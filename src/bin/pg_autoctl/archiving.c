@@ -43,7 +43,54 @@ static bool get_walfile_md5(const char *filename, char *md5);
  * using WAL-G.
  */
 bool
-archive_wal(Keeper *keeper, MonitorArchiverPolicy *policy, const char *filename)
+archive_wal_with_config(Keeper *keeper,
+						const char *archiverConfigPathname,
+						const char *filename)
+{
+	KeeperConfig *config = &(keeper->config);
+	PostgresSetup *pgSetup = &(config->pgSetup);
+
+	MonitorWALFile walFile = { 0 };
+
+	/* we don't have an archiving policy */
+	int64_t policyId = 0;
+
+	if (!prepareWalFile(pgSetup,
+						policyId,
+						config->groupId,
+						keeper->state.current_node_id,
+						filename,
+						&walFile))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	log_info("Archiving WAL file \"%s\" with a local archiving configuration, "
+			 "skipping WAL registration on the monitor",
+			 walFile.filename);
+
+	bool success =
+		walg_wal_push(archiverConfigPathname, walFile.pathname);
+
+	if (success)
+	{
+		log_info("Archived WAL file \"%s\" successfully",
+				 walFile.filename);
+	}
+
+	return success;
+}
+
+
+/*
+ * archive_wal prepares the archiving of a given WAL file, and archives it
+ * using WAL-G.
+ */
+bool
+archive_wal_for_policy(Keeper *keeper,
+					   MonitorArchiverPolicy *policy,
+					   const char *filename)
 {
 	Monitor *monitor = &(keeper->monitor);
 	KeeperConfig *config = &(keeper->config);
@@ -142,11 +189,16 @@ archive_wal(Keeper *keeper, MonitorArchiverPolicy *policy, const char *filename)
 		/* first, handle the configuration file */
 		char archiverConfigPathname[MAXPGPATH] = { 0 };
 
+		if (!walg_prepare_config(pgSetup->pgdata,
+								 policy->config,
+								 archiverConfigPathname))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
 		/* now call wal-g wal-push --config filename WAL */
 		bool success =
-			walg_prepare_config(pgSetup->pgdata,
-								policy->config,
-								archiverConfigPathname) &&
 			walg_wal_push(archiverConfigPathname, walFile.pathname);
 
 		if (success)

@@ -15,8 +15,12 @@
 #include "keeper.h"
 #include "monitor.h"
 
-bool archive_wal(Keeper *keeper,
-				 MonitorArchiverPolicy *policy,
-				 const char *filename);
+bool archive_wal_with_config(Keeper *keeper,
+							 const char *archiverConfigPathname,
+							 const char *filename);
+
+bool archive_wal_for_policy(Keeper *keeper,
+							MonitorArchiverPolicy *policy,
+							const char *filename);
 
 #endif  /* ARCHIVING_H */

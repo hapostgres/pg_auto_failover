@@ -304,6 +304,41 @@ cli_archive_wal(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
+	const char *filename = argv[0];
+
+	/*
+	 * The `pg_autoctl archive wal` command can be used in two modes:
+	 *
+	 * - either as the archive_command where we apply the archiver_policy
+	 *   maintained on the monitor, using the configuration found on the
+	 *   monitor.
+	 *
+	 * - or as an interactive command that's used to test and validate a local
+	 *   configuration, and in this case we don't want to contact the monitor
+	 *   and register the WAL at all.
+	 *
+	 * When using --config foo, we don't implement a monitor archiver_policy
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(configFilename))
+	{
+		if (!archive_wal_with_config(&keeper, configFilename, filename))
+		{
+			log_fatal("Failed to archive WAL file \"%s\"", filename);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		exit(EXIT_CODE_QUIT);
+	}
+
+	/*
+	 * When the --config option has not been used, we are handling the monitor
+	 * archiver_policy settings. So first grab the policies, and then loop over
+	 * each policy and archive the WAL file for every one of them.
+	 *
+	 * Note that we register the WAL file again for each policy, so that if two
+	 * policies are set-up, by the time we reach the second WAL file, another
+	 * node might be already taking care of it. That's a nice feature.
+	 */
 	MonitorArchiverPolicyArray policiesArray = { 0 };
 
 	if (!monitor_get_archiver_policies(monitor,
@@ -313,8 +348,6 @@ cli_archive_wal(int argc, char **argv)
 		/* errors have already been logged */
 		exit(EXIT_CODE_MONITOR);
 	}
-
-	const char *filename = argv[0];
 
 	if (policiesArray.count == 0)
 	{
@@ -332,7 +365,7 @@ cli_archive_wal(int argc, char **argv)
 	{
 		MonitorArchiverPolicy *policy = &(policiesArray.policies[i]);
 
-		if (!archive_wal(&keeper, policy, filename))
+		if (!archive_wal_for_policy(&keeper, policy, filename))
 		{
 			/* errors have already been logged */
 			exit(EXIT_CODE_INTERNAL_ERROR);
