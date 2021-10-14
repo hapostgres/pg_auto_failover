@@ -1985,6 +1985,7 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 
 	GUC recoverySettingsStandby[] = {
 		{ "standby_mode", "'on'" },
+		{ "restore_command", "'pg_autoctl restore wal %f %p'" },
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
 		{ "recovery_target_timeline", (char *) targetTimeline },
@@ -1993,6 +1994,7 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 
 	GUC recoverySettingsTargetLSN[] = {
 		{ "standby_mode", "'on'" },
+		{ "restore_command", "'pg_autoctl restore wal %f %p'" },
 		{ "primary_conninfo", (char *) primaryConnInfo },
 		{ "primary_slot_name", (char *) primarySlotName },
 		{ "recovery_target_timeline", (char *) targetTimeline },
