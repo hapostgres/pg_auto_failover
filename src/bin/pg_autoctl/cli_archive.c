@@ -282,14 +282,10 @@ cli_archive_wal(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	bool missingPgdataIsOk = false;
-	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	if (!keeper_config_read_file(config,
-								 missingPgdataIsOk,
-								 pgIsNotRunningIsOk,
-								 monitorDisabledIsOk))
+	if (!keeper_config_read_file_skip_pgsetup(config,
+											  monitorDisabledIsOk))
 	{
 		log_fatal("Failed to read configuration file \"%s\"",
 				  config->pathnames.config);
