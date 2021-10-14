@@ -583,7 +583,7 @@ cli_monitor_config_get(int argc, char **argv)
 
 
 /*
- * cli_keeper_config_get retrieves the value of a given configuration value,
+ * cli_config_set sets the value of a given configuration value,
  * supporting either a Keeper or a Monitor configuration file.
  */
 static void
@@ -686,8 +686,6 @@ cli_keeper_config_set(int argc, char **argv)
 static void
 cli_monitor_config_set(int argc, char **argv)
 {
-	KeeperConfig kconfig = keeperOptions;
-
 	if (argc != 2)
 	{
 		log_error("Two arguments are expected, found %d", argc);
@@ -698,15 +696,13 @@ cli_monitor_config_set(int argc, char **argv)
 		/* we print out the value that we parsed, as a double-check */
 		char value[BUFSIZE];
 		MonitorConfig mconfig = { 0 };
-		bool missing_pgdata_is_ok = true;
-		bool pg_is_not_running_is_ok = true;
 
-		if (!monitor_config_init_from_pgsetup(&mconfig,
-											  &kconfig.pgSetup,
-											  missing_pgdata_is_ok,
-											  pg_is_not_running_is_ok))
+		mconfig.pgSetup = keeperOptions.pgSetup;
+
+		if (!monitor_config_set_pathnames_from_pgdata(&mconfig))
 		{
-			exit(EXIT_CODE_PGCTL);
+			/* errors have already been logged */
+			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 
 		/* first write the new configuration settings to file */
