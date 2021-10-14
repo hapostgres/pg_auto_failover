@@ -1,16 +1,28 @@
 NODES ?= 3
 
-PATCH = tests/upgrade/monitor-upgrade-1.7.patch
+PATCH = tests/upgrade/monitor-upgrade-99.1.patch
 Q_VERSION = select default_version, installed_version
 Q_VERSION += from pg_available_extensions where name = 'pgautofailover'
+
+
+tmux: upgrade.tmux
+	tmux -u start-server \; source-file $^
+	-$(MAKE) clean
+	$(MAKE) down
+	$(MAKE) kill
+
+kill:
+	tmux kill-session -t pgautofailover-test-upgrade
 
 build:
 	docker-compose build
 
 patch:
+	touch ../../src/monitor/pgautofailover--1.7--99.1.sql
 	cd ../.. && git apply $(PATCH)
 
 clean:
+	rm ../../src/monitor/pgautofailover--1.7--99.1.sql
 	cd ../.. && git apply --reverse $(PATCH)
 
 up: create-volumes compose-up tail ;
@@ -50,7 +62,8 @@ failover:
 	docker-compose exec monitor pg_autoctl perform failover
 
 watch:
-	docker-compose exec monitor watch -n 0.2 pg_autoctl show state
+	docker-compose exec monitor pg_autoctl show state --watch
 
 .PHONY: build patch clean up down upgrade-monitor state watch
 .PHONY: compose-down compose-up create-volumes rm-volumes
+.PHONY: tmux

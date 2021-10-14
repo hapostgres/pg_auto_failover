@@ -8,6 +8,39 @@ It might be possible to also test what happens when we upgrade from a
 previously released version with some edits in this tooling, though that's
 not the main use-case here.
 
+## Semi-automated testing
+
+To bring-up a tmux environment that looks like what's described in the next
+section, use the command:
+
+```bash
+$ make tmux
+```
+
+When detaching from the tmux session the following command is automatically
+executed, but it might be necessary in some cases to know about it and run
+it manually again, or parts of it.
+
+```bash
+$ make clean down kill
+```
+
+In the tmux scripting, 3 panes are created:
+
+  1. a pane for the `docker-compose up -d` and `docker-compose tail` commands
+  2. a pane for the `make watch` command
+  3. a pane for the interactive commands
+
+In the third pane the script runs the following commands:
+
+```bash
+$ make version
+$ make upgrade-monitor
+$ make version
+```
+
+## Manual testing
+
 A typical manual session looks like the following. First, let us prepare a
 tmux environment with two panes. The top pane will show the logs from all
 the nodes running within the docker-compose orchestration:

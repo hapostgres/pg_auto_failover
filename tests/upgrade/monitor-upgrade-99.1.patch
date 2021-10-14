@@ -1,0 +1,36 @@
+diff --git a/src/bin/pg_autoctl/defaults.h b/src/bin/pg_autoctl/defaults.h
+index a2fd8dde..50e190e5 100644
+--- a/src/bin/pg_autoctl/defaults.h
++++ b/src/bin/pg_autoctl/defaults.h
+@@ -19,3 +19,3 @@
+ /* version of the extension that we requite to talk to on the monitor */
+-#define PG_AUTOCTL_EXTENSION_VERSION "1.7"
++#define PG_AUTOCTL_EXTENSION_VERSION "99.1"
+ 
+diff --git a/src/monitor/Makefile b/src/monitor/Makefile
+index 478fb2a7..4a66a7ac 100644
+--- a/src/monitor/Makefile
++++ b/src/monitor/Makefile
+@@ -4,3 +4,3 @@
+ EXTENSION = pgautofailover
+-EXTVERSION = 1.7
++EXTVERSION = 99.1
+ 
+diff --git a/src/monitor/metadata.h b/src/monitor/metadata.h
+index 0f8b39a3..532ef544 100644
+--- a/src/monitor/metadata.h
++++ b/src/monitor/metadata.h
+@@ -17,3 +17,3 @@
+ 
+-#define AUTO_FAILOVER_EXTENSION_VERSION "1.7"
++#define AUTO_FAILOVER_EXTENSION_VERSION "99.1"
+ #define AUTO_FAILOVER_EXTENSION_NAME "pgautofailover"
+diff --git a/src/monitor/pgautofailover.control b/src/monitor/pgautofailover.control
+index d0504410..978f50c3 100644
+--- a/src/monitor/pgautofailover.control
++++ b/src/monitor/pgautofailover.control
+@@ -1,3 +1,3 @@
+ comment = 'pg_auto_failover'
+-default_version = '1.7'
++default_version = '99.1'
+ module_pathname = '$libdir/pgautofailover'
