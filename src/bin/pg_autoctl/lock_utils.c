@@ -107,27 +107,14 @@ semaphore_finish(Semaphore *semaphore)
 	 * its semId as found in our environment variable PG_AUTOCTL_LOG_SEMAPHORE.
 	 *
 	 * At finish time (called from the atexit(3) registry), we remove the
-	 * semaphore only when we are the owner of it. We expect semaphore->owner
-	 * to be either zero (0), or to have been filled with our own pid.
+	 * semaphore only when we are the owner of it.
 	 */
-	if (semaphore->owner == 0)
-	{
-		/* there's no semaphore closing protocol in SysV */
-		return true;
-	}
-	else if (semaphore->owner == getpid())
+	if (semaphore->owner == getpid())
 	{
 		return semaphore_unlink(semaphore);
 	}
-	else
-	{
-		log_fatal("BUG: semaphore_finish semId %d owner is %d, getpid is %d",
-				  semaphore->semId,
-				  semaphore->owner,
-				  getpid());
 
-		return false;
-	}
+	return true;
 }
 
 
