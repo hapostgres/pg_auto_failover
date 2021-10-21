@@ -381,8 +381,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	 * When an old primary gets back online and reaches draining/draining, if a
 	 * failover is on-going then have it join the selection process.
 	 */
-	{ DRAINING_STATE, REPORT_LSN_STATE, COMMENT_DRAINING_TO_REPORT_LSN, &fsm_report_lsn },
-	{ DEMOTED_STATE, REPORT_LSN_STATE, COMMENT_DEMOTED_TO_REPORT_LSN, &fsm_report_lsn },
+	{ DRAINING_STATE, REPORT_LSN_STATE, COMMENT_DRAINING_TO_REPORT_LSN, &fsm_report_lsn_and_drop_replication_slots },
+	{ DEMOTED_STATE, REPORT_LSN_STATE, COMMENT_DEMOTED_TO_REPORT_LSN, &fsm_report_lsn_and_drop_replication_slots },
 
 	/*
 	 * When adding a new node and there is no primary, but there are existing
