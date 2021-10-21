@@ -209,7 +209,7 @@ nodestatePrintHeader(NodeAddressHeaders *headers)
 			headers->maxHostSize, "Host:Port",
 			headers->maxLSNSize, "TLI: LSN",
 			headers->maxHealthSize, "Connection",
-			headers->maxStateSize, "Current State",
+			headers->maxStateSize, "Reported State",
 			headers->maxStateSize, "Assigned State");
 
 	fformat(stdout, "%*s-+-%*s-+-%*s-+-%*s-+-%*s-+-%*s-+-%*s\n",
