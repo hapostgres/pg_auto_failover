@@ -674,19 +674,18 @@ class PGNode:
         if events:
             return "\n".join(
                 [
-                    "%32s %8s %17s/%-17s %10s %10s %s"
+                    "%19s %8s %17s %17s %12s %s"
                     % (
                         "eventtime",
                         "name",
-                        "state",
+                        "reported state",
                         "goal state",
-                        "repl st",
                         "tli:lsn",
                         "event",
                     )
                 ]
                 + [
-                    "%32s %8s %17s/%-17s %10s %3s:%7s %s" % result
+                    "%19s %8s %17s %17s %3s:%9s %s" % result
                     for result in events
                 ]
             )
@@ -1276,12 +1275,6 @@ SELECT reportedstate, goalstate
         Returns the current list of events from the monitor.
         """
         if self.monitor:
-            last_events_query = (
-                "select eventtime, nodename, "
-                "reportedstate, goalstate, "
-                "reportedrepstate, reportedtli, reportedlsn, description "
-                "from pgautofailover.last_events('default', count => 20)"
-            )
             return self.monitor.get_events()
 
     def enable_maintenance(self, allowFailover=False):
@@ -1847,9 +1840,9 @@ class MonitorNode(PGNode):
         Returns the current list of events from the monitor.
         """
         last_events_query = (
-            "select eventtime, nodename, "
-            "reportedstate, goalstate, "
-            "reportedrepstate, reportedtli, reportedlsn, description "
+            "select to_char(eventTime, 'YYYY-MM-DD HH24:MI:SS') as eventtime, "
+            "nodename, reportedstate, goalstate, "
+            "reportedtli, reportedlsn, description "
             "from pgautofailover.last_events('default', count => 20)"
         )
 
