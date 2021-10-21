@@ -1242,6 +1242,7 @@ compute_events_sizes(WatchContext *context)
 		int nameSize = strlen(event->nodeName);
 		int timeSize = 19;      /* "YYYY-MM-DD HH:MI:SS" is 19 chars long */
 		int descSize = 60;      /* desc. has horizontal scrolling */
+		int lsnSize = strlen(event->lsn) + 5; /* "%3d: %s" */
 
 		if (headers->maxEventIdSize < idSize)
 		{
@@ -1261,6 +1262,11 @@ compute_events_sizes(WatchContext *context)
 		if (headers->maxEventDescSize < descSize)
 		{
 			headers->maxEventDescSize = descSize;
+		}
+
+		if (headers->maxEventLSNSize < lsnSize)
+		{
+			headers->maxEventLSNSize = lsnSize;
 		}
 	}
 
@@ -1291,6 +1297,11 @@ compute_event_column_size(EventColumnType type, MonitorEventsHeaders *headers)
 		case EVENT_COLUMN_TYPE_NODE_NAME:
 		{
 			return headers->maxEventNodeNameSize;
+		}
+
+		case EVENT_COLUMN_TYPE_LSN:
+		{
+			return headers->maxEventLSNSize;
 		}
 
 		case EVENT_COLUMN_TYPE_DESCRIPTION:
@@ -1424,6 +1435,19 @@ print_event(WatchContext *context, EventColPolicy *policy, int index, int r, int
 			case EVENT_COLUMN_TYPE_NODE_NAME:
 			{
 				mvprintw(r, cc, "%*s", len, event->nodeName);
+				break;
+			}
+
+			case EVENT_COLUMN_TYPE_LSN:
+			{
+				char tliLSN[BUFSIZE] = { 0 };
+
+				/* left-align the timeline, some states report LSN 0/0 */
+				sformat(tliLSN, sizeof(tliLSN),
+						"%3d: %*s", event->timeline, len - 5, event->lsn);
+
+				mvprintw(r, cc, "%*s", len, tliLSN);
+
 				break;
 			}
 

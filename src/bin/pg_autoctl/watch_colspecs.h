@@ -261,7 +261,7 @@ EventColPolicy EventColumnPolicies[] = {
 		}
 	},
 	{
-		"standard",
+		"quite terse",
 		0,
 		{
 			{ EVENT_COLUMN_TYPE_TIME, "Event Time", 0 },
@@ -270,11 +270,22 @@ EventColPolicy EventColumnPolicies[] = {
 		}
 	},
 	{
-		"almost verbose",
+		"terse",
 		0,
 		{
 			{ EVENT_COLUMN_TYPE_ID, "Id", 0 },
 			{ EVENT_COLUMN_TYPE_TIME, "Event Time", 0 },
+			{ EVENT_COLUMN_TYPE_DESCRIPTION, "Description", 0 },
+			{ EVENT_COLUMN_TYPE_LAST, "", 0 }
+		}
+	},
+	{
+		"standard",
+		0,
+		{
+			{ EVENT_COLUMN_TYPE_ID, "Id", 0 },
+			{ EVENT_COLUMN_TYPE_TIME, "Event Time", 0 },
+			{ EVENT_COLUMN_TYPE_NODE_NAME, "Name", 0 },
 			{ EVENT_COLUMN_TYPE_DESCRIPTION, "Description", 0 },
 			{ EVENT_COLUMN_TYPE_LAST, "", 0 }
 		}
@@ -286,6 +297,7 @@ EventColPolicy EventColumnPolicies[] = {
 			{ EVENT_COLUMN_TYPE_ID, "Id", 0 },
 			{ EVENT_COLUMN_TYPE_TIME, "Event Time", 0 },
 			{ EVENT_COLUMN_TYPE_NODE_NAME, "Name", 0 },
+			{ EVENT_COLUMN_TYPE_LSN, "TLI: LSN", 0 },
 			{ EVENT_COLUMN_TYPE_DESCRIPTION, "Description", 0 },
 			{ EVENT_COLUMN_TYPE_LAST, "", 0 }
 		}

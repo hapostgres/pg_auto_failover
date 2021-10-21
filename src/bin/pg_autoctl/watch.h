@@ -39,6 +39,7 @@ typedef struct MonitorEventsHeaders
 	int maxEventTimeSize;
 	int maxEventNodeNameSize;
 	int maxEventDescSize;
+	int maxEventLSNSize;
 } MonitorEventsHeaders;
 
 #define EVENTS_BUFFER_COUNT 80
