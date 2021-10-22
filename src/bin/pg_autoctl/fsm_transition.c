@@ -1371,26 +1371,6 @@ fsm_fast_forward(Keeper *keeper)
 
 
 /*
- * fsm_cleanup_as_primary cleans-up the replication setting. It's called after
- * a fast-forward operation.
- */
-bool
-fsm_cleanup_as_primary(Keeper *keeper)
-{
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	if (!standby_cleanup_as_primary(postgres))
-	{
-		log_error("Failed to cleanup replication settings and restart Postgres "
-				  "to continue as a primary, see above for details");
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
  * When the failover is done we need to follow the new primary. We should be
  * able to do that directly, by changing our primary_conninfo, thanks to our
  * candidate selection where we make it so that the failover candidate always
