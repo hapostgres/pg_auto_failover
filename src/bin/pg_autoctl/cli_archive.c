@@ -273,7 +273,7 @@ cli_archive_wal(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
-	if (argc != 1 || IS_EMPTY_STRING_BUFFER(argv[0]))
+	if (argc != 1)
 	{
 		log_error("Failed to parse command line arguments: "
 				  "got %d when 1 is expected",
@@ -284,8 +284,7 @@ cli_archive_wal(int argc, char **argv)
 
 	bool monitorDisabledIsOk = false;
 
-	if (!keeper_config_read_file_skip_pgsetup(config,
-											  monitorDisabledIsOk))
+	if (!keeper_config_read_file_skip_pgsetup(config, monitorDisabledIsOk))
 	{
 		log_fatal("Failed to read configuration file \"%s\"",
 				  config->pathnames.config);
@@ -352,6 +351,7 @@ cli_archive_wal(int argc, char **argv)
 		log_info("HINT: Create an archiving policy using the command: "
 				 "pg_autoctl create archiver-policy");
 
+		/* exit happily: WAL archiving is disabled */
 		exit(EXIT_CODE_QUIT);
 	}
 
