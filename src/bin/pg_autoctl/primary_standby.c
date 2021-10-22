@@ -811,6 +811,11 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 {
 	ReplicationSource *upstream = &(postgres->replicationSource);
 
+	/*
+	 * If the upstreamNode is NULL, refrain from editing it at all. When the
+	 * caller wants to reset the upstreamNode, it passes down a NodeAddress
+	 * initialized to { 0 }.
+	 */
 	if (upstreamNode != NULL)
 	{
 		upstream->primaryNode.nodeId = upstreamNode->nodeId;
@@ -826,7 +831,12 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 
 	strlcpy(upstream->userName, username, NAMEDATALEN);
 
-	if (password != NULL)
+	/* when password is NULL, make sure we clean-up whatever was in there */
+	if (password == NULL)
+	{
+		bzero((void *) upstream->password, MAXCONNINFO);
+	}
+	else
 	{
 		strlcpy(upstream->password, password, MAXCONNINFO);
 	}
@@ -837,7 +847,12 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 			MAXIMUM_BACKUP_RATE_LEN);
 	strlcpy(upstream->backupDir, backupDirectory, MAXCONNINFO);
 
-	if (targetLSN != NULL)
+	/* when targetLSN is NULL, make sure we clean-up whatever was in there */
+	if (targetLSN == NULL)
+	{
+		bzero((void *) upstream->targetLSN, PG_LSN_MAXLENGTH);
+	}
+	else
 	{
 		strlcpy(upstream->targetLSN, targetLSN, PG_LSN_MAXLENGTH);
 	}
