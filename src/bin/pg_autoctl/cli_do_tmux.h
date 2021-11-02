@@ -56,6 +56,7 @@ typedef struct TmuxNodeArray
 	TmuxNode nodes[MAX_NODES];
 } TmuxNodeArray;
 
+extern char *tmux_banner[];
 extern TmuxOptions tmuxOptions;
 extern TmuxNodeArray tmuxNodeArray;
 

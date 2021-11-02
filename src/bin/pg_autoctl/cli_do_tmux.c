@@ -1,5 +1,5 @@
 /*
- * src/bin/pg_autoctl/cli_do_misc.c
+ * src/bin/pg_autoctl/cli_do_tmux.c
  *     Implementation of a CLI which lets you run operations on the local
  *     postgres server directly.
  *

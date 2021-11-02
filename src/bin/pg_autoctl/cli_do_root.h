@@ -109,6 +109,11 @@ void cli_do_tmux_stop(int argc, char **argv);
 void cli_do_tmux_clean(int argc, char **argv);
 void cli_do_tmux_wait(int argc, char **argv);
 
+/* src/bin/pg_autoctl/cli_do_tmux_compose.c */
+void cli_do_tmux_compose_config(int argc, char **argv);
+void cli_do_tmux_compose_script(int argc, char **argv);
+void cli_do_tmux_compose_session(int argc, char **argv);
+
 /* src/bin/pg_autoctl/cli_do_azure.c */
 int cli_do_azure_getopts(int argc, char **argv);
 void cli_do_azure_create_environment(int argc, char **argv);

@@ -261,11 +261,26 @@ tmux-session: bin
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
 
+tmux-compose-session:
+	$(PG_AUTOCTL) do tmux compose session \
+         --root $(TMUX_TOP_DIR)           \
+         --first-pgport $(FIRST_PGPORT)   \
+         --nodes $(NODES)                 \
+         --async-nodes $(NODES_ASYNC)     \
+         --node-priorities $(NODES_PRIOS) \
+         --sync-standbys $(NODES_SYNC_SB) \
+         $(CLUSTER_OPTS)                  \
+         --binpath $(BINPATH)             \
+         --layout $(TMUX_LAYOUT)
+
 cluster: install tmux-clean
 	# This is explicitly not a target, otherwise when make uses multiple jobs
 	# tmux-clean and tmux-session can have a race condidition where tmux-clean
 	# removes the files that are just created by tmux-session.
 	$(MAKE) tmux-session
+
+compose:
+	$(MAKE) tmux-compose-session
 
 valgrind-session: build-test
 	docker run                             \
@@ -302,7 +317,7 @@ azdrop: all
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
 .PHONY: build-test run-test
-.PHONY: tmux-clean cluster
+.PHONY: tmux-clean cluster compose
 .PHONY: azcluster azdrop az
 .PHONY: build-image
 .PHONY: build-test-pg10 build-test-pg11 build-test-pg142
