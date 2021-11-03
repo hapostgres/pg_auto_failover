@@ -8,7 +8,7 @@ BUILD_CONTAINER_NAME = pg_auto_failover_build
 TEST_CONTAINER_NAME = pg_auto_failover_test
 DOCKER_RUN_OPTS = --privileged  -ti --rm
 
-PGVERSION = 10
+PGVERSION ?= 10
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
 # Tests for the monitor
@@ -175,7 +175,7 @@ run-test: build-test-pg$(PGVERSION)
 		$(DOCKER_RUN_OPTS)			            \
 		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
 		make -C /usr/src/pg_auto_failover test	\
-		PGVERSION=$(PGVERSION) TEST='${TEST}'
+		TEST='${TEST}'
 
 build-pg10: build-test-pg10
 	docker build --build-arg PGVERSION=10 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg10 .
