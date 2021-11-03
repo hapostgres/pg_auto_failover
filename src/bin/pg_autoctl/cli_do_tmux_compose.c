@@ -308,11 +308,33 @@ tmux_compose_docker_build(TmuxOptions *options)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
+	char pgversion[5] = { 0 };
+	char pgversionArg[15] = { 0 };
+
+	if (env_exists("PGVERSION"))
+	{
+		if (!get_env_copy("PGVERSION", pgversion, sizeof(pgversion)))
+		{
+			/* errors have already been logged */
+			log_warn("Using PGVERSION=14");
+			strlcpy(pgversion, "14", sizeof(pgversion));
+		}
+	}
+	else
+	{
+		strlcpy(pgversion, "14", sizeof(pgversion));
+	}
+
+	/* prepare our --build-arg PGVERSION=XX */
+	sformat(pgversionArg, sizeof(pgversionArg), "PGVERSION=%s", pgversion);
+
 	char *args[16];
 	int argsIndex = 0;
 
 	args[argsIndex++] = (char *) dockerCompose;
 	args[argsIndex++] = "build";
+	args[argsIndex++] = "--build-arg";
+	args[argsIndex++] = (char *) pgversionArg;
 	args[argsIndex++] = "--quiet";
 	args[argsIndex] = NULL;
 
