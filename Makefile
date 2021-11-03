@@ -175,7 +175,7 @@ run-test: build-test-pg$(PGVERSION)
 		$(DOCKER_RUN_OPTS)			            \
 		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
 		make -C /usr/src/pg_auto_failover test	\
-		TEST='${TEST}'
+		PGVERSION=$(PGVERSION) TEST='${TEST}'
 
 build-pg10: build-test-pg10
 	docker build --build-arg PGVERSION=10 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg10 .
