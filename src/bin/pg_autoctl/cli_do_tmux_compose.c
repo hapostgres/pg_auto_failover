@@ -91,6 +91,8 @@ prepare_tmux_compose_script(TmuxOptions *options, PQExpBuffer script)
 
 	if (options->numSync != -1)
 	{
+		/* wait for the monitor to be up-and-running */
+		tmux_add_send_keys_command(script, "sleep 10");
 		tmux_add_send_keys_command(
 			script,
 			"docker-compose exec monitor "
