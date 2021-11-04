@@ -193,9 +193,8 @@ tmux_compose_add_node(PQExpBuffer script,
 	appendPQExpBuffer(script, "     - 5432\n");
 	appendPQExpBuffer(script, "    command: "
 							  "pg_autoctl create postgres "
-							  " --name %s "
-							  " --ssl-self-signed --auth trust --pg-hba-lan --run\n",
-					  name);
+							  "--ssl-self-signed --auth trust "
+							  "--pg-hba-lan --run\n");
 }
 
 
