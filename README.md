@@ -41,7 +41,7 @@ the _replication quorum_ of Postgres.
 ## Dependencies
 
 At runtime, pg_auto_failover depends on only Postgres. Postgres versions 10,
-11, 12, and 13 are currently supported.
+11, 12, 13, and 14 are currently supported.
 
 At buildtime. pg_auto_failover depends on Postgres server development
 package like any other Postgres extensions (the server development package
@@ -58,7 +58,21 @@ to guides and troubleshooting information.
 
 ## Installing pg_auto_failover from packages
 
-Ubuntu or Debian:
+Note that pg_auto_failover packages are also found in Postgres PGDG package
+repositories. If you're using those repositories already, you can install
+the packages from there.
+
+### Ubuntu or Debian:
+
+When using debian, two packages are provided for pg_auto_failover: the
+monitor Postgres extension is packaged separately and depends on the
+Postgres version you want to run for the monitor itself. The monitor's
+extension package is named `postgresql-14-auto-failover` when targetting
+Postgres 14.
+
+Then another package is prepared that contains the `pg_autoctl` command, and
+the name of the package is `pg-auto-failover-cli`. That's the package that
+is needed for the Postgres nodes.
 
 ```bash
 # Add the repository to your system
@@ -71,7 +85,7 @@ sudo apt-get install postgresql-11-auto-failover
 /usr/bin/pg_autoctl --version
 ```
 
-Fedora, CentOS, or Red Hat:
+### Fedora, CentOS, or Red Hat:
 
 ```bash
 # Add the repository to your system
@@ -93,7 +107,7 @@ install`.
 Build dependencies example on debian for Postgres 11:
 
 ~~~ bash
-$ sudo apt-get install postgresql-server-dev-11 libssl-dev libkrb5-dev
+$ sudo apt-get install postgresql-server-dev-11 libssl-dev libkrb5-dev libncurses6
 ~~~
 
 Then build pg_auto_failover from sources with the following instructions:
@@ -116,6 +130,18 @@ install the `pg_autoctl` binary command in the directory pointed to by
 ## Trying pg_auto_failover on your local computer
 
 Once the building and installation is done, follow those steps:
+
+  0. If you're building from sources, and if you've already been using tmux,
+     then try the following command:
+
+	 ~~~ bash
+	 $ make cluster
+	 ~~~
+
+	 This creates a tmux session with multiple panes that are each running a
+     node for pg_auto_failover: the monitor, a first Postgres node, a second
+     Postgres node, and then there is another tmux pane for interactive
+     commands.
 
   1. Install and run a monitor
 
