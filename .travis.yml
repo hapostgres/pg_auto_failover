@@ -51,6 +51,7 @@ before_install:
   - sudo apt-get install python3-pip
   - sudo apt-get install python3-nose
   - sudo pip3 install --upgrade pip
+  - pip3 install --user pyroute2>=0.5.17
   - pip3 install --user pipenv
   - pip3 install --user black
 install:
