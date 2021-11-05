@@ -49,6 +49,7 @@ before_install:
   - sudo apt-get install liblz4-dev
   - sudo apt-get install bridge-utils
   - sudo apt-get install python3-pip
+  - sudo apt-get install python3-nose
   - sudo pip3 install --upgrade pip
   - pip3 install --user pipenv
   - pip3 install --user black
