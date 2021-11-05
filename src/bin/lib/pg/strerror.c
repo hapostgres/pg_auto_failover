@@ -252,10 +252,8 @@ get_errno_symbol(int errnum)
 #endif
 		case ESRCH:
 			return "ESRCH";
-#ifdef ETIMEDOUT
 		case ETIMEDOUT:
 			return "ETIMEDOUT";
-#endif
 #ifdef ETXTBSY
 		case ETXTBSY:
 			return "ETXTBSY";
