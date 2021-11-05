@@ -17,7 +17,7 @@ activity.
 * Work around pg_replication_slot_advance xmin maintenance bug. (#815)
 * Fix "Current State" to "Reported State", and a docs cross-ref.
 * Monitor config set postgresql.pg_ctl bug fix (#818)
-* Refrain from using atexit() to clean-up our logs semaphore. (#811)
+* Fix how we clean-up our logs semaphore. (#811)
 * Fix synchronous_standby_names return value when there is no primary (#807)
 
 ### pg_auto_failover v1.6.2 (September 8, 2021) ###
