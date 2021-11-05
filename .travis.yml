@@ -50,7 +50,8 @@ before_install:
   - sudo apt-get install bridge-utils
   - sudo apt-get install python3-pip
   - sudo apt-get install python3-nose
-  - sudo pip3 install --upgrade pip
+  - sudo -H pip3 install --upgrade pip
+  - pip3 install setuptools
   - pip3 install pyroute2>=0.5.17
   - pip3 install --user pipenv
   - pip3 install --user black
