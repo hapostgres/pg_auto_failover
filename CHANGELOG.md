@@ -1,3 +1,25 @@
+### pg_auto_failover v1.6.3 (November 5, 2021) ###
+
+This is a bug fix release for the 1.6 series.
+
+This release also introduces a new ncurses interactive dashboard that makes
+it easier to understand the current state (and transitions) of a formation.
+The new command `pg_autoctl watch` can be used to monitor pg_auto_failover
+activity.
+
+#### Added
+* New ncurses dashboard with command pg_autoctl watch (#809)
+
+#### Changed
+* Allow setting maximum-backup-rate on create postgres step (#812)
+
+#### Fixed
+* Work around pg_replication_slot_advance xmin maintenance bug. (#815)
+* Fix "Current State" to "Reported State", and a docs cross-ref.
+* Monitor config set postgresql.pg_ctl bug fix (#818)
+* Refrain from using atexit() to clean-up our logs semaphore. (#811)
+* Fix synchronous_standby_names return value when there is no primary (#807)
+
 ### pg_auto_failover v1.6.2 (September 8, 2021) ###
 
 This is a bug fix release for the 1.6 series.
