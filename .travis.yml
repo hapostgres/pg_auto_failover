@@ -42,9 +42,6 @@ before_install:
   - 'if [ -z "$LINTING" ]; then setup_apt; fi'
   - 'if [ -z "$LINTING" ]; then nuke_pg; fi'
   - python --version
-  - pyenv versions
-  - pyenv install -s 3.7
-  - pyenv global 3.7
   - sudo apt-get install liblz4-1
   - sudo apt-get install liblz4-dev
   - sudo apt-get install bridge-utils
