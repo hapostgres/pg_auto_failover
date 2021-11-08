@@ -2,7 +2,7 @@ sudo: required
 dist: bionic
 language: c
 python:
-  - "3.6"
+  - "3.7"
 cache:
   apt: true
   directories:
@@ -45,9 +45,6 @@ before_install:
   - sudo apt-get install liblz4-1
   - sudo apt-get install liblz4-dev
   - sudo apt-get install bridge-utils
-  - sudo apt install software-properties-common
-  - sudo add-apt-repository --yes ppa:deadsnakes/ppa
-  - sudo apt-get install --assume-yes python3.7
   - sudo apt-get install python3-pip
   - sudo apt-get install python3-nose
   - sudo apt-get install python3-psycopg2
