@@ -50,10 +50,9 @@ before_install:
   - sudo apt-get install bridge-utils
   - sudo apt-get install python3-pip
   - sudo apt-get install python3-nose
-  - sudo -H python3 -m pip install --upgrade pip
-  - pip3 install setuptools
+  - sudo apt-get install python3-psycopg2
+  - sudo -H pip3 install --upgrade pip
   - pip3 install pyroute2>=0.5.17
-  - pip3 install --user pipenv
   - pip3 install --user black
 install:
   - 'if [ -n "$LINTING" ]; then install_uncrustify; fi'
@@ -61,7 +60,6 @@ install:
   - 'if [ -n "$LINTING" ]; then rm -rf uncrustify*; fi'
   - 'if [ -z "$LINTING" ]; then install_pg; fi'
   - 'if [ -z "$LINTING" ]; then install_custom_pg; fi'
-  - PIPENV_PIPFILE="${TRAVIS_BUILD_DIR}"/tests/Pipfile pipenv install --system --deploy
   - env
   - 'if [ -z "$LINTING" ]; then pg_config; fi'
   - 'if [ -z "$LINTING" ]; then PATH=`pg_config --bindir`:$PATH which pg_ctl; fi'
