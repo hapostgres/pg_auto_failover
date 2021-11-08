@@ -48,7 +48,7 @@ before_install:
   - sudo apt-get install python3-pip
   - sudo apt-get install python3-nose
   - sudo apt-get install python3-psycopg2
-  - pip3 install pyroute2>=0.5.17
+  - sudo -H pip3 install pyroute2>=0.5.17
   - pip3 install --user black
 install:
   - 'if [ -n "$LINTING" ]; then install_uncrustify; fi'
