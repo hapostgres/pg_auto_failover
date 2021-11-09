@@ -1,8 +1,8 @@
 sudo: required
-dist: bionic
+dist: focal
 language: c
 python:
-  - "3.6"
+  - "3.7"
 cache:
   apt: true
   directories:
@@ -42,15 +42,15 @@ before_install:
   - 'if [ -z "$LINTING" ]; then setup_apt; fi'
   - 'if [ -z "$LINTING" ]; then nuke_pg; fi'
   - python --version
-  - pyenv versions
-  - pyenv install -s 3.7
-  - pyenv global 3.7
+  - python3 --version
   - sudo apt-get install liblz4-1
   - sudo apt-get install liblz4-dev
   - sudo apt-get install bridge-utils
   - sudo apt-get install python3-pip
-  - sudo pip3 install --upgrade pip
-  - pip3 install --user pipenv
+  - sudo apt-get install python3-nose
+  - sudo apt-get install python3-psycopg2
+  - sudo apt-get install python3-setuptools
+  - sudo -H pip3 install pyroute2>=0.5.17
   - pip3 install --user black
 install:
   - 'if [ -n "$LINTING" ]; then install_uncrustify; fi'
@@ -58,7 +58,6 @@ install:
   - 'if [ -n "$LINTING" ]; then rm -rf uncrustify*; fi'
   - 'if [ -z "$LINTING" ]; then install_pg; fi'
   - 'if [ -z "$LINTING" ]; then install_custom_pg; fi'
-  - PIPENV_PIPFILE="${TRAVIS_BUILD_DIR}"/tests/Pipfile pipenv install --system --deploy
   - env
   - 'if [ -z "$LINTING" ]; then pg_config; fi'
   - 'if [ -z "$LINTING" ]; then PATH=`pg_config --bindir`:$PATH which pg_ctl; fi'

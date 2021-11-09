@@ -75,7 +75,7 @@ your terminal window size changes:
 	the Node column contains the groupId and the nodeId, separated by a
 	colon, such as ``0:1`` for the first coordinator node.
 
-  - Reported Lag, or Lag(R)
+  - Last Report, or Report
 
 	Time interval between now and the last known time when a node has
 	reported to the monitor, using the ``node_active`` protocol.
@@ -84,14 +84,15 @@ your terminal window size changes:
 	increment when either the ``pg_autoctl run`` service is not running, or
 	when there is a network split.
 
-  - Health Lag, or Lag(H)
+  - Last Check, or Check
 
 	Time inverval between now and the last known time when the monitor could
 	connect to a node's Postgres instance, via its health check mechanism.
 
-	This value is expected to stay under 6s or abouts, and is known to
-	increment when either the Postgres service is not running on the target
-	node, or when there is a network split.
+	This value is known to increment when either the Postgres service is not
+	running on the target node, when there is a network split, or when the
+	internal machinery (the health check worker background process)
+	implements jitter.
 
   - Host:Port
 
