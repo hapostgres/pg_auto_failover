@@ -748,11 +748,11 @@ WaitForEvent(List *healthCheckList)
 
 			if (healthCheck->pollingStatus == PGRES_POLLING_READING)
 			{
-				pollEventMask = POLLERR | POLLIN;
+				pollEventMask = POLLIN;
 			}
 			else if (healthCheck->pollingStatus == PGRES_POLLING_WRITING)
 			{
-				pollEventMask = POLLERR | POLLOUT;
+				pollEventMask = POLLOUT;
 			}
 
 			pollFileDescriptor->fd = PQsocket(connection);
@@ -786,8 +786,7 @@ WaitForEvent(List *healthCheckList)
 		HealthCheck *healthCheck = (HealthCheck *) lfirst(healthCheckCell);
 		struct pollfd *pollFileDescriptor = &pollFDs[healthCheckIndex];
 
-		healthCheck->readyToPoll = pollFileDescriptor->revents &
-								   pollFileDescriptor->events;
+		healthCheck->readyToPoll = pollFileDescriptor->revents != 0;
 
 		healthCheckIndex++;
 	}
