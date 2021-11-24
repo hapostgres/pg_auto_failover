@@ -97,7 +97,7 @@ def test_005_logging_of_passwords():
     assert "password=****" in logs
     # We are still logging passwords when the pguri is incomplete and when printing settings,
     #  so assert that it's not there in other cases:
-    assert not re.match(
+    assert not re.search(
         "^(?!primary_conninfo|Failed to find).*%s.*$" % replication_password,
         logs,
     )
