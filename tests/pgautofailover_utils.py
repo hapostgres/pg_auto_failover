@@ -655,16 +655,20 @@ class PGNode:
             out, err, ret = command.execute("show uri", "show", "uri")
         return out
 
-    def logs(self):
+    def logs(self, log_type=""):
         log_string = ""
         if self.running():
             out, err, ret = self.stop_pg_autoctl()
-            log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n"
-            log_string += f"{self.pg_autoctl.cmd}\n{out}\n"
-            log_string += f"STDERR OF PG_AUTOCTL FOR {self.datadir}:\n{err}\n"
-
-        pglogs = self.get_postgres_logs()
-        log_string += f"POSTGRES LOGS FOR {self.datadir}:\n{pglogs}\n"
+            if not log_type or (log_type == "STDOUT"):
+                log_string += f"STDOUT OF PG_AUTOCTL FOR {self.datadir}:\n"
+                log_string += f"{self.pg_autoctl.cmd}\n{out}\n"
+            if not log_type or (log_type == "STDERR"):
+                log_string += (
+                    f"STDERR OF PG_AUTOCTL FOR {self.datadir}:\n{err}\n"
+                )
+        if not log_type or (log_type == "POSTGRES"):
+            pglogs = self.get_postgres_logs()
+            log_string += f"POSTGRES LOGS FOR {self.datadir}:\n{pglogs}\n"
         return log_string
 
     def get_events_str(self):

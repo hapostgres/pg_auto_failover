@@ -68,6 +68,14 @@ def test_003_init_secondary():
         node1.get_synchronous_standby_names_local(),
         "ANY 1 (pgautofailover_standby_2)",
     )
+    logs = node2.logs("STDERR")
+    match = re.search(
+        "Failed to connect to .*, retrying until the server is ready", logs
+    )
+    if match:
+        print("Found connection failure in logs: ", match[0])
+    assert not match
+    node2.run()
 
 
 def test_004_failover():
