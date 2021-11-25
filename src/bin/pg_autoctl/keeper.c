@@ -973,17 +973,29 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 			log_info("Replication settings at \"%s\" have changed, "
 					 "restarting Postgres", upstreamConfPath);
 
-			if (!pgsql_checkpoint(&(postgres->sqlClient)))
+			if (pg_setup_is_running(pgSetup))
 			{
-				log_warn("Failed to CHECKPOINT before restart, "
-						 "see above for details");
-			}
+				if (!pgsql_checkpoint(&(postgres->sqlClient)))
+				{
+					log_warn("Failed to CHECKPOINT before restart, "
+							 "see above for details");
+				}
 
-			if (!keeper_restart_postgres(keeper))
+				if (!keeper_restart_postgres(keeper))
+				{
+					log_error("Failed to restart Postgres to enable new "
+							  "replication settings, see above for details");
+					return false;
+				}
+			}
+			else
 			{
-				log_error("Failed to restart Postgres to enable new "
-						  "replication settings, see above for details");
-				return false;
+				if (!ensure_postgres_service_is_running(postgres))
+				{
+					log_error("Failed to start Postgres with new "
+							  "replication settings, see above for details");
+					return false;
+				}
 			}
 		}
 	}
