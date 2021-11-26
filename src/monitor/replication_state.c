@@ -39,8 +39,15 @@ static bool IsReplicationStateName(char *name, ReplicationState replicationState
 Oid
 ReplicationStateTypeOid(void)
 {
+/* new String type in version 15devel  */
+#if (PG_VERSION_NUM >= 150000)
+	String *schemaName = makeString(AUTO_FAILOVER_SCHEMA_NAME);
+	String *typeName = makeString(REPLICATION_STATE_TYPE_NAME);
+#else
 	Value *schemaName = makeString(AUTO_FAILOVER_SCHEMA_NAME);
 	Value *typeName = makeString(REPLICATION_STATE_TYPE_NAME);
+#endif
+
 	List *enumTypeNameList = list_make2(schemaName, typeName);
 	TypeName *enumTypeName = makeTypeNameFromNameList(enumTypeNameList);
 	Oid enumTypeOid = typenameTypeId(NULL, enumTypeName);
