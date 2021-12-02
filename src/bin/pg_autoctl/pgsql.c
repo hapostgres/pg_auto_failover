@@ -10,10 +10,15 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "postgres.h"
 #include "postgres_fe.h"
 #include "libpq-fe.h"
 #include "pqexpbuffer.h"
 #include "portability/instr_time.h"
+
+#if PG_MAJORVERSION_NUM >= 15
+#include "common/pg_prng.h"
+#endif
 
 #include "cli_root.h"
 #include "defaults.h"
@@ -24,13 +29,13 @@
 #include "string_utils.h"
 
 
-#define ERRCODE_DUPLICATE_OBJECT "42710"
-#define ERRCODE_DUPLICATE_DATABASE "42P04"
+#define STR_ERRCODE_DUPLICATE_OBJECT "42710"
+#define STR_ERRCODE_DUPLICATE_DATABASE "42P04"
 
-#define ERRCODE_INVALID_OBJECT_DEFINITION "42P17"
-#define ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE "55000"
-#define ERRCODE_OBJECT_IN_USE "55006"
-#define ERRCODE_UNDEFINED_OBJECT "42704"
+#define STR_ERRCODE_INVALID_OBJECT_DEFINITION "42P17"
+#define STR_ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE "55000"
+#define STR_ERRCODE_OBJECT_IN_USE "55006"
+#define STR_ERRCODE_UNDEFINED_OBJECT "42704"
 
 static char * ConnectionTypeToString(ConnectionType connectionType);
 static void log_connection_error(PGconn *connection, int logLevel);
@@ -177,7 +182,11 @@ pgsql_set_retry_policy(ConnectionRetryPolicy *retryPolicy,
 	retryPolicy->baseSleepTime = baseSleepTime;
 
 	/* initialize a seed for our random number generator */
+#if PG_MAJORVERSION_NUM < 15
 	pg_srand48(time(0));
+#else
+	pg_prng_seed(&(retryPolicy->prng_state), (uint64) (getpid() ^ time(NULL)));
+#endif
 }
 
 
@@ -263,8 +272,28 @@ pgsql_set_monitor_interactive_retry_policy(ConnectionRetryPolicy *retryPolicy)
 /*
  * http://c-faq.com/lib/randrange.html
  */
-#define random_between(M, N) \
-	((M) + pg_lrand48() / (RAND_MAX / ((N) -(M) +1) + 1))
+#define random_between(R, M, N) ((M) + R / (RAND_MAX / ((N) -(M) +1) + 1))
+
+/*
+ * pick_random_sleep_time picks a random sleep time between the given policy
+ * base sleep time and 3 times the previous sleep time. See below in
+ * pgsql_compute_connection_retry_sleep_time for a deep dive into why we are
+ * interested in this computation.
+ */
+static int
+pick_random_sleep_time(ConnectionRetryPolicy *retryPolicy)
+{
+#if PG_MAJORVERSION_NUM < 15
+	long random = pg_lrand48();
+#else
+	uint32_t random = pg_prng_uint32(&(retryPolicy->prng_state));
+#endif
+
+	return random_between(random,
+						  retryPolicy->baseSleepTime,
+						  retryPolicy->sleepTime * 3);
+}
+
 
 /*
  * pgsql_compute_connection_retry_sleep_time returns how much time to sleep
@@ -312,9 +341,7 @@ pgsql_compute_connection_retry_sleep_time(ConnectionRetryPolicy *retryPolicy)
 	 * time spent, something we care to optimize for even when it means more
 	 * work on the monitor side.
 	 */
-	int previousSleepTime = retryPolicy->sleepTime;
-	int sleepTime =
-		random_between(retryPolicy->baseSleepTime, previousSleepTime * 3);
+	int sleepTime = pick_random_sleep_time(retryPolicy);
 
 	retryPolicy->sleepTime = min(retryPolicy->maxSleepTime, sleepTime);
 
@@ -1070,10 +1097,10 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		 */
 		if (pgsql->connectionType == PGSQL_CONN_MONITOR &&
 			sqlstate != NULL &&
-			!(strcmp(sqlstate, ERRCODE_INVALID_OBJECT_DEFINITION) == 0 ||
-			  strcmp(sqlstate, ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) == 0 ||
-			  strcmp(sqlstate, ERRCODE_OBJECT_IN_USE) == 0 ||
-			  strcmp(sqlstate, ERRCODE_UNDEFINED_OBJECT) == 0))
+			!(strcmp(sqlstate, STR_ERRCODE_INVALID_OBJECT_DEFINITION) == 0 ||
+			  strcmp(sqlstate, STR_ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE) == 0 ||
+			  strcmp(sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0 ||
+			  strcmp(sqlstate, STR_ERRCODE_UNDEFINED_OBJECT) == 0))
 		{
 			log_error("SQL query: %s", sql);
 			log_error("SQL params: %s", debugParameters);
@@ -2073,7 +2100,7 @@ pgsql_create_database(PGSQL *pgsql, const char *dbname, const char *owner)
 		 */
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
 
-		if (strcmp(sqlstate, ERRCODE_DUPLICATE_DATABASE) == 0)
+		if (strcmp(sqlstate, STR_ERRCODE_DUPLICATE_DATABASE) == 0)
 		{
 			log_info("The database \"%s\" already exists, skipping.", dbname);
 		}
@@ -2270,7 +2297,7 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 		 */
 		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
 
-		if (strcmp(sqlstate, ERRCODE_DUPLICATE_OBJECT) == 0)
+		if (strcmp(sqlstate, STR_ERRCODE_DUPLICATE_OBJECT) == 0)
 		{
 			log_info("The user \"%s\" already exists, skipping.", userName);
 		}
