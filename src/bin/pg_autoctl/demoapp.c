@@ -16,6 +16,12 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "postgres.h"
+
+#if PG_MAJORVERSION_NUM >= 15
+#include "common/pg_prng.h"
+#endif
+
 #include "cli_do_demoapp.h"
 #include "defaults.h"
 #include "demoapp.h"
@@ -530,8 +536,13 @@ demoapp_update_client_failovers(const char *pguri, int clientId, int failovers)
 /*
  * http://c-faq.com/lib/randrange.html
  */
+#if PG_MAJORVERSION_NUM < 15
 #define random_between(M, N) \
 	((M) + pg_lrand48() / (RAND_MAX / ((N) -(M) +1) + 1))
+#else
+#define random_between(M, N) \
+	((M) + pg_prng_uint32(&prng_state) / (RAND_MAX / ((N) -(M) +1) + 1))
+#endif
 
 /*
  * demo_start_client starts a sub-process that implements our demo application:
@@ -558,7 +569,14 @@ demoapp_start_client(const char *pguri, int clientId,
 	int retrySleepTime = 500;   /* first retry happens after 500 ms */
 
 	/* initialize a seed for our random number generator */
+
+#if PG_MAJORVERSION_NUM < 15
 	pg_srand48(((unsigned int) (getpid() ^ time(NULL))));
+#else
+	pg_prng_state prng_state;
+
+	pg_prng_seed(&prng_state, (uint64) (getpid() ^ time(NULL)));
+#endif
 
 	/* pick a random retry policy for this client */
 	retryCap = random_between(50, 500);

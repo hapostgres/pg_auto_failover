@@ -14,8 +14,13 @@
 #include <limits.h>
 #include <stdbool.h>
 
+#include "postgres.h"
 #include "libpq-fe.h"
 #include "portability/instr_time.h"
+
+#if PG_MAJORVERSION_NUM >= 15
+#include "common/pg_prng.h"
+#endif
 
 #include "defaults.h"
 #include "pgsetup.h"
@@ -92,6 +97,10 @@ typedef struct ConnectionRetryPolicy
 	instr_time startTime;       /* time of the first attempt */
 	instr_time connectTime;     /* time of successful connection */
 	int attempts;               /* how many attempts have been made so far */
+
+#if PG_MAJORVERSION_NUM >= 15
+	pg_prng_state prng_state;
+#endif
 } ConnectionRetryPolicy;
 
 /*
