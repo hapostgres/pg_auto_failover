@@ -137,7 +137,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 		int candidatePriority = strtol(prio, NULL, 10);
 		if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
 		{
-			log_fatal("--candidate-priority argument is not valid."
+			log_fatal("PG_AUTOCTL_CANDIDATE_PRIORITY environment variable is not valid."
 					  " Valid values are integers from 0 to 100. ");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
