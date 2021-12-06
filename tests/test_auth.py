@@ -68,12 +68,12 @@ def test_003_init_secondary():
         node1.get_synchronous_standby_names_local(),
         "ANY 1 (pgautofailover_standby_2)",
     )
+
+    # Prevent regression from bug fixed in PR #839
     logs = node2.logs("STDERR")
-    match = re.search(
-        "Failed to connect to .*, retrying until the server is ready", logs
-    )
+    match = re.search("Failed to CHECKPOINT before restart", logs)
     if match:
-        print("Found connection failure in logs: ", match[0])
+        print("Found CHECKPOINT in logs: ", match[0])
     assert not match
     node2.run()
 
@@ -95,8 +95,9 @@ def test_005_logging_of_passwords():
     logs = node2.logs()
     assert monitor_password not in logs
     assert "password=****" in logs
-    # We are still logging passwords when the pguri is incomplete and when printing settings,
-    #  so assert that it's not there in other cases:
+
+    # We are still logging passwords when the pguri is incomplete and when
+    # printing settings, so assert that it's not there in other cases:
     assert not re.search(
         "^(?!primary_conninfo|Failed to find).*%s.*$" % replication_password,
         logs,

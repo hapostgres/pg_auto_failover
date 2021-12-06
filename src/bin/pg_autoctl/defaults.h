@@ -29,6 +29,11 @@
 /* environment variable for --monitor, when used instead of --pgdata */
 #define PG_AUTOCTL_MONITOR "PG_AUTOCTL_MONITOR"
 
+/* environment variable for --candidate-priority and --replication-quorum */
+#define PG_AUTOCTL_NODE_NAME "PG_AUTOCTL_NODE_NAME"
+#define PG_AUTOCTL_CANDIDATE_PRIORITY "PG_AUTOCTL_CANDIDATE_PRIORITY"
+#define PG_AUTOCTL_REPLICATION_QUORUM "PG_AUTOCTL_REPLICATION_QUORUM"
+
 /* default values for the pg_autoctl settings */
 #define POSTGRES_PORT 5432
 #define POSTGRES_DEFAULT_LISTEN_ADDRESSES "*"
