@@ -910,7 +910,7 @@ monitor_register_node(Monitor *monitor, char *formation,
 	}
 
 	log_info("Registered node " NODE_FORMAT
-			 "in formation \"%s\", group %d, state \"%s\"",
+			 " in formation \"%s\", group %d, state \"%s\"",
 			 assignedState->nodeId, assignedState->name, host, port,
 			 formation, assignedState->groupId,
 			 NodeStateToString(assignedState->state));
