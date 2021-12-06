@@ -112,6 +112,60 @@ cli_common_keeper_getopts(int argc, char **argv,
 	/* default to a "primary" in citus node_role terms */
 	LocalOptionConfig.citusRole = CITUS_ROLE_PRIMARY;
 
+	/* add support for environment variable for some of the options */
+	if (env_exists(PG_AUTOCTL_NODE_NAME))
+	{
+		if (!get_env_copy(PG_AUTOCTL_NODE_NAME,
+						  LocalOptionConfig.name,
+						  sizeof(LocalOptionConfig.name)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	if (env_exists(PG_AUTOCTL_CANDIDATE_PRIORITY))
+	{
+		char prio[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_CANDIDATE_PRIORITY, prio, sizeof(prio)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		int candidatePriority = strtol(prio, NULL, 10);
+		if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
+		{
+			log_fatal("PG_AUTOCTL_CANDIDATE_PRIORITY environment variable is not valid."
+					  " Valid values are integers from 0 to 100. ");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		LocalOptionConfig.pgSetup.settings.candidatePriority = candidatePriority;
+	}
+
+	if (env_exists(PG_AUTOCTL_REPLICATION_QUORUM))
+	{
+		char quorum[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_REPLICATION_QUORUM, quorum, sizeof(quorum)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		bool replicationQuorum = false;
+		if (!parse_bool(quorum, &replicationQuorum))
+		{
+			log_fatal("PG_AUTOCTL_REPLICATION_QUORUM environment variable is not valid."
+					  " Valid values are \"true\" or \"false\".");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		LocalOptionConfig.pgSetup.settings.replicationQuorum = replicationQuorum;
+	}
+
 	optind = 0;
 
 	while ((c = getopt_long(argc, argv,
