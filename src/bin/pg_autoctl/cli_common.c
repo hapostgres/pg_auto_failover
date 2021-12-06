@@ -158,7 +158,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 		bool replicationQuorum = false;
 		if (!parse_bool(quorum, &replicationQuorum))
 		{
-			log_fatal("--replication-quorum argument is not valid."
+			log_fatal("PG_AUTOCTL_REPLICATION_QUORUM environment variable is not valid."
 					  " Valid values are \"true\" or \"false\".");
 			exit(EXIT_CODE_BAD_ARGS);
 		}
