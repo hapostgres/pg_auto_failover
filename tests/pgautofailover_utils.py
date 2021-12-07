@@ -364,6 +364,19 @@ class PGNode:
         else:
             time.sleep(secs)
 
+    def run_psql(self, query):
+        """
+        Run sql query with psql
+        """
+        command = [
+            shutil.which("psql"),
+            "-d",
+            self.database,
+            "-c",
+            query,
+        ]
+        self.vnode.run_and_wait(command, name="psql query")
+
     def run_sql_query(self, query, *args):
         """
         Runs the given sql query with the given arguments in this postgres node
