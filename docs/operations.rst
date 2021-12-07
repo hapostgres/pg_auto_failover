@@ -248,7 +248,7 @@ example of such an operation::
   11:53:03 50526 WARN  Enabling maintenance on a primary causes a failover
   11:53:03 50526 FATAL Please use --allow-failover to allow the command proceed
 
-As we can see the option ``allow-maintenance`` is mandatory. In the next
+As we can see the option ``allow-failover`` is mandatory. In the next
 example we use it::
 
   $ pg_autoctl enable maintenance --allow-failover
