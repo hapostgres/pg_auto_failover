@@ -194,7 +194,6 @@ register_node(PG_FUNCTION_ARGS)
 							  sysIdentifier,
 							  nodeCluster,
 							  &currentNodeState);
-	LockNodeGroup(formationId, currentNodeState.groupId, ExclusiveLock);
 
 	AutoFailoverNode *pgAutoFailoverNode = GetAutoFailoverNode(nodeHost, nodePort);
 	if (pgAutoFailoverNode == NULL)
@@ -536,11 +535,17 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		groupId = currentNodeState->groupId = 0;
 	}
 
-	/* a group number was asked for in the registration call */
+	/* either a Citus groupId was asked for, or we're in group 0 for pgsql */
 	if (currentNodeState->groupId >= 0)
 	{
-		/* the node prefers a particular group */
 		groupId = currentNodeState->groupId;
+
+		/*
+		 * Now that we have a groupId, take an exclusive lock to avoid race
+		 * conditions during registration, as the initial target state depends
+		 * on the other nodes in the same group.
+		 */
+		LockNodeGroup(formation->formationId, groupId, ExclusiveLock);
 
 		List *groupNodeList =
 			AutoFailoverNodeGroup(formation->formationId, groupId);
@@ -550,7 +555,8 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		 * in a group, we only ever accept a primary node first. Then, any
 		 * other node in the same group should be a standby. That's easy.
 		 */
-		if (list_length(groupNodeList) == 0)
+		if (list_length(groupNodeList) == 0 &&
+			currentNodeState->candidatePriority > 0)
 		{
 			initialState = REPLICATION_STATE_SINGLE;
 		}
