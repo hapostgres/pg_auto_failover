@@ -55,6 +55,8 @@ typedef struct KeeperConfig
 	char replication_password[MAXCONNINFO];
 	char maximum_backup_rate[MAXIMUM_BACKUP_RATE_LEN];
 	char backupDirectory[MAXPGPATH];
+	char tablespaceMappingsStr[PG_AUTOCTL_MAX_TABLESPACES_STR];
+	TablespaceMappings mappings;
 
 	/* Citus specific options and settings */
 	char citusRoleStr[NAMEDATALEN];
@@ -103,5 +105,7 @@ bool keeper_config_set_setting(KeeperConfig *config,
 bool keeper_config_merge_options(KeeperConfig *config, KeeperConfig *options);
 bool keeper_config_update(KeeperConfig *config, int64_t nodeId, int groupId);
 bool keeper_config_update_with_absolute_pgdata(KeeperConfig *config);
+
+bool parse_tablespace_mappings(KeeperConfig *config);
 
 #endif /* KEEPER_CONFIG_H */

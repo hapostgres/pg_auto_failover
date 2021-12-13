@@ -41,6 +41,7 @@ registered too, and is known to be healthy).
      --candidate-priority    priority of the node to be promoted to become primary
      --replication-quorum    true if node participates in write quorum
      --maximum-backup-rate   maximum transfer rate of data transferred from the server during initial sync
+     --tablespace-mappings   tablespace mapping options for pg_basebackup; semicolon separated
 
 Description
 -----------
@@ -303,3 +304,14 @@ The following options are available to ``pg_autoctl create postgres``:
 --server-cert
 
   Set the Postgres ``ssl_cert_file`` to that file path.
+
+--tablespace-mappings
+
+  Sets the tablespace mapping options for ``pg_basebackup``.
+  Tablespace mappings should be semicolon separated.
+
+  This option should be used when creating nodes for a cluster with additional tablespaces.
+  To add additional an additional tablespace after the fact, see the Postgres documentation.
+
+  __ https://www.postgresql.org/docs/current/manage-ag-tablespaces.html
+  __ https://www.postgresql.org/docs/current/warm-standby.html#STANDBY-SERVER-OPERATION

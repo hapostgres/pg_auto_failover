@@ -774,7 +774,8 @@ wait_until_primary_has_created_our_replication_slot(Keeper *keeper,
 										 config->backupDirectory,
 										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
-										 assignedState->nodeId))
+										 assignedState->nodeId,
+										 &config->mappings))
 	{
 		/* can't happen at the moment */
 		return false;

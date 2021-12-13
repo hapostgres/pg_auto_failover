@@ -143,6 +143,11 @@
 	make_strbuf_option("replication", "backup_directory", NULL, \
 					   false, MAXPGPATH, config->backupDirectory)
 
+#define OPTION_REPLICATION_TABLESPACE_MAPPING(config) \
+	make_strbuf_option("replication", "tablespace_mapping", NULL, \
+					   false, PG_AUTOCTL_MAX_TABLESPACES_STR, \
+					   config->tablespaceMappingsStr)
+
 #define OPTION_TIMEOUT_NETWORK_PARTITION(config) \
 	make_int_option_default("timeout", "network_partition_timeout", \
 							NULL, false, \
@@ -221,6 +226,7 @@
 		OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config), \
 		OPTION_REPLICATION_BACKUP_DIR(config), \
 		OPTION_REPLICATION_PASSWORD(config), \
+		OPTION_REPLICATION_TABLESPACE_MAPPING(config), \
 		OPTION_TIMEOUT_NETWORK_PARTITION(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_CATCHUP(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
@@ -381,6 +387,53 @@ keeper_config_read_file(KeeperConfig *config,
 }
 
 
+bool
+parse_tablespace_mappings(KeeperConfig *config)
+{
+	if (!IS_EMPTY_STRING_BUFFER(config->tablespaceMappingsStr))
+	{
+		char *delimiter = ";";
+		char *equal = "=";
+		char slicedString[PG_AUTOCTL_MAX_TABLESPACES_STR] = { 0 };
+		strlcpy(slicedString, config->tablespaceMappingsStr,
+				PG_AUTOCTL_MAX_TABLESPACES_STR);
+		char *savePtrSemicolon = { 0 };
+		char *directoryMap = strtok_r(slicedString, delimiter, &savePtrSemicolon);
+		while (directoryMap != NULL)
+		{
+			char *savePtrEqual = { 0 };
+			const char *originalDir = strtok_r(directoryMap, equal, &savePtrEqual);
+			const char *backupDir = strtok_r(NULL, equal, &savePtrEqual);
+			log_trace("parse_tablespace_mappings: %s", directoryMap);
+			if (originalDir == NULL || backupDir == NULL)
+			{
+				log_error("Failed to parse tablespace_mapping \"%s\": "
+						  "Use is tablespaceLocation=backupLocation with semicolon delimiter",
+						  config->tablespaceMappingsStr);
+				return false;
+			}
+			strlcpy(config->mappings.dirs[config->mappings.count].original,
+					originalDir, MAXPGPATH);
+			strlcpy(config->mappings.dirs[config->mappings.count].backup,
+					backupDir, MAXPGPATH);
+			config->mappings.count++;
+
+			directoryMap = strtok_r(NULL, delimiter, &savePtrSemicolon);
+
+			if (sizeof(directoryMap) > (MAXPGPATH * 2 + 1))
+			{
+				log_error(
+					"Failed to parse tablespace_mapping \"%s\": max directory length is %d",
+					config->tablespaceMappingsStr,
+					MAXPGPATH);
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+
 /*
  * keeper_config_read_file_skip_pgsetup overrides values in given KeeperConfig
  * with whatever values are read from given configuration filename.
@@ -479,6 +532,12 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 					  "\"primary\" or \"secondary\"", config->citusRoleStr);
 			return false;
 		}
+	}
+
+	if (!parse_tablespace_mappings(config))
+	{
+		/* error already logged*/
+		return false;
 	}
 
 	if (!keeper_config_init_nodekind(config))

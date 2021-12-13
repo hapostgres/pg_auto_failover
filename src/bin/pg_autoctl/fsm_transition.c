@@ -760,7 +760,8 @@ fsm_stop_postgres_and_setup_standby(Keeper *keeper)
 										 config->backupDirectory,
 										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
-										 keeper->state.current_node_id))
+										 keeper->state.current_node_id,
+										 &config->mappings))
 	{
 		/* can't happen at the moment */
 		return false;
@@ -937,7 +938,8 @@ fsm_init_standby(Keeper *keeper)
 										 config->backupDirectory,
 										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
-										 keeper->state.current_node_id))
+										 keeper->state.current_node_id,
+										 &config->mappings))
 	{
 		/* can't happen at the moment */
 		return false;
@@ -977,7 +979,8 @@ fsm_rewind_or_init(Keeper *keeper)
 										 config->backupDirectory,
 										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
-										 keeper->state.current_node_id))
+										 keeper->state.current_node_id,
+										 &config->mappings))
 	{
 		/* can't happen at the moment */
 		return false;
@@ -1248,7 +1251,8 @@ fsm_report_lsn(Keeper *keeper)
 										 config->backupDirectory,
 										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
-										 keeper->state.current_node_id))
+										 keeper->state.current_node_id,
+										 &config->mappings))
 	{
 		/* can't happen at the moment */
 		return false;
@@ -1349,7 +1353,8 @@ fsm_fast_forward(Keeper *keeper)
 										 config->backupDirectory,
 										 upstreamNode.lsn,
 										 config->pgSetup.ssl,
-										 keeper->state.current_node_id))
+										 keeper->state.current_node_id,
+										 &config->mappings))
 	{
 		/* can't happen at the moment */
 		return false;
@@ -1421,7 +1426,8 @@ fsm_follow_new_primary(Keeper *keeper)
 										 config->backupDirectory,
 										 NULL, /* no targetLSN */
 										 config->pgSetup.ssl,
-										 keeper->state.current_node_id))
+										 keeper->state.current_node_id,
+										 &config->mappings))
 	{
 		/* can't happen at the moment */
 		return false;
@@ -1489,7 +1495,8 @@ fsm_init_from_standby(Keeper *keeper)
 										 config->backupDirectory,
 										 upstreamNode.lsn,
 										 config->pgSetup.ssl,
-										 keeper->state.current_node_id))
+										 keeper->state.current_node_id,
+										 &config->mappings))
 	{
 		/* can't happen at the moment */
 		return false;

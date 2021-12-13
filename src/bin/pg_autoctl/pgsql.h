@@ -225,6 +225,28 @@ typedef struct IdentifySystem
 
 
 /*
+ * The --tablespace-mappings can be up to PG_AUTOCTL_MAX_TABLESPACES
+ * mappings long,
+ * Each mapping can be MAXPGPATH*2 + 1 (e.g. `/original/dir=/backup/dir`)
+ * with up to PG_AUTOCTL_MAX_TABLESPACES semicolon separators.
+ */
+#define PG_AUTOCTL_MAX_TABLESPACES 16
+#define PG_AUTOCTL_MAX_TABLESPACES_STR ((PG_AUTOCTL_MAX_TABLESPACES * (MAXPGPATH * 2 + 1)) \
+										+ PG_AUTOCTL_MAX_TABLESPACES)
+typedef struct BackupDirectory
+{
+	char original[MAXPGPATH];
+	char backup[MAXPGPATH];
+} BackupDirectory;
+
+typedef struct TablespaceMappings
+{
+	int count;
+	BackupDirectory dirs[PG_AUTOCTL_MAX_TABLESPACES];
+} TablespaceMappings;
+
+
+/*
  * The replicationSource structure is used to pass the bits of a connection
  * string to the primary node around in several function calls. All the
  * information stored in there must fit in a connection string, so MAXCONNINFO
@@ -244,6 +266,7 @@ typedef struct ReplicationSource
 	char targetTimeline[NAMEDATALEN];
 	SSLOptions sslOptions;
 	IdentifySystem system;
+	TablespaceMappings mappings;
 } ReplicationSource;
 
 

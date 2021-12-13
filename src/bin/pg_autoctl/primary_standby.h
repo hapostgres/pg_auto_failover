@@ -96,7 +96,8 @@ bool standby_init_replication_source(LocalPostgresServer *postgres,
 									 const char *backupDirectory,
 									 const char *targetLSN,
 									 SSLOptions sslOptions,
-									 int currentNodeId);
+									 int currentNodeId,
+									 TablespaceMappings *mappings);
 bool standby_init_database(LocalPostgresServer *postgres,
 						   const char *hostname,
 						   bool skipBaseBackup);

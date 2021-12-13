@@ -804,7 +804,8 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 								const char *backupDirectory,
 								const char *targetLSN,
 								SSLOptions sslOptions,
-								int currentNodeId)
+								int currentNodeId,
+								TablespaceMappings *mappings)
 {
 	ReplicationSource *upstream = &(postgres->replicationSource);
 
@@ -846,6 +847,19 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 			"%s%d",
 			REPLICATION_APPLICATION_NAME_PREFIX,
 			currentNodeId);
+
+	if (mappings != NULL)
+	{
+		upstream->mappings.count = mappings->count;
+		int i;
+		for (i = 0; i < mappings->count; i++)
+		{
+			strlcpy(upstream->mappings.dirs[i].backup, mappings->dirs[i].backup,
+					MAXPGPATH);
+			strlcpy(upstream->mappings.dirs[i].original,
+					mappings->dirs[i].original, MAXPGPATH);
+		}
+	}
 
 	return true;
 }

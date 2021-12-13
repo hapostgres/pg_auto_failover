@@ -958,6 +958,7 @@ class DataNode(PGNode):
         nodeId=None,
         citusSecondary=False,
         citusClusterName="default",
+        tablespaceMappings=None,
     ):
         """
         Runs "pg_autoctl create"
@@ -1051,6 +1052,9 @@ class DataNode(PGNode):
             assert nodeId is not None
             create_args += ["--disable-monitor"]
             create_args += ["--node-id", str(nodeId)]
+
+        if tablespaceMappings:
+            create_args += ["--tablespace-mappings", tablespaceMappings]
 
         if run:
             create_args += ["--run"]

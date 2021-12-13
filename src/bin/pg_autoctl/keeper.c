@@ -934,7 +934,8 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 											 config->backupDirectory,
 											 NULL, /* no targetLSN */
 											 config->pgSetup.ssl,
-											 state->current_node_id))
+											 state->current_node_id,
+											 &config->mappings))
 		{
 			/* can't happen at the moment */
 			free(currentConfContents);

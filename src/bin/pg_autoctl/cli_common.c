@@ -573,6 +573,20 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'T':
+			{
+				strlcpy(LocalOptionConfig.tablespaceMappingsStr, optarg,
+						PG_AUTOCTL_MAX_TABLESPACES_STR);
+				log_trace("--tablespace-mappings %s",
+						  LocalOptionConfig.tablespaceMappingsStr);
+				if (!parse_tablespace_mappings(&LocalOptionConfig))
+				{
+					/* error has already been logged */
+					errors++;
+				}
+				break;
+			}
+
 			default:
 			{
 				/* getopt_long already wrote an error message */
@@ -705,6 +719,7 @@ cli_common_keeper_getopts(int argc, char **argv,
  *      { "server-crt", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
  *      { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
  *      { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+ *      { "tablespace-mappings", no_argument, NULL, 'T' },
  *		{ NULL, 0, NULL, 0 }
  *	};
  *

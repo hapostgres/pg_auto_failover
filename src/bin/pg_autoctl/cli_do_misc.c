@@ -440,7 +440,8 @@ keeper_cli_init_standby(int argc, char **argv)
 										 config.backupDirectory,
 										 NULL, /* no targetLSN */
 										 config.pgSetup.ssl,
-										 0))
+										 0,
+										 &config.mappings))
 	{
 		/* can't happen at the moment */
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -499,7 +500,8 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 										 config.backupDirectory,
 										 NULL, /* no targetLSN */
 										 config.pgSetup.ssl,
-										 0))
+										 0,
+										 &config.mappings))
 	{
 		/* can't happen at the moment */
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -535,7 +537,8 @@ keeper_cli_maybe_do_crash_recovery(int argc, char **argv)
 										 config.backupDirectory,
 										 NULL, /* no targetLSN */
 										 config.pgSetup.ssl,
-										 0))
+										 0,
+										 &config.mappings))
 	{
 		/* can't happen at the moment */
 		exit(EXIT_CODE_INTERNAL_ERROR);

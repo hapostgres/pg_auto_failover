@@ -2970,7 +2970,7 @@ pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system)
 
 
 /*
- * parsePgMetadata parses the result from a PostgreSQL query fetching
+ * parseIdentifySystemResult parses the result from a PostgreSQL query fetching
  * two columns from pg_stat_replication: sync_state and currentLSN.
  */
 static void

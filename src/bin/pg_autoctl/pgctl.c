@@ -1187,7 +1187,7 @@ pg_basebackup(const char *pgdata,
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
-	char *args[16];
+	char *args[16 + (2 * PG_AUTOCTL_MAX_TABLESPACES)];
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
@@ -1197,6 +1197,19 @@ pg_basebackup(const char *pgdata,
 	{
 		/* errors have already been logged. */
 		return false;
+	}
+
+	int i;
+	for (i = 0; i < replicationSource->mappings.count; i++)
+	{
+		char *backup = replicationSource->mappings.dirs[i].backup;
+
+		log_debug("mkdir -p \"%s\"", backup);
+		if (!ensure_empty_dir(backup, 0700))
+		{
+			/* errors have already been logged. */
+			return false;
+		}
 	}
 
 	/* call pg_basebackup */
@@ -1238,6 +1251,24 @@ pg_basebackup(const char *pgdata,
 	args[argsIndex++] = "--max-rate";
 	args[argsIndex++] = replicationSource->maximumBackupRate;
 	args[argsIndex++] = "--wal-method=stream";
+
+	/*	--tablespace-mapping=olddir=newdir */
+	for (i = 0; i < replicationSource->mappings.count; i++)
+	{
+		args[argsIndex++] = "--tablespace-mapping";
+		char tablespaceMapping[MAXPGPATH * 2 + 1];
+		if (sformat(tablespaceMapping, MAXPGPATH * 2 + 1, "%s=%s",
+					replicationSource->mappings.dirs[i].original,
+					replicationSource->mappings.dirs[i].backup) < 1)
+		{
+			log_error("Failed to build tablespace arguments");
+			return false;
+		}
+		args[argsIndex] = tablespaceMapping;
+		log_trace("pg_basebackup: use tablespace-mapping %s", args[argsIndex]);
+		argsIndex++;
+	}
+
 
 	/* we don't use a replication slot e.g. when upstream is a standby */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))
