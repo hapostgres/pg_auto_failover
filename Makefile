@@ -4,9 +4,11 @@
 TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 CONTAINER_NAME = pg_auto_failover
+BUILD_CONTAINER_NAME = pg_auto_failover_build
 TEST_CONTAINER_NAME = pg_auto_failover_test
 DOCKER_RUN_OPTS = --privileged  -ti --rm
 
+PGVERSION ?= 10
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
 # Tests for the monitor
@@ -146,30 +148,56 @@ indent:
 docs: $(FSM)
 	$(MAKE) -C docs html
 
-build:
-	docker build				    \
-		$(DOCKER_BUILD_OPTS)		\
-		-t $(CONTAINER_NAME)	    \
-		.
-
 interactive-test:
 	docker run --name $(CONTAINER_NAME) --rm -ti $(CONTAINER_NAME)
 
+build-image:
+	docker build $(DOCKER_BUILD_OPTS) --target build -t $(BUILD_CONTAINER_NAME) .
 
-build-test:
-	docker build				    \
-		$(DOCKER_BUILD_OPTS)		\
-		--target build-test         \
-		-t $(TEST_CONTAINER_NAME)	\
-		.
+build-test-pg10: build-image
+	docker build --build-arg PGVERSION=10 --target test -t $(TEST_CONTAINER_NAME):pg10 .
 
-run-test: build-test
+build-test-pg11:
+	docker build --build-arg PGVERSION=11 --target test -t $(TEST_CONTAINER_NAME):pg11 .
+
+build-test-pg12:
+	docker build --build-arg PGVERSION=12 --target test -t $(TEST_CONTAINER_NAME):pg12 .
+
+build-test-pg13:
+	docker build --build-arg PGVERSION=13 --target test -t $(TEST_CONTAINER_NAME):pg13 .
+
+build-test-pg14:
+	docker build --build-arg PGVERSION=14 --target test -t $(TEST_CONTAINER_NAME):pg14 .
+
+run-test: build-test-pg$(PGVERSION)
 	docker run					                \
 		--name $(TEST_CONTAINER_NAME)		    \
 		$(DOCKER_RUN_OPTS)			            \
-		$(TEST_CONTAINER_NAME)			        \
+		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
 		make -C /usr/src/pg_auto_failover test	\
-		TEST='${TEST}'
+		PGVERSION=$(PGVERSION) TEST='${TEST}'
+
+build-pg10: build-test-pg10
+	docker build --build-arg PGVERSION=10 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg10 .
+
+build-pg11: build-test-pg11
+	docker build --build-arg PGVERSION=11 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg11 .
+
+build-pg12: build-test-pg12
+	docker build --build-arg PGVERSION=12 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg12 .
+
+build-pg13: build-test-pg13
+	docker build --build-arg PGVERSION=13 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg13 .
+
+build-pg14: build-test-pg14
+	docker build --build-arg PGVERSION=14 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg14 .
+
+build: build-pg10 build-pg11 build-pg12 build-pg13 build-pg14 ;
+
+build-check:
+	for v in 10 11 12 13 14; do \
+		docker run --rm -t pg_auto_failover_test:pg$$v pg_autoctl version --json | jq ".pg_version" | xargs echo $$v: ; \
+	done
 
 build-i386:
 	docker build -t i386:latest -f Dockerfile.i386 .
@@ -276,3 +304,7 @@ azdrop: all
 .PHONY: build-test run-test
 .PHONY: tmux-clean cluster
 .PHONY: azcluster azdrop az
+.PHONY: build-image
+.PHONY: build-test-pg10 build-test-pg11 build-test-pg142
+.PHONY: build-test-pg13 build-test-pg14
+.PHONY: build build-pg10 build-pg11 build-pg12 build-pg13 build-pg14
