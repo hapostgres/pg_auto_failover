@@ -1,6 +1,16 @@
-FROM debian:buster-slim as build-test
+#
+# Using --build-arg PGVERSION=11 we can build pg_auto_failover for any
+# target version of Postgres. In the Makefile, we use that to our advantage
+# and tag test images such as pg_auto_failover_test:pg14.
+#
+ARG PGVERSION=10
 
-ENV PGVERSION 10
+#
+# Define a base image with all our build dependencies.
+#
+# This base image contains all our target Postgres versions.
+#
+FROM debian:buster-slim as base
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -17,7 +27,8 @@ RUN apt-get update \
     libreadline-dev \
     libpam-dev \
     zlib1g-dev \
-    libxml2-dev \
+    liblz4-dev \
+	libxml2-dev \
     libxslt1-dev \
     libselinux1-dev \
 	libncurses-dev \
@@ -48,8 +59,16 @@ RUN echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main" > /etc/a
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
 RUN apt-get update \
 	&& apt-get install -y --no-install-recommends \
-     postgresql-server-dev-${PGVERSION} \
-     postgresql-${PGVERSION} \
+     postgresql-server-dev-10 \
+     postgresql-server-dev-11 \
+     postgresql-server-dev-12 \
+     postgresql-server-dev-13 \
+     postgresql-server-dev-14 \
+     postgresql-10 \
+     postgresql-11 \
+     postgresql-12 \
+     postgresql-13 \
+     postgresql-14 \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install pyroute2>=0.5.17
@@ -58,25 +77,48 @@ RUN adduser docker sudo
 RUN adduser docker postgres
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
+#
+# On-top of the base build-dependencies image, now we can build
+# pg_auto_failover for a given --build-arg PGVERSION target version of
+# Postgres.
+#
+FROM base as build
+
+ARG PGVERSION
+
+ENV PG_CONFIG /usr/lib/postgresql/${PGVERSION}/bin/pg_config
+
 WORKDIR /usr/src/pg_auto_failover
 
 COPY Makefile ./
 COPY ./src/ ./src
 RUN make -s clean && make -s install -j8
 
-COPY ./tests/ ./tests
 
+#
+# Given the build image above, we can now run our test suite targetting a
+# given version of Postgres.
+#
+FROM build as test
+
+ARG PGVERSION
+
+COPY ./tests/ ./tests
 COPY ./valgrind ./valgrind
 RUN chmod a+w ./valgrind
 
 USER docker
-ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/${PGVERSION}/bin
+
 ENV PG_AUTOCTL_DEBUG 1
+ENV PATH /usr/lib/postgresql/${PGVERSION}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 
+#
+# And finally our "run" images with the bare minimum for run-time.
+#
 FROM debian:buster-slim as run
 
-ENV PGVERSION 10
+ARG PGVERSION
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -110,9 +152,9 @@ RUN adduser docker sudo
 RUN adduser docker postgres
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-COPY --from=build-test /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so /usr/lib/postgresql/${PGVERSION}/lib
-COPY --from=build-test /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* /usr/share/postgresql/${PGVERSION}/extension/
-COPY --from=build-test /usr/lib/postgresql/${PGVERSION}/bin/pg_autoctl /usr/local/bin
+COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so /usr/lib/postgresql/${PGVERSION}/lib
+COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* /usr/share/postgresql/${PGVERSION}/extension/
+COPY --from=build /usr/lib/postgresql/${PGVERSION}/bin/pg_autoctl /usr/local/bin
 
 #
 # In tests/upgrade/docker-compose.yml we use internal docker volumes in
