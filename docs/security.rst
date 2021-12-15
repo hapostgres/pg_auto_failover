@@ -139,7 +139,7 @@ Certificates`__ page.
 __ https://www.postgresql.org/docs/current/ssl-tcp.html#SSL-CERTIFICATE-CREATION
 
 The certificate subject CN defaults to the ``--hostname`` parameter, which
-can be given explicitely or computed by ``pg_autoctl`` as either your
+can be given explicitly or computed by ``pg_autoctl`` as either your
 hostname when you have proper DNS resolution, or your current IP address.
 
 Self-signed certificates provide protection against eavesdropping; this
@@ -179,7 +179,7 @@ it handle the Postgres setup for you::
                                ...
 
 The option ``--ssl-mode`` can be used to force connection strings used by
-``pg_autoctl`` to contain your prefered ssl mode. It defaults to ``require``
+``pg_autoctl`` to contain your preferred ssl mode. It defaults to ``require``
 when using ``--ssl-self-signed`` and to ``allow`` when ``--no-ssl`` is used.
 Here, we set ``--ssl-mode`` to ``verify-full`` which requires SSL
 Certificates Authentication, covered next.
@@ -315,7 +315,7 @@ configuration with::
 
   $ pg_autoctl config get pg_autoctl.monitor
 
-Note that an already running pg_autoctl deamon will try to reload its
+Note that an already running pg_autoctl daemon will try to reload its
 configuration after ``pg_autoctl enable ssl`` has finished. In some cases
 this is not possible to do without a restart. So be sure to check the logs
 from a running daemon to confirm that the reload succeeded. If it did not

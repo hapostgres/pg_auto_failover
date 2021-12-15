@@ -385,7 +385,7 @@ the following commands.
 
   1. Apply the STONITH approach on the old monitor to make sure this node is
      not going to show up again during the procedure. This step is sometimes
-     refered to as “fencing”.
+     referred to as “fencing”.
 
   2. On every node, ending with the (current) Postgres primary node for each
      group, disable the monitor while ``pg_autoctl`` is still running::

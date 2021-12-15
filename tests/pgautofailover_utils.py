@@ -200,7 +200,7 @@ class Cluster:
         """
         Returns a list of all nodes in the cluster including the monitor
 
-        NOTE: Monitor is explicitely last in this list. So this list of nodes
+        NOTE: Monitor is explicitly last in this list. So this list of nodes
         can be stopped in order safely.
         """
         nodes = self.datanodes.copy()
@@ -1811,7 +1811,7 @@ class MonitorNode(PGNode):
         """
         performs manual failover for given formation and group id
         """
-        failover_commmand_text = (
+        failover_command_text = (
             "select * from pgautofailover.perform_failover('%s', %s)"
             % (formation, group)
         )
@@ -1820,7 +1820,7 @@ class MonitorNode(PGNode):
             "-d",
             self.database,
             "-c",
-            failover_commmand_text,
+            failover_command_text,
         ]
         self.vnode.run_and_wait(failover_command, name="manual failover")
 

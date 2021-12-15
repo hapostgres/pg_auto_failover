@@ -247,7 +247,7 @@ The main changes of this release are:
   - It is possible to `pg_autoctl create postgres` when PGDATA is an already
     existing data_directory: as usual the monitor decides if that node is
     going to be a primary or a standby. All the Postgres nodes in the same
-    group must have the same Postgres system identifer, and that is now
+    group must have the same Postgres system identifier, and that is now
     enforced on the monitor.
 
 #### Added

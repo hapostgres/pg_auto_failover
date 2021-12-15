@@ -8,7 +8,7 @@ pg_autoctl get replication-quorum - get replication-quorum property from the mon
 Synopsis
 --------
 
-This command prints ``pg_autoctl`` replication quorun for a given node::
+This command prints ``pg_autoctl`` replication quorum for a given node::
 
   usage: pg_autoctl get node replication-quorum  [ --pgdata ] [ --json ] [ --formation ] [ --name ]
 

@@ -214,7 +214,7 @@ The command `pg_autoctl perform switchover` can be used to force
 pg_auto_failover to orchestrate a failover. Because all the nodes are
 actually running fine (meaning that `pg_autoctl` actively reports the local
 state of each node to the monitor), the failover process does not have to
-carefuly implement timeouts to make sure to avoid split-brain.
+carefully implement timeouts to make sure to avoid split-brain.
 
 ~~~ bash
 $ pg_autoctl perform switchover

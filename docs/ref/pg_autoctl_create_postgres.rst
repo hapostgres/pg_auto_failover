@@ -58,7 +58,7 @@ corresponding to as many implementation strategies.
      The monitor answers to the registration call with a state to assign to
      the new member of the group, either *SINGLE* or *WAIT_STANDBY*. When
      the assigned state is *SINGLE*, then ``pg_autoctl create postgres``
-     proceedes to initialize a new PostgreSQL instance.
+     proceeds to initialize a new PostgreSQL instance.
 
   2. Initialize an already existing primary server
 

@@ -183,7 +183,7 @@ def test_010_promote_node1():
     # to the rest of the code when the promotion is all over with
     #
     # we need to take control way before that, so just trigger the failover
-    # and get back to controling our test case.
+    # and get back to controlling our test case.
     q = "select pgautofailover.perform_promotion('default', 'node_1')"
     monitor.run_sql_query(q)
 
