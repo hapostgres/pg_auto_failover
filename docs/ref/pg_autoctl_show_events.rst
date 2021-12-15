@@ -59,7 +59,7 @@ Options
 
 --json
 
-  Output a JSON formated data instead of a table formatted list.
+  Output a JSON formatted data instead of a table formatted list.
 
 Examples
 --------
