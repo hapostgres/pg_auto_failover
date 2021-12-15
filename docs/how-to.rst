@@ -84,7 +84,7 @@ or development purposes.
    When running several ``pg_autoctl`` nodes on the same machine for testing
    or contributing to pg_auto_failover, each Postgres instance needs to run
    on its own port, and with its own data directory. It can make things
-   easier to then set the environement variables ``PGDATA`` and ``PGPORT``
+   easier to then set the environment variables ``PGDATA`` and ``PGPORT``
    in each terminal, shell, or tab where each instance is started.
 
 Inspecting nodes

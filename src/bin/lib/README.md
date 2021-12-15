@@ -1,4 +1,4 @@
-# Vendored-in librairies
+# Vendored-in libraries
 
 ## log.c
 

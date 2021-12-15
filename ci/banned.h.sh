@@ -38,7 +38,7 @@ grep -E  '\b(strcat|strcpy|strerror|strncat|strncpy|strtok|wcscat|wcscpy|wcsncat
 # shellcheck disable=SC2086
 grep -E '\b(wnsprintf|wnsprintfA|wnsprintfW|_snwprintf|_snprintf|_sntprintf|_vsnprintf|vsnprintf|_vsnwprintf|_vsntprintf|wvnsprintf|wvnsprintfA|wvnsprintfW|strtok|_tcstok|wcstok|_mbstok|makepath|_tmakepath| _makepath|_wmakepath|_splitpath|_tsplitpath|_wsplitpath|scanf|wscanf|_tscanf|sscanf|swscanf|_stscanf|snscanf|snwscanf|_sntscanf|_itoa|_itow|_i64toa|_i64tow|_ui64toa|_ui64tot|_ui64tow|_ultoa|_ultot|_ultow|CharToOem|CharToOemA|CharToOemW|OemToChar|OemToCharA|OemToCharW|CharToOemBuffA|CharToOemBuffW|alloca|_alloca|ChangeWindowMessageFilter)\(' $files  \
     | grep -v "IGNORE-BANNED" \
-    && echo "ERROR: Recomended banned API usage detected" && exit 1
+    && echo "ERROR: Recommended banned API usage detected" && exit 1
 
 # Recommended banned from table on liquid. If you can change the code not to use these
 # that would be great. You can use IGNORE-BANNED if you need to use it anyway.
@@ -50,5 +50,5 @@ grep -E '\b(wnsprintf|wnsprintfA|wnsprintfW|_snwprintf|_snprintf|_sntprintf|_vsn
 # shellcheck disable=SC2086
 grep -E '\b(alloca|getwd|mktemp|tmpnam|wcrtomb|wcrtombs|wcslen|wcsrtombs|wcstombs|wctomb|class_addMethod|class_replaceMethod)\(' $files  \
     | grep -v "IGNORE-BANNED" \
-    && echo "ERROR: Recomended banned API usage detected" && exit 1
+    && echo "ERROR: Recommended banned API usage detected" && exit 1
 exit 0

@@ -224,7 +224,7 @@ def test_011_write_into_new_primary():
     results = node2.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,), (3,), (4,)]
 
-    # generate more WAL trafic for replication
+    # generate more WAL traffic for replication
     node2.run_sql_query("CHECKPOINT")
 
 
@@ -233,7 +233,7 @@ def test_012_fail_primary():
     print("Failing current primary node 2")
     node2.fail()
 
-    # explicitely allow for the 30s timeout in stop_replication
+    # explicitly allow for the 30s timeout in stop_replication
     assert node1.wait_until_state(target_state="stop_replication")
     assert node1.wait_until_state(target_state="primary")
     assert node3.wait_until_state(target_state="secondary")

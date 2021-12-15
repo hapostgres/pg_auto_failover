@@ -193,7 +193,7 @@ class VirtualNode:
     def run_and_wait(self, command, name, timeout=COMMAND_TIMEOUT):
         """
         Waits for command to exit successfully. If it exits with error or it timeouts,
-        raises an execption with stdout and stderr streams of the process.
+        raises an exception with stdout and stderr streams of the process.
         """
         with self.run(command) as proc:
             try:

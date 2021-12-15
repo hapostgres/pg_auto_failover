@@ -26,7 +26,7 @@ Options
 
 --json
 
-  Output JSON formated data.
+  Output JSON formatted data.
 
 Description
 -----------
@@ -83,7 +83,7 @@ Without arguments, we get the entire file::
   postgresql_restart_failure_timeout = 20
   postgresql_restart_failure_max_retries = 3
 
-It is possible to pipe JSON formated output to the ``jq`` command line and
+It is possible to pipe JSON formatted output to the ``jq`` command line and
 filter the result down to a specific section of the file::
 
   $ pg_autoctl config get --pgdata node1 --json | jq .pg_autoctl

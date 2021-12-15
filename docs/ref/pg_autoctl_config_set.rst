@@ -26,7 +26,7 @@ Options
 
 --json
 
-  Output JSON formated data.
+  Output JSON formatted data.
 
 Description
 -----------
