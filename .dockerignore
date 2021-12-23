@@ -2,3 +2,60 @@
 src/bin/pg_autoctl/pg_autoctl
 docs
 Dockerfile
+
+# Global excludes across all subdirectories
+*.o
+*.bc
+*.so
+*.so.[0-9]
+*.so.[0-9].[0-9]
+*.sl
+*.sl.[0-9]
+*.sl.[0-9].[0-9]
+*.dylib
+*.dll
+*.a
+*.mo
+*.pot
+objfiles.txt
+.deps/
+*.gcno
+*.gcda
+*.gcov
+*.gcov.out
+lcov.info
+coverage/
+*.vcproj
+*.vcxproj
+win32ver.rc
+*.exe
+lib*dll.def
+lib*.pc
+*.log
+
+# Local excludes in root directory
+/config.log
+/config.status
+/pgsql.sln
+/pgsql.sln.cache
+/Debug/
+/Release/
+/autom4te.cache
+/Makefile.global
+/src/Makefile.custom
+/tests/__pycache__/
+/env/
+
+# Exclude generated SQL files
+pgautofailover--?.?.sql
+!pgautofailover--1.0.sql
+
+# Exclude generated PDF and PNG files for the graphics
+docs/tikz/*.pdf
+docs/tikz/*.png
+
+# Exclude our demo/test tmux directory
+tmux/
+valgrind/*
+
+.ccls-cache/
