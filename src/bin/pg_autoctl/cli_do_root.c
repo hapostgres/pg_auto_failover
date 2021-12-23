@@ -221,6 +221,66 @@ CommandLine do_pgsetup_commands =
 					 "Manage a local Postgres setup", NULL, NULL,
 					 NULL, do_pgsetup);
 
+CommandLine do_tmux_compose_config =
+	make_command("config",
+				 "Produce a docker-compose configuration file for a demo",
+				 "[option ...]",
+				 "  --root            path where to create a cluster\n"
+				 "  --first-pgport    first Postgres port to use (5500)\n"
+				 "  --nodes           number of Postgres nodes to create (2)\n"
+				 "  --async-nodes     number of async nodes within nodes (0)\n"
+				 "  --node-priorities list of nodes priorities (50)\n"
+				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
+				 "  --layout          tmux layout to use (even-vertical)\n"
+				 "  --binpath         path to the pg_autoctl binary (current binary path)",
+				 cli_do_tmux_script_getopts,
+				 cli_do_tmux_compose_config);
+
+CommandLine do_tmux_compose_script =
+	make_command("script",
+				 "Produce a tmux script for a demo or a test case (debug only)",
+				 "[option ...]",
+				 "  --root            path where to create a cluster\n"
+				 "  --first-pgport    first Postgres port to use (5500)\n"
+				 "  --nodes           number of Postgres nodes to create (2)\n"
+				 "  --async-nodes     number of async nodes within nodes (0)\n"
+				 "  --node-priorities list of nodes priorities (50)\n"
+				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
+				 "  --layout          tmux layout to use (even-vertical)\n"
+				 "  --binpath         path to the pg_autoctl binary (current binary path)",
+				 cli_do_tmux_script_getopts,
+				 cli_do_tmux_compose_script);
+
+CommandLine do_tmux_compose_session =
+	make_command("session",
+				 "Run a tmux session for a demo or a test case",
+				 "[option ...]",
+				 "  --root            path where to create a cluster\n"
+				 "  --first-pgport    first Postgres port to use (5500)\n"
+				 "  --nodes           number of Postgres nodes to create (2)\n"
+				 "  --async-nodes     number of async nodes within nodes (0)\n"
+				 "  --node-priorities list of nodes priorities (50)\n"
+				 "  --sync-standbys   number-sync-standbys to set (0 or 1)\n"
+				 "  --skip-pg-hba     use --skip-pg-hba when creating nodes\n"
+				 "  --layout          tmux layout to use (even-vertical)\n"
+				 "  --binpath         path to the pg_autoctl binary (current binary path)",
+				 cli_do_tmux_script_getopts,
+				 cli_do_tmux_compose_session);
+
+CommandLine *do_tmux_compose[] = {
+	&do_tmux_compose_config,
+	&do_tmux_compose_script,
+	&do_tmux_compose_session,
+	NULL
+};
+
+CommandLine do_tmux_compose_commands =
+	make_command_set("compose",
+					 "Set of facilities to handle docker-compose sessions",
+					 NULL, NULL, NULL, do_tmux_compose);
+
 CommandLine do_tmux_script =
 	make_command("script",
 				 "Produce a tmux script for a demo or a test case (debug only)",
@@ -290,6 +350,7 @@ CommandLine do_tmux_wait =
 				 cli_do_tmux_wait);
 
 CommandLine *do_tmux[] = {
+	&do_tmux_compose_commands,
 	&do_tmux_script,
 	&do_tmux_session,
 	&do_tmux_stop,
