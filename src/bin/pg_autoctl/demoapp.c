@@ -150,10 +150,15 @@ demoapp_prepare_schema(const char *pguri)
 	const char *ddls[] = {
 		"drop schema if exists demo cascade",
 		"create schema demo",
+
+		"create table demo.client(client integer primary key, pid integer, "
+		"retry_sleep_ms integer, retry_cap_ms integer, failover_count integer, "
+		"unique(pid))",
+
 		"create table demo.tracking(ts timestamptz default now(), "
-		"client integer, loop integer, retries integer, us bigint, recovery bool)",
-		"create table demo.client(client integer, pid integer, "
-		"retry_sleep_ms integer, retry_cap_ms integer, failover_count integer)",
+		"client integer, loop integer, retries integer, us bigint, recovery bool,"
+		"primary key(client, ts),"
+		"foreign key (client) references demo.client(client))",
 		NULL
 	};
 
@@ -383,9 +388,12 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 
 	if (demoAppOptions->duration <= (demoAppOptions->firstFailover + 10))
 	{
+		log_warn("Using --duration %ds and --first-failover %ds",
+				 demoAppOptions->duration,
+				 demoAppOptions->firstFailover);
 		log_error("Use a --duration of at least %ds for a failover to happen",
 				  demoAppOptions->firstFailover + 10);
-		exit(EXIT_CODE_INTERNAL_ERROR);
+		exit(EXIT_CODE_QUIT);
 	}
 
 	log_info("Failover client is started, will failover in %ds "
