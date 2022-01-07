@@ -54,6 +54,9 @@ a.skiplink {
 .wy-menu-vertical li button.toctree-expand {
   color: #b3b3b3;
 }
+.wy-menu-vertical li.toctree-l2 button.toctree-expand {
+  color: #656565;
+}
 
 .wy-table-odd a, .wy-table-striped tr:nth-child(2n-1) a, .rst-content table.docutils:not(.field-list) tr:nth-child(2n-1) a {
   color: #2575AB;
