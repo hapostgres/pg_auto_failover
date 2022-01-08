@@ -16,8 +16,14 @@ h1,h2,.rst-content .toctree-wrapper p.caption,h3,h4,h5,h6,legend {
   border: 1px solid #404040;
 }
 
-.btn:focus {
+/*.btn:focus {
   outline: 1px solid;
+}*/
+:focus {
+  outline: 1px dashed;
+}
+.wy-menu :not(.toctree-expand):focus {
+  outline-offset: -1px;
 }
 
 #search-results .context {
@@ -26,11 +32,6 @@ h1,h2,.rst-content .toctree-wrapper p.caption,h3,h4,h5,h6,legend {
 
 a {
   color: #2678AF;
-}
-
-a.skiplink {
-  color: #757575;
-  margin-bottom: 0;
 }
 
 .wy-menu-vertical li.current {
@@ -125,7 +126,8 @@ div.admonition.note a {
 }
 
 .wy-side-nav-search > div.version,
-.wy-side-nav-search > a.icon-home {
+.wy-side-nav-search > a.icon-home,
+a.skiplink {
   color: white !important;
 }
 
