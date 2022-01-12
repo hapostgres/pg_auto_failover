@@ -132,6 +132,10 @@ clean-bin:
 install-bin: bin
 	$(MAKE) -C src/bin/ install
 
+test-tablespaces:
+	$(MAKE) -C tests/tablespaces teardown
+	$(MAKE) -C tests/tablespaces run-test
+
 test:
 	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
 		$(NOSETESTS)			\

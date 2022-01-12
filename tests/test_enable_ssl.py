@@ -1,5 +1,5 @@
-import pgautofailover_utils as pgautofailover
-import ssl_cert_utils as cert
+import tests.pgautofailover_utils as pgautofailover
+import tests.ssl_cert_utils as cert
 import subprocess
 import os
 import time

@@ -1,0 +1,69 @@
+version: "3.9"  # optional since v1.27.0
+services:
+  monitor:
+    build: .
+    environment:
+      PGDATA: /tmp/pgdata
+      PG_AUTOCTL_DEBUG: 1
+    command: pg_autoctl create monitor --ssl-self-signed --auth trust --run
+    expose:
+      - 5432
+    container_name: monitor
+  node1:
+    build: .
+    environment:
+      PGDATA: /var/lib/postgres/data
+      PGPORT: 5433
+      PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor:5432/pg_auto_failover"
+      HOSTNAME: "node1.tablespaces_default"
+    command: pg_autoctl create postgres --ssl-self-signed --auth trust --pg-hba-lan --run
+    expose:
+      - 5433
+    links:
+      - monitor
+    container_name: node1
+    volumes:
+      - node1-volume:/var/lib/postgres:rw
+      - node1-a-volume:/extra_volumes/extended_a:rw
+      - node1-b-volume:/extra_volumes/extended_b:rw
+      - node1-c-volume:/extra_volumes/extended_c:rw
+  node2:
+    build: .
+    environment:
+      PGDATA: /var/lib/postgres/data
+      PGPORT: 5434
+      PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor:5432/pg_auto_failover"
+      HOSTNAME: "node2.tablespaces_default"
+    command: pg_autoctl create postgres --ssl-self-signed --auth trust --pg-hba-lan --run
+    expose:
+      - 5433
+    links:
+      - monitor
+    container_name: node2
+    volumes:
+      - node2-volume:/var/lib/postgres:rw
+      - node2-a-volume:/extra_volumes/extended_a:rw
+      - node2-b-volume:/extra_volumes/extended_b:rw
+      - node2-c-volume:/extra_volumes/extended_c:rw
+  test:
+    build:
+      context: .
+      target: test
+    environment:
+      TEST_NUM:
+    command: [
+    "make", "-C", "/usr/src/pg_auto_failover", "test", "TEST=tablespaces/test_tablespaces_$${TEST_NUM}"
+    ]
+    container_name: pg_auto_failover_tablespaces_test
+    links:
+      - monitor
+
+volumes:
+  node1-volume:
+  node1-a-volume:
+  node1-b-volume:
+  node1-c-volume:
+  node2-volume:
+  node2-a-volume:
+  node2-b-volume:
+  node2-c-volume:

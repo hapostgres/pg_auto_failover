@@ -1,4 +1,4 @@
-import pgautofailover_utils as pgautofailover
+import tests.pgautofailover_utils as pgautofailover
 from nose.tools import assert_raises, raises, eq_
 
 import os
