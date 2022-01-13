@@ -282,6 +282,11 @@ buildDebianDataAndConfDirectoryNames(PostgresSetup *pgSetup,
 	char clusterDir[MAXPGPATH] = { 0 };
 	char versionDir[MAXPGPATH] = { 0 };
 
+	if (pgmajor == NULL)
+	{
+		log_error(ALLOCATION_FAILED_ERROR);
+		return false;
+	}
 
 	/* we need to work with the absolute pathname of PGDATA */
 	if (!normalize_filename(pgSetup->pgdata, pgdata, MAXPGPATH))
@@ -300,6 +305,12 @@ buildDebianDataAndConfDirectoryNames(PostgresSetup *pgSetup,
 	/* get the names of our version and cluster directories */
 	char *clusterDirName = strdup(basename(clusterDir));
 	char *versionDirName = strdup(basename(versionDir));
+
+	if (clusterDirName == NULL || versionDirName == NULL)
+	{
+		log_error(ALLOCATION_FAILED_ERROR);
+		return false;
+	}
 
 	/* transform pgversion "11.4" to "11" to get the major version part */
 	char *dot = strchr(pgmajor, '.');

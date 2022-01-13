@@ -114,6 +114,11 @@ parseSingleValueResult(void *ctx, PGresult *result)
 			case PGSQL_RESULT_STRING:
 			{
 				context->strVal = strdup(value);
+				if (context->strVal == NULL)
+				{
+					context->parsedOk = false;
+					log_error(ALLOCATION_FAILED_ERROR);
+				}
 				context->parsedOk = true;
 				break;
 			}
