@@ -252,6 +252,11 @@ ini_set_option_value(IniOption *option, const char *value)
 			else
 			{
 				*(option->strValue) = strdup(value);
+				if (*(option->strValue) == NULL)
+				{
+					log_error(ALLOCATION_FAILED_ERROR);
+					return false;
+				}
 			}
 			break;
 		}
@@ -575,6 +580,11 @@ lookup_ini_path_value(IniOption *optionList, const char *path)
 	}
 
 	section_name = strdup(path);                   /* don't scribble on path */
+	if (section_name == NULL)
+	{
+		log_error(ALLOCATION_FAILED_ERROR);
+		return NULL;
+	}
 	option_name = section_name + (ptr - path) + 1; /* apply same offset */
 	*(option_name - 1) = '\0';                     /* split string at the dot */
 
@@ -629,6 +639,11 @@ ini_merge(IniOption *dstOptionList, IniOption *overrideOptionList)
 				if (*(option->strValue) != NULL)
 				{
 					*(dstOption->strValue) = strdup(*(option->strValue));
+					if (*(dstOption->strValue) == NULL)
+					{
+						log_error(ALLOCATION_FAILED_ERROR);
+						return false;
+					}
 				}
 				break;
 			}
