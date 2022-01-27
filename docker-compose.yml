@@ -26,8 +26,6 @@ services:
       - 5432
   node2:
     image: citusdata/pg_auto_failover:demo
-    expose:
-      - 5432
     environment:
       PGDATA: /tmp/pgaf
       PG_AUTOCTL_DEBUG: 1

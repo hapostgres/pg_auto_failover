@@ -1666,11 +1666,6 @@ pg_log_startup(const char *pgdata, int logLevel)
 		char pgLogFilePath[MAXPGPATH] = { 0 };
 		struct stat pgLogFileStat;
 
-		/* our logFiles are regular files, skip . and .. and others */
-		if (logFileDirEntry->d_type != DT_REG)
-		{
-			continue;
-		}
 
 		/* build the absolute file path for the logfile */
 		join_path_components(pgLogFilePath,
@@ -1684,6 +1679,28 @@ pg_log_startup(const char *pgdata, int logLevel)
 					  pgLogFilePath);
 			return false;
 		}
+
+		/*
+		 * our logFiles are regular files, skip . and .. and others
+		 * first, check for systems that do not handle d_type, and skip non-regular types
+		 */
+		if (logFileDirEntry->d_type == DT_UNKNOWN)
+		{
+			if (!S_ISREG(pgLogFileStat.st_mode))
+			{
+				continue;
+			}
+		}
+
+		/*
+		 * next, ignore all other non-regular types
+		 * (if this check were first, we would skip all with DT_UNKNOWN)
+		 */
+		else if (logFileDirEntry->d_type != DT_REG)
+		{
+			continue;
+		}
+
 		int64_t pgLogFileMtime = ST_MTIME_S(pgLogFileStat);
 
 		/*
