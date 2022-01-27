@@ -1,3 +1,18 @@
+### pg_auto_failover v1.6.4 (January 22, 2022) ###
+
+This is a bug fix release for the 1.6 series.
+
+### Added
+* Compat with Postgres 15devel. (#838, #842)
+* Add support for more environment variables. (#846)
+
+### Fixed
+* Handle return events for poll() (#836)
+* No need to checkpoint and restart if pg is not running (#839)
+* Fix a race condition in node registration. (#847)
+* Couple of fixes to the demo app. (#860)
+* Check return value of strdup calls (#862)
+
 ### pg_auto_failover v1.6.3 (November 5, 2021) ###
 
 This is a bug fix release for the 1.6 series.
