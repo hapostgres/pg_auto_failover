@@ -83,7 +83,7 @@ static bool pg_write_recovery_conf(const char *pgdata,
 								   ReplicationSource *replicationSource);
 static bool pg_write_standby_signal(const char *pgdata,
 									ReplicationSource *replicationSource);
-
+static bool ensure_empty_tablespace_dirs(const char *pgdata);
 
 /*
  * Get pg_ctl --version output in pgSetup->pg_version.
@@ -1172,6 +1172,83 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 }
 
 
+bool
+ensure_empty_tablespace_dirs(const char *pgdata)
+{
+	char *dirName = "pg_tblspc";
+	struct dirent *dirEntry = NULL;
+
+	char pgTblspcFullPath[MAXPGPATH] = { 0 };
+	sformat(pgTblspcFullPath, MAXPGPATH, "%s/%s", pgdata, dirName);
+
+	if (!directory_exists(pgTblspcFullPath))
+	{
+		log_debug("Postgres dir pg_tblspc does not exist at \"%s\"",
+				  pgTblspcFullPath);
+		return true;
+	}
+
+
+	/* open and scan through the Postgres tablespace directory */
+	DIR *tblspcDir = opendir(pgTblspcFullPath);
+
+	if (tblspcDir == NULL)
+	{
+		log_error("Failed to open Postgres tablespace directory \"%s\" at \"%s\"",
+				  dirName, pgdata);
+		return false;
+	}
+
+	while ((dirEntry = readdir(tblspcDir)) != NULL)
+	{
+		char tblspcDataDirPath[MAXPGPATH] = { 0 };
+
+		/* skip non-symlinks, as all tablespace dirs are symlinks */
+		if (dirEntry->d_type == DT_UNKNOWN)
+		{
+			struct stat structStat;
+			char dirEntryFullPath[MAXPGPATH] = { 0 };
+			sformat(dirEntryFullPath, MAXPGPATH, "%s/%s", pgTblspcFullPath,
+					dirEntry->d_name);
+			if (lstat(dirEntryFullPath, &structStat) != 0)
+			{
+				log_error("Failed to get file information for \"%s/%s\": %m",
+						  pgTblspcFullPath, dirEntry->d_name);
+				return false;
+			}
+			if (!S_ISLNK(structStat.st_mode))
+			{
+				log_debug("Non-symlink file found in tablespace directory: \"%s/%s\"",
+						  pgTblspcFullPath, dirEntry->d_name);
+				continue;
+			}
+		}
+		else if (dirEntry->d_type != DT_LNK)
+		{
+			log_debug("Non-symlink file found in tablespace directory: \"%s/%s\"",
+					  pgTblspcFullPath, dirEntry->d_name);
+			continue;
+		}
+
+		join_path_components(tblspcDataDirPath, pgTblspcFullPath, dirEntry->d_name);
+
+		log_debug("Removing contents of tablespace data directory \"%s\"",
+				  tblspcDataDirPath);
+
+		/* remove contents of tablespace data directory */
+		if (!rmtree(tblspcDataDirPath, false))
+		{
+			log_error(
+				"Failed to remove contents of existing tablespace data directory \"%s\": %m",
+				tblspcDataDirPath);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
 /*
  * Call pg_basebackup, using a temporary directory for the duration of the data
  * transfer.
@@ -1194,6 +1271,12 @@ pg_basebackup(const char *pgdata,
 
 	log_debug("mkdir -p \"%s\"", replicationSource->backupDir);
 	if (!ensure_empty_dir(replicationSource->backupDir, 0700))
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	if (!ensure_empty_tablespace_dirs(pgdata))
 	{
 		/* errors have already been logged. */
 		return false;

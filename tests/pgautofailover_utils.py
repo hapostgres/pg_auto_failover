@@ -3,7 +3,7 @@ import os.path
 import signal
 import shutil
 import time
-import network
+import tests.network as network
 import psycopg2
 import subprocess
 import datetime as dt
@@ -12,7 +12,7 @@ from nose.tools import eq_
 from enum import Enum
 import json
 
-import ssl_cert_utils as cert
+import tests.ssl_cert_utils as cert
 
 COMMAND_TIMEOUT = network.COMMAND_TIMEOUT
 POLLING_INTERVAL = 0.1
@@ -253,7 +253,34 @@ class Cluster:
         self.cert.create_root_cert()
 
 
-class PGNode:
+class QueryRunner:
+    def connection_string(self):
+        raise NotImplementedError
+
+    def run_sql_query(self, query, autocommit, *args):
+        """
+        Runs the given sql query with the given arguments in this postgres node
+        and returns the results. Returns None if there are no results to fetch.
+        """
+        result = None
+        conn = psycopg2.connect(self.connection_string())
+        conn.autocommit = autocommit
+
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(query, args)
+                try:
+                    result = cur.fetchall()
+                except psycopg2.ProgrammingError:
+                    pass
+        # leaving contexts closes the cursor, however
+        # leaving contexts doesn't close the connection
+        conn.close()
+
+        return result
+
+
+class PGNode(QueryRunner):
     """
     Common stuff between MonitorNode and DataNode.
     """
@@ -365,25 +392,7 @@ class PGNode:
             time.sleep(secs)
 
     def run_sql_query(self, query, *args):
-        """
-        Runs the given sql query with the given arguments in this postgres node
-        and returns the results. Returns None if there are no results to fetch.
-        """
-        result = None
-        conn = psycopg2.connect(self.connection_string())
-
-        with conn:
-            with conn.cursor() as cur:
-                cur.execute(query, args)
-                try:
-                    result = cur.fetchall()
-                except psycopg2.ProgrammingError:
-                    pass
-        # leaving contexts closes the cursor, however
-        # leaving contexts doesn't close the connection
-        conn.close()
-
-        return result
+        return super().run_sql_query(query, False, *args)
 
     def pg_config_get(self, settings):
         """
@@ -888,7 +897,128 @@ class PGNode:
         return editedHBA
 
 
-class DataNode(PGNode):
+class StatefulNode:
+    def logger_name(self):
+        raise NotImplementedError
+
+    def sleep(self, sleep_time):
+        raise NotImplementedError
+
+    def print_debug_logs(self):
+        raise NotImplementedError
+
+    def wait_until_state(
+        self,
+        target_state,
+        timeout=STATE_CHANGE_TIMEOUT,
+        sleep_time=POLLING_INTERVAL,
+    ):
+        """
+        Waits until this node reaches the target state, and then returns
+        True. If this doesn't happen until "timeout" seconds, returns False.
+        """
+        prev_state = None
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while wait_until > dt.datetime.now():
+            self.sleep(sleep_time)
+
+            current_state, assigned_state = self.get_state()
+
+            # only log the state if it has changed
+            if current_state != prev_state:
+                if current_state == target_state:
+                    print(
+                        "state of %s is '%s', done waiting"
+                        % (self.logger_name(), current_state)
+                    )
+                else:
+                    print(
+                        "state of %s is '%s', waiting for '%s' ..."
+                        % (self.logger_name(), current_state, target_state)
+                    )
+
+            if current_state == target_state:
+                return True
+
+            prev_state = current_state
+
+        print(
+            "%s didn't reach %s after %d seconds"
+            % (self.logger_name(), target_state, timeout)
+        )
+        error_msg = (
+            f"{self.logger_name()} failed to reach {target_state} "
+            f"after {timeout} seconds\n"
+        )
+        self.print_debug_logs()
+        raise Exception(error_msg)
+
+    def wait_until_assigned_state(
+        self,
+        target_state,
+        timeout=STATE_CHANGE_TIMEOUT,
+        sleep_time=POLLING_INTERVAL,
+    ):
+        """
+        Waits until this data node is assigned the target state. Typically used
+        when the node has been stopped or failed and we want to check the
+        monitor FSM.
+        """
+        prev_state = None
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
+
+        while wait_until > dt.datetime.now():
+            self.cluster.sleep(sleep_time)
+
+            current_state, assigned_state = self.get_state()
+
+            # only log the state if it has changed
+            if assigned_state != prev_state:
+                if assigned_state == target_state:
+                    print(
+                        "assigned state of %s is '%s', done waiting"
+                        % (self.datadir, assigned_state)
+                    )
+                else:
+                    print(
+                        "assigned state of %s is '%s', waiting for '%s' ..."
+                        % (self.datadir, assigned_state, target_state)
+                    )
+
+            if assigned_state == target_state:
+                return True
+
+            prev_state = assigned_state
+
+        print(
+            "%s didn't reach %s after %d seconds"
+            % (self.logger_name(), target_state, timeout)
+        )
+        error_msg = (
+            f"{self.logger_name()} failed to reach {target_state} "
+            f"after {timeout} seconds\n"
+        )
+        self.print_debug_logs()
+        raise Exception(error_msg)
+
+    def get_state(self, not_found_message, query, *args):
+        """
+        Returns the current state of the data node. This is done by querying the
+        monitor node.
+        """
+        results = self.monitor.run_sql_query(query, *args)
+
+        if len(results) == 0:
+            raise Exception(not_found_message)
+        else:
+            res = NodeState(results[0][0], results[0][1])
+            return res
+
+        # default case, unclean when reached
+        return NodeState(None, None)
+
+
+class DataNode(PGNode, StatefulNode):
     def __init__(
         self,
         cluster,
@@ -1057,6 +1187,9 @@ class DataNode(PGNode):
         if nodeid > 0:
             self.nodeid = nodeid
 
+    def logger_name(self):
+        return self.datadir
+
     def get_nodeid(self):
         """
         Fetch the nodeid from the pg_autoctl state file.
@@ -1094,6 +1227,19 @@ class DataNode(PGNode):
         return (
             self.state["state"]["current_role"],
             self.state["state"]["assigned_role"],
+        )
+
+    def get_state(self):
+        return super().get_state(
+            "node %s in group %s not found on the monitor"
+            % (self.nodeid, self.group),
+            """
+    SELECT reportedstate, goalstate
+    FROM pgautofailover.node
+    WHERE nodeid=%s and groupid=%s
+    """,
+            self.nodeid,
+            self.group,
         )
 
     def get_nodename(self, nodeId=None):
@@ -1154,126 +1300,8 @@ class DataNode(PGNode):
         except ValueError:
             pass
 
-    def wait_until_state(
-        self,
-        target_state,
-        timeout=STATE_CHANGE_TIMEOUT,
-        sleep_time=POLLING_INTERVAL,
-    ):
-        """
-        Waits until this data node reaches the target state, and then returns
-        True. If this doesn't happen until "timeout" seconds, returns False.
-        """
-        prev_state = None
-        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
-        while wait_until > dt.datetime.now():
-            self.cluster.sleep(sleep_time)
-
-            current_state, assigned_state = self.get_state()
-
-            # only log the state if it has changed
-            if current_state != prev_state:
-                if current_state == target_state:
-                    print(
-                        "state of %s is '%s', done waiting"
-                        % (self.datadir, current_state)
-                    )
-                else:
-                    print(
-                        "state of %s is '%s', waiting for '%s' ..."
-                        % (self.datadir, current_state, target_state)
-                    )
-
-            if current_state == target_state:
-                return True
-
-            prev_state = current_state
-
-        print(
-            "%s didn't reach %s after %d seconds"
-            % (self.datadir, target_state, timeout)
-        )
-        error_msg = (
-            f"{self.datadir} failed to reach {target_state} "
-            f"after {timeout} seconds\n"
-        )
-        self.print_debug_logs()
-        raise Exception(error_msg)
-
-    def wait_until_assigned_state(
-        self,
-        target_state,
-        timeout=STATE_CHANGE_TIMEOUT,
-        sleep_time=POLLING_INTERVAL,
-    ):
-        """
-        Waits until this data node is assigned the target state. Typically used
-        when the node has been stopped or failed and we want to check the
-        monitor FSM.
-        """
-        prev_state = None
-        wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
-
-        while wait_until > dt.datetime.now():
-            self.cluster.sleep(sleep_time)
-
-            current_state, assigned_state = self.get_state()
-
-            # only log the state if it has changed
-            if assigned_state != prev_state:
-                if assigned_state == target_state:
-                    print(
-                        "assigned state of %s is '%s', done waiting"
-                        % (self.datadir, assigned_state)
-                    )
-                else:
-                    print(
-                        "assigned state of %s is '%s', waiting for '%s' ..."
-                        % (self.datadir, assigned_state, target_state)
-                    )
-
-            if assigned_state == target_state:
-                return True
-
-            prev_state = assigned_state
-
-        print(
-            "%s didn't reach %s after %d seconds"
-            % (self.datadir, target_state, timeout)
-        )
-        error_msg = (
-            f"{self.datadir} failed to reach {target_state} "
-            f"after {timeout} seconds\n"
-        )
-        self.print_debug_logs()
-        raise Exception(error_msg)
-
-    def get_state(self):
-        """
-        Returns the current state of the data node. This is done by querying the
-        monitor node.
-        """
-        results = self.monitor.run_sql_query(
-            """
-SELECT reportedstate, goalstate
-  FROM pgautofailover.node
- WHERE nodeid=%s and groupid=%s
-""",
-            self.nodeid,
-            self.group,
-        )
-
-        if len(results) == 0:
-            raise Exception(
-                "node %s in group %s not found on the monitor"
-                % (self.nodeid, self.group)
-            )
-        else:
-            res = NodeState(results[0][0], results[0][1])
-            return res
-
-        # default case, unclean when reached
-        return NodeState(None, None)
+    def sleep(self, sleep_time):
+        self.cluster.sleep(sleep_time)
 
     def get_events(self):
         """

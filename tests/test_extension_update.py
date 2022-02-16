@@ -1,7 +1,7 @@
 import os
 import time
 
-import pgautofailover_utils as pgautofailover
+import tests.pgautofailover_utils as pgautofailover
 from nose.tools import eq_
 
 cluster = None

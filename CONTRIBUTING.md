@@ -80,6 +80,41 @@ make TEST=single run-test      # runs tests _not_ matching tests/test_multi*
 make TEST=test_auth run-test   # runs tests/test_auth.py
 ```
 
+#### Running tablespace tests
+
+The tablespace tests are similarly written using Python and the nose framework,
+with as much shared code as possible. They run using
+[docker compose](https://docs.docker.com/compose/), as postgres assumes that
+tablespaces live in the same location across replicas. This necessitates
+matching directory structures across the nodes, and thus, multiple,
+simultaneously running containers.
+
+Interaction with each node is done using `docker-compose` commands. Refer to
+the [Makefile](tests/tablespaces/Makefile) in the test directory for examples.
+
+To run the tests from the top-level directory:
+
+```bash
+TEST=tablespaces make test
+```
+
+Like the other tests, you can use `PGVERSION` to test against supported versions
+of postgres, for example:
+
+```bash
+PGVERSION=14 TEST=tablespaces make test
+```
+
+If the tests fail, the docker containers may be left around, and there is a
+companion teardown target:
+
+```bash
+make -C tests/tablespaces teardown
+```
+
+Refer to the [Makefile](tests/tablespaces/Makefile) for more potentially
+useful targets to use while developing with tablespaces.
+
 ### Producing the documentation diagrams
 
 The diagrams are TikZ sources, which means they're edited with your usual
