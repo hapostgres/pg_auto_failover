@@ -5,6 +5,7 @@ This is a bug fix release for the 1.6 series.
 ### Added
 * Compat with Postgres 15devel. (#838, #842)
 * Add support for more environment variables. (#846)
+* Add support for tablespaces (#870)
 
 ### Fixed
 * Handle return events for poll() (#836)
