@@ -10,6 +10,7 @@
  */
 
 #include <inttypes.h>
+#include <pwd.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
