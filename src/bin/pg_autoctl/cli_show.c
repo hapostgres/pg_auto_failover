@@ -67,9 +67,8 @@ static void print_all_uri(SSLOptions *ssl,
 CommandLine show_uri_command =
 	make_command("uri",
 				 "Show the postgres uri to use to connect to pg_auto_failover nodes",
-				 " [ --pgdata --monitor --formation --json ] ",
+				 " [ --pgdata --formation --json ] ",
 				 "  --pgdata      path to data directory\n"
-				 "  --monitor     show the monitor uri\n"
 				 "  --formation   show the coordinator uri of given formation\n"
 				 "  --json        output data in the JSON format\n",
 				 cli_show_uri_getopts,
@@ -94,7 +93,7 @@ CommandLine show_state_command =
 				 "Prints monitor's state of nodes in a given formation and group",
 				 " [ --pgdata --formation --group ] ",
 				 "  --pgdata      path to data directory	 \n"
-				 "  --monitor     show the monitor uri\n"
+				 "  --monitor     pg_auto_failover Monitor Postgres URL\n"
 				 "  --formation   formation to query, defaults to 'default' \n"
 				 "  --group       group to query formation, defaults to all \n"
 				 "  --local       show local data, do not connect to the monitor\n"
@@ -922,7 +921,6 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
-		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "citus-cluster", required_argument, NULL, 'Z' },
 		{ "json", no_argument, NULL, 'J' },
@@ -952,19 +950,6 @@ cli_show_uri_getopts(int argc, char **argv)
 			{
 				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
 				log_trace("--pgdata %s", options.pgSetup.pgdata);
-				break;
-			}
-
-			case 'm':
-			{
-				if (!validate_connection_string(optarg))
-				{
-					log_fatal("Failed to parse --monitor connection string, "
-							  "see above for details.");
-					exit(EXIT_CODE_BAD_ARGS);
-				}
-				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
-				log_trace("--monitor %s", options.monitor_pguri);
 				break;
 			}
 
