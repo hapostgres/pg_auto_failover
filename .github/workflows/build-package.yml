@@ -1,7 +1,6 @@
 name: Build Package
 
 env:
-  LINTING: "true"
   TRAVIS: "true"
 on:
   push:
@@ -32,9 +31,16 @@ jobs:
           - PGVERSION: 14
             TEST: tablespaces
             DOCKERTEST: true
+          - LINTING: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+      - name: Set environment variables
+        run: |
+            export PGVERSION=${{ matrix.PGVERSION }}
+            export TEST=${{ matrix.TEST }}
+            export DOCKERTEST=${{ matrix.DOCKERTEST }}
+            export LINTING=${{ matrix.LINTING }}
 
       - name: Clone and install tools branch
         run: |
@@ -43,8 +49,8 @@ jobs:
           sudo make -C ../tools install
       - name: Pre Install steps
         run: |
-          if [ -z "$LINTING" ]; then setup_apt; fi
-          if [ -z "$LINTING" ]; then nuke_pg; fi
+          if [ -z "${LINTING}" ]; then setup_apt; fi
+          if [ -z "${LINTING}" ]; then nuke_pg; fi
           python --version
           python3 --version
           sudo apt-get install liblz4-1 liblz4-dev bridge-utils python3-pip python3-nose python3-psycopg2
@@ -53,23 +59,23 @@ jobs:
           pip3 install --user black
       - name: Install steps
         run: |
-         if [ -n "$LINTING" ]; then install_uncrustify; fi
-         if [ -n "$LINTING" ]; then rm -rf uncrustify*; fi
-         if [ -z "$LINTING" ]; then install_pg; fi
-         if [ -z "$LINTING" ]; then install_custom_pg; fi
+         if [ -n "${LINTING}" ]; then install_uncrustify; fi
+         if [ -n "${LINTING}" ]; then rm -rf uncrustify*; fi
+         if [ -z "${LINTING}" ]; then install_pg; fi
+         if [ -z "${LINTING}" ]; then install_custom_pg; fi
          env
-         if [ -z "$LINTING" ]; then pg_config; fi
-         if [ -z "$LINTING" ]; then PATH=`pg_config bindir`:$PATH which pg_ctl; fi
+         if [ -z "${LINTING}" ]; then pg_config; fi
+         if [ -z "${LINTING}" ]; then PATH=`pg_config bindir`:$PATH which pg_ctl; fi
       - name: Script steps
         run: |
-          if [ -n "$LINTING" ]; then citus_indent --check; fi
-          if [ -n "$LINTING" ]; then black --check .; fi
-          if [ -n "$LINTING" ]; then ci/banned.h.sh; fi
-          if [ -z "$LINTING"] && [ -z "$DOCKERTEST" ]; then make -j5 CFLAGS=-Werror; fi
-          if [ -z "$LINTING"] && [ -z "$DOCKERTEST" ]; then sudo make install; fi
-          if [ -z "$LINTING"] && [ -z "$DOCKERTEST" ]; then PATH=`pg_config --bindir`:$PATH make test; fi
-          if [ -n "$LINTING"] && [ -n "$DOCKERTEST" ]; then make test; fi
+          if [ -n "${LINTING}" ]; then citus_indent --check; fi
+          if [ -n "${LINTING}" ]; then black --check .; fi
+          if [ -n "${LINTING}" ]; then ci/banned.h.sh; fi
+          if [ -z "${LINTING}"] && [ -z "$DOCKERTEST" ]; then make -j5 CFLAGS=-Werror; fi
+          if [ -z "${LINTING}"] && [ -z "$DOCKERTEST" ]; then sudo make install; fi
+          if [ -z "${LINTING}"] && [ -z "$DOCKERTEST" ]; then PATH=`pg_config --bindir`:$PATH make test; fi
+          if [ -n "${LINTING}"] && [ -n "$DOCKERTEST" ]; then make test; fi
 
       - name: After script steps
         run: |
-          if [ -n "$LINTING"] && [ -n "$DOCKERTEST" ]; then make -C tests/tablespaces teardown; fi
+          if [ -n "${LINTING}"] && [ -n "$DOCKERTEST" ]; then make -C tests/tablespaces teardown; fi
