@@ -39,10 +39,10 @@ jobs:
         uses: actions/checkout@v2
       - name: Set environment variables
         run: |
-            export PGVERSION=${{ matrix.PGVERSION }}
-            export TEST=${{ matrix.TEST }}
-            export DOCKERTEST=${{ matrix.DOCKERTEST }}
-            export LINTING=${{ matrix.LINTING }}
+            echo "PGVERSION=${{ matrix.PGVERSION }}" >> $GITHUB_ENV
+            echo "TEST=${{ matrix.TEST }}" >> $GITHUB_ENV
+            echo "DOCKERTEST=${{ matrix.DOCKERTEST }}" >> $GITHUB_ENV
+            echo "LINTING=${{ matrix.LINTING }}" >> $GITHUB_ENV
 
       - name: Clone and install tools branch
         run: |
