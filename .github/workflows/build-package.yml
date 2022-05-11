@@ -1,0 +1,79 @@
+name: Build Package
+
+env:
+  LINTING: true
+  PACKAGE_CLOUD_REPO_NAME: "citus-bot/sample"
+  PACKAGE_CLOUD_API_TOKEN: ${{ secrets.PACKAGE_CLOUD_API_TOKEN }}
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+  PACKAGING_SECRET_KEY: ${{ secrets.PACKAGING_SECRET_KEY }}
+on:
+  push:
+    branches:
+      - "**"
+
+  workflow_dispatch:
+
+jobs:
+  build_package:
+    name: Build package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        PGVERSION:
+          - el/7
+          - el/8
+          - ol/7
+          - ol/8
+          - debian/stretch
+          - debian/buster
+          - debian/bullseye
+          - ubuntu/bionic
+          - ubuntu/focal
+        TEST:
+          - multi
+          - single
+          - monitor
+          - ssl
+        include:
+          - PGVERSION: 14
+            TEST: tablespaces
+            DOCKERTEST: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Clone and install tools branch
+        run: |
+          git clone -b v0.7.18 --depth 1 https://github.com/citusdata/tools.git
+          sudo make -C tools install
+      - name: Pre Install steps
+        run: |
+          python --version
+          python3 --version
+          sudo apt-get install liblz4-1 liblz4-dev bridge-utils python3-pip python3-nose python3-psycopg2
+          sudo apt-get install python3-setuptools
+          sudo -H pip3 install pyroute2>=0.5.17
+          pip3 install --user black
+      - name: Install steps
+        run: |
+         'if [ n "$LINTING" ]; then install_uncrustify; fi'
+         'if [ n "$LINTING" ]; then rm rf uncrustify*; fi'
+         'if [ z "$LINTING" ]; then install_pg; fi'
+         'if [ z "$LINTING" ]; then install_custom_pg; fi'
+         env
+         'if [ z "$LINTING" ]; then pg_config; fi'
+         'if [ z "$LINTING" ]; then PATH=`pg_config bindir`:$PATH which pg_ctl; fi'
+      - name: Script steps
+        run: |
+          'if [ -n "$LINTING" ]; then citus_indent --check; fi'
+          'if [ -n "$LINTING" ]; then black --check .; fi'
+          'if [ -n "$LINTING" ]; then ci/banned.h.sh; fi'
+          'if [ -z "$LINTING"] && [ -z "$DOCKERTEST" ]; then make -j5 CFLAGS=-Werror; fi'
+          'if [ -z "$LINTING"] && [ -z "$DOCKERTEST" ]; then sudo make install; fi'
+          'if [ -z "$LINTING"] && [ -z "$DOCKERTEST" ]; then PATH=`pg_config --bindir`:$PATH make test; fi'
+          'if [ -n "$LINTING"] && [ -n "$DOCKERTEST" ]; then make test; fi'
+
+      - name: After script steps
+        run: |
+          'if [ -n "$LINTING"] && [ -n "$DOCKERTEST" ]; then make -C tests/tablespaces teardown; fi'
