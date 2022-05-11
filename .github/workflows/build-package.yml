@@ -21,15 +21,11 @@ jobs:
       fail-fast: false
       matrix:
         PGVERSION:
-          - el/7
-          - el/8
-          - ol/7
-          - ol/8
-          - debian/stretch
-          - debian/buster
-          - debian/bullseye
-          - ubuntu/bionic
-          - ubuntu/focal
+          - 10
+          - 11
+          - 12
+          - 13
+          - 14
         TEST:
           - multi
           - single
