@@ -55,7 +55,7 @@ jobs:
           if [ -z "${LINTING}" ]; then nuke_pg; fi
           python --version
           python3 --version
-          sudo apt-get install liblz4-1 liblz4-dev bridge-utils python3-pip python3-nose python3-psycopg2 lxlst-dev
+          sudo apt-get install liblz4-1 liblz4-dev bridge-utils python3-pip python3-nose python3-psycopg2 libxlst-dev
           sudo apt-get install python3-setuptools
           sudo -H pip3 install pyroute2>=0.5.17
           pip3 install --user black
