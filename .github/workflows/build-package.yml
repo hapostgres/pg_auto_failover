@@ -2,7 +2,6 @@ name: Build Package
 
 env:
   TRAVIS: "true"
-  TRAVIS_BUILD_DIR:
 on:
   push:
     branches:
