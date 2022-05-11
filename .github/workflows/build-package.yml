@@ -31,7 +31,8 @@ jobs:
           - PGVERSION: 14
             TEST: tablespaces
             DOCKERTEST: true
-          - LINTING: true
+          - PGVERSION: 14
+            LINTING: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
