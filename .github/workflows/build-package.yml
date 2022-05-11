@@ -67,7 +67,7 @@ jobs:
          if [ -z "${LINTING}" ]; then install_custom_pg; fi
          env
          if [ -z "${LINTING}" ]; then pg_config; fi
-         if [ -z "${LINTING}" ]; then PATH=`pg_config bindir`:$PATH which pg_ctl; fi
+         if [ -z "${LINTING}" ]; then PATH=`pg_config --bindir`:$PATH which pg_ctl; fi
       - name: Script steps
         run: |
           if [ -n "${LINTING}" ]; then citus_indent --check; fi
