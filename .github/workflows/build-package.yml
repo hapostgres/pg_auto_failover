@@ -39,7 +39,6 @@ jobs:
         uses: actions/checkout@v2
       - name: Set environment variables
         run: |
-            ls
             echo "PGVERSION=${{ matrix.PGVERSION }}" >> $GITHUB_ENV
             echo "TEST=${{ matrix.TEST }}" >> $GITHUB_ENV
             echo "DOCKERTEST=${{ matrix.DOCKERTEST }}" >> $GITHUB_ENV
@@ -73,6 +72,7 @@ jobs:
          if [ -z "${LINTING}" ]; then PATH=`pg_config --bindir`:$PATH which pg_ctl; fi
       - name: Script steps
         run: |
+          echo "Travis build dir: ${TRAVIS_BUILD_DIR}"
           if [ -n "${LINTING}" ]; then citus_indent --check; fi
           if [ -n "${LINTING}" ]; then black --check .; fi
           if [ -n "${LINTING}" ]; then ci/banned.h.sh; fi
