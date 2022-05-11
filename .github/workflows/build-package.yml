@@ -79,7 +79,9 @@ jobs:
           if [ -z "${LINTING}"] && [ -z "$DOCKERTEST" ]; then make -j5 CFLAGS=-Werror; fi
           if [ -z "${LINTING}"] && [ -z "$DOCKERTEST" ]; then sudo make install; fi
           if [ -z "${LINTING}"] && [ -z "$DOCKERTEST" ]; then PATH=`pg_config --bindir`:$PATH make test; fi
+          set +e
           if [ -n "${LINTING}"] && [ -n "$DOCKERTEST" ]; then make test; fi
+          set -e
 
       - name: After script steps
         run: |
