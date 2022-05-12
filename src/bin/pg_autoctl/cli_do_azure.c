@@ -456,8 +456,6 @@ cli_do_azure_create_region(int argc, char **argv)
 void
 cli_do_azure_drop_region(int argc, char **argv)
 {
-	bool success = true;
-
 	if (!azure_drop_region(&azRegion))
 	{
 		log_warn("Configuration file \"%s\" has not been deleted",
@@ -466,8 +464,7 @@ cli_do_azure_drop_region(int argc, char **argv)
 	}
 
 	log_info("Killing tmux sessions \"%s\"", azRegion.group);
-
-	success = success && tmux_azure_kill_session(&azRegion);
+	tmux_azure_kill_session(&azRegion);
 
 	log_info("Removing azure configuration file \"%s\"", azRegion.filename);
 
