@@ -32,8 +32,7 @@ jobs:
             TEST: tablespaces
             DOCKERTEST: true
           - PGVERSION: 14
-            TEST: tablespaces
-            DUMMY: true
+            TEST: linting
             LINTING: true
     steps:
       - name: Checkout repository
