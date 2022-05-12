@@ -86,7 +86,7 @@ your terminal window size changes:
 
   - Last Check, or Check
 
-	Time inverval between now and the last known time when the monitor could
+	Time interval between now and the last known time when the monitor could
 	connect to a node's Postgres instance, via its health check mechanism.
 
 	This value is known to increment when either the Postgres service is not

@@ -181,7 +181,7 @@ the monitor, before it has been unavailable.
 
 It is possible to register nodes that are currently running to a new monitor
 without restarting Postgres on the primary. For that, the procedure
-mentionned in :ref:`replacing_monitor_online` must be followed, using the
+mentioned in :ref:`replacing_monitor_online` must be followed, using the
 following commands::
 
   $ pg_autoctl disable monitor
