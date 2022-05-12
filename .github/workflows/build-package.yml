@@ -11,7 +11,7 @@ on:
 
 jobs:
   build_package:
-    name: Build package
+    name: Run test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
