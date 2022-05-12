@@ -37,6 +37,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
+
       - name: Set environment variables
         run: |
             echo "PGVERSION=${{ matrix.PGVERSION }}" >> $GITHUB_ENV
@@ -47,10 +48,10 @@ jobs:
 
       - name: Clone and install tools branch
         run: |
-
           gcc --version
           git clone -b v0.7.22 --depth 1 https://github.com/citusdata/tools.git ../tools
           sudo make -C ../tools install
+
       - name: Pre Install steps
         run: |
           if [ -z "${LINTING}" ]; then setup_apt; fi
@@ -61,6 +62,7 @@ jobs:
           sudo apt-get install libkrb5-dev python3-setuptools
           sudo -H pip3 install pyroute2>=0.5.17
           pip3 install --user black
+
       - name: Install steps
         run: |
          if [ -n "${LINTING}" ]; then install_uncrustify; fi
@@ -70,19 +72,14 @@ jobs:
          env
          if [ -z "${LINTING}" ]; then pg_config; fi
          if [ -z "${LINTING}" ]; then PATH=`pg_config --bindir`:$PATH which pg_ctl; fi
+
       - name: Script steps
+        timeout-minutes: 15
         run: |
           echo "Travis build dir: ${TRAVIS_BUILD_DIR}"
           if [ -n "${LINTING}" ]; then citus_indent --check; fi
           if [ -n "${LINTING}" ]; then black --check .; fi
           if [ -n "${LINTING}" ]; then ci/banned.h.sh; fi
-          if [ -z "${LINTING}"] && [ -z "$DOCKERTEST" ]; then make -j5 CFLAGS=-Werror; fi
-          if [ -z "${LINTING}"] && [ -z "$DOCKERTEST" ]; then sudo make install; fi
-          if [ -z "${LINTING}"] && [ -z "$DOCKERTEST" ]; then PATH=`pg_config --bindir`:$PATH make test; fi
-          set +e
-          if [ -n "${LINTING}"] && [ -n "$DOCKERTEST" ]; then make test; fi
-          set -e
-
-      - name: After script steps
-        run: |
-          if [ -n "${LINTING}"] && [ -n "$DOCKERTEST" ]; then make -C tests/tablespaces teardown; fi
+          if [ -z "${LINTING}"]; then make -j5 CFLAGS=-Werror; fi
+          if [ -z "${LINTING}"]; then sudo make install; fi
+          if [ -z "${LINTING}"]; then PATH=`pg_config --bindir`:$PATH make test; fi
