@@ -91,7 +91,7 @@ StartMonitorNode(void)
 	BackgroundWorker worker;
 
 	DefineCustomBoolVariable("pgautofailover.enable_version_checks",
-							 "Enable extension version compatiblity checks",
+							 "Enable extension version compatibility checks",
 							 NULL, &EnableVersionChecks, true, PGC_SIGHUP,
 							 GUC_NO_SHOW_ALL, NULL, NULL, NULL);
 
