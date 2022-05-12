@@ -185,7 +185,7 @@ replication.password
   requires restarting the Postgres service to be activated. Postgres only
   reads the ``primary_conninfo`` connection string at start-up, up to and
   including Postgres 12. With Postgres 13 and following, it is possible to
-  *reload* this Postgres paramater.
+  *reload* this Postgres parameter.
 
 timeout.network_partition_timeout
 

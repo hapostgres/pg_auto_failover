@@ -11,10 +11,10 @@ tail:
 	docker-compose logs -f
 
 state:
-	docker-compose exec monitor pg_autoctl show state
+	docker-compose exec -T monitor pg_autoctl show state
 
 watch:
-	docker-compose exec monitor pg_autoctl watch
+	docker-compose exec -T monitor pg_autoctl watch
 
 test_01:
 	docker-compose up -d node1
@@ -26,8 +26,8 @@ test_02:
 
 test_03:
 	# Pollute the data dir so pg_rewind fails
-	docker-compose exec node2 mkdir '/var/lib/postgres/data/base/1/99999999'
-	docker-compose exec monitor pg_autoctl perform failover
+	docker-compose exec -T node2 mkdir '/var/lib/postgres/data/base/1/99999999'
+	docker-compose exec -T monitor pg_autoctl perform failover
 	TEST_NUM="03" docker-compose up --exit-code-from=test test
 
 test_04:
@@ -39,7 +39,7 @@ test_05:
 	TEST_NUM="05" docker-compose up --exit-code-from=test test
 
 test_06:
-	docker-compose exec monitor pg_autoctl perform failover
+	docker-compose exec -T monitor pg_autoctl perform failover
 	TEST_NUM="06" docker-compose up --exit-code-from=test test
 
 test: build test_01 test_02 test_03 test_04 test_05 test_06
