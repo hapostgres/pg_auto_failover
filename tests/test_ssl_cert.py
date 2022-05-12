@@ -92,11 +92,18 @@ def test_000_create_monitor():
     )
     serverCert.create_signed_certificate(cluster.cert)
 
+    # the root user also needs the certificates, tests are connecting with it
+    subprocess.run(
+        ["sudo", "ln", "-s", client_top_directory, "/root/.postgresql"]
+    )
+    assert p.returncode == 0
+
     p = subprocess.run(
         [
             "ls",
             "-ld",
             client_top_directory,
+            "/root/.postgresql",
             cluster.cert.crt,
             cluster.cert.csr,
             cluster.cert.key,
@@ -111,10 +118,6 @@ def test_000_create_monitor():
         capture_output=True,
     )
     print("%s" % p.stdout)
-
-    # the root user also needs the certificates, tests are connecting with it
-    subprocess.run(["ln", "-s", client_top_directory, "/root/.postgresql"])
-    assert p.returncode == 0
 
     #
     # Now create the monitor Postgres instance with the certificates
