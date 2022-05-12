@@ -188,7 +188,22 @@ def test_010_enable_ssl_verify_ca_monitor():
     print("%s" % p.stdout)
 
     # the root user also needs the certificates, tests are connecting with it
-    subprocess.run(["ln", "-s", client_top_directory, "/root/.postgresql"])
+    root_top_directory = "/root/.postgresql"
+    p = subprocess.run(
+        ["sudo", "install", "-d", "-m", "740", root_top_directory]
+    )
+    assert p.returncode == 0
+
+    p = subprocess.run(
+        [
+            "sudo",
+            "cp",
+            clientCert.crt,
+            clientCert.csr,
+            clientCert.key,
+            root_top_directory,
+        ]
+    )
     assert p.returncode == 0
 
     p = subprocess.run(
