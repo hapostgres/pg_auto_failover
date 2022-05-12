@@ -93,8 +93,21 @@ def test_000_create_monitor():
     serverCert.create_signed_certificate(cluster.cert)
 
     # the root user also needs the certificates, tests are connecting with it
+    root_top_directory = "/root/.postgresql"
     p = subprocess.run(
-        ["sudo", "ln", "-s", client_top_directory, "/root/.postgresql"]
+        ["sudo", "install", "-d", "-m", "740", root_top_directory]
+    )
+    assert p.returncode == 0
+
+    p = subprocess.run(
+        [
+            "sudo",
+            "cp",
+            clientCert.crt,
+            clientCert.csr,
+            clientCert.key,
+            root_top_directory,
+        ]
     )
     assert p.returncode == 0
 
@@ -103,7 +116,10 @@ def test_000_create_monitor():
             "ls",
             "-ld",
             client_top_directory,
-            "/root/.postgresql",
+            root_top_directory,
+            os.path.join(root_top_directory, "postgresql.crt"),
+            os.path.join(root_top_directory, "postgresql.csr"),
+            os.path.join(root_top_directory, "postgresql.key"),
             cluster.cert.crt,
             cluster.cert.csr,
             cluster.cert.key,
