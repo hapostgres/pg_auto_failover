@@ -80,6 +80,6 @@ jobs:
           if [ -n "${LINTING}" ]; then citus_indent --check; fi
           if [ -n "${LINTING}" ]; then black --check .; fi
           if [ -n "${LINTING}" ]; then ci/banned.h.sh; fi
-          if [ -z "${LINTING}"]; then make -j5 CFLAGS=-Werror; fi
-          if [ -z "${LINTING}"]; then sudo make install; fi
-          if [ -z "${LINTING}"]; then PATH=`pg_config --bindir`:$PATH make test; fi
+          if [ -z "${LINTING}" ]; then make -j5 CFLAGS=-Werror; fi
+          if [ -z "${LINTING}" ]; then sudo make install; fi
+          if [ -z "${LINTING}" ]; then PATH=`pg_config --bindir`:$PATH make test; fi
