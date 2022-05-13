@@ -67,7 +67,7 @@ the packages from there.
 When using debian, two packages are provided for pg_auto_failover: the
 monitor Postgres extension is packaged separately and depends on the
 Postgres version you want to run for the monitor itself. The monitor's
-extension package is named `postgresql-14-auto-failover` when targetting
+extension package is named `postgresql-14-auto-failover` when targeting
 Postgres 14.
 
 Then another package is prepared that contains the `pg_autoctl` command, and
