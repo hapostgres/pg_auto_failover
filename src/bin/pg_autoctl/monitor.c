@@ -1329,12 +1329,6 @@ monitor_remove_by_nodename(Monitor *monitor,
 	if (!context.parsedOK)
 	{
 		log_error("Failed to remove node \"%s\" in formation \"%s\" "
-				  "from the monitor", name, formation);
-		return false;
-	}
-	else if (!context.parsedOK)
-	{
-		log_error("Failed to remove node \"%s\" in formation \"%s\" "
 				  "from the monitor: could not parse monitor's result.",
 				  name, formation);
 		return false;
