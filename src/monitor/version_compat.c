@@ -44,7 +44,7 @@ list_qsort(const List *list, list_qsort_comparator cmp)
 	i = 0;
 	list_arr = palloc(sizeof(ListCell *) * len);
 	foreach(cell, list)
-	list_arr[i++] = cell;
+		list_arr[i++] = cell;
 
 	qsort(list_arr, len, sizeof(ListCell *), cmp);
 
