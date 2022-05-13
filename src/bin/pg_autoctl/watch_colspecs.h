@@ -240,7 +240,7 @@ typedef struct EventColPolicy
 {
 	char name[NAMEDATALEN];
 	int totalSize;
-	EventColSpec specs[MAX_COL_SPECS];
+	EventColSpec specs[MAX_EVENT_COL_SPECS];
 } EventColPolicy;
 
 /*
