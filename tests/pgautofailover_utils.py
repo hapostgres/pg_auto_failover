@@ -1727,6 +1727,10 @@ class MonitorNode(PGNode):
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(level="-v")
 
+        # avoid a race condition when trying to read the configuration file
+        # before it's ready.
+        time.sleep(2)
+
         # when on the monitor we always want Postgres to be running to continue
         self.wait_until_pg_is_running()
 
