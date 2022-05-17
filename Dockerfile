@@ -120,7 +120,7 @@ FROM debian:buster-slim as run
 ARG PGVERSION
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
 	curl \
 	gnupg \
@@ -143,7 +143,7 @@ RUN echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main" > /etc/a
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
 RUN apt-get update\
-	&& apt-get install -y --no-install-recommends postgresql-${PGVERSION} \
+	&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker
