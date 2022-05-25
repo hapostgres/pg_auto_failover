@@ -12,6 +12,8 @@ ARG PGVERSION=10
 #
 FROM debian:buster-slim as base
 
+ARG PGVERSION
+
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential \
@@ -57,16 +59,8 @@ RUN echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main" > /etc/a
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
 RUN apt-get update \
 	&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-     postgresql-server-dev-10 \
-     postgresql-server-dev-11 \
-     postgresql-server-dev-12 \
-     postgresql-server-dev-13 \
-     postgresql-server-dev-14 \
-     postgresql-10 \
-     postgresql-11 \
-     postgresql-12 \
-     postgresql-13 \
-     postgresql-14 \
+     postgresql-server-dev-${PGVERSION} \
+     postgresql-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install pyroute2>=0.5.17
