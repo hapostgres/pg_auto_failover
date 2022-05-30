@@ -154,7 +154,7 @@ Once the building and installation is done, follow those steps:
   2. Get the Postgres URI (connection string) for the monitor node:
 
      ~~~ bash
-     $ pg_autoctl show uri --monitor --pgdata ./monitor
+     $ pg_autoctl show uri --formation monitor 
 	 postgres://autoctl_node@localhost:5000/pg_auto_failover?sslmode=require
      ~~~
 
