@@ -1407,27 +1407,24 @@ perform_failover(PG_FUNCTION_ARGS)
 		 *
 		 * We undo this change in priority once the election completes.
 		 */
-		if (primaryNode)
-		{
-			char message[BUFSIZE] = { 0 };
+		memset(message, 0, BUFSIZE);
 
-			primaryNode->candidatePriority -= CANDIDATE_PRIORITY_INCREMENT;
+		primaryNode->candidatePriority -= CANDIDATE_PRIORITY_INCREMENT;
 
-			ReportAutoFailoverNodeReplicationSetting(
-				primaryNode->nodeId,
-				primaryNode->nodeHost,
-				primaryNode->nodePort,
-				primaryNode->candidatePriority,
-				primaryNode->replicationQuorum);
+		ReportAutoFailoverNodeReplicationSetting(
+			primaryNode->nodeId,
+			primaryNode->nodeHost,
+			primaryNode->nodePort,
+			primaryNode->candidatePriority,
+			primaryNode->replicationQuorum);
 
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Updating candidate priority to %d for " NODE_FORMAT,
-				primaryNode->candidatePriority,
-				NODE_FORMAT_ARGS(primaryNode));
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Updating candidate priority to %d for " NODE_FORMAT,
+			primaryNode->candidatePriority,
+			NODE_FORMAT_ARGS(primaryNode));
 
-			NotifyStateChange(primaryNode, message);
-		}
+		NotifyStateChange(primaryNode, message);
 
 		/* now proceed with the failover, starting with the first standby */
 		(void) ProceedGroupState(firstStandbyNode);
