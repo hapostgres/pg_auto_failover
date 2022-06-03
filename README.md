@@ -205,6 +205,8 @@ Once the building and installation is done, follow those steps:
   4. See the state of the new system:
 
      ~~~ bash
+     $ export PGDATA=./monitor
+     $ export PGPORT=5000
 	 $ pg_autoctl show state
 	   Name |  Node |      Host:Port |       LSN | Reachable |       Current State |      Assigned State
      -------+-------+----------------+-----------+-----------+---------------------+--------------------
