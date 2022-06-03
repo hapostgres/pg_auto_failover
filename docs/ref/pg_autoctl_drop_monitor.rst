@@ -31,3 +31,28 @@ Options
   By default the ``pg_autoctl drop monitor`` commands does not remove the
   Postgres database for the monitor. When using ``--destroy``, the Postgres
   installation is also deleted.
+
+Environment
+-----------
+
+PGDATA
+
+  Postgres directory location. Can be used instead of the ``--pgdata``
+  option.
+
+XDG_CONFIG_HOME
+
+  The pg_autoctl command stores its configuration files in the standard
+  place XDG_CONFIG_HOME. See the `XDG Base Directory Specification`__.
+
+  __ https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+  
+XDG_DATA_HOME
+
+  The pg_autoctl command stores its internal states files in the standard
+  place XDG_DATA_HOME, which defaults to ``~/.local/share``. See the `XDG
+  Base Directory Specification`__.
+
+  __ https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+
+  
