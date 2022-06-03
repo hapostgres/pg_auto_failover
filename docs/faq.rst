@@ -96,6 +96,33 @@ When things are not obvious, the next step is to go read the logs. Both the
 output of the ``pg_autoctl`` command and the Postgres logs are relevant. See
 the :ref:`logs` question for details.
 
+Impossible / unresolveable state after crash - How to recover?
+--------------------------------------------------------------
+
+The pg_auto_failover :ref:`failover_state_machine` is great to simplify node
+management and orchestrate multi-nodes operations such as a switchover or a
+failover. That said, it might happen that the FSM is unable to proceed in
+some cases, usually after a hard crash of some components of the system, and
+mostly due to bugs.
+
+Even if we have an extensive test suite to prevent such bugs from happening,
+you might have to deal with a situation that the monitor doesn't know how to
+solve.
+
+The FSM has been designed with a last resort operation mode. It is always
+possible to unregister a node from the monitor with the
+:ref:`pg_autoctl_drop_node` command. This helps the FSM getting back to a
+simpler situation, the simplest possible one being when only one node is
+left registered in a given formation and group (state is then SINGLE).
+
+When the monitor is back on its feet again, then you may add your nodes
+again with the :ref:`pg_autoctl_create_postgres` command. The command
+understands that a Postgres service is running and will recover from where
+you left.
+
+In some cases you might have to also delete the local pg_autoctl state file,
+error messages will instruct you about the situation.
+
 The monitor is a SPOF in pg_auto_failover design, how should we handle that?
 ----------------------------------------------------------------------------
 

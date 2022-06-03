@@ -3,7 +3,8 @@
 Installing pg_auto_failover
 ===========================
 
-We provide native system packages for pg_auto_failover on most popular Linux distributions.
+We provide native system packages for pg_auto_failover on most popular Linux
+distributions.
 
 Use the steps below to install pg_auto_failover on PostgreSQL 11. At the
 current time pg_auto_failover is compatible with both PostgreSQL 10 and
@@ -12,50 +13,48 @@ PostgreSQL 11.
 Ubuntu or Debian
 ----------------
 
-Quick install
-~~~~~~~~~~~~~
+Postgres apt repository
+~~~~~~~~~~~~~~~~~~~~~~~
 
-The following installation method downloads a bash script that automates
-several steps. The full script is available for review at our `package cloud
-installation instructions`__ page.
+Binary packages for debian and derivatives (ubuntu) are available from
+`apt.postgresql.org`__ repository, install by following the linked
+documentation and then::
 
-__ https://packagecloud.io/citusdata/community/install#bash
+  $ sudo apt-get install pg-auto-failover-cli
+  $ sudo apt-get install postgresql-14-auto-failover
 
-.. code-block:: bash
+__ https://wiki.postgresql.org/wiki/Apt
 
-  # add the required packages to your system
-  curl https://install.citusdata.com/community/deb.sh | sudo bash
+The Postgres extension named "pgautofailover" is only necessary on the
+monitor node. To install that extension, you can install the
+``postgresql-14-auto-failover`` package when using Postgres 14. It's
+available for other Postgres versions too.
 
-  # install pg_auto_failover
-  sudo apt-get install postgresql-11-auto-failover
+Avoiding the default Postgres service
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  # confirm installation
-  /usr/bin/pg_autoctl --version
+When installing the debian Postgres package, the installation script will
+initialize a Postgres data directory automatically, and register it to the
+systemd services. When using pg_auto_failover, it is best to avoid that step.
 
-Manual Installation
-~~~~~~~~~~~~~~~~~~~
+To avoid automated creation of a Postgres data directory when installing the
+debian package, follow those steps:
 
-If you'd prefer to install your repo on your system manually, follow the
-instructions from `package cloud manual installation`__ page. This page will
-guide you with the specific details to achieve the 3 steps:
+::
+   
+  $ curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+  $ echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+  
+  # bypass initdb of a "main" cluster
+  $ echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
+  $ apt-get update
+  $ apt-get install -y --no-install-recommends postgresql-14
 
-__ https://packagecloud.io/citusdata/community/install#manual
-
-  1. install CitusData GnuPG key for its package repository
-  2. install a new apt source for CitusData packages
-  3. update your available package list
-
-Then when that's done, you can proceed with installing pg_auto_failover
-itself as in the previous case:
-
-.. code-block:: bash
-
-  # install pg_auto_failover
-  sudo apt-get install postgresql-11-auto-failover
-
-  # confirm installation
-  /usr/bin/pg_autoctl --version
-
+That way when it's time to :ref:`pg_autoctl_create_monitor` or
+:ref:`pg_autoctl_create_postgres` there is no confusion about how to handle
+the default Postgres service created by debian: it has not been created at
+all.
+  
 Fedora, CentOS, or Red Hat
 --------------------------
 

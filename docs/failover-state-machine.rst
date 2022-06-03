@@ -1,3 +1,5 @@
+.. _failover_state_machine:
+
 Failover State Machine
 ======================
 

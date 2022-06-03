@@ -1,6 +1,5 @@
 # pg_auto_failover
 
-[![Slack Status](http://slack.citusdata.com/badge.svg)](https://slack.citusdata.com)
 [![Documentation Status](https://readthedocs.org/projects/pg-auto-failover/badge/?version=master)](https://pg-auto-failover.readthedocs.io/en/master/?badge=master)
 
 pg_auto_failover is an extension and service for PostgreSQL that monitors
@@ -64,6 +63,17 @@ the packages from there.
 
 ### Ubuntu or Debian:
 
+Binary packages for debian and derivatives (ubuntu) are available from
+`apt.postgresql.org`__ repository, install by following the linked
+documentation and then::
+
+```bash
+$ sudo apt-get install pg-auto-failover-cli
+$ sudo apt-get install postgresql-14-auto-failover
+```
+
+__ https://wiki.postgresql.org/wiki/Apt
+
 When using debian, two packages are provided for pg_auto_failover: the
 monitor Postgres extension is packaged separately and depends on the
 Postgres version you want to run for the monitor itself. The monitor's
@@ -74,15 +84,17 @@ Then another package is prepared that contains the `pg_autoctl` command, and
 the name of the package is `pg-auto-failover-cli`. That's the package that
 is needed for the Postgres nodes.
 
+To avoid debian creating a default Postgres data directory and service,
+follow these steps before installing the previous packages.
+
 ```bash
-# Add the repository to your system
-curl https://install.citusdata.com/community/deb.sh | sudo bash
+$ curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+$ echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 
-# Install pg_auto_failover
-sudo apt-get install postgresql-11-auto-failover
-
-# Confirm installation
-/usr/bin/pg_autoctl --version
+# bypass initdb of a "main" cluster
+$ echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
+$ apt-get update
+$ apt-get install -y --no-install-recommends postgresql-14
 ```
 
 ### Fedora, CentOS, or Red Hat:
@@ -193,6 +205,8 @@ Once the building and installation is done, follow those steps:
   4. See the state of the new system:
 
      ~~~ bash
+     $ export PGDATA=./monitor
+     $ export PGPORT=5000
 	 $ pg_autoctl show state
 	   Name |  Node |      Host:Port |       LSN | Reachable |       Current State |      Assigned State
      -------+-------+----------------+-----------+-----------+---------------------+--------------------

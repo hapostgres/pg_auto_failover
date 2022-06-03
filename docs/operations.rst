@@ -19,6 +19,23 @@ pg_auto_failover monitor. The ``pg_autoctl create`` command honors the
 running. If Postgres is detected, the new node is registered in SINGLE mode,
 bypassing the monitor's role assignment policy.
 
+Postgres configuration management
+---------------------------------
+
+The :ref:`pg_autoctl_create_postgres` command edits the default Postgres
+configuration file (``postgresql.conf``) to include pg_auto_failover
+settings.
+
+The include directive is placed on the top of the ``postgresql.conf`` file
+in a way that you may override any setting by editing it later in the file.
+
+Unless using the ``--skip-pg-hba`` option then pg_autoctl edits a minimal
+set of HBA rules for you, in order for the pg_auto_failover nodes to be able
+to connect to each other. The HBA rules that are needed for your application
+to connect to your Postgres nodes still need to be added. As pg_autoctl
+knows nothing about your applications, then you are responsible for editing
+the HBA file.
+
 Upgrading pg_auto_failover, from versions 1.4 onward
 -----------------------------------------------------
 

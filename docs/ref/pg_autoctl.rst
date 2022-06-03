@@ -140,3 +140,13 @@ A typical JSON output would be::
 This is for version 1.4.2 of pg_auto_failover. This particular version of
 the pg_autoctl client tool has been compiled using ``libpq`` for PostgreSQL
 12.3 and is compatible with Postgres 10, 11, 12, and 13.
+
+Environment
+-----------
+
+PG_AUTOCTL_DEBUG
+
+  When this environment variable is set (to anything) then ``pg_autoctl``
+  allows more commands. Use with care, this opens abilities to destroy your
+  production clusters.
+

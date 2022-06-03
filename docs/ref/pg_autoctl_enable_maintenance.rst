@@ -36,6 +36,35 @@ Options
 
   Target formation where to enable secondary feature.
 
+Environment
+-----------
+
+PGDATA
+
+  Postgres directory location. Can be used instead of the ``--pgdata``
+  option.
+
+PG_AUTOCTL_MONITOR
+
+  Postgres URI to connect to the monitor node, can be used instead of the
+  ``--monitor`` option.
+
+XDG_CONFIG_HOME
+
+  The pg_autoctl command stores its configuration files in the standard
+  place XDG_CONFIG_HOME. See the `XDG Base Directory Specification`__.
+
+  __ https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+  
+XDG_DATA_HOME
+
+  The pg_autoctl command stores its internal states files in the standard
+  place XDG_DATA_HOME, which defaults to ``~/.local/share``. See the `XDG
+  Base Directory Specification`__.
+
+  __ https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+
+  
 Examples
 --------
 
