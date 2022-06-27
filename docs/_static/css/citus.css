@@ -16,9 +16,10 @@ h1,h2,.rst-content .toctree-wrapper p.caption,h3,h4,h5,h6,legend {
   border: 1px solid #404040;
 }
 
-/*.btn:focus {
-  outline: 1px solid;
-}*/
+.btn:focus {
+  outline: 1px dashed !important;
+}
+
 :focus {
   outline: 1px dashed;
 }
