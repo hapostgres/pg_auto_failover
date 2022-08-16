@@ -1,0 +1,113 @@
+% Fix for: https://tex.stackexchange.com/a/315027/43228
+\RequirePackage{luatex85}
+\documentclass[border=10pt,17pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows,shapes,decorations}
+\usetikzlibrary{shapes.multipart}
+
+\begin{document}
+
+%% sans-serif fonts, large by default, and bold too
+\sffamily
+\sbweight
+\bfseries
+\large
+
+\begin{tikzpicture}[>=stealth',auto,rounded corners]
+
+  \input{common.tex}
+
+  %% \draw [help lines] (-10,0) grid (10,20);
+
+  \node (flegend) at (0,19) {\textbf{\textt{number\_sync\_standby = 0}}} ;
+
+  \node  (c0a)   at (0,16)   [primary]
+         {\textbf{\normalsize Coord0A}
+           \nodepart{second}
+           \textbf{\Large Primary}
+           \nodepart[text=stxt]{third}
+           \texttt{pg\_dist\_node}
+         };
+
+  \node  (c0b)   at (-9,12)   [cstandby]
+         {\textbf{\normalsize Coord0B}
+           \nodepart{second}
+           \textbf{\Large Secondary}
+         };
+
+  \node  (w1a)   at (-7,8)  [cprimary]
+         {\textbf{\normalsize Worker1A}
+           \nodepart{second}
+           \textbf{\Large Primary}
+         };
+
+  \node  (w1b)   at (-7,4)  [cstandby]
+         {\textbf{\normalsize Worker1B}
+           \nodepart{second}
+           \textbf{\Large Secondary}
+         };
+
+  \node  (w2a)   at (0,8)   [cprimary]
+         {\textbf{\normalsize Worker2A}
+           \nodepart{second}
+           \textbf{\Large Primary}
+         };
+
+  \node  (w2b)   at (0,4)   [cstandby]
+         {\textbf{\normalsize Worker2B}
+           \nodepart{second}
+           \textbf{\Large Secondary}
+         };
+
+  \node  (w3a)   at (7,8)   [cprimary]
+         {\textbf{\normalsize Worker3A}
+           \nodepart{second}
+           \textbf{\Large Primary}
+         };
+
+  \node  (w3b)   at (7,4)   [cstandby]
+         {\textbf{\normalsize Worker3B}
+           \nodepart{second}
+           \textbf{\Large Secondary}
+         };
+
+  \node  (app) at (-8,18)  [app]        {\Large Application};
+  \node  (m)   at (8,18)   [monitor]    {\Large Monitor};
+
+  \node  (mid1) at (4,13)  [coordinate] {};
+  \node  (mid2) at (4,10)  [coordinate] {};
+  \node  (mid3) at (4,8)  [coordinate] {};
+
+  \path (app) edge [sql,out=0,in=180]  node[above,near start] {SQL} (c0a)
+              edge [sqlf,out=0,in=45]  node[left,near end] {SQL (fallback)} (c0b.north east)
+
+        (m)   edge [hc,out=-90,in=0] (c0a)
+              edge [hc,<-,out=-90,in=90] node[below] {Health checks} (mid1)
+
+        (mid1) edge [hc,->,out=-90,in=0] (c0b.east)
+               edge [hc,->,out=-90,in=45] (w1a.north east)
+               edge [hcmid,out=-90,in=90] (mid2)
+
+        (mid2) edge [hc,->,out=-90,in=0] (w2a.east)
+               edge [hc,->,out=-90,in=180] (w3a.west)
+               edge [hcmid,out=-90,in=90] (mid3)
+
+        (mid3) edge [hc,->,out=-90,in=45] (w1b.north east)
+               edge [hc,->,out=-90,in=0] (w2b.east)
+               edge [hc,->,out=-90,in=180] (w3b.west)
+
+         (c0a) edge [sr] node[above] {Streaming} node[below] {Replication} (c0b)
+        (w1a) edge [sr] (w1b)
+        (w2a) edge [sr] (w2b)
+        (w3a) edge [sr] (w3b)
+
+        (c0a.south) edge [cw,out=-90,in=90] (w1a)
+        (c0a.south) edge [cw,out=-90,in=90] node[left] {Citus} node[right] {Connection} (w2a)
+        (c0a.south) edge [cw,out=-90,in=90] (w3a);
+
+\end{tikzpicture}
+
+\end{document}

@@ -1,8 +1,9 @@
 Introduction to pg_auto_failover
 ================================
 
-pg_auto_failover is an extension for PostgreSQL that monitors and manages failover
-for a postgres clusters. It is optimised for simplicity and correctness.
+pg_auto_failover is an extension for PostgreSQL that monitors and manages
+failover for postgres clusters. It is optimised for simplicity and
+correctness.
 
 Single Standby Architecture
 ---------------------------
@@ -82,3 +83,26 @@ implement high availability of both the Postgres service and the data set.
 Node C might be set up for Business Continuity in case the first data center is
 lost, or maybe for reporting the need for deployment on another application
 domain.
+
+Citus Architecture
+------------------
+
+.. figure:: ./tikz/arch-citus.svg
+   :alt: pg_auto_failover architecture with a Citus formation
+
+   pg_auto_failover architecture with a Citus formation
+
+pg_auto_failover implements Business Continuity for your Citus services.
+pg_auto_failover implements a single Citus formation service using multiple
+Citus nodes with automated failover, and automates PostgreSQL maintenance
+operations in a way that guarantees availability of the service to its users
+and applications.
+
+In that case, pg_auto_failover knows how to orchestrate a Citus coordinator
+failover and a Citus worker failover. A Citus worker failover can be
+achieved with a very minimal downtime to the application, where during a
+short time window SQL writes may error out.
+
+In this figure we see a single standby node for each Citus node, coordinator
+and workers. It is possible to implement more standby nodes, and even
+read-only nodes for load balancing, see :ref:`citus_secondaries`.

@@ -6,6 +6,11 @@ Citus Support
 The usual ``pg_autoctl`` commands work both with Postgres standalone nodes
 and with Citus nodes.
 
+.. figure:: ./tikz/arch-citus.svg
+   :alt: pg_auto_failover architecture with a Citus formation
+
+   pg_auto_failover architecture with a Citus formation
+
 When using pg_auto_failover with Citus, a pg_auto_failover *formation* is
 composed of a coordinator and a set of worker nodes.
 
