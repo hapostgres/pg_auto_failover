@@ -1016,12 +1016,12 @@ create_database_and_extension(Keeper *keeper)
 	 */
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
 	{
+		char pguser[NAMEDATALEN] = { 0 };
+
 		/*
 		 * Remove PGUSER from the environment when we want to create that very
 		 * user at bootstrap.
 		 */
-		char pguser[NAMEDATALEN] = { 0 };
-
 		if (!get_env_copy_with_fallback("PGUSER", pguser, NAMEDATALEN, ""))
 		{
 			/* errors have already been logged */

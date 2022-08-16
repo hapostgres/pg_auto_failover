@@ -207,6 +207,9 @@ build-check:
 build-i386:
 	docker build -t i386:latest -f Dockerfile.i386 .
 
+build-demo:
+	docker build -t citusdata/pg_auto_failover:demo .
+
 # expected to be run from within the i386 docker container
 installcheck-i386:
 	pg_autoctl run &
