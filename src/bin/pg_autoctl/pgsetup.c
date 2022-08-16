@@ -199,7 +199,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 	}
 
 	/* check or find dbname */
-	if (options->dbname[0] != '\0')
+	if (!IS_EMPTY_STRING_BUFFER(options->dbname))
 	{
 		strlcpy(pgSetup->dbname, options->dbname, NAMEDATALEN);
 	}
