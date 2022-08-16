@@ -144,6 +144,85 @@ cli_do_demoapp_getopts(int argc, char **argv)
 	strlcpy(options.formation, "default", sizeof(options.formation));
 
 	/*
+	 * Add support for environment variables for some of those options.
+	 */
+	if (env_exists(PG_AUTOCTL_DEMO_CLIENTS))
+	{
+		char clients[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_DEMO_CLIENTS, clients, sizeof(clients)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (!stringToInt(clients, &(options.clientsCount)))
+		{
+			log_fatal("Failed to parse \"%s\" integer value \"%s\"",
+					  PG_AUTOCTL_DEMO_CLIENTS,
+					  clients);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	if (env_exists(PG_AUTOCTL_DEMO_DURATION))
+	{
+		char duration[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_DEMO_DURATION, duration, sizeof(duration)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (!stringToInt(duration, &(options.duration)))
+		{
+			log_fatal("Failed to parse \"%s\" integer value \"%s\"",
+					  PG_AUTOCTL_DEMO_DURATION,
+					  duration);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	if (env_exists(PG_AUTOCTL_DEMO_FAILOVER_FIRST))
+	{
+		char first[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_DEMO_FAILOVER_FIRST, first, sizeof(first)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (!stringToInt(first, &(options.firstFailover)))
+		{
+			log_fatal("Failed to parse \"%s\" integer value \"%s\"",
+					  PG_AUTOCTL_DEMO_FAILOVER_FIRST,
+					  first);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	if (env_exists(PG_AUTOCTL_DEMO_FAILOVER_FREQ))
+	{
+		char freq[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_DEMO_FAILOVER_FREQ, freq, sizeof(freq)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (!stringToInt(freq, &(options.failoverFreq)))
+		{
+			log_fatal("Failed to parse \"%s\" integer value \"%s\"",
+					  PG_AUTOCTL_DEMO_FAILOVER_FREQ,
+					  freq);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	/*
 	 * The only command lines that are using cli_do_demoapp_getopts are
 	 * terminal ones: they don't accept subcommands. In that case our option
 	 * parsing can happen in any order and we don't need getopt_long to behave

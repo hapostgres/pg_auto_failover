@@ -45,9 +45,8 @@ services:
       PGUSER: ad
       PGDATABASE: analytics
       PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
-    command: [
-    "pg_autoctl", "do", "demo", "run",
-    "--clients", "10",
-    "--duration", "125",
-    "--first-failover", "45",
-    "--failover-freq", "30"]
+      PG_AUTOCTL_DEMO_CLIENTS: 10
+      PG_AUTOCTL_DEMO_DURATION: 125
+      PG_AUTOCTL_DEMO_FAILOVER_FREQ: 30
+      PG_AUTOCTL_DEMO_FAILOVER_FIRST: 45
+    command:  pg_autoctl do demo run
