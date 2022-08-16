@@ -159,6 +159,8 @@ nodes. It will help us run and observe PostgreSQL.
   done
   wait
 
+.. _tutorial_run_monitor:
+
 Run a monitor
 -------------
 

@@ -19,6 +19,7 @@
 
 #include "cli_common.h"
 #include "commandline.h"
+#include "coordinator.h"
 #include "env_utils.h"
 #include "defaults.h"
 #include "fsm.h"
@@ -48,6 +49,14 @@ MonitorConfig monitorOptions = { 0 };
 
 static int cli_create_postgres_getopts(int argc, char **argv);
 static void cli_create_postgres(int argc, char **argv);
+
+static int cli_create_coordinator_getopts(int argc, char **argv);
+static void cli_create_coordinator(int argc, char **argv);
+
+static int cli_create_worker_getopts(int argc, char **argv);
+static void cli_create_worker(int argc, char **argv);
+
+static void cli_activate_node(int argc, char **argv);
 
 static int cli_create_monitor_getopts(int argc, char **argv);
 static void cli_create_monitor(int argc, char **argv);
@@ -96,6 +105,63 @@ CommandLine create_postgres_command =
 		cli_create_postgres_getopts,
 		cli_create_postgres);
 
+CommandLine create_coordinator_command =
+	make_command(
+		"coordinator",
+		"Initialize a pg_auto_failover citus coordinator node",
+		"",
+		"  --pgctl           path to pg_ctl\n"
+		"  --pgdata          path to data directory\n"
+		"  --pghost          PostgreSQL's hostname\n"
+		"  --pgport          PostgreSQL's port number\n"
+		"  --hostname        hostname by which postgres is reachable\n"
+		"  --listen          PostgreSQL's listen_addresses\n"
+		"  --username        PostgreSQL's username\n"
+		"  --dbname          PostgreSQL's database name\n"
+		"  --name            pg_auto_failover node name\n"
+		"  --formation       pg_auto_failover formation\n"
+		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
+		"  --auth            authentication method for connections from monitor\n"
+		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
+		"  --citus-secondary when used, this worker node is a citus secondary\n"
+		"  --citus-cluster   name of the Citus Cluster for read-replicas\n"
+		KEEPER_CLI_SSL_OPTIONS,
+		cli_create_coordinator_getopts,
+		cli_create_coordinator);
+
+CommandLine create_worker_command =
+	make_command(
+		"worker",
+		"Initialize a pg_auto_failover citus worker node",
+		"",
+		"  --pgctl           path to pg_ctl\n"
+		"  --pgdata          path to data director\n"
+		"  --pghost          PostgreSQL's hostname\n"
+		"  --pgport          PostgreSQL's port number\n"
+		"  --hostname        hostname by which postgres is reachable\n"
+		"  --listen          PostgreSQL's listen_addresses\n"
+		"  --proxyport       Proxy's port number\n"
+		"  --username        PostgreSQL's username\n"
+		"  --dbname          PostgreSQL's database name\n"
+		"  --name            pg_auto_failover node name\n"
+		"  --formation       pg_auto_failover formation\n"
+		"  --group           pg_auto_failover group Id\n"
+		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
+		"  --auth            authentication method for connections from monitor\n"
+		"  --skip-pg-hba     skip editing pg_hba.conf rules\n"
+		"  --citus-secondary when used, this worker node is a citus secondary\n"
+		"  --citus-cluster   name of the Citus Cluster for read-replicas\n"
+		KEEPER_CLI_SSL_OPTIONS,
+		cli_create_worker_getopts,
+		cli_create_worker);
+
+CommandLine activate_node_command =
+	make_command("activate",
+				 "Activate a Citus worker from the Citus coordinator",
+				 " [ --pgdata ]",
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_activate_node);
 
 /*
  * cli_create_config manages the whole set of configuration parameters that
@@ -336,6 +402,355 @@ cli_create_postgres(int argc, char **argv)
 	}
 
 	cli_create_pg(&keeper);
+}
+
+
+/*
+ * cli_create_coordinator_getopts parses command line options and set the
+ * global variable keeperOptions from them, without doing any check.
+ */
+static int
+cli_create_coordinator_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+
+	static struct option long_options[] = {
+		{ "pgctl", required_argument, NULL, 'C' },
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "pghost", required_argument, NULL, 'H' },
+		{ "pgport", required_argument, NULL, 'p' },
+		{ "listen", required_argument, NULL, 'l' },
+		{ "username", required_argument, NULL, 'U' },
+		{ "auth", required_argument, NULL, 'A' },
+		{ "skip-pg-hba", no_argument, NULL, 'S' },
+		{ "dbname", required_argument, NULL, 'd' },
+		{ "name", required_argument, NULL, 'a' },
+		{ "hostname", required_argument, NULL, 'n' },
+		{ "formation", required_argument, NULL, 'f' },
+		{ "monitor", required_argument, NULL, 'm' },
+		{ "disable-monitor", no_argument, NULL, 'M' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ "citus-secondary", no_argument, NULL, 'z' },
+		{ "citus-cluster", required_argument, NULL, 'Z' },
+		{ "candidate-priority", required_argument, NULL, 'P' },
+		{ "replication-quorum", required_argument, NULL, 'r' },
+		{ "run", no_argument, NULL, 'x' },
+		{ "no-ssl", no_argument, NULL, 'N' },
+		{ "ssl-self-signed", no_argument, NULL, 's' },
+		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
+		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	int optind =
+		cli_create_node_getopts(argc, argv, long_options,
+								"C:D:H:p:l:U:A:Sd:a:n:f:m:MRVvqhzZ:P:r:xsN",
+								&options);
+
+	options.groupId = 0;
+
+	/* publish our option parsing in the global variable */
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_create_coordinator prepares a local PostgreSQL instance to be used as a
+ * citus coordinator.
+ */
+static void
+cli_create_coordinator(int argc, char **argv)
+{
+	pid_t pid = 0;
+	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
+
+	keeper.config = keeperOptions;
+
+	if (read_pidfile(keeper.config.pathnames.pid, &pid))
+	{
+		log_fatal("pg_autoctl is already running with pid %d", pid);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!file_exists(keeper.config.pathnames.config))
+	{
+		/* pg_autoctl create coordinator: mark ourselves as a coordinator node */
+		keeper.config.pgSetup.pgKind = NODE_KIND_CITUS_COORDINATOR;
+		strlcpy(keeper.config.nodeKind, "coordinator", NAMEDATALEN);
+
+		if (!check_or_discover_hostname(config))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	if (!cli_create_config(&keeper))
+	{
+		log_error("Failed to initialize our configuration, see above.");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	cli_create_pg(&keeper);
+}
+
+
+/*
+ * cli_create_worker_getopts parses command line options and set the global
+ * variable keeperOptions from them, without doing any check.
+ */
+static int
+cli_create_worker_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+
+	static struct option long_options[] = {
+		{ "pgctl", required_argument, NULL, 'C' },
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "pghost", required_argument, NULL, 'H' },
+		{ "pgport", required_argument, NULL, 'p' },
+		{ "listen", required_argument, NULL, 'l' },
+		{ "proxyport", required_argument, NULL, 'y' },
+		{ "username", required_argument, NULL, 'U' },
+		{ "auth", required_argument, NULL, 'A' },
+		{ "skip-pg-hba", no_argument, NULL, 'S' },
+		{ "dbname", required_argument, NULL, 'd' },
+		{ "name", required_argument, NULL, 'a' },
+		{ "hostname", required_argument, NULL, 'n' },
+		{ "formation", required_argument, NULL, 'f' },
+		{ "group", required_argument, NULL, 'g' },
+		{ "monitor", required_argument, NULL, 'm' },
+		{ "disable-monitor", no_argument, NULL, 'M' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ "citus-secondary", no_argument, NULL, 'z' },
+		{ "citus-cluster", required_argument, NULL, 'Z' },
+		{ "candidate-priority", required_argument, NULL, 'P' },
+		{ "replication-quorum", required_argument, NULL, 'r' },
+		{ "run", no_argument, NULL, 'x' },
+		{ "no-ssl", no_argument, NULL, 'N' },
+		{ "ssl-self-signed", no_argument, NULL, 's' },
+		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
+		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	int optind =
+		cli_create_node_getopts(argc, argv, long_options,
+								"C:D:H:p:l:y:zZ:U:A:Sd:a:n:f:m:MRVvqhzP:r:xsN",
+								&options);
+
+	if (options.groupId == 0)
+	{
+		log_error("A Citus worker must not have a groupId of zero (0).");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* publish our option parsing in the global variable */
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_create_worker prepares a local PostgreSQL instance to be used as a citus
+ * worker.
+ */
+static void
+cli_create_worker(int argc, char **argv)
+{
+	pid_t pid = 0;
+	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
+
+	keeper.config = keeperOptions;
+
+	if (read_pidfile(keeper.config.pathnames.pid, &pid))
+	{
+		log_fatal("pg_autoctl is already running with pid %d", pid);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (!file_exists(keeper.config.pathnames.config))
+	{
+		/* pg_autoctl create coordinator: mark ourselves as a coordinator node */
+		keeper.config.pgSetup.pgKind = NODE_KIND_CITUS_WORKER;
+		strlcpy(keeper.config.nodeKind, "worker", NAMEDATALEN);
+
+		if (!check_or_discover_hostname(config))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	if (!cli_create_config(&keeper))
+	{
+		log_error("Failed to initialize our configuration, see above.");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	cli_create_pg(&keeper);
+}
+
+
+/*
+ * cli_activate_node contacts the Citus coordinator and calls
+ * master_activate_node() for the worker, and master_add_node()
+ * for the coordinator. For the details, see the function.
+ */
+static void
+cli_activate_node(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+
+	CoordinatorNodeAddress coordinatorNodeAddress = { 0 };
+	Coordinator coordinator = { 0 };
+	int nodeid = -1;
+
+	const bool missingPgdataIsOk = true;
+	const bool pgIsNotRunningIsOk = true;
+	const bool monitorDisabledIsOk = true;
+
+	keeper.config = keeperOptions;
+
+	(void) exit_unless_role_is_keeper(&(keeper.config));
+
+	if (!keeper_config_read_file(&(keeper.config),
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!keeper_init(&keeper, &keeper.config))
+	{
+		log_fatal("Failed to initialise keeper, see above for details");
+		exit(EXIT_CODE_KEEPER);
+	}
+
+	if (keeper.config.pgSetup.pgKind != NODE_KIND_CITUS_WORKER &&
+		keeper.config.pgSetup.pgKind != NODE_KIND_CITUS_COORDINATOR)
+	{
+		log_fatal("pg_autoctl activate only makes sense for citus nodes, "
+				  "this node is a %s", nodeKindToString(keeper.postgres.pgKind));
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
+	{
+		log_fatal("Failed to initialize the monitor connection, "
+				  "see above for details.");
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (!monitor_get_coordinator(&(keeper.monitor),
+								 keeper.config.formation,
+								 &coordinatorNodeAddress))
+	{
+		log_fatal("Failed to get the coordinator for formation \"%s\" "
+				  "from the monitor at %s",
+				  keeper.config.formation,
+				  keeper.config.monitor_pguri);
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (!coordinator_init(&coordinator, &(coordinatorNodeAddress.node), &keeper))
+	{
+		log_fatal("Failed to contact the coordinator because its URL is invalid, "
+				  "see above for details");
+		exit(EXIT_CODE_COORDINATOR);
+	}
+
+
+	switch (keeper.config.pgSetup.pgKind)
+	{
+		case NODE_KIND_CITUS_COORDINATOR:
+		{
+			/*
+			 * In the case of a coordinator, pg_autoctl adds the coordinator
+			 * as active node as there is no concept of "inactive" coordinator.
+			 * If the coordinator is already in the metadata, this operation
+			 * becomes a no-op.
+			 */
+			if (!coordinator_add_node(&coordinator, &keeper, &nodeid))
+			{
+				log_fatal("Failed to add the coordinator to itself, "
+						  "see above for details");
+				exit(EXIT_CODE_COORDINATOR);
+			}
+
+			log_info("Added the node as active %s:%d in formation "
+					 "\"%s\" coordinator %s:%d", keeper.config.hostname,
+					 keeper.config.pgSetup.pgport, keeper.config.formation,
+					 coordinator.node.host, coordinator.node.port);
+
+			break;
+		}
+
+		case NODE_KIND_CITUS_WORKER:
+		{
+			/*
+			 * The worker might have already been added as "inactive" node,
+			 * just activate it.
+			 *
+			 * In case the node is already active (such as user manually
+			 * activated), Citus "re-creates" the distributed objects on
+			 * the worker node. The operation is idempotent, so safe to do
+			 * anytime.
+			 */
+			if (!coordinator_activate_node(&coordinator, &keeper, &nodeid))
+			{
+				log_fatal("Failed to activate current node to the Citus coordinator, "
+						  "see above for details");
+				exit(EXIT_CODE_COORDINATOR);
+			}
+
+			log_info("Activated node %s:%d in formation \"%s\" coordinator %s:%d",
+					 keeper.config.hostname, keeper.config.pgSetup.pgport,
+					 keeper.config.formation,
+					 coordinator.node.host, coordinator.node.port);
+
+			break;
+		}
+
+		default:
+		{
+			/*
+			 * We already checked for the expected node kinds at the start
+			 * of the function. Still, let's be defensive and make the switch
+			 * statement robust for any future changes.
+			 */
+			log_error("Unexpected node kind: %d for node node %s:%d in "
+					  "formation \"%s\"",
+					  keeper.config.pgSetup.pgKind, keeper.config.hostname,
+					  keeper.config.pgSetup.pgport, keeper.config.formation);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	/*
+	 * Any errors already logged, and returned with an exit code. For success
+	 * cases, return code should indicate success.
+	 */
+	exit(EXIT_CODE_QUIT);
 }
 
 

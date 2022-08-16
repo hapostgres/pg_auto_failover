@@ -25,6 +25,8 @@ CommandLine version =
 CommandLine *create_subcommands[] = {
 	&create_monitor_command,
 	&create_postgres_command,
+	&create_coordinator_command,
+	&create_worker_command,
 	&create_formation_command,
 	NULL
 };
@@ -119,6 +121,7 @@ CommandLine *root_subcommands[] = {
 	&get_commands,
 	&set_commands,
 	&perform_commands,
+	&activate_node_command,
 	&service_run_command,
 	&watch_command,
 	&service_stop_command,

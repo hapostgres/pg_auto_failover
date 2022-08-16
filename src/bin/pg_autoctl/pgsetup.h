@@ -133,6 +133,11 @@ typedef enum PgInstanceKind
 	NODE_KIND_ANY = 0xff
 } PgInstanceKind;
 
+
+#define NODE_KIND_CITUS_ANY \
+	(NODE_KIND_CITUS_COORDINATOR | NODE_KIND_CITUS_WORKER)
+
+
 #define IS_CITUS_INSTANCE_KIND(x) \
 	(x == NODE_KIND_CITUS_COORDINATOR \
 	 || x == NODE_KIND_CITUS_WORKER)

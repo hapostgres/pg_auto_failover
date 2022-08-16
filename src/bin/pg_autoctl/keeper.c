@@ -17,6 +17,7 @@
 
 #include "cli_common.h"
 #include "cli_root.h"
+#include "coordinator.h"
 #include "env_utils.h"
 #include "file_utils.h"
 #include "fsm.h"
@@ -2328,6 +2329,79 @@ diff_nodesArray(NodeAddressArray *previousNodesArray,
 
 
 /*
+ * keeper_refresh_citus_remove_dropped_nodes maintains the pg_dist_node table
+ * current by removing nodes that have been dropped from the monitor.
+ *
+ * That's a "cache invalidation" mechanism that's useful when dropping a node
+ * from the monitor while the node itself is not running anymore, and thus
+ * won't be able to call citus.master_remove_node() for itself on its way out.
+ */
+bool
+keeper_refresh_citus_remove_dropped_nodes(Keeper *keeper,
+										  NodeAddressArray *newNodesArray,
+										  bool forceCacheInvalidation)
+{
+	Monitor *monitor = &(keeper->monitor);
+	Coordinator coordinator = { 0 };
+
+	/* we only maintain pg_dist_node on the Citus coordinator itself */
+	if (keeper->config.pgSetup.pgKind != NODE_KIND_CITUS_COORDINATOR)
+	{
+		return true;
+	}
+
+	/* we only maintain pg_dist_node on the primary (stable) node */
+	if (!(keeper->state.current_role == keeper->state.assigned_role &&
+		  (keeper->state.current_role == SINGLE_STATE ||
+		   keeper->state.current_role == WAIT_PRIMARY_STATE ||
+		   keeper->state.current_role == JOIN_PRIMARY_STATE ||
+		   keeper->state.current_role == PRIMARY_STATE ||
+		   keeper->state.current_role == APPLY_SETTINGS_STATE)))
+	{
+		return true;
+	}
+
+	/*
+	 * First, grab the list of all the nodes in our formation
+	 */
+	int group = -1;             /* all groups */
+	CurrentNodeStateArray nodesArray = { 0 };
+
+	if (!monitor_get_current_state(monitor,
+								   keeper->config.formation,
+								   group,
+								   &nodesArray))
+	{
+		log_fatal("Failed to get the list of all the nodes in formation \"%s\" "
+				  "from the monitor, see above for details",
+				  keeper->config.formation);
+		return false;
+	}
+
+	/* Now, implement cache invalidation for pg_dist_node */
+	if (!coordinator_init_from_keeper(&coordinator, keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/* skip cache invalidation altogether if Postgres is not running (yet) */
+	if (!pg_setup_is_running(&(keeper->postgres.postgresSetup)))
+	{
+		return true;
+	}
+
+	if (!coordinator_remove_dropped_nodes(&coordinator, &nodesArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * keeper_set_node_metadata sets a new nodename for the current pg_autoctl node
  * on the monitor. This node might be in an environment where you might get a
  * new IP at reboot, such as in Kubernetes.
@@ -2773,6 +2847,112 @@ keeper_reload_configuration(Keeper *keeper, bool firstLoop, bool doInit)
 		log_warn("Configuration file \"%s\" does not exist, "
 				 "continuing with the same configuration.",
 				 config->pathnames.config);
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_state_allows_master_update_node returns true when the current known
+ * state of a Citus node allows for calling master_update_node() on the
+ * coordinator. As the Citus coordinator only keeps track of the primary nodes,
+ * we must restrict ourselves to "primary" states. Also, we should refrain from
+ * calling master_update_node() when the state is not "stable": current and
+ * assigned state must be the same.
+ */
+static bool
+keeper_state_allows_master_update_node(Keeper *keeper)
+{
+	KeeperStateData *state = &(keeper->state);
+
+	return state->current_role == state->assigned_role &&
+		   (state->current_role == SINGLE_STATE ||
+			state->current_role == PRIMARY_STATE ||
+			state->current_role == WAIT_PRIMARY_STATE ||
+			state->current_role == JOIN_PRIMARY_STATE ||
+			state->current_role == APPLY_SETTINGS_STATE);
+}
+
+
+/*
+ * citus_worker_update_hostname_port is registered in KeeperReloadHooksArray
+ * global variable as a KeeperReloadFunction. It is called at pg_autoctl
+ * node-active start-up and then each time we receive a SIGHUP signal to reload
+ * our configuration.
+ *
+ * When we are maintaining a Citus Worker, the hostname:port of the local node
+ * must by synced with both the monitor (as any other node) and the
+ * coordinator. This function updates hostname:port on the coordinator.
+ *
+ * As the Citus coordinator only knows about the primary node, we must refrain
+ * from calling master_update_node() on a standby, whatever the current state
+ * it's in.
+ */
+bool
+keeper_reload_citus_node_update_hostname_port(Keeper *keeper,
+											  bool firstLoop,
+											  bool doInit)
+{
+	if (doInit)
+	{
+		/*
+		 * On the first loop of the keeper_node_active_loop function, when
+		 * doInit is still true, we didn't call the monitor yet. This means we
+		 * don't know if the current known state in our state file is still
+		 * valid, and thus we can't decide to call master_update_node().
+		 *
+		 * In the worst case, we would call master_update_node() to re-install
+		 * this node as the current worker for the group although we have been
+		 * DEMOTED earlier from the monitor and the node is just getting back
+		 * online, ready to rejoin as a secondary thanks to pg_rewind or
+		 * pg_basebackup.
+		 */
+		log_debug("citus_worker_update_hostname_port: "
+				  "bypass until doInit is set to false, "
+				  "once the monitor has been successfully contacted");
+		return true;
+	}
+
+	/*
+	 * Now if the current node is in a stable role and a primary, we call
+	 * master_update_node() on the coordinator on reload, with a possibly new
+	 * hostname and port.
+	 */
+	if (IS_CITUS_INSTANCE_KIND(keeper->postgres.pgKind) &&
+		keeper_state_allows_master_update_node(keeper))
+	{
+		Coordinator coordinator = { 0 };
+
+		if (!coordinator_init_from_monitor(&coordinator, keeper))
+		{
+			log_error("Failed update hostname:port for this node in the monitor "
+					  "at %s, see above for details",
+					  firstLoop ? "startup" : "reload");
+			return false;
+		}
+
+		log_info("Calling master_update_node on the coordinator (%s:%d) "
+				 "during %s to handle possible change of "
+				 "this node's hostname and port (%s:%d)",
+				 coordinator.node.host, coordinator.node.port,
+				 firstLoop ? "startup" : "reload",
+				 keeper->config.hostname, keeper->config.pgSetup.pgport);
+
+		if (!coordinator_update_node_prepare(&coordinator, keeper))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (!coordinator_update_node_commit(&coordinator, keeper))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		log_info("Done updating this node host:port (%s:%d) on the coordinator",
+				 keeper->config.hostname, keeper->config.pgSetup.pgport);
 	}
 
 	return true;

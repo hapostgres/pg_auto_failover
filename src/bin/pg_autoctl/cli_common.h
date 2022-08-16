@@ -87,9 +87,14 @@ extern CommandLine do_commands;
 /* cli_config.c */
 extern CommandLine config_commands;
 
-/* cli_create_drop_node.c */
+/* cli_create_node.c */
 extern CommandLine create_monitor_command;
 extern CommandLine create_postgres_command;
+extern CommandLine create_coordinator_command;
+extern CommandLine create_worker_command;
+extern CommandLine activate_node_command;
+
+/* cli_drop_node.c */
 extern CommandLine drop_node_command;
 extern CommandLine drop_monitor_command;
 extern CommandLine destroy_command;

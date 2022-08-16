@@ -557,6 +557,7 @@ CommandLine do_azure_commands =
 
 CommandLine *do_subcommands[] = {
 	&do_monitor_commands,
+	&do_coordinator_commands,
 	&do_fsm_commands,
 	&do_primary_,
 	&do_standby_,

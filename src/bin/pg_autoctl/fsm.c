@@ -182,8 +182,6 @@
 	"This node is being dropped from the monitor"
 
 
-/* *INDENT-OFF* */
-
 /*
  * The full 2-nodes state machine contains states that are expected only when
  * the node is a primary, and some only when the node is a standby. Each node
@@ -203,9 +201,17 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * Started as a single, no nothing
 	 */
+	{ INIT_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_INIT_TO_SINGLE,
+	  &fsm_citus_worker_init_primary },
+
 	{ INIT_STATE, SINGLE_STATE, NODE_KIND_ANY,
 	  COMMENT_INIT_TO_SINGLE,
 	  &fsm_init_primary },
+
+	{ DROPPED_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_INIT_TO_SINGLE,
+	  &fsm_citus_worker_init_primary },
 
 	{ DROPPED_STATE, SINGLE_STATE, NODE_KIND_ANY,
 	  COMMENT_INIT_TO_SINGLE,
@@ -299,7 +305,7 @@ KeeperFSMTransition KeeperFSM[] = {
 
 	{ DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, NODE_KIND_ANY,
 	  COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED,
-	  &fsm_stop_postgres},
+	  &fsm_stop_postgres },
 
 	/*
 	 * wait_primary stops reporting, is (supposed) dead now
@@ -311,13 +317,25 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * was demoted after a failure, but standby was forcibly removed
 	 */
+	{ DEMOTED_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_DEMOTED_TO_SINGLE,
+	  &fsm_citus_worker_resume_as_primary },
+
 	{ DEMOTED_STATE, SINGLE_STATE, NODE_KIND_ANY,
 	  COMMENT_DEMOTED_TO_SINGLE,
 	  &fsm_resume_as_primary },
 
+	{ DEMOTE_TIMEOUT_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_DEMOTED_TO_SINGLE,
+	  &fsm_citus_worker_resume_as_primary },
+
 	{ DEMOTE_TIMEOUT_STATE, SINGLE_STATE, NODE_KIND_ANY,
 	  COMMENT_DEMOTED_TO_SINGLE,
 	  &fsm_resume_as_primary },
+
+	{ DRAINING_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_DEMOTED_TO_SINGLE,
+	  &fsm_citus_worker_resume_as_primary },
 
 	{ DRAINING_STATE, SINGLE_STATE, NODE_KIND_ANY,
 	  COMMENT_DEMOTED_TO_SINGLE,
@@ -326,13 +344,37 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * primary was forcibly removed
 	 */
+	{ SECONDARY_STATE, SINGLE_STATE, NODE_KIND_CITUS_COORDINATOR,
+	  COMMENT_LOST_PRIMARY,
+	  &fsm_citus_coordinator_promote_standby_to_single },
+
+	{ SECONDARY_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_LOST_PRIMARY,
+	  &fsm_citus_worker_promote_standby_to_single },
+
 	{ SECONDARY_STATE, SINGLE_STATE, NODE_KIND_ANY,
 	  COMMENT_LOST_PRIMARY,
 	  &fsm_promote_standby },
 
+	{ CATCHINGUP_STATE, SINGLE_STATE, NODE_KIND_CITUS_COORDINATOR,
+	  COMMENT_LOST_PRIMARY,
+	  &fsm_citus_coordinator_promote_standby_to_single },
+
+	{ CATCHINGUP_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_LOST_PRIMARY,
+	  &fsm_citus_worker_promote_standby_to_single },
+
 	{ CATCHINGUP_STATE, SINGLE_STATE, NODE_KIND_ANY,
 	  COMMENT_LOST_PRIMARY,
 	  &fsm_promote_standby },
+
+	{ PREP_PROMOTION_STATE, SINGLE_STATE, NODE_KIND_CITUS_COORDINATOR,
+	  COMMENT_LOST_PRIMARY,
+	  &fsm_citus_coordinator_promote_standby_to_single },
+
+	{ PREP_PROMOTION_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_LOST_PRIMARY,
+	  &fsm_citus_worker_promote_standby_to_single },
 
 	{ PREP_PROMOTION_STATE, SINGLE_STATE, NODE_KIND_ANY,
 	  COMMENT_LOST_PRIMARY,
@@ -341,6 +383,10 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * went down to force the primary to time out, but then it was removed
 	 */
+	{ STOP_REPLICATION_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_REPLICATION_TO_SINGLE,
+	  &fsm_citus_worker_promote_standby_to_single },
+
 	{ STOP_REPLICATION_STATE, SINGLE_STATE, NODE_KIND_ANY,
 	  COMMENT_REPLICATION_TO_SINGLE,
 	  &fsm_promote_standby },
@@ -409,6 +455,10 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * We're asked to be a standby.
 	 */
+	{ CATCHINGUP_STATE, SECONDARY_STATE, NODE_KIND_CITUS_ANY,
+	  COMMENT_CATCHINGUP_TO_SECONDARY,
+	  &fsm_citus_maintain_replication_slots },
+
 	{ CATCHINGUP_STATE, SECONDARY_STATE, NODE_KIND_ANY,
 	  COMMENT_CATCHINGUP_TO_SECONDARY,
 	  &fsm_prepare_for_secondary },
@@ -416,9 +466,17 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * The standby is asked to prepare its own promotion
 	 */
+	{ SECONDARY_STATE, PREP_PROMOTION_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_SECONDARY_TO_PREP_PROMOTION,
+	  &fsm_citus_worker_prepare_standby_for_promotion },
+
 	{ SECONDARY_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
 	  COMMENT_SECONDARY_TO_PREP_PROMOTION,
 	  &fsm_prepare_standby_for_promotion },
+
+	{ CATCHINGUP_STATE, PREP_PROMOTION_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_SECONDARY_TO_PREP_PROMOTION,
+	  &fsm_citus_worker_prepare_standby_for_promotion },
 
 	{ CATCHINGUP_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
 	  COMMENT_SECONDARY_TO_PREP_PROMOTION,
@@ -427,6 +485,10 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * Forcefully stop replication by stopping the server.
 	 */
+	{ PREP_PROMOTION_STATE, STOP_REPLICATION_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_PROMOTION_TO_STOP_REPLICATION,
+	  &fsm_citus_worker_stop_replication },
+
 	{ PREP_PROMOTION_STATE, STOP_REPLICATION_STATE, NODE_KIND_ANY,
 	  COMMENT_PROMOTION_TO_STOP_REPLICATION,
 	  &fsm_stop_replication },
@@ -434,9 +496,21 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * finish the promotion
 	 */
+	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, NODE_KIND_CITUS_COORDINATOR,
+	  COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY,
+	  &fsm_citus_coordinator_promote_standby_to_primary },
+
+	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY,
+	  &fsm_citus_worker_promote_standby_to_primary },
+
 	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
 	  COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY,
 	  &fsm_promote_standby_to_primary },
+
+	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_BLOCKED_WRITES,
+	  &fsm_citus_worker_promote_standby },
 
 	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
 	  COMMENT_BLOCKED_WRITES,
@@ -538,6 +612,10 @@ KeeperFSMTransition KeeperFSM[] = {
 	  COMMENT_SECONDARY_TO_REPORT_LSN,
 	  &fsm_report_lsn },
 
+	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, NODE_KIND_CITUS_WORKER,
+	  COMMENT_REPORT_LSN_TO_PREP_PROMOTION,
+	  &fsm_citus_worker_prepare_standby_for_promotion },
+
 	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
 	  COMMENT_REPORT_LSN_TO_PREP_PROMOTION,
 	  &fsm_prepare_standby_for_promotion },
@@ -545,6 +623,10 @@ KeeperFSMTransition KeeperFSM[] = {
 	{ REPORT_LSN_STATE, FAST_FORWARD_STATE, NODE_KIND_ANY,
 	  COMMENT_REPORT_LSN_TO_FAST_FORWARD,
 	  &fsm_fast_forward },
+
+	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, NODE_KIND_CITUS_ANY,
+	  COMMENT_FAST_FORWARD_TO_PREP_PROMOTION,
+	  &fsm_citus_cleanup_and_resume_as_primary },
 
 	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
 	  COMMENT_FAST_FORWARD_TO_PREP_PROMOTION,
@@ -585,6 +667,10 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * Dropping a node is a two-step process
 	 */
+	{ ANY_STATE, DROPPED_STATE, NODE_KIND_CITUS_ANY,
+	  COMMENT_ANY_TO_DROPPED,
+	  &fsm_citus_drop_node },
+
 	{ ANY_STATE, DROPPED_STATE, NODE_KIND_ANY,
 	  COMMENT_ANY_TO_DROPPED,
 	  &fsm_drop_node },
@@ -596,9 +682,6 @@ KeeperFSMTransition KeeperFSM[] = {
 	  NULL,
 	  NULL },
 };
-
-
-/* *INDENT-ON* */
 
 
 /*

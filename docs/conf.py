@@ -32,7 +32,7 @@ from pygments.formatters.latex import LatexFormatter
 class CustomLatexFormatter(LatexFormatter):
     def __init__(self, **options):
         super(CustomLatexFormatter, self).__init__(**options)
-        self.verboptions = r"formatcom=\scriptsize"
+        self.verboptions = r"formatcom=\tiny"
 
 
 PygmentsBridge.latex_formatter = CustomLatexFormatter
@@ -99,7 +99,7 @@ todo_include_todos = False
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = "sphinx_rtd_theme_citus"
+html_theme = "sphinx_rtd_theme"
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -442,6 +442,27 @@ man_pages = [
         "ref/pg_autoctl_reload",
         "pg_autoctl reload",
         "pg_autoctl reload",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_create_coordinator",
+        "pg_autoctl create coordinator",
+        "pg_autoctl create coordinator",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_create_worker",
+        "pg_autoctl create worker",
+        "pg_autoctl create worker",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_activate",
+        "pg_autoctl activate",
+        "pg_autoctl activate",
         [author],
         1,
     ),

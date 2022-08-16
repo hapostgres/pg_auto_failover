@@ -10,27 +10,30 @@ Synopsis
 
 pg_autoctl provides the following commands::
 
-  + create   Create a pg_auto_failover node, or formation
-  + drop     Drop a pg_auto_failover node, or formation
-  + config   Manages the pg_autoctl configuration
-  + show     Show pg_auto_failover information
-  + enable   Enable a feature on a formation
-  + disable  Disable a feature on a formation
-  + get      Get a pg_auto_failover node, or formation setting
-  + set      Set a pg_auto_failover node, or formation setting
-  + perform  Perform an action orchestrated by the monitor
-    run      Run the pg_autoctl service (monitor or keeper)
-    watch    Display a dashboard to watch monitor's events and state
-    stop     signal the pg_autoctl service for it to stop
-    reload   signal the pg_autoctl for it to reload its configuration
-    status   Display the current status of the pg_autoctl service
-    help     print help message
-    version  print pg_autoctl version
+  pg_autoctl
+  + create    Create a pg_auto_failover node, or formation
+  + drop      Drop a pg_auto_failover node, or formation
+  + config    Manages the pg_autoctl configuration
+  + show      Show pg_auto_failover information
+  + enable    Enable a feature on a formation
+  + disable   Disable a feature on a formation
+  + get       Get a pg_auto_failover node, or formation setting
+  + set       Set a pg_auto_failover node, or formation setting
+  + perform   Perform an action orchestrated by the monitor
+    activate  Activate a Citus worker from the Citus coordinator
+    run       Run the pg_autoctl service (monitor or keeper)
+    stop      signal the pg_autoctl service for it to stop
+    reload    signal the pg_autoctl for it to reload its configuration
+    status    Display the current status of the pg_autoctl service
+    help      print help message
+    version   print pg_autoctl version
 
   pg_autoctl create
-    monitor    Initialize a pg_auto_failover monitor node
-    postgres   Initialize a pg_auto_failover standalone postgres node
-    formation  Create a new formation on the pg_auto_failover monitor
+    monitor      Initialize a pg_auto_failover monitor node
+    postgres     Initialize a pg_auto_failover standalone postgres node
+    coordinator  Initialize a pg_auto_failover citus coordinator node
+    worker       Initialize a pg_auto_failover citus worker node
+    formation    Create a new formation on the pg_auto_failover monitor
 
   pg_autoctl drop
     monitor    Drop the pg_auto_failover monitor
@@ -55,11 +58,13 @@ pg_autoctl provides the following commands::
     secondary    Enable secondary nodes on a formation
     maintenance  Enable Postgres maintenance mode on this node
     ssl          Enable SSL configuration on this node
+    monitor      Enable a monitor for this node to be orchestrated from
 
   pg_autoctl disable
     secondary    Disable secondary nodes on a formation
     maintenance  Disable Postgres maintenance mode on this node
     ssl          Disable SSL configuration on this node
+    monitor      Disable the monitor for this node
 
   pg_autoctl get
   + node       get a node property from the pg_auto_failover monitor
@@ -149,4 +154,3 @@ PG_AUTOCTL_DEBUG
   When this environment variable is set (to anything) then ``pg_autoctl``
   allows more commands. Use with care, this opens abilities to destroy your
   production clusters.
-

@@ -687,7 +687,7 @@ class PGNode(QueryRunner):
         if events:
             return "\n".join(
                 [
-                    "%32s %8s %17s/%-17s %10s %10s %s"
+                    "%32s %15s %17s/%-17s %10s %10s %s"
                     % (
                         "eventtime",
                         "name",

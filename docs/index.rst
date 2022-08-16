@@ -49,6 +49,8 @@ __ https://github.com/citusdata
    tutorial
    architecture
    architecture-multi-standby
+   citus
+   quickstart-cluster
    failover-state-machine
    fault-tolerance
    install

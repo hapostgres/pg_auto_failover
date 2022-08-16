@@ -66,6 +66,10 @@ typedef struct KeeperConfig
 	int prepare_promotion_walreceiver;
 	int postgresql_restart_failure_timeout;
 	int postgresql_restart_failure_max_retries;
+
+	int citus_master_update_node_lock_cooldown;
+	int citus_coordinator_wait_timeout;
+	int citus_coordinator_wait_max_retries;
 	int listen_notifications_timeout;
 } KeeperConfig;
 
