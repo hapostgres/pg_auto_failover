@@ -12,6 +12,9 @@ on:
 
   workflow_dispatch:
 
+env:
+  CITUSVERSION: 10.1
+
 jobs:
   build_package:
     name: Run test
@@ -31,6 +34,7 @@ jobs:
           - single
           - monitor
           - ssl
+          - citus
         include:
           - PGVERSION: 14
             TEST: tablespaces

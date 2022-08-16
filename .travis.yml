@@ -22,6 +22,9 @@ matrix:
     - env: PGVERSION=12 TEST=single
     - env: PGVERSION=13 TEST=single
     - env: PGVERSION=14 TEST=single
+    - env: PGVERSION=11 CITUSVERSION=10.0 TEST=citus
+    - env: PGVERSION=12 CITUSVERSION=10.1 TEST=citus
+    - env: PGVERSION=13 CITUSVERSION=10.1 TEST=citus
     - env: PGVERSION=10 TEST=monitor
     - env: PGVERSION=11 TEST=monitor
     - env: PGVERSION=12 TEST=monitor
@@ -37,6 +40,7 @@ matrix:
 before_install:
   - git clone -b v0.7.18 --depth 1 https://github.com/citusdata/tools.git
   - sudo make -C tools install
+  - 'if [ -z "$LINTING" ]; then curl https://install.citusdata.com/community/deb.sh | sudo bash; fi'
   - 'if [ -z "$LINTING" ]; then setup_apt; fi'
   - 'if [ -z "$LINTING" ]; then nuke_pg; fi'
   - python --version
@@ -56,6 +60,8 @@ install:
   - 'if [ -n "$LINTING" ]; then rm -rf uncrustify*; fi'
   - 'if [ -z "$LINTING" ]; then install_pg; fi'
   - 'if [ -z "$LINTING" ]; then install_custom_pg; fi'
+  - 'if [ -z "$LINTING" ]; then sudo apt-get install postgresql-${PGVERSION}-citus-${CITUSVERSION}; fi'
+  - PIPENV_PIPFILE="${TRAVIS_BUILD_DIR}"/tests/Pipfile pipenv install --system --deploy
   - env
   - 'if [ -z "$LINTING" ]; then pg_config; fi'
   - 'if [ -z "$LINTING" ]; then PATH=`pg_config --bindir`:$PATH which pg_ctl; fi'

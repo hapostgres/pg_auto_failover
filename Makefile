@@ -44,10 +44,20 @@ TESTS_MULTI += test_multi_ifdown
 TESTS_MULTI += test_multi_maintenance
 TESTS_MULTI += test_multi_standbys
 
+# Tests for Citus
+TESTS_CITUS  = test_basic_citus_operation
+TESTS_CITUS += test_citus_cluster_name
+TESTS_CITUS += test_citus_force_failover
+TESTS_CITUS += test_citus_multi_standbys
+TESTS_CITUS += test_nonha_citus_operation
+TESTS_CITUS += test_citus_skip_pg_hba
+
 # TEST indicates the testfile to run
 TEST ?=
 ifeq ($(TEST),)
 	TEST_ARGUMENT = --where=tests
+else ifeq ($(TEST),citus)
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_CITUS)
 else ifeq ($(TEST),multi)
 	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MULTI)
 else ifeq ($(TEST),single)
