@@ -670,6 +670,8 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	 */
 	bool dropped = false;
 
+	local_postgres_init(&(keeper.postgres), &(config->pgSetup));
+
 	if (keeper_ensure_node_has_been_dropped(&keeper, &dropped) && dropped)
 	{
 		log_info("This node with id %lld in formation \"%s\" and group %d "
