@@ -174,6 +174,9 @@ build-test-pg13:
 build-test-pg14:
 	docker build --build-arg PGVERSION=14 --target test -t $(TEST_CONTAINER_NAME):pg14 .
 
+build-test-pg15:
+	docker build --build-arg PGVERSION=15 --target test -t $(TEST_CONTAINER_NAME):pg15 .
+
 run-test: build-test-pg$(PGVERSION)
 	docker run					                \
 		--name $(TEST_CONTAINER_NAME)		    \
@@ -196,6 +199,9 @@ build-pg13: build-test-pg13
 
 build-pg14: build-test-pg14
 	docker build --build-arg PGVERSION=14 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg14 .
+
+build-pg15: build-test-pg15
+	docker build --build-arg PGVERSION=15 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg15 .
 
 build: build-pg10 build-pg11 build-pg12 build-pg13 build-pg14 ;
 

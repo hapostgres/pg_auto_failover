@@ -52,6 +52,7 @@ extern int HealthCheckTimeout;
 extern int HealthCheckMaxRetries;
 extern int HealthCheckRetryDelay;
 
+extern size_t HealthCheckWorkerShmemSize(void);
 
 extern void InitializeHealthCheckWorker(void);
 extern void HealthCheckWorkerMain(Datum arg);

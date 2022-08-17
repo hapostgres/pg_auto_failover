@@ -139,7 +139,6 @@ static int CompareTimes(struct timeval *leftTime, struct timeval *rightTime);
 static int SubtractTimes(struct timeval base, struct timeval subtract);
 static struct timeval AddTimeMillis(struct timeval base, uint32 additionalMs);
 static void LatchWait(long timeoutMs);
-static size_t HealthCheckWorkerShmemSize(void);
 static void HealthCheckWorkerShmemInit(void);
 
 
@@ -196,10 +195,13 @@ pg_auto_failover_monitor_sighup(SIGNAL_ARGS)
 void
 InitializeHealthCheckWorker(void)
 {
+	/* on PG 15, we use shmem_request_hook_type */
+#if PG_VERSION_NUM < PG_VERSION_15
 	if (!IsUnderPostmaster)
 	{
 		RequestAddinShmemSpace(HealthCheckWorkerShmemSize());
 	}
+#endif
 
 	prev_shmem_startup_hook = shmem_startup_hook;
 	shmem_startup_hook = HealthCheckWorkerShmemInit;
@@ -1086,7 +1088,7 @@ AddTimeMillis(struct timeval base, uint32 additionalMs)
 /*
  * HealthCheckWorkerShmemSize computes how much shared memory is required.
  */
-static size_t
+size_t
 HealthCheckWorkerShmemSize(void)
 {
 	Size size = 0;
