@@ -638,7 +638,7 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	 * so we can take over. This can happen either because --force was used
 	 * or because 30 seconds was not enough time for the service to exit.
 	 */
-	if (!stopped)
+	if (!stopped && pid != 0)
 	{
 		/* if the service isn't terminated, signal it to quit now */
 		log_info("Sending signal %s to pg_autoctl process %d",

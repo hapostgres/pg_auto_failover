@@ -499,6 +499,11 @@ pidfile_as_json(JSON_Value *js, const char *pidfile, bool includeStatus)
 }
 
 
+/*
+ * is_process_stopped reads given pidfile and checks if the included PID
+ * belongs to a process that's still running, and if not, sets the *stopped
+ * boolean to true.
+ */
 bool
 is_process_stopped(const char *pidfile, bool *stopped, pid_t *pid)
 {
@@ -520,8 +525,8 @@ is_process_stopped(const char *pidfile, bool *stopped, pid_t *pid)
 
 
 /*
- * wait_for_process_to_stop waits until the PID found in the pidfile is not running
- * anymore.
+ * wait_for_process_to_stop waits until the PID found in the pidfile is not
+ * running anymore.
  */
 bool
 wait_for_process_to_stop(const char *pidfile, int timeout, bool *stopped, pid_t *pid)
@@ -530,6 +535,12 @@ wait_for_process_to_stop(const char *pidfile, int timeout, bool *stopped, pid_t 
 	{
 		/* errors have already been logged */
 		return false;
+	}
+
+	/* if the process has stopped already, we're done here */
+	if (*stopped)
+	{
+		return true;
 	}
 
 	log_info("An instance of pg_autoctl is running with PID %d, "
