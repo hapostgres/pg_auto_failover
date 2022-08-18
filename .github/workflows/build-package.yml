@@ -25,6 +25,7 @@ jobs:
           - 12
           - 13
           - 14
+          - 15
         TEST:
           - multi
           - single
@@ -52,7 +53,7 @@ jobs:
       - name: Clone and install tools branch
         run: |
           gcc --version
-          git clone -b v0.7.22 --depth 1 https://github.com/citusdata/tools.git ../tools
+          git clone -b v0.8.18 --depth 1 https://github.com/citusdata/tools.git ../tools
           sudo make -C ../tools install
 
       - name: Pre Install steps
