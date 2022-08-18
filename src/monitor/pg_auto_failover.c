@@ -38,7 +38,7 @@
 ProcessUtility_hook_type PreviousProcessUtility_hook = NULL;
 
 
-#if PG_VERSION_NUM >= PG_VERSION_15
+#if PG_VERSION_NUM >= 150000
 static shmem_request_hook_type prev_shmem_request_hook = NULL;
 static void pgautofailover_shmem_request(void);
 #endif
@@ -83,7 +83,7 @@ _PG_init(void)
 						 "configuration variable in postgresql.conf.")));
 	}
 
-#if PG_VERSION_NUM >= PG_VERSION_15
+#if PG_VERSION_NUM >= 150000
 	prev_shmem_request_hook = shmem_request_hook;
 	shmem_request_hook = pgautofailover_shmem_request;
 #endif
@@ -92,7 +92,7 @@ _PG_init(void)
 }
 
 
-#if PG_VERSION_NUM >= PG_VERSION_15
+#if PG_VERSION_NUM >= 150000
 
 /*
  * Requests any additional shared memory required for pg_auto_failover health

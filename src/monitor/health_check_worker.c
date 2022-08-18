@@ -196,7 +196,7 @@ void
 InitializeHealthCheckWorker(void)
 {
 	/* on PG 15, we use shmem_request_hook_type */
-#if PG_VERSION_NUM < PG_VERSION_15
+#if PG_VERSION_NUM < 150000
 	if (!IsUnderPostmaster)
 	{
 		RequestAddinShmemSpace(HealthCheckWorkerShmemSize());
