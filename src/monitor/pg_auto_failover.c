@@ -38,6 +38,12 @@
 ProcessUtility_hook_type PreviousProcessUtility_hook = NULL;
 
 
+#if PG_VERSION_NUM >= 150000
+static shmem_request_hook_type prev_shmem_request_hook = NULL;
+static void pgautofailover_shmem_request(void);
+#endif
+
+
 void _PG_init(void);
 static void StartMonitorNode(void);
 
@@ -77,9 +83,34 @@ _PG_init(void)
 						 "configuration variable in postgresql.conf.")));
 	}
 
+#if PG_VERSION_NUM >= 150000
+	prev_shmem_request_hook = shmem_request_hook;
+	shmem_request_hook = pgautofailover_shmem_request;
+#endif
+
 	StartMonitorNode();
 }
 
+
+#if PG_VERSION_NUM >= 150000
+
+/*
+ * Requests any additional shared memory required for pg_auto_failover health
+ * check worker.
+ */
+static void
+pgautofailover_shmem_request(void)
+{
+	if (prev_shmem_request_hook)
+	{
+		prev_shmem_request_hook();
+	}
+
+	RequestAddinShmemSpace(HealthCheckWorkerShmemSize());
+}
+
+
+#endif
 
 /*
  * StartMonitor register GUCs for monitor mode and starts the
