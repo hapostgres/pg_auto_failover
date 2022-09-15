@@ -167,6 +167,7 @@ tmux_compose_add_monitor(PQExpBuffer script)
  */
 static void
 tmux_compose_add_node(PQExpBuffer script,
+					  PgInstanceKind nodeKind,
 					  int group,
 					  const char *name,
 					  const char *pguser,
@@ -185,18 +186,27 @@ tmux_compose_add_node(PQExpBuffer script,
 
 	char command[BUFSIZE] = { 0 };
 
-	if (group == 0)
+	if (nodeKind == NODE_KIND_STANDALONE)
 	{
 		sformat(command, sizeof(command),
-				"pg_autoctl create coordinator "
+				"pg_autoctl create postgres "
 				"--ssl-self-signed --auth trust --pg-hba-lan --run");
 	}
 	else
 	{
-		sformat(command, sizeof(command),
-				"pg_autoctl create worker "
-				"--ssl-self-signed --auth trust --pg-hba-lan --group %d --run",
-				group);
+		if (group == 0)
+		{
+			sformat(command, sizeof(command),
+					"pg_autoctl create coordinator "
+					"--ssl-self-signed --auth trust --pg-hba-lan --run");
+		}
+		else
+		{
+			sformat(command, sizeof(command),
+					"pg_autoctl create worker "
+					"--ssl-self-signed --auth trust --pg-hba-lan --group %d --run",
+					group);
+		}
 	}
 
 	appendPQExpBuffer(script, "  %s:\n", name);
@@ -256,8 +266,18 @@ prepare_tmux_compose_config(TmuxOptions *options, PQExpBuffer script)
 	{
 		TmuxNode *node = &(tmuxNodeArray.nodes[i]);
 
+		PgInstanceKind kind = NODE_KIND_STANDALONE;
+
+		if (options->withCitus)
+		{
+			kind = node->group == 0
+				   ? NODE_KIND_CITUS_COORDINATOR
+				   : NODE_KIND_CITUS_WORKER;
+		}
+
 		(void) tmux_compose_add_node(
 			script,
+			kind,
 			node->group,
 			node->name,
 			"demo",
