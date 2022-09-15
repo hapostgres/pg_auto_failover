@@ -8,7 +8,8 @@ BUILD_CONTAINER_NAME = pg_auto_failover_build
 TEST_CONTAINER_NAME = pg_auto_failover_test
 DOCKER_RUN_OPTS = --privileged --rm
 
-PGVERSION ?= 10
+PGVERSION ?= 14
+
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
 # Tests for the monitor
@@ -89,7 +90,8 @@ NODES ?= 2						# total count of Postgres nodes
 NODES_ASYNC ?= 0				# count of replication-quorum false nodes
 NODES_PRIOS ?= 50				# either "50", or "50,50", or "50,50,0" etc
 NODES_SYNC_SB ?= -1
-WITH_CITUS = 0
+
+CITUS = 0
 WORKERS = 2
 NODES_SECONDARY = 0
 CLUSTER_OPTS = ""			# could be "--skip-pg-hba"
@@ -268,10 +270,12 @@ build-pg14: build-test-pg14
 build-pg15: build-test-pg15
 	docker build --build-arg PGVERSION=15 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg15 .
 
-build: build-pg10 build-pg11 build-pg12 build-pg13 build-pg14 ;
+#build: build-pg10 build-pg11 build-pg12 build-pg13 build-pg14 ;
+build: build-pg12 build-pg13 build-pg14 ;
 
 build-check:
-	for v in 10 11 12 13 14; do \
+	#for v in 10 11 12 13 14; do
+	for v in 12 13 14; do \
 		docker run --rm -t pg_auto_failover_test:pg$$v pg_autoctl version --json | jq ".pg_version" | xargs echo $$v: ; \
 	done
 
@@ -355,6 +359,8 @@ tmux-compose-session:
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
+         --citus-workers $(WORKERS)       \
+         --citus-secondaries $(NODES_SECONDARY) \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)

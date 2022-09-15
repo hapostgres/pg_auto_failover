@@ -160,17 +160,20 @@ parseCandidatePriorities(char *prioritiesString, int *priorities)
  * a Postgres standalone formation.
  *
  * Whatever the number of nodes asked for, we always create a monitor, one
- * coordinator and two workers. We actually build N coordinators and 2*N
- * workers.
+ * coordinator and W workers. We actually build N coordinators and N*W
+ * workers. With WORKERS=3 and NODES=2 we have
  *
- *  index  name          index-1    (index-1)/2   (index-1)%2  group
+ *  index  name          index-1    (index-1)/3   (index-1)%3  group
  *      0  monitor       -1                                    -1
  *      1  coord0a        0         0             0             0
  *      2  coord0b        1         0             1             0
- *      3  worker1a       2         1             0             1
- *      4  worker1b       3         1             1             1
- *      5  worker2a       4         2             0             2
- *      6  worker2b       5         2             1             2
+ *      3  coord0c        2         0             2             0
+ *      4  worker1a       3         1             0             1
+ *      5  worker1b       4         1             1             1
+ *      6  worker1c       5         1             2             1
+ *      7  worker2a       6         2             0             2
+ *      8  worker2b       7         2             1             2
+ *      9  worker2c       8         2             2             2
  *
  * Citus secondary nodes are using a specific naming convention: coord0S,
  * worker1S, and worker2S. That helps make them easy to spot.
@@ -188,6 +191,7 @@ prepare_node_name(TmuxOptions *options, TmuxNode *node, int index)
 		return;
 	}
 
+	/* now, Citus formations are more complex */
 	if (options->nodes > strlen(alphabet))
 	{
 		log_fatal("Node count %d is not supported, must be less than %lu",
@@ -202,7 +206,7 @@ prepare_node_name(TmuxOptions *options, TmuxNode *node, int index)
 	{
 		sformat(node->name, sizeof(node->name), "monitor");
 	}
-	else if (1 <= index && index <= options->nodes)
+	else if (1 <= index && index <= options->citusWorkers)
 	{
 		/* first N nodes are for the coordinator nodes */
 		char suffix = alphabet[index - 1];
@@ -220,11 +224,11 @@ prepare_node_name(TmuxOptions *options, TmuxNode *node, int index)
 					"cluster_%c", suffix);
 		}
 	}
-	else if (options->nodes < index && index <= totalNodesCount)
+	else if (options->citusWorkers < index && index <= totalNodesCount)
 	{
 		/* then nodes are worker nodes */
-		int group = compute_citus_group(options->nodes, index);
-		int seq = compute_citus_node_seq_in_group(options->nodes, index);
+		int group = compute_citus_group(options->citusWorkers, index);
+		int seq = compute_citus_node_seq_in_group(options->citusWorkers, index);
 		bool secondary =
 			compute_citus_node_is_secondary(
 				options->nodes,
@@ -261,7 +265,7 @@ compute_node_count(TmuxOptions *options)
 	if (options->withCitus)
 	{
 		/* we have the coordinators, options->nodes of them, and the workers */
-		return (options->citusWorkers + 1) * options->nodes;
+		return (options->nodes + 1) * options->citusWorkers;
 	}
 
 	return options->nodes;
@@ -347,8 +351,12 @@ prepareTmuxNodeArray(TmuxOptions *options, TmuxNodeArray *nodeArray)
 
 		if (options->withCitus)
 		{
-			node->group = compute_citus_group(options->nodes, nodeIndex);
-			node->seq = compute_citus_node_seq_in_group(options->nodes, nodeIndex);
+			node->group =
+				compute_citus_group(options->citusWorkers, nodeIndex);
+
+			node->seq =
+				compute_citus_node_seq_in_group(options->citusWorkers, nodeIndex);
+
 			node->secondary =
 				compute_citus_node_is_secondary(options->nodes,
 												options->citusSecondaries,
@@ -386,16 +394,30 @@ prepareTmuxNodeArray(TmuxOptions *options, TmuxNodeArray *nodeArray)
 
 
 	/* some useful debug information */
-	for (int i = 0; i < options->nodes; i++)
+	for (int i = 0; i < totalNodesCount; i++)
 	{
 		TmuxNode *node = &(nodeArray->nodes[i]);
 
-		log_debug("prepareTmuxNodeArray[%d]: %s %d %s %d",
-				  i,
-				  node->name,
-				  node->pgport,
-				  node->replicationQuorum ? "true" : "false",
-				  node->candidatePriority);
+		if (options->withCitus)
+		{
+			log_debug("prepareTmuxNodeArray[%d]: %d/%d %10s %d %5s %d",
+					  i,
+					  node->seq,
+					  node->group,
+					  node->name,
+					  node->pgport,
+					  node->replicationQuorum ? "true" : "false",
+					  node->candidatePriority);
+		}
+		else
+		{
+			log_debug("prepareTmuxNodeArray[%d]: %s %d %5s %d",
+					  i,
+					  node->name,
+					  node->pgport,
+					  node->replicationQuorum ? "true" : "false",
+					  node->candidatePriority);
+		}
 	}
 
 	return true;

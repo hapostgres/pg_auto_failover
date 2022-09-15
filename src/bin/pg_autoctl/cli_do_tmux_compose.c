@@ -34,6 +34,7 @@
 #include "env_utils.h"
 #include "log.h"
 #include "pidfile.h"
+#include "pgsetup.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -166,6 +167,7 @@ tmux_compose_add_monitor(PQExpBuffer script)
  */
 static void
 tmux_compose_add_node(PQExpBuffer script,
+					  int group,
 					  const char *name,
 					  const char *pguser,
 					  const char *dbname,
@@ -181,6 +183,22 @@ tmux_compose_add_node(PQExpBuffer script,
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
+	char command[BUFSIZE] = { 0 };
+
+	if (group == 0)
+	{
+		sformat(command, sizeof(command),
+				"pg_autoctl create coordinator "
+				"--ssl-self-signed --auth trust --pg-hba-lan --run");
+	}
+	else
+	{
+		sformat(command, sizeof(command),
+				"pg_autoctl create worker "
+				"--ssl-self-signed --auth trust --pg-hba-lan --group %d --run",
+				group);
+	}
+
 	appendPQExpBuffer(script, "  %s:\n", name);
 	appendPQExpBuffer(script, "    build: %s\n", currentWorkingDirectory);
 	appendPQExpBuffer(script, "    hostname: %s\n", name);
@@ -191,6 +209,7 @@ tmux_compose_add_node(PQExpBuffer script,
 	appendPQExpBuffer(script, "      PGUSER: %s\n", pguser);
 	appendPQExpBuffer(script, "      PGDATABASE: %s\n", dbname);
 	appendPQExpBuffer(script, "      PG_AUTOCTL_MONITOR: \"%s\"\n", monitor_pguri);
+	appendPQExpBuffer(script, "      PG_AUTOCTL_NODE_NAME: \"%s\"\n", name);
 
 	appendPQExpBuffer(script, "      PG_AUTOCTL_REPLICATION_QUORUM: \"%s\"\n",
 					  replicationQuorum ? "true" : "false");
@@ -199,10 +218,7 @@ tmux_compose_add_node(PQExpBuffer script,
 
 	appendPQExpBuffer(script, "    expose:\n");
 	appendPQExpBuffer(script, "     - 5432\n");
-	appendPQExpBuffer(script, "    command: "
-							  "pg_autoctl create postgres "
-							  "--ssl-self-signed --auth trust "
-							  "--pg-hba-lan --run\n");
+	appendPQExpBuffer(script, "    command: %s\n", command);
 }
 
 
@@ -242,6 +258,7 @@ prepare_tmux_compose_config(TmuxOptions *options, PQExpBuffer script)
 
 		(void) tmux_compose_add_node(
 			script,
+			node->group,
 			node->name,
 			"demo",
 			"demo",
