@@ -169,7 +169,9 @@ tmux_compose_add_node(PQExpBuffer script,
 					  const char *name,
 					  const char *pguser,
 					  const char *dbname,
-					  const char *monitor_pguri)
+					  const char *monitor_pguri,
+					  bool replicationQuorum,
+					  int candidatePriority)
 {
 	char currentWorkingDirectory[MAXPGPATH] = { 0 };
 
@@ -189,6 +191,12 @@ tmux_compose_add_node(PQExpBuffer script,
 	appendPQExpBuffer(script, "      PGUSER: %s\n", pguser);
 	appendPQExpBuffer(script, "      PGDATABASE: %s\n", dbname);
 	appendPQExpBuffer(script, "      PG_AUTOCTL_MONITOR: \"%s\"\n", monitor_pguri);
+
+	appendPQExpBuffer(script, "      PG_AUTOCTL_REPLICATION_QUORUM: \"%s\"\n",
+					  replicationQuorum ? "true" : "false");
+	appendPQExpBuffer(script, "      PG_AUTOCTL_CANDIDATE_PRIORITY: %d\n",
+					  candidatePriority);
+
 	appendPQExpBuffer(script, "    expose:\n");
 	appendPQExpBuffer(script, "     - 5432\n");
 	appendPQExpBuffer(script, "    command: "
@@ -237,7 +245,9 @@ prepare_tmux_compose_config(TmuxOptions *options, PQExpBuffer script)
 			node->name,
 			"demo",
 			"demo",
-			"postgresql://autoctl_node@monitor/pg_auto_failover");
+			"postgresql://autoctl_node@monitor/pg_auto_failover",
+			node->replicationQuorum,
+			node->candidatePriority);
 	}
 
 	appendPQExpBuffer(script, "\n");
