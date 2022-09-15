@@ -423,6 +423,7 @@ cli_create_coordinator_getopts(int argc, char **argv)
 		{ "username", required_argument, NULL, 'U' },
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
+		{ "pg-hba-lan", no_argument, NULL, 'L' },
 		{ "dbname", required_argument, NULL, 'd' },
 		{ "name", required_argument, NULL, 'a' },
 		{ "hostname", required_argument, NULL, 'n' },
@@ -450,7 +451,7 @@ cli_create_coordinator_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:Sd:a:n:f:m:MRVvqhzZ:P:r:xsN",
+								"C:D:H:p:l:U:A:SLd:a:n:f:m:MRVvqhzZ:P:r:xsN",
 								&options);
 
 	options.groupId = 0;
@@ -531,6 +532,7 @@ cli_create_worker_getopts(int argc, char **argv)
 		{ "username", required_argument, NULL, 'U' },
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
+		{ "pg-hba-lan", no_argument, NULL, 'L' },
 		{ "dbname", required_argument, NULL, 'd' },
 		{ "name", required_argument, NULL, 'a' },
 		{ "hostname", required_argument, NULL, 'n' },
@@ -559,7 +561,7 @@ cli_create_worker_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:y:zZ:U:A:Sd:a:n:f:m:MRVvqhzP:r:xsN",
+								"C:D:H:p:l:y:zZ:U:A:SLd:a:n:f:m:MRVvqhzP:r:xsN",
 								&options);
 
 	if (options.groupId == 0)
