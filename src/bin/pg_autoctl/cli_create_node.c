@@ -455,6 +455,14 @@ cli_create_coordinator_getopts(int argc, char **argv)
 
 	options.groupId = 0;
 
+	/* default to --dbname=citus */
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.dbname))
+	{
+		strlcpy(options.pgSetup.dbname,
+				DEFAULT_CITUS_DBNAME,
+				sizeof(options.pgSetup.dbname));
+	}
+
 	/* publish our option parsing in the global variable */
 	keeperOptions = options;
 
@@ -558,6 +566,14 @@ cli_create_worker_getopts(int argc, char **argv)
 	{
 		log_error("A Citus worker must not have a groupId of zero (0).");
 		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* default to --dbname=citus */
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.dbname))
+	{
+		strlcpy(options.pgSetup.dbname,
+				DEFAULT_CITUS_DBNAME,
+				sizeof(options.pgSetup.dbname));
 	}
 
 	/* publish our option parsing in the global variable */
