@@ -54,7 +54,7 @@
  * in local memory. We pre-allocate the memory storage, and limit how many node
  * addresses we can handle because of the pre-allocation strategy.
  */
-#define NODE_ARRAY_MAX_COUNT 12
+#define NODE_ARRAY_MAX_COUNT 128
 
 
 /* abstract representation of a Postgres server that we can connect to */
