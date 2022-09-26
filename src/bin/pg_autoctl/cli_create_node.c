@@ -812,41 +812,11 @@ cli_create_monitor_getopts(int argc, char **argv)
 	/* hard-coded defaults */
 	options.pgSetup.pgport = pgsetup_get_pgport();
 
-	/* support for environment variables */
-	if (env_exists(PG_AUTOCTL_SSL_SELF_SIGNED))
+	/* fetch config values from the environment */
+	if (!cli_common_getenv_pgsetup(&(options.pgSetup), &sslCommandLineOptions))
 	{
-		char selfSigned[BUFSIZE] = { 0 };
-
-		if (!get_env_copy(PG_AUTOCTL_SSL_SELF_SIGNED,
-						  selfSigned,
-						  sizeof(selfSigned)))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		bool sslSelfSigned = false;
-		if (!parse_bool(selfSigned, &sslSelfSigned))
-		{
-			log_fatal("PG_AUTOCTL_SSL_SELF_SIGNED environment variable is not valid."
-					  " Valid values are \"true\" or \"false\".");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		if (sslSelfSigned)
-		{
-			log_warn("PG_AUTOCTL_SSL_SELF_SIGNED: true");
-			if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
-											   sslCommandLineOptions))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_BAD_ARGS);
-			}
-			sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
-
-			options.pgSetup.ssl.active = 1;
-			options.pgSetup.ssl.createSelfSignedCert = true;
-		}
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	optind = 0;

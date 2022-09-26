@@ -112,137 +112,11 @@ cli_common_keeper_getopts(int argc, char **argv,
 	/* default to a "primary" in citus node_role terms */
 	LocalOptionConfig.citusRole = CITUS_ROLE_PRIMARY;
 
-	/* add support for environment variable for some of the options */
-	if (env_exists(PG_AUTOCTL_NODE_NAME))
+	/* fetch config values from the environment */
+	if (!cli_common_getenv(&LocalOptionConfig, sslCommandLineOptions))
 	{
-		if (!get_env_copy(PG_AUTOCTL_NODE_NAME,
-						  LocalOptionConfig.name,
-						  sizeof(LocalOptionConfig.name)))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-	}
-
-	if (env_exists(PG_AUTOCTL_CANDIDATE_PRIORITY))
-	{
-		char prio[BUFSIZE] = { 0 };
-
-		if (!get_env_copy(PG_AUTOCTL_CANDIDATE_PRIORITY, prio, sizeof(prio)))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		int candidatePriority = strtol(prio, NULL, 10);
-		if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
-		{
-			log_fatal("PG_AUTOCTL_CANDIDATE_PRIORITY environment variable is not valid."
-					  " Valid values are integers from 0 to 100. ");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		LocalOptionConfig.pgSetup.settings.candidatePriority = candidatePriority;
-	}
-
-	if (env_exists(PG_AUTOCTL_REPLICATION_QUORUM))
-	{
-		char quorum[BUFSIZE] = { 0 };
-
-		if (!get_env_copy(PG_AUTOCTL_REPLICATION_QUORUM, quorum, sizeof(quorum)))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		bool replicationQuorum = false;
-		if (!parse_bool(quorum, &replicationQuorum))
-		{
-			log_fatal("PG_AUTOCTL_REPLICATION_QUORUM environment variable is not valid."
-					  " Valid values are \"true\" or \"false\".");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		LocalOptionConfig.pgSetup.settings.replicationQuorum = replicationQuorum;
-	}
-
-	if (env_exists(PG_AUTOCTL_SSL_SELF_SIGNED))
-	{
-		char selfSigned[BUFSIZE] = { 0 };
-
-		if (!get_env_copy(PG_AUTOCTL_SSL_SELF_SIGNED,
-						  selfSigned,
-						  sizeof(selfSigned)))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		bool sslSelfSigned = false;
-		if (!parse_bool(selfSigned, &sslSelfSigned))
-		{
-			log_fatal("PG_AUTOCTL_SSL_SELF_SIGNED environment variable is not valid."
-					  " Valid values are \"true\" or \"false\".");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		if (sslSelfSigned)
-		{
-			log_warn("PG_AUTOCTL_SSL_SELF_SIGNED: true");
-			if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
-											   *sslCommandLineOptions))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_BAD_ARGS);
-			}
-			*sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
-
-			LocalOptionConfig.pgSetup.ssl.active = 1;
-			LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = true;
-		}
-	}
-
-	if (env_exists(PG_AUTOCTL_AUTH_METHOD))
-	{
-		if (!get_env_copy(PG_AUTOCTL_AUTH_METHOD,
-						  LocalOptionConfig.pgSetup.authMethod,
-						  sizeof(LocalOptionConfig.pgSetup.authMethod)))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
-		{
-			strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
-					pgsetup_hba_level_to_string(HBA_EDIT_MINIMAL),
-					sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
-
-			LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_MINIMAL;
-		}
-	}
-
-	if (env_exists(PG_AUTOCTL_PG_HBA_LAN))
-	{
-		char hbaLevel[BUFSIZE] = { 0 };
-
-		if (!get_env_copy(PG_AUTOCTL_PG_HBA_LAN, hbaLevel, sizeof(hbaLevel)))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		bool pgHBAlan = false;
-		if (!parse_bool(hbaLevel, &pgHBAlan))
-		{
-			log_fatal("PG_AUTOCTL_PG_HBA_LAN environment variable is not valid."
-					  " Valid values are \"true\" or \"false\".");
-			exit(EXIT_CODE_BAD_ARGS);
-		}
-
-		strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
-				pgsetup_hba_level_to_string(HBA_EDIT_LAN),
-				sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	optind = 0;
@@ -1008,6 +882,162 @@ cli_common_get_set_pgdata_or_exit(PostgresSetup *pgSetup)
 		/* from now on want PGDATA set in the environment */
 		setenv("PGDATA", pgSetup->pgdata, 1);
 	}
+}
+
+
+/*
+ * cli_common_getenv reads the environment variables that are supported by
+ * pg_autoctl before parsing command line options.
+ */
+bool
+cli_common_getenv(KeeperConfig *options,
+				  SSLCommandLineOptions *sslCommandLineOptions)
+{
+	/* add support for environment variable for some of the options */
+	if (env_exists(PG_AUTOCTL_NODE_NAME))
+	{
+		if (!get_env_copy(PG_AUTOCTL_NODE_NAME,
+						  options->name,
+						  sizeof(options->name)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	if (env_exists(PG_AUTOCTL_CANDIDATE_PRIORITY))
+	{
+		char prio[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_CANDIDATE_PRIORITY, prio, sizeof(prio)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		int candidatePriority = strtol(prio, NULL, 10);
+		if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
+		{
+			log_fatal("PG_AUTOCTL_CANDIDATE_PRIORITY environment variable "
+					  " is not valid. Valid values are integers from 0 to 100.");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		options->pgSetup.settings.candidatePriority = candidatePriority;
+	}
+
+	if (env_exists(PG_AUTOCTL_REPLICATION_QUORUM))
+	{
+		char quorum[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_REPLICATION_QUORUM, quorum, sizeof(quorum)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		bool replicationQuorum = false;
+		if (!parse_bool(quorum, &replicationQuorum))
+		{
+			log_fatal("PG_AUTOCTL_REPLICATION_QUORUM environment variable "
+					  "is not valid. Valid values are \"true\" or \"false\".");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		options->pgSetup.settings.replicationQuorum = replicationQuorum;
+	}
+
+	return cli_common_getenv_pgsetup(&(options->pgSetup), sslCommandLineOptions);
+}
+
+
+/*
+ * cli_common_getenv_pgsetup reads the environment variables that are supported
+ * by pg_autoctl before parsing command line options.
+ */
+bool
+cli_common_getenv_pgsetup(PostgresSetup *pgSetup,
+						  SSLCommandLineOptions *sslCommandLineOptions)
+{
+	if (env_exists(PG_AUTOCTL_SSL_SELF_SIGNED))
+	{
+		char selfSigned[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_SSL_SELF_SIGNED,
+						  selfSigned,
+						  sizeof(selfSigned)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		bool sslSelfSigned = false;
+		if (!parse_bool(selfSigned, &sslSelfSigned))
+		{
+			log_fatal("PG_AUTOCTL_SSL_SELF_SIGNED environment variable "
+					  "is not valid. Valid values are \"true\" or \"false\".");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (sslSelfSigned)
+		{
+			if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
+											   *sslCommandLineOptions))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+			*sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
+
+			pgSetup->ssl.active = 1;
+			pgSetup->ssl.createSelfSignedCert = true;
+		}
+	}
+
+	if (env_exists(PG_AUTOCTL_AUTH_METHOD))
+	{
+		if (!get_env_copy(PG_AUTOCTL_AUTH_METHOD,
+						  pgSetup->authMethod,
+						  sizeof(pgSetup->authMethod)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (pgSetup->hbaLevel == HBA_EDIT_UNKNOWN)
+		{
+			strlcpy(pgSetup->hbaLevelStr,
+					pgsetup_hba_level_to_string(HBA_EDIT_MINIMAL),
+					sizeof(pgSetup->hbaLevelStr));
+
+			pgSetup->hbaLevel = HBA_EDIT_MINIMAL;
+		}
+	}
+
+	if (env_exists(PG_AUTOCTL_PG_HBA_LAN))
+	{
+		char hbaLevel[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_PG_HBA_LAN, hbaLevel, sizeof(hbaLevel)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		bool pgHBAlan = false;
+		if (!parse_bool(hbaLevel, &pgHBAlan))
+		{
+			log_fatal("PG_AUTOCTL_PG_HBA_LAN environment variable is not valid."
+					  " Valid values are \"true\" or \"false\".");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		strlcpy(pgSetup->hbaLevelStr,
+				pgsetup_hba_level_to_string(HBA_EDIT_LAN),
+				sizeof(pgSetup->hbaLevelStr));
+	}
+
+	return true;
 }
 
 
