@@ -166,6 +166,85 @@ cli_common_keeper_getopts(int argc, char **argv,
 		LocalOptionConfig.pgSetup.settings.replicationQuorum = replicationQuorum;
 	}
 
+	if (env_exists(PG_AUTOCTL_SSL_SELF_SIGNED))
+	{
+		char selfSigned[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_SSL_SELF_SIGNED,
+						  selfSigned,
+						  sizeof(selfSigned)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		bool sslSelfSigned = false;
+		if (!parse_bool(selfSigned, &sslSelfSigned))
+		{
+			log_fatal("PG_AUTOCTL_SSL_SELF_SIGNED environment variable is not valid."
+					  " Valid values are \"true\" or \"false\".");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (sslSelfSigned)
+		{
+			log_warn("PG_AUTOCTL_SSL_SELF_SIGNED: true");
+			if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
+											   *sslCommandLineOptions))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+			*sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
+
+			LocalOptionConfig.pgSetup.ssl.active = 1;
+			LocalOptionConfig.pgSetup.ssl.createSelfSignedCert = true;
+		}
+	}
+
+	if (env_exists(PG_AUTOCTL_AUTH_METHOD))
+	{
+		if (!get_env_copy(PG_AUTOCTL_AUTH_METHOD,
+						  LocalOptionConfig.pgSetup.authMethod,
+						  sizeof(LocalOptionConfig.pgSetup.authMethod)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (LocalOptionConfig.pgSetup.hbaLevel == HBA_EDIT_UNKNOWN)
+		{
+			strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+					pgsetup_hba_level_to_string(HBA_EDIT_MINIMAL),
+					sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+
+			LocalOptionConfig.pgSetup.hbaLevel = HBA_EDIT_MINIMAL;
+		}
+	}
+
+	if (env_exists(PG_AUTOCTL_PG_HBA_LAN))
+	{
+		char hbaLevel[BUFSIZE] = { 0 };
+
+		if (!get_env_copy(PG_AUTOCTL_PG_HBA_LAN, hbaLevel, sizeof(hbaLevel)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		bool pgHBAlan = false;
+		if (!parse_bool(hbaLevel, &pgHBAlan))
+		{
+			log_fatal("PG_AUTOCTL_PG_HBA_LAN environment variable is not valid."
+					  " Valid values are \"true\" or \"false\".");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		strlcpy(LocalOptionConfig.pgSetup.hbaLevelStr,
+				pgsetup_hba_level_to_string(HBA_EDIT_LAN),
+				sizeof(LocalOptionConfig.pgSetup.hbaLevelStr));
+	}
+
 	optind = 0;
 
 	while ((c = getopt_long(argc, argv,

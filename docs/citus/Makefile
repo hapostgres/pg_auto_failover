@@ -1,4 +1,4 @@
-CONTAINER_NAME = pg_auto_failover:cluster
+CONTAINER_NAME = pg_auto_failover:citus
 
 all: build up;
 

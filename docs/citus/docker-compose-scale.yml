@@ -3,17 +3,16 @@ version: "3.9"  # optional since v1.27.0
 services:
 
   monitor:
-    image: pg_auto_failover:cluster
+    image: pg_auto_failover:citus
     environment:
       PGDATA: /tmp/pgaf
-      PG_AUTOCTL_DEBUG: 1
     command: |
       pg_autoctl create monitor --ssl-self-signed --auth trust --run
     expose:
       - 5432
 
   coord:
-    image: pg_auto_failover:cluster
+    image: pg_auto_failover:citus
     environment:
       PGDATA: /tmp/pgaf
       PGUSER: citus
@@ -25,7 +24,7 @@ services:
       pg_autoctl create coordinator --ssl-self-signed --auth trust --pg-hba-lan --run
 
   worker:
-    image: pg_auto_failover:cluster
+    image: pg_auto_failover:citus
     environment:
       PGDATA: /tmp/pgaf
       PGUSER: citus

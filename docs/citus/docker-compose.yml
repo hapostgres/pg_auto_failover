@@ -1,0 +1,99 @@
+version: "3.9"  # optional since v1.27.0
+
+x-coord: &coordinator
+  image: pg_auto_failover:citus
+  environment:
+    PGDATA: /tmp/pgaf
+    PGUSER: citus
+    PGDATABASE: citus
+    PG_AUTOCTL_HBA_LAN: true
+    PG_AUTOCTL_AUTH_METHOD: "trust"
+    PG_AUTOCTL_SSL_SELF_SIGNED: true
+    PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
+  expose:
+    - 5432
+
+x-worker: &worker
+  image: pg_auto_failover:citus
+  environment:
+    PGDATA: /tmp/pgaf
+    PGUSER: citus
+    PGDATABASE: citus
+    PG_AUTOCTL_HBA_LAN: true
+    PG_AUTOCTL_AUTH_METHOD: "trust"
+    PG_AUTOCTL_SSL_SELF_SIGNED: true
+    PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
+  expose:
+    - 5432
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    environment:
+      PGUSER: citus
+      PGDATABASE: citus
+      PGHOST: coord0a,coord0b
+      PGPORT: 5432
+      PGAPPNAME: demo
+      PGSSLMODE: require
+      PGTARGETSESSIONATTRS: read-write
+
+  monitor:
+    image: pg_auto_failover:citus
+    environment:
+      PGDATA: /tmp/pgaf
+      PG_AUTOCTL_SSL_SELF_SIGNED: true
+    expose:
+      - 5432
+    command: |
+      pg_autoctl create monitor --auth trust --run
+
+  coord0a:
+    <<: *coordinator
+    hostname: coord0a
+    command: |
+      pg_autoctl create coordinator --name coord0a --run
+
+  coord0b:
+    <<: *coordinator
+    hostname: coord0b
+    command: |
+      pg_autoctl create coordinator --name coord0b --run
+
+  worker1a:
+    <<: *worker
+    hostname: worker1a
+    command: |
+      pg_autoctl create worker --group 1 --name worker1a --run
+
+  worker1b:
+    <<: *worker
+    hostname: worker1b
+    command: |
+      pg_autoctl create worker --group 1 --name worker1b --run
+
+  worker2a:
+    <<: *worker
+    hostname: worker2a
+    command: |
+      pg_autoctl create worker --group 2 --name worker2a --run
+
+  worker2b:
+    <<: *worker
+    hostname: worker2b
+    command: |
+      pg_autoctl create worker --group 2 --name worker2b --run
+
+  worker3a:
+    <<: *worker
+    hostname: worker3a
+    command: |
+      pg_autoctl create worker --group 3 --name worker3a --run
+
+  worker3b:
+    <<: *worker
+    hostname: worker3b
+    command: |
+      pg_autoctl create worker --group 3 --name worker3b --run

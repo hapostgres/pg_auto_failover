@@ -27,10 +27,9 @@ matches very well to provisioning separate physical machines on-prem, or
 Virtual Machines either on-prem on in a Cloud service.
 
 The docker image used in this tutorial is named `pg_auto_failover:cluster`.
-It can be built locally when using the attached `Dockerfile`__ found within
-the GitHub repository for pg_auto_failover.
-
-__ https://github.com/citusdata/pg_auto_failover/blob/master/docs/cluster/Dockerfile
+It can be built locally when using the attached :download:`Dockerfile
+<citus/Dockerfile>` found within the GitHub repository for
+pg_auto_failover.
 
 To build the image, either use the provided Makefile and run ``make build``,
 or run the docker build command directly:
@@ -39,14 +38,16 @@ or run the docker build command directly:
 
    $ git clone https://github.com/citusdata/pg_auto_failover
    $ cd pg_auto_failover/docs/cluster
-   $ docker build -t $(CONTAINER_NAME) -f Dockerfile ../..
 
-Create a Citus Cluster
-----------------------
+   $ docker build -t pg_auto_failover:citus -f Dockerfile ../..
+   $ docker-compose build
+
+Our first Citus Cluster
+-----------------------
 
 To create a cluster we use the following docker-compose definition:
 
-.. literalinclude:: cluster/docker-compose.yml
+.. literalinclude:: citus/docker-compose-scale.yml
    :language: yaml
    :emphasize-lines: 5,15,27
    :linenos:
@@ -165,7 +166,7 @@ Create a Citus Cluster, take two
 
 This time we create a cluster using the following docker-compose definition:
 
-.. literalinclude:: cluster/docker-compose-anchors.yml
+.. literalinclude:: citus/docker-compose.yml
    :language: yaml
    :emphasize-lines: 3,15,40,44,48,52,56,60,64,68
    :linenos:
@@ -177,28 +178,32 @@ actual nodes.
 
 __ https://yaml101.com/anchors-and-aliases/
 
-We start this cluster as in the previous section:
+Also this time we provision an application service (named "app") that sits
+in the backgound and allow us to later connect to our current primary
+coordinator. See :download:`Dockerfile.app <citus/Dockerfile.app>` for the
+complete definition of this service.
+
+We start this cluster with a simplified command line this time:
 
 ::
 
-   $ docker-compose up --scale coord=2 --scale worker=6
+   $ docker-compose up
 
 And this time we get the following cluster as a result:
 
 ::
 
    $ docker-compose exec monitor pg_autoctl show state
-
        Name |  Node |     Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ---------+-------+---------------+----------------+--------------+---------------------+--------------------
-    coord0a |   0/4 |  coord0b:5432 |   1: 0/3000110 |   read-write |             primary |             primary
-    coord0b |   0/7 |  coord0a:5432 |   1: 0/3000110 |    read-only |           secondary |           secondary
-   worker1a |   1/1 | worker1b:5432 |   1: 0/3000110 |   read-write |             primary |             primary
-   worker1b |   1/8 | worker1a:5432 |   1: 0/3000110 |    read-only |           secondary |           secondary
-   worker2a |   2/2 | worker2b:5432 |   1: 0/3000110 |   read-write |             primary |             primary
-   worker2b |   2/5 | worker2a:5432 |   1: 0/3000110 |    read-only |           secondary |           secondary
-   worker3a |   3/3 | worker3a:5432 |   1: 0/3000110 |   read-write |             primary |             primary
-   worker3b |   3/6 | worker3b:5432 |   1: 0/3000110 |    read-only |           secondary |           secondary
+    coord0a |   0/3 |  coord0a:5432 |   1: 0/312B040 |   read-write |             primary |             primary
+    coord0b |   0/4 |  coord0b:5432 |   1: 0/312B040 |    read-only |           secondary |           secondary
+   worker1a |   1/1 | worker1a:5432 |   1: 0/311C550 |   read-write |             primary |             primary
+   worker1b |   1/2 | worker1b:5432 |   1: 0/311C550 |    read-only |           secondary |           secondary
+   worker2b |   2/7 | worker2b:5432 |   2: 0/5032698 |   read-write |             primary |             primary
+   worker2a |   2/8 | worker2a:5432 |   2: 0/5032698 |    read-only |           secondary |           secondary
+   worker3a |   3/5 | worker3a:5432 |   1: 0/311C870 |   read-write |             primary |             primary
+   worker3b |   3/6 | worker3b:5432 |   1: 0/311C870 |    read-only |           secondary |           secondary
 
 
 And then we have the following application connection string to use:
@@ -219,8 +224,8 @@ sense:
    $ docker-compose exec coord0a psql -d citus -c 'select * from citus_get_active_worker_nodes()'
     node_name | node_port
    -----------+-----------
+    worker1a  |      5432
     worker3a  |      5432
-    worker1b  |      5432
     worker2b  |      5432
    (3 rows)
 
@@ -236,7 +241,7 @@ Our first Citus worker failover
 -------------------------------
 
 We see that in the ``citus_get_active_worker_nodes()`` output we have
-``worker3a``, ``worker1b``, and ``worker2b``. As mentionned before, that
+``worker1a``, ``worker2b``, and ``worker3a``. As mentionned before, that
 should have no impact on the operations of the Citus cluster when nodes are
 all dimensionned the same.
 
@@ -252,20 +257,20 @@ then. With pg_auto_failover, this is as easy as doing:
    15:40:03 9246 INFO  Following table displays times when notifications are received
        Time |     Name |  Node |     Host:Port |       Current State |      Assigned State
    ---------+----------+-------+---------------+---------------------+--------------------
-   15:40:03 | worker2a |   2/2 | worker2b:5432 |             primary |            draining
-   15:40:03 | worker2b |   2/5 | worker2a:5432 |           secondary |   prepare_promotion
-   15:40:03 | worker2a |   2/2 | worker2b:5432 |            draining |            draining
-   15:40:03 | worker2b |   2/5 | worker2a:5432 |   prepare_promotion |   prepare_promotion
-   15:40:03 | worker2b |   2/5 | worker2a:5432 |   prepare_promotion |        wait_primary
-   15:40:03 | worker2a |   2/2 | worker2b:5432 |            draining |             demoted
-   15:40:03 | worker2a |   2/2 | worker2b:5432 |             demoted |             demoted
-   15:40:04 | worker2b |   2/5 | worker2a:5432 |        wait_primary |        wait_primary
-   15:40:04 | worker2a |   2/2 | worker2b:5432 |             demoted |          catchingup
-   15:40:07 | worker2a |   2/2 | worker2b:5432 |          catchingup |          catchingup
-   15:40:07 | worker2a |   2/2 | worker2b:5432 |          catchingup |           secondary
-   15:40:07 | worker2a |   2/2 | worker2b:5432 |           secondary |           secondary
-   15:40:07 | worker2b |   2/5 | worker2a:5432 |        wait_primary |             primary
-   15:40:07 | worker2b |   2/5 | worker2a:5432 |             primary |             primary
+   22:58:42 | worker2b |   2/7 | worker2b:5432 |             primary |            draining
+   22:58:42 | worker2a |   2/8 | worker2a:5432 |           secondary |   prepare_promotion
+   22:58:42 | worker2a |   2/8 | worker2a:5432 |   prepare_promotion |   prepare_promotion
+   22:58:42 | worker2a |   2/8 | worker2a:5432 |   prepare_promotion |        wait_primary
+   22:58:42 | worker2b |   2/7 | worker2b:5432 |             primary |             demoted
+   22:58:42 | worker2b |   2/7 | worker2b:5432 |            draining |             demoted
+   22:58:42 | worker2b |   2/7 | worker2b:5432 |             demoted |             demoted
+   22:58:43 | worker2a |   2/8 | worker2a:5432 |        wait_primary |        wait_primary
+   22:58:44 | worker2b |   2/7 | worker2b:5432 |             demoted |          catchingup
+   22:58:46 | worker2b |   2/7 | worker2b:5432 |          catchingup |          catchingup
+   22:58:46 | worker2b |   2/7 | worker2b:5432 |          catchingup |           secondary
+   22:58:46 | worker2b |   2/7 | worker2b:5432 |           secondary |           secondary
+   22:58:46 | worker2a |   2/8 | worker2a:5432 |        wait_primary |             primary
+   22:58:46 | worker2a |   2/8 | worker2a:5432 |             primary |             primary
 
 So it took around 5 seconds to do a full worker failover in worker group 2.
 Now we'll do the same on the group 1 to fix the other situation, and review
@@ -273,19 +278,17 @@ the resulting cluster state.
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl perform failover --group 2
-   ...
    $ docker-compose exec monitor pg_autoctl show state
-          Name |  Node |     Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
+       Name |  Node |     Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ---------+-------+---------------+----------------+--------------+---------------------+--------------------
-    coord0a |   0/4 |  coord0b:5432 |   1: 0/312C6F8 |   read-write |             primary |             primary
-    coord0b |   0/7 |  coord0a:5432 |   1: 0/312C6F8 |    read-only |           secondary |           secondary
-   worker1a |   1/1 | worker1b:5432 |   2: 0/50000D8 |    read-only |           secondary |           secondary
-   worker1b |   1/8 | worker1a:5432 |   2: 0/50000D8 |   read-write |             primary |             primary
-   worker2a |   2/2 | worker2b:5432 |   2: 0/5032838 |    read-only |           secondary |           secondary
-   worker2b |   2/5 | worker2a:5432 |   2: 0/5032838 |   read-write |             primary |             primary
-   worker3a |   3/3 | worker3a:5432 |   1: 0/311C838 |   read-write |             primary |             primary
-   worker3b |   3/6 | worker3b:5432 |   1: 0/311C838 |    read-only |           secondary |           secondary
+    coord0a |   0/3 |  coord0a:5432 |   1: 0/312ADA8 |   read-write |             primary |             primary
+    coord0b |   0/4 |  coord0b:5432 |   1: 0/312ADA8 |    read-only |           secondary |           secondary
+   worker1a |   1/1 | worker1a:5432 |   1: 0/311B610 |   read-write |             primary |             primary
+   worker1b |   1/2 | worker1b:5432 |   1: 0/311B610 |    read-only |           secondary |           secondary
+   worker2b |   2/7 | worker2b:5432 |   2: 0/50000D8 |    read-only |           secondary |           secondary
+   worker2a |   2/8 | worker2a:5432 |   2: 0/50000D8 |   read-write |             primary |             primary
+   worker3a |   3/5 | worker3a:5432 |   1: 0/311B648 |   read-write |             primary |             primary
+   worker3b |   3/6 | worker3b:5432 |   1: 0/311B648 |    read-only |           secondary |           secondary
 
 Which seen from the Citus coordinator, looks like the following:
 
@@ -304,111 +307,137 @@ Distribute Data to Workers
 
 Let's create a database schema with a single distributed table.
 
-.. code-block:: bash
+::
 
-  psql $COORD
+   $ docker-compose exec app psql
 
-.. code-block:: psql
+.. code-block:: sql
 
   -- in psql
 
-  CREATE TABLE companies (
-    id bigserial PRIMARY KEY,
-    name text NOT NULL,
-    image_url text,
+  CREATE TABLE companies
+  (
+    id         bigserial PRIMARY KEY,
+    name       text NOT NULL,
+    image_url  text,
     created_at timestamp without time zone NOT NULL,
     updated_at timestamp without time zone NOT NULL
   );
 
   SELECT create_distributed_table('companies', 'id');
 
-Next download and ingest some sample data.
+Next download and ingest some sample data, still from within our psql session:
 
-.. code-block:: bash
+::
 
-  curl -O https://examples.citusdata.com/mt_ref_arch/companies.csv
-  psql $COORD -c "\copy companies from 'companies.csv' with csv"
-  # ( COPY 75 )
+   \copy companies from program 'curl -o- https://examples.citusdata.com/mt_ref_arch/companies.csv' with csv
+   # ( COPY 75 )
 
 Handle Worker Failure
 ---------------------
 
-Now we'll intentionally crash a worker's primary node and observe how the pg_auto_failover monitor unregisters that node in the coordinator and registers the secondary instead.
+Now we'll intentionally crash a worker's primary node and observe how the
+pg_auto_failover monitor unregisters that node in the coordinator and
+registers the secondary instead.
 
-.. code-block:: bash
+::
 
-  # the pg_auto_failover keeper process will be unable to resurrect
-  # the worker node if pg_control has been removed
-  rm w1_a/global/pg_control
+   # the pg_auto_failover keeper process will be unable to resurrect
+   # the worker node if pg_control has been removed
+   $ docker-compose exec worker1a rm /tmp/pgaf/global/pg_control
 
-  # shut it down
-  pg_ctl stop -D w1_a
+   # shut it down
+   $ docker-compose exec worker1a /usr/lib/postgresql/14/bin/pg_ctl stop -D /tmp/pgaf
 
-The keeper will attempt to start worker 1a three times and then report the failure to the monitor, who promotes worker 1b to replace 1a. Worker 1a is unregistered with the coordinator node, and 1b is registered in its stead.
+The keeper will attempt to start worker 1a three times and then report the
+failure to the monitor, who promotes worker1b to replace worker1a. Citus
+worker worker1a is unregistered with the coordinator node, and worker1b is
+registered in its stead.
 
-Asking the coordinator for active worker nodes now shows 1b and 2a (ports 6021 and 6030).
+Asking the coordinator for active worker nodes now shows worker1b, worker2a,
+and worker3a:
 
-.. code-block:: bash
+::
 
-  psql $COORD -c 'select * from master_get_active_worker_nodes();'
+   $ docker-compose exec app psql -c 'select * from master_get_active_worker_nodes();'
 
-   node_name | node_port
-  -----------+-----------
-   127.0.0.1 |      6021
-   127.0.0.1 |      6030
+    node_name | node_port
+   -----------+-----------
+    worker3a  |      5432
+    worker2a  |      5432
+    worker1b  |      5432
+   (3 rows)
 
 Finally, verify that all rows of data are still present:
 
-.. code-block:: bash
+::
 
-  psql $COORD -c 'select count(*) from companies;'
+   $ docker-compose exec app psql -c 'select count(*) from companies;'
+    count
+   -------
+       75
 
-   count
-  -------
-      75
+Meanwhile, the keeper on worker 1a heals the node. It runs ``pg_basebackup``
+to fetch the current PGDATA from worker1a. This restores, among other
+things, a new copy of the file we removed. After streaming replication
+completes, worker1b becomes a full-fledged primary and worker1a its
+secondary.
 
-Meanwhile, the keeper on worker 1a heals the node. It runs pg_basebackup on restore from worker 1b. This restores, among other things, a new copy of the file we removed. After streaming replication completes, worker 1b becomes a full-fledged primary and 1a its secondary.
+::
+
+   $ docker-compose exec monitor pg_autoctl show state
+       Name |  Node |     Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
+   ---------+-------+---------------+----------------+--------------+---------------------+--------------------
+    coord0a |   0/3 |  coord0a:5432 |   1: 0/3178B20 |   read-write |             primary |             primary
+    coord0b |   0/4 |  coord0b:5432 |   1: 0/3178B20 |    read-only |           secondary |           secondary
+   worker1a |   1/1 | worker1a:5432 |   2: 0/504C400 |    read-only |           secondary |           secondary
+   worker1b |   1/2 | worker1b:5432 |   2: 0/504C400 |   read-write |             primary |             primary
+   worker2b |   2/7 | worker2b:5432 |   2: 0/50FF048 |    read-only |           secondary |           secondary
+   worker2a |   2/8 | worker2a:5432 |   2: 0/50FF048 |   read-write |             primary |             primary
+   worker3a |   3/5 | worker3a:5432 |   1: 0/31CD8C0 |   read-write |             primary |             primary
+   worker3b |   3/6 | worker3b:5432 |   1: 0/31CD8C0 |    read-only |           secondary |           secondary
+
+
 
 Handle Coordinator Failure
 --------------------------
 
-Because our ``$COORD`` connection string includes both ``127.0.0.1:6010`` and ``127.0.0.1:6011`` with the provision that ``target_session_attrs=read-write``, the database client will connect to whichever of these servers supports both reads and writes. Secondary nodes do not support writes, so the client will connect to the primary. This is currently the node listening on port 6010:
+Because our application connection string includes both coordinator hosts
+with the option ``target_session_attrs=read-write``, the database client
+will connect to whichever of these servers supports both reads and writes.
 
-.. code-block:: text
+However if we use the same trick with the pg_control file to crash our
+primary coordinator, we can watch how the monitor promotes the secondary.
 
-  psql $COORD -c \
-    "SELECT setting FROM pg_settings WHERE name = 'port';"
+::
 
-   setting
-  ---------
-   6010
+   $ docker-compose exec coord0a rm /tmp/pgaf/global/pg_control
+   $ docker-compose exec coord0a /usr/lib/postgresql/14/bin/pg_ctl stop -D /tmp/pgaf
 
-However if we use the same trick with the pg_control file to crash our primary coordinator, we can watch how the monitor promotes the secondary.
+After some time, coordinator A's keeper heals it, and the cluster converges
+in this state:
 
-.. code-block:: bash
+::
 
-  rm coord_a/global/pg_control
-  pg_ctl stop -D coord_a
+   $ docker-compose exec monitor pg_autoctl show state
+       Name |  Node |     Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
+   ---------+-------+---------------+----------------+--------------+---------------------+--------------------
+    coord0a |   0/3 |  coord0a:5432 |   2: 0/50000D8 |    read-only |           secondary |           secondary
+    coord0b |   0/4 |  coord0b:5432 |   2: 0/50000D8 |   read-write |             primary |             primary
+   worker1a |   1/1 | worker1a:5432 |   2: 0/504C520 |    read-only |           secondary |           secondary
+   worker1b |   1/2 | worker1b:5432 |   2: 0/504C520 |   read-write |             primary |             primary
+   worker2b |   2/7 | worker2b:5432 |   2: 0/50FF130 |    read-only |           secondary |           secondary
+   worker2a |   2/8 | worker2a:5432 |   2: 0/50FF130 |   read-write |             primary |             primary
+   worker3a |   3/5 | worker3a:5432 |   1: 0/31CD8C0 |   read-write |             primary |             primary
+   worker3b |   3/6 | worker3b:5432 |   1: 0/31CD8C0 |    read-only |           secondary |           secondary
 
-  # then observe the switch
 
-  psql $COORD -c \
-    "SELECT setting FROM pg_settings WHERE name = 'port';"
+We can check that the data is still available through the new coordinator
+node too:
 
-   setting
-  ---------
-   6011
+::
 
-After some time, coordinator A's keeper heals it, and the cluster converges in this state:
-
-.. code-block:: bash
-
-  pg_autoctl show state --pgdata ./monitor
-       Name |   Port | Group |  Node |     Current State |    Assigned State
-  ----------+--------+-------+-------+-------------------+------------------
-  127.0.0.1 |   6010 |     0 |     1 |         secondary |         secondary
-  127.0.0.1 |   6011 |     0 |     2 |           primary |           primary
-  127.0.0.1 |   6020 |     1 |     3 |         secondary |         secondary
-  127.0.0.1 |   6021 |     1 |     4 |           primary |           primary
-  127.0.0.1 |   6030 |     2 |     5 |           primary |           primary
-  127.0.0.1 |   6031 |     2 |     6 |         secondary |         secondary
+   $ docker-compose exec app psql -c 'select count(*) from companies;'
+    count
+   -------
+       75
