@@ -2,7 +2,7 @@ name: Build Package
 
 env:
   TRAVIS: "true"
-  CITUSVERSION: 10.1
+  CITUSVERSION: 11.1
 
 on:
   push:
@@ -39,6 +39,17 @@ jobs:
             TEST: tablespaces
           - PGVERSION: 14
             TEST: linting
+<<<<<<< HEAD
+=======
+            LINTING: true
+        exclude:
+          - PGVERSION: 10
+            TEST: citus
+          - PGVERSION: 11
+            TEST: citus
+          - PGVERSION: 12
+            TEST: citus
+>>>>>>> 118fe062 (Review how to install the Postgres Citus package in CI.)
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
