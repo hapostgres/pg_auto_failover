@@ -22,7 +22,7 @@ every PostgreSQL node it manages. A health-check is successful when it is
 able to connect to the PostgreSQL node using the PostgreSQL protocol
 (libpq), imitating the ``pg_isready`` command.
 
-How frequent those health checks are (20s by default), the PostgreSQL
+How frequent those health checks are (5s by default), the PostgreSQL
 connection timeout in use (5s by default), and how many times to retry in
 case of a failure before marking the node unhealthy (2 by default) are GUC
 variables that you can set on the Monitor node itself. Remember, the monitor
@@ -35,7 +35,7 @@ PostgreSQL configuration settings::
                    name                   | setting
  -----------------------------------------+---------
   pgautofailover.health_check_max_retries | 2
-  pgautofailover.health_check_period      | 20000
+  pgautofailover.health_check_period      | 5000
   pgautofailover.health_check_retry_delay | 2000
   pgautofailover.health_check_timeout     | 5000
  (4 rows)
