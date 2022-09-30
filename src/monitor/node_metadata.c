@@ -1216,7 +1216,7 @@ AddAutoFailoverNode(char *formationId,
 		"                      chr(ascii('a') + "
 		"                      (select count(*) "
 		"                         from " AUTO_FAILOVER_NODE_TABLE
-		"                        where groupid = $3 "
+		"                        where formationid = $1 and groupid = $3 "
 		"                      )::int )) "
 		"        end "
 		"   else $4 "
