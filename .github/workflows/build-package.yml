@@ -61,4 +61,4 @@ jobs:
           if [ -n "${LINTING}" ]; then citus_indent --check; fi
           if [ -n "${LINTING}" ]; then black --check .; fi
           if [ -n "${LINTING}" ]; then ci/banned.h.sh; fi
-          if [ -z "${LINTING}" ]; make run-test; fi
+          if [ -z "${LINTING}" ]; then make run-test; fi
