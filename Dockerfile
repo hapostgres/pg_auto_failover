@@ -42,6 +42,7 @@ RUN apt-get update \
     libzstd-dev \
     uuid-dev \
 	make \
+	autoconf \
     openssl \
     pipenv \
     python3-nose \
@@ -79,10 +80,11 @@ RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 FROM base as citus
 
 ARG PGVERSION
+ARG CITUSTAG=v11.1.2
 
 ENV PG_CONFIG /usr/lib/postgresql/${PGVERSION}/bin/pg_config
 
-RUN git clone -b v11.0.6 --depth 1 https://github.com/citusdata/citus.git /usr/src/citus
+RUN git clone -b ${CITUSTAG} --depth 1 https://github.com/citusdata/citus.git /usr/src/citus
 WORKDIR /usr/src/citus
 
 RUN ./configure

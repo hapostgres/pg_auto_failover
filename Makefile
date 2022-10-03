@@ -222,23 +222,25 @@ interactive-test:
 build-image:
 	docker build $(DOCKER_BUILD_OPTS) --target build -t $(BUILD_CONTAINER_NAME) .
 
-build-test-pg10: build-image
-	docker build --build-arg PGVERSION=10 --target test -t $(TEST_CONTAINER_NAME):pg10 .
+# Citus 9.0 seems to be the most recent version of Citus with Postgres 10
+# support, but fails to compile nowadays...
+# build-test-pg10:
+# 	docker build --build-arg PGVERSION=10 --build-arg CITUSTAG=v9.0.2 --target test -t $(TEST_CONTAINER_NAME):pg10 .
 
 build-test-pg11:
-	docker build --build-arg PGVERSION=11 --target test -t $(TEST_CONTAINER_NAME):pg11 .
+	docker build --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10 --target test -t $(TEST_CONTAINER_NAME):pg11 .
 
 build-test-pg12:
-	docker build --build-arg PGVERSION=12 --target test -t $(TEST_CONTAINER_NAME):pg12 .
+	docker build --build-arg PGVERSION=12 --build-arg CITUSTAG=v10.2.3 --target test -t $(TEST_CONTAINER_NAME):pg12 .
 
 build-test-pg13:
-	docker build --build-arg PGVERSION=13 --target test -t $(TEST_CONTAINER_NAME):pg13 .
+	docker build --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.3 --target test -t $(TEST_CONTAINER_NAME):pg13 .
 
 build-test-pg14:
-	docker build --build-arg PGVERSION=14 --target test -t $(TEST_CONTAINER_NAME):pg14 .
+	docker build --build-arg PGVERSION=14 --build-arg CITUSTAG=v11.1.2 --target test -t $(TEST_CONTAINER_NAME):pg14 .
 
 build-test-pg15:
-	docker build --build-arg PGVERSION=15 --target test -t $(TEST_CONTAINER_NAME):pg15 .
+	docker build --build-arg PGVERSION=15 --build-arg CITUSTAG=v11.1.2 --target test -t $(TEST_CONTAINER_NAME):pg15 .
 
 #
 # make run-test; is the main testing entry point used to run tests inside
@@ -252,8 +254,8 @@ run-test: build-test-pg$(PGVERSION)
 		make -C /usr/src/pg_auto_failover test	\
 		PGVERSION=$(PGVERSION) TEST='${TEST}'
 
-build-pg10: build-test-pg10
-	docker build --build-arg PGVERSION=10 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg10 .
+# build-pg10: build-test-pg10
+# 	docker build --build-arg PGVERSION=10 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg10 .
 
 build-pg11: build-test-pg11
 	docker build --build-arg PGVERSION=11 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg11 .
@@ -270,12 +272,10 @@ build-pg14: build-test-pg14
 build-pg15: build-test-pg15
 	docker build --build-arg PGVERSION=15 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg15 .
 
-#build: build-pg10 build-pg11 build-pg12 build-pg13 build-pg14 ;
-build: build-pg12 build-pg13 build-pg14 ;
+build: build-pg11 build-pg12 build-pg13 build-pg14 build-pg15 ;
 
 build-check:
-	#for v in 10 11 12 13 14; do
-	for v in 12 13 14; do \
+	for v in 11 12 13 14 15; do \
 		docker run --rm -t pg_auto_failover_test:pg$$v pg_autoctl version --json | jq ".pg_version" | xargs echo $$v: ; \
 	done
 
@@ -408,7 +408,7 @@ azdrop: all
 .PHONY: all clean check install docs
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
-.PHONY: build-test run-test spellcheck lint linting
+.PHONY: build-test run-test spellcheck lint linting ci-test
 .PHONY: tmux-clean cluster compose
 .PHONY: azcluster azdrop az
 .PHONY: build-image
