@@ -1,4 +1,4 @@
-name: Build Package
+name: Run Tests
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_package:
+  run_tests:
     name: Run test
     runs-on: ubuntu-latest
     strategy:
@@ -57,6 +57,6 @@ jobs:
           rm -rf uncrustify*
 
       - name: Run Test
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
           make ci-test
