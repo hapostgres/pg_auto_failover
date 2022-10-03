@@ -120,6 +120,10 @@ class Cluster:
         vnode = self.vlan.create_node()
         nodeid = len(self.datanodes) + 1
 
+        dbname = "postgres"
+        if role == Role.Coordinator or role == Role.Worker:
+            dbname = "citus"
+
         datanode = DataNode(
             self,
             datadir,
@@ -1141,6 +1145,9 @@ class DataNode(PGNode, StatefulNode):
 
         if self.group:
             create_args += ["--group", str(self.group)]
+
+        if self.database:
+            create_args += ["--dbname", self.database]
 
         if name:
             self.name = name
