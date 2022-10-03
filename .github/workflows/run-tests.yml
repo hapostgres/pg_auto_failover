@@ -46,6 +46,7 @@ jobs:
             echo "TRAVIS_BUILD_DIR=$(pwd)" >> $GITHUB_ENV
 
       - name: Clone and install linting tools
+        if: ${{ env.TEST == 'linting' }}
         run: |
           sudo apt-get install python3-pip
           pip3 install --user black
@@ -56,12 +57,18 @@ jobs:
           install_uncrustify
           rm -rf uncrustify*
 
+      - name: Check code formatting and banned function
+        if: ${{ env.TEST == 'linting' }}
+        run: |
+          make lint
+
       - name: Build Docker Test Image
         if: ${{ env.TEST != 'linting' }}
         run: |
           make build-test-image
 
       - name: Run Test
+        if: ${{ env.TEST != 'linting' }}
         timeout-minutes: 15
         run: |
           make ci-test
