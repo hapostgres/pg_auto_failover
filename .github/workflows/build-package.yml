@@ -36,7 +36,6 @@ jobs:
             TEST: tablespaces
           - PGVERSION: 14
             TEST: linting
-            LINTING: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -56,12 +55,10 @@ jobs:
           gcc --version
           git clone -b v0.8.19 --depth 1 https://github.com/citusdata/tools.git ../tools
           sudo make -C ../tools install
-          if [ -n "${LINTING}" ]; then install_uncrustify; fi
-          if [ -n "${LINTING}" ]; then rm -rf uncrustify*; fi
+          install_uncrustify
+          rm -rf uncrustify*
 
       - name: Run Test
         timeout-minutes: 15
         run: |
-          if [ -n "${LINTING}" ]; then make lint; fi
-          if [ "${TEST}" = "tablespaces" ]; then make test; fi
-          if [ "${TEST}" != "tablespaces" ]; then make run-test; fi
+          make ci-test

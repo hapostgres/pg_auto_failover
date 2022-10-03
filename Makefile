@@ -132,7 +132,26 @@ clean-bin:
 install-bin: bin
 	$(MAKE) -C src/bin/ install
 
+#
+# make ci-test; is run on the GitHub Action workflow
+#
+# In that environment we have a local git checkout of the code, and docker
+# is available too. We run our tests in docker, except for the code linting
+# parts which requires full access to the git repository, so linter tooling
+# is installed directly on the CI vm.
+#
+ci-test:
+ifeq ($(TEST),tablespaces)
+	$(MAKE) -C tests/tablespaces run-test
+else ifeq ($(TEST),linting)
+	$(MAKE) spellcheck
+else
+	$(MAKE) run-test
+endif
 
+#
+# make test; is run from inside the testing Docker image.
+#
 test:
 ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
@@ -148,12 +167,24 @@ else
 		${TEST_ARGUMENT}
 endif
 
+#
+# make indent; edits the code when necessary
+#
 indent:
 	citus_indent
 	black .
 
+#
+# make lint; is an alias for make spellcheck
+# make linting; is an alias for make spellcheck
+#
 lint: spellcheck ;
+linting: spellcheck ;
 
+#
+# make spellcheck; runs our linting tools without editing the code, only
+# reports compliance with the rules.
+#
 spellcheck:
 	citus_indent --check
 	black --check .
@@ -186,6 +217,10 @@ build-test-pg14:
 build-test-pg15:
 	docker build --build-arg PGVERSION=15 --target test -t $(TEST_CONTAINER_NAME):pg15 .
 
+#
+# make run-test; is the main testing entry point used to run tests inside
+# our testing Docker container. The docker container depends on PGVERSION.
+#
 run-test: build-test-pg$(PGVERSION)
 	docker run					                \
 		--name $(TEST_CONTAINER_NAME)		    \
@@ -339,7 +374,7 @@ azdrop: all
 .PHONY: all clean check install docs
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
-.PHONY: build-test run-test spellcheck
+.PHONY: build-test run-test spellcheck lint linting
 .PHONY: tmux-clean cluster compose
 .PHONY: azcluster azdrop az
 .PHONY: build-image
