@@ -136,6 +136,8 @@ install-bin: bin
 test:
 ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
+else ifeq ($(TEST),linting)
+	$(MAKE) spellcheck
 else
 	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
 		$(NOSETESTS)			\
@@ -149,6 +151,11 @@ endif
 indent:
 	citus_indent
 	black .
+
+spellcheck:
+	citus_indent --check
+	black --check .
+	ci/banned.h.sh
 
 docs: $(FSM)
 	$(MAKE) -C docs html
@@ -330,7 +337,7 @@ azdrop: all
 .PHONY: all clean check install docs
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
-.PHONY: build-test run-test
+.PHONY: build-test run-test spellcheck
 .PHONY: tmux-clean cluster compose
 .PHONY: azcluster azdrop az
 .PHONY: build-image

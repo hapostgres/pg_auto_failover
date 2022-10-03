@@ -34,10 +34,8 @@ jobs:
         include:
           - PGVERSION: 14
             TEST: tablespaces
-            DOCKERTEST: true
           - PGVERSION: 14
             TEST: linting
-            LINTING: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -46,44 +44,21 @@ jobs:
         run: |
             echo "PGVERSION=${{ matrix.PGVERSION }}" >> $GITHUB_ENV
             echo "TEST=${{ matrix.TEST }}" >> $GITHUB_ENV
-            echo "DOCKERTEST=${{ matrix.DOCKERTEST }}" >> $GITHUB_ENV
             echo "LINTING=${{ matrix.LINTING }}" >> $GITHUB_ENV
             echo "TRAVIS_BUILD_DIR=$(pwd)" >> $GITHUB_ENV
 
-      - name: Clone and install tools branch
+      - name: Clone and install Citusdata tools
         run: |
           gcc --version
           git clone -b v0.8.19 --depth 1 https://github.com/citusdata/tools.git ../tools
           sudo make -C ../tools install
+          if [ -n "${LINTING}" ]; then install_uncrustify; fi
+          if [ -n "${LINTING}" ]; then rm -rf uncrustify*; fi
 
-      - name: Pre Install steps
-        run: |
-          if [ -z "${LINTING}" ]; then setup_apt; fi
-          if [ -z "${LINTING}" ]; then nuke_pg; fi
-          python --version
-          python3 --version
-          sudo apt-get install liblz4-1 liblz4-dev bridge-utils python3-pip python3-nose python3-psycopg2 libxslt1-dev libzstd-dev
-          sudo apt-get install libkrb5-dev python3-setuptools
-          sudo -H pip3 install pyroute2>=0.5.17
-          pip3 install --user black
-
-      - name: Install steps
-        run: |
-         if [ -n "${LINTING}" ]; then install_uncrustify; fi
-         if [ -n "${LINTING}" ]; then rm -rf uncrustify*; fi
-         if [ -z "${LINTING}" ]; then install_pg; fi
-         if [ -z "${LINTING}" ]; then install_custom_pg; fi
-         env
-         if [ -z "${LINTING}" ]; then pg_config; fi
-         if [ -z "${LINTING}" ]; then PATH=`pg_config --bindir`:$PATH which pg_ctl; fi
-
-      - name: Script steps
+      - name: Run Test
         timeout-minutes: 15
         run: |
-          echo "Travis build dir: ${TRAVIS_BUILD_DIR}"
           if [ -n "${LINTING}" ]; then citus_indent --check; fi
           if [ -n "${LINTING}" ]; then black --check .; fi
           if [ -n "${LINTING}" ]; then ci/banned.h.sh; fi
-          if [ -z "${LINTING}" ]; then make -j5 CFLAGS=-Werror; fi
-          if [ -z "${LINTING}" ]; then sudo make install; fi
-          if [ -z "${LINTING}" ]; then PATH=`pg_config --bindir`:$PATH make test; fi
+          if [ -z "${LINTING}" ]; make run-test; fi
