@@ -60,6 +60,6 @@ jobs:
       - name: Run Test
         timeout-minutes: 15
         run: |
-          if [ -n "${LINTING}" ]; then make ling; fi
+          if [ -n "${LINTING}" ]; then make lint; fi
           if [ "${TEST}" = "tablespaces" ]; then make test; fi
           if [ "${TEST}" != "tablespaces" ]; then make run-test; fi
