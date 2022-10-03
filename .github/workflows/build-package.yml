@@ -52,7 +52,7 @@ jobs:
         run: |
           sudo apt-get install python3-pip
           pip3 install --user black
-          black --bersion
+          black --version
           gcc --version
           git clone -b v0.8.19 --depth 1 https://github.com/citusdata/tools.git ../tools
           sudo make -C ../tools install
