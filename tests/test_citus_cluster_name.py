@@ -1,4 +1,4 @@
-import pgautofailover_utils as pgautofailover
+import tests.pgautofailover_utils as pgautofailover
 import psycopg2
 from nose.tools import *
 
