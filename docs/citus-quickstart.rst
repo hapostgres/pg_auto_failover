@@ -15,6 +15,12 @@ component needs to be deployed and run on which node.
 
 __ https://docs.docker.com/compose/
 
+The setup provided in this tutorial is good for replaying at home in the
+lab. It is not intended to be production ready though. In particular, no
+attention have been spent on volume management. After all, this is a
+tutorial: the goal is to walk through the first steps of using
+pg_auto_failover to provide HA to a Citus formation.
+
 Pre-requisites
 --------------
 
@@ -163,6 +169,14 @@ instead or useful node names such as ``worker1a`` or ``worker3b``.
 
 Create a Citus Cluster, take two
 --------------------------------
+
+In order to implement the following architecture, we need to introduce a
+more complex docker-compose file than in the previous section.
+
+.. figure:: ./tikz/arch-citus.svg
+   :alt: pg_auto_failover architecture with a Citus formation
+
+   pg_auto_failover architecture with a Citus formation
 
 This time we create a cluster using the following docker-compose definition:
 
@@ -441,3 +455,26 @@ node too:
     count
    -------
        75
+
+Next steps
+----------
+
+As mentioned in the first section of this tutorial, the way we use
+docker-compose here is not meant to be production ready. It's useful to
+understand and play with a distributed system such as Citus though, and
+makes it simple to introduce faults and see how the pg_auto_failover High
+Availability reacts to those faults.
+
+One obvious missing element to better test the system is the lack of
+persistent volumes in our docker-compose based test rig. It is possible to
+create external volumes and use them for each node in the docker-compose
+definition. This allows restarting nodes over the same data set.
+
+See the command :ref:`pg_autoctl_do_tmux_compose_session` for more details
+about how to run a docker-compose test environment with docker-compose,
+including external volumes for each node.
+
+Now is a good time to go read `Citus Documentation`__ too, so that you know
+how to use this cluster you just created!
+
+__ https://docs.citusdata.com/en/latest/
