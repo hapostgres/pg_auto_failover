@@ -3,7 +3,7 @@ name: Build Package
 env:
   TRAVIS: "true"
   CITUSVERSION: 11.1
-  CITUSPGVERSION: 110
+  CITUSPGVERSION: 1111
 
 on:
   push:
