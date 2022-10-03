@@ -57,6 +57,7 @@ jobs:
           rm -rf uncrustify*
 
       - name: Build Docker Test Image
+        if: ${{ env.TEST != 'linting' }}
         run: |
           make build-test-image
 
