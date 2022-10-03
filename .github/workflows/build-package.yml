@@ -36,6 +36,7 @@ jobs:
             TEST: tablespaces
           - PGVERSION: 14
             TEST: linting
+            LINTING: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -61,4 +62,5 @@ jobs:
           if [ -n "${LINTING}" ]; then citus_indent --check; fi
           if [ -n "${LINTING}" ]; then black --check .; fi
           if [ -n "${LINTING}" ]; then ci/banned.h.sh; fi
-          if [ -z "${LINTING}" ]; then make run-test; fi
+          if [ "${TEST}" = "tablespaces" ]; then make test; fi
+          if [ "${TEST}" != "tablespaces" ]; then make run-test; fi
