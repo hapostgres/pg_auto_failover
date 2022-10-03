@@ -56,7 +56,11 @@ jobs:
           install_uncrustify
           rm -rf uncrustify*
 
+      - name: Build Docker Test Image
+        run: |
+          make build-test-image
+
       - name: Run Test
-        timeout-minutes: 20
+        timeout-minutes: 15
         run: |
           make ci-test

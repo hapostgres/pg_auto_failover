@@ -220,7 +220,7 @@ interactive-test:
 	docker run --name $(CONTAINER_NAME) --rm -ti $(CONTAINER_NAME)
 
 build-image:
-	docker build $(DOCKER_BUILD_OPTS) --target build -t $(BUILD_CONTAINER_NAME) .
+	docker build --target build -t $(BUILD_CONTAINER_NAME) .
 
 # Citus 9.0 seems to be the most recent version of Citus with Postgres 10
 # support, but fails to compile nowadays...
@@ -242,6 +242,10 @@ build-test-pg14:
 build-test-pg15:
 	docker build --build-arg PGVERSION=15 --build-arg CITUSTAG=v11.1.2 --target test -t $(TEST_CONTAINER_NAME):pg15 .
 
+
+build-test-image: build-test-pg$(PGVERSION) ;
+
+
 #
 # make run-test; is the main testing entry point used to run tests inside
 # our testing Docker container. The docker container depends on PGVERSION.
@@ -255,22 +259,22 @@ run-test: build-test-pg$(PGVERSION)
 		PGVERSION=$(PGVERSION) TEST='${TEST}'
 
 # build-pg10: build-test-pg10
-# 	docker build --build-arg PGVERSION=10 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg10 .
+# 	docker build --build-arg PGVERSION=10 -t $(CONTAINER_NAME):pg10 .
 
 build-pg11: build-test-pg11
-	docker build --build-arg PGVERSION=11 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg11 .
+	docker build --build-arg PGVERSION=11 -t $(CONTAINER_NAME):pg11 .
 
 build-pg12: build-test-pg12
-	docker build --build-arg PGVERSION=12 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg12 .
+	docker build --build-arg PGVERSION=12 -t $(CONTAINER_NAME):pg12 .
 
 build-pg13: build-test-pg13
-	docker build --build-arg PGVERSION=13 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg13 .
+	docker build --build-arg PGVERSION=13 -t $(CONTAINER_NAME):pg13 .
 
 build-pg14: build-test-pg14
-	docker build --build-arg PGVERSION=14 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg14 .
+	docker build --build-arg PGVERSION=14 -t $(CONTAINER_NAME):pg14 .
 
 build-pg15: build-test-pg15
-	docker build --build-arg PGVERSION=15 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg15 .
+	docker build --build-arg PGVERSION=15 -t $(CONTAINER_NAME):pg15 .
 
 build: build-pg11 build-pg12 build-pg13 build-pg14 build-pg15 ;
 
