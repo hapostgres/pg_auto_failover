@@ -6,7 +6,7 @@ TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 CONTAINER_NAME = pg_auto_failover
 BUILD_CONTAINER_NAME = pg_auto_failover_build
 TEST_CONTAINER_NAME = pg_auto_failover_test
-DOCKER_RUN_OPTS = --privileged  -ti --rm
+DOCKER_RUN_OPTS = --privileged --rm
 
 PGVERSION ?= 10
 NOSETESTS = $(shell which nosetests3 || which nosetests)
