@@ -152,6 +152,8 @@ indent:
 	citus_indent
 	black .
 
+lint: spellcheck ;
+
 spellcheck:
 	citus_indent --check
 	black --check .

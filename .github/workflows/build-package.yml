@@ -48,8 +48,9 @@ jobs:
             echo "LINTING=${{ matrix.LINTING }}" >> $GITHUB_ENV
             echo "TRAVIS_BUILD_DIR=$(pwd)" >> $GITHUB_ENV
 
-      - name: Clone and install Citusdata tools
+      - name: Clone and install linting tools
         run: |
+          sudo apt-get install black
           gcc --version
           git clone -b v0.8.19 --depth 1 https://github.com/citusdata/tools.git ../tools
           sudo make -C ../tools install
@@ -59,8 +60,6 @@ jobs:
       - name: Run Test
         timeout-minutes: 15
         run: |
-          if [ -n "${LINTING}" ]; then citus_indent --check; fi
-          if [ -n "${LINTING}" ]; then black --check .; fi
-          if [ -n "${LINTING}" ]; then ci/banned.h.sh; fi
+          if [ -n "${LINTING}" ]; then make ling; fi
           if [ "${TEST}" = "tablespaces" ]; then make test; fi
           if [ "${TEST}" != "tablespaces" ]; then make run-test; fi
