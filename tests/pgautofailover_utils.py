@@ -131,7 +131,7 @@ class Cluster:
             port,
             os.getenv("USER"),
             authMethod,
-            "postgres",
+            dbname,
             self.monitor,
             nodeid,
             group,

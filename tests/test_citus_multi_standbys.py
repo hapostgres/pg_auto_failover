@@ -25,7 +25,7 @@ def setup_module():
 
 def teardown_module():
     # make sure all Citus nodes are in-sync before DROP TABLE
-    coordinator1a.run_sql_query("select public.wait_until_metadata_sync()")
+    coordinator1a.run_sql_query("select public.wait_until_metadata_sync(30000)")
     coordinator1a.run_sql_query("DROP TABLE t1")
     cluster.destroy()
 
@@ -162,7 +162,7 @@ def test_002_init_workers():
 def test_003_001_create_distributed_table():
     # reduce number of shards to make it easier to test data sets on workers
     coordinator1a.run_sql_query(
-        "ALTER DATABASE postgres SET citus.shard_count TO 4"
+        "ALTER DATABASE citus SET citus.shard_count TO 4"
     )
     coordinator1a.run_sql_query("CREATE TABLE t1 (a int)")
     coordinator1a.run_sql_query("SELECT create_distributed_table('t1', 'a')")
