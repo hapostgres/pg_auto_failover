@@ -44,6 +44,10 @@ def test_001_init_coordinator():
     print()  # make the debug output more readable
     assert coordinator1a.wait_until_state(target_state="single")
 
+    # we need to expose some Citus testing internals
+    assert coordinator1a.wait_until_pg_is_running()
+    coordinator1a.create_wait_until_metadata_sync()
+
     coordinator1b = ha_cluster.create_datanode(
         "/tmp/citus/foce/coordinator1b", role=pgautofailover.Role.Coordinator
     )
@@ -141,4 +145,5 @@ def test_004_read_only_cluster():
 
 
 def test_005_drop_table():
+    coordinator1a.run_sql_query("select public.wait_until_metadata_sync()")
     coordinator1a.run_sql_query("DROP TABLE t1")

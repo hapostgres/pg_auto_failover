@@ -1639,6 +1639,23 @@ class DataNode(PGNode, StatefulNode):
         )
         return False
 
+    def create_wait_until_metadata_sync(self):
+        """
+        Create an additional function for Citus that's needed for regression
+        testing.
+        """
+        if self.role != Role.Coordinator:
+            return False
+
+        self.run_sql_query(
+            """
+        CREATE OR REPLACE FUNCTION
+        public.wait_until_metadata_sync (timeout INTEGER DEFAULT 15000)
+        RETURNS void
+        LANGUAGE C STRICT AS 'citus';
+        """
+        )
+
 
 class MonitorNode(PGNode):
     def __init__(

@@ -25,6 +25,7 @@ def setup_module():
 
 
 def teardown_module():
+    coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
     coordinator1b.run_sql_query("DROP TABLE t1")
     cluster.destroy()
 
@@ -46,6 +47,10 @@ def test_001_init_coordinator():
     coordinator1a.run()
 
     assert coordinator1a.wait_until_state(target_state="single")
+
+    # we need to expose some Citus testing internals
+    assert coordinator1a.wait_until_pg_is_running()
+    coordinator1a.create_wait_until_metadata_sync()
 
     # check that Citus did skip creating the SSL certificates (--no-ssl)
     assert not os.path.isfile(

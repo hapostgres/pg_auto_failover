@@ -17,7 +17,9 @@ def setup_module():
 
 
 def teardown_module():
-    coordinator1b.run_sql_query("DROP TABLE t1")
+    if coordinator1b is not None:
+        coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
+        coordinator1b.run_sql_query("DROP TABLE t1")
     cluster.destroy()
 
 
@@ -46,6 +48,10 @@ def test_002_init_coordinator():
 
     print()  # make the debug output more readable
     assert coordinator1a.wait_until_state(target_state="single")
+
+    # we need to expose some Citus testing internals
+    assert coordinator1a.wait_until_pg_is_running()
+    coordinator1a.create_wait_until_metadata_sync()
 
 
 def test_003_init_workers():

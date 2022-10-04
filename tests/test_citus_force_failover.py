@@ -22,6 +22,7 @@ def setup_module():
 
 
 def teardown_module():
+    coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
     coordinator1b.run_sql_query("DROP TABLE t1")
     ha_cluster.destroy()
 
@@ -44,6 +45,10 @@ def test_001_init_coordinator():
 
     print()  # make the debug output more readable
     assert coordinator1a.wait_until_state(target_state="single")
+
+    # we need to expose some Citus testing internals
+    assert coordinator1a.wait_until_pg_is_running()
+    coordinator1a.create_wait_until_metadata_sync()
 
     coordinator1b = ha_cluster.create_datanode(
         "/tmp/citus/force/coordinator1b", role=pgautofailover.Role.Coordinator
