@@ -25,7 +25,7 @@ def setup_module():
 
 def teardown_module():
     # make sure all Citus nodes are in-sync before DROP TABLE
-    coordinator1a.run_sql_query("select public.wait_until_metadata_sync(30000)")
+    coordinator1a.run_sql_query("select public.wait_until_metadata_sync()")
     coordinator1a.run_sql_query("DROP TABLE t1")
     cluster.destroy()
 

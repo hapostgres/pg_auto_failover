@@ -283,6 +283,20 @@ class QueryRunner:
 
         return result
 
+    def alter_system_set(self, gucs):
+        """
+        Calls ALTER SYSTEM SET on the provided GUCs, then pg_reload_conf().
+        """
+        psql_command = [shutil.which("psql"), "-d", self.database, "-c"]
+        for key in gucs:
+            sql = "alter system set %s = %s" % (key, gucs[key])
+            command = psql_command + [sql]
+            self.vnode.run_and_wait(command, name="alter system set")
+
+        sql = "select pg_reload_conf()"
+        command = psql_command + [sql]
+        self.vnode.run_and_wait(command, name="alter system set")
+
 
 class PGNode(QueryRunner):
     """
@@ -1654,6 +1668,13 @@ class DataNode(PGNode, StatefulNode):
         RETURNS void
         LANGUAGE C STRICT AS 'citus';
         """
+        )
+
+        self.alter_system_set(
+            gucs={
+                "citus.metadata_sync_interval": 1000,
+                "citus.metadata_sync_retry_interval": 200,
+            }
         )
 
 
