@@ -168,6 +168,7 @@ RUN adduser docker postgres
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/citus.so /usr/lib/postgresql/${PGVERSION}/lib
+COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/citus_columnar.so /usr/lib/postgresql/${PGVERSION}/lib
 COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/citus* /usr/share/postgresql/${PGVERSION}/extension/
 
 COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so /usr/lib/postgresql/${PGVERSION}/lib
