@@ -4,6 +4,7 @@ from nose.tools import eq_, raises
 import os.path
 import time
 import subprocess
+import pprint
 
 cluster = None
 monitor = None
@@ -64,6 +65,12 @@ def test_001_init_coordinator():
     coordinator1b.run()
     assert coordinator1a.wait_until_state(target_state="primary")
     assert coordinator1b.wait_until_state(target_state="secondary")
+
+    sql = "select nodename, nodeport from pg_dist_node"
+    nodes = coordinator1a.run_sql_query(sql)
+
+    assert nodes[0][0] == str(coordinator1a.vnode.address)
+    assert nodes[0][1] == coordinator1a.port
 
 
 def test_002_init_workers():

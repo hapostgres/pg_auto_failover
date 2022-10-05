@@ -201,6 +201,10 @@ KeeperFSMTransition KeeperFSM[] = {
 	/*
 	 * Started as a single, no nothing
 	 */
+	{ INIT_STATE, SINGLE_STATE, NODE_KIND_CITUS_COORDINATOR,
+	  COMMENT_INIT_TO_SINGLE,
+	  &fsm_citus_coordinator_init_primary },
+
 	{ INIT_STATE, SINGLE_STATE, NODE_KIND_CITUS_WORKER,
 	  COMMENT_INIT_TO_SINGLE,
 	  &fsm_citus_worker_init_primary },
