@@ -25,16 +25,12 @@ __ https://github.com/citusdata
    maintains the pg_auto_failover Open Source Software so that its users may
    continue using it in production.
 
-   The pg_auto_failover Open Source project does not include support for the
-   Citus extension. Citus support in pg_auto_failover has not been Open
-   Sourced at this time.
-
    For enhancements, improvements, and new features, consider contributing
    to the project. Pull Requests are reviewed as part of the offered
    maintenance.
 
 .. note::
-   
+
    Assistance is provided as usual with Open Source projects, on a voluntary
    basis. If you need help to cook a patch, enhance the documentation, or
    even to use the software, you're welcome to ask questions and expect some
@@ -49,6 +45,8 @@ __ https://github.com/citusdata
    tutorial
    architecture
    architecture-multi-standby
+   citus
+   citus-quickstart
    failover-state-machine
    fault-tolerance
    install

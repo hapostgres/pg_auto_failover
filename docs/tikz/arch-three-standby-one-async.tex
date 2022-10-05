@@ -22,9 +22,9 @@
 
   %% \draw [help lines] (-10,0) grid (10,20);
 
-  \node (flegend) at (0,18) {\textbf{\textt{number\_sync\_standby = 1}}} ;
+  \node (flegend) at (8,18) {\textbf{\textt{number\_sync\_standby = 2}}} ;
 
-  \node  (a)   at (0,15)   [primary]
+  \node  (a)   at (0,18)   [primary]
          {\textbf{\normalsize Node A}
            \nodepart{second}
            \textbf{\Large Primary}
@@ -33,7 +33,7 @@
            \texttt{candidate priority = 50}
          };
 
-  \node  (b)   at (-7,2)  [standby]
+  \node  (b)   at (0,12)  [standby]
          {\textbf{\normalsize Node B}
            \nodepart{second}
            \textbf{\Large Secondary}
@@ -42,17 +42,8 @@
            \texttt{candidate priority = 50}
          };
 
-  \node  (c)   at (0,8)   [standby,rectangle split part fill={sbox,sbox,async}]
+  \node  (c)   at (0,6)   [standby]
          {\textbf{\normalsize Node C}
-           \nodepart{second}
-           \textbf{\Large Secondary}
-           \nodepart[align=left]{third}
-		   \textbf{\texttt{replication quorum = false}} \\
-		   \textbf{\texttt{candidate priority = 0}}
-         };
-
-  \node  (d)   at (7,2)   [standby]
-         {\textbf{\normalsize Node D}
            \nodepart{second}
            \textbf{\Large Secondary}
            \nodepart[align=left]{third}
@@ -60,21 +51,34 @@
            \texttt{candidate priority = 50}
          };
 
-  \node  (app) at (-8,18)  [app]        {\Large Application};
-  \node  (m)   at (8,18)   [monitor]    {\Large Monitor};
+  \draw (-9,3) -- (9,3);
 
-  \path (app) edge [sql,out=0,in=180]  node[below,near start] {SQL} (a)
-              edge [sqlf,out=-90,in=135]  node[left,near start] {SQL (fallback)} (b.north west)
-              edge [sqlf,out=-90,in=180]  (d.west)
+  \node  (d)   at (0,0)   [standby,rectangle split part fill={sbox,sbox,async}]
+         {\textbf{\normalsize Node D}
+           \nodepart{second}
+           \textbf{\Large Secondary}
+           \nodepart[align=left]{third}
+           \texttt{replication quorum = false} \\
+           \texttt{candidate priority = 0}
+         };
 
-        (m)   edge [hc,out=-90,in=0] (a)
-              edge [hc,out=-90,in=0] (b.east)
-              edge [hc,out=-90,in=45] (c.north east)
-              edge [hc,out=-90,in=45] node[right,near start] {Health checks} (d.north east)
+  \node  (app) at (-8,9)  [app]        {\Large Application};
+  \node  (m)   at (8,9)   [monitor]    {\Large Monitor};
 
-        (a.south west) edge [sr] (b)
-        (a) edge [sr] node[left,near start]  {Streaming} node[right,near start] {Replication} (c)
-        (a.south east) edge [sr] (d);
+  \path (app) edge [sql,out=90,in=180]  node[near start] {SQL} (a.west)
+              edge [sqlf,out=90,in=180] (b)
+              edge [sqlf,out=-90,in=180] node[near start,above]  {SQL (fallback)} (c.west)
+              edge [sqlf,out=-90,in=180] (d)
+
+        (a.south east) edge [sr,out=0,in=35,bend left=30] node[left,near start] {Streaming Replication} (b.north east)
+        (a.south east) edge [sr,out=0,in=35,bend left=30] (c.north east)
+        (a.south east) edge [sr,out=0,in=35,bend left=30] (d.north east)
+
+        (m)   edge [hc,out=90,in=0]  (a.east)
+              edge [hc,out=90,in=0] (b.east)
+              edge [hc,out=-90,in=0] node[below,near end] {Health checks} (c.east)
+              edge [hc,out=-90,in=0] (d.east);
+
 \end{tikzpicture}
 
 \end{document}

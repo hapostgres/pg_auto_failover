@@ -29,6 +29,7 @@ typedef struct KeeperFSMTransition
 {
 	NodeState current;
 	NodeState assigned;
+	PgInstanceKind pgKind;
 	const char *comment;
 	ReachAssignedStateFunction transitionFunction;
 } KeeperFSMTransition;
@@ -36,6 +37,7 @@ typedef struct KeeperFSMTransition
 /* src/bin/pg_autoctl/fsm.c */
 extern KeeperFSMTransition KeeperFSM[];
 
+/* src/bin/pg_autoctl/fsm_transition.c */
 bool fsm_init_primary(Keeper *keeper);
 bool fsm_prepare_replication(Keeper *keeper);
 bool fsm_disable_replication(Keeper *keeper);
@@ -73,6 +75,25 @@ bool fsm_cleanup_as_primary(Keeper *keeper);
 bool fsm_init_from_standby(Keeper *keeper);
 
 bool fsm_drop_node(Keeper *keeper);
+
+/* src/bin/pg_autoctl/fsm_transition_citus.c */
+bool fsm_citus_worker_init_primary(Keeper *keeper);
+bool fsm_citus_worker_resume_as_primary(Keeper *keeper);
+bool fsm_citus_coordinator_promote_standby_to_single(Keeper *keeper);
+bool fsm_citus_worker_promote_standby_to_single(Keeper *keeper);
+bool fsm_citus_worker_promote_standby(Keeper *keeper);
+bool fsm_citus_coordinator_master_update_itself(Keeper *keeper);
+bool fsm_citus_cleanup_and_resume_as_primary(Keeper *keeper);
+
+bool fsm_citus_worker_stop_replication(Keeper *keeper);
+bool fsm_citus_coordinator_promote_standby_to_primary(Keeper *keeper);
+bool fsm_citus_worker_promote_standby_to_primary(Keeper *keeper);
+bool fsm_citus_worker_prepare_standby_for_promotion(Keeper *keeper);
+
+bool fsm_citus_maintain_replication_slots(Keeper *keeper);
+
+bool fsm_citus_drop_node(Keeper *keeper);
+
 
 /*
  * Extra helpers.

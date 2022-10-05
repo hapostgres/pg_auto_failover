@@ -3,14 +3,14 @@
 # target version of Postgres. In the Makefile, we use that to our advantage
 # and tag test images such as pg_auto_failover_test:pg14.
 #
-ARG PGVERSION=10
+ARG PGVERSION=14
 
 #
 # Define a base image with all our build dependencies.
 #
 # This base image contains all our target Postgres versions.
 #
-FROM debian:buster-slim as base
+FROM debian:bullseye-slim as base
 
 ARG PGVERSION
 
@@ -21,21 +21,28 @@ RUN apt-get update \
 	curl \
 	gnupg \
 	git \
+	gawk \
+	flex \
+	bison \
     iproute2 \
-    libicu-dev \
-    libkrb5-dev \
-    libssl-dev \
-    libedit-dev \
-    libreadline-dev \
-    libpam-dev \
-    zlib1g-dev \
-    liblz4-dev \
-	libxml2-dev \
-    libxslt1-dev \
-    libselinux1-dev \
+	libcurl4-gnutls-dev \
+	libicu-dev \
 	libncurses-dev \
+	libxml2-dev \
+	zlib1g-dev \
+    libedit-dev \
+    libkrb5-dev \
+    liblz4-dev \
     libncurses6 \
-    make \
+    libpam-dev \
+    libreadline-dev \
+    libselinux1-dev \
+    libssl-dev \
+    libxslt1-dev \
+    libzstd-dev \
+    uuid-dev \
+	make \
+	autoconf \
     openssl \
     pipenv \
     python3-nose \
@@ -53,7 +60,7 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
@@ -70,12 +77,25 @@ RUN adduser docker sudo
 RUN adduser docker postgres
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
+FROM base as citus
+
+ARG PGVERSION
+ARG CITUSTAG=v11.1.2
+
+ENV PG_CONFIG /usr/lib/postgresql/${PGVERSION}/bin/pg_config
+
+RUN git clone -b ${CITUSTAG} --depth 1 https://github.com/citusdata/citus.git /usr/src/citus
+WORKDIR /usr/src/citus
+
+RUN ./configure
+RUN make -s clean && make -s -j8 install
+
 #
 # On-top of the base build-dependencies image, now we can build
 # pg_auto_failover for a given --build-arg PGVERSION target version of
 # Postgres.
 #
-FROM base as build
+FROM citus as build
 
 ARG PGVERSION
 
@@ -109,7 +129,7 @@ ENV PATH /usr/lib/postgresql/${PGVERSION}/bin:/usr/local/sbin:/usr/local/bin:/us
 #
 # And finally our "run" images with the bare minimum for run-time.
 #
-FROM debian:buster-slim as run
+FROM debian:bullseye-slim as run
 
 ARG PGVERSION
 
@@ -127,12 +147,14 @@ RUN apt-get update \
     psutils \
     dnsutils \
     bind9-host \
-    postgresql-common \
+	libcurl4-gnutls-dev \
+    libzstd-dev \
+	postgresql-common \
     libpq-dev \
 	&& rm -rf /var/lib/apt/lists/*
 
 RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
@@ -144,6 +166,9 @@ RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker
 RUN adduser docker sudo
 RUN adduser docker postgres
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/citus.so /usr/lib/postgresql/${PGVERSION}/lib
+COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/citus* /usr/share/postgresql/${PGVERSION}/extension/
 
 COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so /usr/lib/postgresql/${PGVERSION}/lib
 COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* /usr/share/postgresql/${PGVERSION}/extension/

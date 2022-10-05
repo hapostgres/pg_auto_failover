@@ -39,6 +39,7 @@ static bool keepRunning = true;
 /* list of hooks to run at reload time */
 KeeperReloadFunction KeeperReloadHooksArray[] = {
 	&keeper_reload_configuration,
+	&keeper_reload_citus_node_update_hostname_port,
 	NULL
 };
 
@@ -47,6 +48,7 @@ KeeperReloadFunction *KeeperReloadHooks = KeeperReloadHooksArray;
 /* list of hooks to run to update a list of nodes, at node active time */
 KeeperNodesArrayRefreshFunction KeeperNodesArrayRefreshArray[] = {
 	&keeper_refresh_hba,
+	&keeper_refresh_citus_remove_dropped_nodes,
 	NULL
 };
 

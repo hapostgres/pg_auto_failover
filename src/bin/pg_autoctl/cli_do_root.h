@@ -68,6 +68,9 @@ extern CommandLine do_discover;
 
 extern CommandLine do_tmux_commands;
 
+/* src/bin/pg_autoctl/cli_do_coordinator.c */
+extern CommandLine do_coordinator_commands;
+
 /* src/bin/pg_autoctl/cli_do_azure.c */
 extern CommandLine do_azure_ssh;
 

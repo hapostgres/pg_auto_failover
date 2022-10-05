@@ -55,6 +55,14 @@ char *xdg[][3] = {
 	{ NULL, NULL }
 };
 
+static void prepare_node_name(TmuxOptions *options, TmuxNode *node, int index);
+
+static int compute_citus_group(int nodes, int index);
+static int compute_citus_node_seq_in_group(int nodes, int index);
+static bool compute_citus_node_is_secondary(int nodes, int secondaries, int index);
+
+static int compute_node_count(TmuxOptions *options);
+
 static void prepare_tmux_script(TmuxOptions *options, PQExpBuffer script);
 static bool tmux_stop_pg_autoctl(TmuxOptions *options);
 static bool parseCandidatePriority(char *priorityString,
@@ -146,6 +154,177 @@ parseCandidatePriorities(char *prioritiesString, int *priorities)
 
 
 /*
+ * prepare_node_name prepares a node name that is suitable for a
+ * pg_auto_failover node in a formation, depending on the given index and how
+ * many nodes per group are asked for, and whether this is a Citus formation or
+ * a Postgres standalone formation.
+ *
+ * Whatever the number of nodes asked for, we always create a monitor, one
+ * coordinator and W workers. We actually build N coordinators and N nodes per
+ * workers (N*W). With WORKERS=3 and NODES=2 we have
+ *
+ *  index  name          index-1    (index-1)/2   (index-1)%2  group
+ *      0  monitor       -1                                    -1
+ *      1  coord0a        0         0             0             0
+ *      2  coord0b        1         0             1             0
+ *      3  worker1a       2         1             0             1
+ *      4  worker1b       3         1             1             1
+ *      5  worker2a       4         2             0             2
+ *      6  worker2b       5         2             1             2
+ *      7  worker3a       6         3             0             3
+ *      8  worker3b       7         3             1             3
+ *
+ * Citus secondary nodes are using a specific naming convention: coord0S,
+ * worker1S, and worker2S. That helps make them easy to spot.
+ */
+static void
+prepare_node_name(TmuxOptions *options, TmuxNode *node, int index)
+{
+	/* index zero is always the monitor */
+	char *alphabet = "abcdefghijklmnopqrstuvwxyz";
+
+	/* for standalone Postgres formations, that's easy: node%d */
+	if (options->withCitus == false)
+	{
+		sformat(node->name, sizeof(node->name), "node%d", index);
+		return;
+	}
+
+	/* now, Citus formations are more complex */
+	if (options->nodes > strlen(alphabet))
+	{
+		log_fatal("Node count %d is not supported, must be less than %lu",
+				  options->nodes, strlen(alphabet));
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* we have N coordinators (N = nodes), and N nodes per workers */
+	int totalNodesCount = compute_node_count(options);
+
+	if (index == 0)
+	{
+		sformat(node->name, sizeof(node->name), "monitor");
+	}
+	else if (1 <= index && index <= options->nodes)
+	{
+		/* first N nodes are for the coordinator nodes */
+		char suffix = alphabet[index - 1];
+		bool secondary =
+			compute_citus_node_is_secondary(
+				options->nodes,
+				options->citusSecondaries,
+				index);
+
+		sformat(node->name, sizeof(node->name), "coord0%c", suffix);
+
+		if (secondary)
+		{
+			sformat(node->clusterName, sizeof(node->clusterName),
+					"cluster_%c", suffix);
+		}
+	}
+	else if (options->nodes < index && index <= totalNodesCount)
+	{
+		/* then nodes are worker nodes */
+		int group = compute_citus_group(options->nodes, index);
+		int seq = compute_citus_node_seq_in_group(options->nodes, index);
+		bool secondary =
+			compute_citus_node_is_secondary(
+				options->nodes,
+				options->citusSecondaries,
+				index);
+		char suffix = alphabet[seq];
+
+		char *prefix = secondary ? "reader" : "worker";
+
+		sformat(node->name, sizeof(node->name), "%s%d%c", prefix, group, suffix);
+
+		if (secondary)
+		{
+			sformat(node->clusterName, sizeof(node->clusterName),
+					"cluster_%c", suffix);
+		}
+	}
+	else
+	{
+		log_fatal("Node index %d is not supported, must be in 0..%d ",
+				  index, totalNodesCount);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+}
+
+
+/*
+ * compute_node_count computes how many nodes we're going to create, depending
+ * on whether this is a Citus formation or a Postgres standalone formation.
+ */
+static int
+compute_node_count(TmuxOptions *options)
+{
+	if (options->withCitus)
+	{
+		/* we have NODES nodes per WORKERS (including the coordinator) */
+		return options->nodes + (options->nodes * options->citusWorkers);
+	}
+
+	return options->nodes;
+}
+
+
+/*
+ * compute_citus_group returns a node group for a Citus cluster node, given a
+ * index and how many nodes per group are asked for. See prepare_node_name for
+ * more information.
+ */
+static int
+compute_citus_group(int nodes, int index)
+{
+	if (index == 0)
+	{
+		return -1;
+	}
+	else
+	{
+		return (index - 1) / nodes;
+	}
+}
+
+
+/*
+ * compute_citus_node_seq_in_group returns a node sequence number in its own
+ * group for a Citus cluster node, given a index and how many nodes per group
+ * are asked for. See prepare_node_name for more information.
+ */
+static int
+compute_citus_node_seq_in_group(int nodes, int index)
+{
+	if (index == 0)
+	{
+		return -1;
+	}
+	else
+	{
+		return (index - 1) % nodes;
+	}
+}
+
+
+/*
+ * compute_citus_node_is_secondary returns true if the given node index is
+ * going to be initialized as a citus secondary node, per the given --nodes and
+ * --citus-secondaries options.
+ */
+static bool
+compute_citus_node_is_secondary(int nodes, int secondaries, int index)
+{
+	int seq = compute_citus_node_seq_in_group(nodes, index);
+
+	/* first nodes are HA nodes, then Citus Secondary nodes */
+	return (nodes - secondaries) <= seq;
+}
+
+
+/*
  * prepareTmuxNodeArray expands the command line options into an array of
  * nodes, where each node name and properties have been computed.
  */
@@ -155,39 +334,101 @@ prepareTmuxNodeArray(TmuxOptions *options, TmuxNodeArray *nodeArray)
 	/* first pgport is for the monitor */
 	int pgport = options->firstPort + 1;
 
+	int totalNodesCount = compute_node_count(options);
+
+	if (NODE_ARRAY_MAX_COUNT < totalNodesCount)
+	{
+		log_fatal("This setup requires %d nodes and pg_autoctl is limited "
+				  "to %d nodes",
+				  totalNodesCount,
+				  NODE_ARRAY_MAX_COUNT);
+		return false;
+	}
+
 	/* make sure we initialize our nodes array */
 	nodeArray->count = 0;
 	nodeArray->numSync = options->numSync;
 
-	for (int i = 0; i < options->nodes; i++)
+	for (int i = 0; i < totalNodesCount; i++)
 	{
 		TmuxNode *node = &(nodeArray->nodes[i]);
 
-		sformat(node->name, sizeof(node->name), "node%d", i + 1);
+		int nodeIndex = i + 1;
 
 		node->pgport = pgport++;
 
-		/* the first nodes are sync, then async, threshold is asyncNodes */
-		node->replicationQuorum = i < (options->nodes - options->asyncNodes);
+		if (options->withCitus)
+		{
+			node->group =
+				compute_citus_group(options->nodes, nodeIndex);
 
-		/* node priorities have been expanded correctly in the options */
-		node->candidatePriority = options->priorities[i];
+			node->seq =
+				compute_citus_node_seq_in_group(options->nodes, nodeIndex);
+
+			node->secondary =
+				compute_citus_node_is_secondary(options->nodes,
+												options->citusSecondaries,
+												nodeIndex);
+		}
+		else
+		{
+			node->group = 0;
+			node->seq = nodeIndex - 1;
+			node->secondary = false;
+		}
+
+		/* compute node name (node1, coord0a, worker2b, etc) */
+		(void) prepare_node_name(options, node, nodeIndex);
+
+		/* install default values for now */
+		node->replicationQuorum = true;
+		node->candidatePriority = 50;
+
+		/* the first nodes are sync, then async, threshold is asyncNodes */
+		if ((options->nodes - options->asyncNodes) <= node->seq)
+		{
+			node->replicationQuorum = false;
+		}
+
+		/*
+		 * Node priorities have been expanded correctly in the options, still
+		 * we force priority for secondary nodes
+		 */
+		node->candidatePriority =
+			node->secondary ? 0 : options->priorities[node->seq];
 
 		++(nodeArray->count);
 	}
 
-
 	/* some useful debug information */
-	for (int i = 0; i < options->nodes; i++)
+	int padding = totalNodesCount < 10 ? 1 : totalNodesCount < 100 ? 2 : 3;
+
+	for (int i = 0; i < totalNodesCount; i++)
 	{
 		TmuxNode *node = &(nodeArray->nodes[i]);
 
-		log_debug("prepareTmuxNodeArray[%d]: %s %d %s %d",
-				  i,
-				  node->name,
-				  node->pgport,
-				  node->replicationQuorum ? "true" : "false",
-				  node->candidatePriority);
+		if (options->withCitus)
+		{
+			log_debug("prepareTmuxNodeArray[%*d]: %d/%d %10s %d %5s %d",
+					  padding,
+					  i,
+					  node->seq,
+					  node->group,
+					  node->name,
+					  node->pgport,
+					  node->replicationQuorum ? "true" : "false",
+					  node->candidatePriority);
+		}
+		else
+		{
+			log_debug("prepareTmuxNodeArray[%*d]: %s %d %5s %d",
+					  padding,
+					  i,
+					  node->name,
+					  node->pgport,
+					  node->replicationQuorum ? "true" : "false",
+					  node->candidatePriority);
+		}
 	}
 
 	return true;
@@ -215,6 +456,9 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 		{ "node-priorities", required_argument, NULL, 'P' },
 		{ "sync-standbys", required_argument, NULL, 's' },
 		{ "skip-pg-hba", required_argument, NULL, 'S' },
+		{ "citus", no_argument, NULL, 'c' },
+		{ "citus-workers", required_argument, NULL, 'w' },
+		{ "citus-secondaries", required_argument, NULL, 'z' },
 		{ "layout", required_argument, NULL, 'l' },
 		{ "binpath", required_argument, NULL, 'b' },
 		{ "version", no_argument, NULL, 'V' },
@@ -232,6 +476,9 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 	options.asyncNodes = 0;
 	options.numSync = -1;       /* use pg_autoctl defaults */
 	options.skipHBA = false;
+	options.withCitus = false;
+	options.citusWorkers = 2;
+	options.citusSecondaries = 0;
 	strlcpy(options.root, "/tmp/pgaf/tmux", sizeof(options.root));
 	strlcpy(options.layout, "even-vertical", sizeof(options.layout));
 	strlcpy(options.binpath, pg_autoctl_argv0, sizeof(options.binpath));
@@ -341,6 +588,39 @@ cli_do_tmux_script_getopts(int argc, char **argv)
 			{
 				options.skipHBA = true;
 				log_trace("--skip-pg-hba");
+				break;
+			}
+
+			case 'c':
+			{
+				options.withCitus = true;
+				log_trace("--citus");
+				break;
+			}
+
+			case 'w':
+			{
+				if (!stringToInt(optarg, &options.citusWorkers))
+				{
+					log_error("Failed to parse --citus-workers number \"%s\"",
+							  optarg);
+					errors++;
+				}
+				log_trace("--citus-workers %d", options.firstPort);
+				break;
+			}
+
+			case 'z':
+			{
+				/* { "citus-secondaries", no_argument, NULL, 'z' }, */
+				if (!stringToInt(optarg, &options.citusSecondaries))
+				{
+					log_error("Failed to parse --citus-secondaries number \"%s\"",
+							  optarg);
+					errors++;
+				}
+
+				log_trace("--citus-secondaries %d", options.citusSecondaries);
 				break;
 			}
 
@@ -686,10 +966,7 @@ void
 tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 								const char *root,
 								const char *binpath,
-								int pgport,
-								const char *name,
-								bool replicationQuorum,
-								int candidatePriority,
+								TmuxNode *node,
 								bool skipHBA)
 {
 	char monitor[BUFSIZE] = { 0 };
@@ -698,7 +975,7 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 		? "--hostname localhost --ssl-self-signed --skip-pg-hba"
 		: "--hostname localhost --ssl-self-signed --auth trust --pg-hba-lan";
 
-	tmux_add_send_keys_command(script, "export PGPORT=%d", pgport);
+	tmux_add_send_keys_command(script, "export PGPORT=%d", node->pgport);
 
 	sformat(monitor, sizeof(monitor),
 			"$(%s show uri --pgdata %s/monitor --formation monitor)",
@@ -708,7 +985,7 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 	tmux_add_send_keys_command(script,
 							   "export PGDATA=\"%s/%s\"",
 							   root,
-							   name);
+							   node->name);
 
 	tmux_add_send_keys_command(script,
 							   "%s create postgres %s "
@@ -721,9 +998,128 @@ tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 							   binpath,
 							   pg_ctl_opts,
 							   monitor,
-							   name,
-							   replicationQuorum ? "true" : "false",
-							   candidatePriority);
+							   node->name,
+							   node->replicationQuorum ? "true" : "false",
+							   node->candidatePriority);
+}
+
+
+/*
+ * tmux_pg_autoctl_activate appens a pg_autoctl activate command to the given
+ * script buffer.
+ */
+void
+tmux_pg_autoctl_activate(PQExpBuffer script,
+						 const char *root,
+						 const char *binpath,
+						 const char *name)
+{
+	tmux_add_send_keys_command(script,
+							   "%s activate --pgdata \"%s/%s\"",
+							   binpath,
+							   root,
+							   name);
+}
+
+
+/*
+ * tmux_pg_autoctl_create_coordinator appends a pg_autoctl create coordinator
+ * command to the given script buffer, and also the commands to set PGDATA and
+ * PGPORT.
+ */
+void
+tmux_pg_autoctl_create_coordinator(PQExpBuffer script,
+								   const char *root,
+								   const char *binpath,
+								   TmuxNode *node,
+								   bool skipHBA)
+{
+	char monitor[BUFSIZE] = { 0 };
+	char *pg_ctl_opts =
+		skipHBA
+		? "--hostname localhost --ssl-self-signed --skip-pg-hba"
+		: "--hostname localhost --ssl-self-signed --auth trust";
+
+	tmux_add_send_keys_command(script, "export PGPORT=%d", node->pgport);
+
+	sformat(monitor, sizeof(monitor),
+			"$(%s show uri --pgdata %s/monitor --formation monitor)",
+			binpath,
+			root);
+
+	tmux_add_send_keys_command(script,
+							   "export PGDATA=\"%s/%s\"",
+							   root,
+							   node->name);
+
+	tmux_add_send_keys_command(script,
+							   "%s create coordinator %s "
+							   "--monitor %s --name %s "
+							   "%s"
+							   "%s %s "
+							   "--replication-quorum %s "
+							   "--candidate-priority %d "
+							   "--run",
+							   binpath,
+							   pg_ctl_opts,
+							   monitor,
+							   node->name,
+							   node->secondary ? "--citus-secondary " : "",
+							   node->secondary ? "--citus-cluster" : "",
+							   node->secondary ? node->clusterName : "",
+							   node->replicationQuorum ? "true" : "false",
+							   node->candidatePriority);
+}
+
+
+/*
+ * tmux_pg_autoctl_create_coordinator appends a pg_autoctl create coordinator
+ * command to the given script buffer, and also the commands to set PGDATA and
+ * PGPORT.
+ */
+void
+tmux_pg_autoctl_create_worker(PQExpBuffer script,
+							  const char *root,
+							  const char *binpath,
+							  TmuxNode *node,
+							  bool skipHBA)
+{
+	char monitor[BUFSIZE] = { 0 };
+	char *pg_ctl_opts =
+		skipHBA
+		? "--hostname localhost --ssl-self-signed --skip-pg-hba"
+		: "--hostname localhost --ssl-self-signed --auth trust";
+
+	tmux_add_send_keys_command(script, "export PGPORT=%d", node->pgport);
+
+	sformat(monitor, sizeof(monitor),
+			"$(%s show uri --pgdata %s/monitor --formation monitor)",
+			binpath,
+			root);
+
+	tmux_add_send_keys_command(script,
+							   "export PGDATA=\"%s/%s\"",
+							   root,
+							   node->name);
+
+	tmux_add_send_keys_command(script,
+							   "%s create worker %s "
+							   "--monitor %s --name %s --group %d "
+							   "%s"
+							   "%s %s "
+							   "--replication-quorum %s "
+							   "--candidate-priority %d "
+							   "--run",
+							   binpath,
+							   pg_ctl_opts,
+							   monitor,
+							   node->name,
+							   node->group,
+							   node->secondary ? "--citus-secondary " : "",
+							   node->secondary ? "--citus-cluster" : "",
+							   node->secondary ? node->clusterName : "",
+							   node->replicationQuorum ? "true" : "false",
+							   node->candidatePriority);
 }
 
 
@@ -767,7 +1163,17 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 		/*
 		 * Force node ordering to easy debugging of interactive sessions: each
 		 * node waits until the previous one has been started or registered.
+		 *
+		 * First worker in a group is named worker1a or worker2a and can be
+		 * started as soon as the monitor is ready, other workers in the same
+		 * group have to wait until the first worker is ready to ensure their
+		 * naming worker1b or worker2b.
 		 */
+		if (node->group > 0 && node->seq == 0)
+		{
+			sformat(previousName, sizeof(previousName), "monitor");
+		}
+
 		tmux_add_send_keys_command(script,
 								   "PG_AUTOCTL_DEBUG=1 "
 								   "%s do tmux wait --root %s %s",
@@ -775,14 +1181,33 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 								   options->root,
 								   previousName);
 
-		tmux_pg_autoctl_create_postgres(script,
-										root,
-										options->binpath,
-										node->pgport,
-										node->name,
-										node->replicationQuorum,
-										node->candidatePriority,
-										options->skipHBA);
+		if (options->withCitus)
+		{
+			if (node->group == 0)
+			{
+				tmux_pg_autoctl_create_coordinator(script,
+												   root,
+												   options->binpath,
+												   node,
+												   options->skipHBA);
+			}
+			else
+			{
+				tmux_pg_autoctl_create_worker(script,
+											  root,
+											  options->binpath,
+											  node,
+											  options->skipHBA);
+			}
+		}
+		else
+		{
+			tmux_pg_autoctl_create_postgres(script,
+											root,
+											options->binpath,
+											node,
+											options->skipHBA);
+		}
 
 		strlcpy(previousName, node->name, sizeof(previousName));
 	}
@@ -808,6 +1233,28 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 	tmux_add_command(script, "select-layout even-vertical");
 	(void) tmux_add_xdg_environment(script);
 
+	/* activate the first (primary) coordinator when asked to */
+	if (env_exists("PG_AUTOCTL_ACTIVATE_COORDINATOR"))
+	{
+		TmuxNode coord0a = { 0 };
+
+		/* wait until the coordinator is ready */
+		(void) prepare_node_name(options, &coord0a, 1);
+
+		tmux_add_send_keys_command(script,
+								   "PG_AUTOCTL_DEBUG=1 "
+								   "%s do tmux wait --root %s %s %s",
+								   pg_autoctl_argv0,
+								   options->root,
+								   coord0a.name,
+								   NodeStateToString(WAIT_PRIMARY_STATE));
+
+		tmux_pg_autoctl_activate(script,
+								 options->root,
+								 options->binpath,
+								 coord0a.name);
+	}
+
 	if (options->numSync != -1)
 	{
 		/*
@@ -815,18 +1262,18 @@ prepare_tmux_script(TmuxOptions *options, PQExpBuffer script)
 		 * PRIMARY before we can go on and change formation settings with
 		 *   pg_autoctl set formation ...
 		 */
-		char firstNode[NAMEDATALEN] = { 0 };
+		TmuxNode firstNode = { 0 };
 		NodeState targetPrimaryState =
 			options->numSync == 0 ? WAIT_PRIMARY_STATE : PRIMARY_STATE;
 
-		sformat(firstNode, sizeof(firstNode), "node%d", 1);
+		(void) prepare_node_name(options, &firstNode, 1);
 
 		tmux_add_send_keys_command(script,
 								   "PG_AUTOCTL_DEBUG=1 "
 								   "%s do tmux wait --root %s %s %s",
 								   options->binpath,
 								   options->root,
-								   firstNode,
+								   firstNode.name,
 								   NodeStateToString(targetPrimaryState));
 
 		/* PGDATA has just been exported, rely on it */
@@ -1017,29 +1464,23 @@ tmux_stop_pg_autoctl(TmuxOptions *options)
 	/* signal processes using increasing levels of urge to quit now */
 	for (int s = 0; s < signalsCount; s++)
 	{
+		int totalNodesCount = compute_node_count(options);
 		int countRunning = options->nodes + 1;
 
-		for (int i = 0; i <= options->nodes; i++)
+		for (int i = 0; i <= totalNodesCount; i++)
 		{
 			pid_t pid = 0;
-			char name[MAXPGPATH] = { 0 };
+			TmuxNode node = { 0 };
 			char pgdata[MAXPGPATH] = { 0 };
 
-			if (i == options->nodes)
-			{
-				sformat(name, sizeof(name), "monitor");
-			}
-			else
-			{
-				sformat(name, sizeof(name), "node%d", i + 1);
-			}
+			(void) prepare_node_name(options, &node, i);
 
-			sformat(pgdata, sizeof(pgdata), "%s/%s", options->root, name);
+			sformat(pgdata, sizeof(pgdata), "%s/%s", options->root, node.name);
 
 			if (!pg_autoctl_getpid(pgdata, &pid))
 			{
 				/* we don't have a pid */
-				log_info("No pidfile for pg_autoctl for node \"%s\"", name);
+				log_info("No pidfile for pg_autoctl for node \"%s\"", node.name);
 				--countRunning;
 				continue;
 			}
@@ -1047,13 +1488,13 @@ tmux_stop_pg_autoctl(TmuxOptions *options)
 			if (kill(pid, 0) == -1 && errno == ESRCH)
 			{
 				log_info("Pid %d for node \"%s\" is not running anymore",
-						 pid, name);
+						 pid, node.name);
 				--countRunning;
 			}
 			else
 			{
 				log_info("Sending signal %s to pid %d for node \"%s\"",
-						 signal_to_string(signals[s]), pid, name);
+						 signal_to_string(signals[s]), pid, node.name);
 
 				if (kill(pid, signals[s]) != 0)
 				{

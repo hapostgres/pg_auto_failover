@@ -34,6 +34,7 @@
 #include "env_utils.h"
 #include "log.h"
 #include "pidfile.h"
+#include "pgsetup.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -166,10 +167,14 @@ tmux_compose_add_monitor(PQExpBuffer script)
  */
 static void
 tmux_compose_add_node(PQExpBuffer script,
+					  PgInstanceKind nodeKind,
+					  int group,
 					  const char *name,
 					  const char *pguser,
 					  const char *dbname,
-					  const char *monitor_pguri)
+					  const char *monitor_pguri,
+					  bool replicationQuorum,
+					  int candidatePriority)
 {
 	char currentWorkingDirectory[MAXPGPATH] = { 0 };
 
@@ -177,6 +182,31 @@ tmux_compose_add_node(PQExpBuffer script,
 	{
 		log_error("Failed to get the current working directory: %m");
 		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	char command[BUFSIZE] = { 0 };
+
+	if (nodeKind == NODE_KIND_STANDALONE)
+	{
+		sformat(command, sizeof(command),
+				"pg_autoctl create postgres "
+				"--ssl-self-signed --auth trust --pg-hba-lan --run");
+	}
+	else
+	{
+		if (group == 0)
+		{
+			sformat(command, sizeof(command),
+					"pg_autoctl create coordinator "
+					"--ssl-self-signed --auth trust --pg-hba-lan --run");
+		}
+		else
+		{
+			sformat(command, sizeof(command),
+					"pg_autoctl create worker "
+					"--ssl-self-signed --auth trust --pg-hba-lan --group %d --run",
+					group);
+		}
 	}
 
 	appendPQExpBuffer(script, "  %s:\n", name);
@@ -189,12 +219,16 @@ tmux_compose_add_node(PQExpBuffer script,
 	appendPQExpBuffer(script, "      PGUSER: %s\n", pguser);
 	appendPQExpBuffer(script, "      PGDATABASE: %s\n", dbname);
 	appendPQExpBuffer(script, "      PG_AUTOCTL_MONITOR: \"%s\"\n", monitor_pguri);
+	appendPQExpBuffer(script, "      PG_AUTOCTL_NODE_NAME: \"%s\"\n", name);
+
+	appendPQExpBuffer(script, "      PG_AUTOCTL_REPLICATION_QUORUM: \"%s\"\n",
+					  replicationQuorum ? "true" : "false");
+	appendPQExpBuffer(script, "      PG_AUTOCTL_CANDIDATE_PRIORITY: %d\n",
+					  candidatePriority);
+
 	appendPQExpBuffer(script, "    expose:\n");
 	appendPQExpBuffer(script, "     - 5432\n");
-	appendPQExpBuffer(script, "    command: "
-							  "pg_autoctl create postgres "
-							  "--ssl-self-signed --auth trust "
-							  "--pg-hba-lan --run\n");
+	appendPQExpBuffer(script, "    command: %s\n", command);
 }
 
 
@@ -232,12 +266,25 @@ prepare_tmux_compose_config(TmuxOptions *options, PQExpBuffer script)
 	{
 		TmuxNode *node = &(tmuxNodeArray.nodes[i]);
 
+		PgInstanceKind kind = NODE_KIND_STANDALONE;
+
+		if (options->withCitus)
+		{
+			kind = node->group == 0
+				   ? NODE_KIND_CITUS_COORDINATOR
+				   : NODE_KIND_CITUS_WORKER;
+		}
+
 		(void) tmux_compose_add_node(
 			script,
+			kind,
+			node->group,
 			node->name,
 			"demo",
 			"demo",
-			"postgresql://autoctl_node@monitor/pg_auto_failover");
+			"postgresql://autoctl_node@monitor/pg_auto_failover",
+			node->replicationQuorum,
+			node->candidatePriority);
 	}
 
 	appendPQExpBuffer(script, "\n");

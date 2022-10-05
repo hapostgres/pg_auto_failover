@@ -8,7 +8,8 @@ BUILD_CONTAINER_NAME = pg_auto_failover_build
 TEST_CONTAINER_NAME = pg_auto_failover_test
 DOCKER_RUN_OPTS = --privileged --rm
 
-PGVERSION ?= 10
+PGVERSION ?= 14
+
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
 # Tests for the monitor
@@ -44,10 +45,20 @@ TESTS_MULTI += test_multi_ifdown
 TESTS_MULTI += test_multi_maintenance
 TESTS_MULTI += test_multi_standbys
 
+# Tests for Citus
+TESTS_CITUS  = test_basic_citus_operation
+TESTS_CITUS += test_citus_cluster_name
+TESTS_CITUS += test_citus_force_failover
+TESTS_CITUS += test_citus_multi_standbys
+TESTS_CITUS += test_nonha_citus_operation
+TESTS_CITUS += test_citus_skip_pg_hba
+
 # TEST indicates the testfile to run
 TEST ?=
 ifeq ($(TEST),)
 	TEST_ARGUMENT = --where=tests
+else ifeq ($(TEST),citus)
+	TEST_ARGUMENT = --where=tests --tests=$(TESTS_CITUS)
 else ifeq ($(TEST),multi)
 	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MULTI)
 else ifeq ($(TEST),single)
@@ -79,13 +90,25 @@ NODES ?= 2						# total count of Postgres nodes
 NODES_ASYNC ?= 0				# count of replication-quorum false nodes
 NODES_PRIOS ?= 50				# either "50", or "50,50", or "50,50,0" etc
 NODES_SYNC_SB ?= -1
-FIRST_PGPORT ?= 5500
+
+CITUS = 0
+WORKERS = 2
+NODES_SECONDARY = 0
 CLUSTER_OPTS = ""			# could be "--skip-pg-hba"
 
 TMUX_EXTRA_COMMANDS ?= ""
 TMUX_LAYOUT ?= even-vertical	# could be "tiled"
 TMUX_TOP_DIR = ./tmux
 TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
+
+ifeq ($(CITUS),1)
+	FIRST_PGPORT ?= 5600
+	CLUSTER_OPTS += --citus
+	TMUX_TOP_DIR = ./tmux/citus
+else
+	FIRST_PGPORT ?= 5500
+	TMUX_TOP_DIR = ./tmux/pgsql
+endif
 
 # make azcluster arguments
 AZURE_PREFIX ?= ha-demo-$(shell whoami)
@@ -197,25 +220,31 @@ interactive-test:
 	docker run --name $(CONTAINER_NAME) --rm -ti $(CONTAINER_NAME)
 
 build-image:
-	docker build $(DOCKER_BUILD_OPTS) --target build -t $(BUILD_CONTAINER_NAME) .
+	docker build --target build -t $(BUILD_CONTAINER_NAME) .
 
-build-test-pg10: build-image
-	docker build --build-arg PGVERSION=10 --target test -t $(TEST_CONTAINER_NAME):pg10 .
+# Citus 9.0 seems to be the most recent version of Citus with Postgres 10
+# support, but fails to compile nowadays...
+# build-test-pg10:
+# 	docker build --build-arg PGVERSION=10 --build-arg CITUSTAG=v9.0.2 --target test -t $(TEST_CONTAINER_NAME):pg10 .
 
 build-test-pg11:
-	docker build --build-arg PGVERSION=11 --target test -t $(TEST_CONTAINER_NAME):pg11 .
+	docker build --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10 --target test -t $(TEST_CONTAINER_NAME):pg11 .
 
 build-test-pg12:
-	docker build --build-arg PGVERSION=12 --target test -t $(TEST_CONTAINER_NAME):pg12 .
+	docker build --build-arg PGVERSION=12 --build-arg CITUSTAG=v10.2.3 --target test -t $(TEST_CONTAINER_NAME):pg12 .
 
 build-test-pg13:
-	docker build --build-arg PGVERSION=13 --target test -t $(TEST_CONTAINER_NAME):pg13 .
+	docker build --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.3 --target test -t $(TEST_CONTAINER_NAME):pg13 .
 
 build-test-pg14:
-	docker build --build-arg PGVERSION=14 --target test -t $(TEST_CONTAINER_NAME):pg14 .
+	docker build --build-arg PGVERSION=14 --build-arg CITUSTAG=v11.1.2 --target test -t $(TEST_CONTAINER_NAME):pg14 .
 
 build-test-pg15:
-	docker build --build-arg PGVERSION=15 --target test -t $(TEST_CONTAINER_NAME):pg15 .
+	docker build --build-arg PGVERSION=15 --build-arg CITUSTAG=v11.1.2 --target test -t $(TEST_CONTAINER_NAME):pg15 .
+
+
+build-test-image: build-test-pg$(PGVERSION) ;
+
 
 #
 # make run-test; is the main testing entry point used to run tests inside
@@ -229,28 +258,28 @@ run-test: build-test-pg$(PGVERSION)
 		make -C /usr/src/pg_auto_failover test	\
 		PGVERSION=$(PGVERSION) TEST='${TEST}'
 
-build-pg10: build-test-pg10
-	docker build --build-arg PGVERSION=10 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg10 .
+# build-pg10: build-test-pg10
+# 	docker build --build-arg PGVERSION=10 -t $(CONTAINER_NAME):pg10 .
 
 build-pg11: build-test-pg11
-	docker build --build-arg PGVERSION=11 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg11 .
+	docker build --build-arg PGVERSION=11 -t $(CONTAINER_NAME):pg11 .
 
 build-pg12: build-test-pg12
-	docker build --build-arg PGVERSION=12 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg12 .
+	docker build --build-arg PGVERSION=12 -t $(CONTAINER_NAME):pg12 .
 
 build-pg13: build-test-pg13
-	docker build --build-arg PGVERSION=13 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg13 .
+	docker build --build-arg PGVERSION=13 -t $(CONTAINER_NAME):pg13 .
 
 build-pg14: build-test-pg14
-	docker build --build-arg PGVERSION=14 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg14 .
+	docker build --build-arg PGVERSION=14 -t $(CONTAINER_NAME):pg14 .
 
 build-pg15: build-test-pg15
-	docker build --build-arg PGVERSION=15 $(DOCKER_BUILD_OPTS) -t $(CONTAINER_NAME):pg15 .
+	docker build --build-arg PGVERSION=15 -t $(CONTAINER_NAME):pg15 .
 
-build: build-pg10 build-pg11 build-pg12 build-pg13 build-pg14 ;
+build: build-pg11 build-pg12 build-pg13 build-pg14 build-pg15 ;
 
 build-check:
-	for v in 10 11 12 13 14; do \
+	for v in 11 12 13 14 15; do \
 		docker run --rm -t pg_auto_failover_test:pg$$v pg_autoctl version --json | jq ".pg_version" | xargs echo $$v: ; \
 	done
 
@@ -295,6 +324,8 @@ $(TMUX_SCRIPT): bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
+         --citus-workers $(WORKERS) \
+         --citus-secondaries $(NODES_SECONDARY) \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
 		 --layout $(TMUX_LAYOUT) > $@
@@ -305,7 +336,10 @@ tmux-clean: bin
 	$(PG_AUTOCTL) do tmux clean           \
          --root $(TMUX_TOP_DIR)           \
          --first-pgport $(FIRST_PGPORT)   \
-         --nodes $(NODES)
+         --nodes $(NODES)                 \
+         --citus-workers $(WORKERS)       \
+         --citus-secondaries $(NODES_SECONDARY) \
+         $(CLUSTER_OPTS)
 
 tmux-session: bin
 	$(PG_AUTOCTL) do tmux session         \
@@ -315,6 +349,8 @@ tmux-session: bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
+         --citus-workers $(WORKERS)       \
+         --citus-secondaries $(NODES_SECONDARY) \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
@@ -327,6 +363,8 @@ tmux-compose-session:
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
+         --citus-workers $(WORKERS)       \
+         --citus-secondaries $(NODES_SECONDARY) \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
@@ -374,7 +412,7 @@ azdrop: all
 .PHONY: all clean check install docs
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
-.PHONY: build-test run-test spellcheck lint linting
+.PHONY: build-test run-test spellcheck lint linting ci-test
 .PHONY: tmux-clean cluster compose
 .PHONY: azcluster azdrop az
 .PHONY: build-image

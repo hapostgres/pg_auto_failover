@@ -26,3 +26,4 @@ have their own manual page.
    pg_autoctl_stop
    pg_autoctl_reload
    pg_autoctl_status
+   pg_autoctl_activate

@@ -26,8 +26,11 @@
 #include "signals.h"
 #include "string_utils.h"
 
-#define MAX_NODES 12
+#define MAX_NODES 24
 
+/*
+ * Parse command line options for the tmux commands (and make cluster)
+ */
 typedef struct TmuxOptions
 {
 	char root[MAXPGPATH];
@@ -36,6 +39,9 @@ typedef struct TmuxOptions
 	int asyncNodes;             /* number of async nodes, within the total */
 	int priorities[MAX_NODES];  /* node priorities */
 	int numSync;                /* number-sync-standbys */
+	bool withCitus;             /* do we create a citus formation? --citus */
+	int citusWorkers;           /* citus worker nodes */
+	int citusSecondaries;       /* citus secondary nodes, 0 or 1 */
 	bool skipHBA;               /* do we want to use --skip-pg-hba? */
 	char layout[BUFSIZE];
 	char binpath[MAXPGPATH];
@@ -44,7 +50,11 @@ typedef struct TmuxOptions
 typedef struct TmuxNode
 {
 	char name[NAMEDATALEN];
+	char clusterName[NAMEDATALEN];
 	int pgport;
+	int group;
+	int seq;
+	bool secondary;
 	bool replicationQuorum;
 	int candidatePriority;
 } TmuxNode;
@@ -87,11 +97,25 @@ void tmux_pg_autoctl_create_monitor(PQExpBuffer script,
 void tmux_pg_autoctl_create_postgres(PQExpBuffer script,
 									 const char *root,
 									 const char *binpath,
-									 int pgport,
-									 const char *name,
-									 bool replicationQuorum,
-									 int candidatePriority,
+									 TmuxNode *node,
 									 bool skipHBA);
+
+void tmux_pg_autoctl_create_coordinator(PQExpBuffer script,
+										const char *root,
+										const char *binpath,
+										TmuxNode *node,
+										bool skipHBA);
+
+void tmux_pg_autoctl_create_worker(PQExpBuffer script,
+								   const char *root,
+								   const char *binpath,
+								   TmuxNode *node,
+								   bool skipHBA);
+
+void tmux_pg_autoctl_activate(PQExpBuffer script,
+							  const char *root,
+							  const char *binpath,
+							  const char *name);
 
 bool tmux_start_server(const char *scriptName, const char *binpath);
 bool pg_autoctl_getpid(const char *pgdata, pid_t *pid);

@@ -104,6 +104,9 @@ extern KeeperNodesArrayRefreshFunction *KeeperRefreshHooks;
 
 void keeper_call_reload_hooks(Keeper *keeper, bool firstLoop, bool doInit);
 bool keeper_reload_configuration(Keeper *keeper, bool firstLoop, bool doInit);
+bool keeper_reload_citus_node_update_hostname_port(Keeper *keeper,
+												   bool firstLoop,
+												   bool doInit);
 
 bool keeper_call_refresh_hooks(Keeper *keeper,
 							   NodeAddressArray *newNodesArray,
@@ -111,6 +114,9 @@ bool keeper_call_refresh_hooks(Keeper *keeper,
 bool keeper_refresh_hba(Keeper *keeper,
 						NodeAddressArray *newNodesArray,
 						bool forceCacheInvalidation);
+bool keeper_refresh_citus_remove_dropped_nodes(Keeper *keeper,
+											   NodeAddressArray *newNodesArray,
+											   bool forceCacheInvalidation);
 
 bool keeper_read_nodes_from_file(Keeper *keeper, NodeAddressArray *nodesArray);
 bool keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode);

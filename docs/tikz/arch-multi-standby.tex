@@ -22,9 +22,9 @@
 
   %% \draw [help lines] (-10,0) grid (10,20);
 
-  \node (flegend) at (0,18) {\textt{number\_sync\_standby = 1}} ;
+  \node (flegend) at (8,18) {\textt{number\_sync\_standby = 1}} ;
 
-  \node  (a)   at (0,15)   [primary]
+  \node  (a)   at (0,18)   [primary]
          {\textbf{\normalsize Node A}
            \nodepart{second}
            \textbf{\Large Primary}
@@ -33,7 +33,7 @@
 		   \texttt{candidate priority = 50}
          };
 
-  \node  (b)   at (-6,8)  [standby]
+  \node  (b)   at (0,12)  [standby]
          {\textbf{\normalsize Node B}
            \nodepart{second}
            \textbf{\Large Secondary}
@@ -42,7 +42,7 @@
 		   \texttt{candidate priority = 50}
          };
 
-  \node  (c)   at (6,8)   [standby]
+  \node  (c)   at (0,6)   [standby]
          {\textbf{\normalsize Node C}
            \nodepart{second}
            \textbf{\Large Secondary}
@@ -51,19 +51,19 @@
 		   \texttt{candidate priority = 50}
          };
 
-  \node  (app) at (-8,18)  [app]        {\textbf{\Large Application}};
-  \node  (m)   at (8,18)   [monitor]    {\textbf{\Large Monitor}};
+  \node  (app) at (-8,12)  [app]        {\textbf{\Large Application}};
+  \node  (m)   at (8,12)   [monitor]    {\textbf{\Large Monitor}};
 
-  \path (app) edge [sql]  node[near start]       {SQL}            (a)
-              edge [sqlf] node[left,near start]  {SQL (fallback)} (b)
-              edge [sqlf,out=-90,in=145]                          (c)
+  \path (app) edge [sql,out=90,in=180]  node[near start] {SQL} (a.west)
+              edge [sqlf] (b)
+              edge [sqlf,out=-90,in=180] node[near start,above]  {SQL (fallback)} (c.west)
 
-        (a)   edge [sr]  node[left]           {Streaming}   (b.north east)
-              edge [sr]  node[right]  {Replication} (c.north west)
+        (a.south east) edge [sr,out=0,in=35]  node[left,near start]   {Streaming Replication}   (b.north east)
+        (a.south east) edge [sr,out=0,in=35] (c.north east)
 
-        (m)   edge [hc]                                               (a)
-              edge [hc,out=-90,in=35]                                 (b)
-              edge [hc] node[right,near start] {Health checks}        (c);
+        (m)   edge [hc,out=90,in=0]  (a.east)
+              edge [hc,out=180,in=0] (b.east)
+              edge [hc,out=-90,in=0] node[below,near end] {Health checks} (c.east);
 \end{tikzpicture}
 
 \end{document}

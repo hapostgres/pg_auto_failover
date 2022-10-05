@@ -177,6 +177,27 @@
 							&(config->postgresql_restart_failure_max_retries), \
 							POSTGRESQL_FAILS_TO_START_RETRIES)
 
+#define OPTION_TIMEOUT_CITUS_MASTER_UPDATE_NODE_LOCK_COOLDOWN(config) \
+	make_int_option_default("timeout", "citus_master_update_node_lock_cooldown", \
+							NULL, \
+							false, \
+							&(config->citus_master_update_node_lock_cooldown), \
+							CITUS_MASTER_UPDATE_NODE_LOCK_COOLDOWN)
+
+#define OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_MAX_RETRIES(config) \
+	make_int_option_default("timeout", "citus_coordinator_wait_max_retries", \
+							NULL, \
+							false, \
+							&(config->citus_coordinator_wait_max_retries), \
+							CITUS_COORDINATOR_WAIT_MAX_RETRIES)
+
+#define OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_TIMEOUT(config) \
+	make_int_option_default("timeout", "citus_coordinator_wait_timeout", \
+							NULL, \
+							false, \
+							&(config->citus_coordinator_wait_timeout), \
+							CITUS_COORDINATOR_WAIT_TIMEOUT)
+
 #define OPTION_TIMEOUT_LISTEN_NOTIFICATIONS(config) \
 	make_int_option_default("timeout", "listen_notifications_timeout", \
 							NULL, false, \
@@ -190,7 +211,6 @@
 #define OPTION_CITUS_CLUSTER_NAME(config) \
 	make_strbuf_option("citus", "cluster_name", "citus-cluster", \
 					   false, NAMEDATALEN, config->pgSetup.citusClusterName)
-
 
 #define SET_INI_OPTIONS_ARRAY(config) \
 	{ \
@@ -227,6 +247,10 @@
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config), \
 		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config), \
 		OPTION_TIMEOUT_LISTEN_NOTIFICATIONS(config), \
+ \
+		OPTION_TIMEOUT_CITUS_MASTER_UPDATE_NODE_LOCK_COOLDOWN(config), \
+		OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_MAX_RETRIES(config), \
+		OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_TIMEOUT(config), \
  \
 		OPTION_CITUS_ROLE(config), \
 		OPTION_CITUS_CLUSTER_NAME(config), \

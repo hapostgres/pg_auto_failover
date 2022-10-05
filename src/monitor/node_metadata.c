@@ -1119,7 +1119,7 @@ AddAutoFailoverNode(char *formationId,
 
 	const char *prefix =
 		formationKind == FORMATION_KIND_CITUS
-		? (groupId == 0 ? "coordinator" : "worker")
+		? (groupId == 0 ? "coord" : "worker")
 		: "node";
 
 	Oid argTypes[] = {
@@ -1193,8 +1193,10 @@ AddAutoFailoverNode(char *formationId,
 	 * in a CASE expression in the INSERT query.
 	 *
 	 * In a citus formation kind, we want to name the node with the convention
-	 * 'coordinator_%d' for the coordinator nodes, and 'worker%d' for the
-	 * worker nodes.
+	 * 'coord0a' and 'coord0b' etc for the coordinator nodes, and 'worker1a'
+	 * and 'worker1b' etc for the worker nodes. The first number is then the
+	 * groupid, that's easy enough, and the letter is derived from the node
+	 * sequence within that groupid.
 	 */
 
 	const char *insertQuery =
@@ -1207,7 +1209,18 @@ AddAutoFailoverNode(char *formationId,
 		" sysidentifier, goalstate, reportedstate, "
 		" candidatepriority, replicationquorum, nodecluster)"
 		" SELECT $1, seq.nodeid, $3, "
-		" case when $4 is null then format('%s_%s', $12, seq.nodeid) else $4 end, "
+		" case when $4 is null "
+		"   then case when $12 = 'node' "
+		"          then format('%s_%s', $12, seq.nodeid) "
+		"          else format('%s%s%s', $12, $3, "
+		"                      chr(ascii('a') + "
+		"                      (select count(*) "
+		"                         from " AUTO_FAILOVER_NODE_TABLE
+		"                        where formationid = $1 and groupid = $3 "
+		"                      )::int )) "
+		"        end "
+		"   else $4 "
+		" end, "
 		" $5, $6, $7, $8, $9, $10, $11, $13 "
 		" FROM seq "
 		"RETURNING nodeid";

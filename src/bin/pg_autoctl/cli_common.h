@@ -87,9 +87,14 @@ extern CommandLine do_commands;
 /* cli_config.c */
 extern CommandLine config_commands;
 
-/* cli_create_drop_node.c */
+/* cli_create_node.c */
 extern CommandLine create_monitor_command;
 extern CommandLine create_postgres_command;
+extern CommandLine create_coordinator_command;
+extern CommandLine create_worker_command;
+extern CommandLine activate_node_command;
+
+/* cli_drop_node.c */
 extern CommandLine drop_node_command;
 extern CommandLine drop_monitor_command;
 extern CommandLine destroy_command;
@@ -149,6 +154,12 @@ void keeper_cli_help(int argc, char **argv);
 int cli_print_version_getopts(int argc, char **argv);
 void keeper_cli_print_version(int argc, char **argv);
 void cli_pprint_json(JSON_Value *js);
+
+bool cli_common_getenv(KeeperConfig *options,
+					   SSLCommandLineOptions *sslCommandLineOptions);
+
+bool cli_common_getenv_pgsetup(PostgresSetup *pgSetup,
+							   SSLCommandLineOptions *sslCommandLineOptions);
 
 void cli_common_get_set_pgdata_or_exit(PostgresSetup *pgSetup);
 

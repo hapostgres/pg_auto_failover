@@ -1,8 +1,9 @@
 Introduction to pg_auto_failover
 ================================
 
-pg_auto_failover is an extension for PostgreSQL that monitors and manages failover
-for a postgres clusters. It is optimised for simplicity and correctness.
+pg_auto_failover is an extension for PostgreSQL that monitors and manages
+failover for postgres clusters. It is optimised for simplicity and
+correctness.
 
 Single Standby Architecture
 ---------------------------
@@ -13,8 +14,8 @@ Single Standby Architecture
    pg_auto_failover architecture with a primary and a standby node
 
 pg_auto_failover implements Business Continuity for your PostgreSQL
-services. pg_auto_failover implements a single PostgreSQL service using multiple
-nodes with automated failover, and automates PostgreSQL maintenance
+services. pg_auto_failover implements a single PostgreSQL service using
+multiple nodes with automated failover, and automates PostgreSQL maintenance
 operations in a way that guarantees availability of the service to its users
 and applications.
 
@@ -25,14 +26,15 @@ service:
   - a PostgreSQL secondary node, using Synchronous Hot Standby,
   - a pg_auto_failover Monitor node that acts both as a witness and an orchestrator.
 
-The pg_auto_failover Monitor implements a state machine and relies on in-core
-PostgreSQL facilities to deliver HA. For example. when the *secondary* node
-is detected to be unavailable, or when its lag is reported above a defined
-threshold (the default is 1 WAL files, or 16MB, see the
-`pgautofailover.promote_wal_log_threshold` GUC on the pg_auto_failover monitor), then the
-Monitor removes it from the `synchronous_standby_names` setting on the
-*primary* node. Until the *secondary* is back to being monitored healthy,
-failover and switchover operations are not allowed, preventing data loss.
+The pg_auto_failover Monitor implements a state machine and relies on
+in-core PostgreSQL facilities to deliver HA. For example. when the
+*secondary* node is detected to be unavailable, or when its lag is reported
+above a defined threshold (the default is 1 WAL files, or 16MB, see the
+`pgautofailover.promote_wal_log_threshold` GUC on the pg_auto_failover
+monitor), then the Monitor removes it from the `synchronous_standby_names`
+setting on the *primary* node. Until the *secondary* is back to being
+monitored healthy, failover and switchover operations are not allowed,
+preventing data loss.
 
 Multiple Standby Architecture
 -----------------------------
@@ -69,16 +71,39 @@ system always maintains a minimum of two copies of the data set: one on the
 primary, another one on one on either node B or node D. Whenever we lose one
 of those nodes, we can hold to this guarantee of two copies of the data set.
 
-Adding to that, we have the standby server C which has been set up to not
-participate in the replication quorum. Node C will not be found in the
-``synchronous_standby_names`` list of nodes. Also, node C is set up in a way to
+Adding to that, we have the standby server D which has been set up to not
+participate in the replication quorum. Node D will not be found in the
+``synchronous_standby_names`` list of nodes. Also, node D is set up in a way to
 never be a candidate for failover, with ``candidate-priority = 0``.
 
-This architecture would fit a situation where nodes A, B, and D are deployed
-in the same data center or availability zone, and node C in another.
-Those three nodes are set up to support the main production traffic and
-implement high availability of both the Postgres service and the data set.
+This architecture would fit a situation where nodes A, B, and C are deployed
+in the same data center or availability zone, and node D in another. Those
+three nodes are set up to support the main production traffic and implement
+high availability of both the Postgres service and the data set.
 
-Node C might be set up for Business Continuity in case the first data center is
-lost, or maybe for reporting the need for deployment on another application
-domain.
+Node D might be set up for Business Continuity in case the first data center
+is lost, or maybe for reporting the need for deployment on another
+application domain.
+
+Citus Architecture
+------------------
+
+.. figure:: ./tikz/arch-citus.svg
+   :alt: pg_auto_failover architecture with a Citus formation
+
+   pg_auto_failover architecture with a Citus formation
+
+pg_auto_failover implements Business Continuity for your Citus services.
+pg_auto_failover implements a single Citus formation service using multiple
+Citus nodes with automated failover, and automates PostgreSQL maintenance
+operations in a way that guarantees availability of the service to its users
+and applications.
+
+In that case, pg_auto_failover knows how to orchestrate a Citus coordinator
+failover and a Citus worker failover. A Citus worker failover can be
+achieved with a very minimal downtime to the application, where during a
+short time window SQL writes may error out.
+
+In this figure we see a single standby node for each Citus node, coordinator
+and workers. It is possible to implement more standby nodes, and even
+read-only nodes for load balancing, see :ref:`citus_secondaries`.

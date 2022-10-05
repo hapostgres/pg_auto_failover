@@ -120,6 +120,10 @@ class Cluster:
         vnode = self.vlan.create_node()
         nodeid = len(self.datanodes) + 1
 
+        dbname = "postgres"
+        if role == Role.Coordinator or role == Role.Worker:
+            dbname = "citus"
+
         datanode = DataNode(
             self,
             datadir,
@@ -127,7 +131,7 @@ class Cluster:
             port,
             os.getenv("USER"),
             authMethod,
-            "postgres",
+            dbname,
             self.monitor,
             nodeid,
             group,
@@ -278,6 +282,20 @@ class QueryRunner:
         conn.close()
 
         return result
+
+    def alter_system_set(self, gucs):
+        """
+        Calls ALTER SYSTEM SET on the provided GUCs, then pg_reload_conf().
+        """
+        psql_command = [shutil.which("psql"), "-d", self.database, "-c"]
+        for key in gucs:
+            sql = "alter system set %s = %s" % (key, gucs[key])
+            command = psql_command + [sql]
+            self.vnode.run_and_wait(command, name="alter system set")
+
+        sql = "select pg_reload_conf()"
+        command = psql_command + [sql]
+        self.vnode.run_and_wait(command, name="alter system set")
 
 
 class PGNode(QueryRunner):
@@ -687,7 +705,7 @@ class PGNode(QueryRunner):
         if events:
             return "\n".join(
                 [
-                    "%32s %8s %17s/%-17s %10s %10s %s"
+                    "%32s %15s %17s/%-17s %10s %10s %s"
                     % (
                         "eventtime",
                         "name",
@@ -1141,6 +1159,9 @@ class DataNode(PGNode, StatefulNode):
 
         if self.group:
             create_args += ["--group", str(self.group)]
+
+        if self.database:
+            create_args += ["--dbname", self.database]
 
         if name:
             self.name = name
@@ -1631,6 +1652,30 @@ class DataNode(PGNode, StatefulNode):
             % (self.datadir, current_slots, expected_slots)
         )
         return False
+
+    def create_wait_until_metadata_sync(self):
+        """
+        Create an additional function for Citus that's needed for regression
+        testing.
+        """
+        if self.role != Role.Coordinator:
+            return False
+
+        self.run_sql_query(
+            """
+        CREATE OR REPLACE FUNCTION
+        public.wait_until_metadata_sync (timeout INTEGER DEFAULT 15000)
+        RETURNS void
+        LANGUAGE C STRICT AS 'citus';
+        """
+        )
+
+        self.alter_system_set(
+            gucs={
+                "citus.metadata_sync_interval": 1000,
+                "citus.metadata_sync_retry_interval": 200,
+            }
+        )
 
 
 class MonitorNode(PGNode):

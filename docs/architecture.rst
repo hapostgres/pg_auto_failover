@@ -85,6 +85,8 @@ It is possible to operate many formations with a single monitor instance.
 Each formation has a group of Postgres nodes and the FSM orchestration
 implemented by the monitor applies separately to each group.
 
+.. _group:
+
 Group
 ^^^^^
 
