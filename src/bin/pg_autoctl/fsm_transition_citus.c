@@ -75,6 +75,16 @@ fsm_citus_coordinator_init_primary(Keeper *keeper)
 		return false;
 	}
 
+	PostgresSetup *pgSetup = &(config->pgSetup);
+
+	if (pgSetup->hbaLevel <= HBA_EDIT_SKIP)
+	{
+		log_info(
+			"Skipping coordinator registration to itself when --skip-pg-hba "
+			"is used, because we can't connect at pg_autoctl create node time");
+		return true;
+	}
+
 	/*
 	 * We now have a coordinator to talk to: add ourselves as inactive.
 	 */
@@ -87,7 +97,6 @@ fsm_citus_coordinator_init_primary(Keeper *keeper)
 	strlcpy(coordinatorNodeAddress.node.host,
 			keeper->config.hostname,
 			sizeof(coordinatorNodeAddress.node.host));
-
 
 	if (!coordinator_init(&coordinator, &(coordinatorNodeAddress.node), keeper))
 	{
