@@ -123,8 +123,8 @@ special built set of FSM transitions for Citus workers.
 Citus Secondaries and read-replica
 ----------------------------------
 
-Starting with pg_auto_failover 1.5, it is possible to setup Citus read-only
-replica. This Citus feature allows using a set of dedicated nodes (both
+It is possible to setup Citus read-only
+replicas. This Citus feature allows using a set of dedicated nodes (both
 coordinator and workers) to serve read-only traffic, such as reporting,
 analytics, or other parts of your workload that are read-only.
 
