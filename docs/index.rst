@@ -43,6 +43,7 @@ __ https://github.com/citusdata
    intro
    how-to
    tutorial
+   azure-tutorial
    architecture
    architecture-multi-standby
    citus

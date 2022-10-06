@@ -32,10 +32,9 @@ Within the context of a tutorial, or even a development environment, this
 matches very well to provisioning separate physical machines on-prem, or
 Virtual Machines either on-prem on in a Cloud service.
 
-The docker image used in this tutorial is named `pg_auto_failover:cluster`.
-It can be built locally when using the attached :download:`Dockerfile
-<citus/Dockerfile>` found within the GitHub repository for
-pg_auto_failover.
+The docker image used in this tutorial is named `pg_auto_failover:citus`. It
+can be built locally when using the attached :download:`Dockerfile
+<citus/Dockerfile>` found within the GitHub repository for pg_auto_failover.
 
 To build the image, either use the provided Makefile and run ``make build``,
 or run the docker build command directly:
