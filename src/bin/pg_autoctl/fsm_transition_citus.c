@@ -42,6 +42,91 @@ static bool ensure_hostname_is_current_on_coordinator(Keeper *keeper);
 
 
 /*
+ * fsm_citus_coordinator_init_primary initializes a primary coordinator node in
+ * a Citus formation. After doing the usual initialization steps as per the
+ * non-citus version of the FSM, the coordinator node registers itself to the
+ * Citus nodes metadata.
+ */
+bool
+fsm_citus_coordinator_init_primary(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	CoordinatorNodeAddress coordinatorNodeAddress = { 0 };
+	Coordinator coordinator = { 0 };
+	int nodeid = -1;
+
+	if (!fsm_init_primary(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * Only Citus workers have more work to do, coordinator are ok. To add
+	 * coordinator to the metadata, users can call "activate" subcommand
+	 * for the coordinator.
+	 */
+	if (keeper->postgres.pgKind != NODE_KIND_CITUS_COORDINATOR)
+	{
+		log_error("BUG: fsm_citus_coordinator_init_primary called for "
+				  "node kind %s",
+				  nodeKindToString(keeper->postgres.pgKind));
+		return false;
+	}
+
+	PostgresSetup *pgSetup = &(config->pgSetup);
+
+	if (pgSetup->hbaLevel <= HBA_EDIT_SKIP)
+	{
+		log_info(
+			"Skipping coordinator registration to itself when --skip-pg-hba "
+			"is used, because we can't connect at pg_autoctl create node time");
+		return true;
+	}
+
+	/*
+	 * We now have a coordinator to talk to: add ourselves as inactive.
+	 */
+	coordinatorNodeAddress.node.port = keeper->config.pgSetup.pgport;
+
+	strlcpy(coordinatorNodeAddress.node.name,
+			keeper->config.name,
+			sizeof(coordinatorNodeAddress.node.name));
+
+	strlcpy(coordinatorNodeAddress.node.host,
+			keeper->config.hostname,
+			sizeof(coordinatorNodeAddress.node.host));
+
+	if (!coordinator_init(&coordinator, &(coordinatorNodeAddress.node), keeper))
+	{
+		log_fatal("Failed to contact the coordinator because its URL is invalid, "
+				  "see above for details");
+		return false;
+	}
+
+	if (!coordinator_add_node(&coordinator, keeper, &nodeid))
+	{
+		/*
+		 * master_add_inactive_node() is idempotent: if the node already has
+		 * been added, nothing changes, in particular if the node is active
+		 * already then the function happily let the node active.
+		 */
+		log_fatal("Failed to add current node to the Citus coordinator, "
+				  "see above for details");
+		return false;
+	}
+
+	log_info("Added coordinator node %s:%d in formation \"%s\" to itself",
+			 keeper->config.hostname,
+			 keeper->config.pgSetup.pgport,
+			 config->formation);
+
+	return true;
+}
+
+
+/*
  * fsm_citus_init_primary initializes a primary worker node in a Citus
  * formation. After doing the usual initialization steps as per the non-citus
  * version of the FSM, the worker node must be added to Citus.

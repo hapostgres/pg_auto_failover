@@ -77,6 +77,7 @@ bool fsm_init_from_standby(Keeper *keeper);
 bool fsm_drop_node(Keeper *keeper);
 
 /* src/bin/pg_autoctl/fsm_transition_citus.c */
+bool fsm_citus_coordinator_init_primary(Keeper *keeper);
 bool fsm_citus_worker_init_primary(Keeper *keeper);
 bool fsm_citus_worker_resume_as_primary(Keeper *keeper);
 bool fsm_citus_coordinator_promote_standby_to_single(Keeper *keeper);

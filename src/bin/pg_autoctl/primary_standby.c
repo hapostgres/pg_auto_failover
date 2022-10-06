@@ -86,6 +86,7 @@ GUC postgres_default_settings_13[] = {
 GUC citus_default_settings_pre_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13,
 	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
+	{ "wal_level", "logical" },
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
 	{ "citus.cluster_name", "'default'" },
 	{ "citus.use_secondary_nodes", "'never'" },
@@ -96,6 +97,7 @@ GUC citus_default_settings_pre_13[] = {
 GUC citus_default_settings_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13,
 	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
+	{ "wal_level", "logical" },
 	{ "citus.node_conninfo", "'sslmode=prefer'" },
 	{ "citus.cluster_name", "'default'" },
 	{ "citus.use_secondary_nodes", "'never'" },

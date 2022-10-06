@@ -52,6 +52,7 @@ def test_001a_init_coordinator():
         # run_sql_query() will need
         # host "172.27.1.1", user "docker", database "postgres"
         hba.write("host postgres docker %s trust\n" % cluster.networkSubnet)
+        hba.write("host citus docker %s trust\n" % cluster.networkSubnet)
         hba.write("host all all %s trust\n" % cluster.networkSubnet)
         hba.write("host replication all %s trust\n" % cluster.networkSubnet)
 
