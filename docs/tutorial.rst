@@ -18,7 +18,7 @@ The setup provided in this tutorial is good for replaying at home in the
 lab. It is not intended to be production ready though. In particular, no
 attention have been spent on volume management. After all, this is a
 tutorial: the goal is to walk through the first steps of using
-pg_auto_failover to provide HA to a Citus formation.
+pg_auto_failover to implement Postgres automated failover.
 
 Pre-requisites
 --------------
