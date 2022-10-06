@@ -384,8 +384,8 @@ compose:
 valgrind-session: build-test
 	docker run                             \
 	    --name $(TEST_CONTAINER_NAME) 	   \
-		$(DOCKER_RUN_OPTS)			       \
-		$(TEST_CONTAINER_NAME)			   \
+		$(DOCKER_RUN_OPTS) -it		       \
+		$(TEST_CONTAINER_NAME):pg14		   \
 	    make -C /usr/src/pg_auto_failover  \
 	     VALGRIND=1 					   \
 	     TMUX_TOP_DIR=/tmp/tmux 	       \
