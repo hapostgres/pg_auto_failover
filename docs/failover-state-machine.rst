@@ -274,33 +274,6 @@ entry. If a node is not reporting anymore, maybe because it's completely
 unavailable, then it's possible to run the ``pg_autoctl drop node --force``
 command, and then the node entry is removed from the monitor.
 
-Failover logic
---------------
-
-This section needs to be expanded further, but below is the failover state
-machine for each node that is implemented by the monitor:
-
-.. figure:: ./fsm/node-state-machine.png
-   :scale: 30%
-   :alt: Node state machine
-
-   Node state machine
-
-Since the state machines of the data nodes always move in tandem, a pair
-(group) of data nodes also implicitly has the following state machine:
-
-.. figure:: ./fsm/group-state-machine.png
-   :scale: 40%
-   :alt: Group state machine
-
-   Group state machine
-
-.. raw:: latex
-
-    \newpage
-
-.. _state_machine_diagram:
-
 pg_auto_failover keeper's State Machine
 ---------------------------------------
 

@@ -213,8 +213,11 @@ spellcheck:
 	black --check .
 	ci/banned.h.sh
 
-docs: $(FSM)
+docs: $(FSM) tikz
 	$(MAKE) -C docs html
+
+tikz:
+	$(MAKE) -C docs/tikz all
 
 interactive-test:
 	docker run --name $(CONTAINER_NAME) --rm -ti $(CONTAINER_NAME)
@@ -301,7 +304,7 @@ run-installcheck-i386: build-i386
 man:
 	$(MAKE) -C docs man
 
-pdf: $(PDF)
+pdf: $(PDF) ;
 
 $(PDF):
 	$(MAKE) -s -C docs/tikz pdf
@@ -409,7 +412,7 @@ az: all
 azdrop: all
 	$(PG_AUTOCTL) do azure drop
 
-.PHONY: all clean check install docs
+.PHONY: all clean check install docs tikz
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin
 .PHONY: build-test run-test spellcheck lint linting ci-test
