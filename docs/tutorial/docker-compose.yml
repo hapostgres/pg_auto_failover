@@ -1,0 +1,64 @@
+version: "3.9"  # optional since v1.27.0
+
+services:
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    environment:
+      PGUSER: tutorial
+      PGDATABASE: tutorial
+      PGHOST: node1,node2
+      PGPORT: 5432
+      PGAPPNAME: tutorial
+      PGSSLMODE: require
+      PGTARGETSESSIONATTRS: read-write
+
+  monitor:
+    image: pg_auto_failover:tutorial
+    volumes:
+      - ./monitor:/var/lib/postgres
+    environment:
+      PGDATA: /var/lib/postgres/pgaf
+      PG_AUTOCTL_SSL_SELF_SIGNED: true
+    expose:
+      - 5432
+    command: |
+      pg_autoctl create monitor --auth trust --run
+
+  node1:
+    image: pg_auto_failover:tutorial
+    hostname: node1
+    volumes:
+      - ./node1:/var/lib/postgres
+    environment:
+      PGDATA: /var/lib/postgres/pgaf
+      PGUSER: tutorial
+      PGDATABASE: tutorial
+      PG_AUTOCTL_HBA_LAN: true
+      PG_AUTOCTL_AUTH_METHOD: "trust"
+      PG_AUTOCTL_SSL_SELF_SIGNED: true
+      PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
+    expose:
+      - 5432
+    command: |
+      pg_autoctl create postgres --name node1 --pg-hba-lan --run
+
+  node2:
+    image: pg_auto_failover:tutorial
+    hostname: node2
+    volumes:
+      - ./node2:/var/lib/postgres
+    environment:
+      PGDATA: /var/lib/postgres/pgaf
+      PGUSER: tutorial
+      PGDATABASE: tutorial
+      PG_AUTOCTL_HBA_LAN: true
+      PG_AUTOCTL_AUTH_METHOD: "trust"
+      PG_AUTOCTL_SSL_SELF_SIGNED: true
+      PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
+    expose:
+     - 5432
+    command: |
+      pg_autoctl create postgres --name node2 --pg-hba-lan --run
