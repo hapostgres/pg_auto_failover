@@ -23,7 +23,7 @@ We utilize the "ini.h" ini-file reader from https://github.com/mattiasgustavsson
 
 ## JSON
 
-The parson librairy at https://github.com/kgabis/parson is a single C file
+The parson library at https://github.com/kgabis/parson is a single C file
 and MIT licenced. It allows parsing from and serializing to JSON.
 
 ## pg

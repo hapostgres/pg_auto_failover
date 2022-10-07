@@ -327,7 +327,7 @@ has been used at creation time. That's because the ``host`` records match
 either SSL or non-SSL connection attempts in Postgres HBA file, so the
 pre-existing setup will continue to work. To enhance the SSL setup, you can
 manually edit the HBA files and change the existing lines from ``host`` to
-``hostssl`` to dissallow unencrypted connections at the server side.
+``hostssl`` to disallow unencrypted connections at the server side.
 
 In summary, to upgrade an existing pg_auto_failover setup to enable SSL:
 
