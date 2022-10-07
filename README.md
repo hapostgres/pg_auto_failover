@@ -14,7 +14,7 @@ and secondary by the monitor.
 ![pg_auto_failover Architecture with 2 nodes](docs/tikz/arch-single-standby.svg?raw=true "pg_auto_failover Architecture with 2 nodes")
 
 The pg_auto_failover Monitor implements a state machine and relies on
-in-core PostgreSQL facilities to deliver HA. For example. when the
+in-core PostgreSQL facilities to deliver HA. For example, when the
 **secondary** node is detected to be unavailable, or when its lag is too
 much, then the Monitor removes it from the `synchronous_standby_names`
 setting on the **primary** node. Until the **secondary** is back to being
