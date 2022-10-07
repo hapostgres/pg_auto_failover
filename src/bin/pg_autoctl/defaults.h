@@ -14,10 +14,10 @@
 #define PG_AUTOCTL_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_VERSION "1.6.4"
+#define PG_AUTOCTL_VERSION "2.0"
 
 /* version of the extension that we requite to talk to on the monitor */
-#define PG_AUTOCTL_EXTENSION_VERSION "1.6"
+#define PG_AUTOCTL_EXTENSION_VERSION "2.0"
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"

@@ -1,3 +1,42 @@
+### pg_auto_failover v2.0 (October 7, 2022) ###
+
+This new release includes support for Citus in pg_auto_failover, the usual
+amount of bug fixes, and update documentation with new tutorials and
+diagrams.
+
+The source code repository branch "master" was renamed to "main". This
+impacts the URLs of the docs for the not-yet released versions, and if
+you're using your own local git clone you might need to change your remote
+settings to follow the "main" branch now.
+
+### Added
+* Implement Citus support in pg_auto_failover. (#933)
+* Improve our Citus support for modern Citus compatibility. (#939)
+
+### Fixed
+* Fix documentation of health_check_period to match code (#926)
+* Bug fix: if process is stopped, refrain from signaling PID 0. (#921)
+* Fix monitor extension for new Postgres 15 shared memory hooks. (#922)
+* Refrain from using PGPASSWORD for pg_basebackup connection. (#768)
+* Fix build on FreeBSD (sempahore union support). (#901)
+* Improve tests stability around wait-until-pg-is-running. (#900)
+* Avoid NULL pointer check (#898)
+* Fix incorrect order of arguments in prototype (#887)
+* Fix check for negative pid (#888)
+* Fix potential out of bounds array access (#889)
+* Fix incorrect indentation of foreach block (#884)
+* docs: fix various typos (#885)
+* Fix tests for a non-interactive environment. (#894)
+* Fix ssl test by copying root client-side certificates. (#893)
+
+### Changed
+* Review the README, introduce a new first simple tutorial. (#942)
+* Use our docker test infrastructure on GitHub Actions. (#937)
+* Include Postgres 15 in our CI testing. (#923)
+* Improve our docker compose file a little. (#724)
+* Improve documentation thanks to user feedback. (#909)
+* Trigger github action workflow on pull requests to master. (#895)
+
 ### pg_auto_failover v1.6.4 (January 22, 2022) ###
 
 This is a bug fix release for the 1.6 series.
