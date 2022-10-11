@@ -246,7 +246,7 @@ The following options are available to ``pg_autoctl create postgres``:
   connections in the Postgres HBA rules.
 
   For instance, when the monitor resolves to ``192.168.0.1`` and your local
-  Postgres node uses an inferface with IP address
+  Postgres node uses an interface with IP address
   ``192.168.0.2/255.255.255.0`` to connect to the monitor, then the LAN CIDR
   is computed to be ``192.168.0.0/24``.
 

@@ -1476,7 +1476,7 @@ check_hostname(const char *hostname)
 
 		if (!fetchLocalCIDR(hostname, cidr, BUFSIZE))
 		{
-			log_warn("Failed to find adress \"%s\" in local network "
+			log_warn("Failed to find address \"%s\" in local network "
 					 "interfaces, automated pg_hba.conf setup might fail.",
 					 hostname);
 		}

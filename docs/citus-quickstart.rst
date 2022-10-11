@@ -9,7 +9,7 @@ failure in the coordinator and worker nodes and see how the system continues
 to function.
 
 This tutorial uses `docker-compose`__ in order to separate the architecture
-design from some of the implementation details. This allows reasonning at
+design from some of the implementation details. This allows reasoning at
 the architecture level within this tutorial, and better see which software
 component needs to be deployed and run on which node.
 
@@ -192,7 +192,7 @@ actual nodes.
 __ https://yaml101.com/anchors-and-aliases/
 
 Also this time we provision an application service (named "app") that sits
-in the backgound and allow us to later connect to our current primary
+in the background and allow us to later connect to our current primary
 coordinator. See :download:`Dockerfile.app <citus/Dockerfile.app>` for the
 complete definition of this service.
 
@@ -254,7 +254,7 @@ Our first Citus worker failover
 -------------------------------
 
 We see that in the ``citus_get_active_worker_nodes()`` output we have
-``worker1a``, ``worker2b``, and ``worker3a``. As mentionned before, that
+``worker1a``, ``worker2b``, and ``worker3a``. As mentioned before, that
 should have no impact on the operations of the Citus cluster when nodes are
 all dimensionned the same.
 

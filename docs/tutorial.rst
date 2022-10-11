@@ -8,7 +8,7 @@ standby. Then we'll add a second standby node. We’ll simulate failure in the
 Postgres nodes and see how the system continues to function.
 
 This tutorial uses `docker-compose`__ in order to separate the architecture
-design from some of the implementation details. This allows reasonning at
+design from some of the implementation details. This allows reasoning at
 the architecture level within this tutorial, and better see which software
 component needs to be deployed and run on which node.
 
@@ -202,7 +202,7 @@ Next steps
 As mentioned in the first section of this tutorial, the way we use
 docker-compose here is not meant to be production ready. It's useful to
 understand and play with a distributed system such as Postgres multiple
-nodes sytem and failovers.
+nodes system and failovers.
 
 See the command :ref:`pg_autoctl_do_tmux_compose_session` for more details
 about how to run a docker-compose test environment with docker-compose,

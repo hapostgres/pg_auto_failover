@@ -36,7 +36,7 @@ The code is organized in the following way:
   - files with a names that start with `ini_` implement our higher level
     facilities to handle configuration written in the INI format.
 
-  - files with a names that starts with `pg` implement abstrations used to
+  - files with a names that starts with `pg` implement abstractions used to
     handle a Postgres service:
 
 	  - the `pgsql` module contains code to query the local Postgres

@@ -24,9 +24,7 @@ Options
 --pgdata
 
   Location of the Postgres node being managed locally. Defaults to the
-  environment variable ``PGDATA``. Use ``--monitor`` to connect to a monitor
-  from anywhere, rather than the monitor URI used by a local Postgres node
-  managed with ``pg_autoctl``.
+  environment variable ``PGDATA``.
 
 --json
 
@@ -42,8 +40,7 @@ PGDATA
 
 PG_AUTOCTL_MONITOR
 
-  Postgres URI to connect to the monitor node, can be used instead of the
-  ``--monitor`` option.
+  Postgres URI to connect to the monitor node.
 
 XDG_CONFIG_HOME
 
