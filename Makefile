@@ -9,7 +9,8 @@ ifeq ("$(wildcard $(VERSION_FILE))","")
 DUMMY := $(shell git update-index -q --refresh)
 GIT_DIRTY := $(shell test -z "`git diff-index --name-only HEAD --`" || echo "-dirty")
 GIT_VVERSION := $(shell git describe --match "v[0-9]*" HEAD 2>/dev/null)
-GIT_VERSION := $(shell echo $(GIT_VVERSION) | awk -Fv '{print $$2"$(GIT_DIRTY)"}')
+GIT_DVERSION := $(shell echo $(GIT_VVERSION) | awk -Fv '{print $$2"$(GIT_DIRTY)"}')
+GIT_VERSION := $(shell echo $(GIT_DVERSION) | sed -e 's/-/./g')
 else
 GIT_VERSION := $(shell awk -F '[ "]' '{print $$4}' $(VERSION_FILE))
 endif
