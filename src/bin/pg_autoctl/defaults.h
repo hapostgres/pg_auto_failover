@@ -10,11 +10,13 @@
 #ifndef DEFAULTS_H
 #define DEFAULTS_H
 
+#include "git-version.h"
+
 /* to be written in the state file */
 #define PG_AUTOCTL_STATE_VERSION 1
 
 /* additional version information for printing version on CLI */
-#define PG_AUTOCTL_VERSION "2.0"
+#define PG_AUTOCTL_VERSION GIT_VERSION
 
 /* version of the extension that we requite to talk to on the monitor */
 #define PG_AUTOCTL_EXTENSION_VERSION "2.0"
