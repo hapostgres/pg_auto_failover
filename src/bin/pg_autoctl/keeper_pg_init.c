@@ -1012,6 +1012,16 @@ create_database_and_extension(Keeper *keeper)
 	}
 
 	/*
+	 * ensure_postgres_service_is_running reset our connection string to update
+	 * pgSetup cache with new Postgres pid and other information, but we really
+	 * want to make sure we connect with no username still (bootstrap user) and
+	 * to the template1 database.
+	 */
+	strlcpy(initPgSetup.username, "", NAMEDATALEN);
+	strlcpy(initPgSetup.dbname, "template1", NAMEDATALEN);
+	local_postgres_init(&initPostgres, &initPgSetup);
+
+	/*
 	 * If username was set in the setup and doesn't exist we need to create it.
 	 */
 	if (!IS_EMPTY_STRING_BUFFER(pgSetup->username))
@@ -1028,7 +1038,7 @@ create_database_and_extension(Keeper *keeper)
 			return false;
 		}
 
-		if (strcmp(pguser, pgSetup->username) == 0)
+		if (!IS_EMPTY_STRING_BUFFER(pguser))
 		{
 			unsetenv("PGUSER");
 		}
@@ -1048,10 +1058,12 @@ create_database_and_extension(Keeper *keeper)
 		}
 
 		/* reinstall the PGUSER value now that the user has been created. */
-		if (strcmp(pguser, pgSetup->username) == 0)
+		if (!IS_EMPTY_STRING_BUFFER(pguser))
 		{
 			setenv("PGUSER", pguser, 1);
 		}
+
+		log_info("CREATE USER %s", pgSetup->username);
 	}
 
 	/*
