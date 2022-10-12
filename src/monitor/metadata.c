@@ -173,18 +173,23 @@ LockNodeGroup(char *formationId, int groupId, LOCKMODE lockMode)
 /*
  * checkPgAutoFailoverVersion checks whether there is a version mismatch
  * between the available version and the loaded version or between the
- * installed version and the loaded version. Returns true if compatible, false
+ * installed version and the loaded version. Returns if compatible, errors out
  * otherwise.
  *
  * We need to be careful that the pgautofailover.so that is currently loaded in
  * the Postgres backend is intended to work with the current extension version
  * definition (schema and SQL definitions of C coded functions).
  */
-bool
+void
 checkPgAutoFailoverVersion()
 {
 	char *installedVersion = NULL;
 	char *availableVersion = NULL;
+
+	if (!EnableVersionChecks)
+	{
+		return;
+	}
 
 	const int argCount = 1;
 	Oid argTypes[] = { TEXTOID };
@@ -194,11 +199,6 @@ checkPgAutoFailoverVersion()
 	char *selectQuery =
 		"SELECT default_version, installed_version "
 		"FROM pg_catalog.pg_available_extensions WHERE name = $1;";
-
-	if (!EnableVersionChecks)
-	{
-		return true;
-	}
 
 	SPI_connect();
 
@@ -255,7 +255,6 @@ checkPgAutoFailoverVersion()
 				 errhint("Restart the database to load the latest version "
 						 "of the \"%s\" library.",
 						 AUTO_FAILOVER_EXTENSION_NAME)));
-		return false;
 	}
 
 	if (strcmp(AUTO_FAILOVER_EXTENSION_VERSION, installedVersion) != 0)
@@ -270,8 +269,5 @@ checkPgAutoFailoverVersion()
 						   installedVersion),
 				 errhint("Run ALTER EXTENSION %s UPDATE and try again.",
 						 AUTO_FAILOVER_EXTENSION_NAME)));
-		return false;
 	}
-
-	return true;
 }
