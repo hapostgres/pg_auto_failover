@@ -44,4 +44,4 @@ extern Oid pgAutoFailoverSchemaId(void);
 extern Oid pgAutoFailoverExtensionOwner(void);
 extern void LockFormation(char *formationId, LOCKMODE lockMode);
 extern void LockNodeGroup(char *formationId, int groupId, LOCKMODE lockMode);
-extern bool checkPgAutoFailoverVersion(void);
+extern void checkPgAutoFailoverVersion(void);
