@@ -3,12 +3,30 @@
 
 TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
+VERSION_FILE = src/bin/pg_autoctl/git-version.h
+
+ifeq ("$(wildcard $(VERSION_FILE))","")
+DUMMY := $(shell git update-index -q --refresh)
+GIT_DIRTY := $(shell test -z "`git diff-index --name-only HEAD --`" || echo "-dirty")
+GIT_VVERSION := $(shell git describe --match "v[0-9]*" HEAD 2>/dev/null)
+GIT_DVERSION := $(shell echo $(GIT_VVERSION) | awk -Fv '{print $$2"$(GIT_DIRTY)"}')
+GIT_VERSION := $(shell echo $(GIT_DVERSION) | sed -e 's/-/./g')
+else
+GIT_VERSION := $(shell awk -F '[ "]' '{print $$4}' $(VERSION_FILE))
+endif
+
 CONTAINER_NAME = pg_auto_failover
 BUILD_CONTAINER_NAME = pg_auto_failover_build
 TEST_CONTAINER_NAME = pg_auto_failover_test
 DOCKER_RUN_OPTS = --privileged --rm
 
 PGVERSION ?= 14
+
+BUILD_ARGS_PG11 = --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10
+BUILD_ARGS_PG12 = --build-arg PGVERSION=12 --build-arg CITUSTAG=v10.2.3
+BUILD_ARGS_PG13 = --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.3
+BUILD_ARGS_PG14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=v11.1.2
+BUILD_ARGS_PG15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=v11.1.2
 
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
@@ -132,6 +150,7 @@ all: monitor bin ;
 
 install: install-monitor install-bin ;
 clean: clean-monitor clean-bin ;
+maintainer-clean: clean-monitor clean-version clean-bin ;
 check: check-monitor ;
 
 monitor:
@@ -146,7 +165,7 @@ install-monitor: monitor
 check-monitor: install-monitor
 	$(MAKE) -C src/monitor/ installcheck
 
-bin:
+bin: version
 	$(MAKE) -C src/bin/ all
 
 clean-bin:
@@ -154,6 +173,14 @@ clean-bin:
 
 install-bin: bin
 	$(MAKE) -C src/bin/ install
+
+version: $(VERSION_FILE) ;
+
+$(VERSION_FILE):
+	@echo "#define GIT_VERSION \""$(GIT_VERSION)"\"" > $@
+
+clean-version:
+	rm -f $(VERSION_FILE)
 
 #
 # make ci-test; is run on the GitHub Action workflow
@@ -227,23 +254,21 @@ build-image:
 
 # Citus 9.0 seems to be the most recent version of Citus with Postgres 10
 # support, but fails to compile nowadays...
-# build-test-pg10:
-# 	docker build --build-arg PGVERSION=10 --build-arg CITUSTAG=v9.0.2 --target test -t $(TEST_CONTAINER_NAME):pg10 .
 
-build-test-pg11:
-	docker build --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10 --target test -t $(TEST_CONTAINER_NAME):pg11 .
+build-test-pg11: version
+	docker build $(BUILD_ARGS_PG11) --target test -t $(TEST_CONTAINER_NAME):pg11 .
 
-build-test-pg12:
-	docker build --build-arg PGVERSION=12 --build-arg CITUSTAG=v10.2.3 --target test -t $(TEST_CONTAINER_NAME):pg12 .
+build-test-pg12: version
+	docker build $(BUILD_ARGS_PG12) --target test -t $(TEST_CONTAINER_NAME):pg12 .
 
-build-test-pg13:
-	docker build --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.3 --target test -t $(TEST_CONTAINER_NAME):pg13 .
+build-test-pg13: version
+	docker build $(BUILD_ARGS_PG13) --target test -t $(TEST_CONTAINER_NAME):pg13 .
 
-build-test-pg14:
-	docker build --build-arg PGVERSION=14 --build-arg CITUSTAG=v11.1.2 --target test -t $(TEST_CONTAINER_NAME):pg14 .
+build-test-pg14: version
+	docker build $(BUILD_ARGS_PG14) --target test -t $(TEST_CONTAINER_NAME):pg14 .
 
-build-test-pg15:
-	docker build --build-arg PGVERSION=15 --build-arg CITUSTAG=v11.1.2 --target test -t $(TEST_CONTAINER_NAME):pg15 .
+build-test-pg15: version
+	docker build $(BUILD_ARGS_PG15) --target test -t $(TEST_CONTAINER_NAME):pg15 .
 
 
 build-test-image: build-test-pg$(PGVERSION) ;
@@ -261,23 +286,20 @@ run-test: build-test-pg$(PGVERSION)
 		make -C /usr/src/pg_auto_failover test	\
 		PGVERSION=$(PGVERSION) TEST='${TEST}'
 
-# build-pg10: build-test-pg10
-# 	docker build --build-arg PGVERSION=10 -t $(CONTAINER_NAME):pg10 .
-
 build-pg11: build-test-pg11
-	docker build --build-arg PGVERSION=11 -t $(CONTAINER_NAME):pg11 .
+	docker build $(BUILD_ARGS_PG11) -t $(CONTAINER_NAME):pg11 .
 
 build-pg12: build-test-pg12
-	docker build --build-arg PGVERSION=12 -t $(CONTAINER_NAME):pg12 .
+	docker build $(BUILD_ARGS_PG12) -t $(CONTAINER_NAME):pg12 .
 
 build-pg13: build-test-pg13
-	docker build --build-arg PGVERSION=13 -t $(CONTAINER_NAME):pg13 .
+	docker build $(BUILD_ARGS_PG13) -t $(CONTAINER_NAME):pg13 .
 
 build-pg14: build-test-pg14
-	docker build --build-arg PGVERSION=14 -t $(CONTAINER_NAME):pg14 .
+	docker build $(BUILD_ARGS_PG14) -t $(CONTAINER_NAME):pg14 .
 
 build-pg15: build-test-pg15
-	docker build --build-arg PGVERSION=15 -t $(CONTAINER_NAME):pg15 .
+	docker build $(BUILD_ARGS_PG15) -t $(CONTAINER_NAME):pg15 .
 
 build: build-pg11 build-pg12 build-pg13 build-pg14 build-pg15 ;
 
@@ -290,7 +312,7 @@ build-i386:
 	docker build -t i386:latest -f Dockerfile.i386 .
 
 build-demo:
-	docker build -t citusdata/pg_auto_failover:demo .
+	docker build $(BUILD_ARGS_PG14) -t citusdata/pg_auto_failover:demo .
 
 # expected to be run from within the i386 docker container
 installcheck-i386:
@@ -414,7 +436,7 @@ azdrop: all
 
 .PHONY: all clean check install docs tikz
 .PHONY: monitor clean-monitor check-monitor install-monitor
-.PHONY: bin clean-bin install-bin
+.PHONY: bin clean-bin install-bin maintainer-clean
 .PHONY: build-test run-test spellcheck lint linting ci-test
 .PHONY: tmux-clean cluster compose
 .PHONY: azcluster azdrop az
