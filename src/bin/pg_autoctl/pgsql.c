@@ -2249,7 +2249,7 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 	if (password)
 	{
 		/* show the statement before we append the password */
-		log_debug("Running command on Postgres: %s PASSWORD '*****';", query->data);
+		log_debug("%s PASSWORD '*****';", query->data);
 
 		escapedIdentifier = PQescapeLiteral(connection, password, strlen(password));
 		if (escapedIdentifier == NULL)
@@ -2267,7 +2267,7 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 	}
 	else
 	{
-		log_debug("Running command on Postgres: %s;", query->data);
+		log_debug("%s;", query->data);
 	}
 
 	/* memory allocation could have failed while building string */
