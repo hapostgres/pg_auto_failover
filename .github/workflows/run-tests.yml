@@ -58,12 +58,12 @@ jobs:
           sudo make -C ../tools install
           install_uncrustify
           rm -rf uncrustify*
-          make build-docs
 
-      - name: Check code formatting and banned function
+      - name: Check code formatting, banned function, and docs
         if: ${{ env.TEST == 'linting' }}
         run: |
           make lint
+          make build-docs
 
       - name: Build Docker Test Image
         if: ${{ env.TEST != 'linting' }}
@@ -74,7 +74,7 @@ jobs:
         if: ${{ env.TEST != 'linting' }}
         timeout-minutes: 15
         run: |
-          test -n "`git diff --name-only ${GITHUB_BASE_REF}.. -- src`" && make ci-test
+          test -n "`git diff --name-only ${GITHUB_BASE_REF} HEAD -- src`" && make ci-test
 
       - name: Run Test on push to main branch, and on workflow_dispatch
         if: ${{ contains(fromJson('["push", "workflow_dispatch"]'), github.event_name) }}

@@ -23,12 +23,12 @@ RUN pip3 install sphinx_rtd_theme
 WORKDIR /usr/src/pg_auto_failover
 
 COPY Makefile ./
-COPY src/bin/pg_autoctl/git-version.h src/bin/pg_autoctl/git-version.h
 COPY ./src ./src
 COPY ./docs ./docs
 
 # avoid building the main binary to generate the FSM graphics
 RUN touch docs/fsm.png
+RUN touch src/bin/pg_autoctl/git-version.h
 
 # still make sure we can produce the tikz graphics (pdf, svg)
 # use TERM=dumb to avoid tput error messages when we don't have a terminal
