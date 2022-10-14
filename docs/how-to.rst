@@ -1,7 +1,7 @@
 .. _how-to:
 
-Main pg_autoctl commands
-========================
+Quick Start
+===========
 
 pg_auto_failover includes the command line tool ``pg_autoctl`` that
 implements many commands to manage your Postgres nodes. To implement the
@@ -19,7 +19,9 @@ To understand which replication settings to use in your case, see
 
 To follow a step by step guide that you can reproduce on your own Azure
 subscription and create a production Postgres setup from VMs, see the
-:ref:`tutorial` section.
+:ref:`azure_tutorial` section. To get started with a local setup using
+docker-compose to run multiple Postgres nodes, see the :ref:`tutorial`
+section.
 
 To understand how to setup pg_auto_failover in a way that is compliant with
 your internal security guide lines, read the :ref:`security` section.

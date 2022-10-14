@@ -20,6 +20,9 @@ BUILD_CONTAINER_NAME = pg_auto_failover_build
 TEST_CONTAINER_NAME = pg_auto_failover_test
 DOCKER_RUN_OPTS = --privileged --rm
 
+# make serve-docs uses this port on localhost to expose the web server
+DOCS_PORT = 8000
+
 PGVERSION ?= 14
 
 BUILD_ARGS_PG11 = --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10
@@ -242,6 +245,12 @@ spellcheck:
 
 docs: $(FSM) tikz
 	$(MAKE) -C docs html
+
+build-docs:
+	docker build -t pg_auto_failover:docs -f Dockerfile.docs .
+
+serve-docs: build-docs
+	docker run --rm -it -p $(DOCS_PORT):8000 pg_auto_failover:docs
 
 tikz:
 	$(MAKE) -C docs/tikz all

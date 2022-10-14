@@ -56,6 +56,7 @@ jobs:
           sudo make -C ../tools install
           install_uncrustify
           rm -rf uncrustify*
+          make build-docs
 
       - name: Check code formatting and banned function
         if: ${{ env.TEST == 'linting' }}

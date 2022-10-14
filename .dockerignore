@@ -1,7 +1,13 @@
 .git
 src/bin/pg_autoctl/pg_autoctl
-docs
 Dockerfile
+
+docs/tutorial/monitor
+docs/tutorial/node1
+docs/tutorial/node2
+docs/tikz/*svg
+docs/tikz/*pdf
+docs/tikz/*png
 
 # Global excludes across all subdirectories
 *.o

@@ -1,7 +1,7 @@
 .. _tutorial:
 
-pg_auto_failover Tutorial
-=========================
+Tutorial
+========
 
 In this guide we’ll create a Postgres setup with two nodes, a primary and a
 standby. Then we'll add a second standby node. We’ll simulate failure in the
