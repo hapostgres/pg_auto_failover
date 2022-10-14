@@ -36,7 +36,9 @@ jobs:
             TEST: linting
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # all history for all branches and tags
 
       - name: Set environment variables
         run: |
@@ -68,8 +70,14 @@ jobs:
         run: |
           make build-test-image
 
-      - name: Run Test
+      - name: Run Test (if src has changed)
         if: ${{ env.TEST != 'linting' }}
+        timeout-minutes: 15
+        run: |
+          test -n "`git diff --name-only ${GITHUB_BASE_REF}.. -- src`" && make ci-test
+
+      - name: Run Test on push to main branch, and on workflow_dispatch
+        if: ${{ contains(['push', 'workflow_dispatch'], GITHUB_EVENT_NAME) }}
         timeout-minutes: 15
         run: |
           make ci-test
