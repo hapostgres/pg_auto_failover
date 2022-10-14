@@ -77,7 +77,7 @@ jobs:
           test -n "`git diff --name-only ${GITHUB_BASE_REF}.. -- src`" && make ci-test
 
       - name: Run Test on push to main branch, and on workflow_dispatch
-        if: ${{ contains(['push', 'workflow_dispatch'], GITHUB_EVENT_NAME) }}
+        if: ${{ contains(fromJson('["push", "workflow_dispatch"]'), github.event_name) }}
         timeout-minutes: 15
         run: |
           make ci-test
