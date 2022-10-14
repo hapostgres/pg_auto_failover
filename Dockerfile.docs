@@ -1,0 +1,43 @@
+FROM debian:bullseye-slim
+
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+	curl \
+	git \
+	gawk \
+	make \
+	python3 \
+    python3-sphinx \
+    python3-pip \
+	sudo \
+	texlive \
+    texlive-luatex \
+	texlive-latex-extra \
+    texlive-fonts-extra \
+	latexmk \
+	poppler-utils \
+	&& rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install sphinx_rtd_theme
+
+WORKDIR /usr/src/pg_auto_failover
+
+COPY Makefile ./
+COPY ./src ./src
+COPY ./docs ./docs
+
+# avoid building the main binary to generate the FSM graphics
+RUN touch docs/fsm.png
+RUN touch src/bin/pg_autoctl/git-version.h
+
+# still make sure we can produce the tikz graphics (pdf, svg)
+# use TERM=dumb to avoid tput error messages when we don't have a terminal
+RUN make TERM=dumb -C docs/tikz clean all
+
+# and finally use python-sphinx to produce the docs in html
+RUN make -C docs html
+
+RUN find docs
+
+EXPOSE 8000/tcp
+CMD ["python3", "-m", "http.server", "--directory", "docs/_build/html"]

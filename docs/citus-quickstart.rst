@@ -1,7 +1,7 @@
 .. _citus_quickstart:
 
-Citus Cluster Quick Start
-=========================
+Citus Tutorial
+==============
 
 In this guide we’ll create a Citus cluster with a coordinator node and three
 workers. Every node will have a secondary for failover. We’ll simulate

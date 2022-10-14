@@ -36,7 +36,7 @@ jobs:
             TEST: linting
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set environment variables
         run: |
@@ -61,6 +61,11 @@ jobs:
         if: ${{ env.TEST == 'linting' }}
         run: |
           make lint
+
+      - name: Build documentation
+        if: ${{ env.TEST == 'linting' }}
+        run: |
+          make build-docs
 
       - name: Build Docker Test Image
         if: ${{ env.TEST != 'linting' }}

@@ -37,23 +37,43 @@ __ https://github.com/citusdata
    level of free guidance.
 
 .. toctree::
-   :maxdepth: 4
-   :caption: Contents:
+   :hidden:
+   :caption: Getting Started
 
    intro
    how-to
    tutorial
    azure-tutorial
+   install
+
+.. toctree::
+   :hidden:
+   :caption: Architecture
+
    architecture
    architecture-multi-standby
-   citus
-   citus-quickstart
    failover-state-machine
    fault-tolerance
-   install
    security
+
+.. toctree::
+   :hidden:
+   :caption: Citus
+
+   citus
+   citus-quickstart
+
+.. toctree::
+   :hidden:
+   :caption: Manual Pages
+
    ref/manual
    ref/configuration
+
+.. toctree::
+   :hidden:
+   :caption: Operations
+
    operations
    faq
 
