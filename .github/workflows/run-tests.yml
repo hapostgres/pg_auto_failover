@@ -37,8 +37,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0 # all history for all branches and tags
 
       - name: Set environment variables
         run: |
@@ -59,10 +57,14 @@ jobs:
           install_uncrustify
           rm -rf uncrustify*
 
-      - name: Check code formatting, banned function, and docs
+      - name: Check code formatting and banned function
         if: ${{ env.TEST == 'linting' }}
         run: |
           make lint
+
+      - name: Build documentation
+        if: ${{ env.TEST == 'linting' }}
+        run: |
           make build-docs
 
       - name: Build Docker Test Image
@@ -70,14 +72,8 @@ jobs:
         run: |
           make build-test-image
 
-      - name: Run Test (if src has changed)
+      - name: Run Test
         if: ${{ env.TEST != 'linting' }}
-        timeout-minutes: 15
-        run: |
-          test -n "`git diff --name-only ${GITHUB_BASE_REF} HEAD -- src`" && make ci-test
-
-      - name: Run Test on push to main branch, and on workflow_dispatch
-        if: ${{ contains(fromJson('["push", "workflow_dispatch"]'), github.event_name) }}
         timeout-minutes: 15
         run: |
           make ci-test
