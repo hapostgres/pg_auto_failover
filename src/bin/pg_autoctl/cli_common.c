@@ -959,6 +959,15 @@ bool
 cli_common_getenv_pgsetup(PostgresSetup *pgSetup,
 						  SSLCommandLineOptions *sslCommandLineOptions)
 {
+	if (env_exists("PGDATABASE"))
+	{
+		if (!get_env_copy("PGDATABASE", pgSetup->dbname, sizeof(pgSetup->dbname)))
+		{
+			/* errors have already been logged */
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
 	if (env_exists(PG_AUTOCTL_SSL_SELF_SIGNED))
 	{
 		char selfSigned[BUFSIZE] = { 0 };
