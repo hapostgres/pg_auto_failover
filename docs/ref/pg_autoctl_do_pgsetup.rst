@@ -134,7 +134,7 @@ Outputs the Postgres logs from the most recent log file in the
 pg_autoctl do pgsetup tune
 --------------------------
 
-Outputs the pg_autoclt automated tuning options. Depending on the number of
+Outputs the pg_autoctl automated tuning options. Depending on the number of
 CPU and amount of RAM detected in the environment where it is run,
 ``pg_autoctl`` can adjust some very basic Postgres tuning knobs to get
 started.
