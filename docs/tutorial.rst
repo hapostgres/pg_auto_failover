@@ -43,8 +43,6 @@ or run the docker build command directly:
 
    $ git clone https://github.com/citusdata/pg_auto_failover
    $ cd pg_auto_failover/docs/tutorial
-
-   $ docker build -t pg_auto_failover:tutorial -f Dockerfile ../..
    $ docker-compose build
 
 Postgres failover with two nodes
@@ -74,7 +72,7 @@ following command:
 
 ::
 
-   $ docker-compose up
+   $ docker-compose up app monitor node1 node2
 
 The command above starts the services up. The first service is the monitor
 and is created with the command ``pg_autoctl create monitor``. The options
@@ -195,6 +193,107 @@ And we can verify that we still have the data available::
    -------
        75
    (1 row)
+
+Multiple Standbys Architectures
+-------------------------------
+
+The ``docker-compose.yml`` file comes with a third node that you can bring
+up to obtain the following architecture:
+
+.. figure:: ./tikz/arch-multi-standby.svg
+   :alt: pg_auto_failover Architecture for a standalone PostgreSQL service
+
+   pg_auto_failover architecture with a primary and two standby nodes
+
+Adding a second standby node
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To run a second standby node, or a third Postgres node, simply run the
+following command:
+
+::
+
+   $ docker-compose up -d node3
+
+We can see the resulting replication settings with the following command:
+
+::
+
+   $ docker-compose exec monitor pg_autoctl show settings
+
+     Context |    Name |                   Setting | Value
+   ----------+---------+---------------------------+-------------------------------------------------------------
+   formation | default |      number_sync_standbys | 1
+     primary |   node1 | synchronous_standby_names | 'ANY 1 (pgautofailover_standby_1, pgautofailover_standby_3)'
+        node |   node2 |        candidate priority | 50
+        node |   node1 |        candidate priority | 50
+        node |   node3 |        candidate priority | 50
+        node |   node2 |        replication quorum | true
+        node |   node1 |        replication quorum | true
+        node |   node3 |        replication quorum | true
+
+Editing the replication settings while in production
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+It's then possible to change the production architecture obtained with
+playing with the :ref:`architecture_setup` commands. Specifically, try the
+following command to change the candidate_priority of the node3 to zero, in
+order for it to never be a candidate for failover:
+
+::
+
+   $ docker-compose exec node3 pg_autoctl set candidate-priority 0 --name node3
+
+To see the replication settings for all the nodes, the following command can
+be useful, and is described in more details in the :ref:`architecture_setup`
+section.
+
+::
+
+   $ docker-compose exec monitor pg_autoctl show settings
+
+     Context |    Name |                   Setting | Value
+   ----------+---------+---------------------------+-------------------------------------------------------------
+   formation | default |      number_sync_standbys | 1
+     primary |   node1 | synchronous_standby_names | 'ANY 1 (pgautofailover_standby_1, pgautofailover_standby_3)'
+        node |   node2 |        candidate priority | 50
+        node |   node1 |        candidate priority | 50
+        node |   node3 |        candidate priority | 0
+        node |   node2 |        replication quorum | true
+        node |   node1 |        replication quorum | true
+        node |   node3 |        replication quorum | true
+
+Then in a separate terminal (but in the same directory, because of the way
+docker-compose works with projects), you can run the following watch
+command:
+
+::
+
+   $ docker-compose exec monitor pg_autoctl watch
+
+And in the main terminal, while the watch command output is visible, you can
+run a switchover operation:
+
+::
+
+   $ docker-compose exec monitor pg_autoctl perform switchover
+
+Getting familiar with those commands one of you next steps. The manual has
+coverage for them in the following links:
+
+ * :ref:`pg_autoctl_watch`
+ * :ref:`pg_autoctl_show_state`
+ * :ref:`pg_autoctl_show_settings`
+ * :ref:`pg_autoctl_set_node_candidate_priority`
+
+Cleanup
+-------
+
+To dispose of the entire tutorial environment, just use the following command:
+
+::
+
+   $ docker-compose down
 
 Next steps
 ----------

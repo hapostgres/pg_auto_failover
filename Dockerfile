@@ -55,7 +55,11 @@ RUN apt-get update \
     watch \
     lsof \
     psutils \
-	valgrind \
+    psmisc \
+    htop \
+    less \
+	mg \
+    valgrind \
     postgresql-common \
 	&& rm -rf /var/lib/apt/lists/*
 

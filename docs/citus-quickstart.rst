@@ -455,6 +455,15 @@ node too:
    -------
        75
 
+Cleanup
+-------
+
+To dispose of the entire tutorial environment, just use the following command:
+
+::
+
+   $ docker-compose down
+
 Next steps
 ----------
 

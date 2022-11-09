@@ -1,5 +1,24 @@
 version: "3.9"  # optional since v1.27.0
 
+x-node: &node
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+    tags:
+      - pg_auto_failover:tutorial
+  volumes:
+    - /var/lib/postgres
+  environment:
+    PGDATA: /var/lib/postgres/pgaf
+    PGUSER: tutorial
+    PGDATABASE: tutorial
+    PG_AUTOCTL_HBA_LAN: true
+    PG_AUTOCTL_AUTH_METHOD: "trust"
+    PG_AUTOCTL_SSL_SELF_SIGNED: true
+    PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
+  expose:
+    - 5432
+
 services:
 
   app:
@@ -18,7 +37,7 @@ services:
   monitor:
     image: pg_auto_failover:tutorial
     volumes:
-      - ./monitor:/var/lib/postgres
+      - /var/lib/postgres
     environment:
       PGDATA: /var/lib/postgres/pgaf
       PG_AUTOCTL_SSL_SELF_SIGNED: true
@@ -28,37 +47,19 @@ services:
       pg_autoctl create monitor --auth trust --run
 
   node1:
-    image: pg_auto_failover:tutorial
+    <<: *node
     hostname: node1
-    volumes:
-      - ./node1:/var/lib/postgres
-    environment:
-      PGDATA: /var/lib/postgres/pgaf
-      PGUSER: tutorial
-      PGDATABASE: tutorial
-      PG_AUTOCTL_HBA_LAN: true
-      PG_AUTOCTL_AUTH_METHOD: "trust"
-      PG_AUTOCTL_SSL_SELF_SIGNED: true
-      PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
-    expose:
-      - 5432
     command: |
-      pg_autoctl create postgres --name node1 --pg-hba-lan --run
+      pg_autoctl create postgres --name node1 --run
 
   node2:
-    image: pg_auto_failover:tutorial
+    <<: *node
     hostname: node2
-    volumes:
-      - ./node2:/var/lib/postgres
-    environment:
-      PGDATA: /var/lib/postgres/pgaf
-      PGUSER: tutorial
-      PGDATABASE: tutorial
-      PG_AUTOCTL_HBA_LAN: true
-      PG_AUTOCTL_AUTH_METHOD: "trust"
-      PG_AUTOCTL_SSL_SELF_SIGNED: true
-      PG_AUTOCTL_MONITOR: "postgresql://autoctl_node@monitor/pg_auto_failover"
-    expose:
-     - 5432
     command: |
-      pg_autoctl create postgres --name node2 --pg-hba-lan --run
+      pg_autoctl create postgres --name node2 --run
+
+  node3:
+    <<: *node
+    hostname: node3
+    command: |
+      pg_autoctl create postgres --name node3 --run

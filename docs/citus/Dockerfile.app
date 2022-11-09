@@ -13,6 +13,7 @@ RUN apt-get update \
      watch \
      lsof \
      psutils \
+     python3 \
   && rm -rf /var/lib/apt/lists/*
 
 # we use apt.postgresql.org
@@ -29,5 +30,7 @@ RUN adduser --disabled-password --gecos '' docker
 RUN adduser docker sudo
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
+COPY ./app.py /usr/src/app/app.py
+
 USER docker
-ENTRYPOINT while true; do date -R; sleep 600; done
+ENTRYPOINT [ "/usr/src/app/app.py" ]

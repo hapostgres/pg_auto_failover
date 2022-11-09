@@ -47,5 +47,8 @@ COPY src/ ./src
 RUN make -s clean && make -s install -j8
 RUN cp /usr/lib/postgresql/${PGVERSION}/bin/pg_autoctl /usr/local/bin
 
+RUN install -o docker -m 0755 -d /var/lib/postgres
+VOLUME /var/lib/postgres
+
 USER docker
 ENV PG_AUTOCTL_DEBUG 1
