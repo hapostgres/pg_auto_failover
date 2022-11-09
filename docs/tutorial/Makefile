@@ -3,18 +3,22 @@ CONTAINER_NAME = pg_auto_failover:tutorial
 all: build down up;
 
 build:
-	docker build -t $(CONTAINER_NAME) -f Dockerfile ../..
 	docker-compose build
 
 up:
-	docker-compose up
+	docker-compose up app monitor node1 node2
+
+node3:
+	docker-compose up -d node3
 
 down:
-	docker-compose down --volumes --remove-orphans
-	rm -rf {monitor,node1,node2,node3}/pgaf/
+	docker-compose down
 
 state:
 	docker-compose exec monitor pg_autoctl show state
 
 switchover:
 	docker-compose exec monitor pg_autoctl perform switchover
+
+watch:
+	docker-compose exec monitor pg_autoctl watch

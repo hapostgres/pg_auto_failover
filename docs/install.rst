@@ -41,10 +41,10 @@ To avoid automated creation of a Postgres data directory when installing the
 debian package, follow those steps:
 
 ::
-   
+
   $ curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
   $ echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main" > /etc/apt/sources.list.d/pgdg.list
-  
+
   # bypass initdb of a "main" cluster
   $ echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
   $ apt-get update
@@ -54,53 +54,19 @@ That way when it's time to :ref:`pg_autoctl_create_monitor` or
 :ref:`pg_autoctl_create_postgres` there is no confusion about how to handle
 the default Postgres service created by debian: it has not been created at
 all.
-  
+
 Fedora, CentOS, or Red Hat
 --------------------------
 
-Quick install
-~~~~~~~~~~~~~
+The Postgres community packaging team for RPM based system has worked on
+supporting pg_auto_failover. Binary packages are available by following the
+documentation at `PostgreSQL Yum Repository`__.
 
-The following installation method downloads a bash script that automates
-several steps. The full script is available for review at our `package cloud
-installation instructions page`__ url.
+__ https://yum.postgresql.org
 
-__ https://packagecloud.io/citusdata/community/install#bash
-
-.. code-block:: bash
-
-  # add the required packages to your system
-  curl https://install.citusdata.com/community/rpm.sh | sudo bash
-
-  # install pg_auto_failover
-  sudo yum install -y pg-auto-failover14_12
-
-  # confirm installation
-  /usr/pgsql-12/bin/pg_autoctl --version
-
-Manual installation
-~~~~~~~~~~~~~~~~~~~
-
-If you'd prefer to install your repo on your system manually, follow the
-instructions from `package cloud manual installation`__ page. This page will
-guide you with the specific details to achieve the 3 steps:
-
-  1. install the pygpgme yum-utils packages for your distribution
-  2. install a new RPM reposiroty for CitusData packages
-  3. update your local yum cache
-
-Then when that's done, you can proceed with installing pg_auto_failover
-itself as in the previous case:
-
-.. code-block:: bash
-
-  # install pg_auto_failover
-  sudo yum install -y pg-auto-failover14_12
-
-  # confirm installation
-  /usr/pgsql-12/bin/pg_autoctl --version
-
-__ https://packagecloud.io/citusdata/community/install#manual-rpm
+A single package named ``pg_auto_failover`` is available on the RPM based
+systems, containing both the monitor Postgres extension and the pg_autoctl
+command line.
 
 Installing a pgautofailover Systemd unit
 ----------------------------------------
@@ -140,3 +106,34 @@ It is important that PostgreSQL is started by ``pg_autoctl`` rather than by
 systemd itself, as it might be that a failover has been done during a
 reboot, for instance, and that once the reboot complete we want the local
 Postgres to re-join as a secondary node where it used to be a primary node.
+
+
+Building pg_auto_failover from sources
+--------------------------------------
+
+To build the project, make sure you have installed the build-dependencies,
+then just type `make`. You can install the resulting binary using `make
+install`.
+
+For this to work please consider adding both the binary and the source
+repositories to your debian distribution by using the following apt sources,
+as an example targetting the debian bullseye distribution:
+
+::
+
+   deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main
+   deb-src http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main
+
+Then we can install the build dependencies for Postgres, knowing that
+pg_auto_failover uses the same build dependencies:
+
+::
+
+   $ sudo apt-get build-dep -y --no-install-recommends postgresql-14
+
+Then build pg_auto_failover from sources with the following instructions:
+
+::
+
+   $ make -s clean && make -s -j12 all
+   $ sudo make -s install
