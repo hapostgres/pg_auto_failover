@@ -34,13 +34,13 @@ monitor to be able to orchestrate nodes integration completely:
     monitor to the registered Postgres nodes, and use the ``hostname`` and
     ``port`` as registered.
 
-    The ``pg_autoctl show state`` commands column *Reachable* contains
-    "yes" when the monitor could connect to a specific node, "no" when this
-    connection failed, and "unknown" when no connection has been attempted
+    The ``pg_autoctl show state`` commands column *Health* contains
+    "1" when the monitor could connect to a specific node, "0" when this
+    connection failed, and "-1" when no connection has been attempted
     yet, since the last startup time of the monitor.
 
-    The *Reachable* column from ``pg_autoctl show state`` command output
-    must show a "yes" entry before a new standby node can be orchestrated
+    The *Health* column from ``pg_autoctl show state`` command output
+    must show a "1" entry before a new standby node can be orchestrated
     up to the "secondary" goal state.
 
  2. pg_autoctl service must be running
