@@ -68,7 +68,7 @@ different Postgres architectures for your production needs.
 In this case, the system is setup with two standby nodes participating in
 the replication quorum, allowing for ``number_sync_standbys = 1``. The
 system always maintains a minimum of two copies of the data set: one on the
-primary, another one on one on either node B or node D. Whenever we lose one
+primary, another one on either node B or node C. Whenever we lose one
 of those nodes, we can hold to this guarantee of two copies of the data set.
 
 Adding to that, we have the standby server D which has been set up to not
