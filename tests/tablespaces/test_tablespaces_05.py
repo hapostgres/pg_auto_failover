@@ -2,6 +2,7 @@ from nose.tools import *
 from tests.tablespaces.tablespace_utils import node1
 from tests.tablespaces.tablespace_utils import node2
 
+
 # Node 1 is brought back online by makefile, wait until it's up and replicating
 def test_001_original_primary_comes_back_up():
     assert node1.wait_until_state(target_state="secondary")

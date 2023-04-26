@@ -26,10 +26,10 @@ DOCS_PORT = 8000
 PGVERSION ?= 14
 
 BUILD_ARGS_PG11 = --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10
-BUILD_ARGS_PG12 = --build-arg PGVERSION=12 --build-arg CITUSTAG=v10.2.3
-BUILD_ARGS_PG13 = --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.3
-BUILD_ARGS_PG14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=v11.1.3
-BUILD_ARGS_PG15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=v11.1.3
+BUILD_ARGS_PG12 = --build-arg PGVERSION=12 --build-arg CITUSTAG=v10.2.9
+BUILD_ARGS_PG13 = --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.9
+BUILD_ARGS_PG14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=v11.2.1
+BUILD_ARGS_PG15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=v11.2.1
 
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 

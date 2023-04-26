@@ -1,6 +1,7 @@
 from nose.tools import *
 from tests.tablespaces.tablespace_utils import node2
 
+
 # Node 1 is paused by the Makefile, wait for pgaf to acknowledge
 def test_001_old_primary_goes_down():
     assert node2.wait_until_state(target_state="wait_primary")
