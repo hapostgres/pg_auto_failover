@@ -21,6 +21,7 @@ PGVERSION = os.getenv("PGVERSION", "11")
 
 NodeState = namedtuple("NodeState", "reported assigned")
 
+
 # Append stderr output to default CalledProcessError message
 class CalledProcessError(subprocess.CalledProcessError):
     def __str__(self):
@@ -1693,7 +1694,6 @@ class MonitorNode(PGNode):
         sslServerKey=None,
         sslServerCert=None,
     ):
-
         super().__init__(
             cluster,
             datadir,

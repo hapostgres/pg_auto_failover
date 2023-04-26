@@ -2,6 +2,7 @@ from nose.tools import *
 from tests.tablespaces.tablespace_utils import node1
 from tests.tablespaces.tablespace_utils import node2
 
+
 # Failover is performed by the makefile Makefile, wait for it to complete
 def test_001_wait_for_failover_and_insert():
     assert node2.wait_until_state(target_state="primary")
