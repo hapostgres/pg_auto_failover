@@ -193,7 +193,7 @@ typedef struct NodeAddressArray
 #define InvalidXLogRecPtr 0
 #define XLogRecPtrIsInvalid(r) ((r) == InvalidXLogRecPtr)
 
-#define PG_AUTOCTL_MAX_TIMELINES 1024
+#define PG_AUTOCTL_MAX_TIMELINES 1048576
 
 typedef struct TimeLineHistoryEntry
 {
