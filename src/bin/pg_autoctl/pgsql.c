@@ -3094,17 +3094,17 @@ bool
 parseTimeLineHistory(const char *filename, const char *content,
 					 IdentifySystem *system)
 {
-	char *historyLines[BUFSIZE] = { 0 };
-	int lineCount = splitLines((char *) content, historyLines, BUFSIZE);
+	int lineCount = countLines((char *) content);
+	char **historyLines = (char **) calloc(lineCount, sizeof(char *));
 	int lineNumber = 0;
 
-	if (lineCount >= PG_AUTOCTL_MAX_TIMELINES)
+	if (historyLines == NULL)
 	{
-		log_error("history file \"%s\" contains %d lines, "
-				  "pg_autoctl only supports up to %d lines",
-				  filename, lineCount, PG_AUTOCTL_MAX_TIMELINES - 1);
+		log_error(ALLOCATION_FAILED_ERROR);
 		return false;
 	}
+
+	splitLines((char *) content, historyLines, lineCount);
 
 	uint64_t prevend = InvalidXLogRecPtr;
 
@@ -3141,6 +3141,7 @@ parseTimeLineHistory(const char *filename, const char *content,
 		{
 			log_error("Failed to parse history file line %d: \"%s\"",
 					  lineNumber, ptr);
+			free(historyLines);
 			return false;
 		}
 
@@ -3149,6 +3150,7 @@ parseTimeLineHistory(const char *filename, const char *content,
 		if (!stringToUInt(historyLines[lineNumber], &(entry->tli)))
 		{
 			log_error("Failed to parse history timeline \"%s\"", tabptr);
+			free(historyLines);
 			return false;
 		}
 
@@ -3167,6 +3169,7 @@ parseTimeLineHistory(const char *filename, const char *content,
 		{
 			log_error("Failed to parse history timeline %d LSN \"%s\"",
 					  entry->tli, lsn);
+			free(historyLines);
 			return false;
 		}
 
@@ -3183,6 +3186,8 @@ parseTimeLineHistory(const char *filename, const char *content,
 
 		entry = &(system->timelines.history[++system->timelines.count]);
 	}
+
+	free(historyLines);
 
 	/*
 	 * Create one more entry for the "tip" of the timeline, which has no entry
