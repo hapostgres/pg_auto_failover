@@ -37,6 +37,7 @@ bool stringToUInt32(const char *str, uint32_t *number);
 bool stringToDouble(const char *str, double *number);
 bool IntervalToString(double seconds, char *buffer, size_t size);
 
+int countLines(char *buffer);
 int splitLines(char *errorMessage, char **linesArray, int size);
 void processBufferCallback(const char *buffer, bool error);
 
