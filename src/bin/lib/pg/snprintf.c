@@ -2,7 +2,7 @@
  * Copyright (c) 1983, 1995, 1996 Eric P. Allman
  * Copyright (c) 1988, 1993
  *	The Regents of the University of California.  All rights reserved.
- * Portions Copyright (c) 1996-2021, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2023, PostgreSQL Global Development Group
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -338,18 +338,36 @@ static void leading_pad(int zpad, int signvalue, int *padlen,
 						PrintfTarget *target);
 static void trailing_pad(int padlen, PrintfTarget *target);
 
-
 /*
- * While Postgres sources do it the smart way and check HAVE_STRCHRNUL from the
- * auto-configure output, we just use the Postgres version of strchrnul here.
+ * If strchrnul exists (it's a glibc-ism), it's a good bit faster than the
+ * equivalent manual loop.  If it doesn't exist, provide a replacement.
+ *
+ * Note: glibc declares this as returning "char *", but that would require
+ * casting away const internally, so we don't follow that detail.
  */
+#ifndef HAVE_STRCHRNUL
+
 static inline const char *
-pg_strchrnul(const char *s, int c)
+strchrnul(const char *s, int c)
 {
 	while (*s != '\0' && *s != c)
 		s++;
 	return s;
 }
+
+#else
+
+/*
+ * glibc's <string.h> declares strchrnul only if _GNU_SOURCE is defined.
+ * While we typically use that on glibc platforms, configure will set
+ * HAVE_STRCHRNUL whether it's used or not.  Fill in the missing declaration
+ * so that this file will compile cleanly with or without _GNU_SOURCE.
+ */
+#ifndef _GNU_SOURCE
+extern char *strchrnul(const char *s, int c);
+#endif
+
+#endif							/* HAVE_STRCHRNUL */
 
 
 /*
@@ -394,7 +412,7 @@ dopr(PrintfTarget *target, const char *format, va_list args)
 		if (*format != '%')
 		{
 			/* Scan to next '%' or end of string */
-			const char *next_pct = pg_strchrnul(format + 1, '%');
+			const char *next_pct = strchrnul(format + 1, '%');
 
 			/* Dump literal data we just scanned over */
 			dostr(format, next_pct - format, target);
@@ -739,12 +757,8 @@ find_arguments(const char *format, va_list args,
 	int			longflag;
 	int			fmtpos;
 	int			i;
-	int			last_dollar;
-	PrintfArgType argtypes[PG_NL_ARGMAX + 1];
-
-	/* Initialize to "no dollar arguments known" */
-	last_dollar = 0;
-	MemSet(argtypes, 0, sizeof(argtypes));
+	int			last_dollar = 0;	/* Init to "no dollar arguments known" */
+	PrintfArgType argtypes[PG_NL_ARGMAX + 1] = {0};
 
 	/*
 	 * This loop must accept the same format strings as the one in dopr().
@@ -985,8 +999,8 @@ fmtptr(const void *value, PrintfTarget *target)
 	int			vallen;
 	char		convert[64];
 
-	/* we rely on regular C library's sprintf to do the basic conversion */
-	vallen = sprintf(convert, "%p", value);
+	/* we rely on regular C library's snprintf to do the basic conversion */
+	vallen = snprintf(convert, sizeof(convert), "%p", value);
 	if (vallen < 0)
 		target->failed = true;
 	else
@@ -1136,11 +1150,11 @@ fmtfloat(double value, char type, int forcesign, int leftjust,
 	int			padlen;			/* amount to pad with spaces */
 
 	/*
-	 * We rely on the regular C library's sprintf to do the basic conversion,
+	 * We rely on the regular C library's snprintf to do the basic conversion,
 	 * then handle padding considerations here.
 	 *
 	 * The dynamic range of "double" is about 1E+-308 for IEEE math, and not
-	 * too wildly more than that with other hardware.  In "f" format, sprintf
+	 * too wildly more than that with other hardware.  In "f" format, snprintf
 	 * could therefore generate at most 308 characters to the left of the
 	 * decimal point; while we need to allow the precision to get as high as
 	 * 308+17 to ensure that we don't truncate significant digits from very
@@ -1192,14 +1206,14 @@ fmtfloat(double value, char type, int forcesign, int leftjust,
 			fmt[2] = '*';
 			fmt[3] = type;
 			fmt[4] = '\0';
-			vallen = sprintf(convert, fmt, prec, value);
+			vallen = snprintf(convert, sizeof(convert), fmt, prec, value);
 		}
 		else
 		{
 			fmt[0] = '%';
 			fmt[1] = type;
 			fmt[2] = '\0';
-			vallen = sprintf(convert, fmt, value);
+			vallen = snprintf(convert, sizeof(convert), fmt, value);
 		}
 		if (vallen < 0)
 			goto fail;
@@ -1328,7 +1342,7 @@ pg_strfromd(char *str, size_t count, int precision, double value)
 			fmt[2] = '*';
 			fmt[3] = 'g';
 			fmt[4] = '\0';
-			vallen = sprintf(convert, fmt, precision, value);
+			vallen = snprintf(convert, sizeof(convert), fmt, precision, value);
 			if (vallen < 0)
 			{
 				target.failed = true;

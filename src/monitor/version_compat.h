@@ -14,8 +14,8 @@
 
 #include "postgres.h"
 
-/* we support Postgres versions 10, 11, 12, 13, and 14. And 15devel. */
-#if (PG_VERSION_NUM < 100000 || PG_VERSION_NUM >= 160000)
+/* we support Postgres versions 10, 11, 12, 13, 14, 15, and 16. */
+#if (PG_VERSION_NUM < 100000 || PG_VERSION_NUM >= 170000)
 #error "Unknown or unsupported postgresql version"
 #endif
 
@@ -74,6 +74,17 @@ HeapTupleGetOid(HeapTuple tuple)
 
 /* Compatibility for ProcessUtility hook */
 #define QueryCompletion char
+
+#endif
+
+/* Removed in Postgres 16 development */
+#ifndef Abs
+
+/*
+ * Abs
+ *		Return the absolute value of the argument.
+ */
+#define Abs(x) ((x) >= 0 ? (x) : -(x))
 
 #endif
 

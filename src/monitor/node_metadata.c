@@ -1255,9 +1255,9 @@ AddAutoFailoverNode(char *formationId,
 			" max(nodeid)+1) "
 			" FROM " AUTO_FAILOVER_NODE_TABLE;
 
-		int spiStatus = SPI_execute_with_args(setValQuery,
-											  0, NULL, NULL, NULL,
-											  false, 0);
+		spiStatus = SPI_execute_with_args(setValQuery,
+										  0, NULL, NULL, NULL,
+										  false, 0);
 
 		if (spiStatus != SPI_OK_SELECT)
 		{

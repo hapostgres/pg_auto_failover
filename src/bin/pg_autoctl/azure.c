@@ -1585,9 +1585,9 @@ azure_fetch_resource_list(const char *group, AzureRegionResources *azRegion)
 			}
 			else if (streq(type, "Microsoft.Compute/virtualMachines"))
 			{
-				int index = azure_node_index_from_name(group, name);
+				int idx = azure_node_index_from_name(group, name);
 
-				strlcpy(azRegion->vmArray[index].name, name, NAMEDATALEN);
+				strlcpy(azRegion->vmArray[idx].name, name, NAMEDATALEN);
 
 				log_info("Found existing VM \"%s\"", name);
 			}

@@ -1239,7 +1239,7 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 				 * Now stop Postgres by just killing our child process, and
 				 * wait until the child process has finished with waitpid().
 				 */
-				int wpid, status;
+				int wpid;
 
 				do {
 					if (kill(fpid, SIGTERM) != 0)

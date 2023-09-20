@@ -501,7 +501,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 		}
 		else
 		{
-			int logLevel = pgIsNotRunningIsOk ? LOG_DEBUG : LOG_WARN;
+			logLevel = pgIsNotRunningIsOk ? LOG_DEBUG : LOG_WARN;
 
 			log_level(logLevel,
 					  "Read a stale pid in \"postmaster.pid\": %d", pid);

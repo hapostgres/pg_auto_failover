@@ -1430,7 +1430,7 @@ print_event(WatchContext *context, EventColPolicy *policy, int index, int r, int
 			case EVENT_COLUMN_TYPE_DESCRIPTION:
 			{
 				char *text = event->description;
-				int len = strlen(text);
+				len = strlen(text);
 
 				/* when KEY_END is used, ensure we see the end of text */
 				if (context->move == WATCH_MOVE_FOCUS_END)
