@@ -338,36 +338,18 @@ static void leading_pad(int zpad, int signvalue, int *padlen,
 						PrintfTarget *target);
 static void trailing_pad(int padlen, PrintfTarget *target);
 
-/*
- * If strchrnul exists (it's a glibc-ism), it's a good bit faster than the
- * equivalent manual loop.  If it doesn't exist, provide a replacement.
- *
- * Note: glibc declares this as returning "char *", but that would require
- * casting away const internally, so we don't follow that detail.
- */
-#ifndef HAVE_STRCHRNUL
 
+/*
+ * While Postgres sources do it the smart way and check HAVE_STRCHRNUL from the
+ * auto-configure output, we just use the Postgres version of strchrnul here.
+ */
 static inline const char *
-strchrnul(const char *s, int c)
+pg_strchrnul(const char *s, int c)
 {
 	while (*s != '\0' && *s != c)
 		s++;
 	return s;
 }
-
-#else
-
-/*
- * glibc's <string.h> declares strchrnul only if _GNU_SOURCE is defined.
- * While we typically use that on glibc platforms, configure will set
- * HAVE_STRCHRNUL whether it's used or not.  Fill in the missing declaration
- * so that this file will compile cleanly with or without _GNU_SOURCE.
- */
-#ifndef _GNU_SOURCE
-extern char *strchrnul(const char *s, int c);
-#endif
-
-#endif							/* HAVE_STRCHRNUL */
 
 
 /*
@@ -412,7 +394,7 @@ dopr(PrintfTarget *target, const char *format, va_list args)
 		if (*format != '%')
 		{
 			/* Scan to next '%' or end of string */
-			const char *next_pct = strchrnul(format + 1, '%');
+			const char *next_pct = pg_strchrnul(format + 1, '%');
 
 			/* Dump literal data we just scanned over */
 			dostr(format, next_pct - format, target);
