@@ -124,13 +124,13 @@ StartMonitorNode(void)
 	DefineCustomBoolVariable("pgautofailover.enable_version_checks",
 							 "Enable extension version compatibility checks",
 							 NULL, &EnableVersionChecks, true, PGC_SIGHUP,
-							 GUC_NO_SHOW_ALL & GUC_NOT_IN_SAMPLE,
+							 GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE,
 							 NULL, NULL, NULL);
 
 	DefineCustomBoolVariable("pgautofailover.enable_health_checks",
 							 "Enable background health checks",
 							 NULL, &HealthChecksEnabled, true, PGC_SIGHUP,
-							 GUC_NO_SHOW_ALL & GUC_NOT_IN_SAMPLE,
+							 GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE,
 							 NULL, NULL, NULL);
 
 	DefineCustomIntVariable("pgautofailover.health_check_period",
