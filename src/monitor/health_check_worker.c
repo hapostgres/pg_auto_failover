@@ -37,7 +37,6 @@
 #include "fmgr.h"
 #include "lib/stringinfo.h"
 #include "libpq-fe.h"
-#include "libpq-int.h"
 #include "libpq/pqsignal.h"
 #include "poll.h"
 #include "sys/time.h"
@@ -57,8 +56,6 @@
 	"password=pgautofailover_monitor dbname=postgres " \
 	"connect_timeout=%u"
 #define MAX_CONN_INFO_SIZE 1024
-
-#define CANNOT_CONNECT_NOW "57P03"
 
 
 typedef enum
@@ -939,20 +936,9 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 				break;
 			}
 
-			/* This logic is taken from libpq's internal_ping (fe-connect.c) */
 			pollingStatus = PQconnectPoll(connection);
-			char *sqlstate = connection->last_sqlstate;
-			bool receivedSqlstate = (sqlstate != NULL && strlen(sqlstate) == 5);
-			bool cannotConnectNowSqlstate = (receivedSqlstate &&
-											 strcmp(sqlstate, CANNOT_CONNECT_NOW) == 0);
 
-			if (pollingStatus == PGRES_POLLING_OK ||
-
-			    /* an auth request means pg is running */
-				connection->auth_req_received ||
-
-			    /* any error but CANNOT_CONNECT means the db is accepting connections */
-				(receivedSqlstate && !cannotConnectNowSqlstate))
+			if (pollingStatus == PGRES_POLLING_OK)
 			{
 				PQfinish(connection);
 
