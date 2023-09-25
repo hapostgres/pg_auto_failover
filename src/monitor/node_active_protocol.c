@@ -867,7 +867,7 @@ get_nodes(PG_FUNCTION_ARGS)
 		/* prepare next SRF call */
 		fctx->nodesList = list_delete_first(fctx->nodesList);
 
-		SRF_RETURN_NEXT(funcctx, PointerGetDatum(resultDatum));
+		SRF_RETURN_NEXT(funcctx, resultDatum);
 	}
 
 	SRF_RETURN_DONE(funcctx);
@@ -995,7 +995,7 @@ get_other_nodes(PG_FUNCTION_ARGS)
 		/* prepare next SRF call */
 		fctx->nodesList = list_delete_first(fctx->nodesList);
 
-		SRF_RETURN_NEXT(funcctx, PointerGetDatum(resultDatum));
+		SRF_RETURN_NEXT(funcctx, resultDatum);
 	}
 
 	SRF_RETURN_DONE(funcctx);
@@ -1132,7 +1132,6 @@ RemoveNode(AutoFailoverNode *currentNode, bool force)
 	{
 		foreach(nodeCell, otherNodesGroupList)
 		{
-			char message[BUFSIZE] = { 0 };
 			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
 			if (node == NULL)
@@ -1712,7 +1711,6 @@ start_maintenance(PG_FUNCTION_ARGS)
 	{
 		List *standbyNodesGroupList = AutoFailoverOtherNodesList(currentNode);
 		AutoFailoverNode *firstStandbyNode = linitial(standbyNodesGroupList);
-		char message[BUFSIZE] = { 0 };
 
 		/*
 		 * We need at least one candidate node to initiate a failover and allow

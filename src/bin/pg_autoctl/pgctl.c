@@ -1837,9 +1837,6 @@ pg_log_startup(const char *pgdata, int logLevel)
 		 */
 		if (pgLogFileMtime >= pgStartupMtime)
 		{
-			char *fileContents;
-			long fileSize;
-
 			log_level(pathLogLevel,
 					  "Postgres logs from \"%s\":", pgLogFilePath);
 

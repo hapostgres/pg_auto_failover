@@ -28,8 +28,9 @@ PGVERSION ?= 14
 BUILD_ARGS_PG11 = --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10
 BUILD_ARGS_PG12 = --build-arg PGVERSION=12 --build-arg CITUSTAG=v10.2.9
 BUILD_ARGS_PG13 = --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.9
-BUILD_ARGS_PG14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=v11.2.1
-BUILD_ARGS_PG15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=v11.2.1
+BUILD_ARGS_PG14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=v12.1.0
+BUILD_ARGS_PG15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=v12.1.0
+BUILD_ARGS_PG16 = --build-arg PGVERSION=16 --build-arg CITUSTAG=v12.1.0
 
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
@@ -279,6 +280,9 @@ build-test-pg14: version
 build-test-pg15: version
 	docker build $(BUILD_ARGS_PG15) --target test -t $(TEST_CONTAINER_NAME):pg15 .
 
+build-test-pg16: version
+	docker build $(BUILD_ARGS_PG16) --target test -t $(TEST_CONTAINER_NAME):pg16 .
+
 
 build-test-image: build-test-pg$(PGVERSION) ;
 
@@ -310,10 +314,13 @@ build-pg14: build-test-pg14
 build-pg15: build-test-pg15
 	docker build $(BUILD_ARGS_PG15) -t $(CONTAINER_NAME):pg15 .
 
-build: build-pg11 build-pg12 build-pg13 build-pg14 build-pg15 ;
+build-pg16: build-test-pg16
+	docker build $(BUILD_ARGS_PG16) -t $(CONTAINER_NAME):pg16 .
+
+build: build-pg11 build-pg12 build-pg13 build-pg14 build-pg15 build-pg16 ;
 
 build-check:
-	for v in 11 12 13 14 15; do \
+	for v in 11 12 13 14 15 16; do \
 		docker run --rm -t pg_auto_failover_test:pg$$v pg_autoctl version --json | jq ".pg_version" | xargs echo $$v: ; \
 	done
 
