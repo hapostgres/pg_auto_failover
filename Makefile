@@ -1,6 +1,11 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the PostgreSQL License.
 
+# Supported PostgreSQL versions:
+PGVERSIONS = 11 12 13 14 15 16
+# Default version:
+PGVERSION ?= $(lastword $(PGVERSIONS))
+
 TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 VERSION_FILE = src/bin/pg_autoctl/git-version.h
@@ -22,8 +27,6 @@ DOCKER_RUN_OPTS = --privileged --rm
 
 # make serve-docs uses this port on localhost to expose the web server
 DOCS_PORT = 8000
-
-PGVERSION ?= 14
 
 # We use pg not PG in uppercase in the var name to ease implicit rules matching
 BUILD_ARGS_pg11 = --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10
@@ -268,8 +271,6 @@ build-image:
 # Citus 9.0 seems to be the most recent version of Citus with Postgres 10
 # support, but fails to compile nowadays...
 
-PGVERSIONS = 11 12 13 14 15
-
 BUILD_TEST_TARGETS = $(patsubst %,build-test-pg%,$(PGVERSIONS))
 
 .PHONY: $(BUILD_TEST_TARGETS)
@@ -305,8 +306,9 @@ $(BUILD_TARGETS): version
 .PHONY: build
 build: $(BUILD_TARGETS) ;
 
-build-check:
-	for v in 11 12 13 14 15 16; do \
+.PHONY: build-check
+build-check: $(BUILD_TEST_TARGETS)
+	for v in $(PGVERSIONS); do \
 		docker run --rm -t pg_auto_failover_test:pg$$v pg_autoctl version --json | jq ".pg_version" | xargs echo $$v: ; \
 	done
 
