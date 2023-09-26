@@ -9,6 +9,11 @@ PGVERSIONS = 11 12 13 14 15 16
 # Default version:
 PGVERSION ?= $(lastword $(PGVERSIONS))
 
+# XXXX This should be in Makefile.citus only
+# but requires to clean up dockerfile and make targets related to citus first.
+# Default Citus Data version
+CITUSTAG ?= v12.1.0
+
 # TODO should be abs_top_dir ?
 TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -254,6 +259,10 @@ DOCKER_RUN_OPTS = --privileged --rm
 #
 # Include Citus only for testing purpose
 #
+ifeq ($(TEST),citus)
+  CITUS=1
+endif
+
 ifeq ($(CITUS),1)
 include Makefile.citus
 endif
