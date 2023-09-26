@@ -306,11 +306,17 @@ $(BUILD_TARGETS): version
 .PHONY: build
 build: $(BUILD_TARGETS) ;
 
+BUILD_CHECK_TARGETS = $(patsubst %,build-check-pg%,$(PGVERSIONS))
+
+.SECONDEXPANSION:
+.PHONY: $(BUILD_CHECK_TARGETS)
+$(BUILD_CHECK_TARGETS): version $$(subst build-check-,build-test-,$$@)
+	docker run --rm \
+	  -t pg_auto_failover_test:$(subst build-check-,,$@) \
+	  pg_autoctl version --json | jq ".pg_version" | xargs echo $(subst build-check-,,$@):
+
 .PHONY: build-check
-build-check: $(BUILD_TEST_TARGETS)
-	for v in $(PGVERSIONS); do \
-		docker run --rm -t pg_auto_failover_test:pg$$v pg_autoctl version --json | jq ".pg_version" | xargs echo $$v: ; \
-	done
+build-check: $(BUILD_CHECK_TARGETS)
 
 .PHONY: build-i386
 build-i386:
