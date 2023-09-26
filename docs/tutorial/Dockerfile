@@ -43,6 +43,8 @@ RUN apt-get update \
 WORKDIR /usr/src/pg_auto_failover
 
 COPY Makefile ./
+COPY Makefile.azure ./
+COPY Makefile.citus ./
 COPY src/ ./src
 RUN make -s clean && make -s install -j8
 RUN cp /usr/lib/postgresql/${PGVERSION}/bin/pg_autoctl /usr/local/bin

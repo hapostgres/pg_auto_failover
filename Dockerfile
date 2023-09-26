@@ -108,6 +108,8 @@ ENV PG_CONFIG /usr/lib/postgresql/${PGVERSION}/bin/pg_config
 WORKDIR /usr/src/pg_auto_failover
 
 COPY Makefile ./
+COPY Makefile.azure ./
+COPY Makefile.citus ./
 COPY ./src/ ./src
 COPY ./src/bin/pg_autoctl/git-version.h ./src/bin/pg_autoctl/git-version.h
 RUN make -s clean && make -s install -j8

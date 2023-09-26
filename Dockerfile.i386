@@ -56,6 +56,8 @@ RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 WORKDIR /usr/src/pg_auto_failover
 
 COPY Makefile ./
+COPY Makefile.azure ./
+COPY Makefile.citus ./
 COPY ./src/ ./src
 RUN make -s clean && make -s install
 
