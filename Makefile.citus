@@ -1,0 +1,24 @@
+# Default Citus Data version
+CITUSTAG ?= v12.1.0
+
+# Citus testing
+CITUS = 0
+WORKERS = 2
+NODES_SECONDARY = 0
+CLUSTER_OPTS = ""			# could be "--skip-pg-hba"
+
+FIRST_PGPORT ?= 5600
+CLUSTER_OPTS += --citus
+TMUX_TOP_DIR = ./tmux/citus
+
+# If this Makefile is included then we are only interested in Citus testing
+ifeq ($(TEST),citus)
+  TESTS_CITUS  = test_basic_citus_operation
+  TESTS_CITUS += test_citus_cluster_name
+  TESTS_CITUS += test_citus_force_failover
+  TESTS_CITUS += test_citus_multi_standbys
+  TESTS_CITUS += test_nonha_citus_operation
+  TESTS_CITUS += test_citus_skip_pg_hba
+
+  TEST_ARGUMENT = --where=tests --tests=$(TESTS_CITUS)
+endif
