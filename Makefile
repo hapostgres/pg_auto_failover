@@ -136,24 +136,6 @@ else
 	TMUX_TOP_DIR = ./tmux/pgsql
 endif
 
-# make azcluster arguments
-AZURE_PREFIX ?= ha-demo-$(shell whoami)
-AZURE_REGION ?= paris
-AZURE_LOCATION ?= francecentral
-
-# Pick a version of Postgres and pg_auto_failover packages to install
-# in our target Azure VMs when provisionning
-#
-#  sudo apt-get install -q -y postgresql-13-auto-failover-1.5=1.5.2
-#  postgresql-${AZ_PG_VERSION}-auto-failover-${AZ_PGAF_DEB_VERSION}=${AZ_PGAF_VERSION}
-AZ_PG_VERSION ?= 13
-AZ_PGAF_DEB_VERSION ?= 1.6
-AZ_PGAF_DEB_REVISION ?= 1.6.4-1
-
-export AZ_PG_VERSION
-export AZ_PGAF_DEB_VERSION
-export AZ_PGAF_DEB_REVISION
-
 all: monitor bin ;
 
 install: install-monitor install-bin ;
@@ -432,23 +414,10 @@ valgrind-session: build-test-pg$(PGVERSION)
 		 TMUX_LAYOUT=$(TMUX_LAYOUT)        \
 	     tmux-session
 
-azcluster: all
-	$(PG_AUTOCTL) do azure create         \
-         --prefix $(AZURE_PREFIX)         \
-         --region $(AZURE_REGION)         \
-         --location $(AZURE_LOCATION)     \
-         --nodes $(NODES)
-
-# make azcluster has been done before, just re-attach
-az: all
-	$(PG_AUTOCTL) do azure tmux session
-
-azdrop: all
-	$(PG_AUTOCTL) do azure drop
+include Makefile.azure
 
 .PHONY: all clean check install docs tikz
 .PHONY: monitor clean-monitor check-monitor install-monitor
 .PHONY: bin clean-bin install-bin maintainer-clean
 .PHONY: run-test spellcheck lint linting ci-test
 .PHONY: tmux-clean cluster compose
-.PHONY: azcluster azdrop az

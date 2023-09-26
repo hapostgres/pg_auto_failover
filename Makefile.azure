@@ -1,0 +1,38 @@
+#
+# AZURE related
+#
+
+# make azcluster arguments
+AZURE_PREFIX ?= ha-demo-$(shell whoami)
+AZURE_REGION ?= paris
+AZURE_LOCATION ?= francecentral
+
+# Pick a version of Postgres and pg_auto_failover packages to install
+# in our target Azure VMs when provisionning
+#
+#  sudo apt-get install -q -y postgresql-13-auto-failover-1.5=1.5.2
+#  postgresql-${AZ_PG_VERSION}-auto-failover-${AZ_PGAF_DEB_VERSION}=${AZ_PGAF_VERSION}
+AZ_PG_VERSION ?= 13
+AZ_PGAF_DEB_VERSION ?= 1.6
+AZ_PGAF_DEB_REVISION ?= 1.6.4-1
+
+export AZ_PG_VERSION
+export AZ_PGAF_DEB_VERSION
+export AZ_PGAF_DEB_REVISION
+
+.PHONY: azcluster
+azcluster: all
+	$(PG_AUTOCTL) do azure create      \
+	  --prefix $(AZURE_PREFIX)         \
+	  --region $(AZURE_REGION)         \
+	  --location $(AZURE_LOCATION)     \
+	  --nodes $(NODES)
+
+# make azcluster has been done before, just re-attach
+.PHONY: az
+az: all
+	$(PG_AUTOCTL) do azure tmux session
+
+.PHONY: azdrop
+azdrop: all
+	$(PG_AUTOCTL) do azure drop
