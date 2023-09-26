@@ -5,7 +5,6 @@ CITUSTAG ?= v12.1.0
 CITUS = 0
 WORKERS = 2
 NODES_SECONDARY = 0
-CLUSTER_OPTS = ""			# could be "--skip-pg-hba"
 
 FIRST_PGPORT ?= 5600
 CLUSTER_OPTS += --citus
@@ -22,3 +21,6 @@ ifeq ($(TEST),citus)
 
   TEST_ARGUMENT = --where=tests --tests=$(TESTS_CITUS)
 endif
+
+# this target is defined and used later in the main Makefile
+$(TMUX_SCRIPT): TMUX_CITUS=--citus-workers $(WORKERS) --citus-secondaries $(NODES_SECONDARY)

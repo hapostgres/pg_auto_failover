@@ -9,6 +9,10 @@ PGVERSIONS = 11 12 13 14 15 16
 # Default version:
 PGVERSION ?= $(lastword $(PGVERSIONS))
 
+# PostgreSQL cluster option
+# could be "--skip-pg-hba"
+CLUSTER_OPTS = ""
+
 # XXXX This should be in Makefile.citus only
 # but requires to clean up dockerfile and make targets related to citus first.
 # Default Citus Data version
@@ -359,6 +363,7 @@ TMUX_EXTRA_COMMANDS ?= ""
 TMUX_LAYOUT ?= even-vertical	# could be "tiled"
 TMUX_TOP_DIR = ./tmux/pgsql
 TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
+TMUX_CITUS = ""
 
 # PostgreSQL testing
 ## total count of Postgres nodes
@@ -369,10 +374,6 @@ NODES_ASYNC ?= 0
 NODES_PRIOS ?= 50
 ## TODO ???
 NODES_SYNC_SB ?= -1
-## Citus workers (set in Makefile.citus)
-WORKERS = 0
-## Citus secondaries (set in Makefile.citus)
-NODES_SECONDARY = 0
 
 .PHONY: interactive-test
 interactive-test:
@@ -388,8 +389,7 @@ $(TMUX_SCRIPT): bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
-         --citus-workers $(WORKERS) \
-         --citus-secondaries $(NODES_SECONDARY) \
+         $(TMUX_CITUS)                    \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
 		 --layout $(TMUX_LAYOUT) > $@
@@ -403,8 +403,7 @@ tmux-clean: bin
          --root $(TMUX_TOP_DIR)           \
          --first-pgport $(FIRST_PGPORT)   \
          --nodes $(NODES)                 \
-         --citus-workers $(WORKERS)       \
-         --citus-secondaries $(NODES_SECONDARY) \
+         $(TMUX_CITUS)                    \
          $(CLUSTER_OPTS)
 
 .PHONY: tmux-session
@@ -416,8 +415,7 @@ tmux-session: bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
-         --citus-workers $(WORKERS)       \
-         --citus-secondaries $(NODES_SECONDARY) \
+         $(TMUX_CITUS)                    \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
@@ -431,8 +429,7 @@ tmux-compose-session:
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
-         --citus-workers $(WORKERS)       \
-         --citus-secondaries $(NODES_SECONDARY) \
+         $(TMUX_CITUS)                    \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
