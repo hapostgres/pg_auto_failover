@@ -1,6 +1,8 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the PostgreSQL License.
 
+.DEFAULT_GOAL := all
+
 # Supported PostgreSQL versions:
 PGVERSIONS = 11 12 13 14 15 16
 
