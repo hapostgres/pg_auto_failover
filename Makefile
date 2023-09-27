@@ -1,10 +1,28 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the PostgreSQL License.
 
+.DEFAULT_GOAL := all
+
+# Supported PostgreSQL versions:
+PGVERSIONS = 11 12 13 14 15 16
+
+# Default version:
+PGVERSION ?= $(lastword $(PGVERSIONS))
+
+# PostgreSQL cluster option
+# could be "--skip-pg-hba"
+CLUSTER_OPTS = ""
+
+# XXXX This should be in Makefile.citus only
+# but requires to clean up dockerfile and make targets related to citus first.
+# Default Citus Data version
+CITUSTAG ?= v12.1.0
+
+# TODO should be abs_top_dir ?
 TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
+# Get pg_auto_failover version from header file
 VERSION_FILE = src/bin/pg_autoctl/git-version.h
-
 ifeq ("$(wildcard $(VERSION_FILE))","")
 DUMMY := $(shell git update-index -q --refresh)
 GIT_DIRTY := $(shell test -z "`git diff-index --name-only HEAD --`" || echo "-dirty")
@@ -15,23 +33,12 @@ else
 GIT_VERSION := $(shell awk -F '[ "]' '{print $$4}' $(VERSION_FILE))
 endif
 
-CONTAINER_NAME = pg_auto_failover
-BUILD_CONTAINER_NAME = pg_auto_failover_build
-TEST_CONTAINER_NAME = pg_auto_failover_test
-DOCKER_RUN_OPTS = --privileged --rm
+# Azure only targets and variables are in a separate Makefile
+include Makefile.azure
 
-# make serve-docs uses this port on localhost to expose the web server
-DOCS_PORT = 8000
-
-PGVERSION ?= 14
-
-BUILD_ARGS_PG11 = --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10
-BUILD_ARGS_PG12 = --build-arg PGVERSION=12 --build-arg CITUSTAG=v10.2.9
-BUILD_ARGS_PG13 = --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.9
-BUILD_ARGS_PG14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=v12.1.0
-BUILD_ARGS_PG15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=v12.1.0
-BUILD_ARGS_PG16 = --build-arg PGVERSION=16 --build-arg CITUSTAG=v12.1.0
-
+#
+# LIST TESTS
+#
 NOSETESTS = $(shell which nosetests3 || which nosetests)
 
 # Tests for the monitor
@@ -67,20 +74,11 @@ TESTS_MULTI += test_multi_ifdown
 TESTS_MULTI += test_multi_maintenance
 TESTS_MULTI += test_multi_standbys
 
-# Tests for Citus
-TESTS_CITUS  = test_basic_citus_operation
-TESTS_CITUS += test_citus_cluster_name
-TESTS_CITUS += test_citus_force_failover
-TESTS_CITUS += test_citus_multi_standbys
-TESTS_CITUS += test_nonha_citus_operation
-TESTS_CITUS += test_citus_skip_pg_hba
-
 # TEST indicates the testfile to run
+# Included Makefile may define TEST_ARGUMENT (like for citus)
 TEST ?=
 ifeq ($(TEST),)
 	TEST_ARGUMENT = --where=tests
-else ifeq ($(TEST),citus)
-	TEST_ARGUMENT = --where=tests --tests=$(TESTS_CITUS)
 else ifeq ($(TEST),multi)
 	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MULTI)
 else ifeq ($(TEST),single)
@@ -93,98 +91,61 @@ else
 	TEST_ARGUMENT = $(TEST:%=tests/%.py)
 endif
 
-# Documentation and images
-FSM = docs/fsm.png
-PDF = ./docs/_build/latex/pg_auto_failover.pdf
-
-# Command line with DEBUG facilities
-VALGRIND ?=
-ifeq ($(VALGRIND),)
-	BINPATH = ./src/bin/pg_autoctl/pg_autoctl
-	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
-else
-	BINPATH = $(abspath $(TOP))/src/tools/pg_autoctl.valgrind
-	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 PG_AUTOCTL_DEBUG_BIN_PATH="$(BINPATH)" ./src/tools/pg_autoctl.valgrind
-endif
-
-
-NODES ?= 2						# total count of Postgres nodes
-NODES_ASYNC ?= 0				# count of replication-quorum false nodes
-NODES_PRIOS ?= 50				# either "50", or "50,50", or "50,50,0" etc
-NODES_SYNC_SB ?= -1
-
-CITUS = 0
-WORKERS = 2
-NODES_SECONDARY = 0
-CLUSTER_OPTS = ""			# could be "--skip-pg-hba"
-
-TMUX_EXTRA_COMMANDS ?= ""
-TMUX_LAYOUT ?= even-vertical	# could be "tiled"
-TMUX_TOP_DIR = ./tmux
-TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
-
-ifeq ($(CITUS),1)
-	FIRST_PGPORT ?= 5600
-	CLUSTER_OPTS += --citus
-	TMUX_TOP_DIR = ./tmux/citus
-else
-	FIRST_PGPORT ?= 5500
-	TMUX_TOP_DIR = ./tmux/pgsql
-endif
-
-# make azcluster arguments
-AZURE_PREFIX ?= ha-demo-$(shell whoami)
-AZURE_REGION ?= paris
-AZURE_LOCATION ?= francecentral
-
-# Pick a version of Postgres and pg_auto_failover packages to install
-# in our target Azure VMs when provisionning
 #
-#  sudo apt-get install -q -y postgresql-13-auto-failover-1.5=1.5.2
-#  postgresql-${AZ_PG_VERSION}-auto-failover-${AZ_PGAF_DEB_VERSION}=${AZ_PGAF_VERSION}
-AZ_PG_VERSION ?= 13
-AZ_PGAF_DEB_VERSION ?= 1.6
-AZ_PGAF_DEB_REVISION ?= 1.6.4-1
-
-export AZ_PG_VERSION
-export AZ_PGAF_DEB_VERSION
-export AZ_PGAF_DEB_REVISION
-
+# Main make targets
+#
+.PHONY: all
 all: monitor bin ;
 
-install: install-monitor install-bin ;
-clean: clean-monitor clean-bin ;
-maintainer-clean: clean-monitor clean-version clean-bin ;
-check: check-monitor ;
-
-monitor:
-	$(MAKE) -C src/monitor/ all
-
-clean-monitor:
-	$(MAKE) -C src/monitor/ clean
-
-install-monitor: monitor
-	$(MAKE) -C src/monitor/ install
-
-check-monitor: install-monitor
-	$(MAKE) -C src/monitor/ installcheck
-
+.PHONY: bin
 bin: version
 	$(MAKE) -C src/bin/ all
 
+.PHONY: check-monitor
+check: check-monitor ;
+
+.PHONY: check-monitor
+check-monitor: install-monitor
+	$(MAKE) -C src/monitor/ installcheck
+
+.PHONY: clean
+clean: clean-monitor clean-bin ;
+
+.PHONY: clean-bin
 clean-bin:
 	$(MAKE) -C src/bin/ clean
 
+.PHONY: clean-monitor
+clean-monitor:
+	$(MAKE) -C src/monitor/ clean
+
+.PHONY: clean-version
+clean-version:
+	rm -f $(VERSION_FILE)
+
+.PHONY: install
+install: install-monitor install-bin ;
+
+.PHONY: install-bin
 install-bin: bin
 	$(MAKE) -C src/bin/ install
 
+.PHONY: install-monitor
+install-monitor: monitor
+	$(MAKE) -C src/monitor/ install
+
+.PHONY: maintainer-clean
+maintainer-clean: clean-monitor clean-version clean-bin ;
+
+.PHONY: monitor
+monitor:
+	$(MAKE) -C src/monitor/ all
+
+.PHONY: version
 version: $(VERSION_FILE) ;
 
 $(VERSION_FILE):
 	@echo "#define GIT_VERSION \""$(GIT_VERSION)"\"" > $@
-
-clean-version:
-	rm -f $(VERSION_FILE)
 
 #
 # make ci-test; is run on the GitHub Action workflow
@@ -194,6 +155,7 @@ clean-version:
 # parts which requires full access to the git repository, so linter tooling
 # is installed directly on the CI vm.
 #
+.PHONY: ci-test
 ci-test:
 ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
@@ -206,6 +168,7 @@ endif
 #
 # make test; is run from inside the testing Docker image.
 #
+.PHONY: test
 test:
 ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
@@ -222,126 +185,42 @@ else
 endif
 
 #
-# make indent; edits the code when necessary
+# INDENT/LINT/SPELLCHECK
 #
+# make indent; edits the code when necessary
+.PHONY: indent
 indent:
 	citus_indent
 	black .
 
-#
 # make lint; is an alias for make spellcheck
 # make linting; is an alias for make spellcheck
-#
-lint: spellcheck ;
-linting: spellcheck ;
+.PHONY: lint linting
+lint linting: spellcheck ;
 
-#
 # make spellcheck; runs our linting tools without editing the code, only
 # reports compliance with the rules.
-#
+.PHONY: spellcheck
 spellcheck:
 	citus_indent --check
 	black --check .
 	ci/banned.h.sh
 
-docs: $(FSM) tikz
-	$(MAKE) -C docs html
-
-build-docs:
-	docker build -t pg_auto_failover:docs -f Dockerfile.docs .
-
-serve-docs: build-docs
-	docker run --rm -it -p $(DOCS_PORT):8000 pg_auto_failover:docs
-
-tikz:
-	$(MAKE) -C docs/tikz all
-
-interactive-test:
-	docker run --name $(CONTAINER_NAME) --rm -ti $(CONTAINER_NAME)
-
-build-image:
-	docker build --target build -t $(BUILD_CONTAINER_NAME) .
-
-# Citus 9.0 seems to be the most recent version of Citus with Postgres 10
-# support, but fails to compile nowadays...
-
-build-test-pg11: version
-	docker build $(BUILD_ARGS_PG11) --target test -t $(TEST_CONTAINER_NAME):pg11 .
-
-build-test-pg12: version
-	docker build $(BUILD_ARGS_PG12) --target test -t $(TEST_CONTAINER_NAME):pg12 .
-
-build-test-pg13: version
-	docker build $(BUILD_ARGS_PG13) --target test -t $(TEST_CONTAINER_NAME):pg13 .
-
-build-test-pg14: version
-	docker build $(BUILD_ARGS_PG14) --target test -t $(TEST_CONTAINER_NAME):pg14 .
-
-build-test-pg15: version
-	docker build $(BUILD_ARGS_PG15) --target test -t $(TEST_CONTAINER_NAME):pg15 .
-
-build-test-pg16: version
-	docker build $(BUILD_ARGS_PG16) --target test -t $(TEST_CONTAINER_NAME):pg16 .
-
-
-build-test-image: build-test-pg$(PGVERSION) ;
-
-
 #
-# make run-test; is the main testing entry point used to run tests inside
-# our testing Docker container. The docker container depends on PGVERSION.
+# DOCS
 #
-run-test: build-test-pg$(PGVERSION)
-	docker run					                \
-		--name $(TEST_CONTAINER_NAME)		    \
-		$(DOCKER_RUN_OPTS)			            \
-		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
-		make -C /usr/src/pg_auto_failover test	\
-		PGVERSION=$(PGVERSION) TEST='${TEST}'
+# Documentation and images
+FSM = docs/fsm.png
+PDF = ./docs/_build/latex/pg_auto_failover.pdf
 
-build-pg11: build-test-pg11
-	docker build $(BUILD_ARGS_PG11) -t $(CONTAINER_NAME):pg11 .
+# make serve-docs uses this port on localhost to expose the web server
+DOCS_PORT = 8000
 
-build-pg12: build-test-pg12
-	docker build $(BUILD_ARGS_PG12) -t $(CONTAINER_NAME):pg12 .
-
-build-pg13: build-test-pg13
-	docker build $(BUILD_ARGS_PG13) -t $(CONTAINER_NAME):pg13 .
-
-build-pg14: build-test-pg14
-	docker build $(BUILD_ARGS_PG14) -t $(CONTAINER_NAME):pg14 .
-
-build-pg15: build-test-pg15
-	docker build $(BUILD_ARGS_PG15) -t $(CONTAINER_NAME):pg15 .
-
-build-pg16: build-test-pg16
-	docker build $(BUILD_ARGS_PG16) -t $(CONTAINER_NAME):pg16 .
-
-build: build-pg11 build-pg12 build-pg13 build-pg14 build-pg15 build-pg16 ;
-
-build-check:
-	for v in 11 12 13 14 15 16; do \
-		docker run --rm -t pg_auto_failover_test:pg$$v pg_autoctl version --json | jq ".pg_version" | xargs echo $$v: ; \
-	done
-
-build-i386:
-	docker build -t i386:latest -f Dockerfile.i386 .
-
-build-demo:
-	docker build $(BUILD_ARGS_PG14) -t citusdata/pg_auto_failover:demo .
-
-# expected to be run from within the i386 docker container
-installcheck-i386:
-	pg_autoctl run &
-	pg_autoctl do pgsetup wait
-	$(MAKE) -C src/monitor installcheck
-
-run-installcheck-i386: build-i386
-	docker run --platform linux/386 --rm -it --privileged i386 make installcheck-i386
-
+.PHONY: man
 man:
 	$(MAKE) -C docs man
 
+.PHONY: pdf
 pdf: $(PDF) ;
 
 $(PDF):
@@ -356,6 +235,151 @@ $(PDF):
 $(FSM): bin
 	$(PG_AUTOCTL) do fsm gv | dot -Tpng > $@
 
+.PHONY: docs
+docs: $(FSM) tikz
+	$(MAKE) -C docs html
+
+.PHONY: build-docs
+build-docs:
+	docker build -t pg_auto_failover:docs -f Dockerfile.docs .
+
+.PHONY: serve-docs
+serve-docs: build-docs
+	docker run --rm -it -p $(DOCS_PORT):8000 pg_auto_failover:docs
+
+.PHONY: tikz
+tikz:
+	$(MAKE) -C docs/tikz all
+
+#
+# DOCKER
+#
+
+CONTAINER_NAME = pg_auto_failover
+BUILD_CONTAINER_NAME = pg_auto_failover_build
+TEST_CONTAINER_NAME = pg_auto_failover_test
+DOCKER_RUN_OPTS = --privileged --rm
+
+#
+# Include Citus only for testing purpose
+#
+ifeq ($(TEST),citus)
+  CITUS=1
+endif
+
+ifeq ($(CITUS),1)
+include Makefile.citus
+endif
+
+# We use pg not PG in uppercase in the var name to ease implicit rules matching
+BUILD_ARGS_pg11 = --build-arg PGVERSION=11 --build-arg CITUSTAG=v9.5.10
+BUILD_ARGS_pg12 = --build-arg PGVERSION=12 --build-arg CITUSTAG=v10.2.9
+BUILD_ARGS_pg13 = --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.9
+BUILD_ARGS_pg14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=$(CITUSTAG)
+BUILD_ARGS_pg15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=$(CITUSTAG)
+BUILD_ARGS_pg16 = --build-arg PGVERSION=16 --build-arg CITUSTAG=$(CITUSTAG)
+
+# DOCKER BUILDS
+
+BUILD_TARGETS       = $(patsubst %,build-pg%,$(PGVERSIONS))
+.PHONY: build
+build: $(BUILD_TARGETS) ;
+
+.PHONY: build-demo
+build-demo:
+	docker build $(BUILD_ARGS_pg$(PGVERSION)) -t citusdata/pg_auto_failover:demo .
+
+.PHONY: build-i386
+build-i386: Dockerfile.i386
+	docker build -t i386:latest -f Dockerfile.i386 .
+
+.PHONY: build-image
+build-image:
+	docker build --target build -t $(BUILD_CONTAINER_NAME) .
+
+.PHONY: $(BUILD_TARGETS)
+$(BUILD_TARGETS): version
+	docker build \
+	  $(BUILD_ARGS_$(subst build-,,$@)) \
+	  -t $(CONTAINER_NAME):$(subst build-,,$@) .
+
+# DOCKER TESTS & CHECKS
+
+BUILD_CHECK_TARGETS = $(patsubst %,build-check-pg%,$(PGVERSIONS))
+BUILD_TEST_TARGETS  = $(patsubst %,build-test-pg%,$(PGVERSIONS))
+
+.PHONY: build-check
+build-check: $(BUILD_CHECK_TARGETS)
+
+.PHONY: build-check
+build-test: $(BUILD_TEST_TARGETS)
+
+.PHONY: build-test-image
+build-test-image: build-test-pg$(PGVERSION) ;
+
+.PHONY: $(BUILD_TEST_TARGETS)
+$(BUILD_TEST_TARGETS): version
+	docker build \
+	  $(BUILD_ARGS_$(subst build-test-,,$@)) \
+	  --target test \
+	  -t $(TEST_CONTAINER_NAME):$(subst build-test-,,$@) .
+
+.SECONDEXPANSION:
+.PHONY: $(BUILD_CHECK_TARGETS)
+$(BUILD_CHECK_TARGETS): version $$(subst build-check-,build-test-,$$@)
+	docker run --rm \
+	  -t $(TEST_CONTAINER_NAME):$(subst build-check-,,$@) \
+	  pg_autoctl version --json | jq ".pg_version" | xargs echo $(subst build-check-,,$@):
+
+# make run-test; is the main testing entry point used to run tests inside
+# our testing Docker container. The docker container depends on PGVERSION.
+.PHONY: run-test
+run-test: build-test-pg$(PGVERSION)
+	docker run					                \
+		--name $(TEST_CONTAINER_NAME)		    \
+		$(DOCKER_RUN_OPTS)			            \
+		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
+		make -C /usr/src/pg_auto_failover test	\
+		PGVERSION=$(PGVERSION) TEST='${TEST}'
+
+# expected to be run from within the i386 docker container
+.PHONY: installcheck-i386
+installcheck-i386:
+	pg_autoctl run &
+	pg_autoctl do pgsetup wait
+	$(MAKE) -C src/monitor installcheck
+
+.PHONY: run-installcheck-i386
+run-installcheck-i386: build-i386
+	docker run --platform linux/386 --rm -it --privileged i386 make installcheck-i386
+
+#
+# BE INTERACTIVE
+#
+
+FIRST_PGPORT ?= 5500
+
+TMUX_EXTRA_COMMANDS ?= ""
+TMUX_LAYOUT ?= even-vertical	# could be "tiled"
+TMUX_TOP_DIR = ./tmux/pgsql
+TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
+TMUX_CITUS = ""
+
+# PostgreSQL testing
+## total count of Postgres nodes
+NODES ?= 2
+## count of replication-quorum false nodes
+NODES_ASYNC ?= 0
+## either "50", or "50,50", or "50,50,0" etc
+NODES_PRIOS ?= 50
+## TODO ???
+NODES_SYNC_SB ?= -1
+
+.PHONY: interactive-test
+interactive-test:
+	docker run --name $(CONTAINER_NAME) --rm -ti $(CONTAINER_NAME)
+
+.PHONY: $(TMUX_SCRIPT)
 $(TMUX_SCRIPT): bin
 	mkdir -p $(TMUX_TOP_DIR)
 	$(PG_AUTOCTL) do tmux script          \
@@ -365,23 +389,24 @@ $(TMUX_SCRIPT): bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
-         --citus-workers $(WORKERS) \
-         --citus-secondaries $(NODES_SECONDARY) \
+         $(TMUX_CITUS)                    \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
 		 --layout $(TMUX_LAYOUT) > $@
 
+.PHONY: tmux-script
 tmux-script: $(TMUX_SCRIPT) ;
 
+.PHONY: tmux-clean
 tmux-clean: bin
 	$(PG_AUTOCTL) do tmux clean           \
          --root $(TMUX_TOP_DIR)           \
          --first-pgport $(FIRST_PGPORT)   \
          --nodes $(NODES)                 \
-         --citus-workers $(WORKERS)       \
-         --citus-secondaries $(NODES_SECONDARY) \
+         $(TMUX_CITUS)                    \
          $(CLUSTER_OPTS)
 
+.PHONY: tmux-session
 tmux-session: bin
 	$(PG_AUTOCTL) do tmux session         \
          --root $(TMUX_TOP_DIR)           \
@@ -390,12 +415,12 @@ tmux-session: bin
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
-         --citus-workers $(WORKERS)       \
-         --citus-secondaries $(NODES_SECONDARY) \
+         $(TMUX_CITUS)                    \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
 
+.PHONY: tmux-compose-session
 tmux-compose-session:
 	$(PG_AUTOCTL) do tmux compose session \
          --root $(TMUX_TOP_DIR)           \
@@ -404,59 +429,52 @@ tmux-compose-session:
          --async-nodes $(NODES_ASYNC)     \
          --node-priorities $(NODES_PRIOS) \
          --sync-standbys $(NODES_SYNC_SB) \
-         --citus-workers $(WORKERS)       \
-         --citus-secondaries $(NODES_SECONDARY) \
+         $(TMUX_CITUS)                    \
          $(CLUSTER_OPTS)                  \
          --binpath $(BINPATH)             \
          --layout $(TMUX_LAYOUT)
 
+.PHONY: cluster
 cluster: install tmux-clean
 	# This is explicitly not a target, otherwise when make uses multiple jobs
 	# tmux-clean and tmux-session can have a race condidition where tmux-clean
 	# removes the files that are just created by tmux-session.
 	$(MAKE) tmux-session
 
+.PHONY: compose
 compose:
 	$(MAKE) tmux-compose-session
 
-valgrind-session: build-test
-	docker run                             \
-	    --name $(TEST_CONTAINER_NAME) 	   \
-		$(DOCKER_RUN_OPTS) -it		       \
-		$(TEST_CONTAINER_NAME):pg14		   \
-	    make -C /usr/src/pg_auto_failover  \
-	     VALGRIND=1 					   \
-	     TMUX_TOP_DIR=/tmp/tmux 	       \
-		 NODES=$(NODES) 				   \
-		 NODES_ASYNC=$(NODES_ASYNC)        \
-		 NODES_PRIOS=$(NODES_PRIOS)        \
-		 NODES_SYNC_SB=$(NODES_SYNC_SB)    \
-		 CLUSTER_OPTS=$(CLUSTER_OPTS)      \
-		 TMUX_EXTRA_COMMANDS=$(TMUX_EXTRA_COMMANDS) \
-		 TMUX_LAYOUT=$(TMUX_LAYOUT)        \
-	     tmux-session
+# Command line with DEBUG facilities
+VALGRIND ?=
+ifeq ($(VALGRIND),)
+	BINPATH = ./src/bin/pg_autoctl/pg_autoctl
+	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
+else
+	BINPATH = $(abspath $(TOP))/src/tools/pg_autoctl.valgrind
+	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 PG_AUTOCTL_DEBUG_BIN_PATH="$(BINPATH)" ./src/tools/pg_autoctl.valgrind
+endif
 
-azcluster: all
-	$(PG_AUTOCTL) do azure create         \
-         --prefix $(AZURE_PREFIX)         \
-         --region $(AZURE_REGION)         \
-         --location $(AZURE_LOCATION)     \
-         --nodes $(NODES)
+VALGRIND_SESSION_TARGETS  = $(patsubst %,valgrind-session-pg%,$(PGVERSIONS))
 
-# make azcluster has been done before, just re-attach
-az: all
-	$(PG_AUTOCTL) do azure tmux session
+.SECONDEXPANSION:
+.PHONY: $(VALGRIND_SESSION_TARGETS)
+$(VALGRIND_SESSION_TARGETS): version $$(subst valgrind-session-,build-test-,$$@)
+	docker run
+	  --name $(TEST_CONTAINER_NAME)                \
+	  $(DOCKER_RUN_OPTS) -it                       \
+	  $(TEST_CONTAINER_NAME):$(subst valgrind-session-,,$@)        \
+	  make -C /usr/src/pg_auto_failover            \
+	    VALGRIND=1                                 \
+	    TMUX_TOP_DIR=/tmp/tmux                     \
+	    NODES=$(NODES)                             \
+	    NODES_ASYNC=$(NODES_ASYNC)                 \
+	    NODES_PRIOS=$(NODES_PRIOS)                 \
+	    NODES_SYNC_SB=$(NODES_SYNC_SB)             \
+	    CLUSTER_OPTS=$(CLUSTER_OPTS)               \
+	    TMUX_EXTRA_COMMANDS=$(TMUX_EXTRA_COMMANDS) \
+	    TMUX_LAYOUT=$(TMUX_LAYOUT)                 \
+	    tmux-session
 
-azdrop: all
-	$(PG_AUTOCTL) do azure drop
-
-.PHONY: all clean check install docs tikz
-.PHONY: monitor clean-monitor check-monitor install-monitor
-.PHONY: bin clean-bin install-bin maintainer-clean
-.PHONY: build-test run-test spellcheck lint linting ci-test
-.PHONY: tmux-clean cluster compose
-.PHONY: azcluster azdrop az
-.PHONY: build-image
-.PHONY: build-test-pg10 build-test-pg11 build-test-pg142
-.PHONY: build-test-pg13 build-test-pg14
-.PHONY: build build-pg10 build-pg11 build-pg12 build-pg13 build-pg14
+.PHONY: valgrind-session
+valgrind-session: valgrind-session-pg$(PGVERSION)
