@@ -27,7 +27,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./docs
-          push: false
+          load: true
           tags: sphinxdoc:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
