@@ -20,9 +20,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build documentation
-        run: |
-          make build-docs
+      - uses: ammaraskar/sphinx-action@0.4
+        with:
+          build-command: "sphinx-build -M html . _build"
+          docs-folder: "docs/"
 
   linting:
     name: Linting
@@ -45,7 +46,7 @@ jobs:
         with:
           key: python-3.11-pip-tools
           path: |
-            tools
+            /usr/local/bin/uncrustify
 
       - name: Clone and install linting tools
         run: |
