@@ -28,11 +28,11 @@ jobs:
         with:
           context: ./docs
           push: false
-          tags: sphinxdoc
+          tags: sphinxdoc:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - run: docker run --rm -v ./:/docs sphinxdoc
+      - run: docker run --rm -v ./:/docs sphinxdoc:latest
 
   linting:
     name: Linting
