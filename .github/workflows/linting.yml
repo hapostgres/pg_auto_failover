@@ -1,0 +1,39 @@
+name: Code Linting/Checking
+
+on:
+  pull_request:
+    branches:
+    - main
+  push:
+    branches:
+    - main
+  workflow_dispatch:
+
+jobs:
+  linting:
+    name: Run Linting and friends
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set environment variables
+        run: |
+            echo "TRAVIS_BUILD_DIR=$(pwd)" >> $GITHUB_ENV
+
+      - name: Clone and install linting tools
+        run: |
+          sudo apt-get install python3-pip
+          pip3 install --user black
+          black --version
+          gcc --version
+          git clone -b v0.8.19 --depth 1 https://github.com/citusdata/tools.git ../tools
+          sudo make -C ../tools install
+          install_uncrustify
+          rm -rf uncrustify*
+
+      - name: Check code formatting and banned function
+        run: |
+          make lint

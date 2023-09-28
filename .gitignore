@@ -52,3 +52,6 @@ docs/tikz/*.png
 # Exclude our demo/test tmux directory
 tmux/
 valgrind/
+
+# Exclude docker ID files
+docker.id*

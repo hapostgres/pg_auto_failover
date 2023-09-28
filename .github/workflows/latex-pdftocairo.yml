@@ -1,0 +1,41 @@
+name: Build pictures
+
+env:
+  context:    /docs/tikz
+  tikz_image: hapostgres/latexmk-pdftocairo:latest
+
+on:
+  pull_request:
+    branches:
+    - main
+    paths:
+      - 'docs/tikz/**'
+  push:
+    branches:
+    - main
+  workflow_dispatch:
+
+jobs:
+  pictures:
+    name: Building latexmk/pdftocairo pictures
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build hapostgres/latexmk-pdftocairo docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ".${{ env.context }}"
+          load: true
+          tags: ${{ env.tikz_image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+      - name: Build pdf/png/svg files
+        run: "docker run --rm -v .${{ env.context }}:/tikz ${{ env.tikz_image }} make all"
