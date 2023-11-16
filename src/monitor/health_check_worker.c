@@ -414,6 +414,8 @@ RegisterHealthCheckWorker(DatabaseListEntry *db)
 			sizeof(worker.bgw_library_name));
 	strlcpy(worker.bgw_function_name, "HealthCheckWorkerMain",
 			sizeof(worker.bgw_function_name));
+	strlcpy(worker.bgw_type, "pgautofailover",
+			sizeof(worker.bgw_type));
 	appendStringInfo(&buf, "pg_auto_failover monitor healthcheck worker %s",
 					 db->dbname);
 	strlcpy(worker.bgw_name, buf.data,
