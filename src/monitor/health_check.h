@@ -55,8 +55,8 @@ extern int HealthCheckRetryDelay;
 extern size_t HealthCheckWorkerShmemSize(void);
 
 extern void InitializeHealthCheckWorker(void);
-extern void HealthCheckWorkerMain(Datum arg);
-extern void HealthCheckWorkerLauncherMain(Datum arg);
+extern PGDLLEXPORT void HealthCheckWorkerMain(Datum arg);
+extern PGDLLEXPORT void HealthCheckWorkerLauncherMain(Datum arg);
 extern List * LoadNodeHealthList(void);
 extern NodeHealth * TupleToNodeHealth(HeapTuple heapTuple,
 									  TupleDesc tupleDescriptor);
