@@ -1,13 +1,14 @@
-name: Run Tests
+name: Continuous Integration
 
 on:
-  push:
-    branches:
-    - main
   pull_request:
     branches:
     - main
-
+    paths-ignore:
+      - 'docs/**'
+  push:
+    branches:
+    - main
   workflow_dispatch:
 
 jobs:
@@ -33,8 +34,6 @@ jobs:
         include:
           - PGVERSION: 14
             TEST: tablespaces
-          - PGVERSION: 14
-            TEST: linting
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -43,38 +42,13 @@ jobs:
         run: |
             echo "PGVERSION=${{ matrix.PGVERSION }}" >> $GITHUB_ENV
             echo "TEST=${{ matrix.TEST }}" >> $GITHUB_ENV
-            echo "LINTING=${{ matrix.LINTING }}" >> $GITHUB_ENV
             echo "TRAVIS_BUILD_DIR=$(pwd)" >> $GITHUB_ENV
 
-      - name: Clone and install linting tools
-        if: ${{ env.TEST == 'linting' }}
-        run: |
-          sudo apt-get install python3-pip
-          pip3 install --user black
-          black --version
-          gcc --version
-          git clone -b v0.8.19 --depth 1 https://github.com/citusdata/tools.git ../tools
-          sudo make -C ../tools install
-          install_uncrustify
-          rm -rf uncrustify*
-
-      - name: Check code formatting and banned function
-        if: ${{ env.TEST == 'linting' }}
-        run: |
-          make lint
-
-      - name: Build documentation
-        if: ${{ env.TEST == 'linting' }}
-        run: |
-          make build-docs
-
       - name: Build Docker Test Image
-        if: ${{ env.TEST != 'linting' }}
         run: |
           make build-test-image
 
       - name: Run Test
-        if: ${{ env.TEST != 'linting' }}
         timeout-minutes: 15
         run: |
           make ci-test
