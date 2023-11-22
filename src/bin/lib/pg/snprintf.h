@@ -3,7 +3,7 @@
  * port.h
  *	  Header for src/port/ compatibility functions.
  *
- * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2023, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/port.h
@@ -17,7 +17,8 @@
 
 #ifndef USE_REPL_SNPRINTF
 
-int	pg_vsnprintf(char *str, size_t count, const char *fmt, va_list args);
+int	pg_vsnprintf(char *str, size_t count, const char *fmt, va_list args)
+ 	__attribute__((format(printf, 3, 0)));
 int	pg_snprintf(char *str, size_t count, const char *fmt,...)
  	__attribute__((format(printf, 3, 4)));
 int	pg_vsprintf(char *str, const char *fmt, va_list args);

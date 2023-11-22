@@ -19,7 +19,7 @@
 #define PG_AUTOCTL_VERSION GIT_VERSION
 
 /* version of the extension that we requite to talk to on the monitor */
-#define PG_AUTOCTL_EXTENSION_VERSION "2.0"
+#define PG_AUTOCTL_EXTENSION_VERSION "2.1"
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"

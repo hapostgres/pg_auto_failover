@@ -15,7 +15,7 @@
 
 #include "storage/lockdefs.h"
 
-#define AUTO_FAILOVER_EXTENSION_VERSION "2.0"
+#define AUTO_FAILOVER_EXTENSION_VERSION "2.1"
 #define AUTO_FAILOVER_EXTENSION_NAME "pgautofailover"
 #define AUTO_FAILOVER_SCHEMA_NAME "pgautofailover"
 #define AUTO_FAILOVER_FORMATION_TABLE "pgautofailover.formation"

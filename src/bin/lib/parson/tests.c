@@ -2,7 +2,7 @@
  SPDX-License-Identifier: MIT
 
  Parson (https://github.com/kgabis/parson)
- Copyright (c) 2012 - 2022 Krzysztof Gabis
+ Copyright (c) 2012 - 2023 Krzysztof Gabis
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,10 @@
 */
 #ifdef _MSC_VER
 #define _CRT_SECURE_NO_WARNINGS
+#endif
+
+#if defined(__APPLE__) && defined(__clang__)
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
 #include "parson.h"
@@ -63,6 +67,8 @@ void test_suite_11(void); /* Additional things that require testing */
 void test_memory_leaks(void);
 void test_failing_allocations(void);
 void test_custom_number_format(void);
+void test_custom_number_serialization_function(void);
+void test_object_clear(void);
 
 void print_commits_info(const char *username, const char *repo);
 void persistence_example(void);
@@ -132,6 +138,8 @@ int tests_main(int argc, char *argv[]) {
     test_memory_leaks();
     test_failing_allocations();
     test_custom_number_format();
+    test_custom_number_serialization_function();
+    test_object_clear();
 
     printf("Tests failed: %d\n", g_tests_failed);
     printf("Tests passed: %d\n", g_tests_passed);
@@ -365,7 +373,7 @@ void test_suite_3(void) {
     TEST(g_malloc_count == 0);
 }
 
-void test_suite_4() {
+void test_suite_4(void) {
     const char *filename = "test_2.txt";
     JSON_Value *a = NULL, *a_copy = NULL;
     a = json_parse_file(get_file_path(filename));
@@ -599,7 +607,7 @@ void test_suite_10(void) {
     TEST(g_malloc_count == 0);
 }
 
-void test_suite_11() {
+void test_suite_11(void) {
     const char * array_with_slashes = "[\"a/b/c\"]";
     const char * array_with_escaped_slashes = "[\"a\\/b\\/c\"]";
     char *serialized = NULL;
@@ -617,7 +625,7 @@ void test_suite_11() {
     TEST(STREQ(array_with_escaped_slashes, serialized));
 }
 
-void test_memory_leaks() {
+void test_memory_leaks(void) {
     g_malloc_count = 0;
 
     TEST(json_object_set_string(NULL, "lorem", "ipsum") == JSONFailure);
@@ -630,7 +638,7 @@ void test_memory_leaks() {
     TEST(g_malloc_count == 0);
 }
 
-void test_failing_allocations() {
+void test_failing_allocations(void) {
     const char *filename = "test_2.txt";
     JSON_Value *root_value = NULL;
     JSON_Object *root_object = NULL;
@@ -689,19 +697,63 @@ void test_failing_allocations() {
         }
     }
 
-    json_set_allocation_functions(malloc, free);
+    json_set_allocation_functions(counted_malloc, counted_free);
     printf("OK (tested %d failing allocations)\n", n - 1);
     g_tests_passed++;
 }
 
-void test_custom_number_format() {
-    char *serialized = NULL;
-    JSON_Value *val = json_value_init_number(0.6);
-    json_set_float_serialization_format("%.1f");
-    serialized = json_serialize_to_string(val);
-    TEST(STREQ(serialized, "0.6"));
-    json_free_serialized_string(serialized);
-    json_value_free(val);
+void test_custom_number_format(void) {
+    g_malloc_count = 0;
+    {
+        char *serialized = NULL;
+        JSON_Value *val = json_value_init_number(0.6);
+        json_set_float_serialization_format("%.1f");
+        serialized = json_serialize_to_string(val);
+        json_set_float_serialization_format(NULL);
+        TEST(STREQ(serialized, "0.6"));
+        json_free_serialized_string(serialized);
+        json_value_free(val);
+    }
+    TEST(g_malloc_count == 0);
+}
+
+static int custom_serialization_func_called = 0;
+static int custom_serialization_func(double num, char *buf) {
+    char num_buf[32];
+    custom_serialization_func_called = 1;
+    if (buf == NULL)
+        buf = num_buf;
+    return sprintf(buf, "%.1f", num);
+}
+
+void test_custom_number_serialization_function(void) {
+    g_malloc_count = 0;
+    {
+        /* We just test that custom_serialization_func() gets called, not it's performance */
+        char *serialized = NULL;
+        JSON_Value *val = json_value_init_number(0.6);
+        json_set_number_serialization_function(custom_serialization_func);
+        serialized = json_serialize_to_string(val);
+        TEST(STREQ(serialized, "0.6"));
+        TEST(custom_serialization_func_called);
+        json_set_number_serialization_function(NULL);
+        json_free_serialized_string(serialized);
+        json_value_free(val);
+    }
+    TEST(g_malloc_count == 0);
+}
+
+void test_object_clear(void) {
+    g_malloc_count = 0;
+    {
+        JSON_Value *val = json_value_init_object();
+        JSON_Object *obj = json_value_get_object(val);
+        json_object_set_string(obj, "foo", "bar");
+        json_object_clear(obj);
+        TEST(json_object_get_value(obj, "foo") == NULL);
+        json_value_free(val);
+    }
+    TEST(g_malloc_count == 0);
 }
 
 void print_commits_info(const char *username, const char *repo) {
