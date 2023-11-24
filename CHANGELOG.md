@@ -1,3 +1,29 @@
+### pg_auto_failover v2.1 (November 24, 2022) ###
+
+This release incorporates support for Postgres major version 16, some bug fixes,
+documentation updates, and usual code maintenance work.
+
+### Added
+* Support for Postgres major version 16. (#1013, #1006, )
+* Improve on documentation, Docker images, and tutorials. (#964, #954, #947)
+* PGDATABASE as default create node --dbname. (#956)
+* Add chapters to the documentation navigation. (#954)
+
+### Fixed
+* Makefile .PHONY target is defined throughout where needed. (#1008)
+* History file parsing allowing for files longer than 1024 lines. (#995)
+* A mistake in setup description (#984)
+* Typo in pg_autoctl_do_pgsetup.rst (#961)
+* pg_autoctl version Postgres compatibility string. (#951)
+* Creating the PGUSER at pg_autoctl create postgres time. (#950)
+* Dockerfile compatibility for Citus before 11. (#946)
+* Punctuation in README.md. (#945)
+
+### Changed
+* Main Makefile is reorganized to split out citus and azure specifics. (#1008)
+* Citus version matrix with new Citus releases. (#990)
+* Update Citus from 11.1.2 to 11.1.3 in the build system. (#957)
+
 ### pg_auto_failover v2.0 (October 7, 2022) ###
 
 This new release includes support for Citus in pg_auto_failover, the usual

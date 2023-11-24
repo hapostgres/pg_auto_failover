@@ -19,5 +19,5 @@ select installed_version
 -- should error because installed extension isn't compatible with .so
 select * from pgautofailover.get_primary('unknown formation');
 ERROR:  loaded "pgautofailover" library version differs from installed extension version
-DETAIL:  Loaded library requires 2.0, but the installed extension version is dummy.
+DETAIL:  Loaded library requires 2.1, but the installed extension version is dummy.
 HINT:  Run ALTER EXTENSION pgautofailover UPDATE and try again.
