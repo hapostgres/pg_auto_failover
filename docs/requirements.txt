@@ -1,4 +1,4 @@
 Sphinx==4.0.2
 sphinx_rtd_theme_citus==0.5.25
 docutils==0.16
-readthedocs-sphinx-search==0.1.0
+readthedocs-sphinx-search==0.3.2
