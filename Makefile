@@ -4,7 +4,7 @@
 .DEFAULT_GOAL := all
 
 # Supported PostgreSQL versions:
-PGVERSIONS = 13 14 15 16
+PGVERSIONS = 13 14 15 16 17
 
 # Default version:
 PGVERSION ?= $(lastword $(PGVERSIONS))
@@ -276,6 +276,7 @@ BUILD_ARGS_pg13 = --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.9
 BUILD_ARGS_pg14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=$(CITUSTAG)
 BUILD_ARGS_pg15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=$(CITUSTAG)
 BUILD_ARGS_pg16 = --build-arg PGVERSION=16 --build-arg CITUSTAG=$(CITUSTAG)
+BUILD_ARGS_pg17 = --build-arg PGVERSION=17 --build-arg CITUSTAG=$(CITUSTAG)
 
 # DOCKER BUILDS
 
