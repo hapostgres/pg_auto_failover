@@ -223,7 +223,7 @@ CommandLine do_pgsetup_commands =
 
 CommandLine do_tmux_compose_config =
 	make_command("config",
-				 "Produce a docker-compose configuration file for a demo",
+				 "Produce a docker compose configuration file for a demo",
 				 "[option ...]",
 				 "  --root            path where to create a cluster\n"
 				 "  --first-pgport    first Postgres port to use (5500)\n"
@@ -278,7 +278,7 @@ CommandLine *do_tmux_compose[] = {
 
 CommandLine do_tmux_compose_commands =
 	make_command_set("compose",
-					 "Set of facilities to handle docker-compose sessions",
+					 "Set of facilities to handle docker compose sessions",
 					 NULL, NULL, NULL, do_tmux_compose);
 
 CommandLine do_tmux_script =

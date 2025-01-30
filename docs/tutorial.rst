@@ -7,7 +7,7 @@ In this guide we’ll create a Postgres setup with two nodes, a primary and a
 standby. Then we'll add a second standby node. We’ll simulate failure in the
 Postgres nodes and see how the system continues to function.
 
-This tutorial uses `docker-compose`__ in order to separate the architecture
+This tutorial uses `docker compose`__ in order to separate the architecture
 design from some of the implementation details. This allows reasoning at
 the architecture level within this tutorial, and better see which software
 component needs to be deployed and run on which node.
@@ -23,7 +23,7 @@ pg_auto_failover to implement Postgres automated failover.
 Pre-requisites
 --------------
 
-When using `docker-compose` we describe a list of services, each service may
+When using `docker compose` we describe a list of services, each service may
 run on one or more nodes, and each service just runs a single isolated
 process in a container.
 
@@ -43,12 +43,12 @@ or run the docker build command directly:
 
    $ git clone https://github.com/citusdata/pg_auto_failover
    $ cd pg_auto_failover/docs/tutorial
-   $ docker-compose build
+   $ docker compose build
 
 Postgres failover with two nodes
 --------------------------------
 
-Using docker-compose makes it easy enough to create an architecture that
+Using docker compose makes it easy enough to create an architecture that
 looks like the following diagram:
 
 .. figure:: ./tikz/arch-single-standby.svg
@@ -61,7 +61,7 @@ provide with High Availability of both the Postgres service and the data.
 See the :ref:`multi_node_architecture` chapter of our docs to understand
 more about this.
 
-To create a cluster we use the following docker-compose definition:
+To create a cluster we use the following docker compose definition:
 
 .. literalinclude:: tutorial/docker-compose.yml
    :language: yaml
@@ -72,7 +72,7 @@ following command:
 
 ::
 
-   $ docker-compose up app monitor node1 node2
+   $ docker compose up app monitor node1 node2
 
 The command above starts the services up. The first service is the monitor
 and is created with the command ``pg_autoctl create monitor``. The options
@@ -83,18 +83,18 @@ specified on the command line too:
 
    $ pg_autoctl create postgres --ssl-self-signed --auth trust --pg-hba-lan --run
 
-While the Postgres nodes are being provisionned by docker-compose, you can
+While the Postgres nodes are being provisionned by docker compose, you can
 run the following command and have a dynamic dashboard to follow what's
 happening. The following command is like ``top`` for pg_auto_failover::
 
-  $ docker-compose exec monitor pg_autoctl watch
+  $ docker compose exec monitor pg_autoctl watch
 
 After a little while, you can run the :ref:`pg_autoctl_show_state` command
 and see a stable result:
 
 .. code-block:: bash
 
-   $ docker-compose exec monitor pg_autoctl show state
+   $ docker compose exec monitor pg_autoctl show state
 
     Name |  Node |  Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ------+-------+------------+----------------+--------------+---------------------+--------------------
@@ -104,7 +104,7 @@ and see a stable result:
 We can review the available Postgres URIs with the
 :ref:`pg_autoctl_show_uri` command::
 
-  $ docker-compose exec monitor pg_autoctl show uri
+  $ docker compose exec monitor pg_autoctl show uri
            Type |    Name | Connection String
    -------------+---------+-------------------------------
         monitor | monitor | postgres://autoctl_node@58053a02af03:5432/pg_auto_failover?sslmode=require
@@ -117,7 +117,7 @@ Let's create a database schema with a single table, and some data in there.
 
 ::
 
-   $ docker-compose exec app psql
+   $ docker compose exec app psql
 
 .. code-block:: sql
 
@@ -149,7 +149,7 @@ primary.
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl perform switchover
+   $ docker compose exec monitor pg_autoctl perform switchover
    14:57:16 992 INFO  Waiting 60 secs for a notification with state "primary" in formation "default" and group 0
    14:57:16 992 INFO  Listening monitor notifications about state changes in formation "default" and group 0
    14:57:16 992 INFO  Following table displays times when notifications are received
@@ -180,7 +180,7 @@ The new state after the failover looks like the following:
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl show state
+   $ docker compose exec monitor pg_autoctl show state
     Name |  Node |  Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ------+-------+------------+----------------+--------------+---------------------+--------------------
    node2 |     1 | node2:5432 |   2: 0/5002698 |    read-only |           secondary |           secondary
@@ -188,7 +188,7 @@ The new state after the failover looks like the following:
 
 And we can verify that we still have the data available::
 
-  docker-compose exec app psql -c "select count(*) from companies"
+  docker compose exec app psql -c "select count(*) from companies"
     count
    -------
        75
@@ -213,13 +213,13 @@ following command:
 
 ::
 
-   $ docker-compose up -d node3
+   $ docker compose up -d node3
 
 We can see the resulting replication settings with the following command:
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl show settings
+   $ docker compose exec monitor pg_autoctl show settings
 
      Context |    Name |                   Setting | Value
    ----------+---------+---------------------------+-------------------------------------------------------------
@@ -242,7 +242,7 @@ order for it to never be a candidate for failover:
 
 ::
 
-   $ docker-compose exec node3 pg_autoctl set candidate-priority 0 --name node3
+   $ docker compose exec node3 pg_autoctl set candidate-priority 0 --name node3
 
 To see the replication settings for all the nodes, the following command can
 be useful, and is described in more details in the :ref:`architecture_setup`
@@ -250,7 +250,7 @@ section.
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl show settings
+   $ docker compose exec monitor pg_autoctl show settings
 
      Context |    Name |                   Setting | Value
    ----------+---------+---------------------------+-------------------------------------------------------------
@@ -264,19 +264,19 @@ section.
         node |   node3 |        replication quorum | true
 
 Then in a separate terminal (but in the same directory, because of the way
-docker-compose works with projects), you can run the following watch
+docker compose works with projects), you can run the following watch
 command:
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl watch
+   $ docker compose exec monitor pg_autoctl watch
 
 And in the main terminal, while the watch command output is visible, you can
 run a switchover operation:
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl perform switchover
+   $ docker compose exec monitor pg_autoctl perform switchover
 
 Getting familiar with those commands one of you next steps. The manual has
 coverage for them in the following links:
@@ -293,18 +293,18 @@ To dispose of the entire tutorial environment, just use the following command:
 
 ::
 
-   $ docker-compose down
+   $ docker compose down
 
 Next steps
 ----------
 
 As mentioned in the first section of this tutorial, the way we use
-docker-compose here is not meant to be production ready. It's useful to
+docker compose here is not meant to be production ready. It's useful to
 understand and play with a distributed system such as Postgres multiple
 nodes system and failovers.
 
 See the command :ref:`pg_autoctl_do_tmux_compose_session` for more details
-about how to run a docker-compose test environment with docker-compose,
+about how to run a docker compose test environment with docker compose,
 including external volumes for each node.
 
 See also the complete :ref:`azure_tutorial` for a guide on how-to provision

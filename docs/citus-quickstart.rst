@@ -8,7 +8,7 @@ workers. Every node will have a secondary for failover. We’ll simulate
 failure in the coordinator and worker nodes and see how the system continues
 to function.
 
-This tutorial uses `docker-compose`__ in order to separate the architecture
+This tutorial uses `docker compose`__ in order to separate the architecture
 design from some of the implementation details. This allows reasoning at
 the architecture level within this tutorial, and better see which software
 component needs to be deployed and run on which node.
@@ -24,7 +24,7 @@ pg_auto_failover to provide HA to a Citus formation.
 Pre-requisites
 --------------
 
-When using `docker-compose` we describe a list of services, each service may
+When using `docker compose` we describe a list of services, each service may
 run on one or more nodes, and each service just runs a single isolated
 process in a container.
 
@@ -45,12 +45,12 @@ or run the docker build command directly:
    $ cd pg_auto_failover/docs/cluster
 
    $ docker build -t pg_auto_failover:citus -f Dockerfile ../..
-   $ docker-compose build
+   $ docker compose build
 
 Our first Citus Cluster
 -----------------------
 
-To create a cluster we use the following docker-compose definition:
+To create a cluster we use the following docker compose definition:
 
 .. literalinclude:: citus/docker-compose-scale.yml
    :language: yaml
@@ -62,7 +62,7 @@ following command:
 
 ::
 
-   $ docker-compose up --scale coord=2 --scale worker=6
+   $ docker compose up --scale coord=2 --scale worker=6
 
 The command above starts the services up. The command also specifies a
 ``--scale`` option that is different for each service. We need:
@@ -91,11 +91,11 @@ that we don't have to. In a High Availability setup, every node should be
 ready to be promoted primary at any time, so knowing which node in a group
 is assigned primary first is not very interesting.
 
-While the cluster is being provisionned by docker-compose, you can run the
+While the cluster is being provisionned by docker compose, you can run the
 following command and have a dynamic dashboard to follow what's happening.
 The following command is like ``top`` for pg_auto_failover::
 
-  $ docker-compose exec monitor pg_autoctl watch
+  $ docker compose exec monitor pg_autoctl watch
 
 Because the ``pg_basebackup`` operation that is used to create the secondary
 nodes takes some time when using Citus, because of the first CHECKPOINT
@@ -104,7 +104,7 @@ might see the following output:
 
 .. code-block:: bash
 
-   $ docker-compose exec monitor pg_autoctl show state
+   $ docker compose exec monitor pg_autoctl show state
        Name |  Node |         Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ---------+-------+-------------------+----------------+--------------+---------------------+--------------------
     coord0a |   0/1 | cd52db444544:5432 |   1: 0/200C4A0 |   read-write |        wait_primary |        wait_primary
@@ -121,7 +121,7 @@ same command again for stable result:
 
 .. code-block:: bash
 
-   $ docker-compose exec monitor pg_autoctl show state
+   $ docker compose exec monitor pg_autoctl show state
 
        Name |  Node |         Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ---------+-------+-------------------+----------------+--------------+---------------------+--------------------
@@ -142,7 +142,7 @@ and supports reads and writes.
 We can review the available Postgres URIs with the
 :ref:`pg_autoctl_show_uri` command::
 
-  $ docker-compose exec monitor pg_autoctl show uri
+  $ docker compose exec monitor pg_autoctl show uri
            Type |    Name | Connection String
    -------------+---------+-------------------------------
         monitor | monitor | postgres://autoctl_node@552dd89d5d63:5432/pg_auto_failover?sslmode=require
@@ -153,7 +153,7 @@ can run a psql session right from the coordinator container:
 
 .. code-block:: bash
 
-   $ docker-compose exec coord psql -d citus -c 'select * from citus_get_active_worker_nodes();'
+   $ docker compose exec coord psql -d citus -c 'select * from citus_get_active_worker_nodes();'
      node_name   | node_port
    --------------+-----------
     dae7c062e2c1 |      5432
@@ -161,7 +161,7 @@ can run a psql session right from the coordinator container:
     c23610380024 |      5432
    (3 rows)
 
-We are now reaching the limits of using a simplified docker-compose setup.
+We are now reaching the limits of using a simplified docker compose setup.
 When using the ``--scale`` option, it is not possible to give a specific
 hostname to each running node, and then we get a randomly generated string
 instead or useful node names such as ``worker1a`` or ``worker3b``.
@@ -170,14 +170,14 @@ Create a Citus Cluster, take two
 --------------------------------
 
 In order to implement the following architecture, we need to introduce a
-more complex docker-compose file than in the previous section.
+more complex docker compose file than in the previous section.
 
 .. figure:: ./tikz/arch-citus.svg
    :alt: pg_auto_failover architecture with a Citus formation
 
    pg_auto_failover architecture with a Citus formation
 
-This time we create a cluster using the following docker-compose definition:
+This time we create a cluster using the following docker compose definition:
 
 .. literalinclude:: citus/docker-compose.yml
    :language: yaml
@@ -200,13 +200,13 @@ We start this cluster with a simplified command line this time:
 
 ::
 
-   $ docker-compose up
+   $ docker compose up
 
 And this time we get the following cluster as a result:
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl show state
+   $ docker compose exec monitor pg_autoctl show state
        Name |  Node |     Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ---------+-------+---------------+----------------+--------------+---------------------+--------------------
     coord0a |   0/3 |  coord0a:5432 |   1: 0/312B040 |   read-write |             primary |             primary
@@ -223,7 +223,7 @@ And then we have the following application connection string to use:
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl show uri
+   $ docker compose exec monitor pg_autoctl show uri
            Type |    Name | Connection String
    -------------+---------+-------------------------------
         monitor | monitor | postgres://autoctl_node@f0135b83edcd:5432/pg_auto_failover?sslmode=require
@@ -234,7 +234,7 @@ sense:
 
 ::
 
-   $ docker-compose exec coord0a psql -d citus -c 'select * from citus_get_active_worker_nodes()'
+   $ docker compose exec coord0a psql -d citus -c 'select * from citus_get_active_worker_nodes()'
     node_name | node_port
    -----------+-----------
     worker1a  |      5432
@@ -264,7 +264,7 @@ then. With pg_auto_failover, this is as easy as doing:
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl perform failover --group 2
+   $ docker compose exec monitor pg_autoctl perform failover --group 2
    15:40:03 9246 INFO  Waiting 60 secs for a notification with state "primary" in formation "default" and group 2
    15:40:03 9246 INFO  Listening monitor notifications about state changes in formation "default" and group 2
    15:40:03 9246 INFO  Following table displays times when notifications are received
@@ -291,7 +291,7 @@ the resulting cluster state.
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl show state
+   $ docker compose exec monitor pg_autoctl show state
        Name |  Node |     Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ---------+-------+---------------+----------------+--------------+---------------------+--------------------
     coord0a |   0/3 |  coord0a:5432 |   1: 0/312ADA8 |   read-write |             primary |             primary
@@ -307,7 +307,7 @@ Which seen from the Citus coordinator, looks like the following:
 
 ::
 
-   $ docker-compose exec coord0a psql -d citus -c 'select * from citus_get_active_worker_nodes()'
+   $ docker compose exec coord0a psql -d citus -c 'select * from citus_get_active_worker_nodes()'
     node_name | node_port
    -----------+-----------
     worker1a  |      5432
@@ -322,7 +322,7 @@ Let's create a database schema with a single distributed table.
 
 ::
 
-   $ docker-compose exec app psql
+   $ docker compose exec app psql
 
 .. code-block:: sql
 
@@ -357,10 +357,10 @@ registers the secondary instead.
 
    # the pg_auto_failover keeper process will be unable to resurrect
    # the worker node if pg_control has been removed
-   $ docker-compose exec worker1a rm /tmp/pgaf/global/pg_control
+   $ docker compose exec worker1a rm /tmp/pgaf/global/pg_control
 
    # shut it down
-   $ docker-compose exec worker1a /usr/lib/postgresql/14/bin/pg_ctl stop -D /tmp/pgaf
+   $ docker compose exec worker1a /usr/lib/postgresql/14/bin/pg_ctl stop -D /tmp/pgaf
 
 The keeper will attempt to start worker 1a three times and then report the
 failure to the monitor, who promotes worker1b to replace worker1a. Citus
@@ -372,7 +372,7 @@ and worker3a:
 
 ::
 
-   $ docker-compose exec app psql -c 'select * from master_get_active_worker_nodes();'
+   $ docker compose exec app psql -c 'select * from master_get_active_worker_nodes();'
 
     node_name | node_port
    -----------+-----------
@@ -385,7 +385,7 @@ Finally, verify that all rows of data are still present:
 
 ::
 
-   $ docker-compose exec app psql -c 'select count(*) from companies;'
+   $ docker compose exec app psql -c 'select count(*) from companies;'
     count
    -------
        75
@@ -398,7 +398,7 @@ secondary.
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl show state
+   $ docker compose exec monitor pg_autoctl show state
        Name |  Node |     Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ---------+-------+---------------+----------------+--------------+---------------------+--------------------
     coord0a |   0/3 |  coord0a:5432 |   1: 0/3178B20 |   read-write |             primary |             primary
@@ -424,15 +424,15 @@ primary coordinator, we can watch how the monitor promotes the secondary.
 
 ::
 
-   $ docker-compose exec coord0a rm /tmp/pgaf/global/pg_control
-   $ docker-compose exec coord0a /usr/lib/postgresql/14/bin/pg_ctl stop -D /tmp/pgaf
+   $ docker compose exec coord0a rm /tmp/pgaf/global/pg_control
+   $ docker compose exec coord0a /usr/lib/postgresql/14/bin/pg_ctl stop -D /tmp/pgaf
 
 After some time, coordinator A's keeper heals it, and the cluster converges
 in this state:
 
 ::
 
-   $ docker-compose exec monitor pg_autoctl show state
+   $ docker compose exec monitor pg_autoctl show state
        Name |  Node |     Host:Port |       TLI: LSN |   Connection |      Reported State |      Assigned State
    ---------+-------+---------------+----------------+--------------+---------------------+--------------------
     coord0a |   0/3 |  coord0a:5432 |   2: 0/50000D8 |    read-only |           secondary |           secondary
@@ -450,7 +450,7 @@ node too:
 
 ::
 
-   $ docker-compose exec app psql -c 'select count(*) from companies;'
+   $ docker compose exec app psql -c 'select count(*) from companies;'
     count
    -------
        75
@@ -462,24 +462,24 @@ To dispose of the entire tutorial environment, just use the following command:
 
 ::
 
-   $ docker-compose down
+   $ docker compose down
 
 Next steps
 ----------
 
 As mentioned in the first section of this tutorial, the way we use
-docker-compose here is not meant to be production ready. It's useful to
+docker compose here is not meant to be production ready. It's useful to
 understand and play with a distributed system such as Citus though, and
 makes it simple to introduce faults and see how the pg_auto_failover High
 Availability reacts to those faults.
 
 One obvious missing element to better test the system is the lack of
-persistent volumes in our docker-compose based test rig. It is possible to
-create external volumes and use them for each node in the docker-compose
+persistent volumes in our docker compose based test rig. It is possible to
+create external volumes and use them for each node in the docker compose
 definition. This allows restarting nodes over the same data set.
 
 See the command :ref:`pg_autoctl_do_tmux_compose_session` for more details
-about how to run a docker-compose test environment with docker-compose,
+about how to run a docker compose test environment with docker compose,
 including external volumes for each node.
 
 Now is a good time to go read `Citus Documentation`__ too, so that you know
