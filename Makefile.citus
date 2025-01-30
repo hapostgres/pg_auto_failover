@@ -1,5 +1,5 @@
 # Default Citus Data version
-CITUSTAG ?= v12.1.0
+CITUSTAG ?= v13.0.0
 
 # Citus testing
 CITUS = 0

@@ -16,7 +16,7 @@ CLUSTER_OPTS = ""
 # XXXX This should be in Makefile.citus only
 # but requires to clean up dockerfile and make targets related to citus first.
 # Default Citus Data version
-CITUSTAG ?= v12.1.0
+CITUSTAG ?= v13.0.0
 
 # TODO should be abs_top_dir ?
 TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
