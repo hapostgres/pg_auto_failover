@@ -154,7 +154,7 @@ nodes. It will help us run and observe PostgreSQL.
         "curl https://install.citusdata.com/community/deb.sh | sudo bash" \
         "sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y postgresql-common" \
         "echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf" \
-        "sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y postgresql-11-auto-failover-1.4" \
+        "sudo DEBIAN_FRONTEND=noninteractive apt-get install -q -y postgresql-16-auto-failover" \
         "sudo usermod -a -G postgres ha-admin" &
   done
   wait
@@ -178,7 +178,7 @@ own roles in the system.
        --auth trust \
        --ssl-self-signed \
        --pgdata monitor \
-       --pgctl /usr/lib/postgresql/11/bin/pg_ctl
+       --pgctl /usr/lib/postgresql/16/bin/pg_ctl
 
 This command initializes a PostgreSQL cluster at the location pointed
 by the ``--pgdata`` option. When ``--pgdata`` is omitted, ``pg_autoctl``
@@ -225,7 +225,7 @@ We’ll create the primary database using the ``pg_autoctl create`` subcommand.
        --username ha-admin \
        --dbname appdb \
        --hostname ha-demo-a.internal.cloudapp.net \
-       --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
+       --pgctl /usr/lib/postgresql/16/bin/pg_ctl \
        --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
 
 Notice the user and database name in the monitor connection string -- these
@@ -274,7 +274,7 @@ Next connect to node B and do the same process. We'll do both steps at once:
        --username ha-admin \
        --dbname appdb \
        --hostname ha-demo-b.internal.cloudapp.net \
-       --pgctl /usr/lib/postgresql/11/bin/pg_ctl \
+       --pgctl /usr/lib/postgresql/16/bin/pg_ctl \
        --monitor 'postgres://autoctl_node@ha-demo-monitor.internal.cloudapp.net/pg_auto_failover?sslmode=require'
 
    ssh -T -l ha-admin `vm_ip b` << CMD

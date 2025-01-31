@@ -1,4 +1,4 @@
-PGVERSION ?= 10
+PGVERSION ?= 14
 
 build:
 	$(MAKE) -C ../../ build-test-pg$(PGVERSION)

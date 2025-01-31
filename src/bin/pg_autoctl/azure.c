@@ -1055,10 +1055,10 @@ azure_build_pg_autoctl(AzureRegionResources *azRegion)
 	pid_t pidArray[MAX_VMS_PER_REGION] = { 0 };
 
 	char *buildCommand =
-		"make PG_CONFIG=/usr/lib/postgresql/11/bin/pg_config "
+		"make PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config "
 		"-C pg_auto_failover -s clean all "
 		" && "
-		"sudo make PG_CONFIG=/usr/lib/postgresql/11/bin/pg_config "
+		"sudo make PG_CONFIG=/usr/lib/postgresql/16/bin/pg_config "
 		"BINDIR=/usr/local/bin -C pg_auto_failover install";
 
 	log_info("Building pg_auto_failover from sources on %d Azure VMs",
@@ -1206,7 +1206,7 @@ azure_prepare_debian_install_command(char *command, size_t size)
  * azure_prepare_debian_install_postgres_command prepares the debian command to
  * install our target Postgres version when building from sources.
  *
- *   sudo apt-get build-dep -q -y postgresql-11
+ *   sudo apt-get build-dep -q -y postgresql-16
  */
 static bool
 azure_prepare_debian_install_postgres_command(char *command, size_t size)
@@ -1239,7 +1239,7 @@ azure_prepare_debian_install_postgres_command(char *command, size_t size)
  * git repository.
  *
  *   sudo apt-get install -q -y \
- *      postgresql-server-dev-all libkrb5-dev postgresql-11 rsync
+ *      postgresql-server-dev-all libkrb5-dev postgresql-16 rsync
  */
 static bool
 azure_prepare_debian_build_dep_postgres_command(char *command, size_t size)

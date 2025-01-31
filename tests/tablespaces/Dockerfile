@@ -1,4 +1,4 @@
-ARG PGVERSION=10
+ARG PGVERSION=14
 
 FROM pg_auto_failover_test:pg${PGVERSION} as test
 

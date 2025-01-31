@@ -1,5 +1,5 @@
 #
-# Using --build-arg PGVERSION=11 we can build pg_auto_failover for any
+# Using --build-arg PGVERSION=14 we can build pg_auto_failover for any
 # target version of Postgres. In the Makefile, we use that to our advantage
 # and tag test images such as pg_auto_failover_test:pg14.
 #
