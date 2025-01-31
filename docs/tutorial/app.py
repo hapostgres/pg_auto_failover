@@ -2,7 +2,7 @@
 
 #
 # Write a Python application that knows how to exit gracefully when
-# receiving SIGTERM (at docker-compose down time), but doesn't know how to
+# receiving SIGTERM (at docker compose down time), but doesn't know how to
 # do much else.
 #
 

@@ -1,6 +1,6 @@
 # Testing monitor upgrades
 
-This directory contains some docker-compose based tooling to manually test
+This directory contains some docker compose based tooling to manually test
 monitor upgrades. The tooling is built around the idea that we want to test
 what happens at upgrade from the code in the local branch.
 
@@ -10,7 +10,7 @@ not the main use-case here.
 
 A typical manual session looks like the following. First, let us prepare a
 tmux environment with two panes. The top pane will show the logs from all
-the nodes running within the docker-compose orchestration:
+the nodes running within the docker compose orchestration:
 
 ```bash
 $ tmux

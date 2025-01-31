@@ -105,7 +105,7 @@ The main documentation for pg_auto_failover includes the following 3 tutorial:
 
   - The main [pg_auto_failover
     Tutorial](https://pg-auto-failover.readthedocs.io/en/main/tutorial.html)
-    uses docker-compose on your local computer to start multiple Postgres
+    uses docker compose on your local computer to start multiple Postgres
     nodes and implement your first failover.
 
   - The complete [pg_auto_failover Azure VM
@@ -117,7 +117,7 @@ The main documentation for pg_auto_failover includes the following 3 tutorial:
 
   - The [Citus Cluster Quick
     Start](https://pg-auto-failover.readthedocs.io/en/main/citus-quickstart.html)
-    tutorial uses docker-compose to create a full Citus cluster and guide
+    tutorial uses docker compose to create a full Citus cluster and guide
     you to a worker failover and then a coordinator failover.
 
 ## Reporting Security Issues
