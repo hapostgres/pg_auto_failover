@@ -6,8 +6,8 @@ Installing pg_auto_failover
 We provide native system packages for pg_auto_failover on most popular Linux
 distributions.
 
-Use the steps below to install pg_auto_failover on PostgreSQL 16. At the
-current time pg_auto_failover is compatible with PostgreSQL 13 to 16.
+Use the steps below to install pg_auto_failover on PostgreSQL 17. At the
+current time pg_auto_failover is compatible with PostgreSQL 13 and newer.
 
 Ubuntu or Debian
 ----------------
@@ -20,13 +20,13 @@ Binary packages for debian and derivatives (ubuntu) are available from
 documentation and then::
 
   $ sudo apt-get install pg-auto-failover-cli
-  $ sudo apt-get install postgresql-16-auto-failover
+  $ sudo apt-get install postgresql-17-auto-failover
 
 __ https://wiki.postgresql.org/wiki/Apt
 
 The Postgres extension named "pgautofailover" is only necessary on the
 monitor node. To install that extension, you can install the
-``postgresql-16-auto-failover`` package when using Postgres 16. It's
+``postgresql-17-auto-failover`` package when using Postgres 17. It's
 available for other Postgres versions too.
 
 Avoiding the default Postgres service
@@ -42,12 +42,12 @@ debian package, follow those steps:
 ::
 
   $ curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-  $ echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+  $ echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 
   # bypass initdb of a "main" cluster
   $ echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
   $ apt-get update
-  $ apt-get install -y --no-install-recommends postgresql-14
+  $ apt-get install -y --no-install-recommends postgresql-17
 
 That way when it's time to :ref:`pg_autoctl_create_monitor` or
 :ref:`pg_autoctl_create_postgres` there is no confusion about how to handle
@@ -91,7 +91,7 @@ Here's a sample output from the command:
    WorkingDirectory = /var/lib/postgresql
    Environment = 'PGDATA=/var/lib/postgresql/monitor'
    User = postgres
-   ExecStart = /usr/lib/postgresql/10/bin/pg_autoctl run
+   ExecStart = /usr/lib/postgresql/17/bin/pg_autoctl run
    Restart = always
    StartLimitBurst = 0
 
@@ -128,7 +128,7 @@ pg_auto_failover uses the same build dependencies:
 
 ::
 
-   $ sudo apt-get build-dep -y --no-install-recommends postgresql-14
+   $ sudo apt-get build-dep -y --no-install-recommends postgresql-17
 
 Then build pg_auto_failover from sources with the following instructions:
 

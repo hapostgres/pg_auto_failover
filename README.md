@@ -67,14 +67,14 @@ install by following the linked documentation and then::
 
 ```bash
 $ sudo apt-get install pg-auto-failover-cli
-$ sudo apt-get install postgresql-16-auto-failover
+$ sudo apt-get install postgresql-17-auto-failover
 ```
 
 When using debian, two packages are provided for pg_auto_failover: the
 monitor Postgres extension is packaged separately and depends on the
 Postgres version you want to run for the monitor itself. The monitor's
-extension package is named `postgresql-16-auto-failover` when targeting
-Postgres 16.
+extension package is named `postgresql-17-auto-failover` when targeting
+Postgres 17.
 
 Then another package is prepared that contains the `pg_autoctl` command, and
 the name of the package is `pg-auto-failover-cli`. That's the package that
@@ -90,7 +90,7 @@ $ echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/a
 # bypass initdb of a "main" cluster
 $ echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
 $ apt-get update
-$ apt-get install -y --no-install-recommends postgresql-16
+$ apt-get install -y --no-install-recommends postgresql-17
 ```
 
 ### Other installation methods
