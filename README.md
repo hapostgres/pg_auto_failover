@@ -4,7 +4,7 @@
 
 pg_auto_failover is an extension and service for PostgreSQL that monitors
 and manages automated failover for a Postgres cluster. It is optimized for
-simplicity and correctness and supports Postgres 10 and newer.
+simplicity and correctness and supports Postgres 13 and newer.
 
 pg_auto_failover supports several Postgres architectures and implements a
 safe automated failover for your Postgres service. It is possible to get
@@ -67,7 +67,7 @@ install by following the linked documentation and then::
 
 ```bash
 $ sudo apt-get install pg-auto-failover-cli
-$ sudo apt-get install postgresql-14-auto-failover
+$ sudo apt-get install postgresql-16-auto-failover
 ```
 
 When using debian, two packages are provided for pg_auto_failover: the

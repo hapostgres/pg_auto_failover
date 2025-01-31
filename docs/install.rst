@@ -6,9 +6,8 @@ Installing pg_auto_failover
 We provide native system packages for pg_auto_failover on most popular Linux
 distributions.
 
-Use the steps below to install pg_auto_failover on PostgreSQL 11. At the
-current time pg_auto_failover is compatible with both PostgreSQL 10 and
-PostgreSQL 11.
+Use the steps below to install pg_auto_failover on PostgreSQL 16. At the
+current time pg_auto_failover is compatible with PostgreSQL 13 to 16.
 
 Ubuntu or Debian
 ----------------
@@ -21,13 +20,13 @@ Binary packages for debian and derivatives (ubuntu) are available from
 documentation and then::
 
   $ sudo apt-get install pg-auto-failover-cli
-  $ sudo apt-get install postgresql-14-auto-failover
+  $ sudo apt-get install postgresql-16-auto-failover
 
 __ https://wiki.postgresql.org/wiki/Apt
 
 The Postgres extension named "pgautofailover" is only necessary on the
 monitor node. To install that extension, you can install the
-``postgresql-14-auto-failover`` package when using Postgres 14. It's
+``postgresql-16-auto-failover`` package when using Postgres 16. It's
 available for other Postgres versions too.
 
 Avoiding the default Postgres service

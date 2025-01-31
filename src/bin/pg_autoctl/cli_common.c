@@ -1524,7 +1524,7 @@ keeper_cli_print_version(int argc, char **argv)
 				"pg_autoctl extension version %s\n",
 				PG_AUTOCTL_EXTENSION_VERSION);
 		fformat(stdout, "compiled with %s\n", PG_VERSION_STR);
-		fformat(stdout, "compatible with Postgres 11, 12, 13, 14, 15, and 16\n");
+		fformat(stdout, "compatible with Postgres 13, 14, 15, and 16\n");
 	}
 
 	exit(0);
