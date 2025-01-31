@@ -288,10 +288,6 @@ build: $(BUILD_TARGETS) ;
 build-demo:
 	docker build $(BUILD_ARGS_pg$(PGVERSION)) -t citusdata/pg_auto_failover:demo .
 
-.PHONY: build-i386
-build-i386: Dockerfile.i386
-	docker build -t i386:latest -f Dockerfile.i386 .
-
 .PHONY: build-image
 build-image:
 	docker build --target build -t $(BUILD_CONTAINER_NAME) .
@@ -340,17 +336,6 @@ run-test: build-test-pg$(PGVERSION)
 		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
 		make -C /usr/src/pg_auto_failover test	\
 		PGVERSION=$(PGVERSION) TEST='${TEST}'
-
-# expected to be run from within the i386 docker container
-.PHONY: installcheck-i386
-installcheck-i386:
-	pg_autoctl run &
-	pg_autoctl do pgsetup wait
-	$(MAKE) -C src/monitor installcheck
-
-.PHONY: run-installcheck-i386
-run-installcheck-i386: build-i386
-	docker run --platform linux/386 --rm -it --privileged i386 make installcheck-i386
 
 #
 # BE INTERACTIVE
