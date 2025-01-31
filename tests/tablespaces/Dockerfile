@@ -1,6 +1,6 @@
 ARG PGVERSION=14
 
-FROM pg_auto_failover_test:pg${PGVERSION} as test
+FROM pg_auto_failover_test:pg${PGVERSION} AS test
 
 USER root
 RUN mkdir -p /extra_volumes/extended_a && chown -R docker /extra_volumes/extended_a
