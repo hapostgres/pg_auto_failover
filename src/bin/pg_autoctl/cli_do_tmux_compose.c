@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_autoctl/cli_do_tmux_compose.c
  *     Implementation of a CLI which lets you run operations on a local
- *     docker-compose environment with multiple Postgres nodes.
+ *     docker compose environment with multiple Postgres nodes.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -42,7 +42,7 @@
 
 char *tmux_compose_banner[] = {
 	"# to quit tmux: type either `Ctrl+b d` or `tmux detach`",
-	"# to test failover: docker-compose exec monitor pg_autoctl perform failover",
+	"# to test failover: docker compose exec monitor pg_autoctl perform failover",
 	NULL
 };
 
@@ -72,18 +72,18 @@ prepare_tmux_compose_script(TmuxOptions *options, PQExpBuffer script)
 	/* change to the user given options->root directory */
 	tmux_add_send_keys_command(script, "cd \"%s\"", options->root);
 
-	/* docker-compose */
-	tmux_add_send_keys_command(script, "docker-compose up -d");
-	tmux_add_send_keys_command(script, "docker-compose logs -f");
+	/* docker compose */
+	tmux_add_send_keys_command(script, "docker compose up -d");
+	tmux_add_send_keys_command(script, "docker compose logs -f");
 
 	/* add a window for pg_autoctl show state */
 	tmux_add_command(script, "split-window -v");
 	tmux_add_command(script, "select-layout even-vertical");
 
-	/* wait for the docker volumes to be initialized in docker-compose up -d */
+	/* wait for the docker volumes to be initialized in docker compose up -d */
 	tmux_add_send_keys_command(script, "sleep 5");
 	tmux_add_send_keys_command(script,
-							   "docker-compose exec monitor "
+							   "docker compose exec monitor "
 							   "pg_autoctl watch");
 
 	/* add a window for interactive pg_autoctl commands */
@@ -96,7 +96,7 @@ prepare_tmux_compose_script(TmuxOptions *options, PQExpBuffer script)
 		tmux_add_send_keys_command(script, "sleep 10");
 		tmux_add_send_keys_command(
 			script,
-			"docker-compose exec monitor "
+			"docker compose exec monitor "
 			"pg_autoctl set formation number-sync-standbys %d",
 			options->numSync);
 	}
@@ -133,7 +133,7 @@ prepare_tmux_compose_script(TmuxOptions *options, PQExpBuffer script)
 
 
 /*
- * tmux_compose_add_monitor adds a docker-compose service for the monitor node.
+ * tmux_compose_add_monitor adds a docker compose service for the monitor node.
  */
 static void
 tmux_compose_add_monitor(PQExpBuffer script)
@@ -162,7 +162,7 @@ tmux_compose_add_monitor(PQExpBuffer script)
 
 
 /*
- * tmux_compose_add_monitor adds a docker-compose service for the given
+ * tmux_compose_add_monitor adds a docker compose service for the given
  * Postgres node.
  */
 static void
@@ -233,7 +233,7 @@ tmux_compose_add_node(PQExpBuffer script,
 
 
 /*
- * tmux_compose_add_volume adds a docker-compose volume for the given node
+ * tmux_compose_add_volume adds a docker compose volume for the given node
  * name.
  */
 static void
@@ -246,8 +246,8 @@ tmux_compose_add_volume(PQExpBuffer script, const char *name)
 
 
 /*
- * prepare_tmux_compose_config prepares a docker-compose configuration for a
- * docker-compose session with the given nodes specifications.
+ * prepare_tmux_compose_config prepares a docker compose configuration for a
+ * docker compose session with the given nodes specifications.
  */
 static void
 prepare_tmux_compose_config(TmuxOptions *options, PQExpBuffer script)
@@ -335,7 +335,7 @@ log_program_output(const char *prefix, Program *program)
 
 
 /*
- * tmux_compose_docker_build calls `docker-compose build`.
+ * tmux_compose_docker_build calls `docker compose build`.
  */
 static void
 tmux_compose_docker_build(TmuxOptions *options)
@@ -346,13 +346,13 @@ tmux_compose_docker_build(TmuxOptions *options)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	log_info("docker-compose build");
+	log_info("docker compose build");
 
 	char dockerCompose[MAXPGPATH] = { 0 };
 
-	if (!search_path_first("docker-compose", dockerCompose, LOG_ERROR))
+	if (!search_path_first("docker", dockerCompose, LOG_ERROR))
 	{
-		log_fatal("Failed to find program docker-compose in PATH");
+		log_fatal("Failed to find program docker compose in PATH");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
@@ -416,7 +416,7 @@ tmux_compose_docker_build(TmuxOptions *options)
 
 	if (returnCode != 0)
 	{
-		log_fatal("Failed to run docker-compose build");
+		log_fatal("Failed to run docker compose build");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
@@ -424,7 +424,7 @@ tmux_compose_docker_build(TmuxOptions *options)
 
 /*
  * tmux_compose_create_volume calls `docker volume create` for a given volume
- * that is going to be referenced in the docker-compose file.
+ * that is going to be referenced in the docker compose file.
  */
 static void
 tmux_compose_create_volume(const char *docker, const char *nodeName)
@@ -456,7 +456,7 @@ tmux_compose_create_volume(const char *docker, const char *nodeName)
 
 /*
  * tmux_compose_create_volumes calls `docker volume create` for each volume
- * that is going to be referenced in the docker-compose file.
+ * that is going to be referenced in the docker compose file.
  */
 static void
 tmux_compose_create_volumes(TmuxOptions *options)
@@ -482,7 +482,7 @@ tmux_compose_create_volumes(TmuxOptions *options)
 
 /*
  * tmux_compose_rm_volume calls `docker volume rm` for a given volume that has
- * been referenced in the docker-compose file.
+ * been referenced in the docker compose file.
  */
 static void
 tmux_compose_rm_volume(const char *docker, const char *nodeName)
@@ -513,7 +513,7 @@ tmux_compose_rm_volume(const char *docker, const char *nodeName)
 
 
 /*
- * tmux_compose_down runs `docker-compose down` and then removes the external
+ * tmux_compose_down runs `docker compose down` and then removes the external
  * docker compose volumes that have been created for this run.
  */
 static bool
@@ -521,14 +521,14 @@ tmux_compose_down(TmuxOptions *options)
 {
 	char dockerCompose[MAXPGPATH] = { 0 };
 
-	if (!search_path_first("docker-compose", dockerCompose, LOG_ERROR))
+	if (!search_path_first("docker", dockerCompose, LOG_ERROR))
 	{
-		log_fatal("Failed to find program docker-compose in PATH");
+		log_fatal("Failed to find program docker compose in PATH");
 		return false;
 	}
 
-	/* first docker-compose down */
-	log_info("docker-compose down");
+	/* first docker compose down */
+	log_info("docker compose down");
 
 	Program program =
 		run_program(dockerCompose, "down",
@@ -541,9 +541,9 @@ tmux_compose_down(TmuxOptions *options)
 		(void) snprintf_program_command_line(&program, command, BUFSIZE);
 
 		log_error("%s [%d]", command, program.returnCode);
-		log_program_output("docker-compose down", &program);
+		log_program_output("docker compose down", &program);
 
-		log_fatal("Failed to run docker-compose down");
+		log_fatal("Failed to run docker compose down");
 		free_program(&program);
 
 		return false;
@@ -574,7 +574,7 @@ tmux_compose_down(TmuxOptions *options)
 
 
 /*
- * keeper_cli_tmux_compose_config generates a docker-compose configuration to
+ * keeper_cli_tmux_compose_config generates a docker compose configuration to
  * run a test case or a demo for pg_auto_failover easily, based on using
  * docker-compose.
  */
@@ -612,7 +612,7 @@ cli_do_tmux_compose_config(int argc, char **argv)
 
 /*
  * keeper_cli_tmux_compose_script generates a tmux script to run a test case or
- * a demo for pg_auto_failover easily, based on using docker-compose.
+ * a demo for pg_auto_failover easily, based on using docker compose.
  */
 void
 cli_do_tmux_compose_script(int argc, char **argv)
@@ -674,7 +674,7 @@ cli_do_tmux_compose_session(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	/* prepare the tmux script and docker-compose config */
+	/* prepare the tmux script and docker compose config */
 	(void) prepare_tmux_compose_script(&options, script);
 	(void) prepare_tmux_compose_config(&options, config);
 
@@ -694,11 +694,11 @@ cli_do_tmux_compose_session(int argc, char **argv)
 	sformat(configPathname, sizeof(configPathname),
 			"%s/docker-compose.yml", options.root);
 
-	log_info("Writing docker-compose configuration at \"%s\"", configPathname);
+	log_info("Writing docker compose configuration at \"%s\"", configPathname);
 
 	if (!write_file(config->data, config->len, configPathname))
 	{
-		log_fatal("Failed to write docker-compose config at \"%s\"",
+		log_fatal("Failed to write docker compose config at \"%s\"",
 				  configPathname);
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
@@ -723,7 +723,7 @@ cli_do_tmux_compose_session(int argc, char **argv)
 
 	/*
 	 * Before starting a tmux session, we have to:
-	 *  1. docker-compose build
+	 *  1. docker compose build
 	 *  2. create all the volumes
 	 */
 	(void) tmux_compose_docker_build(&options);

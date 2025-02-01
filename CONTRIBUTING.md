@@ -89,7 +89,7 @@ tablespaces live in the same location across replicas. This necessitates
 matching directory structures across the nodes, and thus, multiple,
 simultaneously running containers.
 
-Interaction with each node is done using `docker-compose` commands. Refer to
+Interaction with each node is done using `docker compose` commands. Refer to
 the [Makefile](tests/tablespaces/Makefile) in the test directory for examples.
 
 To run the tests from the top-level directory:

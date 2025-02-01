@@ -4,7 +4,7 @@
 
 pg_auto_failover is an extension and service for PostgreSQL that monitors
 and manages automated failover for a Postgres cluster. It is optimized for
-simplicity and correctness and supports Postgres 10 and newer.
+simplicity and correctness and supports Postgres 13 to 17.
 
 pg_auto_failover supports several Postgres architectures and implements a
 safe automated failover for your Postgres service. It is possible to get
@@ -67,14 +67,14 @@ install by following the linked documentation and then::
 
 ```bash
 $ sudo apt-get install pg-auto-failover-cli
-$ sudo apt-get install postgresql-14-auto-failover
+$ sudo apt-get install postgresql-17-auto-failover
 ```
 
 When using debian, two packages are provided for pg_auto_failover: the
 monitor Postgres extension is packaged separately and depends on the
 Postgres version you want to run for the monitor itself. The monitor's
-extension package is named `postgresql-14-auto-failover` when targeting
-Postgres 14.
+extension package is named `postgresql-17-auto-failover` when targeting
+Postgres 17.
 
 Then another package is prepared that contains the `pg_autoctl` command, and
 the name of the package is `pg-auto-failover-cli`. That's the package that
@@ -85,12 +85,12 @@ follow these steps before installing the previous packages.
 
 ```bash
 $ curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-$ echo "deb http://apt.postgresql.org/pub/repos/apt buster-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+$ echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 $ echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
 $ apt-get update
-$ apt-get install -y --no-install-recommends postgresql-14
+$ apt-get install -y --no-install-recommends postgresql-17
 ```
 
 ### Other installation methods
@@ -105,7 +105,7 @@ The main documentation for pg_auto_failover includes the following 3 tutorial:
 
   - The main [pg_auto_failover
     Tutorial](https://pg-auto-failover.readthedocs.io/en/main/tutorial.html)
-    uses docker-compose on your local computer to start multiple Postgres
+    uses docker compose on your local computer to start multiple Postgres
     nodes and implement your first failover.
 
   - The complete [pg_auto_failover Azure VM
@@ -117,7 +117,7 @@ The main documentation for pg_auto_failover includes the following 3 tutorial:
 
   - The [Citus Cluster Quick
     Start](https://pg-auto-failover.readthedocs.io/en/main/citus-quickstart.html)
-    tutorial uses docker-compose to create a full Citus cluster and guide
+    tutorial uses docker compose to create a full Citus cluster and guide
     you to a worker failover and then a coordinator failover.
 
 ## Reporting Security Issues

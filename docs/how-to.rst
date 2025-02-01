@@ -20,7 +20,7 @@ To understand which replication settings to use in your case, see
 To follow a step by step guide that you can reproduce on your own Azure
 subscription and create a production Postgres setup from VMs, see the
 :ref:`azure_tutorial` section. To get started with a local setup using
-docker-compose to run multiple Postgres nodes, see the :ref:`tutorial`
+docker compose to run multiple Postgres nodes, see the :ref:`tutorial`
 section.
 
 To understand how to setup pg_auto_failover in a way that is compliant with

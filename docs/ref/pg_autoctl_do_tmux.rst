@@ -11,7 +11,7 @@ Synopsis
 pg_autoctl do tmux provides the following commands::
 
   pg_autoctl do tmux
-  + compose  Set of facilities to handle docker-compose sessions
+  + compose  Set of facilities to handle docker compose sessions
     script   Produce a tmux script for a demo or a test case (debug only)
     session  Run a tmux session for a demo or a test case
     stop     Stop pg_autoctl processes that belong to a tmux session
@@ -19,7 +19,7 @@ pg_autoctl do tmux provides the following commands::
     clean    Clean-up a tmux session processes and root dir
 
   pg_autoctl do tmux compose
-    config   Produce a docker-compose configuration file for a demo
+    config   Produce a docker compose configuration file for a demo
     script   Produce a tmux script for a demo or a test case (debug only)
     session  Run a tmux session for a demo or a test case
 
@@ -57,13 +57,13 @@ are the following::
   $ pg_autoctl get formation settings
   $ pg_autoctl perform failover
 
-Using docker-compose to run a distributed system
+Using docker compose to run a distributed system
 ------------------------------------------------
 
-The same idea can also be implemented with docker-compose to run the nodes,
+The same idea can also be implemented with docker compose to run the nodes,
 and still using tmux to have three control panels this time:
 
- - one pane for the docker-compose cumulative logs of all the nodes
+ - one pane for the docker compose cumulative logs of all the nodes
  - one pane for running ``pg_autoctl watch``
  - one extra pane for an interactive shell.
 
@@ -83,7 +83,7 @@ For this setup, you can use the following command::
 
 The ``pg_autoctl do tmux compose session`` command also takes care of
 creating external docker volumes and referencing them for each node in the
-docker-compose file.
+docker compose file.
 
 .. _pg_autoctl_do_tmux_session:
 
@@ -116,7 +116,7 @@ pg_autoctl do tmux compose session
 ----------------------------------
 
 This command runs a tmux session for a demo or a test case. It generates a
-docker-compose file and then uses docker-compose to drive many nodes.
+docker compose file and then uses docker compose to drive many nodes.
 
 ::
 
