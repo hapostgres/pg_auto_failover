@@ -10,7 +10,7 @@ ARG PGVERSION=14
 #
 # This base image contains all our target Postgres versions.
 #
-FROM debian:bullseye-slim as base
+FROM debian:bullseye-slim AS base
 
 ARG PGVERSION
 
@@ -81,12 +81,12 @@ RUN adduser docker sudo
 RUN adduser docker postgres
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-FROM base as citus
+FROM base AS citus
 
 ARG PGVERSION
 ARG CITUSTAG=v11.1.2
 
-ENV PG_CONFIG /usr/lib/postgresql/${PGVERSION}/bin/pg_config
+ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 
 RUN git clone -b ${CITUSTAG} --depth 1 https://github.com/citusdata/citus.git /usr/src/citus
 WORKDIR /usr/src/citus
@@ -99,11 +99,11 @@ RUN make -s clean && make -s -j8 install
 # pg_auto_failover for a given --build-arg PGVERSION target version of
 # Postgres.
 #
-FROM citus as build
+FROM citus AS build
 
 ARG PGVERSION
 
-ENV PG_CONFIG /usr/lib/postgresql/${PGVERSION}/bin/pg_config
+ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 
 WORKDIR /usr/src/pg_auto_failover
 
@@ -119,7 +119,7 @@ RUN make -s clean && make -s install -j8
 # Given the build image above, we can now run our test suite targetting a
 # given version of Postgres.
 #
-FROM build as test
+FROM build AS test
 
 ARG PGVERSION
 
@@ -136,7 +136,7 @@ ENV PATH /usr/lib/postgresql/${PGVERSION}/bin:/usr/local/sbin:/usr/local/bin:/us
 #
 # And finally our "run" images with the bare minimum for run-time.
 #
-FROM debian:bullseye-slim as run
+FROM debian:bullseye-slim AS run
 
 ARG PGVERSION
 
@@ -192,8 +192,8 @@ RUN mkdir -p /var/lib/postgres \
  && chown -R docker /var/lib/postgres
 
 USER docker
-ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/${PGVERSION}/bin
-ENV PG_AUTOCTL_DEBUG 1
-ENV PGDATA /var/lib/postgres/pgaf
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/${PGVERSION}/bin
+ENV PG_AUTOCTL_DEBUG=1
+ENV PGDATA=/var/lib/postgres/pgaf
 
-CMD pg_autoctl do tmux session --nodes 3 --binpath /usr/local/bin/pg_autoctl
+CMD ["pg_autoctl", "do tmux session --nodes 3 --binpath /usr/local/bin/pg_autoctl"]
