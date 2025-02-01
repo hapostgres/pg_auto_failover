@@ -22,6 +22,7 @@ jobs:
           - 14
           - 15
           - 16
+          - 17
         TEST:
           - multi
           - single
@@ -51,7 +52,7 @@ jobs:
           pip3 install --user black
           black --version
           gcc --version
-          git clone -b v0.8.19 --depth 1 https://github.com/citusdata/tools.git ../tools
+          git clone -b v0.8.31 --depth 1 https://github.com/citusdata/tools.git ../tools
           sudo make -C ../tools install
           install_uncrustify
           rm -rf uncrustify*

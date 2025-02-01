@@ -1569,12 +1569,12 @@ pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 	log_info("Initialising a PostgreSQL cluster at \"%s\"", pgdata);
 	log_info("%s initdb -s -D %s --option '--auth=trust'", pg_ctl, pgdata);
 
-	Program program = run_program(pg_ctl, "initdb",
+	Program program = run_program(pg_ctl,
 								  "--silent",
 								  "--pgdata", pgdata,
 
 	                              /* avoid warning message */
-								  "--option", "'--auth=trust'",
+								  "--option", "'--auth=trust'", "initdb",
 								  NULL);
 
 	bool success = program.returnCode == 0;
@@ -1944,8 +1944,8 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 	Program program = run_program(pg_ctl,
 								  "--pgdata", pgdata,
 								  "--wait",
-								  "stop",
 								  "--mode", "fast",
+								  "stop",
 								  NULL);
 
 	/*
@@ -2009,7 +2009,7 @@ pg_ctl_stop(const char *pg_ctl, const char *pgdata)
 int
 pg_ctl_status(const char *pg_ctl, const char *pgdata, bool log_output)
 {
-	Program program = run_program(pg_ctl, "status", "-D", pgdata, NULL);
+	Program program = run_program(pg_ctl, "-D", pgdata, "status", NULL);
 	int returnCode = program.returnCode;
 
 	log_level(log_output ? LOG_INFO : LOG_DEBUG,
@@ -2032,7 +2032,7 @@ bool
 pg_ctl_promote(const char *pg_ctl, const char *pgdata)
 {
 	Program program =
-		run_program(pg_ctl, "promote", "-D", pgdata, "--no-wait", NULL);
+		run_program(pg_ctl, "-D", pgdata, "--no-wait", "promote", NULL);
 	int returnCode = program.returnCode;
 
 	log_debug("%s promote -D %s --no-wait", pg_ctl, pgdata);
