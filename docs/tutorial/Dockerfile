@@ -1,7 +1,7 @@
 FROM debian:bookworm-slim
 
-ARG PGVERSION=14
-ARG CITUS=postgresql-14-citus-11.1
+ARG PGVERSION=17
+ARG CITUS=postgresql-17-citus-13.0
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
