@@ -3,7 +3,7 @@
 # target version of Postgres. In the Makefile, we use that to our advantage
 # and tag test images such as pg_auto_failover_test:pg14.
 #
-ARG PGVERSION=14
+ARG PGVERSION=16
 
 #
 # Define a base image with all our build dependencies.
@@ -84,7 +84,7 @@ RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 FROM base AS citus
 
 ARG PGVERSION
-ARG CITUSTAG=v11.1.2
+ARG CITUSTAG=v12.1.0
 
 ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 
