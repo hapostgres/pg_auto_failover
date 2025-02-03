@@ -44,12 +44,10 @@ RUN apt-get update \
     make \
     autoconf \
     openssl \
-    pipenv \
     python3-nose \
     python3 \
     python3-setuptools \
     python3-psycopg2 \
-    python3-pip \
     python3-pyroute2 \
     sudo \
     tmux \
