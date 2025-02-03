@@ -1,16 +1,16 @@
 #
-# Using --build-arg PGVERSION=14 we can build pg_auto_failover for any
+# Using --build-arg PGVERSION=17 we can build pg_auto_failover for any
 # target version of Postgres. In the Makefile, we use that to our advantage
 # and tag test images such as pg_auto_failover_test:pg14.
 #
-ARG PGVERSION=14
+ARG PGVERSION=17
 
 #
 # Define a base image with all our build dependencies.
 #
 # This base image contains all our target Postgres versions.
 #
-FROM debian:bullseye-slim AS base
+FROM debian:bookworm-slim AS base
 
 ARG PGVERSION
 
@@ -44,12 +44,11 @@ RUN apt-get update \
 	make \
 	autoconf \
     openssl \
-    pipenv \
     python3-nose \
     python3 \
 	python3-setuptools \
 	python3-psycopg2 \
-    python3-pip \
+    python3-pyroute2 \
 	sudo \
     tmux \
     watch \
@@ -63,8 +62,8 @@ RUN apt-get update \
     postgresql-common \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+RUN echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
@@ -74,8 +73,6 @@ RUN apt-get update \
      postgresql-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install pyroute2>=0.5.17
-
 RUN adduser --disabled-password --gecos '' docker
 RUN adduser docker sudo
 RUN adduser docker postgres
@@ -84,7 +81,7 @@ RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 FROM base AS citus
 
 ARG PGVERSION
-ARG CITUSTAG=v11.1.2
+ARG CITUSTAG=v13.0.0
 
 ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 
@@ -136,7 +133,7 @@ ENV PATH /usr/lib/postgresql/${PGVERSION}/bin:/usr/local/sbin:/usr/local/bin:/us
 #
 # And finally our "run" images with the bare minimum for run-time.
 #
-FROM debian:bullseye-slim AS run
+FROM debian:bookworm-slim AS run
 
 ARG PGVERSION
 
@@ -160,8 +157,8 @@ RUN apt-get update \
     libpq-dev \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+RUN echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
