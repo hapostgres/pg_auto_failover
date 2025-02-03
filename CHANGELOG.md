@@ -1,10 +1,27 @@
-### pg_auto_failover v2.1 (November 24, 2022) ###
+### pg_auto_failover v2.2 (February 01, 2025) ###
+
+This release includes support for Postgres major version 17 as well as dependency and documentation updates. It also drops support for outdated Postgres major versions 11 and 12.
+
+### Added
+* Support for Postgres major version 17. (#1061)
+
+### Fixes
+* Switch from docker-compose to the one build into docker (docker compose) (#1065)
+* Update Dockerfile to address warnings (#1039)
+
+### Changed
+* Documentation updated to reference latest Debian and PostgreSQL releases (#1061)
+* Support dropped for outdated Postgres major versions 11 and 12 (#1067)
+* Support dropped for 32-bit architectures (#1066)
+* Citus version updated to v13.0.0 (#1064)
+
+### pg_auto_failover v2.1 (November 24, 2023) ###
 
 This release incorporates support for Postgres major version 16, some bug fixes,
 documentation updates, and usual code maintenance work.
 
 ### Added
-* Support for Postgres major version 16. (#1013, #1006, )
+* Support for Postgres major version 16. (#1013, #1006)
 * Improve on documentation, Docker images, and tutorials. (#964, #954, #947)
 * PGDATABASE as default create node --dbname. (#956)
 * Add chapters to the documentation navigation. (#954)
