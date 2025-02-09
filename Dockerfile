@@ -15,21 +15,31 @@ FROM debian:bookworm-slim AS base
 ARG PGVERSION
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
-	curl \
-	gnupg \
-	git \
-	gawk \
-	flex \
-	bison \
+    curl \
+    postgresql-common
+
+RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+RUN echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+
+# bypass initdb of a "main" cluster
+RUN echo 'create_main_cluster = false' >> /etc/postgresql-common/createcluster.conf
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential \
+    gnupg \
+    git \
+    gawk \
+    flex \
+    bison \
     iproute2 \
-	libcurl4-gnutls-dev \
-	libicu-dev \
-	libncurses-dev \
-	libxml2-dev \
-	zlib1g-dev \
+    libcurl4-gnutls-dev \
+    libicu-dev \
+    libncurses-dev \
+    libxml2-dev \
+    zlib1g-dev \
     libedit-dev \
     libkrb5-dev \
     liblz4-dev \
@@ -41,16 +51,16 @@ RUN apt-get update \
     libxslt1-dev \
     libzstd-dev \
     uuid-dev \
-	make \
-	autoconf \
+    make \
+    autoconf \
     openssl \
     pipenv \
     python3-nose \
     python3 \
-	python3-setuptools \
-	python3-psycopg2 \
+    python3-setuptools \
+    python3-psycopg2 \
     python3-pip \
-	sudo \
+    sudo \
     tmux \
     watch \
     lsof \
@@ -58,21 +68,11 @@ RUN apt-get update \
     psmisc \
     htop \
     less \
-	mg \
+    mg \
     valgrind \
-    postgresql-common \
-	&& rm -rf /var/lib/apt/lists/*
-
-RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
-RUN echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
-
-# bypass initdb of a "main" cluster
-RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
-RUN apt-get update \
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-     postgresql-server-dev-${PGVERSION} \
-     postgresql-${PGVERSION} \
-	&& rm -rf /var/lib/apt/lists/*
+    postgresql-server-dev-${PGVERSION} \
+    postgresql-${PGVERSION} \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --break-system-packages pyroute2>=0.5.17
 
@@ -141,33 +141,33 @@ FROM debian:bookworm-slim AS run
 ARG PGVERSION
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
-	curl \
-	gnupg \
-    make \
-    sudo \
-    tmux \
-	watch \
-    libncurses6 \
-    lsof \
-    psutils \
-    dnsutils \
-    bind9-host \
-	libcurl4-gnutls-dev \
-    libzstd-dev \
-	postgresql-common \
-    libpq-dev \
-	&& rm -rf /var/lib/apt/lists/*
+    curl \
+    postgresql-common
 
 RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
 RUN echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
-RUN apt-get update\
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-${PGVERSION} \
-	&& rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    gnupg \
+    make \
+    sudo \
+    tmux \
+    watch \
+    libncurses6 \
+    lsof \
+    psutils \
+    dnsutils \
+    bind9-host \
+    libcurl4-gnutls-dev \
+    libzstd-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker
 RUN adduser docker sudo
@@ -189,7 +189,7 @@ COPY --from=build /usr/lib/postgresql/${PGVERSION}/bin/pg_autoctl /usr/local/bin
 # pg_autoctl has the necessary set of privileges.
 #
 RUN mkdir -p /var/lib/postgres \
- && chown -R docker /var/lib/postgres
+    && chown -R docker /var/lib/postgres
 
 USER docker
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/${PGVERSION}/bin
