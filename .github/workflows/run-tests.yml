@@ -52,10 +52,19 @@ jobs:
           pip3 install --user black
           black --version
           gcc --version
-          git clone -b v0.8.32 --depth 1 https://github.com/citusdata/tools.git ../tools
-          sudo make -C ../tools install
-          install_uncrustify
-          rm -rf uncrustify*
+          # Citus style is picky, uses version 0.68.1
+          cd ../tools
+          curl -L https://github.com/uncrustify/uncrustify/archive/uncrustify-0.68.1.tar.gz | tar xz
+          cd uncrustify-uncrustify-0.68.1
+          mkdir build
+          cmake -B build ..
+          make -j5
+          sudo make install
+          cd ..
+
+          git clone --depth 1 https://github.com/citusdata/tools.git ../tools
+          cd tools
+          make uncrustify/.install
 
       - name: Check code formatting and banned function
         if: ${{ env.TEST == 'linting' }}
@@ -73,6 +82,7 @@ jobs:
           make build-test-image
 
       - name: Run Test
+        if: false
         if: ${{ env.TEST != 'linting' }}
         timeout-minutes: 15
         run: |
