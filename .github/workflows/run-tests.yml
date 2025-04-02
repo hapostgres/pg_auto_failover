@@ -29,7 +29,6 @@ jobs:
           - monitor
           - ssl
           - citus
-          - linting
         include:
           - PGVERSION: 14
             TEST: tablespaces
