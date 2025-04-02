@@ -10,7 +10,7 @@ UNCRUSTIFY_DIR = uncrustify-uncrustify-0.68.1
 
 CMAKE_OPTS = -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 
-tools: mkdir uncrustify citus-tools ;
+tools: citus-tools ;
 
 mkdir:
 	mkdir tools
@@ -22,6 +22,6 @@ uncrustify: mkdir
 	make -C tools/$(UNCRUSTIFY_DIR)/build -j5
 	sudo make -C tools/$(UNCRUSTIFY_DIR)/build install
 
-citus-tools: mkdir
+citus-tools: uncrustify
 	git clone --depth 1 $(CITUS_TOOLS) tools/tools
 	sudo make -C tools/tools uncrustify/.install
