@@ -83,7 +83,7 @@ jobs:
 
       - name: Run Test
         if: false
-        if: ${{ env.TEST != 'linting' }}
+        # if: ${{ env.TEST != 'linting' }}
         timeout-minutes: 15
         run: |
           make ci-test
