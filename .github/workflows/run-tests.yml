@@ -52,19 +52,8 @@ jobs:
           pip3 install --user black
           black --version
           gcc --version
-          # Citus style is picky, uses version 0.68.1
-          cd ../tools
-          curl -L https://github.com/uncrustify/uncrustify/archive/uncrustify-0.68.1.tar.gz | tar xz
-          cd uncrustify-uncrustify-0.68.1
-          mkdir build
-          cmake -B build ..
-          make -j5
-          sudo make install
-          cd ..
-
-          git clone --depth 1 https://github.com/citusdata/tools.git ../tools
-          cd tools
-          make uncrustify/.install
+          # Install uncrustify the Citus way
+          make -C ci -f tools.mk tools
 
       - name: Check code formatting and banned function
         if: ${{ env.TEST == 'linting' }}
