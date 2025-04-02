@@ -18,17 +18,18 @@ jobs:
       fail-fast: false
       matrix:
         PGVERSION:
-          - 13
+          # - 13
           - 14
-          - 15
-          - 16
-          - 17
+          # - 15
+          # - 16
+          # - 17
         TEST:
-          - multi
-          - single
-          - monitor
-          - ssl
-          - citus
+          # - multi
+          # - single
+          # - monitor
+          # - ssl
+          # - citus
+          - linting
         include:
           - PGVERSION: 14
             TEST: tablespaces
@@ -71,8 +72,7 @@ jobs:
           make build-test-image
 
       - name: Run Test
-        if: false
-        # if: ${{ env.TEST != 'linting' }}
+        if: ${{ env.TEST != 'linting' }}
         timeout-minutes: 15
         run: |
           make ci-test
