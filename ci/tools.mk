@@ -24,4 +24,4 @@ uncrustify: mkdir
 
 citus-tools: mkdir
 	git clone --depth 1 $(CITUS_TOOLS) tools/tools
-	make -C tools/tools uncrustify/.install
+	sudo make -C tools/tools uncrustify/.install
