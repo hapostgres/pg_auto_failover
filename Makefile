@@ -191,7 +191,7 @@ endif
 .PHONY: indent
 indent:
 	citus_indent
-	black .
+	black --exclude=ci/tools .
 
 # make lint; is an alias for make spellcheck
 # make linting; is an alias for make spellcheck
@@ -203,7 +203,7 @@ lint linting: spellcheck ;
 .PHONY: spellcheck
 spellcheck:
 	citus_indent --check
-	black --check .
+	black --exclude=ci/tools --check .
 	ci/banned.h.sh
 
 #
