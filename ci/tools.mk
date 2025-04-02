@@ -8,6 +8,8 @@ CITUS_TOOLS = https://github.com/citusdata/tools.git
 UNCRUSTIFY = https://github.com/uncrustify/uncrustify/archive/uncrustify-0.68.1.tar.gz
 UNCRUSTIFY_DIR = uncrustify-uncrustify-0.68.1
 
+CMAKE_OPTS = -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
 tools: mkdir uncrustify citus-tools ;
 
 mkdir:
@@ -16,7 +18,7 @@ mkdir:
 uncrustify: mkdir
 	curl -L $(UNCRUSTIFY) | tar -C tools -xz
 	mkdir tools/$(UNCRUSTIFY_DIR)/build
-	cmake -B tools/$(UNCRUSTIFY_DIR)/build -S tools/$(UNCRUSTIFY_DIR)
+	cd tools/$(UNCRUSTIFY_DIR)/build && cmake $(CMAKE_OPTS) ..
 	make -C tools/$(UNCRUSTIFY_DIR)/build -j5
 	sudo make -C tools/$(UNCRUSTIFY_DIR)/build install
 
