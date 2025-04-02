@@ -18,17 +18,17 @@ jobs:
       fail-fast: false
       matrix:
         PGVERSION:
-          # - 13
+          - 13
           - 14
-          # - 15
-          # - 16
-          # - 17
+          - 15
+          - 16
+          - 17
         TEST:
-          # - multi
-          # - single
-          # - monitor
-          # - ssl
-          # - citus
+          - multi
+          - single
+          - monitor
+          - ssl
+          - citus
           - linting
         include:
           - PGVERSION: 14
