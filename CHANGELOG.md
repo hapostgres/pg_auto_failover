@@ -1,4 +1,4 @@
-### pg_auto_failover v2.2 (February 01, 2025) ###
+### pg_auto_failover v2.2 (April 3, 2025) ###
 
 This release includes support for Postgres major version 17 as well as dependency and documentation updates. It also drops support for outdated Postgres major versions 11 and 12.
 
@@ -6,7 +6,7 @@ This release includes support for Postgres major version 17 as well as dependenc
 * Support for Postgres major version 17. (#1061)
 
 ### Fixes
-* Switch from docker-compose to the one build into docker (docker compose) (#1065)
+* Switch from docker-compose to the one build into docker (docker compose) (#1065, #1077)
 * Update Dockerfile to address warnings (#1039)
 
 ### Changed
