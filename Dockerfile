@@ -3,7 +3,7 @@
 # target version of Postgres. In the Makefile, we use that to our advantage
 # and tag test images such as pg_auto_failover_test:pg14.
 #
-ARG PGVERSION=14
+ARG PGVERSION=17
 
 #
 # Define a base image with all our build dependencies.
@@ -18,18 +18,18 @@ RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
-	curl \
-	gnupg \
-	git \
-	gawk \
-	flex \
-	bison \
+    curl \
+    gnupg \
+    git \
+    gawk \
+    flex \
+    bison \
     iproute2 \
-	libcurl4-gnutls-dev \
-	libicu-dev \
-	libncurses-dev \
-	libxml2-dev \
-	zlib1g-dev \
+    libcurl4-gnutls-dev \
+    libicu-dev \
+    libncurses-dev \
+    libxml2-dev \
+    zlib1g-dev \
     libedit-dev \
     libkrb5-dev \
     liblz4-dev \
@@ -41,16 +41,16 @@ RUN apt-get update \
     libxslt1-dev \
     libzstd-dev \
     uuid-dev \
-	make \
-	autoconf \
+    make \
+    autoconf \
     openssl \
     pipenv \
     python3-nose \
     python3 \
-	python3-setuptools \
-	python3-psycopg2 \
+    python3-setuptools \
+    python3-psycopg2 \
     python3-pip \
-	sudo \
+    sudo \
     tmux \
     watch \
     lsof \
@@ -58,10 +58,10 @@ RUN apt-get update \
     psmisc \
     htop \
     less \
-	mg \
+    mg \
     valgrind \
     postgresql-common \
-	&& rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
 RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
 RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
@@ -84,7 +84,7 @@ RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 FROM base AS citus
 
 ARG PGVERSION
-ARG CITUSTAG=v11.1.2
+ARG CITUSTAG=v13.0.1
 
 ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 

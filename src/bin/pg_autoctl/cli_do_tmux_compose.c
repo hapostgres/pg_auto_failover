@@ -252,10 +252,6 @@ tmux_compose_add_volume(PQExpBuffer script, const char *name)
 static void
 prepare_tmux_compose_config(TmuxOptions *options, PQExpBuffer script)
 {
-	/* that's optional, but we still fill it as an header of sorts */
-	appendPQExpBuffer(script, "version: \"3.9\"\n");
-	appendPQExpBuffer(script, "\n");
-
 	appendPQExpBuffer(script, "services:\n");
 
 	/* first, the monitor */
@@ -348,16 +344,17 @@ tmux_compose_docker_build(TmuxOptions *options)
 
 	log_info("docker compose build");
 
-	char dockerCompose[MAXPGPATH] = { 0 };
+	char docker[MAXPGPATH] = { 0 };
 
-	if (!search_path_first("docker", dockerCompose, LOG_ERROR))
+	if (!search_path_first("docker", docker, LOG_ERROR))
 	{
-		log_fatal("Failed to find program docker compose in PATH");
+		log_fatal("Failed to find program docker in PATH");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
 	char pgversion[5] = { 0 };
 	char pgversionArg[15] = { 0 };
+	char citustagArg[20] = { 0 };
 
 	if (env_exists("PGVERSION"))
 	{
@@ -373,16 +370,53 @@ tmux_compose_docker_build(TmuxOptions *options)
 		strlcpy(pgversion, "14", sizeof(pgversion));
 	}
 
+	/* prepare Postgres/Citus compatibility matrix */
+	char *pgCitusMatrix[18] = { 0 };
+	pgCitusMatrix[13] = "v10.2.9";
+	pgCitusMatrix[14] = "v12.1.5";
+	pgCitusMatrix[15] = "v12.1.5";
+	pgCitusMatrix[16] = "v13.0.1";
+	pgCitusMatrix[17] = "v13.0.1";
+
+	int pgVersionNum;
+	char *citustag = NULL;
+
+	if (!stringToInt(pgversion, &pgVersionNum))
+	{
+		log_error("Failed to parse PGVERSION \"%s\" into an int", pgversion);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (pgVersionNum > 12 && pgVersionNum < 18)
+	{
+		citustag = pgCitusMatrix[pgVersionNum];
+	}
+	else
+	{
+		log_fatal("Unsupported PGVERSION=%s", pgversion);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	if (citustag == NULL)
+	{
+		log_fatal("Unknown CITUSTAG for PGVERSION=%s", pgversion);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
 	/* prepare our --build-arg PGVERSION=XX */
 	sformat(pgversionArg, sizeof(pgversionArg), "PGVERSION=%s", pgversion);
+	sformat(citustagArg, sizeof(citustagArg), "CITUSTAG=%s", citustag);
 
 	char *args[16];
 	int argsIndex = 0;
 
-	args[argsIndex++] = (char *) dockerCompose;
+	args[argsIndex++] = (char *) docker;
+	args[argsIndex++] = "compose";
 	args[argsIndex++] = "build";
 	args[argsIndex++] = "--build-arg";
 	args[argsIndex++] = (char *) pgversionArg;
+	args[argsIndex++] = "--build-arg";
+	args[argsIndex++] = (char *) citustagArg;
 	args[argsIndex++] = "--quiet";
 	args[argsIndex] = NULL;
 
@@ -519,11 +553,11 @@ tmux_compose_rm_volume(const char *docker, const char *nodeName)
 static bool
 tmux_compose_down(TmuxOptions *options)
 {
-	char dockerCompose[MAXPGPATH] = { 0 };
+	char docker[MAXPGPATH] = { 0 };
 
-	if (!search_path_first("docker", dockerCompose, LOG_ERROR))
+	if (!search_path_first("docker", docker, LOG_ERROR))
 	{
-		log_fatal("Failed to find program docker compose in PATH");
+		log_fatal("Failed to find program docker in PATH");
 		return false;
 	}
 
@@ -531,7 +565,7 @@ tmux_compose_down(TmuxOptions *options)
 	log_info("docker compose down");
 
 	Program program =
-		run_program(dockerCompose, "down",
+		run_program(docker, "compose", "down",
 					"--volumes", "--remove-orphans", NULL);
 
 	if (program.returnCode != 0)
@@ -552,14 +586,6 @@ tmux_compose_down(TmuxOptions *options)
 	/*
 	 * Now remove all the docker volumes
 	 */
-	char docker[MAXPGPATH] = { 0 };
-
-	if (!search_path_first("docker", docker, LOG_ERROR))
-	{
-		log_fatal("Failed to find program docker in PATH");
-		return false;
-	}
-
 	(void) tmux_compose_rm_volume(docker, "monitor");
 
 	for (int i = 0; i < tmuxNodeArray.count; i++)

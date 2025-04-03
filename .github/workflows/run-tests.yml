@@ -52,10 +52,8 @@ jobs:
           pip3 install --user black
           black --version
           gcc --version
-          git clone -b v0.8.31 --depth 1 https://github.com/citusdata/tools.git ../tools
-          sudo make -C ../tools install
-          install_uncrustify
-          rm -rf uncrustify*
+          # Install uncrustify the Citus way
+          make -C ci -f tools.mk tools
 
       - name: Check code formatting and banned function
         if: ${{ env.TEST == 'linting' }}
