@@ -1859,7 +1859,7 @@ pgsetup_sslmode_to_string(SSLMode sslMode)
  * In Postgres 11 and 12, the pg_replication_slot_advance() function has been
  * buggy and prevented WAL recycling on standby nodes.
  *
- * See https://github.com/citusdata/pg_auto_failover/issues/283 for the problem
+ * See https://github.com/hapostgres/pg_auto_failover/issues/283 for the problem
  * and https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=b48df81
  * for the solution.
  *

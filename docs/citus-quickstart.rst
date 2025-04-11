@@ -41,7 +41,7 @@ or run the docker build command directly:
 
 ::
 
-   $ git clone https://github.com/citusdata/pg_auto_failover
+   $ git clone https://github.com/hapostgres/pg_auto_failover
    $ cd pg_auto_failover/docs/cluster
 
    $ docker build -t pg_auto_failover:citus -f Dockerfile ../..

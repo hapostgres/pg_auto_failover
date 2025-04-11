@@ -128,7 +128,7 @@ keeper_update_state(Keeper *keeper, int64_t node_id, int group_id,
 		log_fatal("Current node id does not fit in a 32 bits integer.");
 		log_info("Please report a bug to pg_auto_failover by opening "
 				 "an issue on Github project at "
-				 "https://github.com/citusdata/pg_auto_failover.");
+				 "https://github.com/hapostgres/pg_auto_failover.");
 		return false;
 	}
 
@@ -1071,7 +1071,7 @@ keeper_maintain_replication_slots(Keeper *keeper)
 	 *
 	 * In Postgres 11 and 12, the pg_replication_slot_advance() function has
 	 * been buggy for quite some time and prevented WAL recycling on standby
-	 * servers, see https://github.com/citusdata/pg_auto_failover/issues/283
+	 * servers, see https://github.com/hapostgres/pg_auto_failover/issues/283
 	 * for the problem and
 	 * https://git.postgresql.org/gitweb/?p=postgresql.git;a=commit;h=b48df81
 	 * for the solution.
