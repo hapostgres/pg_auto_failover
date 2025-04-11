@@ -7,7 +7,7 @@ Welcome to pg_auto_failover's documentation!
 ============================================
 
 The pg_auto_failover project is an Open Source Software project. The
-development happens at `https://github.com/citusdata/pg_auto_failover`__ and
+development happens at `https://github.com/hapostgres/pg_auto_failover`__ and
 is public: everyone is welcome to participate by opening issues or pull
 requests, giving feedback, etc.
 
@@ -16,7 +16,7 @@ command, then read the entire available documentation (after all, I took the
 time to write it), and then to address the community in a kind and polite
 way — the same way you would expect people to use when addressing you.
 
-__ https://github.com/citusdata
+__ https://github.com/hapostgres/pg_auto_failover
 
 .. note::
 

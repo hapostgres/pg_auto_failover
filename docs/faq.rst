@@ -5,7 +5,7 @@ Those questions have been asked in `GitHub issues`__ for the project by
 several people. If you have more questions, feel free to open a new issue,
 and your question and its answer might make it to this FAQ.
 
-__ https://github.com/citusdata/pg_auto_failover/issues_
+__ https://github.com/hapostgres/pg_auto_failover/issues
 
 I stopped the primary and no failover is happening for 20s to 30s, why?
 -----------------------------------------------------------------------
