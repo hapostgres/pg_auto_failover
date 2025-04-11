@@ -27,6 +27,7 @@
 #include "pidfile.h"
 #include "service_keeper.h"
 #include "service_postgres_ctl.h"
+#include "service_run_hooks.h"
 #include "signals.h"
 #include "state.h"
 #include "string_utils.h"
@@ -84,6 +85,13 @@ start_keeper(Keeper *keeper)
 			RP_PERMANENT,
 			-1,
 			&service_keeper_start,
+			(void *) keeper
+		},
+		{
+			SERVICE_NAME_RUN_HOOKS,
+			RP_PERMANENT,
+			-1,
+			&service_run_hooks_start,
 			(void *) keeper
 		}
 	};

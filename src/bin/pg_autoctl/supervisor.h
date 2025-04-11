@@ -23,6 +23,7 @@
 #define SERVICE_NAME_POSTGRES "postgres"
 #define SERVICE_NAME_KEEPER "node-active"
 #define SERVICE_NAME_MONITOR "listener"
+#define SERVICE_NAME_RUN_HOOKS "hooks"
 
 /*
  * At pg_autoctl create time we use a transient service to initialize our local
