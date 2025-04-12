@@ -1,4 +1,4 @@
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -18,7 +18,7 @@ RUN apt-get update \
 	poppler-utils \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install sphinx_rtd_theme
+RUN pip3 install --break-system-packages sphinx_rtd_theme
 
 WORKDIR /usr/src/pg_auto_failover
 
