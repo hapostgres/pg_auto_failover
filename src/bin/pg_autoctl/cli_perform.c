@@ -108,7 +108,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
+	while ((c = getopt_long(argc, argv, "+D:f:g:n:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -342,16 +342,6 @@ cli_perform_promotion_getopts(int argc, char **argv)
 		PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
 	optind = 0;
-
-	/*
-	 * The only command lines that are using keeper_cli_getopt_pgdata are
-	 * terminal ones: they don't accept subcommands. In that case our option
-	 * parsing can happen in any order and we don't need getopt_long to behave
-	 * in a POSIXLY_CORRECT way.
-	 *
-	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
-	 */
-	unsetenv("POSIXLY_CORRECT");
 
 	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
 							long_options, &option_index)) != -1)

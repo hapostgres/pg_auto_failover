@@ -98,20 +98,6 @@ main(int argc, char **argv)
 	}
 
 	/*
-	 * We need to follow POSIX specifications for argument parsing, in
-	 * particular we want getopt() to stop as soon as it reaches a non option
-	 * in the command line.
-	 *
-	 * GNU and modern getopt() implementation will reorder the command
-	 * arguments, making a mess of our nice subcommands facility.
-	 *
-	 * Note that we call unsetenv("POSIXLY_CORRECT"); before parsing options
-	 * for commands that are the final sub-command of their chain and when we
-	 * might mix options and arguments.
-	 */
-	setenv("POSIXLY_CORRECT", "1", 1);
-
-	/*
 	 * Stash away the argv[0] used to run this program and compute the realpath
 	 * of the program invoked, which we need at several places including when
 	 * preparing the systemd unit files.

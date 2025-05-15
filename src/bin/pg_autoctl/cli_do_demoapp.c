@@ -222,16 +222,6 @@ cli_do_demoapp_getopts(int argc, char **argv)
 		}
 	}
 
-	/*
-	 * The only command lines that are using cli_do_demoapp_getopts are
-	 * terminal ones: they don't accept subcommands. In that case our option
-	 * parsing can happen in any order and we don't need getopt_long to behave
-	 * in a POSIXLY_CORRECT way.
-	 *
-	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
-	 */
-	unsetenv("POSIXLY_CORRECT");
-
 	while ((c = getopt_long(argc, argv, "D:p:Vvqh",
 							long_options, &option_index)) != -1)
 	{

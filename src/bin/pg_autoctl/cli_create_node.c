@@ -354,7 +354,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:RVvqhP:r:xsN",
+								"+C:D:H:p:l:U:A:SLd:a:n:f:m:MI:RVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -452,7 +452,7 @@ cli_create_coordinator_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:SLd:a:n:f:m:MRVvqhzZ:P:r:xsN",
+								"+C:D:H:p:l:U:A:SLd:a:n:f:m:MRVvqhzZ:P:r:xsN",
 								&options);
 
 	options.groupId = 0;
@@ -562,7 +562,7 @@ cli_create_worker_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:y:zZ:U:A:SLd:a:n:f:m:MRVvqhzP:r:xsN",
+								"+C:D:H:p:l:y:zZ:U:A:SLd:a:n:f:m:MRVvqhzP:r:xsN",
 								&options);
 
 	if (options.groupId == 0)
@@ -821,7 +821,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhxNs",
+	while ((c = getopt_long(argc, argv, "+C:D:p:n:l:A:SVvqhxNs",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
