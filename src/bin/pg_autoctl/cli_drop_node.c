@@ -120,7 +120,7 @@ cli_drop_node_getopts(int argc, char **argv)
 	options.listen_notifications_timeout =
 		PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
-	while ((c = getopt_long(argc, argv, "D:dn:p:Vvqh",
+	while ((c = getopt_long(argc, argv, "+D:dn:p:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)

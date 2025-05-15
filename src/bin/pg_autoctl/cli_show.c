@@ -204,7 +204,7 @@ cli_show_state_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
+	while ((c = getopt_long(argc, argv, "+D:f:g:n:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -711,7 +711,7 @@ cli_show_standby_names_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
+	while ((c = getopt_long(argc, argv, "+D:f:g:n:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -942,7 +942,7 @@ cli_show_uri_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:Vvqh",
+	while ((c = getopt_long(argc, argv, "+D:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -1362,7 +1362,7 @@ cli_show_file_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:acsipCVvqh",
+	while ((c = getopt_long(argc, argv, "+D:acsipCVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)

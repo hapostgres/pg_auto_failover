@@ -1075,16 +1075,6 @@ cli_getopt_pgdata(int argc, char **argv)
 	};
 	optind = 0;
 
-	/*
-	 * The only command lines that are using keeper_cli_getopt_pgdata are
-	 * terminal ones: they don't accept subcommands. In that case our option
-	 * parsing can happen in any order and we don't need getopt_long to behave
-	 * in a POSIXLY_CORRECT way.
-	 *
-	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
-	 */
-	unsetenv("POSIXLY_CORRECT");
-
 	while ((c = getopt_long(argc, argv, "D:JVvqh",
 							long_options, &option_index)) != -1)
 	{
@@ -1450,16 +1440,6 @@ cli_print_version_getopts(int argc, char **argv)
 	};
 	optind = 0;
 
-	/*
-	 * The only command lines that are using keeper_cli_getopt_pgdata are
-	 * terminal ones: they don't accept subcommands. In that case our option
-	 * parsing can happen in any order and we don't need getopt_long to behave
-	 * in a POSIXLY_CORRECT way.
-	 *
-	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
-	 */
-	unsetenv("POSIXLY_CORRECT");
-
 	while ((c = getopt_long(argc, argv, "JVvqh",
 							long_options, &option_index)) != -1)
 	{
@@ -1802,7 +1782,7 @@ cli_node_metadata_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:n:H:p:JVvqh",
+	while ((c = getopt_long(argc, argv, "+D:n:H:p:JVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -1962,15 +1942,6 @@ cli_get_name_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	/*
-	 * The only command lines that are using keeper_cli_getopt_pgdata are
-	 * terminal ones: they don't accept subcommands. In that case our option
-	 * parsing can happen in any order and we don't need getopt_long to behave
-	 * in a POSIXLY_CORRECT way.
-	 *
-	 * The unsetenv() call allows getopt_long() to reorder arguments for us.
-	 */
-	unsetenv("POSIXLY_CORRECT");
 
 	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
 							long_options, &option_index)) != -1)
