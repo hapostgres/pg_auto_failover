@@ -75,6 +75,15 @@ PG_MODULE_MAGIC;
 void
 _PG_init(void)
 {
+	/* Check PostgreSQL's internal binary upgrade flag */
+	extern bool IsBinaryUpgrade;
+	if (IsBinaryUpgrade)
+	{
+		ereport(LOG,
+				(errmsg("pgautofailover: skipping initialization during binary upgrade")));
+		return;
+	}
+
 	if (!process_shared_preload_libraries_in_progress)
 	{
 		ereport(ERROR,
