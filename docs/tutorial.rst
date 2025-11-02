@@ -242,7 +242,7 @@ order for it to never be a candidate for failover:
 
 ::
 
-   $ docker compose exec node3 pg_autoctl set candidate-priority 0 --name node3
+   $ docker compose exec node3 pg_autoctl set node candidate-priority 0 --name node3
 
 To see the replication settings for all the nodes, the following command can
 be useful, and is described in more details in the :ref:`architecture_setup`
