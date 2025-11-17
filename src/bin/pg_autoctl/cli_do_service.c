@@ -27,6 +27,7 @@
 #include "service_keeper.h"
 #include "service_monitor.h"
 #include "service_postgres_ctl.h"
+#include "service_run_hooks.h"
 #include "signals.h"
 #include "supervisor.h"
 
@@ -39,14 +40,17 @@ static void cli_do_service_getpid(const char *serviceName);
 static void cli_do_service_getpid_postgres(int argc, char **argv);
 static void cli_do_service_getpid_listener(int argc, char **argv);
 static void cli_do_service_getpid_node_active(int argc, char **argv);
+static void cli_do_service_getpid_run_hooks(int argc, char **argv);
 
 static void cli_do_service_restart(const char *serviceName);
 static void cli_do_service_restart_postgres(int argc, char **argv);
 static void cli_do_service_restart_listener(int argc, char **argv);
 static void cli_do_service_restart_node_active(int argc, char **argv);
+static void cli_do_service_restart_run_hooks(int argc, char **argv);
 
 static void cli_do_service_monitor_listener(int argc, char **argv);
 static void cli_do_service_node_active(int argc, char **argv);
+static void cli_do_service_run_hooks(int argc, char **argv);
 
 CommandLine service_pgcontroller =
 	make_command("pgcontroller",
@@ -80,6 +84,14 @@ CommandLine service_node_active =
 				 cli_getopt_pgdata,
 				 cli_do_service_node_active);
 
+CommandLine service_run_hooks =
+	make_command("run-hooks",
+				 "pg_autoctl service that run hooks (scripts)",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_run_hooks);
+
 CommandLine service_getpid_postgres =
 	make_command("postgres",
 				 "Get the pid of the pg_autoctl postgres controller service",
@@ -104,10 +116,19 @@ CommandLine service_getpid_node_active =
 				 cli_getopt_pgdata,
 				 cli_do_service_getpid_node_active);
 
+CommandLine service_getpid_run_hooks =
+	make_command("run-hooks",
+				 "Get the pid of the pg_autoctl run-hooks service",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_getpid_run_hooks);
+
 static CommandLine *service_getpid[] = {
 	&service_getpid_postgres,
 	&service_getpid_listener,
 	&service_getpid_node_active,
+	&service_getpid_run_hooks,
 	NULL
 };
 
@@ -141,10 +162,19 @@ CommandLine service_restart_node_active =
 				 cli_getopt_pgdata,
 				 cli_do_service_restart_node_active);
 
+CommandLine service_restart_run_hooks =
+	make_command("run-hooks",
+				 "Restart the pg_autoctl run-hooks service",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_service_restart_run_hooks);
+
 static CommandLine *service_restart[] = {
 	&service_restart_postgres,
 	&service_restart_listener,
 	&service_restart_node_active,
+	&service_restart_run_hooks,
 	NULL
 };
 
@@ -160,6 +190,7 @@ static CommandLine *service[] = {
 	&service_postgres,
 	&service_monitor_listener,
 	&service_node_active,
+	&service_run_hooks,
 	NULL
 };
 
@@ -252,6 +283,16 @@ static void
 cli_do_service_getpid_node_active(int argc, char **argv)
 {
 	(void) cli_do_service_getpid(SERVICE_NAME_KEEPER);
+}
+
+
+/*
+ * cli_do_service_getpid_node_active gets the postgres service pid.
+ */
+static void
+cli_do_service_getpid_run_hooks(int argc, char **argv)
+{
+	(void) cli_do_service_getpid(SERVICE_NAME_RUN_HOOKS);
 }
 
 
@@ -349,6 +390,18 @@ static void
 cli_do_service_restart_node_active(int argc, char **argv)
 {
 	(void) cli_do_service_restart(SERVICE_NAME_KEEPER);
+}
+
+
+/*
+ * cli_do_service_restart_run_hooks sends the TERM signal to the run-hooks,
+ * which is known to have the restart policy RP_PERMANENT (that's hard-coded).
+ * As a consequence the supervisor will restart the service.
+ */
+static void
+cli_do_service_restart_run_hooks(int argc, char **argv)
+{
+	(void) cli_do_service_restart(SERVICE_NAME_RUN_HOOKS);
 }
 
 
@@ -587,4 +640,45 @@ cli_do_service_node_active(int argc, char **argv)
 
 	/* Start the node_active() protocol client */
 	(void) keeper_node_active_loop(&keeper, ppid);
+}
+
+
+/*
+ * cli_do_service_run_hooks starts the run-hooks service.
+ */
+static void
+cli_do_service_run_hooks(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+
+	pid_t ppid = getppid();
+
+	bool exitOnQuit = true;
+
+	keeper.config = keeperOptions;
+
+	/* Establish a handler for signals. */
+	(void) set_signal_handlers(exitOnQuit);
+
+	/* display a user-friendly process name */
+	(void) set_ps_title("pg_autoctl: run-hooks");
+
+	/* Prepare our Keeper and KeeperConfig from the CLI options */
+	if (!service_run_hooks_init(&keeper))
+	{
+		log_fatal("Failed to initialize the run-hooks service, "
+				  "see above for details");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* create the service pidfile */
+	if (!create_service_pidfile(keeper.config.pathnames.pid,
+								SERVICE_NAME_RUN_HOOKS))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* Start the node_active() protocol client */
+	(void) service_run_hooks_loop(&keeper, ppid);
 }
