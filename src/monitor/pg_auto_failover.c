@@ -35,7 +35,7 @@
 #include "tcop/utility.h"
 
 
-ProcessUtility_hook_type PreviousProcessUtility_hook = NULL;
+static ProcessUtility_hook_type PreviousProcessUtility_hook = NULL;
 
 
 #if PG_VERSION_NUM >= 150000

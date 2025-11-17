@@ -19,6 +19,7 @@
 /* list_qsort is only in Postgres 11 and 12 */
 #include "version_compat.h"
 
+#include "group_state_machine.h"
 #include "health_check.h"
 #include "metadata.h"
 #include "node_metadata.h"
