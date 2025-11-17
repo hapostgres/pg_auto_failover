@@ -4,7 +4,7 @@
 .DEFAULT_GOAL := all
 
 # Supported PostgreSQL versions:
-PGVERSIONS = 13 14 15 16 17
+PGVERSIONS = 13 14 15 16 17 18
 
 # Default version:
 PGVERSION ?= $(lastword $(PGVERSIONS))
@@ -16,7 +16,7 @@ CLUSTER_OPTS = ""
 # XXXX This should be in Makefile.citus only
 # but requires to clean up dockerfile and make targets related to citus first.
 # Default Citus Data version
-CITUSTAG ?= v13.0.1
+CITUSTAG ?= v13.2.0
 
 # TODO should be abs_top_dir ?
 TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -277,6 +277,7 @@ BUILD_ARGS_pg14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=v12.1.5
 BUILD_ARGS_pg15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=v12.1.5
 BUILD_ARGS_pg16 = --build-arg PGVERSION=16 --build-arg CITUSTAG=$(CITUSTAG)
 BUILD_ARGS_pg17 = --build-arg PGVERSION=17 --build-arg CITUSTAG=$(CITUSTAG)
+BUILD_ARGS_pg18 = --build-arg PGVERSION=18 --build-arg CITUSTAG=$(CITUSTAG)
 
 # DOCKER BUILDS
 

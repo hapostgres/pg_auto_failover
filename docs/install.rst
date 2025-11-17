@@ -7,7 +7,7 @@ We provide native system packages for pg_auto_failover on most popular Linux
 distributions.
 
 Use the steps below to install pg_auto_failover on PostgreSQL 17. At the
-current time pg_auto_failover is compatible with PostgreSQL 13 to 17.
+current time pg_auto_failover is compatible with PostgreSQL 13 to 18.
 
 Ubuntu or Debian
 ----------------
