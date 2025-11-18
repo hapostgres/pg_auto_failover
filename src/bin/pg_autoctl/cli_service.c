@@ -296,7 +296,7 @@ cli_getopt_pgdata_and_mode(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:fiVvqh",
+	while ((c = getopt_long(argc, argv, "+D:fiVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
