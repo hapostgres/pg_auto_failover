@@ -436,6 +436,7 @@ cli_set_node_candidate_priority(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	errno = 0;
 	int candidatePriority = strtol(argv[0], NULL, 10);
 
 	if (errno == EINVAL || candidatePriority < 0 || candidatePriority > 100)
@@ -598,6 +599,7 @@ cli_set_formation_number_sync_standbys(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	errno = 0;
 	int numberSyncStandbys = strtol(argv[0], NULL, 10);
 	if (errno == EINVAL || numberSyncStandbys < 0)
 	{
