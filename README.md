@@ -84,8 +84,10 @@ To avoid debian creating a default Postgres data directory and service,
 follow these steps before installing the previous packages.
 
 ```bash
-$ curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-$ echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+$ apt install curl ca-certificates
+$ install -d /usr/share/postgresql-common/pgdg
+$ curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+$ echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc]  https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 $ echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf

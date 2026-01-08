@@ -1,5 +1,5 @@
 #
-# Using --build-arg PGVERSION=14 we can build pg_auto_failover for any
+# Using --build-arg PGVERSION=17 we can build pg_auto_failover for any
 # target version of Postgres. In the Makefile, we use that to our advantage
 # and tag test images such as pg_auto_failover_test:pg14.
 #
@@ -10,15 +10,25 @@ ARG PGVERSION=17
 #
 # This base image contains all our target Postgres versions.
 #
-FROM debian:bullseye-slim AS base
+FROM debian:bookworm-slim AS base
 
 ARG PGVERSION
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    postgresql-common
+
+RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+RUN echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+
+# bypass initdb of a "main" cluster
+RUN echo 'create_main_cluster = false' >> /etc/postgresql-common/createcluster.conf
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential \
     gnupg \
     git \
     gawk \
@@ -60,21 +70,11 @@ RUN apt-get update \
     less \
     mg \
     valgrind \
-    postgresql-common \
- && rm -rf /var/lib/apt/lists/*
+    postgresql-server-dev-${PGVERSION} \
+    postgresql-${PGVERSION} \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
-
-# bypass initdb of a "main" cluster
-RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
-RUN apt-get update \
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-     postgresql-server-dev-${PGVERSION} \
-     postgresql-${PGVERSION} \
-	&& rm -rf /var/lib/apt/lists/*
-
-RUN pip3 install pyroute2>=0.5.17
+RUN pip3 install --break-system-packages pyroute2>=0.5.17
 
 RUN adduser --disabled-password --gecos '' docker
 RUN adduser docker sudo
@@ -136,38 +136,38 @@ ENV PATH /usr/lib/postgresql/${PGVERSION}/bin:/usr/local/sbin:/usr/local/bin:/us
 #
 # And finally our "run" images with the bare minimum for run-time.
 #
-FROM debian:bullseye-slim AS run
+FROM debian:bookworm-slim AS run
 
 ARG PGVERSION
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
-	curl \
-	gnupg \
+    curl \
+    postgresql-common
+
+RUN curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+RUN echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+
+# bypass initdb of a "main" cluster
+RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    gnupg \
     make \
     sudo \
     tmux \
-	watch \
+    watch \
     libncurses6 \
     lsof \
     psutils \
     dnsutils \
     bind9-host \
-	libcurl4-gnutls-dev \
+    libcurl4-gnutls-dev \
     libzstd-dev \
-	postgresql-common \
     libpq-dev \
-	&& rm -rf /var/lib/apt/lists/*
-
-RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
-
-# bypass initdb of a "main" cluster
-RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
-RUN apt-get update\
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-${PGVERSION} \
-	&& rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker
 RUN adduser docker sudo
@@ -189,7 +189,7 @@ COPY --from=build /usr/lib/postgresql/${PGVERSION}/bin/pg_autoctl /usr/local/bin
 # pg_autoctl has the necessary set of privileges.
 #
 RUN mkdir -p /var/lib/postgres \
- && chown -R docker /var/lib/postgres
+    && chown -R docker /var/lib/postgres
 
 USER docker
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/${PGVERSION}/bin

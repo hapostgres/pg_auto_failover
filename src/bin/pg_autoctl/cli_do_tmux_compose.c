@@ -361,13 +361,13 @@ tmux_compose_docker_build(TmuxOptions *options)
 		if (!get_env_copy("PGVERSION", pgversion, sizeof(pgversion)))
 		{
 			/* errors have already been logged */
-			log_warn("Using PGVERSION=14");
-			strlcpy(pgversion, "14", sizeof(pgversion));
+			log_warn("Using PGVERSION=17");
+			strlcpy(pgversion, "17", sizeof(pgversion));
 		}
 	}
 	else
 	{
-		strlcpy(pgversion, "14", sizeof(pgversion));
+		strlcpy(pgversion, "17", sizeof(pgversion));
 	}
 
 	/* prepare Postgres/Citus compatibility matrix */

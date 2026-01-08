@@ -41,8 +41,10 @@ debian package, follow those steps:
 
 ::
 
-  $ curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-  $ echo "deb http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+  $ apt install curl ca-certificates
+  $ install -d /usr/share/postgresql-common/pgdg
+  $ curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+  $ echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
 
   # bypass initdb of a "main" cluster
   $ echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
@@ -116,12 +118,12 @@ install`.
 
 For this to work please consider adding both the binary and the source
 repositories to your debian distribution by using the following apt sources,
-as an example targetting the debian bullseye distribution:
+as an example targetting the debian bookworm distribution:
 
 ::
 
-   deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main
-   deb-src http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main
+   deb https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main
+   deb-src https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main
 
 Then we can install the build dependencies for Postgres, knowing that
 pg_auto_failover uses the same build dependencies:
