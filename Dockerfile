@@ -33,6 +33,7 @@ RUN apt-get update \
     libedit-dev \
     libkrb5-dev \
     liblz4-dev \
+    libnuma-dev \
     libncurses6 \
     libpam-dev \
     libreadline-dev \

@@ -277,7 +277,7 @@ BUILD_ARGS_pg14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=v12.1.5
 BUILD_ARGS_pg15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=v12.1.5
 BUILD_ARGS_pg16 = --build-arg PGVERSION=16 --build-arg CITUSTAG=$(CITUSTAG)
 BUILD_ARGS_pg17 = --build-arg PGVERSION=17 --build-arg CITUSTAG=$(CITUSTAG)
-BUILD_ARGS_pg18 = --build-arg PGVERSION=18 --build-arg CITUSTAG=$(CITUSTAG)
+BUILD_ARGS_pg18 = --build-arg PGVERSION=18 --build-arg CITUSTAG=803f0ac
 
 # DOCKER BUILDS
 
