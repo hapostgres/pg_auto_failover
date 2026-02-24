@@ -48,6 +48,7 @@ typedef struct CandidateList
 	int candidateCount;
 	int quorumCandidateCount;
 	int missingNodesCount;
+	int deadMissingNodesCount;
 } CandidateList;
 
 
@@ -1375,6 +1376,64 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	}
 
 	/*
+	 * Some replication-quorum nodes are unreachable (unhealthy and not
+	 * reporting) and never reported their LSN.  We cannot recover their
+	 * LSN, but we can still proceed safely when the number of such dead
+	 * nodes is strictly less than number_sync_standbys.
+	 *
+	 * Reasoning (pigeonhole principle): if number_sync_standbys = S, then
+	 * every commit that was ever acknowledged to a client was received by at
+	 * least S standbys.  If fewer than S quorum nodes are missing, at least
+	 * one of the alive candidates must have received the most recent commit,
+	 * so promoting the most-advanced alive node cannot cause data loss beyond
+	 * what has already been made unavoidable by the failures.
+	 *
+	 * When number_sync_standbys = 0 no synchronous-replication guarantee was
+	 * in effect, so dead nodes never blocked data-safety and we always
+	 * proceed.
+	 */
+	if (candidateList.deadMissingNodesCount > 0)
+	{
+		if (formation->number_sync_standbys > 0 &&
+			candidateList.deadMissingNodesCount >= formation->number_sync_standbys)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Failover still in progress after %d nodes reported their LSN "
+				"and %d unreachable nodes did not report; "
+				"manual intervention (pg_autoctl drop node) is required because "
+				"the number of unreachable quorum nodes (%d) is not less than "
+				"number_sync_standbys (%d), so data-safe automatic failover "
+				"cannot be guaranteed; "
+				"activeNode is " NODE_FORMAT
+				" and reported state \"%s\"",
+				candidateList.candidateCount,
+				candidateList.deadMissingNodesCount,
+				candidateList.deadMissingNodesCount,
+				formation->number_sync_standbys,
+				NODE_FORMAT_ARGS(activeNode),
+				ReplicationStateGetName(activeNode->reportedState));
+
+			return false;
+		}
+
+		/*
+		 * deadMissingNodesCount < number_sync_standbys (or
+		 * number_sync_standbys == 0): safe to proceed.
+		 */
+		elog(LOG,
+			 "Proceeding with failover despite %d unreachable quorum node(s) "
+			 "not having reported their LSN: "
+			 "deadMissingNodesCount (%d) < number_sync_standbys (%d), "
+			 "so at least one alive candidate holds the most recent LSN",
+			 candidateList.deadMissingNodesCount,
+			 candidateList.deadMissingNodesCount,
+			 formation->number_sync_standbys);
+	}
+
+	/*
 	 * So all the expected candidates did report their LSN, no node is missing.
 	 * Let's see about selecting a candidate for failover now, when we do have
 	 * candidates.
@@ -1569,11 +1628,18 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 			 * Only the nodes that participate in the quorum are required to
 			 * report their LSN, because only those nodes are waited by
 			 * Postgres to report a commit to the client connection.
+			 *
+			 * Count these unreachable quorum nodes separately from
+			 * missingNodesCount (which tracks nodes that are alive but have
+			 * not reported yet). This allows the caller to decide whether it
+			 * is safe to proceed using the pigeonhole principle: if
+			 * deadMissingNodesCount < number_sync_standbys, then at least one
+			 * alive candidate is guaranteed to hold the most recent LSN.
 			 */
 			if (node->replicationQuorum &&
 				node->reportedState != REPLICATION_STATE_REPORT_LSN)
 			{
-				++(candidateList->missingNodesCount);
+				++(candidateList->deadMissingNodesCount);
 			}
 
 			continue;
