@@ -801,6 +801,7 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 								NodeAddress *upstreamNode,
 								const char *username,
 								const char *password,
+								const char *dbname,
 								const char *slotName,
 								const char *maximumBackupRate,
 								const char *backupDirectory,
@@ -828,6 +829,11 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 	if (password != NULL)
 	{
 		strlcpy(upstream->password, password, MAXCONNINFO);
+	}
+
+	if (dbname != NULL)
+	{
+		strlcpy(upstream->dbname, dbname, NAMEDATALEN);
 	}
 
 	strlcpy(upstream->slotName, slotName, MAXCONNINFO);

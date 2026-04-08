@@ -242,6 +242,7 @@ typedef struct ReplicationSource
 	char targetLSN[PG_LSN_MAXLENGTH];
 	char targetAction[NAMEDATALEN];
 	char targetTimeline[NAMEDATALEN];
+	char dbname[NAMEDATALEN];
 	SSLOptions sslOptions;
 	IdentifySystem system;
 } ReplicationSource;

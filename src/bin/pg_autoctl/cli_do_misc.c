@@ -435,6 +435,7 @@ keeper_cli_init_standby(int argc, char **argv)
 										 NULL, /* primaryNode is done */
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config.replication_password,
+										 config.pgSetup.dbname,
 										 config.replication_slot_name,
 										 config.maximum_backup_rate,
 										 config.backupDirectory,
@@ -494,6 +495,7 @@ keeper_cli_rewind_old_primary(int argc, char **argv)
 										 NULL, /* primaryNode is done */
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config.replication_password,
+										 config.pgSetup.dbname,
 										 config.replication_slot_name,
 										 config.maximum_backup_rate,
 										 config.backupDirectory,
@@ -530,6 +532,7 @@ keeper_cli_maybe_do_crash_recovery(int argc, char **argv)
 										 NULL, /* primaryNode is done */
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config.replication_password,
+										 config.pgSetup.dbname,
 										 config.replication_slot_name,
 										 config.maximum_backup_rate,
 										 config.backupDirectory,

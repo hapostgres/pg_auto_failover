@@ -930,6 +930,7 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 											 NULL, /* primaryNode is done */
 											 PG_AUTOCTL_REPLICA_USERNAME,
 											 config->replication_password,
+											 config->pgSetup.dbname,
 											 config->replication_slot_name,
 											 config->maximum_backup_rate,
 											 config->backupDirectory,

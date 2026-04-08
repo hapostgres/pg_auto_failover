@@ -1307,7 +1307,7 @@ pg_basebackup(const char *pgdata,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
-								  NULL, /* no database */
+								  replicationSource->dbname,
 								  NULL, /* no password here */
 								  replicationSource->applicationName,
 								  replicationSource->sslOptions,
@@ -2326,7 +2326,7 @@ prepare_recovery_settings(const char *pgdata,
 									  primaryNode->host,
 									  primaryNode->port,
 									  replicationSource->userName,
-									  NULL, /* no database */
+									  replicationSource->dbname,
 									  replicationSource->password,
 									  replicationSource->applicationName,
 									  replicationSource->sslOptions,
@@ -2550,7 +2550,7 @@ prepare_primary_conninfo(char *primaryConnInfo,
 	appendPQExpBuffer(buffer, " port=%d", primaryPort);
 	appendPQExpBuffer(buffer, " user=%s", replicationUsername);
 
-	if (dbname != NULL)
+	if (dbname != NULL && !IS_EMPTY_STRING_BUFFER(dbname))
 	{
 		appendPQExpBuffer(buffer, " dbname=%s", dbname);
 	}
@@ -2667,7 +2667,7 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
-								  NULL, /* no database */
+								  replicationSource->dbname,
 								  replicationSource->password,
 								  replicationSource->applicationName,
 								  replicationSource->sslOptions,
