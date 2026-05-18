@@ -371,12 +371,13 @@ tmux_compose_docker_build(TmuxOptions *options)
 	}
 
 	/* prepare Postgres/Citus compatibility matrix */
-	char *pgCitusMatrix[18] = { 0 };
+	char *pgCitusMatrix[19] = { 0 };
 	pgCitusMatrix[13] = "v10.2.9";
 	pgCitusMatrix[14] = "v12.1.5";
 	pgCitusMatrix[15] = "v12.1.5";
 	pgCitusMatrix[16] = "v13.0.1";
 	pgCitusMatrix[17] = "v13.0.1";
+	pgCitusMatrix[18] = "803f0ac";
 
 	int pgVersionNum;
 	char *citustag = NULL;
@@ -387,7 +388,7 @@ tmux_compose_docker_build(TmuxOptions *options)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	if (pgVersionNum > 12 && pgVersionNum < 18)
+	if (pgVersionNum > 12 && pgVersionNum < 19)
 	{
 		citustag = pgCitusMatrix[pgVersionNum];
 	}
