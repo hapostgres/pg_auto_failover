@@ -1,8 +1,9 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the PostgreSQL License.
 #
-# Makefile.common — shared build variables included by both pg_autoctl and
-# pgaftest Makefiles via: include ../common/Makefile.common
+# Makefile.common — shared build variables and common source library.
+# Included by both pg_autoctl and pgaftest Makefiles via:
+#   include ../common/Makefile.common
 
 PG_CONFIG ?= pg_config
 
@@ -14,7 +15,8 @@ LOG_SRC         = $(wildcard $(LIB_DIR)/log/src/log.*)
 COMMANDLINE_SRC = $(wildcard $(LIB_DIR)/subcommands.c/commandline.*)
 PARSON_SRC      = $(wildcard $(LIB_DIR)/parson/parson.*)
 
-COMMON_INCLUDES  = -I$(LIB_DIR)/pg
+COMMON_INCLUDES  = -I$(COMMON_DIR)
+COMMON_INCLUDES += -I$(LIB_DIR)/pg
 COMMON_INCLUDES += -I$(LIB_DIR)/log/src/
 COMMON_INCLUDES += -I$(LIB_DIR)/subcommands.c/
 COMMON_INCLUDES += -I$(LIB_DIR)/libs/
@@ -27,15 +29,6 @@ DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir-server)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
 DEFAULT_CFLAGS += $(shell $(PG_CONFIG) --cflags)
-
-# On macOS, gettext is keg-only and not in the default include path.
-# postgres_fe.h → c.h → libintl.h requires finding it explicitly.
-ifeq ($(shell uname -s),Darwin)
-  GETTEXT_PREFIX := $(shell brew --prefix gettext 2>/dev/null)
-  ifneq ($(GETTEXT_PREFIX),)
-    DEFAULT_CFLAGS += -I$(GETTEXT_PREFIX)/include
-  endif
-endif
 DEFAULT_CFLAGS += -Wformat
 DEFAULT_CFLAGS += -Wall
 DEFAULT_CFLAGS += -Werror=implicit-int
@@ -46,11 +39,13 @@ DEFAULT_CFLAGS += -D_WANT_SEMUN
 DEFAULT_CFLAGS += -Wno-missing-braces
 DEFAULT_CFLAGS += $(COMMON_INCLUDES)
 
-ifdef USE_SECURITY_FLAGS
-SECURITY_CFLAGS = -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O2 \
-                  -z noexecstack -fpie -Wl,-pie -Wl,-z,relro -Wl,-z,now \
-                  -Wformat -Wformat-security -Werror=format-security
-DEFAULT_CFLAGS += $(SECURITY_CFLAGS)
+# On macOS, gettext is keg-only and not in the default include path.
+# postgres_fe.h → c.h → libintl.h requires finding it explicitly.
+ifeq ($(shell uname -s),Darwin)
+  GETTEXT_PREFIX := $(shell brew --prefix gettext 2>/dev/null)
+  ifneq ($(GETTEXT_PREFIX),)
+    DEFAULT_CFLAGS += -I$(GETTEXT_PREFIX)/include
+  endif
 endif
 
 override CFLAGS := $(DEFAULT_CFLAGS) $(CFLAGS)
@@ -65,7 +60,31 @@ LIBS += -lpq
 
 DEPDIR = .deps
 
-# Shared rule: compile .c → .o with auto-dependency tracking
+# -----------------------------------------------------------------------
+# Common source library (src/bin/common/*.c → libpgaf_common.a)
+# Callers link with: $(COMMON_LIB) and add $(COMMON_LIB) to OBJS.
+# -----------------------------------------------------------------------
+
+COMMON_SRC = $(wildcard $(COMMON_DIR)*.c)
+COMMON_OBJ = $(patsubst $(COMMON_DIR)%.c,$(COMMON_DIR)%.o,$(COMMON_SRC))
+COMMON_LIB = $(COMMON_DIR)libpgaf_common.a
+
+# Compile rule for common objects (run from each caller's directory)
+$(COMMON_DIR)%.o: $(COMMON_DIR)%.c
+	@if test ! -d $(COMMON_DIR)$(DEPDIR); then mkdir -p $(COMMON_DIR)$(DEPDIR); fi
+	$(CC) $(CFLAGS) -c -MMD -MP -MF$(COMMON_DIR)$(DEPDIR)/$(*F).Po -o $@ $<
+
+$(COMMON_LIB): $(COMMON_OBJ)
+	$(AR) rcs $@ $^
+
+Po_common_files := $(wildcard $(COMMON_DIR)$(DEPDIR)/*.Po)
+ifneq (,$(Po_common_files))
+include $(Po_common_files)
+endif
+
+# -----------------------------------------------------------------------
+# Compile rule for caller's own .c → .o with auto-dependency tracking
+# -----------------------------------------------------------------------
 %.o : %.c
 	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
 	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/$(*F).Po -o $@ $<
@@ -75,7 +94,7 @@ ifneq (,$(Po_files))
 include $(Po_files)
 endif
 
-# Shared rules for vendored libs (callers reference with explicit target names)
+# Shared rules for vendored libs
 lib-snprintf.o: $(PG_SNPRINTF)
 	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/lib-snprintf.Po -MT$@ \
 	    -o $@ $(LIB_DIR)/pg/snprintf.c

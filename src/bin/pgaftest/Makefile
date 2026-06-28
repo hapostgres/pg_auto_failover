@@ -21,26 +21,22 @@ LOCAL_SRC = main.c cli_root.c cli_demo.c \
 LOCAL_OBJS = $(patsubst %.c,%.o,$(LOCAL_SRC))
 
 # -----------------------------------------------------------------------
-# Shared sources compiled from pg_autoctl/ by explicit path
+# pg_autoctl-specific shared sources (business logic; not in common/).
+# Compiled as shared-%.o to distinguish from local objects.
 # -----------------------------------------------------------------------
-# All non-CLI pg_autoctl source files (exclude main.c, demoapp.c, cli_*.c).
-# We compile them as shared-%.o to keep them separate from local objects.
-SHARED_SRCS = cli_common.c config.c coordinator.c debian.c \
-              env_utils.c file_utils.c fsm.c fsm_transition.c \
-              fsm_transition_citus.c ini_file.c ini_implementation.c \
-              ipaddr.c keeper.c keeper_config.c keeper_pg_init.c \
-              lock_utils.c monitor.c monitor_config.c monitor_pg_init.c \
-              nodestate_utils.c parsing.c pgctl.c pghba.c pgsetup.c \
-              pgsql.c pgtuning.c pidfile.c primary_standby.c \
+SHARED_SRCS = cli_common.c config.c coordinator.c fsm.c fsm_transition.c \
+              fsm_transition_citus.c keeper.c keeper_config.c keeper_pg_init.c \
+              monitor.c monitor_config.c monitor_pg_init.c \
+              nodestate_utils.c pghba.c primary_standby.c \
               service_keeper.c service_keeper_init.c service_monitor.c \
               service_monitor_init.c service_postgres.c service_postgres_ctl.c \
-              signals.c state.c string_utils.c supervisor.c system_utils.c \
-              systemd_config.c
+              state.c supervisor.c systemd_config.c
 
 SHARED_OBJS = $(patsubst %.c,shared-%.o,$(SHARED_SRCS))
 
 OBJS  = $(LOCAL_OBJS) $(SHARED_OBJS)
 OBJS += lib-log.o lib-commandline.o lib-parson.o lib-snprintf.o lib-strerror.o
+OBJS += $(COMMON_LIB)
 
 INCLUDES = $(wildcard $(SRC_DIR)*.h)
 
@@ -69,13 +65,14 @@ include $(Po_files)
 endif
 
 # -----------------------------------------------------------------------
-all: $(PGAFTEST) ;
+all: $(COMMON_LIB) $(PGAFTEST) ;
 
 $(PGAFTEST): $(OBJS) $(INCLUDES)
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) $(LIBS) -o $@
 
 clean:
 	rm -f $(OBJS) $(PGAFTEST) test_spec_scan.c test_spec_parse.c test_spec_parse.h
+	rm -f $(COMMON_LIB) $(COMMON_OBJ)
 	rm -rf $(DEPDIR)
 
 install: $(PGAFTEST)

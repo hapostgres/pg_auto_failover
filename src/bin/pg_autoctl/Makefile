@@ -15,17 +15,19 @@ INCLUDES = $(patsubst $(SRC_DIR)%.h,%.h,$(wildcard $(SRC_DIR)*.h))
 SRC  = $(patsubst $(SRC_DIR)%.c,%.c,$(wildcard $(SRC_DIR)*.c))
 OBJS = $(patsubst %.c,%.o,$(SRC))
 OBJS += lib-log.o lib-commandline.o lib-parson.o lib-snprintf.o lib-strerror.o
+OBJS += $(COMMON_LIB)
 
 # ncurses needed for pg_autoctl watch
 LIBS += -lncurses
 
-all: $(PG_AUTOCTL) ;
+all: $(COMMON_LIB) $(PG_AUTOCTL) ;
 
 $(PG_AUTOCTL): $(OBJS) $(INCLUDES)
 	$(CC) $(CFLAGS) $(OBJS) $(LDFLAGS) $(LIBS) -o $@
 
 clean:
 	rm -f $(OBJS) $(PG_AUTOCTL)
+	rm -f $(COMMON_LIB) $(COMMON_OBJ)
 	rm -rf $(DEPDIR)
 
 install: $(PG_AUTOCTL)
