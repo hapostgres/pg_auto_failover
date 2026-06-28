@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "commandline.h"
+#include "defaults.h"
 #include "log.h"
 #include "test_spec.h"
 #include "test_runner.h"

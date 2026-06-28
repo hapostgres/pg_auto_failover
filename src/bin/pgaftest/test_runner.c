@@ -14,6 +14,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+/* postgres_fe.h must precede pqexpbuffer.h to define pg_attribute_printf and bool */
+#include "postgres_fe.h"
 #include "libpq-fe.h"
 #include "pqexpbuffer.h"
 

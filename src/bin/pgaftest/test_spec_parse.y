@@ -79,8 +79,7 @@ static void register_step(TestSpec *spec, TestStep *step)
 %token <str>  T_IDENT T_STRING T_BLOCK
 
 %type <str>   ident_or_string
-%type <step>  step_block cmd_block
-%type <cmd>   command command_list
+%type <step>  cmd_block
 
 %%
 

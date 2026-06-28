@@ -24,7 +24,6 @@ static char *pgaf_strdup(const char *s)
 
 %option noyywrap
 %option nounput
-%option noinput
 %option never-interactive
 
 /* multi-line SQL/text block: { ... } */

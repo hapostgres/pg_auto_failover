@@ -23,10 +23,19 @@ LOCAL_OBJS = $(patsubst %.c,%.o,$(LOCAL_SRC))
 # -----------------------------------------------------------------------
 # Shared sources compiled from pg_autoctl/ by explicit path
 # -----------------------------------------------------------------------
-SHARED_SRCS = env_utils.c file_utils.c string_utils.c parsing.c \
-              nodestate_utils.c ipaddr.c signals.c pidfile.c \
-              pgsetup.c pgsql.c lock_utils.c ini_file.c ini_implementation.c \
-              debian.c
+# All non-CLI pg_autoctl source files (exclude main.c, demoapp.c, cli_*.c).
+# We compile them as shared-%.o to keep them separate from local objects.
+SHARED_SRCS = cli_common.c config.c coordinator.c debian.c \
+              env_utils.c file_utils.c fsm.c fsm_transition.c \
+              fsm_transition_citus.c ini_file.c ini_implementation.c \
+              ipaddr.c keeper.c keeper_config.c keeper_pg_init.c \
+              lock_utils.c monitor.c monitor_config.c monitor_pg_init.c \
+              nodestate_utils.c parsing.c pgctl.c pghba.c pgsetup.c \
+              pgsql.c pgtuning.c pidfile.c primary_standby.c \
+              service_keeper.c service_keeper_init.c service_monitor.c \
+              service_monitor_init.c service_postgres.c service_postgres_ctl.c \
+              signals.c state.c string_utils.c supervisor.c system_utils.c \
+              systemd_config.c
 
 SHARED_OBJS = $(patsubst %.c,shared-%.o,$(SHARED_SRCS))
 

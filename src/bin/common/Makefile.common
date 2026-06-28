@@ -27,6 +27,15 @@ DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir-server)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
 DEFAULT_CFLAGS += $(shell $(PG_CONFIG) --cflags)
+
+# On macOS, gettext is keg-only and not in the default include path.
+# postgres_fe.h → c.h → libintl.h requires finding it explicitly.
+ifeq ($(shell uname -s),Darwin)
+  GETTEXT_PREFIX := $(shell brew --prefix gettext 2>/dev/null)
+  ifneq ($(GETTEXT_PREFIX),)
+    DEFAULT_CFLAGS += -I$(GETTEXT_PREFIX)/include
+  endif
+endif
 DEFAULT_CFLAGS += -Wformat
 DEFAULT_CFLAGS += -Wall
 DEFAULT_CFLAGS += -Werror=implicit-int
