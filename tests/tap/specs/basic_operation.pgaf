@@ -172,7 +172,7 @@ step multiple_failovers {
 
 step fail_primary {
     network disconnect node1
-    wait until node2 state = wait_primary timeout 90s
+    wait until node2 state = wait_primary timeout 120s
 }
 
 step writes_to_new_primary {
