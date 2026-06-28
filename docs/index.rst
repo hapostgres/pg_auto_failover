@@ -65,10 +65,17 @@ __ https://github.com/hapostgres/pg_auto_failover
 
 .. toctree::
    :hidden:
+   :caption: Testing
+
+   pgaftest
+
+.. toctree::
+   :hidden:
    :caption: Manual Pages
 
    ref/manual
    ref/configuration
+   ref/pg_autoctl_node
 
 .. toctree::
    :hidden:
