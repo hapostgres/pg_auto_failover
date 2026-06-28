@@ -3,14 +3,12 @@
 
 cluster {
     monitor
-    formation {
-        coordinator1a coordinator
-        coordinator1b coordinator
-        worker1a worker group 1
-        worker1b worker group 1
-        worker2a worker group 2
-        worker2b worker group 2
-    }
+    citus-coordinator coordinator1a
+    citus-coordinator coordinator1b
+    citus-worker worker1a  group=1
+    citus-worker worker1b  group=1
+    citus-worker worker2a  group=2
+    citus-worker worker2b  group=2
 }
 
 setup {
@@ -70,9 +68,7 @@ step test_004_writes_succeed_after_failover {
 #
 step test_005_read_from_coordinator {
     sql coordinator1a { SELECT a FROM t1 ORDER BY a ASC; }
-    expect { 1
-2
-3 }
+    expect { { 1 } { 2 } { 3 } }
 }
 
 #
@@ -81,10 +77,7 @@ step test_005_read_from_coordinator {
 step test_006_writes_to_coordinator_succeed {
     sql coordinator1a { INSERT INTO t1 VALUES (4); }
     sql coordinator1a { SELECT a FROM t1 ORDER BY a ASC; }
-    expect { 1
-2
-3
-4 }
+    expect { { 1 } { 2 } { 3 } { 4 } }
 }
 
 #
@@ -102,10 +95,7 @@ step test_007_start_worker2a_again {
 #
 step test_008_read_from_coordinator {
     sql coordinator1a { SELECT a FROM t1 ORDER BY a ASC; }
-    expect { 1
-2
-3
-4 }
+    expect { { 1 } { 2 } { 3 } { 4 } }
 }
 
 #
@@ -121,10 +111,7 @@ step test_009_fail_worker2b {
 #
 step test_010_read_from_coordinator {
     sql coordinator1a { SELECT a FROM t1 ORDER BY a ASC; }
-    expect { 1
-2
-3
-4 }
+    expect { { 1 } { 2 } { 3 } { 4 } }
 }
 
 #

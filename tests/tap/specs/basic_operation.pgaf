@@ -62,10 +62,7 @@ step verify_initial_setup {
 # test_005: read from secondary
 step verify_read_from_secondary {
     sql node2 { SELECT * FROM t1 ORDER BY a; }
-    expect {
-1
-2
-}
+    expect { { 1 } { 2 } }
 }
 
 # ------------------------------------------------------------------
@@ -180,12 +177,7 @@ step fail_primary {
 step writes_to_new_primary {
     sql node2 { INSERT INTO t1 VALUES (4); }
     sql node2 { SELECT * FROM t1 ORDER BY a; }
-    expect {
-1
-2
-3
-4
-}
+    expect { { 1 } { 2 } { 3 } { 4 } }
 }
 
 # test_012: reconnect node1, it rejoins as secondary; check SSN.
@@ -201,12 +193,7 @@ step restart_node1 {
 # test_013: read data from new secondary (node1)
 step read_from_new_secondary {
     sql node1 { SELECT * FROM t1 ORDER BY a; }
-    expect {
-1
-2
-3
-4
-}
+    expect { { 1 } { 2 } { 3 } { 4 } }
 }
 
 # ------------------------------------------------------------------

@@ -1,11 +1,9 @@
 cluster {
     monitor
-    formation {
-        node1
-        node2
-        node3
-        node4
-    }
+    node node1
+    node node2
+    node node3
+    node node4
 }
 
 setup {
@@ -119,14 +117,11 @@ step test_009_failover {
 #
 step test_010_read_from_nodes {
     sql node1 { SELECT * FROM t1; }
-    expect { 1
-2 }
+    expect { { 1 } { 2 } }
     sql node2 { SELECT * FROM t1; }
-    expect { 1
-2 }
+    expect { { 1 } { 2 } }
     sql node3 { SELECT * FROM t1; }
-    expect { 1
-2 }
+    expect { { 1 } { 2 } }
 }
 
 #

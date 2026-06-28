@@ -3,10 +3,8 @@
 
 cluster {
     monitor
-    formation {
-        node1 listen
-        node2 listen
-    }
+    node node1  listen
+    node node2  listen
 }
 
 setup {
@@ -45,8 +43,7 @@ step test_003_init_secondary {
 #
 step test_004_read_from_secondary {
     sql node2 { SELECT * FROM t1 ORDER BY a; }
-    expect { 1
-2 }
+    expect { { 1 } { 2 } }
 }
 
 #
@@ -63,9 +60,7 @@ step test_006_fail_primary {
 step test_007_writes_to_node2_succeed {
     sql node2 { INSERT INTO t1 VALUES (3); }
     sql node2 { SELECT * FROM t1 ORDER BY a; }
-    expect { 1
-2
-3 }
+    expect { { 1 } { 2 } { 3 } }
 }
 
 #
@@ -83,9 +78,7 @@ step test_008_start_node1_again {
 #
 step test_009_read_from_new_secondary {
     sql node1 { SELECT * FROM t1 ORDER BY a; }
-    expect { 1
-2
-3 }
+    expect { { 1 } { 2 } { 3 } }
 }
 
 #
