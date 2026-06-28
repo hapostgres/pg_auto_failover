@@ -282,11 +282,27 @@ All commands are available inside ``setup``, ``teardown``, and ``step`` blocks.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Run a command inside a running container via ``docker compose exec``.
+Fails the step if the command exits with a non-zero status.
 
 .. code-block:: text
 
    exec node1  pg_autoctl perform failover
    exec monitor  psql -c "SELECT count(*) FROM pgautofailover.node"
+
+``exec-fails <service> <command...>``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Like ``exec`` but asserts the command **fails** (exits non-zero).
+Fails the step if the command unexpectedly succeeds.  Use this to verify
+that a command is correctly rejected by pg_autoctl.
+
+.. code-block:: text
+
+   # enable maintenance on a primary without --allow-failover must fail
+   exec-fails node1  pg_autoctl enable maintenance
+
+   # failover with a single node (no standby) must fail
+   exec-fails monitor  pg_autoctl perform failover
 
 ``wait until <node> state = <state>  [timeout Ns]``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -339,7 +355,8 @@ multi-line ``{ ... }`` block for multi-statement SQL.
 ~~~~~~~~~~~~~~~~~~~~
 
 Compare the output of the most recent ``sql`` command against ``text``.
-Fails the step when the output does not match.
+Fails the step when the output does not match.  Also fails if the
+preceding ``sql`` raised a SQL error (use ``expect error`` for that).
 
 Single-value form:
 
@@ -365,6 +382,34 @@ This is equivalent to the multi-line form above.
 
    sql node1 { SELECT count(*) FROM t GROUP BY status; }
    expect { { 2 } { 5 } }
+
+``expect error [SQLSTATE]``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Assert that the most recent ``sql`` command raised a SQL error.
+Fails the step if the query succeeded.  The optional ``SQLSTATE`` argument
+(a 5-character PostgreSQL error code) constrains the check to a specific
+error class.
+
+.. code-block:: text
+
+   # writes to a hot-standby must be rejected (25006 = read_only_sql_transaction)
+   sql node2 { INSERT INTO t1 VALUES (42); }
+   expect error 25006
+
+   # any SQL error is acceptable (no SQLSTATE constraint)
+   sql node1 { SELECT 1/0; }
+   expect error
+
+PostgreSQL SQLSTATE codes of interest:
+
+* ``25006`` — ``read_only_sql_transaction`` (writes to a standby)
+* ``42P01`` — ``undefined_table``
+* ``23505`` — ``unique_violation``
+
+The SQLSTATE is extracted from psql's verbose error output
+(``VERBOSITY=verbose``).  ``ON_ERROR_STOP=1`` is always set so psql
+exits non-zero on SQL errors.
 
 ``network disconnect <node>``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

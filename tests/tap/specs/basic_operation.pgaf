@@ -65,7 +65,28 @@ step verify_read_from_secondary {
     expect { { 1 } { 2 } }
 }
 
+# test_006_001: writes to secondary must be rejected (read-only replica).
+# SQLSTATE 25006 = read_only_sql_transaction
+step write_to_secondary_fails {
+    sql node2 { INSERT INTO t1 VALUES (3); }
+    expect error 25006
+}
+
+# test_006_002: data unchanged on secondary after rejected write.
+step read_secondary_unchanged {
+    sql node2 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } }
+}
+
 # ------------------------------------------------------------------
+# test_007: maintenance on primary — without --allow-failover it
+# must be rejected because it would leave no primary available.
+# ------------------------------------------------------------------
+
+step maintenance_primary_rejected {
+    exec-fails node1  pg_autoctl enable maintenance
+}
+
 # test_007: maintenance on primary with --allow-failover
 # After: node1=maintenance, node2=wait_primary
 # ------------------------------------------------------------------
@@ -196,6 +217,12 @@ step read_from_new_secondary {
     expect { { 1 } { 2 } { 3 } { 4 } }
 }
 
+# test_014: writes to node1 (now secondary) must be rejected.
+step write_to_old_primary_fails {
+    sql node1 { INSERT INTO t1 VALUES (5); }
+    expect error 25006
+}
+
 # ------------------------------------------------------------------
 # test_016: drop secondary (node1), node2 becomes single.
 # Verify no replication slots remain on node2.
@@ -210,6 +237,11 @@ step drop_secondary {
         ORDER BY slot_name;
     }
     expect {  }
+}
+
+# test_018: node2 is now single; a failover with no standby must be rejected.
+step failover_single_node_rejected {
+    exec-fails monitor  pg_autoctl perform failover
 }
 
 # ------------------------------------------------------------------
@@ -235,6 +267,9 @@ sequence
     create_table
     verify_initial_setup
     verify_read_from_secondary
+    write_to_secondary_fails
+    read_secondary_unchanged
+    maintenance_primary_rejected
     maintenance_primary_allow_failover
     disable_maintenance_rejoin
     maintenance_secondary
@@ -245,6 +280,8 @@ sequence
     writes_to_new_primary
     restart_node1
     read_from_new_secondary
+    write_to_old_primary_fails
     drop_secondary
+    failover_single_node_rejected
     stop_monitor_postgres
     drop_primary

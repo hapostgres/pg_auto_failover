@@ -689,7 +689,17 @@ cmd_block:
 
 			TestCmd *cmd = NULL;
 
-			if (strncmp(line, "exec ", 5) == 0)
+			if (strncmp(line, "exec-fails ", 11) == 0)
+			{
+				cmd = make_cmd(CMD_EXEC_FAILS);
+				char *rest = line + 11;
+				while (*rest == ' ' || *rest == '\t') rest++;
+				sscanf(rest, "%63s", cmd->service);
+				char *sp = rest + strlen(cmd->service);
+				while (*sp == ' ' || *sp == '\t') sp++;
+				strncpy(cmd->args, sp, sizeof(cmd->args) - 1);
+			}
+			else if (strncmp(line, "exec ", 5) == 0)
 			{
 				cmd = make_cmd(CMD_EXEC);
 				char *rest = line + 5;
@@ -743,6 +753,16 @@ cmd_block:
 				else
 					strncpy(cmd->args, q, sizeof(cmd->args)-1);
 			}
+			else if (strncmp(line, "expect error", 12) == 0 &&
+			         (line[12] == '\0' || line[12] == ' ' || line[12] == '\t'))
+			{
+				cmd = make_cmd(CMD_EXPECT_ERROR);
+				/* optional SQLSTATE code after "expect error" */
+				char *rest = line + 12;
+				while (*rest == ' ' || *rest == '\t') rest++;
+				if (*rest)
+					strncpy(cmd->state, rest, sizeof(cmd->state) - 1);
+			}
 			else if (strncmp(line, "expect ", 7) == 0)
 			{
 				cmd = make_cmd(CMD_EXPECT);
@@ -784,6 +804,19 @@ cmd_block:
 			line = strtok(NULL, "\n");
 		}
 		free(text);
+
+		/*
+		 * Post-process: any CMD_SQL immediately followed by CMD_EXPECT_ERROR
+		 * must not fail the step when SQL errors — it just records the error
+		 * for CMD_EXPECT_ERROR to validate.
+		 */
+		for (TestCmd *c = step->commands; c; c = c->next)
+		{
+			if (c->kind == CMD_SQL && c->next &&
+			    c->next->kind == CMD_EXPECT_ERROR)
+				c->allowError = true;
+		}
+
 		$$ = step;
 	}
 	;

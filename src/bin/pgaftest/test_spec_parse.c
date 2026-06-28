@@ -1051,7 +1051,7 @@ static const yytype_int8 yyrhs[] =
 static const yytype_uint16 yyrline[] =
 {
        0,   605,   605,   606,   610,   611,   612,   613,   614,   626,
-     646,   653,   664,   674,   796,   799,   801,   820,   821
+     646,   653,   664,   674,   829,   832,   834,   853,   854
 };
 #endif
 
@@ -2031,7 +2031,17 @@ yyreduce:
 
 			TestCmd *cmd = NULL;
 
-			if (strncmp(line, "exec ", 5) == 0)
+			if (strncmp(line, "exec-fails ", 11) == 0)
+			{
+				cmd = make_cmd(CMD_EXEC_FAILS);
+				char *rest = line + 11;
+				while (*rest == ' ' || *rest == '\t') rest++;
+				sscanf(rest, "%63s", cmd->service);
+				char *sp = rest + strlen(cmd->service);
+				while (*sp == ' ' || *sp == '\t') sp++;
+				strncpy(cmd->args, sp, sizeof(cmd->args) - 1);
+			}
+			else if (strncmp(line, "exec ", 5) == 0)
 			{
 				cmd = make_cmd(CMD_EXEC);
 				char *rest = line + 5;
@@ -2085,6 +2095,16 @@ yyreduce:
 				else
 					strncpy(cmd->args, q, sizeof(cmd->args)-1);
 			}
+			else if (strncmp(line, "expect error", 12) == 0 &&
+			         (line[12] == '\0' || line[12] == ' ' || line[12] == '\t'))
+			{
+				cmd = make_cmd(CMD_EXPECT_ERROR);
+				/* optional SQLSTATE code after "expect error" */
+				char *rest = line + 12;
+				while (*rest == ' ' || *rest == '\t') rest++;
+				if (*rest)
+					strncpy(cmd->state, rest, sizeof(cmd->state) - 1);
+			}
 			else if (strncmp(line, "expect ", 7) == 0)
 			{
 				cmd = make_cmd(CMD_EXPECT);
@@ -2126,12 +2146,25 @@ yyreduce:
 			line = strtok(NULL, "\n");
 		}
 		free(text);
+
+		/*
+		 * Post-process: any CMD_SQL immediately followed by CMD_EXPECT_ERROR
+		 * must not fail the step when SQL errors — it just records the error
+		 * for CMD_EXPECT_ERROR to validate.
+		 */
+		for (TestCmd *c = step->commands; c; c = c->next)
+		{
+			if (c->kind == CMD_SQL && c->next &&
+			    c->next->kind == CMD_EXPECT_ERROR)
+				c->allowError = true;
+		}
+
 		(yyval.step) = step;
 	;}
     break;
 
   case 16:
-#line 802 "test_spec_parse.y"
+#line 835 "test_spec_parse.y"
     {
 		int i = current_spec->sequenceLength;
 		if (i < PGAF_MAX_SEQ)
@@ -2146,18 +2179,18 @@ yyreduce:
     break;
 
   case 17:
-#line 820 "test_spec_parse.y"
+#line 853 "test_spec_parse.y"
     { (yyval.str) = (yyvsp[(1) - (1)].str); ;}
     break;
 
   case 18:
-#line 821 "test_spec_parse.y"
+#line 854 "test_spec_parse.y"
     { (yyval.str) = (yyvsp[(1) - (1)].str); ;}
     break;
 
 
 /* Line 1267 of yacc.c.  */
-#line 2161 "test_spec_parse.c"
+#line 2194 "test_spec_parse.c"
       default: break;
     }
   YY_SYMBOL_PRINT ("-> $$ =", yyr1[yyn], &yyval, &yyloc);
@@ -2371,7 +2404,7 @@ yyreturn:
 }
 
 
-#line 824 "test_spec_parse.y"
+#line 857 "test_spec_parse.y"
 
 
 /* -----------------------------------------------------------------------

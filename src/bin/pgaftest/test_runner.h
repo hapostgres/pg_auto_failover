@@ -28,8 +28,11 @@ typedef struct TestRunner
 	int         tapPass;
 	int         tapFail;
 
-	/* last SQL output (for CMD_EXPECT) */
+	/* last SQL result (for CMD_EXPECT / CMD_EXPECT_ERROR) */
 	char        lastSqlOutput[4096];
+	bool        lastSqlFailed;     /* true when last sql raised an error  */
+	char        lastSqlState[8];   /* SQLSTATE from last failed sql       */
+	char        lastSqlService[64];/* service name of last sql command    */
 
 	bool        composeUp;         /* compose stack is running        */
 } TestRunner;

@@ -100,11 +100,13 @@ typedef struct TestCluster
 typedef enum TestCmdKind
 {
 	CMD_EXEC,            /* exec <svc> <args...>                        */
+	CMD_EXEC_FAILS,      /* exec-fails <svc> <args...>                  */
 	CMD_WAIT_STATE,      /* wait until <node> state = <s> [timeout Ns] */
 	CMD_ASSERT_STATE,    /* assert <node> state = <s>                   */
 	CMD_ASSERT_ASSIGNED, /* assert <node> assigned-state = <s>          */
 	CMD_SQL,             /* sql <svc> { SQL }                           */
 	CMD_EXPECT,          /* expect { text }                             */
+	CMD_EXPECT_ERROR,    /* expect error [SQLSTATE]                     */
 	CMD_NETWORK_OFF,     /* network disconnect <node>                   */
 	CMD_NETWORK_ON,      /* network connect <node>                      */
 	CMD_SLEEP,           /* sleep Ns                                    */
@@ -116,9 +118,10 @@ typedef struct TestCmd
 	TestCmdKind kind;
 	char        service[64];       /* target service / node name          */
 	char        args[4096];        /* exec args or SQL text               */
-	char        state[64];         /* expected state string               */
+	char        state[64];         /* expected state / SQLSTATE           */
 	char        expected[4096];    /* for CMD_EXPECT                      */
 	int         timeoutSeconds;    /* for CMD_WAIT_STATE                  */
+	bool        allowError;        /* CMD_SQL: don't fail if SQL errors   */
 	struct TestCmd *next;
 } TestCmd;
 

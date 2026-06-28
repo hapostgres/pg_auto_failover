@@ -351,30 +351,81 @@ wait_for_state(TestRunner *r, const char *nodeName, const char *targetState,
  * SQL execution on a service
  * ----------------------------------------------------------------------- */
 
+/*
+ * escape_sql_for_shell — escape single-quotes for embedding SQL in a
+ * single-quoted shell argument using the '\'' trick.
+ */
+static void
+escape_sql_for_shell(const char *sql, char *out, int outlen)
+{
+	int oi = 0;
+	for (int i = 0; sql[i] && oi < outlen - 2; i++)
+	{
+		if (sql[i] == '\'')
+		{
+			out[oi++] = '\'';
+			out[oi++] = '\\';
+			out[oi++] = '\'';
+			if (oi < outlen - 1) out[oi++] = '\'';
+		}
+		else
+			out[oi++] = sql[i];
+	}
+	out[oi] = '\0';
+}
+
+/*
+ * parse_sqlstate — scan output for a PostgreSQL SQLSTATE code.
+ *
+ * With VERBOSITY=verbose, psql formats errors as:
+ *   ERROR:  XXXXX: message text
+ * where XXXXX is a 5-character alphanumeric SQLSTATE code.
+ * Writes up to 6 bytes (5 + NUL) into state.
+ */
+static void
+parse_sqlstate(const char *output, char *state, int statelen)
+{
+	state[0] = '\0';
+	const char *p = output;
+	while (p && *p)
+	{
+		p = strstr(p, "ERROR:  ");
+		if (!p) break;
+		p += 8;  /* skip "ERROR:  " */
+		/* SQLSTATE: exactly 5 alphanumeric characters followed by ':' */
+		if (strlen(p) >= 6 && p[5] == ':')
+		{
+			bool valid = true;
+			for (int i = 0; i < 5 && valid; i++)
+				valid = isalnum((unsigned char)p[i]);
+			if (valid)
+			{
+				int n = statelen < 6 ? statelen - 1 : 5;
+				memcpy(state, p, n);
+				state[n] = '\0';
+				return;
+			}
+		}
+	}
+}
+
 static bool
 exec_sql_on_service(TestRunner *r, const char *service,
                     const char *sql, char *outbuf, int outlen)
 {
-	/* Escape single quotes in SQL for shell */
 	char escaped[8192];
-	int  oi = 0;
-	for (int i = 0; sql[i] && oi < (int)sizeof(escaped)-2; i++)
-	{
-		if (sql[i] == '\'')
-		{
-			escaped[oi++] = '\'';
-			escaped[oi++] = '\\';
-			escaped[oi++] = '\'';
-			escaped[oi++] = '\'';
-		}
-		else
-			escaped[oi++] = sql[i];
-	}
-	escaped[oi] = '\0';
+	escape_sql_for_shell(sql, escaped, sizeof(escaped));
 
+	/*
+	 * Always run with ON_ERROR_STOP=1 so psql exits non-zero on SQL errors,
+	 * and VERBOSITY=verbose so SQLSTATE codes appear in error output.
+	 * Redirect stderr to stdout so both are captured.
+	 */
 	int rc = run_cmd_capture(outbuf, outlen,
 		"docker compose -p %s -f %s exec -T %s "
-		"psql --tuples-only --no-align -c '%s' 2>&1",
+		"psql --tuples-only --no-align "
+		"-v ON_ERROR_STOP=1 -v VERBOSITY=verbose "
+		"-c '%s' 2>&1",
 		r->projectName, r->composeFile, service, escaped);
 
 	return rc == 0;
@@ -433,6 +484,25 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			return true;
 		}
 
+		case CMD_EXEC_FAILS:
+		{
+			int rc = run_cmd(
+				"docker compose -p %s -f %s exec -T %s %s 2>&1",
+				r->projectName, r->composeFile,
+				cmd->service, cmd->args);
+			if (rc == 0)
+			{
+				snprintf(errBuf, errLen,
+				         "exec-fails %s %s: command succeeded (exit 0) "
+				         "but expected failure",
+				         cmd->service, cmd->args);
+				return false;
+			}
+			log_debug("exec-fails %s %s: exited with %d (expected)",
+			          cmd->service, cmd->args, rc);
+			return true;
+		}
+
 		case CMD_WAIT_STATE:
 			if (!wait_for_state(r, cmd->service, cmd->state,
 			                    cmd->timeoutSeconds, false))
@@ -474,12 +544,33 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 
 		case CMD_SQL:
 		{
+			strlcpy(r->lastSqlService, cmd->service, sizeof(r->lastSqlService));
+			r->lastSqlFailed = false;
+			r->lastSqlState[0] = '\0';
+			r->lastSqlOutput[0] = '\0';
+
 			if (!exec_sql_on_service(r, cmd->service, cmd->args,
 			                         r->lastSqlOutput,
 			                         sizeof(r->lastSqlOutput)))
 			{
+				if (cmd->allowError)
+				{
+					/*
+					 * Soft failure: expected by the following CMD_EXPECT_ERROR.
+					 * Record the SQLSTATE and clear the output (it's an error
+					 * message, not usable result rows).
+					 */
+					r->lastSqlFailed = true;
+					parse_sqlstate(r->lastSqlOutput, r->lastSqlState,
+					               sizeof(r->lastSqlState));
+					log_debug("sql on %s failed with SQLSTATE %s (expected)",
+					          cmd->service,
+					          r->lastSqlState[0] ? r->lastSqlState : "(unknown)");
+					r->lastSqlOutput[0] = '\0';
+					return true;
+				}
 				snprintf(errBuf, errLen,
-				         "sql on %s failed", cmd->service);
+				         "sql on %s failed:\n%s", cmd->service, r->lastSqlOutput);
 				return false;
 			}
 			log_debug("sql output: %s", r->lastSqlOutput);
@@ -495,6 +586,28 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				         cmd->expected, r->lastSqlOutput);
 				return false;
 			}
+			return true;
+		}
+
+		case CMD_EXPECT_ERROR:
+		{
+			if (!r->lastSqlFailed)
+			{
+				snprintf(errBuf, errLen,
+				         "expected SQL error on %s, but the query succeeded",
+				         r->lastSqlService);
+				return false;
+			}
+			if (cmd->state[0] &&
+			    strcmp(r->lastSqlState, cmd->state) != 0)
+			{
+				snprintf(errBuf, errLen,
+				         "expected SQLSTATE %s on %s, got %s",
+				         cmd->state, r->lastSqlService,
+				         r->lastSqlState[0] ? r->lastSqlState : "(unknown)");
+				return false;
+			}
+			r->lastSqlFailed = false;  /* consumed */
 			return true;
 		}
 
