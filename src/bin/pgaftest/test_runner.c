@@ -168,11 +168,30 @@ runner_compose_generate(TestRunner *r)
 		return false;
 	}
 
-	return compose_gen_write(&r->spec->cluster,
-	                         r->composeFile,
-	                         r->projectName,
-	                         r->monitorPort,
-	                         r->contextDir);
+	if (!compose_gen_write(&r->spec->cluster,
+	                       r->composeFile,
+	                       r->projectName,
+	                       r->monitorPort,
+	                       r->contextDir))
+		return false;
+
+	/*
+	 * Write per-node pg_autoctl_node.ini files into the workdir.  Each one
+	 * is bind-mounted into its container at /etc/pgaf/node.ini so that
+	 * every container uses the same image and command regardless of role.
+	 */
+	if (!compose_gen_write_monitor_ini(&r->spec->cluster, r->workDir))
+		return false;
+
+	for (int i = 0; i < r->spec->cluster.nodeCount; i++)
+	{
+		if (!compose_gen_write_node_ini(&r->spec->cluster,
+		                                &r->spec->cluster.nodes[i],
+		                                r->workDir))
+			return false;
+	}
+
+	return true;
 }
 
 static bool

@@ -195,47 +195,92 @@ cluster_block:
 		char *text = $2;
 		char *line = strtok(text, "\n");
 
-		current_spec->cluster.withMonitor = true;
-		current_spec->cluster.numSync = -1;
+		TestCluster *cl = &current_spec->cluster;
+		cl->withMonitor = true;
+		cl->numSync = -1;
+		/* cluster-level defaults */
+		strlcpy(cl->ssl,       "self-signed", sizeof(cl->ssl));
+		strlcpy(cl->auth,      "trust",       sizeof(cl->auth));
+		strlcpy(cl->formation, "default",     sizeof(cl->formation));
+		cl->monitorHostPort = 0;   /* 0 = auto-assigned by runner */
 
 		while (line)
 		{
-			/* skip leading whitespace */
+			/* skip leading whitespace and comment lines */
 			while (*line == ' ' || *line == '\t') line++;
+			if (*line == '#' || *line == '\0') { line = strtok(NULL, "\n"); continue; }
 
-			if (strncmp(line, "monitor", 7) == 0)
+			if (strncmp(line, "image", 5) == 0)
 			{
-				current_spec->cluster.withMonitor = true;
+				/* image "pg_auto_failover:pg17"  or  image pg_auto_failover:pg17 */
+				char val[256] = { 0 };
+				const char *p = line + 5;
+				while (*p == ' ' || *p == '\t') p++;
+				if (*p == '"')
+					sscanf(p, "\"%255[^\"]\"", val);
+				else
+					sscanf(p, "%255s", val);
+				strlcpy(cl->image, val, sizeof(cl->image));
+			}
+			else if (strncmp(line, "ssl", 3) == 0)
+			{
+				char val[32] = { 0 };
+				sscanf(line + 3, " %31s", val);
+				strlcpy(cl->ssl, val, sizeof(cl->ssl));
+			}
+			else if (strncmp(line, "auth", 4) == 0)
+			{
+				char val[32] = { 0 };
+				sscanf(line + 4, " %31s", val);
+				strlcpy(cl->auth, val, sizeof(cl->auth));
+			}
+			else if (strncmp(line, "formation", 9) == 0)
+			{
+				char val[64] = { 0 };
+				const char *p = line + 9;
+				while (*p == ' ' || *p == '\t') p++;
+				if (*p == '"')
+					sscanf(p, "\"%63[^\"]\"", val);
+				else
+					sscanf(p, "%63s", val);
+				strlcpy(cl->formation, val, sizeof(cl->formation));
+			}
+			else if (strncmp(line, "num-sync", 8) == 0)
+			{
+				sscanf(line + 8, " %d", &cl->numSync);
+			}
+			else if (strncmp(line, "monitor", 7) == 0)
+			{
+				cl->withMonitor = true;
+				/* optional: monitor [port 15432] */
+				char *pp = strstr(line, "port");
+				if (pp) cl->monitorHostPort = atoi(pp + 4);
 			}
 			else if (strncmp(line, "citus-coordinator", 17) == 0)
 			{
-				TestNode *n = &current_spec->cluster.nodes[
-				              current_spec->cluster.nodeCount++];
+				TestNode *n = &cl->nodes[cl->nodeCount++];
 				sscanf(line + 18, "%63s", n->name);
 				n->kind = NODE_KIND_CITUS_COORDINATOR;
 				n->group = 0;
 				n->candidatePriority = 50;
 				n->replicationQuorum = true;
-				current_spec->cluster.withCitus = true;
+				cl->withCitus = true;
 			}
 			else if (strncmp(line, "citus-worker", 12) == 0)
 			{
-				TestNode *n = &current_spec->cluster.nodes[
-				              current_spec->cluster.nodeCount++];
+				TestNode *n = &cl->nodes[cl->nodeCount++];
 				char rest[256];
 				sscanf(line + 13, "%63s %255[^\n]", n->name, rest);
 				n->kind = NODE_KIND_CITUS_WORKER;
 				n->candidatePriority = 50;
 				n->replicationQuorum = true;
-				/* parse group=N from rest */
 				char *gp = strstr(rest, "group=");
 				if (gp) n->group = atoi(gp + 6);
-				current_spec->cluster.withCitus = true;
+				cl->withCitus = true;
 			}
 			else if (strncmp(line, "node", 4) == 0)
 			{
-				TestNode *n = &current_spec->cluster.nodes[
-				              current_spec->cluster.nodeCount++];
+				TestNode *n = &cl->nodes[cl->nodeCount++];
 				n->kind = NODE_KIND_STANDALONE;
 				n->candidatePriority = 50;
 				n->replicationQuorum = true;
@@ -243,7 +288,6 @@ cluster_block:
 				char rest[256] = { 0 };
 				sscanf(line + 5, "%63s %255[^\n]", n->name, rest);
 
-				/* parse options: candidate-priority=N  async */
 				char *cp = strstr(rest, "candidate-priority=");
 				if (cp) n->candidatePriority = atoi(cp + 19);
 

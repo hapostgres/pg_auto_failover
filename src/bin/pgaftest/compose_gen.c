@@ -1,6 +1,27 @@
 /*
  * src/bin/pgaftest/compose_gen.c
- *   Generate a docker-compose.yml from a TestCluster spec.
+ *   Generate a docker-compose.yml and per-node pg_autoctl_node.ini files
+ *   from a TestCluster spec.
+ *
+ * Design principle — uniform containers
+ * ======================================
+ * Every container in the generated compose file uses:
+ *   - the same Docker image (PGAF_IMAGE env var or a local build)
+ *   - the same command:  pg_autoctl node run /etc/pgaf/node.ini
+ *   - the same config file location inside the container
+ *
+ * Node-specific behaviour (monitor vs postgres vs coordinator vs worker,
+ * candidate-priority, replication-quorum, formation, group) is encoded in
+ * the per-node pg_autoctl_node.ini file, which is bind-mounted into the
+ * container at /etc/pgaf/node.ini.
+ *
+ * This means:
+ *   - No bespoke container command per node type.
+ *   - The running supervisor watches /etc/pgaf/node.ini via inotify/mtime
+ *     and converges mutable settings when the file is edited externally.
+ *   - Changing candidate-priority or replication-quorum for a node is as
+ *     simple as editing the ini file on the host — the container picks it
+ *     up without a restart.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -13,6 +34,8 @@
 #include "compose_gen.h"
 #include "pgsetup.h"
 #include "log.h"
+#include "file_utils.h"   /* sformat */
+#include "string_utils.h"
 
 /*
  * Monitor URI used by data nodes to register.
@@ -21,18 +44,23 @@
 #define MONITOR_PGURI \
 	"postgresql://autoctl_node@monitor/pg_auto_failover"
 
+/* Fixed path inside every container */
+#define NODE_INI_PATH "/etc/pgaf/node.ini"
+
+/* Fixed PGDATA location inside every container */
+#define NODE_PGDATA "/var/lib/postgres/pgaf"
+
+
 /*
- * Emit either an `image:` stanza (when PGAF_IMAGE is set) or a
- * `build:` stanza pointing at the project root.
- *
- * Using PGAF_IMAGE skips the Docker build entirely — useful when the
- * caller has already built and tagged an image:
- *   PGAF_IMAGE=pg_auto_failover:pg17 pgaftest run spec.pgaf
+ * image_stanza writes either `image:` (when PGAF_IMAGE is set or the cluster
+ * spec provides an image) or a `build:` stanza.
  */
 static void
-write_image_or_build(FILE *f, const char *contextDir)
+write_image_stanza(FILE *f, const TestCluster *cluster, const char *contextDir)
 {
-	const char *img = getenv("PGAF_IMAGE");
+	/* cluster-level image overrides PGAF_IMAGE env var */
+	const char *img = cluster->image[0] ? cluster->image : getenv("PGAF_IMAGE");
+
 	if (img && *img)
 		fprintf(f, "    image: \"%s\"\n", img);
 	else
@@ -43,19 +71,19 @@ write_image_or_build(FILE *f, const char *contextDir)
 			contextDir);
 }
 
-void
-compose_network_name(const char *projectName, char *buf, int buflen)
-{
-	snprintf(buf, buflen, "%s_default", projectName);
-}
 
-void
-compose_container_name(const char *projectName, const char *service,
-                       char *buf, int buflen)
-{
-	snprintf(buf, buflen, "%s-%s-1", projectName, service);
-}
+/* -----------------------------------------------------------------------
+ * compose_gen_write — the docker-compose.yml
+ * ----------------------------------------------------------------------- */
 
+/*
+ * compose_gen_write generates the docker-compose.yml.
+ *
+ * Every service uses:
+ *   command: pg_autoctl node run /etc/pgaf/node.ini
+ *
+ * The per-node ini file is bind-mounted from the workdir.
+ */
 bool
 compose_gen_write(const TestCluster *cluster,
                   const char *path,
@@ -76,13 +104,14 @@ compose_gen_write(const TestCluster *cluster,
 
 	/* ---- monitor ---- */
 	fprintf(f, "  monitor:\n");
-	write_image_or_build(f, contextDir);
+	write_image_stanza(f, cluster, contextDir);
 	fprintf(f,
 		"    hostname: monitor\n"
 		"    volumes:\n"
 		"      - monitor_data:/var/lib/postgres:rw\n"
+		"      - ./monitor_node.ini:" NODE_INI_PATH ":ro\n"
 		"    environment:\n"
-		"      PGDATA: /var/lib/postgres/pgaf\n"
+		"      PGDATA: " NODE_PGDATA "\n"
 		"    ports:\n"
 		"      - \"127.0.0.1:%d:5432\"\n"
 		"    healthcheck:\n"
@@ -92,58 +121,39 @@ compose_gen_write(const TestCluster *cluster,
 		"      timeout: 5s\n"
 		"      retries: 20\n"
 		"      start_period: 30s\n"
-		"    command: >-\n"
-		"      pg_autoctl create monitor\n"
-		"        --ssl-self-signed --auth trust --run\n"
-		"\n",
+		"    command: [\"pg_autoctl\", \"node\", \"run\", \"" NODE_INI_PATH "\"]\n\n",
 		monitorHostPort);
 
 	/* ---- data nodes ---- */
 	for (int i = 0; i < cluster->nodeCount; i++)
 	{
 		const TestNode *n = &cluster->nodes[i];
-		const char *pgactl_cmd;
+		char ini_filename[128];
 
-		if (n->kind == NODE_KIND_CITUS_COORDINATOR)
-			pgactl_cmd = "pg_autoctl create coordinator"
-			             " --ssl-self-signed --auth trust --pg-hba-lan --run";
-		else if (n->kind == NODE_KIND_CITUS_WORKER)
-		{
-			/* written below with group arg */
-			pgactl_cmd = NULL;
-		}
-		else
-			pgactl_cmd = "pg_autoctl create postgres"
-			             " --ssl-self-signed --auth trust --pg-hba-lan --run";
+		sformat(ini_filename, sizeof(ini_filename), "%s_node.ini", n->name);
 
 		fprintf(f, "  %s:\n", n->name);
-		write_image_or_build(f, contextDir);
+		write_image_stanza(f, cluster, contextDir);
 		fprintf(f,
 			"    hostname: %s\n"
 			"    volumes:\n"
 			"      - %s_data:/var/lib/postgres:rw\n"
+			"      - ./%s:" NODE_INI_PATH ":ro\n"
 			"    environment:\n"
-			"      PGDATA: /var/lib/postgres/pgaf\n"
+			"      PGDATA: " NODE_PGDATA "\n"
 			"      PGUSER: demo\n"
 			"      PGDATABASE: demo\n"
-			"      PG_AUTOCTL_MONITOR: \"%s\"\n"
-			"      PG_AUTOCTL_NODE_NAME: \"%s\"\n"
-			"      PG_AUTOCTL_REPLICATION_QUORUM: \"%s\"\n"
-			"      PG_AUTOCTL_CANDIDATE_PRIORITY: %d\n"
 			"    expose:\n"
 			"      - 5432\n"
 			"    depends_on:\n"
 			"      monitor:\n"
 			"        condition: service_healthy\n",
-			n->name, n->name,
-			MONITOR_PGURI,
 			n->name,
-			n->replicationQuorum ? "true" : "false",
-			n->candidatePriority);
+			n->name, ini_filename);
 
 		/*
-		 * All nodes after the first also wait for the first node's container
-		 * to start, ensuring node1 registers first and gets nodeid=1.
+		 * Ensure node registration order is deterministic: node1 always
+		 * registers before node2 etc., so node IDs are predictable in tests.
 		 */
 		if (i > 0)
 			fprintf(f,
@@ -151,17 +161,9 @@ compose_gen_write(const TestCluster *cluster,
 				"        condition: service_started\n",
 				cluster->nodes[0].name);
 
-		if (n->kind == NODE_KIND_CITUS_WORKER)
-			fprintf(f,
-				"    command: >-\n"
-				"      pg_autoctl create worker\n"
-				"        --ssl-self-signed --auth trust --pg-hba-lan"
-				" --group %d --run\n\n",
-				n->group);
-		else
-			fprintf(f,
-				"    command: \"%s\"\n\n",
-				pgactl_cmd);
+		fprintf(f,
+			"    command: [\"pg_autoctl\", \"node\", \"run\","
+			" \"" NODE_INI_PATH "\"]\n\n");
 	}
 
 	/* ---- volumes ---- */
@@ -173,4 +175,138 @@ compose_gen_write(const TestCluster *cluster,
 	fclose(f);
 	log_info("Wrote docker-compose.yml to \"%s\"", path);
 	return true;
+}
+
+
+/* -----------------------------------------------------------------------
+ * compose_gen_write_monitor_ini
+ * ----------------------------------------------------------------------- */
+
+bool
+compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
+{
+	char path[1024];
+	sformat(path, sizeof(path), "%s/monitor_node.ini", dir);
+
+	FILE *f = fopen(path, "w");
+	if (!f)
+	{
+		log_error("Failed to open \"%s\" for writing: %m", path);
+		return false;
+	}
+
+	fprintf(f,
+		"# Generated by pgaftest — do not edit manually\n"
+		"# Monitor node configuration\n"
+		"\n"
+		"[node]\n"
+		"kind     = monitor\n"
+		"hostname = monitor\n"
+		"port     = 5432\n"
+		"\n"
+		"[postgresql]\n"
+		"pgdata = " NODE_PGDATA "\n"
+		"\n"
+		"[settings]\n"
+		"candidate_priority = 0\n"
+		"replication_quorum = false\n"
+		"\n"
+		"[create]\n"
+		"ssl        = %s\n"
+		"auth       = %s\n"
+		"pg_hba_lan = false\n",
+		cluster->ssl,
+		cluster->auth);
+
+	fclose(f);
+	log_info("Wrote monitor_node.ini to \"%s\"", path);
+	return true;
+}
+
+
+/* -----------------------------------------------------------------------
+ * compose_gen_write_node_ini
+ * ----------------------------------------------------------------------- */
+
+bool
+compose_gen_write_node_ini(const TestCluster *cluster,
+                           const TestNode *node,
+                           const char *dir)
+{
+	char path[1024];
+	sformat(path, sizeof(path), "%s/%s_node.ini", dir, node->name);
+
+	FILE *f = fopen(path, "w");
+	if (!f)
+	{
+		log_error("Failed to open \"%s\" for writing: %m", path);
+		return false;
+	}
+
+	const char *kindStr;
+	switch (node->kind)
+	{
+		case NODE_KIND_CITUS_COORDINATOR: kindStr = "coordinator"; break;
+		case NODE_KIND_CITUS_WORKER:      kindStr = "worker";      break;
+		default:                          kindStr = "postgres";    break;
+	}
+
+	fprintf(f,
+		"# Generated by pgaftest — do not edit manually\n"
+		"# Node: %s\n"
+		"\n"
+		"[node]\n"
+		"kind     = %s\n"
+		"hostname = %s\n"
+		"port     = 5432\n"
+		"\n"
+		"[postgresql]\n"
+		"pgdata = " NODE_PGDATA "\n"
+		"\n"
+		"[monitor]\n"
+		"pguri = " MONITOR_PGURI "\n"
+		"\n"
+		"[formation]\n"
+		"name  = %s\n"
+		"group = %d\n"
+		"\n"
+		"[settings]\n"
+		"candidate_priority = %d\n"
+		"replication_quorum = %s\n"
+		"\n"
+		"[create]\n"
+		"ssl        = %s\n"
+		"auth       = %s\n"
+		"pg_hba_lan = true\n",
+		node->name,
+		kindStr,
+		node->name,
+		cluster->formation,
+		node->group,
+		node->candidatePriority,
+		node->replicationQuorum ? "true" : "false",
+		cluster->ssl,
+		cluster->auth);
+
+	fclose(f);
+	log_info("Wrote %s_node.ini to \"%s\"", node->name, path);
+	return true;
+}
+
+
+/* -----------------------------------------------------------------------
+ * Helpers used by test_runner.c
+ * ----------------------------------------------------------------------- */
+
+void
+compose_network_name(const char *projectName, char *buf, int buflen)
+{
+	snprintf(buf, buflen, "%s_default", projectName);
+}
+
+void
+compose_container_name(const char *projectName, const char *service,
+                       char *buf, int buflen)
+{
+	snprintf(buf, buflen, "%s-%s-1", projectName, service);
 }

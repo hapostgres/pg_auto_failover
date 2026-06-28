@@ -24,6 +24,22 @@ bool compose_gen_write(const TestCluster *cluster,
                        int monitorHostPort,
                        const char *contextDir);
 
+/*
+ * Write a pg_autoctl_node.ini file for the monitor node into `dir`.
+ * The file is written as <dir>/monitor_node.ini and will be bind-mounted
+ * into the container at PG_AUTOCTL_NODESPEC_PATH.
+ */
+bool compose_gen_write_monitor_ini(const TestCluster *cluster,
+                                   const char *dir);
+
+/*
+ * Write a pg_autoctl_node.ini file for a data node into `dir`.
+ * The file is written as <dir>/<node->name>_node.ini.
+ */
+bool compose_gen_write_node_ini(const TestCluster *cluster,
+                                const TestNode *node,
+                                const char *dir);
+
 /* Return the docker network name for a project */
 void compose_network_name(const char *projectName, char *buf, int buflen);
 

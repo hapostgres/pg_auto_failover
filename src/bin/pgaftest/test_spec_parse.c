@@ -617,7 +617,7 @@ static const yytype_int8 yyrhs[] =
 static const yytype_uint16 yyrline[] =
 {
        0,   171,   171,   172,   176,   177,   178,   179,   180,   188,
-     265,   272,   283,   293,   414,   417,   419,   438,   439
+     309,   316,   327,   337,   458,   461,   463,   482,   483
 };
 #endif
 
@@ -1549,47 +1549,92 @@ yyreduce:
 		char *text = (yyvsp[(2) - (2)].str);
 		char *line = strtok(text, "\n");
 
-		current_spec->cluster.withMonitor = true;
-		current_spec->cluster.numSync = -1;
+		TestCluster *cl = &current_spec->cluster;
+		cl->withMonitor = true;
+		cl->numSync = -1;
+		/* cluster-level defaults */
+		strlcpy(cl->ssl,       "self-signed", sizeof(cl->ssl));
+		strlcpy(cl->auth,      "trust",       sizeof(cl->auth));
+		strlcpy(cl->formation, "default",     sizeof(cl->formation));
+		cl->monitorHostPort = 0;   /* 0 = auto-assigned by runner */
 
 		while (line)
 		{
-			/* skip leading whitespace */
+			/* skip leading whitespace and comment lines */
 			while (*line == ' ' || *line == '\t') line++;
+			if (*line == '#' || *line == '\0') { line = strtok(NULL, "\n"); continue; }
 
-			if (strncmp(line, "monitor", 7) == 0)
+			if (strncmp(line, "image", 5) == 0)
 			{
-				current_spec->cluster.withMonitor = true;
+				/* image "pg_auto_failover:pg17"  or  image pg_auto_failover:pg17 */
+				char val[256] = { 0 };
+				const char *p = line + 5;
+				while (*p == ' ' || *p == '\t') p++;
+				if (*p == '"')
+					sscanf(p, "\"%255[^\"]\"", val);
+				else
+					sscanf(p, "%255s", val);
+				strlcpy(cl->image, val, sizeof(cl->image));
+			}
+			else if (strncmp(line, "ssl", 3) == 0)
+			{
+				char val[32] = { 0 };
+				sscanf(line + 3, " %31s", val);
+				strlcpy(cl->ssl, val, sizeof(cl->ssl));
+			}
+			else if (strncmp(line, "auth", 4) == 0)
+			{
+				char val[32] = { 0 };
+				sscanf(line + 4, " %31s", val);
+				strlcpy(cl->auth, val, sizeof(cl->auth));
+			}
+			else if (strncmp(line, "formation", 9) == 0)
+			{
+				char val[64] = { 0 };
+				const char *p = line + 9;
+				while (*p == ' ' || *p == '\t') p++;
+				if (*p == '"')
+					sscanf(p, "\"%63[^\"]\"", val);
+				else
+					sscanf(p, "%63s", val);
+				strlcpy(cl->formation, val, sizeof(cl->formation));
+			}
+			else if (strncmp(line, "num-sync", 8) == 0)
+			{
+				sscanf(line + 8, " %d", &cl->numSync);
+			}
+			else if (strncmp(line, "monitor", 7) == 0)
+			{
+				cl->withMonitor = true;
+				/* optional: monitor [port 15432] */
+				char *pp = strstr(line, "port");
+				if (pp) cl->monitorHostPort = atoi(pp + 4);
 			}
 			else if (strncmp(line, "citus-coordinator", 17) == 0)
 			{
-				TestNode *n = &current_spec->cluster.nodes[
-				              current_spec->cluster.nodeCount++];
+				TestNode *n = &cl->nodes[cl->nodeCount++];
 				sscanf(line + 18, "%63s", n->name);
 				n->kind = NODE_KIND_CITUS_COORDINATOR;
 				n->group = 0;
 				n->candidatePriority = 50;
 				n->replicationQuorum = true;
-				current_spec->cluster.withCitus = true;
+				cl->withCitus = true;
 			}
 			else if (strncmp(line, "citus-worker", 12) == 0)
 			{
-				TestNode *n = &current_spec->cluster.nodes[
-				              current_spec->cluster.nodeCount++];
+				TestNode *n = &cl->nodes[cl->nodeCount++];
 				char rest[256];
 				sscanf(line + 13, "%63s %255[^\n]", n->name, rest);
 				n->kind = NODE_KIND_CITUS_WORKER;
 				n->candidatePriority = 50;
 				n->replicationQuorum = true;
-				/* parse group=N from rest */
 				char *gp = strstr(rest, "group=");
 				if (gp) n->group = atoi(gp + 6);
-				current_spec->cluster.withCitus = true;
+				cl->withCitus = true;
 			}
 			else if (strncmp(line, "node", 4) == 0)
 			{
-				TestNode *n = &current_spec->cluster.nodes[
-				              current_spec->cluster.nodeCount++];
+				TestNode *n = &cl->nodes[cl->nodeCount++];
 				n->kind = NODE_KIND_STANDALONE;
 				n->candidatePriority = 50;
 				n->replicationQuorum = true;
@@ -1597,7 +1642,6 @@ yyreduce:
 				char rest[256] = { 0 };
 				sscanf(line + 5, "%63s %255[^\n]", n->name, rest);
 
-				/* parse options: candidate-priority=N  async */
 				char *cp = strstr(rest, "candidate-priority=");
 				if (cp) n->candidatePriority = atoi(cp + 19);
 
@@ -1612,21 +1656,21 @@ yyreduce:
     break;
 
   case 10:
-#line 266 "test_spec_parse.y"
+#line 310 "test_spec_parse.y"
     {
 		current_spec->setup = (yyvsp[(2) - (2)].step);
 	;}
     break;
 
   case 11:
-#line 273 "test_spec_parse.y"
+#line 317 "test_spec_parse.y"
     {
 		current_spec->teardown = (yyvsp[(2) - (2)].step);
 	;}
     break;
 
   case 12:
-#line 284 "test_spec_parse.y"
+#line 328 "test_spec_parse.y"
     {
 		TestStep *s = (yyvsp[(3) - (3)].step);
 		strncpy(s->name, (yyvsp[(2) - (3)].str), sizeof(s->name) - 1);
@@ -1636,7 +1680,7 @@ yyreduce:
     break;
 
   case 13:
-#line 294 "test_spec_parse.y"
+#line 338 "test_spec_parse.y"
     {
 		/*
 		 * Parse the block text into a linked list of TestCmd.
@@ -1753,7 +1797,7 @@ yyreduce:
     break;
 
   case 16:
-#line 420 "test_spec_parse.y"
+#line 464 "test_spec_parse.y"
     {
 		int i = current_spec->sequenceLength;
 		if (i < PGAF_MAX_SEQ)
@@ -1768,18 +1812,18 @@ yyreduce:
     break;
 
   case 17:
-#line 438 "test_spec_parse.y"
+#line 482 "test_spec_parse.y"
     { (yyval.str) = (yyvsp[(1) - (1)].str); ;}
     break;
 
   case 18:
-#line 439 "test_spec_parse.y"
+#line 483 "test_spec_parse.y"
     { (yyval.str) = (yyvsp[(1) - (1)].str); ;}
     break;
 
 
 /* Line 1267 of yacc.c.  */
-#line 1783 "test_spec_parse.c"
+#line 1827 "test_spec_parse.c"
       default: break;
     }
   YY_SYMBOL_PRINT ("-> $$ =", yyr1[yyn], &yyval, &yyloc);
@@ -1993,7 +2037,7 @@ yyreturn:
 }
 
 
-#line 442 "test_spec_parse.y"
+#line 486 "test_spec_parse.y"
 
 
 /* -----------------------------------------------------------------------

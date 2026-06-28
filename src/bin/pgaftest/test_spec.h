@@ -38,6 +38,13 @@ typedef struct TestCluster
 	bool     withMonitor;        /* always true for now */
 	bool     withCitus;
 	int      numSync;            /* number-sync-standbys, -1 = unset */
+
+	/* cluster-level Docker / network options */
+	char     image[256];         /* Docker image tag; "" = build from source */
+	char     ssl[32];            /* self-signed | cert | off; default self-signed */
+	char     auth[32];           /* trust | md5 | scram; default trust */
+	char     formation[64];      /* formation name; default "default" */
+	int      monitorHostPort;    /* host-side port mapped to monitor:5432; 0 = auto */
 } TestCluster;
 
 /* -----------------------------------------------------------------------
