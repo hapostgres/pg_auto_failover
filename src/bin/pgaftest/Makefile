@@ -6,6 +6,10 @@ PGAFTEST = ./pgaftest
 SRC_DIR    := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 PGACTL_DIR := $(SRC_DIR)../pg_autoctl/
 
+# Must be set before include so that targets in Makefile.common don't
+# become the default goal when included before the all: rule below.
+.DEFAULT_GOAL := all
+
 include $(SRC_DIR)../common/Makefile.common
 
 # Include both our own dir and pg_autoctl for shared headers

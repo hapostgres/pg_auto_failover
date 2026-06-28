@@ -5,6 +5,10 @@ PG_AUTOCTL = ./pg_autoctl
 
 SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
+# Must be set before include so that targets in Makefile.common don't
+# become the default goal when included before the all: rule below.
+.DEFAULT_GOAL := all
+
 include $(SRC_DIR)../common/Makefile.common
 
 # pg_autoctl includes its own source directory too

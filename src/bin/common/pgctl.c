@@ -1632,7 +1632,8 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	args[argsIndex++] = "-D";
 	args[argsIndex++] = (char *) pgdata;
 	args[argsIndex++] = "-p";
-	args[argsIndex++] = (char *) intToString(pgport).strValue;
+	IntString pgportStr = intToString(pgport);
+	args[argsIndex++] = (char *) pgportStr.strValue;
 
 	if (listen)
 	{

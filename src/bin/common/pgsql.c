@@ -1580,7 +1580,8 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 	for (nodeIndex = 0; nodeIndex < nodeArray->count; nodeIndex++)
 	{
 		NodeAddress *node = &(nodeArray->nodes[nodeIndex]);
-		char *nodeIdString = intToString(node->nodeId).strValue;
+		IntString nodeIdStr = intToString(node->nodeId);
+		char *nodeIdString = nodeIdStr.strValue;
 
 		int idParamIndex = paramIndex;
 		int lsnParamIndex = paramIndex + 1;
