@@ -183,12 +183,16 @@ runner_compose_generate(TestRunner *r)
 	if (!compose_gen_write_monitor_ini(&r->spec->cluster, r->workDir))
 		return false;
 
-	for (int i = 0; i < r->spec->cluster.nodeCount; i++)
+	for (int fi = 0; fi < r->spec->cluster.formationCount; fi++)
 	{
-		if (!compose_gen_write_node_ini(&r->spec->cluster,
-		                                &r->spec->cluster.nodes[i],
-		                                r->workDir))
-			return false;
+		const TestFormation *form = &r->spec->cluster.formations[fi];
+
+		for (int ni = 0; ni < form->nodeCount; ni++)
+		{
+			if (!compose_gen_write_node_ini(&r->spec->cluster, form,
+			                                &form->nodes[ni], r->workDir))
+				return false;
+		}
 	}
 
 	return true;
@@ -208,6 +212,51 @@ runner_compose_up(TestRunner *r)
 	}
 	r->composeUp = true;
 	return true;
+}
+
+/*
+ * runner_apply_formation_settings — apply cluster-level formation settings
+ * that cannot be expressed in the node ini files.
+ *
+ * Called once after `docker compose up` and the monitor healthcheck passes.
+ * Currently applies:
+ *   - number-sync-standbys (when numSync >= 0 in the cluster spec)
+ *
+ * We use `docker compose exec` so the call goes through the monitor's own
+ * pg_autoctl binary and lands on the already-running monitor instance.
+ */
+static bool
+runner_apply_formation_settings(TestRunner *r)
+{
+	const TestCluster *c = &r->spec->cluster;
+	bool ok = true;
+
+	for (int fi = 0; fi < c->formationCount; fi++)
+	{
+		const TestFormation *form = &c->formations[fi];
+
+		if (form->numSync < 0)
+			continue;
+
+		log_info("Setting formation \"%s\" number-sync-standbys = %d",
+		         form->name, form->numSync);
+
+		int rc = run_cmd(
+			"docker compose -p %s -f %s exec monitor "
+			"pg_autoctl set formation number-sync-standbys %d "
+			"--pgdata /var/lib/postgres/pgaf --formation %s 2>&1",
+			r->projectName, r->composeFile,
+			form->numSync, form->name);
+
+		if (rc != 0)
+		{
+			log_error("Failed to set number-sync-standbys for formation "
+			          "\"%s\" (exit %d)", form->name, rc);
+			ok = false;
+		}
+	}
+
+	return ok;
 }
 
 static bool
@@ -530,6 +579,12 @@ runner_run(TestSpec *spec, const char *workDir)
 	if (!runner_compose_up(&r))
 		return false;
 
+	if (!runner_apply_formation_settings(&r))
+	{
+		runner_compose_down(&r);
+		return false;
+	}
+
 	tap_plan(&r);
 
 	/* setup{} */
@@ -594,6 +649,12 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 
 	if (!runner_compose_up(&r))
 		return false;
+
+	if (!runner_apply_formation_settings(&r))
+	{
+		runner_compose_down(&r);
+		return false;
+	}
 
 	/* run setup{} block */
 	if (spec->setup)

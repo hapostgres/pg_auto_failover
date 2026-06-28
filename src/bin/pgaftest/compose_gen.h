@@ -26,7 +26,7 @@ bool compose_gen_write(const TestCluster *cluster,
 
 /*
  * Write a pg_autoctl_node.ini file for the monitor node into `dir`.
- * The file is written as <dir>/monitor_node.ini and will be bind-mounted
+ * The file is written as <dir>/monitor.ini and will be bind-mounted
  * into the container at PG_AUTOCTL_NODESPEC_PATH.
  */
 bool compose_gen_write_monitor_ini(const TestCluster *cluster,
@@ -34,9 +34,11 @@ bool compose_gen_write_monitor_ini(const TestCluster *cluster,
 
 /*
  * Write a pg_autoctl_node.ini file for a data node into `dir`.
- * The file is written as <dir>/<node->name>_node.ini.
+ * The file is written as <dir>/<node->name>.ini.
+ * `formation` supplies the formation name and is written into [formation].
  */
 bool compose_gen_write_node_ini(const TestCluster *cluster,
+                                const TestFormation *formation,
                                 const TestNode *node,
                                 const char *dir);
 

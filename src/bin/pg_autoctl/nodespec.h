@@ -69,7 +69,7 @@ typedef struct NodeSpec
 	int  candidate_priority;     /* 0-100, default 50 */
 	bool replication_quorum;     /* sync quorum participant, default true */
 
-	/* [create]    — immutable; used only at pg_autoctl create time */
+	/* [options]    — immutable; used only at pg_autoctl create time */
 	char ssl[32];                /* self-signed | cert | off */
 	char auth[32];               /* trust | md5 | scram */
 	bool pg_hba_lan;             /* add --pg-hba-lan flag */

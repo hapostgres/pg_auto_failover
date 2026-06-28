@@ -12,13 +12,42 @@
 #include <stdbool.h>
 #include "pgsetup.h"   /* PgInstanceKind */
 
-#define PGAF_MAX_NODES    32
-#define PGAF_MAX_STEPS    256
-#define PGAF_MAX_SEQ      256
+#define PGAF_MAX_NODES       32
+#define PGAF_MAX_FORMATIONS  16
+#define PGAF_MAX_STEPS      256
+#define PGAF_MAX_SEQ        256
 #define PGAF_TIMEOUT_DEFAULT 90
 
 /* -----------------------------------------------------------------------
  * Cluster topology (from the cluster { } block)
+ *
+ * Hierarchy:  cluster → monitor + formations → nodes
+ *
+ * Syntax:
+ *
+ *   cluster {
+ *       monitor [port 15432]
+ *       image   "pg_auto_failover:pg17"   # optional; default: build from src
+ *       ssl     self-signed               # optional; default: self-signed
+ *       auth    trust                     # optional; default: trust
+ *
+ *       formation [name] [num-sync N] {
+ *           node1
+ *           node2
+ *           node3  async  candidate-priority 0
+ *           coord  coordinator
+ *           w1     worker  group 1
+ *       }
+ *
+ *       # Multiple formations (Citus use case)
+ *       formation workers num-sync 1 {
+ *           w1 worker group 1
+ *           w2 worker group 1
+ *       }
+ *   }
+ *
+ * When "formation" has no name it defaults to "default".
+ * When a formation block is omitted entirely the cluster is invalid.
  * ----------------------------------------------------------------------- */
 
 typedef struct TestNode
@@ -28,23 +57,30 @@ typedef struct TestNode
 	int  group;                  /* Citus group id; 0 = coordinator */
 	int  candidatePriority;      /* 0-100, default 50 */
 	bool replicationQuorum;      /* participates in sync quorum */
-	bool async;                  /* async standby */
+	bool async;                  /* async standby (replicationQuorum = false) */
 } TestNode;
+
+typedef struct TestFormation
+{
+	char name[64];               /* formation name; default "default" */
+	int  numSync;                /* number-sync-standbys, -1 = unset */
+	TestNode nodes[PGAF_MAX_NODES];
+	int  nodeCount;
+} TestFormation;
 
 typedef struct TestCluster
 {
-	TestNode nodes[PGAF_MAX_NODES];
-	int      nodeCount;
-	bool     withMonitor;        /* always true for now */
-	bool     withCitus;
-	int      numSync;            /* number-sync-standbys, -1 = unset */
+	TestFormation formations[PGAF_MAX_FORMATIONS];
+	int           formationCount;
+
+	bool withMonitor;            /* always true for now */
+	bool withCitus;
+	int  monitorHostPort;        /* host-side port mapped to monitor:5432; 0 = auto */
 
 	/* cluster-level Docker / network options */
-	char     image[256];         /* Docker image tag; "" = build from source */
-	char     ssl[32];            /* self-signed | cert | off; default self-signed */
-	char     auth[32];           /* trust | md5 | scram; default trust */
-	char     formation[64];      /* formation name; default "default" */
-	int      monitorHostPort;    /* host-side port mapped to monitor:5432; 0 = auto */
+	char image[256];             /* Docker image tag; "" = build from source */
+	char ssl[32];                /* self-signed | cert | off; default self-signed */
+	char auth[32];               /* trust | md5 | scram; default trust */
 } TestCluster;
 
 /* -----------------------------------------------------------------------

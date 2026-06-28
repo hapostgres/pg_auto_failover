@@ -19,9 +19,6 @@
 #include "test_runner.h"
 #include "cli_demo.h"
 
-/* Default work directory when --work-dir is not specified */
-#define DEFAULT_WORK_DIR "/tmp/pgaftest"
-
 /* -----------------------------------------------------------------------
  * Shared option parsing
  * ----------------------------------------------------------------------- */
@@ -29,7 +26,7 @@
 typedef struct PgaftestOpts
 {
 	char specFile[1024];
-	char workDir[1024];
+	char workDir[1024];   /* empty = auto-derive from spec name */
 	char stepName[64];
 	char schedule[1024];
 	char expected[1024];
@@ -37,9 +34,42 @@ typedef struct PgaftestOpts
 	int  verbose;
 } PgaftestOpts;
 
-static PgaftestOpts pgaftestOpts = {
-	.workDir = DEFAULT_WORK_DIR
-};
+static PgaftestOpts pgaftestOpts;   /* zero-initialised: workDir = "" */
+
+/*
+ * derive_work_dir — build $TMPDIR/pgaftest/<basename-without-.pgaf>
+ *
+ * Using TMPDIR (or /tmp when unset) + "pgaftest" + the test name means:
+ *   - Every spec gets its own isolated directory.
+ *   - Multiple instances of different specs can run concurrently.
+ *   - The directory name matches the Docker Compose project name, so
+ *     `docker compose -p basic_operation` addresses the right stack.
+ *
+ * Examples:
+ *   tests/tap/specs/basic_operation.pgaf  →  /tmp/pgaftest/basic_operation
+ *   failover.pgaf                         →  /tmp/pgaftest/failover
+ */
+static void
+derive_work_dir(const char *specPath, char *buf, int buflen)
+{
+	/* base name without directory */
+	const char *base = strrchr(specPath, '/');
+	base = base ? base + 1 : specPath;
+
+	char name[256] = { 0 };
+	strncpy(name, base, sizeof(name) - 1);
+
+	/* strip .pgaf extension */
+	char *dot = strrchr(name, '.');
+	if (dot && strcmp(dot, ".pgaf") == 0)
+		*dot = '\0';
+
+	const char *tmpdir = getenv("TMPDIR");
+	if (!tmpdir || *tmpdir == '\0')
+		tmpdir = "/tmp";
+
+	snprintf(buf, buflen, "%s/pgaftest/%s", tmpdir, name);
+}
 
 static struct option long_options[] = {
 	{ "work-dir",  required_argument, NULL, 'w' },
@@ -135,15 +165,22 @@ cli_run(int argc, char **argv)
 				         "tests/tap/specs/%s.pgaf", p);
 
 			char workDir[1024];
-			/* derive per-spec workdir from spec basename */
-			const char *base = strrchr(specPath, '/');
-			base = base ? base+1 : specPath;
-			char name[128];
-			strncpy(name, base, sizeof(name)-1);
-			char *dot = strrchr(name, '.');
-			if (dot) *dot = '\0';
-			snprintf(workDir, sizeof(workDir),
-			         "%s/%s", pgaftestOpts.workDir, name);
+			if (pgaftestOpts.workDir[0] != '\0')
+			{
+				/* explicit --work-dir: append spec name as subdir */
+				const char *base = strrchr(specPath, '/');
+				base = base ? base+1 : specPath;
+				char name[128];
+				strncpy(name, base, sizeof(name)-1);
+				char *dot = strrchr(name, '.');
+				if (dot) *dot = '\0';
+				snprintf(workDir, sizeof(workDir),
+				         "%s/%s", pgaftestOpts.workDir, name);
+			}
+			else
+			{
+				derive_work_dir(specPath, workDir, sizeof(workDir));
+			}
 
 			TestSpec *spec = parse_test_spec(specPath);
 			if (!spec) { failed++; total++; continue; }
@@ -169,6 +206,10 @@ cli_run(int argc, char **argv)
 	strncpy(pgaftestOpts.specFile, argv[optind - 1],
 	        sizeof(pgaftestOpts.specFile)-1);
 
+	if (pgaftestOpts.workDir[0] == '\0')
+		derive_work_dir(pgaftestOpts.specFile,
+		                pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
+
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
 	if (!spec) exit(1);
 
@@ -193,6 +234,10 @@ cli_setup(int argc, char **argv)
 
 	strncpy(pgaftestOpts.specFile, argv[optind - 1],
 	        sizeof(pgaftestOpts.specFile)-1);
+
+	if (pgaftestOpts.workDir[0] == '\0')
+		derive_work_dir(pgaftestOpts.specFile,
+		                pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
 
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
 	if (!spec) exit(1);
@@ -229,6 +274,11 @@ cli_step(int argc, char **argv)
 	/* If there's a second positional arg, treat it as the spec path */
 	if (optind + 1 < argc)
 		strncpy(specPath, argv[optind+1], sizeof(specPath)-1);
+
+	/* derive work dir from spec path when not given explicitly */
+	if (pgaftestOpts.workDir[0] == '\0')
+		derive_work_dir(specPath, pgaftestOpts.workDir,
+		                sizeof(pgaftestOpts.workDir));
 
 	TestSpec *spec = parse_test_spec(specPath);
 	if (!spec) exit(1);
@@ -270,12 +320,26 @@ cli_show(int argc, char **argv)
 static void
 cli_down(int argc, char **argv)
 {
-	pgaftest_getopts(argc, argv);
+	int optind = pgaftest_getopts(argc, argv);
+
+	/* optional positional: spec file to derive work dir from */
+	if (optind <= argc && argv[optind - 1] && argv[optind - 1][0] != '-')
+	{
+		strncpy(pgaftestOpts.specFile, argv[optind - 1],
+		        sizeof(pgaftestOpts.specFile)-1);
+	}
+
+	if (pgaftestOpts.workDir[0] == '\0' && pgaftestOpts.specFile[0] != '\0')
+		derive_work_dir(pgaftestOpts.specFile,
+		                pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
 
 	/* spec file is optional for `down` — teardown may not need it */
 	char specPath[1024];
-	snprintf(specPath, sizeof(specPath), "%s/spec.pgaf",
-	         pgaftestOpts.workDir);
+	if (pgaftestOpts.specFile[0] != '\0')
+		strncpy(specPath, pgaftestOpts.specFile, sizeof(specPath)-1);
+	else
+		snprintf(specPath, sizeof(specPath), "%s/spec.pgaf",
+		         pgaftestOpts.workDir);
 
 	TestSpec *spec = NULL;
 	if (access(specPath, R_OK) == 0)
@@ -302,7 +366,8 @@ static CommandLine run_command =
 	             "[options] [<spec.pgaf>]",
 	             "  --schedule <file>  Run all specs listed in schedule file\n"
 	             "  --expected <dir>   Directory of expected output files\n"
-	             "  --work-dir <dir>   Working directory (default: /tmp/pgaftest)\n"
+	             "  --work-dir <dir>   Working directory\n"
+	             "                     (default: $TMPDIR/pgaftest/<testname>)\n"
 	             "  --verbose          Increase log verbosity\n",
 	             pgaftest_getopts, cli_run);
 
@@ -311,7 +376,8 @@ static CommandLine setup_command =
 	             "Bring up a cluster from a spec file (interactive mode)",
 	             "[options] <spec.pgaf>",
 	             "  --tmux             Launch a tmux session after setup\n"
-	             "  --work-dir <dir>   Working directory (default: /tmp/pgaftest)\n"
+	             "  --work-dir <dir>   Working directory\n"
+	             "                     (default: $TMPDIR/pgaftest/<testname>)\n"
 	             "  --verbose          Increase log verbosity\n",
 	             pgaftest_getopts, cli_setup);
 

@@ -284,6 +284,256 @@ static void register_step(TestSpec *spec, TestStep *step)
 	spec->stepCount++;
 }
 
+/* -----------------------------------------------------------------------
+ * Cluster block mini-parser
+ *
+ * parse_node_line, parse_formation_block, and parse_cluster_block live in
+ * the %{ %} prologue so that bison sees them as C code, not grammar rules.
+ * ----------------------------------------------------------------------- */
+
+static void parse_formation_block(const char **pp, TestFormation *f,
+                                   TestCluster *cl);
+
+/*
+ * parse_node_line — parse one node line inside a formation block.
+ *
+ *   name [kind] [option...]
+ *
+ * Advances *pp past the line (stops at '\n' or '\0').
+ */
+static void
+parse_node_line(const char **pp, TestFormation *f, TestCluster *cl)
+{
+	const char *p = *pp;
+
+	/* skip leading whitespace */
+	while (*p == ' ' || *p == '\t') p++;
+
+	/* empty or comment */
+	if (*p == '\0' || *p == '#' || *p == '\n') {
+		while (*p && *p != '\n') p++;
+		*pp = p;
+		return;
+	}
+
+	if (f->nodeCount >= PGAF_MAX_NODES) {
+		fprintf(stderr, "pgaftest: too many nodes in formation (max %d)\n",
+		        PGAF_MAX_NODES);
+		exit(1);
+	}
+
+	TestNode *n = &f->nodes[f->nodeCount++];
+	n->kind = NODE_KIND_STANDALONE;
+	n->candidatePriority = 50;
+	n->replicationQuorum = true;
+
+	/* first token: node name */
+	char tok[64];
+	int i = 0;
+	while (*p && *p != ' ' && *p != '\t' && *p != '\n' && i < 63)
+		tok[i++] = *p++;
+	tok[i] = '\0';
+	strlcpy(n->name, tok, sizeof(n->name));
+
+	/* remaining tokens on the line */
+	while (*p && *p != '\n') {
+		while (*p == ' ' || *p == '\t') p++;
+		if (*p == '\0' || *p == '\n' || *p == '#') break;
+
+		/* read next token */
+		i = 0;
+		while (*p && *p != ' ' && *p != '\t' && *p != '\n' && i < 63)
+			tok[i++] = *p++;
+		tok[i] = '\0';
+
+		if (strcmp(tok, "postgres") == 0)
+			n->kind = NODE_KIND_STANDALONE;
+		else if (strcmp(tok, "coordinator") == 0) {
+			n->kind = NODE_KIND_CITUS_COORDINATOR;
+			cl->withCitus = true;
+		}
+		else if (strcmp(tok, "worker") == 0) {
+			n->kind = NODE_KIND_CITUS_WORKER;
+			cl->withCitus = true;
+		}
+		else if (strcmp(tok, "async") == 0)
+			n->replicationQuorum = false;
+		else if (strcmp(tok, "candidate-priority") == 0) {
+			while (*p == ' ' || *p == '\t') p++;
+			n->candidatePriority = atoi(p);
+			while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+		}
+		else if (strcmp(tok, "group") == 0) {
+			while (*p == ' ' || *p == '\t') p++;
+			n->group = atoi(p);
+			while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+		}
+		/* unknown tokens silently ignored */
+	}
+
+	/* advance past newline */
+	if (*p == '\n') p++;
+	*pp = p;
+}
+
+/*
+ * parse_formation_block — parse the body of a formation { } section.
+ *
+ * *pp points to the first character after the opening '{'.
+ * Returns with *pp pointing past the closing '}'.
+ */
+static void
+parse_formation_block(const char **pp, TestFormation *f, TestCluster *cl)
+{
+	const char *p = *pp;
+
+	while (*p) {
+		/* skip whitespace */
+		while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+		if (*p == '\0') break;
+
+		/* closing brace ends the formation */
+		if (*p == '}') { p++; break; }
+
+		/* comment */
+		if (*p == '#') {
+			while (*p && *p != '\n') p++;
+			continue;
+		}
+
+		/* node line */
+		parse_node_line(&p, f, cl);
+	}
+
+	*pp = p;
+}
+
+/*
+ * parse_cluster_block — parse the body of the cluster { } block.
+ */
+static void
+parse_cluster_block(const char *text, TestCluster *cl)
+{
+	const char *p = text;
+
+	while (*p) {
+		/* skip whitespace */
+		while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+		if (*p == '\0') break;
+
+		/* comment */
+		if (*p == '#') {
+			while (*p && *p != '\n') p++;
+			continue;
+		}
+
+		/* read the keyword / first token of the line */
+		char kw[64];
+		int  i = 0;
+		while (*p && *p != ' ' && *p != '\t' && *p != '\n' && i < 63)
+			kw[i++] = *p++;
+		kw[i] = '\0';
+
+		if (strcmp(kw, "monitor") == 0) {
+			cl->withMonitor = true;
+			/* optional: port N */
+			const char *pp = strstr(p, "port");
+			if (pp) {
+				pp += 4;
+				while (*pp == ' ' || *pp == '\t') pp++;
+				cl->monitorHostPort = atoi(pp);
+			}
+			while (*p && *p != '\n') p++;
+		}
+		else if (strcmp(kw, "image") == 0) {
+			while (*p == ' ' || *p == '\t') p++;
+			if (*p == '"') {
+				p++;
+				i = 0;
+				while (*p && *p != '"' && i < 255) cl->image[i++] = *p++;
+				cl->image[i] = '\0';
+				if (*p == '"') p++;
+			} else {
+				i = 0;
+				while (*p && *p != ' ' && *p != '\t' && *p != '\n' && i < 255)
+					cl->image[i++] = *p++;
+				cl->image[i] = '\0';
+			}
+			while (*p && *p != '\n') p++;
+		}
+		else if (strcmp(kw, "ssl") == 0) {
+			while (*p == ' ' || *p == '\t') p++;
+			i = 0;
+			while (*p && *p != ' ' && *p != '\t' && *p != '\n' && i < 31)
+				cl->ssl[i++] = *p++;
+			cl->ssl[i] = '\0';
+			while (*p && *p != '\n') p++;
+		}
+		else if (strcmp(kw, "auth") == 0) {
+			while (*p == ' ' || *p == '\t') p++;
+			i = 0;
+			while (*p && *p != ' ' && *p != '\t' && *p != '\n' && i < 31)
+				cl->auth[i++] = *p++;
+			cl->auth[i] = '\0';
+			while (*p && *p != '\n') p++;
+		}
+		else if (strcmp(kw, "formation") == 0) {
+			if (cl->formationCount >= PGAF_MAX_FORMATIONS) {
+				fprintf(stderr, "pgaftest: too many formations (max %d)\n",
+				        PGAF_MAX_FORMATIONS);
+				exit(1);
+			}
+			TestFormation *f = &cl->formations[cl->formationCount++];
+			strlcpy(f->name, "default", sizeof(f->name));
+			f->numSync = -1;
+
+			/* optional: name, then formation-level options, then '{' */
+			bool seen_brace = false;
+			while (*p && !seen_brace) {
+				while (*p == ' ' || *p == '\t') p++;
+				if (*p == '{') {
+					p++;
+					seen_brace = true;
+					break;
+				}
+				if (*p == '\0' || *p == '\n') break;
+
+				/* read next token */
+				char tok[64];
+				i = 0;
+				while (*p && *p != ' ' && *p != '\t' && *p != '\n' &&
+				       *p != '{' && i < 63)
+					tok[i++] = *p++;
+				tok[i] = '\0';
+
+				if (strcmp(tok, "num-sync") == 0) {
+					while (*p == ' ' || *p == '\t') p++;
+					f->numSync = atoi(p);
+					while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+				}
+				else if (tok[0] != '\0') {
+					/* treat as formation name */
+					strlcpy(f->name, tok, sizeof(f->name));
+				}
+			}
+
+			if (!seen_brace) {
+				/* skip to '{' which may be on a following line */
+				while (*p && *p != '{') p++;
+				if (*p == '{') p++;
+			}
+
+			parse_formation_block(&p, f, cl);
+		}
+		else {
+			/* unknown keyword — skip to end of line */
+			while (*p && *p != '\n') p++;
+		}
+
+		if (*p == '\n') p++;
+	}
+}
+
 
 
 /* Enabling traces.  */
@@ -306,7 +556,7 @@ static void register_step(TestSpec *spec, TestStep *step)
 
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 typedef union YYSTYPE
-#line 148 "test_spec_parse.y"
+#line 398 "test_spec_parse.y"
 {
 	int         ival;
 	char       *str;
@@ -314,7 +564,7 @@ typedef union YYSTYPE
 	TestCmd    *cmd;
 }
 /* Line 193 of yacc.c.  */
-#line 318 "test_spec_parse.c"
+#line 568 "test_spec_parse.c"
 	YYSTYPE;
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1
@@ -327,7 +577,7 @@ typedef union YYSTYPE
 
 
 /* Line 216 of yacc.c.  */
-#line 331 "test_spec_parse.c"
+#line 581 "test_spec_parse.c"
 
 #ifdef short
 # undef short
@@ -616,8 +866,8 @@ static const yytype_int8 yyrhs[] =
 /* YYRLINE[YYN] -- source line where rule number YYN was defined.  */
 static const yytype_uint16 yyrline[] =
 {
-       0,   171,   171,   172,   176,   177,   178,   179,   180,   188,
-     309,   316,   327,   337,   458,   461,   463,   482,   483
+       0,   421,   421,   422,   426,   427,   428,   429,   430,   442,
+     462,   469,   480,   490,   611,   614,   616,   635,   636
 };
 #endif
 
@@ -1539,138 +1789,37 @@ yyreduce:
   switch (yyn)
     {
         case 9:
-#line 189 "test_spec_parse.y"
+#line 443 "test_spec_parse.y"
     {
-		/*
-		 * Re-parse the block text as a mini node-list.
-		 * We do this with a simple line-by-line parser here rather than
-		 * a recursive grammar to keep things simple.
-		 */
-		char *text = (yyvsp[(2) - (2)].str);
-		char *line = strtok(text, "\n");
-
 		TestCluster *cl = &current_spec->cluster;
-		cl->withMonitor = true;
-		cl->numSync = -1;
+
 		/* cluster-level defaults */
-		strlcpy(cl->ssl,       "self-signed", sizeof(cl->ssl));
-		strlcpy(cl->auth,      "trust",       sizeof(cl->auth));
-		strlcpy(cl->formation, "default",     sizeof(cl->formation));
-		cl->monitorHostPort = 0;   /* 0 = auto-assigned by runner */
+		cl->withMonitor = true;
+		strlcpy(cl->ssl,  "self-signed", sizeof(cl->ssl));
+		strlcpy(cl->auth, "trust",       sizeof(cl->auth));
+		cl->monitorHostPort = 0;
 
-		while (line)
-		{
-			/* skip leading whitespace and comment lines */
-			while (*line == ' ' || *line == '\t') line++;
-			if (*line == '#' || *line == '\0') { line = strtok(NULL, "\n"); continue; }
-
-			if (strncmp(line, "image", 5) == 0)
-			{
-				/* image "pg_auto_failover:pg17"  or  image pg_auto_failover:pg17 */
-				char val[256] = { 0 };
-				const char *p = line + 5;
-				while (*p == ' ' || *p == '\t') p++;
-				if (*p == '"')
-					sscanf(p, "\"%255[^\"]\"", val);
-				else
-					sscanf(p, "%255s", val);
-				strlcpy(cl->image, val, sizeof(cl->image));
-			}
-			else if (strncmp(line, "ssl", 3) == 0)
-			{
-				char val[32] = { 0 };
-				sscanf(line + 3, " %31s", val);
-				strlcpy(cl->ssl, val, sizeof(cl->ssl));
-			}
-			else if (strncmp(line, "auth", 4) == 0)
-			{
-				char val[32] = { 0 };
-				sscanf(line + 4, " %31s", val);
-				strlcpy(cl->auth, val, sizeof(cl->auth));
-			}
-			else if (strncmp(line, "formation", 9) == 0)
-			{
-				char val[64] = { 0 };
-				const char *p = line + 9;
-				while (*p == ' ' || *p == '\t') p++;
-				if (*p == '"')
-					sscanf(p, "\"%63[^\"]\"", val);
-				else
-					sscanf(p, "%63s", val);
-				strlcpy(cl->formation, val, sizeof(cl->formation));
-			}
-			else if (strncmp(line, "num-sync", 8) == 0)
-			{
-				sscanf(line + 8, " %d", &cl->numSync);
-			}
-			else if (strncmp(line, "monitor", 7) == 0)
-			{
-				cl->withMonitor = true;
-				/* optional: monitor [port 15432] */
-				char *pp = strstr(line, "port");
-				if (pp) cl->monitorHostPort = atoi(pp + 4);
-			}
-			else if (strncmp(line, "citus-coordinator", 17) == 0)
-			{
-				TestNode *n = &cl->nodes[cl->nodeCount++];
-				sscanf(line + 18, "%63s", n->name);
-				n->kind = NODE_KIND_CITUS_COORDINATOR;
-				n->group = 0;
-				n->candidatePriority = 50;
-				n->replicationQuorum = true;
-				cl->withCitus = true;
-			}
-			else if (strncmp(line, "citus-worker", 12) == 0)
-			{
-				TestNode *n = &cl->nodes[cl->nodeCount++];
-				char rest[256];
-				sscanf(line + 13, "%63s %255[^\n]", n->name, rest);
-				n->kind = NODE_KIND_CITUS_WORKER;
-				n->candidatePriority = 50;
-				n->replicationQuorum = true;
-				char *gp = strstr(rest, "group=");
-				if (gp) n->group = atoi(gp + 6);
-				cl->withCitus = true;
-			}
-			else if (strncmp(line, "node", 4) == 0)
-			{
-				TestNode *n = &cl->nodes[cl->nodeCount++];
-				n->kind = NODE_KIND_STANDALONE;
-				n->candidatePriority = 50;
-				n->replicationQuorum = true;
-
-				char rest[256] = { 0 };
-				sscanf(line + 5, "%63s %255[^\n]", n->name, rest);
-
-				char *cp = strstr(rest, "candidate-priority=");
-				if (cp) n->candidatePriority = atoi(cp + 19);
-
-				if (strstr(rest, "async"))
-					n->replicationQuorum = false;
-			}
-
-			line = strtok(NULL, "\n");
-		}
+		parse_cluster_block((yyvsp[(2) - (2)].str), cl);
 		free((yyvsp[(2) - (2)].str));
 	;}
     break;
 
   case 10:
-#line 310 "test_spec_parse.y"
+#line 463 "test_spec_parse.y"
     {
 		current_spec->setup = (yyvsp[(2) - (2)].step);
 	;}
     break;
 
   case 11:
-#line 317 "test_spec_parse.y"
+#line 470 "test_spec_parse.y"
     {
 		current_spec->teardown = (yyvsp[(2) - (2)].step);
 	;}
     break;
 
   case 12:
-#line 328 "test_spec_parse.y"
+#line 481 "test_spec_parse.y"
     {
 		TestStep *s = (yyvsp[(3) - (3)].step);
 		strncpy(s->name, (yyvsp[(2) - (3)].str), sizeof(s->name) - 1);
@@ -1680,7 +1829,7 @@ yyreduce:
     break;
 
   case 13:
-#line 338 "test_spec_parse.y"
+#line 491 "test_spec_parse.y"
     {
 		/*
 		 * Parse the block text into a linked list of TestCmd.
@@ -1797,7 +1946,7 @@ yyreduce:
     break;
 
   case 16:
-#line 464 "test_spec_parse.y"
+#line 617 "test_spec_parse.y"
     {
 		int i = current_spec->sequenceLength;
 		if (i < PGAF_MAX_SEQ)
@@ -1812,18 +1961,18 @@ yyreduce:
     break;
 
   case 17:
-#line 482 "test_spec_parse.y"
+#line 635 "test_spec_parse.y"
     { (yyval.str) = (yyvsp[(1) - (1)].str); ;}
     break;
 
   case 18:
-#line 483 "test_spec_parse.y"
+#line 636 "test_spec_parse.y"
     { (yyval.str) = (yyvsp[(1) - (1)].str); ;}
     break;
 
 
 /* Line 1267 of yacc.c.  */
-#line 1827 "test_spec_parse.c"
+#line 1976 "test_spec_parse.c"
       default: break;
     }
   YY_SYMBOL_PRINT ("-> $$ =", yyr1[yyn], &yyval, &yyloc);
@@ -2037,7 +2186,7 @@ yyreturn:
 }
 
 
-#line 486 "test_spec_parse.y"
+#line 639 "test_spec_parse.y"
 
 
 /* -----------------------------------------------------------------------
@@ -2059,7 +2208,6 @@ parse_test_spec(const char *filename)
 	if (!spec) { fprintf(stderr, "out of memory\n"); exit(1); }
 
 	strncpy(spec->filename, filename, sizeof(spec->filename)-1);
-	spec->cluster.numSync = -1;
 
 	current_spec = spec;
 	pgaf_line_number = 1;

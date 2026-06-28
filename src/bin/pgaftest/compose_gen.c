@@ -109,7 +109,7 @@ compose_gen_write(const TestCluster *cluster,
 		"    hostname: monitor\n"
 		"    volumes:\n"
 		"      - monitor_data:/var/lib/postgres:rw\n"
-		"      - ./monitor_node.ini:" NODE_INI_PATH ":ro\n"
+		"      - ./monitor.ini:" NODE_INI_PATH ":ro\n"
 		"    environment:\n"
 		"      PGDATA: " NODE_PGDATA "\n"
 		"    ports:\n"
@@ -124,53 +124,64 @@ compose_gen_write(const TestCluster *cluster,
 		"    command: [\"pg_autoctl\", \"node\", \"run\", \"" NODE_INI_PATH "\"]\n\n",
 		monitorHostPort);
 
-	/* ---- data nodes ---- */
-	for (int i = 0; i < cluster->nodeCount; i++)
+	/* ---- data nodes — iterate all formations ---- */
+	const TestNode *firstNode = NULL;
+
+	for (int fi = 0; fi < cluster->formationCount; fi++)
 	{
-		const TestNode *n = &cluster->nodes[i];
-		char ini_filename[128];
+		const TestFormation *form = &cluster->formations[fi];
 
-		sformat(ini_filename, sizeof(ini_filename), "%s_node.ini", n->name);
+		for (int ni = 0; ni < form->nodeCount; ni++)
+		{
+			const TestNode *n = &form->nodes[ni];
+			char ini_filename[128];
 
-		fprintf(f, "  %s:\n", n->name);
-		write_image_stanza(f, cluster, contextDir);
-		fprintf(f,
-			"    hostname: %s\n"
-			"    volumes:\n"
-			"      - %s_data:/var/lib/postgres:rw\n"
-			"      - ./%s:" NODE_INI_PATH ":ro\n"
-			"    environment:\n"
-			"      PGDATA: " NODE_PGDATA "\n"
-			"      PGUSER: demo\n"
-			"      PGDATABASE: demo\n"
-			"    expose:\n"
-			"      - 5432\n"
-			"    depends_on:\n"
-			"      monitor:\n"
-			"        condition: service_healthy\n",
-			n->name,
-			n->name, ini_filename);
+			sformat(ini_filename, sizeof(ini_filename), "%s.ini", n->name);
 
-		/*
-		 * Ensure node registration order is deterministic: node1 always
-		 * registers before node2 etc., so node IDs are predictable in tests.
-		 */
-		if (i > 0)
+			fprintf(f, "  %s:\n", n->name);
+			write_image_stanza(f, cluster, contextDir);
 			fprintf(f,
-				"      %s:\n"
-				"        condition: service_started\n",
-				cluster->nodes[0].name);
+				"    hostname: %s\n"
+				"    volumes:\n"
+				"      - %s_data:/var/lib/postgres:rw\n"
+				"      - ./%s:" NODE_INI_PATH ":ro\n"
+				"    environment:\n"
+				"      PGDATA: " NODE_PGDATA "\n"
+				"      PGUSER: demo\n"
+				"      PGDATABASE: demo\n"
+				"    expose:\n"
+				"      - 5432\n"
+				"    depends_on:\n"
+				"      monitor:\n"
+				"        condition: service_healthy\n",
+				n->name,
+				n->name, ini_filename);
 
-		fprintf(f,
-			"    command: [\"pg_autoctl\", \"node\", \"run\","
-			" \"" NODE_INI_PATH "\"]\n\n");
+			/*
+			 * Ensure node registration order is deterministic: the first
+			 * node in the first formation always registers before subsequent
+			 * nodes, so node IDs are predictable in tests.
+			 */
+			if (firstNode && firstNode != n)
+				fprintf(f,
+					"      %s:\n"
+					"        condition: service_started\n",
+					firstNode->name);
+
+			fprintf(f,
+				"    command: [\"pg_autoctl\", \"node\", \"run\","
+				" \"" NODE_INI_PATH "\"]\n\n");
+
+			if (!firstNode) firstNode = n;
+		}
 	}
 
 	/* ---- volumes ---- */
 	fprintf(f, "volumes:\n");
 	fprintf(f, "  monitor_data:\n");
-	for (int i = 0; i < cluster->nodeCount; i++)
-		fprintf(f, "  %s_data:\n", cluster->nodes[i].name);
+	for (int fi = 0; fi < cluster->formationCount; fi++)
+		for (int ni = 0; ni < cluster->formations[fi].nodeCount; ni++)
+			fprintf(f, "  %s_data:\n", cluster->formations[fi].nodes[ni].name);
 
 	fclose(f);
 	log_info("Wrote docker-compose.yml to \"%s\"", path);
@@ -186,7 +197,7 @@ bool
 compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 {
 	char path[1024];
-	sformat(path, sizeof(path), "%s/monitor_node.ini", dir);
+	sformat(path, sizeof(path), "%s/monitor.ini", dir);
 
 	FILE *f = fopen(path, "w");
 	if (!f)
@@ -207,11 +218,7 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 		"[postgresql]\n"
 		"pgdata = " NODE_PGDATA "\n"
 		"\n"
-		"[settings]\n"
-		"candidate_priority = 0\n"
-		"replication_quorum = false\n"
-		"\n"
-		"[create]\n"
+		"[options]\n"
 		"ssl        = %s\n"
 		"auth       = %s\n"
 		"pg_hba_lan = false\n",
@@ -219,7 +226,7 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 		cluster->auth);
 
 	fclose(f);
-	log_info("Wrote monitor_node.ini to \"%s\"", path);
+	log_info("Wrote monitor.ini to \"%s\"", path);
 	return true;
 }
 
@@ -230,11 +237,12 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 
 bool
 compose_gen_write_node_ini(const TestCluster *cluster,
+                           const TestFormation *formation,
                            const TestNode *node,
                            const char *dir)
 {
 	char path[1024];
-	sformat(path, sizeof(path), "%s/%s_node.ini", dir, node->name);
+	sformat(path, sizeof(path), "%s/%s.ini", dir, node->name);
 
 	FILE *f = fopen(path, "w");
 	if (!f)
@@ -253,7 +261,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 
 	fprintf(f,
 		"# Generated by pgaftest — do not edit manually\n"
-		"# Node: %s\n"
+		"# Node: %s  (formation: %s)\n"
 		"\n"
 		"[node]\n"
 		"kind     = %s\n"
@@ -274,14 +282,14 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 		"candidate_priority = %d\n"
 		"replication_quorum = %s\n"
 		"\n"
-		"[create]\n"
+		"[options]\n"
 		"ssl        = %s\n"
 		"auth       = %s\n"
 		"pg_hba_lan = true\n",
-		node->name,
+		node->name, formation->name,
 		kindStr,
 		node->name,
-		cluster->formation,
+		formation->name,
 		node->group,
 		node->candidatePriority,
 		node->replicationQuorum ? "true" : "false",
@@ -289,7 +297,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 		cluster->auth);
 
 	fclose(f);
-	log_info("Wrote %s_node.ini to \"%s\"", node->name, path);
+	log_info("Wrote %s.ini to \"%s\"", node->name, path);
 	return true;
 }
 

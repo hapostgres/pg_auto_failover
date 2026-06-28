@@ -50,7 +50,7 @@ pg_autoctl node run
 
   usage: pg_autoctl node run <file.ini>
 
-  <file.ini>   Path to the pg_autoctl_node.ini file.
+  <file.ini>   Path to the pg_autoctl.ini file.
                Defaults to /etc/pgaf/node.ini when no argument is given.
 
 **First start (node not yet created):**
@@ -62,7 +62,7 @@ Builds and executes the equivalent of::
     --pgport   <port>      \
     --monitor  <pguri>     \
     --formation <formation> \
-    --ssl-self-signed      \   # or --no-ssl, depending on [create] ssl =
+    --ssl-self-signed      \   # or --no-ssl, depending on [options] ssl =
     --auth trust           \
     --pg-hba-lan           \
     --run
@@ -110,7 +110,7 @@ pg_autoctl node show
   usage: pg_autoctl node show [ --pgdata <dir> ]
 
 Reads the local ``pg_autoctl.cfg`` configuration file and prints it in
-``pg_autoctl_node.ini`` format on stdout.  Useful for bootstrapping a spec
+``pg_autoctl.ini`` format on stdout.  Useful for bootstrapping a spec
 file from an existing node that was created with ``pg_autoctl create``.
 
 Example::
@@ -146,7 +146,7 @@ Example output::
 
 .. _node_spec_format:
 
-Node spec file format (pg_autoctl_node.ini)
+Node spec file format (pg_autoctl.ini)
 -------------------------------------------
 
 The node spec file uses a simple INI syntax with five sections.  Lines
@@ -154,7 +154,7 @@ beginning with ``#`` are comments.
 
 .. code-block:: ini
 
-   # pg_autoctl_node.ini — describes a single pg_auto_failover node.
+   # pg_autoctl.ini — describes a single pg_auto_failover node.
    # Feed to: pg_autoctl node run /etc/pgaf/node.ini
    # Edit and save to converge mutable settings on the running node.
 
@@ -179,7 +179,7 @@ beginning with ``#`` are comments.
    candidate_priority = 50    # 0–100; 0 = never a failover candidate
    replication_quorum = true  # participates in the synchronous replication quorum
 
-   [create]
+   [options]
    # These fields are immutable after the node is created.
    # They are only used during the first-ever pg_autoctl create run.
    ssl        = self-signed   # self-signed | cert | off
@@ -251,7 +251,7 @@ Sections and fields
   Editing this field and saving the file causes the supervisor to call
   ``pg_autoctl set node replication-quorum``.
 
-``[create]`` — immutable after creation
+``[options]`` — immutable after creation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ``ssl``
@@ -293,7 +293,7 @@ Workflow — updating candidate priority in a running cluster
 .. code-block:: bash
 
    # 1. Edit the spec file on the Docker host
-   sed -i 's/candidate_priority = 50/candidate_priority = 0/' node1_node.ini
+   sed -i 's/candidate_priority = 50/candidate_priority = 0/' node1.ini
 
    # 2. No further action required: the supervisor picks up the change
    #    within 10 s (mtime poll) or immediately (inotify on Linux).
@@ -326,14 +326,14 @@ In Docker Compose, each service mounts its own ini file at
        image: pg_auto_failover:pg17
        volumes:
          - monitor_data:/var/lib/postgres:rw
-         - ./monitor_node.ini:/etc/pgaf/node.ini:ro
+         - ./monitor.ini:/etc/pgaf/node.ini:ro
        command: ["pg_autoctl", "node", "run", "/etc/pgaf/node.ini"]
 
      node1:
        image: pg_auto_failover:pg17
        volumes:
          - node1_data:/var/lib/postgres:rw
-         - ./node1_node.ini:/etc/pgaf/node.ini:ro
+         - ./node1.ini:/etc/pgaf/node.ini:ro
        command: ["pg_autoctl", "node", "run", "/etc/pgaf/node.ini"]
 
 In Kubernetes, use a ``ConfigMap`` to store the ini content and mount it as a
@@ -368,7 +368,7 @@ detects the change and converges without a Pod restart.
        candidate_priority = 50
        replication_quorum = true
 
-       [create]
+       [options]
        ssl        = self-signed
        auth       = scram-sha-256
        pg_hba_lan = true

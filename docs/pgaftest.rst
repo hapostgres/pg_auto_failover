@@ -36,10 +36,11 @@ Quick start
    PGAF_IMAGE=pg_auto_failover:pg17 pgaftest setup tests/tap/specs/basic_operation.pgaf
 
    # Run one named step against the live cluster
-   pgaftest step fail_primary --work-dir /tmp/pgaftest-work
+   # (work dir is auto-derived: $TMPDIR/pgaftest/basic_operation)
+   pgaftest step fail_primary tests/tap/specs/basic_operation.pgaf
 
    # Tear down
-   pgaftest down --work-dir /tmp/pgaftest-work
+   pgaftest down tests/tap/specs/basic_operation.pgaf
 
 .. _pgaftest_spec:
 
@@ -65,72 +66,83 @@ generates:
 * Each container mounts its ini file at ``/etc/pgaf/node.ini`` and runs the
   same command: ``pg_autoctl node run /etc/pgaf/node.ini``
 
+The topology follows a three-level hierarchy:
+``cluster`` → ``monitor`` + ``formation(s)`` → ``nodes``
+
 **Syntax**
 
 .. code-block:: text
 
    cluster {
        # Cluster-level options (all optional)
-       image       "pg_auto_failover:pg17"    # Docker image tag; "" = build from source
-       ssl         self-signed                 # self-signed | cert | off
-       auth        trust                       # trust | md5 | scram
-       formation   "default"                   # formation name
-       num-sync    1                           # number-sync-standbys
-       monitor [port 15432]                    # expose monitor on host port; 0 = auto
+       monitor [port N]               # expose monitor on host port; 0 = auto
+       image   "pg_auto_failover:pg17"  # Docker image; "" = build from source
+       ssl     self-signed             # self-signed | cert | off
+       auth    trust                   # trust | md5 | scram
 
-       # Node declarations
-       monitor
-       node <name>  [candidate-priority=N]  [async]
-       citus-coordinator <name>
-       citus-worker <name>  group=N
+       # One or more formation blocks
+       formation [name] [num-sync N] {
+           nodename [kind] [option...]
+           ...
+       }
    }
 
 **Cluster-level options**
-
-``image``
-  Docker image to use for every container.  Overrides the ``PGAF_IMAGE``
-  environment variable.  When neither is set, a ``build:`` stanza pointing at
-  the project root is used instead.
-
-  .. code-block:: text
-
-     image "pg_auto_failover:pg17"
-
-``ssl``
-  SSL mode written into the ``[create]`` section of each node's ini file.
-  Allowed values: ``self-signed`` (default), ``cert``, ``off``.
-
-``auth``
-  Authentication method.  Passed as ``--auth`` to ``pg_autoctl create``.
-  Default: ``trust``.
-
-``formation``
-  Formation name on the monitor.  Default: ``default``.
-
-``num-sync``
-  Sets ``number-sync-standbys`` on the monitor formation after the cluster
-  comes up.  When absent, the monitor default applies.
 
 ``monitor [port N]``
   Declares the monitor service.  The optional ``port N`` exposes the
   monitor's Postgres port on host port ``N`` so the test runner can connect
   directly with libpq.  When omitted, a random free port is chosen.
 
-**Node declarations**
+``image``
+  Docker image to use for every container.  Overrides the ``PGAF_IMAGE``
+  environment variable.  When neither is set, a ``build:`` stanza pointing at
+  the project root is used instead.
 
-``node <name>  [candidate-priority=N]  [async]``
-  A standalone (non-Citus) Postgres node.
+``ssl``
+  SSL mode written into the ``[options]`` section of each node's ini file.
+  Allowed values: ``self-signed`` (default), ``cert``, ``off``.
 
-  * ``candidate-priority=N`` — integer 0–100; default 50.  ``0`` prevents
-    this node from ever being elected primary.
-  * ``async`` — makes this node asynchronous (``replication_quorum = false``).
+``auth``
+  Authentication method.  Passed as ``--auth`` to ``pg_autoctl create``.
+  Default: ``trust``.
 
-``citus-coordinator <name>``
-  A Citus coordinator node.  Exactly one per cluster.
+**Formation block**
 
-``citus-worker <name>  group=N``
-  A Citus worker node belonging to Citus group ``N``.  Multiple workers
-  can share the same group to form an HA pair.
+.. code-block:: text
+
+   formation [name] [num-sync N] {
+       ...nodes...
+   }
+
+``name``
+  Formation name on the monitor.  Defaults to ``default`` when omitted.
+
+``num-sync N``
+  Sets ``number-sync-standbys`` on this formation after the cluster comes up.
+  When absent, the monitor default (0) applies.
+
+**Node lines** (inside a formation block)
+
+.. code-block:: text
+
+   nodename [kind] [option...]
+
+``nodename``
+  The service name — used as the Docker Compose service name and as the
+  ``hostname`` in the container.
+
+``kind`` (optional, default ``postgres``)
+  * ``postgres`` — standalone Postgres node
+  * ``coordinator`` — Citus coordinator
+  * ``worker`` — Citus worker
+
+Options:
+
+* ``async`` — makes this node asynchronous (``replication_quorum = false``)
+* ``candidate-priority N`` — integer 0–100; default 50.  ``0`` prevents this
+  node from ever being elected primary.
+* ``group N`` — Citus group id (required for ``worker`` kind)
 
 **Examples**
 
@@ -140,45 +152,54 @@ Minimal two-node HA cluster:
 
    cluster {
        monitor
-       node node1
-       node node2
+       formation {
+           node1
+           node2
+       }
    }
 
-Three-node cluster with a non-candidate standby:
+Three-node cluster, ``node3`` is a non-candidate async standby:
 
 .. code-block:: text
 
    cluster {
        monitor
-       node node1
-       node node2
-       node node3  candidate-priority=0
+       formation {
+           node1
+           node2
+           node3  async  candidate-priority 0
+       }
    }
 
-Three nodes, one asynchronous (does not block writes):
+Named formation with ``num-sync``:
 
 .. code-block:: text
 
    cluster {
        monitor
-       node node1
-       node node2
-       node node3  async
-       num-sync    1
+       formation default num-sync 1 {
+           node1
+           node2
+           node3
+       }
    }
 
-Citus cluster (one coordinator, two worker HA pairs):
+Citus cluster (one coordinator, two worker HA pairs in separate formations):
 
 .. code-block:: text
 
    cluster {
        image "pg_auto_failover:pg17-citus"
        monitor
-       citus-coordinator coord
-       citus-worker worker1  group=1
-       citus-worker worker2  group=1
-       citus-worker worker3  group=2
-       citus-worker worker4  group=2
+       formation coordinators {
+           coord  coordinator
+       }
+       formation workers num-sync 1 {
+           worker1  worker  group 1
+           worker2  worker  group 1
+           worker3  worker  group 2
+           worker4  worker  group 2
+       }
    }
 
 Custom image and non-default auth:
@@ -189,9 +210,11 @@ Custom image and non-default auth:
        image "myregistry.example.com/pgaf:latest"
        ssl   self-signed
        auth  scram-sha-256
-       monitor [port 15432]
-       node node1
-       node node2
+       monitor port 15432
+       formation {
+           node1
+           node2
+       }
    }
 
 setup { } and teardown { }
@@ -385,8 +408,10 @@ verifies replication, triggers a failover, and checks recovery.
 
    cluster {
        monitor
-       node node1
-       node node2
+       formation {
+           node1
+           node2
+       }
    }
 
    setup {
@@ -479,12 +504,13 @@ Interactive session (useful for debugging):
      pgaftest setup tests/tap/specs/basic_operation.pgaf
 
    # In a separate terminal, run individual steps
-   pgaftest step create_table  --work-dir /tmp/pgaftest-work
-   pgaftest step fail_primary  --work-dir /tmp/pgaftest-work
-   pgaftest step check_failover --work-dir /tmp/pgaftest-work
+   # (work dir auto-derived to $TMPDIR/pgaftest/basic_operation)
+   pgaftest step create_table   tests/tap/specs/basic_operation.pgaf
+   pgaftest step fail_primary   tests/tap/specs/basic_operation.pgaf
+   pgaftest step check_failover tests/tap/specs/basic_operation.pgaf
 
    # Tear down when done
-   pgaftest down --work-dir /tmp/pgaftest-work
+   pgaftest down tests/tap/specs/basic_operation.pgaf
 
 Environment variables
 ---------------------
@@ -515,8 +541,10 @@ change ``node2``'s candidate priority without restarting the container:
 .. code-block:: bash
 
    # Edit the generated ini file in the work directory
+   # (auto-derived from the spec name, e.g. $TMPDIR/pgaftest/basic_operation)
+   WORKDIR=${TMPDIR:-/tmp}/pgaftest/basic_operation
    sed -i 's/candidate_priority = 50/candidate_priority = 0/' \
-       /tmp/pgaftest-work/node2_node.ini
+       $WORKDIR/node2.ini
 
    # The supervisor inside node2 picks up the change automatically.
    # Verify on the monitor:

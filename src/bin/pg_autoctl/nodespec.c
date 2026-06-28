@@ -51,7 +51,7 @@
  * candidate_priority   = 50
  * replication_quorum   = true
  *
- * [create]
+ * [options]
  * ssl      = self-signed
  * auth     = trust
  * pg_hba_lan = true
@@ -104,14 +104,14 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(replicationQuorumStr),
 								   replicationQuorumStr, "true"),
 
-		/* [create] — immutable, used only at create time */
-		make_strbuf_option_default("create", "ssl", NULL, false,
+		/* [options] — immutable, used only at create time */
+		make_strbuf_option_default("options", "ssl", NULL, false,
 								   sizeof(spec->ssl), spec->ssl,
 								   "self-signed"),
-		make_strbuf_option_default("create", "auth", NULL, false,
+		make_strbuf_option_default("options", "auth", NULL, false,
 								   sizeof(spec->auth), spec->auth,
 								   "trust"),
-		make_strbuf_option_default("create", "pg_hba_lan", NULL, false,
+		make_strbuf_option_default("options", "pg_hba_lan", NULL, false,
 								   sizeof(pgHbaLanStr), pgHbaLanStr,
 								   "true"),
 
@@ -220,7 +220,7 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			"candidate_priority = %d\n"
 			"replication_quorum = %s\n"
 			"\n"
-			"[create]\n"
+			"[options]\n"
 			"ssl        = %s\n"
 			"auth       = %s\n"
 			"pg_hba_lan = %s\n",

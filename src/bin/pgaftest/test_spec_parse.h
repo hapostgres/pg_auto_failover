@@ -112,7 +112,7 @@
 
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 typedef union YYSTYPE
-#line 148 "test_spec_parse.y"
+#line 398 "test_spec_parse.y"
 {
 	int         ival;
 	char       *str;
