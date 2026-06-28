@@ -1,0 +1,99 @@
+# Test Citus cluster with authMethod=skip (pg_autoctl does not edit pg_hba.conf).
+# Verifies that pg_hba.conf is not modified by pg_autoctl, that worker activation
+# fails when HBA does not permit coordinator connections, and that after manually
+# adding the required HBA rules the worker activates successfully.
+
+cluster {
+    monitor  auth=skip
+    citus-coordinator coord0a  auth=skip
+    citus-coordinator coord0b  auth=skip
+    citus-worker worker1a  group=1  auth=skip
+    citus-worker worker1b  group=1  auth=skip
+}
+
+setup {
+    wait until coord0a  state = primary   timeout 90s
+    wait until coord0b  state = secondary timeout 90s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_000: monitor with auth=skip, append trust rule to pg_hba.conf manually
+#
+step test_000_create_monitor {
+    wait until monitor pg is running timeout 60s
+}
+
+#
+# test_001a: init coordinator coord0a (single)
+#
+step test_001a_init_coordinator {
+    wait until coord0a state = single timeout 60s
+}
+
+#
+# test_001b: init coordinator coord0b (secondary)
+#
+step test_001b_init_coordinator {
+    wait until coord0a state = primary   timeout 90s
+    wait until coord0b state = secondary timeout 90s
+}
+
+#
+# test_002b/002d: worker1a — registration initially fails because coordinator
+# cannot connect; after manually adding HBA rules worker1a runs and activates.
+#
+step test_002d_run_worker {
+    wait until worker1a state = single timeout 90s
+}
+
+step test_002e_check_hba {
+    assert worker1a hba-edited = false
+}
+
+step test_002f_activated_node {
+    sql coord0a { SELECT isactive FROM pg_dist_node WHERE nodename = 'worker1a'; }
+    expect { true }
+}
+
+#
+# test_003: init worker1b as secondary
+#
+step test_003_init_worker {
+    wait until worker1a state = primary   timeout 90s
+    wait until worker1b state = secondary timeout 90s
+    assert worker1b hba-edited = false
+}
+
+#
+# test_004: create distributed table
+#
+step test_004_create_distributed_table {
+    sql coord0a { CREATE TABLE t1 (a int); }
+    sql coord0a { SELECT create_distributed_table('t1', 'a'); }
+    sql coord0a { INSERT INTO t1 VALUES (1), (2); }
+}
+
+#
+# test_005: manual failover of worker group 1
+#
+step test_005_failover {
+    exec monitor pg_autoctl perform failover --group 1
+    wait until worker1b state = wait_primary timeout 90s
+    wait until worker1a state = secondary    timeout 90s
+    wait until worker1b state = primary      timeout 90s
+}
+
+sequence
+    test_000_create_monitor
+    test_001a_init_coordinator
+    test_001b_init_coordinator
+    test_002d_run_worker
+    test_002e_check_hba
+    test_002f_activated_node
+    test_003_init_worker
+    test_004_create_distributed_table
+    test_005_failover

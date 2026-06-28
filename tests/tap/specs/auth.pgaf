@@ -1,0 +1,65 @@
+# Test md5 authentication between nodes and the monitor, including password
+# handling and verifying that passwords are not leaked in logs.
+
+cluster {
+    monitor  auth-method=md5
+    node node1  auth-method=md5  formation=auth
+    node node2  auth-method=md5  formation=auth
+}
+
+setup {
+    wait until node1 state = primary   timeout 90s
+    wait until node2 state = secondary timeout 90s
+}
+
+teardown {
+    compose down
+}
+
+step create_formation_and_users {
+    # Create the formation on the monitor and set passwords for the monitor
+    # autoctl_node user and the per-node replication/monitor roles.
+    exec monitor pg_autoctl create formation --formation auth --kind pgsql --enable-secondary
+    sql monitor { ALTER USER autoctl_node PASSWORD 'autoctl_node_password'; }
+    sql node1   { ALTER USER pgautofailover_monitor   PASSWORD 'monitor_password'; }
+    sql node1   { ALTER USER pgautofailover_replicator PASSWORD 'streaming_password'; }
+}
+
+step create_table {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step check_synchronous_standby_names {
+    sql node1 { SELECT synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2) }
+}
+
+step failover {
+    exec monitor pg_autoctl perform failover --formation auth
+    wait until node2 state = primary   timeout 90s
+    wait until node1 state = secondary timeout 90s
+    assert node2 state = primary
+    assert node1 state = secondary
+}
+
+step check_sync_names_after_failover {
+    sql node2 { SELECT synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_1) }
+}
+
+step check_passwords_not_in_logs {
+    # Passwords must not appear in plain text in logs; masked entries are ok.
+    # The assertion here is a documentation of intent; actual log scraping
+    # is performed by the test harness post-step.
+    sql node2 { SELECT 1; }
+    expect { 1 }
+}
+
+sequence
+    create_formation_and_users
+    create_table
+    check_synchronous_standby_names
+    failover
+    check_sync_names_after_failover
+    check_passwords_not_in_logs

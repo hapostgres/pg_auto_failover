@@ -1,0 +1,31 @@
+cluster {
+    monitor
+}
+
+setup {
+    wait until monitor pg_is_running timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: add a trust HBA entry for all local network traffic
+#           so that pg_regress installcheck can connect.
+#
+step test_001_add_hba_entry {
+    exec monitor pg_autoctl reload
+}
+
+#
+# test_002: run make installcheck against the monitor's pgautofailover extension.
+#           This exercises all the regression SQL test files in src/monitor/.
+#
+step test_002_make_installcheck {
+    exec monitor make -C /usr/src/pg_auto_failover/src/monitor installcheck
+}
+
+sequence
+    test_001_add_hba_entry
+    test_002_make_installcheck

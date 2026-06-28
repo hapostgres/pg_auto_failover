@@ -1,0 +1,166 @@
+cluster {
+    monitor
+    node node1
+    node node2
+    node node3
+}
+
+setup {
+    wait until node1 state = single    timeout 60s
+    wait until node2 state = secondary timeout 60s
+    wait until node1 state = primary   timeout 60s
+    wait until node3 state = secondary timeout 60s
+    wait until node1 state = primary   timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# Series 003: stop node1 (primary) → node2 becomes primary,
+#             then stop node2 → node3 reports_lsn and waits,
+#             restart node2 → node2 becomes primary again,
+#             restart node1 → node1 becomes secondary.
+#
+#   node1         node2        node3
+#   primary       secondary    secondary
+#   <down>
+#   demoted       primary      secondary
+#                 <down>
+#   demoted       draining     report_lsn
+#                 <up>
+#   demoted       primary      secondary
+#   <up>
+#   secondary     primary      secondary
+#
+step test_003_001_stop_primary {
+    network disconnect node1
+    wait until node1 assigned-state = demoted  timeout 90s
+    wait until node2 state = primary           timeout 90s
+}
+
+step test_003_002_stop_new_primary {
+    network disconnect node2
+    wait until node2 assigned-state = draining timeout 90s
+    wait until node3 state = report_lsn        timeout 90s
+    sleep 5s
+    assert node3 state = report_lsn
+}
+
+step test_003_003_bringup_node2 {
+    network connect node2
+    exec node2 pg_autoctl run --background
+    wait until node2 state = primary   timeout 90s
+    wait until node3 state = secondary timeout 90s
+}
+
+step test_003_004_bringup_node1 {
+    network connect node1
+    exec node1 pg_autoctl run --background
+    wait until node1 state = secondary timeout 90s
+    assert node2 assigned-state = primary
+    assert node3 assigned-state = secondary
+}
+
+#
+# Series 005: stop node2 (primary) → node1 becomes primary,
+#             then stop node1 → node3 enters report_lsn,
+#             restart node2 → node2 becomes secondary, node3 becomes primary,
+#             restart node1 → node1 becomes secondary.
+#
+#   node1         node2        node3
+#   secondary     primary      secondary
+#                 <down>
+#   primary       demoted      secondary
+#   <down>
+#   draining      demoted      report_lsn
+#                 <up>
+#   draining      secondary    primary
+#   <up>
+#   secondary     secondary    primary
+#
+step test_005_001_fail_primary {
+    network disconnect node2
+    wait until node2 assigned-state = demote_timeout timeout 120s
+    wait until node2 assigned-state = demoted        timeout 120s
+    wait until node1 assigned-state = primary        timeout 120s
+    wait until node1 state = primary                 timeout 120s
+    wait until node3 state = secondary               timeout 120s
+}
+
+step test_005_002_fail_new_primary {
+    network disconnect node1
+    wait until node1 assigned-state = draining  timeout 90s
+    wait until node3 assigned-state = report_lsn timeout 90s
+}
+
+step test_005_003_bringup_node2 {
+    network connect node2
+    exec node2 pg_autoctl run --background
+    wait until node2 state = demoted   timeout 90s
+    wait until node2 state = secondary timeout 90s
+    wait until node3 state = primary   timeout 90s
+}
+
+step test_005_004_bringup_node1 {
+    network connect node1
+    exec node1 pg_autoctl run --background
+    wait until node1 state = secondary timeout 90s
+    assert node3 assigned-state = primary
+    assert node2 assigned-state = secondary
+}
+
+#
+# Series 006: stop node3 (primary) → node1 becomes primary,
+#             stop node1 and concurrently restart node3,
+#             node2 becomes primary, node3 becomes secondary,
+#             restart node1 → node1 becomes secondary.
+#
+#   node1         node2        node3
+#   secondary     secondary    primary
+#                              <down>
+#   primary       secondary    demoted
+#   <down>
+#                              <up>
+#   demoted       primary      secondary
+#   <up>
+#   secondary     primary      secondary
+#
+step test_006_001_fail_primary {
+    network disconnect node3
+    wait until node3 assigned-state = demote_timeout timeout 120s
+    wait until node3 assigned-state = demoted        timeout 120s
+    wait until node1 assigned-state = primary        timeout 120s
+    wait until node1 state = primary                 timeout 120s
+    wait until node2 state = secondary               timeout 120s
+}
+
+step test_006_002_fail_new_primary {
+    network disconnect node1
+    network connect node3
+    exec node3 pg_autoctl run --background
+    wait until node2 state = primary   timeout 120s
+    wait until node3 state = secondary timeout 120s
+}
+
+step test_006_003_bringup_node1 {
+    network connect node1
+    exec node1 pg_autoctl run --background
+    wait until node1 state = secondary timeout 120s
+    wait until node2 state = primary   timeout 120s
+    wait until node3 state = secondary timeout 120s
+}
+
+sequence
+    test_003_001_stop_primary
+    test_003_002_stop_new_primary
+    test_003_003_bringup_node2
+    test_003_004_bringup_node1
+    test_005_001_fail_primary
+    test_005_002_fail_new_primary
+    test_005_003_bringup_node2
+    test_005_004_bringup_node1
+    test_006_001_fail_primary
+    test_006_002_fail_new_primary
+    test_006_003_bringup_node1

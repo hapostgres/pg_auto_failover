@@ -1,0 +1,289 @@
+cluster {
+    monitor
+    node node1
+    node node2
+    node node3  async
+    node node4
+}
+
+setup {
+    wait until node1 state = single    timeout 60s
+    wait until node2 state = secondary timeout 60s
+    wait until node1 state = primary   timeout 60s
+    wait until node3 state = secondary timeout 60s
+    wait until node1 state = primary   timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_004: set the whole formation to async
+#
+step test_004_set_async {
+    exec node1 pg_autoctl set formation number-sync-standbys --number-sync-standbys 0
+    exec node1 pg_autoctl set node replication-quorum --replication-quorum false
+    exec node2 pg_autoctl set node replication-quorum --replication-quorum false
+    exec node3 pg_autoctl set node replication-quorum --replication-quorum false
+    wait until node1 state = primary timeout 60s
+}
+
+#
+# test_005: write into primary
+#
+step test_005_write_into_primary {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2), (3), (4); }
+    sql node1 { CHECKPOINT; }
+}
+
+#
+# test_006: async failover — promote node2
+#
+step test_006_async_failover {
+    exec monitor pg_autoctl perform promotion --nodename node2
+    wait until node1 state = secondary timeout 90s
+    wait until node3 state = secondary timeout 90s
+    wait until node2 state = primary   timeout 90s
+}
+
+#
+# test_007: read from new primary
+#
+step test_007_read_from_new_primary {
+    sql node2 { SELECT * FROM t1; }
+    expect { 1
+2
+3
+4 }
+}
+
+#
+# test_008: set mixed sync/async configuration
+#
+step test_008_set_sync_async {
+    exec node1 pg_autoctl set node replication-quorum --replication-quorum true
+    exec node2 pg_autoctl set node replication-quorum --replication-quorum true
+    exec node3 pg_autoctl set node replication-quorum --replication-quorum false
+    exec node3 pg_autoctl set node candidate-priority --candidate-priority 0
+    wait until node2 state = primary timeout 60s
+}
+
+#
+# test_009: add sync standby node4
+#
+step test_009_add_node4 {
+    wait until node1 state = secondary timeout 60s
+    wait until node2 state = primary   timeout 60s
+    wait until node3 state = secondary timeout 60s
+    wait until node4 state = secondary timeout 60s
+    wait until node2 state = primary   timeout 60s
+}
+
+#
+# test_010: promote node1 via monitor SQL
+#
+step test_010_promote_node1 {
+    sql monitor { SELECT pgautofailover.perform_promotion('default', 'node_1'); }
+}
+
+#
+# test_011: ifdown node4 while it is at report_lsn
+#
+step test_011_ifdown_node4_at_reportlsn {
+    wait until node4 state = report_lsn timeout 60s
+    network disconnect node4
+    wait until node3 state = secondary  timeout 90s
+}
+
+#
+# test_012: ifup node4
+#
+step test_012_ifup_node4 {
+    network connect node4
+    exec node4 pg_autoctl run --background
+    wait until node3 state = secondary  timeout 90s
+    wait until node4 state = secondary  timeout 90s
+    wait until node1 state = primary    timeout 90s
+    wait until node2 state = secondary  timeout 90s
+}
+
+#
+# test_013: drop node4
+#
+step test_013_drop_node4 {
+    exec monitor pg_autoctl drop node --nodename node4
+    wait until node1 state = primary   timeout 90s
+    wait until node2 state = secondary timeout 90s
+    wait until node3 state = secondary timeout 90s
+}
+
+#
+# test_014: fail node1 (primary), then fail node2 (new primary),
+#           restart node1 (fast_forward), then restart node2
+#
+#   node1         node2        node3
+#   primary       secondary    secondary
+#   <down>
+#   demoted       wait_primary secondary
+#                 <down>
+#   demoted       demoted      report_lsn
+#   <up>
+#   wait_primary  demoted      secondary   (fast_forward → primary)
+#                 <up>
+#   primary       secondary    secondary
+#
+step test_014_fail_node1 {
+    network disconnect node1
+    wait until node2 state = stop_replication timeout 120s
+    wait until node2 state = wait_primary     timeout 120s
+    wait until node3 state = secondary        timeout 60s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect {  }
+}
+
+step test_014_fail_node2 {
+    network disconnect node2
+    wait until node3 state = report_lsn timeout 90s
+}
+
+step test_014_restart_node1 {
+    network connect node1
+    exec node1 pg_autoctl run --background
+    wait until node1 assigned-state = fast_forward  timeout 90s
+    wait until node1 state = stop_replication        timeout 90s
+    wait until node1 state = wait_primary            timeout 90s
+    wait until node3 state = secondary               timeout 90s
+}
+
+step test_014_restart_node2 {
+    network connect node2
+    exec node2 pg_autoctl run --background
+    wait until node2 state = secondary timeout 90s
+    wait until node3 state = secondary timeout 90s
+    wait until node1 state = primary   timeout 90s
+}
+
+#
+# test_015: same as 014 but restart order reversed
+#
+#   node1        node2        node3
+#   primary      secondary    secondary
+#   <down>
+#   demoted      wait_primary secondary
+#                <down>
+#   demoted      demoted      report_lsn
+#                <up>
+#   demoted      wait_primary secondary
+#   <up>
+#   secondary    primary      secondary
+#
+step test_015_fail_node1 {
+    network disconnect node1
+    wait until node2 state = wait_primary timeout 120s
+    wait until node3 state = secondary    timeout 60s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect {  }
+}
+
+step test_015_fail_node2 {
+    network disconnect node2
+    wait until node3 state = report_lsn timeout 90s
+}
+
+step test_015_restart_node2 {
+    network connect node2
+    exec node2 pg_autoctl run --background
+    wait until node2 state = wait_primary timeout 90s
+    wait until node3 state = secondary    timeout 90s
+    sleep 5s
+}
+
+step test_015_restart_node1 {
+    network connect node1
+    exec node1 pg_autoctl run --background
+    wait until node3 state = secondary timeout 90s
+    wait until node2 state = primary   timeout 90s
+    wait until node1 state = secondary timeout 90s
+}
+
+#
+# test_016: candidate-priority=0 secondary comes back while primary is
+#           wait_primary → stay wait_primary until a candidate rejoins
+#
+step test_016_fail_node3 {
+    network disconnect node3
+    wait until node3 assigned-state = catchingup timeout 90s
+}
+
+step test_016_fail_node1 {
+    network disconnect node1
+    wait until node2 state = wait_primary timeout 90s
+}
+
+step test_016_restart_node3 {
+    network connect node3
+    exec node3 pg_autoctl run --background
+    wait until node3 assigned-state = secondary timeout 90s
+    wait until node2 state = wait_primary       timeout 60s
+    sleep 5s
+}
+
+step test_016_restart_node1 {
+    network connect node1
+    exec node1 pg_autoctl run --background
+    wait until node3 state = secondary timeout 90s
+    wait until node2 state = primary   timeout 90s
+    wait until node1 state = secondary timeout 90s
+}
+
+#
+# test_017: async standby (node3) fails while primary is already wait_primary
+#
+step test_017_fail_node1 {
+    network disconnect node1
+    wait until node2 state = wait_primary timeout 90s
+}
+
+step test_017_fail_node3 {
+    network disconnect node3
+    wait until node3 assigned-state = catchingup timeout 90s
+}
+
+step test_017_restart_nodes {
+    network connect node3
+    exec node3 pg_autoctl run --background
+    network connect node1
+    exec node1 pg_autoctl run --background
+    wait until node3 state = secondary timeout 90s
+    wait until node2 state = primary   timeout 90s
+    wait until node1 state = secondary timeout 90s
+}
+
+sequence
+    test_004_set_async
+    test_005_write_into_primary
+    test_006_async_failover
+    test_007_read_from_new_primary
+    test_008_set_sync_async
+    test_009_add_node4
+    test_010_promote_node1
+    test_011_ifdown_node4_at_reportlsn
+    test_012_ifup_node4
+    test_013_drop_node4
+    test_014_fail_node1
+    test_014_fail_node2
+    test_014_restart_node1
+    test_014_restart_node2
+    test_015_fail_node1
+    test_015_fail_node2
+    test_015_restart_node2
+    test_015_restart_node1
+    test_016_fail_node3
+    test_016_fail_node1
+    test_016_restart_node3
+    test_016_restart_node1
+    test_017_fail_node1
+    test_017_fail_node3
+    test_017_restart_nodes

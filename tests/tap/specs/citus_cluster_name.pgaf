@@ -1,0 +1,85 @@
+# Test Citus cluster name and read-only secondary cluster routing.
+# A "readonly" cluster is registered with candidatePriority=0 and
+# citusSecondary=true. It should route all reads to secondary nodes
+# via citus.use_secondary_nodes = 'always'.
+
+cluster {
+    monitor
+    citus-coordinator coordinator1a
+    citus-coordinator coordinator1b  candidate-priority=0  citus-secondary  citus-cluster-name=readonly
+    citus-worker worker1a  group=1
+    citus-worker worker1b  group=1  candidate-priority=0  citus-secondary  citus-cluster-name=readonly
+    citus-worker worker2a  group=2
+    citus-worker worker2b  group=2  candidate-priority=0  citus-secondary  citus-cluster-name=readonly
+}
+
+setup {
+    wait until coordinator1a state = primary   timeout 90s
+    wait until coordinator1b state = secondary timeout 90s
+    wait until worker1a      state = primary   timeout 90s
+    wait until worker1b      state = secondary timeout 90s
+    wait until worker2a      state = primary   timeout 90s
+    wait until worker2b      state = secondary timeout 90s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: coordinator pair — coordinator1b is read-only secondary cluster
+#
+step test_001_init_coordinator {
+    wait until coordinator1a state = primary   timeout 90s
+    wait until coordinator1b state = secondary timeout 90s
+}
+
+#
+# test_002: worker groups
+#
+step test_002_001_init_workers_group1 {
+    wait until worker1a state = primary   timeout 90s
+    wait until worker1b state = secondary timeout 90s
+}
+
+step test_002_002_init_workers_group2 {
+    wait until worker2a state = primary   timeout 90s
+    wait until worker2b state = secondary timeout 90s
+}
+
+#
+# test_003: create distributed table and insert data
+#
+step test_003_create_distributed_table {
+    sql coordinator1a { SET citus.shard_count TO 4; CREATE TABLE t1 (a int); SELECT create_distributed_table('t1', 'a'); }
+    sql coordinator1a { INSERT INTO t1 SELECT x FROM generate_series(1, 1000) as gs(x); }
+    sql coordinator1a { CHECKPOINT; }
+}
+
+#
+# test_004: verify read-only cluster settings
+#
+step test_004_read_only_cluster {
+    sql coordinator1a { SELECT current_setting('citus.use_secondary_nodes'), current_setting('citus.cluster_name'); }
+    expect { never	default }
+    sql coordinator1b { SELECT current_setting('citus.use_secondary_nodes'), current_setting('citus.cluster_name'); }
+    expect { always	readonly }
+    sql coordinator1b { SELECT count(*) FROM t1; }
+    expect { 1000 }
+}
+
+#
+# test_005: drop distributed table (cleanup)
+#
+step test_005_drop_table {
+    sql coordinator1a { SELECT public.wait_until_metadata_sync(); }
+    sql coordinator1a { DROP TABLE t1; }
+}
+
+sequence
+    test_001_init_coordinator
+    test_002_001_init_workers_group1
+    test_002_002_init_workers_group2
+    test_003_create_distributed_table
+    test_004_read_only_cluster
+    test_005_drop_table

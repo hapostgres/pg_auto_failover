@@ -1,0 +1,64 @@
+# Test --skip-pg-hba (auth-method=skip): pg_autoctl must NOT edit pg_hba.conf
+# on either node.  HBA rules are managed manually by the operator.
+
+cluster {
+    monitor  auth-method=skip
+    node node1  auth-method=skip
+    node node2  auth-method=skip
+}
+
+setup {
+    wait until node1 state = primary   timeout 90s
+    wait until node2 state = secondary timeout 90s
+}
+
+teardown {
+    compose down
+}
+
+step setup_monitor_hba {
+    # Add permissive rules to the monitor's HBA so test clients can connect.
+    exec monitor sh -c "echo 'host all all 0.0.0.0/0 trust' >> /var/lib/postgresql/pgaf/pg_hba.conf"
+    exec monitor pg_ctl reload -D /var/lib/postgresql/pgaf
+}
+
+step create_table {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step check_hba_not_edited {
+    # pg_autoctl must report hba_level = skip in its config.
+    exec node1 pg_autoctl config get postgresql.hba_level
+    expect { skip }
+    exec node2 pg_autoctl config get postgresql.hba_level
+    expect { skip }
+}
+
+step failover {
+    exec monitor pg_autoctl perform failover
+    wait until node2 state = primary   timeout 90s
+    wait until node1 state = secondary timeout 90s
+    assert node2 state = primary
+    assert node1 state = secondary
+}
+
+step restart_secondary {
+    exec node1 pg_autoctl stop
+    exec node1 pg_autoctl run --background
+}
+
+step check_hba_not_edited_after_restart {
+    exec node1 pg_autoctl config get postgresql.hba_level
+    expect { skip }
+    exec node2 pg_autoctl config get postgresql.hba_level
+    expect { skip }
+}
+
+sequence
+    setup_monitor_hba
+    create_table
+    check_hba_not_edited
+    failover
+    restart_secondary
+    check_hba_not_edited_after_restart

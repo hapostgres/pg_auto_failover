@@ -375,11 +375,12 @@ CommandLine do_tmux_commands =
 					 NULL, NULL, NULL, do_tmux);
 
 /*
- * pg_autoctl do azure ...
- *
- * Set of commands to prepare and control a full QA environment running in
- * Azure VMs, provisionned either from our packages or from local source code.
+ * Azure integration has been removed.  The commands that were here are no
+ * longer maintained and have been deleted from this file.  See pgaftest for
+ * the replacement QA tooling.
  */
+
+#if 0  /* REMOVED: azure commands — see pgaftest instead */
 CommandLine do_azure_provision_region =
 	make_command("region",
 				 "Provision an azure region: resource group, network, VMs",
@@ -564,6 +565,7 @@ CommandLine do_azure_commands =
 					 "Manage a set of Azure resources for a pg_auto_failover demo",
 					 NULL, NULL, NULL, do_azure);
 
+#endif /* REMOVED: azure commands */
 
 CommandLine *do_subcommands[] = {
 	&do_monitor_commands,
@@ -576,7 +578,6 @@ CommandLine *do_subcommands[] = {
 	&do_service_postgres_ctl_commands,
 	&do_service_commands,
 	&do_tmux_commands,
-	&do_azure_commands,
 	&do_demo_commands,
 	NULL
 };

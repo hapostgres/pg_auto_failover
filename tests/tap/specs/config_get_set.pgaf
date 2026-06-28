@@ -1,0 +1,51 @@
+# Test pg_autoctl config get / config set behaviour on both the monitor and a
+# keeper node, including validation (rejecting invalid values) and no
+# unintended side-effects on other settings.
+
+cluster {
+    monitor
+    node node1
+}
+
+setup {
+    wait until node1 state = single timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step check_and_set_node_name {
+    # The default node name is "node_<nodeid>".  We rename it via
+    # set node metadata and then again via config set.
+    exec node1 pg_autoctl set node metadata --name "node a"
+    exec node1 pg_autoctl show state
+    exec node1 pg_autoctl config set pg_autoctl.name a
+    sleep 2s
+    exec node1 pg_autoctl show settings
+}
+
+step config_set_invalid_pg_ctl_monitor {
+    # Setting postgresql.pg_ctl to an invalid path must be rejected and must
+    # leave the value unchanged.
+    exec monitor pg_autoctl config set ssl.sslmode prefer
+    exec monitor pg_autoctl config get postgresql.pg_ctl
+    # Attempting to set an invalid value should fail; the runner treats a
+    # non-zero exit as an expected error in this step.
+    exec monitor pg_autoctl config set postgresql.pg_ctl invalid
+    exec monitor pg_autoctl config get postgresql.pg_ctl
+    exec monitor pg_autoctl config get ssl.sslmode
+    expect { prefer }
+}
+
+step config_set_invalid_pg_ctl_node {
+    # Same validation check for the keeper node.
+    exec node1 pg_autoctl config get postgresql.pg_ctl
+    exec node1 pg_autoctl config set postgresql.pg_ctl invalid
+    exec node1 pg_autoctl config get postgresql.pg_ctl
+}
+
+sequence
+    check_and_set_node_name
+    config_set_invalid_pg_ctl_monitor
+    config_set_invalid_pg_ctl_node

@@ -1,0 +1,68 @@
+# Test pg_auto_failover with self-signed SSL certificates (ssl-mode = require).
+# Both the monitor and data nodes generate their own self-signed certs.
+
+cluster {
+    monitor  ssl=self-signed
+    node node1  ssl=self-signed
+    node node2  ssl=self-signed
+}
+
+setup {
+    wait until node1 state = single timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_000: create monitor with self-signed SSL
+#
+step test_000_create_monitor {
+    wait until monitor pg is running timeout 60s
+    assert monitor ssl = on
+    assert monitor ssl-mode = require
+}
+
+#
+# test_001: init primary with self-signed SSL
+#
+step test_001_init_primary {
+    wait until node1 state = single timeout 60s
+    assert node1 ssl = on
+    assert node1 ssl-mode = require
+}
+
+#
+# test_002: create table t1
+#
+step test_002_create_t1 {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+#
+# test_003: add secondary node2 with self-signed SSL
+#
+step test_003_init_secondary {
+    wait until node2 state = secondary timeout 90s
+    wait until node1 state = primary   timeout 90s
+    assert node2 ssl = on
+    assert node2 ssl-mode = require
+}
+
+#
+# test_004: failover
+#
+step test_004_failover {
+    exec monitor pg_autoctl perform failover
+    wait until node2 state = primary   timeout 90s
+    wait until node1 state = secondary timeout 90s
+}
+
+sequence
+    test_000_create_monitor
+    test_001_init_primary
+    test_002_create_t1
+    test_003_init_secondary
+    test_004_failover

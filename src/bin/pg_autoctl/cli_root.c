@@ -9,6 +9,8 @@
  */
 
 #include "cli_common.h"
+#include "cli_inspect.h"
+#include "cli_override.h"
 #include "cli_root.h"
 #include "commandline.h"
 
@@ -81,36 +83,10 @@ CommandLine drop_commands =
 					 NULL, drop_subcommands);
 
 /*
- * Binding them all into the top-level command:
+ * Single root command table — inspect and override are always visible.
+ * The PG_AUTOCTL_DEBUG env var now only controls log verbosity, not
+ * command visibility.
  */
-CommandLine *root_subcommands_with_debug[] = {
-	&create_commands,
-	&drop_commands,
-	&config_commands,
-	&show_commands_with_debug,
-	&enable_commands,
-	&disable_commands,
-	&get_commands,
-	&set_commands,
-	&perform_commands,
-	&do_commands,
-	&service_run_command,
-	&watch_command,
-	&service_stop_command,
-	&service_reload_command,
-	&service_status_command,
-	&help,
-	&version,
-	NULL
-};
-
-CommandLine root_with_debug =
-	make_command_set("pg_autoctl",
-					 "pg_auto_failover control tools and service",
-					 "[ --debug|verbose|quiet ]", NULL,
-					 root_options, root_subcommands_with_debug);
-
-
 CommandLine *root_subcommands[] = {
 	&create_commands,
 	&drop_commands,
@@ -122,6 +98,8 @@ CommandLine *root_subcommands[] = {
 	&set_commands,
 	&perform_commands,
 	&activate_node_command,
+	&inspect_commands,
+	&override_commands,
 	&service_run_command,
 	&watch_command,
 	&service_stop_command,
@@ -137,6 +115,37 @@ CommandLine root =
 					 "pg_auto_failover control tools and service",
 					 "[ --verbose --quiet ]", NULL,
 					 root_options, root_subcommands);
+
+/* Backward-compat alias: root_with_debug and root_subcommands_with_debug
+ * previously held the do_commands.  They now point to the same root. */
+CommandLine *root_subcommands_with_debug[] = {
+	&create_commands,
+	&drop_commands,
+	&config_commands,
+	&show_commands,
+	&enable_commands,
+	&disable_commands,
+	&get_commands,
+	&set_commands,
+	&perform_commands,
+	&activate_node_command,
+	&inspect_commands,
+	&override_commands,
+	&service_run_command,
+	&watch_command,
+	&service_stop_command,
+	&service_reload_command,
+	&service_status_command,
+	&help,
+	&version,
+	NULL
+};
+
+CommandLine root_with_debug =
+	make_command_set("pg_autoctl",
+					 "pg_auto_failover control tools and service",
+					 "[ --verbose --quiet ]", NULL,
+					 root_options, root_subcommands_with_debug);
 
 
 /*

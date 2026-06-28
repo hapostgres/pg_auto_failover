@@ -1,0 +1,29 @@
+cluster {
+    monitor
+}
+
+setup {
+    # The monitor is started with PG_AUTOCTL_EXTENSION_VERSION=dummy
+    # to simulate an extension update scenario.
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: start monitor with a dummy extension version and verify
+#           that the installed version matches the dummy version.
+#
+step test_001_update_extension {
+    wait until monitor pg_is_running timeout 60s
+    sql monitor {
+        SELECT installed_version
+          FROM pg_available_extensions
+         WHERE name = 'pgautofailover';
+    }
+    expect { dummy }
+}
+
+sequence
+    test_001_update_extension

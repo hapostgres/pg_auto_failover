@@ -1,0 +1,33 @@
+# tests/tap/schedule
+# One spec name per line; pgaftest run --schedule tests/tap/schedule
+# Lines starting with # are comments; empty lines are ignored.
+# Citus specs require CITUS_CLUSTER=1 env var to be set.
+
+basic_operation
+basic_operation_listen_flag
+create_run
+create_standby_with_pgdata
+ensure
+monitor_disabled
+replace_monitor
+config_get_set
+skip_pg_hba
+debian_clusters
+auth
+enable_ssl
+ssl_cert
+ssl_self_signed
+multi_standbys
+multi_async
+multi_ifdown
+multi_maintenance
+multi_alternate
+extension_update
+installcheck
+# Citus tests (uncomment when CITUS_CLUSTER=1):
+# basic_citus_operation
+# citus_cluster_name
+# citus_force_failover
+# citus_multi_standbys
+# citus_skip_pg_hba
+# nonha_citus_operation

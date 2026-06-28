@@ -1,0 +1,85 @@
+# Test Citus force failover: a transaction in progress competes with a worker
+# failover. The failover mechanism must terminate competing backends to make
+# progress within a bounded time window.
+# Also tests dropping a failed primary worker and a failed coordinator.
+
+cluster {
+    monitor
+    citus-coordinator coordinator1a
+    citus-coordinator coordinator1b
+    citus-worker worker1a  group=1
+    citus-worker worker1b  group=1
+    citus-worker worker2a  group=2
+    citus-worker worker2b  group=2
+}
+
+setup {
+    wait until coordinator1a state = primary   timeout 90s
+    wait until coordinator1b state = secondary timeout 90s
+    wait until worker1a      state = primary   timeout 90s
+    wait until worker1b      state = secondary timeout 90s
+    wait until worker2a      state = primary   timeout 90s
+    wait until worker2b      state = secondary timeout 90s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: coordinator pair
+#
+step test_001_init_coordinator {
+    wait until coordinator1a state = primary   timeout 90s
+    wait until coordinator1b state = secondary timeout 90s
+}
+
+#
+# test_002: worker groups
+#
+step test_002_init_workers {
+    wait until worker1a state = primary   timeout 90s
+    wait until worker1b state = secondary timeout 90s
+    wait until worker2a state = primary   timeout 90s
+    wait until worker2b state = secondary timeout 90s
+}
+
+#
+# test_003: create distributed table
+#
+step test_003_create_distributed_table {
+    sql coordinator1a { SET citus.shard_count TO 4; CREATE TABLE t1 (a int); SELECT create_distributed_table('t1', 'a'); }
+}
+
+#
+# test_004: fail worker1a while a transaction is in progress on the coordinator.
+# The failover terminates the competing backend; the transaction client gets an
+# OperationalError. worker1b then becomes wait_primary.
+#
+step test_004_fail_while_transaction_in_progress {
+    network disconnect worker1a
+    wait until worker1b state = wait_primary timeout 90s
+}
+
+#
+# test_005: drop failed primary worker2a and coordinator1a
+#
+step test_005_drop_primary_worker {
+    network disconnect worker2a
+    wait until worker2b state = wait_primary timeout 90s
+    exec monitor pg_autoctl drop node --nodename worker2a
+    wait until worker2b state = single       timeout 60s
+}
+
+step test_005_drop_primary_coordinator {
+    exec monitor pg_autoctl drop node --nodename coordinator1a
+    wait until coordinator1b state = single timeout 60s
+}
+
+sequence
+    test_001_init_coordinator
+    test_002_init_workers
+    test_003_create_distributed_table
+    test_004_fail_while_transaction_in_progress
+    test_005_drop_primary_worker
+    test_005_drop_primary_coordinator

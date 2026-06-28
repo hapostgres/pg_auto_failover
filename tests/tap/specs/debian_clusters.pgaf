@@ -1,0 +1,44 @@
+# Test pg_auto_failover with Debian-style pg_createcluster layouts where the
+# postgresql.conf lives outside PGDATA (in /etc/postgresql/<ver>/<name>/).
+# pg_autoctl must detect and support this split-config layout.
+
+cluster {
+    monitor  debian-cluster=monitor  port=6000
+    node node1  debian-cluster=debian_node1  port=6001  listen
+}
+
+setup {
+    wait until monitor pg is running timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_000: create monitor using pg_createcluster layout
+# postgresql.conf starts outside PGDATA; pg_autoctl moves it in on first run.
+#
+step test_000_create_monitor {
+    wait until monitor pg is running timeout 60s
+}
+
+#
+# test_001: create a single data node using pg_createcluster layout
+#
+step test_001_custom_single {
+    wait until node1 state = single timeout 60s
+}
+
+#
+# test_002: fix group-write permission on the PostgreSQL base directory
+# (Debian sets drwxr-xr-x on /var/lib/postgresql/<ver>; pg_autoctl needs g+w)
+#
+step test_002_chmod_debian_data_directory {
+    exec node1 chmod go+w /var/lib/postgresql
+}
+
+sequence
+    test_000_create_monitor
+    test_001_custom_single
+    test_002_chmod_debian_data_directory
