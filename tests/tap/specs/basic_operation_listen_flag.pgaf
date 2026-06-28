@@ -47,6 +47,14 @@ step test_004_read_from_secondary {
 }
 
 #
+# test_005: writes to secondary (node2) must fail — SQLSTATE 25006 read_only_sql_transaction
+#
+step test_005_writes_to_node2_fail {
+    sql node2 { INSERT INTO t1 VALUES (3); }
+    expect error 25006
+}
+
+#
 # test_006: fail primary node1
 #
 step test_006_fail_primary {
@@ -82,6 +90,14 @@ step test_009_read_from_new_secondary {
 }
 
 #
+# test_010: writes to node1 (now secondary after failover) must fail — SQLSTATE 25006
+#
+step test_010_writes_to_node1_fail {
+    sql node1 { INSERT INTO t1 VALUES (3); }
+    expect error 25006
+}
+
+#
 # test_011: fail secondary node1
 #
 step test_011_fail_secondary {
@@ -94,8 +110,10 @@ sequence
     test_002_create_t1
     test_003_init_secondary
     test_004_read_from_secondary
+    test_005_writes_to_node2_fail
     test_006_fail_primary
     test_007_writes_to_node2_succeed
     test_008_start_node1_again
     test_009_read_from_new_secondary
+    test_010_writes_to_node1_fail
     test_011_fail_secondary

@@ -75,6 +75,13 @@ step test_004_001_fail_worker2 {
     network disconnect worker2a
 }
 
+# test_004_002: INSERT routes to worker2 shard right after worker2a failed,
+# before worker2b completes failover — Citus cannot contact the shard.
+step test_004_002_writes_via_coordinator_fail {
+    sql coordinator1a { INSERT INTO t1 VALUES (3); }
+    expect error
+}
+
 step test_004_004_wait_for_failover {
     wait until worker2b state = wait_primary timeout 90s
     wait until worker2c state = secondary   timeout 90s
@@ -152,6 +159,7 @@ sequence
     test_002_init_workers
     test_003_001_create_distributed_table
     test_004_001_fail_worker2
+    test_004_002_writes_via_coordinator_fail
     test_004_004_wait_for_failover
     test_004_005_writes_via_coordinator_succeed_after_failover
     test_005_read_from_coordinator

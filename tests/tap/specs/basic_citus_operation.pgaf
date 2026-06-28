@@ -59,7 +59,16 @@ step test_004_fail_worker2 {
     wait until worker2b state = wait_primary timeout 90s
 }
 
+# test_004_002: INSERT routes to worker2 shard, but worker2a is down and
+# worker2b hasn't completed failover yet — Citus cannot contact the shard.
+step test_004_002_writes_via_coordinator_fail {
+    sql coordinator1a { INSERT INTO t1 VALUES (3); }
+    expect error
+}
+
+# test_004_004/005: wait for worker2b to become primary, then write succeeds.
 step test_004_writes_succeed_after_failover {
+    wait until worker2b state = primary timeout 90s
     sql coordinator1a { INSERT INTO t1 VALUES (3); }
 }
 
@@ -159,6 +168,7 @@ sequence
     test_002_init_workers
     test_003_create_distributed_table
     test_004_fail_worker2
+    test_004_002_writes_via_coordinator_fail
     test_004_writes_succeed_after_failover
     test_005_read_from_coordinator
     test_006_writes_to_coordinator_succeed

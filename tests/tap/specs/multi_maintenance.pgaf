@@ -119,6 +119,14 @@ step test_008b_start_primary {
 }
 
 #
+# test_009a: trying to enable maintenance on node3 (the primary, with --allow-failover)
+# must fail because node1 and node2 are already in maintenance — no standby would remain.
+#
+step test_009a_enable_maintenance_on_primary_fails {
+    exec-fails node3  pg_autoctl enable maintenance --allow-failover
+}
+
+#
 # test_009b: disable maintenance on node1 and node2
 #
 step test_009b_disable_maintenance {
@@ -204,9 +212,7 @@ step test_016_two_standbys_in_maintenance {
 #           we would have no standby left (number-sync-standbys=1, two in maintenance)
 #
 step test_017_primary_to_maintenance_fails {
-    exec node3 pg_autoctl enable maintenance --allow-failover
-    # expected to fail — node3 should remain primary
-    assert node3 state = primary
+    exec-fails node3  pg_autoctl enable maintenance
 }
 
 #
@@ -268,6 +274,7 @@ sequence
     test_007b_node2_to_maintenance
     test_008a_stop_primary
     test_008b_start_primary
+    test_009a_enable_maintenance_on_primary_fails
     test_009b_disable_maintenance
     test_010_set_sync_zero
     test_011_all_to_maintenance
