@@ -21,6 +21,28 @@
 #define MONITOR_PGURI \
 	"postgresql://autoctl_node@monitor/pg_auto_failover"
 
+/*
+ * Emit either an `image:` stanza (when PGAF_IMAGE is set) or a
+ * `build:` stanza pointing at the project root.
+ *
+ * Using PGAF_IMAGE skips the Docker build entirely — useful when the
+ * caller has already built and tagged an image:
+ *   PGAF_IMAGE=pg_auto_failover:pg17 pgaftest run spec.pgaf
+ */
+static void
+write_image_or_build(FILE *f, const char *contextDir)
+{
+	const char *img = getenv("PGAF_IMAGE");
+	if (img && *img)
+		fprintf(f, "    image: \"%s\"\n", img);
+	else
+		fprintf(f,
+			"    build:\n"
+			"      context: \"%s\"\n"
+			"      target: run\n",
+			contextDir);
+}
+
 void
 compose_network_name(const char *projectName, char *buf, int buflen)
 {
@@ -38,7 +60,8 @@ bool
 compose_gen_write(const TestCluster *cluster,
                   const char *path,
                   const char *projectName,
-                  int monitorHostPort)
+                  int monitorHostPort,
+                  const char *contextDir)
 {
 	FILE *f = fopen(path, "w");
 	if (!f)
@@ -52,9 +75,9 @@ compose_gen_write(const TestCluster *cluster,
 	fprintf(f, "services:\n");
 
 	/* ---- monitor ---- */
+	fprintf(f, "  monitor:\n");
+	write_image_or_build(f, contextDir);
 	fprintf(f,
-		"  monitor:\n"
-		"    build: .\n"
 		"    hostname: monitor\n"
 		"    volumes:\n"
 		"      - monitor_data:/var/lib/postgres:rw\n"
@@ -62,6 +85,13 @@ compose_gen_write(const TestCluster *cluster,
 		"      PGDATA: /var/lib/postgres/pgaf\n"
 		"    ports:\n"
 		"      - \"127.0.0.1:%d:5432\"\n"
+		"    healthcheck:\n"
+		"      test: [\"CMD-SHELL\","
+		" \"pg_isready -d pg_auto_failover -U autoctl_node\"]\n"
+		"      interval: 5s\n"
+		"      timeout: 5s\n"
+		"      retries: 20\n"
+		"      start_period: 30s\n"
 		"    command: >-\n"
 		"      pg_autoctl create monitor\n"
 		"        --ssl-self-signed --auth trust --run\n"
@@ -86,9 +116,9 @@ compose_gen_write(const TestCluster *cluster,
 			pgactl_cmd = "pg_autoctl create postgres"
 			             " --ssl-self-signed --auth trust --pg-hba-lan --run";
 
+		fprintf(f, "  %s:\n", n->name);
+		write_image_or_build(f, contextDir);
 		fprintf(f,
-			"  %s:\n"
-			"    build: .\n"
 			"    hostname: %s\n"
 			"    volumes:\n"
 			"      - %s_data:/var/lib/postgres:rw\n"
@@ -103,12 +133,23 @@ compose_gen_write(const TestCluster *cluster,
 			"    expose:\n"
 			"      - 5432\n"
 			"    depends_on:\n"
-			"      - monitor\n",
-			n->name, n->name, n->name,
+			"      monitor:\n"
+			"        condition: service_healthy\n",
+			n->name, n->name,
 			MONITOR_PGURI,
 			n->name,
 			n->replicationQuorum ? "true" : "false",
 			n->candidatePriority);
+
+		/*
+		 * All nodes after the first also wait for the first node's container
+		 * to start, ensuring node1 registers first and gets nodeid=1.
+		 */
+		if (i > 0)
+			fprintf(f,
+				"      %s:\n"
+				"        condition: service_started\n",
+				cluster->nodes[0].name);
 
 		if (n->kind == NODE_KIND_CITUS_WORKER)
 			fprintf(f,

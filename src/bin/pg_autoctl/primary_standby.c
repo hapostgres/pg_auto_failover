@@ -1207,7 +1207,7 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 			default:
 			{
 				/* wait until postgres crash recovery is done */
-				for (int attempts = 0;; attempts++)
+				for (;;)
 				{
 					int timeout = 30;
 

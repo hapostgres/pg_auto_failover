@@ -99,6 +99,14 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 	snprintf(r->workDir, sizeof(r->workDir), "%s", workDir);
 	snprintf(r->composeFile, sizeof(r->composeFile),
 	         "%s/docker-compose.yml", workDir);
+
+	/* build context = directory from which pgaftest was invoked */
+	if (getcwd(r->contextDir, sizeof(r->contextDir)) == NULL)
+	{
+		log_error("getcwd failed: %m");
+		r->contextDir[0] = '\0';
+	}
+
 	snprintf(r->monitorConnStr, sizeof(r->monitorConnStr),
 	         "host=127.0.0.1 port=%d user=autoctl_node "
 	         "dbname=pg_auto_failover sslmode=prefer",
@@ -163,7 +171,8 @@ runner_compose_generate(TestRunner *r)
 	return compose_gen_write(&r->spec->cluster,
 	                         r->composeFile,
 	                         r->projectName,
-	                         r->monitorPort);
+	                         r->monitorPort,
+	                         r->contextDir);
 }
 
 static bool
@@ -665,6 +674,6 @@ runner_show(TestSpec *spec)
 
 	/* write to stdout instead of a file */
 	bool ok = compose_gen_write(&spec->cluster, "/dev/stdout",
-	                            r.projectName, r.monitorPort);
+	                            r.projectName, r.monitorPort, r.contextDir);
 	return ok;
 }

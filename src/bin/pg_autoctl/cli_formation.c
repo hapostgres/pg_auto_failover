@@ -413,6 +413,12 @@ keeper_cli_formation_create_getopts(int argc, char **argv)
 		}
 	}
 
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	/* when we have a monitor URI we don't need PGDATA */
 	if (cli_formation_use_monitor_option(&options))
 	{

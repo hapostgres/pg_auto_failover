@@ -21,7 +21,8 @@
 bool compose_gen_write(const TestCluster *cluster,
                        const char *path,
                        const char *projectName,
-                       int monitorHostPort);
+                       int monitorHostPort,
+                       const char *contextDir);
 
 /* Return the docker network name for a project */
 void compose_network_name(const char *projectName, char *buf, int buflen);

@@ -21,6 +21,7 @@ typedef struct TestRunner
 	char        workDir[1024];     /* temp dir for this run           */
 	int         monitorPort;       /* host port mapped to monitor:5432 */
 	char        monitorConnStr[256];
+	char        contextDir[1024];  /* absolute path used as docker build context */
 
 	/* TAP counters */
 	int         tapTotal;

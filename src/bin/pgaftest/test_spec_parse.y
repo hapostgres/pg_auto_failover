@@ -44,6 +44,90 @@ static void append_cmd(TestStep *step, TestCmd *cmd)
 	}
 }
 
+/*
+ * Collect content from a `{ ... }` block that may span multiple lines.
+ *
+ * `src` points to the `{` character (already the first char of the argument).
+ * For the inline case `{ content }`, the closing `}` is on the same string.
+ * For the multi-line case `{\n  line1\n  line2\n}`, subsequent lines are
+ * fetched with strtok(NULL, "\n") which continues the caller's split.
+ *
+ * The collected content (without surrounding braces) is written into `out`.
+ */
+static void
+collect_block_content(const char *src, char *out, int outlen)
+{
+	/* skip '{' and leading whitespace */
+	src++;
+	while (*src == ' ' || *src == '\t') src++;
+
+	/* Inline single-line: { content } — closing } on the same string */
+	const char *close = strchr(src, '}');
+	if (close)
+	{
+		int len = (int)(close - src);
+		/* trim trailing whitespace before } */
+		while (len > 0 && (src[len-1] == ' ' || src[len-1] == '\t'))
+			len--;
+		if (len >= outlen) len = outlen - 1;
+		memcpy(out, src, len);
+		out[len] = '\0';
+		return;
+	}
+
+	/*
+	 * Multi-line form: content starts on remaining of same line (may be empty)
+	 * then continues on subsequent lines until a line that is just `}`.
+	 */
+	int pos = 0;
+
+	/* remainder of current line after `{` */
+	if (*src)
+	{
+		int l = strlen(src);
+		/* trim trailing whitespace */
+		while (l > 0 && (src[l-1] == '\r' || src[l-1] == '\n' ||
+		                  src[l-1] == ' '  || src[l-1] == '\t'))
+			l--;
+		if (l > 0)
+		{
+			if (l >= outlen - 1) l = outlen - 1;
+			memcpy(out, src, l);
+			pos = l;
+			out[pos] = '\0';
+		}
+	}
+
+	char *nxtline;
+	while ((nxtline = strtok(NULL, "\n")) != NULL)
+	{
+		/* skip leading whitespace */
+		char *p = nxtline;
+		while (*p == ' ' || *p == '\t') p++;
+
+		/* closing brace line */
+		if (*p == '}' && (p[1] == '\0' || p[1] == ' ' || p[1] == '\t'))
+			break;
+
+		/* append a newline separator if we already have content */
+		if (pos > 0 && pos < outlen - 1)
+			out[pos++] = '\n';
+
+		int l = strlen(p);
+		/* trim trailing CR/LF */
+		while (l > 0 && (p[l-1] == '\r' || p[l-1] == '\n')) l--;
+
+		if (pos + l >= outlen)
+			l = outlen - pos - 1;
+		if (l > 0)
+		{
+			memcpy(out + pos, p, l);
+			pos += l;
+		}
+		out[pos] = '\0';
+	}
+}
+
 static void register_step(TestSpec *spec, TestStep *step)
 {
 	if (!spec->steps)
@@ -268,21 +352,25 @@ cmd_block:
 			else if (strncmp(line, "sql ", 4) == 0)
 			{
 				cmd = make_cmd(CMD_SQL);
-				/* sql <svc> { SQL } — but the { } was already consumed by the
-				 * outer block parser; here we just have the inline form
-				 * sql <svc> <single-line SQL> or sql <svc> { multi-line }
-				 * For simplicity we treat everything after svc as the query. */
 				char *rest = line + 4;
 				while (*rest == ' ' || *rest == '\t') rest++;
 				sscanf(rest, "%63s", cmd->service);
 				char *q = rest + strlen(cmd->service);
 				while (*q == ' ' || *q == '\t') q++;
-				strncpy(cmd->args, q, sizeof(cmd->args)-1);
+				if (*q == '{')
+					collect_block_content(q, cmd->args, sizeof(cmd->args));
+				else
+					strncpy(cmd->args, q, sizeof(cmd->args)-1);
 			}
 			else if (strncmp(line, "expect ", 7) == 0)
 			{
 				cmd = make_cmd(CMD_EXPECT);
-				strncpy(cmd->expected, line + 7, sizeof(cmd->expected)-1);
+				char *rest = line + 7;
+				while (*rest == ' ' || *rest == '\t') rest++;
+				if (*rest == '{')
+					collect_block_content(rest, cmd->expected, sizeof(cmd->expected));
+				else
+					strncpy(cmd->expected, rest, sizeof(cmd->expected)-1);
 			}
 			else if (strncmp(line, "network disconnect ", 19) == 0)
 			{

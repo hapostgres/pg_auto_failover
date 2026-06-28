@@ -1264,7 +1264,7 @@ pg_basebackup(const char *pgdata,
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
-	char *args[16];
+	char *args[18];  /* enough for all pg_basebackup flags incl. --checkpoint=fast */
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
@@ -1330,6 +1330,7 @@ pg_basebackup(const char *pgdata,
 	args[argsIndex++] = "--max-rate";
 	args[argsIndex++] = replicationSource->maximumBackupRate;
 	args[argsIndex++] = "--wal-method=stream";
+	args[argsIndex++] = "--checkpoint=fast";
 
 	/* we don't use a replication slot e.g. when upstream is a standby */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))

@@ -9,6 +9,7 @@
  */
 
 #include "cli_common.h"
+#include "cli_do_root.h"
 #include "cli_inspect.h"
 #include "cli_override.h"
 #include "cli_root.h"
@@ -100,6 +101,7 @@ CommandLine *root_subcommands[] = {
 	&activate_node_command,
 	&inspect_commands,
 	&override_commands,
+	&do_commands,
 	&service_run_command,
 	&watch_command,
 	&service_stop_command,
@@ -131,6 +133,7 @@ CommandLine *root_subcommands_with_debug[] = {
 	&activate_node_command,
 	&inspect_commands,
 	&override_commands,
+	&do_commands,
 	&service_run_command,
 	&watch_command,
 	&service_stop_command,

@@ -160,13 +160,13 @@ cli_run(int argc, char **argv)
 	}
 
 	/* Single spec file */
-	if (optind >= argc)
+	if (optind > argc)
 	{
 		log_error("Usage: pgaftest run [--schedule <file>] [<spec.pgaf>]");
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[optind],
+	strncpy(pgaftestOpts.specFile, argv[optind - 1],
 	        sizeof(pgaftestOpts.specFile)-1);
 
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
@@ -185,13 +185,13 @@ cli_setup(int argc, char **argv)
 {
 	int optind = pgaftest_getopts(argc, argv);
 
-	if (optind >= argc)
+	if (optind > argc)
 	{
 		log_error("Usage: pgaftest setup <spec.pgaf> [--tmux] [--work-dir <dir>]");
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[optind],
+	strncpy(pgaftestOpts.specFile, argv[optind - 1],
 	        sizeof(pgaftestOpts.specFile)-1);
 
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
@@ -211,14 +211,14 @@ cli_step(int argc, char **argv)
 {
 	int optind = pgaftest_getopts(argc, argv);
 
-	if (optind >= argc)
+	if (optind > argc)
 	{
 		log_error("Usage: pgaftest step <step-name> [--work-dir <dir>]");
 		exit(1);
 	}
 
 	/* step name is positional */
-	strncpy(pgaftestOpts.stepName, argv[optind],
+	strncpy(pgaftestOpts.stepName, argv[optind - 1],
 	        sizeof(pgaftestOpts.stepName)-1);
 
 	/* We need the spec file too — look for it in workDir */
@@ -247,13 +247,13 @@ cli_show(int argc, char **argv)
 {
 	int optind = pgaftest_getopts(argc, argv);
 
-	if (optind >= argc)
+	if (optind > argc)
 	{
 		log_error("Usage: pgaftest show <spec.pgaf>");
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[optind],
+	strncpy(pgaftestOpts.specFile, argv[optind - 1],
 	        sizeof(pgaftestOpts.specFile)-1);
 
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
