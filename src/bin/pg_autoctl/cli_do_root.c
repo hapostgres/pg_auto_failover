@@ -567,23 +567,8 @@ CommandLine do_azure_commands =
 
 #endif /* REMOVED: azure commands */
 
-CommandLine *do_subcommands[] = {
-	&do_monitor_commands,
-	&do_coordinator_commands,
-	&do_fsm_commands,
-	&do_primary_,
-	&do_standby_,
-	&do_show_commands,
-	&do_pgsetup_commands,
-	&do_service_postgres_ctl_commands,
-	&do_service_commands,
-	&do_tmux_commands,
-	&do_demo_commands,
-	NULL
-};
-
 /*
- * pg_autoctl do service postgres|listener|node-active
+ * pg_autoctl internal service postgres|listener|node-active
  *
  * These are the subprocess entry points used by the supervisor (pg_autoctl run
  * and pg_autoctl create … --run).  The supervisor fork()s and then execv()s
@@ -603,11 +588,39 @@ CommandLine *do_subcommands[] = {
  * version mismatch precisely to trigger this restart-with-new-binary path.
  *
  * These commands are hidden from --help output (make_hidden_command_set) so
- * operators do not accidentally invoke them.  Use "pg_autoctl manual service"
- * for the user-facing service controls (getpid, restart, pgctl on/off).
+ * operators do not accidentally invoke them directly.
+ * Use "pg_autoctl manual service" for the user-facing controls (restart, pgctl).
+ * Use "pg_autoctl inspect getpid" to read sub-process PIDs.
  */
+static CommandLine *internal_service_subcommands[] = {
+	&service_pgcontroller,      /* debug: supervisor for just the postgres controller */
+	&service_postgres,          /* spawned by service_postgres_ctl_start() */
+	&service_monitor_listener,  /* spawned by service_monitor_start() */
+	&service_node_active,       /* spawned by service_keeper_start() */
+	NULL
+};
+
+static CommandLine internal_service_commands =
+	make_hidden_command_set("service",
+					 "Subprocess entry points for the pg_autoctl supervisor",
+					 NULL, NULL, NULL, internal_service_subcommands);
+
+/*
+ * pg_autoctl internal
+ *
+ * Hidden from --help; routable so the supervisor's execv() calls work.
+ * Contains only what the supervisor spawns plus dev/QA tooling not yet
+ * moved to pgaftest (tmux, demo).
+ */
+CommandLine *do_subcommands[] = {
+	&internal_service_commands,
+	&do_tmux_commands,
+	&do_demo_commands,
+	NULL
+};
+
 CommandLine do_commands =
-	make_hidden_command_set("do",
+	make_hidden_command_set("internal",
 					 "Internal subprocess entry points — not for direct use",
 					 NULL, NULL, NULL, do_subcommands);
 

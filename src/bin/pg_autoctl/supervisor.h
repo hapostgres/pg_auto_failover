@@ -18,7 +18,7 @@
  *
  *  - the main pidfile,
  *  - the per-service name for the pidfile is derived from this,
- *  - the pg_autoctl do service getpid|restart commands
+ *  - the pg_autoctl manual service getpid|restart commands
  */
 #define SERVICE_NAME_POSTGRES "postgres"
 #define SERVICE_NAME_KEEPER "node-active"

@@ -40,6 +40,11 @@ extern CommandLine do_service_commands;
 extern CommandLine do_service_getpid_commands;
 extern CommandLine do_service_restart_commands;
 extern CommandLine do_service_postgres_ctl_commands;
+/* subprocess entry points (spawned by the supervisor via fork+exec) */
+extern CommandLine service_pgcontroller;
+extern CommandLine service_postgres;
+extern CommandLine service_monitor_listener;
+extern CommandLine service_node_active;
 
 /* src/bin/pg_autoctl/cli_do_show.c */
 extern CommandLine do_show_commands;

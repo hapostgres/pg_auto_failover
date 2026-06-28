@@ -121,7 +121,7 @@ service_monitor_start(void *context, pid_t *pid)
 /*
  * service_monitor_runprogram runs the monitor listener service:
  *
- *   $ pg_autoctl do service listener --pgdata ...
+ *   $ pg_autoctl internal service listener --pgdata ...
  *
  * This function is intended to be called from the child process after a fork()
  * has been successfully done at the parent process level: it's calling
@@ -165,7 +165,7 @@ service_monitor_runprogram(Monitor *monitor)
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
 
 	args[argsIndex++] = (char *) pg_autoctl_program;
-	args[argsIndex++] = "do";
+	args[argsIndex++] = "internal";
 	args[argsIndex++] = "service";
 	args[argsIndex++] = "listener";
 	args[argsIndex++] = "--pgdata";

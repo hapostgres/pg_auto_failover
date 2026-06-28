@@ -56,7 +56,7 @@ static CommandLine manual_fsm_commands =
  * Intentionally excludes the internal subprocess entry points
  * (pgcontroller / postgres / listener / node-active) which are spawned by the
  * supervisor via fork+exec and are not meant for direct operator use.
- * Those live under the hidden "pg_autoctl do service" group.
+ * Those live under the hidden "pg_autoctl internal service" group.
  */
 static CommandLine *manual_service_subcommands[] = {
 	&do_service_restart_commands,       /* restart postgres|listener|node-active */

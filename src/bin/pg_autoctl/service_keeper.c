@@ -143,7 +143,7 @@ service_keeper_start(void *context, pid_t *pid)
 /*
  * service_keeper_runprogram runs the node_active protocol service:
  *
- *   $ pg_autoctl do service node-active --pgdata ...
+ *   $ pg_autoctl internal service node-active --pgdata ...
  *
  * This function is intended to be called from the child process after a fork()
  * has been successfully done at the parent process level: it's calling
@@ -181,7 +181,7 @@ service_keeper_runprogram(Keeper *keeper)
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
 
 	args[argsIndex++] = (char *) pg_autoctl_program;
-	args[argsIndex++] = "do";
+	args[argsIndex++] = "internal";
 	args[argsIndex++] = "service";
 	args[argsIndex++] = "node-active";
 	args[argsIndex++] = "--pgdata";
