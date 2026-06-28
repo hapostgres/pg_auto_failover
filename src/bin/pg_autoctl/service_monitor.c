@@ -119,13 +119,18 @@ service_monitor_start(void *context, pid_t *pid)
 
 
 /*
- * service_monitor_runprogram runs the node_active protocol service:
+ * service_monitor_runprogram runs the monitor listener service:
  *
- *   $ pg_autoctl do service monitor --pgdata ...
+ *   $ pg_autoctl do service listener --pgdata ...
  *
  * This function is intended to be called from the child process after a fork()
  * has been successfully done at the parent process level: it's calling
  * execve() and will never return.
+ *
+ * Using execve() is a deliberate live-upgrade design choice: the supervisor
+ * restarts children via fork()+execve(), re-execing the binary from disk so
+ * an in-place update of pg_autoctl is picked up without restarting the
+ * supervisor (which may be PID 1 in a container).
  */
 void
 service_monitor_runprogram(Monitor *monitor)

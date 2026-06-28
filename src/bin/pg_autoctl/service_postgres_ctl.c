@@ -93,6 +93,10 @@ service_postgres_ctl_start(void *context, pid_t *pid)
  * service_postgres_ctl_runprogram runs the postgres controller service:
  *
  *   $ pg_autoctl do service postgres --pgdata ...
+ *
+ * Uses fork()+execve() so the supervisor can restart the child with the
+ * current binary on disk — enabling live (zero-downtime) upgrades when
+ * pg_autoctl runs as PID 1 in a container.
  */
 void
 service_postgres_ctl_runprogram()

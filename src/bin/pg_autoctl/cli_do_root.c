@@ -582,10 +582,34 @@ CommandLine *do_subcommands[] = {
 	NULL
 };
 
+/*
+ * pg_autoctl do service postgres|listener|node-active
+ *
+ * These are the subprocess entry points used by the supervisor (pg_autoctl run
+ * and pg_autoctl create … --run).  The supervisor fork()s and then execv()s
+ * the pg_autoctl binary itself with one of these sub-commands so that each
+ * service runs in its own address space.
+ *
+ * Using fork+exec (rather than fork alone) is a deliberate design choice for
+ * live upgrades: when a child process exits with an incompatible monitor
+ * extension version, the supervisor restarts it via fork()+execv(), which loads
+ * the current binary from disk.  If the binary has been updated in place (e.g.
+ * by a package manager), the restarted child automatically picks up the new
+ * version without touching the supervisor process — making pg_autoctl safe to
+ * use as PID 1 in Docker/Kubernetes containers where replacing the binary and
+ * sending SIGTERM would lose the container.
+ *
+ * See also: keeper.c keeper_check_monitor_extension_version(), which exits on
+ * version mismatch precisely to trigger this restart-with-new-binary path.
+ *
+ * These commands are hidden from --help output (make_hidden_command_set) so
+ * operators do not accidentally invoke them.  Use "pg_autoctl manual service"
+ * for the user-facing service controls (getpid, restart, pgctl on/off).
+ */
 CommandLine do_commands =
-	make_command_set("do",
-					 "Internal commands and internal QA tooling", NULL, NULL,
-					 NULL, do_subcommands);
+	make_hidden_command_set("do",
+					 "Internal subprocess entry points — not for direct use",
+					 NULL, NULL, NULL, do_subcommands);
 
 
 /*

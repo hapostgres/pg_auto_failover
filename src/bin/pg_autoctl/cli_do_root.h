@@ -18,9 +18,18 @@ extern CommandLine do_fsm_commands;
 
 /* src/bin/pg_autoctl/cli_do_monitor.c */
 extern CommandLine do_monitor_commands;
+/* read-only sub-commands exposed via "pg_autoctl inspect monitor" */
+extern CommandLine monitor_get_command;
+extern CommandLine monitor_parse_notification_command;
+/* mutating sub-commands exposed via "pg_autoctl manual monitor" */
+extern CommandLine monitor_register_command;
+extern CommandLine monitor_node_active_command;
+extern CommandLine monitor_version_command;
 
 /* src/bin/pg_autoctl/cli_do_service.c */
 extern CommandLine do_service_commands;
+extern CommandLine do_service_getpid_commands;
+extern CommandLine do_service_restart_commands;
 extern CommandLine do_service_postgres_ctl_commands;
 
 /* src/bin/pg_autoctl/cli_do_show.c */

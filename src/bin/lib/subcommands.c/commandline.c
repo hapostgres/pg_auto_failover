@@ -226,6 +226,9 @@ commandline_pretty_print_subcommands(CommandLine *command, FILE *stream)
 		/* pretty printing: reduce maximum length of subcommand names */
 		for (subcommand = command->subcommands; *subcommand != NULL; subcommand++)
 		{
+			if ((*subcommand)->hidden)
+				continue;
+
 			int len = strlen((*subcommand)->name);
 
 			if (maxLength < len)
@@ -237,6 +240,9 @@ commandline_pretty_print_subcommands(CommandLine *command, FILE *stream)
 		for (subcommand = command->subcommands; *subcommand != NULL; subcommand++)
 		{
 			const char *description = "";
+
+			if ((*subcommand)->hidden)
+				continue;
 
 			if ((*subcommand)->shortDescription != NULL)
 			{

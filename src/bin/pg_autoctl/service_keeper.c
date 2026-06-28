@@ -148,6 +148,17 @@ service_keeper_start(void *context, pid_t *pid)
  * This function is intended to be called from the child process after a fork()
  * has been successfully done at the parent process level: it's calling
  * execve() and will never return.
+ *
+ * Using execve() (rather than just calling the service function directly) is a
+ * deliberate design choice for live upgrades: when keeper_node_active() detects
+ * a monitor extension version mismatch it exits, and the supervisor restarts
+ * the child via fork()+execve() — which re-execs the pg_autoctl binary from
+ * disk.  If the binary has been updated in place the restarted child picks up
+ * the new version automatically, making zero-downtime upgrades possible even
+ * when pg_autoctl runs as PID 1 in a Docker/Kubernetes container.
+ *
+ * See keeper_check_monitor_extension_version() in keeper.c for the exit path
+ * that triggers this mechanism.
  */
 void
 service_keeper_runprogram(Keeper *keeper)

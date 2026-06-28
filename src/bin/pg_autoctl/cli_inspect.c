@@ -2,8 +2,11 @@
  * src/bin/pg_autoctl/cli_inspect.c
  *   pg_autoctl inspect — read-only diagnostics, always visible.
  *
- *   These commands read local or cluster state without mutating anything.
+ *   All commands here read local or cluster state without mutating anything.
  *   Safe to run at any time, even while `pg_autoctl run` is active.
+ *
+ *   For mutating recovery commands (fsm assign, standby promote, etc.) see
+ *   cli_manual.c ("pg_autoctl manual …").
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -14,17 +17,32 @@
 #include "cli_do_root.h"
 
 /*
- * Aggregate the read-only do_* command sets under a single "inspect" group.
- * We reference the existing command sets by address — do_show_commands,
- * do_pgsetup_commands, etc. are extern CommandLine objects already declared
- * in cli_do_root.h.
+ * Read-only monitor sub-commands: get primary/others/candidate-count/coordinator
+ * and parse-notification.  We intentionally exclude "register", "active", and
+ * "version" (ALTER EXTENSION) which are mutating — those live under "manual".
  */
+static CommandLine *inspect_monitor_subcommands[] = {
+	&monitor_get_command,
+	&monitor_parse_notification_command,
+	NULL
+};
 
+static CommandLine inspect_monitor_commands =
+	make_command_set("monitor",
+	                 "Query the monitor's current state (read-only)",
+	                 NULL, NULL, NULL, inspect_monitor_subcommands);
+
+/*
+ * Aggregate the read-only do_* command sets under "inspect".
+ *
+ * service here is only "getpid" — inspecting PIDs of running sub-processes.
+ * "restart" and "pgctl on/off" mutate state and belong under "manual service".
+ */
 static CommandLine *inspect_subcommands[] = {
-	&do_show_commands,        /* ipaddr / cidr / lookup / hostname / reverse */
-	&do_pgsetup_commands,     /* discover / ready / wait / logs / tune / pg_ctl */
-	&do_monitor_commands,     /* get primary|others / version / register / active */
-	&do_service_commands,     /* getpid postgres|listener|node-active */
+	&do_show_commands,          /* ipaddr / cidr / lookup / hostname / reverse */
+	&do_pgsetup_commands,       /* discover / ready / wait / logs / tune / pg_ctl */
+	&inspect_monitor_commands,  /* get primary|others|candidate-count + parse-notification */
+	&do_service_getpid_commands, /* getpid postgres|listener|node-active */
 	NULL
 };
 
