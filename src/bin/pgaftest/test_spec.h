@@ -58,6 +58,16 @@ typedef struct TestNode
 	int  candidatePriority;      /* 0-100, default 50 */
 	bool replicationQuorum;      /* participates in sync quorum */
 	bool async;                  /* async standby (replicationQuorum = false) */
+
+	/* create-time options — passed to pg_autoctl create via [options] ini */
+	bool noMonitor;              /* --no-monitor: standalone node */
+	bool listen;                 /* --listen 0.0.0.0: bind all interfaces */
+	bool citusSecondary;         /* --citus-secondary */
+	char citusClusterName[64];   /* --citus-cluster-name NAME */
+	int  pgPort;                 /* --pg-port N (0 = default 5432) */
+	char debianCluster[64];      /* --debian-cluster NAME */
+	char ssl[32];                /* per-node ssl override; "" = use cluster */
+	char auth[32];               /* per-node auth override; "" = use cluster */
 } TestNode;
 
 typedef struct TestFormation

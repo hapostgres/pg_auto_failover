@@ -141,8 +141,19 @@ Options:
 
 * ``async`` — makes this node asynchronous (``replication_quorum = false``)
 * ``candidate-priority N`` — integer 0–100; default 50.  ``0`` prevents this
-  node from ever being elected primary.
-* ``group N`` — Citus group id (required for ``worker`` kind)
+  node from ever being elected primary.  Can also be written ``candidate-priority=N``.
+* ``replication-quorum false`` — same as ``async``; can also be
+  written ``replication-quorum=false``.
+* ``group N`` — Citus group id (required for ``worker`` kind).
+  Can also be written ``group=N``.
+* ``no-monitor`` — standalone node: does not register with a monitor.
+* ``listen`` — bind Postgres to all interfaces (``0.0.0.0``).
+* ``citus-secondary`` — marks this node as a Citus secondary.
+* ``citus-cluster-name NAME`` — sets the Citus cluster name.
+* ``port N`` — override the default Postgres port (5432).
+* ``debian-cluster NAME`` — Debian-style Postgres cluster name.
+* ``ssl MODE`` — per-node SSL mode override (overrides the cluster-level ``ssl``).
+* ``auth-method METHOD`` — per-node auth method override.
 
 **Examples**
 
@@ -328,12 +339,32 @@ multi-line ``{ ... }`` block for multi-statement SQL.
 ~~~~~~~~~~~~~~~~~~~~
 
 Compare the output of the most recent ``sql`` command against ``text``.
-Fails the step when the output does not match.  Whitespace is normalised.
+Fails the step when the output does not match.
+
+Single-value form:
 
 .. code-block:: text
 
    sql node2 { SELECT count(*) FROM t1; }
    expect { 3 }
+
+Multi-line form (matches ``psql --tuples-only --no-align`` output, one row per line):
+
+.. code-block:: text
+
+   sql node1 { SELECT a, b FROM t ORDER BY a; }
+   expect {
+       1	hello
+       2	world
+   }
+
+Inline tuple form — each ``{ value }`` group corresponds to one output row.
+This is equivalent to the multi-line form above.
+
+.. code-block:: text
+
+   sql node1 { SELECT count(*) FROM t GROUP BY status; }
+   expect { { 2 } { 5 } }
 
 ``network disconnect <node>``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

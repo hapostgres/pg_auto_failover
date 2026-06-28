@@ -3,8 +3,10 @@
 
 cluster {
     monitor
-    node node1  listen
-    node node2  listen
+    formation {
+        node1 listen
+        node2 listen
+    }
 }
 
 setup {

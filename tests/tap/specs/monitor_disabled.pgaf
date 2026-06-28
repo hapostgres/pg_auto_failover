@@ -2,9 +2,11 @@
 # The FSM is driven manually via pg_autoctl do fsm assign / nodes set.
 
 cluster {
-    node node1  no-monitor
-    node node2  no-monitor
-    node node3  no-monitor
+    formation {
+        node1 no-monitor
+        node2 no-monitor
+        node3 no-monitor
+    }
 }
 
 # No monitor, so no automatic state convergence — each step drives the FSM

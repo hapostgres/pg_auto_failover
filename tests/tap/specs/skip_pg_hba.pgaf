@@ -2,9 +2,12 @@
 # on either node.  HBA rules are managed manually by the operator.
 
 cluster {
-    monitor  auth-method=skip
-    node node1  auth-method=skip
-    node node2  auth-method=skip
+    monitor
+    auth skip
+    formation {
+        node1
+        node2
+    }
 }
 
 setup {

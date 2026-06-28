@@ -3,9 +3,12 @@
 # shared root CA, and client certificates are placed in ~/.postgresql/.
 
 cluster {
-    monitor  ssl=verify-ca
-    node node1  ssl=verify-ca
-    node node2  ssl=verify-ca
+    monitor
+    ssl verify-ca
+    formation {
+        node1
+        node2
+    }
 }
 
 setup {

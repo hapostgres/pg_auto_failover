@@ -2,9 +2,12 @@
 # handling and verifying that passwords are not leaked in logs.
 
 cluster {
-    monitor  auth-method=md5
-    node node1  auth-method=md5  formation=auth
-    node node2  auth-method=md5  formation=auth
+    monitor
+    auth md5
+    formation auth {
+        node1
+        node2
+    }
 }
 
 setup {

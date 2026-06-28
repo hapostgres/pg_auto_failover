@@ -5,12 +5,14 @@
 
 cluster {
     monitor
-    citus-coordinator coordinator1a
-    citus-coordinator coordinator1b  candidate-priority=0  citus-secondary  citus-cluster-name=readonly
-    citus-worker worker1a  group=1
-    citus-worker worker1b  group=1  candidate-priority=0  citus-secondary  citus-cluster-name=readonly
-    citus-worker worker2a  group=2
-    citus-worker worker2b  group=2  candidate-priority=0  citus-secondary  citus-cluster-name=readonly
+    formation {
+        coordinator1a coordinator
+        coordinator1b coordinator candidate-priority 0 citus-secondary citus-cluster-name readonly
+        worker1a worker group 1
+        worker1b worker group 1 candidate-priority 0 citus-secondary citus-cluster-name readonly
+        worker2a worker group 2
+        worker2b worker group 2 candidate-priority 0 citus-secondary citus-cluster-name readonly
+    }
 }
 
 setup {

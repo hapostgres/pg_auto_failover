@@ -4,11 +4,14 @@
 # adding the required HBA rules the worker activates successfully.
 
 cluster {
-    monitor  auth=skip
-    citus-coordinator coord0a  auth=skip
-    citus-coordinator coord0b  auth=skip
-    citus-worker worker1a  group=1  auth=skip
-    citus-worker worker1b  group=1  auth=skip
+    monitor
+    auth skip
+    formation {
+        coord0a coordinator
+        coord0b coordinator
+        worker1a worker group 1
+        worker1b worker group 1
+    }
 }
 
 setup {

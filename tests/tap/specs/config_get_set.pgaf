@@ -4,7 +4,9 @@
 
 cluster {
     monitor
-    node node1
+    formation {
+        node1
+    }
 }
 
 setup {

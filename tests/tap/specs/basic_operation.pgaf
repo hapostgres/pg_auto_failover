@@ -13,8 +13,10 @@
 
 cluster {
     monitor
-    node node1
-    node node2
+    formation {
+        node1
+        node2
+    }
 }
 
 setup {

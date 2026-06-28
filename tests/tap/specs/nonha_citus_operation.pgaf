@@ -5,12 +5,14 @@
 
 cluster {
     monitor
-    citus-coordinator coordinator1a  formation=non-ha
-    citus-coordinator coordinator1b  formation=non-ha
-    citus-worker worker1a  group=1  formation=non-ha
-    citus-worker worker1b  group=1  formation=non-ha
-    citus-worker worker2a  group=2  formation=non-ha
-    citus-worker worker2b  group=2  formation=non-ha
+    formation non-ha {
+        coordinator1a coordinator
+        coordinator1b coordinator
+        worker1a worker group 1
+        worker1b worker group 1
+        worker2a worker group 2
+        worker2b worker group 2
+    }
 }
 
 setup {

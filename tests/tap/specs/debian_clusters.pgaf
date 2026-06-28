@@ -3,8 +3,10 @@
 # pg_autoctl must detect and support this split-config layout.
 
 cluster {
-    monitor  debian-cluster=monitor  port=6000
-    node node1  debian-cluster=debian_node1  port=6001  listen
+    monitor port 6000 debian-cluster monitor
+    formation {
+        node1 port 6001 debian-cluster debian_node1 listen
+    }
 }
 
 setup {

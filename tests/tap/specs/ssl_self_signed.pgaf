@@ -2,9 +2,12 @@
 # Both the monitor and data nodes generate their own self-signed certs.
 
 cluster {
-    monitor  ssl=self-signed
-    node node1  ssl=self-signed
-    node node2  ssl=self-signed
+    monitor
+    ssl self-signed
+    formation {
+        node1
+        node2
+    }
 }
 
 setup {
