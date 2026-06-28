@@ -17,6 +17,23 @@
 #include "cli_do_root.h"
 
 /*
+ * Read-only FSM sub-commands: display the current state, list reachable
+ * transitions, or dump the full FSM as a graphviz .gv file.
+ * Mutating operations (init, assign, step, nodes set) live under "manual fsm".
+ */
+static CommandLine *inspect_fsm_subcommands[] = {
+	&fsm_state,
+	&fsm_list,
+	&fsm_gv,
+	NULL
+};
+
+static CommandLine inspect_fsm_commands =
+	make_command_set("fsm",
+	                 "Display keeper FSM state and transitions (read-only)",
+	                 NULL, NULL, NULL, inspect_fsm_subcommands);
+
+/*
  * Read-only monitor sub-commands: get primary/others/candidate-count/coordinator
  * and parse-notification.  We intentionally exclude "register", "active", and
  * "version" (ALTER EXTENSION) which are mutating — those live under "manual".
@@ -39,9 +56,10 @@ static CommandLine inspect_monitor_commands =
  * "restart" and "pgctl on/off" mutate state and belong under "manual service".
  */
 static CommandLine *inspect_subcommands[] = {
-	&do_show_commands,          /* ipaddr / cidr / lookup / hostname / reverse */
-	&do_pgsetup_commands,       /* discover / ready / wait / logs / tune / pg_ctl */
-	&inspect_monitor_commands,  /* get primary|others|candidate-count + parse-notification */
+	&do_show_commands,           /* ipaddr / cidr / lookup / hostname / reverse */
+	&do_pgsetup_commands,        /* discover / ready / wait / logs / tune / pg_ctl */
+	&inspect_fsm_commands,       /* state / list / gv */
+	&inspect_monitor_commands,   /* get primary|others|candidate-count + parse-notification */
 	&do_service_getpid_commands, /* getpid postgres|listener|node-active */
 	NULL
 };
@@ -52,6 +70,7 @@ CommandLine inspect_commands =
 	                 "[sub-command]",
 	                 "  show      Networking and hostname diagnostics\n"
 	                 "  pgsetup   Local PostgreSQL setup inspection\n"
+	                 "  fsm       Display keeper FSM state and reachable transitions\n"
 	                 "  monitor   Query the monitor's current state\n"
-	                 "  service   Get PIDs of pg_autoctl sub-processes\n",
+	                 "  getpid    Get PIDs of pg_autoctl sub-processes\n",
 	                 NULL, inspect_subcommands);

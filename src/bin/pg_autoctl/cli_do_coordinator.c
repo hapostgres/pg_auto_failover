@@ -108,7 +108,7 @@ static CommandLine *coordinator_commands[] = {
 
 CommandLine do_coordinator_commands =
 	make_command_set("coordinator",
-					 "Query a Citus coordinator", NULL, NULL,
+					 "Manage Citus coordinator node metadata", NULL, NULL,
 					 NULL, coordinator_commands);
 
 

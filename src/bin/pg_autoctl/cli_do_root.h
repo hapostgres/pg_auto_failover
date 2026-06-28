@@ -15,6 +15,15 @@
 
 /* src/bin/pg_autoctl/cli_do_fsm.c */
 extern CommandLine do_fsm_commands;
+/* read-only sub-commands exposed via "pg_autoctl inspect fsm" */
+extern CommandLine fsm_state;
+extern CommandLine fsm_list;
+extern CommandLine fsm_gv;
+/* mutating sub-commands exposed via "pg_autoctl manual fsm" */
+extern CommandLine fsm_init;
+extern CommandLine fsm_assign;
+extern CommandLine fsm_step;
+extern CommandLine fsm_nodes;  /* nodes get + nodes set — kept together in manual */
 
 /* src/bin/pg_autoctl/cli_do_monitor.c */
 extern CommandLine do_monitor_commands;
