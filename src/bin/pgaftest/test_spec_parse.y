@@ -345,6 +345,8 @@ parse_node_line(const char **pp, TestFormation *f, TestCluster *cl)
 		}
 		else if (strcmp(key, "no-monitor") == 0)
 			n->noMonitor = true;
+		else if (strcmp(key, "no-autostart") == 0)
+			n->noAutostart = true;
 		else if (strcmp(key, "listen") == 0)
 			n->listen = true;
 		else if (strcmp(key, "citus-secondary") == 0)

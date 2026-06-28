@@ -173,9 +173,13 @@ compose_gen_write(const TestCluster *cluster,
 					"        condition: service_started\n",
 					firstNode->name);
 
-			fprintf(f,
-				"    command: [\"pg_autoctl\", \"node\", \"run\","
-				" \"" NODE_INI_PATH "\"]\n\n");
+			if (n->noAutostart)
+				fprintf(f,
+					"    command: [\"sleep\", \"infinity\"]\n\n");
+			else
+				fprintf(f,
+					"    command: [\"pg_autoctl\", \"node\", \"run\","
+					" \"" NODE_INI_PATH "\"]\n\n");
 
 			if (!firstNode) firstNode = n;
 		}

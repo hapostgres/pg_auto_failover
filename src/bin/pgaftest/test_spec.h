@@ -61,6 +61,7 @@ typedef struct TestNode
 
 	/* create-time options — passed to pg_autoctl create via [options] ini */
 	bool noMonitor;              /* --no-monitor: standalone node */
+	bool noAutostart;            /* container sleeps; pg_autoctl run is manual */
 	bool listen;                 /* --listen 0.0.0.0: bind all interfaces */
 	bool citusSecondary;         /* --citus-secondary */
 	char citusClusterName[64];   /* --citus-cluster-name NAME */
