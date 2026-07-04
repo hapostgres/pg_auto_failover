@@ -59,12 +59,12 @@ step create_new_monitor {
 }
 
 step enable_monitor_node1 {
-    exec node1  pg_autoctl enable monitor --monitor postgresql://newmonitor/pg_auto_failover
+    exec node1  pg_autoctl enable monitor postgresql://newmonitor/pg_auto_failover
     wait until node1 state is single  timeout 90s
 }
 
 step enable_monitor_node2 {
-    exec node2  pg_autoctl enable monitor --monitor postgresql://newmonitor/pg_auto_failover
+    exec node2  pg_autoctl enable monitor postgresql://newmonitor/pg_auto_failover
     wait until node2 state is catchingup  timeout 90s
     wait until node1 state is wait_primary  timeout 90s
 }
