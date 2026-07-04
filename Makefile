@@ -187,10 +187,16 @@ endif
 #
 # INDENT/LINT/SPELLCHECK
 #
-# citus_indent is run via its official Docker image so that the version
-# matches CI exactly.  The image is citus/stylechecker:no-py.
-CITUS_INDENT = docker run --rm \
-	-v "$(shell pwd):/workdir" \
+# citus_indent is run via its official Docker image (citus/stylechecker:no-py)
+# so that the local version exactly matches CI.  When the local citus_indent
+# binary is already in PATH (e.g. inside CI after tools.mk installs it) the
+# plain binary is used instead, which is equally authoritative there.
+#
+# To use Docker locally:
+#   make docker-indent    # auto-fix formatting via Docker
+#   make docker-check     # check-only via Docker
+CITUS_INDENT_DOCKER = docker run --rm \
+	-v "$(CURDIR):/workdir" \
 	-w /workdir \
 	citus/stylechecker:no-py \
 	citus_indent
@@ -198,8 +204,15 @@ CITUS_INDENT = docker run --rm \
 # make indent; edits the code when necessary
 .PHONY: indent
 indent:
-	$(CITUS_INDENT)
+	citus_indent
 	black --exclude=ci/tools .
+
+# make docker-indent / make docker-check — use Docker image locally
+.PHONY: docker-indent docker-check
+docker-indent:
+	$(CITUS_INDENT_DOCKER)
+docker-check:
+	$(CITUS_INDENT_DOCKER) --check
 
 # make lint; is an alias for make spellcheck
 # make linting; is an alias for make spellcheck
@@ -210,7 +223,7 @@ lint linting: spellcheck ;
 # reports compliance with the rules.
 .PHONY: spellcheck
 spellcheck:
-	$(CITUS_INDENT) --check
+	citus_indent --check
 	black --exclude=ci/tools --check .
 	ci/banned.h.sh
 
