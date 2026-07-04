@@ -67,15 +67,15 @@ jobs:
         run: |
           docker create --name pgaftest-extract pgaf:build
           docker cp pgaftest-extract:/usr/lib/postgresql/${{ env.PGVERSION }}/bin/pgaftest \
-            /tmp/pgaftest
+            /tmp/pgaftest-bin
           docker rm pgaftest-extract
-          chmod +x /tmp/pgaftest
+          chmod +x /tmp/pgaftest-bin
 
       - name: Upload pgaftest binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: pgaftest-binary
-          path: /tmp/pgaftest
+          path: /tmp/pgaftest-bin
           retention-days: 1
 
   # ---------------------------------------------------------------------------
@@ -147,8 +147,8 @@ jobs:
         env:
           PGAF_IMAGE: pgaf:run
         run: |
-          chmod +x /tmp/pgaftest
-          /tmp/pgaftest run tests/tap/specs/${{ matrix.spec }}.pgaf
+          chmod +x /tmp/pgaftest-bin
+          /tmp/pgaftest-bin run tests/tap/specs/${{ matrix.spec }}.pgaf
 
   # ---------------------------------------------------------------------------
   # Upgrade test: builds both pgaf:next (current branch) and pgaf:current
@@ -206,5 +206,5 @@ jobs:
       - name: Run upgrade spec
         timeout-minutes: 25
         run: |
-          chmod +x /tmp/pgaftest
-          /tmp/pgaftest run tests/tap/specs/upgrade.pgaf
+          chmod +x /tmp/pgaftest-bin
+          /tmp/pgaftest-bin run tests/tap/specs/upgrade.pgaf
