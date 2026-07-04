@@ -13,6 +13,7 @@
 
 cluster {
     monitor
+    ssl off
     formation {
         node1
         node2

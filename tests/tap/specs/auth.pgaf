@@ -52,7 +52,7 @@ step test_002_create_t1 {
 }
 
 step test_003_failover {
-    pg_autoctl perform failover --formation auth
+    exec monitor  pg_autoctl perform failover --formation auth
     wait until node2 state is primary
         and node1 state is secondary
         timeout 90s

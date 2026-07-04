@@ -6,6 +6,7 @@
 cluster {
     monitor
     monitor newmonitor initially stopped
+    ssl off
     formation {
         node1
         node2
