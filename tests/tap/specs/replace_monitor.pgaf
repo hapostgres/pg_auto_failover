@@ -53,7 +53,9 @@ step read_replicated_write {
 }
 
 step create_new_monitor {
-    exec newmonitor  pg_autoctl run --background
+    compose start newmonitor
+    exec newmonitor  pg_autoctl inspect pgsetup wait
+    set monitor newmonitor
 }
 
 step enable_monitor_node1 {
