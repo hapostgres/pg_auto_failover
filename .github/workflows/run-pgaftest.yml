@@ -23,7 +23,7 @@ jobs:
     name: Build image & pgaftest
     runs-on: ubuntu-latest
     env:
-      PGVERSION: 16
+      PGVERSION: 17
 
     steps:
       - uses: actions/checkout@v4

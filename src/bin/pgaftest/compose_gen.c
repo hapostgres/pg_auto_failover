@@ -807,6 +807,8 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 	}
 
 	fclose(f);
+	/* world-writable so the container's docker user can update it at runtime */
+	(void) chmod(path, 0666);
 	log_info("Wrote monitor.ini to \"%s\"", path);
 	return true;
 }
@@ -868,6 +870,7 @@ compose_gen_write_second_monitor_ini(const TestCluster *cluster, const char *dir
 			"key_file  = /var/lib/postgres/server.key\n");
 
 	fclose(f);
+	(void) chmod(path, 0666);
 	log_info("Wrote %s.ini to \"%s\"", name, path);
 	return true;
 }
@@ -1050,6 +1053,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 	}
 
 	fclose(f);
+	(void) chmod(path, 0666);
 	log_info("Wrote %s.ini to \"%s\"", node->name, path);
 	return true;
 }

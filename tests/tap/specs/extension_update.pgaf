@@ -9,6 +9,7 @@
 
 cluster {
     monitor
+    extension-version "dummy"
 }
 
 setup {
