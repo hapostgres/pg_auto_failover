@@ -608,30 +608,41 @@ compose_gen_write(TestCluster *cluster,
 				node_pgdata);
 
 			/*
-			 * The first data node gets a healthcheck so that subsequent nodes
-			 * can use service_healthy depends_on.  This ensures node1 has
-			 * registered with the monitor (and become the initial primary) before
-			 * any other node starts, making the initial election deterministic.
+			 * With a monitor: the first data node gets a healthcheck so that
+			 * subsequent nodes use service_healthy depends_on.  This ensures
+			 * node1 has registered with the monitor (and become the initial
+			 * primary) before any other node starts, making the initial
+			 * election deterministic.
 			 *
-			 * pg_autoctl status exits 0 only after the keeper process is running
-			 * and has established its state with the monitor.
+			 * Without a monitor (no-monitor nodes): the first node still gets
+			 * a healthcheck (pg_isready) so that subsequent nodes wait until
+			 * postgres is accepting connections before starting.  The test
+			 * steps then drive the FSM manually from a known-ready state.
 			 */
 			if (!firstNode)
-				fprintf(f,
-					"    healthcheck:\n"
-					"      test: [\"CMD\", \"pg_autoctl\", \"status\","
-					" \"--pgdata\", \"%s\"]\n"
-					"      interval: 2s\n"
-					"      timeout: 5s\n"
-					"      retries: 30\n"
-					"      start_period: 5s\n",
-					node_pgdata);
+			{
+				if (cluster->withMonitor)
+					fprintf(f,
+						"    healthcheck:\n"
+						"      test: [\"CMD\", \"pg_autoctl\", \"status\","
+						" \"--pgdata\", \"%s\"]\n"
+						"      interval: 2s\n"
+						"      timeout: 5s\n"
+						"      retries: 30\n"
+						"      start_period: 15s\n",
+						node_pgdata);
+				else
+					/* no-monitor: just wait for postgres to be ready */
+					fprintf(f,
+						"    healthcheck:\n"
+						"      test: [\"CMD-SHELL\","
+						" \"pg_isready -h localhost -p 5432 -q\"]\n"
+						"      interval: 2s\n"
+						"      timeout: 5s\n"
+						"      retries: 30\n"
+						"      start_period: 15s\n");
+			}
 
-			/*
-			 * Non-first data nodes wait for the first node to be healthy before
-			 * starting, giving node1 a guaranteed head start on the monitor
-			 * registration race.
-			 */
 			if (firstNode)
 				fprintf(f,
 					"    depends_on:\n"

@@ -22,11 +22,11 @@
 # Predecessor: tests/test_auth.py
 
 cluster {
-    monitor
+    monitor password "pg-auto-failover"
     auth md5
     formation auth {
-        node1
-        node2
+        node1 monitor-password "pg-hba-check" replication-password "pg-replication"
+        node2 monitor-password "pg-hba-check" replication-password "pg-replication"
     }
 }
 

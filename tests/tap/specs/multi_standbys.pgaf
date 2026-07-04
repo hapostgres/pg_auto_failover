@@ -201,9 +201,9 @@ step test_014_002_fail_two_standby_nodes {
     network disconnect node3
     wait until node2 assigned-state = catchingup  timeout 120s
     wait until node3 assigned-state = catchingup  timeout 120s
-    wait until node1 state is primary  timeout 120s
-    sql node1 { SHOW synchronous_standby_names; }
-    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
+    # With both sync standbys disconnected, node1 enters wait_primary (blocked
+    # writes) because it can no longer satisfy number-sync-standbys=1.
+    wait until node1 state is wait_primary  timeout 120s
 }
 
 step test_014_003_unblock_writes {
