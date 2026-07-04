@@ -6,14 +6,15 @@
 
 cluster {
     monitor
-    auth skip
     formation {
-        node1
-        node2
+        node1 auth skip
+        node2 auth skip
     }
 }
 
 setup {
+    # With auth=skip, nodes don't add HBA rules automatically.
+    # Add them now so the monitor can health-check the data nodes.
     exec node1  pg_autoctl override pgsetup hba-lan
     exec node2  pg_autoctl override pgsetup hba-lan
     wait until primary, secondary  timeout 120s
