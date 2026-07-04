@@ -185,7 +185,7 @@ compose_gen_write_ssl_certs(const TestCluster *cluster, const char *workDir)
 		if (!run_openssl(genCA))
 			return false;
 
-		chmod(caKey, 0600);
+		chmod(caKey, 0600); /* CA key stays private; not mounted into containers */
 		log_info("Generated CA certificate at %s", caCrt);
 		caRegenerated = true;
 	}
@@ -245,7 +245,8 @@ compose_gen_write_ssl_certs(const TestCluster *cluster, const char *workDir)
 		if (!run_openssl(genReq))
 			return false;
 
-		chmod(srvKey, 0600);
+		/* 0644: container user must read this for the cp-and-chmod step */
+		chmod(srvKey, 0644);
 
 		const char *signSrv[] = {
 			"openssl", "x509", "-req", "-in", srvCsr,
@@ -291,7 +292,8 @@ compose_gen_write_ssl_certs(const TestCluster *cluster, const char *workDir)
 		if (!run_openssl(genReq))
 			return false;
 
-		chmod(clientKey, 0600);
+		/* 0644: container user must read this for the cp-and-chmod step */
+		chmod(clientKey, 0644);
 
 		const char *signClient[] = {
 			"openssl", "x509", "-req", "-in", clientCsr,

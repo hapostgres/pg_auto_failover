@@ -15,6 +15,7 @@
 
 cluster {
     monitor
+    image "pgaf:testrun"
 }
 
 setup {

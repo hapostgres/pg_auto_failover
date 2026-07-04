@@ -5,6 +5,7 @@
 
 cluster {
     monitor
+    monitor newmonitor initially stopped
     formation {
         node1
         node2
@@ -36,8 +37,8 @@ step drop_old_monitor {
 }
 
 step disable_monitor_on_nodes {
-    exec node2  pg_autoctl disable monitor
-    exec node1  pg_autoctl disable monitor
+    exec node2  pg_autoctl disable monitor --force
+    exec node1  pg_autoctl disable monitor --force
 }
 
 step write_while_monitor_down {

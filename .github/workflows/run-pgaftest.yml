@@ -110,7 +110,6 @@ jobs:
           - multi_maintenance
           - multi_alternate
           - extension_update
-          - installcheck
 
     steps:
       - uses: actions/checkout@v4
@@ -149,6 +148,56 @@ jobs:
         run: |
           chmod +x /tmp/pgaftest-bin
           /tmp/pgaftest-bin run tests/tap/specs/${{ matrix.spec }}.pgaf
+
+  # ---------------------------------------------------------------------------
+  # installcheck: builds pgaf:testrun (run + source tree + postgresql-server-dev)
+  # and runs the SQL regression test suite via pg_regress.  Kept separate from
+  # the main matrix because it requires a larger image built inline.
+  # ---------------------------------------------------------------------------
+  installcheck:
+    name: pgaftest / installcheck
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PGVERSION: 17
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libpq runtime
+        run: |
+          sudo apt-get install -y curl ca-certificates gnupg
+          curl https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo apt-key add -
+          echo "deb http://apt.postgresql.org/pub/repos/apt \
+            $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y libpq5
+
+      - name: Download pgaftest binary
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaftest-binary
+          path: /tmp
+
+      - name: Generate git-version.h
+        run: make version
+
+      - name: Build pgaf:testrun image
+        run: |
+          docker build \
+            --build-arg PGVERSION=${{ env.PGVERSION }} \
+            --target testrun \
+            -t pgaf:testrun \
+            .
+
+      - name: Run installcheck spec
+        timeout-minutes: 15
+        run: |
+          chmod +x /tmp/pgaftest-bin
+          /tmp/pgaftest-bin run tests/tap/specs/installcheck.pgaf
 
   # ---------------------------------------------------------------------------
   # Upgrade test: builds both pgaf:next (current branch) and pgaf:current
