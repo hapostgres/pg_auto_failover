@@ -227,7 +227,7 @@ cli_node_run(int argc, char **argv)
 	 * are assigned in name order (node1 → id 1, node2 → id 2, …).
 	 * Extract the trailing integer from the node name and sleep 2×N seconds.
 	 */
-	if (getenv("PG_AUTOCTL_TEST_DELAY") && spec.name[0] != '\0')
+	if (env_exists("PG_AUTOCTL_TEST_DELAY") && spec.name[0] != '\0')
 	{
 		const char *p = spec.name + strlen(spec.name);
 		while (p > spec.name && isdigit((unsigned char) p[-1]))

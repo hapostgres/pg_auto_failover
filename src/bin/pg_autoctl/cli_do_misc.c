@@ -506,8 +506,8 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 
 		/* Use a short per-attempt connect_timeout so we retry briskly. */
 		char attemptConnstr[MAXCONNINFO];
-		snprintf(attemptConnstr, sizeof(attemptConnstr),
-		         "%s connect_timeout=1", connstr);
+		sformat(attemptConnstr, sizeof(attemptConnstr),
+		        "%s connect_timeout=1", connstr);
 
 		PGSQL pgsql = { 0 };
 		pgsql_init(&pgsql, attemptConnstr, PGSQL_CONN_LOCAL);
