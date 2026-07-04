@@ -12,6 +12,7 @@
 #include <getopt.h>
 #include <inttypes.h>
 #include <signal.h>
+#include <unistd.h>
 
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
@@ -639,20 +640,25 @@ keeper_cli_pgsetup_tune(int argc, char **argv)
 void
 keeper_cli_pgsetup_hba_lan(int argc, char **argv)
 {
-	ConfigFilePaths pathnames = { 0 };
-	LocalPostgresServer postgres = { 0 };
-	PostgresSetup *pgSetup = &(postgres.postgresSetup);
+	/*
+	 * Derive pgdata from command-line options directly, without calling
+	 * cli_common_pgsetup_init().  cli_common_pgsetup_init() calls
+	 * ProbeConfigurationFileRole() which fatals when the keeper config file
+	 * does not exist yet (e.g. node still initializing).  We do not need the
+	 * full pgSetup here — only pgdata, hostname, auth method, and ssl.
+	 */
+	const char *pgdata = keeperOptions.pgSetup.pgdata;
 
-	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
+	if (IS_EMPTY_STRING_BUFFER(pgdata))
 	{
-		exit(EXIT_CODE_BAD_CONFIG);
+		log_fatal("Please provide --pgdata or set PGDATA");
+		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	const char *pgdata = pgSetup->pgdata;
 	char hbaFile[MAXPGPATH];
 	sformat(hbaFile, MAXPGPATH, "%s/pg_hba.conf", pgdata);
 
-	/* Step 1: wait for pg_hba.conf to appear */
+	/* Step 1: wait for pg_hba.conf to appear (up to 60 s) */
 	{
 		int timeout = 60;
 		time_t deadline = time(NULL) + timeout;
@@ -668,27 +674,55 @@ keeper_cli_pgsetup_hba_lan(int argc, char **argv)
 		}
 	}
 
-	/* Step 2: append LAN CIDR rules directly to the file (no TCP) */
 	/*
-	 * pgSetup->pghost may be a Unix socket path (e.g. /var/run/postgresql)
-	 * when postgres is configured for local connections only.  That path is
-	 * not a valid hostname for LAN CIDR detection.  Try to get the node's
-	 * network hostname from the keeper config; fall back to pghost only when
-	 * the keeper config can't be read or has no hostname.
+	 * Step 2: determine the hostname for LAN CIDR lookups.
+	 *
+	 * Preference order:
+	 *   a) keeper config file hostname (written early during pg_autoctl init)
+	 *   b) OS hostname via gethostname() — inside a Docker container this is
+	 *      the service name (e.g. "node2") which resolves correctly on the LAN
+	 *   c) keeperOptions.pgSetup.pghost (last resort; may be a Unix socket
+	 *      path like /var/run/postgresql that does not resolve as a hostname)
+	 *
+	 * The keeper config file is created before postgres initialises, so it is
+	 * normally available by the time pg_hba.conf appears.  All three options
+	 * are tried so the command works even when called very early.
 	 */
-	KeeperConfig hbaConfig = keeperOptions;
-	bool hbaConfigLoaded =
-		keeper_config_set_pathnames_from_pgdata(&hbaConfig.pathnames,
-												pgdata) &&
-		keeper_config_read_file(&hbaConfig,
-								false /* missingPgdataIsOk */,
-								true  /* pgIsNotRunningIsOk */,
-								true  /* monitorDisabledIsOk */);
+	char hostname[_POSIX_HOST_NAME_MAX] = "";
 
-	const char *hostname =
-		(hbaConfigLoaded && !IS_EMPTY_STRING_BUFFER(hbaConfig.hostname))
-		? hbaConfig.hostname
-		: pgSetup->pghost;
+	/* option a: keeper config */
+	{
+		KeeperConfig hbaConfig = keeperOptions;
+		if (keeper_config_set_pathnames_from_pgdata(&hbaConfig.pathnames,
+		                                            pgdata) &&
+		    keeper_config_read_file(&hbaConfig,
+		                            false /* missingPgdataIsOk */,
+		                            true  /* pgIsNotRunningIsOk */,
+		                            true  /* monitorDisabledIsOk */) &&
+		    !IS_EMPTY_STRING_BUFFER(hbaConfig.hostname))
+		{
+			strlcpy(hostname, hbaConfig.hostname, sizeof(hostname));
+		}
+	}
+
+	/* option b: OS hostname */
+	if (IS_EMPTY_STRING_BUFFER(hostname))
+	{
+		if (gethostname(hostname, sizeof(hostname)) == 0)
+		{
+			log_debug("hba-lan: using OS hostname \"%s\"", hostname);
+		}
+		else
+		{
+			hostname[0] = '\0';
+		}
+	}
+
+	/* option c: pghost (may be a socket path — last resort) */
+	if (IS_EMPTY_STRING_BUFFER(hostname))
+	{
+		strlcpy(hostname, keeperOptions.pgSetup.pghost, sizeof(hostname));
+	}
 
 	/* --auth <method> defaults to "trust"; --ssl enables hostssl rules */
 	const char *authMethod = keeperOptions.pgSetup.authMethod;
@@ -736,7 +770,7 @@ keeper_cli_pgsetup_hba_lan(int argc, char **argv)
 	}
 
 	/* Step 3: wait for Postgres to be running (PID file, no TCP needed) */
-	if (!pg_setup_wait_until_is_ready(pgSetup, 60, LOG_INFO))
+	if (!pg_setup_wait_until_is_ready(&keeperOptions.pgSetup, 60, LOG_INFO))
 	{
 		log_error("Postgres did not become ready within 60 s");
 		exit(EXIT_CODE_PGCTL);
@@ -744,7 +778,7 @@ keeper_cli_pgsetup_hba_lan(int argc, char **argv)
 
 	/* Step 4: reload so the new HBA rules take effect */
 	log_info("Reloading Postgres configuration in \"%s\"", pgdata);
-	if (!pg_ctl_reload(pgSetup->pg_ctl, pgdata))
+	if (!pg_ctl_reload(keeperOptions.pgSetup.pg_ctl, pgdata))
 	{
 		exit(EXIT_CODE_PGCTL);
 	}
