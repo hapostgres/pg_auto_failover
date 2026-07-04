@@ -20,12 +20,18 @@ cluster {
 # No monitor, so no automatic state convergence — each step drives the FSM
 # manually.
 
+setup {
+    # No monitor: wait until postgres is accepting connections on each node.
+    exec node1  pg_autoctl inspect pgsetup wait --timeout 90
+    exec node2  pg_autoctl inspect pgsetup wait --timeout 90
+    exec node3  pg_autoctl inspect pgsetup wait --timeout 90
+}
+
 teardown {
     compose down
 }
 
 step test_002_init_to_single {
-    sleep 5s
     exec node1  pg_autoctl manual fsm assign single
     exec node1  pg_autoctl inspect pgsetup wait
 }
