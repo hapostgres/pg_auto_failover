@@ -15,8 +15,8 @@ cluster {
 setup {
     # With auth=skip, nodes don't add HBA rules automatically.
     # Add them now so the monitor can health-check the data nodes.
-    exec node1  pg_autoctl do pgsetup hba-lan
-    exec node2  pg_autoctl do pgsetup hba-lan
+    exec node1  pg_autoctl inspect pgsetup hba-lan
+    exec node2  pg_autoctl inspect pgsetup hba-lan
     wait until primary, secondary  timeout 120s
     promote node1
 }

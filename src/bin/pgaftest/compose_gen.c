@@ -639,8 +639,8 @@ compose_gen_write(TestCluster *cluster,
 						" \"pg_isready -h localhost -p 5432 -q\"]\n"
 						"      interval: 2s\n"
 						"      timeout: 5s\n"
-						"      retries: 30\n"
-						"      start_period: 15s\n");
+						"      retries: 60\n"
+						"      start_period: 30s\n");
 			}
 
 			if (firstNode)

@@ -62,8 +62,8 @@ step test_006_enable_ssl_primary {
 
 step test_007_enable_ssl_secondary {
     exec node2  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
-    sleep 5s
-    exec node2  pg_autoctl inspect pgsetup wait
+    exec node2  pg_autoctl manual service restart postgres
+    exec node2  pg_autoctl inspect pgsetup wait --timeout 90
     sql node2 { SHOW ssl; }
     expect { on }
 }
