@@ -86,7 +86,9 @@ step test_002_check_initial_slots {
 
 step test_003_001_stop_primary {
     compose kill node1
-    wait until node2 state is primary  timeout 90s
+    wait until node2 state is primary
+        and node3 state is secondary
+        timeout 120s
 }
 
 step test_003_002_stop_primary {

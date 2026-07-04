@@ -14,6 +14,7 @@
 
 cluster {
     monitor
+    ssl off
     formation {
         node1
         node2
@@ -161,11 +162,6 @@ step test_014_secondary_reports_lsn {
 step test_015_start_node3_node1 {
     compose start node3
     compose start node1
-}
-
-step test_015_prep_hba {
-    exec node2  bash -c "echo 'hostssl all pgautofailover_replicator %CIDR% trust' >> /var/lib/postgres/pgaf/pg_hba.conf"
-    sql node2 { SELECT pg_reload_conf(); }
 }
 
 #
