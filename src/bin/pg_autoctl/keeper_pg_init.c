@@ -566,11 +566,12 @@ reach_initial_state(Keeper *keeper)
 		}
 
 		default:
-
+		{
 			/* we don't support any other state at initialization time */
 			log_error("reach_initial_state: don't know how to read state %s",
 					  NodeStateToString(keeper->state.assigned_role));
 			return false;
+		}
 	}
 
 	/*

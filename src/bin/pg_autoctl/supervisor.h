@@ -133,7 +133,7 @@ typedef struct Supervisor
 	 * watcher.active is false when not in use (normal create/run path).
 	 */
 	NodeSpecWatcher watcher;
-	NodeSpec        watchedSpec;   /* last-applied spec — baseline for diff */
+	NodeSpec watchedSpec;          /* last-applied spec — baseline for diff */
 } Supervisor;
 
 

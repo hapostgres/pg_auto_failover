@@ -28,7 +28,7 @@ static void cli_set_node_replication_quorum(int argc, char **argv);
 static void cli_set_node_candidate_priority(int argc, char **argv);
 static void cli_set_node_metadata(int argc, char **argv);
 static void cli_set_formation_number_sync_standbys(int arc, char **argv);
-static int  cli_set_password_getopts(int argc, char **argv);
+static int cli_set_password_getopts(int argc, char **argv);
 static void cli_set_password(int argc, char **argv);
 
 static bool set_node_candidate_priority(Keeper *keeper, int candidatePriority);
@@ -884,7 +884,15 @@ typedef struct SetPasswordOptions
 	char password[MAXCONNINFO];
 } SetPasswordOptions;
 
-static SetPasswordOptions setPasswordOptions = { { 0 }, { 0 }, { 0 } };
+static SetPasswordOptions setPasswordOptions = {
+	{
+		0
+	}, {
+		0
+	}, {
+		0
+	}
+};
 
 static int
 cli_set_password_getopts(int argc, char **argv)
@@ -967,7 +975,7 @@ prompt_password(const char *prompt, char *buf, size_t buflen)
 	if (tcgetattr(fileno(stdin), &old) != 0)
 	{
 		/* stdin is not a tty; just read normally */
-		fprintf(stderr, "%s", prompt);
+		fformat(stderr, "%s", prompt);
 		fflush(stderr);
 
 		if (fgets(buf, buflen, stdin) == NULL)
@@ -988,7 +996,7 @@ prompt_password(const char *prompt, char *buf, size_t buflen)
 		return false;
 	}
 
-	fprintf(stderr, "%s", prompt);
+	fformat(stderr, "%s", prompt);
 	fflush(stderr);
 
 	if (fgets(buf, buflen, stdin) != NULL)
@@ -998,7 +1006,7 @@ prompt_password(const char *prompt, char *buf, size_t buflen)
 	}
 
 	(void) tcsetattr(fileno(stdin), TCSAFLUSH, &old);
-	fprintf(stderr, "\n");
+	fformat(stderr, "\n");
 
 	return ok;
 }
@@ -1022,9 +1030,9 @@ cli_set_password(int argc, char **argv)
 	char password[MAXCONNINFO] = { 0 };
 
 	/* validate role name */
-	bool isAutoctlNode      = (strcmp(role, PG_AUTOCTL_MONITOR_USERNAME) == 0);
-	bool isHealthUser       = (strcmp(role, PG_AUTOCTL_HEALTH_USERNAME) == 0);
-	bool isReplicaUser      = (strcmp(role, PG_AUTOCTL_REPLICA_USERNAME) == 0);
+	bool isAutoctlNode = (strcmp(role, PG_AUTOCTL_MONITOR_USERNAME) == 0);
+	bool isHealthUser = (strcmp(role, PG_AUTOCTL_HEALTH_USERNAME) == 0);
+	bool isReplicaUser = (strcmp(role, PG_AUTOCTL_REPLICA_USERNAME) == 0);
 
 	if (!isAutoctlNode && !isHealthUser && !isReplicaUser)
 	{
@@ -1133,16 +1141,16 @@ cli_set_password(int argc, char **argv)
 		}
 
 		if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
-													  config.pgSetup.pgdata))
+													 config.pgSetup.pgdata))
 		{
 			log_fatal("Failed to set keeper config pathnames");
 			exit(EXIT_CODE_BAD_CONFIG);
 		}
 
 		if (!keeper_config_read_file(&config,
-									  missingPgdataIsOk,
-									  pgIsNotRunningIsOk,
-									  monitorDisabledIsOk))
+									 missingPgdataIsOk,
+									 pgIsNotRunningIsOk,
+									 monitorDisabledIsOk))
 		{
 			log_fatal("Failed to read keeper configuration file");
 			exit(EXIT_CODE_BAD_CONFIG);

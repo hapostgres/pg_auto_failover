@@ -386,7 +386,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 			else
 			{
 				log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
-															 "version %u, catalog version %u",
+						  "version %u, catalog version %u",
 						  pgSetup->control.system_identifier,
 						  pgSetup->pgdata,
 						  pgSetup->control.pg_control_version,
@@ -1491,8 +1491,10 @@ nodeKindToString(PgInstanceKind kind)
 		}
 
 		default:
+		{
 			log_fatal("nodeKindToString: unknown node kind %d", kind);
 			return NULL;
+		}
 	}
 
 	/* can't happen, keep compiler happy */
@@ -1563,7 +1565,9 @@ pmStatusToString(PostmasterStatus pm_status)
 		}
 
 		case POSTMASTER_STATUS_STANDBY:
+		{
 			return "standby";
+		}
 	}
 
 	/* keep compiler happy */
@@ -1842,7 +1846,9 @@ pgsetup_sslmode_to_string(SSLMode sslMode)
 		}
 
 		case SSL_MODE_VERIFY_FULL:
+		{
 			return "verify-full";
+		}
 	}
 
 	/* This is a huge bug */
@@ -1986,7 +1992,9 @@ pgsetup_hba_level_to_string(HBAEditLevel hbaLevel)
 		}
 
 		case HBA_EDIT_UNKNOWN:
+		{
 			return "unknown";
+		}
 	}
 
 	log_error("BUG: hbaLevel %d is unknown", hbaLevel);
@@ -2033,7 +2041,9 @@ dbstateToString(DBState state)
 		}
 
 		case DB_IN_PRODUCTION:
+		{
 			return "in production";
+		}
 	}
 	return "unrecognized status code";
 }

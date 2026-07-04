@@ -312,9 +312,10 @@ keeper_ensure_current_state(Keeper *keeper)
 
 		case MAINTENANCE_STATE:
 		default:
-
+		{
 			/* nothing to be done here */
 			return true;
+		}
 	}
 
 	/* should never happen */
@@ -387,7 +388,7 @@ ReportPgIsRunning(Keeper *keeper)
 		 */
 		log_error("Failed to restart PostgreSQL %d times in the "
 				  "last %" PRIu64 "s, reporting PostgreSQL not running to "
-								  "the pg_auto_failover monitor.",
+				  "the pg_auto_failover monitor.",
 				  postgres->pgStartRetries,
 				  now - postgres->pgFirstStartFailureTs);
 
@@ -637,7 +638,7 @@ keeper_state_check_postgres(Keeper *keeper, PostgresControlData *control)
 		 * are doing anymore.
 		 */
 		log_error("Unknown PostgreSQL system identifier: %" PRIu64 ", "
-																   "expected %" PRIu64,
+				  "expected %" PRIu64,
 				  keeperState->system_identifier,
 				  control->system_identifier);
 		return false;
@@ -2778,8 +2779,8 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 			newConfig->prepare_promotion_walreceiver;
 	}
 
-	if (newConfig->postgresql_restart_failure_timeout !=
-		config->postgresql_restart_failure_timeout)
+	if (newConfig->postgresql_restart_failure_timeout != config->
+		postgresql_restart_failure_timeout)
 	{
 		log_info(
 			"Reloading configuration: timeout.postgresql_restart_failure_timeout "
@@ -2791,8 +2792,8 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 			newConfig->postgresql_restart_failure_timeout;
 	}
 
-	if (newConfig->postgresql_restart_failure_max_retries !=
-		config->postgresql_restart_failure_max_retries)
+	if (newConfig->postgresql_restart_failure_max_retries != config->
+		postgresql_restart_failure_max_retries)
 	{
 		log_info(
 			"Reloading configuration: retries.postgresql_restart_failure_max_retries "

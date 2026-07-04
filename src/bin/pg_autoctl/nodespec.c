@@ -65,9 +65,9 @@ nodespec_read(const char *path, NodeSpec *spec)
 	char launchModeStr[16] = { 0 };
 	char noMonitorStr[8] = { 0 };
 	char citusRoleStr[NAMEDATALEN] = { 0 };
-	int  port = 5432;
-	int  group = 0;
-	int  candidatePriority = 50;
+	int port = 5432;
+	int group = 0;
+	int candidatePriority = 50;
 
 	/*
 	 * Provide string buffers for booleans and the kind enum — we parse them
@@ -124,6 +124,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 		make_strbuf_option_default("options", "pg_hba_lan", NULL, false,
 								   sizeof(pgHbaLanStr), pgHbaLanStr,
 								   "true"),
+
 		/* [ssl] — certificate paths for verify-ca / verify-full mode */
 		make_strbuf_option_default("ssl", "ca_file", NULL, false,
 								   sizeof(spec->ssl_ca_file),
@@ -175,13 +176,21 @@ nodespec_read(const char *path, NodeSpec *spec)
 
 	/* resolve kind string → enum */
 	if (strcmp(kindStr, "monitor") == 0)
+	{
 		spec->kind = NODE_KIND_UNKNOWN;   /* handled specially: no formation */
+	}
 	else if (strcmp(kindStr, "postgres") == 0)
+	{
 		spec->kind = NODE_KIND_STANDALONE;
+	}
 	else if (strcmp(kindStr, "coordinator") == 0)
+	{
 		spec->kind = NODE_KIND_CITUS_COORDINATOR;
+	}
 	else if (strcmp(kindStr, "worker") == 0)
+	{
 		spec->kind = NODE_KIND_CITUS_WORKER;
+	}
 	else
 	{
 		log_error("Unknown node kind \"%s\" in \"%s\"; "
@@ -220,7 +229,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 	 */
 	{
 		char *fileContents = NULL;
-		long  fileSize = 0L;
+		long fileSize = 0L;
 
 		if (read_file(path, &fileContents, &fileSize))
 		{
@@ -235,11 +244,20 @@ nodespec_read(const char *path, NodeSpec *spec)
 				for (int si = 0; si < nsec; si++)
 				{
 					const char *sname = ini_section_name(raw, si);
-					if (!sname) continue;
-					if (strncmp(sname, "formation ", 10) != 0) continue;
+					if (!sname)
+					{
+						continue;
+					}
+					if (strncmp(sname, "formation ", 10) != 0)
+					{
+						continue;
+					}
 
 					const char *fname = sname + 10;  /* skip "formation " */
-					if (fname[0] == '\0') continue;
+					if (fname[0] == '\0')
+					{
+						continue;
+					}
 
 					if (spec->formationCount >= NODESPEC_MAX_FORMATIONS)
 					{
@@ -250,7 +268,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 
 					int fi = spec->formationCount++;
 					strlcpy(spec->formationNames[fi], fname,
-					        sizeof(spec->formationNames[fi]));
+							sizeof(spec->formationNames[fi]));
 
 					/* optional: kind = ha (default) */
 					int ki = ini_find_property(raw, si, "kind", 0);
@@ -258,15 +276,21 @@ nodespec_read(const char *path, NodeSpec *spec)
 					{
 						const char *kv = ini_property_value(raw, si, ki);
 						if (kv && kv[0])
+						{
 							strlcpy(spec->formationKinds[fi], kv,
-							        sizeof(spec->formationKinds[fi]));
+									sizeof(spec->formationKinds[fi]));
+						}
 						else
+						{
 							strlcpy(spec->formationKinds[fi], "pgsql",
-							        sizeof(spec->formationKinds[fi]));
+									sizeof(spec->formationKinds[fi]));
+						}
 					}
 					else
+					{
 						strlcpy(spec->formationKinds[fi], "pgsql",
-						        sizeof(spec->formationKinds[fi]));
+								sizeof(spec->formationKinds[fi]));
+					}
 				}
 				ini_destroy(raw);
 			}
@@ -297,22 +321,48 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 
 	switch (spec->kind)
 	{
-		case NODE_KIND_UNKNOWN:         kindStr = "monitor";     break;
-		case NODE_KIND_STANDALONE:      kindStr = "postgres";    break;
-		case NODE_KIND_CITUS_COORDINATOR: kindStr = "coordinator"; break;
-		case NODE_KIND_CITUS_WORKER:    kindStr = "worker";      break;
-		default:                        kindStr = "postgres";    break;
+		case NODE_KIND_UNKNOWN:
+		{
+			kindStr = "monitor";
+			break;
+		}
+
+		case NODE_KIND_STANDALONE:
+		{
+			kindStr = "postgres";
+			break;
+		}
+
+		case NODE_KIND_CITUS_COORDINATOR:
+		{
+			kindStr = "coordinator";
+			break;
+		}
+
+		case NODE_KIND_CITUS_WORKER:
+		{
+			kindStr = "worker";
+			break;
+		}
+
+		default:
+		{
+			kindStr = "postgres";
+			break;
+		}
 	}
 
-	fprintf(out,
+	fformat(out,
 			"[node]\n"
 			"kind     = %s\n",
 			kindStr);
 
 	if (!IS_EMPTY_STRING_BUFFER(spec->name))
-		fprintf(out, "name     = %s\n", spec->name);
+	{
+		fformat(out, "name     = %s\n", spec->name);
+	}
 
-	fprintf(out,
+	fformat(out,
 			"hostname = %s\n"
 			"port     = %d\n"
 			"\n"
@@ -326,18 +376,22 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 	if (spec->kind != NODE_KIND_UNKNOWN)
 	{
 		if (spec->noMonitor)
-			fprintf(out,
+		{
+			fformat(out,
 					"[monitor]\n"
 					"no_monitor = true\n"
 					"\n");
+		}
 		else
-			fprintf(out,
+		{
+			fformat(out,
 					"[monitor]\n"
 					"pguri = %s\n"
 					"\n",
 					spec->monitor_pguri);
+		}
 
-		fprintf(out,
+		fformat(out,
 				"[formation]\n"
 				"name  = %s\n"
 				"group = %d\n"
@@ -346,7 +400,7 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 				spec->group);
 	}
 
-	fprintf(out,
+	fformat(out,
 			"[settings]\n"
 			"candidate_priority = %d\n"
 			"replication_quorum = %s\n"
@@ -363,15 +417,19 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 
 	/* only emit [launch] when deferred — omitting the section means immediate */
 	if (spec->launchDeferred)
-		fprintf(out, "\n[launch]\nmode = deferred\n");
+	{
+		fformat(out, "\n[launch]\nmode = deferred\n");
+	}
 
 	/* [formation <name>] sections — monitor kind only */
 	for (int fi = 0; fi < spec->formationCount; fi++)
 	{
-		fprintf(out, "\n[formation %s]\n", spec->formationNames[fi]);
+		fformat(out, "\n[formation %s]\n", spec->formationNames[fi]);
 		if (spec->formationKinds[fi][0] &&
-		    strcmp(spec->formationKinds[fi], "pgsql") != 0)
-			fprintf(out, "kind = %s\n", spec->formationKinds[fi]);
+			strcmp(spec->formationKinds[fi], "pgsql") != 0)
+		{
+			fformat(out, "kind = %s\n", spec->formationKinds[fi]);
+		}
 	}
 
 	return true;
@@ -393,17 +451,17 @@ nodespec_write(const NodeSpec *spec, FILE *out)
  */
 int
 nodespec_create_argv(const NodeSpec *spec,
-                     const char *pg_autoctl_path,
-                     char **args, int args_size)
+					 const char *pg_autoctl_path,
+					 char **args, int args_size)
 {
 	int i = 0;
 
 #define PUSH(v) do { \
-	if (i >= args_size - 1) { \
-		log_error("nodespec_create_argv: args[] overflow"); \
-		return -1; \
-	} \
-	args[i++] = (char *)(v); \
+			if (i >= args_size - 1) { \
+				log_error("nodespec_create_argv: args[] overflow"); \
+				return -1; \
+			} \
+			args[i++] = (char *) (v); \
 } while (0)
 
 	PUSH(pg_autoctl_path);
@@ -412,20 +470,34 @@ nodespec_create_argv(const NodeSpec *spec,
 	switch (spec->kind)
 	{
 		case NODE_KIND_UNKNOWN:
+		{
 			PUSH("monitor");
 			break;
+		}
+
 		case NODE_KIND_STANDALONE:
+		{
 			PUSH("postgres");
 			break;
+		}
+
 		case NODE_KIND_CITUS_COORDINATOR:
+		{
 			PUSH("coordinator");
 			break;
+		}
+
 		case NODE_KIND_CITUS_WORKER:
+		{
 			PUSH("worker");
 			break;
+		}
+
 		default:
+		{
 			PUSH("postgres");
 			break;
+		}
 	}
 
 	PUSH("--pgdata");
@@ -489,16 +561,24 @@ nodespec_create_argv(const NodeSpec *spec,
 
 	/* SSL */
 	if (strcmp(spec->ssl, "self-signed") == 0)
+	{
 		PUSH("--ssl-self-signed");
+	}
 	else if (strcmp(spec->ssl, "off") == 0)
+	{
 		PUSH("--no-ssl");
+	}
 	else if (!IS_EMPTY_STRING_BUFFER(spec->ssl_ca_file))
 	{
 		/* verify-ca / verify-full: pass the cert paths explicitly */
-		PUSH("--ssl-ca-file"); PUSH(spec->ssl_ca_file);
-		PUSH("--server-cert"); PUSH(spec->ssl_cert_file);
-		PUSH("--server-key");  PUSH(spec->ssl_key_file);
-		PUSH("--ssl-mode");    PUSH(spec->ssl);
+		PUSH("--ssl-ca-file");
+		PUSH(spec->ssl_ca_file);
+		PUSH("--server-cert");
+		PUSH(spec->ssl_cert_file);
+		PUSH("--server-key");
+		PUSH(spec->ssl_key_file);
+		PUSH("--ssl-mode");
+		PUSH(spec->ssl);
 	}
 
 	/* auth */
@@ -509,7 +589,9 @@ nodespec_create_argv(const NodeSpec *spec,
 	}
 
 	if (spec->pg_hba_lan && spec->kind != NODE_KIND_UNKNOWN)
+	{
 		PUSH("--pg-hba-lan");
+	}
 
 	/* passwords */
 	if (spec->kind == NODE_KIND_UNKNOWN &&
@@ -558,7 +640,9 @@ nodespec_create_argv(const NodeSpec *spec,
 
 		/* Citus secondary/read-replica cluster settings */
 		if (spec->citusSecondary)
+		{
 			PUSH("--citus-secondary");
+		}
 		if (!IS_EMPTY_STRING_BUFFER(spec->citusClusterName))
 		{
 			PUSH("--citus-cluster");
@@ -575,7 +659,6 @@ nodespec_create_argv(const NodeSpec *spec,
 }
 
 
-
 /*
  * nodespec_write_to_path writes the spec to the given filesystem path,
  * replacing the file in-place.  Used by pg_autoctl node start to clear the
@@ -584,7 +667,7 @@ nodespec_create_argv(const NodeSpec *spec,
 bool
 nodespec_write_to_path(const NodeSpec *spec, const char *path)
 {
-	FILE *f = fopen(path, "w");
+	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
 	if (!f)
 	{
 		log_error("Cannot open \"%s\" for writing: %m", path);
@@ -630,7 +713,9 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 			log_warn("nodespec_apply: set candidate-priority %s failed (rc=%d)",
 					 prio, prog.returnCode);
 			if (prog.stdOut)
+			{
 				log_warn("%s", prog.stdOut);
+			}
 		}
 		else
 		{
@@ -655,7 +740,9 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 			log_warn("nodespec_apply: set replication-quorum %s failed (rc=%d)",
 					 quorum, prog.returnCode);
 			if (prog.stdOut)
+			{
 				log_warn("%s", prog.stdOut);
+			}
 		}
 		else
 		{
@@ -673,7 +760,9 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 	}
 
 	if (!changed)
+	{
 		log_debug("nodespec_apply: no mutable fields changed");
+	}
 
 	return true;
 }
@@ -728,9 +817,13 @@ nodespec_watcher_init(NodeSpecWatcher *w, const char *path)
 
 	/* record initial mtime so we don't fire on the very first check */
 	if (stat(path, &st) == 0)
+	{
 		w->last_mtime = st.st_mtime;
+	}
 	else
+	{
 		w->last_mtime = 0;
+	}
 
 	w->active = true;
 	return true;
@@ -748,7 +841,9 @@ nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 	bool file_changed = false;
 
 	if (!w->active)
+	{
 		return false;
+	}
 
 #ifdef __linux__
 	if (w->inotify_fd >= 0)
@@ -761,7 +856,9 @@ nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 		ssize_t n;
 
 		while ((n = read(w->inotify_fd, buf, sizeof(buf))) > 0)
+		{
 			file_changed = true;
+		}
 
 		if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 		{
@@ -779,7 +876,9 @@ nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 		time_t now = time(NULL);
 
 		if (now - w->last_checked < NODESPEC_WATCH_INTERVAL_SECS)
+		{
 			return false;
+		}
 
 		w->last_checked = now;
 
@@ -792,7 +891,9 @@ nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 	}
 
 	if (!file_changed)
+	{
 		return false;
+	}
 
 	/* File changed — re-parse and apply */
 	log_info("nodespec: \"%s\" changed, re-reading and converging", w->path);
@@ -807,12 +908,16 @@ nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 
 	/* Warn about immutable field changes rather than silently ignoring them */
 	if (new_spec.kind != current->kind)
+	{
 		log_warn("nodespec: 'kind' changed in \"%s\" but cannot be applied "
 				 "to a running node — restart required", w->path);
+	}
 
 	if (strcmp(new_spec.pgdata, current->pgdata) != 0)
+	{
 		log_warn("nodespec: 'pgdata' changed in \"%s\" but cannot be applied "
 				 "to a running node — restart required", w->path);
+	}
 
 	(void) nodespec_apply(&new_spec, current);
 	return true;

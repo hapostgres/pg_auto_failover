@@ -39,7 +39,7 @@
 
 /* Options specific to "pg_autoctl inspect pgsetup wait" */
 static bool pgsetupWaitReadWrite = false;
-static int  pgsetupWaitTimeout   = 30;
+static int pgsetupWaitTimeout = 30;
 
 
 /*
@@ -344,11 +344,11 @@ keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
 
 	/* Reset module-level wait options */
 	pgsetupWaitReadWrite = false;
-	pgsetupWaitTimeout   = 30;
+	pgsetupWaitTimeout = 30;
 
 	static struct option wait_options[] = {
-		{ "read-write", no_argument,       NULL, 'W' },
-		{ "timeout",    required_argument, NULL, 'T' },
+		{ "read-write", no_argument, NULL, 'W' },
+		{ "timeout", required_argument, NULL, 'T' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -363,8 +363,10 @@ keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
 		switch (c)
 		{
 			case 'W':
+			{
 				pgsetupWaitReadWrite = true;
 				break;
+			}
 
 			case 'T':
 			{
@@ -379,8 +381,10 @@ keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
 			}
 
 			default:
+			{
 				/* all other options handled by the first pass above */
 				break;
+			}
 		}
 	}
 
@@ -419,14 +423,14 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 	{
 		KeeperConfig kconfig = keeperOptions;
 		if (keeper_config_set_pathnames_from_pgdata(&(kconfig.pathnames),
-		                                             kconfig.pgSetup.pgdata))
+													kconfig.pgSetup.pgdata))
 		{
 			time_t deadline = startTime + timeout;
 			while (!file_exists(kconfig.pathnames.config) &&
-			       time(NULL) < deadline)
+				   time(NULL) < deadline)
 			{
 				log_debug("Waiting for config file \"%s\" to appear",
-				          kconfig.pathnames.config);
+						  kconfig.pathnames.config);
 				pg_usleep(500 * 1000);
 			}
 		}
@@ -487,33 +491,33 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 	}
 
 	log_info("Waiting for Postgres to accept read-write connections "
-	         "(timeout %ds)", timeout);
+			 "(timeout %ds)", timeout);
 
 	bool isReadWrite = false;
 	int attempts = 0;
 
 	while (!isReadWrite)
 	{
-		int elapsed  = (int) (time(NULL) - startTime);
+		int elapsed = (int) (time(NULL) - startTime);
 		int remaining = timeout - elapsed;
 
 		if (remaining <= 0)
 		{
 			log_error("Timed out after %ds waiting for Postgres "
-			          "to accept read-write connections", timeout);
+					  "to accept read-write connections", timeout);
 			exit(EXIT_CODE_PGSQL);
 		}
 
 		/* Use a short per-attempt connect_timeout so we retry briskly. */
 		char attemptConnstr[MAXCONNINFO];
 		sformat(attemptConnstr, sizeof(attemptConnstr),
-		        "%s connect_timeout=1", connstr);
+				"%s connect_timeout=1", connstr);
 
 		PGSQL pgsql = { 0 };
 		pgsql_init(&pgsql, attemptConnstr, PGSQL_CONN_LOCAL);
 
 		bool inRecovery = true;   /* assume standby until proven otherwise */
-		bool queryOk    = pgsql_is_in_recovery(&pgsql, &inRecovery);
+		bool queryOk = pgsql_is_in_recovery(&pgsql, &inRecovery);
 		pgsql_finish(&pgsql);
 
 		if (queryOk && !inRecovery)
@@ -526,10 +530,10 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 		if (attempts % 10 == 0)
 		{
 			log_debug("pgsetup wait --read-write: attempt %d, "
-			          "in_recovery=%s, after %ds",
-			          attempts + 1,
-			          inRecovery ? "true" : "false",
-			          elapsed);
+					  "in_recovery=%s, after %ds",
+					  attempts + 1,
+					  inRecovery ? "true" : "false",
+					  elapsed);
 		}
 
 		++attempts;
@@ -537,7 +541,7 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 	}
 
 	log_info("Postgres is now accepting read-write connections on port %d",
-	         pgSetup->pgport);
+			 pgSetup->pgport);
 	exit(EXIT_CODE_QUIT);
 }
 
@@ -637,7 +641,9 @@ keeper_cli_pgsetup_hba_lan(int argc, char **argv)
 	/* --auth <method> defaults to "trust"; --ssl enables hostssl rules */
 	const char *authMethod = keeperOptions.pgSetup.authMethod;
 	if (IS_EMPTY_STRING_BUFFER(authMethod))
+	{
 		authMethod = "trust";
+	}
 	bool useSSL = keeperOptions.pgSetup.ssl.active;
 
 	/* cert auth for replication needs an ident map */

@@ -36,47 +36,47 @@ extern int ssl_flag;
 extern int monitorDisabledNodeId;
 
 #define KEEPER_CLI_SSL_OPTIONS \
-	"  --ssl-self-signed setup network encryption using self signed certificates (does NOT protect against MITM)\n" \
-	"  --ssl-mode        use that sslmode in connection strings\n" \
-	"  --ssl-ca-file     set the Postgres ssl_ca_file to that file path\n" \
-	"  --ssl-crl-file    set the Postgres ssl_crl_file to that file path\n" \
-	"  --no-ssl          don't enable network encryption (NOT recommended, prefer --ssl-self-signed)\n" \
-	"  --server-key      set the Postgres ssl_key_file to that file path\n" \
-	"  --server-cert     set the Postgres ssl_cert_file to that file path\n"
+		"  --ssl-self-signed setup network encryption using self signed certificates (does NOT protect against MITM)\n" \
+		"  --ssl-mode        use that sslmode in connection strings\n" \
+		"  --ssl-ca-file     set the Postgres ssl_ca_file to that file path\n" \
+		"  --ssl-crl-file    set the Postgres ssl_crl_file to that file path\n" \
+		"  --no-ssl          don't enable network encryption (NOT recommended, prefer --ssl-self-signed)\n" \
+		"  --server-key      set the Postgres ssl_key_file to that file path\n" \
+		"  --server-cert     set the Postgres ssl_cert_file to that file path\n"
 
 #define KEEPER_CLI_WORKER_SETUP_OPTIONS \
-	"  --pgctl           path to pg_ctl\n" \
-	"  --pgdata          path to data directory\n" \
-	"  --pghost          PostgreSQL's hostname\n" \
-	"  --pgport          PostgreSQL's port number\n" \
-	"  --listen          PostgreSQL's listen_addresses\n" \
-	"  --username        PostgreSQL's username\n" \
-	"  --dbname          PostgreSQL's database name\n" \
-	"  --proxyport       Proxy's port number\n" \
-	"  --name            pg_auto_failover node name\n" \
-	"  --hostname        hostname used to connect from the other nodes\n" \
-	"  --formation       pg_auto_failover formation\n" \
-	"  --group           pg_auto_failover group Id\n" \
-	"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
-	KEEPER_CLI_SSL_OPTIONS
+		"  --pgctl           path to pg_ctl\n" \
+		"  --pgdata          path to data directory\n" \
+		"  --pghost          PostgreSQL's hostname\n" \
+		"  --pgport          PostgreSQL's port number\n" \
+		"  --listen          PostgreSQL's listen_addresses\n" \
+		"  --username        PostgreSQL's username\n" \
+		"  --dbname          PostgreSQL's database name\n" \
+		"  --proxyport       Proxy's port number\n" \
+		"  --name            pg_auto_failover node name\n" \
+		"  --hostname        hostname used to connect from the other nodes\n" \
+		"  --formation       pg_auto_failover formation\n" \
+		"  --group           pg_auto_failover group Id\n" \
+		"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
+		KEEPER_CLI_SSL_OPTIONS
 
 #define KEEPER_CLI_NON_WORKER_SETUP_OPTIONS \
-	"  --pgctl           path to pg_ctl\n" \
-	"  --pgdata          path to data directory\n" \
-	"  --pghost          PostgreSQL's hostname\n" \
-	"  --pgport          PostgreSQL's port number\n" \
-	"  --listen          PostgreSQL's listen_addresses\n" \
-	"  --username        PostgreSQL's username\n" \
-	"  --dbname          PostgreSQL's database name\n" \
-	"  --name            pg_auto_failover node name\n" \
-	"  --hostname        hostname used to connect from the other nodes\n" \
-	"  --formation       pg_auto_failover formation\n" \
-	"  --group           pg_auto_failover group Id\n" \
-	"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
-	KEEPER_CLI_SSL_OPTIONS
+		"  --pgctl           path to pg_ctl\n" \
+		"  --pgdata          path to data directory\n" \
+		"  --pghost          PostgreSQL's hostname\n" \
+		"  --pgport          PostgreSQL's port number\n" \
+		"  --listen          PostgreSQL's listen_addresses\n" \
+		"  --username        PostgreSQL's username\n" \
+		"  --dbname          PostgreSQL's database name\n" \
+		"  --name            pg_auto_failover node name\n" \
+		"  --hostname        hostname used to connect from the other nodes\n" \
+		"  --formation       pg_auto_failover formation\n" \
+		"  --group           pg_auto_failover group Id\n" \
+		"  --monitor         pg_auto_failover Monitor Postgres URL\n" \
+		KEEPER_CLI_SSL_OPTIONS
 
 #define CLI_PGDATA_OPTION \
-	"  --pgdata      path to data directory\n" \
+		"  --pgdata      path to data directory\n" \
 
 #define CLI_PGDATA_USAGE " [ --pgdata ] [ --json ] "
 

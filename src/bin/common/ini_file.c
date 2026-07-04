@@ -116,11 +116,12 @@ parse_ini_buffer(const char *filename,
 					}
 
 					default:
-
+					{
 						/* should never happen, or it's a development bug */
 						log_fatal("Unknown option type %d", option->type);
 						ini_destroy(ini);
 						return false;
+					}
 				}
 			}
 		}
@@ -219,10 +220,11 @@ ini_validate_options(IniOption *optionList)
 			}
 
 			default:
-
+			{
 				/* should never happen, or it's a development bug */
 				log_fatal("Unknown option type %d", option->type);
 				return false;
+			}
 		}
 	}
 	return true;
@@ -660,10 +662,11 @@ ini_merge(IniOption *dstOptionList, IniOption *overrideOptionList)
 			}
 
 			default:
-
+			{
 				/* should never happen, or it's a development bug */
 				log_fatal("Unknown option type %d", option->type);
 				return false;
+			}
 		}
 	}
 	return true;

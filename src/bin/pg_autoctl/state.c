@@ -488,7 +488,9 @@ NodeStateToString(NodeState s)
 		}
 
 		default:
+		{
 			return "Unknown State";
+		}
 	}
 }
 
@@ -662,7 +664,9 @@ PreInitPostgreInstanceStateToString(PreInitPostgreInstanceState pgInitState)
 		}
 
 		default:
+		{
 			return "unknown";
+		}
 	}
 
 	/* keep compiler happy */

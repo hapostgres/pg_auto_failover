@@ -32,15 +32,15 @@
 #include "string_utils.h"
 
 
-static int  cli_node_run_getopts(int argc, char **argv);
+static int cli_node_run_getopts(int argc, char **argv);
 static void cli_node_run(int argc, char **argv);
-static int  cli_node_apply_getopts(int argc, char **argv);
+static int cli_node_apply_getopts(int argc, char **argv);
 static void cli_node_apply(int argc, char **argv);
-static int  cli_node_start_getopts(int argc, char **argv);
+static int cli_node_start_getopts(int argc, char **argv);
 static void cli_node_start(int argc, char **argv);
-static int  cli_node_show_getopts(int argc, char **argv);
+static int cli_node_show_getopts(int argc, char **argv);
 static void cli_node_show(int argc, char **argv);
-static int  cli_node_check_getopts(int argc, char **argv);
+static int cli_node_check_getopts(int argc, char **argv);
 static void cli_node_check(int argc, char **argv);
 
 
@@ -117,19 +117,23 @@ static char nodeSpecPath[MAXPGPATH] = { 0 };
 /* -----------------------------------------------------------------------
  * pg_autoctl node run <file>
  * ----------------------------------------------------------------------- */
-
 static int
 cli_node_run_getopts(int argc, char **argv)
 {
 	/* argv[0] is the subcommand name ("run"/"apply"/"check"); the optional
 	 * file path is the first remaining positional argument at argv[1]. */
 	if (argc > 1 && argv[1][0] != '-')
+	{
 		strlcpy(nodeSpecPath, argv[1], sizeof(nodeSpecPath));
+	}
 	else
+	{
 		strlcpy(nodeSpecPath, PG_AUTOCTL_NODESPEC_PATH, sizeof(nodeSpecPath));
+	}
 
 	return 0;
 }
+
 
 /*
  * cli_node_run reads the pg_autoctl_node.ini file, runs `pg_autoctl create
@@ -148,7 +152,9 @@ cli_node_run(int argc, char **argv)
 	int nargs;
 
 	if (!nodespec_read(nodeSpecPath, &spec))
+	{
 		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	/*
 	 * [launch] mode = deferred: spin here re-reading nodeSpecPath until
@@ -216,7 +222,9 @@ cli_node_run(int argc, char **argv)
 		nargs = nodespec_create_argv(&spec, pg_autoctl_program,
 									 args, 32);
 		if (nargs < 0)
+		{
 			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
 	}
 
 	/* Tell the supervisor which spec file to watch for live changes */
@@ -231,14 +239,16 @@ cli_node_run(int argc, char **argv)
 	{
 		const char *p = spec.name + strlen(spec.name);
 		while (p > spec.name && isdigit((unsigned char) p[-1]))
+		{
 			p--;
+		}
 		if (*p != '\0')
 		{
-			int n    = atoi(p);
+			int n = atoi(p) /* IGNORE-BANNED */;
 			int secs = 2 * n;
 			log_info("PG_AUTOCTL_TEST_DELAY: sleeping %ds before "
-			         "registration (node %s, index %d)",
-			         secs, spec.name, n);
+					 "registration (node %s, index %d)",
+					 secs, spec.name, n);
 			sleep(secs);
 		}
 	}
@@ -254,7 +264,10 @@ cli_node_run(int argc, char **argv)
 		};
 		for (int i = 0; i < nargs; i++)
 		{
-			if (i > 0) appendPQExpBufferChar(cmd, ' ');
+			if (i > 0)
+			{
+				appendPQExpBufferChar(cmd, ' ');
+			}
 
 			/* Check if the previous arg was a password flag. */
 			bool maskThis = false;
@@ -262,7 +275,7 @@ cli_node_run(int argc, char **argv)
 			{
 				for (int k = 0; pwFlags[k]; k++)
 				{
-					if (strcmp(args[i-1], pwFlags[k]) == 0)
+					if (strcmp(args[i - 1], pwFlags[k]) == 0)
 					{
 						maskThis = true;
 						break;
@@ -286,12 +299,13 @@ cli_node_run(int argc, char **argv)
 /* -----------------------------------------------------------------------
  * pg_autoctl node apply <file>
  * ----------------------------------------------------------------------- */
-
 static int
 cli_node_apply_getopts(int argc, char **argv)
 {
 	if (argc > 0 && argv[0][0] != '-')
+	{
 		strlcpy(nodeSpecPath, argv[0], sizeof(nodeSpecPath));
+	}
 	else
 	{
 		log_error("pg_autoctl node apply requires a file argument");
@@ -300,6 +314,7 @@ cli_node_apply_getopts(int argc, char **argv)
 	return 0;
 }
 
+
 static void
 cli_node_apply(int argc, char **argv)
 {
@@ -307,7 +322,9 @@ cli_node_apply(int argc, char **argv)
 	NodeSpec cur_spec = { 0 };
 
 	if (!nodespec_read(nodeSpecPath, &new_spec))
+	{
 		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	/* Read the current spec from the same path as a baseline */
 	(void) nodespec_read(nodeSpecPath, &cur_spec);
@@ -326,17 +343,21 @@ cli_node_apply(int argc, char **argv)
  * Clears launch = deferred in the spec file so a waiting pg_autoctl node run
  * proceeds.  Idempotent: if the node is already immediate, exits 0 quietly.
  * ----------------------------------------------------------------------- */
-
 static int
 cli_node_start_getopts(int argc, char **argv)
 {
 	if (argc > 1 && argv[1][0] != '-')
+	{
 		strlcpy(nodeSpecPath, argv[1], sizeof(nodeSpecPath));
+	}
 	else
+	{
 		strlcpy(nodeSpecPath, PG_AUTOCTL_NODESPEC_PATH, sizeof(nodeSpecPath));
+	}
 
 	return 0;
 }
+
 
 static void
 cli_node_start(int argc, char **argv)
@@ -344,7 +365,9 @@ cli_node_start(int argc, char **argv)
 	NodeSpec spec = { 0 };
 
 	if (!nodespec_read(nodeSpecPath, &spec))
+	{
 		exit(EXIT_CODE_BAD_CONFIG);
+	}
 
 	if (!spec.launchDeferred)
 	{
@@ -369,13 +392,13 @@ cli_node_start(int argc, char **argv)
 /* -----------------------------------------------------------------------
  * pg_autoctl node show [--pgdata <dir>]
  * ----------------------------------------------------------------------- */
-
 static int
 cli_node_show_getopts(int argc, char **argv)
 {
 	/* honour --pgdata from the global keeperOptions */
 	return cli_getopt_pgdata(argc, argv);
 }
+
 
 static void
 cli_node_show(int argc, char **argv)
@@ -427,12 +450,13 @@ cli_node_show(int argc, char **argv)
 /* -----------------------------------------------------------------------
  * pg_autoctl node check <file>
  * ----------------------------------------------------------------------- */
-
 static int
 cli_node_check_getopts(int argc, char **argv)
 {
 	if (argc > 0 && argv[0][0] != '-')
+	{
 		strlcpy(nodeSpecPath, argv[0], sizeof(nodeSpecPath));
+	}
 	else
 	{
 		log_error("pg_autoctl node check requires a file argument");
@@ -440,6 +464,7 @@ cli_node_check_getopts(int argc, char **argv)
 	}
 	return 0;
 }
+
 
 static void
 cli_node_check(int argc, char **argv)
@@ -455,31 +480,55 @@ cli_node_check(int argc, char **argv)
 	const char *kindStr;
 	switch (spec.kind)
 	{
-		case NODE_KIND_UNKNOWN:           kindStr = "monitor";      break;
-		case NODE_KIND_STANDALONE:        kindStr = "postgres";     break;
-		case NODE_KIND_CITUS_COORDINATOR: kindStr = "coordinator";  break;
-		case NODE_KIND_CITUS_WORKER:      kindStr = "worker";       break;
-		default:                          kindStr = "unknown";      break;
+		case NODE_KIND_UNKNOWN:
+		{
+			kindStr = "monitor";
+			break;
+		}
+
+		case NODE_KIND_STANDALONE:
+		{
+			kindStr = "postgres";
+			break;
+		}
+
+		case NODE_KIND_CITUS_COORDINATOR:
+		{
+			kindStr = "coordinator";
+			break;
+		}
+
+		case NODE_KIND_CITUS_WORKER:
+		{
+			kindStr = "worker";
+			break;
+		}
+
+		default:
+		{
+			kindStr = "unknown";
+			break;
+		}
 	}
 
-	fprintf(stdout, "Node spec \"%s\" is valid.\n", nodeSpecPath);
-	fprintf(stdout, "  kind               : %s\n", kindStr);
-	fprintf(stdout, "  pgdata             : %s\n", spec.pgdata);
-	fprintf(stdout, "  hostname           : %s\n", spec.hostname);
-	fprintf(stdout, "  port               : %d\n", spec.port);
+	fformat(stdout, "Node spec \"%s\" is valid.\n", nodeSpecPath);
+	fformat(stdout, "  kind               : %s\n", kindStr);
+	fformat(stdout, "  pgdata             : %s\n", spec.pgdata);
+	fformat(stdout, "  hostname           : %s\n", spec.hostname);
+	fformat(stdout, "  port               : %d\n", spec.port);
 
 	if (spec.kind != NODE_KIND_UNKNOWN)
 	{
-		fprintf(stdout, "  monitor_pguri      : %s\n", spec.monitor_pguri);
-		fprintf(stdout, "  formation          : %s\n", spec.formation);
-		fprintf(stdout, "  group              : %d\n", spec.group);
+		fformat(stdout, "  monitor_pguri      : %s\n", spec.monitor_pguri);
+		fformat(stdout, "  formation          : %s\n", spec.formation);
+		fformat(stdout, "  group              : %d\n", spec.group);
 	}
 
-	fprintf(stdout, "  candidate_priority : %d\n", spec.candidate_priority);
-	fprintf(stdout, "  replication_quorum : %s\n",
+	fformat(stdout, "  candidate_priority : %d\n", spec.candidate_priority);
+	fformat(stdout, "  replication_quorum : %s\n",
 			spec.replication_quorum ? "true" : "false");
-	fprintf(stdout, "  ssl                : %s\n", spec.ssl);
-	fprintf(stdout, "  auth               : %s\n", spec.auth);
-	fprintf(stdout, "  pg_hba_lan         : %s\n",
+	fformat(stdout, "  ssl                : %s\n", spec.ssl);
+	fformat(stdout, "  auth               : %s\n", spec.auth);
+	fformat(stdout, "  pg_hba_lan         : %s\n",
 			spec.pg_hba_lan ? "true" : "false");
 }

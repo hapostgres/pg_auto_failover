@@ -154,8 +154,10 @@ service_monitor_init_start(void *context, pid_t *pid)
 
 				if (!monitor_create_formation(monitor, fname, fkind,
 											  DEFAULT_DATABASE_NAME,
-											  /* hasSecondary */ true,
-											  /* numberSyncStandbys */ 0))
+
+				                              /* hasSecondary */ true,
+
+				                              /* numberSyncStandbys */ 0))
 				{
 					log_error("Failed to create formation \"%s\"", fname);
 					exit(EXIT_CODE_INTERNAL_ERROR);

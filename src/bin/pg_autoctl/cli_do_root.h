@@ -15,11 +15,13 @@
 
 /* src/bin/pg_autoctl/cli_do_fsm.c */
 extern CommandLine do_fsm_commands;
+
 /* read-only sub-commands exposed via "pg_autoctl inspect fsm" */
 extern CommandLine fsm_state;
 extern CommandLine fsm_node_state;
 extern CommandLine fsm_list;
 extern CommandLine fsm_gv;
+
 /* mutating sub-commands exposed via "pg_autoctl manual fsm" */
 extern CommandLine fsm_init;
 extern CommandLine fsm_assign;
@@ -28,11 +30,13 @@ extern CommandLine fsm_nodes;  /* nodes get + nodes set — kept together in man
 
 /* src/bin/pg_autoctl/cli_do_monitor.c */
 extern CommandLine do_monitor_commands;
+
 /* read-only sub-commands exposed via "pg_autoctl inspect monitor" */
 extern CommandLine monitor_get_command;
 extern CommandLine monitor_parse_notification_command;
 extern CommandLine monitor_node_state_command;
 extern CommandLine monitor_formation_states_command;
+
 /* mutating sub-commands exposed via "pg_autoctl manual monitor" */
 extern CommandLine monitor_register_command;
 extern CommandLine monitor_node_active_command;
@@ -43,6 +47,7 @@ extern CommandLine do_service_commands;
 extern CommandLine do_service_getpid_commands;
 extern CommandLine do_service_restart_commands;
 extern CommandLine do_service_postgres_ctl_commands;
+
 /* subprocess entry points (spawned by the supervisor via fork+exec) */
 extern CommandLine service_pgcontroller;
 extern CommandLine service_postgres;
@@ -112,7 +117,7 @@ void keeper_cli_disable_synchronous_replication(int argc, char **argv);
 void keeper_cli_pgsetup_pg_ctl(int argc, char **argv);
 void keeper_cli_pgsetup_discover(int argc, char **argv);
 void keeper_cli_pgsetup_is_ready(int argc, char **argv);
-int  keeper_cli_pgsetup_wait_getopts(int argc, char **argv);
+int keeper_cli_pgsetup_wait_getopts(int argc, char **argv);
 void keeper_cli_pgsetup_wait_until_ready(int argc, char **argv);
 void keeper_cli_pgsetup_startup_logs(int argc, char **argv);
 void keeper_cli_pgsetup_tune(int argc, char **argv);

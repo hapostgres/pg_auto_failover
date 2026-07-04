@@ -45,8 +45,8 @@ static CommandLine *manual_fsm_subcommands[] = {
 
 static CommandLine manual_fsm_commands =
 	make_command_set("fsm",
-	                 "Manually drive the keeper FSM (mutating operations)",
-	                 NULL, NULL, NULL, manual_fsm_subcommands);
+					 "Manually drive the keeper FSM (mutating operations)",
+					 NULL, NULL, NULL, manual_fsm_subcommands);
 
 /*
  * manual service: user-visible service controls only.
@@ -66,8 +66,8 @@ static CommandLine *manual_service_subcommands[] = {
 
 static CommandLine manual_service_commands =
 	make_command_set("service",
-	                 "Restart pg_autoctl sub-processes or signal the postgres controller",
-	                 NULL, NULL, NULL, manual_service_subcommands);
+					 "Restart pg_autoctl sub-processes or signal the postgres controller",
+					 NULL, NULL, NULL, manual_service_subcommands);
 
 /*
  * manual monitor: mutating monitor operations.
@@ -88,8 +88,8 @@ static CommandLine *manual_monitor_subcommands[] = {
 
 static CommandLine manual_monitor_commands =
 	make_command_set("monitor",
-	                 "Manually drive monitor RPCs (register / active / version)",
-	                 NULL, NULL, NULL, manual_monitor_subcommands);
+					 "Manually drive monitor RPCs (register / active / version)",
+					 NULL, NULL, NULL, manual_monitor_subcommands);
 
 /*
  * manual coordinator: Citus coordinator metadata management.
@@ -117,12 +117,12 @@ static CommandLine *manual_subcommands[] = {
 
 CommandLine manual_commands =
 	make_command_set("manual",
-	                 "Manual FSM operations — drive by hand what automation normally does",
-	                 "[sub-command]",
-	                 "  fsm         Manually drive keeper FSM transitions\n"
-	                 "  service     Restart sub-processes or signal the postgres controller\n"
-	                 "  monitor     Manually drive monitor registration protocol\n"
-	                 "  primary     Manual primary-side PostgreSQL operations\n"
-	                 "  standby     Manual standby-side PostgreSQL operations\n"
-	                 "  coordinator Citus coordinator metadata management\n",
-	                 NULL, manual_subcommands);
+					 "Manual FSM operations — drive by hand what automation normally does",
+					 "[sub-command]",
+					 "  fsm         Manually drive keeper FSM transitions\n"
+					 "  service     Restart sub-processes or signal the postgres controller\n"
+					 "  monitor     Manually drive monitor registration protocol\n"
+					 "  primary     Manual primary-side PostgreSQL operations\n"
+					 "  standby     Manual standby-side PostgreSQL operations\n"
+					 "  coordinator Citus coordinator metadata management\n",
+					 NULL, manual_subcommands);

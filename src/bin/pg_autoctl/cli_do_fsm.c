@@ -29,7 +29,7 @@
 
 static void cli_do_fsm_init(int argc, char **argv);
 static void cli_do_fsm_state(int argc, char **argv);
-static int  cli_do_fsm_node_state_getopts(int argc, char **argv);
+static int cli_do_fsm_node_state_getopts(int argc, char **argv);
 static void cli_do_fsm_node_state(int argc, char **argv);
 static void cli_do_fsm_list(int argc, char **argv);
 static void cli_do_fsm_gv(int argc, char **argv);
@@ -243,10 +243,12 @@ cli_do_fsm_state(int argc, char **argv)
 
 
 /* option state for fsm node-state */
-static struct {
+static struct
+{
 	char targetState[64];
-	int  timeout;
-} fsmNodeStateOpts;
+	int timeout;
+}
+fsmNodeStateOpts;
 
 static int
 cli_do_fsm_node_state_getopts(int argc, char **argv)
@@ -255,8 +257,8 @@ cli_do_fsm_node_state_getopts(int argc, char **argv)
 	fsmNodeStateOpts.timeout = 0;
 
 	static struct option long_options[] = {
-		{ "pgdata",  required_argument, NULL, 'D' },
-		{ "state",   required_argument, NULL, 's' },
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "state", required_argument, NULL, 's' },
 		{ "timeout", required_argument, NULL, 't' },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -268,19 +270,30 @@ cli_do_fsm_node_state_getopts(int argc, char **argv)
 		switch (c)
 		{
 			case 'D':
+			{
 				strlcpy(keeperOptions.pgSetup.pgdata, optarg,
-				        sizeof(keeperOptions.pgSetup.pgdata));
+						sizeof(keeperOptions.pgSetup.pgdata));
 				break;
+			}
+
 			case 's':
+			{
 				strlcpy(fsmNodeStateOpts.targetState, optarg,
-				        sizeof(fsmNodeStateOpts.targetState));
+						sizeof(fsmNodeStateOpts.targetState));
 				break;
+			}
+
 			case 't':
-				fsmNodeStateOpts.timeout = atoi(optarg);
+			{
+				fsmNodeStateOpts.timeout = atoi(optarg) /* IGNORE-BANNED */;
 				break;
+			}
+
 			default:
+			{
 				commandline_print_usage(&fsm_node_state, stderr);
 				exit(EXIT_CODE_BAD_ARGS);
+			}
 		}
 	}
 
@@ -288,13 +301,14 @@ cli_do_fsm_node_state_getopts(int argc, char **argv)
 	cli_common_get_set_pgdata_or_exit(&keeperOptions.pgSetup);
 
 	if (!keeper_config_set_pathnames_from_pgdata(&keeperOptions.pathnames,
-	                                              keeperOptions.pgSetup.pgdata))
+												 keeperOptions.pgSetup.pgdata))
 	{
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
 	return optind;
 }
+
 
 /*
  * cli_do_fsm_node_state reads the keeper's on-disk state and prints:
@@ -313,9 +327,9 @@ cli_do_fsm_node_state(int argc, char **argv)
 	bool monitorDisabledIsOk = true;
 
 	if (!keeper_config_read_file(&config,
-	                             missingPgdataIsOk,
-	                             pgIsNotRunningIsOk,
-	                             monitorDisabledIsOk))
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
 	{
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
@@ -339,19 +353,20 @@ cli_do_fsm_node_state(int argc, char **argv)
 		}
 
 		KeeperStateData *s = &keeper.state;
-		const char *current  = NodeStateToString(s->current_role);
+		const char *current = NodeStateToString(s->current_role);
 		const char *assigned = NodeStateToString(s->assigned_role);
 
 		if (fsmNodeStateOpts.targetState[0] != '\0' &&
-		    strcmp(current, fsmNodeStateOpts.targetState) != 0)
+			strcmp(current, fsmNodeStateOpts.targetState) != 0)
 		{
 			log_debug("fsm node-state: current_role=%s, waiting for %s",
-			          current, fsmNodeStateOpts.targetState);
+					  current, fsmNodeStateOpts.targetState);
 			if (deadline && time(NULL) < deadline)
 			{
 				pg_usleep(500 * 1000);
 				continue;
 			}
+
 			/* timed out or --timeout 0 with no match */
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}

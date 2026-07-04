@@ -48,9 +48,9 @@ static void cli_do_monitor_register_node(int argc, char **argv);
 static void cli_do_monitor_node_active(int argc, char **argv);
 static void cli_do_monitor_version(int argc, char **argv);
 static void cli_do_monitor_parse_notification(int argc, char **argv);
-static int  cli_do_monitor_node_state_getopts(int argc, char **argv);
+static int cli_do_monitor_node_state_getopts(int argc, char **argv);
 static void cli_do_monitor_node_state(int argc, char **argv);
-static int  cli_do_monitor_formation_states_getopts(int argc, char **argv);
+static int cli_do_monitor_formation_states_getopts(int argc, char **argv);
 static void cli_do_monitor_formation_states(int argc, char **argv);
 
 
@@ -744,17 +744,19 @@ cli_do_monitor_parse_notification(int argc, char **argv)
  * ----------------------------------------------------------------------- */
 
 #define MONITOR_LOCAL_URI \
-	"postgresql://autoctl_node@localhost/pg_auto_failover?sslmode=prefer"
+		"postgresql://autoctl_node@localhost/pg_auto_failover?sslmode=prefer"
 
 /* Shared option state for both new commands */
-static struct {
+static struct
+{
 	char monitorUri[MAXCONNINFO];
 	char nodeName[_POSIX_HOST_NAME_MAX];
 	char targetState[64];   /* --state: wait until reportedstate matches */
 	char formation[NAMEDATALEN]; /* --formation: filter by formation */
-	int  groupId;    /* -1 = all groups */
-	int  timeout;    /* 0 = no retry loop, N = retry for N seconds */
-} inspectOpts;
+	int groupId;     /* -1 = all groups */
+	int timeout;     /* 0 = no retry loop, N = retry for N seconds */
+}
+inspectOpts;
 
 static int
 cli_do_monitor_node_state_getopts(int argc, char **argv)
@@ -768,8 +770,8 @@ cli_do_monitor_node_state_getopts(int argc, char **argv)
 
 	static struct option long_options[] = {
 		{ "monitor", required_argument, NULL, 'm' },
-		{ "name",    required_argument, NULL, 'n' },
-		{ "state",   required_argument, NULL, 's' },
+		{ "name", required_argument, NULL, 'n' },
+		{ "state", required_argument, NULL, 's' },
 		{ "timeout", required_argument, NULL, 't' },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -781,23 +783,37 @@ cli_do_monitor_node_state_getopts(int argc, char **argv)
 		switch (c)
 		{
 			case 'm':
+			{
 				strlcpy(inspectOpts.monitorUri, optarg,
-				        sizeof(inspectOpts.monitorUri));
+						sizeof(inspectOpts.monitorUri));
 				break;
+			}
+
 			case 'n':
+			{
 				strlcpy(inspectOpts.nodeName, optarg,
-				        sizeof(inspectOpts.nodeName));
+						sizeof(inspectOpts.nodeName));
 				break;
+			}
+
 			case 's':
+			{
 				strlcpy(inspectOpts.targetState, optarg,
-				        sizeof(inspectOpts.targetState));
+						sizeof(inspectOpts.targetState));
 				break;
+			}
+
 			case 't':
-				inspectOpts.timeout = atoi(optarg);
+			{
+				inspectOpts.timeout = atoi(optarg) /* IGNORE-BANNED */;
 				break;
+			}
+
 			default:
+			{
 				commandline_print_usage(&monitor_node_state_command, stderr);
 				exit(EXIT_CODE_BAD_ARGS);
+			}
 		}
 	}
 
@@ -809,6 +825,7 @@ cli_do_monitor_node_state_getopts(int argc, char **argv)
 
 	return optind;
 }
+
 
 /*
  * cli_do_monitor_node_state connects to the local monitor and prints:
@@ -833,14 +850,17 @@ cli_do_monitor_node_state(int argc, char **argv)
 	ConnectionRetryPolicy retryPolicy = { 0 };
 
 	if (inspectOpts.timeout > 0)
+	{
 		pgsql_set_retry_policy(&retryPolicy,
 							   inspectOpts.timeout,
 							   -1,    /* unbounded attempts within timeout */
 							   2000,  /* cap at 2 s between attempts */
 							   500);  /* start at 500 ms */
+	}
 	else
+	{
 		pgsql_set_retry_policy(&retryPolicy, 0, 0, 0, 0); /* no retry */
-
+	}
 	do {
 		Monitor monitor = { 0 };
 
@@ -853,8 +873,8 @@ cli_do_monitor_node_state(int argc, char **argv)
 		SingleValueResultContext ctx = { { 0 }, PGSQL_RESULT_STRING, false };
 
 		if (!pgsql_execute_with_params(&monitor.pgsql, sql,
-		                               paramCount, paramTypes, paramValues,
-		                               &ctx, &parseSingleValueResult))
+									   paramCount, paramTypes, paramValues,
+									   &ctx, &parseSingleValueResult))
 		{
 			pgsql_finish(&monitor.pgsql);
 			goto next_attempt;
@@ -865,7 +885,10 @@ cli_do_monitor_node_state(int argc, char **argv)
 		if (!ctx.parsedOk || ctx.strVal == NULL)
 		{
 			/* node not found yet */
-			if (ctx.strVal) free(ctx.strVal);
+			if (ctx.strVal)
+			{
+				free(ctx.strVal);
+			}
 			goto next_attempt;
 		}
 
@@ -882,8 +905,10 @@ cli_do_monitor_node_state(int argc, char **argv)
 			{
 				int len = pipe - ctx.strVal;
 				if (len >= (int) sizeof(reported))
+				{
 					len = sizeof(reported) - 1;
-				memcpy(reported, ctx.strVal, len);
+				}
+				memcpy(reported, ctx.strVal, len); /* IGNORE-BANNED */
 				reported[len] = '\0';
 			}
 			if (strcmp(reported, inspectOpts.targetState) != 0)
@@ -899,13 +924,14 @@ cli_do_monitor_node_state(int argc, char **argv)
 
 next_attempt:
 		if (pgsql_retry_policy_expired(&retryPolicy))
+		{
 			break;
+		}
 
 		int sleepMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 		log_debug("node-state: node \"%s\" not found yet, retrying in %d ms",
 				  inspectOpts.nodeName, sleepMs);
 		pg_usleep((long) sleepMs * 1000);
-
 	} while (!pgsql_retry_policy_expired(&retryPolicy));
 
 	log_error("Node \"%s\" not found on the monitor", inspectOpts.nodeName);
@@ -922,10 +948,10 @@ cli_do_monitor_formation_states_getopts(int argc, char **argv)
 	inspectOpts.timeout = 0;
 
 	static struct option long_options[] = {
-		{ "monitor",   required_argument, NULL, 'm' },
+		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'F' },
-		{ "group",     required_argument, NULL, 'g' },
-		{ "timeout",   required_argument, NULL, 't' },
+		{ "group", required_argument, NULL, 'g' },
+		{ "timeout", required_argument, NULL, 't' },
 		{ NULL, 0, NULL, 0 }
 	};
 
@@ -936,27 +962,42 @@ cli_do_monitor_formation_states_getopts(int argc, char **argv)
 		switch (c)
 		{
 			case 'm':
+			{
 				strlcpy(inspectOpts.monitorUri, optarg,
-				        sizeof(inspectOpts.monitorUri));
+						sizeof(inspectOpts.monitorUri));
 				break;
+			}
+
 			case 'F':
+			{
 				strlcpy(inspectOpts.formation, optarg,
-				        sizeof(inspectOpts.formation));
+						sizeof(inspectOpts.formation));
 				break;
+			}
+
 			case 'g':
-				inspectOpts.groupId = atoi(optarg);
+			{
+				inspectOpts.groupId = atoi(optarg) /* IGNORE-BANNED */;
 				break;
+			}
+
 			case 't':
-				inspectOpts.timeout = atoi(optarg);
+			{
+				inspectOpts.timeout = atoi(optarg) /* IGNORE-BANNED */;
 				break;
+			}
+
 			default:
+			{
 				commandline_print_usage(&monitor_formation_states_command, stderr);
 				exit(EXIT_CODE_BAD_ARGS);
+			}
 		}
 	}
 
 	return optind;
 }
+
 
 /*
  * cli_do_monitor_formation_states checks that every state listed on the
@@ -1001,37 +1042,43 @@ cli_do_monitor_formation_states(int argc, char **argv)
 	for (int i = 0; i < argc; i++)
 	{
 		if (i > 0)
+		{
 			appendPQExpBufferStr(&sqlBuf, " || ',' || ");
+		}
 		appendPQExpBuffer(&sqlBuf,
-			"(count(*) FILTER (WHERE reportedstate::text = $%d))::text",
-			i + 1);
+						  "(count(*) FILTER (WHERE reportedstate::text = $%d))::text",
+						  i + 1);
 	}
 	appendPQExpBufferStr(&sqlBuf, " FROM pgautofailover.node");
 
 	bool hasFormation = inspectOpts.formation[0] != '\0';
-	bool hasGroup     = inspectOpts.groupId >= 0;
-	bool needWhere    = hasFormation || hasGroup;
-	int  extraParams  = (hasFormation ? 1 : 0) + (hasGroup ? 1 : 0);
+	bool hasGroup = inspectOpts.groupId >= 0;
+	bool needWhere = hasFormation || hasGroup;
+	int extraParams = (hasFormation ? 1 : 0) + (hasGroup ? 1 : 0);
 
 	if (needWhere)
 	{
 		appendPQExpBufferStr(&sqlBuf, " WHERE");
 		if (hasFormation)
+		{
 			appendPQExpBuffer(&sqlBuf, " formationid = $%d", argc + 1);
+		}
 		if (hasGroup)
+		{
 			appendPQExpBuffer(&sqlBuf, "%s groupid = $%d",
-			                  hasFormation ? " AND" : "",
-			                  argc + (hasFormation ? 2 : 1));
+							  hasFormation ? " AND" : "",
+							  argc + (hasFormation ? 2 : 1));
+		}
 	}
 
-	int          paramCount = argc + extraParams;
-	Oid          paramTypes[MAX_STATES + 2];
-	const char  *paramValues[MAX_STATES + 2];
-	IntString    groupIdStr = { 0 };
+	int paramCount = argc + extraParams;
+	Oid paramTypes[MAX_STATES + 2];
+	const char *paramValues[MAX_STATES + 2];
+	IntString groupIdStr = { 0 };
 
 	for (int i = 0; i < argc; i++)
 	{
-		paramTypes[i]  = TEXTOID;
+		paramTypes[i] = TEXTOID;
 		paramValues[i] = argv[i];
 	}
 	if (extraParams > 0)
@@ -1039,14 +1086,14 @@ cli_do_monitor_formation_states(int argc, char **argv)
 		int pi = argc;
 		if (hasFormation)
 		{
-			paramTypes[pi]  = TEXTOID;
+			paramTypes[pi] = TEXTOID;
 			paramValues[pi] = inspectOpts.formation;
 			pi++;
 		}
 		if (hasGroup)
 		{
 			groupIdStr = intToString(inspectOpts.groupId);
-			paramTypes[pi]  = INT4OID;
+			paramTypes[pi] = INT4OID;
 			paramValues[pi] = groupIdStr.strValue;
 		}
 	}
@@ -1054,25 +1101,30 @@ cli_do_monitor_formation_states(int argc, char **argv)
 	ConnectionRetryPolicy retryPolicy = { 0 };
 
 	if (inspectOpts.timeout > 0)
+	{
 		pgsql_set_retry_policy(&retryPolicy,
 							   inspectOpts.timeout,
 							   -1,    /* unbounded attempts within timeout */
 							   2000,  /* cap at 2 s between attempts */
 							   500);  /* start at 500 ms */
+	}
 	else
+	{
 		pgsql_set_retry_policy(&retryPolicy, 0, 0, 0, 0); /* no retry */
-
+	}
 	do {
 		Monitor monitor = { 0 };
 
 		if (!monitor_init(&monitor, inspectOpts.monitorUri))
+		{
 			goto next_attempt;
+		}
 
 		SingleValueResultContext ctx = { { 0 }, PGSQL_RESULT_STRING, false };
 
 		if (!pgsql_execute_with_params(&monitor.pgsql, sqlBuf.data,
-		                               paramCount, paramTypes, paramValues,
-		                               &ctx, &parseSingleValueResult))
+									   paramCount, paramTypes, paramValues,
+									   &ctx, &parseSingleValueResult))
 		{
 			pgsql_finish(&monitor.pgsql);
 			goto next_attempt;
@@ -1082,7 +1134,10 @@ cli_do_monitor_formation_states(int argc, char **argv)
 
 		if (!ctx.parsedOk || ctx.strVal == NULL)
 		{
-			if (ctx.strVal) free(ctx.strVal);
+			if (ctx.strVal)
+			{
+				free(ctx.strVal);
+			}
 			goto next_attempt;
 		}
 
@@ -1091,10 +1146,21 @@ cli_do_monitor_formation_states(int argc, char **argv)
 		char *p = ctx.strVal;
 		for (int i = 0; i < argc; i++)
 		{
-			int cnt = atoi(p);
-			if (cnt < 1) { allMet = false; break; }
+			int cnt = atoi(p) /* IGNORE-BANNED */;
+			if (cnt < 1)
+			{
+				allMet = false;
+				break;
+			}
 			p = strchr(p, ',');
-			if (p) p++; else break;
+			if (p)
+			{
+				p++;
+			}
+			else
+			{
+				break;
+			}
 		}
 		free(ctx.strVal);
 
@@ -1106,13 +1172,14 @@ cli_do_monitor_formation_states(int argc, char **argv)
 
 next_attempt:
 		if (pgsql_retry_policy_expired(&retryPolicy))
+		{
 			break;
+		}
 
 		int sleepMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
 		log_debug("formation-states: condition not met yet, retrying in %d ms",
 				  sleepMs);
 		pg_usleep((long) sleepMs * 1000);
-
 	} while (!pgsql_retry_policy_expired(&retryPolicy));
 
 	termPQExpBuffer(&sqlBuf);

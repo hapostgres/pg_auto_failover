@@ -613,8 +613,8 @@ static CommandLine *internal_service_subcommands[] = {
 
 static CommandLine internal_service_commands =
 	make_hidden_command_set("service",
-					 "Subprocess entry points for the pg_autoctl supervisor",
-					 NULL, NULL, NULL, internal_service_subcommands);
+							"Subprocess entry points for the pg_autoctl supervisor",
+							NULL, NULL, NULL, internal_service_subcommands);
 
 /*
  * pg_autoctl internal
@@ -632,8 +632,8 @@ CommandLine *do_subcommands[] = {
 
 CommandLine do_commands =
 	make_hidden_command_set("internal",
-					 "Internal subprocess entry points — not for direct use",
-					 NULL, NULL, NULL, do_subcommands);
+							"Internal subprocess entry points — not for direct use",
+							NULL, NULL, NULL, do_subcommands);
 
 
 /*

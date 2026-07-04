@@ -35,7 +35,7 @@ typedef struct MonitorConfig
 
 	/* non-default formations to create during monitor init */
 #define MONITOR_MAX_FORMATIONS 16
-	int  formationCount;
+	int formationCount;
 	char formationNames[MONITOR_MAX_FORMATIONS][NAMEDATALEN];
 	char formationKinds[MONITOR_MAX_FORMATIONS][NAMEDATALEN]; /* "pgsql" = default */
 } MonitorConfig;

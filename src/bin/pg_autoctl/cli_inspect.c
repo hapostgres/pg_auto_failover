@@ -31,8 +31,8 @@ static CommandLine *inspect_fsm_subcommands[] = {
 
 static CommandLine inspect_fsm_commands =
 	make_command_set("fsm",
-	                 "Display keeper FSM state and transitions (read-only)",
-	                 NULL, NULL, NULL, inspect_fsm_subcommands);
+					 "Display keeper FSM state and transitions (read-only)",
+					 NULL, NULL, NULL, inspect_fsm_subcommands);
 
 /*
  * Read-only monitor sub-commands: get primary/others/candidate-count/coordinator
@@ -49,8 +49,8 @@ static CommandLine *inspect_monitor_subcommands[] = {
 
 static CommandLine inspect_monitor_commands =
 	make_command_set("monitor",
-	                 "Query the monitor's current state (read-only)",
-	                 NULL, NULL, NULL, inspect_monitor_subcommands);
+					 "Query the monitor's current state (read-only)",
+					 NULL, NULL, NULL, inspect_monitor_subcommands);
 
 /*
  * Aggregate the read-only do_* command sets under "inspect".
@@ -69,11 +69,11 @@ static CommandLine *inspect_subcommands[] = {
 
 CommandLine inspect_commands =
 	make_command_set("inspect",
-	                 "Read-only diagnostics (safe on live nodes)",
-	                 "[sub-command]",
-	                 "  show      Networking and hostname diagnostics\n"
-	                 "  pgsetup   Local PostgreSQL setup inspection\n"
-	                 "  fsm       Display keeper FSM state and reachable transitions\n"
-	                 "  monitor   Query the monitor's current state\n"
-	                 "  getpid    Get PIDs of pg_autoctl sub-processes\n",
-	                 NULL, inspect_subcommands);
+					 "Read-only diagnostics (safe on live nodes)",
+					 "[sub-command]",
+					 "  show      Networking and hostname diagnostics\n"
+					 "  pgsetup   Local PostgreSQL setup inspection\n"
+					 "  fsm       Display keeper FSM state and reachable transitions\n"
+					 "  monitor   Query the monitor's current state\n"
+					 "  getpid    Get PIDs of pg_autoctl sub-processes\n",
+					 NULL, inspect_subcommands);

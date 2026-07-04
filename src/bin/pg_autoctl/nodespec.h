@@ -54,7 +54,7 @@ typedef struct NodeSpec
 	PgInstanceKind kind;         /* postgres | coordinator | worker | monitor */
 	char name[_POSIX_HOST_NAME_MAX]; /* --name; defaults to hostname when empty */
 	char hostname[_POSIX_HOST_NAME_MAX];
-	int  port;                   /* Postgres port, default 5432 */
+	int port;                    /* Postgres port, default 5432 */
 
 	/* [postgresql] */
 	char pgdata[MAXPGPATH];
@@ -62,14 +62,14 @@ typedef struct NodeSpec
 	/* [monitor]   — empty for kind == monitor */
 	char monitor_pguri[MAXCONNINFO];
 	bool noMonitor;              /* [monitor] no_monitor=true: standalone mode */
-	int  nodeId;                 /* [monitor] node_id: required with --disable-monitor */
+	int nodeId;                  /* [monitor] node_id: required with --disable-monitor */
 
 	/* [formation] */
 	char formation[NAMEDATALEN]; /* default "default" */
-	int  group;                  /* Citus group; 0 = coordinator */
+	int group;                   /* Citus group; 0 = coordinator */
 
 	/* [settings]  — mutable; applied on SIGHUP / file change */
-	int  candidate_priority;     /* 0-100, default 50 */
+	int candidate_priority;      /* 0-100, default 50 */
 	bool replication_quorum;     /* sync quorum participant, default true */
 
 	/* [options]    — immutable; used only at pg_autoctl create time */
@@ -85,7 +85,7 @@ typedef struct NodeSpec
 
 	/* [formation <name>]  — monitor kind: non-default formations to create */
 #define NODESPEC_MAX_FORMATIONS 16
-	int  formationCount;
+	int formationCount;
 	char formationNames[NODESPEC_MAX_FORMATIONS][NAMEDATALEN];
 	char formationKinds[NODESPEC_MAX_FORMATIONS][NAMEDATALEN]; /* "pgsql" default */
 
@@ -109,14 +109,14 @@ typedef struct NodeSpec
 
 typedef struct NodeSpecWatcher
 {
-	bool     active;             /* true once nodespec_watcher_init() succeeds */
-	char     path[MAXPGPATH];   /* path of the watched file                   */
-	time_t   last_mtime;        /* mtime at last check                        */
-	time_t   last_checked;      /* wall-clock time of last poll               */
+	bool active;                 /* true once nodespec_watcher_init() succeeds */
+	char path[MAXPGPATH];       /* path of the watched file                   */
+	time_t last_mtime;          /* mtime at last check                        */
+	time_t last_checked;        /* wall-clock time of last poll               */
 
 #ifdef __linux__
-	int      inotify_fd;        /* inotify instance fd, -1 if unavailable     */
-	int      watch_fd;          /* inotify watch descriptor                   */
+	int inotify_fd;             /* inotify instance fd, -1 if unavailable     */
+	int watch_fd;               /* inotify watch descriptor                   */
 #endif
 } NodeSpecWatcher;
 
@@ -133,9 +133,9 @@ bool nodespec_write(const NodeSpec *spec, FILE *out);
 /* Build the argv[] for `pg_autoctl create <kind> [flags]`.
  * Caller provides args[] with room for at least 40 char* entries.
  * Returns the number of entries filled (not counting the trailing NULL). */
-int  nodespec_create_argv(const NodeSpec *spec,
-                          const char *pg_autoctl_path,
-                          char **args, int args_size);
+int nodespec_create_argv(const NodeSpec *spec,
+						 const char *pg_autoctl_path,
+						 char **args, int args_size);
 
 /* Apply mutable fields (candidate_priority, replication_quorum) to a
  * running node by calling into the keeper/monitor APIs directly.
