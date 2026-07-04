@@ -28,6 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # git-version.h is generated from the working tree and must exist on the
+      # host before the Docker build COPY step reads it.
+      - name: Generate git-version.h
+        run: make version
+
       - name: Build pg_auto_failover run image
         run: |
           docker build \
@@ -182,6 +187,9 @@ jobs:
         with:
           name: pgaftest-binary
           path: /tmp
+
+      - name: Generate git-version.h
+        run: make version
 
       # The build job already produced pgaf:run at PG16 for the regular tests,
       # but the upgrade job runs independently and needs its own images.
