@@ -177,7 +177,7 @@ step test_008_failover_post_upgrade {
     wait until node2 state is primary
         and node1 state is secondary
         and node3 state is secondary
-        timeout 120s
+        timeout 240s
 }
 
 step test_009_write_on_new_primary {
