@@ -47,7 +47,6 @@ step test_004_maintenance {
 
 step test_005_enable_ssl_monitor {
     exec monitor  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
-    exec monitor  pg_autoctl manual service restart postgres
     exec monitor  pg_autoctl inspect pgsetup wait --timeout 60
     sql monitor { SHOW ssl; }
     expect { on }
@@ -55,7 +54,6 @@ step test_005_enable_ssl_monitor {
 
 step test_006_enable_ssl_primary {
     exec node1  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
-    exec node1  pg_autoctl manual service restart postgres
     exec node1  pg_autoctl inspect pgsetup wait --timeout 60
     sql node1 { SHOW ssl; }
     expect { on }
@@ -63,7 +61,8 @@ step test_006_enable_ssl_primary {
 
 step test_007_enable_ssl_secondary {
     exec node2  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
-    exec node2  pg_autoctl manual service restart postgres
+    compose stop node2
+    compose start node2
     exec node2  pg_autoctl inspect pgsetup wait --timeout 90
     sql node2 { SHOW ssl; }
     expect { on }

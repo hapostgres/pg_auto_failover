@@ -21,10 +21,11 @@ cluster {
 # manually.
 
 setup {
-    # No monitor: wait until postgres is accepting connections on each node.
-    exec node1  pg_autoctl inspect pgsetup wait --timeout 90
-    exec node2  pg_autoctl inspect pgsetup wait --timeout 90
-    exec node3  pg_autoctl inspect pgsetup wait --timeout 90
+    # No monitor: nodes start pg_autoctl in INIT state (postgres not yet
+    # running).  The first test step assigns SINGLE state to node1 which
+    # starts postgres.  Just give pg_autoctl a moment to initialize the
+    # data directory before the test steps begin.
+    sleep 5s
 }
 
 teardown {

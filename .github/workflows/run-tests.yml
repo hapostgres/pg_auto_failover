@@ -16,7 +16,7 @@ jobs:
     container: citus/stylechecker:no-py
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Set safe directory for git
         run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
@@ -51,7 +51,7 @@ jobs:
             TEST: tablespaces
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Set environment variables
         run: |

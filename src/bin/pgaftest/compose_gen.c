@@ -614,41 +614,30 @@ compose_gen_write(TestCluster *cluster,
 			 * primary) before any other node starts, making the initial
 			 * election deterministic.
 			 *
-			 * Without a monitor (no-monitor nodes): the first node still gets
-			 * a healthcheck (pg_isready) so that subsequent nodes wait until
-			 * postgres is accepting connections before starting.  The test
-			 * steps then drive the FSM manually from a known-ready state.
+			 * Without a monitor (no-monitor nodes): the FSM is driven
+			 * manually via pg_autoctl manual fsm assign, so postgres is not
+			 * running when the container starts.  No healthcheck; subsequent
+			 * nodes use service_started so they launch as soon as node1 has
+			 * started (they don't need postgres to be ready yet).
 			 */
-			if (!firstNode)
-			{
-				if (cluster->withMonitor)
-					fprintf(f,
-						"    healthcheck:\n"
-						"      test: [\"CMD\", \"pg_autoctl\", \"status\","
-						" \"--pgdata\", \"%s\"]\n"
-						"      interval: 2s\n"
-						"      timeout: 5s\n"
-						"      retries: 30\n"
-						"      start_period: 15s\n",
-						node_pgdata);
-				else
-					/* no-monitor: just wait for postgres to be ready */
-					fprintf(f,
-						"    healthcheck:\n"
-						"      test: [\"CMD-SHELL\","
-						" \"pg_isready -h localhost -p 5432 -q\"]\n"
-						"      interval: 2s\n"
-						"      timeout: 5s\n"
-						"      retries: 60\n"
-						"      start_period: 30s\n");
-			}
+			if (!firstNode && cluster->withMonitor)
+				fprintf(f,
+					"    healthcheck:\n"
+					"      test: [\"CMD\", \"pg_autoctl\", \"status\","
+					" \"--pgdata\", \"%s\"]\n"
+					"      interval: 2s\n"
+					"      timeout: 5s\n"
+					"      retries: 30\n"
+					"      start_period: 15s\n",
+					node_pgdata);
 
 			if (firstNode)
 				fprintf(f,
 					"    depends_on:\n"
 					"      %s:\n"
-					"        condition: service_healthy\n",
-					firstNode->name);
+					"        condition: %s\n",
+					firstNode->name,
+					cluster->withMonitor ? "service_healthy" : "service_started");
 			fprintf(f, "\n");
 
 			if (!firstNode) firstNode = n;

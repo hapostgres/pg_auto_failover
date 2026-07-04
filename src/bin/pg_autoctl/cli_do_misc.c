@@ -334,13 +334,16 @@ int
 keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
 {
 	/*
-	 * Delegate standard keeper options to keeper_cli_keeper_setup_getopts,
-	 * which populates keeperOptions.  Then do a second scan with opterr=0 to
-	 * pick up the two new flags that the common function doesn't know about.
-	 * Because getopt_long returns '?' for unknown flags (and we suppress the
-	 * error message), we only act on 'W' and 'T' and ignore everything else.
+	 * cli_common_keeper_getopts (called by keeper_cli_keeper_setup_getopts)
+	 * exits with BAD_ARGS when it encounters unknown options.  Since --timeout
+	 * and --read-write are not in its options list, we must remove them from
+	 * argv before delegating.
+	 *
+	 * Strategy:
+	 *   1. Scan argv with opterr=0 to capture --timeout / --read-write.
+	 *   2. Build a filtered argv that omits those two options.
+	 *   3. Pass the filtered argv to keeper_cli_keeper_setup_getopts.
 	 */
-	int rc = keeper_cli_keeper_setup_getopts(argc, argv);
 
 	/* Reset module-level wait options */
 	pgsetupWaitReadWrite = false;
@@ -382,13 +385,43 @@ keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
 
 			default:
 			{
-				/* all other options handled by the first pass above */
+				/* standard keeper options; handled by the delegated call below */
 				break;
 			}
 		}
 	}
 
 	opterr = 1;
+
+	/*
+	 * Build a filtered argv that strips --timeout/--read-write (and their
+	 * arguments) so that keeper_cli_keeper_setup_getopts does not see them.
+	 */
+	char **filtered_argv = (char **) palloc((argc + 1) * sizeof(char *));
+	int filtered_argc = 0;
+
+	for (int i = 0; i < argc; i++)
+	{
+		if (strcmp(argv[i], "--read-write") == 0 || strcmp(argv[i], "-W") == 0)
+		{
+			continue;
+		}
+
+		if ((strcmp(argv[i], "--timeout") == 0 || strcmp(argv[i], "-T") == 0)
+			&& i + 1 < argc)
+		{
+			/* skip both the flag and its argument */
+			i++;
+			continue;
+		}
+
+		filtered_argv[filtered_argc++] = argv[i];
+	}
+	filtered_argv[filtered_argc] = NULL;
+
+	int rc = keeper_cli_keeper_setup_getopts(filtered_argc, filtered_argv);
+
+	pfree(filtered_argv);
 
 	return rc;
 }
@@ -636,7 +669,26 @@ keeper_cli_pgsetup_hba_lan(int argc, char **argv)
 	}
 
 	/* Step 2: append LAN CIDR rules directly to the file (no TCP) */
-	const char *hostname = pgSetup->pghost;
+	/*
+	 * pgSetup->pghost may be a Unix socket path (e.g. /var/run/postgresql)
+	 * when postgres is configured for local connections only.  That path is
+	 * not a valid hostname for LAN CIDR detection.  Try to get the node's
+	 * network hostname from the keeper config; fall back to pghost only when
+	 * the keeper config can't be read or has no hostname.
+	 */
+	KeeperConfig hbaConfig = keeperOptions;
+	bool hbaConfigLoaded =
+		keeper_config_set_pathnames_from_pgdata(&hbaConfig.pathnames,
+												pgdata) &&
+		keeper_config_read_file(&hbaConfig,
+								false /* missingPgdataIsOk */,
+								true  /* pgIsNotRunningIsOk */,
+								true  /* monitorDisabledIsOk */);
+
+	const char *hostname =
+		(hbaConfigLoaded && !IS_EMPTY_STRING_BUFFER(hbaConfig.hostname))
+		? hbaConfig.hostname
+		: pgSetup->pghost;
 
 	/* --auth <method> defaults to "trust"; --ssl enables hostssl rules */
 	const char *authMethod = keeperOptions.pgSetup.authMethod;

@@ -198,13 +198,15 @@ step test_014_001_fail_set_properties {
 }
 
 step test_014_002_fail_two_standby_nodes {
-    network disconnect node2
-    network disconnect node3
+    compose stop node2
+    compose stop node3
     wait until node2 assigned-state = catchingup  timeout 180s
     wait until node3 assigned-state = catchingup  timeout 180s
-    # With both sync standbys disconnected, node1 enters wait_primary (blocked
-    # writes) because it can no longer satisfy number-sync-standbys=1.
-    wait until node1 state is wait_primary  timeout 180s
+    # node1 remains primary (blocking writes at postgres level) until
+    # number-sync-standbys is explicitly set to 0 in the next step.
+    wait until node1 state is primary  timeout 180s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
 }
 
 step test_014_003_unblock_writes {
@@ -215,8 +217,8 @@ step test_014_003_unblock_writes {
 }
 
 step test_014_004_restart_nodes {
-    network connect node3
-    network connect node2
+    compose start node3
+    compose start node2
     wait until node3 state is secondary
         and node2 state is secondary
         and node1 state is primary

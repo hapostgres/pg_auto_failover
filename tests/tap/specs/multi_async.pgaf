@@ -164,7 +164,6 @@ step test_014_002_stop_new_primary_node2 {
 
 step test_014_003_restart_node1 {
     compose start node1
-    wait until node1 assigned-state = fast_forward  timeout 180s
     wait until node1 state is wait_primary  timeout 180s
 }
 

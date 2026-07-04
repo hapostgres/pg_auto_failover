@@ -34,6 +34,8 @@
 static bool wait_for_state(TestRunner *r, const char *nodeName,
                            const char *targetState, int timeoutSecs,
                            bool checkAssigned);
+static bool runner_wait_assigned_goal(TestRunner *r, const char *nodeName,
+                                      const char *targetState, int timeoutSecs);
 static void log_output(const char *prefix, const char *out);
 
 /* -----------------------------------------------------------------------
@@ -1245,7 +1247,13 @@ runner_wait_notify_goal(TestRunner *r,
 
 			/*
 			 * For unhealthy nodes: also accept a match from the node's local
-			 * FSM — the keeper self-assigns certain states without monitor contact.
+			 * FSM — the keeper self-assigns certain states without monitor
+			 * contact.
+			 *
+			 * For nodes that have been hard-killed (compose kill), the
+			 * container is gone so exec fails.  Accept goalState-alone match
+			 * for unhealthy nodes: a dead node can never report the new state,
+			 * but the monitor has already made the assignment decision.
 			 */
 			{
 				char rep[64] = "", goal[64] = "";
@@ -1256,6 +1264,9 @@ runner_wait_notify_goal(TestRunner *r,
 				                            &health) &&
 				    health <= 0)
 				{
+					if (strcmp(goal, targetState) == 0)
+						return true;
+
 					char pgdata[1024] = "";
 					get_node_pgdata(r, nodeName, pgdata, sizeof(pgdata));
 					char out[256];
@@ -1275,7 +1286,9 @@ runner_wait_notify_goal(TestRunner *r,
 			/*
 			 * No LISTEN connection — fall back to polling via SQL.
 			 * Require both reportedState and assignedState to equal the target
-			 * (same convergence criterion as the notification path).
+			 * (same convergence criterion as the notification path), except for
+			 * unhealthy nodes where goalState alone is accepted (dead nodes
+			 * can never report the new state).
 			 */
 			char rep[64] = "", asgn[64] = "";
 			if (monitor_get_node_state(r, nodeName, rep, sizeof(rep),
@@ -1293,6 +1306,17 @@ runner_wait_notify_goal(TestRunner *r,
 				}
 				if (strcmp(rep,  targetState) == 0 &&
 				    strcmp(asgn, targetState) == 0)
+					return true;
+
+				/* unhealthy node: accept goalState match alone */
+				char rep2[64] = "", goal2[64] = "";
+				int  health2 = 1;
+				if (strcmp(asgn, targetState) == 0 &&
+				    monitor_get_node_health(r, nodeName,
+				                           rep2, sizeof(rep2),
+				                           goal2, sizeof(goal2),
+				                           &health2) &&
+				    health2 <= 0)
 					return true;
 			}
 		}
@@ -1331,24 +1355,146 @@ next_iter:
 }
 
 /*
+ * runner_wait_assigned_goal — wait until the monitor's goalState for nodeName
+ * equals targetState, without requiring reportedState to converge.
+ *
+ * This implements the semantics of "wait until <node> assigned-state = X":
+ * succeed as soon as the monitor assigns X as the goalState, even if the node
+ * has not yet transitioned its own reportedState.  This matches the Python
+ * test's wait_until_assigned_state() behaviour.
+ *
+ * Uses NOTIFY fast-path (goalState match alone) and falls back to polling
+ * the assigned_state column directly via monitor_get_node_state().
+ */
+static bool
+runner_wait_assigned_goal(TestRunner *r, const char *nodeName,
+                          const char *targetState, int timeoutSecs)
+{
+	runner_notify_connect(r);
+
+	/* fast path: already there */
+	{
+		char rep[64] = "", asgn[64] = "";
+		if (monitor_get_node_state(r, nodeName, rep, sizeof(rep),
+		                           asgn, sizeof(asgn)) &&
+		    strcmp(asgn, targetState) == 0)
+			return true;
+	}
+
+	time_t deadline = time(NULL) + timeoutSecs;
+
+	while (time(NULL) < deadline)
+	{
+		if (r->notifyConnected)
+		{
+			PQconsumeInput(r->notifyConn.connection);
+
+			PGnotify *notify;
+			while ((notify = PQnotifies(r->notifyConn.connection)) != NULL)
+			{
+				if (strcmp(notify->relname, "state") == 0)
+				{
+					CurrentNodeState ns = { 0 };
+					if (parse_state_notification_message(&ns, notify->extra))
+					{
+						const char *ns_goal = NodeStateToString(ns.goalState);
+						const char *ns_rep  = NodeStateToString(ns.reportedState);
+
+						if (ns.health >= 0)
+							log_info("  [notify] %s: %s \xe2\x9e\x9c %s",
+							         ns.node.name, ns_rep, ns_goal);
+						else
+							log_info("  [notify] %s: %s \xe2\x9e\x9c %s (unhealthy)",
+							         ns.node.name, ns_rep, ns_goal);
+
+						if (strcmp(ns.node.name, nodeName) == 0 &&
+						    strcmp(ns_goal, targetState) == 0)
+						{
+							PQfreemem(notify);
+							/* confirm via SQL */
+							char rep[64] = "", asgn[64] = "";
+							if (monitor_get_node_state(r, nodeName,
+							                           rep,  sizeof(rep),
+							                           asgn, sizeof(asgn)))
+							{
+								if (strcmp(asgn, targetState) == 0)
+									return true;
+								/* rare race: goalState changed already; keep looping */
+							}
+							else
+							{
+								return true; /* can't reach monitor, trust notify */
+							}
+							goto next_iter_asgn;
+						}
+					}
+				}
+				PQfreemem(notify);
+			}
+		}
+		else
+		{
+			/* fallback: poll assigned_state via SQL */
+			char rep[64] = "", asgn[64] = "";
+			if (monitor_get_node_state(r, nodeName, rep, sizeof(rep),
+			                           asgn, sizeof(asgn)) &&
+			    strcmp(asgn, targetState) == 0)
+				return true;
+		}
+
+next_iter_asgn:
+		{
+			int remainMs = (int)((deadline - time(NULL)) * 1000);
+			if (remainMs <= 0) break;
+			int waitMs = remainMs < 2000 ? remainMs : 2000;
+
+			if (r->notifyConnected)
+				runner_wait_socket(r, waitMs);
+			else
+				pg_usleep(500 * 1000);
+
+			runner_notify_connect(r);
+		}
+	}
+
+	return false;
+}
+
+/*
  * Wait until the node reaches the target state, or timeout expires.
  *
- * Delegates to runner_wait_notify_goal() which uses the LISTEN "state" channel
- * as the primary signal (goalState == target) with a SQL fallback.
- * checkAssigned is kept for API compatibility but no longer changes behavior —
- * both wait-until-state and wait-until-assigned-state now use the same
- * goalState-from-notification approach.
+ * For state (reported) checks: delegates to runner_wait_notify_goal() which
+ * waits for both goalState and reportedState to converge on target.
+ * For assigned-state checks: delegates to runner_wait_assigned_goal() which
+ * succeeds as soon as the monitor's goalState equals target.
  */
 static bool
 wait_for_state(TestRunner *r, const char *nodeName, const char *targetState,
                int timeoutSecs, bool checkAssigned)
 {
-	(void) checkAssigned;   /* now unified: both modes use goalState notify */
+	if (checkAssigned)
+	{
+		/*
+		 * assigned-state check: succeed as soon as the monitor's goalState
+		 * equals the target, without requiring the node to have transitioned
+		 * its reportedState.  This matches the Python test's behaviour for
+		 * wait_until_assigned_state() and is necessary for cases like
+		 * test_015_003 where the primary is assigned "primary" goalstate but
+		 * cannot complete the transition until standbys reconnect.
+		 */
+		if (!runner_wait_assigned_goal(r, nodeName, targetState, timeoutSecs))
+		{
+			log_error("Timeout waiting for %s assigned-state = %s",
+			          nodeName, targetState);
+			return false;
+		}
+		return true;
+	}
 
 	if (!runner_wait_notify_goal(r, nodeName, targetState,
 	                             NULL, NULL, 0, timeoutSecs))
 	{
-		log_error("Timeout waiting for %s assigned-state = %s",
+		log_error("Timeout waiting for %s state = %s",
 		          nodeName, targetState);
 		return false;
 	}
@@ -1939,10 +2085,14 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 * so `start` would fail for them.  `up -d --no-recreate --no-deps`
 			 * handles both: creates+starts a new container, or starts an
 			 * existing stopped one without touching other services.
+			 *
+			 * `--no-deps` is critical: without it, `start` (and `up`) would
+			 * also start any stopped services listed in `depends_on`, which
+			 * interferes with tests that restart a single node.
 			 */
 			char out[4096] = "";
 			int rc = run_cmd_capture(out, sizeof(out),
-				"%s start %s 2>&1",
+				"%s up -d --no-recreate --no-deps %s 2>&1",
 				r->composeBase, cmd->service);
 			if (out[0])
 				log_output("   compose: ", out);

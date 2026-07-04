@@ -311,6 +311,17 @@ keeper_ensure_current_state(Keeper *keeper)
 		}
 
 		case MAINTENANCE_STATE:
+		{
+			/*
+			 * Ensure the postgres controller knows postgres should be running.
+			 * This is needed after a process restart (e.g. container restart)
+			 * when the expected-status file may not exist in XDG_DATA_HOME.
+			 * Without writing the status file here, the controller waits
+			 * forever for a file that no one writes.
+			 */
+			return ensure_postgres_service_is_running_as_subprocess(postgres);
+		}
+
 		default:
 		{
 			/* nothing to be done here */
@@ -972,11 +983,29 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 
 		if (replicationSettingsHaveChanged)
 		{
-			log_info("Replication settings at \"%s\" have changed, "
-					 "restarting Postgres", upstreamConfPath);
-
-			if (pg_setup_is_running(pgSetup))
+			/*
+			 * In maintenance state, the operator controls postgres. Skip the
+			 * automatic restart: the updated settings take effect on the next
+			 * postgres startup (e.g. after the node exits maintenance and
+			 * postgres is restarted by the operator or by compose stop/start).
+			 *
+			 * Auto-restarting postgres in maintenance state hangs when the WAL
+			 * receiver is blocked on a connection attempt (e.g. after enabling
+			 * SSL with a new primary_conninfo), because pg_ctl stop --fast
+			 * waits for the WAL receiver to finish.
+			 */
+			if (state->current_role == MAINTENANCE_STATE)
 			{
+				log_info("Replication settings at \"%s\" have changed, "
+						 "skipping Postgres restart in maintenance state "
+						 "(changes will take effect on next restart)",
+						 upstreamConfPath);
+			}
+			else if (pg_setup_is_running(pgSetup))
+			{
+				log_info("Replication settings at \"%s\" have changed, "
+						 "restarting Postgres", upstreamConfPath);
+
 				if (!pgsql_checkpoint(&(postgres->sqlClient)))
 				{
 					log_warn("Failed to CHECKPOINT before restart, "
@@ -992,6 +1021,9 @@ keeper_ensure_configuration(Keeper *keeper, bool postgresNotRunningIsOk)
 			}
 			else
 			{
+				log_info("Replication settings at \"%s\" have changed, "
+						 "restarting Postgres", upstreamConfPath);
+
 				if (!ensure_postgres_service_is_running(postgres))
 				{
 					log_error("Failed to start Postgres with new "

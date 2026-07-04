@@ -26,7 +26,7 @@ jobs:
       PGVERSION: 17
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       # git-version.h is generated from the working tree and must exist on the
       # host before the Docker build COPY step reads it.
@@ -45,7 +45,7 @@ jobs:
         run: docker save pgaf:run | gzip > /tmp/pgaf-run.tar.gz
 
       - name: Upload pgaf:run image artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.3
         with:
           name: pgaf-run-image
           path: /tmp/pgaf-run.tar.gz
@@ -72,7 +72,7 @@ jobs:
           chmod +x /tmp/pgaftest-bin
 
       - name: Upload pgaftest binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.3
         with:
           name: pgaftest-binary
           path: /tmp/pgaftest-bin
@@ -112,10 +112,10 @@ jobs:
           - extension_update
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Download pgaf:run image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.8
         with:
           name: pgaf-run-image
           path: /tmp
@@ -124,7 +124,7 @@ jobs:
         run: docker load < /tmp/pgaf-run.tar.gz
 
       - name: Download pgaftest binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.8
         with:
           name: pgaftest-binary
           path: /tmp
@@ -163,7 +163,7 @@ jobs:
       PGVERSION: 17
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
       - name: Install libpq runtime
         run: |
@@ -177,7 +177,7 @@ jobs:
           sudo apt-get install -y libpq5
 
       - name: Download pgaftest binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.8
         with:
           name: pgaftest-binary
           path: /tmp
@@ -214,7 +214,7 @@ jobs:
       PGVERSION: 16
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
         with:
           # Full history needed so PREV_TAG auto-detection (git tag --sort)
           # finds the correct previous release tag.
@@ -232,7 +232,7 @@ jobs:
           sudo apt-get install -y libpq5
 
       - name: Download pgaftest binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4.1.8
         with:
           name: pgaftest-binary
           path: /tmp
