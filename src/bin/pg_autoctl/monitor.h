@@ -140,6 +140,7 @@ bool monitor_register_node(Monitor *monitor,
 						   bool quorum,
 						   char *citusClusterName,
 						   bool *mayRetry,
+						   bool *formationMissing,
 						   MonitorAssignedState *assignedState);
 bool monitor_node_active(Monitor *monitor,
 						 char *formation, int64_t nodeId,

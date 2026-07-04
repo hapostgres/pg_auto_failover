@@ -2336,6 +2336,85 @@ pgsql_create_user(PGSQL *pgsql, const char *userName, const char *password,
 
 
 /*
+ * pgsql_alter_role_password runs ALTER ROLE <roleName> PASSWORD '...'.
+ *
+ * The password is never logged; we log "ALTER ROLE <name> PASSWORD '*****'"
+ * instead.  Uses PQescapeIdentifier / PQescapeLiteral so the values are safe
+ * to interpolate directly into the query string.
+ */
+bool
+pgsql_alter_role_password(PGSQL *pgsql, const char *roleName,
+						  const char *password)
+{
+	/* open a connection upfront since it is needed by PQescape functions */
+	PGconn *connection = pgsql_open_connection(pgsql);
+	if (connection == NULL)
+	{
+		/* error message was logged in pgsql_open_connection */
+		return false;
+	}
+
+	char *escapedRole = PQescapeIdentifier(connection, roleName, strlen(roleName));
+	if (escapedRole == NULL)
+	{
+		log_error("Failed to escape role name \"%s\": %s",
+				  roleName, PQerrorMessage(connection));
+		pgsql_finish(pgsql);
+		return false;
+	}
+
+	char *escapedPassword = PQescapeLiteral(connection, password, strlen(password));
+	if (escapedPassword == NULL)
+	{
+		log_error("Failed to escape password for role \"%s\": %s",
+				  roleName, PQerrorMessage(connection));
+		PQfreemem(escapedRole);
+		pgsql_finish(pgsql);
+		return false;
+	}
+
+	/* log without the real password */
+	log_debug("ALTER ROLE %s PASSWORD '*****';", escapedRole);
+
+	PQExpBuffer query = createPQExpBuffer();
+	appendPQExpBuffer(query, "ALTER ROLE %s PASSWORD %s", escapedRole, escapedPassword);
+	PQfreemem(escapedRole);
+	PQfreemem(escapedPassword);
+
+	if (PQExpBufferBroken(query))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(query);
+		pgsql_finish(pgsql);
+		return false;
+	}
+
+	PGresult *result = PQexec(connection, query->data);
+	destroyPQExpBuffer(query);
+
+	if (!is_response_ok(result))
+	{
+		log_error("Failed to alter role \"%s\" password: %s",
+				  roleName, PQerrorMessage(connection));
+		PQclear(result);
+		clear_results(pgsql);
+		pgsql_finish(pgsql);
+		return false;
+	}
+
+	PQclear(result);
+	clear_results(pgsql);
+
+	if (pgsql->connectionStatementType == PGSQL_CONNECTION_SINGLE_STATEMENT)
+	{
+		pgsql_finish(pgsql);
+	}
+
+	return true;
+}
+
+
+/*
  * pgsql_has_replica returns whether a replica with the given username is active.
  */
 bool

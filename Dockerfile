@@ -196,4 +196,108 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/p
 ENV PG_AUTOCTL_DEBUG=1
 ENV PGDATA=/var/lib/postgres/pgaf
 
-CMD ["pg_autoctl", "do tmux session --nodes 3 --binpath /usr/local/bin/pg_autoctl"]
+#
+# debian image — like run, but with a Debian-style "main" cluster pre-created
+# via pg_createcluster so that pg_autoctl can test adoption of the split-config
+# layout (postgresql.conf lives in /etc/postgresql/${PGVERSION}/main/ outside
+# PGDATA).  pg_autoctl node run detects the missing postgresql.conf in PGDATA,
+# moves the conf files in, and proceeds normally — no entrypoint changes needed.
+#
+FROM run AS debian
+
+ARG PGVERSION
+
+USER root
+RUN pg_createcluster \
+      --user docker --group postgres \
+      ${PGVERSION} main \
+      -- --auth-local trust --auth-host trust \
+ && chown docker /var/lib/postgresql/${PGVERSION}
+
+USER docker
+ENV PGDATA=/var/lib/postgresql/${PGVERSION}/main
+
+#
+# testrun image — like run, but adds postgresql-server-dev and the full source
+# tree so that "make installcheck" works inside the monitor container.
+# Used by installcheck.pgaf via "monitor image-target testrun".
+#
+FROM run AS testrun
+
+ARG PGVERSION
+
+USER root
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    make \
+    postgresql-server-dev-${PGVERSION} \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --chown=docker ./src/ /usr/src/pg_auto_failover/src/
+
+USER docker
+
+#
+# pgaftest image — standalone test-runner image.
+#
+# Kept entirely separate from the pg_auto_failover run image so that no
+# test tooling leaks into the images used for monitor and data nodes.
+#
+# Runtime dependencies come from two sources:
+#   - Docker's own apt repo  → docker-ce-cli + docker-compose-plugin (v2)
+#   - PGDG apt repo          → libpq5 matching the build's PGVERSION
+#
+# The pg_auto_failover binaries are copied directly from the run stage;
+# nothing is built here.
+#
+FROM debian:bullseye-slim AS pgaftest
+
+ARG PGVERSION
+
+# Minimal runtime libs (libssl, libcurl, libzstd) plus PGDG for libpq
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      gnupg \
+      libcurl4-gnutls-dev \
+      libncurses6 \
+      libzstd-dev \
+      sudo \
+  && rm -rf /var/lib/apt/lists/*
+
+# PGDG repo — needed for the libpq version that pg_autoctl and pgaftest link against
+RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" \
+      > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      libpq5 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Docker's apt repo — provides docker-ce-cli and the compose v2 plugin
+RUN curl -fsSL https://download.docker.com/linux/debian/gpg \
+      | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+      https://download.docker.com/linux/debian bullseye stable" \
+      > /etc/apt/sources.list.d/docker.list \
+  && apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      docker-ce-cli \
+      docker-compose-plugin \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker \
+  && adduser docker sudo \
+  && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers \
+  && mkdir -p /var/lib/postgres \
+  && chown docker /var/lib/postgres
+
+# Binaries from the pg_auto_failover run image
+COPY --from=run /usr/local/bin/pg_autoctl /usr/local/bin/
+
+# pgaftest binary from the build stage
+COPY --from=build /usr/lib/postgresql/${PGVERSION}/bin/pgaftest /usr/local/bin/
+
+USER docker
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

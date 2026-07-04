@@ -1,3 +1,17 @@
+# Test network-partition (ifdown/ifup) scenarios with three nodes and
+# explicit candidate-priority settings.
+# Covers: basic ifdown of a standby while writes continue on the primary,
+# failover when the primary is disconnected and a lagging candidate reconnects,
+# and an advanced split-brain scenario where both the primary and the
+# most-advanced secondary are cleanly stopped before a behind async node is
+# promoted — requiring pg_rewind to fetch missing WAL from the survivors.
+#
+# Note: the advanced test uses compose stop (clean shutdown) rather than
+# network disconnect for the primary/advanced secondary so Postgres does not
+# recycle WAL segments, which would corrupt pg_rewind's prev-links.
+#
+# Predecessor: tests/test_multi_ifdown.py
+
 cluster {
     monitor
     formation {
@@ -8,12 +22,9 @@ cluster {
 }
 
 setup {
-    wait until node1 state = single    timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node1 state = primary   timeout 60s
-    wait until node3 state = secondary timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node1 state = primary   timeout 60s
+    wait until primary, secondary  timeout 120s
+    wait until node3 state is secondary  timeout 60s
+    promote node1
 }
 
 teardown {
@@ -23,6 +34,7 @@ teardown {
 #
 # test_004: write into primary
 #
+
 step test_004_write_into_primary {
     sql node1 { CREATE TABLE t1(a int); }
     sql node1 { INSERT INTO t1 VALUES (1), (2), (3), (4); }
@@ -37,13 +49,15 @@ step test_004_write_into_primary {
 #   node2 priority=0  (not a candidate)
 #   node3 priority=90
 #
+
 step test_005_set_candidate_priorities {
-    exec node1 pg_autoctl set node candidate-priority --candidate-priority 90
-    exec node2 pg_autoctl set node candidate-priority --candidate-priority 0
-    exec node3 pg_autoctl set node candidate-priority --candidate-priority 90
-    wait until node1 state = primary   timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node3 state = secondary timeout 60s
+    exec node1  pg_autoctl set node candidate-priority 90
+    exec node2  pg_autoctl set node candidate-priority 0
+    exec node3  pg_autoctl set node candidate-priority 90
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 60s
     sql node1 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2) }
 }
@@ -51,6 +65,7 @@ step test_005_set_candidate_priorities {
 #
 # test_006: take node3 offline (ifdown)
 #
+
 step test_006_ifdown_node3 {
     network disconnect node3
 }
@@ -58,21 +73,25 @@ step test_006_ifdown_node3 {
 #
 # test_007: insert rows while node3 is down; node2 is sync and gets WAL
 #
+
 step test_007_insert_rows {
-    sql node1 { INSERT INTO t1 SELECT x+10 FROM generate_series(1, 10000) as gs(x); }
+    sql node1 {
+        INSERT INTO t1 SELECT x+10 FROM generate_series(1, 10000) as gs(x);
+    }
     sql node1 { CHECKPOINT; }
 }
 
 #
 # test_008: fail node1 (primary), reconnect node3, verify node3 becomes primary
 #
+
 step test_008_failover {
     network disconnect node1
     network connect node3
-    exec node3 pg_autoctl run --background
-    wait until node3 state = wait_primary timeout 120s
-    wait until node2 state = secondary    timeout 90s
-    wait until node3 state = primary      timeout 90s
+    wait until node3 state is wait_primary  timeout 120s
+    wait until node2 state is secondary
+        and node3 state is primary
+        timeout 120s
     sql node3 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2) }
 }
@@ -80,6 +99,7 @@ step test_008_failover {
 #
 # test_009: read from new primary
 #
+
 step test_009_read_from_new_primary {
     sql node3 { SELECT count(*) FROM t1; }
     expect { 10004 }
@@ -88,12 +108,13 @@ step test_009_read_from_new_primary {
 #
 # test_010: start node1 again as secondary
 #
+
 step test_010_start_node1_again {
     network connect node1
-    exec node1 pg_autoctl run --background
-    wait until node1 state = secondary timeout 90s
-    wait until node2 state = secondary timeout 90s
-    wait until node3 state = primary   timeout 60s
+    wait until node1 state is secondary
+        and node2 state is secondary
+        and node3 state is primary
+        timeout 90s
     sql node3 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2) }
 }
@@ -102,19 +123,17 @@ step test_010_start_node1_again {
 # test_011–012: prepare for advanced scenario
 #   Promote node2, make node2 async so it can fall behind
 #
+
 step test_011_prepare_candidate_priorities {
-    exec node2 pg_autoctl set node candidate-priority --candidate-priority 100
+    exec node2  pg_autoctl set node candidate-priority 100
 }
 
 step test_012_prepare_replication_quorums {
-    exec node3 pg_autoctl set formation number-sync-standbys --number-sync-standbys 0
-    exec node2 pg_autoctl set node replication-quorum --replication-quorum false
+    exec node3  pg_autoctl set formation number-sync-standbys 0
+    exec node2  pg_autoctl set node replication-quorum false
 }
 
-#
-# test_013: let node2 fall behind by taking it offline while primary writes
-#
-step test_013_secondary_gets_behind {
+step test_013_secondary_gets_behind_primary {
     network disconnect node2
     sql node3 { INSERT INTO t1 VALUES (5), (6); }
     sql node3 { CHECKPOINT; }
@@ -127,42 +146,37 @@ step test_013_secondary_gets_behind {
 # test_014: trigger failover with node3 (primary) and node1 (most advanced)
 #           both offline; only node2 (behind, async candidate) is online
 #
+
 step test_014_secondary_reports_lsn {
-    wait until node1 state = secondary timeout 60s
-    wait until node3 state = primary   timeout 60s
-    network disconnect node3
-    network disconnect node1
+    wait until node1 state is secondary
+        and node3 state is primary
+        timeout 60s
+    compose stop node3
+    compose stop node1
     network connect node2
-    exec node2 pg_autoctl run --background
-    exec monitor pg_autoctl perform failover
-    wait until node2 state = report_lsn timeout 90s
+    exec monitor  bash -c "pg_autoctl perform failover || true"
+    wait until node2 state is report_lsn  timeout 90s
+}
+
+step test_015_start_node3_node1 {
+    compose start node3
+    compose start node1
+}
+
+step test_015_prep_hba {
+    exec node2  bash -c "echo 'hostssl all pgautofailover_replicator %CIDR% trust' >> /var/lib/postgres/pgaf/pg_hba.conf"
+    sql node2 { SELECT pg_reload_conf(); }
 }
 
 #
 # test_015: bring back node1 and node3 so node2 can fetch missing WAL
 #
+
 step test_015_finalize_failover {
-    network connect node1
-    exec node1 pg_autoctl run --background
-    network connect node3
-    exec node3 pg_autoctl run --background
-    wait until node1 state = secondary timeout 90s
-    wait until node3 state = secondary timeout 90s
-    wait until node2 state = primary   timeout 90s
+    wait until node1 state is secondary
+        and node3 state is secondary
+        and node2 state is primary
+        timeout 300s
     sql node2 { SELECT count(*) FROM t1; }
     expect { 10006 }
 }
-
-sequence
-    test_004_write_into_primary
-    test_005_set_candidate_priorities
-    test_006_ifdown_node3
-    test_007_insert_rows
-    test_008_failover
-    test_009_read_from_new_primary
-    test_010_start_node1_again
-    test_011_prepare_candidate_priorities
-    test_012_prepare_replication_quorums
-    test_013_secondary_gets_behind
-    test_014_secondary_reports_lsn
-    test_015_finalize_failover

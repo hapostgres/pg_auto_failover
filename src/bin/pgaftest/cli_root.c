@@ -18,6 +18,7 @@
 #include "test_spec.h"
 #include "test_runner.h"
 #include "cli_demo.h"
+#include "cli_indent.h"
 
 /* -----------------------------------------------------------------------
  * Shared option parsing
@@ -31,6 +32,7 @@ typedef struct PgaftestOpts
 	char schedule[1024];
 	char expected[1024];
 	bool withTmux;
+	bool noCleanup;       /* --no-cleanup: skip compose down after run */
 	int  verbose;
 } PgaftestOpts;
 
@@ -72,12 +74,14 @@ derive_work_dir(const char *specPath, char *buf, int buflen)
 }
 
 static struct option long_options[] = {
-	{ "work-dir",  required_argument, NULL, 'w' },
-	{ "schedule",  required_argument, NULL, 'S' },
-	{ "expected",  required_argument, NULL, 'E' },
-	{ "tmux",      no_argument,       NULL, 't' },
-	{ "verbose",   no_argument,       NULL, 'v' },
-	{ "help",      no_argument,       NULL, 'h' },
+	{ "work-dir",    required_argument, NULL, 'w' },
+	{ "schedule",    required_argument, NULL, 'S' },
+	{ "expected",    required_argument, NULL, 'E' },
+	{ "tmux",        no_argument,       NULL, 't' },
+	{ "no-cleanup",  no_argument,       NULL, 'n' },
+	{ "verbose",     no_argument,       NULL, 'v' },
+	{ "debug",       no_argument,       NULL, 'd' },
+	{ "help",        no_argument,       NULL, 'h' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -86,7 +90,7 @@ pgaftest_getopts(int argc, char **argv)
 {
 	int c, option_index = 0;
 
-	while ((c = getopt_long(argc, argv, "w:S:E:tvh",
+	while ((c = getopt_long(argc, argv, "w:S:E:tnvdh",
 	                        long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -106,9 +110,16 @@ pgaftest_getopts(int argc, char **argv)
 			case 't':
 				pgaftestOpts.withTmux = true;
 				break;
+			case 'n':
+				pgaftestOpts.noCleanup = true;
+				break;
 			case 'v':
 				pgaftestOpts.verbose++;
 				log_set_level(LOG_DEBUG);
+				break;
+			case 'd':
+				pgaftestOpts.verbose += 2;
+				log_set_level(LOG_TRACE);
 				break;
 			case 'h':
 				commandline_help(stderr);
@@ -127,7 +138,11 @@ pgaftest_getopts(int argc, char **argv)
 static void
 cli_run(int argc, char **argv)
 {
-	int optind = pgaftest_getopts(argc, argv);
+	/*
+	 * The subcommand library already called pgaftest_getopts() and stripped
+	 * all options from argv before calling us.  argv[0] is the spec file
+	 * (if provided), argc is the number of remaining positional arguments.
+	 */
 
 	/* Handle --schedule file */
 	if (pgaftestOpts.schedule[0] != '\0')
@@ -186,7 +201,7 @@ cli_run(int argc, char **argv)
 			if (!spec) { failed++; total++; continue; }
 
 			total++;
-			if (!runner_run(spec, workDir))
+			if (!runner_run(spec, workDir, pgaftestOpts.noCleanup))
 				failed++;
 		}
 		fclose(f);
@@ -197,13 +212,13 @@ cli_run(int argc, char **argv)
 	}
 
 	/* Single spec file */
-	if (optind > argc)
+	if (argc < 1 || argv[0] == NULL)
 	{
 		log_error("Usage: pgaftest run [--schedule <file>] [<spec.pgaf>]");
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[optind - 1],
+	strncpy(pgaftestOpts.specFile, argv[0],
 	        sizeof(pgaftestOpts.specFile)-1);
 
 	if (pgaftestOpts.workDir[0] == '\0')
@@ -213,7 +228,7 @@ cli_run(int argc, char **argv)
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
 	if (!spec) exit(1);
 
-	bool ok = runner_run(spec, pgaftestOpts.workDir);
+	bool ok = runner_run(spec, pgaftestOpts.workDir, pgaftestOpts.noCleanup);
 	exit(ok ? 0 : 1);
 }
 
@@ -224,15 +239,13 @@ cli_run(int argc, char **argv)
 static void
 cli_setup(int argc, char **argv)
 {
-	int optind = pgaftest_getopts(argc, argv);
-
-	if (optind > argc)
+	if (argc < 1 || argv[0] == NULL)
 	{
 		log_error("Usage: pgaftest setup <spec.pgaf> [--tmux] [--work-dir <dir>]");
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[optind - 1],
+	strncpy(pgaftestOpts.specFile, argv[0],
 	        sizeof(pgaftestOpts.specFile)-1);
 
 	if (pgaftestOpts.workDir[0] == '\0')
@@ -254,16 +267,14 @@ cli_setup(int argc, char **argv)
 static void
 cli_step(int argc, char **argv)
 {
-	int optind = pgaftest_getopts(argc, argv);
-
-	if (optind > argc)
+	if (argc < 1 || argv[0] == NULL)
 	{
 		log_error("Usage: pgaftest step <step-name> [--work-dir <dir>]");
 		exit(1);
 	}
 
 	/* step name is positional */
-	strncpy(pgaftestOpts.stepName, argv[optind - 1],
+	strncpy(pgaftestOpts.stepName, argv[0],
 	        sizeof(pgaftestOpts.stepName)-1);
 
 	/* We need the spec file too — look for it in workDir */
@@ -272,8 +283,8 @@ cli_step(int argc, char **argv)
 	         pgaftestOpts.workDir);
 
 	/* If there's a second positional arg, treat it as the spec path */
-	if (optind + 1 < argc)
-		strncpy(specPath, argv[optind+1], sizeof(specPath)-1);
+	if (argc >= 2 && argv[1] != NULL)
+		strncpy(specPath, argv[1], sizeof(specPath)-1);
 
 	/* derive work dir from spec path when not given explicitly */
 	if (pgaftestOpts.workDir[0] == '\0')
@@ -289,21 +300,47 @@ cli_step(int argc, char **argv)
 }
 
 /* -----------------------------------------------------------------------
+ * pgaftest prepare <spec.pgaf> [<output-dir>]
+ *
+ * Writes docker-compose.yml, *.ini files, and a Makefile to the output
+ * directory.  Prints the docker compose command to stdout.
+ * ----------------------------------------------------------------------- */
+
+static void
+cli_prepare(int argc, char **argv)
+{
+	if (argc < 1 || argv[0] == NULL)
+	{
+		log_error("Usage: pgaftest prepare <spec.pgaf> [<output-dir>]");
+		exit(1);
+	}
+
+	strncpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile)-1);
+
+	const char *outDir = (argc >= 2 && argv[1] && argv[1][0] != '-')
+	                     ? argv[1] : NULL;
+
+	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
+	if (!spec) exit(1);
+
+	bool ok = runner_prepare(spec, outDir);
+	exit(ok ? 0 : 1);
+}
+
+/* -----------------------------------------------------------------------
  * pgaftest show <spec.pgaf>
  * ----------------------------------------------------------------------- */
 
 static void
 cli_show(int argc, char **argv)
 {
-	int optind = pgaftest_getopts(argc, argv);
-
-	if (optind > argc)
+	if (argc < 1 || argv[0] == NULL)
 	{
 		log_error("Usage: pgaftest show <spec.pgaf>");
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[optind - 1],
+	strncpy(pgaftestOpts.specFile, argv[0],
 	        sizeof(pgaftestOpts.specFile)-1);
 
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
@@ -320,12 +357,10 @@ cli_show(int argc, char **argv)
 static void
 cli_down(int argc, char **argv)
 {
-	int optind = pgaftest_getopts(argc, argv);
-
 	/* optional positional: spec file to derive work dir from */
-	if (optind <= argc && argv[optind - 1] && argv[optind - 1][0] != '-')
+	if (argc >= 1 && argv[0] && argv[0][0] != '-')
 	{
-		strncpy(pgaftestOpts.specFile, argv[optind - 1],
+		strncpy(pgaftestOpts.specFile, argv[0],
 		        sizeof(pgaftestOpts.specFile)-1);
 	}
 
@@ -368,7 +403,11 @@ static CommandLine run_command =
 	             "  --expected <dir>   Directory of expected output files\n"
 	             "  --work-dir <dir>   Working directory\n"
 	             "                     (default: $TMPDIR/pgaftest/<testname>)\n"
-	             "  --verbose          Increase log verbosity\n",
+	             "  --no-cleanup       Leave the compose stack running after the\n"
+	             "                     run (pass or fail) for post-mortem inspection.\n"
+	             "                     Use `pgaftest down <spec.pgaf>` to clean up.\n"
+	             "  --verbose          Enable DEBUG log level\n"
+	             "  --debug            Enable TRACE log level\n",
 	             pgaftest_getopts, cli_run);
 
 static CommandLine setup_command =
@@ -378,7 +417,8 @@ static CommandLine setup_command =
 	             "  --tmux             Launch a tmux session after setup\n"
 	             "  --work-dir <dir>   Working directory\n"
 	             "                     (default: $TMPDIR/pgaftest/<testname>)\n"
-	             "  --verbose          Increase log verbosity\n",
+	             "  --verbose          Enable DEBUG log level\n"
+	             "  --debug            Enable TRACE log level\n",
 	             pgaftest_getopts, cli_setup);
 
 static CommandLine step_command =
@@ -395,6 +435,14 @@ static CommandLine show_command =
 	             "",
 	             pgaftest_getopts, cli_show);
 
+static CommandLine prepare_command =
+	make_command("prepare",
+	             "Write compose files and Makefile to a directory for manual use",
+	             "<spec.pgaf> [<output-dir>]",
+	             "  <spec.pgaf>    Path to the spec file\n"
+	             "  <output-dir>   Output directory (default: <spec-stem>-compose/)\n",
+	             pgaftest_getopts, cli_prepare);
+
 static CommandLine down_command =
 	make_command("down",
 	             "Run teardown block and stop the compose stack",
@@ -402,12 +450,23 @@ static CommandLine down_command =
 	             "  --work-dir <dir>   Working directory (default: /tmp/pgaftest)\n",
 	             pgaftest_getopts, cli_down);
 
+extern void cli_indent(int argc, char **argv);
+
+static CommandLine indent_command =
+	make_command("indent",
+	             "Parse a .pgaf spec and rewrite it with canonical indentation",
+	             "<spec.pgaf>",
+	             "",
+	             pgaftest_getopts, cli_indent);
+
 static CommandLine *root_subcommands[] = {
 	&run_command,
 	&setup_command,
 	&step_command,
 	&show_command,
+	&prepare_command,
 	&down_command,
+	&indent_command,
 	&pgaftest_demo_command,
 	NULL
 };
@@ -416,10 +475,12 @@ CommandLine pgaftest_root =
 	make_command_set("pgaftest",
 	                 "pg_auto_failover test runner",
 	                 "[command] [options]",
-	                 "  run     Run a .pgaf spec (CI mode)\n"
-	                 "  setup   Bring up a cluster interactively\n"
-	                 "  step    Run one named step\n"
-	                 "  show    Print generated docker-compose.yml\n"
-	                 "  down    Tear down the cluster\n"
-	                 "  demo    Demo application\n",
+	                 "  run      Run a .pgaf spec (CI mode)\n"
+	                 "  setup    Bring up a cluster interactively\n"
+	                 "  step     Run one named step\n"
+	                 "  show     Print generated docker-compose.yml\n"
+	                 "  prepare  Write compose files + Makefile to a directory\n"
+	                 "  down     Tear down the cluster\n"
+	                 "  indent   Rewrite a spec with canonical indentation\n"
+	                 "  demo     Demo application\n",
 	                 NULL, root_subcommands);

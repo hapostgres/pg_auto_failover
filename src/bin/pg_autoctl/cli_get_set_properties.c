@@ -7,10 +7,16 @@
  * Licensed under the PostgreSQL License.
  *
  */
+#include <termios.h>
+#include <unistd.h>
+
 #include "parson.h"
 
 #include "cli_common.h"
+#include "monitor_pg_init.h"
 #include "parsing.h"
+#include "pgsql.h"
+#include "pgsetup.h"
 #include "string_utils.h"
 
 static bool get_node_replication_settings(NodeReplicationSettings *settings);
@@ -22,6 +28,8 @@ static void cli_set_node_replication_quorum(int argc, char **argv);
 static void cli_set_node_candidate_priority(int argc, char **argv);
 static void cli_set_node_metadata(int argc, char **argv);
 static void cli_set_formation_number_sync_standbys(int arc, char **argv);
+static int  cli_set_password_getopts(int argc, char **argv);
+static void cli_set_password(int argc, char **argv);
 
 static bool set_node_candidate_priority(Keeper *keeper, int candidatePriority);
 static bool set_node_replication_quorum(Keeper *keeper, bool replicationQuorum);
@@ -181,9 +189,21 @@ static CommandLine set_formation_command =
 					 set_formation_subcommands);
 
 
+static CommandLine set_password_command =
+	make_command("password",
+				 "set the password for a pg_auto_failover role",
+				 " [ --pgdata ] --role <role> [ --password <password> ]",
+				 "  --pgdata      path to data directory\n"
+				 "  --role        one of: autoctl_node, pgautofailover_monitor,"
+				 " pgautofailover_replicator\n"
+				 "  --password    new password (prompted if omitted)\n",
+				 cli_set_password_getopts,
+				 cli_set_password);
+
 static CommandLine *set_subcommands[] = {
 	&set_node_command,
 	&set_formation_command,
+	&set_password_command,
 	NULL
 };
 
@@ -851,4 +871,316 @@ set_formation_number_sync_standbys(Monitor *monitor,
 	}
 
 	return true;
+}
+
+
+/*
+ * Options for `pg_autoctl set password`.
+ */
+typedef struct SetPasswordOptions
+{
+	char pgdata[MAXPGPATH];
+	char role[NAMEDATALEN];
+	char password[MAXCONNINFO];
+} SetPasswordOptions;
+
+static SetPasswordOptions setPasswordOptions = { { 0 }, { 0 }, { 0 } };
+
+static int
+cli_set_password_getopts(int argc, char **argv)
+{
+	static struct option longOptions[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "role", required_argument, NULL, 'r' },
+		{ "password", required_argument, NULL, 'p' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	int c, option_index = 0;
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:r:p:h",
+							longOptions, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(setPasswordOptions.pgdata, optarg, MAXPGPATH);
+				strlcpy(keeperOptions.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", setPasswordOptions.pgdata);
+				break;
+			}
+
+			case 'r':
+			{
+				strlcpy(setPasswordOptions.role, optarg, NAMEDATALEN);
+				log_trace("--role %s", setPasswordOptions.role);
+				break;
+			}
+
+			case 'p':
+			{
+				strlcpy(setPasswordOptions.password, optarg, MAXCONNINFO);
+				log_trace("--password ****");
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+			}
+
+			default:
+			{
+				log_error("Unrecognized option: %c", c);
+				commandline_help(stderr);
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+		}
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(setPasswordOptions.role))
+	{
+		log_error("Please provide --role { autoctl_node | "
+				  "pgautofailover_monitor | pgautofailover_replicator }");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	return optind;
+}
+
+
+/*
+ * prompt_password reads a password from the terminal without echoing it.
+ * Returns true on success, false on error.
+ */
+static bool
+prompt_password(const char *prompt, char *buf, size_t buflen)
+{
+	struct termios old, noecho;
+	bool ok = false;
+
+	if (tcgetattr(fileno(stdin), &old) != 0)
+	{
+		/* stdin is not a tty; just read normally */
+		fprintf(stderr, "%s", prompt);
+		fflush(stderr);
+
+		if (fgets(buf, buflen, stdin) == NULL)
+		{
+			return false;
+		}
+
+		/* strip trailing newline */
+		buf[strcspn(buf, "\n")] = '\0';
+		return true;
+	}
+
+	noecho = old;
+	noecho.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL);
+
+	if (tcsetattr(fileno(stdin), TCSAFLUSH, &noecho) != 0)
+	{
+		return false;
+	}
+
+	fprintf(stderr, "%s", prompt);
+	fflush(stderr);
+
+	if (fgets(buf, buflen, stdin) != NULL)
+	{
+		buf[strcspn(buf, "\n")] = '\0';
+		ok = true;
+	}
+
+	(void) tcsetattr(fileno(stdin), TCSAFLUSH, &old);
+	fprintf(stderr, "\n");
+
+	return ok;
+}
+
+
+/*
+ * cli_set_password implements `pg_autoctl set password`.
+ *
+ * Supported roles:
+ *   autoctl_node            — lives on the monitor; ALTER ROLE there and
+ *                             update monitor config autoctl_node_password
+ *   pgautofailover_monitor  — lives on each data node; ALTER ROLE there and
+ *                             update keeper config monitor_password
+ *   pgautofailover_replicator — lives on each data node; ALTER ROLE there
+ *                             and update keeper config replication.password
+ */
+static void
+cli_set_password(int argc, char **argv)
+{
+	const char *role = setPasswordOptions.role;
+	char password[MAXCONNINFO] = { 0 };
+
+	/* validate role name */
+	bool isAutoctlNode      = (strcmp(role, PG_AUTOCTL_MONITOR_USERNAME) == 0);
+	bool isHealthUser       = (strcmp(role, PG_AUTOCTL_HEALTH_USERNAME) == 0);
+	bool isReplicaUser      = (strcmp(role, PG_AUTOCTL_REPLICA_USERNAME) == 0);
+
+	if (!isAutoctlNode && !isHealthUser && !isReplicaUser)
+	{
+		log_error("Unknown role \"%s\". Valid roles: %s, %s, %s",
+				  role,
+				  PG_AUTOCTL_MONITOR_USERNAME,
+				  PG_AUTOCTL_HEALTH_USERNAME,
+				  PG_AUTOCTL_REPLICA_USERNAME);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/* obtain the password */
+	if (!IS_EMPTY_STRING_BUFFER(setPasswordOptions.password))
+	{
+		strlcpy(password, setPasswordOptions.password, sizeof(password));
+	}
+	else
+	{
+		char prompt[256];
+		sformat(prompt, sizeof(prompt), "Password for role %s: ", role);
+
+		if (!prompt_password(prompt, password, sizeof(password)))
+		{
+			log_error("Failed to read password from terminal");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(password))
+	{
+		log_error("Password may not be empty");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
+	 * autoctl_node lives on the MONITOR.  We connect to the monitor's local
+	 * Postgres (via MonitorConfig) and ALTER the role there.
+	 */
+	if (isAutoctlNode)
+	{
+		MonitorConfig mconfig = { 0 };
+
+		/* resolve pgdata */
+		if (!IS_EMPTY_STRING_BUFFER(setPasswordOptions.pgdata))
+		{
+			strlcpy(mconfig.pgSetup.pgdata,
+					setPasswordOptions.pgdata,
+					MAXPGPATH);
+		}
+
+		if (!monitor_config_set_pathnames_from_pgdata(&mconfig))
+		{
+			log_fatal("Failed to set monitor config pathnames");
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		if (!monitor_config_read_file(&mconfig, false, true))
+		{
+			log_fatal("Failed to read monitor configuration file");
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/* connect to the monitor's local postgres */
+		PGSQL pgsql = { 0 };
+		char connInfo[MAXCONNINFO];
+		pg_setup_get_local_connection_string(&mconfig.pgSetup, connInfo);
+		pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
+
+		if (!pgsql_alter_role_password(&pgsql, role, password))
+		{
+			log_error("Failed to ALTER ROLE \"%s\" PASSWORD on the monitor", role);
+			exit(EXIT_CODE_PGSQL);
+		}
+
+		/* persist password into monitor ini */
+		strlcpy(mconfig.autoctl_node_password, password,
+				sizeof(mconfig.autoctl_node_password));
+
+		if (!monitor_config_write_file(&mconfig))
+		{
+			log_error("Failed to update monitor configuration file");
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		log_info("Password for role \"%s\" updated on the monitor and "
+				 "saved to the monitor configuration file", role);
+		return;
+	}
+
+	/*
+	 * pgautofailover_monitor and pgautofailover_replicator both live on the
+	 * local data node.  We need a KeeperConfig for the local Postgres
+	 * connection details.
+	 */
+	{
+		KeeperConfig config = keeperOptions;
+		bool missingPgdataIsOk = false;
+		bool pgIsNotRunningIsOk = true;
+		bool monitorDisabledIsOk = true;
+
+		if (!IS_EMPTY_STRING_BUFFER(setPasswordOptions.pgdata))
+		{
+			strlcpy(config.pgSetup.pgdata,
+					setPasswordOptions.pgdata,
+					MAXPGPATH);
+		}
+
+		if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+													  config.pgSetup.pgdata))
+		{
+			log_fatal("Failed to set keeper config pathnames");
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		if (!keeper_config_read_file(&config,
+									  missingPgdataIsOk,
+									  pgIsNotRunningIsOk,
+									  monitorDisabledIsOk))
+		{
+			log_fatal("Failed to read keeper configuration file");
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/* connect to the local data node's Postgres */
+		PGSQL pgsql = { 0 };
+		char connInfo[MAXCONNINFO];
+		pg_setup_get_local_connection_string(&config.pgSetup, connInfo);
+		pgsql_init(&pgsql, connInfo, PGSQL_CONN_LOCAL);
+
+		if (!pgsql_alter_role_password(&pgsql, role, password))
+		{
+			log_error("Failed to ALTER ROLE \"%s\" PASSWORD on the local node",
+					  role);
+			exit(EXIT_CODE_PGSQL);
+		}
+
+		/* persist password into keeper ini */
+		if (isHealthUser)
+		{
+			strlcpy(config.monitor_password, password,
+					sizeof(config.monitor_password));
+		}
+		else
+		{
+			/* isReplicaUser */
+			strlcpy(config.replication_password, password,
+					sizeof(config.replication_password));
+		}
+
+		if (!keeper_config_write_file(&config))
+		{
+			log_error("Failed to update keeper configuration file");
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		log_info("Password for role \"%s\" updated on the local node and "
+				 "saved to the keeper configuration file", role);
+	}
 }

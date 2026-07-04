@@ -21,6 +21,7 @@ have their own manual page.
    pg_autoctl_set
    pg_autoctl_perform
    pg_autoctl_do
+   pg_autoctl_node
    pg_autoctl_run
    pg_autoctl_watch
    pg_autoctl_stop

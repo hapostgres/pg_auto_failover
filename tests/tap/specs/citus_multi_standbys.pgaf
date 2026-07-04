@@ -1,31 +1,46 @@
 # Test Citus cluster with multiple standbys per group (3 nodes per group:
-# a primary, a sync secondary, and an async secondary with candidate-priority=0
-# and replication-quorum=false). Verifies failover, data consistency, and
+# a primary, a sync secondary, and an async secondary with candidate-priority 0
+# and replication-quorum false). Verifies failover, data consistency, and
 # synchronous_standby_names after each failure/recovery cycle.
+#
+# Ported from tests/test_citus_multi_standbys.py
+# Predecessor: tests/test_citus_multi_standbys.py
 
 cluster {
     monitor
-    citus-coordinator coordinator1a
-    citus-coordinator coordinator1b
-    citus-coordinator coordinator1c  candidate-priority=0  replication-quorum=false
-    citus-worker worker1a  group=1
-    citus-worker worker1b  group=1
-    citus-worker worker1c  group=1  candidate-priority=0  replication-quorum=false
-    citus-worker worker2a  group=2
-    citus-worker worker2b  group=2
-    citus-worker worker2c  group=2  candidate-priority=0  replication-quorum=false
+    formation {
+        coordinator1a coordinator
+        coordinator1b coordinator
+        node coordinator1c {
+            coordinator
+            candidate-priority 0
+            replication-quorum false
+        }
+        worker1a worker group 1
+        worker1b worker group 1
+        node worker1c {
+            worker group 1
+            candidate-priority 0
+            replication-quorum false
+        }
+        worker2a worker group 2
+        worker2b worker group 2
+        node worker2c {
+            worker group 2
+            candidate-priority 0
+            replication-quorum false
+        }
+    }
 }
 
 setup {
-    wait until coordinator1a state = primary   timeout 90s
-    wait until coordinator1b state = secondary timeout 90s
-    wait until coordinator1c state = secondary timeout 90s
-    wait until worker1a      state = primary   timeout 90s
-    wait until worker1b      state = secondary timeout 90s
-    wait until worker1c      state = secondary timeout 90s
-    wait until worker2a      state = primary   timeout 90s
-    wait until worker2b      state = secondary timeout 90s
-    wait until worker2c      state = secondary timeout 90s
+    wait until primary, secondary in group 0  timeout 90s
+    wait until primary, secondary in group 1  timeout 90s
+    wait until primary, secondary in group 2  timeout 90s
+    wait until coordinator1c state is secondary  timeout 90s
+    wait until worker1c state is secondary  timeout 90s
+    wait until worker2c state is secondary  timeout 90s
+    promote coordinator1a, worker1a, worker2a
 }
 
 teardown {
@@ -35,67 +50,74 @@ teardown {
 #
 # test_001: coordinator group with async secondary coordinator1c
 #
+
 step test_001_init_coordinator {
-    wait until coordinator1a state = primary   timeout 90s
-    wait until coordinator1b state = secondary timeout 90s
-    wait until coordinator1c state = secondary timeout 90s
-    assert coordinator1c candidate-priority = 0
+    wait until coordinator1a state is primary
+        and coordinator1b state is secondary
+        and coordinator1c state is secondary
+        timeout 90s
+    exec coordinator1c  pg_autoctl get node candidate-priority
+    expect { 0 }
 }
 
 #
 # test_002: worker groups with async standbys
 #
+
 step test_002_init_workers {
-    wait until worker1a state = primary   timeout 90s
-    wait until worker1b state = secondary timeout 90s
-    wait until worker1c state = secondary timeout 90s
-    wait until worker2a state = primary   timeout 90s
-    wait until worker2b state = secondary timeout 90s
-    wait until worker2c state = secondary timeout 90s
-    assert worker1c candidate-priority = 0
-    assert worker2c candidate-priority = 0
+    wait until worker1a state is primary
+        and worker1b state is secondary
+        and worker1c state is secondary
+        and worker2a state is primary
+        and worker2b state is secondary
+        and worker2c state is secondary
+        timeout 90s
+    exec worker1c  pg_autoctl get node candidate-priority
+    expect { 0 }
+    exec worker2c  pg_autoctl get node candidate-priority
+    expect { 0 }
 }
 
 #
 # test_003: create distributed table and seed data
 #
+
 step test_003_001_create_distributed_table {
-    sql coordinator1a { ALTER DATABASE citus SET citus.shard_count TO 4; }
+    exec coordinator1a  sh -c 'for i in $(seq 1 30); do n=$(psql -U docker -d demo -tAc "SELECT count(*) FROM pg_dist_node WHERE metadatasynced = false AND isactive = true"); [ "$n" = "0" ] && exit 0; sleep 2; done; exit 1'
+    sql coordinator1a { ALTER DATABASE demo SET citus.shard_count TO 4; }
     sql coordinator1a { CREATE TABLE t1 (a int); }
     sql coordinator1a { SELECT create_distributed_table('t1', 'a'); }
     sql coordinator1a { INSERT INTO t1 VALUES (1), (2); }
-    sql coordinator1a { TABLE t1 ORDER BY a; }
+    sql coordinator1a { SELECT a FROM t1 ORDER BY a; }
     expect { { 1 } { 2 } }
 }
 
 #
 # test_004: fail worker2a, reads for worker1 still work via coordinator
 #
+
 step test_004_001_fail_worker2 {
     network disconnect worker2a
 }
 
-# test_004_002: INSERT routes to worker2 shard right after worker2a failed,
-# before worker2b completes failover — Citus cannot contact the shard.
-step test_004_002_writes_via_coordinator_fail {
+step test_004_002_writes_via_coordinator_to_worker2_fail {
     sql coordinator1a { INSERT INTO t1 VALUES (3); }
-    expect error
+    expect error 
 }
 
 step test_004_004_wait_for_failover {
-    wait until worker2b state = wait_primary timeout 90s
-    wait until worker2c state = secondary   timeout 90s
-    assert worker2c candidate-priority = 0
+    wait until worker2b state is wait_primary
+        and worker2c state is secondary
+        timeout 90s
+    exec worker2c  pg_autoctl get node candidate-priority
+    expect { 0 }
 }
 
 step test_004_005_writes_via_coordinator_succeed_after_failover {
     sql coordinator1a { INSERT INTO t1 VALUES (3); }
 }
 
-#
-# test_005: read from coordinator across all workers
-#
-step test_005_read_from_coordinator {
+step test_005_read_from_workers_via_coordinator {
     sql coordinator1a { SELECT a FROM t1 ORDER BY a ASC; }
     expect { { 1 } { 2 } { 3 } }
 }
@@ -103,6 +125,7 @@ step test_005_read_from_coordinator {
 #
 # test_006: write more data
 #
+
 step test_006_writes_to_coordinator_succeed {
     sql coordinator1a { INSERT INTO t1 VALUES (4); }
     sql coordinator1a { SELECT a FROM t1 ORDER BY a ASC; }
@@ -112,17 +135,15 @@ step test_006_writes_to_coordinator_succeed {
 #
 # test_007: restart worker2a as secondary under new primary worker2b
 #
+
 step test_007_start_worker2a_again {
     network connect worker2a
-    exec worker2a pg_autoctl run --background
-    wait until worker2a state = secondary timeout 90s
-    wait until worker2b state = primary   timeout 90s
+    wait until worker2a state is secondary
+        and worker2b state is primary
+        timeout 90s
 }
 
-#
-# test_008: read from coordinator after worker2a rejoins
-#
-step test_008_read_from_coordinator {
+step test_008_read_from_workers_via_coordinator {
     sql coordinator1a { SELECT a FROM t1 ORDER BY a ASC; }
     expect { { 1 } { 2 } { 3 } { 4 } }
 }
@@ -130,16 +151,15 @@ step test_008_read_from_coordinator {
 #
 # test_009: fail worker2b, failover back to worker2a
 #
+
 step test_009_fail_worker2b {
     network disconnect worker2b
-    wait until worker2a state = wait_primary timeout 90s
-    wait until worker2c state = secondary   timeout 90s
+    wait until worker2a state is wait_primary
+        and worker2c state is secondary
+        timeout 90s
 }
 
-#
-# test_010: data survives second failover
-#
-step test_010_read_from_coordinator {
+step test_010_read_from_workers_via_coordinator {
     sql coordinator1a { SELECT a FROM t1 ORDER BY a ASC; }
     expect { { 1 } { 2 } { 3 } { 4 } }
 }
@@ -147,25 +167,10 @@ step test_010_read_from_coordinator {
 #
 # test_011: restart worker2b as secondary
 #
+
 step test_011_start_worker2b_again {
     network connect worker2b
-    exec worker2b pg_autoctl run --background
-    wait until worker2b state = secondary timeout 90s
-    wait until worker2a state = primary   timeout 90s
+    wait until worker2b state is secondary
+        and worker2a state is primary
+        timeout 90s
 }
-
-sequence
-    test_001_init_coordinator
-    test_002_init_workers
-    test_003_001_create_distributed_table
-    test_004_001_fail_worker2
-    test_004_002_writes_via_coordinator_fail
-    test_004_004_wait_for_failover
-    test_004_005_writes_via_coordinator_succeed_after_failover
-    test_005_read_from_coordinator
-    test_006_writes_to_coordinator_succeed
-    test_007_start_worker2a_again
-    test_008_read_from_coordinator
-    test_009_fail_worker2b
-    test_010_read_from_coordinator
-    test_011_start_worker2b_again

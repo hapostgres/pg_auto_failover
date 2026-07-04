@@ -1,16 +1,19 @@
 # Test pg_auto_failover with Debian-style pg_createcluster layouts where the
 # postgresql.conf lives outside PGDATA (in /etc/postgresql/<ver>/<name>/).
 # pg_autoctl must detect and support this split-config layout.
+#
+# Ported from tests/test_debian_clusters.py
+# Predecessor: tests/test_debian_clusters.py
 
 cluster {
-    monitor port 6000 debian-cluster monitor
+    monitor
     formation {
-        node1 port 6001 debian-cluster debian_node1 listen
+        node1 debian-cluster main
     }
 }
 
 setup {
-    wait until monitor pg is running timeout 60s
+    wait until node1 state is single  timeout 60s
 }
 
 teardown {
@@ -18,29 +21,31 @@ teardown {
 }
 
 #
-# test_000: create monitor using pg_createcluster layout
-# postgresql.conf starts outside PGDATA; pg_autoctl moves it in on first run.
+# test_001: pg_autoctl adopts the Debian "main" cluster pre-created by
+# pg_createcluster at image build time.  postgresql.conf starts outside
+# PGDATA (/etc/postgresql/17/main/); pg_autoctl moves it in on first run.
 #
-step test_000_create_monitor {
-    wait until monitor pg is running timeout 60s
+
+step test_001_single_with_debian_cluster {
+    exec monitor  pg_autoctl inspect pgsetup wait
+    exec node1  pg_autoctl inspect pgsetup wait
 }
 
 #
-# test_001: create a single data node using pg_createcluster layout
+# test_002: verify pg_autoctl moved postgresql.conf into PGDATA.
 #
-step test_001_custom_single {
-    wait until node1 state = single timeout 60s
+
+step test_002_conf_in_pgdata {
+    exec node1  test -f /var/lib/postgresql/17/main/postgresql.conf
 }
 
 #
-# test_002: fix group-write permission on the PostgreSQL base directory
-# (Debian sets drwxr-xr-x on /var/lib/postgresql/<ver>; pg_autoctl needs g+w)
+# test_003: basic write/read to confirm Postgres is functional.
 #
-step test_002_chmod_debian_data_directory {
-    exec node1 chmod go+w /var/lib/postgresql
-}
 
-sequence
-    test_000_create_monitor
-    test_001_custom_single
-    test_002_chmod_debian_data_directory
+step test_003_write_and_read {
+    sql node1 { CREATE TABLE t1 (a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2), (3); }
+    sql node1 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } { 3 } }
+}

@@ -1,0 +1,202 @@
+name: pgaftest
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+# One run per branch; cancel in-progress runs on new push.
+concurrency:
+  group: pgaftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build the runtime Docker image and the pgaftest binary once, then share
+  # both as artifacts with every parallel test job.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build image & pgaftest
+    runs-on: ubuntu-latest
+    env:
+      PGVERSION: 16
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build pg_auto_failover run image
+        run: |
+          docker build \
+            --build-arg PGVERSION=${{ env.PGVERSION }} \
+            --target run \
+            -t pgaf:run \
+            .
+
+      - name: Save pgaf:run image as a tarball
+        run: docker save pgaf:run | gzip > /tmp/pgaf-run.tar.gz
+
+      - name: Upload pgaf:run image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgaf-run-image
+          path: /tmp/pgaf-run.tar.gz
+          # Only needed for the duration of this workflow run.
+          retention-days: 1
+
+      # Build the full build image just to extract the pgaftest binary.
+      # The binary is linux/amd64, linked against PGDG libpq — matches
+      # ubuntu-latest runners where the test jobs will execute it.
+      - name: Build pg_auto_failover build image (for pgaftest extraction)
+        run: |
+          docker build \
+            --build-arg PGVERSION=${{ env.PGVERSION }} \
+            --target build \
+            -t pgaf:build \
+            .
+
+      - name: Extract pgaftest binary from build image
+        run: |
+          docker create --name pgaftest-extract pgaf:build
+          docker cp pgaftest-extract:/usr/lib/postgresql/${{ env.PGVERSION }}/bin/pgaftest \
+            /tmp/pgaftest
+          docker rm pgaftest-extract
+          chmod +x /tmp/pgaftest
+
+      - name: Upload pgaftest binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgaftest-binary
+          path: /tmp/pgaftest
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Run all non-upgrade specs from tests/tap/schedule in a matrix.
+  # Each job is independent; they all share the pre-built image and binary.
+  # ---------------------------------------------------------------------------
+  test:
+    name: pgaftest / ${{ matrix.spec }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        spec:
+          - basic_operation
+          - basic_operation_listen_flag
+          - maintenance_and_drop
+          - create_standby_with_pgdata
+          - ensure
+          - monitor_disabled
+          - replace_monitor
+          - config_get_set
+          - skip_pg_hba
+          - auth
+          - enable_ssl
+          - ssl_cert
+          - ssl_self_signed
+          - multi_standbys
+          - multi_async
+          - multi_ifdown
+          - multi_maintenance
+          - multi_alternate
+          - extension_update
+          - installcheck
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download pgaf:run image
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaf-run-image
+          path: /tmp
+
+      - name: Load pgaf:run image into Docker
+        run: docker load < /tmp/pgaf-run.tar.gz
+
+      - name: Download pgaftest binary
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaftest-binary
+          path: /tmp
+
+      # pgaftest links against PGDG libpq — install the matching runtime lib.
+      - name: Install libpq runtime
+        run: |
+          sudo apt-get install -y curl ca-certificates gnupg
+          curl https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo apt-key add -
+          echo "deb http://apt.postgresql.org/pub/repos/apt \
+            $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y libpq5
+
+      - name: Run ${{ matrix.spec }}
+        timeout-minutes: 15
+        env:
+          PGAF_IMAGE: pgaf:run
+        run: |
+          chmod +x /tmp/pgaftest
+          /tmp/pgaftest run tests/tap/specs/${{ matrix.spec }}.pgaf
+
+  # ---------------------------------------------------------------------------
+  # Upgrade test: builds both pgaf:next (current branch) and pgaf:current
+  # (the previous release tag, auto-detected), then runs the upgrade spec.
+  # Kept separate because it needs a PGVERSION=16 image and additional
+  # build steps (pgaf:current-base from git archive of PREV_TAG).
+  # ---------------------------------------------------------------------------
+  upgrade:
+    name: pgaftest / upgrade
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PGVERSION: 16
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history needed so PREV_TAG auto-detection (git tag --sort)
+          # finds the correct previous release tag.
+          fetch-depth: 0
+
+      - name: Install libpq runtime
+        run: |
+          sudo apt-get install -y curl ca-certificates gnupg
+          curl https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo apt-key add -
+          echo "deb http://apt.postgresql.org/pub/repos/apt \
+            $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y libpq5
+
+      - name: Download pgaftest binary
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaftest-binary
+          path: /tmp
+
+      # The build job already produced pgaf:run at PG16 for the regular tests,
+      # but the upgrade job runs independently and needs its own images.
+      # Build pgaf:next first so pgaf:current's Dockerfile.current can COPY
+      # the v2.2 binary and extension files from it.
+      - name: Build pgaf:next (current branch, PGVERSION=16)
+        run: |
+          make -C tests/upgrade pgaf-next PGVERSION=${{ env.PGVERSION }}
+
+      - name: Build pgaf:current (previous release + both binaries baked in)
+        run: |
+          make -C tests/upgrade pgaf-current PGVERSION=${{ env.PGVERSION }}
+
+      - name: Run upgrade spec
+        timeout-minutes: 25
+        run: |
+          chmod +x /tmp/pgaftest
+          /tmp/pgaftest run tests/tap/specs/upgrade.pgaf

@@ -11,6 +11,7 @@
  * Licensed under the PostgreSQL License.
  */
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,8 @@ static int  cli_node_run_getopts(int argc, char **argv);
 static void cli_node_run(int argc, char **argv);
 static int  cli_node_apply_getopts(int argc, char **argv);
 static void cli_node_apply(int argc, char **argv);
+static int  cli_node_start_getopts(int argc, char **argv);
+static void cli_node_start(int argc, char **argv);
 static int  cli_node_show_getopts(int argc, char **argv);
 static void cli_node_show(int argc, char **argv);
 static int  cli_node_check_getopts(int argc, char **argv);
@@ -60,6 +63,16 @@ static CommandLine node_apply_command =
 		cli_node_apply_getopts,
 		cli_node_apply);
 
+static CommandLine node_start_command =
+	make_command(
+		"start",
+		"Start a node waiting in launch=deferred mode (idempotent)",
+		"[<file.ini>]",
+		"  <file.ini>   path to the pg_autoctl_node.ini file\n"
+		"               (default: " PG_AUTOCTL_NODESPEC_PATH ")\n",
+		cli_node_start_getopts,
+		cli_node_start);
+
 static CommandLine node_show_command =
 	make_command(
 		"show",
@@ -81,6 +94,7 @@ static CommandLine node_check_command =
 static CommandLine *node_subcommands[] = {
 	&node_run_command,
 	&node_apply_command,
+	&node_start_command,
 	&node_show_command,
 	&node_check_command,
 	NULL
@@ -107,8 +121,10 @@ static char nodeSpecPath[MAXPGPATH] = { 0 };
 static int
 cli_node_run_getopts(int argc, char **argv)
 {
-	if (argc > 0 && argv[0][0] != '-')
-		strlcpy(nodeSpecPath, argv[0], sizeof(nodeSpecPath));
+	/* argv[0] is the subcommand name ("run"/"apply"/"check"); the optional
+	 * file path is the first remaining positional argument at argv[1]. */
+	if (argc > 1 && argv[1][0] != '-')
+		strlcpy(nodeSpecPath, argv[1], sizeof(nodeSpecPath));
 	else
 		strlcpy(nodeSpecPath, PG_AUTOCTL_NODESPEC_PATH, sizeof(nodeSpecPath));
 
@@ -128,11 +144,37 @@ static void
 cli_node_run(int argc, char **argv)
 {
 	NodeSpec spec = { 0 };
-	char *args[32];
+	char *args[40];
 	int nargs;
 
 	if (!nodespec_read(nodeSpecPath, &spec))
 		exit(EXIT_CODE_BAD_CONFIG);
+
+	/*
+	 * [launch] mode = deferred: spin here re-reading nodeSpecPath until
+	 * pg_autoctl node start rewrites it with mode = immediate (or removes
+	 * the [launch] section).  The file is the rendezvous point — no external
+	 * sentinel needed.
+	 */
+	if (spec.launchDeferred)
+	{
+		log_info("Node configured with launch = deferred in \"%s\"; "
+				 "waiting for pg_autoctl node start", nodeSpecPath);
+
+		for (;;)
+		{
+			pg_usleep(500 * 1000);   /* 0.5 s poll */
+
+			NodeSpec polled = { 0 };
+			if (nodespec_read(nodeSpecPath, &polled) && !polled.launchDeferred)
+			{
+				spec = polled;
+				break;
+			}
+		}
+
+		log_info("launch = immediate; proceeding with node initialization");
+	}
 
 	/*
 	 * If PGDATA already has a pg_autoctl.cfg, the node was created before.
@@ -180,13 +222,54 @@ cli_node_run(int argc, char **argv)
 	/* Tell the supervisor which spec file to watch for live changes */
 	setenv("PG_AUTOCTL_NODESPEC", nodeSpecPath, 1);
 
-	/* Log the command we're about to exec */
+	/*
+	 * PG_AUTOCTL_TEST_DELAY: stagger node registration so that node IDs
+	 * are assigned in name order (node1 → id 1, node2 → id 2, …).
+	 * Extract the trailing integer from the node name and sleep 2×N seconds.
+	 */
+	if (getenv("PG_AUTOCTL_TEST_DELAY") && spec.name[0] != '\0')
+	{
+		const char *p = spec.name + strlen(spec.name);
+		while (p > spec.name && isdigit((unsigned char) p[-1]))
+			p--;
+		if (*p != '\0')
+		{
+			int n    = atoi(p);
+			int secs = 2 * n;
+			log_info("PG_AUTOCTL_TEST_DELAY: sleeping %ds before "
+			         "registration (node %s, index %d)",
+			         secs, spec.name, n);
+			sleep(secs);
+		}
+	}
+
+	/* Log the command we're about to exec, masking password arguments. */
 	{
 		PQExpBuffer cmd = createPQExpBuffer();
+		static const char *pwFlags[] = {
+			"--monitor-password",
+			"--replication-password",
+			"--autoctl-node-password",
+			NULL
+		};
 		for (int i = 0; i < nargs; i++)
 		{
 			if (i > 0) appendPQExpBufferChar(cmd, ' ');
-			appendPQExpBufferStr(cmd, args[i]);
+
+			/* Check if the previous arg was a password flag. */
+			bool maskThis = false;
+			if (i > 0)
+			{
+				for (int k = 0; pwFlags[k]; k++)
+				{
+					if (strcmp(args[i-1], pwFlags[k]) == 0)
+					{
+						maskThis = true;
+						break;
+					}
+				}
+			}
+			appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
 		}
 		log_info("pg_autoctl node run: %s", cmd->data);
 		destroyPQExpBuffer(cmd);
@@ -234,6 +317,52 @@ cli_node_apply(int argc, char **argv)
 		log_error("Failed to apply node spec from \"%s\"", nodeSpecPath);
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
+}
+
+
+/* -----------------------------------------------------------------------
+ * pg_autoctl node start [<file>]
+ *
+ * Clears launch = deferred in the spec file so a waiting pg_autoctl node run
+ * proceeds.  Idempotent: if the node is already immediate, exits 0 quietly.
+ * ----------------------------------------------------------------------- */
+
+static int
+cli_node_start_getopts(int argc, char **argv)
+{
+	if (argc > 1 && argv[1][0] != '-')
+		strlcpy(nodeSpecPath, argv[1], sizeof(nodeSpecPath));
+	else
+		strlcpy(nodeSpecPath, PG_AUTOCTL_NODESPEC_PATH, sizeof(nodeSpecPath));
+
+	return 0;
+}
+
+static void
+cli_node_start(int argc, char **argv)
+{
+	NodeSpec spec = { 0 };
+
+	if (!nodespec_read(nodeSpecPath, &spec))
+		exit(EXIT_CODE_BAD_CONFIG);
+
+	if (!spec.launchDeferred)
+	{
+		log_info("Node \"%s\" launch is already immediate; nothing to do",
+				 nodeSpecPath);
+		exit(0);
+	}
+
+	spec.launchDeferred = false;
+
+	if (!nodespec_write_to_path(&spec, nodeSpecPath))
+	{
+		log_error("Failed to update \"%s\"", nodeSpecPath);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("Cleared launch = deferred in \"%s\"; node will now start",
+			 nodeSpecPath);
 }
 
 

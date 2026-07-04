@@ -1,10 +1,17 @@
-# Test pg_auto_failover with SSL using CA-signed certificates (verify-ca mode).
+# Test pg_auto_failover with SSL using CA-signed certificates and cert auth.
+#
 # Monitor and all data nodes are set up with server certificates signed by a
 # shared root CA, and client certificates are placed in ~/.postgresql/.
+# Authentication uses the "cert" method: pg_autoctl writes hostssl + cert
+# rules to pg_hba.conf and the ident map to pg_ident.conf automatically.
+#
+# Ported from tests/test_ssl_cert.py
+# Predecessor: tests/test_ssl_cert.py
 
 cluster {
     monitor
     ssl verify-ca
+    auth cert
     formation {
         node1
         node2
@@ -12,7 +19,10 @@ cluster {
 }
 
 setup {
-    wait until node1 state = single timeout 60s
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 120s
+    promote node1
 }
 
 teardown {
@@ -20,53 +30,56 @@ teardown {
 }
 
 #
-# test_000: create monitor with SSL verify-ca
+# test_000: verify monitor has SSL enabled with cert auth
 #
+
 step test_000_create_monitor {
-    wait until monitor pg is running timeout 60s
-    assert monitor ssl = on
-    assert monitor ssl-mode = verify-ca
+    exec monitor  pg_autoctl inspect pgsetup wait
+    sql monitor { SHOW ssl; }
+    expect { on }
+    exec monitor  pg_autoctl config get ssl.sslmode
+    expect { verify-ca }
 }
 
 #
-# test_001: init primary with SSL verify-ca
+# test_001: verify primary has SSL enabled with cert auth
 #
+
 step test_001_init_primary {
-    wait until node1 state = single timeout 60s
-    assert node1 ssl = on
-    assert node1 ssl-mode = verify-ca
+    wait until node1 state is primary  timeout 60s
+    sql node1 { SHOW ssl; }
+    expect { on }
+    exec node1  pg_autoctl config get ssl.sslmode
+    expect { verify-ca }
 }
 
 #
 # test_002: create table t1
 #
+
 step test_002_create_t1 {
     sql node1 { CREATE TABLE t1(a int); }
     sql node1 { INSERT INTO t1 VALUES (1), (2); }
 }
 
 #
-# test_003: add secondary node2 with SSL verify-ca
+# test_003: verify secondary has SSL enabled with cert auth
 #
+
 step test_003_init_secondary {
-    wait until node2 state = secondary timeout 90s
-    wait until node1 state = primary   timeout 90s
-    assert node2 ssl = on
-    assert node2 ssl-mode = verify-ca
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+    sql node2 { SHOW ssl; }
+    expect { on }
+    exec node2  pg_autoctl config get ssl.sslmode
+    expect { verify-ca }
 }
 
 #
 # test_004: failover
 #
-step test_004_failover {
-    exec monitor pg_autoctl perform failover
-    wait until node2 state = primary   timeout 90s
-    wait until node1 state = secondary timeout 90s
-}
 
-sequence
-    test_000_create_monitor
-    test_001_init_primary
-    test_002_create_t1
-    test_003_init_secondary
-    test_004_failover
+step test_004_failover {
+    exec monitor  pg_autoctl perform failover
+}

@@ -26,6 +26,7 @@
 
 #define STR_ERRCODE_OBJECT_IN_USE "55006"
 #define STR_ERRCODE_EXCLUSION_VIOLATION "23P01"
+#define STR_ERRCODE_INVALID_OBJECT_DEFINITION "42P17"
 
 #define STR_ERRCODE_SERIALIZATION_FAILURE "40001"
 #define STR_ERRCODE_STATEMENT_COMPLETION_UNKNOWN "40003"
@@ -831,6 +832,7 @@ monitor_register_node(Monitor *monitor, char *formation,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
 					  char *citusClusterName,
 					  bool *mayRetry,
+					  bool *formationMissing,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -838,6 +840,8 @@ monitor_register_node(Monitor *monitor, char *formation,
 		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, $6, $7, "
 		"$8, $9::pgautofailover.replication_state, $10, $11, $12, $13)";
 	int paramCount = 13;
+
+	*formationMissing = false;
 	Oid paramTypes[13] = {
 		TEXTOID, TEXTOID, INT4OID, NAMEOID, TEXTOID, INT8OID,
 		INT8OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID
@@ -877,6 +881,14 @@ monitor_register_node(Monitor *monitor, char *formation,
 		if (monitor_retryable_error(parseContext.sqlstate) ||
 			strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
 		{
+			*mayRetry = true;
+			return false;
+		}
+		else if (strcmp(parseContext.sqlstate,
+						STR_ERRCODE_INVALID_OBJECT_DEFINITION) == 0)
+		{
+			/* Formation doesn't exist yet — caller will create it and retry. */
+			*formationMissing = true;
 			*mayRetry = true;
 			return false;
 		}
@@ -969,6 +981,24 @@ monitor_node_active(Monitor *monitor,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
 	{
+		/*
+		 * ERRCODE_UNDEFINED_OBJECT (42704): the monitor raised "couldn't find
+		 * node with nodeid N".  This happens when remove_node() was called with
+		 * --force, or after the node already reported DROPPED and the monitor
+		 * deleted the row.  The running keeper should treat this as a DROPPED
+		 * assignment so the FSM exits cleanly rather than looping on errors.
+		 */
+		if (strcmp(parseContext.sqlstate, STR_ERRCODE_UNDEFINED_OBJECT) == 0)
+		{
+			log_info("Node %" PRId64 " is no longer registered on the monitor "
+					 "(SQLSTATE %s); treating as dropped.",
+					 nodeId, parseContext.sqlstate);
+			assignedState->nodeId   = nodeId;
+			assignedState->groupId  = groupId;
+			assignedState->state    = DROPPED_STATE;
+			return true;
+		}
+
 		log_error("Failed to get node state for node %" PRId64
 				  " in group %d of formation \"%s\" with initial state "
 				  "\"%s\", replication state \"%s\", "
@@ -4318,20 +4348,27 @@ monitor_wait_until_some_node_reported_state(Monitor *monitor,
 
 	while (!context.failoverIsDone)
 	{
-		/* when timeout <= 0 we just never stop waiting */
+		int thisLoopTimeout;
+
 		if (timeout > 0)
 		{
 			uint64_t now = time(NULL);
+			uint64_t elapsed = now - start;
 
-			if ((now - start) > timeout)
+			if (elapsed >= (uint64_t) timeout)
 			{
 				log_error("Failed to receive monitor's notifications");
 				break;
 			}
-		}
 
-		int thisLoopTimeout =
-			timeout > 0 ? timeout : PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
+			/* cap inner wait to remaining time so we don't overshoot by a full timeout */
+			thisLoopTimeout = (int) (timeout - elapsed);
+		}
+		else
+		{
+			/* timeout <= 0: wait indefinitely, using the default block time */
+			thisLoopTimeout = PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
+		}
 
 		if (!monitor_process_notifications(
 				monitor,

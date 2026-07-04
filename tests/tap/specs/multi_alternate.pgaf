@@ -1,3 +1,15 @@
+# Test alternating failover scenarios with three nodes: each node serves as
+# primary at least once across three series.  Series 003 kills node1 then
+# node2 in sequence; series 005 reverses the restart order; series 006 kills
+# node3 (the surviving primary) and concurrently restarts a previously failed
+# node.  Verifies correct election outcomes and that pg_rewind restores each
+# node as a healthy secondary after it rejoins.
+#
+# All kills use SIGKILL (compose kill) so the stopped process has no chance
+# to update the monitor or claim a re-election win during shutdown.
+#
+# Predecessor: tests/test_multi_alternate_primary_failures.py
+
 cluster {
     monitor
     formation {
@@ -8,15 +20,49 @@ cluster {
 }
 
 setup {
-    wait until node1 state = single    timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node1 state = primary   timeout 60s
-    wait until node3 state = secondary timeout 60s
-    wait until node1 state = primary   timeout 60s
+    wait until primary, secondary  timeout 120s
+    wait until node3 state is secondary  timeout 60s
+    promote node1
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 120s
 }
 
 teardown {
     compose down
+}
+
+#
+# test_002: verify replication slots after initial 3-node convergence.
+# Node ids are assigned in registration order: node1=1, node2=2, node3=3.
+# Each primary holds physical replication slots for each standby.
+# After setup node1 is primary; it holds slots for standbys 2 and 3.
+# node2 and node3 are standbys; each holds a slot for the other two.
+#
+
+step test_002_check_initial_slots {
+    sql node1 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_2 } { pgautofailover_standby_3 } }
+    sql node2 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_1 } { pgautofailover_standby_3 } }
+    sql node3 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_1 } { pgautofailover_standby_2 } }
 }
 
 #
@@ -36,81 +82,95 @@ teardown {
 #   <up>
 #   secondary     primary      secondary
 #
+
 step test_003_001_stop_primary {
-    network disconnect node1
-    wait until node1 assigned-state = demoted  timeout 90s
-    wait until node2 state = primary           timeout 90s
+    compose kill node1
+    wait until node2 state is primary  timeout 90s
 }
 
-step test_003_002_stop_new_primary {
-    network disconnect node2
-    wait until node2 assigned-state = draining timeout 90s
-    wait until node3 state = report_lsn        timeout 90s
+step test_003_002_stop_primary {
+    compose kill node2
+    wait until node2 assigned-state = draining  timeout 90s
+    wait until node3 state is report_lsn  timeout 90s
     sleep 5s
-    assert node3 state = report_lsn
+    wait until node3 state is report_lsn  timeout 90s
 }
 
-step test_003_003_bringup_node2 {
-    network connect node2
-    exec node2 pg_autoctl run --background
-    wait until node2 state = primary   timeout 90s
-    wait until node3 state = secondary timeout 90s
+step test_003_003_bringup_last_failed_primary {
+    compose start node2
+    wait until node2 state is primary
+        and node3 state is secondary
+        timeout 180s
 }
 
-step test_003_004_bringup_node1 {
-    network connect node1
-    exec node1 pg_autoctl run --background
-    wait until node1 state = secondary timeout 90s
-    assert node2 assigned-state = primary
-    assert node3 assigned-state = secondary
+step test_003_004_bringup_first_failed_primary {
+    compose start node1
+    wait until node1 assigned-state = secondary  timeout 90s
+    wait until node2 assigned-state = primary  timeout 90s
+    wait until node3 assigned-state = secondary  timeout 90s
 }
 
-#
-# Series 005: stop node2 (primary) → node1 becomes primary,
-#             then stop node1 → node3 enters report_lsn,
-#             restart node2 → node2 becomes secondary, node3 becomes primary,
-#             restart node1 → node1 becomes secondary.
-#
-#   node1         node2        node3
-#   secondary     primary      secondary
-#                 <down>
-#   primary       demoted      secondary
-#   <down>
-#   draining      demoted      report_lsn
-#                 <up>
-#   draining      secondary    primary
-#   <up>
-#   secondary     secondary    primary
-#
-step test_005_001_fail_primary {
-    network disconnect node2
-    wait until node2 assigned-state = demote_timeout timeout 120s
-    wait until node2 assigned-state = demoted        timeout 120s
-    wait until node1 assigned-state = primary        timeout 120s
-    wait until node1 state = primary                 timeout 120s
-    wait until node3 state = secondary               timeout 120s
+# After series 003: node2 is primary (id=2), node1 and node3 are standbys.
+
+step test_003_005_check_slots_after_series_003 {
+    sql node2 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_1 } { pgautofailover_standby_3 } }
+    sql node1 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_2 } { pgautofailover_standby_3 } }
+    sql node3 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_1 } { pgautofailover_standby_2 } }
 }
 
-step test_005_002_fail_new_primary {
-    network disconnect node1
-    wait until node1 assigned-state = draining  timeout 90s
-    wait until node3 assigned-state = report_lsn timeout 90s
+step test_005_001_fail_primary_again {
+    compose kill node2
+    wait until node1 state is primary
+        and node3 state is secondary
+        timeout 180s
 }
 
-step test_005_003_bringup_node2 {
-    network connect node2
-    exec node2 pg_autoctl run --background
-    wait until node2 state = demoted   timeout 90s
-    wait until node2 state = secondary timeout 90s
-    wait until node3 state = primary   timeout 90s
+step test_005_001b_write_and_checkpoint {
+    wait until node1 state is primary
+        and node3 state is secondary
+        timeout 120s
+    sql node1 {
+        CREATE TABLE IF NOT EXISTS _lsn_advance(x int); INSERT INTO
+        _lsn_advance VALUES(1); CHECKPOINT;
+    }
 }
 
-step test_005_004_bringup_node1 {
-    network connect node1
-    exec node1 pg_autoctl run --background
-    wait until node1 state = secondary timeout 90s
-    assert node3 assigned-state = primary
-    assert node2 assigned-state = secondary
+step test_005_002_fail_primary_again {
+    compose kill node1
+    wait until node3 assigned-state = report_lsn  timeout 120s
+}
+
+step test_005_003_bring_up_first_failed_primary {
+    compose start node2
+    wait until node2 state is demoted  timeout 120s
+    wait until node2 state is secondary
+        and node3 state is primary
+        timeout 120s
+}
+
+step test_005_004_bring_up_last_failed_primary {
+    compose start node1
+    wait until node1 state is secondary
+        and node3 state is primary
+        timeout 120s
 }
 
 #
@@ -129,40 +189,78 @@ step test_005_004_bringup_node1 {
 #   <up>
 #   secondary     primary      secondary
 #
+
+# After series 005: node3 is primary (id=3), node1 and node2 are standbys.
+
+step test_005_005_check_slots_after_series_005 {
+    sql node3 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_1 } { pgautofailover_standby_2 } }
+    sql node1 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_2 } { pgautofailover_standby_3 } }
+    sql node2 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_1 } { pgautofailover_standby_3 } }
+}
+
 step test_006_001_fail_primary {
-    network disconnect node3
-    wait until node3 assigned-state = demote_timeout timeout 120s
-    wait until node3 assigned-state = demoted        timeout 120s
-    wait until node1 assigned-state = primary        timeout 120s
-    wait until node1 state = primary                 timeout 120s
-    wait until node2 state = secondary               timeout 120s
+    compose kill node3
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 120s
 }
 
 step test_006_002_fail_new_primary {
-    network disconnect node1
-    network connect node3
-    exec node3 pg_autoctl run --background
-    wait until node2 state = primary   timeout 120s
-    wait until node3 state = secondary timeout 120s
+    compose kill node1
+    compose start node3
+    wait until node2 state is primary
+        and node3 state is secondary
+        timeout 120s
 }
 
-step test_006_003_bringup_node1 {
-    network connect node1
-    exec node1 pg_autoctl run --background
-    wait until node1 state = secondary timeout 120s
-    wait until node2 state = primary   timeout 120s
-    wait until node3 state = secondary timeout 120s
+step test_006_003_bringup_last_failed_primary {
+    compose start node1
+    wait until node1 state is secondary
+        and node2 state is primary
+        and node3 state is secondary
+        timeout 120s
 }
 
-sequence
-    test_003_001_stop_primary
-    test_003_002_stop_new_primary
-    test_003_003_bringup_node2
-    test_003_004_bringup_node1
-    test_005_001_fail_primary
-    test_005_002_fail_new_primary
-    test_005_003_bringup_node2
-    test_005_004_bringup_node1
-    test_006_001_fail_primary
-    test_006_002_fail_new_primary
-    test_006_003_bringup_node1
+# After series 006: node2 is primary (id=2), node1 and node3 are standbys.
+
+step test_006_004_check_slots_after_series_006 {
+    sql node2 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_1 } { pgautofailover_standby_3 } }
+    sql node1 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_2 } { pgautofailover_standby_3 } }
+    sql node3 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { { pgautofailover_standby_1 } { pgautofailover_standby_2 } }
+}

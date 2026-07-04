@@ -282,11 +282,33 @@ fsm_init_primary(Keeper *keeper)
 		 * leaking information from the passfile, environment variable, or
 		 * other places.
 		 */
+		/*
+		 * When monitor_password is configured, use it and honour the cluster
+		 * auth method; otherwise fall back to the hard-coded password with
+		 * "trust" so that existing deployments are unaffected.
+		 */
+		char healthPassword[MAXCONNINFO];
+		char healthAuthMethod[MAXPGPATH];
+
+		if (config->monitor_password[0] != '\0')
+		{
+			strlcpy(healthPassword, config->monitor_password,
+					sizeof(healthPassword));
+			strlcpy(healthAuthMethod, pg_setup_get_auth_method(pgSetup),
+					sizeof(healthAuthMethod));
+		}
+		else
+		{
+			strlcpy(healthPassword, PG_AUTOCTL_HEALTH_PASSWORD,
+					sizeof(healthPassword));
+			strlcpy(healthAuthMethod, "trust", sizeof(healthAuthMethod));
+		}
+
 		if (!primary_create_user_with_hba(postgres,
 										  PG_AUTOCTL_HEALTH_USERNAME,
-										  PG_AUTOCTL_HEALTH_PASSWORD,
+										  healthPassword,
 										  monitorHostname,
-										  "trust",
+										  healthAuthMethod,
 										  pgSetup->hbaLevel,
 										  connlimit))
 		{
@@ -902,6 +924,21 @@ fsm_init_standby_from_upstream(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * After a pg_basebackup the standby inherits the primary's postgresql.conf
+	 * and postgresql-auto-failover.conf.  Rewrite postgresql-auto-failover.conf
+	 * via postgres_add_default_settings() so that citus.cluster_name and
+	 * citus.use_secondary_nodes reflect this node's own configuration rather
+	 * than the primary's.  prepare_guc_settings_from_pgsetup() derives those
+	 * settings dynamically from pgSetup->citusClusterName, so the full default
+	 * table (including max_wal_senders = 12) is preserved.
+	 */
+	if (!postgres_add_default_settings(postgres, config->hostname))
+	{
+		log_error("Failed to rewrite postgresql-auto-failover.conf for standby");
+		return false;
+	}
+
 	/* now, in case we have an init state file around, remove it */
 	return unlink_file(config->pathnames.init);
 }
@@ -1329,6 +1366,20 @@ fsm_fast_forward(Keeper *keeper)
 		log_error("Failed to fast forward from the most advanced standby node, "
 				  "see above for details");
 		return false;
+	}
+
+	/*
+	 * When the most advanced standby IS this node itself, there is no WAL
+	 * to fetch: we are already at the frontier.  Skip straight to
+	 * prepare_promotion without setting up a (self-referential) replication
+	 * source that would inevitably fail to connect.
+	 */
+	if (upstreamNode.nodeId == keeper->state.current_node_id)
+	{
+		log_info("This node is already the most advanced standby "
+				 "(LSN %s); no WAL to fetch, skipping fast-forward",
+				 upstreamNode.lsn);
+		return true;
 	}
 
 	/*

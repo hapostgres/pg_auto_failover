@@ -17,6 +17,7 @@
 #include "cli_common.h"
 #include "cli_root.h"
 #include "defaults.h"
+#include "file_utils.h"
 #include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -676,7 +677,18 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 	if (nodeHasBeenDroppedFromTheMonitor)
 	{
-		/* signal that it's time to shutdown everything */
+		/*
+		 * The monitor has confirmed the drop (the node row has been removed).
+		 * Remove local pg_autoctl files now that it is safe to do so: if we
+		 * were interrupted before this point, the files would still exist and
+		 * the keeper could restart and re-enter this drop sequence.  PGDATA is
+		 * intentionally left intact; use "pg_autoctl drop node --destroy" to
+		 * remove it.
+		 */
+		(void) unlink_file(keeper->config.pathnames.init);
+		(void) unlink_file(keeper->config.pathnames.state);
+		(void) unlink_file(keeper->config.pathnames.config);
+
 		exit(EXIT_CODE_DROPPED);
 	}
 

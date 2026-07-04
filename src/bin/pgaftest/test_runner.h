@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 #include "test_spec.h"
+#include "pgsql.h"
 
 /* Runtime context for a running test */
 typedef struct TestRunner
@@ -18,15 +19,17 @@ typedef struct TestRunner
 	TestSpec   *spec;
 	char        projectName[64];   /* docker compose project name     */
 	char        composeFile[1024]; /* path to generated compose YAML  */
+	char        composeBase[1152]; /* "docker compose -p name [-f file]" */
 	char        workDir[1024];     /* temp dir for this run           */
-	int         monitorPort;       /* host port mapped to monitor:5432 */
-	char        monitorConnStr[256];
 	char        contextDir[1024];  /* absolute path used as docker build context */
+	char        specFile[1024];    /* absolute path to the .pgaf spec file */
 
-	/* TAP counters */
+	/* TAP counters and buffered output */
 	int         tapTotal;
 	int         tapPass;
 	int         tapFail;
+	char        tapBuffer[65536];
+	int         tapBufferLen;
 
 	/* last SQL result (for CMD_EXPECT / CMD_EXPECT_ERROR) */
 	char        lastSqlOutput[4096];
@@ -35,13 +38,32 @@ typedef struct TestRunner
 	char        lastSqlService[64];/* service name of last sql command    */
 
 	bool        composeUp;         /* compose stack is running        */
+
+	/*
+	 * Direct libpq connection to the monitor's exposed postgres port.
+	 * Used for LISTEN "state" notifications so wait loops are event-driven
+	 * instead of polling via docker exec.
+	 */
+	PGSQL       notifyConn;
+	bool        notifyConnected;
+
+	/*
+	 * Which monitor service the runner currently targets for LISTEN/NOTIFY
+	 * and monitor_get_node_state() queries.  Defaults to "monitor"; changed
+	 * by the "set monitor <svc>" DSL command in a replace-monitor test.
+	 */
+	char        activeMonitorService[64];
 } TestRunner;
 
 /*
  * CI mode: run the full spec (setup → sequence → teardown).
  * Emits TAP to stdout.  Returns true if all steps passed.
  */
-bool runner_run(TestSpec *spec, const char *workDir);
+/*
+ * noCleanup: when true, skip `compose down` after the run so the stack stays
+ * up for post-mortem inspection.  Use `pgaftest down <spec.pgaf>` to clean up.
+ */
+bool runner_run(TestSpec *spec, const char *workDir, bool noCleanup);
 
 /*
  * Interactive mode: bring up compose, run setup{}, then stop.
@@ -66,5 +88,12 @@ bool runner_down(TestSpec *spec, const char *workDir);
  * Print the generated docker-compose.yml without starting anything.
  */
 bool runner_show(TestSpec *spec);
+
+/*
+ * Prepare an output directory with docker-compose.yml, *.ini files, and a
+ * Makefile.  Prints the `docker compose up` command to stdout.
+ * outDir is created if it does not exist.  Pass NULL to derive from spec name.
+ */
+bool runner_prepare(TestSpec *spec, const char *outDir);
 
 #endif /* TEST_RUNNER_H */

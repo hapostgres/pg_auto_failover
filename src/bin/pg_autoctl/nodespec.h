@@ -52,6 +52,7 @@ typedef struct NodeSpec
 {
 	/* [node] */
 	PgInstanceKind kind;         /* postgres | coordinator | worker | monitor */
+	char name[_POSIX_HOST_NAME_MAX]; /* --name; defaults to hostname when empty */
 	char hostname[_POSIX_HOST_NAME_MAX];
 	int  port;                   /* Postgres port, default 5432 */
 
@@ -60,6 +61,8 @@ typedef struct NodeSpec
 
 	/* [monitor]   — empty for kind == monitor */
 	char monitor_pguri[MAXCONNINFO];
+	bool noMonitor;              /* [monitor] no_monitor=true: standalone mode */
+	int  nodeId;                 /* [monitor] node_id: required with --disable-monitor */
 
 	/* [formation] */
 	char formation[NAMEDATALEN]; /* default "default" */
@@ -70,9 +73,34 @@ typedef struct NodeSpec
 	bool replication_quorum;     /* sync quorum participant, default true */
 
 	/* [options]    — immutable; used only at pg_autoctl create time */
-	char ssl[32];                /* self-signed | cert | off */
-	char auth[32];               /* trust | md5 | scram */
+	char ssl[32];                /* self-signed | verify-ca | verify-full | off */
+	char auth[32];               /* trust | md5 | scram | cert */
 	bool pg_hba_lan;             /* add --pg-hba-lan flag */
+
+	/* [ssl]  — certificate paths for verify-ca / verify-full mode */
+	char ssl_ca_file[MAXPGPATH];
+	char ssl_cert_file[MAXPGPATH];
+	char ssl_key_file[MAXPGPATH];
+	bool launchDeferred;         /* [launch] mode=deferred: wait for node start */
+
+	/* [formation <name>]  — monitor kind: non-default formations to create */
+#define NODESPEC_MAX_FORMATIONS 16
+	int  formationCount;
+	char formationNames[NODESPEC_MAX_FORMATIONS][NAMEDATALEN];
+	char formationKinds[NODESPEC_MAX_FORMATIONS][NAMEDATALEN]; /* "pgsql" default */
+
+	/* [pg_auto_failover]  — monitor kind: password for autoctl_node role */
+	char autoctl_node_password[MAXCONNINFO];
+
+	/* [replication]  — postgres kind: password for pgautofailover_replicator */
+	char replication_password[MAXCONNINFO];
+
+	/* [pg_auto_failover]  — postgres kind: password for pgautofailover_monitor */
+	char monitor_password[MAXCONNINFO];
+
+	/* [citus]  — Citus secondary/read-replica cluster settings */
+	bool citusSecondary;             /* role = secondary */
+	char citusClusterName[NAMEDATALEN]; /* cluster_name = <name> */
 } NodeSpec;
 
 /* -----------------------------------------------------------------------
@@ -103,7 +131,7 @@ bool nodespec_read(const char *path, NodeSpec *spec);
 bool nodespec_write(const NodeSpec *spec, FILE *out);
 
 /* Build the argv[] for `pg_autoctl create <kind> [flags]`.
- * Caller provides args[] with room for at least 32 char* entries.
+ * Caller provides args[] with room for at least 40 char* entries.
  * Returns the number of entries filled (not counting the trailing NULL). */
 int  nodespec_create_argv(const NodeSpec *spec,
                           const char *pg_autoctl_path,
@@ -113,6 +141,7 @@ int  nodespec_create_argv(const NodeSpec *spec,
  * running node by calling into the keeper/monitor APIs directly.
  * Logs what changed.  Returns false only on hard error. */
 bool nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec);
+bool nodespec_write_to_path(const NodeSpec *spec, const char *path);
 
 /* -----------------------------------------------------------------------
  * Watcher — called from supervisor loop

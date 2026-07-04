@@ -81,14 +81,36 @@ pg_autoctl do pgsetup wait
 --------------------------
 
 When ``pg_autoctl do pgsetup ready`` would return false because Postgres is
-not ready yet, this command continues probing every second for 30 seconds,
-and exists as soon as Postgres is ready.
+not ready yet, this command continues probing every second (up to
+``--timeout`` seconds, default 30) and exits as soon as Postgres is ready.
+
+Options:
+
+``--read-write``
+   After Postgres reports itself ready, additionally wait until the server
+   accepts read-write connections (i.e. ``pg_is_in_recovery()`` returns
+   ``false``).  Useful after a failover when you want to block until the new
+   primary is writable before sending traffic.
+
+``--timeout N``
+   Total timeout in seconds shared across both phases.  Time spent waiting
+   for Postgres to start counts against the budget for the read-write phase,
+   so a single ``--timeout 60`` means at most 60 seconds total, not 60
+   seconds per phase.  Default: 30.
 
 ::
 
    $ pg_autoctl do pgsetup wait --pgdata node1
    16:50:22 70829 INFO  Postgres is now serving PGDATA "/Users/dim/dev/MS/pg_auto_failover/tmux/node1" on port 5501 with pid 21029
    16:50:22 70829 INFO  Postgres status is: "ready"
+
+::
+
+   $ pg_autoctl do pgsetup wait --pgdata node1 --read-write --timeout 60
+   16:50:22 70829 INFO  Postgres is now serving PGDATA "..." on port 5501 with pid 21029
+   16:50:22 70829 INFO  Postgres status is: "ready"
+   16:50:22 70829 INFO  Waiting for Postgres to accept read-write connections (timeout 60s)
+   16:50:23 70829 INFO  Postgres is now accepting read-write connections on port 5501
 
 
 pg_autoctl do pgsetup logs

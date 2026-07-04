@@ -1,71 +1,69 @@
 # Test pg_autoctl "ensure" behaviour: verify that the keeper restarts
 # Postgres after an unexpected stop, survives a demoted transition, and
 # correctly orchestrates a failover when Postgres is broken on the primary.
+#
+# node2 is declared launch deferred so it starts in single mode for test_001,
+# matching the Python test order (node2 is not created until test_003).
+#
+# Ported from tests/test_ensure.py
+# Predecessor: tests/test_ensure.py
 
 cluster {
     monitor
     formation {
         node1
-        node2
+        node2 launch deferred
     }
 }
 
 setup {
-    wait until node1 state = primary   timeout 90s
-    wait until node2 state = secondary timeout 90s
+    wait until node1 state is single  timeout 60s
+    exec node1  pg_autoctl inspect pgsetup wait
 }
 
 teardown {
     compose down
 }
 
-step init_with_postgres_stop {
-    # Stop Postgres immediately after node creation to verify that the keeper
-    # re-starts it and reaches the "single" / "primary" state on its own.
-    exec node1 pg_ctl stop -D /var/lib/postgresql/pgaf
-    exec node1 pg_autoctl run --background
-    wait until node1 state = single timeout 90s
+step test_001_init_primary {
+    stop postgres node1
+    wait until node1 state is single  timeout 90s
+    exec node1  pg_autoctl inspect pgsetup wait
 }
 
-step create_table {
+step test_002_create_t1 {
     sql node1 { CREATE TABLE t1(a int); }
     sql node1 { INSERT INTO t1 VALUES (1), (2); }
 }
 
-step init_secondary_with_postgres_stop {
-    exec node2 pg_ctl stop -D /var/lib/postgresql/pgaf
-    exec node2 pg_autoctl run --background
-    wait until node2 state = secondary timeout 90s
-    wait until node1 state = primary   timeout 90s
+step test_003_init_secondary {
+    exec node2  pg_autoctl node start
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+    stop postgres node2
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
 }
 
-step demoted_transition {
-    # Stop both Postgres and pg_autoctl on the primary, wait long enough for
-    # the monitor to assign the "demoted" state, then restart the keeper and
-    # verify it passes through demoted before reaching secondary.
-    exec node1 pg_autoctl stop postgres
-    exec node1 pg_autoctl stop
+step test_004_demoted {
+    compose stop node1
     sleep 30s
-    exec node1 pg_autoctl run --background
-    wait until node1 state = demoted    timeout 120s
-    wait until node1 state = secondary  timeout 120s
+    compose start node1
+    wait until node1 state is demoted  timeout 120s
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 120s
 }
 
-step inject_error_on_primary {
-    # Break Postgres on node2 (now primary) by loading a non-existent
-    # extension, then restart it.  pg_autoctl should detect the failure and
-    # orchestrate a failover back to node1.
-    assert node2 state = primary
-    exec node2 sh -c "echo \"shared_preload_libraries='wrong_extension'\" >> /var/lib/postgresql/pgaf/postgresql.conf"
-    exec node2 pg_ctl restart -D /var/lib/postgresql/pgaf
-    wait until node1 state = wait_primary timeout 120s
-    wait until node2 state = secondary    timeout 120s
-    wait until node1 state = primary      timeout 120s
+step test_005_inject_error_in_node2 {
+    wait until node2 state is primary  timeout 60s
+    wait until node2 state is primary  timeout 90s
+    exec node2  bash -c "echo \"shared_preload_libraries='wrong_extension'\" >> /var/lib/postgres/pgaf/postgresql.conf"
+    stop postgres node2
+    wait until node1 state is wait_primary  timeout 120s
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 120s
 }
-
-sequence
-    init_with_postgres_stop
-    create_table
-    init_secondary_with_postgres_stop
-    demoted_transition
-    inject_error_on_primary

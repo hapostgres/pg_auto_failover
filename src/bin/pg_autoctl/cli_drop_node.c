@@ -47,6 +47,7 @@
  */
 bool dropAndDestroy = false;
 static bool dropForce = false;
+static bool dropNoWait = false;
 
 static void cli_drop_monitor(int argc, char **argv);
 
@@ -103,6 +104,7 @@ cli_drop_node_getopts(int argc, char **argv)
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "destroy", no_argument, NULL, 'd' },
 		{ "force", no_argument, NULL, 'F' },
+		{ "no-wait", no_argument, NULL, 'W' },
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "formation", required_argument, NULL, 'f' },
@@ -156,6 +158,13 @@ cli_drop_node_getopts(int argc, char **argv)
 			{
 				dropForce = true;
 				log_trace("--force");
+				break;
+			}
+
+			case 'W':
+			{
+				dropNoWait = true;
+				log_trace("--no-wait");
 				break;
 			}
 
@@ -592,6 +601,19 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 		int groupId = -1;
 
 		(void) cli_drop_node_from_monitor(config, &nodeId, &groupId);
+	}
+
+	/*
+	 * With --no-wait the caller takes responsibility for waiting until the
+	 * supervisor has stopped (e.g. via `docker compose wait` in a container
+	 * environment).  The running keeper will detect it has been dropped on its
+	 * next node_active() heartbeat and exit cleanly on its own.
+	 */
+	if (dropNoWait)
+	{
+		log_info("Node unregistered from monitor; not waiting for the local "
+				 "pg_autoctl process to stop (--no-wait).");
+		exit(EXIT_CODE_QUIT);
 	}
 
 	/*

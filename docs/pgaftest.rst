@@ -151,9 +151,87 @@ Options:
 * ``citus-secondary`` — marks this node as a Citus secondary.
 * ``citus-cluster-name NAME`` — sets the Citus cluster name.
 * ``port N`` — override the default Postgres port (5432).
-* ``debian-cluster NAME`` — Debian-style Postgres cluster name.
+* ``debian-cluster NAME`` — Debian-style Postgres cluster name.  The node
+  will use the Debian ``/var/lib/postgresql/<version>/<NAME>`` layout that
+  results from ``pg_createcluster``.  Requires the ``debian`` Dockerfile
+  build target; see ``monitor image-target`` below.
 * ``ssl MODE`` — per-node SSL mode override (overrides the cluster-level ``ssl``).
 * ``auth-method METHOD`` — per-node auth method override.
+* ``launch deferred`` — do not start this node automatically at ``compose up``
+  time.  Use ``compose start <node>`` inside a step to start it later.  This
+  is how tests that add nodes mid-scenario are written.
+* ``volume <name> <containerPath>`` — mount a Docker named volume into the
+  container at ``<containerPath>``.  The volume is created automatically.
+  Multiple ``volume`` lines are allowed.
+
+**Multi-option nodes — block syntax**
+
+When a node needs several options the block form keeps the spec readable:
+
+.. code-block:: text
+
+   node coordinator1b {
+       coordinator
+       candidate-priority 0
+       citus-secondary
+       citus-cluster-name readonly
+   }
+
+   node worker1b {
+       worker group 1
+       candidate-priority 0
+       citus-secondary
+       citus-cluster-name readonly
+   }
+
+   node node1 {
+       volume extra_a "/extra_volumes/extra_a"
+       volume extra_b "/extra_volumes/extra_b"
+   }
+
+The block form requires the ``node`` keyword before the name.  Flat (single-
+line) form does not use the keyword.  ``pgaftest indent`` automatically
+promotes a node to block form whenever the flat line would exceed 72 characters
+or the node has any ``volume`` entries.
+
+**Monitor options**
+
+.. code-block:: text
+
+   cluster {
+       monitor image-target testrun
+       monitor debian-cluster main
+       ...
+   }
+
+``monitor image-target <name>``
+  Use the specified Dockerfile build stage for the monitor container instead
+  of the default ``run`` stage.  Useful when the monitor needs extra tools
+  (e.g. ``testrun`` for ``make installcheck``, ``test`` for the build
+  environment).
+
+``monitor debian-cluster <name>``
+  Mark the monitor container as Debian-style: use the ``debian`` Dockerfile
+  target and set ``PGDATA`` to ``/var/lib/postgresql/<version>/<name>``.
+
+``monitor <name> initially stopped``
+  Declare a second monitor service named ``<name>``.  The container is
+  created and initialized at ``compose up`` time (so its data volume is
+  ready), but ``pgaftest`` immediately stops it.  Use this for
+  monitor-replacement scenarios where the second monitor must exist on disk
+  but must not be reachable until the test deliberately starts it with
+  ``compose start <name>``.
+
+  .. code-block:: text
+
+     cluster {
+         monitor
+         monitor monitor2 initially stopped
+         formation {
+             node1
+             node2
+         }
+     }
 
 **Examples**
 
@@ -304,21 +382,160 @@ that a command is correctly rejected by pg_autoctl.
    # failover with a single node (no standby) must fail
    exec-fails monitor  pg_autoctl perform failover
 
-``wait until <node> state = <state>  [timeout Ns]``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``wait until <node> state is <state>  [timeout Ns]``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Poll the monitor until ``<node>`` reports ``<state>``.  The timeout defaults
-to 90 seconds.  Fails the current step if the timeout expires.
+Poll until ``<node>`` reaches ``<state>``, then continue.  The timeout
+defaults to 90 seconds.  Fails the current step if the timeout expires.
+Both ``is`` and ``=`` are accepted as the state operator.
 
 .. code-block:: text
 
-   wait until node1 state = primary   timeout 120s
-   wait until node2 state = secondary timeout 60s
-   wait until node2 state = wait_primary
+   wait until node1 state is primary        timeout 120s
+   wait until node2 state is secondary      timeout 60s
+   wait until node2 state is demote_timeout timeout 90s
 
-Valid state names are the pg_auto_failover FSM states: ``primary``,
-``secondary``, ``wait_primary``, ``draining``, ``demoted``,
-``maintenance``, ``join_primary``, ``catchingup``, etc.
+**Multi-node form** — wait for several nodes simultaneously using ``and``:
+
+.. code-block:: text
+
+   wait until node1 state is primary
+       and node2 state is secondary
+       timeout 90s
+
+   wait until coordinator1a state is primary
+       and coordinator1b state is secondary
+       and worker1a state is primary
+       timeout 120s
+
+Each ``and <node> state is <state>`` condition must be satisfied at the same
+time for the wait to succeed.
+
+**Pass-through states** — assert that a node visits intermediate states on
+the way to the target:
+
+.. code-block:: text
+
+   wait until node2 state is primary
+       passing through stop_replication, draining
+       timeout 120s
+
+The runner observes monitor LISTEN/NOTIFY notifications; a pass-through state
+is satisfied when a notification for that state is received before the target
+state notification arrives.
+
+**State names** — all pg_auto_failover FSM states are first-class tokens in
+the spec DSL.  Both ``_`` and ``-`` spellings are accepted:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 30 40
+
+   * - Token
+     - Aliases
+     - Description
+   * - ``init``
+     -
+     - Node has just been created
+   * - ``single``
+     -
+     - Single-node cluster (no standby yet)
+   * - ``primary``
+     -
+     - Running as primary
+   * - ``wait_primary``
+     - ``wait-primary``
+     - Waiting for a standby to connect
+   * - ``wait_standby``
+     - ``wait-standby``
+     - Primary waiting for first standby
+   * - ``secondary``
+     -
+     - Running as synchronous standby
+   * - ``catchingup``
+     -
+     - Standby catching up after promotion or restart
+   * - ``draining``
+     -
+     - Primary draining before demotion
+   * - ``demote_timeout``
+     - ``demote-timeout``
+     - Former primary waiting for demotion timer
+   * - ``demoted``
+     -
+     - Former primary; postgres stopped
+   * - ``maintenance``
+     -
+     - Node paused for maintenance
+   * - ``prepare_maintenance``
+     - ``prepare-maintenance``
+     - Transition into maintenance
+   * - ``wait_maintenance``
+     - ``wait-maintenance``
+     - Standby waiting while primary enters maintenance
+   * - ``join_primary``
+     - ``join-primary``
+     - New node joining as primary
+   * - ``apply_settings``
+     - ``apply-settings``
+     - Applying configuration changes
+   * - ``report_lsn``
+     - ``report-lsn``
+     - Standby reporting its LSN for promotion selection
+   * - ``fast_forward``
+     - ``fast-forward``
+     - Standby fast-forwarding to primary's LSN
+   * - ``join_secondary``
+     - ``join-secondary``
+     - New node joining as secondary
+   * - ``prepare_promotion``
+     - ``prepare-promotion``
+     - Standby preparing to be promoted
+   * - ``stop_replication``
+     - ``stop-replication``
+     - Standby stopping replication before promotion
+   * - ``dropped``
+     -
+     - Node has been dropped from the formation
+
+**Dual-source polling** — the runner queries two sources in each polling
+round, succeeding as soon as either returns a match:
+
+1. **Monitor** (``pg_autoctl inspect monitor node-state``): checks the
+   ``reportedstate`` column in ``pgautofailover.node``.  This is the primary
+   source; it captures fast FSM transitions correctly because the monitor's
+   view lags by exactly one keeper heartbeat.
+
+2. **Node-local FSM** (``pg_autoctl inspect fsm node-state``): checks the
+   keeper's on-disk ``current_role`` in the state file inside the container.
+   This source is consulted **only** when the monitor reports ``health < 0``
+   (node is unhealthy / unreachable) for the target node.  A network-
+   partitioned primary self-assigns ``demote_timeout`` locally after
+   ``network_partition_timeout`` seconds (default 20 s) even though it cannot
+   report that state back to the monitor.  Gating the node-local check on the
+   monitor's health value avoids false positives from stale on-disk state
+   while correctly observing partition-driven transitions.
+
+.. note::
+
+   The dual-source strategy lets tests write ``wait until node2 state =
+   demote_timeout`` after a ``network disconnect node2`` without any special
+   syntax.  The runner detects the partition automatically.
+
+``wait until <state1>, <state2>, ... [in group N] [timeout Ns]``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Wait until the formation as a whole has at least one node in each of the
+listed states simultaneously.  Useful for asserting cluster-wide convergence
+after a failover.
+
+.. code-block:: text
+
+   # Wait for primary + secondary simultaneously
+   wait until primary, secondary timeout 120s
+
+   # Wait for specific group
+   wait until primary, secondary in group 1 timeout 90s
 
 ``assert <node> state = <state>``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -446,6 +663,157 @@ up after a test run.
    teardown {
        compose down
    }
+
+``compose start <service>``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Start a stopped container.  Equivalent to ``docker compose start <service>``.
+Pairs with ``compose stop`` and ``launch deferred`` node declarations.
+
+.. code-block:: text
+
+   compose start node2
+
+``compose stop <service>``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Stop a container cleanly (SIGTERM + grace period).  Equivalent to
+``docker compose stop <service>``.  Use this to simulate a process crash or
+clean node shutdown.
+
+.. code-block:: text
+
+   compose stop node1
+   wait until node2 state is wait_primary  timeout 90s
+
+``compose kill <service>``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Kill a container immediately with SIGKILL.  Equivalent to
+``docker compose kill <service>``.  Use when a clean shutdown would allow
+the node to complete its shutdown sequence — which some tests intentionally
+want to avoid.
+
+.. code-block:: text
+
+   compose kill node1
+
+``set monitor <service>``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Switch the runner's active monitor to ``<service>``.  After this command:
+
+* LISTEN/NOTIFY reconnects to ``<service>`` — subsequent ``wait until`` and
+  formation-state checks use the new monitor.
+* ``monitor_get_node_state`` queries ``<service>`` for implicit post-exec
+  state verification.
+
+Use this in monitor-replacement tests immediately after starting the new
+monitor container, so that all subsequent runner operations target it instead
+of the original (stopped) monitor.
+
+.. code-block:: text
+
+   step switch_to_new_monitor {
+       compose start monitor2
+       sleep 5s
+       exec monitor2  pg_autoctl inspect pgsetup wait
+       set monitor monitor2
+   }
+
+   step reconnect_node1 {
+       exec node1  pg_autoctl enable monitor postgresql://autoctl_node@monitor2/pg_auto_failover
+       wait until node1 state is single  timeout 60s
+   }
+
+``logs <svc> [not] contains "<pattern>"``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Assert that the container log output of ``<svc>`` contains (or does not
+contain) the literal string ``<pattern>``.  The runner runs
+``docker compose logs --no-color <svc>`` and pipes through ``grep -qF``.
+
+.. code-block:: text
+
+   logs node2  contains "password=****"
+   logs node2  not contains "plaintext_secret"
+
+``logs <svc> [not] matches "<pattern>"``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Like ``logs … contains`` but uses PCRE via ``grep -qP``.  Use this for
+regular-expression patterns, including negative lookahead assertions.
+
+.. code-block:: text
+
+   logs node2  not matches "^(?!primary_conninfo|Failed to find).*streaming_password"
+
+The example asserts that no log line contains ``streaming_password`` unless
+the line also starts with ``primary_conninfo`` or ``Failed to find`` — the
+two expected contexts where the password legitimately appears.
+
+``stop postgres <node>``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Stop the Postgres server inside ``<node>``'s container without stopping the
+``pg_autoctl`` supervisor.  Equivalent to calling
+``pg_autoctl manual service pgctl off`` inside the container.  The supervisor detects
+the outage and reacts according to the FSM.
+
+.. code-block:: text
+
+   exec node1   pg_autoctl enable maintenance
+   wait until node1 state is maintenance  timeout 60s
+   stop postgres node1
+
+``start postgres <node>``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Restart the Postgres server inside ``<node>``'s container via the
+``pg_autoctl`` supervisor (``pg_autoctl manual pgctl on``).
+
+.. code-block:: text
+
+   start postgres node1
+
+``promote <node>[, <node>, ...]``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Assign ``pg_autoctl perform promotion`` to the listed nodes, one per group.
+Useful after setup to designate which node becomes primary in each group.
+
+.. code-block:: text
+
+   promote node1
+   promote coordinator1a, worker1a, worker2a
+
+``assert <node> stays <state> while { }``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Assert that ``<node>`` remains in ``<state>`` throughout the execution of all
+commands in the ``while { }`` body.  The state is checked before and after
+each inner command; any deviation fails the step.
+
+.. code-block:: text
+
+   assert node1 stays secondary while {
+       exec node2  pg_autoctl enable maintenance
+       wait until node2 state is maintenance  timeout 60s
+       exec node2  pg_autoctl disable maintenance
+       wait until node2 state is secondary    timeout 60s
+   }
+
+``%CIDR%`` macro
+~~~~~~~~~~~~~~~~~
+
+The literal token ``%CIDR%`` is expanded to the Docker network CIDR (e.g.
+``172.31.0.0/16``) in any ``exec`` or ``exec-fails`` command argument.  The
+expanded value is logged on a separate line.  Use it to scope HBA rules to
+the test network instead of ``0.0.0.0/0``:
+
+.. code-block:: text
+
+   exec monitor  bash -c "echo 'host all all %CIDR% trust' >> /var/lib/postgres/pgaf/pg_hba.conf"
 
 TAP output
 ----------
@@ -626,6 +994,73 @@ change ``node2``'s candidate priority without restarting the container:
    # Verify on the monitor:
    docker compose exec monitor \
      pg_autoctl get node candidate-priority --pgdata /var/lib/postgres/pgaf
+
+pg_autoctl inspect commands used by pgaftest
+--------------------------------------------
+
+``pgaftest`` talks to the containers exclusively through ``pg_autoctl``
+subcommands via ``docker compose exec``.  No psql scripts, no port
+forwarding.  The relevant commands are:
+
+``pg_autoctl inspect monitor node-state``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Runs on the **monitor** container.  Queries ``pgautofailover.node`` and
+prints one line::
+
+   <reportedstate>|<goalstate>|<health>
+
+``health`` is the integer from the monitor's health-check column:
+``1`` = healthy, ``-1`` = unhealthy (keeper unreachable).
+
+With ``--name <node>`` and ``--state <target>`` the command exits 0 only
+when ``reportedstate`` equals ``<target>``.  ``--timeout N`` retries for up
+to ``N`` seconds using exponential back-off.
+
+.. code-block:: bash
+
+   # One-shot query (prints reported|goal|health)
+   docker compose exec -T monitor \
+     pg_autoctl inspect monitor node-state --name node2
+
+   # Wait up to 90 s for node2 to report "secondary"
+   docker compose exec -T monitor \
+     pg_autoctl inspect monitor node-state \
+       --name node2 --state secondary --timeout 90
+
+``pg_autoctl inspect fsm node-state``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Runs on a **data node** container.  Reads the keeper's on-disk state file
+and prints::
+
+   <current_role>|<assigned_role>
+
+``current_role`` is the keeper's authoritative local state.  It is updated
+by the keeper even when the node cannot reach the monitor — for example, a
+partitioned primary self-assigns ``demote_timeout`` after
+``network_partition_timeout`` (default 20 s) without any monitor contact.
+
+With ``--state <target>`` exits 0 when ``current_role`` equals ``<target>``.
+``--timeout N`` retries for up to ``N`` seconds.
+
+.. code-block:: bash
+
+   # Check that a partitioned primary has self-assigned demote_timeout
+   docker compose exec -T node2 \
+     pg_autoctl inspect fsm node-state --state demote_timeout --timeout 60
+
+``pg_autoctl inspect monitor formation-states``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Runs on the **monitor** container.  Waits until the formation has at least
+one node in each of the listed states simultaneously, then exits 0.
+
+.. code-block:: bash
+
+   docker compose exec -T monitor \
+     pg_autoctl inspect monitor formation-states \
+       --timeout 120 primary secondary
 
 See also
 --------

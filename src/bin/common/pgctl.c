@@ -2057,6 +2057,31 @@ pg_ctl_promote(const char *pg_ctl, const char *pgdata)
 
 
 /*
+ * pg_ctl_reload reloads Postgres configuration by running "pg_ctl reload".
+ * Does not require a libpq connection — useful when HBA hasn't been set up yet.
+ */
+bool
+pg_ctl_reload(const char *pg_ctl, const char *pgdata)
+{
+	Program program = run_program(pg_ctl, "-D", pgdata, "reload", NULL);
+	int returnCode = program.returnCode;
+
+	if (program.stdErr != NULL)
+		log_debug("%s", program.stdErr);
+
+	free_program(&program);
+
+	if (returnCode != 0)
+	{
+		log_error("pg_ctl reload -D %s failed (exit %d)", pgdata, returnCode);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * pg_setup_standby_mode sets up standby mode by either writing a recovery.conf
  * file or adding the configuration items to postgresql.conf and then creating
  * a standby.signal file in PGDATA.

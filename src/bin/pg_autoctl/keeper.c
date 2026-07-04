@@ -1630,6 +1630,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
 		bool mayRetry = false;
+		bool formationMissing = false;
 
 		/*
 		 * When registering to the monitor, we get assigned a nodeId, that we
@@ -1670,6 +1671,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 								  config->pgSetup.settings.replicationQuorum,
 								  config->pgSetup.citusClusterName,
 								  &mayRetry,
+								  &formationMissing,
 								  &assignedState))
 		{
 			/* registration was successful, break out of the retry loop */
@@ -1682,22 +1684,8 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 			goto rollback;
 		}
 
-		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
-
-		log_warn("Failed to register node %s:%d in group %d of "
-				 "formation \"%s\" with initial state \"%s\" "
-				 "because the monitor is already registering another "
-				 "standby, retrying in %d ms",
-				 config->hostname,
-				 config->pgSetup.pgport,
-				 config->groupId,
-				 config->formation,
-				 NodeStateToString(initialState),
-				 sleepTimeMs);
-
 		/*
-		 * The current transaction is dead: we caugth an ERROR from the
-		 * call to pgautofailover.register_node().
+		 * The current transaction is dead: roll it back before sleeping.
 		 */
 		if (!pgsql_rollback(&(monitor->pgsql)))
 		{
@@ -1705,6 +1693,35 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 					  " on the monitor, see above for details.");
 			pgsql_finish(&(monitor->pgsql));
 			return false;
+		}
+
+		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		if (formationMissing)
+		{
+			/*
+			 * The formation doesn't exist on the monitor yet.  This is
+			 * normal in test environments where "pg_autoctl node run" on the
+			 * monitor creates it shortly after the data nodes start.  Wait
+			 * and retry; don't auto-create — a missing formation in
+			 * production likely indicates a configuration error.
+			 */
+			log_info("Formation \"%s\" does not exist on the monitor yet, "
+					 "retrying in %d ms",
+					 config->formation, sleepTimeMs);
+		}
+		else
+		{
+			log_warn("Failed to register node %s:%d in group %d of "
+					 "formation \"%s\" with initial state \"%s\" "
+					 "because the monitor is already registering another "
+					 "standby, retrying in %d ms",
+					 config->hostname,
+					 config->pgSetup.pgport,
+					 config->groupId,
+					 config->formation,
+					 NodeStateToString(initialState),
+					 sleepTimeMs);
 		}
 
 		/* we have milliseconds, pg_usleep() wants microseconds */
@@ -1859,6 +1876,7 @@ keeper_register_again(Keeper *keeper)
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
 		bool mayRetry = false;
+		bool formationMissing = false;  /* re-registration: formation always exists */
 
 		if (monitor_register_node(monitor,
 								  config->formation,
@@ -1875,6 +1893,7 @@ keeper_register_again(Keeper *keeper)
 								  config->pgSetup.settings.replicationQuorum,
 								  DEFAULT_CITUS_CLUSTER_NAME,
 								  &mayRetry,
+								  &formationMissing,
 								  &assignedState))
 		{
 			/* registration was successful, break out of the retry loop */
@@ -2077,18 +2096,38 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 
 	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
 
+	/*
+	 * cert auth for replication uses "cert map=pgautofailover" so that the
+	 * autoctl_node client certificate CN maps to pgautofailover_replicator.
+	 */
+	bool isCertAuth = (strcmp(authMethod, "cert") == 0);
+	const char *replAuth = isCertAuth ? "cert map=pgautofailover" : authMethod;
+
 	if (!pghba_ensure_host_rules_exist(hbaFilePath,
 									   diffNodesArray,
-									   postgresSetup->ssl.active,
+									   postgresSetup->ssl.active || isCertAuth,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
-									   authMethod,
+									   replAuth,
 									   keeper->config.pgSetup.hbaLevel))
 	{
 		log_error("Failed to edit HBA file \"%s\" to update rules to current "
 				  "list of nodes registered on the monitor",
 				  hbaFilePath);
 		return false;
+	}
+
+	if (isCertAuth &&
+		keeper->config.pgSetup.hbaLevel >= HBA_EDIT_MINIMAL)
+	{
+		if (!pghba_ensure_ident_map_entry(postgresSetup->pgdata,
+										  "pgautofailover",
+										  PG_AUTOCTL_MONITOR_USERNAME,
+										  PG_AUTOCTL_REPLICA_USERNAME))
+		{
+			log_error("Failed to add cert ident map entry to pg_ident.conf");
+			return false;
+		}
 	}
 
 	/*

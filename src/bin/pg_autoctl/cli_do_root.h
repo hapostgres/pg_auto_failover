@@ -17,6 +17,7 @@
 extern CommandLine do_fsm_commands;
 /* read-only sub-commands exposed via "pg_autoctl inspect fsm" */
 extern CommandLine fsm_state;
+extern CommandLine fsm_node_state;
 extern CommandLine fsm_list;
 extern CommandLine fsm_gv;
 /* mutating sub-commands exposed via "pg_autoctl manual fsm" */
@@ -30,6 +31,8 @@ extern CommandLine do_monitor_commands;
 /* read-only sub-commands exposed via "pg_autoctl inspect monitor" */
 extern CommandLine monitor_get_command;
 extern CommandLine monitor_parse_notification_command;
+extern CommandLine monitor_node_state_command;
+extern CommandLine monitor_formation_states_command;
 /* mutating sub-commands exposed via "pg_autoctl manual monitor" */
 extern CommandLine monitor_register_command;
 extern CommandLine monitor_node_active_command;
@@ -109,9 +112,11 @@ void keeper_cli_disable_synchronous_replication(int argc, char **argv);
 void keeper_cli_pgsetup_pg_ctl(int argc, char **argv);
 void keeper_cli_pgsetup_discover(int argc, char **argv);
 void keeper_cli_pgsetup_is_ready(int argc, char **argv);
+int  keeper_cli_pgsetup_wait_getopts(int argc, char **argv);
 void keeper_cli_pgsetup_wait_until_ready(int argc, char **argv);
 void keeper_cli_pgsetup_startup_logs(int argc, char **argv);
 void keeper_cli_pgsetup_tune(int argc, char **argv);
+void keeper_cli_pgsetup_hba_lan(int argc, char **argv);
 
 void keeper_cli_add_default_settings(int argc, char **argv);
 void keeper_cli_create_monitor_user(int argc, char **argv);

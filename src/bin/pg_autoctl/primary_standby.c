@@ -454,6 +454,14 @@ upstream_has_replication_slot(ReplicationSource *upstream,
 	 */
 	pg_setup_get_local_connection_string(&upstreamSetup, connectionString);
 
+	if (!IS_EMPTY_STRING_BUFFER(upstream->password))
+	{
+		char connWithPw[MAXCONNINFO];
+		sformat(connWithPw, sizeof(connWithPw), "%s password=%s",
+				connectionString, upstream->password);
+		strlcpy(connectionString, connWithPw, sizeof(connectionString));
+	}
+
 	if (!pgsql_init(&upstreamClient, connectionString, PGSQL_CONN_UPSTREAM))
 	{
 		/* errors have already been logged */
@@ -839,6 +847,10 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 	if (targetLSN != NULL)
 	{
 		strlcpy(upstream->targetLSN, targetLSN, PG_LSN_MAXLENGTH);
+	}
+	else
+	{
+		upstream->targetLSN[0] = '\0';
 	}
 
 	upstream->sslOptions = sslOptions;

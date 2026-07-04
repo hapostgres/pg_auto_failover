@@ -30,9 +30,16 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "pgctl.h"
+#include "pghba.h"
+#include "pgsetup.h"
+#include "pgsql.h"
 #include "pgtuning.h"
 #include "primary_standby.h"
 #include "string_utils.h"
+
+/* Options specific to "pg_autoctl inspect pgsetup wait" */
+static bool pgsetupWaitReadWrite = false;
+static int  pgsetupWaitTimeout   = 30;
 
 
 /*
@@ -319,17 +326,111 @@ keeper_cli_pgsetup_is_ready(int argc, char **argv)
 
 
 /*
- * keeper_cli_discover_pg_setup implements the CLI to discover a PostgreSQL
- * setup thanks to PGDATA and other environment variables.
+ * keeper_cli_pgsetup_wait_getopts parses options specific to
+ * "pg_autoctl inspect pgsetup wait": --read-write, --timeout, plus the
+ * standard Postgres connection options inherited from the keeper setup.
+ */
+int
+keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
+{
+	/*
+	 * Delegate standard keeper options to keeper_cli_keeper_setup_getopts,
+	 * which populates keeperOptions.  Then do a second scan with opterr=0 to
+	 * pick up the two new flags that the common function doesn't know about.
+	 * Because getopt_long returns '?' for unknown flags (and we suppress the
+	 * error message), we only act on 'W' and 'T' and ignore everything else.
+	 */
+	int rc = keeper_cli_keeper_setup_getopts(argc, argv);
+
+	/* Reset module-level wait options */
+	pgsetupWaitReadWrite = false;
+	pgsetupWaitTimeout   = 30;
+
+	static struct option wait_options[] = {
+		{ "read-write", no_argument,       NULL, 'W' },
+		{ "timeout",    required_argument, NULL, 'T' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 1;
+	opterr = 0;
+
+	int c;
+	int option_index = 0;
+
+	while ((c = getopt_long(argc, argv, "WT:", wait_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'W':
+				pgsetupWaitReadWrite = true;
+				break;
+
+			case 'T':
+			{
+				int t = strtol(optarg, NULL, 10);
+				if (t <= 0)
+				{
+					log_error("--timeout must be a positive integer");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				pgsetupWaitTimeout = t;
+				break;
+			}
+
+			default:
+				/* all other options handled by the first pass above */
+				break;
+		}
+	}
+
+	opterr = 1;
+
+	return rc;
+}
+
+
+/*
+ * keeper_cli_pgsetup_wait_until_ready waits for the local Postgres server to
+ * become ready.  When --read-write is given, it additionally waits until the
+ * server is accepting read-write connections (not in recovery and not set to
+ * default_transaction_read_only).
+ *
+ * The --timeout value (default 30s) is a single deadline shared by both
+ * phases: the pg_is_ready poll and the subsequent read-write connection
+ * attempt.  Time spent waiting for Postgres to start counts against the
+ * budget for the read-write phase.
  */
 void
 keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 {
-	int timeout = 30;
+	int timeout = pgsetupWaitTimeout;
 
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
 	PostgresSetup *pgSetup = &(postgres.postgresSetup);
+
+	/* Record wall-clock start so all phases share one deadline. */
+	time_t startTime = time(NULL);
+
+	/* Wait up to `timeout` seconds for the config file to be created.
+	 * In no-monitor mode, pg_autoctl create postgres runs first and writes the
+	 * config; pgsetup wait may be called before that completes. */
+	{
+		KeeperConfig kconfig = keeperOptions;
+		if (keeper_config_set_pathnames_from_pgdata(&(kconfig.pathnames),
+		                                             kconfig.pgSetup.pgdata))
+		{
+			time_t deadline = startTime + timeout;
+			while (!file_exists(kconfig.pathnames.config) &&
+			       time(NULL) < deadline)
+			{
+				log_debug("Waiting for config file \"%s\" to appear",
+				          kconfig.pathnames.config);
+				pg_usleep(500 * 1000);
+			}
+		}
+	}
 
 	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
@@ -339,15 +440,105 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 
 	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
 
-	bool pgIsReady = pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_INFO);
+	/*
+	 * Phase 1: wait for postmaster to signal "ready" in postmaster.pid.
+	 * Pass the remaining timeout so the two phases together stay within the
+	 * single user-visible deadline.
+	 */
+	int remainingAfterConfig = timeout - (int) (time(NULL) - startTime);
+	if (remainingAfterConfig <= 0)
+	{
+		log_error("Timed out waiting for Postgres config file to appear");
+		exit(EXIT_CODE_PGSQL);
+	}
+
+	bool pgIsReady =
+		pg_setup_wait_until_is_ready(pgSetup, remainingAfterConfig, LOG_INFO);
 
 	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup->pm_status));
 
-	if (pgIsReady)
+	if (!pgIsReady)
 	{
+		exit(EXIT_CODE_PGSQL);
+	}
+
+	if (!pgsetupWaitReadWrite)
+	{
+		/* Plain "ready" check — we're done. */
 		exit(EXIT_CODE_QUIT);
 	}
-	exit(EXIT_CODE_PGSQL);
+
+	/*
+	 * Phase 2: wait until the server accepts read-write connections.
+	 *
+	 * Postgres is up (phase 1 passed) but may still be in recovery, finishing
+	 * pg_rewind, or in standby mode.  We poll with a libpq connection that
+	 * checks pg_is_in_recovery() until it returns false or the deadline fires.
+	 *
+	 * We use the local connection string from pgSetup (Unix socket when
+	 * available, matching whatever auth the node was created with) so that the
+	 * check works regardless of the cluster's auth method.
+	 */
+	char connstr[MAXCONNINFO];
+	if (!pg_setup_get_local_connection_string(pgSetup, connstr))
+	{
+		log_error("Failed to build local connection string for read-write check");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	log_info("Waiting for Postgres to accept read-write connections "
+	         "(timeout %ds)", timeout);
+
+	bool isReadWrite = false;
+	int attempts = 0;
+
+	while (!isReadWrite)
+	{
+		int elapsed  = (int) (time(NULL) - startTime);
+		int remaining = timeout - elapsed;
+
+		if (remaining <= 0)
+		{
+			log_error("Timed out after %ds waiting for Postgres "
+			          "to accept read-write connections", timeout);
+			exit(EXIT_CODE_PGSQL);
+		}
+
+		/* Use a short per-attempt connect_timeout so we retry briskly. */
+		char attemptConnstr[MAXCONNINFO];
+		snprintf(attemptConnstr, sizeof(attemptConnstr),
+		         "%s connect_timeout=1", connstr);
+
+		PGSQL pgsql = { 0 };
+		pgsql_init(&pgsql, attemptConnstr, PGSQL_CONN_LOCAL);
+
+		bool inRecovery = true;   /* assume standby until proven otherwise */
+		bool queryOk    = pgsql_is_in_recovery(&pgsql, &inRecovery);
+		pgsql_finish(&pgsql);
+
+		if (queryOk && !inRecovery)
+		{
+			isReadWrite = true;
+			break;
+		}
+
+		/* let's not be THAT verbose about it */
+		if (attempts % 10 == 0)
+		{
+			log_debug("pgsetup wait --read-write: attempt %d, "
+			          "in_recovery=%s, after %ds",
+			          attempts + 1,
+			          inRecovery ? "true" : "false",
+			          elapsed);
+		}
+
+		++attempts;
+		pg_usleep(100 * 1000);   /* 100 ms between probes */
+	}
+
+	log_info("Postgres is now accepting read-write connections on port %d",
+	         pgSetup->pgport);
+	exit(EXIT_CODE_QUIT);
 }
 
 
@@ -390,6 +581,115 @@ keeper_cli_pgsetup_tune(int argc, char **argv)
 	}
 
 	fformat(stdout, "%s\n", config);
+}
+
+
+/*
+ * keeper_cli_pgsetup_hba_lan appends LAN CIDR trust rules to pg_hba.conf
+ * without connecting to Postgres (safe when TCP HBA hasn't been set up yet),
+ * then reloads the configuration via pg_ctl.
+ *
+ * Intended for --skip-pg-hba setups where the operator needs to seed the
+ * initial trust rules before pg_autoctl or replication can connect via TCP.
+ *
+ * Sequence:
+ *   1. Wait up to 60 s for $PGDATA/pg_hba.conf to appear.
+ *   2. Append "host all all <LAN-CIDR> trust" and
+ *      "host replication all <LAN-CIDR> trust" directly to the file.
+ *   3. Wait for Postgres to be running (reads postmaster.pid, no TCP).
+ *   4. pg_ctl reload -D $PGDATA.
+ */
+void
+keeper_cli_pgsetup_hba_lan(int argc, char **argv)
+{
+	ConfigFilePaths pathnames = { 0 };
+	LocalPostgresServer postgres = { 0 };
+	PostgresSetup *pgSetup = &(postgres.postgresSetup);
+
+	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
+	{
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	const char *pgdata = pgSetup->pgdata;
+	char hbaFile[MAXPGPATH];
+	sformat(hbaFile, MAXPGPATH, "%s/pg_hba.conf", pgdata);
+
+	/* Step 1: wait for pg_hba.conf to appear */
+	{
+		int timeout = 60;
+		time_t deadline = time(NULL) + timeout;
+		while (!file_exists(hbaFile) && time(NULL) < deadline)
+		{
+			log_debug("Waiting for \"%s\" to appear", hbaFile);
+			pg_usleep(500 * 1000);
+		}
+		if (!file_exists(hbaFile))
+		{
+			log_error("Timed out waiting for \"%s\" to appear", hbaFile);
+			exit(EXIT_CODE_PGCTL);
+		}
+	}
+
+	/* Step 2: append LAN CIDR rules directly to the file (no TCP) */
+	const char *hostname = pgSetup->pghost;
+
+	/* --auth <method> defaults to "trust"; --ssl enables hostssl rules */
+	const char *authMethod = keeperOptions.pgSetup.authMethod;
+	if (IS_EMPTY_STRING_BUFFER(authMethod))
+		authMethod = "trust";
+	bool useSSL = keeperOptions.pgSetup.ssl.active;
+
+	/* cert auth for replication needs an ident map */
+	bool isCert = (strcmp(authMethod, "cert") == 0);
+	const char *replAuth = isCert ? "cert map=pgautofailover" : authMethod;
+
+	if (!pghba_enable_lan_cidr(NULL, useSSL,
+							   HBA_DATABASE_ALL, NULL,
+							   hostname, NULL, authMethod,
+							   HBA_EDIT_MINIMAL,
+							   pgdata))
+	{
+		log_error("Failed to add LAN CIDR HBA rule for \"all\" databases");
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	if (!pghba_enable_lan_cidr(NULL, useSSL,
+							   HBA_DATABASE_REPLICATION, NULL,
+							   hostname, NULL, replAuth,
+							   HBA_EDIT_MINIMAL,
+							   pgdata))
+	{
+		log_error("Failed to add LAN CIDR HBA rule for replication");
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	/* cert auth requires an ident map entry in pg_ident.conf */
+	if (isCert)
+	{
+		if (!pghba_ensure_ident_map_entry(pgdata,
+										  "pgautofailover",
+										  PG_AUTOCTL_MONITOR_USERNAME,
+										  PG_AUTOCTL_REPLICA_USERNAME))
+		{
+			log_error("Failed to add cert ident map entry to pg_ident.conf");
+			exit(EXIT_CODE_PGCTL);
+		}
+	}
+
+	/* Step 3: wait for Postgres to be running (PID file, no TCP needed) */
+	if (!pg_setup_wait_until_is_ready(pgSetup, 60, LOG_INFO))
+	{
+		log_error("Postgres did not become ready within 60 s");
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	/* Step 4: reload so the new HBA rules take effect */
+	log_info("Reloading Postgres configuration in \"%s\"", pgdata);
+	if (!pg_ctl_reload(pgSetup->pg_ctl, pgdata))
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
 }
 
 

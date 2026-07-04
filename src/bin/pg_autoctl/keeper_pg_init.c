@@ -908,6 +908,23 @@ create_database_and_extension(Keeper *keeper)
 	}
 
 	/*
+	 * cert auth for replication requires an ident map so the autoctl_node
+	 * client cert CN maps to the pgautofailover_replicator Postgres role.
+	 */
+	if (strcmp(pg_setup_get_auth_method(pgSetup), "cert") == 0 &&
+		pgSetup->hbaLevel >= HBA_EDIT_MINIMAL)
+	{
+		if (!pghba_ensure_ident_map_entry(pgSetup->pgdata,
+										  "pgautofailover",
+										  PG_AUTOCTL_MONITOR_USERNAME,
+										  PG_AUTOCTL_REPLICA_USERNAME))
+		{
+			log_error("Failed to add cert ident map entry to pg_ident.conf");
+			return false;
+		}
+	}
+
+	/*
 	 * In test environments using PG_REGRESS_SOCK_DIR="" to disable unix socket
 	 * directory, we have to connect to the address from pghost.
 	 */

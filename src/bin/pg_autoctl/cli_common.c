@@ -495,6 +495,24 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'W':
+			{
+				/* { "monitor-password", required_argument, NULL, 'W' } */
+				strlcpy(LocalOptionConfig.monitor_password, optarg,
+						sizeof(LocalOptionConfig.monitor_password));
+				log_trace("--monitor-password ****");
+				break;
+			}
+
+			case 'w':
+			{
+				/* { "replication-password", required_argument, NULL, 'w' } */
+				strlcpy(LocalOptionConfig.replication_password, optarg,
+						sizeof(LocalOptionConfig.replication_password));
+				log_trace("--replication-password ****");
+				break;
+			}
+
 			/*
 			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
 			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }

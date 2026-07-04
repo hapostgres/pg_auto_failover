@@ -1,7 +1,15 @@
 # Test operating pg_autoctl without a monitor ("monitor disabled" mode).
-# The FSM is driven manually via pg_autoctl do fsm assign / nodes set.
+# The FSM is driven manually via pg_autoctl manual fsm assign / nodes set.
+#
+# No-monitor nodes start pg_autoctl node run automatically (like all nodes)
+# but with no_monitor = true in the ini, so there is no monitor registration.
+# Each test step drives the FSM manually.
+#
+# Ported from tests/test_monitor_disabled.py
+# Predecessor: tests/test_monitor_disabled.py
 
 cluster {
+    ssl off
     formation {
         node1 no-monitor
         node2 no-monitor
@@ -16,101 +24,68 @@ teardown {
     compose down
 }
 
-step init_node1 {
-    exec node1 pg_autoctl run --background --name a
+step test_002_init_to_single {
+    sleep 5s
+    exec node1  pg_autoctl manual fsm assign single
+    exec node1  pg_autoctl inspect pgsetup wait
 }
 
-step assign_single {
-    exec node1 pg_autoctl do fsm assign single
-}
-
-step create_table {
+step test_003_create_t1 {
     sql node1 { CREATE TABLE t1(a int); }
     sql node1 { INSERT INTO t1 VALUES (1), (2); }
 }
 
-step init_node2 {
-    exec node2 pg_autoctl run --background --name b
+step test_004_init_secondary {
+    sleep 5s
 }
 
-step fsm_nodes_set_two_nodes {
-    # Nodes array is built from node1 (primary candidate) and node2
-    # (standby candidate) with LSN 0/1 as placeholder.
-    exec node1 pg_autoctl do fsm nodes set \
-        '[ {"nodeId":1,"nodeName":"a","nodeHost":"node1","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":true}, \
-           {"nodeId":2,"nodeName":"b","nodeHost":"node2","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":false} ]'
-    exec node2 pg_autoctl do fsm nodes set \
-        '[ {"nodeId":1,"nodeName":"a","nodeHost":"node1","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":true}, \
-           {"nodeId":2,"nodeName":"b","nodeHost":"node2","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":false} ]'
+step test_005_fsm_nodes_set {
+    exec node1  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes12.json && pg_autoctl manual fsm nodes set /tmp/nodes12.json'
+    exec node2  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes12.json && pg_autoctl manual fsm nodes set /tmp/nodes12.json'
 }
 
-step assign_wait_standby {
-    exec node2 pg_autoctl do fsm assign wait_standby
+step test_006_init_to_wait_standby {
+    exec node2  pg_autoctl manual fsm assign wait_standby
 }
 
-step assign_catchingup {
-    exec node1 pg_autoctl do fsm assign wait_primary
-    exec node2 pg_autoctl do fsm assign catchingup
+step test_007_catchingup {
+    exec node1  pg_autoctl manual fsm assign wait_primary
+    exec node2  pg_autoctl manual fsm assign catchingup
 }
 
-step assign_primary_secondary {
-    exec node1 pg_autoctl do fsm assign primary
-    exec node2 pg_autoctl do fsm assign secondary
-    sql node1 { SELECT synchronous_standby_names; }
+step test_008_secondary {
+    exec node1  pg_autoctl manual fsm assign primary
+    exec node2  pg_autoctl manual fsm assign secondary
+    sql node1 { SHOW synchronous_standby_names; }
     expect { * }
 }
 
-step init_node3 {
-    exec node3 pg_autoctl run --background --name c
+step test_009_init_secondary {
+    sleep 5s
 }
 
-step fsm_nodes_set_three_nodes {
-    # Refresh nodes set with current LSNs and add node3.
-    exec node1 pg_autoctl do fsm nodes set \
-        '[ {"nodeId":1,"nodeName":"a","nodeHost":"node1","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":true}, \
-           {"nodeId":2,"nodeName":"b","nodeHost":"node2","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":false}, \
-           {"nodeId":3,"nodeName":"c","nodeHost":"node3","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":false} ]'
-    exec node2 pg_autoctl do fsm nodes set \
-        '[ {"nodeId":1,"nodeName":"a","nodeHost":"node1","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":true}, \
-           {"nodeId":2,"nodeName":"b","nodeHost":"node2","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":false}, \
-           {"nodeId":3,"nodeName":"c","nodeHost":"node3","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":false} ]'
-    exec node3 pg_autoctl do fsm nodes set \
-        '[ {"nodeId":1,"nodeName":"a","nodeHost":"node1","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":true}, \
-           {"nodeId":2,"nodeName":"b","nodeHost":"node2","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":false}, \
-           {"nodeId":3,"nodeName":"c","nodeHost":"node3","nodePort":5432,"nodeCluster":"default","nodeLSN":"0/1","nodeIsPrimary":false} ]'
+step test_010_fsm_nodes_set {
+    exec node1  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false},{"node_id":3,"node_name":"node3","node_host":"node3","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes123.json && pg_autoctl manual fsm nodes set /tmp/nodes123.json'
+    exec node2  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false},{"node_id":3,"node_name":"node3","node_host":"node3","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes123.json && pg_autoctl manual fsm nodes set /tmp/nodes123.json'
+    exec node3  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false},{"node_id":3,"node_name":"node3","node_host":"node3","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes123.json && pg_autoctl manual fsm nodes set /tmp/nodes123.json'
 }
 
-step assign_node3_wait_standby {
-    exec node1 pg_autoctl do fsm assign primary
-    exec node3 pg_autoctl do fsm assign wait_standby
-    sql node1 { SELECT synchronous_standby_names; }
+step test_011_init_to_wait_standby {
+    exec node1  pg_autoctl manual fsm assign primary
+    exec node3  pg_autoctl manual fsm assign wait_standby
+    sql node1 { SHOW synchronous_standby_names; }
     expect { * }
 }
 
-step assign_node3_catchingup {
-    exec node3 pg_autoctl do fsm assign catchingup
-    sql node1 { SELECT synchronous_standby_names; }
+step test_012_catchingup {
+    exec node3  pg_autoctl manual fsm assign catchingup
+    sql node1 { SHOW synchronous_standby_names; }
     expect { * }
 }
 
-step assign_node3_secondary {
-    exec node3 pg_autoctl do fsm assign secondary
-    exec node1 pg_autoctl do fsm assign primary
-    sql node1 { SELECT synchronous_standby_names; }
+step test_013_secondary {
+    exec node3  pg_autoctl manual fsm assign secondary
+    exec node1  pg_autoctl manual fsm assign primary
+    sql node1 { SHOW synchronous_standby_names; }
     expect { * }
 }
-
-sequence
-    init_node1
-    assign_single
-    create_table
-    init_node2
-    fsm_nodes_set_two_nodes
-    assign_wait_standby
-    assign_catchingup
-    assign_primary_secondary
-    init_node3
-    fsm_nodes_set_three_nodes
-    assign_node3_wait_standby
-    assign_node3_catchingup
-    assign_node3_secondary

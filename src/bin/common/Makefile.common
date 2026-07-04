@@ -52,9 +52,22 @@ override CFLAGS := $(DEFAULT_CFLAGS) $(CFLAGS)
 
 BINDIR ?= $(shell $(PG_CONFIG) --bindir)
 
+# pg_config --ldflags from source builds can emit colon-joined paths such as
+# -L/path/a:/path/b as a single token, which the linker rejects.  Split each
+# -L token on ':' so every directory gets its own -L flag.
+PG_LDFLAGS_RAW := $(shell $(PG_CONFIG) --ldflags)
+PG_LDFLAGS := $(shell echo "$(PG_LDFLAGS_RAW)" | awk '{ \
+    for (i = 1; i <= NF; i++) { \
+        if (substr($$i, 1, 2) == "-L") { \
+            n = split(substr($$i, 3), p, ":"); \
+            for (j = 1; j <= n; j++) if (p[j] != "") printf "-L%s ", p[j]; \
+        } else { printf "%s ", $$i; } \
+    } \
+}')
+
 LIBS  = -L $(shell $(PG_CONFIG) --pkglibdir)
 LIBS += -L $(shell $(PG_CONFIG) --libdir)
-LIBS += $(shell $(PG_CONFIG) --ldflags)
+LIBS += $(PG_LDFLAGS)
 LIBS += $(shell $(PG_CONFIG) --libs)
 LIBS += -lpq
 

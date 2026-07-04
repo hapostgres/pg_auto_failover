@@ -7,7 +7,6 @@
  */
 
 #include <errno.h>
-#include <fcntl.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -18,6 +17,7 @@
 
 #include "nodespec.h"
 #include "ini_file.h"
+#include "ini.h"
 #include "log.h"
 #include "pgsetup.h"
 #include "string_utils.h"
@@ -62,6 +62,9 @@ nodespec_read(const char *path, NodeSpec *spec)
 	char kindStr[NAMEDATALEN] = { 0 };
 	char replicationQuorumStr[8] = { 0 };
 	char pgHbaLanStr[8] = { 0 };
+	char launchModeStr[16] = { 0 };
+	char noMonitorStr[8] = { 0 };
+	char citusRoleStr[NAMEDATALEN] = { 0 };
 	int  port = 5432;
 	int  group = 0;
 	int  candidatePriority = 50;
@@ -75,6 +78,9 @@ nodespec_read(const char *path, NodeSpec *spec)
 		make_strbuf_option_default("node", "kind", NULL, true,
 								   sizeof(kindStr), kindStr,
 								   "postgres"),
+		make_strbuf_option_default("node", "name", NULL, false,
+								   sizeof(spec->name), spec->name,
+								   ""),
 		make_strbuf_option_default("node", "hostname", NULL, false,
 								   sizeof(spec->hostname), spec->hostname,
 								   ""),
@@ -89,6 +95,10 @@ nodespec_read(const char *path, NodeSpec *spec)
 		make_strbuf_option_default("monitor", "pguri", NULL, false,
 								   sizeof(spec->monitor_pguri),
 								   spec->monitor_pguri, ""),
+		make_strbuf_option_default("monitor", "no_monitor", NULL, false,
+								   sizeof(noMonitorStr), noMonitorStr, "false"),
+		make_int_option_default("monitor", "node_id", NULL, false,
+								&spec->nodeId, 0),
 
 		/* [formation] */
 		make_strbuf_option_default("formation", "name", NULL, false,
@@ -114,6 +124,45 @@ nodespec_read(const char *path, NodeSpec *spec)
 		make_strbuf_option_default("options", "pg_hba_lan", NULL, false,
 								   sizeof(pgHbaLanStr), pgHbaLanStr,
 								   "true"),
+		/* [ssl] — certificate paths for verify-ca / verify-full mode */
+		make_strbuf_option_default("ssl", "ca_file", NULL, false,
+								   sizeof(spec->ssl_ca_file),
+								   spec->ssl_ca_file, ""),
+		make_strbuf_option_default("ssl", "cert_file", NULL, false,
+								   sizeof(spec->ssl_cert_file),
+								   spec->ssl_cert_file, ""),
+		make_strbuf_option_default("ssl", "key_file", NULL, false,
+								   sizeof(spec->ssl_key_file),
+								   spec->ssl_key_file, ""),
+
+		/* [launch] — optional section; mode=deferred delays node init */
+		make_strbuf_option_default("launch", "mode", NULL, false,
+								   sizeof(launchModeStr), launchModeStr,
+								   "immediate"),
+
+		/* [pg_auto_failover] — monitor: password for autoctl_node role */
+		make_strbuf_option_default("pg_auto_failover", "autoctl_node_password",
+								   NULL, false,
+								   sizeof(spec->autoctl_node_password),
+								   spec->autoctl_node_password, ""),
+
+		/* [replication] — postgres: password for pgautofailover_replicator */
+		make_strbuf_option_default("replication", "password", NULL, false,
+								   sizeof(spec->replication_password),
+								   spec->replication_password, ""),
+
+		/* [pg_auto_failover] — postgres: password for pgautofailover_monitor */
+		make_strbuf_option_default("pg_auto_failover", "monitor_password",
+								   NULL, false,
+								   sizeof(spec->monitor_password),
+								   spec->monitor_password, ""),
+
+		/* [citus] — optional; present only for Citus secondary/read-replica nodes */
+		make_strbuf_option_default("citus", "role", NULL, false,
+								   sizeof(citusRoleStr), citusRoleStr, ""),
+		make_strbuf_option_default("citus", "cluster_name", NULL, false,
+								   sizeof(spec->citusClusterName),
+								   spec->citusClusterName, ""),
 
 		INI_OPTION_LAST
 	};
@@ -156,9 +205,78 @@ nodespec_read(const char *path, NodeSpec *spec)
 		 strcmp(pgHbaLanStr, "yes") == 0 ||
 		 strcmp(pgHbaLanStr, "1") == 0);
 
-	/* validate: non-monitor nodes need a monitor URI */
+	spec->launchDeferred = (strcmp(launchModeStr, "deferred") == 0);
+	spec->noMonitor =
+		(strcmp(noMonitorStr, "true") == 0 ||
+		 strcmp(noMonitorStr, "yes") == 0 ||
+		 strcmp(noMonitorStr, "1") == 0);
+
+	spec->citusSecondary = (strcmp(citusRoleStr, "secondary") == 0);
+
+	/*
+	 * Second pass: enumerate [formation <name>] sections.
+	 * The standard IniOption machinery can't handle variable-count sections,
+	 * so we open the file again with ini_load directly.
+	 */
+	{
+		char *fileContents = NULL;
+		long  fileSize = 0L;
+
+		if (read_file(path, &fileContents, &fileSize))
+		{
+			ini_t *raw = ini_load(fileContents, NULL);
+			free(fileContents);
+
+			if (raw)
+			{
+				int nsec = ini_section_count(raw);
+				spec->formationCount = 0;
+
+				for (int si = 0; si < nsec; si++)
+				{
+					const char *sname = ini_section_name(raw, si);
+					if (!sname) continue;
+					if (strncmp(sname, "formation ", 10) != 0) continue;
+
+					const char *fname = sname + 10;  /* skip "formation " */
+					if (fname[0] == '\0') continue;
+
+					if (spec->formationCount >= NODESPEC_MAX_FORMATIONS)
+					{
+						log_warn("nodespec: too many [formation <name>] sections "
+								 "in \"%s\"; max %d", path, NODESPEC_MAX_FORMATIONS);
+						break;
+					}
+
+					int fi = spec->formationCount++;
+					strlcpy(spec->formationNames[fi], fname,
+					        sizeof(spec->formationNames[fi]));
+
+					/* optional: kind = ha (default) */
+					int ki = ini_find_property(raw, si, "kind", 0);
+					if (ki != INI_NOT_FOUND)
+					{
+						const char *kv = ini_property_value(raw, si, ki);
+						if (kv && kv[0])
+							strlcpy(spec->formationKinds[fi], kv,
+							        sizeof(spec->formationKinds[fi]));
+						else
+							strlcpy(spec->formationKinds[fi], "pgsql",
+							        sizeof(spec->formationKinds[fi]));
+					}
+					else
+						strlcpy(spec->formationKinds[fi], "pgsql",
+						        sizeof(spec->formationKinds[fi]));
+				}
+				ini_destroy(raw);
+			}
+		}
+	}
+
+	/* validate: non-monitor nodes need a monitor URI unless no_monitor=true */
 	if (spec->kind != NODE_KIND_UNKNOWN &&
-		IS_EMPTY_STRING_BUFFER(spec->monitor_pguri))
+		IS_EMPTY_STRING_BUFFER(spec->monitor_pguri) &&
+		!spec->noMonitor)
 	{
 		log_error("Node kind \"%s\" requires [monitor] pguri in \"%s\"",
 				  kindStr, path);
@@ -188,29 +306,42 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 
 	fprintf(out,
 			"[node]\n"
-			"kind     = %s\n"
+			"kind     = %s\n",
+			kindStr);
+
+	if (!IS_EMPTY_STRING_BUFFER(spec->name))
+		fprintf(out, "name     = %s\n", spec->name);
+
+	fprintf(out,
 			"hostname = %s\n"
 			"port     = %d\n"
 			"\n"
 			"[postgresql]\n"
 			"pgdata = %s\n"
 			"\n",
-			kindStr,
 			spec->hostname,
 			spec->port,
 			spec->pgdata);
 
 	if (spec->kind != NODE_KIND_UNKNOWN)
 	{
+		if (spec->noMonitor)
+			fprintf(out,
+					"[monitor]\n"
+					"no_monitor = true\n"
+					"\n");
+		else
+			fprintf(out,
+					"[monitor]\n"
+					"pguri = %s\n"
+					"\n",
+					spec->monitor_pguri);
+
 		fprintf(out,
-				"[monitor]\n"
-				"pguri = %s\n"
-				"\n"
 				"[formation]\n"
 				"name  = %s\n"
 				"group = %d\n"
 				"\n",
-				spec->monitor_pguri,
 				spec->formation,
 				spec->group);
 	}
@@ -230,6 +361,19 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			spec->auth,
 			spec->pg_hba_lan ? "true" : "false");
 
+	/* only emit [launch] when deferred — omitting the section means immediate */
+	if (spec->launchDeferred)
+		fprintf(out, "\n[launch]\nmode = deferred\n");
+
+	/* [formation <name>] sections — monitor kind only */
+	for (int fi = 0; fi < spec->formationCount; fi++)
+	{
+		fprintf(out, "\n[formation %s]\n", spec->formationNames[fi]);
+		if (spec->formationKinds[fi][0] &&
+		    strcmp(spec->formationKinds[fi], "pgsql") != 0)
+			fprintf(out, "kind = %s\n", spec->formationKinds[fi]);
+	}
+
 	return true;
 }
 
@@ -243,7 +387,7 @@ nodespec_write(const NodeSpec *spec, FILE *out)
  *                            [--auth <m>] [--pg-hba-lan] --run
  *
  * Returns the number of entries written (terminating NULL not counted).
- * args[] must have room for at least 32 pointers.
+ * args[] must have room for at least 40 pointers.
  *
  * String values are pointers into *spec — the caller must keep spec alive.
  */
@@ -287,6 +431,12 @@ nodespec_create_argv(const NodeSpec *spec,
 	PUSH("--pgdata");
 	PUSH(spec->pgdata);
 
+	if (!IS_EMPTY_STRING_BUFFER(spec->name))
+	{
+		PUSH("--name");
+		PUSH(spec->name);
+	}
+
 	if (!IS_EMPTY_STRING_BUFFER(spec->hostname))
 	{
 		PUSH("--hostname");
@@ -304,8 +454,22 @@ nodespec_create_argv(const NodeSpec *spec,
 
 	if (spec->kind != NODE_KIND_UNKNOWN)
 	{
-		PUSH("--monitor");
-		PUSH(spec->monitor_pguri);
+		if (spec->noMonitor)
+		{
+			PUSH("--disable-monitor");
+			if (spec->nodeId > 0)
+			{
+				static char nodeIdBuf[16];
+				sformat(nodeIdBuf, sizeof(nodeIdBuf), "%d", spec->nodeId);
+				PUSH("--node-id");
+				PUSH(nodeIdBuf);
+			}
+		}
+		else
+		{
+			PUSH("--monitor");
+			PUSH(spec->monitor_pguri);
+		}
 
 		if (!IS_EMPTY_STRING_BUFFER(spec->formation) &&
 			strcmp(spec->formation, "default") != 0)
@@ -328,7 +492,14 @@ nodespec_create_argv(const NodeSpec *spec,
 		PUSH("--ssl-self-signed");
 	else if (strcmp(spec->ssl, "off") == 0)
 		PUSH("--no-ssl");
-	/* "cert" mode: SSL flags come from postgresql.conf, nothing to add */
+	else if (!IS_EMPTY_STRING_BUFFER(spec->ssl_ca_file))
+	{
+		/* verify-ca / verify-full: pass the cert paths explicitly */
+		PUSH("--ssl-ca-file"); PUSH(spec->ssl_ca_file);
+		PUSH("--server-cert"); PUSH(spec->ssl_cert_file);
+		PUSH("--server-key");  PUSH(spec->ssl_key_file);
+		PUSH("--ssl-mode");    PUSH(spec->ssl);
+	}
 
 	/* auth */
 	if (!IS_EMPTY_STRING_BUFFER(spec->auth))
@@ -340,12 +511,88 @@ nodespec_create_argv(const NodeSpec *spec,
 	if (spec->pg_hba_lan && spec->kind != NODE_KIND_UNKNOWN)
 		PUSH("--pg-hba-lan");
 
+	/* passwords */
+	if (spec->kind == NODE_KIND_UNKNOWN &&
+		!IS_EMPTY_STRING_BUFFER(spec->autoctl_node_password))
+	{
+		PUSH("--autoctl-node-password");
+		PUSH(spec->autoctl_node_password);
+	}
+
+	/* non-default formations to create during monitor init */
+	if (spec->kind == NODE_KIND_UNKNOWN)
+	{
+		for (int fi = 0; fi < spec->formationCount; fi++)
+		{
+			PUSH("--formation");
+			PUSH(spec->formationNames[fi]);
+		}
+	}
+
+	if (spec->kind != NODE_KIND_UNKNOWN)
+	{
+		if (!IS_EMPTY_STRING_BUFFER(spec->monitor_password))
+		{
+			PUSH("--monitor-password");
+			PUSH(spec->monitor_password);
+		}
+		if (!IS_EMPTY_STRING_BUFFER(spec->replication_password))
+		{
+			PUSH("--replication-password");
+			PUSH(spec->replication_password);
+		}
+
+		/* candidate priority and replication quorum (non-default values) */
+		if (spec->candidate_priority != 50)
+		{
+			static char pribuf[16];
+			sformat(pribuf, sizeof(pribuf), "%d", spec->candidate_priority);
+			PUSH("--candidate-priority");
+			PUSH(pribuf);
+		}
+		if (!spec->replication_quorum)
+		{
+			PUSH("--replication-quorum");
+			PUSH("false");
+		}
+
+		/* Citus secondary/read-replica cluster settings */
+		if (spec->citusSecondary)
+			PUSH("--citus-secondary");
+		if (!IS_EMPTY_STRING_BUFFER(spec->citusClusterName))
+		{
+			PUSH("--citus-cluster");
+			PUSH(spec->citusClusterName);
+		}
+	}
+
 	PUSH("--run");
 
 	args[i] = NULL;
 
 #undef PUSH
 	return i;
+}
+
+
+
+/*
+ * nodespec_write_to_path writes the spec to the given filesystem path,
+ * replacing the file in-place.  Used by pg_autoctl node start to clear the
+ * [launch] deferred flag so the waiting pg_autoctl node run can proceed.
+ */
+bool
+nodespec_write_to_path(const NodeSpec *spec, const char *path)
+{
+	FILE *f = fopen(path, "w");
+	if (!f)
+	{
+		log_error("Cannot open \"%s\" for writing: %m", path);
+		return false;
+	}
+	bool ok = nodespec_write(spec, f);
+	fclose(f);
+	return ok;
 }
 
 
@@ -357,8 +604,11 @@ nodespec_create_argv(const NodeSpec *spec,
  *   - candidate_priority   → monitor_set_node_candidate_priority()
  *   - replication_quorum   → monitor_set_node_replication_quorum()
  *
- * Immutable fields (kind, pgdata, ssl, auth, pg_hba_lan) are not checked here;
- * the caller should warn when those differ.
+ * The [launch] mode field is handled separately by pg_autoctl node start.
+ * Applying a spec with mode=deferred to an already-started node is a
+ * non-fatal warning (ignored).
+ *
+ * Immutable fields (kind, pgdata, ssl, auth, pg_hba_lan) are not checked here.
  */
 bool
 nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
@@ -413,6 +663,13 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 			changed = true;
 		}
 		free_program(&prog);
+	}
+
+	/* immediate → deferred on an already-started node: non-fatal, ignored */
+	if (!old_spec->launchDeferred && new_spec->launchDeferred)
+	{
+		log_warn("nodespec_apply: ignoring attempt to set launch=deferred "
+				 "on a node that is already running");
 	}
 
 	if (!changed)

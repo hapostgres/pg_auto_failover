@@ -1,27 +1,48 @@
 # Test Citus cluster name and read-only secondary cluster routing.
-# A "readonly" cluster is registered with candidatePriority=0 and
-# citusSecondary=true. It should route all reads to secondary nodes
-# via citus.use_secondary_nodes = 'always'.
+#
+# A "readonly" cluster is a set of Citus nodes registered with
+# candidate-priority=0, citus-secondary, and citus-cluster-name=readonly.
+# These nodes should have:
+#   citus.use_secondary_nodes = 'always'
+#   citus.cluster_name        = 'readonly'
+# in their postgresql.conf, so that distributed queries are routed to the
+# secondary (standby) copies of each shard rather than the primaries.
+#
+# Ported from tests/test_citus_cluster_name.py.
+# Predecessor: tests/test_citus_cluster_name.py
 
 cluster {
     monitor
     formation {
         coordinator1a coordinator
-        coordinator1b coordinator candidate-priority 0 citus-secondary citus-cluster-name readonly
+        node coordinator1b {
+            coordinator
+            candidate-priority 0
+            citus-secondary
+            citus-cluster-name readonly
+        }
         worker1a worker group 1
-        worker1b worker group 1 candidate-priority 0 citus-secondary citus-cluster-name readonly
+        node worker1b {
+            worker group 1
+            candidate-priority 0
+            citus-secondary
+            citus-cluster-name readonly
+        }
         worker2a worker group 2
-        worker2b worker group 2 candidate-priority 0 citus-secondary citus-cluster-name readonly
+        node worker2b {
+            worker group 2
+            candidate-priority 0
+            citus-secondary
+            citus-cluster-name readonly
+        }
     }
 }
 
 setup {
-    wait until coordinator1a state = primary   timeout 90s
-    wait until coordinator1b state = secondary timeout 90s
-    wait until worker1a      state = primary   timeout 90s
-    wait until worker1b      state = secondary timeout 90s
-    wait until worker2a      state = primary   timeout 90s
-    wait until worker2b      state = secondary timeout 90s
+    wait until primary, secondary in group 0  timeout 90s
+    wait until primary, secondary in group 1  timeout 90s
+    wait until primary, secondary in group 2  timeout 90s
+    promote coordinator1a, worker1a, worker2a
 }
 
 teardown {
@@ -31,41 +52,55 @@ teardown {
 #
 # test_001: coordinator pair — coordinator1b is read-only secondary cluster
 #
+
 step test_001_init_coordinator {
-    wait until coordinator1a state = primary   timeout 90s
-    wait until coordinator1b state = secondary timeout 90s
+    wait until coordinator1a state is primary
+        and coordinator1b state is secondary
+        timeout 90s
 }
 
-#
-# test_002: worker groups
-#
-step test_002_001_init_workers_group1 {
-    wait until worker1a state = primary   timeout 90s
-    wait until worker1b state = secondary timeout 90s
+step test_002_001_init_workers {
+    wait until worker1a state is primary
+        and worker1b state is secondary
+        timeout 90s
 }
 
-step test_002_002_init_workers_group2 {
-    wait until worker2a state = primary   timeout 90s
-    wait until worker2b state = secondary timeout 90s
+step test_002_002_init_workers {
+    wait until worker2a state is primary
+        and worker2b state is secondary
+        timeout 90s
 }
 
 #
 # test_003: create distributed table and insert data
 #
+
 step test_003_create_distributed_table {
-    sql coordinator1a { SET citus.shard_count TO 4; CREATE TABLE t1 (a int); SELECT create_distributed_table('t1', 'a'); }
-    sql coordinator1a { INSERT INTO t1 SELECT x FROM generate_series(1, 1000) as gs(x); }
+    sql coordinator1a {
+        SET citus.shard_count TO 4; CREATE TABLE t1 (a int); SELECT
+        create_distributed_table('t1', 'a');
+    }
+    sql coordinator1a {
+        INSERT INTO t1 SELECT x FROM generate_series(1, 1000) as gs(x);
+    }
     sql coordinator1a { CHECKPOINT; }
 }
 
 #
 # test_004: verify read-only cluster settings
 #
+
 step test_004_read_only_cluster {
-    sql coordinator1a { SELECT current_setting('citus.use_secondary_nodes'), current_setting('citus.cluster_name'); }
-    expect { never	default }
-    sql coordinator1b { SELECT current_setting('citus.use_secondary_nodes'), current_setting('citus.cluster_name'); }
-    expect { always	readonly }
+    sql coordinator1a {
+        SELECT current_setting('citus.use_secondary_nodes'),
+        current_setting('citus.cluster_name');
+    }
+    expect { never|default }
+    sql coordinator1b {
+        SELECT current_setting('citus.use_secondary_nodes'),
+        current_setting('citus.cluster_name');
+    }
+    expect { always|readonly }
     sql coordinator1b { SELECT count(*) FROM t1; }
     expect { 1000 }
 }
@@ -73,15 +108,13 @@ step test_004_read_only_cluster {
 #
 # test_005: drop distributed table (cleanup)
 #
+
 step test_005_drop_table {
+    exec coordinator1a  sh -c 'for i in $(seq 1 30); do n=$(psql -U docker -d demo -tAc "SELECT count(*) FROM pg_dist_node WHERE metadatasynced = false AND isactive = true AND nodecluster = '"'"'default'"'"'"); [ "$n" = "0" ] && exit 0; sleep 2; done; exit 1'
+    sql coordinator1a {
+        CREATE OR REPLACE FUNCTION public.wait_until_metadata_sync(timeout
+        INTEGER DEFAULT 15000) RETURNS void LANGUAGE C STRICT AS 'citus';
+    }
     sql coordinator1a { SELECT public.wait_until_metadata_sync(); }
     sql coordinator1a { DROP TABLE t1; }
 }
-
-sequence
-    test_001_init_coordinator
-    test_002_001_init_workers_group1
-    test_002_002_init_workers_group2
-    test_003_create_distributed_table
-    test_004_read_only_cluster
-    test_005_drop_table

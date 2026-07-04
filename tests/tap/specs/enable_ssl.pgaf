@@ -1,7 +1,16 @@
-# Test enabling SSL on monitor and data nodes, including self-signed and CA-signed certs.
+# Test enabling SSL on a running cluster: nodes start without SSL and SSL is
+# enabled live with --ssl-self-signed.  After enabling, replication must still
+# work and reads from the secondary must return correct data.
+#
+# CA-signed certificate tests (verify-ca / verify-full) are covered separately
+# in ssl_cert.pgaf, which starts the cluster with SSL already configured.
+#
+# Ported from tests/test_enable_ssl.py
+# Predecessor: tests/test_enable_ssl.py
 
 cluster {
     monitor
+    ssl off
     formation {
         node1
         node2
@@ -9,17 +18,15 @@ cluster {
 }
 
 setup {
-    wait until node1 state = single    timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node1 state = primary   timeout 60s
+    wait until primary, secondary  timeout 60s
+    promote node1
 }
 
 teardown {
     compose down
 }
 
-step check_initial_ssl {
-    # Initial state: SSL off, sslmode prefer on all nodes
+step test_001_init_primary {
     sql monitor { SHOW ssl; }
     expect { off }
     sql node1 { SHOW ssl; }
@@ -28,114 +35,49 @@ step check_initial_ssl {
     expect { off }
 }
 
-step create_table {
+step test_002_create_t1 {
     sql node1 { CREATE TABLE t1(a int); }
     sql node1 { INSERT INTO t1 VALUES (1), (2); }
 }
 
-step enable_maintenance {
-    exec node2 pg_autoctl enable maintenance
-    wait until node2 state = maintenance timeout 60s
+step test_004_maintenance {
+    exec node2  pg_autoctl enable maintenance
+    wait until node2 state is maintenance  timeout 60s
 }
 
-step enable_ssl_self_signed_monitor {
-    exec monitor pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
+step test_005_enable_ssl_monitor {
+    exec monitor  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
     sleep 3s
     sql monitor { SHOW ssl; }
     expect { on }
 }
 
-step enable_ssl_self_signed_node1 {
-    exec node1 pg_autoctl stop
-    exec node1 pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
-    exec node1 pg_autoctl run --background
+step test_006_enable_ssl_primary {
+    exec node1  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
+    sleep 5s
+    exec node1  pg_autoctl inspect pgsetup wait
     sql node1 { SHOW ssl; }
     expect { on }
 }
 
-step enable_ssl_self_signed_node2 {
-    exec node2 pg_autoctl stop
-    exec node2 pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
-    exec node2 pg_autoctl run --background
+step test_007_enable_ssl_secondary {
+    exec node2  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
+    exec node2  pg_autoctl inspect pgsetup wait
     sql node2 { SHOW ssl; }
     expect { on }
 }
 
-step disable_maintenance_after_self_signed {
-    exec node2 pg_autoctl disable maintenance
-    wait until node2 state = secondary timeout 60s
-    wait until node1 state = primary   timeout 60s
+step test_008_disable_maintenance {
+    exec node2  pg_autoctl disable maintenance
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
 }
 
-step enable_maintenance_for_verify_ca {
-    exec node2 pg_autoctl enable maintenance
-    wait until node2 state = maintenance timeout 60s
-}
-
-step enable_ssl_verify_ca_monitor {
-    # Root CA and signed server cert for monitor are pre-created via setup scripts.
-    exec monitor pg_autoctl enable ssl \
-        --ssl-ca-file /tmp/certs/root.crt \
-        --server-key  /tmp/certs/monitor/server.key \
-        --server-cert /tmp/certs/monitor/server.crt \
-        --ssl-mode verify-ca
-    sleep 3s
-    sql monitor { SHOW ssl; }
-    expect { on }
-}
-
-step enable_ssl_verify_ca_node1 {
-    exec node1 pg_autoctl stop
-    exec node1 pg_autoctl enable ssl \
-        --ssl-ca-file /tmp/certs/root.crt \
-        --server-key  /tmp/certs/node1/server.key \
-        --server-cert /tmp/certs/node1/server.crt \
-        --ssl-mode verify-ca
-    exec node1 pg_autoctl run --background
-    sql node1 { SHOW ssl; }
-    expect { on }
-}
-
-step enable_ssl_verify_ca_node2 {
-    exec node2 pg_autoctl stop
-    exec node2 pg_autoctl enable ssl \
-        --ssl-ca-file /tmp/certs/root.crt \
-        --server-key  /tmp/certs/node2/server.key \
-        --server-cert /tmp/certs/node2/server.crt \
-        --ssl-mode verify-ca
-    exec node2 pg_autoctl run --background
+step test_009_read_from_secondary {
+    exec node2  pg_autoctl inspect pgsetup wait
     sql node2 { SHOW ssl; }
     expect { on }
+    sql node2 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } }
 }
-
-step disable_maintenance_after_verify_ca {
-    exec node2 pg_autoctl disable maintenance
-    wait until node2 state = secondary timeout 60s
-    wait until node1 state = primary   timeout 60s
-}
-
-step enable_ssl_require_node1_online {
-    # Enable SSL on node1 online (SIGHUP path) using signed cert, require mode
-    exec node1 pg_autoctl enable ssl \
-        --server-key  /tmp/certs/node1/server.key \
-        --server-cert /tmp/certs/node1/server.crt \
-        --ssl-mode require
-    sleep 6s
-    sql node1 { SHOW ssl; }
-    expect { on }
-}
-
-sequence
-    check_initial_ssl
-    create_table
-    enable_maintenance
-    enable_ssl_self_signed_monitor
-    enable_ssl_self_signed_node1
-    enable_ssl_self_signed_node2
-    disable_maintenance_after_self_signed
-    enable_maintenance_for_verify_ca
-    enable_ssl_verify_ca_monitor
-    enable_ssl_verify_ca_node1
-    enable_ssl_verify_ca_node2
-    disable_maintenance_after_verify_ca
-    enable_ssl_require_node1_online

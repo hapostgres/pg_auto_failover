@@ -1,5 +1,8 @@
 # Test --skip-pg-hba (auth-method=skip): pg_autoctl must NOT edit pg_hba.conf
 # on either node.  HBA rules are managed manually by the operator.
+#
+# Ported from tests/test_skip_pg_hba.py
+# Predecessor: tests/test_skip_pg_hba.py
 
 cluster {
     monitor
@@ -11,57 +14,44 @@ cluster {
 }
 
 setup {
-    wait until node1 state = primary   timeout 90s
-    wait until node2 state = secondary timeout 90s
+    exec node1  pg_autoctl override pgsetup hba-lan
+    exec node2  pg_autoctl override pgsetup hba-lan
+    wait until primary, secondary  timeout 120s
+    promote node1
 }
 
 teardown {
     compose down
 }
 
-step setup_monitor_hba {
-    # Add permissive rules to the monitor's HBA so test clients can connect.
-    exec monitor sh -c "echo 'host all all 0.0.0.0/0 trust' >> /var/lib/postgresql/pgaf/pg_hba.conf"
-    exec monitor pg_ctl reload -D /var/lib/postgresql/pgaf
-}
-
-step create_table {
+step test_002_create_t1 {
     sql node1 { CREATE TABLE t1(a int); }
     sql node1 { INSERT INTO t1 VALUES (1), (2); }
 }
 
-step check_hba_not_edited {
-    # pg_autoctl must report hba_level = skip in its config.
-    exec node1 pg_autoctl config get postgresql.hba_level
+step test_004a_hba_have_not_been_edited {
+    exec node1  pg_autoctl config get postgresql.hba_level
     expect { skip }
-    exec node2 pg_autoctl config get postgresql.hba_level
-    expect { skip }
-}
-
-step failover {
-    exec monitor pg_autoctl perform failover
-    wait until node2 state = primary   timeout 90s
-    wait until node1 state = secondary timeout 90s
-    assert node2 state = primary
-    assert node1 state = secondary
-}
-
-step restart_secondary {
-    exec node1 pg_autoctl stop
-    exec node1 pg_autoctl run --background
-}
-
-step check_hba_not_edited_after_restart {
-    exec node1 pg_autoctl config get postgresql.hba_level
-    expect { skip }
-    exec node2 pg_autoctl config get postgresql.hba_level
+    exec node2  pg_autoctl config get postgresql.hba_level
     expect { skip }
 }
 
-sequence
-    setup_monitor_hba
-    create_table
-    check_hba_not_edited
-    failover
-    restart_secondary
-    check_hba_not_edited_after_restart
+step test_005_failover {
+    exec monitor  pg_autoctl perform failover
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+}
+
+step test_006_restart_secondary {
+    compose stop node1
+    compose start node1
+    wait until node1 state is secondary  timeout 60s
+}
+
+step test_006a_hba_have_not_been_edited {
+    exec node1  pg_autoctl config get postgresql.hba_level
+    expect { skip }
+    exec node2  pg_autoctl config get postgresql.hba_level
+    expect { skip }
+}

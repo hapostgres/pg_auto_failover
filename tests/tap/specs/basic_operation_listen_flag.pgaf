@@ -1,14 +1,19 @@
 # Test basic pg_auto_failover operations with the --listen flag, verifying
 # that nodes bind on all interfaces for replication and failover.
+#
+# Ported from tests/test_basic_operation_listen_flag.py
+# Predecessor: tests/test_basic_operation_listen_flag.py
 
 cluster {
     monitor
-    node node1  listen
-    node node2  listen
+    formation {
+        node1 listen
+        node2 launch deferred listen
+    }
 }
 
 setup {
-    wait until node1 state = single timeout 60s
+    exec monitor  pg_autoctl inspect pgsetup wait
 }
 
 teardown {
@@ -18,13 +23,16 @@ teardown {
 #
 # test_001: init primary with listen flag
 #
+
 step test_001_init_primary {
-    wait until node1 state = single timeout 60s
+    wait until node1 state is single  timeout 60s
+    exec node1  pg_autoctl inspect pgsetup wait
 }
 
 #
 # test_002: create table t1
 #
+
 step test_002_create_t1 {
     sql node1 { CREATE TABLE t1(a int); }
     sql node1 { INSERT INTO t1 VALUES (1), (2); }
@@ -33,22 +41,23 @@ step test_002_create_t1 {
 #
 # test_003: add secondary node2 with listen flag
 #
+
 step test_003_init_secondary {
-    wait until node2 state = secondary timeout 90s
-    wait until node1 state = primary   timeout 90s
+    exec node2  pg_autoctl node start
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
 }
 
 #
 # test_004: read from secondary
 #
+
 step test_004_read_from_secondary {
     sql node2 { SELECT * FROM t1 ORDER BY a; }
     expect { { 1 } { 2 } }
 }
 
-#
-# test_005: writes to secondary (node2) must fail — SQLSTATE 25006 read_only_sql_transaction
-#
 step test_005_writes_to_node2_fail {
     sql node2 { INSERT INTO t1 VALUES (3); }
     expect error 25006
@@ -57,14 +66,16 @@ step test_005_writes_to_node2_fail {
 #
 # test_006: fail primary node1
 #
+
 step test_006_fail_primary {
     network disconnect node1
-    wait until node2 state = wait_primary timeout 90s
+    wait until node2 state is wait_primary  timeout 90s
 }
 
 #
 # test_007: writes to new primary succeed
 #
+
 step test_007_writes_to_node2_succeed {
     sql node2 { INSERT INTO t1 VALUES (3); }
     sql node2 { SELECT * FROM t1 ORDER BY a; }
@@ -74,24 +85,23 @@ step test_007_writes_to_node2_succeed {
 #
 # test_008: restart node1 as secondary
 #
+
 step test_008_start_node1_again {
     network connect node1
-    exec node1 pg_autoctl run --background
-    wait until node2 state = primary   timeout 90s
-    wait until node1 state = secondary timeout 90s
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
 }
 
 #
 # test_009: read from new secondary (node1)
 #
+
 step test_009_read_from_new_secondary {
     sql node1 { SELECT * FROM t1 ORDER BY a; }
     expect { { 1 } { 2 } { 3 } }
 }
 
-#
-# test_010: writes to node1 (now secondary after failover) must fail — SQLSTATE 25006
-#
 step test_010_writes_to_node1_fail {
     sql node1 { INSERT INTO t1 VALUES (3); }
     expect error 25006
@@ -100,20 +110,8 @@ step test_010_writes_to_node1_fail {
 #
 # test_011: fail secondary node1
 #
+
 step test_011_fail_secondary {
     network disconnect node1
-    wait until node2 state = wait_primary timeout 90s
+    wait until node2 state is wait_primary  timeout 90s
 }
-
-sequence
-    test_001_init_primary
-    test_002_create_t1
-    test_003_init_secondary
-    test_004_read_from_secondary
-    test_005_writes_to_node2_fail
-    test_006_fail_primary
-    test_007_writes_to_node2_succeed
-    test_008_start_node1_again
-    test_009_read_from_new_secondary
-    test_010_writes_to_node1_fail
-    test_011_fail_secondary

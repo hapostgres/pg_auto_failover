@@ -1,10 +1,18 @@
+# Test pg_auto_failover extension version management.
+# The monitor starts with a "dummy" extension version baked into the Docker
+# image.  pg_autoctl detects the mismatch at startup, runs ALTER EXTENSION
+# pgautofailover UPDATE, and restarts Postgres.  The test verifies that the
+# installed_version seen in pg_available_extensions matches the dummy version
+# and that the monitor comes back healthy after the restart.
+#
+# Predecessor: tests/test_extension_update.py
+
 cluster {
     monitor
 }
 
 setup {
-    # The monitor is started with PG_AUTOCTL_EXTENSION_VERSION=dummy
-    # to simulate an extension update scenario.
+    exec monitor  pg_autoctl inspect pgsetup wait
 }
 
 teardown {
@@ -15,15 +23,14 @@ teardown {
 # test_001: start monitor with a dummy extension version and verify
 #           that the installed version matches the dummy version.
 #
+
 step test_001_update_extension {
-    wait until monitor pg_is_running timeout 60s
+    sleep 3s
+    exec monitor  pg_autoctl inspect pgsetup wait
     sql monitor {
         SELECT installed_version
-          FROM pg_available_extensions
-         WHERE name = 'pgautofailover';
+        FROM pg_available_extensions
+        WHERE name = 'pgautofailover';
     }
     expect { dummy }
 }
-
-sequence
-    test_001_update_extension

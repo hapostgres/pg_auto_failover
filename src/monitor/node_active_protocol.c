@@ -476,7 +476,15 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 		/*
 		 * Report the current state. The state might not have changed, but in
 		 * that case we still update the last report time.
+		 *
+		 * LockNodeGroup must be taken before ReportAutoFailoverNodeState so
+		 * that every code path acquires advisory locks before row-level locks.
+		 * Reversing the order causes a deadlock with set_node_candidate_priority
+		 * and similar functions that hold the NodeGroup advisory lock while
+		 * updating node-table rows.
 		 */
+		LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
+
 		ReportAutoFailoverNodeState(pgAutoFailoverNode->nodeHost,
 									pgAutoFailoverNode->nodePort,
 									currentNodeState->replicationState,
@@ -485,8 +493,6 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 									currentNodeState->reportedTLI,
 									currentNodeState->reportedLSN);
 	}
-
-	LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
 
 	ProceedGroupState(pgAutoFailoverNode);
 

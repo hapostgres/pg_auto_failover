@@ -3,11 +3,10 @@ name: Run Tests
 on:
   push:
     branches:
-    - main
+      - main
   pull_request:
     branches:
-    - main
-
+      - main
   workflow_dispatch:
 
 jobs:
@@ -37,42 +36,36 @@ jobs:
             TEST: linting
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set environment variables
         run: |
-            echo "PGVERSION=${{ matrix.PGVERSION }}" >> $GITHUB_ENV
-            echo "TEST=${{ matrix.TEST }}" >> $GITHUB_ENV
-            echo "LINTING=${{ matrix.LINTING }}" >> $GITHUB_ENV
-            echo "TRAVIS_BUILD_DIR=$(pwd)" >> $GITHUB_ENV
+          echo "PGVERSION=${{ matrix.PGVERSION }}" >> $GITHUB_ENV
+          echo "TEST=${{ matrix.TEST }}" >> $GITHUB_ENV
+          echo "TRAVIS_BUILD_DIR=$(pwd)" >> $GITHUB_ENV
 
       - name: Clone and install linting tools
-        if: ${{ env.TEST == 'linting' }}
+        if: ${{ matrix.TEST == 'linting' }}
         run: |
           sudo apt-get install python3-pip
           pip3 install --user black
           black --version
           gcc --version
-          # Install uncrustify the Citus way
           make -C ci -f tools.mk tools
 
       - name: Check code formatting and banned function
-        if: ${{ env.TEST == 'linting' }}
-        run: |
-          make lint
+        if: ${{ matrix.TEST == 'linting' }}
+        run: make lint
 
       - name: Build documentation
-        if: ${{ env.TEST == 'linting' }}
-        run: |
-          make build-docs
+        if: ${{ matrix.TEST == 'linting' }}
+        run: make build-docs
 
       - name: Build Docker Test Image
-        if: ${{ env.TEST != 'linting' }}
-        run: |
-          make build-test-image
+        if: ${{ matrix.TEST != 'linting' }}
+        run: make build-test-image
 
       - name: Run Test
-        if: ${{ env.TEST != 'linting' }}
+        if: ${{ matrix.TEST != 'linting' }}
         timeout-minutes: 15
-        run: |
-          make ci-test
+        run: make ci-test

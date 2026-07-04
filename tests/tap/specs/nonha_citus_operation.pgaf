@@ -2,120 +2,103 @@
 # workers, enable secondary support, add standbys, attempt to disable while
 # standbys exist (expect failure), fail-over primaries, drop them, and finally
 # disable secondary support once only single nodes remain.
+#
+# Ported from tests/test_nonha_citus_operation.py
+# Predecessor: tests/test_nonha_citus_operation.py
 
 cluster {
     monitor
     formation non-ha {
         coordinator1a coordinator
-        coordinator1b coordinator
+        coordinator1b coordinator launch deferred
         worker1a worker group 1
-        worker1b worker group 1
+        worker1b worker group 1 launch deferred
         worker2a worker group 2
-        worker2b worker group 2
+        worker2b worker group 2 launch deferred
     }
 }
 
 setup {
-    wait until coordinator1a state = single timeout 60s
+    wait until coordinator1a state is single  timeout 120s
+    wait until worker1a state is single  timeout 120s
+    wait until worker2a state is single  timeout 120s
+    sleep 5s
 }
 
 teardown {
     compose down
 }
 
-#
-# test_001: create a non-HA citus formation (secondary=false)
-#
-step test_001_create_formation {
-    exec monitor pg_autoctl create formation --formation non-ha --kind citus --no-secondary
+step test_001_disable_secondary_on_formation {
+    exec monitor  pg_autoctl disable secondary --formation non-ha
 }
 
-#
-# test_002: coordinator comes up as single (no secondary in non-HA)
-#
-step test_002_init_coordinator {
-    wait until coordinator1a state = single timeout 60s
+step test_002_wait_metadata_sync {
+    exec coordinator1a  sh -c 'for i in $(seq 1 30); do n=$(psql -U docker -d demo -tAc "SELECT count(*) FROM pg_dist_node WHERE metadatasynced = false AND isactive = true"); [ "$n" = "0" ] && exit 0; sleep 2; done; exit 1'
 }
 
-#
-# test_003: two worker groups come up as single
-#
-step test_003_init_workers {
-    wait until worker1a state = single timeout 90s
-    wait until worker2a state = single timeout 90s
-}
-
-#
-# test_004: create distributed table
-#
-step test_004_create_distributed_table {
+step test_003_create_distributed_table {
     sql coordinator1a { CREATE TABLE t1 (a int); }
     sql coordinator1a { SELECT create_distributed_table('t1', 'a'); }
     sql coordinator1a { INSERT INTO t1 VALUES (1), (2); }
 }
 
-#
-# test_005: enable secondary support on the non-HA formation
-#
-step test_005_enable_secondary {
-    exec monitor pg_autoctl enable secondary --formation non-ha
+step test_004_enable_secondary {
+    exec monitor  pg_autoctl enable secondary --formation non-ha
+    exec coordinator1b  pg_autoctl node start /etc/pgaf/node.ini
+    exec worker1b  pg_autoctl node start /etc/pgaf/node.ini
+    exec worker2b  pg_autoctl node start /etc/pgaf/node.ini
 }
 
-#
-# test_006: add standbys for coordinator and both worker groups
-#
-step test_006_add_secondaries {
-    wait until coordinator1b state = secondary timeout 90s
-    wait until worker1b      state = secondary timeout 90s
-    wait until worker2b      state = secondary timeout 90s
+step test_005_add_secondaries {
+    wait until coordinator1b state is secondary  timeout 120s
+    wait until worker1b state is secondary  timeout 120s
+    wait until worker2b state is secondary  timeout 120s
 }
 
-#
-# test_007: trying to disable secondary support while secondaries exist must fail.
-#
-step test_007_fail_when_disabling_with_secondaries {
+step test_006_fail_when_disabling_with_secondaries {
     exec-fails monitor  pg_autoctl disable secondary --formation non-ha
 }
 
-#
-# test_008: fail primaries — secondaries promote to wait_primary
-#
-step test_008_shutdown_primaries {
+step test_007_failover_coordinator {
     network disconnect coordinator1a
-    wait until coordinator1b state = wait_primary timeout 90s
+    wait until coordinator1b state is wait_primary  timeout 90s
+    network connect coordinator1a
+    wait until coordinator1b state is primary
+        and coordinator1a state is secondary
+        timeout 180s
+}
+
+step test_007b_failover_worker1 {
     network disconnect worker1a
-    wait until worker1b state = wait_primary timeout 90s
+    wait until worker1b state is wait_primary  timeout 90s
+    network connect worker1a
+    wait until worker1b state is primary
+        and worker1a state is secondary
+        timeout 180s
+}
+
+step test_007c_failover_worker2 {
     network disconnect worker2a
-    wait until worker2b state = wait_primary timeout 90s
+    wait until worker2b state is wait_primary  timeout 90s
+    network connect worker2a
+    wait until worker2b state is primary
+        and worker2a state is secondary
+        timeout 180s
 }
 
-#
-# test_009: drop failed primary nodes, wait for singles
-#
-step test_009_remove_failed_nodes {
-    exec monitor pg_autoctl drop node --nodename coordinator1a
-    exec monitor pg_autoctl drop node --nodename worker1a
-    exec monitor pg_autoctl drop node --nodename worker2a
-    wait until coordinator1b state = single timeout 60s
-    wait until worker1b      state = single timeout 60s
-    wait until worker2b      state = single timeout 60s
+step test_008_remove_old_primaries {
+    exec monitor  pg_autoctl drop node --name coordinator1a --formation non-ha
+    exec monitor  pg_autoctl drop node --name worker1a --formation non-ha
+    exec monitor  pg_autoctl drop node --name worker2a --formation non-ha
+    compose stop coordinator1a
+    compose stop worker1a
+    compose stop worker2a
+    wait until coordinator1b state is single  timeout 60s
+    wait until worker1b state is single  timeout 60s
+    wait until worker2b state is single  timeout 60s
 }
 
-#
-# test_010: disable secondary support — now only single nodes remain
-#
-step test_010_disable_secondaries {
-    exec monitor pg_autoctl disable secondary --formation non-ha
+step test_009_disable_secondaries {
+    exec monitor  pg_autoctl disable secondary --formation non-ha
 }
-
-sequence
-    test_001_create_formation
-    test_002_init_coordinator
-    test_003_init_workers
-    test_004_create_distributed_table
-    test_005_enable_secondary
-    test_006_add_secondaries
-    test_007_fail_when_disabling_with_secondaries
-    test_008_shutdown_primaries
-    test_009_remove_failed_nodes
-    test_010_disable_secondaries

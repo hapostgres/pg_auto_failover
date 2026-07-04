@@ -12,8 +12,8 @@ cluster {
 }
 
 setup {
-    wait until node1 state = primary   timeout 90s
-    wait until node2 state = secondary timeout 90s
+    wait until node1 state is primary  timeout 90s
+    wait until node2 state is secondary  timeout 90s
 }
 
 teardown {
@@ -32,13 +32,12 @@ step read_from_secondary {
 }
 
 step drop_old_monitor {
-    # Simulate monitor loss: stop the monitor service.
-    exec monitor pg_autoctl stop
+    exec monitor  pg_autoctl stop
 }
 
 step disable_monitor_on_nodes {
-    exec node2 pg_autoctl disable monitor
-    exec node1 pg_autoctl disable monitor
+    exec node2  pg_autoctl disable monitor
+    exec node1  pg_autoctl disable monitor
 }
 
 step write_while_monitor_down {
@@ -53,34 +52,33 @@ step read_replicated_write {
 }
 
 step create_new_monitor {
-    # The new monitor service is started as "newmonitor" in compose.
-    exec newmonitor pg_autoctl run --background
+    exec newmonitor  pg_autoctl run --background
 }
 
 step enable_monitor_node1 {
-    exec node1 pg_autoctl enable monitor --monitor postgresql://newmonitor/pg_auto_failover
-    wait until node1 state = single timeout 90s
+    exec node1  pg_autoctl enable monitor --monitor postgresql://newmonitor/pg_auto_failover
+    wait until node1 state is single  timeout 90s
 }
 
 step enable_monitor_node2 {
-    exec node2 pg_autoctl enable monitor --monitor postgresql://newmonitor/pg_auto_failover
-    wait until node2 state = catchingup  timeout 90s
-    wait until node1 state = wait_primary timeout 90s
+    exec node2  pg_autoctl enable monitor --monitor postgresql://newmonitor/pg_auto_failover
+    wait until node2 state is catchingup  timeout 90s
+    wait until node1 state is wait_primary  timeout 90s
 }
 
 step wait_for_convergence {
-    wait until node1 state = primary   timeout 90s
-    wait until node2 state = secondary timeout 90s
-    assert node1 state = primary
-    assert node2 state = secondary
+    wait until node1 state is primary  timeout 90s
+    wait until node2 state is secondary  timeout 90s
+    wait until node1 state is primary  timeout 90s
+    wait until node2 state is secondary  timeout 90s
 }
 
 step failover_via_new_monitor {
-    exec newmonitor pg_autoctl perform failover
-    wait until node2 state = primary   timeout 90s
-    wait until node1 state = secondary timeout 90s
-    assert node2 state = primary
-    assert node1 state = secondary
+    exec newmonitor  pg_autoctl perform failover
+    wait until node2 state is primary  timeout 90s
+    wait until node1 state is secondary  timeout 90s
+    wait until node2 state is primary  timeout 90s
+    wait until node1 state is secondary  timeout 90s
     sql node2 { SELECT synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_1) }
 }
@@ -91,17 +89,3 @@ step read_from_new_secondary {
     expect { 2 }
     expect { 3 }
 }
-
-sequence
-    create_table
-    read_from_secondary
-    drop_old_monitor
-    disable_monitor_on_nodes
-    write_while_monitor_down
-    read_replicated_write
-    create_new_monitor
-    enable_monitor_node1
-    enable_monitor_node2
-    wait_for_convergence
-    failover_via_new_monitor
-    read_from_new_secondary

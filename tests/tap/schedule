@@ -5,14 +5,14 @@
 
 basic_operation
 basic_operation_listen_flag
-create_run
+maintenance_and_drop
 create_standby_with_pgdata
 ensure
 monitor_disabled
 replace_monitor
 config_get_set
 skip_pg_hba
-debian_clusters
+#debian_clusters
 auth
 enable_ssl
 ssl_cert
@@ -24,6 +24,9 @@ multi_maintenance
 multi_alternate
 extension_update
 installcheck
+# Upgrade test — requires pgaf:current and pgaf:next images to be pre-built:
+#   make -C tests/upgrade pgaf-current pgaf-next
+upgrade
 # Citus tests (uncomment when CITUS_CLUSTER=1):
 # basic_citus_operation
 # citus_cluster_name

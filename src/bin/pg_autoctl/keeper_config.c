@@ -133,6 +133,11 @@
 							   config->replication_password, \
 							   REPLICATION_PASSWORD_DEFAULT)
 
+#define OPTION_AUTOCTL_MONITOR_PASSWORD(config) \
+	make_strbuf_option_default("pg_autoctl", "monitor_password", NULL, \
+							   false, MAXCONNINFO, \
+							   config->monitor_password, "")
+
 #define OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config) \
 	make_strbuf_option_default("replication", "maximum_backup_rate", NULL, \
 							   false, MAXIMUM_BACKUP_RATE_LEN, \
@@ -241,6 +246,7 @@
 		OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config), \
 		OPTION_REPLICATION_BACKUP_DIR(config), \
 		OPTION_REPLICATION_PASSWORD(config), \
+		OPTION_AUTOCTL_MONITOR_PASSWORD(config), \
 		OPTION_TIMEOUT_NETWORK_PARTITION(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_CATCHUP(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \

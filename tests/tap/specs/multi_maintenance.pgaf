@@ -1,18 +1,30 @@
+# Test the maintenance mode lifecycle with four nodes (three sync + one async).
+# Covers: putting a standby in maintenance while triggering failover,
+# both standbys in maintenance while primary keeps running, attempting to
+# stop the primary while no standby is available (must fail), enabling
+# maintenance on the primary with --allow-failover, and verifying the monitor
+# enforces the invariant that at least one non-maintenance standby always
+# remains when number-sync-standbys > 0.
+#
+# node4 starts async / candidate-priority 0; test_013 promotes it to
+# full quorum participant to simulate dynamic node addition.
+#
+# Predecessor: tests/test_multi_maintenance.py
+
 cluster {
     monitor
-    node node1
-    node node2
-    node node3
-    node node4
+    formation {
+        node1
+        node2
+        node3
+        node4 candidate-priority 0 replication-quorum false
+    }
 }
 
 setup {
-    wait until node1 state = single    timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node1 state = primary   timeout 60s
-    wait until node3 state = secondary timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node1 state = primary   timeout 60s
+    wait until primary, secondary  timeout 120s
+    wait until node3 state is secondary  timeout 60s
+    promote node1
 }
 
 teardown {
@@ -22,6 +34,7 @@ teardown {
 #
 # test_004: write into primary
 #
+
 step test_004_write_into_primary {
     sql node1 { CREATE TABLE t1(a int); }
     sql node1 { INSERT INTO t1 VALUES (1), (2), (3), (4); }
@@ -30,17 +43,14 @@ step test_004_write_into_primary {
     expect { 4 }
 }
 
-#
-# test_005: set candidate priorities
-#   node3 is the favorite for failover
-#
-step test_005_set_priorities {
-    exec node1 pg_autoctl set node candidate-priority --candidate-priority 80
-    exec node2 pg_autoctl set node candidate-priority --candidate-priority 70
-    exec node3 pg_autoctl set node candidate-priority --candidate-priority 90
-    wait until node1 state = primary   timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node3 state = secondary timeout 60s
+step test_005_set_candidate_priorities {
+    exec node1  pg_autoctl set node candidate-priority 80
+    exec node2  pg_autoctl set node candidate-priority 70
+    exec node3  pg_autoctl set node candidate-priority 90
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 60s
     sql node1 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2) }
 }
@@ -48,26 +58,25 @@ step test_005_set_priorities {
 #
 # test_006a: put node2 in maintenance, failover to node3, then disable maintenance
 #
+
 step test_006a_maintenance_and_failover {
-    exec node2 pg_autoctl enable maintenance
-    wait until node2 state = maintenance timeout 60s
-    exec node2 pg_ctl stop -D /var/lib/postgres/pgaf -m fast
-    wait until node1 state = primary     timeout 60s
+    exec node2  pg_autoctl enable maintenance
+    wait until node2 state is maintenance  timeout 60s
+    stop postgres node2
+    wait until node1 state is primary  timeout 60s
     sql node1 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2) }
-
-    exec monitor pg_autoctl perform failover
-    wait until node3 state = primary   timeout 90s
-    wait until node1 state = secondary timeout 90s
-
+    exec monitor  pg_autoctl perform failover
+    wait until node3 state is primary
+        and node1 state is secondary
+        timeout 90s
     sql node3 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2) }
-
-    exec node2 pg_autoctl disable maintenance
-    wait until node1 state = secondary timeout 90s
-    wait until node2 state = secondary timeout 90s
-    wait until node3 state = primary   timeout 60s
-
+    exec node2  pg_autoctl disable maintenance
+    wait until node1 state is secondary
+        and node2 state is secondary
+        and node3 state is primary
+        timeout 90s
     sql node3 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2) }
 }
@@ -75,6 +84,7 @@ step test_006a_maintenance_and_failover {
 #
 # test_006b: read from new primary
 #
+
 step test_006b_read_from_new_primary {
     sql node3 { SELECT * FROM t1; }
     expect { { 1 } { 2 } { 3 } { 4 } }
@@ -83,18 +93,20 @@ step test_006b_read_from_new_primary {
 #
 # test_007a: put node1 in maintenance
 #
+
 step test_007a_node1_to_maintenance {
-    wait until node3 state = primary timeout 60s
-    exec node1 pg_autoctl enable maintenance
-    wait until node3 state = primary timeout 60s
+    wait until node3 state is primary  timeout 60s
+    exec node1  pg_autoctl enable maintenance
+    wait until node3 state is primary  timeout 60s
 }
 
 #
 # test_007b: put node2 in maintenance; both standbys now in maintenance
 #
+
 step test_007b_node2_to_maintenance {
-    exec node2 pg_autoctl enable maintenance
-    wait until node3 state = primary timeout 60s
+    exec node2  pg_autoctl enable maintenance
+    wait until node3 state is primary  timeout 60s
     sql node3 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2) }
 }
@@ -103,56 +115,55 @@ step test_007b_node2_to_maintenance {
 # test_008a: stop the primary (node3) while standbys are in maintenance
 #            node3 must NOT be assigned draining (both secondaries are in maintenance)
 #
+
 step test_008a_stop_primary {
-    network disconnect node3
-    sleep 30s
-    assert node3 assigned-state = primary
+    assert node3 stays primary while {
+        network disconnect node3
+        sleep 30s
+    }
+    wait until node3 assigned-state = primary  timeout 90s
 }
 
 #
 # test_008b: restart primary node3
 #
+
 step test_008b_start_primary {
     network connect node3
-    exec node3 pg_autoctl run --background
-    wait until node3 state = primary timeout 90s
+    wait until node3 state is primary  timeout 90s
 }
 
-#
-# test_009a: trying to enable maintenance on node3 (the primary, with --allow-failover)
-# must fail because node1 and node2 are already in maintenance — no standby would remain.
-#
-step test_009a_enable_maintenance_on_primary_fails {
+step test_009a_enable_maintenance_on_primary_should_fail {
     exec-fails node3  pg_autoctl enable maintenance --allow-failover
 }
 
 #
 # test_009b: disable maintenance on node1 and node2
 #
+
 step test_009b_disable_maintenance {
-    exec node1 pg_autoctl disable maintenance
-    exec node2 pg_autoctl disable maintenance
-    wait until node1 state = secondary timeout 90s
-    wait until node2 state = secondary timeout 90s
-    wait until node3 state = primary   timeout 60s
+    exec node1  pg_autoctl disable maintenance
+    exec node2  pg_autoctl disable maintenance
+    wait until node1 state is secondary
+        and node2 state is secondary
+        and node3 state is primary
+        timeout 90s
 }
 
-#
-# test_010: set number-sync-standbys to zero
-#
-step test_010_set_sync_zero {
-    exec node3 pg_autoctl set formation number-sync-standbys --number-sync-standbys 0
+step test_010_set_number_sync_standby_to_zero {
+    exec node3  pg_autoctl set formation number-sync-standbys 0
 }
 
 #
 # test_011: put both standbys in maintenance; primary becomes wait_primary
 #
+
 step test_011_all_to_maintenance {
-    wait until node3 state = primary timeout 60s
-    exec node1 pg_autoctl enable maintenance
-    wait until node3 state = primary timeout 60s
-    exec node2 pg_autoctl enable maintenance
-    wait until node3 state = wait_primary timeout 90s
+    wait until node3 state is primary  timeout 60s
+    exec node1  pg_autoctl enable maintenance
+    wait until node3 state is primary  timeout 60s
+    exec node2  pg_autoctl enable maintenance
+    wait until node3 state is wait_primary  timeout 90s
     sql node3 { SHOW synchronous_standby_names; }
     expect {  }
 }
@@ -160,131 +171,107 @@ step test_011_all_to_maintenance {
 #
 # test_012: can write while in wait_primary (number-sync-standbys=0)
 #
+
 step test_012_can_write_during_maintenance {
     sql node3 { INSERT INTO t1 VALUES (5), (6); }
     sql node3 { CHECKPOINT; }
 }
 
-#
-# test_013: add a fourth node while two are in maintenance
-#
-step test_013_add_node4 {
-    wait until node4 state = secondary    timeout 60s
-    wait until node3 state = primary      timeout 60s
-    wait until node2 state = maintenance  timeout 60s
-    wait until node1 state = maintenance  timeout 60s
-    wait until node3 state = primary      timeout 60s
+step test_013_add_standby {
+    exec node4  pg_autoctl set node replication-quorum true
+    exec node4  pg_autoctl set node candidate-priority 50
+    wait until node4 state is secondary
+        and node3 state is primary
+        and node2 state is maintenance
+        and node1 state is maintenance
+        timeout 60s
 }
 
 #
 # test_014: disable maintenance on node2 and node1
 #
-step test_014_disable_maintenance {
-    wait until node2 state = maintenance timeout 60s
-    exec node2 pg_autoctl disable maintenance
-    wait until node3 state = primary     timeout 90s
 
-    wait until node1 state = maintenance timeout 60s
-    exec node1 pg_autoctl disable maintenance
-    wait until node3 state = primary     timeout 90s
+step test_014_disable_maintenance {
+    wait until node2 state is maintenance  timeout 60s
+    exec node2  pg_autoctl disable maintenance
+    wait until node3 state is primary  timeout 90s
+    wait until node1 state is maintenance  timeout 60s
+    exec node1  pg_autoctl disable maintenance
+    wait until node3 state is primary  timeout 90s
 }
 
-#
-# test_015: set number-sync-standbys back to 1
-#
-step test_015_set_sync_one {
-    exec node3 pg_autoctl set formation number-sync-standbys --number-sync-standbys 1
-    wait until node3 state = primary timeout 60s
+step test_015_set_number_sync_standby_to_one {
+    exec node3  pg_autoctl set formation number-sync-standbys 1
+    wait until node3 state is primary  timeout 60s
 }
 
 #
 # test_016: put two standbys in maintenance (number-sync-standbys=1, primary stays primary)
 #
+
 step test_016_two_standbys_in_maintenance {
-    exec node1 pg_autoctl enable maintenance
-    wait until node3 state = primary timeout 60s
-    exec node2 pg_autoctl enable maintenance
-    wait until node3 state = primary timeout 60s
+    exec node1  pg_autoctl enable maintenance
+    wait until node3 state is primary  timeout 60s
+    exec node2  pg_autoctl enable maintenance
+    wait until node3 state is primary  timeout 60s
 }
 
-#
-# test_017: trying to put primary (node3) in maintenance must fail because
-#           we would have no standby left (number-sync-standbys=1, two in maintenance)
-#
-step test_017_primary_to_maintenance_fails {
+step test_017_primary_to_maintenance {
     exec-fails node3  pg_autoctl enable maintenance
 }
 
 #
 # test_018: disable maintenance on node2 and node1
 #
-step test_018_disable_maintenance {
-    wait until node2 state = maintenance timeout 60s
-    exec node2 pg_autoctl disable maintenance
-    wait until node3 state = primary     timeout 90s
 
-    wait until node1 state = maintenance timeout 60s
-    exec node1 pg_autoctl disable maintenance
-    wait until node3 state = primary     timeout 90s
+step test_018_disable_maintenance {
+    wait until node2 state is maintenance  timeout 60s
+    exec node2  pg_autoctl disable maintenance
+    wait until node3 state is primary  timeout 90s
+    wait until node1 state is maintenance  timeout 60s
+    exec node1  pg_autoctl disable maintenance
+    wait until node3 state is primary  timeout 90s
 }
 
 #
 # test_019: set priorities so node1 is the preferred candidate
 #
+
 step test_019_set_priorities {
-    exec node1 pg_autoctl set node candidate-priority --candidate-priority 90
-    exec node2 pg_autoctl set node candidate-priority --candidate-priority 70
-    exec node3 pg_autoctl set node candidate-priority --candidate-priority 70
-    exec node4 pg_autoctl set node candidate-priority --candidate-priority 70
-    wait until node1 state = secondary timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node3 state = primary   timeout 60s
-    wait until node4 state = secondary timeout 60s
+    exec node1  pg_autoctl set node candidate-priority 90
+    exec node2  pg_autoctl set node candidate-priority 70
+    exec node3  pg_autoctl set node candidate-priority 70
+    exec node4  pg_autoctl set node candidate-priority 70
+    wait until node1 state is secondary
+        and node2 state is secondary
+        and node3 state is primary
+        and node4 state is secondary
+        timeout 60s
 }
 
 #
 # test_020: put primary (node3) in maintenance with failover allowed
 #
+
 step test_020_primary_to_maintenance {
-    wait until node3 state = primary timeout 60s
-    exec node3 pg_autoctl enable maintenance --allow-failover
-    wait until node3 state = maintenance timeout 90s
-    wait until node2 state = secondary   timeout 90s
-    wait until node4 state = secondary   timeout 90s
-    wait until node1 state = primary     timeout 90s
+    wait until node3 state is primary  timeout 60s
+    exec node3  pg_autoctl enable maintenance --allow-failover
+    wait until node3 state is maintenance
+        and node2 state is secondary
+        and node4 state is secondary
+        and node1 state is primary
+        timeout 90s
 }
 
 #
 # test_021: disable maintenance on node3, it rejoins as secondary
 #
-step test_021_stop_maintenance {
-    exec node3 pg_autoctl disable maintenance
-    wait until node3 state = secondary timeout 90s
-    wait until node1 state = primary   timeout 60s
-    wait until node2 state = secondary timeout 60s
-    wait until node4 state = secondary timeout 60s
-}
 
-sequence
-    test_004_write_into_primary
-    test_005_set_priorities
-    test_006a_maintenance_and_failover
-    test_006b_read_from_new_primary
-    test_007a_node1_to_maintenance
-    test_007b_node2_to_maintenance
-    test_008a_stop_primary
-    test_008b_start_primary
-    test_009a_enable_maintenance_on_primary_fails
-    test_009b_disable_maintenance
-    test_010_set_sync_zero
-    test_011_all_to_maintenance
-    test_012_can_write_during_maintenance
-    test_013_add_node4
-    test_014_disable_maintenance
-    test_015_set_sync_one
-    test_016_two_standbys_in_maintenance
-    test_017_primary_to_maintenance_fails
-    test_018_disable_maintenance
-    test_019_set_priorities
-    test_020_primary_to_maintenance
-    test_021_stop_maintenance
+step test_021_stop_maintenance {
+    exec node3  pg_autoctl disable maintenance
+    wait until node3 state is secondary
+        and node1 state is primary
+        and node2 state is secondary
+        and node4 state is secondary
+        timeout 90s
+}
