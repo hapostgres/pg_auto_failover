@@ -399,7 +399,7 @@ ReportPgIsRunning(Keeper *keeper)
 		 */
 		log_error("Failed to restart PostgreSQL %d times in the "
 				  "last %" PRIu64 "s, reporting PostgreSQL not running to "
-								  "the pg_auto_failover monitor.",
+				  "the pg_auto_failover monitor.",
 				  postgres->pgStartRetries,
 				  now - postgres->pgFirstStartFailureTs);
 
@@ -649,7 +649,7 @@ keeper_state_check_postgres(Keeper *keeper, PostgresControlData *control)
 		 * are doing anymore.
 		 */
 		log_error("Unknown PostgreSQL system identifier: %" PRIu64 ", "
-																   "expected %" PRIu64,
+				  "expected %" PRIu64,
 				  keeperState->system_identifier,
 				  control->system_identifier);
 		return false;

@@ -39,39 +39,39 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
  * replaced with dynamic values from the setup when used.
  */
 #define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER \
-	{ "shared_preload_libraries", "pg_stat_statements" }, \
-	{ "listen_addresses", "'*'" }, \
-	{ "port", "5432" }, \
-	{ "max_wal_senders", "12" }, \
-	{ "max_replication_slots", "12" }, \
-	{ "wal_level", "'replica'" }, \
-	{ "wal_log_hints", "on" }, \
-	{ "wal_sender_timeout", "'30s'" }, \
-	{ "hot_standby_feedback", "on" }, \
-	{ "hot_standby", "on" }, \
-	{ "synchronous_commit", "on" }, \
-	{ "logging_collector", "on" }, \
-	{ "log_destination", "stderr" }, \
-	{ "log_directory", "log" }, \
-	{ "log_min_messages", "info" }, \
-	{ "log_connections", "off" }, \
-	{ "log_disconnections", "off" }, \
-	{ "log_lock_waits", "on" }, \
-	{ "password_encryption", "md5" }, \
-	{ "ssl", "off" }, \
-	{ "ssl_ca_file", "" }, \
-	{ "ssl_crl_file", "" }, \
-	{ "ssl_cert_file", "" }, \
-	{ "ssl_key_file", "" }, \
-	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" }
+		{ "shared_preload_libraries", "pg_stat_statements" }, \
+		{ "listen_addresses", "'*'" }, \
+		{ "port", "5432" }, \
+		{ "max_wal_senders", "12" }, \
+		{ "max_replication_slots", "12" }, \
+		{ "wal_level", "'replica'" }, \
+		{ "wal_log_hints", "on" }, \
+		{ "wal_sender_timeout", "'30s'" }, \
+		{ "hot_standby_feedback", "on" }, \
+		{ "hot_standby", "on" }, \
+		{ "synchronous_commit", "on" }, \
+		{ "logging_collector", "on" }, \
+		{ "log_destination", "stderr" }, \
+		{ "log_directory", "log" }, \
+		{ "log_min_messages", "info" }, \
+		{ "log_connections", "off" }, \
+		{ "log_disconnections", "off" }, \
+		{ "log_lock_waits", "on" }, \
+		{ "password_encryption", "md5" }, \
+		{ "ssl", "off" }, \
+		{ "ssl_ca_file", "" }, \
+		{ "ssl_crl_file", "" }, \
+		{ "ssl_cert_file", "" }, \
+		{ "ssl_key_file", "" }, \
+		{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" }
 
 #define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13 \
-	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER, \
-	{ "wal_keep_segments", "512" }
+		DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER, \
+		{ "wal_keep_segments", "512" }
 
 #define DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13 \
-	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER, \
-	{ "wal_keep_size", "'8 GB'" }
+		DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER, \
+		{ "wal_keep_size", "'8 GB'" }
 
 GUC postgres_default_settings_pre_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13,

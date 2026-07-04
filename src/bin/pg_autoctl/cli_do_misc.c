@@ -408,8 +408,8 @@ keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
 			continue;
 		}
 
-		if ((strcmp(argv[i], "--timeout") == 0 || strcmp(argv[i], "-T") == 0)
-			&& i + 1 < argc)
+		if ((strcmp(argv[i], "--timeout") == 0 || strcmp(argv[i], "-T") == 0) &&
+			i + 1 < argc)
 		{
 			/* skip both the flag and its argument */
 			i++;
@@ -694,12 +694,12 @@ keeper_cli_pgsetup_hba_lan(int argc, char **argv)
 	{
 		KeeperConfig hbaConfig = keeperOptions;
 		if (keeper_config_set_pathnames_from_pgdata(&hbaConfig.pathnames,
-		                                            pgdata) &&
-		    keeper_config_read_file(&hbaConfig,
-		                            false /* missingPgdataIsOk */,
-		                            true  /* pgIsNotRunningIsOk */,
-		                            true  /* monitorDisabledIsOk */) &&
-		    !IS_EMPTY_STRING_BUFFER(hbaConfig.hostname))
+													pgdata) &&
+			keeper_config_read_file(&hbaConfig,
+									false /* missingPgdataIsOk */,
+									true /* pgIsNotRunningIsOk */,
+									true /* monitorDisabledIsOk */) &&
+			!IS_EMPTY_STRING_BUFFER(hbaConfig.hostname))
 		{
 			strlcpy(hostname, hbaConfig.hostname, sizeof(hostname));
 		}

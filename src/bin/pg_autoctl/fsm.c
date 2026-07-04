@@ -30,156 +30,156 @@
  * Comments displayed in the logs when state changes.
  */
 #define COMMENT_INIT_TO_SINGLE \
-	"Start as a single node"
+		"Start as a single node"
 
 #define COMMENT_PRIMARY_TO_SINGLE \
-	"Other node was forcibly removed, now single"
+		"Other node was forcibly removed, now single"
 
 #define COMMENT_DEMOTED_TO_SINGLE \
-	"Was demoted after a failure, " \
-	"but secondary was forcibly removed"
+		"Was demoted after a failure, " \
+		"but secondary was forcibly removed"
 
 #define COMMENT_LOST_PRIMARY \
-	"Primary was forcibly removed"
+		"Primary was forcibly removed"
 
 #define COMMENT_REPLICATION_TO_SINGLE \
-	"Went down to force the primary to time out, " \
-	"but then it was removed"
+		"Went down to force the primary to time out, " \
+		"but then it was removed"
 
 #define COMMENT_SINGLE_TO_WAIT_PRIMARY \
-	"A new secondary was added"
+		"A new secondary was added"
 
 #define COMMENT_PRIMARY_TO_WAIT_PRIMARY \
-	"Secondary became unhealthy"
+		"Secondary became unhealthy"
 
 #define COMMENT_PRIMARY_TO_JOIN_PRIMARY \
-	"A new secondary was added"
+		"A new secondary was added"
 
 #define COMMENT_PRIMARY_TO_DRAINING \
-	"A failover occurred, stopping writes "
+		"A failover occurred, stopping writes "
 
 #define COMMENT_PRIMARY_TO_PREPARE_MAINTENANCE \
-	"Promoting the standby to enable maintenance on the " \
-	"primary, stopping Postgres "
+		"Promoting the standby to enable maintenance on the " \
+		"primary, stopping Postgres "
 
 #define COMMENT_PRIMARY_TO_MAINTENANCE \
-	"Setting up Postgres in standby mode for maintenance operations"
+		"Setting up Postgres in standby mode for maintenance operations"
 
 #define COMMENT_PRIMARY_TO_MAINTENANCE_PROMOTE_SECONDARY \
-	"Promoting the standby to enable maintenance on the primary"
+		"Promoting the standby to enable maintenance on the primary"
 
 #define COMMENT_PRIMARY_TO_DEMOTED \
-	"A failover occurred, no longer primary"
+		"A failover occurred, no longer primary"
 
 #define COMMENT_DRAINING_TO_DEMOTED \
-	"Demoted after a failover, no longer primary"
+		"Demoted after a failover, no longer primary"
 
 #define COMMENT_DRAINING_TO_DEMOTE_TIMEOUT \
-	"Secondary confirms it’s receiving no more writes"
+		"Secondary confirms it’s receiving no more writes"
 
 #define COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED \
-	"Demote timeout expired"
+		"Demote timeout expired"
 
 #define COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY \
-	"Confirmed promotion with the monitor"
+		"Confirmed promotion with the monitor"
 
 #define COMMENT_WAIT_PRIMARY_TO_PRIMARY \
-	"A healthy secondary appeared"
+		"A healthy secondary appeared"
 
 #define COMMENT_JOIN_PRIMARY_TO_PRIMARY \
-	"A healthy secondary appeared"
+		"A healthy secondary appeared"
 
 #define COMMENT_DEMOTE_TO_PRIMARY \
-	"Detected a network partition, " \
-	"but monitor didn't do failover"
+		"Detected a network partition, " \
+		"but monitor didn't do failover"
 
 #define COMMENT_WAIT_STANDBY_TO_CATCHINGUP \
-	"The primary is now ready to accept a standby"
+		"The primary is now ready to accept a standby"
 
 #define COMMENT_DEMOTED_TO_CATCHINGUP \
-	"A new primary is available. " \
-	"First, try to rewind. If that fails, do a pg_basebackup."
+		"A new primary is available. " \
+		"First, try to rewind. If that fails, do a pg_basebackup."
 
 #define COMMENT_SECONDARY_TO_CATCHINGUP \
-	"Failed to report back to the monitor, " \
-	"not eligible for promotion"
+		"Failed to report back to the monitor, " \
+		"not eligible for promotion"
 
 #define COMMENT_CATCHINGUP_TO_SECONDARY \
-	"Convinced the monitor that I'm up and running, " \
-	"and eligible for promotion again"
+		"Convinced the monitor that I'm up and running, " \
+		"and eligible for promotion again"
 
 #define COMMENT_SECONDARY_TO_PREP_PROMOTION \
-	"Stop traffic to primary, " \
-	"wait for it to finish draining."
+		"Stop traffic to primary, " \
+		"wait for it to finish draining."
 
 #define COMMENT_PROMOTION_TO_STOP_REPLICATION \
-	"Prevent against split-brain situations."
+		"Prevent against split-brain situations."
 
 #define COMMENT_INIT_TO_WAIT_STANDBY \
-	"Start following a primary"
+		"Start following a primary"
 
 #define COMMENT_SECONARY_TO_WAIT_STANDBY \
-	"Registering to a new monitor"
+		"Registering to a new monitor"
 
 #define COMMENT_SECONDARY_TO_WAIT_MAINTENANCE \
-	"Waiting for the primary to disable sync replication before " \
-	"going to maintenance."
+		"Waiting for the primary to disable sync replication before " \
+		"going to maintenance."
 
 #define COMMENT_SECONDARY_TO_MAINTENANCE \
-	"Suspending standby for manual maintenance."
+		"Suspending standby for manual maintenance."
 
 #define COMMENT_MAINTENANCE_TO_CATCHINGUP \
-	"Restarting standby after manual maintenance is done."
+		"Restarting standby after manual maintenance is done."
 
 #define COMMENT_BLOCKED_WRITES \
-	"Promoting a Citus Worker standby after having blocked writes " \
-	"from the coordinator."
+		"Promoting a Citus Worker standby after having blocked writes " \
+		"from the coordinator."
 
 #define COMMENT_PRIMARY_TO_APPLY_SETTINGS \
-	"Apply new pg_auto_failover settings (synchronous_standby_names)"
+		"Apply new pg_auto_failover settings (synchronous_standby_names)"
 
 #define COMMENT_APPLY_SETTINGS_TO_PRIMARY \
-	"Back to primary state after having applied new pg_auto_failover settings"
+		"Back to primary state after having applied new pg_auto_failover settings"
 
 #define COMMENT_SECONDARY_TO_REPORT_LSN \
-	"Reporting the last write-ahead log location received"
+		"Reporting the last write-ahead log location received"
 
 #define COMMENT_DRAINING_TO_REPORT_LSN \
-	"Reporting the last write-ahead log location after draining"
+		"Reporting the last write-ahead log location after draining"
 
 #define COMMENT_DEMOTED_TO_REPORT_LSN \
-	"Reporting the last write-ahead log location after being demoted"
+		"Reporting the last write-ahead log location after being demoted"
 
 #define COMMENT_REPORT_LSN_TO_PREP_PROMOTION \
-	"Stop traffic to primary, " \
-	"wait for it to finish draining."
+		"Stop traffic to primary, " \
+		"wait for it to finish draining."
 
 #define COMMENT_REPORT_LSN_TO_FAST_FORWARD \
-	"Fetching missing WAL bits from another standby before promotion"
+		"Fetching missing WAL bits from another standby before promotion"
 
 #define COMMENT_REPORT_LSN_TO_SINGLE \
-	"There is no other node anymore, promote this node"
+		"There is no other node anymore, promote this node"
 
 #define COMMENT_FOLLOW_NEW_PRIMARY \
-	"Switch replication to the new primary"
+		"Switch replication to the new primary"
 
 #define COMMENT_REPORT_LSN_TO_JOIN_SECONDARY \
-	"A failover candidate has been selected, stop replication"
+		"A failover candidate has been selected, stop replication"
 
 #define COMMENT_JOIN_SECONDARY_TO_SECONDARY \
-	"Failover is done, we have a new primary to follow"
+		"Failover is done, we have a new primary to follow"
 
 #define COMMENT_FAST_FORWARD_TO_PREP_PROMOTION \
-	"Got the missing WAL bytes, promoted"
+		"Got the missing WAL bytes, promoted"
 
 #define COMMENT_INIT_TO_REPORT_LSN \
-	"Creating a new node from a standby node that is not a candidate."
+		"Creating a new node from a standby node that is not a candidate."
 
 #define COMMENT_DROPPED_TO_REPORT_LSN \
-	"This node is being reinitialized after having been dropped"
+		"This node is being reinitialized after having been dropped"
 
 #define COMMENT_ANY_TO_DROPPED \
-	"This node is being dropped from the monitor"
+		"This node is being dropped from the monitor"
 
 
 /*

@@ -744,7 +744,7 @@ cli_do_monitor_parse_notification(int argc, char **argv)
  * ----------------------------------------------------------------------- */
 
 #define MONITOR_LOCAL_URI \
-	"postgresql://autoctl_node@localhost/pg_auto_failover?sslmode=prefer"
+		"postgresql://autoctl_node@localhost/pg_auto_failover?sslmode=prefer"
 
 /* Shared option state for both new commands */
 static struct

@@ -552,10 +552,10 @@ demoapp_update_client_failovers(const char *pguri, int clientId, int failovers)
  */
 #if PG_MAJORVERSION_NUM < 15
 #define random_between(M, N) \
-	((M) + pg_lrand48() / (RAND_MAX / ((N) -(M) +1) + 1))
+		((M) + pg_lrand48() / (RAND_MAX / ((N) -(M) +1) + 1))
 #else
 #define random_between(M, N) \
-	((M) + pg_prng_uint32(&prng_state) / (RAND_MAX / ((N) -(M) +1) + 1))
+		((M) + pg_prng_uint32(&prng_state) / (RAND_MAX / ((N) -(M) +1) + 1))
 #endif
 
 /*
