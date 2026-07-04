@@ -335,8 +335,8 @@ cli_do_fsm_node_state(int argc, char **argv)
 	}
 
 	time_t deadline = (fsmNodeStateOpts.timeout > 0)
-		? time(NULL) + fsmNodeStateOpts.timeout
-		: 0;
+					  ? time(NULL) + fsmNodeStateOpts.timeout
+					  : 0;
 
 	for (;;)
 	{

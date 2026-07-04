@@ -50,31 +50,31 @@
 #define Anum_pgautofailover_node_nodecluster 21
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
-		"formationid, " \
-		"nodeid, " \
-		"groupid, " \
-		"nodename, " \
-		"nodehost, " \
-		"nodeport, " \
-		"sysidentifier, " \
-		"goalstate, " \
-		"reportedstate, " \
-		"reportedpgisrunning, " \
-		"reportedrepstate, " \
-		"reporttime, " \
-		"reportedtli, " \
-		"reportedlsn, " \
-		"walreporttime, " \
-		"health, " \
-		"healthchecktime, " \
-		"statechangetime, " \
-		"candidatepriority, " \
-		"replicationquorum, " \
-		"nodecluster"
+	"formationid, " \
+	"nodeid, " \
+	"groupid, " \
+	"nodename, " \
+	"nodehost, " \
+	"nodeport, " \
+	"sysidentifier, " \
+	"goalstate, " \
+	"reportedstate, " \
+	"reportedpgisrunning, " \
+	"reportedrepstate, " \
+	"reporttime, " \
+	"reportedtli, " \
+	"reportedlsn, " \
+	"walreporttime, " \
+	"health, " \
+	"healthchecktime, " \
+	"statechangetime, " \
+	"candidatepriority, " \
+	"replicationquorum, " \
+	"nodecluster"
 
 
 #define SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE \
-		"SELECT " AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS " FROM " AUTO_FAILOVER_NODE_TABLE
+	"SELECT " AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS " FROM " AUTO_FAILOVER_NODE_TABLE
 
 /* pg_stat_replication.sync_state: "sync", "async", "quorum", "potential" */
 typedef enum SyncState
@@ -104,7 +104,7 @@ typedef enum SyncState
  */
 #define NODE_FORMAT "node %lld \"%s\" (%s:%d)"
 #define NODE_FORMAT_ARGS(node) \
-		(long long) node->nodeId, node->nodeName, node->nodeHost, node->nodePort
+	(long long) node->nodeId, node->nodeName, node->nodeHost, node->nodePort
 
 /*
  * AutoFailoverNode represents a Postgres node that is being tracked by the

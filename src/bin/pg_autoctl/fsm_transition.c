@@ -282,6 +282,7 @@ fsm_init_primary(Keeper *keeper)
 		 * leaking information from the passfile, environment variable, or
 		 * other places.
 		 */
+
 		/*
 		 * When monitor_password is configured, use it and honour the cluster
 		 * auth method; otherwise fall back to the hard-coded password with

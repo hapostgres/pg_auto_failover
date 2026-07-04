@@ -24,57 +24,57 @@
 #include "runprogram.h"
 
 #define OPTION_SYSTEMD_DESCRIPTION(config) \
-		make_strbuf_option_default("Unit", "Description", NULL, true, BUFSIZE, \
-								   config->Description, "pg_auto_failover")
+	make_strbuf_option_default("Unit", "Description", NULL, true, BUFSIZE, \
+							   config->Description, "pg_auto_failover")
 
 #define OPTION_SYSTEMD_WORKING_DIRECTORY(config) \
-		make_strbuf_option_default("Service", "WorkingDirectory", \
-								   NULL, true, BUFSIZE, \
-								   config->WorkingDirectory, "/var/lib/postgresql")
+	make_strbuf_option_default("Service", "WorkingDirectory", \
+							   NULL, true, BUFSIZE, \
+							   config->WorkingDirectory, "/var/lib/postgresql")
 
 #define OPTION_SYSTEMD_ENVIRONMENT_PGDATA(config) \
-		make_strbuf_option_default("Service", "Environment", \
-								   NULL, true, BUFSIZE, \
-								   config->EnvironmentPGDATA, \
-								   "PGDATA=/var/lib/postgresql/11/pg_auto_failover")
+	make_strbuf_option_default("Service", "Environment", \
+							   NULL, true, BUFSIZE, \
+							   config->EnvironmentPGDATA, \
+							   "PGDATA=/var/lib/postgresql/11/pg_auto_failover")
 
 #define OPTION_SYSTEMD_USER(config) \
-		make_strbuf_option_default("Service", "User", NULL, true, BUFSIZE, \
-								   config->User, "postgres")
+	make_strbuf_option_default("Service", "User", NULL, true, BUFSIZE, \
+							   config->User, "postgres")
 
 #define OPTION_SYSTEMD_EXECSTART(config) \
-		make_strbuf_option_default("Service", "ExecStart", NULL, true, BUFSIZE, \
-								   config->ExecStart, "/usr/bin/pg_autoctl run")
+	make_strbuf_option_default("Service", "ExecStart", NULL, true, BUFSIZE, \
+							   config->ExecStart, "/usr/bin/pg_autoctl run")
 
 #define OPTION_SYSTEMD_RESTART(config) \
-		make_strbuf_option_default("Service", "Restart", NULL, true, BUFSIZE, \
-								   config->Restart, "always")
+	make_strbuf_option_default("Service", "Restart", NULL, true, BUFSIZE, \
+							   config->Restart, "always")
 
 #define OPTION_SYSTEMD_STARTLIMITBURST(config) \
-		make_int_option_default("Service", "StartLimitBurst", NULL, true, \
-								&(config->StartLimitBurst), 20)
+	make_int_option_default("Service", "StartLimitBurst", NULL, true, \
+							&(config->StartLimitBurst), 20)
 
 #define OPTION_SYSTEMD_EXECRELOAD(config) \
-		make_strbuf_option_default("Service", "ExecReload", NULL, true, BUFSIZE, \
-								   config->ExecReload, "/usr/bin/pg_autoctl reload")
+	make_strbuf_option_default("Service", "ExecReload", NULL, true, BUFSIZE, \
+							   config->ExecReload, "/usr/bin/pg_autoctl reload")
 
 #define OPTION_SYSTEMD_WANTEDBY(config) \
-		make_strbuf_option_default("Install", "WantedBy", NULL, true, BUFSIZE, \
-								   config->WantedBy, "multi-user.target")
+	make_strbuf_option_default("Install", "WantedBy", NULL, true, BUFSIZE, \
+							   config->WantedBy, "multi-user.target")
 
 #define SET_INI_OPTIONS_ARRAY(config) \
-		{ \
-			OPTION_SYSTEMD_DESCRIPTION(config), \
-			OPTION_SYSTEMD_WORKING_DIRECTORY(config), \
-			OPTION_SYSTEMD_ENVIRONMENT_PGDATA(config), \
-			OPTION_SYSTEMD_USER(config), \
-			OPTION_SYSTEMD_EXECSTART(config), \
-			OPTION_SYSTEMD_RESTART(config), \
-			OPTION_SYSTEMD_STARTLIMITBURST(config), \
-			OPTION_SYSTEMD_EXECRELOAD(config), \
-			OPTION_SYSTEMD_WANTEDBY(config), \
-			INI_OPTION_LAST \
-		}
+	{ \
+		OPTION_SYSTEMD_DESCRIPTION(config), \
+		OPTION_SYSTEMD_WORKING_DIRECTORY(config), \
+		OPTION_SYSTEMD_ENVIRONMENT_PGDATA(config), \
+		OPTION_SYSTEMD_USER(config), \
+		OPTION_SYSTEMD_EXECSTART(config), \
+		OPTION_SYSTEMD_RESTART(config), \
+		OPTION_SYSTEMD_STARTLIMITBURST(config), \
+		OPTION_SYSTEMD_EXECRELOAD(config), \
+		OPTION_SYSTEMD_WANTEDBY(config), \
+		INI_OPTION_LAST \
+	}
 
 
 /*

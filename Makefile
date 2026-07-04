@@ -187,10 +187,18 @@ endif
 #
 # INDENT/LINT/SPELLCHECK
 #
+# citus_indent is run via its official Docker image so that the version
+# matches CI exactly.  The image is citus/stylechecker:no-py.
+CITUS_INDENT = docker run --rm \
+	-v "$(shell pwd):/workdir" \
+	-w /workdir \
+	citus/stylechecker:no-py \
+	citus_indent
+
 # make indent; edits the code when necessary
 .PHONY: indent
 indent:
-	citus_indent
+	$(CITUS_INDENT)
 	black --exclude=ci/tools .
 
 # make lint; is an alias for make spellcheck
@@ -202,7 +210,7 @@ lint linting: spellcheck ;
 # reports compliance with the rules.
 .PHONY: spellcheck
 spellcheck:
-	citus_indent --check
+	$(CITUS_INDENT) --check
 	black --exclude=ci/tools --check .
 	ci/banned.h.sh
 

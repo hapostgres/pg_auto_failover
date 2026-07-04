@@ -148,7 +148,7 @@ service_monitor_init_start(void *context, pid_t *pid)
 			{
 				char *fname = config->formationNames[fi];
 				char *fkind = config->formationKinds[fi][0]
-								  ? config->formationKinds[fi] : "pgsql";
+							  ? config->formationKinds[fi] : "pgsql";
 
 				log_info("Creating formation \"%s\" (kind %s)", fname, fkind);
 

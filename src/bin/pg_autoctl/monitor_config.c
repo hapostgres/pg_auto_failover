@@ -22,8 +22,8 @@
 #include "pgctl.h"
 
 #define OPTION_AUTOCTL_ROLE(config) \
-		make_strbuf_option_default("pg_autoctl", "role", NULL, true, NAMEDATALEN, \
-								   config->role, MONITOR_ROLE)
+	make_strbuf_option_default("pg_autoctl", "role", NULL, true, NAMEDATALEN, \
+							   config->role, MONITOR_ROLE)
 
 /*
  * --hostname used to be --nodename, and we need to support transition from the
@@ -33,99 +33,99 @@
  * As a result HOSTNAME is marked not required and NODENAME is marked compat.
  */
 #define OPTION_AUTOCTL_HOSTNAME(config) \
-		make_strbuf_option("pg_autoctl", "hostname", "hostname", \
-						   false, _POSIX_HOST_NAME_MAX, config->hostname)
+	make_strbuf_option("pg_autoctl", "hostname", "hostname", \
+					   false, _POSIX_HOST_NAME_MAX, config->hostname)
 
 #define OPTION_AUTOCTL_NODE_PASSWORD(config) \
-		make_strbuf_option_default("pg_autoctl", "autoctl_node_password", NULL, \
-								   false, MAXCONNINFO, \
-								   config->autoctl_node_password, "")
+	make_strbuf_option_default("pg_autoctl", "autoctl_node_password", NULL, \
+							   false, MAXCONNINFO, \
+							   config->autoctl_node_password, "")
 
 #define OPTION_AUTOCTL_NODENAME(config) \
-		make_strbuf_compat_option("pg_autoctl", "nodename", \
-								  _POSIX_HOST_NAME_MAX, config->hostname)
+	make_strbuf_compat_option("pg_autoctl", "nodename", \
+							  _POSIX_HOST_NAME_MAX, config->hostname)
 
 #define OPTION_POSTGRESQL_PGDATA(config) \
-		make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
-						   config->pgSetup.pgdata)
+	make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
+					   config->pgSetup.pgdata)
 
 #define OPTION_POSTGRESQL_PG_CTL(config) \
-		make_strbuf_option("postgresql", "pg_ctl", "pgctl", false, MAXPGPATH, \
-						   config->pgSetup.pg_ctl)
+	make_strbuf_option("postgresql", "pg_ctl", "pgctl", false, MAXPGPATH, \
+					   config->pgSetup.pg_ctl)
 
 #define OPTION_POSTGRESQL_USERNAME(config) \
-		make_strbuf_option("postgresql", "username", "username", \
-						   false, NAMEDATALEN, \
-						   config->pgSetup.username)
+	make_strbuf_option("postgresql", "username", "username", \
+					   false, NAMEDATALEN, \
+					   config->pgSetup.username)
 
 #define OPTION_POSTGRESQL_DBNAME(config) \
-		make_strbuf_option("postgresql", "dbname", "dbname", false, NAMEDATALEN, \
-						   config->pgSetup.dbname)
+	make_strbuf_option("postgresql", "dbname", "dbname", false, NAMEDATALEN, \
+					   config->pgSetup.dbname)
 
 #define OPTION_POSTGRESQL_HOST(config) \
-		make_strbuf_option("postgresql", "host", "pghost", \
-						   false, _POSIX_HOST_NAME_MAX, \
-						   config->pgSetup.pghost)
+	make_strbuf_option("postgresql", "host", "pghost", \
+					   false, _POSIX_HOST_NAME_MAX, \
+					   config->pgSetup.pghost)
 
 #define OPTION_POSTGRESQL_PORT(config) \
-		make_int_option("postgresql", "port", "pgport", \
-						true, &(config->pgSetup.pgport))
+	make_int_option("postgresql", "port", "pgport", \
+					true, &(config->pgSetup.pgport))
 
 #define OPTION_POSTGRESQL_LISTEN_ADDRESSES(config) \
-		make_strbuf_option("postgresql", "listen_addresses", "listen", \
-						   false, MAXPGPATH, config->pgSetup.listen_addresses)
+	make_strbuf_option("postgresql", "listen_addresses", "listen", \
+					   false, MAXPGPATH, config->pgSetup.listen_addresses)
 
 #define OPTION_POSTGRESQL_AUTH_METHOD(config) \
-		make_strbuf_option("postgresql", "auth_method", "auth", \
-						   false, MAXPGPATH, config->pgSetup.authMethod)
+	make_strbuf_option("postgresql", "auth_method", "auth", \
+					   false, MAXPGPATH, config->pgSetup.authMethod)
 
 #define OPTION_SSL_ACTIVE(config) \
-		make_int_option_default("ssl", "active", NULL, \
-								false, &(config->pgSetup.ssl.active), 0)
+	make_int_option_default("ssl", "active", NULL, \
+							false, &(config->pgSetup.ssl.active), 0)
 
 #define OPTION_SSL_MODE(config) \
-		make_strbuf_option("ssl", "sslmode", "ssl-mode", \
-						   false, SSL_MODE_STRLEN, config->pgSetup.ssl.sslModeStr)
+	make_strbuf_option("ssl", "sslmode", "ssl-mode", \
+					   false, SSL_MODE_STRLEN, config->pgSetup.ssl.sslModeStr)
 
 #define OPTION_SSL_CA_FILE(config) \
-		make_strbuf_option("ssl", "ca_file", "ssl-ca-file", \
-						   false, MAXPGPATH, config->pgSetup.ssl.caFile)
+	make_strbuf_option("ssl", "ca_file", "ssl-ca-file", \
+					   false, MAXPGPATH, config->pgSetup.ssl.caFile)
 
 #define OPTION_SSL_CRL_FILE(config) \
-		make_strbuf_option("ssl", "crl_file", "ssl-crl-file", \
-						   false, MAXPGPATH, config->pgSetup.ssl.crlFile)
+	make_strbuf_option("ssl", "crl_file", "ssl-crl-file", \
+					   false, MAXPGPATH, config->pgSetup.ssl.crlFile)
 
 #define OPTION_SSL_SERVER_CERT(config) \
-		make_strbuf_option("ssl", "cert_file", "server-cert", \
-						   false, MAXPGPATH, config->pgSetup.ssl.serverCert)
+	make_strbuf_option("ssl", "cert_file", "server-cert", \
+					   false, MAXPGPATH, config->pgSetup.ssl.serverCert)
 
 #define OPTION_SSL_SERVER_KEY(config) \
-		make_strbuf_option("ssl", "key_file", "server-key", \
-						   false, MAXPGPATH, config->pgSetup.ssl.serverKey)
+	make_strbuf_option("ssl", "key_file", "server-key", \
+					   false, MAXPGPATH, config->pgSetup.ssl.serverKey)
 
 
 #define SET_INI_OPTIONS_ARRAY(config) \
-		{ \
-			OPTION_AUTOCTL_ROLE(config), \
-			OPTION_AUTOCTL_HOSTNAME(config), \
-			OPTION_AUTOCTL_NODENAME(config), \
-			OPTION_AUTOCTL_NODE_PASSWORD(config), \
-			OPTION_POSTGRESQL_PGDATA(config), \
-			OPTION_POSTGRESQL_PG_CTL(config), \
-			OPTION_POSTGRESQL_USERNAME(config), \
-			OPTION_POSTGRESQL_DBNAME(config), \
-			OPTION_POSTGRESQL_HOST(config), \
-			OPTION_POSTGRESQL_PORT(config), \
-			OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
-			OPTION_POSTGRESQL_AUTH_METHOD(config), \
-			OPTION_SSL_MODE(config), \
-			OPTION_SSL_ACTIVE(config), \
-			OPTION_SSL_CA_FILE(config), \
-			OPTION_SSL_CRL_FILE(config), \
-			OPTION_SSL_SERVER_CERT(config), \
-			OPTION_SSL_SERVER_KEY(config), \
-			INI_OPTION_LAST \
-		}
+	{ \
+		OPTION_AUTOCTL_ROLE(config), \
+		OPTION_AUTOCTL_HOSTNAME(config), \
+		OPTION_AUTOCTL_NODENAME(config), \
+		OPTION_AUTOCTL_NODE_PASSWORD(config), \
+		OPTION_POSTGRESQL_PGDATA(config), \
+		OPTION_POSTGRESQL_PG_CTL(config), \
+		OPTION_POSTGRESQL_USERNAME(config), \
+		OPTION_POSTGRESQL_DBNAME(config), \
+		OPTION_POSTGRESQL_HOST(config), \
+		OPTION_POSTGRESQL_PORT(config), \
+		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
+		OPTION_POSTGRESQL_AUTH_METHOD(config), \
+		OPTION_SSL_MODE(config), \
+		OPTION_SSL_ACTIVE(config), \
+		OPTION_SSL_CA_FILE(config), \
+		OPTION_SSL_CRL_FILE(config), \
+		OPTION_SSL_SERVER_CERT(config), \
+		OPTION_SSL_SERVER_KEY(config), \
+		INI_OPTION_LAST \
+	}
 
 
 /*

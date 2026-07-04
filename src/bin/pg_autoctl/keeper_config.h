@@ -75,7 +75,7 @@ typedef struct KeeperConfig
 } KeeperConfig;
 
 #define PG_AUTOCTL_MONITOR_IS_DISABLED(config) \
-		(strcmp(config->monitor_pguri, PG_AUTOCTL_MONITOR_DISABLED) == 0)
+	(strcmp(config->monitor_pguri, PG_AUTOCTL_MONITOR_DISABLED) == 0)
 
 bool keeper_config_set_pathnames_from_pgdata(ConfigFilePaths *pathnames,
 											 const char *pgdata);

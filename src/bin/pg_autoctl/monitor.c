@@ -991,7 +991,7 @@ monitor_node_active(Monitor *monitor,
 		if (strcmp(parseContext.sqlstate, STR_ERRCODE_UNDEFINED_OBJECT) == 0)
 		{
 			log_info("Node %" PRId64 " is no longer registered on the monitor "
-					 "(SQLSTATE %s); treating as dropped.",
+									 "(SQLSTATE %s); treating as dropped.",
 					 nodeId, parseContext.sqlstate);
 			assignedState->nodeId = nodeId;
 			assignedState->groupId = groupId;
