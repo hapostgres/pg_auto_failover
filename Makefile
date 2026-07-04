@@ -150,17 +150,11 @@ $(VERSION_FILE):
 #
 # make ci-test; is run on the GitHub Action workflow
 #
-# In that environment we have a local git checkout of the code, and docker
-# is available too. We run our tests in docker, except for the code linting
-# parts which requires full access to the git repository, so linter tooling
-# is installed directly on the CI vm.
 #
 .PHONY: ci-test
 ci-test:
 ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
-else ifeq ($(TEST),linting)
-	$(MAKE) spellcheck
 else
 	$(MAKE) run-test
 endif
@@ -172,8 +166,6 @@ endif
 test:
 ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
-else ifeq ($(TEST),linting)
-	$(MAKE) spellcheck
 else
 	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
 		$(NOSETESTS)			\
@@ -223,7 +215,7 @@ lint linting: spellcheck ;
 # reports compliance with the rules.
 .PHONY: spellcheck
 spellcheck:
-	citus_indent --check
+	$(CITUS_INDENT_DOCKER) --check
 	black --exclude=ci/tools --check .
 	ci/banned.h.sh
 

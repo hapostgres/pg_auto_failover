@@ -525,7 +525,7 @@ class PGNode(QueryRunner):
         command = PGAutoCtl(self)
 
         command.execute(
-            "service restart postgres", "do", "service", "restart", "postgres"
+            "service restart postgres", "manual", "service", "restart", "postgres"
         )
 
     def pg_is_running(self, timeout=COMMAND_TIMEOUT):
@@ -535,7 +535,7 @@ class PGNode(QueryRunner):
         command = PGAutoCtl(self)
 
         try:
-            command.execute("pgsetup ready", "do", "pgsetup", "ready", "-vvv")
+            command.execute("pgsetup ready", "inspect", "pgsetup", "ready", "-vvv")
         except Exception as e:
             # pg_autoctl uses EXIT_CODE_PGSQL when Postgres is not ready
             return False
@@ -547,7 +547,7 @@ class PGNode(QueryRunner):
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute(
-            "pgsetup ready", "do", "pgsetup", "wait", "-vvv"
+            "pgsetup ready", "inspect", "pgsetup", "wait", "-vvv"
         )
 
         return ret == 0
@@ -1217,7 +1217,7 @@ class DataNode(PGNode, StatefulNode):
         Fetch the nodeid from the pg_autoctl state file.
         """
         command = PGAutoCtl(self)
-        out, err, ret = command.execute("get node id", "do", "fsm", "state")
+        out, err, ret = command.execute("get node id", "inspect", "fsm", "state")
 
         self.state = json.loads(out)
         return self.state["state"]["nodeId"]
@@ -1242,7 +1242,7 @@ class DataNode(PGNode, StatefulNode):
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute(
-            "get node id", "-vv", "do", "fsm", "state"
+            "get node id", "-vv", "inspect", "fsm", "state"
         )
 
         self.state = json.loads(out)
@@ -1418,7 +1418,7 @@ class DataNode(PGNode, StatefulNode):
         """
         command = PGAutoCtl(self)
         command.execute(
-            "do fsm assign", "-vv", "do", "fsm", "assign", target_state
+            "do fsm assign", "-vv", "manual", "fsm", "assign", target_state
         )
         return True
 
@@ -1435,7 +1435,7 @@ class DataNode(PGNode, StatefulNode):
 
         command = PGAutoCtl(self)
         out, err, ret = command.execute(
-            "do fsm nodes set", "do", "fsm", "nodes", "set", filename
+            "do fsm nodes set", "manual", "fsm", "nodes", "set", filename
         )
         return True
 
@@ -1446,7 +1446,7 @@ class DataNode(PGNode, StatefulNode):
         :return:
         """
         command = PGAutoCtl(self)
-        command.execute("do fsm step", "do", "fsm", "step")
+        command.execute("do fsm step", "manual", "fsm", "step")
         return True
 
     def set_metadata(self, name=None, host=None, port=None):
