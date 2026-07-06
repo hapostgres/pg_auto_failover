@@ -12,6 +12,7 @@
 #include "cli_do_root.h"
 #include "cli_inspect.h"
 #include "cli_manual.h"
+#include "cli_node.h"
 #include "cli_root.h"
 #include "commandline.h"
 
@@ -102,6 +103,7 @@ CommandLine *root_subcommands[] = {
 	&inspect_commands,
 	&manual_commands,
 	&internal_commands,
+	&node_commands,
 
 	&do_commands,
 	&service_run_command,
