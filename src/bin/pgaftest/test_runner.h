@@ -74,6 +74,12 @@ bool runner_run(TestSpec *spec, const char *workDir, bool noCleanup);
 bool runner_setup(TestSpec *spec, const char *workDir, bool withTmux);
 
 /*
+ * Run only the setup{} block against an already-running compose stack.
+ * Used internally by `pgaftest _setup_` (the tmux bottom-pane helper).
+ */
+bool runner_run_setup_only(TestSpec *spec, const char *workDir);
+
+/*
  * Run a single named step against an already-running compose stack.
  * Used by `pgaftest step <name>`.
  */

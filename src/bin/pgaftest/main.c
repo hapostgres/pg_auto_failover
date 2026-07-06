@@ -41,6 +41,9 @@ CommandLine root_with_debug = make_command("pgaftest", "", "", "", NULL, NULL);
 int
 main(int argc, char **argv)
 {
+	/* store binary path so runner_setup can reference it in tmux panes */
+	strlcpy(pg_autoctl_program, argv[0], sizeof(pg_autoctl_program));
+
 	/* default log level: INFO to stderr */
 	log_set_level(LOG_INFO);
 

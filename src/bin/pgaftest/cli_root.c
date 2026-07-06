@@ -481,14 +481,74 @@ cli_down(int argc, char **argv)
 		spec = parse_test_spec(specPath);
 	}
 
-	/* If no spec, just run compose down */
+	/* If no spec, derive project name from workDir and run targeted compose down */
 	if (!spec)
 	{
-		int rc = system("docker compose down --volumes --remove-orphans 2>&1");
+		const char *base = strrchr(pgaftestOpts.workDir, '/');
+		const char *projectName = (base && *(base + 1)) ? base + 1
+								  : pgaftestOpts.workDir;
+
+		if (projectName[0] == '\0')
+		{
+			log_error("Cannot determine project name: "
+					  "provide --work-dir or a spec file path");
+			exit(1);
+		}
+
+		char cmd[2048];
+		snprintf(cmd, sizeof(cmd),
+				 "docker compose -p %s -f %s/docker-compose.yml "
+				 "down --volumes --remove-orphans",
+				 projectName, pgaftestOpts.workDir);
+
+		int rc = system(cmd);
 		exit(rc == 0 ? 0 : 1);
 	}
 
 	bool ok = runner_down(spec, pgaftestOpts.workDir);
+	exit(ok ? 0 : 1);
+}
+
+
+/* -----------------------------------------------------------------------
+ * pgaftest _setup_ <spec.pgaf> --work-dir <dir>
+ *
+ * Internal command: runs the setup{} block against an already-running
+ * compose stack.  Invoked from the tmux bottom pane by runner_setup()
+ * so the user immediately gets the session while setup runs live.
+ * Not intended to be called directly by users.
+ * ----------------------------------------------------------------------- */
+static void
+cli_run_setup_only(int argc, char **argv)
+{
+	if (argc < 1 || argv[0] == NULL)
+	{
+		log_error("Usage: pgaftest _setup_ <spec.pgaf> [--work-dir <dir>]");
+		exit(1);
+	}
+
+	strncpy(pgaftestOpts.specFile, argv[0],
+			sizeof(pgaftestOpts.specFile) - 1);
+
+#ifdef __BSD_VISIBLE
+	optreset = 1;
+#endif
+	optind = 1;
+	pgaftest_getopts(argc, argv);
+
+	if (pgaftestOpts.workDir[0] == '\0')
+	{
+		derive_work_dir(pgaftestOpts.specFile,
+						pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
+	}
+
+	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
+	if (!spec)
+	{
+		exit(1);
+	}
+
+	bool ok = runner_run_setup_only(spec, pgaftestOpts.workDir);
 	exit(ok ? 0 : 1);
 }
 
@@ -561,6 +621,13 @@ static CommandLine indent_command =
 				 "",
 				 pgaftest_getopts, cli_indent);
 
+static CommandLine internal_setup_command =
+	make_command("_setup_",
+				 "Internal: run setup{} block against a running stack (tmux helper)",
+				 "<spec.pgaf> [--work-dir <dir>]",
+				 "",
+				 pgaftest_getopts, cli_run_setup_only);
+
 static CommandLine *root_subcommands[] = {
 	&run_command,
 	&setup_command,
@@ -569,6 +636,7 @@ static CommandLine *root_subcommands[] = {
 	&prepare_command,
 	&down_command,
 	&indent_command,
+	&internal_setup_command,
 	&pgaftest_demo_command,
 	NULL
 };

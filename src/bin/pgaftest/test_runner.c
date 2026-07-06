@@ -17,6 +17,9 @@
 
 #include "log.h"
 #include "compose_gen.h"
+
+/* binary path set by main() for use in tmux pane commands */
+extern char pg_autoctl_program[];
 #include "pgsql.h"
 #include "parsing.h"
 #include "nodestate_utils.h"
@@ -3567,19 +3570,6 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		return false;
 	}
 
-	/* run setup{} block */
-	if (spec->setup)
-	{
-		char err[512] = "";
-		log_info("Running setup block");
-		if (!runner_exec_step(&r, spec->setup, err, sizeof(err), 0))
-		{
-			log_error("Setup failed: %s", err);
-			runner_compose_down(&r);
-			return false;
-		}
-	}
-
 	if (withTmux)
 	{
 		/*
@@ -3609,11 +3599,32 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		 * Build a three-pane tmux session:
 		 *   top    — docker compose logs -f
 		 *   middle — pg_autoctl watch on the monitor
-		 *   bottom — interactive bash in the first data node
+		 *   bottom — setup{} block running via `pgaftest _setup_`, then bash
 		 *
-		 * Created detached first, then immediately attached so the current
-		 * terminal lands inside the session.
+		 * The setup block runs inside the bottom tmux pane so the user
+		 * immediately gets the session and can watch logs while the cluster
+		 * initialises.  When setup completes the pane becomes a bash shell
+		 * in the first data node.
+		 *
+		 * pg_autoctl_program holds argv[0] — the path to the pgaftest binary.
 		 */
+		char bottomCmd[2048];
+
+		if (spec->setup)
+		{
+			snprintf(bottomCmd, sizeof(bottomCmd),
+					 "%s _setup_ %s --work-dir %s && "
+					 "%s exec -it %s bash",
+					 pg_autoctl_program, spec->filename, workDir,
+					 r.composeBase, shellNode);
+		}
+		else
+		{
+			snprintf(bottomCmd, sizeof(bottomCmd),
+					 "%s exec -it %s bash",
+					 r.composeBase, shellNode);
+		}
+
 		log_info("Starting tmux session \"%s\" (shell target: %s)",
 				 r.projectName, shellNode);
 
@@ -3623,18 +3634,31 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 			"split-window -v "
 			"\"%s exec %s pg_autoctl watch\" \\; "
 			"split-window -v "
-			"\"%s exec -it %s bash\" \\; "
+			"\"%s\" \\; "
 			"select-layout even-vertical",
 			r.projectName,
 			r.composeBase,
 			r.composeBase, r.activeMonitorService,
-			r.composeBase, shellNode);
+			bottomCmd);
 
 		/* Attach the current terminal into the session. */
 		run_cmd("tmux attach-session -t %s", r.projectName);
 	}
 	else
 	{
+		/* run setup{} block synchronously when not using tmux */
+		if (spec->setup)
+		{
+			char err[512] = "";
+			log_info("Running setup block");
+			if (!runner_exec_step(&r, spec->setup, err, sizeof(err), 0))
+			{
+				log_error("Setup failed: %s", err);
+				runner_compose_down(&r);
+				return false;
+			}
+		}
+
 		printf("\nCluster ready — compose project: %s\n", r.projectName);
 		printf("Work dir: %s\n", workDir);
 		printf("\nAvailable steps:");
@@ -3676,6 +3700,34 @@ runner_step(TestSpec *spec, const char *workDir, const char *stepName)
 	}
 
 	log_info("Step \"%s\" passed", stepName);
+	return true;
+}
+
+
+bool
+runner_run_setup_only(TestSpec *spec, const char *workDir)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (!runner_load_state(&r))
+	{
+		return false;
+	}
+
+	if (!spec->setup)
+	{
+		return true;
+	}
+
+	char err[512] = "";
+	log_info("Running setup block");
+	if (!runner_exec_step(&r, spec->setup, err, sizeof(err), 0))
+	{
+		log_error("Setup failed: %s", err);
+		return false;
+	}
+
 	return true;
 }
 
