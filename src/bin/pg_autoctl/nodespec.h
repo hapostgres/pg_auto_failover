@@ -59,7 +59,9 @@ typedef struct NodeSpec
 	/* [postgresql] */
 	char pgdata[MAXPGPATH];
 
-	/* [monitor]   — empty for kind == monitor */
+	/* [monitor]   — empty for kind == monitor
+	 * monitor_pguri is mutable: changing it triggers disable monitor --force
+	 * followed by enable monitor <new_uri> (re-registers without restarting). */
 	char monitor_pguri[MAXCONNINFO];
 	bool noMonitor;              /* [monitor] no_monitor=true: standalone mode */
 	int nodeId;                  /* [monitor] node_id: required with --disable-monitor */

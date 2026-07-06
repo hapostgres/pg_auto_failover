@@ -133,9 +133,12 @@ on a running node without a restart, and its default value.
      -
    * - ``pguri``
      - connstring
-     - No
+     - **Yes**
      - —
      - Connection string to the pg_auto_failover monitor. Empty for monitor nodes.
+       Changing it re-registers the node to the new monitor without restarting
+       Postgres (``pg_autoctl disable monitor --force`` then
+       ``pg_autoctl enable monitor <new_uri>``).
    * - ``no_monitor``
      - boolean
      - No
@@ -266,9 +269,16 @@ for changes.  When it detects a write it re-reads the file and converges any
     Applied by calling ``pg_autoctl enable ssl`` with the appropriate flags.
     Postgres reloads its SSL configuration without a full restart.
 
+``monitor.pguri``
+    Applied by calling ``pg_autoctl disable monitor --force`` (which removes
+    the node from the old monitor) followed by
+    ``pg_autoctl enable monitor <new_uri>`` (which registers the node to the
+    new monitor).  Postgres keeps running throughout; only the monitoring
+    relationship changes.
+
 Changing an **immutable** field (``kind``, ``pgdata``, ``hostname``, ``port``,
-``monitor.pguri``, ``auth``, ``pg_hba_lan``) while the node is running is
-logged as a warning; the value takes effect the next time the node is started.
+``auth``, ``pg_hba_lan``) while the node is running is logged as a warning;
+the value takes effect the next time the node is started.
 
 The ``launch = deferred`` Pattern
 ----------------------------------

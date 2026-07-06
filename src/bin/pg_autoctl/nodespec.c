@@ -688,9 +688,11 @@ nodespec_write_to_path(const NodeSpec *spec, const char *path)
  *   - candidate_priority   → pg_autoctl set node candidate-priority
  *   - replication_quorum   → pg_autoctl set node replication-quorum
  *   - ssl / ssl_*_file     → pg_autoctl enable ssl
+ *   - monitor_pguri        → pg_autoctl disable monitor --force
+ *                            pg_autoctl enable monitor <new_uri>
  *
- * Immutable fields (kind, pgdata, hostname, port, monitor_pguri,
- * auth, pg_hba_lan) require a node restart to take effect.
+ * Immutable fields (kind, pgdata, hostname, port, auth,
+ * pg_hba_lan) require a node restart to take effect.
  *
  * The [launch] mode field is handled separately by pg_autoctl node start.
  * Applying a spec with mode=deferred to an already-started node is a
@@ -753,6 +755,59 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 			changed = true;
 		}
 		free_program(&prog);
+	}
+
+	/*
+	 * Monitor URI changed: disable the current monitor (removing this node
+	 * from it) then re-register to the new one.  The --force flag allows
+	 * disable to proceed even if the old monitor is unreachable.
+	 */
+	if (strcmp(new_spec->monitor_pguri, old_spec->monitor_pguri) != 0 &&
+		!IS_EMPTY_STRING_BUFFER(new_spec->monitor_pguri))
+	{
+		Program disable_prog = run_program(pg_autoctl_program,
+										   "disable", "monitor",
+										   "--force",
+										   "--pgdata", new_spec->pgdata,
+										   NULL);
+
+		if (disable_prog.returnCode != 0)
+		{
+			log_warn("nodespec_apply: disable monitor failed (rc=%d)",
+					 disable_prog.returnCode);
+			if (disable_prog.stdOut)
+			{
+				log_warn("%s", disable_prog.stdOut);
+			}
+			free_program(&disable_prog);
+		}
+		else
+		{
+			free_program(&disable_prog);
+
+			Program enable_prog = run_program(pg_autoctl_program,
+											  "enable", "monitor",
+											  "--pgdata", new_spec->pgdata,
+											  new_spec->monitor_pguri,
+											  NULL);
+
+			if (enable_prog.returnCode != 0)
+			{
+				log_warn("nodespec_apply: enable monitor \"%s\" failed (rc=%d)",
+						 new_spec->monitor_pguri, enable_prog.returnCode);
+				if (enable_prog.stdOut)
+				{
+					log_warn("%s", enable_prog.stdOut);
+				}
+			}
+			else
+			{
+				log_info("nodespec: applied monitor_pguri = %s",
+						 new_spec->monitor_pguri);
+				changed = true;
+			}
+			free_program(&enable_prog);
+		}
 	}
 
 	/*
