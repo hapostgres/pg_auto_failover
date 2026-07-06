@@ -310,6 +310,19 @@ cli_setup(int argc, char **argv)
 	strncpy(pgaftestOpts.specFile, argv[0],
 			sizeof(pgaftestOpts.specFile) - 1);
 
+	/*
+	 * The commandline library stops getopt at the first non-option (the spec
+	 * file path), so flags that follow it — e.g. `pgaftest setup spec --tmux`
+	 * — are not seen on the first pass.  Re-run getopts now: argv[0] acts as
+	 * a dummy program name so getopt starts scanning from index 1 onward,
+	 * picking up --tmux, --work-dir, etc.  optreset resets BSD/macOS state.
+	 */
+#ifdef __BSD_VISIBLE
+	optreset = 1;
+#endif
+	optind = 1;
+	pgaftest_getopts(argc, argv);
+
 	if (pgaftestOpts.workDir[0] == '\0')
 	{
 		derive_work_dir(pgaftestOpts.specFile,
