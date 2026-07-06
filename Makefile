@@ -350,6 +350,35 @@ run-test: build-test-pg$(PGVERSION)
 		make -C /usr/src/pg_auto_failover test	\
 		PGVERSION=$(PGVERSION) TEST='${TEST}'
 
+# make run-test-prebuilt; like ci-test but skips the Docker build step.
+# Used in CI after images have been built and loaded by a prior job.
+.PHONY: run-test-prebuilt
+run-test-prebuilt:
+ifeq ($(TEST),tablespaces)
+	$(MAKE) -C tests/tablespaces run-test
+else
+	docker run					                \
+		--name $(TEST_CONTAINER_NAME)		    \
+		$(DOCKER_RUN_OPTS)			            \
+		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
+		make -C /usr/src/pg_auto_failover test	\
+		PGVERSION=$(PGVERSION) TEST='${TEST}'
+endif
+
+# make save-test-image; compresses the test image to a .tar.zst archive.
+# Used in CI to pass the built image to downstream test jobs as an artifact.
+.PHONY: save-test-image
+save-test-image:
+	docker save $(TEST_CONTAINER_NAME):pg$(PGVERSION) \
+	  | zstd -T0 -3 > $(TEST_CONTAINER_NAME)-pg$(PGVERSION).tar.zst
+
+# make load-test-image; decompresses and loads a .tar.zst image archive.
+# Used in CI test jobs that download the image from a prior build job.
+.PHONY: load-test-image
+load-test-image:
+	zstd -d --stdout $(TEST_CONTAINER_NAME)-pg$(PGVERSION).tar.zst \
+	  | docker load
+
 #
 # BE INTERACTIVE
 #
