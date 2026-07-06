@@ -124,8 +124,8 @@ step test_003_upgrade_monitor {
 step test_003b_wait_keeper_restart {
     # Give keepers time to detect the extension upgrade and self-restart.
     # v2.1 keeper polls every ~5 s; the listener restart + ALTER EXTENSION adds
-    # another 1-2 s.  20 s is a comfortable upper bound before we check logs.
-    exec monitor sleep 20
+    # another 1-2 s.  45 s gives ample time on slow CI runners.
+    exec monitor sleep 45
 }
 
 step test_004_wait_convergence {

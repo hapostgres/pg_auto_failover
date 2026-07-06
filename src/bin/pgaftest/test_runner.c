@@ -928,6 +928,7 @@ monitor_wait_formation_states(TestRunner *r,
 		return true;
 
 	time_t deadline = time(NULL) + timeoutSecs;
+	int pollCounter = 0;      /* counts 5s wait-socket cycles */
 
 	while (time(NULL) < deadline)
 	{
@@ -949,10 +950,20 @@ monitor_wait_formation_states(TestRunner *r,
 			for (int i = 0; i < stateCount; i++)
 				if (!satisfied[i]) { allSatisfied = false; break; }
 
-			if (allSatisfied &&
-			    monitor_check_formation_converged(r, states, stateCount,
-			                                      groupIds, groupCount))
-				return true;
+			/*
+			 * Also poll the monitor directly every ~5 cycles (~25 s) even
+			 * without allSatisfied.  This handles the case where the LISTEN
+			 * connection reconnects AFTER the state transitions fired — those
+			 * notifications are gone and allSatisfied will never become true,
+			 * but the monitor's current-state query still reflects reality.
+			 */
+			++pollCounter;
+			if (allSatisfied || (pollCounter % 5 == 0))
+			{
+				if (monitor_check_formation_converged(r, states, stateCount,
+				                                      groupIds, groupCount))
+					return true;
+			}
 
 			runner_notify_connect(r); /* reconnect if socket went bad */
 		}
