@@ -307,6 +307,3 @@ See the command :ref:`pg_autoctl_do_tmux_compose_session` for more details
 about how to run a docker compose test environment with docker compose,
 including external volumes for each node.
 
-See also the complete :ref:`azure_tutorial` for a guide on how-to provision
-an Azure network and then Azure VMs with pg_auto_failover, including systemd
-coverage and a failover triggered by stopping a full VM.
