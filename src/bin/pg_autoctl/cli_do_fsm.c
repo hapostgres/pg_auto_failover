@@ -37,7 +37,7 @@ static void cli_do_fsm_step(int argc, char **argv);
 static void cli_do_fsm_get_nodes(int argc, char **argv);
 static void cli_do_fsm_set_nodes(int argc, char **argv);
 
-static CommandLine fsm_init =
+CommandLine fsm_init =
 	make_command("init",
 				 "Initialize the keeper's state on-disk",
 				 CLI_PGDATA_USAGE,
@@ -45,7 +45,7 @@ static CommandLine fsm_init =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_init);
 
-static CommandLine fsm_state =
+CommandLine fsm_state =
 	make_command("state",
 				 "Read the keeper's state from disk and display it",
 				 CLI_PGDATA_USAGE,
@@ -53,7 +53,7 @@ static CommandLine fsm_state =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_state);
 
-static CommandLine fsm_list =
+CommandLine fsm_list =
 	make_command("list",
 				 "List reachable FSM states from current state",
 				 CLI_PGDATA_USAGE,
@@ -61,12 +61,12 @@ static CommandLine fsm_list =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_list);
 
-static CommandLine fsm_gv =
+CommandLine fsm_gv =
 	make_command("gv",
 				 "Output the FSM as a .gv program suitable for graphviz/dot",
 				 "", NULL, NULL, cli_do_fsm_gv);
 
-static CommandLine fsm_assign =
+CommandLine fsm_assign =
 	make_command("assign",
 				 "Assign a new goal state to the keeper",
 				 CLI_PGDATA_USAGE "<goal state>",
@@ -74,7 +74,7 @@ static CommandLine fsm_assign =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_assign);
 
-static CommandLine fsm_step =
+CommandLine fsm_step =
 	make_command("step",
 				 "Make a state transition if instructed by the monitor",
 				 CLI_PGDATA_USAGE,

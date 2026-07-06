@@ -277,10 +277,10 @@ command, and then the node entry is removed from the monitor.
 pg_auto_failover keeper's State Machine
 ---------------------------------------
 
-When built in TEST mode, it is then possible to use the following command to
-get a visual representation of the Keeper's Finite State Machine::
+It is possible to use the following command to get a visual representation
+of the Keeper's Finite State Machine::
 
-  $ PG_AUTOCTL_DEBUG=1 pg_autoctl do fsm gv | dot -Tsvg > fsm.svg
+  $ pg_autoctl inspect fsm gv | dot -Tsvg > fsm.svg
 
 The `dot` program is part of the Graphviz suite and produces the following
 output:

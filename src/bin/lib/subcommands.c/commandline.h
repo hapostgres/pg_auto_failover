@@ -29,15 +29,25 @@ typedef struct CommandLine
 
 	struct CommandLine **subcommands;
 	char *breadcrumb;
+	bool hidden;			/* if true, omit from --help output */
 } CommandLine;
 
 extern CommandLine *current_command;
 
 #define make_command_set(name, desc, usage, help, getopt, set) \
-	{ name, desc, usage, help, getopt, NULL, set, NULL }
+	{ name, desc, usage, help, getopt, NULL, set, NULL, false }
 
 #define make_command(name, desc, usage, help, getopt, run) \
-	{ name, desc, usage, help, getopt, run, NULL, NULL }
+	{ name, desc, usage, help, getopt, run, NULL, NULL, false }
+
+/*
+ * Like make_command_set but the command is omitted from --help output.
+ * The command still routes normally when invoked explicitly — used for
+ * internal subprocess entry points that must remain in the binary but
+ * are not intended for direct operator use.
+ */
+#define make_hidden_command_set(name, desc, usage, help, getopt, set) \
+	{ name, desc, usage, help, getopt, NULL, set, NULL, true }
 
 bool commandline_run(CommandLine *command, int argc, char **argv);
 void commandline_help(FILE *stream);

@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_autoctl/cli_do_root.h
- *     Implementation of a CLI which lets you run individual keeper routines
- *     directly
+ *     Implementation of a CLI which lets you run operations on the local
+ *     postgres server directly
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -15,22 +15,47 @@
 
 /* src/bin/pg_autoctl/cli_do_fsm.c */
 extern CommandLine do_fsm_commands;
+extern CommandLine fsm_nodes;
+
+/* Exported individually so cli_inspect.c and cli_manual.c can compose them */
+extern CommandLine fsm_init;
+extern CommandLine fsm_state;
+extern CommandLine fsm_list;
+extern CommandLine fsm_gv;
+extern CommandLine fsm_assign;
+extern CommandLine fsm_step;
 
 /* src/bin/pg_autoctl/cli_do_monitor.c */
 extern CommandLine do_monitor_commands;
 
+/* Exported individually so cli_inspect.c and cli_manual.c can compose them */
+extern CommandLine monitor_get_command;
+extern CommandLine monitor_parse_notification_command;
+extern CommandLine monitor_register_command;
+extern CommandLine monitor_node_active_command;
+extern CommandLine monitor_version_command;
+
 /* src/bin/pg_autoctl/cli_do_service.c */
 extern CommandLine do_service_commands;
+extern CommandLine do_service_restart_commands;
+extern CommandLine do_service_getpid_commands;
 extern CommandLine do_service_postgres_ctl_commands;
+
+/* Internal subprocess entry points used in cli_do_root.c's internal_service_commands */
+extern CommandLine service_pgcontroller;
+extern CommandLine service_postgres;
+extern CommandLine service_monitor_listener;
+extern CommandLine service_node_active;
 
 /* src/bin/pg_autoctl/cli_do_show.c */
 extern CommandLine do_show_commands;
 extern CommandLine do_pgsetup_commands;
-extern CommandLine do_service_postgres_ctl_commands;
-extern CommandLine do_service_commands;
 
 /* src/bin/pg_autoctl/cli_do_demo.c */
 extern CommandLine do_demo_commands;
+
+/* src/bin/pg_autoctl/cli_do_coordinator.c */
+extern CommandLine do_coordinator_commands;
 
 /* src/bin/pg_autoctl/cli_do_root.c */
 extern CommandLine do_primary_adduser;
@@ -38,19 +63,10 @@ extern CommandLine *do_primary_adduser_subcommands[];
 extern CommandLine do_primary_adduser_monitor;
 extern CommandLine do_primary_adduser_replica;
 
-extern CommandLine do_primary_syncrep_;
-extern CommandLine *do_primary_syncrep[];
-extern CommandLine do_primary_syncrep_enable;
-extern CommandLine do_primary_syncrep_disable;
-
 extern CommandLine do_primary_slot_;
 extern CommandLine *do_primary_slot[];
 extern CommandLine do_primary_slot_create;
 extern CommandLine do_primary_slot_drop;
-
-extern CommandLine do_primary_hba;
-extern CommandLine *do_primary_hba_commands[];
-extern CommandLine do_primary_hba_setup;
 
 extern CommandLine do_primary_defaults;
 extern CommandLine do_primary_identify_system;
@@ -64,12 +80,10 @@ extern CommandLine do_standby_init;
 extern CommandLine do_standby_rewind;
 extern CommandLine do_standby_promote;
 
-extern CommandLine do_discover;
-
 extern CommandLine do_tmux_commands;
 
-/* src/bin/pg_autoctl/cli_do_coordinator.c */
-extern CommandLine do_coordinator_commands;
+extern CommandLine internal_service_commands;
+extern CommandLine internal_commands;
 
 extern CommandLine do_commands;
 extern CommandLine *do_subcommands[];

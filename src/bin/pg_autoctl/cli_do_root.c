@@ -374,6 +374,35 @@ CommandLine do_tmux_commands =
 					 "Set of facilities to handle tmux interactive sessions",
 					 NULL, NULL, NULL, do_tmux);
 
+/*
+ * internal service: hidden entry points spawned by the supervisor via
+ * fork+exec.  The supervisor builds argv as:
+ *   pg_autoctl internal service postgres|listener|node-active --pgdata ...
+ * Use make_hidden_command_set so these never appear in --help output.
+ */
+static CommandLine *internal_service_subcommands[] = {
+	&service_pgcontroller,
+	&service_postgres,
+	&service_monitor_listener,
+	&service_node_active,
+	NULL
+};
+
+CommandLine internal_service_commands =
+	make_hidden_command_set("service",
+							"Internal subprocess entry points (supervisor use only)",
+							NULL, NULL, NULL, internal_service_subcommands);
+
+static CommandLine *internal_subcommands[] = {
+	&internal_service_commands,
+	NULL
+};
+
+CommandLine internal_commands =
+	make_hidden_command_set("internal",
+							"Internal commands for use by the supervisor (not for operators)",
+							NULL, NULL, NULL, internal_subcommands);
+
 CommandLine *do_subcommands[] = {
 	&do_monitor_commands,
 	&do_coordinator_commands,
