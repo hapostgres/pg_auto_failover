@@ -35,12 +35,10 @@ jobs:
       fail-fast: false
       matrix:
         PGVERSION:
-          - 13
           - 14
           - 15
           - 16
           - 17
-          - 18
         TEST:
           - multi
           - single
