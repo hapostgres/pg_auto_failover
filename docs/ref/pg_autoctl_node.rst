@@ -83,181 +83,163 @@ A monitor node omits ``[monitor]`` entirely::
 Section and Property Reference
 -------------------------------
 
-The table below lists every property, its section, whether it can be changed
-on a running node without a restart, and its default value.
+The following sections and properties are supported in
+``pg_autoctl_node.ini``.  Properties marked *mutable* can be changed on a
+running node by editing the file; the supervisor converges the change without
+restarting Postgres.  Immutable properties take effect only the next time the
+node is created or started from scratch.
 
-.. list-table::
-   :widths: 18 14 8 12 48
-   :header-rows: 1
+``[node]``
+^^^^^^^^^^
 
-   * - Section / Property
-     - Type
-     - Mutable
-     - Default
-     - Description
-   * - **[node]**
-     -
-     -
-     -
-     -
-   * - ``kind``
-     - string
-     - No
-     - —
-     - Node role: ``postgres``, ``monitor``, ``coordinator``, or ``worker``
-   * - ``name``
-     - string
-     - No
-     - hostname
-     - Human-readable node name shown in ``pg_autoctl show state``
-   * - ``hostname``
-     - string
-     - No
-     - auto-detected
-     - Address other nodes use to reach this node
-   * - ``port``
-     - integer
-     - No
-     - 5432
-     - Postgres port number
-   * - **[postgresql]**
-     -
-     -
-     -
-     -
-   * - ``pgdata``
-     - path
-     - No
-     - —
-     - Path to the Postgres data directory
-   * - **[monitor]**
-     -
-     -
-     -
-     -
-   * - ``pguri``
-     - connstring
-     - **Yes**
-     - —
-     - Connection string to the pg_auto_failover monitor. Empty for monitor nodes.
-       Changing it re-registers the node to the new monitor without restarting
-       Postgres (``pg_autoctl disable monitor --force`` then
-       ``pg_autoctl enable monitor <new_uri>``).
-   * - ``no_monitor``
-     - boolean
-     - No
-     - false
-     - Set ``true`` for :ref:`pg_autoctl_disable_monitor` (standalone) mode
-   * - ``node_id``
-     - integer
-     - No
-     - —
-     - Required with ``no_monitor = true``
-   * - **[formation]**
-     -
-     -
-     -
-     -
-   * - ``name``
-     - string
-     - No
-     - default
-     - Formation name
-   * - ``group``
-     - integer
-     - No
-     - 0
-     - Citus group id (0 = coordinator)
-   * - **[settings]** *(applied live without restart)*
-     -
-     -
-     -
-     -
-   * - ``candidate_priority``
-     - integer 0–100
-     - **Yes**
-     - 50
-     - Failover weight.  0 means never promote this node.
-   * - ``replication_quorum``
-     - boolean
-     - **Yes**
-     - true
-     - Whether this node participates in the synchronous replication quorum
-   * - **[options]**
-     -
-     -
-     -
-     -
-   * - ``ssl``
-     - string
-     - **Yes**
-     - self-signed
-     - SSL mode: ``self-signed``, ``verify-ca``, ``verify-full``, or ``off``.
-       Changes call ``pg_autoctl enable ssl`` on the running node.
-   * - ``auth``
-     - string
-     - No
-     - trust
-     - Authentication method written into ``pg_hba.conf`` at create time:
-       ``trust``, ``md5``, ``scram``, or ``cert``
-   * - ``pg_hba_lan``
-     - boolean
-     - No
-     - true
-     - Add LAN-range entries to ``pg_hba.conf`` at create time
-   * - **[ssl]** *(for ``verify-ca`` / ``verify-full`` modes; applied live)*
-     -
-     -
-     -
-     -
-   * - ``ca_file``
-     - path
-     - **Yes**
-     - —
-     - Path to the CA certificate file (``ssl_ca_file`` in postgresql.conf)
-   * - ``cert_file``
-     - path
-     - **Yes**
-     - —
-     - Path to the server certificate (``ssl_cert_file``)
-   * - ``key_file``
-     - path
-     - **Yes**
-     - —
-     - Path to the server private key (``ssl_key_file``)
-   * - **[launch]** *(optional)*
-     -
-     -
-     -
-     -
-   * - ``mode``
-     - string
-     - —
-     - immediate
-     - ``deferred``: hold the node in a wait loop until ``pg_autoctl node start``
-       writes ``immediate``.  Useful for ordered startup in compose or k8s.
-   * - **[formation <name>]** *(monitor kind only, repeat for each extra formation)*
-     -
-     -
-     -
-     -
-   * - ``kind``
-     - string
-     - No
-     - pgsql
-     - Formation kind: ``pgsql`` or ``citus``
+``kind``
 
-Additional sections for passwords (kept out of the main ini where possible):
+  Node role.  One of ``postgres``, ``monitor``, ``coordinator``, or
+  ``worker``.  Required; immutable.
+
+``name``
+
+  Human-readable node name shown in ``pg_autoctl show state``.  Defaults to
+  the value of ``hostname`` when not set.  Immutable.
+
+``hostname``
+
+  Address that other nodes (including the monitor) use to reach this node.
+  Defaults to the auto-detected FQDN of the host.  Immutable.
+
+``port``
+
+  Postgres port number.  Defaults to ``5432``.  Immutable.
+
+``[postgresql]``
+^^^^^^^^^^^^^^^^
+
+``pgdata``
+
+  Path to the Postgres data directory.  Required; immutable.
+
+``[monitor]``
+^^^^^^^^^^^^^
+
+``pguri``
+
+  Connection string to the pg_auto_failover monitor.  Omit for monitor
+  nodes.  **Mutable**: changing this value re-registers the node to the new
+  monitor without restarting Postgres (``pg_autoctl disable monitor --force``
+  followed by ``pg_autoctl enable monitor <new_uri>``).
+
+``no_monitor``
+
+  Set to ``true`` to run in :ref:`pg_autoctl_disable_monitor` (standalone)
+  mode.  Immutable.
+
+``node_id``
+
+  Node identifier to use when ``no_monitor = true``.  Immutable.
+
+``[formation]``
+^^^^^^^^^^^^^^^
+
+``name``
+
+  Formation name.  Defaults to ``default``.  Immutable.
+
+``group``
+
+  Citus group identifier.  ``0`` means coordinator.  Defaults to ``0``.
+  Immutable.
+
+``[settings]``
+^^^^^^^^^^^^^^
+
+Settings in this section are applied live without restarting the node.
+
+``candidate_priority``
+
+  Failover weight, an integer from 0 to 100.  A value of ``0`` means this
+  node is never promoted to primary.  Defaults to ``50``.  **Mutable**.
+
+``replication_quorum``
+
+  Whether this node participates in the synchronous replication quorum.
+  Boolean, defaults to ``true``.  **Mutable**.
+
+``[options]``
+^^^^^^^^^^^^^
+
+``ssl``
+
+  SSL mode.  One of ``self-signed``, ``verify-ca``, ``verify-full``, or
+  ``off``.  Defaults to ``self-signed``.  **Mutable**: changes are applied via
+  ``pg_autoctl enable ssl``; Postgres reloads SSL without a full restart.
+
+``auth``
+
+  Authentication method written into ``pg_hba.conf`` at create time.  One of
+  ``trust``, ``md5``, ``scram``, or ``cert``.  Defaults to ``trust``.
+  Immutable (create-time only).
+
+``pg_hba_lan``
+
+  When ``true``, add LAN-range entries to ``pg_hba.conf`` at create time.
+  Defaults to ``true``.  Immutable (create-time only).
+
+``[ssl]``
+^^^^^^^^^
+
+Certificate paths for ``verify-ca`` and ``verify-full`` SSL modes.  All
+three are **mutable**: editing them and saving the file reconfigures Postgres
+SSL live via ``pg_autoctl enable ssl``.
+
+``ca_file``
+
+  Path to the CA certificate file (``ssl_ca_file`` in ``postgresql.conf``).
+
+``cert_file``
+
+  Path to the server certificate file (``ssl_cert_file``).
+
+``key_file``
+
+  Path to the server private key file (``ssl_key_file``).
+
+``[launch]``
+^^^^^^^^^^^^
+
+``mode``
+
+  When set to ``deferred``, the node starts a polling loop and waits instead
+  of creating or starting Postgres immediately.  Call ``pg_autoctl node
+  start`` to release it.  Defaults to ``immediate``.  See
+  :ref:`pg_autoctl_node_start`.
+
+``[formation <name>]``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Repeat this section for each non-default formation to create.  Applies to
+monitor nodes only.
+
+``kind``
+
+  Formation kind.  One of ``pgsql`` or ``citus``.  Defaults to ``pgsql``.
+  Immutable.
+
+Password sections
+^^^^^^^^^^^^^^^^^
+
+These sections hold credentials that are kept out of the main ini file where
+possible.
 
 ``[pg_auto_failover]``
-    ``autoctl_node_password`` — password for the ``pgautofailover_monitor`` role
-    (monitor nodes), or the ``autoctl_node`` role (data nodes).
+  ``autoctl_node_password`` — password for the ``pgautofailover_monitor``
+  role (monitor nodes) or the ``autoctl_node`` role (data nodes).
 
 ``[replication]``
-    ``replication_password`` — password for the ``pgautofailover_replicator`` role.
+  ``replication_password`` — password for the ``pgautofailover_replicator``
+  role.
 
 ``[citus]``
-    ``role = secondary`` and ``cluster_name`` for Citus secondary clusters.
+  ``role = secondary`` and ``cluster_name`` for Citus secondary clusters.
 
 Live Reconfiguration
 --------------------
