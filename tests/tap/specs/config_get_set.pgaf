@@ -1,0 +1,48 @@
+# Test pg_autoctl config get / config set behaviour on both the monitor and a
+# keeper node, including validation (rejecting invalid values) and no
+# unintended side-effects on other settings.
+#
+# Ported from tests/test_config_get_set.py
+# Predecessor: tests/test_config_get_set.py
+
+cluster {
+    monitor
+    formation {
+        node1
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_init_primary {
+    exec node1  pg_autoctl set node metadata --name "node a"
+    exec node1  pg_autoctl show state
+    exec node1  pg_autoctl config set pg_autoctl.name a
+    sleep 2s
+    exec node1  pg_autoctl show settings
+}
+
+step test_002_config_set_monitor {
+    exec monitor  pg_autoctl config set ssl.sslmode prefer
+    exec monitor  pg_autoctl config get postgresql.pg_ctl
+    expect { /usr/lib/postgresql/17/bin/pg_ctl }
+    exec-fails monitor  pg_autoctl config set postgresql.pg_ctl invalid
+    exec monitor  pg_autoctl config get postgresql.pg_ctl
+    expect { /usr/lib/postgresql/17/bin/pg_ctl }
+    exec monitor  pg_autoctl config get ssl.sslmode
+    expect { prefer }
+}
+
+step test_002b_config_set_node {
+    exec node1  pg_autoctl config get postgresql.pg_ctl
+    expect { /usr/lib/postgresql/17/bin/pg_ctl }
+    exec-fails node1  pg_autoctl config set postgresql.pg_ctl invalid
+    exec node1  pg_autoctl config get postgresql.pg_ctl
+    expect { /usr/lib/postgresql/17/bin/pg_ctl }
+}
