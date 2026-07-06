@@ -36,7 +36,6 @@ commands, only available in debug environments::
     + pgctl    Signal the pg_autoctl postgres service
     + service  Run pg_autoctl sub-processes (services)
     + tmux     Set of facilities to handle tmux interactive sessions
-    + azure    Manage a set of Azure resources for a pg_auto_failover demo
     + demo     Use a demo application for pg_auto_failover
 
     pg_autoctl do monitor
@@ -126,29 +125,6 @@ commands, only available in debug environments::
       stop     Stop pg_autoctl processes that belong to a tmux session
       wait     Wait until a given node has been registered on the monitor
       clean    Clean-up a tmux session processes and root dir
-
-    pg_autoctl do azure
-    + provision  provision azure resources for a pg_auto_failover demo
-    + tmux       Run a tmux session with an Azure setup for QA/testing
-    + show       show azure resources for a pg_auto_failover demo
-      deploy     Deploy a pg_autoctl VMs, given by name
-      create     Create an azure QA environment
-      drop       Drop an azure QA environment: resource group, network, VMs
-      ls         List resources in a given azure region
-      ssh        Runs ssh -l ha-admin <public ip address> for a given VM name
-      sync       Rsync pg_auto_failover sources on all the target region VMs
-
-    pg_autoctl do azure provision
-      region  Provision an azure region: resource group, network, VMs
-      nodes   Provision our pre-created VM with pg_autoctl Postgres nodes
-
-    pg_autoctl do azure tmux
-      session  Create or attach a tmux session for the created Azure VMs
-      kill     Kill an existing tmux session for Azure VMs
-
-    pg_autoctl do azure show
-      ips    Show public and private IP addresses for selected VMs
-      state  Connect to the monitor node to show the current state
 
     pg_autoctl do demo
       run      Run the pg_auto_failover demo application
