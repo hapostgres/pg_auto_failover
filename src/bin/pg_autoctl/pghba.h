@@ -49,6 +49,11 @@ bool pghba_enable_lan_cidr(PGSQL *pgsql,
 						   HBAEditLevel hbaLevel,
 						   const char *pgdata);
 
+bool pghba_ensure_ident_map_entry(const char *pgdata,
+								  const char *mapName,
+								  const char *systemUser,
+								  const char *pgUser);
+
 bool pghba_check_hostname(const char *hostname, char *ipaddr, size_t size,
 						  bool *useHostname);
 

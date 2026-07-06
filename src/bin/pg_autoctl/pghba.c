@@ -701,6 +701,68 @@ pghba_enable_lan_cidr(PGSQL *pgsql,
 
 
 /*
+ * pghba_ensure_ident_map_entry ensures that pg_ident.conf contains the given
+ * ident map entry, appending it if missing.  Used with cert auth so that the
+ * autoctl_node client certificate CN maps to the pgautofailover_replicator
+ * PostgreSQL role for replication connections.
+ */
+bool
+pghba_ensure_ident_map_entry(const char *pgdata,
+							 const char *mapName,
+							 const char *systemUser,
+							 const char *pgUser)
+{
+	char identFilePath[MAXPGPATH];
+	char *contents = NULL;
+	long size = 0L;
+
+	sformat(identFilePath, MAXPGPATH, "%s/pg_ident.conf", pgdata);
+
+	if (!read_file(identFilePath, &contents, &size))
+	{
+		log_error("Failed to read \"%s\"", identFilePath);
+		return false;
+	}
+
+	/* check whether this exact entry already exists */
+	PQExpBuffer needle = createPQExpBuffer();
+	if (!needle)
+	{
+		free(contents);
+		log_error("Failed to allocate memory");
+		return false;
+	}
+	appendPQExpBuffer(needle, "%s %s %s", mapName, systemUser, pgUser);
+
+	if (strstr(contents, needle->data) != NULL)
+	{
+		/* already present */
+		destroyPQExpBuffer(needle);
+		free(contents);
+		return true;
+	}
+	destroyPQExpBuffer(needle);
+
+	/* append the new entry */
+	FILE *f = fopen(identFilePath, "a"); /* IGNORE-BANNED */
+	if (!f)
+	{
+		log_error("Failed to open \"%s\" for appending: %m", identFilePath);
+		free(contents);
+		return false;
+	}
+	fformat(f, "%s %s %s%s\n",
+			mapName, systemUser, pgUser, HBA_LINE_COMMENT);
+	fclose(f);
+	free(contents);
+
+	log_info("Added ident map entry \"%s %s %s\" to \"%s\"",
+			 mapName, systemUser, pgUser, identFilePath);
+	return true;
+}
+
+
+/*
  * hba_check_hostname returns true when the DNS setting looks compatible with
  * Postgres expectations for an HBA hostname entry.
  *

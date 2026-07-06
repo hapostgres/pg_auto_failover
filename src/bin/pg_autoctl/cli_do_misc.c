@@ -12,6 +12,7 @@
 #include <getopt.h>
 #include <inttypes.h>
 #include <signal.h>
+#include <unistd.h>
 
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
@@ -30,6 +31,9 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "pgctl.h"
+#include "pghba.h"
+#include "pgsetup.h"
+#include "pgsql.h"
 #include "pgtuning.h"
 #include "primary_standby.h"
 #include "string_utils.h"
@@ -390,6 +394,169 @@ keeper_cli_pgsetup_tune(int argc, char **argv)
 	}
 
 	fformat(stdout, "%s\n", config);
+}
+
+
+/*
+ * keeper_cli_pgsetup_hba_lan appends LAN CIDR trust rules to pg_hba.conf
+ * without connecting to Postgres (safe when TCP HBA hasn't been set up yet),
+ * then reloads the configuration via pg_ctl.
+ *
+ * Intended for --skip-pg-hba setups where the operator needs to seed the
+ * initial trust rules before pg_autoctl or replication can connect via TCP.
+ *
+ * Sequence:
+ *   1. Wait up to 60 s for $PGDATA/pg_hba.conf to appear.
+ *   2. Append "host all all <LAN-CIDR> trust" and
+ *      "host replication all <LAN-CIDR> trust" directly to the file.
+ *   3. Wait for Postgres to be running (reads postmaster.pid, no TCP).
+ *   4. pg_ctl reload -D $PGDATA.
+ */
+void
+keeper_cli_pgsetup_hba_lan(int argc, char **argv)
+{
+	/*
+	 * Derive pgdata from command-line options directly, without calling
+	 * cli_common_pgsetup_init().  cli_common_pgsetup_init() calls
+	 * ProbeConfigurationFileRole() which fatals when the keeper config file
+	 * does not exist yet (e.g. node still initializing).  We do not need the
+	 * full pgSetup here — only pgdata, hostname, auth method, and ssl.
+	 */
+	const char *pgdata = keeperOptions.pgSetup.pgdata;
+
+	if (IS_EMPTY_STRING_BUFFER(pgdata))
+	{
+		log_fatal("Please provide --pgdata or set PGDATA");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	char hbaFile[MAXPGPATH];
+	sformat(hbaFile, MAXPGPATH, "%s/pg_hba.conf", pgdata);
+
+	/* Step 1: wait for pg_hba.conf to appear (up to 60 s) */
+	{
+		int timeout = 60;
+		time_t deadline = time(NULL) + timeout;
+		while (!file_exists(hbaFile) && time(NULL) < deadline)
+		{
+			log_debug("Waiting for \"%s\" to appear", hbaFile);
+			pg_usleep(500 * 1000);
+		}
+		if (!file_exists(hbaFile))
+		{
+			log_error("Timed out waiting for \"%s\" to appear", hbaFile);
+			exit(EXIT_CODE_PGCTL);
+		}
+	}
+
+	/*
+	 * Step 2: determine the hostname for LAN CIDR lookups.
+	 *
+	 * Preference order:
+	 *   a) keeper config file hostname (written early during pg_autoctl init)
+	 *   b) OS hostname via gethostname() — inside a Docker container this is
+	 *      the service name (e.g. "node2") which resolves correctly on the LAN
+	 *   c) keeperOptions.pgSetup.pghost (last resort; may be a Unix socket
+	 *      path like /var/run/postgresql that does not resolve as a hostname)
+	 *
+	 * The keeper config file is created before postgres initialises, so it is
+	 * normally available by the time pg_hba.conf appears.  All three options
+	 * are tried so the command works even when called very early.
+	 */
+	char hostname[_POSIX_HOST_NAME_MAX] = "";
+
+	/* option a: keeper config */
+	{
+		KeeperConfig hbaConfig = keeperOptions;
+		if (keeper_config_set_pathnames_from_pgdata(&hbaConfig.pathnames,
+													pgdata) &&
+			keeper_config_read_file(&hbaConfig,
+									false /* missingPgdataIsOk */,
+									true /* pgIsNotRunningIsOk */,
+									true /* monitorDisabledIsOk */) &&
+			!IS_EMPTY_STRING_BUFFER(hbaConfig.hostname))
+		{
+			strlcpy(hostname, hbaConfig.hostname, sizeof(hostname));
+		}
+	}
+
+	/* option b: OS hostname */
+	if (IS_EMPTY_STRING_BUFFER(hostname))
+	{
+		if (gethostname(hostname, sizeof(hostname)) == 0)
+		{
+			log_debug("hba-lan: using OS hostname \"%s\"", hostname);
+		}
+		else
+		{
+			hostname[0] = '\0';
+		}
+	}
+
+	/* option c: pghost (may be a socket path — last resort) */
+	if (IS_EMPTY_STRING_BUFFER(hostname))
+	{
+		strlcpy(hostname, keeperOptions.pgSetup.pghost, sizeof(hostname));
+	}
+
+	/* --auth <method> defaults to "trust"; --ssl enables hostssl rules */
+	const char *authMethod = keeperOptions.pgSetup.authMethod;
+	if (IS_EMPTY_STRING_BUFFER(authMethod))
+	{
+		authMethod = "trust";
+	}
+	bool useSSL = keeperOptions.pgSetup.ssl.active;
+
+	/* cert auth for replication needs an ident map */
+	bool isCert = (strcmp(authMethod, "cert") == 0);
+	const char *replAuth = isCert ? "cert map=pgautofailover" : authMethod;
+
+	if (!pghba_enable_lan_cidr(NULL, useSSL,
+							   HBA_DATABASE_ALL, NULL,
+							   hostname, NULL, authMethod,
+							   HBA_EDIT_MINIMAL,
+							   pgdata))
+	{
+		log_error("Failed to add LAN CIDR HBA rule for \"all\" databases");
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	if (!pghba_enable_lan_cidr(NULL, useSSL,
+							   HBA_DATABASE_REPLICATION, NULL,
+							   hostname, NULL, replAuth,
+							   HBA_EDIT_MINIMAL,
+							   pgdata))
+	{
+		log_error("Failed to add LAN CIDR HBA rule for replication");
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	/* cert auth requires an ident map entry in pg_ident.conf */
+	if (isCert)
+	{
+		if (!pghba_ensure_ident_map_entry(pgdata,
+										  "pgautofailover",
+										  PG_AUTOCTL_MONITOR_USERNAME,
+										  PG_AUTOCTL_REPLICA_USERNAME))
+		{
+			log_error("Failed to add cert ident map entry to pg_ident.conf");
+			exit(EXIT_CODE_PGCTL);
+		}
+	}
+
+	/* Step 3: wait for Postgres to be running (PID file, no TCP needed) */
+	if (!pg_setup_wait_until_is_ready(&keeperOptions.pgSetup, 60, LOG_INFO))
+	{
+		log_error("Postgres did not become ready within 60 s");
+		exit(EXIT_CODE_PGCTL);
+	}
+
+	/* Step 4: reload so the new HBA rules take effect */
+	log_info("Reloading Postgres configuration in \"%s\"", pgdata);
+	if (!pg_ctl_reload(keeperOptions.pgSetup.pg_ctl, pgdata))
+	{
+		exit(EXIT_CODE_PGCTL);
+	}
 }
 
 
