@@ -23,7 +23,6 @@
  */
 static CommandLine *inspect_fsm_subcommands[] = {
 	&fsm_state,
-	&fsm_node_state,
 	&fsm_list,
 	&fsm_gv,
 	NULL
@@ -42,8 +41,6 @@ static CommandLine inspect_fsm_commands =
 static CommandLine *inspect_monitor_subcommands[] = {
 	&monitor_get_command,
 	&monitor_parse_notification_command,
-	&monitor_node_state_command,
-	&monitor_formation_states_command,
 	NULL
 };
 

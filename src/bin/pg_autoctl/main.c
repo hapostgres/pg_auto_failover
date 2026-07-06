@@ -65,15 +65,6 @@ main(int argc, char **argv)
 	atexit(log_semaphore_unlink_atexit);
 
 	/*
-	 * When PG_AUTOCTL_DEBUG is set in the environment, provide the user
-	 * commands available to debug a pg_autoctl instance.
-	 */
-	if (env_exists(PG_AUTOCTL_DEBUG))
-	{
-		command = root_with_debug;
-	}
-
-	/*
 	 * When PGCONNECT_TIMEOUT is set in the environment, keep a copy of it in
 	 * our own global variable pgconnect_timeout. We implement our own
 	 * connection retry policy and will change change the environment variable

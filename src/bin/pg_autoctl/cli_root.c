@@ -101,6 +101,7 @@ CommandLine *root_subcommands[] = {
 	&activate_node_command,
 	&inspect_commands,
 	&manual_commands,
+	&internal_commands,
 
 	&do_commands,
 	&service_run_command,
@@ -118,39 +119,6 @@ CommandLine root =
 					 "pg_auto_failover control tools and service",
 					 "[ --verbose --quiet ]", NULL,
 					 root_options, root_subcommands);
-
-/* Backward-compat alias: root_with_debug and root_subcommands_with_debug
- * previously held the do_commands.  They now point to the same root. */
-CommandLine *root_subcommands_with_debug[] = {
-	&create_commands,
-	&drop_commands,
-	&config_commands,
-	&show_commands,
-	&enable_commands,
-	&disable_commands,
-	&get_commands,
-	&set_commands,
-	&perform_commands,
-	&activate_node_command,
-	&inspect_commands,
-	&manual_commands,
-
-	&do_commands,
-	&service_run_command,
-	&watch_command,
-	&service_stop_command,
-	&service_reload_command,
-	&service_status_command,
-	&help,
-	&version,
-	NULL
-};
-
-CommandLine root_with_debug =
-	make_command_set("pg_autoctl",
-					 "pg_auto_failover control tools and service",
-					 "[ --verbose --quiet ]", NULL,
-					 root_options, root_subcommands_with_debug);
 
 
 /*
