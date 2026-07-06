@@ -56,6 +56,12 @@ test_spec_scan.c: test_spec_scan.l test_spec_parse.h
 test_spec_parse.c test_spec_parse.h: test_spec_parse.y
 	$(BISON) -d -o test_spec_parse.c $<
 
+# Convenience target to regenerate parser/scanner sources explicitly.
+# Running "make generate" is the only supported way to regenerate the
+# committed .c/.h files from the .y/.l grammars.
+.PHONY: generate
+generate: test_spec_parse.c test_spec_parse.h test_spec_scan.c
+
 # cli_indent.c includes test_spec_parse.h (bison-generated); ensure it's
 # built first so a parallel clean build doesn't race on the generated header.
 cli_indent.o: test_spec_parse.h

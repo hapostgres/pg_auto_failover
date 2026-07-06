@@ -115,9 +115,11 @@ COPY ./src/bin/pg_autoctl/git-version.h ./src/bin/pg_autoctl/git-version.h
 # Touch bison/flex generated files so they appear newer than the grammar
 # sources, preventing make from re-running bison (system bison version may
 # differ from the one used to pre-generate the committed .c/.h files).
-RUN touch src/bin/pgaftest/test_spec_parse.c \
-         src/bin/pgaftest/test_spec_parse.h \
-         src/bin/pgaftest/test_spec_scan.c
+RUN for f in src/bin/pgaftest/test_spec_parse.c \
+             src/bin/pgaftest/test_spec_parse.h \
+             src/bin/pgaftest/test_spec_scan.c; do \
+      [ -f "$$f" ] && touch "$$f" || echo "warning: $$f not found, bison will regenerate"; \
+    done
 RUN make -s clean && make -s install -j8
 
 
