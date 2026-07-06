@@ -110,7 +110,7 @@ step test_010_promote_node1 {
 #
 
 step test_011_ifdown_node4_at_reportlsn {
-    wait until node4 assigned-state = report_lsn  timeout 120s
+    wait until node4 state is report_lsn  timeout 120s
     network disconnect node4
     wait until node3 state is secondary  timeout 120s
 }

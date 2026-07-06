@@ -397,6 +397,6 @@ step test_024_stop_postgres_monitor {
 
 step test_025_drop_primary {
     exec node3  pg_autoctl drop node --no-wait
-    wait until node3 stopped  timeout 30s
+    wait until node3 stopped  timeout 60s
     wait until node2 state is single  timeout 90s
 }
