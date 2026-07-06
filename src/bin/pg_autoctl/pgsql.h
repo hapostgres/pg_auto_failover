@@ -393,5 +393,8 @@ bool pgsql_alter_extension_update_to(PGSQL *pgsql,
 bool parseTimeLineHistory(const char *filename, const char *content,
 						  IdentifySystem *system);
 
+bool pgsql_alter_role_password(PGSQL *pgsql, const char *roleName,
+							   const char *password);
+
 
 #endif /* PGSQL_H */

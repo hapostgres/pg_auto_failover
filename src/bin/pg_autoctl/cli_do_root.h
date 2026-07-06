@@ -98,6 +98,7 @@ void keeper_cli_enable_synchronous_replication(int argc, char **argv);
 void keeper_cli_disable_synchronous_replication(int argc, char **argv);
 
 void keeper_cli_pgsetup_pg_ctl(int argc, char **argv);
+void keeper_cli_pgsetup_hba_lan(int argc, char **argv);
 void keeper_cli_pgsetup_discover(int argc, char **argv);
 void keeper_cli_pgsetup_is_ready(int argc, char **argv);
 void keeper_cli_pgsetup_wait_until_ready(int argc, char **argv);
