@@ -23,6 +23,10 @@ creation, startup, and live reconfiguration — driven by a single
    :maxdepth: 1
 
    pg_autoctl_node_run
+   pg_autoctl_node_apply
+   pg_autoctl_node_start
+   pg_autoctl_node_show
+   pg_autoctl_node_check
 
 Description
 -----------
