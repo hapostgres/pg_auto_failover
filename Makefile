@@ -350,16 +350,20 @@ run-test: build-test-pg$(PGVERSION)
 		make -C /usr/src/pg_auto_failover test	\
 		PGVERSION=$(PGVERSION) TEST='${TEST}'
 
-# make run-test-prebuilt; like run-test but skips the build step.
+# make run-test-prebuilt; like ci-test but skips the Docker build step.
 # Used in CI after images have been built and loaded by a prior job.
 .PHONY: run-test-prebuilt
 run-test-prebuilt:
+ifeq ($(TEST),tablespaces)
+	$(MAKE) -C tests/tablespaces run-test
+else
 	docker run					                \
 		--name $(TEST_CONTAINER_NAME)		    \
 		$(DOCKER_RUN_OPTS)			            \
 		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
 		make -C /usr/src/pg_auto_failover test	\
 		PGVERSION=$(PGVERSION) TEST='${TEST}'
+endif
 
 # make save-test-image; compresses the test image to a .tar.zst archive.
 # Used in CI to pass the built image to downstream test jobs as an artifact.
