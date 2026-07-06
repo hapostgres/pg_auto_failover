@@ -520,12 +520,12 @@ class PGNode(QueryRunner):
 
     def restart_postgres(self):
         """
-        Restart Postgres with pg_autoctl do service restart postgres
+        Restart Postgres with pg_autoctl manual service restart postgres
         """
         command = PGAutoCtl(self)
 
         command.execute(
-            "service restart postgres", "do", "service", "restart", "postgres"
+            "service restart postgres", "manual", "service", "restart", "postgres"
         )
 
     def pg_is_running(self, timeout=COMMAND_TIMEOUT):
@@ -535,7 +535,7 @@ class PGNode(QueryRunner):
         command = PGAutoCtl(self)
 
         try:
-            command.execute("pgsetup ready", "do", "pgsetup", "ready", "-vvv")
+            command.execute("pgsetup ready", "inspect", "pgsetup", "ready", "-vvv")
         except Exception as e:
             # pg_autoctl uses EXIT_CODE_PGSQL when Postgres is not ready
             return False
@@ -547,7 +547,7 @@ class PGNode(QueryRunner):
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute(
-            "pgsetup ready", "do", "pgsetup", "wait", "-vvv"
+            "pgsetup ready", "inspect", "pgsetup", "wait", "-vvv"
         )
 
         return ret == 0
@@ -1217,7 +1217,7 @@ class DataNode(PGNode, StatefulNode):
         Fetch the nodeid from the pg_autoctl state file.
         """
         command = PGAutoCtl(self)
-        out, err, ret = command.execute("get node id", "do", "fsm", "state")
+        out, err, ret = command.execute("get node id", "inspect", "fsm", "state")
 
         self.state = json.loads(out)
         return self.state["state"]["nodeId"]
@@ -1242,7 +1242,7 @@ class DataNode(PGNode, StatefulNode):
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute(
-            "get node id", "-vv", "do", "fsm", "state"
+            "get node id", "-vv", "inspect", "fsm", "state"
         )
 
         self.state = json.loads(out)
@@ -1412,19 +1412,19 @@ class DataNode(PGNode, StatefulNode):
 
     def do_fsm_assign(self, target_state):
         """
-        Runs `pg_autoctl do fsm assign` on a node
+        Runs `pg_autoctl manual fsm assign` on a node
 
         :return:
         """
         command = PGAutoCtl(self)
         command.execute(
-            "do fsm assign", "-vv", "do", "fsm", "assign", target_state
+            "manual fsm assign", "-vv", "manual", "fsm", "assign", target_state
         )
         return True
 
     def do_fsm_nodes_set(self, nodesArray):
         """
-        Runs `pg_autoctl do fsm nodes set` on a node
+        Runs `pg_autoctl manual fsm nodes set` on a node
 
         :return:
         """
@@ -1435,18 +1435,18 @@ class DataNode(PGNode, StatefulNode):
 
         command = PGAutoCtl(self)
         out, err, ret = command.execute(
-            "do fsm nodes set", "do", "fsm", "nodes", "set", filename
+            "manual fsm nodes set", "manual", "fsm", "nodes", "set", filename
         )
         return True
 
     def do_fsm_step(self):
         """
-        Runs `pg_autoctl do fsm step` on a node
+        Runs `pg_autoctl manual fsm step` on a node
 
         :return:
         """
         command = PGAutoCtl(self)
-        command.execute("do fsm step", "do", "fsm", "step")
+        command.execute("manual fsm step", "manual", "fsm", "step")
         return True
 
     def set_metadata(self, name=None, host=None, port=None):

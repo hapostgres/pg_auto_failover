@@ -185,9 +185,11 @@ CommandLine do_pgsetup_is_ready =
 CommandLine do_pgsetup_wait_until_ready =
 	make_command("wait",
 				 "Wait until the local Postgres server is ready",
-				 "[option ...]",
+				 "[--read-write] [--timeout N] [option ...]",
+				 "  --read-write    also wait until the server accepts read-write connections\n"
+				 "  --timeout N     total timeout in seconds (default: 30)\n"
 				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
-				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_pgsetup_wait_getopts,
 				 keeper_cli_pgsetup_wait_until_ready);
 
 CommandLine do_pgsetup_startup_logs =
@@ -206,6 +208,14 @@ CommandLine do_pgsetup_tune =
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_pgsetup_tune);
 
+CommandLine do_pgsetup_hba_lan =
+	make_command("hba-lan",
+				 "Append LAN CIDR trust rules to pg_hba.conf and reload Postgres",
+				 "[option ...]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_pgsetup_hba_lan);
+
 CommandLine *do_pgsetup[] = {
 	&do_pgsetup_pg_ctl,
 	&do_pgsetup_discover,
@@ -213,6 +223,7 @@ CommandLine *do_pgsetup[] = {
 	&do_pgsetup_wait_until_ready,
 	&do_pgsetup_startup_logs,
 	&do_pgsetup_tune,
+	&do_pgsetup_hba_lan,
 	NULL
 };
 
@@ -374,25 +385,255 @@ CommandLine do_tmux_commands =
 					 "Set of facilities to handle tmux interactive sessions",
 					 NULL, NULL, NULL, do_tmux);
 
+/*
+ * Azure integration has been removed.  The commands that were here are no
+ * longer maintained and have been deleted from this file.  See pgaftest for
+ * the replacement QA tooling.
+ */
+
+#if 0  /* REMOVED: azure commands — see pgaftest instead */
+CommandLine do_azure_provision_region =
+	make_command("region",
+				 "Provision an azure region: resource group, network, VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --location  azure location where to create a resource group\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_region);
+
+CommandLine do_azure_provision_nodes =
+	make_command("nodes",
+				 "Provision our pre-created VM with pg_autoctl Postgres nodes",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_nodes);
+
+
+CommandLine *do_azure_provision[] = {
+	&do_azure_provision_region,
+	&do_azure_provision_nodes,
+	NULL
+};
+
+CommandLine do_azure_provision_commands =
+	make_command_set("provision",
+					 "provision azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure_provision);
+
+CommandLine do_azure_create =
+	make_command("create",
+				 "Create an azure QA environment",
+				 "[option ...]",
+				 "  --prefix      azure group name prefix (ha-demo)\n"
+				 "  --region      name to use for referencing the region\n"
+				 "  --location    azure location to use for the resources\n"
+				 "  --nodes       number of Postgres nodes to create (2)\n"
+				 "  --script      output a script instead of creating resources\n"
+				 "  --no-monitor  do not create the pg_autoctl monitor node\n"
+				 "  --no-app      do not create the application node\n"
+				 "  --cidr        use the 10.CIDR.CIDR.0/24 subnet (11)\n"
+				 "  --from-source provision pg_auto_failover from sources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_create_environment);
+
+CommandLine do_azure_drop =
+	make_command("drop",
+				 "Drop an azure QA environment: resource group, network, VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --location  azure location where to create a resource group\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n"
+				 "  --script    output a shell script instead of creating resources\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_drop_region);
+
+CommandLine do_azure_deploy =
+	make_command("deploy",
+				 "Deploy a pg_autoctl VMs, given by name",
+				 "[option ...] vmName",
+				 "",
+				 cli_do_azure_getopts,
+				 cli_do_azure_deploy);
+
+CommandLine do_azure_show_ips =
+	make_command("ips",
+				 "Show public and private IP addresses for selected VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_show_ips);
+
+CommandLine do_azure_show_state =
+	make_command("state",
+				 "Connect to the monitor node to show the current state",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n"
+				 "  --watch     run the command again every 0.2s\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_show_state);
+
+CommandLine *do_azure_show[] = {
+	&do_azure_show_ips,
+	&do_azure_show_state,
+	NULL
+};
+
+CommandLine do_azure_show_commands =
+	make_command_set("show",
+					 "show azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure_show);
+
+CommandLine do_azure_ls =
+	make_command("ls",
+				 "List resources in a given azure region",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_ls);
+
+CommandLine do_azure_ssh =
+	make_command("ssh",
+				 "Runs ssh -l ha-admin <public ip address> for a given VM name",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    name to use for referencing the region\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_ssh);
+
+CommandLine do_azure_sync =
+	make_command("sync",
+				 "Rsync pg_auto_failover sources on all the target region VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    region to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_rsync);
+
+CommandLine do_azure_tmux_session =
+	make_command("session",
+				 "Create or attach a tmux session for the created Azure VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    region to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_tmux_session);
+
+CommandLine do_azure_tmux_kill =
+	make_command("kill",
+				 "Kill an existing tmux session for Azure VMs",
+				 "[option ...]",
+				 "  --prefix    azure group name prefix (ha-demo)\n"
+				 "  --region    region to use for referencing the region\n"
+				 "  --monitor   should we create a monitor in the region (false)\n"
+				 "  --nodes     number of Postgres nodes to create (2)\n",
+				 cli_do_azure_getopts,
+				 cli_do_azure_tmux_kill);
+
+CommandLine *do_azure_tmux[] = {
+	&do_azure_tmux_session,
+	&do_azure_tmux_kill,
+	NULL
+};
+
+CommandLine do_azure_tmux_commands =
+	make_command_set("tmux",
+					 "Run a tmux session with an Azure setup for QA/testing",
+					 NULL, NULL, NULL, do_azure_tmux);
+
+CommandLine *do_azure[] = {
+	&do_azure_provision_commands,
+	&do_azure_tmux_commands,
+	&do_azure_show_commands,
+	&do_azure_deploy,
+	&do_azure_create,
+	&do_azure_drop,
+	&do_azure_ls,
+	&do_azure_ssh,
+	&do_azure_sync,
+	NULL
+};
+
+CommandLine do_azure_commands =
+	make_command_set("azure",
+					 "Manage a set of Azure resources for a pg_auto_failover demo",
+					 NULL, NULL, NULL, do_azure);
+
+#endif /* REMOVED: azure commands */
+
+/*
+ * pg_autoctl internal service postgres|listener|node-active
+ *
+ * These are the subprocess entry points used by the supervisor (pg_autoctl run
+ * and pg_autoctl create … --run).  The supervisor fork()s and then execv()s
+ * the pg_autoctl binary itself with one of these sub-commands so that each
+ * service runs in its own address space.
+ *
+ * Using fork+exec (rather than fork alone) is a deliberate design choice for
+ * live upgrades: when a child process exits with an incompatible monitor
+ * extension version, the supervisor restarts it via fork()+execv(), which loads
+ * the current binary from disk.  If the binary has been updated in place (e.g.
+ * by a package manager), the restarted child automatically picks up the new
+ * version without touching the supervisor process — making pg_autoctl safe to
+ * use as PID 1 in Docker/Kubernetes containers where replacing the binary and
+ * sending SIGTERM would lose the container.
+ *
+ * See also: keeper.c keeper_check_monitor_extension_version(), which exits on
+ * version mismatch precisely to trigger this restart-with-new-binary path.
+ *
+ * These commands are hidden from --help output (make_hidden_command_set) so
+ * operators do not accidentally invoke them directly.
+ * Use "pg_autoctl manual service" for the user-facing controls (restart, pgctl).
+ * Use "pg_autoctl inspect getpid" to read sub-process PIDs.
+ */
+static CommandLine *internal_service_subcommands[] = {
+	&service_pgcontroller,      /* debug: supervisor for just the postgres controller */
+	&service_postgres,          /* spawned by service_postgres_ctl_start() */
+	&service_monitor_listener,  /* spawned by service_monitor_start() */
+	&service_node_active,       /* spawned by service_keeper_start() */
+	NULL
+};
+
+static CommandLine internal_service_commands =
+	make_hidden_command_set("service",
+							"Subprocess entry points for the pg_autoctl supervisor",
+							NULL, NULL, NULL, internal_service_subcommands);
+
+/*
+ * pg_autoctl internal
+ *
+ * Hidden from --help; routable so the supervisor's execv() calls work.
+ * Contains only what the supervisor spawns plus dev/QA tooling not yet
+ * moved to pgaftest (tmux, demo).
+ */
 CommandLine *do_subcommands[] = {
-	&do_monitor_commands,
-	&do_coordinator_commands,
-	&do_fsm_commands,
-	&do_primary_,
-	&do_standby_,
-	&do_show_commands,
-	&do_pgsetup_commands,
-	&do_service_postgres_ctl_commands,
-	&do_service_commands,
+	&internal_service_commands,
 	&do_tmux_commands,
 	&do_demo_commands,
 	NULL
 };
 
 CommandLine do_commands =
-	make_command_set("do",
-					 "Internal commands and internal QA tooling", NULL, NULL,
-					 NULL, do_subcommands);
+	make_hidden_command_set("internal",
+							"Internal subprocess entry points — not for direct use",
+							NULL, NULL, NULL, do_subcommands);
 
 
 /*

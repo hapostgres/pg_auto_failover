@@ -170,7 +170,7 @@ service_keeper_runprogram(Keeper *keeper)
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
 
 	args[argsIndex++] = (char *) pg_autoctl_program;
-	args[argsIndex++] = "do";
+	args[argsIndex++] = "internal";
 	args[argsIndex++] = "service";
 	args[argsIndex++] = "node-active";
 	args[argsIndex++] = "--pgdata";

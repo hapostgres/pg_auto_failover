@@ -29,6 +29,8 @@
 
 static void cli_do_fsm_init(int argc, char **argv);
 static void cli_do_fsm_state(int argc, char **argv);
+static int cli_do_fsm_node_state_getopts(int argc, char **argv);
+static void cli_do_fsm_node_state(int argc, char **argv);
 static void cli_do_fsm_list(int argc, char **argv);
 static void cli_do_fsm_gv(int argc, char **argv);
 static void cli_do_fsm_assign(int argc, char **argv);
@@ -37,15 +39,8 @@ static void cli_do_fsm_step(int argc, char **argv);
 static void cli_do_fsm_get_nodes(int argc, char **argv);
 static void cli_do_fsm_set_nodes(int argc, char **argv);
 
-static CommandLine fsm_init =
-	make_command("init",
-				 "Initialize the keeper's state on-disk",
-				 CLI_PGDATA_USAGE,
-				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
-				 cli_do_fsm_init);
-
-static CommandLine fsm_state =
+/* read-only — exported for pg_autoctl inspect fsm */
+CommandLine fsm_state =
 	make_command("state",
 				 "Read the keeper's state from disk and display it",
 				 CLI_PGDATA_USAGE,
@@ -53,7 +48,17 @@ static CommandLine fsm_state =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_state);
 
-static CommandLine fsm_list =
+CommandLine fsm_node_state =
+	make_command("node-state",
+				 "Poll the keeper's on-disk current_role; exit 0 when it matches --state",
+				 CLI_PGDATA_USAGE,
+				 "  --pgdata  path to the keeper's data directory\n"
+				 "  --state   target state to wait for (e.g. demote_timeout)\n"
+				 "  --timeout seconds to retry (default: no retry)\n",
+				 cli_do_fsm_node_state_getopts,
+				 cli_do_fsm_node_state);
+
+CommandLine fsm_list =
 	make_command("list",
 				 "List reachable FSM states from current state",
 				 CLI_PGDATA_USAGE,
@@ -61,12 +66,21 @@ static CommandLine fsm_list =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_list);
 
-static CommandLine fsm_gv =
+CommandLine fsm_gv =
 	make_command("gv",
 				 "Output the FSM as a .gv program suitable for graphviz/dot",
 				 "", NULL, NULL, cli_do_fsm_gv);
 
-static CommandLine fsm_assign =
+/* mutating — exported for pg_autoctl manual fsm */
+CommandLine fsm_init =
+	make_command("init",
+				 "Initialize the keeper's state on-disk",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_init);
+
+CommandLine fsm_assign =
 	make_command("assign",
 				 "Assign a new goal state to the keeper",
 				 CLI_PGDATA_USAGE "<goal state>",
@@ -74,7 +88,7 @@ static CommandLine fsm_assign =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_assign);
 
-static CommandLine fsm_step =
+CommandLine fsm_step =
 	make_command("step",
 				 "Make a state transition if instructed by the monitor",
 				 CLI_PGDATA_USAGE,
@@ -225,6 +239,141 @@ cli_do_fsm_state(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 	fformat(stdout, "%s\n", keeperStateJSON);
+}
+
+
+/* option state for fsm node-state */
+static struct
+{
+	char targetState[64];
+	int timeout;
+}
+fsmNodeStateOpts;
+
+static int
+cli_do_fsm_node_state_getopts(int argc, char **argv)
+{
+	fsmNodeStateOpts.targetState[0] = '\0';
+	fsmNodeStateOpts.timeout = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "state", required_argument, NULL, 's' },
+		{ "timeout", required_argument, NULL, 't' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	int c;
+	optind = 0;
+	while ((c = getopt_long(argc, argv, "D:s:t:", long_options, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(keeperOptions.pgSetup.pgdata, optarg,
+						sizeof(keeperOptions.pgSetup.pgdata));
+				break;
+			}
+
+			case 's':
+			{
+				strlcpy(fsmNodeStateOpts.targetState, optarg,
+						sizeof(fsmNodeStateOpts.targetState));
+				break;
+			}
+
+			case 't':
+			{
+				fsmNodeStateOpts.timeout = atoi(optarg) /* IGNORE-BANNED */;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&fsm_node_state, stderr);
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+		}
+	}
+
+	/* fall back to $PGDATA when --pgdata was not given */
+	cli_common_get_set_pgdata_or_exit(&keeperOptions.pgSetup);
+
+	if (!keeper_config_set_pathnames_from_pgdata(&keeperOptions.pathnames,
+												 keeperOptions.pgSetup.pgdata))
+	{
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_do_fsm_node_state reads the keeper's on-disk state and prints:
+ *   <current_role>|<assigned_role>
+ *
+ * When --state is given the command retries until current_role matches.
+ * When --timeout is given the retry loop stops after N seconds.
+ */
+static void
+cli_do_fsm_node_state(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = true;
+
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	time_t deadline = (fsmNodeStateOpts.timeout > 0)
+					  ? time(NULL) + fsmNodeStateOpts.timeout
+					  : 0;
+
+	for (;;)
+	{
+		Keeper keeper = { 0 };
+
+		if (!keeper_init(&keeper, &config))
+		{
+			if (deadline && time(NULL) < deadline)
+			{
+				pg_usleep(500 * 1000);
+				continue;
+			}
+			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		KeeperStateData *s = &keeper.state;
+		const char *current = NodeStateToString(s->current_role);
+		const char *assigned = NodeStateToString(s->assigned_role);
+
+		if (fsmNodeStateOpts.targetState[0] != '\0' &&
+			strcmp(current, fsmNodeStateOpts.targetState) != 0)
+		{
+			log_debug("fsm node-state: current_role=%s, waiting for %s",
+					  current, fsmNodeStateOpts.targetState);
+			if (deadline && time(NULL) < deadline)
+			{
+				pg_usleep(500 * 1000);
+				continue;
+			}
+
+			/* timed out or --timeout 0 with no match */
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		fformat(stdout, "%s|%s\n", current, assigned);
+		exit(0);
+	}
 }
 
 
