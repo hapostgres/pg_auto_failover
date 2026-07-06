@@ -39,6 +39,7 @@
 #include "service_monitor.h"
 #include "service_monitor_init.h"
 #include "signals.h"
+#include "file_utils.h"
 #include "string_utils.h"
 
 /*
@@ -679,6 +680,22 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 				 (long long) keeperState->current_node_id,
 				 config->formation,
 				 config->groupId);
+	}
+	else if (pid != 0 && !file_exists(config->pathnames.state))
+	{
+		/*
+		 * The running service stopped and deleted its own state file.  The
+		 * service only removes the state file after completing the DROPPED
+		 * protocol (two confirmed monitor contacts in DROPPED state), so the
+		 * absence of the state file is authoritative: the drop succeeded.
+		 */
+		log_info("This node with id %lld in formation \"%s\" and group %d "
+				 "has been dropped from the monitor "
+				 "(confirmed by service clean-up)",
+				 (long long) keeperState->current_node_id,
+				 config->formation,
+				 config->groupId);
+		dropped = true;
 	}
 	else
 	{
