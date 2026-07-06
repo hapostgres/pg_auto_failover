@@ -3,14 +3,31 @@ name: Run Tests
 on:
   push:
     branches:
-    - main
+      - main
   pull_request:
     branches:
-    - main
+      - main
 
   workflow_dispatch:
 
 jobs:
+  style_checker:
+    name: Style check
+    runs-on: ubuntu-latest
+    container: citus/stylechecker:no-py
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Set safe directory for git
+        run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+
+      - name: Check C formatting
+        run: citus_indent --check
+
+      - name: Check banned functions
+        run: ci/banned.h.sh
+
   run_tests:
     name: Run test
     runs-on: ubuntu-latest
@@ -33,46 +50,19 @@ jobs:
         include:
           - PGVERSION: 14
             TEST: tablespaces
-          - PGVERSION: 14
-            TEST: linting
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4.2.2
 
       - name: Set environment variables
         run: |
-            echo "PGVERSION=${{ matrix.PGVERSION }}" >> $GITHUB_ENV
-            echo "TEST=${{ matrix.TEST }}" >> $GITHUB_ENV
-            echo "LINTING=${{ matrix.LINTING }}" >> $GITHUB_ENV
-            echo "TRAVIS_BUILD_DIR=$(pwd)" >> $GITHUB_ENV
-
-      - name: Clone and install linting tools
-        if: ${{ env.TEST == 'linting' }}
-        run: |
-          sudo apt-get install python3-pip
-          pip3 install --user black
-          black --version
-          gcc --version
-          # Install uncrustify the Citus way
-          make -C ci -f tools.mk tools
-
-      - name: Check code formatting and banned function
-        if: ${{ env.TEST == 'linting' }}
-        run: |
-          make lint
-
-      - name: Build documentation
-        if: ${{ env.TEST == 'linting' }}
-        run: |
-          make build-docs
+          echo "PGVERSION=${{ matrix.PGVERSION }}" >> $GITHUB_ENV
+          echo "TEST=${{ matrix.TEST }}" >> $GITHUB_ENV
+          echo "TRAVIS_BUILD_DIR=$(pwd)" >> $GITHUB_ENV
 
       - name: Build Docker Test Image
-        if: ${{ env.TEST != 'linting' }}
-        run: |
-          make build-test-image
+        run: make build-test-image
 
       - name: Run Test
-        if: ${{ env.TEST != 'linting' }}
         timeout-minutes: 15
-        run: |
-          make ci-test
+        run: make ci-test

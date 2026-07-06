@@ -150,17 +150,10 @@ $(VERSION_FILE):
 #
 # make ci-test; is run on the GitHub Action workflow
 #
-# In that environment we have a local git checkout of the code, and docker
-# is available too. We run our tests in docker, except for the code linting
-# parts which requires full access to the git repository, so linter tooling
-# is installed directly on the CI vm.
-#
 .PHONY: ci-test
 ci-test:
 ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
-else ifeq ($(TEST),linting)
-	$(MAKE) spellcheck
 else
 	$(MAKE) run-test
 endif
@@ -172,8 +165,6 @@ endif
 test:
 ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
-else ifeq ($(TEST),linting)
-	$(MAKE) spellcheck
 else
 	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
 		$(NOSETESTS)			\
@@ -187,11 +178,32 @@ endif
 #
 # INDENT/LINT/SPELLCHECK
 #
+# citus_indent is run via its official Docker image (citus/stylechecker:no-py)
+# so that the local version exactly matches CI.  When the local citus_indent
+# binary is already in PATH (e.g. inside the stylechecker container) the plain
+# binary is used instead, which is equally authoritative there.
+#
+# To check or auto-fix locally without installing citus_indent:
+#   make docker-check    # check only
+#   make docker-indent   # auto-fix
+CITUS_INDENT_DOCKER = docker run --rm \
+	-v "$(CURDIR):/workdir" \
+	-w /workdir \
+	citus/stylechecker:no-py \
+	citus_indent
+
 # make indent; edits the code when necessary
 .PHONY: indent
 indent:
 	citus_indent
 	black --exclude=ci/tools .
+
+# make docker-indent / make docker-check — use Docker image locally
+.PHONY: docker-indent docker-check
+docker-indent:
+	$(CITUS_INDENT_DOCKER)
+docker-check:
+	$(CITUS_INDENT_DOCKER) --check
 
 # make lint; is an alias for make spellcheck
 # make linting; is an alias for make spellcheck
@@ -202,7 +214,7 @@ lint linting: spellcheck ;
 # reports compliance with the rules.
 .PHONY: spellcheck
 spellcheck:
-	citus_indent --check
+	$(CITUS_INDENT_DOCKER) --check
 	black --exclude=ci/tools --check .
 	ci/banned.h.sh
 
