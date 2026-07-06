@@ -115,7 +115,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   replicationQuorumStr, "true"),
 
 		/* [options] — ssl is mutable (applied via `pg_autoctl enable ssl`);
-		             auth and pg_hba_lan are create-time only */
+		 *           auth and pg_hba_lan are create-time only */
 		make_strbuf_option_default("options", "ssl", NULL, false,
 								   sizeof(spec->ssl), spec->ssl,
 								   "self-signed"),
@@ -458,11 +458,11 @@ nodespec_create_argv(const NodeSpec *spec,
 	int i = 0;
 
 #define PUSH(v) do { \
-		if (i >= args_size - 1) { \
-			log_error("nodespec_create_argv: args[] overflow"); \
-			return -1; \
-		} \
-		args[i++] = (char *) (v); \
+			if (i >= args_size - 1) { \
+				log_error("nodespec_create_argv: args[] overflow"); \
+				return -1; \
+			} \
+			args[i++] = (char *) (v); \
 } while (0)
 
 	PUSH(pg_autoctl_path);
