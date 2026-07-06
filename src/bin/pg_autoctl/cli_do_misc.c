@@ -466,12 +466,12 @@ keeper_cli_pgsetup_hba_lan(int argc, char **argv)
 	{
 		KeeperConfig hbaConfig = keeperOptions;
 		if (keeper_config_set_pathnames_from_pgdata(&hbaConfig.pathnames,
-		                                            pgdata) &&
-		    keeper_config_read_file(&hbaConfig,
-		                            false /* missingPgdataIsOk */,
-		                            true  /* pgIsNotRunningIsOk */,
-		                            true  /* monitorDisabledIsOk */) &&
-		    !IS_EMPTY_STRING_BUFFER(hbaConfig.hostname))
+													pgdata) &&
+			keeper_config_read_file(&hbaConfig,
+									false /* missingPgdataIsOk */,
+									true /* pgIsNotRunningIsOk */,
+									true /* monitorDisabledIsOk */) &&
+			!IS_EMPTY_STRING_BUFFER(hbaConfig.hostname))
 		{
 			strlcpy(hostname, hbaConfig.hostname, sizeof(hostname));
 		}
