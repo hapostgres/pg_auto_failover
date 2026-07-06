@@ -61,31 +61,45 @@ provide with High Availability of both the Postgres service and the data.
 See the :ref:`multi_node_architecture` chapter of our docs to understand
 more about this.
 
-To create a cluster we use the following docker compose definition:
+Each node in the cluster is described by a small ``pg_autoctl_node.ini``
+file that is bind-mounted into its container.  There are two files:
+
+.. literalinclude:: tutorial/ini/monitor.ini
+   :language: ini
+   :caption: tutorial/ini/monitor.ini
+
+.. literalinclude:: tutorial/ini/postgres.ini
+   :language: ini
+   :caption: tutorial/ini/postgres.ini
+
+The monitor file sets ``kind = monitor``; it has no ``[monitor]`` section
+because the monitor is not itself a client of a monitor.  The postgres file
+is shared by every data node — the node's ``name`` and ``hostname`` are
+omitted, so they default to the container hostname set by Docker Compose
+(``node1``, ``node2``, ``node3``).
+
+The docker compose definition that assembles these pieces is:
 
 .. literalinclude:: tutorial/docker-compose.yml
    :language: yaml
    :linenos:
 
-To run the full Citus cluster with HA from this definition, we can use the
-following command:
+Every service runs the same entry-point — ``pg_autoctl node run`` — with a
+different ini file bind-mounted at ``/etc/pgaf/node.ini``.  On first start
+the command creates the Postgres cluster and registers the node; on
+subsequent starts it picks up the existing cluster and runs the supervisor.
+Either way the container never needs updating to change node configuration:
+edit the ini file and restart.
+
+To start the two-node cluster run:
 
 ::
 
    $ docker compose up app monitor node1 node2
 
-The command above starts the services up. The first service is the monitor
-and is created with the command ``pg_autoctl create monitor``. The options
-for this command are exposed in the environment, and could have been
-specified on the command line too:
-
-::
-
-   $ pg_autoctl create postgres --ssl-self-signed --auth trust --pg-hba-lan --run
-
-While the Postgres nodes are being provisionned by docker compose, you can
-run the following command and have a dynamic dashboard to follow what's
-happening. The following command is like ``top`` for pg_auto_failover::
+While the nodes are being provisioned you can run the following command and
+have a dynamic dashboard to follow what's happening. The following command
+is like ``top`` for pg_auto_failover::
 
   $ docker compose exec monitor pg_autoctl watch
 
@@ -235,18 +249,75 @@ We can see the resulting replication settings with the following command:
 Editing the replication settings while in production
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-It's then possible to change the production architecture obtained with
-playing with the :ref:`architecture_setup` commands. Specifically, try the
-following command to change the candidate_priority of the node3 to zero, in
-order for it to never be a candidate for failover:
+Because node3 uses the same ``postgres.ini`` as node1 and node2, its
+``candidate_priority`` starts at ``50``.  To make node3 a read-only standby
+that is never promoted there are two ways to proceed.
 
-::
+**Direct command** — takes effect immediately on the running cluster::
 
    $ docker compose exec node3 pg_autoctl set candidate-priority 0 --name node3
 
-To see the replication settings for all the nodes, the following command can
-be useful, and is described in more details in the :ref:`architecture_setup`
-section.
+This reaches into the running supervisor and updates the setting on the
+monitor in one step.  It is the fastest option when you need an immediate
+change on a live cluster.
+
+**Declarative ini file** — the persistent, version-controlled option.
+Because node3 shares ``postgres.ini`` with the other two nodes, you first
+create a dedicated ini file for it:
+
+.. code-block:: ini
+
+   # tutorial/ini/node3.ini
+   [node]
+   kind = postgres
+   port = 5432
+
+   [postgresql]
+   pgdata = /var/lib/postgres/pgaf
+
+   [monitor]
+   pguri = postgresql://autoctl_node@monitor/pg_auto_failover
+
+   [settings]
+   candidate_priority = 0
+   replication_quorum = true
+
+   [options]
+   ssl        = self-signed
+   auth       = trust
+   pg_hba_lan = true
+
+Then update the ``node3`` service in ``docker-compose.yml`` to mount this
+file instead of the shared one::
+
+   node3:
+     <<: *node
+     hostname: node3
+     volumes:
+       - /var/lib/postgres
+       - ./ini/node3.ini:/etc/pgaf/node.ini:ro
+
+Changing the ``volumes:`` list requires recreating the container — Docker
+cannot swap a bind mount into a running container.  Run::
+
+   $ docker compose up -d node3
+
+Docker Compose stops node3, recreates it with the new mount, and starts it
+again.  ``pg_autoctl node run`` detects that the Postgres cluster already
+exists inside the volume, reads ``node3.ini``, and calls ``pg_autoctl node
+apply`` before exec'ing into the supervisor.  The apply step calls
+``pg_autoctl set node candidate-priority 0``, registering the change on the
+monitor.  node3 rejoins the formation as a secondary within a few seconds.
+
+.. note::
+
+   Once node3 has its own ini file mounted, any further edits to
+   ``tutorial/ini/node3.ini`` on the host are picked up live by the running
+   supervisor — Docker bind mounts reflect host-side writes immediately, and
+   the supervisor's file watcher applies mutable fields (``candidate_priority``,
+   ``replication_quorum``, ``ssl``) without restarting the container.
+
+Verify with:
 
 ::
 
@@ -298,12 +369,13 @@ To dispose of the entire tutorial environment, just use the following command:
 Next steps
 ----------
 
-As mentioned in the first section of this tutorial, the way we use
-docker compose here is not meant to be production ready. It's useful to
-understand and play with a distributed system such as Postgres multiple
-nodes system and failovers.
+The docker compose setup in this tutorial is a good playground for
+understanding pg_auto_failover's behaviour.  For production container and
+Kubernetes deployments, the same ``pg_autoctl node run`` entry-point scales
+directly: store your ini files in a ConfigMap or alongside your Compose
+file, bind-mount them, and live reconfiguration handles the rest.
 
-See the command :ref:`pg_autoctl_do_tmux_compose_session` for more details
-about how to run a docker compose test environment with docker compose,
-including external volumes for each node.
+See :ref:`pg_autoctl_node` for the full property reference and mutability
+table, and the :ref:`container-and-kubernetes-deployments` section of the
+Operations guide for production patterns.
 

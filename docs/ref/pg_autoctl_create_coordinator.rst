@@ -90,3 +90,12 @@ options. This section now lists the options that are specific to
   are part of this cluster.
 
   See :ref:`citus_secondaries` for more information.
+
+See Also
+--------
+
+:ref:`pg_autoctl_node_run` provides a declarative alternative to this
+command: set ``kind = coordinator`` in a ``pg_autoctl_node.ini`` file and
+run ``pg_autoctl node run`` — it creates the coordinator if absent and starts
+the supervisor in one step.  See :ref:`pg_autoctl_node` for the full
+reference.

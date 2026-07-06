@@ -50,46 +50,55 @@ or run the docker build command directly:
 Our first Citus Cluster
 -----------------------
 
-To create a cluster we use the following docker compose definition:
+Each node in the cluster is described by a ``pg_autoctl_node.ini`` file
+bind-mounted into its container.  There are three files:
+
+.. literalinclude:: citus/ini/monitor.ini
+   :language: ini
+   :caption: citus/ini/monitor.ini
+
+.. literalinclude:: citus/ini/coordinator.ini
+   :language: ini
+   :caption: citus/ini/coordinator.ini
+
+.. literalinclude:: citus/ini/worker.ini
+   :language: ini
+   :caption: citus/ini/worker.ini
+
+The ``worker.ini`` has no ``[formation] group`` entry.  When that field is
+absent the monitor assigns each worker to a group automatically — the first
+worker to register in a group becomes primary, the second becomes secondary.
+This is the right setup for the scaled deploy below, where we ask Docker
+Compose to start six worker containers and let the monitor pair them.
+
+The docker compose definition for the scalable cluster is:
 
 .. literalinclude:: citus/docker-compose-scale.yml
    :language: yaml
-   :emphasize-lines: 5,15,27
    :linenos:
 
-To run the full Citus cluster with HA from this definition, we can use the
-following command:
+Every service runs ``pg_autoctl node run`` — creating the node on first
+start, resuming on subsequent starts.  All ``PG_AUTOCTL_*`` environment
+variables are gone; everything lives in the ini files.
+
+To run the full Citus cluster with HA from this definition:
 
 ::
 
    $ docker compose up --scale coord=2 --scale worker=6
 
-The command above starts the services up. The command also specifies a
-``--scale`` option that is different for each service. We need:
+The ``--scale`` options tell Docker Compose how many containers to start for
+each service:
 
- - one monitor node, and the default scale for a service is 1,
+ - one monitor node (default scale is 1),
+ - two coordinator containers — one primary, one secondary,
+ - six worker containers — the monitor pairs them into three groups of two,
+   assigning a primary and secondary in each group.
 
- - one primary Citus coordinator node and one secondary Cituscoordinator
-   node, which is to say two coordinator nodes,
-
- - and three Citus worker nodes, each worker with both a primary Postgres
-   node and a secondary Postgres node, so that's a scale of 6 here.
-
-The default policy for the pg_auto_failover monitor is to assign a primary
-and a secondary per auto failover :ref:`group`. In our case, every node
-being provisioned with the same command, we benefit from that default policy::
-
-  $ pg_autoctl create worker --ssl-self-signed --auth trust --pg-hba-lan --run
-
-When provisioning a production cluster, it is often required to have a
-better control over which node participates in which group, then using the
-``--group N`` option in the ``pg_autoctl create worker`` command line.
-
-Within a given group, the first node that registers is a primary, and the
-other nodes are secondary nodes. The monitor takes care of that in a way
-that we don't have to. In a High Availability setup, every node should be
-ready to be promoted primary at any time, so knowing which node in a group
-is assigned primary first is not very interesting.
+Within a given group the first node that registers becomes primary; the
+monitor handles the assignment so we don't have to track it.  In a High
+Availability setup every node must be ready for promotion at any time, so
+the initial primary assignment within a group is not significant.
 
 While the cluster is being provisionned by docker compose, you can run the
 following command and have a dynamic dashboard to follow what's happening.
@@ -177,26 +186,36 @@ more complex docker compose file than in the previous section.
 
    pg_auto_failover architecture with a Citus formation
 
-This time we create a cluster using the following docker compose definition:
+This time we need per-group worker ini files so that each worker pair
+lands in the right Citus shard group:
+
+.. literalinclude:: citus/ini/worker1.ini
+   :language: ini
+   :caption: citus/ini/worker1.ini  (worker1a and worker1b)
+
+Worker 2 and worker 3 are identical except for ``group = 2`` and
+``group = 3`` respectively.  When ``group`` is set, ``pg_autoctl node run``
+passes ``--group N`` to ``pg_autoctl create worker``, pinning the pair to
+that shard group.
+
+The docker compose definition is:
 
 .. literalinclude:: citus/docker-compose.yml
    :language: yaml
-   :emphasize-lines: 3,15,40,44,48,52,56,60,64,68
    :linenos:
 
-This definition is a little more involved than the previous one. We take
-benefit from `YAML anchors and aliases`__ to define a *template* for our
-coordinator nodes and worker nodes, and then apply that template to the
-actual nodes.
+We use `YAML anchors and aliases`__ to define templates for the coordinator
+and each worker group, then apply them to the named services.  Each service
+sets its own ``hostname:`` — ``pg_autoctl node run`` uses the container
+hostname as the node name when ``name`` is not set in the ini file.
 
 __ https://yaml101.com/anchors-and-aliases/
 
-Also this time we provision an application service (named "app") that sits
-in the background and allow us to later connect to our current primary
-coordinator. See :download:`Dockerfile.app <citus/Dockerfile.app>` for the
-complete definition of this service.
+Also this time we provision an application service (``app``) that sits in
+the background and allows us to connect to the current primary coordinator.
+See :download:`Dockerfile.app <citus/Dockerfile.app>` for its definition.
 
-We start this cluster with a simplified command line this time:
+We start this cluster with:
 
 ::
 
@@ -474,13 +493,15 @@ makes it simple to introduce faults and see how the pg_auto_failover High
 Availability reacts to those faults.
 
 One obvious missing element to better test the system is the lack of
-persistent volumes in our docker compose based test rig. It is possible to
+persistent volumes in our docker compose based test rig.  It is possible to
 create external volumes and use them for each node in the docker compose
-definition. This allows restarting nodes over the same data set.
+definition, allowing nodes to restart over the same data set.
 
-See the command :ref:`pg_autoctl_do_tmux_compose_session` for more details
-about how to run a docker compose test environment with docker compose,
-including external volumes for each node.
+For production Kubernetes deployments, the same ini files work as
+ConfigMaps: bind-mount them alongside a persistent volume claim for
+``/tmp/pgaf`` and use ``pg_autoctl node run`` as the container command.
+See :ref:`pg_autoctl_node` for the full property reference and
+:ref:`container-and-kubernetes-deployments` for production patterns.
 
 Now is a good time to go read `Citus Documentation`__ too, so that you know
 how to use this cluster you just created!

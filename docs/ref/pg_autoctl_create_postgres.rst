@@ -370,3 +370,11 @@ XDG_DATA_HOME
   Base Directory Specification`__.
 
   __ https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
+
+See Also
+--------
+
+:ref:`pg_autoctl_node_run` provides a declarative alternative to this
+command: describe the node once in a ``pg_autoctl_node.ini`` file and run
+``pg_autoctl node run`` — it creates the node if absent and starts the
+supervisor in one step.  See :ref:`pg_autoctl_node` for the full reference.

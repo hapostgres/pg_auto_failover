@@ -59,6 +59,10 @@ you can manually run the following command on every node::
 
   $ pg_autoctl run
 
+For container and Kubernetes deployments, :ref:`pg_autoctl_node_run`
+combines the create and run steps into a single command driven by a
+``pg_autoctl_node.ini`` file — see :ref:`pg_autoctl_node` for details.
+
 It is also possible (and recommended) to integrate the pg_auto_failover
 service in your usual service management facility. When using **systemd**
 the following commands can be used to produce the unit file configuration
