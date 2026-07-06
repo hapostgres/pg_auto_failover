@@ -114,7 +114,8 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(replicationQuorumStr),
 								   replicationQuorumStr, "true"),
 
-		/* [options] — immutable, used only at create time */
+		/* [options] — ssl is mutable (applied via `pg_autoctl enable ssl`);
+		             auth and pg_hba_lan are create-time only */
 		make_strbuf_option_default("options", "ssl", NULL, false,
 								   sizeof(spec->ssl), spec->ssl,
 								   "self-signed"),
@@ -683,15 +684,17 @@ nodespec_write_to_path(const NodeSpec *spec, const char *path)
  * nodespec_apply compares new_spec against old_spec and applies any changes
  * to the mutable fields by calling into the keeper / monitor APIs.
  *
- * Currently mutable fields:
- *   - candidate_priority   → monitor_set_node_candidate_priority()
- *   - replication_quorum   → monitor_set_node_replication_quorum()
+ * Mutable fields:
+ *   - candidate_priority   → pg_autoctl set node candidate-priority
+ *   - replication_quorum   → pg_autoctl set node replication-quorum
+ *   - ssl / ssl_*_file     → pg_autoctl enable ssl
+ *
+ * Immutable fields (kind, pgdata, hostname, port, monitor_pguri,
+ * auth, pg_hba_lan) require a node restart to take effect.
  *
  * The [launch] mode field is handled separately by pg_autoctl node start.
  * Applying a spec with mode=deferred to an already-started node is a
  * non-fatal warning (ignored).
- *
- * Immutable fields (kind, pgdata, ssl, auth, pg_hba_lan) are not checked here.
  */
 bool
 nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
@@ -750,6 +753,69 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 			changed = true;
 		}
 		free_program(&prog);
+	}
+
+	/*
+	 * SSL mode or certificate paths changed: call `pg_autoctl enable ssl`
+	 * with the appropriate flags so Postgres is reconfigured live.
+	 *
+	 * ssl=off maps to --no-ssl; ssl=self-signed maps to --ssl-self-signed;
+	 * anything else is a CA-verified mode and requires the cert paths.
+	 */
+	{
+		bool ssl_changed =
+			(strcmp(new_spec->ssl, old_spec->ssl) != 0) ||
+			(strcmp(new_spec->ssl_ca_file, old_spec->ssl_ca_file) != 0) ||
+			(strcmp(new_spec->ssl_cert_file, old_spec->ssl_cert_file) != 0) ||
+			(strcmp(new_spec->ssl_key_file, old_spec->ssl_key_file) != 0);
+
+		if (ssl_changed)
+		{
+			Program prog;
+
+			if (strcmp(new_spec->ssl, "off") == 0)
+			{
+				prog = run_program(pg_autoctl_program,
+								   "enable", "ssl",
+								   "--pgdata", new_spec->pgdata,
+								   "--no-ssl", NULL);
+			}
+			else if (strcmp(new_spec->ssl, "self-signed") == 0 ||
+					 IS_EMPTY_STRING_BUFFER(new_spec->ssl_ca_file))
+			{
+				prog = run_program(pg_autoctl_program,
+								   "enable", "ssl",
+								   "--pgdata", new_spec->pgdata,
+								   "--ssl-self-signed", NULL);
+			}
+			else
+			{
+				prog = run_program(pg_autoctl_program,
+								   "enable", "ssl",
+								   "--pgdata", new_spec->pgdata,
+								   "--ssl-mode", new_spec->ssl,
+								   "--ssl-ca-file", new_spec->ssl_ca_file,
+								   "--server-cert", new_spec->ssl_cert_file,
+								   "--server-key", new_spec->ssl_key_file,
+								   NULL);
+			}
+
+			if (prog.returnCode != 0)
+			{
+				log_warn("nodespec_apply: enable ssl failed (rc=%d)",
+						 prog.returnCode);
+				if (prog.stdOut)
+				{
+					log_warn("%s", prog.stdOut);
+				}
+			}
+			else
+			{
+				log_info("nodespec: applied ssl = %s", new_spec->ssl);
+				changed = true;
+			}
+			free_program(&prog);
+		}
 	}
 
 	/* immediate → deferred on an already-started node: non-fatal, ignored */

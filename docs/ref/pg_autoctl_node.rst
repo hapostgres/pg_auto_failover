@@ -10,7 +10,7 @@ Synopsis
 
 ``pg_autoctl node`` manages the full lifecycle of a pg_auto_failover node —
 creation, startup, and live reconfiguration — driven by a single
-``pg_autoctl_node.ini`` file rather than long sequences of flags::
+``pg_autoctl_node.ini`` file rather than long sequences of command-line flags::
 
     pg_autoctl node
       run    Create (if needed) and run a node described by a pg_autoctl_node.ini file
@@ -27,23 +27,17 @@ creation, startup, and live reconfiguration — driven by a single
 Description
 -----------
 
-``pg_autoctl node`` is the recommended entry point for container and
-Kubernetes environments. The complete node description lives in one ini file
-that can be version-controlled, templated, and mounted into a container.
-
-A single command starts the node from scratch or resumes an existing one::
-
-    pg_autoctl node run /etc/pgaf/node.ini
-
-This makes ``pg_autoctl node run`` a natural ``CMD`` or ``command:`` for a
-Docker or Kubernetes workload — the same image and the same entry-point
-work for every node type (monitor, primary, standby, Citus coordinator,
-Citus worker). Per-node differences live entirely in the mounted ini file.
+``pg_autoctl node run <file>`` is the recommended entry-point for container
+and Kubernetes deployments.  The complete node description lives in one ini
+file that can be version-controlled, templated, and bind-mounted into a
+container.  The same image and the same entry-point work for every node type
+(monitor, primary, standby, Citus coordinator, Citus worker); per-node
+differences live entirely in the mounted ini file.
 
 The ``pg_autoctl_node.ini`` File
 --------------------------------
 
-The file uses ``.ini`` sections. A typical data node::
+The file uses ``.ini`` sections.  A typical data node::
 
     [node]
     kind     = postgres
@@ -65,16 +59,16 @@ The file uses ``.ini`` sections. A typical data node::
     replication_quorum = true
 
     [options]
-    ssl     = self-signed
-    auth    = trust
+    ssl        = self-signed
+    auth       = trust
     pg_hba_lan = true
 
-A monitor node omits ``[monitor]`` entirely (or leaves ``pguri`` empty)::
+A monitor node omits ``[monitor]`` entirely::
 
     [node]
-    kind = monitor
+    kind     = monitor
     hostname = monitor.internal
-    port = 5432
+    port     = 5432
 
     [postgresql]
     pgdata = /var/lib/postgresql/monitor
@@ -82,157 +76,219 @@ A monitor node omits ``[monitor]`` entirely (or leaves ``pguri`` empty)::
     [formation default]
     kind = pgsql
 
-Section reference
-~~~~~~~~~~~~~~~~~
+Section and Property Reference
+-------------------------------
 
-``[node]``
-    ``kind`` — one of ``postgres``, ``monitor``, ``coordinator``, ``worker``.
-    ``name``, ``hostname``, ``port``.
+The table below lists every property, its section, whether it can be changed
+on a running node without a restart, and its default value.
 
-``[postgresql]``
-    ``pgdata`` — path to the Postgres data directory.
+.. list-table::
+   :widths: 18 14 8 12 48
+   :header-rows: 1
 
-``[monitor]``
-    ``pguri`` — connection string to the pg_auto_failover monitor.
-    ``no_monitor = true`` for :ref:`disabled-monitor` mode.
-    ``node_id`` — required with ``no_monitor``.
+   * - Section / Property
+     - Type
+     - Mutable
+     - Default
+     - Description
+   * - **[node]**
+     -
+     -
+     -
+     -
+   * - ``kind``
+     - string
+     - No
+     - —
+     - Node role: ``postgres``, ``monitor``, ``coordinator``, or ``worker``
+   * - ``name``
+     - string
+     - No
+     - hostname
+     - Human-readable node name shown in ``pg_autoctl show state``
+   * - ``hostname``
+     - string
+     - No
+     - auto-detected
+     - Address other nodes use to reach this node
+   * - ``port``
+     - integer
+     - No
+     - 5432
+     - Postgres port number
+   * - **[postgresql]**
+     -
+     -
+     -
+     -
+   * - ``pgdata``
+     - path
+     - No
+     - —
+     - Path to the Postgres data directory
+   * - **[monitor]**
+     -
+     -
+     -
+     -
+   * - ``pguri``
+     - connstring
+     - No
+     - —
+     - Connection string to the pg_auto_failover monitor. Empty for monitor nodes.
+   * - ``no_monitor``
+     - boolean
+     - No
+     - false
+     - Set ``true`` for :ref:`pg_autoctl_disable_monitor` (standalone) mode
+   * - ``node_id``
+     - integer
+     - No
+     - —
+     - Required with ``no_monitor = true``
+   * - **[formation]**
+     -
+     -
+     -
+     -
+   * - ``name``
+     - string
+     - No
+     - default
+     - Formation name
+   * - ``group``
+     - integer
+     - No
+     - 0
+     - Citus group id (0 = coordinator)
+   * - **[settings]** *(applied live without restart)*
+     -
+     -
+     -
+     -
+   * - ``candidate_priority``
+     - integer 0–100
+     - **Yes**
+     - 50
+     - Failover weight.  0 means never promote this node.
+   * - ``replication_quorum``
+     - boolean
+     - **Yes**
+     - true
+     - Whether this node participates in the synchronous replication quorum
+   * - **[options]**
+     -
+     -
+     -
+     -
+   * - ``ssl``
+     - string
+     - **Yes**
+     - self-signed
+     - SSL mode: ``self-signed``, ``verify-ca``, ``verify-full``, or ``off``.
+       Changes call ``pg_autoctl enable ssl`` on the running node.
+   * - ``auth``
+     - string
+     - No
+     - trust
+     - Authentication method written into ``pg_hba.conf`` at create time:
+       ``trust``, ``md5``, ``scram``, or ``cert``
+   * - ``pg_hba_lan``
+     - boolean
+     - No
+     - true
+     - Add LAN-range entries to ``pg_hba.conf`` at create time
+   * - **[ssl]** *(for ``verify-ca`` / ``verify-full`` modes; applied live)*
+     -
+     -
+     -
+     -
+   * - ``ca_file``
+     - path
+     - **Yes**
+     - —
+     - Path to the CA certificate file (``ssl_ca_file`` in postgresql.conf)
+   * - ``cert_file``
+     - path
+     - **Yes**
+     - —
+     - Path to the server certificate (``ssl_cert_file``)
+   * - ``key_file``
+     - path
+     - **Yes**
+     - —
+     - Path to the server private key (``ssl_key_file``)
+   * - **[launch]** *(optional)*
+     -
+     -
+     -
+     -
+   * - ``mode``
+     - string
+     - —
+     - immediate
+     - ``deferred``: hold the node in a wait loop until ``pg_autoctl node start``
+       writes ``immediate``.  Useful for ordered startup in compose or k8s.
+   * - **[formation <name>]** *(monitor kind only, repeat for each extra formation)*
+     -
+     -
+     -
+     -
+   * - ``kind``
+     - string
+     - No
+     - pgsql
+     - Formation kind: ``pgsql`` or ``citus``
 
-``[formation]``
-    ``name`` — formation name, default ``"default"``.
-    ``group`` — Citus group id (0 = coordinator).
+Additional sections for passwords (kept out of the main ini where possible):
 
-``[settings]``  *(mutable — changes take effect without restart)*
-    ``candidate_priority`` — failover weight 0–100, default 50.
-    ``replication_quorum`` — sync quorum participant, default ``true``.
+``[pg_auto_failover]``
+    ``autoctl_node_password`` — password for the ``pgautofailover_monitor`` role
+    (monitor nodes), or the ``autoctl_node`` role (data nodes).
 
-``[options]``  *(create-time only — ignored on restart)*
-    ``ssl`` — ``self-signed``, ``verify-ca``, ``verify-full``, or ``off``.
-    ``auth`` — ``trust``, ``md5``, ``scram``, or ``cert``.
-    ``pg_hba_lan`` — add LAN-range entries to ``pg_hba.conf``.
+``[replication]``
+    ``replication_password`` — password for the ``pgautofailover_replicator`` role.
 
-``[ssl]``  *(for ``verify-ca`` / ``verify-full`` modes)*
-    ``ssl_ca_file``, ``ssl_cert_file``, ``ssl_key_file``.
-
-``[launch]``  *(optional — for ordered startup)*
-    ``mode = deferred`` — hold the node in a wait loop until
-    ``pg_autoctl node start`` writes ``mode = immediate``.
-    Useful in orchestrators that need fine-grained control over
-    the order in which nodes join the formation.
-
-``[formation <name>]``  *(monitor kind only — repeat for each non-default formation)*
-    ``kind`` — ``pgsql`` (default) or ``citus``.
+``[citus]``
+    ``role = secondary`` and ``cluster_name`` for Citus secondary clusters.
 
 Live Reconfiguration
 --------------------
 
 The supervisor that ``pg_autoctl node run`` exec's into watches the ini file
-for changes. When it detects a write (via inotify on Linux, mtime polling
-elsewhere) it re-reads the ``[settings]`` section and applies any changes
-without restarting the node or interrupting replication.
+for changes.  When it detects a write it re-reads the file and converges any
+**mutable** fields without restarting the node or interrupting replication:
 
-Fields that are **mutable** and applied live:
+``candidate_priority`` and ``replication_quorum``
+    Applied by calling ``pg_autoctl set node`` against the running node.
 
-- ``candidate_priority``
-- ``replication_quorum``
+``ssl``, ``ca_file``, ``cert_file``, ``key_file``
+    Applied by calling ``pg_autoctl enable ssl`` with the appropriate flags.
+    Postgres reloads its SSL configuration without a full restart.
 
-Fields that are **immutable** (require a node restart to take effect):
-``kind``, ``pgdata``, ``hostname``, ``port``, ``monitor.pguri``, all
-``[options]`` and ``[ssl]`` values.
+Changing an **immutable** field (``kind``, ``pgdata``, ``hostname``, ``port``,
+``monitor.pguri``, ``auth``, ``pg_hba_lan``) while the node is running is
+logged as a warning; the value takes effect the next time the node is started.
 
-Changing an immutable field while the node is running is logged as a warning;
-the new value will take effect the next time the node is started.
+The ``launch = deferred`` Pattern
+----------------------------------
 
-Docker and Kubernetes Usage
----------------------------
+::
 
-The fixed default path ``/etc/pgaf/node.ini`` lets every container image
-use the same entry-point::
+    [launch]
+    mode = deferred
 
-    CMD ["pg_autoctl", "node", "run", "/etc/pgaf/node.ini"]
+A node configured with ``mode = deferred`` starts a polling loop and waits.
+A sidecar container or init script then calls::
 
-Per-node configuration is then a bind-mount (Docker) or a ConfigMap
-volume (Kubernetes), keeping the image itself fully generic.
+    pg_autoctl node start /etc/pgaf/node.ini
 
-**Docker Compose example:**
-
-.. code-block:: yaml
-
-    services:
-      monitor:
-        image: hapostgres/pg_auto_failover:latest
-        volumes:
-          - ./config/monitor.ini:/etc/pgaf/node.ini:ro
-        command: ["pg_autoctl", "node", "run", "/etc/pgaf/node.ini"]
-
-      node1:
-        image: hapostgres/pg_auto_failover:latest
-        volumes:
-          - node1-data:/var/lib/postgresql/data
-          - ./config/node1.ini:/etc/pgaf/node.ini:ro
-        command: ["pg_autoctl", "node", "run", "/etc/pgaf/node.ini"]
-        depends_on: [monitor]
-
-      node2:
-        image: hapostgres/pg_auto_failover:latest
-        volumes:
-          - node2-data:/var/lib/postgresql/data
-          - ./config/node2.ini:/etc/pgaf/node.ini:ro
-        command: ["pg_autoctl", "node", "run", "/etc/pgaf/node.ini"]
-        depends_on: [monitor]
-
-    volumes:
-      node1-data:
-      node2-data:
-
-To promote ``node2`` to a higher failover priority without restarting it,
-edit ``node2.ini`` and change ``candidate_priority = 80``, then write the
-file. The supervisor picks up the change within seconds.
-
-**Kubernetes StatefulSet example:**
-
-.. code-block:: yaml
-
-    apiVersion: apps/v1
-    kind: StatefulSet
-    metadata:
-      name: pg-node
-    spec:
-      replicas: 2
-      template:
-        spec:
-          containers:
-          - name: pg-autoctl
-            image: hapostgres/pg_auto_failover:latest
-            command: ["pg_autoctl", "node", "run", "/etc/pgaf/node.ini"]
-            volumeMounts:
-            - name: node-spec
-              mountPath: /etc/pgaf
-          volumes:
-          - name: node-spec
-            configMap:
-              name: pg-autoctl-node-spec
-
-Updating the ConfigMap triggers the supervisor's file watcher and mutable
-settings converge automatically; immutable changes require a pod restart.
-
-Relationship to ``pg_autoctl create`` and ``pg_autoctl run``
-------------------------------------------------------------
-
-``pg_autoctl node run`` is a thin layer on top of the existing machinery —
-it translates the ini file into the same flags and exec's into the same
-supervisor that ``pg_autoctl create ... --run`` or ``pg_autoctl run`` would
-start. There is no hidden API: every behaviour described here maps directly
-to documented ``pg_autoctl`` operations.
-
-You can always switch between approaches:
-
-- Use ``pg_autoctl node show --pgdata <dir>`` to generate an ini file from
-  an existing node that was created with ``pg_autoctl create``.
-- Use ``pg_autoctl create`` and ``pg_autoctl run`` directly when you prefer
-  explicit flag-based management.
-
-Both approaches share the same state files, configuration, and monitor
-protocol — only the entry point differs.
+which rewrites the ini file with ``mode = immediate``.  The waiting node
+detects the change within the poll interval and proceeds to create or run.
+This enables ordered startup without an external orchestrator: the monitor
+container can be given ``mode = immediate`` while all data nodes start with
+``mode = deferred``, and each data node is released with ``node start`` only
+after the monitor is confirmed ready.
 
 See Also
 --------

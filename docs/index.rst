@@ -71,12 +71,6 @@ __ https://github.com/hapostgres/pg_auto_failover
 
 .. toctree::
    :hidden:
-   :caption: Container and Kubernetes
-
-   ref/pg_autoctl_node
-
-.. toctree::
-   :hidden:
    :caption: Operations
 
    operations
