@@ -106,6 +106,13 @@ systemd itself, as it might be that a failover has been done during a
 reboot, for instance, and that once the reboot complete we want the local
 Postgres to re-join as a secondary node where it used to be a primary node.
 
+For container and Kubernetes deployments, systemd is not used.  Instead,
+:ref:`pg_autoctl_node_run` acts as PID 1: it creates the node if absent,
+then exec's into the supervisor.  The standard Unix signal contract
+(``SIGTERM`` to stop, ``SIGHUP`` to reload) is preserved because the
+supervisor becomes the direct child process.  See :ref:`pg_autoctl_node`
+for the full reference.
+
 
 Building pg_auto_failover from sources
 --------------------------------------

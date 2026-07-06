@@ -57,6 +57,16 @@ To create a cluster we use the following docker compose definition:
    :emphasize-lines: 5,15,27
    :linenos:
 
+.. note::
+
+   The Compose file above uses the imperative ``pg_autoctl create
+   coordinator/worker --run`` form to keep the tutorial self-contained.  For
+   production container deployments the recommended approach is
+   :ref:`pg_autoctl_node_run`: each node is described in a
+   ``pg_autoctl_node.ini`` file (with ``kind = coordinator`` or
+   ``kind = worker``) and ``pg_autoctl node run`` handles both creation and
+   startup in one step.  See :ref:`pg_autoctl_node` for the full reference.
+
 To run the full Citus cluster with HA from this definition, we can use the
 following command:
 
