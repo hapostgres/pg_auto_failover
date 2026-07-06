@@ -55,3 +55,4 @@ valgrind/
 *.tmp
 src/bin/pgaftest/test_spec_parse.tab.*
 src/bin/pgaftest/test_spec_parse.output
+src/bin/pgaftest/pgaftest
