@@ -3582,22 +3582,56 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 
 	if (withTmux)
 	{
-		/* Launch tmux with compose logs + pg_autoctl watch */
-		log_info("Starting tmux session for project %s", r.projectName);
+		/*
+		 * Pick the first non-deferred data node as the interactive shell
+		 * target.  Falls back to the monitor if no data node is found.
+		 */
+		const char *shellNode = r.activeMonitorService;
+
+		for (int fi = 0; fi < spec->cluster.formationCount; fi++)
+		{
+			const TestFormation *form = &spec->cluster.formations[fi];
+
+			for (int ni = 0; ni < form->nodeCount; ni++)
+			{
+				const TestNode *n = &form->nodes[ni];
+
+				if (!n->launchDeferred)
+				{
+					shellNode = n->name;
+					fi = spec->cluster.formationCount; /* break outer loop */
+					break;
+				}
+			}
+		}
+
+		/*
+		 * Build a three-pane tmux session:
+		 *   top    — docker compose logs -f
+		 *   middle — pg_autoctl watch on the monitor
+		 *   bottom — interactive bash in the first data node
+		 *
+		 * Created detached first, then immediately attached so the current
+		 * terminal lands inside the session.
+		 */
+		log_info("Starting tmux session \"%s\" (shell target: %s)",
+				 r.projectName, shellNode);
+
 		run_cmd(
 			"tmux new-session -d -s %s "
 			"\"%s logs -f\" \\; "
 			"split-window -v "
-			"\"%s exec monitor pg_autoctl watch\" \\; "
-			"split-window -v \\; "
+			"\"%s exec %s pg_autoctl watch\" \\; "
+			"split-window -v "
+			"\"%s exec -it %s bash\" \\; "
 			"select-layout even-vertical",
 			r.projectName,
 			r.composeBase,
-			r.composeBase);
+			r.composeBase, r.activeMonitorService,
+			r.composeBase, shellNode);
 
-		printf("Cluster ready. Attach with: tmux attach -t %s\n",
-			   r.projectName);
-		printf("Tear down with: pgaftest down --work-dir %s\n", workDir);
+		/* Attach the current terminal into the session. */
+		run_cmd("tmux attach-session -t %s", r.projectName);
 	}
 	else
 	{
