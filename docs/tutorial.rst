@@ -251,12 +251,23 @@ Editing the replication settings while in production
 
 Because node3 uses the same ``postgres.ini`` as node1 and node2, its
 ``candidate_priority`` starts at ``50``.  To make node3 a read-only standby
-that is never promoted, edit ``tutorial/ini/postgres.ini`` — or better,
-since we want to change only node3, create a dedicated ini file for it:
+that is never promoted there are two ways to proceed.
+
+**Direct command** — takes effect immediately on the running cluster::
+
+   $ docker compose exec node3 pg_autoctl set candidate-priority 0 --name node3
+
+This reaches into the running supervisor and updates the setting on the
+monitor in one step.  It is the fastest option when you need an immediate
+change on a live cluster.
+
+**Declarative ini file** — the persistent, version-controlled option.
+Because node3 shares ``postgres.ini`` with the other two nodes, you first
+create a dedicated ini file for it:
 
 .. code-block:: ini
 
-   # tutorial/ini/node3.ini  (same as postgres.ini, different candidate_priority)
+   # tutorial/ini/node3.ini
    [node]
    kind = postgres
    port = 5432
@@ -276,8 +287,8 @@ since we want to change only node3, create a dedicated ini file for it:
    auth       = trust
    pg_hba_lan = true
 
-Update the ``node3`` service in ``docker-compose.yml`` to mount this file
-instead::
+Then update the ``node3`` service in ``docker-compose.yml`` to mount this
+file instead of the shared one::
 
    node3:
      <<: *node
@@ -286,8 +297,27 @@ instead::
        - /var/lib/postgres
        - ./ini/node3.ini:/etc/pgaf/node.ini:ro
 
-The running supervisor on node3 detects the file change and applies the new
-``candidate_priority`` live — no restart required.  Verify with:
+Changing the ``volumes:`` list requires recreating the container — Docker
+cannot swap a bind mount into a running container.  Run::
+
+   $ docker compose up -d node3
+
+Docker Compose stops node3, recreates it with the new mount, and starts it
+again.  ``pg_autoctl node run`` detects that the Postgres cluster already
+exists inside the volume, reads ``node3.ini``, and calls ``pg_autoctl node
+apply`` before exec'ing into the supervisor.  The apply step calls
+``pg_autoctl set node candidate-priority 0``, registering the change on the
+monitor.  node3 rejoins the formation as a secondary within a few seconds.
+
+.. note::
+
+   Once node3 has its own ini file mounted, any further edits to
+   ``tutorial/ini/node3.ini`` on the host are picked up live by the running
+   supervisor — Docker bind mounts reflect host-side writes immediately, and
+   the supervisor's file watcher applies mutable fields (``candidate_priority``,
+   ``replication_quorum``, ``ssl``) without restarting the container.
+
+Verify with:
 
 ::
 
