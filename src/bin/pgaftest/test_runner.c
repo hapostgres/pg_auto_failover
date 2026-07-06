@@ -958,7 +958,21 @@ monitor_wait_formation_states(TestRunner *r,
 			 * but the monitor's current-state query still reflects reality.
 			 */
 			++pollCounter;
-			if (allSatisfied || (pollCounter % 5 == 0))
+
+			/*
+			 * When notifications say we converged, trust them — return
+			 * immediately without a subprocess double-check.  The double-check
+			 * races with fast post-convergence transitions: by the time the
+			 * subprocess queries the monitor the nodes may have already moved
+			 * on, producing a false negative that causes a 120s timeout.
+			 *
+			 * The periodic (every ~25s) subprocess poll remains as a fallback
+			 * for missed notifications (e.g. the LISTEN reconnect after a
+			 * monitor Postgres restart in the upgrade test).
+			 */
+			if (allSatisfied)
+				return true;
+			if (pollCounter % 5 == 0)
 			{
 				if (monitor_check_formation_converged(r, states, stateCount,
 				                                      groupIds, groupCount))
