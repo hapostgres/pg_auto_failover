@@ -1744,6 +1744,18 @@ cli_pg_autoctl_reload(const char *pidfile)
 {
 	pid_t pid;
 
+	/*
+	 * Ignore SIGHUP in this process before sending it to the daemon.  The
+	 * daemon's supervisor_reload_services() broadcasts SIGHUP to all its
+	 * service children.  A freshly exec'd one-shot command can share a PID
+	 * with a recently-exited service (PID reuse), and since one-shot
+	 * commands don't install a SIGHUP handler, the default disposition
+	 * (terminate) would kill us before we even return.  SIG_IGN is safe
+	 * here because all callers are one-shot CLI commands that exit shortly
+	 * after this call anyway.
+	 */
+	signal(SIGHUP, SIG_IGN);
+
 	if (read_pidfile(pidfile, &pid))
 	{
 		if (pid <= 0)
