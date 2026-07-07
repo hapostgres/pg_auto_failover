@@ -15,6 +15,8 @@
 #include <sys/select.h>
 #include <sys/stat.h>
 
+#include "file_utils.h"
+#include "string_utils.h"
 #include "log.h"
 #include "compose_gen.h"
 
@@ -52,7 +54,7 @@ run_cmd(const char *fmt, ...)
 	char cmd[4096];
 	va_list ap;
 	va_start(ap, fmt);
-	vsnprintf(cmd, sizeof(cmd), fmt, ap);
+	pg_vsnprintf(cmd, sizeof(cmd), fmt, ap);
 	va_end(ap);
 
 	log_debug("$ %s", cmd);
@@ -67,7 +69,7 @@ run_cmd_capture(char *buf, int buflen, const char *fmt, ...)
 	char cmd[4096];
 	va_list ap;
 	va_start(ap, fmt);
-	vsnprintf(cmd, sizeof(cmd), fmt, ap);
+	pg_vsnprintf(cmd, sizeof(cmd), fmt, ap);
 	va_end(ap);
 
 	log_debug("$ %s", cmd);
@@ -111,7 +113,7 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 	 * authoritative (the container is invoked with /spec.pgaf which would
 	 * otherwise yield "spec").  On the host, derive from the spec filename.
 	 */
-	const char *envProject = getenv("COMPOSE_PROJECT_NAME");
+	const char *envProject = getenv("COMPOSE_PROJECT_NAME"); /* IGNORE-BANNED */
 	if (envProject && *envProject)
 	{
 		strlcpy(r->projectName, envProject, sizeof(r->projectName));
@@ -128,16 +130,16 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 		}
 	}
 
-	snprintf(r->workDir, sizeof(r->workDir), "%s", workDir);
-	snprintf(r->composeFile, sizeof(r->composeFile),
-			 "%s/docker-compose.yml", workDir);
+	sformat(r->workDir, sizeof(r->workDir), "%s", workDir);
+	sformat(r->composeFile, sizeof(r->composeFile),
+			"%s/docker-compose.yml", workDir);
 
 	/*
 	 * Inside the compose network the compose file lives on the HOST filesystem
 	 * and is not accessible from the container.  Docker Compose v2 can exec
 	 * into a running project by project-name alone; omit -f in that case.
 	 */
-	if (getenv("PGAFTEST_COMPOSE_SERVICE"))
+	if (getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
 	{
 		/*
 		 * Inside the pgaftest container, the compose file lives on the HOST
@@ -145,23 +147,23 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 		 * container so Docker daemon can find it).  Use -f to point Docker
 		 * Compose at it so that `up -d` can create new containers.
 		 */
-		const char *hostWorkDir = getenv("PGAFTEST_HOST_WORK_DIR");
+		const char *hostWorkDir = getenv("PGAFTEST_HOST_WORK_DIR"); /* IGNORE-BANNED */
 		if (hostWorkDir && hostWorkDir[0])
 		{
-			snprintf(r->composeBase, sizeof(r->composeBase),
-					 "docker compose -p %s -f %s/docker-compose.yml",
-					 r->projectName, hostWorkDir);
+			sformat(r->composeBase, sizeof(r->composeBase),
+					"docker compose -p %s -f %s/docker-compose.yml",
+					r->projectName, hostWorkDir);
 		}
 		else
 		{
-			snprintf(r->composeBase, sizeof(r->composeBase),
-					 "docker compose -p %s", r->projectName);
+			sformat(r->composeBase, sizeof(r->composeBase),
+					"docker compose -p %s", r->projectName);
 		}
 	}
 	else
 	{
-		snprintf(r->composeBase, sizeof(r->composeBase),
-				 "docker compose -p %s -f %s", r->projectName, r->composeFile);
+		sformat(r->composeBase, sizeof(r->composeBase),
+				"docker compose -p %s -f %s", r->projectName, r->composeFile);
 	}
 
 	/* build context = directory from which pgaftest was invoked */
@@ -178,8 +180,8 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 	}
 	else
 	{
-		snprintf(r->specFile, sizeof(r->specFile), "%s/%s",
-				 r->contextDir, spec->filename);
+		sformat(r->specFile, sizeof(r->specFile), "%s/%s",
+				r->contextDir, spec->filename);
 	}
 
 	/* Start with the primary monitor as the active target. */
@@ -198,9 +200,9 @@ tap_buf(TestRunner *r, const char *fmt, ...)
 {
 	va_list ap;
 	va_start(ap, fmt);
-	int n = vsnprintf(r->tapBuffer + r->tapBufferLen,
-					  sizeof(r->tapBuffer) - r->tapBufferLen,
-					  fmt, ap);
+	int n = pg_vsnprintf(r->tapBuffer + r->tapBufferLen,
+						 sizeof(r->tapBuffer) - r->tapBufferLen,
+						 fmt, ap);
 	va_end(ap);
 	if (n > 0)
 	{
@@ -213,7 +215,7 @@ tap_buf(TestRunner *r, const char *fmt, ...)
 static void
 tap_plan(TestRunner *r)
 {
-	printf("1..%d\n", r->tapTotal);
+	fformat(stdout, "1..%d\n", r->tapTotal);
 	if (r->tapBufferLen > 0)
 	{
 		fwrite(r->tapBuffer, 1, r->tapBufferLen, stdout);
@@ -248,9 +250,9 @@ tap_diag(const char *fmt, ...)
 	char buf[1024];
 	va_list ap;
 	va_start(ap, fmt);
-	vsnprintf(buf, sizeof(buf), fmt, ap);
+	pg_vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);
-	printf("# %s\n", buf);
+	fformat(stdout, "# %s\n", buf);
 	fflush(stdout);
 }
 
@@ -293,7 +295,7 @@ runner_compose_generate(TestRunner *r)
 	 * makes sense for the in-compose CI mode where `docker compose up
 	 * --exit-code-from pgaftest` drives the whole run.  Pass NULL to omit it.
 	 */
-	const char *specFileForCompose = getenv("PGAFTEST_COMPOSE_SERVICE")
+	const char *specFileForCompose = getenv("PGAFTEST_COMPOSE_SERVICE") /* IGNORE-BANNED */
 									 ? r->specFile : NULL;
 
 	if (!compose_gen_write(&r->spec->cluster,
@@ -439,7 +441,7 @@ runner_compose_down(TestRunner *r)
 	 * "compose down" sends SIGKILL to our own container, so skip it — the host
 	 * runner already calls "compose down" after we exit.
 	 */
-	if (getenv("PGAFTEST_COMPOSE_SERVICE"))
+	if (getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
 	{
 		r->composeUp = false;
 		return true;
@@ -545,9 +547,9 @@ static bool
 get_node_pgdata(TestRunner *r, const char *nodeName, char *pgdata, int len)
 {
 	char iniPath[1280];
-	snprintf(iniPath, sizeof(iniPath), "%s/%s.ini", r->workDir, nodeName);
+	sformat(iniPath, sizeof(iniPath), "%s/%s.ini", r->workDir, nodeName);
 
-	FILE *f = fopen(iniPath, "r");
+	FILE *f = fopen(iniPath, "r"); /* IGNORE-BANNED */
 	if (!f)
 	{
 		return false;
@@ -629,7 +631,10 @@ monitor_get_node_health(TestRunner *r, const char *nodeName,
 	*p2 = '\0';
 	strlcpy(goal, p1 + 1, goallen);
 
-	*health = atoi(p2 + 1);
+	if (!stringToInt(p2 + 1, health))
+	{
+		return false;
+	}
 	return true;
 }
 
@@ -732,7 +737,7 @@ runner_notify_connect(TestRunner *r)
 
 	char connstr[512];
 
-	if (getenv("PGAFTEST_COMPOSE_SERVICE"))
+	if (getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
 	{
 		/*
 		 * Inside the compose network: connect directly via the monitor service
@@ -741,17 +746,17 @@ runner_notify_connect(TestRunner *r)
 		 */
 		if (cl->monitorPassword[0])
 		{
-			snprintf(connstr, sizeof(connstr),
-					 "host=%s port=5432 dbname=pg_auto_failover "
-					 "user=autoctl_node password=%s connect_timeout=5",
-					 svc, cl->monitorPassword);
+			sformat(connstr, sizeof(connstr),
+					"host=%s port=5432 dbname=pg_auto_failover "
+					"user=autoctl_node password=%s connect_timeout=5",
+					svc, cl->monitorPassword);
 		}
 		else
 		{
-			snprintf(connstr, sizeof(connstr),
-					 "host=%s port=5432 dbname=pg_auto_failover "
-					 "user=autoctl_node connect_timeout=5",
-					 svc);
+			sformat(connstr, sizeof(connstr),
+					"host=%s port=5432 dbname=pg_auto_failover "
+					"user=autoctl_node connect_timeout=5",
+					svc);
 		}
 	}
 	else
@@ -765,19 +770,19 @@ runner_notify_connect(TestRunner *r)
 		}
 		if (cl->monitorPassword[0])
 		{
-			snprintf(connstr, sizeof(connstr),
-					 "host=localhost port=%d dbname=pg_auto_failover "
-					 "user=autoctl_node password=%s "
-					 "connect_timeout=5",
-					 port, cl->monitorPassword);
+			sformat(connstr, sizeof(connstr),
+					"host=localhost port=%d dbname=pg_auto_failover "
+					"user=autoctl_node password=%s "
+					"connect_timeout=5",
+					port, cl->monitorPassword);
 		}
 		else
 		{
-			snprintf(connstr, sizeof(connstr),
-					 "host=localhost port=%d dbname=pg_auto_failover "
-					 "user=autoctl_node "
-					 "connect_timeout=2",
-					 port);
+			sformat(connstr, sizeof(connstr),
+					"host=localhost port=%d dbname=pg_auto_failover "
+					"user=autoctl_node "
+					"connect_timeout=2",
+					port);
 		}
 	}
 
@@ -1207,7 +1212,7 @@ wait_for_states(TestRunner *r, TestCmd *cmd)
 		for (int i = 0; i < cmd->waitGroupCount; i++)
 		{
 			char g[16];
-			snprintf(g, sizeof(g), "%s%d", i > 0 ? "," : "", cmd->waitGroups[i]);
+			sformat(g, sizeof(g), "%s%d", i > 0 ? "," : "", cmd->waitGroups[i]);
 			strlcat(label, g, sizeof(label));
 		}
 	}
@@ -1806,10 +1811,10 @@ runner_check_stays_notify(TestRunner *r,
 					strcmp(ns_goal, expectedState) != 0)
 				{
 					PQfreemem(notify);
-					snprintf(errBuf, errLen,
-							 "stays-while: %s was assigned state %s "
-							 "(expected to stay %s)",
-							 nodeName, ns_goal, expectedState);
+					sformat(errBuf, errLen,
+							"stays-while: %s was assigned state %s "
+							"(expected to stay %s)",
+							nodeName, ns_goal, expectedState);
 					return false;
 				}
 			}
@@ -1998,8 +2003,8 @@ runner_expand_macros(TestRunner *r, const char *args, char *dst, int dstlen,
 							 r->composeBase);
 	if (rc != 0 || cidr[0] == '\0')
 	{
-		snprintf(errBuf, errLen,
-				 "%%CIDR%%: could not get Docker network CIDR from monitor");
+		sformat(errBuf, errLen,
+				"%%CIDR%%: could not get Docker network CIDR from monitor");
 		return false;
 	}
 
@@ -2065,9 +2070,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				{
 					log_output("   ", out);
 				}
-				snprintf(errBuf, errLen,
-						 "exec %s %s failed (exit %d)",
-						 cmd->service, expandedArgs, rc);
+				sformat(errBuf, errLen,
+						"exec %s %s failed (exit %d)",
+						cmd->service, expandedArgs, rc);
 				return false;
 			}
 
@@ -2102,10 +2107,10 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				if (!monitor_wait_formation_states(r, fsStates, 2,
 												   NULL, 0, 120))
 				{
-					snprintf(errBuf, errLen,
-							 "exec %s %s: timed out waiting for "
-							 "primary+secondary",
-							 cmd->service, expandedArgs);
+					sformat(errBuf, errLen,
+							"exec %s %s: timed out waiting for "
+							"primary+secondary",
+							cmd->service, expandedArgs);
 					return false;
 				}
 			}
@@ -2125,9 +2130,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				}
 				if (!wait_for_state(r, cmd->service, "maintenance", 60, false))
 				{
-					snprintf(errBuf, errLen,
-							 "exec %s %s: timed out waiting for maintenance",
-							 cmd->service, expandedArgs);
+					sformat(errBuf, errLen,
+							"exec %s %s: timed out waiting for maintenance",
+							cmd->service, expandedArgs);
 					return false;
 				}
 			}
@@ -2147,10 +2152,10 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				{
 					log_output("   ", out);
 				}
-				snprintf(errBuf, errLen,
-						 "exec-fails %s %s: command succeeded (exit 0) "
-						 "but expected failure",
-						 cmd->service, cmd->args);
+				sformat(errBuf, errLen,
+						"exec-fails %s %s: command succeeded (exit 0) "
+						"but expected failure",
+						cmd->service, cmd->args);
 				return false;
 			}
 			log_debug("exec-fails %s %s: exited with %d (expected)",
@@ -2175,9 +2180,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 										 seenThrough, cmd->passThroughCount,
 										 cmd->timeoutSeconds))
 			{
-				snprintf(errBuf, errLen,
-						 "timeout: %s assigned-state never reached %s",
-						 cmd->service, cmd->state);
+				sformat(errBuf, errLen,
+						"timeout: %s assigned-state never reached %s",
+						cmd->service, cmd->state);
 				return false;
 			}
 
@@ -2185,12 +2190,12 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			{
 				if (!seenThrough[i])
 				{
-					snprintf(errBuf, errLen,
-							 "%s did not pass through assigned-state %s "
-							 "on way to %s",
-							 cmd->service,
-							 cmd->passThroughStates[i],
-							 cmd->state);
+					sformat(errBuf, errLen,
+							"%s did not pass through assigned-state %s "
+							"on way to %s",
+							cmd->service,
+							cmd->passThroughStates[i],
+							cmd->state);
 					return false;
 				}
 			}
@@ -2211,8 +2216,8 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 					}
 					strlcat(label, cmd->waitStates[i], sizeof(label));
 				}
-				snprintf(errBuf, errLen,
-						 "timeout: formation never reached states {%s}", label);
+				sformat(errBuf, errLen,
+						"timeout: formation never reached states {%s}", label);
 				return false;
 			}
 			return true;
@@ -2224,9 +2229,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			{
 				if (!runner_promote_one(r, cmd->promoteNodes[i]))
 				{
-					snprintf(errBuf, errLen,
-							 "promote: could not make %s primary",
-							 cmd->promoteNodes[i]);
+					sformat(errBuf, errLen,
+							"promote: could not make %s primary",
+							cmd->promoteNodes[i]);
 					return false;
 				}
 			}
@@ -2243,12 +2248,12 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 									cmd->timeoutSeconds,
 									cmd->kind == CMD_ASSERT_ASSIGNED))
 				{
-					snprintf(errBuf, errLen,
-							 "timeout: %s %s never reached %s",
-							 cmd->service,
-							 cmd->kind == CMD_ASSERT_ASSIGNED
-							 ? "assigned-state" : "state",
-							 cmd->state);
+					sformat(errBuf, errLen,
+							"timeout: %s %s never reached %s",
+							cmd->service,
+							cmd->kind == CMD_ASSERT_ASSIGNED
+							? "assigned-state" : "state",
+							cmd->state);
 					return false;
 				}
 				return true;
@@ -2259,21 +2264,21 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 										reported, sizeof(reported),
 										assigned, sizeof(assigned)))
 			{
-				snprintf(errBuf, errLen,
-						 "cannot reach monitor to assert %s state",
-						 cmd->service);
+				sformat(errBuf, errLen,
+						"cannot reach monitor to assert %s state",
+						cmd->service);
 				return false;
 			}
 			const char *actual = (cmd->kind == CMD_ASSERT_ASSIGNED)
 								 ? assigned : reported;
 			if (strcmp(actual, cmd->state) != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "%s %s is \"%s\", expected \"%s\"",
-						 cmd->service,
-						 (cmd->kind == CMD_ASSERT_ASSIGNED)
-						 ? "assigned-state" : "state",
-						 actual, cmd->state);
+				sformat(errBuf, errLen,
+						"%s %s is \"%s\", expected \"%s\"",
+						cmd->service,
+						(cmd->kind == CMD_ASSERT_ASSIGNED)
+						? "assigned-state" : "state",
+						actual, cmd->state);
 				return false;
 			}
 			return true;
@@ -2306,8 +2311,8 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 					r->lastSqlOutput[0] = '\0';
 					return true;
 				}
-				snprintf(errBuf, errLen,
-						 "sql on %s failed:\n%s", cmd->service, r->lastSqlOutput);
+				sformat(errBuf, errLen,
+						"sql on %s failed:\n%s", cmd->service, r->lastSqlOutput);
 				return false;
 			}
 			log_debug("sql output: %s", r->lastSqlOutput);
@@ -2324,9 +2329,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 */
 			if (strstr(r->lastSqlOutput, cmd->expected) == NULL)
 			{
-				snprintf(errBuf, errLen,
-						 "expected \"%s\", got \"%s\"",
-						 cmd->expected, r->lastSqlOutput);
+				sformat(errBuf, errLen,
+						"expected \"%s\", got \"%s\"",
+						cmd->expected, r->lastSqlOutput);
 				return false;
 			}
 			return true;
@@ -2336,18 +2341,18 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		{
 			if (!r->lastSqlFailed)
 			{
-				snprintf(errBuf, errLen,
-						 "expected SQL error on %s, but the query succeeded",
-						 r->lastSqlService);
+				sformat(errBuf, errLen,
+						"expected SQL error on %s, but the query succeeded",
+						r->lastSqlService);
 				return false;
 			}
 			if (cmd->state[0] &&
 				strcmp(r->lastSqlState, cmd->state) != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "expected SQLSTATE %s on %s, got %s",
-						 cmd->state, r->lastSqlService,
-						 r->lastSqlState[0] ? r->lastSqlState : "(unknown)");
+				sformat(errBuf, errLen,
+						"expected SQLSTATE %s on %s, got %s",
+						cmd->state, r->lastSqlService,
+						r->lastSqlState[0] ? r->lastSqlState : "(unknown)");
 				return false;
 			}
 			r->lastSqlFailed = false;  /* consumed */
@@ -2358,8 +2363,8 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		{
 			if (!runner_network_off(r, cmd->service))
 			{
-				snprintf(errBuf, errLen,
-						 "network disconnect %s failed", cmd->service);
+				sformat(errBuf, errLen,
+						"network disconnect %s failed", cmd->service);
 				return false;
 			}
 			return true;
@@ -2369,8 +2374,8 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		{
 			if (!runner_network_on(r, cmd->service))
 			{
-				snprintf(errBuf, errLen,
-						 "network connect %s failed", cmd->service);
+				sformat(errBuf, errLen,
+						"network connect %s failed", cmd->service);
 				return false;
 			}
 			return true;
@@ -2411,9 +2416,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			}
 			if (rc != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "docker compose start %s failed (exit %d)",
-						 cmd->service, rc);
+				sformat(errBuf, errLen,
+						"docker compose start %s failed (exit %d)",
+						cmd->service, rc);
 				return false;
 			}
 			return true;
@@ -2431,9 +2436,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			}
 			if (rc != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "docker compose stop %s failed (exit %d)",
-						 cmd->service, rc);
+				sformat(errBuf, errLen,
+						"docker compose stop %s failed (exit %d)",
+						cmd->service, rc);
 				return false;
 			}
 			return true;
@@ -2451,9 +2456,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			}
 			if (rc != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "docker compose kill %s failed (exit %d)",
-						 cmd->service, rc);
+				sformat(errBuf, errLen,
+						"docker compose kill %s failed (exit %d)",
+						cmd->service, rc);
 				return false;
 			}
 			return true;
@@ -2490,9 +2495,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			}
 			if (rc != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "compose inject: docker create %s failed (exit %d)",
-						 cmd->expected, rc);
+				sformat(errBuf, errLen,
+						"compose inject: docker create %s failed (exit %d)",
+						cmd->expected, rc);
 				return false;
 			}
 
@@ -2510,8 +2515,8 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 							"docker rm _pgaf_inject_tmp 2>&1");
 			if (rc != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "compose inject: docker cp from image failed (exit %d)", rc);
+				sformat(errBuf, errLen,
+						"compose inject: docker cp from image failed (exit %d)", rc);
 				return false;
 			}
 
@@ -2529,9 +2534,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			}
 			if (rc != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "compose inject: docker cp to %s:%s failed (exit %d)",
-						 cmd->service, cmd->state, rc);
+				sformat(errBuf, errLen,
+						"compose inject: docker cp to %s:%s failed (exit %d)",
+						cmd->service, cmd->state, rc);
 				return false;
 			}
 
@@ -2647,12 +2652,12 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 					strlcat(label, " and ", sizeof(label));
 				}
 				char part[128];
-				snprintf(part, sizeof(part), "%s=%s",
-						 cmd->waitNodes[i], cmd->waitStates[i]);
+				sformat(part, sizeof(part), "%s=%s",
+						cmd->waitNodes[i], cmd->waitStates[i]);
 				strlcat(label, part, sizeof(label));
 			}
-			snprintf(errBuf, errLen,
-					 "timeout: conditions not met: %s", label);
+			sformat(errBuf, errLen,
+					"timeout: conditions not met: %s", label);
 			return false;
 		}
 
@@ -2677,8 +2682,8 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				{
 					log_output("   ", out);
 				}
-				snprintf(errBuf, errLen,
-						 "pg_autoctl %s failed (exit %d)", cmd->args, rc);
+				sformat(errBuf, errLen,
+						"pg_autoctl %s failed (exit %d)", cmd->args, rc);
 				return false;
 			}
 			return true;
@@ -2724,9 +2729,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				usleep(500000); /* 500ms */
 			}
 
-			snprintf(errBuf, errLen,
-					 "timeout: service %s did not stop within %ds",
-					 svc, timeoutSecs);
+			sformat(errBuf, errLen,
+					"timeout: service %s did not stop within %ds",
+					svc, timeoutSecs);
 			return false;
 		}
 
@@ -2743,9 +2748,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				r->composeBase, cmd->service);
 			if (rc != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "stop postgres %s failed (exit %d)",
-						 cmd->service, rc);
+				sformat(errBuf, errLen,
+						"stop postgres %s failed (exit %d)",
+						cmd->service, rc);
 				return false;
 			}
 			return true;
@@ -2760,9 +2765,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				r->composeBase, cmd->service);
 			if (rc != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "start postgres %s failed (exit %d)",
-						 cmd->service, rc);
+				sformat(errBuf, errLen,
+						"start postgres %s failed (exit %d)",
+						cmd->service, rc);
 				return false;
 			}
 			return true;
@@ -2797,16 +2802,16 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 										curReported, sizeof(curReported),
 										curAssigned, sizeof(curAssigned)))
 			{
-				snprintf(errBuf, errLen,
-						 "stays-while: could not get state of %s", cmd->service);
+				sformat(errBuf, errLen,
+						"stays-while: could not get state of %s", cmd->service);
 				return false;
 			}
 			if (strcmp(curAssigned, cmd->state) != 0)
 			{
-				snprintf(errBuf, errLen,
-						 "stays-while: %s assigned-state is %s, "
-						 "expected %s (before body)",
-						 cmd->service, curAssigned, cmd->state);
+				sformat(errBuf, errLen,
+						"stays-while: %s assigned-state is %s, "
+						"expected %s (before body)",
+						cmd->service, curAssigned, cmd->state);
 				return false;
 			}
 
@@ -2838,17 +2843,17 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 												curReported, sizeof(curReported),
 												curAssigned, sizeof(curAssigned)))
 					{
-						snprintf(errBuf, errLen,
-								 "stays-while: could not get state of %s after command",
-								 cmd->service);
+						sformat(errBuf, errLen,
+								"stays-while: could not get state of %s after command",
+								cmd->service);
 						return false;
 					}
 					if (strcmp(curAssigned, cmd->state) != 0)
 					{
-						snprintf(errBuf, errLen,
-								 "stays-while: %s assigned-state changed to %s, "
-								 "expected %s during body",
-								 cmd->service, curAssigned, cmd->state);
+						sformat(errBuf, errLen,
+								"stays-while: %s assigned-state changed to %s, "
+								"expected %s during body",
+								cmd->service, curAssigned, cmd->state);
 						return false;
 					}
 				}
@@ -2867,10 +2872,10 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 											curAssigned, sizeof(curAssigned)) ||
 					strcmp(curAssigned, cmd->state) != 0)
 				{
-					snprintf(errBuf, errLen,
-							 "stays-while: %s assigned-state is %s "
-							 "after body, expected %s",
-							 cmd->service, curAssigned, cmd->state);
+					sformat(errBuf, errLen,
+							"stays-while: %s assigned-state is %s "
+							"after body, expected %s",
+							cmd->service, curAssigned, cmd->state);
 					return false;
 				}
 			}
@@ -2941,12 +2946,12 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			}
 
 			char grepCmd[8192];
-			snprintf(grepCmd, sizeof(grepCmd),
-					 "docker compose --project-directory %s logs --no-color %s 2>&1 | grep %s %s",
-					 r->workDir,
-					 cmd->service,
-					 flag,
-					 quotedPat);
+			sformat(grepCmd, sizeof(grepCmd),
+					"docker compose --project-directory %s logs --no-color %s 2>&1 | grep %s %s",
+					r->workDir,
+					cmd->service,
+					flag,
+					quotedPat);
 
 			log_info("  logs %s: %s%s \"%s\"",
 					 cmd->service,
@@ -3061,20 +3066,20 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 	{
 		case CMD_EXEC:
 		{
-			snprintf(buf, len, "exec %s  %s", cmd->service, cmd->args);
+			sformat(buf, len, "exec %s  %s", cmd->service, cmd->args);
 			break;
 		}
 
 		case CMD_EXEC_FAILS:
 		{
-			snprintf(buf, len, "exec-fails %s  %s", cmd->service, cmd->args);
+			sformat(buf, len, "exec-fails %s  %s", cmd->service, cmd->args);
 			break;
 		}
 
 		case CMD_WAIT_STATE:
 		{
-			snprintf(buf, len, "wait until %s state = %s  timeout %ds",
-					 cmd->service, cmd->state, cmd->timeoutSeconds);
+			sformat(buf, len, "wait until %s state = %s  timeout %ds",
+					cmd->service, cmd->state, cmd->timeoutSeconds);
 			break;
 		}
 
@@ -3089,21 +3094,21 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 				}
 				strlcat(states, cmd->waitStates[i], sizeof(states));
 			}
-			snprintf(buf, len, "wait until %s  timeout %ds", states,
-					 cmd->timeoutSeconds);
+			sformat(buf, len, "wait until %s  timeout %ds", states,
+					cmd->timeoutSeconds);
 			break;
 		}
 
 		case CMD_ASSERT_STATE:
 		{
-			snprintf(buf, len, "assert %s state = %s", cmd->service, cmd->state);
+			sformat(buf, len, "assert %s state = %s", cmd->service, cmd->state);
 			break;
 		}
 
 		case CMD_ASSERT_ASSIGNED:
 		{
-			snprintf(buf, len, "assert %s assigned-state = %s",
-					 cmd->service, cmd->state);
+			sformat(buf, len, "assert %s assigned-state = %s",
+					cmd->service, cmd->state);
 			break;
 		}
 
@@ -3118,14 +3123,14 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 				}
 				strlcat(nodes, cmd->promoteNodes[i], sizeof(nodes));
 			}
-			snprintf(buf, len, "promote %s", nodes[0] ? nodes : cmd->service);
+			sformat(buf, len, "promote %s", nodes[0] ? nodes : cmd->service);
 			break;
 		}
 
 		case CMD_SQL:
 		{
 			inline_text(cmd->args, tmp, sizeof(tmp));
-			snprintf(buf, len, "sql %s { %s }", cmd->service, tmp);
+			sformat(buf, len, "sql %s { %s }", cmd->service, tmp);
 			break;
 		}
 
@@ -3141,84 +3146,84 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 				{
 					const char *nl = strchr(p, '\n');
 					int rowlen = nl ? (int) (nl - p) : (int) strlen(p);
-					int n = snprintf(rows + rpos, sizeof(rows) - rpos,
-									 "%s{ %.*s }",
-									 rpos ? " " : "", rowlen, p);
+					int n = sformat(rows + rpos, sizeof(rows) - rpos,
+									"%s{ %.*s }",
+									rpos ? " " : "", rowlen, p);
 					if (n > 0)
 					{
 						rpos += n;
 					}
 					p = nl ? nl + 1 : p + rowlen;
 				}
-				snprintf(buf, len, "expect { %s }", rows);
+				sformat(buf, len, "expect { %s }", rows);
 			}
 			else
 			{
 				inline_text(cmd->expected, tmp, sizeof(tmp));
-				snprintf(buf, len, "expect { %s }", tmp);
+				sformat(buf, len, "expect { %s }", tmp);
 			}
 			break;
 		}
 
 		case CMD_EXPECT_ERROR:
 		{
-			snprintf(buf, len, "expect error %s", cmd->state);
+			sformat(buf, len, "expect error %s", cmd->state);
 			break;
 		}
 
 		case CMD_NETWORK_OFF:
 		{
-			snprintf(buf, len, "network disconnect %s", cmd->service);
+			sformat(buf, len, "network disconnect %s", cmd->service);
 			break;
 		}
 
 		case CMD_NETWORK_ON:
 		{
-			snprintf(buf, len, "network connect %s", cmd->service);
+			sformat(buf, len, "network connect %s", cmd->service);
 			break;
 		}
 
 		case CMD_SLEEP:
 		{
-			snprintf(buf, len, "sleep %ds", cmd->timeoutSeconds);
+			sformat(buf, len, "sleep %ds", cmd->timeoutSeconds);
 			break;
 		}
 
 		case CMD_COMPOSE_DOWN:
 		{
-			snprintf(buf, len, "compose down");
+			sformat(buf, len, "compose down");
 			break;
 		}
 
 		case CMD_COMPOSE_START:
 		{
-			snprintf(buf, len, "compose start %s", cmd->service);
+			sformat(buf, len, "compose start %s", cmd->service);
 			break;
 		}
 
 		case CMD_COMPOSE_STOP:
 		{
-			snprintf(buf, len, "compose stop %s", cmd->service);
+			sformat(buf, len, "compose stop %s", cmd->service);
 			break;
 		}
 
 		case CMD_COMPOSE_KILL:
 		{
-			snprintf(buf, len, "compose kill %s", cmd->service);
+			sformat(buf, len, "compose kill %s", cmd->service);
 			break;
 		}
 
 		case CMD_COMPOSE_INJECT:
 		{
-			snprintf(buf, len, "compose inject %s %s %s:%s",
-					 cmd->expected, cmd->args, cmd->service, cmd->state);
+			sformat(buf, len, "compose inject %s %s %s:%s",
+					cmd->expected, cmd->args, cmd->service, cmd->state);
 			break;
 		}
 
 		case CMD_WAIT_STOPPED:
 		{
-			snprintf(buf, len, "wait until %s stopped  timeout %ds",
-					 cmd->service, cmd->timeoutSeconds);
+			sformat(buf, len, "wait until %s stopped  timeout %ds",
+					cmd->service, cmd->timeoutSeconds);
 			break;
 		}
 
@@ -3232,59 +3237,59 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 					strlcat(parts, " and ", sizeof(parts));
 				}
 				char piece[128];
-				snprintf(piece, sizeof(piece), "%s state = %s",
-						 cmd->waitNodes[i], cmd->waitStates[i]);
+				sformat(piece, sizeof(piece), "%s state = %s",
+						cmd->waitNodes[i], cmd->waitStates[i]);
 				strlcat(parts, piece, sizeof(parts));
 			}
-			snprintf(buf, len, "wait until %s  timeout %ds", parts,
-					 cmd->timeoutSeconds);
+			sformat(buf, len, "wait until %s  timeout %ds", parts,
+					cmd->timeoutSeconds);
 			break;
 		}
 
 		case CMD_PG_AUTOCTL:
 		{
-			snprintf(buf, len, "pg_autoctl %s", cmd->args);
+			sformat(buf, len, "pg_autoctl %s", cmd->args);
 			break;
 		}
 
 		case CMD_STOP_POSTGRES:
 		{
-			snprintf(buf, len, "stop postgres %s", cmd->service);
+			sformat(buf, len, "stop postgres %s", cmd->service);
 			break;
 		}
 
 		case CMD_START_POSTGRES:
 		{
-			snprintf(buf, len, "start postgres %s", cmd->service);
+			sformat(buf, len, "start postgres %s", cmd->service);
 			break;
 		}
 
 		case CMD_STAYS_WHILE:
 		{
-			snprintf(buf, len, "assert %s stays %s while { ... }",
-					 cmd->service, cmd->state);
+			sformat(buf, len, "assert %s stays %s while { ... }",
+					cmd->service, cmd->state);
 			break;
 		}
 
 		case CMD_SET_MONITOR:
 		{
-			snprintf(buf, len, "set monitor %s", cmd->service);
+			sformat(buf, len, "set monitor %s", cmd->service);
 			break;
 		}
 
 		case CMD_LOGS_CHECK:
 		{
-			snprintf(buf, len, "logs %s %s%s \"%s\"",
-					 cmd->service,
-					 cmd->logsNegate ? "not " : "",
-					 cmd->allowError ? "matches" : "contains",
-					 cmd->args);
+			sformat(buf, len, "logs %s %s%s \"%s\"",
+					cmd->service,
+					cmd->logsNegate ? "not " : "",
+					cmd->allowError ? "matches" : "contains",
+					cmd->args);
 			break;
 		}
 
 		default:
 		{
-			snprintf(buf, len, "(unknown command %d)", cmd->kind);
+			sformat(buf, len, "(unknown command %d)", cmd->kind);
 			break;
 		}
 	}
@@ -3375,10 +3380,10 @@ runner_wait_for_monitor(TestRunner *r)
 	time_t deadline = time(NULL) + MONITOR_WAIT_TIMEOUT_SECS;
 
 	char monitorReadyCmd[sizeof(r->composeBase) + 128];
-	snprintf(monitorReadyCmd, sizeof(monitorReadyCmd),
-			 "%s exec -T monitor psql -U autoctl_node -d pg_auto_failover "
-			 "-c 'SELECT 1' >/dev/null 2>&1",
-			 r->composeBase);
+	sformat(monitorReadyCmd, sizeof(monitorReadyCmd),
+			"%s exec -T monitor psql -U autoctl_node -d pg_auto_failover "
+			"-c 'SELECT 1' >/dev/null 2>&1",
+			r->composeBase);
 
 	while (time(NULL) < deadline)
 	{
@@ -3437,7 +3442,7 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 	 * include a pgaftest service and we're running inside that container; skip
 	 * compose up since the stack is already running.
 	 */
-	if (!getenv("PGAFTEST_COMPOSE_SERVICE"))
+	if (!getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
 	{
 		log_info("Starting compose stack (project: %s)", r.projectName);
 
@@ -3610,17 +3615,17 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 
 		if (spec->setup)
 		{
-			snprintf(bottomCmd, sizeof(bottomCmd),
-					 "%s _setup_ %s --work-dir %s && "
-					 "%s exec -it %s bash",
-					 pg_autoctl_program, spec->filename, workDir,
-					 r.composeBase, shellNode);
+			sformat(bottomCmd, sizeof(bottomCmd),
+					"%s _setup_ %s --work-dir %s && "
+					"%s exec -it %s bash",
+					pg_autoctl_program, spec->filename, workDir,
+					r.composeBase, shellNode);
 		}
 		else
 		{
-			snprintf(bottomCmd, sizeof(bottomCmd),
-					 "%s exec -it %s bash",
-					 r.composeBase, shellNode);
+			sformat(bottomCmd, sizeof(bottomCmd),
+					"%s exec -it %s bash",
+					r.composeBase, shellNode);
 		}
 
 		log_info("Starting tmux session \"%s\" (shell target: %s)",
@@ -3657,15 +3662,15 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 			}
 		}
 
-		printf("\nCluster ready — compose project: %s\n", r.projectName);
-		printf("Work dir: %s\n", workDir);
-		printf("\nAvailable steps:");
+		fformat(stdout, "\nCluster ready — compose project: %s\n", r.projectName);
+		fformat(stdout, "Work dir: %s\n", workDir);
+		fformat(stdout, "\nAvailable steps:");
 		for (TestStep *s = spec->steps; s; s = s->next)
 		{
-			printf(" %s", s->name);
+			fformat(stdout, " %s", s->name);
 		}
-		printf("\n\nRun a step: pgaftest step <name> --work-dir %s\n", workDir);
-		printf("Tear down:  pgaftest down --work-dir %s\n\n", workDir);
+		fformat(stdout, "\n\nRun a step: pgaftest step <name> --work-dir %s\n", workDir);
+		fformat(stdout, "Tear down:  pgaftest down --work-dir %s\n\n", workDir);
 	}
 
 	return true;
@@ -3795,12 +3800,12 @@ runner_prepare(TestSpec *spec, const char *outDir)
 		const char *slash = strrchr(spec->filename, '/');
 		if (slash)
 		{
-			snprintf(derivedDir, sizeof(derivedDir), "%.*s/%s-compose",
-					 (int) (slash - spec->filename), spec->filename, stem);
+			sformat(derivedDir, sizeof(derivedDir), "%.*s/%s-compose",
+					(int) (slash - spec->filename), spec->filename, stem);
 		}
 		else
 		{
-			snprintf(derivedDir, sizeof(derivedDir), "%s-compose", stem);
+			sformat(derivedDir, sizeof(derivedDir), "%s-compose", stem);
 		}
 		outDir = derivedDir;
 	}
@@ -3859,14 +3864,14 @@ runner_prepare(TestSpec *spec, const char *outDir)
 
 	/* Write Makefile */
 	char makefilePath[1280];
-	snprintf(makefilePath, sizeof(makefilePath), "%s/Makefile", outDir);
-	FILE *mf = fopen(makefilePath, "w");
+	sformat(makefilePath, sizeof(makefilePath), "%s/Makefile", outDir);
+	FILE *mf = fopen(makefilePath, "w"); /* IGNORE-BANNED */
 	if (!mf)
 	{
 		log_error("Failed to open \"%s\": %m", makefilePath);
 		return false;
 	}
-	fprintf(mf,
+	fformat(mf,
 			".PHONY: test down\n"
 			"\n"
 			"test:\n"
@@ -3881,10 +3886,10 @@ runner_prepare(TestSpec *spec, const char *outDir)
 	log_info("Wrote Makefile to \"%s\"", makefilePath);
 
 	/* Print the docker compose command to stdout */
-	printf("cd %s && \\\n", outDir);
-	printf("  docker compose -p %s -f docker-compose.yml"
-		   " up --build --exit-code-from pgaftest --attach pgaftest\n",
-		   r.projectName);
+	fformat(stdout, "cd %s && \\\n", outDir);
+	fformat(stdout, "  docker compose -p %s -f docker-compose.yml"
+					" up --build --exit-code-from pgaftest --attach pgaftest\n",
+			r.projectName);
 
 	return true;
 }

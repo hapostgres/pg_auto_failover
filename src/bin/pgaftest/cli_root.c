@@ -14,6 +14,8 @@
 
 #include "commandline.h"
 #include "defaults.h"
+#include "file_utils.h"
+#include "string_utils.h"
 #include "log.h"
 #include "test_spec.h"
 #include "test_runner.h"
@@ -68,13 +70,13 @@ derive_work_dir(const char *specPath, char *buf, int buflen)
 		*dot = '\0';
 	}
 
-	const char *tmpdir = getenv("TMPDIR");
+	const char *tmpdir = getenv("TMPDIR"); /* IGNORE-BANNED */
 	if (!tmpdir || *tmpdir == '\0')
 	{
 		tmpdir = "/tmp";
 	}
 
-	snprintf(buf, buflen, "%s/pgaftest/%s", tmpdir, name);
+	sformat(buf, buflen, "%s/pgaftest/%s", tmpdir, name);
 }
 
 
@@ -175,7 +177,7 @@ cli_run(int argc, char **argv)
 	/* Handle --schedule file */
 	if (pgaftestOpts.schedule[0] != '\0')
 	{
-		FILE *f = fopen(pgaftestOpts.schedule, "r");
+		FILE *f = fopen(pgaftestOpts.schedule, "r"); /* IGNORE-BANNED */
 		if (!f)
 		{
 			log_error("Cannot open schedule \"%s\": %m",
@@ -219,8 +221,8 @@ cli_run(int argc, char **argv)
 			}
 			else
 			{
-				snprintf(specPath, sizeof(specPath),
-						 "tests/tap/specs/%s.pgaf", p);
+				sformat(specPath, sizeof(specPath),
+						"tests/tap/specs/%s.pgaf", p);
 			}
 
 			char workDir[1024];
@@ -236,8 +238,8 @@ cli_run(int argc, char **argv)
 				{
 					*dot = '\0';
 				}
-				snprintf(workDir, sizeof(workDir),
-						 "%s/%s", pgaftestOpts.workDir, name);
+				sformat(workDir, sizeof(workDir),
+						"%s/%s", pgaftestOpts.workDir, name);
 			}
 			else
 			{
@@ -260,7 +262,7 @@ cli_run(int argc, char **argv)
 		}
 		fclose(f);
 
-		fprintf(stderr, "\nSchedule complete: %d/%d passed\n",
+		fformat(stderr, "\nSchedule complete: %d/%d passed\n",
 				total - failed, total);
 		exit(failed > 0 ? 1 : 0);
 	}
@@ -353,8 +355,8 @@ cli_step(int argc, char **argv)
 
 	/* We need the spec file too — look for it in workDir */
 	char specPath[1024];
-	snprintf(specPath, sizeof(specPath), "%s/spec.pgaf",
-			 pgaftestOpts.workDir);
+	sformat(specPath, sizeof(specPath), "%s/spec.pgaf",
+			pgaftestOpts.workDir);
 
 	/* If there's a second positional arg, treat it as the spec path */
 	if (argc >= 2 && argv[1] != NULL)
@@ -463,8 +465,8 @@ cli_down(int argc, char **argv)
 	}
 	else
 	{
-		snprintf(specPath, sizeof(specPath), "%s/spec.pgaf",
-				 pgaftestOpts.workDir);
+		sformat(specPath, sizeof(specPath), "%s/spec.pgaf",
+				pgaftestOpts.workDir);
 	}
 
 	TestSpec *spec = NULL;
@@ -488,10 +490,10 @@ cli_down(int argc, char **argv)
 		}
 
 		char cmd[2048];
-		snprintf(cmd, sizeof(cmd),
-				 "docker compose -p %s -f %s/docker-compose.yml "
-				 "down --volumes --remove-orphans",
-				 projectName, pgaftestOpts.workDir);
+		sformat(cmd, sizeof(cmd),
+				"docker compose -p %s -f %s/docker-compose.yml "
+				"down --volumes --remove-orphans",
+				projectName, pgaftestOpts.workDir);
 
 		int rc = system(cmd);
 		exit(rc == 0 ? 0 : 1);

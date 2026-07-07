@@ -325,8 +325,8 @@ static TestSpec *current_spec = NULL;
 static void
 yyerror(const char *msg)
 {
-	fprintf(stderr, "pgaftest: parse error at line %d: %s\n",
-			pgaf_line_number, msg);
+	fprintf(/* IGNORE-BANNED */ stderr, "pgaftest: parse error at line %d: %s\n",
+								pgaf_line_number, msg);
 	exit(1);
 }
 
@@ -1376,9 +1376,9 @@ static const yytype_uint8 yystos[] =
 #ifndef YY_LOCATION_PRINT
 # if defined YYLTYPE_IS_TRIVIAL && YYLTYPE_IS_TRIVIAL
 #  define YY_LOCATION_PRINT(File, Loc) \
-	fprintf(File, "%d.%d-%d.%d", \
-			(Loc).first_line, (Loc).first_column, \
-			(Loc).last_line, (Loc).last_column)
+	fprintf(/* IGNORE-BANNED */ File, "%d.%d-%d.%d", \
+								(Loc).first_line, (Loc).first_column, \
+								(Loc).last_line, (Loc).last_column)
 # else
 #  define YY_LOCATION_PRINT(File, Loc) ((void) 0)
 # endif
@@ -1535,11 +1535,11 @@ int yyrule;
 	/* The symbols being reduced.  */
 	for (yyi = 0; yyi < yynrhs; yyi++)
 	{
-		fprintf(stderr, "   $%d = ", yyi + 1);
+		fprintf(stderr, "   $%d = ", yyi + 1); /* IGNORE-BANNED */
 		yy_symbol_print(stderr, yyrhs[yyprhs[yyrule] + yyi],
 						&(yyvsp[(yyi + 1) - (yynrhs)])
 						);
-		fprintf(stderr, "\n");
+		fprintf(stderr, "\n"); /* IGNORE-BANNED */
 	}
 }
 
@@ -2346,8 +2346,9 @@ yyreduce:
 				TestCluster *cl = &current_spec->cluster;
 				if (cl->formationCount >= PGAF_MAX_FORMATIONS)
 				{
-					fprintf(stderr, "pgaftest: too many formations (max %d)\n",
-							PGAF_MAX_FORMATIONS);
+					fprintf(/* IGNORE-BANNED */ stderr,
+												"pgaftest: too many formations (max %d)\n",
+												PGAF_MAX_FORMATIONS);
 					exit(1);
 				}
 				current_formation = &cl->formations[cl->formationCount++];
@@ -2427,8 +2428,9 @@ yyreduce:
 			{
 				if (current_formation->nodeCount >= PGAF_MAX_NODES)
 				{
-					fprintf(stderr, "pgaftest: too many nodes in formation (max %d)\n",
-							PGAF_MAX_NODES);
+					fprintf(/* IGNORE-BANNED */ stderr,
+												"pgaftest: too many nodes in formation (max %d)\n",
+												PGAF_MAX_NODES);
 					exit(1);
 				}
 				current_node = &current_formation->nodes[current_formation->nodeCount++];
@@ -3286,8 +3288,9 @@ yyreduce:
 			{
 				/* SQLSTATE codes like 25006 are all digits, lexed as T_INTEGER */
 				(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
-				snprintf((yyval.cmd)->state, sizeof((yyval.cmd)->state), "%d",
-						 (yyvsp[(3) - (3)].ival));
+				snprintf(/* IGNORE-BANNED */ (yyval.cmd)->state,
+											 sizeof((yyval.cmd)->state), "%d",
+											 (yyvsp[(3) - (3)].ival));
 			}
 			break;
 
@@ -3485,11 +3488,11 @@ yyreduce:
 				/* only "set monitor <svc>" is supported; $2 must be "monitor" */
 				if (strcmp((yyvsp[(2) - (3)].str), "monitor") != 0)
 				{
-					fprintf(stderr,
-							"pgaftest: unknown 'set' target '%s' (expected 'monitor')\n",
-							(yyvsp[(2) -
-								   (
-									   3)].str));
+					fprintf(/* IGNORE-BANNED */ stderr,
+												"pgaftest: unknown 'set' target '%s' (expected 'monitor')\n",
+												(yyvsp[(2) -
+													   (
+														   3)].str));
 					free((yyvsp[(2) - (3)].str));
 					free((yyvsp[(3) - (3)].str));
 					YYERROR;
@@ -3574,8 +3577,9 @@ yyreduce:
 				}
 				else
 				{
-					fprintf(stderr, "pgaftest: too many steps in sequence (max %d)\n",
-							PGAF_MAX_SEQ);
+					fprintf(/* IGNORE-BANNED */ stderr,
+												"pgaftest: too many steps in sequence (max %d)\n",
+												PGAF_MAX_SEQ);
 					exit(1);
 				}
 			}
@@ -4001,18 +4005,19 @@ yyreturn:
 TestSpec *
 parse_test_spec(const char *filename)
 {
-	FILE *f = fopen(filename, "r");
+	FILE *f = fopen(filename, "r"); /* IGNORE-BANNED */
 	if (!f)
 	{
-		fprintf(stderr, "pgaftest: cannot open spec file \"%s\": %s\n",
-				filename, strerror(errno));
+		fprintf(/* IGNORE-BANNED */ stderr,
+									"pgaftest: cannot open spec file \"%s\": %s\n",
+									filename, strerror(errno) /* IGNORE-BANNED */);
 		return NULL;
 	}
 
 	TestSpec *spec = (TestSpec *) calloc(1, sizeof(TestSpec));
 	if (!spec)
 	{
-		fprintf(stderr, "out of memory\n");
+		fprintf(stderr, "out of memory\n"); /* IGNORE-BANNED */
 		exit(1);
 	}
 
@@ -4034,7 +4039,7 @@ make_cmd(TestCmdKind kind)
 	TestCmd *c = (TestCmd *) calloc(1, sizeof(TestCmd));
 	if (!c)
 	{
-		fprintf(stderr, "out of memory\n");
+		fprintf(stderr, "out of memory\n"); /* IGNORE-BANNED */
 		exit(1);
 	}
 	c->kind = kind;
@@ -4049,7 +4054,7 @@ make_step(const char *name)
 	TestStep *s = (TestStep *) calloc(1, sizeof(TestStep));
 	if (!s)
 	{
-		fprintf(stderr, "out of memory\n");
+		fprintf(stderr, "out of memory\n"); /* IGNORE-BANNED */
 		exit(1);
 	}
 	if (name)

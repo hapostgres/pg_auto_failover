@@ -1190,7 +1190,7 @@ pgaf_strdup(const char *s)
 	char *r = strdup(s);
 	if (!r)
 	{
-		fprintf(stderr, "out of memory\n");
+		fprintf(stderr, "out of memory\n"); /* IGNORE-BANNED */
 		exit(1);
 	}
 	return r;
@@ -1590,7 +1590,7 @@ do_action:  /* This label is used only to access EOF actions. */
 					YY_RULE_SETUP
 #line 106 "test_spec_scan.l"
 					{
-						yylval.ival = atoi(yytext);
+						yylval.ival = atoi(yytext); /* IGNORE-BANNED */
 						return T_INTEGER;
 					}
 
@@ -1635,8 +1635,9 @@ do_action:  /* This label is used only to access EOF actions. */
 						}
 
 						/* fallback: should not happen in a well-formed file */
-						fprintf(stderr, "pgaftest: unexpected '{' at line %d\n",
-								pgaf_line_number);
+						fprintf(/* IGNORE-BANNED */ stderr,
+													"pgaftest: unexpected '{' at line %d\n",
+													pgaf_line_number);
 					}
 
 					YY_BREAK
@@ -1661,9 +1662,9 @@ do_action:  /* This label is used only to access EOF actions. */
 					YY_RULE_SETUP
 #line 143 "test_spec_scan.l"
 					{
-						fprintf(stderr,
-								"pgaftest: unexpected character '%c' at line %d\n",
-								yytext[0], pgaf_line_number);
+						fprintf(/* IGNORE-BANNED */ stderr,
+													"pgaftest: unexpected character '%c' at line %d\n",
+													yytext[0], pgaf_line_number);
 					}
 
 					YY_BREAK
@@ -1959,7 +1960,7 @@ do_action:  /* This label is used only to access EOF actions. */
 					YY_RULE_SETUP
 #line 188 "test_spec_scan.l"
 					{
-						yylval.ival = atoi(yytext);
+						yylval.ival = atoi(yytext); /* IGNORE-BANNED */
 						return T_INTEGER;
 					}
 
@@ -2631,7 +2632,7 @@ do_action:  /* This label is used only to access EOF actions. */
 					YY_RULE_SETUP
 #line 297 "test_spec_scan.l"
 					{
-						yylval.ival = atoi(yytext);
+						yylval.ival = atoi(yytext); /* IGNORE-BANNED */
 						return T_INTEGER;
 					}
 
@@ -3623,7 +3624,7 @@ yy_scan_bytes(const char *yybytes, yy_size_t _yybytes_len)
 static void yynoreturn
 yy_fatal_error(const char *msg)
 {
-	fprintf(stderr, "%s\n", msg);
+	fprintf(stderr, "%s\n", msg); /* IGNORE-BANNED */
 	exit(YY_EXIT_FAILURE);
 }
 

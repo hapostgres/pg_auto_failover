@@ -26,6 +26,7 @@
 #include "test_spec.h"
 #include "test_spec_parse.h"
 #include "defaults.h"
+#include "file_utils.h"
 #include "log.h"
 #include "string_utils.h"
 
@@ -70,7 +71,7 @@ cli_indent(int argc, char **argv)
 {
 	if (argc < 1 || argv[0] == NULL)
 	{
-		fprintf(stderr, "Usage: pgaftest indent <spec.pgaf>\n");
+		fformat(stderr, "Usage: pgaftest indent <spec.pgaf>\n");
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
@@ -96,14 +97,14 @@ cli_indent(int argc, char **argv)
 		const char *cmt = lookup_comment(cmap, "setup");
 		if (cmt)
 		{
-			fprintf(out, "\n%s\nsetup {\n", cmt);
+			fformat(out, "\n%s\nsetup {\n", cmt);
 		}
 		else
 		{
-			fprintf(out, "\nsetup {\n");
+			fformat(out, "\nsetup {\n");
 		}
 		print_step(out, spec->setup, false);
-		fprintf(out, "}\n");
+		fformat(out, "}\n");
 	}
 
 	if (spec->teardown)
@@ -111,14 +112,14 @@ cli_indent(int argc, char **argv)
 		const char *cmt = lookup_comment(cmap, "teardown");
 		if (cmt)
 		{
-			fprintf(out, "\n%s\nteardown {\n", cmt);
+			fformat(out, "\n%s\nteardown {\n", cmt);
 		}
 		else
 		{
-			fprintf(out, "\nteardown {\n");
+			fformat(out, "\nteardown {\n");
 		}
 		print_step(out, spec->teardown, false);
-		fprintf(out, "}\n");
+		fformat(out, "}\n");
 	}
 
 	for (TestStep *s = spec->steps; s; s = s->next)
@@ -126,14 +127,14 @@ cli_indent(int argc, char **argv)
 		const char *cmt = lookup_comment(cmap, s->name);
 		if (cmt)
 		{
-			fprintf(out, "\n%s\nstep %s {\n", cmt, s->name);
+			fformat(out, "\n%s\nstep %s {\n", cmt, s->name);
 		}
 		else
 		{
-			fprintf(out, "\nstep %s {\n", s->name);
+			fformat(out, "\nstep %s {\n", s->name);
 		}
 		print_step(out, s, true);
-		fprintf(out, "}\n");
+		fformat(out, "}\n");
 	}
 
 	/*
@@ -162,10 +163,10 @@ cli_indent(int argc, char **argv)
 
 		if (!redundant)
 		{
-			fprintf(out, "\nsequence\n");
+			fformat(out, "\nsequence\n");
 			for (int i = 0; i < spec->sequenceLength; i++)
 			{
-				fprintf(out, "    %s\n", spec->sequence[i]);
+				fformat(out, "    %s\n", spec->sequence[i]);
 			}
 		}
 	}
@@ -183,10 +184,10 @@ cli_indent(int argc, char **argv)
 static void
 print_header(FILE *out, const char *path)
 {
-	FILE *f = fopen(path, "r");
+	FILE *f = fopen(path, "r"); /* IGNORE-BANNED */
 	if (!f)
 	{
-		fprintf(out, "# %s\n\n", path);
+		fformat(out, "# %s\n\n", path);
 		return;
 	}
 
@@ -228,10 +229,10 @@ print_header(FILE *out, const char *path)
 
 	if (!any)
 	{
-		fprintf(out, "# %s\n", path);
+		fformat(out, "# %s\n", path);
 	}
 
-	fprintf(out, "\n");
+	fformat(out, "\n");
 }
 
 
@@ -248,7 +249,7 @@ collect_comments(const char *path)
 		return m;
 	}
 
-	FILE *f = fopen(path, "r");
+	FILE *f = fopen(path, "r"); /* IGNORE-BANNED */
 	if (!f)
 	{
 		return m;
@@ -289,7 +290,7 @@ collect_comments(const char *path)
 
 		/* Check for a block keyword */
 		char kw[128] = "";
-		if (sscanf(line, "step %127s", kw) == 1)
+		if (sscanf(line, "step %127s", kw) == 1) /* IGNORE-BANNED */
 		{
 			/* strip trailing " {" from name */
 			char *brace = strchr(kw, '{');
@@ -327,7 +328,7 @@ collect_comments(const char *path)
 			if (len > 0)
 			{
 				char clean[8192];
-				snprintf(clean, sizeof(clean), "%.*s\n", len, start);
+				sformat(clean, sizeof(clean), "%.*s\n", len, start);
 				strlcpy(m->entries[m->count].name, kw,
 						sizeof(m->entries[0].name));
 				m->entries[m->count].text = strdup(clean);
@@ -407,7 +408,7 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 	{
 		if (n->group != 0)
 		{
-			snprintf(kindbuf, sizeof(kindbuf), "worker group %d", n->group);
+			sformat(kindbuf, sizeof(kindbuf), "worker group %d", n->group);
 		}
 		else
 		{
@@ -438,7 +439,7 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 	}
 	if (n->candidatePriority != 50)
 	{
-		snprintf(numbuf, sizeof(numbuf), "%d", n->candidatePriority);
+		sformat(numbuf, sizeof(numbuf), "%d", n->candidatePriority);
 		ADD("candidate-priority", numbuf);
 	}
 	if (!n->replicationQuorum)
@@ -455,7 +456,7 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 	}
 	if (n->pgPort != 0)
 	{
-		snprintf(numbuf, sizeof(numbuf), "%d", n->pgPort);
+		sformat(numbuf, sizeof(numbuf), "%d", n->pgPort);
 		ADD("port", numbuf);
 	}
 	if (n->ssl[0])
@@ -495,39 +496,39 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 	if ((lineLen <= 72 || pc == 0) && n->volumeCount == 0)
 	{
 		/* fits on one line — flat syntax, no "node" keyword needed */
-		fprintf(out, "%*s%s", baseIndent, "", n->name);
+		fformat(out, "%*s%s", baseIndent, "", n->name);
 		if (kind[0])
 		{
-			fprintf(out, " %s", kind);
+			fformat(out, " %s", kind);
 		}
-		fprintf(out, "%s\n", inline_props);
+		fformat(out, "%s\n", inline_props);
 		return;
 	}
 
 	/* multi-line — use block syntax: node <name> { \n  kind\n  opt\n  opt\n } */
 	int innerIndent = baseIndent + 4;
-	fprintf(out, "%*snode %s {\n", baseIndent, "", n->name);
+	fformat(out, "%*snode %s {\n", baseIndent, "", n->name);
 	if (kind[0])
 	{
-		fprintf(out, "%*s%s\n", innerIndent, "", kind);
+		fformat(out, "%*s%s\n", innerIndent, "", kind);
 	}
 
 	for (int i = 0; i < pc; i++)
 	{
-		fprintf(out, "%*s%s", innerIndent, "", props[i].kw);
+		fformat(out, "%*s%s", innerIndent, "", props[i].kw);
 		if (props[i].val[0])
 		{
-			fprintf(out, " %s", props[i].val);
+			fformat(out, " %s", props[i].val);
 		}
-		fprintf(out, "\n");
+		fformat(out, "\n");
 	}
 	for (int vi = 0; vi < n->volumeCount; vi++)
 	{
-		fprintf(out, "%*svolume %s \"%s\"\n",
+		fformat(out, "%*svolume %s \"%s\"\n",
 				innerIndent, "",
 				n->volumes[vi].name, n->volumes[vi].path);
 	}
-	fprintf(out, "%*s}\n", baseIndent, "");
+	fformat(out, "%*s}\n", baseIndent, "");
 }
 
 
@@ -536,33 +537,33 @@ print_cluster(FILE *out, const TestSpec *spec)
 {
 	const TestCluster *cl = &spec->cluster;
 
-	fprintf(out, "cluster {\n");
+	fformat(out, "cluster {\n");
 
 	if (cl->withMonitor)
 	{
-		fprintf(out, "    monitor\n");
+		fformat(out, "    monitor\n");
 	}
 
 	if (cl->secondMonitorName[0])
 	{
-		fprintf(out, "    monitor %s initially stopped\n", cl->secondMonitorName);
+		fformat(out, "    monitor %s initially stopped\n", cl->secondMonitorName);
 	}
 
 	if (cl->image[0])
 	{
-		fprintf(out, "    image \"%s\"\n", cl->image);
+		fformat(out, "    image \"%s\"\n", cl->image);
 	}
 	if (cl->ssl[0] && strcmp(cl->ssl, "self-signed") != 0)
 	{
-		fprintf(out, "    ssl %s\n", cl->ssl);
+		fformat(out, "    ssl %s\n", cl->ssl);
 	}
 	if (cl->auth[0] && strcmp(cl->auth, "trust") != 0)
 	{
-		fprintf(out, "    auth %s\n", cl->auth);
+		fformat(out, "    auth %s\n", cl->auth);
 	}
 	if (cl->extensionVersion[0])
 	{
-		fprintf(out, "    extension-version %s\n", cl->extensionVersion);
+		fformat(out, "    extension-version %s\n", cl->extensionVersion);
 	}
 
 	for (int fi = 0; fi < cl->formationCount; fi++)
@@ -571,11 +572,11 @@ print_cluster(FILE *out, const TestSpec *spec)
 
 		if (strcmp(f->name, "default") == 0)
 		{
-			fprintf(out, "    formation {\n");
+			fformat(out, "    formation {\n");
 		}
 		else
 		{
-			fprintf(out, "    formation %s {\n", f->name);
+			fformat(out, "    formation %s {\n", f->name);
 		}
 
 		for (int ni = 0; ni < f->nodeCount; ni++)
@@ -583,10 +584,10 @@ print_cluster(FILE *out, const TestSpec *spec)
 			print_node(out, &f->nodes[ni], 8);
 		}
 
-		fprintf(out, "    }\n");
+		fformat(out, "    }\n");
 	}
 
-	fprintf(out, "}\n");
+	fformat(out, "}\n");
 }
 
 
@@ -698,7 +699,7 @@ emit_segment(FILE *out, const char *seg, int bodyIndent)
 	{
 		if ((int) strlen(p) <= avail)
 		{
-			fprintf(out, "%*s%s\n", bodyIndent, "", p);
+			fformat(out, "%*s%s\n", bodyIndent, "", p);
 			break;
 		}
 
@@ -714,14 +715,14 @@ emit_segment(FILE *out, const char *seg, int bodyIndent)
 
 		if (last_spc)
 		{
-			fprintf(out, "%*s%.*s\n",
+			fformat(out, "%*s%.*s\n",
 					bodyIndent, "", (int) (last_spc - p), p);
 			p = last_spc + 1;   /* skip the space */
 		}
 		else
 		{
 			/* No space — hard break (avoids infinite loop on long tokens). */
-			fprintf(out, "%*s%.*s\n", bodyIndent, "", avail, p);
+			fformat(out, "%*s%.*s\n", bodyIndent, "", avail, p);
 			p += avail;
 		}
 	}
@@ -755,7 +756,7 @@ print_sql_body(FILE *out, const char *raw_sql, int bodyIndent)
 	/* Short enough to fit on one line? */
 	if ((int) strlen(norm) <= avail)
 	{
-		fprintf(out, "%*s%s\n", bodyIndent, "", norm);
+		fformat(out, "%*s%s\n", bodyIndent, "", norm);
 		return;
 	}
 
@@ -816,13 +817,13 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 	{
 		case CMD_EXEC:
 		{
-			fprintf(out, "%*sexec %s  %s\n", indent, "", cmd->service, cmd->args);
+			fformat(out, "%*sexec %s  %s\n", indent, "", cmd->service, cmd->args);
 			break;
 		}
 
 		case CMD_EXEC_FAILS:
 		{
-			fprintf(out, "%*sexec-fails %s  %s\n", indent, "",
+			fformat(out, "%*sexec-fails %s  %s\n", indent, "",
 					cmd->service, cmd->args);
 			break;
 		}
@@ -839,45 +840,45 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 		case CMD_WAIT_STATES:
 		{
 			/* wait until s1, s2 [in group N] timeout Ns */
-			fprintf(out, "%*swait until", indent, "");
+			fformat(out, "%*swait until", indent, "");
 			for (int i = 0; i < cmd->waitStateCount; i++)
 			{
 				if (i > 0)
 				{
-					fprintf(out, ",");
+					fformat(out, ",");
 				}
-				fprintf(out, " %s", cmd->waitStates[i]);
+				fformat(out, " %s", cmd->waitStates[i]);
 			}
 			if (cmd->waitGroupCount > 0)
 			{
 				for (int g = 0; g < cmd->waitGroupCount; g++)
 				{
-					fprintf(out, " in group %d", cmd->waitGroups[g]);
+					fformat(out, " in group %d", cmd->waitGroups[g]);
 				}
 			}
-			fprintf(out, "  timeout %ds\n", cmd->timeoutSeconds);
+			fformat(out, "  timeout %ds\n", cmd->timeoutSeconds);
 			break;
 		}
 
 		case CMD_WAIT_STOPPED:
 		{
-			fprintf(out, "%*swait until %s stopped  timeout %ds\n",
+			fformat(out, "%*swait until %s stopped  timeout %ds\n",
 					indent, "", cmd->service, cmd->timeoutSeconds);
 			break;
 		}
 
 		case CMD_PROMOTE:
 		{
-			fprintf(out, "%*spromote", indent, "");
+			fformat(out, "%*spromote", indent, "");
 			for (int i = 0; i < cmd->promoteCount; i++)
 			{
 				if (i > 0)
 				{
-					fprintf(out, ",");
+					fformat(out, ",");
 				}
-				fprintf(out, " %s", cmd->promoteNodes[i]);
+				fformat(out, " %s", cmd->promoteNodes[i]);
 			}
-			fprintf(out, "\n");
+			fformat(out, "\n");
 			break;
 		}
 
@@ -901,14 +902,14 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 
 			if (oneliner_len <= 79)
 			{
-				fprintf(out, "%*ssql %s { %s }\n",
+				fformat(out, "%*ssql %s { %s }\n",
 						indent, "", cmd->service, norm);
 			}
 			else
 			{
-				fprintf(out, "%*ssql %s {\n", indent, "", cmd->service);
+				fformat(out, "%*ssql %s {\n", indent, "", cmd->service);
 				print_sql_body(out, norm, indent + 4);
-				fprintf(out, "%*s}\n", indent, "");
+				fformat(out, "%*s}\n", indent, "");
 			}
 			break;
 		}
@@ -919,109 +920,109 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 			 * { r1 } { r2 } tuple syntax by expand_tuple_expect — reverse it. */
 			if (strchr(cmd->expected, '\n'))
 			{
-				fprintf(out, "%*sexpect {", indent, "");
+				fformat(out, "%*sexpect {", indent, "");
 				const char *p = cmd->expected;
 				while (*p)
 				{
 					const char *nl = strchr(p, '\n');
 					int len = nl ? (int) (nl - p) : (int) strlen(p);
-					fprintf(out, " { %.*s }", len, p);
+					fformat(out, " { %.*s }", len, p);
 					p += len;
 					if (*p == '\n')
 					{
 						p++;
 					}
 				}
-				fprintf(out, " }\n");
+				fformat(out, " }\n");
 			}
 			else
 			{
-				fprintf(out, "%*sexpect { %s }\n", indent, "", cmd->expected);
+				fformat(out, "%*sexpect { %s }\n", indent, "", cmd->expected);
 			}
 			break;
 		}
 
 		case CMD_EXPECT_ERROR:
 		{
-			fprintf(out, "%*sexpect error %s\n", indent, "", cmd->state);
+			fformat(out, "%*sexpect error %s\n", indent, "", cmd->state);
 			break;
 		}
 
 		case CMD_NETWORK_OFF:
 		{
-			fprintf(out, "%*snetwork disconnect %s\n", indent, "", cmd->service);
+			fformat(out, "%*snetwork disconnect %s\n", indent, "", cmd->service);
 			break;
 		}
 
 		case CMD_NETWORK_ON:
 		{
-			fprintf(out, "%*snetwork connect %s\n", indent, "", cmd->service);
+			fformat(out, "%*snetwork connect %s\n", indent, "", cmd->service);
 			break;
 		}
 
 		case CMD_SLEEP:
 		{
-			fprintf(out, "%*ssleep %ds\n", indent, "", cmd->timeoutSeconds);
+			fformat(out, "%*ssleep %ds\n", indent, "", cmd->timeoutSeconds);
 			break;
 		}
 
 		case CMD_COMPOSE_DOWN:
 		{
-			fprintf(out, "%*scompose down\n", indent, "");
+			fformat(out, "%*scompose down\n", indent, "");
 			break;
 		}
 
 		case CMD_COMPOSE_START:
 		{
-			fprintf(out, "%*scompose start %s\n", indent, "", cmd->service);
+			fformat(out, "%*scompose start %s\n", indent, "", cmd->service);
 			break;
 		}
 
 		case CMD_COMPOSE_STOP:
 		{
-			fprintf(out, "%*scompose stop %s\n", indent, "", cmd->service);
+			fformat(out, "%*scompose stop %s\n", indent, "", cmd->service);
 			break;
 		}
 
 		case CMD_COMPOSE_KILL:
 		{
-			fprintf(out, "%*scompose kill %s\n", indent, "", cmd->service);
+			fformat(out, "%*scompose kill %s\n", indent, "", cmd->service);
 			break;
 		}
 
 		case CMD_PG_AUTOCTL:
 		{
-			fprintf(out, "%*spg_autoctl %s\n", indent, "", cmd->args);
+			fformat(out, "%*spg_autoctl %s\n", indent, "", cmd->args);
 			break;
 		}
 
 		case CMD_STOP_POSTGRES:
 		{
-			fprintf(out, "%*sstop postgres %s\n", indent, "", cmd->service);
+			fformat(out, "%*sstop postgres %s\n", indent, "", cmd->service);
 			break;
 		}
 
 		case CMD_START_POSTGRES:
 		{
-			fprintf(out, "%*sstart postgres %s\n", indent, "", cmd->service);
+			fformat(out, "%*sstart postgres %s\n", indent, "", cmd->service);
 			break;
 		}
 
 		case CMD_STAYS_WHILE:
 		{
-			fprintf(out, "%*sassert %s stays %s while {\n",
+			fformat(out, "%*sassert %s stays %s while {\n",
 					indent, "", cmd->service, cmd->state);
 			for (const TestCmd *bc = cmd->body; bc; bc = bc->next)
 			{
 				print_cmd(out, bc, indent + 4);
 			}
-			fprintf(out, "%*s}\n", indent, "");
+			fformat(out, "%*s}\n", indent, "");
 			break;
 		}
 
 		case CMD_COMPOSE_INJECT:
 		{
-			fprintf(out, "%*scompose inject %s %s %s:%s\n",
+			fformat(out, "%*scompose inject %s %s %s:%s\n",
 					indent, "",
 					cmd->expected,  /* image */
 					cmd->args,      /* src path */
@@ -1032,7 +1033,7 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 
 		case CMD_SET_MONITOR:
 		{
-			fprintf(out, "%*sset monitor %s\n", indent, "", cmd->service);
+			fformat(out, "%*sset monitor %s\n", indent, "", cmd->service);
 			break;
 		}
 
@@ -1043,7 +1044,7 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 			 * The logsNegate flag adds "not " and allowError picks the verb.
 			 */
 			const char *verb = cmd->allowError ? "matches" : "contains";
-			fprintf(out, "%*slogs %s %s%s \"%s\"\n",
+			fformat(out, "%*slogs %s %s%s \"%s\"\n",
 					indent, "",
 					cmd->service,
 					cmd->logsNegate ? "not " : "",
@@ -1054,7 +1055,7 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 
 		default:
 		{
-			fprintf(out, "%*s(unknown cmd %d)\n", indent, "", cmd->kind);
+			fformat(out, "%*s(unknown cmd %d)\n", indent, "", cmd->kind);
 			break;
 		}
 	}
@@ -1071,15 +1072,15 @@ print_cmd_wait(FILE *out, const TestCmd *cmd, int indent)
 	if (cmd->kind == CMD_WAIT_MULTI)
 	{
 		/* first condition on same line, subsequent "and" lines indented */
-		fprintf(out, "%*swait until %s state is %s\n",
+		fformat(out, "%*swait until %s state is %s\n",
 				indent, "", cmd->waitNodes[0], cmd->waitStates[0]);
 		for (int i = 1; i < cmd->waitStateCount; i++)
 		{
-			fprintf(out, "%*sand %s state is %s\n",
+			fformat(out, "%*sand %s state is %s\n",
 					indent + 4, "",
 					cmd->waitNodes[i], cmd->waitStates[i]);
 		}
-		fprintf(out, "%*s    timeout %ds\n", indent, "", cmd->timeoutSeconds);
+		fformat(out, "%*s    timeout %ds\n", indent, "", cmd->timeoutSeconds);
 		return;
 	}
 
@@ -1091,12 +1092,12 @@ print_cmd_wait(FILE *out, const TestCmd *cmd, int indent)
 	{
 		if (cmd->timeoutSeconds > 0)
 		{
-			fprintf(out, "%*swait until %s assigned-state = %s  timeout %ds\n",
+			fformat(out, "%*swait until %s assigned-state = %s  timeout %ds\n",
 					indent, "", cmd->service, cmd->state, cmd->timeoutSeconds);
 		}
 		else
 		{
-			fprintf(out, "%*sassert %s assigned-state = %s\n",
+			fformat(out, "%*sassert %s assigned-state = %s\n",
 					indent, "", cmd->service, cmd->state);
 		}
 		return;
@@ -1105,7 +1106,7 @@ print_cmd_wait(FILE *out, const TestCmd *cmd, int indent)
 	/* CMD_ASSERT_STATE with no timeout: instant check → canonical assert form */
 	if (cmd->kind == CMD_ASSERT_STATE && cmd->timeoutSeconds == 0)
 	{
-		fprintf(out, "%*sassert %s state = %s\n",
+		fformat(out, "%*sassert %s state = %s\n",
 				indent, "", cmd->service, cmd->state);
 		return;
 	}
@@ -1116,31 +1117,31 @@ print_cmd_wait(FILE *out, const TestCmd *cmd, int indent)
 	if (cmd->passThroughCount > 0)
 	{
 		/* multi-line: target state, then "passing through" line */
-		fprintf(out, "%*s%s %s state is %s\n",
+		fformat(out, "%*s%s %s state is %s\n",
 				indent, "", op, cmd->service, cmd->state);
-		fprintf(out, "%*s    passing through", indent, "");
+		fformat(out, "%*s    passing through", indent, "");
 		for (int i = 0; i < cmd->passThroughCount; i++)
 		{
 			if (i > 0)
 			{
-				fprintf(out, ",");
+				fformat(out, ",");
 			}
-			fprintf(out, " %s", cmd->passThroughStates[i]);
+			fformat(out, " %s", cmd->passThroughStates[i]);
 		}
-		fprintf(out, "\n");
-		fprintf(out, "%*s    timeout %ds\n", indent, "", cmd->timeoutSeconds);
+		fformat(out, "\n");
+		fformat(out, "%*s    timeout %ds\n", indent, "", cmd->timeoutSeconds);
 		return;
 	}
 
 	/* simple single-line */
 	if (cmd->timeoutSeconds > 0)
 	{
-		fprintf(out, "%*s%s %s state is %s  timeout %ds\n",
+		fformat(out, "%*s%s %s state is %s  timeout %ds\n",
 				indent, "", op, cmd->service, cmd->state, cmd->timeoutSeconds);
 	}
 	else
 	{
-		fprintf(out, "%*s%s %s state is %s\n",
+		fformat(out, "%*s%s %s state is %s\n",
 				indent, "", op, cmd->service, cmd->state);
 	}
 }
