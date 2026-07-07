@@ -458,11 +458,11 @@ nodespec_create_argv(const NodeSpec *spec,
 	int i = 0;
 
 #define PUSH(v) do { \
-			if (i >= args_size - 1) { \
-				log_error("nodespec_create_argv: args[] overflow"); \
-				return -1; \
-			} \
-			args[i++] = (char *) (v); \
+		if (i >= args_size - 1) { \
+			log_error("nodespec_create_argv: args[] overflow"); \
+			return -1; \
+		} \
+		args[i++] = (char *) (v); \
 } while (0)
 
 	PUSH(pg_autoctl_path);

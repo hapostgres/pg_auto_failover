@@ -48,7 +48,7 @@
  * The monitor hostname is always "monitor" inside the compose network.
  */
 #define MONITOR_PGURI \
-		"postgresql://autoctl_node@monitor/pg_auto_failover"
+	"postgresql://autoctl_node@monitor/pg_auto_failover"
 
 /* Fixed path inside every container */
 #define NODE_INI_PATH "/etc/pgaf/node.ini"
@@ -81,21 +81,21 @@ debian_pg_version(void)
  * - CA cert copied to ~/.postgresql/root.crt so libpq trusts server certs.
  */
 #define SSL_COPY_CERTS_CMD \
-		"cp " SSL_DIR_IN_CONTAINER "/server/server.crt /var/lib/postgres/server.crt" \
-		" && cp " SSL_DIR_IN_CONTAINER \
-		"/server/server.key /var/lib/postgres/server.key" \
-		" && chmod 0600 /var/lib/postgres/server.key" \
-		" && mkdir -p /var/lib/postgres/.postgresql" \
-		" && cp " \
-		SSL_DIR_IN_CONTAINER \
-		"/client/postgresql.crt /var/lib/postgres/.postgresql/postgresql.crt" \
-		" && cp " \
-		SSL_DIR_IN_CONTAINER \
-		"/client/postgresql.key /var/lib/postgres/.postgresql/postgresql.key" \
-		" && chmod 0600 /var/lib/postgres/.postgresql/postgresql.key" \
-		" && cp " \
-		SSL_DIR_IN_CONTAINER "/ca.crt /var/lib/postgres/.postgresql/root.crt" \
-		" &&"
+	"cp " SSL_DIR_IN_CONTAINER "/server/server.crt /var/lib/postgres/server.crt" \
+							   " && cp " SSL_DIR_IN_CONTAINER \
+	"/server/server.key /var/lib/postgres/server.key" \
+	" && chmod 0600 /var/lib/postgres/server.key" \
+	" && mkdir -p /var/lib/postgres/.postgresql" \
+	" && cp " \
+	SSL_DIR_IN_CONTAINER \
+	"/client/postgresql.crt /var/lib/postgres/.postgresql/postgresql.crt" \
+	" && cp " \
+	SSL_DIR_IN_CONTAINER \
+	"/client/postgresql.key /var/lib/postgres/.postgresql/postgresql.key" \
+	" && chmod 0600 /var/lib/postgres/.postgresql/postgresql.key" \
+	" && cp " \
+	SSL_DIR_IN_CONTAINER "/ca.crt /var/lib/postgres/.postgresql/root.crt" \
+						 " &&"
 
 
 /*
@@ -520,9 +520,9 @@ compose_gen_write(TestCluster *cluster,
 		{
 			fformat(f,
 					"      - ./ssl/ca.crt:" SSL_DIR_IN_CONTAINER "/ca.crt:ro\n"
-					"      - ./ssl/monitor:"
+																 "      - ./ssl/monitor:"
 					SSL_DIR_IN_CONTAINER "/server:ro\n"
-					"      - ./ssl/client:"
+										 "      - ./ssl/client:"
 					SSL_DIR_IN_CONTAINER "/client:ro\n");
 		}
 		if (cluster->bindSource)
@@ -549,7 +549,7 @@ compose_gen_write(TestCluster *cluster,
 				"    command: [\"/bin/sh\", \"-c\","
 				" \"%s rm -f /tmp/pg_autoctl%s/pg_autoctl.pid"
 				" && exec pg_autoctl node run " NODE_INI_PATH "\"]\n"
-				"    stop_grace_period: 60s\n\n",
+															  "    stop_grace_period: 60s\n\n",
 				ssl_needs_certs(cluster->ssl) ? SSL_COPY_CERTS_CMD : "",
 				monitor_pgdata);
 	}
@@ -575,9 +575,9 @@ compose_gen_write(TestCluster *cluster,
 		{
 			fformat(f,
 					"      - ./ssl/ca.crt:" SSL_DIR_IN_CONTAINER "/ca.crt:ro\n"
-					"      - ./ssl/%s:"
+																 "      - ./ssl/%s:"
 					SSL_DIR_IN_CONTAINER "/server:ro\n"
-					"      - ./ssl/client:"
+										 "      - ./ssl/client:"
 					SSL_DIR_IN_CONTAINER "/client:ro\n",
 					svc);
 		}
@@ -596,9 +596,9 @@ compose_gen_write(TestCluster *cluster,
 		fformat(f,
 				"    command: [\"/bin/sh\", \"-c\","
 				" \"%s rm -f /tmp/pg_autoctl" NODE_PGDATA "/pg_autoctl.pid"
-				" && exec pg_autoctl node run "
+														  " && exec pg_autoctl node run "
 				NODE_INI_PATH "\"]\n"
-				"    stop_grace_period: 60s\n\n",
+							  "    stop_grace_period: 60s\n\n",
 				ssl_needs_certs(cluster->ssl) ? SSL_COPY_CERTS_CMD : "");
 	}
 
@@ -655,9 +655,9 @@ compose_gen_write(TestCluster *cluster,
 			{
 				fformat(f,
 						"      - ./ssl/ca.crt:" SSL_DIR_IN_CONTAINER "/ca.crt:ro\n"
-						"      - ./ssl/%s:"
+																	 "      - ./ssl/%s:"
 						SSL_DIR_IN_CONTAINER "/server:ro\n"
-						"      - ./ssl/client:"
+											 "      - ./ssl/client:"
 						SSL_DIR_IN_CONTAINER "/client:ro\n",
 						n->name);
 			}
@@ -688,7 +688,7 @@ compose_gen_write(TestCluster *cluster,
 					"    command: [\"/bin/sh\", \"-c\","
 					" \"%s rm -f /tmp/pg_autoctl%s/pg_autoctl.pid"
 					" && exec pg_autoctl node run " NODE_INI_PATH "\"]\n"
-					"    stop_grace_period: 60s\n",
+																  "    stop_grace_period: 60s\n",
 					ssl_needs_certs(node_ssl) ? SSL_COPY_CERTS_CMD : "",
 					node_pgdata);
 
@@ -910,8 +910,8 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 		         * user) in the start command so the key is owned by the container
 		         * user and PostgreSQL can open it.
 		         */
-				"cert_file = /var/lib/postgres/server.crt\n"
-				"key_file  = /var/lib/postgres/server.key\n");
+													"cert_file = /var/lib/postgres/server.crt\n"
+													"key_file  = /var/lib/postgres/server.key\n");
 	}
 
 	if (cluster->monitorPassword[0])
@@ -978,11 +978,11 @@ compose_gen_write_second_monitor_ini(const TestCluster *cluster, const char *dir
 			"\n"
 			"[postgresql]\n"
 			"pgdata = " NODE_PGDATA "\n"
-			"\n"
-			"[options]\n"
-			"ssl        = %s\n"
-			"auth       = %s\n"
-			"pg_hba_lan = false\n",
+									"\n"
+									"[options]\n"
+									"ssl        = %s\n"
+									"auth       = %s\n"
+									"pg_hba_lan = false\n",
 			name, name,
 			cluster->ssl,
 			cluster->auth);
@@ -1000,8 +1000,8 @@ compose_gen_write_second_monitor_ini(const TestCluster *cluster, const char *dir
 		         * user) in the start command so the key is owned by the container
 		         * user and PostgreSQL can open it.
 		         */
-				"cert_file = /var/lib/postgres/server.crt\n"
-				"key_file  = /var/lib/postgres/server.key\n");
+													"cert_file = /var/lib/postgres/server.crt\n"
+													"key_file  = /var/lib/postgres/server.key\n");
 	}
 
 	fclose(f);
@@ -1085,7 +1085,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 				"\n"
 				"[postgresql]\n"
 				"pgdata = " DEBIAN_PGDATA_PREFIX "/%s/%s\n"
-				"\n",
+												 "\n",
 				debian_pg_version(), node->debianCluster);
 	}
 	else
@@ -1094,7 +1094,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 				"\n"
 				"[postgresql]\n"
 				"pgdata = " NODE_PGDATA "\n"
-				"\n");
+										"\n");
 	}
 
 	if (node->noMonitor)
@@ -1119,7 +1119,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 		fformat(f,
 				"[monitor]\n"
 				"pguri = " MONITOR_PGURI "\n"
-				"\n");
+										 "\n");
 	}
 
 	fformat(f,
@@ -1172,8 +1172,8 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 		         * user) in the start command so the key is owned by the container
 		         * user and PostgreSQL can open it.
 		         */
-				"cert_file = /var/lib/postgres/server.crt\n"
-				"key_file  = /var/lib/postgres/server.key\n");
+													"cert_file = /var/lib/postgres/server.crt\n"
+													"key_file  = /var/lib/postgres/server.key\n");
 	}
 
 	if (node->listen)

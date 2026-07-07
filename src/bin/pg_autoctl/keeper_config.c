@@ -22,25 +22,25 @@
 #include "pgctl.h"
 
 #define OPTION_AUTOCTL_ROLE(config) \
-		make_strbuf_option_default("pg_autoctl", "role", NULL, true, NAMEDATALEN, \
-								   config->role, KEEPER_ROLE)
+	make_strbuf_option_default("pg_autoctl", "role", NULL, true, NAMEDATALEN, \
+							   config->role, KEEPER_ROLE)
 
 #define OPTION_AUTOCTL_MONITOR(config) \
-		make_strbuf_option("pg_autoctl", "monitor", "monitor", false, MAXCONNINFO, \
-						   config->monitor_pguri)
+	make_strbuf_option("pg_autoctl", "monitor", "monitor", false, MAXCONNINFO, \
+					   config->monitor_pguri)
 
 #define OPTION_AUTOCTL_FORMATION(config) \
-		make_strbuf_option_default("pg_autoctl", "formation", "formation", \
-								   true, NAMEDATALEN, \
-								   config->formation, FORMATION_DEFAULT)
+	make_strbuf_option_default("pg_autoctl", "formation", "formation", \
+							   true, NAMEDATALEN, \
+							   config->formation, FORMATION_DEFAULT)
 
 #define OPTION_AUTOCTL_GROUPID(config) \
-		make_int_option("pg_autoctl", "group", "group", false, &(config->groupId))
+	make_int_option("pg_autoctl", "group", "group", false, &(config->groupId))
 
 #define OPTION_AUTOCTL_NAME(config) \
-		make_strbuf_option_default("pg_autoctl", "name", "name", \
-								   false, _POSIX_HOST_NAME_MAX, \
-								   config->name, "")
+	make_strbuf_option_default("pg_autoctl", "name", "name", \
+							   false, _POSIX_HOST_NAME_MAX, \
+							   config->name, "")
 
 /*
  * --hostname used to be --nodename, and we need to support transition from the
@@ -50,212 +50,212 @@
  * As a result HOSTNAME is marked not required and NODENAME is marked compat.
  */
 #define OPTION_AUTOCTL_HOSTNAME(config) \
-		make_strbuf_option("pg_autoctl", "hostname", "hostname", \
-						   false, _POSIX_HOST_NAME_MAX, config->hostname)
+	make_strbuf_option("pg_autoctl", "hostname", "hostname", \
+					   false, _POSIX_HOST_NAME_MAX, config->hostname)
 
 #define OPTION_AUTOCTL_NODENAME(config) \
-		make_strbuf_compat_option("pg_autoctl", "nodename", \
-								  _POSIX_HOST_NAME_MAX, config->hostname)
+	make_strbuf_compat_option("pg_autoctl", "nodename", \
+							  _POSIX_HOST_NAME_MAX, config->hostname)
 
 #define OPTION_AUTOCTL_NODEKIND(config) \
-		make_strbuf_option("pg_autoctl", "nodekind", NULL, false, NAMEDATALEN, \
-						   config->nodeKind)
+	make_strbuf_option("pg_autoctl", "nodekind", NULL, false, NAMEDATALEN, \
+					   config->nodeKind)
 
 #define OPTION_POSTGRESQL_PGDATA(config) \
-		make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
-						   config->pgSetup.pgdata)
+	make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
+					   config->pgSetup.pgdata)
 
 #define OPTION_POSTGRESQL_PG_CTL(config) \
-		make_strbuf_option("postgresql", "pg_ctl", "pgctl", false, MAXPGPATH, \
-						   config->pgSetup.pg_ctl)
+	make_strbuf_option("postgresql", "pg_ctl", "pgctl", false, MAXPGPATH, \
+					   config->pgSetup.pg_ctl)
 
 #define OPTION_POSTGRESQL_USERNAME(config) \
-		make_strbuf_option("postgresql", "username", "username", \
-						   false, NAMEDATALEN, \
-						   config->pgSetup.username)
+	make_strbuf_option("postgresql", "username", "username", \
+					   false, NAMEDATALEN, \
+					   config->pgSetup.username)
 
 #define OPTION_POSTGRESQL_DBNAME(config) \
-		make_strbuf_option("postgresql", "dbname", "dbname", false, NAMEDATALEN, \
-						   config->pgSetup.dbname)
+	make_strbuf_option("postgresql", "dbname", "dbname", false, NAMEDATALEN, \
+					   config->pgSetup.dbname)
 
 #define OPTION_POSTGRESQL_HOST(config) \
-		make_strbuf_option("postgresql", "host", "pghost", \
-						   false, _POSIX_HOST_NAME_MAX, \
-						   config->pgSetup.pghost)
+	make_strbuf_option("postgresql", "host", "pghost", \
+					   false, _POSIX_HOST_NAME_MAX, \
+					   config->pgSetup.pghost)
 
 #define OPTION_POSTGRESQL_PORT(config) \
-		make_int_option("postgresql", "port", "pgport", \
-						true, &(config->pgSetup.pgport))
+	make_int_option("postgresql", "port", "pgport", \
+					true, &(config->pgSetup.pgport))
 
 #define OPTION_POSTGRESQL_PROXY_PORT(config) \
-		make_int_option("postgresql", "proxyport", "proxyport", \
-						false, &(config->pgSetup.proxyport))
+	make_int_option("postgresql", "proxyport", "proxyport", \
+					false, &(config->pgSetup.proxyport))
 
 #define OPTION_POSTGRESQL_LISTEN_ADDRESSES(config) \
-		make_strbuf_option("postgresql", "listen_addresses", "listen", \
-						   false, MAXPGPATH, config->pgSetup.listen_addresses)
+	make_strbuf_option("postgresql", "listen_addresses", "listen", \
+					   false, MAXPGPATH, config->pgSetup.listen_addresses)
 
 #define OPTION_POSTGRESQL_AUTH_METHOD(config) \
-		make_strbuf_option("postgresql", "auth_method", "auth", \
-						   false, MAXPGPATH, config->pgSetup.authMethod)
+	make_strbuf_option("postgresql", "auth_method", "auth", \
+					   false, MAXPGPATH, config->pgSetup.authMethod)
 
 #define OPTION_POSTGRESQL_HBA_LEVEL(config) \
-		make_strbuf_option("postgresql", "hba_level", NULL, \
-						   false, MAXPGPATH, config->pgSetup.hbaLevelStr)
+	make_strbuf_option("postgresql", "hba_level", NULL, \
+					   false, MAXPGPATH, config->pgSetup.hbaLevelStr)
 
 #define OPTION_SSL_ACTIVE(config) \
-		make_int_option_default("ssl", "active", NULL, \
-								false, &(config->pgSetup.ssl.active), 0)
+	make_int_option_default("ssl", "active", NULL, \
+							false, &(config->pgSetup.ssl.active), 0)
 
 #define OPTION_SSL_MODE(config) \
-		make_strbuf_option("ssl", "sslmode", "ssl-mode", \
-						   false, SSL_MODE_STRLEN, config->pgSetup.ssl.sslModeStr)
+	make_strbuf_option("ssl", "sslmode", "ssl-mode", \
+					   false, SSL_MODE_STRLEN, config->pgSetup.ssl.sslModeStr)
 
 #define OPTION_SSL_CA_FILE(config) \
-		make_strbuf_option("ssl", "ca_file", "ssl-ca-file", \
-						   false, MAXPGPATH, config->pgSetup.ssl.caFile)
+	make_strbuf_option("ssl", "ca_file", "ssl-ca-file", \
+					   false, MAXPGPATH, config->pgSetup.ssl.caFile)
 
 #define OPTION_SSL_CRL_FILE(config) \
-		make_strbuf_option("ssl", "crl_file", "ssl-crl-file", \
-						   false, MAXPGPATH, config->pgSetup.ssl.crlFile)
+	make_strbuf_option("ssl", "crl_file", "ssl-crl-file", \
+					   false, MAXPGPATH, config->pgSetup.ssl.crlFile)
 
 #define OPTION_SSL_SERVER_CERT(config) \
-		make_strbuf_option("ssl", "cert_file", "server-cert", \
-						   false, MAXPGPATH, config->pgSetup.ssl.serverCert)
+	make_strbuf_option("ssl", "cert_file", "server-cert", \
+					   false, MAXPGPATH, config->pgSetup.ssl.serverCert)
 
 #define OPTION_SSL_SERVER_KEY(config) \
-		make_strbuf_option("ssl", "key_file", "server-key", \
-						   false, MAXPGPATH, config->pgSetup.ssl.serverKey)
+	make_strbuf_option("ssl", "key_file", "server-key", \
+					   false, MAXPGPATH, config->pgSetup.ssl.serverKey)
 
 #define OPTION_REPLICATION_PASSWORD(config) \
-		make_strbuf_option_default("replication", "password", NULL, \
-								   false, MAXCONNINFO, \
-								   config->replication_password, \
-								   REPLICATION_PASSWORD_DEFAULT)
+	make_strbuf_option_default("replication", "password", NULL, \
+							   false, MAXCONNINFO, \
+							   config->replication_password, \
+							   REPLICATION_PASSWORD_DEFAULT)
 
 #define OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config) \
-		make_strbuf_option_default("replication", "maximum_backup_rate", NULL, \
-								   false, MAXIMUM_BACKUP_RATE_LEN, \
-								   config->maximum_backup_rate, \
-								   MAXIMUM_BACKUP_RATE)
+	make_strbuf_option_default("replication", "maximum_backup_rate", NULL, \
+							   false, MAXIMUM_BACKUP_RATE_LEN, \
+							   config->maximum_backup_rate, \
+							   MAXIMUM_BACKUP_RATE)
 
 #define OPTION_REPLICATION_BACKUP_DIR(config) \
-		make_strbuf_option("replication", "backup_directory", NULL, \
-						   false, MAXPGPATH, config->backupDirectory)
+	make_strbuf_option("replication", "backup_directory", NULL, \
+					   false, MAXPGPATH, config->backupDirectory)
 
 #define OPTION_TIMEOUT_NETWORK_PARTITION(config) \
-		make_int_option_default("timeout", "network_partition_timeout", \
-								NULL, false, \
-								&(config->network_partition_timeout), \
-								NETWORK_PARTITION_TIMEOUT)
+	make_int_option_default("timeout", "network_partition_timeout", \
+							NULL, false, \
+							&(config->network_partition_timeout), \
+							NETWORK_PARTITION_TIMEOUT)
 
 #define OPTION_TIMEOUT_PREPARE_PROMOTION_CATCHUP(config) \
-		make_int_option_default("timeout", "prepare_promotion_catchup", \
-								NULL, \
-								false, \
-								&(config->prepare_promotion_catchup), \
-								PREPARE_PROMOTION_CATCHUP_TIMEOUT)
+	make_int_option_default("timeout", "prepare_promotion_catchup", \
+							NULL, \
+							false, \
+							&(config->prepare_promotion_catchup), \
+							PREPARE_PROMOTION_CATCHUP_TIMEOUT)
 
 #define OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config) \
-		make_int_option_default("timeout", "prepare_promotion_walreceiver", \
-								NULL, \
-								false, \
-								&(config->prepare_promotion_walreceiver), \
-								PREPARE_PROMOTION_WALRECEIVER_TIMEOUT)
+	make_int_option_default("timeout", "prepare_promotion_walreceiver", \
+							NULL, \
+							false, \
+							&(config->prepare_promotion_walreceiver), \
+							PREPARE_PROMOTION_WALRECEIVER_TIMEOUT)
 
 #define OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config) \
-		make_int_option_default("timeout", "postgresql_restart_failure_timeout", \
-								NULL, \
-								false, \
-								&(config->postgresql_restart_failure_timeout), \
-								POSTGRESQL_FAILS_TO_START_TIMEOUT)
+	make_int_option_default("timeout", "postgresql_restart_failure_timeout", \
+							NULL, \
+							false, \
+							&(config->postgresql_restart_failure_timeout), \
+							POSTGRESQL_FAILS_TO_START_TIMEOUT)
 
 #define OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config) \
-		make_int_option_default("timeout", "postgresql_restart_failure_max_retries", \
-								NULL, \
-								false, \
-								&(config->postgresql_restart_failure_max_retries), \
-								POSTGRESQL_FAILS_TO_START_RETRIES)
+	make_int_option_default("timeout", "postgresql_restart_failure_max_retries", \
+							NULL, \
+							false, \
+							&(config->postgresql_restart_failure_max_retries), \
+							POSTGRESQL_FAILS_TO_START_RETRIES)
 
 #define OPTION_TIMEOUT_CITUS_MASTER_UPDATE_NODE_LOCK_COOLDOWN(config) \
-		make_int_option_default("timeout", "citus_master_update_node_lock_cooldown", \
-								NULL, \
-								false, \
-								&(config->citus_master_update_node_lock_cooldown), \
-								CITUS_MASTER_UPDATE_NODE_LOCK_COOLDOWN)
+	make_int_option_default("timeout", "citus_master_update_node_lock_cooldown", \
+							NULL, \
+							false, \
+							&(config->citus_master_update_node_lock_cooldown), \
+							CITUS_MASTER_UPDATE_NODE_LOCK_COOLDOWN)
 
 #define OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_MAX_RETRIES(config) \
-		make_int_option_default("timeout", "citus_coordinator_wait_max_retries", \
-								NULL, \
-								false, \
-								&(config->citus_coordinator_wait_max_retries), \
-								CITUS_COORDINATOR_WAIT_MAX_RETRIES)
+	make_int_option_default("timeout", "citus_coordinator_wait_max_retries", \
+							NULL, \
+							false, \
+							&(config->citus_coordinator_wait_max_retries), \
+							CITUS_COORDINATOR_WAIT_MAX_RETRIES)
 
 #define OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_TIMEOUT(config) \
-		make_int_option_default("timeout", "citus_coordinator_wait_timeout", \
-								NULL, \
-								false, \
-								&(config->citus_coordinator_wait_timeout), \
-								CITUS_COORDINATOR_WAIT_TIMEOUT)
+	make_int_option_default("timeout", "citus_coordinator_wait_timeout", \
+							NULL, \
+							false, \
+							&(config->citus_coordinator_wait_timeout), \
+							CITUS_COORDINATOR_WAIT_TIMEOUT)
 
 #define OPTION_TIMEOUT_LISTEN_NOTIFICATIONS(config) \
-		make_int_option_default("timeout", "listen_notifications_timeout", \
-								NULL, false, \
-								&(config->listen_notifications_timeout), \
-								PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+	make_int_option_default("timeout", "listen_notifications_timeout", \
+							NULL, false, \
+							&(config->listen_notifications_timeout), \
+							PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
 
 #define OPTION_CITUS_ROLE(config) \
-		make_strbuf_option_default("citus", "role", NULL, false, NAMEDATALEN, \
-								   config->citusRoleStr, DEFAULT_CITUS_ROLE)
+	make_strbuf_option_default("citus", "role", NULL, false, NAMEDATALEN, \
+							   config->citusRoleStr, DEFAULT_CITUS_ROLE)
 
 #define OPTION_CITUS_CLUSTER_NAME(config) \
-		make_strbuf_option("citus", "cluster_name", "citus-cluster", \
-						   false, NAMEDATALEN, config->pgSetup.citusClusterName)
+	make_strbuf_option("citus", "cluster_name", "citus-cluster", \
+					   false, NAMEDATALEN, config->pgSetup.citusClusterName)
 
 #define SET_INI_OPTIONS_ARRAY(config) \
-		{ \
-			OPTION_AUTOCTL_ROLE(config), \
-			OPTION_AUTOCTL_MONITOR(config), \
-			OPTION_AUTOCTL_FORMATION(config), \
-			OPTION_AUTOCTL_GROUPID(config), \
-			OPTION_AUTOCTL_NAME(config), \
-			OPTION_AUTOCTL_HOSTNAME(config), \
-			OPTION_AUTOCTL_NODENAME(config), \
-			OPTION_AUTOCTL_NODEKIND(config), \
-			OPTION_POSTGRESQL_PGDATA(config), \
-			OPTION_POSTGRESQL_PG_CTL(config), \
-			OPTION_POSTGRESQL_USERNAME(config), \
-			OPTION_POSTGRESQL_DBNAME(config), \
-			OPTION_POSTGRESQL_HOST(config), \
-			OPTION_POSTGRESQL_PORT(config), \
-			OPTION_POSTGRESQL_PROXY_PORT(config), \
-			OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
-			OPTION_POSTGRESQL_AUTH_METHOD(config), \
-			OPTION_POSTGRESQL_HBA_LEVEL(config), \
-			OPTION_SSL_ACTIVE(config), \
-			OPTION_SSL_MODE(config), \
-			OPTION_SSL_CA_FILE(config), \
-			OPTION_SSL_CRL_FILE(config), \
-			OPTION_SSL_SERVER_CERT(config), \
-			OPTION_SSL_SERVER_KEY(config), \
-			OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config), \
-			OPTION_REPLICATION_BACKUP_DIR(config), \
-			OPTION_REPLICATION_PASSWORD(config), \
-			OPTION_TIMEOUT_NETWORK_PARTITION(config), \
-			OPTION_TIMEOUT_PREPARE_PROMOTION_CATCHUP(config), \
-			OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
-			OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config), \
-			OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config), \
-			OPTION_TIMEOUT_LISTEN_NOTIFICATIONS(config), \
+	{ \
+		OPTION_AUTOCTL_ROLE(config), \
+		OPTION_AUTOCTL_MONITOR(config), \
+		OPTION_AUTOCTL_FORMATION(config), \
+		OPTION_AUTOCTL_GROUPID(config), \
+		OPTION_AUTOCTL_NAME(config), \
+		OPTION_AUTOCTL_HOSTNAME(config), \
+		OPTION_AUTOCTL_NODENAME(config), \
+		OPTION_AUTOCTL_NODEKIND(config), \
+		OPTION_POSTGRESQL_PGDATA(config), \
+		OPTION_POSTGRESQL_PG_CTL(config), \
+		OPTION_POSTGRESQL_USERNAME(config), \
+		OPTION_POSTGRESQL_DBNAME(config), \
+		OPTION_POSTGRESQL_HOST(config), \
+		OPTION_POSTGRESQL_PORT(config), \
+		OPTION_POSTGRESQL_PROXY_PORT(config), \
+		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
+		OPTION_POSTGRESQL_AUTH_METHOD(config), \
+		OPTION_POSTGRESQL_HBA_LEVEL(config), \
+		OPTION_SSL_ACTIVE(config), \
+		OPTION_SSL_MODE(config), \
+		OPTION_SSL_CA_FILE(config), \
+		OPTION_SSL_CRL_FILE(config), \
+		OPTION_SSL_SERVER_CERT(config), \
+		OPTION_SSL_SERVER_KEY(config), \
+		OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config), \
+		OPTION_REPLICATION_BACKUP_DIR(config), \
+		OPTION_REPLICATION_PASSWORD(config), \
+		OPTION_TIMEOUT_NETWORK_PARTITION(config), \
+		OPTION_TIMEOUT_PREPARE_PROMOTION_CATCHUP(config), \
+		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \
+		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_TIMEOUT(config), \
+		OPTION_TIMEOUT_POSTGRESQL_RESTART_FAILURE_MAX_RETRIES(config), \
+		OPTION_TIMEOUT_LISTEN_NOTIFICATIONS(config), \
  \
-			OPTION_TIMEOUT_CITUS_MASTER_UPDATE_NODE_LOCK_COOLDOWN(config), \
-			OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_MAX_RETRIES(config), \
-			OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_TIMEOUT(config), \
+		OPTION_TIMEOUT_CITUS_MASTER_UPDATE_NODE_LOCK_COOLDOWN(config), \
+		OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_MAX_RETRIES(config), \
+		OPTION_TIMEOUT_CITUS_COORDINATOR_WAIT_TIMEOUT(config), \
  \
-			OPTION_CITUS_ROLE(config), \
-			OPTION_CITUS_CLUSTER_NAME(config), \
-			INI_OPTION_LAST \
-		}
+		OPTION_CITUS_ROLE(config), \
+		OPTION_CITUS_CLUSTER_NAME(config), \
+		INI_OPTION_LAST \
+	}
 
 static bool keeper_config_init_nodekind(KeeperConfig *config);
 static bool keeper_config_init_hbalevel(KeeperConfig *config);

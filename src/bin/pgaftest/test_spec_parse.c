@@ -326,7 +326,7 @@ static void
 yyerror(const char *msg)
 {
 	fprintf(/* IGNORE-BANNED */ stderr, "pgaftest: parse error at line %d: %s\n",
-			pgaf_line_number, msg);
+								pgaf_line_number, msg);
 	exit(1);
 }
 
@@ -703,24 +703,24 @@ union yyalloc
 /* The size of an array large to enough to hold all stacks, each with
  * N elements.  */
 # define YYSTACK_BYTES(N) \
-		((N) *(sizeof(yytype_int16) + sizeof(YYSTYPE)) \
-		 + YYSTACK_GAP_MAXIMUM)
+	((N) *(sizeof(yytype_int16) + sizeof(YYSTYPE)) \
+	 + YYSTACK_GAP_MAXIMUM)
 
 /* Copy COUNT objects from FROM to TO.  The source and destination do
  * not overlap.  */
 # ifndef YYCOPY
 #  if defined __GNUC__ && 1 < __GNUC__
 #   define YYCOPY(To, From, Count) \
-		__builtin_memcpy(To, From, (Count) * sizeof(*(From)))
+	__builtin_memcpy(To, From, (Count) * sizeof(*(From)))
 #  else
 #   define YYCOPY(To, From, Count) \
-		do \
-		{ \
-			YYSIZE_T yyi; \
-			for (yyi = 0; yyi < (Count); yyi++) { \
-				(To)[yyi] = (From)[yyi]; } \
-		} \
-		while (YYID(0))
+	do \
+	{ \
+		YYSIZE_T yyi; \
+		for (yyi = 0; yyi < (Count); yyi++) { \
+			(To)[yyi] = (From)[yyi]; } \
+	} \
+	while (YYID(0))
 #  endif
 # endif
 
@@ -730,15 +730,15 @@ union yyalloc
  * stack.  Advance YYPTR to a properly aligned location for the next
  * stack.  */
 # define YYSTACK_RELOCATE(Stack) \
-		do \
-		{ \
-			YYSIZE_T yynewbytes; \
-			YYCOPY(&yyptr->Stack, Stack, yysize); \
-			Stack = &yyptr->Stack; \
-			yynewbytes = yystacksize * sizeof(*Stack) + YYSTACK_GAP_MAXIMUM; \
-			yyptr += yynewbytes / sizeof(*yyptr); \
-		} \
-		while (YYID(0))
+	do \
+	{ \
+		YYSIZE_T yynewbytes; \
+		YYCOPY(&yyptr->Stack, Stack, yysize); \
+		Stack = &yyptr->Stack; \
+		yynewbytes = yystacksize * sizeof(*Stack) + YYSTACK_GAP_MAXIMUM; \
+		yyptr += yynewbytes / sizeof(*yyptr); \
+	} \
+	while (YYID(0))
 
 #endif
 
@@ -765,7 +765,7 @@ union yyalloc
 #define YYMAXUTOK 362
 
 #define YYTRANSLATE(YYX) \
-		((unsigned int) (YYX) <= YYMAXUTOK ? yytranslate[YYX] : YYUNDEFTOK)
+	((unsigned int) (YYX) <= YYMAXUTOK ? yytranslate[YYX] : YYUNDEFTOK)
 
 /* YYTRANSLATE[YYLEX] -- Bison symbol number corresponding to YYLEX.  */
 static const yytype_uint8 yytranslate[] =
@@ -1322,7 +1322,7 @@ static const yytype_uint8 yystos[] =
 #define YYRECOVERING() (!!yyerrstatus)
 
 #define YYBACKUP(Token, Value) \
-		do \
+	do \
 		if (yychar == YYEMPTY && yylen == 1) \
 		{ \
 			yychar = (Token); \
@@ -1336,7 +1336,7 @@ static const yytype_uint8 yystos[] =
 			yyerror(YY_("syntax error: cannot back up")); \
 			YYERROR; \
 		} \
-		while (YYID(0))
+	while (YYID(0))
 
 
 #define YYTERROR 1
@@ -1350,7 +1350,7 @@ static const yytype_uint8 yystos[] =
 #define YYRHSLOC(Rhs, K) ((Rhs)[K])
 #ifndef YYLLOC_DEFAULT
 # define YYLLOC_DEFAULT(Current, Rhs, N) \
-		do \
+	do \
 		if (YYID(N)) \
 		{ \
 			(Current).first_line = YYRHSLOC(Rhs, 1).first_line; \
@@ -1365,7 +1365,7 @@ static const yytype_uint8 yystos[] =
 			(Current).first_column = (Current).last_column = \
 				YYRHSLOC(Rhs, 0).last_column; \
 		} \
-		while (YYID(0))
+	while (YYID(0))
 #endif
 
 
@@ -1376,9 +1376,9 @@ static const yytype_uint8 yystos[] =
 #ifndef YY_LOCATION_PRINT
 # if defined YYLTYPE_IS_TRIVIAL && YYLTYPE_IS_TRIVIAL
 #  define YY_LOCATION_PRINT(File, Loc) \
-		fprintf(/* IGNORE-BANNED */ File, "%d.%d-%d.%d", \
-				(Loc).first_line, (Loc).first_column, \
-				(Loc).last_line, (Loc).last_column)
+	fprintf(/* IGNORE-BANNED */ File, "%d.%d-%d.%d", \
+								(Loc).first_line, (Loc).first_column, \
+								(Loc).last_line, (Loc).last_column)
 # else
 #  define YY_LOCATION_PRINT(File, Loc) ((void) 0)
 # endif
@@ -1402,21 +1402,21 @@ static const yytype_uint8 yystos[] =
 # endif
 
 # define YYDPRINTF(Args) \
-		do { \
-			if (yydebug) { \
-				YYFPRINTF Args; } \
-		} while (YYID(0))
+	do { \
+		if (yydebug) { \
+			YYFPRINTF Args; } \
+	} while (YYID(0))
 
 # define YY_SYMBOL_PRINT(Title, Type, Value, Location) \
-		do { \
-			if (yydebug) \
-			{ \
-				YYFPRINTF(stderr, "%s ", Title); \
-				yy_symbol_print(stderr, \
-								Type, Value); \
-				YYFPRINTF(stderr, "\n"); \
-			} \
-		} while (YYID(0))
+	do { \
+		if (yydebug) \
+		{ \
+			YYFPRINTF(stderr, "%s ", Title); \
+			yy_symbol_print(stderr, \
+							Type, Value); \
+			YYFPRINTF(stderr, "\n"); \
+		} \
+	} while (YYID(0))
 
 
 /*--------------------------------.
@@ -1507,10 +1507,10 @@ yytype_int16 *top;
 }
 
 # define YY_STACK_PRINT(Bottom, Top) \
-		do { \
-			if (yydebug) { \
-				yy_stack_print((Bottom), (Top)); } \
-		} while (YYID(0))
+	do { \
+		if (yydebug) { \
+			yy_stack_print((Bottom), (Top)); } \
+	} while (YYID(0))
 
 
 /*------------------------------------------------.
@@ -1544,10 +1544,10 @@ int yyrule;
 }
 
 # define YY_REDUCE_PRINT(Rule) \
-		do { \
-			if (yydebug) { \
-				yy_reduce_print(yyvsp, Rule); } \
-		} while (YYID(0))
+	do { \
+		if (yydebug) { \
+			yy_reduce_print(yyvsp, Rule); } \
+	} while (YYID(0))
 
 /* Nonzero means print parse trace.  It is left uninitialized so that
  * multiple parsers can coexist.  */
@@ -2183,1570 +2183,1570 @@ yyreduce:
 	{
 		case 9:
 #line 233 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.ssl, "self-signed",
-					sizeof(current_spec->cluster.ssl));
-			strlcpy(current_spec->cluster.auth, "trust",
-					sizeof(current_spec->cluster.auth));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.ssl, "self-signed",
+						sizeof(current_spec->cluster.ssl));
+				strlcpy(current_spec->cluster.auth, "trust",
+						sizeof(current_spec->cluster.auth));
+				break;
+			}
 
 		case 19:
 #line 254 "test_spec_parse.y"
-		{
-			current_spec->cluster.bindSource = true;
-			break;
-		}
+			{
+				current_spec->cluster.bindSource = true;
+				break;
+			}
 
 		case 20:
 #line 268 "test_spec_parse.y"
-		{
-			current_spec->cluster.withMonitor = true;
-			break;
-		}
+			{
+				current_spec->cluster.withMonitor = true;
+				break;
+			}
 
 		case 21:
 #line 272 "test_spec_parse.y"
-		{
-			current_spec->cluster.withMonitor = true;
-			strlcpy(current_spec->cluster.monitorDebianCluster, (yyvsp[(3) -
-																	   (3)].str),
-					sizeof(current_spec->cluster.monitorDebianCluster));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				current_spec->cluster.withMonitor = true;
+				strlcpy(current_spec->cluster.monitorDebianCluster, (yyvsp[(3) -
+																		   (3)].str),
+						sizeof(current_spec->cluster.monitorDebianCluster));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 22:
 #line 279 "test_spec_parse.y"
-		{
-			current_spec->cluster.withMonitor = true;
-			strlcpy(current_spec->cluster.monitorImageTarget, (yyvsp[(3) - (3)].str),
-					sizeof(current_spec->cluster.monitorImageTarget));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				current_spec->cluster.withMonitor = true;
+				strlcpy(current_spec->cluster.monitorImageTarget, (yyvsp[(3) - (3)].str),
+						sizeof(current_spec->cluster.monitorImageTarget));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 23:
 #line 286 "test_spec_parse.y"
-		{
-			current_spec->cluster.withMonitor = true;
+			{
+				current_spec->cluster.withMonitor = true;
 
-			/* monitor port not stored in TestCluster yet; ignore */
-			(void) (yyvsp[(3) - (3)].ival);
-			break;
-		}
+				/* monitor port not stored in TestCluster yet; ignore */
+				(void) (yyvsp[(3) - (3)].ival);
+				break;
+			}
 
 		case 24:
 #line 292 "test_spec_parse.y"
-		{
-			current_spec->cluster.withMonitor = true;
-			strlcpy(current_spec->cluster.monitorPassword, (yyvsp[(3) - (3)].str),
-					sizeof(current_spec->cluster.monitorPassword));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				current_spec->cluster.withMonitor = true;
+				strlcpy(current_spec->cluster.monitorPassword, (yyvsp[(3) - (3)].str),
+						sizeof(current_spec->cluster.monitorPassword));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 25:
 #line 299 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.secondMonitorName, (yyvsp[(2) - (4)].str),
-					sizeof(current_spec->cluster.secondMonitorName));
-			current_spec->cluster.secondMonitorStopped = true;
-			free((yyvsp[(2) - (4)].str));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.secondMonitorName, (yyvsp[(2) - (4)].str),
+						sizeof(current_spec->cluster.secondMonitorName));
+				current_spec->cluster.secondMonitorStopped = true;
+				free((yyvsp[(2) - (4)].str));
+				break;
+			}
 
 		case 26:
 #line 306 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.secondMonitorName, (yyvsp[(2) - (4)].str),
-					sizeof(current_spec->cluster.secondMonitorName));
-			current_spec->cluster.secondMonitorStopped = true;
-			free((yyvsp[(2) - (4)].str));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.secondMonitorName, (yyvsp[(2) - (4)].str),
+						sizeof(current_spec->cluster.secondMonitorName));
+				current_spec->cluster.secondMonitorStopped = true;
+				free((yyvsp[(2) - (4)].str));
+				break;
+			}
 
 		case 27:
 #line 313 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.secondMonitorName, (yyvsp[(2) - (6)].str),
-					sizeof(current_spec->cluster.secondMonitorName));
-			current_spec->cluster.secondMonitorStopped = true;
-			free((yyvsp[(2) - (6)].str));
+			{
+				strlcpy(current_spec->cluster.secondMonitorName, (yyvsp[(2) - (6)].str),
+						sizeof(current_spec->cluster.secondMonitorName));
+				current_spec->cluster.secondMonitorStopped = true;
+				free((yyvsp[(2) - (6)].str));
 
-			/* password for second monitor not yet stored */
-			free((yyvsp[(6) - (6)].str));
-			break;
-		}
+				/* password for second monitor not yet stored */
+				free((yyvsp[(6) - (6)].str));
+				break;
+			}
 
 		case 28:
 #line 326 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.image, (yyvsp[(2) - (2)].str),
-					sizeof(current_spec->cluster.image));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.image, (yyvsp[(2) - (2)].str),
+						sizeof(current_spec->cluster.image));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 29:
 #line 332 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.image, (yyvsp[(2) - (2)].str),
-					sizeof(current_spec->cluster.image));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.image, (yyvsp[(2) - (2)].str),
+						sizeof(current_spec->cluster.image));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 30:
 #line 342 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.extensionVersion, (yyvsp[(2) - (2)].str),
-					sizeof(current_spec->cluster.extensionVersion));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.extensionVersion, (yyvsp[(2) - (2)].str),
+						sizeof(current_spec->cluster.extensionVersion));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 31:
 #line 348 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.extensionVersion, (yyvsp[(2) - (2)].str),
-					sizeof(current_spec->cluster.extensionVersion));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.extensionVersion, (yyvsp[(2) - (2)].str),
+						sizeof(current_spec->cluster.extensionVersion));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 32:
 #line 358 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.ssl, (yyvsp[(2) - (2)].str),
-					sizeof(current_spec->cluster.ssl));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.ssl, (yyvsp[(2) - (2)].str),
+						sizeof(current_spec->cluster.ssl));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 33:
 #line 368 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.auth, (yyvsp[(2) - (2)].str),
-					sizeof(current_spec->cluster.auth));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.auth, (yyvsp[(2) - (2)].str),
+						sizeof(current_spec->cluster.auth));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 34:
 #line 374 "test_spec_parse.y"
-		{
-			strlcpy(current_spec->cluster.auth, (yyvsp[(2) - (2)].str),
-					sizeof(current_spec->cluster.auth));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_spec->cluster.auth, (yyvsp[(2) - (2)].str),
+						sizeof(current_spec->cluster.auth));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 35:
 #line 384 "test_spec_parse.y"
-		{
-			TestCluster *cl = &current_spec->cluster;
-			if (cl->formationCount >= PGAF_MAX_FORMATIONS)
 			{
-				fprintf(/* IGNORE-BANNED */ stderr,
-						"pgaftest: too many formations (max %d)\n",
-						PGAF_MAX_FORMATIONS);
-				exit(1);
+				TestCluster *cl = &current_spec->cluster;
+				if (cl->formationCount >= PGAF_MAX_FORMATIONS)
+				{
+					fprintf(/* IGNORE-BANNED */ stderr,
+												"pgaftest: too many formations (max %d)\n",
+												PGAF_MAX_FORMATIONS);
+					exit(1);
+				}
+				current_formation = &cl->formations[cl->formationCount++];
+				strlcpy(current_formation->name, "default",
+						sizeof(current_formation->name));
+				current_formation->numSync = -1;
+				break;
 			}
-			current_formation = &cl->formations[cl->formationCount++];
-			strlcpy(current_formation->name, "default",
-					sizeof(current_formation->name));
-			current_formation->numSync = -1;
-			break;
-		}
 
 		case 39:
 #line 411 "test_spec_parse.y"
-		{
-			(yyval.str) = (yyvsp[(1) - (1)].str);
-			break;
-		}
+			{
+				(yyval.str) = (yyvsp[(1) - (1)].str);
+				break;
+			}
 
 		case 40:
 #line 412 "test_spec_parse.y"
-		{
-			(yyval.str) = (yyvsp[(1) - (1)].str);
-			break;
-		}
+			{
+				(yyval.str) = (yyvsp[(1) - (1)].str);
+				break;
+			}
 
 		case 41:
 #line 413 "test_spec_parse.y"
-		{
-			(yyval.str) = strdup("auth");
-			break;
-		}
+			{
+				(yyval.str) = strdup("auth");
+				break;
+			}
 
 		case 42:
 #line 414 "test_spec_parse.y"
-		{
-			(yyval.str) = strdup("monitor");
-			break;
-		}
+			{
+				(yyval.str) = strdup("monitor");
+				break;
+			}
 
 		case 43:
 #line 415 "test_spec_parse.y"
-		{
-			(yyval.str) = strdup("node");
-			break;
-		}
+			{
+				(yyval.str) = strdup("node");
+				break;
+			}
 
 		case 44:
 #line 420 "test_spec_parse.y"
-		{
-			strlcpy(current_formation->name, (yyvsp[(1) - (1)].str),
-					sizeof(current_formation->name));
-			free((yyvsp[(1) - (1)].str));
-			break;
-		}
+			{
+				strlcpy(current_formation->name, (yyvsp[(1) - (1)].str),
+						sizeof(current_formation->name));
+				free((yyvsp[(1) - (1)].str));
+				break;
+			}
 
 		case 45:
 #line 425 "test_spec_parse.y"
-		{
-			current_formation->numSync = (yyvsp[(2) - (2)].ival);
-			break;
-		}
+			{
+				current_formation->numSync = (yyvsp[(2) - (2)].ival);
+				break;
+			}
 
 		case 48:
 #line 451 "test_spec_parse.y"
-		{
-			(yyval.str) = (yyvsp[(1) - (1)].str);
-			break;
-		}
+			{
+				(yyval.str) = (yyvsp[(1) - (1)].str);
+				break;
+			}
 
 		case 49:
 #line 452 "test_spec_parse.y"
-		{
-			(yyval.str) = strdup("monitor");
-			break;
-		}
+			{
+				(yyval.str) = strdup("monitor");
+				break;
+			}
 
 		case 50:
 #line 461 "test_spec_parse.y"
-		{
-			if (current_formation->nodeCount >= PGAF_MAX_NODES)
 			{
-				fprintf(/* IGNORE-BANNED */ stderr,
-						"pgaftest: too many nodes in formation (max %d)\n",
-						PGAF_MAX_NODES);
-				exit(1);
+				if (current_formation->nodeCount >= PGAF_MAX_NODES)
+				{
+					fprintf(/* IGNORE-BANNED */ stderr,
+												"pgaftest: too many nodes in formation (max %d)\n",
+												PGAF_MAX_NODES);
+					exit(1);
+				}
+				current_node = &current_formation->nodes[current_formation->nodeCount++];
+				current_node->kind = NODE_KIND_STANDALONE;
+				current_node->candidatePriority = 50;
+				current_node->replicationQuorum = true;
+				break;
 			}
-			current_node = &current_formation->nodes[current_formation->nodeCount++];
-			current_node->kind = NODE_KIND_STANDALONE;
-			current_node->candidatePriority = 50;
-			current_node->replicationQuorum = true;
-			break;
-		}
 
 		case 51:
 #line 478 "test_spec_parse.y"
-		{
-			strlcpy(current_node->name, (yyvsp[(1) - (2)].str),
-					sizeof(current_node->name));
-			free((yyvsp[(1) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_node->name, (yyvsp[(1) - (2)].str),
+						sizeof(current_node->name));
+				free((yyvsp[(1) - (2)].str));
+				break;
+			}
 
 		case 53:
 #line 485 "test_spec_parse.y"
-		{
-			strlcpy(current_node->name, (yyvsp[(2) - (3)].str),
-					sizeof(current_node->name));
-			free((yyvsp[(2) - (3)].str));
-			break;
-		}
+			{
+				strlcpy(current_node->name, (yyvsp[(2) - (3)].str),
+						sizeof(current_node->name));
+				free((yyvsp[(2) - (3)].str));
+				break;
+			}
 
 		case 57:
 #line 499 "test_spec_parse.y"
-		{
-			current_node->kind = NODE_KIND_CITUS_COORDINATOR;
-			current_spec->cluster.withCitus = true;
-			break;
-		}
+			{
+				current_node->kind = NODE_KIND_CITUS_COORDINATOR;
+				current_spec->cluster.withCitus = true;
+				break;
+			}
 
 		case 58:
 #line 504 "test_spec_parse.y"
-		{
-			current_node->kind = NODE_KIND_CITUS_WORKER;
-			current_spec->cluster.withCitus = true;
-			break;
-		}
+			{
+				current_node->kind = NODE_KIND_CITUS_WORKER;
+				current_spec->cluster.withCitus = true;
+				break;
+			}
 
 		case 59:
 #line 509 "test_spec_parse.y"
-		{
-			current_node->replicationQuorum = false;
-			break;
-		}
+			{
+				current_node->replicationQuorum = false;
+				break;
+			}
 
 		case 60:
 #line 513 "test_spec_parse.y"
-		{
-			current_node->noMonitor = true;
-			break;
-		}
+			{
+				current_node->noMonitor = true;
+				break;
+			}
 
 		case 61:
 #line 517 "test_spec_parse.y"
-		{
-			current_node->launchDeferred = true;
-			break;
-		}
+			{
+				current_node->launchDeferred = true;
+				break;
+			}
 
 		case 62:
 #line 521 "test_spec_parse.y"
-		{
-			current_node->launchDeferred = true;
-			break;
-		}
+			{
+				current_node->launchDeferred = true;
+				break;
+			}
 
 		case 63:
 #line 525 "test_spec_parse.y"
-		{
-			current_node->launchDeferred = false;
-			break;
-		}
+			{
+				current_node->launchDeferred = false;
+				break;
+			}
 
 		case 64:
 #line 529 "test_spec_parse.y"
-		{
-			current_node->launchDeferred = false;
-			break;
-		}
+			{
+				current_node->launchDeferred = false;
+				break;
+			}
 
 		case 65:
 #line 533 "test_spec_parse.y"
-		{
-			current_node->listen = true;
-			break;
-		}
+			{
+				current_node->listen = true;
+				break;
+			}
 
 		case 66:
 #line 537 "test_spec_parse.y"
-		{
-			current_node->citusSecondary = true;
-			break;
-		}
+			{
+				current_node->citusSecondary = true;
+				break;
+			}
 
 		case 67:
 #line 541 "test_spec_parse.y"
-		{
-			current_node->candidatePriority = (yyvsp[(2) - (2)].ival);
-			break;
-		}
+			{
+				current_node->candidatePriority = (yyvsp[(2) - (2)].ival);
+				break;
+			}
 
 		case 68:
 #line 545 "test_spec_parse.y"
-		{
-			current_node->group = (yyvsp[(2) - (2)].ival);
-			break;
-		}
+			{
+				current_node->group = (yyvsp[(2) - (2)].ival);
+				break;
+			}
 
 		case 69:
 #line 549 "test_spec_parse.y"
-		{
-			current_node->pgPort = (yyvsp[(2) - (2)].ival);
-			break;
-		}
+			{
+				current_node->pgPort = (yyvsp[(2) - (2)].ival);
+				break;
+			}
 
 		case 70:
 #line 553 "test_spec_parse.y"
-		{
-			strlcpy(current_node->citusClusterName, (yyvsp[(2) - (2)].str),
-					sizeof(current_node->citusClusterName));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_node->citusClusterName, (yyvsp[(2) - (2)].str),
+						sizeof(current_node->citusClusterName));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 71:
 #line 559 "test_spec_parse.y"
-		{
-			strlcpy(current_node->debianCluster, (yyvsp[(2) - (2)].str),
-					sizeof(current_node->debianCluster));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_node->debianCluster, (yyvsp[(2) - (2)].str),
+						sizeof(current_node->debianCluster));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 72:
 #line 565 "test_spec_parse.y"
-		{
-			strlcpy(current_node->ssl, (yyvsp[(2) - (2)].str),
-					sizeof(current_node->ssl));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_node->ssl, (yyvsp[(2) - (2)].str),
+						sizeof(current_node->ssl));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 73:
 #line 570 "test_spec_parse.y"
-		{
-			strlcpy(current_node->auth, (yyvsp[(2) - (2)].str),
-					sizeof(current_node->auth));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_node->auth, (yyvsp[(2) - (2)].str),
+						sizeof(current_node->auth));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 74:
 #line 575 "test_spec_parse.y"
-		{
-			strlcpy(current_node->auth, (yyvsp[(2) - (2)].str),
-					sizeof(current_node->auth));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_node->auth, (yyvsp[(2) - (2)].str),
+						sizeof(current_node->auth));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 75:
 #line 580 "test_spec_parse.y"
-		{
-			if (strcmp((yyvsp[(2) - (2)].str), "false") == 0 || strcmp((yyvsp[(2) -
-																			  (2)].str),
-																	   "0") == 0)
 			{
-				current_node->replicationQuorum = false;
+				if (strcmp((yyvsp[(2) - (2)].str), "false") == 0 || strcmp((yyvsp[(2) -
+																				  (2)].str),
+																		   "0") == 0)
+				{
+					current_node->replicationQuorum = false;
+				}
+				else
+				{
+					current_node->replicationQuorum = true;
+				}
+				free((yyvsp[(2) - (2)].str));
+				break;
 			}
-			else
-			{
-				current_node->replicationQuorum = true;
-			}
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
 
 		case 76:
 #line 588 "test_spec_parse.y"
-		{
-			strlcpy(current_node->replicationPassword, (yyvsp[(2) - (2)].str),
-					sizeof(current_node->replicationPassword));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_node->replicationPassword, (yyvsp[(2) - (2)].str),
+						sizeof(current_node->replicationPassword));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 77:
 #line 594 "test_spec_parse.y"
-		{
-			strlcpy(current_node->monitorPassword, (yyvsp[(2) - (2)].str),
-					sizeof(current_node->monitorPassword));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				strlcpy(current_node->monitorPassword, (yyvsp[(2) - (2)].str),
+						sizeof(current_node->monitorPassword));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 78:
 #line 600 "test_spec_parse.y"
-		{
-			/* volume <name> <containerPath> — adds a named Docker volume */
-			int vi = current_node->volumeCount;
-			if (vi < PGAF_MAX_NODE_VOLUMES)
 			{
-				strlcpy(current_node->volumes[vi].name, (yyvsp[(2) - (3)].str),
-						sizeof(current_node->volumes[0].name));
-				strlcpy(current_node->volumes[vi].path, (yyvsp[(3) - (3)].str),
-						sizeof(current_node->volumes[0].path));
-				current_node->volumeCount++;
+				/* volume <name> <containerPath> — adds a named Docker volume */
+				int vi = current_node->volumeCount;
+				if (vi < PGAF_MAX_NODE_VOLUMES)
+				{
+					strlcpy(current_node->volumes[vi].name, (yyvsp[(2) - (3)].str),
+							sizeof(current_node->volumes[0].name));
+					strlcpy(current_node->volumes[vi].path, (yyvsp[(3) - (3)].str),
+							sizeof(current_node->volumes[0].path));
+					current_node->volumeCount++;
+				}
+				free((yyvsp[(2) - (3)].str));
+				free((yyvsp[(3) - (3)].str));
+				break;
 			}
-			free((yyvsp[(2) - (3)].str));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
 
 		case 79:
 #line 614 "test_spec_parse.y"
-		{
-			/* volume <name> "/path/with spaces" */
-			int vi = current_node->volumeCount;
-			if (vi < PGAF_MAX_NODE_VOLUMES)
 			{
-				strlcpy(current_node->volumes[vi].name, (yyvsp[(2) - (3)].str),
-						sizeof(current_node->volumes[0].name));
-				strlcpy(current_node->volumes[vi].path, (yyvsp[(3) - (3)].str),
-						sizeof(current_node->volumes[0].path));
-				current_node->volumeCount++;
+				/* volume <name> "/path/with spaces" */
+				int vi = current_node->volumeCount;
+				if (vi < PGAF_MAX_NODE_VOLUMES)
+				{
+					strlcpy(current_node->volumes[vi].name, (yyvsp[(2) - (3)].str),
+							sizeof(current_node->volumes[0].name));
+					strlcpy(current_node->volumes[vi].path, (yyvsp[(3) - (3)].str),
+							sizeof(current_node->volumes[0].path));
+					current_node->volumeCount++;
+				}
+				free((yyvsp[(2) - (3)].str));
+				free((yyvsp[(3) - (3)].str));
+				break;
 			}
-			free((yyvsp[(2) - (3)].str));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
 
 		case 80:
 #line 635 "test_spec_parse.y"
-		{
-			current_spec->setup = (yyvsp[(2) - (2)].step);
-			break;
-		}
+			{
+				current_spec->setup = (yyvsp[(2) - (2)].step);
+				break;
+			}
 
 		case 81:
 #line 642 "test_spec_parse.y"
-		{
-			current_spec->teardown = (yyvsp[(2) - (2)].step);
-			break;
-		}
+			{
+				current_spec->teardown = (yyvsp[(2) - (2)].step);
+				break;
+			}
 
 		case 82:
 #line 653 "test_spec_parse.y"
-		{
-			TestStep *s = (yyvsp[(3) - (3)].step);
-			strlcpy(s->name, (yyvsp[(2) - (3)].str), sizeof(s->name));
-			free((yyvsp[(2) - (3)].str));
-			register_step(current_spec, s);
-			break;
-		}
+			{
+				TestStep *s = (yyvsp[(3) - (3)].step);
+				strlcpy(s->name, (yyvsp[(2) - (3)].str), sizeof(s->name));
+				free((yyvsp[(2) - (3)].str));
+				register_step(current_spec, s);
+				break;
+			}
 
 		case 83:
 #line 671 "test_spec_parse.y"
-		{
-			/* post-process: CMD_SQL immediately before CMD_EXPECT_ERROR */
-			for (TestCmd *c = (yyvsp[(2) - (3)].step)->commands; c; c = c->next)
 			{
-				if (c->kind == CMD_SQL && c->next &&
-					c->next->kind == CMD_EXPECT_ERROR)
+				/* post-process: CMD_SQL immediately before CMD_EXPECT_ERROR */
+				for (TestCmd *c = (yyvsp[(2) - (3)].step)->commands; c; c = c->next)
 				{
-					c->allowError = true;
+					if (c->kind == CMD_SQL && c->next &&
+						c->next->kind == CMD_EXPECT_ERROR)
+					{
+						c->allowError = true;
+					}
 				}
+				(yyval.step) = (yyvsp[(2) - (3)].step);
+				break;
 			}
-			(yyval.step) = (yyvsp[(2) - (3)].step);
-			break;
-		}
 
 		case 84:
 #line 685 "test_spec_parse.y"
-		{
-			(yyval.step) = make_step("");
-			break;
-		}
+			{
+				(yyval.step) = make_step("");
+				break;
+			}
 
 		case 85:
 #line 689 "test_spec_parse.y"
-		{
-			if ((yyvsp[(2) - (2)].cmd))
 			{
-				append_cmd((yyvsp[(1) - (2)].step), (yyvsp[(2) - (2)].cmd));
+				if ((yyvsp[(2) - (2)].cmd))
+				{
+					append_cmd((yyvsp[(1) - (2)].step), (yyvsp[(2) - (2)].cmd));
+				}
+				(yyval.step) = (yyvsp[(1) - (2)].step);
+				break;
 			}
-			(yyval.step) = (yyvsp[(1) - (2)].step);
-			break;
-		}
 
 		case 86:
 #line 696 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 87:
 #line 697 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 88:
 #line 698 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 89:
 #line 699 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 90:
 #line 700 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 91:
 #line 701 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 92:
 #line 702 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 93:
 #line 703 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 94:
 #line 704 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 95:
 #line 705 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 96:
 #line 706 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 97:
 #line 707 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 98:
 #line 708 "test_spec_parse.y"
-		{
-			(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
-			break;
-		}
+			{
+				(yyval.cmd) = (yyvsp[(1) - (1)].cmd);
+				break;
+			}
 
 		case 99:
 #line 723 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_EXEC);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->args, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->args));
-			free((yyvsp[(2) - (3)].str));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_EXEC);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->args, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->args));
+				free((yyvsp[(2) - (3)].str));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 100:
 #line 730 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_EXEC);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (2)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_EXEC);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (2)].str),
+						sizeof((yyval.cmd)->service));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 101:
 #line 736 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_EXEC_FAILS);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->args, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->args));
-			free((yyvsp[(2) - (3)].str));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_EXEC_FAILS);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->args, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->args));
+				free((yyvsp[(2) - (3)].str));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 102:
 #line 743 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_EXEC_FAILS);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (2)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_EXEC_FAILS);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (2)].str),
+						sizeof((yyval.cmd)->service));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 103:
 #line 749 "test_spec_parse.y"
-		{
-			/* "pg_autoctl perform failover --formation auth"
-			 * EXEC_ARGS returns T_IDENT for first word, T_SHELL_ARGS for rest */
-			(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
-			sformat((yyval.cmd)->args, sizeof((yyval.cmd)->args), "%s %s",
-					(yyvsp[(2) - (3)].str), (yyvsp[(3) - (3)].str));
-			free((yyvsp[(2) - (3)].str));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				/* "pg_autoctl perform failover --formation auth"
+				 * EXEC_ARGS returns T_IDENT for first word, T_SHELL_ARGS for rest */
+				(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
+				sformat((yyval.cmd)->args, sizeof((yyval.cmd)->args), "%s %s",
+						(yyvsp[(2) - (3)].str), (yyvsp[(3) - (3)].str));
+				free((yyvsp[(2) - (3)].str));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 104:
 #line 757 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
-			strlcpy((yyval.cmd)->args, (yyvsp[(2) - (2)].str),
-					sizeof((yyval.cmd)->args));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
+				strlcpy((yyval.cmd)->args, (yyvsp[(2) - (2)].str),
+						sizeof((yyval.cmd)->args));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 105:
 #line 763 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
+				break;
+			}
 
 		case 108:
 #line 801 "test_spec_parse.y"
-		{
-			if (!current_wait_cmd)
 			{
-				current_wait_cmd = make_cmd(CMD_WAIT_MULTI);
+				if (!current_wait_cmd)
+				{
+					current_wait_cmd = make_cmd(CMD_WAIT_MULTI);
+				}
+				int i = current_wait_cmd->waitStateCount;
+				if (i < PGAF_MAX_WAIT_STATES)
+				{
+					strlcpy(current_wait_cmd->waitNodes[i], (yyvsp[(1) - (4)].str),
+							sizeof(current_wait_cmd->waitNodes[0]));
+					strlcpy(current_wait_cmd->waitStates[i], (yyvsp[(4) - (4)].str),
+							sizeof(current_wait_cmd->waitStates[0]));
+					current_wait_cmd->waitStateCount++;
+				}
+				free((yyvsp[(1) - (4)].str));
+				break;
 			}
-			int i = current_wait_cmd->waitStateCount;
-			if (i < PGAF_MAX_WAIT_STATES)
-			{
-				strlcpy(current_wait_cmd->waitNodes[i], (yyvsp[(1) - (4)].str),
-						sizeof(current_wait_cmd->waitNodes[0]));
-				strlcpy(current_wait_cmd->waitStates[i], (yyvsp[(4) - (4)].str),
-						sizeof(current_wait_cmd->waitStates[0]));
-				current_wait_cmd->waitStateCount++;
-			}
-			free((yyvsp[(1) - (4)].str));
-			break;
-		}
 
 		case 109:
 #line 816 "test_spec_parse.y"
-		{
-			if (!current_wait_cmd)
 			{
-				current_wait_cmd = make_cmd(CMD_WAIT_MULTI);
+				if (!current_wait_cmd)
+				{
+					current_wait_cmd = make_cmd(CMD_WAIT_MULTI);
+				}
+				int i = current_wait_cmd->waitStateCount;
+				if (i < PGAF_MAX_WAIT_STATES)
+				{
+					strlcpy(current_wait_cmd->waitNodes[i], (yyvsp[(1) - (4)].str),
+							sizeof(current_wait_cmd->waitNodes[0]));
+					strlcpy(current_wait_cmd->waitStates[i], (yyvsp[(4) - (4)].str),
+							sizeof(current_wait_cmd->waitStates[0]));
+					current_wait_cmd->waitStateCount++;
+				}
+				free((yyvsp[(1) - (4)].str));
+				free((yyvsp[(4) - (4)].str));
+				break;
 			}
-			int i = current_wait_cmd->waitStateCount;
-			if (i < PGAF_MAX_WAIT_STATES)
-			{
-				strlcpy(current_wait_cmd->waitNodes[i], (yyvsp[(1) - (4)].str),
-						sizeof(current_wait_cmd->waitNodes[0]));
-				strlcpy(current_wait_cmd->waitStates[i], (yyvsp[(4) - (4)].str),
-						sizeof(current_wait_cmd->waitStates[0]));
-				current_wait_cmd->waitStateCount++;
-			}
-			free((yyvsp[(1) - (4)].str));
-			free((yyvsp[(4) - (4)].str));
-			break;
-		}
 
 		case 114:
 #line 856 "test_spec_parse.y"
-		{
-			/* current_pass_cmd set by the enclosing wait_cmd rule */
-			if (current_pass_cmd &&
-				current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
 			{
-				strlcpy(
-					current_pass_cmd->passThroughStates[current_pass_cmd->
-														passThroughCount++],
-					(yyvsp[(1) - (1)].str),
-					sizeof(current_pass_cmd->passThroughStates[0]));
+				/* current_pass_cmd set by the enclosing wait_cmd rule */
+				if (current_pass_cmd &&
+					current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
+				{
+					strlcpy(
+						current_pass_cmd->passThroughStates[current_pass_cmd->
+															passThroughCount++],
+						(yyvsp[(1) - (1)].str),
+						sizeof(current_pass_cmd->passThroughStates[0]));
+				}
+				break;
 			}
-			break;
-		}
 
 		case 115:
 #line 864 "test_spec_parse.y"
-		{
-			if (current_pass_cmd &&
-				current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
 			{
-				strlcpy(
-					current_pass_cmd->passThroughStates[current_pass_cmd->
-														passThroughCount++],
-					(yyvsp[(1) - (1)].str),
-					sizeof(current_pass_cmd->passThroughStates[0]));
+				if (current_pass_cmd &&
+					current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
+				{
+					strlcpy(
+						current_pass_cmd->passThroughStates[current_pass_cmd->
+															passThroughCount++],
+						(yyvsp[(1) - (1)].str),
+						sizeof(current_pass_cmd->passThroughStates[0]));
+				}
+				free((yyvsp[(1) - (1)].str));
+				break;
 			}
-			free((yyvsp[(1) - (1)].str));
-			break;
-		}
 
 		case 116:
 #line 872 "test_spec_parse.y"
-		{
-			if (current_pass_cmd &&
-				current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
 			{
-				strlcpy(
-					current_pass_cmd->passThroughStates[current_pass_cmd->
-														passThroughCount++],
-					(yyvsp[(3) - (3)].str),
-					sizeof(current_pass_cmd->passThroughStates[0]));
+				if (current_pass_cmd &&
+					current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
+				{
+					strlcpy(
+						current_pass_cmd->passThroughStates[current_pass_cmd->
+															passThroughCount++],
+						(yyvsp[(3) - (3)].str),
+						sizeof(current_pass_cmd->passThroughStates[0]));
+				}
+				break;
 			}
-			break;
-		}
 
 		case 117:
 #line 879 "test_spec_parse.y"
-		{
-			if (current_pass_cmd &&
-				current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
 			{
-				strlcpy(
-					current_pass_cmd->passThroughStates[current_pass_cmd->
-														passThroughCount++],
-					(yyvsp[(3) - (3)].str),
-					sizeof(current_pass_cmd->passThroughStates[0]));
+				if (current_pass_cmd &&
+					current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
+				{
+					strlcpy(
+						current_pass_cmd->passThroughStates[current_pass_cmd->
+															passThroughCount++],
+						(yyvsp[(3) - (3)].str),
+						sizeof(current_pass_cmd->passThroughStates[0]));
+				}
+				free((yyvsp[(3) - (3)].str));
+				break;
 			}
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
 
 		case 118:
 #line 890 "test_spec_parse.y"
-		{
-			current_pass_cmd = make_cmd(CMD_WAIT_STATE);
-			strlcpy(current_pass_cmd->service, (yyvsp[(3) - (6)].str),
-					sizeof(current_pass_cmd->service));
-			strlcpy(current_pass_cmd->state, (yyvsp[(6) - (6)].str),
-					sizeof(current_pass_cmd->state));
-			free((yyvsp[(3) - (6)].str));
-			break;
-		}
+			{
+				current_pass_cmd = make_cmd(CMD_WAIT_STATE);
+				strlcpy(current_pass_cmd->service, (yyvsp[(3) - (6)].str),
+						sizeof(current_pass_cmd->service));
+				strlcpy(current_pass_cmd->state, (yyvsp[(6) - (6)].str),
+						sizeof(current_pass_cmd->state));
+				free((yyvsp[(3) - (6)].str));
+				break;
+			}
 
 		case 119:
 #line 895 "test_spec_parse.y"
-		{
-			current_pass_cmd->timeoutSeconds = (yyvsp[(9) - (9)].ival);
-			(yyval.cmd) = current_pass_cmd;
-			current_pass_cmd = NULL;
-			break;
-		}
+			{
+				current_pass_cmd->timeoutSeconds = (yyvsp[(9) - (9)].ival);
+				(yyval.cmd) = current_pass_cmd;
+				current_pass_cmd = NULL;
+				break;
+			}
 
 		case 120:
 #line 901 "test_spec_parse.y"
-		{
-			current_pass_cmd = make_cmd(CMD_WAIT_STATE);
-			strlcpy(current_pass_cmd->service, (yyvsp[(3) - (6)].str),
-					sizeof(current_pass_cmd->service));
-			strlcpy(current_pass_cmd->state, (yyvsp[(6) - (6)].str),
-					sizeof(current_pass_cmd->state));
-			free((yyvsp[(3) - (6)].str));
-			free((yyvsp[(6) - (6)].str));
-			break;
-		}
+			{
+				current_pass_cmd = make_cmd(CMD_WAIT_STATE);
+				strlcpy(current_pass_cmd->service, (yyvsp[(3) - (6)].str),
+						sizeof(current_pass_cmd->service));
+				strlcpy(current_pass_cmd->state, (yyvsp[(6) - (6)].str),
+						sizeof(current_pass_cmd->state));
+				free((yyvsp[(3) - (6)].str));
+				free((yyvsp[(6) - (6)].str));
+				break;
+			}
 
 		case 121:
 #line 906 "test_spec_parse.y"
-		{
-			current_pass_cmd->timeoutSeconds = (yyvsp[(9) - (9)].ival);
-			(yyval.cmd) = current_pass_cmd;
-			current_pass_cmd = NULL;
-			break;
-		}
+			{
+				current_pass_cmd->timeoutSeconds = (yyvsp[(9) - (9)].ival);
+				(yyval.cmd) = current_pass_cmd;
+				current_pass_cmd = NULL;
+				break;
+			}
 
 		case 122:
 #line 912 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_WAIT_STATE);
-			(yyval.cmd)->kind = CMD_ASSERT_ASSIGNED;
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (7)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->state, (yyvsp[(6) - (7)].str),
-					sizeof((yyval.cmd)->state));
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(7) - (7)].ival);
-			free((yyvsp[(3) - (7)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_WAIT_STATE);
+				(yyval.cmd)->kind = CMD_ASSERT_ASSIGNED;
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (7)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->state, (yyvsp[(6) - (7)].str),
+						sizeof((yyval.cmd)->state));
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(7) - (7)].ival);
+				free((yyvsp[(3) - (7)].str));
+				break;
+			}
 
 		case 123:
 #line 921 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_WAIT_STATE);
-			(yyval.cmd)->kind = CMD_ASSERT_ASSIGNED;
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (7)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->state, (yyvsp[(6) - (7)].str),
-					sizeof((yyval.cmd)->state));
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(7) - (7)].ival);
-			free((yyvsp[(3) - (7)].str));
-			free((yyvsp[(6) - (7)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_WAIT_STATE);
+				(yyval.cmd)->kind = CMD_ASSERT_ASSIGNED;
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (7)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->state, (yyvsp[(6) - (7)].str),
+						sizeof((yyval.cmd)->state));
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(7) - (7)].ival);
+				free((yyvsp[(3) - (7)].str));
+				free((yyvsp[(6) - (7)].str));
+				break;
+			}
 
 		case 124:
 #line 930 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_WAIT_STOPPED);
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (5)].str),
-					sizeof((yyval.cmd)->service));
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(5) - (5)].ival);
-			free((yyvsp[(3) - (5)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_WAIT_STOPPED);
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (5)].str),
+						sizeof((yyval.cmd)->service));
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(5) - (5)].ival);
+				free((yyvsp[(3) - (5)].str));
+				break;
+			}
 
 		case 125:
 #line 937 "test_spec_parse.y"
-		{
-			(yyval.cmd) = current_wait_cmd;
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(5) - (5)].ival);
-			current_wait_cmd = NULL;
-			break;
-		}
+			{
+				(yyval.cmd) = current_wait_cmd;
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(5) - (5)].ival);
+				current_wait_cmd = NULL;
+				break;
+			}
 
 		case 126:
 #line 951 "test_spec_parse.y"
-		{
-			(yyval.cmd) = current_wait_cmd;
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
-			current_wait_cmd = NULL;
-			break;
-		}
+			{
+				(yyval.cmd) = current_wait_cmd;
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
+				current_wait_cmd = NULL;
+				break;
+			}
 
 		case 127:
 #line 966 "test_spec_parse.y"
-		{
-			current_wait_cmd = make_cmd(CMD_WAIT_STATES);
-			strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
-					(yyvsp[(1) - (1)].str), sizeof(current_wait_cmd->waitStates[0]));
-			break;
-		}
+			{
+				current_wait_cmd = make_cmd(CMD_WAIT_STATES);
+				strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
+						(yyvsp[(1) - (1)].str), sizeof(current_wait_cmd->waitStates[0]));
+				break;
+			}
 
 		case 128:
 #line 972 "test_spec_parse.y"
-		{
-			current_wait_cmd = make_cmd(CMD_WAIT_STATES);
-			strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
-					(yyvsp[(1) - (1)].str), sizeof(current_wait_cmd->waitStates[0]));
-			free((yyvsp[(1) - (1)].str));
-			break;
-		}
+			{
+				current_wait_cmd = make_cmd(CMD_WAIT_STATES);
+				strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
+						(yyvsp[(1) - (1)].str), sizeof(current_wait_cmd->waitStates[0]));
+				free((yyvsp[(1) - (1)].str));
+				break;
+			}
 
 		case 129:
 #line 979 "test_spec_parse.y"
-		{
-			if (current_wait_cmd->waitStateCount < PGAF_MAX_WAIT_STATES)
 			{
-				strlcpy(
-					current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
-					(yyvsp[(3) - (3)].str),
-					sizeof(current_wait_cmd->waitStates[0]));
+				if (current_wait_cmd->waitStateCount < PGAF_MAX_WAIT_STATES)
+				{
+					strlcpy(
+						current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
+						(yyvsp[(3) - (3)].str),
+						sizeof(current_wait_cmd->waitStates[0]));
+				}
+				break;
 			}
-			break;
-		}
 
 		case 130:
 #line 985 "test_spec_parse.y"
-		{
-			if (current_wait_cmd->waitStateCount < PGAF_MAX_WAIT_STATES)
 			{
-				strlcpy(
-					current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
-					(yyvsp[(3) - (3)].str),
-					sizeof(current_wait_cmd->waitStates[0]));
+				if (current_wait_cmd->waitStateCount < PGAF_MAX_WAIT_STATES)
+				{
+					strlcpy(
+						current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
+						(yyvsp[(3) - (3)].str),
+						sizeof(current_wait_cmd->waitStates[0]));
+				}
+				free((yyvsp[(3) - (3)].str));
+				break;
 			}
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
 
 		case 133:
 #line 1004 "test_spec_parse.y"
-		{
-			if (current_wait_cmd->waitGroupCount < PGAF_MAX_WAIT_GROUPS)
 			{
-				current_wait_cmd->waitGroups[current_wait_cmd->waitGroupCount++] =
-					(yyvsp[(2) - (2)].ival);
+				if (current_wait_cmd->waitGroupCount < PGAF_MAX_WAIT_GROUPS)
+				{
+					current_wait_cmd->waitGroups[current_wait_cmd->waitGroupCount++] =
+						(yyvsp[(2) - (2)].ival);
+				}
+				break;
 			}
-			break;
-		}
 
 		case 134:
 #line 1009 "test_spec_parse.y"
-		{
-			if (current_wait_cmd->waitGroupCount < PGAF_MAX_WAIT_GROUPS)
 			{
-				current_wait_cmd->waitGroups[current_wait_cmd->waitGroupCount++] =
-					(yyvsp[(4) - (4)].ival);
+				if (current_wait_cmd->waitGroupCount < PGAF_MAX_WAIT_GROUPS)
+				{
+					current_wait_cmd->waitGroups[current_wait_cmd->waitGroupCount++] =
+						(yyvsp[(4) - (4)].ival);
+				}
+				break;
 			}
-			break;
-		}
 
 		case 135:
 #line 1016 "test_spec_parse.y"
-		{
-			(yyval.ival) = PGAF_TIMEOUT_DEFAULT;
-			break;
-		}
+			{
+				(yyval.ival) = PGAF_TIMEOUT_DEFAULT;
+				break;
+			}
 
 		case 136:
 #line 1017 "test_spec_parse.y"
-		{
-			(yyval.ival) = (yyvsp[(2) - (2)].ival);
-			break;
-		}
+			{
+				(yyval.ival) = (yyvsp[(2) - (2)].ival);
+				break;
+			}
 
 		case 137:
 #line 1018 "test_spec_parse.y"
-		{
-			(yyval.ival) = (yyvsp[(3) - (3)].ival);
-			break;
-		}
+			{
+				(yyval.ival) = (yyvsp[(3) - (3)].ival);
+				break;
+			}
 
 		case 138:
 #line 1030 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd((yyvsp[(6) - (6)].ival) > 0 ? CMD_WAIT_STATE :
-								   CMD_ASSERT_STATE);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (6)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->state, (yyvsp[(5) - (6)].str),
-					sizeof((yyval.cmd)->state));
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
-			free((yyvsp[(2) - (6)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd((yyvsp[(6) - (6)].ival) > 0 ? CMD_WAIT_STATE :
+									   CMD_ASSERT_STATE);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (6)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->state, (yyvsp[(5) - (6)].str),
+						sizeof((yyval.cmd)->state));
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
+				free((yyvsp[(2) - (6)].str));
+				break;
+			}
 
 		case 139:
 #line 1038 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd((yyvsp[(6) - (6)].ival) > 0 ? CMD_WAIT_STATE :
-								   CMD_ASSERT_STATE);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (6)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->state, (yyvsp[(5) - (6)].str),
-					sizeof((yyval.cmd)->state));
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
-			free((yyvsp[(2) - (6)].str));
-			free((yyvsp[(5) - (6)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd((yyvsp[(6) - (6)].ival) > 0 ? CMD_WAIT_STATE :
+									   CMD_ASSERT_STATE);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (6)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->state, (yyvsp[(5) - (6)].str),
+						sizeof((yyval.cmd)->state));
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
+				free((yyvsp[(2) - (6)].str));
+				free((yyvsp[(5) - (6)].str));
+				break;
+			}
 
 		case 140:
 #line 1046 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_ASSERT_ASSIGNED);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (6)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->state, (yyvsp[(5) - (6)].str),
-					sizeof((yyval.cmd)->state));
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
-			free((yyvsp[(2) - (6)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_ASSERT_ASSIGNED);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (6)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->state, (yyvsp[(5) - (6)].str),
+						sizeof((yyval.cmd)->state));
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
+				free((yyvsp[(2) - (6)].str));
+				break;
+			}
 
 		case 141:
 #line 1054 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_ASSERT_ASSIGNED);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (6)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->state, (yyvsp[(5) - (6)].str),
-					sizeof((yyval.cmd)->state));
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
-			free((yyvsp[(2) - (6)].str));
-			free((yyvsp[(5) - (6)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_ASSERT_ASSIGNED);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (6)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->state, (yyvsp[(5) - (6)].str),
+						sizeof((yyval.cmd)->state));
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(6) - (6)].ival);
+				free((yyvsp[(2) - (6)].str));
+				free((yyvsp[(5) - (6)].str));
+				break;
+			}
 
 		case 142:
 #line 1072 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_SQL);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->args, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->args));
-			free((yyvsp[(2) - (3)].str));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_SQL);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->args, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->args));
+				free((yyvsp[(2) - (3)].str));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 143:
 #line 1087 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_EXPECT);
-			strlcpy((yyval.cmd)->expected, (yyvsp[(2) - (2)].str),
-					sizeof((yyval.cmd)->expected));
-			expand_tuple_expect((yyval.cmd)->expected, sizeof((yyval.cmd)->expected));
-			free((yyvsp[(2) - (2)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_EXPECT);
+				strlcpy((yyval.cmd)->expected, (yyvsp[(2) - (2)].str),
+						sizeof((yyval.cmd)->expected));
+				expand_tuple_expect((yyval.cmd)->expected, sizeof((yyval.cmd)->expected));
+				free((yyvsp[(2) - (2)].str));
+				break;
+			}
 
 		case 144:
 #line 1094 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
+				break;
+			}
 
 		case 145:
 #line 1098 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
-			strlcpy((yyval.cmd)->state, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->state));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
+				strlcpy((yyval.cmd)->state, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->state));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 146:
 #line 1104 "test_spec_parse.y"
-		{
-			/* SQLSTATE codes like 25006 are all digits, lexed as T_INTEGER */
-			(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
-			snprintf(/* IGNORE-BANNED */ (yyval.cmd)->state,
-					 sizeof((yyval.cmd)->state), "%d",
-					 (yyvsp[(3) - (3)].ival));
-			break;
-		}
+			{
+				/* SQLSTATE codes like 25006 are all digits, lexed as T_INTEGER */
+				(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
+				snprintf(/* IGNORE-BANNED */ (yyval.cmd)->state,
+											 sizeof((yyval.cmd)->state), "%d",
+											 (yyvsp[(3) - (3)].ival));
+				break;
+			}
 
 		case 147:
 #line 1117 "test_spec_parse.y"
-		{
-			(yyval.cmd) = current_promote_cmd;
-			current_promote_cmd = NULL;
-			break;
-		}
+			{
+				(yyval.cmd) = current_promote_cmd;
+				current_promote_cmd = NULL;
+				break;
+			}
 
 		case 148:
 #line 1125 "test_spec_parse.y"
-		{
-			current_promote_cmd = make_cmd(CMD_PROMOTE);
-			current_promote_cmd->timeoutSeconds = PGAF_TIMEOUT_DEFAULT;
-			strlcpy(
-				current_promote_cmd->promoteNodes[current_promote_cmd->promoteCount++],
-				(yyvsp[(1) - (1)].str),
-				sizeof(current_promote_cmd->promoteNodes[0]));
-			free((yyvsp[(1) - (1)].str));
-			break;
-		}
+			{
+				current_promote_cmd = make_cmd(CMD_PROMOTE);
+				current_promote_cmd->timeoutSeconds = PGAF_TIMEOUT_DEFAULT;
+				strlcpy(
+					current_promote_cmd->promoteNodes[current_promote_cmd->promoteCount++],
+					(yyvsp[(1) - (1)].str),
+					sizeof(current_promote_cmd->promoteNodes[0]));
+				free((yyvsp[(1) - (1)].str));
+				break;
+			}
 
 		case 149:
 #line 1133 "test_spec_parse.y"
-		{
-			if (current_promote_cmd->promoteCount < PGAF_MAX_PROMOTE_NODES)
 			{
-				strlcpy(
-					current_promote_cmd->promoteNodes[current_promote_cmd->
-													  promoteCount++],
-					(yyvsp[(3) - (3)].str),
-					sizeof(current_promote_cmd->promoteNodes[0]));
+				if (current_promote_cmd->promoteCount < PGAF_MAX_PROMOTE_NODES)
+				{
+					strlcpy(
+						current_promote_cmd->promoteNodes[current_promote_cmd->
+														  promoteCount++],
+						(yyvsp[(3) - (3)].str),
+						sizeof(current_promote_cmd->promoteNodes[0]));
+				}
+				free((yyvsp[(3) - (3)].str));
+				break;
 			}
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
 
 		case 150:
 #line 1148 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_NETWORK_OFF);
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_NETWORK_OFF);
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 151:
 #line 1154 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_NETWORK_ON);
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_NETWORK_ON);
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 152:
 #line 1167 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_SLEEP);
-			(yyval.cmd)->timeoutSeconds = (yyvsp[(2) - (2)].ival);
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_SLEEP);
+				(yyval.cmd)->timeoutSeconds = (yyvsp[(2) - (2)].ival);
+				break;
+			}
 
 		case 153:
 #line 1181 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_COMPOSE_DOWN);
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_COMPOSE_DOWN);
+				break;
+			}
 
 		case 154:
 #line 1185 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_COMPOSE_START);
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_COMPOSE_START);
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 155:
 #line 1191 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_COMPOSE_STOP);
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_COMPOSE_STOP);
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 156:
 #line 1197 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_COMPOSE_KILL);
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_COMPOSE_KILL);
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 157:
 #line 1223 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_COMPOSE_INJECT);
-			strlcpy((yyval.cmd)->expected, (yyvsp[(3) - (4)].str),
-					sizeof((yyval.cmd)->expected));                                             /* image */
+			{
+				(yyval.cmd) = make_cmd(CMD_COMPOSE_INJECT);
+				strlcpy((yyval.cmd)->expected, (yyvsp[(3) - (4)].str),
+						sizeof((yyval.cmd)->expected));                                         /* image */
 
-			/* Split T_SHELL_ARGS: "<src-path> <svc>:<dst-path>" */
-			char tmp[4096];
-			strlcpy(tmp, (yyvsp[(4) - (4)].str), sizeof(tmp));
-			char *src = tmp;
-			char *p = tmp;
-			while (*p && *p != ' ' && *p != '\t')
-			{
-				p++;
-			}
-			if (*p)
-			{
-				*p++ = '\0';
-				while (*p == ' ' || *p == '\t')
+				/* Split T_SHELL_ARGS: "<src-path> <svc>:<dst-path>" */
+				char tmp[4096];
+				strlcpy(tmp, (yyvsp[(4) - (4)].str), sizeof(tmp));
+				char *src = tmp;
+				char *p = tmp;
+				while (*p && *p != ' ' && *p != '\t')
 				{
 					p++;
 				}
+				if (*p)
+				{
+					*p++ = '\0';
+					while (*p == ' ' || *p == '\t')
+					{
+						p++;
+					}
+				}
+				char *svcdst = p;
+				char *colon = (*svcdst) ? strchr(svcdst, ':') : NULL;
+				strlcpy((yyval.cmd)->args, src, sizeof((yyval.cmd)->args));
+				if (colon)
+				{
+					*colon = '\0';
+					strlcpy((yyval.cmd)->service, svcdst, sizeof((yyval.cmd)->service)); /* dst svc  */
+					strlcpy((yyval.cmd)->state, colon + 1, sizeof((yyval.cmd)->state)); /* dst path */
+				}
+				free((yyvsp[(3) - (4)].str));
+				free((yyvsp[(4) - (4)].str));
+				break;
 			}
-			char *svcdst = p;
-			char *colon = (*svcdst) ? strchr(svcdst, ':') : NULL;
-			strlcpy((yyval.cmd)->args, src, sizeof((yyval.cmd)->args));
-			if (colon)
-			{
-				*colon = '\0';
-				strlcpy((yyval.cmd)->service, svcdst, sizeof((yyval.cmd)->service));     /* dst svc  */
-				strlcpy((yyval.cmd)->state, colon + 1, sizeof((yyval.cmd)->state));     /* dst path */
-			}
-			free((yyvsp[(3) - (4)].str));
-			free((yyvsp[(4) - (4)].str));
-			break;
-		}
 
 		case 158:
 #line 1257 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_STOP_POSTGRES);
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_STOP_POSTGRES);
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 159:
 #line 1263 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_START_POSTGRES);
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_START_POSTGRES);
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->service));
+				free((yyvsp[(3) - (3)].str));
+				break;
+			}
 
 		case 160:
 #line 1279 "test_spec_parse.y"
-		{
-			pgaf_next_brace_is_while = 1;
-			break;
-		}
+			{
+				pgaf_next_brace_is_while = 1;
+				break;
+			}
 
 		case 161:
 #line 1280 "test_spec_parse.y"
-		{
-			(yyval.step) = (yyvsp[(4) - (5)].step);
-			break;
-		}
+			{
+				(yyval.step) = (yyvsp[(4) - (5)].step);
+				break;
+			}
 
 		case 162:
 #line 1285 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_STAYS_WHILE);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (5)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->state, (yyvsp[(4) - (5)].str),
-					sizeof((yyval.cmd)->state));
-			(yyval.cmd)->body = ((yyvsp[(5) - (5)].step)) ? (yyvsp[(5) -
-																   (5)].step)->
-								commands : NULL;
-			free((yyvsp[(2) - (5)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_STAYS_WHILE);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (5)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->state, (yyvsp[(4) - (5)].str),
+						sizeof((yyval.cmd)->state));
+				(yyval.cmd)->body = ((yyvsp[(5) - (5)].step)) ? (yyvsp[(5) -
+																	   (5)].step)->
+									commands : NULL;
+				free((yyvsp[(2) - (5)].str));
+				break;
+			}
 
 		case 163:
 #line 1304 "test_spec_parse.y"
-		{
-			/* only "set monitor <svc>" is supported; $2 must be "monitor" */
-			if (strcmp((yyvsp[(2) - (3)].str), "monitor") != 0)
 			{
-				fprintf(/* IGNORE-BANNED */ stderr,
-						"pgaftest: unknown 'set' target '%s' (expected 'monitor')\n",
-						(yyvsp[(2) -
-							   (
-								   3)].str));
+				/* only "set monitor <svc>" is supported; $2 must be "monitor" */
+				if (strcmp((yyvsp[(2) - (3)].str), "monitor") != 0)
+				{
+					fprintf(/* IGNORE-BANNED */ stderr,
+												"pgaftest: unknown 'set' target '%s' (expected 'monitor')\n",
+												(yyvsp[(2) -
+													   (
+														   3)].str));
+					free((yyvsp[(2) - (3)].str));
+					free((yyvsp[(3) - (3)].str));
+					YYERROR;
+				}
+				(yyval.cmd) = make_cmd(CMD_SET_MONITOR);
+				strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
+						sizeof((yyval.cmd)->service));
 				free((yyvsp[(2) - (3)].str));
 				free((yyvsp[(3) - (3)].str));
-				YYERROR;
+				break;
 			}
-			(yyval.cmd) = make_cmd(CMD_SET_MONITOR);
-			strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str),
-					sizeof((yyval.cmd)->service));
-			free((yyvsp[(2) - (3)].str));
-			free((yyvsp[(3) - (3)].str));
-			break;
-		}
 
 		case 164:
 #line 1329 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (4)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->args, (yyvsp[(4) - (4)].str),
-					sizeof((yyval.cmd)->args));
-			(yyval.cmd)->logsNegate = false;
-			(yyval.cmd)->allowError = false;     /* false = fixed string, true = PCRE */
-			free((yyvsp[(2) - (4)].str));
-			free((yyvsp[(4) - (4)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (4)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->args, (yyvsp[(4) - (4)].str),
+						sizeof((yyval.cmd)->args));
+				(yyval.cmd)->logsNegate = false;
+				(yyval.cmd)->allowError = false; /* false = fixed string, true = PCRE */
+				free((yyvsp[(2) - (4)].str));
+				free((yyvsp[(4) - (4)].str));
+				break;
+			}
 
 		case 165:
 #line 1338 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (5)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->args, (yyvsp[(5) - (5)].str),
-					sizeof((yyval.cmd)->args));
-			(yyval.cmd)->logsNegate = true;
-			(yyval.cmd)->allowError = false;
-			free((yyvsp[(2) - (5)].str));
-			free((yyvsp[(5) - (5)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (5)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->args, (yyvsp[(5) - (5)].str),
+						sizeof((yyval.cmd)->args));
+				(yyval.cmd)->logsNegate = true;
+				(yyval.cmd)->allowError = false;
+				free((yyvsp[(2) - (5)].str));
+				free((yyvsp[(5) - (5)].str));
+				break;
+			}
 
 		case 166:
 #line 1347 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (4)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->args, (yyvsp[(4) - (4)].str),
-					sizeof((yyval.cmd)->args));
-			(yyval.cmd)->logsNegate = false;
-			(yyval.cmd)->allowError = true;     /* true = PCRE (-P) */
-			free((yyvsp[(2) - (4)].str));
-			free((yyvsp[(4) - (4)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (4)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->args, (yyvsp[(4) - (4)].str),
+						sizeof((yyval.cmd)->args));
+				(yyval.cmd)->logsNegate = false;
+				(yyval.cmd)->allowError = true; /* true = PCRE (-P) */
+				free((yyvsp[(2) - (4)].str));
+				free((yyvsp[(4) - (4)].str));
+				break;
+			}
 
 		case 167:
 #line 1356 "test_spec_parse.y"
-		{
-			(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
-			strlcpy((yyval.cmd)->service, (yyvsp[(2) - (5)].str),
-					sizeof((yyval.cmd)->service));
-			strlcpy((yyval.cmd)->args, (yyvsp[(5) - (5)].str),
-					sizeof((yyval.cmd)->args));
-			(yyval.cmd)->logsNegate = true;
-			(yyval.cmd)->allowError = true;
-			free((yyvsp[(2) - (5)].str));
-			free((yyvsp[(5) - (5)].str));
-			break;
-		}
+			{
+				(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
+				strlcpy((yyval.cmd)->service, (yyvsp[(2) - (5)].str),
+						sizeof((yyval.cmd)->service));
+				strlcpy((yyval.cmd)->args, (yyvsp[(5) - (5)].str),
+						sizeof((yyval.cmd)->args));
+				(yyval.cmd)->logsNegate = true;
+				(yyval.cmd)->allowError = true;
+				free((yyvsp[(2) - (5)].str));
+				free((yyvsp[(5) - (5)].str));
+				break;
+			}
 
 		case 170:
 #line 1377 "test_spec_parse.y"
-		{
-			int i = current_spec->sequenceLength;
-			if (i < PGAF_MAX_SEQ)
 			{
-				current_spec->sequence[current_spec->sequenceLength++] = (yyvsp[(2) -
-																				(2)].
-																		  str);
+				int i = current_spec->sequenceLength;
+				if (i < PGAF_MAX_SEQ)
+				{
+					current_spec->sequence[current_spec->sequenceLength++] = (yyvsp[(2) -
+																					(2)].
+																			  str);
+				}
+				else
+				{
+					fprintf(/* IGNORE-BANNED */ stderr,
+												"pgaftest: too many steps in sequence (max %d)\n",
+												PGAF_MAX_SEQ);
+					exit(1);
+				}
+				break;
 			}
-			else
-			{
-				fprintf(/* IGNORE-BANNED */ stderr,
-						"pgaftest: too many steps in sequence (max %d)\n",
-						PGAF_MAX_SEQ);
-				exit(1);
-			}
-			break;
-		}
 
 		case 171:
 #line 1398 "test_spec_parse.y"
-		{
-			(yyval.str) = "init";
-			break;
-		}
+			{
+				(yyval.str) = "init";
+				break;
+			}
 
 		case 172:
 #line 1399 "test_spec_parse.y"
-		{
-			(yyval.str) = "single";
-			break;
-		}
+			{
+				(yyval.str) = "single";
+				break;
+			}
 
 		case 173:
 #line 1400 "test_spec_parse.y"
-		{
-			(yyval.str) = "primary";
-			break;
-		}
+			{
+				(yyval.str) = "primary";
+				break;
+			}
 
 		case 174:
 #line 1401 "test_spec_parse.y"
-		{
-			(yyval.str) = "wait_primary";
-			break;
-		}
+			{
+				(yyval.str) = "wait_primary";
+				break;
+			}
 
 		case 175:
 #line 1402 "test_spec_parse.y"
-		{
-			(yyval.str) = "wait_standby";
-			break;
-		}
+			{
+				(yyval.str) = "wait_standby";
+				break;
+			}
 
 		case 176:
 #line 1403 "test_spec_parse.y"
-		{
-			(yyval.str) = "demoted";
-			break;
-		}
+			{
+				(yyval.str) = "demoted";
+				break;
+			}
 
 		case 177:
 #line 1404 "test_spec_parse.y"
-		{
-			(yyval.str) = "demote_timeout";
-			break;
-		}
+			{
+				(yyval.str) = "demote_timeout";
+				break;
+			}
 
 		case 178:
 #line 1405 "test_spec_parse.y"
-		{
-			(yyval.str) = "draining";
-			break;
-		}
+			{
+				(yyval.str) = "draining";
+				break;
+			}
 
 		case 179:
 #line 1406 "test_spec_parse.y"
-		{
-			(yyval.str) = "secondary";
-			break;
-		}
+			{
+				(yyval.str) = "secondary";
+				break;
+			}
 
 		case 180:
 #line 1407 "test_spec_parse.y"
-		{
-			(yyval.str) = "catchingup";
-			break;
-		}
+			{
+				(yyval.str) = "catchingup";
+				break;
+			}
 
 		case 181:
 #line 1408 "test_spec_parse.y"
-		{
-			(yyval.str) = "prepare_promotion";
-			break;
-		}
+			{
+				(yyval.str) = "prepare_promotion";
+				break;
+			}
 
 		case 182:
 #line 1409 "test_spec_parse.y"
-		{
-			(yyval.str) = "stop_replication";
-			break;
-		}
+			{
+				(yyval.str) = "stop_replication";
+				break;
+			}
 
 		case 183:
 #line 1410 "test_spec_parse.y"
-		{
-			(yyval.str) = "maintenance";
-			break;
-		}
+			{
+				(yyval.str) = "maintenance";
+				break;
+			}
 
 		case 184:
 #line 1411 "test_spec_parse.y"
-		{
-			(yyval.str) = "join_primary";
-			break;
-		}
+			{
+				(yyval.str) = "join_primary";
+				break;
+			}
 
 		case 185:
 #line 1412 "test_spec_parse.y"
-		{
-			(yyval.str) = "apply_settings";
-			break;
-		}
+			{
+				(yyval.str) = "apply_settings";
+				break;
+			}
 
 		case 186:
 #line 1413 "test_spec_parse.y"
-		{
-			(yyval.str) = "prepare_maintenance";
-			break;
-		}
+			{
+				(yyval.str) = "prepare_maintenance";
+				break;
+			}
 
 		case 187:
 #line 1414 "test_spec_parse.y"
-		{
-			(yyval.str) = "wait_maintenance";
-			break;
-		}
+			{
+				(yyval.str) = "wait_maintenance";
+				break;
+			}
 
 		case 188:
 #line 1415 "test_spec_parse.y"
-		{
-			(yyval.str) = "report_lsn";
-			break;
-		}
+			{
+				(yyval.str) = "report_lsn";
+				break;
+			}
 
 		case 189:
 #line 1416 "test_spec_parse.y"
-		{
-			(yyval.str) = "fast_forward";
-			break;
-		}
+			{
+				(yyval.str) = "fast_forward";
+				break;
+			}
 
 		case 190:
 #line 1417 "test_spec_parse.y"
-		{
-			(yyval.str) = "join_secondary";
-			break;
-		}
+			{
+				(yyval.str) = "join_secondary";
+				break;
+			}
 
 		case 191:
 #line 1418 "test_spec_parse.y"
-		{
-			(yyval.str) = "dropped";
-			break;
-		}
+			{
+				(yyval.str) = "dropped";
+				break;
+			}
 
 		case 192:
 #line 1426 "test_spec_parse.y"
-		{
-			(yyval.str) = (yyvsp[(1) - (1)].str);
-			break;
-		}
+			{
+				(yyval.str) = (yyvsp[(1) - (1)].str);
+				break;
+			}
 
 		case 193:
 #line 1427 "test_spec_parse.y"
-		{
-			(yyval.str) = (yyvsp[(1) - (1)].str);
-			break;
-		}
+			{
+				(yyval.str) = (yyvsp[(1) - (1)].str);
+				break;
+			}
 
 
 /* Line 1267 of yacc.c.  */
@@ -4011,8 +4011,8 @@ parse_test_spec(const char *filename)
 	if (!f)
 	{
 		fprintf(/* IGNORE-BANNED */ stderr,
-				"pgaftest: cannot open spec file \"%s\": %s\n",
-				filename, strerror(errno) /* IGNORE-BANNED */);
+									"pgaftest: cannot open spec file \"%s\": %s\n",
+									filename, strerror(errno) /* IGNORE-BANNED */);
 		return NULL;
 	}
 
