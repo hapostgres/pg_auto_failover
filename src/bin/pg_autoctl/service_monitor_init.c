@@ -143,6 +143,27 @@ service_monitor_init_start(void *context, pid_t *pid)
 
 			log_info("Monitor has been successfully initialized.");
 
+			/* create any non-default formations requested via --formation */
+			for (int fi = 0; fi < config->formationCount; fi++)
+			{
+				char *fname = config->formationNames[fi];
+				char *fkind = config->formationKinds[fi][0]
+							  ? config->formationKinds[fi] : "pgsql";
+
+				log_info("Creating formation \"%s\" (kind %s)", fname, fkind);
+
+				if (!monitor_create_formation(monitor, fname, fkind,
+											  DEFAULT_DATABASE_NAME,
+
+				                              /* hasSecondary */ true,
+
+				                              /* numberSyncStandbys */ 0))
+				{
+					log_error("Failed to create formation \"%s\"", fname);
+					exit(EXIT_CODE_INTERNAL_ERROR);
+				}
+			}
+
 			if (createAndRun)
 			{
 				/* here we call execv() so we never get back */

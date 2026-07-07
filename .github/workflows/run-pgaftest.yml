@@ -103,38 +103,26 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
-  # Run every spec against every supported Postgres version.
-  # Each job downloads its matching pgaf:run-pgNN image and the shared binary.
+  # Run test schedules against every supported Postgres version.
+  # Each schedule groups several specs to reduce total job count from
+  # 19-specs × 4-PG = 76 jobs down to 6-schedules × 4-PG = 24 jobs.
   # ---------------------------------------------------------------------------
   test:
-    name: pgaftest / ${{ matrix.spec }} (PG${{ matrix.PGVERSION }})
+    name: pgaftest / ${{ matrix.schedule }} (PG${{ matrix.PGVERSION }})
     needs: [build-images, build-pgaftest]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         PGVERSION: [14, 15, 16, 17]
-        spec:
-          - basic_operation
-          - basic_operation_listen_flag
-          - maintenance_and_drop
-          - create_standby_with_pgdata
-          - ensure
-          - monitor_disabled
-          - replace_monitor
-          - config_get_set
-          - skip_pg_hba
-          - auth
-          - enable_ssl
-          - ssl_cert
-          - ssl_self_signed
-          - multi_standbys
-          - multi_async
-          - multi_ifdown
-          - multi_maintenance
-          - multi_alternate
-          - extension_update
+        schedule:
+          - quick       # basic_operation, basic_operation_listen_flag, config_get_set, skip_pg_hba
+          - node        # create_standby_with_pgdata, maintenance_and_drop, auth
+          - monitor     # monitor_disabled, replace_monitor, extension_update
+          - ssl         # enable_ssl, ssl_self_signed, ssl_cert
+          - multi-1     # multi_standbys, multi_maintenance, multi_async
+          - multi-2     # ensure, multi_alternate, multi_ifdown
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -168,13 +156,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libpq5
 
-      - name: Run ${{ matrix.spec }}
-        timeout-minutes: 18
+      - name: Run schedule ${{ matrix.schedule }}
+        timeout-minutes: 35
         env:
           PGAF_IMAGE: pgaf:run
         run: |
           chmod +x /tmp/pgaftest-bin
-          /tmp/pgaftest-bin run tests/tap/specs/${{ matrix.spec }}.pgaf
+          /tmp/pgaftest-bin run --schedule tests/tap/schedules/${{ matrix.schedule }}.sch
 
   # ---------------------------------------------------------------------------
   # installcheck: SQL regression suite via pg_regress.

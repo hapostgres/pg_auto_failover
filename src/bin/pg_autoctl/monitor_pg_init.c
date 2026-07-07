@@ -218,6 +218,23 @@ monitor_install(const char *hostname,
 	}
 
 	/*
+	 * If a password for the autoctl_node role has been configured, set it now.
+	 * The autoctl_node role is created by the pgautofailover extension (via
+	 * CREATE EXTENSION above), so we ALTER it here after the extension exists.
+	 */
+	if (autoctl_node_password != NULL && autoctl_node_password[0] != '\0')
+	{
+		if (!pgsql_alter_role_password(&postgres.sqlClient,
+									   PG_AUTOCTL_MONITOR_USERNAME,
+									   autoctl_node_password))
+		{
+			log_error("Failed to set password for role \"%s\"",
+					  PG_AUTOCTL_MONITOR_USERNAME);
+			return false;
+		}
+	}
+
+	/*
 	 * When installing the monitor on-top of an already running PostgreSQL, we
 	 * want to check that our settings have been applied already, and warn the
 	 * user to restart their instance otherwise.
@@ -248,18 +265,6 @@ monitor_install(const char *hostname,
 	{
 		log_warn("Failed to grant connection to local network.");
 		return false;
-	}
-
-	if (autoctl_node_password != NULL && autoctl_node_password[0] != '\0')
-	{
-		if (!pgsql_alter_role_password(&postgres.sqlClient,
-									   PG_AUTOCTL_MONITOR_USERNAME,
-									   autoctl_node_password))
-		{
-			log_error("Failed to set password for role \"%s\"",
-					  PG_AUTOCTL_MONITOR_USERNAME);
-			return false;
-		}
 	}
 
 	log_info("Your pg_auto_failover monitor instance is now ready on port %d.",

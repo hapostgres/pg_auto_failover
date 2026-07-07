@@ -38,6 +38,10 @@
 #include "primary_standby.h"
 #include "string_utils.h"
 
+/* Options specific to "pg_autoctl inspect pgsetup wait" */
+static bool pgsetupWaitReadWrite = false;
+static int pgsetupWaitTimeout = 30;
+
 
 /*
  * keeper_cli_create_replication_slot implements the CLI to create a replication
@@ -322,108 +326,149 @@ keeper_cli_pgsetup_is_ready(int argc, char **argv)
 }
 
 
-/* timeout parsed by keeper_cli_pgsetup_wait_getopts, consumed by wait_until_ready */
-static int pgsetup_wait_timeout = 30;
-
 /*
- * keeper_cli_pgsetup_wait_getopts parses --pgdata and --timeout for the
- * "pgsetup wait" subcommand.
+ * keeper_cli_pgsetup_wait_getopts parses options specific to
+ * "pg_autoctl inspect pgsetup wait": --read-write, --timeout, plus the
+ * standard Postgres connection options inherited from the keeper setup.
  */
 int
 keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
 {
-	int c, option_index = 0;
+	/*
+	 * cli_common_keeper_getopts (called by keeper_cli_keeper_setup_getopts)
+	 * exits with BAD_ARGS when it encounters unknown options.  Since --timeout
+	 * and --read-write are not in its options list, we must remove them from
+	 * argv before delegating.
+	 *
+	 * Strategy:
+	 *   1. Scan argv with opterr=0 to capture --timeout / --read-write.
+	 *   2. Build a filtered argv that omits those two options.
+	 *   3. Pass the filtered argv to keeper_cli_keeper_setup_getopts.
+	 */
 
-	static struct option long_options[] = {
-		{ "pgdata", required_argument, NULL, 'D' },
-		{ "timeout", required_argument, NULL, 't' },
-		{ "version", no_argument, NULL, 'V' },
-		{ "verbose", no_argument, NULL, 'v' },
-		{ "quiet", no_argument, NULL, 'q' },
-		{ "help", no_argument, NULL, 'h' },
+	/* Reset module-level wait options */
+	pgsetupWaitReadWrite = false;
+	pgsetupWaitTimeout = 30;
+
+	static struct option wait_options[] = {
+		{ "read-write", no_argument, NULL, 'W' },
+		{ "timeout", required_argument, NULL, 'T' },
 		{ NULL, 0, NULL, 0 }
 	};
 
-	optind = 0;
+	optind = 1;
+	opterr = 0;
 
-	while ((c = getopt_long(argc, argv, "D:t:Vvqh",
-							long_options, &option_index)) != -1)
+	int c;
+	int option_index = 0;
+
+	while ((c = getopt_long(argc, argv, "WT:", wait_options, &option_index)) != -1)
 	{
 		switch (c)
 		{
-			case 'D':
+			case 'W':
 			{
-				strlcpy(keeperOptions.pgSetup.pgdata, optarg, MAXPGPATH);
-				log_trace("--pgdata %s", optarg);
+				pgsetupWaitReadWrite = true;
 				break;
 			}
 
-			case 't':
+			case 'T':
 			{
-				if (!stringToInt(optarg, &pgsetup_wait_timeout) ||
-					pgsetup_wait_timeout <= 0)
+				int t = strtol(optarg, NULL, 10);
+				if (t <= 0)
 				{
-					log_fatal(
-						"--timeout argument is not a valid positive integer: \"%s\"",
-						optarg);
+					log_error("--timeout must be a positive integer");
 					exit(EXIT_CODE_BAD_ARGS);
 				}
-				log_trace("--timeout %d", pgsetup_wait_timeout);
-				break;
-			}
-
-			case 'V':
-			{
-				keeper_cli_print_version(argc, argv);
-				break;
-			}
-
-			case 'v':
-			{
-				log_set_level(LOG_DEBUG);
-				break;
-			}
-
-			case 'q':
-			{
-				log_set_level(LOG_ERROR);
-				break;
-			}
-
-			case 'h':
-			{
-				commandline_help(stderr);
-				exit(EXIT_CODE_QUIT);
+				pgsetupWaitTimeout = t;
 				break;
 			}
 
 			default:
 			{
-				commandline_help(stderr);
-				exit(EXIT_CODE_BAD_ARGS);
+				/* standard keeper options; handled by the delegated call below */
 				break;
 			}
 		}
 	}
 
-	/* publish parsed options */
-	keeperOptions.pgSetup.pgdata[0] =
-		keeperOptions.pgSetup.pgdata[0]; /* no-op, already set above */
+	opterr = 1;
 
-	return optind;
+	/*
+	 * Build a filtered argv that strips --timeout/--read-write (and their
+	 * arguments) so that keeper_cli_keeper_setup_getopts does not see them.
+	 */
+	char **filtered_argv = (char **) palloc((argc + 1) * sizeof(char *));
+	int filtered_argc = 0;
+
+	for (int i = 0; i < argc; i++)
+	{
+		if (strcmp(argv[i], "--read-write") == 0 || strcmp(argv[i], "-W") == 0)
+		{
+			continue;
+		}
+
+		if ((strcmp(argv[i], "--timeout") == 0 || strcmp(argv[i], "-T") == 0) &&
+			i + 1 < argc)
+		{
+			/* skip both the flag and its argument */
+			i++;
+			continue;
+		}
+
+		filtered_argv[filtered_argc++] = argv[i];
+	}
+	filtered_argv[filtered_argc] = NULL;
+
+	int rc = keeper_cli_keeper_setup_getopts(filtered_argc, filtered_argv);
+
+	pfree(filtered_argv);
+
+	return rc;
 }
 
 
 /*
- * keeper_cli_pgsetup_wait_until_ready waits until the local Postgres server
- * is ready to accept connections, up to --timeout seconds (default 30).
+ * keeper_cli_pgsetup_wait_until_ready waits for the local Postgres server to
+ * become ready.  When --read-write is given, it additionally waits until the
+ * server is accepting read-write connections (not in recovery and not set to
+ * default_transaction_read_only).
+ *
+ * The --timeout value (default 30s) is a single deadline shared by both
+ * phases: the pg_is_ready poll and the subsequent read-write connection
+ * attempt.  Time spent waiting for Postgres to start counts against the
+ * budget for the read-write phase.
  */
 void
 keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 {
+	int timeout = pgsetupWaitTimeout;
+
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
 	PostgresSetup *pgSetup = &(postgres.postgresSetup);
+
+	/* Record wall-clock start so all phases share one deadline. */
+	time_t startTime = time(NULL);
+
+	/* Wait up to `timeout` seconds for the config file to be created.
+	 * In no-monitor mode, pg_autoctl create postgres runs first and writes the
+	 * config; pgsetup wait may be called before that completes. */
+	{
+		KeeperConfig kconfig = keeperOptions;
+		if (keeper_config_set_pathnames_from_pgdata(&(kconfig.pathnames),
+													kconfig.pgSetup.pgdata))
+		{
+			time_t deadline = startTime + timeout;
+			while (!file_exists(kconfig.pathnames.config) &&
+				   time(NULL) < deadline)
+			{
+				log_debug("Waiting for config file \"%s\" to appear",
+						  kconfig.pathnames.config);
+				pg_usleep(500 * 1000);
+			}
+		}
+	}
 
 	if (!cli_common_pgsetup_init(&pathnames, pgSetup))
 	{
@@ -433,16 +478,105 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 
 	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
 
+	/*
+	 * Phase 1: wait for postmaster to signal "ready" in postmaster.pid.
+	 * Pass the remaining timeout so the two phases together stay within the
+	 * single user-visible deadline.
+	 */
+	int remainingAfterConfig = timeout - (int) (time(NULL) - startTime);
+	if (remainingAfterConfig <= 0)
+	{
+		log_error("Timed out waiting for Postgres config file to appear");
+		exit(EXIT_CODE_PGSQL);
+	}
+
 	bool pgIsReady =
-		pg_setup_wait_until_is_ready(pgSetup, pgsetup_wait_timeout, LOG_INFO);
+		pg_setup_wait_until_is_ready(pgSetup, remainingAfterConfig, LOG_INFO);
 
 	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup->pm_status));
 
-	if (pgIsReady)
+	if (!pgIsReady)
 	{
+		exit(EXIT_CODE_PGSQL);
+	}
+
+	if (!pgsetupWaitReadWrite)
+	{
+		/* Plain "ready" check — we're done. */
 		exit(EXIT_CODE_QUIT);
 	}
-	exit(EXIT_CODE_PGSQL);
+
+	/*
+	 * Phase 2: wait until the server accepts read-write connections.
+	 *
+	 * Postgres is up (phase 1 passed) but may still be in recovery, finishing
+	 * pg_rewind, or in standby mode.  We poll with a libpq connection that
+	 * checks pg_is_in_recovery() until it returns false or the deadline fires.
+	 *
+	 * We use the local connection string from pgSetup (Unix socket when
+	 * available, matching whatever auth the node was created with) so that the
+	 * check works regardless of the cluster's auth method.
+	 */
+	char connstr[MAXCONNINFO];
+	if (!pg_setup_get_local_connection_string(pgSetup, connstr))
+	{
+		log_error("Failed to build local connection string for read-write check");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	log_info("Waiting for Postgres to accept read-write connections "
+			 "(timeout %ds)", timeout);
+
+	bool isReadWrite = false;
+	int attempts = 0;
+
+	while (!isReadWrite)
+	{
+		int elapsed = (int) (time(NULL) - startTime);
+		int remaining = timeout - elapsed;
+
+		if (remaining <= 0)
+		{
+			log_error("Timed out after %ds waiting for Postgres "
+					  "to accept read-write connections", timeout);
+			exit(EXIT_CODE_PGSQL);
+		}
+
+		/* Use a short per-attempt connect_timeout so we retry briskly. */
+		char attemptConnstr[MAXCONNINFO];
+		sformat(attemptConnstr, sizeof(attemptConnstr),
+				"%s connect_timeout=1", connstr);
+
+		PGSQL pgsql = { 0 };
+		pgsql_init(&pgsql, attemptConnstr, PGSQL_CONN_LOCAL);
+
+		bool inRecovery = true;   /* assume standby until proven otherwise */
+		bool queryOk = pgsql_is_in_recovery(&pgsql, &inRecovery);
+		pgsql_finish(&pgsql);
+
+		if (queryOk && !inRecovery)
+		{
+			isReadWrite = true;
+			break;
+		}
+
+		/* let's not be THAT verbose about it */
+		if (attempts % 10 == 0)
+		{
+			log_debug("pgsetup wait --read-write: attempt %d, "
+					  "in_recovery=%s, after %ds",
+					  attempts + 1,
+					  inRecovery ? "true" : "false",
+					  elapsed);
+		}
+
+		++attempts;
+		pg_usleep(100 * 1000);   /* 100 ms between probes */
+	}
+
+	log_info("Postgres is now accepting read-write connections on port %d",
+			 pgSetup->pgport);
+	exit(EXIT_CODE_QUIT);
 }
 
 
