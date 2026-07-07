@@ -208,7 +208,7 @@ jobs:
       - name: Run schedule ${{ matrix.schedule }}
         timeout-minutes: 35
         run: |
-          mkdir -p /tmp/pgaftest
+          mkdir -p /tmp/pgaftest && chmod 777 /tmp/pgaftest
           DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
           docker run --rm \
             --user root \
@@ -269,7 +269,7 @@ jobs:
       - name: Run installcheck spec
         timeout-minutes: 15
         run: |
-          mkdir -p /tmp/pgaftest
+          mkdir -p /tmp/pgaftest && chmod 777 /tmp/pgaftest
           DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
           docker run --rm \
             --user root \
@@ -321,7 +321,7 @@ jobs:
       - name: Run upgrade spec
         timeout-minutes: 25
         run: |
-          mkdir -p /tmp/pgaftest
+          mkdir -p /tmp/pgaftest && chmod 777 /tmp/pgaftest
           DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
           docker run --rm \
             --user root \
