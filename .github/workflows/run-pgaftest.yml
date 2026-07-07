@@ -119,10 +119,13 @@ jobs:
         schedule:
           - quick       # basic_operation, basic_operation_listen_flag, config_get_set, skip_pg_hba
           - node        # create_standby_with_pgdata, maintenance_and_drop, auth
+          - node-extra  # debian_clusters, tablespaces
           - monitor     # monitor_disabled, replace_monitor, extension_update
           - ssl         # enable_ssl, ssl_self_signed, ssl_cert
           - multi-1     # multi_standbys, multi_maintenance, multi_async
           - multi-2     # ensure, multi_alternate, multi_ifdown
+          - citus-1     # citus_cluster_name, citus_force_failover, citus_skip_pg_hba
+          - citus-2     # basic_citus_operation, nonha_citus_operation, citus_multi_standbys
 
     steps:
       - uses: actions/checkout@v7.0.0
