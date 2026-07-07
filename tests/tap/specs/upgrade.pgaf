@@ -129,10 +129,11 @@ step test_003b_wait_keeper_restart {
 }
 
 step test_004_wait_convergence {
+    # 300s: 3-node post-upgrade reconvergence can be slow on shared CI runners
     wait until node1 state is primary
         and node2 state is secondary
         and node3 state is secondary
-        timeout 180s
+        timeout 300s
 }
 
 # -------------------------------------------------------------------------

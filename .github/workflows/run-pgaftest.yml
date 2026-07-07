@@ -49,16 +49,40 @@ jobs:
             -t pgaf:run-pg${{ matrix.PGVERSION }} \
             .
 
-      - name: Save image to tarball
+      - name: Build pgaf:debian image (PG${{ matrix.PGVERSION }})
+        run: |
+          # Layer cache from the run build above covers the run stage;
+          # this step only adds the pg_createcluster layer on top.
+          case "${{ matrix.PGVERSION }}" in
+            14|15) CITUSTAG=v12.1.5 ;;
+            *)     CITUSTAG=v13.2.0 ;;
+          esac
+          docker build \
+            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${CITUSTAG} \
+            --target debian \
+            -t pgaf:debian-pg${{ matrix.PGVERSION }} \
+            .
+
+      - name: Save images to tarballs
         run: |
           docker save pgaf:run-pg${{ matrix.PGVERSION }} \
             | gzip > /tmp/pgaf-run-pg${{ matrix.PGVERSION }}.tar.gz
+          docker save pgaf:debian-pg${{ matrix.PGVERSION }} \
+            | gzip > /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
 
-      - name: Upload image artifact
+      - name: Upload run image artifact
         uses: actions/upload-artifact@v7.0.1
         with:
           name: pgaf-run-image-pg${{ matrix.PGVERSION }}
           path: /tmp/pgaf-run-pg${{ matrix.PGVERSION }}.tar.gz
+          retention-days: 1
+
+      - name: Upload debian image artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: pgaf-debian-image-pg${{ matrix.PGVERSION }}
+          path: /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
           retention-days: 1
 
   # ---------------------------------------------------------------------------
@@ -142,6 +166,19 @@ jobs:
           # Alias to the name pgaftest expects via PGAF_IMAGE
           docker tag pgaf:run-pg${{ matrix.PGVERSION }} pgaf:run
 
+      - name: Download pgaf:debian image (PG${{ matrix.PGVERSION }})
+        if: matrix.schedule == 'node-extra'
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: pgaf-debian-image-pg${{ matrix.PGVERSION }}
+          path: /tmp
+
+      - name: Load pgaf:debian image into Docker
+        if: matrix.schedule == 'node-extra'
+        run: |
+          docker load < /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
+          docker tag pgaf:debian-pg${{ matrix.PGVERSION }} pgaf:debian
+
       - name: Download pgaftest binary
         uses: actions/download-artifact@v8.0.1
         with:
@@ -163,6 +200,8 @@ jobs:
         timeout-minutes: 35
         env:
           PGAF_IMAGE: pgaf:run
+          PGVERSION: ${{ matrix.PGVERSION }}
+          PGAF_DEBIAN_IMAGE: ${{ matrix.schedule == 'node-extra' && 'pgaf:debian' || '' }}
         run: |
           chmod +x /tmp/pgaftest-bin
           /tmp/pgaftest-bin run --schedule tests/tap/schedules/${{ matrix.schedule }}.sch

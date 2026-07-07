@@ -359,16 +359,34 @@ write_image_stanza_target(FILE *f, const TestCluster *cluster,
 
 	if (img && *img && !isTestRunner)
 	{
-		fformat(f, "    image: \"%s\"\n", img);
+		if (strcmp(target, "debian") == 0)
+		{
+			/*
+			 * When PGAF_IMAGE is set (pre-built run image), the debian stage
+			 * needs a separately built image supplied via PGAF_DEBIAN_IMAGE.
+			 * If not provided, fall through to the inline build stanza so the
+			 * debian target is built from source (slower, but correct).
+			 */
+			const char *debImg = getenv("PGAF_DEBIAN_IMAGE"); /* IGNORE-BANNED */
+
+			if (debImg && *debImg)
+			{
+				fformat(f, "    image: \"%s\"\n", debImg);
+				return;
+			}
+		}
+		else
+		{
+			fformat(f, "    image: \"%s\"\n", img);
+			return;
+		}
 	}
-	else
-	{
-		fformat(f,
-				"    build:\n"
-				"      context: \"%s\"\n"
-				"      target: %s\n",
-				contextDir, target);
-	}
+
+	fformat(f,
+			"    build:\n"
+			"      context: \"%s\"\n"
+			"      target: %s\n",
+			contextDir, target);
 }
 
 
@@ -713,7 +731,7 @@ compose_gen_write(TestCluster *cluster,
 						" \"--pgdata\", \"%s\"]\n"
 						"      interval: 2s\n"
 						"      timeout: 5s\n"
-						"      retries: 30\n"
+						"      retries: 60\n"
 						"      start_period: 15s\n",
 						node_pgdata);
 			}

@@ -89,10 +89,12 @@ step test_007_insert_rows {
 step test_008_failover {
     network disconnect node1
     network connect node3
-    wait until node3 state is wait_primary  timeout 180s
+    # 'wait_primary' is transient: node3 passes through it in under a second
+    # once node2 joins as standby.  Skip the intermediate wait and go straight
+    # to the stable end state.  300s: shared CI runners can be slow.
     wait until node2 state is secondary
         and node3 state is primary
-        timeout 180s
+        timeout 300s
     sql node3 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2) }
 }

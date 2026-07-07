@@ -36,7 +36,7 @@ step test_001_single_with_debian_cluster {
 #
 
 step test_002_conf_in_pgdata {
-    exec node1  test -f /var/lib/postgresql/17/main/postgresql.conf
+    exec node1  /bin/sh -c 'test -f ${PGDATA}/postgresql.conf'
 }
 
 #

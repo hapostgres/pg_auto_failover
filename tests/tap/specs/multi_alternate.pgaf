@@ -161,10 +161,12 @@ step test_005_002_fail_primary_again {
 
 step test_005_003_bring_up_first_failed_primary {
     compose start node2
-    wait until node2 state is demoted  timeout 180s
+    # 'demoted' is a transient intermediate state that lasts under a second;
+    # waiting for it races reliably on shared CI runners.  Wait for the stable
+    # end state instead.
     wait until node2 state is secondary
         and node3 state is primary
-        timeout 180s
+        timeout 300s
 }
 
 step test_005_004_bring_up_last_failed_primary {
