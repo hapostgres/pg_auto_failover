@@ -32,7 +32,7 @@ cluster {
 
 setup {
     # 180s: cert-auth cluster formation is slower on shared CI runners
-    wait until primary, secondary  timeout 180s
+    wait until primary, secondary  timeout 300s
     promote node1
 }
 

@@ -361,9 +361,10 @@ step test_021_ifdown_primary {
 }
 
 step test_022_detect_network_partition {
-    # 300s: demote_timeout transition involves monitor health-check cycles;
-    # shared CI runners can be slow to process the network partition signal
-    wait until node2 state is demote_timeout  timeout 300s
+    # node2 is network-disconnected so it cannot report its state back to the
+    # monitor.  Check only the assigned state (monitor's decision); checking
+    # the full convergence state would wait forever for a node that is offline.
+    wait until node2 assigned-state = demote_timeout  timeout 300s
     wait until node3 state is wait_primary  timeout 300s
     sleep 3s
     exec-fails node2  pg_autoctl inspect pgsetup ready
