@@ -226,7 +226,8 @@ step test_014_writes_to_node1_fail {
 
 step test_015_fail_secondary {
     compose stop node1
-    wait until node1 stopped  timeout 30s
+    # 60s: compose stop can be slow on shared CI runners
+    wait until node1 stopped  timeout 60s
     wait until node2 state is wait_primary  timeout 60s
 }
 
@@ -242,7 +243,8 @@ step test_016_drop_secondary {
         and node1 state is secondary
         timeout 90s
     exec node1  pg_autoctl drop node --no-wait
-    wait until node1 stopped  timeout 30s
+    # 60s: compose stop can be slow on shared CI runners
+    wait until node1 stopped  timeout 60s
     wait until node2 state is single  timeout 90s
     sql node2 {
         SELECT slot_name
@@ -359,8 +361,10 @@ step test_021_ifdown_primary {
 }
 
 step test_022_detect_network_partition {
-    wait until node2 state is demote_timeout  timeout 90s
-    wait until node3 state is wait_primary  timeout 90s
+    # 150s: demote_timeout transition involves monitor health-check cycles;
+    # shared CI runners can be slow to process the network partition signal
+    wait until node2 state is demote_timeout  timeout 150s
+    wait until node3 state is wait_primary  timeout 150s
     sleep 3s
     exec-fails node2  pg_autoctl inspect pgsetup ready
     sql node3 { SHOW synchronous_standby_names; }
