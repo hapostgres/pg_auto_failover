@@ -732,7 +732,7 @@ compose_gen_write(TestCluster *cluster,
 						"      interval: 2s\n"
 						"      timeout: 5s\n"
 						"      retries: 60\n"
-						"      start_period: 15s\n",
+						"      start_period: 90s\n",
 						node_pgdata);
 			}
 

@@ -127,9 +127,9 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
-  # Run test schedules against every supported Postgres version.
-  # Each schedule groups several specs to reduce total job count from
-  # 19-specs × 4-PG = 76 jobs down to 6-schedules × 4-PG = 24 jobs.
+  # Run test schedules.  Fast schedules (quick, node, ssl) run against all four
+  # Postgres versions.  Slow schedules (multi-*, citus-*) run PG17 only.
+  # Total: 3×4 + 4×1 = 16 test jobs — keeps GitHub shared-runner queue short.
   # ---------------------------------------------------------------------------
   test:
     name: pgaftest / ${{ matrix.schedule }} (PG${{ matrix.PGVERSION }})
@@ -139,17 +139,35 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        PGVERSION: [14, 15, 16, 17]
-        schedule:
-          - quick       # basic_operation, basic_operation_listen_flag, config_get_set, skip_pg_hba
-          - node        # create_standby_with_pgdata, maintenance_and_drop, auth
-          - node-extra  # debian_clusters, tablespaces
-          - monitor     # monitor_disabled, replace_monitor, extension_update
-          - ssl         # enable_ssl, ssl_self_signed, ssl_cert
-          - multi-1     # multi_standbys, multi_maintenance, multi_async
-          - multi-2     # ensure, multi_alternate, multi_ifdown
-          - citus-1     # citus_cluster_name, citus_force_failover, citus_skip_pg_hba
-          - citus-2     # basic_citus_operation, nonha_citus_operation, citus_multi_standbys
+        # Fast/medium schedules run against all four Postgres versions.
+        # Slow schedules (multi-*, citus-*) run PG17 only: they exercise
+        # pg_auto_failover FSM logic, not Postgres version-specific code paths,
+        # and restricting them reduces total job count from 36 to 16 — avoiding
+        # GitHub Actions shared-runner queue saturation that was adding 10-15 min
+        # of queue wait to every run.
+        include:
+          # quick: basic_operation, basic_operation_listen_flag, config_get_set, skip_pg_hba
+          - { PGVERSION: 14, schedule: quick }
+          - { PGVERSION: 15, schedule: quick }
+          - { PGVERSION: 16, schedule: quick }
+          - { PGVERSION: 17, schedule: quick }
+          # node: create_standby_with_pgdata, maintenance_and_drop, auth,
+          #       monitor_disabled, replace_monitor, extension_update,
+          #       debian_clusters, tablespaces
+          - { PGVERSION: 14, schedule: node }
+          - { PGVERSION: 15, schedule: node }
+          - { PGVERSION: 16, schedule: node }
+          - { PGVERSION: 17, schedule: node }
+          # ssl: enable_ssl, ssl_self_signed, ssl_cert
+          - { PGVERSION: 14, schedule: ssl }
+          - { PGVERSION: 15, schedule: ssl }
+          - { PGVERSION: 16, schedule: ssl }
+          - { PGVERSION: 17, schedule: ssl }
+          # slow schedules: PG17 only
+          - { PGVERSION: 17, schedule: multi-1 }   # multi_standbys, multi_maintenance, multi_async
+          - { PGVERSION: 17, schedule: multi-2 }   # ensure, multi_alternate, multi_ifdown
+          - { PGVERSION: 17, schedule: citus-1 }   # citus_cluster_name, citus_force_failover, citus_skip_pg_hba
+          - { PGVERSION: 17, schedule: citus-2 }   # basic_citus_operation, nonha_citus_operation, citus_multi_standbys
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -167,14 +185,14 @@ jobs:
           docker tag pgaf:run-pg${{ matrix.PGVERSION }} pgaf:run
 
       - name: Download pgaf:debian image (PG${{ matrix.PGVERSION }})
-        if: matrix.schedule == 'node-extra'
+        if: matrix.schedule == 'node'
         uses: actions/download-artifact@v8.0.1
         with:
           name: pgaf-debian-image-pg${{ matrix.PGVERSION }}
           path: /tmp
 
       - name: Load pgaf:debian image into Docker
-        if: matrix.schedule == 'node-extra'
+        if: matrix.schedule == 'node'
         run: |
           docker load < /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
           docker tag pgaf:debian-pg${{ matrix.PGVERSION }} pgaf:debian
@@ -201,7 +219,7 @@ jobs:
         env:
           PGAF_IMAGE: pgaf:run
           PGVERSION: ${{ matrix.PGVERSION }}
-          PGAF_DEBIAN_IMAGE: ${{ matrix.schedule == 'node-extra' && 'pgaf:debian' || '' }}
+          PGAF_DEBIAN_IMAGE: ${{ matrix.schedule == 'node' && 'pgaf:debian' || '' }}
         run: |
           chmod +x /tmp/pgaftest-bin
           /tmp/pgaftest-bin run --schedule tests/tap/schedules/${{ matrix.schedule }}.sch

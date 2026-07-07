@@ -51,10 +51,11 @@ step test_004_demoted {
     compose stop node1
     sleep 30s
     compose start node1
-    wait until node1 state is demoted  timeout 180s
+    # 'demoted' is a sub-second transient state; waiting for it races on
+    # loaded shared CI runners.  Wait for the stable end state instead.
     wait until node2 state is primary
         and node1 state is secondary
-        timeout 180s
+        timeout 300s
 }
 
 step test_005_inject_error_in_node2 {

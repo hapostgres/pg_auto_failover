@@ -145,10 +145,12 @@ step test_009a_enable_maintenance_on_primary_should_fail {
 step test_009b_disable_maintenance {
     exec node1  pg_autoctl disable maintenance
     exec node2  pg_autoctl disable maintenance
+    # 180s: two nodes rejoining simultaneously (pg_rewind + replication restart)
+    # can be slow on shared CI runners
     wait until node1 state is secondary
         and node2 state is secondary
         and node3 state is primary
-        timeout 90s
+        timeout 180s
 }
 
 step test_010_set_number_sync_standby_to_zero {

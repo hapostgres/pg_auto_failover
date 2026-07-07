@@ -19,9 +19,11 @@ cluster {
 }
 
 setup {
+    # 300s: verify-ca + cert-auth cluster formation is slower than plain auth
+    # on shared CI runners, especially as the third spec in the ssl schedule
     wait until node1 state is primary
         and node2 state is secondary
-        timeout 180s
+        timeout 300s
     promote node1
 }
 

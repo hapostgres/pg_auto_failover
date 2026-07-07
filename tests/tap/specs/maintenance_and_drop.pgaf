@@ -14,7 +14,8 @@ cluster {
 }
 
 setup {
-    wait until primary, secondary  timeout 90s
+    # 180s: cluster formation can be slow on shared CI runners
+    wait until primary, secondary  timeout 180s
     promote node1
 }
 

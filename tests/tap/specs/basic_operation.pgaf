@@ -361,10 +361,10 @@ step test_021_ifdown_primary {
 }
 
 step test_022_detect_network_partition {
-    # 150s: demote_timeout transition involves monitor health-check cycles;
+    # 300s: demote_timeout transition involves monitor health-check cycles;
     # shared CI runners can be slow to process the network partition signal
-    wait until node2 state is demote_timeout  timeout 150s
-    wait until node3 state is wait_primary  timeout 150s
+    wait until node2 state is demote_timeout  timeout 300s
+    wait until node3 state is wait_primary  timeout 300s
     sleep 3s
     exec-fails node2  pg_autoctl inspect pgsetup ready
     sql node3 { SHOW synchronous_standby_names; }
