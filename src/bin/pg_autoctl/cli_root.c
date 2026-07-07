@@ -104,8 +104,6 @@ CommandLine *root_subcommands[] = {
 	&manual_commands,
 	&internal_commands,
 	&node_commands,
-
-	&do_commands,
 	&service_run_command,
 	&watch_command,
 	&service_stop_command,

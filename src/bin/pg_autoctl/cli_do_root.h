@@ -102,7 +102,7 @@ extern CommandLine do_tmux_commands;
 /* src/bin/pg_autoctl/cli_do_coordinator.c */
 extern CommandLine do_coordinator_commands;
 
-extern CommandLine do_commands;
+extern CommandLine internal_commands;
 extern CommandLine *do_subcommands[];
 
 int keeper_cli_keeper_setup_getopts(int argc, char **argv);

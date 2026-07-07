@@ -630,7 +630,7 @@ CommandLine *do_subcommands[] = {
 	NULL
 };
 
-CommandLine do_commands =
+CommandLine internal_commands =
 	make_hidden_command_set("internal",
 							"Internal subprocess entry points — not for direct use",
 							NULL, NULL, NULL, do_subcommands);

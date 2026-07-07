@@ -1438,14 +1438,7 @@ exit_unless_role_is_keeper(KeeperConfig *kconfig)
 void
 keeper_cli_help(int argc, char **argv)
 {
-	CommandLine command = root;
-
-	if (env_exists(PG_AUTOCTL_DEBUG))
-	{
-		command = root_with_debug;
-	}
-
-	(void) commandline_print_command_tree(&command, stdout);
+	(void) commandline_print_command_tree(&root, stdout);
 }
 
 
