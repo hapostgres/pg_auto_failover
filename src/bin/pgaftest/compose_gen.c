@@ -723,7 +723,7 @@ compose_gen_write(TestCluster *cluster,
 			 * nodes use service_started so they launch as soon as node1 has
 			 * started (they don't need postgres to be ready yet).
 			 */
-			if (!firstNode && cluster->withMonitor)
+			if (!firstNode && cluster->withMonitor && !n->launchDeferred)
 			{
 				fformat(f,
 						"    healthcheck:\n"
@@ -747,7 +747,7 @@ compose_gen_write(TestCluster *cluster,
 			}
 			fformat(f, "\n");
 
-			if (!firstNode)
+			if (!firstNode && !n->launchDeferred)
 			{
 				firstNode = n;
 			}

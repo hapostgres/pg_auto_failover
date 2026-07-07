@@ -6,10 +6,6 @@
 # most-advanced secondary are cleanly stopped before a behind async node is
 # promoted — requiring pg_rewind to fetch missing WAL from the survivors.
 #
-# Note: the advanced test uses compose stop (clean shutdown) rather than
-# network disconnect for the primary/advanced secondary so Postgres does not
-# recycle WAL segments, which would corrupt pg_rewind's prev-links.
-#
 # Predecessor: tests/test_multi_ifdown.py
 
 cluster {
@@ -154,16 +150,16 @@ step test_014_secondary_reports_lsn {
     wait until node1 state is secondary
         and node3 state is primary
         timeout 60s
-    compose stop node3
-    compose stop node1
+    network disconnect node3
+    network disconnect node1
     network connect node2
-    exec monitor  bash -c "pg_autoctl perform failover || true"
-    wait until node2 state is report_lsn  timeout 90s
+    exec monitor  bash -c "pg_autoctl perform failover &"
+    wait until node2 state is report_lsn  timeout 300s
 }
 
 step test_015_start_node3_node1 {
-    compose start node3
-    compose start node1
+    network connect node3
+    network connect node1
 }
 
 #

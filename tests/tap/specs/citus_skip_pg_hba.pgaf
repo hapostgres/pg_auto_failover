@@ -1,27 +1,25 @@
 # Test Citus cluster with authMethod=skip (pg_autoctl does not edit pg_hba.conf).
 #
 # With auth=skip, pg_autoctl leaves pg_hba.conf untouched after postgres init.
-# The coordinator pair starts normally (coord0b pg_basebackup-s from coord0a
-# and inherits its HBA; the monitor and coordinator connections work via the
-# Docker network with trust auth set at the monitor level).
+# All data nodes are launch deferred so startup can be sequenced manually:
 #
-# worker1a is launch deferred.  The first manual run fails because the
-# coordinator tries master_activate_node on worker1a but worker1a's default
-# pg_hba.conf blocks that connection.  After we manually append the required
-# HBA rules and retry, activation succeeds — and pg_autoctl has not modified
-# pg_hba.conf itself (verified by assert hba-edited = false).
+#   setup: monitor starts → add LAN HBA to monitor → start coord0a
+#   test_000: add LAN HBA to coord0a (so coord0b can connect later)
+#   test_001a: wait until coord0a reaches single
+#   test_001b: start coord0b, wait until coord0a=primary/coord0b=secondary
 #
-# worker1b is also launch deferred to ensure it starts only after worker1a is
-# the active primary for group 1, matching the Python test's sequential order.
+# worker1a's first run fails because the coordinator tries master_activate_node
+# but worker1a's default pg_hba.conf blocks that connection.  After manually
+# appending HBA rules and retrying, activation succeeds — and pg_autoctl has
+# not modified pg_hba.conf itself (verified by assert hba-edited = false).
 #
-# Ported from tests/test_citus_skip_pg_hba.py
 # Predecessor: tests/test_citus_skip_pg_hba.py
 
 cluster {
     monitor
     auth skip
     formation {
-        coord0a coordinator
+        coord0a coordinator launch deferred
         coord0b coordinator launch deferred
         worker1a worker group 1 launch deferred
         worker1b worker group 1 launch deferred
@@ -30,6 +28,8 @@ cluster {
 
 setup {
     exec monitor  pg_autoctl inspect pgsetup wait
+    exec monitor  pg_autoctl override pgsetup hba-lan
+    exec coord0a  pg_autoctl node start /etc/pgaf/node.ini
 }
 
 teardown {
@@ -40,8 +40,7 @@ teardown {
 # test_000: monitor with auth=skip, append trust rule to pg_hba.conf manually
 #
 
-step test_000_create_monitor {
-    exec monitor  pg_autoctl override pgsetup hba-lan
+step test_000_add_coord0a_hba {
     exec coord0a  pg_autoctl override pgsetup hba-lan
 }
 
