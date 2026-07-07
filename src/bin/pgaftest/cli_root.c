@@ -59,7 +59,7 @@ derive_work_dir(const char *specPath, char *buf, int buflen)
 	base = base ? base + 1 : specPath;
 
 	char name[256] = { 0 };
-	strncpy(name, base, sizeof(name) - 1);
+	strlcpy(name, base, sizeof(name));
 
 	/* strip .pgaf extension */
 	char *dot = strrchr(name, '.');
@@ -102,22 +102,19 @@ pgaftest_getopts(int argc, char **argv)
 		{
 			case 'w':
 			{
-				strncpy(pgaftestOpts.workDir, optarg,
-						sizeof(pgaftestOpts.workDir) - 1);
+				strlcpy(pgaftestOpts.workDir, optarg, sizeof(pgaftestOpts.workDir));
 				break;
 			}
 
 			case 'S':
 			{
-				strncpy(pgaftestOpts.schedule, optarg,
-						sizeof(pgaftestOpts.schedule) - 1);
+				strlcpy(pgaftestOpts.schedule, optarg, sizeof(pgaftestOpts.schedule));
 				break;
 			}
 
 			case 'E':
 			{
-				strncpy(pgaftestOpts.expected, optarg,
-						sizeof(pgaftestOpts.expected) - 1);
+				strlcpy(pgaftestOpts.expected, optarg, sizeof(pgaftestOpts.expected));
 				break;
 			}
 
@@ -218,7 +215,7 @@ cli_run(int argc, char **argv)
 			char specPath[1024];
 			if (strchr(p, '/'))
 			{
-				strncpy(specPath, p, sizeof(specPath) - 1);
+				strlcpy(specPath, p, sizeof(specPath));
 			}
 			else
 			{
@@ -233,7 +230,7 @@ cli_run(int argc, char **argv)
 				const char *base = strrchr(specPath, '/');
 				base = base ? base + 1 : specPath;
 				char name[128];
-				strncpy(name, base, sizeof(name) - 1);
+				strlcpy(name, base, sizeof(name));
 				char *dot = strrchr(name, '.');
 				if (dot)
 				{
@@ -275,8 +272,7 @@ cli_run(int argc, char **argv)
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[0],
-			sizeof(pgaftestOpts.specFile) - 1);
+	strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
 
 	if (pgaftestOpts.workDir[0] == '\0')
 	{
@@ -307,8 +303,7 @@ cli_setup(int argc, char **argv)
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[0],
-			sizeof(pgaftestOpts.specFile) - 1);
+	strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
 
 	/*
 	 * The commandline library stops getopt at the first non-option (the spec
@@ -354,8 +349,7 @@ cli_step(int argc, char **argv)
 	}
 
 	/* step name is positional */
-	strncpy(pgaftestOpts.stepName, argv[0],
-			sizeof(pgaftestOpts.stepName) - 1);
+	strlcpy(pgaftestOpts.stepName, argv[0], sizeof(pgaftestOpts.stepName));
 
 	/* We need the spec file too — look for it in workDir */
 	char specPath[1024];
@@ -365,7 +359,7 @@ cli_step(int argc, char **argv)
 	/* If there's a second positional arg, treat it as the spec path */
 	if (argc >= 2 && argv[1] != NULL)
 	{
-		strncpy(specPath, argv[1], sizeof(specPath) - 1);
+		strlcpy(specPath, argv[1], sizeof(specPath));
 	}
 
 	/* derive work dir from spec path when not given explicitly */
@@ -402,7 +396,7 @@ cli_prepare(int argc, char **argv)
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile) - 1);
+	strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
 
 	const char *outDir = (argc >= 2 && argv[1] && argv[1][0] != '-')
 						 ? argv[1] : NULL;
@@ -430,8 +424,7 @@ cli_show(int argc, char **argv)
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[0],
-			sizeof(pgaftestOpts.specFile) - 1);
+	strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
 
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
 	if (!spec)
@@ -453,8 +446,7 @@ cli_down(int argc, char **argv)
 	/* optional positional: spec file to derive work dir from */
 	if (argc >= 1 && argv[0] && argv[0][0] != '-')
 	{
-		strncpy(pgaftestOpts.specFile, argv[0],
-				sizeof(pgaftestOpts.specFile) - 1);
+		strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
 	}
 
 	if (pgaftestOpts.workDir[0] == '\0' && pgaftestOpts.specFile[0] != '\0')
@@ -467,7 +459,7 @@ cli_down(int argc, char **argv)
 	char specPath[1024];
 	if (pgaftestOpts.specFile[0] != '\0')
 	{
-		strncpy(specPath, pgaftestOpts.specFile, sizeof(specPath) - 1);
+		strlcpy(specPath, pgaftestOpts.specFile, sizeof(specPath));
 	}
 	else
 	{
@@ -527,8 +519,7 @@ cli_run_setup_only(int argc, char **argv)
 		exit(1);
 	}
 
-	strncpy(pgaftestOpts.specFile, argv[0],
-			sizeof(pgaftestOpts.specFile) - 1);
+	strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
 
 #ifdef __BSD_VISIBLE
 	optreset = 1;

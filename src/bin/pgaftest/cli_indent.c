@@ -208,8 +208,7 @@ print_header(FILE *out, const char *path)
 			if (any)
 			{
 				/* accumulate blank lines; flush only if more comments follow */
-				strncat(pending_blank, line,
-						sizeof(pending_blank) - strlen(pending_blank) - 1);
+				strlcat(pending_blank, line, sizeof(pending_blank));
 			}
 			continue;
 		}
@@ -274,7 +273,7 @@ collect_comments(const char *path)
 		if (line[0] == '#')
 		{
 			/* Accumulate comment line */
-			strncat(pending, line, sizeof(pending) - strlen(pending) - 1);
+			strlcat(pending, line, sizeof(pending));
 			continue;
 		}
 
@@ -283,7 +282,7 @@ collect_comments(const char *path)
 			/* Blank line: keep pending — comment may continue after blank */
 			if (pending[0])
 			{
-				strncat(pending, line, sizeof(pending) - strlen(pending) - 1);
+				strlcat(pending, line, sizeof(pending));
 			}
 			continue;
 		}
@@ -480,14 +479,12 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 	char inline_props[512] = "";
 	for (int i = 0; i < pc; i++)
 	{
-		strncat(inline_props, " ", sizeof(inline_props) - strlen(inline_props) - 1);
-		strncat(inline_props, props[i].kw, sizeof(inline_props) - strlen(inline_props) -
-				1);
+		strlcat(inline_props, " ", sizeof(inline_props));
+		strlcat(inline_props, props[i].kw, sizeof(inline_props));
 		if (props[i].val[0])
 		{
-			strncat(inline_props, " ", sizeof(inline_props) - strlen(inline_props) - 1);
-			strncat(inline_props, props[i].val, sizeof(inline_props) - strlen(
-						inline_props) - 1);
+			strlcat(inline_props, " ", sizeof(inline_props));
+			strlcat(inline_props, props[i].val, sizeof(inline_props));
 		}
 	}
 
@@ -783,7 +780,7 @@ print_sql_body(FILE *out, const char *raw_sql, int bodyIndent)
 				if (seglen > 0)
 				{
 					char seg[8192];
-					memcpy(seg, seg_start, (size_t) seglen);
+					memcpy(seg, seg_start, (size_t) seglen); /* IGNORE-BANNED */
 					seg[seglen] = '\0';
 					emit_segment(out, seg, bodyIndent);
 				}

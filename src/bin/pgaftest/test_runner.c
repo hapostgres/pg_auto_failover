@@ -120,7 +120,7 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 	{
 		const char *base = strrchr(spec->filename, '/');
 		base = base ? base + 1 : spec->filename;
-		strncpy(r->projectName, base, sizeof(r->projectName) - 1);
+		strlcpy(r->projectName, base, sizeof(r->projectName));
 		char *dot = strrchr(r->projectName, '.');
 		if (dot)
 		{
@@ -264,7 +264,7 @@ runner_compose_generate(TestRunner *r)
 	/* ensure workdir exists (create intermediate directories as needed) */
 	{
 		char tmp[sizeof(r->workDir)];
-		strncpy(tmp, r->workDir, sizeof(tmp) - 1);
+		strlcpy(tmp, r->workDir, sizeof(tmp));
 		for (char *p = tmp + 1; *p; p++)
 		{
 			if (*p == '/')
@@ -526,13 +526,13 @@ monitor_get_node_state(TestRunner *r, const char *nodeName,
 		return false;
 	}
 	*sep1 = '\0';
-	strncpy(reported, out, replen - 1);
+	strlcpy(reported, out, replen);
 	char *sep2 = strchr(sep1 + 1, '|');
 	if (sep2)
 	{
 		*sep2 = '\0';
 	}
-	strncpy(assigned, sep1 + 1, asslen - 1);
+	strlcpy(assigned, sep1 + 1, asslen);
 	return true;
 }
 
@@ -1196,19 +1196,19 @@ wait_for_states(TestRunner *r, TestCmd *cmd)
 	{
 		if (i > 0)
 		{
-			strncat(label, ", ", sizeof(label) - strlen(label) - 1);
+			strlcat(label, ", ", sizeof(label));
 		}
-		strncat(label, cmd->waitStates[i], sizeof(label) - strlen(label) - 1);
+		strlcat(label, cmd->waitStates[i], sizeof(label));
 	}
 
 	if (cmd->waitGroupCount > 0)
 	{
-		strncat(label, " in group(s) ", sizeof(label) - strlen(label) - 1);
+		strlcat(label, " in group(s) ", sizeof(label));
 		for (int i = 0; i < cmd->waitGroupCount; i++)
 		{
 			char g[16];
 			snprintf(g, sizeof(g), "%s%d", i > 0 ? "," : "", cmd->waitGroups[i]);
-			strncat(label, g, sizeof(label) - strlen(label) - 1);
+			strlcat(label, g, sizeof(label));
 		}
 	}
 
@@ -1885,7 +1885,7 @@ parse_sqlstate(const char *output, char *state, int statelen)
 			if (valid)
 			{
 				int n = statelen < 6 ? statelen - 1 : 5;
-				memcpy(state, p, n);
+				memcpy(state, p, n); /* IGNORE-BANNED */
 				state[n] = '\0';
 				return;
 			}
@@ -2021,7 +2021,7 @@ runner_expand_macros(TestRunner *r, const char *args, char *dst, int dstlen,
 			int cl = strlen(cidr);
 			if (di + cl < dstlen - 1)
 			{
-				memcpy(dst + di, cidr, cl);
+				memcpy(dst + di, cidr, cl); /* IGNORE-BANNED */
 				di += cl;
 			}
 			p += strlen(macro);
@@ -2207,10 +2207,9 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				{
 					if (i > 0)
 					{
-						strncat(label, ",", sizeof(label) - strlen(label) - 1);
+						strlcat(label, ",", sizeof(label));
 					}
-					strncat(label, cmd->waitStates[i],
-							sizeof(label) - strlen(label) - 1);
+					strlcat(label, cmd->waitStates[i], sizeof(label));
 				}
 				snprintf(errBuf, errLen,
 						 "timeout: formation never reached states {%s}", label);
@@ -2645,12 +2644,12 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			{
 				if (i > 0)
 				{
-					strncat(label, " and ", sizeof(label) - strlen(label) - 1);
+					strlcat(label, " and ", sizeof(label));
 				}
 				char part[128];
 				snprintf(part, sizeof(part), "%s=%s",
 						 cmd->waitNodes[i], cmd->waitStates[i]);
-				strncat(label, part, sizeof(label) - strlen(label) - 1);
+				strlcat(label, part, sizeof(label));
 			}
 			snprintf(errBuf, errLen,
 					 "timeout: conditions not met: %s", label);
@@ -3086,9 +3085,9 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 			{
 				if (i > 0)
 				{
-					strncat(states, ", ", sizeof(states) - strlen(states) - 1);
+					strlcat(states, ", ", sizeof(states));
 				}
-				strncat(states, cmd->waitStates[i], sizeof(states) - strlen(states) - 1);
+				strlcat(states, cmd->waitStates[i], sizeof(states));
 			}
 			snprintf(buf, len, "wait until %s  timeout %ds", states,
 					 cmd->timeoutSeconds);
@@ -3115,10 +3114,9 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 			{
 				if (i > 0)
 				{
-					strncat(nodes, ", ", sizeof(nodes) - strlen(nodes) - 1);
+					strlcat(nodes, ", ", sizeof(nodes));
 				}
-				strncat(nodes, cmd->promoteNodes[i],
-						sizeof(nodes) - strlen(nodes) - 1);
+				strlcat(nodes, cmd->promoteNodes[i], sizeof(nodes));
 			}
 			snprintf(buf, len, "promote %s", nodes[0] ? nodes : cmd->service);
 			break;
@@ -3231,12 +3229,12 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 			{
 				if (i > 0)
 				{
-					strncat(parts, " and ", sizeof(parts) - strlen(parts) - 1);
+					strlcat(parts, " and ", sizeof(parts));
 				}
 				char piece[128];
 				snprintf(piece, sizeof(piece), "%s state = %s",
 						 cmd->waitNodes[i], cmd->waitStates[i]);
-				strncat(parts, piece, sizeof(parts) - strlen(parts) - 1);
+				strlcat(parts, piece, sizeof(parts));
 			}
 			snprintf(buf, len, "wait until %s  timeout %ds", parts,
 					 cmd->timeoutSeconds);

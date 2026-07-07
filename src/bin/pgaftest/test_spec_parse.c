@@ -438,7 +438,7 @@ expand_tuple_expect(char *buf, int buflen)
 		}
 		if (l > 0)
 		{
-			memcpy(tmp + pos, row, l);
+			memcpy(tmp + pos, row, l); /* IGNORE-BANNED */
 			pos += l;
 		}
 		tmp[pos] = '\0';
@@ -447,7 +447,7 @@ expand_tuple_expect(char *buf, int buflen)
 
 	if (!first)
 	{
-		strncpy(buf, tmp, buflen - 1);
+		strlcpy(buf, tmp, buflen);
 	}
 }
 
@@ -2683,7 +2683,7 @@ yyreduce:
 #line 653 "test_spec_parse.y"
 			{
 				TestStep *s = (yyvsp[(3) - (3)].step);
-				strncpy(s->name, (yyvsp[(2) - (3)].str), sizeof(s->name) - 1);
+				strlcpy(s->name, (yyvsp[(2) - (3)].str), sizeof(s->name));
 				free((yyvsp[(2) - (3)].str));
 				register_step(current_spec, s);
 			}
@@ -4016,7 +4016,7 @@ parse_test_spec(const char *filename)
 		exit(1);
 	}
 
-	strncpy(spec->filename, filename, sizeof(spec->filename) - 1);
+	strlcpy(spec->filename, filename, sizeof(spec->filename));
 
 	current_spec = spec;
 	pgaf_line_number = 1;
@@ -4054,7 +4054,7 @@ make_step(const char *name)
 	}
 	if (name)
 	{
-		strncpy(s->name, name, sizeof(s->name) - 1);
+		strlcpy(s->name, name, sizeof(s->name));
 	}
 	return s;
 }
