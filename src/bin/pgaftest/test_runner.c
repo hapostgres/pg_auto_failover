@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/select.h>
 #include <sys/stat.h>
@@ -786,15 +787,48 @@ runner_notify_connect(TestRunner *r)
 			 * server certs) so that both LISTEN and SQL-fallback paths can
 			 * connect.  Without this the runner logs "LISTEN not available"
 			 * and the wait-for-state fallback also fails.
+			 *
+			 * The generated client key is chmod 0644 so the container user
+			 * can read it from the bind-mount.  libpq refuses private keys
+			 * with group/world read access, so copy it to a 0600 temp file
+			 * that only the runner process can read.
 			 */
+			char srcKey[MAXPGPATH], runnerKey[MAXPGPATH];
+			sformat(srcKey, sizeof(srcKey),
+					"%s/ssl/client/postgresql.key", r->workDir);
+			sformat(runnerKey, sizeof(runnerKey),
+					"%s/ssl/client/runner.key", r->workDir);
+
+			/* copy src → runner.key at 0600 if not already done */
+			if (access(runnerKey, F_OK) != 0)
+			{
+				int src = open(srcKey, O_RDONLY);
+				if (src >= 0)
+				{
+					int dst = open(runnerKey,
+								   O_WRONLY | O_CREAT | O_TRUNC, 0600);
+					if (dst >= 0)
+					{
+						char buf[4096];
+						ssize_t n;
+						while ((n = read(src, buf, sizeof(buf))) > 0)
+						{
+							(void) write(dst, buf, n);
+						}
+						close(dst);
+					}
+					close(src);
+				}
+			}
+
 			sformat(connstr, sizeof(connstr),
 					"host=localhost port=%d dbname=pg_auto_failover "
 					"user=autoctl_node connect_timeout=5 "
 					"sslmode=verify-ca "
 					"sslrootcert=%s/ssl/ca.crt "
 					"sslcert=%s/ssl/client/postgresql.crt "
-					"sslkey=%s/ssl/client/postgresql.key",
-					port, r->workDir, r->workDir, r->workDir);
+					"sslkey=%s",
+					port, r->workDir, r->workDir, runnerKey);
 		}
 		else
 		{
