@@ -86,12 +86,16 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
-  # Build the pgaftest binary once from the PG17 build image.
-  # The binary links against libpq at runtime, so it works with any PG version
-  # as long as the matching libpq5 package is installed on the runner.
+  # Build the pgaf:pgaftest image once from the PG17 build image.
+  # The Dockerfile pgaftest target bundles the pgaftest binary together with
+  # its runtime dependencies (libpq5 from PGDG, docker-ce-cli, and the
+  # docker-compose-plugin) so that test jobs run pgaftest inside this
+  # container via Docker-out-of-Docker rather than installing libpq on the
+  # bare runner.  That eliminates the fragile apt-get dependency on the
+  # pre-installed Microsoft package repositories on GitHub's runner image.
   # ---------------------------------------------------------------------------
   build-pgaftest:
-    name: Build pgaftest binary
+    name: Build pgaftest image
     runs-on: ubuntu-latest
     env:
       PGVERSION: 17
@@ -102,28 +106,23 @@ jobs:
       - name: Generate git-version.h
         run: make version
 
-      - name: Build pg_auto_failover build image
+      - name: Build pgaf:pgaftest image (PG${{ env.PGVERSION }})
         run: |
           docker build \
             --build-arg PGVERSION=${{ env.PGVERSION }} \
             --build-arg CITUSTAG=v13.2.0 \
-            --target build \
-            -t pgaf:build \
+            --target pgaftest \
+            -t pgaf:pgaftest \
             .
 
-      - name: Extract pgaftest binary
-        run: |
-          docker create --name pgaftest-extract pgaf:build
-          docker cp pgaftest-extract:/usr/lib/postgresql/${{ env.PGVERSION }}/bin/pgaftest \
-            /tmp/pgaftest-bin
-          docker rm pgaftest-extract
-          chmod +x /tmp/pgaftest-bin
+      - name: Save image to tarball
+        run: docker save pgaf:pgaftest | gzip > /tmp/pgaf-pgaftest.tar.gz
 
-      - name: Upload pgaftest binary
+      - name: Upload pgaftest image artifact
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: pgaftest-binary
-          path: /tmp/pgaftest-bin
+          name: pgaftest-image
+          path: /tmp/pgaf-pgaftest.tar.gz
           retention-days: 1
 
   # ---------------------------------------------------------------------------
@@ -197,32 +196,29 @@ jobs:
           docker load < /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
           docker tag pgaf:debian-pg${{ matrix.PGVERSION }} pgaf:debian
 
-      - name: Download pgaftest binary
+      - name: Download pgaf:pgaftest image
         uses: actions/download-artifact@v8.0.1
         with:
-          name: pgaftest-binary
+          name: pgaftest-image
           path: /tmp
 
-      - name: Install libpq runtime (PG${{ matrix.PGVERSION }})
-        run: |
-          sudo apt-get install -y curl ca-certificates gnupg
-          curl https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo apt-key add -
-          echo "deb http://apt.postgresql.org/pub/repos/apt \
-            $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y libpq5
+      - name: Load pgaf:pgaftest image into Docker
+        run: docker load < /tmp/pgaf-pgaftest.tar.gz
 
       - name: Run schedule ${{ matrix.schedule }}
         timeout-minutes: 35
-        env:
-          PGAF_IMAGE: pgaf:run
-          PGVERSION: ${{ matrix.PGVERSION }}
-          PGAF_DEBIAN_IMAGE: ${{ matrix.schedule == 'node' && 'pgaf:debian' || '' }}
         run: |
-          chmod +x /tmp/pgaftest-bin
-          /tmp/pgaftest-bin run --schedule tests/tap/schedules/${{ matrix.schedule }}.sch
+          mkdir -p /tmp/pgaftest
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/pgaftest:/tmp/pgaftest \
+            -v "$(pwd)":/work:ro \
+            -w /work \
+            -e PGAF_IMAGE=pgaf:run \
+            -e PGVERSION=${{ matrix.PGVERSION }} \
+            -e PGAF_DEBIAN_IMAGE=${{ matrix.schedule == 'node' && 'pgaf:debian' || '' }} \
+            pgaf:pgaftest \
+            pgaftest run --schedule tests/tap/schedules/${{ matrix.schedule }}.sch
 
   # ---------------------------------------------------------------------------
   # installcheck: SQL regression suite via pg_regress.
@@ -242,22 +238,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.0
 
-      - name: Install libpq runtime
-        run: |
-          sudo apt-get install -y curl ca-certificates gnupg
-          curl https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo apt-key add -
-          echo "deb http://apt.postgresql.org/pub/repos/apt \
-            $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y libpq5
-
-      - name: Download pgaftest binary
+      - name: Download pgaf:pgaftest image
         uses: actions/download-artifact@v8.0.1
         with:
-          name: pgaftest-binary
+          name: pgaftest-image
           path: /tmp
+
+      - name: Load pgaf:pgaftest image into Docker
+        run: docker load < /tmp/pgaf-pgaftest.tar.gz
 
       - name: Generate git-version.h
         run: make version
@@ -278,8 +266,14 @@ jobs:
       - name: Run installcheck spec
         timeout-minutes: 15
         run: |
-          chmod +x /tmp/pgaftest-bin
-          /tmp/pgaftest-bin run tests/tap/specs/installcheck.pgaf
+          mkdir -p /tmp/pgaftest
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/pgaftest:/tmp/pgaftest \
+            -v "$(pwd)":/work:ro \
+            -w /work \
+            pgaf:pgaftest \
+            pgaftest run tests/tap/specs/installcheck.pgaf
 
   # ---------------------------------------------------------------------------
   # Upgrade test: binary + extension swap without container restart.
@@ -300,22 +294,14 @@ jobs:
           # Full history needed so PREV_TAG auto-detection finds the right tag.
           fetch-depth: 0
 
-      - name: Install libpq runtime
-        run: |
-          sudo apt-get install -y curl ca-certificates gnupg
-          curl https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-            | sudo apt-key add -
-          echo "deb http://apt.postgresql.org/pub/repos/apt \
-            $(lsb_release -cs)-pgdg main" \
-            | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y libpq5
-
-      - name: Download pgaftest binary
+      - name: Download pgaf:pgaftest image
         uses: actions/download-artifact@v8.0.1
         with:
-          name: pgaftest-binary
+          name: pgaftest-image
           path: /tmp
+
+      - name: Load pgaf:pgaftest image into Docker
+        run: docker load < /tmp/pgaf-pgaftest.tar.gz
 
       - name: Generate git-version.h
         run: make version
@@ -329,5 +315,12 @@ jobs:
       - name: Run upgrade spec
         timeout-minutes: 25
         run: |
-          chmod +x /tmp/pgaftest-bin
-          /tmp/pgaftest-bin run tests/tap/specs/upgrade.pgaf
+          mkdir -p /tmp/pgaftest
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/pgaftest:/tmp/pgaftest \
+            -v "$(pwd)":/work:ro \
+            -w /work \
+            -e PGVERSION=${{ env.PGVERSION }} \
+            pgaf:pgaftest \
+            pgaftest run tests/tap/specs/upgrade.pgaf
