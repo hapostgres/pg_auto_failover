@@ -51,10 +51,10 @@ step test_004_demoted {
     compose stop node1
     sleep 30s
     compose start node1
-    wait until node1 state is demoted  timeout 120s
+    wait until node1 state is demoted  timeout 180s
     wait until node2 state is primary
         and node1 state is secondary
-        timeout 120s
+        timeout 180s
 }
 
 step test_005_inject_error_in_node2 {

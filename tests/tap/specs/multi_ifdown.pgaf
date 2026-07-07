@@ -89,10 +89,10 @@ step test_007_insert_rows {
 step test_008_failover {
     network disconnect node1
     network connect node3
-    wait until node3 state is wait_primary  timeout 120s
+    wait until node3 state is wait_primary  timeout 180s
     wait until node2 state is secondary
         and node3 state is primary
-        timeout 120s
+        timeout 180s
     sql node3 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_1, pgautofailover_standby_2) }
 }

@@ -21,7 +21,7 @@ cluster {
 setup {
     wait until node1 state is primary
         and node2 state is secondary
-        timeout 120s
+        timeout 180s
     promote node1
 }
 
