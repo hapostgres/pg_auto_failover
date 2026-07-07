@@ -31,6 +31,9 @@ typedef struct MonitorConfig
 
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;
+
+	/* password for the autoctl_node role; "" means no password (trust) */
+	char autoctl_node_password[MAXCONNINFO];
 } MonitorConfig;
 
 

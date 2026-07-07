@@ -118,6 +118,9 @@
 		OPTION_SSL_CRL_FILE(config), \
 		OPTION_SSL_SERVER_CERT(config), \
 		OPTION_SSL_SERVER_KEY(config), \
+		make_strbuf_option_default("pg_auto_failover", "autoctl_node_password", \
+								   NULL, false, MAXCONNINFO, \
+								   config->autoctl_node_password, ""), \
 		INI_OPTION_LAST \
 	}
 

@@ -341,6 +341,8 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
 		{ "maximum-backup-rate", required_argument, NULL, 'R' },
+		{ "replication-password", required_argument, NULL, 'e' },
+		{ "monitor-password", required_argument, NULL, 'w' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
@@ -354,7 +356,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:RVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:Re:w:VvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -793,6 +795,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "listen", required_argument, NULL, 'l' },
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
+		{ "autoctl-node-password", required_argument, NULL, 'e' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -821,7 +824,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhxNs",
+	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:Se:VvqhxNs",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -895,6 +898,14 @@ cli_create_monitor_getopts(int argc, char **argv)
 				options.pgSetup.hbaLevel = HBA_EDIT_SKIP;
 
 				log_trace("--skip-pg-hba");
+				break;
+			}
+
+			case 'e':
+			{
+				/* { "autoctl-node-password", required_argument, NULL, 'e' } */
+				strlcpy(options.autoctl_node_password, optarg, MAXCONNINFO);
+				log_trace("--autoctl-node-password ****");
 				break;
 			}
 

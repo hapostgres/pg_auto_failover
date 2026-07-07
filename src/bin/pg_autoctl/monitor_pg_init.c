@@ -139,7 +139,8 @@ monitor_pg_init(Monitor *monitor)
  */
 bool
 monitor_install(const char *hostname,
-				PostgresSetup pgSetupOption, bool checkSettings)
+				PostgresSetup pgSetupOption, bool checkSettings,
+				const char *autoctl_node_password)
 {
 	PostgresSetup pgSetup = { 0 };
 	bool missingPgdataIsOk = false;
@@ -247,6 +248,18 @@ monitor_install(const char *hostname,
 	{
 		log_warn("Failed to grant connection to local network.");
 		return false;
+	}
+
+	if (autoctl_node_password != NULL && autoctl_node_password[0] != '\0')
+	{
+		if (!pgsql_alter_role_password(&postgres.sqlClient,
+									   PG_AUTOCTL_MONITOR_USERNAME,
+									   autoctl_node_password))
+		{
+			log_error("Failed to set password for role \"%s\"",
+					  PG_AUTOCTL_MONITOR_USERNAME);
+			return false;
+		}
 	}
 
 	log_info("Your pg_auto_failover monitor instance is now ready on port %d.",

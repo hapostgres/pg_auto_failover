@@ -216,8 +216,13 @@ jobs:
 
       - name: Build pgaf:testrun image (PG${{ matrix.PGVERSION }})
         run: |
+          case "${{ matrix.PGVERSION }}" in
+            14|15) CITUSTAG=v12.1.5 ;;
+            *)     CITUSTAG=v13.2.0 ;;
+          esac
           docker build \
             --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${CITUSTAG} \
             --target testrun \
             -t pgaf:testrun \
             .
