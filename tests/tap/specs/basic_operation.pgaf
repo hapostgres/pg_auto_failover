@@ -389,10 +389,13 @@ step test_023_ifup_old_primary {
 #
 
 step test_024_stop_postgres_monitor {
-    assert node3 stays primary while {
-        stop postgres monitor
-        sleep 5s
-    }
+    # Stop the monitor's postgres directly.  The monitor cannot assign state
+    # changes while postgres is down, so there is no point wrapping this in
+    # "assert stays primary while" — that construct queries the monitor to
+    # verify the state, which is impossible when the monitor is the one being
+    # stopped.  The subsequent wait verifies recovery.
+    stop postgres monitor
+    sleep 5s
     wait until node3 state is primary  timeout 60s
 }
 
