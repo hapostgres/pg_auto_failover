@@ -209,7 +209,10 @@ jobs:
         timeout-minutes: 35
         run: |
           mkdir -p /tmp/pgaftest
+          DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
           docker run --rm \
+            --user root \
+            --group-add "${DOCKER_GID}" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v /tmp/pgaftest:/tmp/pgaftest \
             -v "$(pwd)":/work:ro \
@@ -267,7 +270,10 @@ jobs:
         timeout-minutes: 15
         run: |
           mkdir -p /tmp/pgaftest
+          DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
           docker run --rm \
+            --user root \
+            --group-add "${DOCKER_GID}" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v /tmp/pgaftest:/tmp/pgaftest \
             -v "$(pwd)":/work:ro \
@@ -316,7 +322,10 @@ jobs:
         timeout-minutes: 25
         run: |
           mkdir -p /tmp/pgaftest
+          DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
           docker run --rm \
+            --user root \
+            --group-add "${DOCKER_GID}" \
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v /tmp/pgaftest:/tmp/pgaftest \
             -v "$(pwd)":/work:ro \
