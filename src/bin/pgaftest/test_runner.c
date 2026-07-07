@@ -1348,6 +1348,28 @@ runner_wait_notify_goal(TestRunner *r,
 	runner_notify_connect(r);
 
 	/*
+	 * Drain any notifications already buffered in libpq before the fast-path
+	 * check.  A preceding blocking exec command may have accumulated the
+	 * entire FSM cycle in the socket while pgaftest was waiting for the
+	 * subprocess to return.  Processing those notifications here means that a
+	 * transient state that arrived and departed during the exec is not missed.
+	 *
+	 * This also prevents stale convergence notifications from prior waits from
+	 * firing the current wait: each wait drains the buffer on entry, so only
+	 * notifications that arrive *after* the wait starts can satisfy it.
+	 */
+	if (r->notifyConnected)
+	{
+		bool satisfiedEarly = false;
+
+		runner_drain_notify(r, NULL, &nodeName, &targetState, 1, &satisfiedEarly);
+		if (satisfiedEarly)
+		{
+			return true;
+		}
+	}
+
+	/*
 	 * Fast path: if the node has already converged on the target state
 	 * (reportedState == assignedState == targetState), return immediately.
 	 * Without this, a node that settled during a preceding command would
@@ -1421,12 +1443,19 @@ runner_wait_notify_goal(TestRunner *r,
 							}
 
 							/*
-							 * Lift the wait only when both states have converged:
-							 * the monitor assigned the target (goalState) and the
-							 * node confirmed it (reportedState).  The notification
-							 * already carries both values so we can test here
-							 * without an extra round-trip; we still do a final SQL
-							 * confirmation to guard against a torn read.
+							 * Lift the wait when both states have converged in the
+							 * same notification: the monitor assigned the target
+							 * (goalState) and the node confirmed it (reportedState).
+							 *
+							 * The drain-at-start above ensures that only
+							 * notifications arriving after this wait began can
+							 * reach this check, so there is no risk of a stale
+							 * notification from a prior wait triggering a false
+							 * positive.  Trust the notification without a SQL
+							 * round-trip: that confirmation would race against the
+							 * monitor advancing past the target for transient states
+							 * (report_lsn, demoted, wait_primary) and cause spurious
+							 * timeouts.
 							 */
 							if (strcmp(ns_goal, targetState) == 0 &&
 								strcmp(ns_rep, targetState) == 0)
@@ -1436,32 +1465,7 @@ runner_wait_notify_goal(TestRunner *r,
 								/* post-match drain: no marking — belongs to next wait */
 								runner_drain_notify(r, NULL, NULL, NULL, 0, NULL);
 
-								/* final SQL: confirm both assigned and reported */
-								char rep[64] = "", asgn[64] = "";
-								if (monitor_get_node_state(r, nodeName,
-														   rep, sizeof(rep),
-														   asgn, sizeof(asgn)))
-								{
-									if (strcmp(rep, targetState) == 0 &&
-										strcmp(asgn, targetState) == 0)
-									{
-										return true;
-									}
-
-									/*
-									 * Rare torn read: keep looping.
-									 * The next notification will re-trigger.
-									 */
-									log_debug("  %s: notify shows convergence on %s "
-											  "but SQL has rep=%s asgn=%s, retrying",
-											  nodeName, targetState, rep, asgn);
-								}
-								else
-								{
-									/* can't reach monitor — trust the notification */
-									return true;
-								}
-								goto next_iter;
+								return true;
 							}
 						}
 					}
@@ -1558,7 +1562,6 @@ runner_wait_notify_goal(TestRunner *r,
 			}
 		}
 
-next_iter:
 		{
 			int remainMs = (int) ((deadline - time(NULL)) * 1000);
 			if (remainMs <= 0)
