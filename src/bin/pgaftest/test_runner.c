@@ -776,6 +776,26 @@ runner_notify_connect(TestRunner *r)
 					"connect_timeout=5",
 					port, cl->monitorPassword);
 		}
+		else if ((strcmp(cl->ssl, "verify-ca") == 0 ||
+				  strcmp(cl->ssl, "verify-full") == 0) &&
+				 strcmp(cl->auth, "cert") == 0)
+		{
+			/*
+			 * The monitor requires client certificate authentication: supply
+			 * the runner's own client cert (generated alongside the spec's
+			 * server certs) so that both LISTEN and SQL-fallback paths can
+			 * connect.  Without this the runner logs "LISTEN not available"
+			 * and the wait-for-state fallback also fails.
+			 */
+			sformat(connstr, sizeof(connstr),
+					"host=localhost port=%d dbname=pg_auto_failover "
+					"user=autoctl_node connect_timeout=5 "
+					"sslmode=verify-ca "
+					"sslrootcert=%s/ssl/ca.crt "
+					"sslcert=%s/ssl/client/postgresql.crt "
+					"sslkey=%s/ssl/client/postgresql.key",
+					port, r->workDir, r->workDir, r->workDir);
+		}
 		else
 		{
 			sformat(connstr, sizeof(connstr),

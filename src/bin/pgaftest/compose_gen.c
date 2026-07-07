@@ -731,8 +731,8 @@ compose_gen_write(TestCluster *cluster,
 						" \"--pgdata\", \"%s\"]\n"
 						"      interval: 2s\n"
 						"      timeout: 5s\n"
-						"      retries: 60\n"
-						"      start_period: 90s\n",
+						"      retries: 120\n"
+						"      start_period: 120s\n",
 						node_pgdata);
 			}
 
