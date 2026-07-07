@@ -386,7 +386,7 @@ pg_setup_init(PostgresSetup *pgSetup,
 			else
 			{
 				log_debug("Found PostgreSQL system %" PRIu64 " at \"%s\", "
-															 "version %u, catalog version %u",
+						  "version %u, catalog version %u",
 						  pgSetup->control.system_identifier,
 						  pgSetup->pgdata,
 						  pgSetup->control.pg_control_version,

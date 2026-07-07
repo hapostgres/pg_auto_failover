@@ -602,7 +602,7 @@ pgsql_open_connection(PGSQL *pgsql)
  * to help anyone. A good trade-off seems to be a warning every 30s.
  */
 #define SHOULD_WARN_AGAIN(duration) \
-	(INSTR_TIME_GET_MILLISEC(duration) > 30000)
+		(INSTR_TIME_GET_MILLISEC(duration) > 30000)
 
 /*
  * pgsql_retry_open_connection loops over a PQping call until the remote server

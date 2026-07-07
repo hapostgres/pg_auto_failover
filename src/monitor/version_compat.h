@@ -27,10 +27,10 @@
 #define DEFAULT_XLOG_SEG_SIZE XLOG_SEG_SIZE
 
 #define BackgroundWorkerInitializeConnection(dbname, username, flags) \
-	BackgroundWorkerInitializeConnection(dbname, username)
+		BackgroundWorkerInitializeConnection(dbname, username)
 
 #define BackgroundWorkerInitializeConnectionByOid(dboid, useroid, flags) \
-	BackgroundWorkerInitializeConnectionByOid(dboid, useroid)
+		BackgroundWorkerInitializeConnectionByOid(dboid, useroid)
 
 #include "nodes/pg_list.h"
 

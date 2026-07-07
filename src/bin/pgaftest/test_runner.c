@@ -1219,7 +1219,7 @@ wait_for_states(TestRunner *r, TestCmd *cmd)
 
 	time_t t0 = time(NULL);
 	if (!monitor_wait_formation_states(r,
-									   (const char (*)[64])cmd->waitStates,
+									   (const char (*)[64]) cmd->waitStates,
 									   cmd->waitStateCount,
 									   cmd->waitGroups,
 									   cmd->waitGroupCount,
@@ -2176,7 +2176,7 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			bool seenThrough[PGAF_MAX_WAIT_STATES] = { false };
 
 			if (!runner_wait_notify_goal(r, cmd->service, cmd->state,
-										 (const char (*)[64])cmd->passThroughStates,
+										 (const char (*)[64]) cmd->passThroughStates,
 										 seenThrough, cmd->passThroughCount,
 										 cmd->timeoutSeconds))
 			{

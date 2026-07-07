@@ -363,8 +363,9 @@ keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
 				if (!stringToInt(optarg, &pgsetup_wait_timeout) ||
 					pgsetup_wait_timeout <= 0)
 				{
-					log_fatal("--timeout argument is not a valid positive integer: \"%s\"",
-							  optarg);
+					log_fatal(
+						"--timeout argument is not a valid positive integer: \"%s\"",
+						optarg);
 					exit(EXIT_CODE_BAD_ARGS);
 				}
 				log_trace("--timeout %d", pgsetup_wait_timeout);

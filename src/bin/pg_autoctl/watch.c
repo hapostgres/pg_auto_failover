@@ -342,6 +342,7 @@ cli_watch_process_keys(WatchContext *context)
 				}
 			}
 		}
+
 		/* left and right moves are conditionnal / relative */
 		else if (ch == KEY_LEFT || ch == ctrl('b') || ch == 'h')
 		{
@@ -365,6 +366,7 @@ cli_watch_process_keys(WatchContext *context)
 				context->move = WATCH_MOVE_FOCUS_NONE;
 			}
 		}
+
 		/* left and right moves are conditionnal / relative */
 		else if (ch == KEY_RIGHT || ch == ctrl('f') || ch == 'l')
 		{
@@ -380,6 +382,7 @@ cli_watch_process_keys(WatchContext *context)
 				context->move = WATCH_MOVE_FOCUS_NONE;
 			}
 		}
+
 		/* home and end moves are unconditionnal / absolute */
 		else if (ch == KEY_HOME || ch == ctrl('a') || ch == '0')
 		{
@@ -391,6 +394,7 @@ cli_watch_process_keys(WatchContext *context)
 		{
 			context->move = WATCH_MOVE_FOCUS_END;
 		}
+
 		/* up is C-p in Emacs, k in vi(m) */
 		else if (ch == KEY_UP || ch == ctrl('p') || ch == 'k')
 		{
@@ -401,6 +405,7 @@ cli_watch_process_keys(WatchContext *context)
 				--context->selectedRow;
 			}
 		}
+
 		/* page up, which is also C-u in the terminal with less/more etc */
 		else if (ch == KEY_PPAGE || ch == ctrl('u'))
 		{
@@ -413,6 +418,7 @@ cli_watch_process_keys(WatchContext *context)
 				context->selectedRow -= 5;
 			}
 		}
+
 		/* down is C-n in Emacs, j in vi(m) */
 		else if (ch == KEY_DOWN || ch == ctrl('n') || ch == 'j')
 		{
@@ -423,6 +429,7 @@ cli_watch_process_keys(WatchContext *context)
 				++context->selectedRow;
 			}
 		}
+
 		/* page down, which is also C-d in the terminal with less/more etc */
 		else if (ch == KEY_NPAGE || ch == ctrl('d'))
 		{
@@ -436,6 +443,7 @@ cli_watch_process_keys(WatchContext *context)
 				context->selectedRow += 5;
 			}
 		}
+
 		/* cancel current selected row */
 		else if (ch == KEY_DL || ch == KEY_DC)
 		{
@@ -561,8 +569,8 @@ cli_watch_render(WatchContext *context, WatchContext *previous)
 		context->startCol != previous->startCol ||
 		context->cookedMode != previous->cookedMode ||
 		context->eventsArray.count != previous->eventsArray.count ||
-		(context->eventsArray.events[0].eventId !=
-		 previous->eventsArray.events[0].eventId))
+		(context->eventsArray.events[0].eventId != previous->eventsArray.events[0].eventId
+		))
 	{
 		(void) clear_line_at(++printedRows);
 

@@ -135,7 +135,7 @@ service_monitor_init_start(void *context, pid_t *pid)
 
 			/* finish the install if necessary */
 			if (!monitor_install(config->hostname, *pgSetup, false,
-							 config->autoctl_node_password))
+								 config->autoctl_node_password))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_INTERNAL_ERROR);

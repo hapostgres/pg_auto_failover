@@ -173,17 +173,17 @@ extern FILE *yyin, *yyout;
 
 /* Return all but the first "n" matched characters back to the input stream. */
 #define yyless(n) \
-	do \
-	{ \
-		/* Undo effects of setting up yytext. */ \
-		int yyless_macro_arg = (n); \
-		YY_LESS_LINENO(yyless_macro_arg); \
-		*yy_cp = (yy_hold_char); \
-		YY_RESTORE_YY_MORE_OFFSET \
-			(yy_c_buf_p) = yy_cp = yy_bp + yyless_macro_arg - YY_MORE_ADJ; \
-		YY_DO_BEFORE_ACTION; /* set up yytext again */ \
-	} \
-	while (0)
+		do \
+		{ \
+			/* Undo effects of setting up yytext. */ \
+			int yyless_macro_arg = (n); \
+			YY_LESS_LINENO(yyless_macro_arg); \
+			*yy_cp = (yy_hold_char); \
+			YY_RESTORE_YY_MORE_OFFSET \
+				(yy_c_buf_p) = yy_cp = yy_bp + yyless_macro_arg - YY_MORE_ADJ; \
+			YY_DO_BEFORE_ACTION; /* set up yytext again */ \
+		} \
+		while (0)
 #define unput(c) yyunput(c, (yytext_ptr))
 
 #ifndef YY_STRUCT_YY_BUFFER_STATE
@@ -309,23 +309,23 @@ void yyfree(void *);
 
 #define yy_new_buffer yy_create_buffer
 #define yy_set_interactive(is_interactive) \
-	{ \
-		if (!YY_CURRENT_BUFFER) { \
-			yyensure_buffer_stack(); \
-			YY_CURRENT_BUFFER_LVALUE = \
-				yy_create_buffer(yyin, YY_BUF_SIZE); \
-		} \
-		YY_CURRENT_BUFFER_LVALUE->yy_is_interactive = is_interactive; \
-	}
+		{ \
+			if (!YY_CURRENT_BUFFER) { \
+				yyensure_buffer_stack(); \
+				YY_CURRENT_BUFFER_LVALUE = \
+					yy_create_buffer(yyin, YY_BUF_SIZE); \
+			} \
+			YY_CURRENT_BUFFER_LVALUE->yy_is_interactive = is_interactive; \
+		}
 #define yy_set_bol(at_bol) \
-	{ \
-		if (!YY_CURRENT_BUFFER) { \
-			yyensure_buffer_stack(); \
-			YY_CURRENT_BUFFER_LVALUE = \
-				yy_create_buffer(yyin, YY_BUF_SIZE); \
-		} \
-		YY_CURRENT_BUFFER_LVALUE->yy_at_bol = at_bol; \
-	}
+		{ \
+			if (!YY_CURRENT_BUFFER) { \
+				yyensure_buffer_stack(); \
+				YY_CURRENT_BUFFER_LVALUE = \
+					yy_create_buffer(yyin, YY_BUF_SIZE); \
+			} \
+			YY_CURRENT_BUFFER_LVALUE->yy_at_bol = at_bol; \
+		}
 #define YY_AT_BOL() (YY_CURRENT_BUFFER_LVALUE->yy_at_bol)
 
 /* Begin user sect3 */
@@ -356,11 +356,11 @@ static void yynoreturn yy_fatal_error(const char *msg);
  * corresponding action - sets up yytext.
  */
 #define YY_DO_BEFORE_ACTION \
-	(yytext_ptr) = yy_bp; \
-	yyleng = (yy_size_t) (yy_cp - yy_bp); \
-	(yy_hold_char) = *yy_cp; \
-	*yy_cp = '\0'; \
-	(yy_c_buf_p) = yy_cp;
+		(yytext_ptr) = yy_bp; \
+		yyleng = (yy_size_t) (yy_cp - yy_bp); \
+		(yy_hold_char) = *yy_cp; \
+		*yy_cp = '\0'; \
+		(yy_c_buf_p) = yy_cp;
 #define YY_NUM_RULES 147
 #define YY_END_OF_BUFFER 148
 
@@ -1320,34 +1320,35 @@ static int input(void);
  */
 #ifndef YY_INPUT
 #define YY_INPUT(buf, result, max_size) \
-	if (YY_CURRENT_BUFFER_LVALUE->yy_is_interactive) \
-	{ \
-		int c = '*'; \
-		yy_size_t n; \
-		for (n = 0; n < max_size && \
-			 (c = getc(yyin)) != EOF && c != '\n'; ++n) { \
-			buf[n] = (char) c; } \
-		if (c == '\n') { \
-			buf[n++] = (char) c; } \
-		if (c == EOF && ferror(yyin)) { \
-			YY_FATAL_ERROR("input in flex scanner failed"); } \
-		result = n; \
-	} \
-	else \
-	{ \
-		errno = 0; \
-		while ((result = (int) fread(buf, 1, (yy_size_t) max_size, yyin)) == 0 && ferror( \
-				   yyin)) \
+		if (YY_CURRENT_BUFFER_LVALUE->yy_is_interactive) \
 		{ \
-			if (errno != EINTR) \
-			{ \
-				YY_FATAL_ERROR("input in flex scanner failed"); \
-				break; \
-			} \
-			errno = 0; \
-			clearerr(yyin); \
+			int c = '*'; \
+			yy_size_t n; \
+			for (n = 0; n < max_size && \
+				 (c = getc(yyin)) != EOF && c != '\n'; ++n) { \
+				buf[n] = (char) c; } \
+			if (c == '\n') { \
+				buf[n++] = (char) c; } \
+			if (c == EOF && ferror(yyin)) { \
+				YY_FATAL_ERROR("input in flex scanner failed"); } \
+			result = n; \
 		} \
-	} \
+		else \
+		{ \
+			errno = 0; \
+			while ((result = (int) fread(buf, 1, (yy_size_t) max_size, yyin)) == 0 && \
+				   ferror( \
+					   yyin)) \
+			{ \
+				if (errno != EINTR) \
+				{ \
+					YY_FATAL_ERROR("input in flex scanner failed"); \
+					break; \
+				} \
+				errno = 0; \
+				clearerr(yyin); \
+			} \
+		} \
  \
 
 #endif
@@ -1396,11 +1397,11 @@ extern int yylex(void);
 #endif
 
 #define YY_RULE_SETUP \
-	YY_USER_ACTION
+		YY_USER_ACTION
 
 /** The main scanner function which does all the work.
  */
-YY_DECL
+	YY_DECL
 {
 	yy_state_type yy_current_state;
 	char *yy_cp, *yy_bp;
@@ -1490,19 +1491,25 @@ do_action:  /* This label is used only to access EOF actions. */
 			{ /* beginning of action switch */
 				case 0: /* must back up */
 					/* undo the effects of YY_DO_BEFORE_ACTION */
+				{
 					*yy_cp = (yy_hold_char);
 					yy_cp = (yy_last_accepting_cpos);
 					yy_current_state = (yy_last_accepting_state);
 					goto yy_find_action;
+				}
 
 				case 1:
+				{
 					YY_RULE_SETUP
 #line 91 "test_spec_scan.l"
 					{ /* comment */
 					}
 
 					YY_BREAK
+				}
+
 				case 2:
+				{
 					YY_RULE_SETUP
 #line 93 "test_spec_scan.l"
 					{
@@ -1511,7 +1518,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 3:
+				{
 					YY_RULE_SETUP
 #line 94 "test_spec_scan.l"
 					{
@@ -1519,7 +1529,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 4:
+				{
 					YY_RULE_SETUP
 #line 95 "test_spec_scan.l"
 					{
@@ -1527,7 +1540,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 5:
+				{
 					YY_RULE_SETUP
 #line 96 "test_spec_scan.l"
 					{
@@ -1535,7 +1551,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 6:
+				{
 					YY_RULE_SETUP
 #line 97 "test_spec_scan.l"
 					{
@@ -1543,7 +1562,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 7:
+				{
 					YY_RULE_SETUP
 #line 99 "test_spec_scan.l"
 					{
@@ -1552,7 +1574,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 8:
+				{
 					YY_RULE_SETUP
 #line 100 "test_spec_scan.l"
 					{
@@ -1561,7 +1586,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 9:
+				{
 					YY_RULE_SETUP
 #line 101 "test_spec_scan.l"
 					{
@@ -1570,7 +1598,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 10:
+				{
 					YY_RULE_SETUP
 #line 102 "test_spec_scan.l"
 					{
@@ -1578,7 +1609,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 11:
+				{
 					YY_RULE_SETUP
 #line 104 "test_spec_scan.l"
 					{
@@ -1586,7 +1620,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 12:
+				{
 					YY_RULE_SETUP
 #line 106 "test_spec_scan.l"
 					{
@@ -1595,7 +1632,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 13:
+				{
 					YY_RULE_SETUP
 #line 111 "test_spec_scan.l"
 					{
@@ -1604,8 +1644,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
-				case 14:
+				}
 
+				case 14:
+				{
 /* rule 14 can match eol */
 					YY_RULE_SETUP
 #line 116 "test_spec_scan.l"
@@ -1616,7 +1658,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 15:
+				{
 					YY_RULE_SETUP
 #line 122 "test_spec_scan.l"
 					{
@@ -1636,13 +1681,15 @@ do_action:  /* This label is used only to access EOF actions. */
 
 						/* fallback: should not happen in a well-formed file */
 						fprintf(/* IGNORE-BANNED */ stderr,
-													"pgaftest: unexpected '{' at line %d\n",
-													pgaf_line_number);
+								"pgaftest: unexpected '{' at line %d\n",
+								pgaf_line_number);
 					}
 
 					YY_BREAK
-				case 16:
+				}
 
+				case 16:
+				{
 /* rule 16 can match eol */
 					YY_RULE_SETUP
 #line 140 "test_spec_scan.l"
@@ -1651,32 +1698,43 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 17:
+				{
 					YY_RULE_SETUP
 #line 141 "test_spec_scan.l"
 					{ /* whitespace */
 					}
 
 					YY_BREAK
+				}
+
 				case 18:
+				{
 					YY_RULE_SETUP
 #line 143 "test_spec_scan.l"
 					{
 						fprintf(/* IGNORE-BANNED */ stderr,
-													"pgaftest: unexpected character '%c' at line %d\n",
-													yytext[0], pgaf_line_number);
+								"pgaftest: unexpected character '%c' at line %d\n",
+								yytext[0], pgaf_line_number);
 					}
 
 					YY_BREAK
+				}
+
 				case 19:
+				{
 					YY_RULE_SETUP
 #line 148 "test_spec_scan.l"
 					{ /* comment */
 					}
 
 					YY_BREAK
-				case 20:
+				}
 
+				case 20:
+				{
 /* rule 20 can match eol */
 					YY_RULE_SETUP
 #line 149 "test_spec_scan.l"
@@ -1685,14 +1743,20 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 21:
+				{
 					YY_RULE_SETUP
 #line 150 "test_spec_scan.l"
 					{ /* whitespace */
 					}
 
 					YY_BREAK
+				}
+
 				case 22:
+				{
 					YY_RULE_SETUP
 #line 152 "test_spec_scan.l"
 					{
@@ -1700,7 +1764,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 23:
+				{
 					YY_RULE_SETUP
 #line 153 "test_spec_scan.l"
 					{
@@ -1708,7 +1775,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 24:
+				{
 					YY_RULE_SETUP
 #line 154 "test_spec_scan.l"
 					{
@@ -1716,7 +1786,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 25:
+				{
 					YY_RULE_SETUP
 #line 155 "test_spec_scan.l"
 					{
@@ -1724,7 +1797,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 26:
+				{
 					YY_RULE_SETUP
 #line 156 "test_spec_scan.l"
 					{
@@ -1732,7 +1808,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 27:
+				{
 					YY_RULE_SETUP
 #line 157 "test_spec_scan.l"
 					{
@@ -1740,7 +1819,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 28:
+				{
 					YY_RULE_SETUP
 #line 158 "test_spec_scan.l"
 					{
@@ -1748,7 +1830,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 29:
+				{
 					YY_RULE_SETUP
 #line 159 "test_spec_scan.l"
 					{
@@ -1756,7 +1841,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 30:
+				{
 					YY_RULE_SETUP
 #line 160 "test_spec_scan.l"
 					{
@@ -1764,7 +1852,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 31:
+				{
 					YY_RULE_SETUP
 #line 162 "test_spec_scan.l"
 					{
@@ -1772,7 +1863,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 32:
+				{
 					YY_RULE_SETUP
 #line 163 "test_spec_scan.l"
 					{
@@ -1780,7 +1874,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 33:
+				{
 					YY_RULE_SETUP
 #line 164 "test_spec_scan.l"
 					{
@@ -1788,7 +1885,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 34:
+				{
 					YY_RULE_SETUP
 #line 165 "test_spec_scan.l"
 					{
@@ -1796,7 +1896,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 35:
+				{
 					YY_RULE_SETUP
 #line 166 "test_spec_scan.l"
 					{
@@ -1804,7 +1907,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 36:
+				{
 					YY_RULE_SETUP
 #line 167 "test_spec_scan.l"
 					{
@@ -1812,7 +1918,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 37:
+				{
 					YY_RULE_SETUP
 #line 168 "test_spec_scan.l"
 					{
@@ -1820,7 +1929,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 38:
+				{
 					YY_RULE_SETUP
 #line 169 "test_spec_scan.l"
 					{
@@ -1828,7 +1940,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 39:
+				{
 					YY_RULE_SETUP
 #line 170 "test_spec_scan.l"
 					{
@@ -1836,7 +1951,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 40:
+				{
 					YY_RULE_SETUP
 #line 171 "test_spec_scan.l"
 					{
@@ -1844,7 +1962,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 41:
+				{
 					YY_RULE_SETUP
 #line 172 "test_spec_scan.l"
 					{
@@ -1852,7 +1973,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 42:
+				{
 					YY_RULE_SETUP
 #line 173 "test_spec_scan.l"
 					{
@@ -1860,7 +1984,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 43:
+				{
 					YY_RULE_SETUP
 #line 174 "test_spec_scan.l"
 					{
@@ -1868,7 +1995,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 44:
+				{
 					YY_RULE_SETUP
 #line 175 "test_spec_scan.l"
 					{
@@ -1876,7 +2006,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 45:
+				{
 					YY_RULE_SETUP
 #line 176 "test_spec_scan.l"
 					{
@@ -1884,7 +2017,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 46:
+				{
 					YY_RULE_SETUP
 #line 177 "test_spec_scan.l"
 					{
@@ -1892,7 +2028,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 47:
+				{
 					YY_RULE_SETUP
 #line 178 "test_spec_scan.l"
 					{
@@ -1900,7 +2039,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 48:
+				{
 					YY_RULE_SETUP
 #line 179 "test_spec_scan.l"
 					{
@@ -1908,7 +2050,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 49:
+				{
 					YY_RULE_SETUP
 #line 180 "test_spec_scan.l"
 					{
@@ -1916,7 +2061,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 50:
+				{
 					YY_RULE_SETUP
 #line 181 "test_spec_scan.l"
 					{
@@ -1924,7 +2072,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 51:
+				{
 					YY_RULE_SETUP
 #line 182 "test_spec_scan.l"
 					{
@@ -1932,7 +2083,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 52:
+				{
 					YY_RULE_SETUP
 #line 183 "test_spec_scan.l"
 					{
@@ -1940,7 +2094,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 53:
+				{
 					YY_RULE_SETUP
 #line 184 "test_spec_scan.l"
 					{
@@ -1948,7 +2105,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 54:
+				{
 					YY_RULE_SETUP
 #line 186 "test_spec_scan.l"
 					{
@@ -1956,7 +2116,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 55:
+				{
 					YY_RULE_SETUP
 #line 188 "test_spec_scan.l"
 					{
@@ -1965,8 +2128,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
-				case 56:
+				}
 
+				case 56:
+				{
 /* rule 56 can match eol */
 					YY_RULE_SETUP
 #line 193 "test_spec_scan.l"
@@ -1977,7 +2142,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 57:
+				{
 					YY_RULE_SETUP
 #line 199 "test_spec_scan.l"
 					{
@@ -1986,7 +2154,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 58:
+				{
 					YY_RULE_SETUP
 #line 204 "test_spec_scan.l"
 					{
@@ -1999,7 +2170,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 59:
+				{
 					YY_RULE_SETUP
 #line 211 "test_spec_scan.l"
 					{
@@ -2007,7 +2181,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 60:
+				{
 					YY_RULE_SETUP
 #line 212 "test_spec_scan.l"
 					{
@@ -2015,7 +2192,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 61:
+				{
 					YY_RULE_SETUP
 #line 213 "test_spec_scan.l"
 					{
@@ -2023,7 +2203,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 62:
+				{
 					YY_RULE_SETUP
 #line 214 "test_spec_scan.l"
 					{
@@ -2031,7 +2214,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 63:
+				{
 					YY_RULE_SETUP
 #line 215 "test_spec_scan.l"
 					{
@@ -2039,7 +2225,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 64:
+				{
 					YY_RULE_SETUP
 #line 216 "test_spec_scan.l"
 					{
@@ -2047,7 +2236,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 65:
+				{
 					YY_RULE_SETUP
 #line 217 "test_spec_scan.l"
 					{
@@ -2055,7 +2247,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 66:
+				{
 					YY_RULE_SETUP
 #line 218 "test_spec_scan.l"
 					{
@@ -2063,7 +2258,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 67:
+				{
 					YY_RULE_SETUP
 #line 219 "test_spec_scan.l"
 					{
@@ -2071,7 +2269,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 68:
+				{
 					YY_RULE_SETUP
 #line 220 "test_spec_scan.l"
 					{
@@ -2079,7 +2280,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 69:
+				{
 					YY_RULE_SETUP
 #line 221 "test_spec_scan.l"
 					{
@@ -2087,7 +2291,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 70:
+				{
 					YY_RULE_SETUP
 #line 222 "test_spec_scan.l"
 					{
@@ -2095,7 +2302,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 71:
+				{
 					YY_RULE_SETUP
 #line 223 "test_spec_scan.l"
 					{
@@ -2103,7 +2313,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 72:
+				{
 					YY_RULE_SETUP
 #line 224 "test_spec_scan.l"
 					{
@@ -2111,7 +2324,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 73:
+				{
 					YY_RULE_SETUP
 #line 225 "test_spec_scan.l"
 					{
@@ -2119,7 +2335,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 74:
+				{
 					YY_RULE_SETUP
 #line 226 "test_spec_scan.l"
 					{
@@ -2127,7 +2346,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 75:
+				{
 					YY_RULE_SETUP
 #line 227 "test_spec_scan.l"
 					{
@@ -2135,7 +2357,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 76:
+				{
 					YY_RULE_SETUP
 #line 228 "test_spec_scan.l"
 					{
@@ -2143,7 +2368,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 77:
+				{
 					YY_RULE_SETUP
 #line 229 "test_spec_scan.l"
 					{
@@ -2151,7 +2379,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 78:
+				{
 					YY_RULE_SETUP
 #line 230 "test_spec_scan.l"
 					{
@@ -2159,7 +2390,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 79:
+				{
 					YY_RULE_SETUP
 #line 231 "test_spec_scan.l"
 					{
@@ -2167,7 +2401,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 80:
+				{
 					YY_RULE_SETUP
 #line 232 "test_spec_scan.l"
 					{
@@ -2175,7 +2412,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 81:
+				{
 					YY_RULE_SETUP
 #line 233 "test_spec_scan.l"
 					{
@@ -2183,7 +2423,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 82:
+				{
 					YY_RULE_SETUP
 #line 234 "test_spec_scan.l"
 					{
@@ -2191,7 +2434,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 83:
+				{
 					YY_RULE_SETUP
 #line 235 "test_spec_scan.l"
 					{
@@ -2199,7 +2445,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 84:
+				{
 					YY_RULE_SETUP
 #line 236 "test_spec_scan.l"
 					{
@@ -2207,7 +2456,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 85:
+				{
 					YY_RULE_SETUP
 #line 237 "test_spec_scan.l"
 					{
@@ -2215,7 +2467,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 86:
+				{
 					YY_RULE_SETUP
 #line 238 "test_spec_scan.l"
 					{
@@ -2223,7 +2478,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 87:
+				{
 					YY_RULE_SETUP
 #line 239 "test_spec_scan.l"
 					{
@@ -2231,7 +2489,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 88:
+				{
 					YY_RULE_SETUP
 #line 240 "test_spec_scan.l"
 					{
@@ -2239,7 +2500,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 89:
+				{
 					YY_RULE_SETUP
 #line 241 "test_spec_scan.l"
 					{
@@ -2247,7 +2511,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 90:
+				{
 					YY_RULE_SETUP
 #line 242 "test_spec_scan.l"
 					{
@@ -2255,7 +2522,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 91:
+				{
 					YY_RULE_SETUP
 #line 243 "test_spec_scan.l"
 					{
@@ -2263,7 +2533,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 92:
+				{
 					YY_RULE_SETUP
 #line 245 "test_spec_scan.l"
 					{
@@ -2272,15 +2545,20 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 93:
+				{
 					YY_RULE_SETUP
 #line 250 "test_spec_scan.l"
 					{ /* comment */
 					}
 
 					YY_BREAK
-				case 94:
+				}
 
+				case 94:
+				{
 /* rule 94 can match eol */
 					YY_RULE_SETUP
 #line 251 "test_spec_scan.l"
@@ -2289,14 +2567,20 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 95:
+				{
 					YY_RULE_SETUP
 #line 252 "test_spec_scan.l"
 					{ /* whitespace */
 					}
 
 					YY_BREAK
+				}
+
 				case 96:
+				{
 					YY_RULE_SETUP
 #line 254 "test_spec_scan.l"
 					{
@@ -2305,7 +2589,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 97:
+				{
 					YY_RULE_SETUP
 #line 255 "test_spec_scan.l"
 					{
@@ -2314,7 +2601,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 98:
+				{
 					YY_RULE_SETUP
 #line 256 "test_spec_scan.l"
 					{
@@ -2323,7 +2613,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 99:
+				{
 					YY_RULE_SETUP
 #line 258 "test_spec_scan.l"
 					{
@@ -2331,7 +2624,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 100:
+				{
 					YY_RULE_SETUP
 #line 259 "test_spec_scan.l"
 					{
@@ -2339,7 +2635,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 101:
+				{
 					YY_RULE_SETUP
 #line 260 "test_spec_scan.l"
 					{
@@ -2347,7 +2646,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 102:
+				{
 					YY_RULE_SETUP
 #line 261 "test_spec_scan.l"
 					{
@@ -2355,7 +2657,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 103:
+				{
 					YY_RULE_SETUP
 #line 262 "test_spec_scan.l"
 					{
@@ -2363,7 +2668,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 104:
+				{
 					YY_RULE_SETUP
 #line 263 "test_spec_scan.l"
 					{
@@ -2371,7 +2679,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 105:
+				{
 					YY_RULE_SETUP
 #line 264 "test_spec_scan.l"
 					{
@@ -2379,7 +2690,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 106:
+				{
 					YY_RULE_SETUP
 #line 265 "test_spec_scan.l"
 					{
@@ -2387,7 +2701,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 107:
+				{
 					YY_RULE_SETUP
 #line 266 "test_spec_scan.l"
 					{
@@ -2395,7 +2712,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 108:
+				{
 					YY_RULE_SETUP
 #line 267 "test_spec_scan.l"
 					{
@@ -2403,7 +2723,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 109:
+				{
 					YY_RULE_SETUP
 #line 268 "test_spec_scan.l"
 					{
@@ -2411,7 +2734,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 110:
+				{
 					YY_RULE_SETUP
 #line 269 "test_spec_scan.l"
 					{
@@ -2419,7 +2745,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 111:
+				{
 					YY_RULE_SETUP
 #line 270 "test_spec_scan.l"
 					{
@@ -2427,7 +2756,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 112:
+				{
 					YY_RULE_SETUP
 #line 271 "test_spec_scan.l"
 					{
@@ -2435,7 +2767,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 113:
+				{
 					YY_RULE_SETUP
 #line 272 "test_spec_scan.l"
 					{
@@ -2443,7 +2778,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 114:
+				{
 					YY_RULE_SETUP
 #line 273 "test_spec_scan.l"
 					{
@@ -2451,7 +2789,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 115:
+				{
 					YY_RULE_SETUP
 #line 274 "test_spec_scan.l"
 					{
@@ -2459,7 +2800,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 116:
+				{
 					YY_RULE_SETUP
 #line 275 "test_spec_scan.l"
 					{
@@ -2467,7 +2811,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 117:
+				{
 					YY_RULE_SETUP
 #line 276 "test_spec_scan.l"
 					{
@@ -2475,7 +2822,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 118:
+				{
 					YY_RULE_SETUP
 #line 277 "test_spec_scan.l"
 					{
@@ -2483,7 +2833,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 119:
+				{
 					YY_RULE_SETUP
 #line 278 "test_spec_scan.l"
 					{
@@ -2491,7 +2844,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 120:
+				{
 					YY_RULE_SETUP
 #line 279 "test_spec_scan.l"
 					{
@@ -2499,7 +2855,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 121:
+				{
 					YY_RULE_SETUP
 #line 280 "test_spec_scan.l"
 					{
@@ -2507,7 +2866,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 122:
+				{
 					YY_RULE_SETUP
 #line 281 "test_spec_scan.l"
 					{
@@ -2515,7 +2877,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 123:
+				{
 					YY_RULE_SETUP
 #line 282 "test_spec_scan.l"
 					{
@@ -2523,7 +2888,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 124:
+				{
 					YY_RULE_SETUP
 #line 283 "test_spec_scan.l"
 					{
@@ -2531,7 +2899,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 125:
+				{
 					YY_RULE_SETUP
 #line 284 "test_spec_scan.l"
 					{
@@ -2539,7 +2910,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 126:
+				{
 					YY_RULE_SETUP
 #line 285 "test_spec_scan.l"
 					{
@@ -2547,7 +2921,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 127:
+				{
 					YY_RULE_SETUP
 #line 286 "test_spec_scan.l"
 					{
@@ -2555,7 +2932,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 128:
+				{
 					YY_RULE_SETUP
 #line 287 "test_spec_scan.l"
 					{
@@ -2563,7 +2943,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 129:
+				{
 					YY_RULE_SETUP
 #line 288 "test_spec_scan.l"
 					{
@@ -2571,7 +2954,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 130:
+				{
 					YY_RULE_SETUP
 #line 289 "test_spec_scan.l"
 					{
@@ -2579,7 +2965,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 131:
+				{
 					YY_RULE_SETUP
 #line 290 "test_spec_scan.l"
 					{
@@ -2587,7 +2976,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 132:
+				{
 					YY_RULE_SETUP
 #line 291 "test_spec_scan.l"
 					{
@@ -2596,7 +2988,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 133:
+				{
 					YY_RULE_SETUP
 #line 292 "test_spec_scan.l"
 					{
@@ -2604,7 +2999,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 134:
+				{
 					YY_RULE_SETUP
 #line 293 "test_spec_scan.l"
 					{
@@ -2612,7 +3010,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 135:
+				{
 					YY_RULE_SETUP
 #line 294 "test_spec_scan.l"
 					{
@@ -2620,7 +3021,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 136:
+				{
 					YY_RULE_SETUP
 #line 295 "test_spec_scan.l"
 					{
@@ -2628,7 +3032,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 137:
+				{
 					YY_RULE_SETUP
 #line 297 "test_spec_scan.l"
 					{
@@ -2637,8 +3044,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
-				case 138:
+				}
 
+				case 138:
+				{
 /* rule 138 can match eol */
 					YY_RULE_SETUP
 #line 302 "test_spec_scan.l"
@@ -2649,7 +3058,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 139:
+				{
 					YY_RULE_SETUP
 #line 308 "test_spec_scan.l"
 					{
@@ -2664,7 +3076,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 140:
+				{
 					YY_RULE_SETUP
 #line 318 "test_spec_scan.l"
 					{
@@ -2679,7 +3094,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 141:
+				{
 					YY_RULE_SETUP
 #line 328 "test_spec_scan.l"
 					{
@@ -2688,14 +3106,20 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 142:
+				{
 					YY_RULE_SETUP
 #line 333 "test_spec_scan.l"
 					{ /* skip whitespace before service name */
 					}
 
 					YY_BREAK
+				}
+
 				case 143:
+				{
 					YY_RULE_SETUP
 #line 335 "test_spec_scan.l"
 					{
@@ -2705,8 +3129,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
-				case 144:
+				}
 
+				case 144:
+				{
 /* rule 144 can match eol */
 					YY_RULE_SETUP
 #line 341 "test_spec_scan.l"
@@ -2716,7 +3142,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 145:
+				{
 					YY_RULE_SETUP
 #line 346 "test_spec_scan.l"
 					{
@@ -2731,8 +3160,10 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
-				case 146:
+				}
 
+				case 146:
+				{
 /* rule 146 can match eol */
 					YY_RULE_SETUP
 #line 354 "test_spec_scan.l"
@@ -2742,19 +3173,26 @@ do_action:  /* This label is used only to access EOF actions. */
 					}
 
 					YY_BREAK
+				}
+
 				case 147:
+				{
 					YY_RULE_SETUP
 #line 359 "test_spec_scan.l"
 					ECHO;
 
 					YY_BREAK
+				}
+
 #line 2301 "test_spec_scan.c"
 				case YY_STATE_EOF(INITIAL):
 				case YY_STATE_EOF(CLUSTER_BODY):
 				case YY_STATE_EOF(STEP_BODY):
 				case YY_STATE_EOF(EXEC_ARGS):
 				case YY_STATE_EOF(EXEC_ARGS_REST):
+				{
 					yyterminate();
+				}
 
 				case YY_END_OF_BUFFER:
 				{
@@ -2788,8 +3226,8 @@ do_action:  /* This label is used only to access EOF actions. */
 					 * end-of-buffer state).  Contrast this with the test
 					 * in input().
 					 */
-					if ((yy_c_buf_p) <=
-						&YY_CURRENT_BUFFER_LVALUE->yy_ch_buf[(yy_n_chars)])
+					if ((yy_c_buf_p) <= &YY_CURRENT_BUFFER_LVALUE->yy_ch_buf[(yy_n_chars)]
+						)
 					{ /* This was really a NUL. */
 						yy_state_type yy_next_state;
 
@@ -2859,6 +3297,7 @@ do_action:  /* This label is used only to access EOF actions. */
 							}
 
 							case EOB_ACT_CONTINUE_SCAN:
+							{
 								(yy_c_buf_p) =
 									(yytext_ptr) + yy_amount_of_matched_text;
 
@@ -2867,8 +3306,10 @@ do_action:  /* This label is used only to access EOF actions. */
 								yy_cp = (yy_c_buf_p);
 								yy_bp = (yytext_ptr) + YY_MORE_ADJ;
 								goto yy_match;
+							}
 
 							case EOB_ACT_LAST_MATCH:
+							{
 								(yy_c_buf_p) =
 									&YY_CURRENT_BUFFER_LVALUE->yy_ch_buf[(yy_n_chars)];
 
@@ -2877,14 +3318,17 @@ do_action:  /* This label is used only to access EOF actions. */
 								yy_cp = (yy_c_buf_p);
 								yy_bp = (yytext_ptr) + YY_MORE_ADJ;
 								goto yy_find_action;
+							}
 						}
 					}
 					break;
 				}
 
 				default:
+				{
 					YY_FATAL_ERROR(
 						"fatal flex scanner internal error--no action found");
+				}
 			} /* end of action switch */
 		} /* end of scanning one token */
 	} /* end of user's declarations */
@@ -3153,7 +3597,7 @@ input(void)
 			switch (yy_get_next_buffer())
 			{
 				case EOB_ACT_LAST_MATCH:
-
+				{
 					/* This happens because yy_g_n_b()
 					 * sees that we've accumulated a
 					 * token and flags that we need to
@@ -3166,6 +3610,7 @@ input(void)
 
 					/* Reset buffer status. */
 					yyrestart(yyin);
+				}
 
 				/*FALLTHROUGH*/
 
@@ -3188,8 +3633,10 @@ input(void)
 				}
 
 				case EOB_ACT_CONTINUE_SCAN:
+				{
 					(yy_c_buf_p) = (yytext_ptr) + offset;
 					break;
+				}
 			}
 		}
 	}
@@ -3633,18 +4080,18 @@ yy_fatal_error(const char *msg)
 
 #undef yyless
 #define yyless(n) \
-	do \
-	{ \
-		/* Undo effects of setting up yytext. */ \
-		yy_size_t yyless_macro_arg = (n); \
-		YY_LESS_LINENO(yyless_macro_arg); \
-		yytext[yyleng] = (yy_hold_char); \
-		(yy_c_buf_p) = yytext + yyless_macro_arg; \
-		(yy_hold_char) = *(yy_c_buf_p); \
-		*(yy_c_buf_p) = '\0'; \
-		yyleng = yyless_macro_arg; \
-	} \
-	while (0)
+		do \
+		{ \
+			/* Undo effects of setting up yytext. */ \
+			yy_size_t yyless_macro_arg = (n); \
+			YY_LESS_LINENO(yyless_macro_arg); \
+			yytext[yyleng] = (yy_hold_char); \
+			(yy_c_buf_p) = yytext + yyless_macro_arg; \
+			(yy_hold_char) = *(yy_c_buf_p); \
+			*(yy_c_buf_p) = '\0'; \
+			yyleng = yyless_macro_arg; \
+		} \
+		while (0)
 
 /* Accessor  methods (get/set functions) to struct members. */
 
