@@ -85,7 +85,7 @@ RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 FROM base AS citus
 
 ARG PGVERSION
-ARG CITUSTAG=v12.1.5
+ARG CITUSTAG=v13.2.0
 
 ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 

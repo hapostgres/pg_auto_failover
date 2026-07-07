@@ -35,8 +35,16 @@ jobs:
 
       - name: Build pgaf:run image (PG${{ matrix.PGVERSION }})
         run: |
+          # Match the CITUSTAG-per-PGVERSION logic from the top-level Makefile:
+          # PG14–15 require Citus v12 (last version supporting those releases).
+          # PG16+ use the current default.
+          case "${{ matrix.PGVERSION }}" in
+            14|15) CITUSTAG=v12.1.5 ;;
+            *)     CITUSTAG=v13.2.0 ;;
+          esac
           docker build \
             --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${CITUSTAG} \
             --target run \
             -t pgaf:run-pg${{ matrix.PGVERSION }} \
             .
@@ -74,6 +82,7 @@ jobs:
         run: |
           docker build \
             --build-arg PGVERSION=${{ env.PGVERSION }} \
+            --build-arg CITUSTAG=v13.2.0 \
             --target build \
             -t pgaf:build \
             .
