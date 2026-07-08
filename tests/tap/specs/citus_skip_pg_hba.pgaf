@@ -28,7 +28,7 @@ cluster {
 
 setup {
     exec monitor  pg_autoctl inspect pgsetup wait
-    exec monitor  pg_autoctl override pgsetup hba-lan
+    exec monitor  pg_autoctl inspect pgsetup hba-lan
     exec coord0a  pg_autoctl node start /etc/pgaf/node.ini
 }
 
@@ -41,7 +41,7 @@ teardown {
 #
 
 step test_000_add_coord0a_hba {
-    exec coord0a  pg_autoctl override pgsetup hba-lan
+    exec coord0a  pg_autoctl inspect pgsetup hba-lan
 }
 
 #
@@ -73,7 +73,7 @@ step test_002b_create_worker {
 #
 
 step test_002d_run_worker {
-    exec worker1a  pg_autoctl override pgsetup hba-lan
+    exec worker1a  pg_autoctl inspect pgsetup hba-lan
     exec worker1a  pg_autoctl node run --background /etc/pgaf/node.ini
 }
 
