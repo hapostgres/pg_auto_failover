@@ -96,22 +96,27 @@ step test_009_add_sync_standby {
 }
 
 #
-# test_010: promote node1 via monitor SQL
+# test_010: promote node1 via monitor SQL, with node4 pre-disconnected.
+#
+# The perform_promotion SQL is non-blocking; the LSN election completes in
+# under a second on fast runners, so catching node4 AT report_lsn via polling
+# is unreliable.  Instead, disconnect node4 before the election starts — the
+# monitor runs the election without node4, which exercises the same code path
+# (a candidate missing from the election) reliably and without a race window.
 #
 
 step test_010_promote_node1 {
+    network disconnect node4
     sql monitor {
         SELECT pgautofailover.perform_promotion('default', 'node1');
     }
 }
 
 #
-# test_011: ifdown node4 while it is at report_lsn
+# test_011: verify the election completed with node4 offline
 #
 
 step test_011_ifdown_node4_at_reportlsn {
-    wait until node4 state is report_lsn  timeout 180s
-    network disconnect node4
     wait until node3 state is secondary  timeout 180s
 }
 

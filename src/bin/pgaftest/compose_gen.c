@@ -725,15 +725,23 @@ compose_gen_write(TestCluster *cluster,
 			 */
 			if (!firstNode && cluster->withMonitor && !n->launchDeferred)
 			{
+				/*
+				 * SSL clusters take longer to initialise on slow CI runners
+				 * (cert generation + pg_autoctl SSL config + monitor TLS
+				 * handshake).  Double start_period so the runner has time to
+				 * complete init before failures start counting.
+				 */
+				const char *hc_start =
+					ssl_needs_certs(node_ssl) ? "300s" : "120s";
 				fformat(f,
 						"    healthcheck:\n"
 						"      test: [\"CMD\", \"pg_autoctl\", \"status\","
 						" \"--pgdata\", \"%s\"]\n"
 						"      interval: 2s\n"
 						"      timeout: 5s\n"
-						"      retries: 120\n"
-						"      start_period: 120s\n",
-						node_pgdata);
+						"      retries: 150\n"
+						"      start_period: %s\n",
+						node_pgdata, hc_start);
 			}
 
 			if (firstNode)
