@@ -582,7 +582,7 @@ compose_gen_write(TestCluster *cluster,
 				ssl_needs_certs(cluster->ssl) ? "300s" : "60s";
 			fformat(f,
 					"    healthcheck:\n"
-					"      test: [\"CMD\", \"pg_autoctl\", \"status\"," 
+					"      test: [\"CMD\", \"pg_autoctl\", \"status\","
 					" \"--pgdata\", \"%s\"]\n"
 					"      interval: 2s\n"
 					"      timeout: 5s\n"
@@ -1181,9 +1181,9 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 					"pguri = postgresql://autoctl_node:%s@monitor/pg_auto_failover"
 					"?sslmode=%s"
 					"&sslrootcert=" SSL_DIR_IN_CONTAINER "/ca.crt"
-					"&sslcert=/var/lib/postgres/.postgresql/postgresql.crt"
-					"&sslkey=/var/lib/postgres/.postgresql/postgresql.key"
-					"\n\n",
+														 "&sslcert=/var/lib/postgres/.postgresql/postgresql.crt"
+														 "&sslkey=/var/lib/postgres/.postgresql/postgresql.key"
+														 "\n\n",
 					cluster->monitorPassword,
 					eff_ssl);
 		}
@@ -1209,9 +1209,9 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 				"pguri = " MONITOR_PGURI
 				"?sslmode=%s"
 				"&sslrootcert=" SSL_DIR_IN_CONTAINER "/ca.crt"
-				"&sslcert=/var/lib/postgres/.postgresql/postgresql.crt"
-				"&sslkey=/var/lib/postgres/.postgresql/postgresql.key"
-				"\n\n",
+													 "&sslcert=/var/lib/postgres/.postgresql/postgresql.crt"
+													 "&sslkey=/var/lib/postgres/.postgresql/postgresql.key"
+													 "\n\n",
 				eff_ssl);
 	}
 	else
