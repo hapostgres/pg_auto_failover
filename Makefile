@@ -39,7 +39,7 @@ include Makefile.azure
 #
 # LIST TESTS
 #
-NOSETESTS = $(shell which nosetests3 || which nosetests)
+PYTEST = $(shell which pytest || which pytest3)
 
 # Tests for the monitor
 TESTS_MONITOR  = test_extension_update
@@ -78,17 +78,17 @@ TESTS_MULTI += test_multi_standbys
 # Included Makefile may define TEST_ARGUMENT (like for citus)
 TEST ?=
 ifeq ($(TEST),)
-	TEST_ARGUMENT = --where=tests
+	TEST_ARGUMENT = tests/
 else ifeq ($(TEST),multi)
-	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MULTI)
+	TEST_ARGUMENT = $(TESTS_MULTI:%=tests/%.py)
 else ifeq ($(TEST),single)
-	TEST_ARGUMENT = --where=tests --tests=$(TESTS_SINGLE)
+	TEST_ARGUMENT = $(TESTS_SINGLE:%=tests/%.py)
 else ifeq ($(TEST),monitor)
-	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MONITOR)
+	TEST_ARGUMENT = $(TESTS_MONITOR:%=tests/%.py)
 else ifeq ($(TEST),ssl)
-	TEST_ARGUMENT = --where=tests --tests=$(TESTS_SSL)
+	TEST_ARGUMENT = $(TESTS_SSL:%=tests/%.py)
 else
-	TEST_ARGUMENT = $(TEST:%=tests/%.py)
+	TEST_ARGUMENT = tests/$(TEST).py
 endif
 
 #
@@ -167,11 +167,10 @@ ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
 else
 	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
-		$(NOSETESTS)			\
-		--verbose				\
-		--nologcapture			\
-		--nocapture				\
-		--stop					\
+		$(PYTEST)				\
+		-v						\
+		-s						\
+		-x						\
 		${TEST_ARGUMENT}
 endif
 
