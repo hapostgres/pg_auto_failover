@@ -73,8 +73,6 @@ RUN apt-get update \
      postgresql-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install 'pyroute2>=0.5.17,<0.7.0'
-
 RUN adduser --disabled-password --gecos '' docker
 RUN adduser docker sudo
 RUN adduser docker postgres
