@@ -10,7 +10,7 @@ ARG PGVERSION=17
 #
 # This base image contains all our target Postgres versions.
 #
-FROM debian:bullseye-slim AS base
+FROM debian:bookworm-slim AS base
 
 ARG PGVERSION
 
@@ -45,7 +45,6 @@ RUN apt-get update \
     autoconf \
     openssl \
     pipenv \
-    python3-nose \
     python3 \
     python3-setuptools \
     python3-psycopg2 \
@@ -58,14 +57,13 @@ RUN apt-get update \
     psmisc \
     htop \
     less \
-    mg \
     valgrind \
     postgresql-common \
  && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
       | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
-RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
@@ -147,7 +145,7 @@ ENV PATH /usr/lib/postgresql/${PGVERSION}/bin:/usr/local/sbin:/usr/local/bin:/us
 #
 # And finally our "run" images with the bare minimum for run-time.
 #
-FROM debian:bullseye-slim AS run
+FROM debian:bookworm-slim AS run
 
 ARG PGVERSION
 
@@ -173,7 +171,7 @@ RUN apt-get update \
 
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
       | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
-RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
@@ -262,7 +260,7 @@ USER docker
 # The pg_auto_failover binaries are copied directly from the run stage;
 # nothing is built here.
 #
-FROM debian:bullseye-slim AS pgaftest
+FROM debian:bookworm-slim AS pgaftest
 
 ARG PGVERSION
 
@@ -281,7 +279,7 @@ RUN apt-get update \
 # PGDG repo — needed for the libpq version that pg_autoctl and pgaftest link against
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
       | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
-RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" \
+RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" \
       > /etc/apt/sources.list.d/pgdg.list \
   && apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -292,7 +290,7 @@ RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://ap
 RUN curl -fsSL https://download.docker.com/linux/debian/gpg \
       | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
-      https://download.docker.com/linux/debian bullseye stable" \
+      https://download.docker.com/linux/debian bookworm stable" \
       > /etc/apt/sources.list.d/docker.list \
   && apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

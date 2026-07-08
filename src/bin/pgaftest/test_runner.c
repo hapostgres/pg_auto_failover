@@ -3516,6 +3516,10 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		if (up_rc != 0)
 		{
 			log_error("docker compose up failed (exit %d)", up_rc);
+			log_info("--- container logs ---");
+			(void) run_cmd("%s logs --no-color --timestamps 2>&1",
+						   r.composeBase);
+			log_info("--- end container logs ---");
 			run_cmd("%s down --volumes 2>&1", r.composeBase);
 			return false;
 		}
