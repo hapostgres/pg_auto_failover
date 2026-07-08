@@ -570,6 +570,26 @@ compose_gen_write(TestCluster *cluster,
 															  "    stop_grace_period: 60s\n\n",
 				ssl_needs_certs(cluster->ssl) ? SSL_COPY_CERTS_CMD : "",
 				monitor_pgdata);
+
+		/*
+		 * Monitor healthcheck: data nodes use depends_on service_healthy so
+		 * they do not start until the monitor is fully initialised.  SSL
+		 * clusters take longer (cert copy + pg_autoctl SSL config), so use a
+		 * longer start_period there.
+		 */
+		{
+			const char *hc_start =
+				ssl_needs_certs(cluster->ssl) ? "300s" : "60s";
+			fformat(f,
+					"    healthcheck:\n"
+					"      test: [\"CMD\", \"pg_autoctl\", \"status\"," 
+					" \"--pgdata\", \"%s\"]\n"
+					"      interval: 2s\n"
+					"      timeout: 5s\n"
+					"      retries: 150\n"
+					"      start_period: %s\n\n",
+					monitor_pgdata, hc_start);
+		}
 	}
 
 	/* ---- second monitor (initially stopped, for replace-monitor tests) ---- */
@@ -752,6 +772,14 @@ compose_gen_write(TestCluster *cluster,
 						"        condition: %s\n",
 						firstNode->name,
 						cluster->withMonitor ? "service_healthy" : "service_started");
+			}
+			else if (cluster->withMonitor && !n->launchDeferred)
+			{
+				/* node1: wait for monitor to be healthy before starting */
+				fformat(f,
+						"    depends_on:\n"
+						"      monitor:\n"
+						"        condition: service_healthy\n");
 			}
 			fformat(f, "\n");
 
