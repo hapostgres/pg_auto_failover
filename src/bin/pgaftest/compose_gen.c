@@ -823,8 +823,12 @@ compose_gen_write(TestCluster *cluster,
 		}
 
 		/*
-		 * pgaftest has its own ping loop that waits for the monitor before
-		 * starting, so no depends_on is needed.
+		 * pgaftest waits for the first data node to be healthy so that the
+		 * setup {} block's wait timeouts don't need to cover node
+		 * initialisation from scratch.  Without this, pgaftest's setup timer
+		 * starts as soon as the monitor is connectable, but node1 may not
+		 * have finished initialising yet (especially in SSL cert clusters
+		 * where each stage has its own 600s window).
 		 */
 
 		/* Derive work dir (directory containing the compose file). */
@@ -864,6 +868,14 @@ compose_gen_write(TestCluster *cluster,
 		if (cluster->withMonitor)
 		{
 			fformat(f, "      PG_AUTOCTL_MONITOR: \"%s\"\n", monitorPguri);
+		}
+		if (firstNode && cluster->withMonitor)
+		{
+			fformat(f,
+					"    depends_on:\n"
+					"      %s:\n"
+					"        condition: service_healthy\n",
+					firstNode->name);
 		}
 		fformat(f, "    command: [\"pgaftest\", \"run\", \"/spec.pgaf\"]\n\n");
 	}
