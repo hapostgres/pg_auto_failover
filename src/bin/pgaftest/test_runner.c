@@ -96,6 +96,14 @@ run_cmd_capture(char *buf, int buflen, const char *fmt, ...)
 		buf[--pos] = '\0';
 	}
 
+	/* Drain any remaining output so pclose() doesn't close a pipe with
+	 * unread data still buffered — that causes SIGPIPE in the child which
+	 * docker translates to SIGKILL (exit 137) for the exec'd process. */
+	while (c != EOF)
+	{
+		c = fgetc(p);
+	}
+
 	return pclose(p);
 }
 
@@ -183,6 +191,18 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 	{
 		sformat(r->specFile, sizeof(r->specFile), "%s/%s",
 				r->contextDir, spec->filename);
+	}
+
+	/* directory containing the spec file (for /etc/pgaf/specs bind mount) */
+	strlcpy(r->specDir, r->specFile, sizeof(r->specDir));
+	char *slash = strrchr(r->specDir, '/');
+	if (slash)
+	{
+		*slash = '\0';
+	}
+	else
+	{
+		r->specDir[0] = '\0';
 	}
 
 	/* Start with the primary monitor as the active target. */
@@ -303,7 +323,8 @@ runner_compose_generate(TestRunner *r)
 						   r->composeFile,
 						   r->projectName,
 						   r->contextDir,
-						   specFileForCompose))
+						   specFileForCompose,
+						   r->specDir))
 	{
 		return false;
 	}
@@ -3826,7 +3847,7 @@ runner_show(TestSpec *spec)
 	/* write to stdout instead of a file */
 	/* No specFile for show — omit the pgaftest service */
 	bool ok = compose_gen_write(&spec->cluster, "/dev/stdout",
-								r.projectName, r.contextDir, NULL);
+								r.projectName, r.contextDir, NULL, r.specDir);
 	return ok;
 }
 
@@ -3891,7 +3912,8 @@ runner_prepare(TestSpec *spec, const char *outDir)
 
 	/* Write docker-compose.yml (with pgaftest service) */
 	if (!compose_gen_write(&spec->cluster, r.composeFile,
-						   r.projectName, r.contextDir, r.specFile))
+						   r.projectName, r.contextDir, r.specFile,
+						   r.specDir))
 	{
 		return false;
 	}

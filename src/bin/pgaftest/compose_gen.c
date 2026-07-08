@@ -480,7 +480,8 @@ compose_gen_write(TestCluster *cluster,
 				  const char *path,
 				  const char *projectName,
 				  const char *contextDir,
-				  const char *specFile)
+				  const char *specFile,
+				  const char *specDir)
 {
 	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
 	if (!f)
@@ -547,6 +548,10 @@ compose_gen_write(TestCluster *cluster,
 		{
 			fformat(f,
 					"      - %s:/usr/src/pg_auto_failover:rw\n", contextDir);
+		}
+		if (specDir && specDir[0])
+		{
+			fformat(f, "      - %s:/etc/pgaf/specs:ro\n", specDir);
 		}
 		fformat(f,
 				"    environment:\n"
@@ -703,6 +708,11 @@ compose_gen_write(TestCluster *cluster,
 			{
 				fformat(f, "      - %s_%s:%s:rw\n",
 						n->volumes[vi].name, n->name, n->volumes[vi].path);
+			}
+			if (specDir && specDir[0])
+			{
+				fformat(f,
+						"      - %s:/etc/pgaf/specs:ro\n", specDir);
 			}
 			fformat(f,
 					"    environment:\n"

@@ -26,12 +26,17 @@ bool compose_gen_write_ssl_certs(const TestCluster *cluster,
 
 /* cluster is non-const: monitorHostPort is filled in if zero.
  * specFile is the absolute path to the .pgaf spec file; it is bind-mounted
- * into the pgaftest service at /spec.pgaf.  Pass NULL to omit the service. */
+ * into the pgaftest service at /spec.pgaf.  Pass NULL to omit the service.
+ * specDir is the directory containing the spec (dirname(specFile)); it is
+ * bind-mounted read-only at /etc/pgaf/specs in every data-node container so
+ * that static JSON or other helper files shipped next to the spec can be
+ * referenced in exec commands.  Pass NULL to omit the mount. */
 bool compose_gen_write(TestCluster *cluster,
 					   const char *path,
 					   const char *projectName,
 					   const char *contextDir,
-					   const char *specFile);
+					   const char *specFile,
+					   const char *specDir);
 
 /*
  * Write a pg_autoctl_node.ini for the second (replacement) monitor into `dir`.

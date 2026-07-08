@@ -41,6 +41,7 @@ teardown {
 #
 
 step test_000_add_coord0a_hba {
+    exec coord0a  pg_autoctl inspect pgsetup wait
     exec coord0a  pg_autoctl inspect pgsetup hba-lan
 }
 
@@ -72,8 +73,17 @@ step test_002b_create_worker {
 # cannot connect (pg_hba.conf has no trust rule yet).  After manually adding
 # HBA rules the already-running keeper retries activation automatically.
 #
+# Wait for postgres to be ready before calling hba-lan: the deferred poll in
+# pg_autoctl node run detects launchDeferred=false and execv()s into
+# pg_autoctl create citus-worker --run.  Calling hba-lan immediately would
+# race with that execv and the subsequent supervisor + initdb startup.
+# pgsetup wait blocks until pg_autoctl.cfg exists and postgres accepts
+# connections, so by the time hba-lan runs pg_hba.conf already exists and the
+# container is fully initialised.
+#
 
 step test_002d_run_worker {
+    exec worker1a  pg_autoctl inspect pgsetup wait
     exec worker1a  pg_autoctl inspect pgsetup hba-lan
     wait until worker1a state is single  timeout 120s
 }
@@ -95,6 +105,7 @@ step test_002f_activated_node {
 
 step test_003_init_worker {
     exec worker1b  pg_autoctl node start /etc/pgaf/node.ini
+    exec worker1b  pg_autoctl inspect pgsetup wait
     exec worker1b  pg_autoctl inspect pgsetup hba-lan
     wait until worker1a state is primary
         and worker1b state is secondary
