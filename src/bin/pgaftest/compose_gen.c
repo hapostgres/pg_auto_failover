@@ -1174,11 +1174,45 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 	}
 	else if (cluster->monitorPassword[0])
 	{
+		if (ssl_needs_certs(eff_ssl))
+		{
+			fformat(f,
+					"[monitor]\n"
+					"pguri = postgresql://autoctl_node:%s@monitor/pg_auto_failover"
+					"?sslmode=%s"
+					"&sslrootcert=" SSL_DIR_IN_CONTAINER "/ca.crt"
+					"&sslcert=/var/lib/postgres/.postgresql/postgresql.crt"
+					"&sslkey=/var/lib/postgres/.postgresql/postgresql.key"
+					"\n\n",
+					cluster->monitorPassword,
+					eff_ssl);
+		}
+		else
+		{
+			fformat(f,
+					"[monitor]\n"
+					"pguri = postgresql://autoctl_node:%s@monitor/pg_auto_failover\n"
+					"\n",
+					cluster->monitorPassword);
+		}
+	}
+	else if (ssl_needs_certs(eff_ssl))
+	{
+		/*
+		 * For verify-ca / verify-full clusters, embed explicit SSL params in
+		 * the monitor URI rather than relying on libpq auto-discovery of
+		 * ~/.postgresql/.  Auto-discovery depends on $HOME being set correctly
+		 * inside the container, which is fragile in the CI DinD environment.
+		 */
 		fformat(f,
 				"[monitor]\n"
-				"pguri = postgresql://autoctl_node:%s@monitor/pg_auto_failover\n"
-				"\n",
-				cluster->monitorPassword);
+				"pguri = " MONITOR_PGURI
+				"?sslmode=%s"
+				"&sslrootcert=" SSL_DIR_IN_CONTAINER "/ca.crt"
+				"&sslcert=/var/lib/postgres/.postgresql/postgresql.crt"
+				"&sslkey=/var/lib/postgres/.postgresql/postgresql.key"
+				"\n\n",
+				eff_ssl);
 	}
 	else
 	{

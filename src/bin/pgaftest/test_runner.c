@@ -353,6 +353,9 @@ runner_compose_up(TestRunner *r)
 	if (rc != 0)
 	{
 		log_error("docker compose up failed (exit %d)", rc);
+		log_info("--- container logs ---");
+		(void) run_cmd("%s logs --no-color --timestamps 2>&1", r->composeBase);
+		log_info("--- end container logs ---");
 		return false;
 	}
 	r->composeUp = true;
