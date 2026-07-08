@@ -150,16 +150,16 @@ step test_014_secondary_reports_lsn {
     wait until node1 state is secondary
         and node3 state is primary
         timeout 60s
-    network disconnect node3
-    network disconnect node1
+    compose stop node3
+    compose stop node1
     network connect node2
     exec monitor  bash -c "pg_autoctl perform failover &"
     wait until node2 state is report_lsn  timeout 300s
 }
 
 step test_015_start_node3_node1 {
-    network connect node3
-    network connect node1
+    compose start node3
+    compose start node1
 }
 
 #
