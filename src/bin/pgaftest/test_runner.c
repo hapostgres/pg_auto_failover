@@ -205,6 +205,27 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 		r->specDir[0] = '\0';
 	}
 
+	/*
+	 * When pgaftest runs inside a Docker container (e.g. via `docker run
+	 * -v $(pwd):/work -w /work pgaf:pgaftest pgaftest run ...`), contextDir
+	 * is the container-internal path (e.g. /work).  The docker-compose.yml
+	 * we generate is read by the HOST docker daemon, which resolves volume
+	 * bind-mount paths against the HOST filesystem.  PGAFTEST_HOST_WORK_DIR
+	 * is the HOST path corresponding to contextDir; use it to translate
+	 * specDir into a host-side path for the /etc/pgaf/specs bind mount.
+	 */
+	const char *hostWorkDir = getenv("PGAFTEST_HOST_WORK_DIR"); /* IGNORE-BANNED */
+	if (hostWorkDir && hostWorkDir[0] && r->specDir[0] && r->contextDir[0] &&
+		strncmp(r->specDir, r->contextDir, strlen(r->contextDir)) == 0)
+	{
+		sformat(r->hostSpecDir, sizeof(r->hostSpecDir), "%s%s",
+				hostWorkDir, r->specDir + strlen(r->contextDir));
+	}
+	else
+	{
+		strlcpy(r->hostSpecDir, r->specDir, sizeof(r->hostSpecDir));
+	}
+
 	/* Start with the primary monitor as the active target. */
 	strlcpy(r->activeMonitorService, "monitor",
 			sizeof(r->activeMonitorService));
@@ -324,7 +345,7 @@ runner_compose_generate(TestRunner *r)
 						   r->projectName,
 						   r->contextDir,
 						   specFileForCompose,
-						   r->specDir))
+						   r->hostSpecDir))
 	{
 		return false;
 	}
@@ -3847,7 +3868,7 @@ runner_show(TestSpec *spec)
 	/* write to stdout instead of a file */
 	/* No specFile for show — omit the pgaftest service */
 	bool ok = compose_gen_write(&spec->cluster, "/dev/stdout",
-								r.projectName, r.contextDir, NULL, r.specDir);
+								r.projectName, r.contextDir, NULL, r.hostSpecDir);
 	return ok;
 }
 
@@ -3913,7 +3934,7 @@ runner_prepare(TestSpec *spec, const char *outDir)
 	/* Write docker-compose.yml (with pgaftest service) */
 	if (!compose_gen_write(&spec->cluster, r.composeFile,
 						   r.projectName, r.contextDir, r.specFile,
-						   r.specDir))
+						   r.hostSpecDir))
 	{
 		return false;
 	}

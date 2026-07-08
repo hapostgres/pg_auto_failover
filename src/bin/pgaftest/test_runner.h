@@ -24,6 +24,7 @@ typedef struct TestRunner
 	char contextDir[1024];         /* absolute path used as docker build context */
 	char specFile[1024];           /* absolute path to the .pgaf spec file */
 	char specDir[1024];            /* dirname(specFile): directory of the spec */
+	char hostSpecDir[1024];        /* host-side specDir for compose bind-mount */
 
 	/* TAP counters and buffered output */
 	int tapTotal;

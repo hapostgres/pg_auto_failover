@@ -220,6 +220,7 @@ jobs:
             -e PGAF_IMAGE=pgaf:run \
             -e PGVERSION=${{ matrix.PGVERSION }} \
             -e PGAF_DEBIAN_IMAGE=${{ matrix.schedule == 'node' && 'pgaf:debian' || '' }} \
+            -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
             pgaf:pgaftest \
             pgaftest run --schedule tests/tap/schedules/${{ matrix.schedule }}.sch
 
@@ -278,6 +279,7 @@ jobs:
             -v /tmp/pgaftest:/tmp/pgaftest \
             -v "$(pwd)":/work:ro \
             -w /work \
+            -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
             pgaf:pgaftest \
             pgaftest run tests/tap/specs/installcheck.pgaf
 
@@ -331,5 +333,6 @@ jobs:
             -v "$(pwd)":/work:ro \
             -w /work \
             -e PGVERSION=${{ env.PGVERSION }} \
+            -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
             pgaf:pgaftest \
             pgaftest run tests/tap/specs/upgrade.pgaf

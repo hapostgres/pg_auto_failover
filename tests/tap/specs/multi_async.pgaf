@@ -37,6 +37,7 @@ teardown {
 
 step test_004_set_async {
     exec node1  pg_autoctl set formation number-sync-standbys 0
+    wait until node1 state is primary  timeout 60s
     exec node1  pg_autoctl set node replication-quorum false
     exec node2  pg_autoctl set node replication-quorum false
     exec node3  pg_autoctl set node replication-quorum false
