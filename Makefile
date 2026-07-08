@@ -78,7 +78,7 @@ TESTS_MULTI += test_multi_standbys
 # Included Makefile may define TEST_ARGUMENT (like for citus)
 TEST ?=
 ifeq ($(TEST),)
-	TEST_ARGUMENT = tests/
+	TEST_ARGUMENT = tests/*.py
 else ifeq ($(TEST),multi)
 	TEST_ARGUMENT = $(TESTS_MULTI:%=tests/%.py)
 else ifeq ($(TEST),single)
