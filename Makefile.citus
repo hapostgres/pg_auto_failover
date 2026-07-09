@@ -19,7 +19,7 @@ ifeq ($(TEST),citus)
   TESTS_CITUS += test_nonha_citus_operation
   TESTS_CITUS += test_citus_skip_pg_hba
 
-  TEST_ARGUMENT = --where=tests --tests=$(TESTS_CITUS)
+  TEST_ARGUMENT = $(TESTS_CITUS:%=tests/%.py)
 endif
 
 # this target is defined and used later in the main Makefile
