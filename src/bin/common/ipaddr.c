@@ -303,7 +303,9 @@ fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size)
 			}
 
 			default:
+			{
 				continue;
+			}
 		}
 
 		if (strcmp(address, localIpAddress) == 0)

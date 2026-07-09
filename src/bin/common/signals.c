@@ -253,6 +253,8 @@ signal_to_string(int signal)
 		}
 
 		default:
+		{
 			return "unknown signal";
+		}
 	}
 }
