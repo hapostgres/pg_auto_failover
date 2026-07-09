@@ -371,13 +371,14 @@ monitor_get_nodes(Monitor *monitor, char *formation, int groupId,
 	int paramCount = 1;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2] = { 0 };
+	IntString myGroupIdString = { 0 };
 	NodeAddressArrayParseContext parseContext = { { 0 }, nodeArray, false };
 
 	paramValues[0] = formation;
 
 	if (groupId > -1)
 	{
-		IntString myGroupIdString = intToString(groupId);
+		myGroupIdString = intToString(groupId);
 
 		++paramCount;
 		paramValues[1] = myGroupIdString.strValue;
@@ -429,12 +430,13 @@ monitor_print_nodes_as_json(Monitor *monitor, char *formation, int groupId)
 	int paramCount = 1;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2] = { 0 };
+	IntString myGroupIdString = { 0 };
 
 	paramValues[0] = formation;
 
 	if (groupId > -1)
 	{
-		IntString myGroupIdString = intToString(groupId);
+		myGroupIdString = intToString(groupId);
 
 		++paramCount;
 		paramValues[1] = myGroupIdString.strValue;
