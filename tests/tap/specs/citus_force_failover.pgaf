@@ -1,0 +1,86 @@
+# Test Citus force failover: a transaction in progress competes with a worker
+# failover. The failover mechanism must terminate competing backends to make
+# progress within a bounded time window.
+# Also tests dropping a failed primary worker and a failed coordinator.
+#
+# Predecessor: tests/test_citus_force_failover.py
+
+cluster {
+    monitor
+    formation {
+        coordinator1a coordinator
+        coordinator1b coordinator
+        worker1a worker group 1
+        worker1b worker group 1
+        worker2a worker group 2
+        worker2b worker group 2
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 90s
+    wait until primary, secondary in group 1  timeout 90s
+    wait until primary, secondary in group 2  timeout 90s
+    promote coordinator1a, worker1a, worker2a
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: coordinator pair
+#
+
+step test_001_init_coordinator {
+    wait until coordinator1a state is primary
+        and coordinator1b state is secondary
+        timeout 90s
+}
+
+#
+# test_002: worker groups
+#
+
+step test_002_init_workers {
+    wait until worker1a state is primary
+        and worker1b state is secondary
+        and worker2a state is primary
+        and worker2b state is secondary
+        timeout 90s
+}
+
+#
+# test_003: create distributed table
+#
+
+step test_003_create_distributed_table {
+    exec coordinator1a  sh -c 'for i in $(seq 1 30); do n=$(psql -U docker -d demo -tAc "SELECT count(*) FROM pg_dist_node WHERE metadatasynced = false AND isactive = true"); [ "$n" = "0" ] && exit 0; sleep 2; done; exit 1'
+    sql coordinator1a {
+        SET citus.shard_count TO 4; CREATE TABLE t1 (a int); SELECT
+        create_distributed_table('t1', 'a');
+    }
+}
+
+step test_004_fail_while_transaction_is_in_progress {
+    network disconnect worker1a
+    wait until worker1b state is wait_primary  timeout 90s
+}
+
+#
+# test_005: drop failed primary worker2a and coordinator1a
+#
+
+step test_005_drop_primary_worker {
+    network disconnect worker2a
+    wait until worker2b state is wait_primary  timeout 90s
+    compose stop worker2a
+    exec monitor  psql -d pg_auto_failover -tAc "SELECT pgautofailover.remove_node(nodehost, nodeport) FROM pgautofailover.node WHERE nodename = 'worker2a'"
+    wait until worker2b state is single  timeout 60s
+}
+
+step test_005_drop_primary_coordinator {
+    compose stop coordinator1a
+    exec monitor  psql -d pg_auto_failover -tAc "SELECT pgautofailover.remove_node(nodehost, nodeport) FROM pgautofailover.node WHERE nodename = 'coordinator1a'"
+    wait until coordinator1b state is single  timeout 60s
+}

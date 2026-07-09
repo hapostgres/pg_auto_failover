@@ -1,0 +1,148 @@
+# Tablespace HA: verify that tablespaces stored on extra volumes outside
+# PGDATA survive failover, network partitions, and pg_rewind.
+#
+# Three tablespace directories are used across the test:
+#   /extra_volumes/extended_a  — created before node2 joins
+#   /extra_volumes/extended_b  — created while streaming replication is active
+#   /extra_volumes/extended_c  — created during a network partition (wait_primary)
+#
+# Each node gets its own named Docker volume for each tablespace path.
+# Replication copies data via WAL; volumes are not shared between nodes.
+#
+# Predecessor: tests/tablespaces/test_tablespaces_0[1-6].py
+
+cluster {
+    monitor
+    formation {
+        node node1 {
+            volume extended_a "/extra_volumes/extended_a"
+            volume extended_b "/extra_volumes/extended_b"
+            volume extended_c "/extra_volumes/extended_c"
+        }
+        node node2 {
+            volume extended_a "/extra_volumes/extended_a"
+            volume extended_b "/extra_volumes/extended_b"
+            volume extended_c "/extra_volumes/extended_c"
+        }
+    }
+}
+
+setup {
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 90s
+    exec node1  sudo chown docker /extra_volumes/extended_a /extra_volumes/extended_b /extra_volumes/extended_c
+    exec node2  sudo chown docker /extra_volumes/extended_a /extra_volumes/extended_b /extra_volumes/extended_c
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: create table t1 in default tablespace, then create tablespace
+# extended_a and table t2 in it.  node2 has not joined yet.
+#
+
+step test_001_create_tablespace_a {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+    sql node1 {
+        CREATE TABLESPACE extended_a LOCATION '/extra_volumes/extended_a';
+    }
+    sql node1 { CREATE TABLE t2(i int) TABLESPACE extended_a; }
+    sql node1 { INSERT INTO t2 VALUES (3), (4); }
+}
+
+#
+# test_002: node2 joins as secondary; verify that both tables — including
+# t2 in extended_a — are accessible on the secondary.
+#
+
+step test_002_init_secondary {
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+    sql node2 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } }
+    sql node2 { SELECT * FROM t2 ORDER BY i; }
+    expect { { 3 } { 4 } }
+}
+
+#
+# test_003: create tablespace extended_b while streaming replication is
+# active; verify the new tablespace and table t3 replicate correctly.
+#
+
+step test_003_tablespace_b_while_streaming {
+    sql node1 {
+        CREATE TABLESPACE extended_b LOCATION '/extra_volumes/extended_b';
+    }
+    sql node1 { CREATE TABLE t3(i int) TABLESPACE extended_b; }
+    sql node1 { INSERT INTO t3 VALUES (5), (6); }
+    sql node2 { SELECT * FROM t3 ORDER BY i; }
+    expect { { 5 } { 6 } }
+}
+
+#
+# test_004: failover — node2 becomes primary.  Write to tablespace tables
+# on the new primary, verify the new secondary (node1) reads them back.
+#
+
+step test_004_failover {
+    exec monitor  pg_autoctl perform failover
+    sql node2 { INSERT INTO t2 VALUES (7); }
+    sql node1 { SELECT * FROM t2 ORDER BY i; }
+    expect { { 3 } { 4 } { 7 } }
+    sql node2 { INSERT INTO t3 VALUES (8); }
+    sql node1 { SELECT * FROM t3 ORDER BY i; }
+    expect { { 5 } { 6 } { 8 } }
+}
+
+#
+# test_005: network partition — disconnect node1 (now secondary).
+# While node2 is in wait_primary, create tablespace extended_c and write
+# to all three tablespace tables.
+#
+
+step test_005_network_partition {
+    network disconnect node1
+    wait until node2 state is wait_primary  timeout 90s
+    sql node2 {
+        CREATE TABLESPACE extended_c LOCATION '/extra_volumes/extended_c';
+    }
+    sql node2 { CREATE TABLE t4(i int) TABLESPACE extended_c; }
+    sql node2 { INSERT INTO t4 VALUES (10), (11); }
+    sql node2 { INSERT INTO t2 VALUES (12); }
+    sql node2 { INSERT INTO t3 VALUES (13); }
+}
+
+#
+# test_006: reconnect node1.  pg_rewind copies WAL from node2, which
+# includes the extended_c tablespace directory.  After convergence node1
+# must see all writes that happened during the partition.
+#
+
+step test_006_node1_rejoins {
+    network connect node1
+    wait until node1 state is secondary
+        and node2 state is primary
+        timeout 90s
+    sql node1 { SELECT * FROM t4 ORDER BY i; }
+    expect { { 10 } { 11 } }
+    sql node1 { SELECT * FROM t2 ORDER BY i; }
+    expect { { 3 } { 4 } { 7 } { 12 } }
+    sql node1 { SELECT * FROM t3 ORDER BY i; }
+    expect { { 5 } { 6 } { 8 } { 13 } }
+}
+
+#
+# test_007: promote the original primary (node1) back via perform-promotion.
+#
+
+step test_007_promote_original_primary {
+    exec monitor  pg_autoctl perform promotion --name node1
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 90s
+}

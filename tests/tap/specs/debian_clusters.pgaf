@@ -1,0 +1,51 @@
+# Test pg_auto_failover with Debian-style pg_createcluster layouts where the
+# postgresql.conf lives outside PGDATA (in /etc/postgresql/<ver>/<name>/).
+# pg_autoctl must detect and support this split-config layout.
+#
+# Ported from tests/test_debian_clusters.py
+# Predecessor: tests/test_debian_clusters.py
+
+cluster {
+    monitor
+    formation {
+        node1 debian-cluster main
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: pg_autoctl adopts the Debian "main" cluster pre-created by
+# pg_createcluster at image build time.  postgresql.conf starts outside
+# PGDATA (/etc/postgresql/17/main/); pg_autoctl moves it in on first run.
+#
+
+step test_001_single_with_debian_cluster {
+    exec monitor  pg_autoctl inspect pgsetup wait
+    exec node1  pg_autoctl inspect pgsetup wait
+}
+
+#
+# test_002: verify pg_autoctl moved postgresql.conf into PGDATA.
+#
+
+step test_002_conf_in_pgdata {
+    exec node1  test -f /var/lib/postgresql/17/main/postgresql.conf
+}
+
+#
+# test_003: basic write/read to confirm Postgres is functional.
+#
+
+step test_003_write_and_read {
+    sql node1 { CREATE TABLE t1 (a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2), (3); }
+    sql node1 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } { 3 } }
+}

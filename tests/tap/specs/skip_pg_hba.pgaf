@@ -1,0 +1,58 @@
+# Test --skip-pg-hba (auth-method=skip): pg_autoctl must NOT edit pg_hba.conf
+# on either node.  HBA rules are managed manually by the operator.
+#
+# Ported from tests/test_skip_pg_hba.py
+# Predecessor: tests/test_skip_pg_hba.py
+
+cluster {
+    monitor
+    formation {
+        node1 auth skip
+        node2 auth skip
+    }
+}
+
+setup {
+    # With auth=skip, nodes don't add HBA rules automatically.
+    # Add them now so the monitor can health-check the data nodes.
+    exec node1  pg_autoctl inspect pgsetup hba-lan
+    exec node2  pg_autoctl inspect pgsetup hba-lan
+    wait until primary, secondary  timeout 120s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+step test_002_create_t1 {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step test_004a_hba_have_not_been_edited {
+    exec node1  pg_autoctl config get postgresql.hba_level
+    expect { skip }
+    exec node2  pg_autoctl config get postgresql.hba_level
+    expect { skip }
+}
+
+step test_005_failover {
+    exec monitor  pg_autoctl perform failover
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+}
+
+step test_006_restart_secondary {
+    compose stop node1
+    compose start node1
+    wait until node1 state is secondary  timeout 60s
+}
+
+step test_006a_hba_have_not_been_edited {
+    exec node1  pg_autoctl config get postgresql.hba_level
+    expect { skip }
+    exec node2  pg_autoctl config get postgresql.hba_level
+    expect { skip }
+}

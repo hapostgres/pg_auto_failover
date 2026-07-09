@@ -209,6 +209,45 @@ ENV PGDATA=/var/lib/postgres/pgaf
 CMD ["pg_autoctl", "do tmux session --nodes 3 --binpath /usr/local/bin/pg_autoctl"]
 
 #
+# debian image — like run, but with a pre-created pg_createcluster main cluster.
+# Used by the debian_clusters spec which tests pg_auto_failover alongside a
+# distro-managed Postgres cluster.
+#
+FROM run AS debian
+
+ARG PGVERSION
+
+USER root
+RUN pg_createcluster \
+      --user docker --group postgres \
+      ${PGVERSION} main \
+      -- --auth-local trust --auth-host trust \
+ && chown docker /var/lib/postgresql/${PGVERSION}
+
+USER docker
+ENV PGDATA=/var/lib/postgresql/${PGVERSION}/main
+
+#
+# testrun image — like run, but adds postgresql-server-dev and the full source
+# tree so that "make installcheck" works inside the monitor container.
+# Used by installcheck.pgaf via "monitor image-target testrun".
+#
+FROM run AS testrun
+
+ARG PGVERSION
+
+USER root
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    make \
+    postgresql-server-dev-${PGVERSION} \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --chown=docker ./src/ /usr/src/pg_auto_failover/src/
+
+USER docker
+
+#
 # pgaftest image — standalone test-runner image.
 #
 # Kept entirely separate from the pg_auto_failover run image so that no

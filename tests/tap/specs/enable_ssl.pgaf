@@ -1,0 +1,84 @@
+# Test enabling SSL on a running cluster: nodes start without SSL and SSL is
+# enabled live with --ssl-self-signed.  After enabling, replication must still
+# work and reads from the secondary must return correct data.
+#
+# CA-signed certificate tests (verify-ca / verify-full) are covered separately
+# in ssl_cert.pgaf, which starts the cluster with SSL already configured.
+#
+# Ported from tests/test_enable_ssl.py
+# Predecessor: tests/test_enable_ssl.py
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 60s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+step test_001_init_primary {
+    sql monitor { SHOW ssl; }
+    expect { off }
+    sql node1 { SHOW ssl; }
+    expect { off }
+    sql node2 { SHOW ssl; }
+    expect { off }
+}
+
+step test_002_create_t1 {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step test_004_maintenance {
+    exec node2  pg_autoctl enable maintenance
+    wait until node2 state is maintenance  timeout 60s
+}
+
+step test_005_enable_ssl_monitor {
+    exec monitor  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
+    exec monitor  pg_autoctl inspect pgsetup wait --timeout 60
+    sql monitor { SHOW ssl; }
+    expect { on }
+}
+
+step test_006_enable_ssl_primary {
+    exec node1  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
+    exec node1  pg_autoctl inspect pgsetup wait --timeout 60
+    sql node1 { SHOW ssl; }
+    expect { on }
+}
+
+step test_007_enable_ssl_secondary {
+    exec node2  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
+    compose stop node2
+    compose start node2
+    exec node2  pg_autoctl inspect pgsetup wait --timeout 90
+    sql node2 { SHOW ssl; }
+    expect { on }
+}
+
+step test_008_disable_maintenance {
+    exec node2  pg_autoctl disable maintenance
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+}
+
+step test_009_read_from_secondary {
+    exec node2  pg_autoctl inspect pgsetup wait
+    sql node2 { SHOW ssl; }
+    expect { on }
+    sql node2 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } }
+}

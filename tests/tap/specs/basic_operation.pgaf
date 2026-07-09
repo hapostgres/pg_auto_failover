@@ -1,0 +1,402 @@
+# Basic two-node HA: create primary + secondary, test maintenance,
+# failover, network partition detection, and node drop.
+#
+# Ported from tests/test_basic_operation.py — same step ordering and
+# same commands as the Python implementation (run-on-node vs run-on-monitor
+# matches the Python test).
+#
+# Node IDs are deterministic because node2's container depends_on node1
+# (see compose_gen.c), so node1 always registers first and gets nodeid=1,
+# node2 gets nodeid=2, node3 gets nodeid=3.  Replication slot names embed
+# the standby's nodeid:
+#   pgautofailover_standby_1  — node1's slot (on the primary)
+#   pgautofailover_standby_2  — node2's slot (on the primary)
+#   pgautofailover_standby_3  — node3's slot (on the primary)
+#
+# node3 is declared launch deferred so the container starts with
+# `sleep infinity`; test_017 issues `compose start node3` which
+# restarts it with the normal `pg_autoctl node run` command.
+# Predecessor: tests/test_basic_operation.py
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+        node3 launch deferred
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_003: create table on primary and verify replication to secondary.
+#
+
+step test_003_create_t1 {
+    sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
+    sql node2 { SELECT count(*) FROM t1; }
+    expect { 2 }
+}
+
+#
+# test_004: verify synchronous_standby_names and replication slots
+#           after secondary joins.  Both nodes must have a physical slot
+#           for the other's replication identity.
+#
+
+step test_004_init_secondary {
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2) }
+    sql node1 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { pgautofailover_standby_2 }
+    sql node2 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { pgautofailover_standby_1 }
+}
+
+#
+# test_005: read replicated data from the secondary.
+#
+
+step test_005_read_from_secondary {
+    sql node2 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } }
+}
+
+#
+# test_006: verify the secondary rejects writes (read-only replica).
+#           INSERT must fail with SQLSTATE 25006 (read_only_sql_transaction).
+#
+
+step test_006_001_writes_to_node2_fail {
+    sql node2 { INSERT INTO t1 VALUES (3); }
+    expect error 25006
+}
+
+step test_006_002_read_from_secondary {
+    sql node2 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } }
+}
+
+#
+# test_007: maintenance mode on node1 (primary).
+#   test_007_002: enabling maintenance without --allow-failover on the primary
+#                 must fail (no standby would remain to take over).
+#   test_007_004: with --allow-failover node2 transitions to wait_primary.
+#   test_007_005: disabling maintenance rejoins node1 as secondary.
+#
+
+step test_007_002_maintenance_primary {
+    exec-fails node1  pg_autoctl enable maintenance
+}
+
+step test_007_004_maintenance_primary_allow_failover {
+    exec node1  pg_autoctl enable maintenance --allow-failover
+    wait until node1 state is maintenance
+        and node2 state is wait_primary
+        timeout 60s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect {  }
+}
+
+step test_007_005_disable_maintenance {
+    exec node1  pg_autoctl disable maintenance
+    wait until node1 state is secondary
+        and node2 state is primary
+        timeout 90s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_1) }
+}
+
+#
+# test_008: maintenance mode on node1 (now secondary after test_007).
+#   test_008_001: enable maintenance, stop postgres on node1, write to primary.
+#   test_008_002: disable maintenance — node1 pg_rewinds and rejoins as secondary.
+#
+
+step test_008_001_enable_maintenance_secondary {
+    exec node1  pg_autoctl enable maintenance
+    wait until node1 state is maintenance  timeout 60s
+    stop postgres node1
+    sql node2 { INSERT INTO t1 VALUES (3); }
+}
+
+step test_008_002_disable_maintenance_secondary {
+    exec node1  pg_autoctl disable maintenance
+    wait until node1 state is secondary
+        and node2 state is primary
+        timeout 90s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_1) }
+}
+
+#
+# test_009: failback — promote node1 back to primary via perform-promotion.
+#           After: node1=primary, node2=secondary.
+#
+
+step test_009_failback {
+    exec monitor  pg_autoctl perform promotion --name node1
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2) }
+}
+
+#
+# test_010: disconnect node1 (primary) from the network — simulates a network
+#           partition.  node2 must detect the loss and enter wait_primary
+#           (it cannot promote yet without confirmation from the monitor).
+#
+
+step test_010_fail_primary {
+    network disconnect node1
+    wait until node2 state is wait_primary  timeout 120s
+}
+
+#
+# test_011: node2 is now wait_primary — writes must succeed even before
+#           the full promotion completes (no sync standby required in
+#           wait_primary state).
+#
+
+step test_011_writes_to_node2_succeed {
+    sql node2 { INSERT INTO t1 VALUES (4); }
+    sql node2 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } { 3 } { 4 } }
+}
+
+#
+# test_012: reconnect node1 — it pg_rewinds against node2 and rejoins as
+#           secondary.  node2 transitions from wait_primary to primary once
+#           it has a healthy sync standby again.
+#
+
+step test_012_start_node1_again {
+    network connect node1
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_1) }
+}
+
+#
+# test_013: verify all four rows are visible on node1 (now secondary),
+#           confirming pg_rewind brought it fully up to date.
+#
+
+step test_013_read_from_new_secondary {
+    sql node1 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } { 3 } { 4 } }
+}
+
+#
+# test_014: node1 is secondary again — writes must be rejected (25006).
+#
+
+step test_014_writes_to_node1_fail {
+    sql node1 { INSERT INTO t1 VALUES (5); }
+    expect error 25006
+}
+
+#
+# test_015: stop node1 (secondary) via compose stop — Postgres shuts down
+#           cleanly.  node2 enters wait_primary because its sync standby
+#           disappeared (number_sync_standbys=1).
+#
+
+step test_015_fail_secondary {
+    compose stop node1
+    wait until node1 stopped  timeout 30s
+    wait until node2 state is wait_primary  timeout 60s
+}
+
+#
+# test_016: restart node1, let it rejoin, then drop it with --no-wait.
+#           node2 becomes single.  Verify no stale replication slots remain
+#           on node2 after the drop (pg_auto_failover must clean them up).
+#
+
+step test_016_drop_secondary {
+    compose start node1
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+    exec node1  pg_autoctl drop node --no-wait
+    wait until node1 stopped  timeout 30s
+    wait until node2 state is single  timeout 90s
+    sql node2 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect {  }
+}
+
+#
+# test_017–019: add node3 as a new secondary (was launch deferred).
+#   test_017: issue `pg_autoctl node start` to bring the deferred node live.
+#   test_018: perform failover must fail immediately — node3 is still
+#             catching up and no election can complete yet.
+#   test_019: wait for node3 to reach secondary; verify SSN and slots.
+#
+
+step test_017_add_new_secondary {
+    exec node3  pg_autoctl node start
+}
+
+step test_018_cant_failover_yet {
+    exec-fails monitor  pg_autoctl perform failover
+}
+
+step test_019_run_secondary {
+    wait until node3 state is secondary
+        and node2 state is primary
+        timeout 120s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_3) }
+    sql node2 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { pgautofailover_standby_3 }
+    sql node3 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { pgautofailover_standby_2 }
+}
+
+#
+# test_020: two back-to-back manual failovers.  After each failover verify
+#           synchronous_standby_names and that every node has the correct
+#           physical replication slot for the other nodes — slots must
+#           survive a role change intact.
+#
+
+step test_020_multiple_manual_failover_verify_replication_slots {
+    exec monitor  pg_autoctl perform failover
+    wait until node3 state is primary
+        and node2 state is secondary
+        timeout 90s
+    sql node3 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2) }
+    sql node3 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { pgautofailover_standby_2 }
+    sql node2 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { pgautofailover_standby_3 }
+    exec node2  pg_autoctl perform promotion
+    wait until node2 state is primary
+        and node3 state is secondary
+        timeout 90s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_3) }
+    sql node2 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { pgautofailover_standby_3 }
+    sql node3 {
+        SELECT slot_name
+        FROM pg_replication_slots
+        WHERE slot_name ~ '^pgautofailover_standby_' AND slot_type = 'physical'
+        ORDER BY slot_name;
+    }
+    expect { pgautofailover_standby_2 }
+}
+
+#
+# test_021–023: network partition detection and demote-timeout.
+#   test_021: disconnect node2 (primary) — simulates a hard network failure.
+#   test_022: wait for demote_timeout on node2 and wait_primary on node3;
+#             verify pg_autoctl on node2 considers itself unready (no monitor
+#             contact) and that node3 has no sync standby yet.
+#   test_023: reconnect node2 — it detects it lost the election, pg_rewinds
+#             against node3, and rejoins as secondary.
+#
+
+step test_021_ifdown_primary {
+    wait until node2 state is primary  timeout 30s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_3) }
+    network disconnect node2
+}
+
+step test_022_detect_network_partition {
+    wait until node2 state is demote_timeout  timeout 90s
+    wait until node3 state is wait_primary  timeout 90s
+    sleep 3s
+    exec-fails node2  pg_autoctl inspect pgsetup ready
+    sql node3 { SHOW synchronous_standby_names; }
+    expect {  }
+}
+
+step test_023_ifup_old_primary {
+    network connect node2
+    wait until node2 state is secondary
+        and node3 state is primary
+        timeout 90s
+    sql node3 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2) }
+}
+
+#
+# test_024: stop the monitor's Postgres process directly (bypassing
+#           pg_autoctl) and verify pg_autoctl restarts it automatically.
+#           The data node must remain in its current state throughout —
+#           a brief monitor outage must not trigger a spurious failover.
+#
+
+step test_024_stop_postgres_monitor {
+    assert node3 stays primary while {
+        stop postgres monitor
+        sleep 5s
+    }
+    wait until node3 state is primary  timeout 60s
+}
+
+#
+# test_025: drop the last remaining data node — cluster goes empty.
+#
+
+step test_025_drop_primary {
+    exec node3  pg_autoctl drop node --no-wait
+    wait until node3 stopped  timeout 60s
+    wait until node2 state is single  timeout 90s
+}
