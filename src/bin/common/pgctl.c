@@ -1264,7 +1264,7 @@ pg_basebackup(const char *pgdata,
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
-	char *args[16];
+	char *args[18];  /* enough for all pg_basebackup flags incl. --checkpoint=fast */
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
@@ -1330,6 +1330,7 @@ pg_basebackup(const char *pgdata,
 	args[argsIndex++] = "--max-rate";
 	args[argsIndex++] = replicationSource->maximumBackupRate;
 	args[argsIndex++] = "--wal-method=stream";
+	args[argsIndex++] = "--checkpoint=fast";
 
 	/* we don't use a replication slot e.g. when upstream is a standby */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))
@@ -1628,13 +1629,12 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	/* prepare startup.log file in PGDATA */
 	join_path_components(logfile, pgdata, "startup.log");
 
-	IntString pgportStr = intToString(pgport);
-
 	args[argsIndex++] = (char *) postgres;
 	args[argsIndex++] = "-D";
 	args[argsIndex++] = (char *) pgdata;
 	args[argsIndex++] = "-p";
-	args[argsIndex++] = pgportStr.strValue;
+	IntString pgportStr = intToString(pgport);
+	args[argsIndex++] = (char *) pgportStr.strValue;
 
 	if (listen)
 	{
@@ -2028,32 +2028,6 @@ pg_ctl_status(const char *pg_ctl, const char *pgdata, bool log_output)
 
 
 /*
- * pg_ctl_reload reloads PostgreSQL configuration by running "pg_ctl reload".
- */
-bool
-pg_ctl_reload(const char *pg_ctl, const char *pgdata)
-{
-	Program program = run_program(pg_ctl, "-D", pgdata, "reload", NULL);
-	int returnCode = program.returnCode;
-
-	if (program.stdErr != NULL)
-	{
-		log_debug("%s", program.stdErr);
-	}
-
-	free_program(&program);
-
-	if (returnCode != 0)
-	{
-		log_error("pg_ctl reload -D %s failed (exit %d)", pgdata, returnCode);
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
  * pg_ctl_promote promotes a standby by running "pg_ctl promote"
  */
 bool
@@ -2078,6 +2052,33 @@ pg_ctl_promote(const char *pg_ctl, const char *pgdata)
 	}
 
 	free_program(&program);
+	return true;
+}
+
+
+/*
+ * pg_ctl_reload reloads Postgres configuration by running "pg_ctl reload".
+ * Does not require a libpq connection — useful when HBA hasn't been set up yet.
+ */
+bool
+pg_ctl_reload(const char *pg_ctl, const char *pgdata)
+{
+	Program program = run_program(pg_ctl, "-D", pgdata, "reload", NULL);
+	int returnCode = program.returnCode;
+
+	if (program.stdErr != NULL)
+	{
+		log_debug("%s", program.stdErr);
+	}
+
+	free_program(&program);
+
+	if (returnCode != 0)
+	{
+		log_error("pg_ctl reload -D %s failed (exit %d)", pgdata, returnCode);
+		return false;
+	}
+
 	return true;
 }
 
