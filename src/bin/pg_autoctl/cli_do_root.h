@@ -147,6 +147,4 @@ void cli_do_tmux_compose_config(int argc, char **argv);
 void cli_do_tmux_compose_script(int argc, char **argv);
 void cli_do_tmux_compose_session(int argc, char **argv);
 
-/* Azure integration removed — use pgaftest instead */
-
 #endif  /* CLI_DO_ROOT_H */
