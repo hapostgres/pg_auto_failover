@@ -271,16 +271,21 @@ class QueryRunner:
         conn = psycopg2.connect(self.connection_string())
         conn.autocommit = autocommit
 
-        with conn:
+        try:
             with conn.cursor() as cur:
                 cur.execute(query, args)
                 try:
                     result = cur.fetchall()
                 except psycopg2.ProgrammingError:
                     pass
-        # leaving contexts closes the cursor, however
-        # leaving contexts doesn't close the connection
-        conn.close()
+            if not autocommit:
+                conn.commit()
+        except Exception:
+            if not autocommit:
+                conn.rollback()
+            raise
+        finally:
+            conn.close()
 
         return result
 
