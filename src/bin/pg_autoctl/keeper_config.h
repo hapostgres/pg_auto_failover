@@ -56,6 +56,11 @@ typedef struct KeeperConfig
 	char maximum_backup_rate[MAXIMUM_BACKUP_RATE_LEN];
 	char backupDirectory[MAXPGPATH];
 
+	/* Hooks settings (JSON strings) */
+	int enableHooks;            /* hooks.active */
+	char onPrimaryCmd[BUFSIZE];
+	char serviceStartCmd[BUFSIZE];
+
 	/* Citus specific options and settings */
 	char citusRoleStr[NAMEDATALEN];
 	CitusRole citusRole;

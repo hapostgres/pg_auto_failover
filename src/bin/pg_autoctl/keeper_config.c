@@ -143,6 +143,18 @@
 	make_strbuf_option("replication", "backup_directory", NULL, \
 					   false, MAXPGPATH, config->backupDirectory)
 
+#define OPTION_HOOKS_ACTIVE(config) \
+	make_int_option_default("hooks", "active", NULL, \
+							false, &(config->enableHooks), 0)
+
+#define OPTION_HOOKS_ON_PRIMARY_CMD(config) \
+	make_strbuf_option("hooks", "on_primary", NULL, \
+					   false, BUFSIZE, config->onPrimaryCmd)
+
+#define OPTION_HOOKS_SERVICE_START_CMD(config) \
+	make_strbuf_option("hooks", "service", NULL, \
+					   false, BUFSIZE, config->serviceStartCmd)
+
 #define OPTION_TIMEOUT_NETWORK_PARTITION(config) \
 	make_int_option_default("timeout", "network_partition_timeout", \
 							NULL, false, \
@@ -241,6 +253,9 @@
 		OPTION_REPLICATION_MAXIMUM_BACKUP_RATE(config), \
 		OPTION_REPLICATION_BACKUP_DIR(config), \
 		OPTION_REPLICATION_PASSWORD(config), \
+		OPTION_HOOKS_ACTIVE(config), \
+		OPTION_HOOKS_ON_PRIMARY_CMD(config), \
+		OPTION_HOOKS_SERVICE_START_CMD(config), \
 		OPTION_TIMEOUT_NETWORK_PARTITION(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_CATCHUP(config), \
 		OPTION_TIMEOUT_PREPARE_PROMOTION_WALRECEIVER(config), \

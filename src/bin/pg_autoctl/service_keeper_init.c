@@ -28,6 +28,7 @@
 #include "service_keeper.h"
 #include "service_keeper_init.h"
 #include "service_postgres_ctl.h"
+#include "service_run_hooks.h"
 #include "signals.h"
 #include "string_utils.h"
 #include "supervisor.h"
@@ -56,6 +57,13 @@ service_keeper_init(Keeper *keeper)
 			createAndRun ? RP_PERMANENT : RP_TRANSIENT,
 			-1,
 			&service_keeper_init_start,
+			(void *) keeper
+		},
+		{
+			SERVICE_NAME_RUN_HOOKS,
+			RP_PERMANENT,
+			-1,
+			&service_run_hooks_start,
 			(void *) keeper
 		}
 	};
