@@ -25,12 +25,19 @@ typedef struct MonitorConfig
 
 	/* pg_autoctl setup */
 	char hostname[_POSIX_HOST_NAME_MAX];
+	char autoctl_node_password[MAXCONNINFO];
 
 	/* PostgreSQL setup */
 	char role[NAMEDATALEN];
 
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;
+
+	/* non-default formations to create during monitor init */
+#define MONITOR_MAX_FORMATIONS 16
+	int formationCount;
+	char formationNames[MONITOR_MAX_FORMATIONS][NAMEDATALEN];
+	char formationKinds[MONITOR_MAX_FORMATIONS][NAMEDATALEN]; /* "pgsql" = default */
 } MonitorConfig;
 
 

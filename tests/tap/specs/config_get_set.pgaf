@@ -31,18 +31,18 @@ step test_001_init_primary {
 step test_002_config_set_monitor {
     exec monitor  pg_autoctl config set ssl.sslmode prefer
     exec monitor  pg_autoctl config get postgresql.pg_ctl
-    expect { /usr/lib/postgresql/17/bin/pg_ctl }
+    expect { /bin/pg_ctl }
     exec-fails monitor  pg_autoctl config set postgresql.pg_ctl invalid
     exec monitor  pg_autoctl config get postgresql.pg_ctl
-    expect { /usr/lib/postgresql/17/bin/pg_ctl }
+    expect { /bin/pg_ctl }
     exec monitor  pg_autoctl config get ssl.sslmode
     expect { prefer }
 }
 
 step test_002b_config_set_node {
     exec node1  pg_autoctl config get postgresql.pg_ctl
-    expect { /usr/lib/postgresql/17/bin/pg_ctl }
+    expect { /bin/pg_ctl }
     exec-fails node1  pg_autoctl config set postgresql.pg_ctl invalid
     exec node1  pg_autoctl config get postgresql.pg_ctl
-    expect { /usr/lib/postgresql/17/bin/pg_ctl }
+    expect { /bin/pg_ctl }
 }

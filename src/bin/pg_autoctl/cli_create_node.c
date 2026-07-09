@@ -793,6 +793,8 @@ cli_create_monitor_getopts(int argc, char **argv)
 		{ "listen", required_argument, NULL, 'l' },
 		{ "auth", required_argument, NULL, 'A' },
 		{ "skip-pg-hba", no_argument, NULL, 'S' },
+		{ "autoctl-node-password", required_argument, NULL, 'W' },
+		{ "formation", required_argument, NULL, 'f' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -821,7 +823,7 @@ cli_create_monitor_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SVvqhxNs",
+	while ((c = getopt_long(argc, argv, "C:D:p:n:l:A:SW:f:VvqhxsN",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -895,6 +897,30 @@ cli_create_monitor_getopts(int argc, char **argv)
 				options.pgSetup.hbaLevel = HBA_EDIT_SKIP;
 
 				log_trace("--skip-pg-hba");
+				break;
+			}
+
+			case 'W':
+			{
+				strlcpy(options.autoctl_node_password, optarg,
+						sizeof(options.autoctl_node_password));
+				log_trace("--autoctl-node-password ****");
+				break;
+			}
+
+			case 'f':
+			{
+				/* --formation <name>  (may be repeated) */
+				if (options.formationCount >= MONITOR_MAX_FORMATIONS)
+				{
+					log_error("Too many --formation options (max %d)",
+							  MONITOR_MAX_FORMATIONS);
+					errors++;
+					break;
+				}
+				int fi = options.formationCount++;
+				strlcpy(options.formationNames[fi], optarg, NAMEDATALEN);
+				log_trace("--formation %s", optarg);
 				break;
 			}
 

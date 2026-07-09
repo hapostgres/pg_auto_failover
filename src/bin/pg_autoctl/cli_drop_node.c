@@ -606,6 +606,19 @@ cli_drop_local_node(KeeperConfig *config, bool dropAndDestroy)
 	}
 
 	/*
+	 * With --no-wait the caller takes responsibility for waiting until the
+	 * supervisor has stopped (e.g. via `docker compose wait` in a container
+	 * environment).  The running keeper will detect it has been dropped on its
+	 * next node_active() heartbeat and exit cleanly on its own.
+	 */
+	if (config->listen_notifications_timeout == 0)
+	{
+		log_info("Node unregistered from monitor; not waiting for the local "
+				 "pg_autoctl process to stop (--no-wait).");
+		exit(EXIT_CODE_QUIT);
+	}
+
+	/*
 	 * Now, when the pg_autoctl keeper service is still running, wait until
 	 * it has reached the DROPPED/DROPPED state on-disk and then exited.
 	 */

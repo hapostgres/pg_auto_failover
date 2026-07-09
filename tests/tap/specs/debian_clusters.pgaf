@@ -23,7 +23,7 @@ teardown {
 #
 # test_001: pg_autoctl adopts the Debian "main" cluster pre-created by
 # pg_createcluster at image build time.  postgresql.conf starts outside
-# PGDATA (/etc/postgresql/17/main/); pg_autoctl moves it in on first run.
+# PGDATA (/etc/postgresql/<ver>/main/); pg_autoctl moves it in on first run.
 #
 
 step test_001_single_with_debian_cluster {
@@ -36,7 +36,7 @@ step test_001_single_with_debian_cluster {
 #
 
 step test_002_conf_in_pgdata {
-    exec node1  test -f /var/lib/postgresql/17/main/postgresql.conf
+    exec node1  /bin/sh -c 'test -f ${PGDATA}/postgresql.conf'
 }
 
 #

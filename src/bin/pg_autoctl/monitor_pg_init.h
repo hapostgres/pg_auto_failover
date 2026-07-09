@@ -18,7 +18,8 @@
 bool monitor_pg_init(Monitor *monitor);
 bool monitor_install(const char *hostname,
 					 PostgresSetup pgSetupOption,
-					 bool checkSettings);
+					 bool checkSettings,
+					 const char *autoctl_node_password);
 bool monitor_add_postgres_default_settings(Monitor *monitor);
 
 #endif /* MONITOR_PG_INIT_H */
