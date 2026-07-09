@@ -39,7 +39,7 @@ include Makefile.azure
 #
 # LIST TESTS
 #
-PYTEST = $(shell which pytest || which pytest3)
+PYTEST = python3 -m pytest
 
 # Tests for the monitor
 TESTS_MONITOR  = test_extension_update

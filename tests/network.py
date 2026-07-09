@@ -153,6 +153,8 @@ class VirtualNode:
             user,
             "env",
             "PATH=" + os.getenv("PATH"),
+            "LC_ALL=C",
+            "LANG=C",
         ] + command
         return managed_nspopen(
             self.namespace,
@@ -179,6 +181,8 @@ class VirtualNode:
             user,
             "env",
             "PATH=" + os.getenv("PATH"),
+            "LC_ALL=C",
+            "LANG=C",
         ] + command
         return NSPopen(
             self.namespace,
