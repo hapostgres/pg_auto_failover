@@ -84,7 +84,8 @@ CommandLine drop_node_command =
 		"  --pgport      drop the node with given hostname and pgport\n"
 		"  --destroy     also destroy Postgres database\n"
 		"  --force       force dropping the node from the monitor\n"
-		"  --wait        how many seconds to wait, default to 60 \n",
+		"  --wait        how many seconds to wait, default to 60\n"
+		"  --no-wait     drop the node without waiting for confirmation\n",
 		cli_drop_node_getopts,
 		cli_drop_node);
 
@@ -104,6 +105,7 @@ cli_drop_node_getopts(int argc, char **argv)
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "destroy", no_argument, NULL, 'd' },
 		{ "force", no_argument, NULL, 'F' },
+		{ "no-wait", no_argument, NULL, 'W' },
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "pgport", required_argument, NULL, 'p' },
 		{ "formation", required_argument, NULL, 'f' },
@@ -157,6 +159,14 @@ cli_drop_node_getopts(int argc, char **argv)
 			{
 				dropForce = true;
 				log_trace("--force");
+				break;
+			}
+
+			case 'W':
+			{
+				/* --no-wait: set timeout to zero so the notification loop is skipped */
+				options.listen_notifications_timeout = 0;
+				log_trace("--no-wait");
 				break;
 			}
 

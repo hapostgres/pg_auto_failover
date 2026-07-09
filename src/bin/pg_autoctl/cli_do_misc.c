@@ -322,15 +322,105 @@ keeper_cli_pgsetup_is_ready(int argc, char **argv)
 }
 
 
+/* timeout parsed by keeper_cli_pgsetup_wait_getopts, consumed by wait_until_ready */
+static int pgsetup_wait_timeout = 30;
+
 /*
- * keeper_cli_discover_pg_setup implements the CLI to discover a PostgreSQL
- * setup thanks to PGDATA and other environment variables.
+ * keeper_cli_pgsetup_wait_getopts parses --pgdata and --timeout for the
+ * "pgsetup wait" subcommand.
+ */
+int
+keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
+{
+	int c, option_index = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "timeout", required_argument, NULL, 't' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:t:Vvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(keeperOptions.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", optarg);
+				break;
+			}
+
+			case 't':
+			{
+				if (!stringToInt(optarg, &pgsetup_wait_timeout) ||
+					pgsetup_wait_timeout <= 0)
+				{
+					log_fatal(
+						"--timeout argument is not a valid positive integer: \"%s\"",
+						optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--timeout %d", pgsetup_wait_timeout);
+				break;
+			}
+
+			case 'V':
+			{
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				log_set_level(LOG_DEBUG);
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_BAD_ARGS);
+				break;
+			}
+		}
+	}
+
+	/* publish parsed options */
+	keeperOptions.pgSetup.pgdata[0] =
+		keeperOptions.pgSetup.pgdata[0]; /* no-op, already set above */
+
+	return optind;
+}
+
+
+/*
+ * keeper_cli_pgsetup_wait_until_ready waits until the local Postgres server
+ * is ready to accept connections, up to --timeout seconds (default 30).
  */
 void
 keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 {
-	int timeout = 30;
-
 	ConfigFilePaths pathnames = { 0 };
 	LocalPostgresServer postgres = { 0 };
 	PostgresSetup *pgSetup = &(postgres.postgresSetup);
@@ -343,7 +433,8 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 
 	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
 
-	bool pgIsReady = pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_INFO);
+	bool pgIsReady =
+		pg_setup_wait_until_is_ready(pgSetup, pgsetup_wait_timeout, LOG_INFO);
 
 	log_info("Postgres status is: \"%s\"", pmStatusToString(pgSetup->pm_status));
 
