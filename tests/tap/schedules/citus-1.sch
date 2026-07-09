@@ -1,4 +1,4 @@
-# Citus basic tests: cluster name, forced failover, skip-pg-hba (~15 min)
+# Citus basic tests: cluster name, forced failover, multi-standby (~4 min)
 citus_cluster_name
 citus_force_failover
-citus_skip_pg_hba
+citus_multi_standbys

@@ -15,12 +15,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  style_checker:
+    name: Style check
+    runs-on: ubuntu-latest
+    container: citus/stylechecker:no-py
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.0
+
+      - name: Set safe directory for git
+        run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+
+      - name: Check C formatting
+        run: citus_indent --check
+
+      - name: Check banned functions
+        run: ci/banned.h.sh
+
   # ---------------------------------------------------------------------------
   # Build one pgaf:run image per Postgres version and upload each as an
   # artifact.  All downstream test jobs download only the version they need.
   # ---------------------------------------------------------------------------
   build-images:
     name: Build image (PG${{ matrix.PGVERSION }})
+    needs: style_checker
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -96,6 +114,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build-pgaftest:
     name: Build pgaftest image
+    needs: style_checker
     runs-on: ubuntu-latest
     env:
       PGVERSION: 17
@@ -141,7 +160,7 @@ jobs:
         # Fast/medium schedules run against all four Postgres versions.
         # Slow schedules (multi-*, citus-*) run PG17 only: they exercise
         # pg_auto_failover FSM logic, not Postgres version-specific code paths,
-        # and restricting them reduces total job count from 36 to 16 — avoiding
+        # and restricting them reduces total job count from 36 to 17 — avoiding
         # GitHub Actions shared-runner queue saturation that was adding 10-15 min
         # of queue wait to every run.
         include:
@@ -163,10 +182,11 @@ jobs:
           - { PGVERSION: 16, schedule: ssl }
           - { PGVERSION: 17, schedule: ssl }
           # slow schedules: PG17 only
-          - { PGVERSION: 17, schedule: multi-1 }   # multi_standbys, multi_maintenance, multi_async
-          - { PGVERSION: 17, schedule: multi-2 }   # ensure, multi_alternate, multi_ifdown
-          - { PGVERSION: 17, schedule: citus-1 }   # citus_cluster_name, citus_force_failover, citus_skip_pg_hba
-          - { PGVERSION: 17, schedule: citus-2 }   # basic_citus_operation, nonha_citus_operation, citus_multi_standbys
+          - { PGVERSION: 17, schedule: multi-alternate }  # multi_alternate
+          - { PGVERSION: 17, schedule: multi-misc }       # multi_standbys, multi_maintenance, ensure, multi_ifdown
+          - { PGVERSION: 17, schedule: multi-async }      # multi_async
+          - { PGVERSION: 17, schedule: citus-1 }          # citus_cluster_name, citus_force_failover, citus_multi_standbys
+          - { PGVERSION: 17, schedule: citus-2 }          # basic_citus_operation, nonha_citus_operation, citus_skip_pg_hba
 
     steps:
       - uses: actions/checkout@v7.0.0

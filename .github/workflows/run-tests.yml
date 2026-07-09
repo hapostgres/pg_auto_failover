@@ -30,6 +30,7 @@ jobs:
 
   build_images:
     name: Build test image (PG${{ matrix.PGVERSION }})
+    needs: style_checker
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
