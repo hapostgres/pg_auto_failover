@@ -33,9 +33,6 @@ else
 GIT_VERSION := $(shell awk -F '[ "]' '{print $$4}' $(VERSION_FILE))
 endif
 
-# Azure only targets and variables are in a separate Makefile
-include Makefile.azure
-
 #
 # LIST TESTS
 #

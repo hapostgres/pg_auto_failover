@@ -1,6 +1,6 @@
 /*
  * src/bin/pgaftest/cli_demo.c
- *   Demo application sub-command for pgaftest (moved from pg_autoctl do demo).
+ *   Demo application sub-command for pgaftest.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -20,7 +20,6 @@ static void
 cli_demo_run(int argc, char **argv)
 {
 	log_error("pgaftest demo run: not yet implemented in this build.");
-	log_info("Use: docker compose exec <node> pg_autoctl do demo run ...");
 }
 
 

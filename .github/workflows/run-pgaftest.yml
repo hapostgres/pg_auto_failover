@@ -147,7 +147,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # Run test schedules.  Fast schedules (quick, node, ssl) run against all four
   # Postgres versions.  Slow schedules (multi-*, citus-*) run PG17 only.
-  # Total: 3×4 + 4×1 = 16 test jobs — keeps GitHub shared-runner queue short.
+  # Total: 3×4 + 5×1 = 17 test jobs — keeps GitHub shared-runner queue short.
   # ---------------------------------------------------------------------------
   test:
     name: pgaftest / ${{ matrix.schedule }} (PG${{ matrix.PGVERSION }})
