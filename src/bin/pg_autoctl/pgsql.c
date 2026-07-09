@@ -1580,13 +1580,13 @@ BuildNodesArrayValues(NodeAddressArray *nodeArray,
 	for (nodeIndex = 0; nodeIndex < nodeArray->count; nodeIndex++)
 	{
 		NodeAddress *node = &(nodeArray->nodes[nodeIndex]);
-		char *nodeIdString = intToString(node->nodeId).strValue;
+		IntString nodeIdStr = intToString(node->nodeId);
 
 		int idParamIndex = paramIndex;
 		int lsnParamIndex = paramIndex + 1;
 
 		sqlParams->types[idParamIndex] = INT8OID;
-		strlcpy(sqlParams->nodeIds[nodeIndex], nodeIdString, NODEID_MAX_LENGTH);
+		strlcpy(sqlParams->nodeIds[nodeIndex], nodeIdStr.strValue, NODEID_MAX_LENGTH);
 
 		/* store the (char *) pointer to the data in values */
 		sqlParams->values[idParamIndex] = sqlParams->nodeIds[nodeIndex];
