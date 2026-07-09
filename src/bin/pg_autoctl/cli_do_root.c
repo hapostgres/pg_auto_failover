@@ -185,19 +185,12 @@ CommandLine do_pgsetup_is_ready =
 CommandLine do_pgsetup_wait_until_ready =
 	make_command("wait",
 				 "Wait until the local Postgres server is ready",
-				 "[option ...]",
-				 "  --pgdata          path to data directory\n"
-				 "  --timeout         seconds to wait, default 30\n",
+				 "[--read-write] [--timeout N] [option ...]",
+				 "  --read-write    also wait until the server accepts read-write connections\n"
+				 "  --timeout N     total timeout in seconds (default: 30)\n"
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
 				 keeper_cli_pgsetup_wait_getopts,
 				 keeper_cli_pgsetup_wait_until_ready);
-
-CommandLine do_pgsetup_hba_lan =
-	make_command("hba-lan",
-				 "Add LAN CIDR trust rules to pg_hba.conf and reload",
-				 "[option ...]",
-				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
-				 keeper_cli_keeper_setup_getopts,
-				 keeper_cli_pgsetup_hba_lan);
 
 CommandLine do_pgsetup_startup_logs =
 	make_command("logs",
@@ -214,6 +207,14 @@ CommandLine do_pgsetup_tune =
 				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
 				 keeper_cli_keeper_setup_getopts,
 				 keeper_cli_pgsetup_tune);
+
+CommandLine do_pgsetup_hba_lan =
+	make_command("hba-lan",
+				 "Append LAN CIDR trust rules to pg_hba.conf and reload Postgres",
+				 "[option ...]",
+				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
+				 keeper_cli_keeper_setup_getopts,
+				 keeper_cli_pgsetup_hba_lan);
 
 CommandLine *do_pgsetup[] = {
 	&do_pgsetup_pg_ctl,
@@ -384,54 +385,63 @@ CommandLine do_tmux_commands =
 					 "Set of facilities to handle tmux interactive sessions",
 					 NULL, NULL, NULL, do_tmux);
 
+
 /*
- * internal service: hidden entry points spawned by the supervisor via
- * fork+exec.  The supervisor builds argv as:
- *   pg_autoctl internal service postgres|listener|node-active --pgdata ...
- * Use make_hidden_command_set so these never appear in --help output.
+ * pg_autoctl internal service postgres|listener|node-active
+ *
+ * These are the subprocess entry points used by the supervisor (pg_autoctl run
+ * and pg_autoctl create … --run).  The supervisor fork()s and then execv()s
+ * the pg_autoctl binary itself with one of these sub-commands so that each
+ * service runs in its own address space.
+ *
+ * Using fork+exec (rather than fork alone) is a deliberate design choice for
+ * live upgrades: when a child process exits with an incompatible monitor
+ * extension version, the supervisor restarts it via fork()+execv(), which loads
+ * the current binary from disk.  If the binary has been updated in place (e.g.
+ * by a package manager), the restarted child automatically picks up the new
+ * version without touching the supervisor process — making pg_autoctl safe to
+ * use as PID 1 in Docker/Kubernetes containers where replacing the binary and
+ * sending SIGTERM would lose the container.
+ *
+ * See also: keeper.c keeper_check_monitor_extension_version(), which exits on
+ * version mismatch precisely to trigger this restart-with-new-binary path.
+ *
+ * These commands are hidden from --help output (make_hidden_command_set) so
+ * operators do not accidentally invoke them directly.
+ * Use "pg_autoctl manual service" for the user-facing controls (restart, pgctl).
+ * Use "pg_autoctl inspect getpid" to read sub-process PIDs.
  */
 static CommandLine *internal_service_subcommands[] = {
-	&service_pgcontroller,
-	&service_postgres,
-	&service_monitor_listener,
-	&service_node_active,
+	&service_pgcontroller,      /* debug: supervisor for just the postgres controller */
+	&service_postgres,          /* spawned by service_postgres_ctl_start() */
+	&service_monitor_listener,  /* spawned by service_monitor_start() */
+	&service_node_active,       /* spawned by service_keeper_start() */
 	NULL
 };
 
-CommandLine internal_service_commands =
+static CommandLine internal_service_commands =
 	make_hidden_command_set("service",
-							"Internal subprocess entry points (supervisor use only)",
+							"Subprocess entry points for the pg_autoctl supervisor",
 							NULL, NULL, NULL, internal_service_subcommands);
 
-static CommandLine *internal_subcommands[] = {
-	&internal_service_commands,
-	NULL
-};
-
-CommandLine internal_commands =
-	make_hidden_command_set("internal",
-							"Internal commands for use by the supervisor (not for operators)",
-							NULL, NULL, NULL, internal_subcommands);
-
+/*
+ * pg_autoctl internal
+ *
+ * Hidden from --help; routable so the supervisor's execv() calls work.
+ * Contains only what the supervisor spawns plus dev/QA tooling not yet
+ * moved to pgaftest (tmux, demo).
+ */
 CommandLine *do_subcommands[] = {
-	&do_monitor_commands,
-	&do_coordinator_commands,
-	&do_fsm_commands,
-	&do_primary_,
-	&do_standby_,
-	&do_show_commands,
-	&do_pgsetup_commands,
-	&do_service_postgres_ctl_commands,
-	&do_service_commands,
+	&internal_service_commands,
 	&do_tmux_commands,
 	&do_demo_commands,
 	NULL
 };
 
-CommandLine do_commands =
-	make_command_set("do",
-					 "Internal commands and internal QA tooling", NULL, NULL,
-					 NULL, do_subcommands);
+CommandLine internal_commands =
+	make_hidden_command_set("internal",
+							"Internal subprocess entry points — not for direct use",
+							NULL, NULL, NULL, do_subcommands);
 
 
 /*

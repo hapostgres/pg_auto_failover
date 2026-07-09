@@ -36,6 +36,11 @@
 	make_strbuf_option("pg_autoctl", "hostname", "hostname", \
 					   false, _POSIX_HOST_NAME_MAX, config->hostname)
 
+#define OPTION_AUTOCTL_NODE_PASSWORD(config) \
+	make_strbuf_option_default("pg_autoctl", "autoctl_node_password", NULL, \
+							   false, MAXCONNINFO, \
+							   config->autoctl_node_password, "")
+
 #define OPTION_AUTOCTL_NODENAME(config) \
 	make_strbuf_compat_option("pg_autoctl", "nodename", \
 							  _POSIX_HOST_NAME_MAX, config->hostname)
@@ -104,6 +109,7 @@
 		OPTION_AUTOCTL_ROLE(config), \
 		OPTION_AUTOCTL_HOSTNAME(config), \
 		OPTION_AUTOCTL_NODENAME(config), \
+		OPTION_AUTOCTL_NODE_PASSWORD(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
 		OPTION_POSTGRESQL_USERNAME(config), \

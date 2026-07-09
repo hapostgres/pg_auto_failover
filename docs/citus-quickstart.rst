@@ -474,6 +474,83 @@ node too:
    -------
        75
 
+.. _citus_tutorial_pgaftest:
+
+Alternative: Citus cluster with pgaftest
+-----------------------------------------
+
+The named Citus cluster from the previous section can also be started with a
+single ``pgaftest`` command.  ``pgaftest`` reads the ``.pgaf`` spec below,
+generates the compose file, and opens a tmux session once all nodes are
+healthy — no manual ``docker compose up`` or ``pg_autoctl watch`` needed.
+
+.. code-block:: text
+   :caption: docs/tutorial/citus_tutorial.pgaf
+
+   # Citus cluster: one coordinator pair + three worker pairs
+   #
+   # Usage:
+   #   pgaftest setup docs/tutorial/citus_tutorial.pgaf --tmux
+
+   cluster {
+       monitor
+
+       formation coord {
+           coord0a  coordinator
+           coord0b  coordinator
+       }
+
+       formation workers num-sync 1 {
+           worker1a  worker  group 1
+           worker1b  worker  group 1
+           worker2a  worker  group 2
+           worker2b  worker  group 2
+           worker3a  worker  group 3
+           worker3b  worker  group 3
+       }
+   }
+
+   setup {
+       wait until primary, secondary  timeout 180s
+   }
+
+   teardown {
+       compose down
+   }
+
+Start it:
+
+::
+
+   $ pgaftest setup docs/tutorial/citus_tutorial.pgaf --tmux
+
+Three panes open immediately:
+
+- **top** — ``docker compose logs -f`` (streaming container output)
+- **middle** — ``pg_autoctl watch`` showing all eight nodes converging
+- **bottom** — interactive ``bash`` in the coordinator primary
+
+From the bottom pane, verify the cluster::
+
+   pg_autoctl show state \
+       --monitor postgresql://autoctl_node@monitor/pg_auto_failover
+
+To trigger a coordinator failover::
+
+   pg_autoctl perform failover --formation coord \
+       --monitor postgresql://autoctl_node@monitor/pg_auto_failover
+
+To trigger a worker failover in group 1::
+
+   pg_autoctl perform failover --group 1 \
+       --monitor postgresql://autoctl_node@monitor/pg_auto_failover
+
+When done::
+
+   $ pgaftest down --work-dir /tmp/pgaftest/citus_tutorial
+
+For the full ``pgaftest`` reference see :ref:`pgaftest`.
+
 Cleanup
 -------
 

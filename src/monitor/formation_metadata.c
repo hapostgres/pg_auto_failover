@@ -474,8 +474,10 @@ FormationKindToString(FormationKind kind)
 		}
 
 		default:
+		{
 			ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 							errmsg("unknown formation kind value %d", kind)));
+		}
 	}
 
 	/* keep compiler happy */

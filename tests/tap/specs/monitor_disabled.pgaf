@@ -47,8 +47,10 @@ step test_004_init_secondary {
 }
 
 step test_005_fsm_nodes_set {
-    exec node1  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes12.json && pg_autoctl manual fsm nodes set /tmp/nodes12.json'
-    exec node2  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes12.json && pg_autoctl manual fsm nodes set /tmp/nodes12.json'
+    # /etc/pgaf/specs is bind-mounted from the directory containing this spec;
+    # the JSON files are shipped in git alongside monitor_disabled.pgaf.
+    exec node1  pg_autoctl manual fsm nodes set /etc/pgaf/specs/monitor_disabled_nodes12.json
+    exec node2  pg_autoctl manual fsm nodes set /etc/pgaf/specs/monitor_disabled_nodes12.json
 }
 
 step test_006_init_to_wait_standby {
@@ -72,9 +74,9 @@ step test_009_init_secondary {
 }
 
 step test_010_fsm_nodes_set {
-    exec node1  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false},{"node_id":3,"node_name":"node3","node_host":"node3","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes123.json && pg_autoctl manual fsm nodes set /tmp/nodes123.json'
-    exec node2  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false},{"node_id":3,"node_name":"node3","node_host":"node3","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes123.json && pg_autoctl manual fsm nodes set /tmp/nodes123.json'
-    exec node3  sh -c 'printf '"'"'[{"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},{"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false},{"node_id":3,"node_name":"node3","node_host":"node3","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}]'"'"' > /tmp/nodes123.json && pg_autoctl manual fsm nodes set /tmp/nodes123.json'
+    exec node1  pg_autoctl manual fsm nodes set /etc/pgaf/specs/monitor_disabled_nodes123.json
+    exec node2  pg_autoctl manual fsm nodes set /etc/pgaf/specs/monitor_disabled_nodes123.json
+    exec node3  pg_autoctl manual fsm nodes set /etc/pgaf/specs/monitor_disabled_nodes123.json
 }
 
 step test_011_init_to_wait_standby {

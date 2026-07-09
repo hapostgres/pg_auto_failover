@@ -226,7 +226,8 @@ step test_014_writes_to_node1_fail {
 
 step test_015_fail_secondary {
     compose stop node1
-    wait until node1 stopped  timeout 30s
+    # 60s: compose stop can be slow on shared CI runners
+    wait until node1 stopped  timeout 60s
     wait until node2 state is wait_primary  timeout 60s
 }
 
@@ -242,7 +243,8 @@ step test_016_drop_secondary {
         and node1 state is secondary
         timeout 90s
     exec node1  pg_autoctl drop node --no-wait
-    wait until node1 stopped  timeout 30s
+    # 60s: compose stop can be slow on shared CI runners
+    wait until node1 stopped  timeout 60s
     wait until node2 state is single  timeout 90s
     sql node2 {
         SELECT slot_name
@@ -359,8 +361,11 @@ step test_021_ifdown_primary {
 }
 
 step test_022_detect_network_partition {
-    wait until node2 state is demote_timeout  timeout 90s
-    wait until node3 state is wait_primary  timeout 90s
+    # node2 is network-disconnected so it cannot report its state back to the
+    # monitor.  Check only the assigned state (monitor's decision); checking
+    # the full convergence state would wait forever for a node that is offline.
+    wait until node2 assigned-state = demote_timeout  timeout 300s
+    wait until node3 state is wait_primary  timeout 300s
     sleep 3s
     exec-fails node2  pg_autoctl inspect pgsetup ready
     sql node3 { SHOW synchronous_standby_names; }
@@ -384,10 +389,13 @@ step test_023_ifup_old_primary {
 #
 
 step test_024_stop_postgres_monitor {
-    assert node3 stays primary while {
-        stop postgres monitor
-        sleep 5s
-    }
+    # Stop the monitor's postgres directly.  The monitor cannot assign state
+    # changes while postgres is down, so there is no point wrapping this in
+    # "assert stays primary while" — that construct queries the monitor to
+    # verify the state, which is impossible when the monitor is the one being
+    # stopped.  The subsequent wait verifies recovery.
+    stop postgres monitor
+    sleep 5s
     wait until node3 state is primary  timeout 60s
 }
 

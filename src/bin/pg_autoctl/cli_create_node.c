@@ -334,6 +334,8 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "disable-monitor", no_argument, NULL, 'M' },
 		{ "node-id", required_argument, NULL, 'I' },
+		{ "monitor-password", required_argument, NULL, 'W' },
+		{ "replication-password", required_argument, NULL, 'w' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -354,7 +356,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:RVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:W:w:RVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */

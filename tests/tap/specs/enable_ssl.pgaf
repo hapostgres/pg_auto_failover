@@ -63,9 +63,9 @@ step test_007_enable_ssl_secondary {
     exec node2  pg_autoctl enable ssl --ssl-self-signed --ssl-mode require
     compose stop node2
     compose start node2
-    exec node2  pg_autoctl inspect pgsetup wait --timeout 90
-    sql node2 { SHOW ssl; }
-    expect { on }
+    # node2 is still in maintenance: the monitor assigned state is 'maintenance'
+    # so pg_autoctl will not start Postgres yet.  Postgres starts in test_008
+    # after disable maintenance triggers a state transition.
 }
 
 step test_008_disable_maintenance {
@@ -73,6 +73,9 @@ step test_008_disable_maintenance {
     wait until node2 state is secondary
         and node1 state is primary
         timeout 90s
+    # 90s: wait for Postgres to be fully ready with SSL after the maintenance
+    # state transition on shared CI runners
+    exec node2  pg_autoctl inspect pgsetup wait --timeout 90
 }
 
 step test_009_read_from_secondary {

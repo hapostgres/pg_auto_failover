@@ -162,7 +162,8 @@ class VirtualNode:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
+            encoding="utf-8",
+            errors="replace",
             start_new_session=True,
         )
 
@@ -190,7 +191,8 @@ class VirtualNode:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
+            encoding="utf-8",
+            errors="replace",
             start_new_session=True,
         )
 

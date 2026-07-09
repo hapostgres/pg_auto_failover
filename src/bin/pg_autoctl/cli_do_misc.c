@@ -12,7 +12,6 @@
 #include <getopt.h>
 #include <inttypes.h>
 #include <signal.h>
-#include <time.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -38,6 +37,10 @@
 #include "pgtuning.h"
 #include "primary_standby.h"
 #include "string_utils.h"
+
+/* Options specific to "pg_autoctl inspect pgsetup wait" */
+static bool pgsetupWaitReadWrite = false;
+static int pgsetupWaitTimeout = 30;
 
 
 /*
@@ -323,10 +326,6 @@ keeper_cli_pgsetup_is_ready(int argc, char **argv)
 }
 
 
-/* Options specific to "pg_autoctl inspect pgsetup wait" */
-static bool pgsetupWaitReadWrite = false;
-static int pgsetupWaitTimeout = 30;
-
 /*
  * keeper_cli_pgsetup_wait_getopts parses options specific to
  * "pg_autoctl inspect pgsetup wait": --read-write, --timeout, plus the
@@ -344,8 +343,7 @@ keeper_cli_pgsetup_wait_getopts(int argc, char **argv)
 	 * Strategy:
 	 *   1. Scan argv with opterr=0 to capture --timeout / --read-write.
 	 *   2. Build a filtered argv that omits those two options.
-	 *   3. Pass the filtered argv to keeper_cli_keeper_setup_getopts, which
-	 *      picks up PGDATA from either --pgdata or the PGDATA env var.
+	 *   3. Pass the filtered argv to keeper_cli_keeper_setup_getopts.
 	 */
 
 	/* Reset module-level wait options */
@@ -454,8 +452,8 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 	time_t startTime = time(NULL);
 
 	/* Wait up to `timeout` seconds for the config file to be created.
-	* In no-monitor mode, pg_autoctl create postgres runs first and writes
-	* the config; pgsetup wait may be called before that completes. */
+	 * In no-monitor mode, pg_autoctl create postgres runs first and writes the
+	 * config; pgsetup wait may be called before that completes. */
 	{
 		KeeperConfig kconfig = keeperOptions;
 		if (keeper_config_set_pathnames_from_pgdata(&(kconfig.pathnames),
@@ -480,6 +478,11 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 
 	log_debug("Initialized pgSetup, now calling pg_setup_wait_until_is_ready()");
 
+	/*
+	 * Phase 1: wait for postmaster to signal "ready" in postmaster.pid.
+	 * Pass the remaining timeout so the two phases together stay within the
+	 * single user-visible deadline.
+	 */
 	int remainingAfterConfig = timeout - (int) (time(NULL) - startTime);
 	if (remainingAfterConfig <= 0)
 	{
@@ -509,6 +512,10 @@ keeper_cli_pgsetup_wait_until_ready(int argc, char **argv)
 	 * Postgres is up (phase 1 passed) but may still be in recovery, finishing
 	 * pg_rewind, or in standby mode.  We poll with a libpq connection that
 	 * checks pg_is_in_recovery() until it returns false or the deadline fires.
+	 *
+	 * We use the local connection string from pgSetup (Unix socket when
+	 * available, matching whatever auth the node was created with) so that the
+	 * check works regardless of the cluster's auth method.
 	 */
 	char connstr[MAXCONNINFO];
 	if (!pg_setup_get_local_connection_string(pgSetup, connstr))

@@ -159,12 +159,10 @@ coordinator_add_node(Coordinator *coordinator, Keeper *keeper,
 		: keeper->config.pgSetup.citusClusterName;
 
 	SingleValueResultContext parseContext = { { 0 }, PGSQL_RESULT_INT, false };
-	IntString pgportStr = intToString(keeper->config.pgSetup.pgport);
-	IntString groupIdStr = intToString(keeper->config.groupId);
 
 	paramValues[0] = keeper->config.hostname;
-	paramValues[1] = pgportStr.strValue;
-	paramValues[2] = groupIdStr.strValue;
+	paramValues[1] = intToString(keeper->config.pgSetup.pgport).strValue;
+	paramValues[2] = intToString(keeper->config.groupId).strValue;
 	paramValues[3] = citusRoleStr;
 	paramValues[4] = clusterName;
 
@@ -232,8 +230,6 @@ coordinator_add_inactive_node(Coordinator *coordinator, Keeper *keeper,
 		: keeper->config.pgSetup.citusClusterName;
 
 	SingleValueResultContext parseContext = { { 0 }, PGSQL_RESULT_INT, false };
-	IntString pgportStr = intToString(keeper->config.pgSetup.pgport);
-	IntString groupIdStr = intToString(keeper->config.groupId);
 
 	if (!coordinator_master_activate_node_returns_record(pgsql, &returnsRecord))
 	{
@@ -252,8 +248,8 @@ coordinator_add_inactive_node(Coordinator *coordinator, Keeper *keeper,
 	}
 
 	paramValues[0] = keeper->config.hostname;
-	paramValues[1] = pgportStr.strValue;
-	paramValues[2] = groupIdStr.strValue;
+	paramValues[1] = intToString(keeper->config.pgSetup.pgport).strValue;
+	paramValues[2] = intToString(keeper->config.groupId).strValue;
 	paramValues[3] = citusRoleStr;
 	paramValues[4] = clusterName;
 
@@ -311,8 +307,6 @@ coordinator_activate_node(Coordinator *coordinator, Keeper *keeper,
 	parseContext.resultType = PGSQL_RESULT_INT;
 	parseContext.parsedOk = false;
 
-	IntString pgportStr = intToString(keeper->config.pgSetup.pgport);
-
 	if (!coordinator_master_activate_node_returns_record(pgsql, &returnsRecord))
 	{
 		log_error("Failed to activate node %s:%d, see above for details",
@@ -330,7 +324,7 @@ coordinator_activate_node(Coordinator *coordinator, Keeper *keeper,
 	}
 
 	paramValues[0] = keeper->config.hostname;
-	paramValues[1] = pgportStr.strValue;
+	paramValues[1] = intToString(keeper->config.pgSetup.pgport).strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -377,10 +371,9 @@ coordinator_remove_node(Coordinator *coordinator, Keeper *keeper)
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
-	IntString pgportStr = intToString(keeper->config.pgSetup.pgport);
 
 	paramValues[0] = keeper->config.hostname;
-	paramValues[1] = pgportStr.strValue;
+	paramValues[1] = intToString(keeper->config.pgSetup.pgport).strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -612,16 +605,11 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 	 * private data handled by the coordinator, and the coordinator is going to
 	 * provide for that information itself with the following SQL query.
 	 */
-	IntString groupIdStr = intToString(groupId);
-	IntString pgportStr = intToString(keeper->config.pgSetup.pgport);
-
 	if (supportForForce)
 	{
 		const int paramCount = 5;
 		Oid paramTypes[5] = { INT4OID, TEXTOID, INT4OID, TEXTOID, INT4OID };
 		const char *paramValues[5];
-		IntString lockCooldownStr = intToString(
-			keeper->config.citus_master_update_node_lock_cooldown);
 
 		sformat(sql,
 				sizeof(sql),
@@ -633,11 +621,12 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 				"   and not exists"
 				"        (select 1 from pg_prepared_xacts where gid = $4)");
 
-		paramValues[0] = groupIdStr.strValue;
+		paramValues[0] = intToString(groupId).strValue;
 		paramValues[1] = keeper->config.hostname;
-		paramValues[2] = pgportStr.strValue;
+		paramValues[2] = intToString(keeper->config.pgSetup.pgport).strValue;
 		paramValues[3] = transactionName;
-		paramValues[4] = lockCooldownStr.strValue;
+		paramValues[4] = intToString(
+			keeper->config.citus_master_update_node_lock_cooldown).strValue;
 
 		if (!pgsql_execute_with_params(pgsql, sql,
 									   paramCount, paramTypes, paramValues,
@@ -663,9 +652,9 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 				"   and not exists"
 				"        (select 1 from pg_prepared_xacts where gid = $4)");
 
-		paramValues[0] = groupIdStr.strValue;
+		paramValues[0] = intToString(groupId).strValue;
 		paramValues[1] = keeper->config.hostname;
-		paramValues[2] = pgportStr.strValue;
+		paramValues[2] = intToString(keeper->config.pgSetup.pgport).strValue;
 		paramValues[3] = transactionName;
 
 		if (!pgsql_execute_with_params(pgsql, sql,
@@ -816,9 +805,7 @@ coordinator_upsert_poolinfo_port(Coordinator *coordinator, Keeper *keeper)
 	sformat(proxyInfo, sizeof(proxyInfo), "host=%s port=%d",
 			keeper->config.hostname, keeper->config.pgSetup.proxyport);
 
-	IntString groupIdStr = intToString(keeper->config.groupId);
-
-	paramValues[0] = groupIdStr.strValue;
+	paramValues[0] = intToString(keeper->config.groupId).strValue;
 	paramValues[1] = proxyInfo;
 
 	if (!pgsql_execute_with_params(pgsql, sql,

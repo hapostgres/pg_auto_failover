@@ -33,13 +33,10 @@ else
 GIT_VERSION := $(shell awk -F '[ "]' '{print $$4}' $(VERSION_FILE))
 endif
 
-# Azure only targets and variables are in a separate Makefile
-include Makefile.azure
-
 #
 # LIST TESTS
 #
-PYTEST = python3 -m pytest
+PYTEST = $(shell which pytest || which pytest3)
 
 # Tests for the monitor
 TESTS_MONITOR  = test_extension_update
