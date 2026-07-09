@@ -846,18 +846,23 @@ monitor_register_node(Monitor *monitor, char *formation,
 	MonitorAssignedStateParseContext parseContext =
 	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
+	IntString portStr = intToString(port);
+	IntString systemIdentifierStr = intToString(system_identifier);
+	IntString desiredNodeIdStr = intToString(desiredNodeId);
+	IntString desiredGroupIdStr = intToString(desiredGroupId);
+	IntString candidatePriorityStr = intToString(candidatePriority);
 
 	paramValues[0] = formation;
 	paramValues[1] = host;
-	paramValues[2] = intToString(port).strValue;
+	paramValues[2] = portStr.strValue;
 	paramValues[3] = dbname;
 	paramValues[4] = name == NULL ? "" : name;
-	paramValues[5] = intToString(system_identifier).strValue;
-	paramValues[6] = intToString(desiredNodeId).strValue;
-	paramValues[7] = intToString(desiredGroupId).strValue;
+	paramValues[5] = systemIdentifierStr.strValue;
+	paramValues[6] = desiredNodeIdStr.strValue;
+	paramValues[7] = desiredGroupIdStr.strValue;
 	paramValues[8] = nodeStateString;
 	paramValues[9] = nodeKindToString(kind);
-	paramValues[10] = intToString(candidatePriority).strValue;
+	paramValues[10] = candidatePriorityStr.strValue;
 	paramValues[11] = quorum ? "true" : "false";
 	paramValues[12] =
 		IS_EMPTY_STRING_BUFFER(citusClusterName)
@@ -945,13 +950,16 @@ monitor_node_active(Monitor *monitor,
 	MonitorAssignedStateParseContext parseContext =
 	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(currentState);
+	IntString nodeIdStr = intToString(nodeId);
+	IntString groupIdStr = intToString(groupId);
+	IntString currentTLIStr = intToString(currentTLI);
 
 	paramValues[0] = formation;
-	paramValues[1] = intToString(nodeId).strValue;
-	paramValues[2] = intToString(groupId).strValue;
+	paramValues[1] = nodeIdStr.strValue;
+	paramValues[2] = groupIdStr.strValue;
 	paramValues[3] = nodeStateString;
 	paramValues[4] = pgIsRunning ? "true" : "false";
-	paramValues[5] = intToString(currentTLI).strValue;
+	paramValues[5] = currentTLIStr.strValue;
 	paramValues[6] = currentLSN;
 	paramValues[7] = pgsrSyncState;
 
@@ -1001,7 +1009,8 @@ monitor_set_node_candidate_priority(Monitor *monitor,
 	int paramCount = 3;
 	Oid paramTypes[3] = { TEXTOID, TEXTOID, INT4OID };
 	const char *paramValues[3];
-	char *candidatePriorityText = intToString(candidate_priority).strValue;
+	IntString candidatePriorityStr = intToString(candidate_priority);
+	char *candidatePriorityText = candidatePriorityStr.strValue;
 	bool success = true;
 
 	paramValues[0] = formation;
@@ -1218,8 +1227,10 @@ monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
 	SingleValueResultContext parseContext = { { 0 }, PGSQL_RESULT_BOOL, false };
+	IntString numberSyncStandbysStr = intToString(numberSyncStandbys);
+
 	paramValues[0] = formation;
-	paramValues[1] = intToString(numberSyncStandbys).strValue;
+	paramValues[1] = numberSyncStandbysStr.strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1256,9 +1267,10 @@ monitor_remove_by_hostname(Monitor *monitor, char *host, int port, bool force,
 	int paramCount = 3;
 	Oid paramTypes[3] = { TEXTOID, INT4OID, BOOLOID };
 	const char *paramValues[3];
+	IntString portStr = intToString(port);
 
 	paramValues[0] = host;
-	paramValues[1] = intToString(port).strValue;
+	paramValues[1] = portStr.strValue;
 	paramValues[2] = force ? "true" : "false";
 
 	if (!pgsql_execute_with_params(pgsql, sql,
@@ -1495,9 +1507,10 @@ monitor_perform_failover(Monitor *monitor, char *formation, int group)
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
+	IntString groupStr = intToString(group);
 
 	paramValues[0] = formation;
-	paramValues[1] = intToString(group).strValue;
+	paramValues[1] = groupStr.strValue;
 
 	/*
 	 * pgautofailover.perform_failover() returns VOID.
@@ -2738,12 +2751,13 @@ monitor_create_formation(Monitor *monitor,
 	int paramCount = 5;
 	Oid paramTypes[5] = { TEXTOID, TEXTOID, TEXTOID, BOOLOID, INT4OID };
 	const char *paramValues[5];
+	IntString numberSyncStandbysStr = intToString(numberSyncStandbys);
 
 	paramValues[0] = formation;
 	paramValues[1] = kind;
 	paramValues[2] = dbname;
 	paramValues[3] = hasSecondary ? "true" : "false";
-	paramValues[4] = intToString(numberSyncStandbys).strValue;
+	paramValues[4] = numberSyncStandbysStr.strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -3429,11 +3443,13 @@ monitor_update_node_metadata(Monitor *monitor,
 	const char *paramValues[4];
 
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+	IntString nodeIdStr = intToString(nodeId);
+	IntString portStr = intToString(port);
 
-	paramValues[0] = intToString(nodeId).strValue;
+	paramValues[0] = nodeIdStr.strValue;
 	paramValues[1] = name;
 	paramValues[2] = hostname;
-	paramValues[3] = intToString(port).strValue;
+	paramValues[3] = portStr.strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -3477,9 +3493,11 @@ monitor_set_node_system_identifier(Monitor *monitor,
 
 	NodeAddress node = { 0 };
 	NodeAddressParseContext parseContext = { { 0 }, &node, false };
+	IntString nodeIdStr = intToString(nodeId);
+	IntString systemIdentifierStr = intToString(system_identifier);
 
-	paramValues[0] = intToString(nodeId).strValue;
-	paramValues[1] = intToString(system_identifier).strValue;
+	paramValues[0] = nodeIdStr.strValue;
+	paramValues[1] = systemIdentifierStr.strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -3525,9 +3543,11 @@ monitor_set_group_system_identifier(Monitor *monitor,
 	const char *paramValues[2];
 
 	SingleValueResultContext context = { 0 };
+	IntString groupIdStr = intToString(groupId);
+	IntString systemIdentifierStr = intToString(system_identifier);
 
-	paramValues[0] = intToString(groupId).strValue;
-	paramValues[1] = intToString(system_identifier).strValue;
+	paramValues[0] = groupIdStr.strValue;
+	paramValues[1] = systemIdentifierStr.strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -3640,8 +3660,9 @@ monitor_start_maintenance(Monitor *monitor, int64_t nodeId, bool *mayRetry)
 	int paramCount = 1;
 	Oid paramTypes[1] = { INT8OID };
 	const char *paramValues[1];
+	IntString nodeIdStr = intToString(nodeId);
 
-	paramValues[0] = intToString(nodeId).strValue;
+	paramValues[0] = nodeIdStr.strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -3688,8 +3709,9 @@ monitor_stop_maintenance(Monitor *monitor, int64_t nodeId, bool *mayRetry)
 	int paramCount = 1;
 	Oid paramTypes[1] = { INT8OID };
 	const char *paramValues[1];
+	IntString nodeIdStr = intToString(nodeId);
 
-	paramValues[0] = intToString(nodeId).strValue;
+	paramValues[0] = nodeIdStr.strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -4854,10 +4876,12 @@ monitor_find_node_by_nodeid(Monitor *monitor,
 	const char *paramValues[3];
 
 	NodeAddressArrayParseContext parseContext = { { 0 }, nodesArray, false };
+	IntString groupIdStr = intToString(groupId);
+	IntString nodeIdStr = intToString(nodeId);
 
 	paramValues[0] = formation;
-	paramValues[1] = intToString(groupId).strValue;
-	paramValues[2] = intToString(nodeId).strValue;
+	paramValues[1] = groupIdStr.strValue;
+	paramValues[2] = nodeIdStr.strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,

@@ -1628,11 +1628,13 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 	/* prepare startup.log file in PGDATA */
 	join_path_components(logfile, pgdata, "startup.log");
 
+	IntString pgportStr = intToString(pgport);
+
 	args[argsIndex++] = (char *) postgres;
 	args[argsIndex++] = "-D";
 	args[argsIndex++] = (char *) pgdata;
 	args[argsIndex++] = "-p";
-	args[argsIndex++] = (char *) intToString(pgport).strValue;
+	args[argsIndex++] = pgportStr.strValue;
 
 	if (listen)
 	{

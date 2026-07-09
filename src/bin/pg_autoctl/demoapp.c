@@ -481,11 +481,15 @@ demoapp_register_client(const char *pguri,
 
 	const Oid paramTypes[4] = { INT4OID, INT4OID, INT4OID, INT4OID };
 	const char *paramValues[4] = { 0 };
+	IntString clientIdStr = intToString(clientId);
+	IntString pidStr = intToString(getpid());
+	IntString retrySleepStr = intToString(retrySleep);
+	IntString retryCapStr = intToString(retryCap);
 
-	paramValues[0] = intToString(clientId).strValue;
-	paramValues[1] = intToString(getpid()).strValue;
-	paramValues[2] = intToString(retrySleep).strValue;
-	paramValues[3] = intToString(retryCap).strValue;
+	paramValues[0] = clientIdStr.strValue;
+	paramValues[1] = pidStr.strValue;
+	paramValues[2] = retrySleepStr.strValue;
+	paramValues[3] = retryCapStr.strValue;
 
 	pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_APP);
 
@@ -518,9 +522,11 @@ demoapp_update_client_failovers(const char *pguri, int clientId, int failovers)
 
 	const Oid paramTypes[2] = { INT4OID, INT4OID };
 	const char *paramValues[2] = { 0 };
+	IntString clientIdStr = intToString(clientId);
+	IntString failoversStr = intToString(failovers);
 
-	paramValues[0] = intToString(clientId).strValue;
-	paramValues[1] = intToString(failovers).strValue;
+	paramValues[0] = clientIdStr.strValue;
+	paramValues[1] = failoversStr.strValue;
 
 	pgsql_init(&pgsql, (char *) pguri, PGSQL_CONN_APP);
 
@@ -698,11 +704,15 @@ demoapp_start_client(const char *pguri, int clientId,
 
 		const Oid paramTypes[5] = { INT4OID, INT4OID, INT8OID, INT8OID, BOOLOID };
 		const char *paramValues[5] = { 0 };
+		IntString clientIdStr = intToString(clientId);
+		IntString indexStr = intToString(index);
+		IntString attemptsStr = intToString(pgsql.retryPolicy.attempts);
+		IntString durationUsStr = intToString(INSTR_TIME_GET_MICROSEC(duration));
 
-		paramValues[0] = intToString(clientId).strValue;
-		paramValues[1] = intToString(index).strValue;
-		paramValues[2] = intToString(pgsql.retryPolicy.attempts).strValue;
-		paramValues[3] = intToString(INSTR_TIME_GET_MICROSEC(duration)).strValue;
+		paramValues[0] = clientIdStr.strValue;
+		paramValues[1] = indexStr.strValue;
+		paramValues[2] = attemptsStr.strValue;
+		paramValues[3] = durationUsStr.strValue;
 		paramValues[4] = is_in_recovery ? "true" : "false";
 
 		if (!pgsql_execute_with_params(&pgsql, sql, 5, paramTypes, paramValues,
