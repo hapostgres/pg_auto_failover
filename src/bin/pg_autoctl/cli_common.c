@@ -407,6 +407,28 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'e':
+			{
+				/* { "replication-password", required_argument, NULL, 'e' } */
+				strlcpy(LocalOptionConfig.replication_password, optarg,
+						MAXCONNINFO);
+				log_trace("--replication-password ****");
+				break;
+			}
+
+			case 'w':
+			{
+				/*
+				 * { "monitor-password", required_argument, NULL, 'w' }
+				 * The pgautofailover_monitor health-check role currently uses a
+				 * hardcoded password (PG_AUTOCTL_HEALTH_PASSWORD).  Accept the
+				 * option so pg_autoctl node run can pass it without error; it
+				 * is otherwise unused at this time.
+				 */
+				log_trace("--monitor-password ****");
+				break;
+			}
+
 			case 'V':
 			{
 				/* keeper_cli_print_version prints version and exits. */

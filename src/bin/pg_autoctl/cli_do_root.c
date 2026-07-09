@@ -186,9 +186,18 @@ CommandLine do_pgsetup_wait_until_ready =
 	make_command("wait",
 				 "Wait until the local Postgres server is ready",
 				 "[option ...]",
+				 "  --pgdata          path to data directory\n"
+				 "  --timeout         seconds to wait, default 30\n",
+				 keeper_cli_pgsetup_wait_getopts,
+				 keeper_cli_pgsetup_wait_until_ready);
+
+CommandLine do_pgsetup_hba_lan =
+	make_command("hba-lan",
+				 "Add LAN CIDR trust rules to pg_hba.conf and reload",
+				 "[option ...]",
 				 KEEPER_CLI_WORKER_SETUP_OPTIONS,
 				 keeper_cli_keeper_setup_getopts,
-				 keeper_cli_pgsetup_wait_until_ready);
+				 keeper_cli_pgsetup_hba_lan);
 
 CommandLine do_pgsetup_startup_logs =
 	make_command("logs",
@@ -213,6 +222,7 @@ CommandLine *do_pgsetup[] = {
 	&do_pgsetup_wait_until_ready,
 	&do_pgsetup_startup_logs,
 	&do_pgsetup_tune,
+	&do_pgsetup_hba_lan,
 	NULL
 };
 
