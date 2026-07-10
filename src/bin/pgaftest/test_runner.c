@@ -2378,6 +2378,14 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 
 		case CMD_WAIT_STATE:
 		{
+			if (r->spec->cluster.monitorApiOnly)
+			{
+				sformat(errBuf, errLen,
+						"wait until is not supported in scenario mode; "
+						"use node_active calls in setup to drive state");
+				return false;
+			}
+
 			/*
 			 * LISTEN-driven wait (items 5 & 6).
 			 *
@@ -2495,6 +2503,41 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				return false;
 			}
 			return true;
+		}
+
+		case CMD_ASSERT_STATES:
+		{
+			/*
+			 * Synchronous multi-node goalstate check.
+			 * Calls monitor_get_node_state() for each (name, expected) pair
+			 * and fails immediately if any mismatch is found.
+			 */
+			bool ok = true;
+			for (int i = 0; i < cmd->waitStateCount; i++)
+			{
+				char reported[64] = "", assigned[64] = "";
+				if (!monitor_get_node_state(r, cmd->waitNodes[i],
+											reported, sizeof(reported),
+											assigned, sizeof(assigned)))
+				{
+					sformat(errBuf, errLen,
+							"assert states: cannot reach monitor "
+							"to check state of node '%s'",
+							cmd->waitNodes[i]);
+					ok = false;
+					break;
+				}
+				if (strcmp(assigned, cmd->waitStates[i]) != 0)
+				{
+					sformat(errBuf, errLen,
+							"assert states: %s assigned-state is \"%s\", "
+							"expected \"%s\"",
+							cmd->waitNodes[i], assigned, cmd->waitStates[i]);
+					ok = false;
+					break;
+				}
+			}
+			return ok;
 		}
 
 		case CMD_SQL:
@@ -2768,6 +2811,14 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		 */
 		case CMD_WAIT_MULTI:
 		{
+			if (r->spec->cluster.monitorApiOnly)
+			{
+				sformat(errBuf, errLen,
+						"wait until is not supported in scenario mode; "
+						"use node_active calls in setup to drive state");
+				return false;
+			}
+
 			runner_notify_connect(r);
 
 			int timeoutSecs = cmd->timeoutSeconds;
@@ -3324,6 +3375,49 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				*nl = '\0';
 			}
 
+			/*
+			 * Empty result means the node is not registered yet.  In scenario
+			 * mode, virtual nodes are auto-registered on first contact so that
+			 * setup blocks can drive the FSM from scratch using node_active
+			 * calls without needing real pg_autoctl keepers.
+			 */
+			if (nodeInfo[0] == '\0' && r->spec->cluster.monitorApiOnly)
+			{
+				char regSql[512];
+				char regResult[256] = { 0 };
+
+				/*
+				 * Pass sysidentifier=1 (non-zero) so the check constraint
+				 * "system_identifier_is_null_at_init_only" does not fire
+				 * when reportedstate later advances past 'init'.  All
+				 * virtual nodes in the same group get the same value,
+				 * which also satisfies same_system_identifier_within_group.
+				 */
+				sformat(regSql, sizeof(regSql),
+						"SELECT assigned_node_id || '|' || assigned_group_id "
+						"FROM pgautofailover.register_node("
+						"'default', '%s', 5432, 'pg_auto_failover', '%s', 1)",
+						nodeName, nodeName);
+
+				if (!exec_sql_on_service(r, "monitor", regSql,
+										 regResult, sizeof(regResult)))
+				{
+					sformat(errBuf, errLen,
+							"node_active: auto-register failed for node '%s'",
+							nodeName);
+					return false;
+				}
+
+				char *nl2 = strchr(regResult, '\n');
+				if (nl2)
+				{
+					*nl2 = '\0';
+				}
+				strlcpy(nodeInfo, regResult, sizeof(nodeInfo));
+				log_info("  node_active: registered node '%s' as %s",
+						 nodeName, nodeInfo);
+			}
+
 			long long nodeId = 0;
 			int groupId = 0;
 			if (sscanf(nodeInfo, "%lld|%d", &nodeId, &groupId) != 2)
@@ -3382,18 +3476,32 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 * mark healthy/unhealthy: <node>
 			 *
 			 * Directly update the health column in pgautofailover.node on the
-			 * monitor.  health=1 means GOOD, health=-1 means BAD.
+			 * monitor.  health=1 (NODE_HEALTH_GOOD), health=0 (NODE_HEALTH_BAD).
+			 *
+			 * Must run as the docker OS user (PostgreSQL superuser via peer
+			 * auth) because autoctl_node lacks write access to this table.
 			 */
-			int healthValue = cmd->markHealthy ? 1 : -1;
+			int healthValue = cmd->markHealthy ? 1 : 0;
 			char updateSql[512];
 			sformat(updateSql, sizeof(updateSql),
 					"UPDATE pgautofailover.node "
 					"SET health = %d, healthchecktime = now() "
-					"WHERE nodename = '%s'",
+					"WHERE nodename = \'%s\'",
 					healthValue, cmd->service);
 
+			char escapedSql[1024];
+			escape_sql_for_shell(updateSql, escapedSql, sizeof(escapedSql));
+
 			char out[256] = { 0 };
-			if (!exec_sql_on_service(r, "monitor", updateSql, out, sizeof(out)))
+			int rc_health = run_cmd_capture(out, sizeof(out),
+											"%s exec -T -u docker %s "
+											"psql --tuples-only --no-align "
+											"-v ON_ERROR_STOP=1 -v VERBOSITY=verbose "
+											"-d pg_auto_failover -c '%s' 2>&1",
+											r->composeBase, r->activeMonitorService,
+											escapedSql);
+
+			if (rc_health != 0)
 			{
 				sformat(errBuf, errLen,
 						"mark %s: UPDATE failed for node '%s': %s",
@@ -3610,6 +3718,12 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 		{
 			sformat(buf, len, "assert %s assigned-state = %s",
 					cmd->service, cmd->state);
+			break;
+		}
+
+		case CMD_ASSERT_STATES:
+		{
+			sformat(buf, len, "assert states { %d nodes }", cmd->waitStateCount);
 			break;
 		}
 

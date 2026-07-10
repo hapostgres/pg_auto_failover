@@ -119,6 +119,14 @@ typedef struct TestCluster
 
 	char monitorDebianCluster[64]; /* debian-cluster name for the monitor, "" otherwise */
 	char monitorImageTarget[64];   /* Dockerfile build target for monitor; "" = "run" */
+
+	/*
+	 * When true the spec was declared with the "scenario { }" keyword rather
+	 * than "cluster { }".  Only a monitor service is provisioned; nodes are
+	 * virtual (names only, no containers).  node_active and mark_health
+	 * commands are restricted to this mode.
+	 */
+	bool monitorApiOnly;
 } TestCluster;
 
 /* -----------------------------------------------------------------------
@@ -177,6 +185,9 @@ typedef enum TestCmdKind
 	 */
 	CMD_NODE_ACTIVE,     /* node_active { ... } expect { assigned: ... }       */
 	CMD_MARK_HEALTH,     /* mark [un]healthy: <node>                           */
+
+	/* assert states { node1: X  node2: Y } — sync multi-node goalstate check */
+	CMD_ASSERT_STATES,
 } TestCmdKind;
 
 typedef struct TestCmd

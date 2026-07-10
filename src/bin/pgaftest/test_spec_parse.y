@@ -150,7 +150,7 @@ static TestNode      *current_node        = NULL;
 }
 
 /* ---- Outer-structure tokens (used in INITIAL lex state) ---- */
-%token T_CLUSTER T_MONITOR T_NODE T_CITUS_COORDINATOR T_CITUS_WORKER
+%token T_CLUSTER T_SCENARIO T_MONITOR T_NODE T_CITUS_COORDINATOR T_CITUS_WORKER
 %token T_SETUP T_TEARDOWN T_STEP T_SEQUENCE
 %token T_EQUALS
 
@@ -187,7 +187,7 @@ static TestNode      *current_node        = NULL;
 %token T_LBRACE T_RBRACE T_COMMA
 %token T_POSTGRES T_STAYS T_WHILE T_THROUGH T_SET
 %token T_LOGS T_NOT T_CONTAINS T_MATCHES
-%token T_NODE_ACTIVE T_MARK T_HEALTHY T_UNHEALTHY
+%token T_NODE_ACTIVE T_MARK T_HEALTHY T_UNHEALTHY T_STATES
 
 /* ---- Tokens with values ---- */
 %token <ival> T_INTEGER
@@ -216,6 +216,7 @@ spec:
 
 spec_item:
 	  cluster_block
+	| scenario_block
 	| setup_block
 	| teardown_block
 	| named_step
@@ -239,6 +240,43 @@ cluster_block:
 		        sizeof(current_spec->cluster.auth));
 	}
 	cluster_item_list T_RBRACE
+	;
+
+/* -----------------------------------------------------------------------
+ * scenario { }
+ *
+ * A monitor-API-only test scenario.  Only the monitor service is
+ * provisioned; node names in the formation block are virtual (no
+ * containers are created for them).  The node_active and mark_health
+ * commands are restricted to specs declared with this keyword.
+ *
+ * The lexer reuses the CLUSTER_BODY state for the scenario body so all
+ * the existing formation / node-name tokens are available.
+ * ----------------------------------------------------------------------- */
+
+scenario_block:
+	T_SCENARIO T_LBRACE
+	{
+		current_spec->cluster.monitorApiOnly = true;
+		current_spec->cluster.withMonitor    = true;
+		strlcpy(current_spec->cluster.ssl,  "self-signed",
+		        sizeof(current_spec->cluster.ssl));
+		strlcpy(current_spec->cluster.auth, "trust",
+		        sizeof(current_spec->cluster.auth));
+	}
+	scenario_item_list T_RBRACE
+	;
+
+scenario_item_list:
+	  /* empty */
+	| scenario_item_list scenario_item
+	;
+
+scenario_item:
+	  formation_block
+	| image_line
+	| ssl_line
+	| auth_line
 	;
 
 cluster_item_list:
@@ -1062,6 +1100,48 @@ assert_cmd:
 		$$->timeoutSeconds = $6;
 		free($2); free($5);
 	}
+	| T_ASSERT T_STATES T_BLOCK
+	{
+		$$ = make_cmd(CMD_ASSERT_STATES);
+		/* T_BLOCK contains "node1: draining  node2: prepare_promotion" */
+		/* Parse name:state pairs inline */
+		char *p = $3;
+		while (*p)
+		{
+			while (*p == ' ' || *p == '\t' || *p == '\n') p++;
+			if (*p == '\0') break;
+			/* name */
+			char name[64] = { 0 };
+			int ni = 0;
+			while (*p && *p != ':' && *p != ' ' && *p != '\t')
+			{
+				if (ni < 63) name[ni++] = *p;
+				p++;
+			}
+			while (*p == ' ' || *p == '\t') p++;
+			if (*p == ':') p++;
+			while (*p == ' ' || *p == '\t') p++;
+			/* state */
+			char state[64] = { 0 };
+			int si = 0;
+			while (*p && *p != ' ' && *p != '\t' && *p != '\n')
+			{
+				if (si < 63) state[si++] = *p;
+				p++;
+			}
+			if (name[0] && state[0])
+			{
+				int idx = $$->waitStateCount;
+				if (idx < PGAF_MAX_WAIT_STATES)
+				{
+					strlcpy($$->waitNodes[idx], name, sizeof($$->waitNodes[0]));
+					strlcpy($$->waitStates[idx], state, sizeof($$->waitStates[0]));
+					$$->waitStateCount++;
+				}
+			}
+		}
+		free($3);
+	}
 	;
 
 /* -----------------------------------------------------------------------
@@ -1379,6 +1459,11 @@ logs_cmd:
 node_active_cmd:
 	T_NODE_ACTIVE T_BLOCK T_EXPECT T_BLOCK
 	{
+		if (!current_spec->cluster.monitorApiOnly)
+		{
+			yyerror("node_active is only allowed inside a scenario { } block; "
+			        "use a cluster { } block for full docker compose tests");
+		}
 		$$ = make_cmd(CMD_NODE_ACTIVE);
 		/* $2 = "node2  reported: secondary  lsn: 0/5A0  ..." */
 		strlcpy($$->args, $2, sizeof($$->args));
@@ -1396,6 +1481,11 @@ node_active_cmd:
 mark_health_cmd:
 	T_MARK T_HEALTHY ':' T_IDENT
 	{
+		if (!current_spec->cluster.monitorApiOnly)
+		{
+			yyerror("mark healthy/unhealthy is only allowed inside a scenario { } "
+			        "block; use a cluster { } block for full docker compose tests");
+		}
 		$$ = make_cmd(CMD_MARK_HEALTH);
 		strlcpy($$->service, $4, sizeof($$->service));
 		$$->markHealthy = true;
@@ -1403,6 +1493,11 @@ mark_health_cmd:
 	}
 	| T_MARK T_UNHEALTHY ':' T_IDENT
 	{
+		if (!current_spec->cluster.monitorApiOnly)
+		{
+			yyerror("mark healthy/unhealthy is only allowed inside a scenario { } "
+			        "block; use a cluster { } block for full docker compose tests");
+		}
 		$$ = make_cmd(CMD_MARK_HEALTH);
 		strlcpy($$->service, $4, sizeof($$->service));
 		$$->markHealthy = false;

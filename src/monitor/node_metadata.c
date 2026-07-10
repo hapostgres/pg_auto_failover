@@ -2060,6 +2060,15 @@ NodeIsHealthy(const AutoFailoverNode *node, const struct GroupStateContext *ctx)
 		return node->pgIsRunning;
 	}
 
+	/*
+	 * UNKNOWN (-1) means no health-check worker has run yet.  Trust the
+	 * keeper's own pgIsRunning report; we have no contradictory evidence.
+	 */
+	if (node->health == NODE_HEALTH_UNKNOWN)
+	{
+		return node->pgIsRunning;
+	}
+
 	return node->health == NODE_HEALTH_GOOD && node->pgIsRunning;
 }
 

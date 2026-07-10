@@ -26,6 +26,7 @@
 
 #include "access/htup_details.h"
 #include "access/xlogdefs.h"
+#include "utils/timestamp.h"
 #include "catalog/pg_enum.h"
 #include "nodes/makefuncs.h"
 #include "nodes/parsenodes.h"
@@ -484,6 +485,17 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 									currentNodeState->pgsrSyncState,
 									currentNodeState->reportedTLI,
 									currentNodeState->reportedLSN);
+
+		/*
+		 * Sync the in-memory struct with the values just written to the DB.
+		 * ReportAutoFailoverNodeState updates reportedpgisrunning, reportedtli,
+		 * and reporttime in the DB, but not in this struct.  ProceedGroupState
+		 * relies on NodeIsHealthy() which reads pgIsRunning and reportTime from
+		 * the struct, so leaving them stale causes spurious health failures.
+		 */
+		pgAutoFailoverNode->pgIsRunning = currentNodeState->pgIsRunning;
+		pgAutoFailoverNode->reportedTLI = currentNodeState->reportedTLI;
+		pgAutoFailoverNode->reportTime = GetCurrentTimestamp();
 	}
 
 	LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
