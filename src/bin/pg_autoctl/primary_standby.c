@@ -13,6 +13,7 @@
 #include "postgres_fe.h"
 
 #include "config.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "keeper.h"
 #include "log.h"
@@ -440,6 +441,8 @@ upstream_has_replication_slot(ReplicationSource *upstream,
 	PostgresSetup upstreamSetup = { 0 };
 	PGSQL upstreamClient = { 0 };
 	char connectionString[MAXCONNINFO] = { 0 };
+	char savedPgPassword[BUFSIZE] = { 0 };
+	bool passwordSet = false;
 
 	/* prepare a PostgresSetup that allows preparing a connection string */
 	strlcpy(upstreamSetup.username, PG_AUTOCTL_REPLICA_USERNAME, NAMEDATALEN);
@@ -454,23 +457,45 @@ upstream_has_replication_slot(ReplicationSource *upstream,
 	 */
 	pg_setup_get_local_connection_string(&upstreamSetup, connectionString);
 
+	/*
+	 * When a replication password is configured (e.g. --auth md5), supply it
+	 * via PGPASSWORD so that the connection to the upstream node can
+	 * authenticate.  Save and restore any existing value.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(upstream->password))
+	{
+		if (env_exists("PGPASSWORD"))
+		{
+			if (!get_env_copy("PGPASSWORD", savedPgPassword, sizeof(savedPgPassword)))
+			{
+				return false;
+			}
+		}
+		setenv("PGPASSWORD", upstream->password, 1);
+		passwordSet = true;
+	}
+
 	if (!pgsql_init(&upstreamClient, connectionString, PGSQL_CONN_UPSTREAM))
 	{
 		/* errors have already been logged */
+		if (passwordSet)
+		{
+			setenv("PGPASSWORD", savedPgPassword, 1);
+		}
 		return false;
 	}
 
-	if (!pgsql_replication_slot_exists(&upstreamClient,
-									   upstream->slotName,
-									   hasReplicationSlot))
-	{
-		/* errors have already been logged */
-		PQfinish(upstreamClient.connection);
-		return false;
-	}
-
+	bool result = pgsql_replication_slot_exists(&upstreamClient,
+												upstream->slotName,
+												hasReplicationSlot);
 	PQfinish(upstreamClient.connection);
-	return true;
+
+	if (passwordSet)
+	{
+		setenv("PGPASSWORD", savedPgPassword, 1);
+	}
+
+	return result;
 }
 
 

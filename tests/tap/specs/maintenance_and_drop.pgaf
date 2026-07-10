@@ -1,0 +1,76 @@
+# Test maintenance mode and clean node drop: enable maintenance with a
+# concurrent node failure, verify the cluster recovers when maintenance is
+# disabled, then simulate a primary failure, recover, and finally drop a
+# node cleanly verifying the formation returns to single.
+#
+# Predecessor: tests/test_create_run.py
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    # 180s: cluster formation can be slow on shared CI runners
+    wait until primary, secondary  timeout 180s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+step test_002_create_t1 {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step test_004_read_from_secondary {
+    sql node2 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } }
+}
+
+step test_005_maintenance {
+    exec node2  pg_autoctl enable maintenance
+    wait until node2 state is maintenance  timeout 60s
+    sql node1 { INSERT INTO t1 VALUES (3); }
+    exec node2  pg_autoctl disable maintenance
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+}
+
+step test_006_fail_primary {
+    compose stop node1
+    wait until node2 state is wait_primary  timeout 180s
+}
+
+step test_007_start_node1_again {
+    compose start node1
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+}
+
+step test_008_read_from_new_secondary {
+    sql node1 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } { 3 } }
+}
+
+step test_009_fail_secondary {
+    compose stop node1
+    wait until node2 state is wait_primary  timeout 90s
+}
+
+step test_010_drop_secondary {
+    compose start node1
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+    exec node1  pg_autoctl drop node --no-wait
+    wait until node1 stopped  timeout 30s
+    wait until node2 state is single  timeout 60s
+}

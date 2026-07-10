@@ -63,6 +63,58 @@ run_cmd(const char *fmt, ...)
 }
 
 
+/*
+ * Run a shell command, capture both stdout and stderr into buf.
+ * Returns the exit code.  The capture is implemented by appending "2>&1" to
+ * the shell command string and reading from popen(cmd, "r") — the shell
+ * redirects file descriptor 2 onto 1 before exec, so both streams arrive on
+ * the single pipe end that popen hands back to us.  We read until EOF, trim
+ * trailing whitespace, and drain any overflow so pclose() doesn't see an
+ * unread pipe (which would SIGPIPE the child and make docker report exit 137).
+ */
+static int __attribute__((format(printf, 3, 4)))
+run_cmd_capture_both(char *buf, int buflen, const char *fmt, ...)
+{
+	char inner[4096];
+	va_list ap;
+	va_start(ap, fmt);
+	pg_vsnprintf(inner, sizeof(inner), fmt, ap);
+	va_end(ap);
+
+	char cmd[4096 + 6]; /* room for " 2>&1" */
+	sformat(cmd, sizeof(cmd), "%s 2>&1", inner);
+
+	log_debug("$ %s", cmd);
+
+	FILE *p = popen(cmd, "r");
+	if (!p)
+	{
+		return -1;
+	}
+
+	int pos = 0;
+	int c;
+	while ((c = fgetc(p)) != EOF && pos < buflen - 1)
+	{
+		buf[pos++] = (char) c;
+	}
+	buf[pos] = '\0';
+
+	while (pos > 0 && (buf[pos - 1] == '\n' || buf[pos - 1] == '\r' ||
+					   buf[pos - 1] == ' '))
+	{
+		buf[--pos] = '\0';
+	}
+
+	while (c != EOF)
+	{
+		c = fgetc(p);
+	}
+
+	return pclose(p);
+}
+
+
 /* Run a shell command, capture stdout into buf */
 static int __attribute__((format(printf, 3, 4)))
 run_cmd_capture(char *buf, int buflen, const char *fmt, ...)
@@ -1039,6 +1091,57 @@ runner_wait_socket(TestRunner *r, int remainMs)
 
 
 /*
+ * Post-convergence notification flush for CMD_WAIT_MULTI.
+ *
+ * After the subprocess (or LISTEN) confirms all conditions are met, the
+ * corresponding NOTIFY messages may still be in transit: the monitor commits
+ * the state change and sends NOTIFY in one transaction, but TCP delivery on
+ * Docker Desktop for Mac can arrive tens to hundreds of milliseconds after
+ * the database commit that the subprocess reads.
+ *
+ * We loop, draining with marks on each pass, until either all listenSatisfied
+ * flags are set (every convergence NOTIFY has arrived) or 1 second elapses
+ * (generous safety cap — the caller already confirmed convergence, so we will
+ * return true regardless).
+ */
+static void
+notify_flush_until_satisfied(TestRunner *r,
+							 const char *const *mn,
+							 const char *const *ms,
+							 int count,
+							 bool *satisfied)
+{
+	if (!r->notifyConnected)
+	{
+		return;
+	}
+
+	time_t deadline = time(NULL) + 1;
+
+	while (time(NULL) < deadline)
+	{
+		/* stop as soon as every convergence NOTIFY has arrived */
+		bool allNotified = true;
+		for (int i = 0; i < count; i++)
+		{
+			if (!satisfied[i])
+			{
+				allNotified = false;
+				break;
+			}
+		}
+		if (allNotified)
+		{
+			break;
+		}
+
+		runner_wait_socket(r, 200);
+		runner_drain_notify(r, NULL, mn, ms, count, satisfied);
+	}
+}
+
+
+/*
  * Check that the formation has converged: for each required state, at least
  * one cluster node must have both reportedstate = assignedstate = that state.
  * This is the correct convergence condition — checking only assignedstate
@@ -1149,7 +1252,7 @@ monitor_wait_formation_states(TestRunner *r,
 	runner_notify_connect(r);
 
 	/* pointer arrays for drain marking — NULL node = wildcard (any node) */
-	const char *ms[PGAF_MAX_WAIT_STATES];
+	const char *ms[PGAF_MAX_WAIT_STATES] = { 0 };
 	for (int i = 0; i < stateCount && i < PGAF_MAX_WAIT_STATES; i++)
 	{
 		ms[i] = states[i];
@@ -1464,6 +1567,14 @@ runner_wait_notify_goal(TestRunner *r,
 		runner_drain_notify(r, NULL, &nodeName, &targetState, 1, &satisfiedEarly);
 		if (satisfiedEarly)
 		{
+			/*
+			 * Post-match flush: drain any notifications that arrived in the
+			 * same TCP packet as the convergence event so they appear under
+			 * this step, not interleaved into the next command's drain.
+			 * No marks — these belong to the step that caused the transition,
+			 * not this wait.
+			 */
+			runner_drain_notify(r, NULL, NULL, NULL, 0, NULL);
 			return true;
 		}
 	}
@@ -2657,11 +2768,14 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		 */
 		case CMD_WAIT_MULTI:
 		{
+			runner_notify_connect(r);
+
 			int timeoutSecs = cmd->timeoutSeconds;
 			time_t deadline = time(NULL) + timeoutSecs;
 
 			/* build pointer arrays once — used for marking on every drain */
-			const char *mn[PGAF_MAX_WAIT_STATES], *ms[PGAF_MAX_WAIT_STATES];
+			const char *mn[PGAF_MAX_WAIT_STATES] = { 0 };
+			const char *ms[PGAF_MAX_WAIT_STATES] = { 0 };
 			for (int i = 0; i < cmd->waitStateCount; i++)
 			{
 				mn[i] = cmd->waitNodes[i];
@@ -2672,10 +2786,22 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 * convergence notification arrives for a specific (node, state) pair */
 			bool listenSatisfied[PGAF_MAX_WAIT_STATES] = { false };
 
+			/*
+			 * Initial drain: consume any notifications buffered during the
+			 * preceding command (e.g. exec that triggered state transitions).
+			 * With marks so that buffered convergence events get '*' here,
+			 * not silently during the next command's inter-drain.
+			 */
+			if (r->notifyConnected)
+			{
+				runner_drain_notify(r, NULL, mn, ms,
+									cmd->waitStateCount, listenSatisfied);
+			}
+
 			while (time(NULL) < deadline)
 			{
 				/*
-				 * Try subprocess-based check first.  monitor_get_node_state runs
+				 * Try subprocess-based check.  monitor_get_node_state runs
 				 * "pg_autoctl inspect monitor node-state" which requires v2.2.
 				 * When nodes run v2.1 the call returns false; track how many
 				 * succeed so we can fall back to LISTEN-based convergence.
@@ -2690,7 +2816,6 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 												assigned, sizeof(assigned)))
 					{
 						allMet = false; /* can't confirm via subprocess */
-						/* don't break — try to drain anyway */
 						continue;
 					}
 					subproc_ok++;
@@ -2710,11 +2835,18 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				}
 
 				/*
-				 * Drain: log notifications, mark '*' on convergence events, and
-				 * set listenSatisfied[i] when the (node, state) pair converges.
+				 * Drain with marks now — after the subprocess (which may have
+				 * taken ~200ms) — so any notifications that arrived while we
+				 * were polling get their '*' before we decide to return.  This
+				 * is the ordering that makes '*' reliable: drain first, check
+				 * allMet / allListenMet second.
 				 */
-				runner_drain_notify(r, NULL, mn, ms,
-									cmd->waitStateCount, listenSatisfied);
+				if (r->notifyConnected)
+				{
+					runner_drain_notify(r, NULL, mn, ms,
+										cmd->waitStateCount, listenSatisfied);
+					runner_notify_connect(r);
+				}
 
 				/*
 				 * When subprocess is unavailable (v2.1 nodes), fall back to
@@ -2734,14 +2866,21 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 					}
 					if (allListenMet)
 					{
+						notify_flush_until_satisfied(r, mn, ms,
+													 cmd->waitStateCount,
+													 listenSatisfied);
 						return true;
 					}
 				}
 				else if (allMet)
 				{
+					notify_flush_until_satisfied(r, mn, ms,
+												 cmd->waitStateCount,
+												 listenSatisfied);
 					return true;
 				}
 
+				/* wait for next notification */
 				runner_wait_socket(r, 1000);
 			}
 
@@ -2844,12 +2983,15 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 * Postgres.  Equivalent to calling `pg_autoctl manual service pgctl off`.
 			 */
 			log_info("Stopping Postgres on %s", cmd->service);
-			int rc = run_cmd(
-				"%s exec %s pg_autoctl manual service pgctl off"
+			char pgctlOut[4096] = "";
+			int rc = run_cmd_capture_both(
+				pgctlOut, sizeof(pgctlOut),
+				"%s exec -T %s pg_autoctl manual service pgctl off"
 				" --pgdata /var/lib/postgres/pgaf",
 				r->composeBase, cmd->service);
 			if (rc != 0)
 			{
+				log_info("%s", pgctlOut);
 				sformat(errBuf, errLen,
 						"stop postgres %s failed (exit %d)",
 						cmd->service, rc);
@@ -2861,12 +3003,15 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		case CMD_START_POSTGRES:
 		{
 			log_info("Starting Postgres on %s", cmd->service);
-			int rc = run_cmd(
-				"%s exec %s pg_autoctl manual service pgctl on"
+			char pgctlOut[4096] = "";
+			int rc = run_cmd_capture_both(
+				pgctlOut, sizeof(pgctlOut),
+				"%s exec -T %s pg_autoctl manual service pgctl on"
 				" --pgdata /var/lib/postgres/pgaf",
 				r->composeBase, cmd->service);
 			if (rc != 0)
 			{
+				log_info("%s", pgctlOut);
 				sformat(errBuf, errLen,
 						"start postgres %s failed (exit %d)",
 						cmd->service, rc);
@@ -3406,17 +3551,28 @@ runner_exec_step(TestRunner *r, TestStep *step, char *errBuf, int errLen,
 	for (TestCmd *cmd = step->commands; cmd; cmd = cmd->next)
 	{
 		/*
-		 * Flush all notifications that arrived during the previous command.
+		 * Flush notifications that arrived during the previous command —
+		 * UNLESS the current command is a wait.  Wait commands (CMD_WAIT_STATE,
+		 * CMD_WAIT_STATES, CMD_WAIT_MULTI) each start with their own drain that
+		 * passes the correct mark arrays, so the '*' convergence prefix is
+		 * applied to the right notifications.  Draining here without marks would
+		 * consume those notifications before the wait sees them, silencing the
+		 * '*' markers entirely.
+		 *
 		 * Loop until the socket is idle for 50 ms so we catch notifications
-		 * still in-flight in the TCP stream, not just what libpq buffered.
+		 * still in-flight in the TCP stream, not just what libpq has buffered.
 		 */
-		if (r->notifyConnected)
+		bool isWaitCmd = (cmd->kind == CMD_WAIT_STATE ||
+						  cmd->kind == CMD_WAIT_STATES ||
+						  cmd->kind == CMD_WAIT_MULTI);
+
+		if (r->notifyConnected && !isWaitCmd)
 		{
 			while (runner_wait_socket(r, 50))
 			{
 				runner_drain_notify(r, NULL, NULL, NULL, 0, NULL);
 			}
-			runner_drain_notify(r, NULL, NULL, NULL, 0, NULL); /* one last sweep of the libpq buffer */
+			runner_drain_notify(r, NULL, NULL, NULL, 0, NULL); /* one last sweep */
 		}
 
 		char label[256];
@@ -3497,15 +3653,27 @@ runner_wait_for_monitor(TestRunner *r)
 
 		/*
 		 * If the direct libpq connection can't be established (e.g. the
-		 * host IP is not in the monitor's pg_hba.conf — common when the
-		 * monitor was initialised by an older pg_autoctl version that only
-		 * added the Docker network CIDR), fall back to a subprocess check
-		 * via docker compose exec.  Once the monitor responds to psql we
-		 * return true; wait loops will use subprocess polling instead of
-		 * LISTEN/NOTIFY.
+		 * host IP is not in the monitor's pg_hba.conf — common on Docker
+		 * Desktop for Mac where published-port connections appear as
+		 * 192.168.65.1, outside the Docker bridge CIDR), fall back to a
+		 * subprocess check.  Once the monitor responds to psql, patch pg_hba
+		 * to allow all hosts (safe for local test containers with trust auth)
+		 * and retry the LISTEN connection once before falling back to polling.
 		 */
 		if (run_cmd("%s", monitorReadyCmd) == 0)
 		{
+			run_cmd("%s exec -T monitor sh -c "
+					"\"echo 'host all all 0.0.0.0/0 trust'"
+					" >> \\$PGDATA/pg_hba.conf"
+					" && pg_ctl -D \\$PGDATA reload -s\""
+					" >/dev/null 2>&1",
+					r->composeBase);
+			pg_usleep(200 * 1000);
+			if (runner_notify_connect(r))
+			{
+				log_info("Monitor is ready; LISTEN channel open");
+				return true;
+			}
 			log_info("Monitor is ready (subprocess check; LISTEN not available)");
 			return true;
 		}

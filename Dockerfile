@@ -10,7 +10,7 @@ ARG PGVERSION=17
 #
 # This base image contains all our target Postgres versions.
 #
-FROM debian:bullseye-slim AS base
+FROM debian:bookworm-slim AS base
 
 ARG PGVERSION
 
@@ -44,8 +44,6 @@ RUN apt-get update \
     make \
     autoconf \
     openssl \
-    python3-nose \
-    python3-pytest \
     python3 \
     python3-setuptools \
     python3-psycopg2 \
@@ -58,13 +56,13 @@ RUN apt-get update \
     psmisc \
     htop \
     less \
-    mg \
     valgrind \
     postgresql-common \
  && rm -rf /var/lib/apt/lists/*
 
-RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
+RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
@@ -74,7 +72,7 @@ RUN apt-get update \
      postgresql-${PGVERSION} \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install 'pyroute2>=0.5.17'
+RUN pip3 install --break-system-packages nose pytest 'pyroute2>=0.5.17'
 
 RUN adduser --disabled-password --gecos '' docker
 RUN adduser docker sudo
@@ -84,7 +82,7 @@ RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 FROM base AS citus
 
 ARG PGVERSION
-ARG CITUSTAG=v13.0.1
+ARG CITUSTAG=v13.2.0
 
 ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 
@@ -108,8 +106,8 @@ ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 WORKDIR /usr/src/pg_auto_failover
 
 COPY Makefile ./
-COPY Makefile.azure ./
 COPY Makefile.citus ./
+COPY Makefile.azure* ./
 COPY ./src/ ./src
 COPY ./src/bin/pg_autoctl/git-version.h ./src/bin/pg_autoctl/git-version.h
 # Touch bison/flex generated files so they appear newer than the grammar
@@ -146,7 +144,7 @@ ENV PATH /usr/lib/postgresql/${PGVERSION}/bin:/usr/local/sbin:/usr/local/bin:/us
 #
 # And finally our "run" images with the bare minimum for run-time.
 #
-FROM debian:bullseye-slim AS run
+FROM debian:bookworm-slim AS run
 
 ARG PGVERSION
 
@@ -170,8 +168,9 @@ RUN apt-get update \
     libpq-dev \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
-RUN echo "deb http://apt.postgresql.org/pub/repos/apt bullseye-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
+RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
 
 # bypass initdb of a "main" cluster
 RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
@@ -206,7 +205,46 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/p
 ENV PG_AUTOCTL_DEBUG=1
 ENV PGDATA=/var/lib/postgres/pgaf
 
-CMD ["pg_autoctl", "do tmux session --nodes 3 --binpath /usr/local/bin/pg_autoctl"]
+#
+# debian image — like run, but with a Debian-style "main" cluster pre-created
+# via pg_createcluster so that pg_autoctl can test adoption of the split-config
+# layout (postgresql.conf lives in /etc/postgresql/${PGVERSION}/main/ outside
+# PGDATA).  pg_autoctl node run detects the missing postgresql.conf in PGDATA,
+# moves the conf files in, and proceeds normally — no entrypoint changes needed.
+#
+FROM run AS debian
+
+ARG PGVERSION
+
+USER root
+RUN pg_createcluster \
+      --user docker --group postgres \
+      ${PGVERSION} main \
+      -- --auth-local trust --auth-host trust \
+ && chown docker /var/lib/postgresql/${PGVERSION}
+
+USER docker
+ENV PGDATA=/var/lib/postgresql/${PGVERSION}/main
+
+#
+# testrun image — like run, but adds postgresql-server-dev and the full source
+# tree so that "make installcheck" works inside the monitor container.
+# Used by installcheck.pgaf via "monitor image-target testrun".
+#
+FROM run AS testrun
+
+ARG PGVERSION
+
+USER root
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    make \
+    postgresql-server-dev-${PGVERSION} \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --chown=docker ./src/ /usr/src/pg_auto_failover/src/
+
+USER docker
 
 #
 # pgaftest image — standalone test-runner image.

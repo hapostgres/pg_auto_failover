@@ -79,10 +79,8 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 	hints.ai_socktype = SOCK_STREAM; /* we only want TCP sockets */
 	hints.ai_protocol = IPPROTO_TCP; /* we only want TCP sockets */
 
-	IntString servicePortStr = intToString(servicePort);
-
 	if (!GetAddrInfo(serviceName,
-					 servicePortStr.strValue,
+					 intToString(servicePort).strValue,
 					 &hints,
 					 &lookup))
 	{

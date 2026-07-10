@@ -1,0 +1,306 @@
+# Test multi-standby formation features with four nodes.
+# Covers: candidate-priority and replication-quorum APIs (get/set/validate),
+# number_sync_standbys get/set and the auto-decrement trigger when a node is
+# dropped, failover and read-from-all-nodes verification, network-partition
+# failover, unblocking writes by setting number-sync-standbys=0 while two
+# standbys are down, and the edge case where all candidate priorities are zero
+# (no promotion possible until one priority is raised to ≥1).
+#
+# Predecessor: tests/test_multi_standbys.py
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+        node3
+        node4
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    wait until node2 state is secondary
+        and node3 state is secondary
+        and node4 state is secondary
+        timeout 60s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_002: candidate priority API
+#
+
+step test_002_candidate_priority {
+    exec node1  pg_autoctl get node candidate-priority
+    expect { 50 }
+    exec-fails node1  pg_autoctl set node candidate-priority -1
+    exec node1  pg_autoctl get node candidate-priority
+    expect { 50 }
+    exec node1  pg_autoctl set node candidate-priority 99
+    exec node1  pg_autoctl get node candidate-priority
+    expect { 99 }
+}
+
+#
+# test_003: replication quorum API
+#
+
+step test_003_replication_quorum {
+    exec node1  pg_autoctl get node replication-quorum
+    expect { true }
+    exec-fails node1  pg_autoctl set node replication-quorum "wrong quorum"
+    exec node1  pg_autoctl get node replication-quorum
+    expect { true }
+    exec node1  pg_autoctl set node replication-quorum false
+    exec node1  pg_autoctl get node replication-quorum
+    expect { false }
+    exec node1  pg_autoctl set node replication-quorum true
+    exec node1  pg_autoctl get node replication-quorum
+    expect { true }
+}
+
+step test_004_001_add_three_standbys {
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 60s
+}
+
+step test_004_002_add_three_standbys {
+    wait until node3 state is secondary
+        and node1 state is primary
+        timeout 60s
+}
+
+step test_004_003_add_three_standbys {
+    wait until node4 state is secondary
+        and node1 state is primary
+        timeout 60s
+}
+
+#
+# test_005: number_sync_standbys
+#
+
+step test_005_number_sync_standbys {
+    exec node1  pg_autoctl set formation number-sync-standbys 2
+    wait until node1 state is primary  timeout 30s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 2 (pgautofailover_standby_2, pgautofailover_standby_3, pgautofailover_standby_4) }
+    exec node1  pg_autoctl set formation number-sync-standbys 0
+    wait until node1 state is primary  timeout 30s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3, pgautofailover_standby_4) }
+    exec node1  pg_autoctl set formation number-sync-standbys 1
+    wait until node1 state is primary  timeout 30s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3, pgautofailover_standby_4) }
+}
+
+step test_006_number_sync_standbys_trigger {
+    exec node1  pg_autoctl set formation number-sync-standbys 2
+    exec monitor  pg_autoctl drop node --name node4
+    compose stop node4
+    wait until node1 state is primary  timeout 90s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
+    sleep 6s
+}
+
+#
+# test_007: create table t1
+#
+
+step test_007_create_t1 {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+    sql node1 { CHECKPOINT; }
+}
+
+step test_008_set_candidate_priorities {
+    exec node1  pg_autoctl set node candidate-priority 90
+    exec node2  pg_autoctl set node candidate-priority 90
+    exec node3  pg_autoctl set node candidate-priority 70
+    wait until node1 state is primary  timeout 60s
+}
+
+#
+# test_009: failover — node2 becomes primary
+#
+
+step test_009_failover {
+    exec monitor  pg_autoctl perform failover
+    wait until node2 state is primary
+        and node3 state is secondary
+        and node1 state is secondary
+        timeout 90s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_1, pgautofailover_standby_3) }
+}
+
+#
+# test_010: read from all nodes
+#
+
+step test_010_read_from_nodes {
+    sql node1 { SELECT * FROM t1; }
+    expect { { 1 } { 2 } }
+    sql node2 { SELECT * FROM t1; }
+    expect { { 1 } { 2 } }
+    sql node3 { SELECT * FROM t1; }
+    expect { { 1 } { 2 } }
+}
+
+#
+# test_011: write into new primary
+#
+
+step test_011_write_into_new_primary {
+    sql node2 { INSERT INTO t1 VALUES (3), (4); }
+    sql node2 { CHECKPOINT; }
+}
+
+#
+# test_012: fail primary node2
+#
+
+step test_012_fail_primary {
+    network disconnect node2
+    wait until node1 state is stop_replication  timeout 90s
+    wait until node1 state is primary
+        and node3 state is secondary
+        timeout 90s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
+}
+
+#
+# test_013: restart node2 as secondary
+#
+
+step test_013_restart_node2 {
+    network connect node2
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 90s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
+}
+
+step test_014_001_fail_set_properties {
+    exec node1  pg_autoctl set node candidate-priority 50
+    exec node2  pg_autoctl set node candidate-priority 50
+    exec node3  pg_autoctl set node candidate-priority 50
+    wait until node1 state is primary  timeout 60s
+}
+
+step test_014_002_fail_two_standby_nodes {
+    compose stop node2
+    compose stop node3
+    wait until node2 assigned-state = catchingup  timeout 180s
+    wait until node3 assigned-state = catchingup  timeout 180s
+    # node1 remains primary (blocking writes at postgres level) until
+    # number-sync-standbys is explicitly set to 0 in the next step.
+    wait until node1 state is primary  timeout 180s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
+}
+
+step test_014_003_unblock_writes {
+    exec node1  pg_autoctl set formation number-sync-standbys 0
+    wait until node1 state is wait_primary  timeout 90s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect {  }
+}
+
+step test_014_004_restart_nodes {
+    compose start node3
+    compose start node2
+    wait until node3 state is secondary
+        and node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
+}
+
+step test_015_002_fail_two_standby_nodes {
+    network disconnect node2
+    network disconnect node3
+    wait until node1 state is wait_primary  timeout 90s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect {  }
+}
+
+step test_015_003_set_properties {
+    sql monitor {
+        SELECT pgautofailover.set_formation_number_sync_standbys('default', 1);
+    }
+    wait until node1 assigned-state = primary  timeout 90s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
+}
+
+step test_015_004_restart_nodes {
+    network connect node3
+    network connect node2
+    wait until node3 state is secondary
+        and node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
+}
+
+step test_016_001_set_candidate_priorities_to_zero {
+    exec node1  pg_autoctl set node candidate-priority 0
+    exec node2  pg_autoctl set node candidate-priority 0
+    exec node3  pg_autoctl set node candidate-priority 0
+    wait until node1 state is primary  timeout 60s
+}
+
+step test_016_002_trigger_failover {
+    exec monitor  bash -c "pg_autoctl perform failover --wait 1 || true"
+    wait until node3 state is report_lsn
+        and node2 state is report_lsn
+        and node1 state is report_lsn
+        timeout 90s
+}
+
+step test_016_003_set_candidate_priority_to_one {
+    exec node2  pg_autoctl set node candidate-priority 1
+    wait until node2 state is primary
+        and node1 state is secondary
+        and node3 state is secondary
+        timeout 90s
+}
+
+step test_016_004_reset_candidate_priority {
+    exec node2  pg_autoctl set node candidate-priority 0
+    wait until node2 state is primary
+        and node1 state is secondary
+        and node3 state is secondary
+        timeout 60s
+}
+
+step test_016_005_perform_promotion {
+    exec monitor  pg_autoctl perform promotion --name node1
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 90s
+}
+
+step test_017_remove_old_primary {
+    exec monitor  pg_autoctl drop node --name node2
+    compose stop node2
+    wait until node1 state is primary
+        and node3 state is secondary
+        timeout 90s
+}

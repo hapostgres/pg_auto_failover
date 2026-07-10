@@ -1,0 +1,80 @@
+# Test creating a standby from an existing PGDATA directory.
+#
+# test_003/004/005: verify that registering a node whose PGDATA was created by
+# a separate initdb (different system_identifier) is rejected by the monitor.
+#
+# test_006: start node3 via pg_autoctl node start; pg_autoctl detects the
+# pre-existing pg_basebackup PGDATA and sets up streaming replication without
+# running another pg_basebackup (skipBaseBackup path in fsm_init_standby).
+#
+# Both node2 and node3 are declared launch deferred: their containers sleep
+# until a step explicitly calls pg_autoctl node start (which rewrites the ini
+# from mode=deferred to mode=immediate and unblocks the waiting node run loop).
+#
+# Ported from tests/test_create_standby_with_pgdata.py
+# Predecessor: tests/test_create_standby_with_pgdata.py
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2 launch deferred
+        node3 launch deferred
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+    exec node1  pg_autoctl inspect pgsetup wait
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: init primary
+#
+
+step test_001_init_primary {
+    wait until node1 state is single  timeout 60s
+}
+
+#
+# test_002: create table t1
+#
+
+step test_002_create_t1 {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step test_003_init_secondary {
+    exec node2  pg_ctl initdb -D /var/lib/postgres/pgaf
+}
+
+step test_004_create_raises_error {
+    exec-fails node2  pg_autoctl create postgres --pgdata /var/lib/postgres/pgaf --monitor postgresql://autoctl_node@monitor/pg_auto_failover --auth trust --ssl-self-signed --name node2 --hostname node2
+}
+
+step test_005_cleanup_after_failure {
+    exec node2  rm -rf /var/lib/postgres/pgaf
+}
+
+step test_006_init_secondary {
+    exec node3  pg_autoctl node start /etc/pgaf/node.ini
+    wait until node3 state is secondary
+        and node1 state is primary
+        timeout 90s
+}
+
+#
+# test_007: manual failover to node3
+#
+
+step test_007_failover {
+    exec monitor  pg_autoctl perform failover
+    wait until node3 state is primary
+        and node1 state is secondary
+        timeout 90s
+}

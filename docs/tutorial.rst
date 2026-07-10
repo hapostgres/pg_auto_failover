@@ -366,6 +366,46 @@ To dispose of the entire tutorial environment, just use the following command:
 
    $ docker compose down
 
+.. _tutorial_pgaftest:
+
+Alternative: interactive cluster with pgaftest
+----------------------------------------------
+
+The same two-node cluster from this tutorial can be started with a single
+``pgaftest`` command, without writing any compose files or ini files by hand.
+``pgaftest`` generates both from the spec file, starts the cluster, and opens
+a tmux session so you can explore it immediately.
+
+The following spec file describes the tutorial topology:
+
+.. literalinclude:: tutorial/interactive_tutorial.pgaf
+   :language: text
+   :caption: docs/tutorial/interactive_tutorial.pgaf
+
+Start it with:
+
+::
+
+   $ pgaftest setup docs/tutorial/interactive_tutorial.pgaf --tmux
+
+Three tmux panes open as soon as the cluster is healthy:
+
+- **top** — ``docker compose logs -f`` (live container output)
+- **middle** — ``pg_autoctl watch`` state dashboard
+- **bottom** — interactive ``bash`` in ``node1``
+
+From the bottom pane you can trigger a failover::
+
+   pg_autoctl perform failover \
+       --monitor postgresql://autoctl_node@monitor/pg_auto_failover
+
+Watch the middle pane as the FSM transitions unfold in real time.  When you
+are done, tear down the cluster from any shell::
+
+   $ pgaftest down --work-dir /tmp/pgaftest/interactive_tutorial
+
+For the full ``pgaftest`` reference see :ref:`pgaftest`.
+
 Next steps
 ----------
 

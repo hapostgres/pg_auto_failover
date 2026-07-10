@@ -1642,9 +1642,11 @@ SyncStateToString(SyncState pgsrSyncState)
 		}
 
 		default:
+		{
 			ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 							errmsg("unknown SyncState enum value %d",
 								   pgsrSyncState)));
+		}
 	}
 
 	/* keep compiler happy */
