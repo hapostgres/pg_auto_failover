@@ -648,155 +648,154 @@ compose_gen_write(TestCluster *cluster,
 	/* ---- data nodes — iterate all formations ---- */
 
 	/*
-	 * In scenario (monitor-API-only) mode, nodes are virtual: only names used
-	 * in node_active calls.  No data-node containers are generated.
+	 * Non-default formations are listed in [formation <name>] sections of the
+	 * monitor.ini.  pg_autoctl node run reads them and creates each one after
+	 * the monitor is initialized, before starting the supervisor.
+	 * Data nodes retry registration until their formation exists.
 	 */
 	const TestNode *firstNode = NULL;
 
-	if (!cluster->monitorApiOnly)
+	for (int fi = 0; fi < cluster->formationCount; fi++)
 	{
-		for (int fi = 0; fi < cluster->formationCount; fi++)
+		const TestFormation *form = &cluster->formations[fi];
+
+		for (int ni = 0; ni < form->nodeCount; ni++)
 		{
-			const TestFormation *form = &cluster->formations[fi];
-
-			for (int ni = 0; ni < form->nodeCount; ni++)
+			const TestNode *n = &form->nodes[ni];
+			fformat(f, "  %s:\n", n->name);
+			if (n->debianCluster[0])
 			{
-				const TestNode *n = &form->nodes[ni];
-				fformat(f, "  %s:\n", n->name);
-				if (n->debianCluster[0])
-				{
-					write_image_stanza_target(f, cluster, contextDir, "debian");
-				}
-				else
-				{
-					write_image_stanza(f, cluster, contextDir);
-				}
+				write_image_stanza_target(f, cluster, contextDir, "debian");
+			}
+			else
+			{
+				write_image_stanza(f, cluster, contextDir);
+			}
 
-				/* debian PGDATA: /var/lib/postgresql/<ver>/<cluster> */
-				char node_pgdata[MAXPGPATH];
-				if (n->debianCluster[0])
-				{
-					sformat(node_pgdata, sizeof(node_pgdata),
-							DEBIAN_PGDATA_PREFIX "/%s/%s",
-							debian_pg_version(), n->debianCluster);
-				}
-				else
-				{
-					strlcpy(node_pgdata, NODE_PGDATA, sizeof(node_pgdata));
-				}
+			/* debian PGDATA: /var/lib/postgresql/<ver>/<cluster> */
+			char node_pgdata[MAXPGPATH];
+			if (n->debianCluster[0])
+			{
+				sformat(node_pgdata, sizeof(node_pgdata),
+						DEBIAN_PGDATA_PREFIX "/%s/%s",
+						debian_pg_version(), n->debianCluster);
+			}
+			else
+			{
+				strlcpy(node_pgdata, NODE_PGDATA, sizeof(node_pgdata));
+			}
 
+			fformat(f,
+					"    hostname: %s\n"
+					"    volumes:\n"
+					"      - %s_data:/var/lib/postgres:rw\n"
+					"      - ./%s.ini:" NODE_INI_PATH ":%s\n",
+					n->name,
+					n->name,
+					n->name,
+					n->launchDeferred ? "rw" : "ro");
+			if (ssl_needs_certs(cluster->ssl))
+			{
 				fformat(f,
-						"    hostname: %s\n"
-						"    volumes:\n"
-						"      - %s_data:/var/lib/postgres:rw\n"
-						"      - ./%s.ini:" NODE_INI_PATH ":%s\n",
-						n->name,
-						n->name,
-						n->name,
-						n->launchDeferred ? "rw" : "ro");
-				if (ssl_needs_certs(cluster->ssl))
-				{
-					fformat(f,
-							"      - ./ssl/ca.crt:" SSL_DIR_IN_CONTAINER "/ca.crt:ro\n"
-																		 "      - ./ssl/%s:"
-							SSL_DIR_IN_CONTAINER "/server:ro\n"
-												 "      - ./ssl/client:"
-							SSL_DIR_IN_CONTAINER "/client:ro\n",
-							n->name);
-				}
-				for (int vi = 0; vi < n->volumeCount; vi++)
-				{
-					fformat(f, "      - %s_%s:%s:rw\n",
-							n->volumes[vi].name, n->name, n->volumes[vi].path);
-				}
-				if (specDir && specDir[0])
-				{
-					fformat(f,
-							"      - %s:/etc/pgaf/specs:ro\n", specDir);
-				}
+						"      - ./ssl/ca.crt:" SSL_DIR_IN_CONTAINER "/ca.crt:ro\n"
+																	 "      - ./ssl/%s:"
+						SSL_DIR_IN_CONTAINER "/server:ro\n"
+											 "      - ./ssl/client:"
+						SSL_DIR_IN_CONTAINER "/client:ro\n",
+						n->name);
+			}
+			for (int vi = 0; vi < n->volumeCount; vi++)
+			{
+				fformat(f, "      - %s_%s:%s:rw\n",
+						n->volumes[vi].name, n->name, n->volumes[vi].path);
+			}
+			if (specDir && specDir[0])
+			{
 				fformat(f,
-						"    environment:\n"
-						"      PGDATA: %s\n"
-						"      PGUSER: demo\n"
-						"      PGDATABASE: demo\n"
-						"      PG_AUTOCTL_TEST_DELAY: \"1\"\n"
-						"    expose:\n"
-						"      - 5432\n",
-						node_pgdata);
+						"      - %s:/etc/pgaf/specs:ro\n", specDir);
+			}
+			fformat(f,
+					"    environment:\n"
+					"      PGDATA: %s\n"
+					"      PGUSER: demo\n"
+					"      PGDATABASE: demo\n"
+					"      PG_AUTOCTL_TEST_DELAY: \"1\"\n"
+					"    expose:\n"
+					"      - 5432\n",
+					node_pgdata);
 
+			/*
+			 * No depends_on: keeper retry loops handle monitor not yet ready,
+			 * and the formation wait in keeper_register_and_init handles the
+			 * case where the formation hasn't been created yet.
+			 */
+
+			/* per-node ssl override may differ from cluster default */
+			const char *node_ssl = n->ssl[0] ? n->ssl : cluster->ssl;
+			fformat(f,
+					"    command: [\"/bin/sh\", \"-c\","
+					" \"%s rm -f /tmp/pg_autoctl%s/pg_autoctl.pid"
+					" && exec pg_autoctl node run " NODE_INI_PATH "\"]\n"
+																  "    stop_grace_period: 60s\n",
+					ssl_needs_certs(node_ssl) ? SSL_COPY_CERTS_CMD : "",
+					node_pgdata);
+
+			/*
+			 * With a monitor: the first data node gets a healthcheck so that
+			 * subsequent nodes use service_healthy depends_on.  This ensures
+			 * node1 has registered with the monitor (and become the initial
+			 * primary) before any other node starts, making the initial
+			 * election deterministic.
+			 *
+			 * Without a monitor (no-monitor nodes): the FSM is driven
+			 * manually via pg_autoctl manual fsm assign, so postgres is not
+			 * running when the container starts.  No healthcheck; subsequent
+			 * nodes use service_started so they launch as soon as node1 has
+			 * started (they don't need postgres to be ready yet).
+			 */
+			if (!firstNode && cluster->withMonitor && !n->launchDeferred)
+			{
 				/*
-				 * No depends_on: keeper retry loops handle monitor not yet ready,
-				 * and the formation wait in keeper_register_and_init handles the
-				 * case where the formation hasn't been created yet.
+				 * SSL clusters take longer to initialise on slow CI runners
+				 * (cert generation + pg_autoctl SSL config + monitor TLS
+				 * handshake).  Double start_period so the runner has time to
+				 * complete init before failures start counting.
 				 */
-
-				/* per-node ssl override may differ from cluster default */
-				const char *node_ssl = n->ssl[0] ? n->ssl : cluster->ssl;
+				const char *hc_start =
+					ssl_needs_certs(node_ssl) ? "300s" : "120s";
 				fformat(f,
-						"    command: [\"/bin/sh\", \"-c\","
-						" \"%s rm -f /tmp/pg_autoctl%s/pg_autoctl.pid"
-						" && exec pg_autoctl node run " NODE_INI_PATH "\"]\n"
-																	  "    stop_grace_period: 60s\n",
-						ssl_needs_certs(node_ssl) ? SSL_COPY_CERTS_CMD : "",
-						node_pgdata);
+						"    healthcheck:\n"
+						"      test: [\"CMD\", \"pg_autoctl\", \"status\","
+						" \"--pgdata\", \"%s\"]\n"
+						"      interval: 2s\n"
+						"      timeout: 5s\n"
+						"      retries: 150\n"
+						"      start_period: %s\n",
+						node_pgdata, hc_start);
+			}
 
-				/*
-				 * With a monitor: the first data node gets a healthcheck so that
-				 * subsequent nodes use service_healthy depends_on.  This ensures
-				 * node1 has registered with the monitor (and become the initial
-				 * primary) before any other node starts, making the initial
-				 * election deterministic.
-				 *
-				 * Without a monitor (no-monitor nodes): the FSM is driven
-				 * manually via pg_autoctl manual fsm assign, so postgres is not
-				 * running when the container starts.  No healthcheck; subsequent
-				 * nodes use service_started so they launch as soon as node1 has
-				 * started (they don't need postgres to be ready yet).
-				 */
-				if (!firstNode && cluster->withMonitor && !n->launchDeferred)
-				{
-					/*
-					 * SSL clusters take longer to initialise on slow CI runners
-					 * (cert generation + pg_autoctl SSL config + monitor TLS
-					 * handshake).  Double start_period so the runner has time to
-					 * complete init before failures start counting.
-					 */
-					const char *hc_start =
-						ssl_needs_certs(node_ssl) ? "300s" : "120s";
-					fformat(f,
-							"    healthcheck:\n"
-							"      test: [\"CMD\", \"pg_autoctl\", \"status\","
-							" \"--pgdata\", \"%s\"]\n"
-							"      interval: 2s\n"
-							"      timeout: 5s\n"
-							"      retries: 150\n"
-							"      start_period: %s\n",
-							node_pgdata, hc_start);
-				}
+			if (firstNode)
+			{
+				fformat(f,
+						"    depends_on:\n"
+						"      %s:\n"
+						"        condition: %s\n",
+						firstNode->name,
+						cluster->withMonitor ? "service_healthy" : "service_started");
+			}
+			else if (cluster->withMonitor && !n->launchDeferred)
+			{
+				/* node1: wait for monitor to be healthy before starting */
+				fformat(f,
+						"    depends_on:\n"
+						"      monitor:\n"
+						"        condition: service_healthy\n");
+			}
+			fformat(f, "\n");
 
-				if (firstNode)
-				{
-					fformat(f,
-							"    depends_on:\n"
-							"      %s:\n"
-							"        condition: %s\n",
-							firstNode->name,
-							cluster->withMonitor ? "service_healthy" : "service_started");
-				}
-				else if (cluster->withMonitor && !n->launchDeferred)
-				{
-					/* node1: wait for monitor to be healthy before starting */
-					fformat(f,
-							"    depends_on:\n"
-							"      monitor:\n"
-							"        condition: service_healthy\n");
-				}
-				fformat(f, "\n");
-
-				if (!firstNode && !n->launchDeferred)
-				{
-					firstNode = n;
-				}
+			if (!firstNode && !n->launchDeferred)
+			{
+				firstNode = n;
 			}
 		}
 	}
@@ -888,14 +887,6 @@ compose_gen_write(TestCluster *cluster,
 					"        condition: service_healthy\n",
 					firstNode->name);
 		}
-		else if (cluster->monitorApiOnly && cluster->withMonitor)
-		{
-			/* scenario mode: no data nodes, wait for monitor only */
-			fformat(f,
-					"    depends_on:\n"
-					"      monitor:\n"
-					"        condition: service_healthy\n");
-		}
 		fformat(f, "    command: [\"pgaftest\", \"run\", \"/spec.pgaf\"]\n\n");
 	}
 
@@ -909,19 +900,16 @@ compose_gen_write(TestCluster *cluster,
 	{
 		fformat(f, "  %s_data:\n", cluster->secondMonitorName);
 	}
-	if (!cluster->monitorApiOnly)
+	for (int fi = 0; fi < cluster->formationCount; fi++)
 	{
-		for (int fi = 0; fi < cluster->formationCount; fi++)
+		const TestFormation *form = &cluster->formations[fi];
+		for (int ni = 0; ni < form->nodeCount; ni++)
 		{
-			const TestFormation *form = &cluster->formations[fi];
-			for (int ni = 0; ni < form->nodeCount; ni++)
+			const TestNode *n = &form->nodes[ni];
+			fformat(f, "  %s_data:\n", n->name);
+			for (int vi = 0; vi < n->volumeCount; vi++)
 			{
-				const TestNode *n = &form->nodes[ni];
-				fformat(f, "  %s_data:\n", n->name);
-				for (int vi = 0; vi < n->volumeCount; vi++)
-				{
-					fformat(f, "  %s_%s:\n", n->volumes[vi].name, n->name);
-				}
+				fformat(f, "  %s_%s:\n", n->volumes[vi].name, n->name);
 			}
 		}
 	}

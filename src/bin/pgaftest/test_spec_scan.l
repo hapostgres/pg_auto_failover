@@ -31,10 +31,8 @@ int pgaf_line_number = 1;
 static int pgaf_next_brace_is_step = 0;
 
 /*
- * When the lexer sees "cluster" or "scenario", it sets this flag so the
- * next "{" enters CLUSTER_BODY rather than doing the raw block read.
- * The CLUSTER_BODY state is reused for "scenario" since the inner syntax
- * (formation, node names, ssl, auth) is identical.
+ * When the lexer sees "cluster", it sets this flag so the next "{"
+ * enters CLUSTER_BODY rather than doing the raw block read.
  */
 static int pgaf_next_brace_is_cluster = 0;
 
@@ -93,7 +91,6 @@ static void pgaf_read_raw_block(void);
 "#"[^\n]*           { /* comment */ }
 
 "cluster"           { pgaf_next_brace_is_cluster = 1; return T_CLUSTER; }
-"scenario"          { pgaf_next_brace_is_cluster = 1; return T_SCENARIO; }
 "monitor"           { return T_MONITOR; }
 "node"              { return T_NODE; }
 "citus-coordinator" { return T_CITUS_COORDINATOR; }
@@ -296,12 +293,6 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"not"           { return T_NOT; }
 <STEP_BODY>"contains"      { return T_CONTAINS; }
 <STEP_BODY>"matches"       { return T_MATCHES; }
-<STEP_BODY>"node_active"   { return T_NODE_ACTIVE; }
-<STEP_BODY>"mark"          { return T_MARK; }
-<STEP_BODY>"healthy"       { return T_HEALTHY; }
-<STEP_BODY>"unhealthy"     { return T_UNHEALTHY; }
-<STEP_BODY>"states"        { return T_STATES; }
-<STEP_BODY>":"             { return ':'; }
 
 <STEP_BODY>[0-9]+[sS]?  {
 	yylval.ival = atoi(yytext);
