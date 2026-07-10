@@ -1149,7 +1149,7 @@ monitor_wait_formation_states(TestRunner *r,
 	runner_notify_connect(r);
 
 	/* pointer arrays for drain marking — NULL node = wildcard (any node) */
-	const char *ms[PGAF_MAX_WAIT_STATES];
+	const char *ms[PGAF_MAX_WAIT_STATES] = { 0 };
 	for (int i = 0; i < stateCount && i < PGAF_MAX_WAIT_STATES; i++)
 	{
 		ms[i] = states[i];
