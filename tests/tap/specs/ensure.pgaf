@@ -48,8 +48,19 @@ step test_003_init_secondary {
 }
 
 step test_004_demoted {
+    # After step 003 stopped and restarted postgres on node2, the cluster may
+    # still be mid-oscillation (node2 re-catching up, node1 in wait_primary).
+    # Wait for a fresh stable primary before triggering the failover, otherwise
+    # compose stop fires while node1 is in wait_primary and no failover occurs.
+    wait until node1 state is primary  timeout 60s
     compose stop node1
-    sleep 30s
+    # Wait for node2 to reach wait_primary — the failover's point of no return.
+    # node2 cannot reach 'primary' while node1 is stopped (it needs a sync
+    # standby), so we must not wait for 'primary' here.  Once node2 is in
+    # wait_primary the monitor has committed to node2 as the new primary; when
+    # node1 restarts it will come back as secondary, and node2 will then
+    # transition from wait_primary → primary.
+    wait until node2 state is wait_primary  timeout 90s
     compose start node1
     # 'demoted' is a sub-second transient state; waiting for it races on
     # loaded shared CI runners.  Wait for the stable end state instead.
