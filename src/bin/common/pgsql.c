@@ -3238,6 +3238,9 @@ parseTimeLineHistory(const char *filename, const char *content,
 			return false;
 		}
 
+		memset(newHistory + system->timelines.capacity,
+			   0,
+			   (cap - system->timelines.capacity) * sizeof(TimeLineHistoryEntry));
 		system->timelines.history = newHistory;
 		system->timelines.capacity = cap;
 	}
