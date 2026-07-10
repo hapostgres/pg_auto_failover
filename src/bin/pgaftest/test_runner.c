@@ -2845,8 +2845,8 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 */
 			log_info("Stopping Postgres on %s", cmd->service);
 			int rc = run_cmd(
-				"%s exec %s pg_autoctl manual service pgctl off"
-				" --pgdata /var/lib/postgres/pgaf",
+				"%s exec -T %s pg_autoctl manual service pgctl off"
+				" --pgdata /var/lib/postgres/pgaf >/dev/null 2>&1",
 				r->composeBase, cmd->service);
 			if (rc != 0)
 			{
@@ -2862,8 +2862,8 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		{
 			log_info("Starting Postgres on %s", cmd->service);
 			int rc = run_cmd(
-				"%s exec %s pg_autoctl manual service pgctl on"
-				" --pgdata /var/lib/postgres/pgaf",
+				"%s exec -T %s pg_autoctl manual service pgctl on"
+				" --pgdata /var/lib/postgres/pgaf >/dev/null 2>&1",
 				r->composeBase, cmd->service);
 			if (rc != 0)
 			{
@@ -3406,17 +3406,28 @@ runner_exec_step(TestRunner *r, TestStep *step, char *errBuf, int errLen,
 	for (TestCmd *cmd = step->commands; cmd; cmd = cmd->next)
 	{
 		/*
-		 * Flush all notifications that arrived during the previous command.
+		 * Flush notifications that arrived during the previous command —
+		 * UNLESS the current command is a wait.  Wait commands (CMD_WAIT_STATE,
+		 * CMD_WAIT_STATES, CMD_WAIT_MULTI) each start with their own drain that
+		 * passes the correct mark arrays, so the '*' convergence prefix is
+		 * applied to the right notifications.  Draining here without marks would
+		 * consume those notifications before the wait sees them, silencing the
+		 * '*' markers entirely.
+		 *
 		 * Loop until the socket is idle for 50 ms so we catch notifications
-		 * still in-flight in the TCP stream, not just what libpq buffered.
+		 * still in-flight in the TCP stream, not just what libpq has buffered.
 		 */
-		if (r->notifyConnected)
+		bool isWaitCmd = (cmd->kind == CMD_WAIT_STATE ||
+						  cmd->kind == CMD_WAIT_STATES ||
+						  cmd->kind == CMD_WAIT_MULTI);
+
+		if (r->notifyConnected && !isWaitCmd)
 		{
 			while (runner_wait_socket(r, 50))
 			{
 				runner_drain_notify(r, NULL, NULL, NULL, 0, NULL);
 			}
-			runner_drain_notify(r, NULL, NULL, NULL, 0, NULL); /* one last sweep of the libpq buffer */
+			runner_drain_notify(r, NULL, NULL, NULL, 0, NULL); /* one last sweep */
 		}
 
 		char label[256];
