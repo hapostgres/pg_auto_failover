@@ -3190,8 +3190,59 @@ parseTimeLineHistory(const char *filename, const char *content,
 
 	system->timelines.count = 0;
 
-	TimeLineHistoryEntry *entry =
-		&(system->timelines.history[system->timelines.count]);
+	/*
+	 * Ensure the history buffer exists and has room for at least lineCount + 1
+	 * entries (all parsed lines plus the tip entry written after the loop).
+	 * We reuse the buffer across calls; realloc only when capacity is tight.
+	 */
+	int needed = lineCount + 1;
+
+	if (system->timelines.history == NULL)
+	{
+		int cap = PG_AUTOCTL_TIMELINES_INITIAL_CAPACITY;
+
+		while (cap < needed)
+		{
+			cap *= 2;
+		}
+
+		system->timelines.history =
+			(TimeLineHistoryEntry *) calloc(cap, sizeof(TimeLineHistoryEntry));
+
+		if (system->timelines.history == NULL)
+		{
+			log_error(ALLOCATION_FAILED_ERROR);
+			free(historyLines);
+			return false;
+		}
+
+		system->timelines.capacity = cap;
+	}
+	else if (system->timelines.capacity < needed)
+	{
+		int cap = system->timelines.capacity;
+
+		while (cap < needed)
+		{
+			cap *= 2;
+		}
+
+		TimeLineHistoryEntry *newHistory =
+			(TimeLineHistoryEntry *) realloc(system->timelines.history,
+											 cap * sizeof(TimeLineHistoryEntry));
+
+		if (newHistory == NULL)
+		{
+			log_error(ALLOCATION_FAILED_ERROR);
+			free(historyLines);
+			return false;
+		}
+
+		system->timelines.history = newHistory;
+		system->timelines.capacity = cap;
+	}
+
+	TimeLineHistoryEntry *entry = &(system->timelines.history[0]);
 
 	for (lineNumber = 0; lineNumber < lineCount; lineNumber++)
 	{
@@ -3271,7 +3322,7 @@ parseTimeLineHistory(const char *filename, const char *content,
 
 	/*
 	 * Create one more entry for the "tip" of the timeline, which has no entry
-	 * in the history file.
+	 * in the history file. Capacity was pre-checked above to include this slot.
 	 */
 	entry->tli = system->timeline;
 	entry->begin = prevend;
