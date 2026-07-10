@@ -33,13 +33,10 @@ else
 GIT_VERSION := $(shell awk -F '[ "]' '{print $$4}' $(VERSION_FILE))
 endif
 
-# Azure only targets and variables are in a separate Makefile
-include Makefile.azure
-
 #
 # LIST TESTS
 #
-NOSETESTS = $(shell which nosetests3 || which nosetests)
+PYTEST = $(shell which pytest || which pytest3)
 
 # Tests for the monitor
 TESTS_MONITOR  = test_extension_update
@@ -78,17 +75,17 @@ TESTS_MULTI += test_multi_standbys
 # Included Makefile may define TEST_ARGUMENT (like for citus)
 TEST ?=
 ifeq ($(TEST),)
-	TEST_ARGUMENT = --where=tests
+	TEST_ARGUMENT = tests/*.py
 else ifeq ($(TEST),multi)
-	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MULTI)
+	TEST_ARGUMENT = $(TESTS_MULTI:%=tests/%.py)
 else ifeq ($(TEST),single)
-	TEST_ARGUMENT = --where=tests --tests=$(TESTS_SINGLE)
+	TEST_ARGUMENT = $(TESTS_SINGLE:%=tests/%.py)
 else ifeq ($(TEST),monitor)
-	TEST_ARGUMENT = --where=tests --tests=$(TESTS_MONITOR)
+	TEST_ARGUMENT = $(TESTS_MONITOR:%=tests/%.py)
 else ifeq ($(TEST),ssl)
-	TEST_ARGUMENT = --where=tests --tests=$(TESTS_SSL)
+	TEST_ARGUMENT = $(TESTS_SSL:%=tests/%.py)
 else
-	TEST_ARGUMENT = $(TEST:%=tests/%.py)
+	TEST_ARGUMENT = tests/$(TEST).py
 endif
 
 #
@@ -167,11 +164,10 @@ ifeq ($(TEST),tablespaces)
 	$(MAKE) -C tests/tablespaces run-test
 else
 	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
-		$(NOSETESTS)			\
-		--verbose				\
-		--nologcapture			\
-		--nocapture				\
-		--stop					\
+		$(PYTEST)				\
+		-v						\
+		-s						\
+		-x						\
 		${TEST_ARGUMENT}
 endif
 
@@ -349,6 +345,35 @@ run-test: build-test-pg$(PGVERSION)
 		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
 		make -C /usr/src/pg_auto_failover test	\
 		PGVERSION=$(PGVERSION) TEST='${TEST}'
+
+# make run-test-prebuilt; like ci-test but skips the Docker build step.
+# Used in CI after images have been built and loaded by a prior job.
+.PHONY: run-test-prebuilt
+run-test-prebuilt:
+ifeq ($(TEST),tablespaces)
+	$(MAKE) -C tests/tablespaces run-test
+else
+	docker run					                \
+		--name $(TEST_CONTAINER_NAME)		    \
+		$(DOCKER_RUN_OPTS)			            \
+		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
+		make -C /usr/src/pg_auto_failover test	\
+		PGVERSION=$(PGVERSION) TEST='${TEST}'
+endif
+
+# make save-test-image; compresses the test image to a .tar.zst archive.
+# Used in CI to pass the built image to downstream test jobs as an artifact.
+.PHONY: save-test-image
+save-test-image:
+	docker save $(TEST_CONTAINER_NAME):pg$(PGVERSION) \
+	  | zstd -T0 -3 > $(TEST_CONTAINER_NAME)-pg$(PGVERSION).tar.zst
+
+# make load-test-image; decompresses and loads a .tar.zst image archive.
+# Used in CI test jobs that download the image from a prior build job.
+.PHONY: load-test-image
+load-test-image:
+	zstd -d --stdout $(TEST_CONTAINER_NAME)-pg$(PGVERSION).tar.zst \
+	  | docker load
 
 #
 # BE INTERACTIVE

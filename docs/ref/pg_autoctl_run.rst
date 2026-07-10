@@ -87,3 +87,11 @@ Options
 --pgport
 
   Postgres port to use, defaults to 5432.
+
+See Also
+--------
+
+:ref:`pg_autoctl_node_run` combines node creation and the service run in a
+single command driven by a ``pg_autoctl_node.ini`` file — it is the
+recommended entry-point for new deployments, especially in container and
+Kubernetes environments.

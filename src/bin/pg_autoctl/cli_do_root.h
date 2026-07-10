@@ -16,12 +16,43 @@
 /* src/bin/pg_autoctl/cli_do_fsm.c */
 extern CommandLine do_fsm_commands;
 
+/* read-only sub-commands exposed via "pg_autoctl inspect fsm" */
+extern CommandLine fsm_state;
+extern CommandLine fsm_node_state;
+extern CommandLine fsm_list;
+extern CommandLine fsm_gv;
+
+/* mutating sub-commands exposed via "pg_autoctl manual fsm" */
+extern CommandLine fsm_init;
+extern CommandLine fsm_assign;
+extern CommandLine fsm_step;
+extern CommandLine fsm_nodes;  /* nodes get + nodes set — kept together in manual */
+
 /* src/bin/pg_autoctl/cli_do_monitor.c */
 extern CommandLine do_monitor_commands;
 
+/* read-only sub-commands exposed via "pg_autoctl inspect monitor" */
+extern CommandLine monitor_get_command;
+extern CommandLine monitor_parse_notification_command;
+extern CommandLine monitor_node_state_command;
+extern CommandLine monitor_formation_states_command;
+
+/* mutating sub-commands exposed via "pg_autoctl manual monitor" */
+extern CommandLine monitor_register_command;
+extern CommandLine monitor_node_active_command;
+extern CommandLine monitor_version_command;
+
 /* src/bin/pg_autoctl/cli_do_service.c */
 extern CommandLine do_service_commands;
+extern CommandLine do_service_getpid_commands;
+extern CommandLine do_service_restart_commands;
 extern CommandLine do_service_postgres_ctl_commands;
+
+/* subprocess entry points (spawned by the supervisor via fork+exec) */
+extern CommandLine service_pgcontroller;
+extern CommandLine service_postgres;
+extern CommandLine service_monitor_listener;
+extern CommandLine service_node_active;
 
 /* src/bin/pg_autoctl/cli_do_show.c */
 extern CommandLine do_show_commands;
@@ -71,10 +102,7 @@ extern CommandLine do_tmux_commands;
 /* src/bin/pg_autoctl/cli_do_coordinator.c */
 extern CommandLine do_coordinator_commands;
 
-/* src/bin/pg_autoctl/cli_do_azure.c */
-extern CommandLine do_azure_ssh;
-
-extern CommandLine do_commands;
+extern CommandLine internal_commands;
 extern CommandLine *do_subcommands[];
 
 int keeper_cli_keeper_setup_getopts(int argc, char **argv);
@@ -89,9 +117,11 @@ void keeper_cli_disable_synchronous_replication(int argc, char **argv);
 void keeper_cli_pgsetup_pg_ctl(int argc, char **argv);
 void keeper_cli_pgsetup_discover(int argc, char **argv);
 void keeper_cli_pgsetup_is_ready(int argc, char **argv);
+int keeper_cli_pgsetup_wait_getopts(int argc, char **argv);
 void keeper_cli_pgsetup_wait_until_ready(int argc, char **argv);
 void keeper_cli_pgsetup_startup_logs(int argc, char **argv);
 void keeper_cli_pgsetup_tune(int argc, char **argv);
+void keeper_cli_pgsetup_hba_lan(int argc, char **argv);
 
 void keeper_cli_add_default_settings(int argc, char **argv);
 void keeper_cli_create_monitor_user(int argc, char **argv);
@@ -116,20 +146,5 @@ void cli_do_tmux_wait(int argc, char **argv);
 void cli_do_tmux_compose_config(int argc, char **argv);
 void cli_do_tmux_compose_script(int argc, char **argv);
 void cli_do_tmux_compose_session(int argc, char **argv);
-
-/* src/bin/pg_autoctl/cli_do_azure.c */
-int cli_do_azure_getopts(int argc, char **argv);
-void cli_do_azure_create_environment(int argc, char **argv);
-void cli_do_azure_create_region(int argc, char **argv);
-void cli_do_azure_drop_region(int argc, char **argv);
-void cli_do_azure_deploy(int argc, char **argv);
-void cli_do_azure_create_nodes(int argc, char **argv);
-void cli_do_azure_ls(int argc, char **argv);
-void cli_do_azure_show_ips(int argc, char **argv);
-void cli_do_azure_ssh(int argc, char **argv);
-void cli_do_azure_rsync(int argc, char **argv);
-void cli_do_azure_show_state(int argc, char **argv);
-void cli_do_azure_tmux_session(int argc, char **argv);
-void cli_do_azure_tmux_kill(int argc, char **argv);
 
 #endif  /* CLI_DO_ROOT_H */

@@ -1,0 +1,48 @@
+# Interactive tutorial cluster
+#
+# A two-node HA cluster ready for hands-on exploration.  There are no test
+# steps — this spec is only meant to be used with `pgaftest setup --tmux`.
+#
+# Usage:
+#   pgaftest setup tests/tap/specs/interactive_tutorial.pgaf --tmux
+#
+# The setup block waits until you have a healthy primary + secondary, then
+# pgaftest hands control to you.  The three tmux panes let you observe the
+# cluster in real time:
+#
+#   top    — docker compose logs -f  (live container logs)
+#   middle — pg_autoctl watch        (node state dashboard)
+#   bottom — bash in node1           (run pg_autoctl / psql commands)
+#
+# When you're done:
+#   pgaftest down --work-dir /tmp/pgaftest/interactive_tutorial
+#
+# Things to try from the bottom pane:
+#
+#   # connect to the primary
+#   psql -h node1 -U postgres
+#
+#   # trigger a manual failover
+#   pg_autoctl perform failover --monitor postgresql://autoctl_node@monitor/pg_auto_failover
+#
+#   # watch the FSM transition live (middle pane updates automatically)
+#
+#   # reconnect to the new primary after failover
+#   psql -h node2 -U postgres
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+}
+
+teardown {
+    compose down
+}

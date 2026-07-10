@@ -1,0 +1,4 @@
+[
+  {"node_id":1,"node_name":"node1","node_host":"node1","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":true},
+  {"node_id":2,"node_name":"node2","node_host":"node2","node_port":5432,"node_cluster":"default","node_lsn":"0/1","node_is_primary":false}
+]

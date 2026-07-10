@@ -88,12 +88,12 @@ static CommandLine *monitor_get_commands[] = {
 	NULL
 };
 
-static CommandLine monitor_get_command =
+CommandLine monitor_get_command =
 	make_command_set("get",
 					 "Get information from the monitor", NULL, NULL,
 					 NULL, monitor_get_commands);
 
-static CommandLine monitor_register_command =
+CommandLine monitor_register_command =
 	make_command("register",
 				 "Register the current node with the monitor",
 				 CLI_PGDATA_USAGE "<initial state>",
@@ -101,7 +101,7 @@ static CommandLine monitor_register_command =
 				 cli_getopt_pgdata,
 				 cli_do_monitor_register_node);
 
-static CommandLine monitor_node_active_command =
+CommandLine monitor_node_active_command =
 	make_command("active",
 				 "Call in the pg_auto_failover Node Active protocol",
 				 CLI_PGDATA_USAGE,
@@ -109,7 +109,7 @@ static CommandLine monitor_node_active_command =
 				 cli_getopt_pgdata,
 				 cli_do_monitor_node_active);
 
-static CommandLine monitor_version_command =
+CommandLine monitor_version_command =
 	make_command("version",
 				 "Check that monitor version is "
 				 PG_AUTOCTL_EXTENSION_VERSION
@@ -119,7 +119,7 @@ static CommandLine monitor_version_command =
 				 cli_getopt_pgdata,
 				 cli_do_monitor_version);
 
-static CommandLine monitor_parse_notification_command =
+CommandLine monitor_parse_notification_command =
 	make_command("parse-notification",
 				 "parse a raw notification message",
 				 " <notification> ",

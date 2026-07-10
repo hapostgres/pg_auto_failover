@@ -1,0 +1,135 @@
+# Test Citus cluster with authMethod=skip (pg_autoctl does not edit pg_hba.conf).
+#
+# With auth=skip, pg_autoctl leaves pg_hba.conf untouched after postgres init.
+# All data nodes are launch deferred so startup can be sequenced manually:
+#
+#   setup: monitor starts → add LAN HBA to monitor → start coord0a
+#   test_000: add LAN HBA to coord0a (so coord0b can connect later)
+#   test_001a: wait until coord0a reaches single
+#   test_001b: start coord0b, wait until coord0a=primary/coord0b=secondary
+#
+# worker1a's first run fails because the coordinator tries master_activate_node
+# but worker1a's default pg_hba.conf blocks that connection.  After manually
+# appending HBA rules and retrying, activation succeeds — and pg_autoctl has
+# not modified pg_hba.conf itself (verified by assert hba-edited = false).
+#
+# Predecessor: tests/test_citus_skip_pg_hba.py
+
+cluster {
+    monitor
+    auth skip
+    formation {
+        coord0a coordinator launch deferred
+        coord0b coordinator launch deferred
+        worker1a worker group 1 launch deferred
+        worker1b worker group 1 launch deferred
+    }
+}
+
+setup {
+    exec monitor  pg_autoctl inspect pgsetup wait
+    exec monitor  pg_autoctl inspect pgsetup hba-lan
+    exec coord0a  pg_autoctl node start /etc/pgaf/node.ini
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_000: monitor with auth=skip, append trust rule to pg_hba.conf manually
+#
+
+step test_000_add_coord0a_hba {
+    exec coord0a  pg_autoctl inspect pgsetup wait
+    exec coord0a  pg_autoctl inspect pgsetup hba-lan
+}
+
+#
+# test_001a: init coordinator coord0a (single)
+#
+
+step test_001a_init_coordinator {
+    wait until coord0a state is single  timeout 60s
+}
+
+#
+# test_001b: init coordinator coord0b (secondary)
+#
+
+step test_001b_init_coordinator {
+    exec coord0b  pg_autoctl node start /etc/pgaf/node.ini
+    wait until coord0a state is primary
+        and coord0b state is secondary
+        timeout 90s
+}
+
+step test_002b_create_worker {
+    exec worker1a  pg_autoctl node start /etc/pgaf/node.ini
+}
+
+#
+# test_002b/002d: worker1a — registration initially fails because coordinator
+# cannot connect (pg_hba.conf has no trust rule yet).  After manually adding
+# HBA rules the already-running keeper retries activation automatically.
+#
+# Wait for postgres to be ready before calling hba-lan: the deferred poll in
+# pg_autoctl node run detects launchDeferred=false and execv()s into
+# pg_autoctl create citus-worker --run.  Calling hba-lan immediately would
+# race with that execv and the subsequent supervisor + initdb startup.
+# pgsetup wait blocks until pg_autoctl.cfg exists and postgres accepts
+# connections, so by the time hba-lan runs pg_hba.conf already exists and the
+# container is fully initialised.
+#
+
+step test_002d_run_worker {
+    exec worker1a  pg_autoctl inspect pgsetup wait
+    exec worker1a  pg_autoctl inspect pgsetup hba-lan
+    wait until worker1a state is single  timeout 120s
+}
+
+step test_002e_check_hba {
+    exec-fails worker1a  grep "pgautofailover_replicator" /var/lib/postgres/pgaf/pg_hba.conf
+}
+
+step test_002f_activated_node {
+    sql coord0a {
+        SELECT isactive FROM pg_dist_node WHERE nodename = 'worker1a';
+    }
+    expect { t }
+}
+
+#
+# test_003: init worker1b as secondary
+#
+
+step test_003_init_worker {
+    exec worker1b  pg_autoctl node start /etc/pgaf/node.ini
+    exec worker1b  pg_autoctl inspect pgsetup wait
+    exec worker1b  pg_autoctl inspect pgsetup hba-lan
+    wait until worker1a state is primary
+        and worker1b state is secondary
+        timeout 120s
+    exec-fails worker1b  grep "pgautofailover_replicator" /var/lib/postgres/pgaf/pg_hba.conf
+}
+
+#
+# test_004: create distributed table
+#
+
+step test_004_create_distributed_table {
+    sql coord0a { CREATE TABLE t1 (a int); }
+    sql coord0a { SELECT create_distributed_table('t1', 'a'); }
+    sql coord0a { INSERT INTO t1 VALUES (1), (2); }
+}
+
+#
+# test_005: manual failover of worker group 1
+#
+
+step test_005_failover {
+    exec monitor  pg_autoctl perform failover --group 1
+    wait until worker1a state is secondary
+        and worker1b state is primary
+        timeout 90s
+}

@@ -357,8 +357,8 @@ cli_do_service_restart_node_active(int argc, char **argv)
  * tree. It is used for debug purposes only. When using this entry point we
  * have a supervisor process that is responsible for only one service:
  *
- *  pg_autoctl do service pgcontroller
- *   - pg_autoctl do service postgres
+ *  pg_autoctl internal service pgcontroller
+ *   - pg_autoctl internal service postgres
  *     - postgres
  */
 static void
@@ -401,9 +401,9 @@ cli_do_service_pgcontroller(int argc, char **argv)
  * that supervises two sub-processes, one of them is cli_do_service_postgres:
  *
  *  pg_autoctl
- *   - pg_autoctl do service postgres
+ *   - pg_autoctl internal service postgres
  *     - postgres
- *   - pg_autoctl do service keeper|monitor
+ *   - pg_autoctl internal service keeper|monitor
  */
 static void
 cli_do_service_postgres(int argc, char **argv)

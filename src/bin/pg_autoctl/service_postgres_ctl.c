@@ -92,7 +92,7 @@ service_postgres_ctl_start(void *context, pid_t *pid)
 /*
  * service_postgres_ctl_runprogram runs the postgres controller service:
  *
- *   $ pg_autoctl do service postgres --pgdata ...
+ *   $ pg_autoctl internal service postgres --pgdata ...
  */
 void
 service_postgres_ctl_runprogram()
@@ -129,7 +129,7 @@ service_postgres_ctl_runprogram()
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
 
 	args[argsIndex++] = (char *) pg_autoctl_program;
-	args[argsIndex++] = "do";
+	args[argsIndex++] = "internal";
 	args[argsIndex++] = "service";
 	args[argsIndex++] = "postgres";
 	args[argsIndex++] = "--pgdata";

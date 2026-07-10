@@ -312,9 +312,10 @@ keeper_ensure_current_state(Keeper *keeper)
 
 		case MAINTENANCE_STATE:
 		default:
-
+		{
 			/* nothing to be done here */
 			return true;
+		}
 	}
 
 	/* should never happen */
@@ -2077,12 +2078,33 @@ keeper_update_group_hba(Keeper *keeper, NodeAddressArray *diffNodesArray)
 
 	sformat(hbaFilePath, MAXPGPATH, "%s/pg_hba.conf", postgresSetup->pgdata);
 
+	/*
+	 * With cert auth, replication connections from standbys use the same
+	 * client certificate (CN=autoctl_node) as monitor connections.  The
+	 * database user for replication is pgautofailover_replicator, so cert
+	 * auth needs an ident map to bridge the two names.
+	 */
+	bool isCert = (strcmp(authMethod, "cert") == 0);
+	const char *replAuth = isCert ? "cert map=pgautofailover" : authMethod;
+
+	if (isCert)
+	{
+		if (!pghba_ensure_ident_map_entry(postgresSetup->pgdata,
+										  "pgautofailover",
+										  PG_AUTOCTL_MONITOR_USERNAME,
+										  PG_AUTOCTL_REPLICA_USERNAME))
+		{
+			log_error("Failed to add cert ident map entry to pg_ident.conf");
+			return false;
+		}
+	}
+
 	if (!pghba_ensure_host_rules_exist(hbaFilePath,
 									   diffNodesArray,
 									   postgresSetup->ssl.active,
 									   postgresSetup->dbname,
 									   PG_AUTOCTL_REPLICA_USERNAME,
-									   authMethod,
+									   replAuth,
 									   keeper->config.pgSetup.hbaLevel))
 	{
 		log_error("Failed to edit HBA file \"%s\" to update rules to current "
@@ -2739,8 +2761,8 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 			newConfig->prepare_promotion_walreceiver;
 	}
 
-	if (newConfig->postgresql_restart_failure_timeout !=
-		config->postgresql_restart_failure_timeout)
+	if (newConfig->postgresql_restart_failure_timeout != config->
+		postgresql_restart_failure_timeout)
 	{
 		log_info(
 			"Reloading configuration: timeout.postgresql_restart_failure_timeout "
@@ -2752,8 +2774,8 @@ keeper_config_accept_new(Keeper *keeper, KeeperConfig *newConfig)
 			newConfig->postgresql_restart_failure_timeout;
 	}
 
-	if (newConfig->postgresql_restart_failure_max_retries !=
-		config->postgresql_restart_failure_max_retries)
+	if (newConfig->postgresql_restart_failure_max_retries != config->
+		postgresql_restart_failure_max_retries)
 	{
 		log_info(
 			"Reloading configuration: retries.postgresql_restart_failure_max_retries "

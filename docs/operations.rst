@@ -19,6 +19,13 @@ pg_auto_failover monitor. The ``pg_autoctl create`` command honors the
 running. If Postgres is detected, the new node is registered in SINGLE mode,
 bypassing the monitor's role assignment policy.
 
+For container and Kubernetes environments, :ref:`pg_autoctl_node_run`
+provides a declarative alternative.  The complete node description lives in
+a single ``pg_autoctl_node.ini`` file that is bind-mounted into the
+container; ``pg_autoctl node run`` creates the node if absent and starts the
+supervisor in one step, making it a natural ``CMD`` / ``command:`` entry-point
+for every node type.  See `Container and Kubernetes Deployments`_ below.
+
 Postgres configuration management
 ---------------------------------
 
@@ -440,3 +447,106 @@ time -- for instance because a firewall rule hasn't yet activated -- it's
 possible to try ``pg_autoctl create`` again. pg_auto_failover will review its previous
 progress and repeat idempotent operations (``create database``, ``create
 extension`` etc), gracefully handling errors.
+
+.. _container-and-kubernetes-deployments:
+
+Container and Kubernetes Deployments
+-------------------------------------
+
+:ref:`pg_autoctl_node` provides a declarative, file-driven entry-point
+designed for container and Kubernetes environments.  Instead of assembling
+long ``pg_autoctl create`` flag sequences per node, the complete node
+description lives in a single ``pg_autoctl_node.ini`` file::
+
+    [node]
+    kind     = postgres
+    hostname = node1.internal
+    port     = 5432
+
+    [postgresql]
+    pgdata = /var/lib/postgresql/data
+
+    [monitor]
+    pguri = postgres://autoctl_node@monitor:5432/pg_auto_failover
+
+    [settings]
+    candidate_priority = 50
+    replication_quorum = true
+
+    [options]
+    ssl = self-signed
+
+A single command then creates the node if absent and starts the supervisor::
+
+    pg_autoctl node run /etc/pgaf/node.ini
+
+This makes ``pg_autoctl node run`` a natural ``CMD`` (Docker) or
+``command:`` (Kubernetes) entry-point for every node type.  The same image
+works for monitor, primary, standby, coordinator, and worker nodes — per-node
+differences live entirely in the bind-mounted ini file.
+
+**Live reconfiguration** — the supervisor watches the ini file.  Editing
+``candidate_priority``, ``replication_quorum``, ``ssl`` settings, or
+``monitor.pguri`` and saving the file is sufficient to converge the running
+node; no restart is required.
+
+**Ordered startup** — add ``[launch] mode = deferred`` to any node that
+should wait for an external signal before initialising.  Call
+``pg_autoctl node start <file>`` from a sidecar or init container to release
+it.  This replaces external orchestration for the common case where data
+nodes must wait until the monitor is ready.
+
+For the full property reference and mutability table see
+:ref:`pg_autoctl_node`.
+
+
+.. _testing:
+
+Testing
+-------
+
+pg_auto_failover ships ``pgaftest``, an integration test runner that drives
+clusters through scenarios described in ``.pgaf`` spec files.  Specs combine
+a topology declaration (the Docker Compose layout) with a sequence of named
+steps that exercise failover, network partitions, maintenance windows, and
+more.
+
+**Run a spec in CI mode** — full headless run with TAP output::
+
+   pgaftest run tests/tap/specs/basic_operation.pgaf
+
+The runner generates a ``docker-compose.yml`` from the ``cluster {}`` block,
+starts the stack, runs the ``setup {}`` block to wait for a healthy cluster,
+executes each step in ``sequence``, runs ``teardown {}``, and removes the
+stack.  Exit code 0 means all steps passed.
+
+**Run the full test schedule** across all supported Postgres versions::
+
+   pgaftest run --schedule tests/tap/schedule
+
+**Bring up an interactive cluster** for manual exploration::
+
+   pgaftest setup tests/tap/specs/basic_operation.pgaf
+
+**Add** ``--tmux`` to open a three-pane session the moment the compose
+stack is ready — no waiting at a blank terminal.  The setup block runs in
+the bottom pane so you can watch the logs pane while the cluster initialises:
+
+- **top** — ``docker compose logs -f``
+- **middle** — ``pg_autoctl watch``
+- **bottom** — setup progress, then an interactive ``bash`` shell
+
+::
+
+   pgaftest setup tests/tap/specs/basic_operation.pgaf --tmux
+
+**Run a single named step** against a live cluster::
+
+   pgaftest step stop_primary --work-dir /tmp/pgaftest/basic_operation
+
+**Tear down** when done::
+
+   pgaftest down --work-dir /tmp/pgaftest/basic_operation
+
+The complete spec language reference, including all DSL commands, environment
+variables, and TAP output format, is at :ref:`pgaftest`.

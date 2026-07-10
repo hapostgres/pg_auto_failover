@@ -160,7 +160,7 @@ service_monitor_runprogram(Monitor *monitor)
 	setenv(PG_AUTOCTL_DEBUG, "1", 1);
 
 	args[argsIndex++] = (char *) pg_autoctl_program;
-	args[argsIndex++] = "do";
+	args[argsIndex++] = "internal";
 	args[argsIndex++] = "service";
 	args[argsIndex++] = "listener";
 	args[argsIndex++] = "--pgdata";

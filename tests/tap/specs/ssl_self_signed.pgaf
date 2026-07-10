@@ -1,0 +1,76 @@
+# Test pg_auto_failover with self-signed SSL certificates (ssl-mode = require).
+# Both the monitor and data nodes generate their own self-signed certs.
+#
+# Ported from tests/test_ssl_self_signed.py
+# Predecessor: tests/test_ssl_self_signed.py
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_000: create monitor with self-signed SSL
+#
+
+step test_000_create_monitor {
+    exec monitor  pg_autoctl inspect pgsetup wait
+    sql monitor { SHOW ssl; }
+    expect { on }
+    exec monitor  pg_autoctl config get ssl.sslmode
+}
+
+#
+# test_001: init primary with self-signed SSL
+#
+
+step test_001_init_primary {
+    wait until node1 state is single  timeout 60s
+    sql node1 { SHOW ssl; }
+    expect { on }
+    exec node1  pg_autoctl config get ssl.sslmode
+}
+
+#
+# test_002: create table t1
+#
+
+step test_002_create_t1 {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+#
+# test_003: add secondary node2 with self-signed SSL
+#
+
+step test_003_init_secondary {
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+    sql node2 { SHOW ssl; }
+    expect { on }
+    exec node2  pg_autoctl config get ssl.sslmode
+}
+
+#
+# test_004: failover
+#
+
+step test_004_failover {
+    exec monitor  pg_autoctl perform failover
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+}

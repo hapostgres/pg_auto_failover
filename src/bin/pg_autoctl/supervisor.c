@@ -20,6 +20,7 @@
 
 #include "cli_root.h"
 #include "defaults.h"
+#include "nodespec.h"
 #include "env_utils.h"
 #include "fsm.h"
 #include "keeper.h"
@@ -75,6 +76,32 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 
 	/* copy the pidfile over to our supervisor structure */
 	strlcpy(supervisor.pidfile, pidfile, MAXPGPATH);
+
+	/*
+	 * If we were started by `pg_autoctl node run`, the node spec path is
+	 * passed via the PG_AUTOCTL_NODESPEC env var.  Set up the file watcher
+	 * so the supervisor can converge mutable settings when the file changes.
+	 */
+	{
+		char specPath[MAXPGPATH] = { 0 };
+
+		if (env_exists("PG_AUTOCTL_NODESPEC") &&
+			get_env_copy("PG_AUTOCTL_NODESPEC", specPath, sizeof(specPath)) &&
+			!IS_EMPTY_STRING_BUFFER(specPath))
+		{
+			if (nodespec_read(specPath, &supervisor.watchedSpec) &&
+				nodespec_watcher_init(&supervisor.watcher, specPath))
+			{
+				log_info("Supervisor: watching node spec \"%s\"", specPath);
+			}
+			else
+			{
+				log_warn("Supervisor: failed to initialise node spec watcher "
+						 "for \"%s\"; changes to the file will be ignored",
+						 specPath);
+			}
+		}
+	}
 
 	/*
 	 * Create our PID file, or quit now if another pg_autoctl instance is
@@ -219,6 +246,14 @@ supervisor_loop(Supervisor *supervisor)
 		{
 			/* avoid busy looping on waitpid(WNOHANG) */
 			pg_usleep(100 * 1000); /* 100 ms */
+
+			/*
+			 * Check if the node spec file has changed and apply mutable
+			 * settings if so.  Uses inotify on Linux, mtime poll elsewhere.
+			 * No-op when watcher.active is false (normal run path).
+			 */
+			(void) nodespec_watcher_check(&supervisor->watcher,
+										  &supervisor->watchedSpec);
 		}
 
 		/* ignore errors */

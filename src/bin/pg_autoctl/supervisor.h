@@ -12,13 +12,15 @@
 #include <inttypes.h>
 #include <signal.h>
 
+#include "nodespec.h"
+
 /*
  * pg_autoctl runs sub-processes as "services", and we need to use the same
  * service names in several places:
  *
  *  - the main pidfile,
  *  - the per-service name for the pidfile is derived from this,
- *  - the pg_autoctl do service getpid|restart commands
+ *  - the pg_autoctl manual service getpid|restart commands
  */
 #define SERVICE_NAME_POSTGRES "postgres"
 #define SERVICE_NAME_KEEPER "node-active"
@@ -122,6 +124,16 @@ typedef struct Supervisor
 	bool shutdownSequenceInProgress;
 	int shutdownSignal;
 	int stoppingLoopCounter;
+
+	/*
+	 * Optional node spec watcher.  When pg_autoctl is started via
+	 * `pg_autoctl node run <file>`, the supervisor watches the ini file for
+	 * changes and converges mutable settings automatically.
+	 *
+	 * watcher.active is false when not in use (normal create/run path).
+	 */
+	NodeSpecWatcher watcher;
+	NodeSpec watchedSpec;          /* last-applied spec — baseline for diff */
 } Supervisor;
 
 

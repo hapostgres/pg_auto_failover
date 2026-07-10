@@ -20,6 +20,9 @@ have their own manual page.
    pg_autoctl_get
    pg_autoctl_set
    pg_autoctl_perform
+   pg_autoctl_node
+   pg_autoctl_inspect
+   pg_autoctl_manual
    pg_autoctl_do
    pg_autoctl_run
    pg_autoctl_watch
@@ -27,3 +30,4 @@ have their own manual page.
    pg_autoctl_reload
    pg_autoctl_status
    pg_autoctl_activate
+   pgaftest

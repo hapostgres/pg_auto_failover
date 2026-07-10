@@ -1,0 +1,257 @@
+# Test mixed sync/async replication configurations with four nodes.
+# Starts with one async node (node3), then exercises: setting the whole
+# formation async, async failover via perform-promotion, returning to mixed
+# sync/async, dropping a node, and two double-failure scenarios (tests 014
+# and 015) where both the primary and the new primary fail before recovery.
+# Also covers: candidate-priority=0 secondary rejoining while primary is
+# wait_primary, and async standby failing while primary is already wait_primary.
+#
+# Predecessor: tests/test_multi_async.py
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+        node3 replication-quorum false
+        node4
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    wait until node3 state is secondary
+        and node4 state is secondary
+        timeout 60s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_004: set the whole formation to async
+#
+
+step test_004_set_async {
+    exec node1  pg_autoctl set formation number-sync-standbys 0
+    wait until node1 state is primary  timeout 60s
+    exec node1  pg_autoctl set node replication-quorum false
+    exec node2  pg_autoctl set node replication-quorum false
+    exec node3  pg_autoctl set node replication-quorum false
+    wait until node1 state is primary  timeout 60s
+}
+
+#
+# test_005: write into primary
+#
+
+step test_005_write_into_primary {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2), (3), (4); }
+    sql node1 { CHECKPOINT; }
+}
+
+#
+# test_006: async failover — promote node2
+#
+
+step test_006_async_failover {
+    exec monitor  pg_autoctl perform promotion --name node2
+    wait until node1 state is secondary
+        and node3 state is secondary
+        and node2 state is primary
+        timeout 90s
+}
+
+#
+# test_007: read from new primary
+#
+
+step test_007_read_from_new_primary {
+    sql node2 { SELECT * FROM t1; }
+    expect { { 1 } { 2 } { 3 } { 4 } }
+}
+
+#
+# test_008: set mixed sync/async configuration
+#
+
+step test_008_set_sync_async {
+    exec node1  pg_autoctl set node replication-quorum true
+    exec node2  pg_autoctl set node replication-quorum true
+    exec node3  pg_autoctl set node replication-quorum false
+    exec node3  pg_autoctl set node candidate-priority 0
+    wait until node2 state is primary  timeout 60s
+}
+
+step test_009_add_sync_standby {
+    exec node2  pg_autoctl set formation number-sync-standbys 1
+    wait until node1 state is secondary
+        and node2 state is primary
+        and node3 state is secondary
+        and node4 state is secondary
+        timeout 60s
+}
+
+#
+# test_010: promote node1 via monitor SQL, with node4 pre-disconnected.
+#
+# The perform_promotion SQL is non-blocking; the LSN election completes in
+# under a second on fast runners, so catching node4 AT report_lsn via polling
+# is unreliable.  Instead, disconnect node4 before the election starts — the
+# monitor runs the election without node4, which exercises the same code path
+# (a candidate missing from the election) reliably and without a race window.
+#
+
+step test_010_promote_node1 {
+    network disconnect node4
+    sql monitor {
+        SELECT pgautofailover.perform_promotion('default', 'node1');
+    }
+}
+
+#
+# test_011: verify the election completed with node4 offline
+#
+
+step test_011_ifdown_node4_at_reportlsn {
+    wait until node3 state is secondary  timeout 180s
+}
+
+#
+# test_012: ifup node4
+#
+
+step test_012_ifup_node4 {
+    network connect node4
+    wait until node3 state is secondary
+        and node4 state is secondary
+        and node1 state is primary
+        and node2 state is secondary
+        timeout 90s
+}
+
+#
+# test_013: drop node4
+#
+
+step test_013_drop_node4 {
+    exec monitor  pg_autoctl drop node --name node4
+    compose stop node4
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 90s
+}
+
+step test_014_001_fail_node1 {
+    compose stop node1
+    wait until node2 state is stop_replication  timeout 120s
+    wait until node2 state is wait_primary
+        and node3 state is secondary
+        timeout 120s
+    sql node2 { SHOW synchronous_standby_names; }
+    expect {  }
+}
+
+step test_014_001b_write_and_checkpoint {
+    sql node2 { INSERT INTO t1 VALUES (100); }
+    sql node2 { CHECKPOINT; }
+    sleep 3s
+}
+
+step test_014_002_stop_new_primary_node2 {
+    compose stop node2
+    wait until node3 state is report_lsn  timeout 90s
+}
+
+step test_014_003_restart_node1 {
+    compose start node1
+    wait until node1 state is wait_primary  timeout 180s
+}
+
+step test_014_004_restart_node2 {
+    compose start node2
+    wait until node2 state is secondary
+        and node3 state is secondary
+        and node1 state is primary
+        timeout 300s
+}
+
+step test_015_001_fail_primary_node1 {
+    compose stop node1
+    wait until node2 state is wait_primary  timeout 120s
+}
+
+step test_015_001b_write_and_checkpoint {
+    sql node2 { INSERT INTO t1 VALUES (101); }
+    sql node2 { CHECKPOINT; }
+    sleep 3s
+}
+
+step test_015_002_fail_new_primary_node2 {
+    compose stop node2
+    wait until node3 state is report_lsn  timeout 90s
+}
+
+step test_015_003_restart_node2 {
+    compose start node2
+    wait until node2 state is wait_primary
+        and node3 state is secondary
+        timeout 120s
+}
+
+step test_015_004_restart_node1 {
+    compose start node1
+    wait until node3 state is secondary
+        and node2 state is primary
+        and node1 state is secondary
+        timeout 120s
+}
+
+step test_016_001_fail_node3 {
+    network disconnect node3
+    wait until node3 assigned-state = catchingup  timeout 90s
+}
+
+step test_016_002_fail_node1 {
+    network disconnect node1
+    wait until node2 state is wait_primary  timeout 90s
+}
+
+step test_016_003_restart_node3 {
+    network connect node3
+    wait until node3 assigned-state = secondary  timeout 90s
+    wait until node2 state is wait_primary  timeout 60s
+    sleep 5s
+}
+
+step test_016_004_restart_node1 {
+    network connect node1
+    wait until node3 state is secondary
+        and node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+}
+
+step test_017_001_fail_node1 {
+    network disconnect node1
+    wait until node2 state is wait_primary  timeout 90s
+}
+
+step test_017_002_fail_node3 {
+    network disconnect node3
+    wait until node3 assigned-state = catchingup  timeout 90s
+}
+
+step test_017_003_restart_nodes {
+    network connect node3
+    network connect node1
+    wait until node3 state is secondary
+        and node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+}

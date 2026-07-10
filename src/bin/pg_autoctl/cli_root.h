@@ -40,9 +40,6 @@ extern CommandLine *show_subcommands_with_debug[];
 extern CommandLine drop_commands;
 extern CommandLine *drop_subcommands[];
 
-extern CommandLine root_with_debug;
-extern CommandLine *root_subcommands_with_debug[];
-
 extern CommandLine root;
 extern CommandLine *root_subcommands[];
 

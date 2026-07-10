@@ -153,6 +153,8 @@ class VirtualNode:
             user,
             "env",
             "PATH=" + os.getenv("PATH"),
+            "LC_ALL=C",
+            "LANG=C",
         ] + command
         return managed_nspopen(
             self.namespace,
@@ -160,7 +162,8 @@ class VirtualNode:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
+            encoding="utf-8",
+            errors="replace",
             start_new_session=True,
         )
 
@@ -179,6 +182,8 @@ class VirtualNode:
             user,
             "env",
             "PATH=" + os.getenv("PATH"),
+            "LC_ALL=C",
+            "LANG=C",
         ] + command
         return NSPopen(
             self.namespace,
@@ -186,7 +191,8 @@ class VirtualNode:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
+            encoding="utf-8",
+            errors="replace",
             start_new_session=True,
         )
 

@@ -1,0 +1,98 @@
+# Test pg_autoctl "ensure" behaviour: verify that the keeper restarts
+# Postgres after an unexpected stop, survives a demoted transition, and
+# correctly orchestrates a failover when Postgres is broken on the primary.
+#
+# node2 is declared launch deferred so it starts in single mode for test_001,
+# matching the Python test order (node2 is not created until test_003).
+#
+# Ported from tests/test_ensure.py
+# Predecessor: tests/test_ensure.py
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2 launch deferred
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+    exec node1  pg_autoctl inspect pgsetup wait
+}
+
+teardown {
+    compose down
+}
+
+step test_001_init_primary {
+    stop postgres node1
+    wait until node1 state is single  timeout 90s
+    exec node1  pg_autoctl inspect pgsetup wait
+}
+
+step test_002_create_t1 {
+    sql node1 { CREATE TABLE t1(a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step test_003_init_secondary {
+    exec node2  pg_autoctl node start
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+    stop postgres node2
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+}
+
+step test_004_demoted {
+    # After step 003 stopped and restarted postgres on node2, the cluster may
+    # still be mid-oscillation (node2 re-catching up, node1 in wait_primary).
+    # Wait for a fresh stable primary before triggering the failover, otherwise
+    # the stop below fires while node1 is in wait_primary and no failover occurs.
+    wait until node1 state is primary  timeout 60s
+    # Stop postgres first while pg_autoctl is still running: pg_autoctl detects
+    # the outage and reports it to the monitor, which starts the failover FSM.
+    # (Python: node1.stop_postgres() then node1.stop_pg_autoctl())
+    stop postgres node1
+    compose stop node1
+    # Wait for node2 to reach wait_primary — the failover's point of no return.
+    # node2 cannot reach 'primary' while node1 is stopped (it needs a sync
+    # standby), so we must not wait for 'primary' here.  Once node2 is in
+    # wait_primary the monitor has committed to node2 as the new primary; when
+    # node1 restarts it will come back as secondary, and node2 will then
+    # transition from wait_primary → primary.
+    wait until node2 state is wait_primary  timeout 90s
+    # Bring node1 back: pg_autoctl starts, connects to monitor, gets assigned
+    # 'demoted', executes the demoted transition, then moves to secondary.
+    # The Python test explicitly asserts the 'demoted' state, but 'demoted' is
+    # a sub-second transient: node1's pg_autoctl may report 'catchingup' before
+    # the convergence NOTIFY (demoted ➜ demoted) is ever emitted on the LISTEN
+    # channel.  Skip it and assert the stable end state instead.
+    compose start node1
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 300s
+}
+
+step test_005_inject_error_in_node2 {
+    wait until node2 state is primary  timeout 60s
+    wait until node2 state is primary  timeout 90s
+    exec node2  bash -c "echo \"shared_preload_libraries='wrong_extension'\" >> /var/lib/postgres/pgaf/postgresql.conf"
+    # Stop postgres cleanly (pgctl off), then re-enable auto-start (pgctl on)
+    # so pg_autoctl keeps trying to restart postgres — which fails each time
+    # due to the bad config.  This mirrors the Python's node2.restart_postgres()
+    # intent: postgres repeatedly fails, the monitor detects an unhealthy primary
+    # and triggers a failover to node1.
+    # We ignore the exit code of pgctl on because postgres cannot start with
+    # the broken config, so the command always exits with an error; pg_autoctl
+    # itself keeps running and will retry.
+    stop postgres node2
+    exec node2  bash -c "pg_autoctl manual service pgctl on || true"
+    wait until node1 state is wait_primary  timeout 120s
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 120s
+}

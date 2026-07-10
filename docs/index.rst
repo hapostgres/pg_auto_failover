@@ -43,7 +43,6 @@ __ https://github.com/hapostgres/pg_auto_failover
    intro
    how-to
    tutorial
-   azure-tutorial
    install
 
 .. toctree::

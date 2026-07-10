@@ -231,3 +231,50 @@ The pg_auto_failover keeper tries to restart PostgreSQL
 (default 3) or up to ``timeout.postgresql_restart_failure_timeout``
 (defaults 20s) since it detected that PostgreSQL is not running, whichever
 comes first.
+
+.. _nodespec_configuration:
+
+Declarative Node Configuration (pg_autoctl_node.ini)
+-----------------------------------------------------
+
+When using :ref:`pg_autoctl_node`, the node is described entirely in a
+``pg_autoctl_node.ini`` file.  This is an alternative to passing flags on
+the ``pg_autoctl create`` command line, and it is the recommended approach
+for container and Kubernetes deployments.
+
+The ini file maps every ``pg_autoctl create`` flag to a named key in one of
+the following sections:
+
+``[node]``
+    ``kind``, ``name``, ``hostname``, ``port``
+
+``[postgresql]``
+    ``pgdata``
+
+``[monitor]``
+    ``pguri``, ``no_monitor``, ``node_id``
+
+``[formation]``
+    ``name``, ``group``
+
+``[settings]`` *(mutable — changes applied live without restart)*
+    ``candidate_priority``, ``replication_quorum``
+
+``[options]``
+    ``ssl`` *(mutable — applied via* ``pg_autoctl enable ssl`` *)*,
+    ``auth`` *(create-time only)*,
+    ``pg_hba_lan`` *(create-time only)*
+
+``[ssl]`` *(mutable — changes applied via* ``pg_autoctl enable ssl`` *)*
+    ``ca_file``, ``cert_file``, ``key_file``
+
+The pg_autoctl keeper configuration file (``pg_autoctl.cfg`` inside
+``PGDATA``) is still the authoritative runtime configuration.  The
+``pg_autoctl_node.ini`` file is read at startup and on every file-change
+event; its mutable fields are converged into the running node state, while
+immutable fields are only applied at node creation time.
+
+Use ``pg_autoctl node show --pgdata <dir>`` to generate a
+``pg_autoctl_node.ini`` from an existing node's current configuration.
+
+See :ref:`pg_autoctl_node` for the full property reference.

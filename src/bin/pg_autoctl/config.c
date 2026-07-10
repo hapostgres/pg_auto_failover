@@ -70,10 +70,11 @@ build_xdg_path(char *dst,
 		}
 
 		default:
-
+		{
 			/* developper error */
 			log_error("No support for XDG Resource Type %d", xdgType);
 			return false;
+		}
 	}
 
 	if (!get_env_copy_with_fallback(envVarName, xdg_topdir, MAXPGPATH, fallback))

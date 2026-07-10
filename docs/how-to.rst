@@ -17,11 +17,8 @@ To understand which replication settings to use in your case, see
 :ref:`architecture_basics` section and then the
 :ref:`multi_node_architecture` section.
 
-To follow a step by step guide that you can reproduce on your own Azure
-subscription and create a production Postgres setup from VMs, see the
-:ref:`azure_tutorial` section. To get started with a local setup using
-docker compose to run multiple Postgres nodes, see the :ref:`tutorial`
-section.
+To get started with a local setup using docker compose to run multiple
+Postgres nodes, see the :ref:`tutorial` section.
 
 To understand how to setup pg_auto_failover in a way that is compliant with
 your internal security guide lines, read the :ref:`security` section.
@@ -61,6 +58,10 @@ actually run the Postgres service that are expected to be running. For that
 you can manually run the following command on every node::
 
   $ pg_autoctl run
+
+For container and Kubernetes deployments, :ref:`pg_autoctl_node_run`
+combines the create and run steps into a single command driven by a
+``pg_autoctl_node.ini`` file — see :ref:`pg_autoctl_node` for details.
 
 It is also possible (and recommended) to integrate the pg_auto_failover
 service in your usual service management facility. When using **systemd**

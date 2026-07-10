@@ -1,0 +1,104 @@
+# Test non-HA Citus formation lifecycle: start with secondary=false, add
+# workers, enable secondary support, add standbys, attempt to disable while
+# standbys exist (expect failure), fail-over primaries, drop them, and finally
+# disable secondary support once only single nodes remain.
+#
+# Ported from tests/test_nonha_citus_operation.py
+# Predecessor: tests/test_nonha_citus_operation.py
+
+cluster {
+    monitor
+    formation non-ha {
+        coordinator1a coordinator
+        coordinator1b coordinator launch deferred
+        worker1a worker group 1
+        worker1b worker group 1 launch deferred
+        worker2a worker group 2
+        worker2b worker group 2 launch deferred
+    }
+}
+
+setup {
+    wait until coordinator1a state is single  timeout 120s
+    wait until worker1a state is single  timeout 120s
+    wait until worker2a state is single  timeout 120s
+    sleep 5s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_disable_secondary_on_formation {
+    exec monitor  pg_autoctl disable secondary --formation non-ha
+}
+
+step test_002_wait_metadata_sync {
+    exec coordinator1a  sh -c 'for i in $(seq 1 30); do n=$(psql -U docker -d demo -tAc "SELECT count(*) FROM pg_dist_node WHERE metadatasynced = false AND isactive = true"); [ "$n" = "0" ] && exit 0; sleep 2; done; exit 1'
+}
+
+step test_003_create_distributed_table {
+    sql coordinator1a { CREATE TABLE t1 (a int); }
+    sql coordinator1a { SELECT create_distributed_table('t1', 'a'); }
+    sql coordinator1a { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step test_004_enable_secondary {
+    exec monitor  pg_autoctl enable secondary --formation non-ha
+    exec coordinator1b  pg_autoctl node start /etc/pgaf/node.ini
+    exec worker1b  pg_autoctl node start /etc/pgaf/node.ini
+    exec worker2b  pg_autoctl node start /etc/pgaf/node.ini
+}
+
+step test_005_add_secondaries {
+    wait until coordinator1b state is secondary  timeout 120s
+    wait until worker1b state is secondary  timeout 120s
+    wait until worker2b state is secondary  timeout 120s
+}
+
+step test_006_fail_when_disabling_with_secondaries {
+    exec-fails monitor  pg_autoctl disable secondary --formation non-ha
+}
+
+step test_007_failover_coordinator {
+    network disconnect coordinator1a
+    wait until coordinator1b state is wait_primary  timeout 90s
+    network connect coordinator1a
+    wait until coordinator1b state is primary
+        and coordinator1a state is secondary
+        timeout 180s
+}
+
+step test_007b_failover_worker1 {
+    network disconnect worker1a
+    wait until worker1b state is wait_primary  timeout 90s
+    network connect worker1a
+    wait until worker1b state is primary
+        and worker1a state is secondary
+        timeout 180s
+}
+
+step test_007c_failover_worker2 {
+    network disconnect worker2a
+    wait until worker2b state is wait_primary  timeout 90s
+    network connect worker2a
+    wait until worker2b state is primary
+        and worker2a state is secondary
+        timeout 180s
+}
+
+step test_008_remove_old_primaries {
+    exec monitor  pg_autoctl drop node --name coordinator1a --formation non-ha
+    exec monitor  pg_autoctl drop node --name worker1a --formation non-ha
+    exec monitor  pg_autoctl drop node --name worker2a --formation non-ha
+    compose stop coordinator1a
+    compose stop worker1a
+    compose stop worker2a
+    wait until coordinator1b state is single  timeout 60s
+    wait until worker1b state is single  timeout 60s
+    wait until worker2b state is single  timeout 60s
+}
+
+step test_009_disable_secondaries {
+    exec monitor  pg_autoctl disable secondary --formation non-ha
+}

@@ -495,6 +495,24 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'W':
+			{
+				/* { "monitor-password", required_argument, NULL, 'W' } */
+				strlcpy(LocalOptionConfig.monitor_password, optarg,
+						sizeof(LocalOptionConfig.monitor_password));
+				log_trace("--monitor-password ****");
+				break;
+			}
+
+			case 'w':
+			{
+				/* { "replication-password", required_argument, NULL, 'w' } */
+				strlcpy(LocalOptionConfig.replication_password, optarg,
+						sizeof(LocalOptionConfig.replication_password));
+				log_trace("--replication-password ****");
+				break;
+			}
+
 			/*
 			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
 			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
@@ -1420,14 +1438,7 @@ exit_unless_role_is_keeper(KeeperConfig *kconfig)
 void
 keeper_cli_help(int argc, char **argv)
 {
-	CommandLine command = root;
-
-	if (env_exists(PG_AUTOCTL_DEBUG))
-	{
-		command = root_with_debug;
-	}
-
-	(void) commandline_print_command_tree(&command, stdout);
+	(void) commandline_print_command_tree(&root, stdout);
 }
 
 
@@ -1743,6 +1754,18 @@ bool
 cli_pg_autoctl_reload(const char *pidfile)
 {
 	pid_t pid;
+
+	/*
+	 * Ignore SIGHUP in this process before sending it to the daemon.  The
+	 * daemon's supervisor_reload_services() broadcasts SIGHUP to all its
+	 * service children.  A freshly exec'd one-shot command can share a PID
+	 * with a recently-exited service (PID reuse), and since one-shot
+	 * commands don't install a SIGHUP handler, the default disposition
+	 * (terminate) would kill us before we even return.  SIG_IGN is safe
+	 * here because all callers are one-shot CLI commands that exit shortly
+	 * after this call anyway.
+	 */
+	signal(SIGHUP, SIG_IGN);
 
 	if (read_pidfile(pidfile, &pid))
 	{
