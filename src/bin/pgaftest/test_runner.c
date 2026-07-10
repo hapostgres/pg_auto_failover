@@ -1516,6 +1516,14 @@ runner_wait_notify_goal(TestRunner *r,
 		runner_drain_notify(r, NULL, &nodeName, &targetState, 1, &satisfiedEarly);
 		if (satisfiedEarly)
 		{
+			/*
+			 * Post-match flush: drain any notifications that arrived in the
+			 * same TCP packet as the convergence event so they appear under
+			 * this step, not interleaved into the next command's drain.
+			 * No marks — these belong to the step that caused the transition,
+			 * not this wait.
+			 */
+			runner_drain_notify(r, NULL, NULL, NULL, 0, NULL);
 			return true;
 		}
 	}
@@ -2709,11 +2717,14 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		 */
 		case CMD_WAIT_MULTI:
 		{
+			runner_notify_connect(r);
+
 			int timeoutSecs = cmd->timeoutSeconds;
 			time_t deadline = time(NULL) + timeoutSecs;
 
 			/* build pointer arrays once — used for marking on every drain */
-			const char *mn[PGAF_MAX_WAIT_STATES], *ms[PGAF_MAX_WAIT_STATES];
+			const char *mn[PGAF_MAX_WAIT_STATES] = { 0 };
+			const char *ms[PGAF_MAX_WAIT_STATES] = { 0 };
 			for (int i = 0; i < cmd->waitStateCount; i++)
 			{
 				mn[i] = cmd->waitNodes[i];
@@ -2724,10 +2735,22 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 * convergence notification arrives for a specific (node, state) pair */
 			bool listenSatisfied[PGAF_MAX_WAIT_STATES] = { false };
 
+			/*
+			 * Initial drain: consume any notifications buffered during the
+			 * preceding command (e.g. exec that triggered state transitions).
+			 * With marks so that buffered convergence events get '*' here,
+			 * not silently during the next command's inter-drain.
+			 */
+			if (r->notifyConnected)
+			{
+				runner_drain_notify(r, NULL, mn, ms,
+									cmd->waitStateCount, listenSatisfied);
+			}
+
 			while (time(NULL) < deadline)
 			{
 				/*
-				 * Try subprocess-based check first.  monitor_get_node_state runs
+				 * Try subprocess-based check.  monitor_get_node_state runs
 				 * "pg_autoctl inspect monitor node-state" which requires v2.2.
 				 * When nodes run v2.1 the call returns false; track how many
 				 * succeed so we can fall back to LISTEN-based convergence.
@@ -2742,7 +2765,6 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 												assigned, sizeof(assigned)))
 					{
 						allMet = false; /* can't confirm via subprocess */
-						/* don't break — try to drain anyway */
 						continue;
 					}
 					subproc_ok++;
@@ -2762,11 +2784,18 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				}
 
 				/*
-				 * Drain: log notifications, mark '*' on convergence events, and
-				 * set listenSatisfied[i] when the (node, state) pair converges.
+				 * Drain with marks now — after the subprocess (which may have
+				 * taken ~200ms) — so any notifications that arrived while we
+				 * were polling get their '*' before we decide to return.  This
+				 * is the ordering that makes '*' reliable: drain first, check
+				 * allMet / allListenMet second.
 				 */
-				runner_drain_notify(r, NULL, mn, ms,
-									cmd->waitStateCount, listenSatisfied);
+				if (r->notifyConnected)
+				{
+					runner_drain_notify(r, NULL, mn, ms,
+										cmd->waitStateCount, listenSatisfied);
+					runner_notify_connect(r);
+				}
 
 				/*
 				 * When subprocess is unavailable (v2.1 nodes), fall back to
@@ -2786,14 +2815,44 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 					}
 					if (allListenMet)
 					{
+						/*
+						 * Post-match flush: the NOTIFY may arrive after the
+						 * subprocess confirms convergence (monitor commits the
+						 * state change and sends NOTIFY in the same transaction,
+						 * but TCP delivery on Docker Desktop for Mac can lag
+						 * several milliseconds behind the subprocess result).
+						 * Poll briefly so those in-flight notifications get
+						 * their '*' here rather than spilling unmarked into the
+						 * next command's inter-drain.
+						 */
+						if (r->notifyConnected)
+						{
+							while (runner_wait_socket(r, 200))
+							{
+								runner_drain_notify(r, NULL, mn, ms,
+													cmd->waitStateCount,
+													listenSatisfied);
+							}
+						}
 						return true;
 					}
 				}
 				else if (allMet)
 				{
+					/* same post-match flush for subprocess-confirmed convergence */
+					if (r->notifyConnected)
+					{
+						while (runner_wait_socket(r, 200))
+						{
+							runner_drain_notify(r, NULL, mn, ms,
+												cmd->waitStateCount,
+												listenSatisfied);
+						}
+					}
 					return true;
 				}
 
+				/* wait for next notification */
 				runner_wait_socket(r, 1000);
 			}
 
