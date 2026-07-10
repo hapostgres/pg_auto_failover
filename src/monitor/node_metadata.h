@@ -241,3 +241,19 @@ extern bool IsHealthy(AutoFailoverNode *pgAutoFailoverNode);
 extern bool IsUnhealthy(AutoFailoverNode *pgAutoFailoverNode);
 extern bool IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode);
 extern bool IsReporting(AutoFailoverNode *pgAutoFailoverNode);
+
+/*
+ * Pure (context-based) variants of the health predicates.  They take a
+ * pre-captured GroupStateContext instead of calling GetCurrentTimestamp() or
+ * reading GUC globals themselves.  Forward-declare the struct here to avoid a
+ * circular dependency between node_metadata.h and group_state_machine.h.
+ */
+struct GroupStateContext;
+extern bool NodeIsHealthy(const AutoFailoverNode *node,
+						  const struct GroupStateContext *ctx);
+extern bool NodeIsUnhealthy(const AutoFailoverNode *node,
+							const struct GroupStateContext *ctx);
+extern bool NodeIsReporting(const AutoFailoverNode *node,
+							const struct GroupStateContext *ctx);
+extern bool NodeIsDrainTimeExpired(const AutoFailoverNode *node,
+								   const struct GroupStateContext *ctx);

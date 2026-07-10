@@ -2036,3 +2036,97 @@ IsDrainTimeExpired(AutoFailoverNode *pgAutoFailoverNode)
 
 	return drainTimeExpired;
 }
+
+
+/*
+ * NodeIsHealthy is the context-pure variant of IsHealthy.  It uses the
+ * timestamp snapshot in ctx->now instead of calling GetCurrentTimestamp().
+ */
+bool
+NodeIsHealthy(const AutoFailoverNode *node, const struct GroupStateContext *ctx)
+{
+	int nodeActiveCallsFrequencyMs = 1 * 1000;
+
+	if (node == NULL)
+	{
+		return false;
+	}
+
+	if (node->health == NODE_HEALTH_BAD &&
+		TimestampDifferenceExceeds(node->healthCheckTime, node->reportTime, 0) &&
+		!TimestampDifferenceExceeds(node->reportTime, ctx->now,
+									nodeActiveCallsFrequencyMs))
+	{
+		return node->pgIsRunning;
+	}
+
+	return node->health == NODE_HEALTH_GOOD && node->pgIsRunning;
+}
+
+
+/*
+ * NodeIsUnhealthy is the context-pure variant of IsUnhealthy.
+ */
+bool
+NodeIsUnhealthy(const AutoFailoverNode *node, const struct GroupStateContext *ctx)
+{
+	if (node == NULL)
+	{
+		return true;
+	}
+
+	if (TimestampDifferenceExceeds(node->reportTime, ctx->now,
+								   ctx->unhealthyTimeoutMs))
+	{
+		if (node->health == NODE_HEALTH_BAD &&
+			TimestampDifferenceExceeds(PgStartTime, node->healthCheckTime, 0))
+		{
+			if (TimestampDifferenceExceeds(PgStartTime, ctx->now,
+										   ctx->startupGracePeriodMs))
+			{
+				return true;
+			}
+		}
+	}
+
+	if (!node->pgIsRunning)
+	{
+		return true;
+	}
+
+	return false;
+}
+
+
+/*
+ * NodeIsReporting is the context-pure variant of IsReporting.
+ */
+bool
+NodeIsReporting(const AutoFailoverNode *node, const struct GroupStateContext *ctx)
+{
+	if (node == NULL)
+	{
+		return false;
+	}
+
+	return !TimestampDifferenceExceeds(node->reportTime, ctx->now,
+									   ctx->unhealthyTimeoutMs);
+}
+
+
+/*
+ * NodeIsDrainTimeExpired is the context-pure variant of IsDrainTimeExpired.
+ */
+bool
+NodeIsDrainTimeExpired(const AutoFailoverNode *node,
+					   const struct GroupStateContext *ctx)
+{
+	if (node == NULL ||
+		node->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT)
+	{
+		return false;
+	}
+
+	return TimestampDifferenceExceeds(node->stateChangeTime, ctx->now,
+									  ctx->drainTimeoutMs);
+}
