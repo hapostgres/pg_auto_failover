@@ -193,7 +193,7 @@ typedef struct NodeAddressArray
 #define InvalidXLogRecPtr 0
 #define XLogRecPtrIsInvalid(r) ((r) == InvalidXLogRecPtr)
 
-#define PG_AUTOCTL_MAX_TIMELINES 1024
+#define PG_AUTOCTL_TIMELINES_INITIAL_CAPACITY 16
 
 typedef struct TimeLineHistoryEntry
 {
@@ -203,10 +203,19 @@ typedef struct TimeLineHistoryEntry
 } TimeLineHistoryEntry;
 
 
+/*
+ * TimeLineHistory holds a dynamically-allocated array of timeline history
+ * entries. The history pointer starts as NULL and is allocated on first use
+ * inside parseTimeLineHistory(); subsequent calls reuse the same buffer,
+ * growing it with realloc() when needed. No explicit free is required because
+ * this struct is embedded in long-lived per-process structs (LocalPostgresServer
+ * → ReplicationSource → IdentifySystem) that live for the process lifetime.
+ */
 typedef struct TimeLineHistory
 {
 	int count;
-	TimeLineHistoryEntry history[PG_AUTOCTL_MAX_TIMELINES];
+	int capacity;
+	TimeLineHistoryEntry *history;
 } TimeLineHistory;
 
 
