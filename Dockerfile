@@ -107,6 +107,7 @@ WORKDIR /usr/src/pg_auto_failover
 
 COPY Makefile ./
 COPY Makefile.citus ./
+COPY Makefile.azure* ./
 COPY ./src/ ./src
 COPY ./src/bin/pg_autoctl/git-version.h ./src/bin/pg_autoctl/git-version.h
 # Touch bison/flex generated files so they appear newer than the grammar
