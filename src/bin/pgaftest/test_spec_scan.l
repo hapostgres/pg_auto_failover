@@ -293,6 +293,11 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"not"           { return T_NOT; }
 <STEP_BODY>"contains"      { return T_CONTAINS; }
 <STEP_BODY>"matches"       { return T_MATCHES; }
+<STEP_BODY>"node_active"   { return T_NODE_ACTIVE; }
+<STEP_BODY>"mark"          { return T_MARK; }
+<STEP_BODY>"healthy"       { return T_HEALTHY; }
+<STEP_BODY>"unhealthy"     { return T_UNHEALTHY; }
+<STEP_BODY>":"             { return ':'; }
 
 <STEP_BODY>[0-9]+[sS]?  {
 	yylval.ival = atoi(yytext);

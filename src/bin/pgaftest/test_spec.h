@@ -162,6 +162,21 @@ typedef enum TestCmdKind
 	CMD_SET_MONITOR,     /* set monitor <svc>  — switch active monitor service  */
 	CMD_LOGS_CHECK,      /* logs <svc> [not] <pattern> — grep container logs    */
 	CMD_COMPOSE_INJECT,  /* compose inject <image> <src> <svc>:<dst>            */
+
+	/*
+	 * Monitor node_active protocol tests.
+	 *
+	 * node_active { <node>  reported: <state>  lsn: <lsn>  [tli: N]  [pgrunning: bool] }
+	 *    expect { assigned: <state> }
+	 *
+	 * Calls pgautofailover.node_active() on the monitor with the given
+	 * parameters and asserts the returned assigned state.
+	 *
+	 * mark healthy: <node>   — set node health to GOOD  (healthchecktime = now)
+	 * mark unhealthy: <node> — set node health to BAD   (healthchecktime = now)
+	 */
+	CMD_NODE_ACTIVE,     /* node_active { ... } expect { assigned: ... }       */
+	CMD_MARK_HEALTH,     /* mark [un]healthy: <node>                           */
 } TestCmdKind;
 
 typedef struct TestCmd
@@ -204,6 +219,17 @@ typedef struct TestCmd
 
 	/* CMD_LOGS_CHECK */
 	bool logsNegate;           /* true → assert pattern NOT found */
+
+	/* CMD_NODE_ACTIVE */
+	char nodeActiveName[64];        /* node name                          */
+	char nodeActiveReported[64];    /* reported state string              */
+	char nodeActiveLsn[32];         /* LSN string, e.g. "0/5A0"          */
+	int nodeActiveTli;              /* timeline, default 1                */
+	bool nodeActivePgRunning;       /* pg_is_running, default true        */
+	char nodeActiveExpected[64];    /* expected assigned state            */
+
+	/* CMD_MARK_HEALTH */
+	bool markHealthy;               /* true → GOOD, false → BAD          */
 
 	struct TestCmd *next;
 } TestCmd;

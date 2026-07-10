@@ -3154,6 +3154,260 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			return true;
 		}
 
+		case CMD_NODE_ACTIVE:
+		{
+			/*
+			 * Monitor node_active protocol test.
+			 *
+			 * Parse the raw block: "node2  reported: secondary  lsn: 0/5A0
+			 *                       tli: 1  pgrunning: true"
+			 * and the expect block: "assigned: secondary"
+			 *
+			 * Then:
+			 *   1. Look up node_id from pgautofailover.node.
+			 *   2. Call pgautofailover.node_active(...) on the monitor.
+			 *   3. Assert the returned assigned state matches nodeActiveExpected.
+			 */
+			char nodeName[64] = { 0 };
+			char reported[64] = "secondary";
+			char lsn[32] = "0/0";
+			int tli = 1;
+			int pgrunning = 1;
+
+			/* Parse raw block content into key-value pairs */
+			{
+				char buf[sizeof(cmd->args)];
+				strlcpy(buf, cmd->args, sizeof(buf));
+
+				/* First token before any ':' is the node name */
+				char *p = buf;
+				while (*p == ' ' || *p == '\t')
+				{
+					p++;
+				}
+				char *nameEnd = p;
+				while (*nameEnd && *nameEnd != ' ' && *nameEnd != '\t')
+				{
+					nameEnd++;
+				}
+				size_t nameLen = nameEnd - p;
+				if (nameLen >= sizeof(nodeName))
+				{
+					nameLen = sizeof(nodeName) - 1;
+				}
+				memcpy(nodeName, p, nameLen);
+				nodeName[nameLen] = '\0';
+				p = nameEnd;
+
+				/* Parse remaining key: value pairs */
+				while (*p)
+				{
+					while (*p == ' ' || *p == '\t')
+					{
+						p++;
+					}
+					char *kstart = p;
+					while (*p && *p != ':')
+					{
+						p++;
+					}
+					if (*p != ':')
+					{
+						break;
+					}
+					*p++ = '\0';
+					while (*p == ' ' || *p == '\t')
+					{
+						p++;
+					}
+					char *vstart = p;
+					while (*p && *p != ' ' && *p != '\t' && *p != '\n')
+					{
+						p++;
+					}
+					if (*p)
+					{
+						*p++ = '\0';
+					}
+
+					/* trim trailing whitespace from key */
+					char *kt = kstart + strlen(kstart) - 1;
+					while (kt >= kstart && (*kt == ' ' || *kt == '\t'))
+					{
+						*kt-- = '\0';
+					}
+
+					if (strcmp(kstart, "reported") == 0)
+					{
+						strlcpy(reported, vstart, sizeof(reported));
+					}
+					else if (strcmp(kstart, "lsn") == 0)
+					{
+						strlcpy(lsn, vstart, sizeof(lsn));
+					}
+					else if (strcmp(kstart, "tli") == 0)
+					{
+						tli = atoi(vstart);
+					}
+					else if (strcmp(kstart, "pgrunning") == 0)
+					{
+						pgrunning = (strcmp(vstart, "true") == 0 ||
+									 strcmp(vstart, "1") == 0) ? 1 : 0;
+					}
+				}
+			}
+
+			/* Parse expected: "assigned: secondary" */
+			char expectedState[64] = { 0 };
+			{
+				const char *p = cmd->nodeActiveExpected;
+				while (*p == ' ' || *p == '\t')
+				{
+					p++;
+				}
+				if (strncmp(p, "assigned:", 9) == 0)
+				{
+					p += 9;
+					while (*p == ' ' || *p == '\t')
+					{
+						p++;
+					}
+					strlcpy(expectedState, p, sizeof(expectedState));
+
+					/* trim trailing whitespace */
+					char *e = expectedState + strlen(expectedState) - 1;
+					while (e >= expectedState && (*e == ' ' || *e == '\t' || *e == '\n'))
+					{
+						*e-- = '\0';
+					}
+				}
+			}
+
+			if (nodeName[0] == '\0' || expectedState[0] == '\0')
+			{
+				sformat(errBuf, errLen,
+						"node_active: failed to parse command "
+						"(args=%s expect=%s)",
+						cmd->args, cmd->nodeActiveExpected);
+				return false;
+			}
+
+			log_info("  node_active: node=%s reported=%s lsn=%s tli=%d "
+					 "pgrunning=%s  expect assigned=%s",
+					 nodeName, reported, lsn, tli,
+					 pgrunning ? "true" : "false", expectedState);
+
+			/*
+			 * Step 1: resolve node_id + group_id from the monitor.
+			 */
+			char lookupSql[512];
+			char nodeInfo[256] = { 0 };
+			sformat(lookupSql, sizeof(lookupSql),
+					"SELECT nodeid || '|' || groupid "
+					"FROM pgautofailover.node "
+					"WHERE nodename = '%s' LIMIT 1",
+					nodeName);
+
+			if (!exec_sql_on_service(r, "monitor",
+									 lookupSql, nodeInfo, sizeof(nodeInfo)))
+			{
+				sformat(errBuf, errLen,
+						"node_active: could not look up node '%s' on monitor",
+						nodeName);
+				return false;
+			}
+
+			/* strip trailing newline */
+			char *nl = strchr(nodeInfo, '\n');
+			if (nl)
+			{
+				*nl = '\0';
+			}
+
+			long long nodeId = 0;
+			int groupId = 0;
+			if (sscanf(nodeInfo, "%lld|%d", &nodeId, &groupId) != 2)
+			{
+				sformat(errBuf, errLen,
+						"node_active: unexpected node lookup result: '%s'",
+						nodeInfo);
+				return false;
+			}
+
+			/*
+			 * Step 2: call pgautofailover.node_active() and capture the
+			 *         assigned_group_state column.
+			 */
+			char callSql[1024];
+			sformat(callSql, sizeof(callSql),
+					"SELECT assigned_group_state "
+					"FROM pgautofailover.node_active("
+					"'default', %lld, %d, '%s', %s, %d, '%s', '')",
+					nodeId, groupId,
+					reported,
+					pgrunning ? "true" : "false",
+					tli, lsn);
+
+			char assignedState[256] = { 0 };
+			if (!exec_sql_on_service(r, "monitor",
+									 callSql, assignedState, sizeof(assignedState)))
+			{
+				sformat(errBuf, errLen,
+						"node_active: call failed for node '%s': %s",
+						nodeName, assignedState);
+				return false;
+			}
+
+			/* strip trailing whitespace */
+			nl = assignedState + strlen(assignedState);
+			while (nl > assignedState &&
+				   (nl[-1] == '\n' || nl[-1] == '\r' || nl[-1] == ' '))
+			{
+				*--nl = '\0';
+			}
+
+			if (strcmp(assignedState, expectedState) != 0)
+			{
+				sformat(errBuf, errLen,
+						"node_active: expected assigned='%s', got '%s'",
+						expectedState, assignedState);
+				return false;
+			}
+			return true;
+		}
+
+		case CMD_MARK_HEALTH:
+		{
+			/*
+			 * mark healthy/unhealthy: <node>
+			 *
+			 * Directly update the health column in pgautofailover.node on the
+			 * monitor.  health=1 means GOOD, health=-1 means BAD.
+			 */
+			int healthValue = cmd->markHealthy ? 1 : -1;
+			char updateSql[512];
+			sformat(updateSql, sizeof(updateSql),
+					"UPDATE pgautofailover.node "
+					"SET health = %d, healthchecktime = now() "
+					"WHERE nodename = '%s'",
+					healthValue, cmd->service);
+
+			char out[256] = { 0 };
+			if (!exec_sql_on_service(r, "monitor", updateSql, out, sizeof(out)))
+			{
+				sformat(errBuf, errLen,
+						"mark %s: UPDATE failed for node '%s': %s",
+						cmd->markHealthy ? "healthy" : "unhealthy",
+						cmd->service, out);
+				return false;
+			}
+
+			log_info("  mark %s: node=%s",
+					 cmd->markHealthy ? "healthy" : "unhealthy",
+					 cmd->service);
+			return true;
+		}
+
 		case CMD_LOGS_CHECK:
 		{
 			/*
@@ -3531,6 +3785,21 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 					cmd->logsNegate ? "not " : "",
 					cmd->allowError ? "matches" : "contains",
 					cmd->args);
+			break;
+		}
+
+		case CMD_NODE_ACTIVE:
+		{
+			sformat(buf, len, "node_active { %s } expect { %s }",
+					cmd->args, cmd->nodeActiveExpected);
+			break;
+		}
+
+		case CMD_MARK_HEALTH:
+		{
+			sformat(buf, len, "mark %s: %s",
+					cmd->markHealthy ? "healthy" : "unhealthy",
+					cmd->service);
 			break;
 		}
 

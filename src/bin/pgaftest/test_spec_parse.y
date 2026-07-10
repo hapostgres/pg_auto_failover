@@ -187,6 +187,7 @@ static TestNode      *current_node        = NULL;
 %token T_LBRACE T_RBRACE T_COMMA
 %token T_POSTGRES T_STAYS T_WHILE T_THROUGH T_SET
 %token T_LOGS T_NOT T_CONTAINS T_MATCHES
+%token T_NODE_ACTIVE T_MARK T_HEALTHY T_UNHEALTHY
 
 /* ---- Tokens with values ---- */
 %token <ival> T_INTEGER
@@ -202,6 +203,7 @@ static TestNode      *current_node        = NULL;
 %type <cmd>   exec_cmd wait_cmd assert_cmd sql_cmd expect_cmd
 %type <cmd>   promote_cmd network_cmd sleep_cmd compose_cmd
 %type <cmd>   postgres_ctl_cmd stays_while_cmd set_monitor_cmd logs_cmd
+%type <cmd>   node_active_cmd mark_health_cmd
 %type <ival>  opt_timeout
 %type <step>  while_body
 
@@ -706,6 +708,8 @@ step_cmd:
 	| stays_while_cmd   { $$ = $1; }
 	| set_monitor_cmd   { $$ = $1; }
 	| logs_cmd          { $$ = $1; }
+	| node_active_cmd   { $$ = $1; }
+	| mark_health_cmd   { $$ = $1; }
 	;
 
 /* -----------------------------------------------------------------------
@@ -1360,6 +1364,49 @@ logs_cmd:
 		$$->logsNegate = true;
 		$$->allowError = true;
 		free($2); free($5);
+	}
+	;
+
+/* -----------------------------------------------------------------------
+ * node_active { <node> reported: <state> lsn: <lsn> [tli: N] [pgrunning: bool] }
+ *    expect { assigned: <state> }
+ *
+ * The key-value pairs inside the { } braces are read as a raw T_BLOCK string
+ * and parsed in C by the runner.  This keeps the grammar simple and avoids
+ * introducing a lex state for the block content.
+ * ----------------------------------------------------------------------- */
+
+node_active_cmd:
+	T_NODE_ACTIVE T_BLOCK T_EXPECT T_BLOCK
+	{
+		$$ = make_cmd(CMD_NODE_ACTIVE);
+		/* $2 = "node2  reported: secondary  lsn: 0/5A0  ..." */
+		strlcpy($$->args, $2, sizeof($$->args));
+		/* $4 = "assigned: secondary" */
+		strlcpy($$->nodeActiveExpected, $4, sizeof($$->nodeActiveExpected));
+		free($2); free($4);
+	}
+	;
+
+/* -----------------------------------------------------------------------
+ * mark healthy: <node>
+ * mark unhealthy: <node>
+ * ----------------------------------------------------------------------- */
+
+mark_health_cmd:
+	T_MARK T_HEALTHY ':' T_IDENT
+	{
+		$$ = make_cmd(CMD_MARK_HEALTH);
+		strlcpy($$->service, $4, sizeof($$->service));
+		$$->markHealthy = true;
+		free($4);
+	}
+	| T_MARK T_UNHEALTHY ':' T_IDENT
+	{
+		$$ = make_cmd(CMD_MARK_HEALTH);
+		strlcpy($$->service, $4, sizeof($$->service));
+		$$->markHealthy = false;
+		free($4);
 	}
 	;
 
