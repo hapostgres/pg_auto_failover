@@ -3497,15 +3497,27 @@ runner_wait_for_monitor(TestRunner *r)
 
 		/*
 		 * If the direct libpq connection can't be established (e.g. the
-		 * host IP is not in the monitor's pg_hba.conf — common when the
-		 * monitor was initialised by an older pg_autoctl version that only
-		 * added the Docker network CIDR), fall back to a subprocess check
-		 * via docker compose exec.  Once the monitor responds to psql we
-		 * return true; wait loops will use subprocess polling instead of
-		 * LISTEN/NOTIFY.
+		 * host IP is not in the monitor's pg_hba.conf — common on Docker
+		 * Desktop for Mac where published-port connections appear as
+		 * 192.168.65.1, outside the Docker bridge CIDR), fall back to a
+		 * subprocess check.  Once the monitor responds to psql, patch pg_hba
+		 * to allow all hosts (safe for local test containers with trust auth)
+		 * and retry the LISTEN connection once before falling back to polling.
 		 */
 		if (run_cmd("%s", monitorReadyCmd) == 0)
 		{
+			run_cmd("%s exec -T monitor sh -c "
+					"\"echo 'host all all 0.0.0.0/0 trust'"
+					" >> \\$PGDATA/pg_hba.conf"
+					" && pg_ctl -D \\$PGDATA reload -s\""
+					" >/dev/null 2>&1",
+					r->composeBase);
+			pg_usleep(200 * 1000);
+			if (runner_notify_connect(r))
+			{
+				log_info("Monitor is ready; LISTEN channel open");
+				return true;
+			}
 			log_info("Monitor is ready (subprocess check; LISTEN not available)");
 			return true;
 		}
