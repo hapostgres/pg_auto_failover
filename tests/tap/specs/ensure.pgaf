@@ -51,8 +51,12 @@ step test_004_demoted {
     # After step 003 stopped and restarted postgres on node2, the cluster may
     # still be mid-oscillation (node2 re-catching up, node1 in wait_primary).
     # Wait for a fresh stable primary before triggering the failover, otherwise
-    # compose stop fires while node1 is in wait_primary and no failover occurs.
+    # the stop below fires while node1 is in wait_primary and no failover occurs.
     wait until node1 state is primary  timeout 60s
+    # Stop postgres first while pg_autoctl is still running: pg_autoctl detects
+    # the outage and reports it to the monitor, which starts the failover FSM.
+    # (Python: node1.stop_postgres() then node1.stop_pg_autoctl())
+    stop postgres node1
     compose stop node1
     # Wait for node2 to reach wait_primary — the failover's point of no return.
     # node2 cannot reach 'primary' while node1 is stopped (it needs a sync
@@ -61,9 +65,10 @@ step test_004_demoted {
     # node1 restarts it will come back as secondary, and node2 will then
     # transition from wait_primary → primary.
     wait until node2 state is wait_primary  timeout 90s
+    # Bring node1 back: pg_autoctl starts, connects to monitor, gets assigned
+    # 'demoted', executes the demoted transition, then moves to secondary.
     compose start node1
-    # 'demoted' is a sub-second transient state; waiting for it races on
-    # loaded shared CI runners.  Wait for the stable end state instead.
+    wait until node1 state is demoted  timeout 60s
     wait until node2 state is primary
         and node1 state is secondary
         timeout 300s
@@ -73,7 +78,16 @@ step test_005_inject_error_in_node2 {
     wait until node2 state is primary  timeout 60s
     wait until node2 state is primary  timeout 90s
     exec node2  bash -c "echo \"shared_preload_libraries='wrong_extension'\" >> /var/lib/postgres/pgaf/postgresql.conf"
+    # Stop postgres cleanly (pgctl off), then re-enable auto-start (pgctl on)
+    # so pg_autoctl keeps trying to restart postgres — which fails each time
+    # due to the bad config.  This mirrors the Python's node2.restart_postgres()
+    # intent: postgres repeatedly fails, the monitor detects an unhealthy primary
+    # and triggers a failover to node1.
+    # We ignore the exit code of pgctl on because postgres cannot start with
+    # the broken config, so the command always exits with an error; pg_autoctl
+    # itself keeps running and will retry.
     stop postgres node2
+    exec node2  bash -c "pg_autoctl manual service pgctl on || true"
     wait until node1 state is wait_primary  timeout 120s
     wait until node2 state is secondary
         and node1 state is primary
