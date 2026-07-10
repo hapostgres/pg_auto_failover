@@ -1,0 +1,80 @@
+# Test the monitor's node_active protocol directly.
+#
+# Uses the `node_active { ... } expect { ... }` DSL to drive the monitor
+# FSM through a simple two-node failover scenario without relying on keepers
+# running in the background.
+#
+# Each `node_active` call sends one keeper heartbeat to the monitor and
+# asserts the returned assigned state.  The `mark [un]healthy` directive
+# updates the monitor's health table, simulating what the health-check
+# worker does.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+    exec node1  pg_autoctl node start
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 90s
+}
+
+teardown {
+    compose down
+}
+
+# ------------------------------------------------------------------
+# test_001: verify stable primary/secondary state is reflected back
+# ------------------------------------------------------------------
+step test_001_steady_state {
+    # primary reports its current state; monitor should keep assigning primary
+    node_active { node1  reported: primary  lsn: 0/5000  tli: 1  pgrunning: true }
+        expect { assigned: primary }
+
+    # secondary reports its current state; monitor should keep assigning secondary
+    node_active { node2  reported: secondary  lsn: 0/5000  tli: 1  pgrunning: true }
+        expect { assigned: secondary }
+}
+
+# ------------------------------------------------------------------
+# test_002: simulate primary failure and monitor FSM response
+# ------------------------------------------------------------------
+step test_002_primary_failure {
+    # Mark node1 as unhealthy (simulates health-check worker detecting a failure)
+    mark unhealthy: node1
+
+    # node1 stops reporting (pgrunning false); monitor should move to draining
+    node_active { node1  reported: primary  lsn: 0/5000  tli: 1  pgrunning: false }
+        expect { assigned: draining }
+
+    # node2, still healthy, reports secondary; monitor should start promoting it
+    node_active { node2  reported: secondary  lsn: 0/5000  tli: 1  pgrunning: true }
+        expect { assigned: prepare_promotion }
+}
+
+# ------------------------------------------------------------------
+# test_003: restore node1 as secondary after failover completes
+# ------------------------------------------------------------------
+step test_003_post_failover {
+    # node2 completes promotion
+    node_active { node2  reported: wait_primary  lsn: 0/5000  tli: 2  pgrunning: true }
+        expect { assigned: primary }
+
+    # Restore node1 health so it can rejoin as secondary
+    mark healthy: node1
+
+    # node1 reconnects, reports demoted; monitor assigns catchingup
+    node_active { node1  reported: demoted  lsn: 0/4F00  tli: 1  pgrunning: false }
+        expect { assigned: catchingup }
+}
+
+sequence
+    test_001_steady_state
+    test_002_primary_failure
+    test_003_post_failover
