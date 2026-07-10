@@ -1091,6 +1091,57 @@ runner_wait_socket(TestRunner *r, int remainMs)
 
 
 /*
+ * Post-convergence notification flush for CMD_WAIT_MULTI.
+ *
+ * After the subprocess (or LISTEN) confirms all conditions are met, the
+ * corresponding NOTIFY messages may still be in transit: the monitor commits
+ * the state change and sends NOTIFY in one transaction, but TCP delivery on
+ * Docker Desktop for Mac can arrive tens to hundreds of milliseconds after
+ * the database commit that the subprocess reads.
+ *
+ * We loop, draining with marks on each pass, until either all listenSatisfied
+ * flags are set (every convergence NOTIFY has arrived) or 1 second elapses
+ * (generous safety cap — the caller already confirmed convergence, so we will
+ * return true regardless).
+ */
+static void
+notify_flush_until_satisfied(TestRunner *r,
+							 const char *const *mn,
+							 const char *const *ms,
+							 int count,
+							 bool *satisfied)
+{
+	if (!r->notifyConnected)
+	{
+		return;
+	}
+
+	time_t deadline = time(NULL) + 1;
+
+	while (time(NULL) < deadline)
+	{
+		/* stop as soon as every convergence NOTIFY has arrived */
+		bool allNotified = true;
+		for (int i = 0; i < count; i++)
+		{
+			if (!satisfied[i])
+			{
+				allNotified = false;
+				break;
+			}
+		}
+		if (allNotified)
+		{
+			break;
+		}
+
+		runner_wait_socket(r, 200);
+		runner_drain_notify(r, NULL, mn, ms, count, satisfied);
+	}
+}
+
+
+/*
  * Check that the formation has converged: for each required state, at least
  * one cluster node must have both reportedstate = assignedstate = that state.
  * This is the correct convergence condition — checking only assignedstate
@@ -2815,40 +2866,17 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 					}
 					if (allListenMet)
 					{
-						/*
-						 * Post-match flush: the NOTIFY may arrive after the
-						 * subprocess confirms convergence (monitor commits the
-						 * state change and sends NOTIFY in the same transaction,
-						 * but TCP delivery on Docker Desktop for Mac can lag
-						 * several milliseconds behind the subprocess result).
-						 * Poll briefly so those in-flight notifications get
-						 * their '*' here rather than spilling unmarked into the
-						 * next command's inter-drain.
-						 */
-						if (r->notifyConnected)
-						{
-							while (runner_wait_socket(r, 200))
-							{
-								runner_drain_notify(r, NULL, mn, ms,
-													cmd->waitStateCount,
-													listenSatisfied);
-							}
-						}
+						notify_flush_until_satisfied(r, mn, ms,
+													 cmd->waitStateCount,
+													 listenSatisfied);
 						return true;
 					}
 				}
 				else if (allMet)
 				{
-					/* same post-match flush for subprocess-confirmed convergence */
-					if (r->notifyConnected)
-					{
-						while (runner_wait_socket(r, 200))
-						{
-							runner_drain_notify(r, NULL, mn, ms,
-												cmd->waitStateCount,
-												listenSatisfied);
-						}
-					}
+					notify_flush_until_satisfied(r, mn, ms,
+												 cmd->waitStateCount,
+												 listenSatisfied);
 					return true;
 				}
 
