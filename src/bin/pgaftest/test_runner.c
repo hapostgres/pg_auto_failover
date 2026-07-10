@@ -63,6 +63,58 @@ run_cmd(const char *fmt, ...)
 }
 
 
+/*
+ * Run a shell command, capture both stdout and stderr into buf.
+ * Returns the exit code.  The capture is implemented by appending "2>&1" to
+ * the shell command string and reading from popen(cmd, "r") — the shell
+ * redirects file descriptor 2 onto 1 before exec, so both streams arrive on
+ * the single pipe end that popen hands back to us.  We read until EOF, trim
+ * trailing whitespace, and drain any overflow so pclose() doesn't see an
+ * unread pipe (which would SIGPIPE the child and make docker report exit 137).
+ */
+static int __attribute__((format(printf, 3, 4)))
+run_cmd_capture_both(char *buf, int buflen, const char *fmt, ...)
+{
+	char inner[4096];
+	va_list ap;
+	va_start(ap, fmt);
+	pg_vsnprintf(inner, sizeof(inner), fmt, ap);
+	va_end(ap);
+
+	char cmd[4096 + 6]; /* room for " 2>&1" */
+	sformat(cmd, sizeof(cmd), "%s 2>&1", inner);
+
+	log_debug("$ %s", cmd);
+
+	FILE *p = popen(cmd, "r");
+	if (!p)
+	{
+		return -1;
+	}
+
+	int pos = 0;
+	int c;
+	while ((c = fgetc(p)) != EOF && pos < buflen - 1)
+	{
+		buf[pos++] = (char) c;
+	}
+	buf[pos] = '\0';
+
+	while (pos > 0 && (buf[pos - 1] == '\n' || buf[pos - 1] == '\r' ||
+					   buf[pos - 1] == ' '))
+	{
+		buf[--pos] = '\0';
+	}
+
+	while (c != EOF)
+	{
+		c = fgetc(p);
+	}
+
+	return pclose(p);
+}
+
+
 /* Run a shell command, capture stdout into buf */
 static int __attribute__((format(printf, 3, 4)))
 run_cmd_capture(char *buf, int buflen, const char *fmt, ...)
@@ -2844,12 +2896,15 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 * Postgres.  Equivalent to calling `pg_autoctl manual service pgctl off`.
 			 */
 			log_info("Stopping Postgres on %s", cmd->service);
-			int rc = run_cmd(
+			char pgctlOut[4096] = "";
+			int rc = run_cmd_capture_both(
+				pgctlOut, sizeof(pgctlOut),
 				"%s exec -T %s pg_autoctl manual service pgctl off"
-				" --pgdata /var/lib/postgres/pgaf >/dev/null 2>&1",
+				" --pgdata /var/lib/postgres/pgaf",
 				r->composeBase, cmd->service);
 			if (rc != 0)
 			{
+				log_info("%s", pgctlOut);
 				sformat(errBuf, errLen,
 						"stop postgres %s failed (exit %d)",
 						cmd->service, rc);
@@ -2861,12 +2916,15 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		case CMD_START_POSTGRES:
 		{
 			log_info("Starting Postgres on %s", cmd->service);
-			int rc = run_cmd(
+			char pgctlOut[4096] = "";
+			int rc = run_cmd_capture_both(
+				pgctlOut, sizeof(pgctlOut),
 				"%s exec -T %s pg_autoctl manual service pgctl on"
-				" --pgdata /var/lib/postgres/pgaf >/dev/null 2>&1",
+				" --pgdata /var/lib/postgres/pgaf",
 				r->composeBase, cmd->service);
 			if (rc != 0)
 			{
+				log_info("%s", pgctlOut);
 				sformat(errBuf, errLen,
 						"start postgres %s failed (exit %d)",
 						cmd->service, rc);
