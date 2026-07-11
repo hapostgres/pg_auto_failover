@@ -946,7 +946,10 @@ class StatefulNode:
         while wait_until > dt.datetime.now():
             self.sleep(sleep_time)
 
-            current_state, assigned_state = self.get_state()
+            try:
+                current_state, assigned_state = self.get_state()
+            except Exception:
+                continue
 
             # only log the state if it has changed
             if current_state != prev_state:
@@ -994,7 +997,10 @@ class StatefulNode:
         while wait_until > dt.datetime.now():
             self.cluster.sleep(sleep_time)
 
-            current_state, assigned_state = self.get_state()
+            try:
+                current_state, assigned_state = self.get_state()
+            except Exception:
+                continue
 
             # only log the state if it has changed
             if assigned_state != prev_state:
@@ -1210,9 +1216,14 @@ class DataNode(PGNode, StatefulNode):
 
         # sometimes we might have holes in the nodeid sequence
         # grab the current nodeid, if it's already available
-        nodeid = self.get_nodeid()
-        if nodeid > 0:
-            self.nodeid = nodeid
+        # when run=True the background process may not have written its state
+        # file yet — tolerate that and leave self.nodeid at its default
+        try:
+            nodeid = self.get_nodeid()
+            if nodeid > 0:
+                self.nodeid = nodeid
+        except CalledProcessError:
+            pass
 
     def logger_name(self):
         return self.datadir

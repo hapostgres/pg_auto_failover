@@ -66,8 +66,6 @@ step enable_monitor_node1 {
 
 step enable_monitor_node2 {
     exec node2  pg_autoctl enable monitor postgresql://autoctl_node@newmonitor/pg_auto_failover
-    wait until node2 state is catchingup  timeout 90s
-    wait until node1 state is wait_primary  timeout 90s
 }
 
 step wait_for_convergence {

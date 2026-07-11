@@ -179,7 +179,7 @@ StartMonitorNode(void)
 							"Wait for at least this much time after startup before "
 							"initiating a failover.",
 							NULL, &StartupGracePeriodMs, 10 * 1000, 1, INT_MAX,
-							PGC_SIGHUP, GUC_UNIT_MS, NULL, NULL, NULL);
+							PGC_SUSET, GUC_UNIT_MS, NULL, NULL, NULL);
 
 	PreviousProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = pgautofailover_ProcessUtility;

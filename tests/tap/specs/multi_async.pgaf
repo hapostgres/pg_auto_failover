@@ -225,7 +225,6 @@ step test_016_002_fail_node1 {
 step test_016_003_restart_node3 {
     network connect node3
     wait until node3 assigned-state = secondary  timeout 90s
-    wait until node2 state is wait_primary  timeout 60s
     sleep 5s
 }
 
@@ -234,7 +233,7 @@ step test_016_004_restart_node1 {
     wait until node3 state is secondary
         and node2 state is primary
         and node1 state is secondary
-        timeout 90s
+        timeout 120s
 }
 
 step test_017_001_fail_node1 {

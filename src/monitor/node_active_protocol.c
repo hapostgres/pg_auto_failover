@@ -26,6 +26,7 @@
 
 #include "access/htup_details.h"
 #include "access/xlogdefs.h"
+#include "utils/timestamp.h"
 #include "catalog/pg_enum.h"
 #include "nodes/makefuncs.h"
 #include "nodes/parsenodes.h"
@@ -435,6 +436,7 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 	else
 	{
 		LockFormation(formationId, ShareLock);
+		LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
 
 		if (pgAutoFailoverNode->reportedState != currentNodeState->replicationState)
 		{
@@ -484,9 +486,27 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 									currentNodeState->pgsrSyncState,
 									currentNodeState->reportedTLI,
 									currentNodeState->reportedLSN);
-	}
 
-	LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
+		/*
+		 * Sync the in-memory struct with the values just written to the DB.
+		 * ReportAutoFailoverNodeState updates reportedpgisrunning, reportedtli,
+		 * and reporttime in the DB, but not in this struct.  ProceedGroupState
+		 * relies on NodeIsHealthy() which reads pgIsRunning and reportTime from
+		 * the struct, so leaving them stale causes spurious health failures.
+		 *
+		 * Mirror the DB's CASE WHEN 0 THEN reportedtli ELSE $4 END logic for
+		 * reportedTLI: a keeper reporting TLI=0 (e.g. wait_standby before
+		 * streaming starts) must not overwrite the struct's existing value,
+		 * because InsertEvent() passes node->reportedTLI directly and the
+		 * event_reportedtli_check constraint requires reportedtli > 0.
+		 */
+		pgAutoFailoverNode->pgIsRunning = currentNodeState->pgIsRunning;
+		if (currentNodeState->reportedTLI != 0)
+		{
+			pgAutoFailoverNode->reportedTLI = currentNodeState->reportedTLI;
+		}
+		pgAutoFailoverNode->reportTime = GetCurrentTimestamp();
+	}
 
 	ProceedGroupState(pgAutoFailoverNode);
 

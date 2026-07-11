@@ -105,6 +105,26 @@ check: check-monitor ;
 check-monitor: install-monitor
 	$(MAKE) -C src/monitor/ installcheck
 
+# Run SQL regression tests (pg_regress installcheck) inside a Docker container.
+# Defaults to PG16; override with PGVERSION=17 etc.
+# Usage: make installcheck [PGVERSION=16]
+INSTALLCHECK_PGVERSION ?= 16
+.PHONY: installcheck
+installcheck: build-test-pg$(INSTALLCHECK_PGVERSION)
+	docker run --rm \
+	  $(TEST_CONTAINER_NAME):pg$(INSTALLCHECK_PGVERSION) \
+	  bash -c ' \
+	    initdb --auth=trust --username=docker -D /tmp/pgdata && \
+	    printf "shared_preload_libraries = '"'"'pgautofailover'"'"'\n" \
+	      >> /tmp/pgdata/postgresql.conf && \
+	    pg_ctl start -D /tmp/pgdata -l /tmp/pgdata/pg.log -o "-k /tmp -p 5432" && \
+	    sudo chmod -R a+w /usr/src/pg_auto_failover/src/monitor && \
+	    make -C /usr/src/pg_auto_failover/src/monitor installcheck \
+	         PGHOST=/tmp PGPORT=5432 PGUSER=docker \
+	    || { pg_ctl stop -D /tmp/pgdata; exit 1; } && \
+	    pg_ctl stop -D /tmp/pgdata \
+	  '
+
 .PHONY: clean
 clean: clean-monitor clean-bin ;
 

@@ -15,6 +15,8 @@
 #include "postgres.h"
 
 #include "access/xlogdefs.h"
+#include "datatype/timestamp.h"
+#include "formation_metadata.h"
 #include "node_metadata.h"
 
 /*
@@ -34,8 +36,36 @@ typedef struct AutoFailoverNodeState
 } AutoFailoverNodeState;
 
 
+/*
+ * GroupStateContext bundles every input the monitor node_active protocol needs
+ * to make FSM decisions: the node list (loaded once from the DB), the
+ * formation, a single timestamp snapshot, and copies of the relevant GUCs.
+ *
+ * Production code builds this with BuildGroupStateContext(), which fetches
+ * everything from the database.  Test code can populate it from fixtures and
+ * call ProceedGroupStateFromContext() directly, making the FSM logic
+ * exercisable without a live database.
+ */
+typedef struct GroupStateContext
+{
+	char *formationId;
+	int groupId;
+	AutoFailoverNode *activeNode;
+	List *groupNodeList;
+	int groupNodeCount;
+	AutoFailoverFormation *formation;
+	TimestampTz now;
+	int unhealthyTimeoutMs;
+	int drainTimeoutMs;
+	int startupGracePeriodMs;
+} GroupStateContext;
+
+
 /* public function declarations */
+extern bool BuildGroupStateContext(GroupStateContext *ctx,
+								   AutoFailoverNode *activeNode);
 extern bool ProceedGroupState(AutoFailoverNode *activeNode);
+extern bool ProceedGroupStateFromContext(GroupStateContext *ctx);
 
 /* GUCs */
 extern int EnableSyncXlogThreshold;

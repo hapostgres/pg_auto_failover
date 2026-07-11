@@ -52,16 +52,19 @@ typedef struct CandidateList
 
 
 /* private function forward declarations */
-static bool ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode);
-static bool ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
+static bool ProceedGroupStateForPrimaryNode(GroupStateContext *ctx,
+											AutoFailoverNode *primaryNode);
+static bool ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 										   AutoFailoverNode *primaryNode);
 static bool ProceedWithMSFailover(AutoFailoverNode *activeNode,
 								  AutoFailoverNode *candidateNode);
 
-static bool BuildCandidateList(List *standbyNodesGroupList,
+static bool BuildCandidateList(GroupStateContext *ctx,
+							   List *standbyNodesGroupList,
 							   CandidateList *candidateList);
 
-static AutoFailoverNode * SelectFailoverCandidateNode(CandidateList *candidateList,
+static AutoFailoverNode * SelectFailoverCandidateNode(GroupStateContext *ctx,
+													  CandidateList *candidateList,
 													  AutoFailoverNode *primaryNode);
 
 static bool PromoteSelectedNode(AutoFailoverNode *selectedNode,
@@ -80,26 +83,71 @@ int PromoteXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
 
 
 /*
- * ProceedGroupState proceeds the state machines of the group of which
- * the given node is part.
+ * BuildGroupStateContext loads everything from the database that the
+ * node_active FSM needs, capturing a single timestamp snapshot and copying
+ * the current GUC values.  Call this once at the top of NodeActive() and pass
+ * the resulting context to ProceedGroupStateFromContext().
+ *
+ * Returns false (and raises an ereport ERROR) when the formation cannot be
+ * found.
  */
 bool
-ProceedGroupState(AutoFailoverNode *activeNode)
+BuildGroupStateContext(GroupStateContext *ctx, AutoFailoverNode *activeNode)
 {
-	char *formationId = activeNode->formationId;
-	int groupId = activeNode->groupId;
+	ctx->formationId = activeNode->formationId;
+	ctx->groupId = activeNode->groupId;
+	ctx->activeNode = activeNode;
+	ctx->formation = GetFormation(activeNode->formationId);
+	ctx->groupNodeList =
+		AutoFailoverNodeGroup(activeNode->formationId, activeNode->groupId);
+	ctx->groupNodeCount = list_length(ctx->groupNodeList);
+	ctx->now = GetCurrentTimestamp();
+	ctx->unhealthyTimeoutMs = UnhealthyTimeoutMs;
+	ctx->drainTimeoutMs = DrainTimeoutMs;
+	ctx->startupGracePeriodMs = StartupGracePeriodMs;
 
-	AutoFailoverFormation *formation = GetFormation(formationId);
-
-	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
-	int nodesCount = list_length(nodesGroupList);
-
-	if (formation == NULL)
+	if (ctx->formation == NULL)
 	{
 		ereport(ERROR,
 				(errmsg("Formation for %s could not be found",
 						activeNode->formationId)));
 	}
+
+	return true;
+}
+
+
+/*
+ * ProceedGroupState proceeds the state machines of the group of which
+ * the given node is part.  It builds a GroupStateContext from the database and
+ * delegates to ProceedGroupStateFromContext.
+ */
+bool
+ProceedGroupState(AutoFailoverNode *activeNode)
+{
+	GroupStateContext ctx;
+
+	BuildGroupStateContext(&ctx, activeNode);
+
+	return ProceedGroupStateFromContext(&ctx);
+}
+
+
+/*
+ * ProceedGroupStateFromContext is the core FSM logic, operating entirely on
+ * the pre-built GroupStateContext.  It does not touch the database for reads;
+ * writes (AssignGoalState, NotifyStateChange) still go to the DB.
+ *
+ * This separation lets test code inject a synthetic context and exercise the
+ * FSM without a live database connection.
+ */
+bool
+ProceedGroupStateFromContext(GroupStateContext *ctx)
+{
+	AutoFailoverNode *activeNode = ctx->activeNode;
+	char *formationId = ctx->formationId;
+	int groupId = ctx->groupId;
+	int nodesCount = ctx->groupNodeCount;
 
 	/*
 	 * If the active node just reached the DROPPED state, proceed to remove it
@@ -191,7 +239,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsInPrimaryState(activeNode))
 	{
-		return ProceedGroupStateForPrimaryNode(activeNode);
+		return ProceedGroupStateForPrimaryNode(ctx, activeNode);
 	}
 
 	AutoFailoverNode *primaryNode =
@@ -214,7 +262,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *
 	 * In all other cases we require a primaryNode to be identified.
 	 */
-	if (primaryNode == NULL && !IsFailoverInProgress(nodesGroupList))
+	if (primaryNode == NULL && !IsFailoverInProgress(ctx->groupNodeList))
 	{
 		ereport(ERROR,
 				(errmsg("ProceedGroupState couldn't find the primary node "
@@ -227,7 +275,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	}
 
 	/* Multiple Standby failover is handled in its own function. */
-	if (nodesCount > 2 && IsUnhealthy(primaryNode))
+	if (nodesCount > 2 && NodeIsUnhealthy(primaryNode, ctx))
 	{
 		/*
 		 * The WAIT_PRIMARY state encodes the fact that we know there is no
@@ -293,7 +341,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		 * stop here. When it return false, it did nothing, and so we want to
 		 * apply the common orchestration code for a failover.
 		 */
-		if (ProceedGroupStateForMSFailover(activeNode, primaryNode))
+		if (ProceedGroupStateForMSFailover(ctx, primaryNode))
 		{
 			return true;
 		}
@@ -310,7 +358,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)) &&
-		IsHealthy(primaryNode))
+		NodeIsHealthy(primaryNode, ctx))
 	{
 		char message[BUFSIZE] = { 0 };
 
@@ -335,7 +383,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
 		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
-		IsHealthy(primaryNode))
+		NodeIsHealthy(primaryNode, ctx))
 	{
 		char message[BUFSIZE];
 
@@ -378,7 +426,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) ||
 		IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
 	{
-		return ProceedGroupStateForMSFailover(activeNode, primaryNode);
+		return ProceedGroupStateForMSFailover(ctx, primaryNode);
 	}
 
 	/*
@@ -473,7 +521,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)) &&
-		IsHealthy(activeNode) &&
+		NodeIsHealthy(activeNode, ctx) &&
 		activeNode->reportedTLI == primaryNode->reportedTLI &&
 		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
 	{
@@ -498,7 +546,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_SECONDARY) &&
 		IsInPrimaryState(primaryNode) &&
-		IsUnhealthy(primaryNode) && IsHealthy(activeNode) &&
+		NodeIsUnhealthy(primaryNode, ctx) && NodeIsHealthy(activeNode, ctx) &&
 		activeNode->candidatePriority > 0 &&
 		WalDifferenceWithin(activeNode, primaryNode, PromoteXlogThreshold))
 	{
@@ -603,7 +651,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
 		primaryNode &&
-		IsCitusFormation(formation) && activeNode->groupId > 0)
+		IsCitusFormation(ctx->formation) && activeNode->groupId > 0)
 	{
 		char message[BUFSIZE];
 
@@ -630,7 +678,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
 		primaryNode == NULL &&
-		IsCitusFormation(formation) && activeNode->groupId > 0)
+		IsCitusFormation(ctx->formation) && activeNode->groupId > 0)
 	{
 		char message[BUFSIZE];
 
@@ -735,7 +783,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT) ||
-		 IsDrainTimeExpired(primaryNode)))
+		 NodeIsDrainTimeExpired(primaryNode, ctx)))
 	{
 		char message[BUFSIZE];
 
@@ -762,7 +810,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
 		primaryNode &&
-		IsCitusFormation(formation) && activeNode->groupId > 0)
+		IsCitusFormation(ctx->formation) && activeNode->groupId > 0)
 	{
 		char message[BUFSIZE];
 
@@ -789,7 +837,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
 		primaryNode == NULL &&
-		IsCitusFormation(formation) && activeNode->groupId > 0)
+		IsCitusFormation(ctx->formation) && activeNode->groupId > 0)
 	{
 		char message[BUFSIZE];
 
@@ -815,7 +863,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 * concurrently making progress.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
-		IsHealthy(primaryNode) &&
+		NodeIsHealthy(primaryNode, ctx) &&
 		((primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
 		  primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY) &&
 		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
@@ -841,7 +889,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 	 *  demoted -> catchingup
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
-		IsHealthy(primaryNode) &&
+		NodeIsHealthy(primaryNode, ctx) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
 		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)))
@@ -898,7 +946,7 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
 
 		/* compute next step for the primary depending on node settings */
-		return ProceedGroupStateForPrimaryNode(primaryNode);
+		return ProceedGroupStateForPrimaryNode(ctx, primaryNode);
 	}
 
 	/*
@@ -935,7 +983,8 @@ ProceedGroupState(AutoFailoverNode *activeNode)
  * Group State Machine when a primary node contacts the monitor.
  */
 static bool
-ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
+ProceedGroupStateForPrimaryNode(GroupStateContext *ctx,
+								AutoFailoverNode *primaryNode)
 {
 	List *otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 	int otherNodesCount = list_length(otherNodesGroupList);
@@ -1011,8 +1060,6 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		int secondaryNodesCount = otherNodesCount;
 		int secondaryQuorumNodesCount = otherNodesCount;
 
-		AutoFailoverFormation *formation =
-			GetFormation(primaryNode->formationId);
 		ListCell *nodeCell = NULL;
 
 		foreach(nodeCell, otherNodesGroupList)
@@ -1029,7 +1076,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			if (otherNode->goalState == REPLICATION_STATE_SECONDARY &&
 				otherNode->reportedState != REPLICATION_STATE_REPORT_LSN &&
 				otherNode->reportedState != REPLICATION_STATE_JOIN_SECONDARY &&
-				IsUnhealthy(otherNode))
+				NodeIsUnhealthy(otherNode, ctx))
 			{
 				char message[BUFSIZE];
 
@@ -1078,7 +1125,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 		 */
 		if (replicationQuorumCount == 0)
 		{
-			Assert(formation->number_sync_standbys == 0);
+			Assert(ctx->formation->number_sync_standbys == 0);
 
 			ReplicationState primaryGoalState =
 				secondaryNodesCount == 0
@@ -1133,7 +1180,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			 * block writes on the primary.
 			 */
 			ReplicationState primaryGoalState =
-				formation->number_sync_standbys == 0
+				ctx->formation->number_sync_standbys == 0
 				? REPLICATION_STATE_WAIT_PRIMARY
 				: REPLICATION_STATE_PRIMARY;
 
@@ -1199,7 +1246,7 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
 			char message[BUFSIZE] = { 0 };
 
 			ReplicationState primaryGoalState =
-				formation->number_sync_standbys == 0 &&
+				ctx->formation->number_sync_standbys == 0 &&
 				secondaryQuorumNodesCount == 0
 				? REPLICATION_STATE_WAIT_PRIMARY
 				: REPLICATION_STATE_PRIMARY;
@@ -1255,11 +1302,11 @@ ProceedGroupStateForPrimaryNode(AutoFailoverNode *primaryNode)
  *  - there's more than one standby node registered in the system
  */
 static bool
-ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
+ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 							   AutoFailoverNode *primaryNode)
 {
-	List *nodesGroupList =
-		AutoFailoverNodeGroup(activeNode->formationId, activeNode->groupId);
+	AutoFailoverNode *activeNode = ctx->activeNode;
+	List *nodesGroupList = ctx->groupNodeList;  /* already fetched in context */
 	CandidateList candidateList = { 0 };
 
 	/*
@@ -1310,7 +1357,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		 * started yet.
 		 */
 		if (IsStateIn(nodeBeingPromoted->reportedState, knownUnreachableStates) ||
-			IsHealthy(nodeBeingPromoted))
+			NodeIsHealthy(nodeBeingPromoted, ctx))
 		{
 			elog(LOG, "Found candidate " NODE_FORMAT,
 				 NODE_FORMAT_ARGS(nodeBeingPromoted));
@@ -1338,12 +1385,9 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * different candidateNodesGroupList in which every node has reported their
 	 * LSN position, allowing progress to be made.
 	 */
-	char *formationId = activeNode->formationId;
-	AutoFailoverFormation *formation = GetFormation(formationId);
+	candidateList.numberSyncStandbys = ctx->formation->number_sync_standbys;
 
-	candidateList.numberSyncStandbys = formation->number_sync_standbys;
-
-	BuildCandidateList(nodesGroupList, &candidateList);
+	BuildCandidateList(ctx, nodesGroupList, &candidateList);
 
 	/*
 	 * Time to select a candidate?
@@ -1385,7 +1429,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 	 * WAIT_PRIMARY state with all the writes blocked for lack of standby
 	 * nodes.
 	 */
-	int minCandidates = formation->number_sync_standbys + 1;
+	int minCandidates = ctx->formation->number_sync_standbys + 1;
 
 	/* no candidates is a hard pass */
 	if (candidateList.candidateCount == 0)
@@ -1407,8 +1451,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 			" and reported state \"%s\"",
 			candidateList.quorumCandidateCount,
 			minCandidates,
-			formation->number_sync_standbys,
-			formation->formationId,
+			ctx->formation->number_sync_standbys,
+			ctx->formation->formationId,
 			NODE_FORMAT_ARGS(activeNode),
 			ReplicationStateGetName(activeNode->reportedState));
 
@@ -1457,7 +1501,7 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
 		}
 
 		AutoFailoverNode *selectedNode =
-			SelectFailoverCandidateNode(&candidateList, primaryNode);
+			SelectFailoverCandidateNode(ctx, &candidateList, primaryNode);
 
 		/* we might not have a selected candidate for failover yet */
 		if (selectedNode == NULL)
@@ -1507,7 +1551,8 @@ ProceedGroupStateForMSFailover(AutoFailoverNode *activeNode,
  * caller for BuildCandidateList knows to refrain from any decision making.
  */
 static bool
-BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
+BuildCandidateList(GroupStateContext *ctx, List *nodesGroupList,
+				   CandidateList *candidateList)
 {
 	ListCell *nodeCell = NULL;
 	List *candidateNodesGroupList = NIL;
@@ -1550,7 +1595,7 @@ BuildCandidateList(List *nodesGroupList, CandidateList *candidateList)
 		 * unless the node is unhealthy because Postgres is down, but
 		 * pg_autoctl is still reporting.
 		 */
-		if (IsUnhealthy(node) && !IsReporting(node))
+		if (NodeIsUnhealthy(node, ctx) && !NodeIsReporting(node, ctx))
 		{
 			elog(LOG,
 				 "Skipping candidate " NODE_FORMAT ", which is unhealthy",
@@ -1717,7 +1762,8 @@ ProceedWithMSFailover(AutoFailoverNode *activeNode,
  * the next step (cascade WALs or promote directly).
  */
 static AutoFailoverNode *
-SelectFailoverCandidateNode(CandidateList *candidateList,
+SelectFailoverCandidateNode(GroupStateContext *ctx,
+							CandidateList *candidateList,
 							AutoFailoverNode *primaryNode)
 {
 	/*
@@ -1789,7 +1835,7 @@ SelectFailoverCandidateNode(CandidateList *candidateList,
 		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
 		/* all the candidates are now in the REPORT_LSN state */
-		if (IsUnhealthy(node))
+		if (NodeIsUnhealthy(node, ctx))
 		{
 			char message[BUFSIZE];
 
@@ -1840,7 +1886,7 @@ SelectFailoverCandidateNode(CandidateList *candidateList,
 		{
 			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
-			if (IsHealthy(node))
+			if (NodeIsHealthy(node, ctx))
 			{
 				someMostAdvancedStandbysAreHealthy = true;
 				break;
