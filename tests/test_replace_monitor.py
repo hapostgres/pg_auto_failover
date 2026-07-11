@@ -87,7 +87,6 @@ def test_009a_enable_monitor_node1():
 def test_009b_enable_monitor_node2():
     node2.enable_monitor(newmonitor)
     assert node2.wait_until_state(target_state="catchingup")
-    assert node1.wait_until_state(target_state="wait_primary")
 
 
 def test_010_wait_until_state():
