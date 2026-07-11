@@ -414,3 +414,193 @@ assigned_group_state        | primary
 assigned_candidate_priority | 100
 assigned_replication_quorum | t
 
+-- ── test_005: start_maintenance on primary with health=UNKNOWN secondary ──────
+--
+-- Regression for the CountHealthyCandidates / IsHealthy inconsistency.
+--
+-- NodeIsHealthy() treats NODE_HEALTH_UNKNOWN as "trust pgIsRunning", so
+-- catchingup→secondary can fire before the health-check worker runs.  The
+-- old IsHealthy() returned false for UNKNOWN, so start_maintenance() counted
+-- 0 healthy candidates even when the secondary was fully reachable.
+--
+-- After fixing IsHealthy() to mirror NodeIsHealthy() for UNKNOWN health,
+-- start_maintenance must succeed and assign prepare_maintenance /
+-- prepare_promotion.
+-- Confirm node2 as primary (last test_004 call left it in wait_primary goal).
+SELECT *
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
+                                  current_group_role => 'primary',
+                                  current_pg_is_running => true,
+                                  current_tli => 2,
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]---------------+--------
+assigned_node_id            | 7
+assigned_group_id           | 0
+assigned_group_state        | primary
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+
+-- Confirm node1 as secondary.
+SELECT *
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
+                                  current_group_role => 'secondary',
+                                  current_pg_is_running => true,
+                                  current_tli => 2,
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]---------------+----------
+assigned_node_id            | 6
+assigned_group_id           | 0
+assigned_group_state        | secondary
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+
+-- Force node1 health back to UNKNOWN to simulate a node that reached
+-- SECONDARY before the health-check worker ran (the window our FSM fix
+-- opened up).  Without the IsHealthy() fix this causes start_maintenance
+-- to fail with "0 candidate nodes available".
+UPDATE pgautofailover.node
+   SET health = -1
+ WHERE nodename = 'node1';
+-- start_maintenance on the primary (node2): must succeed despite
+-- node1 health=UNKNOWN, because IsHealthy() now trusts pgIsRunning=true
+-- when no health check has run yet.
+SELECT pgautofailover.start_maintenance(:n2);
+-[ RECORD 1 ]-----+--
+start_maintenance | t
+
+-- Verify: node2 → prepare_maintenance, node1 → prepare_promotion.
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'fsm_test'
+ ORDER BY nodename;
+-[ RECORD 1 ]-+--------------------
+nodename      | node1
+goalstate     | prepare_promotion
+reportedstate | secondary
+-[ RECORD 2 ]-+--------------------
+nodename      | node2
+goalstate     | prepare_maintenance
+reportedstate | primary
+
+-- ── test_006: killed-primary failover (health=BAD, pgIsRunning still true) ────
+--
+-- The container-killed scenario: the primary stops reporting node_active (so
+-- pgIsRunning stays TRUE in the DB from its last heartbeat), the health-check
+-- worker eventually marks it BAD, and after unhealthyTimeoutMs the monitor
+-- should fire secondary → prepare_promotion even though the primary never
+-- self-reported pgIsRunning=false.
+--
+-- Distinct from test_003 (self-reported-down path via pgIsRunning=false).
+-- Here we exercise the time+health-check-based unhealthy path.
+--
+-- Uses a fresh formation to start from a clean state.
+SELECT pgautofailover.create_formation('killed_test', 'pgsql', 'postgres', true, 0);
+-[ RECORD 1 ]----+---------------------------------
+create_formation | (killed_test,pgsql,postgres,t,0)
+
+SELECT *
+  FROM pgautofailover.register_node('killed_test', 'ka', 5432,
+                                    'postgres', 'ka', 1);
+-[ RECORD 1 ]---------------+-------
+assigned_node_id            | 8
+assigned_group_id           | 0
+assigned_group_state        | single
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+assigned_node_name          | ka
+
+SELECT nodeid AS ka FROM pgautofailover.node
+ WHERE formationid = 'killed_test' AND nodename = 'ka' \gset
+SELECT *
+  FROM pgautofailover.register_node('killed_test', 'kb', 5432,
+                                    'postgres', 'kb', 1);
+-[ RECORD 1 ]---------------+-------------
+assigned_node_id            | 9
+assigned_group_id           | 0
+assigned_group_state        | wait_standby
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+assigned_node_name          | kb
+
+SELECT nodeid AS kb FROM pgautofailover.node
+ WHERE formationid = 'killed_test' AND nodename = 'kb' \gset
+-- Bootstrap to primary + secondary.
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :ka, 0, current_group_role => 'single');
+-[ RECORD 1 ]--------+-------
+assigned_group_state | single
+
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :kb, 0, current_group_role => 'wait_standby');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_standby
+
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :ka, 0, current_group_role => 'single', current_lsn => '0/3000');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_primary
+
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :ka, 0, current_group_role => 'wait_primary', current_lsn => '0/3000');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_primary
+
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :kb, 0, current_group_role => 'wait_standby');
+-[ RECORD 1 ]--------+-----------
+assigned_group_state | catchingup
+
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :kb, 0, current_group_role => 'catchingup', current_lsn => '0/3000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :kb, 0, current_group_role => 'secondary', current_lsn => '0/3000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :ka, 0, current_group_role => 'wait_primary', current_lsn => '0/3000');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | primary
+
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :ka, 0, current_group_role => 'primary', current_lsn => '0/3000');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | primary
+
+SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :kb, 0, current_group_role => 'secondary', current_lsn => '0/3000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+-- Lower startup_grace_period to 1ms so the time-based unhealthy path fires
+-- immediately in the test environment (in production the server has been up
+-- far longer than the 10s default).
+ALTER SYSTEM SET pgautofailover.startup_grace_period = 1;
+SELECT pg_reload_conf();
+-[ RECORD 1 ]--+--
+pg_reload_conf | t
+
+-- Simulate killed primary (ka): health checker ran and marked it BAD,
+-- but ka's last node_active set pgIsRunning=true and that value is still in
+-- the DB — it never self-reported pgIsRunning=false.
+-- reporttime is set 60s in the past to exceed UnhealthyTimeoutMs (20s default).
+-- healthchecktime is recent so the health-check-ran-after-startup condition holds.
+UPDATE pgautofailover.node
+   SET health = 0,
+       healthchecktime = now(),
+       reporttime = now() - interval '60 seconds'
+ WHERE formationid = 'killed_test' AND nodename = 'ka';
+-- kb (secondary) calls node_active: NodeIsUnhealthy(ka, ctx) must fire via
+-- the time-based path (reportTime > unhealthyTimeoutMs AND health=BAD),
+-- triggering secondary → prepare_promotion even though ka never called
+-- node_active with pgIsRunning=false.
+SELECT *
+  FROM pgautofailover.node_active('killed_test', :kb, 0,
+                                  current_group_role => 'secondary',
+                                  current_pg_is_running => true,
+                                  current_lsn => '0/3000');
+-[ RECORD 1 ]---------------+------------------
+assigned_node_id            | 9
+assigned_group_id           | 0
+assigned_group_state        | prepare_promotion
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+
+ALTER SYSTEM RESET pgautofailover.startup_grace_period;
+SELECT pg_reload_conf();
+-[ RECORD 1 ]--+--
+pg_reload_conf | t
+

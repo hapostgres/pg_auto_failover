@@ -1932,6 +1932,20 @@ IsHealthy(AutoFailoverNode *pgAutoFailoverNode)
 		return pgAutoFailoverNode->pgIsRunning;
 	}
 
+	/*
+	 * UNKNOWN (-1) means no health-check worker has run yet.  Trust the
+	 * keeper's own pgIsRunning report; we have no contradictory evidence.
+	 * Mirrors the same rule in NodeIsHealthy().  Without this,
+	 * CountHealthyCandidates() rejects healthy secondaries that reached
+	 * SECONDARY state before the health-check worker ran (which our FSM
+	 * now allows via NodeIsHealthy), causing start_maintenance() to
+	 * report "0 candidate nodes available".
+	 */
+	if (pgAutoFailoverNode->health == NODE_HEALTH_UNKNOWN)
+	{
+		return pgAutoFailoverNode->pgIsRunning;
+	}
+
 	/* nominal case: trust background checks + reported Postgres state */
 	return pgAutoFailoverNode->health == NODE_HEALTH_GOOD &&
 		   pgAutoFailoverNode->pgIsRunning == true;
