@@ -190,7 +190,7 @@ StartMonitorNode(void)
 							 NULL,
 							 &GuardDataLoss,
 							 true,
-							 PGC_SUSET,
+							 PGC_USERSET,
 							 0,
 							 NULL, NULL, NULL);
 
