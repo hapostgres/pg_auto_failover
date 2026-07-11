@@ -1210,9 +1210,14 @@ class DataNode(PGNode, StatefulNode):
 
         # sometimes we might have holes in the nodeid sequence
         # grab the current nodeid, if it's already available
-        nodeid = self.get_nodeid()
-        if nodeid > 0:
-            self.nodeid = nodeid
+        # when run=True the background process may not have written its state
+        # file yet — tolerate that and leave self.nodeid at its default
+        try:
+            nodeid = self.get_nodeid()
+            if nodeid > 0:
+                self.nodeid = nodeid
+        except CalledProcessError:
+            pass
 
     def logger_name(self):
         return self.datadir
