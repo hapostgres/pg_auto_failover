@@ -492,9 +492,18 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 		 * and reporttime in the DB, but not in this struct.  ProceedGroupState
 		 * relies on NodeIsHealthy() which reads pgIsRunning and reportTime from
 		 * the struct, so leaving them stale causes spurious health failures.
+		 *
+		 * Mirror the DB's CASE WHEN 0 THEN reportedtli ELSE $4 END logic for
+		 * reportedTLI: a keeper reporting TLI=0 (e.g. wait_standby before
+		 * streaming starts) must not overwrite the struct's existing value,
+		 * because InsertEvent() passes node->reportedTLI directly and the
+		 * event_reportedtli_check constraint requires reportedtli > 0.
 		 */
 		pgAutoFailoverNode->pgIsRunning = currentNodeState->pgIsRunning;
-		pgAutoFailoverNode->reportedTLI = currentNodeState->reportedTLI;
+		if (currentNodeState->reportedTLI != 0)
+		{
+			pgAutoFailoverNode->reportedTLI = currentNodeState->reportedTLI;
+		}
 		pgAutoFailoverNode->reportTime = GetCurrentTimestamp();
 	}
 
