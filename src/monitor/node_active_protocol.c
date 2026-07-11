@@ -436,6 +436,7 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 	else
 	{
 		LockFormation(formationId, ShareLock);
+		LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
 
 		if (pgAutoFailoverNode->reportedState != currentNodeState->replicationState)
 		{
@@ -506,8 +507,6 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 		}
 		pgAutoFailoverNode->reportTime = GetCurrentTimestamp();
 	}
-
-	LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
 
 	ProceedGroupState(pgAutoFailoverNode);
 
