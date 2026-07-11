@@ -32,7 +32,7 @@
 
 -- ── formation and node registration ─────────────────────────────────────────
 
-SELECT pgautofailover.create_formation('fsm_test', 'pgsql', 'postgres', true);
+SELECT pgautofailover.create_formation('fsm_test', 'pgsql', 'postgres', true, 1);
 
 -- sysidentifier=1: a non-zero value satisfies the same_system_identifier
 -- constraint without a separate set_node_system_identifier() call.
@@ -40,9 +40,15 @@ SELECT *
   FROM pgautofailover.register_node('fsm_test', 'node1', 5432,
                                     'postgres', 'node1', 1);
 
+SELECT nodeid AS n1 FROM pgautofailover.node
+ WHERE formationid = 'fsm_test' AND nodename = 'node1' \gset
+
 SELECT *
   FROM pgautofailover.register_node('fsm_test', 'node2', 5432,
                                     'postgres', 'node2', 1);
+
+SELECT nodeid AS n2 FROM pgautofailover.node
+ WHERE formationid = 'fsm_test' AND nodename = 'node2' \gset
 
 -- ── formation bootstrap ──────────────────────────────────────────────────────
 --
@@ -52,29 +58,29 @@ SELECT *
 
 -- node1: single (confirm)
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'single');
 
 -- node2: wait_standby (confirm)
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'wait_standby');
 
 -- node1: single → wait_primary (secondary has joined in WAIT_STANDBY)
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'single',
                                   current_lsn => '0/5000');
 
 -- node1: wait_primary (confirm)
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'wait_primary',
                                   current_lsn => '0/5000');
 
 -- node2: wait_standby → catchingup (primary is confirmed in WAIT_PRIMARY)
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'wait_standby');
 
 -- node2: catchingup → secondary
@@ -82,31 +88,31 @@ SELECT *
 -- the health-check worker has not run).  NodeIsHealthy must trust the
 -- keeper's pgIsRunning=true instead of returning false.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'catchingup',
                                   current_lsn => '0/5000');
 
 -- node2: secondary (confirm)
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'secondary',
                                   current_lsn => '0/5000');
 
 -- node1: wait_primary → primary (secondary quorum satisfied)
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'wait_primary',
                                   current_lsn => '0/5000');
 
 -- ── test_001: steady state ───────────────────────────────────────────────────
 
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'primary',
                                   current_lsn => '0/5000');
 
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'secondary',
                                   current_lsn => '0/5000');
 
@@ -125,14 +131,14 @@ UPDATE pgautofailover.node
 
 -- Primary reports pgIsRunning=true; fresh report overrides the BAD health.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'primary',
                                   current_pg_is_running => true,
                                   current_lsn => '0/5000');
 
 -- Secondary calls in; NodeIsUnhealthy(primary) is false — no promotion.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'secondary',
                                   current_pg_is_running => true,
                                   current_lsn => '0/5000');
@@ -154,14 +160,14 @@ UPDATE pgautofailover.node
 -- ProceedGroupStateForPrimaryNode has no self-demotion rule; the failover
 -- trigger fires from the standby's heartbeat.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'primary',
                                   current_pg_is_running => false,
                                   current_lsn => '0/5000');
 
 -- Secondary calls in: NodeIsUnhealthy(primary) is true → prepare_promotion.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'secondary',
                                   current_pg_is_running => true,
                                   current_lsn => '0/5000');
@@ -169,7 +175,7 @@ SELECT *
 -- node2 reports prepare_promotion → assigned stop_replication.
 -- node1 gets goalState=demote_timeout.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'prepare_promotion',
                                   current_pg_is_running => true,
                                   current_lsn => '0/5000');
@@ -177,7 +183,7 @@ SELECT *
 -- node1 reports demote_timeout; satisfies IsCurrentState(node1, DEMOTE_TIMEOUT)
 -- so that the next node2 heartbeat can advance.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'demote_timeout',
                                   current_pg_is_running => false,
                                   current_lsn => '0/5000');
@@ -185,7 +191,7 @@ SELECT *
 -- node2 reports stop_replication → assigned wait_primary.
 -- node1 gets goalState=demoted.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'stop_replication',
                                   current_pg_is_running => true,
                                   current_tli => 2,
@@ -193,7 +199,7 @@ SELECT *
 
 -- node2 in wait_primary; no secondary in quorum yet.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'wait_primary',
                                   current_pg_is_running => true,
                                   current_tli => 2,
@@ -222,7 +228,7 @@ UPDATE pgautofailover.node
 -- IsCurrentState(node1, DEMOTED) is false (reportedState mismatch), so no
 -- DEMOTED rule fires; the monitor returns the current goalState = demoted.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'primary',
                                   current_pg_is_running => true,
                                   current_tli => 1,
@@ -230,7 +236,7 @@ SELECT *
 
 -- node1 reports demoted → catchingup assigned.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'demoted',
                                   current_pg_is_running => false,
                                   current_tli => 1,
@@ -247,7 +253,7 @@ UPDATE pgautofailover.node
 -- The stale-struct fix ensures the pgIsRunning=true from this call's report
 -- is visible to ProceedGroupState within the same call.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'catchingup',
                                   current_pg_is_running => true,
                                   current_tli => 2,
@@ -255,7 +261,7 @@ SELECT *
 
 -- node1 confirms secondary.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 1, 0,
+  FROM pgautofailover.node_active('fsm_test', :n1, 0,
                                   current_group_role => 'secondary',
                                   current_pg_is_running => true,
                                   current_tli => 2,
@@ -263,7 +269,7 @@ SELECT *
 
 -- node2 now has a healthy secondary in the quorum → promoted to primary.
 SELECT *
-  FROM pgautofailover.node_active('fsm_test', 2, 0,
+  FROM pgautofailover.node_active('fsm_test', :n2, 0,
                                   current_group_role => 'wait_primary',
                                   current_pg_is_running => true,
                                   current_tli => 2,
