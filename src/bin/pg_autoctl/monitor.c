@@ -1535,6 +1535,55 @@ monitor_perform_failover(Monitor *monitor, char *formation, int group)
 
 
 /*
+ * monitor_perform_failover_allow_data_loss runs perform_failover in a
+ * transaction with guard_data_loss disabled, accepting the risk of data
+ * loss when quorum nodes have not reported their LSN.
+ */
+bool
+monitor_perform_failover_allow_data_loss(Monitor *monitor,
+										 char *formation,
+										 int group)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT pgautofailover.perform_failover($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2];
+	IntString groupString = intToString(group);
+
+	paramValues[0] = formation;
+	paramValues[1] = groupString.strValue;
+
+	if (!pgsql_begin(pgsql))
+	{
+		log_error("Failed to open transaction on monitor");
+		return false;
+	}
+
+	if (!pgsql_execute(pgsql,
+					   "SET LOCAL pgautofailover.guard_data_loss TO false"))
+	{
+		log_error("Failed to disable guard_data_loss on monitor");
+		(void) pgsql_rollback(pgsql);
+		return false;
+	}
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to perform failover with --allow-data-loss "
+				  "for formation %s and group %d",
+				  formation, group);
+		(void) pgsql_rollback(pgsql);
+		return false;
+	}
+
+	return pgsql_commit(pgsql);
+}
+
+
+/*
  * monitor_perform_promotion calls the pgautofailover.perform_promotion
  * function on the monitor.
  */

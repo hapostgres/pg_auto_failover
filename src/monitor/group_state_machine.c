@@ -18,6 +18,7 @@
 
 #include "formation_metadata.h"
 #include "group_state_machine.h"
+#include "metadata.h"
 #include "node_metadata.h"
 #include "notifications.h"
 #include "replication_state.h"
@@ -1404,18 +1405,31 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	{
 		char message[BUFSIZE] = { 0 };
 
+		if (GuardDataLoss)
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Failover still in progress after %d nodes reported their LSN "
+				"and we are waiting for %d nodes to report, "
+				"activeNode is " NODE_FORMAT
+				" and reported state \"%s\"",
+				candidateList.candidateCount,
+				candidateList.missingNodesCount,
+				NODE_FORMAT_ARGS(activeNode),
+				ReplicationStateGetName(activeNode->reportedState));
+
+			return false;
+		}
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Failover still in progress after %d nodes reported their LSN "
-			"and we are waiting for %d nodes to report, "
-			"activeNode is " NODE_FORMAT
-			" and reported state \"%s\"",
-			candidateList.candidateCount,
+			"Proceeding with failover despite %d unreported quorum node(s): "
+			"pgautofailover.guard_data_loss is false. "
+			"Committed transactions on missing node(s) may be lost. "
+			"activeNode is " NODE_FORMAT " and reported state \"%s\"",
 			candidateList.missingNodesCount,
 			NODE_FORMAT_ARGS(activeNode),
 			ReplicationStateGetName(activeNode->reportedState));
-
-		return false;
 	}
 
 	/*
@@ -1438,29 +1452,45 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	}
 
 	/* not enough candidates to promote and then accept writes, pass */
-	else if (candidateList.quorumCandidateCount < minCandidates)
+	if (candidateList.quorumCandidateCount < minCandidates)
 	{
 		char message[BUFSIZE] = { 0 };
 
+		if (GuardDataLoss)
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Failover still in progress with %d candidates that participate "
+				"in the quorum having reported their LSN: %d nodes are required "
+				"in the quorum to satisfy number_sync_standbys=%d in "
+				"formation \"%s\", activeNode is " NODE_FORMAT
+				" and reported state \"%s\"",
+				candidateList.quorumCandidateCount,
+				minCandidates,
+				ctx->formation->number_sync_standbys,
+				ctx->formation->formationId,
+				NODE_FORMAT_ARGS(activeNode),
+				ReplicationStateGetName(activeNode->reportedState));
+
+			return false;
+		}
+
 		LogAndNotifyMessage(
 			message, BUFSIZE,
-			"Failover still in progress with %d candidates that participate "
-			"in the quorum having reported their LSN: %d nodes are required "
-			"in the quorum to satisfy number_sync_standbys=%d in "
-			"formation \"%s\", activeNode is " NODE_FORMAT
-			" and reported state \"%s\"",
+			"Proceeding with failover with only %d quorum candidate(s) despite "
+			"number_sync_standbys=%d requiring %d: "
+			"pgautofailover.guard_data_loss is false. "
+			"The new primary may start in wait_primary state with fewer "
+			"sync standbys than required. "
+			"activeNode is " NODE_FORMAT " and reported state \"%s\"",
 			candidateList.quorumCandidateCount,
-			minCandidates,
 			ctx->formation->number_sync_standbys,
-			ctx->formation->formationId,
+			minCandidates,
 			NODE_FORMAT_ARGS(activeNode),
 			ReplicationStateGetName(activeNode->reportedState));
-
-		return false;
 	}
 
 	/* enough candidates to promote and then accept writes, let's do it! */
-	else
 	{
 		/* build the list of most advanced standby nodes, not ordered */
 		List *mostAdvancedNodeList =

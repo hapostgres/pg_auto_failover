@@ -72,6 +72,9 @@ typedef struct KeeperConfig
 	int citus_coordinator_wait_timeout;
 	int citus_coordinator_wait_max_retries;
 	int listen_notifications_timeout;
+
+	/* allow data loss during a perform failover operation */
+	bool allowDataLoss;
 } KeeperConfig;
 
 #define PG_AUTOCTL_MONITOR_IS_DISABLED(config) \

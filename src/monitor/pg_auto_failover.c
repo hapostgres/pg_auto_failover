@@ -181,6 +181,19 @@ StartMonitorNode(void)
 							NULL, &StartupGracePeriodMs, 10 * 1000, 1, INT_MAX,
 							PGC_SUSET, GUC_UNIT_MS, NULL, NULL, NULL);
 
+	DefineCustomBoolVariable("pgautofailover.guard_data_loss",
+							 "Refuse to proceed with failover when quorum nodes have not "
+							 "yet reported their LSN, preventing potential data loss from "
+							 "the synchronous replication gap.  Set to false to allow "
+							 "failover to proceed despite missing quorum nodes, accepting "
+							 "the risk that committed transactions may be lost.",
+							 NULL,
+							 &GuardDataLoss,
+							 true,
+							 PGC_SUSET,
+							 0,
+							 NULL, NULL, NULL);
+
 	PreviousProcessUtility_hook = ProcessUtility_hook;
 	ProcessUtility_hook = pgautofailover_ProcessUtility;
 
