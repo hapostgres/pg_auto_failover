@@ -1,0 +1,280 @@
+-- Copyright (c) Microsoft Corporation. All rights reserved.
+-- Licensed under the PostgreSQL License.
+--
+-- Regression tests for the fast_forward WAL-fetch stuck detection introduced
+-- in group_state_machine.c (ProceedGroupStateForMSFailover).
+--
+-- Scenario: 3-node formation (p + s1 + s2, number_sync_standbys=1).
+--   p  dies → draining.
+--   s1 has the higher LSN (0/5100) → stays in report_lsn (WAL source).
+--   s2 has a lower LSN (0/5000) but higher candidate_priority → selected as
+--      fast_forward candidate.
+--   s1 then becomes unhealthy → s2's WAL fetch has no source.
+--
+-- Test A (guard_data_loss=true):
+--   node_active for s2 with reportedState=report_lsn resets s2 goal to
+--   report_lsn (stuck-fast_forward guard fires).
+--
+-- Test B (guard_data_loss=false):
+--   node_active for s2 with reportedState=report_lsn falls through; s2 goal
+--   stays fast_forward.
+--
+-- Also exercises get_most_advanced_standby() directly:
+--   guard_data_loss=true  → returns s1 (unhealthy but included by SQL filter).
+--   guard_data_loss=false → returns no rows (unhealthy nodes filtered out,
+--                           s2 excluded by caller_node_id).
+
+\x on
+
+-- ── formation setup ──────────────────────────────────────────────────────────
+
+SELECT pgautofailover.create_formation('ff_test', 'pgsql', 'postgres', true, 1);
+
+-- Register three nodes.
+SELECT *
+  FROM pgautofailover.register_node('ff_test', 'ff_p', 5432,
+                                    'postgres', 'ff_p', 1);
+
+SELECT nodeid AS np FROM pgautofailover.node
+ WHERE formationid = 'ff_test' AND nodename = 'ff_p' \gset
+
+SELECT *
+  FROM pgautofailover.register_node('ff_test', 'ff_s1', 5432,
+                                    'postgres', 'ff_s1', 1);
+
+SELECT nodeid AS ns1 FROM pgautofailover.node
+ WHERE formationid = 'ff_test' AND nodename = 'ff_s1' \gset
+
+SELECT *
+  FROM pgautofailover.register_node('ff_test', 'ff_s2', 5432,
+                                    'postgres', 'ff_s2', 1);
+
+SELECT nodeid AS ns2 FROM pgautofailover.node
+ WHERE formationid = 'ff_test' AND nodename = 'ff_s2' \gset
+
+-- ── bootstrap ────────────────────────────────────────────────────────────────
+
+-- p: single (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :np, 0,
+                                  current_group_role => 'single');
+
+-- s1: wait_standby (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns1, 0,
+                                  current_group_role => 'wait_standby');
+
+-- p: single → wait_primary
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :np, 0,
+                                  current_group_role => 'single',
+                                  current_lsn => '0/5000');
+
+-- p: wait_primary (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+
+-- s1: wait_standby → catchingup
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns1, 0,
+                                  current_group_role => 'wait_standby');
+
+-- s1: catchingup → secondary
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns1, 0,
+                                  current_group_role => 'catchingup',
+                                  current_lsn => '0/5000');
+
+-- s1: secondary (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns1, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+
+-- p: wait_primary → primary (s1 is now secondary)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+
+-- p: primary (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :np, 0,
+                                  current_group_role => 'primary',
+                                  current_lsn => '0/5000');
+
+-- s1: secondary (confirm after primary confirmed)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns1, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+
+-- s2: wait_standby (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns2, 0,
+                                  current_group_role => 'wait_standby');
+
+-- s2: catchingup
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns2, 0,
+                                  current_group_role => 'catchingup',
+                                  current_lsn => '0/5000');
+
+-- s2: secondary
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns2, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+
+-- p: primary (refresh to pick up second secondary)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :np, 0,
+                                  current_group_role => 'primary',
+                                  current_lsn => '0/5000');
+
+-- Verify final formation state: p=primary, s1=secondary, s2=secondary.
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'ff_test'
+ ORDER BY nodename;
+
+-- ── set up fast_forward scenario ─────────────────────────────────────────────
+--
+-- s2 has higher candidate priority so the monitor elects it as fast_forward
+-- candidate.  s1 has the higher LSN and stays in report_lsn (WAL source).
+-- We then make s1 unhealthy so s2's WAL fetch has no valid source.
+
+SET pgautofailover.startup_grace_period = 1;
+
+-- Mark p as dead.
+UPDATE pgautofailover.node
+   SET health = 0,
+       healthchecktime = now(),
+       reporttime = now() - interval '60 seconds'
+ WHERE formationid = 'ff_test' AND nodename = 'ff_p';
+
+-- Demote p to draining.
+UPDATE pgautofailover.node
+   SET goalstate = 'draining', reportedstate = 'draining'
+ WHERE formationid = 'ff_test' AND nodename = 'ff_p';
+
+-- s1 reported a higher LSN (0/5100) in the report_lsn round.
+UPDATE pgautofailover.node
+   SET goalstate      = 'report_lsn',
+       reportedstate  = 'report_lsn',
+       reportedlsn    = '0/5100'
+ WHERE formationid = 'ff_test' AND nodename = 'ff_s1';
+
+-- s2 has candidate_priority 90 < 100 (lower than s1's default 100) but for
+-- the purpose of this test we give it priority 110 so the monitor prefers it.
+-- We then place s2 directly in fast_forward/report_lsn (goal assigned by the
+-- monitor, not yet confirmed by the keeper).
+UPDATE pgautofailover.node
+   SET candidatepriority = 110,
+       reportedlsn       = '0/5000',
+       goalstate         = 'fast_forward',
+       reportedstate     = 'report_lsn'
+ WHERE formationid = 'ff_test' AND nodename = 'ff_s2';
+
+-- Make s1 unhealthy: it cannot serve as a WAL source.
+UPDATE pgautofailover.node
+   SET health = 0,
+       healthchecktime = now(),
+       reporttime = now() - interval '60 seconds'
+ WHERE formationid = 'ff_test' AND nodename = 'ff_s1';
+
+-- Verify manufactured state before tests.
+SELECT nodename, goalstate, reportedstate, reportedlsn, health, candidatepriority
+  FROM pgautofailover.node
+ WHERE formationid = 'ff_test'
+ ORDER BY nodename;
+
+-- ── test A: guard_data_loss = true (default) resets goal to report_lsn ──────
+--
+-- s2 calls node_active with reportedState=report_lsn while goalState is
+-- fast_forward and all WAL source nodes (s1) are unhealthy.
+-- The stuck-fast_forward guard must reset s2's goal back to report_lsn.
+
+SET pgautofailover.guard_data_loss TO true;
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns2, 0,
+                                  current_group_role => 'report_lsn',
+                                  current_lsn => '0/5000',
+                                  current_tli => 1,
+                                  current_pg_is_running => true);
+
+-- s2 goal must now be report_lsn (reset by the guard).
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'ff_test'
+ ORDER BY nodename;
+
+-- ── re-arm fast_forward scenario for test B ──────────────────────────────────
+--
+-- Put s2 back into fast_forward goal / report_lsn reported state,
+-- s1 still unhealthy.
+
+UPDATE pgautofailover.node
+   SET goalstate = 'fast_forward', reportedstate = 'report_lsn'
+ WHERE formationid = 'ff_test' AND nodename = 'ff_s2';
+
+-- Confirm re-armed state.
+SELECT nodename, goalstate, reportedstate, health
+  FROM pgautofailover.node
+ WHERE formationid = 'ff_test'
+ ORDER BY nodename;
+
+-- ── test B: guard_data_loss = false — goal stays fast_forward ────────────────
+--
+-- The guard logs the situation but does NOT reset s2's goal; it falls through
+-- to ProceedWithMSFailover.  get_most_advanced_standby() will find no healthy
+-- WAL source and fsm_fast_forward() will skip the fetch, causing the keeper to
+-- call node_active again with reportedState=fast_forward, at which point the
+-- monitor assigns prepare_promotion.  Here we only verify that the immediate
+-- node_active response does NOT return report_lsn (goal is kept or advanced).
+
+SET pgautofailover.guard_data_loss TO false;
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('ff_test', :ns2, 0,
+                                  current_group_role => 'report_lsn',
+                                  current_lsn => '0/5000',
+                                  current_tli => 1,
+                                  current_pg_is_running => true);
+
+-- s2 goal must NOT be reset to report_lsn; it should be fast_forward or
+-- further advanced (prepare_promotion).
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'ff_test'
+ ORDER BY nodename;
+
+-- ── test get_most_advanced_standby directly ───────────────────────────────────
+--
+-- Restore s2 to fast_forward / report_lsn so both nodes are in report_lsn.
+
+UPDATE pgautofailover.node
+   SET goalstate = 'fast_forward', reportedstate = 'report_lsn'
+ WHERE formationid = 'ff_test' AND nodename = 'ff_s2';
+
+-- guard_data_loss=true: s1 is included despite health=0 (SQL filter uses OR).
+-- Caller is s2 (:ns2) so s1 should be returned (highest LSN among others).
+SET pgautofailover.guard_data_loss TO true;
+
+SELECT node_name, node_lsn, node_is_primary
+  FROM pgautofailover.get_most_advanced_standby('ff_test', 0, :ns2);
+
+-- guard_data_loss=false: unhealthy nodes are excluded; s1 (health=0) is
+-- filtered out.  s2 itself is excluded via caller_node_id.  Expect no rows.
+SET pgautofailover.guard_data_loss TO false;
+
+SELECT node_name, node_lsn, node_is_primary
+  FROM pgautofailover.get_most_advanced_standby('ff_test', 0, :ns2);
+
+-- ── cleanup ───────────────────────────────────────────────────────────────────
+
+RESET pgautofailover.guard_data_loss;
+RESET pgautofailover.startup_grace_period;

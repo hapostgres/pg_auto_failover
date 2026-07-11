@@ -1293,6 +1293,46 @@ ProceedGroupStateForPrimaryNode(GroupStateContext *ctx,
 
 
 /*
+ * WalSourceNodesAreAllUnhealthy returns true when every report_lsn peer that
+ * could serve as a WAL source for the given fast_forward candidate is
+ * currently unhealthy.  Returns false if at least one source is healthy, or
+ * if there are no source nodes at all (unusual; caller handles separately).
+ */
+static bool
+WalSourceNodesAreAllUnhealthy(GroupStateContext *ctx,
+							  List *nodesGroupList,
+							  AutoFailoverNode *candidateNode)
+{
+	ListCell *nodeCell = NULL;
+	bool foundAnySource = false;
+
+	foreach(nodeCell, nodesGroupList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (node->nodeId == candidateNode->nodeId)
+		{
+			continue;
+		}
+
+		if (!IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
+		{
+			continue;
+		}
+
+		foundAnySource = true;
+
+		if (NodeIsHealthy(node, ctx))
+		{
+			return false;
+		}
+	}
+
+	return foundAnySource;
+}
+
+
+/*
  * ProceedGroupStateForMSFailover implements Group State Machine transition to
  * orchestrate a failover when we have more than one standby.
  *
@@ -1335,6 +1375,59 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 		/* activeNode might be the failover candidate, proceed already */
 		if (nodeBeingPromoted->nodeId == activeNode->nodeId)
 		{
+			/*
+			 * Detect a fast_forward candidate whose WAL fetch failed: the
+			 * keeper reports back report_lsn while the goal is still
+			 * fast_forward.
+			 *
+			 * When all WAL source nodes (other report_lsn peers) are
+			 * unhealthy we cannot make progress without data loss.  Warn the
+			 * operator and act based on guard_data_loss:
+			 *
+			 *  - guard_data_loss=true: reset the candidate goal back to
+			 *    report_lsn so the cycle retries automatically if a source
+			 *    recovers.
+			 *
+			 *  - guard_data_loss=false: log and fall through.
+			 *    get_most_advanced_standby() filters unhealthy sources out,
+			 *    so fsm_fast_forward() will find no upstream, skip the WAL
+			 *    fetch, and report fast_forward as its current state.  The
+			 *    monitor then assigns prepare_promotion on the next call.
+			 */
+			if (activeNode->reportedState == REPLICATION_STATE_REPORT_LSN &&
+				activeNode->goalState == REPLICATION_STATE_FAST_FORWARD &&
+				WalSourceNodesAreAllUnhealthy(ctx, nodesGroupList, activeNode))
+			{
+				if (GuardDataLoss)
+				{
+					LogAndNotifyMessage(
+						message, BUFSIZE,
+						"Failover candidate " NODE_FORMAT
+						" is stuck in fast_forward: all WAL source nodes are "
+						"unhealthy and pgautofailover.guard_data_loss is true. "
+						"Resetting candidate to report_lsn to retry when a "
+						"source recovers. Use pg_autoctl perform failover "
+						"--allow-data-loss to promote with available WAL.",
+						NODE_FORMAT_ARGS(activeNode));
+
+					AssignGoalState(activeNode,
+									REPLICATION_STATE_REPORT_LSN,
+									message);
+
+					return true;
+				}
+				else
+				{
+					LogAndNotifyMessage(
+						message, BUFSIZE,
+						"Failover candidate " NODE_FORMAT
+						" is in fast_forward with all WAL source nodes "
+						"unhealthy; pgautofailover.guard_data_loss is false, "
+						"will promote with available WAL.",
+						NODE_FORMAT_ARGS(activeNode));
+				}
+			}
+
 			return ProceedWithMSFailover(activeNode, nodeBeingPromoted);
 		}
 

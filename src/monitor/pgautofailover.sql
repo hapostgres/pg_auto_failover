@@ -417,6 +417,7 @@ AS $$
       and groupid = $2
       and nodeid != $3
       and reportedstate = 'report_lsn'
+      and (current_setting('pgautofailover.guard_data_loss')::bool or health > 0)
  order by reportedlsn desc, health desc
     limit 1;
 $$;

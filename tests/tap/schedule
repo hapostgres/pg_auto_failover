@@ -23,6 +23,7 @@ multi_ifdown
 multi_maintenance
 multi_alternate
 guard_data_loss
+fast_forward
 extension_update
 installcheck
 # Upgrade test — requires pgaf:current and pgaf:next images to be pre-built:
