@@ -568,11 +568,7 @@ assigned_group_state | secondary
 -- Lower startup_grace_period to 1ms so the time-based unhealthy path fires
 -- immediately in the test environment (in production the server has been up
 -- far longer than the 10s default).
-ALTER SYSTEM SET pgautofailover.startup_grace_period = 1;
-SELECT pg_reload_conf();
--[ RECORD 1 ]--+--
-pg_reload_conf | t
-
+SET pgautofailover.startup_grace_period = 1;
 -- Simulate killed primary (ka): health checker ran and marked it BAD,
 -- but ka's last node_active set pgIsRunning=true and that value is still in
 -- the DB — it never self-reported pgIsRunning=false.
@@ -599,8 +595,4 @@ assigned_group_state        | prepare_promotion
 assigned_candidate_priority | 100
 assigned_replication_quorum | t
 
-ALTER SYSTEM RESET pgautofailover.startup_grace_period;
-SELECT pg_reload_conf();
--[ RECORD 1 ]--+--
-pg_reload_conf | t
-
+RESET pgautofailover.startup_grace_period;

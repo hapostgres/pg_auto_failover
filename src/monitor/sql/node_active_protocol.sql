@@ -367,8 +367,7 @@ SELECT assigned_group_state FROM pgautofailover.node_active('killed_test', :kb, 
 -- Lower startup_grace_period to 1ms so the time-based unhealthy path fires
 -- immediately in the test environment (in production the server has been up
 -- far longer than the 10s default).
-ALTER SYSTEM SET pgautofailover.startup_grace_period = 1;
-SELECT pg_reload_conf();
+SET pgautofailover.startup_grace_period = 1;
 
 -- Simulate killed primary (ka): health checker ran and marked it BAD,
 -- but ka's last node_active set pgIsRunning=true and that value is still in
@@ -391,5 +390,4 @@ SELECT *
                                   current_pg_is_running => true,
                                   current_lsn => '0/3000');
 
-ALTER SYSTEM RESET pgautofailover.startup_grace_period;
-SELECT pg_reload_conf();
+RESET pgautofailover.startup_grace_period;
