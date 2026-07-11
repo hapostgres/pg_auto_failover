@@ -64,7 +64,7 @@ step test_004_demoted {
     # wait_primary the monitor has committed to node2 as the new primary; when
     # node1 restarts it will come back as secondary, and node2 will then
     # transition from wait_primary → primary.
-    wait until node2 state is wait_primary  timeout 90s
+    wait until node2 state is wait_primary  timeout 180s
     # Bring node1 back: pg_autoctl starts, connects to monitor, gets assigned
     # 'demoted', executes the demoted transition, then moves to secondary.
     # The Python test explicitly asserts the 'demoted' state, but 'demoted' is

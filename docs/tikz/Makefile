@@ -1,4 +1,4 @@
-SRC = $(wildcard arch*.tex fsm.tex)
+SRC = $(wildcard arch*.tex fsm.tex seq-*.tex)
 PDF = $(SRC:.tex=.pdf)
 SVG = $(SRC:.tex=.svg)
 PNG = $(SRC:.tex=.png)

@@ -1,0 +1,136 @@
+\RequirePackage{luatex85}
+\documentclass[border=10pt,12pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{amssymb}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+
+\begin{document}
+
+\sffamily\bfseries
+
+%% Actor x-positions (cm)
+%% P=0  B=8  C=15  M=23
+\def\px{0}
+\def\bx{8}
+\def\cx{15}
+\def\mx{23}
+\def\ybot{16.2}
+
+\begin{tikzpicture}[
+  >=Stealth,
+  yscale=-1,
+]
+
+\input{common.tex}
+
+\tikzstyle{actor}=[rectangle, minimum width=3.2cm, minimum height=0.7cm,
+  inner sep=4pt, rounded corners=2pt, align=center, font=\bfseries]
+\tikzstyle{ll}=[densely dashed, gray!60, line width=0.5pt]
+\tikzstyle{lldead}=[densely dashed, red!40, line width=0.5pt]
+\tikzstyle{msg}=[->, line width=0.65pt]
+\tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{lbl}=[font=\small, inner sep=2pt]
+\tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
+  font=\small, align=center]
+\tikzstyle{seclbl}=[font=\small\itshape, text=gray!70!black, anchor=west]
+
+%% ── actor headers ───────────────────────────────────────────────────────
+\node[actor, fill=pbox, text=ptxt] at (\px,0) {Primary};
+\node[actor, fill=sbox, text=stxt] at (\bx,0) {Standby B};
+\node[actor, fill=sbox, text=stxt] at (\cx,0) {Standby C};
+\node[actor, fill=mbox, text=mtxt] at (\mx,0) {Monitor};
+
+%% lifelines (all start alive)
+\draw[ll] (\px,0.35) -- (\px,\ybot);
+\draw[ll] (\bx,0.35) -- (\bx,\ybot);
+\draw[ll] (\cx,0.35) -- (\cx,\ybot);
+\draw[ll] (\mx,0.35) -- (\mx,\ybot);
+
+%% ── steady state ────────────────────────────────────────────────────────
+\node[seclbl] at (-2.2,1.3) {steady state};
+
+\draw[msg] (\px,1.6) -- (\bx,1.6) node[lbl,midway,above] {WAL stream};
+\draw[msg] (\px,2.3) -- (\cx,2.3) node[lbl,midway,above] {WAL stream};
+
+%% ── double failure ──────────────────────────────────────────────────────
+\node[seclbl] at (-2.2,3.3) {double failure};
+
+%% Two separate failure boxes, one per failed node
+\node[note, fill=red!20, draw=red!60]
+  at (\px, 3.65) {\small\bfseries\color{red!80!black} $\times$~primary fails};
+\node[note, fill=red!20, draw=red!60]
+  at (\bx, 3.65) {\small\bfseries\color{red!80!black} $\times$~Standby B fails};
+
+%% Red lifelines after failure
+\draw[lldead] (\px,4.05) -- (\px,\ybot);
+\draw[lldead] (\bx,4.05) -- (\bx,\ybot);
+
+%% ── report_lsn election ─────────────────────────────────────────────────
+\node[seclbl] at (-2.2,5.0) {report\_lsn election};
+
+%% Monitor → C: only surviving standby
+\draw[msg] (\mx,5.3) -- (\cx,5.3)
+  node[lbl,midway,above] {assign report\_lsn};
+
+%% C → Monitor
+\draw[rsp] (\cx,6.2) -- (\mx,6.2)
+  node[lbl,midway,above] {LSN = 0/4FFF000};
+
+%% ── monitor blocked ─────────────────────────────────────────────────────
+\node[seclbl] at (-2.2,7.2) {stuck};
+
+%% Block note on Monitor lifeline
+\node[note, fill=red!15, draw=red!50, text width=5.5cm]
+  at (\mx, 8.1)
+  {\bfseries\color{red!80!black} BLOCKED\\[3pt]
+   \normalfont quorum member B has not\\
+   reported its LSN yet\\[2pt]
+   promoting could discard\\
+   committed transactions};
+
+%% wait loop arrow (self-arrow on Monitor)
+\draw[gray!50, line width=0.5pt, ->]
+  (\mx+0.5, 7.2) .. controls (\mx+2.0,7.5) and (\mx+2.0,9.0) .. (\mx+0.5,9.3)
+  node[right, font=\small\itshape, text=gray!70] {waiting\ldots};
+
+%% ── operator action ─────────────────────────────────────────────────────
+\node[seclbl] at (-2.2,10.4) {operator action};
+
+%% (px+cx)/2 = 7.5  ;  (cx+mx)/2 = 19.0  ;  (px+mx)/2 = 11.5
+\node[note, fill=blue!10, draw=blue!40, text width=8.0cm]
+  at (7.5, 10.8)
+  {\ttfamily\small pg\_autoctl perform failover --allow-data-loss};
+
+%% operator arrow → Monitor
+\draw[msg, color=blue!60, line width=0.8pt]
+  (11.5, 11.4) -- (\mx-1.6, 11.4);
+
+%% Monitor → C: assign prepare_promotion — label near Monitor end
+\draw[msg, color=pbox, line width=1pt]
+  (\mx,12.4) -- (\cx,12.4);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.8,12.4)
+  {assign prepare\_promotion};
+
+%% outcome
+\node[note, fill=yellow!20, draw=orange!60, font=\small\bfseries]
+  at (19.0, 13.5) {C becomes primary};
+
+\node[note, fill=red!10, draw=red!40, text width=10cm, font=\small]
+  at (11.5, 14.7)
+  {\color{red!80!black}\bfseries Warning:~\normalfont
+   transactions acknowledged by B but not yet\\
+   replicated to C may be permanently lost};
+
+%% ── actor footers ───────────────────────────────────────────────────────
+\node[actor, fill=red!25, draw=red!60, text=red!80!black]
+  at (\px, \ybot+0.35) {\small Primary $\times$};
+\node[actor, fill=red!25, draw=red!60, text=red!80!black]
+  at (\bx, \ybot+0.35) {\small Standby B $\times$};
+\node[actor, fill=sbox, text=stxt] at (\cx, \ybot+0.35) {Standby C};
+\node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
+
+\end{tikzpicture}
+\end{document}

@@ -2,3 +2,4 @@ Sphinx==8.2.3
 sphinx-rtd-theme==3.0.2
 docutils==0.21.2
 readthedocs-sphinx-search==0.1.0
+sphinxcontrib-mermaid==2.0.3
