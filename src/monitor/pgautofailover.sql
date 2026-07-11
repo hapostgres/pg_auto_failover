@@ -401,6 +401,7 @@ CREATE FUNCTION pgautofailover.get_most_advanced_standby
  (
    IN formationid       text default 'default',
    IN groupid           int default 0,
+   IN caller_node_id    bigint default 0,
    OUT node_id          bigint,
    OUT node_name        text,
    OUT node_host        text,
@@ -414,12 +415,13 @@ AS $$
      from pgautofailover.node
     where formationid = $1
       and groupid = $2
+      and nodeid != $3
       and reportedstate = 'report_lsn'
  order by reportedlsn desc, health desc
     limit 1;
 $$;
 
-grant execute on function pgautofailover.get_most_advanced_standby(text,int)
+grant execute on function pgautofailover.get_most_advanced_standby(text,int,bigint)
    to autoctl_node;
 
 

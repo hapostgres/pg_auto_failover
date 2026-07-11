@@ -120,7 +120,8 @@ bool keeper_refresh_citus_remove_dropped_nodes(Keeper *keeper,
 
 bool keeper_read_nodes_from_file(Keeper *keeper, NodeAddressArray *nodesArray);
 bool keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode);
-bool keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *primaryNode);
+bool keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *primaryNode,
+									  bool *found);
 
 
 bool keeper_pg_autoctl_get_version_from_disk(Keeper *keeper,

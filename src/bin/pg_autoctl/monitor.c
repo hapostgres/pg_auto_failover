@@ -751,23 +751,26 @@ monitor_get_coordinator(Monitor *monitor, char *formation,
 bool
 monitor_get_most_advanced_standby(Monitor *monitor,
 								  char *formation, int groupId,
-								  NodeAddress *node)
+								  int64_t callerNodeId,
+								  NodeAddress *node, bool *found)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT * FROM pgautofailover.get_most_advanced_standby($1, $2)";
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, INT4OID };
-	const char *paramValues[2];
+		"SELECT * FROM pgautofailover.get_most_advanced_standby($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, INT4OID, INT8OID };
+	const char *paramValues[3];
 
-	/* we expect a single entry */
+	/* we expect zero or one entry */
 	NodeAddressArray nodeArray = { 0 };
 	NodeAddressArrayParseContext parseContext = { { 0 }, &nodeArray, false };
 
 	IntString groupIdString = intToString(groupId);
+	IntString callerNodeIdString = intToString(callerNodeId);
 
 	paramValues[0] = formation;
 	paramValues[1] = groupIdString.strValue;
+	paramValues[2] = callerNodeIdString.strValue;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -781,7 +784,7 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 		return false;
 	}
 
-	if (!parseContext.parsedOK || nodeArray.count != 1)
+	if (!parseContext.parsedOK)
 	{
 		log_error(
 			"Failed to get the most advanced standby node from the monitor "
@@ -790,6 +793,15 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 			"See previous line for details.",
 			sql, formation, groupId);
 		return false;
+	}
+
+	/* zero rows: no other report_lsn peer exists; caller is most advanced */
+	if (nodeArray.count == 0)
+	{
+		log_info("No other standby is reporting its LSN; "
+				 "node %" PRId64 " is the most advanced", callerNodeId);
+		*found = false;
+		return true;
 	}
 
 	/* copy the node we retrieved in the expected place */
@@ -803,6 +815,7 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 	log_debug("The most advanced standby node is node " NODE_FORMAT,
 			  node->nodeId, node->name, node->host, node->port);
 
+	*found = true;
 	return true;
 }
 

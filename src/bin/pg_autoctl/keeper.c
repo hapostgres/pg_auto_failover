@@ -3109,10 +3109,12 @@ keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode)
  * the keeper->otherNodes array.
  */
 bool
-keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode)
+keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode,
+								 bool *found)
 {
 	KeeperConfig *config = &(keeper->config);
 	int groupId = keeper->state.current_group;
+	int64_t localNodeId = keeper->state.current_node_id;
 
 	if (!config->monitorDisabled)
 	{
@@ -3121,7 +3123,9 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode)
 		if (!monitor_get_most_advanced_standby(monitor,
 											   config->formation,
 											   groupId,
-											   upstreamNode))
+											   localNodeId,
+											   upstreamNode,
+											   found))
 		{
 			log_error("Failed to get the most advanced standby node "
 					  "from the monitor, see above for details");
@@ -3139,6 +3143,12 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode)
 		{
 			NodeAddress *node = &(keeper->otherNodes.nodes[i]);
 			uint64_t nodeLSN = 0;
+
+			/* skip self to avoid fetching WAL from ourselves */
+			if (node->nodeId == localNodeId)
+			{
+				continue;
+			}
 
 			if (!parseLSN(node->lsn, &nodeLSN))
 			{
@@ -3158,14 +3168,14 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode)
 
 		if (mostAdvandedStandbyNode == NULL)
 		{
-			log_error("Failed to get the most avdanced standby node "
-					  "from the current list of other nodes, "
-					  "refresh the list with the command: "
-					  "pg_autoctl do fsm nodes set");
-			return false;
+			log_info("No other standby found in local node list; "
+					 "node %" PRId64 " is the most advanced", localNodeId);
+			*found = false;
+			return true;
 		}
 
 		*upstreamNode = *mostAdvandedStandbyNode;
+		*found = true;
 		return true;
 	}
 

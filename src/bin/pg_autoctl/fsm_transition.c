@@ -1320,15 +1320,29 @@ fsm_fast_forward(Keeper *keeper)
 	ReplicationSource *upstream = &(postgres->replicationSource);
 
 	NodeAddress upstreamNode = { 0 };
+	bool found = false;
 
 	char slotName[MAXCONNINFO] = { 0 };
 
-	/* get the primary node to follow */
-	if (!keeper_get_most_advanced_standby(keeper, &upstreamNode))
+	/* get the most advanced peer standby to fetch missing WAL from */
+	if (!keeper_get_most_advanced_standby(keeper, &upstreamNode, &found))
 	{
 		log_error("Failed to fast forward from the most advanced standby node, "
 				  "see above for details");
 		return false;
+	}
+
+	/*
+	 * When no other report_lsn peer exists (because the intended upstream
+	 * already transitioned away), this node is now the most advanced.
+	 * Skip the WAL fetch — the monitor will assign prepare_promotion on the
+	 * next node_active call.
+	 */
+	if (!found)
+	{
+		log_info("No upstream standby found for fast_forward; "
+				 "skipping WAL fetch and proceeding to promotion");
+		return true;
 	}
 
 	/*
@@ -1471,12 +1485,20 @@ fsm_init_from_standby(Keeper *keeper)
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
 	NodeAddress upstreamNode = { 0 };
+	bool found = false;
 
 	/* get the primary node to follow */
-	if (!keeper_get_most_advanced_standby(keeper, &upstreamNode))
+	if (!keeper_get_most_advanced_standby(keeper, &upstreamNode, &found))
 	{
 		log_error("Failed to initialise from the most advanced standby node, "
 				  "see above for details");
+		return false;
+	}
+
+	if (!found)
+	{
+		log_error("No standby node found to initialise from; "
+				  "cannot proceed without an upstream source");
 		return false;
 	}
 
