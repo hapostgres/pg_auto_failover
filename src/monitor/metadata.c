@@ -39,6 +39,7 @@
 #include "utils/relcache.h"
 
 bool EnableVersionChecks = true; /* version checks are enabled */
+bool GuardDataLoss = true;       /* guard against data loss during failover */
 
 /*
  * pgAutoFailoverRelationId returns the OID of a given relation in the

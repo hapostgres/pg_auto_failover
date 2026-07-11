@@ -1,0 +1,125 @@
+\RequirePackage{luatex85}
+\documentclass[border=10pt,12pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{amssymb}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+
+\begin{document}
+
+\sffamily\bfseries
+
+%% Actor x-positions (cm): wider spacing avoids mid-arrow label clashes
+%% P=0  B=8  C=15  M=23
+\def\px{0}
+\def\bx{8}
+\def\cx{15}
+\def\mx{23}
+\def\ybot{14.2}
+
+\begin{tikzpicture}[
+  >=Stealth,
+  yscale=-1,
+]
+
+\input{common.tex}
+
+\tikzstyle{actor}=[rectangle, minimum width=3.2cm, minimum height=0.7cm,
+  inner sep=4pt, rounded corners=2pt, align=center, font=\bfseries]
+\tikzstyle{ll}=[densely dashed, gray!60, line width=0.5pt]
+\tikzstyle{lldead}=[densely dashed, red!40, line width=0.5pt]
+\tikzstyle{msg}=[->, line width=0.65pt]
+\tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{lbl}=[font=\small, inner sep=2pt]
+\tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
+  font=\small, align=center]
+\tikzstyle{seclbl}=[font=\small\itshape, text=gray!70!black, anchor=west]
+
+%% ── actor headers ───────────────────────────────────────────────────────
+\node[actor, fill=pbox, text=ptxt] (Ph) at (\px,0) {Primary};
+\node[actor, fill=sbox, text=stxt] (Bh) at (\bx,0) {Standby B};
+\node[actor, fill=sbox, text=stxt] (Ch) at (\cx,0) {Standby C};
+\node[actor, fill=mbox, text=mtxt] (Mh) at (\mx,0) {Monitor};
+
+%% lifelines
+\draw[ll]     (\px,0.35) -- (\px,\ybot);
+\draw[ll]     (\bx,0.35) -- (\bx,\ybot);
+\draw[ll]     (\cx,0.35) -- (\cx,\ybot);
+\draw[ll]     (\mx,0.35) -- (\mx,\ybot);
+
+%% ── steady state ────────────────────────────────────────────────────────
+\node[seclbl] at (-2.2,1.3) {steady state};
+
+\draw[msg] (\px,1.6) -- (\bx,1.6)
+  node[lbl,midway,above] {WAL stream};
+\draw[msg] (\px,2.3) -- (\cx,2.3)
+  node[lbl,midway,above] {WAL stream};
+
+%% ── client commit ───────────────────────────────────────────────────────
+\node[seclbl] at (-2.2,3.3) {client commit};
+
+%% Arrow P→B; label near P to stay clear of C's lifeline
+\draw[msg, color=pbox, line width=0.8pt]
+  (\px,3.6) -- (\bx,3.6);
+\node[lbl, above, text=pbox] at (\px+2.4, 3.6)
+  {wait flush + ack};
+\node[lbl, below, text=pbox, font=\small\itshape] at (\px+2.4, 3.6)
+  {(ANY 1 of B or C)};
+
+\draw[rsp] (\bx,4.5) -- (\px,4.5)
+  node[lbl,midway,above] {ack};
+
+\node[note, fill=green!15, draw=green!50!black]
+  at (\px+1.8, 5.3) {\small commit confirmed $\checkmark$};
+
+%% ── failover ────────────────────────────────────────────────────────────
+\node[seclbl] at (-2.2,6.2) {failover};
+
+\node[note, fill=red!20, draw=red!60]
+  at (\px, 6.5) {\small\bfseries\color{red!80!black} $\times$~primary fails};
+
+%% red dashed lifeline after failure
+\draw[lldead] (\px,6.85) -- (\px,\ybot);
+
+%% Monitor → B: label near Monitor end (pos≈0.10) to clear C lifeline
+\draw[msg] (\mx,7.5) -- (\bx,7.5);
+\node[lbl, above] at (\mx-2.0, 7.5) {assign report\_lsn};
+
+%% Monitor → C
+\draw[msg] (\mx,8.3) -- (\cx,8.3)
+  node[lbl,midway,above] {assign report\_lsn};
+
+%% B → Monitor: label near B to clear C lifeline
+\draw[rsp] (\bx,9.2) -- (\mx,9.2);
+\node[lbl, above] at (\bx+2.2, 9.2) {LSN = 0/5001F00};
+
+%% C → Monitor
+\draw[rsp] (\cx,10.0) -- (\mx,10.0)
+  node[lbl,midway,above] {LSN = 0/4FFF000};
+
+%% Monitor note: B most advanced — placed below M lifeline, above next arrow
+\node[note, fill=yellow!30, draw=orange!60]
+  at (\mx, 11.0) {\small B most advanced $\Rightarrow$ select B};
+
+%% Monitor → B: assign prepare_promotion — label near Monitor end
+\draw[msg, color=pbox, line width=1pt]
+  (\mx,12.0) -- (\bx,12.0);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.8, 12.0)
+  {assign prepare\_promotion};
+
+%% outcome bar  (midpoint of B–C span = (8+15)/2 = 11.5)
+\node[note, fill=green!15, draw=green!50!black,
+      font=\small\bfseries, minimum width=8cm]
+  at (11.5, 13.1) {$\checkmark$~~B becomes primary \textemdash\ no data loss};
+
+%% ── actor footers ───────────────────────────────────────────────────────
+\node[actor, fill=red!25, draw=red!60, text=red!80!black]
+  at (\px, \ybot+0.35) {\small Primary $\times$};
+\node[actor, fill=sbox, text=stxt] at (\bx, \ybot+0.35) {Standby B};
+\node[actor, fill=sbox, text=stxt] at (\cx, \ybot+0.35) {Standby C};
+\node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
+
+\end{tikzpicture}
+\end{document}

@@ -56,6 +56,12 @@ In more details:
     standby node acknowledges the transactions locally committed, thus
     degrading your Postgres service to read-only.
 
+    The sequence below shows how a commit is confirmed and how a healthy
+    failover completes when all quorum standbys are available:
+
+    .. figure:: ./tikz/seq-normal-failover.svg
+       :align: center
+
  0. It is possible to manually set ``number_sync_standbys`` to zero when
     having registered two standby nodes to the monitor, overriding the
     default behavior.
@@ -72,6 +78,29 @@ In more details:
     production data set is kept and, if the primary was then to fail, some
     data will be lost. How much depends on your backup and recovery
     mechanisms.
+
+The sequence below shows the stuck-election scenario that can arise with any
+``number_sync_standbys >= 1`` setting when the primary and one quorum standby
+fail at the same time, and how ``--allow-data-loss`` unblocks it:
+
+.. figure:: ./tikz/seq-stuck-failover.svg
+   :align: center
+
+.. note::
+
+   **Failover when the primary and a quorum standby fail simultaneously.**
+   If the primary and one quorum standby are lost at the same time, the
+   surviving standby is assigned ``report_lsn`` but will not be promoted
+   automatically.  The monitor cannot know whether the missing standby
+   acknowledged the last synchronous commit, and promoting the survivor
+   could silently discard those transactions.
+
+   Once you have confirmed the missing node is permanently lost and you accept
+   the potential data loss, unblock the election with::
+
+     pg_autoctl perform failover --allow-data-loss
+
+   See :ref:`perform_failover_allow_data_loss` for a full explanation.
 
 .. _architecture_setup:
 

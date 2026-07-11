@@ -101,6 +101,34 @@ database where the extension has been deployed::
   setting    | 10000
   unit       | ms
   short_desc | Wait for at least this much time after startup before initiating a failover.
+  -[ RECORD 10 ]---------------------------------------------------------------------------------------------------
+  name       | pgautofailover.guard_data_loss
+  setting    | true
+  unit       |
+  short_desc | Refuse to proceed with failover when quorum nodes have not yet reported their LSN.
+
+pgautofailover.guard_data_loss
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``true`` (the default), ``ProceedGroupStateForMSFailover`` refuses to
+promote any standby if one or more quorum nodes have not reported their LSN
+position during a failover election.  This prevents silent data loss: if the
+missing node acknowledged a synchronous commit that no surviving standby
+replicated, promoting a lagging standby would permanently discard those
+transactions.
+
+Set to ``false`` to allow the election to proceed with only the surviving
+candidates, accepting that committed transactions on the missing node(s) may
+be lost.  The recommended way to use this setting is through
+:ref:`pg_autoctl_perform_failover` with the ``--allow-data-loss`` flag, which
+scopes the change to a single transaction and emits a server log message for
+each guard that is bypassed.
+
+Setting ``guard_data_loss = false`` globally in ``postgresql.conf`` is
+**not** recommended: it would silently suppress the protection for all future
+failovers.  Use ``ALTER DATABASE pg_auto_failover SET
+pgautofailover.guard_data_loss = false;`` only if you want the setting to
+persist across monitor restarts with explicit intent, and document the reason.
 
 You can edit the parameters as usual with PostgreSQL, either in the
 ``postgresql.conf`` file or using ``ALTER DATABASE pg_auto_failover SET parameter =

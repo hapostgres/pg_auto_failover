@@ -1,0 +1,116 @@
+# Test pgautofailover.guard_data_loss / pg_autoctl perform failover --allow-data-loss
+#
+# Scenario: 3-node formation (number_sync_standbys=1).
+# The primary and one standby fail simultaneously.  The surviving standby
+# enters REPORT_LSN and waits — it cannot be promoted because the dead
+# standby was a quorum member and may have acknowledged the last synchronous
+# commit.  Without intervention the cluster is stuck forever.
+#
+# This test verifies:
+#   1. After both failures, the surviving standby (node3) stays at report_lsn
+#      and is NOT promoted automatically (guard_data_loss=true by default).
+#   2. Running `pg_autoctl perform failover --allow-data-loss` from the monitor
+#      unblocks the situation: node3 advances to prepare_promotion and the
+#      cluster reaches a healthy primary state.
+#
+# Predecessor: monitor regression test src/monitor/sql/guard_data_loss.sql
+# Related issues: #1113, #1060, #1059, #1014
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+        node3
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    wait until node3 state is secondary  timeout 60s
+    promote node1
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+#
+# Step 1: kill the primary (node1) and one standby (node2) in quick succession.
+#
+# After node1 dies the monitor assigns report_lsn to both standbys.
+# node3 will report its LSN.  node2 is killed before it can report — it
+# remains as a "missing" quorum member.
+#
+# With guard_data_loss=true (the default), ProceedGroupStateForMSFailover
+# sees missingNodesCount=1 and refuses to promote anyone.  node3 stays at
+# report_lsn indefinitely.
+#
+
+step test_001_kill_primary_and_one_standby {
+    compose kill node1
+    compose kill node2
+    wait until node1 assigned-state = draining  timeout 120s
+    wait until node3 state is report_lsn  timeout 120s
+}
+
+#
+# Step 2: verify node3 stays stuck — no automatic promotion.
+#
+# We sleep briefly to let the monitor run a few more health-check cycles.
+# If guard_data_loss were incorrectly false, node3 would have advanced by now.
+#
+
+step test_002_verify_stuck {
+    sleep 10s
+    assert node3 state is report_lsn
+}
+
+#
+# Step 3: unblock with --allow-data-loss.
+#
+# pg_autoctl perform failover --allow-data-loss opens a transaction on the
+# monitor, sets LOCAL pgautofailover.guard_data_loss = false, and calls
+# perform_failover().  The monitor selects node3 as the only available
+# candidate and drives it toward prepare_promotion.
+#
+
+step test_003_allow_data_loss_failover {
+    exec monitor  pg_autoctl perform failover --allow-data-loss --formation default
+    wait until node3 state is wait_primary  timeout 120s
+}
+
+#
+# Step 4: bring node2 back so node3 can become a full primary.
+#
+
+step test_004_bringup_node2 {
+    compose start node2
+    wait until node3 state is primary
+        and node2 state is secondary
+        timeout 180s
+}
+
+#
+# Step 5: bring node1 back as the second standby.
+#
+
+step test_005_bringup_node1 {
+    compose start node1
+    wait until node1 state is secondary
+        and node3 state is primary
+        and node2 state is secondary
+        timeout 120s
+}
+
+sequence
+    test_001_kill_primary_and_one_standby
+    test_002_verify_stuck
+    test_003_allow_data_loss_failover
+    test_004_bringup_node2
+    test_005_bringup_node1

@@ -84,6 +84,33 @@ default configuration deployed by ``pg_autoctl create ...``. When a custom
 Postgres setup is used, please refer to your actual setup to find Postgres
 logs.
 
+My failover is stuck: standbys are in ``report_lsn`` and nothing moves
+-----------------------------------------------------------------------
+
+This happens when the primary and one or more quorum standbys
+(nodes counted by ``number_sync_standbys``) fail at the same time.  The
+monitor drives all surviving standbys to the ``report_lsn`` state to
+determine the most advanced node, but it refuses to promote any candidate
+while a quorum member is missing.  The missing node may have acknowledged a
+synchronous commit that no surviving standby has yet replicated, and
+promoting would silently discard those transactions.
+
+**First, try to bring the missing node back.**  If it recovers and reports
+its LSN, the election resumes automatically.
+
+**If the missing node is permanently lost and you accept the data-loss
+risk,** unblock the election::
+
+  pg_autoctl perform failover --allow-data-loss
+
+The command promotes the most advanced surviving standby.  Transactions
+acknowledged by the missing node but not yet replicated to any survivor
+will be permanently lost once the new primary starts accepting writes.
+
+See :ref:`perform_failover_allow_data_loss` and the
+``pgautofailover.guard_data_loss`` GUC in :ref:`configuration` for a full
+explanation.
+
 The state of the system is blocked, what should I do?
 -----------------------------------------------------
 

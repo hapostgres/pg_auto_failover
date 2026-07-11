@@ -173,6 +173,9 @@ bool monitor_get_groupId_from_name(Monitor *monitor,
 								   int *groupId);
 
 bool monitor_perform_failover(Monitor *monitor, char *formation, int group);
+bool monitor_perform_failover_allow_data_loss(Monitor *monitor,
+											  char *formation,
+											  int group);
 bool monitor_perform_promotion(Monitor *monitor, char *formation, char *name);
 
 bool monitor_get_current_state(Monitor *monitor, char *formation, int group,

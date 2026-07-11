@@ -38,6 +38,9 @@ typedef enum AutoFailoverHALocktagClass
 /* GUC variable for version checks, true by default */
 extern bool EnableVersionChecks;
 
+/* GUC variable to guard against data loss during failover, true by default */
+extern bool GuardDataLoss;
+
 /* public function declarations */
 extern Oid pgAutoFailoverRelationId(const char *relname);
 extern Oid pgAutoFailoverSchemaId(void);

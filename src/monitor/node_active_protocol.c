@@ -1313,6 +1313,32 @@ perform_failover(PG_FUNCTION_ARGS)
 
 	if (primaryNode == NULL)
 	{
+		/*
+		 * No primary to initiate a failover from.  Maybe a failover is already
+		 * in progress and stuck waiting for quorum nodes to report their LSN.
+		 * In that case, drive the state machine for the first report_lsn node:
+		 * if guard_data_loss is false this will proceed despite missing nodes.
+		 */
+		AutoFailoverNode *reportLsnNode = NULL;
+		ListCell *nodeCell = NULL;
+
+		foreach(nodeCell, groupNodeList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (IsCurrentState(node, REPLICATION_STATE_REPORT_LSN))
+			{
+				reportLsnNode = node;
+				break;
+			}
+		}
+
+		if (reportLsnNode != NULL)
+		{
+			(void) ProceedGroupState(reportLsnNode);
+			PG_RETURN_VOID();
+		}
+
 		ereport(ERROR,
 				(errmsg("couldn't find the primary node in formation \"%s\", "
 						"group %d", formationId, groupId)));

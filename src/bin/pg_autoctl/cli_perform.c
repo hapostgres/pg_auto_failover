@@ -29,10 +29,14 @@ CommandLine perform_failover_command =
 	make_command("failover",
 				 "Perform a failover for given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory\n"
-				 "  --formation   formation to target, defaults to 'default'\n"
-				 "  --group       group to target, defaults to 0\n"
-				 "  --wait        how many seconds to wait, default to 60 \n",
+				 "  --pgdata          path to data directory\n"
+				 "  --formation       formation to target, defaults to 'default'\n"
+				 "  --group           group to target, defaults to 0\n"
+				 "  --wait            how many seconds to wait, default to 60 \n"
+				 "  --allow-data-loss Proceed even when quorum nodes have not reported "
+				 "their\n"
+				 "                    LSN; committed transactions on missing nodes may "
+				 "be lost\n",
 				 cli_perform_failover_getopts,
 				 cli_perform_failover);
 
@@ -40,10 +44,14 @@ CommandLine perform_switchover_command =
 	make_command("switchover",
 				 "Perform a switchover for given formation and group",
 				 " [ --pgdata --formation --group ] ",
-				 "  --pgdata      path to data directory\n"
-				 "  --formation   formation to target, defaults to 'default'\n"
-				 "  --group       group to target, defaults to 0\n"
-				 "  --wait        how many seconds to wait, default to 60 \n",
+				 "  --pgdata          path to data directory\n"
+				 "  --formation       formation to target, defaults to 'default'\n"
+				 "  --group           group to target, defaults to 0\n"
+				 "  --wait            how many seconds to wait, default to 60 \n"
+				 "  --allow-data-loss Proceed even when quorum nodes have not reported "
+				 "their\n"
+				 "                    LSN; committed transactions on missing nodes may "
+				 "be lost\n",
 				 cli_perform_failover_getopts,
 				 cli_perform_failover);
 
@@ -87,6 +95,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 		{ "formation", required_argument, NULL, 'f' },
 		{ "group", required_argument, NULL, 'g' },
 		{ "wait", required_argument, NULL, 'w' },
+		{ "allow-data-loss", no_argument, NULL, 'A' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -108,7 +117,7 @@ cli_perform_failover_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
+	while ((c = getopt_long(argc, argv, "D:f:g:n:AVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -161,6 +170,13 @@ cli_perform_failover_getopts(int argc, char **argv)
 					exit(EXIT_CODE_BAD_ARGS);
 				}
 				log_trace("--wait %d", options.listen_notifications_timeout);
+				break;
+			}
+
+			case 'A':
+			{
+				options.allowDataLoss = true;
+				log_trace("--allow-data-loss");
 				break;
 			}
 
@@ -284,11 +300,31 @@ cli_perform_failover(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!monitor_perform_failover(&monitor, config.formation, config.groupId))
+	bool performOk;
+
+	if (keeperOptions.allowDataLoss)
 	{
-		log_fatal("Failed to perform failover/switchover, "
-				  "see above for details");
-		exit(EXIT_CODE_MONITOR);
+		performOk = monitor_perform_failover_allow_data_loss(
+			&monitor, config.formation, config.groupId);
+
+		if (!performOk)
+		{
+			log_fatal("Failed to perform failover with --allow-data-loss, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
+		}
+	}
+	else
+	{
+		performOk = monitor_perform_failover(
+			&monitor, config.formation, config.groupId);
+
+		if (!performOk)
+		{
+			log_fatal("Failed to perform failover/switchover, "
+					  "see above for details");
+			exit(EXIT_CODE_MONITOR);
+		}
 	}
 
 	/* process state changes notification until we have a new primary */

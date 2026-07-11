@@ -250,6 +250,17 @@ restarting Postgres without a ``primary_conninfo``. This allows the primary
 node to detect :ref:`network_partitions`, i.e. when the primary can't connect
 to the monitor and there's no standby listed in ``pg_stat_replication``.
 
+If one or more quorum standbys (nodes counted by ``number_sync_standbys``)
+are unreachable and never report their LSN, the monitor will not advance the
+election.  The missing node may have acknowledged the last synchronous commit
+before it disappeared, and promoting a lagging candidate would silently discard
+those transactions.  This protection is controlled by the
+``pgautofailover.guard_data_loss`` GUC (default ``true``).  When the missing
+node cannot be recovered and the operator is willing to accept the potential
+data loss, the election can be unblocked with
+:ref:`pg_autoctl_perform_failover` ``--allow-data-loss``.  See
+:ref:`perform_failover_allow_data_loss` for details.
+
 Fast_forward
 ^^^^^^^^^^^^
 
