@@ -946,7 +946,10 @@ class StatefulNode:
         while wait_until > dt.datetime.now():
             self.sleep(sleep_time)
 
-            current_state, assigned_state = self.get_state()
+            try:
+                current_state, assigned_state = self.get_state()
+            except Exception:
+                continue
 
             # only log the state if it has changed
             if current_state != prev_state:
@@ -994,7 +997,10 @@ class StatefulNode:
         while wait_until > dt.datetime.now():
             self.cluster.sleep(sleep_time)
 
-            current_state, assigned_state = self.get_state()
+            try:
+                current_state, assigned_state = self.get_state()
+            except Exception:
+                continue
 
             # only log the state if it has changed
             if assigned_state != prev_state:
