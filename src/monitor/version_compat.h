@@ -143,13 +143,6 @@ HeapTupleGetOid(HeapTuple tuple)
 #endif
 #endif
 
-/*
- * PgStartTime was renamed to MyStartTimestamp in PG19.
- */
-#if (PG_VERSION_NUM >= 190000)
-#define PgStartTime MyStartTimestamp
-#endif
-
 /* utils/timestamp.h is no longer pulled in transitively by miscadmin.h
  * in PG19; include it here so monitors that use timestamp functions compile. */
 #if (PG_VERSION_NUM >= 190000)
