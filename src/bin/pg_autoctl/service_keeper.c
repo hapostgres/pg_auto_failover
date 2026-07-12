@@ -245,6 +245,61 @@ service_keeper_node_active_init(Keeper *keeper)
 
 
 /*
+ * keeper_node_active_shutdown_loop sends node_active reports to the monitor
+ * every second for up to KEEPER_SHUTDOWN_LOOP_MAX_SECS while PostgreSQL stops.
+ *
+ * This runs after the main node-active loop exits on SIGTERM, concurrently
+ * with the postgres-controller service (a sibling process) calling
+ * "pg_ctl stop -m fast".
+ *
+ * When SIGTERM reaches the postmaster, process_pm_shutdown_request()
+ * (src/backend/postmaster/postmaster.c) sets Shutdown = FastShutdown and
+ * calls UpdatePMState(PM_STOP_BACKENDS).  After that transition,
+ * canAcceptConnections() (same file) returns CAC_SHUTDOWN for every new
+ * connection attempt, so the primary stops accepting writes immediately —
+ * before a single backend has rolled back.  Only the final checkpoint that
+ * follows can be slow.
+ *
+ * By continuing to call node_active with the current pgIsRunning value here,
+ * we ensure the monitor learns the primary is going away within one second of
+ * the shutdown starting, and can begin failover right away rather than waiting
+ * for a health-check timeout.
+ */
+#define KEEPER_SHUTDOWN_LOOP_MAX_SECS 30
+
+static void
+keeper_node_active_shutdown_loop(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+
+	log_info("Graceful shutdown: reporting node state to monitor "
+			 "while PostgreSQL stops (up to %d seconds)",
+			 KEEPER_SHUTDOWN_LOOP_MAX_SECS);
+
+	for (int i = 0; i < KEEPER_SHUTDOWN_LOOP_MAX_SECS; i++)
+	{
+		/* escalated signal: exit without further reporting */
+		if (asked_to_quit || asked_to_stop_fast)
+		{
+			break;
+		}
+
+		(void) keeper_update_pg_state(keeper, LOG_DEBUG);
+		(void) service_keeper_node_active(keeper, false);
+
+		if (!postgres->pgIsRunning)
+		{
+			log_info("PostgreSQL has stopped; "
+					 "final node_active report sent to monitor");
+			break;
+		}
+
+		pg_usleep(1000000L); /* 1 second */
+	}
+}
+
+
+/*
  * keeper_node_active_loop implements the main loop of the keeper, which
  * periodically gets the goal state from the monitor and makes the state
  * transitions.
@@ -657,6 +712,16 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			warnedOnPreviousIteration = true;
 			warnedOnCurrentIteration = false;
 		}
+	}
+
+	/*
+	 * Graceful SIGTERM shutdown: keep reporting state to the monitor while
+	 * PostgreSQL finishes its checkpoint and stops.  Skip on SIGINT/SIGQUIT
+	 * which request immediate exit.
+	 */
+	if (asked_to_stop && !asked_to_stop_fast && !asked_to_quit)
+	{
+		(void) keeper_node_active_shutdown_loop(keeper);
 	}
 
 	/* One last check that we do not have any connections open */
