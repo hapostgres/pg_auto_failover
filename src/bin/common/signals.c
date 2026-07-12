@@ -119,8 +119,10 @@ unblock_signals(sigset_t *orig_mask)
  * catch_reload receives the SIGHUP signal.
  */
 void
-catch_reload(int sig)
+catch_reload(SIGNAL_ARGS)
 {
+	int sig = postgres_signal_arg;
+
 	asked_to_reload = 1;
 	pqsignal(sig, catch_reload);
 }
@@ -130,8 +132,10 @@ catch_reload(int sig)
  * catch_int receives the SIGINT signal.
  */
 void
-catch_int(int sig)
+catch_int(SIGNAL_ARGS)
 {
+	int sig = postgres_signal_arg;
+
 	asked_to_stop_fast = 1;
 	pqsignal(sig, catch_int);
 }
@@ -141,8 +145,10 @@ catch_int(int sig)
  * catch_stop receives SIGTERM signal.
  */
 void
-catch_term(int sig)
+catch_term(SIGNAL_ARGS)
 {
+	int sig = postgres_signal_arg;
+
 	asked_to_stop = 1;
 	pqsignal(sig, catch_term);
 }
@@ -152,8 +158,10 @@ catch_term(int sig)
  * catch_quit receives the SIGQUIT signal.
  */
 void
-catch_quit(int sig)
+catch_quit(SIGNAL_ARGS)
 {
+	int sig = postgres_signal_arg;
+
 	/* default signal handler disposition is to core dump, we don't */
 	asked_to_quit = 1;
 	pqsignal(sig, catch_quit);
@@ -164,7 +172,7 @@ catch_quit(int sig)
  * quit_and_exit exit(EXIT_CODE_QUIT) upon receiving the SIGQUIT signal.
  */
 void
-catch_quit_and_exit(int sig)
+catch_quit_and_exit(SIGNAL_ARGS)
 {
 	/* default signal handler disposition is to core dump, we don't */
 	exit(EXIT_CODE_QUIT);
