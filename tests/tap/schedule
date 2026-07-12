@@ -29,6 +29,9 @@ installcheck
 # Upgrade test — requires pgaf:current and pgaf:next images to be pre-built:
 #   make -C tests/upgrade pgaf-current pgaf-next
 upgrade
+# Debug/diagnostic specs — not run in CI, useful for interactive investigation:
+# debug_failover_pg19
+
 # Citus tests (uncomment when CITUS_CLUSTER=1):
 # basic_citus_operation
 # citus_cluster_name
