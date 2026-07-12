@@ -1,0 +1,129 @@
+# Test fast_forward stuck detection and recovery
+#
+# Scenario: 3-node formation (number_sync_standbys=1).
+# When a failover candidate is assigned the fast_forward state, it means the
+# candidate has a lower LSN than another standby (the "WAL source") and must
+# fetch WAL from that standby before being promoted.  If the WAL source dies
+# while the candidate is fetching, the candidate gets stuck in fast_forward
+# with no live peer to catch up from.
+#
+# The fix (issue #1060) adds stuck-detection logic to the monitor:
+#   - guard_data_loss=true  → monitor resets the candidate back to report_lsn
+#     so that the next health-check cycle can re-evaluate the situation.
+#   - guard_data_loss=false → monitor allows the candidate to promote with
+#     whatever WAL it already has.
+#
+# Because a tap test cannot easily pre-load one standby with more WAL than
+# another, this test exercises the guard_data_loss=false end-to-end path:
+#   • node1 (primary) and node3 (the WAL-source standby) are killed together.
+#   • node2 is the only survivor.  With guard_data_loss=true the SQL health
+#     filter sees a missing quorum member and keeps node2 at report_lsn.
+#   • After running `pg_autoctl perform failover --allow-data-loss`, the
+#     guard_data_loss GUC is set to false for that transaction and the monitor
+#     promotes node2 even though its WAL source (node3) is unreachable.
+#   • node3 and node1 are brought back; the cluster stabilises at
+#     primary + secondary + secondary.
+#
+# Related issues: #1060, #1113
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+        node3
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    wait until node3 state is secondary  timeout 60s
+    promote node1
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+#
+# Step 1: kill the primary (node1) and the WAL-source standby (node3)
+# simultaneously.
+#
+# After node1 dies the monitor assigns report_lsn to both standbys.
+# node2 reports its LSN; node3 is killed before it can do so and remains a
+# "missing" quorum member.  With guard_data_loss=true (the default), the
+# monitor's ProceedGroupStateForMSFailover sees missingNodesCount=1 and
+# refuses to promote node2.  If the monitor had already assigned fast_forward
+# to node2 (pointing to node3 as the WAL source) before node3 was detected
+# dead, the stuck-detection logic resets node2 back to report_lsn.
+#
+
+step test_001_kill_primary_and_wal_source {
+    compose kill node1
+    compose kill node3
+    wait until node1 assigned-state = draining  timeout 120s
+    wait until node2 state is report_lsn  timeout 120s
+}
+
+#
+# Step 2: verify node2 stays stuck — no automatic promotion.
+#
+# We sleep briefly to let the monitor run a few more health-check cycles.
+# If the stuck-detection fix were absent (or guard_data_loss incorrectly
+# false), node2 would have advanced to prepare_promotion by now.
+#
+
+step test_002_verify_stuck {
+    sleep 10s
+    assert node2 state is report_lsn
+}
+
+#
+# Step 3: unblock with --allow-data-loss.
+#
+# pg_autoctl perform failover --allow-data-loss opens a transaction on the
+# monitor, sets LOCAL pgautofailover.guard_data_loss = false, and calls
+# perform_failover().  The health filter no longer blocks on the missing WAL
+# source; node2 is selected as the only available candidate and driven toward
+# prepare_promotion then wait_primary.
+#
+
+step test_003_allow_data_loss_failover {
+    exec monitor  pg_autoctl perform failover --allow-data-loss --formation default
+    wait until node2 state is wait_primary  timeout 120s
+}
+
+#
+# Step 4: bring node3 back so node2 can become a full primary.
+#
+
+step test_004_bringup_node3 {
+    compose start node3
+    wait until node2 state is primary
+        and node3 state is secondary
+        timeout 180s
+}
+
+#
+# Step 5: bring node1 back as the second standby.
+#
+
+step test_005_bringup_node1 {
+    compose start node1
+    wait until node1 state is secondary
+        and node2 state is primary
+        and node3 state is secondary
+        timeout 120s
+}
+
+sequence
+    test_001_kill_primary_and_wal_source
+    test_002_verify_stuck
+    test_003_allow_data_loss_failover
+    test_004_bringup_node3
+    test_005_bringup_node1
