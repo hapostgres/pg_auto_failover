@@ -1,0 +1,432 @@
+name: CI
+
+# Unified workflow: build images once, share across both test suites.
+#
+# Job graph per push/PR:
+#
+#   style ──► build (PG14) ──► pytest  (PG14, multi/single/monitor/ssl/citus/tablespaces)
+#         │                 ├─► pgaftest (PG14, quick/node/ssl)
+#         │                 └─► installcheck (PG14)
+#         ├─► build (PG15) ──► ...
+#         ├─► build (PG16) ──► ...
+#         └─► build (PG17) ──► pytest  (PG17, all schedules incl. slow ones)
+#                          ├─► pgaftest (PG17, all schedules incl. slow ones)
+#                          ├─► installcheck (PG17)
+#                          └─► upgrade
+#
+# Each build job:
+#   1. Pulls GHA layer cache (scope build-pgNN) to skip re-compiling Postgres+Citus
+#      on unchanged code.  Writes the cache back so subsequent runs stay warm.
+#   2. Builds all targets (test, run, debian, testrun; pgaftest for PG17 only)
+#      sequentially — Docker's local layer cache means the base→citus→build chain
+#      is compiled once and reused for every subsequent target in the same job.
+#   3. Uploads each image as a GitHub Actions artifact (retention: 1 day) for
+#      downstream test jobs to download.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Style gate — runs once, not once per PG version.
+  # ---------------------------------------------------------------------------
+  style:
+    name: Style check
+    runs-on: ubuntu-latest
+    container: citus/stylechecker:no-py
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set safe directory for git
+        run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+
+      - name: Check C formatting
+        run: citus_indent --check
+
+      - name: Check banned functions
+        run: ci/banned.h.sh
+
+  # ---------------------------------------------------------------------------
+  # Build all images for one Postgres major version.
+  # Uploads everything as artifacts; downstream jobs download only what they need.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build images (PG${{ matrix.PGVERSION }})
+    needs: style
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        PGVERSION: [14, 15, 16, 17]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set CITUSTAG for PG${{ matrix.PGVERSION }}
+        run: |
+          case "${{ matrix.PGVERSION }}" in
+            14|15) echo "CITUSTAG=v12.1.5" >> $GITHUB_ENV ;;
+            *)     echo "CITUSTAG=v13.2.0" >> $GITHUB_ENV ;;
+          esac
+
+      - name: Generate git-version.h
+        run: make version
+
+      # Build the fat build image (base → citus → build → test).
+      # This is the most expensive step; GHA layer cache avoids re-compiling
+      # Postgres+Citus when the Dockerfile and source are unchanged.
+      - name: Build test image (pytest suite)
+        run: |
+          docker buildx build \
+            --cache-from type=gha,scope=build-pg${{ matrix.PGVERSION }} \
+            --cache-to   type=gha,scope=build-pg${{ matrix.PGVERSION }},mode=max \
+            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${{ env.CITUSTAG }} \
+            --target test \
+            -t pg_auto_failover_test:pg${{ matrix.PGVERSION }} \
+            --load \
+            .
+
+      # Slim runtime image.  Reuses build-stage layers from the local daemon
+      # cache populated by the test build above — no re-compilation.
+      - name: Build run image (pgaftest cluster node)
+        run: |
+          docker buildx build \
+            --cache-from type=gha,scope=build-pg${{ matrix.PGVERSION }} \
+            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${{ env.CITUSTAG }} \
+            --target run \
+            -t pgaf:run-pg${{ matrix.PGVERSION }} \
+            --load \
+            .
+
+      # debian target extends run (pg_createcluster layer) — fast.
+      - name: Build debian image (node schedule)
+        run: |
+          docker buildx build \
+            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${{ env.CITUSTAG }} \
+            --target debian \
+            -t pgaf:debian-pg${{ matrix.PGVERSION }} \
+            --load \
+            .
+
+      # testrun target extends run (adds server-dev headers) — fast.
+      - name: Build testrun image (installcheck)
+        run: |
+          docker buildx build \
+            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${{ env.CITUSTAG }} \
+            --target testrun \
+            -t pgaf:testrun-pg${{ matrix.PGVERSION }} \
+            --load \
+            .
+
+      # pgaftest runner container: only one version needed (it runs pgaftest
+      # itself and drives cluster nodes via Docker-out-of-Docker).
+      - name: Build pgaftest runner image
+        if: matrix.PGVERSION == 17
+        run: |
+          docker buildx build \
+            --cache-from type=gha,scope=pgaftest \
+            --cache-to   type=gha,scope=pgaftest,mode=max \
+            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${{ env.CITUSTAG }} \
+            --target pgaftest \
+            -t pgaf:pgaftest \
+            --load \
+            .
+
+      - name: Save images to archives
+        run: |
+          # test image: use zstd (matches make save-test-image / load-test-image)
+          docker save pg_auto_failover_test:pg${{ matrix.PGVERSION }} \
+            | zstd -T0 -3 > /tmp/pg_auto_failover_test-pg${{ matrix.PGVERSION }}.tar.zst
+
+          docker save pgaf:run-pg${{ matrix.PGVERSION }} \
+            | gzip > /tmp/pgaf-run-pg${{ matrix.PGVERSION }}.tar.gz
+
+          docker save pgaf:debian-pg${{ matrix.PGVERSION }} \
+            | gzip > /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
+
+          docker save pgaf:testrun-pg${{ matrix.PGVERSION }} \
+            | gzip > /tmp/pgaf-testrun-pg${{ matrix.PGVERSION }}.tar.gz
+
+          if [ "${{ matrix.PGVERSION }}" = "17" ]; then
+            docker save pgaf:pgaftest | gzip > /tmp/pgaf-pgaftest.tar.gz
+          fi
+
+      - name: Upload test image
+        uses: actions/upload-artifact@v4
+        with:
+          name: pg-test-image-${{ matrix.PGVERSION }}
+          path: /tmp/pg_auto_failover_test-pg${{ matrix.PGVERSION }}.tar.zst
+          retention-days: 1
+
+      - name: Upload run image
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgaf-run-image-pg${{ matrix.PGVERSION }}
+          path: /tmp/pgaf-run-pg${{ matrix.PGVERSION }}.tar.gz
+          retention-days: 1
+
+      - name: Upload debian image
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgaf-debian-image-pg${{ matrix.PGVERSION }}
+          path: /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
+          retention-days: 1
+
+      - name: Upload testrun image
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgaf-testrun-image-pg${{ matrix.PGVERSION }}
+          path: /tmp/pgaf-testrun-pg${{ matrix.PGVERSION }}.tar.gz
+          retention-days: 1
+
+      - name: Upload pgaftest runner image
+        if: matrix.PGVERSION == 17
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgaftest-image
+          path: /tmp/pgaf-pgaftest.tar.gz
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # pytest suite (Python integration tests, tests/ directory).
+  # ---------------------------------------------------------------------------
+  pytest:
+    name: Run test (${{ matrix.PGVERSION }}, ${{ matrix.TEST }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        PGVERSION: [14, 15, 16, 17]
+        TEST: [multi, single, monitor, ssl, citus]
+        include:
+          - PGVERSION: 14
+            TEST: tablespaces
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download test image (PG${{ matrix.PGVERSION }})
+        uses: actions/download-artifact@v4
+        with:
+          name: pg-test-image-${{ matrix.PGVERSION }}
+
+      - name: Load test image
+        run: |
+          PGVERSION=${{ matrix.PGVERSION }} make load-test-image
+
+      - name: Run test
+        env:
+          PGVERSION: ${{ matrix.PGVERSION }}
+          TEST: ${{ matrix.TEST }}
+          TRAVIS_BUILD_DIR: ${{ github.workspace }}
+        run: make run-test-prebuilt
+
+  # ---------------------------------------------------------------------------
+  # pgaftest TAP suite.
+  # Fast schedules (quick, node, ssl) run on all four PG versions.
+  # Slow schedules (multi-*, citus-*) are PG17-only to keep total job count low.
+  # ---------------------------------------------------------------------------
+  pgaftest:
+    name: pgaftest / ${{ matrix.schedule }} (PG${{ matrix.PGVERSION }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { PGVERSION: 14, schedule: quick }
+          - { PGVERSION: 15, schedule: quick }
+          - { PGVERSION: 16, schedule: quick }
+          - { PGVERSION: 17, schedule: quick }
+          - { PGVERSION: 14, schedule: node }
+          - { PGVERSION: 15, schedule: node }
+          - { PGVERSION: 16, schedule: node }
+          - { PGVERSION: 17, schedule: node }
+          - { PGVERSION: 14, schedule: ssl }
+          - { PGVERSION: 15, schedule: ssl }
+          - { PGVERSION: 16, schedule: ssl }
+          - { PGVERSION: 17, schedule: ssl }
+          - { PGVERSION: 17, schedule: multi-alternate }
+          - { PGVERSION: 17, schedule: multi-misc }
+          - { PGVERSION: 17, schedule: multi-async }
+          - { PGVERSION: 17, schedule: citus-1 }
+          - { PGVERSION: 17, schedule: citus-2 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download pgaf:run image (PG${{ matrix.PGVERSION }})
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaf-run-image-pg${{ matrix.PGVERSION }}
+          path: /tmp
+
+      - name: Load pgaf:run image
+        run: |
+          docker load < /tmp/pgaf-run-pg${{ matrix.PGVERSION }}.tar.gz
+          docker tag pgaf:run-pg${{ matrix.PGVERSION }} pgaf:run
+
+      - name: Download pgaf:debian image (PG${{ matrix.PGVERSION }})
+        if: matrix.schedule == 'node'
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaf-debian-image-pg${{ matrix.PGVERSION }}
+          path: /tmp
+
+      - name: Load pgaf:debian image
+        if: matrix.schedule == 'node'
+        run: |
+          docker load < /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
+          docker tag pgaf:debian-pg${{ matrix.PGVERSION }} pgaf:debian
+
+      - name: Download pgaf:pgaftest runner image
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaftest-image
+          path: /tmp
+
+      - name: Load pgaf:pgaftest image
+        run: docker load < /tmp/pgaf-pgaftest.tar.gz
+
+      - name: Run schedule ${{ matrix.schedule }} (PG${{ matrix.PGVERSION }})
+        timeout-minutes: 35
+        run: |
+          mkdir -p /tmp/pgaftest && chmod 777 /tmp/pgaftest
+          DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+          docker run --rm \
+            --user root \
+            --group-add "${DOCKER_GID}" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/pgaftest:/tmp/pgaftest \
+            -v "$(pwd)":/work:ro \
+            -w /work \
+            -e PGAF_IMAGE=pgaf:run \
+            -e PGVERSION=${{ matrix.PGVERSION }} \
+            -e PGAF_DEBIAN_IMAGE=${{ matrix.schedule == 'node' && 'pgaf:debian' || '' }} \
+            -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
+            pgaf:pgaftest \
+            pgaftest run --schedule tests/tap/schedules/${{ matrix.schedule }}.sch
+
+  # ---------------------------------------------------------------------------
+  # SQL regression suite (pg_regress installcheck).
+  # ---------------------------------------------------------------------------
+  installcheck:
+    name: pgaftest / installcheck (PG${{ matrix.PGVERSION }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        PGVERSION: [14, 15, 16, 17]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download pgaf:testrun image (PG${{ matrix.PGVERSION }})
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaf-testrun-image-pg${{ matrix.PGVERSION }}
+          path: /tmp
+
+      - name: Load pgaf:testrun image
+        run: docker load < /tmp/pgaf-testrun-pg${{ matrix.PGVERSION }}.tar.gz
+
+      - name: Download pgaf:pgaftest runner image
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaftest-image
+          path: /tmp
+
+      - name: Load pgaf:pgaftest image
+        run: docker load < /tmp/pgaf-pgaftest.tar.gz
+
+      - name: Generate git-version.h
+        run: make version
+
+      - name: Run installcheck
+        timeout-minutes: 15
+        run: |
+          mkdir -p /tmp/pgaftest && chmod 777 /tmp/pgaftest
+          DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+          docker run --rm \
+            --user root \
+            --group-add "${DOCKER_GID}" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/pgaftest:/tmp/pgaftest \
+            -v "$(pwd)":/work:ro \
+            -w /work \
+            -e PGVERSION=${{ matrix.PGVERSION }} \
+            -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
+            pgaf:pgaftest \
+            pgaftest run tests/tap/specs/installcheck.pgaf
+
+  # ---------------------------------------------------------------------------
+  # Upgrade test (PG16, binary + extension swap without container restart).
+  # ---------------------------------------------------------------------------
+  upgrade:
+    name: pgaftest / upgrade
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PGVERSION: 16
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download pgaf:pgaftest runner image
+        uses: actions/download-artifact@v4
+        with:
+          name: pgaftest-image
+          path: /tmp
+
+      - name: Load pgaf:pgaftest image
+        run: docker load < /tmp/pgaf-pgaftest.tar.gz
+
+      - name: Generate git-version.h
+        run: make version
+
+      - name: Build pgaf:next (current branch, PG${{ env.PGVERSION }})
+        run: make -C tests/upgrade pgaf-next PGVERSION=${{ env.PGVERSION }}
+
+      - name: Build pgaf:current (previous release, PG${{ env.PGVERSION }})
+        run: make -C tests/upgrade pgaf-current PGVERSION=${{ env.PGVERSION }}
+
+      - name: Run upgrade spec
+        timeout-minutes: 25
+        run: |
+          mkdir -p /tmp/pgaftest && chmod 777 /tmp/pgaftest
+          DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+          docker run --rm \
+            --user root \
+            --group-add "${DOCKER_GID}" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v /tmp/pgaftest:/tmp/pgaftest \
+            -v "$(pwd)":/work:ro \
+            -w /work \
+            -e PGVERSION=${{ env.PGVERSION }} \
+            -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
+            pgaf:pgaftest \
+            pgaftest run tests/tap/specs/upgrade.pgaf
