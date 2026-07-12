@@ -934,8 +934,25 @@ supervisor_update_pidfile(Supervisor *supervisor)
 		appendPQExpBuffer(content, "%d %s\n", service->pid, service->name);
 	}
 
-	bool success = write_file(content->data, content->len, supervisor->pidfile);
+	/*
+	 * Write atomically via a temp file + rename so that concurrent readers of
+	 * the pidfile never see a truncated (empty) file during the update.
+	 * POSIX rename(2) is atomic: a reader sees either the old complete file
+	 * or the new complete one, never a partially-written version.
+	 */
+	char tmpfile[MAXPGPATH];
+	sformat(tmpfile, MAXPGPATH, "%s.tmp", supervisor->pidfile);
+
+	bool success = write_file(content->data, content->len, tmpfile);
 	destroyPQExpBuffer(content);
+
+	if (success && rename(tmpfile, supervisor->pidfile) != 0)
+	{
+		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpfile,
+				  supervisor->pidfile);
+		(void) unlink(tmpfile);
+		success = false;
+	}
 
 	return success;
 }
