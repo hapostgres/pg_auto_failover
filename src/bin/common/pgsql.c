@@ -2618,7 +2618,7 @@ pgsql_get_postgres_metadata(PGSQL *pgsql,
 		" case when pg_is_in_recovery()"
 		" then coalesce("
 		"        (select received_tli from pg_stat_wal_receiver"
-		"          where status <> 'connecting'),"
+		"          where received_tli > 0),"
 		"        (select timeline_id from pg_control_checkpoint()))"
 		" else (select timeline_id from pg_control_checkpoint()) "
 		" end as timeline_id "
