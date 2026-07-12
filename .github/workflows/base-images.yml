@@ -90,10 +90,7 @@ jobs:
     name: Check minor releases (PG${{ matrix.PGVERSION }})
     if: >
       github.event_name == 'schedule' && github.event.schedule == '0 3 * * 1' ||
-      github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.pgversion == '' ||
-        github.event.inputs.pgversion == matrix.PGVERSION_STR
-      )
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -102,11 +99,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { PGVERSION: 14, PGVERSION_STR: '14', CITUSTAG: v12.1.5 }
-          - { PGVERSION: 15, PGVERSION_STR: '15', CITUSTAG: v12.1.5 }
-          - { PGVERSION: 16, PGVERSION_STR: '16', CITUSTAG: v13.2.0 }
-          - { PGVERSION: 17, PGVERSION_STR: '17', CITUSTAG: v13.2.0 }
-          - { PGVERSION: 18, PGVERSION_STR: '18', CITUSTAG: v14.1.0 }
+          - { PGVERSION: 14, CITUSTAG: v12.1.5 }
+          - { PGVERSION: 15, CITUSTAG: v12.1.5 }
+          - { PGVERSION: 16, CITUSTAG: v13.2.0 }
+          - { PGVERSION: 17, CITUSTAG: v13.2.0 }
+          - { PGVERSION: 18, CITUSTAG: v14.1.0 }
 
     steps:
       - uses: actions/checkout@v4
@@ -117,6 +114,14 @@ jobs:
       - name: Detect latest Postgres ${{ matrix.PGVERSION }} minor release
         id: detect
         run: |
+          # When triggered manually with a specific pgversion, skip other versions.
+          INPUT="${{ github.event.inputs.pgversion }}"
+          if [ -n "${INPUT}" ] && [ "${INPUT}" != "${{ matrix.PGVERSION }}" ]; then
+            echo "rebuild=false" >> $GITHUB_OUTPUT
+            echo "PG${{ matrix.PGVERSION }}: skipped (manual run requested PG${INPUT})"
+            exit 0
+          fi
+
           LATEST=$(git ls-remote --tags https://github.com/postgres/postgres \
             "refs/tags/REL_${{ matrix.PGVERSION }}_*" \
             | grep -v '\^{}' \
