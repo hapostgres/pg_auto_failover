@@ -109,7 +109,7 @@ endif
 
 # Shared rules for vendored libs
 lib-snprintf.o: $(PG_SNPRINTF)
-	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/lib-snprintf.Po -MT$@ \
+	$(CC) $(CFLAGS) -Wno-implicit-fallthrough -c -MMD -MP -MF$(DEPDIR)/lib-snprintf.Po -MT$@ \
 	    -o $@ $(LIB_DIR)/pg/snprintf.c
 
 lib-strerror.o: $(PG_SNPRINTF)

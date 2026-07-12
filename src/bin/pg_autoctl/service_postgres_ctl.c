@@ -95,7 +95,7 @@ service_postgres_ctl_start(void *context, pid_t *pid)
  *   $ pg_autoctl internal service postgres --pgdata ...
  */
 void
-service_postgres_ctl_runprogram()
+service_postgres_ctl_runprogram(void)
 {
 	char *args[12];
 	int argsIndex = 0;

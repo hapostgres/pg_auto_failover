@@ -155,7 +155,7 @@ get_service_pidfile(const char *pidfile,
  * pidfile.
  */
 static void
-remove_service_pidfile_atexit()
+remove_service_pidfile_atexit(void)
 {
 	(void) remove_pidfile(service_pidfile);
 }

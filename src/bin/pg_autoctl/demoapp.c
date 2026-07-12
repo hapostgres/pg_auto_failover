@@ -836,7 +836,7 @@ demoapp_print_summary(const char *pguri, DemoAppOptions *demoAppOptions)
  * demoapp_get_terminal_columns gets the current terminal window width.
  */
 static int
-demoapp_get_terminal_columns()
+demoapp_get_terminal_columns(void)
 {
 	struct winsize ws;
 
