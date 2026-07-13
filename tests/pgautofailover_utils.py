@@ -1703,45 +1703,49 @@ class DataNode(PGNode, StatefulNode):
         A newly-promoted or rejoined node can transiently reject connections
         right after the FSM state converges.  Retry for up to retry_timeout
         seconds on any connectivity error before surfacing the exception.
+        The retry covers both the pgmajor() probe and the subsequent
+        list_replication_slot_names() call, since Postgres can drop the
+        socket between the two.
         """
         deadline = dt.datetime.now() + dt.timedelta(seconds=retry_timeout)
         while True:
             try:
                 pgmajor = self.pgmajor()
-                break
+
+                if pgmajor == 10:
+                    return True
+
+                other_nodes = self.monitor.get_other_nodes(self.nodeid)
+                expected_slots = [
+                    "pgautofailover_standby_%s" % n[0] for n in other_nodes
+                ]
+                current_slots = self.list_replication_slot_names()
+
+                # just to make it easier to read through the print()ed list
+                expected_slots.sort()
+                current_slots.sort()
+
+                if set(expected_slots) == set(current_slots):
+                    return True
+
+                self.print_debug_logs()
+                print()
+                print(
+                    "slots list on %s is %s, expected %s"
+                    % (self.datadir, current_slots, expected_slots)
+                )
+                return False
+
             except psycopg2.OperationalError:
                 if dt.datetime.now() >= deadline:
                     raise
+                print(
+                    "transient connectivity error on %s, retrying has_needed_replication_slots ..."
+                    % self.datadir
+                )
                 time.sleep(0.5)
                 self._pgversion = None
                 self._pgmajor = None
-
-        if pgmajor == 10:
-            return True
-
-        hostname = str(self.vnode.address)
-        other_nodes = self.monitor.get_other_nodes(self.nodeid)
-        expected_slots = [
-            "pgautofailover_standby_%s" % n[0] for n in other_nodes
-        ]
-        current_slots = self.list_replication_slot_names()
-
-        # just to make it easier to read through the print()ed list
-        expected_slots.sort()
-        current_slots.sort()
-
-        if set(expected_slots) == set(current_slots):
-            # print("slots list on %s is %s, as expected" %
-            #       (self.datadir, current_slots))
-            return True
-
-        self.print_debug_logs()
-        print()
-        print(
-            "slots list on %s is %s, expected %s"
-            % (self.datadir, current_slots, expected_slots)
-        )
-        return False
 
     def create_wait_until_metadata_sync(self):
         """
