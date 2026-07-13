@@ -206,6 +206,35 @@ ENV PG_AUTOCTL_DEBUG=1
 ENV PGDATA=/var/lib/postgres/pgaf
 
 #
+# prebuilt image — extends run with a pre-initialized monitor PGDATA.
+#
+# pg_autoctl node init reads a minimal monitor.ini and runs
+# `pg_autoctl create monitor` without --run, so that initdb runs at image
+# build time and is cached in this layer.  At compose-up time, pg_autoctl
+# node run detects that PGDATA already has pg_autoctl.cfg and skips straight
+# to `pg_autoctl run`, avoiding the ~10s initdb cost per test run.
+#
+# Data nodes cannot be pre-initialized here because they need the live
+# monitor URI (assigned dynamically by the compose network).  Only the
+# monitor is pre-initialized.
+#
+FROM run AS prebuilt
+
+ARG PGVERSION
+
+USER root
+RUN mkdir -p /tmp/prebuilt-init && chown docker /tmp/prebuilt-init
+
+USER docker
+
+# Write a minimal monitor.ini for the pre-init step.
+# pgport 5432 and hostname monitor match the defaults used by compose_gen.c.
+RUN printf '[postgresql]\npgdata = /var/lib/postgres/pgaf\npgport = 5432\n\n[pg_autoctl]\nhostname = monitor\nkind = monitor\n' \
+      > /tmp/prebuilt-init/monitor.ini \
+ && pg_autoctl node init /tmp/prebuilt-init/monitor.ini \
+ && rm -rf /tmp/prebuilt-init
+
+#
 # debian image — like run, but with a Debian-style "main" cluster pre-created
 # via pg_createcluster so that pg_autoctl can test adoption of the split-config
 # layout (postgresql.conf lives in /etc/postgresql/${PGVERSION}/main/ outside

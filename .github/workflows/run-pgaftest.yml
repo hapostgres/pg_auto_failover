@@ -35,6 +35,12 @@ jobs:
   # ---------------------------------------------------------------------------
   # Build one pgaf:run image per Postgres version and upload each as an
   # artifact.  All downstream test jobs download only the version they need.
+  #
+  # BuildKit GHA layer cache (type=gha) is used for all docker buildx calls so
+  # that the apt-get heavy base/citus stages are reused across runs when the
+  # Dockerfile and source haven't changed.  On cache-hit runs this saves 3–6
+  # minutes per version.  Each version gets its own cache scope so a PG17 build
+  # doesn't evict PG14 layers.
   # ---------------------------------------------------------------------------
   build-images:
     name: Build image (PG${{ matrix.PGVERSION }})
@@ -51,41 +57,70 @@ jobs:
       - name: Generate git-version.h
         run: make version
 
+      - name: Set up Docker BuildKit
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
+      - name: Set CITUSTAG
+        id: citustag
+        run: |
+          case "${{ matrix.PGVERSION }}" in
+            14|15) echo "CITUSTAG=v12.1.5" >> "$GITHUB_OUTPUT" ;;
+            16|17) echo "CITUSTAG=v13.2.0" >> "$GITHUB_OUTPUT" ;;
+            18)    echo "CITUSTAG=v14.1.0" >> "$GITHUB_OUTPUT" ;;
+            *)     echo "CITUSTAG=none"    >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Build pgaf:run image (PG${{ matrix.PGVERSION }})
         run: |
-          # Match the CITUSTAG-per-PGVERSION logic from the top-level Makefile:
-          # PG14–15 require Citus v12 (last version supporting those releases).
-          # PG16+ use the current default.
-          case "${{ matrix.PGVERSION }}" in
-            14|15) CITUSTAG=v12.1.5 ;;
-            *)     CITUSTAG=v13.2.0 ;;
-          esac
-          docker build \
+          docker buildx build \
+            --cache-from type=gha,scope=pgaf-run-pg${{ matrix.PGVERSION }} \
+            --cache-to   type=gha,mode=max,scope=pgaf-run-pg${{ matrix.PGVERSION }} \
             --build-arg PGVERSION=${{ matrix.PGVERSION }} \
-            --build-arg CITUSTAG=${CITUSTAG} \
+            --build-arg CITUSTAG=${{ steps.citustag.outputs.CITUSTAG }} \
             --target run \
             -t pgaf:run-pg${{ matrix.PGVERSION }} \
+            --load \
+            .
+
+      - name: Build pgaf:prebuilt image (PG${{ matrix.PGVERSION }})
+        run: |
+          # The prebuilt stage extends run with a pre-initialized monitor PGDATA.
+          # It reuses the run layer from the GHA cache, so only the pg_autoctl
+          # node init step runs here (~5 s).
+          docker buildx build \
+            --cache-from type=gha,scope=pgaf-run-pg${{ matrix.PGVERSION }} \
+            --cache-from type=gha,scope=pgaf-prebuilt-pg${{ matrix.PGVERSION }} \
+            --cache-to   type=gha,mode=max,scope=pgaf-prebuilt-pg${{ matrix.PGVERSION }} \
+            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${{ steps.citustag.outputs.CITUSTAG }} \
+            --target prebuilt \
+            -t pgaf:prebuilt-pg${{ matrix.PGVERSION }} \
+            --load \
             .
 
       - name: Build pgaf:debian image (PG${{ matrix.PGVERSION }})
         run: |
-          # Layer cache from the run build above covers the run stage;
-          # this step only adds the pg_createcluster layer on top.
-          case "${{ matrix.PGVERSION }}" in
-            14|15) CITUSTAG=v12.1.5 ;;
-            *)     CITUSTAG=v13.2.0 ;;
-          esac
-          docker build \
+          # Layer cache from the run build covers the run stage; only the
+          # pg_createcluster layer is new.
+          docker buildx build \
+            --cache-from type=gha,scope=pgaf-run-pg${{ matrix.PGVERSION }} \
+            --cache-from type=gha,scope=pgaf-debian-pg${{ matrix.PGVERSION }} \
+            --cache-to   type=gha,mode=max,scope=pgaf-debian-pg${{ matrix.PGVERSION }} \
             --build-arg PGVERSION=${{ matrix.PGVERSION }} \
-            --build-arg CITUSTAG=${CITUSTAG} \
+            --build-arg CITUSTAG=${{ steps.citustag.outputs.CITUSTAG }} \
             --target debian \
             -t pgaf:debian-pg${{ matrix.PGVERSION }} \
+            --load \
             .
 
       - name: Save images to tarballs
         run: |
           docker save pgaf:run-pg${{ matrix.PGVERSION }} \
             | gzip > /tmp/pgaf-run-pg${{ matrix.PGVERSION }}.tar.gz
+          docker save pgaf:prebuilt-pg${{ matrix.PGVERSION }} \
+            | gzip > /tmp/pgaf-prebuilt-pg${{ matrix.PGVERSION }}.tar.gz
           docker save pgaf:debian-pg${{ matrix.PGVERSION }} \
             | gzip > /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
 
@@ -96,6 +131,13 @@ jobs:
           path: /tmp/pgaf-run-pg${{ matrix.PGVERSION }}.tar.gz
           retention-days: 1
 
+      - name: Upload prebuilt image artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: pgaf-prebuilt-image-pg${{ matrix.PGVERSION }}
+          path: /tmp/pgaf-prebuilt-pg${{ matrix.PGVERSION }}.tar.gz
+          retention-days: 1
+
       - name: Upload debian image artifact
         uses: actions/upload-artifact@v7.0.1
         with:
@@ -104,7 +146,7 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
-  # Build the pgaf:pgaftest image once from the PG17 build image.
+  # Build the pgaf:pgaftest image once from the PG18 build image.
   # The Dockerfile pgaftest target bundles the pgaftest binary together with
   # its runtime dependencies (libpq5 from PGDG, docker-ce-cli, and the
   # docker-compose-plugin) so that test jobs run pgaftest inside this
@@ -125,13 +167,22 @@ jobs:
       - name: Generate git-version.h
         run: make version
 
+      - name: Set up Docker BuildKit
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
       - name: Build pgaf:pgaftest image (PG${{ env.PGVERSION }})
         run: |
-          docker build \
+          docker buildx build \
+            --cache-from type=gha,scope=pgaf-run-pg${{ env.PGVERSION }} \
+            --cache-from type=gha,scope=pgaf-pgaftest \
+            --cache-to   type=gha,mode=max,scope=pgaf-pgaftest \
             --build-arg PGVERSION=${{ env.PGVERSION }} \
             --build-arg CITUSTAG=v13.2.0 \
             --target pgaftest \
             -t pgaf:pgaftest \
+            --load \
             .
 
       - name: Save image to tarball
@@ -203,6 +254,18 @@ jobs:
           # Alias to the name pgaftest expects via PGAF_IMAGE
           docker tag pgaf:run-pg${{ matrix.PGVERSION }} pgaf:run
 
+      - name: Download pgaf:prebuilt image (PG${{ matrix.PGVERSION }})
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: pgaf-prebuilt-image-pg${{ matrix.PGVERSION }}
+          path: /tmp
+
+      - name: Load pgaf:prebuilt image into Docker
+        run: |
+          docker load < /tmp/pgaf-prebuilt-pg${{ matrix.PGVERSION }}.tar.gz
+          # Alias so pgaftest can find it via PGAF_PREBUILT_IMAGE=pgaf:prebuilt
+          docker tag pgaf:prebuilt-pg${{ matrix.PGVERSION }} pgaf:prebuilt
+
       - name: Download pgaf:debian image (PG${{ matrix.PGVERSION }})
         if: matrix.schedule == 'node'
         uses: actions/download-artifact@v8.0.1
@@ -238,6 +301,7 @@ jobs:
             -v "$(pwd)":/work:ro \
             -w /work \
             -e PGAF_IMAGE=pgaf:run \
+            -e PGAF_PREBUILT_IMAGE=pgaf:prebuilt \
             -e PGVERSION=${{ matrix.PGVERSION }} \
             -e PGAF_DEBIAN_IMAGE=${{ matrix.schedule == 'node' && 'pgaf:debian' || '' }} \
             -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \

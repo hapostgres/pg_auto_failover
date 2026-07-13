@@ -34,6 +34,8 @@
 
 static int cli_node_run_getopts(int argc, char **argv);
 static void cli_node_run(int argc, char **argv);
+static int cli_node_init_getopts(int argc, char **argv);
+static void cli_node_init(int argc, char **argv);
 static int cli_node_apply_getopts(int argc, char **argv);
 static void cli_node_apply(int argc, char **argv);
 static int cli_node_start_getopts(int argc, char **argv);
@@ -53,6 +55,21 @@ static CommandLine node_run_command =
 		"               (default: " PG_AUTOCTL_NODESPEC_PATH ")\n",
 		cli_node_run_getopts,
 		cli_node_run);
+
+static CommandLine node_init_command =
+	make_command(
+		"init",
+		"Initialize a node's PGDATA from a pg_autoctl_node.ini file (no --run)",
+		"<file.ini>",
+		"  <file.ini>   path to the pg_autoctl_node.ini file\n"
+		"\n"
+		"  Runs `pg_autoctl create <kind> ...` without --run, so that the\n"
+		"  Postgres data directory is initialized (and the monitor registered)\n"
+		"  without starting the supervisor.  Useful in Dockerfile stages to\n"
+		"  pre-bake initdb into an image layer.  For a monitor node, no external\n"
+		"  dependencies are needed.  For data nodes the monitor must be reachable.\n",
+		cli_node_init_getopts,
+		cli_node_init);
 
 static CommandLine node_apply_command =
 	make_command(
@@ -93,6 +110,7 @@ static CommandLine node_check_command =
 
 static CommandLine *node_subcommands[] = {
 	&node_run_command,
+	&node_init_command,
 	&node_apply_command,
 	&node_start_command,
 	&node_show_command,
@@ -285,6 +303,119 @@ cli_node_run(int argc, char **argv)
 			appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
 		}
 		log_info("pg_autoctl node run: %s", cmd->data);
+		destroyPQExpBuffer(cmd);
+	}
+
+	execv(args[0], args);
+
+	/* If we get here execv failed */
+	log_fatal("execv(\"%s\"): %m", args[0]);
+	exit(EXIT_CODE_INTERNAL_ERROR);
+}
+
+
+/* -----------------------------------------------------------------------
+ * pg_autoctl node init <file>
+ *
+ * Like node run, but runs `pg_autoctl create <kind> ...` without --run.
+ * The node's PGDATA is initialized (and the monitor is registered) without
+ * starting the supervisor.  Intended for Dockerfile stages that pre-bake
+ * initdb into a named image layer so that test startup skips the slow
+ * initdb + registration step.
+ *
+ * For the monitor node this is fully self-contained.  For data nodes the
+ * monitor must be reachable during the init step.
+ * ----------------------------------------------------------------------- */
+static int
+cli_node_init_getopts(int argc, char **argv)
+{
+	if (argc > 1 && argv[1][0] != '-')
+	{
+		strlcpy(nodeSpecPath, argv[1], sizeof(nodeSpecPath));
+	}
+	else
+	{
+		strlcpy(nodeSpecPath, PG_AUTOCTL_NODESPEC_PATH, sizeof(nodeSpecPath));
+	}
+
+	return 0;
+}
+
+
+static void
+cli_node_init(int argc, char **argv)
+{
+	NodeSpec spec = { 0 };
+	char *args[40];
+	int nargs;
+
+	if (!nodespec_read(nodeSpecPath, &spec))
+	{
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	char cfgPath[MAXPGPATH];
+
+	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
+	{
+		sformat(cfgPath, sizeof(cfgPath), "%s/pg_autoctl.cfg", spec.pgdata);
+	}
+
+	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata) && file_exists(cfgPath))
+	{
+		log_info("Node already initialized at \"%s\"; nothing to do", spec.pgdata);
+		exit(0);
+	}
+
+	/*
+	 * Build the same argv as node run, but nodespec_create_argv always appends
+	 * --run.  We build the argv and drop the final --run entry so that
+	 * pg_autoctl create <kind> returns after initialization, without starting
+	 * the supervisor.
+	 */
+	nargs = nodespec_create_argv(&spec, pg_autoctl_program, args, 32);
+	if (nargs < 0)
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* Drop the trailing "--run" that nodespec_create_argv always appends. */
+	if (nargs >= 2 && strcmp(args[nargs - 1], "--run") == 0)
+	{
+		args[nargs - 1] = NULL;
+		nargs--;
+	}
+
+	/* Log the command (masking passwords). */
+	{
+		PQExpBuffer cmd = createPQExpBuffer();
+		static const char *pwFlags[] = {
+			"--monitor-password",
+			"--replication-password",
+			"--autoctl-node-password",
+			NULL
+		};
+		for (int i = 0; i < nargs; i++)
+		{
+			if (i > 0)
+			{
+				appendPQExpBufferChar(cmd, ' ');
+			}
+			bool maskThis = false;
+			if (i > 0)
+			{
+				for (int k = 0; pwFlags[k]; k++)
+				{
+					if (strcmp(args[i - 1], pwFlags[k]) == 0)
+					{
+						maskThis = true;
+						break;
+					}
+				}
+			}
+			appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
+		}
+		log_info("pg_autoctl node init: %s", cmd->data);
 		destroyPQExpBuffer(cmd);
 	}
 

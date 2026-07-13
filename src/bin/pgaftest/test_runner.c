@@ -3688,6 +3688,57 @@ runner_wait_for_monitor(TestRunner *r)
 
 
 /* -----------------------------------------------------------------------
+ * runner_print_summary
+ *
+ * Print a pg_regress-style per-step result table to stderr after the
+ * teardown block completes.  Called once at the end of runner_run().
+ * ----------------------------------------------------------------------- */
+static void
+runner_print_summary(const TestRunner *r)
+{
+	if (r->stepResultCount == 0)
+	{
+		return;
+	}
+
+	/* compute column width: longest name, minimum 20 */
+	int maxNameLen = 20;
+	for (int i = 0; i < r->stepResultCount; i++)
+	{
+		int len = (int) strlen(r->stepResults[i].name);
+		if (len > maxNameLen)
+		{
+			maxNameLen = len;
+		}
+	}
+
+	int failCount = 0;
+	for (int i = 0; i < r->stepResultCount; i++)
+	{
+		const char *name = r->stepResults[i].name;
+		bool passed = r->stepResults[i].passed;
+		long ms = r->stepResults[i].elapsed_ms;
+		const char *result = passed ? "ok" : "FAILED";
+
+		if (!passed)
+		{
+			failCount++;
+		}
+
+		fprintf(stderr, "test %-*s ... %-8s (%6ld ms)\n",
+				maxNameLen, name, result, ms);
+	}
+
+	if (failCount > 0)
+	{
+		fprintf(stderr, "\n%d test%s failed.\n",
+				failCount,
+				failCount == 1 ? "" : "s");
+	}
+}
+
+
+/* -----------------------------------------------------------------------
  * Public API
  * ----------------------------------------------------------------------- */
 bool
@@ -3792,7 +3843,27 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 
 		log_info("STEP %d: %s", i + 1, name);
 		char err[512] = "";
-		if (runner_exec_step(&r, step, err, sizeof(err), i + 1))
+
+		struct timespec t0, t1;
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+		bool passed = runner_exec_step(&r, step, err, sizeof(err), i + 1);
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+
+		long elapsed_ms =
+			(t1.tv_sec - t0.tv_sec) * 1000L +
+			(t1.tv_nsec - t0.tv_nsec) / 1000000L;
+
+		if (r.stepResultCount < PGAF_MAX_SEQ)
+		{
+			strlcpy(r.stepResults[r.stepResultCount].name,
+					name,
+					sizeof(r.stepResults[0].name));
+			r.stepResults[r.stepResultCount].passed = passed;
+			r.stepResults[r.stepResultCount].elapsed_ms = elapsed_ms;
+			r.stepResultCount++;
+		}
+
+		if (passed)
 		{
 			tap_ok(&r, name);
 		}
@@ -3813,6 +3884,8 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		log_info("Running teardown block");
 		runner_exec_step(&r, spec->teardown, err, sizeof(err), 0);
 	}
+
+	runner_print_summary(&r);
 
 	/* compose lifecycle is owned by the host — do not call compose_down here */
 	return allPassed;
