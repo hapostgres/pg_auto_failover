@@ -567,31 +567,21 @@ compose_gen_write(TestCluster *cluster,
 
 		fformat(f,
 				"    command: [\"pg_autoctl\", \"node\", \"run\","
-				" \"" NODE_INI_PATH "\"]\
-"
-				"    stop_grace_period: 60s\
-\
-");
+				" \"" NODE_INI_PATH "\"]\n"
+									"    stop_grace_period: 60s\n\n");
 
 		/*
 		 * Monitor healthcheck: data nodes use depends_on service_healthy so
 		 * they do not start until the monitor is fully initialised.
 		 */
 		fformat(f,
-				"    healthcheck:\
-"
+				"    healthcheck:\n"
 				"      test: [\"CMD\", \"pg_autoctl\", \"status\","
-				" \"--pgdata\", \"%s\"]\
-"
-				"      interval: 2s\
-"
-				"      timeout: 5s\
-"
-				"      retries: 150\
-"
-				"      start_period: 60s\
-\
-",
+				" \"--pgdata\", \"%s\"]\n"
+				"      interval: 2s\n"
+				"      timeout: 5s\n"
+				"      retries: 150\n"
+				"      start_period: 60s\n\n",
 				monitor_pgdata);
 	}
 
@@ -636,11 +626,8 @@ compose_gen_write(TestCluster *cluster,
 				cluster->secondMonitorHostPort);
 		fformat(f,
 				"    command: [\"pg_autoctl\", \"node\", \"run\","
-				" \"" NODE_INI_PATH "\"]\
-"
-				"    stop_grace_period: 60s\
-\
-");
+				" \"" NODE_INI_PATH "\"]\n"
+									"    stop_grace_period: 60s\n\n");
 	}
 
 	/* ---- data nodes — iterate all formations ---- */
@@ -723,10 +710,8 @@ compose_gen_write(TestCluster *cluster,
 
 			fformat(f,
 					"    command: [\"pg_autoctl\", \"node\", \"run\","
-					" \"" NODE_INI_PATH "\"]\
-"
-					"    stop_grace_period: 60s\
-");
+					" \"" NODE_INI_PATH "\"]\n"
+										"    stop_grace_period: 60s\n");
 
 			/*
 			 * With a monitor: the first data node gets a healthcheck so that
