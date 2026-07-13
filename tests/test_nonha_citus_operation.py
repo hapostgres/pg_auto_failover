@@ -83,7 +83,12 @@ def test_003_init_workers():
 def test_004_create_distributed_table():
     assert coordinator1a.wait_until_pg_is_running()
     coordinator1a.run_sql_query("CREATE TABLE t1 (a int)")
-    coordinator1a.run_sql_query("SELECT create_distributed_table('t1', 'a')")
+    # create_distributed_table contacts each worker node; a worker may still
+    # be initialising at the Citus level even after its pg_autoctl state
+    # reached 'single'.  Retry for up to 30s on transient connectivity errors.
+    coordinator1a.run_sql_query_retry(
+        "SELECT create_distributed_table('t1', 'a')", timeout=30
+    )
     coordinator1a.run_sql_query("INSERT INTO t1 VALUES (1), (2)")
 
 

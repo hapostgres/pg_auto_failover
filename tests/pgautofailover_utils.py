@@ -5,6 +5,7 @@ import shutil
 import time
 import tests.network as network
 import psycopg2
+import psycopg2.errors
 import subprocess
 import datetime as dt
 from collections import namedtuple
@@ -417,6 +418,27 @@ class PGNode(QueryRunner):
 
     def run_sql_query(self, query, *args):
         return super().run_sql_query(query, False, *args)
+
+    def run_sql_query_retry(self, query, *args, timeout=30):
+        """
+        Like run_sql_query but retries on transient connectivity errors such as
+        "the database system is starting up" (ERRCODE 57P03, CannotConnectNow)
+        or plain OperationalError (connection refused / reset).  Retries for up
+        to timeout seconds with 0.5s back-off.
+        """
+        deadline = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while True:
+            try:
+                return self.run_sql_query(query, *args)
+            except (psycopg2.OperationalError,
+                    psycopg2.errors.CannotConnectNow) as e:
+                if dt.datetime.now() >= deadline:
+                    raise
+                print(
+                    "transient connectivity error on %s (%s), retrying ..."
+                    % (self.datadir, e)
+                )
+                time.sleep(0.5)
 
     def pg_config_get(self, settings):
         """
@@ -985,12 +1007,22 @@ class StatefulNode:
         target_state,
         timeout=STATE_CHANGE_TIMEOUT,
         sleep_time=POLLING_INTERVAL,
+        or_state=None,
     ):
         """
         Waits until this data node is assigned the target state. Typically used
         when the node has been stopped or failed and we want to check the
         monitor FSM.
+
+        Pass or_state to accept either target_state or or_state as success —
+        useful when the FSM can skip through a transient state faster than the
+        poll interval (e.g. draining vs demote_timeout).
         """
+        target_states = {target_state}
+        if or_state is not None:
+            target_states.add(or_state)
+
+        label = " or ".join(sorted(target_states))
         prev_state = None
         wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
 
@@ -1004,7 +1036,7 @@ class StatefulNode:
 
             # only log the state if it has changed
             if assigned_state != prev_state:
-                if assigned_state == target_state:
+                if assigned_state in target_states:
                     print(
                         "assigned state of %s is '%s', done waiting"
                         % (self.datadir, assigned_state)
@@ -1012,20 +1044,20 @@ class StatefulNode:
                 else:
                     print(
                         "assigned state of %s is '%s', waiting for '%s' ..."
-                        % (self.datadir, assigned_state, target_state)
+                        % (self.datadir, assigned_state, label)
                     )
 
-            if assigned_state == target_state:
+            if assigned_state in target_states:
                 return True
 
             prev_state = assigned_state
 
         print(
             "%s didn't reach %s after %d seconds"
-            % (self.logger_name(), target_state, timeout)
+            % (self.logger_name(), label, timeout)
         )
         error_msg = (
-            f"{self.logger_name()} failed to reach {target_state} "
+            f"{self.logger_name()} failed to reach {label} "
             f"after {timeout} seconds\n"
         )
         self.print_debug_logs()
@@ -1633,7 +1665,7 @@ class DataNode(PGNode, StatefulNode):
             self.print_debug_logs()
             raise e
 
-    def has_needed_replication_slots(self):
+    def has_needed_replication_slots(self, retry_timeout=5):
         """
         Each node is expected to maintain a slot for each of the other nodes
         the primary through streaming replication, the secondary(s) manually
@@ -1642,8 +1674,24 @@ class DataNode(PGNode, StatefulNode):
         Postgres 10 lacks the function pg_replication_slot_advance() so when
         the local Postgres is version 10 we don't create any replication
         slot on the standby servers.
+
+        A newly-promoted or rejoined node can transiently reject connections
+        right after the FSM state converges.  Retry for up to retry_timeout
+        seconds on any connectivity error before surfacing the exception.
         """
-        if self.pgmajor() == 10:
+        deadline = dt.datetime.now() + dt.timedelta(seconds=retry_timeout)
+        while True:
+            try:
+                pgmajor = self.pgmajor()
+                break
+            except psycopg2.OperationalError:
+                if dt.datetime.now() >= deadline:
+                    raise
+                time.sleep(0.5)
+                self._pgversion = None
+                self._pgmajor = None
+
+        if pgmajor == 10:
             return True
 
         hostname = str(self.vnode.address)
