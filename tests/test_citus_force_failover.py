@@ -136,6 +136,11 @@ def test_004_fail_while_transaction_is_in_progress():
     conn.close()
 
 
+def test_004b_drop_table():
+    coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
+    coordinator1b.run_sql_query("DROP TABLE t1")
+
+
 def test_005_drop_primary_worker():
     worker2a.fail()
     # can't drop a worker node with shard placements, wait until failover
