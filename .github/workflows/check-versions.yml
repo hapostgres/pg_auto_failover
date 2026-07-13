@@ -5,7 +5,7 @@ name: Check base image versions
 # triggers a forced rebuild of the base image.
 #
 # Checks:
-#   - apt.postgresql.org: latest available version for PG 14–19
+#   - apt.postgresql.org: latest available version for PG 14–17
 #   - github.com/citusdata/citus: latest release in each supported series
 #
 # The base image stores the Citus tags it was built with as Docker
@@ -55,7 +55,7 @@ jobs:
 
           # Extract labels via docker inspect (needs a pull)
           docker pull "$IMAGE" --quiet
-          for pg in 14 15 16 17 18 19; do
+          for pg in 14 15 16 17; do
             val=$(docker inspect "$IMAGE" \
               --format "{{ index .Config.Labels \"org.pgaf.citustag.${pg}\" }}" 2>/dev/null || echo "")
             echo "CURRENT_CITUSTAG_${pg}=${val}" >> "$GITHUB_OUTPUT"
@@ -88,20 +88,17 @@ jobs:
 
           LATEST_12=$(latest_in_series "v12.")
           LATEST_13=$(latest_in_series "v13.")
-          LATEST_14=$(latest_in_series "v14.")
 
           # Map PG versions to series
-          # PG14,15 → v12.x   PG16,17 → v13.x   PG18 → v14.x   PG19 → none
+          # PG14,15 → v12.x   PG16,17 → v13.x
           echo "LATEST_CITUSTAG_14=${LATEST_12}" >> "$GITHUB_OUTPUT"
           echo "LATEST_CITUSTAG_15=${LATEST_12}" >> "$GITHUB_OUTPUT"
           echo "LATEST_CITUSTAG_16=${LATEST_13}" >> "$GITHUB_OUTPUT"
           echo "LATEST_CITUSTAG_17=${LATEST_13}" >> "$GITHUB_OUTPUT"
-          echo "LATEST_CITUSTAG_18=${LATEST_14}" >> "$GITHUB_OUTPUT"
-          echo "LATEST_CITUSTAG_19=none"         >> "$GITHUB_OUTPUT"
 
           # Detect any mismatch — read current tags from the pulled image labels
           CHANGED=false
-          for pg in 14 15 16 17 18 19; do
+          for pg in 14 15 16 17; do
             current=$(docker inspect "$IMAGE" \
               --format "{{ index .Config.Labels \"org.pgaf.citustag.${pg}\" }}" 2>/dev/null || echo "")
             latest=$(eval echo "\$LATEST_CITUSTAG_${pg}")
@@ -126,7 +123,7 @@ jobs:
           docker run --rm "$IMAGE" bash -c '
             apt-get update -qq 2>/dev/null
             CHANGED=false
-            for pg in 14 15 16 17 18 19; do
+            for pg in 14 15 16 17; do
               installed=$(dpkg-query -W -f="\\${Version}" postgresql-${pg} 2>/dev/null || echo "")
               available=$(apt-cache show postgresql-${pg} 2>/dev/null \
                 | awk "/^Version:/{print \$2; exit}")

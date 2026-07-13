@@ -28,9 +28,7 @@ ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 
 WORKDIR /usr/src/pg_auto_failover
 
-COPY Makefile ./
-COPY Makefile.citus ./
-COPY Makefile.azure* ./
+COPY Makefile Makefile.docker Makefile.installcheck ./
 COPY ./src/ ./src
 COPY ./src/bin/pg_autoctl/git-version.h ./src/bin/pg_autoctl/git-version.h
 
@@ -44,6 +42,9 @@ RUN if [ -d src/bin/pgaftest ]; then \
     fi
 
 RUN make -s clean && make -s install -j$(nproc) BINDIR=/usr/local/bin
+RUN pg_virtualenv -v ${PGVERSION} \
+      -o "shared_preload_libraries=pgautofailover" \
+      make -C src/monitor/ installcheck
 
 # ---------------------------------------------------------------------------
 # test — old Python test runner (kept for compatibility; new tests use pgaftest)

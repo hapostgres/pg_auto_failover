@@ -46,6 +46,7 @@ RUN apt-get update \
       libpam-dev \
       libreadline-dev \
       libselinux1-dev \
+      libcurl4-gnutls-dev \
       libssl-dev \
       libxml2-dev \
       libxslt1-dev \
@@ -69,7 +70,7 @@ RUN apt-get update \
       postgresql-common \
  && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --break-system-packages nose pytest 'pyroute2>=0.5.17'
+RUN PIP_ROOT_USER_ACTION=ignore pip3 install --break-system-packages nose pytest 'pyroute2>=0.5.17'
 
 # ---------------------------------------------------------------------------
 # PGDG apt repository — all supported major versions in one source line
@@ -78,7 +79,7 @@ RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
       | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
 
 RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] \
-      http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main 14 15 16 17 18 19" \
+      http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main 14 15 16 17" \
       > /etc/apt/sources.list.d/pgdg.list
 
 # Don't create a default cluster on install (we create them explicitly in tests)
@@ -90,8 +91,6 @@ RUN apt-get update \
       postgresql-15            postgresql-server-dev-15 \
       postgresql-16            postgresql-server-dev-16 \
       postgresql-17            postgresql-server-dev-17 \
-      postgresql-18            postgresql-server-dev-18 \
-      postgresql-19            postgresql-server-dev-19 \
  && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
@@ -105,17 +104,13 @@ ARG CITUSTAG_14=v12.1.5
 ARG CITUSTAG_15=v12.1.5
 ARG CITUSTAG_16=v13.2.0
 ARG CITUSTAG_17=v13.2.0
-ARG CITUSTAG_18=v14.1.0
-ARG CITUSTAG_19=none
 
 RUN set -e; \
     for pair in \
         "14:${CITUSTAG_14}" \
         "15:${CITUSTAG_15}" \
         "16:${CITUSTAG_16}" \
-        "17:${CITUSTAG_17}" \
-        "18:${CITUSTAG_18}" \
-        "19:${CITUSTAG_19}"; \
+        "17:${CITUSTAG_17}"; \
     do \
         PG="${pair%%:*}"; \
         TAG="${pair#*:}"; \
@@ -145,12 +140,8 @@ ARG CITUSTAG_14
 ARG CITUSTAG_15
 ARG CITUSTAG_16
 ARG CITUSTAG_17
-ARG CITUSTAG_18
-ARG CITUSTAG_19
 
 LABEL org.pgaf.citustag.14="${CITUSTAG_14}" \
       org.pgaf.citustag.15="${CITUSTAG_15}" \
       org.pgaf.citustag.16="${CITUSTAG_16}" \
-      org.pgaf.citustag.17="${CITUSTAG_17}" \
-      org.pgaf.citustag.18="${CITUSTAG_18}" \
-      org.pgaf.citustag.19="${CITUSTAG_19}"
+      org.pgaf.citustag.17="${CITUSTAG_17}"

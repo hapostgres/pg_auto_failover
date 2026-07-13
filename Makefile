@@ -3,18 +3,7 @@
 
 .DEFAULT_GOAL := all
 
-# Supported PostgreSQL versions:
-PGVERSIONS = 13 14 15 16 17 18
-
-# Default version:
-PGVERSION ?= $(lastword $(PGVERSIONS))
-
-# PostgreSQL cluster option
-# could be "--skip-pg-hba"
-CLUSTER_OPTS = ""
-
-# TODO should be abs_top_dir ?
-TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+include Makefile.docker
 
 # Get pg_auto_failover version from header file
 VERSION_FILE = src/bin/pg_autoctl/git-version.h
@@ -29,62 +18,7 @@ GIT_VERSION := $(shell awk -F '[ "]' '{print $$4}' $(VERSION_FILE))
 endif
 
 #
-# LIST TESTS
-#
-PYTEST = $(shell which pytest || which pytest3)
-
-# Tests for the monitor
-TESTS_MONITOR  = test_extension_update
-TESTS_MONITOR += test_installcheck
-TESTS_MONITOR += test_monitor_disabled
-TESTS_MONITOR += test_replace_monitor
-
-# This could be in TESTS_MULTI, but adding it here optimizes Travis run time
-TESTS_MONITOR += test_multi_alternate_primary_failures
-
-# Tests for single standby
-TESTS_SINGLE  = test_auth
-TESTS_SINGLE += test_basic_operation
-TESTS_SINGLE += test_basic_operation_listen_flag
-TESTS_SINGLE += test_create_run
-TESTS_SINGLE += test_create_standby_with_pgdata
-TESTS_SINGLE += test_ensure
-TESTS_SINGLE += test_skip_pg_hba
-TESTS_SINGLE += test_config_get_set
-
-# Tests for SSL
-TESTS_SSL  = test_enable_ssl
-TESTS_SSL += test_ssl_cert
-TESTS_SSL += test_ssl_self_signed
-
-# This could be in TESTS_SINGLE, but adding it here optimizes Travis run time
-TESTS_SSL += test_debian_clusters
-
-# Tests for multiple standbys
-TESTS_MULTI  = test_multi_async
-TESTS_MULTI += test_multi_ifdown
-TESTS_MULTI += test_multi_maintenance
-TESTS_MULTI += test_multi_standbys
-
-# TEST indicates the testfile to run
-# Included Makefile may define TEST_ARGUMENT (like for citus)
-TEST ?=
-ifeq ($(TEST),)
-	TEST_ARGUMENT = tests/*.py
-else ifeq ($(TEST),multi)
-	TEST_ARGUMENT = $(TESTS_MULTI:%=tests/%.py)
-else ifeq ($(TEST),single)
-	TEST_ARGUMENT = $(TESTS_SINGLE:%=tests/%.py)
-else ifeq ($(TEST),monitor)
-	TEST_ARGUMENT = $(TESTS_MONITOR:%=tests/%.py)
-else ifeq ($(TEST),ssl)
-	TEST_ARGUMENT = $(TESTS_SSL:%=tests/%.py)
-else
-	TEST_ARGUMENT = tests/$(TEST).py
-endif
-
-#
-# Main make targets
+# Main build targets
 #
 .PHONY: all
 all: monitor bin ;
@@ -93,32 +27,26 @@ all: monitor bin ;
 bin: version
 	$(MAKE) -C src/bin/ all
 
-.PHONY: check-monitor
-check: check-monitor ;
+.PHONY: monitor
+monitor:
+	$(MAKE) -C src/monitor/ all
 
-.PHONY: check-monitor
-check-monitor: install-monitor
-	$(MAKE) -C src/monitor/ installcheck
+.PHONY: version
+version: $(VERSION_FILE) ;
 
-# Run SQL regression tests (pg_regress installcheck) inside a Docker container.
-# Defaults to PG16; override with PGVERSION=17 etc.
-# Usage: make installcheck [PGVERSION=16]
-INSTALLCHECK_PGVERSION ?= 16
-.PHONY: installcheck
-installcheck: build-test-pg$(INSTALLCHECK_PGVERSION)
-	docker run --rm \
-	  $(TEST_CONTAINER_NAME):pg$(INSTALLCHECK_PGVERSION) \
-	  bash -c ' \
-	    initdb --auth=trust --username=docker -D /tmp/pgdata && \
-	    printf "shared_preload_libraries = '"'"'pgautofailover'"'"'\n" \
-	      >> /tmp/pgdata/postgresql.conf && \
-	    pg_ctl start -D /tmp/pgdata -l /tmp/pgdata/pg.log -o "-k /tmp -p 5432" && \
-	    sudo chmod -R a+w /usr/src/pg_auto_failover/src/monitor && \
-	    make -C /usr/src/pg_auto_failover/src/monitor installcheck \
-	         PGHOST=/tmp PGPORT=5432 PGUSER=docker \
-	    || { pg_ctl stop -D /tmp/pgdata; exit 1; } && \
-	    pg_ctl stop -D /tmp/pgdata \
-	  '
+$(VERSION_FILE):
+	@echo "#define GIT_VERSION \""$(GIT_VERSION)"\"" > $@
+
+.PHONY: install
+install: install-monitor install-bin ;
+
+.PHONY: install-bin
+install-bin: bin
+	$(MAKE) -C src/bin/ install
+
+.PHONY: install-monitor
+install-monitor: monitor
+	$(MAKE) -C src/monitor/ install
 
 .PHONY: clean
 clean: clean-monitor clean-bin ;
@@ -135,56 +63,34 @@ clean-monitor:
 clean-version:
 	rm -f $(VERSION_FILE)
 
-.PHONY: install
-install: install-monitor install-bin ;
-
-.PHONY: install-bin
-install-bin: bin
-	$(MAKE) -C src/bin/ install
-
-.PHONY: install-monitor
-install-monitor: monitor
-	$(MAKE) -C src/monitor/ install
-
 .PHONY: maintainer-clean
 maintainer-clean: clean-monitor clean-version clean-bin ;
 
-.PHONY: monitor
-monitor:
-	$(MAKE) -C src/monitor/ all
-
-.PHONY: version
-version: $(VERSION_FILE) ;
-
-$(VERSION_FILE):
-	@echo "#define GIT_VERSION \""$(GIT_VERSION)"\"" > $@
-
 #
-# make ci-test; is run on the GitHub Action workflow
+# SQL regression tests (pg_regress installcheck)
 #
-.PHONY: ci-test
-ci-test:
-ifeq ($(TEST),tablespaces)
-	$(MAKE) -C tests/tablespaces run-test
-else
-	$(MAKE) run-test
-endif
+.PHONY: check check-monitor
+check: check-monitor ;
+check-monitor: install-monitor
+	$(MAKE) -C src/monitor/ installcheck
+
+# Run installcheck inside a Docker container using the base image.
+# pg_virtualenv manages the temporary cluster; see Makefile.installcheck.
+# Usage: make installcheck [PGVERSION=17]
+.PHONY: installcheck
+installcheck: version
+	docker run --rm \
+	  -v "$(CURDIR):/usr/src/pg_auto_failover" \
+	  -w /usr/src/pg_auto_failover \
+	  $(BASE) \
+	  make -f Makefile.installcheck installcheck PGVERSION=$(PGVERSION)
 
 #
-# make test; is run from inside the testing Docker image.
+# Python test suite — delegate to tests/Makefile
 #
-.PHONY: test
-test:
-ifeq ($(TEST),tablespaces)
-	$(MAKE) -C tests/tablespaces run-test
-else
-	sudo -E env "PATH=${PATH}" USER=$(shell whoami) \
-		$(PYTEST)				\
-		-v						\
-		-s						\
-		-x						\
-		${TEST_ARGUMENT}
-endif
+.PHONY: test ci-test run-test run-test-prebuilt
+test ci-test run-test run-test-prebuilt:
+	$(MAKE) -C tests $@ PGVERSION=$(PGVERSION) TEST='$(TEST)'
 
 #
 # INDENT/LINT/SPELLCHECK
@@ -203,27 +109,19 @@ CITUS_INDENT_DOCKER = docker run --rm \
 	citus/stylechecker:no-py \
 	citus_indent
 
-# make indent; edits the code when necessary
 .PHONY: indent
 indent:
 	citus_indent
 	black --exclude=ci/tools .
 
-# make docker-indent / make docker-check — use Docker image locally
 .PHONY: docker-indent docker-check
 docker-indent:
 	$(CITUS_INDENT_DOCKER)
 docker-check:
 	$(CITUS_INDENT_DOCKER) --check
 
-# make lint; is an alias for make spellcheck
-# make linting; is an alias for make spellcheck
-.PHONY: lint linting
+.PHONY: lint linting spellcheck
 lint linting: spellcheck ;
-
-# make spellcheck; runs our linting tools without editing the code, only
-# reports compliance with the rules.
-.PHONY: spellcheck
 spellcheck:
 	$(CITUS_INDENT_DOCKER) --check
 	black --exclude=ci/tools --check .
@@ -232,12 +130,10 @@ spellcheck:
 #
 # DOCS
 #
-# Documentation and images
-FSM = docs/fsm.png
-PDF = ./docs/_build/latex/pg_auto_failover.pdf
-
-# make serve-docs uses this port on localhost to expose the web server
+FSM      = docs/fsm.png
+PDF      = ./docs/_build/latex/pg_auto_failover.pdf
 DOCS_PORT = 8000
+PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
 
 .PHONY: man
 man:
@@ -262,259 +158,12 @@ $(FSM): bin
 docs: $(FSM) tikz
 	$(MAKE) -C docs html
 
-.PHONY: build-docs
-build-docs:
-	docker build -t pg_auto_failover:docs -f Dockerfile.docs .
-
-.PHONY: serve-docs
-serve-docs: build-docs
-	docker run --rm -it -p $(DOCS_PORT):8000 pg_auto_failover:docs
-
 .PHONY: tikz
 tikz:
 	$(MAKE) -C docs/tikz all
 
-#
-# DOCKER
-#
-
-CONTAINER_NAME = pg_auto_failover
-BUILD_CONTAINER_NAME = pg_auto_failover_build
-TEST_CONTAINER_NAME = pg_auto_failover_test
-DOCKER_RUN_OPTS = --privileged --rm
-
-#
-# Include Citus only for testing purpose
-#
-ifeq ($(TEST),citus)
-  CITUS=1
-endif
-
-ifeq ($(CITUS),1)
-include Makefile.citus
-endif
-
-# Base image that provides all Postgres versions + Citus builds.
-# Override locally if you've built the base image under a different tag.
-BASE ?= ghcr.io/hapostgres/pg_auto_failover/pgaf-base:bookworm
-
-# We use pg not PG in uppercase in the var name to ease implicit rules matching
-BUILD_ARGS_pg13 = --build-arg PGVERSION=13 --build-arg BASE=$(BASE)
-BUILD_ARGS_pg14 = --build-arg PGVERSION=14 --build-arg BASE=$(BASE)
-BUILD_ARGS_pg15 = --build-arg PGVERSION=15 --build-arg BASE=$(BASE)
-BUILD_ARGS_pg16 = --build-arg PGVERSION=16 --build-arg BASE=$(BASE)
-BUILD_ARGS_pg17 = --build-arg PGVERSION=17 --build-arg BASE=$(BASE)
-BUILD_ARGS_pg18 = --build-arg PGVERSION=18 --build-arg BASE=$(BASE)
-BUILD_ARGS_pg19 = --build-arg PGVERSION=19 --build-arg BASE=$(BASE)
-
-# DOCKER BUILDS
-#
-# make build          — build the 'run' image for every supported PG version
-# make build-pg17     — build the 'run' image for PG 17 only
-# make build-test     — build the 'test' (Python) image for every PG version
-# make build-test-image — build the 'test' image for PGVERSION (default 19)
-
-BUILD_TARGETS       = $(patsubst %,build-pg%,$(PGVERSIONS))
-BUILD_TEST_TARGETS  = $(patsubst %,build-test-pg%,$(PGVERSIONS))
-BUILD_CHECK_TARGETS = $(patsubst %,build-check-pg%,$(PGVERSIONS))
-
-.PHONY: build
-build: $(BUILD_TARGETS) ;
-
-.PHONY: $(BUILD_TARGETS)
-$(BUILD_TARGETS): version
-	docker build \
-	  $(BUILD_ARGS_$(subst build-,,$@)) \
-	  --target run \
-	  -t $(CONTAINER_NAME):$(subst build-,,$@) .
-
-# DOCKER TESTS & CHECKS
-
-.PHONY: build-check
-build-check: $(BUILD_CHECK_TARGETS)
-
-.PHONY: build-test
-build-test: $(BUILD_TEST_TARGETS)
-
-.PHONY: build-test-image
-build-test-image: build-test-pg$(PGVERSION) ;
-
-.PHONY: $(BUILD_TEST_TARGETS)
-$(BUILD_TEST_TARGETS): version
-	docker build \
-	  $(BUILD_ARGS_$(subst build-test-,,$@)) \
-	  --target test \
-	  -t $(TEST_CONTAINER_NAME):$(subst build-test-,,$@) .
-
-.SECONDEXPANSION:
-.PHONY: $(BUILD_CHECK_TARGETS)
-$(BUILD_CHECK_TARGETS): version $$(subst build-check-,build-test-,$$@)
-	docker run --rm \
-	  -t $(TEST_CONTAINER_NAME):$(subst build-check-,,$@) \
-	  pg_autoctl version --json | jq ".pg_version" | xargs echo $(subst build-check-,,$@):
-
-# make run-test; is the main testing entry point used to run tests inside
-# our testing Docker container. The docker container depends on PGVERSION.
-.PHONY: run-test
-run-test: build-test-pg$(PGVERSION)
-	docker run					                \
-		--name $(TEST_CONTAINER_NAME)		    \
-		$(DOCKER_RUN_OPTS)			            \
-		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
-		make -C /usr/src/pg_auto_failover test	\
-		PGVERSION=$(PGVERSION) TEST='${TEST}'
-
-# make run-test-prebuilt; like ci-test but skips the Docker build step.
-# Used in CI after images have been built and loaded by a prior job.
-.PHONY: run-test-prebuilt
-run-test-prebuilt:
-ifeq ($(TEST),tablespaces)
-	$(MAKE) -C tests/tablespaces run-test
-else
-	docker run					                \
-		--name $(TEST_CONTAINER_NAME)		    \
-		$(DOCKER_RUN_OPTS)			            \
-		$(TEST_CONTAINER_NAME):pg$(PGVERSION)   \
-		make -C /usr/src/pg_auto_failover test	\
-		PGVERSION=$(PGVERSION) TEST='${TEST}'
-endif
-
-# make save-test-image; compresses the test image to a .tar.zst archive.
-# Used in CI to pass the built image to downstream test jobs as an artifact.
-.PHONY: save-test-image
-save-test-image:
-	docker save $(TEST_CONTAINER_NAME):pg$(PGVERSION) \
-	  | zstd -T0 -3 > $(TEST_CONTAINER_NAME)-pg$(PGVERSION).tar.zst
-
-# make load-test-image; decompresses and loads a .tar.zst image archive.
-# Used in CI test jobs that download the image from a prior build job.
-.PHONY: load-test-image
-load-test-image:
-	zstd -d --stdout $(TEST_CONTAINER_NAME)-pg$(PGVERSION).tar.zst \
-	  | docker load
-
-#
-# BE INTERACTIVE
-#
-
-FIRST_PGPORT ?= 5500
-
-TMUX_EXTRA_COMMANDS ?= ""
-TMUX_LAYOUT ?= even-vertical	# could be "tiled"
-TMUX_TOP_DIR = ./tmux/pgsql
-TMUX_SCRIPT = ./tmux/script-$(FIRST_PGPORT).tmux
-TMUX_CITUS = ""
-
-# PostgreSQL testing
-## total count of Postgres nodes
-NODES ?= 2
-## count of replication-quorum false nodes
-NODES_ASYNC ?= 0
-## either "50", or "50,50", or "50,50,0" etc
-NODES_PRIOS ?= 50
-## TODO ???
-NODES_SYNC_SB ?= -1
-
-.PHONY: interactive-test
-interactive-test:
-	docker run --name $(CONTAINER_NAME) --rm -ti $(CONTAINER_NAME)
-
-.PHONY: $(TMUX_SCRIPT)
-$(TMUX_SCRIPT): bin
-	mkdir -p $(TMUX_TOP_DIR)
-	$(PG_AUTOCTL) do tmux script          \
-         --root $(TMUX_TOP_DIR)           \
-         --first-pgport $(FIRST_PGPORT)   \
-         --nodes $(NODES)                 \
-         --async-nodes $(NODES_ASYNC)     \
-         --node-priorities $(NODES_PRIOS) \
-         --sync-standbys $(NODES_SYNC_SB) \
-         $(TMUX_CITUS)                    \
-         $(CLUSTER_OPTS)                  \
-         --binpath $(BINPATH)             \
-		 --layout $(TMUX_LAYOUT) > $@
-
-.PHONY: tmux-script
-tmux-script: $(TMUX_SCRIPT) ;
-
-.PHONY: tmux-clean
-tmux-clean: bin
-	$(PG_AUTOCTL) do tmux clean           \
-         --root $(TMUX_TOP_DIR)           \
-         --first-pgport $(FIRST_PGPORT)   \
-         --nodes $(NODES)                 \
-         $(TMUX_CITUS)                    \
-         $(CLUSTER_OPTS)
-
-.PHONY: tmux-session
-tmux-session: bin
-	$(PG_AUTOCTL) do tmux session         \
-         --root $(TMUX_TOP_DIR)           \
-         --first-pgport $(FIRST_PGPORT)   \
-         --nodes $(NODES)                 \
-         --async-nodes $(NODES_ASYNC)     \
-         --node-priorities $(NODES_PRIOS) \
-         --sync-standbys $(NODES_SYNC_SB) \
-         $(TMUX_CITUS)                    \
-         $(CLUSTER_OPTS)                  \
-         --binpath $(BINPATH)             \
-         --layout $(TMUX_LAYOUT)
-
-.PHONY: tmux-compose-session
-tmux-compose-session:
-	$(PG_AUTOCTL) do tmux compose session \
-         --root $(TMUX_TOP_DIR)           \
-         --first-pgport $(FIRST_PGPORT)   \
-         --nodes $(NODES)                 \
-         --async-nodes $(NODES_ASYNC)     \
-         --node-priorities $(NODES_PRIOS) \
-         --sync-standbys $(NODES_SYNC_SB) \
-         $(TMUX_CITUS)                    \
-         $(CLUSTER_OPTS)                  \
-         --binpath $(BINPATH)             \
-         --layout $(TMUX_LAYOUT)
-
-.PHONY: cluster
-cluster: install tmux-clean
-	# This is explicitly not a target, otherwise when make uses multiple jobs
-	# tmux-clean and tmux-session can have a race condidition where tmux-clean
-	# removes the files that are just created by tmux-session.
-	$(MAKE) tmux-session
-
-.PHONY: compose
-compose:
-	$(MAKE) tmux-compose-session
-
-# Command line with DEBUG facilities
-VALGRIND ?=
-ifeq ($(VALGRIND),)
-	BINPATH = ./src/bin/pg_autoctl/pg_autoctl
-	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 ./src/bin/pg_autoctl/pg_autoctl
-else
-	BINPATH = $(abspath $(TOP))/src/tools/pg_autoctl.valgrind
-	PG_AUTOCTL = PG_AUTOCTL_DEBUG=1 PG_AUTOCTL_DEBUG_BIN_PATH="$(BINPATH)" ./src/tools/pg_autoctl.valgrind
-endif
-
-VALGRIND_SESSION_TARGETS  = $(patsubst %,valgrind-session-pg%,$(PGVERSIONS))
-
-.SECONDEXPANSION:
-.PHONY: $(VALGRIND_SESSION_TARGETS)
-$(VALGRIND_SESSION_TARGETS): version $$(subst valgrind-session-,build-test-,$$@)
-	docker run
-	  --name $(TEST_CONTAINER_NAME)                \
-	  $(DOCKER_RUN_OPTS) -it                       \
-	  $(TEST_CONTAINER_NAME):$(subst valgrind-session-,,$@)        \
-	  make -C /usr/src/pg_auto_failover            \
-	    VALGRIND=1                                 \
-	    TMUX_TOP_DIR=/tmp/tmux                     \
-	    NODES=$(NODES)                             \
-	    NODES_ASYNC=$(NODES_ASYNC)                 \
-	    NODES_PRIOS=$(NODES_PRIOS)                 \
-	    NODES_SYNC_SB=$(NODES_SYNC_SB)             \
-	    CLUSTER_OPTS=$(CLUSTER_OPTS)               \
-	    TMUX_EXTRA_COMMANDS=$(TMUX_EXTRA_COMMANDS) \
-	    TMUX_LAYOUT=$(TMUX_LAYOUT)                 \
-	    tmux-session
-
-.PHONY: valgrind-session
-valgrind-session: valgrind-session-pg$(PGVERSION)
+.PHONY: build-docs serve-docs
+build-docs:
+	docker build -t pg_auto_failover:docs -f Dockerfile.docs .
+serve-docs: build-docs
+	docker run --rm -it -p $(DOCS_PORT):8000 pg_auto_failover:docs
