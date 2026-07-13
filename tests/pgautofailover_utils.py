@@ -440,6 +440,31 @@ class PGNode(QueryRunner):
                 )
                 time.sleep(0.5)
 
+    def citus_run_ddl_after_sync(self, query, timeout=60):
+        """
+        Run a Citus DDL statement (e.g. DROP TABLE on a distributed table)
+        after waiting for metadata to be in sync on all nodes.
+
+        wait_until_metadata_sync() covers the coordinator's view of sync, but
+        a recently-rejoined worker node may still be applying metadata updates
+        when the coordinator considers sync complete.  If the DDL fails with
+        ObjectNotInPrerequisiteState ("is a metadata node, but is out of sync"),
+        wait again and retry the DDL for up to timeout seconds.
+        """
+        deadline = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while True:
+            self.run_sql_query("select public.wait_until_metadata_sync()")
+            try:
+                return self.run_sql_query(query)
+            except psycopg2.errors.ObjectNotInPrerequisiteState as e:
+                if dt.datetime.now() >= deadline:
+                    raise
+                print(
+                    "Citus metadata not yet in sync on %s (%s), retrying ..."
+                    % (self.datadir, e)
+                )
+                time.sleep(1)
+
     def pg_config_get(self, settings):
         """
         Returns the current value of the given postgres settings"

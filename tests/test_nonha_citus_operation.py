@@ -142,8 +142,7 @@ def test_007_fail_when_disabling_with_secondaries():
 
 
 def test_007b_drop_table():
-    coordinator1a.run_sql_query("select public.wait_until_metadata_sync()")
-    coordinator1a.run_sql_query("DROP TABLE t1")
+    coordinator1a.citus_run_ddl_after_sync("DROP TABLE t1")
 
 
 def test_008_shutdown_primaries():

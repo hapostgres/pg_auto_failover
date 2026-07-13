@@ -293,5 +293,4 @@ def test_011_start_worker2b_again():
 
 
 def test_012_drop_table():
-    coordinator1a.run_sql_query("select public.wait_until_metadata_sync()")
-    coordinator1a.run_sql_query("DROP TABLE t1")
+    coordinator1a.citus_run_ddl_after_sync("DROP TABLE t1")
