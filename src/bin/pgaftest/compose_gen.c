@@ -1275,7 +1275,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 		}
 		if (node->launchDeferred)
 		{
-			fformat(f, "mode = deferred\n");
+			fformat(f, "run = deferred\n");
 		}
 	}
 

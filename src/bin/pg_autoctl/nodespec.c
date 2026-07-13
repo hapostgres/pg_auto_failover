@@ -142,8 +142,8 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(spec->ssl_key_file),
 								   spec->ssl_key_file, ""),
 
-		/* [launch] — optional section; mode=deferred delays node run */
-		make_strbuf_option_default("launch", "mode", NULL, false,
+		/* [launch] — optional section; run=deferred delays node run */
+		make_strbuf_option_default("launch", "run", NULL, false,
 								   sizeof(launchModeStr), launchModeStr,
 								   "immediate"),
 		make_strbuf_option_default("launch", "create", NULL, false,
@@ -440,7 +440,7 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 		}
 		if (spec->launchDeferred)
 		{
-			fformat(out, "mode = deferred\n");
+			fformat(out, "run = deferred\n");
 		}
 	}
 
@@ -711,7 +711,7 @@ nodespec_write_to_path(const NodeSpec *spec, const char *path)
  *   - replication_quorum   → monitor_set_node_replication_quorum()
  *
  * The [launch] mode field is handled separately by pg_autoctl node start.
- * Applying a spec with mode=deferred to an already-started node is a
+ * Applying a spec with run=deferred to an already-started node is a
  * non-fatal warning (ignored).
  *
  * Immutable fields (kind, pgdata, ssl, auth, pg_hba_lan) are not checked here.
