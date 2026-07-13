@@ -502,17 +502,26 @@ cli_node_run(int argc, char **argv)
 			 * Run as root (via sudo) so pg_createcluster can create the cluster
 			 * owned by the postgres system user, exactly as a real Debian install
 			 * would.  The container's sudoers grants NOPASSWD to the docker user.
+			 *
+			 * --allow-group-access is passed through to initdb, which sets PGDATA
+			 * to mode 750 and data files to 640/750.  The docker user (a member of
+			 * the postgres group) can then read and write the cluster without any
+			 * subsequent chmod step.  pg_autoctl's sibling backup directory is
+			 * created under /var/lib/postgresql/<ver>/ which pg_createcluster sets
+			 * to 0755, so group members can write there too.
 			 */
 			char *pgcc_args[] = {
 				"sudo", "pg_createcluster",
 				pgmajor_str,
 				spec.debianCluster,
 				"--",
+				"--allow-group-access",
 				"--auth-local", "trust",
 				"--auth-host", "trust",
 				NULL
 			};
-			log_info("pg_autoctl node run: pg_createcluster %d %s",
+			log_info("pg_autoctl node run: pg_createcluster %d %s "
+					 "(--allow-group-access)",
 					 pgmajor, spec.debianCluster);
 
 			pid_t pid = fork();
@@ -533,53 +542,6 @@ cli_node_run(int argc, char **argv)
 			{
 				log_error("pg_createcluster exited with status %d",
 						  WIFEXITED(st) ? WEXITSTATUS(st) : -1);
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-
-			/*
-			 * pg_createcluster creates everything under /var/lib/postgresql/<ver>/
-			 * owned by postgres:postgres with mode 700 (PGDATA) or 755 (parent).
-			 * pg_autoctl also needs to create sibling directories like
-			 * /var/lib/postgresql/<ver>/backup/node_N/, so make the entire version
-			 * directory group-accessible so the docker user (postgres group member)
-			 * can write there.
-			 */
-			char pgverdir[MAXPGPATH];
-			const char *pgverend = strrchr(spec.pgdata, '/');
-			if (pgverend && pgverend > spec.pgdata)
-			{
-				sformat(pgverdir, sizeof(pgverdir), "%.*s",
-						(int) (pgverend - spec.pgdata), spec.pgdata);
-			}
-			else
-			{
-				strlcpy(pgverdir, spec.pgdata, sizeof(pgverdir));
-			}
-
-			char *chmod_args[] = {
-				"sudo", "chmod", "-R", "g+rwX",
-				pgverdir,
-				NULL
-			};
-			pid_t cpid = fork();
-			if (cpid < 0)
-			{
-				log_fatal("fork: %m");
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-			if (cpid == 0)
-			{
-				execvp("sudo", chmod_args);
-				_exit(127);
-			}
-			int cst = 0;
-			while (waitpid(cpid, &cst, 0) < 0 && errno == EINTR)
-			{ }
-			if (!WIFEXITED(cst) || WEXITSTATUS(cst) != 0)
-			{
-				log_error("chmod -R g+rwX \"%s\" exited with status %d",
-						  pgverdir,
-						  WIFEXITED(cst) ? WEXITSTATUS(cst) : -1);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 		}
