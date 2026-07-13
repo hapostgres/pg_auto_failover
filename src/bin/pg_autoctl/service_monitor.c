@@ -10,7 +10,6 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <sys/select.h>
-#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -46,7 +45,8 @@ static NodeSpec post_init_spec = { 0 };
 
 
 /*
- * service_post_init_start forks the post-init child that creates non-default
+ * service_post_init_start forks and execs `pg_autoctl node post-init` which
+ * waits for local Postgres to be ready and then creates the non-default
  * formations declared in the node spec.  Called once by the supervisor at
  * startup; RP_TEMPORARY ensures the supervisor never restarts it.
  */
@@ -71,73 +71,19 @@ service_post_init_start(void *ctx, pid_t *pid)
 		case 0:
 		{
 			/* Detach so a SIGINT to the parent process group does not kill us
-			 * before we have finished creating formations. */
+			 * before formations have been created. */
 			(void) setsid();
 
-			log_info("post-init: will create %d formation(s) once monitor is ready",
-					 spec->formationCount);
+			char *argv_f[] = {
+				(char *) pg_autoctl_program,
+				"node", "post-init",
+				"--pgdata", (char *) spec->pgdata,
+				NULL
+			};
 
-			for (int fi = 0; fi < spec->formationCount; fi++)
-			{
-				const char *fname = spec->formationNames[fi];
-				const char *fkind = spec->formationKinds[fi][0]
-									? spec->formationKinds[fi] : "pgsql";
-
-				log_info(
-					"post-init: creating formation \"%s\" (kind=%s, secondary=%s)",
-					fname, fkind,
-					spec->formationDisableSecondary[fi] ? "disabled" : "enabled");
-
-				int rc = 1;
-				for (int attempts = 0; attempts < 60 && rc != 0; attempts++)
-				{
-					if (attempts > 0)
-					{
-						pg_usleep(2000 * 1000); /* 2 s between retries */
-					}
-
-					char *argv_f[16];
-					int ai = 0;
-					argv_f[ai++] = (char *) pg_autoctl_program;
-					argv_f[ai++] = "create";
-					argv_f[ai++] = "formation";
-					argv_f[ai++] = "--pgdata";
-					argv_f[ai++] = (char *) spec->pgdata;
-					argv_f[ai++] = "--formation";
-					argv_f[ai++] = (char *) fname;
-					argv_f[ai++] = "--kind";
-					argv_f[ai++] = (char *) fkind;
-					if (spec->formationDisableSecondary[fi])
-					{
-						argv_f[ai++] = "--disable-secondary";
-					}
-					argv_f[ai] = NULL;
-
-					pid_t cpid = fork();
-					if (cpid < 0)
-					{
-						log_fatal("post-init: fork: %m");
-						_exit(1);
-					}
-					if (cpid == 0)
-					{
-						execv(argv_f[0], argv_f);
-						_exit(127);
-					}
-					int st = 0;
-					while (waitpid(cpid, &st, 0) < 0 && errno == EINTR)
-					{ }
-					rc = (WIFEXITED(st) && WEXITSTATUS(st) == 0) ? 0 : 1;
-				}
-
-				if (rc != 0)
-				{
-					log_error("post-init: failed to create formation \"%s\"", fname);
-				}
-			}
-
-			log_info("post-init: done");
-			_exit(0);
+			execv(argv_f[0], argv_f);
+			log_fatal("execv pg_autoctl node post-init: %m");
+			_exit(1);
 		}
 
 		default:

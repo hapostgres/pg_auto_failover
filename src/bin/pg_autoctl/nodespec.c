@@ -795,6 +795,105 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 				 "on a node that is already running");
 	}
 
+	/*
+	 * For monitor nodes, apply formation-level changes.
+	 *
+	 * New [formation <name>] sections → pg_autoctl create formation.
+	 * Changed secondary setting     → pg_autoctl enable/disable secondary.
+	 */
+	if (new_spec->kind == NODE_KIND_UNKNOWN)
+	{
+		for (int fi = 0; fi < new_spec->formationCount; fi++)
+		{
+			const char *fname = new_spec->formationNames[fi];
+			const char *fkind = new_spec->formationKinds[fi][0]
+								? new_spec->formationKinds[fi] : "pgsql";
+			bool newDisabled = new_spec->formationDisableSecondary[fi];
+
+			/* look for this formation in the previous spec */
+			int oi = -1;
+			for (int k = 0; k < old_spec->formationCount; k++)
+			{
+				if (strcmp(old_spec->formationNames[k], fname) == 0)
+				{
+					oi = k;
+					break;
+				}
+			}
+
+			if (oi < 0)
+			{
+				/* formation is new: create it */
+				Program prog;
+
+				if (newDisabled)
+				{
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   "--disable-secondary",
+									   NULL);
+				}
+				else
+				{
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   NULL);
+				}
+
+				if (prog.returnCode != 0)
+				{
+					log_warn("nodespec_apply: create formation \"%s\" failed (rc=%d)",
+							 fname, prog.returnCode);
+					if (prog.stdOut)
+					{
+						log_warn("%s", prog.stdOut);
+					}
+				}
+				else
+				{
+					log_info("nodespec: created formation \"%s\" (kind=%s)",
+							 fname, fkind);
+					changed = true;
+				}
+				free_program(&prog);
+			}
+			else if (old_spec->formationDisableSecondary[oi] != newDisabled)
+			{
+				/* secondary setting changed: enable or disable */
+				const char *verb = newDisabled ? "disable" : "enable";
+
+				Program prog = run_program(pg_autoctl_program,
+										   verb, "secondary",
+										   "--pgdata", new_spec->pgdata,
+										   "--formation", fname,
+										   NULL);
+
+				if (prog.returnCode != 0)
+				{
+					log_warn("nodespec_apply: %s secondary for \"%s\" failed (rc=%d)",
+							 verb, fname, prog.returnCode);
+					if (prog.stdOut)
+					{
+						log_warn("%s", prog.stdOut);
+					}
+				}
+				else
+				{
+					log_info("nodespec: %sd secondary for formation \"%s\"",
+							 verb, fname);
+					changed = true;
+				}
+				free_program(&prog);
+			}
+		}
+	}
+
 	if (!changed)
 	{
 		log_debug("nodespec_apply: no mutable fields changed");

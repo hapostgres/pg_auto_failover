@@ -27,6 +27,7 @@
 #include "file_utils.h"
 #include "keeper_config.h"
 #include "log.h"
+#include "monitor_config.h"
 #include "nodespec.h"
 #include "pgsetup.h"
 #include "runprogram.h"
@@ -45,6 +46,8 @@ static int cli_node_show_getopts(int argc, char **argv);
 static void cli_node_show(int argc, char **argv);
 static int cli_node_check_getopts(int argc, char **argv);
 static void cli_node_check(int argc, char **argv);
+static int cli_node_post_init_getopts(int argc, char **argv);
+static void cli_node_post_init(int argc, char **argv);
 
 
 static CommandLine node_run_command =
@@ -109,6 +112,20 @@ static CommandLine node_check_command =
 		cli_node_check_getopts,
 		cli_node_check);
 
+static CommandLine node_post_init_command =
+	make_command(
+		"post-init",
+		"Create non-default formations listed in the node spec (monitor only)",
+		"[--pgdata <dir>]",
+		"  --pgdata <dir>   location of the monitor Postgres data directory\n"
+		"\n"
+		"  Reads the node spec from PG_AUTOCTL_NODESPEC (or derives it from\n"
+		"  --pgdata), waits for local Postgres to be ready, then creates each\n"
+		"  [formation <name>] section declared in the spec.  Called automatically\n"
+		"  by the supervisor as a RP_TEMPORARY service on monitor cold-start.\n",
+		cli_node_post_init_getopts,
+		cli_node_post_init);
+
 static CommandLine *node_subcommands[] = {
 	&node_run_command,
 	&node_init_command,
@@ -116,6 +133,7 @@ static CommandLine *node_subcommands[] = {
 	&node_start_command,
 	&node_show_command,
 	&node_check_command,
+	&node_post_init_command,
 	NULL
 };
 
@@ -942,4 +960,173 @@ cli_node_check(int argc, char **argv)
 	fformat(stdout, "  auth               : %s\n", spec.auth);
 	fformat(stdout, "  pg_hba_lan         : %s\n",
 			spec.pg_hba_lan ? "true" : "false");
+}
+
+
+/* -----------------------------------------------------------------------
+ * pg_autoctl node post-init [--pgdata <dir>]
+ *
+ * Creates non-default formations declared in the [formation <name>] sections
+ * of the node spec.  Called by the supervisor as a RP_TEMPORARY service on
+ * monitor cold-start; the PG_AUTOCTL_NODESPEC env var names the spec file.
+ * May also be run manually for debugging: just point --pgdata at the monitor.
+ * ----------------------------------------------------------------------- */
+static int
+cli_node_post_init_getopts(int argc, char **argv)
+{
+	return cli_getopt_pgdata(argc, argv);
+}
+
+
+static void
+cli_node_post_init(int argc, char **argv)
+{
+	/*
+	 * Find the spec file.  When invoked by the supervisor the env var is set;
+	 * when run manually --pgdata was parsed into keeperOptions by getopts.
+	 */
+	char specPath[MAXPGPATH] = { 0 };
+
+	if (env_exists("PG_AUTOCTL_NODESPEC") &&
+		get_env_copy("PG_AUTOCTL_NODESPEC", specPath, sizeof(specPath)) &&
+		!IS_EMPTY_STRING_BUFFER(specPath))
+	{
+		/* env var takes precedence */
+	}
+	else if (!IS_EMPTY_STRING_BUFFER(keeperOptions.pgSetup.pgdata))
+	{
+		sformat(specPath, sizeof(specPath), "%s/pg_autoctl_node.ini",
+				keeperOptions.pgSetup.pgdata);
+	}
+	else
+	{
+		log_error("pg_autoctl node post-init: "
+				  "set PG_AUTOCTL_NODESPEC or pass --pgdata");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	NodeSpec spec = { 0 };
+
+	if (!nodespec_read(specPath, &spec))
+	{
+		log_error("Failed to read node spec from \"%s\"", specPath);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (spec.kind != NODE_KIND_UNKNOWN)
+	{
+		log_error("pg_autoctl node post-init is only valid for monitor nodes "
+				  "(got kind %d from \"%s\")", spec.kind, specPath);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (spec.formationCount == 0)
+	{
+		log_info("pg_autoctl node post-init: no non-default formations in \"%s\"",
+				 specPath);
+		exit(EXIT_CODE_QUIT);
+	}
+
+	/*
+	 * Wait until local Postgres is ready.  The monitor Postgres config lives
+	 * at <pgdata>/pg_autoctl.cfg; read it so we have a fully populated
+	 * PostgresSetup with the right port, socket directory, etc.
+	 */
+	MonitorConfig monitorConfig = { 0 };
+
+	strlcpy(monitorConfig.pgSetup.pgdata, spec.pgdata,
+			sizeof(monitorConfig.pgSetup.pgdata));
+
+	if (!monitor_config_set_pathnames_from_pgdata(&monitorConfig))
+	{
+		log_error("Failed to derive monitor config pathnames from pgdata \"%s\"",
+				  spec.pgdata);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!monitor_config_read_file(&monitorConfig,
+								  false, /* missing pgdata is NOT ok */
+								  true /* pg not running is ok at this point */))
+	{
+		log_error("Failed to read monitor config from \"%s\"",
+				  monitorConfig.pathnames.config);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	log_info("post-init: waiting for local Postgres to be ready on port %d",
+			 monitorConfig.pgSetup.pgport);
+
+	if (!pg_setup_wait_until_is_ready(&monitorConfig.pgSetup, 120, LOG_INFO))
+	{
+		log_error("post-init: timed out waiting for local Postgres");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("post-init: local Postgres is ready; creating %d formation(s)",
+			 spec.formationCount);
+
+	/*
+	 * Create each non-default formation declared in the spec.  Use
+	 * run_program() so that connection retry, logging, and error handling
+	 * are handled consistently with the rest of pg_autoctl.
+	 */
+	bool allOk = true;
+
+	for (int fi = 0; fi < spec.formationCount; fi++)
+	{
+		const char *fname = spec.formationNames[fi];
+		const char *fkind = spec.formationKinds[fi][0]
+							? spec.formationKinds[fi] : "pgsql";
+
+		log_info("post-init: creating formation \"%s\" (kind=%s, secondary=%s)",
+				 fname, fkind,
+				 spec.formationDisableSecondary[fi] ? "disabled" : "enabled");
+
+		Program prog;
+
+		if (spec.formationDisableSecondary[fi])
+		{
+			prog = run_program(pg_autoctl_program,
+							   "create", "formation",
+							   "--pgdata", spec.pgdata,
+							   "--formation", fname,
+							   "--kind", fkind,
+							   "--disable-secondary",
+							   NULL);
+		}
+		else
+		{
+			prog = run_program(pg_autoctl_program,
+							   "create", "formation",
+							   "--pgdata", spec.pgdata,
+							   "--formation", fname,
+							   "--kind", fkind,
+							   NULL);
+		}
+
+		if (prog.returnCode != 0)
+		{
+			log_error("post-init: failed to create formation \"%s\" (rc=%d)",
+					  fname, prog.returnCode);
+			if (prog.stdOut)
+			{
+				log_error("%s", prog.stdOut);
+			}
+			allOk = false;
+		}
+		else
+		{
+			log_info("post-init: formation \"%s\" created", fname);
+		}
+
+		free_program(&prog);
+	}
+
+	if (!allOk)
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("post-init: done");
+	exit(EXIT_CODE_QUIT);
 }
