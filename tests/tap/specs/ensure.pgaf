@@ -41,7 +41,13 @@ step test_003_init_secondary {
     wait until node2 state is secondary
         and node1 state is primary
         timeout 90s
+    # Stop postgres while pg_autoctl is running, then re-enable auto-start so
+    # the keeper restarts postgres automatically.  This tests that the keeper
+    # recovers from an unexpected postgres stop.  The Python equivalent is
+    # node2.stop_postgres() which sends SIGTERM to postgres without disabling
+    # the pg_autoctl postgres-controller restart logic.
     stop postgres node2
+    start postgres node2
     wait until node2 state is secondary
         and node1 state is primary
         timeout 90s
