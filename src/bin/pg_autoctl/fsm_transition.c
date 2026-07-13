@@ -1059,7 +1059,21 @@ fsm_prepare_for_secondary(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	/* first. check that we're on the same timeline as the new primary */
+	/*
+	 * Verify that Postgres is accepting connections before proceeding.
+	 * Postgres was started in the WAIT_STANDBY -> CATCHINGUP transition, but
+	 * local_postgres_wait_until_ready may have returned as soon as the PID
+	 * file appeared, before the postmaster finished startup recovery and began
+	 * accepting connections.  Calling ensure_postgres_service_is_running here
+	 * re-checks readiness (via pg_setup_wait_until_is_ready) and closes that
+	 * race window before we attempt SQL against the local instance.
+	 */
+	if (!ensure_postgres_service_is_running(postgres))
+	{
+		return false;
+	}
+
+	/* check that we're on the same timeline as the new primary */
 	if (!standby_check_timeline_with_upstream(postgres))
 	{
 		/* errors have already been logged */
