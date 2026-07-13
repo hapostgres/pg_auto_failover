@@ -3705,7 +3705,7 @@ runner_print_summary(const TestRunner *r)
 	if (r->specFile[0] != '\0')
 	{
 		const char *base = strrchr(r->specFile, '/');
-		fprintf(stderr, "# %s\n", base ? base + 1 : r->specFile);
+		fformat(stderr, "# %s\n", base ? base + 1 : r->specFile);
 	}
 
 	/* compute column width: longest name, minimum 20 */
@@ -3743,21 +3743,21 @@ runner_print_summary(const TestRunner *r)
 			failCount++;
 		}
 
-		fprintf(stderr, "%-6s%-8d - %-*s %*ld ms\n",
+		fformat(stderr, "%-6s%-8d - %-*s %*ld ms\n",
 				passed ? "ok" : "not ok",
 				i + 1,
 				maxNameLen, name,
 				msWidth, ms);
 	}
 
-	fprintf(stderr, "1..%d\n", r->stepResultCount);
+	fformat(stderr, "1..%d\n", r->stepResultCount);
 	if (failCount == 0)
 	{
-		fprintf(stderr, "# All %d tests passed.\n", r->stepResultCount);
+		fformat(stderr, "# All %d tests passed.\n", r->stepResultCount);
 	}
 	else
 	{
-		fprintf(stderr, "# %d test%s failed.\n",
+		fformat(stderr, "# %d test%s failed.\n",
 				failCount,
 				failCount == 1 ? "" : "s");
 	}
