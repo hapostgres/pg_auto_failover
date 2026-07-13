@@ -3703,6 +3703,7 @@ runner_print_summary(const TestRunner *r)
 
 	/* compute column width: longest name, minimum 20 */
 	int maxNameLen = 20;
+	long maxMs = 0;
 	for (int i = 0; i < r->stepResultCount; i++)
 	{
 		int len = (int) strlen(r->stepResults[i].name);
@@ -3710,6 +3711,17 @@ runner_print_summary(const TestRunner *r)
 		{
 			maxNameLen = len;
 		}
+		if (r->stepResults[i].elapsed_ms > maxMs)
+		{
+			maxMs = r->stepResults[i].elapsed_ms;
+		}
+	}
+
+	/* width for ms field: number of digits in maxMs, minimum 4 */
+	int msWidth = 4;
+	for (long v = maxMs; v >= 10; v /= 10)
+	{
+		msWidth++;
 	}
 
 	int failCount = 0;
@@ -3718,20 +3730,27 @@ runner_print_summary(const TestRunner *r)
 		const char *name = r->stepResults[i].name;
 		bool passed = r->stepResults[i].passed;
 		long ms = r->stepResults[i].elapsed_ms;
-		const char *result = passed ? "ok" : "FAILED";
 
 		if (!passed)
 		{
 			failCount++;
 		}
 
-		fprintf(stderr, "test %-*s ... %-8s (%6ld ms)\n",
-				maxNameLen, name, result, ms);
+		fprintf(stderr, "%-6s%-8d - %-*s %*ld ms\n",
+				passed ? "ok" : "not ok",
+				i + 1,
+				maxNameLen, name,
+				msWidth, ms);
 	}
 
-	if (failCount > 0)
+	fprintf(stderr, "1..%d\n", r->stepResultCount);
+	if (failCount == 0)
 	{
-		fprintf(stderr, "\n%d test%s failed.\n",
+		fprintf(stderr, "# All %d tests passed.\n", r->stepResultCount);
+	}
+	else
+	{
+		fprintf(stderr, "# %d test%s failed.\n",
 				failCount,
 				failCount == 1 ? "" : "s");
 	}

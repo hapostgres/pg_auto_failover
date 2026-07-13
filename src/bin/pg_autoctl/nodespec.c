@@ -125,6 +125,11 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(pgHbaLanStr), pgHbaLanStr,
 								   "true"),
 
+		/* [options] — debian_cluster: run pg_createcluster before create */
+		make_strbuf_option_default("options", "debian_cluster", NULL, false,
+								   sizeof(spec->debianCluster),
+								   spec->debianCluster, ""),
+
 		/* [ssl] — certificate paths for verify-ca / verify-full mode */
 		make_strbuf_option_default("ssl", "ca_file", NULL, false,
 								   sizeof(spec->ssl_ca_file),
@@ -414,6 +419,11 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			spec->ssl,
 			spec->auth,
 			spec->pg_hba_lan ? "true" : "false");
+
+	if (spec->debianCluster[0])
+	{
+		fformat(out, "debian_cluster = %s\n", spec->debianCluster);
+	}
 
 	/* only emit [launch] when deferred — omitting the section means immediate */
 	if (spec->launchDeferred)

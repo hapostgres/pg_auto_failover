@@ -12,10 +12,12 @@
  */
 
 #include <ctype.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 #include "cli_common.h"
 #include "cli_node.h"
@@ -133,6 +135,240 @@ static char nodeSpecPath[MAXPGPATH] = { 0 };
 
 
 /* -----------------------------------------------------------------------
+ * Shared helpers used by cli_node_run and cli_node_init
+ * ----------------------------------------------------------------------- */
+
+/*
+ * copy_file copies src to dst using read()/write().  Returns true on success.
+ */
+static bool
+copy_file(const char *src, const char *dst)
+{
+	int in_fd = open(src, O_RDONLY);
+	if (in_fd < 0)
+	{
+		log_error("Cannot open \"%s\": %m", src);
+		return false;
+	}
+
+	int out_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (out_fd < 0)
+	{
+		log_error("Cannot open \"%s\" for writing: %m", dst);
+		close(in_fd);
+		return false;
+	}
+
+	char buf[4096];
+	ssize_t n;
+	bool ok = true;
+
+	while ((n = read(in_fd, buf, sizeof(buf))) > 0)
+	{
+		if (write(out_fd, buf, (size_t) n) != n)
+		{
+			log_error("Write error on \"%s\": %m", dst);
+			ok = false;
+			break;
+		}
+	}
+	if (n < 0)
+	{
+		log_error("Read error on \"%s\": %m", src);
+		ok = false;
+	}
+
+	close(in_fd);
+	close(out_fd);
+	return ok;
+}
+
+
+/*
+ * node_copy_ssl_certs copies server and client certificates into the
+ * locations that PostgreSQL and libpq expect:
+ *
+ *   server cert/key  → $HOME/{server.crt,server.key}
+ *   client cert/key  → $HOME/.postgresql/{postgresql.crt,.key}
+ *   CA cert          → $HOME/.postgresql/root.crt
+ *
+ * Source paths are derived from spec->ssl_ca_file (the directory containing
+ * it also has server/ and client/ subdirectories).
+ */
+static bool
+node_copy_ssl_certs(const NodeSpec *spec)
+{
+	const char *home = getenv("HOME"); /* IGNORE-BANNED */
+	if (!home || home[0] == '\0')
+	{
+		home = "/var/lib/postgres";
+	}
+
+	/* Derive SSL root dir from ssl_ca_file, e.g. /etc/pgaf/ssl/ca.crt → /etc/pgaf/ssl */
+	char ssl_dir[MAXPGPATH];
+	strlcpy(ssl_dir, spec->ssl_ca_file, sizeof(ssl_dir));
+	char *last_slash = strrchr(ssl_dir, '/');
+	if (last_slash)
+	{
+		*last_slash = '\0';
+	}
+
+	/* Server cert and key → home dir (PostgreSQL reads them there) */
+	char dst_crt[MAXPGPATH], dst_key[MAXPGPATH];
+	sformat(dst_crt, sizeof(dst_crt), "%s/server.crt", home);
+	sformat(dst_key, sizeof(dst_key), "%s/server.key", home);
+
+	if (!copy_file(spec->ssl_cert_file, dst_crt))
+	{
+		return false;
+	}
+	if (!copy_file(spec->ssl_key_file, dst_key))
+	{
+		return false;
+	}
+	if (chmod(dst_key, 0600) != 0)
+	{
+		log_error("chmod 0600 \"%s\": %m", dst_key);
+		return false;
+	}
+
+	/* ~/.postgresql/ for libpq client certs */
+	char pg_dir[MAXPGPATH];
+	sformat(pg_dir, sizeof(pg_dir), "%s/.postgresql", home);
+	if (mkdir(pg_dir, 0700) != 0 && errno != EEXIST)
+	{
+		log_error("mkdir \"%s\": %m", pg_dir);
+		return false;
+	}
+
+	char src_client_crt[MAXPGPATH], src_client_key[MAXPGPATH];
+	char dst_client_crt[MAXPGPATH], dst_client_key[MAXPGPATH], dst_root[MAXPGPATH];
+	sformat(src_client_crt, sizeof(src_client_crt), "%s/client/postgresql.crt", ssl_dir);
+	sformat(src_client_key, sizeof(src_client_key), "%s/client/postgresql.key", ssl_dir);
+	sformat(dst_client_crt, sizeof(dst_client_crt), "%s/.postgresql/postgresql.crt",
+			home);
+	sformat(dst_client_key, sizeof(dst_client_key), "%s/.postgresql/postgresql.key",
+			home);
+	sformat(dst_root, sizeof(dst_root), "%s/.postgresql/root.crt", home);
+
+	if (!copy_file(src_client_crt, dst_client_crt))
+	{
+		return false;
+	}
+	if (!copy_file(src_client_key, dst_client_key))
+	{
+		return false;
+	}
+	if (chmod(dst_client_key, 0600) != 0)
+	{
+		log_error("chmod 0600 \"%s\": %m", dst_client_key);
+		return false;
+	}
+	if (!copy_file(spec->ssl_ca_file, dst_root))
+	{
+		return false;
+	}
+
+	log_info("SSL certs copied to %s and %s/.postgresql/", home, home);
+	return true;
+}
+
+
+/*
+ * log_argv prints an argv[] to the log, masking password arguments.
+ */
+static void
+log_argv(const char *prefix, char **args, int nargs)
+{
+	PQExpBuffer cmd = createPQExpBuffer();
+	static const char *pwFlags[] = {
+		"--monitor-password",
+		"--replication-password",
+		"--autoctl-node-password",
+		NULL
+	};
+
+	for (int i = 0; i < nargs; i++)
+	{
+		if (i > 0)
+		{
+			appendPQExpBufferChar(cmd, ' ');
+		}
+
+		bool maskThis = false;
+		if (i > 0)
+		{
+			for (int k = 0; pwFlags[k]; k++)
+			{
+				if (strcmp(args[i - 1], pwFlags[k]) == 0)
+				{
+					maskThis = true;
+					break;
+				}
+			}
+		}
+		appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
+	}
+	log_info("%s: %s", prefix, cmd->data);
+	destroyPQExpBuffer(cmd);
+}
+
+
+/*
+ * node_do_init runs `pg_autoctl create <kind>` (no --run) and waits for it
+ * to finish.  Used both by cli_node_init and the cold-start path of
+ * cli_node_run so that both share the same underlying initialisation logic.
+ *
+ * Returns true on success (exit code 0), false otherwise.
+ */
+static bool
+node_do_init(const NodeSpec *spec)
+{
+	char *args[40];
+	int nargs = nodespec_create_argv(spec, pg_autoctl_program, args, 32);
+	if (nargs < 0)
+	{
+		return false;
+	}
+
+	/* nodespec_create_argv always appends --run; strip it */
+	if (nargs >= 2 && strcmp(args[nargs - 1], "--run") == 0)
+	{
+		args[nargs - 1] = NULL;
+		nargs--;
+	}
+
+	log_argv("pg_autoctl node init", args, nargs);
+
+	pid_t pid = fork();
+	if (pid < 0)
+	{
+		log_fatal("fork: %m");
+		return false;
+	}
+
+	if (pid == 0)
+	{
+		execv(args[0], args);
+		_exit(127);
+	}
+
+	int status = 0;
+	while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+	{ }
+
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+	{
+		log_error("pg_autoctl create exited with status %d",
+				  WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+		return false;
+	}
+
+	return true;
+}
+
+
+/* -----------------------------------------------------------------------
  * pg_autoctl node run <file>
  * ----------------------------------------------------------------------- */
 static int
@@ -166,8 +402,6 @@ static void
 cli_node_run(int argc, char **argv)
 {
 	NodeSpec spec = { 0 };
-	char *args[40];
-	int nargs;
 
 	if (!nodespec_read(nodeSpecPath, &spec))
 	{
@@ -176,9 +410,7 @@ cli_node_run(int argc, char **argv)
 
 	/*
 	 * [launch] mode = deferred: spin here re-reading nodeSpecPath until
-	 * pg_autoctl node start rewrites it with mode = immediate (or removes
-	 * the [launch] section).  The file is the rendezvous point — no external
-	 * sentinel needed.
+	 * pg_autoctl node start rewrites it with mode = immediate.
 	 */
 	if (spec.launchDeferred)
 	{
@@ -201,115 +433,164 @@ cli_node_run(int argc, char **argv)
 	}
 
 	/*
-	 * If PGDATA already has a pg_autoctl.cfg, the node was created before.
-	 * In that case run `pg_autoctl run` (no --run, no create flags).
-	 * Otherwise run `pg_autoctl create <kind> ... --run`.
+	 * Delete any leftover PID file from a previous run.  This is safe here
+	 * because we have not started a supervisor yet.  Stale PID files cause
+	 * pg_autoctl to refuse to start, so remove them unconditionally.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
+	{
+		char pidPath[MAXPGPATH];
+		sformat(pidPath, sizeof(pidPath),
+				"/tmp/pg_autoctl%s/pg_autoctl.pid", spec.pgdata);
+		(void) unlink(pidPath);   /* ignore ENOENT */
+	}
+
+	/*
+	 * CA-signed SSL: copy server and client certs into the locations that
+	 * PostgreSQL and libpq expect.  This must happen before pg_autoctl
+	 * create (which configures SSL) and before pg_autoctl run.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(spec.ssl_ca_file))
+	{
+		if (!node_copy_ssl_certs(&spec))
+		{
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
+	/*
+	 * Tell the supervisor which spec file to watch for live changes.
+	 * Set before either execv so the child inherits it.
+	 */
+	setenv("PG_AUTOCTL_NODESPEC", nodeSpecPath, 1);
+
+	/*
+	 * Check whether PGDATA already has pg_autoctl.cfg.
 	 */
 	char cfgPath[MAXPGPATH];
 	bool cfgExists = false;
 
 	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
 	{
-		sformat(cfgPath, sizeof(cfgPath),
-				"%s/pg_autoctl.cfg", spec.pgdata);
+		sformat(cfgPath, sizeof(cfgPath), "%s/pg_autoctl.cfg", spec.pgdata);
 		cfgExists = file_exists(cfgPath);
 	}
 
-	if (cfgExists)
+	if (!cfgExists)
 	{
 		/*
-		 * Node was already created.  Apply any mutable changes that might
-		 * have been made to the spec file since the last run, then hand off
-		 * to the normal run path.
+		 * Cold start: the node has never been initialized.
+		 *
+		 * If debian_cluster is set, run pg_createcluster first so that
+		 * pg_autoctl create detects the Debian-style split-config layout.
 		 */
-		NodeSpec prev = { 0 };
+		if (!IS_EMPTY_STRING_BUFFER(spec.debianCluster))
+		{
+			/* Derive PG major version from path /var/lib/postgresql/<ver>/... */
+			int pgmajor = 0;
+			const char pfx[] = "/var/lib/postgresql/";
+			if (strncmp(spec.pgdata, pfx, strlen(pfx)) == 0)
+			{
+				pgmajor = atoi(spec.pgdata + strlen(pfx)); /* IGNORE-BANNED */
+			}
+			if (pgmajor <= 0)
+			{
+				log_error("Cannot determine PG major version from pgdata \"%s\"",
+						  spec.pgdata);
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
 
-		/* best-effort: ignore errors if we can't re-read the spec */
-		(void) nodespec_read(nodeSpecPath, &prev);
-		(void) nodespec_apply(&spec, &prev);
+			char pgmajor_str[8];
+			sformat(pgmajor_str, sizeof(pgmajor_str), "%d", pgmajor);
 
-		args[0] = (char *) pg_autoctl_program;
-		args[1] = "run";
-		args[2] = "--pgdata";
-		args[3] = spec.pgdata;
-		args[4] = NULL;
-		nargs = 4;
-	}
-	else
-	{
-		nargs = nodespec_create_argv(&spec, pg_autoctl_program,
-									 args, 32);
-		if (nargs < 0)
+			char *pgcc_args[] = {
+				"pg_createcluster",
+				"--user", "docker",
+				"--group", "postgres",
+				pgmajor_str,
+				spec.debianCluster,
+				"--",
+				"--auth-local", "trust",
+				"--auth-host", "trust",
+				NULL
+			};
+			log_info("pg_autoctl node run: pg_createcluster %d %s",
+					 pgmajor, spec.debianCluster);
+
+			pid_t pid = fork();
+			if (pid < 0)
+			{
+				log_fatal("fork: %m");
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+			if (pid == 0)
+			{
+				execvp("pg_createcluster", pgcc_args);
+				_exit(127);
+			}
+			int st = 0;
+			while (waitpid(pid, &st, 0) < 0 && errno == EINTR)
+			{ }
+			if (!WIFEXITED(st) || WEXITSTATUS(st) != 0)
+			{
+				log_error("pg_createcluster exited with status %d",
+						  WIFEXITED(st) ? WEXITSTATUS(st) : -1);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+
+		/*
+		 * PG_AUTOCTL_TEST_DELAY: stagger node registration so that node IDs
+		 * are assigned in name order (node1 → id 1, node2 → id 2, …).
+		 */
+		if (env_exists("PG_AUTOCTL_TEST_DELAY") && spec.name[0] != '\0')
+		{
+			const char *p = spec.name + strlen(spec.name);
+			while (p > spec.name && isdigit((unsigned char) p[-1]))
+			{
+				p--;
+			}
+			if (*p != '\0')
+			{
+				int n = atoi(p); /* IGNORE-BANNED */
+				int secs = 2 * n;
+				log_info("PG_AUTOCTL_TEST_DELAY: sleeping %ds before "
+						 "registration (node %s, index %d)",
+						 secs, spec.name, n);
+				sleep(secs);
+			}
+		}
+
+		if (!node_do_init(&spec))
 		{
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
-
-	/* Tell the supervisor which spec file to watch for live changes */
-	setenv("PG_AUTOCTL_NODESPEC", nodeSpecPath, 1);
+	else
+	{
+		/*
+		 * Warm start: PGDATA already has pg_autoctl.cfg.  Apply any mutable
+		 * changes that might have been made to the spec file since the last run.
+		 */
+		NodeSpec prev = { 0 };
+		(void) nodespec_read(nodeSpecPath, &prev);
+		(void) nodespec_apply(&spec, &prev);
+	}
 
 	/*
-	 * PG_AUTOCTL_TEST_DELAY: stagger node registration so that node IDs
-	 * are assigned in name order (node1 → id 1, node2 → id 2, …).
-	 * Extract the trailing integer from the node name and sleep 2×N seconds.
+	 * Both paths end here: exec `pg_autoctl run --pgdata <dir>`.
 	 */
-	if (env_exists("PG_AUTOCTL_TEST_DELAY") && spec.name[0] != '\0')
-	{
-		const char *p = spec.name + strlen(spec.name);
-		while (p > spec.name && isdigit((unsigned char) p[-1]))
-		{
-			p--;
-		}
-		if (*p != '\0')
-		{
-			int n = atoi(p) /* IGNORE-BANNED */;
-			int secs = 2 * n;
-			log_info("PG_AUTOCTL_TEST_DELAY: sleeping %ds before "
-					 "registration (node %s, index %d)",
-					 secs, spec.name, n);
-			sleep(secs);
-		}
-	}
+	char *run_args[] = {
+		(char *) pg_autoctl_program,
+		"run",
+		"--pgdata",
+		spec.pgdata,
+		NULL
+	};
+	log_argv("pg_autoctl node run", run_args, 4);
+	execv(run_args[0], run_args);
 
-	/* Log the command we're about to exec, masking password arguments. */
-	{
-		PQExpBuffer cmd = createPQExpBuffer();
-		static const char *pwFlags[] = {
-			"--monitor-password",
-			"--replication-password",
-			"--autoctl-node-password",
-			NULL
-		};
-		for (int i = 0; i < nargs; i++)
-		{
-			if (i > 0)
-			{
-				appendPQExpBufferChar(cmd, ' ');
-			}
-
-			/* Check if the previous arg was a password flag. */
-			bool maskThis = false;
-			if (i > 0)
-			{
-				for (int k = 0; pwFlags[k]; k++)
-				{
-					if (strcmp(args[i - 1], pwFlags[k]) == 0)
-					{
-						maskThis = true;
-						break;
-					}
-				}
-			}
-			appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
-		}
-		log_info("pg_autoctl node run: %s", cmd->data);
-		destroyPQExpBuffer(cmd);
-	}
-
-	execv(args[0], args);
-
-	/* If we get here execv failed */
-	log_fatal("execv(\"%s\"): %m", args[0]);
+	log_fatal("execv(\"%s\"): %m", run_args[0]);
 	exit(EXIT_CODE_INTERNAL_ERROR);
 }
 
@@ -346,84 +627,45 @@ static void
 cli_node_init(int argc, char **argv)
 {
 	NodeSpec spec = { 0 };
-	char *args[40];
-	int nargs;
 
 	if (!nodespec_read(nodeSpecPath, &spec))
 	{
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	char cfgPath[MAXPGPATH];
-
+	/* Idempotent: if PGDATA already initialized, nothing to do. */
 	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
 	{
+		char cfgPath[MAXPGPATH];
 		sformat(cfgPath, sizeof(cfgPath), "%s/pg_autoctl.cfg", spec.pgdata);
+		if (file_exists(cfgPath))
+		{
+			log_info("Node already initialized at \"%s\"; nothing to do", spec.pgdata);
+			exit(0);
+		}
 	}
 
-	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata) && file_exists(cfgPath))
+	/* PID file cleanup and SSL cert copy follow the same sequence as node run. */
+	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
 	{
-		log_info("Node already initialized at \"%s\"; nothing to do", spec.pgdata);
-		exit(0);
+		char pidPath[MAXPGPATH];
+		sformat(pidPath, sizeof(pidPath),
+				"/tmp/pg_autoctl%s/pg_autoctl.pid", spec.pgdata);
+		(void) unlink(pidPath);
 	}
 
-	/*
-	 * Build the same argv as node run, but nodespec_create_argv always appends
-	 * --run.  We build the argv and drop the final --run entry so that
-	 * pg_autoctl create <kind> returns after initialization, without starting
-	 * the supervisor.
-	 */
-	nargs = nodespec_create_argv(&spec, pg_autoctl_program, args, 32);
-	if (nargs < 0)
+	if (!IS_EMPTY_STRING_BUFFER(spec.ssl_ca_file))
+	{
+		if (!node_copy_ssl_certs(&spec))
+		{
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
+	if (!node_do_init(&spec))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
-
-	/* Drop the trailing "--run" that nodespec_create_argv always appends. */
-	if (nargs >= 2 && strcmp(args[nargs - 1], "--run") == 0)
-	{
-		args[nargs - 1] = NULL;
-		nargs--;
-	}
-
-	/* Log the command (masking passwords). */
-	{
-		PQExpBuffer cmd = createPQExpBuffer();
-		static const char *pwFlags[] = {
-			"--monitor-password",
-			"--replication-password",
-			"--autoctl-node-password",
-			NULL
-		};
-		for (int i = 0; i < nargs; i++)
-		{
-			if (i > 0)
-			{
-				appendPQExpBufferChar(cmd, ' ');
-			}
-			bool maskThis = false;
-			if (i > 0)
-			{
-				for (int k = 0; pwFlags[k]; k++)
-				{
-					if (strcmp(args[i - 1], pwFlags[k]) == 0)
-					{
-						maskThis = true;
-						break;
-					}
-				}
-			}
-			appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
-		}
-		log_info("pg_autoctl node init: %s", cmd->data);
-		destroyPQExpBuffer(cmd);
-	}
-
-	execv(args[0], args);
-
-	/* If we get here execv failed */
-	log_fatal("execv(\"%s\"): %m", args[0]);
-	exit(EXIT_CODE_INTERNAL_ERROR);
 }
 
 

@@ -82,6 +82,7 @@ typedef struct NodeSpec
 	char ssl_cert_file[MAXPGPATH];
 	char ssl_key_file[MAXPGPATH];
 	bool launchDeferred;         /* [launch] mode=deferred: wait for node start */
+	char debianCluster[64];      /* [options] debian_cluster: run pg_createcluster */
 
 	/* [formation <name>]  — monitor kind: non-default formations to create */
 #define NODESPEC_MAX_FORMATIONS 16

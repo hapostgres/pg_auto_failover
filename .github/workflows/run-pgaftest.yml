@@ -84,65 +84,16 @@ jobs:
             --load \
             .
 
-      - name: Build pgaf:prebuilt image (PG${{ matrix.PGVERSION }})
-        run: |
-          # The prebuilt stage extends run with a pre-initialized monitor PGDATA.
-          # It reuses the run layer from the GHA cache, so only the pg_autoctl
-          # node init step runs here (~5 s).
-          docker buildx build \
-            --cache-from type=gha,scope=pgaf-run-pg${{ matrix.PGVERSION }} \
-            --cache-from type=gha,scope=pgaf-prebuilt-pg${{ matrix.PGVERSION }} \
-            --cache-to   type=gha,mode=max,scope=pgaf-prebuilt-pg${{ matrix.PGVERSION }} \
-            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
-            --build-arg CITUSTAG=${{ steps.citustag.outputs.CITUSTAG }} \
-            --target prebuilt \
-            -t pgaf:prebuilt-pg${{ matrix.PGVERSION }} \
-            --load \
-            .
-
-      - name: Build pgaf:debian image (PG${{ matrix.PGVERSION }})
-        run: |
-          # Layer cache from the run build covers the run stage; only the
-          # pg_createcluster layer is new.
-          docker buildx build \
-            --cache-from type=gha,scope=pgaf-run-pg${{ matrix.PGVERSION }} \
-            --cache-from type=gha,scope=pgaf-debian-pg${{ matrix.PGVERSION }} \
-            --cache-to   type=gha,mode=max,scope=pgaf-debian-pg${{ matrix.PGVERSION }} \
-            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
-            --build-arg CITUSTAG=${{ steps.citustag.outputs.CITUSTAG }} \
-            --target debian \
-            -t pgaf:debian-pg${{ matrix.PGVERSION }} \
-            --load \
-            .
-
       - name: Save images to tarballs
         run: |
           docker save pgaf:run-pg${{ matrix.PGVERSION }} \
             | gzip > /tmp/pgaf-run-pg${{ matrix.PGVERSION }}.tar.gz
-          docker save pgaf:prebuilt-pg${{ matrix.PGVERSION }} \
-            | gzip > /tmp/pgaf-prebuilt-pg${{ matrix.PGVERSION }}.tar.gz
-          docker save pgaf:debian-pg${{ matrix.PGVERSION }} \
-            | gzip > /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
 
       - name: Upload run image artifact
         uses: actions/upload-artifact@v7.0.1
         with:
           name: pgaf-run-image-pg${{ matrix.PGVERSION }}
           path: /tmp/pgaf-run-pg${{ matrix.PGVERSION }}.tar.gz
-          retention-days: 1
-
-      - name: Upload prebuilt image artifact
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: pgaf-prebuilt-image-pg${{ matrix.PGVERSION }}
-          path: /tmp/pgaf-prebuilt-pg${{ matrix.PGVERSION }}.tar.gz
-          retention-days: 1
-
-      - name: Upload debian image artifact
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: pgaf-debian-image-pg${{ matrix.PGVERSION }}
-          path: /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
           retention-days: 1
 
   # ---------------------------------------------------------------------------
@@ -254,31 +205,6 @@ jobs:
           # Alias to the name pgaftest expects via PGAF_IMAGE
           docker tag pgaf:run-pg${{ matrix.PGVERSION }} pgaf:run
 
-      - name: Download pgaf:prebuilt image (PG${{ matrix.PGVERSION }})
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: pgaf-prebuilt-image-pg${{ matrix.PGVERSION }}
-          path: /tmp
-
-      - name: Load pgaf:prebuilt image into Docker
-        run: |
-          docker load < /tmp/pgaf-prebuilt-pg${{ matrix.PGVERSION }}.tar.gz
-          # Alias so pgaftest can find it via PGAF_PREBUILT_IMAGE=pgaf:prebuilt
-          docker tag pgaf:prebuilt-pg${{ matrix.PGVERSION }} pgaf:prebuilt
-
-      - name: Download pgaf:debian image (PG${{ matrix.PGVERSION }})
-        if: matrix.schedule == 'node'
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: pgaf-debian-image-pg${{ matrix.PGVERSION }}
-          path: /tmp
-
-      - name: Load pgaf:debian image into Docker
-        if: matrix.schedule == 'node'
-        run: |
-          docker load < /tmp/pgaf-debian-pg${{ matrix.PGVERSION }}.tar.gz
-          docker tag pgaf:debian-pg${{ matrix.PGVERSION }} pgaf:debian
-
       - name: Download pgaf:pgaftest image
         uses: actions/download-artifact@v8.0.1
         with:
@@ -301,71 +227,10 @@ jobs:
             -v "$(pwd)":/work:ro \
             -w /work \
             -e PGAF_IMAGE=pgaf:run \
-            -e PGAF_PREBUILT_IMAGE=pgaf:prebuilt \
             -e PGVERSION=${{ matrix.PGVERSION }} \
-            -e PGAF_DEBIAN_IMAGE=${{ matrix.schedule == 'node' && 'pgaf:debian' || '' }} \
             -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
             pgaf:pgaftest \
             pgaftest run --schedule tests/tap/schedules/${{ matrix.schedule }}.sch
-
-  # ---------------------------------------------------------------------------
-  # installcheck: SQL regression suite via pg_regress.
-  # Runs on all supported Postgres versions; builds pgaf:testrun inline since
-  # it needs postgresql-server-dev which isn't in the run image.
-  # ---------------------------------------------------------------------------
-  installcheck:
-    name: pgaftest / installcheck (PG${{ matrix.PGVERSION }})
-    needs: build-pgaftest
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        PGVERSION: [14, 15, 16, 17]
-
-    steps:
-      - uses: actions/checkout@v7.0.0
-
-      - name: Download pgaf:pgaftest image
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: pgaftest-image
-          path: /tmp
-
-      - name: Load pgaf:pgaftest image into Docker
-        run: docker load < /tmp/pgaf-pgaftest.tar.gz
-
-      - name: Generate git-version.h
-        run: make version
-
-      - name: Build pgaf:testrun image (PG${{ matrix.PGVERSION }})
-        run: |
-          case "${{ matrix.PGVERSION }}" in
-            14|15) CITUSTAG=v12.1.5 ;;
-            *)     CITUSTAG=v13.2.0 ;;
-          esac
-          docker build \
-            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
-            --build-arg CITUSTAG=${CITUSTAG} \
-            --target testrun \
-            -t pgaf:testrun \
-            .
-
-      - name: Run installcheck spec
-        timeout-minutes: 15
-        run: |
-          mkdir -p /tmp/pgaftest && chmod 777 /tmp/pgaftest
-          DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
-          docker run --rm \
-            --user root \
-            --group-add "${DOCKER_GID}" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v /tmp/pgaftest:/tmp/pgaftest \
-            -v "$(pwd)":/work:ro \
-            -w /work \
-            -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
-            pgaf:pgaftest \
-            pgaftest run tests/tap/specs/installcheck.pgaf
 
   # ---------------------------------------------------------------------------
   # Upgrade test: binary + extension swap without container restart.

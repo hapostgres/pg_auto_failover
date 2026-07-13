@@ -504,36 +504,14 @@ compose_gen_write(TestCluster *cluster,
 		}
 
 		fformat(f, "  monitor:\n");
-		if (cluster->monitorDebianCluster[0])
-		{
-			write_image_stanza_target(f, cluster, contextDir, "debian");
-		}
-		else if (cluster->monitorImageTarget[0])
+		if (cluster->monitorImageTarget[0])
 		{
 			write_image_stanza_target(f, cluster, contextDir,
 									  cluster->monitorImageTarget);
 		}
 		else
 		{
-			/*
-			 * When PGAF_PREBUILT_IMAGE is set, use the pre-initialized monitor
-			 * image (pg_autoctl node init already ran initdb at image-build
-			 * time, so compose-up skips the slow initdb step).  Data nodes
-			 * still use the plain run image; they need the live monitor URI and
-			 * cannot be pre-initialized without it.
-			 */
-			const char *prebuiltImg = getenv("PGAF_PREBUILT_IMAGE"); /* IGNORE-BANNED */
-			const char *runImg = cluster->image[0] ? cluster->image
-								 : getenv("PGAF_IMAGE");                    /* IGNORE-BANNED */
-
-			if (prebuiltImg && *prebuiltImg && runImg && *runImg)
-			{
-				fformat(f, "    image: \"%s\"\n", prebuiltImg);
-			}
-			else
-			{
-				write_image_stanza(f, cluster, contextDir);
-			}
+			write_image_stanza(f, cluster, contextDir);
 		}
 
 		char monitor_pgdata[MAXPGPATH];
@@ -586,33 +564,35 @@ compose_gen_write(TestCluster *cluster,
 				"      - \"%d:5432\"\n",
 				cluster->monitorHostPort);
 
+
 		fformat(f,
-				"    command: [\"/bin/sh\", \"-c\","
-				" \"%s rm -f /tmp/pg_autoctl%s/pg_autoctl.pid"
-				" && exec pg_autoctl node run " NODE_INI_PATH "\"]\n"
-															  "    stop_grace_period: 60s\n\n",
-				ssl_needs_certs(cluster->ssl) ? SSL_COPY_CERTS_CMD : "",
-				monitor_pgdata);
+				"    command: [\"pg_autoctl\", \"node\", \"run\","
+				" \"" NODE_INI_PATH "\"]\
+"
+				"    stop_grace_period: 60s\
+\
+");
 
 		/*
 		 * Monitor healthcheck: data nodes use depends_on service_healthy so
-		 * they do not start until the monitor is fully initialised.  SSL
-		 * clusters take longer (cert copy + pg_autoctl SSL config), so use a
-		 * longer start_period there.
+		 * they do not start until the monitor is fully initialised.
 		 */
-		{
-			const char *hc_start =
-				ssl_needs_certs(cluster->ssl) ? "300s" : "60s";
-			fformat(f,
-					"    healthcheck:\n"
-					"      test: [\"CMD\", \"pg_autoctl\", \"status\","
-					" \"--pgdata\", \"%s\"]\n"
-					"      interval: 2s\n"
-					"      timeout: 5s\n"
-					"      retries: 150\n"
-					"      start_period: %s\n\n",
-					monitor_pgdata, hc_start);
-		}
+		fformat(f,
+				"    healthcheck:\
+"
+				"      test: [\"CMD\", \"pg_autoctl\", \"status\","
+				" \"--pgdata\", \"%s\"]\
+"
+				"      interval: 2s\
+"
+				"      timeout: 5s\
+"
+				"      retries: 150\
+"
+				"      start_period: 60s\
+\
+",
+				monitor_pgdata);
 	}
 
 	/* ---- second monitor (initially stopped, for replace-monitor tests) ---- */
@@ -655,12 +635,12 @@ compose_gen_write(TestCluster *cluster,
 				"      - \"%d:5432\"\n",
 				cluster->secondMonitorHostPort);
 		fformat(f,
-				"    command: [\"/bin/sh\", \"-c\","
-				" \"%s rm -f /tmp/pg_autoctl" NODE_PGDATA "/pg_autoctl.pid"
-														  " && exec pg_autoctl node run "
-				NODE_INI_PATH "\"]\n"
-							  "    stop_grace_period: 60s\n\n",
-				ssl_needs_certs(cluster->ssl) ? SSL_COPY_CERTS_CMD : "");
+				"    command: [\"pg_autoctl\", \"node\", \"run\","
+				" \"" NODE_INI_PATH "\"]\
+"
+				"    stop_grace_period: 60s\
+\
+");
 	}
 
 	/* ---- data nodes — iterate all formations ---- */
@@ -681,14 +661,7 @@ compose_gen_write(TestCluster *cluster,
 		{
 			const TestNode *n = &form->nodes[ni];
 			fformat(f, "  %s:\n", n->name);
-			if (n->debianCluster[0])
-			{
-				write_image_stanza_target(f, cluster, contextDir, "debian");
-			}
-			else
-			{
-				write_image_stanza(f, cluster, contextDir);
-			}
+			write_image_stanza(f, cluster, contextDir);
 
 			/* debian PGDATA: /var/lib/postgresql/<ver>/<cluster> */
 			char node_pgdata[MAXPGPATH];
@@ -748,15 +721,12 @@ compose_gen_write(TestCluster *cluster,
 			 * case where the formation hasn't been created yet.
 			 */
 
-			/* per-node ssl override may differ from cluster default */
-			const char *node_ssl = n->ssl[0] ? n->ssl : cluster->ssl;
 			fformat(f,
-					"    command: [\"/bin/sh\", \"-c\","
-					" \"%s rm -f /tmp/pg_autoctl%s/pg_autoctl.pid"
-					" && exec pg_autoctl node run " NODE_INI_PATH "\"]\n"
-																  "    stop_grace_period: 60s\n",
-					ssl_needs_certs(node_ssl) ? SSL_COPY_CERTS_CMD : "",
-					node_pgdata);
+					"    command: [\"pg_autoctl\", \"node\", \"run\","
+					" \"" NODE_INI_PATH "\"]\
+"
+					"    stop_grace_period: 60s\
+");
 
 			/*
 			 * With a monitor: the first data node gets a healthcheck so that
@@ -773,14 +743,6 @@ compose_gen_write(TestCluster *cluster,
 			 */
 			if (!firstNode && cluster->withMonitor && !n->launchDeferred)
 			{
-				/*
-				 * SSL clusters take longer to initialise on slow CI runners
-				 * (cert generation + pg_autoctl SSL config + monitor TLS
-				 * handshake).  Double start_period so the runner has time to
-				 * complete init before failures start counting.
-				 */
-				const char *hc_start =
-					ssl_needs_certs(node_ssl) ? "300s" : "120s";
 				fformat(f,
 						"    healthcheck:\n"
 						"      test: [\"CMD\", \"pg_autoctl\", \"status\","
@@ -788,8 +750,8 @@ compose_gen_write(TestCluster *cluster,
 						"      interval: 2s\n"
 						"      timeout: 5s\n"
 						"      retries: 150\n"
-						"      start_period: %s\n",
-						node_pgdata, hc_start);
+						"      start_period: 60s\n",
+						node_pgdata);
 			}
 
 			if (firstNode)
