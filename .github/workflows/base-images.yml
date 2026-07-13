@@ -1,0 +1,183 @@
+name: Base images
+
+# Maintains cached base images in GHCR so CI build jobs skip re-compiling
+# Postgres and Citus from source on every PR.
+#
+# Two triggers:
+#
+#   nightly   — rebuilds PG19 (tracking PostgreSQL master), every day at 02:00
+#               UTC.  PG19 is in active development so its headers change often
+#               enough that a daily refresh is worthwhile.
+#
+#   weekly    — checks whether a new Postgres minor release has been tagged on
+#               github.com/postgres/postgres for each stable major version
+#               (PG14–18).  If so, rebuilds and pushes a fresh base image and
+#               commits the updated .github/pg-base-versions/pgNN.ref file so
+#               the next weekly check knows what was already built.
+#
+#   manual    — workflow_dispatch lets you rebuild any single major version on
+#               demand (e.g. right after a minor release ships, without waiting
+#               for the next weekly cron).
+#
+# Image naming in GHCR:
+#   ghcr.io/hapostgres/pg-cache:pgNN
+#
+# The ci.yml build jobs pull this as --cache-from, which makes the
+# base→citus→build chain a cache hit when Postgres/Citus haven't changed.
+
+on:
+  schedule:
+    # Nightly at 02:00 UTC — rebuilds PG19 (master).
+    - cron: '0 2 * * *'
+    # Weekly on Monday 03:00 UTC — checks stable minor versions PG14-18.
+    - cron: '0 3 * * 1'
+
+  workflow_dispatch:
+    inputs:
+      pgversion:
+        description: 'Postgres major version to rebuild (e.g. 17). Leave blank to run the full weekly check.'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  CACHE_IMAGE: ghcr.io/${{ github.repository_owner }}/pg-cache
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Nightly: rebuild PG19 from PostgreSQL master.
+  # ---------------------------------------------------------------------------
+  nightly-pg19:
+    name: Nightly rebuild (PG19 / master)
+    if: >
+      github.event_name == 'schedule' && github.event.schedule == '0 2 * * *' ||
+      github.event_name == 'workflow_dispatch' && github.event.inputs.pgversion == '19'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate git-version.h
+        run: make version
+
+      - name: Build and cache PG19 base image
+        run: |
+          docker buildx build \
+            --cache-from type=registry,ref=${{ env.CACHE_IMAGE }}:pg19 \
+            --cache-to   type=registry,ref=${{ env.CACHE_IMAGE }}:pg19,mode=max \
+            --build-arg PGVERSION=19 \
+            --build-arg CITUSTAG=none \
+            --target build \
+            .
+
+  # ---------------------------------------------------------------------------
+  # Weekly: detect new Postgres minor releases for stable versions (PG14-18).
+  # ---------------------------------------------------------------------------
+  check-minor-releases:
+    name: Check minor releases (PG${{ matrix.PGVERSION }})
+    if: >
+      github.event_name == 'schedule' && github.event.schedule == '0 3 * * 1' ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { PGVERSION: 14, CITUSTAG: v12.1.5 }
+          - { PGVERSION: 15, CITUSTAG: v12.1.5 }
+          - { PGVERSION: 16, CITUSTAG: v13.2.0 }
+          - { PGVERSION: 17, CITUSTAG: v13.2.0 }
+          - { PGVERSION: 18, CITUSTAG: v14.1.0 }
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need push access to update ref files.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Detect latest Postgres ${{ matrix.PGVERSION }} minor release
+        id: detect
+        run: |
+          # When triggered manually with a specific pgversion, skip other versions.
+          INPUT="${{ github.event.inputs.pgversion }}"
+          if [ -n "${INPUT}" ] && [ "${INPUT}" != "${{ matrix.PGVERSION }}" ]; then
+            echo "rebuild=false" >> $GITHUB_OUTPUT
+            echo "PG${{ matrix.PGVERSION }}: skipped (manual run requested PG${INPUT})"
+            exit 0
+          fi
+
+          LATEST=$(git ls-remote --tags https://github.com/postgres/postgres \
+            "refs/tags/REL_${{ matrix.PGVERSION }}_*" \
+            | grep -v '\^{}' \
+            | awk '{print $2}' \
+            | sed 's|refs/tags/||' \
+            | grep -E "^REL_${{ matrix.PGVERSION }}_[0-9]+$" \
+            | sort -V \
+            | tail -1)
+
+          STORED=$(cat .github/pg-base-versions/pg${{ matrix.PGVERSION }}.ref 2>/dev/null || echo "none")
+
+          echo "latest=${LATEST}"  >> $GITHUB_OUTPUT
+          echo "stored=${STORED}"  >> $GITHUB_OUTPUT
+
+          if [ "${LATEST}" != "${STORED}" ] && [ -n "${LATEST}" ]; then
+            echo "rebuild=true"  >> $GITHUB_OUTPUT
+            echo "PG${{ matrix.PGVERSION }}: new minor release ${LATEST} (was ${STORED}), rebuilding"
+          else
+            echo "rebuild=false" >> $GITHUB_OUTPUT
+            echo "PG${{ matrix.PGVERSION }}: already at ${STORED}, nothing to do"
+          fi
+
+      - name: Set up Docker Buildx
+        if: steps.detect.outputs.rebuild == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.detect.outputs.rebuild == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate git-version.h
+        if: steps.detect.outputs.rebuild == 'true'
+        run: make version
+
+      - name: Build and cache PG${{ matrix.PGVERSION }} base image
+        if: steps.detect.outputs.rebuild == 'true'
+        run: |
+          docker buildx build \
+            --cache-from type=registry,ref=${{ env.CACHE_IMAGE }}:pg${{ matrix.PGVERSION }} \
+            --cache-to   type=registry,ref=${{ env.CACHE_IMAGE }}:pg${{ matrix.PGVERSION }},mode=max \
+            --build-arg PGVERSION=${{ matrix.PGVERSION }} \
+            --build-arg CITUSTAG=${{ matrix.CITUSTAG }} \
+            --target build \
+            .
+
+      - name: Update stored ref
+        if: steps.detect.outputs.rebuild == 'true'
+        run: |
+          mkdir -p .github/pg-base-versions
+          echo "${{ steps.detect.outputs.latest }}" > .github/pg-base-versions/pg${{ matrix.PGVERSION }}.ref
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/pg-base-versions/pg${{ matrix.PGVERSION }}.ref
+          git commit -m "ci: update PG${{ matrix.PGVERSION }} base image to ${{ steps.detect.outputs.latest }}"
+          git push
