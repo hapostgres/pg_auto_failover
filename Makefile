@@ -13,11 +13,6 @@ PGVERSION ?= $(lastword $(PGVERSIONS))
 # could be "--skip-pg-hba"
 CLUSTER_OPTS = ""
 
-# XXXX This should be in Makefile.citus only
-# but requires to clean up dockerfile and make targets related to citus first.
-# Default Citus Data version
-CITUSTAG ?= v13.2.0
-
 # TODO should be abs_top_dir ?
 TOP := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
@@ -299,43 +294,46 @@ ifeq ($(CITUS),1)
 include Makefile.citus
 endif
 
+# Base image that provides all Postgres versions + Citus builds.
+# Override locally if you've built the base image under a different tag.
+BASE ?= ghcr.io/hapostgres/pg_auto_failover/pgaf-base:bookworm
+
 # We use pg not PG in uppercase in the var name to ease implicit rules matching
-BUILD_ARGS_pg13 = --build-arg PGVERSION=13 --build-arg CITUSTAG=v10.2.9
-BUILD_ARGS_pg14 = --build-arg PGVERSION=14 --build-arg CITUSTAG=v12.1.5
-BUILD_ARGS_pg15 = --build-arg PGVERSION=15 --build-arg CITUSTAG=v12.1.5
-BUILD_ARGS_pg16 = --build-arg PGVERSION=16 --build-arg CITUSTAG=$(CITUSTAG)
-BUILD_ARGS_pg17 = --build-arg PGVERSION=17 --build-arg CITUSTAG=$(CITUSTAG)
-BUILD_ARGS_pg18 = --build-arg PGVERSION=18 --build-arg CITUSTAG=$(CITUSTAG)
+BUILD_ARGS_pg13 = --build-arg PGVERSION=13 --build-arg BASE=$(BASE)
+BUILD_ARGS_pg14 = --build-arg PGVERSION=14 --build-arg BASE=$(BASE)
+BUILD_ARGS_pg15 = --build-arg PGVERSION=15 --build-arg BASE=$(BASE)
+BUILD_ARGS_pg16 = --build-arg PGVERSION=16 --build-arg BASE=$(BASE)
+BUILD_ARGS_pg17 = --build-arg PGVERSION=17 --build-arg BASE=$(BASE)
+BUILD_ARGS_pg18 = --build-arg PGVERSION=18 --build-arg BASE=$(BASE)
+BUILD_ARGS_pg19 = --build-arg PGVERSION=19 --build-arg BASE=$(BASE)
 
 # DOCKER BUILDS
+#
+# make build          — build the 'run' image for every supported PG version
+# make build-pg17     — build the 'run' image for PG 17 only
+# make build-test     — build the 'test' (Python) image for every PG version
+# make build-test-image — build the 'test' image for PGVERSION (default 19)
 
 BUILD_TARGETS       = $(patsubst %,build-pg%,$(PGVERSIONS))
+BUILD_TEST_TARGETS  = $(patsubst %,build-test-pg%,$(PGVERSIONS))
+BUILD_CHECK_TARGETS = $(patsubst %,build-check-pg%,$(PGVERSIONS))
+
 .PHONY: build
 build: $(BUILD_TARGETS) ;
-
-.PHONY: build-demo
-build-demo:
-	docker build $(BUILD_ARGS_pg$(PGVERSION)) -t citusdata/pg_auto_failover:demo .
-
-.PHONY: build-image
-build-image:
-	docker build --target build -t $(BUILD_CONTAINER_NAME) .
 
 .PHONY: $(BUILD_TARGETS)
 $(BUILD_TARGETS): version
 	docker build \
 	  $(BUILD_ARGS_$(subst build-,,$@)) \
+	  --target run \
 	  -t $(CONTAINER_NAME):$(subst build-,,$@) .
 
 # DOCKER TESTS & CHECKS
 
-BUILD_CHECK_TARGETS = $(patsubst %,build-check-pg%,$(PGVERSIONS))
-BUILD_TEST_TARGETS  = $(patsubst %,build-test-pg%,$(PGVERSIONS))
-
 .PHONY: build-check
 build-check: $(BUILD_CHECK_TARGETS)
 
-.PHONY: build-check
+.PHONY: build-test
 build-test: $(BUILD_TEST_TARGETS)
 
 .PHONY: build-test-image

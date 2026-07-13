@@ -16,7 +16,7 @@
 #
 
 ARG PGVERSION=17
-ARG BASE=ghcr.io/citusdata/pg_auto_failover/pgaf-base:bookworm
+ARG BASE=ghcr.io/hapostgres/pg_auto_failover/pgaf-base:bookworm
 
 # ---------------------------------------------------------------------------
 # build — compile pg_auto_failover against one specific Postgres version
@@ -43,7 +43,7 @@ RUN if [ -d src/bin/pgaftest ]; then \
             src/bin/pgaftest/test_spec_scan.c; \
     fi
 
-RUN make -s clean && make -s install -j$(nproc)
+RUN make -s clean && make -s install -j$(nproc) BINDIR=/usr/local/bin
 
 # ---------------------------------------------------------------------------
 # test — old Python test runner (kept for compatibility; new tests use pgaftest)
@@ -178,7 +178,7 @@ RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker \
  && chown docker /var/lib/postgres
 
 COPY --from=build /usr/local/bin/pg_autoctl /usr/local/bin/
-COPY --from=build /usr/lib/postgresql/${PGVERSION}/bin/pgaftest /usr/local/bin/
+COPY --from=build /usr/local/bin/pgaftest /usr/local/bin/
 
 USER docker
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

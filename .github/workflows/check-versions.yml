@@ -24,7 +24,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}/pgaf-base:bookworm
+  IMAGE: ghcr.io/hapostgres/pg_auto_failover/pgaf-base:bookworm
 
 jobs:
   check-versions:
