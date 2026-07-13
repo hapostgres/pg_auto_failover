@@ -17,9 +17,6 @@ def setup_module():
 
 
 def teardown_module():
-    if coordinator1b is not None:
-        coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
-        coordinator1b.run_sql_query("DROP TABLE t1")
     cluster.destroy()
 
 
@@ -137,6 +134,11 @@ def test_006_add_secondaries():
 def test_007_fail_when_disabling_with_secondaries():
     global monitor
     monitor.disable(pgautofailover.Feature.Secondary, formation="non-ha")
+
+
+def test_007b_drop_table():
+    coordinator1a.run_sql_query("select public.wait_until_metadata_sync()")
+    coordinator1a.run_sql_query("DROP TABLE t1")
 
 
 def test_008_shutdown_primaries():

@@ -22,8 +22,6 @@ def setup_module():
 
 
 def teardown_module():
-    coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
-    coordinator1b.run_sql_query("DROP TABLE t1")
     ha_cluster.destroy()
 
 
@@ -136,6 +134,11 @@ def test_004_fail_while_transaction_is_in_progress():
         pass
 
     conn.close()
+
+
+def test_004b_drop_table():
+    coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
+    coordinator1b.run_sql_query("DROP TABLE t1")
 
 
 def test_005_drop_primary_worker():
