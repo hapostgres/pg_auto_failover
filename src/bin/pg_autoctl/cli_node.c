@@ -537,13 +537,28 @@ cli_node_run(int argc, char **argv)
 			}
 
 			/*
-			 * pg_createcluster creates the cluster owned by postgres:postgres
-			 * with mode 700.  Make it group-accessible so that the docker user
-			 * (a member of the postgres group) can run pg_autoctl create.
+			 * pg_createcluster creates everything under /var/lib/postgresql/<ver>/
+			 * owned by postgres:postgres with mode 700 (PGDATA) or 755 (parent).
+			 * pg_autoctl also needs to create sibling directories like
+			 * /var/lib/postgresql/<ver>/backup/node_N/, so make the entire version
+			 * directory group-accessible so the docker user (postgres group member)
+			 * can write there.
 			 */
+			char pgverdir[MAXPGPATH];
+			const char *pgverend = strrchr(spec.pgdata, '/');
+			if (pgverend && pgverend > spec.pgdata)
+			{
+				sformat(pgverdir, sizeof(pgverdir), "%.*s",
+						(int) (pgverend - spec.pgdata), spec.pgdata);
+			}
+			else
+			{
+				strlcpy(pgverdir, spec.pgdata, sizeof(pgverdir));
+			}
+
 			char *chmod_args[] = {
 				"sudo", "chmod", "-R", "g+rwX",
-				spec.pgdata,
+				pgverdir,
 				NULL
 			};
 			pid_t cpid = fork();
@@ -563,7 +578,7 @@ cli_node_run(int argc, char **argv)
 			if (!WIFEXITED(cst) || WEXITSTATUS(cst) != 0)
 			{
 				log_error("chmod -R g+rwX \"%s\" exited with status %d",
-						  spec.pgdata,
+						  pgverdir,
 						  WIFEXITED(cst) ? WEXITSTATUS(cst) : -1);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}

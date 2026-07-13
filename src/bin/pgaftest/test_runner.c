@@ -3701,6 +3701,13 @@ runner_print_summary(const TestRunner *r)
 		return;
 	}
 
+	/* emit spec filename as a TAP comment so the reader knows which file this is */
+	if (r->specFile[0] != '\0')
+	{
+		const char *base = strrchr(r->specFile, '/');
+		fprintf(stderr, "# %s\n", base ? base + 1 : r->specFile);
+	}
+
 	/* compute column width: longest name, minimum 20 */
 	int maxNameLen = 20;
 	long maxMs = 0;
