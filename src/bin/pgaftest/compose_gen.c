@@ -663,13 +663,22 @@ compose_gen_write(TestCluster *cluster,
 				strlcpy(node_pgdata, NODE_PGDATA, sizeof(node_pgdata));
 			}
 
+			/*
+			 * Debian-cluster nodes store data under /var/lib/postgresql/<ver>/<name>,
+			 * so mount the volume there; regular nodes use /var/lib/postgres.
+			 */
+			const char *dataMount = n->debianCluster[0]
+									? "/var/lib/postgresql"
+									: "/var/lib/postgres";
+
 			fformat(f,
 					"    hostname: %s\n"
 					"    volumes:\n"
-					"      - %s_data:/var/lib/postgres:rw\n"
+					"      - %s_data:%s:rw\n"
 					"      - ./%s.ini:" NODE_INI_PATH ":%s\n",
 					n->name,
 					n->name,
+					dataMount,
 					n->name,
 					(n->launchDeferred || n->createDeferred) ? "rw" : "ro");
 			if (ssl_needs_certs(cluster->ssl))

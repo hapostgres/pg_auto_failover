@@ -498,10 +498,13 @@ cli_node_run(int argc, char **argv)
 			char pgmajor_str[8];
 			sformat(pgmajor_str, sizeof(pgmajor_str), "%d", pgmajor);
 
+			/*
+			 * Run as root (via sudo) so pg_createcluster can create the cluster
+			 * owned by the postgres system user, exactly as a real Debian install
+			 * would.  The container's sudoers grants NOPASSWD to the docker user.
+			 */
 			char *pgcc_args[] = {
-				"pg_createcluster",
-				"--user", "docker",
-				"--group", "postgres",
+				"sudo", "pg_createcluster",
 				pgmajor_str,
 				spec.debianCluster,
 				"--",
@@ -520,7 +523,7 @@ cli_node_run(int argc, char **argv)
 			}
 			if (pid == 0)
 			{
-				execvp("pg_createcluster", pgcc_args);
+				execvp("sudo", pgcc_args);
 				_exit(127);
 			}
 			int st = 0;
@@ -530,6 +533,38 @@ cli_node_run(int argc, char **argv)
 			{
 				log_error("pg_createcluster exited with status %d",
 						  WIFEXITED(st) ? WEXITSTATUS(st) : -1);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+
+			/*
+			 * pg_createcluster creates the cluster owned by postgres:postgres
+			 * with mode 700.  Make it group-accessible so that the docker user
+			 * (a member of the postgres group) can run pg_autoctl create.
+			 */
+			char *chmod_args[] = {
+				"sudo", "chmod", "-R", "g+rwX",
+				spec.pgdata,
+				NULL
+			};
+			pid_t cpid = fork();
+			if (cpid < 0)
+			{
+				log_fatal("fork: %m");
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+			if (cpid == 0)
+			{
+				execvp("sudo", chmod_args);
+				_exit(127);
+			}
+			int cst = 0;
+			while (waitpid(cpid, &cst, 0) < 0 && errno == EINTR)
+			{ }
+			if (!WIFEXITED(cst) || WEXITSTATUS(cst) != 0)
+			{
+				log_error("chmod -R g+rwX \"%s\" exited with status %d",
+						  spec.pgdata,
+						  WIFEXITED(cst) ? WEXITSTATUS(cst) : -1);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
 		}
