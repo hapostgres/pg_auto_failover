@@ -33,19 +33,33 @@ jobs:
         run: ci/banned.h.sh
 
   # ---------------------------------------------------------------------------
+  # Ensure the base image (all PG versions + Citus) is available in ghcr.io.
+  # On cache-hit this is a fast manifest check (~5 s).  On cache-miss the
+  # base image is built from scratch and pushed (~15-20 min, once).
+  # ---------------------------------------------------------------------------
+  ensure-base:
+    name: Ensure base image
+    needs: style_checker
+    uses: ./.github/workflows/base-image.yml
+    permissions:
+      contents: read
+      packages: write
+
+  # ---------------------------------------------------------------------------
   # Build one pgaf:run image per Postgres version and upload each as an
   # artifact.  All downstream test jobs download only the version they need.
   #
-  # BuildKit GHA layer cache (type=gha) is used for all docker buildx calls so
-  # that the apt-get heavy base/citus stages are reused across runs when the
-  # Dockerfile and source haven't changed.  On cache-hit runs this saves 3–6
-  # minutes per version.  Each version gets its own cache scope so a PG17 build
-  # doesn't evict PG14 layers.
+  # The heavy apt/Citus layers live in the base image (pulled from ghcr.io).
+  # Only the pg_auto_failover compilation layer is cached via type=gha, which
+  # is fast (source + make, < 2 min) and isolated per PG version.
   # ---------------------------------------------------------------------------
   build-images:
     name: Build image (PG${{ matrix.PGVERSION }})
-    needs: style_checker
+    needs: [style_checker, ensure-base]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -57,20 +71,17 @@ jobs:
       - name: Generate git-version.h
         run: make version
 
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Docker BuildKit
         uses: docker/setup-buildx-action@v3
         with:
           install: true
-
-      - name: Set CITUSTAG
-        id: citustag
-        run: |
-          case "${{ matrix.PGVERSION }}" in
-            14|15) echo "CITUSTAG=v12.1.5" >> "$GITHUB_OUTPUT" ;;
-            16|17) echo "CITUSTAG=v13.2.0" >> "$GITHUB_OUTPUT" ;;
-            18)    echo "CITUSTAG=v14.1.0" >> "$GITHUB_OUTPUT" ;;
-            *)     echo "CITUSTAG=none"    >> "$GITHUB_OUTPUT" ;;
-          esac
 
       - name: Build pgaf:run image (PG${{ matrix.PGVERSION }})
         run: |
@@ -78,7 +89,7 @@ jobs:
             --cache-from type=gha,scope=pgaf-run-pg${{ matrix.PGVERSION }} \
             --cache-to   type=gha,mode=max,scope=pgaf-run-pg${{ matrix.PGVERSION }} \
             --build-arg PGVERSION=${{ matrix.PGVERSION }} \
-            --build-arg CITUSTAG=${{ steps.citustag.outputs.CITUSTAG }} \
+            --build-arg BASE=ghcr.io/${{ github.repository }}/pgaf-base:bookworm \
             --target run \
             -t pgaf:run-pg${{ matrix.PGVERSION }} \
             --load \
@@ -107,8 +118,11 @@ jobs:
   # ---------------------------------------------------------------------------
   build-pgaftest:
     name: Build pgaftest image
-    needs: style_checker
+    needs: [style_checker, ensure-base]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     env:
       PGVERSION: 17
 
@@ -117,6 +131,13 @@ jobs:
 
       - name: Generate git-version.h
         run: make version
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker BuildKit
         uses: docker/setup-buildx-action@v3
@@ -130,7 +151,7 @@ jobs:
             --cache-from type=gha,scope=pgaf-pgaftest \
             --cache-to   type=gha,mode=max,scope=pgaf-pgaftest \
             --build-arg PGVERSION=${{ env.PGVERSION }} \
-            --build-arg CITUSTAG=v13.2.0 \
+            --build-arg BASE=ghcr.io/${{ github.repository }}/pgaf-base:bookworm \
             --target pgaftest \
             -t pgaf:pgaftest \
             --load \

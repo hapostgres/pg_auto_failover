@@ -1,0 +1,168 @@
+name: Check base image versions
+
+# Runs weekly to detect new PGDG minor releases or Citus tags.
+# When versions have changed since the base image was last built,
+# triggers a forced rebuild of the base image.
+#
+# Checks:
+#   - apt.postgresql.org: latest available version for PG 14–19
+#   - github.com/citusdata/citus: latest release in each supported series
+#
+# The base image stores the Citus tags it was built with as Docker
+# labels (org.pgaf.citustag.<PG>).  PGDG versions are checked live
+# against the apt repo; if any PG package has a newer version than
+# what a test container currently reports, the base image is stale.
+
+on:
+  schedule:
+    # Monday 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}/pgaf-base:bookworm
+
+jobs:
+  check-versions:
+    name: Check PGDG + Citus versions
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # Pull current base image labels
+      # -----------------------------------------------------------------------
+      - name: Pull base image labels
+        id: labels
+        run: |
+          if ! docker manifest inspect "$IMAGE" > /tmp/manifest.json 2>&1; then
+            echo "Base image does not exist — will build it."
+            echo "needs_rebuild=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract labels via docker inspect (needs a pull)
+          docker pull "$IMAGE" --quiet
+          for pg in 14 15 16 17 18 19; do
+            val=$(docker inspect "$IMAGE" \
+              --format "{{ index .Config.Labels \"org.pgaf.citustag.${pg}\" }}" 2>/dev/null || echo "")
+            echo "CURRENT_CITUSTAG_${pg}=${val}" >> "$GITHUB_OUTPUT"
+          done
+          echo "needs_rebuild=false" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Check latest Citus tags per release series via GitHub Releases API
+      # -----------------------------------------------------------------------
+      - name: Check latest Citus tags
+        id: citus
+        if: steps.labels.outputs.needs_rebuild == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fetch all Citus releases (latest 100) once
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/citusdata/citus/releases?per_page=100" \
+            > /tmp/citus-releases.json
+
+          # Latest tag in a given semver series (major.minor match)
+          latest_in_series() {
+            local prefix="$1"  # e.g. "v12."
+            jq -r --arg p "$prefix" \
+              '[.[] | select(.tag_name | startswith($p)) | .tag_name] | sort | last' \
+              /tmp/citus-releases.json
+          }
+
+          LATEST_12=$(latest_in_series "v12.")
+          LATEST_13=$(latest_in_series "v13.")
+          LATEST_14=$(latest_in_series "v14.")
+
+          # Map PG versions to series
+          # PG14,15 → v12.x   PG16,17 → v13.x   PG18 → v14.x   PG19 → none
+          echo "LATEST_CITUSTAG_14=${LATEST_12}" >> "$GITHUB_OUTPUT"
+          echo "LATEST_CITUSTAG_15=${LATEST_12}" >> "$GITHUB_OUTPUT"
+          echo "LATEST_CITUSTAG_16=${LATEST_13}" >> "$GITHUB_OUTPUT"
+          echo "LATEST_CITUSTAG_17=${LATEST_13}" >> "$GITHUB_OUTPUT"
+          echo "LATEST_CITUSTAG_18=${LATEST_14}" >> "$GITHUB_OUTPUT"
+          echo "LATEST_CITUSTAG_19=none"         >> "$GITHUB_OUTPUT"
+
+          # Detect any mismatch — read current tags from the pulled image labels
+          CHANGED=false
+          for pg in 14 15 16 17 18 19; do
+            current=$(docker inspect "$IMAGE" \
+              --format "{{ index .Config.Labels \"org.pgaf.citustag.${pg}\" }}" 2>/dev/null || echo "")
+            latest=$(eval echo "\$LATEST_CITUSTAG_${pg}")
+            if [ -n "$latest" ] && [ "$current" != "$latest" ]; then
+              echo "Citus PG${pg}: ${current} → ${latest}"
+              CHANGED=true
+            else
+              echo "Citus PG${pg}: ${current} (up to date)"
+            fi
+          done
+          echo "citus_changed=${CHANGED}" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Check PGDG minor versions via apt-cache inside a throwaway container
+      # -----------------------------------------------------------------------
+      - name: Check PGDG minor versions
+        id: pgdg
+        if: steps.labels.outputs.needs_rebuild == 'false'
+        run: |
+          # Run apt-cache inside the existing base image to compare what's
+          # installed vs. what's available in the PGDG repo
+          docker run --rm "$IMAGE" bash -c '
+            apt-get update -qq 2>/dev/null
+            CHANGED=false
+            for pg in 14 15 16 17 18 19; do
+              installed=$(dpkg-query -W -f="\\${Version}" postgresql-${pg} 2>/dev/null || echo "")
+              available=$(apt-cache show postgresql-${pg} 2>/dev/null \
+                | awk "/^Version:/{print \$2; exit}")
+              if [ -z "$installed" ] && [ -z "$available" ]; then
+                continue  # PG version not applicable
+              fi
+              if [ "$installed" != "$available" ]; then
+                echo "PGDG PG${pg}: installed=${installed}, available=${available} → STALE"
+                CHANGED=true
+              else
+                echo "PGDG PG${pg}: ${installed} (up to date)"
+              fi
+            done
+            [ "$CHANGED" = "true" ] && exit 1 || exit 0
+          '
+          if [ $? -ne 0 ]; then
+            echo "pgdg_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pgdg_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Trigger base image rebuild if anything changed
+      # -----------------------------------------------------------------------
+      - name: Rebuild base image if stale
+        if: |
+          steps.labels.outputs.needs_rebuild == 'true' ||
+          steps.citus.outputs.citus_changed == 'true'  ||
+          steps.pgdg.outputs.pgdg_changed == 'true'
+        uses: ./.github/workflows/base-image.yml
+        with:
+          force_rebuild: true
+
+      - name: Report — nothing to do
+        if: |
+          steps.labels.outputs.needs_rebuild != 'true' &&
+          steps.citus.outputs.citus_changed != 'true'  &&
+          steps.pgdg.outputs.pgdg_changed != 'true'
+        run: echo "Base image is up to date. No rebuild needed."

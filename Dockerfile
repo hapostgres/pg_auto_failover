@@ -1,106 +1,29 @@
 #
-# Using --build-arg PGVERSION=14 we can build pg_auto_failover for any
-# target version of Postgres. In the Makefile, we use that to our advantage
-# and tag test images such as pg_auto_failover_test:pg14.
+# Build pg_auto_failover for a specific Postgres major version.
 #
+# The heavy apt + Citus work lives in Dockerfile.base (image pgaf-base).
+# This file adds:
+#   build   — compiles pg_auto_failover + pgaftest, runs installcheck
+#   test    — old Python test runner (kept for compatibility)
+#   run     — minimal runtime image for test nodes
+#   pgaftest — test-runner image (Docker CLI + pgaftest binary)
+#
+# Usage:
+#   docker buildx build \
+#     --build-arg PGVERSION=17 \
+#     --build-arg BASE=ghcr.io/ORG/REPO/pgaf-base:bookworm \
+#     --target run -t pgaf:run-pg17 .
+#
+
 ARG PGVERSION=17
+ARG BASE=ghcr.io/citusdata/pg_auto_failover/pgaf-base:bookworm
 
-#
-# Define a base image with all our build dependencies.
-#
-# This base image contains all our target Postgres versions.
-#
-FROM debian:bookworm-slim AS base
-
-ARG PGVERSION
-
-RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    curl \
-    gnupg \
-    git \
-    gawk \
-    flex \
-    bison \
-    iproute2 \
-    libcurl4-gnutls-dev \
-    libicu-dev \
-    libncurses-dev \
-    libxml2-dev \
-    zlib1g-dev \
-    libedit-dev \
-    libkrb5-dev \
-    liblz4-dev \
-    libncurses6 \
-    libpam-dev \
-    libreadline-dev \
-    libselinux1-dev \
-    libssl-dev \
-    libxslt1-dev \
-    libzstd-dev \
-    uuid-dev \
-    make \
-    autoconf \
-    openssl \
-    python3 \
-    python3-setuptools \
-    python3-psycopg2 \
-    python3-pip \
-    sudo \
-    tmux \
-    watch \
-    lsof \
-    psutils \
-    psmisc \
-    htop \
-    less \
-    valgrind \
-    postgresql-common \
- && rm -rf /var/lib/apt/lists/*
-
-RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-      | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
-RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
-
-# bypass initdb of a "main" cluster
-RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
-RUN apt-get update \
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-     postgresql-server-dev-${PGVERSION} \
-     postgresql-${PGVERSION} \
-	&& rm -rf /var/lib/apt/lists/*
-
-RUN pip3 install --break-system-packages nose pytest 'pyroute2>=0.5.17'
-
-RUN adduser --disabled-password --gecos '' docker
-RUN adduser docker sudo
-RUN adduser docker postgres
-RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-
-FROM base AS citus
+# ---------------------------------------------------------------------------
+# build — compile pg_auto_failover against one specific Postgres version
+# ---------------------------------------------------------------------------
+FROM ${BASE} AS build
 
 ARG PGVERSION
-ARG CITUSTAG=v13.2.0
-
-ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
-
-RUN git clone -b ${CITUSTAG} --depth 1 https://github.com/citusdata/citus.git /usr/src/citus
-WORKDIR /usr/src/citus
-
-RUN ./configure
-RUN make -s clean && make -s -j8 install
-
-#
-# On-top of the base build-dependencies image, now we can build
-# pg_auto_failover for a given --build-arg PGVERSION target version of
-# Postgres.
-#
-FROM citus AS build
-
-ARG PGVERSION
-
 ENV PG_CONFIG=/usr/lib/postgresql/${PGVERSION}/bin/pg_config
 
 WORKDIR /usr/src/pg_auto_failover
@@ -110,23 +33,21 @@ COPY Makefile.citus ./
 COPY Makefile.azure* ./
 COPY ./src/ ./src
 COPY ./src/bin/pg_autoctl/git-version.h ./src/bin/pg_autoctl/git-version.h
+
 # Touch bison/flex generated files so they appear newer than the grammar
 # sources, preventing make from re-running bison (system bison version may
 # differ from the one used to pre-generate the committed .c/.h files).
-# Guard with -d: older releases (e.g. v2.1 built via git-archive for upgrade
-# tests) do not have src/bin/pgaftest/ at all.
 RUN if [ -d src/bin/pgaftest ]; then \
       touch src/bin/pgaftest/test_spec_parse.c \
             src/bin/pgaftest/test_spec_parse.h \
             src/bin/pgaftest/test_spec_scan.c; \
     fi
-RUN make -s clean && make -s install -j8
 
+RUN make -s clean && make -s install -j$(nproc)
 
-#
-# Given the build image above, we can now run our test suite targetting a
-# given version of Postgres.
-#
+# ---------------------------------------------------------------------------
+# test — old Python test runner (kept for compatibility; new tests use pgaftest)
+# ---------------------------------------------------------------------------
 FROM build AS test
 
 ARG PGVERSION
@@ -137,66 +58,68 @@ RUN chmod a+w ./valgrind
 
 USER docker
 
-ENV PG_AUTOCTL_DEBUG 1
-ENV PATH /usr/lib/postgresql/${PGVERSION}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV PG_AUTOCTL_DEBUG=1
+ENV PATH=/usr/lib/postgresql/${PGVERSION}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-
+# ---------------------------------------------------------------------------
+# run — minimal runtime image for monitor and data-node containers.
 #
-# And finally our "run" images with the bare minimum for run-time.
-#
+# Starts fresh from debian:bookworm-slim; installs only the Postgres runtime
+# packages (no build tools, no Citus source), then copies the compiled
+# binaries and extension files from the build stage.
+# ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS run
 
 ARG PGVERSION
 
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ca-certificates \
-	curl \
-	gnupg \
-    make \
-    sudo \
-    tmux \
-	watch \
-    libncurses6 \
-    lsof \
-    psutils \
-    dnsutils \
-    bind9-host \
-	libcurl4-gnutls-dev \
-    libzstd-dev \
-	postgresql-common \
-    libpq-dev \
-	&& rm -rf /var/lib/apt/lists/*
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      bind9-host \
+      ca-certificates \
+      curl \
+      dnsutils \
+      gnupg \
+      libcurl4-gnutls-dev \
+      libncurses6 \
+      libpq-dev \
+      libzstd-dev \
+      lsof \
+      make \
+      postgresql-common \
+      psutils \
+      sudo \
+      tmux \
+      watch \
+ && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
       | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
-RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" > /etc/apt/sources.list.d/pgdg.list
+RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] \
+      http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" \
+      > /etc/apt/sources.list.d/pgdg.list
 
-# bypass initdb of a "main" cluster
-RUN echo 'create_main_cluster = false' | sudo tee -a /etc/postgresql-common/createcluster.conf
-RUN apt-get update\
-	&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-${PGVERSION} \
-	&& rm -rf /var/lib/apt/lists/*
+RUN echo 'create_main_cluster = false' >> /etc/postgresql-common/createcluster.conf
 
-RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker
-RUN adduser docker sudo
-RUN adduser docker postgres
-RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      postgresql-${PGVERSION} \
+ && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/citus*.so /usr/lib/postgresql/${PGVERSION}/lib
-COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/citus* /usr/share/postgresql/${PGVERSION}/extension/
+RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker \
+ && adduser docker sudo \
+ && adduser docker postgres \
+ && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
-COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so /usr/lib/postgresql/${PGVERSION}/lib
-COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* /usr/share/postgresql/${PGVERSION}/extension/
-COPY --from=build /usr/lib/postgresql/${PGVERSION}/bin/pg_autoctl /usr/local/bin
+COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/citus*.so \
+                  /usr/lib/postgresql/${PGVERSION}/lib/
+COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/citus* \
+                  /usr/share/postgresql/${PGVERSION}/extension/
+COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so \
+                  /usr/lib/postgresql/${PGVERSION}/lib/
+COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* \
+                  /usr/share/postgresql/${PGVERSION}/extension/
+COPY --from=build /usr/local/bin/pg_autoctl /usr/local/bin/
 
-#
-# In tests/upgrade/docker-compose.yml we use internal docker volumes in
-# order to be able to restart the nodes and keep the data around. For that
-# to work, we must prepare a mount-point that is owned by our target user
-# (docker), so that once the volume in mounted there by docker compose,
-# pg_autoctl has the necessary set of privileges.
-#
 RUN mkdir -p /var/lib/postgres \
  && chown -R docker /var/lib/postgres
 
@@ -205,26 +128,18 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/p
 ENV PG_AUTOCTL_DEBUG=1
 ENV PGDATA=/var/lib/postgres/pgaf
 
+# ---------------------------------------------------------------------------
+# pgaftest — standalone test-runner image.
 #
-# pgaftest image — standalone test-runner image.
-#
-# Kept entirely separate from the pg_auto_failover run image so that no
-# test tooling leaks into the images used for monitor and data nodes.
-#
-# Runtime dependencies come from two sources:
-#   - Docker's own apt repo  → docker-ce-cli + docker-compose-plugin (v2)
-#   - PGDG apt repo          → libpq5 matching the build's PGVERSION
-#
-# The pg_auto_failover binaries are copied directly from the run stage;
-# nothing is built here.
-#
+# Kept separate from the run image so no test tooling leaks into node images.
+# Uses Docker-out-of-Docker: mounts the host Docker socket at runtime.
+# ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS pgaftest
 
 ARG PGVERSION
 
-# Minimal runtime libs (libssl, libcurl, libzstd) plus PGDG for libpq
 RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
       gnupg \
@@ -232,40 +147,37 @@ RUN apt-get update \
       libncurses6 \
       libzstd-dev \
       sudo \
-  && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
-# PGDG repo — needed for the libpq version that pg_autoctl and pgaftest link against
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
       | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
-RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" \
+RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] \
+      http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main ${PGVERSION}" \
       > /etc/apt/sources.list.d/pgdg.list \
-  && apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       libpq5 \
-  && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
-# Docker's apt repo — provides docker-ce-cli and the compose v2 plugin
 RUN curl -fsSL https://download.docker.com/linux/debian/gpg \
       | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
-  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+ && echo "deb [arch=$(dpkg --print-architecture) \
+      signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
       https://download.docker.com/linux/debian bookworm stable" \
       > /etc/apt/sources.list.d/docker.list \
-  && apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       docker-ce-cli \
       docker-compose-plugin \
-  && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
 RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker \
-  && adduser docker sudo \
-  && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers \
-  && mkdir -p /var/lib/postgres \
-  && chown docker /var/lib/postgres
+ && adduser docker sudo \
+ && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers \
+ && mkdir -p /var/lib/postgres \
+ && chown docker /var/lib/postgres
 
-# Binaries from the pg_auto_failover run image
-COPY --from=run /usr/local/bin/pg_autoctl /usr/local/bin/
-
-# pgaftest binary from the build stage
+COPY --from=build /usr/local/bin/pg_autoctl /usr/local/bin/
 COPY --from=build /usr/lib/postgresql/${PGVERSION}/bin/pgaftest /usr/local/bin/
 
 USER docker
