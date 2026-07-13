@@ -87,6 +87,7 @@ typedef struct TestFormation
 {
 	char name[128];               /* formation name; default "default" */
 	int numSync;                 /* number-sync-standbys, -1 = unset */
+	bool disableSecondary;       /* secondary = false in [formation] ini section */
 	TestNode nodes[PGAF_MAX_NODES];
 	int nodeCount;
 } TestFormation;

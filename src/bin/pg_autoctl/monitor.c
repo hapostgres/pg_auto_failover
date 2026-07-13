@@ -26,6 +26,7 @@
 
 #define STR_ERRCODE_OBJECT_IN_USE "55006"
 #define STR_ERRCODE_EXCLUSION_VIOLATION "23P01"
+#define STR_ERRCODE_INVALID_OBJECT_DEFINITION "42P17"
 
 #define STR_ERRCODE_SERIALIZATION_FAILURE "40001"
 #define STR_ERRCODE_STATEMENT_COMPLETION_UNKNOWN "40003"
@@ -894,7 +895,9 @@ monitor_register_node(Monitor *monitor, char *formation,
 								   &parseContext, parseNodeState))
 	{
 		if (monitor_retryable_error(parseContext.sqlstate) ||
-			strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
+			strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0 ||
+			strcmp(parseContext.sqlstate,
+				   STR_ERRCODE_INVALID_OBJECT_DEFINITION) == 0)
 		{
 			*mayRetry = true;
 			return false;

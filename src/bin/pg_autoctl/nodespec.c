@@ -63,7 +63,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 	char replicationQuorumStr[8] = { 0 };
 	char pgHbaLanStr[8] = { 0 };
 	char launchModeStr[16] = { 0 };
-	char createDeferredStr[8] = { 0 };
+	char createDeferredStr[16] = { 0 };
 	char noMonitorStr[8] = { 0 };
 	char citusRoleStr[NAMEDATALEN] = { 0 };
 	int port = 5432;
@@ -280,7 +280,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 					strlcpy(spec->formationNames[fi], fname,
 							sizeof(spec->formationNames[fi]));
 
-					/* optional: kind = ha (default) */
+					/* optional: kind = citus (default pgsql) */
 					int ki = ini_find_property(raw, si, "kind", 0);
 					if (ki != INI_NOT_FOUND)
 					{
@@ -300,6 +300,19 @@ nodespec_read(const char *path, NodeSpec *spec)
 					{
 						strlcpy(spec->formationKinds[fi], "pgsql",
 								sizeof(spec->formationKinds[fi]));
+					}
+
+					/* optional: secondary = false disables failover secondaries */
+					int si2 = ini_find_property(raw, si, "secondary", 0);
+					if (si2 != INI_NOT_FOUND)
+					{
+						const char *sv = ini_property_value(raw, si, si2);
+						if (sv && (strcmp(sv, "false") == 0 ||
+								   strcmp(sv, "no") == 0 ||
+								   strcmp(sv, "0") == 0))
+						{
+							spec->formationDisableSecondary[fi] = true;
+						}
 					}
 				}
 				ini_destroy(raw);
@@ -452,6 +465,10 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			strcmp(spec->formationKinds[fi], "pgsql") != 0)
 		{
 			fformat(out, "kind = %s\n", spec->formationKinds[fi]);
+		}
+		if (spec->formationDisableSecondary[fi])
+		{
+			fformat(out, "secondary = false\n");
 		}
 	}
 
@@ -624,15 +641,11 @@ nodespec_create_argv(const NodeSpec *spec,
 		PUSH(spec->autoctl_node_password);
 	}
 
-	/* non-default formations to create during monitor init */
-	if (spec->kind == NODE_KIND_UNKNOWN)
-	{
-		for (int fi = 0; fi < spec->formationCount; fi++)
-		{
-			PUSH("--formation");
-			PUSH(spec->formationNames[fi]);
-		}
-	}
+	/*
+	 * Non-default formations are created by a post-init child in cli_node_run
+	 * after pg_autoctl run starts postgres, so that each formation's kind and
+	 * secondary flag can be applied correctly.  Nothing to add to the argv here.
+	 */
 
 	if (spec->kind != NODE_KIND_UNKNOWN)
 	{

@@ -984,8 +984,27 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 			continue;
 		}
 
-		/* kind defaults to "ha" — the monitor uses that default when absent */
 		fformat(f, "\n[formation %s]\n", form->name);
+
+		/* derive kind from node types: any coordinator/worker → citus */
+		bool isCitus = false;
+		for (int ni = 0; ni < form->nodeCount && !isCitus; ni++)
+		{
+			PgInstanceKind k = form->nodes[ni].kind;
+			if (k == NODE_KIND_CITUS_COORDINATOR || k == NODE_KIND_CITUS_WORKER)
+			{
+				isCitus = true;
+			}
+		}
+		if (isCitus)
+		{
+			fformat(f, "kind = citus\n");
+		}
+
+		if (form->disableSecondary)
+		{
+			fformat(f, "secondary = false\n");
+		}
 	}
 
 	fclose(f);

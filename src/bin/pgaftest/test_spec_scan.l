@@ -169,6 +169,7 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"create"             { return T_CREATE; }
 <CLUSTER_BODY>"deferred"           { return T_DEFERRED; }
 <CLUSTER_BODY>"immediate"          { return T_IMMEDIATE; }
+<CLUSTER_BODY>"false"              { return T_FALSE; }
 <CLUSTER_BODY>"and"                { return T_AND; }
 <CLUSTER_BODY>"initially"          { return T_INITIALLY; }
 <CLUSTER_BODY>"stopped"            { return T_STOPPED; }

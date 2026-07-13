@@ -17,7 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/wait.h>
 
 #include "cli_common.h"
 #include "cli_node.h"
@@ -609,8 +608,9 @@ cli_node_run(int argc, char **argv)
 	}
 
 	/*
-	 * Tell the supervisor which spec file to watch for live changes.
-	 * Set just before execv so the child inherits it.
+	 * Tell the supervisor which spec file to watch for live changes, and to
+	 * create any non-default formations declared in the spec (monitor
+	 * cold-start only).  Set just before execv so the child inherits it.
 	 */
 	setenv("PG_AUTOCTL_NODESPEC", nodeSpecPath, 1);
 

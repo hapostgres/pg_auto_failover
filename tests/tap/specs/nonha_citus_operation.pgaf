@@ -8,7 +8,7 @@
 
 cluster {
     monitor
-    formation non-ha {
+    formation non-ha secondary false {
         coordinator1a coordinator
         coordinator1b coordinator create and launch deferred
         worker1a worker group 1

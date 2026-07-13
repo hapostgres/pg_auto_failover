@@ -90,6 +90,7 @@ typedef struct NodeSpec
 	int formationCount;
 	char formationNames[NODESPEC_MAX_FORMATIONS][NAMEDATALEN];
 	char formationKinds[NODESPEC_MAX_FORMATIONS][NAMEDATALEN]; /* "pgsql" default */
+	bool formationDisableSecondary[NODESPEC_MAX_FORMATIONS];    /* true → secondary=false */
 
 	/* [pg_auto_failover]  — monitor kind: password for autoctl_node role */
 	char autoctl_node_password[MAXCONNINFO];
