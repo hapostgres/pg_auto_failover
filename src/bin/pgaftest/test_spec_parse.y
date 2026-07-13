@@ -157,7 +157,7 @@ static TestNode      *current_node        = NULL;
 /* ---- Cluster-body tokens ---- */
 %token T_IMAGE T_IMAGE_TARGET T_SSL T_AUTH T_AUTH_METHOD T_FORMATION T_NUM_SYNC
 %token T_COORDINATOR T_WORKER T_ASYNC T_NO_MONITOR
-%token T_LAUNCH T_DEFERRED T_IMMEDIATE T_INITIALLY T_VOLUME
+%token T_LAUNCH T_CREATE T_DEFERRED T_IMMEDIATE T_INITIALLY T_VOLUME
 %token T_LISTEN T_CITUS_SECONDARY T_CANDIDATE_PRIORITY T_PORT T_PASSWORD T_MONITOR_PASSWORD
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
 %token T_EXTENSION_VERSION T_BIND_SOURCE
@@ -515,10 +515,22 @@ node_opt:
 	}
 	| T_DEFERRED
 	{
+		/* bare "deferred" = create and launch deferred (both gates) */
+		current_node->createDeferred = true;
 		current_node->launchDeferred = true;
 	}
 	| T_LAUNCH T_DEFERRED
 	{
+		/* "launch deferred" alone = run-deferred only, create immediate */
+		current_node->launchDeferred = true;
+	}
+	| T_CREATE T_DEFERRED
+	{
+		current_node->createDeferred = true;
+	}
+	| T_CREATE T_AND T_LAUNCH T_DEFERRED
+	{
+		current_node->createDeferred = true;
 		current_node->launchDeferred = true;
 	}
 	| T_LAUNCH T_IMMEDIATE

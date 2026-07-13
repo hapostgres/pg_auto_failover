@@ -62,6 +62,7 @@ typedef struct TestNode
 
 	/* create-time options — passed to pg_autoctl create via [options] ini */
 	bool noMonitor;              /* --no-monitor: standalone node */
+	bool createDeferred;         /* node waits before pg_autoctl create */
 	bool launchDeferred;         /* node waits for pg_autoctl node start */
 	bool listen;                 /* --listen 0.0.0.0: bind all interfaces */
 	bool citusSecondary;         /* --citus-secondary */

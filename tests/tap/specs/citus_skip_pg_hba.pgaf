@@ -1,7 +1,7 @@
 # Test Citus cluster with authMethod=skip (pg_autoctl does not edit pg_hba.conf).
 #
 # With auth=skip, pg_autoctl leaves pg_hba.conf untouched after postgres init.
-# All data nodes are launch deferred so startup can be sequenced manually:
+# All data nodes are create and launch deferred so startup can be sequenced manually:
 #
 #   setup: monitor starts → add LAN HBA to monitor → start coord0a
 #   test_000: add LAN HBA to coord0a (so coord0b can connect later)
@@ -19,10 +19,10 @@ cluster {
     monitor
     auth skip
     formation {
-        coord0a coordinator launch deferred
-        coord0b coordinator launch deferred
-        worker1a worker group 1 launch deferred
-        worker1b worker group 1 launch deferred
+        coord0a coordinator create and launch deferred
+        coord0b coordinator create and launch deferred
+        worker1a worker group 1 create and launch deferred
+        worker1b worker group 1 create and launch deferred
     }
 }
 

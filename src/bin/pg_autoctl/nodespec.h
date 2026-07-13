@@ -81,6 +81,7 @@ typedef struct NodeSpec
 	char ssl_ca_file[MAXPGPATH];
 	char ssl_cert_file[MAXPGPATH];
 	char ssl_key_file[MAXPGPATH];
+	bool createDeferred;         /* [launch] create=deferred: wait before create */
 	bool launchDeferred;         /* [launch] mode=deferred: wait for node start */
 	char debianCluster[64];      /* [options] debian_cluster: run pg_createcluster */
 

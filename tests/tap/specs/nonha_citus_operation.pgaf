@@ -10,11 +10,11 @@ cluster {
     monitor
     formation non-ha {
         coordinator1a coordinator
-        coordinator1b coordinator launch deferred
+        coordinator1b coordinator create and launch deferred
         worker1a worker group 1
-        worker1b worker group 1 launch deferred
+        worker1b worker group 1 create and launch deferred
         worker2a worker group 2
-        worker2b worker group 2 launch deferred
+        worker2b worker group 2 create and launch deferred
     }
 }
 

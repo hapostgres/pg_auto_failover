@@ -166,8 +166,10 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"password"           { return T_PASSWORD; }
 <CLUSTER_BODY>"monitor-password"   { return T_MONITOR_PASSWORD; }
 <CLUSTER_BODY>"launch"             { return T_LAUNCH; }
+<CLUSTER_BODY>"create"             { return T_CREATE; }
 <CLUSTER_BODY>"deferred"           { return T_DEFERRED; }
 <CLUSTER_BODY>"immediate"          { return T_IMMEDIATE; }
+<CLUSTER_BODY>"and"                { return T_AND; }
 <CLUSTER_BODY>"initially"          { return T_INITIALLY; }
 <CLUSTER_BODY>"stopped"            { return T_STOPPED; }
 <CLUSTER_BODY>"volume"             { return T_VOLUME; }

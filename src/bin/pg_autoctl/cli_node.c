@@ -409,30 +409,6 @@ cli_node_run(int argc, char **argv)
 	}
 
 	/*
-	 * [launch] mode = deferred: spin here re-reading nodeSpecPath until
-	 * pg_autoctl node start rewrites it with mode = immediate.
-	 */
-	if (spec.launchDeferred)
-	{
-		log_info("Node configured with launch = deferred in \"%s\"; "
-				 "waiting for pg_autoctl node start", nodeSpecPath);
-
-		for (;;)
-		{
-			pg_usleep(500 * 1000);   /* 0.5 s poll */
-
-			NodeSpec polled = { 0 };
-			if (nodespec_read(nodeSpecPath, &polled) && !polled.launchDeferred)
-			{
-				spec = polled;
-				break;
-			}
-		}
-
-		log_info("launch = immediate; proceeding with node initialization");
-	}
-
-	/*
 	 * Delete any leftover PID file from a previous run.  This is safe here
 	 * because we have not started a supervisor yet.  Stale PID files cause
 	 * pg_autoctl to refuse to start, so remove them unconditionally.
@@ -449,6 +425,7 @@ cli_node_run(int argc, char **argv)
 	 * CA-signed SSL: copy server and client certs into the locations that
 	 * PostgreSQL and libpq expect.  This must happen before pg_autoctl
 	 * create (which configures SSL) and before pg_autoctl run.
+	 * SSL certs are always copied immediately — no monitor dependency.
 	 */
 	if (!IS_EMPTY_STRING_BUFFER(spec.ssl_ca_file))
 	{
@@ -459,10 +436,28 @@ cli_node_run(int argc, char **argv)
 	}
 
 	/*
-	 * Tell the supervisor which spec file to watch for live changes.
-	 * Set before either execv so the child inherits it.
+	 * [launch] create = deferred: spin here re-reading nodeSpecPath until
+	 * pg_autoctl node start clears the flag, then proceed with node creation.
 	 */
-	setenv("PG_AUTOCTL_NODESPEC", nodeSpecPath, 1);
+	if (spec.createDeferred)
+	{
+		log_info("Node configured with create = deferred in \"%s\"; "
+				 "waiting for pg_autoctl node start", nodeSpecPath);
+
+		for (;;)
+		{
+			pg_usleep(500 * 1000);   /* 0.5 s poll */
+
+			NodeSpec polled = { 0 };
+			if (nodespec_read(nodeSpecPath, &polled) && !polled.createDeferred)
+			{
+				spec = polled;
+				break;
+			}
+		}
+
+		log_info("create = immediate; proceeding with node initialization");
+	}
 
 	/*
 	 * Check whether PGDATA already has pg_autoctl.cfg.
@@ -576,6 +571,36 @@ cli_node_run(int argc, char **argv)
 		(void) nodespec_read(nodeSpecPath, &prev);
 		(void) nodespec_apply(&spec, &prev);
 	}
+
+	/*
+	 * [launch] mode = deferred: spin here re-reading nodeSpecPath until
+	 * pg_autoctl node start clears the flag, then exec pg_autoctl run.
+	 */
+	if (spec.launchDeferred)
+	{
+		log_info("Node configured with launch = deferred in \"%s\"; "
+				 "waiting for pg_autoctl node start", nodeSpecPath);
+
+		for (;;)
+		{
+			pg_usleep(500 * 1000);   /* 0.5 s poll */
+
+			NodeSpec polled = { 0 };
+			if (nodespec_read(nodeSpecPath, &polled) && !polled.launchDeferred)
+			{
+				spec = polled;
+				break;
+			}
+		}
+
+		log_info("launch = immediate; proceeding to run");
+	}
+
+	/*
+	 * Tell the supervisor which spec file to watch for live changes.
+	 * Set just before execv so the child inherits it.
+	 */
+	setenv("PG_AUTOCTL_NODESPEC", nodeSpecPath, 1);
 
 	/*
 	 * Both paths end here: exec `pg_autoctl run --pgdata <dir>`.
@@ -742,14 +767,15 @@ cli_node_start(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!spec.launchDeferred)
+	if (!spec.launchDeferred && !spec.createDeferred)
 	{
-		log_info("Node \"%s\" launch is already immediate; nothing to do",
+		log_info("Node \"%s\" is already immediate; nothing to do",
 				 nodeSpecPath);
 		exit(0);
 	}
 
 	spec.launchDeferred = false;
+	spec.createDeferred = false;
 
 	if (!nodespec_write_to_path(&spec, nodeSpecPath))
 	{
@@ -757,7 +783,7 @@ cli_node_start(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	log_info("Cleared launch = deferred in \"%s\"; node will now start",
+	log_info("Cleared deferred flags in \"%s\"; node will now proceed",
 			 nodeSpecPath);
 }
 

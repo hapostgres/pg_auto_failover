@@ -63,6 +63,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 	char replicationQuorumStr[8] = { 0 };
 	char pgHbaLanStr[8] = { 0 };
 	char launchModeStr[16] = { 0 };
+	char createDeferredStr[8] = { 0 };
 	char noMonitorStr[8] = { 0 };
 	char citusRoleStr[NAMEDATALEN] = { 0 };
 	int port = 5432;
@@ -141,10 +142,13 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(spec->ssl_key_file),
 								   spec->ssl_key_file, ""),
 
-		/* [launch] — optional section; mode=deferred delays node init */
+		/* [launch] — optional section; mode=deferred delays node run */
 		make_strbuf_option_default("launch", "mode", NULL, false,
 								   sizeof(launchModeStr), launchModeStr,
 								   "immediate"),
+		make_strbuf_option_default("launch", "create", NULL, false,
+								   sizeof(createDeferredStr),
+								   createDeferredStr, "immediate"),
 
 		/* [pg_auto_failover] — monitor: password for autoctl_node role */
 		make_strbuf_option_default("pg_auto_failover", "autoctl_node_password",
@@ -220,6 +224,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 		 strcmp(pgHbaLanStr, "1") == 0);
 
 	spec->launchDeferred = (strcmp(launchModeStr, "deferred") == 0);
+	spec->createDeferred = (strcmp(createDeferredStr, "deferred") == 0);
 	spec->noMonitor =
 		(strcmp(noMonitorStr, "true") == 0 ||
 		 strcmp(noMonitorStr, "yes") == 0 ||
@@ -426,9 +431,17 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 	}
 
 	/* only emit [launch] when deferred — omitting the section means immediate */
-	if (spec->launchDeferred)
+	if (spec->launchDeferred || spec->createDeferred)
 	{
-		fformat(out, "\n[launch]\nmode = deferred\n");
+		fformat(out, "\n[launch]\n");
+		if (spec->createDeferred)
+		{
+			fformat(out, "create = deferred\n");
+		}
+		if (spec->launchDeferred)
+		{
+			fformat(out, "mode = deferred\n");
+		}
 	}
 
 	/* [formation <name>] sections — monitor kind only */

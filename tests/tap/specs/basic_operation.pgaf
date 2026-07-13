@@ -13,7 +13,7 @@
 #   pgautofailover_standby_2  — node2's slot (on the primary)
 #   pgautofailover_standby_3  — node3's slot (on the primary)
 #
-# node3 is declared launch deferred so the container starts with
+# node3 is declared create and launch deferred so the container starts with
 # `sleep infinity`; test_017 issues `compose start node3` which
 # restarts it with the normal `pg_autoctl node run` command.
 # Predecessor: tests/test_basic_operation.py
@@ -23,7 +23,7 @@ cluster {
     formation {
         node1
         node2
-        node3 launch deferred
+        node3 create and launch deferred
     }
 }
 
@@ -256,7 +256,7 @@ step test_016_drop_secondary {
 }
 
 #
-# test_017–019: add node3 as a new secondary (was launch deferred).
+# test_017–019: add node3 as a new secondary (was create and launch deferred).
 #   test_017: issue `pg_autoctl node start` to bring the deferred node live.
 #   test_018: perform failover must fail immediately — node3 is still
 #             catching up and no election can complete yet.

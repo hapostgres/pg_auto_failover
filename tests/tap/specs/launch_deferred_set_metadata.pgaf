@@ -1,0 +1,84 @@
+# Test that pg_autoctl set node metadata can be called while a node waits in
+# launch deferred mode (create-immediate, run-deferred), and that the metadata
+# change is visible on the monitor before pg_autoctl node start is issued.
+#
+# node2 is declared "launch deferred" (create = immediate, run = deferred):
+# the container runs pg_autoctl create postgres at startup, registers with the
+# monitor, then waits at the run gate.  test_002 sets the node name metadata
+# while node2 is still waiting, test_003 releases the gate, test_004 confirms
+# node2 reaches secondary with the updated name.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2 launch deferred
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_000: wait for node1 to become primary
+#
+
+step test_000_setup {
+    wait until node1 state is single  timeout 60s
+}
+
+#
+# test_001: node2 ran pg_autoctl create postgres (create-immediate) and
+# registered with the monitor.  Verify it appears in the node list.
+#
+
+step test_001_node2_created {
+    sql monitor {
+        SELECT count(*) FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { 1 }
+}
+
+#
+# test_002: set node metadata on node2 while it is still waiting at the
+# run gate (launch deferred).  The monitor should reflect the new name.
+#
+
+step test_002_set_metadata {
+    exec node2  pg_autoctl set node metadata --name node_b --pgdata /var/lib/postgres/pgaf
+    sql monitor {
+        SELECT nodename FROM pgautofailover.node WHERE nodename = 'node_b';
+    }
+    expect { node_b }
+}
+
+#
+# test_003: release the run gate — node2 will exec pg_autoctl run
+#
+
+step test_003_node_start {
+    exec node2  pg_autoctl node start
+}
+
+#
+# test_004: verify cluster is healthy: node1 primary, node2 secondary
+#
+
+step test_004_verify {
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 90s
+}
+
+sequence {
+    test_000_setup
+    test_001_node2_created
+    test_002_set_metadata
+    test_003_node_start
+    test_004_verify
+}

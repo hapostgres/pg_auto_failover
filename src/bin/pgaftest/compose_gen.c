@@ -671,7 +671,7 @@ compose_gen_write(TestCluster *cluster,
 					n->name,
 					n->name,
 					n->name,
-					n->launchDeferred ? "rw" : "ro");
+					(n->launchDeferred || n->createDeferred) ? "rw" : "ro");
 			if (ssl_needs_certs(cluster->ssl))
 			{
 				fformat(f,
@@ -726,7 +726,8 @@ compose_gen_write(TestCluster *cluster,
 			 * nodes use service_started so they launch as soon as node1 has
 			 * started (they don't need postgres to be ready yet).
 			 */
-			if (!firstNode && cluster->withMonitor && !n->launchDeferred)
+			if (!firstNode && cluster->withMonitor &&
+				!n->launchDeferred && !n->createDeferred)
 			{
 				fformat(f,
 						"    healthcheck:\n"
@@ -748,7 +749,8 @@ compose_gen_write(TestCluster *cluster,
 						firstNode->name,
 						cluster->withMonitor ? "service_healthy" : "service_started");
 			}
-			else if (cluster->withMonitor && !n->launchDeferred)
+			else if (cluster->withMonitor &&
+					 !n->launchDeferred && !n->createDeferred)
 			{
 				/* node1: wait for monitor to be healthy before starting */
 				fformat(f,
@@ -758,7 +760,7 @@ compose_gen_write(TestCluster *cluster,
 			}
 			fformat(f, "\n");
 
-			if (!firstNode && !n->launchDeferred)
+			if (!firstNode && !n->launchDeferred && !n->createDeferred)
 			{
 				firstNode = n;
 			}
@@ -1255,9 +1257,17 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 	{
 		fformat(f, "listen     = 0.0.0.0\n");
 	}
-	if (node->launchDeferred)
+	if (node->launchDeferred || node->createDeferred)
 	{
-		fformat(f, "\n[launch]\nmode = deferred\n");
+		fformat(f, "\n[launch]\n");
+		if (node->createDeferred)
+		{
+			fformat(f, "create = deferred\n");
+		}
+		if (node->launchDeferred)
+		{
+			fformat(f, "mode = deferred\n");
+		}
 	}
 
 	/*

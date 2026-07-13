@@ -3894,8 +3894,6 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		}
 	}
 
-	tap_plan(&r);
-
 	/* teardown{} — always runs */
 	if (spec->teardown)
 	{
