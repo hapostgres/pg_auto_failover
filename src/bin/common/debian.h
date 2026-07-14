@@ -64,5 +64,15 @@ typedef struct debian_pathnames
 
 bool keeper_ensure_pg_configuration_files_in_pgdata(PostgresSetup *pgSetup);
 
+/*
+ * pg_createcluster_for_test is a pgaftest testing facility: it invokes
+ * pg_createcluster (via sudo) to create a Debian-style PostgreSQL cluster
+ * inside a test container, then chowns the version directory so the
+ * unprivileged container user ("docker") can create subdirectories in it.
+ *
+ * NOT intended for production use.
+ */
+void pg_createcluster_for_test(const char *pgdata, const char *cluster_name);
+
 
 #endif /* DEBIAN_H */

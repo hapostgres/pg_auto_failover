@@ -21,6 +21,7 @@
 #include "cli_common.h"
 #include "cli_node.h"
 #include "cli_root.h"
+#include "debian.h"
 #include "commandline.h"
 #include "defaults.h"
 #include "env_utils.h"
@@ -503,104 +504,13 @@ cli_node_run(int argc, char **argv)
 		 */
 		if (!IS_EMPTY_STRING_BUFFER(spec.debianCluster))
 		{
-			/* Derive PG major version from path /var/lib/postgresql/<ver>/... */
-			int pgmajor = 0;
-			const char pfx[] = "/var/lib/postgresql/";
-			if (strncmp(spec.pgdata, pfx, strlen(pfx)) == 0)
-			{
-				pgmajor = atoi(spec.pgdata + strlen(pfx)); /* IGNORE-BANNED */
-			}
-			if (pgmajor <= 0)
-			{
-				log_error("Cannot determine PG major version from pgdata \"%s\"",
-						  spec.pgdata);
-				exit(EXIT_CODE_BAD_CONFIG);
-			}
-
-			char pgmajor_str[8];
-			sformat(pgmajor_str, sizeof(pgmajor_str), "%d", pgmajor);
-
 			/*
-			 * Run as root (via sudo) so pg_createcluster can create the cluster
-			 * owned by the container user ("docker"), matching what the Python
-			 * test suite does.  --user docker makes PGDATA owned by docker so
-			 * pg_autoctl (running as docker) can write config files into it.
-			 * --group postgres keeps the group ownership as postgres so that
-			 * any postgres process can still access the data.
+			 * debian_cluster is a pgaftest testing facility: it creates a
+			 * Debian-style PostgreSQL cluster inside a test container so that
+			 * pg_autoctl create postgres picks up the split-config layout.
+			 * This code path is NOT intended for production use.
 			 */
-			char *pgcc_args[] = {
-				"sudo", "pg_createcluster",
-				"--user", "docker",
-				"--group", "postgres",
-				pgmajor_str,
-				spec.debianCluster,
-				"--",
-				"--auth-local", "trust",
-				"--auth-host", "trust",
-				NULL
-			};
-			log_info("pg_autoctl node run: pg_createcluster %d %s "
-					 "(--user docker --group postgres)",
-					 pgmajor, spec.debianCluster);
-
-			pid_t pid = fork();
-			if (pid < 0)
-			{
-				log_fatal("fork: %m");
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-			if (pid == 0)
-			{
-				execvp("sudo", pgcc_args);
-				_exit(127);
-			}
-			int st = 0;
-			while (waitpid(pid, &st, 0) < 0 && errno == EINTR)
-			{ }
-			if (!WIFEXITED(st) || WEXITSTATUS(st) != 0)
-			{
-				log_error("pg_createcluster exited with status %d",
-						  WIFEXITED(st) ? WEXITSTATUS(st) : -1);
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-
-			/*
-			 * pg_createcluster creates /var/lib/postgresql/<ver>/ owned by
-			 * the postgres system user with mode 755.  pg_autoctl (running as
-			 * the docker user) needs to create subdirectories there (e.g.
-			 * backup/node_N).  Chown the version directory so docker owns it.
-			 */
-
-			/* pfx is "/var/lib/postgresql/" (with trailing /), so use %s%d */
-			char pg_ver_dir[MAXPGPATH];
-			sformat(pg_ver_dir, sizeof(pg_ver_dir), "%s%d", pfx, pgmajor);
-
-			char *chown_args[] = {
-				"sudo", "chown", "docker", pg_ver_dir, NULL
-			};
-			log_info("pg_autoctl node run: chown docker \"%s\"", pg_ver_dir);
-
-			pid_t chown_pid = fork();
-			if (chown_pid < 0)
-			{
-				log_fatal("fork: %m");
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-			if (chown_pid == 0)
-			{
-				execvp("sudo", chown_args);
-				_exit(127);
-			}
-			int chown_st = 0;
-			while (waitpid(chown_pid, &chown_st, 0) < 0 && errno == EINTR)
-			{ }
-			if (!WIFEXITED(chown_st) || WEXITSTATUS(chown_st) != 0)
-			{
-				log_error("chown docker \"%s\" exited with status %d",
-						  pg_ver_dir,
-						  WIFEXITED(chown_st) ? WEXITSTATUS(chown_st) : -1);
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
+			pg_createcluster_for_test(spec.pgdata, spec.debianCluster);
 		}
 
 		/*
