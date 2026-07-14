@@ -55,6 +55,15 @@ typedef struct TestRunner
 	 * by the "set monitor <svc>" DSL command in a replace-monitor test.
 	 */
 	char activeMonitorService[64];
+
+	/* Per-step timing/result for the post-run summary */
+	struct
+	{
+		char name[256];
+		bool passed;
+		long elapsed_ms;
+	} stepResults[PGAF_MAX_SEQ];
+	int stepResultCount;
 } TestRunner;
 
 /*

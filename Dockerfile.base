@@ -1,0 +1,147 @@
+#
+# Dockerfile.base — long-lived base image for pg_auto_failover CI.
+#
+# Contains every supported Postgres version (from apt.postgresql.org) plus
+# one Citus build per Postgres version.  This image changes only when a new
+# major Postgres version is added, a Citus release is cut, or system packages
+# need updating.  It is built and pushed to ghcr.io; the per-PG pg_auto_failover
+# build images use it as their FROM, so the heavy apt/Citus work is cached
+# across all PR runs.
+#
+# Build:
+#   docker buildx build -f Dockerfile.base -t ghcr.io/ORG/REPO/pgaf-base:bookworm .
+#
+# To build with specific Citus versions:
+#   docker buildx build -f Dockerfile.base \
+#     --build-arg CITUSTAG_14=v12.1.5  \
+#     --build-arg CITUSTAG_17=v13.2.0  \
+#     -t ghcr.io/ORG/REPO/pgaf-base:bookworm .
+#
+
+FROM debian:bookworm-slim
+
+# ---------------------------------------------------------------------------
+# System build tools
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      autoconf \
+      bison \
+      build-essential \
+      ca-certificates \
+      curl \
+      gawk \
+      git \
+      gnupg \
+      htop \
+      iproute2 \
+      less \
+      libedit-dev \
+      libicu-dev \
+      libkrb5-dev \
+      liblz4-dev \
+      libncurses-dev \
+      libncurses6 \
+      libnuma-dev \
+      libpam-dev \
+      libreadline-dev \
+      libselinux1-dev \
+      libcurl4-gnutls-dev \
+      libssl-dev \
+      libxml2-dev \
+      libxslt1-dev \
+      libzstd-dev \
+      lsof \
+      make \
+      openssl \
+      psmisc \
+      psutils \
+      python3 \
+      python3-pip \
+      python3-psycopg2 \
+      python3-setuptools \
+      sudo \
+      tmux \
+      uuid-dev \
+      valgrind \
+      watch \
+      flex \
+      zlib1g-dev \
+      postgresql-common \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN PIP_ROOT_USER_ACTION=ignore pip3 install --break-system-packages nose pytest 'pyroute2>=0.5.17'
+
+# ---------------------------------------------------------------------------
+# PGDG apt repository — all supported major versions in one source line
+# ---------------------------------------------------------------------------
+RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /usr/share/keyrings/pgdg-archive-keyring.gpg
+
+RUN echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] \
+      http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main 14 15 16 17" \
+      > /etc/apt/sources.list.d/pgdg.list
+
+# Don't create a default cluster on install (we create them explicitly in tests)
+RUN echo 'create_main_cluster = false' >> /etc/postgresql-common/createcluster.conf
+
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      postgresql-14            postgresql-server-dev-14 \
+      postgresql-15            postgresql-server-dev-15 \
+      postgresql-16            postgresql-server-dev-16 \
+      postgresql-17            postgresql-server-dev-17 \
+ && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Citus — one build per supported Postgres version.
+#
+# CITUSTAG_<PG>=none skips the build for that version (PG not yet supported
+# by any Citus release).  CITUSTAG_<PG>=main uses the development branch with
+# --without-pg-version-check.
+# ---------------------------------------------------------------------------
+ARG CITUSTAG_14=v12.1.5
+ARG CITUSTAG_15=v12.1.5
+ARG CITUSTAG_16=v13.2.0
+ARG CITUSTAG_17=v13.2.0
+
+RUN set -e; \
+    for pair in \
+        "14:${CITUSTAG_14}" \
+        "15:${CITUSTAG_15}" \
+        "16:${CITUSTAG_16}" \
+        "17:${CITUSTAG_17}"; \
+    do \
+        PG="${pair%%:*}"; \
+        TAG="${pair#*:}"; \
+        [ "$TAG" = "none" ] && continue; \
+        echo "=== Building Citus ${TAG} for PostgreSQL ${PG} ==="; \
+        CONFIGURE_FLAGS=""; \
+        [ "$TAG" = "main" ] && CONFIGURE_FLAGS="--without-pg-version-check"; \
+        git clone -b "$TAG" --depth 1 \
+            https://github.com/citusdata/citus.git /usr/src/citus-pg${PG} \
+        && ( cd /usr/src/citus-pg${PG} \
+             && PG_CONFIG=/usr/lib/postgresql/${PG}/bin/pg_config \
+                ./configure ${CONFIGURE_FLAGS} \
+             && make -s -j$(nproc) install ) \
+        && rm -rf /usr/src/citus-pg${PG}; \
+    done
+
+# ---------------------------------------------------------------------------
+# Users and sudo
+# ---------------------------------------------------------------------------
+RUN adduser --disabled-password --gecos '' docker \
+ && adduser docker sudo \
+ && adduser docker postgres \
+ && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Record the Citus tags baked into this image as a label for cache validation
+ARG CITUSTAG_14
+ARG CITUSTAG_15
+ARG CITUSTAG_16
+ARG CITUSTAG_17
+
+LABEL org.pgaf.citustag.14="${CITUSTAG_14}" \
+      org.pgaf.citustag.15="${CITUSTAG_15}" \
+      org.pgaf.citustag.16="${CITUSTAG_16}" \
+      org.pgaf.citustag.17="${CITUSTAG_17}"

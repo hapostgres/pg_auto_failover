@@ -81,13 +81,16 @@ typedef struct NodeSpec
 	char ssl_ca_file[MAXPGPATH];
 	char ssl_cert_file[MAXPGPATH];
 	char ssl_key_file[MAXPGPATH];
-	bool launchDeferred;         /* [launch] mode=deferred: wait for node start */
+	bool createDeferred;         /* [launch] create=deferred: wait before create */
+	bool launchDeferred;         /* [launch] run=deferred: wait for node start */
+	char debianCluster[64];      /* [options] debian_cluster: run pg_createcluster */
 
 	/* [formation <name>]  — monitor kind: non-default formations to create */
 #define NODESPEC_MAX_FORMATIONS 16
 	int formationCount;
 	char formationNames[NODESPEC_MAX_FORMATIONS][NAMEDATALEN];
 	char formationKinds[NODESPEC_MAX_FORMATIONS][NAMEDATALEN]; /* "pgsql" default */
+	bool formationDisableSecondary[NODESPEC_MAX_FORMATIONS];    /* true → secondary=false */
 
 	/* [pg_auto_failover]  — monitor kind: password for autoctl_node role */
 	char autoctl_node_password[MAXCONNINFO];

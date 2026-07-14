@@ -2,7 +2,7 @@
 # Postgres after an unexpected stop, survives a demoted transition, and
 # correctly orchestrates a failover when Postgres is broken on the primary.
 #
-# node2 is declared launch deferred so it starts in single mode for test_001,
+# node2 is declared create and launch deferred so it starts in single mode for test_001,
 # matching the Python test order (node2 is not created until test_003).
 #
 # Ported from tests/test_ensure.py
@@ -12,7 +12,7 @@ cluster {
     monitor
     formation {
         node1
-        node2 launch deferred
+        node2 create and launch deferred
     }
 }
 

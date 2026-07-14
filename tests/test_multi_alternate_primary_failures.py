@@ -117,12 +117,27 @@ def test_003_002_stop_primary():
 
     # node3 can't be promoted when it's the only one reporting its LSN
     print()
-    assert node2.wait_until_assigned_state(target_state="draining")
-    assert node3.wait_until_state(target_state="report_lsn")
+    # The monitor assigns draining briefly then immediately moves to
+    # demote_timeout once node3 converges to prepare_promotion.  The two
+    # events can happen within the same second, making draining invisible to
+    # a 100ms poll loop.  Accept either state as success.
+    assert node2.wait_until_assigned_state(
+        target_state="draining", or_state="demote_timeout"
+    )
+    # The monitor assigns node3 goal=report_lsn (BuildCandidateListForFailover)
+    # then may immediately assign goal=prepare_promotion in the same transaction
+    # when node3 is the sole remaining standby.  node3's keeper never reports
+    # reportedstate=report_lsn because it transitions before the next poll.
+    # Check the assigned (goal) state instead of the reported state.
+    assert node3.wait_until_assigned_state(
+        target_state="report_lsn", or_state="prepare_promotion"
+    )
 
-    # check that node3 stays at report_lsn and doesn't go to wait_primary
+    # check that node3 stays blocked and doesn't go to wait_primary
     node3.sleep(5)
-    assert node3.wait_until_state(target_state="report_lsn")
+    assert node3.wait_until_assigned_state(
+        target_state="report_lsn", or_state="prepare_promotion"
+    )
 
 
 def test_003_003_bringup_last_failed_primary():

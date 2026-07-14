@@ -979,6 +979,17 @@ cli_drop_node_from_monitor_and_wait(KeeperConfig *config)
 
 	(void) cli_drop_node_from_monitor(config, &nodeId, &groupId);
 
+	/*
+	 * With --no-wait the caller takes responsibility for any cleanup; return
+	 * immediately after the monitor-side remove_node() call.
+	 */
+	if (dropNoWait)
+	{
+		log_info("Node unregistered from monitor; not waiting for the node "
+				 "row to disappear (--no-wait).");
+		return;
+	}
+
 	/* if the timeout is zero, just don't wait at all */
 	if (config->listen_notifications_timeout == 0)
 	{

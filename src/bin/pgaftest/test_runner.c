@@ -604,7 +604,7 @@ monitor_get_node_state(TestRunner *r, const char *nodeName,
 								  "%s exec -T %s "
 								  "psql -U autoctl_node -d pg_auto_failover -At "
 								  "-c \"SELECT reportedstate||'|'||goalstate FROM pgautofailover.node "
-								  "    WHERE nodename='%s'\" 2>/dev/null",
+								  "    WHERE nodehost='%s'\" 2>/dev/null",
 								  r->composeBase, r->activeMonitorService, nodeName);
 		if (rc2 != 0 || out[0] == '\0')
 		{
@@ -1011,6 +1011,14 @@ runner_drain_notify(TestRunner *r, CurrentNodeState *last,
 				 * both goalState and reportedState equal the target for this node.
 				 * markNodes[i] == NULL is a wildcard matching any node.
 				 */
+
+				/*
+				 * Claim the first unsatisfied slot whose state (and optional
+				 * node name) matches this notification.  The break ensures
+				 * one notification claims only one slot, so duplicate state
+				 * entries (e.g. "secondary, secondary") correctly require two
+				 * distinct convergence events.
+				 */
 				bool matched = false;
 				for (int i = 0; i < markCount; i++)
 				{
@@ -1018,13 +1026,15 @@ runner_drain_notify(TestRunner *r, CurrentNodeState *last,
 						strcmp(ns_goal, markStates[i]) == 0 &&
 						strcmp(ns_rep, markStates[i]) == 0 &&
 						(!markNodes || !markNodes[i] ||
-						 strcmp(ns.node.name, markNodes[i]) == 0))
+						 strcmp(ns.node.name, markNodes[i]) == 0) &&
+						!(satisfied && satisfied[i]))
 					{
 						matched = true;
 						if (satisfied)
 						{
 							satisfied[i] = true;
 						}
+						break;
 					}
 				}
 				const char *prefix = matched ? "* [notify]" : "  [notify]";
@@ -1193,12 +1203,21 @@ monitor_check_formation_converged(TestRunner *r,
 			}
 
 			nodesQueried++;
+
+			/*
+			 * Claim the first unsatisfied slot whose state matches this node.
+			 * Claiming only one slot per node means duplicate state entries
+			 * (e.g. "secondary, secondary") correctly require two distinct
+			 * nodes in that state.
+			 */
 			for (int si = 0; si < stateCount && si < PGAF_MAX_WAIT_STATES; si++)
 			{
-				if (strcmp(reported, states[si]) == 0 &&
+				if (!satisfied[si] &&
+					strcmp(reported, states[si]) == 0 &&
 					strcmp(assigned, states[si]) == 0)
 				{
 					satisfied[si] = true;
+					break;
 				}
 			}
 		}
@@ -2376,6 +2395,37 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			return true;
 		}
 
+		case CMD_RUN:
+		{
+			char expandedArgs[4096] = "";
+			if (!runner_expand_macros(r, cmd->args, expandedArgs,
+									  sizeof(expandedArgs), errBuf, errLen))
+			{
+				return false;
+			}
+
+			char out[4096] = "";
+			int rc = run_cmd_capture(out, sizeof(out),
+									 "%s run --rm %s %s 2>&1",
+									 r->composeBase,
+									 cmd->service, expandedArgs);
+
+			strlcpy(r->lastSqlOutput, out, sizeof(r->lastSqlOutput));
+			r->lastSqlFailed = false;
+			if (rc != 0)
+			{
+				if (out[0])
+				{
+					log_output("   ", out);
+				}
+				sformat(errBuf, errLen,
+						"run %s %s failed (exit %d)",
+						cmd->service, expandedArgs, rc);
+				return false;
+			}
+			return true;
+		}
+
 		case CMD_WAIT_STATE:
 		{
 			/*
@@ -3323,6 +3373,12 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 			break;
 		}
 
+		case CMD_RUN:
+		{
+			sformat(buf, len, "run %s  %s", cmd->service, cmd->args);
+			break;
+		}
+
 		case CMD_WAIT_STATE:
 		{
 			sformat(buf, len, "wait until %s state = %s  timeout %ds",
@@ -3688,6 +3744,83 @@ runner_wait_for_monitor(TestRunner *r)
 
 
 /* -----------------------------------------------------------------------
+ * runner_print_summary
+ *
+ * Print a pg_regress-style per-step result table to stderr after the
+ * teardown block completes.  Called once at the end of runner_run().
+ * ----------------------------------------------------------------------- */
+static void
+runner_print_summary(const TestRunner *r)
+{
+	if (r->stepResultCount == 0)
+	{
+		return;
+	}
+
+	/* emit spec filename as a TAP comment so the reader knows which file this is */
+	if (r->specFile[0] != '\0')
+	{
+		const char *base = strrchr(r->specFile, '/');
+		fformat(stderr, "# %s\n", base ? base + 1 : r->specFile);
+	}
+
+	/* compute column width: longest name, minimum 20 */
+	int maxNameLen = 20;
+	long maxMs = 0;
+	for (int i = 0; i < r->stepResultCount; i++)
+	{
+		int len = (int) strlen(r->stepResults[i].name);
+		if (len > maxNameLen)
+		{
+			maxNameLen = len;
+		}
+		if (r->stepResults[i].elapsed_ms > maxMs)
+		{
+			maxMs = r->stepResults[i].elapsed_ms;
+		}
+	}
+
+	/* width for ms field: number of digits in maxMs, minimum 4 */
+	int msWidth = 4;
+	for (long v = maxMs; v >= 10; v /= 10)
+	{
+		msWidth++;
+	}
+
+	int failCount = 0;
+	for (int i = 0; i < r->stepResultCount; i++)
+	{
+		const char *name = r->stepResults[i].name;
+		bool passed = r->stepResults[i].passed;
+		long ms = r->stepResults[i].elapsed_ms;
+
+		if (!passed)
+		{
+			failCount++;
+		}
+
+		fformat(stderr, "%-6s%-8d - %-*s %*ld ms\n",
+				passed ? "ok" : "not ok",
+				i + 1,
+				maxNameLen, name,
+				msWidth, ms);
+	}
+
+	fformat(stderr, "1..%d\n", r->stepResultCount);
+	if (failCount == 0)
+	{
+		fformat(stderr, "# All %d tests passed.\n", r->stepResultCount);
+	}
+	else
+	{
+		fformat(stderr, "# %d test%s failed.\n",
+				failCount,
+				failCount == 1 ? "" : "s");
+	}
+}
+
+
+/* -----------------------------------------------------------------------
  * Public API
  * ----------------------------------------------------------------------- */
 bool
@@ -3773,6 +3906,20 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		{
 			tap_plan(&r);
 			tap_diag("setup failed: %s", err);
+
+			/* Capture container logs before teardown destroys them */
+			log_info("--- container logs (setup failed) ---");
+			(void) run_cmd("%s logs --no-color --timestamps 2>&1",
+						   r.composeBase);
+			log_info("--- end container logs ---");
+
+			/* teardown{} — always run, even on setup failure */
+			if (spec->teardown)
+			{
+				char tdErr[512] = "";
+				log_info("Running teardown block");
+				runner_exec_step(&r, spec->teardown, tdErr, sizeof(tdErr), 0);
+			}
 			return false;
 		}
 	}
@@ -3792,7 +3939,27 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 
 		log_info("STEP %d: %s", i + 1, name);
 		char err[512] = "";
-		if (runner_exec_step(&r, step, err, sizeof(err), i + 1))
+
+		struct timespec t0, t1;
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+		bool passed = runner_exec_step(&r, step, err, sizeof(err), i + 1);
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+
+		long elapsed_ms =
+			(t1.tv_sec - t0.tv_sec) * 1000L +
+			(t1.tv_nsec - t0.tv_nsec) / 1000000L;
+
+		if (r.stepResultCount < PGAF_MAX_SEQ)
+		{
+			strlcpy(r.stepResults[r.stepResultCount].name,
+					name,
+					sizeof(r.stepResults[0].name));
+			r.stepResults[r.stepResultCount].passed = passed;
+			r.stepResults[r.stepResultCount].elapsed_ms = elapsed_ms;
+			r.stepResultCount++;
+		}
+
+		if (passed)
 		{
 			tap_ok(&r, name);
 		}
@@ -3800,11 +3967,15 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		{
 			tap_not_ok(&r, name, err);
 			allPassed = false;
+
+			/* Capture container logs to aid diagnosis before teardown destroys them */
+			log_info("--- container logs (step %s failed) ---", name);
+			(void) run_cmd("%s logs --no-color --timestamps 2>&1",
+						   r.composeBase);
+			log_info("--- end container logs ---");
 			break;
 		}
 	}
-
-	tap_plan(&r);
 
 	/* teardown{} — always runs */
 	if (spec->teardown)
@@ -3813,6 +3984,8 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		log_info("Running teardown block");
 		runner_exec_step(&r, spec->teardown, err, sizeof(err), 0);
 	}
+
+	runner_print_summary(&r);
 
 	/* compose lifecycle is owned by the host — do not call compose_down here */
 	return allPassed;

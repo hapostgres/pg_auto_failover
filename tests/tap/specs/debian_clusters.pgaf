@@ -21,9 +21,10 @@ teardown {
 }
 
 #
-# test_001: pg_autoctl adopts the Debian "main" cluster pre-created by
-# pg_createcluster at image build time.  postgresql.conf starts outside
-# PGDATA (/etc/postgresql/17/main/); pg_autoctl moves it in on first run.
+# test_001: pg_autoctl adopts the Debian "main" cluster.  When debian_cluster
+# is set in node.ini, pg_autoctl node run calls pg_createcluster before init.
+# postgresql.conf starts outside PGDATA (/etc/postgresql/17/main/); pg_autoctl
+# moves it in on first run.
 #
 
 step test_001_single_with_debian_cluster {

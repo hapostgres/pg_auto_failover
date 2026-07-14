@@ -1,0 +1,119 @@
+# Test pg_autoctl drop node --destroy and --destroy --force.
+#
+# Three-node cluster: node1 (primary), node2 (secondary), node3 (secondary).
+#
+# Exercises:
+#   - pg_autoctl drop node --no-wait          (deregister from monitor; PGDATA kept)
+#   - pg_autoctl drop node --destroy          (deregister + remove PGDATA)
+#   - pg_autoctl drop node --destroy --force  (skip monitor contact; remove PGDATA)
+#
+# The --force variant simulates the failure scenario from test_multi_async.py
+# where the monitor is unreachable during teardown; the drop must succeed even
+# when pg_autoctl cannot reach the monitor.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+        node3
+    }
+}
+
+setup {
+    wait until primary, secondary, secondary  timeout 180s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+# ------------------------------------------------------------------ baseline
+
+step test_001_create_table {
+    sql node1 { CREATE TABLE t1 (a int); }
+    sql node1 { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step test_002_verify_replication {
+    sql node2 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } }
+    sql node3 { SELECT * FROM t1 ORDER BY a; }
+    expect { { 1 } { 2 } }
+}
+
+# ------------------------------------------------------------------ drop node (no --destroy): PGDATA kept
+
+step test_003_drop_node2_no_destroy {
+    # Drop node2 from the monitor while it is still running.
+    # With --no-wait we return immediately; the running keeper detects the
+    # monitor-side removal on its next heartbeat and exits cleanly on its own.
+    exec monitor  pg_autoctl drop node --name node2 --no-wait
+    # node3 is still alive, so node1 stays primary (not wait_primary).
+    # Wait for the apply_settings cycle triggered by the group change to settle.
+    wait until node1 state is primary  timeout 60s
+}
+
+step test_004_verify_pgdata_kept {
+    # PGDATA must still exist after a plain drop (no --destroy).
+    # The keeper is still running (hasn't reached its next heartbeat yet),
+    # so exec into node2 is still possible here.
+    exec node2  test -d /var/lib/postgres/pgaf
+    # Now wait for the keeper to self-exit after detecting the drop.
+    wait until node2 stopped  timeout 30s
+}
+
+# ------------------------------------------------------------------ drop node --destroy: PGDATA removed
+
+step test_005_drop_node3_destroy {
+    # Stop the supervisor first (container exits), then run the drop command
+    # in a fresh container against the same volume via "compose run --rm".
+    # pg_autoctl drop node --destroy detects a running supervisor and waits,
+    # so we must stop first.
+    exec node3  pg_autoctl stop
+    wait until node3 stopped  timeout 30s
+    run node3   pg_autoctl drop node --destroy
+    wait until node1 state is single  timeout 60s
+}
+
+step test_006_verify_pgdata_removed {
+    # Start a fresh container from the node3 image (same volume) to confirm
+    # PGDATA is gone.  "run --rm" exits when the test command returns.
+    run node3   bash -c "test ! -d /var/lib/postgres/pgaf && echo 'ok'"
+    expect { ok }
+}
+
+# ------------------------------------------------------------------ drop node --destroy --force: no monitor contact
+
+step test_007_drop_monitor_to_simulate_unreachable {
+    # Stop the monitor's postgres to make it unreachable, simulating the
+    # scenario where the monitor crashes before teardown runs.
+    exec monitor  pg_autoctl stop
+    wait until monitor stopped  timeout 30s
+}
+
+step test_008_force_destroy_node1 {
+    # --force skips monitor contact, so we can call it even with the monitor
+    # unreachable.  Stop the supervisor first (same reason as test_005), then
+    # run drop in a fresh container via "compose run --rm".
+    exec node1  pg_autoctl stop
+    wait until node1 stopped  timeout 30s
+    run node1   pg_autoctl drop node --destroy --force
+}
+
+step test_009_verify_force_pgdata_removed {
+    run node1   bash -c "test ! -d /var/lib/postgres/pgaf && echo 'ok'"
+    expect { ok }
+}
+
+sequence
+    test_001_create_table
+    test_002_verify_replication
+    test_003_drop_node2_no_destroy
+    test_004_verify_pgdata_kept
+    test_005_drop_node3_destroy
+    test_006_verify_pgdata_removed
+    test_007_drop_monitor_to_simulate_unreachable
+    test_008_force_destroy_node1
+    test_009_verify_force_pgdata_removed

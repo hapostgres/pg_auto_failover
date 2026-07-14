@@ -22,8 +22,6 @@ def setup_module():
 
 
 def teardown_module():
-    coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
-    coordinator1b.run_sql_query("DROP TABLE t1")
     ha_cluster.destroy()
 
 

@@ -25,3 +25,7 @@ src/bin/lib/libs/** -citus-style
 src/bin/lib/pg/** -citus-style
 src/bin/lib/subcommands.c/** -citus-style
 src/monitor/version_compat.c -citus-style
+# bison/flex generated files — not subject to style checks
+src/bin/pgaftest/test_spec_parse.c -citus-style
+src/bin/pgaftest/test_spec_parse.h -citus-style
+src/bin/pgaftest/test_spec_scan.c  -citus-style

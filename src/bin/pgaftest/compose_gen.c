@@ -339,6 +339,40 @@ compose_gen_write_ssl_certs(const TestCluster *cluster, const char *workDir)
 
 
 /*
+ * write_node_command emits the YAML command: stanza.
+ *
+ * When CA-signed SSL certs are in use, the server cert/key must be copied
+ * from the read-only bind-mount (/etc/pgaf/ssl/server/) to the writable
+ * volume root (/var/lib/postgres/) before pg_autoctl starts, because
+ * PostgreSQL requires the key file to be owned by the process user.  The
+ * client cert/key and CA cert are also copied so libpq can find them.
+ * SSL_COPY_CERTS_CMD is a shell snippet ending with " &&" so we can
+ * append the pg_autoctl invocation directly.
+ */
+static void
+write_node_command(FILE *f, const TestCluster *cluster, const char *iniPath)
+{
+	if (ssl_needs_certs(cluster->ssl))
+	{
+		fformat(f,
+				"    command: [\"/bin/sh\", \"-c\", \""
+				SSL_COPY_CERTS_CMD
+				" pg_autoctl node run %s\"]\n"
+				"    stop_grace_period: 60s\n",
+				iniPath);
+	}
+	else
+	{
+		fformat(f,
+				"    command: [\"pg_autoctl\", \"node\", \"run\","
+				" \"%s\"]\n"
+				"    stop_grace_period: 60s\n",
+				iniPath);
+	}
+}
+
+
+/*
  * image_stanza writes either `image:` (when PGAF_IMAGE is set or the cluster
  * spec provides an image) or a `build:` stanza.
  */
@@ -359,34 +393,17 @@ write_image_stanza_target(FILE *f, const TestCluster *cluster,
 
 	if (img && *img && !isTestRunner)
 	{
-		if (strcmp(target, "debian") == 0)
-		{
-			/*
-			 * When PGAF_IMAGE is set (pre-built run image), the debian stage
-			 * needs a separately built image supplied via PGAF_DEBIAN_IMAGE.
-			 * If not provided, fall through to the inline build stanza so the
-			 * debian target is built from source (slower, but correct).
-			 */
-			const char *debImg = getenv("PGAF_DEBIAN_IMAGE"); /* IGNORE-BANNED */
-
-			if (debImg && *debImg)
-			{
-				fformat(f, "    image: \"%s\"\n", debImg);
-				return;
-			}
-		}
-		else
-		{
-			fformat(f, "    image: \"%s\"\n", img);
-			return;
-		}
+		fformat(f, "    image: \"%s\"\n", img);
+		return;
 	}
 
 	fformat(f,
 			"    build:\n"
 			"      context: \"%s\"\n"
-			"      target: %s\n",
-			contextDir, target);
+			"      target: %s\n"
+			"      args:\n"
+			"        PGVERSION: \"%s\"\n",
+			contextDir, target, debian_pg_version());
 }
 
 
@@ -504,11 +521,7 @@ compose_gen_write(TestCluster *cluster,
 		}
 
 		fformat(f, "  monitor:\n");
-		if (cluster->monitorDebianCluster[0])
-		{
-			write_image_stanza_target(f, cluster, contextDir, "debian");
-		}
-		else if (cluster->monitorImageTarget[0])
+		if (cluster->monitorImageTarget[0])
 		{
 			write_image_stanza_target(f, cluster, contextDir,
 									  cluster->monitorImageTarget);
@@ -568,33 +581,23 @@ compose_gen_write(TestCluster *cluster,
 				"      - \"%d:5432\"\n",
 				cluster->monitorHostPort);
 
-		fformat(f,
-				"    command: [\"/bin/sh\", \"-c\","
-				" \"%s rm -f /tmp/pg_autoctl%s/pg_autoctl.pid"
-				" && exec pg_autoctl node run " NODE_INI_PATH "\"]\n"
-															  "    stop_grace_period: 60s\n\n",
-				ssl_needs_certs(cluster->ssl) ? SSL_COPY_CERTS_CMD : "",
-				monitor_pgdata);
+
+		write_node_command(f, cluster, NODE_INI_PATH);
+		fformat(f, "\n");
 
 		/*
 		 * Monitor healthcheck: data nodes use depends_on service_healthy so
-		 * they do not start until the monitor is fully initialised.  SSL
-		 * clusters take longer (cert copy + pg_autoctl SSL config), so use a
-		 * longer start_period there.
+		 * they do not start until the monitor is fully initialised.
 		 */
-		{
-			const char *hc_start =
-				ssl_needs_certs(cluster->ssl) ? "300s" : "60s";
-			fformat(f,
-					"    healthcheck:\n"
-					"      test: [\"CMD\", \"pg_autoctl\", \"status\","
-					" \"--pgdata\", \"%s\"]\n"
-					"      interval: 2s\n"
-					"      timeout: 5s\n"
-					"      retries: 150\n"
-					"      start_period: %s\n\n",
-					monitor_pgdata, hc_start);
-		}
+		fformat(f,
+				"    healthcheck:\n"
+				"      test: [\"CMD\", \"pg_autoctl\", \"status\","
+				" \"--pgdata\", \"%s\"]\n"
+				"      interval: 2s\n"
+				"      timeout: 5s\n"
+				"      retries: 150\n"
+				"      start_period: 60s\n\n",
+				monitor_pgdata);
 	}
 
 	/* ---- second monitor (initially stopped, for replace-monitor tests) ---- */
@@ -636,13 +639,8 @@ compose_gen_write(TestCluster *cluster,
 				"    ports:\n"
 				"      - \"%d:5432\"\n",
 				cluster->secondMonitorHostPort);
-		fformat(f,
-				"    command: [\"/bin/sh\", \"-c\","
-				" \"%s rm -f /tmp/pg_autoctl" NODE_PGDATA "/pg_autoctl.pid"
-														  " && exec pg_autoctl node run "
-				NODE_INI_PATH "\"]\n"
-							  "    stop_grace_period: 60s\n\n",
-				ssl_needs_certs(cluster->ssl) ? SSL_COPY_CERTS_CMD : "");
+		write_node_command(f, cluster, NODE_INI_PATH);
+		fformat(f, "\n");
 	}
 
 	/* ---- data nodes — iterate all formations ---- */
@@ -663,14 +661,7 @@ compose_gen_write(TestCluster *cluster,
 		{
 			const TestNode *n = &form->nodes[ni];
 			fformat(f, "  %s:\n", n->name);
-			if (n->debianCluster[0])
-			{
-				write_image_stanza_target(f, cluster, contextDir, "debian");
-			}
-			else
-			{
-				write_image_stanza(f, cluster, contextDir);
-			}
+			write_image_stanza(f, cluster, contextDir);
 
 			/* debian PGDATA: /var/lib/postgresql/<ver>/<cluster> */
 			char node_pgdata[MAXPGPATH];
@@ -685,15 +676,24 @@ compose_gen_write(TestCluster *cluster,
 				strlcpy(node_pgdata, NODE_PGDATA, sizeof(node_pgdata));
 			}
 
+			/*
+			 * Debian-cluster nodes store data under /var/lib/postgresql/<ver>/<name>,
+			 * so mount the volume there; regular nodes use /var/lib/postgres.
+			 */
+			const char *dataMount = n->debianCluster[0]
+									? "/var/lib/postgresql"
+									: "/var/lib/postgres";
+
 			fformat(f,
 					"    hostname: %s\n"
 					"    volumes:\n"
-					"      - %s_data:/var/lib/postgres:rw\n"
+					"      - %s_data:%s:rw\n"
 					"      - ./%s.ini:" NODE_INI_PATH ":%s\n",
 					n->name,
 					n->name,
+					dataMount,
 					n->name,
-					n->launchDeferred ? "rw" : "ro");
+					(n->launchDeferred || n->createDeferred) ? "rw" : "ro");
 			if (ssl_needs_certs(cluster->ssl))
 			{
 				fformat(f,
@@ -730,15 +730,7 @@ compose_gen_write(TestCluster *cluster,
 			 * case where the formation hasn't been created yet.
 			 */
 
-			/* per-node ssl override may differ from cluster default */
-			const char *node_ssl = n->ssl[0] ? n->ssl : cluster->ssl;
-			fformat(f,
-					"    command: [\"/bin/sh\", \"-c\","
-					" \"%s rm -f /tmp/pg_autoctl%s/pg_autoctl.pid"
-					" && exec pg_autoctl node run " NODE_INI_PATH "\"]\n"
-																  "    stop_grace_period: 60s\n",
-					ssl_needs_certs(node_ssl) ? SSL_COPY_CERTS_CMD : "",
-					node_pgdata);
+			write_node_command(f, cluster, NODE_INI_PATH);
 
 			/*
 			 * With a monitor: the first data node gets a healthcheck so that
@@ -753,16 +745,9 @@ compose_gen_write(TestCluster *cluster,
 			 * nodes use service_started so they launch as soon as node1 has
 			 * started (they don't need postgres to be ready yet).
 			 */
-			if (!firstNode && cluster->withMonitor && !n->launchDeferred)
+			if (!firstNode && cluster->withMonitor &&
+				!n->launchDeferred && !n->createDeferred)
 			{
-				/*
-				 * SSL clusters take longer to initialise on slow CI runners
-				 * (cert generation + pg_autoctl SSL config + monitor TLS
-				 * handshake).  Double start_period so the runner has time to
-				 * complete init before failures start counting.
-				 */
-				const char *hc_start =
-					ssl_needs_certs(node_ssl) ? "300s" : "120s";
 				fformat(f,
 						"    healthcheck:\n"
 						"      test: [\"CMD\", \"pg_autoctl\", \"status\","
@@ -770,8 +755,8 @@ compose_gen_write(TestCluster *cluster,
 						"      interval: 2s\n"
 						"      timeout: 5s\n"
 						"      retries: 150\n"
-						"      start_period: %s\n",
-						node_pgdata, hc_start);
+						"      start_period: 60s\n",
+						node_pgdata);
 			}
 
 			if (firstNode)
@@ -783,7 +768,8 @@ compose_gen_write(TestCluster *cluster,
 						firstNode->name,
 						cluster->withMonitor ? "service_healthy" : "service_started");
 			}
-			else if (cluster->withMonitor && !n->launchDeferred)
+			else if (cluster->withMonitor &&
+					 !n->launchDeferred && !n->createDeferred)
 			{
 				/* node1: wait for monitor to be healthy before starting */
 				fformat(f,
@@ -793,7 +779,7 @@ compose_gen_write(TestCluster *cluster,
 			}
 			fformat(f, "\n");
 
-			if (!firstNode && !n->launchDeferred)
+			if (!firstNode && !n->launchDeferred && !n->createDeferred)
 			{
 				firstNode = n;
 			}
@@ -1008,8 +994,27 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 			continue;
 		}
 
-		/* kind defaults to "ha" — the monitor uses that default when absent */
 		fformat(f, "\n[formation %s]\n", form->name);
+
+		/* derive kind from node types: any coordinator/worker → citus */
+		bool isCitus = false;
+		for (int ni = 0; ni < form->nodeCount && !isCitus; ni++)
+		{
+			PgInstanceKind k = form->nodes[ni].kind;
+			if (k == NODE_KIND_CITUS_COORDINATOR || k == NODE_KIND_CITUS_WORKER)
+			{
+				isCitus = true;
+			}
+		}
+		if (isCitus)
+		{
+			fformat(f, "kind = citus\n");
+		}
+
+		if (form->disableSecondary)
+		{
+			fformat(f, "secondary = false\n");
+		}
 	}
 
 	fclose(f);
@@ -1152,11 +1157,6 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 
 	if (node->debianCluster[0])
 	{
-		fformat(f, "debian_cluster = %s\n", node->debianCluster);
-	}
-
-	if (node->debianCluster[0])
-	{
 		fformat(f,
 				"\n"
 				"[postgresql]\n"
@@ -1269,6 +1269,11 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 			eff_auth,
 			node->noMonitor ? "false" : "true");
 
+	if (node->debianCluster[0])
+	{
+		fformat(f, "debian_cluster = %s\n", node->debianCluster);
+	}
+
 	if (ssl_needs_certs(eff_ssl))
 	{
 		fformat(f,
@@ -1290,9 +1295,17 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 	{
 		fformat(f, "listen     = 0.0.0.0\n");
 	}
-	if (node->launchDeferred)
+	if (node->launchDeferred || node->createDeferred)
 	{
-		fformat(f, "\n[launch]\nmode = deferred\n");
+		fformat(f, "\n[launch]\n");
+		if (node->createDeferred)
+		{
+			fformat(f, "create = deferred\n");
+		}
+		if (node->launchDeferred)
+		{
+			fformat(f, "run = deferred\n");
+		}
 	}
 
 	/*

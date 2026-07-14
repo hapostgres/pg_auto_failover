@@ -40,6 +40,9 @@ def test_004_init_secondary():
     node2 = cluster.create_datanode("/tmp/no-monitor/node2")
     node2.create(monitorDisabled=True, host=str(node2.vnode.address), nodeId=2)
     node2.run(name="b")
+    # Wait for node2's pg_autoctl to write its state file before test_005
+    # calls pg_autoctl inspect fsm state (which reads it).
+    node2.wait_until_pg_autoctl_is_running()
 
 
 def test_005_fsm_nodes_set():

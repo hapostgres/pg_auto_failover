@@ -1,0 +1,9 @@
+PGVERSION ?= 17
+
+.PHONY: installcheck
+installcheck:
+	PG_CONFIG=/usr/lib/postgresql/$(PGVERSION)/bin/pg_config \
+	  make -s clean install BINDIR=/usr/local/bin
+	pg_virtualenv -v $(PGVERSION) \
+	  -o "shared_preload_libraries=pgautofailover" \
+	  make -C src/monitor/ installcheck

@@ -1,7 +1,7 @@
 # Test Citus cluster with authMethod=skip (pg_autoctl does not edit pg_hba.conf).
 #
 # With auth=skip, pg_autoctl leaves pg_hba.conf untouched after postgres init.
-# All data nodes are launch deferred so startup can be sequenced manually:
+# All data nodes are create and launch deferred so startup can be sequenced manually:
 #
 #   setup: monitor starts → add LAN HBA to monitor → start coord0a
 #   test_000: add LAN HBA to coord0a (so coord0b can connect later)
@@ -19,10 +19,10 @@ cluster {
     monitor
     auth skip
     formation {
-        coord0a coordinator launch deferred
-        coord0b coordinator launch deferred
-        worker1a worker group 1 launch deferred
-        worker1b worker group 1 launch deferred
+        coord0a coordinator create and launch deferred
+        coord0b coordinator create and launch deferred
+        worker1a worker group 1 create and launch deferred
+        worker1b worker group 1 create and launch deferred
     }
 }
 
@@ -69,17 +69,17 @@ step test_002b_create_worker {
 }
 
 #
-# test_002b/002d: worker1a — registration initially fails because coordinator
-# cannot connect (pg_hba.conf has no trust rule yet).  After manually adding
-# HBA rules the already-running keeper retries activation automatically.
+# test_002b/002d: worker1a — pg_autoctl create citus-worker succeeds in
+# initialising PGDATA and writing pg_autoctl.cfg, but the coordinator's
+# master_add_node call fails because pg_hba.conf blocks the connection.
+# pg_autoctl node run detects that the config was written despite the
+# non-zero exit and hands off to the keeper (pg_autoctl run), which keeps
+# retrying node_active.  Once HBA rules are added the monitor re-triggers
+# coordinator activation and the node reaches "single".
 #
-# Wait for postgres to be ready before calling hba-lan: the deferred poll in
-# pg_autoctl node run detects launchDeferred=false and execv()s into
-# pg_autoctl create citus-worker --run.  Calling hba-lan immediately would
-# race with that execv and the subsequent supervisor + initdb startup.
 # pgsetup wait blocks until pg_autoctl.cfg exists and postgres accepts
-# connections, so by the time hba-lan runs pg_hba.conf already exists and the
-# container is fully initialised.
+# connections; by that point pg_hba.conf already exists and hba-lan can
+# append trust rules.
 #
 
 step test_002d_run_worker {

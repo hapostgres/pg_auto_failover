@@ -26,8 +26,6 @@ def setup_module():
 
 
 def teardown_module():
-    coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
-    coordinator1b.run_sql_query("DROP TABLE t1")
     cluster.destroy()
 
 
@@ -246,3 +244,7 @@ def test_014_perform_failover_coordinator():
 
     assert coordinator1a.has_needed_replication_slots()
     assert coordinator1b.has_needed_replication_slots()
+
+
+def test_015_drop_table():
+    coordinator1b.citus_run_ddl_after_sync("DROP TABLE t1")

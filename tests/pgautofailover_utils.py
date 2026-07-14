@@ -5,6 +5,7 @@ import shutil
 import time
 import tests.network as network
 import psycopg2
+import psycopg2.errors
 import subprocess
 import datetime as dt
 from collections import namedtuple
@@ -394,6 +395,22 @@ class PGNode(QueryRunner):
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(name=name, host=host, port=port)
 
+    def wait_until_pg_autoctl_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
+        """
+        Polls until pg_autoctl has written its config file (i.e. its
+        initialization is far enough that inspect/state commands work).
+        Raises if the config file is not present within timeout seconds.
+        """
+        deadline = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while dt.datetime.now() < deadline:
+            if os.path.exists(self.config_file_path()):
+                return
+            time.sleep(POLLING_INTERVAL)
+        raise Exception(
+            "pg_autoctl config file for %s not found after %d seconds"
+            % (self.datadir, timeout)
+        )
+
     def running(self):
         return self.pg_autoctl and self.pg_autoctl.run_proc
 
@@ -417,6 +434,52 @@ class PGNode(QueryRunner):
 
     def run_sql_query(self, query, *args):
         return super().run_sql_query(query, False, *args)
+
+    def run_sql_query_retry(self, query, *args, timeout=30):
+        """
+        Like run_sql_query but retries on transient connectivity errors such as
+        "the database system is starting up" (ERRCODE 57P03, CannotConnectNow)
+        or plain OperationalError (connection refused / reset).  Retries for up
+        to timeout seconds with 0.5s back-off.
+        """
+        deadline = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while True:
+            try:
+                return self.run_sql_query(query, *args)
+            except (psycopg2.OperationalError,
+                    psycopg2.errors.CannotConnectNow) as e:
+                if dt.datetime.now() >= deadline:
+                    raise
+                print(
+                    "transient connectivity error on %s (%s), retrying ..."
+                    % (self.datadir, e)
+                )
+                time.sleep(0.5)
+
+    def citus_run_ddl_after_sync(self, query, timeout=60):
+        """
+        Run a Citus DDL statement (e.g. DROP TABLE on a distributed table)
+        after waiting for metadata to be in sync on all nodes.
+
+        wait_until_metadata_sync() covers the coordinator's view of sync, but
+        a recently-rejoined worker node may still be applying metadata updates
+        when the coordinator considers sync complete.  If the DDL fails with
+        ObjectNotInPrerequisiteState ("is a metadata node, but is out of sync"),
+        wait again and retry the DDL for up to timeout seconds.
+        """
+        deadline = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while True:
+            self.run_sql_query("select public.wait_until_metadata_sync()")
+            try:
+                return self.run_sql_query(query)
+            except psycopg2.errors.ObjectNotInPrerequisiteState as e:
+                if dt.datetime.now() >= deadline:
+                    raise
+                print(
+                    "Citus metadata not yet in sync on %s (%s), retrying ..."
+                    % (self.datadir, e)
+                )
+                time.sleep(1)
 
     def pg_config_get(self, settings):
         """
@@ -985,12 +1048,22 @@ class StatefulNode:
         target_state,
         timeout=STATE_CHANGE_TIMEOUT,
         sleep_time=POLLING_INTERVAL,
+        or_state=None,
     ):
         """
         Waits until this data node is assigned the target state. Typically used
         when the node has been stopped or failed and we want to check the
         monitor FSM.
+
+        Pass or_state to accept either target_state or or_state as success —
+        useful when the FSM can skip through a transient state faster than the
+        poll interval (e.g. draining vs demote_timeout).
         """
+        target_states = {target_state}
+        if or_state is not None:
+            target_states.add(or_state)
+
+        label = " or ".join(sorted(target_states))
         prev_state = None
         wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
 
@@ -1004,7 +1077,7 @@ class StatefulNode:
 
             # only log the state if it has changed
             if assigned_state != prev_state:
-                if assigned_state == target_state:
+                if assigned_state in target_states:
                     print(
                         "assigned state of %s is '%s', done waiting"
                         % (self.datadir, assigned_state)
@@ -1012,20 +1085,20 @@ class StatefulNode:
                 else:
                     print(
                         "assigned state of %s is '%s', waiting for '%s' ..."
-                        % (self.datadir, assigned_state, target_state)
+                        % (self.datadir, assigned_state, label)
                     )
 
-            if assigned_state == target_state:
+            if assigned_state in target_states:
                 return True
 
             prev_state = assigned_state
 
         print(
             "%s didn't reach %s after %d seconds"
-            % (self.logger_name(), target_state, timeout)
+            % (self.logger_name(), label, timeout)
         )
         error_msg = (
-            f"{self.logger_name()} failed to reach {target_state} "
+            f"{self.logger_name()} failed to reach {label} "
             f"after {timeout} seconds\n"
         )
         self.print_debug_logs()
@@ -1633,7 +1706,7 @@ class DataNode(PGNode, StatefulNode):
             self.print_debug_logs()
             raise e
 
-    def has_needed_replication_slots(self):
+    def has_needed_replication_slots(self, retry_timeout=5):
         """
         Each node is expected to maintain a slot for each of the other nodes
         the primary through streaming replication, the secondary(s) manually
@@ -1642,33 +1715,53 @@ class DataNode(PGNode, StatefulNode):
         Postgres 10 lacks the function pg_replication_slot_advance() so when
         the local Postgres is version 10 we don't create any replication
         slot on the standby servers.
+
+        A newly-promoted or rejoined node can transiently reject connections
+        right after the FSM state converges.  Retry for up to retry_timeout
+        seconds on any connectivity error before surfacing the exception.
+        The retry covers both the pgmajor() probe and the subsequent
+        list_replication_slot_names() call, since Postgres can drop the
+        socket between the two.
         """
-        if self.pgmajor() == 10:
-            return True
+        deadline = dt.datetime.now() + dt.timedelta(seconds=retry_timeout)
+        while True:
+            try:
+                pgmajor = self.pgmajor()
 
-        hostname = str(self.vnode.address)
-        other_nodes = self.monitor.get_other_nodes(self.nodeid)
-        expected_slots = [
-            "pgautofailover_standby_%s" % n[0] for n in other_nodes
-        ]
-        current_slots = self.list_replication_slot_names()
+                if pgmajor == 10:
+                    return True
 
-        # just to make it easier to read through the print()ed list
-        expected_slots.sort()
-        current_slots.sort()
+                other_nodes = self.monitor.get_other_nodes(self.nodeid)
+                expected_slots = [
+                    "pgautofailover_standby_%s" % n[0] for n in other_nodes
+                ]
+                current_slots = self.list_replication_slot_names()
 
-        if set(expected_slots) == set(current_slots):
-            # print("slots list on %s is %s, as expected" %
-            #       (self.datadir, current_slots))
-            return True
+                # just to make it easier to read through the print()ed list
+                expected_slots.sort()
+                current_slots.sort()
 
-        self.print_debug_logs()
-        print()
-        print(
-            "slots list on %s is %s, expected %s"
-            % (self.datadir, current_slots, expected_slots)
-        )
-        return False
+                if set(expected_slots) == set(current_slots):
+                    return True
+
+                self.print_debug_logs()
+                print()
+                print(
+                    "slots list on %s is %s, expected %s"
+                    % (self.datadir, current_slots, expected_slots)
+                )
+                return False
+
+            except psycopg2.OperationalError:
+                if dt.datetime.now() >= deadline:
+                    raise
+                print(
+                    "transient connectivity error on %s, retrying has_needed_replication_slots ..."
+                    % self.datadir
+                )
+                time.sleep(0.5)
+                self._pgversion = None
+                self._pgmajor = None
 
     def create_wait_until_metadata_sync(self):
         """
@@ -1813,7 +1906,6 @@ class MonitorNode(PGNode):
             )
         except Exception as e:
             print(str(e))
-            raise
 
         try:
             os.remove(self.config_file_path())
@@ -1904,6 +1996,28 @@ class MonitorNode(PGNode):
         """
         performs manual failover for given formation and group id
         """
+        # Wait until the monitor sees a stable primary (reportedstate ==
+        # goalstate, both in a CanInitiateFailover state) before calling
+        # perform_failover.  Without this, perform_failover can race with the
+        # last node_active round-trip and fail with "couldn't find the primary
+        # node" even though wait_until_state("primary") already returned.
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=STATE_CHANGE_TIMEOUT)
+        while dt.datetime.now() < wait_until:
+            rows = self.run_sql_query(
+                """
+                SELECT count(*) FROM pgautofailover.node
+                 WHERE formationid = %s
+                   AND groupid = %s
+                   AND reportedstate IN ('primary', 'single', 'join_primary')
+                   AND goalstate = reportedstate
+                """,
+                formation,
+                group,
+            )
+            if rows[0][0] > 0:
+                break
+            time.sleep(POLLING_INTERVAL)
+
         failover_command_text = (
             "select * from pgautofailover.perform_failover('%s', %s)"
             % (formation, group)

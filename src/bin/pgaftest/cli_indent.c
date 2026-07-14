@@ -421,7 +421,15 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 												   sizeof(props[0].val)); pc++; \
 } while (0)
 #define ADDF(k) do { props[pc].kw = (k); props[pc].val[0] = '\0'; pc++; } while (0)
-	if (n->launchDeferred)
+	if (n->createDeferred && n->launchDeferred)
+	{
+		ADDF("create and launch deferred");
+	}
+	else if (n->createDeferred)
+	{
+		ADDF("create deferred");
+	}
+	else if (n->launchDeferred)
 	{
 		ADDF("launch deferred");
 	}

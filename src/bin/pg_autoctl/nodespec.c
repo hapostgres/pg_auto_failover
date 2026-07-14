@@ -63,6 +63,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 	char replicationQuorumStr[8] = { 0 };
 	char pgHbaLanStr[8] = { 0 };
 	char launchModeStr[16] = { 0 };
+	char createDeferredStr[16] = { 0 };
 	char noMonitorStr[8] = { 0 };
 	char citusRoleStr[NAMEDATALEN] = { 0 };
 	int port = 5432;
@@ -125,6 +126,11 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(pgHbaLanStr), pgHbaLanStr,
 								   "true"),
 
+		/* [options] — debian_cluster: run pg_createcluster before create */
+		make_strbuf_option_default("options", "debian_cluster", NULL, false,
+								   sizeof(spec->debianCluster),
+								   spec->debianCluster, ""),
+
 		/* [ssl] — certificate paths for verify-ca / verify-full mode */
 		make_strbuf_option_default("ssl", "ca_file", NULL, false,
 								   sizeof(spec->ssl_ca_file),
@@ -136,10 +142,13 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(spec->ssl_key_file),
 								   spec->ssl_key_file, ""),
 
-		/* [launch] — optional section; mode=deferred delays node init */
-		make_strbuf_option_default("launch", "mode", NULL, false,
+		/* [launch] — optional section; run=deferred delays node run */
+		make_strbuf_option_default("launch", "run", NULL, false,
 								   sizeof(launchModeStr), launchModeStr,
 								   "immediate"),
+		make_strbuf_option_default("launch", "create", NULL, false,
+								   sizeof(createDeferredStr),
+								   createDeferredStr, "immediate"),
 
 		/* [pg_auto_failover] — monitor: password for autoctl_node role */
 		make_strbuf_option_default("pg_auto_failover", "autoctl_node_password",
@@ -215,6 +224,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 		 strcmp(pgHbaLanStr, "1") == 0);
 
 	spec->launchDeferred = (strcmp(launchModeStr, "deferred") == 0);
+	spec->createDeferred = (strcmp(createDeferredStr, "deferred") == 0);
 	spec->noMonitor =
 		(strcmp(noMonitorStr, "true") == 0 ||
 		 strcmp(noMonitorStr, "yes") == 0 ||
@@ -270,7 +280,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 					strlcpy(spec->formationNames[fi], fname,
 							sizeof(spec->formationNames[fi]));
 
-					/* optional: kind = ha (default) */
+					/* optional: kind = citus (default pgsql) */
 					int ki = ini_find_property(raw, si, "kind", 0);
 					if (ki != INI_NOT_FOUND)
 					{
@@ -290,6 +300,19 @@ nodespec_read(const char *path, NodeSpec *spec)
 					{
 						strlcpy(spec->formationKinds[fi], "pgsql",
 								sizeof(spec->formationKinds[fi]));
+					}
+
+					/* optional: secondary = false disables failover secondaries */
+					int si2 = ini_find_property(raw, si, "secondary", 0);
+					if (si2 != INI_NOT_FOUND)
+					{
+						const char *sv = ini_property_value(raw, si, si2);
+						if (sv && (strcmp(sv, "false") == 0 ||
+								   strcmp(sv, "no") == 0 ||
+								   strcmp(sv, "0") == 0))
+						{
+							spec->formationDisableSecondary[fi] = true;
+						}
 					}
 				}
 				ini_destroy(raw);
@@ -415,10 +438,23 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			spec->auth,
 			spec->pg_hba_lan ? "true" : "false");
 
-	/* only emit [launch] when deferred — omitting the section means immediate */
-	if (spec->launchDeferred)
+	if (spec->debianCluster[0])
 	{
-		fformat(out, "\n[launch]\nmode = deferred\n");
+		fformat(out, "debian_cluster = %s\n", spec->debianCluster);
+	}
+
+	/* only emit [launch] when deferred — omitting the section means immediate */
+	if (spec->launchDeferred || spec->createDeferred)
+	{
+		fformat(out, "\n[launch]\n");
+		if (spec->createDeferred)
+		{
+			fformat(out, "create = deferred\n");
+		}
+		if (spec->launchDeferred)
+		{
+			fformat(out, "run = deferred\n");
+		}
 	}
 
 	/* [formation <name>] sections — monitor kind only */
@@ -429,6 +465,10 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			strcmp(spec->formationKinds[fi], "pgsql") != 0)
 		{
 			fformat(out, "kind = %s\n", spec->formationKinds[fi]);
+		}
+		if (spec->formationDisableSecondary[fi])
+		{
+			fformat(out, "secondary = false\n");
 		}
 	}
 
@@ -601,15 +641,11 @@ nodespec_create_argv(const NodeSpec *spec,
 		PUSH(spec->autoctl_node_password);
 	}
 
-	/* non-default formations to create during monitor init */
-	if (spec->kind == NODE_KIND_UNKNOWN)
-	{
-		for (int fi = 0; fi < spec->formationCount; fi++)
-		{
-			PUSH("--formation");
-			PUSH(spec->formationNames[fi]);
-		}
-	}
+	/*
+	 * Non-default formations are created by a post-init child in cli_node_run
+	 * after pg_autoctl run starts postgres, so that each formation's kind and
+	 * secondary flag can be applied correctly.  Nothing to add to the argv here.
+	 */
 
 	if (spec->kind != NODE_KIND_UNKNOWN)
 	{
@@ -688,7 +724,7 @@ nodespec_write_to_path(const NodeSpec *spec, const char *path)
  *   - replication_quorum   → monitor_set_node_replication_quorum()
  *
  * The [launch] mode field is handled separately by pg_autoctl node start.
- * Applying a spec with mode=deferred to an already-started node is a
+ * Applying a spec with run=deferred to an already-started node is a
  * non-fatal warning (ignored).
  *
  * Immutable fields (kind, pgdata, ssl, auth, pg_hba_lan) are not checked here.
@@ -757,6 +793,105 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 	{
 		log_warn("nodespec_apply: ignoring attempt to set launch=deferred "
 				 "on a node that is already running");
+	}
+
+	/*
+	 * For monitor nodes, apply formation-level changes.
+	 *
+	 * New [formation <name>] sections → pg_autoctl create formation.
+	 * Changed secondary setting     → pg_autoctl enable/disable secondary.
+	 */
+	if (new_spec->kind == NODE_KIND_UNKNOWN)
+	{
+		for (int fi = 0; fi < new_spec->formationCount; fi++)
+		{
+			const char *fname = new_spec->formationNames[fi];
+			const char *fkind = new_spec->formationKinds[fi][0]
+								? new_spec->formationKinds[fi] : "pgsql";
+			bool newDisabled = new_spec->formationDisableSecondary[fi];
+
+			/* look for this formation in the previous spec */
+			int oi = -1;
+			for (int k = 0; k < old_spec->formationCount; k++)
+			{
+				if (strcmp(old_spec->formationNames[k], fname) == 0)
+				{
+					oi = k;
+					break;
+				}
+			}
+
+			if (oi < 0)
+			{
+				/* formation is new: create it */
+				Program prog;
+
+				if (newDisabled)
+				{
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   "--disable-secondary",
+									   NULL);
+				}
+				else
+				{
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   NULL);
+				}
+
+				if (prog.returnCode != 0)
+				{
+					log_warn("nodespec_apply: create formation \"%s\" failed (rc=%d)",
+							 fname, prog.returnCode);
+					if (prog.stdOut)
+					{
+						log_warn("%s", prog.stdOut);
+					}
+				}
+				else
+				{
+					log_info("nodespec: created formation \"%s\" (kind=%s)",
+							 fname, fkind);
+					changed = true;
+				}
+				free_program(&prog);
+			}
+			else if (old_spec->formationDisableSecondary[oi] != newDisabled)
+			{
+				/* secondary setting changed: enable or disable */
+				const char *verb = newDisabled ? "disable" : "enable";
+
+				Program prog = run_program(pg_autoctl_program,
+										   verb, "secondary",
+										   "--pgdata", new_spec->pgdata,
+										   "--formation", fname,
+										   NULL);
+
+				if (prog.returnCode != 0)
+				{
+					log_warn("nodespec_apply: %s secondary for \"%s\" failed (rc=%d)",
+							 verb, fname, prog.returnCode);
+					if (prog.stdOut)
+					{
+						log_warn("%s", prog.stdOut);
+					}
+				}
+				else
+				{
+					log_info("nodespec: %sd secondary for formation \"%s\"",
+							 verb, fname);
+					changed = true;
+				}
+				free_program(&prog);
+			}
+		}
 	}
 
 	if (!changed)
