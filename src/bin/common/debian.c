@@ -741,7 +741,7 @@ pg_createcluster_for_test(const char *pgdata, const char *cluster_name)
 			 pgmajor, cluster_name);
 
 	char *pgcc_args[] = {
-		"sudo", "pg_createcluster",
+		"/usr/bin/sudo", "pg_createcluster",
 		"--user", "docker",
 		"--group", "postgres",
 		pgmajor_str, (char *) cluster_name,
@@ -781,7 +781,7 @@ pg_createcluster_for_test(const char *pgdata, const char *cluster_name)
 
 	log_info("pg_autoctl node run: chown docker \"%s\"", pg_ver_dir);
 
-	char *chown_args[] = { "sudo", "chown", "docker", pg_ver_dir, NULL };
+	char *chown_args[] = { "/usr/bin/sudo", "chown", "docker", pg_ver_dir, NULL };
 
 	Program chown = { 0 };
 	initialize_program(&chown, chown_args, false);

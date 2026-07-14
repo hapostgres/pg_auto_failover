@@ -1157,11 +1157,6 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 
 	if (node->debianCluster[0])
 	{
-		fformat(f, "\n[options]\ndebian_cluster = %s\n", node->debianCluster);
-	}
-
-	if (node->debianCluster[0])
-	{
 		fformat(f,
 				"\n"
 				"[postgresql]\n"
@@ -1273,6 +1268,11 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 			eff_ssl,
 			eff_auth,
 			node->noMonitor ? "false" : "true");
+
+	if (node->debianCluster[0])
+	{
+		fformat(f, "debian_cluster = %s\n", node->debianCluster);
+	}
 
 	if (ssl_needs_certs(eff_ssl))
 	{
