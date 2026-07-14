@@ -563,6 +563,44 @@ cli_node_run(int argc, char **argv)
 						  WIFEXITED(st) ? WEXITSTATUS(st) : -1);
 				exit(EXIT_CODE_INTERNAL_ERROR);
 			}
+
+			/*
+			 * pg_createcluster creates /var/lib/postgresql/<ver>/ owned by
+			 * the postgres system user with mode 755.  pg_autoctl (running as
+			 * the docker user) needs to create subdirectories there (e.g.
+			 * backup/node_N).  Chown the version directory so docker owns it.
+			 */
+
+			/* pfx is "/var/lib/postgresql/" (with trailing /), so use %s%d */
+			char pg_ver_dir[MAXPGPATH];
+			sformat(pg_ver_dir, sizeof(pg_ver_dir), "%s%d", pfx, pgmajor);
+
+			char *chown_args[] = {
+				"sudo", "chown", "docker", pg_ver_dir, NULL
+			};
+			log_info("pg_autoctl node run: chown docker \"%s\"", pg_ver_dir);
+
+			pid_t chown_pid = fork();
+			if (chown_pid < 0)
+			{
+				log_fatal("fork: %m");
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+			if (chown_pid == 0)
+			{
+				execvp("sudo", chown_args);
+				_exit(127);
+			}
+			int chown_st = 0;
+			while (waitpid(chown_pid, &chown_st, 0) < 0 && errno == EINTR)
+			{ }
+			if (!WIFEXITED(chown_st) || WEXITSTATUS(chown_st) != 0)
+			{
+				log_error("chown docker \"%s\" exited with status %d",
+						  pg_ver_dir,
+						  WIFEXITED(chown_st) ? WEXITSTATUS(chown_st) : -1);
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
 		}
 
 		/*
