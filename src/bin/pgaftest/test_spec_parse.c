@@ -67,7 +67,7 @@
 
 
 /* First part of user prologue.  */
-#line 1 "test_spec_parse.y"
+#line 1 "src/bin/pgaftest/test_spec_parse.y"
 
 /*
  * src/bin/pgaftest/test_spec_parse.y
@@ -211,7 +211,7 @@ static TestFormation *current_formation   = NULL;
 static TestNode      *current_node        = NULL;
 
 
-#line 215 "test_spec_parse.c"
+#line 215 "src/bin/pgaftest/test_spec_parse.c"
 
 # ifndef YY_CAST
 #  ifdef __cplusplus
@@ -268,149 +268,150 @@ enum yysymbol_kind_t
   YYSYMBOL_T_DEFERRED = 26,                /* T_DEFERRED  */
   YYSYMBOL_T_IMMEDIATE = 27,               /* T_IMMEDIATE  */
   YYSYMBOL_T_FALSE = 28,                   /* T_FALSE  */
-  YYSYMBOL_T_INITIALLY = 29,               /* T_INITIALLY  */
-  YYSYMBOL_T_VOLUME = 30,                  /* T_VOLUME  */
-  YYSYMBOL_T_LISTEN = 31,                  /* T_LISTEN  */
-  YYSYMBOL_T_CITUS_SECONDARY = 32,         /* T_CITUS_SECONDARY  */
-  YYSYMBOL_T_CANDIDATE_PRIORITY = 33,      /* T_CANDIDATE_PRIORITY  */
-  YYSYMBOL_T_PORT = 34,                    /* T_PORT  */
-  YYSYMBOL_T_PASSWORD = 35,                /* T_PASSWORD  */
-  YYSYMBOL_T_MONITOR_PASSWORD = 36,        /* T_MONITOR_PASSWORD  */
-  YYSYMBOL_T_CITUS_CLUSTER_NAME = 37,      /* T_CITUS_CLUSTER_NAME  */
-  YYSYMBOL_T_DEBIAN_CLUSTER = 38,          /* T_DEBIAN_CLUSTER  */
-  YYSYMBOL_T_REPLICATION_QUORUM = 39,      /* T_REPLICATION_QUORUM  */
-  YYSYMBOL_T_REPLICATION_PASSWORD = 40,    /* T_REPLICATION_PASSWORD  */
-  YYSYMBOL_T_EXTENSION_VERSION = 41,       /* T_EXTENSION_VERSION  */
-  YYSYMBOL_T_BIND_SOURCE = 42,             /* T_BIND_SOURCE  */
-  YYSYMBOL_T_FS_INIT = 43,                 /* T_FS_INIT  */
-  YYSYMBOL_T_FS_SINGLE = 44,               /* T_FS_SINGLE  */
-  YYSYMBOL_T_FS_PRIMARY = 45,              /* T_FS_PRIMARY  */
-  YYSYMBOL_T_FS_WAIT_PRIMARY = 46,         /* T_FS_WAIT_PRIMARY  */
-  YYSYMBOL_T_FS_WAIT_STANDBY = 47,         /* T_FS_WAIT_STANDBY  */
-  YYSYMBOL_T_FS_DEMOTED = 48,              /* T_FS_DEMOTED  */
-  YYSYMBOL_T_FS_DEMOTE_TIMEOUT = 49,       /* T_FS_DEMOTE_TIMEOUT  */
-  YYSYMBOL_T_FS_DRAINING = 50,             /* T_FS_DRAINING  */
-  YYSYMBOL_T_FS_SECONDARY = 51,            /* T_FS_SECONDARY  */
-  YYSYMBOL_T_FS_CATCHINGUP = 52,           /* T_FS_CATCHINGUP  */
-  YYSYMBOL_T_FS_PREP_PROMOTION = 53,       /* T_FS_PREP_PROMOTION  */
-  YYSYMBOL_T_FS_STOP_REPLICATION = 54,     /* T_FS_STOP_REPLICATION  */
-  YYSYMBOL_T_FS_MAINTENANCE = 55,          /* T_FS_MAINTENANCE  */
-  YYSYMBOL_T_FS_JOIN_PRIMARY = 56,         /* T_FS_JOIN_PRIMARY  */
-  YYSYMBOL_T_FS_APPLY_SETTINGS = 57,       /* T_FS_APPLY_SETTINGS  */
-  YYSYMBOL_T_FS_PREPARE_MAINTENANCE = 58,  /* T_FS_PREPARE_MAINTENANCE  */
-  YYSYMBOL_T_FS_WAIT_MAINTENANCE = 59,     /* T_FS_WAIT_MAINTENANCE  */
-  YYSYMBOL_T_FS_REPORT_LSN = 60,           /* T_FS_REPORT_LSN  */
-  YYSYMBOL_T_FS_FAST_FORWARD = 61,         /* T_FS_FAST_FORWARD  */
-  YYSYMBOL_T_FS_JOIN_SECONDARY = 62,       /* T_FS_JOIN_SECONDARY  */
-  YYSYMBOL_T_FS_DROPPED = 63,              /* T_FS_DROPPED  */
-  YYSYMBOL_T_EXEC = 64,                    /* T_EXEC  */
-  YYSYMBOL_T_EXEC_FAILS = 65,              /* T_EXEC_FAILS  */
-  YYSYMBOL_T_PG_AUTOCTL = 66,              /* T_PG_AUTOCTL  */
-  YYSYMBOL_T_WAIT = 67,                    /* T_WAIT  */
-  YYSYMBOL_T_UNTIL = 68,                   /* T_UNTIL  */
-  YYSYMBOL_T_TIMEOUT = 69,                 /* T_TIMEOUT  */
-  YYSYMBOL_T_AND = 70,                     /* T_AND  */
-  YYSYMBOL_T_IS = 71,                      /* T_IS  */
-  YYSYMBOL_T_WITH = 72,                    /* T_WITH  */
-  YYSYMBOL_T_ASSERT = 73,                  /* T_ASSERT  */
-  YYSYMBOL_T_SQL = 74,                     /* T_SQL  */
-  YYSYMBOL_T_EXPECT = 75,                  /* T_EXPECT  */
-  YYSYMBOL_T_ERROR = 76,                   /* T_ERROR  */
-  YYSYMBOL_T_PROMOTE = 77,                 /* T_PROMOTE  */
-  YYSYMBOL_T_NETWORK = 78,                 /* T_NETWORK  */
-  YYSYMBOL_T_DISCONNECT = 79,              /* T_DISCONNECT  */
-  YYSYMBOL_T_CONNECT = 80,                 /* T_CONNECT  */
-  YYSYMBOL_T_SLEEP = 81,                   /* T_SLEEP  */
-  YYSYMBOL_T_COMPOSE = 82,                 /* T_COMPOSE  */
-  YYSYMBOL_T_DOWN = 83,                    /* T_DOWN  */
-  YYSYMBOL_T_START = 84,                   /* T_START  */
-  YYSYMBOL_T_STOP = 85,                    /* T_STOP  */
-  YYSYMBOL_T_STOPPED = 86,                 /* T_STOPPED  */
-  YYSYMBOL_T_KILL = 87,                    /* T_KILL  */
-  YYSYMBOL_T_INJECT = 88,                  /* T_INJECT  */
-  YYSYMBOL_T_STATE = 89,                   /* T_STATE  */
-  YYSYMBOL_T_ASSIGNED_STATE = 90,          /* T_ASSIGNED_STATE  */
-  YYSYMBOL_T_IN = 91,                      /* T_IN  */
-  YYSYMBOL_T_GROUP = 92,                   /* T_GROUP  */
-  YYSYMBOL_T_LBRACE = 93,                  /* T_LBRACE  */
-  YYSYMBOL_T_RBRACE = 94,                  /* T_RBRACE  */
-  YYSYMBOL_T_COMMA = 95,                   /* T_COMMA  */
-  YYSYMBOL_T_POSTGRES = 96,                /* T_POSTGRES  */
-  YYSYMBOL_T_STAYS = 97,                   /* T_STAYS  */
-  YYSYMBOL_T_WHILE = 98,                   /* T_WHILE  */
-  YYSYMBOL_T_THROUGH = 99,                 /* T_THROUGH  */
-  YYSYMBOL_T_SET = 100,                    /* T_SET  */
-  YYSYMBOL_T_LOGS = 101,                   /* T_LOGS  */
-  YYSYMBOL_T_NOT = 102,                    /* T_NOT  */
-  YYSYMBOL_T_CONTAINS = 103,               /* T_CONTAINS  */
-  YYSYMBOL_T_MATCHES = 104,                /* T_MATCHES  */
-  YYSYMBOL_T_INTEGER = 105,                /* T_INTEGER  */
-  YYSYMBOL_T_IDENT = 106,                  /* T_IDENT  */
-  YYSYMBOL_T_STRING = 107,                 /* T_STRING  */
-  YYSYMBOL_T_BLOCK = 108,                  /* T_BLOCK  */
-  YYSYMBOL_T_SHELL_ARGS = 109,             /* T_SHELL_ARGS  */
-  YYSYMBOL_YYACCEPT = 110,                 /* $accept  */
-  YYSYMBOL_spec = 111,                     /* spec  */
-  YYSYMBOL_spec_item = 112,                /* spec_item  */
-  YYSYMBOL_cluster_block = 113,            /* cluster_block  */
-  YYSYMBOL_114_1 = 114,                    /* $@1  */
-  YYSYMBOL_cluster_item_list = 115,        /* cluster_item_list  */
-  YYSYMBOL_cluster_item = 116,             /* cluster_item  */
-  YYSYMBOL_monitor_line = 117,             /* monitor_line  */
-  YYSYMBOL_image_line = 118,               /* image_line  */
-  YYSYMBOL_extension_version_line = 119,   /* extension_version_line  */
-  YYSYMBOL_ssl_line = 120,                 /* ssl_line  */
-  YYSYMBOL_auth_line = 121,                /* auth_line  */
-  YYSYMBOL_formation_block = 122,          /* formation_block  */
-  YYSYMBOL_123_2 = 123,                    /* $@2  */
-  YYSYMBOL_formation_opt_list = 124,       /* formation_opt_list  */
-  YYSYMBOL_bare_name = 125,                /* bare_name  */
-  YYSYMBOL_formation_opt = 126,            /* formation_opt  */
-  YYSYMBOL_node_list = 127,                /* node_list  */
-  YYSYMBOL_node_name = 128,                /* node_name  */
-  YYSYMBOL_init_node_slot = 129,           /* init_node_slot  */
-  YYSYMBOL_node_line = 130,                /* node_line  */
-  YYSYMBOL_131_3 = 131,                    /* $@3  */
-  YYSYMBOL_132_4 = 132,                    /* $@4  */
-  YYSYMBOL_node_opt_list = 133,            /* node_opt_list  */
-  YYSYMBOL_node_opt = 134,                 /* node_opt  */
-  YYSYMBOL_setup_block = 135,              /* setup_block  */
-  YYSYMBOL_teardown_block = 136,           /* teardown_block  */
-  YYSYMBOL_named_step = 137,               /* named_step  */
-  YYSYMBOL_cmd_block = 138,                /* cmd_block  */
-  YYSYMBOL_cmd_list = 139,                 /* cmd_list  */
-  YYSYMBOL_step_cmd = 140,                 /* step_cmd  */
-  YYSYMBOL_exec_cmd = 141,                 /* exec_cmd  */
-  YYSYMBOL_state_op = 142,                 /* state_op  */
-  YYSYMBOL_wait_multi_condition = 143,     /* wait_multi_condition  */
-  YYSYMBOL_wait_multi_condition_list = 144, /* wait_multi_condition_list  */
-  YYSYMBOL_opt_passing_through = 145,      /* opt_passing_through  */
-  YYSYMBOL_pass_state_list = 146,          /* pass_state_list  */
-  YYSYMBOL_wait_cmd = 147,                 /* wait_cmd  */
-  YYSYMBOL_148_5 = 148,                    /* $@5  */
-  YYSYMBOL_149_6 = 149,                    /* $@6  */
-  YYSYMBOL_state_name_list = 150,          /* state_name_list  */
-  YYSYMBOL_opt_in_group = 151,             /* opt_in_group  */
-  YYSYMBOL_group_items = 152,              /* group_items  */
-  YYSYMBOL_opt_timeout = 153,              /* opt_timeout  */
-  YYSYMBOL_assert_cmd = 154,               /* assert_cmd  */
-  YYSYMBOL_sql_cmd = 155,                  /* sql_cmd  */
-  YYSYMBOL_expect_cmd = 156,               /* expect_cmd  */
-  YYSYMBOL_promote_cmd = 157,              /* promote_cmd  */
-  YYSYMBOL_promote_list = 158,             /* promote_list  */
-  YYSYMBOL_network_cmd = 159,              /* network_cmd  */
-  YYSYMBOL_sleep_cmd = 160,                /* sleep_cmd  */
-  YYSYMBOL_compose_cmd = 161,              /* compose_cmd  */
-  YYSYMBOL_postgres_ctl_cmd = 162,         /* postgres_ctl_cmd  */
-  YYSYMBOL_while_body = 163,               /* while_body  */
-  YYSYMBOL_164_7 = 164,                    /* $@7  */
-  YYSYMBOL_stays_while_cmd = 165,          /* stays_while_cmd  */
-  YYSYMBOL_set_monitor_cmd = 166,          /* set_monitor_cmd  */
-  YYSYMBOL_logs_cmd = 167,                 /* logs_cmd  */
-  YYSYMBOL_sequence_block = 168,           /* sequence_block  */
-  YYSYMBOL_sequence_names = 169,           /* sequence_names  */
-  YYSYMBOL_fsm_state = 170,                /* fsm_state  */
-  YYSYMBOL_ident_or_string = 171           /* ident_or_string  */
+  YYSYMBOL_T_TRUE = 29,                    /* T_TRUE  */
+  YYSYMBOL_T_INITIALLY = 30,               /* T_INITIALLY  */
+  YYSYMBOL_T_VOLUME = 31,                  /* T_VOLUME  */
+  YYSYMBOL_T_LISTEN = 32,                  /* T_LISTEN  */
+  YYSYMBOL_T_CITUS_SECONDARY = 33,         /* T_CITUS_SECONDARY  */
+  YYSYMBOL_T_CANDIDATE_PRIORITY = 34,      /* T_CANDIDATE_PRIORITY  */
+  YYSYMBOL_T_PORT = 35,                    /* T_PORT  */
+  YYSYMBOL_T_PASSWORD = 36,                /* T_PASSWORD  */
+  YYSYMBOL_T_MONITOR_PASSWORD = 37,        /* T_MONITOR_PASSWORD  */
+  YYSYMBOL_T_CITUS_CLUSTER_NAME = 38,      /* T_CITUS_CLUSTER_NAME  */
+  YYSYMBOL_T_DEBIAN_CLUSTER = 39,          /* T_DEBIAN_CLUSTER  */
+  YYSYMBOL_T_REPLICATION_QUORUM = 40,      /* T_REPLICATION_QUORUM  */
+  YYSYMBOL_T_REPLICATION_PASSWORD = 41,    /* T_REPLICATION_PASSWORD  */
+  YYSYMBOL_T_EXTENSION_VERSION = 42,       /* T_EXTENSION_VERSION  */
+  YYSYMBOL_T_BIND_SOURCE = 43,             /* T_BIND_SOURCE  */
+  YYSYMBOL_T_FS_INIT = 44,                 /* T_FS_INIT  */
+  YYSYMBOL_T_FS_SINGLE = 45,               /* T_FS_SINGLE  */
+  YYSYMBOL_T_FS_PRIMARY = 46,              /* T_FS_PRIMARY  */
+  YYSYMBOL_T_FS_WAIT_PRIMARY = 47,         /* T_FS_WAIT_PRIMARY  */
+  YYSYMBOL_T_FS_WAIT_STANDBY = 48,         /* T_FS_WAIT_STANDBY  */
+  YYSYMBOL_T_FS_DEMOTED = 49,              /* T_FS_DEMOTED  */
+  YYSYMBOL_T_FS_DEMOTE_TIMEOUT = 50,       /* T_FS_DEMOTE_TIMEOUT  */
+  YYSYMBOL_T_FS_DRAINING = 51,             /* T_FS_DRAINING  */
+  YYSYMBOL_T_FS_SECONDARY = 52,            /* T_FS_SECONDARY  */
+  YYSYMBOL_T_FS_CATCHINGUP = 53,           /* T_FS_CATCHINGUP  */
+  YYSYMBOL_T_FS_PREP_PROMOTION = 54,       /* T_FS_PREP_PROMOTION  */
+  YYSYMBOL_T_FS_STOP_REPLICATION = 55,     /* T_FS_STOP_REPLICATION  */
+  YYSYMBOL_T_FS_MAINTENANCE = 56,          /* T_FS_MAINTENANCE  */
+  YYSYMBOL_T_FS_JOIN_PRIMARY = 57,         /* T_FS_JOIN_PRIMARY  */
+  YYSYMBOL_T_FS_APPLY_SETTINGS = 58,       /* T_FS_APPLY_SETTINGS  */
+  YYSYMBOL_T_FS_PREPARE_MAINTENANCE = 59,  /* T_FS_PREPARE_MAINTENANCE  */
+  YYSYMBOL_T_FS_WAIT_MAINTENANCE = 60,     /* T_FS_WAIT_MAINTENANCE  */
+  YYSYMBOL_T_FS_REPORT_LSN = 61,           /* T_FS_REPORT_LSN  */
+  YYSYMBOL_T_FS_FAST_FORWARD = 62,         /* T_FS_FAST_FORWARD  */
+  YYSYMBOL_T_FS_JOIN_SECONDARY = 63,       /* T_FS_JOIN_SECONDARY  */
+  YYSYMBOL_T_FS_DROPPED = 64,              /* T_FS_DROPPED  */
+  YYSYMBOL_T_EXEC = 65,                    /* T_EXEC  */
+  YYSYMBOL_T_EXEC_FAILS = 66,              /* T_EXEC_FAILS  */
+  YYSYMBOL_T_PG_AUTOCTL = 67,              /* T_PG_AUTOCTL  */
+  YYSYMBOL_T_WAIT = 68,                    /* T_WAIT  */
+  YYSYMBOL_T_UNTIL = 69,                   /* T_UNTIL  */
+  YYSYMBOL_T_TIMEOUT = 70,                 /* T_TIMEOUT  */
+  YYSYMBOL_T_AND = 71,                     /* T_AND  */
+  YYSYMBOL_T_IS = 72,                      /* T_IS  */
+  YYSYMBOL_T_WITH = 73,                    /* T_WITH  */
+  YYSYMBOL_T_ASSERT = 74,                  /* T_ASSERT  */
+  YYSYMBOL_T_SQL = 75,                     /* T_SQL  */
+  YYSYMBOL_T_EXPECT = 76,                  /* T_EXPECT  */
+  YYSYMBOL_T_ERROR = 77,                   /* T_ERROR  */
+  YYSYMBOL_T_PROMOTE = 78,                 /* T_PROMOTE  */
+  YYSYMBOL_T_NETWORK = 79,                 /* T_NETWORK  */
+  YYSYMBOL_T_DISCONNECT = 80,              /* T_DISCONNECT  */
+  YYSYMBOL_T_CONNECT = 81,                 /* T_CONNECT  */
+  YYSYMBOL_T_SLEEP = 82,                   /* T_SLEEP  */
+  YYSYMBOL_T_COMPOSE = 83,                 /* T_COMPOSE  */
+  YYSYMBOL_T_DOWN = 84,                    /* T_DOWN  */
+  YYSYMBOL_T_START = 85,                   /* T_START  */
+  YYSYMBOL_T_STOP = 86,                    /* T_STOP  */
+  YYSYMBOL_T_STOPPED = 87,                 /* T_STOPPED  */
+  YYSYMBOL_T_KILL = 88,                    /* T_KILL  */
+  YYSYMBOL_T_INJECT = 89,                  /* T_INJECT  */
+  YYSYMBOL_T_STATE = 90,                   /* T_STATE  */
+  YYSYMBOL_T_ASSIGNED_STATE = 91,          /* T_ASSIGNED_STATE  */
+  YYSYMBOL_T_IN = 92,                      /* T_IN  */
+  YYSYMBOL_T_GROUP = 93,                   /* T_GROUP  */
+  YYSYMBOL_T_LBRACE = 94,                  /* T_LBRACE  */
+  YYSYMBOL_T_RBRACE = 95,                  /* T_RBRACE  */
+  YYSYMBOL_T_COMMA = 96,                   /* T_COMMA  */
+  YYSYMBOL_T_POSTGRES = 97,                /* T_POSTGRES  */
+  YYSYMBOL_T_STAYS = 98,                   /* T_STAYS  */
+  YYSYMBOL_T_WHILE = 99,                   /* T_WHILE  */
+  YYSYMBOL_T_THROUGH = 100,                /* T_THROUGH  */
+  YYSYMBOL_T_SET = 101,                    /* T_SET  */
+  YYSYMBOL_T_LOGS = 102,                   /* T_LOGS  */
+  YYSYMBOL_T_NOT = 103,                    /* T_NOT  */
+  YYSYMBOL_T_CONTAINS = 104,               /* T_CONTAINS  */
+  YYSYMBOL_T_MATCHES = 105,                /* T_MATCHES  */
+  YYSYMBOL_T_INTEGER = 106,                /* T_INTEGER  */
+  YYSYMBOL_T_IDENT = 107,                  /* T_IDENT  */
+  YYSYMBOL_T_STRING = 108,                 /* T_STRING  */
+  YYSYMBOL_T_BLOCK = 109,                  /* T_BLOCK  */
+  YYSYMBOL_T_SHELL_ARGS = 110,             /* T_SHELL_ARGS  */
+  YYSYMBOL_YYACCEPT = 111,                 /* $accept  */
+  YYSYMBOL_spec = 112,                     /* spec  */
+  YYSYMBOL_spec_item = 113,                /* spec_item  */
+  YYSYMBOL_cluster_block = 114,            /* cluster_block  */
+  YYSYMBOL_115_1 = 115,                    /* $@1  */
+  YYSYMBOL_cluster_item_list = 116,        /* cluster_item_list  */
+  YYSYMBOL_cluster_item = 117,             /* cluster_item  */
+  YYSYMBOL_monitor_line = 118,             /* monitor_line  */
+  YYSYMBOL_image_line = 119,               /* image_line  */
+  YYSYMBOL_extension_version_line = 120,   /* extension_version_line  */
+  YYSYMBOL_ssl_line = 121,                 /* ssl_line  */
+  YYSYMBOL_auth_line = 122,                /* auth_line  */
+  YYSYMBOL_formation_block = 123,          /* formation_block  */
+  YYSYMBOL_124_2 = 124,                    /* $@2  */
+  YYSYMBOL_formation_opt_list = 125,       /* formation_opt_list  */
+  YYSYMBOL_bare_name = 126,                /* bare_name  */
+  YYSYMBOL_formation_opt = 127,            /* formation_opt  */
+  YYSYMBOL_node_list = 128,                /* node_list  */
+  YYSYMBOL_node_name = 129,                /* node_name  */
+  YYSYMBOL_init_node_slot = 130,           /* init_node_slot  */
+  YYSYMBOL_node_line = 131,                /* node_line  */
+  YYSYMBOL_132_3 = 132,                    /* $@3  */
+  YYSYMBOL_133_4 = 133,                    /* $@4  */
+  YYSYMBOL_node_opt_list = 134,            /* node_opt_list  */
+  YYSYMBOL_node_opt = 135,                 /* node_opt  */
+  YYSYMBOL_setup_block = 136,              /* setup_block  */
+  YYSYMBOL_teardown_block = 137,           /* teardown_block  */
+  YYSYMBOL_named_step = 138,               /* named_step  */
+  YYSYMBOL_cmd_block = 139,                /* cmd_block  */
+  YYSYMBOL_cmd_list = 140,                 /* cmd_list  */
+  YYSYMBOL_step_cmd = 141,                 /* step_cmd  */
+  YYSYMBOL_exec_cmd = 142,                 /* exec_cmd  */
+  YYSYMBOL_state_op = 143,                 /* state_op  */
+  YYSYMBOL_wait_multi_condition = 144,     /* wait_multi_condition  */
+  YYSYMBOL_wait_multi_condition_list = 145, /* wait_multi_condition_list  */
+  YYSYMBOL_opt_passing_through = 146,      /* opt_passing_through  */
+  YYSYMBOL_pass_state_list = 147,          /* pass_state_list  */
+  YYSYMBOL_wait_cmd = 148,                 /* wait_cmd  */
+  YYSYMBOL_149_5 = 149,                    /* $@5  */
+  YYSYMBOL_150_6 = 150,                    /* $@6  */
+  YYSYMBOL_state_name_list = 151,          /* state_name_list  */
+  YYSYMBOL_opt_in_group = 152,             /* opt_in_group  */
+  YYSYMBOL_group_items = 153,              /* group_items  */
+  YYSYMBOL_opt_timeout = 154,              /* opt_timeout  */
+  YYSYMBOL_assert_cmd = 155,               /* assert_cmd  */
+  YYSYMBOL_sql_cmd = 156,                  /* sql_cmd  */
+  YYSYMBOL_expect_cmd = 157,               /* expect_cmd  */
+  YYSYMBOL_promote_cmd = 158,              /* promote_cmd  */
+  YYSYMBOL_promote_list = 159,             /* promote_list  */
+  YYSYMBOL_network_cmd = 160,              /* network_cmd  */
+  YYSYMBOL_sleep_cmd = 161,                /* sleep_cmd  */
+  YYSYMBOL_compose_cmd = 162,              /* compose_cmd  */
+  YYSYMBOL_postgres_ctl_cmd = 163,         /* postgres_ctl_cmd  */
+  YYSYMBOL_while_body = 164,               /* while_body  */
+  YYSYMBOL_165_7 = 165,                    /* $@7  */
+  YYSYMBOL_stays_while_cmd = 166,          /* stays_while_cmd  */
+  YYSYMBOL_set_monitor_cmd = 167,          /* set_monitor_cmd  */
+  YYSYMBOL_logs_cmd = 168,                 /* logs_cmd  */
+  YYSYMBOL_sequence_block = 169,           /* sequence_block  */
+  YYSYMBOL_sequence_names = 170,           /* sequence_names  */
+  YYSYMBOL_fsm_state = 171,                /* fsm_state  */
+  YYSYMBOL_ident_or_string = 172           /* ident_or_string  */
 };
 typedef enum yysymbol_kind_t yysymbol_kind_t;
 
@@ -738,19 +739,19 @@ union yyalloc
 /* YYFINAL -- State number of the termination state.  */
 #define YYFINAL  21
 /* YYLAST -- Last index in YYTABLE.  */
-#define YYLAST   560
+#define YYLAST   562
 
 /* YYNTOKENS -- Number of terminals.  */
-#define YYNTOKENS  110
+#define YYNTOKENS  111
 /* YYNNTS -- Number of nonterminals.  */
 #define YYNNTS  62
 /* YYNRULES -- Number of rules.  */
-#define YYNRULES  196
+#define YYNRULES  197
 /* YYNSTATES -- Number of states.  */
-#define YYNSTATES  319
+#define YYNSTATES  320
 
 /* YYMAXUTOK -- Last valid token kind.  */
-#define YYMAXUTOK   364
+#define YYMAXUTOK   365
 
 
 /* YYTRANSLATE(TOKEN-NUM) -- Symbol number corresponding to TOKEN-NUM
@@ -800,7 +801,7 @@ static const yytype_int8 yytranslate[] =
       75,    76,    77,    78,    79,    80,    81,    82,    83,    84,
       85,    86,    87,    88,    89,    90,    91,    92,    93,    94,
       95,    96,    97,    98,    99,   100,   101,   102,   103,   104,
-     105,   106,   107,   108,   109
+     105,   106,   107,   108,   109,   110
 };
 
 #if YYDEBUG
@@ -814,19 +815,19 @@ static const yytype_int16 yyrline[] =
      412,   413,   414,   415,   419,   424,   428,   434,   436,   455,
      456,   465,   482,   481,   489,   488,   496,   498,   502,   507,
      512,   516,   520,   526,   531,   535,   540,   544,   548,   552,
-     556,   560,   564,   568,   574,   580,   585,   590,   595,   603,
-     609,   615,   629,   650,   657,   668,   686,   701,   704,   712,
-     713,   714,   715,   716,   717,   718,   719,   720,   721,   722,
-     723,   724,   738,   745,   751,   758,   764,   772,   778,   805,
-     805,   816,   831,   849,   850,   865,   867,   871,   879,   887,
-     894,   906,   905,   917,   916,   927,   936,   945,   952,   966,
-     981,   987,   994,  1000,  1013,  1015,  1019,  1024,  1032,  1033,
-    1034,  1045,  1053,  1061,  1069,  1087,  1102,  1109,  1113,  1119,
-    1132,  1140,  1148,  1163,  1169,  1182,  1196,  1200,  1206,  1212,
-    1238,  1272,  1278,  1295,  1295,  1300,  1319,  1344,  1353,  1362,
-    1371,  1387,  1390,  1392,  1414,  1415,  1416,  1417,  1418,  1419,
-    1420,  1421,  1422,  1423,  1424,  1425,  1426,  1427,  1428,  1429,
-    1430,  1431,  1432,  1433,  1434,  1442,  1443
+     556,   560,   564,   568,   574,   580,   585,   590,   595,   599,
+     603,   609,   615,   629,   650,   657,   668,   686,   701,   704,
+     712,   713,   714,   715,   716,   717,   718,   719,   720,   721,
+     722,   723,   724,   738,   745,   751,   758,   764,   772,   778,
+     805,   805,   816,   831,   849,   850,   865,   867,   871,   879,
+     887,   894,   906,   905,   917,   916,   927,   936,   945,   952,
+     966,   981,   987,   994,  1000,  1013,  1015,  1019,  1024,  1032,
+    1033,  1034,  1045,  1053,  1061,  1069,  1087,  1102,  1109,  1113,
+    1119,  1132,  1140,  1148,  1163,  1169,  1182,  1196,  1200,  1206,
+    1212,  1238,  1272,  1278,  1295,  1295,  1300,  1319,  1344,  1353,
+    1362,  1371,  1387,  1390,  1392,  1414,  1415,  1416,  1417,  1418,
+    1419,  1420,  1421,  1422,  1423,  1424,  1425,  1426,  1427,  1428,
+    1429,  1430,  1431,  1432,  1433,  1434,  1442,  1443
 };
 #endif
 
@@ -847,7 +848,7 @@ static const char *const yytname[] =
   "T_SETUP", "T_TEARDOWN", "T_STEP", "T_SEQUENCE", "T_EQUALS", "T_IMAGE",
   "T_IMAGE_TARGET", "T_SSL", "T_AUTH", "T_AUTH_METHOD", "T_FORMATION",
   "T_NUM_SYNC", "T_COORDINATOR", "T_WORKER", "T_ASYNC", "T_NO_MONITOR",
-  "T_LAUNCH", "T_CREATE", "T_DEFERRED", "T_IMMEDIATE", "T_FALSE",
+  "T_LAUNCH", "T_CREATE", "T_DEFERRED", "T_IMMEDIATE", "T_FALSE", "T_TRUE",
   "T_INITIALLY", "T_VOLUME", "T_LISTEN", "T_CITUS_SECONDARY",
   "T_CANDIDATE_PRIORITY", "T_PORT", "T_PASSWORD", "T_MONITOR_PASSWORD",
   "T_CITUS_CLUSTER_NAME", "T_DEBIAN_CLUSTER", "T_REPLICATION_QUORUM",
@@ -890,12 +891,12 @@ yysymbol_name (yysymbol_kind_t yysymbol)
 }
 #endif
 
-#define YYPACT_NINF (-157)
+#define YYPACT_NINF (-155)
 
 #define yypact_value_is_default(Yyn) \
   ((Yyn) == YYPACT_NINF)
 
-#define YYTABLE_NINF (-113)
+#define YYTABLE_NINF (-114)
 
 #define yytable_value_is_error(Yyn) \
   0
@@ -904,38 +905,38 @@ yysymbol_name (yysymbol_kind_t yysymbol)
    STATE-NUM.  */
 static const yytype_int16 yypact[] =
 {
-      75,   -77,   -50,   -50,   -80,  -157,    46,  -157,  -157,  -157,
-    -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,   -50,
-     -80,  -157,  -157,  -157,   396,  -157,  -157,     6,   -55,   -39,
-     -25,    21,     3,   -14,   -58,    -9,     8,   -42,   -43,     7,
-      15,  -157,    -7,     9,  -157,  -157,  -157,  -157,  -157,  -157,
-    -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,    -2,   -11,
-      22,    27,    28,  -157,    -5,  -157,  -157,  -157,  -157,  -157,
-    -157,  -157,  -157,  -157,    34,    35,    41,   139,  -157,    24,
-      62,    52,    11,  -157,  -157,    23,    63,    64,  -157,  -157,
-      70,    98,    99,   100,     4,     4,   102,   -33,   125,   127,
-      96,   128,    36,  -157,  -157,  -157,  -157,  -157,  -157,  -157,
-    -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,
-    -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,
-    -157,  -157,  -157,  -157,  -157,   -61,   165,   -29,  -157,     2,
-       2,   497,  -157,  -157,  -157,   130,  -157,  -157,  -157,  -157,
-    -157,   129,  -157,  -157,  -157,  -157,    18,   132,   133,  -157,
-    -157,  -157,  -157,   211,   155,     1,    -8,     2,     2,   136,
-     151,   167,    -8,  -157,  -157,   203,   231,   146,  -157,  -157,
-     160,   161,  -157,  -157,   234,  -157,  -157,  -157,  -157,   166,
-     242,  -157,  -157,  -157,  -157,  -157,   190,   227,  -157,   267,
-     295,   183,  -157,    10,   192,   204,  -157,  -157,  -157,    -8,
-      -8,    -8,    -8,  -157,  -157,  -157,  -157,   191,  -157,  -157,
-      -1,  -157,   195,   232,   233,    -8,    -8,     2,   136,  -157,
-    -157,   209,  -157,  -157,  -157,  -157,   212,  -157,   198,  -157,
-    -157,  -157,  -157,   207,   207,  -157,  -157,   331,  -157,   202,
-    -157,  -157,  -157,   359,    -8,    -8,  -157,  -157,  -157,   438,
-    -157,  -157,  -157,   213,  -157,  -157,  -157,  -157,   238,   141,
-     395,  -157,   226,   228,   229,  -157,  -157,  -157,  -157,    97,
-     -17,  -157,  -157,   230,  -157,  -157,   254,   255,   256,   258,
-     259,   260,   261,   257,  -157,  -157,  -157,   115,  -157,  -157,
-    -157,  -157,  -157,  -157,   309,    19,  -157,  -157,  -157,  -157,
-    -157,  -157,  -157,  -157,  -157,   335,  -157,  -157,  -157
+      33,   -54,   -49,   -49,   -32,  -155,    79,  -155,  -155,  -155,
+    -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,   -49,
+     -32,  -155,  -155,  -155,   397,  -155,  -155,     5,   -52,   -45,
+     -30,    11,     4,   -12,   -63,    -8,     3,   -13,   -35,    21,
+      29,  -155,    -2,    16,  -155,  -155,  -155,  -155,  -155,  -155,
+    -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,   -11,   -16,
+      36,    37,    38,  -155,    -6,  -155,  -155,  -155,  -155,  -155,
+    -155,  -155,  -155,  -155,    18,    41,    50,   140,  -155,    13,
+      12,    52,    10,  -155,  -155,    74,    64,    65,  -155,  -155,
+      71,    98,    99,   100,     6,     6,   102,   -37,   125,   127,
+     126,   129,     7,  -155,  -155,  -155,  -155,  -155,  -155,  -155,
+    -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,
+    -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,
+    -155,  -155,  -155,  -155,  -155,   -26,   166,   -36,  -155,     1,
+       1,   498,  -155,  -155,  -155,   131,  -155,  -155,  -155,  -155,
+    -155,   130,  -155,  -155,  -155,  -155,    15,   133,   134,  -155,
+    -155,  -155,  -155,   213,   156,     0,     8,     1,     1,   137,
+     152,   167,     8,  -155,  -155,   204,   231,   147,  -155,  -155,
+     161,   162,  -155,  -155,   235,  -155,  -155,  -155,  -155,   190,
+     244,  -155,  -155,  -155,  -155,  -155,   191,   203,  -155,   268,
+     295,   208,  -155,   -44,   193,   205,  -155,  -155,  -155,     8,
+       8,     8,     8,  -155,  -155,  -155,  -155,   192,  -155,  -155,
+       2,  -155,   196,   232,   233,     8,     8,     1,   137,  -155,
+    -155,   212,  -155,  -155,  -155,  -155,   214,  -155,   199,  -155,
+    -155,  -155,  -155,   207,   207,  -155,  -155,   332,  -155,   227,
+    -155,  -155,  -155,   359,     8,     8,  -155,  -155,  -155,   439,
+    -155,  -155,  -155,   238,  -155,  -155,  -155,  -155,   215,   142,
+     396,  -155,   228,   229,   230,  -155,  -155,  -155,  -155,    95,
+     -14,  -155,  -155,   253,  -155,  -155,   255,   256,   202,   257,
+     258,    96,   259,   260,  -155,  -155,  -155,   115,  -155,  -155,
+    -155,  -155,  -155,  -155,   339,    26,  -155,  -155,  -155,  -155,
+    -155,  -155,  -155,  -155,  -155,  -155,   342,  -155,  -155,  -155
 };
 
 /* YYDEFACT[STATE-NUM] -- Default reduction number in state STATE-NUM.
@@ -943,50 +944,50 @@ static const yytype_int16 yypact[] =
    means the default is an error.  */
 static const yytype_uint8 yydefact[] =
 {
-       0,     0,     0,     0,     0,   172,     0,     2,     4,     5,
-       6,     7,     8,     9,    87,    83,    84,   195,   196,     0,
-     171,     1,     3,    11,     0,    85,   173,     0,     0,     0,
-     108,     0,     0,     0,     0,     0,     0,     0,     0,     0,
-       0,    86,     0,     0,    88,    89,    90,    91,    92,    93,
-      94,    95,    96,    97,    98,    99,   100,   101,    20,     0,
+       0,     0,     0,     0,     0,   173,     0,     2,     4,     5,
+       6,     7,     8,     9,    88,    84,    85,   196,   197,     0,
+     172,     1,     3,    11,     0,    86,   174,     0,     0,     0,
+     109,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+       0,    87,     0,     0,    89,    90,    91,    92,    93,    94,
+      95,    96,    97,    98,    99,   100,   101,   102,    20,     0,
        0,     0,     0,    35,     0,    19,    10,    12,    13,    14,
-      17,    15,    16,    18,   103,   105,   107,     0,    50,    49,
-       0,     0,   147,   146,   151,   150,     0,     0,   155,   156,
+      17,    15,    16,    18,   104,   106,   108,     0,    50,    49,
+       0,     0,   148,   147,   152,   151,     0,     0,   156,   157,
        0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
        0,     0,     0,    29,    28,    32,    33,    34,    37,    30,
-      31,   102,   104,   106,   174,   175,   176,   177,   178,   179,
-     180,   181,   182,   183,   184,   185,   186,   187,   188,   189,
-     190,   191,   192,   193,   194,   131,     0,   134,   130,     0,
-       0,     0,   145,   149,   148,     0,   153,   154,   157,   158,
-     159,     0,    49,   162,   161,   166,     0,     0,     0,    22,
-      23,    24,    21,     0,     0,     0,   138,     0,     0,     0,
-       0,     0,   138,   109,   110,     0,     0,     0,   152,   160,
-       0,     0,   167,   169,    25,    26,    42,    43,    41,     0,
-       0,    47,    39,    40,    44,    38,     0,     0,   127,     0,
-       0,     0,   113,   138,     0,   135,   133,   132,   128,   138,
-     138,   138,   138,   163,   165,   168,   170,     0,    45,    46,
-       0,   139,     0,   123,   121,   138,   138,     0,     0,   129,
-     136,     0,   142,   141,   144,   143,     0,    27,     0,    36,
-      51,    48,   140,   115,   115,   126,   125,     0,   114,     0,
-      87,    51,    52,     0,   138,   138,   112,   111,   137,     0,
-      54,    56,   118,   116,   117,   124,   122,   164,     0,    53,
+      31,   103,   105,   107,   175,   176,   177,   178,   179,   180,
+     181,   182,   183,   184,   185,   186,   187,   188,   189,   190,
+     191,   192,   193,   194,   195,   132,     0,   135,   131,     0,
+       0,     0,   146,   150,   149,     0,   154,   155,   158,   159,
+     160,     0,    49,   163,   162,   167,     0,     0,     0,    22,
+      23,    24,    21,     0,     0,     0,   139,     0,     0,     0,
+       0,     0,   139,   110,   111,     0,     0,     0,   153,   161,
+       0,     0,   168,   170,    25,    26,    42,    43,    41,     0,
+       0,    47,    39,    40,    44,    38,     0,     0,   128,     0,
+       0,     0,   114,   139,     0,   136,   134,   133,   129,   139,
+     139,   139,   139,   164,   166,   169,   171,     0,    45,    46,
+       0,   140,     0,   124,   122,   139,   139,     0,     0,   130,
+     137,     0,   143,   142,   145,   144,     0,    27,     0,    36,
+      51,    48,   141,   116,   116,   127,   126,     0,   115,     0,
+      88,    51,    52,     0,   139,   139,   113,   112,   138,     0,
+      54,    56,   119,   117,   118,   125,   123,   165,     0,    53,
        0,    56,     0,     0,     0,    58,    59,    60,    61,     0,
        0,    62,    67,     0,    68,    69,     0,     0,     0,     0,
-       0,     0,     0,     0,    57,   120,   119,     0,    75,    76,
-      77,    63,    66,    64,     0,     0,    70,    72,    80,    73,
-      74,    78,    79,    71,    55,     0,    81,    82,    65
+       0,     0,     0,     0,    57,   121,   120,     0,    75,    76,
+      77,    63,    66,    64,     0,     0,    70,    72,    81,    73,
+      74,    79,    78,    80,    71,    55,     0,    82,    83,    65
 };
 
 /* YYPGOTO[NTERM-NUM].  */
 static const yytype_int16 yypgoto[] =
 {
-    -157,  -157,   361,  -157,  -157,  -157,  -157,  -157,  -157,  -157,
-    -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,   -93,   118,
-    -157,  -157,  -157,   101,  -157,  -157,  -157,  -157,    12,   120,
-    -157,  -157,  -129,  -156,  -157,   152,  -157,  -157,  -157,  -157,
-    -157,  -157,  -157,  -135,  -157,  -157,  -157,  -157,  -157,  -157,
-    -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,  -157,
-    -141,   351
+    -155,  -155,   363,  -155,  -155,  -155,  -155,  -155,  -155,  -155,
+    -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,   -93,   119,
+    -155,  -155,  -155,   101,  -155,  -155,  -155,  -155,    14,   121,
+    -155,  -155,  -129,  -154,  -155,   153,  -155,  -155,  -155,  -155,
+    -155,  -155,  -155,  -140,  -155,  -155,  -155,  -155,  -155,  -155,
+    -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,  -155,
+    -141,   353
 };
 
 /* YYDEFGOTO[NTERM-NUM].  */
@@ -1006,187 +1007,187 @@ static const yytype_int16 yydefgoto[] =
    number is the opposite.  If YYTABLE_NINF, syntax error.  */
 static const yytype_int16 yytable[] =
 {
-     177,   153,   154,    78,   238,   186,   187,    78,    78,   303,
-      58,   176,    98,   202,   173,    16,    13,   188,    82,    59,
-     189,    60,    61,    62,    63,   166,    17,    18,   167,   168,
-     207,    25,    99,   100,   210,   212,   101,   208,   199,   200,
-      89,    90,    91,    14,    92,    93,    21,    64,    65,     1,
-      83,    74,   190,   304,     2,     3,     4,     5,   224,   226,
-     163,   196,   170,    88,   197,   164,   171,    75,   229,   156,
-     157,   158,   248,   174,   232,   233,   234,   235,     1,   196,
-     228,    76,   197,     2,     3,     4,     5,    86,    87,    77,
-     245,   246,    81,   239,   191,   103,   104,    84,   247,    96,
-      66,   109,   110,    94,   102,   152,   257,   192,   193,    79,
-     152,    95,   264,   139,   140,    97,   143,   144,   145,   265,
-     266,   180,   181,   301,   302,   316,   317,   240,   105,   296,
-     272,   273,   274,   106,   107,   275,   276,   277,   278,   279,
-     280,   281,   282,   111,   112,   283,   284,   285,   286,   287,
-     113,   288,   289,   290,   291,   292,   272,   273,   274,   141,
-     142,   275,   276,   277,   278,   279,   280,   281,   282,   146,
-     147,   283,   284,   285,   286,   287,   148,   288,   289,   290,
-     291,   292,   114,   115,   116,   117,   118,   119,   120,   121,
+     177,   153,   154,    98,   186,   187,    78,   238,    78,    58,
+      78,   176,   303,   173,    82,   202,   188,    16,    59,   189,
+      60,    61,    62,    63,    99,   100,   196,   228,   101,   197,
+     207,   163,   208,    25,   210,   212,     1,   164,   199,   200,
+      13,     2,     3,     4,     5,    14,    83,    64,    65,    89,
+      90,    91,   190,    92,    93,    74,   170,   304,   224,   226,
+     171,   166,    75,   229,   167,   168,   156,   157,   158,   232,
+     233,   234,   235,   174,   248,    17,    18,    76,   196,    21,
+      77,   197,     1,    86,    87,   245,   246,     2,     3,     4,
+       5,   103,   104,    88,   191,    81,   102,   239,   247,    84,
+      66,   109,   110,   139,   140,    96,   257,   192,   193,   152,
+     141,    79,   264,   152,   265,   266,   143,   144,    94,   180,
+     181,   301,   302,    97,   311,   312,    95,   240,   111,   296,
+     272,   273,   274,   317,   318,   275,   276,   277,   278,   279,
+     280,   281,   282,   105,   106,   107,   283,   284,   285,   286,
+     287,   112,   288,   289,   290,   291,   292,   272,   273,   274,
+     113,   142,   275,   276,   277,   278,   279,   280,   281,   282,
+     145,   146,   147,   283,   284,   285,   286,   287,   148,   288,
+     289,   290,   291,   292,   114,   115,   116,   117,   118,   119,
+     120,   121,   122,   123,   124,   125,   126,   127,   128,   129,
+     130,   131,   132,   133,   134,   149,   150,   151,   293,   155,
+     315,   114,   115,   116,   117,   118,   119,   120,   121,   122,
+     123,   124,   125,   126,   127,   128,   129,   130,   131,   132,
+     133,   134,   159,   160,   161,   293,   162,   169,   178,   184,
+     179,   182,   183,   185,   201,   204,   213,   135,   114,   115,
+     116,   117,   118,   119,   120,   121,   122,   123,   124,   125,
+     126,   127,   128,   129,   130,   131,   132,   133,   134,   215,
+     216,   217,   219,   222,   206,   114,   115,   116,   117,   118,
+     119,   120,   121,   122,   123,   124,   125,   126,   127,   128,
+     129,   130,   131,   132,   133,   134,   218,   221,   227,   230,
+     237,   231,   242,  -113,  -112,   249,   251,   253,   250,   271,
+     308,   209,   114,   115,   116,   117,   118,   119,   120,   121,
      122,   123,   124,   125,   126,   127,   128,   129,   130,   131,
-     132,   133,   134,   161,   149,   150,   151,   293,   155,   314,
-     114,   115,   116,   117,   118,   119,   120,   121,   122,   123,
-     124,   125,   126,   127,   128,   129,   130,   131,   132,   133,
-     134,   159,   160,   293,   162,   169,   178,   184,   179,   182,
-     183,   185,   201,   204,   213,   135,   114,   115,   116,   117,
+     132,   133,   134,   258,   270,   298,   299,   300,   211,   114,
+     115,   116,   117,   118,   119,   120,   121,   122,   123,   124,
+     125,   126,   127,   128,   129,   130,   131,   132,   133,   134,
+     305,   306,   307,   316,   309,   310,   314,   313,   319,    22,
+     260,   259,   297,    26,     0,   223,   114,   115,   116,   117,
      118,   119,   120,   121,   122,   123,   124,   125,   126,   127,
-     128,   129,   130,   131,   132,   133,   134,   215,   216,   217,
-     219,   218,   227,   206,   114,   115,   116,   117,   118,   119,
-     120,   121,   122,   123,   124,   125,   126,   127,   128,   129,
-     130,   131,   132,   133,   134,   221,   222,   230,   237,   231,
-     242,   249,  -112,  -111,   251,   250,   253,   258,   270,   209,
+     128,   129,   130,   131,   132,   133,   134,   255,     0,     0,
+       0,     0,   225,   114,   115,   116,   117,   118,   119,   120,
+     121,   122,   123,   124,   125,   126,   127,   128,   129,   130,
+     131,   132,   133,   134,     0,     0,     0,     0,     0,     0,
+       0,     0,     0,     0,     0,     0,     0,     0,     0,   256,
      114,   115,   116,   117,   118,   119,   120,   121,   122,   123,
      124,   125,   126,   127,   128,   129,   130,   131,   132,   133,
-     134,   271,   298,   315,   299,   300,   305,   211,   114,   115,
-     116,   117,   118,   119,   120,   121,   122,   123,   124,   125,
-     126,   127,   128,   129,   130,   131,   132,   133,   134,   306,
-     307,   318,   313,   308,   309,   310,   311,    22,   312,   260,
-     259,    26,   297,   223,   114,   115,   116,   117,   118,   119,
-     120,   121,   122,   123,   124,   125,   126,   127,   128,   129,
-     130,   131,   132,   133,   134,     0,   255,     0,     0,     0,
-       0,   225,   114,   115,   116,   117,   118,   119,   120,   121,
-     122,   123,   124,   125,   126,   127,   128,   129,   130,   131,
-     132,   133,   134,     0,     0,     0,     0,     0,     0,     0,
-       0,     0,     0,     0,     0,     0,     0,   256,   114,   115,
-     116,   117,   118,   119,   120,   121,   122,   123,   124,   125,
-     126,   127,   128,   129,   130,   131,   132,   133,   134,     0,
-      28,    29,    30,    31,     0,   262,     0,     0,     0,    32,
-      33,    34,     0,    35,    36,     0,     0,    37,    38,     0,
-      39,    40,     0,     0,     0,     0,     0,     0,     0,     0,
-      41,     0,     0,     0,     0,     0,    42,    43,     0,     0,
-       0,   295,    28,    29,    30,    31,     0,     0,     0,     0,
+     134,     0,    28,    29,    30,    31,   262,     0,     0,     0,
        0,    32,    33,    34,     0,    35,    36,     0,     0,    37,
       38,     0,    39,    40,     0,     0,     0,     0,     0,     0,
-       0,     0,   267,     0,     0,     0,     0,     0,    42,    43,
-     114,   115,   116,   117,   118,   119,   120,   121,   122,   123,
-     124,   125,   126,   127,   128,   129,   130,   131,   132,   133,
-     134
+       0,     0,    41,     0,     0,     0,     0,     0,    42,    43,
+       0,     0,     0,   295,    28,    29,    30,    31,     0,     0,
+       0,     0,     0,    32,    33,    34,     0,    35,    36,     0,
+       0,    37,    38,     0,    39,    40,     0,     0,     0,     0,
+       0,     0,     0,     0,   267,     0,     0,     0,     0,     0,
+      42,    43,   114,   115,   116,   117,   118,   119,   120,   121,
+     122,   123,   124,   125,   126,   127,   128,   129,   130,   131,
+     132,   133,   134
 };
 
 static const yytype_int16 yycheck[] =
 {
-     141,    94,    95,     4,     5,     4,     5,     4,     4,    26,
-       4,   140,    14,   169,    12,     3,    93,    16,    76,    13,
-      19,    15,    16,    17,    18,    86,   106,   107,    89,    90,
-     171,    19,    34,    35,   175,   176,    38,   172,   167,   168,
-      83,    84,    85,    93,    87,    88,     0,    41,    42,     3,
-     108,   106,    51,    70,     8,     9,    10,    11,   199,   200,
-      24,    69,    91,   105,    72,    29,    95,   106,   203,   102,
-     103,   104,   228,    71,   209,   210,   211,   212,     3,    69,
-      70,   106,    72,     8,     9,    10,    11,    79,    80,    68,
-     225,   226,   106,    94,    93,   106,   107,   106,   227,   106,
-      94,   106,   107,    96,   106,   106,   247,   106,   107,   106,
-     106,    96,   253,    89,    90,   106,   105,   106,    95,   254,
-     255,   103,   104,    26,    27,   106,   107,   220,   106,   270,
-      15,    16,    17,   106,   106,    20,    21,    22,    23,    24,
-      25,    26,    27,   109,   109,    30,    31,    32,    33,    34,
-     109,    36,    37,    38,    39,    40,    15,    16,    17,    97,
-     108,    20,    21,    22,    23,    24,    25,    26,    27,   106,
-     106,    30,    31,    32,    33,    34,   106,    36,    37,    38,
-      39,    40,    43,    44,    45,    46,    47,    48,    49,    50,
-      51,    52,    53,    54,    55,    56,    57,    58,    59,    60,
-      61,    62,    63,   107,   106,   106,   106,    92,   106,    94,
-      43,    44,    45,    46,    47,    48,    49,    50,    51,    52,
+     141,    94,    95,    14,     4,     5,     4,     5,     4,     4,
+       4,   140,    26,    12,    77,   169,    16,     3,    13,    19,
+      15,    16,    17,    18,    35,    36,    70,    71,    39,    73,
+     171,    24,   172,    19,   175,   176,     3,    30,   167,   168,
+      94,     8,     9,    10,    11,    94,   109,    42,    43,    84,
+      85,    86,    52,    88,    89,   107,    92,    71,   199,   200,
+      96,    87,   107,   203,    90,    91,   103,   104,   105,   209,
+     210,   211,   212,    72,   228,   107,   108,   107,    70,     0,
+      69,    73,     3,    80,    81,   225,   226,     8,     9,    10,
+      11,   107,   108,   106,    94,   107,   107,    95,   227,   107,
+      95,   107,   108,    90,    91,   107,   247,   107,   108,   107,
+      98,   107,   253,   107,   254,   255,   106,   107,    97,   104,
+     105,    26,    27,   107,    28,    29,    97,   220,   110,   270,
+      15,    16,    17,   107,   108,    20,    21,    22,    23,    24,
+      25,    26,    27,   107,   107,   107,    31,    32,    33,    34,
+      35,   110,    37,    38,    39,    40,    41,    15,    16,    17,
+     110,   109,    20,    21,    22,    23,    24,    25,    26,    27,
+      96,   107,   107,    31,    32,    33,    34,    35,   107,    37,
+      38,    39,    40,    41,    44,    45,    46,    47,    48,    49,
+      50,    51,    52,    53,    54,    55,    56,    57,    58,    59,
+      60,    61,    62,    63,    64,   107,   107,   107,    93,   107,
+      95,    44,    45,    46,    47,    48,    49,    50,    51,    52,
       53,    54,    55,    56,    57,    58,    59,    60,    61,    62,
-      63,   106,   105,    92,   106,    70,   106,    26,   109,   107,
-     107,    86,   106,    92,    98,   106,    43,    44,    45,    46,
-      47,    48,    49,    50,    51,    52,    53,    54,    55,    56,
-      57,    58,    59,    60,    61,    62,    63,   107,   107,    35,
-      28,   105,    89,   106,    43,    44,    45,    46,    47,    48,
+      63,    64,   107,   106,   108,    93,   107,    71,   107,    26,
+     110,   108,   108,    87,   107,    93,    99,   107,    44,    45,
+      46,    47,    48,    49,    50,    51,    52,    53,    54,    55,
+      56,    57,    58,    59,    60,    61,    62,    63,    64,   108,
+     108,    36,    28,    70,   107,    44,    45,    46,    47,    48,
       49,    50,    51,    52,    53,    54,    55,    56,    57,    58,
-      59,    60,    61,    62,    63,   105,    69,   105,   107,    95,
-     105,    92,    70,    70,   106,    93,    99,   105,    95,   106,
-      43,    44,    45,    46,    47,    48,    49,    50,    51,    52,
-      53,    54,    55,    56,    57,    58,    59,    60,    61,    62,
-      63,    93,   106,    24,   106,   106,   106,   106,    43,    44,
+      59,    60,    61,    62,    63,    64,   106,   106,    90,   106,
+     108,    96,   106,    71,    71,    93,   107,   100,    94,    94,
+     108,   107,    44,    45,    46,    47,    48,    49,    50,    51,
+      52,    53,    54,    55,    56,    57,    58,    59,    60,    61,
+      62,    63,    64,   106,    96,   107,   107,   107,   107,    44,
       45,    46,    47,    48,    49,    50,    51,    52,    53,    54,
-      55,    56,    57,    58,    59,    60,    61,    62,    63,   105,
-     105,    26,   105,   107,   106,   106,   106,     6,   107,   251,
-     250,    20,   271,   106,    43,    44,    45,    46,    47,    48,
-      49,    50,    51,    52,    53,    54,    55,    56,    57,    58,
-      59,    60,    61,    62,    63,    -1,   244,    -1,    -1,    -1,
-      -1,   106,    43,    44,    45,    46,    47,    48,    49,    50,
+      55,    56,    57,    58,    59,    60,    61,    62,    63,    64,
+     107,   106,   106,    24,   107,   107,   106,   108,    26,     6,
+     251,   250,   271,    20,    -1,   107,    44,    45,    46,    47,
+      48,    49,    50,    51,    52,    53,    54,    55,    56,    57,
+      58,    59,    60,    61,    62,    63,    64,   244,    -1,    -1,
+      -1,    -1,   107,    44,    45,    46,    47,    48,    49,    50,
       51,    52,    53,    54,    55,    56,    57,    58,    59,    60,
-      61,    62,    63,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
-      -1,    -1,    -1,    -1,    -1,    -1,    -1,   106,    43,    44,
-      45,    46,    47,    48,    49,    50,    51,    52,    53,    54,
-      55,    56,    57,    58,    59,    60,    61,    62,    63,    -1,
-      64,    65,    66,    67,    -1,   106,    -1,    -1,    -1,    73,
-      74,    75,    -1,    77,    78,    -1,    -1,    81,    82,    -1,
-      84,    85,    -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,
-      94,    -1,    -1,    -1,    -1,    -1,   100,   101,    -1,    -1,
-      -1,   106,    64,    65,    66,    67,    -1,    -1,    -1,    -1,
-      -1,    73,    74,    75,    -1,    77,    78,    -1,    -1,    81,
-      82,    -1,    84,    85,    -1,    -1,    -1,    -1,    -1,    -1,
-      -1,    -1,    94,    -1,    -1,    -1,    -1,    -1,   100,   101,
-      43,    44,    45,    46,    47,    48,    49,    50,    51,    52,
-      53,    54,    55,    56,    57,    58,    59,    60,    61,    62,
-      63
+      61,    62,    63,    64,    -1,    -1,    -1,    -1,    -1,    -1,
+      -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,    -1,   107,
+      44,    45,    46,    47,    48,    49,    50,    51,    52,    53,
+      54,    55,    56,    57,    58,    59,    60,    61,    62,    63,
+      64,    -1,    65,    66,    67,    68,   107,    -1,    -1,    -1,
+      -1,    74,    75,    76,    -1,    78,    79,    -1,    -1,    82,
+      83,    -1,    85,    86,    -1,    -1,    -1,    -1,    -1,    -1,
+      -1,    -1,    95,    -1,    -1,    -1,    -1,    -1,   101,   102,
+      -1,    -1,    -1,   107,    65,    66,    67,    68,    -1,    -1,
+      -1,    -1,    -1,    74,    75,    76,    -1,    78,    79,    -1,
+      -1,    82,    83,    -1,    85,    86,    -1,    -1,    -1,    -1,
+      -1,    -1,    -1,    -1,    95,    -1,    -1,    -1,    -1,    -1,
+     101,   102,    44,    45,    46,    47,    48,    49,    50,    51,
+      52,    53,    54,    55,    56,    57,    58,    59,    60,    61,
+      62,    63,    64
 };
 
 /* YYSTOS[STATE-NUM] -- The symbol kind of the accessing symbol of
    state STATE-NUM.  */
 static const yytype_uint8 yystos[] =
 {
-       0,     3,     8,     9,    10,    11,   111,   112,   113,   135,
-     136,   137,   168,    93,    93,   138,   138,   106,   107,   171,
-     169,     0,   112,   114,   139,   138,   171,   115,    64,    65,
-      66,    67,    73,    74,    75,    77,    78,    81,    82,    84,
-      85,    94,   100,   101,   140,   141,   147,   154,   155,   156,
-     157,   159,   160,   161,   162,   165,   166,   167,     4,    13,
-      15,    16,    17,    18,    41,    42,    94,   116,   117,   118,
-     119,   120,   121,   122,   106,   106,   106,    68,     4,   106,
-     128,   106,    76,   108,   106,   158,    79,    80,   105,    83,
-      84,    85,    87,    88,    96,    96,   106,   106,    14,    34,
-      35,    38,   106,   106,   107,   106,   106,   106,   123,   106,
-     107,   109,   109,   109,    43,    44,    45,    46,    47,    48,
-      49,    50,    51,    52,    53,    54,    55,    56,    57,    58,
-      59,    60,    61,    62,    63,   106,   143,   150,   170,    89,
-      90,    97,   108,   105,   106,    95,   106,   106,   106,   106,
-     106,   106,   106,   128,   128,   106,   102,   103,   104,   106,
-     105,   107,   106,    24,    29,   124,    86,    89,    90,    70,
-      91,    95,   151,    12,    71,   142,   142,   170,   106,   109,
-     103,   104,   107,   107,    26,    86,     4,     5,    16,    19,
-      51,    93,   106,   107,   125,   126,    69,    72,   153,   142,
-     142,   106,   143,   144,    92,   152,   106,   170,   153,   106,
-     170,   106,   170,    98,   163,   107,   107,    35,   105,    28,
-     127,   105,    69,   106,   170,   106,   170,    89,    70,   153,
-     105,    95,   153,   153,   153,   153,   164,   107,     5,    94,
-     128,   130,   105,   149,   148,   153,   153,   142,   143,    92,
-      93,   106,   129,    99,   145,   145,   106,   170,   105,   139,
-     129,   131,   106,   146,   170,   153,   153,    94,   132,   133,
-      95,    93,    15,    16,    17,    20,    21,    22,    23,    24,
-      25,    26,    27,    30,    31,    32,    33,    34,    36,    37,
-      38,    39,    40,    92,   134,   106,   170,   133,   106,   106,
-     106,    26,    27,    26,    70,   106,   105,   105,   107,   106,
-     106,   106,   107,   105,    94,    24,   106,   107,    26
+       0,     3,     8,     9,    10,    11,   112,   113,   114,   136,
+     137,   138,   169,    94,    94,   139,   139,   107,   108,   172,
+     170,     0,   113,   115,   140,   139,   172,   116,    65,    66,
+      67,    68,    74,    75,    76,    78,    79,    82,    83,    85,
+      86,    95,   101,   102,   141,   142,   148,   155,   156,   157,
+     158,   160,   161,   162,   163,   166,   167,   168,     4,    13,
+      15,    16,    17,    18,    42,    43,    95,   117,   118,   119,
+     120,   121,   122,   123,   107,   107,   107,    69,     4,   107,
+     129,   107,    77,   109,   107,   159,    80,    81,   106,    84,
+      85,    86,    88,    89,    97,    97,   107,   107,    14,    35,
+      36,    39,   107,   107,   108,   107,   107,   107,   124,   107,
+     108,   110,   110,   110,    44,    45,    46,    47,    48,    49,
+      50,    51,    52,    53,    54,    55,    56,    57,    58,    59,
+      60,    61,    62,    63,    64,   107,   144,   151,   171,    90,
+      91,    98,   109,   106,   107,    96,   107,   107,   107,   107,
+     107,   107,   107,   129,   129,   107,   103,   104,   105,   107,
+     106,   108,   107,    24,    30,   125,    87,    90,    91,    71,
+      92,    96,   152,    12,    72,   143,   143,   171,   107,   110,
+     104,   105,   108,   108,    26,    87,     4,     5,    16,    19,
+      52,    94,   107,   108,   126,   127,    70,    73,   154,   143,
+     143,   107,   144,   145,    93,   153,   107,   171,   154,   107,
+     171,   107,   171,    99,   164,   108,   108,    36,   106,    28,
+     128,   106,    70,   107,   171,   107,   171,    90,    71,   154,
+     106,    96,   154,   154,   154,   154,   165,   108,     5,    95,
+     129,   131,   106,   150,   149,   154,   154,   143,   144,    93,
+      94,   107,   130,   100,   146,   146,   107,   171,   106,   140,
+     130,   132,   107,   147,   171,   154,   154,    95,   133,   134,
+      96,    94,    15,    16,    17,    20,    21,    22,    23,    24,
+      25,    26,    27,    31,    32,    33,    34,    35,    37,    38,
+      39,    40,    41,    93,   135,   107,   171,   134,   107,   107,
+     107,    26,    27,    26,    71,   107,   106,   106,   108,   107,
+     107,    28,    29,   108,   106,    95,    24,   107,   108,    26
 };
 
 /* YYR1[RULE-NUM] -- Symbol kind of the left-hand side of rule RULE-NUM.  */
 static const yytype_uint8 yyr1[] =
 {
-       0,   110,   111,   111,   112,   112,   112,   112,   112,   114,
-     113,   115,   115,   116,   116,   116,   116,   116,   116,   116,
-     117,   117,   117,   117,   117,   117,   117,   117,   118,   118,
-     119,   119,   120,   121,   121,   123,   122,   124,   124,   125,
-     125,   125,   125,   125,   126,   126,   126,   127,   127,   128,
-     128,   129,   131,   130,   132,   130,   133,   133,   134,   134,
-     134,   134,   134,   134,   134,   134,   134,   134,   134,   134,
-     134,   134,   134,   134,   134,   134,   134,   134,   134,   134,
-     134,   134,   134,   135,   136,   137,   138,   139,   139,   140,
-     140,   140,   140,   140,   140,   140,   140,   140,   140,   140,
-     140,   140,   141,   141,   141,   141,   141,   141,   141,   142,
-     142,   143,   143,   144,   144,   145,   145,   146,   146,   146,
-     146,   148,   147,   149,   147,   147,   147,   147,   147,   147,
-     150,   150,   150,   150,   151,   151,   152,   152,   153,   153,
-     153,   154,   154,   154,   154,   155,   156,   156,   156,   156,
-     157,   158,   158,   159,   159,   160,   161,   161,   161,   161,
-     161,   162,   162,   164,   163,   165,   166,   167,   167,   167,
-     167,   168,   169,   169,   170,   170,   170,   170,   170,   170,
-     170,   170,   170,   170,   170,   170,   170,   170,   170,   170,
-     170,   170,   170,   170,   170,   171,   171
+       0,   111,   112,   112,   113,   113,   113,   113,   113,   115,
+     114,   116,   116,   117,   117,   117,   117,   117,   117,   117,
+     118,   118,   118,   118,   118,   118,   118,   118,   119,   119,
+     120,   120,   121,   122,   122,   124,   123,   125,   125,   126,
+     126,   126,   126,   126,   127,   127,   127,   128,   128,   129,
+     129,   130,   132,   131,   133,   131,   134,   134,   135,   135,
+     135,   135,   135,   135,   135,   135,   135,   135,   135,   135,
+     135,   135,   135,   135,   135,   135,   135,   135,   135,   135,
+     135,   135,   135,   135,   136,   137,   138,   139,   140,   140,
+     141,   141,   141,   141,   141,   141,   141,   141,   141,   141,
+     141,   141,   141,   142,   142,   142,   142,   142,   142,   142,
+     143,   143,   144,   144,   145,   145,   146,   146,   147,   147,
+     147,   147,   149,   148,   150,   148,   148,   148,   148,   148,
+     148,   151,   151,   151,   151,   152,   152,   153,   153,   154,
+     154,   154,   155,   155,   155,   155,   156,   157,   157,   157,
+     157,   158,   159,   159,   160,   160,   161,   162,   162,   162,
+     162,   162,   163,   163,   165,   164,   166,   167,   168,   168,
+     168,   168,   169,   170,   170,   171,   171,   171,   171,   171,
+     171,   171,   171,   171,   171,   171,   171,   171,   171,   171,
+     171,   171,   171,   171,   171,   171,   172,   172
 };
 
 /* YYR2[RULE-NUM] -- Number of symbols on the right-hand side of rule RULE-NUM.  */
@@ -1200,18 +1201,18 @@ static const yytype_int8 yyr2[] =
        1,     0,     0,     4,     0,     7,     0,     2,     1,     1,
        1,     1,     1,     2,     2,     4,     2,     1,     1,     1,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
-       2,     3,     3,     2,     2,     3,     3,     0,     2,     1,
+       2,     2,     3,     3,     2,     2,     3,     3,     0,     2,
        1,     1,     1,     1,     1,     1,     1,     1,     1,     1,
-       1,     1,     3,     2,     3,     2,     3,     2,     1,     1,
-       1,     4,     4,     1,     3,     0,     2,     1,     1,     3,
-       3,     0,     9,     0,     9,     7,     7,     5,     5,     6,
-       1,     1,     3,     3,     0,     2,     2,     4,     0,     2,
-       3,     6,     6,     6,     6,     3,     2,     2,     3,     3,
-       2,     1,     3,     3,     3,     2,     2,     3,     3,     3,
-       4,     3,     3,     0,     5,     5,     3,     4,     5,     4,
-       5,     2,     0,     2,     1,     1,     1,     1,     1,     1,
+       1,     1,     1,     3,     2,     3,     2,     3,     2,     1,
+       1,     1,     4,     4,     1,     3,     0,     2,     1,     1,
+       3,     3,     0,     9,     0,     9,     7,     7,     5,     5,
+       6,     1,     1,     3,     3,     0,     2,     2,     4,     0,
+       2,     3,     6,     6,     6,     6,     3,     2,     2,     3,
+       3,     2,     1,     3,     3,     3,     2,     2,     3,     3,
+       3,     4,     3,     3,     0,     5,     5,     3,     4,     5,
+       4,     5,     2,     0,     2,     1,     1,     1,     1,     1,
        1,     1,     1,     1,     1,     1,     1,     1,     1,     1,
-       1,     1,     1,     1,     1,     1,     1
+       1,     1,     1,     1,     1,     1,     1,     1
 };
 
 
@@ -1675,97 +1676,97 @@ yyreduce:
   switch (yyn)
     {
   case 9: /* $@1: %empty  */
-#line 233 "test_spec_parse.y"
+#line 233 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.ssl,  "self-signed",
 		        sizeof(current_spec->cluster.ssl));
 		strlcpy(current_spec->cluster.auth, "trust",
 		        sizeof(current_spec->cluster.auth));
 	}
-#line 1686 "test_spec_parse.c"
+#line 1687 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 19: /* cluster_item: T_BIND_SOURCE  */
-#line 254 "test_spec_parse.y"
+#line 254 "src/bin/pgaftest/test_spec_parse.y"
                         { current_spec->cluster.bindSource = true; }
-#line 1692 "test_spec_parse.c"
+#line 1693 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 20: /* monitor_line: T_MONITOR  */
-#line 268 "test_spec_parse.y"
+#line 268 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_spec->cluster.withMonitor = true;
 	}
-#line 1700 "test_spec_parse.c"
+#line 1701 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 21: /* monitor_line: T_MONITOR T_DEBIAN_CLUSTER T_IDENT  */
-#line 272 "test_spec_parse.y"
+#line 272 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_spec->cluster.withMonitor = true;
 		strlcpy(current_spec->cluster.monitorDebianCluster, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.monitorDebianCluster));
 		free((yyvsp[0].str));
 	}
-#line 1711 "test_spec_parse.c"
+#line 1712 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 22: /* monitor_line: T_MONITOR T_IMAGE_TARGET T_IDENT  */
-#line 279 "test_spec_parse.y"
+#line 279 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_spec->cluster.withMonitor = true;
 		strlcpy(current_spec->cluster.monitorImageTarget, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.monitorImageTarget));
 		free((yyvsp[0].str));
 	}
-#line 1722 "test_spec_parse.c"
+#line 1723 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 23: /* monitor_line: T_MONITOR T_PORT T_INTEGER  */
-#line 286 "test_spec_parse.y"
+#line 286 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_spec->cluster.withMonitor = true;
 		/* monitor port not stored in TestCluster yet; ignore */
 		(void) (yyvsp[0].ival);
 	}
-#line 1732 "test_spec_parse.c"
+#line 1733 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 24: /* monitor_line: T_MONITOR T_PASSWORD T_STRING  */
-#line 292 "test_spec_parse.y"
+#line 292 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_spec->cluster.withMonitor = true;
 		strlcpy(current_spec->cluster.monitorPassword, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.monitorPassword));
 		free((yyvsp[0].str));
 	}
-#line 1743 "test_spec_parse.c"
+#line 1744 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 25: /* monitor_line: T_MONITOR T_IDENT T_LAUNCH T_DEFERRED  */
-#line 299 "test_spec_parse.y"
+#line 299 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.secondMonitorName, (yyvsp[-2].str),
 		        sizeof(current_spec->cluster.secondMonitorName));
 		current_spec->cluster.secondMonitorStopped = true;
 		free((yyvsp[-2].str));
 	}
-#line 1754 "test_spec_parse.c"
+#line 1755 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 26: /* monitor_line: T_MONITOR T_IDENT T_INITIALLY T_STOPPED  */
-#line 306 "test_spec_parse.y"
+#line 306 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.secondMonitorName, (yyvsp[-2].str),
 		        sizeof(current_spec->cluster.secondMonitorName));
 		current_spec->cluster.secondMonitorStopped = true;
 		free((yyvsp[-2].str));
 	}
-#line 1765 "test_spec_parse.c"
+#line 1766 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 27: /* monitor_line: T_MONITOR T_IDENT T_LAUNCH T_DEFERRED T_PASSWORD T_STRING  */
-#line 313 "test_spec_parse.y"
+#line 313 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.secondMonitorName, (yyvsp[-4].str),
 		        sizeof(current_spec->cluster.secondMonitorName));
@@ -1774,81 +1775,81 @@ yyreduce:
 		/* password for second monitor not yet stored */
 		free((yyvsp[0].str));
 	}
-#line 1778 "test_spec_parse.c"
+#line 1779 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 28: /* image_line: T_IMAGE T_STRING  */
-#line 326 "test_spec_parse.y"
+#line 326 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.image, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.image));
 		free((yyvsp[0].str));
 	}
-#line 1788 "test_spec_parse.c"
+#line 1789 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 29: /* image_line: T_IMAGE T_IDENT  */
-#line 332 "test_spec_parse.y"
+#line 332 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.image, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.image));
 		free((yyvsp[0].str));
 	}
-#line 1798 "test_spec_parse.c"
+#line 1799 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 30: /* extension_version_line: T_EXTENSION_VERSION T_IDENT  */
-#line 342 "test_spec_parse.y"
+#line 342 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.extensionVersion, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.extensionVersion));
 		free((yyvsp[0].str));
 	}
-#line 1808 "test_spec_parse.c"
+#line 1809 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 31: /* extension_version_line: T_EXTENSION_VERSION T_STRING  */
-#line 348 "test_spec_parse.y"
+#line 348 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.extensionVersion, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.extensionVersion));
 		free((yyvsp[0].str));
 	}
-#line 1818 "test_spec_parse.c"
+#line 1819 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 32: /* ssl_line: T_SSL T_IDENT  */
-#line 358 "test_spec_parse.y"
+#line 358 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.ssl, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.ssl));
 		free((yyvsp[0].str));
 	}
-#line 1828 "test_spec_parse.c"
+#line 1829 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 33: /* auth_line: T_AUTH T_IDENT  */
-#line 368 "test_spec_parse.y"
+#line 368 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.auth, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.auth));
 		free((yyvsp[0].str));
 	}
-#line 1838 "test_spec_parse.c"
+#line 1839 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 34: /* auth_line: T_AUTH_METHOD T_IDENT  */
-#line 374 "test_spec_parse.y"
+#line 374 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.auth, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.auth));
 		free((yyvsp[0].str));
 	}
-#line 1848 "test_spec_parse.c"
+#line 1849 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 35: /* $@2: %empty  */
-#line 384 "test_spec_parse.y"
+#line 384 "src/bin/pgaftest/test_spec_parse.y"
         {
 		TestCluster *cl = &current_spec->cluster;
 		if (cl->formationCount >= PGAF_MAX_FORMATIONS)
@@ -1862,78 +1863,78 @@ yyreduce:
 		        sizeof(current_formation->name));
 		current_formation->numSync = -1;
 	}
-#line 1866 "test_spec_parse.c"
+#line 1867 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 39: /* bare_name: T_IDENT  */
-#line 411 "test_spec_parse.y"
+#line 411 "src/bin/pgaftest/test_spec_parse.y"
                     { (yyval.str) = (yyvsp[0].str); }
-#line 1872 "test_spec_parse.c"
+#line 1873 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 40: /* bare_name: T_STRING  */
-#line 412 "test_spec_parse.y"
+#line 412 "src/bin/pgaftest/test_spec_parse.y"
                     { (yyval.str) = (yyvsp[0].str); }
-#line 1878 "test_spec_parse.c"
+#line 1879 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 41: /* bare_name: T_AUTH  */
-#line 413 "test_spec_parse.y"
+#line 413 "src/bin/pgaftest/test_spec_parse.y"
                     { (yyval.str) = strdup("auth"); }
-#line 1884 "test_spec_parse.c"
+#line 1885 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 42: /* bare_name: T_MONITOR  */
-#line 414 "test_spec_parse.y"
+#line 414 "src/bin/pgaftest/test_spec_parse.y"
                     { (yyval.str) = strdup("monitor"); }
-#line 1890 "test_spec_parse.c"
+#line 1891 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 43: /* bare_name: T_NODE  */
-#line 415 "test_spec_parse.y"
+#line 415 "src/bin/pgaftest/test_spec_parse.y"
                     { (yyval.str) = strdup("node"); }
-#line 1896 "test_spec_parse.c"
+#line 1897 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 44: /* formation_opt: bare_name  */
-#line 420 "test_spec_parse.y"
+#line 420 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_formation->name, (yyvsp[0].str), sizeof(current_formation->name));
 		free((yyvsp[0].str));
 	}
-#line 1905 "test_spec_parse.c"
+#line 1906 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 45: /* formation_opt: T_NUM_SYNC T_INTEGER  */
-#line 425 "test_spec_parse.y"
+#line 425 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_formation->numSync = (yyvsp[0].ival);
 	}
-#line 1913 "test_spec_parse.c"
+#line 1914 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 46: /* formation_opt: T_FS_SECONDARY T_FALSE  */
-#line 429 "test_spec_parse.y"
+#line 429 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_formation->disableSecondary = true;
 	}
-#line 1921 "test_spec_parse.c"
+#line 1922 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 49: /* node_name: T_IDENT  */
-#line 455 "test_spec_parse.y"
+#line 455 "src/bin/pgaftest/test_spec_parse.y"
                      { (yyval.str) = (yyvsp[0].str); }
-#line 1927 "test_spec_parse.c"
+#line 1928 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 50: /* node_name: T_MONITOR  */
-#line 456 "test_spec_parse.y"
+#line 456 "src/bin/pgaftest/test_spec_parse.y"
                      { (yyval.str) = strdup("monitor"); }
-#line 1933 "test_spec_parse.c"
+#line 1934 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 51: /* init_node_slot: %empty  */
-#line 465 "test_spec_parse.y"
+#line 465 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (current_formation->nodeCount >= PGAF_MAX_NODES)
 		{
@@ -1946,234 +1947,238 @@ yyreduce:
 		current_node->candidatePriority = 50;
 		current_node->replicationQuorum = true;
 	}
-#line 1950 "test_spec_parse.c"
+#line 1951 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 52: /* $@3: %empty  */
-#line 482 "test_spec_parse.y"
+#line 482 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_node->name, (yyvsp[-1].str), sizeof(current_node->name));
 		free((yyvsp[-1].str));
 	}
-#line 1959 "test_spec_parse.c"
+#line 1960 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 54: /* $@4: %empty  */
-#line 489 "test_spec_parse.y"
+#line 489 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_node->name, (yyvsp[-1].str), sizeof(current_node->name));
 		free((yyvsp[-1].str));
 	}
-#line 1968 "test_spec_parse.c"
+#line 1969 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 58: /* node_opt: T_COORDINATOR  */
-#line 503 "test_spec_parse.y"
+#line 503 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->kind = NODE_KIND_CITUS_COORDINATOR;
 		current_spec->cluster.withCitus = true;
 	}
-#line 1977 "test_spec_parse.c"
+#line 1978 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 59: /* node_opt: T_WORKER  */
-#line 508 "test_spec_parse.y"
+#line 508 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->kind = NODE_KIND_CITUS_WORKER;
 		current_spec->cluster.withCitus = true;
 	}
-#line 1986 "test_spec_parse.c"
+#line 1987 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 60: /* node_opt: T_ASYNC  */
-#line 513 "test_spec_parse.y"
+#line 513 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->replicationQuorum = false;
 	}
-#line 1994 "test_spec_parse.c"
+#line 1995 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 61: /* node_opt: T_NO_MONITOR  */
-#line 517 "test_spec_parse.y"
+#line 517 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->noMonitor = true;
 	}
-#line 2002 "test_spec_parse.c"
+#line 2003 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 62: /* node_opt: T_DEFERRED  */
-#line 521 "test_spec_parse.y"
+#line 521 "src/bin/pgaftest/test_spec_parse.y"
         {
 		/* bare "deferred" = create and launch deferred (both gates) */
 		current_node->createDeferred = true;
 		current_node->launchDeferred = true;
 	}
-#line 2012 "test_spec_parse.c"
+#line 2013 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 63: /* node_opt: T_LAUNCH T_DEFERRED  */
-#line 527 "test_spec_parse.y"
+#line 527 "src/bin/pgaftest/test_spec_parse.y"
         {
 		/* "launch deferred" alone = run-deferred only, create immediate */
 		current_node->launchDeferred = true;
 	}
-#line 2021 "test_spec_parse.c"
+#line 2022 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 64: /* node_opt: T_CREATE T_DEFERRED  */
-#line 532 "test_spec_parse.y"
+#line 532 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->createDeferred = true;
 	}
-#line 2029 "test_spec_parse.c"
+#line 2030 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 65: /* node_opt: T_CREATE T_AND T_LAUNCH T_DEFERRED  */
-#line 536 "test_spec_parse.y"
+#line 536 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->createDeferred = true;
 		current_node->launchDeferred = true;
 	}
-#line 2038 "test_spec_parse.c"
+#line 2039 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 66: /* node_opt: T_LAUNCH T_IMMEDIATE  */
-#line 541 "test_spec_parse.y"
+#line 541 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->launchDeferred = false;
 	}
-#line 2046 "test_spec_parse.c"
+#line 2047 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 67: /* node_opt: T_IMMEDIATE  */
-#line 545 "test_spec_parse.y"
+#line 545 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->launchDeferred = false;
 	}
-#line 2054 "test_spec_parse.c"
+#line 2055 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 68: /* node_opt: T_LISTEN  */
-#line 549 "test_spec_parse.y"
+#line 549 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->listen = true;
 	}
-#line 2062 "test_spec_parse.c"
+#line 2063 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 69: /* node_opt: T_CITUS_SECONDARY  */
-#line 553 "test_spec_parse.y"
+#line 553 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->citusSecondary = true;
 	}
-#line 2070 "test_spec_parse.c"
+#line 2071 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 70: /* node_opt: T_CANDIDATE_PRIORITY T_INTEGER  */
-#line 557 "test_spec_parse.y"
+#line 557 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->candidatePriority = (yyvsp[0].ival);
 	}
-#line 2078 "test_spec_parse.c"
+#line 2079 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 71: /* node_opt: T_GROUP T_INTEGER  */
-#line 561 "test_spec_parse.y"
+#line 561 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->group = (yyvsp[0].ival);
 	}
-#line 2086 "test_spec_parse.c"
+#line 2087 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 72: /* node_opt: T_PORT T_INTEGER  */
-#line 565 "test_spec_parse.y"
+#line 565 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_node->pgPort = (yyvsp[0].ival);
 	}
-#line 2094 "test_spec_parse.c"
+#line 2095 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 73: /* node_opt: T_CITUS_CLUSTER_NAME T_IDENT  */
-#line 569 "test_spec_parse.y"
+#line 569 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_node->citusClusterName, (yyvsp[0].str),
 		        sizeof(current_node->citusClusterName));
 		free((yyvsp[0].str));
 	}
-#line 2104 "test_spec_parse.c"
+#line 2105 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 74: /* node_opt: T_DEBIAN_CLUSTER T_IDENT  */
-#line 575 "test_spec_parse.y"
+#line 575 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_node->debianCluster, (yyvsp[0].str),
 		        sizeof(current_node->debianCluster));
 		free((yyvsp[0].str));
 	}
-#line 2114 "test_spec_parse.c"
+#line 2115 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 75: /* node_opt: T_SSL T_IDENT  */
-#line 581 "test_spec_parse.y"
+#line 581 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_node->ssl, (yyvsp[0].str), sizeof(current_node->ssl));
 		free((yyvsp[0].str));
 	}
-#line 2123 "test_spec_parse.c"
+#line 2124 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 76: /* node_opt: T_AUTH T_IDENT  */
-#line 586 "test_spec_parse.y"
+#line 586 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_node->auth, (yyvsp[0].str), sizeof(current_node->auth));
 		free((yyvsp[0].str));
 	}
-#line 2132 "test_spec_parse.c"
+#line 2133 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
   case 77: /* node_opt: T_AUTH_METHOD T_IDENT  */
-#line 591 "test_spec_parse.y"
+#line 591 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_node->auth, (yyvsp[0].str), sizeof(current_node->auth));
 		free((yyvsp[0].str));
 	}
-#line 2141 "test_spec_parse.c"
+#line 2142 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 78: /* node_opt: T_REPLICATION_QUORUM T_IDENT  */
-#line 596 "test_spec_parse.y"
+  case 78: /* node_opt: T_REPLICATION_QUORUM T_TRUE  */
+#line 596 "src/bin/pgaftest/test_spec_parse.y"
         {
-		if (strcmp((yyvsp[0].str), "false") == 0 || strcmp((yyvsp[0].str), "0") == 0)
-			current_node->replicationQuorum = false;
-		else
-			current_node->replicationQuorum = true;
-		free((yyvsp[0].str));
+		current_node->replicationQuorum = true;
 	}
-#line 2153 "test_spec_parse.c"
+#line 2150 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 79: /* node_opt: T_REPLICATION_PASSWORD T_STRING  */
-#line 604 "test_spec_parse.y"
+  case 79: /* node_opt: T_REPLICATION_QUORUM T_FALSE  */
+#line 600 "src/bin/pgaftest/test_spec_parse.y"
+        {
+		current_node->replicationQuorum = false;
+	}
+#line 2158 "src/bin/pgaftest/test_spec_parse.c"
+    break;
+
+  case 80: /* node_opt: T_REPLICATION_PASSWORD T_STRING  */
+#line 604 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_node->replicationPassword, (yyvsp[0].str),
 		        sizeof(current_node->replicationPassword));
 		free((yyvsp[0].str));
 	}
-#line 2163 "test_spec_parse.c"
+#line 2168 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 80: /* node_opt: T_MONITOR_PASSWORD T_STRING  */
-#line 610 "test_spec_parse.y"
+  case 81: /* node_opt: T_MONITOR_PASSWORD T_STRING  */
+#line 610 "src/bin/pgaftest/test_spec_parse.y"
         {
 		strlcpy(current_node->monitorPassword, (yyvsp[0].str),
 		        sizeof(current_node->monitorPassword));
 		free((yyvsp[0].str));
 	}
-#line 2173 "test_spec_parse.c"
+#line 2178 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 81: /* node_opt: T_VOLUME T_IDENT T_IDENT  */
-#line 616 "test_spec_parse.y"
+  case 82: /* node_opt: T_VOLUME T_IDENT T_IDENT  */
+#line 616 "src/bin/pgaftest/test_spec_parse.y"
         {
 		/* volume <name> <containerPath> — adds a named Docker volume */
 		int vi = current_node->volumeCount;
@@ -2187,11 +2192,11 @@ yyreduce:
 		}
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2191 "test_spec_parse.c"
+#line 2196 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 82: /* node_opt: T_VOLUME T_IDENT T_STRING  */
-#line 630 "test_spec_parse.y"
+  case 83: /* node_opt: T_VOLUME T_IDENT T_STRING  */
+#line 630 "src/bin/pgaftest/test_spec_parse.y"
         {
 		/* volume <name> "/path/with spaces" */
 		int vi = current_node->volumeCount;
@@ -2205,38 +2210,38 @@ yyreduce:
 		}
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2209 "test_spec_parse.c"
+#line 2214 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 83: /* setup_block: T_SETUP cmd_block  */
-#line 651 "test_spec_parse.y"
+  case 84: /* setup_block: T_SETUP cmd_block  */
+#line 651 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_spec->setup = (yyvsp[0].step);
 	}
-#line 2217 "test_spec_parse.c"
+#line 2222 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 84: /* teardown_block: T_TEARDOWN cmd_block  */
-#line 658 "test_spec_parse.y"
+  case 85: /* teardown_block: T_TEARDOWN cmd_block  */
+#line 658 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_spec->teardown = (yyvsp[0].step);
 	}
-#line 2225 "test_spec_parse.c"
+#line 2230 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 85: /* named_step: T_STEP ident_or_string cmd_block  */
-#line 669 "test_spec_parse.y"
+  case 86: /* named_step: T_STEP ident_or_string cmd_block  */
+#line 669 "src/bin/pgaftest/test_spec_parse.y"
         {
 		TestStep *s = (yyvsp[0].step);
 		strncpy(s->name, (yyvsp[-1].str), sizeof(s->name) - 1);
 		free((yyvsp[-1].str));
 		register_step(current_spec, s);
 	}
-#line 2236 "test_spec_parse.c"
+#line 2241 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 86: /* cmd_block: T_LBRACE cmd_list T_RBRACE  */
-#line 687 "test_spec_parse.y"
+  case 87: /* cmd_block: T_LBRACE cmd_list T_RBRACE  */
+#line 687 "src/bin/pgaftest/test_spec_parse.y"
         {
 		/* post-process: CMD_SQL immediately before CMD_EXPECT_ERROR */
 		for (TestCmd *c = (yyvsp[-1].step)->commands; c; c = c->next)
@@ -2247,148 +2252,148 @@ yyreduce:
 		}
 		(yyval.step) = (yyvsp[-1].step);
 	}
-#line 2251 "test_spec_parse.c"
+#line 2256 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 87: /* cmd_list: %empty  */
-#line 701 "test_spec_parse.y"
+  case 88: /* cmd_list: %empty  */
+#line 701 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.step) = make_step("");
 	}
-#line 2259 "test_spec_parse.c"
+#line 2264 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 88: /* cmd_list: cmd_list step_cmd  */
-#line 705 "test_spec_parse.y"
+  case 89: /* cmd_list: cmd_list step_cmd  */
+#line 705 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if ((yyvsp[0].cmd)) append_cmd((yyvsp[-1].step), (yyvsp[0].cmd));
 		(yyval.step) = (yyvsp[-1].step);
 	}
-#line 2268 "test_spec_parse.c"
+#line 2273 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 89: /* step_cmd: exec_cmd  */
-#line 712 "test_spec_parse.y"
+  case 90: /* step_cmd: exec_cmd  */
+#line 712 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2274 "test_spec_parse.c"
+#line 2279 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 90: /* step_cmd: wait_cmd  */
-#line 713 "test_spec_parse.y"
+  case 91: /* step_cmd: wait_cmd  */
+#line 713 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2280 "test_spec_parse.c"
+#line 2285 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 91: /* step_cmd: assert_cmd  */
-#line 714 "test_spec_parse.y"
+  case 92: /* step_cmd: assert_cmd  */
+#line 714 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2286 "test_spec_parse.c"
+#line 2291 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 92: /* step_cmd: sql_cmd  */
-#line 715 "test_spec_parse.y"
+  case 93: /* step_cmd: sql_cmd  */
+#line 715 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2292 "test_spec_parse.c"
+#line 2297 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 93: /* step_cmd: expect_cmd  */
-#line 716 "test_spec_parse.y"
+  case 94: /* step_cmd: expect_cmd  */
+#line 716 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2298 "test_spec_parse.c"
+#line 2303 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 94: /* step_cmd: promote_cmd  */
-#line 717 "test_spec_parse.y"
+  case 95: /* step_cmd: promote_cmd  */
+#line 717 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2304 "test_spec_parse.c"
+#line 2309 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 95: /* step_cmd: network_cmd  */
-#line 718 "test_spec_parse.y"
+  case 96: /* step_cmd: network_cmd  */
+#line 718 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2310 "test_spec_parse.c"
+#line 2315 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 96: /* step_cmd: sleep_cmd  */
-#line 719 "test_spec_parse.y"
+  case 97: /* step_cmd: sleep_cmd  */
+#line 719 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2316 "test_spec_parse.c"
+#line 2321 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 97: /* step_cmd: compose_cmd  */
-#line 720 "test_spec_parse.y"
+  case 98: /* step_cmd: compose_cmd  */
+#line 720 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2322 "test_spec_parse.c"
+#line 2327 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 98: /* step_cmd: postgres_ctl_cmd  */
-#line 721 "test_spec_parse.y"
+  case 99: /* step_cmd: postgres_ctl_cmd  */
+#line 721 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2328 "test_spec_parse.c"
+#line 2333 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 99: /* step_cmd: stays_while_cmd  */
-#line 722 "test_spec_parse.y"
+  case 100: /* step_cmd: stays_while_cmd  */
+#line 722 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2334 "test_spec_parse.c"
+#line 2339 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 100: /* step_cmd: set_monitor_cmd  */
-#line 723 "test_spec_parse.y"
+  case 101: /* step_cmd: set_monitor_cmd  */
+#line 723 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2340 "test_spec_parse.c"
+#line 2345 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 101: /* step_cmd: logs_cmd  */
-#line 724 "test_spec_parse.y"
+  case 102: /* step_cmd: logs_cmd  */
+#line 724 "src/bin/pgaftest/test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2346 "test_spec_parse.c"
+#line 2351 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 102: /* exec_cmd: T_EXEC T_IDENT T_SHELL_ARGS  */
-#line 739 "test_spec_parse.y"
+  case 103: /* exec_cmd: T_EXEC T_IDENT T_SHELL_ARGS  */
+#line 739 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXEC);
 		strlcpy((yyval.cmd)->service, (yyvsp[-1].str), sizeof((yyval.cmd)->service));
 		strlcpy((yyval.cmd)->args,    (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2357 "test_spec_parse.c"
+#line 2362 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 103: /* exec_cmd: T_EXEC T_IDENT  */
-#line 746 "test_spec_parse.y"
+  case 104: /* exec_cmd: T_EXEC T_IDENT  */
+#line 746 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXEC);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2367 "test_spec_parse.c"
+#line 2372 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 104: /* exec_cmd: T_EXEC_FAILS T_IDENT T_SHELL_ARGS  */
-#line 752 "test_spec_parse.y"
+  case 105: /* exec_cmd: T_EXEC_FAILS T_IDENT T_SHELL_ARGS  */
+#line 752 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXEC_FAILS);
 		strlcpy((yyval.cmd)->service, (yyvsp[-1].str), sizeof((yyval.cmd)->service));
 		strlcpy((yyval.cmd)->args,    (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2378 "test_spec_parse.c"
+#line 2383 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 105: /* exec_cmd: T_EXEC_FAILS T_IDENT  */
-#line 759 "test_spec_parse.y"
+  case 106: /* exec_cmd: T_EXEC_FAILS T_IDENT  */
+#line 759 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXEC_FAILS);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2388 "test_spec_parse.c"
+#line 2393 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 106: /* exec_cmd: T_PG_AUTOCTL T_IDENT T_SHELL_ARGS  */
-#line 765 "test_spec_parse.y"
+  case 107: /* exec_cmd: T_PG_AUTOCTL T_IDENT T_SHELL_ARGS  */
+#line 765 "src/bin/pgaftest/test_spec_parse.y"
         {
 		/* "pg_autoctl perform failover --formation auth"
 		 * EXEC_ARGS returns T_IDENT for first word, T_SHELL_ARGS for rest */
@@ -2396,29 +2401,29 @@ yyreduce:
 		sformat((yyval.cmd)->args, sizeof((yyval.cmd)->args), "%s %s", (yyvsp[-1].str), (yyvsp[0].str));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2400 "test_spec_parse.c"
+#line 2405 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 107: /* exec_cmd: T_PG_AUTOCTL T_IDENT  */
-#line 773 "test_spec_parse.y"
+  case 108: /* exec_cmd: T_PG_AUTOCTL T_IDENT  */
+#line 773 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
 		strlcpy((yyval.cmd)->args, (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[0].str));
 	}
-#line 2410 "test_spec_parse.c"
+#line 2415 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 108: /* exec_cmd: T_PG_AUTOCTL  */
-#line 779 "test_spec_parse.y"
+  case 109: /* exec_cmd: T_PG_AUTOCTL  */
+#line 779 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
 	}
-#line 2418 "test_spec_parse.c"
+#line 2423 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 111: /* wait_multi_condition: T_IDENT T_STATE state_op fsm_state  */
-#line 817 "test_spec_parse.y"
+  case 112: /* wait_multi_condition: T_IDENT T_STATE state_op fsm_state  */
+#line 817 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (!current_wait_cmd)
 			current_wait_cmd = make_cmd(CMD_WAIT_MULTI);
@@ -2433,11 +2438,11 @@ yyreduce:
 		}
 		free((yyvsp[-3].str));
 	}
-#line 2437 "test_spec_parse.c"
+#line 2442 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 112: /* wait_multi_condition: T_IDENT T_STATE state_op T_IDENT  */
-#line 832 "test_spec_parse.y"
+  case 113: /* wait_multi_condition: T_IDENT T_STATE state_op T_IDENT  */
+#line 832 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (!current_wait_cmd)
 			current_wait_cmd = make_cmd(CMD_WAIT_MULTI);
@@ -2452,11 +2457,11 @@ yyreduce:
 		}
 		free((yyvsp[-3].str)); free((yyvsp[0].str));
 	}
-#line 2456 "test_spec_parse.c"
+#line 2461 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 117: /* pass_state_list: fsm_state  */
-#line 872 "test_spec_parse.y"
+  case 118: /* pass_state_list: fsm_state  */
+#line 872 "src/bin/pgaftest/test_spec_parse.y"
         {
 		/* current_pass_cmd set by the enclosing wait_cmd rule */
 		if (current_pass_cmd &&
@@ -2464,11 +2469,11 @@ yyreduce:
 			strlcpy(current_pass_cmd->passThroughStates[current_pass_cmd->passThroughCount++],
 			        (yyvsp[0].str), sizeof(current_pass_cmd->passThroughStates[0]));
 	}
-#line 2468 "test_spec_parse.c"
+#line 2473 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 118: /* pass_state_list: T_IDENT  */
-#line 880 "test_spec_parse.y"
+  case 119: /* pass_state_list: T_IDENT  */
+#line 880 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (current_pass_cmd &&
 		    current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
@@ -2476,22 +2481,22 @@ yyreduce:
 			        (yyvsp[0].str), sizeof(current_pass_cmd->passThroughStates[0]));
 		free((yyvsp[0].str));
 	}
-#line 2480 "test_spec_parse.c"
+#line 2485 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 119: /* pass_state_list: pass_state_list T_COMMA fsm_state  */
-#line 888 "test_spec_parse.y"
+  case 120: /* pass_state_list: pass_state_list T_COMMA fsm_state  */
+#line 888 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (current_pass_cmd &&
 		    current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
 			strlcpy(current_pass_cmd->passThroughStates[current_pass_cmd->passThroughCount++],
 			        (yyvsp[0].str), sizeof(current_pass_cmd->passThroughStates[0]));
 	}
-#line 2491 "test_spec_parse.c"
+#line 2496 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 120: /* pass_state_list: pass_state_list T_COMMA T_IDENT  */
-#line 895 "test_spec_parse.y"
+  case 121: /* pass_state_list: pass_state_list T_COMMA T_IDENT  */
+#line 895 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (current_pass_cmd &&
 		    current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
@@ -2499,49 +2504,49 @@ yyreduce:
 			        (yyvsp[0].str), sizeof(current_pass_cmd->passThroughStates[0]));
 		free((yyvsp[0].str));
 	}
-#line 2503 "test_spec_parse.c"
+#line 2508 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 121: /* $@5: %empty  */
-#line 906 "test_spec_parse.y"
+  case 122: /* $@5: %empty  */
+#line 906 "src/bin/pgaftest/test_spec_parse.y"
             { current_pass_cmd = make_cmd(CMD_WAIT_STATE);
 	      strlcpy(current_pass_cmd->service, (yyvsp[-3].str), sizeof(current_pass_cmd->service));
 	      strlcpy(current_pass_cmd->state,   (yyvsp[0].str), sizeof(current_pass_cmd->state));
 	      free((yyvsp[-3].str)); }
-#line 2512 "test_spec_parse.c"
+#line 2517 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 122: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_STATE state_op fsm_state $@5 opt_passing_through opt_timeout  */
-#line 911 "test_spec_parse.y"
+  case 123: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_STATE state_op fsm_state $@5 opt_passing_through opt_timeout  */
+#line 911 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_pass_cmd->timeoutSeconds = (yyvsp[0].ival);
 		(yyval.cmd) = current_pass_cmd;
 		current_pass_cmd = NULL;
 	}
-#line 2522 "test_spec_parse.c"
+#line 2527 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 123: /* $@6: %empty  */
-#line 917 "test_spec_parse.y"
+  case 124: /* $@6: %empty  */
+#line 917 "src/bin/pgaftest/test_spec_parse.y"
             { current_pass_cmd = make_cmd(CMD_WAIT_STATE);
 	      strlcpy(current_pass_cmd->service, (yyvsp[-3].str), sizeof(current_pass_cmd->service));
 	      strlcpy(current_pass_cmd->state,   (yyvsp[0].str), sizeof(current_pass_cmd->state));
 	      free((yyvsp[-3].str)); free((yyvsp[0].str)); }
-#line 2531 "test_spec_parse.c"
+#line 2536 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 124: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_STATE state_op T_IDENT $@6 opt_passing_through opt_timeout  */
-#line 922 "test_spec_parse.y"
+  case 125: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_STATE state_op T_IDENT $@6 opt_passing_through opt_timeout  */
+#line 922 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_pass_cmd->timeoutSeconds = (yyvsp[0].ival);
 		(yyval.cmd) = current_pass_cmd;
 		current_pass_cmd = NULL;
 	}
-#line 2541 "test_spec_parse.c"
+#line 2546 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 125: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_ASSIGNED_STATE state_op fsm_state opt_timeout  */
-#line 928 "test_spec_parse.y"
+  case 126: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_ASSIGNED_STATE state_op fsm_state opt_timeout  */
+#line 928 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_WAIT_STATE);
 		(yyval.cmd)->kind = CMD_ASSERT_ASSIGNED;
@@ -2550,11 +2555,11 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str));
 	}
-#line 2554 "test_spec_parse.c"
+#line 2559 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 126: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_ASSIGNED_STATE state_op T_IDENT opt_timeout  */
-#line 937 "test_spec_parse.y"
+  case 127: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_ASSIGNED_STATE state_op T_IDENT opt_timeout  */
+#line 937 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_WAIT_STATE);
 		(yyval.cmd)->kind = CMD_ASSERT_ASSIGNED;
@@ -2563,120 +2568,120 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str)); free((yyvsp[-1].str));
 	}
-#line 2567 "test_spec_parse.c"
+#line 2572 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 127: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_STOPPED opt_timeout  */
-#line 946 "test_spec_parse.y"
+  case 128: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_STOPPED opt_timeout  */
+#line 946 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_WAIT_STOPPED);
 		strlcpy((yyval.cmd)->service, (yyvsp[-2].str), sizeof((yyval.cmd)->service));
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-2].str));
 	}
-#line 2578 "test_spec_parse.c"
+#line 2583 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 128: /* wait_cmd: T_WAIT T_UNTIL state_name_list opt_in_group opt_timeout  */
-#line 953 "test_spec_parse.y"
+  case 129: /* wait_cmd: T_WAIT T_UNTIL state_name_list opt_in_group opt_timeout  */
+#line 953 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = current_wait_cmd;
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		current_wait_cmd = NULL;
 	}
-#line 2588 "test_spec_parse.c"
+#line 2593 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 129: /* wait_cmd: T_WAIT T_UNTIL wait_multi_condition T_AND wait_multi_condition_list opt_timeout  */
-#line 967 "test_spec_parse.y"
+  case 130: /* wait_cmd: T_WAIT T_UNTIL wait_multi_condition T_AND wait_multi_condition_list opt_timeout  */
+#line 967 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = current_wait_cmd;
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		current_wait_cmd = NULL;
 	}
-#line 2598 "test_spec_parse.c"
+#line 2603 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 130: /* state_name_list: fsm_state  */
-#line 982 "test_spec_parse.y"
+  case 131: /* state_name_list: fsm_state  */
+#line 982 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_wait_cmd = make_cmd(CMD_WAIT_STATES);
 		strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
 		        (yyvsp[0].str), sizeof(current_wait_cmd->waitStates[0]));
 	}
-#line 2608 "test_spec_parse.c"
+#line 2613 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 131: /* state_name_list: T_IDENT  */
-#line 988 "test_spec_parse.y"
+  case 132: /* state_name_list: T_IDENT  */
+#line 988 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_wait_cmd = make_cmd(CMD_WAIT_STATES);
 		strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
 		        (yyvsp[0].str), sizeof(current_wait_cmd->waitStates[0]));
 		free((yyvsp[0].str));
 	}
-#line 2619 "test_spec_parse.c"
+#line 2624 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 132: /* state_name_list: state_name_list T_COMMA fsm_state  */
-#line 995 "test_spec_parse.y"
+  case 133: /* state_name_list: state_name_list T_COMMA fsm_state  */
+#line 995 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (current_wait_cmd->waitStateCount < PGAF_MAX_WAIT_STATES)
 			strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
 			        (yyvsp[0].str), sizeof(current_wait_cmd->waitStates[0]));
 	}
-#line 2629 "test_spec_parse.c"
+#line 2634 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 133: /* state_name_list: state_name_list T_COMMA T_IDENT  */
-#line 1001 "test_spec_parse.y"
+  case 134: /* state_name_list: state_name_list T_COMMA T_IDENT  */
+#line 1001 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (current_wait_cmd->waitStateCount < PGAF_MAX_WAIT_STATES)
 			strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
 			        (yyvsp[0].str), sizeof(current_wait_cmd->waitStates[0]));
 		free((yyvsp[0].str));
 	}
-#line 2640 "test_spec_parse.c"
+#line 2645 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 136: /* group_items: T_GROUP T_INTEGER  */
-#line 1020 "test_spec_parse.y"
+  case 137: /* group_items: T_GROUP T_INTEGER  */
+#line 1020 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (current_wait_cmd->waitGroupCount < PGAF_MAX_WAIT_GROUPS)
 			current_wait_cmd->waitGroups[current_wait_cmd->waitGroupCount++] = (yyvsp[0].ival);
 	}
-#line 2649 "test_spec_parse.c"
+#line 2654 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 137: /* group_items: group_items T_COMMA T_GROUP T_INTEGER  */
-#line 1025 "test_spec_parse.y"
+  case 138: /* group_items: group_items T_COMMA T_GROUP T_INTEGER  */
+#line 1025 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (current_wait_cmd->waitGroupCount < PGAF_MAX_WAIT_GROUPS)
 			current_wait_cmd->waitGroups[current_wait_cmd->waitGroupCount++] = (yyvsp[0].ival);
 	}
-#line 2658 "test_spec_parse.c"
+#line 2663 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 138: /* opt_timeout: %empty  */
-#line 1032 "test_spec_parse.y"
+  case 139: /* opt_timeout: %empty  */
+#line 1032 "src/bin/pgaftest/test_spec_parse.y"
                                        { (yyval.ival) = PGAF_TIMEOUT_DEFAULT; }
-#line 2664 "test_spec_parse.c"
+#line 2669 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 139: /* opt_timeout: T_TIMEOUT T_INTEGER  */
-#line 1033 "test_spec_parse.y"
+  case 140: /* opt_timeout: T_TIMEOUT T_INTEGER  */
+#line 1033 "src/bin/pgaftest/test_spec_parse.y"
                                        { (yyval.ival) = (yyvsp[0].ival); }
-#line 2670 "test_spec_parse.c"
+#line 2675 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 140: /* opt_timeout: T_WITH T_TIMEOUT T_INTEGER  */
-#line 1034 "test_spec_parse.y"
+  case 141: /* opt_timeout: T_WITH T_TIMEOUT T_INTEGER  */
+#line 1034 "src/bin/pgaftest/test_spec_parse.y"
                                        { (yyval.ival) = (yyvsp[0].ival); }
-#line 2676 "test_spec_parse.c"
+#line 2681 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 141: /* assert_cmd: T_ASSERT T_IDENT T_STATE state_op fsm_state opt_timeout  */
-#line 1046 "test_spec_parse.y"
+  case 142: /* assert_cmd: T_ASSERT T_IDENT T_STATE state_op fsm_state opt_timeout  */
+#line 1046 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd((yyvsp[0].ival) > 0 ? CMD_WAIT_STATE : CMD_ASSERT_STATE);
 		strlcpy((yyval.cmd)->service, (yyvsp[-4].str), sizeof((yyval.cmd)->service));
@@ -2684,11 +2689,11 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str));
 	}
-#line 2688 "test_spec_parse.c"
+#line 2693 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 142: /* assert_cmd: T_ASSERT T_IDENT T_STATE state_op T_IDENT opt_timeout  */
-#line 1054 "test_spec_parse.y"
+  case 143: /* assert_cmd: T_ASSERT T_IDENT T_STATE state_op T_IDENT opt_timeout  */
+#line 1054 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd((yyvsp[0].ival) > 0 ? CMD_WAIT_STATE : CMD_ASSERT_STATE);
 		strlcpy((yyval.cmd)->service, (yyvsp[-4].str), sizeof((yyval.cmd)->service));
@@ -2696,11 +2701,11 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str)); free((yyvsp[-1].str));
 	}
-#line 2700 "test_spec_parse.c"
+#line 2705 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 143: /* assert_cmd: T_ASSERT T_IDENT T_ASSIGNED_STATE state_op fsm_state opt_timeout  */
-#line 1062 "test_spec_parse.y"
+  case 144: /* assert_cmd: T_ASSERT T_IDENT T_ASSIGNED_STATE state_op fsm_state opt_timeout  */
+#line 1062 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_ASSERT_ASSIGNED);
 		strlcpy((yyval.cmd)->service, (yyvsp[-4].str), sizeof((yyval.cmd)->service));
@@ -2708,11 +2713,11 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str));
 	}
-#line 2712 "test_spec_parse.c"
+#line 2717 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 144: /* assert_cmd: T_ASSERT T_IDENT T_ASSIGNED_STATE state_op T_IDENT opt_timeout  */
-#line 1070 "test_spec_parse.y"
+  case 145: /* assert_cmd: T_ASSERT T_IDENT T_ASSIGNED_STATE state_op T_IDENT opt_timeout  */
+#line 1070 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_ASSERT_ASSIGNED);
 		strlcpy((yyval.cmd)->service, (yyvsp[-4].str), sizeof((yyval.cmd)->service));
@@ -2720,70 +2725,70 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str)); free((yyvsp[-1].str));
 	}
-#line 2724 "test_spec_parse.c"
+#line 2729 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 145: /* sql_cmd: T_SQL T_IDENT T_BLOCK  */
-#line 1088 "test_spec_parse.y"
+  case 146: /* sql_cmd: T_SQL T_IDENT T_BLOCK  */
+#line 1088 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_SQL);
 		strlcpy((yyval.cmd)->service, (yyvsp[-1].str), sizeof((yyval.cmd)->service));
 		strlcpy((yyval.cmd)->args,    (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2735 "test_spec_parse.c"
+#line 2740 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 146: /* expect_cmd: T_EXPECT T_BLOCK  */
-#line 1103 "test_spec_parse.y"
+  case 147: /* expect_cmd: T_EXPECT T_BLOCK  */
+#line 1103 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXPECT);
 		strlcpy((yyval.cmd)->expected, (yyvsp[0].str), sizeof((yyval.cmd)->expected));
 		expand_tuple_expect((yyval.cmd)->expected, sizeof((yyval.cmd)->expected));
 		free((yyvsp[0].str));
 	}
-#line 2746 "test_spec_parse.c"
+#line 2751 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 147: /* expect_cmd: T_EXPECT T_ERROR  */
-#line 1110 "test_spec_parse.y"
+  case 148: /* expect_cmd: T_EXPECT T_ERROR  */
+#line 1110 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
 	}
-#line 2754 "test_spec_parse.c"
+#line 2759 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 148: /* expect_cmd: T_EXPECT T_ERROR T_IDENT  */
-#line 1114 "test_spec_parse.y"
+  case 149: /* expect_cmd: T_EXPECT T_ERROR T_IDENT  */
+#line 1114 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
 		strlcpy((yyval.cmd)->state, (yyvsp[0].str), sizeof((yyval.cmd)->state));
 		free((yyvsp[0].str));
 	}
-#line 2764 "test_spec_parse.c"
+#line 2769 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 149: /* expect_cmd: T_EXPECT T_ERROR T_INTEGER  */
-#line 1120 "test_spec_parse.y"
+  case 150: /* expect_cmd: T_EXPECT T_ERROR T_INTEGER  */
+#line 1120 "src/bin/pgaftest/test_spec_parse.y"
         {
 		/* SQLSTATE codes like 25006 are all digits, lexed as T_INTEGER */
 		(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
 		snprintf((yyval.cmd)->state, sizeof((yyval.cmd)->state), "%d", (yyvsp[0].ival));
 	}
-#line 2774 "test_spec_parse.c"
+#line 2779 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 150: /* promote_cmd: T_PROMOTE promote_list  */
-#line 1133 "test_spec_parse.y"
+  case 151: /* promote_cmd: T_PROMOTE promote_list  */
+#line 1133 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = current_promote_cmd;
 		current_promote_cmd = NULL;
 	}
-#line 2783 "test_spec_parse.c"
+#line 2788 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 151: /* promote_list: T_IDENT  */
-#line 1141 "test_spec_parse.y"
+  case 152: /* promote_list: T_IDENT  */
+#line 1141 "src/bin/pgaftest/test_spec_parse.y"
         {
 		current_promote_cmd = make_cmd(CMD_PROMOTE);
 		current_promote_cmd->timeoutSeconds = PGAF_TIMEOUT_DEFAULT;
@@ -2791,89 +2796,89 @@ yyreduce:
 		        (yyvsp[0].str), sizeof(current_promote_cmd->promoteNodes[0]));
 		free((yyvsp[0].str));
 	}
-#line 2795 "test_spec_parse.c"
+#line 2800 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 152: /* promote_list: promote_list T_COMMA T_IDENT  */
-#line 1149 "test_spec_parse.y"
+  case 153: /* promote_list: promote_list T_COMMA T_IDENT  */
+#line 1149 "src/bin/pgaftest/test_spec_parse.y"
         {
 		if (current_promote_cmd->promoteCount < PGAF_MAX_PROMOTE_NODES)
 			strlcpy(current_promote_cmd->promoteNodes[current_promote_cmd->promoteCount++],
 			        (yyvsp[0].str), sizeof(current_promote_cmd->promoteNodes[0]));
 		free((yyvsp[0].str));
 	}
-#line 2806 "test_spec_parse.c"
+#line 2811 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 153: /* network_cmd: T_NETWORK T_DISCONNECT T_IDENT  */
-#line 1164 "test_spec_parse.y"
+  case 154: /* network_cmd: T_NETWORK T_DISCONNECT T_IDENT  */
+#line 1164 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_NETWORK_OFF);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2816 "test_spec_parse.c"
+#line 2821 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 154: /* network_cmd: T_NETWORK T_CONNECT T_IDENT  */
-#line 1170 "test_spec_parse.y"
+  case 155: /* network_cmd: T_NETWORK T_CONNECT T_IDENT  */
+#line 1170 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_NETWORK_ON);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2826 "test_spec_parse.c"
+#line 2831 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 155: /* sleep_cmd: T_SLEEP T_INTEGER  */
-#line 1183 "test_spec_parse.y"
+  case 156: /* sleep_cmd: T_SLEEP T_INTEGER  */
+#line 1183 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_SLEEP);
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 	}
-#line 2835 "test_spec_parse.c"
+#line 2840 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 156: /* compose_cmd: T_COMPOSE T_DOWN  */
-#line 1197 "test_spec_parse.y"
+  case 157: /* compose_cmd: T_COMPOSE T_DOWN  */
+#line 1197 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_DOWN);
 	}
-#line 2843 "test_spec_parse.c"
+#line 2848 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 157: /* compose_cmd: T_COMPOSE T_START T_IDENT  */
-#line 1201 "test_spec_parse.y"
+  case 158: /* compose_cmd: T_COMPOSE T_START T_IDENT  */
+#line 1201 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_START);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2853 "test_spec_parse.c"
+#line 2858 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 158: /* compose_cmd: T_COMPOSE T_STOP T_IDENT  */
-#line 1207 "test_spec_parse.y"
+  case 159: /* compose_cmd: T_COMPOSE T_STOP T_IDENT  */
+#line 1207 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_STOP);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2863 "test_spec_parse.c"
+#line 2868 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 159: /* compose_cmd: T_COMPOSE T_KILL T_IDENT  */
-#line 1213 "test_spec_parse.y"
+  case 160: /* compose_cmd: T_COMPOSE T_KILL T_IDENT  */
+#line 1213 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_KILL);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2873 "test_spec_parse.c"
+#line 2878 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 160: /* compose_cmd: T_COMPOSE T_INJECT T_IDENT T_SHELL_ARGS  */
-#line 1239 "test_spec_parse.y"
+  case 161: /* compose_cmd: T_COMPOSE T_INJECT T_IDENT T_SHELL_ARGS  */
+#line 1239 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_INJECT);
 		strlcpy((yyval.cmd)->expected, (yyvsp[-1].str), sizeof((yyval.cmd)->expected));  /* image */
@@ -2896,43 +2901,43 @@ yyreduce:
 		}
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2900 "test_spec_parse.c"
+#line 2905 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 161: /* postgres_ctl_cmd: T_STOP T_POSTGRES node_name  */
-#line 1273 "test_spec_parse.y"
+  case 162: /* postgres_ctl_cmd: T_STOP T_POSTGRES node_name  */
+#line 1273 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_STOP_POSTGRES);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2910 "test_spec_parse.c"
+#line 2915 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 162: /* postgres_ctl_cmd: T_START T_POSTGRES node_name  */
-#line 1279 "test_spec_parse.y"
+  case 163: /* postgres_ctl_cmd: T_START T_POSTGRES node_name  */
+#line 1279 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_START_POSTGRES);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2920 "test_spec_parse.c"
+#line 2925 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 163: /* $@7: %empty  */
-#line 1295 "test_spec_parse.y"
+  case 164: /* $@7: %empty  */
+#line 1295 "src/bin/pgaftest/test_spec_parse.y"
                 { pgaf_next_brace_is_while = 1; }
-#line 2926 "test_spec_parse.c"
+#line 2931 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 164: /* while_body: T_WHILE $@7 T_LBRACE cmd_list T_RBRACE  */
-#line 1296 "test_spec_parse.y"
+  case 165: /* while_body: T_WHILE $@7 T_LBRACE cmd_list T_RBRACE  */
+#line 1296 "src/bin/pgaftest/test_spec_parse.y"
         { (yyval.step) = (yyvsp[-1].step); }
-#line 2932 "test_spec_parse.c"
+#line 2937 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 165: /* stays_while_cmd: T_ASSERT node_name T_STAYS fsm_state while_body  */
-#line 1301 "test_spec_parse.y"
+  case 166: /* stays_while_cmd: T_ASSERT node_name T_STAYS fsm_state while_body  */
+#line 1301 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_STAYS_WHILE);
 		strlcpy((yyval.cmd)->service, (yyvsp[-3].str), sizeof((yyval.cmd)->service));
@@ -2940,11 +2945,11 @@ yyreduce:
 		(yyval.cmd)->body = ((yyvsp[0].step)) ? (yyvsp[0].step)->commands : NULL;
 		free((yyvsp[-3].str));
 	}
-#line 2944 "test_spec_parse.c"
+#line 2949 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 166: /* set_monitor_cmd: T_SET T_IDENT T_IDENT  */
-#line 1320 "test_spec_parse.y"
+  case 167: /* set_monitor_cmd: T_SET T_IDENT T_IDENT  */
+#line 1320 "src/bin/pgaftest/test_spec_parse.y"
         {
 		/* only "set monitor <svc>" is supported; $2 must be "monitor" */
 		if (strcmp((yyvsp[-1].str), "monitor") != 0)
@@ -2957,11 +2962,11 @@ yyreduce:
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2961 "test_spec_parse.c"
+#line 2966 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 167: /* logs_cmd: T_LOGS T_IDENT T_CONTAINS T_STRING  */
-#line 1345 "test_spec_parse.y"
+  case 168: /* logs_cmd: T_LOGS T_IDENT T_CONTAINS T_STRING  */
+#line 1345 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[-2].str), sizeof((yyval.cmd)->service));
@@ -2970,11 +2975,11 @@ yyreduce:
 		(yyval.cmd)->allowError = false;  /* false = fixed string, true = PCRE */
 		free((yyvsp[-2].str)); free((yyvsp[0].str));
 	}
-#line 2974 "test_spec_parse.c"
+#line 2979 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 168: /* logs_cmd: T_LOGS T_IDENT T_NOT T_CONTAINS T_STRING  */
-#line 1354 "test_spec_parse.y"
+  case 169: /* logs_cmd: T_LOGS T_IDENT T_NOT T_CONTAINS T_STRING  */
+#line 1354 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[-3].str), sizeof((yyval.cmd)->service));
@@ -2983,11 +2988,11 @@ yyreduce:
 		(yyval.cmd)->allowError = false;
 		free((yyvsp[-3].str)); free((yyvsp[0].str));
 	}
-#line 2987 "test_spec_parse.c"
+#line 2992 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 169: /* logs_cmd: T_LOGS T_IDENT T_MATCHES T_STRING  */
-#line 1363 "test_spec_parse.y"
+  case 170: /* logs_cmd: T_LOGS T_IDENT T_MATCHES T_STRING  */
+#line 1363 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[-2].str), sizeof((yyval.cmd)->service));
@@ -2996,11 +3001,11 @@ yyreduce:
 		(yyval.cmd)->allowError = true;   /* true = PCRE (-P) */
 		free((yyvsp[-2].str)); free((yyvsp[0].str));
 	}
-#line 3000 "test_spec_parse.c"
+#line 3005 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 170: /* logs_cmd: T_LOGS T_IDENT T_NOT T_MATCHES T_STRING  */
-#line 1372 "test_spec_parse.y"
+  case 171: /* logs_cmd: T_LOGS T_IDENT T_NOT T_MATCHES T_STRING  */
+#line 1372 "src/bin/pgaftest/test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[-3].str), sizeof((yyval.cmd)->service));
@@ -3009,11 +3014,11 @@ yyreduce:
 		(yyval.cmd)->allowError = true;
 		free((yyvsp[-3].str)); free((yyvsp[0].str));
 	}
-#line 3013 "test_spec_parse.c"
+#line 3018 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 173: /* sequence_names: sequence_names ident_or_string  */
-#line 1393 "test_spec_parse.y"
+  case 174: /* sequence_names: sequence_names ident_or_string  */
+#line 1393 "src/bin/pgaftest/test_spec_parse.y"
         {
 		int i = current_spec->sequenceLength;
 		if (i < PGAF_MAX_SEQ)
@@ -3025,149 +3030,149 @@ yyreduce:
 			exit(1);
 		}
 	}
-#line 3029 "test_spec_parse.c"
+#line 3034 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 174: /* fsm_state: T_FS_INIT  */
-#line 1414 "test_spec_parse.y"
+  case 175: /* fsm_state: T_FS_INIT  */
+#line 1414 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "init"; }
-#line 3035 "test_spec_parse.c"
+#line 3040 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 175: /* fsm_state: T_FS_SINGLE  */
-#line 1415 "test_spec_parse.y"
+  case 176: /* fsm_state: T_FS_SINGLE  */
+#line 1415 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "single"; }
-#line 3041 "test_spec_parse.c"
+#line 3046 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 176: /* fsm_state: T_FS_PRIMARY  */
-#line 1416 "test_spec_parse.y"
+  case 177: /* fsm_state: T_FS_PRIMARY  */
+#line 1416 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "primary"; }
-#line 3047 "test_spec_parse.c"
+#line 3052 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 177: /* fsm_state: T_FS_WAIT_PRIMARY  */
-#line 1417 "test_spec_parse.y"
+  case 178: /* fsm_state: T_FS_WAIT_PRIMARY  */
+#line 1417 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "wait_primary"; }
-#line 3053 "test_spec_parse.c"
+#line 3058 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 178: /* fsm_state: T_FS_WAIT_STANDBY  */
-#line 1418 "test_spec_parse.y"
+  case 179: /* fsm_state: T_FS_WAIT_STANDBY  */
+#line 1418 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "wait_standby"; }
-#line 3059 "test_spec_parse.c"
+#line 3064 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 179: /* fsm_state: T_FS_DEMOTED  */
-#line 1419 "test_spec_parse.y"
+  case 180: /* fsm_state: T_FS_DEMOTED  */
+#line 1419 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "demoted"; }
-#line 3065 "test_spec_parse.c"
+#line 3070 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 180: /* fsm_state: T_FS_DEMOTE_TIMEOUT  */
-#line 1420 "test_spec_parse.y"
+  case 181: /* fsm_state: T_FS_DEMOTE_TIMEOUT  */
+#line 1420 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "demote_timeout"; }
-#line 3071 "test_spec_parse.c"
+#line 3076 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 181: /* fsm_state: T_FS_DRAINING  */
-#line 1421 "test_spec_parse.y"
+  case 182: /* fsm_state: T_FS_DRAINING  */
+#line 1421 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "draining"; }
-#line 3077 "test_spec_parse.c"
+#line 3082 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 182: /* fsm_state: T_FS_SECONDARY  */
-#line 1422 "test_spec_parse.y"
+  case 183: /* fsm_state: T_FS_SECONDARY  */
+#line 1422 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "secondary"; }
-#line 3083 "test_spec_parse.c"
+#line 3088 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 183: /* fsm_state: T_FS_CATCHINGUP  */
-#line 1423 "test_spec_parse.y"
+  case 184: /* fsm_state: T_FS_CATCHINGUP  */
+#line 1423 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "catchingup"; }
-#line 3089 "test_spec_parse.c"
+#line 3094 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 184: /* fsm_state: T_FS_PREP_PROMOTION  */
-#line 1424 "test_spec_parse.y"
+  case 185: /* fsm_state: T_FS_PREP_PROMOTION  */
+#line 1424 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "prepare_promotion"; }
-#line 3095 "test_spec_parse.c"
+#line 3100 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 185: /* fsm_state: T_FS_STOP_REPLICATION  */
-#line 1425 "test_spec_parse.y"
+  case 186: /* fsm_state: T_FS_STOP_REPLICATION  */
+#line 1425 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "stop_replication"; }
-#line 3101 "test_spec_parse.c"
+#line 3106 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 186: /* fsm_state: T_FS_MAINTENANCE  */
-#line 1426 "test_spec_parse.y"
+  case 187: /* fsm_state: T_FS_MAINTENANCE  */
+#line 1426 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "maintenance"; }
-#line 3107 "test_spec_parse.c"
+#line 3112 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 187: /* fsm_state: T_FS_JOIN_PRIMARY  */
-#line 1427 "test_spec_parse.y"
+  case 188: /* fsm_state: T_FS_JOIN_PRIMARY  */
+#line 1427 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "join_primary"; }
-#line 3113 "test_spec_parse.c"
+#line 3118 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 188: /* fsm_state: T_FS_APPLY_SETTINGS  */
-#line 1428 "test_spec_parse.y"
+  case 189: /* fsm_state: T_FS_APPLY_SETTINGS  */
+#line 1428 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "apply_settings"; }
-#line 3119 "test_spec_parse.c"
+#line 3124 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 189: /* fsm_state: T_FS_PREPARE_MAINTENANCE  */
-#line 1429 "test_spec_parse.y"
+  case 190: /* fsm_state: T_FS_PREPARE_MAINTENANCE  */
+#line 1429 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "prepare_maintenance"; }
-#line 3125 "test_spec_parse.c"
+#line 3130 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 190: /* fsm_state: T_FS_WAIT_MAINTENANCE  */
-#line 1430 "test_spec_parse.y"
+  case 191: /* fsm_state: T_FS_WAIT_MAINTENANCE  */
+#line 1430 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "wait_maintenance"; }
-#line 3131 "test_spec_parse.c"
+#line 3136 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 191: /* fsm_state: T_FS_REPORT_LSN  */
-#line 1431 "test_spec_parse.y"
+  case 192: /* fsm_state: T_FS_REPORT_LSN  */
+#line 1431 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "report_lsn"; }
-#line 3137 "test_spec_parse.c"
+#line 3142 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 192: /* fsm_state: T_FS_FAST_FORWARD  */
-#line 1432 "test_spec_parse.y"
+  case 193: /* fsm_state: T_FS_FAST_FORWARD  */
+#line 1432 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "fast_forward"; }
-#line 3143 "test_spec_parse.c"
+#line 3148 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 193: /* fsm_state: T_FS_JOIN_SECONDARY  */
-#line 1433 "test_spec_parse.y"
+  case 194: /* fsm_state: T_FS_JOIN_SECONDARY  */
+#line 1433 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "join_secondary"; }
-#line 3149 "test_spec_parse.c"
+#line 3154 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 194: /* fsm_state: T_FS_DROPPED  */
-#line 1434 "test_spec_parse.y"
+  case 195: /* fsm_state: T_FS_DROPPED  */
+#line 1434 "src/bin/pgaftest/test_spec_parse.y"
                                    { (yyval.str) = "dropped"; }
-#line 3155 "test_spec_parse.c"
+#line 3160 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 195: /* ident_or_string: T_IDENT  */
-#line 1442 "test_spec_parse.y"
+  case 196: /* ident_or_string: T_IDENT  */
+#line 1442 "src/bin/pgaftest/test_spec_parse.y"
                    { (yyval.str) = (yyvsp[0].str); }
-#line 3161 "test_spec_parse.c"
+#line 3166 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
-  case 196: /* ident_or_string: T_STRING  */
-#line 1443 "test_spec_parse.y"
+  case 197: /* ident_or_string: T_STRING  */
+#line 1443 "src/bin/pgaftest/test_spec_parse.y"
                    { (yyval.str) = (yyvsp[0].str); }
-#line 3167 "test_spec_parse.c"
+#line 3172 "src/bin/pgaftest/test_spec_parse.c"
     break;
 
 
-#line 3171 "test_spec_parse.c"
+#line 3176 "src/bin/pgaftest/test_spec_parse.c"
 
       default: break;
     }
@@ -3360,7 +3365,7 @@ yyreturnlab:
   return yyresult;
 }
 
-#line 1446 "test_spec_parse.y"
+#line 1446 "src/bin/pgaftest/test_spec_parse.y"
 
 
 /* -----------------------------------------------------------------------

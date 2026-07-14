@@ -157,7 +157,7 @@ static TestNode      *current_node        = NULL;
 /* ---- Cluster-body tokens ---- */
 %token T_IMAGE T_IMAGE_TARGET T_SSL T_AUTH T_AUTH_METHOD T_FORMATION T_NUM_SYNC
 %token T_COORDINATOR T_WORKER T_ASYNC T_NO_MONITOR
-%token T_LAUNCH T_CREATE T_DEFERRED T_IMMEDIATE T_FALSE T_INITIALLY T_VOLUME
+%token T_LAUNCH T_CREATE T_DEFERRED T_IMMEDIATE T_FALSE T_TRUE T_INITIALLY T_VOLUME
 %token T_LISTEN T_CITUS_SECONDARY T_CANDIDATE_PRIORITY T_PORT T_PASSWORD T_MONITOR_PASSWORD
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
 %token T_EXTENSION_VERSION T_BIND_SOURCE
@@ -592,13 +592,13 @@ node_opt:
 		strlcpy(current_node->auth, $2, sizeof(current_node->auth));
 		free($2);
 	}
-	| T_REPLICATION_QUORUM T_IDENT
+	| T_REPLICATION_QUORUM T_TRUE
 	{
-		if (strcmp($2, "false") == 0 || strcmp($2, "0") == 0)
-			current_node->replicationQuorum = false;
-		else
-			current_node->replicationQuorum = true;
-		free($2);
+		current_node->replicationQuorum = true;
+	}
+	| T_REPLICATION_QUORUM T_FALSE
+	{
+		current_node->replicationQuorum = false;
 	}
 	| T_REPLICATION_PASSWORD T_STRING
 	{

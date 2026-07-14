@@ -604,7 +604,7 @@ monitor_get_node_state(TestRunner *r, const char *nodeName,
 								  "%s exec -T %s "
 								  "psql -U autoctl_node -d pg_auto_failover -At "
 								  "-c \"SELECT reportedstate||'|'||goalstate FROM pgautofailover.node "
-								  "    WHERE nodename='%s'\" 2>/dev/null",
+								  "    WHERE nodehost='%s'\" 2>/dev/null",
 								  r->composeBase, r->activeMonitorService, nodeName);
 		if (rc2 != 0 || out[0] == '\0')
 		{
@@ -3850,6 +3850,14 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		{
 			tap_plan(&r);
 			tap_diag("setup failed: %s", err);
+
+			/* teardown{} — always run, even on setup failure */
+			if (spec->teardown)
+			{
+				char tdErr[512] = "";
+				log_info("Running teardown block");
+				runner_exec_step(&r, spec->teardown, tdErr, sizeof(tdErr), 0);
+			}
 			return false;
 		}
 	}

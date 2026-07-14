@@ -339,6 +339,40 @@ compose_gen_write_ssl_certs(const TestCluster *cluster, const char *workDir)
 
 
 /*
+ * write_node_command emits the YAML command: stanza.
+ *
+ * When CA-signed SSL certs are in use, the server cert/key must be copied
+ * from the read-only bind-mount (/etc/pgaf/ssl/server/) to the writable
+ * volume root (/var/lib/postgres/) before pg_autoctl starts, because
+ * PostgreSQL requires the key file to be owned by the process user.  The
+ * client cert/key and CA cert are also copied so libpq can find them.
+ * SSL_COPY_CERTS_CMD is a shell snippet ending with " &&" so we can
+ * append the pg_autoctl invocation directly.
+ */
+static void
+write_node_command(FILE *f, const TestCluster *cluster, const char *iniPath)
+{
+	if (ssl_needs_certs(cluster->ssl))
+	{
+		fformat(f,
+				"    command: [\"/bin/sh\", \"-c\", \""
+				SSL_COPY_CERTS_CMD
+				" pg_autoctl node run %s\"]\n"
+				"    stop_grace_period: 60s\n",
+				iniPath);
+	}
+	else
+	{
+		fformat(f,
+				"    command: [\"pg_autoctl\", \"node\", \"run\","
+				" \"%s\"]\n"
+				"    stop_grace_period: 60s\n",
+				iniPath);
+	}
+}
+
+
+/*
  * image_stanza writes either `image:` (when PGAF_IMAGE is set or the cluster
  * spec provides an image) or a `build:` stanza.
  */
@@ -548,10 +582,8 @@ compose_gen_write(TestCluster *cluster,
 				cluster->monitorHostPort);
 
 
-		fformat(f,
-				"    command: [\"pg_autoctl\", \"node\", \"run\","
-				" \"" NODE_INI_PATH "\"]\n"
-									"    stop_grace_period: 60s\n\n");
+		write_node_command(f, cluster, NODE_INI_PATH);
+		fformat(f, "\n");
 
 		/*
 		 * Monitor healthcheck: data nodes use depends_on service_healthy so
@@ -607,10 +639,8 @@ compose_gen_write(TestCluster *cluster,
 				"    ports:\n"
 				"      - \"%d:5432\"\n",
 				cluster->secondMonitorHostPort);
-		fformat(f,
-				"    command: [\"pg_autoctl\", \"node\", \"run\","
-				" \"" NODE_INI_PATH "\"]\n"
-									"    stop_grace_period: 60s\n\n");
+		write_node_command(f, cluster, NODE_INI_PATH);
+		fformat(f, "\n");
 	}
 
 	/* ---- data nodes — iterate all formations ---- */
@@ -700,10 +730,7 @@ compose_gen_write(TestCluster *cluster,
 			 * case where the formation hasn't been created yet.
 			 */
 
-			fformat(f,
-					"    command: [\"pg_autoctl\", \"node\", \"run\","
-					" \"" NODE_INI_PATH "\"]\n"
-										"    stop_grace_period: 60s\n");
+			write_node_command(f, cluster, NODE_INI_PATH);
 
 			/*
 			 * With a monitor: the first data node gets a healthcheck so that

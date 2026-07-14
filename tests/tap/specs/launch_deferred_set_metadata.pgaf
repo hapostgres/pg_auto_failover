@@ -25,11 +25,14 @@ teardown {
 }
 
 #
-# test_000: wait for node1 to become primary
+# test_000: node2 is create-immediate, run-deferred: its pg_autoctl create
+# postgres registers with the monitor, causing node1 to transition from
+# single to wait_primary.  Wait for that transition; it confirms node2 has
+# registered and will be visible in the node table for test_001.
 #
 
 step test_000_setup {
-    wait until node1 state is single  timeout 60s
+    wait until node1 state is wait_primary  timeout 60s
 }
 
 #
@@ -75,10 +78,9 @@ step test_004_verify {
         timeout 90s
 }
 
-sequence {
+sequence
     test_000_setup
     test_001_node2_created
     test_002_set_metadata
     test_003_node_start
     test_004_verify
-}

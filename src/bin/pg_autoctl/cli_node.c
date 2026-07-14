@@ -517,28 +517,25 @@ cli_node_run(int argc, char **argv)
 
 			/*
 			 * Run as root (via sudo) so pg_createcluster can create the cluster
-			 * owned by the postgres system user, exactly as a real Debian install
-			 * would.  The container's sudoers grants NOPASSWD to the docker user.
-			 *
-			 * --allow-group-access is passed through to initdb, which sets PGDATA
-			 * to mode 750 and data files to 640/750.  The docker user (a member of
-			 * the postgres group) can then read and write the cluster without any
-			 * subsequent chmod step.  pg_autoctl's sibling backup directory is
-			 * created under /var/lib/postgresql/<ver>/ which pg_createcluster sets
-			 * to 0755, so group members can write there too.
+			 * owned by the container user ("docker"), matching what the Python
+			 * test suite does.  --user docker makes PGDATA owned by docker so
+			 * pg_autoctl (running as docker) can write config files into it.
+			 * --group postgres keeps the group ownership as postgres so that
+			 * any postgres process can still access the data.
 			 */
 			char *pgcc_args[] = {
 				"sudo", "pg_createcluster",
+				"--user", "docker",
+				"--group", "postgres",
 				pgmajor_str,
 				spec.debianCluster,
 				"--",
-				"--allow-group-access",
 				"--auth-local", "trust",
 				"--auth-host", "trust",
 				NULL
 			};
 			log_info("pg_autoctl node run: pg_createcluster %d %s "
-					 "(--allow-group-access)",
+					 "(--user docker --group postgres)",
 					 pgmajor, spec.debianCluster);
 
 			pid_t pid = fork();

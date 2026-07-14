@@ -35,8 +35,8 @@
    especially those whose name start with YY_ or yy_.  They are
    private implementation details that can be changed or removed.  */
 
-#ifndef YY_YY_TEST_SPEC_PARSE_H_INCLUDED
-# define YY_YY_TEST_SPEC_PARSE_H_INCLUDED
+#ifndef YY_YY_SRC_BIN_PGAFTEST_TEST_SPEC_PARSE_H_INCLUDED
+# define YY_YY_SRC_BIN_PGAFTEST_TEST_SPEC_PARSE_H_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
 # define YYDEBUG 0
@@ -80,87 +80,88 @@ extern int yydebug;
     T_DEFERRED = 281,              /* T_DEFERRED  */
     T_IMMEDIATE = 282,             /* T_IMMEDIATE  */
     T_FALSE = 283,                 /* T_FALSE  */
-    T_INITIALLY = 284,             /* T_INITIALLY  */
-    T_VOLUME = 285,                /* T_VOLUME  */
-    T_LISTEN = 286,                /* T_LISTEN  */
-    T_CITUS_SECONDARY = 287,       /* T_CITUS_SECONDARY  */
-    T_CANDIDATE_PRIORITY = 288,    /* T_CANDIDATE_PRIORITY  */
-    T_PORT = 289,                  /* T_PORT  */
-    T_PASSWORD = 290,              /* T_PASSWORD  */
-    T_MONITOR_PASSWORD = 291,      /* T_MONITOR_PASSWORD  */
-    T_CITUS_CLUSTER_NAME = 292,    /* T_CITUS_CLUSTER_NAME  */
-    T_DEBIAN_CLUSTER = 293,        /* T_DEBIAN_CLUSTER  */
-    T_REPLICATION_QUORUM = 294,    /* T_REPLICATION_QUORUM  */
-    T_REPLICATION_PASSWORD = 295,  /* T_REPLICATION_PASSWORD  */
-    T_EXTENSION_VERSION = 296,     /* T_EXTENSION_VERSION  */
-    T_BIND_SOURCE = 297,           /* T_BIND_SOURCE  */
-    T_FS_INIT = 298,               /* T_FS_INIT  */
-    T_FS_SINGLE = 299,             /* T_FS_SINGLE  */
-    T_FS_PRIMARY = 300,            /* T_FS_PRIMARY  */
-    T_FS_WAIT_PRIMARY = 301,       /* T_FS_WAIT_PRIMARY  */
-    T_FS_WAIT_STANDBY = 302,       /* T_FS_WAIT_STANDBY  */
-    T_FS_DEMOTED = 303,            /* T_FS_DEMOTED  */
-    T_FS_DEMOTE_TIMEOUT = 304,     /* T_FS_DEMOTE_TIMEOUT  */
-    T_FS_DRAINING = 305,           /* T_FS_DRAINING  */
-    T_FS_SECONDARY = 306,          /* T_FS_SECONDARY  */
-    T_FS_CATCHINGUP = 307,         /* T_FS_CATCHINGUP  */
-    T_FS_PREP_PROMOTION = 308,     /* T_FS_PREP_PROMOTION  */
-    T_FS_STOP_REPLICATION = 309,   /* T_FS_STOP_REPLICATION  */
-    T_FS_MAINTENANCE = 310,        /* T_FS_MAINTENANCE  */
-    T_FS_JOIN_PRIMARY = 311,       /* T_FS_JOIN_PRIMARY  */
-    T_FS_APPLY_SETTINGS = 312,     /* T_FS_APPLY_SETTINGS  */
-    T_FS_PREPARE_MAINTENANCE = 313, /* T_FS_PREPARE_MAINTENANCE  */
-    T_FS_WAIT_MAINTENANCE = 314,   /* T_FS_WAIT_MAINTENANCE  */
-    T_FS_REPORT_LSN = 315,         /* T_FS_REPORT_LSN  */
-    T_FS_FAST_FORWARD = 316,       /* T_FS_FAST_FORWARD  */
-    T_FS_JOIN_SECONDARY = 317,     /* T_FS_JOIN_SECONDARY  */
-    T_FS_DROPPED = 318,            /* T_FS_DROPPED  */
-    T_EXEC = 319,                  /* T_EXEC  */
-    T_EXEC_FAILS = 320,            /* T_EXEC_FAILS  */
-    T_PG_AUTOCTL = 321,            /* T_PG_AUTOCTL  */
-    T_WAIT = 322,                  /* T_WAIT  */
-    T_UNTIL = 323,                 /* T_UNTIL  */
-    T_TIMEOUT = 324,               /* T_TIMEOUT  */
-    T_AND = 325,                   /* T_AND  */
-    T_IS = 326,                    /* T_IS  */
-    T_WITH = 327,                  /* T_WITH  */
-    T_ASSERT = 328,                /* T_ASSERT  */
-    T_SQL = 329,                   /* T_SQL  */
-    T_EXPECT = 330,                /* T_EXPECT  */
-    T_ERROR = 331,                 /* T_ERROR  */
-    T_PROMOTE = 332,               /* T_PROMOTE  */
-    T_NETWORK = 333,               /* T_NETWORK  */
-    T_DISCONNECT = 334,            /* T_DISCONNECT  */
-    T_CONNECT = 335,               /* T_CONNECT  */
-    T_SLEEP = 336,                 /* T_SLEEP  */
-    T_COMPOSE = 337,               /* T_COMPOSE  */
-    T_DOWN = 338,                  /* T_DOWN  */
-    T_START = 339,                 /* T_START  */
-    T_STOP = 340,                  /* T_STOP  */
-    T_STOPPED = 341,               /* T_STOPPED  */
-    T_KILL = 342,                  /* T_KILL  */
-    T_INJECT = 343,                /* T_INJECT  */
-    T_STATE = 344,                 /* T_STATE  */
-    T_ASSIGNED_STATE = 345,        /* T_ASSIGNED_STATE  */
-    T_IN = 346,                    /* T_IN  */
-    T_GROUP = 347,                 /* T_GROUP  */
-    T_LBRACE = 348,                /* T_LBRACE  */
-    T_RBRACE = 349,                /* T_RBRACE  */
-    T_COMMA = 350,                 /* T_COMMA  */
-    T_POSTGRES = 351,              /* T_POSTGRES  */
-    T_STAYS = 352,                 /* T_STAYS  */
-    T_WHILE = 353,                 /* T_WHILE  */
-    T_THROUGH = 354,               /* T_THROUGH  */
-    T_SET = 355,                   /* T_SET  */
-    T_LOGS = 356,                  /* T_LOGS  */
-    T_NOT = 357,                   /* T_NOT  */
-    T_CONTAINS = 358,              /* T_CONTAINS  */
-    T_MATCHES = 359,               /* T_MATCHES  */
-    T_INTEGER = 360,               /* T_INTEGER  */
-    T_IDENT = 361,                 /* T_IDENT  */
-    T_STRING = 362,                /* T_STRING  */
-    T_BLOCK = 363,                 /* T_BLOCK  */
-    T_SHELL_ARGS = 364             /* T_SHELL_ARGS  */
+    T_TRUE = 284,                  /* T_TRUE  */
+    T_INITIALLY = 285,             /* T_INITIALLY  */
+    T_VOLUME = 286,                /* T_VOLUME  */
+    T_LISTEN = 287,                /* T_LISTEN  */
+    T_CITUS_SECONDARY = 288,       /* T_CITUS_SECONDARY  */
+    T_CANDIDATE_PRIORITY = 289,    /* T_CANDIDATE_PRIORITY  */
+    T_PORT = 290,                  /* T_PORT  */
+    T_PASSWORD = 291,              /* T_PASSWORD  */
+    T_MONITOR_PASSWORD = 292,      /* T_MONITOR_PASSWORD  */
+    T_CITUS_CLUSTER_NAME = 293,    /* T_CITUS_CLUSTER_NAME  */
+    T_DEBIAN_CLUSTER = 294,        /* T_DEBIAN_CLUSTER  */
+    T_REPLICATION_QUORUM = 295,    /* T_REPLICATION_QUORUM  */
+    T_REPLICATION_PASSWORD = 296,  /* T_REPLICATION_PASSWORD  */
+    T_EXTENSION_VERSION = 297,     /* T_EXTENSION_VERSION  */
+    T_BIND_SOURCE = 298,           /* T_BIND_SOURCE  */
+    T_FS_INIT = 299,               /* T_FS_INIT  */
+    T_FS_SINGLE = 300,             /* T_FS_SINGLE  */
+    T_FS_PRIMARY = 301,            /* T_FS_PRIMARY  */
+    T_FS_WAIT_PRIMARY = 302,       /* T_FS_WAIT_PRIMARY  */
+    T_FS_WAIT_STANDBY = 303,       /* T_FS_WAIT_STANDBY  */
+    T_FS_DEMOTED = 304,            /* T_FS_DEMOTED  */
+    T_FS_DEMOTE_TIMEOUT = 305,     /* T_FS_DEMOTE_TIMEOUT  */
+    T_FS_DRAINING = 306,           /* T_FS_DRAINING  */
+    T_FS_SECONDARY = 307,          /* T_FS_SECONDARY  */
+    T_FS_CATCHINGUP = 308,         /* T_FS_CATCHINGUP  */
+    T_FS_PREP_PROMOTION = 309,     /* T_FS_PREP_PROMOTION  */
+    T_FS_STOP_REPLICATION = 310,   /* T_FS_STOP_REPLICATION  */
+    T_FS_MAINTENANCE = 311,        /* T_FS_MAINTENANCE  */
+    T_FS_JOIN_PRIMARY = 312,       /* T_FS_JOIN_PRIMARY  */
+    T_FS_APPLY_SETTINGS = 313,     /* T_FS_APPLY_SETTINGS  */
+    T_FS_PREPARE_MAINTENANCE = 314, /* T_FS_PREPARE_MAINTENANCE  */
+    T_FS_WAIT_MAINTENANCE = 315,   /* T_FS_WAIT_MAINTENANCE  */
+    T_FS_REPORT_LSN = 316,         /* T_FS_REPORT_LSN  */
+    T_FS_FAST_FORWARD = 317,       /* T_FS_FAST_FORWARD  */
+    T_FS_JOIN_SECONDARY = 318,     /* T_FS_JOIN_SECONDARY  */
+    T_FS_DROPPED = 319,            /* T_FS_DROPPED  */
+    T_EXEC = 320,                  /* T_EXEC  */
+    T_EXEC_FAILS = 321,            /* T_EXEC_FAILS  */
+    T_PG_AUTOCTL = 322,            /* T_PG_AUTOCTL  */
+    T_WAIT = 323,                  /* T_WAIT  */
+    T_UNTIL = 324,                 /* T_UNTIL  */
+    T_TIMEOUT = 325,               /* T_TIMEOUT  */
+    T_AND = 326,                   /* T_AND  */
+    T_IS = 327,                    /* T_IS  */
+    T_WITH = 328,                  /* T_WITH  */
+    T_ASSERT = 329,                /* T_ASSERT  */
+    T_SQL = 330,                   /* T_SQL  */
+    T_EXPECT = 331,                /* T_EXPECT  */
+    T_ERROR = 332,                 /* T_ERROR  */
+    T_PROMOTE = 333,               /* T_PROMOTE  */
+    T_NETWORK = 334,               /* T_NETWORK  */
+    T_DISCONNECT = 335,            /* T_DISCONNECT  */
+    T_CONNECT = 336,               /* T_CONNECT  */
+    T_SLEEP = 337,                 /* T_SLEEP  */
+    T_COMPOSE = 338,               /* T_COMPOSE  */
+    T_DOWN = 339,                  /* T_DOWN  */
+    T_START = 340,                 /* T_START  */
+    T_STOP = 341,                  /* T_STOP  */
+    T_STOPPED = 342,               /* T_STOPPED  */
+    T_KILL = 343,                  /* T_KILL  */
+    T_INJECT = 344,                /* T_INJECT  */
+    T_STATE = 345,                 /* T_STATE  */
+    T_ASSIGNED_STATE = 346,        /* T_ASSIGNED_STATE  */
+    T_IN = 347,                    /* T_IN  */
+    T_GROUP = 348,                 /* T_GROUP  */
+    T_LBRACE = 349,                /* T_LBRACE  */
+    T_RBRACE = 350,                /* T_RBRACE  */
+    T_COMMA = 351,                 /* T_COMMA  */
+    T_POSTGRES = 352,              /* T_POSTGRES  */
+    T_STAYS = 353,                 /* T_STAYS  */
+    T_WHILE = 354,                 /* T_WHILE  */
+    T_THROUGH = 355,               /* T_THROUGH  */
+    T_SET = 356,                   /* T_SET  */
+    T_LOGS = 357,                  /* T_LOGS  */
+    T_NOT = 358,                   /* T_NOT  */
+    T_CONTAINS = 359,              /* T_CONTAINS  */
+    T_MATCHES = 360,               /* T_MATCHES  */
+    T_INTEGER = 361,               /* T_INTEGER  */
+    T_IDENT = 362,                 /* T_IDENT  */
+    T_STRING = 363,                /* T_STRING  */
+    T_BLOCK = 364,                 /* T_BLOCK  */
+    T_SHELL_ARGS = 365             /* T_SHELL_ARGS  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -169,14 +170,14 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 145 "test_spec_parse.y"
+#line 145 "src/bin/pgaftest/test_spec_parse.y"
 
 	int         ival;
 	char       *str;
 	TestStep   *step;
 	TestCmd    *cmd;
 
-#line 180 "test_spec_parse.h"
+#line 181 "src/bin/pgaftest/test_spec_parse.h"
 
 };
 typedef union YYSTYPE YYSTYPE;
@@ -191,4 +192,4 @@ extern YYSTYPE yylval;
 int yyparse (void);
 
 
-#endif /* !YY_YY_TEST_SPEC_PARSE_H_INCLUDED  */
+#endif /* !YY_YY_SRC_BIN_PGAFTEST_TEST_SPEC_PARSE_H_INCLUDED  */
