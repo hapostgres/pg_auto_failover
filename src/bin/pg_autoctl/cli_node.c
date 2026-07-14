@@ -161,6 +161,11 @@ static char nodeSpecPath[MAXPGPATH] = { 0 };
 static bool
 copy_file(const char *src, const char *dst)
 {
+	if (strcmp(src, dst) == 0)
+	{
+		return true;
+	}
+
 	int in_fd = open(src, O_RDONLY);
 	if (in_fd < 0)
 	{
