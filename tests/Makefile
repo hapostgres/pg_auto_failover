@@ -87,7 +87,7 @@ run-test: build-pytest-pg$(PGVERSION)
 .PHONY: run-test-prebuilt
 run-test-prebuilt:
 ifeq ($(TEST),tablespaces)
-	$(MAKE) -C tablespaces test teardown
+	$(MAKE) -C tablespaces run-test-prebuilt
 else
 	docker run \
 		--name $(TEST_CONTAINER_NAME) \

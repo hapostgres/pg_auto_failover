@@ -52,4 +52,13 @@ test: build test_01 test_02 test_03 test_04 test_05 test_06
 #  See CONTRIBUTING.md for more detailed instructions.
 run-test: test teardown
 
-.PHONY: build state watch run-test test tail teardown test_01 test_02 test_03 test_04 test_05 test_06
+# run-test-prebuilt: used in CI after pg_auto_failover_test:pgN is already
+# loaded from an artifact.  Skips the build-pytest-pgN rebuild (which would
+# pull from ghcr.io without a login step) and only runs docker compose build
+# (which FROMs the already-loaded local image).
+run-test-prebuilt: docker-compose-build test_01 test_02 test_03 test_04 test_05 test_06 teardown
+
+docker-compose-build:
+	docker compose build --build-arg "PGVERSION=$(PGVERSION)"
+
+.PHONY: build docker-compose-build state watch run-test run-test-prebuilt test tail teardown test_01 test_02 test_03 test_04 test_05 test_06
