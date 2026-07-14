@@ -4,8 +4,9 @@ name: CI
 #
 # Job dependency graph:
 #
-#   style_checker
-#       └── ensure_base               (pull from ghcr.io or build+push on miss)
+#   style_checker ──┐
+#                   ├── (both must pass before any build job starts)
+#   ensure_base  ───┘
 #               ├── build_run_images  (PG 14-17 → pgaf:run-pgN; installcheck runs inside build stage)
 #               │       └── test_pgaftest   (17 spec jobs)
 #               ├── build_pgaftest    (pgaf:pgaftest, built from PG17)
@@ -52,12 +53,12 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 2. Ensure base image — pull from ghcr.io or build+push on cache miss.
+  #    Runs in parallel with style_checker; build jobs wait for both.
   #    Fast path (image exists): ~5 s manifest check.
   #    Slow path (first run / Dockerfile.base changed): ~20 min build.
   # ---------------------------------------------------------------------------
   ensure_base:
     name: Ensure base image
-    needs: style_checker
     uses: ./.github/workflows/base-image.yml
     permissions:
       contents: read
@@ -70,7 +71,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build_run_images:
     name: Build run image (PG${{ matrix.PGVERSION }})
-    needs: ensure_base
+    needs: [style_checker, ensure_base]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -128,7 +129,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build_pgaftest:
     name: Build pgaftest image
-    needs: ensure_base
+    needs: [style_checker, ensure_base]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -183,7 +184,7 @@ jobs:
   # ---------------------------------------------------------------------------
   build_test_images:
     name: Build test image (PG${{ matrix.PGVERSION }})
-    needs: ensure_base
+    needs: [style_checker, ensure_base]
     runs-on: ubuntu-latest
     permissions:
       contents: read
