@@ -323,8 +323,9 @@ monitor_config_read_file(MonitorConfig *config,
 
 
 /*
- * monitor_config_write_file writes the current values in given KeeperConfig to
- * filename.
+ * monitor_config_write_file writes the current values in given MonitorConfig to
+ * filename, using a temp-file + rename so that concurrent readers always see
+ * either the old complete file or the new complete file — never an empty file.
  */
 bool
 monitor_config_write_file(MonitorConfig *config)
@@ -333,7 +334,15 @@ monitor_config_write_file(MonitorConfig *config)
 
 	log_trace("monitor_config_write_file \"%s\"", filePath);
 
-	FILE *fileStream = fopen_with_umask(filePath, "w", FOPEN_FLAGS_W, 0644);
+	char tmpPath[MAXPGPATH];
+
+	if (sformat(tmpPath, sizeof(tmpPath), "%s.tmp", filePath) >= MAXPGPATH)
+	{
+		log_error("Config file path too long: \"%s\"", filePath);
+		return false;
+	}
+
+	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
 	if (fileStream == NULL)
 	{
 		/* errors have already been logged */
@@ -344,11 +353,22 @@ monitor_config_write_file(MonitorConfig *config)
 
 	if (fclose(fileStream) == EOF)
 	{
-		log_error("Failed to write file \"%s\"", filePath);
+		log_error("Failed to write file \"%s\"", tmpPath);
 		return false;
 	}
 
-	return success;
+	if (!success)
+	{
+		return false;
+	}
+
+	if (rename(tmpPath, filePath) != 0)
+	{
+		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpPath, filePath);
+		return false;
+	}
+
+	return true;
 }
 
 
