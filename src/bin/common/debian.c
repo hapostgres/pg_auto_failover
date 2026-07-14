@@ -695,51 +695,6 @@ comment_out_configuration_parameters(const char *srcConfPath,
 
 
 /*
- * run_and_check runs a command via run_program(), logs its output, and exits
- * the process on failure.
- */
-static void
-run_and_check(const char *program, ...)
-{
-	va_list args;
-	Program prog = { 0 };
-	int nb_args = 0;
-
-	/* count args to build the array for initialize_program */
-	char *argv[64] = { 0 };
-	argv[nb_args++] = (char *) program;
-
-	va_start(args, program);
-	const char *arg;
-	while ((arg = va_arg(args, const char *)) != NULL && nb_args < 63)
-	{
-		argv[nb_args++] = (char *) arg;
-	}
-	va_end(args);
-
-	initialize_program(&prog, argv, false);
-	execute_subprogram(&prog);
-
-	if (prog.returnCode != 0)
-	{
-		if (prog.stdOut != NULL)
-		{
-			log_info("%s", prog.stdOut);
-		}
-		if (prog.stdErr != NULL)
-		{
-			log_error("%s", prog.stdErr);
-		}
-		log_error("Failed to run \"%s\": exit code %d", program, prog.returnCode);
-		free_program(&prog);
-		exit(EXIT_CODE_INTERNAL_ERROR);
-	}
-
-	free_program(&prog);
-}
-
-
-/*
  * pg_createcluster_for_test invokes pg_createcluster (via sudo) to create a
  * Debian-style PostgreSQL cluster for a pgaftest container node, then chowns
  * the version directory so that the unprivileged container user ("docker") can
@@ -785,12 +740,35 @@ pg_createcluster_for_test(const char *pgdata, const char *cluster_name)
 			 "(--user docker --group postgres)",
 			 pgmajor, cluster_name);
 
-	run_and_check("sudo", "pg_createcluster",
-				  "--user", "docker",
-				  "--group", "postgres",
-				  pgmajor_str, cluster_name,
-				  "--", "--auth-local", "trust", "--auth-host", "trust",
-				  NULL);
+	char *pgcc_args[] = {
+		"sudo", "pg_createcluster",
+		"--user", "docker",
+		"--group", "postgres",
+		pgmajor_str, (char *) cluster_name,
+		"--", "--auth-local", "trust", "--auth-host", "trust",
+		NULL
+	};
+
+	Program pgcc = { 0 };
+	initialize_program(&pgcc, pgcc_args, false);
+	execute_subprogram(&pgcc);
+
+	if (pgcc.returnCode != 0)
+	{
+		if (pgcc.stdOut != NULL)
+		{
+			log_info("%s", pgcc.stdOut);
+		}
+		if (pgcc.stdErr != NULL)
+		{
+			log_error("%s", pgcc.stdErr);
+		}
+		log_error("pg_createcluster exited with status %d", pgcc.returnCode);
+		free_program(&pgcc);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	free_program(&pgcc);
 
 	/*
 	 * pg_createcluster creates /var/lib/postgresql/<ver>/ owned by the
@@ -803,7 +781,25 @@ pg_createcluster_for_test(const char *pgdata, const char *cluster_name)
 
 	log_info("pg_autoctl node run: chown docker \"%s\"", pg_ver_dir);
 
-	run_and_check("sudo", "chown", "docker", pg_ver_dir, NULL);
+	char *chown_args[] = { "sudo", "chown", "docker", pg_ver_dir, NULL };
+
+	Program chown = { 0 };
+	initialize_program(&chown, chown_args, false);
+	execute_subprogram(&chown);
+
+	if (chown.returnCode != 0)
+	{
+		if (chown.stdErr != NULL)
+		{
+			log_error("%s", chown.stdErr);
+		}
+		log_error("chown docker \"%s\" exited with status %d",
+				  pg_ver_dir, chown.returnCode);
+		free_program(&chown);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	free_program(&chown);
 }
 
 

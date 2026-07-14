@@ -90,6 +90,13 @@ def test_004_write_into_primary():
     results = node1.run_sql_query("SELECT * FROM t1")
     assert results == [(1,), (2,), (3,), (4,)]
 
+    # Ensure the cluster is fully settled before test_005 sets candidate
+    # priorities; a monitor health-check gap during the DML above can trigger
+    # an unexpected failover if we proceed immediately.
+    assert node1.wait_until_state(target_state="primary")
+    assert node2.wait_until_state(target_state="secondary")
+    assert node3.wait_until_state(target_state="secondary")
+
 
 def test_005_set_candidate_priorities():
     print()

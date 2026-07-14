@@ -395,6 +395,22 @@ class PGNode(QueryRunner):
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(name=name, host=host, port=port)
 
+    def wait_until_pg_autoctl_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
+        """
+        Polls until pg_autoctl has written its config file (i.e. its
+        initialization is far enough that inspect/state commands work).
+        Raises if the config file is not present within timeout seconds.
+        """
+        deadline = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while dt.datetime.now() < deadline:
+            if os.path.exists(self.config_file_path()):
+                return
+            time.sleep(POLLING_INTERVAL)
+        raise Exception(
+            "pg_autoctl config file for %s not found after %d seconds"
+            % (self.datadir, timeout)
+        )
+
     def running(self):
         return self.pg_autoctl and self.pg_autoctl.run_proc
 

@@ -342,7 +342,13 @@ def test_015_003_set_properties():
     q = "select pgautofailover.set_formation_number_sync_standbys('default', 1)"
     monitor.run_sql_query(q)
 
-    assert node1.wait_until_assigned_state(target_state="primary")
+    # wait_until_assigned_state is not sufficient here: node1's assigned state
+    # is already "primary" when we call this, so it returns immediately without
+    # waiting for the apply_settings → primary cycle that actually writes the
+    # new synchronous_standby_names into postgresql.conf.  Use wait_until_state
+    # (which checks reportedstate) to ensure the cycle completes.
+    assert node1.wait_until_state(target_state="apply_settings")
+    assert node1.wait_until_state(target_state="primary")
 
     eq_(node1.get_number_sync_standbys(), 1)
 
