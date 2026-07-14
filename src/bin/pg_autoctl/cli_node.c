@@ -483,15 +483,20 @@ cli_node_run(int argc, char **argv)
 	}
 
 	/*
-	 * Check whether PGDATA already has pg_autoctl.cfg.
+	 * Check whether this node has already been initialised by looking for the
+	 * pg_autoctl config file at its canonical XDG location.  The old check
+	 * used PGDATA/pg_autoctl.cfg which is never written, so cfgExists was
+	 * always false; now we use the real path.
 	 */
-	char cfgPath[MAXPGPATH];
 	bool cfgExists = false;
 
 	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
 	{
-		sformat(cfgPath, sizeof(cfgPath), "%s/pg_autoctl.cfg", spec.pgdata);
-		cfgExists = file_exists(cfgPath);
+		ConfigFilePaths pathnames = { 0 };
+		if (keeper_config_set_pathnames_from_pgdata(&pathnames, spec.pgdata))
+		{
+			cfgExists = file_exists(pathnames.config);
+		}
 	}
 
 	if (!cfgExists)
@@ -537,13 +542,33 @@ cli_node_run(int argc, char **argv)
 
 		if (!node_do_init(&spec))
 		{
-			exit(EXIT_CODE_INTERNAL_ERROR);
+			/*
+			 * Check whether the config was written before the failure (e.g.
+			 * monitor registration succeeded but coordinator activation failed
+			 * because pg_hba.conf blocked the connection with auth=skip).  In
+			 * that case the keeper can take over and retry activation once
+			 * external conditions are fixed.
+			 */
+			ConfigFilePaths pathnames = { 0 };
+			if (!IS_EMPTY_STRING_BUFFER(spec.pgdata) &&
+				keeper_config_set_pathnames_from_pgdata(&pathnames, spec.pgdata) &&
+				file_exists(pathnames.config))
+			{
+				log_warn("pg_autoctl create failed but config was written; "
+						 "handing off to keeper to retry");
+
+				/* fall through to exec pg_autoctl run below */
+			}
+			else
+			{
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
 		}
 	}
 	else
 	{
 		/*
-		 * Warm start: PGDATA already has pg_autoctl.cfg.  Apply any mutable
+		 * Warm start: pg_autoctl.cfg already exists.  Apply any mutable
 		 * changes that might have been made to the spec file since the last run.
 		 */
 		NodeSpec prev = { 0 };

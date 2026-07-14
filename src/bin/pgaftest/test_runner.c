@@ -3907,6 +3907,12 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 			tap_plan(&r);
 			tap_diag("setup failed: %s", err);
 
+			/* Capture container logs before teardown destroys them */
+			log_info("--- container logs (setup failed) ---");
+			(void) run_cmd("%s logs --no-color --timestamps 2>&1",
+						   r.composeBase);
+			log_info("--- end container logs ---");
+
 			/* teardown{} — always run, even on setup failure */
 			if (spec->teardown)
 			{
@@ -3961,6 +3967,12 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		{
 			tap_not_ok(&r, name, err);
 			allPassed = false;
+
+			/* Capture container logs to aid diagnosis before teardown destroys them */
+			log_info("--- container logs (step %s failed) ---", name);
+			(void) run_cmd("%s logs --no-color --timestamps 2>&1",
+						   r.composeBase);
+			log_info("--- end container logs ---");
 			break;
 		}
 	}
