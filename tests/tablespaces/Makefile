@@ -1,7 +1,7 @@
 PGVERSION ?= 14
 
 build:
-	$(MAKE) -C ../../ build-test-pg$(PGVERSION)
+	$(MAKE) -C ../../ build-pytest-pg$(PGVERSION)
 	docker compose build --build-arg "PGVERSION=$(PGVERSION)"
 
 teardown:

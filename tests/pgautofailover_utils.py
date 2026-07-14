@@ -1890,7 +1890,6 @@ class MonitorNode(PGNode):
             )
         except Exception as e:
             print(str(e))
-            raise
 
         try:
             os.remove(self.config_file_path())
