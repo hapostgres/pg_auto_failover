@@ -1996,6 +1996,28 @@ class MonitorNode(PGNode):
         """
         performs manual failover for given formation and group id
         """
+        # Wait until the monitor sees a stable primary (reportedstate ==
+        # goalstate, both in a CanInitiateFailover state) before calling
+        # perform_failover.  Without this, perform_failover can race with the
+        # last node_active round-trip and fail with "couldn't find the primary
+        # node" even though wait_until_state("primary") already returned.
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=STATE_CHANGE_TIMEOUT)
+        while dt.datetime.now() < wait_until:
+            rows = self.run_sql_query(
+                """
+                SELECT count(*) FROM pgautofailover.node
+                 WHERE formationid = %s
+                   AND groupid = %s
+                   AND reportedstate IN ('primary', 'single', 'join_primary')
+                   AND goalstate = reportedstate
+                """,
+                formation,
+                group,
+            )
+            if rows[0][0] > 0:
+                break
+            time.sleep(POLLING_INTERVAL)
+
         failover_command_text = (
             "select * from pgautofailover.perform_failover('%s', %s)"
             % (formation, group)
