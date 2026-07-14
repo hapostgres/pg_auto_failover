@@ -174,7 +174,7 @@ static TestNode      *current_node        = NULL;
 %token T_FS_DROPPED
 
 /* ---- Step-body tokens (used in STEP_BODY lex state) ---- */
-%token T_EXEC T_EXEC_FAILS T_PG_AUTOCTL
+%token T_EXEC T_EXEC_FAILS T_RUN T_PG_AUTOCTL
 %token T_WAIT T_UNTIL T_TIMEOUT T_AND T_IS T_WITH
 %token T_ASSERT
 %token T_SQL T_EXPECT T_ERROR
@@ -758,6 +758,19 @@ exec_cmd:
 	| T_EXEC_FAILS T_IDENT
 	{
 		$$ = make_cmd(CMD_EXEC_FAILS);
+		strlcpy($$->service, $2, sizeof($$->service));
+		free($2);
+	}
+	| T_RUN T_IDENT T_SHELL_ARGS
+	{
+		$$ = make_cmd(CMD_RUN);
+		strlcpy($$->service, $2, sizeof($$->service));
+		strlcpy($$->args,    $3, sizeof($$->args));
+		free($2); free($3);
+	}
+	| T_RUN T_IDENT
+	{
+		$$ = make_cmd(CMD_RUN);
 		strlcpy($$->service, $2, sizeof($$->service));
 		free($2);
 	}

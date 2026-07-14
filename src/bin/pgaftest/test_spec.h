@@ -140,6 +140,7 @@ typedef enum TestCmdKind
 {
 	CMD_EXEC,            /* exec <svc> <args...>                        */
 	CMD_EXEC_FAILS,      /* exec-fails <svc> <args...>                  */
+	CMD_RUN,             /* run <svc> <args...> — compose run --rm      */
 	CMD_WAIT_STATE,      /* wait until <node> state = <s> [timeout Ns] */
 	CMD_WAIT_STATES,     /* wait until s1, s2 [in group N,...] [timeout Ns] */
 	CMD_ASSERT_STATE,              /* assert <node> state = <s>                   */

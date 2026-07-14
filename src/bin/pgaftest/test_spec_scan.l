@@ -257,6 +257,7 @@ static void pgaf_read_raw_block(void);
 
 <STEP_BODY>"exec-fails"    { BEGIN(EXEC_ARGS); return T_EXEC_FAILS; }
 <STEP_BODY>"exec"          { BEGIN(EXEC_ARGS); return T_EXEC; }
+<STEP_BODY>"run"           { BEGIN(EXEC_ARGS); return T_RUN; }
 <STEP_BODY>"pg_autoctl"    { BEGIN(EXEC_ARGS); return T_PG_AUTOCTL; }
 
 <STEP_BODY>"wait"          { return T_WAIT; }

@@ -46,31 +46,41 @@ step test_002_verify_replication {
 # ------------------------------------------------------------------ drop node (no --destroy): PGDATA kept
 
 step test_003_drop_node2_no_destroy {
-    # Stop node2's supervisor so we can drop it cleanly.
-    exec node2  pg_autoctl stop
-    wait until node2 stopped  timeout 30s
-    # Drop from monitor without removing PGDATA.
+    # Drop node2 from the monitor while it is still running.
+    # With --no-wait we return immediately; the running keeper detects the
+    # monitor-side removal on its next heartbeat and exits cleanly on its own.
     exec monitor  pg_autoctl drop node --name node2 --no-wait
-    wait until node1 state is wait_primary  timeout 60s
+    # node3 is still alive, so node1 stays primary (not wait_primary).
+    # Wait for the apply_settings cycle triggered by the group change to settle.
+    wait until node1 state is primary  timeout 60s
 }
 
 step test_004_verify_pgdata_kept {
     # PGDATA must still exist after a plain drop (no --destroy).
+    # The keeper is still running (hasn't reached its next heartbeat yet),
+    # so exec into node2 is still possible here.
     exec node2  test -d /var/lib/postgres/pgaf
+    # Now wait for the keeper to self-exit after detecting the drop.
+    wait until node2 stopped  timeout 30s
 }
 
 # ------------------------------------------------------------------ drop node --destroy: PGDATA removed
 
 step test_005_drop_node3_destroy {
+    # Stop the supervisor first (container exits), then run the drop command
+    # in a fresh container against the same volume via "compose run --rm".
+    # pg_autoctl drop node --destroy detects a running supervisor and waits,
+    # so we must stop first.
     exec node3  pg_autoctl stop
     wait until node3 stopped  timeout 30s
-    exec node3  pg_autoctl drop node --destroy
+    run node3   pg_autoctl drop node --destroy
     wait until node1 state is single  timeout 60s
 }
 
 step test_006_verify_pgdata_removed {
-    # After --destroy the data directory must be gone.
-    exec node3  bash -c "test ! -d /var/lib/postgres/pgaf && echo 'ok'"
+    # Start a fresh container from the node3 image (same volume) to confirm
+    # PGDATA is gone.  "run --rm" exits when the test command returns.
+    run node3   bash -c "test ! -d /var/lib/postgres/pgaf && echo 'ok'"
     expect { ok }
 }
 
@@ -84,13 +94,16 @@ step test_007_drop_monitor_to_simulate_unreachable {
 }
 
 step test_008_force_destroy_node1 {
-    # --force must succeed even with no monitor: it skips monitor contact and
-    # just removes the local PGDATA.
-    exec node1  pg_autoctl drop node --destroy --force
+    # --force skips monitor contact, so we can call it even with the monitor
+    # unreachable.  Stop the supervisor first (same reason as test_005), then
+    # run drop in a fresh container via "compose run --rm".
+    exec node1  pg_autoctl stop
+    wait until node1 stopped  timeout 30s
+    run node1   pg_autoctl drop node --destroy --force
 }
 
 step test_009_verify_force_pgdata_removed {
-    exec node1  bash -c "test ! -d /var/lib/postgres/pgaf && echo 'ok'"
+    run node1   bash -c "test ! -d /var/lib/postgres/pgaf && echo 'ok'"
     expect { ok }
 }
 

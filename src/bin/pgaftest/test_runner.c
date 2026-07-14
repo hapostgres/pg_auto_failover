@@ -1011,6 +1011,14 @@ runner_drain_notify(TestRunner *r, CurrentNodeState *last,
 				 * both goalState and reportedState equal the target for this node.
 				 * markNodes[i] == NULL is a wildcard matching any node.
 				 */
+
+				/*
+				 * Claim the first unsatisfied slot whose state (and optional
+				 * node name) matches this notification.  The break ensures
+				 * one notification claims only one slot, so duplicate state
+				 * entries (e.g. "secondary, secondary") correctly require two
+				 * distinct convergence events.
+				 */
 				bool matched = false;
 				for (int i = 0; i < markCount; i++)
 				{
@@ -1018,13 +1026,15 @@ runner_drain_notify(TestRunner *r, CurrentNodeState *last,
 						strcmp(ns_goal, markStates[i]) == 0 &&
 						strcmp(ns_rep, markStates[i]) == 0 &&
 						(!markNodes || !markNodes[i] ||
-						 strcmp(ns.node.name, markNodes[i]) == 0))
+						 strcmp(ns.node.name, markNodes[i]) == 0) &&
+						!(satisfied && satisfied[i]))
 					{
 						matched = true;
 						if (satisfied)
 						{
 							satisfied[i] = true;
 						}
+						break;
 					}
 				}
 				const char *prefix = matched ? "* [notify]" : "  [notify]";
@@ -1193,12 +1203,21 @@ monitor_check_formation_converged(TestRunner *r,
 			}
 
 			nodesQueried++;
+
+			/*
+			 * Claim the first unsatisfied slot whose state matches this node.
+			 * Claiming only one slot per node means duplicate state entries
+			 * (e.g. "secondary, secondary") correctly require two distinct
+			 * nodes in that state.
+			 */
 			for (int si = 0; si < stateCount && si < PGAF_MAX_WAIT_STATES; si++)
 			{
-				if (strcmp(reported, states[si]) == 0 &&
+				if (!satisfied[si] &&
+					strcmp(reported, states[si]) == 0 &&
 					strcmp(assigned, states[si]) == 0)
 				{
 					satisfied[si] = true;
+					break;
 				}
 			}
 		}
@@ -2376,6 +2395,37 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			return true;
 		}
 
+		case CMD_RUN:
+		{
+			char expandedArgs[4096] = "";
+			if (!runner_expand_macros(r, cmd->args, expandedArgs,
+									  sizeof(expandedArgs), errBuf, errLen))
+			{
+				return false;
+			}
+
+			char out[4096] = "";
+			int rc = run_cmd_capture(out, sizeof(out),
+									 "%s run --rm %s %s 2>&1",
+									 r->composeBase,
+									 cmd->service, expandedArgs);
+
+			strlcpy(r->lastSqlOutput, out, sizeof(r->lastSqlOutput));
+			r->lastSqlFailed = false;
+			if (rc != 0)
+			{
+				if (out[0])
+				{
+					log_output("   ", out);
+				}
+				sformat(errBuf, errLen,
+						"run %s %s failed (exit %d)",
+						cmd->service, expandedArgs, rc);
+				return false;
+			}
+			return true;
+		}
+
 		case CMD_WAIT_STATE:
 		{
 			/*
@@ -3320,6 +3370,12 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 		case CMD_EXEC_FAILS:
 		{
 			sformat(buf, len, "exec-fails %s  %s", cmd->service, cmd->args);
+			break;
+		}
+
+		case CMD_RUN:
+		{
+			sformat(buf, len, "run %s  %s", cmd->service, cmd->args);
 			break;
 		}
 
