@@ -74,7 +74,7 @@ endif
 
 # make run-test; build the test image then run pytest inside it.
 .PHONY: run-test
-run-test: build-test-pg$(PGVERSION)
+run-test: build-pytest-pg$(PGVERSION)
 	docker run \
 		--name $(TEST_CONTAINER_NAME) \
 		$(DOCKER_RUN_OPTS) \

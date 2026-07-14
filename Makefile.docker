@@ -1,6 +1,27 @@
 # Shared Docker image infrastructure.
 # Included by the top-level Makefile and by tests/Makefile.
 
+# Repo root: the directory that contains this file, regardless of where make
+# is invoked from (root, tests/, tests/tablespaces/, …).
+REPO_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
+VERSION_FILE = $(REPO_ROOT)src/bin/pg_autoctl/git-version.h
+ifeq ("$(wildcard $(VERSION_FILE))","")
+DUMMY        := $(shell git -C $(REPO_ROOT) update-index -q --refresh)
+GIT_DIRTY    := $(shell test -z "`git -C $(REPO_ROOT) diff-index --name-only HEAD --`" || echo "-dirty")
+GIT_VVERSION := $(shell git -C $(REPO_ROOT) describe --match "v[0-9]*" HEAD 2>/dev/null)
+GIT_DVERSION := $(shell echo $(GIT_VVERSION) | awk -Fv '{print $$2"$(GIT_DIRTY)"}')
+GIT_VERSION  := $(shell echo $(GIT_DVERSION) | sed -e 's/-/./g')
+else
+GIT_VERSION  := $(shell awk -F '[ "]' '{print $$4}' $(VERSION_FILE))
+endif
+
+.PHONY: version
+version: $(VERSION_FILE) ;
+
+$(VERSION_FILE):
+	@echo "#define GIT_VERSION \"$(GIT_VERSION)\"" > $@
+
 # Supported PostgreSQL versions:
 PGVERSIONS = 14 15 16 17
 
@@ -26,7 +47,7 @@ DOCKER_RUN_OPTS     = --privileged --rm
 
 .PHONY: build-base
 build-base:
-	docker build -f Dockerfile.base -t $(BASE) .
+	docker build -f $(REPO_ROOT)Dockerfile.base -t $(BASE) $(REPO_ROOT)
 
 BUILD_TARGETS        = $(patsubst %,build-pg%,$(PGVERSIONS))
 BUILD_PYTEST_TARGETS = $(patsubst %,build-pytest-pg%,$(PGVERSIONS))
@@ -41,7 +62,7 @@ $(BUILD_TARGETS): version
 	  --build-arg PGVERSION=$(subst build-pg,,$@) \
 	  --build-arg BASE=$(BASE) \
 	  --target run \
-	  -t $(CONTAINER_NAME):$(subst build-,,$@) .
+	  -t $(CONTAINER_NAME):$(subst build-,,$@) $(REPO_ROOT)
 
 .PHONY: build-check build-pytest build-pytest-image
 build-check: $(BUILD_CHECK_TARGETS) ;
@@ -56,7 +77,7 @@ build-pgaftest: version
 	  --build-arg PGVERSION=$(PGVERSION) \
 	  --build-arg BASE=$(BASE) \
 	  --target pgaftest \
-	  -t $(PGAFTEST_CONTAINER_NAME):pgaftest .
+	  -t $(PGAFTEST_CONTAINER_NAME):pgaftest $(REPO_ROOT)
 
 .PHONY: $(BUILD_PYTEST_TARGETS)
 $(BUILD_PYTEST_TARGETS): version
@@ -64,7 +85,7 @@ $(BUILD_PYTEST_TARGETS): version
 	  --build-arg PGVERSION=$(subst build-pytest-pg,,$@) \
 	  --build-arg BASE=$(BASE) \
 	  --target test \
-	  -t $(TEST_CONTAINER_NAME):pg$(subst build-pytest-pg,,$@) .
+	  -t $(TEST_CONTAINER_NAME):pg$(subst build-pytest-pg,,$@) $(REPO_ROOT)
 
 .SECONDEXPANSION:
 .PHONY: $(BUILD_CHECK_TARGETS)
