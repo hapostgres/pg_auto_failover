@@ -71,7 +71,6 @@ pgaf-current:
 	printf '#define GIT_VERSION "%s"\n' '$(PREV_TAG)' \
 	    > $(_TMP)/src/bin/pg_autoctl/git-version.h
 	cp $(REPO_ROOT)/Dockerfile $(_TMP)/Dockerfile
-	cp $(REPO_ROOT)/Makefile.docker $(_TMP)/Makefile.docker
 	docker build \
 	    --build-arg PGVERSION=$(PGVERSION) \
 	    --target run \
