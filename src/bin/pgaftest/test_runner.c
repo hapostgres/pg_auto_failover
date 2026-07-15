@@ -4284,7 +4284,7 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 			"tmux new-session -d -s %s "
 			"\"%s logs -f\" \\; "
 			"split-window -v "
-			"\"%s exec %s pg_autoctl watch\" \\; "
+			"\"%s exec %s pg_autoctl watch --wait\" \\; "
 			"split-window -v "
 			"\"%s\" \\; "
 			"select-layout even-vertical",
