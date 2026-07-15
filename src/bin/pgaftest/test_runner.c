@@ -4199,6 +4199,18 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 	runner_init(&r, spec, workDir);
 	r.interactive = withTmux;
 
+	if (withTmux)
+	{
+		char version[128] = "";
+		int rc = run_cmd_capture(version, sizeof(version), "tmux -V");
+		if (rc != 0 || version[0] == '\0')
+		{
+			log_error("tmux not found — install tmux before using 'pgaftest tmux'");
+			return false;
+		}
+		log_notice("tmux version: %s", version);
+	}
+
 	if (!runner_compose_generate(&r))
 	{
 		return false;
@@ -4269,16 +4281,16 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		if (spec->setup)
 		{
 			sformat(setupPane, sizeof(setupPane),
-					"%s run --rm pgaftest "
+					"%s run --rm --name %s-setup pgaftest "
 					"pgaftest _setup_ /var/lib/postgres/spec.pgaf --work-dir %s",
-					r.composeBase, workDir);
+					r.composeBase, r.projectName, workDir);
 		}
 
 		/* pane 3: interactive shell, always present */
 		char shellCmd[512];
 		sformat(shellCmd, sizeof(shellCmd),
-				"%s run --rm -it pgaftest bash",
-				r.composeBase);
+				"%s run --rm -it --name %s-sh pgaftest bash",
+				r.composeBase, r.projectName);
 
 		log_info("Starting tmux session \"%s\"", r.projectName);
 		log_info("To open another shell: %s", shellCmd);
