@@ -818,9 +818,22 @@ compose_gen_write(TestCluster *cluster,
 	 */
 	if (specFile)
 	{
-		/* Determine which service pgaftest must wait for before starting. */
-		/* It needs the cluster fully ready: monitor healthy + all nodes started. */
-		fformat(f, "  pgaftest:\n");
+		/*
+		 * In interactive mode the service is named "setup" and carries a
+		 * profile so that `docker compose up` ignores it entirely — it is
+		 * only invoked via `docker compose run setup`.  This avoids the need
+		 * for --scale pgaftest=0 and prevents Compose from rebuilding cluster
+		 * images on every `pgaftest tmux` invocation.
+		 *
+		 * In CI mode the service is named "pgaftest" with no profile so that
+		 * `docker compose up --exit-code-from pgaftest` works as expected.
+		 */
+		const char *svcName = interactive ? "setup" : "pgaftest";
+		fformat(f, "  %s:\n", svcName);
+		if (interactive)
+		{
+			fformat(f, "    profiles: [setup]\n");
+		}
 		write_image_stanza_target(f, cluster, contextDir, "pgaftest");
 
 		/* Build monitor pguri for PG_AUTOCTL_MONITOR */
@@ -913,18 +926,18 @@ compose_gen_write(TestCluster *cluster,
 		}
 
 		/*
-		 * In interactive (--tmux) mode the container must stay alive so the
-		 * user can exec into it.  In CI mode it runs the spec to completion.
+		 * CI mode: run the full spec to completion (exit code drives CI).
+		 * Interactive mode: no command — docker compose run supplies it.
 		 */
-		if (interactive)
-		{
-			fformat(f, "    command: [\"sleep\", \"infinity\"]\n\n");
-		}
-		else
+		if (!interactive)
 		{
 			fformat(f,
 					"    command: [\"pgaftest\", \"run\","
 					" \"/var/lib/postgres/spec.pgaf\"]\n\n");
+		}
+		else
+		{
+			fformat(f, "\n");
 		}
 	}
 

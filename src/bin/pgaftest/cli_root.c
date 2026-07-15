@@ -712,7 +712,7 @@ cli_sh(int argc, char **argv)
 
 	char cmd[2048];
 	sformat(cmd, sizeof(cmd),
-			"docker compose -p %s -f %s/docker-compose.yml run --rm -it --name %s-sh pgaftest bash",
+			"docker compose -p %s -f %s/docker-compose.yml run --rm -it --name %s-sh setup bash",
 			projectName, pgaftestOpts.workDir, projectName);
 
 	int rc = system(cmd);

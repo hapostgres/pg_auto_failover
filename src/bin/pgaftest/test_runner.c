@@ -635,15 +635,8 @@ runner_compose_up(TestRunner *r)
 {
 	log_info("Starting compose stack (project: %s)", r->projectName);
 
-	/*
-	 * In interactive mode the pgaftest service is used via `docker compose run`
-	 * so we don't need (or want) a background `sleep infinity` container.
-	 * Scale it to 0 so the image is still built but no container is started.
-	 */
-	const char *scaleFlag = r->interactive ? "--scale pgaftest=0" : "";
-
-	int rc = run_cmd("%s up --build -d %s 2>&1",
-					 r->composeBase, scaleFlag);
+	int rc = run_cmd("%s up --build -d 2>&1",
+					 r->composeBase);
 	if (rc != 0)
 	{
 		log_error("docker compose up failed (exit %d)", rc);
@@ -4281,7 +4274,7 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		if (spec->setup)
 		{
 			sformat(setupPane, sizeof(setupPane),
-					"%s run --rm --name %s-setup pgaftest "
+					"%s run --rm --name %s-setup setup "
 					"pgaftest _setup_ /var/lib/postgres/spec.pgaf --work-dir %s",
 					r.composeBase, r.projectName, workDir);
 		}
@@ -4289,11 +4282,11 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		/* pane 3: interactive shell, always present */
 		char shellCmd[512];
 		sformat(shellCmd, sizeof(shellCmd),
-				"%s run --rm -it --name %s-sh pgaftest bash",
+				"%s run --rm -it --name %s-sh setup bash",
 				r.composeBase, r.projectName);
 
 		log_info("Starting tmux session \"%s\"", r.projectName);
-		log_info("To open another shell: %s", shellCmd);
+		log_info("To open another shell: pgaftest cluster sh");
 
 		if (spec->setup)
 		{
