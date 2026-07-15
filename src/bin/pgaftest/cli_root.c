@@ -353,18 +353,27 @@ cli_setup(int argc, char **argv)
 static void
 cli_step(int argc, char **argv)
 {
-	if (argc < 1 || argv[0] == NULL)
+	bool autoNext = false;
+
+	/*
+	 * `pgaftest step` with no positional args runs the next (or retries the
+	 * last failed) step automatically using the state file.
+	 * `pgaftest step <name>` runs that specific step by name.
+	 */
+	if (argc >= 1 && argv[0] != NULL && argv[0][0] != '-')
 	{
-		log_error("Usage: pgaftest step <step-name> [<spec.pgaf>]");
-		exit(1);
+		strlcpy(pgaftestOpts.stepName, argv[0], sizeof(pgaftestOpts.stepName));
+
+		/* Optional spec.pgaf as second positional */
+		if (argc >= 2 && argv[1] != NULL && argv[1][0] != '-')
+		{
+			strlcpy(pgaftestOpts.specFile, argv[1],
+					sizeof(pgaftestOpts.specFile));
+		}
 	}
-
-	strlcpy(pgaftestOpts.stepName, argv[0], sizeof(pgaftestOpts.stepName));
-
-	/* Explicit spec path as second positional arg */
-	if (argc >= 2 && argv[1] != NULL && argv[1][0] != '-')
+	else
 	{
-		strlcpy(pgaftestOpts.specFile, argv[1], sizeof(pgaftestOpts.specFile));
+		autoNext = true;
 	}
 
 	/* Fill specFile + workDir from env / known paths when not set yet */
@@ -372,7 +381,6 @@ cli_step(int argc, char **argv)
 
 	if (pgaftestOpts.specFile[0] == '\0')
 	{
-		/* Last resort: spec.pgaf inside the work dir */
 		if (pgaftestOpts.workDir[0] != '\0')
 		{
 			sformat(pgaftestOpts.specFile, sizeof(pgaftestOpts.specFile),
@@ -398,7 +406,16 @@ cli_step(int argc, char **argv)
 		exit(1);
 	}
 
-	bool ok = runner_step(spec, pgaftestOpts.workDir, pgaftestOpts.stepName);
+	bool ok;
+	if (autoNext)
+	{
+		ok = runner_step_next(spec, pgaftestOpts.workDir);
+	}
+	else
+	{
+		ok = runner_step(spec, pgaftestOpts.workDir, pgaftestOpts.stepName);
+	}
+
 	exit(ok ? 0 : 1);
 }
 
@@ -439,7 +456,7 @@ cli_prepare(int argc, char **argv)
  *
  * show compose    print the generated docker-compose.yml
  * show spec       print the spec in canonical (indented) form
- * show steps      list the steps in sequence order, one per line
+ * show step       list steps with * on next / ! on failed
  * show services   list the compose service names
  * ----------------------------------------------------------------------- */
 
@@ -460,6 +477,11 @@ show_resolve_spec(int argc, char **argv)
 	{
 		log_error("No spec file: pass <spec.pgaf> or set PGAFTEST_SPEC");
 		exit(EXIT_CODE_BAD_ARGS);
+	}
+	if (pgaftestOpts.workDir[0] == '\0')
+	{
+		derive_work_dir(pgaftestOpts.specFile,
+						pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
 	}
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
 	if (!spec)
@@ -504,12 +526,41 @@ cli_show_spec(int argc, char **argv)
 
 
 static void
-cli_show_steps(int argc, char **argv)
+cli_show_step(int argc, char **argv)
 {
 	TestSpec *spec = show_resolve_spec(argc, argv);
+
+	TestRunnerState st;
+	bool hasState = runner_state_read(pgaftestOpts.workDir, &st);
+
 	for (int i = 0; i < spec->sequenceLength; i++)
 	{
-		fformat(stdout, "%s\n", spec->sequence[i]);
+		const char *name = spec->sequence[i];
+
+		if (!hasState)
+		{
+			/* No state yet — mark index 0 as the pending next step */
+			fformat(stdout, "%s %s\n",
+					(i == 0) ? "*" : " ", name);
+		}
+		else if (!st.last_ok && strcmp(name, st.last_step) == 0)
+		{
+			/* Last step failed — mark it for retry */
+			fformat(stdout, "! %s\n", name);
+		}
+		else if (i == st.current)
+		{
+			/* This is the next step to run */
+			fformat(stdout, "* %s\n", name);
+		}
+		else if (i < st.current)
+		{
+			fformat(stdout, "  %s\n", name);
+		}
+		else
+		{
+			fformat(stdout, "  %s\n", name);
+		}
 	}
 	exit(0);
 }
@@ -933,12 +984,14 @@ static CommandLine show_spec_command =
 				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n",
 				 pgaftest_getopts, cli_show_spec);
 
-static CommandLine show_steps_command =
-	make_command("steps",
-				 "List the steps in sequence order, one per line",
+static CommandLine show_step_command =
+	make_command("step",
+				 "List steps in sequence order with * on the current/next step",
 				 "[<spec.pgaf>]",
-				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n",
-				 pgaftest_getopts, cli_show_steps);
+				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n"
+				 "\n"
+				 "  Markers: *=next to run  !=failed (will retry)  (space)=done\n",
+				 pgaftest_getopts, cli_show_step);
 
 static CommandLine show_services_command =
 	make_command("services",
@@ -950,7 +1003,7 @@ static CommandLine show_services_command =
 static CommandLine *show_subcommands[] = {
 	&show_compose_command,
 	&show_spec_command,
-	&show_steps_command,
+	&show_step_command,
 	&show_services_command,
 	NULL
 };
@@ -958,10 +1011,10 @@ static CommandLine *show_subcommands[] = {
 static CommandLine show_command =
 	make_command_set("show",
 					 "Show information about a spec or running cluster",
-					 "<compose|spec|steps|services> [<spec.pgaf>]",
+					 "<compose|spec|step|services> [<spec.pgaf>]",
 					 "  compose    Print the generated docker-compose.yml\n"
 					 "  spec       Print the spec file source\n"
-					 "  steps      List steps in sequence order\n"
+					 "  step       List steps with * on next / ! on failed\n"
 					 "  services   List compose service names\n",
 					 pgaftest_getopts, show_subcommands);
 
@@ -1073,7 +1126,7 @@ CommandLine pgaftest_root =
 					 "  run       Run a .pgaf spec (CI mode)\n"
 					 "  setup     Bring up a cluster interactively\n"
 					 "  step      Run one named step\n"
-					 "  show      Show information (compose, spec, steps, services)\n"
+					 "  show      Show information (compose, spec, step, services)\n"
 					 "  prepare   Write compose files + Makefile to a directory\n"
 					 "  down      Tear down the cluster\n"
 					 "  indent    Rewrite a spec with canonical indentation\n"

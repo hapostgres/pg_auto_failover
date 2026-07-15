@@ -98,6 +98,37 @@ bool runner_run_setup_only(TestSpec *spec, const char *workDir);
 bool runner_step(TestSpec *spec, const char *workDir, const char *stepName);
 
 /*
+ * Interactive session state — written to <workDir>/pgaftest.state after each
+ * step so that `pgaftest step` (with no argument) can advance automatically.
+ *
+ *   current   index of the NEXT step to run (0 = none run yet)
+ *   last_ok   true if the last step succeeded
+ *
+ * On failure current stays pointing at the failed step so the default next
+ * run retries it.
+ */
+typedef struct TestRunnerState
+{
+	int current;                    /* index into sequence[] of next step */
+	bool last_ok;                   /* result of last step, or true if none */
+	char last_step[64];             /* name of last step run, or "" */
+} TestRunnerState;
+
+#define PGAFTEST_STATE_FILE "pgaftest.state"
+
+/* Read state from <workDir>/pgaftest.state; returns false and zeroes *st on missing/corrupt file */
+bool runner_state_read(const char *workDir, TestRunnerState *st);
+
+/* Write state to <workDir>/pgaftest.state */
+bool runner_state_write(const char *workDir, const TestRunnerState *st);
+
+/*
+ * Run the next step (or retry the last failed step).
+ * Updates the state file on completion.
+ */
+bool runner_step_next(TestSpec *spec, const char *workDir);
+
+/*
  * Tear down the compose stack (run teardown{} then compose down).
  * Used by `pgaftest down`.
  */

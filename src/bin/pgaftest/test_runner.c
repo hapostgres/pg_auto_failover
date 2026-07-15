@@ -20,6 +20,7 @@
 #include "string_utils.h"
 #include "log.h"
 #include "compose_gen.h"
+#include "parson.h"
 
 /* binary path set by main() for use in tmux pane commands */
 extern char pg_autoctl_program[];
@@ -4157,6 +4158,118 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 
 
 bool
+runner_state_read(const char *workDir, TestRunnerState *st)
+{
+	memset(st, 0, sizeof(*st));
+	st->last_ok = true;     /* optimistic default: no step has failed yet */
+
+	char path[1024];
+	sformat(path, sizeof(path), "%s/%s", workDir, PGAFTEST_STATE_FILE);
+
+	FILE *f = fopen(path, "r"); /* IGNORE-BANNED */
+	if (!f)
+	{
+		return false;           /* missing is normal before any step runs */
+	}
+
+	char buf[4096] = { 0 };
+	size_t nr = fread(buf, 1, sizeof(buf) - 1, f);
+	fclose(f);
+
+	if (nr == 0)
+	{
+		return false;
+	}
+
+	JSON_Value *root = json_parse_string(buf);
+	if (!root)
+	{
+		log_warn("Ignoring corrupt state file \"%s\"", path);
+		return false;
+	}
+
+	JSON_Object *obj = json_value_get_object(root);
+	if (!obj)
+	{
+		json_value_free(root);
+		return false;
+	}
+
+	st->current = (int) json_object_get_number(obj, "current");
+	st->last_ok = json_object_get_boolean(obj, "last_ok") != 0;
+
+	const char *last = json_object_get_string(obj, "last_step");
+	if (last)
+	{
+		strlcpy(st->last_step, last, sizeof(st->last_step));
+	}
+
+	json_value_free(root);
+	return true;
+}
+
+
+bool
+runner_state_write(const char *workDir, const TestRunnerState *st)
+{
+	char path[1024];
+	sformat(path, sizeof(path), "%s/%s", workDir, PGAFTEST_STATE_FILE);
+
+	JSON_Value *root = json_value_init_object();
+	JSON_Object *obj = json_value_get_object(root);
+
+	json_object_set_number(obj, "current", st->current);
+	json_object_set_boolean(obj, "last_ok", st->last_ok ? 1 : 0);
+	json_object_set_string(obj, "last_step", st->last_step);
+
+	char *serial = json_serialize_to_string_pretty(root);
+	json_value_free(root);
+
+	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
+	if (!f)
+	{
+		log_error("Cannot write state file \"%s\": %m", path);
+		free(serial);
+		return false;
+	}
+
+	fputs(serial, f);
+	fputc('\n', f);
+	fclose(f);
+	free(serial);
+	return true;
+}
+
+
+bool
+runner_step_next(TestSpec *spec, const char *workDir)
+{
+	TestRunnerState st;
+	runner_state_read(workDir, &st);
+
+	if (st.current >= spec->sequenceLength)
+	{
+		log_info("All %d steps completed", spec->sequenceLength);
+		return true;
+	}
+
+	const char *stepName = spec->sequence[st.current];
+	bool ok = runner_step(spec, workDir, stepName);
+
+	if (ok)
+	{
+		st.current++;
+	}
+
+	strlcpy(st.last_step, stepName, sizeof(st.last_step));
+	st.last_ok = ok;
+
+	(void) runner_state_write(workDir, &st);
+	return ok;
+}
+
+
+bool
 runner_step(TestSpec *spec, const char *workDir, const char *stepName)
 {
 	TestRunner r;
@@ -4175,7 +4288,30 @@ runner_step(TestSpec *spec, const char *workDir, const char *stepName)
 	}
 
 	char err[512] = "";
-	if (!runner_exec_step(&r, step, err, sizeof(err), 0))
+	bool ok = runner_exec_step(&r, step, err, sizeof(err), 0);
+
+	/* Update interactive state file so `show step` markers stay accurate */
+	TestRunnerState st;
+	runner_state_read(workDir, &st);
+	strlcpy(st.last_step, stepName, sizeof(st.last_step));
+	st.last_ok = ok;
+
+	/*
+	 * When the step matches the one at st.current, advance the cursor so
+	 * `pgaftest step` (no-arg) picks up the next one automatically.
+	 */
+	if (st.current < spec->sequenceLength &&
+		strcmp(spec->sequence[st.current], stepName) == 0)
+	{
+		if (ok)
+		{
+			st.current++;
+		}
+	}
+
+	(void) runner_state_write(workDir, &st);
+
+	if (!ok)
 	{
 		log_error("Step \"%s\" failed: %s", stepName, err);
 		return false;
