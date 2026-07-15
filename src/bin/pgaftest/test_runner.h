@@ -10,6 +10,7 @@
 #define TEST_RUNNER_H
 
 #include <stdbool.h>
+#include <stdio.h>
 #include "test_spec.h"
 #include "pgsql.h"
 
@@ -96,6 +97,12 @@ bool runner_run_setup_only(TestSpec *spec, const char *workDir);
  * Used by `pgaftest step <name>`.
  */
 bool runner_step(TestSpec *spec, const char *workDir, const char *stepName);
+
+/* Print pg_autoctl show state output with step progress header. */
+bool runner_show_state(TestSpec *spec, const char *workDir);
+
+/* Print a single TestCmd to `f` indented by `indent` spaces. */
+void test_cmd_print(FILE *f, const TestCmd *cmd, int indent);
 
 /*
  * Interactive session state — written to <workDir>/pgaftest.state after each

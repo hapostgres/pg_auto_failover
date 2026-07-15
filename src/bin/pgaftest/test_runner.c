@@ -46,6 +46,175 @@ static bool runner_wait_assigned_goal(TestRunner *r, const char *nodeName,
 static void log_output(const char *prefix, const char *out);
 
 /* -----------------------------------------------------------------------
+ * DSL pretty-printer
+ * ----------------------------------------------------------------------- */
+void
+test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
+{
+	char pad[64] = "";
+	for (int i = 0; i < indent && i < (int) sizeof(pad) - 1; i++)
+	{
+		pad[i] = ' ';
+	}
+	pad[indent < (int) sizeof(pad) - 1 ? indent : (int) sizeof(pad) - 1] = '\0';
+
+	switch (cmd->kind)
+	{
+		case CMD_EXEC:
+		{
+			fprintf(f, "%sexec %s %s\n", pad, cmd->service, cmd->args);
+			break;
+		}
+
+		case CMD_EXEC_FAILS:
+		{
+			fprintf(f, "%sexec-fails %s %s\n", pad, cmd->service, cmd->args);
+			break;
+		}
+
+		case CMD_WAIT_STATE:
+		{
+			if (cmd->timeoutSeconds > 0)
+			{
+				fprintf(f, "%swait until %s state = %s  timeout %ds\n",
+						pad, cmd->service, cmd->state, cmd->timeoutSeconds);
+			}
+			else
+			{
+				fprintf(f, "%swait until %s state = %s\n",
+						pad, cmd->service, cmd->state);
+			}
+			break;
+		}
+
+		case CMD_ASSERT_STATE:
+		{
+			fprintf(f, "%sassert %s state = %s\n",
+					pad, cmd->service, cmd->state);
+			break;
+		}
+
+		case CMD_ASSERT_ASSIGNED:
+		{
+			fprintf(f, "%sassert %s assigned-state = %s\n",
+					pad, cmd->service, cmd->state);
+			break;
+		}
+
+		case CMD_SQL:
+		{
+			fprintf(f, "%ssql %s { %s }\n", pad, cmd->service, cmd->args);
+			break;
+		}
+
+		case CMD_EXPECT:
+		{
+			fprintf(f, "%sexpect { %s }\n", pad, cmd->expected);
+			break;
+		}
+
+		case CMD_EXPECT_ERROR:
+		{
+			if (cmd->state[0])
+			{
+				fprintf(f, "%sexpect error %s\n", pad, cmd->state);
+			}
+			else
+			{
+				fprintf(f, "%sexpect error\n", pad);
+			}
+			break;
+		}
+
+		case CMD_NETWORK_OFF:
+		{
+			fprintf(f, "%snetwork disconnect %s\n", pad, cmd->service);
+			break;
+		}
+
+		case CMD_NETWORK_ON:
+		{
+			fprintf(f, "%snetwork connect %s\n", pad, cmd->service);
+			break;
+		}
+
+		case CMD_SLEEP:
+		{
+			fprintf(f, "%ssleep %ds\n", pad, cmd->timeoutSeconds);
+			break;
+		}
+
+		case CMD_COMPOSE_DOWN:
+		{
+			fprintf(f, "%scompose down\n", pad);
+			break;
+		}
+
+		case CMD_COMPOSE_START:
+		{
+			fprintf(f, "%scompose start %s\n", pad, cmd->service);
+			break;
+		}
+
+		case CMD_COMPOSE_STOP:
+		{
+			fprintf(f, "%scompose stop %s\n", pad, cmd->service);
+			break;
+		}
+
+		case CMD_COMPOSE_KILL:
+		{
+			fprintf(f, "%scompose kill %s\n", pad, cmd->service);
+			break;
+		}
+
+		case CMD_STOP_POSTGRES:
+		{
+			fprintf(f, "%sstop postgres %s\n", pad, cmd->service);
+			break;
+		}
+
+		case CMD_START_POSTGRES:
+		{
+			fprintf(f, "%sstart postgres %s\n", pad, cmd->service);
+			break;
+		}
+
+		case CMD_PROMOTE:
+		{
+			fprintf(f, "%spromote", pad);
+			for (int i = 0; i < cmd->promoteCount; i++)
+			{
+				fprintf(f, " %s%s", cmd->promoteNodes[i],
+						(i < cmd->promoteCount - 1) ? "," : "");
+			}
+			fprintf(f, "\n");
+			break;
+		}
+
+		case CMD_SET_MONITOR:
+		{
+			fprintf(f, "%sset monitor %s\n", pad, cmd->service);
+			break;
+		}
+
+		case CMD_LOGS_CHECK:
+		{
+			fprintf(f, "%slogs %s%s %s\n", pad, cmd->service,
+					cmd->logsNegate ? " not" : "", cmd->args);
+			break;
+		}
+
+		default:
+		{
+			fprintf(f, "%s# (cmd kind %d)\n", pad, (int) cmd->kind);
+			break;
+		}
+	}
+}
+
+
+/* -----------------------------------------------------------------------
  * Internal helpers
  * ----------------------------------------------------------------------- */
 
@@ -4518,6 +4687,62 @@ runner_assert(TestSpec *spec, const char *workDir,
 	log_error("%s: expected state %s, got reported=%s assigned=%s",
 			  nodeName, targetState, rep, asgn);
 	return false;
+}
+
+
+bool
+runner_show_state(TestSpec *spec, const char *workDir)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (!runner_load_state(&r))
+	{
+		return false;
+	}
+
+	TestRunnerState st;
+	runner_state_read(workDir, &st);
+
+	if (spec->sequenceLength > 0)
+	{
+		if (st.current >= spec->sequenceLength)
+		{
+			fformat(stdout, "All %d steps complete\n\n",
+					spec->sequenceLength);
+		}
+		else
+		{
+			const char *nextName = spec->sequence[st.current];
+			if (!st.last_ok && st.last_step[0])
+			{
+				fformat(stdout,
+						"Step %d/%d: %s  (last run FAILED — will retry)\n\n",
+						st.current + 1, spec->sequenceLength, nextName);
+			}
+			else
+			{
+				fformat(stdout,
+						"Step %d/%d: %s\n\n",
+						st.current + 1, spec->sequenceLength, nextName);
+			}
+		}
+	}
+
+	char out[8192];
+	int rc = run_cmd_capture(out, sizeof(out),
+							 "%s exec -T monitor "
+							 "pg_autoctl show state 2>/dev/null",
+							 r.composeBase);
+
+	if (rc != 0 || out[0] == '\0')
+	{
+		log_error("Could not reach monitor — is the cluster running?");
+		return false;
+	}
+
+	fputs(out, stdout);
+	return true;
 }
 
 

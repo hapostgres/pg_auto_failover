@@ -37,7 +37,6 @@ typedef struct PgaftestOpts
 	char stepName[64];
 	char schedule[1024];
 	char expected[1024];
-	bool withTmux;
 	bool noCleanup;       /* --no-cleanup: skip compose down after run */
 	int verbose;
 } PgaftestOpts;
@@ -88,7 +87,6 @@ static struct option long_options[] = {
 	{ "work-dir", required_argument, NULL, 'w' },
 	{ "schedule", required_argument, NULL, 'S' },
 	{ "expected", required_argument, NULL, 'E' },
-	{ "tmux", no_argument, NULL, 't' },
 	{ "no-cleanup", no_argument, NULL, 'n' },
 	{ "verbose", no_argument, NULL, 'v' },
 	{ "debug", no_argument, NULL, 'd' },
@@ -103,7 +101,7 @@ pgaftest_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "w:S:E:tnvdh",
+	while ((c = getopt_long(argc, argv, "w:S:E:nvdh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -123,12 +121,6 @@ pgaftest_getopts(int argc, char **argv)
 			case 'E':
 			{
 				strlcpy(pgaftestOpts.expected, optarg, sizeof(pgaftestOpts.expected));
-				break;
-			}
-
-			case 't':
-			{
-				pgaftestOpts.withTmux = true;
 				break;
 			}
 
@@ -307,7 +299,7 @@ cli_setup(int argc, char **argv)
 {
 	if (argc < 1 || argv[0] == NULL)
 	{
-		log_error("Usage: pgaftest setup [--tmux] [--work-dir <dir>] <spec.pgaf>");
+		log_error("Usage: pgaftest cluster setup [--work-dir <dir>] <spec.pgaf>");
 		exit(1);
 	}
 
@@ -325,8 +317,35 @@ cli_setup(int argc, char **argv)
 		exit(1);
 	}
 
-	bool ok = runner_setup(spec, pgaftestOpts.workDir,
-						   pgaftestOpts.withTmux);
+	bool ok = runner_setup(spec, pgaftestOpts.workDir, false);
+	exit(ok ? 0 : 1);
+}
+
+
+static void
+cli_tmux(int argc, char **argv)
+{
+	if (argc < 1 || argv[0] == NULL)
+	{
+		log_error("Usage: pgaftest tmux [--work-dir <dir>] <spec.pgaf>");
+		exit(1);
+	}
+
+	strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
+
+	if (pgaftestOpts.workDir[0] == '\0')
+	{
+		derive_work_dir(pgaftestOpts.specFile,
+						pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
+	}
+
+	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
+	if (!spec)
+	{
+		exit(1);
+	}
+
+	bool ok = runner_setup(spec, pgaftestOpts.workDir, true);
 	exit(ok ? 0 : 1);
 }
 
@@ -516,7 +535,7 @@ cli_show_spec(int argc, char **argv)
 
 
 static void
-cli_show_step(int argc, char **argv)
+cli_show_steps(int argc, char **argv)
 {
 	TestSpec *spec = show_resolve_spec(argc, argv);
 
@@ -557,24 +576,44 @@ cli_show_step(int argc, char **argv)
 
 
 static void
-cli_show_services(int argc, char **argv)
+cli_show_step(int argc, char **argv)
 {
 	TestSpec *spec = show_resolve_spec(argc, argv);
 
-	if (spec->cluster.withMonitor)
+	TestRunnerState st;
+	runner_state_read(pgaftestOpts.workDir, &st);
+
+	int idx = st.current;
+	if (idx >= spec->sequenceLength)
 	{
-		fformat(stdout, "monitor\n");
+		fformat(stdout, "All %d steps complete.\n", spec->sequenceLength);
+		exit(0);
 	}
 
-	for (int fi = 0; fi < spec->cluster.formationCount; fi++)
+	const char *name = spec->sequence[idx];
+	TestStep *step = spec_find_step(spec, name);
+	if (!step)
 	{
-		const TestFormation *form = &spec->cluster.formations[fi];
-		for (int ni = 0; ni < form->nodeCount; ni++)
-		{
-			fformat(stdout, "%s\n", form->nodes[ni].name);
-		}
+		log_error("Step \"%s\" not found in spec", name);
+		exit(1);
 	}
+
+	fformat(stdout, "step %s {\n", name);
+	for (TestCmd *cmd = step->commands; cmd != NULL; cmd = cmd->next)
+	{
+		test_cmd_print(stdout, cmd, 4);
+	}
+	fformat(stdout, "}\n");
 	exit(0);
+}
+
+
+static void
+cli_show_state(int argc, char **argv)
+{
+	TestSpec *spec = show_resolve_spec(argc, argv);
+	bool ok = runner_show_state(spec, pgaftestOpts.workDir);
+	exit(ok ? 0 : 1);
 }
 
 
@@ -698,10 +737,9 @@ cli_run_setup_only(int argc, char **argv)
 		fformat(stdout, "\n");
 	}
 	fformat(stdout,
-			"Try: pgaftest step <name>"
+			"Try: pgaftest step"
 			"  |  pgaftest network disconnect <node>"
-			"  |  pgaftest wait until <node> state = <state>"
-			"  |  pgaftest down\n\n");
+			"  |  pgaftest show state  |  pgaftest down\n\n");
 
 	/*
 	 * Replace this process with bash so the tmux pane becomes an
@@ -754,67 +792,6 @@ resolve_interactive_context(void)
 							pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
 		}
 	}
-}
-
-
-/* -----------------------------------------------------------------------
- * pgaftest wait until <node> state = <state> [timeout <N>s]
- * ----------------------------------------------------------------------- */
-static void
-cli_wait(int argc, char **argv)
-{
-	/*
-	 * Syntax: pgaftest wait until <node> state = <state> [timeout <N>s]
-	 *
-	 * After option stripping by the command-line library, remaining argv is:
-	 *   argv[0] = "until"
-	 *   argv[1] = <node>
-	 *   argv[2] = "state"
-	 *   argv[3] = "="
-	 *   argv[4] = <state>
-	 *   argv[5] = "timeout"   (optional)
-	 *   argv[6] = "<N>s"      (optional)
-	 */
-	if (argc < 5 ||
-		strcmp(argv[0], "until") != 0 ||
-		strcmp(argv[2], "state") != 0 ||
-		strcmp(argv[3], "=") != 0)
-	{
-		log_error("Usage: pgaftest wait until <node> state = <state> [timeout <N>s]");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	const char *nodeName = argv[1];
-	const char *targetState = argv[4];
-	int timeoutSecs = 60; /* default */
-
-	if (argc >= 7 && strcmp(argv[5], "timeout") == 0)
-	{
-		char *end = NULL;
-		long v = strtol(argv[6], &end, 10);
-		if (end && (*end == 's' || *end == '\0') && v > 0)
-		{
-			timeoutSecs = (int) v;
-		}
-	}
-
-	resolve_interactive_context();
-
-	if (pgaftestOpts.specFile[0] == '\0')
-	{
-		log_error("No spec file: pass one as argument or set PGAFTEST_SPEC");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
-	if (!spec)
-	{
-		exit(1);
-	}
-
-	bool ok = runner_wait(spec, pgaftestOpts.workDir,
-						  nodeName, targetState, timeoutSecs);
-	exit(ok ? 0 : 1);
 }
 
 
@@ -888,42 +865,6 @@ cli_network(int argc, char **argv)
 
 
 /* -----------------------------------------------------------------------
- * pgaftest assert <node> state = <state>
- * ----------------------------------------------------------------------- */
-static void
-cli_assert(int argc, char **argv)
-{
-	if (argc < 4 ||
-		strcmp(argv[1], "state") != 0 ||
-		strcmp(argv[2], "=") != 0)
-	{
-		log_error("Usage: pgaftest assert <node> state = <state>");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	const char *nodeName = argv[0];
-	const char *targetState = argv[3];
-
-	resolve_interactive_context();
-
-	if (pgaftestOpts.specFile[0] == '\0')
-	{
-		log_error("No spec file: pass one as argument or set PGAFTEST_SPEC");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
-	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
-	if (!spec)
-	{
-		exit(1);
-	}
-
-	bool ok = runner_assert(spec, pgaftestOpts.workDir, nodeName, targetState);
-	exit(ok ? 0 : 1);
-}
-
-
-/* -----------------------------------------------------------------------
  * Root command table
  * ----------------------------------------------------------------------- */
 
@@ -946,7 +887,6 @@ static CommandLine setup_command =
 	make_command("setup",
 				 "Bring up a cluster from a spec file (interactive mode)",
 				 "[options] <spec.pgaf>",
-				 "  --tmux             Launch a tmux session after setup\n"
 				 "  --work-dir <dir>   Working directory\n"
 				 "                     (default: $TMPDIR/pgaftest/<testname>)\n"
 				 "  --verbose          Enable DEBUG log level\n"
@@ -974,38 +914,47 @@ static CommandLine show_spec_command =
 				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n",
 				 pgaftest_getopts, cli_show_spec);
 
-static CommandLine show_step_command =
-	make_command("step",
+static CommandLine show_steps_command =
+	make_command("steps",
 				 "List steps in sequence order with * on the current/next step",
 				 "[<spec.pgaf>]",
 				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n"
 				 "\n"
 				 "  Markers: *=next to run  !=failed (will retry)  (space)=done\n",
-				 pgaftest_getopts, cli_show_step);
+				 pgaftest_getopts, cli_show_steps);
 
-static CommandLine show_services_command =
-	make_command("services",
-				 "List the compose service names",
+static CommandLine show_step_command =
+	make_command("step",
+				 "Show commands for the next step to run",
 				 "[<spec.pgaf>]",
 				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n",
-				 pgaftest_getopts, cli_show_services);
+				 pgaftest_getopts, cli_show_step);
+
+static CommandLine show_state_command =
+	make_command("state",
+				 "Show pg_autoctl show state output with step progress header",
+				 "[<spec.pgaf>]",
+				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n",
+				 pgaftest_getopts, cli_show_state);
 
 static CommandLine *show_subcommands[] = {
 	&show_compose_command,
 	&show_spec_command,
+	&show_steps_command,
 	&show_step_command,
-	&show_services_command,
+	&show_state_command,
 	NULL
 };
 
 static CommandLine show_command =
 	make_command_set("show",
 					 "Show information about a spec or running cluster",
-					 "<compose|spec|step|services> [<spec.pgaf>]",
+					 "<compose|spec|steps|step|state> [<spec.pgaf>]",
 					 "  compose    Print the generated docker-compose.yml\n"
 					 "  spec       Print the spec file source\n"
-					 "  step       List steps with * on next / ! on failed\n"
-					 "  services   List compose service names\n",
+					 "  steps      List steps with * on next / ! on failed\n"
+					 "  step       Show commands for the next step\n"
+					 "  state      Show pg_autoctl show state with step header\n",
 					 pgaftest_getopts, show_subcommands);
 
 static CommandLine prepare_command =
@@ -1023,6 +972,32 @@ static CommandLine down_command =
 				 "  --work-dir <dir>   Working directory (default: /tmp/pgaftest)\n",
 				 pgaftest_getopts, cli_down);
 
+static CommandLine *cluster_subcommands[] = {
+	&setup_command,
+	&prepare_command,
+	&down_command,
+	NULL
+};
+
+static CommandLine cluster_command =
+	make_command_set("cluster",
+					 "Manage the cluster lifecycle (bring up, prepare, tear down)",
+					 "<setup|prepare|down> [options]",
+					 "  setup     Bring up a cluster interactively\n"
+					 "  prepare   Write compose files + Makefile to a directory\n"
+					 "  down      Tear down the cluster\n",
+					 pgaftest_getopts, cluster_subcommands);
+
+static CommandLine tmux_command =
+	make_command("tmux",
+				 "Bring up a cluster and launch a tmux session",
+				 "[options] <spec.pgaf>",
+				 "  --work-dir <dir>   Working directory\n"
+				 "                     (default: $TMPDIR/pgaftest/<testname>)\n"
+				 "  --verbose          Enable DEBUG log level\n"
+				 "  --debug            Enable TRACE log level\n",
+				 pgaftest_getopts, cli_tmux);
+
 extern void cli_indent(int argc, char **argv);
 
 static CommandLine indent_command =
@@ -1039,17 +1014,6 @@ static CommandLine internal_setup_command =
 				 "",
 				 pgaftest_getopts, cli_run_setup_only);
 
-static CommandLine wait_command =
-	make_command("wait",
-				 "Wait until a node reaches a target state (interactive)",
-				 "until <node> state = <state> [timeout <N>s]",
-				 "  until <node> state = <state>   Poll until node is in state\n"
-				 "  timeout <N>s                   Timeout in seconds (default 60)\n"
-				 "\n"
-				 "  Reads PGAFTEST_SPEC and PGAFTEST_HOST_WORK_DIR when run\n"
-				 "  inside the pgaftest container (pgaftest setup --tmux).\n",
-				 pgaftest_getopts, cli_wait);
-
 static CommandLine sql_command =
 	make_command("sql",
 				 "Run a SQL query on a named node and print the result (interactive)",
@@ -1065,14 +1029,6 @@ static CommandLine network_command =
 				 "  connect <node>     Restore the node's network access\n"
 				 "  disconnect <node>  Sever the node's network access\n",
 				 pgaftest_getopts, cli_network);
-
-static CommandLine assert_command =
-	make_command("assert",
-				 "Assert a node's current state; exit non-zero if it doesn't match (interactive)",
-				 "<node> state = <state>",
-				 "  <node>    Service name (node1, node2, …)\n"
-				 "  <state>   Expected state (primary, secondary, wait_primary, …)\n",
-				 pgaftest_getopts, cli_assert);
 
 static void
 cli_help(int argc, char **argv)
@@ -1093,16 +1049,13 @@ static CommandLine help_command =
 
 static CommandLine *root_subcommands[] = {
 	&run_command,
-	&setup_command,
+	&cluster_command,
+	&tmux_command,
 	&step_command,
 	&show_command,
-	&prepare_command,
-	&down_command,
 	&indent_command,
-	&wait_command,
 	&sql_command,
 	&network_command,
-	&assert_command,
 	&help_command,
 	&internal_setup_command,
 	&pgaftest_demo_command,
@@ -1114,16 +1067,13 @@ CommandLine pgaftest_root =
 					 "pg_auto_failover test runner",
 					 "[command] [options]",
 					 "  run       Run a .pgaf spec (CI mode)\n"
-					 "  setup     Bring up a cluster interactively\n"
+					 "  cluster   Manage the cluster lifecycle\n"
+					 "  tmux      Bring up a cluster with a tmux session\n"
 					 "  step      Run one named step\n"
-					 "  show      Show information (compose, spec, step, services)\n"
-					 "  prepare   Write compose files + Makefile to a directory\n"
-					 "  down      Tear down the cluster\n"
+					 "  show      Show information (compose, spec, steps, step, state)\n"
 					 "  indent    Rewrite a spec with canonical indentation\n"
-					 "  wait      Wait until a node reaches a state\n"
 					 "  sql       Run SQL on a node and print the result\n"
 					 "  network   Connect or disconnect a node from the network\n"
-					 "  assert    Assert a node's current state\n"
 					 "  help      Show this help message\n"
 					 "  demo      Demo application\n",
 					 pgaftest_getopts, root_subcommands);
