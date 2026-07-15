@@ -4,9 +4,10 @@ name: CI
 #
 # Job dependency graph:
 #
-#   style_checker ──┐
-#                   ├── (both must pass before any build job starts)
-#   ensure_base  ───┘
+#   style_checker ──────┐
+#   check_base_changed ─┤
+#                       ├── (all must pass before any build job starts)
+#   ensure_base  ───────┘
 #               ├── build_run_images  (PG 14-19 → pgaf:run-pgN; installcheck runs inside build stage)
 #               │       └── test_pgaftest   (spec jobs)
 #               ├── build_pgaftest    (pgaf:pgaftest, built from PG17)
@@ -52,14 +53,41 @@ jobs:
         run: ci/banned.h.sh
 
   # ---------------------------------------------------------------------------
-  # 2. Ensure base image — pull from ghcr.io or build+push on cache miss.
-  #    Runs in parallel with style_checker; build jobs wait for both.
-  #    Fast path (image exists): ~5 s manifest check.
-  #    Slow path (first run / Dockerfile.base changed): ~20 min build.
+  # 2a. Detect whether Dockerfile.base changed in this PR/push so that
+  #     ensure_base knows to force-rebuild rather than reuse the cached image.
+  # ---------------------------------------------------------------------------
+  check_base_changed:
+    name: Check if Dockerfile.base changed
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Detect Dockerfile.base change
+        id: diff
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          if git diff --name-only "${BASE_REF}"...HEAD | grep -q '^Dockerfile\.base$'; then
+            echo "changed=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # 2b. Ensure base image — pull from ghcr.io or build+push on cache miss.
+  #     Runs in parallel with style_checker; build jobs wait for both.
+  #     Fast path (image exists and Dockerfile.base unchanged): ~5 s check.
+  #     Slow path (first run or Dockerfile.base changed): ~20 min build.
   # ---------------------------------------------------------------------------
   ensure_base:
     name: Ensure base image
+    needs: check_base_changed
     uses: ./.github/workflows/base-image.yml
+    with:
+      force_rebuild: ${{ needs.check_base_changed.outputs.changed == 'true' }}
     permissions:
       contents: read
       packages: write
