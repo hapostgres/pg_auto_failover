@@ -61,6 +61,10 @@
 	make_strbuf_option("pg_autoctl", "nodekind", NULL, false, NAMEDATALEN, \
 					   config->nodeKind)
 
+#define OPTION_AUTOCTL_REGION(config) \
+	make_strbuf_option_default("pg_autoctl", "region", "region", \
+							   false, NAMEDATALEN, config->region, "")
+
 #define OPTION_POSTGRESQL_PGDATA(config) \
 	make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
 					   config->pgSetup.pgdata)
@@ -227,6 +231,7 @@
 		OPTION_AUTOCTL_HOSTNAME(config), \
 		OPTION_AUTOCTL_NODENAME(config), \
 		OPTION_AUTOCTL_NODEKIND(config), \
+		OPTION_AUTOCTL_REGION(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
 		OPTION_POSTGRESQL_USERNAME(config), \

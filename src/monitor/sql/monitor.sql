@@ -43,7 +43,8 @@ select *
   from pgautofailover.register_node('default', 'localhost', 9879, 'postgres');
 
 select formationid, nodename, goalstate, reportedstate
-  from pgautofailover.node;
+  from pgautofailover.node
+ order by nodeid;
 
 table pgautofailover.formation;
 

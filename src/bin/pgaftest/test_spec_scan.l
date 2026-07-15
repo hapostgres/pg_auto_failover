@@ -178,6 +178,7 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"listen"             { return T_LISTEN; }
 <CLUSTER_BODY>"citus-secondary"    { return T_CITUS_SECONDARY; }
 <CLUSTER_BODY>"candidate-priority" { return T_CANDIDATE_PRIORITY; }
+<CLUSTER_BODY>"region"             { return T_REGION; }
 <CLUSTER_BODY>"group"              { return T_GROUP; }
 <CLUSTER_BODY>"port"               { return T_PORT; }
 <CLUSTER_BODY>"citus-cluster-name" { return T_CITUS_CLUSTER_NAME; }

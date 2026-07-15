@@ -114,6 +114,9 @@ nodespec_read(const char *path, NodeSpec *spec)
 		make_strbuf_option_default("settings", "replication_quorum", NULL, false,
 								   sizeof(replicationQuorumStr),
 								   replicationQuorumStr, "true"),
+		make_strbuf_option_default("settings", "region", NULL, false,
+								   sizeof(spec->region), spec->region,
+								   ""),
 
 		/* [options] — immutable, used only at create time */
 		make_strbuf_option_default("options", "ssl", NULL, false,
@@ -692,6 +695,13 @@ nodespec_create_argv(const NodeSpec *spec,
 		{
 			PUSH("--replication-quorum");
 			PUSH("false");
+		}
+
+		/* region label (omit when empty — monitor defaults to "default") */
+		if (!IS_EMPTY_STRING_BUFFER(spec->region))
+		{
+			PUSH("--region");
+			PUSH(spec->region);
 		}
 
 		/* Citus secondary/read-replica cluster settings */

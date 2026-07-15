@@ -160,7 +160,7 @@ static TestNode      *current_node        = NULL;
 %token T_LAUNCH T_CREATE T_DEFERRED T_IMMEDIATE T_FALSE T_TRUE T_INITIALLY T_VOLUME
 %token T_LISTEN T_CITUS_SECONDARY T_CANDIDATE_PRIORITY T_PORT T_PASSWORD T_MONITOR_PASSWORD
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
-%token T_EXTENSION_VERSION T_BIND_SOURCE T_LEGACY_STARTUP
+%token T_EXTENSION_VERSION T_BIND_SOURCE T_LEGACY_STARTUP T_REGION
 
 /* ---- FSM state tokens (used in CLUSTER_BODY and STEP_BODY) ---- */
 %token T_FS_INIT T_FS_SINGLE T_FS_PRIMARY
@@ -558,6 +558,16 @@ node_opt:
 	| T_CANDIDATE_PRIORITY T_INTEGER
 	{
 		current_node->candidatePriority = $2;
+	}
+	| T_REGION T_IDENT
+	{
+		strlcpy(current_node->region, $2, sizeof(current_node->region));
+		free($2);
+	}
+	| T_REGION T_STRING
+	{
+		strlcpy(current_node->region, $2, sizeof(current_node->region));
+		free($2);
 	}
 	| T_GROUP T_INTEGER
 	{

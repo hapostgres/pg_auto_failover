@@ -1670,6 +1670,7 @@ keeper_register_and_init(Keeper *keeper, NodeState initialState)
 								  config->pgSetup.settings.candidatePriority,
 								  config->pgSetup.settings.replicationQuorum,
 								  config->pgSetup.citusClusterName,
+								  config->region,
 								  &mayRetry,
 								  &assignedState))
 		{
@@ -1875,6 +1876,7 @@ keeper_register_again(Keeper *keeper)
 								  config->pgSetup.settings.candidatePriority,
 								  config->pgSetup.settings.replicationQuorum,
 								  DEFAULT_CITUS_CLUSTER_NAME,
+								  config->region,
 								  &mayRetry,
 								  &assignedState))
 		{

@@ -861,19 +861,20 @@ monitor_register_node(Monitor *monitor, char *formation,
 					  NodeState initialState,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
 					  char *citusClusterName,
+					  char *region,
 					  bool *mayRetry,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, $6, $7, "
-		"$8, $9::pgautofailover.replication_state, $10, $11, $12, $13)";
-	int paramCount = 13;
-	Oid paramTypes[13] = {
+		"$8, $9::pgautofailover.replication_state, $10, $11, $12, $13, $14)";
+	int paramCount = 14;
+	Oid paramTypes[14] = {
 		TEXTOID, TEXTOID, INT4OID, NAMEOID, TEXTOID, INT8OID,
-		INT8OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID
+		INT8OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID, TEXTOID
 	};
-	const char *paramValues[13];
+	const char *paramValues[14];
 	MonitorAssignedStateParseContext parseContext =
 	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
@@ -899,6 +900,10 @@ monitor_register_node(Monitor *monitor, char *formation,
 		IS_EMPTY_STRING_BUFFER(citusClusterName)
 		? DEFAULT_CITUS_CLUSTER_NAME
 		: citusClusterName;
+	paramValues[13] =
+		IS_EMPTY_STRING_BUFFER(region)
+		? "default"
+		: region;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,

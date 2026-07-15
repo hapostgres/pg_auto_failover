@@ -46,6 +46,7 @@ typedef struct KeeperConfig
 	char name[_POSIX_HOST_NAME_MAX];
 	char hostname[_POSIX_HOST_NAME_MAX];
 	char nodeKind[NAMEDATALEN];
+	char region[NAMEDATALEN];
 
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;

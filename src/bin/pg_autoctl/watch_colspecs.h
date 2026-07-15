@@ -39,7 +39,7 @@ typedef struct ColSpec
 	int len;
 } ColSpec;
 
-#define MAX_COL_SPECS 12
+#define MAX_COL_SPECS 14
 
 typedef struct ColPolicy
 {

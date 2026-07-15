@@ -73,6 +73,7 @@ typedef struct TestNode
 	char auth[32];               /* per-node auth override; "" = use cluster */
 	char replicationPassword[256]; /* replication.password written to node ini */
 	char monitorPassword[256];   /* pg_auto_failover.monitor_password written to node ini */
+	char region[64];             /* --region NAME; "" = omit (defaults to "default" on monitor) */
 
 	/* Extra Docker named volumes: volume <name> <containerPath> */
 	struct
