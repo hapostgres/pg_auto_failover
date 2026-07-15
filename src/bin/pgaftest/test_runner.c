@@ -4261,20 +4261,32 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		 * Avoid embedding the step list in the shell command: it can be
 		 * arbitrarily long and contain characters that break sh -c quoting.
 		 */
+
+		/*
+		 * Wait for the pgaftest container to be ready, then exec into it.
+		 * `docker compose exec` exits non-zero when the target container
+		 * isn't running yet, which would close the tmux pane immediately.
+		 * Probe with a no-TTY `true` command until the container accepts
+		 * exec, then hand off to the real interactive command.
+		 */
 		char bottomCmd[2048];
+		char probeCmd[512];
+		sformat(probeCmd, sizeof(probeCmd),
+				"until %s exec -T pgaftest true 2>/dev/null; do sleep 1; done",
+				r.composeBase);
 
 		if (spec->setup)
 		{
 			sformat(bottomCmd, sizeof(bottomCmd),
-					"%s exec -it pgaftest "
-					"pgaftest _setup_ /var/lib/postgres/spec.pgaf --work-dir %s",
-					r.composeBase, workDir);
+					"sh -c '%s && %s exec -it pgaftest "
+					"pgaftest _setup_ /var/lib/postgres/spec.pgaf --work-dir %s'",
+					probeCmd, r.composeBase, workDir);
 		}
 		else
 		{
 			sformat(bottomCmd, sizeof(bottomCmd),
-					"%s exec -it pgaftest bash",
-					r.composeBase);
+					"sh -c '%s && %s exec -it pgaftest bash'",
+					probeCmd, r.composeBase);
 		}
 
 		log_info("Starting tmux session \"%s\" (shell inside pgaftest service)",
@@ -4292,6 +4304,10 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 			r.composeBase,
 			r.composeBase, r.activeMonitorService,
 			bottomCmd);
+
+		log_info("To open a shell in the pgaftest container manually: "
+				 "%s exec -it pgaftest bash",
+				 r.composeBase);
 
 		/* Attach the current terminal into the session. */
 		run_cmd("tmux attach-session -t %s", r.projectName);

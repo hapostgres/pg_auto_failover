@@ -31,9 +31,7 @@ DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
 DEFAULT_CFLAGS += $(shell $(PG_CONFIG) --cflags)
 DEFAULT_CFLAGS += -Wformat
 DEFAULT_CFLAGS += -Wall
-DEFAULT_CFLAGS += -Werror=implicit-int
-DEFAULT_CFLAGS += -Werror=implicit-function-declaration
-DEFAULT_CFLAGS += -Werror=return-type
+DEFAULT_CFLAGS += -Werror
 DEFAULT_CFLAGS += -Wno-declaration-after-statement
 DEFAULT_CFLAGS += -D_WANT_SEMUN
 DEFAULT_CFLAGS += -Wno-missing-braces
