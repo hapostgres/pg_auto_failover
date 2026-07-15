@@ -621,6 +621,33 @@ cli_show_state(int argc, char **argv)
  * pgaftest down
  * ----------------------------------------------------------------------- */
 static void
+cli_sh(int argc, char **argv)
+{
+	resolve_interactive_context();
+
+	if (pgaftestOpts.workDir[0] == '\0')
+	{
+		log_error("Cannot determine work directory: "
+				  "provide --work-dir, a spec file argument, "
+				  "or run from inside the pgaftest container");
+		exit(1);
+	}
+
+	const char *base = strrchr(pgaftestOpts.workDir, '/');
+	const char *projectName = (base && *(base + 1)) ? base + 1
+							  : pgaftestOpts.workDir;
+
+	char cmd[2048];
+	sformat(cmd, sizeof(cmd),
+			"docker compose -p %s -f %s/docker-compose.yml exec -it pgaftest bash",
+			projectName, pgaftestOpts.workDir);
+
+	int rc = system(cmd);
+	exit(rc == 0 ? 0 : 1);
+}
+
+
+static void
 cli_down(int argc, char **argv)
 {
 	/* optional positional: spec file to derive work dir from */
@@ -972,20 +999,29 @@ static CommandLine down_command =
 				 "  --work-dir <dir>   Working directory (default: /tmp/pgaftest)\n",
 				 pgaftest_getopts, cli_down);
 
+static CommandLine sh_command =
+	make_command("sh",
+				 "Open a bash shell in the running pgaftest container",
+				 "[options]",
+				 "  --work-dir <dir>   Working directory (default: derived from spec)\n",
+				 pgaftest_getopts, cli_sh);
+
 static CommandLine *cluster_subcommands[] = {
 	&setup_command,
 	&prepare_command,
 	&down_command,
+	&sh_command,
 	NULL
 };
 
 static CommandLine cluster_command =
 	make_command_set("cluster",
 					 "Manage the cluster lifecycle (bring up, prepare, tear down)",
-					 "<setup|prepare|down> [options]",
+					 "<setup|prepare|down|sh> [options]",
 					 "  setup     Bring up a cluster interactively\n"
 					 "  prepare   Write compose files + Makefile to a directory\n"
-					 "  down      Tear down the cluster\n",
+					 "  down      Tear down the cluster\n"
+					 "  sh        Open a bash shell in the pgaftest container\n",
 					 pgaftest_getopts, cluster_subcommands);
 
 static CommandLine tmux_command =
