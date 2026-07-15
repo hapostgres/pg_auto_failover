@@ -7,12 +7,12 @@ name: CI
 #   style_checker ──┐
 #                   ├── (both must pass before any build job starts)
 #   ensure_base  ───┘
-#               ├── build_run_images  (PG 14-17 → pgaf:run-pgN; installcheck runs inside build stage)
-#               │       └── test_pgaftest   (17 spec jobs)
+#               ├── build_run_images  (PG 14-19 → pgaf:run-pgN; installcheck runs inside build stage)
+#               │       └── test_pgaftest   (spec jobs)
 #               ├── build_pgaftest    (pgaf:pgaftest, built from PG17)
 #               │       └── test_pgaftest   (same)
 #               │       └── upgrade
-#               └── build_test_images (PG 14-17 → pg_auto_failover_test:pgN)
+#               └── build_test_images (PG 14-19 → pg_auto_failover_test:pgN)
 #                       └── test_python    (PG × suite matrix)
 
 on:
@@ -79,7 +79,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        PGVERSION: [14, 15, 16, 17]
+        PGVERSION: [14, 15, 16, 17, 18, 19]
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -188,7 +188,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        PGVERSION: [14, 15, 16, 17]
+        PGVERSION: [14, 15, 16, 17, 18, 19]
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -249,6 +249,8 @@ jobs:
           - { PGVERSION: 15, schedule: quick }
           - { PGVERSION: 16, schedule: quick }
           - { PGVERSION: 17, schedule: quick }
+          - { PGVERSION: 18, schedule: quick }
+          - { PGVERSION: 19, schedule: quick }
           # node: create_standby_with_pgdata, maintenance_and_drop, auth,
           #       monitor_disabled, replace_monitor, extension_update,
           #       debian_clusters, tablespaces
@@ -256,17 +258,27 @@ jobs:
           - { PGVERSION: 15, schedule: node }
           - { PGVERSION: 16, schedule: node }
           - { PGVERSION: 17, schedule: node }
+          - { PGVERSION: 18, schedule: node }
+          - { PGVERSION: 19, schedule: node }
           # ssl: enable_ssl, ssl_self_signed, ssl_cert
           - { PGVERSION: 14, schedule: ssl }
           - { PGVERSION: 15, schedule: ssl }
           - { PGVERSION: 16, schedule: ssl }
           - { PGVERSION: 17, schedule: ssl }
+          - { PGVERSION: 18, schedule: ssl }
+          - { PGVERSION: 19, schedule: ssl }
           # slow schedules: PG17 only (FSM logic, not version-specific code paths)
           - { PGVERSION: 17, schedule: multi-alternate }
           - { PGVERSION: 17, schedule: multi-misc }
           - { PGVERSION: 17, schedule: multi-async }
           - { PGVERSION: 17, schedule: citus-1 }
           - { PGVERSION: 17, schedule: citus-2 }
+          # citus on PG18 (supported); allow failure until officially validated
+          - { PGVERSION: 18, schedule: citus-1, continue-on-error: true }
+          - { PGVERSION: 18, schedule: citus-2, continue-on-error: true }
+          # citus on PG19 (not yet supported by any Citus release)
+          - { PGVERSION: 19, schedule: citus-1, continue-on-error: true }
+          - { PGVERSION: 19, schedule: citus-2, continue-on-error: true }
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -379,11 +391,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        PGVERSION: [14, 15, 16, 17]
+        PGVERSION: [14, 15, 16, 17, 18, 19]
         TEST: [multi, single, monitor, ssl, citus]
+        exclude:
+          # Citus does not support PG19 yet
+          - PGVERSION: 19
+            TEST: citus
         include:
           - PGVERSION: 14
             TEST: tablespaces
+          # Allow citus failures on PG18 until officially validated
+          - PGVERSION: 18
+            TEST: citus
+            continue-on-error: true
 
     steps:
       - uses: actions/checkout@v7.0.0
