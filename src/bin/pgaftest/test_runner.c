@@ -4208,7 +4208,7 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 			log_error("tmux not found — install tmux before using 'pgaftest tmux'");
 			return false;
 		}
-		log_notice("tmux version: %s", version);
+		log_debug("tmux version: %s", version);
 	}
 
 	if (!runner_compose_generate(&r))
