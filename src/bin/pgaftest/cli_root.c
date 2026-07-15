@@ -22,6 +22,9 @@
 #include "cli_demo.h"
 #include "cli_indent.h"
 
+/* forward declaration */
+static void resolve_interactive_context(void);
+
 /* -----------------------------------------------------------------------
  * Shared option parsing
  * ----------------------------------------------------------------------- */
@@ -339,46 +342,63 @@ cli_setup(int argc, char **argv)
 
 
 /* -----------------------------------------------------------------------
- * pgaftest step <step-name>
+ * pgaftest step <step-name> [<spec.pgaf>]
+ *
+ * The spec file is resolved in order:
+ *   1. explicit second positional argument (a .pgaf path)
+ *   2. PGAFTEST_SPEC env var (set inside the pgaftest container)
+ *   3. /spec.pgaf  (fixed mount point in the container)
+ *   4. <workDir>/spec.pgaf  (host-side leftover from a previous setup)
  * ----------------------------------------------------------------------- */
 static void
 cli_step(int argc, char **argv)
 {
 	if (argc < 1 || argv[0] == NULL)
 	{
-		log_error("Usage: pgaftest step <step-name> [--work-dir <dir>]");
+		log_error("Usage: pgaftest step <step-name> [<spec.pgaf>]");
 		exit(1);
 	}
 
-	/* step name is positional */
 	strlcpy(pgaftestOpts.stepName, argv[0], sizeof(pgaftestOpts.stepName));
 
-	/* We need the spec file too — look for it in workDir */
-	char specPath[1024];
-	sformat(specPath, sizeof(specPath), "%s/spec.pgaf",
-			pgaftestOpts.workDir);
-
-	/* If there's a second positional arg, treat it as the spec path */
-	if (argc >= 2 && argv[1] != NULL)
+	/* Explicit spec path as second positional arg */
+	if (argc >= 2 && argv[1] != NULL && argv[1][0] != '-')
 	{
-		strlcpy(specPath, argv[1], sizeof(specPath));
+		strlcpy(pgaftestOpts.specFile, argv[1], sizeof(pgaftestOpts.specFile));
 	}
 
-	/* derive work dir from spec path when not given explicitly */
+	/* Fill specFile + workDir from env / known paths when not set yet */
+	resolve_interactive_context();
+
+	if (pgaftestOpts.specFile[0] == '\0')
+	{
+		/* Last resort: spec.pgaf inside the work dir */
+		if (pgaftestOpts.workDir[0] != '\0')
+		{
+			sformat(pgaftestOpts.specFile, sizeof(pgaftestOpts.specFile),
+					"%s/spec.pgaf", pgaftestOpts.workDir);
+		}
+		else
+		{
+			log_error("No spec file: pass <spec.pgaf>, set PGAFTEST_SPEC, "
+					  "or use --work-dir");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
 	if (pgaftestOpts.workDir[0] == '\0')
 	{
-		derive_work_dir(specPath, pgaftestOpts.workDir,
-						sizeof(pgaftestOpts.workDir));
+		derive_work_dir(pgaftestOpts.specFile,
+						pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
 	}
 
-	TestSpec *spec = parse_test_spec(specPath);
+	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
 	if (!spec)
 	{
 		exit(1);
 	}
 
-	bool ok = runner_step(spec, pgaftestOpts.workDir,
-						  pgaftestOpts.stepName);
+	bool ok = runner_step(spec, pgaftestOpts.workDir, pgaftestOpts.stepName);
 	exit(ok ? 0 : 1);
 }
 
@@ -415,27 +435,105 @@ cli_prepare(int argc, char **argv)
 
 
 /* -----------------------------------------------------------------------
- * pgaftest show <spec.pgaf>
+ * pgaftest show — sub-command set
+ *
+ * show compose    print the generated docker-compose.yml
+ * show spec       print the spec in canonical (indented) form
+ * show steps      list the steps in sequence order, one per line
+ * show services   list the compose service names
  * ----------------------------------------------------------------------- */
-static void
-cli_show(int argc, char **argv)
+
+/*
+ * Shared spec resolution for show sub-commands: accept an optional positional
+ * spec path, then fall back to env / /spec.pgaf.
+ */
+static TestSpec *
+show_resolve_spec(int argc, char **argv)
 {
-	if (argc < 1 || argv[0] == NULL)
+	if (argc >= 1 && argv[0] && argv[0][0] != '-' &&
+		strstr(argv[0], ".pgaf") != NULL)
 	{
-		log_error("Usage: pgaftest show <spec.pgaf>");
-		exit(1);
+		strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
 	}
-
-	strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
-
+	resolve_interactive_context();
+	if (pgaftestOpts.specFile[0] == '\0')
+	{
+		log_error("No spec file: pass <spec.pgaf> or set PGAFTEST_SPEC");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
 	if (!spec)
 	{
 		exit(1);
 	}
+	return spec;
+}
 
+
+static void
+cli_show_compose(int argc, char **argv)
+{
+	TestSpec *spec = show_resolve_spec(argc, argv);
 	bool ok = runner_show(spec);
 	exit(ok ? 0 : 1);
+}
+
+
+static void
+cli_show_spec(int argc, char **argv)
+{
+	TestSpec *spec = show_resolve_spec(argc, argv);
+
+	/* Re-print the spec source — the canonical copy is at specFile itself */
+	FILE *f = fopen(pgaftestOpts.specFile, "r"); /* IGNORE-BANNED */
+	if (!f)
+	{
+		log_error("Cannot open \"%s\": %m", pgaftestOpts.specFile);
+		exit(1);
+	}
+	char buf[4096];
+	size_t n;
+	while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
+	{
+		fwrite(buf, 1, n, stdout);
+	}
+	fclose(f);
+	(void) spec; /* parsed for validation; content comes from the file */
+	exit(0);
+}
+
+
+static void
+cli_show_steps(int argc, char **argv)
+{
+	TestSpec *spec = show_resolve_spec(argc, argv);
+	for (int i = 0; i < spec->sequenceLength; i++)
+	{
+		fformat(stdout, "%s\n", spec->sequence[i]);
+	}
+	exit(0);
+}
+
+
+static void
+cli_show_services(int argc, char **argv)
+{
+	TestSpec *spec = show_resolve_spec(argc, argv);
+
+	if (spec->cluster.withMonitor)
+	{
+		fformat(stdout, "monitor\n");
+	}
+
+	for (int fi = 0; fi < spec->cluster.formationCount; fi++)
+	{
+		const TestFormation *form = &spec->cluster.formations[fi];
+		for (int ni = 0; ni < form->nodeCount; ni++)
+		{
+			fformat(stdout, "%s\n", form->nodes[ni].name);
+		}
+	}
+	exit(0);
 }
 
 
@@ -821,12 +919,51 @@ static CommandLine step_command =
 				 "  --work-dir <dir>   Working directory (default: /tmp/pgaftest)\n",
 				 pgaftest_getopts, cli_step);
 
+static CommandLine show_compose_command =
+	make_command("compose",
+				 "Print the generated docker-compose.yml",
+				 "[<spec.pgaf>]",
+				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n",
+				 pgaftest_getopts, cli_show_compose);
+
+static CommandLine show_spec_command =
+	make_command("spec",
+				 "Print the spec file source",
+				 "[<spec.pgaf>]",
+				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n",
+				 pgaftest_getopts, cli_show_spec);
+
+static CommandLine show_steps_command =
+	make_command("steps",
+				 "List the steps in sequence order, one per line",
+				 "[<spec.pgaf>]",
+				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n",
+				 pgaftest_getopts, cli_show_steps);
+
+static CommandLine show_services_command =
+	make_command("services",
+				 "List the compose service names",
+				 "[<spec.pgaf>]",
+				 "  <spec.pgaf>   Path to spec (default: PGAFTEST_SPEC or /spec.pgaf)\n",
+				 pgaftest_getopts, cli_show_services);
+
+static CommandLine *show_subcommands[] = {
+	&show_compose_command,
+	&show_spec_command,
+	&show_steps_command,
+	&show_services_command,
+	NULL
+};
+
 static CommandLine show_command =
-	make_command("show",
-				 "Print the docker-compose.yml that would be generated",
-				 "[options] <spec.pgaf>",
-				 "",
-				 pgaftest_getopts, cli_show);
+	make_command_set("show",
+					 "Show information about a spec or running cluster",
+					 "<compose|spec|steps|services> [<spec.pgaf>]",
+					 "  compose    Print the generated docker-compose.yml\n"
+					 "  spec       Print the spec file source\n"
+					 "  steps      List steps in sequence order\n"
+					 "  services   List compose service names\n",
+					 pgaftest_getopts, show_subcommands);
 
 static CommandLine prepare_command =
 	make_command("prepare",
@@ -894,6 +1031,23 @@ static CommandLine assert_command =
 				 "  <state>   Expected state (primary, secondary, wait_primary, …)\n",
 				 pgaftest_getopts, cli_assert);
 
+static void
+cli_help(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+	commandline_help(stdout);
+	exit(0);
+}
+
+
+static CommandLine help_command =
+	make_command("help",
+				 "Show this help message",
+				 "",
+				 "",
+				 pgaftest_getopts, cli_help);
+
 static CommandLine *root_subcommands[] = {
 	&run_command,
 	&setup_command,
@@ -906,6 +1060,7 @@ static CommandLine *root_subcommands[] = {
 	&sql_command,
 	&network_command,
 	&assert_command,
+	&help_command,
 	&internal_setup_command,
 	&pgaftest_demo_command,
 	NULL
@@ -918,7 +1073,7 @@ CommandLine pgaftest_root =
 					 "  run       Run a .pgaf spec (CI mode)\n"
 					 "  setup     Bring up a cluster interactively\n"
 					 "  step      Run one named step\n"
-					 "  show      Print generated docker-compose.yml\n"
+					 "  show      Show information (compose, spec, steps, services)\n"
 					 "  prepare   Write compose files + Makefile to a directory\n"
 					 "  down      Tear down the cluster\n"
 					 "  indent    Rewrite a spec with canonical indentation\n"
@@ -926,5 +1081,6 @@ CommandLine pgaftest_root =
 					 "  sql       Run SQL on a node and print the result\n"
 					 "  network   Connect or disconnect a node from the network\n"
 					 "  assert    Assert a node's current state\n"
+					 "  help      Show this help message\n"
 					 "  demo      Demo application\n",
-					 NULL, root_subcommands);
+					 pgaftest_getopts, root_subcommands);
