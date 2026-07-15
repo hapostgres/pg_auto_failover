@@ -4098,7 +4098,7 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		{
 			sformat(bottomCmd, sizeof(bottomCmd),
 					"%s exec -it pgaftest "
-					"pgaftest _setup_ /spec.pgaf --work-dir %s",
+					"pgaftest _setup_ /var/lib/postgres/spec.pgaf --work-dir %s",
 					r.composeBase, workDir);
 		}
 		else

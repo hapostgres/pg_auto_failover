@@ -860,24 +860,25 @@ compose_gen_write(TestCluster *cluster,
 		}
 
 		fformat(f,
-				"    user: root\n"
+				"    user: docker\n"
+				"    working_dir: /var/lib/postgres\n"
 				"    volumes:\n"
-				"      - %s:/spec.pgaf:ro\n"
+				"      - %s:/var/lib/postgres/spec.pgaf:ro\n"
 				"      - /var/run/docker.sock:/var/run/docker.sock\n"
 				"      - %s:%s\n",
 				specFile, workDir, workDir);
 		if (ssl_needs_certs(cluster->ssl))
 		{
 			fformat(f,
-					"      - %s/ssl/ca.crt:/root/.postgresql/root.crt:ro\n"
-					"      - %s/ssl/client/postgresql.crt:/root/.postgresql/postgresql.crt:ro\n"
-					"      - %s/ssl/client/postgresql.key:/root/.postgresql/postgresql.key:ro\n",
+					"      - %s/ssl/ca.crt:/var/lib/postgres/.postgresql/root.crt:ro\n"
+					"      - %s/ssl/client/postgresql.crt:/var/lib/postgres/.postgresql/postgresql.crt:ro\n"
+					"      - %s/ssl/client/postgresql.key:/var/lib/postgres/.postgresql/postgresql.key:ro\n",
 					workDir, workDir, workDir);
 		}
 		fformat(f,
 				"    environment:\n"
 				"      PGAFTEST_COMPOSE_SERVICE: \"1\"\n"
-				"      PGAFTEST_SPEC: \"/spec.pgaf\"\n"
+				"      PGAFTEST_SPEC: \"/var/lib/postgres/spec.pgaf\"\n"
 				"      PGAFTEST_HOST_WORK_DIR: \"%s\"\n"
 				"      COMPOSE_PROJECT_NAME: \"%s\"\n",
 				workDir, projectName);
@@ -904,7 +905,9 @@ compose_gen_write(TestCluster *cluster,
 		}
 		else
 		{
-			fformat(f, "    command: [\"pgaftest\", \"run\", \"/spec.pgaf\"]\n\n");
+			fformat(f,
+					"    command: [\"pgaftest\", \"run\","
+					" \"/var/lib/postgres/spec.pgaf\"]\n\n");
 		}
 	}
 
