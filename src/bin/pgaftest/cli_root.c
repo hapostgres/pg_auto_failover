@@ -100,6 +100,8 @@ pgaftest_getopts(int argc, char **argv)
 {
 	int c, option_index = 0;
 
+	optind = 0;
+
 	while ((c = getopt_long(argc, argv, "w:S:E:tnvdh",
 							long_options, &option_index)) != -1)
 	{
@@ -304,24 +306,11 @@ cli_setup(int argc, char **argv)
 {
 	if (argc < 1 || argv[0] == NULL)
 	{
-		log_error("Usage: pgaftest setup <spec.pgaf> [--tmux] [--work-dir <dir>]");
+		log_error("Usage: pgaftest setup [--tmux] [--work-dir <dir>] <spec.pgaf>");
 		exit(1);
 	}
 
 	strlcpy(pgaftestOpts.specFile, argv[0], sizeof(pgaftestOpts.specFile));
-
-	/*
-	 * The commandline library stops getopt at the first non-option (the spec
-	 * file path), so flags that follow it — e.g. `pgaftest setup spec --tmux`
-	 * — are not seen on the first pass.  Re-run getopts now: argv[0] acts as
-	 * a dummy program name so getopt starts scanning from index 1 onward,
-	 * picking up --tmux, --work-dir, etc.  optreset resets BSD/macOS state.
-	 */
-#ifdef __BSD_VISIBLE
-	optreset = 1;
-#endif
-	optind = 1;
-	pgaftest_getopts(argc, argv);
 
 	if (pgaftestOpts.workDir[0] == '\0')
 	{
