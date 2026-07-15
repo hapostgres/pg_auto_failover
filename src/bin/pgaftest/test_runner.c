@@ -171,8 +171,9 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 
 	/*
 	 * Project name: inside the compose network COMPOSE_PROJECT_NAME is
-	 * authoritative (the container is invoked with /spec.pgaf which would
-	 * otherwise yield "spec").  On the host, derive from the spec filename.
+	 * authoritative.  On the host, derive from the work directory basename
+	 * (e.g. /tmp/pgaftest/basic_operation → "basic_operation").  This is
+	 * stable even when the spec is loaded from the in-workdir spec.pgaf copy.
 	 */
 	const char *envProject = getenv("COMPOSE_PROJECT_NAME"); /* IGNORE-BANNED */
 	if (envProject && *envProject)
@@ -181,14 +182,9 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 	}
 	else
 	{
-		const char *base = strrchr(spec->filename, '/');
-		base = base ? base + 1 : spec->filename;
+		const char *base = strrchr(workDir, '/');
+		base = base ? base + 1 : workDir;
 		strlcpy(r->projectName, base, sizeof(r->projectName));
-		char *dot = strrchr(r->projectName, '.');
-		if (dot)
-		{
-			*dot = '\0';
-		}
 	}
 
 	sformat(r->workDir, sizeof(r->workDir), "%s", workDir);
@@ -428,6 +424,27 @@ runner_compose_generate(TestRunner *r)
 											&form->nodes[ni],
 											++globalNodeId, r->workDir))
 			{
+				return false;
+			}
+		}
+	}
+
+	/*
+	 * Copy the spec file into the work dir as spec.pgaf so that
+	 * `pgaftest step` can find it without the user needing to supply
+	 * the original path again.
+	 */
+	{
+		char dest[MAXPGPATH];
+		sformat(dest, sizeof(dest), "%s/spec.pgaf", r->workDir);
+
+		if (strcmp(r->specFile, dest) != 0)
+		{
+			char cmd[2 * MAXPGPATH + 16];
+			sformat(cmd, sizeof(cmd), "cp %s %s", r->specFile, dest);
+			if (system(cmd) != 0)
+			{
+				log_error("Failed to copy spec file to \"%s\"", dest);
 				return false;
 			}
 		}
