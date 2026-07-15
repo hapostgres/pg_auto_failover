@@ -304,9 +304,7 @@ jobs:
           # citus on PG18 (supported); allow failure until officially validated
           - { PGVERSION: 18, schedule: citus-1, continue-on-error: true }
           - { PGVERSION: 18, schedule: citus-2, continue-on-error: true }
-          # citus on PG19 (not yet supported by any Citus release)
-          - { PGVERSION: 19, schedule: citus-1, continue-on-error: true }
-          - { PGVERSION: 19, schedule: citus-2, continue-on-error: true }
+          # PG19: no Citus release yet (CITUSTAG_19=none) — citus schedules omitted
 
     steps:
       - uses: actions/checkout@v7.0.0
