@@ -542,7 +542,37 @@ cli_run_setup_only(int argc, char **argv)
 	}
 
 	bool ok = runner_run_setup_only(spec, pgaftestOpts.workDir);
-	exit(ok ? 0 : 1);
+	if (!ok)
+	{
+		exit(1);
+	}
+
+	/* Print step list and usage hint directly to the tty. */
+	fformat(stdout, "\n");
+	if (spec->sequenceLength > 0)
+	{
+		fformat(stdout, "Steps:");
+		for (int i = 0; i < spec->sequenceLength; i++)
+		{
+			fformat(stdout, "  %s", spec->sequence[i]);
+		}
+		fformat(stdout, "\n");
+	}
+	fformat(stdout,
+			"Try: pgaftest step <name>"
+			"  |  pgaftest network disconnect <node>"
+			"  |  pgaftest wait until <node> state = <state>"
+			"  |  pgaftest down\n\n");
+
+	/*
+	 * Replace this process with bash so the tmux pane becomes an
+	 * interactive shell without opening a new process layer.
+	 */
+	execlp("bash", "bash", NULL);
+
+	/* execlp only returns on error */
+	log_error("Failed to exec bash: %m");
+	exit(1);
 }
 
 

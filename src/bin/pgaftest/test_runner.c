@@ -4085,32 +4085,26 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 			strlcat(stepList, spec->sequence[si], sizeof(stepList));
 		}
 
-		char hintCmd[256] = "";
-		if (stepList[0])
-		{
-			sformat(hintCmd, sizeof(hintCmd),
-					"echo 'Steps: %s' && "
-					"echo 'Try: pgaftest step <name>  |  pgaftest network disconnect <node>  |  pgaftest down' && ",
-					stepList);
-		}
-
+		/*
+		 * The hint (step list + usage) is printed by `pgaftest _setup_`
+		 * itself to stdout (the pane tty) after the setup block completes.
+		 * Avoid embedding the step list in the shell command: it can be
+		 * arbitrarily long and contain characters that break sh -c quoting.
+		 */
 		char bottomCmd[2048];
 
 		if (spec->setup)
 		{
 			sformat(bottomCmd, sizeof(bottomCmd),
-					"%s exec -it pgaftest sh -c \""
-					"pgaftest _setup_ /spec.pgaf --work-dir %s && "
-					"%s"
-					"exec bash\"",
-					r.composeBase, workDir,
-					hintCmd);
+					"%s exec -it pgaftest "
+					"pgaftest _setup_ /spec.pgaf --work-dir %s",
+					r.composeBase, workDir);
 		}
 		else
 		{
 			sformat(bottomCmd, sizeof(bottomCmd),
-					"%s exec -it pgaftest sh -c \"%sexec bash\"",
-					r.composeBase, hintCmd);
+					"%s exec -it pgaftest bash",
+					r.composeBase);
 		}
 
 		log_info("Starting tmux session \"%s\" (shell inside pgaftest service)",
