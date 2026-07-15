@@ -864,7 +864,7 @@ compose_gen_write(TestCluster *cluster,
 				"    volumes:\n"
 				"      - %s:/spec.pgaf:ro\n"
 				"      - /var/run/docker.sock:/var/run/docker.sock\n"
-				"      - %s:%s:ro\n",
+				"      - %s:%s\n",
 				specFile, workDir, workDir);
 		if (ssl_needs_certs(cluster->ssl))
 		{
