@@ -83,6 +83,77 @@ derive_work_dir(const char *specPath, char *buf, int buflen)
 }
 
 
+/*
+ * pgaftest_last_file — path of the "last active work dir" pointer file.
+ * Written on every successful cluster startup; read as the default workDir
+ * when --work-dir is not given and no spec file is available.
+ */
+static void
+pgaftest_last_file(char *buf, int buflen)
+{
+	const char *tmpdir = getenv("TMPDIR"); /* IGNORE-BANNED */
+	if (!tmpdir || *tmpdir == '\0')
+	{
+		tmpdir = "/tmp";
+	}
+	sformat(buf, buflen, "%s/pgaftest/.last", tmpdir);
+}
+
+
+/*
+ * pgaftest_write_last — record workDir as the most-recently-started cluster.
+ */
+static void
+pgaftest_write_last(const char *workDir)
+{
+	char path[1024];
+	pgaftest_last_file(path, sizeof(path));
+
+	FILE *f = fopen(path, "w");
+	if (!f)
+	{
+		/* non-fatal: .last is a convenience, not required for correctness */
+		return;
+	}
+	fprintf(f, "%s\n", workDir);
+	fclose(f);
+}
+
+
+/*
+ * pgaftest_read_last — fill buf with the last active work dir, or leave it
+ * unchanged if the file doesn't exist or is empty.
+ */
+static void
+pgaftest_read_last(char *buf, int buflen)
+{
+	char path[1024];
+	pgaftest_last_file(path, sizeof(path));
+
+	FILE *f = fopen(path, "r");
+	if (!f)
+	{
+		return;
+	}
+
+	char line[1024] = { 0 };
+	if (fgets(line, sizeof(line), f))
+	{
+		/* strip trailing newline */
+		char *nl = strchr(line, '\n');
+		if (nl)
+		{
+			*nl = '\0';
+		}
+		if (line[0] != '\0')
+		{
+			strlcpy(buf, line, buflen);
+		}
+	}
+	fclose(f);
+}
+
+
 static struct option long_options[] = {
 	{ "work-dir", required_argument, NULL, 'w' },
 	{ "schedule", required_argument, NULL, 'S' },
@@ -317,6 +388,7 @@ cli_setup(int argc, char **argv)
 		exit(1);
 	}
 
+	pgaftest_write_last(pgaftestOpts.workDir);
 	bool ok = runner_setup(spec, pgaftestOpts.workDir, false);
 	exit(ok ? 0 : 1);
 }
@@ -345,6 +417,7 @@ cli_tmux(int argc, char **argv)
 		exit(1);
 	}
 
+	pgaftest_write_last(pgaftestOpts.workDir);
 	bool ok = runner_setup(spec, pgaftestOpts.workDir, true);
 	exit(ok ? 0 : 1);
 }
@@ -817,6 +890,11 @@ resolve_interactive_context(void)
 		{
 			derive_work_dir(pgaftestOpts.specFile,
 							pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
+		}
+		else
+		{
+			/* last resort: most recently started cluster */
+			pgaftest_read_last(pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
 		}
 	}
 }
