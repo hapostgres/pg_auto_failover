@@ -22,8 +22,9 @@
 #include "cli_demo.h"
 #include "cli_indent.h"
 
-/* forward declaration */
+/* forward declarations */
 static void resolve_interactive_context(void);
+extern CommandLine pgaftest_root;
 
 /* -----------------------------------------------------------------------
  * Shared option parsing
@@ -1078,7 +1079,7 @@ cli_help(int argc, char **argv)
 {
 	(void) argc;
 	(void) argv;
-	commandline_help(stdout);
+	commandline_print_command_tree(&pgaftest_root, stdout);
 	exit(0);
 }
 
