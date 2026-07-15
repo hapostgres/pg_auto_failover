@@ -4157,6 +4157,32 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 }
 
 
+/*
+ * runner_state_path — return the path to the state file.
+ *
+ * When running inside the pgaftest container (PGAFTEST_COMPOSE_SERVICE is set)
+ * the state file lives in $HOME so it is always writable by the container user
+ * regardless of the bind-mount ownership.  On the host it lives in workDir
+ * alongside the generated compose files.
+ */
+static void
+runner_state_path(const char *workDir, char *buf, int buflen)
+{
+	bool inCompose = getenv("PGAFTEST_COMPOSE_SERVICE") != NULL; /* IGNORE-BANNED */
+
+	if (inCompose)
+	{
+		const char *home = getenv("HOME"); /* IGNORE-BANNED */
+		sformat(buf, buflen, "%s/%s", home ? home : "/var/lib/postgres",
+				PGAFTEST_STATE_FILE);
+	}
+	else
+	{
+		sformat(buf, buflen, "%s/%s", workDir, PGAFTEST_STATE_FILE);
+	}
+}
+
+
 bool
 runner_state_read(const char *workDir, TestRunnerState *st)
 {
@@ -4164,7 +4190,7 @@ runner_state_read(const char *workDir, TestRunnerState *st)
 	st->last_ok = true;     /* optimistic default: no step has failed yet */
 
 	char path[1024];
-	sformat(path, sizeof(path), "%s/%s", workDir, PGAFTEST_STATE_FILE);
+	runner_state_path(workDir, path, sizeof(path));
 
 	FILE *f = fopen(path, "r"); /* IGNORE-BANNED */
 	if (!f)
@@ -4213,7 +4239,7 @@ bool
 runner_state_write(const char *workDir, const TestRunnerState *st)
 {
 	char path[1024];
-	sformat(path, sizeof(path), "%s/%s", workDir, PGAFTEST_STATE_FILE);
+	runner_state_path(workDir, path, sizeof(path));
 
 	JSON_Value *root = json_value_init_object();
 	JSON_Object *obj = json_value_get_object(root);

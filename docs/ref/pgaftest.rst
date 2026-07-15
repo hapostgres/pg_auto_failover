@@ -170,8 +170,9 @@ alive.  In CI mode it runs ``pgaftest run ~/spec.pgaf`` directly.
 Step state file
 ---------------
 
-Container commands record progress in
-``$PGAFTEST_HOST_WORK_DIR/pgaftest.state``, a small JSON file that tracks:
+Container commands record progress in ``~/pgaftest.state``
+(``$HOME/pgaftest.state`` inside the pgaftest container), a small JSON file
+that tracks:
 
 * ``current`` — index of the next step to run in the sequence;
 * ``last_step`` — name of the most recently executed step;
@@ -179,9 +180,17 @@ Container commands record progress in
 
 On success ``current`` advances; on failure it stays pointing at the failed
 step so the next bare ``pgaftest step`` retries it rather than skipping
-ahead.  The file is written to the host-side work directory (bind-mounted
-read-write into the container) so it persists across ``docker compose exec``
-invocations and is visible from the host for post-mortem inspection.
+ahead.
+
+The file lives in the container user's home directory (``/var/lib/postgres``
+for the ``docker`` user) rather than in the host-side bind-mounted work
+directory, so it is always writable regardless of how the bind-mount
+ownership maps between host and container.  It persists for the lifetime of
+the container.
+
+When ``pgaftest step`` is run on the host (outside the container), the state
+file is written to ``$TMPDIR/pgaftest/<spec-name>/pgaftest.state`` alongside
+the generated compose files.
 
 
 Synopsis
