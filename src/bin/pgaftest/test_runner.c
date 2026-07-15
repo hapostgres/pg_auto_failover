@@ -4583,7 +4583,12 @@ runner_down(TestSpec *spec, const char *workDir)
 		runner_exec_step(&r, spec->teardown, err, sizeof(err), 0);
 	}
 
-	return runner_compose_down(&r);
+	bool ok = runner_compose_down(&r);
+
+	/* Kill the tmux session started by `pgaftest tmux`, if it exists. */
+	run_cmd("tmux kill-session -t %s 2>/dev/null || true", r.projectName);
+
+	return ok;
 }
 
 
