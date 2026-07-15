@@ -635,8 +635,15 @@ runner_compose_up(TestRunner *r)
 {
 	log_info("Starting compose stack (project: %s)", r->projectName);
 
-	int rc = run_cmd("%s up --build -d 2>&1",
-					 r->composeBase);
+	/*
+	 * In interactive mode the pgaftest service is used via `docker compose run`
+	 * so we don't need (or want) a background `sleep infinity` container.
+	 * Scale it to 0 so the image is still built but no container is started.
+	 */
+	const char *scaleFlag = r->interactive ? "--scale pgaftest=0" : "";
+
+	int rc = run_cmd("%s up --build -d %s 2>&1",
+					 r->composeBase, scaleFlag);
 	if (rc != 0)
 	{
 		log_error("docker compose up failed (exit %d)", rc);
@@ -4244,70 +4251,71 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		 *   pgaftest wait until node1 state = wait_primary
 		 */
 
-		/* Build the step name list for the hint printed after setup. */
-		char stepList[1024] = "";
-		for (int si = 0; si < spec->sequenceLength; si++)
+		/*
+		 * Four-pane tmux session:
+		 *
+		 *   pane 0 (top)        docker compose logs -f
+		 *   pane 1              pg_autoctl watch --wait
+		 *   pane 2 (transient)  pgaftest _setup_ — closes naturally when done
+		 *   pane 3 (bottom)     interactive bash shell via docker compose run
+		 *
+		 * All container commands use `docker compose run --rm` so there is no
+		 * background pgaftest service container to wait for — the containers
+		 * start on demand and have no timing race with tmux pane creation.
+		 */
+
+		/* pane 2: setup block, or nothing if there is no setup{} section */
+		char setupPane[1024] = "";
+		if (spec->setup)
 		{
-			if (si > 0)
-			{
-				strlcat(stepList, "  ", sizeof(stepList));
-			}
-			strlcat(stepList, spec->sequence[si], sizeof(stepList));
+			sformat(setupPane, sizeof(setupPane),
+					"%s run --rm pgaftest "
+					"pgaftest _setup_ /var/lib/postgres/spec.pgaf --work-dir %s",
+					r.composeBase, workDir);
 		}
 
-		/*
-		 * The hint (step list + usage) is printed by `pgaftest _setup_`
-		 * itself to stdout (the pane tty) after the setup block completes.
-		 * Avoid embedding the step list in the shell command: it can be
-		 * arbitrarily long and contain characters that break sh -c quoting.
-		 */
-
-		/*
-		 * Wait for the pgaftest container to be ready, then exec into it.
-		 * `docker compose exec` exits non-zero when the target container
-		 * isn't running yet, which would close the tmux pane immediately.
-		 * Probe with a no-TTY `true` command until the container accepts
-		 * exec, then hand off to the real interactive command.
-		 */
-		char bottomCmd[2048];
-		char probeCmd[512];
-		sformat(probeCmd, sizeof(probeCmd),
-				"until %s exec -T pgaftest true 2>/dev/null; do sleep 1; done",
+		/* pane 3: interactive shell, always present */
+		char shellCmd[512];
+		sformat(shellCmd, sizeof(shellCmd),
+				"%s run --rm -it pgaftest bash",
 				r.composeBase);
+
+		log_info("Starting tmux session \"%s\"", r.projectName);
+		log_info("To open another shell: %s", shellCmd);
 
 		if (spec->setup)
 		{
-			sformat(bottomCmd, sizeof(bottomCmd),
-					"sh -c '%s && %s exec -it pgaftest "
-					"pgaftest _setup_ /var/lib/postgres/spec.pgaf --work-dir %s'",
-					probeCmd, r.composeBase, workDir);
+			run_cmd(
+				"tmux new-session -d -s %s "
+				"\"%s logs -f\" \\; "
+				"split-window -v "
+				"\"%s exec %s pg_autoctl watch --wait\" \\; "
+				"split-window -v "
+				"\"%s\" \\; "
+				"split-window -v "
+				"\"%s\" \\; "
+				"select-layout even-vertical",
+				r.projectName,
+				r.composeBase,
+				r.composeBase, r.activeMonitorService,
+				setupPane,
+				shellCmd);
 		}
 		else
 		{
-			sformat(bottomCmd, sizeof(bottomCmd),
-					"sh -c '%s && %s exec -it pgaftest bash'",
-					probeCmd, r.composeBase);
+			run_cmd(
+				"tmux new-session -d -s %s "
+				"\"%s logs -f\" \\; "
+				"split-window -v "
+				"\"%s exec %s pg_autoctl watch --wait\" \\; "
+				"split-window -v "
+				"\"%s\" \\; "
+				"select-layout even-vertical",
+				r.projectName,
+				r.composeBase,
+				r.composeBase, r.activeMonitorService,
+				shellCmd);
 		}
-
-		log_info("Starting tmux session \"%s\" (shell inside pgaftest service)",
-				 r.projectName);
-
-		run_cmd(
-			"tmux new-session -d -s %s "
-			"\"%s logs -f\" \\; "
-			"split-window -v "
-			"\"%s exec %s pg_autoctl watch --wait\" \\; "
-			"split-window -v "
-			"\"%s\" \\; "
-			"select-layout even-vertical",
-			r.projectName,
-			r.composeBase,
-			r.composeBase, r.activeMonitorService,
-			bottomCmd);
-
-		log_info("To open a shell in the pgaftest container manually: "
-				 "%s exec -it pgaftest bash",
-				 r.composeBase);
 
 		/* Attach the current terminal into the session. */
 		run_cmd("tmux attach-session -t %s", r.projectName);
