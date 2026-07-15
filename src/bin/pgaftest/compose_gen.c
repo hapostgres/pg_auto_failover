@@ -859,13 +859,30 @@ compose_gen_write(TestCluster *cluster,
 			strlcpy(workDir, ".", sizeof(workDir));
 		}
 
+		/*
+		 * Add the GID of /var/run/docker.sock as a supplementary group so
+		 * the container's `docker` user can access the socket.  The GID
+		 * differs between hosts (e.g. 1 on macOS Docker Desktop, 999 on
+		 * most Linux distros), so we stat it at compose-generation time and
+		 * inject it via `group_add`.
+		 */
+		struct stat sockStat;
+		gid_t dockerSockGid = 0;
+		if (stat("/var/run/docker.sock", &sockStat) == 0) /* IGNORE-BANNED */
+		{
+			dockerSockGid = sockStat.st_gid;
+		}
+
 		fformat(f,
 				"    user: docker\n"
+				"    group_add:\n"
+				"      - \"%u\"\n"
 				"    working_dir: /var/lib/postgres\n"
 				"    volumes:\n"
 				"      - %s:/var/lib/postgres/spec.pgaf:ro\n"
 				"      - /var/run/docker.sock:/var/run/docker.sock\n"
 				"      - %s:%s\n",
+				(unsigned int) dockerSockGid,
 				specFile, workDir, workDir);
 		if (ssl_needs_certs(cluster->ssl))
 		{
