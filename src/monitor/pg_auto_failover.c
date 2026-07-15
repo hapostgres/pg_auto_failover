@@ -170,6 +170,15 @@ StartMonitorNode(void)
 							NULL, &DrainTimeoutMs, 30 * 1000, 1, INT_MAX,
 							PGC_SIGHUP, GUC_UNIT_MS, NULL, NULL, NULL);
 
+	DefineCustomIntVariable("pgautofailover.replication_stall_timeout",
+							"Assign wait_primary when the primary has had no standby "
+							"connected in pg_stat_replication for this long. "
+							"This unblocks writes in 3-DC topologies where the "
+							"primary-to-standby link fails while both nodes remain "
+							"reachable from the monitor.",
+							NULL, &ReplicationStallTimeoutMs, 10 * 1000, 1, INT_MAX,
+							PGC_SIGHUP, GUC_UNIT_MS, NULL, NULL, NULL);
+
 	DefineCustomIntVariable("pgautofailover.node_considered_unhealthy_timeout",
 							"Mark node unhealthy if last ping was over this long ago",
 							NULL, &UnhealthyTimeoutMs, 20 * 1000, 1, INT_MAX,

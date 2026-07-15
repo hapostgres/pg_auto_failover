@@ -1950,7 +1950,7 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 				"         current_group_state, assigned_group_state, "
 				"         candidate_priority, replication_quorum, "
 				"         reported_tli, reported_lsn, health, nodecluster, "
-				"         healthlag, reportlag"
+				"         noderegion, healthlag, reportlag"
 				"    FROM pgautofailover.current_state($1) cs "
 				"    JOIN ("
 				"          select nodeid, "
@@ -1976,7 +1976,7 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 				"         current_group_state, assigned_group_state, "
 				"         candidate_priority, replication_quorum, "
 				"         reported_tli, reported_lsn, health, nodecluster, "
-				"         healthlag, reportlag"
+				"         noderegion, healthlag, reportlag"
 				"    FROM pgautofailover.current_state($1, $2) cs "
 				"    JOIN ("
 				"          select nodeid, "
@@ -2029,7 +2029,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	int errors = 0;
 
 	/* we don't expect any of the column to be NULL */
-	for (colNumber = 0; colNumber < 16; colNumber++)
+	for (colNumber = 0; colNumber < 17; colNumber++)
 	{
 		if (PQgetisnull(result, rowNumber, 0))
 		{
@@ -2054,8 +2054,9 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	 * 11 - OUT reported_lsn         pg_lsn,
 	 * 12 - OUT health               integer
 	 * 13 - OUT nodecluster          text
-	 * 14 -     healthlag            int (extract epoch from interval)
-	 * 15 -     reportlag            int (extract epoch from interval)
+	 * 14 - OUT noderegion           text
+	 * 15 -     healthlag            int (extract epoch from interval)
+	 * 16 -     reportlag            int (extract epoch from interval)
 	 *
 	 * We need the groupId to parse the formation kind into a nodeKind, so we
 	 * begin at column 1 and get back to column 0 later, after column 4.
@@ -2191,6 +2192,16 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	}
 
 	value = PQgetvalue(result, rowNumber, 14);
+	length = strlcpy(nodeState->region, value, NAMEDATALEN);
+	if (length >= NAMEDATALEN)
+	{
+		log_error("Region \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, NAMEDATALEN - 1);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 15);
 
 	if (!stringToDouble(value, &(nodeState->healthLag)))
 	{
@@ -2198,7 +2209,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 15);
+	value = PQgetvalue(result, rowNumber, 16);
 
 	if (!stringToDouble(value, &(nodeState->reportLag)))
 	{

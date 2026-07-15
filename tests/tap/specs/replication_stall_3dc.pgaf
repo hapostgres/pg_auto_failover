@@ -1,0 +1,148 @@
+# Replication stall detection in a 3-DC topology.
+#
+# Background (issue #997):
+#
+# When the primary (dc1) and standby (dc2) lose connectivity while both
+# remain reachable from the monitor (dc3), synchronous_standby_names stays
+# set on the primary, causing every COMMIT to hang indefinitely.
+#
+# Fix: the monitor tracks replication_stall_since on the primary node row.
+# As soon as the primary reports an empty pg_stat_replication sync_state
+# (SYNC_STATE_UNKNOWN) for longer than
+# pgautofailover.replication_stall_timeout (default 10 s), the FSM assigns
+# wait_primary, which clears synchronous_standby_names and unblocks writes.
+#
+# Topology modelled here:
+#
+#   dc1: primary   (node1)  — group 0
+#   dc2: standby   (node2)  — group 0
+#   dc3: monitor   (compose host / pgaf-monitor service)
+#
+# The monitor is always reachable from both nodes (same Docker network), but
+# we can sever the dc1↔dc2 link with `docker network disconnect`.
+# This replicates the 3-DC split-brain scenario without requiring three
+# separate Docker networks.
+#
+# Predecessor: none (new regression test for issue #997)
+
+cluster {
+    monitor
+    formation {
+        node1 region=dc1
+        node2 region=dc2  candidate-priority=50
+    }
+}
+
+setup {
+    # Lower the stall timeout so the test runs quickly
+    sql monitor {
+        ALTER SYSTEM SET pgautofailover.replication_stall_timeout = '3s';
+        SELECT pg_reload_conf();
+    }
+
+    # Pre-create the smoke table used in write-check steps
+    wait until primary, secondary  timeout 120s
+    promote node1
+    sql node1 {
+        CREATE TABLE smoke (id serial PRIMARY KEY, v int);
+        INSERT INTO smoke (v) VALUES (0);
+    }
+    sql node2 { SELECT count(*) FROM smoke; }
+    expect { 1 }
+}
+
+teardown {
+    # Restore the dc1↔dc2 link even if the test failed, so other tests
+    # can proceed with a healthy cluster
+    network connect node1 node2
+    sql monitor {
+        ALTER SYSTEM RESET pgautofailover.replication_stall_timeout;
+        SELECT pg_reload_conf();
+    }
+    compose down
+}
+
+#
+# step 1: confirm synchronous_standby_names is active on the primary.
+#
+
+step test_001_verify_sync_replication {
+    sql node1 { SHOW synchronous_standby_names; }
+    # value matches "ANY 1 (pgautofailover_standby_<nodeid>)"
+    expect { ANY 1 }
+
+    # Write succeeds: the standby is connected and acknowledges immediately
+    sql node1 { INSERT INTO smoke (v) VALUES (1); }
+    sql node2 { SELECT max(v) FROM smoke; }
+    expect { 1 }
+}
+
+#
+# step 2: cut the dc1↔dc2 replication link.
+#
+# Both nodes remain able to reach the monitor; only the direct peer link
+# between node1 and node2 is severed.
+#
+
+step test_002_cut_replication_link {
+    network disconnect node1 node2
+}
+
+#
+# step 3: the monitor must assign wait_primary within
+# replication_stall_timeout (3 s in setup) + one keeper loop (5 s default).
+# Allow up to 60 s total.
+#
+
+step test_003_primary_becomes_wait_primary {
+    wait until node1 state = wait_primary  timeout 60s
+    assert node1 state = wait_primary
+}
+
+#
+# step 4: verify that writes no longer hang.
+#
+# In wait_primary synchronous_standby_names is cleared, so COMMIT returns
+# without waiting for the (now-unreachable) standby.
+#
+
+step test_004_writes_unblock {
+    sql node1 { SHOW synchronous_standby_names; }
+    expect {  }
+
+    sql node1 { INSERT INTO smoke (v) VALUES (2); }
+    sql node1 { SELECT max(v) FROM smoke; }
+    expect { 2 }
+}
+
+#
+# step 5: restore the dc1↔dc2 link and let the standby re-join.
+#
+
+step test_005_restore_link {
+    network connect node1 node2
+
+    wait until node2 state = secondary  timeout 120s
+    wait until node1 state = primary    timeout 120s
+}
+
+#
+# step 6: confirm the cluster is healthy again and replication is in sync.
+#
+
+step test_006_replication_restored {
+    sql node1 { SHOW synchronous_standby_names; }
+    expect { ANY 1 }
+
+    # Row written during the stall must have replicated
+    sql node2 { SELECT max(v) FROM smoke; }
+    expect { 2 }
+}
+
+sequence
+    test_001_verify_sync_replication
+    test_002_cut_replication_link
+    test_003_primary_becomes_wait_primary
+    test_004_writes_unblock
+    test_005_restore_link
+    test_006_replication_restored

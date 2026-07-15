@@ -26,7 +26,7 @@
  * indices must match with the columns given
  * in the following definition.
  */
-#define Natts_pgautofailover_node 19
+#define Natts_pgautofailover_node 21
 #define Anum_pgautofailover_node_formationid 1
 #define Anum_pgautofailover_node_nodeid 2
 #define Anum_pgautofailover_node_groupid 3
@@ -48,6 +48,8 @@
 #define Anum_pgautofailover_node_candidate_priority 19
 #define Anum_pgautofailover_node_replication_quorum 20
 #define Anum_pgautofailover_node_nodecluster 21
+#define Anum_pgautofailover_node_region 22
+#define Anum_pgautofailover_node_replication_stall_since 23
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
 	"formationid, " \
@@ -70,7 +72,9 @@
 	"statechangetime, " \
 	"candidatepriority, " \
 	"replicationquorum, " \
-	"nodecluster"
+	"nodecluster, " \
+	"region, " \
+	"replication_stall_since"
 
 
 #define SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE \
@@ -133,6 +137,8 @@ typedef struct AutoFailoverNode
 	int candidatePriority;
 	bool replicationQuorum;
 	char *nodeCluster;
+	char *region;
+	TimestampTz replicationStallSince; /* 0 = not stalled */
 } AutoFailoverNode;
 
 
@@ -209,7 +215,8 @@ extern int AddAutoFailoverNode(char *formationId,
 							   ReplicationState reportedState,
 							   int candidatePriority,
 							   bool replicationQuorum,
-							   char *nodeCluster);
+							   char *nodeCluster,
+							   char *region);
 extern void SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							 ReplicationState goalState,
 							 const char *message);

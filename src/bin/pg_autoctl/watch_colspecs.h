@@ -27,6 +27,7 @@ typedef enum
 	COLUMN_TYPE_CONN_REPORT_LAG,
 	COLUMN_TYPE_REPORTED_STATE,
 	COLUMN_TYPE_ASSIGNED_STATE,
+	COLUMN_TYPE_REGION,
 
 	COLUMN_TYPE_LAST
 } ColumnType;
@@ -134,6 +135,7 @@ ColPolicy ColumnPolicies[] = {
 		{
 			{ COLUMN_TYPE_NAME, "Name", 0 },
 			{ COLUMN_TYPE_ID, "Node", 0 },
+			{ COLUMN_TYPE_REGION, "Region", 0 },
 			{ COLUMN_TYPE_REPLICATION_QUORUM, "Quorum", 0 },
 			{ COLUMN_TYPE_CANDIDATE_PRIORITY, "Priority", 0 },
 			{ COLUMN_TYPE_CONN_HEALTH_LAG, "Check", 0 },
@@ -150,6 +152,7 @@ ColPolicy ColumnPolicies[] = {
 		{
 			{ COLUMN_TYPE_NAME, "Name", 0 },
 			{ COLUMN_TYPE_ID, "Node", 0 },
+			{ COLUMN_TYPE_REGION, "Region", 0 },
 			{ COLUMN_TYPE_REPLICATION_QUORUM, "Quorum", 0 },
 			{ COLUMN_TYPE_CANDIDATE_PRIORITY, "Priority", 0 },
 			{ COLUMN_TYPE_TLI_LSN, "TLI: LSN", 0 },
@@ -167,6 +170,7 @@ ColPolicy ColumnPolicies[] = {
 		{
 			{ COLUMN_TYPE_NAME, "Name", 0 },
 			{ COLUMN_TYPE_ID, "Node", 0 },
+			{ COLUMN_TYPE_REGION, "Region", 0 },
 			{ COLUMN_TYPE_REPLICATION_QUORUM, "Quorum", 0 },
 			{ COLUMN_TYPE_CANDIDATE_PRIORITY, "Priority", 0 },
 			{ COLUMN_TYPE_HOST_PORT, "Host:Port", 0 },
@@ -185,6 +189,7 @@ ColPolicy ColumnPolicies[] = {
 		{
 			{ COLUMN_TYPE_NAME, "Name", 0 },
 			{ COLUMN_TYPE_ID, "Node", 0 },
+			{ COLUMN_TYPE_REGION, "Region", 0 },
 			{ COLUMN_TYPE_REPLICATION_QUORUM, "Quorum", 0 },
 			{ COLUMN_TYPE_CANDIDATE_PRIORITY, "Priority", 0 },
 			{ COLUMN_TYPE_HOST_PORT, "Host:Port", 0 },

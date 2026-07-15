@@ -81,6 +81,7 @@ static bool WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 /* GUC variables */
 int EnableSyncXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
 int PromoteXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
+int ReplicationStallTimeoutMs = 10 * 1000;
 
 
 /*
@@ -106,6 +107,7 @@ BuildGroupStateContext(GroupStateContext *ctx, AutoFailoverNode *activeNode)
 	ctx->unhealthyTimeoutMs = UnhealthyTimeoutMs;
 	ctx->drainTimeoutMs = DrainTimeoutMs;
 	ctx->startupGracePeriodMs = StartupGracePeriodMs;
+	ctx->replicationStallTimeoutMs = ReplicationStallTimeoutMs;
 
 	if (ctx->formation == NULL)
 	{
@@ -280,6 +282,40 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 						   " in state %s",
 						   NODE_FORMAT_ARGS(activeNode),
 						   ReplicationStateGetName(activeNode->goalState))));
+	}
+
+	/*
+	 * Replication stall detection (issue #997 — 3-DC split-brain).
+	 *
+	 * When the primary is healthy (monitor can reach it) but no standby has
+	 * appeared in pg_stat_replication for longer than
+	 * pgautofailover.replication_stall_timeout, we assign wait_primary.
+	 * That clears synchronous_standby_names so COMMIT no longer hangs.
+	 *
+	 * replication_stall_since is set/cleared by ReportAutoFailoverNodeState()
+	 * each time the keeper calls node_active().
+	 */
+	if (IsInPrimaryState(primaryNode) &&
+		NodeIsHealthy(primaryNode, ctx) &&
+		primaryNode->replicationStallSince != 0 &&
+		TimestampDifferenceExceeds(primaryNode->replicationStallSince,
+								   ctx->now,
+								   ctx->replicationStallTimeoutMs))
+	{
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to wait_primary: no standby has been connected in "
+			"pg_stat_replication for more than %dms "
+			"(pgautofailover.replication_stall_timeout).",
+			NODE_FORMAT_ARGS(primaryNode),
+			ctx->replicationStallTimeoutMs);
+
+		AssignGoalState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+
+		return true;
 	}
 
 	/* Multiple Standby failover is handled in its own function. */

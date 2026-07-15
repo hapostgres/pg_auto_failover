@@ -25,6 +25,7 @@ typedef struct CurrentNodeState
 
 	char formation[NAMEDATALEN];
 	char citusClusterName[NAMEDATALEN];
+	char region[NAMEDATALEN];
 	int groupId;
 	PgInstanceKind pgKind;
 
