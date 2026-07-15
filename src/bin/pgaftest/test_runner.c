@@ -4214,10 +4214,27 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		return false;
 	}
 
-	if (!runner_wait_for_monitor(&r))
+	/*
+	 * In tmux (interactive) mode, docker compose up -d already waited for the
+	 * full depends_on: service_healthy chain before returning — the monitor is
+	 * provably up and all nodes have started.  Opening a LISTEN connection from
+	 * the host is unnecessary and fragile (Docker Desktop for Mac routes
+	 * published-port traffic via 192.168.65.1, which is outside the monitor's
+	 * pg_hba trust CIDR).  Skip runner_wait_for_monitor; apply formation
+	 * settings directly via docker compose exec, which works on the internal
+	 * network without any host→monitor libpq connection.
+	 *
+	 * In CI mode (pgaftest run) the host process drives every step via
+	 * LISTEN/NOTIFY and does need the connection — runner_wait_for_monitor
+	 * is called from runner_run instead.
+	 */
+	if (!withTmux)
 	{
-		runner_compose_down(&r);
-		return false;
+		if (!runner_wait_for_monitor(&r))
+		{
+			runner_compose_down(&r);
+			return false;
+		}
 	}
 
 	if (!runner_apply_formation_settings(&r))
