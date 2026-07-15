@@ -498,7 +498,8 @@ compose_gen_write(TestCluster *cluster,
 				  const char *projectName,
 				  const char *contextDir,
 				  const char *specFile,
-				  const char *specDir)
+				  const char *specDir,
+				  bool interactive)
 {
 	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
 	if (!f)
@@ -891,7 +892,19 @@ compose_gen_write(TestCluster *cluster,
 					"        condition: service_healthy\n",
 					firstNode->name);
 		}
-		fformat(f, "    command: [\"pgaftest\", \"run\", \"/spec.pgaf\"]\n\n");
+
+		/*
+		 * In interactive (--tmux) mode the container must stay alive so the
+		 * user can exec into it.  In CI mode it runs the spec to completion.
+		 */
+		if (interactive)
+		{
+			fformat(f, "    command: [\"sleep\", \"infinity\"]\n\n");
+		}
+		else
+		{
+			fformat(f, "    command: [\"pgaftest\", \"run\", \"/spec.pgaf\"]\n\n");
+		}
 	}
 
 	/* ---- volumes ---- */

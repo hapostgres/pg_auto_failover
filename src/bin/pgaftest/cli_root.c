@@ -547,6 +547,214 @@ cli_run_setup_only(int argc, char **argv)
 
 
 /* -----------------------------------------------------------------------
+ * Shared helper: resolve spec + work-dir for interactive sub-commands.
+ *
+ * When running inside the pgaftest container (set up by --tmux), the
+ * compose stack injects:
+ *   PGAFTEST_SPEC         = /spec.pgaf
+ *   PGAFTEST_HOST_WORK_DIR = <host workDir> (same abs path bind-mounted)
+ *
+ * Priority: explicit CLI arg > env var > /spec.pgaf in CWD.
+ * ----------------------------------------------------------------------- */
+static void
+resolve_interactive_context(void)
+{
+	if (pgaftestOpts.specFile[0] == '\0')
+	{
+		const char *envSpec = getenv("PGAFTEST_SPEC"); /* IGNORE-BANNED */
+		if (envSpec && *envSpec)
+		{
+			strlcpy(pgaftestOpts.specFile, envSpec, sizeof(pgaftestOpts.specFile));
+		}
+		else if (access("/spec.pgaf", R_OK) == 0)
+		{
+			strlcpy(pgaftestOpts.specFile, "/spec.pgaf", sizeof(pgaftestOpts.specFile));
+		}
+	}
+
+	if (pgaftestOpts.workDir[0] == '\0')
+	{
+		const char *envWork = getenv("PGAFTEST_HOST_WORK_DIR"); /* IGNORE-BANNED */
+		if (envWork && *envWork)
+		{
+			strlcpy(pgaftestOpts.workDir, envWork, sizeof(pgaftestOpts.workDir));
+		}
+		else if (pgaftestOpts.specFile[0])
+		{
+			derive_work_dir(pgaftestOpts.specFile,
+							pgaftestOpts.workDir, sizeof(pgaftestOpts.workDir));
+		}
+	}
+}
+
+
+/* -----------------------------------------------------------------------
+ * pgaftest wait until <node> state = <state> [timeout <N>s]
+ * ----------------------------------------------------------------------- */
+static void
+cli_wait(int argc, char **argv)
+{
+	/*
+	 * Syntax: pgaftest wait until <node> state = <state> [timeout <N>s]
+	 *
+	 * After option stripping by the command-line library, remaining argv is:
+	 *   argv[0] = "until"
+	 *   argv[1] = <node>
+	 *   argv[2] = "state"
+	 *   argv[3] = "="
+	 *   argv[4] = <state>
+	 *   argv[5] = "timeout"   (optional)
+	 *   argv[6] = "<N>s"      (optional)
+	 */
+	if (argc < 5 ||
+		strcmp(argv[0], "until") != 0 ||
+		strcmp(argv[2], "state") != 0 ||
+		strcmp(argv[3], "=") != 0)
+	{
+		log_error("Usage: pgaftest wait until <node> state = <state> [timeout <N>s]");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	const char *nodeName = argv[1];
+	const char *targetState = argv[4];
+	int timeoutSecs = 60; /* default */
+
+	if (argc >= 7 && strcmp(argv[5], "timeout") == 0)
+	{
+		char *end = NULL;
+		long v = strtol(argv[6], &end, 10);
+		if (end && (*end == 's' || *end == '\0') && v > 0)
+		{
+			timeoutSecs = (int) v;
+		}
+	}
+
+	resolve_interactive_context();
+
+	if (pgaftestOpts.specFile[0] == '\0')
+	{
+		log_error("No spec file: pass one as argument or set PGAFTEST_SPEC");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
+	if (!spec)
+	{
+		exit(1);
+	}
+
+	bool ok = runner_wait(spec, pgaftestOpts.workDir,
+						  nodeName, targetState, timeoutSecs);
+	exit(ok ? 0 : 1);
+}
+
+
+/* -----------------------------------------------------------------------
+ * pgaftest sql <node> "<query>"
+ * ----------------------------------------------------------------------- */
+static void
+cli_sql(int argc, char **argv)
+{
+	if (argc < 2)
+	{
+		log_error("Usage: pgaftest sql <node> \"<query>\"");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	const char *service = argv[0];
+	const char *query = argv[1];
+
+	resolve_interactive_context();
+
+	if (pgaftestOpts.specFile[0] == '\0')
+	{
+		log_error("No spec file: pass one as argument or set PGAFTEST_SPEC");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
+	if (!spec)
+	{
+		exit(1);
+	}
+
+	bool ok = runner_sql(spec, pgaftestOpts.workDir, service, query);
+	exit(ok ? 0 : 1);
+}
+
+
+/* -----------------------------------------------------------------------
+ * pgaftest network connect|disconnect <node>
+ * ----------------------------------------------------------------------- */
+static void
+cli_network(int argc, char **argv)
+{
+	if (argc < 2 ||
+		(strcmp(argv[0], "connect") != 0 && strcmp(argv[0], "disconnect") != 0))
+	{
+		log_error("Usage: pgaftest network connect|disconnect <node>");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	bool connect = (strcmp(argv[0], "connect") == 0);
+	const char *nodeName = argv[1];
+
+	resolve_interactive_context();
+
+	if (pgaftestOpts.specFile[0] == '\0')
+	{
+		log_error("No spec file: pass one as argument or set PGAFTEST_SPEC");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
+	if (!spec)
+	{
+		exit(1);
+	}
+
+	bool ok = runner_network(spec, pgaftestOpts.workDir, nodeName, connect);
+	exit(ok ? 0 : 1);
+}
+
+
+/* -----------------------------------------------------------------------
+ * pgaftest assert <node> state = <state>
+ * ----------------------------------------------------------------------- */
+static void
+cli_assert(int argc, char **argv)
+{
+	if (argc < 4 ||
+		strcmp(argv[1], "state") != 0 ||
+		strcmp(argv[2], "=") != 0)
+	{
+		log_error("Usage: pgaftest assert <node> state = <state>");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	const char *nodeName = argv[0];
+	const char *targetState = argv[3];
+
+	resolve_interactive_context();
+
+	if (pgaftestOpts.specFile[0] == '\0')
+	{
+		log_error("No spec file: pass one as argument or set PGAFTEST_SPEC");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
+	if (!spec)
+	{
+		exit(1);
+	}
+
+	bool ok = runner_assert(spec, pgaftestOpts.workDir, nodeName, targetState);
+	exit(ok ? 0 : 1);
+}
+
+
+/* -----------------------------------------------------------------------
  * Root command table
  * ----------------------------------------------------------------------- */
 
@@ -621,6 +829,41 @@ static CommandLine internal_setup_command =
 				 "",
 				 pgaftest_getopts, cli_run_setup_only);
 
+static CommandLine wait_command =
+	make_command("wait",
+				 "Wait until a node reaches a target state (interactive)",
+				 "until <node> state = <state> [timeout <N>s]",
+				 "  until <node> state = <state>   Poll until node is in state\n"
+				 "  timeout <N>s                   Timeout in seconds (default 60)\n"
+				 "\n"
+				 "  Reads PGAFTEST_SPEC and PGAFTEST_HOST_WORK_DIR when run\n"
+				 "  inside the pgaftest container (pgaftest setup --tmux).\n",
+				 pgaftest_getopts, cli_wait);
+
+static CommandLine sql_command =
+	make_command("sql",
+				 "Run a SQL query on a named node and print the result (interactive)",
+				 "<node> \"<query>\"",
+				 "  <node>    Service name (node1, node2, monitor, …)\n"
+				 "  <query>   SQL statement (quote it)\n",
+				 pgaftest_getopts, cli_sql);
+
+static CommandLine network_command =
+	make_command("network",
+				 "Connect or disconnect a node from the compose network (interactive)",
+				 "connect|disconnect <node>",
+				 "  connect <node>     Restore the node's network access\n"
+				 "  disconnect <node>  Sever the node's network access\n",
+				 pgaftest_getopts, cli_network);
+
+static CommandLine assert_command =
+	make_command("assert",
+				 "Assert a node's current state; exit non-zero if it doesn't match (interactive)",
+				 "<node> state = <state>",
+				 "  <node>    Service name (node1, node2, …)\n"
+				 "  <state>   Expected state (primary, secondary, wait_primary, …)\n",
+				 pgaftest_getopts, cli_assert);
+
 static CommandLine *root_subcommands[] = {
 	&run_command,
 	&setup_command,
@@ -629,6 +872,10 @@ static CommandLine *root_subcommands[] = {
 	&prepare_command,
 	&down_command,
 	&indent_command,
+	&wait_command,
+	&sql_command,
+	&network_command,
+	&assert_command,
 	&internal_setup_command,
 	&pgaftest_demo_command,
 	NULL
@@ -638,12 +885,16 @@ CommandLine pgaftest_root =
 	make_command_set("pgaftest",
 					 "pg_auto_failover test runner",
 					 "[command] [options]",
-					 "  run      Run a .pgaf spec (CI mode)\n"
-					 "  setup    Bring up a cluster interactively\n"
-					 "  step     Run one named step\n"
-					 "  show     Print generated docker-compose.yml\n"
-					 "  prepare  Write compose files + Makefile to a directory\n"
-					 "  down     Tear down the cluster\n"
-					 "  indent   Rewrite a spec with canonical indentation\n"
-					 "  demo     Demo application\n",
+					 "  run       Run a .pgaf spec (CI mode)\n"
+					 "  setup     Bring up a cluster interactively\n"
+					 "  step      Run one named step\n"
+					 "  show      Print generated docker-compose.yml\n"
+					 "  prepare   Write compose files + Makefile to a directory\n"
+					 "  down      Tear down the cluster\n"
+					 "  indent    Rewrite a spec with canonical indentation\n"
+					 "  wait      Wait until a node reaches a state\n"
+					 "  sql       Run SQL on a node and print the result\n"
+					 "  network   Connect or disconnect a node from the network\n"
+					 "  assert    Assert a node's current state\n"
+					 "  demo      Demo application\n",
 					 NULL, root_subcommands);

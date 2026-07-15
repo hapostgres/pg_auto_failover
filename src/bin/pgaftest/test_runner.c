@@ -380,20 +380,26 @@ runner_compose_generate(TestRunner *r)
 	}
 
 	/*
-	 * In host mode (no PGAFTEST_COMPOSE_SERVICE) we ARE the test runner, so
-	 * we don't want the compose file to include a pgaftest service — it only
-	 * makes sense for the in-compose CI mode where `docker compose up
-	 * --exit-code-from pgaftest` drives the whole run.  Pass NULL to omit it.
+	 * Include the pgaftest service in the compose file when:
+	 *   - running inside a compose network (PGAFTEST_COMPOSE_SERVICE is set),
+	 *     so `docker compose up --exit-code-from pgaftest` drives the CI run;
+	 *   - or when interactive (--tmux), so the user gets a shell inside the
+	 *     pgaftest container with the binary, Docker CLI, and full env ready.
+	 *
+	 * In plain host mode (no --tmux, no PGAFTEST_COMPOSE_SERVICE) the service
+	 * is omitted: the host process itself is the runner.
 	 */
-	const char *specFileForCompose = getenv("PGAFTEST_COMPOSE_SERVICE") /* IGNORE-BANNED */
-									 ? r->specFile : NULL;
+	bool inCompose = getenv("PGAFTEST_COMPOSE_SERVICE") != NULL; /* IGNORE-BANNED */
+	const char *specFileForCompose =
+		(inCompose || r->interactive) ? r->specFile : NULL;
 
 	if (!compose_gen_write(&r->spec->cluster,
 						   r->composeFile,
 						   r->projectName,
 						   r->contextDir,
 						   specFileForCompose,
-						   r->hostSpecDir))
+						   r->hostSpecDir,
+						   r->interactive))
 	{
 		return false;
 	}
@@ -4014,6 +4020,7 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 {
 	TestRunner r;
 	runner_init(&r, spec, workDir);
+	r.interactive = withTmux;
 
 	if (!runner_compose_generate(&r))
 	{
@@ -4040,60 +4047,74 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 	if (withTmux)
 	{
 		/*
-		 * Pick the first non-deferred data node as the interactive shell
-		 * target.  Falls back to the monitor if no data node is found.
+		 * The bottom tmux pane drops into a shell inside the `pgaftest`
+		 * service container.  That service already has:
+		 *   - the pgaftest binary on PATH
+		 *   - docker + docker compose (DooD via /var/run/docker.sock)
+		 *   - /spec.pgaf bind-mounted from the host workDir
+		 *   - COMPOSE_PROJECT_NAME, PG_AUTOCTL_MONITOR set
+		 *
+		 * (compose_gen_write emits `sleep infinity` as the command when
+		 * r.interactive is true, so the container stays alive.)
 		 */
-		const char *shellNode = r.activeMonitorService;
-
-		for (int fi = 0; fi < spec->cluster.formationCount; fi++)
-		{
-			const TestFormation *form = &spec->cluster.formations[fi];
-
-			for (int ni = 0; ni < form->nodeCount; ni++)
-			{
-				const TestNode *n = &form->nodes[ni];
-
-				if (!n->launchDeferred)
-				{
-					shellNode = n->name;
-					fi = spec->cluster.formationCount; /* break outer loop */
-					break;
-				}
-			}
-		}
 
 		/*
 		 * Build a three-pane tmux session:
 		 *   top    — docker compose logs -f
 		 *   middle — pg_autoctl watch on the monitor
-		 *   bottom — setup{} block running via `pgaftest _setup_`, then bash
+		 *   bottom — setup{} block via `pgaftest _setup_`, then interactive
+		 *            shell inside the `pgaftest` service container
 		 *
-		 * The setup block runs inside the bottom tmux pane so the user
-		 * immediately gets the session and can watch logs while the cluster
-		 * initialises.  When setup completes the pane becomes a bash shell
-		 * in the first data node.
-		 *
-		 * pg_autoctl_program holds argv[0] — the path to the pgaftest binary.
+		 * The bottom pane runs inside the `pgaftest` service container, which
+		 * has the pgaftest binary, docker + docker compose (DooD), /spec.pgaf,
+		 * and COMPOSE_PROJECT_NAME / PG_AUTOCTL_MONITOR already set.
+		 * The user can therefore type e.g.:
+		 *   pgaftest step test_002_cut_replication_link
+		 *   pgaftest network disconnect node2
+		 *   pgaftest wait until node1 state = wait_primary
 		 */
+
+		/* Build the step name list for the hint printed after setup. */
+		char stepList[1024] = "";
+		for (int si = 0; si < spec->sequenceLength; si++)
+		{
+			if (si > 0)
+			{
+				strlcat(stepList, "  ", sizeof(stepList));
+			}
+			strlcat(stepList, spec->sequence[si], sizeof(stepList));
+		}
+
+		char hintCmd[256] = "";
+		if (stepList[0])
+		{
+			sformat(hintCmd, sizeof(hintCmd),
+					"echo 'Steps: %s' && "
+					"echo 'Try: pgaftest step <name>  |  pgaftest network disconnect <node>  |  pgaftest down' && ",
+					stepList);
+		}
+
 		char bottomCmd[2048];
 
 		if (spec->setup)
 		{
 			sformat(bottomCmd, sizeof(bottomCmd),
-					"%s _setup_ %s --work-dir %s && "
-					"%s exec -it %s bash",
-					pg_autoctl_program, spec->filename, workDir,
-					r.composeBase, shellNode);
+					"%s exec -it pgaftest sh -c \""
+					"pgaftest _setup_ /spec.pgaf --work-dir %s && "
+					"%s"
+					"exec bash\"",
+					r.composeBase, workDir,
+					hintCmd);
 		}
 		else
 		{
 			sformat(bottomCmd, sizeof(bottomCmd),
-					"%s exec -it %s bash",
-					r.composeBase, shellNode);
+					"%s exec -it pgaftest sh -c \"%sexec bash\"",
+					r.composeBase, hintCmd);
 		}
 
-		log_info("Starting tmux session \"%s\" (shell target: %s)",
-				 r.projectName, shellNode);
+		log_info("Starting tmux session \"%s\" (shell inside pgaftest service)",
+				 r.projectName);
 
 		run_cmd(
 			"tmux new-session -d -s %s "
@@ -4217,6 +4238,133 @@ runner_down(TestSpec *spec, const char *workDir)
 }
 
 
+/*
+ * runner_wait — `pgaftest wait until <node> state = <state> [timeout <N>s]`
+ *
+ * Opens a LISTEN connection to the monitor and drives the same notify-goal
+ * path used by the spec runner.  Intended for interactive use from inside the
+ * pgaftest service container.
+ */
+bool
+runner_wait(TestSpec *spec, const char *workDir,
+			const char *nodeName, const char *targetState, int timeoutSecs)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (!runner_load_state(&r))
+	{
+		return false;
+	}
+
+	runner_notify_connect(&r);
+
+	if (!runner_wait_notify_goal(&r, nodeName, targetState,
+								 NULL, NULL, 0, timeoutSecs))
+	{
+		log_error("Timeout: %s never reached state %s", nodeName, targetState);
+		pgsql_finish(&r.notifyConn);
+		return false;
+	}
+
+	log_info("%s is now in state %s", nodeName, targetState);
+	pgsql_finish(&r.notifyConn);
+	return true;
+}
+
+
+/*
+ * runner_sql — `pgaftest sql <node> "<query>"`
+ *
+ * Runs a SQL statement on the named service and prints the result to stdout.
+ */
+bool
+runner_sql(TestSpec *spec, const char *workDir,
+		   const char *service, const char *query)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (!runner_load_state(&r))
+	{
+		return false;
+	}
+
+	char output[4096] = "";
+	if (!exec_sql_on_service(&r, service, query, output, sizeof(output)))
+	{
+		fformat(stderr, "%s\n", output);
+		return false;
+	}
+
+	fformat(stdout, "%s\n", output);
+	return true;
+}
+
+
+/*
+ * runner_network — `pgaftest network connect|disconnect <node>`
+ *
+ * Wraps docker network connect/disconnect using the project name derived from
+ * the work dir (or COMPOSE_PROJECT_NAME when running inside the container).
+ */
+bool
+runner_network(TestSpec *spec, const char *workDir,
+			   const char *nodeName, bool connect)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (connect)
+	{
+		return runner_network_on(&r, nodeName);
+	}
+	else
+	{
+		return runner_network_off(&r, nodeName);
+	}
+}
+
+
+/*
+ * runner_assert — `pgaftest assert <node> state = <state>`
+ *
+ * Queries the monitor once; exits 0 if both reportedstate and assignedstate
+ * equal the target, 1 otherwise.
+ */
+bool
+runner_assert(TestSpec *spec, const char *workDir,
+			  const char *nodeName, const char *targetState)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (!runner_load_state(&r))
+	{
+		return false;
+	}
+
+	char rep[64] = "", asgn[64] = "";
+	if (!monitor_get_node_state(&r, nodeName,
+								rep, sizeof(rep),
+								asgn, sizeof(asgn)))
+	{
+		log_error("Could not query state for node \"%s\"", nodeName);
+		return false;
+	}
+
+	if (strcmp(rep, targetState) == 0 && strcmp(asgn, targetState) == 0)
+	{
+		log_info("%s: state = %s", nodeName, targetState);
+		return true;
+	}
+
+	log_error("%s: expected state %s, got reported=%s assigned=%s",
+			  nodeName, targetState, rep, asgn);
+	return false;
+}
+
+
 bool
 runner_show(TestSpec *spec)
 {
@@ -4226,7 +4374,7 @@ runner_show(TestSpec *spec)
 	/* write to stdout instead of a file */
 	/* No specFile for show — omit the pgaftest service */
 	bool ok = compose_gen_write(&spec->cluster, "/dev/stdout",
-								r.projectName, r.contextDir, NULL, r.hostSpecDir);
+								r.projectName, r.contextDir, NULL, r.hostSpecDir, false);
 	return ok;
 }
 
@@ -4292,7 +4440,7 @@ runner_prepare(TestSpec *spec, const char *outDir)
 	/* Write docker-compose.yml (with pgaftest service) */
 	if (!compose_gen_write(&spec->cluster, r.composeFile,
 						   r.projectName, r.contextDir, r.specFile,
-						   r.hostSpecDir))
+						   r.hostSpecDir, false))
 	{
 		return false;
 	}

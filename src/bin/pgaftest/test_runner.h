@@ -40,6 +40,7 @@ typedef struct TestRunner
 	char lastSqlService[64];       /* service name of last sql command    */
 
 	bool composeUp;                /* compose stack is running        */
+	bool interactive;              /* --tmux: pgaftest service sleeps instead of running */
 
 	/*
 	 * Direct libpq connection to the monitor's exposed postgres port.
@@ -106,6 +107,17 @@ bool runner_down(TestSpec *spec, const char *workDir);
  * Print the generated docker-compose.yml without starting anything.
  */
 bool runner_show(TestSpec *spec);
+
+/* Interactive sub-commands (DSL mirror, for use inside pgaftest container) */
+bool runner_wait(TestSpec *spec, const char *workDir,
+				 const char *nodeName, const char *targetState,
+				 int timeoutSecs);
+bool runner_sql(TestSpec *spec, const char *workDir,
+				const char *service, const char *query);
+bool runner_network(TestSpec *spec, const char *workDir,
+					const char *nodeName, bool connect);
+bool runner_assert(TestSpec *spec, const char *workDir,
+				   const char *nodeName, const char *targetState);
 
 /*
  * Prepare an output directory with docker-compose.yml, *.ini files, and a
