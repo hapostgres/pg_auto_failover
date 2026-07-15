@@ -366,7 +366,7 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 	 * and is not accessible from the container.  Docker Compose v2 can exec
 	 * into a running project by project-name alone; omit -f in that case.
 	 */
-	if (getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
 		/*
 		 * Inside the pgaftest container, the compose file lives on the HOST
@@ -551,15 +551,15 @@ runner_compose_generate(TestRunner *r)
 
 	/*
 	 * Include the pgaftest service in the compose file when:
-	 *   - running inside a compose network (PGAFTEST_COMPOSE_SERVICE is set),
+	 *   - running inside a compose network (PGAFTEST_IN_CONTAINER is set),
 	 *     so `docker compose up --exit-code-from pgaftest` drives the CI run;
 	 *   - or when interactive (--tmux), so the user gets a shell inside the
 	 *     pgaftest container with the binary, Docker CLI, and full env ready.
 	 *
-	 * In plain host mode (no --tmux, no PGAFTEST_COMPOSE_SERVICE) the service
+	 * In plain host mode (no --tmux, no PGAFTEST_IN_CONTAINER) the service
 	 * is omitted: the host process itself is the runner.
 	 */
-	bool inCompose = getenv("PGAFTEST_COMPOSE_SERVICE") != NULL; /* IGNORE-BANNED */
+	bool inCompose = getenv("PGAFTEST_IN_CONTAINER") != NULL; /* IGNORE-BANNED */
 	const char *specFileForCompose =
 		(inCompose || r->interactive) ? r->specFile : NULL;
 
@@ -732,7 +732,7 @@ runner_compose_down(TestRunner *r)
 	 * "compose down" sends SIGKILL to our own container, so skip it — the host
 	 * runner already calls "compose down" after we exit.
 	 */
-	if (getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
 		r->composeUp = false;
 		return true;
@@ -1028,7 +1028,7 @@ runner_notify_connect(TestRunner *r)
 
 	char connstr[512];
 
-	if (getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
 		/*
 		 * Inside the compose network: connect directly via the monitor service
@@ -3865,7 +3865,7 @@ runner_load_state(TestRunner *r)
 /* -----------------------------------------------------------------------
  * Monitor readiness ping loop
  *
- * When running inside the compose network (PGAFTEST_COMPOSE_SERVICE=1)
+ * When running inside the compose network (PGAFTEST_IN_CONTAINER=1)
  * the pgaftest container starts at the same time as the monitor — no
  * depends_on ordering.  We spin here until the monitor postgres accepts
  * connections, then open the LISTEN channel.
@@ -4034,11 +4034,11 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 	 * The compose file does not include a pgaftest service in host mode — the
 	 * current process IS the test runner and has docker access already.
 	 *
-	 * When PGAFTEST_COMPOSE_SERVICE is set the compose file was generated to
+	 * When PGAFTEST_IN_CONTAINER is set the compose file was generated to
 	 * include a pgaftest service and we're running inside that container; skip
 	 * compose up since the stack is already running.
 	 */
-	if (!getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
+	if (!getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
 		log_info("Starting compose stack (project: %s)", r.projectName);
 
@@ -4329,7 +4329,7 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 /*
  * runner_state_path — return the path to the state file.
  *
- * When running inside the pgaftest container (PGAFTEST_COMPOSE_SERVICE is set)
+ * When running inside the pgaftest container (PGAFTEST_IN_CONTAINER is set)
  * the state file lives in $HOME so it is always writable by the container user
  * regardless of the bind-mount ownership.  On the host it lives in workDir
  * alongside the generated compose files.
@@ -4337,7 +4337,7 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 static void
 runner_state_path(const char *workDir, char *buf, int buflen)
 {
-	bool inCompose = getenv("PGAFTEST_COMPOSE_SERVICE") != NULL; /* IGNORE-BANNED */
+	bool inCompose = getenv("PGAFTEST_IN_CONTAINER") != NULL; /* IGNORE-BANNED */
 
 	if (inCompose)
 	{

@@ -877,7 +877,7 @@ compose_gen_write(TestCluster *cluster,
 		}
 		fformat(f,
 				"    environment:\n"
-				"      PGAFTEST_COMPOSE_SERVICE: \"1\"\n"
+				"      PGAFTEST_IN_CONTAINER: \"1\"\n"
 				"      PGAFTEST_SPEC: \"/var/lib/postgres/spec.pgaf\"\n"
 				"      PGAFTEST_HOST_WORK_DIR: \"%s\"\n"
 				"      COMPOSE_PROJECT_NAME: \"%s\"\n",
