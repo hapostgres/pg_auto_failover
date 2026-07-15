@@ -2350,12 +2350,22 @@ prepare_recovery_settings(const char *pgdata,
 				  primaryNode->host,
 				  primaryNode->port);
 
+		/*
+		 * PG17 introduced synchronized_standby_slots for logical slot
+		 * failover; pg_sync_replication_slots() requires primary_conninfo
+		 * to include a dbname keyword.  Pass it when available.
+		 */
+		const char *dbname =
+			IS_EMPTY_STRING_BUFFER(replicationSource->dbname)
+			? NULL
+			: replicationSource->dbname;
+
 		if (!prepare_primary_conninfo(primaryConnInfo,
 									  MAXCONNINFO,
 									  primaryNode->host,
 									  primaryNode->port,
 									  replicationSource->userName,
-									  NULL, /* no database */
+									  dbname,
 									  replicationSource->password,
 									  replicationSource->applicationName,
 									  replicationSource->sslOptions,

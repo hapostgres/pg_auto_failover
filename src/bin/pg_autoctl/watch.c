@@ -97,8 +97,10 @@ static void clear_line_at(int row);
  * catch_sigwinch is registered as the SIGWINCH signal handler.
  */
 static void
-catch_sigwinch(int sig)
+catch_sigwinch(SIGNAL_ARGS)
 {
+	int sig = postgres_signal_arg;
+
 	window_size_changed = 1;
 	pqsignal(sig, catch_sigwinch);
 }

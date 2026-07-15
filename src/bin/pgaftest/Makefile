@@ -74,6 +74,7 @@ GENERATED_CFLAGS = $(CFLAGS) \
     -Wno-unused-function \
     -Wno-unused-const-variable \
     -Wno-return-type \
+    -Wno-implicit-fallthrough \
     -Wno-error
 
 test_spec_parse.o: test_spec_parse.c

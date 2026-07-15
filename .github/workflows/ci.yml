@@ -4,15 +4,16 @@ name: CI
 #
 # Job dependency graph:
 #
-#   style_checker ──┐
-#                   ├── (both must pass before any build job starts)
-#   ensure_base  ───┘
-#               ├── build_run_images  (PG 14-17 → pgaf:run-pgN; installcheck runs inside build stage)
-#               │       └── test_pgaftest   (17 spec jobs)
+#   style_checker ──────┐
+#   check_base_changed ─┤
+#                       ├── (all must pass before any build job starts)
+#   ensure_base  ───────┘
+#               ├── build_run_images  (PG 14-19 → pgaf:run-pgN; installcheck runs inside build stage)
+#               │       └── test_pgaftest   (spec jobs)
 #               ├── build_pgaftest    (pgaf:pgaftest, built from PG17)
 #               │       └── test_pgaftest   (same)
 #               │       └── upgrade
-#               └── build_test_images (PG 14-17 → pg_auto_failover_test:pgN)
+#               └── build_test_images (PG 14-19 → pg_auto_failover_test:pgN)
 #                       └── test_python    (PG × suite matrix)
 
 on:
@@ -52,14 +53,41 @@ jobs:
         run: ci/banned.h.sh
 
   # ---------------------------------------------------------------------------
-  # 2. Ensure base image — pull from ghcr.io or build+push on cache miss.
-  #    Runs in parallel with style_checker; build jobs wait for both.
-  #    Fast path (image exists): ~5 s manifest check.
-  #    Slow path (first run / Dockerfile.base changed): ~20 min build.
+  # 2a. Detect whether Dockerfile.base changed in this PR/push so that
+  #     ensure_base knows to force-rebuild rather than reuse the cached image.
+  # ---------------------------------------------------------------------------
+  check_base_changed:
+    name: Check if Dockerfile.base changed
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Detect Dockerfile.base change
+        id: diff
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          if git diff --name-only "${BASE_REF}"...HEAD | grep -q '^Dockerfile\.base$'; then
+            echo "changed=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # 2b. Ensure base image — pull from ghcr.io or build+push on cache miss.
+  #     Runs in parallel with style_checker; build jobs wait for both.
+  #     Fast path (image exists and Dockerfile.base unchanged): ~5 s check.
+  #     Slow path (first run or Dockerfile.base changed): ~20 min build.
   # ---------------------------------------------------------------------------
   ensure_base:
     name: Ensure base image
+    needs: check_base_changed
     uses: ./.github/workflows/base-image.yml
+    with:
+      force_rebuild: ${{ needs.check_base_changed.outputs.changed == 'true' }}
     permissions:
       contents: read
       packages: write
@@ -79,7 +107,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        PGVERSION: [14, 15, 16, 17]
+        PGVERSION: [14, 15, 16, 17, 18, 19]
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -188,7 +216,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        PGVERSION: [14, 15, 16, 17]
+        PGVERSION: [14, 15, 16, 17, 18, 19]
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -249,6 +277,8 @@ jobs:
           - { PGVERSION: 15, schedule: quick }
           - { PGVERSION: 16, schedule: quick }
           - { PGVERSION: 17, schedule: quick }
+          - { PGVERSION: 18, schedule: quick }
+          - { PGVERSION: 19, schedule: quick }
           # node: create_standby_with_pgdata, maintenance_and_drop, auth,
           #       monitor_disabled, replace_monitor, extension_update,
           #       debian_clusters, tablespaces
@@ -256,17 +286,25 @@ jobs:
           - { PGVERSION: 15, schedule: node }
           - { PGVERSION: 16, schedule: node }
           - { PGVERSION: 17, schedule: node }
+          - { PGVERSION: 18, schedule: node }
+          - { PGVERSION: 19, schedule: node }
           # ssl: enable_ssl, ssl_self_signed, ssl_cert
           - { PGVERSION: 14, schedule: ssl }
           - { PGVERSION: 15, schedule: ssl }
           - { PGVERSION: 16, schedule: ssl }
           - { PGVERSION: 17, schedule: ssl }
+          - { PGVERSION: 18, schedule: ssl }
+          - { PGVERSION: 19, schedule: ssl }
           # slow schedules: PG17 only (FSM logic, not version-specific code paths)
           - { PGVERSION: 17, schedule: multi-alternate }
           - { PGVERSION: 17, schedule: multi-misc }
           - { PGVERSION: 17, schedule: multi-async }
           - { PGVERSION: 17, schedule: citus-1 }
           - { PGVERSION: 17, schedule: citus-2 }
+          # citus on PG18 (supported); allow failure until officially validated
+          - { PGVERSION: 18, schedule: citus-1, continue-on-error: true }
+          - { PGVERSION: 18, schedule: citus-2, continue-on-error: true }
+          # PG19: no Citus release yet (CITUSTAG_19=none) — citus schedules omitted
 
     steps:
       - uses: actions/checkout@v7.0.0
@@ -379,11 +417,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        PGVERSION: [14, 15, 16, 17]
+        PGVERSION: [14, 15, 16, 17, 18, 19]
         TEST: [multi, single, monitor, ssl, citus]
+        exclude:
+          # Citus does not support PG19 yet
+          - PGVERSION: 19
+            TEST: citus
         include:
           - PGVERSION: 14
             TEST: tablespaces
+          # Allow citus failures on PG18 until officially validated
+          - PGVERSION: 18
+            TEST: citus
+            continue-on-error: true
 
     steps:
       - uses: actions/checkout@v7.0.0

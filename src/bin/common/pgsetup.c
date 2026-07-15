@@ -1588,7 +1588,7 @@ pmStatusToString(PostmasterStatus pm_status)
  * environment variable, or from our default hard-coded value of 5432.
  */
 int
-pgsetup_get_pgport()
+pgsetup_get_pgport(void)
 {
 	char pgport_env[NAMEDATALEN];
 	int pgport = 0;

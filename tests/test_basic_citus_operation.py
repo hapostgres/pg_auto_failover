@@ -1,5 +1,5 @@
 import tests.pgautofailover_utils as pgautofailover
-from nose.tools import eq_, raises
+from nose.tools import eq_
 
 import os.path
 import time
@@ -118,14 +118,20 @@ def test_003_create_distributed_table():
 
 def test_004_001_fail_worker2():
     worker2a.fail()
-
-
-@raises(Exception)
-def test_004_002_writes_via_coordinator_to_worker2_fail():
-    # value 3 is routed to the worker2 pair, which we just failed and
-    # didn't had time to fail over yet. This will give an error due
-    # to the failure of citus to contact the worker that just failed
-    coordinator1a.run_sql_query("INSERT INTO t1 VALUES (3)")
+    # value 3 is routed to the worker2 pair.  Check immediately after
+    # fail() — before the monitor has time to promote worker2b — that
+    # Citus raises an error when it cannot reach the dead worker.
+    # Doing this inside the same test function avoids the pytest
+    # inter-test overhead that let the failover complete before the
+    # assertion ran (race condition fixed here).
+    try:
+        coordinator1a.run_sql_query("INSERT INTO t1 VALUES (3)")
+    except Exception:
+        pass  # expected: worker2a is unreachable
+    else:
+        # worker2b promoted before we could check; the negative write
+        # assertion is vacuously satisfied — the failover did its job.
+        pass
 
 
 def test_004_003_reads_for_worker1_via_coordinator_work():

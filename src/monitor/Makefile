@@ -12,17 +12,29 @@ DATA = $(EXTENSION)--1.0.sql $(patsubst ${SRC_DIR}%,%,$(wildcard ${SRC_DIR}$(EXT
 # compilation configuration
 MODULE_big = $(EXTENSION)
 OBJS = $(patsubst ${SRC_DIR}%.c,%.o,$(wildcard ${SRC_DIR}*.c))
-PG_CPPFLAGS = -std=c99 -Wall -Werror -Wno-unused-parameter -Iinclude -I$(libpq_srcdir) -g
+PG_CPPFLAGS = -Wall -Werror -Wno-unused-parameter -Iinclude -I$(libpq_srcdir) -g
 SHLIB_LINK = $(libpq)
 REGRESS = create_extension monitor workers node_active_protocol guard_data_loss fast_forward dummy_update drop_extension upgrade
 
 PG_CONFIG ?= pg_config
+
+# PG19 changed pg_lsn display format (e.g. 0/0 -> 0/00000000).
+# Use version-specific expected output files when available.
+PG_MAJOR_VERSION := $(shell $(PG_CONFIG) --version | sed 's/PostgreSQL \([0-9]*\).*/\1/')
+# pg_regress appends /expected/<name>.out to the expecteddir path,
+# so point at the parent directory that contains the expected/ subdirectory.
+PG19_EXPECTED_PARENT := $(SRC_DIR)expected/pg19
+ifneq ($(wildcard $(PG19_EXPECTED_PARENT)/expected),)
+ifeq ($(shell test "$(PG_MAJOR_VERSION)" -ge 19 2>/dev/null && echo yes),yes)
+REGRESS_OPTS += --expecteddir=$(PG19_EXPECTED_PARENT)
+endif
+endif
 PGXS = $(shell $(PG_CONFIG) --pgxs)
 USE_PGXS = 1
 
 .PHONY: cleanup-before-install
 
-DEFAULT_CFLAGS = -std=c99 -D_GNU_SOURCE -g
+DEFAULT_CFLAGS = -D_GNU_SOURCE -g
 DEFAULT_CFLAGS += $(shell $(PG_CONFIG) --cflags)
 DEFAULT_CFLAGS += -Wformat
 DEFAULT_CFLAGS += -Wall

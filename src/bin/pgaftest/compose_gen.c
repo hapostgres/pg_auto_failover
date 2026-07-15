@@ -528,7 +528,25 @@ compose_gen_write(TestCluster *cluster,
 		}
 		else
 		{
-			write_image_stanza(f, cluster, contextDir);
+			/*
+			 * When PGAF_PREBUILT_IMAGE is set, use the pre-initialized monitor
+			 * image (pg_autoctl node init already ran initdb at image-build
+			 * time, so compose-up skips the slow initdb step).  Data nodes
+			 * still use the plain run image; they need the live monitor URI and
+			 * cannot be pre-initialized without it.
+			 */
+			const char *prebuiltImg = getenv("PGAF_PREBUILT_IMAGE"); /* IGNORE-BANNED */
+			const char *runImg = cluster->image[0] ? cluster->image
+								 : getenv("PGAF_IMAGE");                    /* IGNORE-BANNED */
+
+			if (prebuiltImg && *prebuiltImg && runImg && *runImg)
+			{
+				fformat(f, "    image: \"%s\"\n", prebuiltImg);
+			}
+			else
+			{
+				write_image_stanza(f, cluster, contextDir);
+			}
 		}
 
 		char monitor_pgdata[MAXPGPATH];

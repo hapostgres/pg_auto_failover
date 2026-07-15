@@ -31,6 +31,8 @@
 #include "executor/spi.h"
 #include "lib/stringinfo.h"
 #include "nodes/pg_list.h"
+#include "storage/lmgr.h"
+#include "storage/lock.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
@@ -182,7 +184,7 @@ LockNodeGroup(char *formationId, int groupId, LOCKMODE lockMode)
  * definition (schema and SQL definitions of C coded functions).
  */
 void
-checkPgAutoFailoverVersion()
+checkPgAutoFailoverVersion(void)
 {
 	char *installedVersion = NULL;
 	char *availableVersion = NULL;

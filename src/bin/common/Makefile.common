@@ -24,7 +24,7 @@ COMMON_INCLUDES += -I$(LIB_DIR)/parson/
 
 CC = $(shell $(PG_CONFIG) --cc)
 
-DEFAULT_CFLAGS  = -std=c99 -D_GNU_SOURCE -g
+DEFAULT_CFLAGS  = -D_GNU_SOURCE -g
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --includedir-server)
 DEFAULT_CFLAGS += -I $(shell $(PG_CONFIG) --pkgincludedir)/internal
@@ -109,7 +109,7 @@ endif
 
 # Shared rules for vendored libs
 lib-snprintf.o: $(PG_SNPRINTF)
-	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/lib-snprintf.Po -MT$@ \
+	$(CC) $(CFLAGS) -Wno-implicit-fallthrough -c -MMD -MP -MF$(DEPDIR)/lib-snprintf.Po -MT$@ \
 	    -o $@ $(LIB_DIR)/pg/snprintf.c
 
 lib-strerror.o: $(PG_SNPRINTF)

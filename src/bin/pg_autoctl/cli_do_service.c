@@ -292,7 +292,24 @@ cli_do_service_restart(const char *serviceName)
 
 	/* loop until we have a new pid */
 	do {
-		if (!supervisor_find_service_pid(pathnames.pid, serviceName, &newPid))
+		/*
+		 * The supervisor rewrites the pidfile non-atomically for a brief
+		 * window; retry a few times before giving up, to avoid a spurious
+		 * failure racing against that write.
+		 */
+		bool found = false;
+
+		for (int attempt = 0; attempt < 10; attempt++)
+		{
+			if (supervisor_find_service_pid(pathnames.pid, serviceName, &newPid))
+			{
+				found = true;
+				break;
+			}
+			pg_usleep(10 * 1000);   /* 10 ms between retries */
+		}
+
+		if (!found)
 		{
 			log_fatal("Failed to find pid for service name \"%s\"", serviceName);
 			exit(EXIT_CODE_INTERNAL_ERROR);

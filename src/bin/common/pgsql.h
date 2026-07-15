@@ -243,6 +243,7 @@ typedef struct ReplicationSource
 {
 	NodeAddress primaryNode;
 	char userName[NAMEDATALEN];
+	char dbname[NAMEDATALEN];      /* database name for primary_conninfo (PG17+) */
 	char slotName[MAXCONNINFO];
 	char password[MAXCONNINFO];
 	char maximumBackupRate[MAXIMUM_BACKUP_RATE_LEN];

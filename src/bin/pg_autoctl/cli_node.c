@@ -657,45 +657,84 @@ static void
 cli_node_init(int argc, char **argv)
 {
 	NodeSpec spec = { 0 };
+	char *args[40];
+	int nargs;
 
 	if (!nodespec_read(nodeSpecPath, &spec))
 	{
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	/* Idempotent: if PGDATA already initialized, nothing to do. */
+	char cfgPath[MAXPGPATH];
+
 	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
 	{
-		char cfgPath[MAXPGPATH];
 		sformat(cfgPath, sizeof(cfgPath), "%s/pg_autoctl.cfg", spec.pgdata);
-		if (file_exists(cfgPath))
-		{
-			log_info("Node already initialized at \"%s\"; nothing to do", spec.pgdata);
-			exit(0);
-		}
 	}
 
-	/* PID file cleanup and SSL cert copy follow the same sequence as node run. */
-	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
+	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata) && file_exists(cfgPath))
 	{
-		char pidPath[MAXPGPATH];
-		sformat(pidPath, sizeof(pidPath),
-				"/tmp/pg_autoctl%s/pg_autoctl.pid", spec.pgdata);
-		(void) unlink(pidPath);
+		log_info("Node already initialized at \"%s\"; nothing to do", spec.pgdata);
+		exit(0);
 	}
 
-	if (!IS_EMPTY_STRING_BUFFER(spec.ssl_ca_file))
-	{
-		if (!node_copy_ssl_certs(&spec))
-		{
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
-	}
-
-	if (!node_do_init(&spec))
+	/*
+	 * Build the same argv as node run, but nodespec_create_argv always appends
+	 * --run.  We build the argv and drop the final --run entry so that
+	 * pg_autoctl create <kind> returns after initialization, without starting
+	 * the supervisor.
+	 */
+	nargs = nodespec_create_argv(&spec, pg_autoctl_program, args, 32);
+	if (nargs < 0)
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
+
+	/* Drop the trailing "--run" that nodespec_create_argv always appends. */
+	if (nargs >= 2 && strcmp(args[nargs - 1], "--run") == 0)
+	{
+		args[nargs - 1] = NULL;
+		nargs--;
+	}
+
+	/* Log the command (masking passwords). */
+	{
+		PQExpBuffer cmd = createPQExpBuffer();
+		static const char *pwFlags[] = {
+			"--monitor-password",
+			"--replication-password",
+			"--autoctl-node-password",
+			NULL
+		};
+		for (int i = 0; i < nargs; i++)
+		{
+			if (i > 0)
+			{
+				appendPQExpBufferChar(cmd, ' ');
+			}
+			bool maskThis = false;
+			if (i > 0)
+			{
+				for (int k = 0; pwFlags[k]; k++)
+				{
+					if (strcmp(args[i - 1], pwFlags[k]) == 0)
+					{
+						maskThis = true;
+						break;
+					}
+				}
+			}
+			appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
+		}
+		log_info("pg_autoctl node init: %s", cmd->data);
+		destroyPQExpBuffer(cmd);
+	}
+
+	execv(args[0], args);
+
+	/* If we get here execv failed */
+	log_fatal("execv(\"%s\"): %m", args[0]);
+	exit(EXIT_CODE_INTERNAL_ERROR);
 }
 
 

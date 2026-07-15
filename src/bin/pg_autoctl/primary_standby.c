@@ -850,6 +850,7 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 	}
 
 	strlcpy(upstream->userName, username, NAMEDATALEN);
+	strlcpy(upstream->dbname, postgres->postgresSetup.dbname, NAMEDATALEN);
 
 	if (password != NULL)
 	{
