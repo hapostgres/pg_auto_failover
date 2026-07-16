@@ -155,30 +155,53 @@ Docker-out-of-Docker (DooD) architecture
 -----------------------------------------
 
 ``pgaftest cluster setup`` and ``pgaftest tmux`` generate a Compose file that
-includes a ``pgaftest`` service alongside the cluster nodes.  That service:
+includes a ``setup`` service alongside the cluster nodes.  That service:
 
-* runs as the ``docker`` user whose ``$HOME`` is ``/var/lib/postgres``;
-* sets ``working_dir: /var/lib/postgres`` so the interactive shell lands in
-  the user's home directory;
-* mounts the spec file at ``~/spec.pgaf`` (``/var/lib/postgres/spec.pgaf``);
+* runs as **root** — the Docker daemon socket at ``/var/run/docker.sock`` is
+  always accessible by root regardless of the host socket GID, which differs
+  between macOS Docker Desktop and Linux CI runners;
+* sets ``working_dir: /root`` (root's home directory) so that ``pgaftest``
+  can read and write a local state file in a predictable, writable location
+  without any extra volume mounts;
+* mounts the spec file read-only at ``/root/spec.pgaf``;
 * bind-mounts the host Docker socket (``/var/run/docker.sock``) so that
   ``docker compose exec`` calls issued from inside the container target the
   host's Docker daemon and reach the sibling cluster containers;
-* pre-sets ``PGAFTEST_SPEC``, ``PGAFTEST_HOST_WORK_DIR``, and
+* pre-sets ``PGAFTEST_SPEC=/root/spec.pgaf``, ``PGAFTEST_HOST_WORK_DIR``, and
   ``PGAFTEST_IN_CONTAINER=1`` in its environment so all container commands
   discover the spec file and Compose project without extra arguments, and so
   the binary knows it is running inside the container (used to pick the
-  correct state-file location).
+  correct state-file location and to prefer direct libpq connections over
+  ``docker compose exec`` for monitor queries).
 
-In ``tmux`` mode the service runs ``sleep infinity`` to stay alive.
-In CI mode (``pgaftest run``) it runs ``pgaftest run ~/spec.pgaf`` directly.
+In ``tmux`` mode the service runs ``sleep infinity`` to stay alive; the setup
+block is driven by a separate ``docker compose run`` invocation.
+In CI mode (``pgaftest run``) the same ``docker compose run setup`` invocation
+runs ``pgaftest _setup_`` to execute the ``setup {}`` block.
+
+**Direct monitor connections.**  Where possible, ``pgaftest`` uses a direct
+libpq connection to the monitor — via its LISTEN/NOTIFY connection that is
+established as part of the wait-for-state machinery — rather than shelling out
+to ``docker compose exec``.  This applies to:
+
+* polling node state during ``wait until <node> state = <s>`` (both the
+  fast-path check and the periodic 5-second fallback inside the LISTEN loop);
+* ``sql monitor { ... }`` commands in step bodies;
+* ``promote <node>`` — calls ``pgautofailover.perform_promotion()`` directly;
+* ``perform failover`` — calls ``pgautofailover.perform_failover()`` directly;
+* ``pgaftest show state`` — when running inside the container, invokes
+  ``pg_autoctl show state`` directly (it is in PATH and
+  ``PG_AUTOCTL_MONITOR`` is set in the environment).
+
+Docker exec is still used for non-monitor services (node ``exec`` commands,
+``sql node1 { ... }``, network disconnect/connect, compose lifecycle).
 
 
 Step state file
 ---------------
 
-Container commands record progress in ``~/pgaftest.state``
-(``$HOME/pgaftest.state`` inside the pgaftest container), a small JSON file
+Container commands record progress in ``/root/pgaftest.state``
+(``$HOME/pgaftest.state`` inside the setup container), a small JSON file
 that tracks:
 
 * ``current`` — index of the next step to run in the sequence;
@@ -189,11 +212,10 @@ On success ``current`` advances; on failure it stays pointing at the failed
 step so the next bare ``pgaftest step`` retries it rather than skipping
 ahead.
 
-The file lives in the container user's home directory (``/var/lib/postgres``
-for the ``docker`` user) rather than in the host-side bind-mounted work
-directory, so it is always writable regardless of how the bind-mount
-ownership maps between host and container.  It persists for the lifetime of
-the container.
+The file lives in ``/root`` (root's home directory inside the setup container)
+rather than in the host-side bind-mounted work directory, so it is always
+writable without any dependency on bind-mount ownership mapping.  It persists
+for the lifetime of the container.
 
 When ``pgaftest step`` is run on the host (outside the container), the state
 file is written to ``$TMPDIR/pgaftest/<spec-name>/pgaftest.state`` alongside
@@ -491,6 +513,18 @@ Commands inside ``setup``, ``teardown``, and ``step`` blocks
 
 .. code-block:: text
 
+   # Targeted switchover: the named node negotiates with the monitor and
+   # hands off primary to the best available secondary.
+   exec <node>  pg_autoctl perform switchover
+
+   # Untargeted failover via the monitor SQL API: the monitor picks the
+   # best secondary.  Formation and group default to "default" and 0.
+   perform failover
+   perform failover group <N>
+   perform failover in formation <name>
+   perform failover in formation <name> group <N>
+
+   # Legacy targeted promotion via the monitor SQL API:
    promote <node> [, <node2>, ...]
 
 **Monitor targeting** (replace-monitor tests)
@@ -516,10 +550,24 @@ Environment variables
 ---------------------
 
 ``PGAF_IMAGE``
-    Override the Docker image used for all node containers.  Useful in CI to
-    avoid rebuilding the image on every run::
+    Override the Docker image used for cluster node containers.  Defaults to
+    ``pg_auto_failover:pg<version>`` — the image produced by ``make build``
+    (or ``make build-pg17``, etc.).  Set this when using a custom tag::
 
-      PGAF_IMAGE=pgaf:run pgaftest run tests/tap/specs/basic_operation.pgaf
+      PGAF_IMAGE=myregistry/pgaf:pg17 pgaftest run tests/tap/specs/basic_operation.pgaf
+
+``PGAFTEST_IMAGE``
+    Override the Docker image used for the ``setup`` service container.
+    Defaults to ``pgaf:pgaftest`` — the image produced by
+    ``make build-pgaftest``.
+
+``PGAF_BUILD``
+    When set to any non-empty value, the generated ``docker-compose.yml``
+    emits inline ``build:`` stanzas (``target: run`` / ``target: pgaftest``)
+    instead of ``image:`` references.  Use this when iterating on the
+    Dockerfile without tagging an image::
+
+      PGAF_BUILD=1 pgaftest tmux tests/tap/specs/basic_operation.pgaf
 
 ``PGAFTEST_SPEC``
     Path to the spec file inside the container.  Set automatically by
@@ -532,8 +580,8 @@ Environment variables
 
 ``PGAFTEST_HOST_WORK_DIR``
     Host-side working directory, set automatically in the container
-    environment.  Container commands write ``pgaftest.state`` here so
-    progress persists across ``docker compose exec`` invocations.
+    environment.  Used by container commands to locate the compose project
+    (``docker-compose.yml``, node ``*.ini`` files, SSL certificates).
 
 ``TMPDIR``
     Base directory for auto-derived working directories (default: ``/tmp``).
