@@ -116,38 +116,40 @@
      T_EXPECT = 332,
      T_ERROR = 333,
      T_PROMOTE = 334,
-     T_NETWORK = 335,
-     T_DISCONNECT = 336,
-     T_CONNECT = 337,
-     T_SLEEP = 338,
-     T_COMPOSE = 339,
-     T_DOWN = 340,
-     T_START = 341,
-     T_STOP = 342,
-     T_STOPPED = 343,
-     T_KILL = 344,
-     T_INJECT = 345,
-     T_STATE = 346,
-     T_ASSIGNED_STATE = 347,
-     T_IN = 348,
-     T_GROUP = 349,
-     T_LBRACE = 350,
-     T_RBRACE = 351,
-     T_COMMA = 352,
-     T_POSTGRES = 353,
-     T_STAYS = 354,
-     T_WHILE = 355,
-     T_THROUGH = 356,
-     T_SET = 357,
-     T_LOGS = 358,
-     T_NOT = 359,
-     T_CONTAINS = 360,
-     T_MATCHES = 361,
-     T_INTEGER = 362,
-     T_IDENT = 363,
-     T_STRING = 364,
-     T_BLOCK = 365,
-     T_SHELL_ARGS = 366
+     T_PERFORM = 335,
+     T_FAILOVER = 336,
+     T_NETWORK = 337,
+     T_DISCONNECT = 338,
+     T_CONNECT = 339,
+     T_SLEEP = 340,
+     T_COMPOSE = 341,
+     T_DOWN = 342,
+     T_START = 343,
+     T_STOP = 344,
+     T_STOPPED = 345,
+     T_KILL = 346,
+     T_INJECT = 347,
+     T_STATE = 348,
+     T_ASSIGNED_STATE = 349,
+     T_IN = 350,
+     T_GROUP = 351,
+     T_LBRACE = 352,
+     T_RBRACE = 353,
+     T_COMMA = 354,
+     T_POSTGRES = 355,
+     T_STAYS = 356,
+     T_WHILE = 357,
+     T_THROUGH = 358,
+     T_SET = 359,
+     T_LOGS = 360,
+     T_NOT = 361,
+     T_CONTAINS = 362,
+     T_MATCHES = 363,
+     T_INTEGER = 364,
+     T_IDENT = 365,
+     T_STRING = 366,
+     T_BLOCK = 367,
+     T_SHELL_ARGS = 368
    };
 #endif
 /* Tokens.  */
@@ -228,38 +230,40 @@
 #define T_EXPECT 332
 #define T_ERROR 333
 #define T_PROMOTE 334
-#define T_NETWORK 335
-#define T_DISCONNECT 336
-#define T_CONNECT 337
-#define T_SLEEP 338
-#define T_COMPOSE 339
-#define T_DOWN 340
-#define T_START 341
-#define T_STOP 342
-#define T_STOPPED 343
-#define T_KILL 344
-#define T_INJECT 345
-#define T_STATE 346
-#define T_ASSIGNED_STATE 347
-#define T_IN 348
-#define T_GROUP 349
-#define T_LBRACE 350
-#define T_RBRACE 351
-#define T_COMMA 352
-#define T_POSTGRES 353
-#define T_STAYS 354
-#define T_WHILE 355
-#define T_THROUGH 356
-#define T_SET 357
-#define T_LOGS 358
-#define T_NOT 359
-#define T_CONTAINS 360
-#define T_MATCHES 361
-#define T_INTEGER 362
-#define T_IDENT 363
-#define T_STRING 364
-#define T_BLOCK 365
-#define T_SHELL_ARGS 366
+#define T_PERFORM 335
+#define T_FAILOVER 336
+#define T_NETWORK 337
+#define T_DISCONNECT 338
+#define T_CONNECT 339
+#define T_SLEEP 340
+#define T_COMPOSE 341
+#define T_DOWN 342
+#define T_START 343
+#define T_STOP 344
+#define T_STOPPED 345
+#define T_KILL 346
+#define T_INJECT 347
+#define T_STATE 348
+#define T_ASSIGNED_STATE 349
+#define T_IN 350
+#define T_GROUP 351
+#define T_LBRACE 352
+#define T_RBRACE 353
+#define T_COMMA 354
+#define T_POSTGRES 355
+#define T_STAYS 356
+#define T_WHILE 357
+#define T_THROUGH 358
+#define T_SET 359
+#define T_LOGS 360
+#define T_NOT 361
+#define T_CONTAINS 362
+#define T_MATCHES 363
+#define T_INTEGER 364
+#define T_IDENT 365
+#define T_STRING 366
+#define T_BLOCK 367
+#define T_SHELL_ARGS 368
 
 
 
@@ -274,7 +278,7 @@ typedef union YYSTYPE
 	TestCmd    *cmd;
 }
 /* Line 1529 of yacc.c.  */
-#line 278 "test_spec_parse.h"
+#line 282 "test_spec_parse.h"
 	YYSTYPE;
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1

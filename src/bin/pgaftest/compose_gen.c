@@ -6,7 +6,12 @@
  * Design principle — uniform containers
  * ======================================
  * Every container in the generated compose file uses:
- *   - the same Docker image (PGAF_IMAGE env var or a local build)
+ *   - the same Docker image for cluster nodes (default: pg_auto_failover:pg<ver>,
+ *     overridable via PGAF_IMAGE or `image "..."` in the spec)
+ *   - the pgaftest runner image for the setup service (default: pgaf:pgaftest,
+ *     overridable via PGAFTEST_IMAGE)
+ *   - Set PGAF_BUILD=1 to emit inline `build:` stanzas instead of image refs
+ *     (useful when iterating on the Dockerfile without tagging)
  *   - the same command:  pg_autoctl node run /etc/pgaf/node.ini
  *   - the same config file location inside the container
  *
@@ -373,26 +378,51 @@ write_node_command(FILE *f, const TestCluster *cluster, const char *iniPath)
 
 
 /*
- * image_stanza writes either `image:` (when PGAF_IMAGE is set or the cluster
- * spec provides an image) or a `build:` stanza.
+ * write_image_stanza_target — emit either `image:` or `build:` for a service.
+ *
+ * Resolution order for the run/debian/monitor targets (cluster data nodes):
+ *   1. spec-level  `image "..."` declaration
+ *   2. PGAF_IMAGE  env var
+ *   3. pg_auto_failover:pg<version>  — produced by `make build`
+ *
+ * Resolution order for the pgaftest target (setup service):
+ *   1. PGAFTEST_IMAGE env var
+ *   2. pgaf:pgaftest                 — produced by `make build-pgaftest`
+ *
+ * Set PGAF_BUILD=1 to force an inline `build:` stanza for all targets
+ * (useful when iterating on the Dockerfile without tagging an image).
  */
 static void
 write_image_stanza_target(FILE *f, const TestCluster *cluster,
 						  const char *contextDir, const char *target)
 {
-	/*
-	 * The cluster image (from `image "..."` in the spec) is for data services
-	 * only.  The pgaftest service always builds from --target pgaftest so that
-	 * the test runner binary is present regardless of which cluster image is
-	 * used.
-	 */
 	bool isTestRunner = (strcmp(target, "pgaftest") == 0);
+	bool forceBuild = (getenv("PGAF_BUILD") != NULL); /* IGNORE-BANNED */
 
-	/* cluster-level image overrides PGAF_IMAGE env var */
-	const char *img = cluster->image[0] ? cluster->image : getenv("PGAF_IMAGE"); /* IGNORE-BANNED */
-
-	if (img && *img && !isTestRunner)
+	if (!forceBuild)
 	{
+		const char *img = NULL;
+
+		if (isTestRunner)
+		{
+			img = getenv("PGAFTEST_IMAGE"); /* IGNORE-BANNED */
+			if (!img || !*img)
+			{
+				img = "pgaf:pgaftest";
+			}
+		}
+		else
+		{
+			img = cluster->image[0] ? cluster->image : getenv("PGAF_IMAGE"); /* IGNORE-BANNED */
+			if (!img || !*img)
+			{
+				static char defaultImg[64];
+				sformat(defaultImg, sizeof(defaultImg),
+						"pg_auto_failover:pg%s", debian_pg_version());
+				img = defaultImg;
+			}
+		}
+
 		fformat(f, "    image: \"%s\"\n", img);
 		return;
 	}
@@ -873,42 +903,32 @@ compose_gen_write(TestCluster *cluster,
 		}
 
 		/*
-		 * Add the GID of /var/run/docker.sock as a supplementary group so
-		 * the container's `docker` user can access the socket.  The GID
-		 * differs between hosts (e.g. 1 on macOS Docker Desktop, 999 on
-		 * most Linux distros), so we stat it at compose-generation time and
-		 * inject it via `group_add`.
+		 * The setup service runs as root (image default): root always has
+		 * access to /var/run/docker.sock for Docker-out-of-Docker regardless
+		 * of the host socket GID (which differs between macOS Docker Desktop
+		 * and Linux CI).  Working directory is /root so that pgaftest can
+		 * maintain a local state file (current step, etc.) in a predictable,
+		 * writable location without any volume mounts.
 		 */
-		struct stat sockStat;
-		gid_t dockerSockGid = 0;
-		if (stat("/var/run/docker.sock", &sockStat) == 0) /* IGNORE-BANNED */
-		{
-			dockerSockGid = sockStat.st_gid;
-		}
-
 		fformat(f,
-				"    user: docker\n"
-				"    group_add:\n"
-				"      - \"%u\"\n"
-				"    working_dir: /var/lib/postgres\n"
+				"    working_dir: /root\n"
 				"    volumes:\n"
-				"      - %s:/var/lib/postgres/spec.pgaf:ro\n"
+				"      - %s:/root/spec.pgaf:ro\n"
 				"      - /var/run/docker.sock:/var/run/docker.sock\n"
 				"      - %s:%s\n",
-				(unsigned int) dockerSockGid,
 				specFile, workDir, workDir);
 		if (ssl_needs_certs(cluster->ssl))
 		{
 			fformat(f,
-					"      - %s/ssl/ca.crt:/var/lib/postgres/.postgresql/root.crt:ro\n"
-					"      - %s/ssl/client/postgresql.crt:/var/lib/postgres/.postgresql/postgresql.crt:ro\n"
-					"      - %s/ssl/client/postgresql.key:/var/lib/postgres/.postgresql/postgresql.key:ro\n",
+					"      - %s/ssl/ca.crt:/root/.postgresql/root.crt:ro\n"
+					"      - %s/ssl/client/postgresql.crt:/root/.postgresql/postgresql.crt:ro\n"
+					"      - %s/ssl/client/postgresql.key:/root/.postgresql/postgresql.key:ro\n",
 					workDir, workDir, workDir);
 		}
 		fformat(f,
 				"    environment:\n"
 				"      PGAFTEST_IN_CONTAINER: \"1\"\n"
-				"      PGAFTEST_SPEC: \"/var/lib/postgres/spec.pgaf\"\n"
+				"      PGAFTEST_SPEC: \"/root/spec.pgaf\"\n"
 				"      PGAFTEST_HOST_WORK_DIR: \"%s\"\n"
 				"      COMPOSE_PROJECT_NAME: \"%s\"\n",
 				workDir, projectName);
@@ -1050,16 +1070,19 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 				cluster->monitorPassword);
 	}
 
-	/* emit [formation <name>] for every non-default formation */
+	/*
+	 * Emit [formation <name>] sections into monitor.ini.
+	 *
+	 * The default formation is created automatically at monitor init and does
+	 * not need a section for kind/secondary, but we include it when num-sync
+	 * is explicitly declared so that nodespec_apply can set it.
+	 * Non-default formations always get a section so they are created at
+	 * post-init time.
+	 */
 	for (int fi = 0; fi < cluster->formationCount; fi++)
 	{
 		const TestFormation *form = &cluster->formations[fi];
-		if (strcmp(form->name, "default") == 0)
-		{
-			continue;
-		}
-
-		fformat(f, "\n[formation %s]\n", form->name);
+		bool isDefault = (strcmp(form->name, "default") == 0);
 
 		/* derive kind from node types: any coordinator/worker → citus */
 		bool isCitus = false;
@@ -1071,14 +1094,31 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 				isCitus = true;
 			}
 		}
-		if (isCitus)
+
+		/* skip the default formation unless it has settings to apply */
+		if (isDefault && !isCitus && !form->disableSecondary && form->numSync < 0)
 		{
-			fformat(f, "kind = citus\n");
+			continue;
 		}
 
-		if (form->disableSecondary)
+		fformat(f, "\n[formation %s]\n", form->name);
+
+		if (!isDefault)
 		{
-			fformat(f, "secondary = false\n");
+			if (isCitus)
+			{
+				fformat(f, "kind = citus\n");
+			}
+
+			if (form->disableSecondary)
+			{
+				fformat(f, "secondary = false\n");
+			}
+		}
+
+		if (form->numSync >= 0)
+		{
+			fformat(f, "num_sync_standbys = %d\n", form->numSync);
 		}
 	}
 

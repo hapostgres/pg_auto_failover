@@ -205,6 +205,29 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_FAILOVER:
+		{
+			const char *formation =
+				cmd->service[0] ? cmd->service : "default";
+			int groupId =
+				cmd->waitGroupCount > 0 ? cmd->waitGroups[0] : 0;
+
+			if (strcmp(formation, "default") == 0 && groupId == 0)
+			{
+				fprintf(f, "%sperform failover\n", pad);
+			}
+			else if (groupId == 0)
+			{
+				fprintf(f, "%sperform failover in formation %s\n", pad, formation);
+			}
+			else
+			{
+				fprintf(f, "%sperform failover in formation %s group %d\n",
+						pad, formation, groupId);
+			}
+			break;
+		}
+
 		default:
 		{
 			fprintf(f, "%s# (cmd kind %d)\n", pad, (int) cmd->kind);
@@ -671,54 +694,6 @@ runner_compose_up(TestRunner *r)
 }
 
 
-/*
- * runner_apply_formation_settings — apply cluster-level formation settings
- * that cannot be expressed in the node ini files.
- *
- * Called once after `docker compose up` and the monitor healthcheck passes.
- * Currently applies:
- *   - number-sync-standbys (when numSync >= 0 in the cluster spec)
- *
- * We use `docker compose exec` so the call goes through the monitor's own
- * pg_autoctl binary and lands on the already-running monitor instance.
- */
-static bool
-runner_apply_formation_settings(TestRunner *r)
-{
-	const TestCluster *c = &r->spec->cluster;
-	bool ok = true;
-
-	for (int fi = 0; fi < c->formationCount; fi++)
-	{
-		const TestFormation *form = &c->formations[fi];
-
-		if (form->numSync < 0)
-		{
-			continue;
-		}
-
-		log_info("Setting formation \"%s\" number-sync-standbys = %d",
-				 form->name, form->numSync);
-
-		int rc = run_cmd(
-			"%s exec -T monitor "
-			"pg_autoctl set formation number-sync-standbys %d "
-			"--pgdata /var/lib/postgres/pgaf --formation %s 2>&1",
-			r->composeBase,
-			form->numSync, form->name);
-
-		if (rc != 0)
-		{
-			log_error("Failed to set number-sync-standbys for formation "
-					  "\"%s\" (exit %d)", form->name, rc);
-			ok = false;
-		}
-	}
-
-	return ok;
-}
-
-
 static bool
 runner_compose_down(TestRunner *r)
 {
@@ -746,7 +721,20 @@ runner_compose_down(TestRunner *r)
 		r->notifyConnected = false;
 	}
 
-	run_cmd("%s down --volumes --remove-orphans 2>&1",
+	/*
+	 * Explicitly stop the named interactive-shell container spawned by the
+	 * tmux session.  It runs `docker compose run --rm --name <proj>-sh`
+	 * which Docker removes on clean exit, but not when the tmux session is
+	 * killed or the user detaches without exiting.
+	 */
+	run_cmd("docker rm -f %s-sh 2>/dev/null || true", r->projectName);
+
+	/*
+	 * Include --profile setup so that any remaining setup-profile containers
+	 * (e.g. a still-running _setup_ container) are stopped and removed.
+	 * Without this, plain `compose down` ignores profile-gated services.
+	 */
+	run_cmd("%s --profile setup down --volumes --remove-orphans 2>&1",
 			r->composeBase);
 	r->composeUp = false;
 	return true;
@@ -781,6 +769,35 @@ monitor_get_node_state(TestRunner *r, const char *nodeName,
 					   char *reported, int replen,
 					   char *assigned, int asslen)
 {
+	/*
+	 * Prefer a direct libpq query over the LISTEN connection when it is
+	 * available: the libpq path bypasses the docker socket entirely and is
+	 * faster.  Falls through to docker compose exec when not connected.
+	 */
+	if (r->notifyConnected &&
+		r->notifyConn.connection != NULL &&
+		PQstatus(r->notifyConn.connection) == CONNECTION_OK)
+	{
+		const char *params[1] = { nodeName };
+		PGresult *res = PQexecParams(r->notifyConn.connection,
+									 "SELECT reportedstate, goalstate"
+									 "  FROM pgautofailover.node"
+									 " WHERE nodename = $1"
+									 " LIMIT 1",
+									 1, NULL, params, NULL, NULL, 0);
+
+		if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1)
+		{
+			strlcpy(reported, PQgetvalue(res, 0, 0), replen);
+			strlcpy(assigned, PQgetvalue(res, 0, 1), asslen);
+			PQclear(res);
+			return true;
+		}
+		PQclear(res);
+
+		/* fall through to docker exec */
+	}
+
 	char out[256];
 	int rc = run_cmd_capture(out, sizeof(out),
 							 "%s exec -T %s "
@@ -938,14 +955,27 @@ static void
 log_formation_state(TestRunner *r)
 {
 	char out[4096];
-	int rc = run_cmd_capture(out, sizeof(out),
-							 "%s exec -T monitor "
-							 "pg_autoctl show state 2>/dev/null",
-							 r->composeBase);
+	bool gotState = false;
 
-	if (rc != 0 || out[0] == '\0')
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
-		return;
+		int rc2 = run_cmd_capture(out, sizeof(out),
+								  "pg_autoctl show state 2>/dev/null");
+		if (rc2 == 0 && out[0])
+		{
+			gotState = true;
+		}
+	}
+	if (!gotState)
+	{
+		int rc = run_cmd_capture(out, sizeof(out),
+								 "%s exec -T monitor "
+								 "pg_autoctl show state 2>/dev/null",
+								 r->composeBase);
+		if (rc != 0 || out[0] == '\0')
+		{
+			return;
+		}
 	}
 
 	char *line = out;
@@ -1694,25 +1724,74 @@ runner_promote_one(TestRunner *r, const char *nodeName)
 		}
 	}
 
-	char out[4096] = "";
-	int rc = run_cmd_capture(out, sizeof(out),
-							 "%s exec -T monitor "
-							 "pg_autoctl perform promotion --name %s --formation %s 2>&1",
-							 r->composeBase, nodeName, formation);
-
-	if (rc != 0)
+	/*
+	 * Call pgautofailover.perform_promotion(formation, node_name) directly on
+	 * the monitor via the LISTEN connection — no docker socket required.
+	 */
+	if (!r->notifyConnected ||
+		r->notifyConn.connection == NULL ||
+		PQstatus(r->notifyConn.connection) != CONNECTION_OK)
 	{
-		if (out[0])
-		{
-			log_output("   ", out);
-		}
-		log_error("promote: pg_autoctl perform promotion --name %s "
-				  "--formation %s failed (exit %d)", nodeName, formation, rc);
+		log_error("promote: monitor LISTEN connection not available");
 		return false;
 	}
 
+	const char *params[2] = { formation, nodeName };
+	PGresult *res = PQexecParams(r->notifyConn.connection,
+								 "SELECT pgautofailover.perform_promotion($1, $2)",
+								 2, NULL, params, NULL, NULL, 0);
+
+	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		log_error("promote: perform_promotion(%s, %s) failed: %s",
+				  formation, nodeName,
+				  PQresultErrorMessage(res));
+		PQclear(res);
+		return false;
+	}
+	PQclear(res);
+
 	/* confirm monitor agrees */
 	return wait_for_state(r, nodeName, "primary", PGAF_TIMEOUT_DEFAULT, false);
+}
+
+
+/*
+ * runner_perform_failover — calls pgautofailover.perform_failover(formation,
+ * group) directly on the monitor.  This is the untargeted path: the monitor
+ * picks the best secondary to promote.
+ */
+static bool
+runner_perform_failover(TestRunner *r, const char *formation, int groupId)
+{
+	log_info("  perform failover: formation=%s group=%d", formation, groupId);
+
+	if (!r->notifyConnected ||
+		r->notifyConn.connection == NULL ||
+		PQstatus(r->notifyConn.connection) != CONNECTION_OK)
+	{
+		log_error("perform failover: monitor LISTEN connection not available");
+		return false;
+	}
+
+	char groupStr[16];
+	sformat(groupStr, sizeof(groupStr), "%d", groupId);
+	const char *params[2] = { formation, groupStr };
+	PGresult *res = PQexecParams(r->notifyConn.connection,
+								 "SELECT pgautofailover.perform_failover($1, $2::int)",
+								 2, NULL, params, NULL, NULL, 0);
+
+	if (PQresultStatus(res) != PGRES_COMMAND_OK &&
+		PQresultStatus(res) != PGRES_TUPLES_OK)
+	{
+		log_error("perform failover: perform_failover(%s, %d) failed: %s",
+				  formation, groupId,
+				  PQresultErrorMessage(res));
+		PQclear(res);
+		return false;
+	}
+	PQclear(res);
+	return true;
 }
 
 
@@ -1810,10 +1889,36 @@ runner_wait_notify_goal(TestRunner *r,
 
 	time_t deadline = time(NULL) + timeoutSecs;
 
+	time_t lastSqlPoll = 0;
+
 	while (time(NULL) < deadline)
 	{
 		if (r->notifyConnected)
 		{
+			/*
+			 * Periodic SQL poll inside the LISTEN path: catches states that were
+			 * already achieved before LISTEN was established (no new notification
+			 * will fire for a stable state).  The fast-path above handles the
+			 * common case; this catches the race where the state converged
+			 * between the fast-path check and LISTEN setup, or where
+			 * monitor_get_node_state transiently failed on the first call.
+			 */
+			{
+				time_t sqlNow = time(NULL);
+				if (sqlNow - lastSqlPoll >= 5)
+				{
+					char repP[64] = "", asgnP[64] = "";
+					if (monitor_get_node_state(r, nodeName, repP, sizeof(repP),
+											   asgnP, sizeof(asgnP)) &&
+						strcmp(repP, targetState) == 0 &&
+						strcmp(asgnP, targetState) == 0)
+					{
+						return true;
+					}
+					lastSqlPoll = sqlNow;
+				}
+			}
+
 			PQconsumeInput(r->notifyConn.connection);
 
 			PGnotify *notify;
@@ -2328,6 +2433,59 @@ static bool
 exec_sql_on_service(TestRunner *r, const char *service,
 					const char *sql, char *outbuf, int outlen)
 {
+	/*
+	 * For monitor queries, use the existing LISTEN connection when available:
+	 * it's faster than spawning a subprocess and works without docker socket
+	 * access.  For other services, fall through to docker compose exec.
+	 */
+	if (strcmp(service, r->activeMonitorService) == 0 &&
+		r->notifyConnected &&
+		r->notifyConn.connection != NULL &&
+		PQstatus(r->notifyConn.connection) == CONNECTION_OK)
+	{
+		PGresult *res = PQexec(r->notifyConn.connection, sql);
+		ExecStatusType status = PQresultStatus(res);
+
+		if (status == PGRES_TUPLES_OK)
+		{
+			int rows = PQntuples(res);
+			int cols = PQnfields(res);
+			int pos = 0;
+
+			for (int row = 0; row < rows; row++)
+			{
+				for (int col = 0; col < cols; col++)
+				{
+					const char *val = PQgetvalue(res, row, col);
+					int vlen = strlen(val);
+
+					if (pos + vlen + 2 < outlen)
+					{
+						memcpy(outbuf + pos, val, vlen);
+						pos += vlen;
+						outbuf[pos++] = '\n';
+					}
+				}
+			}
+			outbuf[pos] = '\0';
+			PQclear(res);
+			return true;
+		}
+		else if (status == PGRES_COMMAND_OK)
+		{
+			outbuf[0] = '\0';
+			PQclear(res);
+			return true;
+		}
+		else
+		{
+			const char *errmsg = PQresultErrorMessage(res);
+			strlcpy(outbuf, errmsg ? errmsg : "unknown error", outlen);
+			PQclear(res);
+			return false;
+		}
+	}
+
 	char escaped[8192];
 	escape_sql_for_shell(sql, escaped, sizeof(escaped));
 
@@ -2690,6 +2848,23 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 							cmd->promoteNodes[i]);
 					return false;
 				}
+			}
+			return true;
+		}
+
+		case CMD_FAILOVER:
+		{
+			const char *formation =
+				cmd->service[0] ? cmd->service : "default";
+			int groupId =
+				cmd->waitGroupCount > 0 ? cmd->waitGroups[0] : 0;
+
+			if (!runner_perform_failover(r, formation, groupId))
+			{
+				sformat(errBuf, errLen,
+						"perform failover: formation=%s group=%d failed",
+						formation, groupId);
+				return false;
 			}
 			return true;
 		}
@@ -3623,6 +3798,25 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 			break;
 		}
 
+		case CMD_FAILOVER:
+		{
+			const char *formation =
+				cmd->service[0] ? cmd->service : "default";
+			int groupId =
+				cmd->waitGroupCount > 0 ? cmd->waitGroups[0] : 0;
+
+			if (strcmp(formation, "default") == 0 && groupId == 0)
+			{
+				sformat(buf, len, "perform failover");
+			}
+			else
+			{
+				sformat(buf, len, "perform failover in formation %s group %d",
+						formation, groupId);
+			}
+			break;
+		}
+
 		case CMD_SQL:
 		{
 			inline_text(cmd->args, tmp, sizeof(tmp));
@@ -4085,11 +4279,6 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		return false;
 	}
 
-	if (!runner_apply_formation_settings(&r))
-	{
-		return false;
-	}
-
 	/* setup{} */
 	if (spec->setup)
 	{
@@ -4237,12 +4426,6 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		}
 	}
 
-	if (!runner_apply_formation_settings(&r))
-	{
-		runner_compose_down(&r);
-		return false;
-	}
-
 	if (withTmux)
 	{
 		/*
@@ -4291,16 +4474,26 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		if (spec->setup)
 		{
 			sformat(setupPane, sizeof(setupPane),
-					"%s run --rm --name %s-setup setup "
-					"pgaftest _setup_ /var/lib/postgres/spec.pgaf --work-dir %s",
-					r.composeBase, r.projectName, workDir);
+					"%s run --rm setup "
+					"pgaftest _setup_ /root/spec.pgaf --work-dir %s",
+					r.composeBase, workDir);
 		}
 
-		/* pane 3: interactive shell, always present */
+		/*
+		 * pane 3: interactive shell.  Named so that `pgaftest cluster down`
+		 * can forcibly stop it even if the user did not type `exit`.
+		 */
 		char shellCmd[512];
 		sformat(shellCmd, sizeof(shellCmd),
-				"%s run --rm -it --name %s-sh setup bash",
+				"%s run --rm --name %s-sh -it setup bash",
 				r.composeBase, r.projectName);
+
+		/*
+		 * Pre-clean any leftover named containers from a previous tmux
+		 * session that was not torn down with `pgaftest cluster down`.
+		 * These would cause "container name already in use" conflicts.
+		 */
+		run_cmd("docker rm -f %s-sh 2>/dev/null || true", r.projectName);
 
 		log_info("Starting tmux session \"%s\"", r.projectName);
 		log_info("To open another shell: pgaftest cluster sh");
@@ -4780,19 +4973,40 @@ runner_show_state(TestSpec *spec, const char *workDir)
 		}
 	}
 
+	/*
+	 * When running inside the compose network, pg_autoctl is in PATH and
+	 * PG_AUTOCTL_MONITOR is set in the environment — run it directly without
+	 * going through the docker socket.  Outside the container, fall through
+	 * to the docker compose exec path.
+	 */
 	char out[8192];
-	int rc = run_cmd_capture(out, sizeof(out),
-							 "%s exec -T monitor "
-							 "pg_autoctl show state 2>/dev/null",
-							 r.composeBase);
+	bool gotOutput = false;
 
-	if (rc != 0 || out[0] == '\0')
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
-		log_error("Could not reach monitor — is the cluster running?");
-		return false;
+		int rc2 = run_cmd_capture(out, sizeof(out),
+								  "pg_autoctl show state 2>/dev/null");
+		if (rc2 == 0 && out[0])
+		{
+			gotOutput = true;
+		}
+	}
+
+	if (!gotOutput)
+	{
+		int rc = run_cmd_capture(out, sizeof(out),
+								 "%s exec -T monitor "
+								 "pg_autoctl show state 2>/dev/null",
+								 r.composeBase);
+		if (rc != 0 || out[0] == '\0')
+		{
+			log_error("Could not reach monitor — is the cluster running?");
+			return false;
+		}
 	}
 
 	fputs(out, stdout);
+	fputc('\n', stdout);
 	return true;
 }
 

@@ -712,8 +712,8 @@ cli_sh(int argc, char **argv)
 
 	char cmd[2048];
 	sformat(cmd, sizeof(cmd),
-			"docker compose -p %s -f %s/docker-compose.yml run --rm -it --name %s-sh setup bash",
-			projectName, pgaftestOpts.workDir, projectName);
+			"docker compose -p %s -f %s/docker-compose.yml run --rm -it setup bash",
+			projectName, pgaftestOpts.workDir);
 
 	int rc = system(cmd);
 	exit(rc == 0 ? 0 : 1);
@@ -1150,6 +1150,22 @@ cli_help(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 	commandline_print_command_tree(&pgaftest_root, stdout);
+
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
+	{
+		printf(
+			"\n"
+			"Interactive session quick-start (run these inside the container):\n"
+			"\n"
+			"  pgaftest show state    # cluster FSM state from pg_autoctl show state\n"
+			"  pgaftest show steps    # sequence steps with progress markers\n"
+			"  pgaftest show step     # DSL commands that will run on the next step\n"
+			"  pgaftest step          # run the next pending step (auto-advance)\n"
+			"  pgaftest step <name>   # run a specific named step\n"
+			"\n"
+			);
+	}
+
 	exit(0);
 }
 
