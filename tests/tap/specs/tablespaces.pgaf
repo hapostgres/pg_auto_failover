@@ -91,6 +91,7 @@ step test_003_tablespace_b_while_streaming {
 
 step test_004_failover {
     perform failover
+    wait until node2 state is primary  timeout 90s
     sql node2 { INSERT INTO t2 VALUES (7); }
     sql node1 { SELECT * FROM t2 ORDER BY i; }
     expect { { 3 } { 4 } { 7 } }

@@ -72,16 +72,23 @@ step test_002_verify_stuck {
 }
 
 #
-# Step 3: unblock with --allow-data-loss.
+# Step 3: unblock with the SQL equivalent of --allow-data-loss.
 #
 # pg_autoctl perform failover --allow-data-loss opens a transaction on the
 # monitor, sets LOCAL pgautofailover.guard_data_loss = false, and calls
-# perform_failover().  The monitor selects node3 as the only available
-# candidate and drives it toward prepare_promotion.
+# perform_failover().  We replicate that directly via SQL so the call is
+# non-blocking: the CLI version waits for a node to reach "primary", which
+# cannot happen until node2 is brought back in step 4 — creating a deadlock
+# where the exec blocks and step 4 never runs.
 #
 
 step test_003_allow_data_loss_failover {
-    exec monitor  pg_autoctl perform failover --allow-data-loss --formation default
+    sql monitor {
+        BEGIN;
+        SET LOCAL pgautofailover.guard_data_loss TO false;
+        SELECT pgautofailover.perform_failover('default', 0::int);
+        COMMIT;
+    }
     wait until node3 state is wait_primary  timeout 120s
 }
 

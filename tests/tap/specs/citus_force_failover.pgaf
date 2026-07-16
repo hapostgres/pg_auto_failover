@@ -22,7 +22,13 @@ setup {
     wait until primary, secondary in group 1  timeout 90s
     wait until primary, secondary in group 2  timeout 90s
     exec coordinator1a pg_autoctl perform switchover
+    wait until coordinator1b state is primary
+        and coordinator1a state is secondary
+        timeout 60s
     exec worker1a pg_autoctl perform switchover
+    wait until worker1b state is primary
+        and worker1a state is secondary
+        timeout 60s
     exec worker2a pg_autoctl perform switchover
 }
 
