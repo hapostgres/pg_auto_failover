@@ -106,7 +106,7 @@ include:
 
 - PostgreSQL version::
 
-     pg_autoctl version
+     psql --version
 
 - A ``.pgaf`` spec file, or if you cannot write one yet: a description of
   the topology (number of nodes, regions, sync/async) and the exact steps
