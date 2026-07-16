@@ -103,6 +103,7 @@ CommandLine *root_subcommands[] = {
 	&inspect_commands,
 	&manual_commands,
 	&internal_commands,
+	&do_compat_commands,
 	&node_commands,
 	&service_run_command,
 	&watch_command,

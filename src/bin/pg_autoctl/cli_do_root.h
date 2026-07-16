@@ -103,6 +103,7 @@ extern CommandLine do_tmux_commands;
 extern CommandLine do_coordinator_commands;
 
 extern CommandLine internal_commands;
+extern CommandLine do_compat_commands;
 extern CommandLine *do_subcommands[];
 
 int keeper_cli_keeper_setup_getopts(int argc, char **argv);
