@@ -142,6 +142,17 @@ keeper_pg_init_and_register(Keeper *keeper)
 
 		(void) local_postgres_init(postgres, pgSetup);
 
+		/*
+		 * keeper_ensure_node_has_been_dropped connects to the monitor.
+		 * Initialize the monitor connection now so it uses PGSQL_CONN_MONITOR
+		 * rather than the zero-initialized PGSQL_CONN_LOCAL default, which
+		 * would connect to local Postgres (which has no pgautofailover schema).
+		 */
+		if (!monitor_init(&keeper->monitor, config->monitor_pguri))
+		{
+			return false;
+		}
+
 		if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
 		{
 			log_fatal("Failed to determine if node %d with current state \"%s\""
