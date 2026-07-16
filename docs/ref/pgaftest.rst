@@ -516,21 +516,44 @@ TAP output
 ----------
 
 In ``run`` mode, pgaftest produces TAP__ output on standard output.  Each
-named step in ``sequence`` becomes one test point.  No ``TAP version``
-header is emitted::
+named step in ``sequence`` becomes one test point, with elapsed time::
 
-  1..4
-  ok 1 - stop_primary
-  ok 2 - check_failover
-  ok 3 - restart_node1
-  ok 4 - verify_replication
+  # multi_standbys.pgaf
+  ok    1        - test_002_candidate_priority                       1227 ms
+  ok    2        - test_003_replication_quorum                       1624 ms
+  ok    3        - test_004_001_add_three_standbys                   1011 ms
+  ok    4        - test_004_002_add_three_standbys                   1019 ms
+  ok    5        - test_004_003_add_three_standbys                   1014 ms
+  ok    6        - test_005_number_sync_standbys                     1445 ms
+  ok    7        - test_006_number_sync_standbys_trigger             7176 ms
+  ok    8        - test_007_create_t1                                 552 ms
+  ok    9        - test_008_set_candidate_priorities                  670 ms
+  ok    10       - test_009_failover                                 3406 ms
+  ok    11       - test_010_read_from_nodes                           707 ms
+  ok    12       - test_011_write_into_new_primary                    402 ms
+  ok    13       - test_012_fail_primary                            54196 ms
+  ok    14       - test_013_restart_node2                            3648 ms
+  ok    15       - test_014_001_fail_set_properties                   764 ms
+  ok    16       - test_014_002_fail_two_standby_nodes               3306 ms
+  ok    17       - test_014_003_unblock_writes                        417 ms
+  ok    18       - test_014_004_restart_nodes                        1116 ms
+  ok    19       - test_015_002_fail_two_standby_nodes              20471 ms
+  ok    20       - test_015_003_set_properties                        364 ms
+  ok    21       - test_015_004_restart_nodes                        3852 ms
+  ok    22       - test_016_001_set_candidate_priorities_to_zero      700 ms
+  ok    23       - test_016_002_trigger_failover                     2765 ms
+  ok    24       - test_016_003_set_candidate_priority_to_one        3818 ms
+  ok    25       - test_016_004_reset_candidate_priority             1231 ms
+  ok    26       - test_016_005_perform_promotion                    3119 ms
+  ok    27       - test_017_remove_old_primary                        998 ms
+  1..27
+  # All 27 tests passed.
 
-On failure::
+On failure, ``not ok`` replaces ``ok`` and a diagnostic line explains the
+reason::
 
-  1..4
-  ok 1 - stop_primary
-  not ok 2 - check_failover
-  # wait until node2 state is primary: timed out after 90s
+  not ok 13      - test_012_fail_primary
+  # wait until node2 state is wait_primary: timed out after 120s
 
 __ https://testanything.org/tap-specification.html
 
