@@ -100,6 +100,7 @@ typedef struct TestCluster
 	bool withMonitor;            /* true when "monitor" keyword appears in cluster{} */
 	bool withCitus;
 	bool bindSource;             /* bind-source: mount repo root → /usr/src/pg_auto_failover */
+	bool legacyStartup;          /* legacy-startup: use pg_autoctl create <kind> --run (v2.2 style) */
 
 	/* cluster-level Docker / network options */
 	char image[256];             /* Docker image tag; "" = build from source */

@@ -34,8 +34,15 @@
 #   as a hidden root command that routes to the same service callbacks, so no
 #   translation layer is needed.
 #
-#   pgaftest generates: pg_autoctl node run /etc/pgaf/node.ini
-#   Both v2.2 and v2.3 understand "node run" natively; no wrapper needed.
+#   pgaftest generates "pg_autoctl create <kind> --run" for specs that declare
+#   "legacy-startup" (as upgrade.pgaf does), matching what production v2.2
+#   operators ran.  No shim or translation layer is needed.
+#
+#   The upgrade procedure restarts the monitor container (compose stop + start)
+#   rather than just restarting postgres in-process.  This avoids a race where
+#   the v2.2 listener reconnects to the freshly-restarted postgres at the same
+#   moment data-node keepers do, producing transient "schema does not exist"
+#   errors that exhaust the v2.2 supervisor restart limit.
 
 ARG BASE_IMAGE=pgaf:current-base
 ARG NEXT_IMAGE=pgaf:next

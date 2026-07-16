@@ -353,6 +353,12 @@ compose_gen_write_ssl_certs(const TestCluster *cluster, const char *workDir)
  * client cert/key and CA cert are also copied so libpq can find them.
  * SSL_COPY_CERTS_CMD is a shell snippet ending with " &&" so we can
  * append the pg_autoctl invocation directly.
+ *
+ * When cluster->legacyStartup is set (e.g. upgrade tests using pgaf:current
+ * which carries the v2.2 binary), the v2.3 "pg_autoctl node run <ini>" form
+ * is not available.  Use the v2.2-style "pg_autoctl create <kind> --run"
+ * instead.  isMonitor distinguishes the two node kinds; monitorUri is only
+ * used when isMonitor is false.
  */
 static void
 write_node_command(FILE *f, const TestCluster *cluster, const char *iniPath)
@@ -374,6 +380,59 @@ write_node_command(FILE *f, const TestCluster *cluster, const char *iniPath)
 				"    stop_grace_period: 60s\n",
 				iniPath);
 	}
+}
+
+
+/*
+ * ssl_args_for_legacy returns the ssl-related YAML array fragment (without
+ * trailing comma) for a legacy "pg_autoctl create" command.
+ *
+ * "node run <ini>" reads ssl= from the ini; "create <kind> --run" needs the
+ * flag spelled out on the command line.  Most cases are a single flag token;
+ * verify-ca / verify-full would need cert paths too, but the only current
+ * legacy-startup user (upgrade.pgaf) always uses the default self-signed.
+ */
+static const char *
+ssl_args_for_legacy(const char *ssl)
+{
+	if (strcmp(ssl, "off") == 0)
+	{
+		return "\"--no-ssl\"";
+	}
+
+	/* self-signed is the default; also covers the empty/unset case */
+	return "\"--ssl-self-signed\"";
+}
+
+
+static void
+write_legacy_monitor_command(FILE *f, const char *pgdata, const char *auth,
+							 const char *ssl)
+{
+	fformat(f,
+			"    command: [\"pg_autoctl\", \"create\", \"monitor\","
+			" \"--pgdata\", \"%s\","
+			" \"--auth\", \"%s\","
+			" %s,"
+			" \"--run\"]\n"
+			"    stop_grace_period: 60s\n",
+			pgdata, auth, ssl_args_for_legacy(ssl));
+}
+
+
+static void
+write_legacy_node_command(FILE *f, const char *pgdata, const char *monitorUri,
+						  const char *auth, const char *ssl)
+{
+	fformat(f,
+			"    command: [\"pg_autoctl\", \"create\", \"postgres\","
+			" \"--pgdata\", \"%s\","
+			" \"--monitor\", \"%s\","
+			" \"--auth\", \"%s\","
+			" %s,"
+			" \"--run\"]\n"
+			"    stop_grace_period: 60s\n",
+			pgdata, monitorUri, auth, ssl_args_for_legacy(ssl));
 }
 
 
@@ -631,7 +690,15 @@ compose_gen_write(TestCluster *cluster,
 				cluster->monitorHostPort);
 
 
-		write_node_command(f, cluster, NODE_INI_PATH);
+		if (cluster->legacyStartup)
+		{
+			write_legacy_monitor_command(f, monitor_pgdata, cluster->auth,
+										 cluster->ssl);
+		}
+		else
+		{
+			write_node_command(f, cluster, NODE_INI_PATH);
+		}
 		fformat(f, "\n");
 
 		/*
@@ -779,7 +846,29 @@ compose_gen_write(TestCluster *cluster,
 			 * case where the formation hasn't been created yet.
 			 */
 
-			write_node_command(f, cluster, NODE_INI_PATH);
+			if (cluster->legacyStartup)
+			{
+				char monitorUri[512];
+
+				if (cluster->monitorPassword[0])
+				{
+					sformat(monitorUri, sizeof(monitorUri),
+							"postgresql://autoctl_node:%s@monitor/pg_auto_failover",
+							cluster->monitorPassword);
+				}
+				else
+				{
+					strlcpy(monitorUri,
+							"postgresql://autoctl_node@monitor/pg_auto_failover",
+							sizeof(monitorUri));
+				}
+				write_legacy_node_command(f, node_pgdata, monitorUri,
+										  cluster->auth, cluster->ssl);
+			}
+			else
+			{
+				write_node_command(f, cluster, NODE_INI_PATH);
+			}
 
 			/*
 			 * With a monitor: the first data node gets a healthcheck so that

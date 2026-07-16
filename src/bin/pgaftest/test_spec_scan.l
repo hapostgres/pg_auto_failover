@@ -186,6 +186,7 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"replication-password"  { return T_REPLICATION_PASSWORD; }
 <CLUSTER_BODY>"extension-version"   { return T_EXTENSION_VERSION; }
 <CLUSTER_BODY>"bind-source"         { return T_BIND_SOURCE; }
+<CLUSTER_BODY>"legacy-startup"      { return T_LEGACY_STARTUP; }
 
 <CLUSTER_BODY>"="  { return T_EQUALS; }
 
