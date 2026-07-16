@@ -68,7 +68,6 @@ __ https://github.com/hapostgres/pg_auto_failover
 
    ref/manual
    ref/configuration
-   ref/pgaftest
 
 .. toctree::
    :hidden:
