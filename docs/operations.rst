@@ -505,48 +505,6 @@ For the full property reference and mutability table see
 Testing
 -------
 
-pg_auto_failover ships ``pgaftest``, an integration test runner that drives
-clusters through scenarios described in ``.pgaf`` spec files.  Specs combine
-a topology declaration (the Docker Compose layout) with a sequence of named
-steps that exercise failover, network partitions, maintenance windows, and
-more.
-
-**Run a spec in CI mode** — full headless run with TAP output::
-
-   pgaftest run tests/tap/specs/basic_operation.pgaf
-
-The runner generates a ``docker-compose.yml`` from the ``cluster {}`` block,
-starts the stack, runs the ``setup {}`` block to wait for a healthy cluster,
-executes each step in ``sequence``, runs ``teardown {}``, and removes the
-stack.  Exit code 0 means all steps passed.
-
-**Run the full test schedule** across all supported Postgres versions::
-
-   pgaftest run --schedule tests/tap/schedule
-
-**Bring up an interactive cluster** for manual exploration::
-
-   pgaftest setup tests/tap/specs/basic_operation.pgaf
-
-**Add** ``--tmux`` to open a three-pane session the moment the compose
-stack is ready — no waiting at a blank terminal.  The setup block runs in
-the bottom pane so you can watch the logs pane while the cluster initialises:
-
-- **top** — ``docker compose logs -f``
-- **middle** — ``pg_autoctl watch``
-- **bottom** — setup progress, then an interactive ``bash`` shell
-
-::
-
-   pgaftest setup tests/tap/specs/basic_operation.pgaf --tmux
-
-**Run a single named step** against a live cluster::
-
-   pgaftest step stop_primary --work-dir /tmp/pgaftest/basic_operation
-
-**Tear down** when done::
-
-   pgaftest down --work-dir /tmp/pgaftest/basic_operation
-
-The complete spec language reference, including all DSL commands, environment
-variables, and TAP output format, is at :ref:`pgaftest`.
+See :ref:`testing_pgaftest` for the integration test runner and
+:ref:`reporting_bugs` for how to use ``pgaftest`` to reproduce and
+report issues.

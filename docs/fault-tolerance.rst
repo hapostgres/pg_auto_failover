@@ -169,3 +169,11 @@ will cause it to disconnect from the primary. After that, the primary is
 expected to shut down after at least 30 and at most 60 seconds. To factor in
 worst-case scenarios, the monitor waits for 90 seconds before promoting the
 secondary to become the new primary.
+
+
+See also
+--------
+
+- :ref:`testing_pgaftest` — explore these scenarios interactively with
+  ``pgaftest tmux``
+- :ref:`reporting_bugs`

@@ -34,6 +34,24 @@ Docker socket bind-mounted (Docker-out-of-Docker, DooD).  These are the
 commands you type in the interactive shell that ``pgaftest tmux`` drops you
 into.
 
+The compose stack layout and the relationship between host and container
+commands is shown below:
+
+.. code-block:: text
+
+   Host (developer workstation / CI runner)
+   ├── Docker daemon
+   │   └── Compose project: <spec-name>
+   │       ├── monitor    (pgautofailover monitor, port 5432)
+   │       ├── node1      (pg_autoctl run, primary)
+   │       ├── node2      (pg_autoctl run, secondary)
+   │       └── setup      (pgaftest binary, /var/run/docker.sock bind-mounted)
+   │           ↑ interactive shell lives here (pgaftest step, show, sql, network)
+   └── pgaftest tmux     ← runs here, on the host
+       └── tmux session
+           ├── top pane:    pg_autoctl watch (connects to monitor)
+           └── bottom pane: docker exec into setup container → bash
+
 .. list-table::
    :header-rows: 1
    :widths: 40 12 48
@@ -114,7 +132,7 @@ Typical interactive session
 
 Start the cluster on the host and drop into a tmux session::
 
-   pgaftest tmux tests/tap/specs/basic_failover.pgaf
+   pgaftest tmux tests/tap/specs/basic_operation.pgaf
 
 ``pg_autoctl watch`` fills the top pane.  The bottom pane is an interactive
 shell inside the ``pgaftest`` service container.  From there::
@@ -154,72 +172,14 @@ throughout this session.
 Docker-out-of-Docker (DooD) architecture
 -----------------------------------------
 
-``pgaftest cluster setup`` and ``pgaftest tmux`` generate a Compose file that
-includes a ``setup`` service alongside the cluster nodes.  That service:
+The ``setup`` service container runs with the host Docker socket bind-mounted
+so it can reach sibling containers via ``docker compose exec``.  Direct libpq
+connections are used for monitor queries where possible, falling back to
+``docker exec`` for everything else.
 
-* runs as **root** — the Docker daemon socket at ``/var/run/docker.sock`` is
-  always accessible by root regardless of the host socket GID, which differs
-  between macOS Docker Desktop and Linux CI runners;
-* sets ``working_dir: /root`` (root's home directory) so that ``pgaftest``
-  can read and write a local state file in a predictable, writable location
-  without any extra volume mounts;
-* mounts the spec file read-only at ``/root/spec.pgaf``;
-* bind-mounts the host Docker socket (``/var/run/docker.sock``) so that
-  ``docker compose exec`` calls issued from inside the container target the
-  host's Docker daemon and reach the sibling cluster containers;
-* pre-sets ``PGAFTEST_SPEC=/root/spec.pgaf``, ``PGAFTEST_HOST_WORK_DIR``, and
-  ``PGAFTEST_IN_CONTAINER=1`` in its environment so all container commands
-  discover the spec file and Compose project without extra arguments, and so
-  the binary knows it is running inside the container (used to pick the
-  correct state-file location and to prefer direct libpq connections over
-  ``docker compose exec`` for monitor queries).
-
-In ``tmux`` mode the service runs ``sleep infinity`` to stay alive; the setup
-block is driven by a separate ``docker compose run`` invocation.
-In CI mode (``pgaftest run``) the same ``docker compose run setup`` invocation
-runs ``pgaftest _setup_`` to execute the ``setup {}`` block.
-
-**Direct monitor connections.**  Where possible, ``pgaftest`` uses a direct
-libpq connection to the monitor — via its LISTEN/NOTIFY connection that is
-established as part of the wait-for-state machinery — rather than shelling out
-to ``docker compose exec``.  This applies to:
-
-* polling node state during ``wait until <node> state = <s>`` (both the
-  fast-path check and the periodic 5-second fallback inside the LISTEN loop);
-* ``sql monitor { ... }`` commands in step bodies;
-* ``promote <node>`` — calls ``pgautofailover.perform_promotion()`` directly;
-* ``perform failover`` — calls ``pgautofailover.perform_failover()`` directly;
-* ``pgaftest show state`` — when running inside the container, invokes
-  ``pg_autoctl show state`` directly (it is in PATH and
-  ``PG_AUTOCTL_MONITOR`` is set in the environment).
-
-Docker exec is still used for non-monitor services (node ``exec`` commands,
-``sql node1 { ... }``, network disconnect/connect, compose lifecycle).
-
-
-Step state file
----------------
-
-Container commands record progress in ``/root/pgaftest.state``
-(``$HOME/pgaftest.state`` inside the setup container), a small JSON file
-that tracks:
-
-* ``current`` — index of the next step to run in the sequence;
-* ``last_step`` — name of the most recently executed step;
-* ``last_ok`` — whether that step succeeded.
-
-On success ``current`` advances; on failure it stays pointing at the failed
-step so the next bare ``pgaftest step`` retries it rather than skipping
-ahead.
-
-The file lives in ``/root`` (root's home directory inside the setup container)
-rather than in the host-side bind-mounted work directory, so it is always
-writable without any dependency on bind-mount ownership mapping.  It persists
-for the lifetime of the container.
-
-When ``pgaftest step`` is run on the host (outside the container), the state
-file is written to ``$TMPDIR/pgaftest/<spec-name>/pgaftest.state`` alongside
-the generated compose files.
+For implementation details — how the state file works, which operations use
+direct libpq vs. docker exec, environment variables, and how to build
+``pgaftest`` — see ``src/bin/pgaftest/README.md`` in the source tree.
 
 
 Synopsis
@@ -513,9 +473,9 @@ Commands inside ``setup``, ``teardown``, and ``step`` blocks
 
 .. code-block:: text
 
-   # Targeted switchover: the named node negotiates with the monitor and
-   # hands off primary to the best available secondary.
-   exec <node>  pg_autoctl perform switchover
+   # Promote a specific node to primary via the monitor SQL API.
+   # The monitor picks the transition path; all other nodes adjust.
+   promote <node> [, <node2>, ...]
 
    # Untargeted failover via the monitor SQL API: the monitor picks the
    # best secondary.  Formation and group default to "default" and 0.
@@ -524,8 +484,10 @@ Commands inside ``setup``, ``teardown``, and ``step`` blocks
    perform failover in formation <name>
    perform failover in formation <name> group <N>
 
-   # Legacy targeted promotion via the monitor SQL API:
-   promote <node> [, <node2>, ...]
+   # Targeted switchover: ask a node to hand off its primary role.
+   # This triggers a graceful transition FROM that node TO another.
+   # Use when you want the named node to STOP being primary.
+   exec <node>  pg_autoctl perform switchover
 
 **Monitor targeting** (replace-monitor tests)
 
@@ -591,10 +553,10 @@ Environment variables
 TAP output
 ----------
 
-In ``run`` mode, pgaftest produces `TAP version 13`__ output on standard
-output.  Each named step in ``sequence`` becomes one test point::
+In ``run`` mode, pgaftest produces TAP__ output on standard output.  Each
+named step in ``sequence`` becomes one test point.  No ``TAP version``
+header is emitted::
 
-  TAP version 13
   1..4
   ok 1 - stop_primary
   ok 2 - check_failover
@@ -603,10 +565,12 @@ output.  Each named step in ``sequence`` becomes one test point::
 
 On failure::
 
+  1..4
+  ok 1 - stop_primary
   not ok 2 - check_failover
-  # DIAG: wait until node2 state is primary: timed out after 90s
+  # wait until node2 state is primary: timed out after 90s
 
-__ https://testanything.org/tap-version-13-specification.html
+__ https://testanything.org/tap-specification.html
 
 
 See also
