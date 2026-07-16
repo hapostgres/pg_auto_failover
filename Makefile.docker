@@ -42,6 +42,8 @@ DOCKER_RUN_OPTS     = --privileged --rm
 # make build                — build the 'run' images for every supported PG version
 #                             + the 'pgaftest' image (pgaf:pgaftest, using PGVERSION)
 # make build-pg17           — build the 'run' image for PG 17 only
+# make force-build          — same as build but with --no-cache (busts Docker layer cache)
+# make force-build-pg17     — force-rebuild the 'run' image for PG 17 only
 # make build-pgaftest       — build pgaf:pgaftest (test runner, uses PGVERSION)
 # make force-build-pgaftest — same but with --no-cache (busts Docker layer cache)
 # make build-pytest         — build the 'test' (Python) image for every PG version
@@ -71,6 +73,19 @@ $(BUILD_TARGETS): version
 build-check: $(BUILD_CHECK_TARGETS) ;
 build-pytest: $(BUILD_PYTEST_TARGETS) ;
 build-pytest-image: build-pytest-pg$(PGVERSION) ;
+
+FORCE_BUILD_TARGETS = $(patsubst %,force-build-pg%,$(PGVERSIONS))
+
+.PHONY: force-build
+force-build: $(FORCE_BUILD_TARGETS) force-build-pgaftest ;
+
+.PHONY: $(FORCE_BUILD_TARGETS)
+$(FORCE_BUILD_TARGETS): version
+	docker build --no-cache \
+	  --build-arg PGVERSION=$(subst force-build-pg,,$@) \
+	  --build-arg BASE=$(BASE) \
+	  --target run \
+	  -t $(CONTAINER_NAME):$(subst force-build-,,$@) $(REPO_ROOT)
 
 PGAFTEST_CONTAINER_NAME = pgaf
 
