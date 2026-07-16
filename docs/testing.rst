@@ -12,7 +12,7 @@ Two modes are supported:
 
 - **CI mode** (``pgaftest run``): headless, emits TAP output, exits non-zero on failure.
 - **Interactive mode** (``pgaftest tmux``): cluster stays up; a tmux session
-  gives you a live ``pg_autoctl watch`` view and a shell to step through
+  gives you live container logs, a ``pg_autoctl watch`` view, and a shell to step through
   scenarios by hand.
 
 Prerequisites
@@ -48,10 +48,12 @@ partitions, and manual failovers.
 
 ``pgaftest`` generates a ``docker-compose.yml`` from the spec's ``cluster {}``
 block, brings the stack up, runs the ``setup {}`` block to wait for a healthy
-primary+secondary, then launches a two-pane tmux session:
+primary+secondary, then launches a three-pane tmux session:
 
-- **top pane** — ``pg_autoctl watch`` (live FSM state table, auto-refreshing)
-- **bottom pane** — interactive shell inside the ``pgaftest`` service container
+- **top pane** — ``docker compose logs -f`` (streaming container output)
+- **middle pane** — ``pg_autoctl watch`` (live FSM state table, auto-refreshing)
+- **bottom pane** — interactive shell inside the ``pgaftest`` service container,
+  with ``PGAFTEST_SPEC`` set so ``pgaftest`` commands find the spec automatically
 
 All commands below are typed in the **bottom pane**.
 

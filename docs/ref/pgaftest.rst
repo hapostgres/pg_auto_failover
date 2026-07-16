@@ -49,8 +49,11 @@ commands is shown below:
    │           ↑ interactive shell lives here (pgaftest step, show, sql, network)
    └── pgaftest tmux     ← runs here, on the host
        └── tmux session
-           ├── top pane:    pg_autoctl watch (connects to monitor)
-           └── bottom pane: docker exec into setup container → bash
+           ├── top pane:    docker compose logs -f
+           ├── middle pane: pg_autoctl watch (live FSM state table)
+           └── bottom pane: bash inside the setup container
+                            (pgaftest step/show/sql/network available,
+                             PGAFTEST_SPEC set automatically)
 
 .. list-table::
    :header-rows: 1
@@ -69,9 +72,10 @@ commands is shown below:
        return control for interactive use.
    * - ``pgaftest tmux <spec.pgaf>``
      - **Host**
-     - Same as ``cluster setup`` but launches a tmux session: top pane
-       ``pg_autoctl watch``, bottom pane interactive shell in the
-       ``pgaftest`` container.
+     - Same as ``cluster setup`` but launches a three-pane tmux session:
+       top ``docker compose logs -f``, middle ``pg_autoctl watch``,
+       bottom interactive shell inside the ``pgaftest`` container with
+       ``PGAFTEST_SPEC`` pre-set.
    * - ``pgaftest cluster prepare <spec.pgaf> [<dir>]``
      - **Host**
      - Write compose YAML and ``.ini`` files to a directory without
@@ -134,8 +138,9 @@ Start the cluster on the host and drop into a tmux session::
 
    pgaftest tmux tests/tap/specs/basic_operation.pgaf
 
-``pg_autoctl watch`` fills the top pane.  The bottom pane is an interactive
-shell inside the ``pgaftest`` service container.  From there::
+The top pane streams ``docker compose logs -f``.  The middle pane runs
+``pg_autoctl watch``.  The bottom pane is an interactive shell inside the
+``pgaftest`` service container.  From there::
 
    # See which steps are available and where you are
    pgaftest show steps
@@ -243,10 +248,13 @@ tmux session for interactive exploration::
 
    pgaftest tmux tests/tap/specs/basic_operation.pgaf
 
-The session has two panes:
+The session has three panes:
 
-- **top** — ``pg_autoctl watch`` on the monitor (live FSM state table)
-- **bottom** — interactive shell in the ``pgaftest`` service container
+- **top** — ``docker compose logs -f`` (streaming container output)
+- **middle** — ``pg_autoctl watch`` (live FSM state table)
+- **bottom** — interactive shell inside the ``pgaftest`` service container,
+  with ``PGAFTEST_SPEC`` set so all ``pgaftest`` commands find the spec
+  automatically
 
 Options:
 
