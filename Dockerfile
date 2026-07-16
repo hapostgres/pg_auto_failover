@@ -147,7 +147,6 @@ RUN apt-get update \
       libcurl4-gnutls-dev \
       libncurses6 \
       libzstd-dev \
-      sudo \
  && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
@@ -172,14 +171,8 @@ RUN curl -fsSL https://download.docker.com/linux/debian/gpg \
       docker-compose-plugin \
  && rm -rf /var/lib/apt/lists/*
 
-RUN adduser --disabled-password --gecos '' --home /var/lib/postgres docker \
- && adduser docker sudo \
- && echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers \
- && mkdir -p /var/lib/postgres \
- && chown docker /var/lib/postgres
-
 COPY --from=build /usr/local/bin/pg_autoctl /usr/local/bin/
 COPY --from=build /usr/local/bin/pgaftest /usr/local/bin/
 
-USER docker
+WORKDIR /root
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
