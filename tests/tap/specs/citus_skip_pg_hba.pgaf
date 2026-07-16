@@ -128,7 +128,7 @@ step test_004_create_distributed_table {
 #
 
 step test_005_failover {
-    exec monitor  pg_autoctl perform failover --group 1
+    perform failover group 1
     wait until worker1a state is secondary
         and worker1b state is primary
         timeout 90s

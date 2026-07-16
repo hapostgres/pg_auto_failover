@@ -59,7 +59,7 @@ step test_005_write_into_primary {
 #
 
 step test_006_async_failover {
-    exec monitor  pg_autoctl perform promotion --name node2
+    promote node2
     wait until node1 state is secondary
         and node3 state is secondary
         and node2 state is primary

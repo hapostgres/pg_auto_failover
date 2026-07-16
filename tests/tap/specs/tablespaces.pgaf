@@ -90,7 +90,7 @@ step test_003_tablespace_b_while_streaming {
 #
 
 step test_004_failover {
-    exec monitor  pg_autoctl perform failover
+    perform failover
     sql node2 { INSERT INTO t2 VALUES (7); }
     sql node1 { SELECT * FROM t2 ORDER BY i; }
     expect { { 3 } { 4 } { 7 } }
@@ -141,7 +141,7 @@ step test_006_node1_rejoins {
 #
 
 step test_007_promote_original_primary {
-    exec monitor  pg_autoctl perform promotion --name node1
+    promote node1
     wait until node1 state is primary
         and node2 state is secondary
         timeout 90s

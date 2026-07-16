@@ -21,7 +21,9 @@ setup {
     wait until primary, secondary in group 0  timeout 90s
     wait until primary, secondary in group 1  timeout 90s
     wait until primary, secondary in group 2  timeout 90s
-    promote coordinator1a, worker1a, worker2a
+    exec coordinator1a pg_autoctl perform switchover
+    exec worker1a pg_autoctl perform switchover
+    exec worker2a pg_autoctl perform switchover
 }
 
 teardown {

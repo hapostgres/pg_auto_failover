@@ -153,7 +153,7 @@ step test_008_002_disable_maintenance_secondary {
 #
 
 step test_009_failback {
-    exec monitor  pg_autoctl perform promotion --name node1
+    promote node1
     wait until node2 state is secondary
         and node1 state is primary
         timeout 90s
@@ -301,7 +301,7 @@ step test_019_run_secondary {
 #
 
 step test_020_multiple_manual_failover_verify_replication_slots {
-    exec monitor  pg_autoctl perform failover
+    perform failover
     wait until node3 state is primary
         and node2 state is secondary
         timeout 90s

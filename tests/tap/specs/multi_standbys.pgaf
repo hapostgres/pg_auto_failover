@@ -134,7 +134,7 @@ step test_008_set_candidate_priorities {
 #
 
 step test_009_failover {
-    exec monitor  pg_autoctl perform failover
+    perform failover
     wait until node2 state is primary
         and node3 state is secondary
         and node1 state is secondary
@@ -290,7 +290,7 @@ step test_016_004_reset_candidate_priority {
 }
 
 step test_016_005_perform_promotion {
-    exec monitor  pg_autoctl perform promotion --name node1
+    promote node1
     wait until node1 state is primary
         and node2 state is secondary
         and node3 state is secondary

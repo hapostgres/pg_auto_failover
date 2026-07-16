@@ -174,7 +174,7 @@ step test_007_verify_data_intact {
 # -------------------------------------------------------------------------
 
 step test_008_failover_post_upgrade {
-    exec monitor  pg_autoctl perform promotion --name node2
+    promote node2
     wait until node2 state is primary
         and node1 state is secondary
         and node3 state is secondary
