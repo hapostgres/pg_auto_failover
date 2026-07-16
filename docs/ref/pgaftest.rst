@@ -549,11 +549,14 @@ named step in ``sequence`` becomes one test point, with elapsed time::
   1..27
   # All 27 tests passed.
 
-On failure, ``not ok`` replaces ``ok`` and a diagnostic line explains the
-reason::
+On failure::
 
-  not ok 13      - test_012_fail_primary
-  # wait until node2 state is wait_primary: timed out after 120s
+  # guard_data_loss.pgaf
+  ok    1        - test_001_kill_primary_and_one_standby    22427 ms
+  ok    2        - test_002_verify_stuck                    10063 ms
+  not ok3        - test_003_allow_data_loss_failover        90935 ms
+  1..3
+  # 1 test failed.
 
 __ https://testanything.org/tap-specification.html
 
