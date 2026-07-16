@@ -55,80 +55,34 @@ commands is shown below:
                             (pgaftest step/show/sql/network available,
                              PGAFTEST_SPEC set automatically)
 
-.. list-table::
-   :header-rows: 1
-   :widths: 40 12 48
+**On the host** (developer workstation or CI runner):
 
-   * - Command
-     - Where
-     - Purpose
-   * - ``pgaftest run <spec.pgaf>``
-     - **Host**
-     - CI mode: full lifecycle — up, setup, sequence, teardown, down.
-       Emits TAP to stdout.
-   * - ``pgaftest cluster setup <spec.pgaf>``
-     - **Host**
-     - Generate compose YAML, bring the stack up, run ``setup{}``, then
-       return control for interactive use.
-   * - ``pgaftest tmux <spec.pgaf>``
-     - **Host**
-     - Same as ``cluster setup`` but launches a three-pane tmux session:
-       top ``docker compose logs -f``, middle ``pg_autoctl watch``,
-       bottom interactive shell inside the ``pgaftest`` container with
-       ``PGAFTEST_SPEC`` pre-set.
-   * - ``pgaftest cluster prepare <spec.pgaf> [<dir>]``
-     - **Host**
-     - Write compose YAML and ``.ini`` files to a directory without
-       starting anything.  Useful for inspecting generated config.
-   * - ``pgaftest cluster down <spec.pgaf>``
-     - **Host**
-     - Run the ``teardown{}`` block then ``docker compose down --volumes``.
-   * - ``pgaftest show compose <spec.pgaf>``
-     - **Host**
-     - Dry-run: render the generated ``docker-compose.yml`` to stdout
-       without starting anything.
-   * - ``pgaftest show spec <spec.pgaf>``
-     - **Host**
-     - Print the spec file source.
-   * - ``pgaftest indent <spec.pgaf>``
-     - **Host**
-     - Parse and rewrite the spec with canonical indentation in place.
-   * - ``pgaftest help``
-     - **Host**
-     - Print the full command tree.
-   * - ``pgaftest step [<name>]``
-     - **Container**
-     - Run the next pending step (auto-advance) or a specific named step
-       against the live stack.  Records progress in a state file so
-       repeated bare ``pgaftest step`` calls walk the sequence forward,
-       retrying a failed step before advancing.
-   * - ``pgaftest show steps``
-     - **Container**
-     - List the sequence steps with progress markers: ``*`` = next to run,
-       ``!`` = last failed (will retry on next ``pgaftest step``), space
-       prefix = completed.
-   * - ``pgaftest show step``
-     - **Container**
-     - Print the DSL commands that will run when ``pgaftest step`` is called
-       next, so you can review what is about to happen.
-   * - ``pgaftest show state``
-     - **Container**
-     - Print a ``Step X/N: name`` progress header followed by
-       ``pg_autoctl show state`` output for the whole formation.
-   * - ``pgaftest sql <node> { <query> }``
-     - **Container**
-     - Run a SQL query on a named node and print the result to stdout.
-   * - ``pgaftest network disconnect <node>``
-     - **Container**
-     - Disconnect a node from its Compose network, simulating a network
-       partition.
-   * - ``pgaftest network connect <node>``
-     - **Container**
-     - Reconnect a previously disconnected node.
-   * - ``pgaftest cluster down``
-     - **Container**
-     - Run ``teardown{}`` and ``docker compose down`` via DooD from inside
-       the container.
+.. code-block:: text
+
+   pgaftest run <spec.pgaf>               CI mode: up → setup → sequence → teardown → down, TAP output
+   pgaftest run --schedule <file>         Run every spec listed in the schedule file
+   pgaftest tmux <spec.pgaf>             Bring up the stack and open a 3-pane tmux session
+   pgaftest cluster setup <spec.pgaf>    Bring up the stack without opening tmux
+   pgaftest cluster prepare <spec.pgaf>  Write compose YAML and .ini files without starting anything
+   pgaftest cluster down [<spec.pgaf>]   Run teardown{} and docker compose down --volumes
+   pgaftest show compose <spec.pgaf>     Print the generated docker-compose.yml (dry run)
+   pgaftest show spec <spec.pgaf>        Print the spec file source
+   pgaftest indent <spec.pgaf>           Parse and rewrite with canonical indentation
+   pgaftest help                         Print the full command tree
+
+**Inside the container** (bottom pane of the tmux session):
+
+.. code-block:: text
+
+   pgaftest step                         Run the next pending step (auto-advance)
+   pgaftest step <name>                  Run a specific named step
+   pgaftest show steps                   List sequence steps with progress markers (* next, ! failed)
+   pgaftest show step                    Preview the DSL commands the next step will execute
+   pgaftest show state                   Step X/N header + pg_autoctl show state output
+   pgaftest sql <node> { <query> }       Run SQL on a named node and print the result
+   pgaftest network disconnect <node>    Sever a node's network connection (simulate partition)
+   pgaftest network connect <node>       Restore a node's network connection
+   pgaftest cluster down                 Run teardown{} and docker compose down
 
 
 Typical interactive session
