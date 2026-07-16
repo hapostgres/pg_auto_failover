@@ -70,8 +70,8 @@ COPY --from=next /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so \
 COPY install-extension.sh /usr/local/bin/pgaf/2.2/install-extension
 RUN chmod 755 /usr/local/bin/pgaf/2.2/install-extension
 
-# Static shim — stays at the canonical path forever.
-COPY pg_autoctl_shim.sh /usr/local/bin/pg_autoctl
+# Version-compat wrapper — stays at the canonical path forever.
+COPY pg_autoctl_compat.sh /usr/local/bin/pg_autoctl
 RUN chmod 755 /usr/local/bin/pg_autoctl
 
 # Tell the v2.1 supervisor to use the shim path for spawning child processes,

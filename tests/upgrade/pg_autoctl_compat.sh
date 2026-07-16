@@ -1,5 +1,5 @@
 #!/bin/bash
-# Static shim at /usr/local/bin/pg_autoctl — never replaced during the upgrade.
+# Version-compatibility wrapper at /usr/local/bin/pg_autoctl — never replaced during upgrade.
 #
 # Delegates to /usr/local/bin/pgaf/current/pg_autoctl, which is a symlink:
 #   initially → pgaf/2.1   (v2.1 binary)
@@ -40,7 +40,7 @@ if [ "$1" = "node" ] && [ "$2" = "run" ] && [ -n "$3" ]; then
     ssl=$(ini_get      options    ssl      "$ini")
     auth=$(ini_get     options    auth     "$ini")
 
-    [ -z "$pgdata" ] && { echo "pg_autoctl_shim: missing [postgresql] pgdata in $ini" >&2; exit 1; }
+    [ -z "$pgdata" ] && { echo "pg_autoctl_compat: missing [postgresql] pgdata in $ini" >&2; exit 1; }
 
     case "$ssl" in
         off|"") ssl_flag="--no-ssl" ;;
