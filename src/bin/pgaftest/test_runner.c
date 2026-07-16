@@ -43,6 +43,8 @@ static bool wait_for_state(TestRunner *r, const char *nodeName,
 						   bool checkAssigned);
 static bool runner_wait_assigned_goal(TestRunner *r, const char *nodeName,
 									  const char *targetState, int timeoutSecs);
+static bool exec_sql_on_service(TestRunner *r, const char *service,
+								const char *sql, char *outbuf, int outlen);
 static void log_output(const char *prefix, const char *out);
 
 /* -----------------------------------------------------------------------
@@ -1725,31 +1727,21 @@ runner_promote_one(TestRunner *r, const char *nodeName)
 	}
 
 	/*
-	 * Call pgautofailover.perform_promotion(formation, node_name) directly on
-	 * the monitor via the LISTEN connection — no docker socket required.
+	 * Call pgautofailover.perform_promotion(formation, node_name) on the
+	 * monitor.  Uses the LISTEN connection when available; falls back to
+	 * docker compose exec psql when LISTEN is not connected.
 	 */
-	if (!r->notifyConnected ||
-		r->notifyConn.connection == NULL ||
-		PQstatus(r->notifyConn.connection) != CONNECTION_OK)
-	{
-		log_error("promote: monitor LISTEN connection not available");
-		return false;
-	}
-
-	const char *params[2] = { formation, nodeName };
-	PGresult *res = PQexecParams(r->notifyConn.connection,
-								 "SELECT pgautofailover.perform_promotion($1, $2)",
-								 2, NULL, params, NULL, NULL, 0);
-
-	if (PQresultStatus(res) != PGRES_TUPLES_OK)
+	char sql[256];
+	char out[256] = "";
+	sformat(sql, sizeof(sql),
+			"SELECT pgautofailover.perform_promotion('%s', '%s')",
+			formation, nodeName);
+	if (!exec_sql_on_service(r, r->activeMonitorService, sql, out, sizeof(out)))
 	{
 		log_error("promote: perform_promotion(%s, %s) failed: %s",
-				  formation, nodeName,
-				  PQresultErrorMessage(res));
-		PQclear(res);
+				  formation, nodeName, out);
 		return false;
 	}
-	PQclear(res);
 
 	/* confirm monitor agrees */
 	return wait_for_state(r, nodeName, "primary", PGAF_TIMEOUT_DEFAULT, false);
@@ -1766,31 +1758,22 @@ runner_perform_failover(TestRunner *r, const char *formation, int groupId)
 {
 	log_info("  perform failover: formation=%s group=%d", formation, groupId);
 
-	if (!r->notifyConnected ||
-		r->notifyConn.connection == NULL ||
-		PQstatus(r->notifyConn.connection) != CONNECTION_OK)
-	{
-		log_error("perform failover: monitor LISTEN connection not available");
-		return false;
-	}
-
-	char groupStr[16];
-	sformat(groupStr, sizeof(groupStr), "%d", groupId);
-	const char *params[2] = { formation, groupStr };
-	PGresult *res = PQexecParams(r->notifyConn.connection,
-								 "SELECT pgautofailover.perform_failover($1, $2::int)",
-								 2, NULL, params, NULL, NULL, 0);
-
-	if (PQresultStatus(res) != PGRES_COMMAND_OK &&
-		PQresultStatus(res) != PGRES_TUPLES_OK)
+	/*
+	 * Call pgautofailover.perform_failover(formation, group) on the monitor.
+	 * Uses the LISTEN connection when available; falls back to docker compose
+	 * exec psql when LISTEN is not connected.
+	 */
+	char sql[256];
+	char out[256] = "";
+	sformat(sql, sizeof(sql),
+			"SELECT pgautofailover.perform_failover('%s', %d)",
+			formation, groupId);
+	if (!exec_sql_on_service(r, r->activeMonitorService, sql, out, sizeof(out)))
 	{
 		log_error("perform failover: perform_failover(%s, %d) failed: %s",
-				  formation, groupId,
-				  PQresultErrorMessage(res));
-		PQclear(res);
+				  formation, groupId, out);
 		return false;
 	}
-	PQclear(res);
 	return true;
 }
 
