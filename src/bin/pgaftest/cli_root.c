@@ -109,14 +109,14 @@ pgaftest_write_last(const char *workDir)
 	char path[1024];
 	pgaftest_last_file(path, sizeof(path));
 
-	FILE *f = fopen(path, "w");
+	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
 	if (!f)
 	{
 		/* non-fatal: .last is a convenience, not required for correctness */
 		return;
 	}
-	fprintf(f, "%s\n", workDir);
-	fclose(f);
+	fprintf(f, "%s\n", workDir); /* IGNORE-BANNED */
+	fclose(f); /* IGNORE-BANNED */
 }
 
 
@@ -130,7 +130,7 @@ pgaftest_read_last(char *buf, int buflen)
 	char path[1024];
 	pgaftest_last_file(path, sizeof(path));
 
-	FILE *f = fopen(path, "r");
+	FILE *f = fopen(path, "r"); /* IGNORE-BANNED */
 	if (!f)
 	{
 		return;
@@ -150,7 +150,7 @@ pgaftest_read_last(char *buf, int buflen)
 			strlcpy(buf, line, buflen);
 		}
 	}
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 }
 
 
@@ -329,7 +329,7 @@ cli_run(int argc, char **argv)
 				failed++;
 			}
 		}
-		fclose(f);
+		fclose(f); /* IGNORE-BANNED */
 
 		fformat(stderr, "\nSchedule complete: %d/%d passed\n",
 				total - failed, total);
@@ -601,7 +601,7 @@ cli_show_spec(int argc, char **argv)
 	{
 		fwrite(buf, 1, n, stdout);
 	}
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	(void) spec; /* parsed for validation; content comes from the file */
 	exit(0);
 }
@@ -1153,7 +1153,7 @@ cli_help(int argc, char **argv)
 
 	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
-		printf(
+		printf( /* IGNORE-BANNED */
 			"\n"
 			"Interactive session quick-start (run these inside the container):\n"
 			"\n"

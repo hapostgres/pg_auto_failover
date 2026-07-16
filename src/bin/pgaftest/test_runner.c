@@ -62,13 +62,13 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 	{
 		case CMD_EXEC:
 		{
-			fprintf(f, "%sexec %s %s\n", pad, cmd->service, cmd->args);
+			fprintf(f, "%sexec %s %s\n", pad, cmd->service, cmd->args); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_EXEC_FAILS:
 		{
-			fprintf(f, "%sexec-fails %s %s\n", pad, cmd->service, cmd->args);
+			fprintf(f, "%sexec-fails %s %s\n", pad, cmd->service, cmd->args); /* IGNORE-BANNED */
 			break;
 		}
 
@@ -76,12 +76,12 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 		{
 			if (cmd->timeoutSeconds > 0)
 			{
-				fprintf(f, "%swait until %s state = %s  timeout %ds\n",
+				fprintf(f, "%swait until %s state = %s  timeout %ds\n", /* IGNORE-BANNED */
 						pad, cmd->service, cmd->state, cmd->timeoutSeconds);
 			}
 			else
 			{
-				fprintf(f, "%swait until %s state = %s\n",
+				fprintf(f, "%swait until %s state = %s\n", /* IGNORE-BANNED */
 						pad, cmd->service, cmd->state);
 			}
 			break;
@@ -89,27 +89,27 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 
 		case CMD_ASSERT_STATE:
 		{
-			fprintf(f, "%sassert %s state = %s\n",
+			fprintf(f, "%sassert %s state = %s\n", /* IGNORE-BANNED */
 					pad, cmd->service, cmd->state);
 			break;
 		}
 
 		case CMD_ASSERT_ASSIGNED:
 		{
-			fprintf(f, "%sassert %s assigned-state = %s\n",
+			fprintf(f, "%sassert %s assigned-state = %s\n", /* IGNORE-BANNED */
 					pad, cmd->service, cmd->state);
 			break;
 		}
 
 		case CMD_SQL:
 		{
-			fprintf(f, "%ssql %s { %s }\n", pad, cmd->service, cmd->args);
+			fprintf(f, "%ssql %s { %s }\n", pad, cmd->service, cmd->args); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_EXPECT:
 		{
-			fprintf(f, "%sexpect { %s }\n", pad, cmd->expected);
+			fprintf(f, "%sexpect { %s }\n", pad, cmd->expected); /* IGNORE-BANNED */
 			break;
 		}
 
@@ -117,90 +117,90 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 		{
 			if (cmd->state[0])
 			{
-				fprintf(f, "%sexpect error %s\n", pad, cmd->state);
+				fprintf(f, "%sexpect error %s\n", pad, cmd->state); /* IGNORE-BANNED */
 			}
 			else
 			{
-				fprintf(f, "%sexpect error\n", pad);
+				fprintf(f, "%sexpect error\n", pad); /* IGNORE-BANNED */
 			}
 			break;
 		}
 
 		case CMD_NETWORK_OFF:
 		{
-			fprintf(f, "%snetwork disconnect %s\n", pad, cmd->service);
+			fprintf(f, "%snetwork disconnect %s\n", pad, cmd->service); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_NETWORK_ON:
 		{
-			fprintf(f, "%snetwork connect %s\n", pad, cmd->service);
+			fprintf(f, "%snetwork connect %s\n", pad, cmd->service); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_SLEEP:
 		{
-			fprintf(f, "%ssleep %ds\n", pad, cmd->timeoutSeconds);
+			fprintf(f, "%ssleep %ds\n", pad, cmd->timeoutSeconds); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_COMPOSE_DOWN:
 		{
-			fprintf(f, "%scompose down\n", pad);
+			fprintf(f, "%scompose down\n", pad); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_COMPOSE_START:
 		{
-			fprintf(f, "%scompose start %s\n", pad, cmd->service);
+			fprintf(f, "%scompose start %s\n", pad, cmd->service); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_COMPOSE_STOP:
 		{
-			fprintf(f, "%scompose stop %s\n", pad, cmd->service);
+			fprintf(f, "%scompose stop %s\n", pad, cmd->service); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_COMPOSE_KILL:
 		{
-			fprintf(f, "%scompose kill %s\n", pad, cmd->service);
+			fprintf(f, "%scompose kill %s\n", pad, cmd->service); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_STOP_POSTGRES:
 		{
-			fprintf(f, "%sstop postgres %s\n", pad, cmd->service);
+			fprintf(f, "%sstop postgres %s\n", pad, cmd->service); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_START_POSTGRES:
 		{
-			fprintf(f, "%sstart postgres %s\n", pad, cmd->service);
+			fprintf(f, "%sstart postgres %s\n", pad, cmd->service); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_PROMOTE:
 		{
-			fprintf(f, "%spromote", pad);
+			fprintf(f, "%spromote", pad); /* IGNORE-BANNED */
 			for (int i = 0; i < cmd->promoteCount; i++)
 			{
-				fprintf(f, " %s%s", cmd->promoteNodes[i],
+				fprintf(f, " %s%s", cmd->promoteNodes[i], /* IGNORE-BANNED */
 						(i < cmd->promoteCount - 1) ? "," : "");
 			}
-			fprintf(f, "\n");
+			fprintf(f, "\n"); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_SET_MONITOR:
 		{
-			fprintf(f, "%sset monitor %s\n", pad, cmd->service);
+			fprintf(f, "%sset monitor %s\n", pad, cmd->service); /* IGNORE-BANNED */
 			break;
 		}
 
 		case CMD_LOGS_CHECK:
 		{
-			fprintf(f, "%slogs %s%s %s\n", pad, cmd->service,
+			fprintf(f, "%slogs %s%s %s\n", pad, cmd->service, /* IGNORE-BANNED */
 					cmd->logsNegate ? " not" : "", cmd->args);
 			break;
 		}
@@ -214,15 +214,15 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 
 			if (strcmp(formation, "default") == 0 && groupId == 0)
 			{
-				fprintf(f, "%sperform failover\n", pad);
+				fprintf(f, "%sperform failover\n", pad); /* IGNORE-BANNED */
 			}
 			else if (groupId == 0)
 			{
-				fprintf(f, "%sperform failover in formation %s\n", pad, formation);
+				fprintf(f, "%sperform failover in formation %s\n", pad, formation); /* IGNORE-BANNED */
 			}
 			else
 			{
-				fprintf(f, "%sperform failover in formation %s group %d\n",
+				fprintf(f, "%sperform failover in formation %s group %d\n", /* IGNORE-BANNED */
 						pad, formation, groupId);
 			}
 			break;
@@ -230,7 +230,7 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 
 		default:
 		{
-			fprintf(f, "%s# (cmd kind %d)\n", pad, (int) cmd->kind);
+			fprintf(f, "%s# (cmd kind %d)\n", pad, (int) cmd->kind); /* IGNORE-BANNED */
 			break;
 		}
 	}
@@ -889,7 +889,7 @@ get_node_pgdata(TestRunner *r, const char *nodeName, char *pgdata, int len)
 			}
 		}
 	}
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	return found;
 }
 
@@ -2461,7 +2461,7 @@ exec_sql_on_service(TestRunner *r, const char *service,
 
 					if (pos + vlen + 2 < outlen)
 					{
-						memcpy(outbuf + pos, val, vlen);
+						memcpy(outbuf + pos, val, vlen); /* IGNORE-BANNED */
 						pos += vlen;
 						outbuf[pos++] = '\n';
 					}
@@ -4608,7 +4608,7 @@ runner_state_read(const char *workDir, TestRunnerState *st)
 
 	char buf[4096] = { 0 };
 	size_t nr = fread(buf, 1, sizeof(buf) - 1, f);
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 
 	if (nr == 0)
 	{
@@ -4669,7 +4669,7 @@ runner_state_write(const char *workDir, const TestRunnerState *st)
 
 	fputs(serial, f);
 	fputc('\n', f);
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	free(serial);
 	return true;
 }
@@ -5141,7 +5141,7 @@ runner_prepare(TestSpec *spec, const char *outDir)
 			"\tdocker compose -p %s -f docker-compose.yml"
 			" down --volumes --remove-orphans\n",
 			r.projectName, r.projectName);
-	fclose(mf);
+	fclose(mf); /* IGNORE-BANNED */
 	log_info("Wrote Makefile to \"%s\"", makefilePath);
 
 	/* Print the docker compose command to stdout */

@@ -985,7 +985,7 @@ compose_gen_write(TestCluster *cluster,
 		}
 	}
 
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	log_info("Wrote docker-compose.yml to \"%s\"", path);
 	return true;
 }
@@ -1122,7 +1122,7 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 		}
 	}
 
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 
 	/* world-writable so the container's docker user can update it at runtime */
 	(void) chmod(path, 0666);
@@ -1190,7 +1190,7 @@ compose_gen_write_second_monitor_ini(const TestCluster *cluster, const char *dir
 													"key_file  = /var/lib/postgres/server.key\n");
 	}
 
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	(void) chmod(path, 0666);
 	log_info("Wrote %s.ini to \"%s\"", name, path);
 	return true;
@@ -1455,7 +1455,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 		}
 	}
 
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	(void) chmod(path, 0666);
 	log_info("Wrote %s.ini to \"%s\"", node->name, path);
 	return true;

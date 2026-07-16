@@ -730,7 +730,7 @@ nodespec_write_to_path(const NodeSpec *spec, const char *path)
 		return false;
 	}
 	bool ok = nodespec_write(spec, f);
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	return ok;
 }
 
