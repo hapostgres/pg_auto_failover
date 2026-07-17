@@ -4350,6 +4350,7 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		runner_exec_step(&r, spec->teardown, err, sizeof(err), 0);
 	}
 
+	tap_plan(&r);
 	runner_print_summary(&r);
 
 	/* compose lifecycle is owned by the host — do not call compose_down here */
