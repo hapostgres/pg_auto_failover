@@ -2221,10 +2221,10 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 		return false;
 	}
 
-	/* pgautofailover.current_state returns 17 columns (including noderegion) */
-	if (PQnfields(result) != 17)
+	/* monitor_get_current_state selects 16 columns (0–15) */
+	if (PQnfields(result) != 16)
 	{
-		log_error("Query returned %d columns, expected 17", PQnfields(result));
+		log_error("Query returned %d columns, expected 16", PQnfields(result));
 		return false;
 	}
 
