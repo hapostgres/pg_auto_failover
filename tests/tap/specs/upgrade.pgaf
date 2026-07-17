@@ -165,8 +165,6 @@ step test_007_verify_data_intact {
         and node2 state is secondary
         and node3 state is secondary
         timeout 120s
-    sql node1 { SELECT current_database(), current_user; }
-    sql node1 { SELECT tablename FROM pg_tables WHERE schemaname='public'; }
     sql node1 { SELECT count(*) FROM upgrade_marker; }
     expect { 1 }
     sql node2 { SELECT count(*) FROM upgrade_marker; }
