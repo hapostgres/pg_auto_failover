@@ -156,6 +156,7 @@ typedef struct LogNotificationContext
 typedef struct ApplySettingsNotificationContext
 {
 	char *formation;
+	int64_t primaryNodeId;           /* set on first primary/apply_settings */
 	bool applySettingsTransitionInProgress;
 	bool applySettingsTransitionDone;
 } ApplySettingsNotificationContext;
@@ -4015,6 +4016,8 @@ monitor_notification_process_apply_settings(void *context,
 	if (nodeState->reportedState == PRIMARY_STATE &&
 		nodeState->goalState == APPLY_SETTINGS_STATE)
 	{
+		/* first notification: learn which primary is being transitioned */
+		ctx->primaryNodeId = nodeState->node.nodeId;
 		ctx->applySettingsTransitionInProgress = true;
 
 		log_debug("step 1/4: primary node " NODE_FORMAT " is assigned \"%s\"",
@@ -4023,9 +4026,24 @@ monitor_notification_process_apply_settings(void *context,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->goalState));
+
+		return;
 	}
-	else if (nodeState->reportedState == APPLY_SETTINGS_STATE &&
-			 nodeState->goalState == APPLY_SETTINGS_STATE)
+
+	/*
+	 * After step 1 we know which node is being transitioned. All further
+	 * checks filter on that node so that keepalives from other nodes in the
+	 * formation (e.g. secondaries reporting secondary/secondary) cannot
+	 * satisfy the completion condition prematurely.
+	 */
+	if (ctx->primaryNodeId != 0 &&
+		ctx->primaryNodeId != nodeState->node.nodeId)
+	{
+		return;
+	}
+
+	if (nodeState->reportedState == APPLY_SETTINGS_STATE &&
+		nodeState->goalState == APPLY_SETTINGS_STATE)
 	{
 		ctx->applySettingsTransitionInProgress = true;
 
@@ -4069,11 +4087,16 @@ monitor_notification_process_apply_settings(void *context,
 	 * through APPLY_SETTINGS. One such case is when changing candidate
 	 * priority to trigger a failover when all the available nodes have
 	 * candidate priority set to zero.
+	 *
+	 * We only use this shortcut when InProgress is already true (we saw the
+	 * primary/apply_settings step 1 notification), ensuring we don't exit
+	 * early on a keepalive from the same node before the transition starts.
 	 */
-	if ((nodeState->reportedState == PRIMARY_STATE &&
-		 nodeState->reportedState == nodeState->goalState) ||
-		(nodeState->reportedState == WAIT_PRIMARY_STATE &&
-		 nodeState->reportedState == nodeState->goalState))
+	if (ctx->applySettingsTransitionInProgress &&
+		((nodeState->reportedState == PRIMARY_STATE &&
+		  nodeState->reportedState == nodeState->goalState) ||
+		 (nodeState->reportedState == WAIT_PRIMARY_STATE &&
+		  nodeState->reportedState == nodeState->goalState)))
 	{
 		ctx->applySettingsTransitionDone = true;
 	}
@@ -4100,6 +4123,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 	PGconn *connection = monitor->notificationClient.connection;
 	ApplySettingsNotificationContext context = {
 		(char *) formation,
+		0,    /* primaryNodeId: set on first primary/apply_settings notification */
 		false,
 		false
 	};
