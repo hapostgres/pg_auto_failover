@@ -1727,6 +1727,33 @@ runner_promote_one(TestRunner *r, const char *nodeName)
 	}
 
 	/*
+	 * Resolve the spec-level service name (docker hostname, e.g. "node2") to
+	 * the pgautofailover-registered nodename (e.g. "node_2").  With v2.1 the
+	 * registered name is assigned sequentially by the monitor and may differ
+	 * from the container hostname.  The spec name doubles as the nodehost, so
+	 * we look it up by nodehost first and fall back to using the spec name
+	 * as-is (which is correct for v2.2 clusters that registered via the ini).
+	 */
+	const char *pgafName = nodeName;
+	char resolvedName[128] = "";
+	if (r->notifyConnected &&
+		r->notifyConn.connection != NULL &&
+		PQstatus(r->notifyConn.connection) == CONNECTION_OK)
+	{
+		const char *params[1] = { nodeName };
+		PGresult *res = PQexecParams(r->notifyConn.connection,
+									 "SELECT nodename FROM pgautofailover.node"
+									 " WHERE nodehost = $1 LIMIT 1",
+									 1, NULL, params, NULL, NULL, 0);
+		if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1)
+		{
+			strlcpy(resolvedName, PQgetvalue(res, 0, 0), sizeof(resolvedName));
+			pgafName = resolvedName;
+		}
+		PQclear(res);
+	}
+
+	/*
 	 * Call pgautofailover.perform_promotion(formation, node_name) on the
 	 * monitor.  Uses the LISTEN connection when available; falls back to
 	 * docker compose exec psql when LISTEN is not connected.
@@ -1735,11 +1762,11 @@ runner_promote_one(TestRunner *r, const char *nodeName)
 	char out[256] = "";
 	sformat(sql, sizeof(sql),
 			"SELECT pgautofailover.perform_promotion('%s', '%s')",
-			formation, nodeName);
+			formation, pgafName);
 	if (!exec_sql_on_service(r, r->activeMonitorService, sql, out, sizeof(out)))
 	{
 		log_error("promote: perform_promotion(%s, %s) failed: %s",
-				  formation, nodeName, out);
+				  formation, pgafName, out);
 		return false;
 	}
 

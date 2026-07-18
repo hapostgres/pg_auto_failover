@@ -32,6 +32,18 @@
 # PGVERSION defaults to 16.  Rebuild with
 #   PGVERSION=17 make -C tests/upgrade pgaf-current pgaf-next
 # if needed.
+#
+# Note on Postgres restart: the previous release (v2.1) contains a bug where
+# keeper_pg_init_and_register calls keeper_ensure_node_has_been_dropped without
+# first calling monitor_init, so the check connects to local Postgres instead of
+# the monitor and fails with "schema pgautofailover does not exist".  The v2.1
+# supervisor retries 5 times in rapid succession, then exits, which takes the
+# container down.  The v2.2 binary fixes this (monitor_init is now called
+# first).  The upgrade procedure therefore restarts each data-node container
+# after the old supervisor dies; docker preserves the volume so Postgres data
+# is intact, and Postgres itself restarts cleanly from its on-disk state.
+# Future upgrades from v2.2 will not need this container restart because the
+# v2.2 supervisor correctly re-execs the new binary without triggering the bug.
 
 cluster {
     monitor
@@ -113,19 +125,42 @@ step test_003_upgrade_monitor {
 }
 
 # -------------------------------------------------------------------------
-# Phase 3: wait for keepers to self-restart.
+# Phase 3: allow old keepers to exit, then restart containers with new binary.
 #
-# After the monitor extension becomes "2.2", the keeper children compare the
-# installed version against the on-disk binary's required version — they
-# match, so each child calls exit(EXIT_CODE_MONITOR) and the supervisor
-# re-execs from the new binary.  No Postgres restart, no container restart.
+# After the monitor extension becomes "2.2", the v2.1 node-active children
+# compare the installed version against the on-disk binary's required version
+# — they match, so each child calls exit(EXIT_CODE_MONITOR).  The v2.1
+# supervisor then attempts to restart via keeper_pg_init_and_register, but
+# hits a bug (no monitor_init before the dropped-node check) and fails 5
+# times.  The supervisor gives up and exits, taking the container with it.
+#
+# We then restart the data-node containers.  The symlink already points at
+# the next binary, so they start with v2.2 pg_autoctl.  The v2.2 binary
+# handles the state-file restart path correctly (monitor_init is called first)
+# and Postgres comes back up cleanly from its persisted on-disk state.
 # -------------------------------------------------------------------------
 
 step test_003b_wait_keeper_restart {
-    # Give keepers time to detect the extension upgrade and self-restart.
-    # Previous keeper polls every ~5 s; the container restart adds ~5 s.
-    # 45 s gives ample time on slow CI runners.
-    exec monitor sleep 45
+    # Wait for old node-active processes to detect the extension version
+    # mismatch and exit with EXIT_CODE_MONITOR. The v2.1 supervisor then
+    # tries to restart via keeper_pg_init_and_register, which fails 5 times
+    # in rapid succession (v2.1 bug: no monitor_init before the dropped-node
+    # check). The supervisor then gives up and exits, taking the container
+    # with it. 20 s is ample time for this on any runner.
+    exec monitor sleep 20
+
+    # The data node containers are now Exited. Restart them; the symlink
+    # already points at the next binary so these containers run v2.2.
+    # The v2.2 keeper_pg_init_and_register calls monitor_init first and
+    # handles the state-file path correctly. Postgres restarts cleanly from
+    # its on-disk state (the v2.1 supervisor called pg_ctl stop before
+    # exiting, so the data directory is consistent).
+    compose start node1
+    compose start node2
+    compose start node3
+
+    # Give the restarted keepers time to initialize and start reporting.
+    exec monitor sleep 30
 }
 
 step test_004_wait_convergence {

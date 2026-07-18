@@ -143,6 +143,29 @@ keeper_pg_init_and_register(Keeper *keeper)
 		(void) local_postgres_init(postgres, pgSetup);
 
 		/*
+		 * Read the config from disk to get the correct formation, groupId,
+		 * and monitor URI.  When called from the supervisor's restart path
+		 * (e.g. after the old node-active exits with EXIT_CODE_MONITOR), the
+		 * keeper context carries CLI defaults: groupId = -1, which causes
+		 * get_nodes() to return no rows and incorrectly conclude the node was
+		 * dropped.  Reading the config file restores the registered values.
+		 */
+		{
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			bool monitorDisabledIsOk = true;
+
+			if (!keeper_config_read_file(config,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+		}
+
+		/*
 		 * keeper_ensure_node_has_been_dropped connects to the monitor.
 		 * Initialize the monitor connection now so it uses PGSQL_CONN_MONITOR
 		 * rather than the zero-initialized PGSQL_CONN_LOCAL default, which
