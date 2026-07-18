@@ -67,6 +67,14 @@ bool compose_gen_write_node_ini(const TestCluster *cluster,
 								int nodeId,
 								const char *dir);
 
+/*
+ * Write the pgaf-hosts file that the dnsmasq _dns service serves.
+ * path should be <workdir>/pgaf-hosts.
+ */
+bool compose_gen_write_hosts(const TestCluster *cluster,
+							 const char *path,
+							 const char *projectName);
+
 /* Return the docker network name for a project */
 void compose_network_name(const char *projectName, char *buf, int buflen);
 

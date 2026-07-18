@@ -504,6 +504,150 @@ write_image_stanza(FILE *f, const TestCluster *cluster, const char *contextDir)
 
 
 /* -----------------------------------------------------------------------
+ * Static-IP / dnsmasq helpers
+ *
+ * Every compose stack gets a private /24 subnet derived from the project
+ * name.  A lightweight dnsmasq container (_dns) sits at .2 and answers
+ * queries for all service names from a pre-generated hosts file, bypassing
+ * Docker's embedded 127.0.0.11 resolver which is known to drop DNS under
+ * heavy container churn on GitHub Actions runners.
+ *
+ * IP layout (fourth octet):
+ *   .2       _dns (dnsmasq)
+ *   .3       monitor (when present)
+ *   .4       second_monitor (when present)
+ *   .5 …     data nodes, in the order they appear across all formations
+ *
+ * Subnet selection: hash the project name into one of 2048 /24 blocks
+ * spread across 172.20.0.0/12 – 172.27.0.0/12 (second and third octets),
+ * giving low collision probability when multiple tests run in parallel on
+ * the same GHA runner.
+ * ----------------------------------------------------------------------- */
+
+/* Number of /24 subnets available: 8 class-B blocks × 256 class-C = 2048 */
+#define DNS_SUBNET_BASE_A  172
+#define DNS_SUBNET_RANGE_B 8    /* 172.20 … 172.27 */
+#define DNS_SUBNET_BASE_B  20
+
+/*
+ * djb2 hash — fast, low-collision for short ASCII strings.
+ */
+static unsigned long
+djb2_hash(const char *s)
+{
+	unsigned long h = 5381;
+
+	for (; *s; s++)
+	{
+		h = h * 33 ^ (unsigned char) *s;
+	}
+	return h;
+}
+
+
+/*
+ * compose_subnet fills `buf` with the /24 subnet string for `projectName`,
+ * e.g. "172.23.47.0/24".
+ */
+static void
+compose_subnet(const char *projectName, char *buf, int buflen)
+{
+	unsigned long h = djb2_hash(projectName);
+	int b = DNS_SUBNET_BASE_B + (int) ((h >> 8) % DNS_SUBNET_RANGE_B);
+	int c = (int) (h % 256);
+
+	sformat(buf, buflen, "%d.%d.%d.0/24", DNS_SUBNET_BASE_A, b, c);
+}
+
+
+/*
+ * compose_dns_ip fills `buf` with the dnsmasq container's IP (.2).
+ */
+static void
+compose_dns_ip(const char *projectName, char *buf, int buflen)
+{
+	unsigned long h = djb2_hash(projectName);
+	int b = DNS_SUBNET_BASE_B + (int) ((h >> 8) % DNS_SUBNET_RANGE_B);
+	int c = (int) (h % 256);
+
+	sformat(buf, buflen, "%d.%d.%d.2", DNS_SUBNET_BASE_A, b, c);
+}
+
+
+/*
+ * compose_service_ip fills `buf` with the IP for a given last-octet offset.
+ * offset 2 = _dns, 3 = monitor, 4 = secondMonitor, 5+ = data nodes.
+ */
+static void
+compose_service_ip(const char *projectName, int offset, char *buf, int buflen)
+{
+	unsigned long h = djb2_hash(projectName);
+	int b = DNS_SUBNET_BASE_B + (int) ((h >> 8) % DNS_SUBNET_RANGE_B);
+	int c = (int) (h % 256);
+
+	sformat(buf, buflen, "%d.%d.%d.%d", DNS_SUBNET_BASE_A, b, c, offset);
+}
+
+
+/*
+ * compose_gen_write_hosts writes the pgaf-hosts file that dnsmasq serves.
+ * path should be <workdir>/pgaf-hosts.
+ *
+ * The file contains one "IP  name" line per service (monitor + data nodes).
+ * The _dns container itself is omitted (it doesn't need to resolve itself).
+ */
+bool
+compose_gen_write_hosts(const TestCluster *cluster,
+						const char *path,
+						const char *projectName)
+{
+	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
+
+	if (!f)
+	{
+		log_error("Failed to open \"%s\" for writing: %m", path);
+		return false;
+	}
+
+	/* offset 3: monitor */
+	if (cluster->withMonitor)
+	{
+		char ip[32];
+		compose_service_ip(projectName, 3, ip, sizeof(ip));
+		fformat(f, "%s  monitor\n", ip);
+	}
+
+	/* offset 4: second monitor */
+	if (cluster->secondMonitorName[0])
+	{
+		char ip[32];
+		compose_service_ip(projectName, 4, ip, sizeof(ip));
+		fformat(f, "%s  %s\n", ip, cluster->secondMonitorName);
+	}
+
+	/* offset 5+: data nodes */
+	int nodeOffset = 5;
+
+	for (int fi = 0; fi < cluster->formationCount; fi++)
+	{
+		const TestFormation *form = &cluster->formations[fi];
+
+		for (int ni = 0; ni < form->nodeCount; ni++)
+		{
+			const TestNode *n = &form->nodes[ni];
+			char ip[32];
+			compose_service_ip(projectName, nodeOffset++, ip, sizeof(ip));
+			fformat(f, "%s  %s\n", ip, n->name);
+		}
+	}
+
+	fclose(f); /* IGNORE-BANNED */
+	log_info("Wrote pgaf-hosts to \"%s\"", path);
+	return true;
+}
+
+
+/* -----------------------------------------------------------------------
  * compose_gen_write — the docker-compose.yml
  * ----------------------------------------------------------------------- */
 
@@ -597,9 +741,57 @@ compose_gen_write(TestCluster *cluster,
 		return false;
 	}
 
+	char subnet[32];
+	char dnsIp[32];
+
+	compose_subnet(projectName, subnet, sizeof(subnet));
+	compose_dns_ip(projectName, dnsIp, sizeof(dnsIp));
+
+	/*
+	 * Write pgaf-hosts next to docker-compose.yml for dnsmasq to serve.
+	 * Skip when path is /dev/stdout (pgaftest show compose dry-run).
+	 */
+	if (strcmp(path, "/dev/stdout") != 0)
+	{
+		char hostsPath[MAXPGPATH];
+		strlcpy(hostsPath, path, sizeof(hostsPath));
+		char *slash = strrchr(hostsPath, '/');
+
+		if (slash)
+		{
+			*slash = '\0';
+			strlcat(hostsPath, "/pgaf-hosts", sizeof(hostsPath));
+		}
+		else
+		{
+			strlcpy(hostsPath, "pgaf-hosts", sizeof(hostsPath));
+		}
+
+		if (!compose_gen_write_hosts(cluster, hostsPath, projectName))
+		{
+			fclose(f); /* IGNORE-BANNED */
+			return false;
+		}
+	}
+
 	fformat(f, "# Generated by pgaftest — do not edit manually\n");
-	fformat(f, "# Project: %s\n\n", projectName);
+	fformat(f, "# Project: %s  subnet: %s\n\n", projectName, subnet);
 	fformat(f, "services:\n");
+
+	/* ---- _dns: dnsmasq serving static pgaf-hosts ---- */
+	fformat(f,
+			"  _dns:\n"
+			"    image: alpine:3\n"
+			"    command: [\"sh\", \"-c\",\n"
+			"      \"apk add -q dnsmasq"
+			" && dnsmasq --no-daemon --addn-hosts=/etc/pgaf-hosts"
+			" --server=1.1.1.1 --server=8.8.8.8\"]\n"
+			"    volumes:\n"
+			"      - ./pgaf-hosts:/etc/pgaf-hosts:ro\n"
+			"    networks:\n"
+			"      pgafnet:\n"
+			"        ipv4_address: %s\n\n",
+			dnsIp);
 
 	/* ---- monitor (optional) ---- */
 	if (cluster->withMonitor)
@@ -705,6 +897,9 @@ compose_gen_write(TestCluster *cluster,
 		 * Monitor healthcheck: data nodes use depends_on service_healthy so
 		 * they do not start until the monitor is fully initialised.
 		 */
+		char monitorIp[32];
+		compose_service_ip(projectName, 3, monitorIp, sizeof(monitorIp));
+
 		fformat(f,
 				"    healthcheck:\n"
 				"      test: [\"CMD\", \"pg_autoctl\", \"status\","
@@ -712,8 +907,14 @@ compose_gen_write(TestCluster *cluster,
 				"      interval: 2s\n"
 				"      timeout: 5s\n"
 				"      retries: 150\n"
-				"      start_period: 60s\n\n",
-				monitor_pgdata);
+				"      start_period: 60s\n"
+				"    dns: [\"%s\"]\n"
+				"    networks:\n"
+				"      pgafnet:\n"
+				"        ipv4_address: %s\n\n",
+				monitor_pgdata,
+				dnsIp,
+				monitorIp);
 	}
 
 	/* ---- second monitor (initially stopped, for replace-monitor tests) ---- */
@@ -751,12 +952,19 @@ compose_gen_write(TestCluster *cluster,
 		fformat(f,
 				"    environment:\n"
 				"      PGDATA: " NODE_PGDATA "\n");
+		char secondMonitorIp[32];
+		compose_service_ip(projectName, 4, secondMonitorIp, sizeof(secondMonitorIp));
 		fformat(f,
 				"    ports:\n"
 				"      - \"%d:5432\"\n",
 				cluster->secondMonitorHostPort);
 		write_node_command(f, cluster, NODE_INI_PATH);
-		fformat(f, "\n");
+		fformat(f,
+				"    dns: [\"%s\"]\n"
+				"    networks:\n"
+				"      pgafnet:\n"
+				"        ipv4_address: %s\n\n",
+				dnsIp, secondMonitorIp);
 	}
 
 	/* ---- data nodes — iterate all formations ---- */
@@ -769,6 +977,9 @@ compose_gen_write(TestCluster *cluster,
 	 */
 	const TestNode *firstNode = NULL;
 
+	/* IP offset 5 = first data node (2=_dns, 3=monitor, 4=secondMonitor) */
+	int nodeIpOffset = 5;
+
 	for (int fi = 0; fi < cluster->formationCount; fi++)
 	{
 		const TestFormation *form = &cluster->formations[fi];
@@ -776,6 +987,7 @@ compose_gen_write(TestCluster *cluster,
 		for (int ni = 0; ni < form->nodeCount; ni++)
 		{
 			const TestNode *n = &form->nodes[ni];
+			int thisOffset = nodeIpOffset++;
 			fformat(f, "  %s:\n", n->name);
 			write_image_stanza(f, cluster, contextDir);
 
@@ -915,7 +1127,14 @@ compose_gen_write(TestCluster *cluster,
 						"      monitor:\n"
 						"        condition: service_healthy\n");
 			}
-			fformat(f, "\n");
+			char nodeIp[32];
+			compose_service_ip(projectName, thisOffset, nodeIp, sizeof(nodeIp));
+			fformat(f,
+					"    dns: [\"%s\"]\n"
+					"    networks:\n"
+					"      pgafnet:\n"
+					"        ipv4_address: %s\n\n",
+					dnsIp, nodeIp);
 
 			if (!firstNode && !n->launchDeferred && !n->createDeferred)
 			{
@@ -1073,6 +1292,15 @@ compose_gen_write(TestCluster *cluster,
 			}
 		}
 	}
+
+	/* ---- top-level networks block with static subnet ---- */
+	fformat(f,
+			"\nnetworks:\n"
+			"  pgafnet:\n"
+			"    ipam:\n"
+			"      config:\n"
+			"        - subnet: %s\n",
+			subnet);
 
 	fclose(f); /* IGNORE-BANNED */
 	log_info("Wrote docker-compose.yml to \"%s\"", path);
