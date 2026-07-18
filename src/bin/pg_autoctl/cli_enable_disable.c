@@ -554,6 +554,17 @@ cli_enable_maintenance(int argc, char **argv)
 	}
 
 	NodeState targetStates[] = { MAINTENANCE_STATE };
+
+	/*
+	 * When --allow-failover is used on the primary, the monitor must first
+	 * promote a secondary (up to 60 s) and then assign maintenance to this
+	 * node (another 60 s).  Use 3× the base timeout so both phases can
+	 * complete within the single wait window.
+	 */
+	int waitTimeoutSecs = (allowFailover && keeper.state.current_role == PRIMARY_STATE)
+		? 3 * PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT
+		: PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
+
 	if (!monitor_wait_until_node_reported_state(
 			&(keeper.monitor),
 			keeper.config.formation,
@@ -561,7 +572,8 @@ cli_enable_maintenance(int argc, char **argv)
 			keeper.state.current_node_id,
 			keeper.config.pgSetup.pgKind,
 			targetStates,
-			lengthof(targetStates)))
+			lengthof(targetStates),
+			waitTimeoutSecs))
 	{
 		log_error("Failed to wait until the node reached the maintenance state");
 		exit(EXIT_CODE_MONITOR);
@@ -662,7 +674,8 @@ cli_disable_maintenance(int argc, char **argv)
 			keeper.state.current_node_id,
 			keeper.config.pgSetup.pgKind,
 			targetStates,
-			lengthof(targetStates)))
+			lengthof(targetStates),
+			PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT))
 	{
 		log_error("Failed to wait until a node reached the secondary or primary state");
 		exit(EXIT_CODE_MONITOR);
