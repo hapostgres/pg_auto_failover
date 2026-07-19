@@ -836,6 +836,12 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_RUN:
+		{
+			fformat(out, "%*srun %s  %s\n", indent, "", cmd->service, cmd->args);
+			break;
+		}
+
 		case CMD_WAIT_STATE:
 		case CMD_ASSERT_STATE:
 		case CMD_ASSERT_ASSIGNED:
@@ -1042,6 +1048,30 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 		case CMD_SET_MONITOR:
 		{
 			fformat(out, "%*sset monitor %s\n", indent, "", cmd->service);
+			break;
+		}
+
+		case CMD_FAILOVER:
+		{
+			/*
+			 * service holds the formation name ("default" when omitted in
+			 * the source); waitGroups[0] holds the group (0 when omitted).
+			 * Reconstruct whichever of the four "perform failover" forms
+			 * matches (see the perform_cmd grammar rule).
+			 */
+			bool hasFormation = strcmp(cmd->service, "default") != 0;
+			bool hasGroup = cmd->waitGroups[0] != 0;
+
+			fformat(out, "%*sperform failover", indent, "");
+			if (hasFormation)
+			{
+				fformat(out, " in formation %s", cmd->service);
+			}
+			if (hasGroup)
+			{
+				fformat(out, " group %d", cmd->waitGroups[0]);
+			}
+			fformat(out, "\n");
 			break;
 		}
 
