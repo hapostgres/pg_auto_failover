@@ -196,6 +196,17 @@ def test_005_001_fail_primary_again():
 
 
 def test_005_002_fail_primary_again():
+    # Start node2 first so that it can participate in the LSN quorum.
+    # node2 was killed in test_005_001 and never restarted; it is still
+    # registered as a sync standby (replication_quorum=true). With
+    # number_sync_standbys=1 the monitor needs 2 LSN reports to elect a new
+    # primary (pgautofailover.guard_data_loss defaults to true as of #1142),
+    # and without node2 back online only node3 would report, stalling the
+    # failover indefinitely -- the monitor logs "2 nodes are required in the
+    # quorum to satisfy number_sync_standbys=1" forever instead of electing
+    # node3.
+    node2.run()
+
     # verify that node1 is primary and stop it
     assert node1.get_state().assigned == "primary"
     node1.fail()
@@ -208,13 +219,12 @@ def test_005_002_fail_primary_again():
 
 
 def test_005_003_bring_up_first_failed_primary():
-    # Restart node2
-    node2.run()
-
+    # node2 was already started in test_005_002; wait for it to join as
+    # secondary. 'demoted' is a transient intermediate state that lasts
+    # under a second and may have already come and gone by the time we get
+    # here (it races unreliably on shared CI runners) -- wait for the
+    # stable end state instead.
     print()
-    assert node2.wait_until_state(target_state="demoted")
-
-    # Now node 2 should become secondary
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
 
