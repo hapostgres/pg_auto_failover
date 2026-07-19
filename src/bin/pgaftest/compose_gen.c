@@ -995,6 +995,18 @@ compose_gen_write(TestCluster *cluster,
 	/* IP offset 5 = first data node (2=_dns, 3=monitor, 4=secondMonitor) */
 	int nodeIpOffset = 5;
 
+	/*
+	 * Ordinal position of each node across every formation, in cluster{}
+	 * declaration order (0 = first node declared).  Passed to the container
+	 * as PG_AUTOCTL_TEST_DELAY so that pg_autoctl node run can stagger
+	 * registration deterministically — see the PG_AUTOCTL_TEST_DELAY
+	 * handling in cli_node.c for why this exists.  Unlike a name-derived
+	 * index, this works uniformly for both "node1"/"node2" naming and
+	 * Citus-style "worker1a"/"coordinator1b" naming, since it never parses
+	 * the node name at all.
+	 */
+	int nodeOrdinal = 0;
+
 	for (int fi = 0; fi < cluster->formationCount; fi++)
 	{
 		const TestFormation *form = &cluster->formations[fi];
@@ -1003,6 +1015,7 @@ compose_gen_write(TestCluster *cluster,
 		{
 			const TestNode *n = &form->nodes[ni];
 			int thisOffset = nodeIpOffset++;
+			int thisOrdinal = nodeOrdinal++;
 			fformat(f, "  %s:\n", n->name);
 			write_image_stanza(f, cluster, contextDir);
 
@@ -1062,10 +1075,10 @@ compose_gen_write(TestCluster *cluster,
 					"      PGDATA: %s\n"
 					"      PGUSER: demo\n"
 					"      PGDATABASE: demo\n"
-					"      PG_AUTOCTL_TEST_DELAY: \"1\"\n"
+					"      PG_AUTOCTL_TEST_DELAY: \"%d\"\n"
 					"    expose:\n"
 					"      - 5432\n",
-					node_pgdata);
+					node_pgdata, thisOrdinal);
 
 			/*
 			 * No depends_on: keeper retry loops handle monitor not yet ready,
