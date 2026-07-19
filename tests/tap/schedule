@@ -33,7 +33,7 @@ upgrade
 # debug_failover_pg19
 
 # Citus tests (uncomment when CITUS_CLUSTER=1):
-# basic_citus_operation
+# citus_basic_operation
 # citus_cluster_name
 # citus_force_failover
 # citus_multi_standbys
