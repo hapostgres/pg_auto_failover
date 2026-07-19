@@ -2648,58 +2648,119 @@ runner_network_on(TestRunner *r, const char *nodeName)
  * ----------------------------------------------------------------------- */
 
 /*
- * runner_expand_macros substitutes %CIDR% in the args string with the
- * Docker network CIDR reported by `pg_autoctl inspect show cidr` on the
- * monitor container.  The result is written to dst (at most dstlen bytes).
- * Returns false if the CIDR could not be determined.
+ * runner_expand_macros substitutes recognized macros in the args string.
+ * Both use $name(args) call syntax, whether or not resolving them actually
+ * runs anything:
+ *
+ *   $cidr()      the Docker network CIDR, resolved by running
+ *                `pg_autoctl inspect show cidr` on the monitor container.
+ *   $ip(<node>)  the static IP assigned to <node>, resolved by reading the
+ *                dnsmasq pgaf-hosts file (see runner_hosts_lookup).  Useful
+ *                for HBA / raw connection-string assertions that need a
+ *                node's address without hardcoding the hash-derived subnet.
+ *
+ * Neither macro is cached: every occurrence re-resolves independently
+ * (a fresh `pg_autoctl inspect` call, or a fresh pgaf-hosts read), so the
+ * result always reflects current state rather than a value captured at
+ * spec-parse time.
+ *
+ * The result is written to dst (at most dstlen bytes).  Returns false if a
+ * macro could not be resolved.
  */
 static bool
 runner_expand_macros(TestRunner *r, const char *args, char *dst, int dstlen,
 					 char *errBuf, int errLen)
 {
-	const char *macro = "%CIDR%";
-	const char *found = strstr(args, macro);
-
-	if (!found)
+	if (strstr(args, "$cidr()") == NULL && strstr(args, "$ip(") == NULL)
 	{
 		strlcpy(dst, args, dstlen);
 		return true;
 	}
 
-	/* fetch CIDR from the monitor */
+	/* $cidr() is the same value for every occurrence; fetch it lazily once */
 	char cidr[128] = "";
-	int rc = run_cmd_capture(cidr, sizeof(cidr),
-							 "%s exec -T monitor pg_autoctl inspect show cidr 2>/dev/null",
-							 r->composeBase);
-	if (rc != 0 || cidr[0] == '\0')
-	{
-		sformat(errBuf, errLen,
-				"%%CIDR%%: could not get Docker network CIDR from monitor");
-		return false;
-	}
+	bool haveCidr = false;
 
-	/* trim trailing newline */
-	int n = strlen(cidr);
-	while (n > 0 && (cidr[n - 1] == '\n' || cidr[n - 1] == '\r' || cidr[n - 1] == ' '))
-	{
-		cidr[--n] = '\0';
-	}
-
-	log_info("           %%CIDR%% = %s", cidr);
-
-	/* substitute all occurrences */
 	int di = 0;
-	for (const char *p = args; *p && di < dstlen - 1;)
+	const char *p = args;
+
+	while (*p && di < dstlen - 1)
 	{
-		if (strncmp(p, macro, strlen(macro)) == 0)
+		if (strncmp(p, "$cidr()", 7) == 0)
 		{
+			if (!haveCidr)
+			{
+				int rc = run_cmd_capture(cidr, sizeof(cidr),
+										 "%s exec -T monitor pg_autoctl inspect show cidr 2>/dev/null",
+										 r->composeBase);
+				if (rc != 0 || cidr[0] == '\0')
+				{
+					sformat(errBuf, errLen,
+							"$cidr(): could not get Docker network CIDR from monitor");
+					return false;
+				}
+
+				int n = strlen(cidr);
+				while (n > 0 && (cidr[n - 1] == '\n' || cidr[n - 1] == '\r' ||
+								 cidr[n - 1] == ' '))
+				{
+					cidr[--n] = '\0';
+				}
+
+				log_info("           $cidr() = %s", cidr);
+				haveCidr = true;
+			}
+
 			int cl = strlen(cidr);
 			if (di + cl < dstlen - 1)
 			{
 				memcpy(dst + di, cidr, cl); /* IGNORE-BANNED */
 				di += cl;
 			}
-			p += strlen(macro);
+			p += 7;
+		}
+		else if (strncmp(p, "$ip(", 4) == 0)
+		{
+			const char *nameStart = p + 4;
+			const char *close = strchr(nameStart, ')');
+
+			if (close == NULL)
+			{
+				sformat(errBuf, errLen,
+						"$ip(...): missing closing ')' in \"%s\"", args);
+				return false;
+			}
+
+			int nameLen = (int) (close - nameStart);
+			char nodeName[128];
+
+			if (nameLen <= 0 || nameLen >= (int) sizeof(nodeName))
+			{
+				sformat(errBuf, errLen,
+						"$ip(...): invalid node name in \"%s\"", args);
+				return false;
+			}
+
+			memcpy(nodeName, nameStart, nameLen); /* IGNORE-BANNED */
+			nodeName[nameLen] = '\0';
+
+			char nodeIp[64] = "";
+			if (!runner_hosts_lookup(r->workDir, nodeName, nodeIp, sizeof(nodeIp)))
+			{
+				sformat(errBuf, errLen,
+						"$ip(%s): no static IP found in pgaf-hosts", nodeName);
+				return false;
+			}
+
+			log_info("           $ip(%s) = %s", nodeName, nodeIp);
+
+			int cl = strlen(nodeIp);
+			if (di + cl < dstlen - 1)
+			{
+				memcpy(dst + di, nodeIp, cl); /* IGNORE-BANNED */
+				di += cl;
+			}
+			p = close + 1;
 		}
 		else
 		{
