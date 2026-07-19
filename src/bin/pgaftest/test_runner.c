@@ -2557,25 +2557,33 @@ runner_hosts_lookup(const char *workDir, const char *nodeName,
 
 		/* skip comment lines */
 		if (*p == '#' || *p == '\0' || *p == '\n')
+		{
 			continue;
+		}
 
 		/* collect the IP field (up to first whitespace) */
 		char ip[64];
 		int ipLen = 0;
 		while (*p && *p != ' ' && *p != '\t' && ipLen < (int) sizeof(ip) - 1)
+		{
 			ip[ipLen++] = *p++;
+		}
 		ip[ipLen] = '\0';
 
 		/* skip whitespace between fields */
 		while (*p == ' ' || *p == '\t')
+		{
 			p++;
+		}
 
 		/* collect the hostname field (up to whitespace/newline) */
 		char host[128];
 		int hostLen = 0;
 		while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' &&
 			   hostLen < (int) sizeof(host) - 1)
+		{
 			host[hostLen++] = *p++;
+		}
 		host[hostLen] = '\0';
 
 		if (ipLen > 0 && hostLen > 0 && strcmp(host, nodeName) == 0)
