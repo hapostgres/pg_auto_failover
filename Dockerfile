@@ -3,10 +3,11 @@
 #
 # The heavy apt + Citus work lives in Dockerfile.base (image pgaf-base).
 # This file adds:
-#   build   — compiles pg_auto_failover + pgaftest, runs installcheck
-#   test    — old Python test runner (kept for compatibility)
-#   run     — minimal runtime image for test nodes
+#   build    — compiles pg_auto_failover + pgaftest, runs installcheck
+#   test     — old Python test runner (kept for compatibility)
+#   run      — minimal runtime image for test nodes
 #   pgaftest — test-runner image (Docker CLI + pgaftest binary)
+#   dnsmasq  — tiny Alpine image serving /etc/pgaf-hosts via dnsmasq
 #
 # Usage:
 #   docker buildx build \
@@ -176,3 +177,36 @@ COPY --from=build /usr/local/bin/pgaftest /usr/local/bin/
 
 WORKDIR /root
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# ---------------------------------------------------------------------------
+# dnsmasq — lightweight DNS server for pgaftest clusters.
+#
+# Serves static host entries from /etc/pgaf-hosts (bind-mounted by
+# compose_gen_write at <workdir>/pgaf-hosts).  Every data-node and the
+# monitor container point their resolv.conf at this service so that
+# pg_autoctl hostname lookups work reliably instead of relying on Docker's
+# embedded DNS (127.0.0.11) which can fail under load on GHA runners.
+#
+# Build once, reuse across all test runs — no per-run apk install.
+#
+# Usage:
+#   docker build --target dnsmasq -t pgaf:dnsmasq .
+#
+# Override with PGAF_DNS_IMAGE env var when running pgaftest.
+# ---------------------------------------------------------------------------
+FROM alpine:3 AS dnsmasq
+
+RUN apk add --no-cache dnsmasq
+
+# Forwarding upstreams; containers can override via --dns-opt or compose env.
+ENV DNS1=1.1.1.1
+ENV DNS2=8.8.8.8
+
+EXPOSE 53/udp 53/tcp
+
+HEALTHCHECK --interval=2s --timeout=2s --start-period=2s --retries=5 \
+    CMD nslookup localhost 127.0.0.1 || exit 1
+
+ENTRYPOINT ["sh", "-c", \
+    "exec dnsmasq --no-daemon --addn-hosts=/etc/pgaf-hosts \
+        --server=${DNS1} --server=${DNS2} --log-facility=-"]

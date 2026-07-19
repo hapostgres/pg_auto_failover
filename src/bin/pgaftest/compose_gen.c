@@ -780,19 +780,27 @@ compose_gen_write(TestCluster *cluster,
 	fformat(f, "services:\n");
 
 	/* ---- _dns: dnsmasq serving static pgaf-hosts ---- */
+	const char *dnsImage = getenv("PGAF_DNS_IMAGE"); /* IGNORE-BANNED */
+	if (!dnsImage || !*dnsImage)
+	{
+		dnsImage = "pgaf:dnsmasq";
+	}
+
 	fformat(f,
 			"  _dns:\n"
-			"    image: alpine:3\n"
-			"    command: [\"sh\", \"-c\",\n"
-			"      \"apk add -q dnsmasq"
-			" && dnsmasq --no-daemon --addn-hosts=/etc/pgaf-hosts"
-			" --server=1.1.1.1 --server=8.8.8.8\"]\n"
+			"    image: %s\n"
 			"    volumes:\n"
 			"      - ./pgaf-hosts:/etc/pgaf-hosts:ro\n"
 			"    networks:\n"
 			"      pgafnet:\n"
-			"        ipv4_address: %s\n\n",
-			dnsIp);
+			"        ipv4_address: %s\n"
+			"    healthcheck:\n"
+			"      test: [\"CMD\", \"nslookup\", \"localhost\", \"127.0.0.1\"]\n"
+			"      interval: 2s\n"
+			"      timeout: 2s\n"
+			"      start_period: 2s\n"
+			"      retries: 5\n\n",
+			dnsImage, dnsIp);
 
 	/* ---- monitor (optional) ---- */
 	if (cluster->withMonitor)
@@ -909,6 +917,9 @@ compose_gen_write(TestCluster *cluster,
 				"      timeout: 5s\n"
 				"      retries: 150\n"
 				"      start_period: 60s\n"
+				"    depends_on:\n"
+				"      _dns:\n"
+				"        condition: service_healthy\n"
 				"    dns: [\"%s\"]\n"
 				"    networks:\n"
 				"      pgafnet:\n"
@@ -961,6 +972,9 @@ compose_gen_write(TestCluster *cluster,
 				cluster->secondMonitorHostPort);
 		write_node_command(f, cluster, NODE_INI_PATH);
 		fformat(f,
+				"    depends_on:\n"
+				"      _dns:\n"
+				"        condition: service_healthy\n"
 				"    dns: [\"%s\"]\n"
 				"    networks:\n"
 				"      pgafnet:\n"
@@ -1114,6 +1128,8 @@ compose_gen_write(TestCluster *cluster,
 			{
 				fformat(f,
 						"    depends_on:\n"
+						"      _dns:\n"
+						"        condition: service_healthy\n"
 						"      %s:\n"
 						"        condition: %s\n",
 						firstNode->name,
@@ -1122,10 +1138,20 @@ compose_gen_write(TestCluster *cluster,
 			else if (cluster->withMonitor &&
 					 !n->launchDeferred && !n->createDeferred)
 			{
-				/* node1: wait for monitor to be healthy before starting */
+				/* node1: wait for _dns and monitor to be healthy before starting */
 				fformat(f,
 						"    depends_on:\n"
+						"      _dns:\n"
+						"        condition: service_healthy\n"
 						"      monitor:\n"
+						"        condition: service_healthy\n");
+			}
+			else
+			{
+				/* no-monitor or deferred: still wait for _dns */
+				fformat(f,
+						"    depends_on:\n"
+						"      _dns:\n"
 						"        condition: service_healthy\n");
 			}
 			char nodeIp[32];
