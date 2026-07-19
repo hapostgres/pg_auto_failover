@@ -37,6 +37,21 @@ teardown {
 }
 
 #
+# test_002_stop_postgres from the Python predecessor is intentionally not
+# ported here.  In Python it stops node1's Postgres while node1 is still a
+# lone "single" node (node2 doesn't exist yet at that point in the test
+# sequence), so the keeper's local "ensure" restart never races against a
+# synchronous secondary.  This spec's setup{} brings up all three nodes
+# upfront, so node1 already has a synchronous secondary (node2) by the time
+# any step runs; stopping node1's Postgres there reliably triggers a real
+# failover (node1 primary -> draining -> demoted, node2 -> primary) rather
+# than a quiet local self-heal — that scenario is already covered by
+# test_010/test_012 (compose stop, the SIGTERM path).  ensure.pgaf's
+# test_003_init_secondary covers the true "external stop, keeper
+# self-heals" case on a standby, where it doesn't trigger a failover.
+#
+
+#
 # test_003: create table on primary and verify replication to secondary.
 #
 
@@ -134,7 +149,12 @@ step test_007_005_disable_maintenance {
 step test_008_001_enable_maintenance_secondary {
     exec node1  pg_autoctl enable maintenance
     wait until node1 state is maintenance  timeout 60s
-    stop postgres node1
+    # Stop postgres directly via pg_ctl, bypassing pg_autoctl's own restart
+    # logic, rather than "stop postgres node1" (pgctl off).  pgctl off
+    # already guarantees no restart on its own, independent of maintenance
+    # mode, so it can't actually verify that maintenance suppresses the
+    # keeper's "ensure" restart — a raw pg_ctl stop can.
+    exec node1  pg_ctl --wait --mode fast stop
     sql node2 { INSERT INTO t1 VALUES (3); }
 }
 
@@ -162,13 +182,18 @@ step test_009_failback {
 }
 
 #
-# test_010: disconnect node1 (primary) from the network — simulates a network
-#           partition.  node2 must detect the loss and enter wait_primary
-#           (it cannot promote yet without confirmation from the monitor).
+# test_010: stop node1 (primary) via compose stop — Postgres shuts down
+#           cleanly.  Matches the Python predecessor's node1.fail(), which
+#           sends SIGTERM to pg_autoctl then a "pg_ctl fast stop" to
+#           Postgres — a graceful process-level stop, not a network
+#           partition.  (Partition detection has its own dedicated test:
+#           see test_021-023 below, ported from ifdown()/ifup().)
 #
 
 step test_010_fail_primary {
-    network disconnect node1
+    compose stop node1
+    # 60s: compose stop can be slow on shared CI runners
+    wait until node1 stopped  timeout 60s
     wait until node2 state is wait_primary  timeout 120s
 }
 
@@ -185,13 +210,13 @@ step test_011_writes_to_node2_succeed {
 }
 
 #
-# test_012: reconnect node1 — it pg_rewinds against node2 and rejoins as
+# test_012: restart node1 — it pg_rewinds against node2 and rejoins as
 #           secondary.  node2 transitions from wait_primary to primary once
 #           it has a healthy sync standby again.
 #
 
 step test_012_start_node1_again {
-    network connect node1
+    compose start node1
     wait until node2 state is primary
         and node1 state is secondary
         timeout 90s
@@ -395,12 +420,16 @@ step test_023_ifup_old_primary {
 #
 
 step test_024_stop_postgres_monitor {
-    # Stop the monitor's postgres directly.  The monitor cannot assign state
-    # changes while postgres is down, so there is no point wrapping this in
-    # "assert stays primary while" — that construct queries the monitor to
-    # verify the state, which is impossible when the monitor is the one being
-    # stopped.  The subsequent wait verifies recovery.
-    stop postgres monitor
+    # Stop the monitor's postgres directly via pg_ctl, bypassing pg_autoctl
+    # entirely, so its own "ensure" polling loop is what notices and
+    # restarts it — "stop postgres monitor" (pgctl off) would instead tell
+    # the keeper not to restart, defeating the point of this test.  The
+    # monitor cannot assign state changes while postgres is down, so there
+    # is no point wrapping this in "assert stays primary while" — that
+    # construct queries the monitor to verify the state, which is
+    # impossible when the monitor is the one being stopped.  The subsequent
+    # wait verifies recovery.
+    exec monitor  pg_ctl --wait --mode fast stop
     sleep 5s
     wait until node3 state is primary  timeout 60s
 }
