@@ -201,8 +201,10 @@ def test_005_002_fail_primary_again():
     node1.fail()
 
     print()
-    assert node1.wait_until_assigned_state(target_state="draining")
-    assert node3.wait_until_assigned_state(target_state="report_lsn")
+    # report_lsn is transient (milliseconds); the monitor may assign it and
+    # immediately advance to prepare_promotion before the poll sees it.
+    # Wait for the stable end-state instead.
+    assert node3.wait_until_state(target_state="primary", timeout=300)
 
 
 def test_005_003_bring_up_first_failed_primary():

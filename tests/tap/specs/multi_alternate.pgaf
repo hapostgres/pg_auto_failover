@@ -156,7 +156,10 @@ step test_005_001b_write_and_checkpoint {
 
 step test_005_002_fail_primary_again {
     compose kill node1
-    wait until node3 assigned-state = report_lsn  timeout 120s
+    # report_lsn is transient (milliseconds); the monitor may assign it and
+    # immediately advance to prepare_promotion before the poll sees it.
+    # Wait for the stable end-state instead.
+    wait until node3 state is primary  timeout 300s
 }
 
 step test_005_003_bring_up_first_failed_primary {
