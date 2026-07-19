@@ -372,6 +372,36 @@ Node modifiers:
 ``volume <name> <path>``                      Mount a named Docker volume at ``<path>``
 ============================================  =============================================
 
+Node registration order
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Nodes register with the monitor in the order they're declared in
+``cluster{}`` — across every ``formation{}`` block, not just within one —
+so node ids, and which node becomes each group's initial primary, are
+predictable rather than a startup race. Two things make this true:
+
+- The first node declared anywhere in the spec gets a Docker healthcheck;
+  every other node ``depends_on`` it reaching healthy before its own
+  container even starts, so the first node always registers first.
+- Every node also gets a small, increasing delay before it registers with
+  the monitor: 0s for the first node, 2s for the second, 4s for the third,
+  and so on, based purely on its position in the ``cluster{}`` block — not
+  on its name. That's what orders the remaining nodes relative to each
+  other once they all become eligible to start together.
+
+This works the same way for plain ``node1``/``node2``/``node3`` formations
+and for Citus-style ``worker1a``/``coordinator1b`` naming, since nothing
+about it depends on how a node is named. In practice this means a Citus
+spec's first-declared node in each group becomes that group's initial
+primary without needing an explicit ``promote`` — most specs still call
+``promote`` in ``setup{}`` anyway, as a self-documenting confirmation of
+the topology rather than because it's doing real work.
+
+See "Deterministic node registration order" in
+``src/bin/pgaftest/README.md`` for the implementation (``compose_gen.c``
+and ``cli_node.c``).
+
+
 Commands inside ``setup``, ``teardown``, and ``step`` blocks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -399,6 +429,28 @@ Commands inside ``setup``, ``teardown``, and ``step`` blocks
 
    exec        <service>  <command...>   # must exit 0
    exec-fails  <service>  <command...>   # must exit non-zero
+
+``exec`` and ``run`` command lines are macro-expanded before execution.
+Both macros use ``$name(args)`` call syntax regardless of how they're
+resolved — one runs a command, the other reads a file — because that
+distinction is an implementation detail, not something a spec author needs
+to see at the call site:
+
+============================  =========================================================
+``$cidr()``                    The Docker network CIDR. Resolved by running
+                                ``pg_autoctl inspect show cidr`` on the monitor
+                                container at the moment the ``exec``/``run`` command
+                                executes.
+``$ip(<node>)``                The static IP assigned to ``<node>``. Resolved by
+                                reading the dnsmasq ``pgaf-hosts`` file — the same
+                                file ``network connect --ip`` reads from (see below) —
+                                at the moment the ``exec``/``run`` command executes.
+                                No caching: each occurrence re-reads the file, so
+                                it always reflects whatever ``pgaf-hosts`` currently
+                                contains.  Useful when a command needs a node's real
+                                address (e.g. asserting an HBA entry) without
+                                hardcoding the hash-derived subnet.
+============================  =========================================================
 
 **SQL**
 
@@ -468,6 +520,211 @@ Commands inside ``setup``, ``teardown``, and ``step`` blocks
 .. code-block:: text
 
    sleep <N>s
+
+.. _pgaftest-failure-semantics:
+
+Failure-simulation semantics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``pgaftest`` has five distinct ways to make a node stop responding, and they
+are **not interchangeable** — each exercises a different code path in
+``pg_autoctl`` and the monitor. Pick the one that matches what the scenario
+is actually testing, not whichever one happens to make the test pass.
+
+``network disconnect <node>`` / ``network connect <node>``
+    Docker network disconnect — the process keeps running but loses all
+    connectivity. Exercises partition detection: the node's own
+    ``network_partition_timeout`` self-demotion, and the monitor's
+    health-check timeout on the peer side.
+
+``compose stop <service>``
+    ``docker compose stop`` — SIGTERM to the container's PID 1
+    (``pg_autoctl``), which propagates an orderly shutdown to its child
+    services (a grace period applies before Docker escalates to SIGKILL).
+    Exercises orderly shutdown: ``pg_autoctl``'s supervisor
+    (``supervisor_stop_subprocesses()``) runs its normal shutdown sequence,
+    so the monitor sees a clean disconnect, then the same failover trigger
+    as any other lost connection.
+
+``compose kill <service>``
+    ``docker compose kill`` — immediate SIGKILL, no grace period at all.
+    Exercises hard-crash recovery: the process gets zero chance to shut
+    down cleanly. Use only when a test specifically needs to rule out a
+    race where the dying node reports a state transition on its way out
+    (see the ``multi_alternate.pgaf`` header comment).
+
+``stop postgres <node>`` / ``start postgres <node>``
+    ``pg_autoctl manual service pgctl off`` — writes a persistent
+    "expected: stopped" flag that the already-running keeper's
+    postgres-controller continuously honors, then waits for it to comply.
+    Exercises the postgres-controller service inside a *running*
+    ``pg_autoctl``: the keeper stays up, and until ``start postgres`` flips
+    the flag back it will not attempt to restart Postgres on its own.
+
+``exec <node>  pg_ctl --wait --mode fast stop``
+    Runs ``pg_ctl`` directly against the node's PGDATA, bypassing
+    ``pg_autoctl`` and its expected-status flag entirely. Exercises
+    self-healing: the keeper still believes Postgres *should* be running,
+    so its own polling loop notices the unexpected death and restarts it
+    without being told to.
+
+For the full mapping from each of these to the Python test suite's
+``node.fail()`` / ``stop_pg_autoctl()`` / ``stop_postgres()`` /
+``ifdown()``/``ifup()`` methods, see "Porting failure-simulation semantics
+from the Python suite" in ``src/bin/pgaftest/README.md``.
+
+
+Test catalog
+------------
+
+One ``.pgaf`` file per scenario under ``tests/tap/specs/``; each file's own
+header comment is the authoritative description (this list is a shorter
+mirror of it, kept for orientation — read the file for exec/wait details).
+Schedules under ``tests/tap/schedules/*.sch`` group these into CI jobs.
+
+``auth``
+    Test md5 authentication between nodes and the monitor, including
+    password handling and verifying that passwords are not leaked in logs.
+
+``basic_operation``
+    Basic two-node HA: create primary + secondary, test maintenance,
+    failover, network partition detection, and node drop.
+
+``basic_operation_listen_flag``
+    Test basic pg_auto_failover operations with the ``--listen`` flag,
+    verifying that nodes bind on all interfaces for replication and
+    failover.
+
+``citus_basic_operation``
+    Test basic Citus cluster operations: coordinator HA, worker HA with two
+    worker groups, distributed table writes/reads, and failover at each
+    level.
+
+``citus_cluster_name``
+    Test Citus cluster name and read-only secondary cluster routing.
+
+``citus_force_failover``
+    Test Citus force failover: a transaction in progress competes with a
+    worker failover, which must terminate competing backends to make
+    progress within a bounded time window. Also covers dropping a failed
+    primary worker and a failed coordinator.
+
+``citus_multi_standbys``
+    Test a Citus cluster with multiple standbys per group (primary, sync
+    secondary, async secondary with candidate-priority 0). Verifies
+    failover, data consistency, and ``synchronous_standby_names`` after
+    each failure/recovery cycle.
+
+``citus_skip_pg_hba``
+    Test a Citus cluster with ``authMethod=skip`` (pg_autoctl does not edit
+    ``pg_hba.conf``).
+
+``config_get_set``
+    Test ``pg_autoctl config get`` / ``config set`` on both the monitor and
+    a keeper node, including validation and absence of side-effects on
+    other settings.
+
+``create_standby_with_pgdata``
+    Test creating a standby from an existing PGDATA directory.
+
+``debian_clusters``
+    Test pg_auto_failover with Debian-style ``pg_createcluster`` layouts
+    where ``postgresql.conf`` lives outside PGDATA.
+
+``debug_failover_pg19``
+    Diagnostic spec for a PG19 failover stall — not in the CI schedule.
+
+``drop_node_destroy``
+    Test ``pg_autoctl drop node --destroy`` and ``--destroy --force``.
+
+``enable_ssl``
+    Test enabling SSL live on a running cluster (``--ssl-self-signed``);
+    replication and secondary reads must keep working afterward.
+
+``ensure``
+    Test pg_autoctl "ensure" behaviour: the keeper restarts Postgres after
+    an unexpected stop, survives a demoted transition, and orchestrates a
+    failover when Postgres is broken on the primary.
+
+``extension_update``
+    Test extension version management: the monitor starts with a stale
+    extension version baked in, pg_autoctl detects the mismatch and runs
+    ``ALTER EXTENSION ... UPDATE``, and the monitor comes back healthy.
+
+``fast_forward``
+    Test fast-forward stuck detection and recovery.
+
+``guard_data_loss``
+    Test ``pgautofailover.guard_data_loss`` /
+    ``pg_autoctl perform failover --allow-data-loss``.
+
+``launch_deferred_set_metadata``
+    Test that ``pg_autoctl set node metadata`` works while a node waits in
+    launch-deferred mode, and that the change is visible on the monitor
+    before ``pg_autoctl node start`` is issued.
+
+``maintenance_and_drop``
+    Test maintenance mode with a concurrent node failure, recovery, a
+    simulated primary failure, and a clean node drop back to a single-node
+    formation.
+
+``monitor_disabled``
+    Test operating pg_autoctl without a monitor; the FSM is driven manually
+    via ``pg_autoctl manual fsm assign`` / ``nodes set``.
+
+``multi_alternate``
+    Test alternating failover across three nodes, each serving as primary
+    at least once, verifying correct election outcomes and that
+    ``pg_rewind`` restores each node as a healthy secondary after rejoining.
+
+``multi_async``
+    Test mixed sync/async replication with four nodes: async failover,
+    returning to mixed sync/async, dropping a node, and double-failure
+    scenarios where both the primary and the new primary fail before
+    recovery.
+
+``multi_ifdown``
+    Test network-partition (ifdown/ifup) scenarios with three nodes,
+    including a split-brain case requiring ``pg_rewind`` to fetch missing
+    WAL from survivors.
+
+``multi_maintenance``
+    Test the maintenance-mode lifecycle with four nodes: failover while a
+    standby is in maintenance, both standbys in maintenance at once, and
+    the invariant that at least one non-maintenance standby always remains
+    when ``number-sync-standbys > 0``.
+
+``multi_standbys``
+    Test multi-standby formation features with four nodes: candidate
+    priority and replication-quorum APIs, ``number_sync_standbys``
+    auto-decrement on node drop, network-partition failover, and the
+    all-priorities-zero edge case.
+
+``nonha_citus_operation``
+    Test non-HA Citus formation lifecycle: add workers, enable/attempt to
+    disable secondary support, fail over and drop primaries.
+
+``replace_monitor``
+    Test replacing a failed monitor with a new one and verifying the
+    cluster re-converges.
+
+``skip_pg_hba``
+    Test ``--skip-pg-hba``: pg_autoctl must not edit ``pg_hba.conf`` on
+    either node.
+
+``ssl_cert``
+    Test pg_auto_failover with SSL using CA-signed certificates and cert
+    auth.
+
+``ssl_self_signed``
+    Test pg_auto_failover with self-signed SSL certificates.
+
+``tablespaces``
+    Test that tablespaces on extra volumes outside PGDATA survive
+    failover, network partitions, and ``pg_rewind``.
+
+``upgrade``
+    Live binary + extension swap without container restarts.
 
 
 Environment variables
