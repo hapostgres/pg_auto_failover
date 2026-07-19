@@ -430,28 +430,6 @@ Commands inside ``setup``, ``teardown``, and ``step`` blocks
    exec        <service>  <command...>   # must exit 0
    exec-fails  <service>  <command...>   # must exit non-zero
 
-``exec`` and ``run`` command lines are macro-expanded before execution.
-Both macros use ``$name(args)`` call syntax regardless of how they're
-resolved — one runs a command, the other reads a file — because that
-distinction is an implementation detail, not something a spec author needs
-to see at the call site:
-
-============================  =========================================================
-``$cidr()``                    The Docker network CIDR. Resolved by running
-                                ``pg_autoctl inspect show cidr`` on the monitor
-                                container at the moment the ``exec``/``run`` command
-                                executes.
-``$ip(<node>)``                The static IP assigned to ``<node>``. Resolved by
-                                reading the dnsmasq ``pgaf-hosts`` file — the same
-                                file ``network connect --ip`` reads from (see below) —
-                                at the moment the ``exec``/``run`` command executes.
-                                No caching: each occurrence re-reads the file, so
-                                it always reflects whatever ``pgaf-hosts`` currently
-                                contains.  Useful when a command needs a node's real
-                                address (e.g. asserting an HBA entry) without
-                                hardcoding the hash-derived subnet.
-============================  =========================================================
-
 **SQL**
 
 .. code-block:: text
