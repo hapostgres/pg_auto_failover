@@ -526,9 +526,9 @@ write_image_stanza(FILE *f, const TestCluster *cluster, const char *contextDir)
  * ----------------------------------------------------------------------- */
 
 /* Number of /24 subnets available: 8 class-B blocks × 256 class-C = 2048 */
-#define DNS_SUBNET_BASE_A  172
+#define DNS_SUBNET_BASE_A 172
 #define DNS_SUBNET_RANGE_B 8    /* 172.20 … 172.27 */
-#define DNS_SUBNET_BASE_B  20
+#define DNS_SUBNET_BASE_B 20
 
 /*
  * djb2 hash — fast, low-collision for short ASCII strings.
@@ -1812,7 +1812,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 void
 compose_network_name(const char *projectName, char *buf, int buflen)
 {
-	sformat(buf, buflen, "%s_default", projectName);
+	sformat(buf, buflen, "%s_pgafnet", projectName);
 }
 
 

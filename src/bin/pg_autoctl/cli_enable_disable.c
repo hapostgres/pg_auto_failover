@@ -562,8 +562,8 @@ cli_enable_maintenance(int argc, char **argv)
 	 * complete within the single wait window.
 	 */
 	int waitTimeoutSecs = (allowFailover && keeper.state.current_role == PRIMARY_STATE)
-		? 3 * PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT
-		: PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
+						  ? 3 * PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT
+						  : PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
 	if (!monitor_wait_until_node_reported_state(
 			&(keeper.monitor),

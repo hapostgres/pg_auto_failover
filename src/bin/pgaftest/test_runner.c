@@ -2524,6 +2524,72 @@ runner_network_off(TestRunner *r, const char *nodeName)
 }
 
 
+/*
+ * runner_hosts_lookup reads workDir/pgaf-hosts (the static dnsmasq hosts file)
+ * and returns the IP assigned to nodeName.  Returns true on success.
+ *
+ * The pgaf-hosts format is one "IP  hostname" line per entry (no leading
+ * spaces, tab or space between fields).  docker network connect --ip uses this
+ * to reconnect a container to its original static IP so that HBA rules (which
+ * reference the static IP resolved from the hostname at write time) keep
+ * matching after a network disconnect/reconnect cycle.
+ */
+static bool
+runner_hosts_lookup(const char *workDir, const char *nodeName,
+					char *ipBuf, int ipBufLen)
+{
+	char hostsPath[1200];
+	sformat(hostsPath, sizeof(hostsPath), "%s/pgaf-hosts", workDir);
+
+	FILE *f = fopen(hostsPath, "r"); /* IGNORE-BANNED */
+	if (f == NULL)
+	{
+		log_warn("Could not open %s: %m", hostsPath);
+		return false;
+	}
+
+	char line[256];
+	bool found = false;
+	while (fgets(line, sizeof(line), f) != NULL)
+	{
+		/* Format: "IP<whitespace>hostname\n" — no leading whitespace */
+		char *p = line;
+
+		/* skip comment lines */
+		if (*p == '#' || *p == '\0' || *p == '\n')
+			continue;
+
+		/* collect the IP field (up to first whitespace) */
+		char ip[64];
+		int ipLen = 0;
+		while (*p && *p != ' ' && *p != '\t' && ipLen < (int) sizeof(ip) - 1)
+			ip[ipLen++] = *p++;
+		ip[ipLen] = '\0';
+
+		/* skip whitespace between fields */
+		while (*p == ' ' || *p == '\t')
+			p++;
+
+		/* collect the hostname field (up to whitespace/newline) */
+		char host[128];
+		int hostLen = 0;
+		while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' &&
+			   hostLen < (int) sizeof(host) - 1)
+			host[hostLen++] = *p++;
+		host[hostLen] = '\0';
+
+		if (ipLen > 0 && hostLen > 0 && strcmp(host, nodeName) == 0)
+		{
+			strlcpy(ipBuf, ip, ipBufLen);
+			found = true;
+			break;
+		}
+	}
+	fclose(f);
+	return found;
+}
+
+
 static bool
 runner_network_on(TestRunner *r, const char *nodeName)
 {
@@ -2531,11 +2597,36 @@ runner_network_on(TestRunner *r, const char *nodeName)
 	compose_network_name(r->projectName, netName, sizeof(netName));
 	compose_container_name(r->projectName, nodeName, container, sizeof(container));
 
-	log_info("  Reconnecting %s to network %s", container, netName);
+	/*
+	 * Reconnect with the static IP from pgaf-hosts so that dnsmasq keeps
+	 * resolving the hostname to the same IP as the HBA rule written during
+	 * setup.  Without --ip, Docker assigns a fresh DHCP address; the HBA rule
+	 * (recorded as the original IP) no longer matches the new address and
+	 * pg_rewind / streaming replication fail with "no pg_hba.conf entry".
+	 */
+	char staticIp[64] = "";
+	bool haveIp = runner_hosts_lookup(r->workDir, nodeName,
+									  staticIp, sizeof(staticIp));
+
+	log_info("  Reconnecting %s to network %s%s%s",
+			 container, netName,
+			 haveIp ? " with static IP " : "",
+			 haveIp ? staticIp : "");
+
 	char out[1024] = "";
-	int rc = run_cmd_capture(out, sizeof(out),
+	int rc;
+	if (haveIp)
+	{
+		rc = run_cmd_capture(out, sizeof(out),
+							 "docker network connect --ip %s %s %s 2>&1",
+							 staticIp, netName, container);
+	}
+	else
+	{
+		rc = run_cmd_capture(out, sizeof(out),
 							 "docker network connect %s %s 2>&1",
 							 netName, container);
+	}
 	if (rc != 0 && out[0])
 	{
 		log_output("  ", out);

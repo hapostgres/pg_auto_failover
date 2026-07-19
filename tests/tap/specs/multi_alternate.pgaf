@@ -155,6 +155,13 @@ step test_005_001b_write_and_checkpoint {
 }
 
 step test_005_002_fail_primary_again {
+    # Start node2 first so that it can participate in the LSN quorum.
+    # node2 was SIGKILLed in test_005_001 and never reported demoted; it is
+    # still registered as a sync standby (replication_quorum=true).  With
+    # number_sync_standbys=1 the monitor needs 2 LSN reports to elect a new
+    # primary; without node2 back online only node3 would report, stalling
+    # the failover indefinitely.
+    compose start node2
     compose kill node1
     # report_lsn is transient (milliseconds): the monitor assigns it and
     # immediately advances to prepare_promotion.  'assigned-state = report_lsn'
@@ -168,7 +175,7 @@ step test_005_002_fail_primary_again {
 }
 
 step test_005_003_bring_up_first_failed_primary {
-    compose start node2
+    # node2 was already started in test_005_002; wait for it to join as secondary.
     # 'demoted' is a transient intermediate state that lasts under a second;
     # waiting for it races reliably on shared CI runners.  Wait for the stable
     # end state instead.

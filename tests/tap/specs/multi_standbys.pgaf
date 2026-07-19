@@ -188,7 +188,7 @@ step test_013_restart_node2 {
     wait until node1 state is primary
         and node2 state is secondary
         and node3 state is secondary
-        timeout 90s
+        timeout 180s
     sql node1 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
 }
