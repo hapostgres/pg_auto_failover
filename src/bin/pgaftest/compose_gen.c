@@ -422,17 +422,18 @@ write_legacy_monitor_command(FILE *f, const char *pgdata, const char *auth,
 
 static void
 write_legacy_node_command(FILE *f, const char *pgdata, const char *monitorUri,
-						  const char *auth, const char *ssl)
+						  const char *auth, const char *ssl, const char *name)
 {
 	fformat(f,
 			"    command: [\"pg_autoctl\", \"create\", \"postgres\","
 			" \"--pgdata\", \"%s\","
 			" \"--monitor\", \"%s\","
+			" \"--name\", \"%s\","
 			" \"--auth\", \"%s\","
 			" %s,"
 			" \"--run\"]\n"
 			"    stop_grace_period: 60s\n",
-			pgdata, monitorUri, auth, ssl_args_for_legacy(ssl));
+			pgdata, monitorUri, name, auth, ssl_args_for_legacy(ssl));
 }
 
 
@@ -1075,7 +1076,7 @@ compose_gen_write(TestCluster *cluster,
 							sizeof(monitorUri));
 				}
 				write_legacy_node_command(f, node_pgdata, monitorUri,
-										  cluster->auth, cluster->ssl);
+										  cluster->auth, cluster->ssl, n->name);
 			}
 			else
 			{
