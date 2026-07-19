@@ -294,6 +294,7 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"postgres"      { return T_POSTGRES; }
 <STEP_BODY>"stays"         { return T_STAYS; }
 <STEP_BODY>"while"         { return T_WHILE; }
+<STEP_BODY>"passing"[ \t\r\n]+"through"  { return T_THROUGH; }
 <STEP_BODY>"through"       { return T_THROUGH; }
 <STEP_BODY>"set"           { return T_SET; }
 <STEP_BODY>"inject"        { BEGIN(EXEC_ARGS); return T_INJECT; }
