@@ -159,6 +159,15 @@ typedef struct ApplySettingsNotificationContext
 	int64_t primaryNodeId;           /* set on first primary/apply_settings */
 	bool applySettingsTransitionInProgress;
 	bool applySettingsTransitionDone;
+
+	/*
+	 * Set when the priority change triggered a full failover rather than an
+	 * apply_settings round.  This happens when the old primary is assigned
+	 * report_lsn (the first step of a priority-induced failover election)
+	 * instead of apply_settings.  Once detected, any node that reaches
+	 * primary/primary satisfies the "new setting is in effect" condition.
+	 */
+	bool failoverInProgress;
 } ApplySettingsNotificationContext;
 
 
@@ -4027,6 +4036,46 @@ monitor_notification_process_apply_settings(void *context,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->goalState));
 
+		return;
+	}
+
+	/*
+	 * A priority change can trigger a full failover instead of an
+	 * apply_settings round when the new candidate has higher priority than
+	 * the current primary.  The monitor assigns the old primary report_lsn
+	 * (not apply_settings) as its first move.  Detect this and switch to
+	 * waiting for any node to reach primary/primary rather than waiting for
+	 * the apply_settings cycle that will never come.
+	 */
+	if (ctx->primaryNodeId != 0 &&
+		ctx->primaryNodeId == nodeState->node.nodeId &&
+		nodeState->goalState == REPORT_LSN_STATE)
+	{
+		log_info("candidate-priority change triggered a failover on node "
+				 NODE_FORMAT "; waiting for new primary instead of apply_settings",
+				 nodeState->node.nodeId,
+				 nodeState->node.name,
+				 nodeState->node.host,
+				 nodeState->node.port);
+		ctx->failoverInProgress = true;
+	}
+
+	/*
+	 * When a failover is in progress (not an apply_settings round), any node
+	 * reaching primary/primary means the new priority setting is in effect.
+	 */
+	if (ctx->failoverInProgress)
+	{
+		if (nodeState->reportedState == PRIMARY_STATE &&
+			nodeState->goalState == PRIMARY_STATE)
+		{
+			log_debug("failover complete: node " NODE_FORMAT " is now primary",
+					  nodeState->node.nodeId,
+					  nodeState->node.name,
+					  nodeState->node.host,
+					  nodeState->node.port);
+			ctx->applySettingsTransitionDone = true;
+		}
 		return;
 	}
 
