@@ -585,6 +585,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 	{
 		log_error("Failed to set lock_timeout/statement_timeout on the "
 				  "coordinator connection, see above for details.");
+		pgsql_rollback(pgsql);
 		return false;
 	}
 
@@ -598,6 +599,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		log_error("Failed to update node %s:%d on the coordinator, "
 				  "see above for details",
 				  keeper->config.hostname, keeper->config.pgSetup.pgport);
+		pgsql_rollback(pgsql);
 		return false;
 	}
 
@@ -622,6 +624,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		log_error("Failed to update node %s:%d on the coordinator, "
 				  "see above for details",
 				  keeper->config.hostname, keeper->config.pgSetup.pgport);
+		pgsql_rollback(pgsql);
 		return false;
 	}
 
@@ -679,6 +682,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		{
 			log_error("Failed to update node on the coordinator, "
 					  "see above for details.");
+			pgsql_rollback(pgsql);
 			return false;
 		}
 	}
@@ -710,6 +714,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		{
 			log_error("Failed to update node on the coordinator, "
 					  "see above for details.");
+			pgsql_rollback(pgsql);
 			return false;
 		}
 	}
@@ -744,6 +749,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		{
 			log_error("Failed to add proxyport to pg_dist_poolinfo, "
 					  "see above for details");
+			pgsql_rollback(pgsql);
 			return false;
 		}
 	}
@@ -754,6 +760,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 	{
 		log_error("Failed to update node on the coordinator, "
 				  "see above for details.");
+		pgsql_rollback(pgsql);
 		return false;
 	}
 
