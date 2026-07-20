@@ -1,0 +1,40 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1_begin s1_remove s2_report s1_commit s3_check
+assigned_group_state
+--------------------
+secondary           
+(1 row)
+
+step s1_begin: BEGIN;
+step s1_remove: SELECT pgautofailover.remove_node(
+                     (SELECT nodeid FROM pgautofailover.node
+                       WHERE formationid = 'crss_test' AND nodename = 'crss_s'));
+remove_node
+-----------
+t          
+(1 row)
+
+step s2_report: SELECT assigned_group_state FROM pgautofailover.node_active('crss_test',
+                     (SELECT nodeid FROM pgautofailover.node
+                       WHERE formationid = 'crss_test' AND nodename = 'crss_s'),
+                     0, current_group_role => 'secondary', current_lsn => '0/5000'); <waiting ...>
+step s1_commit: COMMIT;
+step s2_report: <... completed>
+assigned_group_state
+--------------------
+dropped             
+(1 row)
+
+step s3_check: 
+    SELECT nodename, goalstate, reportedstate
+      FROM pgautofailover.node
+     WHERE formationid = 'crss_test'
+     ORDER BY nodename;
+
+nodename|goalstate|reportedstate
+--------+---------+-------------
+crss_p  |single   |primary      
+crss_s  |dropped  |secondary    
+(2 rows)
+

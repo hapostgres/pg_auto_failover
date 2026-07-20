@@ -34,14 +34,20 @@
 # acquired, not from the stale pre-lock GetAutoFailoverNodeById() read: the
 # staleness at line ~420 only affects the calling node's own previously-known
 # fields, not the group-membership count the "single" decision is actually
-# based on. Unlike remove_node_by_nodeid()'s "goalState == DROPPED"
-# idempotency check (concurrent_remove_node.spec), which DOES trust that
-# same kind of stale field and so DOES race. Bug C's true trigger remains
-# open; the next candidate to test is whichever code path could cause
-# pg_autoctl drop node to issue -- or the monitor to process -- more than
-# one remove_node() call for the same node from a single "pg_autoctl drop
-# node" invocation, since that is the only concurrency shape proven so far
-# to produce a wrong primary goal state.
+# based on.
+#
+# Bug C's actual trigger turned out to be the same class of bug, on the
+# OTHER node: concurrent_remove_standby_and_standby_report.spec shows the
+# STANDBY's own concurrent node_active() call -- not the primary's --
+# racing its own removal the same way, and there the staleness does
+# matter: the standby's own goalState/reportedState fields (stale, not
+# the fresh nodesCount) are what ProceedGroupState()'s "already dropped,
+# do nothing" checks compare against, so they never fire for the standby
+# reporting on itself, and it falls through to the nodesCount == 1 branch
+# which reassigns its OWN goal to SINGLE -- exactly the original CI log
+# line for the dropped node, "New state for this node ...: single ->
+# single", instead of ever reaching "dropped -> dropped". Fixed in
+# NodeActive() alongside this spec's sibling.
 
 setup
 {

@@ -438,6 +438,33 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 		LockFormation(formationId, ShareLock);
 		LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
 
+		/*
+		 * Re-read the node now that we hold the lock: the initial read above
+		 * happened before we tried to acquire it, so if this call was
+		 * blocked behind a concurrent remove_node() on this same node, the
+		 * struct above is stale by exactly the transaction we were waiting
+		 * on. Using it as-is would mean a node whose goalState just became
+		 * DROPPED (in the transaction that held the lock we were waiting
+		 * for) reports back in on its stale, pre-drop goalState -- missing
+		 * the "already dropped, do nothing" checks in ProceedGroupState()
+		 * entirely, and falling through to ordinary FSM logic instead. In
+		 * particular, AutoFailoverNodeGroup()'s nodesCount (a fresh SPI
+		 * query, unaffected by this staleness) would already correctly see
+		 * a one-node group once the drop has committed, and the
+		 * nodesCount==1 case in ProceedGroupState() would then reassign
+		 * this node's own goal to SINGLE -- undoing the drop it was just
+		 * given, from the dropped node's own next report.
+		 */
+		pgAutoFailoverNode = GetAutoFailoverNodeById(currentNodeState->nodeId);
+
+		if (pgAutoFailoverNode == NULL)
+		{
+			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+							errmsg("node %lld was removed while node_active() "
+								   "was waiting for a lock",
+								   (long long) currentNodeState->nodeId)));
+		}
+
 		if (pgAutoFailoverNode->reportedState != currentNodeState->replicationState)
 		{
 			/*
