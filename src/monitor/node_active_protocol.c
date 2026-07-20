@@ -1368,6 +1368,30 @@ perform_failover(PG_FUNCTION_ARGS)
 
 		AutoFailoverNode *secondaryNode = linitial(standbyNodesGroupList);
 
+		/*
+		 * Read-replica / citus-secondary nodes always have candidate
+		 * priority zero (enforced in set_node_candidate_priority) and are
+		 * never eligible as a failover target: that's the same rule the
+		 * BuildCandidateList path applies for groups with more than two
+		 * nodes. The two-node fast path here was missing the check, so a
+		 * manual "pg_autoctl perform switchover" against such a group
+		 * would promote a node that Citus still has registered as a
+		 * read-only secondary elsewhere, which then fails permanently on
+		 * the coordinator with "there is already another node with the
+		 * specified hostname and port" instead of failing here with a
+		 * clear error up front.
+		 */
+		if (secondaryNode->candidatePriority == 0)
+		{
+			ereport(ERROR,
+					(errmsg("cannot fail over: standby " NODE_FORMAT
+							" has candidate priority set to zero",
+							NODE_FORMAT_ARGS(secondaryNode)),
+					 errdetail("Read-replica and citus-secondary nodes always "
+							   "have candidate priority zero and are never "
+							   "eligible as a failover or switchover target.")));
+		}
+
 		if (secondaryNode->goalState != REPLICATION_STATE_SECONDARY)
 		{
 			const char *secondaryState =

@@ -10,6 +10,16 @@
 #
 # Ported from tests/test_citus_cluster_name.py.
 # Predecessor: tests/test_citus_cluster_name.py
+#
+# setup{} does not switchover any of the groups. Every non-primary node in
+# this formation is a citus-secondary "readonly" node with candidate-priority
+# 0, so it can never be a legitimate failover/switchover target -- the
+# monitor now refuses that with a clear error (see the guard added to
+# perform_failover's two-node path in src/monitor/node_active_protocol.c).
+# An earlier revision of this spec called "exec <node> pg_autoctl perform
+# switchover" on each group here, which the original Python predecessor
+# never did either; none of the steps below depend on a switchover having
+# happened, so it was dropped rather than worked around.
 
 cluster {
     monitor
@@ -42,9 +52,6 @@ setup {
     wait until primary, secondary in group 0  timeout 90s
     wait until primary, secondary in group 1  timeout 90s
     wait until primary, secondary in group 2  timeout 90s
-    exec coordinator1a pg_autoctl perform switchover
-    exec worker1a pg_autoctl perform switchover
-    exec worker2a pg_autoctl perform switchover
 }
 
 teardown {
