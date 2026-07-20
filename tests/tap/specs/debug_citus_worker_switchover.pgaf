@@ -194,13 +194,3 @@ step test_008_final_state {
     }
     exec worker1a  bash -c "echo ---SWITCHOVER-LOG---; cat /tmp/switchover.log; echo ---END---"
 }
-
-sequence
-    test_001_switchover_coordinator
-    test_002_baseline_before_worker_switchover
-    test_003_trigger_worker_switchover_in_background
-    test_004_poll_15s
-    test_005_poll_30s
-    test_006_poll_60s
-    test_007_poll_120s
-    test_008_final_state

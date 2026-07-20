@@ -108,14 +108,3 @@ step test_009_verify_force_pgdata_removed {
     run node1   bash -c "test ! -d /var/lib/postgres/pgaf && echo 'ok'"
     expect { ok }
 }
-
-sequence
-    test_001_create_table
-    test_002_verify_replication
-    test_003_drop_node2_no_destroy
-    test_004_verify_pgdata_kept
-    test_005_drop_node3_destroy
-    test_006_verify_pgdata_removed
-    test_007_drop_monitor_to_simulate_unreachable
-    test_008_force_destroy_node1
-    test_009_verify_force_pgdata_removed
