@@ -121,8 +121,18 @@ def test_003_002_stop_primary():
     # demote_timeout once node3 converges to prepare_promotion.  The two
     # events can happen within the same second, making draining invisible to
     # a 100ms poll loop.  Accept either state as success.
+    #
+    # Reaching this point requires health-check detection of node2's death
+    # (node_considered_unhealthy_timeout, 20s default) plus a full
+    # primary_demote_timeout (30s default) -- and test_003_001 immediately
+    # before this one already drove node1 through the identical sequence, so
+    # a loaded CI runner can push this past the default 90s STATE_CHANGE_TIMEOUT
+    # even though the FSM itself is behaving correctly (this is what caused
+    # the PG16 CI flake: node3 "failed to reach" the state, it never
+    # overshot past it). Use the same 120s margin as the equivalent waits in
+    # test_005_001/test_005_002 below.
     assert node2.wait_until_assigned_state(
-        target_state="draining", or_state="demote_timeout"
+        target_state="draining", or_state="demote_timeout", timeout=120
     )
     # The monitor assigns node3 goal=report_lsn (BuildCandidateListForFailover)
     # then may immediately assign goal=prepare_promotion in the same transaction
@@ -130,13 +140,13 @@ def test_003_002_stop_primary():
     # reportedstate=report_lsn because it transitions before the next poll.
     # Check the assigned (goal) state instead of the reported state.
     assert node3.wait_until_assigned_state(
-        target_state="report_lsn", or_state="prepare_promotion"
+        target_state="report_lsn", or_state="prepare_promotion", timeout=120
     )
 
     # check that node3 stays blocked and doesn't go to wait_primary
     node3.sleep(5)
     assert node3.wait_until_assigned_state(
-        target_state="report_lsn", or_state="prepare_promotion"
+        target_state="report_lsn", or_state="prepare_promotion", timeout=120
     )
 
 
