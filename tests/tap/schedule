@@ -38,4 +38,4 @@ upgrade
 # citus_force_failover
 # citus_multi_standbys
 # citus_skip_pg_hba
-# nonha_citus_operation
+# citus_nonha_operation

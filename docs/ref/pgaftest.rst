@@ -593,6 +593,10 @@ Schedules under ``tests/tap/schedules/*.sch`` group these into CI jobs.
     failover, data consistency, and ``synchronous_standby_names`` after
     each failure/recovery cycle.
 
+``citus_nonha_operation``
+    Test non-HA Citus formation lifecycle: add workers, enable/attempt to
+    disable secondary support, fail over and drop primaries.
+
 ``citus_skip_pg_hba``
     Test a Citus cluster with ``authMethod=skip`` (pg_autoctl does not edit
     ``pg_hba.conf``).
@@ -677,10 +681,6 @@ Schedules under ``tests/tap/schedules/*.sch`` group these into CI jobs.
     priority and replication-quorum APIs, ``number_sync_standbys``
     auto-decrement on node drop, network-partition failover, and the
     all-priorities-zero edge case.
-
-``nonha_citus_operation``
-    Test non-HA Citus formation lifecycle: add workers, enable/attempt to
-    disable secondary support, fail over and drop primaries.
 
 ``replace_monitor``
     Test replacing a failed monitor with a new one and verifying the

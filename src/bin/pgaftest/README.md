@@ -156,7 +156,7 @@ inconsistency, and no separately duplicated partition test), so the
 divergence looks like a deliberate simplification rather than a bug —
 flagging here as a lower-priority follow-up rather than fixing blind:
 `citus_basic_operation.pgaf`, `citus_multi_standbys.pgaf`,
-`multi_ifdown.pgaf` (test_008, node1). `nonha_citus_operation.pgaf` and
+`multi_ifdown.pgaf` (test_008, node1). `citus_nonha_operation.pgaf` and
 `citus_force_failover.pgaf` were checked and are already correct
 (`compose stop` where the Python source used `.fail()`, `network
 disconnect`/`connect` where it used `ifdown()`/`ifup()`).
