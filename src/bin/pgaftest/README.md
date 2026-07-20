@@ -216,11 +216,13 @@ would be a race. Two mechanisms combine to make it deterministic instead:
 ## Static IP on `network connect`
 
 `docker network connect` without `--ip` hands the container a fresh DHCP
-address. The dnsmasq `pgaf-hosts` file (which `pg_hba.conf` entries are
-generated against) maps each node to a fixed address, so a reconnect that
-picks a new IP breaks HBA matching — `runner_network_on()` in
-`test_runner.c` reads the node's original address from `pgaf-hosts` and
-passes it via `--ip` to avoid this.
+address. The `pgaf-hosts` file (the same static IP-to-name mapping baked
+into every service's `extra_hosts` entries, which `pg_hba.conf` entries are
+also generated against) maps each node to a fixed address, so a reconnect
+that picks a new IP breaks HBA matching and every other service's cached
+`/etc/hosts` entry for it — `runner_network_on()` in `test_runner.c` reads
+the node's original address from `pgaf-hosts` and passes it via `--ip` to
+avoid this.
 
 ## Source layout
 

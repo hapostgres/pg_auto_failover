@@ -2525,8 +2525,10 @@ runner_network_off(TestRunner *r, const char *nodeName)
 
 
 /*
- * runner_hosts_lookup reads workDir/pgaf-hosts (the static dnsmasq hosts file)
- * and returns the IP assigned to nodeName.  Returns true on success.
+ * runner_hosts_lookup reads workDir/pgaf-hosts (the static IP-to-name
+ * mapping written by compose_gen_write_hosts, the same mapping baked into
+ * every service's extra_hosts entries) and returns the IP assigned to
+ * nodeName.  Returns true on success.
  *
  * The pgaf-hosts format is one "IP  hostname" line per entry (no leading
  * spaces, tab or space between fields).  docker network connect --ip uses this
@@ -2606,11 +2608,12 @@ runner_network_on(TestRunner *r, const char *nodeName)
 	compose_container_name(r->projectName, nodeName, container, sizeof(container));
 
 	/*
-	 * Reconnect with the static IP from pgaf-hosts so that dnsmasq keeps
-	 * resolving the hostname to the same IP as the HBA rule written during
-	 * setup.  Without --ip, Docker assigns a fresh DHCP address; the HBA rule
-	 * (recorded as the original IP) no longer matches the new address and
-	 * pg_rewind / streaming replication fail with "no pg_hba.conf entry".
+	 * Reconnect with the static IP from pgaf-hosts so it keeps matching every
+	 * other service's extra_hosts entry for this node, and the HBA rule
+	 * written during setup.  Without --ip, Docker assigns a fresh DHCP
+	 * address; the HBA rule (recorded as the original IP) no longer matches
+	 * the new address and pg_rewind / streaming replication fail with
+	 * "no pg_hba.conf entry".
 	 */
 	char staticIp[64] = "";
 	bool haveIp = runner_hosts_lookup(r->workDir, nodeName,

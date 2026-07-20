@@ -13,8 +13,6 @@ name: CI
 #               ├── build_pgaftest    (pgaf:pgaftest, built from PG17)
 #               │       └── test_pgaftest   (same)
 #               │       └── upgrade
-#               ├── build_dnsmasq     (pgaf:dnsmasq, version-independent Alpine image)
-#               │       └── test_pgaftest   (same)
 #               └── build_test_images (PG 14-19 → pg_auto_failover_test:pgN)
 #                       └── test_python    (PG × suite matrix)
 
@@ -205,48 +203,7 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
-  # 3c. Build pgaf:dnsmasq — tiny Alpine image that serves /etc/pgaf-hosts via
-  #     dnsmasq.  Version-independent (no PGVERSION arg, no Citus).
-  #     Every pgaftest cluster uses this instead of apk-installing dnsmasq at
-  #     container start, which eliminates the per-run network fetch and the
-  #     startup race where other containers launch before DNS is ready.
-  # ---------------------------------------------------------------------------
-  build_dnsmasq:
-    name: Build pgaftest image
-    needs: [style_checker, ensure_base]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-
-    steps:
-      - uses: actions/checkout@v7.0.0
-
-      - name: Set up Docker BuildKit
-        uses: docker/setup-buildx-action@v4.2.0
-
-      - name: Build pgaf:dnsmasq
-        run: |
-          docker buildx build \
-            --cache-from type=gha,scope=pgaf-dnsmasq \
-            --cache-to   type=gha,mode=max,scope=pgaf-dnsmasq \
-            --target dnsmasq \
-            -t pgaf:dnsmasq \
-            --load \
-            .
-
-      - name: Save image to tarball
-        run: docker save pgaf:dnsmasq | gzip > /tmp/pgaf-dnsmasq.tar.gz
-
-      - name: Upload dnsmasq image artifact
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: dnsmasq-image
-          path: /tmp/pgaf-dnsmasq.tar.gz
-          retention-days: 1
-
-  # ---------------------------------------------------------------------------
-  # 3d. Build pg_auto_failover_test images — full test images that include the
+  # 3c. Build pg_auto_failover_test images — full test images that include the
   #     Python test suite (pytest) and all source.  Used by test_python jobs.
   # ---------------------------------------------------------------------------
   build_test_images:
@@ -308,7 +265,7 @@ jobs:
   # ---------------------------------------------------------------------------
   test_pgaftest:
     name: pgaftest / ${{ matrix.schedule }} (PG${{ matrix.PGVERSION }})
-    needs: [build_run_images, build_pgaftest, build_dnsmasq]
+    needs: [build_run_images, build_pgaftest]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -370,15 +327,6 @@ jobs:
       - name: Load pgaf:pgaftest image
         run: docker load < /tmp/pgaf-pgaftest.tar.gz
 
-      - name: Download pgaf:dnsmasq image
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: dnsmasq-image
-          path: /tmp
-
-      - name: Load pgaf:dnsmasq image
-        run: docker load < /tmp/pgaf-dnsmasq.tar.gz
-
       - name: Run schedule ${{ matrix.schedule }}
         timeout-minutes: 20
         run: |
@@ -392,7 +340,6 @@ jobs:
             -v "$(pwd)":/work:ro \
             -w /work \
             -e PGAF_IMAGE=pgaf:run-pg${{ matrix.PGVERSION }} \
-            -e PGAF_DNS_IMAGE=pgaf:dnsmasq \
             -e PGVERSION=${{ matrix.PGVERSION }} \
             -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
             pgaf:pgaftest \
@@ -404,7 +351,7 @@ jobs:
   # ---------------------------------------------------------------------------
   upgrade:
     name: pgaftest / upgrade
-    needs: [build_pgaftest, build_dnsmasq]
+    needs: [build_pgaftest]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -431,15 +378,6 @@ jobs:
       - name: Load pgaf:pgaftest image
         run: docker load < /tmp/pgaf-pgaftest.tar.gz
 
-      - name: Download pgaf:dnsmasq image
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: dnsmasq-image
-          path: /tmp
-
-      - name: Load pgaf:dnsmasq image
-        run: docker load < /tmp/pgaf-dnsmasq.tar.gz
-
       - name: Generate git-version.h
         run: make version
 
@@ -461,7 +399,6 @@ jobs:
             -v /tmp/pgaftest:/tmp/pgaftest \
             -v "$(pwd)":/work:ro \
             -w /work \
-            -e PGAF_DNS_IMAGE=pgaf:dnsmasq \
             -e PGVERSION=${{ env.PGVERSION }} \
             -e PGAFTEST_HOST_WORK_DIR="$(pwd)" \
             pgaf:pgaftest \

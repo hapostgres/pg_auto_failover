@@ -68,7 +68,9 @@ bool compose_gen_write_node_ini(const TestCluster *cluster,
 								const char *dir);
 
 /*
- * Write the pgaf-hosts file that the dnsmasq _dns service serves.
+ * Write the pgaf-hosts file: static IP-to-name mapping for every service,
+ * also embedded directly into docker-compose.yml as extra_hosts entries.
+ * pgaftest itself reads this file back for `network connect` IP lookups.
  * path should be <workdir>/pgaf-hosts.
  */
 bool compose_gen_write_hosts(const TestCluster *cluster,
