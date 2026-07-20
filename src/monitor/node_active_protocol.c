@@ -48,7 +48,7 @@ static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeHost, int nodePort,
 						 ReplicationState *initialState);
 
-static bool RemoveNode(AutoFailoverNode *currentNode, bool force);
+static bool RemoveNode(int64 nodeId, bool force);
 
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_node);
@@ -1047,16 +1047,21 @@ remove_node_by_nodeid(PG_FUNCTION_ARGS)
 	int64 nodeId = PG_GETARG_INT64(0);
 	bool force = PG_GETARG_BOOL(1);
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
-
-	if (currentNode == NULL)
+	/*
+	 * Unlocked existence check, only to give a precise error message when
+	 * the nodeId is simply wrong. RemoveNode() re-reads the node itself
+	 * once it holds the formation lock, so a benign TOCTOU race here (the
+	 * node gets removed by a concurrent call between this check and the
+	 * lock being acquired) is already handled there.
+	 */
+	if (GetAutoFailoverNodeById(nodeId) == NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("couldn't find node with nodeid %lld",
 							   (long long) nodeId)));
 	}
 
-	PG_RETURN_BOOL(RemoveNode(currentNode, force));
+	PG_RETURN_BOOL(RemoveNode(nodeId, force));
 }
 
 
@@ -1083,23 +1088,63 @@ remove_node_by_host(PG_FUNCTION_ARGS)
 							   nodeHost, nodePort)));
 	}
 
-	PG_RETURN_BOOL(RemoveNode(currentNode, force));
+	/* same TOCTOU note as remove_node_by_nodeid: RemoveNode() re-reads fresh */
+	PG_RETURN_BOOL(RemoveNode(currentNode->nodeId, force));
 }
 
 
-/* RemoveNode removes the given node from the monitor. */
+/*
+ * RemoveNode removes the given node from the monitor.
+ *
+ * nodeId is resolved to the authoritative AutoFailoverNode only after
+ * LockFormation() is acquired below. Looking the node up before the lock
+ * (as this used to do, taking a pre-resolved AutoFailoverNode* from the
+ * caller) meant a caller that blocked on a concurrent RemoveNode() call for
+ * the same node would resume, once unblocked, still holding the snapshot
+ * it read before it ever tried to acquire the lock -- stale by exactly the
+ * transaction that just committed and released the lock it was waiting on.
+ * That broke the "goalState == DROPPED -> return early" idempotency check
+ * below: a second concurrent call would see the pre-drop goalState, skip
+ * the early return, and redundantly redo the whole removal, including a
+ * second ProceedGroupState(primaryNode) call whose "goal didn't change"
+ * fallback would then force an already-settled primary into
+ * APPLY_SETTINGS for no reason.
+ */
 static bool
-RemoveNode(AutoFailoverNode *currentNode, bool force)
+RemoveNode(int64 nodeId, bool force)
 {
 	ListCell *nodeCell = NULL;
 	char message[BUFSIZE] = { 0 };
 
-	if (currentNode == NULL)
+	/*
+	 * Look the node up once, unlocked, only to learn which formation to
+	 * lock -- a node's formationId is immutable for the life of the row,
+	 * so this initial read being racy doesn't matter. Everything else is
+	 * re-read immediately below, once the lock is held.
+	 */
+	AutoFailoverNode *probeNode = GetAutoFailoverNodeById(nodeId);
+
+	if (probeNode == NULL)
 	{
 		return false;
 	}
 
-	LockFormation(currentNode->formationId, ExclusiveLock);
+	LockFormation(probeNode->formationId, ExclusiveLock);
+
+	/*
+	 * Now that we hold the formation lock, get the authoritative, current
+	 * state of the node: any concurrent RemoveNode()/node_active() call
+	 * that touched this node has either already committed (and we now see
+	 * its effects) or is blocked behind us (and will see ours once we
+	 * commit).
+	 */
+	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
+
+	if (currentNode == NULL)
+	{
+		/* removed by a concurrent call while we waited for the lock */
+		return true;
+	}
 
 	AutoFailoverFormation *formation = GetFormation(currentNode->formationId);
 

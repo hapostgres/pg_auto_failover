@@ -35,10 +35,10 @@ step s3_check:
       FROM pgautofailover.formation
      WHERE formationid = 'crn_test';
 
-nodename|goalstate     |reportedstate
---------+--------------+-------------
-crn_p   |apply_settings|primary      
-crn_s   |dropped       |secondary    
+nodename|goalstate|reportedstate
+--------+---------+-------------
+crn_p   |single   |primary      
+crn_s   |dropped  |secondary    
 (2 rows)
 
 number_sync_standbys

@@ -7,26 +7,29 @@
 # "goalState == DROPPED -> return true early"), but that only proves it's
 # safe to call twice in a row on ONE connection, where the second call sees
 # the first call's committed effects. Genuine concurrency is different, and
-# this test demonstrates a real bug: remove_node_by_nodeid() calls
-# GetAutoFailoverNodeById() to read the target node BEFORE calling
+# this test originally caught a real bug here: remove_node_by_nodeid() used
+# to call GetAutoFailoverNodeById() to read the target node BEFORE calling
 # RemoveNode(), which is where LockFormation(ExclusiveLock) is acquired.
-# s2's call reads the standby's row (still goalState = 'secondary', not yet
-# 'dropped') before blocking on s1's lock, so once s1 commits and s2's call
-# resumes, it is working from a stale snapshot that predates s1's changes:
-# the idempotency check ("goalState == DROPPED -> return early") never
-# fires, and s2 re-runs the entire removal a second time. The standby side
-# is a harmless no-op re-write, but the primary side is not: RemoveNode()'s
-# fallback "if ProceedGroupState(primary) didn't change its goal, force
-# APPLY_SETTINGS" fires on this second, redundant call (the primary is
-# already correctly "single" by then, so its goal genuinely doesn't change
-# on the re-run) and pushes a primary that had already settled at "single"
-# into "apply_settings" for no reason. See expected/concurrent_remove_node.out
-# for the captured, currently-uncorrected behavior; a fix would move the
-# GetAutoFailoverNodeById() lookup to happen after LockFormation is
-# acquired (i.e. inside RemoveNode(), given a nodeId instead of a resolved
-# AutoFailoverNode*), so a blocked second caller re-reads fresh,
-# post-commit state once unblocked instead of reusing what it read before
-# blocking.
+# s2's call would read the standby's row (still goalState = 'secondary',
+# not yet 'dropped') before blocking on s1's lock, so once s1 committed and
+# s2's call resumed, it was working from a stale snapshot that predated
+# s1's changes: the idempotency check ("goalState == DROPPED -> return
+# early") never fired, and s2 redundantly redid the entire removal a second
+# time. The standby side was a harmless no-op re-write, but the primary
+# side was not: RemoveNode()'s fallback "if ProceedGroupState(primary)
+# didn't change its goal, force APPLY_SETTINGS" fired on that second,
+# redundant call (the primary was already correctly "single" by then, so
+# its goal genuinely didn't change on the re-run) and pushed a primary
+# that had already settled at "single" into "apply_settings" for no
+# reason.
+#
+# Fixed: RemoveNode() now takes a nodeId instead of a pre-resolved
+# AutoFailoverNode*, and re-reads the node itself once it holds
+# LockFormation. A caller blocked behind a concurrent RemoveNode() call on
+# the same node now resumes with fresh, post-commit state instead of
+# whatever it read before it ever tried to acquire the lock, so the
+# idempotency check correctly fires and s2 is a true no-op. This spec now
+# documents and guards that fixed behavior -- crn_p stays "single".
 
 setup
 {
