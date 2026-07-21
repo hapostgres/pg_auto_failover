@@ -1,0 +1,59 @@
+Parsed test spec with 4 sessions
+
+starting permutation: s3_check_before s1_begin s1_report s2_report s1_commit s2_report_again s4_check_after
+step s3_check_before: 
+    SELECT nodename, goalstate, reportedstate, health
+      FROM pgautofailover.node
+     WHERE formationid = 'crsp2_test'
+     ORDER BY nodename;
+
+nodename|goalstate|reportedstate|health
+--------+---------+-------------+------
+crsp2_p |demoted  |primary      |     0
+crsp2_s1|primary  |primary      |     0
+crsp2_s2|secondary|secondary    |    -1
+(3 rows)
+
+step s1_begin: BEGIN;
+step s1_report: SELECT assigned_group_state FROM pgautofailover.node_active('crsp2_test',
+                     (SELECT nodeid FROM pgautofailover.node
+                       WHERE formationid = 'crsp2_test' AND nodename = 'crsp2_s1'),
+                     0, current_group_role => 'primary', current_lsn => '0/5000');
+assigned_group_state
+--------------------
+primary             
+(1 row)
+
+step s2_report: SELECT assigned_group_state FROM pgautofailover.node_active('crsp2_test',
+                     (SELECT nodeid FROM pgautofailover.node
+                       WHERE formationid = 'crsp2_test' AND nodename = 'crsp2_s2'),
+                     0, current_group_role => 'secondary', current_lsn => '0/5000'); <waiting ...>
+step s1_commit: COMMIT;
+step s2_report: <... completed>
+assigned_group_state
+--------------------
+secondary           
+(1 row)
+
+step s2_report_again: SELECT assigned_group_state FROM pgautofailover.node_active('crsp2_test',
+                     (SELECT nodeid FROM pgautofailover.node
+                       WHERE formationid = 'crsp2_test' AND nodename = 'crsp2_s2'),
+                     0, current_group_role => 'report_lsn', current_lsn => '0/5000');
+assigned_group_state
+--------------------
+secondary           
+(1 row)
+
+step s4_check_after: 
+    SELECT nodename, goalstate, reportedstate, health
+      FROM pgautofailover.node
+     WHERE formationid = 'crsp2_test'
+     ORDER BY nodename;
+
+nodename|goalstate|reportedstate|health
+--------+---------+-------------+------
+crsp2_p |demoted  |primary      |     0
+crsp2_s1|primary  |primary      |     0
+crsp2_s2|secondary|report_lsn   |    -1
+(3 rows)
+
