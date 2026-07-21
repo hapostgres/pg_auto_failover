@@ -47,6 +47,7 @@
 #include "utils/rel.h"
 #include "utils/relcache.h"
 #include "utils/syscache.h"
+#include "utils/timestamp.h"
 
 
 /* GUC variables */
@@ -1038,6 +1039,111 @@ GetAutoFailoverNodeById(int64 nodeId)
 	SPI_finish();
 
 	return pgAutoFailoverNode;
+}
+
+
+/*
+ * SetNodeHealthAndTimestampsForTesting is a testing-only helper that lets
+ * regression/isolation tests simulate the passage of time and/or a
+ * health-check-worker observation in a single locked, atomic call, instead
+ * of a raw UPDATE statement that bypasses the monitor's own locking
+ * discipline entirely.
+ *
+ * It takes the same LockFormation()/LockNodeGroup() locks that
+ * SetNodeHealthState() (the real health-check writer) and NodeActive() take,
+ * so a test exercising this function alongside a concurrent node_active()
+ * call observes the same serialization a real health-check write and a real
+ * FSM evaluation would -- rather than the two racing unsynchronized, which
+ * is exactly the defect this function exists to help test for.
+ *
+ * health, reportTimeAgo, stateChangeTimeAgo, and healthCheckTimeAgo are all
+ * optional (NULL = leave unchanged). reportTimeAgo/stateChangeTimeAgo/
+ * healthCheckTimeAgo backdate the corresponding timestamp by the given
+ * interval -- there is no production code path that moves these backwards,
+ * so unlike the health value itself, this part is unavoidably a test-only
+ * shortcut for compressing real elapsed time (e.g. UnhealthyTimeoutMs,
+ * DrainTimeoutMs) into an instant.
+ */
+void
+SetNodeHealthAndTimestampsForTesting(int64 nodeId,
+									 bool healthIsNull, int health,
+									 bool reportTimeAgoIsNull,
+									 Interval *reportTimeAgo,
+									 bool stateChangeTimeAgoIsNull,
+									 Interval *stateChangeTimeAgo,
+									 bool healthCheckTimeAgoIsNull,
+									 Interval *healthCheckTimeAgo)
+{
+	AutoFailoverNode *node = GetAutoFailoverNodeById(nodeId);
+
+	if (node == NULL)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("couldn't find node with nodeid %lld",
+						(long long) nodeId)));
+	}
+
+	/*
+	 * Same lock discipline as SetNodeHealthState()/NodeActive(): the
+	 * pre-lock lookup above only determines which lock to take, formationId/
+	 * groupId are stable for an existing node.
+	 */
+	LockFormation(node->formationId, ShareLock);
+	LockNodeGroup(node->formationId, node->groupId, ExclusiveLock);
+
+	Oid argTypes[] = {
+		INT8OID,     /* nodeId */
+		INT4OID,     /* health */
+		INTERVALOID, /* reportTimeAgo */
+		INTERVALOID, /* stateChangeTimeAgo */
+		INTERVALOID  /* healthCheckTimeAgo */
+	};
+
+	Datum argValues[] = {
+		Int64GetDatum(nodeId),
+		healthIsNull ? (Datum) 0 : Int32GetDatum(health),
+		reportTimeAgoIsNull ? (Datum) 0 : IntervalPGetDatum(reportTimeAgo),
+		stateChangeTimeAgoIsNull ? (Datum) 0 : IntervalPGetDatum(stateChangeTimeAgo),
+		healthCheckTimeAgoIsNull ? (Datum) 0 : IntervalPGetDatum(healthCheckTimeAgo)
+	};
+
+	char argNulls[] = {
+		' ',
+		healthIsNull ? 'n' : ' ',
+		reportTimeAgoIsNull ? 'n' : ' ',
+		stateChangeTimeAgoIsNull ? 'n' : ' ',
+		healthCheckTimeAgoIsNull ? 'n' : ' '
+	};
+
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+
+	const char *updateQuery =
+		"UPDATE " AUTO_FAILOVER_NODE_TABLE
+		"   SET health = COALESCE($2, health), "
+		"       reporttime = "
+		"           CASE WHEN $3 IS NOT NULL THEN now() - $3 "
+		"                ELSE reporttime END, "
+		"       statechangetime = "
+		"           CASE WHEN $4 IS NOT NULL THEN now() - $4 "
+		"                ELSE statechangetime END, "
+		"       healthchecktime = "
+		"           CASE WHEN $5 IS NOT NULL THEN now() - $5 "
+		"                WHEN $2 IS NOT NULL THEN now() "
+		"                ELSE healthchecktime END "
+		" WHERE nodeid = $1";
+
+	SPI_connect();
+
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  argNulls, false, 0);
+	if (spiStatus != SPI_OK_UPDATE)
+	{
+		elog(ERROR, "could not update " AUTO_FAILOVER_NODE_TABLE);
+	}
+
+	SPI_finish();
 }
 
 

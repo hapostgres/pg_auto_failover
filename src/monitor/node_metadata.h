@@ -178,6 +178,14 @@ extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
 
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeHost, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeById(int64 nodeId);
+extern void SetNodeHealthAndTimestampsForTesting(int64 nodeId,
+												 bool healthIsNull, int health,
+												 bool reportTimeAgoIsNull,
+												 Interval *reportTimeAgo,
+												 bool stateChangeTimeAgoIsNull,
+												 Interval *stateChangeTimeAgo,
+												 bool healthCheckTimeAgoIsNull,
+												 Interval *healthCheckTimeAgo);
 extern AutoFailoverNode * GetAutoFailoverNodeByName(char *formationId,
 													char *nodeName);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);

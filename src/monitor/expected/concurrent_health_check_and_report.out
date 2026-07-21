@@ -1,0 +1,66 @@
+Parsed test spec with 4 sessions
+
+starting permutation: s3_check_before hc_begin hc_mark_dead s2_report hc_commit s2_report_again s4_check_after
+assigned_group_state
+--------------------
+primary             
+(1 row)
+
+step s3_check_before: 
+    SELECT nodename, goalstate, reportedstate, health
+      FROM pgautofailover.node
+     WHERE formationid = 'crsp3_test'
+     ORDER BY nodename;
+
+nodename|goalstate|reportedstate|health
+--------+---------+-------------+------
+crsp3_p |demoted  |primary      |     0
+crsp3_s1|primary  |primary      |    -1
+crsp3_s2|secondary|secondary    |    -1
+(3 rows)
+
+step hc_begin: BEGIN;
+step hc_mark_dead: 
+    SELECT pgautofailover.testing_set_node_health(
+        (SELECT nodeid FROM pgautofailover.node
+          WHERE formationid = 'crsp3_test' AND nodename = 'crsp3_s1'),
+        health => 0, report_time_ago => interval '60 seconds');
+
+testing_set_node_health
+-----------------------
+                       
+(1 row)
+
+step s2_report: SELECT assigned_group_state FROM pgautofailover.node_active('crsp3_test',
+                     (SELECT nodeid FROM pgautofailover.node
+                       WHERE formationid = 'crsp3_test' AND nodename = 'crsp3_s2'),
+                     0, current_group_role => 'secondary', current_lsn => '0/5000'); <waiting ...>
+step hc_commit: COMMIT;
+step s2_report: <... completed>
+assigned_group_state
+--------------------
+secondary           
+(1 row)
+
+step s2_report_again: SELECT assigned_group_state FROM pgautofailover.node_active('crsp3_test',
+                     (SELECT nodeid FROM pgautofailover.node
+                       WHERE formationid = 'crsp3_test' AND nodename = 'crsp3_s2'),
+                     0, current_group_role => 'report_lsn', current_lsn => '0/5000');
+assigned_group_state
+--------------------
+report_lsn          
+(1 row)
+
+step s4_check_after: 
+    SELECT nodename, goalstate, reportedstate, health
+      FROM pgautofailover.node
+     WHERE formationid = 'crsp3_test'
+     ORDER BY nodename;
+
+nodename|goalstate |reportedstate|health
+--------+----------+-------------+------
+crsp3_p |demoted   |primary      |     0
+crsp3_s1|draining  |primary      |     0
+crsp3_s2|report_lsn|report_lsn   |    -1
+(3 rows)
+

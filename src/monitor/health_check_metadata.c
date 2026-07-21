@@ -15,6 +15,7 @@
 
 #include "health_check.h"
 #include "metadata.h"
+#include "node_metadata.h"
 #include "notifications.h"
 
 #include "access/htup.h"
@@ -195,6 +196,33 @@ SetNodeHealthState(int64 nodeId,
 
 	if (HaMonitorHasBeenLoaded())
 	{
+		/*
+		 * Take the same LockFormation()/LockNodeGroup() locks that every
+		 * other node-mutating entry point (NodeActive, RemoveNode, ...)
+		 * takes before reading or writing node state. Without this,
+		 * SetNodeHealthState() writes health/healthchecktime completely
+		 * unsynchronized with the FSM's decision-making: a health-check
+		 * write can land in the middle of a concurrent node_active() call,
+		 * between its GroupStateContext snapshot (ctx->groupNodeList,
+		 * fetched once by BuildGroupStateContext) and a later, separately
+		 * fetched read of the same node (e.g. GetPrimaryOrDemotedNodeInGroup()
+		 * inside ProceedGroupStateFromContext()) -- so BuildCandidateList()
+		 * ends up evaluating a stale copy of a node whose health just
+		 * changed, while other parts of the same FSM call already see the
+		 * fresh value. Serializing with the same lock closes that window.
+		 *
+		 * The pre-lock lookup below only determines which lock to take;
+		 * formationId/groupId are stable for an existing node and are not
+		 * used to make any FSM decision here.
+		 */
+		AutoFailoverNode *node = GetAutoFailoverNodeById(nodeId);
+
+		if (node != NULL)
+		{
+			LockFormation(node->formationId, ShareLock);
+			LockNodeGroup(node->formationId, node->groupId, ExclusiveLock);
+		}
+
 		initStringInfo(&query);
 		appendStringInfo(&query,
 						 "UPDATE " AUTO_FAILOVER_NODE_TABLE

@@ -68,6 +68,9 @@ PG_FUNCTION_INFO_V1(stop_maintenance);
 PG_FUNCTION_INFO_V1(set_node_candidate_priority);
 PG_FUNCTION_INFO_V1(set_node_replication_quorum);
 PG_FUNCTION_INFO_V1(synchronous_standby_names);
+PG_FUNCTION_INFO_V1(testing_lock_formation);
+PG_FUNCTION_INFO_V1(testing_lock_node_group);
+PG_FUNCTION_INFO_V1(testing_set_node_health);
 
 
 /*
@@ -2629,4 +2632,96 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
 		}
 	}
+}
+
+
+/*
+ * testing_lock_formation is a testing-only function that lets an isolation
+ * test hold LockFormation() explicitly, from plain SQL, for as long as its
+ * surrounding transaction stays open. This lets a test construct a
+ * deterministic blocking scenario against any other entry point that takes
+ * the same lock (NodeActive, RemoveNode, perform_failover, ...) without
+ * needing a second real FSM call in flight to create the contention.
+ *
+ * Uses ExclusiveLock unconditionally: production call sites mostly take
+ * ShareLock here, and ExclusiveLock is the mode that reliably conflicts with
+ * every one of them, maximizing what a test can block.
+ */
+Datum
+testing_lock_formation(PG_FUNCTION_ARGS)
+{
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	LockFormation(formationId, ExclusiveLock);
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * testing_lock_node_group is the LockNodeGroup() counterpart of
+ * testing_lock_formation -- see there for the rationale. This is the lock
+ * that matters most for testing races against the FSM: NodeActive() holds
+ * LockNodeGroup(ExclusiveLock) for the entire duration of a node_active()
+ * call, including its GroupStateContext snapshot and any later, separately
+ * fetched reads of the same group (e.g. GetPrimaryOrDemotedNodeInGroup()).
+ */
+Datum
+testing_lock_node_group(PG_FUNCTION_ARGS)
+{
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+	int32 groupId = PG_GETARG_INT32(1);
+
+	LockNodeGroup(formationId, groupId, ExclusiveLock);
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * testing_set_node_health is a testing-only function that lets a
+ * regression/isolation test simulate a health-check-worker observation
+ * and/or the passage of time, in one locked call, instead of a raw UPDATE
+ * to pgautofailover.node that bypasses the monitor's locking entirely (and
+ * so cannot exercise -- or race against -- the real lock discipline).
+ *
+ * All of health, report_time_ago, state_change_time_ago, and
+ * health_check_time_ago are optional (SQL NULL = leave unchanged).
+ * *_ago backdates the corresponding timestamp column by the given
+ * interval; there is no production code path that moves these timestamps
+ * backwards, so this part is unavoidably a test-only shortcut for
+ * compressing real elapsed time (e.g. pgautofailover.node_considered_
+ * unhealthy_timeout, pgautofailover.primary_demote_timeout) into an
+ * instant, the same way SET pgautofailover.startup_grace_period already
+ * does for that GUC elsewhere in these tests.
+ */
+Datum
+testing_set_node_health(PG_FUNCTION_ARGS)
+{
+	int64 nodeId = PG_GETARG_INT64(0);
+
+	bool healthIsNull = PG_ARGISNULL(1);
+	int health = healthIsNull ? 0 : PG_GETARG_INT32(1);
+
+	bool reportTimeAgoIsNull = PG_ARGISNULL(2);
+	Interval *reportTimeAgo =
+		reportTimeAgoIsNull ? NULL : PG_GETARG_INTERVAL_P(2);
+
+	bool stateChangeTimeAgoIsNull = PG_ARGISNULL(3);
+	Interval *stateChangeTimeAgo =
+		stateChangeTimeAgoIsNull ? NULL : PG_GETARG_INTERVAL_P(3);
+
+	bool healthCheckTimeAgoIsNull = PG_ARGISNULL(4);
+	Interval *healthCheckTimeAgo =
+		healthCheckTimeAgoIsNull ? NULL : PG_GETARG_INTERVAL_P(4);
+
+	SetNodeHealthAndTimestampsForTesting(nodeId,
+										 healthIsNull, health,
+										 reportTimeAgoIsNull, reportTimeAgo,
+										 stateChangeTimeAgoIsNull, stateChangeTimeAgo,
+										 healthCheckTimeAgoIsNull, healthCheckTimeAgo);
+
+	PG_RETURN_VOID();
 }
