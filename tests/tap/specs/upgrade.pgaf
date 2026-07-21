@@ -165,10 +165,15 @@ step test_003b_wait_keeper_restart {
 
 step test_004_wait_convergence {
     # 300s: 3-node post-upgrade reconvergence can be slow on shared CI runners.
-    wait until node1 state is primary
-        and node2 state is secondary
-        and node3 state is secondary
-        timeout 300s
+    #
+    # Role-agnostic on purpose: test_003b's container restart dance can leave
+    # node1 down long enough (container stop + restart lag) to cross the
+    # monitor's unhealthy/demote thresholds, triggering a genuine failover to
+    # node2 before node1 comes back as a secondary. That's a legitimate FSM
+    # outcome, not a bug -- so this only asserts the shape of convergence
+    # (exactly one primary, the other two secondary), not which node ends up
+    # primary.
+    wait until primary, secondary, secondary in group 0 timeout 300s
 }
 
 # -------------------------------------------------------------------------
@@ -196,10 +201,11 @@ step test_006_verify_extension_version {
 # -------------------------------------------------------------------------
 
 step test_007_verify_data_intact {
-    wait until node1 state is primary
-        and node2 state is secondary
-        and node3 state is secondary
-        timeout 120s
+    # Role-agnostic for the same reason as test_004_wait_convergence: node1
+    # may have lost the primary role to node2 during test_003b's restart.
+    # The data-integrity checks below are already keyed by node name, not
+    # role, so they don't need to change.
+    wait until primary, secondary, secondary in group 0 timeout 120s
     sql node1 { SELECT count(*) FROM upgrade_marker; }
     expect { 1 }
     sql node2 { SELECT count(*) FROM upgrade_marker; }
