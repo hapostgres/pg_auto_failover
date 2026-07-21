@@ -1,6 +1,6 @@
 Parsed test spec with 4 sessions
 
-starting permutation: s3_check_before hc_begin hc_mark_dead s2_report hc_commit s2_report_again s4_check_after
+starting permutation: s3_check_before s2_set_grace hc_begin hc_mark_dead s2_report hc_commit s2_report_again s4_check_after
 assigned_group_state
 --------------------
 primary             
@@ -19,6 +19,7 @@ crsp3_s1|primary  |primary      |    -1
 crsp3_s2|secondary|secondary    |    -1
 (3 rows)
 
+step s2_set_grace: SET pgautofailover.startup_grace_period = 1;
 step hc_begin: BEGIN;
 step hc_mark_dead: 
     SELECT pgautofailover.testing_set_node_health(

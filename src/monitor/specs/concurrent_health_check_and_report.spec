@@ -121,6 +121,13 @@ setup
 
     -- ── generation 1: crsp3_p (node1) hard-killed. crsp3_s1 (node2) takes
     -- over through the real report_lsn -> ... -> primary sequence.
+    --
+    -- This SET only reaches the rest of generation 1 below, which all runs
+    -- on this same setup connection. It does NOT reach session s2's later
+    -- evaluation of crsp3_s1 in generation 2 -- pg_isolation_regress gives
+    -- each named session its own separate connection, and SET is session
+    -- local. Session s2 sets this again itself (see s2_set_grace) for that
+    -- reason.
     SET pgautofailover.startup_grace_period = 1;
 
     SELECT pgautofailover.testing_set_node_health(
@@ -208,6 +215,18 @@ step hc_commit { COMMIT; }
 # block until hc_commit, then see a fully-consistent post-health-check
 # world -- proving the two writers can no longer interleave mid-decision.
 session s2
+
+# node_active()'s IsUnhealthy() check gates on both reportTime staleness
+# AND enough real time having passed since the *monitor postgres
+# instance's own* startup (PgStartTime), not since crsp3_s1's own state
+# change -- a grace window meant to avoid spurious failovers right after
+# the monitor itself restarts. The generation-1 SET in setup{} only
+# covers that block's own connection; against a freshly started postgres
+# (as pg_virtualenv gives each installcheck run) the unmodified 10s
+# default on session s2's own connection can still be open when this
+# runs, silently masking the race hc_mark_dead/s2_report exist to prove.
+# Set it low here too, on s2's own connection, before touching crsp3_s1.
+step s2_set_grace { SET pgautofailover.startup_grace_period = 1; }
 step s2_report { SELECT assigned_group_state FROM pgautofailover.node_active('crsp3_test',
                      (SELECT nodeid FROM pgautofailover.node
                        WHERE formationid = 'crsp3_test' AND nodename = 'crsp3_s2'),
@@ -232,4 +251,4 @@ step s4_check_after {
 # is fully retired and crsp3_s1 is now dead too, so with
 # number_sync_standbys=1 (minCandidates=2) only crsp3_s2 can ever report:
 # it can never satisfy quorum alone.
-permutation s3_check_before hc_begin hc_mark_dead s2_report hc_commit s2_report_again s4_check_after
+permutation s3_check_before s2_set_grace hc_begin hc_mark_dead s2_report hc_commit s2_report_again s4_check_after
