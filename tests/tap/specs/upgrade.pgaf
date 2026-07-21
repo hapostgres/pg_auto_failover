@@ -33,17 +33,21 @@
 #   PGVERSION=17 make -C tests/upgrade pgaf-current pgaf-next
 # if needed.
 #
-# Note on Postgres restart: the previous release (v2.1) contains a bug where
-# keeper_pg_init_and_register calls keeper_ensure_node_has_been_dropped without
-# first calling monitor_init, so the check connects to local Postgres instead of
-# the monitor and fails with "schema pgautofailover does not exist".  The v2.1
-# supervisor retries 5 times in rapid succession, then exits, which takes the
-# container down.  The v2.2 binary fixes this (monitor_init is now called
-# first).  The upgrade procedure therefore restarts each data-node container
-# after the old supervisor dies; docker preserves the volume so Postgres data
-# is intact, and Postgres itself restarts cleanly from its on-disk state.
-# Future upgrades from v2.2 will not need this container restart because the
-# v2.2 supervisor correctly re-execs the new binary without triggering the bug.
+# Note on Postgres restart: PREV_TAG auto-detects to the latest released tag
+# that isn't the current in-development version (see tests/upgrade/Makefile),
+# so this spec now exercises v2.2 -> v2.3. v2.1 had a bug where
+# keeper_pg_init_and_register called keeper_ensure_node_has_been_dropped
+# without first calling monitor_init, so the check connected to local
+# Postgres instead of the monitor and failed with "schema pgautofailover
+# does not exist" -- the v2.1 supervisor retried 5 times in rapid succession,
+# then exited, taking the container down, and the upgrade procedure had to
+# restart each data-node container to recover. v2.2 already carries the fix
+# (monitor_init is now called first), so for a v2.2 -> v2.3 upgrade the old
+# supervisor's node-active child re-execs in place and the container never
+# goes down. The "compose start" calls below (test_003b_wait_keeper_restart)
+# are consequently expected to be harmless no-ops against still-running
+# containers, kept so this spec still exercises the restart path correctly
+# whenever PREV_TAG is later pinned back to a pre-v2.2 release.
 
 cluster {
     monitor
@@ -80,7 +84,7 @@ step test_001_baseline {
         FROM pg_available_extensions
         WHERE name = 'pgautofailover';
     }
-    expect { 2.1 }
+    expect { 2.2 }
 }
 
 # -------------------------------------------------------------------------
@@ -112,8 +116,9 @@ step test_002_inject_node_binaries {
 # overwrites the file on disk -- new backends forked from it still see the
 # old, pre-restart library image. "ALTER EXTENSION ... UPDATE" validates
 # every CREATE FUNCTION in the upgrade script by dlsym-ing that in-memory
-# library; a function that exists only in the new .so (added by this branch,
-# with no v2.1 equivalent) can't resolve there and CREATE FUNCTION fails with
+# library; a function that exists only in the new .so (added after the
+# PREV_TAG release, with no equivalent there) can't resolve there and
+# CREATE FUNCTION fails with
 # "could not find function ... in file ...". Existing, unchanged functions
 # don't expose this because their symbols were already present pre-restart.
 # Restarting first makes the new postmaster load the new .so (already on
@@ -144,7 +149,7 @@ step test_003_upgrade_monitor {
     exec monitor  pg_autoctl inspect pgsetup wait --pgdata /var/lib/postgres/pgaf --read-write --timeout 30
     # Upgrade the extension catalog, now that the restarted postmaster has
     # the next pgautofailover.so loaded.
-    exec monitor  psql -U docker -d pg_auto_failover -c "ALTER EXTENSION pgautofailover UPDATE TO '2.2'"
+    exec monitor  psql -U docker -d pg_auto_failover -c "ALTER EXTENSION pgautofailover UPDATE TO '2.3'"
 }
 
 # -------------------------------------------------------------------------
@@ -215,7 +220,7 @@ step test_006_verify_extension_version {
         FROM pg_available_extensions
         WHERE name = 'pgautofailover';
     }
-    expect { 2.2 }
+    expect { 2.3 }
 }
 
 # -------------------------------------------------------------------------
