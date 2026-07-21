@@ -1531,6 +1531,25 @@ parse_test_spec(const char *filename)
 	yyparse();
 	fclose(f);
 
+	/*
+	 * If the file has no explicit sequence{} block, default to running
+	 * steps in declaration order.  Populated here (not just in the CI
+	 * `pgaftest run` path) so every caller that reads spec->sequence --
+	 * `pgaftest step`, `pgaftest show steps`, `pgaftest indent`, and
+	 * `pgaftest run` alike -- sees the same default instead of an empty
+	 * sequence.
+	 */
+	if (spec->sequenceLength == 0)
+	{
+		for (TestStep *s = spec->steps; s; s = s->next)
+		{
+			if (spec->sequenceLength < PGAF_MAX_SEQ)
+			{
+				spec->sequence[spec->sequenceLength++] = s->name;
+			}
+		}
+	}
+
 	return spec;
 }
 

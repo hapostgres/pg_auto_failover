@@ -4275,20 +4275,10 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 	r.composeUp = true;
 
 	/*
-	 * If no sequence{} block was written, run steps in definition order.
-	 * This lets simple test files omit the redundant sequence block entirely.
+	 * spec->sequence defaults to step declaration order when the file has
+	 * no explicit sequence{} block -- populated in parse_test_spec() so
+	 * every caller sees it, not just this one.
 	 */
-	if (spec->sequenceLength == 0)
-	{
-		for (TestStep *s = spec->steps; s; s = s->next)
-		{
-			if (spec->sequenceLength < PGAF_MAX_SEQ)
-			{
-				spec->sequence[spec->sequenceLength++] = s->name;
-			}
-		}
-	}
-
 	r.tapTotal = spec->sequenceLength;
 
 	if (!runner_wait_for_monitor(&r))
