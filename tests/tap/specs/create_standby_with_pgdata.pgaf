@@ -73,7 +73,7 @@ step test_006_init_secondary {
 #
 
 step test_007_failover {
-    exec monitor  pg_autoctl perform failover
+    perform failover
     wait until node3 state is primary
         and node1 state is secondary
         timeout 90s

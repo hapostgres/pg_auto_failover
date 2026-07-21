@@ -30,13 +30,16 @@ bool compose_gen_write_ssl_certs(const TestCluster *cluster,
  * specDir is the directory containing the spec (dirname(specFile)); it is
  * bind-mounted read-only at /etc/pgaf/specs in every data-node container so
  * that static JSON or other helper files shipped next to the spec can be
- * referenced in exec commands.  Pass NULL to omit the mount. */
+ * referenced in exec commands.  Pass NULL to omit the mount.
+ * interactive: when true the pgaftest service uses `sleep infinity` instead
+ * of `pgaftest run /spec.pgaf`, leaving it alive for an interactive shell. */
 bool compose_gen_write(TestCluster *cluster,
 					   const char *path,
 					   const char *projectName,
 					   const char *contextDir,
 					   const char *specFile,
-					   const char *specDir);
+					   const char *specDir,
+					   bool interactive);
 
 /*
  * Write a pg_autoctl_node.ini for the second (replacement) monitor into `dir`.
@@ -63,6 +66,16 @@ bool compose_gen_write_node_ini(const TestCluster *cluster,
 								const TestNode *node,
 								int nodeId,
 								const char *dir);
+
+/*
+ * Write the pgaf-hosts file: static IP-to-name mapping for every service,
+ * also embedded directly into docker-compose.yml as extra_hosts entries.
+ * pgaftest itself reads this file back for `network connect` IP lookups.
+ * path should be <workdir>/pgaf-hosts.
+ */
+bool compose_gen_write_hosts(const TestCluster *cluster,
+							 const char *path,
+							 const char *projectName);
 
 /* Return the docker network name for a project */
 void compose_network_name(const char *projectName, char *buf, int buflen);

@@ -10,6 +10,7 @@
 #include <inttypes.h>
 #include <limits.h>
 #include <sys/select.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -129,6 +130,23 @@ service_postgres_stop(Service *service)
 	{
 		log_error("Failed to stop Postgres, see above for details");
 		return false;
+	}
+
+	/*
+	 * pg_ctl stop signals postgres and polls until it exits, but does not
+	 * call waitpid().  Postgres is our direct child (forked in
+	 * service_postgres_start), so we must reap it here.  Without this call
+	 * the zombie is reparented to PID 1 when we exit, causing the next
+	 * supervisor phase to log "Unknown subprocess died".
+	 */
+	if (service->pid > 0)
+	{
+		int status = 0;
+
+		if (waitpid(service->pid, &status, 0) == -1 && errno != ECHILD)
+		{
+			log_warn("Failed to waitpid(%d) for postgres: %m", service->pid);
+		}
 	}
 
 	/* cache invalidation */

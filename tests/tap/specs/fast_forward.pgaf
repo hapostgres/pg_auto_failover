@@ -120,10 +120,3 @@ step test_005_bringup_node1 {
         and node3 state is secondary
         timeout 120s
 }
-
-sequence
-    test_001_kill_primary_and_wal_source
-    test_002_verify_stuck
-    test_003_allow_data_loss_failover
-    test_004_bringup_node3
-    test_005_bringup_node1

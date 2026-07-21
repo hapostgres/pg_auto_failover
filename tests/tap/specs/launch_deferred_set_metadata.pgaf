@@ -77,10 +77,3 @@ step test_004_verify {
         and node2 state is secondary
         timeout 90s
 }
-
-sequence
-    test_000_setup
-    test_001_node2_created
-    test_002_set_metadata
-    test_003_node_start
-    test_004_verify

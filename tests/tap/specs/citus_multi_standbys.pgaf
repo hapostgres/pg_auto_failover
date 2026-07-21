@@ -40,7 +40,9 @@ setup {
     wait until coordinator1c state is secondary  timeout 90s
     wait until worker1c state is secondary  timeout 90s
     wait until worker2c state is secondary  timeout 90s
-    promote coordinator1a, worker1a, worker2a
+    promote coordinator1a
+    promote worker1a
+    promote worker2a
 }
 
 teardown {

@@ -279,6 +279,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 					int fi = spec->formationCount++;
 					strlcpy(spec->formationNames[fi], fname,
 							sizeof(spec->formationNames[fi]));
+					spec->formationNumSync[fi] = -1; /* default: don't override */
 
 					/* optional: kind = citus (default pgsql) */
 					int ki = ini_find_property(raw, si, "kind", 0);
@@ -312,6 +313,21 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   strcmp(sv, "0") == 0))
 						{
 							spec->formationDisableSecondary[fi] = true;
+						}
+					}
+
+					/* optional: num_sync_standbys = N */
+					int ni = ini_find_property(raw, si, "num_sync_standbys", 0);
+					if (ni != INI_NOT_FOUND)
+					{
+						const char *nv = ini_property_value(raw, si, ni);
+						if (nv && nv[0])
+						{
+							int n = 0;
+							if (stringToInt(nv, &n))
+							{
+								spec->formationNumSync[fi] = n;
+							}
 						}
 					}
 				}
@@ -469,6 +485,10 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 		if (spec->formationDisableSecondary[fi])
 		{
 			fformat(out, "secondary = false\n");
+		}
+		if (spec->formationNumSync[fi] >= 0)
+		{
+			fformat(out, "num_sync_standbys = %d\n", spec->formationNumSync[fi]);
 		}
 	}
 
@@ -710,7 +730,7 @@ nodespec_write_to_path(const NodeSpec *spec, const char *path)
 		return false;
 	}
 	bool ok = nodespec_write(spec, f);
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	return ok;
 }
 
@@ -823,10 +843,25 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 
 			if (oi < 0)
 			{
-				/* formation is new: create it */
+				/* formation is new: create it, passing --number-sync-standbys
+				 * directly so there is no separate set call needed. */
+				int newNs = new_spec->formationNumSync[fi];
+				static char nsbuf[16];
 				Program prog;
 
-				if (newDisabled)
+				if (newDisabled && newNs >= 0)
+				{
+					sformat(nsbuf, sizeof(nsbuf), "%d", newNs);
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   "--disable-secondary",
+									   "--number-sync-standbys", nsbuf,
+									   NULL);
+				}
+				else if (newDisabled)
 				{
 					prog = run_program(pg_autoctl_program,
 									   "create", "formation",
@@ -834,6 +869,17 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 									   "--formation", fname,
 									   "--kind", fkind,
 									   "--disable-secondary",
+									   NULL);
+				}
+				else if (newNs >= 0)
+				{
+					sformat(nsbuf, sizeof(nsbuf), "%d", newNs);
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   "--number-sync-standbys", nsbuf,
 									   NULL);
 				}
 				else
@@ -857,8 +903,9 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 				}
 				else
 				{
-					log_info("nodespec: created formation \"%s\" (kind=%s)",
-							 fname, fkind);
+					log_info("nodespec: created formation \"%s\" (kind=%s%s)",
+							 fname, fkind,
+							 newNs >= 0 ? ", num_sync_standbys set" : "");
 					changed = true;
 				}
 				free_program(&prog);
@@ -890,6 +937,43 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 					changed = true;
 				}
 				free_program(&prog);
+			}
+
+			/*
+			 * num_sync_standbys for existing formations (including "default"):
+			 * the formation already exists so use the set command.
+			 * Skip when oi < 0 (new formation) — handled above via create.
+			 */
+			int newNs = new_spec->formationNumSync[fi];
+			int oldNs = (oi >= 0) ? old_spec->formationNumSync[oi] : -1;
+			if (oi >= 0 && newNs >= 0 && newNs != oldNs)
+			{
+				static char nsbuf[16];
+				sformat(nsbuf, sizeof(nsbuf), "%d", newNs);
+				Program nsp = run_program(pg_autoctl_program,
+										  "set", "formation",
+										  "number-sync-standbys",
+										  nsbuf,
+										  "--pgdata", new_spec->pgdata,
+										  "--formation", fname,
+										  NULL);
+				if (nsp.returnCode != 0)
+				{
+					log_warn("nodespec_apply: set number-sync-standbys %d "
+							 "for \"%s\" failed (rc=%d)",
+							 newNs, fname, nsp.returnCode);
+					if (nsp.stdOut)
+					{
+						log_warn("%s", nsp.stdOut);
+					}
+				}
+				else
+				{
+					log_info("nodespec: set formation \"%s\" number-sync-standbys = %d",
+							 fname, newNs);
+					changed = true;
+				}
+				free_program(&nsp);
 			}
 		}
 	}

@@ -38,12 +38,17 @@ DOCKER_RUN_OPTS     = --privileged --rm
 
 # DOCKER BUILDS
 #
-# make build-base       — build the base image (all PG versions + Citus)
-# make build            — build the 'run' image for every supported PG version
-# make build-pg17       — build the 'run' image for PG 17 only
-# make build-pytest     — build the 'test' (Python) image for every PG version
-# make build-pytest-pg17  — build the 'test' image for PG 17 only
-# make build-pytest-image — build the 'test' image for PGVERSION (default latest)
+# make build-base           — build the base image (all PG versions + Citus)
+# make build                — build the 'run' images for every supported PG version
+#                             + the 'pgaftest' image (pgaf:pgaftest, using PGVERSION)
+# make build-pg17           — build the 'run' image for PG 17 only
+# make force-build          — same as build but with --no-cache (busts Docker layer cache)
+# make force-build-pg17     — force-rebuild the 'run' image for PG 17 only
+# make build-pgaftest       — build pgaf:pgaftest (test runner, uses PGVERSION)
+# make force-build-pgaftest — same but with --no-cache (busts Docker layer cache)
+# make build-pytest         — build the 'test' (Python) image for every PG version
+# make build-pytest-pg17    — build the 'test' image for PG 17 only
+# make build-pytest-image   — build the 'test' image for PGVERSION (default latest)
 
 .PHONY: build-base
 build-base:
@@ -54,7 +59,7 @@ BUILD_PYTEST_TARGETS = $(patsubst %,build-pytest-pg%,$(PGVERSIONS))
 BUILD_CHECK_TARGETS  = $(patsubst %,build-check-pg%,$(PGVERSIONS))
 
 .PHONY: build
-build: $(BUILD_TARGETS) ;
+build: $(BUILD_TARGETS) build-pgaftest ;
 
 .PHONY: $(BUILD_TARGETS)
 $(BUILD_TARGETS): version
@@ -69,11 +74,32 @@ build-check: $(BUILD_CHECK_TARGETS) ;
 build-pytest: $(BUILD_PYTEST_TARGETS) ;
 build-pytest-image: build-pytest-pg$(PGVERSION) ;
 
+FORCE_BUILD_TARGETS = $(patsubst %,force-build-pg%,$(PGVERSIONS))
+
+.PHONY: force-build
+force-build: $(FORCE_BUILD_TARGETS) force-build-pgaftest ;
+
+.PHONY: $(FORCE_BUILD_TARGETS)
+$(FORCE_BUILD_TARGETS): version
+	docker build --no-cache \
+	  --build-arg PGVERSION=$(subst force-build-pg,,$@) \
+	  --build-arg BASE=$(BASE) \
+	  --target run \
+	  -t $(CONTAINER_NAME):$(subst force-build-,,$@) $(REPO_ROOT)
+
 PGAFTEST_CONTAINER_NAME = pgaf
 
 .PHONY: build-pgaftest
 build-pgaftest: version
 	docker build \
+	  --build-arg PGVERSION=$(PGVERSION) \
+	  --build-arg BASE=$(BASE) \
+	  --target pgaftest \
+	  -t $(PGAFTEST_CONTAINER_NAME):pgaftest $(REPO_ROOT)
+
+.PHONY: force-build-pgaftest
+force-build-pgaftest: version
+	docker build --no-cache \
 	  --build-arg PGVERSION=$(PGVERSION) \
 	  --build-arg BASE=$(BASE) \
 	  --target pgaftest \

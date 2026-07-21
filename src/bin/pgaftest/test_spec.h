@@ -100,6 +100,7 @@ typedef struct TestCluster
 	bool withMonitor;            /* true when "monitor" keyword appears in cluster{} */
 	bool withCitus;
 	bool bindSource;             /* bind-source: mount repo root → /usr/src/pg_auto_failover */
+	bool legacyStartup;          /* legacy-startup: use pg_autoctl create <kind> --run (v2.2 style) */
 
 	/* cluster-level Docker / network options */
 	char image[256];             /* Docker image tag; "" = build from source */
@@ -165,6 +166,9 @@ typedef enum TestCmdKind
 	CMD_SET_MONITOR,     /* set monitor <svc>  — switch active monitor service  */
 	CMD_LOGS_CHECK,      /* logs <svc> [not] <pattern> — grep container logs    */
 	CMD_COMPOSE_INJECT,  /* compose inject <image> <src> <svc>:<dst>            */
+	CMD_FAILOVER,        /* perform failover [in formation F] [group G]
+	                      * — calls pgautofailover.perform_failover() directly
+	                      * on the monitor; service = formation, waitGroups[0] = group */
 } TestCmdKind;
 
 typedef struct TestCmd

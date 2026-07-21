@@ -134,7 +134,7 @@ step test_008_set_candidate_priorities {
 #
 
 step test_009_failover {
-    exec monitor  pg_autoctl perform failover
+    perform failover
     wait until node2 state is primary
         and node3 state is secondary
         and node1 state is secondary
@@ -166,11 +166,16 @@ step test_011_write_into_new_primary {
 }
 
 #
-# test_012: fail primary node2
+# test_012: fail primary node2 via compose stop — matches the Python
+#           predecessor's node2.fail() (graceful SIGTERM to pg_autoctl, not
+#           a network partition).  See docs/ref/pgaftest.rst
+#           "Failure-simulation semantics" for why this matters.
 #
 
 step test_012_fail_primary {
-    network disconnect node2
+    compose stop node2
+    # 60s: compose stop can be slow on shared CI runners
+    wait until node2 stopped  timeout 60s
     wait until node1 state is stop_replication  timeout 90s
     wait until node1 state is primary
         and node3 state is secondary
@@ -184,11 +189,11 @@ step test_012_fail_primary {
 #
 
 step test_013_restart_node2 {
-    network connect node2
+    compose start node2
     wait until node1 state is primary
         and node2 state is secondary
         and node3 state is secondary
-        timeout 90s
+        timeout 180s
     sql node1 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_2, pgautofailover_standby_3) }
 }
@@ -231,8 +236,13 @@ step test_014_004_restart_nodes {
 }
 
 step test_015_002_fail_two_standby_nodes {
-    network disconnect node2
-    network disconnect node3
+    # compose stop, not network disconnect: matches node2.fail()/node3.fail()
+    # in the Python predecessor, and mirrors test_014_002 above (same
+    # scenario, different formation config) which already uses compose stop.
+    compose stop node2
+    compose stop node3
+    wait until node2 stopped  timeout 60s
+    wait until node3 stopped  timeout 60s
     wait until node1 state is wait_primary  timeout 90s
     sql node1 { SHOW synchronous_standby_names; }
     expect {  }
@@ -248,8 +258,8 @@ step test_015_003_set_properties {
 }
 
 step test_015_004_restart_nodes {
-    network connect node3
-    network connect node2
+    compose start node3
+    compose start node2
     wait until node3 state is secondary
         and node2 state is secondary
         and node1 state is primary
@@ -290,7 +300,7 @@ step test_016_004_reset_candidate_priority {
 }
 
 step test_016_005_perform_promotion {
-    exec monitor  pg_autoctl perform promotion --name node1
+    promote node1
     wait until node1 state is primary
         and node2 state is secondary
         and node3 state is secondary

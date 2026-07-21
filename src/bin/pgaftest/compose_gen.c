@@ -6,7 +6,12 @@
  * Design principle — uniform containers
  * ======================================
  * Every container in the generated compose file uses:
- *   - the same Docker image (PGAF_IMAGE env var or a local build)
+ *   - the same Docker image for cluster nodes (default: pg_auto_failover:pg<ver>,
+ *     overridable via PGAF_IMAGE or `image "..."` in the spec)
+ *   - the pgaftest runner image for the setup service (default: pgaf:pgaftest,
+ *     overridable via PGAFTEST_IMAGE)
+ *   - Set PGAF_BUILD=1 to emit inline `build:` stanzas instead of image refs
+ *     (useful when iterating on the Dockerfile without tagging)
  *   - the same command:  pg_autoctl node run /etc/pgaf/node.ini
  *   - the same config file location inside the container
  *
@@ -348,6 +353,12 @@ compose_gen_write_ssl_certs(const TestCluster *cluster, const char *workDir)
  * client cert/key and CA cert are also copied so libpq can find them.
  * SSL_COPY_CERTS_CMD is a shell snippet ending with " &&" so we can
  * append the pg_autoctl invocation directly.
+ *
+ * When cluster->legacyStartup is set (e.g. upgrade tests using pgaf:current
+ * which carries the v2.2 binary), the v2.3 "pg_autoctl node run <ini>" form
+ * is not available.  Use the v2.2-style "pg_autoctl create <kind> --run"
+ * instead.  isMonitor distinguishes the two node kinds; monitorUri is only
+ * used when isMonitor is false.
  */
 static void
 write_node_command(FILE *f, const TestCluster *cluster, const char *iniPath)
@@ -373,26 +384,105 @@ write_node_command(FILE *f, const TestCluster *cluster, const char *iniPath)
 
 
 /*
- * image_stanza writes either `image:` (when PGAF_IMAGE is set or the cluster
- * spec provides an image) or a `build:` stanza.
+ * ssl_args_for_legacy returns the ssl-related YAML array fragment (without
+ * trailing comma) for a legacy "pg_autoctl create" command.
+ *
+ * "node run <ini>" reads ssl= from the ini; "create <kind> --run" needs the
+ * flag spelled out on the command line.  Most cases are a single flag token;
+ * verify-ca / verify-full would need cert paths too, but the only current
+ * legacy-startup user (upgrade.pgaf) always uses the default self-signed.
+ */
+static const char *
+ssl_args_for_legacy(const char *ssl)
+{
+	if (strcmp(ssl, "off") == 0)
+	{
+		return "\"--no-ssl\"";
+	}
+
+	/* self-signed is the default; also covers the empty/unset case */
+	return "\"--ssl-self-signed\"";
+}
+
+
+static void
+write_legacy_monitor_command(FILE *f, const char *pgdata, const char *auth,
+							 const char *ssl)
+{
+	fformat(f,
+			"    command: [\"pg_autoctl\", \"create\", \"monitor\","
+			" \"--pgdata\", \"%s\","
+			" \"--auth\", \"%s\","
+			" %s,"
+			" \"--run\"]\n"
+			"    stop_grace_period: 60s\n",
+			pgdata, auth, ssl_args_for_legacy(ssl));
+}
+
+
+static void
+write_legacy_node_command(FILE *f, const char *pgdata, const char *monitorUri,
+						  const char *auth, const char *ssl, const char *name)
+{
+	fformat(f,
+			"    command: [\"pg_autoctl\", \"create\", \"postgres\","
+			" \"--pgdata\", \"%s\","
+			" \"--monitor\", \"%s\","
+			" \"--name\", \"%s\","
+			" \"--auth\", \"%s\","
+			" %s,"
+			" \"--run\"]\n"
+			"    stop_grace_period: 60s\n",
+			pgdata, monitorUri, name, auth, ssl_args_for_legacy(ssl));
+}
+
+
+/*
+ * write_image_stanza_target — emit either `image:` or `build:` for a service.
+ *
+ * Resolution order for the run/debian/monitor targets (cluster data nodes):
+ *   1. spec-level  `image "..."` declaration
+ *   2. PGAF_IMAGE  env var
+ *   3. pg_auto_failover:pg<version>  — produced by `make build`
+ *
+ * Resolution order for the pgaftest target (setup service):
+ *   1. PGAFTEST_IMAGE env var
+ *   2. pgaf:pgaftest                 — produced by `make build-pgaftest`
+ *
+ * Set PGAF_BUILD=1 to force an inline `build:` stanza for all targets
+ * (useful when iterating on the Dockerfile without tagging an image).
  */
 static void
 write_image_stanza_target(FILE *f, const TestCluster *cluster,
 						  const char *contextDir, const char *target)
 {
-	/*
-	 * The cluster image (from `image "..."` in the spec) is for data services
-	 * only.  The pgaftest service always builds from --target pgaftest so that
-	 * the test runner binary is present regardless of which cluster image is
-	 * used.
-	 */
 	bool isTestRunner = (strcmp(target, "pgaftest") == 0);
+	bool forceBuild = (getenv("PGAF_BUILD") != NULL); /* IGNORE-BANNED */
 
-	/* cluster-level image overrides PGAF_IMAGE env var */
-	const char *img = cluster->image[0] ? cluster->image : getenv("PGAF_IMAGE"); /* IGNORE-BANNED */
-
-	if (img && *img && !isTestRunner)
+	if (!forceBuild)
 	{
+		const char *img = NULL;
+
+		if (isTestRunner)
+		{
+			img = getenv("PGAFTEST_IMAGE"); /* IGNORE-BANNED */
+			if (!img || !*img)
+			{
+				img = "pgaf:pgaftest";
+			}
+		}
+		else
+		{
+			img = cluster->image[0] ? cluster->image : getenv("PGAF_IMAGE"); /* IGNORE-BANNED */
+			if (!img || !*img)
+			{
+				static char defaultImg[64];
+				sformat(defaultImg, sizeof(defaultImg),
+						"pg_auto_failover:pg%s", debian_pg_version());
+				img = defaultImg;
+			}
+		}
+
 		fformat(f, "    image: \"%s\"\n", img);
 		return;
 	}
@@ -411,6 +501,186 @@ static void
 write_image_stanza(FILE *f, const TestCluster *cluster, const char *contextDir)
 {
 	write_image_stanza_target(f, cluster, contextDir, "run");
+}
+
+
+/* -----------------------------------------------------------------------
+ * Static-IP / extra_hosts helpers
+ *
+ * Every compose stack gets a private /24 subnet derived from the project
+ * name, and every service in it gets a fixed IP on that subnet. Name
+ * resolution between services (monitor, data nodes) is done with Docker
+ * Compose's `extra_hosts:` key, writing that same static IP-to-name mapping
+ * directly into each service's /etc/hosts at container-creation time —
+ * rather than via a DNS query at all. That sidesteps Docker's embedded
+ * 127.0.0.11 resolver, which is known to drop DNS under heavy container
+ * churn on GitHub Actions runners: an /etc/hosts entry can't time out or
+ * get dropped mid-query the way a UDP DNS lookup can.
+ *
+ * IP layout (fourth octet):
+ *   .2       monitor (when present)
+ *   .3       second_monitor (when present)
+ *   .4 …     data nodes, in the order they appear across all formations
+ *
+ * Subnet selection: hash the project name into one of 2048 /24 blocks
+ * spread across 172.20.0.0/12 – 172.27.0.0/12 (second and third octets),
+ * giving low collision probability when multiple tests run in parallel on
+ * the same GHA runner.
+ * ----------------------------------------------------------------------- */
+
+/* Number of /24 subnets available: 8 class-B blocks × 256 class-C = 2048 */
+#define PGAF_SUBNET_BASE_A 172
+#define PGAF_SUBNET_RANGE_B 8    /* 172.20 … 172.27 */
+#define PGAF_SUBNET_BASE_B 20
+
+/*
+ * djb2 hash — fast, low-collision for short ASCII strings.
+ */
+static unsigned long
+djb2_hash(const char *s)
+{
+	unsigned long h = 5381;
+
+	for (; *s; s++)
+	{
+		h = h * 33 ^ (unsigned char) *s;
+	}
+	return h;
+}
+
+
+/*
+ * compose_subnet fills `buf` with the /24 subnet string for `projectName`,
+ * e.g. "172.23.47.0/24".
+ */
+static void
+compose_subnet(const char *projectName, char *buf, int buflen)
+{
+	unsigned long h = djb2_hash(projectName);
+	int b = PGAF_SUBNET_BASE_B + (int) ((h >> 8) % PGAF_SUBNET_RANGE_B);
+	int c = (int) (h % 256);
+
+	sformat(buf, buflen, "%d.%d.%d.0/24", PGAF_SUBNET_BASE_A, b, c);
+}
+
+
+/*
+ * compose_service_ip fills `buf` with the IP for a given last-octet offset.
+ * offset 2 = monitor, 3 = secondMonitor, 4+ = data nodes.
+ */
+static void
+compose_service_ip(const char *projectName, int offset, char *buf, int buflen)
+{
+	unsigned long h = djb2_hash(projectName);
+	int b = PGAF_SUBNET_BASE_B + (int) ((h >> 8) % PGAF_SUBNET_RANGE_B);
+	int c = (int) (h % 256);
+
+	sformat(buf, buflen, "%d.%d.%d.%d", PGAF_SUBNET_BASE_A, b, c, offset);
+}
+
+
+/*
+ * compose_gen_write_hosts writes the pgaf-hosts file: one "IP  name" line
+ * per service (monitor + data nodes). This is no longer consumed by a DNS
+ * server (see the extra_hosts note above) — pgaftest itself reads this file
+ * back (runner_hosts_lookup in test_runner.c) to know each node's static IP
+ * when reconnecting it to the network after a `network disconnect` step, so
+ * the reconnect keeps the same address every other service's extra_hosts
+ * entry already points at.
+ */
+bool
+compose_gen_write_hosts(const TestCluster *cluster,
+						const char *path,
+						const char *projectName)
+{
+	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
+
+	if (!f)
+	{
+		log_error("Failed to open \"%s\" for writing: %m", path);
+		return false;
+	}
+
+	/* offset 2: monitor */
+	if (cluster->withMonitor)
+	{
+		char ip[32];
+		compose_service_ip(projectName, 2, ip, sizeof(ip));
+		fformat(f, "%s  monitor\n", ip);
+	}
+
+	/* offset 3: second monitor */
+	if (cluster->secondMonitorName[0])
+	{
+		char ip[32];
+		compose_service_ip(projectName, 3, ip, sizeof(ip));
+		fformat(f, "%s  %s\n", ip, cluster->secondMonitorName);
+	}
+
+	/* offset 4+: data nodes */
+	int nodeOffset = 4;
+
+	for (int fi = 0; fi < cluster->formationCount; fi++)
+	{
+		const TestFormation *form = &cluster->formations[fi];
+
+		for (int ni = 0; ni < form->nodeCount; ni++)
+		{
+			const TestNode *n = &form->nodes[ni];
+			char ip[32];
+			compose_service_ip(projectName, nodeOffset++, ip, sizeof(ip));
+			fformat(f, "%s  %s\n", ip, n->name);
+		}
+	}
+
+	fclose(f); /* IGNORE-BANNED */
+	log_info("Wrote pgaf-hosts to \"%s\"", path);
+	return true;
+}
+
+
+/*
+ * compose_write_extra_hosts writes an `extra_hosts:` block (the same
+ * IP-to-name mapping as compose_gen_write_hosts, in Compose YAML form) to
+ * the docker-compose.yml service currently being written. Every service
+ * gets the full mapping — monitor, second monitor, and every data node —
+ * regardless of whether it needs all of those peers, matching what every
+ * service could previously resolve via the shared dnsmasq server.
+ */
+static void
+compose_write_extra_hosts(FILE *f, const TestCluster *cluster,
+						  const char *projectName)
+{
+	fformat(f, "    extra_hosts:\n");
+
+	if (cluster->withMonitor)
+	{
+		char ip[32];
+		compose_service_ip(projectName, 2, ip, sizeof(ip));
+		fformat(f, "      - \"monitor:%s\"\n", ip);
+	}
+
+	if (cluster->secondMonitorName[0])
+	{
+		char ip[32];
+		compose_service_ip(projectName, 3, ip, sizeof(ip));
+		fformat(f, "      - \"%s:%s\"\n", cluster->secondMonitorName, ip);
+	}
+
+	int nodeOffset = 4;
+
+	for (int fi = 0; fi < cluster->formationCount; fi++)
+	{
+		const TestFormation *form = &cluster->formations[fi];
+
+		for (int ni = 0; ni < form->nodeCount; ni++)
+		{
+			const TestNode *n = &form->nodes[ni];
+			char ip[32];
+			compose_service_ip(projectName, nodeOffset++, ip, sizeof(ip));
+			fformat(f, "      - \"%s:%s\"\n", n->name, ip);
+		}
+	}
 }
 
 
@@ -498,7 +768,8 @@ compose_gen_write(TestCluster *cluster,
 				  const char *projectName,
 				  const char *contextDir,
 				  const char *specFile,
-				  const char *specDir)
+				  const char *specDir,
+				  bool interactive)
 {
 	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
 	if (!f)
@@ -507,8 +778,42 @@ compose_gen_write(TestCluster *cluster,
 		return false;
 	}
 
+	char subnet[32];
+
+	compose_subnet(projectName, subnet, sizeof(subnet));
+
+	/*
+	 * Write pgaf-hosts next to docker-compose.yml. No longer read by any
+	 * container at runtime (see compose_write_extra_hosts, which bakes the
+	 * same mapping directly into the compose YAML); pgaftest itself reads
+	 * this file back for `network connect` static-IP lookups.
+	 * Skip when path is /dev/stdout (pgaftest show compose dry-run).
+	 */
+	if (strcmp(path, "/dev/stdout") != 0)
+	{
+		char hostsPath[MAXPGPATH];
+		strlcpy(hostsPath, path, sizeof(hostsPath));
+		char *slash = strrchr(hostsPath, '/');
+
+		if (slash)
+		{
+			*slash = '\0';
+			strlcat(hostsPath, "/pgaf-hosts", sizeof(hostsPath));
+		}
+		else
+		{
+			strlcpy(hostsPath, "pgaf-hosts", sizeof(hostsPath));
+		}
+
+		if (!compose_gen_write_hosts(cluster, hostsPath, projectName))
+		{
+			fclose(f); /* IGNORE-BANNED */
+			return false;
+		}
+	}
+
 	fformat(f, "# Generated by pgaftest — do not edit manually\n");
-	fformat(f, "# Project: %s\n\n", projectName);
+	fformat(f, "# Project: %s  subnet: %s\n\n", projectName, subnet);
 	fformat(f, "services:\n");
 
 	/* ---- monitor (optional) ---- */
@@ -600,13 +905,24 @@ compose_gen_write(TestCluster *cluster,
 				cluster->monitorHostPort);
 
 
-		write_node_command(f, cluster, NODE_INI_PATH);
+		if (cluster->legacyStartup)
+		{
+			write_legacy_monitor_command(f, monitor_pgdata, cluster->auth,
+										 cluster->ssl);
+		}
+		else
+		{
+			write_node_command(f, cluster, NODE_INI_PATH);
+		}
 		fformat(f, "\n");
 
 		/*
 		 * Monitor healthcheck: data nodes use depends_on service_healthy so
 		 * they do not start until the monitor is fully initialised.
 		 */
+		char monitorIp[32];
+		compose_service_ip(projectName, 2, monitorIp, sizeof(monitorIp));
+
 		fformat(f,
 				"    healthcheck:\n"
 				"      test: [\"CMD\", \"pg_autoctl\", \"status\","
@@ -614,8 +930,14 @@ compose_gen_write(TestCluster *cluster,
 				"      interval: 2s\n"
 				"      timeout: 5s\n"
 				"      retries: 150\n"
-				"      start_period: 60s\n\n",
+				"      start_period: 60s\n",
 				monitor_pgdata);
+		compose_write_extra_hosts(f, cluster, projectName);
+		fformat(f,
+				"    networks:\n"
+				"      pgafnet:\n"
+				"        ipv4_address: %s\n\n",
+				monitorIp);
 	}
 
 	/* ---- second monitor (initially stopped, for replace-monitor tests) ---- */
@@ -653,12 +975,19 @@ compose_gen_write(TestCluster *cluster,
 		fformat(f,
 				"    environment:\n"
 				"      PGDATA: " NODE_PGDATA "\n");
+		char secondMonitorIp[32];
+		compose_service_ip(projectName, 3, secondMonitorIp, sizeof(secondMonitorIp));
 		fformat(f,
 				"    ports:\n"
 				"      - \"%d:5432\"\n",
 				cluster->secondMonitorHostPort);
 		write_node_command(f, cluster, NODE_INI_PATH);
-		fformat(f, "\n");
+		compose_write_extra_hosts(f, cluster, projectName);
+		fformat(f,
+				"    networks:\n"
+				"      pgafnet:\n"
+				"        ipv4_address: %s\n\n",
+				secondMonitorIp);
 	}
 
 	/* ---- data nodes — iterate all formations ---- */
@@ -671,6 +1000,21 @@ compose_gen_write(TestCluster *cluster,
 	 */
 	const TestNode *firstNode = NULL;
 
+	/* IP offset 4 = first data node (2=monitor, 3=secondMonitor) */
+	int nodeIpOffset = 4;
+
+	/*
+	 * Ordinal position of each node across every formation, in cluster{}
+	 * declaration order (0 = first node declared).  Passed to the container
+	 * as PG_AUTOCTL_TEST_DELAY so that pg_autoctl node run can stagger
+	 * registration deterministically — see the PG_AUTOCTL_TEST_DELAY
+	 * handling in cli_node.c for why this exists.  Unlike a name-derived
+	 * index, this works uniformly for both "node1"/"node2" naming and
+	 * Citus-style "worker1a"/"coordinator1b" naming, since it never parses
+	 * the node name at all.
+	 */
+	int nodeOrdinal = 0;
+
 	for (int fi = 0; fi < cluster->formationCount; fi++)
 	{
 		const TestFormation *form = &cluster->formations[fi];
@@ -678,6 +1022,8 @@ compose_gen_write(TestCluster *cluster,
 		for (int ni = 0; ni < form->nodeCount; ni++)
 		{
 			const TestNode *n = &form->nodes[ni];
+			int thisOffset = nodeIpOffset++;
+			int thisOrdinal = nodeOrdinal++;
 			fformat(f, "  %s:\n", n->name);
 			write_image_stanza(f, cluster, contextDir);
 
@@ -737,10 +1083,10 @@ compose_gen_write(TestCluster *cluster,
 					"      PGDATA: %s\n"
 					"      PGUSER: demo\n"
 					"      PGDATABASE: demo\n"
-					"      PG_AUTOCTL_TEST_DELAY: \"1\"\n"
+					"      PG_AUTOCTL_TEST_DELAY: \"%d\"\n"
 					"    expose:\n"
 					"      - 5432\n",
-					node_pgdata);
+					node_pgdata, thisOrdinal);
 
 			/*
 			 * No depends_on: keeper retry loops handle monitor not yet ready,
@@ -748,7 +1094,29 @@ compose_gen_write(TestCluster *cluster,
 			 * case where the formation hasn't been created yet.
 			 */
 
-			write_node_command(f, cluster, NODE_INI_PATH);
+			if (cluster->legacyStartup)
+			{
+				char monitorUri[512];
+
+				if (cluster->monitorPassword[0])
+				{
+					sformat(monitorUri, sizeof(monitorUri),
+							"postgresql://autoctl_node:%s@monitor/pg_auto_failover",
+							cluster->monitorPassword);
+				}
+				else
+				{
+					strlcpy(monitorUri,
+							"postgresql://autoctl_node@monitor/pg_auto_failover",
+							sizeof(monitorUri));
+				}
+				write_legacy_node_command(f, node_pgdata, monitorUri,
+										  cluster->auth, cluster->ssl, n->name);
+			}
+			else
+			{
+				write_node_command(f, cluster, NODE_INI_PATH);
+			}
 
 			/*
 			 * With a monitor: the first data node gets a healthcheck so that
@@ -789,13 +1157,26 @@ compose_gen_write(TestCluster *cluster,
 			else if (cluster->withMonitor &&
 					 !n->launchDeferred && !n->createDeferred)
 			{
-				/* node1: wait for monitor to be healthy before starting */
+				/* node1: wait for the monitor to be healthy before starting */
 				fformat(f,
 						"    depends_on:\n"
 						"      monitor:\n"
 						"        condition: service_healthy\n");
 			}
-			fformat(f, "\n");
+
+			/*
+			 * no-monitor or deferred: no depends_on needed — the keeper
+			 * retry loops already handle the monitor/formation not being
+			 * ready yet.
+			 */
+			char nodeIp[32];
+			compose_service_ip(projectName, thisOffset, nodeIp, sizeof(nodeIp));
+			compose_write_extra_hosts(f, cluster, projectName);
+			fformat(f,
+					"    networks:\n"
+					"      pgafnet:\n"
+					"        ipv4_address: %s\n\n",
+					nodeIp);
 
 			if (!firstNode && !n->launchDeferred && !n->createDeferred)
 			{
@@ -817,9 +1198,22 @@ compose_gen_write(TestCluster *cluster,
 	 */
 	if (specFile)
 	{
-		/* Determine which service pgaftest must wait for before starting. */
-		/* It needs the cluster fully ready: monitor healthy + all nodes started. */
-		fformat(f, "  pgaftest:\n");
+		/*
+		 * In interactive mode the service is named "setup" and carries a
+		 * profile so that `docker compose up` ignores it entirely — it is
+		 * only invoked via `docker compose run setup`.  This avoids the need
+		 * for --scale pgaftest=0 and prevents Compose from rebuilding cluster
+		 * images on every `pgaftest tmux` invocation.
+		 *
+		 * In CI mode the service is named "pgaftest" with no profile so that
+		 * `docker compose up --exit-code-from pgaftest` works as expected.
+		 */
+		const char *svcName = interactive ? "setup" : "pgaftest";
+		fformat(f, "  %s:\n", svcName);
+		if (interactive)
+		{
+			fformat(f, "    profiles: [setup]\n");
+		}
 		write_image_stanza_target(f, cluster, contextDir, "pgaftest");
 
 		/* Build monitor pguri for PG_AUTOCTL_MONITOR */
@@ -858,12 +1252,20 @@ compose_gen_write(TestCluster *cluster,
 			strlcpy(workDir, ".", sizeof(workDir));
 		}
 
+		/*
+		 * The setup service runs as root (image default): root always has
+		 * access to /var/run/docker.sock for Docker-out-of-Docker regardless
+		 * of the host socket GID (which differs between macOS Docker Desktop
+		 * and Linux CI).  Working directory is /root so that pgaftest can
+		 * maintain a local state file (current step, etc.) in a predictable,
+		 * writable location without any volume mounts.
+		 */
 		fformat(f,
-				"    user: root\n"
+				"    working_dir: /root\n"
 				"    volumes:\n"
-				"      - %s:/spec.pgaf:ro\n"
+				"      - %s:/root/spec.pgaf:ro\n"
 				"      - /var/run/docker.sock:/var/run/docker.sock\n"
-				"      - %s:%s:ro\n",
+				"      - %s:%s\n",
 				specFile, workDir, workDir);
 		if (ssl_needs_certs(cluster->ssl))
 		{
@@ -875,7 +1277,8 @@ compose_gen_write(TestCluster *cluster,
 		}
 		fformat(f,
 				"    environment:\n"
-				"      PGAFTEST_COMPOSE_SERVICE: \"1\"\n"
+				"      PGAFTEST_IN_CONTAINER: \"1\"\n"
+				"      PGAFTEST_SPEC: \"/root/spec.pgaf\"\n"
 				"      PGAFTEST_HOST_WORK_DIR: \"%s\"\n"
 				"      COMPOSE_PROJECT_NAME: \"%s\"\n",
 				workDir, projectName);
@@ -891,7 +1294,33 @@ compose_gen_write(TestCluster *cluster,
 					"        condition: service_healthy\n",
 					firstNode->name);
 		}
-		fformat(f, "    command: [\"pgaftest\", \"run\", \"/spec.pgaf\"]\n\n");
+
+		/*
+		 * This service resolves "monitor" and node names directly (e.g. via
+		 * PG_AUTOCTL_MONITOR above), so it needs the same static-IP mapping
+		 * as every other service and a place on pgafnet to reach them — no
+		 * fixed IP of its own is needed since nothing resolves this service
+		 * by name.
+		 */
+		compose_write_extra_hosts(f, cluster, projectName);
+		fformat(f,
+				"    networks:\n"
+				"      - pgafnet\n");
+
+		/*
+		 * CI mode: run the full spec to completion (exit code drives CI).
+		 * Interactive mode: no command — docker compose run supplies it.
+		 */
+		if (!interactive)
+		{
+			fformat(f,
+					"    command: [\"pgaftest\", \"run\","
+					" \"/var/lib/postgres/spec.pgaf\"]\n\n");
+		}
+		else
+		{
+			fformat(f, "\n");
+		}
 	}
 
 	/* ---- volumes ---- */
@@ -918,7 +1347,16 @@ compose_gen_write(TestCluster *cluster,
 		}
 	}
 
-	fclose(f);
+	/* ---- top-level networks block with static subnet ---- */
+	fformat(f,
+			"\nnetworks:\n"
+			"  pgafnet:\n"
+			"    ipam:\n"
+			"      config:\n"
+			"        - subnet: %s\n",
+			subnet);
+
+	fclose(f); /* IGNORE-BANNED */
 	log_info("Wrote docker-compose.yml to \"%s\"", path);
 	return true;
 }
@@ -1003,16 +1441,19 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 				cluster->monitorPassword);
 	}
 
-	/* emit [formation <name>] for every non-default formation */
+	/*
+	 * Emit [formation <name>] sections into monitor.ini.
+	 *
+	 * The default formation is created automatically at monitor init and does
+	 * not need a section for kind/secondary, but we include it when num-sync
+	 * is explicitly declared so that nodespec_apply can set it.
+	 * Non-default formations always get a section so they are created at
+	 * post-init time.
+	 */
 	for (int fi = 0; fi < cluster->formationCount; fi++)
 	{
 		const TestFormation *form = &cluster->formations[fi];
-		if (strcmp(form->name, "default") == 0)
-		{
-			continue;
-		}
-
-		fformat(f, "\n[formation %s]\n", form->name);
+		bool isDefault = (strcmp(form->name, "default") == 0);
 
 		/* derive kind from node types: any coordinator/worker → citus */
 		bool isCitus = false;
@@ -1024,18 +1465,35 @@ compose_gen_write_monitor_ini(const TestCluster *cluster, const char *dir)
 				isCitus = true;
 			}
 		}
-		if (isCitus)
+
+		/* skip the default formation unless it has settings to apply */
+		if (isDefault && !isCitus && !form->disableSecondary && form->numSync < 0)
 		{
-			fformat(f, "kind = citus\n");
+			continue;
 		}
 
-		if (form->disableSecondary)
+		fformat(f, "\n[formation %s]\n", form->name);
+
+		if (!isDefault)
 		{
-			fformat(f, "secondary = false\n");
+			if (isCitus)
+			{
+				fformat(f, "kind = citus\n");
+			}
+
+			if (form->disableSecondary)
+			{
+				fformat(f, "secondary = false\n");
+			}
+		}
+
+		if (form->numSync >= 0)
+		{
+			fformat(f, "num_sync_standbys = %d\n", form->numSync);
 		}
 	}
 
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 
 	/* world-writable so the container's docker user can update it at runtime */
 	(void) chmod(path, 0666);
@@ -1103,7 +1561,7 @@ compose_gen_write_second_monitor_ini(const TestCluster *cluster, const char *dir
 													"key_file  = /var/lib/postgres/server.key\n");
 	}
 
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	(void) chmod(path, 0666);
 	log_info("Wrote %s.ini to \"%s\"", name, path);
 	return true;
@@ -1368,7 +1826,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 		}
 	}
 
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	(void) chmod(path, 0666);
 	log_info("Wrote %s.ini to \"%s\"", node->name, path);
 	return true;
@@ -1381,7 +1839,7 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 void
 compose_network_name(const char *projectName, char *buf, int buflen)
 {
-	sformat(buf, buflen, "%s_default", projectName);
+	sformat(buf, buflen, "%s_pgafnet", projectName);
 }
 
 

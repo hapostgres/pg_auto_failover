@@ -156,8 +156,18 @@ typedef struct LogNotificationContext
 typedef struct ApplySettingsNotificationContext
 {
 	char *formation;
+	int64_t primaryNodeId;           /* set on first primary/apply_settings */
 	bool applySettingsTransitionInProgress;
 	bool applySettingsTransitionDone;
+
+	/*
+	 * Set when the priority change triggered a full failover rather than an
+	 * apply_settings round.  This happens when the old primary is assigned
+	 * report_lsn (the first step of a priority-induced failover election)
+	 * instead of apply_settings.  Once detected, any node that reaches
+	 * primary/primary satisfies the "new setting is in effect" condition.
+	 */
+	bool failoverInProgress;
 } ApplySettingsNotificationContext;
 
 
@@ -2221,7 +2231,7 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 		return false;
 	}
 
-	/* pgautofailover.current_state returns 11 columns */
+	/* monitor_get_current_state selects 16 columns (0–15) */
 	if (PQnfields(result) != 16)
 	{
 		log_error("Query returned %d columns, expected 16", PQnfields(result));
@@ -4015,6 +4025,8 @@ monitor_notification_process_apply_settings(void *context,
 	if (nodeState->reportedState == PRIMARY_STATE &&
 		nodeState->goalState == APPLY_SETTINGS_STATE)
 	{
+		/* first notification: learn which primary is being transitioned */
+		ctx->primaryNodeId = nodeState->node.nodeId;
 		ctx->applySettingsTransitionInProgress = true;
 
 		log_debug("step 1/4: primary node " NODE_FORMAT " is assigned \"%s\"",
@@ -4023,9 +4035,64 @@ monitor_notification_process_apply_settings(void *context,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->goalState));
+
+		return;
 	}
-	else if (nodeState->reportedState == APPLY_SETTINGS_STATE &&
-			 nodeState->goalState == APPLY_SETTINGS_STATE)
+
+	/*
+	 * A priority change can trigger a full failover instead of an
+	 * apply_settings round when the new candidate has higher priority than
+	 * the current primary.  The monitor assigns the old primary report_lsn
+	 * (not apply_settings) as its first move.  Detect this and switch to
+	 * waiting for any node to reach primary/primary rather than waiting for
+	 * the apply_settings cycle that will never come.
+	 */
+	if (ctx->primaryNodeId != 0 &&
+		ctx->primaryNodeId == nodeState->node.nodeId &&
+		nodeState->goalState == REPORT_LSN_STATE)
+	{
+		log_info("candidate-priority change triggered a failover on node "
+				 NODE_FORMAT "; waiting for new primary instead of apply_settings",
+				 nodeState->node.nodeId,
+				 nodeState->node.name,
+				 nodeState->node.host,
+				 nodeState->node.port);
+		ctx->failoverInProgress = true;
+	}
+
+	/*
+	 * When a failover is in progress (not an apply_settings round), any node
+	 * reaching primary/primary means the new priority setting is in effect.
+	 */
+	if (ctx->failoverInProgress)
+	{
+		if (nodeState->reportedState == PRIMARY_STATE &&
+			nodeState->goalState == PRIMARY_STATE)
+		{
+			log_debug("failover complete: node " NODE_FORMAT " is now primary",
+					  nodeState->node.nodeId,
+					  nodeState->node.name,
+					  nodeState->node.host,
+					  nodeState->node.port);
+			ctx->applySettingsTransitionDone = true;
+		}
+		return;
+	}
+
+	/*
+	 * After step 1 we know which node is being transitioned. All further
+	 * checks filter on that node so that keepalives from other nodes in the
+	 * formation (e.g. secondaries reporting secondary/secondary) cannot
+	 * satisfy the completion condition prematurely.
+	 */
+	if (ctx->primaryNodeId != 0 &&
+		ctx->primaryNodeId != nodeState->node.nodeId)
+	{
+		return;
+	}
+
+	if (nodeState->reportedState == APPLY_SETTINGS_STATE &&
+		nodeState->goalState == APPLY_SETTINGS_STATE)
 	{
 		ctx->applySettingsTransitionInProgress = true;
 
@@ -4069,11 +4136,16 @@ monitor_notification_process_apply_settings(void *context,
 	 * through APPLY_SETTINGS. One such case is when changing candidate
 	 * priority to trigger a failover when all the available nodes have
 	 * candidate priority set to zero.
+	 *
+	 * We only use this shortcut when InProgress is already true (we saw the
+	 * primary/apply_settings step 1 notification), ensuring we don't exit
+	 * early on a keepalive from the same node before the transition starts.
 	 */
-	if ((nodeState->reportedState == PRIMARY_STATE &&
-		 nodeState->reportedState == nodeState->goalState) ||
-		(nodeState->reportedState == WAIT_PRIMARY_STATE &&
-		 nodeState->reportedState == nodeState->goalState))
+	if (ctx->applySettingsTransitionInProgress &&
+		((nodeState->reportedState == PRIMARY_STATE &&
+		  nodeState->reportedState == nodeState->goalState) ||
+		 (nodeState->reportedState == WAIT_PRIMARY_STATE &&
+		  nodeState->reportedState == nodeState->goalState)))
 	{
 		ctx->applySettingsTransitionDone = true;
 	}
@@ -4100,6 +4172,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 	PGconn *connection = monitor->notificationClient.connection;
 	ApplySettingsNotificationContext context = {
 		(char *) formation,
+		0,    /* primaryNodeId: set on first primary/apply_settings notification */
 		false,
 		false
 	};
@@ -4504,7 +4577,8 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 									   int64_t nodeId,
 									   PgInstanceKind nodeKind,
 									   NodeState *targetStates,
-									   int targetStatesLength)
+									   int targetStatesLength,
+									   int timeoutSecs)
 {
 	PGconn *connection = monitor->notificationClient.connection;
 
@@ -4539,7 +4613,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 	{
 		uint64_t now = time(NULL);
 
-		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		if ((now - start) > (uint64_t) timeoutSecs)
 		{
 			log_error("Failed to receive monitor's notifications");
 			break;
@@ -4547,7 +4621,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 
 		if (!monitor_process_notifications(
 				monitor,
-				PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT * 1000,
+				timeoutSecs * 1000,
 				channels,
 				(void *) &context,
 				&monitor_check_node_report_state))

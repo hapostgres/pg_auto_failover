@@ -63,11 +63,16 @@ step test_005_set_candidate_priorities {
 step test_006a_maintenance_and_failover {
     exec node2  pg_autoctl enable maintenance
     wait until node2 state is maintenance  timeout 60s
-    stop postgres node2
+    # Stop postgres directly via pg_ctl, bypassing pg_autoctl's own restart
+    # logic, rather than "stop postgres node2" (pgctl off).  pgctl off
+    # already guarantees no restart on its own, independent of maintenance
+    # mode, so it can't actually verify that maintenance suppresses the
+    # keeper's "ensure" restart — a raw pg_ctl stop can.
+    exec node2  pg_ctl --wait --mode fast stop
     wait until node1 state is primary  timeout 60s
     sql node1 { SHOW synchronous_standby_names; }
     expect { ANY 1 (pgautofailover_standby_3, pgautofailover_standby_2) }
-    exec monitor  pg_autoctl perform failover
+    perform failover
     wait until node3 state is primary
         and node1 state is secondary
         timeout 90s

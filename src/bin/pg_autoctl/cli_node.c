@@ -11,7 +11,6 @@
  * Licensed under the PostgreSQL License.
  */
 
-#include <ctype.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -520,21 +519,30 @@ cli_node_run(int argc, char **argv)
 
 		/*
 		 * PG_AUTOCTL_TEST_DELAY: stagger node registration so that node IDs
-		 * are assigned in name order (node1 → id 1, node2 → id 2, …).
+		 * are assigned in cluster{} declaration order.  The value is the
+		 * node's 0-based ordinal position across the whole spec (set by
+		 * pgaftest's compose_gen.c), not anything derived from the node's
+		 * name, so this works the same way for plain "node1"/"node2"
+		 * naming and for Citus-style "worker1a"/"coordinator1b" naming.
 		 */
-		if (env_exists("PG_AUTOCTL_TEST_DELAY") && spec.name[0] != '\0')
+		char delayValue[12] = { 0 };
+
+		if (env_exists("PG_AUTOCTL_TEST_DELAY") &&
+			get_env_copy("PG_AUTOCTL_TEST_DELAY", delayValue, sizeof(delayValue)))
 		{
-			const char *p = spec.name + strlen(spec.name);
-			while (p > spec.name && isdigit((unsigned char) p[-1]))
+			int n = 0;
+
+			if (!stringToInt(delayValue, &n))
 			{
-				p--;
+				log_warn("PG_AUTOCTL_TEST_DELAY: invalid value \"%s\", ignoring",
+						 delayValue);
 			}
-			if (*p != '\0')
+			else if (n > 0)
 			{
-				int n = atoi(p); /* IGNORE-BANNED */
 				int secs = 2 * n;
+
 				log_info("PG_AUTOCTL_TEST_DELAY: sleeping %ds before "
-						 "registration (node %s, index %d)",
+						 "registration (node %s, ordinal %d)",
 						 secs, spec.name, n);
 				sleep(secs);
 			}

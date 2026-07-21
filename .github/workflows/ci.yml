@@ -267,7 +267,7 @@ jobs:
     name: pgaftest / ${{ matrix.schedule }} (PG${{ matrix.PGVERSION }})
     needs: [build_run_images, build_pgaftest]
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -328,7 +328,7 @@ jobs:
         run: docker load < /tmp/pgaf-pgaftest.tar.gz
 
       - name: Run schedule ${{ matrix.schedule }}
-        timeout-minutes: 35
+        timeout-minutes: 20
         run: |
           mkdir -p /tmp/pgaftest && chmod 777 /tmp/pgaftest
           DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
@@ -351,7 +351,7 @@ jobs:
   # ---------------------------------------------------------------------------
   upgrade:
     name: pgaftest / upgrade
-    needs: build_pgaftest
+    needs: [build_pgaftest]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

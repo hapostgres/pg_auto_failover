@@ -312,7 +312,22 @@ supervisor_loop(Supervisor *supervisor)
 				/* map the dead child pid to the known dead internal service */
 				if (!supervisor_find_service(supervisor, pid, &dead))
 				{
-					log_error("Unknown subprocess died with pid %d", pid);
+					/*
+					 * When running as PID 1 (inside a container), orphaned
+					 * grandchildren are reparented to us by the kernel and
+					 * we will reap them here.  This is expected behaviour;
+					 * log at INFO rather than ERROR so it doesn't look like
+					 * a bug.
+					 */
+					if (getpid() == 1)
+					{
+						log_info("Reaped orphaned subprocess with pid %d "
+								 "(reparented to PID 1)", pid);
+					}
+					else
+					{
+						log_error("Unknown subprocess died with pid %d", pid);
+					}
 					break;
 				}
 

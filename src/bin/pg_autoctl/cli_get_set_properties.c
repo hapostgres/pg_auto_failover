@@ -714,12 +714,40 @@ set_node_candidate_priority(Keeper *keeper, int candidatePriority)
 	/* now wait until the primary actually applied the new setting */
 	if (nodesArray.count > 1)
 	{
-		if (!monitor_wait_until_primary_applied_settings(
-				&(keeper->monitor),
-				config->formation))
+		bool hasPrimary = false;
+
+		for (int i = 0; i < nodesArray.count; i++)
 		{
-			log_error("Failed to wait until the new setting has been applied");
-			return false;
+			NodeState s = nodesArray.nodes[i].reportedState;
+
+			if (s == PRIMARY_STATE || s == WAIT_PRIMARY_STATE)
+			{
+				hasPrimary = true;
+				break;
+			}
+		}
+
+		/*
+		 * When no primary exists (e.g. all nodes are in report_lsn after
+		 * a failover with all candidate-priority values set to zero), the
+		 * apply_settings notification sequence never fires.  In that case
+		 * the candidate-priority change triggers the election FSM directly,
+		 * so there is nothing to wait for here.
+		 */
+		if (hasPrimary)
+		{
+			if (!monitor_wait_until_primary_applied_settings(
+					&(keeper->monitor),
+					config->formation))
+			{
+				log_error("Failed to wait until the new setting has been applied");
+				return false;
+			}
+		}
+		else
+		{
+			log_info("No primary node exists; candidate-priority change will "
+					 "trigger the election FSM directly, not apply_settings");
 		}
 	}
 

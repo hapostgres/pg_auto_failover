@@ -21,7 +21,6 @@ setup {
     wait until primary, secondary in group 0  timeout 90s
     wait until primary, secondary in group 1  timeout 90s
     wait until primary, secondary in group 2  timeout 90s
-    promote coordinator1a, worker1a, worker2a
 }
 
 teardown {

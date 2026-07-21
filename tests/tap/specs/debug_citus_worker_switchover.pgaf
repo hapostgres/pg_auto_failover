@@ -1,0 +1,196 @@
+# Diagnostic spec for the citus_cluster_name.pgaf worker1a switchover hang.
+#
+# Run interactively:
+#   pgaftest run tests/tap/specs/debug_citus_worker_switchover.pgaf
+#
+# Background: citus_cluster_name.pgaf's setup{} does three switchovers in a
+# row (coordinator1a, worker1a, worker2a). In CI (9 job failures on
+# 2026-07-19) and in local reproduction, the coordinator switchover
+# completes but the immediately-following worker1a switchover hangs for
+# the full CI job timeout (20 minutes).
+#
+# Root cause, confirmed by local reproduction with this spec (see commit
+# 318f67a and the investigation that followed it):
+#
+#   1. coordinator_update_node_prepare() (src/bin/pg_autoctl/coordinator.c)
+#      leaked one coordinator connection per failed retry -- every
+#      "return false;" after a successful pgsql_begin() skipped
+#      pgsql_rollback(), and PGSQL_CONNECTION_MULTI_STATEMENT mode keeps
+#      the connection open on failure by design. At roughly one retry per
+#      second this exhausted coordinator1b's max_connections within a few
+#      minutes ("FATAL: sorry, too many clients already"), which is why
+#      the symptom looked like the whole cluster going unhealthy rather
+#      than one stuck switchover. Fixed in 318f67a.
+#
+#   2. Once the leak stopped masking it, the real and still-open bug
+#      showed up on every retry in the promoted node's keeper log:
+#      "Postgres ERROR: there is already another node with the specified
+#      hostname and port". citus_cluster_name.pgaf registers worker1b as
+#      a citus-secondary "readonly" cluster node, which gives it its own
+#      pg_dist_node row at (nodename=worker1b, nodeport=5432). When
+#      worker1a's switchover promotes worker1b to the group's real
+#      primary, master_update_node() tries to repoint the *existing*
+#      primary row (worker1a's) to that same nodename:nodeport -- and
+#      Citus's uniqueness constraint on (nodename, nodeport), which is
+#      NOT scoped by nodecluster, rejects it. The retry loop never
+#      succeeds on its own; nothing about the collision resolves with
+#      time, so this fails forever, not just slowly.
+#
+# This spec is kept as a reusable template for reproducing and re-checking
+# both of the above (per the debug_failover_pg19.pgaf pattern). Note that
+# pgaftest's `sql { }` step only prints output when followed by an
+# `expect { }` block, so the sql polling steps below run silently in
+# `pgaftest run` mode -- for live output while investigating, prefer
+# `pgaftest cluster setup` + `pgaftest step` (to drive the spec
+# interactively) alongside direct `docker compose exec ... psql` calls
+# against the running containers.
+#
+# The worker1a switchover is triggered as a detached background process
+# (nohup ... &) inside the container instead of a blocking `exec`, so that
+# if it hangs, this spec's own polling steps still run and capture a time
+# series of internal state instead of blocking forever on the same command.
+#
+# What each poll step captures:
+#   - the monitor's node table (state/goal/health/report age) for every
+#     node, to see whether the FSM is stuck waiting on the monitor side
+#   - coordinator1b's pg_stat_activity + pg_locks(NOT granted) + pg_prepared_xacts,
+#     to catch a blocked/leaking master_update_node() call or an orphaned
+#     prepared transaction holding a lock across retries
+#   - a direct, timed connectivity probe from worker1a to both the monitor
+#     and coordinator1b (plain `psql ... SELECT 1`), to rule out
+#     Docker/host networking flakiness as a contributing factor
+#   - worker1a's own switchover log (the backgrounded process's stdout),
+#     to see the CLI-side view: did it ever get past "Preparing failover to
+#     ... on coordinator"? Did it error out and silently keep retrying?
+
+cluster {
+    monitor
+    formation {
+        coordinator1a coordinator
+        node coordinator1b {
+            coordinator
+            candidate-priority 0
+            citus-secondary
+            citus-cluster-name readonly
+        }
+        worker1a worker group 1
+        node worker1b {
+            worker group 1
+            candidate-priority 0
+            citus-secondary
+            citus-cluster-name readonly
+        }
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 90s
+    wait until primary, secondary in group 1  timeout 90s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_switchover_coordinator {
+    exec coordinator1a  pg_autoctl perform switchover
+    wait until coordinator1a state is secondary
+        and coordinator1b state is primary
+        timeout 90s
+}
+
+step test_002_baseline_before_worker_switchover {
+    sql monitor {
+        SELECT nodename, reportedstate, goalstate, health,
+               now() - reporttime AS report_age
+        FROM pgautofailover.node ORDER BY nodeid;
+    }
+    sql coordinator1b {
+        SELECT count(*) FROM pg_prepared_xacts;
+    }
+    expect { 0 }
+    sql coordinator1b {
+        SELECT count(*) FROM pg_locks WHERE NOT granted;
+    }
+    expect { 0 }
+}
+
+step test_003_trigger_worker_switchover_in_background {
+    exec worker1a  bash -c "rm -f /tmp/switchover.log; nohup pg_autoctl perform switchover > /tmp/switchover.log 2>&1 & echo backgrounded pid $!"
+}
+
+step test_004_poll_15s {
+    sleep 15s
+    sql monitor {
+        SELECT nodename, reportedstate, goalstate, health,
+               now() - reporttime AS report_age
+        FROM pgautofailover.node ORDER BY nodeid;
+    }
+    exec worker1a  bash -c "echo ---SWITCHOVER-LOG---; cat /tmp/switchover.log; echo ---END---"
+    sql coordinator1b {
+        SELECT pid, state, wait_event, now()-state_change AS dur, left(query,60)
+        FROM pg_stat_activity WHERE pid<>pg_backend_pid() ORDER BY state_change;
+    }
+    sql coordinator1b {
+        SELECT gid, prepared, owner, database FROM pg_prepared_xacts;
+    }
+    sql coordinator1b {
+        SELECT locktype, relation::regclass, mode, granted, pid
+        FROM pg_locks WHERE NOT granted;
+    }
+    exec worker1a  bash -c "time psql 'postgresql://autoctl_node@monitor/pg_auto_failover' -c 'SELECT 1' 2>&1"
+}
+
+step test_005_poll_30s {
+    sleep 15s
+    sql monitor {
+        SELECT nodename, reportedstate, goalstate, health,
+               now() - reporttime AS report_age
+        FROM pgautofailover.node ORDER BY nodeid;
+    }
+    exec worker1a  bash -c "echo ---SWITCHOVER-LOG---; cat /tmp/switchover.log; echo ---END---"
+    sql coordinator1b {
+        SELECT pid, state, wait_event, now()-state_change AS dur, left(query,60)
+        FROM pg_stat_activity WHERE pid<>pg_backend_pid() ORDER BY state_change;
+    }
+    exec worker1a  bash -c "time psql 'postgresql://autoctl_node@monitor/pg_auto_failover' -c 'SELECT 1' 2>&1"
+}
+
+step test_006_poll_60s {
+    sleep 30s
+    sql monitor {
+        SELECT nodename, reportedstate, goalstate, health,
+               now() - reporttime AS report_age
+        FROM pgautofailover.node ORDER BY nodeid;
+    }
+    exec worker1a  bash -c "echo ---SWITCHOVER-LOG---; cat /tmp/switchover.log; echo ---END---"
+    sql coordinator1b {
+        SELECT pid, state, wait_event, now()-state_change AS dur, left(query,60)
+        FROM pg_stat_activity WHERE pid<>pg_backend_pid() ORDER BY state_change;
+    }
+    exec worker1a  bash -c "time psql 'postgresql://autoctl_node@monitor/pg_auto_failover' -c 'SELECT 1' 2>&1"
+}
+
+step test_007_poll_120s {
+    sleep 60s
+    sql monitor {
+        SELECT nodename, reportedstate, goalstate, health,
+               now() - reporttime AS report_age
+        FROM pgautofailover.node ORDER BY nodeid;
+    }
+    exec worker1a  bash -c "echo ---SWITCHOVER-LOG---; cat /tmp/switchover.log; echo ---END---"
+    sql coordinator1b {
+        SELECT pid, state, wait_event, now()-state_change AS dur, left(query,60)
+        FROM pg_stat_activity WHERE pid<>pg_backend_pid() ORDER BY state_change;
+    }
+}
+
+step test_008_final_state {
+    sleep 60s
+    sql monitor {
+        SELECT nodename, reportedstate, goalstate, health,
+               now() - reporttime AS report_age
+        FROM pgautofailover.node ORDER BY nodeid;
+    }
+    exec worker1a  bash -c "echo ---SWITCHOVER-LOG---; cat /tmp/switchover.log; echo ---END---"
+}

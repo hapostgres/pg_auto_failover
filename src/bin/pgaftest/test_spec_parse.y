@@ -160,7 +160,7 @@ static TestNode      *current_node        = NULL;
 %token T_LAUNCH T_CREATE T_DEFERRED T_IMMEDIATE T_FALSE T_TRUE T_INITIALLY T_VOLUME
 %token T_LISTEN T_CITUS_SECONDARY T_CANDIDATE_PRIORITY T_PORT T_PASSWORD T_MONITOR_PASSWORD
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
-%token T_EXTENSION_VERSION T_BIND_SOURCE
+%token T_EXTENSION_VERSION T_BIND_SOURCE T_LEGACY_STARTUP
 
 /* ---- FSM state tokens (used in CLUSTER_BODY and STEP_BODY) ---- */
 %token T_FS_INIT T_FS_SINGLE T_FS_PRIMARY
@@ -179,6 +179,7 @@ static TestNode      *current_node        = NULL;
 %token T_ASSERT
 %token T_SQL T_EXPECT T_ERROR
 %token T_PROMOTE
+%token T_PERFORM T_FAILOVER
 %token T_NETWORK T_DISCONNECT T_CONNECT
 %token T_SLEEP
 %token T_COMPOSE T_DOWN T_START T_STOP T_STOPPED T_KILL T_INJECT
@@ -201,7 +202,7 @@ static TestNode      *current_node        = NULL;
 %type <cmd>   step_cmd
 %type <cmd>   exec_cmd wait_cmd assert_cmd sql_cmd expect_cmd
 %type <cmd>   promote_cmd network_cmd sleep_cmd compose_cmd
-%type <cmd>   postgres_ctl_cmd stays_while_cmd set_monitor_cmd logs_cmd
+%type <cmd>   postgres_ctl_cmd stays_while_cmd set_monitor_cmd logs_cmd perform_cmd
 %type <ival>  opt_timeout
 %type <step>  while_body
 
@@ -252,6 +253,7 @@ cluster_item:
 	| extension_version_line
 	| formation_block
 	| T_BIND_SOURCE { current_spec->cluster.bindSource = true; }
+	| T_LEGACY_STARTUP { current_spec->cluster.legacyStartup = true; }
 	;
 
 /*
@@ -715,6 +717,7 @@ step_cmd:
 	| sql_cmd           { $$ = $1; }
 	| expect_cmd        { $$ = $1; }
 	| promote_cmd       { $$ = $1; }
+	| perform_cmd       { $$ = $1; }
 	| network_cmd       { $$ = $1; }
 	| sleep_cmd         { $$ = $1; }
 	| compose_cmd       { $$ = $1; }
@@ -1168,6 +1171,50 @@ promote_list:
 	;
 
 /* -----------------------------------------------------------------------
+ * perform failover [in formation <name>] [group <n>]
+ *
+ * Calls pgautofailover.perform_failover(formation, group) directly on the
+ * monitor via libpq — no docker socket needed.  The formation defaults to
+ * "default" and the group to 0 when omitted.
+ *
+ * service  = formation name
+ * waitGroups[0] = group_id
+ * ----------------------------------------------------------------------- */
+
+perform_cmd:
+	  T_PERFORM T_FAILOVER
+	{
+		$$ = make_cmd(CMD_FAILOVER);
+		strlcpy($$->service, "default", sizeof($$->service));
+		$$->waitGroups[0] = 0;
+		$$->waitGroupCount = 1;
+	}
+	| T_PERFORM T_FAILOVER T_GROUP T_INTEGER
+	{
+		$$ = make_cmd(CMD_FAILOVER);
+		strlcpy($$->service, "default", sizeof($$->service));
+		$$->waitGroups[0] = $4;
+		$$->waitGroupCount = 1;
+	}
+	| T_PERFORM T_FAILOVER T_IN T_FORMATION T_IDENT
+	{
+		$$ = make_cmd(CMD_FAILOVER);
+		strlcpy($$->service, $5, sizeof($$->service));
+		$$->waitGroups[0] = 0;
+		$$->waitGroupCount = 1;
+		free($5);
+	}
+	| T_PERFORM T_FAILOVER T_IN T_FORMATION T_IDENT T_GROUP T_INTEGER
+	{
+		$$ = make_cmd(CMD_FAILOVER);
+		strlcpy($$->service, $5, sizeof($$->service));
+		$$->waitGroups[0] = $7;
+		$$->waitGroupCount = 1;
+		free($5);
+	}
+	;
+
+/* -----------------------------------------------------------------------
  * network disconnect <node>
  * network connect <node>
  * ----------------------------------------------------------------------- */
@@ -1483,6 +1530,25 @@ parse_test_spec(const char *filename)
 	yyin = f;
 	yyparse();
 	fclose(f);
+
+	/*
+	 * If the file has no explicit sequence{} block, default to running
+	 * steps in declaration order.  Populated here (not just in the CI
+	 * `pgaftest run` path) so every caller that reads spec->sequence --
+	 * `pgaftest step`, `pgaftest show steps`, `pgaftest indent`, and
+	 * `pgaftest run` alike -- sees the same default instead of an empty
+	 * sequence.
+	 */
+	if (spec->sequenceLength == 0)
+	{
+		for (TestStep *s = spec->steps; s; s = s->next)
+		{
+			if (spec->sequenceLength < PGAF_MAX_SEQ)
+			{
+				spec->sequence[spec->sequenceLength++] = s->name;
+			}
+		}
+	}
 
 	return spec;
 }

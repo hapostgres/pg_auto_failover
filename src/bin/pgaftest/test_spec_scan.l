@@ -155,7 +155,7 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"ssl"                { return T_SSL; }
 <CLUSTER_BODY>"auth-method"        { return T_AUTH_METHOD; }
 <CLUSTER_BODY>"auth"               { return T_AUTH; }
-<CLUSTER_BODY>"formation"          { return T_FORMATION; }
+<CLUSTER_BODY,STEP_BODY>"formation"  { return T_FORMATION; }
 <CLUSTER_BODY>"num-sync"           { return T_NUM_SYNC; }
 <CLUSTER_BODY>"node"               { return T_NODE; }
 
@@ -186,6 +186,7 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"replication-password"  { return T_REPLICATION_PASSWORD; }
 <CLUSTER_BODY>"extension-version"   { return T_EXTENSION_VERSION; }
 <CLUSTER_BODY>"bind-source"         { return T_BIND_SOURCE; }
+<CLUSTER_BODY>"legacy-startup"      { return T_LEGACY_STARTUP; }
 
 <CLUSTER_BODY>"="  { return T_EQUALS; }
 
@@ -268,6 +269,8 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"expect"        { return T_EXPECT; }
 <STEP_BODY>"error"         { return T_ERROR; }
 <STEP_BODY>"promote"       { return T_PROMOTE; }
+<STEP_BODY>"perform"       { return T_PERFORM; }
+<STEP_BODY>"failover"      { return T_FAILOVER; }
 <STEP_BODY>"network"       { return T_NETWORK; }
 <STEP_BODY>"disconnect"    { return T_DISCONNECT; }
 <STEP_BODY>"connect"       { return T_CONNECT; }
@@ -291,6 +294,7 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"postgres"      { return T_POSTGRES; }
 <STEP_BODY>"stays"         { return T_STAYS; }
 <STEP_BODY>"while"         { return T_WHILE; }
+<STEP_BODY>"passing"[ \t\r\n]+"through"  { return T_THROUGH; }
 <STEP_BODY>"through"       { return T_THROUGH; }
 <STEP_BODY>"set"           { return T_SET; }
 <STEP_BODY>"inject"        { BEGIN(EXEC_ARGS); return T_INJECT; }

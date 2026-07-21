@@ -83,5 +83,5 @@ step test_003_init_secondary {
 #
 
 step test_004_failover {
-    exec monitor  pg_autoctl perform failover
+    perform failover
 }

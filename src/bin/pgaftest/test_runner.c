@@ -20,6 +20,7 @@
 #include "string_utils.h"
 #include "log.h"
 #include "compose_gen.h"
+#include "parson.h"
 
 /* binary path set by main() for use in tmux pane commands */
 extern char pg_autoctl_program[];
@@ -42,7 +43,201 @@ static bool wait_for_state(TestRunner *r, const char *nodeName,
 						   bool checkAssigned);
 static bool runner_wait_assigned_goal(TestRunner *r, const char *nodeName,
 									  const char *targetState, int timeoutSecs);
+static bool exec_sql_on_service(TestRunner *r, const char *service,
+								const char *sql, char *outbuf, int outlen);
 static void log_output(const char *prefix, const char *out);
+
+/* -----------------------------------------------------------------------
+ * DSL pretty-printer
+ * ----------------------------------------------------------------------- */
+void
+test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
+{
+	char pad[64] = "";
+	for (int i = 0; i < indent && i < (int) sizeof(pad) - 1; i++)
+	{
+		pad[i] = ' ';
+	}
+	pad[indent < (int) sizeof(pad) - 1 ? indent : (int) sizeof(pad) - 1] = '\0';
+
+	switch (cmd->kind)
+	{
+		case CMD_EXEC:
+		{
+			fprintf(f, "%sexec %s %s\n", pad, cmd->service, cmd->args); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_EXEC_FAILS:
+		{
+			fprintf(f, "%sexec-fails %s %s\n", pad, cmd->service, cmd->args); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_WAIT_STATE:
+		{
+			if (cmd->timeoutSeconds > 0)
+			{
+				fprintf(f, "%swait until %s state = %s  timeout %ds\n", /* IGNORE-BANNED */
+						pad, cmd->service, cmd->state, cmd->timeoutSeconds);
+			}
+			else
+			{
+				fprintf(f, "%swait until %s state = %s\n", /* IGNORE-BANNED */
+						pad, cmd->service, cmd->state);
+			}
+			break;
+		}
+
+		case CMD_ASSERT_STATE:
+		{
+			fprintf(f, "%sassert %s state = %s\n", /* IGNORE-BANNED */
+					pad, cmd->service, cmd->state);
+			break;
+		}
+
+		case CMD_ASSERT_ASSIGNED:
+		{
+			fprintf(f, "%sassert %s assigned-state = %s\n", /* IGNORE-BANNED */
+					pad, cmd->service, cmd->state);
+			break;
+		}
+
+		case CMD_SQL:
+		{
+			fprintf(f, "%ssql %s { %s }\n", pad, cmd->service, cmd->args); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_EXPECT:
+		{
+			fprintf(f, "%sexpect { %s }\n", pad, cmd->expected); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_EXPECT_ERROR:
+		{
+			if (cmd->state[0])
+			{
+				fprintf(f, "%sexpect error %s\n", pad, cmd->state); /* IGNORE-BANNED */
+			}
+			else
+			{
+				fprintf(f, "%sexpect error\n", pad); /* IGNORE-BANNED */
+			}
+			break;
+		}
+
+		case CMD_NETWORK_OFF:
+		{
+			fprintf(f, "%snetwork disconnect %s\n", pad, cmd->service); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_NETWORK_ON:
+		{
+			fprintf(f, "%snetwork connect %s\n", pad, cmd->service); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_SLEEP:
+		{
+			fprintf(f, "%ssleep %ds\n", pad, cmd->timeoutSeconds); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_COMPOSE_DOWN:
+		{
+			fprintf(f, "%scompose down\n", pad); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_COMPOSE_START:
+		{
+			fprintf(f, "%scompose start %s\n", pad, cmd->service); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_COMPOSE_STOP:
+		{
+			fprintf(f, "%scompose stop %s\n", pad, cmd->service); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_COMPOSE_KILL:
+		{
+			fprintf(f, "%scompose kill %s\n", pad, cmd->service); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_STOP_POSTGRES:
+		{
+			fprintf(f, "%sstop postgres %s\n", pad, cmd->service); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_START_POSTGRES:
+		{
+			fprintf(f, "%sstart postgres %s\n", pad, cmd->service); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_PROMOTE:
+		{
+			fprintf(f, "%spromote", pad); /* IGNORE-BANNED */
+			for (int i = 0; i < cmd->promoteCount; i++)
+			{
+				fprintf(f, " %s%s", cmd->promoteNodes[i], /* IGNORE-BANNED */
+						(i < cmd->promoteCount - 1) ? "," : "");
+			}
+			fprintf(f, "\n"); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_SET_MONITOR:
+		{
+			fprintf(f, "%sset monitor %s\n", pad, cmd->service); /* IGNORE-BANNED */
+			break;
+		}
+
+		case CMD_LOGS_CHECK:
+		{
+			fprintf(f, "%slogs %s%s %s\n", pad, cmd->service, /* IGNORE-BANNED */
+					cmd->logsNegate ? " not" : "", cmd->args);
+			break;
+		}
+
+		case CMD_FAILOVER:
+		{
+			const char *formation =
+				cmd->service[0] ? cmd->service : "default";
+			int groupId =
+				cmd->waitGroupCount > 0 ? cmd->waitGroups[0] : 0;
+
+			if (strcmp(formation, "default") == 0 && groupId == 0)
+			{
+				fprintf(f, "%sperform failover\n", pad); /* IGNORE-BANNED */
+			}
+			else if (groupId == 0)
+			{
+				fprintf(f, "%sperform failover in formation %s\n", pad, formation); /* IGNORE-BANNED */
+			}
+			else
+			{
+				fprintf(f, "%sperform failover in formation %s group %d\n", /* IGNORE-BANNED */
+						pad, formation, groupId);
+			}
+			break;
+		}
+
+		default:
+		{
+			fprintf(f, "%s# (cmd kind %d)\n", pad, (int) cmd->kind); /* IGNORE-BANNED */
+			break;
+		}
+	}
+}
+
 
 /* -----------------------------------------------------------------------
  * Internal helpers
@@ -171,8 +366,9 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 
 	/*
 	 * Project name: inside the compose network COMPOSE_PROJECT_NAME is
-	 * authoritative (the container is invoked with /spec.pgaf which would
-	 * otherwise yield "spec").  On the host, derive from the spec filename.
+	 * authoritative.  On the host, derive from the work directory basename
+	 * (e.g. /tmp/pgaftest/basic_operation → "basic_operation").  This is
+	 * stable even when the spec is loaded from the in-workdir spec.pgaf copy.
 	 */
 	const char *envProject = getenv("COMPOSE_PROJECT_NAME"); /* IGNORE-BANNED */
 	if (envProject && *envProject)
@@ -181,14 +377,9 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 	}
 	else
 	{
-		const char *base = strrchr(spec->filename, '/');
-		base = base ? base + 1 : spec->filename;
+		const char *base = strrchr(workDir, '/');
+		base = base ? base + 1 : workDir;
 		strlcpy(r->projectName, base, sizeof(r->projectName));
-		char *dot = strrchr(r->projectName, '.');
-		if (dot)
-		{
-			*dot = '\0';
-		}
 	}
 
 	sformat(r->workDir, sizeof(r->workDir), "%s", workDir);
@@ -200,7 +391,7 @@ runner_init(TestRunner *r, TestSpec *spec, const char *workDir)
 	 * and is not accessible from the container.  Docker Compose v2 can exec
 	 * into a running project by project-name alone; omit -f in that case.
 	 */
-	if (getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
 		/*
 		 * Inside the pgaftest container, the compose file lives on the HOST
@@ -384,20 +575,26 @@ runner_compose_generate(TestRunner *r)
 	}
 
 	/*
-	 * In host mode (no PGAFTEST_COMPOSE_SERVICE) we ARE the test runner, so
-	 * we don't want the compose file to include a pgaftest service — it only
-	 * makes sense for the in-compose CI mode where `docker compose up
-	 * --exit-code-from pgaftest` drives the whole run.  Pass NULL to omit it.
+	 * Include the pgaftest service in the compose file when:
+	 *   - running inside a compose network (PGAFTEST_IN_CONTAINER is set),
+	 *     so `docker compose up --exit-code-from pgaftest` drives the CI run;
+	 *   - or when interactive (--tmux), so the user gets a shell inside the
+	 *     pgaftest container with the binary, Docker CLI, and full env ready.
+	 *
+	 * In plain host mode (no --tmux, no PGAFTEST_IN_CONTAINER) the service
+	 * is omitted: the host process itself is the runner.
 	 */
-	const char *specFileForCompose = getenv("PGAFTEST_COMPOSE_SERVICE") /* IGNORE-BANNED */
-									 ? r->specFile : NULL;
+	bool inCompose = getenv("PGAFTEST_IN_CONTAINER") != NULL; /* IGNORE-BANNED */
+	const char *specFileForCompose =
+		(inCompose || r->interactive) ? r->specFile : NULL;
 
 	if (!compose_gen_write(&r->spec->cluster,
 						   r->composeFile,
 						   r->projectName,
 						   r->contextDir,
 						   specFileForCompose,
-						   r->hostSpecDir))
+						   r->hostSpecDir,
+						   r->interactive))
 	{
 		return false;
 	}
@@ -428,6 +625,27 @@ runner_compose_generate(TestRunner *r)
 											&form->nodes[ni],
 											++globalNodeId, r->workDir))
 			{
+				return false;
+			}
+		}
+	}
+
+	/*
+	 * Copy the spec file into the work dir as spec.pgaf so that
+	 * `pgaftest step` can find it without the user needing to supply
+	 * the original path again.
+	 */
+	{
+		char dest[MAXPGPATH];
+		sformat(dest, sizeof(dest), "%s/spec.pgaf", r->workDir);
+
+		if (strcmp(r->specFile, dest) != 0)
+		{
+			char cmd[2 * MAXPGPATH + 16];
+			sformat(cmd, sizeof(cmd), "cp %s %s", r->specFile, dest);
+			if (system(cmd) != 0)
+			{
+				log_error("Failed to copy spec file to \"%s\"", dest);
 				return false;
 			}
 		}
@@ -478,54 +696,6 @@ runner_compose_up(TestRunner *r)
 }
 
 
-/*
- * runner_apply_formation_settings — apply cluster-level formation settings
- * that cannot be expressed in the node ini files.
- *
- * Called once after `docker compose up` and the monitor healthcheck passes.
- * Currently applies:
- *   - number-sync-standbys (when numSync >= 0 in the cluster spec)
- *
- * We use `docker compose exec` so the call goes through the monitor's own
- * pg_autoctl binary and lands on the already-running monitor instance.
- */
-static bool
-runner_apply_formation_settings(TestRunner *r)
-{
-	const TestCluster *c = &r->spec->cluster;
-	bool ok = true;
-
-	for (int fi = 0; fi < c->formationCount; fi++)
-	{
-		const TestFormation *form = &c->formations[fi];
-
-		if (form->numSync < 0)
-		{
-			continue;
-		}
-
-		log_info("Setting formation \"%s\" number-sync-standbys = %d",
-				 form->name, form->numSync);
-
-		int rc = run_cmd(
-			"%s exec -T monitor "
-			"pg_autoctl set formation number-sync-standbys %d "
-			"--pgdata /var/lib/postgres/pgaf --formation %s 2>&1",
-			r->composeBase,
-			form->numSync, form->name);
-
-		if (rc != 0)
-		{
-			log_error("Failed to set number-sync-standbys for formation "
-					  "\"%s\" (exit %d)", form->name, rc);
-			ok = false;
-		}
-	}
-
-	return ok;
-}
-
-
 static bool
 runner_compose_down(TestRunner *r)
 {
@@ -539,7 +709,7 @@ runner_compose_down(TestRunner *r)
 	 * "compose down" sends SIGKILL to our own container, so skip it — the host
 	 * runner already calls "compose down" after we exit.
 	 */
-	if (getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
 		r->composeUp = false;
 		return true;
@@ -553,7 +723,20 @@ runner_compose_down(TestRunner *r)
 		r->notifyConnected = false;
 	}
 
-	run_cmd("%s down --volumes --remove-orphans 2>&1",
+	/*
+	 * Explicitly stop the named interactive-shell container spawned by the
+	 * tmux session.  It runs `docker compose run --rm --name <proj>-sh`
+	 * which Docker removes on clean exit, but not when the tmux session is
+	 * killed or the user detaches without exiting.
+	 */
+	run_cmd("docker rm -f %s-sh 2>/dev/null || true", r->projectName);
+
+	/*
+	 * Include --profile setup so that any remaining setup-profile containers
+	 * (e.g. a still-running _setup_ container) are stopped and removed.
+	 * Without this, plain `compose down` ignores profile-gated services.
+	 */
+	run_cmd("%s --profile setup down --volumes --remove-orphans 2>&1",
 			r->composeBase);
 	r->composeUp = false;
 	return true;
@@ -588,6 +771,35 @@ monitor_get_node_state(TestRunner *r, const char *nodeName,
 					   char *reported, int replen,
 					   char *assigned, int asslen)
 {
+	/*
+	 * Prefer a direct libpq query over the LISTEN connection when it is
+	 * available: the libpq path bypasses the docker socket entirely and is
+	 * faster.  Falls through to docker compose exec when not connected.
+	 */
+	if (r->notifyConnected &&
+		r->notifyConn.connection != NULL &&
+		PQstatus(r->notifyConn.connection) == CONNECTION_OK)
+	{
+		const char *params[1] = { nodeName };
+		PGresult *res = PQexecParams(r->notifyConn.connection,
+									 "SELECT reportedstate, goalstate"
+									 "  FROM pgautofailover.node"
+									 " WHERE nodename = $1"
+									 " LIMIT 1",
+									 1, NULL, params, NULL, NULL, 0);
+
+		if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1)
+		{
+			strlcpy(reported, PQgetvalue(res, 0, 0), replen);
+			strlcpy(assigned, PQgetvalue(res, 0, 1), asslen);
+			PQclear(res);
+			return true;
+		}
+		PQclear(res);
+
+		/* fall through to docker exec */
+	}
+
 	char out[256];
 	int rc = run_cmd_capture(out, sizeof(out),
 							 "%s exec -T %s "
@@ -679,7 +891,7 @@ get_node_pgdata(TestRunner *r, const char *nodeName, char *pgdata, int len)
 			}
 		}
 	}
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	return found;
 }
 
@@ -745,14 +957,27 @@ static void
 log_formation_state(TestRunner *r)
 {
 	char out[4096];
-	int rc = run_cmd_capture(out, sizeof(out),
-							 "%s exec -T monitor "
-							 "pg_autoctl show state 2>/dev/null",
-							 r->composeBase);
+	bool gotState = false;
 
-	if (rc != 0 || out[0] == '\0')
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
-		return;
+		int rc2 = run_cmd_capture(out, sizeof(out),
+								  "pg_autoctl show state 2>/dev/null");
+		if (rc2 == 0 && out[0])
+		{
+			gotState = true;
+		}
+	}
+	if (!gotState)
+	{
+		int rc = run_cmd_capture(out, sizeof(out),
+								 "%s exec -T monitor "
+								 "pg_autoctl show state 2>/dev/null",
+								 r->composeBase);
+		if (rc != 0 || out[0] == '\0')
+		{
+			return;
+		}
 	}
 
 	char *line = out;
@@ -835,7 +1060,7 @@ runner_notify_connect(TestRunner *r)
 
 	char connstr[512];
 
-	if (getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
 		/*
 		 * Inside the compose network: connect directly via the monitor service
@@ -1501,25 +1726,60 @@ runner_promote_one(TestRunner *r, const char *nodeName)
 		}
 	}
 
-	char out[4096] = "";
-	int rc = run_cmd_capture(out, sizeof(out),
-							 "%s exec -T monitor "
-							 "pg_autoctl perform promotion --name %s --formation %s 2>&1",
-							 r->composeBase, nodeName, formation);
-
-	if (rc != 0)
+	/*
+	 * Call perform_promotion by resolving the docker nodehost to the
+	 * pgautofailover-registered nodename in one query.  The schema guarantees
+	 * UNIQUE (nodehost, nodeport), so nodehost is unique across the cluster and
+	 * no LIMIT is required.  With v2.1 the registered name is assigned
+	 * sequentially (e.g. "node_2") and may differ from the container hostname
+	 * (e.g. "node2"), so we cannot use the spec name directly.
+	 */
+	char sql[512];
+	char out[256] = "";
+	sformat(sql, sizeof(sql),
+			"SELECT pgautofailover.perform_promotion('%s', nodename)"
+			"  FROM pgautofailover.node"
+			" WHERE nodehost = '%s'",
+			formation, nodeName);
+	if (!exec_sql_on_service(r, r->activeMonitorService, sql, out, sizeof(out)))
 	{
-		if (out[0])
-		{
-			log_output("   ", out);
-		}
-		log_error("promote: pg_autoctl perform promotion --name %s "
-				  "--formation %s failed (exit %d)", nodeName, formation, rc);
+		log_error("promote: perform_promotion(%s, nodehost=%s) failed: %s",
+				  formation, nodeName, out);
 		return false;
 	}
 
 	/* confirm monitor agrees */
 	return wait_for_state(r, nodeName, "primary", PGAF_TIMEOUT_DEFAULT, false);
+}
+
+
+/*
+ * runner_perform_failover — calls pgautofailover.perform_failover(formation,
+ * group) directly on the monitor.  This is the untargeted path: the monitor
+ * picks the best secondary to promote.
+ */
+static bool
+runner_perform_failover(TestRunner *r, const char *formation, int groupId)
+{
+	log_info("  perform failover: formation=%s group=%d", formation, groupId);
+
+	/*
+	 * Call pgautofailover.perform_failover(formation, group) on the monitor.
+	 * Uses the LISTEN connection when available; falls back to docker compose
+	 * exec psql when LISTEN is not connected.
+	 */
+	char sql[256];
+	char out[256] = "";
+	sformat(sql, sizeof(sql),
+			"SELECT pgautofailover.perform_failover('%s', %d)",
+			formation, groupId);
+	if (!exec_sql_on_service(r, r->activeMonitorService, sql, out, sizeof(out)))
+	{
+		log_error("perform failover: perform_failover(%s, %d) failed: %s",
+				  formation, groupId, out);
+		return false;
+	}
+	return true;
 }
 
 
@@ -1617,10 +1877,36 @@ runner_wait_notify_goal(TestRunner *r,
 
 	time_t deadline = time(NULL) + timeoutSecs;
 
+	time_t lastSqlPoll = 0;
+
 	while (time(NULL) < deadline)
 	{
 		if (r->notifyConnected)
 		{
+			/*
+			 * Periodic SQL poll inside the LISTEN path: catches states that were
+			 * already achieved before LISTEN was established (no new notification
+			 * will fire for a stable state).  The fast-path above handles the
+			 * common case; this catches the race where the state converged
+			 * between the fast-path check and LISTEN setup, or where
+			 * monitor_get_node_state transiently failed on the first call.
+			 */
+			{
+				time_t sqlNow = time(NULL);
+				if (sqlNow - lastSqlPoll >= 5)
+				{
+					char repP[64] = "", asgnP[64] = "";
+					if (monitor_get_node_state(r, nodeName, repP, sizeof(repP),
+											   asgnP, sizeof(asgnP)) &&
+						strcmp(repP, targetState) == 0 &&
+						strcmp(asgnP, targetState) == 0)
+					{
+						return true;
+					}
+					lastSqlPoll = sqlNow;
+				}
+			}
+
 			PQconsumeInput(r->notifyConn.connection);
 
 			PGnotify *notify;
@@ -2135,6 +2421,59 @@ static bool
 exec_sql_on_service(TestRunner *r, const char *service,
 					const char *sql, char *outbuf, int outlen)
 {
+	/*
+	 * For monitor queries, use the existing LISTEN connection when available:
+	 * it's faster than spawning a subprocess and works without docker socket
+	 * access.  For other services, fall through to docker compose exec.
+	 */
+	if (strcmp(service, r->activeMonitorService) == 0 &&
+		r->notifyConnected &&
+		r->notifyConn.connection != NULL &&
+		PQstatus(r->notifyConn.connection) == CONNECTION_OK)
+	{
+		PGresult *res = PQexec(r->notifyConn.connection, sql);
+		ExecStatusType status = PQresultStatus(res);
+
+		if (status == PGRES_TUPLES_OK)
+		{
+			int rows = PQntuples(res);
+			int cols = PQnfields(res);
+			int pos = 0;
+
+			for (int row = 0; row < rows; row++)
+			{
+				for (int col = 0; col < cols; col++)
+				{
+					const char *val = PQgetvalue(res, row, col);
+					int vlen = strlen(val);
+
+					if (pos + vlen + 2 < outlen)
+					{
+						memcpy(outbuf + pos, val, vlen); /* IGNORE-BANNED */
+						pos += vlen;
+						outbuf[pos++] = '\n';
+					}
+				}
+			}
+			outbuf[pos] = '\0';
+			PQclear(res);
+			return true;
+		}
+		else if (status == PGRES_COMMAND_OK)
+		{
+			outbuf[0] = '\0';
+			PQclear(res);
+			return true;
+		}
+		else
+		{
+			const char *errmsg = PQresultErrorMessage(res);
+			strlcpy(outbuf, errmsg ? errmsg : "unknown error", outlen);
+			PQclear(res);
+			return false;
+		}
+	}
+
 	char escaped[8192];
 	escape_sql_for_shell(sql, escaped, sizeof(escaped));
 
@@ -2185,6 +2524,82 @@ runner_network_off(TestRunner *r, const char *nodeName)
 }
 
 
+/*
+ * runner_hosts_lookup reads workDir/pgaf-hosts (the static IP-to-name
+ * mapping written by compose_gen_write_hosts, the same mapping baked into
+ * every service's extra_hosts entries) and returns the IP assigned to
+ * nodeName.  Returns true on success.
+ *
+ * The pgaf-hosts format is one "IP  hostname" line per entry (no leading
+ * spaces, tab or space between fields).  docker network connect --ip uses this
+ * to reconnect a container to its original static IP so that HBA rules (which
+ * reference the static IP resolved from the hostname at write time) keep
+ * matching after a network disconnect/reconnect cycle.
+ */
+static bool
+runner_hosts_lookup(const char *workDir, const char *nodeName,
+					char *ipBuf, int ipBufLen)
+{
+	char hostsPath[1200];
+	sformat(hostsPath, sizeof(hostsPath), "%s/pgaf-hosts", workDir);
+
+	FILE *f = fopen(hostsPath, "r"); /* IGNORE-BANNED */
+	if (f == NULL)
+	{
+		log_warn("Could not open %s: %m", hostsPath);
+		return false;
+	}
+
+	char line[256];
+	bool found = false;
+	while (fgets(line, sizeof(line), f) != NULL)
+	{
+		/* Format: "IP<whitespace>hostname\n" — no leading whitespace */
+		char *p = line;
+
+		/* skip comment lines */
+		if (*p == '#' || *p == '\0' || *p == '\n')
+		{
+			continue;
+		}
+
+		/* collect the IP field (up to first whitespace) */
+		char ip[64];
+		int ipLen = 0;
+		while (*p && *p != ' ' && *p != '\t' && ipLen < (int) sizeof(ip) - 1)
+		{
+			ip[ipLen++] = *p++;
+		}
+		ip[ipLen] = '\0';
+
+		/* skip whitespace between fields */
+		while (*p == ' ' || *p == '\t')
+		{
+			p++;
+		}
+
+		/* collect the hostname field (up to whitespace/newline) */
+		char host[128];
+		int hostLen = 0;
+		while (*p && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' &&
+			   hostLen < (int) sizeof(host) - 1)
+		{
+			host[hostLen++] = *p++;
+		}
+		host[hostLen] = '\0';
+
+		if (ipLen > 0 && hostLen > 0 && strcmp(host, nodeName) == 0)
+		{
+			strlcpy(ipBuf, ip, ipBufLen);
+			found = true;
+			break;
+		}
+	}
+	fclose(f);
+	return found;
+}
+
+
 static bool
 runner_network_on(TestRunner *r, const char *nodeName)
 {
@@ -2192,11 +2607,37 @@ runner_network_on(TestRunner *r, const char *nodeName)
 	compose_network_name(r->projectName, netName, sizeof(netName));
 	compose_container_name(r->projectName, nodeName, container, sizeof(container));
 
-	log_info("  Reconnecting %s to network %s", container, netName);
+	/*
+	 * Reconnect with the static IP from pgaf-hosts so it keeps matching every
+	 * other service's extra_hosts entry for this node, and the HBA rule
+	 * written during setup.  Without --ip, Docker assigns a fresh DHCP
+	 * address; the HBA rule (recorded as the original IP) no longer matches
+	 * the new address and pg_rewind / streaming replication fail with
+	 * "no pg_hba.conf entry".
+	 */
+	char staticIp[64] = "";
+	bool haveIp = runner_hosts_lookup(r->workDir, nodeName,
+									  staticIp, sizeof(staticIp));
+
+	log_info("  Reconnecting %s to network %s%s%s",
+			 container, netName,
+			 haveIp ? " with static IP " : "",
+			 haveIp ? staticIp : "");
+
 	char out[1024] = "";
-	int rc = run_cmd_capture(out, sizeof(out),
+	int rc;
+	if (haveIp)
+	{
+		rc = run_cmd_capture(out, sizeof(out),
+							 "docker network connect --ip %s %s %s 2>&1",
+							 staticIp, netName, container);
+	}
+	else
+	{
+		rc = run_cmd_capture(out, sizeof(out),
 							 "docker network connect %s %s 2>&1",
 							 netName, container);
+	}
 	if (rc != 0 && out[0])
 	{
 		log_output("  ", out);
@@ -2208,71 +2649,6 @@ runner_network_on(TestRunner *r, const char *nodeName)
 /* -----------------------------------------------------------------------
  * Execute a single command
  * ----------------------------------------------------------------------- */
-
-/*
- * runner_expand_macros substitutes %CIDR% in the args string with the
- * Docker network CIDR reported by `pg_autoctl inspect show cidr` on the
- * monitor container.  The result is written to dst (at most dstlen bytes).
- * Returns false if the CIDR could not be determined.
- */
-static bool
-runner_expand_macros(TestRunner *r, const char *args, char *dst, int dstlen,
-					 char *errBuf, int errLen)
-{
-	const char *macro = "%CIDR%";
-	const char *found = strstr(args, macro);
-
-	if (!found)
-	{
-		strlcpy(dst, args, dstlen);
-		return true;
-	}
-
-	/* fetch CIDR from the monitor */
-	char cidr[128] = "";
-	int rc = run_cmd_capture(cidr, sizeof(cidr),
-							 "%s exec -T monitor pg_autoctl inspect show cidr 2>/dev/null",
-							 r->composeBase);
-	if (rc != 0 || cidr[0] == '\0')
-	{
-		sformat(errBuf, errLen,
-				"%%CIDR%%: could not get Docker network CIDR from monitor");
-		return false;
-	}
-
-	/* trim trailing newline */
-	int n = strlen(cidr);
-	while (n > 0 && (cidr[n - 1] == '\n' || cidr[n - 1] == '\r' || cidr[n - 1] == ' '))
-	{
-		cidr[--n] = '\0';
-	}
-
-	log_info("           %%CIDR%% = %s", cidr);
-
-	/* substitute all occurrences */
-	int di = 0;
-	for (const char *p = args; *p && di < dstlen - 1;)
-	{
-		if (strncmp(p, macro, strlen(macro)) == 0)
-		{
-			int cl = strlen(cidr);
-			if (di + cl < dstlen - 1)
-			{
-				memcpy(dst + di, cidr, cl); /* IGNORE-BANNED */
-				di += cl;
-			}
-			p += strlen(macro);
-		}
-		else
-		{
-			dst[di++] = *p++;
-		}
-	}
-	dst[di] = '\0';
-	return true;
-}
-
-
 static bool
 runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 {
@@ -2281,11 +2657,7 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		case CMD_EXEC:
 		{
 			char expandedArgs[4096] = "";
-			if (!runner_expand_macros(r, cmd->args, expandedArgs,
-									  sizeof(expandedArgs), errBuf, errLen))
-			{
-				return false;
-			}
+			strlcpy(expandedArgs, cmd->args, sizeof(expandedArgs));
 
 			char out[4096] = "";
 			int rc = run_cmd_capture(out, sizeof(out),
@@ -2398,11 +2770,7 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		case CMD_RUN:
 		{
 			char expandedArgs[4096] = "";
-			if (!runner_expand_macros(r, cmd->args, expandedArgs,
-									  sizeof(expandedArgs), errBuf, errLen))
-			{
-				return false;
-			}
+			strlcpy(expandedArgs, cmd->args, sizeof(expandedArgs));
 
 			char out[4096] = "";
 			int rc = run_cmd_capture(out, sizeof(out),
@@ -2497,6 +2865,23 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 							cmd->promoteNodes[i]);
 					return false;
 				}
+			}
+			return true;
+		}
+
+		case CMD_FAILOVER:
+		{
+			const char *formation =
+				cmd->service[0] ? cmd->service : "default";
+			int groupId =
+				cmd->waitGroupCount > 0 ? cmd->waitGroups[0] : 0;
+
+			if (!runner_perform_failover(r, formation, groupId))
+			{
+				sformat(errBuf, errLen,
+						"perform failover: formation=%s group=%d failed",
+						formation, groupId);
+				return false;
 			}
 			return true;
 		}
@@ -3430,6 +3815,25 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 			break;
 		}
 
+		case CMD_FAILOVER:
+		{
+			const char *formation =
+				cmd->service[0] ? cmd->service : "default";
+			int groupId =
+				cmd->waitGroupCount > 0 ? cmd->waitGroups[0] : 0;
+
+			if (strcmp(formation, "default") == 0 && groupId == 0)
+			{
+				sformat(buf, len, "perform failover");
+			}
+			else
+			{
+				sformat(buf, len, "perform failover in formation %s group %d",
+						formation, groupId);
+			}
+			break;
+		}
+
 		case CMD_SQL:
 		{
 			inline_text(cmd->args, tmp, sizeof(tmp));
@@ -3672,7 +4076,7 @@ runner_load_state(TestRunner *r)
 /* -----------------------------------------------------------------------
  * Monitor readiness ping loop
  *
- * When running inside the compose network (PGAFTEST_COMPOSE_SERVICE=1)
+ * When running inside the compose network (PGAFTEST_IN_CONTAINER=1)
  * the pgaftest container starts at the same time as the monitor — no
  * depends_on ordering.  We spin here until the monitor postgres accepts
  * connections, then open the LISTEN channel.
@@ -3841,11 +4245,11 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 	 * The compose file does not include a pgaftest service in host mode — the
 	 * current process IS the test runner and has docker access already.
 	 *
-	 * When PGAFTEST_COMPOSE_SERVICE is set the compose file was generated to
+	 * When PGAFTEST_IN_CONTAINER is set the compose file was generated to
 	 * include a pgaftest service and we're running inside that container; skip
 	 * compose up since the stack is already running.
 	 */
-	if (!getenv("PGAFTEST_COMPOSE_SERVICE")) /* IGNORE-BANNED */
+	if (!getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
 	{
 		log_info("Starting compose stack (project: %s)", r.projectName);
 
@@ -3871,28 +4275,13 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 	r.composeUp = true;
 
 	/*
-	 * If no sequence{} block was written, run steps in definition order.
-	 * This lets simple test files omit the redundant sequence block entirely.
+	 * spec->sequence defaults to step declaration order when the file has
+	 * no explicit sequence{} block -- populated in parse_test_spec() so
+	 * every caller sees it, not just this one.
 	 */
-	if (spec->sequenceLength == 0)
-	{
-		for (TestStep *s = spec->steps; s; s = s->next)
-		{
-			if (spec->sequenceLength < PGAF_MAX_SEQ)
-			{
-				spec->sequence[spec->sequenceLength++] = s->name;
-			}
-		}
-	}
-
 	r.tapTotal = spec->sequenceLength;
 
 	if (!runner_wait_for_monitor(&r))
-	{
-		return false;
-	}
-
-	if (!runner_apply_formation_settings(&r))
 	{
 		return false;
 	}
@@ -3985,6 +4374,7 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		runner_exec_step(&r, spec->teardown, err, sizeof(err), 0);
 	}
 
+	tap_plan(&r);
 	runner_print_summary(&r);
 
 	/* compose lifecycle is owned by the host — do not call compose_down here */
@@ -3997,6 +4387,19 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 {
 	TestRunner r;
 	runner_init(&r, spec, workDir);
+	r.interactive = withTmux;
+
+	if (withTmux)
+	{
+		char version[128] = "";
+		int rc = run_cmd_capture(version, sizeof(version), "tmux -V");
+		if (rc != 0 || version[0] == '\0')
+		{
+			log_error("tmux not found — install tmux before using 'pgaftest tmux'");
+			return false;
+		}
+		log_debug("tmux version: %s", version);
+	}
 
 	if (!runner_compose_generate(&r))
 	{
@@ -4008,88 +4411,90 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		return false;
 	}
 
-	if (!runner_wait_for_monitor(&r))
+	/*
+	 * In tmux (interactive) mode, docker compose up -d already waited for the
+	 * full depends_on: service_healthy chain before returning — the monitor is
+	 * provably up and all nodes have started.  Opening a LISTEN connection from
+	 * the host is unnecessary and fragile (Docker Desktop for Mac routes
+	 * published-port traffic via 192.168.65.1, which is outside the monitor's
+	 * pg_hba trust CIDR).  Skip runner_wait_for_monitor; apply formation
+	 * settings directly via docker compose exec, which works on the internal
+	 * network without any host→monitor libpq connection.
+	 *
+	 * In CI mode (pgaftest run) the host process drives every step via
+	 * LISTEN/NOTIFY and does need the connection — runner_wait_for_monitor
+	 * is called from runner_run instead.
+	 */
+	if (!withTmux)
 	{
-		runner_compose_down(&r);
-		return false;
-	}
-
-	if (!runner_apply_formation_settings(&r))
-	{
-		runner_compose_down(&r);
-		return false;
+		if (!runner_wait_for_monitor(&r))
+		{
+			runner_compose_down(&r);
+			return false;
+		}
 	}
 
 	if (withTmux)
 	{
 		/*
-		 * Pick the first non-deferred data node as the interactive shell
-		 * target.  Falls back to the monitor if no data node is found.
+		 * Three-pane tmux session:
+		 *
+		 *   pane 0 (top)     docker compose logs -f
+		 *   pane 1 (middle)  pg_autoctl watch --wait
+		 *   pane 2 (bottom)  setup{} block via `pgaftest _setup_`, which
+		 *                    execlp()s into bash once setup completes
+		 *                    (see cli_run_setup_only) — so this one pane
+		 *                    serves as both the setup runner and the
+		 *                    interactive shell; there is no separate
+		 *                    always-open shell pane to close afterwards.
+		 *
+		 * All container commands use `docker compose run --rm` so there is no
+		 * background pgaftest service container to wait for — the containers
+		 * start on demand and have no timing race with tmux pane creation.
 		 */
-		const char *shellNode = r.activeMonitorService;
-
-		for (int fi = 0; fi < spec->cluster.formationCount; fi++)
-		{
-			const TestFormation *form = &spec->cluster.formations[fi];
-
-			for (int ni = 0; ni < form->nodeCount; ni++)
-			{
-				const TestNode *n = &form->nodes[ni];
-
-				if (!n->launchDeferred)
-				{
-					shellNode = n->name;
-					fi = spec->cluster.formationCount; /* break outer loop */
-					break;
-				}
-			}
-		}
 
 		/*
-		 * Build a three-pane tmux session:
-		 *   top    — docker compose logs -f
-		 *   middle — pg_autoctl watch on the monitor
-		 *   bottom — setup{} block running via `pgaftest _setup_`, then bash
-		 *
-		 * The setup block runs inside the bottom tmux pane so the user
-		 * immediately gets the session and can watch logs while the cluster
-		 * initialises.  When setup completes the pane becomes a bash shell
-		 * in the first data node.
-		 *
-		 * pg_autoctl_program holds argv[0] — the path to the pgaftest binary.
+		 * pane 2: setup block (if any) then interactive shell in the same
+		 * container.  Named so that `pgaftest cluster down` can forcibly
+		 * stop it even if the user did not type `exit`.
 		 */
-		char bottomCmd[2048];
-
+		char bottomPane[1024];
 		if (spec->setup)
 		{
-			sformat(bottomCmd, sizeof(bottomCmd),
-					"%s _setup_ %s --work-dir %s && "
-					"%s exec -it %s bash",
-					pg_autoctl_program, spec->filename, workDir,
-					r.composeBase, shellNode);
+			sformat(bottomPane, sizeof(bottomPane),
+					"%s run --rm --name %s-sh -it setup "
+					"pgaftest _setup_ /root/spec.pgaf --work-dir %s",
+					r.composeBase, r.projectName, workDir);
 		}
 		else
 		{
-			sformat(bottomCmd, sizeof(bottomCmd),
-					"%s exec -it %s bash",
-					r.composeBase, shellNode);
+			sformat(bottomPane, sizeof(bottomPane),
+					"%s run --rm --name %s-sh -it setup bash",
+					r.composeBase, r.projectName);
 		}
 
-		log_info("Starting tmux session \"%s\" (shell target: %s)",
-				 r.projectName, shellNode);
+		/*
+		 * Pre-clean any leftover named containers from a previous tmux
+		 * session that was not torn down with `pgaftest cluster down`.
+		 * These would cause "container name already in use" conflicts.
+		 */
+		run_cmd("docker rm -f %s-sh 2>/dev/null || true", r.projectName);
+
+		log_info("Starting tmux session \"%s\"", r.projectName);
+		log_info("To open another shell: pgaftest cluster sh");
 
 		run_cmd(
 			"tmux new-session -d -s %s "
 			"\"%s logs -f\" \\; "
 			"split-window -v "
-			"\"%s exec %s pg_autoctl watch\" \\; "
+			"\"%s exec %s pg_autoctl watch --wait\" \\; "
 			"split-window -v "
 			"\"%s\" \\; "
 			"select-layout even-vertical",
 			r.projectName,
 			r.composeBase,
 			r.composeBase, r.activeMonitorService,
-			bottomCmd);
+			bottomPane);
 
 		/* Attach the current terminal into the session. */
 		run_cmd("tmux attach-session -t %s", r.projectName);
@@ -4124,6 +4529,144 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 }
 
 
+/*
+ * runner_state_path — return the path to the state file.
+ *
+ * When running inside the pgaftest container (PGAFTEST_IN_CONTAINER is set)
+ * the state file lives in $HOME so it is always writable by the container user
+ * regardless of the bind-mount ownership.  On the host it lives in workDir
+ * alongside the generated compose files.
+ */
+static void
+runner_state_path(const char *workDir, char *buf, int buflen)
+{
+	bool inCompose = getenv("PGAFTEST_IN_CONTAINER") != NULL; /* IGNORE-BANNED */
+
+	if (inCompose)
+	{
+		const char *home = getenv("HOME"); /* IGNORE-BANNED */
+		sformat(buf, buflen, "%s/%s", home ? home : "/var/lib/postgres",
+				PGAFTEST_STATE_FILE);
+	}
+	else
+	{
+		sformat(buf, buflen, "%s/%s", workDir, PGAFTEST_STATE_FILE);
+	}
+}
+
+
+bool
+runner_state_read(const char *workDir, TestRunnerState *st)
+{
+	memset(st, 0, sizeof(*st));
+	st->last_ok = true;     /* optimistic default: no step has failed yet */
+
+	char path[1024];
+	runner_state_path(workDir, path, sizeof(path));
+
+	FILE *f = fopen(path, "r"); /* IGNORE-BANNED */
+	if (!f)
+	{
+		return false;           /* missing is normal before any step runs */
+	}
+
+	char buf[4096] = { 0 };
+	size_t nr = fread(buf, 1, sizeof(buf) - 1, f);
+	fclose(f); /* IGNORE-BANNED */
+
+	if (nr == 0)
+	{
+		return false;
+	}
+
+	JSON_Value *root = json_parse_string(buf);
+	if (!root)
+	{
+		log_warn("Ignoring corrupt state file \"%s\"", path);
+		return false;
+	}
+
+	JSON_Object *obj = json_value_get_object(root);
+	if (!obj)
+	{
+		json_value_free(root);
+		return false;
+	}
+
+	st->current = (int) json_object_get_number(obj, "current");
+	st->last_ok = json_object_get_boolean(obj, "last_ok") != 0;
+
+	const char *last = json_object_get_string(obj, "last_step");
+	if (last)
+	{
+		strlcpy(st->last_step, last, sizeof(st->last_step));
+	}
+
+	json_value_free(root);
+	return true;
+}
+
+
+bool
+runner_state_write(const char *workDir, const TestRunnerState *st)
+{
+	char path[1024];
+	runner_state_path(workDir, path, sizeof(path));
+
+	JSON_Value *root = json_value_init_object();
+	JSON_Object *obj = json_value_get_object(root);
+
+	json_object_set_number(obj, "current", st->current);
+	json_object_set_boolean(obj, "last_ok", st->last_ok ? 1 : 0);
+	json_object_set_string(obj, "last_step", st->last_step);
+
+	char *serial = json_serialize_to_string_pretty(root);
+	json_value_free(root);
+
+	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
+	if (!f)
+	{
+		log_error("Cannot write state file \"%s\": %m", path);
+		free(serial);
+		return false;
+	}
+
+	fputs(serial, f);
+	fputc('\n', f);
+	fclose(f); /* IGNORE-BANNED */
+	free(serial);
+	return true;
+}
+
+
+bool
+runner_step_next(TestSpec *spec, const char *workDir)
+{
+	TestRunnerState st;
+	runner_state_read(workDir, &st);
+
+	if (st.current >= spec->sequenceLength)
+	{
+		log_info("All %d steps completed", spec->sequenceLength);
+		return true;
+	}
+
+	const char *stepName = spec->sequence[st.current];
+	bool ok = runner_step(spec, workDir, stepName);
+
+	if (ok)
+	{
+		st.current++;
+	}
+
+	strlcpy(st.last_step, stepName, sizeof(st.last_step));
+	st.last_ok = ok;
+
+	(void) runner_state_write(workDir, &st);
+	return ok;
+}
+
+
 bool
 runner_step(TestSpec *spec, const char *workDir, const char *stepName)
 {
@@ -4143,7 +4686,30 @@ runner_step(TestSpec *spec, const char *workDir, const char *stepName)
 	}
 
 	char err[512] = "";
-	if (!runner_exec_step(&r, step, err, sizeof(err), 0))
+	bool ok = runner_exec_step(&r, step, err, sizeof(err), 0);
+
+	/* Update interactive state file so `show step` markers stay accurate */
+	TestRunnerState st;
+	runner_state_read(workDir, &st);
+	strlcpy(st.last_step, stepName, sizeof(st.last_step));
+	st.last_ok = ok;
+
+	/*
+	 * When the step matches the one at st.current, advance the cursor so
+	 * `pgaftest step` (no-arg) picks up the next one automatically.
+	 */
+	if (st.current < spec->sequenceLength &&
+		strcmp(spec->sequence[st.current], stepName) == 0)
+	{
+		if (ok)
+		{
+			st.current++;
+		}
+	}
+
+	(void) runner_state_write(workDir, &st);
+
+	if (!ok)
 	{
 		log_error("Step \"%s\" failed: %s", stepName, err);
 		return false;
@@ -4196,7 +4762,216 @@ runner_down(TestSpec *spec, const char *workDir)
 		runner_exec_step(&r, spec->teardown, err, sizeof(err), 0);
 	}
 
-	return runner_compose_down(&r);
+	bool ok = runner_compose_down(&r);
+
+	/* Kill the tmux session started by `pgaftest tmux`, if it exists. */
+	run_cmd("tmux kill-session -t %s 2>/dev/null || true", r.projectName);
+
+	return ok;
+}
+
+
+/*
+ * runner_wait — `pgaftest wait until <node> state = <state> [timeout <N>s]`
+ *
+ * Opens a LISTEN connection to the monitor and drives the same notify-goal
+ * path used by the spec runner.  Intended for interactive use from inside the
+ * pgaftest service container.
+ */
+bool
+runner_wait(TestSpec *spec, const char *workDir,
+			const char *nodeName, const char *targetState, int timeoutSecs)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (!runner_load_state(&r))
+	{
+		return false;
+	}
+
+	runner_notify_connect(&r);
+
+	if (!runner_wait_notify_goal(&r, nodeName, targetState,
+								 NULL, NULL, 0, timeoutSecs))
+	{
+		log_error("Timeout: %s never reached state %s", nodeName, targetState);
+		pgsql_finish(&r.notifyConn);
+		return false;
+	}
+
+	log_info("%s is now in state %s", nodeName, targetState);
+	pgsql_finish(&r.notifyConn);
+	return true;
+}
+
+
+/*
+ * runner_sql — `pgaftest sql <node> "<query>"`
+ *
+ * Runs a SQL statement on the named service and prints the result to stdout.
+ */
+bool
+runner_sql(TestSpec *spec, const char *workDir,
+		   const char *service, const char *query)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (!runner_load_state(&r))
+	{
+		return false;
+	}
+
+	char output[4096] = "";
+	if (!exec_sql_on_service(&r, service, query, output, sizeof(output)))
+	{
+		fformat(stderr, "%s\n", output);
+		return false;
+	}
+
+	fformat(stdout, "%s\n", output);
+	return true;
+}
+
+
+/*
+ * runner_network — `pgaftest network connect|disconnect <node>`
+ *
+ * Wraps docker network connect/disconnect using the project name derived from
+ * the work dir (or COMPOSE_PROJECT_NAME when running inside the container).
+ */
+bool
+runner_network(TestSpec *spec, const char *workDir,
+			   const char *nodeName, bool connect)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (connect)
+	{
+		return runner_network_on(&r, nodeName);
+	}
+	else
+	{
+		return runner_network_off(&r, nodeName);
+	}
+}
+
+
+/*
+ * runner_assert — `pgaftest assert <node> state = <state>`
+ *
+ * Queries the monitor once; exits 0 if both reportedstate and assignedstate
+ * equal the target, 1 otherwise.
+ */
+bool
+runner_assert(TestSpec *spec, const char *workDir,
+			  const char *nodeName, const char *targetState)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (!runner_load_state(&r))
+	{
+		return false;
+	}
+
+	char rep[64] = "", asgn[64] = "";
+	if (!monitor_get_node_state(&r, nodeName,
+								rep, sizeof(rep),
+								asgn, sizeof(asgn)))
+	{
+		log_error("Could not query state for node \"%s\"", nodeName);
+		return false;
+	}
+
+	if (strcmp(rep, targetState) == 0 && strcmp(asgn, targetState) == 0)
+	{
+		log_info("%s: state = %s", nodeName, targetState);
+		return true;
+	}
+
+	log_error("%s: expected state %s, got reported=%s assigned=%s",
+			  nodeName, targetState, rep, asgn);
+	return false;
+}
+
+
+bool
+runner_show_state(TestSpec *spec, const char *workDir)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	if (!runner_load_state(&r))
+	{
+		return false;
+	}
+
+	TestRunnerState st;
+	runner_state_read(workDir, &st);
+
+	if (spec->sequenceLength > 0)
+	{
+		if (st.current >= spec->sequenceLength)
+		{
+			fformat(stdout, "All %d steps complete\n\n",
+					spec->sequenceLength);
+		}
+		else
+		{
+			const char *nextName = spec->sequence[st.current];
+			if (!st.last_ok && st.last_step[0])
+			{
+				fformat(stdout,
+						"Step %d/%d: %s  (last run FAILED — will retry)\n\n",
+						st.current + 1, spec->sequenceLength, nextName);
+			}
+			else
+			{
+				fformat(stdout,
+						"Step %d/%d: %s\n\n",
+						st.current + 1, spec->sequenceLength, nextName);
+			}
+		}
+	}
+
+	/*
+	 * When running inside the compose network, pg_autoctl is in PATH and
+	 * PG_AUTOCTL_MONITOR is set in the environment — run it directly without
+	 * going through the docker socket.  Outside the container, fall through
+	 * to the docker compose exec path.
+	 */
+	char out[8192];
+	bool gotOutput = false;
+
+	if (getenv("PGAFTEST_IN_CONTAINER")) /* IGNORE-BANNED */
+	{
+		int rc2 = run_cmd_capture(out, sizeof(out),
+								  "pg_autoctl show state 2>/dev/null");
+		if (rc2 == 0 && out[0])
+		{
+			gotOutput = true;
+		}
+	}
+
+	if (!gotOutput)
+	{
+		int rc = run_cmd_capture(out, sizeof(out),
+								 "%s exec -T monitor "
+								 "pg_autoctl show state 2>/dev/null",
+								 r.composeBase);
+		if (rc != 0 || out[0] == '\0')
+		{
+			log_error("Could not reach monitor — is the cluster running?");
+			return false;
+		}
+	}
+
+	fputs(out, stdout);
+	fputc('\n', stdout);
+	return true;
 }
 
 
@@ -4209,7 +4984,7 @@ runner_show(TestSpec *spec)
 	/* write to stdout instead of a file */
 	/* No specFile for show — omit the pgaftest service */
 	bool ok = compose_gen_write(&spec->cluster, "/dev/stdout",
-								r.projectName, r.contextDir, NULL, r.hostSpecDir);
+								r.projectName, r.contextDir, NULL, r.hostSpecDir, false);
 	return ok;
 }
 
@@ -4275,7 +5050,7 @@ runner_prepare(TestSpec *spec, const char *outDir)
 	/* Write docker-compose.yml (with pgaftest service) */
 	if (!compose_gen_write(&spec->cluster, r.composeFile,
 						   r.projectName, r.contextDir, r.specFile,
-						   r.hostSpecDir))
+						   r.hostSpecDir, false))
 	{
 		return false;
 	}
@@ -4330,7 +5105,7 @@ runner_prepare(TestSpec *spec, const char *outDir)
 			"\tdocker compose -p %s -f docker-compose.yml"
 			" down --volumes --remove-orphans\n",
 			r.projectName, r.projectName);
-	fclose(mf);
+	fclose(mf); /* IGNORE-BANNED */
 	log_info("Wrote Makefile to \"%s\"", makefilePath);
 
 	/* Print the docker compose command to stdout */

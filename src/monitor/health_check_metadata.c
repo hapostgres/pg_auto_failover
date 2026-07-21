@@ -15,6 +15,7 @@
 
 #include "health_check.h"
 #include "metadata.h"
+#include "node_metadata.h"
 #include "notifications.h"
 
 #include "access/htup.h"
@@ -195,6 +196,28 @@ SetNodeHealthState(int64 nodeId,
 
 	if (HaMonitorHasBeenLoaded())
 	{
+		/*
+		 * Take the same lock every other node-mutating entry point takes
+		 * before reading or writing node state, via the shared
+		 * LockNodeGroupAndFetch() helper. Without this, SetNodeHealthState()
+		 * writes health/healthchecktime completely unsynchronized with the
+		 * FSM's decision-making: a health-check write can land in the
+		 * middle of a concurrent node_active() call, between its
+		 * GroupStateContext snapshot (ctx->groupNodeList, fetched once by
+		 * BuildGroupStateContext) and a later, separately fetched read of
+		 * the same node (e.g. GetPrimaryOrDemotedNodeInGroup() inside
+		 * ProceedGroupStateFromContext()) -- so BuildCandidateList() ends
+		 * up evaluating a stale copy of a node whose health just changed,
+		 * while other parts of the same FSM call already see the fresh
+		 * value. Serializing with the same lock closes that window.
+		 *
+		 * The returned node (if any) is discarded: this function only
+		 * needed the lock, not a fresh read, since it writes health/
+		 * healthchecktime unconditionally rather than making a decision
+		 * based on other fields.
+		 */
+		(void) LockNodeGroupAndFetch(nodeId);
+
 		initStringInfo(&query);
 		appendStringInfo(&query,
 						 "UPDATE " AUTO_FAILOVER_NODE_TABLE

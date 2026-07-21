@@ -1058,6 +1058,8 @@ bool
 fsm_prepare_for_secondary(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	PGSQL *pgsql = &(postgres->sqlClient);
 
 	/*
 	 * Verify that Postgres is accepting connections before proceeding.
@@ -1072,6 +1074,36 @@ fsm_prepare_for_secondary(Keeper *keeper)
 	{
 		return false;
 	}
+
+	/*
+	 * The PID-file PM_STATUS flag transitions to "ready" or "standby" a few
+	 * milliseconds before the TCP listener is actually bound.
+	 * ensure_postgres_service_is_running() returned as soon as the PID file
+	 * was updated, so there is still a narrow window where connections are
+	 * refused.
+	 *
+	 * Close that window by attempting an actual connection to local Postgres.
+	 * We use the init retry policy (up to 15 minutes, starting at 5 ms with
+	 * exponential backoff capped at 2 s) so that the attempt mirrors what the
+	 * keeper does on first startup.  pgsql_get_postgres_metadata calls
+	 * pgsql_open_connection, which calls pgsql_retry_open_connection (with
+	 * PQping polling) when the initial PQconnectdb fails, so no new mechanism
+	 * is needed here.
+	 */
+	pgsql_set_init_retry_policy(&pgsql->retryPolicy);
+
+	if (!pgsql_get_postgres_metadata(pgsql,
+									 &pgSetup->is_in_recovery,
+									 postgres->pgsrSyncState,
+									 postgres->currentLSN,
+									 &pgSetup->control))
+	{
+		log_error("Failed to connect to local Postgres after startup; "
+				  "will not report SECONDARY yet");
+		return false;
+	}
+
+	postgres->pgIsRunning = true;
 
 	/* check that we're on the same timeline as the new primary */
 	if (!standby_check_timeline_with_upstream(postgres))
@@ -1430,6 +1462,7 @@ fsm_follow_new_primary(Keeper *keeper)
 {
 	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	ReplicationSource *replicationSource = &(postgres->replicationSource);
 
 	/* get the primary node to follow */
@@ -1481,6 +1514,30 @@ fsm_follow_new_primary(Keeper *keeper)
 	 */
 	if (keeper->state.assigned_role == SECONDARY_STATE)
 	{
+		PGSQL *pgsql = &(postgres->sqlClient);
+
+		/*
+		 * standby_follow_new_primary restarts Postgres; the same PM_STATUS
+		 * vs. TCP-listener race that exists in fsm_prepare_for_secondary
+		 * applies here.  Confirm the TCP listener is bound before reporting
+		 * SECONDARY by attempting an actual connection with the init retry
+		 * policy, which retries with PQping for up to 15 minutes.
+		 */
+		pgsql_set_init_retry_policy(&pgsql->retryPolicy);
+
+		if (!pgsql_get_postgres_metadata(pgsql,
+										 &pgSetup->is_in_recovery,
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN,
+										 &pgSetup->control))
+		{
+			log_error("Failed to connect to local Postgres after restart; "
+					  "will not report SECONDARY yet");
+			return false;
+		}
+
+		postgres->pgIsRunning = true;
+
 		return standby_check_timeline_with_upstream(postgres);
 	}
 

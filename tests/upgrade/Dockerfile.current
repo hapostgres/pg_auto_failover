@@ -1,37 +1,47 @@
-# pgaf:current — v2.1 with both binaries baked in and a static shim.
+# pgaf:current — previous release with both binaries baked in, linked via pgaf/current.
 #
 # Layout:
-#   /usr/local/bin/pg_autoctl              — static bash shim (never replaced)
-#   /usr/local/bin/pgaf/2.1/pg_autoctl     — v2.1 binary
-#   /usr/local/bin/pgaf/2.2/pg_autoctl     — v2.2 binary (from pgaf:next)
-#   /usr/local/bin/pgaf/current            — symlink → pgaf/2.1  (initially)
+#   /usr/local/bin/pg_autoctl              — symlink → pgaf/current/pg_autoctl
+#   /usr/local/bin/pgaf/prev/pg_autoctl    — previous release binary
+#   /usr/local/bin/pgaf/next/pg_autoctl    — next binary (from pgaf:next)
+#   /usr/local/bin/pgaf/current            — symlink → pgaf/prev  (initially)
 #
-# "Injecting" an upgrade = ln -sf /usr/local/bin/pgaf/2.2 /usr/local/bin/pgaf/current
+# "Injecting" an upgrade = ln -sfn /usr/local/bin/pgaf/next /usr/local/bin/pgaf/current
 # Run that inside each container via `docker compose exec`; no docker cp needed.
 #
-# Why this works for the self-restart mechanism:
+# How the self-restart mechanism works:
 #
-#   The shim always lives at /usr/local/bin/pg_autoctl.  It delegates every
-#   command to pgaf/current/pg_autoctl via `exec -a /usr/local/bin/pg_autoctl`
-#   so the real binary sees argv[0] = /usr/local/bin/pg_autoctl.  That path is
-#   what pg_autoctl saves as pg_autoctl_argv0, and later uses for the on-disk
-#   version check:
+#   /usr/local/bin/pg_autoctl is a symlink that resolves through pgaf/current.
+#   PG_AUTOCTL_DEBUG_BIN_PATH is set to that path so the previous supervisor
+#   stores /usr/local/bin/pg_autoctl as pg_autoctl_program.  When it spawns a
+#   child it calls execv("/usr/local/bin/pg_autoctl", args) with args[0] also
+#   set to that path, so the child's argv[0] is /usr/local/bin/pg_autoctl
+#   regardless of which version the symlink chain resolves to.
+#
+#   The keeper uses argv[0] for the on-disk version check:
 #
 #       run_program(pg_autoctl_argv0, "version", "--json")
 #
-#   After the symlink flip, that invocation runs the shim → delegates to v2.2 →
-#   returns required_extension_version "2.2".  Combined with the monitor
-#   extension just upgraded to "2.2", the keeper detects a match and calls
-#   exit(EXIT_CODE_MONITOR) so the supervisor re-execs from the new binary.
+#   After the symlink flip, that call resolves through pgaf/current → pgaf/next
+#   and returns the new required_extension_version.  With the monitor extension
+#   at that version the keeper finds a match and calls exit(EXIT_CODE_MONITOR),
+#   causing the previous supervisor to re-exec the child from the next binary.
 #
-#   PG_AUTOCTL_DEBUG_BIN_PATH=/usr/local/bin/pg_autoctl is set in ENV so the
-#   v2.1 supervisor's pg_autoctl_program also resolves to the shim path, and
-#   child processes spawned after the symlink flip pick up v2.2.
+# Command compatibility:
 #
-# Startup command translation:
+#   The previous supervisor spawns services as "pg_autoctl do service
+#   {postgres,listener,node-active}".  The next binary retains "do" as a
+#   hidden root command that routes to the same service callbacks, so no
+#   translation layer is needed.
 #
-#   pgaftest generates:  pg_autoctl node run /etc/pgaf/node.ini  (v2.2 syntax)
-#   v2.1 does not know "node run"; the shim translates it per node kind.
+#   pgaftest generates "pg_autoctl create <kind> --run" for specs that declare
+#   "legacy-startup" (as upgrade.pgaf does), matching what production operators
+#   ran.  No shim or translation layer is needed.
+#
+#   The upgrade procedure restarts the monitor container (compose stop + start)
+#   rather than just restarting postgres in-process.  This avoids a race where
+#   the previous listener reconnects to the freshly-restarted postgres at the
+#   same moment data-node keepers do.
 
 ARG BASE_IMAGE=pgaf:current-base
 ARG NEXT_IMAGE=pgaf:next
@@ -41,41 +51,30 @@ FROM ${BASE_IMAGE}
 
 USER root
 
-# bash is required for "exec -a name" (sets argv[0] for the real binary).
-RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends bash \
-    && rm -rf /var/lib/apt/lists/*
-
-# Place both binaries side by side; current → 2.1 initially.
-RUN mkdir -p /usr/local/bin/pgaf/2.1 /usr/local/bin/pgaf/2.2
-RUN mv /usr/local/bin/pg_autoctl /usr/local/bin/pgaf/2.1/pg_autoctl
-COPY --from=next /usr/local/bin/pg_autoctl /usr/local/bin/pgaf/2.2/pg_autoctl
-RUN ln -s /usr/local/bin/pgaf/2.1 /usr/local/bin/pgaf/current \
+# Place both binaries side by side; current → prev initially.
+RUN mkdir -p /usr/local/bin/pgaf/prev /usr/local/bin/pgaf/next
+RUN mv /usr/local/bin/pg_autoctl /usr/local/bin/pgaf/prev/pg_autoctl
+COPY --from=next /usr/local/bin/pg_autoctl /usr/local/bin/pgaf/next/pg_autoctl
+RUN ln -s /usr/local/bin/pgaf/prev /usr/local/bin/pgaf/current \
+    && ln -s /usr/local/bin/pgaf/current/pg_autoctl /usr/local/bin/pg_autoctl \
     && chown -R docker /usr/local/bin/pgaf
 
-# Pre-stage v2.2 extension files so the upgrade step is a local install, not
-# a docker cp from an external image.  Stored alongside the v2.2 binary.
+# Pre-stage next extension files so the upgrade step is a local install, not
+# a docker cp from an external image.  Stored alongside the next binary.
 ARG PGVERSION=16
-COPY --from=next /usr/share/postgresql/${PGVERSION}/extension/pgautofailover.control \
-                 /usr/local/bin/pgaf/2.2/pgautofailover.control
-COPY --from=next /usr/share/postgresql/${PGVERSION}/extension/pgautofailover--2.1--2.2.sql \
-                 /usr/local/bin/pgaf/2.2/pgautofailover--2.1--2.2.sql
-COPY --from=next /usr/share/postgresql/${PGVERSION}/extension/pgautofailover--2.2.sql \
-                 /usr/local/bin/pgaf/2.2/pgautofailover--2.2.sql
+COPY --from=next /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* \
+                 /usr/local/bin/pgaf/next/
 COPY --from=next /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so \
-                 /usr/local/bin/pgaf/2.2/pgautofailover.so
+                 /usr/local/bin/pgaf/next/pgautofailover.so
 
 # Install script — uses pg_config at runtime so PGVERSION need not be baked in.
-# Usage (inside the container, as root):  /usr/local/bin/pgaf/2.2/install-extension
-COPY install-extension.sh /usr/local/bin/pgaf/2.2/install-extension
-RUN chmod 755 /usr/local/bin/pgaf/2.2/install-extension
+# Usage (inside the container, as root):  /usr/local/bin/pgaf/next/install-extension
+COPY install-extension.sh /usr/local/bin/pgaf/next/install-extension
+RUN chmod 755 /usr/local/bin/pgaf/next/install-extension
 
-# Static shim — stays at the canonical path forever.
-COPY pg_autoctl_shim.sh /usr/local/bin/pg_autoctl
-RUN chmod 755 /usr/local/bin/pg_autoctl
-
-# Tell the v2.1 supervisor to use the shim path for spawning child processes,
-# so that after the symlink flip the next child spawn picks up v2.2.
+# Tell the previous supervisor to use the symlink path for spawning child
+# processes, so that after the symlink flip the next child spawn picks up the
+# next binary.
 ENV PG_AUTOCTL_DEBUG_BIN_PATH=/usr/local/bin/pg_autoctl
 
 USER docker

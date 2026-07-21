@@ -243,8 +243,15 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 		return ProceedGroupStateForPrimaryNode(ctx, activeNode);
 	}
 
+	/*
+	 * Derive primaryNode from ctx->groupNodeList (already fetched under the
+	 * lock NodeActive() holds for the whole call) instead of running a
+	 * second, independent AutoFailoverNodeGroup() query -- see
+	 * GetPrimaryOrDemotedNodeInGroupFromList()'s comment for why this
+	 * matters even though every writer now shares the same lock.
+	 */
 	AutoFailoverNode *primaryNode =
-		GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
+		GetPrimaryOrDemotedNodeInGroupFromList(ctx->groupNodeList);
 
 	/*
 	 * We want to have a primaryNode around for most operations, but also need
