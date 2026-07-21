@@ -160,9 +160,11 @@ extern List * AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailover
 extern List * AutoFailoverCandidateNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 													ReplicationState currentState);
 extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
+extern AutoFailoverNode * GetPrimaryNodeInGroupFromList(List *groupNodeList);
 AutoFailoverNode * GetNodeToFailoverFromInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * GetPrimaryOrDemotedNodeInGroup(char *formationId,
 														 int32 groupId);
+extern AutoFailoverNode * GetPrimaryOrDemotedNodeInGroupFromList(List *groupNodeList);
 extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
 extern List * GroupListCandidates(List *groupNodeList);
 extern List * ListMostAdvancedStandbyNodes(List *groupNodeList);
@@ -178,6 +180,9 @@ extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
 
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeHost, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeById(int64 nodeId);
+extern AutoFailoverNode * LockNodeGroupAndFetch(int64 nodeId);
+extern AutoFailoverNode * LockNodeGroupAndFetchByName(char *formationId,
+													  char *nodeName);
 extern void SetNodeHealthAndTimestampsForTesting(int64 nodeId,
 												 bool healthIsNull, int health,
 												 bool reportTimeAgoIsNull,

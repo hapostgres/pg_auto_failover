@@ -422,16 +422,15 @@ AutoFailoverCandidateNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 
 
 /*
- * GetPrimaryNodeInGroup returns the writable node in the specified group, if
- * any.
+ * GetPrimaryNodeInGroupFromList is the pure, no-SPI variant of
+ * GetPrimaryNodeInGroup -- see GetPrimaryOrDemotedNodeInGroupFromList's
+ * comment for when to prefer this over a fresh query.
  */
 AutoFailoverNode *
-GetPrimaryNodeInGroup(char *formationId, int32 groupId)
+GetPrimaryNodeInGroupFromList(List *groupNodeList)
 {
 	AutoFailoverNode *writableNode = NULL;
 	ListCell *nodeCell = NULL;
-
-	List *groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
 
 	foreach(nodeCell, groupNodeList)
 	{
@@ -445,6 +444,19 @@ GetPrimaryNodeInGroup(char *formationId, int32 groupId)
 	}
 
 	return writableNode;
+}
+
+
+/*
+ * GetPrimaryNodeInGroup returns the writable node in the specified group, if
+ * any.
+ */
+AutoFailoverNode *
+GetPrimaryNodeInGroup(char *formationId, int32 groupId)
+{
+	List *groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+
+	return GetPrimaryNodeInGroupFromList(groupNodeList);
 }
 
 
@@ -477,8 +489,22 @@ GetNodeToFailoverFromInGroup(char *formationId, int32 groupId)
 
 
 /*
- * GetPrimaryOrDemotedNodeInGroup returns the node in the group with a role
- * that only a primary can have.
+ * GetPrimaryOrDemotedNodeInGroupFromList is the pure, no-SPI variant of
+ * GetPrimaryOrDemotedNodeInGroup: it scans an already-fetched node list
+ * instead of running its own independent query.
+ *
+ * Use this whenever a group's node list has already been fetched under the
+ * lock the caller is holding (e.g. ctx->groupNodeList inside
+ * ProceedGroupStateFromContext(), or a groupNodesList already fetched
+ * earlier in the same locked entry point) -- a second, separate
+ * AutoFailoverNodeGroup() query for the primary alone is not just redundant
+ * work, it is exactly the kind of "two reads of the same locked data that
+ * could in principle diverge" shape that made Bug 6 possible when one of
+ * the writers involved didn't yet share the same lock. With every writer
+ * now holding the same lock for the whole decision, a second read can't
+ * actually see anything different -- but there's no reason to keep taking
+ * it, or to leave the door open for a future writer to reintroduce the
+ * same risk by relying on that redundant read instead of the shared one.
  *
  * When handling multiple standbys, it could be that the primary node gets
  * demoted, triggering a failover with the other standby node(s). Then the
@@ -486,12 +512,10 @@ GetNodeToFailoverFromInGroup(char *formationId, int32 groupId)
  * standby that re-joins the group, not as a primary being demoted.
  */
 AutoFailoverNode *
-GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
+GetPrimaryOrDemotedNodeInGroupFromList(List *groupNodeList)
 {
 	AutoFailoverNode *primaryNode = NULL;
 	ListCell *nodeCell = NULL;
-
-	List *groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
 
 	/* first find a node that is writable */
 	foreach(nodeCell, groupNodeList)
@@ -529,6 +553,21 @@ GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
 	}
 
 	return primaryNode;
+}
+
+
+/*
+ * GetPrimaryOrDemotedNodeInGroup is the SPI-fetching wrapper of
+ * GetPrimaryOrDemotedNodeInGroupFromList, for callers that don't already
+ * have the group's node list in hand under a lock (e.g. get_primary(), a
+ * standalone read-only query with no locking of its own).
+ */
+AutoFailoverNode *
+GetPrimaryOrDemotedNodeInGroup(char *formationId, int32 groupId)
+{
+	List *groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
+
+	return GetPrimaryOrDemotedNodeInGroupFromList(groupNodeList);
 }
 
 
@@ -1043,6 +1082,82 @@ GetAutoFailoverNodeById(int64 nodeId)
 
 
 /*
+ * LockNodeGroupAndFetch is the single, canonical way any SQL-callable entry
+ * point should both lock and read a node it is about to make a decision
+ * about or write to.
+ *
+ * It resolves nodeId to its (formationId, groupId), acquires
+ * LockFormation(ShareLock) + LockNodeGroup(ExclusiveLock) for that group,
+ * and returns a freshly re-read AutoFailoverNode -- as of the moment the
+ * lock was acquired, not as of the pre-lock lookup used only to determine
+ * which lock to take.
+ *
+ * This exists because six SQL-callable entry points (perform_promotion,
+ * start_maintenance, stop_maintenance, set_node_candidate_priority,
+ * set_node_replication_quorum, update_node_metadata) were each found, by
+ * audit, to read a node before locking and then use mutable fields of that
+ * same pre-lock struct for decisions after locking -- the identical defect
+ * shape already fixed twice this session in RemoveNode() and NodeActive()
+ * (both of which read-before-lock too, but re-fetch after acquiring the
+ * lock; this helper generalizes that fix into one shared, hard-to-forget
+ * code path instead of six hand-rolled copies of it).
+ *
+ * Returns NULL if the node does not exist (including if it was concurrently
+ * removed between the pre-lock lookup and the lock being acquired -- the
+ * caller sees this exactly as if the node had never existed, rather than
+ * silently proceeding on stale data).
+ */
+AutoFailoverNode *
+LockNodeGroupAndFetch(int64 nodeId)
+{
+	AutoFailoverNode *node = GetAutoFailoverNodeById(nodeId);
+
+	if (node == NULL)
+	{
+		return NULL;
+	}
+
+	LockFormation(node->formationId, ShareLock);
+	LockNodeGroup(node->formationId, node->groupId, ExclusiveLock);
+
+	/*
+	 * Re-fetch by nodeId (the stable primary key) now that we hold the
+	 * lock: formationId/groupId cannot have changed for an existing node,
+	 * but every other field -- reportedState, goalState, health,
+	 * candidatePriority, replicationQuorum, ... -- could have, if we
+	 * blocked behind a concurrent writer for this same group.
+	 */
+	return GetAutoFailoverNodeById(nodeId);
+}
+
+
+/*
+ * LockNodeGroupAndFetchByName is the name-based counterpart of
+ * LockNodeGroupAndFetch, for the entry points that identify their target
+ * node by name rather than nodeId. It resolves to nodeId first so the
+ * post-lock re-fetch is keyed by the stable primary key, not by name --
+ * immune to a concurrent rename landing in the same window.
+ */
+AutoFailoverNode *
+LockNodeGroupAndFetchByName(char *formationId, char *nodeName)
+{
+	AutoFailoverNode *node = GetAutoFailoverNodeByName(formationId, nodeName);
+
+	if (node == NULL)
+	{
+		return NULL;
+	}
+
+	int64 nodeId = node->nodeId;
+
+	LockFormation(formationId, ShareLock);
+	LockNodeGroup(formationId, node->groupId, ExclusiveLock);
+
+	return GetAutoFailoverNodeById(nodeId);
+}
+
+
+/*
  * SetNodeHealthAndTimestampsForTesting is a testing-only helper that lets
  * regression/isolation tests simulate the passage of time and/or a
  * health-check-worker observation in a single locked, atomic call, instead
@@ -1074,7 +1189,7 @@ SetNodeHealthAndTimestampsForTesting(int64 nodeId,
 									 bool healthCheckTimeAgoIsNull,
 									 Interval *healthCheckTimeAgo)
 {
-	AutoFailoverNode *node = GetAutoFailoverNodeById(nodeId);
+	AutoFailoverNode *node = LockNodeGroupAndFetch(nodeId);
 
 	if (node == NULL)
 	{
@@ -1083,14 +1198,6 @@ SetNodeHealthAndTimestampsForTesting(int64 nodeId,
 				 errmsg("couldn't find node with nodeid %lld",
 						(long long) nodeId)));
 	}
-
-	/*
-	 * Same lock discipline as SetNodeHealthState()/NodeActive(): the
-	 * pre-lock lookup above only determines which lock to take, formationId/
-	 * groupId are stable for an existing node.
-	 */
-	LockFormation(node->formationId, ShareLock);
-	LockNodeGroup(node->formationId, node->groupId, ExclusiveLock);
 
 	Oid argTypes[] = {
 		INT8OID,     /* nodeId */

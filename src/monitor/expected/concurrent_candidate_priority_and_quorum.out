@@ -1,0 +1,49 @@
+Parsed test spec with 4 sessions
+
+starting permutation: s3_check_before cp_begin cp_set rq_set cp_commit s4_check_after
+assigned_group_state
+--------------------
+apply_settings      
+(1 row)
+
+step s3_check_before: 
+    SELECT nodename, candidatepriority, replicationquorum
+      FROM pgautofailover.node
+     WHERE formationid = 'ccpq_test'
+     ORDER BY nodename;
+
+nodename|candidatepriority|replicationquorum
+--------+-----------------+-----------------
+ccpq_p  |              100|t                
+ccpq_s1 |              100|t                
+ccpq_s2 |              100|t                
+(3 rows)
+
+step cp_begin: BEGIN;
+step cp_set: SELECT pgautofailover.set_node_candidate_priority('ccpq_test', 'ccpq_s2', 0);
+set_node_candidate_priority
+---------------------------
+t                          
+(1 row)
+
+step rq_set: SELECT pgautofailover.set_node_replication_quorum('ccpq_test', 'ccpq_s2', true); <waiting ...>
+step cp_commit: COMMIT;
+step rq_set: <... completed>
+set_node_replication_quorum
+---------------------------
+t                          
+(1 row)
+
+step s4_check_after: 
+    SELECT nodename, candidatepriority, replicationquorum
+      FROM pgautofailover.node
+     WHERE formationid = 'ccpq_test'
+     ORDER BY nodename;
+
+nodename|candidatepriority|replicationquorum
+--------+-----------------+-----------------
+ccpq_p  |              100|t                
+ccpq_s1 |              100|t                
+ccpq_s2 |                0|t                
+(3 rows)
+

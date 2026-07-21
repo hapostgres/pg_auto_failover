@@ -416,6 +416,14 @@ node_active(PG_FUNCTION_ARGS)
 
 /*
  * NodeActive reports the current state of a node and returns the assigned state.
+ *
+ * Does not use LockNodeGroupAndFetch(): this needs the pre-lock read to
+ * validate currentNodeState->formationId/groupId (caller-supplied, over
+ * the wire) against the node's actual registration before ever taking a
+ * lock, and locks on the caller-supplied groupId rather than re-deriving
+ * it from the row. The lock-then-refetch shape below (see the comment at
+ * the re-read) is otherwise the same pattern LockNodeGroupAndFetch()
+ * generalizes.
  */
 static AutoFailoverNodeState *
 NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
@@ -616,11 +624,13 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		{
 			initialState = REPLICATION_STATE_WAIT_STANDBY;
 
-			/* if we have a primary node, pg_basebackup from it */
+			/*
+			 * if we have a primary node, pg_basebackup from it -- derived
+			 * from groupNodeList (already fetched above, under the lock
+			 * just taken) rather than a second, independent query.
+			 */
 			AutoFailoverNode *primaryNode =
-				GetPrimaryNodeInGroup(
-					formation->formationId,
-					currentNodeState->groupId);
+				GetPrimaryNodeInGroupFromList(groupNodeList);
 
 			/* we might be in the middle of a failover */
 			List *nodesGroupList =
@@ -1147,6 +1157,13 @@ RemoveNode(int64 nodeId, bool force)
 	char message[BUFSIZE] = { 0 };
 
 	/*
+	 * Does not use LockNodeGroupAndFetch(): removing a node needs a
+	 * formation-wide ExclusiveLock (it can affect sync-standby bookkeeping
+	 * across the whole formation), not the ShareLock-formation +
+	 * ExclusiveLock-nodegroup pair every other entry point takes. The
+	 * lock-then-refetch shape below is otherwise the same pattern
+	 * LockNodeGroupAndFetch() generalizes.
+	 *
 	 * Look the node up once, unlocked, only to learn which formation to
 	 * lock -- a node's formationId is immutable for the life of the row,
 	 * so this initial read being racy doesn't matter. Everything else is
@@ -1592,9 +1609,14 @@ perform_promotion(PG_FUNCTION_ARGS)
 	text *nodeNameText = PG_GETARG_TEXT_P(1);
 	char *nodeName = text_to_cstring(nodeNameText);
 
-
+	/*
+	 * LockNodeGroupAndFetch resolves nodeName, locks, and returns a
+	 * post-lock fresh read -- every check below (IsCurrentState etc.) that
+	 * used to run against the pre-lock struct now sees state as of the
+	 * moment the lock was acquired, not as of an earlier, unlocked read.
+	 */
 	AutoFailoverNode *currentNode =
-		GetAutoFailoverNodeByName(formationId, nodeName);
+		LockNodeGroupAndFetchByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
@@ -1603,9 +1625,6 @@ perform_promotion(PG_FUNCTION_ARGS)
 				 errmsg("node \"%s\" is not registered in formation \"%s\"",
 						nodeName, formationId)));
 	}
-
-	LockFormation(formationId, ShareLock);
-	LockNodeGroup(formationId, currentNode->groupId, ExclusiveLock);
 
 	/*
 	 * If the current node is the primary, that's done.
@@ -1742,14 +1761,11 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 	char message[BUFSIZE];
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
+	AutoFailoverNode *currentNode = LockNodeGroupAndFetch(nodeId);
 	if (currentNode == NULL)
 	{
 		PG_RETURN_BOOL(false);
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	AutoFailoverFormation *formation = GetFormation(currentNode->formationId);
 
@@ -2006,14 +2022,11 @@ stop_maintenance(PG_FUNCTION_ARGS)
 
 	char message[BUFSIZE] = { 0 };
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
+	AutoFailoverNode *currentNode = LockNodeGroupAndFetch(nodeId);
 	if (currentNode == NULL)
 	{
 		PG_RETURN_BOOL(false);
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	List *groupNodesList =
 		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
@@ -2040,10 +2053,13 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	 * We need to find the primary node even if we are in the middle of a
 	 * failover, and it's already set to draining. That way we may rejoin the
 	 * cluster, report our LSN, and help proceed to reach a consistent state.
+	 *
+	 * Derived from groupNodesList (already fetched above, under the lock
+	 * LockNodeGroupAndFetch() took) rather than a second, independent
+	 * query -- see GetPrimaryOrDemotedNodeInGroupFromList()'s comment.
 	 */
 	AutoFailoverNode *primaryNode =
-		GetPrimaryOrDemotedNodeInGroup(currentNode->formationId,
-									   currentNode->groupId);
+		GetPrimaryOrDemotedNodeInGroupFromList(groupNodesList);
 
 	/*
 	 * When there is no primary, we might be in trouble, we just want to join
@@ -2127,7 +2143,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	int nonZeroCandidatePriorityNodeCount = 0;
 
 	AutoFailoverNode *currentNode =
-		GetAutoFailoverNodeByName(formationId, nodeName);
+		LockNodeGroupAndFetchByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
@@ -2136,9 +2152,6 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 				 errmsg("node \"%s\" is not registered in formation \"%s\"",
 						nodeName, formationId)));
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	List *nodesGroupList =
 		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
@@ -2286,7 +2299,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 
 	AutoFailoverNode *currentNode =
-		GetAutoFailoverNodeByName(formationId, nodeName);
+		LockNodeGroupAndFetchByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
@@ -2295,9 +2308,6 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 				 errmsg("node \"%s\" is not registered in formation \"%s\"",
 						nodeName, formationId)));
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	List *nodesGroupList =
 		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
@@ -2444,7 +2454,7 @@ update_node_metadata(PG_FUNCTION_ARGS)
 		nodeid = PG_GETARG_INT64(0);
 	}
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeid);
+	AutoFailoverNode *currentNode = LockNodeGroupAndFetch(nodeid);
 
 	if (currentNode == NULL)
 	{
@@ -2452,9 +2462,6 @@ update_node_metadata(PG_FUNCTION_ARGS)
 						errmsg("node %lld is not registered",
 							   (long long) nodeid)));
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	/*
 	 * When arguments are NULL, replace them with the current value of the node
