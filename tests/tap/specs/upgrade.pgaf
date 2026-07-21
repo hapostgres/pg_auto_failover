@@ -102,26 +102,47 @@ step test_002_inject_node_binaries {
 }
 
 # -------------------------------------------------------------------------
-# Phase 2: install the next extension files on the monitor, upgrade the
-# extension catalog, flip the monitor symlink, then restart the monitor
-# container so that postgres loads the next pgautofailover.so.
+# Phase 2: install the next extension files on the monitor, restart the
+# monitor container so postgres loads the next pgautofailover.so, flip the
+# monitor symlink, then upgrade the extension catalog.
+#
+# The restart must happen BEFORE "ALTER EXTENSION ... UPDATE", not after:
+# pgautofailover is loaded via shared_preload_libraries, so the running
+# postmaster keeps the OLD .so mapped in memory even after install-extension
+# overwrites the file on disk -- new backends forked from it still see the
+# old, pre-restart library image. "ALTER EXTENSION ... UPDATE" validates
+# every CREATE FUNCTION in the upgrade script by dlsym-ing that in-memory
+# library; a function that exists only in the new .so (added by this branch,
+# with no v2.1 equivalent) can't resolve there and CREATE FUNCTION fails with
+# "could not find function ... in file ...". Existing, unchanged functions
+# don't expose this because their symbols were already present pre-restart.
+# Restarting first makes the new postmaster load the new .so (already on
+# disk) via shared_preload_libraries, so the upgrade script's new symbols
+# resolve normally.
 #
 # compose stop + start avoids a race where the previous listener reconnects
 # to the freshly-restarted postgres at the same moment data-node keepers do,
 # producing transient "schema pgautofailover does not exist" errors that
 # exhaust the previous supervisor's restart limit.  A full container restart
-# gives data nodes a clean "monitor is down, keep retrying" signal.
+# gives data nodes a clean "monitor is down, keep retrying" signal. The
+# healthcheck (pg_autoctl status) makes "compose start" block until the
+# pg_autoctl process itself reports running -- but that fires slightly
+# before postgres finishes its own restart, so the ALTER EXTENSION call
+# right after can still race "the database system is starting up". The
+# pg_isready retry loop below closes that last, short window.
 # -------------------------------------------------------------------------
 
 step test_003_upgrade_monitor {
     # Install next extension files into system paths.
     exec monitor  sudo /usr/local/bin/pgaf/next/install-extension
-    # Upgrade the extension catalog.
-    exec monitor  psql -U docker -d pg_auto_failover -c "ALTER EXTENSION pgautofailover UPDATE TO '2.2'"
     # Flip the monitor symlink; from here pg_autoctl = next binary.
     exec monitor  ln -sfn /usr/local/bin/pgaf/next /usr/local/bin/pgaf/current
     compose stop monitor
     compose start monitor
+    exec monitor  sh -c 'for i in $(seq 1 30); do pg_isready -U docker -d pg_auto_failover && exit 0; sleep 1; done; exit 1'
+    # Upgrade the extension catalog, now that the restarted postmaster has
+    # the next pgautofailover.so loaded.
+    exec monitor  psql -U docker -d pg_auto_failover -c "ALTER EXTENSION pgautofailover UPDATE TO '2.2'"
 }
 
 # -------------------------------------------------------------------------
