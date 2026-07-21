@@ -128,8 +128,10 @@ step test_002_inject_node_binaries {
 # healthcheck (pg_autoctl status) makes "compose start" block until the
 # pg_autoctl process itself reports running -- but that fires slightly
 # before postgres finishes its own restart, so the ALTER EXTENSION call
-# right after can still race "the database system is starting up". The
-# pg_isready retry loop below closes that last, short window.
+# right after can still race "the database system is starting up".
+# "pg_autoctl inspect pgsetup wait" closes that last, short window: it's
+# the project's own native retry-with-timeout primitive for exactly this
+# condition, rather than a hand-rolled shell polling loop.
 # -------------------------------------------------------------------------
 
 step test_003_upgrade_monitor {
@@ -139,7 +141,7 @@ step test_003_upgrade_monitor {
     exec monitor  ln -sfn /usr/local/bin/pgaf/next /usr/local/bin/pgaf/current
     compose stop monitor
     compose start monitor
-    exec monitor  sh -c 'for i in $(seq 1 30); do pg_isready -U docker -d pg_auto_failover && exit 0; sleep 1; done; exit 1'
+    exec monitor  pg_autoctl inspect pgsetup wait --pgdata /var/lib/postgres/pgaf --read-write --timeout 30
     # Upgrade the extension catalog, now that the restarted postmaster has
     # the next pgautofailover.so loaded.
     exec monitor  psql -U docker -d pg_auto_failover -c "ALTER EXTENSION pgautofailover UPDATE TO '2.2'"
