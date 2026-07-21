@@ -515,12 +515,13 @@ class PGNode(QueryRunner):
         self.vnode.run_and_wait(passwd_command, name="user passwd")
         self.authenticatedUsers[username] = password
 
-    def stop_pg_autoctl(self):
+    def stop_pg_autoctl(self, sig=signal.SIGTERM):
         """
-        Kills the keeper by sending a SIGTERM to keeper's process group.
+        Kills the keeper by sending "sig" to keeper's process group.
+        See PGAutoCtl.stop() for what signal choice controls.
         """
         if self.pg_autoctl:
-            return self.pg_autoctl.stop()
+            return self.pg_autoctl.stop(sig)
 
     def stop_postgres(self):
         """
@@ -620,12 +621,22 @@ class PGNode(QueryRunner):
 
         return ret == 0
 
-    def fail(self):
+    def fail(self, sig=signal.SIGTERM):
         """
         Simulates a data node failure by terminating the keeper and stopping
         postgres.
+
+        Default SIGTERM triggers pg_autoctl's graceful shutdown reporting
+        (see PGAutoCtl.stop()) -- fine for most tests, but it means the
+        node can keep participating in FSM transitions for a few seconds
+        after fail() returns, with timing that depends on how long
+        PostgreSQL's own shutdown checkpoint takes. Tests asserting on a
+        node being permanently excluded from candidate selection right
+        after a failure (e.g. a quorum stall with no other node to satisfy
+        it) should pass sig=signal.SIGINT/SIGQUIT for a true hard-crash
+        simulation instead.
         """
-        self.stop_pg_autoctl()
+        self.stop_pg_autoctl(sig)
 
         # stopping pg_autoctl also stops Postgres, unless bugs.
         if self.pg_is_running():
@@ -2172,13 +2183,20 @@ class PGAutoCtl:
 
             return out, err, proc.returncode
 
-    def stop(self):
+    def stop(self, sig=signal.SIGTERM):
         """
-        Kills the keeper by sending a SIGTERM to keeper's process group.
+        Kills the keeper by sending "sig" to keeper's process group.
+
+        SIGTERM triggers pg_autoctl's graceful shutdown path: the
+        node-active service keeps reporting to the monitor for up to 30s
+        while PostgreSQL stops (see keeper_node_active_shutdown_loop() in
+        service_keeper.c). SIGINT/SIGQUIT skip that loop and exit
+        immediately -- pass one of those to simulate a true hard crash
+        instead of an operator-initiated stop.
         """
         if self.run_proc and self.run_proc.pid:
             try:
-                os.kill(self.run_proc.pid, signal.SIGTERM)
+                os.kill(self.run_proc.pid, sig)
 
                 return self.pgnode.cluster.communicate(self, COMMAND_TIMEOUT)
 

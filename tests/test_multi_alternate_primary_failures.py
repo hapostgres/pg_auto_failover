@@ -1,5 +1,6 @@
 import tests.pgautofailover_utils as pgautofailover
 from nose.tools import raises, eq_
+import signal
 import time
 
 import os.path
@@ -113,32 +114,45 @@ def test_003_001_stop_primary():
 def test_003_002_stop_primary():
     # verify that node2 is primary and stop it
     assert node2.get_state().assigned == "primary"
-    node2.fail()
+    # SIGINT, not the default SIGTERM: this is the one scenario in this file
+    # where node3 is the *sole* surviving standby (node1 is already dead from
+    # test_003_001), so it depends on node2 never being able to report
+    # anything again. A plain fail() (SIGTERM) triggers pg_autoctl's graceful
+    # shutdown reporting (keeper_node_active_shutdown_loop(), #1146): the
+    # node-active service keeps calling the full node_active() protocol every
+    # second for up to 30s while PostgreSQL's own shutdown checkpoint
+    # completes, racing against that checkpoint's duration. If node2 manages
+    # to confirm "draining" (both goal and reported state) before it's
+    # actually gone, BuildCandidateList()'s "skip old/new primary unless
+    # draining/demoted" exemption stops excluding it, letting it contribute a
+    # second quorum report alongside node3 -- satisfying
+    # number_sync_standbys=1's minCandidates=2 and promoting node3 right away
+    # instead of leaving it correctly stuck at report_lsn. This is exactly
+    # the PG14 CI flake: non-deterministic depending on how long the
+    # checkpoint happens to take on that runner. SIGINT skips the shutdown
+    # loop entirely (asked_to_stop_fast exits immediately), matching what
+    # fail() is meant to simulate -- an abrupt crash, not a graceful stop --
+    # and making node2 permanently unable to report past whatever state it
+    # was last confirmed in.
+    node2.fail(sig=signal.SIGINT)
 
     # node3 can't be promoted when it's the only one reporting its LSN
     print()
-    # The monitor assigns draining briefly then immediately moves to
-    # demote_timeout once node3 converges to prepare_promotion.  The two
-    # events can happen within the same second, making draining invisible to
-    # a 100ms poll loop.  Accept either state as success.
-    #
     # Reaching this point requires health-check detection of node2's death
     # (node_considered_unhealthy_timeout, 20s default) plus a full
     # primary_demote_timeout (30s default) -- and test_003_001 immediately
     # before this one already drove node1 through the identical sequence, so
     # a loaded CI runner can push this past the default 90s STATE_CHANGE_TIMEOUT
-    # even though the FSM itself is behaving correctly (this is what caused
-    # the PG16 CI flake: node3 "failed to reach" the state, it never
-    # overshot past it). Use the same 120s margin as the equivalent waits in
-    # test_005_001/test_005_002 below.
+    # even though the FSM itself is behaving correctly. Use the same 120s
+    # margin as the equivalent waits in test_005_001/test_005_002 below.
     assert node2.wait_until_assigned_state(
         target_state="draining", or_state="demote_timeout", timeout=120
     )
-    # The monitor assigns node3 goal=report_lsn (BuildCandidateListForFailover)
-    # then may immediately assign goal=prepare_promotion in the same transaction
-    # when node3 is the sole remaining standby.  node3's keeper never reports
-    # reportedstate=report_lsn because it transitions before the next poll.
-    # Check the assigned (goal) state instead of the reported state.
+    # With node2 hard-killed, it can never confirm a second LSN report, so
+    # node3 should stay deterministically stuck at report_lsn (quorumCandidateCount
+    # stays 1, short of number_sync_standbys=1's minCandidates=2). or_state
+    # is kept as a defensive margin, not because prepare_promotion is
+    # expected here.
     assert node3.wait_until_assigned_state(
         target_state="report_lsn", or_state="prepare_promotion", timeout=120
     )
