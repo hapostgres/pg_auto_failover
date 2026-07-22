@@ -170,6 +170,15 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	Datum nodeCluster = heap_getattr(heapTuple,
 									 Anum_pgautofailover_node_nodecluster,
 									 tupleDescriptor, &isNull);
+	bool regionIsNull = false;
+	Datum region = heap_getattr(heapTuple,
+								Anum_pgautofailover_node_region,
+								tupleDescriptor, &regionIsNull);
+	bool stallIsNull = false;
+	Datum replicationStallSince =
+		heap_getattr(heapTuple,
+					 Anum_pgautofailover_node_replication_stall_since,
+					 tupleDescriptor, &stallIsNull);
 
 	Oid goalStateOid = DatumGetObjectId(goalState);
 	Oid reportedStateOid = DatumGetObjectId(reportedState);
@@ -201,6 +210,10 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 	pgAutoFailoverNode->candidatePriority = DatumGetInt32(candidatePriority);
 	pgAutoFailoverNode->replicationQuorum = DatumGetBool(replicationQuorum);
 	pgAutoFailoverNode->nodeCluster = TextDatumGetCString(nodeCluster);
+	pgAutoFailoverNode->region =
+		regionIsNull ? "" : TextDatumGetCString(region);
+	pgAutoFailoverNode->replicationStallSince =
+		stallIsNull ? 0 : DatumGetTimestampTz(replicationStallSince);
 
 	return pgAutoFailoverNode;
 }
@@ -1325,7 +1338,8 @@ AddAutoFailoverNode(char *formationId,
 					ReplicationState reportedState,
 					int candidatePriority,
 					bool replicationQuorum,
-					char *nodeCluster)
+					char *nodeCluster,
+					char *region)
 {
 	Oid goalStateOid = ReplicationStateGetEnum(goalState);
 	Oid reportedStateOid = ReplicationStateGetEnum(reportedState);
@@ -1349,7 +1363,8 @@ AddAutoFailoverNode(char *formationId,
 		INT4OID, /* candidate_priority */
 		BOOLOID,  /* replication_quorum */
 		TEXTOID,  /* node name prefix */
-		TEXTOID   /* nodecluster */
+		TEXTOID,  /* nodecluster */
+		TEXTOID   /* region */
 	};
 
 	Datum argValues[] = {
@@ -1365,7 +1380,8 @@ AddAutoFailoverNode(char *formationId,
 		Int32GetDatum(candidatePriority),   /* candidate_priority */
 		BoolGetDatum(replicationQuorum),    /* replication_quorum */
 		CStringGetTextDatum(prefix),        /* prefix */
-		CStringGetTextDatum(nodeCluster)    /* nodecluster */
+		CStringGetTextDatum(nodeCluster),   /* nodecluster */
+		CStringGetTextDatum(region)         /* region */
 	};
 
 	/*
@@ -1391,7 +1407,8 @@ AddAutoFailoverNode(char *formationId,
 		' ',                            /* candidate_priority */
 		' ',                            /* replication_quorum */
 		' ',                            /* prefix */
-		' '                             /* nodecluster */
+		' ',                            /* nodecluster */
+		' '                             /* region */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -1421,7 +1438,7 @@ AddAutoFailoverNode(char *formationId,
 		"INSERT INTO " AUTO_FAILOVER_NODE_TABLE
 		" (formationid, nodeid, groupid, nodename, nodehost, nodeport, "
 		" sysidentifier, goalstate, reportedstate, "
-		" candidatepriority, replicationquorum, nodecluster)"
+		" candidatepriority, replicationquorum, nodecluster, region)"
 		" SELECT $1, seq.nodeid, $3, "
 		" case when $4 is null "
 		"   then case when $12 = 'node' "
@@ -1435,7 +1452,7 @@ AddAutoFailoverNode(char *formationId,
 		"        end "
 		"   else $4 "
 		" end, "
-		" $5, $6, $7, $8, $9, $10, $11, $13 "
+		" $5, $6, $7, $8, $9, $10, $11, $13, $14 "
 		" FROM seq "
 		"RETURNING nodeid";
 
@@ -1576,6 +1593,13 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
+	/*
+	 * Track when a PRIMARY node first loses its standby from
+	 * pg_stat_replication.  We set replication_stall_since on the first
+	 * empty-sync-state report and clear it as soon as a standby reconnects.
+	 * The FSM uses this timestamp to assign wait_primary after
+	 * pgautofailover.replication_stall_timeout elapses (issue #997).
+	 */
 	const char *updateQuery =
 		"UPDATE " AUTO_FAILOVER_NODE_TABLE
 		" SET reportedstate = $1, reporttime = now(), "
@@ -1583,7 +1607,13 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		"reportedtli = CASE $4 WHEN 0 THEN reportedtli ELSE $4 END, "
 		"reportedlsn = CASE $5 WHEN '0/0'::pg_lsn THEN reportedlsn ELSE $5 END, "
 		"walreporttime = CASE $5 WHEN '0/0'::pg_lsn THEN walreporttime ELSE now() END, "
-		"statechangetime = CASE WHEN reportedstate <> $1 THEN now() ELSE statechangetime END "
+		"statechangetime = CASE WHEN reportedstate <> $1 THEN now() ELSE statechangetime END, "
+		"replication_stall_since = CASE "
+		"  WHEN $1 = 'primary'::pgautofailover.replication_state"
+		"       AND $3 = '' "
+		"  THEN COALESCE(replication_stall_since, now()) "
+		"  ELSE NULL "
+		"END "
 		"WHERE nodehost = $6 AND nodeport = $7";
 
 	SPI_connect();

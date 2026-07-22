@@ -407,6 +407,14 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'G':
+			{
+				/* { "region", required_argument, NULL, 'G' } */
+				strlcpy(LocalOptionConfig.region, optarg, NAMEDATALEN);
+				log_trace("--region %s", LocalOptionConfig.region);
+				break;
+			}
+
 			case 'V':
 			{
 				/* keeper_cli_print_version prints version and exits. */

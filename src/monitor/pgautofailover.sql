@@ -121,6 +121,8 @@ CREATE TABLE pgautofailover.node
     candidatepriority	 int not null default 100,
     replicationquorum	 bool not null default true,
     nodecluster          text not null default 'default',
+    region               text not null default 'default',
+    replication_stall_since timestamptz,
 
     -- node names must be unique in a given formation
     UNIQUE (formationid, nodename),
@@ -256,6 +258,7 @@ CREATE FUNCTION pgautofailover.register_node
     IN candidate_priority 	int default 100,
     IN replication_quorum	bool default true,
     IN node_cluster         text default 'default',
+    IN node_region          text default 'default',
    OUT assigned_node_id     bigint,
    OUT assigned_group_id    int,
    OUT assigned_group_state pgautofailover.replication_state,
@@ -269,7 +272,7 @@ AS 'MODULE_PATHNAME', $$register_node$$;
 grant execute on function
       pgautofailover.register_node(text,text,int,name,text,bigint,bigint,int,
                                    pgautofailover.replication_state,text,
-                                   int,bool,text)
+                                   int,bool,text,text)
    to autoctl_node;
 
 
@@ -603,14 +606,15 @@ CREATE FUNCTION pgautofailover.current_state
    OUT reported_tli         int,
    OUT reported_lsn         pg_lsn,
    OUT health               integer,
-   OUT nodecluster          text
+   OUT nodecluster          text,
+   OUT noderegion           text
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedtli, reportedlsn, health, nodecluster
+          reportedtli, reportedlsn, health, nodecluster, region
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id
@@ -640,14 +644,15 @@ CREATE FUNCTION pgautofailover.current_state
    OUT reported_tli         int,
    OUT reported_lsn         pg_lsn,
    OUT health               integer,
-   OUT nodecluster          text
+   OUT nodecluster          text,
+   OUT noderegion           text
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedtli, reportedlsn, health, nodecluster
+          reportedtli, reportedlsn, health, nodecluster, region
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id

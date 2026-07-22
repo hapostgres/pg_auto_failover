@@ -1721,6 +1721,11 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 			node->candidatePriority,
 			node->replicationQuorum ? "true" : "false");
 
+	if (node->region[0])
+	{
+		fformat(f, "region = %s\n", node->region);
+	}
+
 	/* Citus role/cluster settings live in their own [citus] section */
 	if (node->citusSecondary || node->citusClusterName[0])
 	{

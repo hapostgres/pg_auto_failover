@@ -43,6 +43,7 @@ static AutoFailoverNodeState * NodeActive(char *formationId,
 static void JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 									  char *nodeName, char *nodeHost, int nodePort,
 									  uint64 sysIdentifier, char *nodeCluster,
+									  char *region,
 									  AutoFailoverNodeState *currentNodeState);
 static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeHost, int nodePort,
@@ -113,6 +114,9 @@ register_node(PG_FUNCTION_ARGS)
 
 	text *nodeClusterText = PG_GETARG_TEXT_P(12);
 	char *nodeCluster = text_to_cstring(nodeClusterText);
+
+	text *nodeRegionText = PG_GETARG_TEXT_P(13);
+	char *nodeRegion = text_to_cstring(nodeRegionText);
 
 	AutoFailoverNodeState currentNodeState = { 0 };
 
@@ -197,6 +201,7 @@ register_node(PG_FUNCTION_ARGS)
 							  nodePort,
 							  sysIdentifier,
 							  nodeCluster,
+							  nodeRegion,
 							  &currentNodeState);
 
 	AutoFailoverNode *pgAutoFailoverNode = GetAutoFailoverNode(nodeHost, nodePort);
@@ -567,6 +572,7 @@ static void
 JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 						  char *nodeName, char *nodeHost, int nodePort,
 						  uint64 sysIdentifier, char *nodeCluster,
+						  char *region,
 						  AutoFailoverNodeState *currentNodeState)
 {
 	int groupId = -1;
@@ -735,7 +741,8 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 						currentNodeState->replicationState,
 						currentNodeState->candidatePriority,
 						currentNodeState->replicationQuorum,
-						nodeCluster);
+						nodeCluster,
+						region);
 
 	currentNodeState->groupId = groupId;
 }

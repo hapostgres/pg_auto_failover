@@ -898,6 +898,12 @@ compute_column_size(ColumnType type, NodeAddressHeaders *headers)
 			return headers->maxStateSize;
 		}
 
+		case COLUMN_TYPE_REGION:
+		{
+			/* "default" is 7 chars; most region names fit in 12 */
+			return 12;
+		}
+
 		default:
 		{
 			log_fatal("BUG: compute_column_size(%d)", type);
@@ -1082,6 +1088,12 @@ print_node_state(WatchContext *context, ColPolicy *policy,
 						 NodeStateToString(nodeState->goalState));
 
 				watch_set_state_attributes(nodeState->goalState, false);
+				break;
+			}
+
+			case COLUMN_TYPE_REGION:
+			{
+				mvprintw(r, cc, "%*s", len, nodeState->region);
 				break;
 			}
 

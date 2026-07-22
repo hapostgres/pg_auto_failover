@@ -861,19 +861,20 @@ monitor_register_node(Monitor *monitor, char *formation,
 					  NodeState initialState,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
 					  char *citusClusterName,
+					  char *region,
 					  bool *mayRetry,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, $6, $7, "
-		"$8, $9::pgautofailover.replication_state, $10, $11, $12, $13)";
-	int paramCount = 13;
-	Oid paramTypes[13] = {
+		"$8, $9::pgautofailover.replication_state, $10, $11, $12, $13, $14)";
+	int paramCount = 14;
+	Oid paramTypes[14] = {
 		TEXTOID, TEXTOID, INT4OID, NAMEOID, TEXTOID, INT8OID,
-		INT8OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID
+		INT8OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID, TEXTOID
 	};
-	const char *paramValues[13];
+	const char *paramValues[14];
 	MonitorAssignedStateParseContext parseContext =
 	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
@@ -899,6 +900,10 @@ monitor_register_node(Monitor *monitor, char *formation,
 		IS_EMPTY_STRING_BUFFER(citusClusterName)
 		? DEFAULT_CITUS_CLUSTER_NAME
 		: citusClusterName;
+	paramValues[13] =
+		IS_EMPTY_STRING_BUFFER(region)
+		? "default"
+		: region;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1950,7 +1955,7 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 				"         current_group_state, assigned_group_state, "
 				"         candidate_priority, replication_quorum, "
 				"         reported_tli, reported_lsn, health, nodecluster, "
-				"         healthlag, reportlag"
+				"         noderegion, healthlag, reportlag"
 				"    FROM pgautofailover.current_state($1) cs "
 				"    JOIN ("
 				"          select nodeid, "
@@ -1976,7 +1981,7 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 				"         current_group_state, assigned_group_state, "
 				"         candidate_priority, replication_quorum, "
 				"         reported_tli, reported_lsn, health, nodecluster, "
-				"         healthlag, reportlag"
+				"         noderegion, healthlag, reportlag"
 				"    FROM pgautofailover.current_state($1, $2) cs "
 				"    JOIN ("
 				"          select nodeid, "
@@ -2029,7 +2034,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	int errors = 0;
 
 	/* we don't expect any of the column to be NULL */
-	for (colNumber = 0; colNumber < 16; colNumber++)
+	for (colNumber = 0; colNumber < 17; colNumber++)
 	{
 		if (PQgetisnull(result, rowNumber, 0))
 		{
@@ -2054,8 +2059,9 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	 * 11 - OUT reported_lsn         pg_lsn,
 	 * 12 - OUT health               integer
 	 * 13 - OUT nodecluster          text
-	 * 14 -     healthlag            int (extract epoch from interval)
-	 * 15 -     reportlag            int (extract epoch from interval)
+	 * 14 - OUT noderegion           text
+	 * 15 -     healthlag            int (extract epoch from interval)
+	 * 16 -     reportlag            int (extract epoch from interval)
 	 *
 	 * We need the groupId to parse the formation kind into a nodeKind, so we
 	 * begin at column 1 and get back to column 0 later, after column 4.
@@ -2191,6 +2197,16 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	}
 
 	value = PQgetvalue(result, rowNumber, 14);
+	length = strlcpy(nodeState->region, value, NAMEDATALEN);
+	if (length >= NAMEDATALEN)
+	{
+		log_error("Region \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, NAMEDATALEN - 1);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 15);
 
 	if (!stringToDouble(value, &(nodeState->healthLag)))
 	{
@@ -2198,7 +2214,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 15);
+	value = PQgetvalue(result, rowNumber, 16);
 
 	if (!stringToDouble(value, &(nodeState->reportLag)))
 	{
@@ -2231,10 +2247,10 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 		return false;
 	}
 
-	/* monitor_get_current_state selects 16 columns (0–15) */
-	if (PQnfields(result) != 16)
+	/* monitor_get_current_state selects 17 columns (0–16) */
+	if (PQnfields(result) != 17)
 	{
-		log_error("Query returned %d columns, expected 16", PQnfields(result));
+		log_error("Query returned %d columns, expected 17", PQnfields(result));
 		return false;
 	}
 

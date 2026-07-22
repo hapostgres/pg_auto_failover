@@ -450,6 +450,10 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 		sformat(numbuf, sizeof(numbuf), "%d", n->candidatePriority);
 		ADD("candidate-priority", numbuf);
 	}
+	if (n->region[0])
+	{
+		ADD("region", n->region);
+	}
 	if (!n->replicationQuorum)
 	{
 		ADD("replication-quorum", "false");

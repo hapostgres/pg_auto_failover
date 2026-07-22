@@ -71,6 +71,7 @@ typedef struct NodeSpec
 	/* [settings]  — mutable; applied on SIGHUP / file change */
 	int candidate_priority;      /* 0-100, default 50 */
 	bool replication_quorum;     /* sync quorum participant, default true */
+	char region[NAMEDATALEN];    /* data-centre / availability zone label */
 
 	/* [options]    — immutable; used only at pg_autoctl create time */
 	char ssl[32];                /* self-signed | verify-ca | verify-full | off */

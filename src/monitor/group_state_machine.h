@@ -58,6 +58,7 @@ typedef struct GroupStateContext
 	int unhealthyTimeoutMs;
 	int drainTimeoutMs;
 	int startupGracePeriodMs;
+	int replicationStallTimeoutMs;
 } GroupStateContext;
 
 
@@ -73,3 +74,4 @@ extern int PromoteXlogThreshold;
 extern int DrainTimeoutMs;
 extern int UnhealthyTimeoutMs;
 extern int StartupGracePeriodMs;
+extern int ReplicationStallTimeoutMs;
