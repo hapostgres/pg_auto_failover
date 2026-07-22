@@ -2247,10 +2247,10 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 		return false;
 	}
 
-	/* monitor_get_current_state selects 16 columns (0–15) */
-	if (PQnfields(result) != 16)
+	/* monitor_get_current_state selects 17 columns (0–16) */
+	if (PQnfields(result) != 17)
 	{
-		log_error("Query returned %d columns, expected 16", PQnfields(result));
+		log_error("Query returned %d columns, expected 17", PQnfields(result));
 		return false;
 	}
 
