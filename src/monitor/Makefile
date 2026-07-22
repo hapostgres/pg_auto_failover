@@ -57,6 +57,20 @@ override CFLAGS := $(DEFAULT_CFLAGS) $(CFLAGS)
 
 include $(PGXS)
 
+# See regress_schedule for why a custom schedule is needed instead of
+# PGXS's default behavior (the whole $(REGRESS) list as one parallel group).
+REGRESS_OPTS += --schedule=$(SRC_DIR)regress_schedule
+
+# Override PGXS's installcheck: with --schedule in REGRESS_OPTS, pg_regress
+# runs the schedule's groups first and then re-runs every bare $(REGRESS)
+# name again, one at a time, as extra tests appended after the schedule
+# (pg_regress.c's extra_tests/run_single_test()). So $(REGRESS) must not
+# also be passed on the command line here -- the schedule file is the only
+# source of truth for which tests run and how they're grouped.
+installcheck: submake $(REGRESS_PREP)
+	$(pg_regress_installcheck) $(REGRESS_OPTS)
+	$(pg_isolation_regress_installcheck) $(ISOLATION_OPTS) $(ISOLATION)
+
 ifdef USE_SECURITY_FLAGS
 # Flags taken from: https://liquid.microsoft.com/Web/Object/Read/ms.security/Requirements/Microsoft.Security.SystemsADM.10203#guide
 SECURITY_BITCODE_CFLAGS=-fsanitize=safe-stack -fstack-protector-strong -flto -fPIC -Wformat -Wformat-security -Werror=format-security
