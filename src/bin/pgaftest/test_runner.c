@@ -1818,13 +1818,13 @@ runner_perform_failover(TestRunner *r, const char *formation, int groupId)
  * the keeper self-assigns a state without monitor contact.
  */
 static bool
-runner_wait_notify_goal(TestRunner *r,
-						const char *nodeName,
-						const char *targetState,
-						const char passThroughStates[][64],
-						bool *seenThrough,
-						int passThroughCount,
-						int timeoutSecs)
+runner_wait_notify_goal_impl(TestRunner *r,
+							 const char *nodeName,
+							 const char *targetState,
+							 const char passThroughStates[][64],
+							 bool *seenThrough,
+							 int passThroughCount,
+							 int timeoutSecs)
 {
 	runner_notify_connect(r);
 
@@ -1897,11 +1897,34 @@ runner_wait_notify_goal(TestRunner *r,
 				{
 					char repP[64] = "", asgnP[64] = "";
 					if (monitor_get_node_state(r, nodeName, repP, sizeof(repP),
-											   asgnP, sizeof(asgnP)) &&
-						strcmp(repP, targetState) == 0 &&
-						strcmp(asgnP, targetState) == 0)
+											   asgnP, sizeof(asgnP)))
 					{
-						return true;
+						/*
+						 * Backfill pass-through tracking from this poll too:
+						 * if the NOTIFY for a fast intermediate state was
+						 * missed (e.g. a transient LISTEN disconnect/
+						 * reconnect, which silently drops any notification
+						 * sent while nobody was listening), this periodic
+						 * poll is the only remaining chance to observe it
+						 * before the node moves past it.
+						 */
+						for (int i = 0; i < passThroughCount; i++)
+						{
+							if (seenThrough && !seenThrough[i] &&
+								strcmp(asgnP, passThroughStates[i]) == 0)
+							{
+								log_info("wait %s: observed pass-through "
+										 "assigned-state %s (SQL poll)",
+										 nodeName, asgnP);
+								seenThrough[i] = true;
+							}
+						}
+
+						if (strcmp(repP, targetState) == 0 &&
+							strcmp(asgnP, targetState) == 0)
+						{
+							return true;
+						}
 					}
 					lastSqlPoll = sqlNow;
 				}
@@ -2114,6 +2137,104 @@ runner_wait_notify_goal(TestRunner *r,
 	}
 
 	return false;
+}
+
+
+/*
+ * runner_wait_notify_goal — wraps runner_wait_notify_goal_impl() with a
+ * retroactive backfill pass against the monitor's persistent event log
+ * (pgautofailover.event) for pass-through state tracking.
+ *
+ * The live NOTIFY-based tracking inside the impl can miss a fast transient
+ * state (report_lsn, demoted, ...): PostgreSQL never replays a NOTIFY sent
+ * while nobody was listening, so a LISTEN connection that is ever
+ * re-established mid-wait silently loses any notification sent in the gap.
+ * The impl's own periodic SQL-poll fallback (every 5s) narrows that window
+ * but cannot close it for states that live for only a second or two.
+ *
+ * pgautofailover.event durably records every FSM transition regardless of
+ * whether pgaftest observed it live.  Once the wait succeeds, a single
+ * retroactive query against that log settles pass-through tracking with
+ * certainty instead of depending on having caught the transition in real
+ * time.
+ */
+static bool
+runner_wait_notify_goal(TestRunner *r,
+						const char *nodeName,
+						const char *targetState,
+						const char passThroughStates[][64],
+						bool *seenThrough,
+						int passThroughCount,
+						int timeoutSecs)
+{
+	long long baselineEventId = -1;
+
+	if (passThroughCount > 0)
+	{
+		runner_notify_connect(r);
+
+		if (r->notifyConnected &&
+			r->notifyConn.connection != NULL &&
+			PQstatus(r->notifyConn.connection) == CONNECTION_OK)
+		{
+			PGresult *res =
+				PQexecParams(r->notifyConn.connection,
+							 "SELECT coalesce(max(eventid), 0)"
+							 "  FROM pgautofailover.event",
+							 0, NULL, NULL, NULL, NULL, 0);
+
+			if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1)
+			{
+				baselineEventId = strtoll(PQgetvalue(res, 0, 0), NULL, 10);
+			}
+			PQclear(res);
+		}
+	}
+
+	bool result = runner_wait_notify_goal_impl(r, nodeName, targetState,
+											   passThroughStates, seenThrough,
+											   passThroughCount, timeoutSecs);
+
+	if (result && passThroughCount > 0 && baselineEventId >= 0 &&
+		r->notifyConnected &&
+		r->notifyConn.connection != NULL &&
+		PQstatus(r->notifyConn.connection) == CONNECTION_OK)
+	{
+		char eventIdStr[32];
+		sformat(eventIdStr, sizeof(eventIdStr), "%lld", baselineEventId);
+
+		const char *params[2] = { nodeName, eventIdStr };
+		PGresult *res =
+			PQexecParams(r->notifyConn.connection,
+						 "SELECT DISTINCT goalstate::text"
+						 "  FROM pgautofailover.event"
+						 " WHERE nodename = $1"
+						 "   AND eventid > $2::bigint",
+						 2, NULL, params, NULL, NULL, 0);
+
+		if (PQresultStatus(res) == PGRES_TUPLES_OK)
+		{
+			for (int row = 0; row < PQntuples(res); row++)
+			{
+				const char *goal = PQgetvalue(res, row, 0);
+
+				for (int i = 0; i < passThroughCount; i++)
+				{
+					if (seenThrough && !seenThrough[i] &&
+						strcmp(goal, passThroughStates[i]) == 0)
+					{
+						log_info("wait %s: observed pass-through "
+								 "assigned-state %s (event log)",
+								 nodeName, goal);
+						seenThrough[i] = true;
+					}
+				}
+			}
+		}
+		PQclear(res);
+	}
+
+	return result;
 }
 
 
@@ -3069,6 +3190,51 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 						cmd->service, rc);
 				return false;
 			}
+
+			/*
+			 * `docker compose up -d` (and its own "Started"/"Running" status
+			 * line) returns as soon as the daemon has issued the start, not
+			 * once the container is actually registered as running -- a
+			 * following `docker exec` can still race that with "container
+			 * ... is not running" for a few hundred ms.  Poll the daemon's
+			 * own view of the container state before declaring success.
+			 */
+			{
+				bool running = false;
+				int elapsedMs = 0;
+				const int pollIntervalMs = 200;
+				const int pollTimeoutMs = 10000;
+
+				while (elapsedMs < pollTimeoutMs)
+				{
+					char state[64] = "";
+					int stateRc = run_cmd_capture(state, sizeof(state),
+												  "%s ps -q %s | "
+												  "xargs -r docker inspect "
+												  "--format '{{.State.Running}}' "
+												  "2>/dev/null",
+												  r->composeBase, cmd->service);
+
+					if (stateRc == 0 && strcmp(state, "true") == 0)
+					{
+						running = true;
+						break;
+					}
+
+					pg_usleep(pollIntervalMs * 1000);
+					elapsedMs += pollIntervalMs;
+				}
+
+				if (!running)
+				{
+					sformat(errBuf, errLen,
+							"docker compose start %s: container did not "
+							"report running within %d ms",
+							cmd->service, pollTimeoutMs);
+					return false;
+				}
+			}
+
 			return true;
 		}
 
