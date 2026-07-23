@@ -163,15 +163,16 @@ step test_005_002_fail_primary_again {
     # the failover indefinitely.
     compose start node2
     compose kill node1
-    # report_lsn is transient (milliseconds): the monitor assigns it and
-    # immediately advances to prepare_promotion.  'assigned-state = report_lsn'
-    # uses runner_wait_assigned_goal which does not pre-drain the libpq
-    # notification buffer and can miss it under load.  Use the LISTEN-driven
-    # 'state is primary passing through report_lsn' instead: runner_wait_notify_goal
-    # drains all buffered notifications on entry (catching states that came and
-    # went while the previous exec was blocked) and enforces that the monitor
-    # went through the report_lsn goal-state assignment before declaring success.
-    wait until node3 state is primary passing through report_lsn  timeout 300s
+    # report_lsn here can be transient down to microseconds: monitor logs have
+    # shown node3's own goalState/reportedState converge on report_lsn and
+    # advance to prepare_promotion within the same log timestamp (a ~17us
+    # window observed locally). No external observer -- live NOTIFY, periodic
+    # SQL polling, or a retroactive query against the monitor's persistent
+    # pgautofailover.event log -- can reliably catch a transition that fast;
+    # 'passing through report_lsn' intermittently fails here for reasons
+    # that have nothing to do with the FSM behaving correctly. Wait for the
+    # stable end state directly instead, matching test_003_001/002 above.
+    wait until node3 state is primary  timeout 300s
 }
 
 step test_005_003_bring_up_first_failed_primary {

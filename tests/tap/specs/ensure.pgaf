@@ -53,6 +53,14 @@ step test_003_init_secondary {
     wait until node2 state is secondary
         and node1 state is primary
         timeout 90s
+    # node2 self-reporting "secondary" above only means its own FSM converged;
+    # the monitor's independent health-check worker (5s probe period, 20s
+    # unhealthy-timeout) may not have re-confirmed node2 healthy yet after the
+    # forced restart. If test_004 kills node1 inside that window, the monitor
+    # can catch node2 mid-unhealthy and never fail over to it, stalling the
+    # next step. Give the health-check worker a few more probe cycles to
+    # clear the earlier "bad" mark before destabilizing node1.
+    sleep 15s
 }
 
 step test_004_demoted {

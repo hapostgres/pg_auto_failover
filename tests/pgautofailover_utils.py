@@ -616,7 +616,14 @@ class PGNode(QueryRunner):
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute(
-            "pgsetup ready", "inspect", "pgsetup", "wait", "-vvv"
+            "pgsetup ready",
+            "inspect",
+            "pgsetup",
+            "wait",
+            "-vvv",
+            "--timeout",
+            str(timeout),
+            timeout=timeout + 10,
         )
 
         return ret == 0
