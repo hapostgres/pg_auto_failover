@@ -1,6 +1,7 @@
 import tests.pgautofailover_utils as pgautofailover
 from nose.tools import *
 
+import signal
 import time
 import os.path
 
@@ -57,7 +58,13 @@ def test_003_init_secondary():
 def test_004_demoted():
     print()
     node1.stop_postgres()
-    node1.stop_pg_autoctl()
+    # SIGQUIT here, not the default SIGTERM: this test wants to simulate
+    # node1's Postgres having already crashed out from under a keeper that
+    # then also goes away abruptly, so the *next* pg_autoctl run() reports
+    # "demoted" -- SIGTERM would instead drive a graceful maintenance
+    # handoff (node1 is still primary at this point), which succeeds and
+    # never produces "demoted" at all.
+    node1.stop_pg_autoctl(sig=signal.SIGQUIT)
     # we need the pg_autoctl process to run to reach the state demoted,
     # otherwise the monitor assigns that state to node1 but we never reach
     # it
