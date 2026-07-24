@@ -410,8 +410,10 @@ cli_common_keeper_getopts(int argc, char **argv,
 			case 'G':
 			{
 				/* { "region", required_argument, NULL, 'G' } */
-				strlcpy(LocalOptionConfig.region, optarg, NAMEDATALEN);
-				log_trace("--region %s", LocalOptionConfig.region);
+				strlcpy(LocalOptionConfig.pgSetup.settings.region,
+						optarg, NAMEDATALEN);
+				log_trace("--region %s",
+						  LocalOptionConfig.pgSetup.settings.region);
 				break;
 			}
 
