@@ -2294,6 +2294,20 @@ class PGAutoCtl:
         self.stdout_path = self.datadir.rstrip("/") + ".stdout.log"
         self.stderr_path = self.datadir.rstrip("/") + ".stderr.log"
 
+        # The parent directory only exists already by accident, when some
+        # earlier step in the same test (e.g. creating the monitor) happened
+        # to create it first: nothing guarantees it in monitor-disabled
+        # tests, where this can be the very first path created under
+        # datadir's parent. Chmod it wide open: pytest itself runs as root
+        # (via plain `sudo`), so a bare os.makedirs() here leaves the
+        # directory root-owned and mode 0755 -- but pg_autoctl itself runs as
+        # the unprivileged "docker" user (via `sudo -u docker`), and needs to
+        # create its own subdirectories under the same parent (e.g. its
+        # backup directory), which then fails with "Permission denied".
+        parent_dir = os.path.dirname(self.stdout_path)
+        os.makedirs(parent_dir, exist_ok=True)
+        os.chmod(parent_dir, 0o777)
+
         self.stdout_file = open(self.stdout_path, "w")
         self.stderr_file = open(self.stderr_path, "w")
 
