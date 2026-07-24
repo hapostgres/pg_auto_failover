@@ -132,9 +132,20 @@ Manually starting/stopping a node
 
 ``compose start <service>`` / ``compose stop <service>`` (see
 :ref:`pgaftest-failure-semantics` below) are DSL keywords understood only inside a
-spec's ``step { }`` block — there is no standalone ``pgaftest compose ...``
-command to run them ad hoc from the bottom pane. To do the same thing
-interactively, without adding a step to the spec, use plain Docker Compose
+spec's ``step { }`` block. To do the same thing ad hoc from the bottom pane —
+without adding a step to the spec — use :ref:`pgaftest_compose`::
+
+   pgaftest compose stop  node2
+   pgaftest compose start node2
+   pgaftest compose kill  node2
+   pgaftest compose exec  node2  pg_autoctl show state
+
+``pgaftest compose`` resolves the spec/work-dir the same way every other
+interactive sub-command does (``PGAFTEST_SPEC`` / ``PGAFTEST_HOST_WORK_DIR``
+inside the container, or ``--work-dir`` outside it), so it works both from
+the ``pgaftest tmux`` bottom pane and directly on the host.
+
+Equivalently, the same thing can always be done with plain Docker Compose
 directly. The ``pgaftest`` service container already exports
 ``COMPOSE_PROJECT_NAME`` for you, so only ``-f`` is needed to point at the
 compose file, which lives at ``$PGAFTEST_HOST_WORK_DIR`` rather than the
@@ -179,6 +190,8 @@ Synopsis
    pgaftest show            compose|spec|steps|step|state [<spec.pgaf>]
    pgaftest sql             <node> { <query> }
    pgaftest network         disconnect|connect <node>
+   pgaftest nodeini         get <node> <key>  |  set <node> <key> <value>
+   pgaftest compose         start|stop|kill <node>  |  down  |  exec <node> <args...>
    pgaftest indent          <spec.pgaf>
    pgaftest help
 
@@ -319,6 +332,44 @@ Sub-commands for inspecting a spec or a running session:
     Print a ``Step X/N: name`` progress header followed by
     ``pg_autoctl show state`` output for the whole formation (container
     command).
+
+.. _pgaftest_nodeini:
+
+``pgaftest nodeini``
+~~~~~~~~~~~~~~~~~~~~
+
+Read or edit a node's host-side ``.ini`` ``[settings]`` entry directly,
+bypassing ``pg_autoctl`` entirely — the interactive mirror of the ``nodeini
+get``/``nodeini set`` DSL commands documented under "Node .ini file access"
+further down this page::
+
+   pgaftest nodeini get node1 region
+   pgaftest nodeini set node1 region dc2
+
+``set`` exercises the same supervisor file-watch live-apply path as the DSL
+form, the same as hand-editing the file would; ``get`` prints the value
+currently on disk, which may lag what ``pg_autoctl get node ...`` reports
+from the monitor if the supervisor hasn't picked up a recent change yet (or,
+under Docker Desktop for macOS, may never converge — same caveat as the DSL
+form).
+
+.. _pgaftest_compose:
+
+``pgaftest compose``
+~~~~~~~~~~~~~~~~~~~~~
+
+Thin wrappers around ``docker compose`` for the running stack, so you don't
+need to remember the ``-p``/``-f`` flags by hand::
+
+   pgaftest compose start <node>          # up -d --no-recreate --no-deps
+   pgaftest compose stop  <node>          # graceful (SIGTERM, grace period)
+   pgaftest compose kill  <node>          # immediate SIGKILL
+   pgaftest compose down                  # docker compose down (no teardown{})
+   pgaftest compose exec  <node> <args...>  # interactive TTY, like `docker compose exec -it`
+
+``pgaftest compose down`` only runs ``docker compose down`` — it does not run
+the spec's ``teardown {}`` block first. Use ``pgaftest cluster down`` when you
+want the teardown block to run too.
 
 
 Spec file format
@@ -478,6 +529,33 @@ Commands inside ``setup``, ``teardown``, and ``step`` blocks
    compose start <service>
    compose kill  <service>
    compose down
+
+.. _pgaftest-nodeini-dsl:
+
+**Node .ini file access**
+
+.. code-block:: text
+
+   nodeini set <node> <key> <value>
+   nodeini get <node> <key> <value>
+
+Reads or edits ``<node>``'s host-side ``pg_autoctl_node.ini`` ``[settings]``
+entry directly on the host side — the file is bind-mounted read-only inside
+the node's own container, so this can't go through ``exec``/``compose``.
+``nodeini set`` exercises the supervisor's automatic file-watch live-apply
+path (``nodespec_watcher_check()``, on a ~100ms tick), distinct from calling
+``pg_autoctl set node ...`` directly; ``nodeini get <node> <key> <value>``
+asserts the on-disk value equals ``<value>``, distinct from ``pg_autoctl get
+node ...`` which queries the running node/monitor instead of the file.
+
+.. note::
+   Under Docker Desktop for macOS (virtiofs), a host-side ``nodeini set``
+   syncs file *content* into the container immediately, but does not
+   reliably raise the inotify event the supervisor's watcher listens for —
+   so the change may never be picked up locally. This is a virtiofs/gRPC-fuse
+   gap in relaying host-originated filesystem events into the Linux guest,
+   not a bug in ``nodespec.c``. Native Linux Docker (including CI runners)
+   has no such VM boundary and picks the change up within one tick.
 
 **PostgreSQL control**
 

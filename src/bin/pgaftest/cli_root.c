@@ -970,6 +970,221 @@ cli_network(int argc, char **argv)
 
 
 /* -----------------------------------------------------------------------
+ * pgaftest nodeini get <node> <key>
+ * pgaftest nodeini set <node> <key> <value>
+ * ----------------------------------------------------------------------- */
+static void
+cli_nodeini(int argc, char **argv)
+{
+	bool isGet = (argc >= 1 && strcmp(argv[0], "get") == 0);
+	bool isSet = (argc >= 1 && strcmp(argv[0], "set") == 0);
+
+	if ((!isGet && !isSet) ||
+		(isGet && argc < 3) ||
+		(isSet && argc < 4))
+	{
+		log_error("Usage: pgaftest nodeini get <node> <key>"
+				  "  |  pgaftest nodeini set <node> <key> <value>");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	const char *nodeName = argv[1];
+	const char *key = argv[2];
+
+	resolve_interactive_context();
+
+	if (pgaftestOpts.specFile[0] == '\0')
+	{
+		log_error("No spec file: pass one as argument or set PGAFTEST_SPEC");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	TestSpec *spec = parse_test_spec(pgaftestOpts.specFile);
+	if (!spec)
+	{
+		exit(1);
+	}
+
+	if (isSet)
+	{
+		const char *value = argv[3];
+		bool ok = runner_nodeini_set(spec, pgaftestOpts.workDir,
+									 nodeName, key, value);
+		exit(ok ? 0 : 1);
+	}
+	else
+	{
+		char value[4096] = "";
+		bool ok = runner_nodeini_get(spec, pgaftestOpts.workDir,
+									 nodeName, key, value, sizeof(value));
+		if (ok)
+		{
+			fformat(stdout, "%s\n", value);
+		}
+		exit(ok ? 0 : 1);
+	}
+}
+
+
+/* -----------------------------------------------------------------------
+ * pgaftest compose start|stop|kill|down|exec — thin wrappers around
+ * `docker compose ...` for the running stack, sparing users from having to
+ * remember the -p/-f flags by hand (see the "Manually starting/stopping a
+ * node" section in docs/ref/pgaftest.rst).
+ * ----------------------------------------------------------------------- */
+static bool
+compose_base_cmd(char *buf, int buflen)
+{
+	resolve_interactive_context();
+
+	if (pgaftestOpts.workDir[0] == '\0')
+	{
+		log_error("Cannot determine work directory: "
+				  "provide --work-dir, a spec file argument, "
+				  "or run from inside the pgaftest container");
+		return false;
+	}
+
+	const char *base = strrchr(pgaftestOpts.workDir, '/');
+	const char *projectName = (base && *(base + 1)) ? base + 1
+							  : pgaftestOpts.workDir;
+
+	sformat(buf, buflen, "docker compose -p %s -f %s/docker-compose.yml",
+			projectName, pgaftestOpts.workDir);
+	return true;
+}
+
+
+static void
+cli_compose_start(int argc, char **argv)
+{
+	if (argc < 1)
+	{
+		log_error("Usage: pgaftest compose start <node>");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	char base[2048];
+	if (!compose_base_cmd(base, sizeof(base)))
+	{
+		exit(1);
+	}
+
+	/*
+	 * `up -d --no-recreate --no-deps` rather than `start`: `start` only
+	 * works for already-created containers, but a node declared with
+	 * "launch deferred" is never created during the initial compose up.
+	 */
+	char cmd[2200];
+	sformat(cmd, sizeof(cmd), "%s up -d --no-recreate --no-deps %s",
+			base, argv[0]);
+
+	int rc = system(cmd); /* IGNORE-BANNED */
+	exit(rc == 0 ? 0 : 1);
+}
+
+
+static void
+cli_compose_stop(int argc, char **argv)
+{
+	if (argc < 1)
+	{
+		log_error("Usage: pgaftest compose stop <node>");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	char base[2048];
+	if (!compose_base_cmd(base, sizeof(base)))
+	{
+		exit(1);
+	}
+
+	char cmd[2200];
+	sformat(cmd, sizeof(cmd), "%s stop %s", base, argv[0]);
+
+	int rc = system(cmd); /* IGNORE-BANNED */
+	exit(rc == 0 ? 0 : 1);
+}
+
+
+static void
+cli_compose_kill(int argc, char **argv)
+{
+	if (argc < 1)
+	{
+		log_error("Usage: pgaftest compose kill <node>");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	char base[2048];
+	if (!compose_base_cmd(base, sizeof(base)))
+	{
+		exit(1);
+	}
+
+	char cmd[2200];
+	sformat(cmd, sizeof(cmd), "%s kill %s", base, argv[0]);
+
+	int rc = system(cmd); /* IGNORE-BANNED */
+	exit(rc == 0 ? 0 : 1);
+}
+
+
+static void
+cli_compose_down(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	char base[2048];
+	if (!compose_base_cmd(base, sizeof(base)))
+	{
+		exit(1);
+	}
+
+	char cmd[2200];
+	sformat(cmd, sizeof(cmd), "%s down", base);
+
+	int rc = system(cmd); /* IGNORE-BANNED */
+	exit(rc == 0 ? 0 : 1);
+}
+
+
+static void
+cli_compose_exec(int argc, char **argv)
+{
+	if (argc < 2)
+	{
+		log_error("Usage: pgaftest compose exec <node> <args...>");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	char base[2048];
+	if (!compose_base_cmd(base, sizeof(base)))
+	{
+		exit(1);
+	}
+
+	/* re-join argv[1..] into a single shell-visible argument string */
+	char rest[4096] = "";
+	for (int i = 1; i < argc; i++)
+	{
+		if (i > 1)
+		{
+			strlcat(rest, " ", sizeof(rest));
+		}
+		strlcat(rest, argv[i], sizeof(rest));
+	}
+
+	char cmd[8192];
+	sformat(cmd, sizeof(cmd), "%s exec -it %s %s", base, argv[0], rest);
+
+	int rc = system(cmd); /* IGNORE-BANNED */
+	exit(rc == 0 ? 0 : 1);
+}
+
+
+/* -----------------------------------------------------------------------
  * Root command table
  * ----------------------------------------------------------------------- */
 
@@ -1144,6 +1359,70 @@ static CommandLine network_command =
 				 "  disconnect <node>  Sever the node's network access\n",
 				 pgaftest_getopts, cli_network);
 
+static CommandLine nodeini_command =
+	make_command("nodeini",
+				 "Read or edit a node's host-side .ini [settings] entry directly (interactive)",
+				 "get <node> <key>  |  set <node> <key> <value>",
+				 "  get <node> <key>          Print the current value\n"
+				 "  set <node> <key> <value>  Write a new value (exercises the\n"
+				 "                            supervisor's file-watch live-apply path)\n",
+				 pgaftest_getopts, cli_nodeini);
+
+static CommandLine compose_start_command =
+	make_command("start",
+				 "Start a stopped or deferred node",
+				 "<node>",
+				 "",
+				 pgaftest_getopts, cli_compose_start);
+
+static CommandLine compose_stop_command =
+	make_command("stop",
+				 "Stop a running node (graceful)",
+				 "<node>",
+				 "",
+				 pgaftest_getopts, cli_compose_stop);
+
+static CommandLine compose_kill_command =
+	make_command("kill",
+				 "Kill a running node (SIGKILL, no grace)",
+				 "<node>",
+				 "",
+				 pgaftest_getopts, cli_compose_kill);
+
+static CommandLine compose_down_command =
+	make_command("down",
+				 "Tear down the compose stack (no teardown{} block; see `pgaftest down`)",
+				 "",
+				 "",
+				 pgaftest_getopts, cli_compose_down);
+
+static CommandLine compose_exec_command =
+	make_command("exec",
+				 "Run a command inside a node's container (interactive TTY)",
+				 "<node> <args...>",
+				 "",
+				 pgaftest_getopts, cli_compose_exec);
+
+static CommandLine *compose_subcommands[] = {
+	&compose_start_command,
+	&compose_stop_command,
+	&compose_kill_command,
+	&compose_down_command,
+	&compose_exec_command,
+	NULL
+};
+
+static CommandLine compose_command =
+	make_command_set("compose",
+					 "Control individual compose services directly (interactive)",
+					 "<start|stop|kill|down|exec> <node> [args...]",
+					 "  start <node>          Start a stopped or deferred node\n"
+					 "  stop <node>           Stop a running node (graceful)\n"
+					 "  kill <node>           Kill a running node (SIGKILL)\n"
+					 "  down                  Tear down the compose stack\n"
+					 "  exec <node> <args...> Run a command inside a node's container\n",
+					 pgaftest_getopts, compose_subcommands);
+
 static void
 cli_help(int argc, char **argv)
 {
@@ -1186,6 +1465,8 @@ static CommandLine *root_subcommands[] = {
 	&indent_command,
 	&sql_command,
 	&network_command,
+	&nodeini_command,
+	&compose_command,
 	&help_command,
 	&internal_setup_command,
 	&pgaftest_demo_command,
@@ -1204,6 +1485,8 @@ CommandLine pgaftest_root =
 					 "  indent    Rewrite a spec with canonical indentation\n"
 					 "  sql       Run SQL on a node and print the result\n"
 					 "  network   Connect or disconnect a node from the network\n"
+					 "  nodeini   Read or edit a node's .ini file directly\n"
+					 "  compose   Control individual compose services (start/stop/kill/exec)\n"
 					 "  help      Show this help message\n"
 					 "  demo      Demo application\n",
 					 pgaftest_getopts, root_subcommands);

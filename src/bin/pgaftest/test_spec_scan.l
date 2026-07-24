@@ -277,6 +277,7 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"connect"       { return T_CONNECT; }
 <STEP_BODY>"sleep"         { return T_SLEEP; }
 <STEP_BODY>"compose"       { return T_COMPOSE; }
+<STEP_BODY>"nodeini"       { return T_NODEINI; }
 <STEP_BODY>"down"          { return T_DOWN; }
 <STEP_BODY>"start"         { return T_START; }
 <STEP_BODY>"stop"           { return T_STOP; }
@@ -298,6 +299,7 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"passing"[ \t\r\n]+"through"  { return T_THROUGH; }
 <STEP_BODY>"through"       { return T_THROUGH; }
 <STEP_BODY>"set"           { return T_SET; }
+<STEP_BODY>"get"           { return T_GET; }
 <STEP_BODY>"inject"        { BEGIN(EXEC_ARGS); return T_INJECT; }
 <STEP_BODY>"logs"          { return T_LOGS; }
 <STEP_BODY>"not"           { return T_NOT; }

@@ -170,6 +170,17 @@ typedef enum TestCmdKind
 	CMD_FAILOVER,        /* perform failover [in formation F] [group G]
 	                      * — calls pgautofailover.perform_failover() directly
 	                      * on the monitor; service = formation, waitGroups[0] = group */
+	CMD_NODEINI_SET,     /* nodeini set <node> <key> <value> — edits the
+	                      * node's host-side pg_autoctl_node.ini [settings]
+	                      * entry directly, exercising the supervisor's
+	                      * file-watch live-apply path (the ini is read-only
+	                      * inside the node's own container, so this can't go
+	                      * through exec/compose). service = node,
+	                      * state = key, args = value. */
+	CMD_NODEINI_GET,     /* nodeini get <node> <key> <value> — reads the
+	                      * node's host-side .ini [settings] entry directly
+	                      * and asserts it equals <value>. service = node,
+	                      * state = key, args = expected value. */
 } TestCmdKind;
 
 typedef struct TestCmd

@@ -82,76 +82,78 @@
      T_BIND_SOURCE = 298,
      T_LEGACY_STARTUP = 299,
      T_REGION = 300,
-     T_FS_INIT = 301,
-     T_FS_SINGLE = 302,
-     T_FS_PRIMARY = 303,
-     T_FS_WAIT_PRIMARY = 304,
-     T_FS_WAIT_STANDBY = 305,
-     T_FS_DEMOTED = 306,
-     T_FS_DEMOTE_TIMEOUT = 307,
-     T_FS_DRAINING = 308,
-     T_FS_SECONDARY = 309,
-     T_FS_CATCHINGUP = 310,
-     T_FS_PREP_PROMOTION = 311,
-     T_FS_STOP_REPLICATION = 312,
-     T_FS_MAINTENANCE = 313,
-     T_FS_JOIN_PRIMARY = 314,
-     T_FS_APPLY_SETTINGS = 315,
-     T_FS_PREPARE_MAINTENANCE = 316,
-     T_FS_WAIT_MAINTENANCE = 317,
-     T_FS_REPORT_LSN = 318,
-     T_FS_FAST_FORWARD = 319,
-     T_FS_JOIN_SECONDARY = 320,
-     T_FS_DROPPED = 321,
-     T_EXEC = 322,
-     T_EXEC_FAILS = 323,
-     T_RUN = 324,
-     T_PG_AUTOCTL = 325,
-     T_WAIT = 326,
-     T_UNTIL = 327,
-     T_TIMEOUT = 328,
-     T_AND = 329,
-     T_IS = 330,
-     T_WITH = 331,
-     T_ASSERT = 332,
-     T_SQL = 333,
-     T_EXPECT = 334,
-     T_ERROR = 335,
-     T_PROMOTE = 336,
-     T_PERFORM = 337,
-     T_FAILOVER = 338,
-     T_NETWORK = 339,
-     T_DISCONNECT = 340,
-     T_CONNECT = 341,
-     T_SLEEP = 342,
-     T_COMPOSE = 343,
-     T_DOWN = 344,
-     T_START = 345,
-     T_STOP = 346,
-     T_STOPPED = 347,
-     T_KILL = 348,
-     T_INJECT = 349,
-     T_STATE = 350,
-     T_ASSIGNED_STATE = 351,
-     T_IN = 352,
-     T_GROUP = 353,
-     T_LBRACE = 354,
-     T_RBRACE = 355,
-     T_COMMA = 356,
-     T_POSTGRES = 357,
-     T_STAYS = 358,
-     T_WHILE = 359,
-     T_THROUGH = 360,
-     T_SET = 361,
-     T_LOGS = 362,
-     T_NOT = 363,
-     T_CONTAINS = 364,
-     T_MATCHES = 365,
-     T_INTEGER = 366,
-     T_IDENT = 367,
-     T_STRING = 368,
-     T_BLOCK = 369,
-     T_SHELL_ARGS = 370
+     T_NODEINI = 301,
+     T_FS_INIT = 302,
+     T_FS_SINGLE = 303,
+     T_FS_PRIMARY = 304,
+     T_FS_WAIT_PRIMARY = 305,
+     T_FS_WAIT_STANDBY = 306,
+     T_FS_DEMOTED = 307,
+     T_FS_DEMOTE_TIMEOUT = 308,
+     T_FS_DRAINING = 309,
+     T_FS_SECONDARY = 310,
+     T_FS_CATCHINGUP = 311,
+     T_FS_PREP_PROMOTION = 312,
+     T_FS_STOP_REPLICATION = 313,
+     T_FS_MAINTENANCE = 314,
+     T_FS_JOIN_PRIMARY = 315,
+     T_FS_APPLY_SETTINGS = 316,
+     T_FS_PREPARE_MAINTENANCE = 317,
+     T_FS_WAIT_MAINTENANCE = 318,
+     T_FS_REPORT_LSN = 319,
+     T_FS_FAST_FORWARD = 320,
+     T_FS_JOIN_SECONDARY = 321,
+     T_FS_DROPPED = 322,
+     T_EXEC = 323,
+     T_EXEC_FAILS = 324,
+     T_RUN = 325,
+     T_PG_AUTOCTL = 326,
+     T_WAIT = 327,
+     T_UNTIL = 328,
+     T_TIMEOUT = 329,
+     T_AND = 330,
+     T_IS = 331,
+     T_WITH = 332,
+     T_ASSERT = 333,
+     T_SQL = 334,
+     T_EXPECT = 335,
+     T_ERROR = 336,
+     T_PROMOTE = 337,
+     T_PERFORM = 338,
+     T_FAILOVER = 339,
+     T_NETWORK = 340,
+     T_DISCONNECT = 341,
+     T_CONNECT = 342,
+     T_SLEEP = 343,
+     T_COMPOSE = 344,
+     T_DOWN = 345,
+     T_START = 346,
+     T_STOP = 347,
+     T_STOPPED = 348,
+     T_KILL = 349,
+     T_INJECT = 350,
+     T_STATE = 351,
+     T_ASSIGNED_STATE = 352,
+     T_IN = 353,
+     T_GROUP = 354,
+     T_LBRACE = 355,
+     T_RBRACE = 356,
+     T_COMMA = 357,
+     T_POSTGRES = 358,
+     T_STAYS = 359,
+     T_WHILE = 360,
+     T_THROUGH = 361,
+     T_SET = 362,
+     T_GET = 363,
+     T_LOGS = 364,
+     T_NOT = 365,
+     T_CONTAINS = 366,
+     T_MATCHES = 367,
+     T_INTEGER = 368,
+     T_IDENT = 369,
+     T_STRING = 370,
+     T_BLOCK = 371,
+     T_SHELL_ARGS = 372
    };
 #endif
 /* Tokens.  */
@@ -198,76 +200,78 @@
 #define T_BIND_SOURCE 298
 #define T_LEGACY_STARTUP 299
 #define T_REGION 300
-#define T_FS_INIT 301
-#define T_FS_SINGLE 302
-#define T_FS_PRIMARY 303
-#define T_FS_WAIT_PRIMARY 304
-#define T_FS_WAIT_STANDBY 305
-#define T_FS_DEMOTED 306
-#define T_FS_DEMOTE_TIMEOUT 307
-#define T_FS_DRAINING 308
-#define T_FS_SECONDARY 309
-#define T_FS_CATCHINGUP 310
-#define T_FS_PREP_PROMOTION 311
-#define T_FS_STOP_REPLICATION 312
-#define T_FS_MAINTENANCE 313
-#define T_FS_JOIN_PRIMARY 314
-#define T_FS_APPLY_SETTINGS 315
-#define T_FS_PREPARE_MAINTENANCE 316
-#define T_FS_WAIT_MAINTENANCE 317
-#define T_FS_REPORT_LSN 318
-#define T_FS_FAST_FORWARD 319
-#define T_FS_JOIN_SECONDARY 320
-#define T_FS_DROPPED 321
-#define T_EXEC 322
-#define T_EXEC_FAILS 323
-#define T_RUN 324
-#define T_PG_AUTOCTL 325
-#define T_WAIT 326
-#define T_UNTIL 327
-#define T_TIMEOUT 328
-#define T_AND 329
-#define T_IS 330
-#define T_WITH 331
-#define T_ASSERT 332
-#define T_SQL 333
-#define T_EXPECT 334
-#define T_ERROR 335
-#define T_PROMOTE 336
-#define T_PERFORM 337
-#define T_FAILOVER 338
-#define T_NETWORK 339
-#define T_DISCONNECT 340
-#define T_CONNECT 341
-#define T_SLEEP 342
-#define T_COMPOSE 343
-#define T_DOWN 344
-#define T_START 345
-#define T_STOP 346
-#define T_STOPPED 347
-#define T_KILL 348
-#define T_INJECT 349
-#define T_STATE 350
-#define T_ASSIGNED_STATE 351
-#define T_IN 352
-#define T_GROUP 353
-#define T_LBRACE 354
-#define T_RBRACE 355
-#define T_COMMA 356
-#define T_POSTGRES 357
-#define T_STAYS 358
-#define T_WHILE 359
-#define T_THROUGH 360
-#define T_SET 361
-#define T_LOGS 362
-#define T_NOT 363
-#define T_CONTAINS 364
-#define T_MATCHES 365
-#define T_INTEGER 366
-#define T_IDENT 367
-#define T_STRING 368
-#define T_BLOCK 369
-#define T_SHELL_ARGS 370
+#define T_NODEINI 301
+#define T_FS_INIT 302
+#define T_FS_SINGLE 303
+#define T_FS_PRIMARY 304
+#define T_FS_WAIT_PRIMARY 305
+#define T_FS_WAIT_STANDBY 306
+#define T_FS_DEMOTED 307
+#define T_FS_DEMOTE_TIMEOUT 308
+#define T_FS_DRAINING 309
+#define T_FS_SECONDARY 310
+#define T_FS_CATCHINGUP 311
+#define T_FS_PREP_PROMOTION 312
+#define T_FS_STOP_REPLICATION 313
+#define T_FS_MAINTENANCE 314
+#define T_FS_JOIN_PRIMARY 315
+#define T_FS_APPLY_SETTINGS 316
+#define T_FS_PREPARE_MAINTENANCE 317
+#define T_FS_WAIT_MAINTENANCE 318
+#define T_FS_REPORT_LSN 319
+#define T_FS_FAST_FORWARD 320
+#define T_FS_JOIN_SECONDARY 321
+#define T_FS_DROPPED 322
+#define T_EXEC 323
+#define T_EXEC_FAILS 324
+#define T_RUN 325
+#define T_PG_AUTOCTL 326
+#define T_WAIT 327
+#define T_UNTIL 328
+#define T_TIMEOUT 329
+#define T_AND 330
+#define T_IS 331
+#define T_WITH 332
+#define T_ASSERT 333
+#define T_SQL 334
+#define T_EXPECT 335
+#define T_ERROR 336
+#define T_PROMOTE 337
+#define T_PERFORM 338
+#define T_FAILOVER 339
+#define T_NETWORK 340
+#define T_DISCONNECT 341
+#define T_CONNECT 342
+#define T_SLEEP 343
+#define T_COMPOSE 344
+#define T_DOWN 345
+#define T_START 346
+#define T_STOP 347
+#define T_STOPPED 348
+#define T_KILL 349
+#define T_INJECT 350
+#define T_STATE 351
+#define T_ASSIGNED_STATE 352
+#define T_IN 353
+#define T_GROUP 354
+#define T_LBRACE 355
+#define T_RBRACE 356
+#define T_COMMA 357
+#define T_POSTGRES 358
+#define T_STAYS 359
+#define T_WHILE 360
+#define T_THROUGH 361
+#define T_SET 362
+#define T_GET 363
+#define T_LOGS 364
+#define T_NOT 365
+#define T_CONTAINS 366
+#define T_MATCHES 367
+#define T_INTEGER 368
+#define T_IDENT 369
+#define T_STRING 370
+#define T_BLOCK 371
+#define T_SHELL_ARGS 372
 
 
 
@@ -282,7 +286,7 @@ typedef union YYSTYPE
 	TestCmd    *cmd;
 }
 /* Line 1529 of yacc.c.  */
-#line 286 "test_spec_parse.h"
+#line 290 "test_spec_parse.h"
 	YYSTYPE;
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1
