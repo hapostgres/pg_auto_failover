@@ -152,7 +152,8 @@ node is created or started from scratch.
 ``[settings]``
 ^^^^^^^^^^^^^^
 
-Settings in this section are applied live without restarting the node.
+Most settings in this section are applied live without restarting the
+node; ``region`` is the one exception, marked as such below.
 
 ``candidate_priority``
 
@@ -163,6 +164,17 @@ Settings in this section are applied live without restarting the node.
 
   Whether this node participates in the synchronous replication quorum.
   Boolean, defaults to ``true``.  **Mutable**.
+
+``region``
+
+  Free-form label identifying the data-centre or availability zone this
+  node runs in.  Defaults to ``default``.  Read from this section, but
+  unlike ``candidate_priority`` and ``replication_quorum`` it is applied
+  only at node creation time (there is no ``pg_autoctl set node region``
+  command) — editing it in the ini file of an already-created node has no
+  effect.  Purely informational: shown as its own column by ``pg_autoctl
+  watch`` in the verbose and higher policies, and does not currently
+  affect any failover or quorum decision.
 
 ``[options]``
 ^^^^^^^^^^^^^

@@ -127,6 +127,29 @@ The top pane streams ``docker compose logs -f``.  The middle pane runs
 The ``pg_autoctl watch`` output in the top tmux pane updates in real time
 throughout this session.
 
+Manually starting/stopping a node
+----------------------------------
+
+``compose start <service>`` / ``compose stop <service>`` (see
+:ref:`pgaftest-failure-semantics` below) are DSL keywords understood only inside a
+spec's ``step { }`` block — there is no standalone ``pgaftest compose ...``
+command to run them ad hoc from the bottom pane. To do the same thing
+interactively, without adding a step to the spec, use plain Docker Compose
+directly. The ``pgaftest`` service container already exports
+``COMPOSE_PROJECT_NAME`` for you, so only ``-f`` is needed to point at the
+compose file, which lives at ``$PGAFTEST_HOST_WORK_DIR`` rather than the
+container's default working directory::
+
+   docker compose -f $PGAFTEST_HOST_WORK_DIR/docker-compose.yml stop node2
+   docker compose -f $PGAFTEST_HOST_WORK_DIR/docker-compose.yml start node2
+
+or equivalently, ``cd`` there first since the same path is bind-mounted
+identically inside and outside the container::
+
+   cd $PGAFTEST_HOST_WORK_DIR
+   docker compose stop node2
+   docker compose start node2
+
 
 Docker-out-of-Docker (DooD) architecture
 -----------------------------------------
@@ -362,6 +385,8 @@ Node modifiers:
 ============================================  =============================================
 ``async``                                     Mark as async standby (no sync quorum)
 ``candidate-priority <N>``                    Failover priority 0–100 (default: 50)
+``region <name>``                             Data-centre / availability-zone label
+                                              (``--region``; default: ``default``)
 ``launch deferred``                           Container starts with ``sleep infinity``;
                                               use ``exec node  pg_autoctl node start``
 ``coordinator`` / ``worker group <N>``        Citus role
@@ -529,6 +554,11 @@ is actually testing, not whichever one happens to make the test pass.
     monitor is unreachable, or no candidate is available), Postgres is
     simply stopped and the process exits, falling back to the monitor's own
     health-check-driven failover.
+
+    ``compose start``/``compose stop`` are DSL keywords, only usable inside
+    a spec's ``step { }`` block. To do the same thing ad hoc from the
+    ``pgaftest tmux`` bottom pane, see `Manually starting/stopping a node`_
+    above.
 
 ``compose kill <service>``
     ``docker compose kill`` — immediate SIGKILL, no grace period at all.
