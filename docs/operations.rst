@@ -204,6 +204,16 @@ following examples we're directly connecting as the ``autoctl`` role.
 The main operations with pg_auto_failover are node maintenance and manual
 failover, also known as a controlled switchover.
 
+.. note::
+
+   A plain ``pg_autoctl stop`` (a graceful ``SIGTERM``, see
+   :ref:`pg_autoctl_stop`) requests maintenance the same way as the manual
+   ``pg_autoctl enable maintenance`` commands shown below, automatically,
+   on the node's own behalf before stopping. This section covers the
+   manual commands for when you want a node to stay registered in
+   maintenance mode independently of a restart, e.g. for a longer OS
+   maintenance window.
+
 Maintenance of a secondary node
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

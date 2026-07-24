@@ -111,7 +111,8 @@ For container and Kubernetes deployments, systemd is not used.  Instead,
 then exec's into the supervisor.  The standard Unix signal contract
 (``SIGTERM`` to stop, ``SIGHUP`` to reload) is preserved because the
 supervisor becomes the direct child process.  See :ref:`pg_autoctl_node`
-for the full reference.
+for the full reference, and :ref:`pg_autoctl_stop` for what a graceful
+``SIGTERM`` actually does before the node stops.
 
 
 Building pg_auto_failover from sources

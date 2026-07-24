@@ -519,13 +519,16 @@ is actually testing, not whichever one happens to make the test pass.
     ``docker compose stop`` — SIGTERM to the container's PID 1
     (``pg_autoctl``), which forwards a plain SIGTERM to the node-active
     (keeper) service only (a grace period applies before Docker escalates to
-    SIGKILL). Exercises graceful shutdown: for a primary, the keeper calls
-    ``start_maintenance()`` on its own behalf and hands off to a standby
-    through the ordinary maintenance FSM (``prepare_maintenance`` ->
-    ``maintenance``), the same transitions an operator-run ``pg_autoctl
-    enable maintenance --allow-failover`` would drive. For anything else
-    (a secondary, or a primary maintenance can't be started for), Postgres
-    is simply stopped and the process exits.
+    SIGKILL). Exercises graceful shutdown: for a primary, secondary, or
+    catching-up node, the keeper calls ``start_maintenance()`` on its own
+    behalf and drives the ordinary maintenance FSM (``prepare_maintenance``
+    -> ``maintenance`` for a primary, straight to ``maintenance`` or via
+    ``wait_maintenance`` for a secondary/catching-up node), the same
+    transitions an operator-run ``pg_autoctl enable maintenance
+    --allow-failover`` would drive. If maintenance can't be started (the
+    monitor is unreachable, or no candidate is available), Postgres is
+    simply stopped and the process exits, falling back to the monitor's own
+    health-check-driven failover.
 
 ``compose kill <service>``
     ``docker compose kill`` — immediate SIGKILL, no grace period at all.

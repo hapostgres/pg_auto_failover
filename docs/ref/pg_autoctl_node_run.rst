@@ -40,7 +40,8 @@ deployments. Given a ``pg_autoctl_node.ini`` file it:
 Because the command uses ``execv()``, the pg_autoctl supervisor becomes
 the direct child process (PID 1 in a container), preserving the standard
 Unix signal contract — ``SIGTERM`` stops the supervisor cleanly,
-``SIGHUP`` reloads configuration.
+``SIGHUP`` reloads configuration. See :ref:`pg_autoctl_stop` for what a
+graceful ``SIGTERM`` actually does before the node stops.
 
 The ``launch = deferred`` pattern
 ----------------------------------
