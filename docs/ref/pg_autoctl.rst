@@ -73,6 +73,7 @@ pg_autoctl provides the following commands::
   pg_autoctl get node
     replication-quorum  get replication-quorum property from the monitor
     candidate-priority  get candidate property from the monitor
+    region              get region property from the monitor
 
   pg_autoctl get formation
     settings              get replication settings for a formation from the monitor
@@ -86,6 +87,7 @@ pg_autoctl provides the following commands::
     metadata            set metadata on the monitor
     replication-quorum  set replication-quorum property on the monitor
     candidate-priority  set candidate property on the monitor
+    region              set region property on the monitor
 
   pg_autoctl set formation
     number-sync-standbys  set number-sync-standbys for a formation on the monitor

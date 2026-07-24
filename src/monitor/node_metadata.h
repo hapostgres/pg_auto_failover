@@ -234,6 +234,10 @@ extern void ReportAutoFailoverNodeReplicationSetting(int64 nodeid,
 													 int nodePort,
 													 int candidatePriority,
 													 bool replicationQuorum);
+extern void ReportAutoFailoverNodeRegion(int64 nodeid,
+										 char *nodeHost,
+										 int nodePort,
+										 char *region);
 extern void UpdateAutoFailoverNodeMetadata(int64 nodeid,
 										   char *nodeName,
 										   char *nodeHost,
