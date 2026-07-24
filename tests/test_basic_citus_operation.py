@@ -2,6 +2,7 @@ import tests.pgautofailover_utils as pgautofailover
 from nose.tools import eq_
 
 import os.path
+import signal
 import time
 import subprocess
 import pprint
@@ -225,7 +226,15 @@ def test_012_perform_failover_worker2():
 def test_013_perform_failover_worker2b_draining():
     print()
 
-    worker2a.stop_pg_autoctl()
+    # SIGQUIT here, not the default SIGTERM: this test wants worker2a (the
+    # secondary) simply down while a failover is forced on the monitor, to
+    # reproduce the historical get_primary() race described above. SIGTERM
+    # would instead drive worker2a into maintenance, which -- since it's the
+    # only secondary with number_sync_standbys=0 -- also forces worker2b's
+    # goal state to wait_primary as a side effect, so the very next
+    # perform_failover() call fails outright with "couldn't find the primary
+    # node" instead of reproducing the race this test is about.
+    worker2a.stop_pg_autoctl(sig=signal.SIGQUIT)
 
     print("Calling pgautofailover.failover(group => 2) on the monitor")
     cluster.monitor.failover(group=2)

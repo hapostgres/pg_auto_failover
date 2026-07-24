@@ -1647,6 +1647,23 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 		args[argsIndex++] = "-h";
 		args[argsIndex++] = (char *) listen_addresses;
 	}
+	else if (env_found_empty("PG_REGRESS_SOCK_DIR"))
+	{
+		/*
+		 * PG_REGRESS_SOCK_DIR="" means unix sockets are unavailable in this
+		 * environment (see pg_setup_get_local_connection_string, which then
+		 * forces client connections to use "host=localhost" instead). If we
+		 * also pass an empty listen_addresses here, postgres has no way to
+		 * create any socket at all -- TCP disabled by "-h ''", unix socket
+		 * disabled by the "-k" added below -- and fails outright with
+		 * "FATAL: no socket created for listening", even though nothing
+		 * external is meant to connect to it in this "do not open the
+		 * service just yet" mode. Fall back to the loopback interface only,
+		 * matching the same PG_REGRESS_SOCK_DIR convention used elsewhere.
+		 */
+		args[argsIndex++] = "-h";
+		args[argsIndex++] = "localhost";
+	}
 	else
 	{
 		args[argsIndex++] = "-h";

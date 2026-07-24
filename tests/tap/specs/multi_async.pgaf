@@ -148,8 +148,11 @@ step test_013_drop_node4 {
 }
 
 step test_014_001_fail_node1 {
+    # With 3+ nodes in the group, the candidate election goes through
+    # ProceedGroupStateForMSFailover()'s report_lsn-based path (not
+    # stop_replication, which is only used by the direct 2-node promotion) --
+    # assert only the stable end state, not an intermediate one.
     compose stop node1
-    wait until node2 state is stop_replication  timeout 120s
     wait until node2 state is wait_primary
         and node3 state is secondary
         timeout 120s

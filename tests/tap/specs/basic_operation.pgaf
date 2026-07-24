@@ -43,12 +43,15 @@ teardown {
 # sequence), so the keeper's local "ensure" restart never races against a
 # synchronous secondary.  This spec's setup{} brings up all three nodes
 # upfront, so node1 already has a synchronous secondary (node2) by the time
-# any step runs; stopping node1's Postgres there reliably triggers a real
-# failover (node1 primary -> draining -> demoted, node2 -> primary) rather
-# than a quiet local self-heal — that scenario is already covered by
-# test_010/test_012 (compose stop, the SIGTERM path).  ensure.pgaf's
-# test_003_init_secondary covers the true "external stop, keeper
-# self-heals" case on a standby, where it doesn't trigger a failover.
+# any step runs; stopping node1's Postgres there (bypassing pg_autoctl,
+# e.g. a raw pg_ctl stop) reliably triggers a real failover (node1 primary
+# -> draining -> demoted, node2 -> primary) rather than a quiet local
+# self-heal — that scenario is already covered, via a different mechanism
+# (a graceful SIGTERM-driven maintenance handoff rather than an unexpected
+# Postgres death), by test_010/test_012 (compose stop, see the comment
+# there).  ensure.pgaf's test_003_init_secondary covers the true "external
+# stop, keeper self-heals" case on a standby, where it doesn't trigger a
+# failover.
 #
 
 #
@@ -182,12 +185,17 @@ step test_009_failback {
 }
 
 #
-# test_010: stop node1 (primary) via compose stop — Postgres shuts down
-#           cleanly.  Matches the Python predecessor's node1.fail(), which
-#           sends SIGTERM to pg_autoctl then a "pg_ctl fast stop" to
-#           Postgres — a graceful process-level stop, not a network
-#           partition.  (Partition detection has its own dedicated test:
-#           see test_021-023 below, ported from ifdown()/ifup().)
+# test_010: stop node1 (primary) via compose stop — a plain SIGTERM to
+#           pg_autoctl, which now drives a graceful maintenance handoff: the
+#           keeper calls start_maintenance() on its own behalf, transitions
+#           primary -> prepare_maintenance -> maintenance (stopping Postgres
+#           as part of that), and node2 is promoted the same way it would be
+#           for an operator-run `pg_autoctl enable maintenance
+#           --allow-failover`.  This is a graceful process-level stop, not a
+#           network partition (partition detection has its own dedicated
+#           test: see test_021-023 below, ported from ifdown()/ifup()), and
+#           it no longer matches the Python predecessor's node1.fail(),
+#           which now defaults to SIGQUIT to simulate a hard crash instead.
 #
 
 step test_010_fail_primary {

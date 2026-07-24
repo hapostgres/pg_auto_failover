@@ -169,8 +169,11 @@ def test_009_read_from_new_primary():
 
 
 def test_010_start_node1_again():
-    node1.run()
-    assert node1.wait_until_state(target_state="secondary")
+    # node1 was hard-killed in test_008 (node1.fail()); restarting it right
+    # after occasionally hits a Postgres bind race in this test harness (see
+    # run_and_wait_with_retry()'s docstring), so retry the restart itself
+    # rather than a plain node1.run().
+    assert node1.run_and_wait_with_retry(target_state="secondary")
 
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")

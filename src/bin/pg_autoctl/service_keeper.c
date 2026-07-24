@@ -25,6 +25,7 @@
 #include "monitor.h"
 #include "pgctl.h"
 #include "pidfile.h"
+#include "primary_standby.h"
 #include "service_keeper.h"
 #include "service_postgres_ctl.h"
 #include "signals.h"
@@ -61,6 +62,9 @@ static void check_for_network_partitions(Keeper *keeper);
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 								 int networkPartitionTimeout);
+static void keeper_graceful_shutdown(Keeper *keeper);
+static bool keeper_shutdown_via_maintenance(Keeper *keeper);
+static void keeper_auto_recover_shutdown_maintenance(Keeper *keeper);
 
 
 /*
@@ -240,17 +244,77 @@ service_keeper_node_active_init(Keeper *keeper)
 		exit(EXIT_CODE_PGCTL);
 	}
 
+	(void) keeper_auto_recover_shutdown_maintenance(keeper);
+
 	return true;
 }
 
 
 /*
- * keeper_node_active_shutdown_loop sends node_active reports to the monitor
- * every second for up to KEEPER_SHUTDOWN_LOOP_MAX_SECS while PostgreSQL stops.
+ * keeper_auto_recover_shutdown_maintenance runs once at node-active service
+ * startup, right after the keeper state has been loaded. If the previous
+ * run's graceful shutdown got far enough to persist
+ * maintenanceEnteredOnShutdown (see keeper_shutdown_via_maintenance()),
+ * this node's own SIGTERM handling entered maintenance on its own behalf --
+ * as opposed to an operator running `pg_autoctl enable maintenance` -- so it
+ * should self-clear here rather than waiting for an explicit
+ * `pg_autoctl disable maintenance`.
  *
- * This runs after the main node-active loop exits on SIGTERM, concurrently
- * with the postgres-controller service (a sibling process) calling
- * "pg_ctl stop -m fast".
+ * monitor_stop_maintenance() has its own precondition check on the monitor
+ * side (the node must currently be in MAINTENANCE_STATE or
+ * PREPARE_MAINTENANCE_STATE): calling it when the node has already left
+ * maintenance by some other means (an operator already disabled it, or the
+ * state was never actually committed on the monitor side because the
+ * process was killed between persisting this flag and the
+ * start_maintenance() call landing) is expected to be a harmless no-op or
+ * error, logged but not treated as fatal here. Either way the flag is
+ * cleared and persisted immediately, so this only ever attempts the
+ * auto-recovery once per shutdown.
+ */
+static void
+keeper_auto_recover_shutdown_maintenance(Keeper *keeper)
+{
+	KeeperStateData *keeperState = &(keeper->state);
+
+	if (!keeperState->maintenanceEnteredOnShutdown ||
+		keeper->config.monitorDisabled)
+	{
+		return;
+	}
+
+	log_info("This node entered maintenance as part of its own graceful "
+			 "shutdown; automatically disabling maintenance now");
+
+	bool mayRetry = false;
+
+	if (!monitor_stop_maintenance(&(keeper->monitor),
+								  keeperState->current_node_id,
+								  &mayRetry))
+	{
+		log_warn("Failed to automatically disable maintenance for this "
+				 "node; if it is still in maintenance, run "
+				 "`pg_autoctl disable maintenance` manually");
+	}
+
+	keeperState->maintenanceEnteredOnShutdown = false;
+	(void) keeper_store_state(keeper);
+}
+
+
+/*
+ * keeper_node_active_shutdown_loop sends node_active reports to the monitor
+ * every second for up to KEEPER_SHUTDOWN_LOOP_MAX_SECS, confirming Postgres
+ * has stopped.
+ *
+ * This is the fallback path for a plain SIGTERM shutdown, used when
+ * keeper_shutdown_via_maintenance() could not be used (not currently a
+ * primary, monitor disabled, or start_maintenance() itself failed, e.g. no
+ * candidate is available to take over). The caller, keeper_graceful_
+ * shutdown(), calls ensure_postgres_service_is_stopped() before this loop
+ * runs: unlike before, the Postgres-controller sibling process is not
+ * directly signalled by the supervisor on a plain SIGTERM (see
+ * supervisor_stop_subprocesses()), so nothing else would stop Postgres on
+ * its own if we didn't.
  *
  * When SIGTERM reaches the postmaster, process_pm_shutdown_request()
  * (src/backend/postmaster/postmaster.c) sets Shutdown = FastShutdown and
@@ -263,20 +327,41 @@ service_keeper_node_active_init(Keeper *keeper)
  * By continuing to call node_active with the current pgIsRunning value here,
  * we ensure the monitor learns the primary is going away within one second of
  * the shutdown starting, and can begin failover right away rather than waiting
- * for a health-check timeout.
+ * for a health-check timeout. In the ordinary case Postgres is already down
+ * by the time this loop starts, so its first iteration reports that and
+ * returns immediately; the loop only runs longer if the stop is still in
+ * flight or slow to confirm, or if reporting itself fails.
+ *
+ * The 1-second cadence only applies while Postgres is still going down: once
+ * pgIsRunning is observed false, there is no more urgency, so the loop backs
+ * off to a KEEPER_SHUTDOWN_LOOP_STOPPED_REPORT_INTERVAL_SECS-second retry
+ * cadence for the rest of its time budget. That slow phase only runs at all
+ * when the report carrying pgIsRunning=false itself failed to reach the
+ * monitor (a transient connection issue, say) -- it exists as insurance for
+ * that case, not as a normal path.
+ *
+ * That insurance is bounded to KEEPER_SHUTDOWN_STOPPED_REPORT_MAX_ATTEMPTS
+ * attempts once Postgres is confirmed stopped, rather than running for the
+ * full KEEPER_SHUTDOWN_LOOP_MAX_SECS budget: a genuinely unreachable monitor
+ * (as opposed to a momentary blip) means every attempt pays a full
+ * connection-timeout's worth of time (which can itself be several seconds),
+ * and Postgres being down locally is already the main thing this function
+ * exists to ensure -- there is no reason to hold up the rest of the shutdown
+ * for many multiples of that timeout just to keep trying to tell a monitor
+ * that is not there to listen.
  */
-#define KEEPER_SHUTDOWN_LOOP_MAX_SECS 30
-
 static void
 keeper_node_active_shutdown_loop(Keeper *keeper)
 {
 	LocalPostgresServer *postgres = &(keeper->postgres);
+	time_t start = time(NULL);
+	int stoppedReportAttempts = 0;
 
 	log_info("Graceful shutdown: reporting node state to monitor "
 			 "while PostgreSQL stops (up to %d seconds)",
 			 KEEPER_SHUTDOWN_LOOP_MAX_SECS);
 
-	for (int i = 0; i < KEEPER_SHUTDOWN_LOOP_MAX_SECS; i++)
+	while (time(NULL) - start < KEEPER_SHUTDOWN_LOOP_MAX_SECS)
 	{
 		/* escalated signal: exit without further reporting */
 		if (asked_to_quit || asked_to_stop_fast)
@@ -285,17 +370,235 @@ keeper_node_active_shutdown_loop(Keeper *keeper)
 		}
 
 		(void) keeper_update_pg_state(keeper, LOG_DEBUG);
-		(void) service_keeper_node_active(keeper, false);
+		bool reported = service_keeper_node_active(keeper, false);
 
 		if (!postgres->pgIsRunning)
 		{
-			log_info("PostgreSQL has stopped; "
-					 "final node_active report sent to monitor");
+			if (reported)
+			{
+				log_info("PostgreSQL has stopped; "
+						 "final node_active report sent to monitor");
+				break;
+			}
+
+			if (++stoppedReportAttempts >= KEEPER_SHUTDOWN_STOPPED_REPORT_MAX_ATTEMPTS)
+			{
+				log_warn("PostgreSQL has stopped, but the final node_active "
+						 "report could not be delivered after %d attempts; "
+						 "exiting anyway",
+						 stoppedReportAttempts);
+				break;
+			}
+		}
+
+		int sleepSecs = postgres->pgIsRunning
+						? 1
+						: KEEPER_SHUTDOWN_LOOP_STOPPED_REPORT_INTERVAL_SECS;
+
+		pg_usleep(sleepSecs * 1000000L);
+	}
+}
+
+
+/*
+ * keeper_shutdown_via_maintenance implements a graceful shutdown by calling
+ * start_maintenance() on the node's own behalf -- the same monitor call
+ * `pg_autoctl enable maintenance [--allow-failover]` already uses -- then
+ * driving the ordinary FSM towards maintenance with the same
+ * keeper_fsm_step() primitive used by `pg_autoctl do fsm step`.
+ *
+ * This covers both roles start_maintenance() accepts:
+ *
+ *  - a primary (PRIMARY_STATE -> prepare_maintenance -> maintenance),
+ *    promoting a standby in the process;
+ *
+ *  - a secondary or catching-up standby (SECONDARY_STATE/CATCHINGUP_STATE ->
+ *    [wait_maintenance ->] maintenance), which prompts the primary to drop
+ *    it from the replication quorum immediately instead of only noticing
+ *    once the monitor's health check times out -- the same rationale as the
+ *    primary case, just for the standby side of a graceful stop.
+ *
+ * start_maintenance() itself decides which of these applies (and whether an
+ * intermediate wait_maintenance/prepare_maintenance step happens at all)
+ * based on the node's currently reported state; this function only drives
+ * whichever FSM path results, via keeper_fsm_step().
+ *
+ * Routing the shutdown through maintenance means Postgres gets stopped by
+ * the ordinary FSM action functions (fsm_stop_postgres_for_primary_
+ * maintenance for a primary, fsm_start_maintenance_on_standby for a
+ * secondary), via the existing keeper/Postgres-controller state-file
+ * protocol (ensure_postgres_service_is_stopped()). No new coordination with
+ * the sibling Postgres-controller process is needed. For a primary, it is
+ * also excluded from candidate selection from the moment the monitor
+ * assigns PREPARE_MAINTENANCE_STATE -- structurally, not by timing luck,
+ * unlike the old draining/demote_timeout path (see BuildCandidateList()'s
+ * "skip old/new primary unless draining/demoted" exemption, which does not
+ * extend to the maintenance states).
+ *
+ * Returns false only when start_maintenance() itself could not be called at
+ * all (e.g. no candidate available for a primary, or for a secondary, the
+ * primary isn't currently stable enough to accept the quorum change), in
+ * which case the caller falls back to today's shutdown-reporting behaviour.
+ * A timeout or an escalated signal arriving mid-transition also returns
+ * false, as a safety net: if maintenanceEnteredOnShutdown was already
+ * persisted by that point, the flag still drives the auto
+ * stop_maintenance() call on next startup regardless of whether this
+ * function itself reported success.
+ *
+ * Once current_role locally reaches MAINTENANCE_STATE, one more
+ * keeper_fsm_step() call is made before returning: monitor_node_active()
+ * reports the state as of the *start* of each step, before that step's own
+ * transition runs, so the step that transitions into maintenance still only
+ * reports the prior state (wait_maintenance or prepare_maintenance) to the
+ * monitor. Skipping this extra call would exit with the monitor's
+ * reportedState never having caught up to "maintenance" -- and
+ * stop_maintenance() rejects a node whose reportedState isn't "maintenance"
+ * outright, so keeper_auto_recover_shutdown_maintenance() on next startup
+ * would fail every time, leaving the node stuck in maintenance until a
+ * manual `pg_autoctl disable maintenance`.
+ */
+static bool
+keeper_shutdown_via_maintenance(Keeper *keeper)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperStateData *keeperState = &(keeper->state);
+	bool mayRetry = false;
+
+	if (!monitor_start_maintenance(monitor, keeperState->current_node_id,
+								   &mayRetry))
+	{
+		log_warn("Failed to enter maintenance for a graceful shutdown, "
+				 "likely because there is no candidate currently available "
+				 "to take over, or the primary is not currently stable");
+		return false;
+	}
+
+	log_info("Graceful shutdown: requested maintenance (up to %d seconds)",
+			 KEEPER_MAINTENANCE_SHUTDOWN_LOOP_MAX_SECS);
+
+	for (int i = 0; i < KEEPER_MAINTENANCE_SHUTDOWN_LOOP_MAX_SECS; i++)
+	{
+		/* escalated signal: stop driving the FSM, let the caller take over */
+		if (asked_to_quit || asked_to_stop_fast)
+		{
 			break;
+		}
+
+		if (!keeper_fsm_step(keeper))
+		{
+			/* errors have already been logged, try again next second */
+			pg_usleep(1000000L);
+			continue;
+		}
+
+		/*
+		 * Flag as soon as we're committed to maintenance, not only once
+		 * fully there: a primary always passes through prepare_maintenance
+		 * first, and a secondary sometimes passes through wait_maintenance
+		 * first, but a secondary that isn't the last quorum member goes
+		 * SECONDARY/CATCHINGUP -> MAINTENANCE directly in one step, with no
+		 * intermediate state to catch here -- hence also checking
+		 * MAINTENANCE_STATE itself, not just the two "in progress" states.
+		 */
+		if (!keeperState->maintenanceEnteredOnShutdown &&
+			(keeperState->current_role == PREPARE_MAINTENANCE_STATE ||
+			 keeperState->current_role == WAIT_MAINTENANCE_STATE ||
+			 keeperState->current_role == MAINTENANCE_STATE))
+		{
+			keeperState->maintenanceEnteredOnShutdown = true;
+			(void) keeper_store_state(keeper);
+		}
+
+		if (keeperState->current_role == MAINTENANCE_STATE)
+		{
+			log_info("Reached maintenance; PostgreSQL has stopped");
+
+			/*
+			 * Report the new current_role to the monitor before exiting
+			 * (see the doc comment above): this step's own transition, if
+			 * any, is a no-op since assigned_role already equals
+			 * current_role at this point. Best-effort: even if this fails,
+			 * maintenanceEnteredOnShutdown is already persisted, and the
+			 * auto-recovery attempt on next startup logs its own warning
+			 * rather than looping here.
+			 */
+			(void) keeper_fsm_step(keeper);
+
+			return true;
 		}
 
 		pg_usleep(1000000L); /* 1 second */
 	}
+
+	log_warn("Did not reach maintenance within %d seconds, "
+			 "falling back to reporting the shutdown state",
+			 KEEPER_MAINTENANCE_SHUTDOWN_LOOP_MAX_SECS);
+
+	return false;
+}
+
+
+/*
+ * keeper_graceful_shutdown implements pg_autoctl's response to a plain
+ * SIGTERM, once the main node-active loop has exited because asked_to_stop
+ * was set (and neither asked_to_stop_fast nor asked_to_quit).
+ *
+ * Since supervisor_stop_subprocesses() (supervisor.c) now forwards a plain
+ * SIGTERM to the node-active service only, the Postgres-controller sibling
+ * process is not directly signalled and won't stop Postgres on its own
+ * initiative as it used to: it only reacts to the keeper/controller
+ * state-file protocol. This function is therefore responsible for making
+ * sure Postgres actually stops as part of a graceful shutdown, one way or
+ * another, before the node-active process exits.
+ */
+static void
+keeper_graceful_shutdown(Keeper *keeper)
+{
+	KeeperStateData *keeperState = &(keeper->state);
+
+	/*
+	 * PRIMARY_STATE, SECONDARY_STATE, and CATCHINGUP_STATE are exactly the
+	 * roles start_maintenance() accepts (see node_active_protocol.c's
+	 * start_maintenance(): IsCurrentState(primary) or reportedState in
+	 * {secondary, catchingup}) -- every other current_role would just make
+	 * that monitor call fail outright, so there is no point attempting it.
+	 */
+	bool canAttemptMaintenance =
+		(keeperState->current_role == PRIMARY_STATE ||
+		 keeperState->current_role == SECONDARY_STATE ||
+		 keeperState->current_role == CATCHINGUP_STATE) &&
+		!keeper->config.monitorDisabled;
+
+	if (canAttemptMaintenance)
+	{
+		if (keeper_shutdown_via_maintenance(keeper))
+		{
+			/*
+			 * The FSM's own maintenance action function (fsm_stop_postgres_
+			 * for_primary_maintenance or fsm_start_maintenance_on_standby)
+			 * already stopped Postgres as part of reaching maintenance.
+			 */
+			return;
+		}
+	}
+
+	/*
+	 * Whether we're not a primary, the monitor is disabled, or maintenance
+	 * could not be used: make sure Postgres actually stops now, using the
+	 * same state-file protocol any other FSM transition relies on. This is
+	 * a no-op if Postgres is already stopped (e.g. maintenance got far
+	 * enough to stop it before timing out above).
+	 *
+	 * This must happen before keeper_node_active_shutdown_loop() below, not
+	 * after: that loop only reports state and waits for pgIsRunning to go
+	 * false, and nothing else is going to make that happen on its own
+	 * anymore. Stopping Postgres first means the loop's first iteration
+	 * typically already observes it down and returns immediately, instead
+	 * of always running for its full duration.
+	 */
+	(void) ensure_postgres_service_is_stopped(&(keeper->postgres));
+
+	(void) keeper_node_active_shutdown_loop(keeper);
 }
 
 
@@ -715,13 +1018,14 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	}
 
 	/*
-	 * Graceful SIGTERM shutdown: keep reporting state to the monitor while
-	 * PostgreSQL finishes its checkpoint and stops.  Skip on SIGINT/SIGQUIT
-	 * which request immediate exit.
+	 * Graceful SIGTERM shutdown: route a primary through maintenance so a
+	 * standby can take over immediately, or otherwise make sure Postgres
+	 * stops as part of our own exit.  Skip on SIGINT/SIGQUIT which request
+	 * immediate exit.
 	 */
 	if (asked_to_stop && !asked_to_stop_fast && !asked_to_quit)
 	{
-		(void) keeper_node_active_shutdown_loop(keeper);
+		(void) keeper_graceful_shutdown(keeper);
 	}
 
 	/* One last check that we do not have any connections open */
