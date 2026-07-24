@@ -517,7 +517,9 @@ class PGNode(QueryRunner):
 
     def stop_pg_autoctl(self, sig=signal.SIGTERM):
         """
-        Kills the keeper by sending "sig" to keeper's process group.
+        Kills the keeper by sending "sig" to keeper's process group. Default
+        SIGTERM is a graceful stop, used by tests that want a plain
+        restart (not a simulated failure -- see DataNode.fail() for that).
         See PGAutoCtl.stop() for what signal choice controls.
         """
         if self.pg_autoctl:
@@ -628,20 +630,26 @@ class PGNode(QueryRunner):
 
         return ret == 0
 
-    def fail(self, sig=signal.SIGTERM):
+    def fail(self, sig=signal.SIGQUIT):
         """
         Simulates a data node failure by terminating the keeper and stopping
         postgres.
 
-        Default SIGTERM triggers pg_autoctl's graceful shutdown reporting
-        (see PGAutoCtl.stop()) -- fine for most tests, but it means the
-        node can keep participating in FSM transitions for a few seconds
-        after fail() returns, with timing that depends on how long
-        PostgreSQL's own shutdown checkpoint takes. Tests asserting on a
-        node being permanently excluded from candidate selection right
-        after a failure (e.g. a quorum stall with no other node to satisfy
-        it) should pass sig=signal.SIGINT/SIGQUIT for a true hard-crash
-        simulation instead.
+        Default SIGQUIT exits immediately, without running pg_autoctl's own
+        signal handler cleanup (see PGAutoCtl.stop()) -- the closest
+        simulation of a real crash. SIGTERM is no longer a hard-crash
+        simulation: it now triggers a graceful shutdown that, for a primary,
+        requests maintenance so a standby can take over immediately (see
+        keeper_shutdown_via_maintenance() in service_keeper.c); most tests
+        asserting on a node being permanently excluded from candidate
+        selection right after a failure need the default here, not SIGTERM.
+
+        If a specific test turns out to be flaky with SIGQUIT (too little
+        control over exactly how abruptly the process exits), pass
+        sig=signal.SIGINT instead: it is still an immediate exit request that
+        bypasses the graceful/maintenance path, but runs one more loop
+        iteration and a clean libpq disconnect before exiting, which can be
+        easier to reason about under test-timing pressure.
         """
         self.stop_pg_autoctl(sig)
 
@@ -1182,6 +1190,76 @@ class DataNode(PGNode, StatefulNode):
         self.listen_flag = listen_flag
         self.formation = formation
         self.monitorDisabled = None
+
+    def run_and_wait_with_retry(
+        self,
+        target_state,
+        timeout=STATE_CHANGE_TIMEOUT,
+        retries=3,
+        name=None,
+        host=None,
+        port=None,
+    ):
+        """
+        Runs pg_autoctl and waits for this node to reach target_state,
+        restarting (not just re-waiting) up to `retries` times if it
+        doesn't get there.
+
+        This exists for restarting a node after a hard-crash simulation
+        (node.fail()): Postgres occasionally fails to (re)bind its port
+        with "no socket created for listening" even though nothing else
+        holds it -- suspected to be a pyroute2/network-namespace-
+        attachment race in this test harness's per-node namespace
+        simulation, not a pg_autoctl bug, since the port is confirmed
+        free at the OS level when this happens. pg_autoctl's own keeper
+        does not retry that internally, so plain node.run() can get
+        stuck. Use this instead of a plain node.run() wherever a test
+        restarts a node that was previously killed hard.
+        """
+        per_attempt_timeout = max(timeout // retries, 30)
+
+        for attempt in range(1, retries + 1):
+            self.run(name=name, host=host, port=port)
+
+            if self.wait_until_state(
+                target_state=target_state, timeout=per_attempt_timeout
+            ):
+                return True
+
+            print(
+                "%s did not reach '%s' within %ds (attempt %d/%d), "
+                "restarting and retrying"
+                % (
+                    self.logger_name(),
+                    target_state,
+                    per_attempt_timeout,
+                    attempt,
+                    retries,
+                )
+            )
+
+            # the stuck attempt's pg_autoctl may not be responsive to a
+            # plain stop if it's wedged on the failed bind; fail() (SIGQUIT,
+            # then a direct Postgres stop if needed) is more likely to
+            # actually free the pgdata lock before the next attempt.
+            #
+            # fail() itself can raise subprocess.TimeoutExpired here: its
+            # underlying Cluster.communicate() waits up to its own timeout
+            # in 1-second steps, then makes one last attempt with whatever
+            # is left of the budget, which by then can be ~0 (or a tiny
+            # negative float from rounding) and raise even though the
+            # SIGQUIT'd process is, in practice, already gone -- that's a
+            # pre-existing quirk of that helper, unrelated to the bind race
+            # this method exists for. Don't let it abort the retry loop.
+            try:
+                self.fail()
+            except subprocess.TimeoutExpired as e:
+                print(
+                    "%s: cleanup before retry raised %s (continuing anyway)"
+                    % (self.logger_name(), e)
+                )
+
+        return False
 
     def create(
         self,
@@ -2131,6 +2209,14 @@ class PGAutoCtl:
         self.err = ""
         self.cmd = ""
 
+        # Only set by run(): stdout/stderr log files for the long-running
+        # background process it starts, in place of pipes (see its
+        # docstring). None for anything started via execute() instead.
+        self.stdout_path = None
+        self.stderr_path = None
+        self.stdout_file = None
+        self.stderr_file = None
+
         if argv:
             self.command = [self.program] + argv
 
@@ -2164,7 +2250,29 @@ class PGAutoCtl:
         if self.run_proc:
             self.run_proc.release()
 
-        self.run_proc = self.vnode.run_unmanaged(self.command)
+        # In case a previous run() was never followed by a communicate()
+        # call (e.g. release()'d directly), don't leak its file handles.
+        if self.stdout_file is not None:
+            self.stdout_file.close()
+
+        if self.stderr_file is not None:
+            self.stderr_file.close()
+
+        # `pg_autoctl run` is a long-running background process: this method
+        # returns immediately, and nothing calls communicate() on it again
+        # until much later (stop()/fail()), if ever. Redirecting its stdout/
+        # stderr to files rather than pipes means its own (possibly `-vv`)
+        # logging can never fill an undrained pipe buffer and deadlock it --
+        # see run_unmanaged()'s docstring in network.py.
+        self.stdout_path = self.datadir.rstrip("/") + ".stdout.log"
+        self.stderr_path = self.datadir.rstrip("/") + ".stderr.log"
+
+        self.stdout_file = open(self.stdout_path, "w")
+        self.stderr_file = open(self.stderr_path, "w")
+
+        self.run_proc = self.vnode.run_unmanaged(
+            self.command, stdout=self.stdout_file, stderr=self.stderr_file
+        )
 
     def execute(self, name, *args, timeout=COMMAND_TIMEOUT):
         """
@@ -2194,12 +2302,15 @@ class PGAutoCtl:
         """
         Kills the keeper by sending "sig" to keeper's process group.
 
-        SIGTERM triggers pg_autoctl's graceful shutdown path: the
-        node-active service keeps reporting to the monitor for up to 30s
-        while PostgreSQL stops (see keeper_node_active_shutdown_loop() in
-        service_keeper.c). SIGINT/SIGQUIT skip that loop and exit
-        immediately -- pass one of those to simulate a true hard crash
-        instead of an operator-initiated stop.
+        SIGTERM triggers pg_autoctl's graceful shutdown path (see
+        keeper_graceful_shutdown() in service_keeper.c): for a primary, this
+        now requests maintenance so a standby can take over immediately,
+        driving the FSM through prepare_maintenance -> maintenance; for
+        anything else (or if maintenance isn't possible, e.g. no candidate
+        is available), it falls back to reporting node state to the
+        monitor for up to 30s while PostgreSQL stops. SIGINT/SIGQUIT skip
+        all of that and exit immediately -- pass one of those to simulate a
+        true hard crash instead of a graceful, operator-initiated stop.
         """
         if self.run_proc and self.run_proc.pid:
             try:
@@ -2219,7 +2330,9 @@ class PGAutoCtl:
 
     def communicate(self, timeout=COMMAND_TIMEOUT):
         """
-        Read all data from the Unix PIPE
+        Read all data from the Unix PIPE, or from the stdout/stderr log
+        files when run() redirected them there instead (see run()'s
+        docstring for why).
 
         This call is idempotent. If it is called a second time after an earlier
         successful call, then it returns the results from when the process
@@ -2229,6 +2342,23 @@ class PGAutoCtl:
             return self.out, self.err
 
         self.out, self.err = self.run_proc.communicate(timeout=timeout)
+
+        # run() redirects to files rather than pipes for a process it
+        # doesn't communicate() with right away (see its docstring): in that
+        # case the line above returns (None, None), since Popen only ever
+        # captures output itself when it owns the pipes. Read it back from
+        # the files instead, now that the process has exited.
+        if self.stdout_file is not None:
+            self.stdout_file.close()
+            self.stdout_file = None
+            with open(self.stdout_path, "r") as f:
+                self.out = f.read()
+
+        if self.stderr_file is not None:
+            self.stderr_file.close()
+            self.stderr_file = None
+            with open(self.stderr_path, "r") as f:
+                self.err = f.read()
 
         # The process exited, so let's clean this process up. Calling
         # communicate again would otherwise cause an "Invalid file object"

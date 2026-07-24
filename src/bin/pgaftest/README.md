@@ -104,21 +104,21 @@ and where the `.pgaf` ports currently stand relative to that mechanism.
 
 | Method | Mechanism | Notes |
 |---|---|---|
-| `PGNode.stop_pg_autoctl()` / `PGAutoCtl.stop()` | `os.kill(pid, SIGTERM)` on the `pg_autoctl run` process | Despite the docstring ("Kills the keeper..."), this is graceful: `pg_autoctl`'s supervisor runs its normal shutdown sequence on SIGTERM. |
+| `PGNode.stop_pg_autoctl()` / `PGAutoCtl.stop()` | `os.kill(pid, SIGTERM)` on the `pg_autoctl run` process | Graceful: `pg_autoctl`'s supervisor forwards a plain SIGTERM to the node-active (keeper) service only, which drives a graceful shutdown — for a primary, that means calling `start_maintenance()` on its own behalf and handing off to a standby via the normal maintenance FSM, rather than an abrupt stop. |
 | `PGNode.stop_postgres()` | `pg_ctl -D <datadir> --wait --mode fast stop` (SIGINT to postmaster), retried up to 60× | Bypasses `pg_autoctl` entirely — the keeper stays up and will try to restart Postgres, which is why the retry loop exists (races against that restart). |
-| `PGNode.fail()` | `stop_pg_autoctl()` then, if Postgres is still up, `stop_postgres()` | The suite's standard "simulate a node failure" call. Composite of the two graceful primitives above — **not** a hard crash, no SIGKILL involved anywhere. |
+| `PGNode.fail()` | `os.kill(pid, SIGQUIT)` on the `pg_autoctl run` process by default | The suite's standard "simulate a node failure" call. Deliberately the hardest signal pg_autoctl handles without going through the OS's default disposition: for the node-active service, SIGQUIT is wired to an immediate `exit()` from inside the signal handler, no cleanup, no FSM-driven handoff — the closest thing to a real crash `.fail()` can produce without an actual SIGKILL. Pass `sig=signal.SIGINT` explicitly for tests that need the softer, one-more-iteration-then-exit variant instead. |
 | `PGNode.ifdown()` / `.ifup()` | `pyroute2` NDB: veth interface administratively down/up | Genuine network partition — processes keep running, only reachability is cut. |
 
 No Python test helper ever sends SIGKILL to a node's `pg_autoctl` or
-`postgres` process — the hardest failure the old suite could inflict was
-SIGTERM + a fast `pg_ctl stop`.
+`postgres` process — the hardest failure the suite can inflict via `.fail()`
+is SIGQUIT's immediate, no-cleanup exit.
 
 ### `.pgaf` DSL equivalents
 
 | `.pgaf` command | Mechanism | Closest Python equivalent |
 |---|---|---|
-| `compose stop <svc>` | `docker compose stop` → SIGTERM to container PID 1 (`pg_autoctl`) | `node.fail()` / `stop_pg_autoctl()` |
-| `compose kill <svc>` | `docker compose kill` → immediate SIGKILL | none — stricter than anything in the Python suite; use only with a documented reason (see `multi_alternate.pgaf`'s header comment) |
+| `compose stop <svc>` | `docker compose stop` → SIGTERM to container PID 1 (`pg_autoctl`) | `stop_pg_autoctl()` — a graceful shutdown, routed through a maintenance handoff for a primary. No longer `.fail()`: since `.fail()` now defaults to SIGQUIT, a `.pgaf` spec step that wants to match `.fail()`'s hard-crash intent should use `compose kill` instead (or `compose stop` if the scenario specifically wants to exercise the graceful/maintenance path). |
+| `compose kill <svc>` | `docker compose kill` → immediate SIGKILL | closest to `.fail()`'s current (SIGQUIT) intent, though still one step harder — SIGKILL bypasses pg_autoctl's signal handling entirely, where SIGQUIT at least runs `pg_autoctl`'s own signal handler before exiting |
 | `stop postgres <node>` / `start postgres <node>` | `pg_autoctl manual service pgctl off/on` inside the container | Close in intent to `stop_postgres()`, but goes through `pg_autoctl` rather than calling `pg_ctl` directly, so it does not reproduce the restart race the Python retry loop was written around |
 | `network disconnect <node>` / `network connect <node>` | Docker network disconnect/connect (+ static `--ip` on reconnect, see below) | `ifdown()` / `ifup()` |
 

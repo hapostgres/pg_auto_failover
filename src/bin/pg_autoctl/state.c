@@ -255,6 +255,8 @@ log_keeper_state(KeeperStateData *keeperState)
 
 	log_trace("state.keeper_is_paused: %d", keeperState->keeper_is_paused);
 	log_trace("state.pg_version: %d", keeperState->pg_version);
+	log_trace("state.maintenanceEnteredOnShutdown: %d",
+			  keeperState->maintenanceEnteredOnShutdown);
 }
 
 

@@ -517,19 +517,23 @@ is actually testing, not whichever one happens to make the test pass.
 
 ``compose stop <service>``
     ``docker compose stop`` — SIGTERM to the container's PID 1
-    (``pg_autoctl``), which propagates an orderly shutdown to its child
-    services (a grace period applies before Docker escalates to SIGKILL).
-    Exercises orderly shutdown: ``pg_autoctl``'s supervisor
-    (``supervisor_stop_subprocesses()``) runs its normal shutdown sequence,
-    so the monitor sees a clean disconnect, then the same failover trigger
-    as any other lost connection.
+    (``pg_autoctl``), which forwards a plain SIGTERM to the node-active
+    (keeper) service only (a grace period applies before Docker escalates to
+    SIGKILL). Exercises graceful shutdown: for a primary, the keeper calls
+    ``start_maintenance()`` on its own behalf and hands off to a standby
+    through the ordinary maintenance FSM (``prepare_maintenance`` ->
+    ``maintenance``), the same transitions an operator-run ``pg_autoctl
+    enable maintenance --allow-failover`` would drive. For anything else
+    (a secondary, or a primary maintenance can't be started for), Postgres
+    is simply stopped and the process exits.
 
 ``compose kill <service>``
     ``docker compose kill`` — immediate SIGKILL, no grace period at all.
     Exercises hard-crash recovery: the process gets zero chance to shut
-    down cleanly. Use only when a test specifically needs to rule out a
-    race where the dying node reports a state transition on its way out
-    (see the ``multi_alternate.pgaf`` header comment).
+    down cleanly, not even a signal handler. Use only when a test
+    specifically needs to rule out a race where the dying node reports a
+    state transition on its way out (see the ``multi_alternate.pgaf``
+    header comment).
 
 ``stop postgres <node>`` / ``start postgres <node>``
     ``pg_autoctl manual service pgctl off`` — writes a persistent

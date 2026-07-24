@@ -120,6 +120,24 @@ typedef struct
 	uint64_t last_secondary_contact;
 	int64_t xlog_lag;
 	int keeper_is_paused;
+
+	/*
+	 * Set when a graceful SIGTERM shutdown of a primary calls
+	 * start_maintenance() on its own behalf (see keeper_shutdown_via_
+	 * maintenance() in service_keeper.c), as soon as the monitor has
+	 * assigned PREPARE_MAINTENANCE_STATE -- not only once MAINTENANCE_STATE
+	 * is fully reached, so that a restart at any point after that assignment
+	 * (including one that interrupts the checkpoint-and-stop transition
+	 * itself) is still recognised as self-triggered maintenance.
+	 *
+	 * On the next startup, this flag distinguishes "maintenance because this
+	 * node's own shutdown sequence entered it" (auto-clear it by calling
+	 * stop_maintenance() on the node's behalf) from "maintenance because an
+	 * operator explicitly ran `pg_autoctl enable maintenance`" (leave it
+	 * alone; only an explicit `pg_autoctl disable maintenance` should end
+	 * that one).
+	 */
+	bool maintenanceEnteredOnShutdown;
 } KeeperStateData;
 
 _Static_assert(sizeof(KeeperStateData) < PG_AUTOCTL_KEEPER_STATE_FILE_SIZE,

@@ -166,17 +166,26 @@ step test_011_write_into_new_primary {
 }
 
 #
-# test_012: fail primary node2 via compose stop — matches the Python
-#           predecessor's node2.fail() (graceful SIGTERM to pg_autoctl, not
-#           a network partition).  See docs/ref/pgaftest.rst
-#           "Failure-simulation semantics" for why this matters.
+# test_012: fail primary node2 via compose stop — a graceful SIGTERM to
+#           pg_autoctl, not a network partition, which now drives a
+#           maintenance handoff to node1 rather than an abrupt stop (see the
+#           comment on basic_operation.pgaf's test_010).  This no longer
+#           matches the Python predecessor's node2.fail(), which now
+#           defaults to SIGQUIT to simulate a hard crash instead.  See
+#           docs/ref/pgaftest.rst "Failure-simulation semantics" for why
+#           this matters.
+#
+#           With 3+ nodes in the group, the candidate election goes through
+#           ProceedGroupStateForMSFailover()'s report_lsn-based path (not
+#           stop_replication, which is only used by the direct 2-node
+#           promotion) -- assert only the stable end state, not an
+#           intermediate one, same as basic_operation.pgaf's 2-node case.
 #
 
 step test_012_fail_primary {
     compose stop node2
     # 60s: compose stop can be slow on shared CI runners
     wait until node2 stopped  timeout 60s
-    wait until node1 state is stop_replication  timeout 90s
     wait until node1 state is primary
         and node3 state is secondary
         timeout 90s
@@ -206,10 +215,17 @@ step test_014_001_fail_set_properties {
 }
 
 step test_014_002_fail_two_standby_nodes {
+    # compose stop is a graceful SIGTERM: both secondaries now go through
+    # start_maintenance() on their own behalf (see keeper_shutdown_via_
+    # maintenance() in service_keeper.c) rather than just vanishing, so they
+    # land in "maintenance", not "catchingup" -- a node in maintenance can
+    # only leave it via an explicit stop_maintenance() call, so "catchingup"
+    # can no longer happen here at all.
     compose stop node2
     compose stop node3
-    wait until node2 assigned-state = catchingup  timeout 180s
-    wait until node3 assigned-state = catchingup  timeout 180s
+    wait until node2 state is maintenance
+        and node3 state is maintenance
+        timeout 180s
     # node1 remains primary (blocking writes at postgres level) until
     # number-sync-standbys is explicitly set to 0 in the next step.
     wait until node1 state is primary  timeout 180s
