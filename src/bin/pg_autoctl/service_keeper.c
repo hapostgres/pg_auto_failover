@@ -465,7 +465,7 @@ keeper_shutdown_via_maintenance(Keeper *keeper)
 	bool mayRetry = false;
 
 	if (!monitor_start_maintenance(monitor, keeperState->current_node_id,
-									&mayRetry))
+								   &mayRetry))
 	{
 		log_warn("Failed to enter maintenance for a graceful shutdown, "
 				 "likely because there is no candidate currently available "
