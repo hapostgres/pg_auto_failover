@@ -1215,15 +1215,42 @@ class DataNode(PGNode, StatefulNode):
         does not retry that internally, so plain node.run() can get
         stuck. Use this instead of a plain node.run() wherever a test
         restarts a node that was previously killed hard.
+
+        Deliberately polls directly (like wait_until_state() does
+        internally) rather than calling wait_until_state() itself: despite
+        its docstring ("returns False" on timeout), it actually *raises* on
+        timeout, and before doing so it calls print_debug_logs(), which
+        iterates every node in the cluster and stop_pg_autoctl()'s any that
+        are still running -- a much bigger side effect than "log something
+        and let the caller retry". Since this method only restarts *this*
+        node on the next attempt, that would silently leave every other
+        node in the cluster stopped and never restarted, turning one node's
+        transient bind race into the whole cluster wedging. Polling
+        directly avoids that side effect entirely.
         """
         per_attempt_timeout = max(timeout // retries, 30)
 
         for attempt in range(1, retries + 1):
             self.run(name=name, host=host, port=port)
 
-            if self.wait_until_state(
-                target_state=target_state, timeout=per_attempt_timeout
-            ):
+            deadline = dt.datetime.now() + dt.timedelta(
+                seconds=per_attempt_timeout
+            )
+            reached = False
+
+            while dt.datetime.now() < deadline:
+                self.sleep(POLLING_INTERVAL)
+
+                try:
+                    current_state, _ = self.get_state()
+                except Exception:
+                    continue
+
+                if current_state == target_state:
+                    reached = True
+                    break
+
+            if reached:
                 return True
 
             print(
