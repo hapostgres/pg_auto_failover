@@ -157,6 +157,12 @@ bool monitor_set_node_candidate_priority(Monitor *monitor,
 bool monitor_set_node_replication_quorum(Monitor *monitor,
 										 char *formation, char *name,
 										 bool replicationQuorum);
+bool monitor_set_node_region(Monitor *monitor,
+							 char *formation, char *name,
+							 char *region);
+bool monitor_get_node_region(Monitor *monitor,
+							 char *name,
+							 char *region, size_t size);
 bool monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 												int *numberSyncStandbys);
 bool monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,

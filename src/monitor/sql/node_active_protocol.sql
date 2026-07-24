@@ -391,3 +391,20 @@ SELECT *
                                   current_lsn => '0/3000');
 
 RESET pgautofailover.startup_grace_period;
+
+-- ── test_007: set_node_region ────────────────────────────────────────────────
+--
+-- region is purely informational: setting it must not touch any FSM state,
+-- and must be rejected for an unknown node or an empty value.
+
+SELECT region FROM pgautofailover.node WHERE nodename = 'node1';
+
+SELECT pgautofailover.set_node_region('fsm_test', 'node1', 'dc2');
+
+SELECT region FROM pgautofailover.node WHERE nodename = 'node1';
+
+-- unknown node: error
+SELECT pgautofailover.set_node_region('fsm_test', 'unknown_node', 'dc2');
+
+-- empty region: error
+SELECT pgautofailover.set_node_region('fsm_test', 'node1', '');

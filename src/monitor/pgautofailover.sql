@@ -803,6 +803,22 @@ grant execute on function
       pgautofailover.set_node_replication_quorum(text, text, bool)
    to autoctl_node;
 
+CREATE FUNCTION pgautofailover.set_node_region
+ (
+    IN formation_id text,
+    IN node_name    text,
+    IN region       text
+ )
+RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$set_node_region$$;
+
+comment on function pgautofailover.set_node_region(text, text, text)
+        is 'sets the region label for a node, identifying its data-centre or availability zone';
+
+grant execute on function
+      pgautofailover.set_node_region(text, text, text)
+   to autoctl_node;
+
 
 create function pgautofailover.synchronous_standby_names
  (

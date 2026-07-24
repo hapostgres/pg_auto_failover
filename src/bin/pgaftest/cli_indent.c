@@ -984,6 +984,20 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_NODEINI_SET:
+		{
+			fformat(out, "%*snodeini set %s %s %s\n",
+					indent, "", cmd->service, cmd->state, cmd->args);
+			break;
+		}
+
+		case CMD_NODEINI_GET:
+		{
+			fformat(out, "%*snodeini get %s %s %s\n",
+					indent, "", cmd->service, cmd->state, cmd->args);
+			break;
+		}
+
 		case CMD_COMPOSE_DOWN:
 		{
 			fformat(out, "%*scompose down\n", indent, "");

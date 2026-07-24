@@ -146,6 +146,20 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_NODEINI_SET:
+		{
+			fprintf(f, "%snodeini set %s %s %s\n", /* IGNORE-BANNED */
+					pad, cmd->service, cmd->state, cmd->args);
+			break;
+		}
+
+		case CMD_NODEINI_GET:
+		{
+			fprintf(f, "%snodeini get %s %s %s\n", /* IGNORE-BANNED */
+					pad, cmd->service, cmd->state, cmd->args);
+			break;
+		}
+
 		case CMD_COMPOSE_DOWN:
 		{
 			fprintf(f, "%scompose down\n", pad); /* IGNORE-BANNED */
@@ -2768,6 +2782,152 @@ runner_network_on(TestRunner *r, const char *nodeName)
 
 
 /* -----------------------------------------------------------------------
+ * nodeini_write_value / nodeini_read_value
+ *
+ * Edit or read a node's host-side .ini file [settings] entry directly (the
+ * file is bind-mounted read-only inside the node's own container, so this
+ * can't go through exec/compose).  Used both by the `nodeini set|get` DSL
+ * commands (to exercise the supervisor's file-watch live-apply path) and by
+ * the `pgaftest nodeini get|set` interactive command.
+ * ----------------------------------------------------------------------- */
+static bool
+nodeini_write_value(TestRunner *r, const char *nodeName,
+					const char *key, const char *value,
+					char *errBuf, int errLen)
+{
+	char path[MAXPGPATH];
+	sformat(path, sizeof(path), "%s/%s.ini", r->workDir, nodeName);
+
+	FILE *f = fopen(path, "r"); /* IGNORE-BANNED */
+	if (!f)
+	{
+		sformat(errBuf, errLen,
+				"nodeini %s: could not open \"%s\"", nodeName, path);
+		return false;
+	}
+
+	char buf[8192] = { 0 };
+	size_t nr = fread(buf, 1, sizeof(buf) - 1, f); /* IGNORE-BANNED */
+	fclose(f); /* IGNORE-BANNED */
+
+	char keyPrefix[128];
+	sformat(keyPrefix, sizeof(keyPrefix), "%s =", key);
+	size_t keyPrefixLen = strlen(keyPrefix);
+
+	char out[8192] = { 0 };
+	int outPos = 0;
+	bool found = false;
+	const char *line = buf;
+
+	while (line < buf + nr)
+	{
+		const char *nl = memchr(line, '\n', buf + nr - line); /* IGNORE-BANNED */
+		int lineLen = nl ? (int) (nl - line) : (int) (buf + nr - line);
+
+		if (!found &&
+			(size_t) lineLen >= keyPrefixLen &&
+			strncmp(line, keyPrefix, keyPrefixLen) == 0)
+		{
+			outPos += sformat(out + outPos, sizeof(out) - outPos,
+							  "%s = %s\n", key, value);
+			found = true;
+		}
+		else
+		{
+			memcpy(out + outPos, line, lineLen); /* IGNORE-BANNED */
+			outPos += lineLen;
+			if (nl)
+			{
+				out[outPos++] = '\n';
+			}
+		}
+
+		line = nl ? nl + 1 : buf + nr;
+	}
+
+	if (!found)
+	{
+		sformat(errBuf, errLen,
+				"nodeini %s: key \"%s\" not found in \"%s\"",
+				nodeName, key, path);
+		return false;
+	}
+
+	f = fopen(path, "w"); /* IGNORE-BANNED */
+	if (!f)
+	{
+		sformat(errBuf, errLen,
+				"nodeini %s: could not write \"%s\"", nodeName, path);
+		return false;
+	}
+	fwrite(out, 1, outPos, f); /* IGNORE-BANNED */
+	fclose(f); /* IGNORE-BANNED */
+
+	log_info("nodeini: set %s = %s in %s", key, value, path);
+	return true;
+}
+
+
+static bool
+nodeini_read_value(TestRunner *r, const char *nodeName,
+				   const char *key, char *value, int valueLen,
+				   char *errBuf, int errLen)
+{
+	char path[MAXPGPATH];
+	sformat(path, sizeof(path), "%s/%s.ini", r->workDir, nodeName);
+
+	FILE *f = fopen(path, "r"); /* IGNORE-BANNED */
+	if (!f)
+	{
+		sformat(errBuf, errLen,
+				"nodeini %s: could not open \"%s\"", nodeName, path);
+		return false;
+	}
+
+	char buf[8192] = { 0 };
+	size_t nr = fread(buf, 1, sizeof(buf) - 1, f); /* IGNORE-BANNED */
+	fclose(f); /* IGNORE-BANNED */
+
+	char keyPrefix[128];
+	sformat(keyPrefix, sizeof(keyPrefix), "%s =", key);
+	size_t keyPrefixLen = strlen(keyPrefix);
+
+	const char *line = buf;
+	while (line < buf + nr)
+	{
+		const char *nl = memchr(line, '\n', buf + nr - line); /* IGNORE-BANNED */
+		int lineLen = nl ? (int) (nl - line) : (int) (buf + nr - line);
+
+		if ((size_t) lineLen >= keyPrefixLen &&
+			strncmp(line, keyPrefix, keyPrefixLen) == 0)
+		{
+			const char *v = line + keyPrefixLen;
+			const char *lineEnd = line + lineLen;
+			while (v < lineEnd && (*v == ' ' || *v == '\t'))
+			{
+				v++;
+			}
+			int vlen = (int) (lineEnd - v);
+			if (vlen >= valueLen)
+			{
+				vlen = valueLen - 1;
+			}
+			memcpy(value, v, vlen); /* IGNORE-BANNED */
+			value[vlen] = '\0';
+			return true;
+		}
+
+		line = nl ? nl + 1 : buf + nr;
+	}
+
+	sformat(errBuf, errLen,
+			"nodeini %s: key \"%s\" not found in \"%s\"",
+			nodeName, key, path);
+	return false;
+}
+
+
+/* -----------------------------------------------------------------------
  * Execute a single command
  * ----------------------------------------------------------------------- */
 static bool
@@ -3153,6 +3313,32 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		case CMD_SLEEP:
 		{
 			sleep(cmd->timeoutSeconds);
+			return true;
+		}
+
+		case CMD_NODEINI_SET:
+		{
+			return nodeini_write_value(r, cmd->service, cmd->state, cmd->args,
+									   errBuf, errLen);
+		}
+
+		case CMD_NODEINI_GET:
+		{
+			char value[4096] = "";
+			if (!nodeini_read_value(r, cmd->service, cmd->state,
+									value, sizeof(value), errBuf, errLen))
+			{
+				return false;
+			}
+
+			if (strcmp(value, cmd->args) != 0)
+			{
+				sformat(errBuf, errLen,
+						"nodeini %s: expected %s = \"%s\", got \"%s\"",
+						cmd->service, cmd->state, cmd->args, value);
+				return false;
+			}
+
 			return true;
 		}
 
@@ -4059,6 +4245,20 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 		case CMD_SLEEP:
 		{
 			sformat(buf, len, "sleep %ds", cmd->timeoutSeconds);
+			break;
+		}
+
+		case CMD_NODEINI_SET:
+		{
+			sformat(buf, len, "nodeini set %s %s %s",
+					cmd->service, cmd->state, cmd->args);
+			break;
+		}
+
+		case CMD_NODEINI_GET:
+		{
+			sformat(buf, len, "nodeini get %s %s %s",
+					cmd->service, cmd->state, cmd->args);
 			break;
 		}
 
@@ -5022,6 +5222,55 @@ runner_network(TestSpec *spec, const char *workDir,
 	{
 		return runner_network_off(&r, nodeName);
 	}
+}
+
+
+/*
+ * runner_nodeini_set — `pgaftest nodeini set <node> <key> <value>`
+ *
+ * Edits the node's host-side .ini file directly, same as the `nodeini set`
+ * DSL command.
+ */
+bool
+runner_nodeini_set(TestSpec *spec, const char *workDir,
+				   const char *nodeName, const char *key,
+				   const char *value)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	char errBuf[1024] = "";
+	if (!nodeini_write_value(&r, nodeName, key, value, errBuf, sizeof(errBuf)))
+	{
+		log_error("%s", errBuf);
+		return false;
+	}
+	return true;
+}
+
+
+/*
+ * runner_nodeini_get — `pgaftest nodeini get <node> <key>`
+ *
+ * Reads the node's host-side .ini file directly, same as the `nodeini get`
+ * DSL command (minus the assertion against an expected value).
+ */
+bool
+runner_nodeini_get(TestSpec *spec, const char *workDir,
+				   const char *nodeName, const char *key,
+				   char *value, int valueLen)
+{
+	TestRunner r;
+	runner_init(&r, spec, workDir);
+
+	char errBuf[1024] = "";
+	if (!nodeini_read_value(&r, nodeName, key, value, valueLen,
+							errBuf, sizeof(errBuf)))
+	{
+		log_error("%s", errBuf);
+		return false;
+	}
+	return true;
 }
 
 

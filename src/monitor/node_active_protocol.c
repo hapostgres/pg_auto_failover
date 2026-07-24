@@ -68,6 +68,7 @@ PG_FUNCTION_INFO_V1(start_maintenance);
 PG_FUNCTION_INFO_V1(stop_maintenance);
 PG_FUNCTION_INFO_V1(set_node_candidate_priority);
 PG_FUNCTION_INFO_V1(set_node_replication_quorum);
+PG_FUNCTION_INFO_V1(set_node_region);
 PG_FUNCTION_INFO_V1(synchronous_standby_names);
 PG_FUNCTION_INFO_V1(testing_lock_formation);
 PG_FUNCTION_INFO_V1(testing_lock_node_group);
@@ -2428,6 +2429,66 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 		/* other case is that we failed to find a primary node, proceed */
 	}
+
+	PG_RETURN_BOOL(true);
+}
+
+
+/*
+ * set_node_region sets the node region property. Unlike candidate_priority
+ * and replication_quorum, region is purely an informational label: it does
+ * not affect replication settings or failover eligibility, so no FSM
+ * transition is needed on the primary after updating it.
+ */
+Datum
+set_node_region(PG_FUNCTION_ARGS)
+{
+	checkPgAutoFailoverVersion();
+
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	text *nodeNameText = PG_GETARG_TEXT_P(1);
+	char *nodeName = text_to_cstring(nodeNameText);
+
+	text *regionText = PG_GETARG_TEXT_P(2);
+	char *region = text_to_cstring(regionText);
+
+	AutoFailoverNode *currentNode =
+		LockNodeGroupAndFetchByName(formationId, nodeName);
+
+	if (currentNode == NULL)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("node \"%s\" is not registered in formation \"%s\"",
+						nodeName, formationId)));
+	}
+
+	if (region == NULL || region[0] == '\0')
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid value for region: expected a non-empty "
+						"string")));
+	}
+
+	currentNode->region = region;
+
+	ReportAutoFailoverNodeRegion(currentNode->nodeId,
+								 currentNode->nodeHost,
+								 currentNode->nodePort,
+								 currentNode->region);
+
+	char message[BUFSIZE];
+
+	LogAndNotifyMessage(
+		message, BUFSIZE,
+		"Updating region to \"%s\" for " NODE_FORMAT,
+		currentNode->region,
+		NODE_FORMAT_ARGS(currentNode));
+
+	NotifyStateChange(currentNode, message);
 
 	PG_RETURN_BOOL(true);
 }

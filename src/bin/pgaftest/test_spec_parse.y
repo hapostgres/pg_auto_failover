@@ -161,6 +161,7 @@ static TestNode      *current_node        = NULL;
 %token T_LISTEN T_CITUS_SECONDARY T_CANDIDATE_PRIORITY T_PORT T_PASSWORD T_MONITOR_PASSWORD
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
 %token T_EXTENSION_VERSION T_BIND_SOURCE T_LEGACY_STARTUP T_REGION
+%token T_NODEINI
 
 /* ---- FSM state tokens (used in CLUSTER_BODY and STEP_BODY) ---- */
 %token T_FS_INIT T_FS_SINGLE T_FS_PRIMARY
@@ -186,7 +187,7 @@ static TestNode      *current_node        = NULL;
 %token T_STATE T_ASSIGNED_STATE
 %token T_IN T_GROUP
 %token T_LBRACE T_RBRACE T_COMMA
-%token T_POSTGRES T_STAYS T_WHILE T_THROUGH T_SET
+%token T_POSTGRES T_STAYS T_WHILE T_THROUGH T_SET T_GET
 %token T_LOGS T_NOT T_CONTAINS T_MATCHES
 
 /* ---- Tokens with values ---- */
@@ -203,6 +204,7 @@ static TestNode      *current_node        = NULL;
 %type <cmd>   exec_cmd wait_cmd assert_cmd sql_cmd expect_cmd
 %type <cmd>   promote_cmd network_cmd sleep_cmd compose_cmd
 %type <cmd>   postgres_ctl_cmd stays_while_cmd set_monitor_cmd logs_cmd perform_cmd
+%type <cmd>   nodeini_cmd
 %type <ival>  opt_timeout
 %type <step>  while_body
 
@@ -735,6 +737,7 @@ step_cmd:
 	| stays_while_cmd   { $$ = $1; }
 	| set_monitor_cmd   { $$ = $1; }
 	| logs_cmd          { $$ = $1; }
+	| nodeini_cmd       { $$ = $1; }
 	;
 
 /* -----------------------------------------------------------------------
@@ -1241,6 +1244,37 @@ network_cmd:
 		$$ = make_cmd(CMD_NETWORK_ON);
 		strlcpy($$->service, $3, sizeof($$->service));
 		free($3);
+	}
+	;
+
+/* -----------------------------------------------------------------------
+ * nodeini set <node> <key> <value>
+ * nodeini get <node> <key> <value>
+ *
+ * Edits or reads <node>'s pg_autoctl_node.ini [settings] entry directly on
+ * the host side (the file is bind-mounted read-only inside the node's own
+ * container, so this can't go through exec/compose). "set" exercises the
+ * supervisor's automatic file-watch apply path, distinct from calling
+ * `pg_autoctl set node ...` directly; "get" asserts the on-disk value,
+ * distinct from `pg_autoctl get node ...` which queries the running node.
+ * ----------------------------------------------------------------------- */
+
+nodeini_cmd:
+	T_NODEINI T_SET T_IDENT T_IDENT T_IDENT
+	{
+		$$ = make_cmd(CMD_NODEINI_SET);
+		strlcpy($$->service, $3, sizeof($$->service));
+		strlcpy($$->state, $4, sizeof($$->state));
+		strlcpy($$->args, $5, sizeof($$->args));
+		free($3); free($4); free($5);
+	}
+	| T_NODEINI T_GET T_IDENT T_IDENT T_IDENT
+	{
+		$$ = make_cmd(CMD_NODEINI_GET);
+		strlcpy($$->service, $3, sizeof($$->service));
+		strlcpy($$->state, $4, sizeof($$->state));
+		strlcpy($$->args, $5, sizeof($$->args));
+		free($3); free($4); free($5);
 	}
 	;
 

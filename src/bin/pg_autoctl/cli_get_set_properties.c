@@ -16,15 +16,18 @@
 static bool get_node_replication_settings(NodeReplicationSettings *settings);
 static void cli_get_node_replication_quorum(int argc, char **argv);
 static void cli_get_node_candidate_priority(int argc, char **argv);
+static void cli_get_node_region(int argc, char **argv);
 static void cli_get_formation_number_sync_standbys(int argc, char **argv);
 
 static void cli_set_node_replication_quorum(int argc, char **argv);
 static void cli_set_node_candidate_priority(int argc, char **argv);
+static void cli_set_node_region(int argc, char **argv);
 static void cli_set_node_metadata(int argc, char **argv);
 static void cli_set_formation_number_sync_standbys(int arc, char **argv);
 
 static bool set_node_candidate_priority(Keeper *keeper, int candidatePriority);
 static bool set_node_replication_quorum(Keeper *keeper, bool replicationQuorum);
+static bool set_node_region(Keeper *keeper, const char *region);
 static bool set_formation_number_sync_standbys(Monitor *monitor,
 											   char *formation,
 											   int groupId,
@@ -52,10 +55,22 @@ CommandLine get_node_candidate_priority =
 				 cli_get_name_getopts,
 				 cli_get_node_candidate_priority);
 
+CommandLine get_node_region =
+	make_command("region",
+				 "get region property from the monitor",
+				 " [ --pgdata ] [ --json ] [ --formation ] [ --name ]",
+				 "  --pgdata      path to data directory\n"
+				 "  --formation   pg_auto_failover formation\n"
+				 "  --name        pg_auto_failover node name\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_get_name_getopts,
+				 cli_get_node_region);
+
 
 static CommandLine *get_node_subcommands[] = {
 	&get_node_replication_quorum,
 	&get_node_candidate_priority,
+	&get_node_region,
 	NULL
 };
 
@@ -144,11 +159,24 @@ static CommandLine set_node_metadata_command =
 				 cli_node_metadata_getopts,
 				 cli_set_node_metadata);
 
+static CommandLine set_node_region_command =
+	make_command("region",
+				 "set region property on the monitor",
+				 " [ --pgdata ] [ --json ] [ --formation ] [ --name ] "
+				 "<region>",
+				 "  --pgdata      path to data directory\n"
+				 "  --formation   pg_auto_failover formation\n"
+				 "  --name        pg_auto_failover node name\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_get_name_getopts,
+				 cli_set_node_region);
+
 
 static CommandLine *set_node_subcommands[] = {
 	&set_node_metadata_command,
 	&set_node_replication_quorum_command,
 	&set_node_candidate_priority_command,
+	&set_node_region_command,
 	NULL
 };
 
@@ -283,6 +311,48 @@ cli_get_node_candidate_priority(int argc, char **argv)
 	else
 	{
 		fformat(stdout, "%d\n", settings.candidatePriority);
+	}
+}
+
+
+/*
+ * cli_get_node_region function prints the region property of this node to
+ * standard output.
+ */
+static void
+cli_get_node_region(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
+	char region[NAMEDATALEN] = { 0 };
+
+	keeper.config = keeperOptions;
+
+	(void) cli_monitor_init_from_option_or_config(monitor, &(keeper.config));
+
+	/* grab --name from either the command options or the configuration file */
+	(void) cli_ensure_node_name(&keeper);
+
+	if (!monitor_get_node_region(monitor, keeper.config.name,
+								 region, sizeof(region)))
+	{
+		log_error("Unable to get region value from monitor");
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj, "name", keeper.config.name);
+		json_object_set_string(jsObj, "region", region);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fformat(stdout, "%s\n", region);
 	}
 }
 
@@ -470,6 +540,62 @@ cli_set_node_candidate_priority(int argc, char **argv)
 	else
 	{
 		fformat(stdout, "%d\n", candidatePriority);
+	}
+}
+
+
+/*
+ * cli_set_node_region sets the region property on the monitor for current
+ * pg_autoctl node.
+ */
+static void
+cli_set_node_region(int argc, char **argv)
+{
+	Keeper keeper = { 0 };
+	Monitor *monitor = &(keeper.monitor);
+
+	keeper.config = keeperOptions;
+
+	if (argc != 1)
+	{
+		log_error("Failed to parse command line arguments: "
+				  "got %d when 1 is expected",
+				  argc);
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	const char *region = argv[0];
+
+	if (IS_EMPTY_STRING_BUFFER(region))
+	{
+		log_error("region value must not be empty");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	(void) cli_monitor_init_from_option_or_config(monitor, &(keeper.config));
+
+	/* grab --name from either the command options or the configuration file */
+	(void) cli_ensure_node_name(&keeper);
+
+	if (!set_node_region(&keeper, region))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj, "region", region);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		fformat(stdout, "%s\n", region);
 	}
 }
 
@@ -812,6 +938,30 @@ set_node_replication_quorum(Keeper *keeper, bool replicationQuorum)
 			log_error("Failed to wait until the new setting has been applied");
 			return false;
 		}
+	}
+
+	return true;
+}
+
+
+/*
+ * set_node_region sets the region label on the monitor. Unlike
+ * candidate-priority and replication-quorum, region is purely informational
+ * and never triggers an apply_settings transition on the primary, so there
+ * is nothing to wait for after the monitor call succeeds.
+ */
+static bool
+set_node_region(Keeper *keeper, const char *region)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	if (!monitor_set_node_region(&(keeper->monitor),
+								 config->formation,
+								 config->name,
+								 (char *) region))
+	{
+		log_error("Failed to set \"region\" to \"%s\".", region);
+		return false;
 	}
 
 	return true;

@@ -154,6 +154,7 @@ typedef struct NodeReplicationSettings
 	char name[_POSIX_HOST_NAME_MAX];
 	int candidatePriority;      /* promotion candidate priority */
 	bool replicationQuorum;     /* true if participates in write quorum */
+	char region[NAMEDATALEN];  /* data-centre / availability-zone label */
 } NodeReplicationSettings;
 
 

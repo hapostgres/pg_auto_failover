@@ -72,6 +72,14 @@ typedef struct NodeReplicationSettingsParseContext
 	bool parsedOK;
 } NodeReplicationSettingsParseContext;
 
+typedef struct NodeRegionParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	char *region;
+	size_t size;
+	bool parsedOK;
+} NodeRegionParseContext;
+
 typedef struct CurrentNodeStateContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
@@ -113,6 +121,7 @@ static void parseNodeResult(void *ctx, PGresult *result);
 static void parseNodeArray(void *ctx, PGresult *result);
 static void parseNodeState(void *ctx, PGresult *result);
 static void parseNodeReplicationSettings(void *ctx, PGresult *result);
+static void parseNodeRegion(void *ctx, PGresult *result);
 static bool parseCurrentNodeState(PGresult *result, int rowNumber,
 								  CurrentNodeState *nodeState);
 static bool parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray,
@@ -1103,6 +1112,105 @@ monitor_set_node_replication_quorum(Monitor *monitor,
 	}
 
 	return success;
+}
+
+
+/*
+ * monitor_set_node_region updates the monitor on the changes in the node
+ * region label.
+ */
+bool
+monitor_set_node_region(Monitor *monitor,
+						char *formation, char *name,
+						char *region)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.set_node_region($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[3];
+	bool success = true;
+
+	paramValues[0] = formation;
+	paramValues[1] = name;
+	paramValues[2] = region;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to update node region on node \"%s\" "
+				  "in formation \"%s\" to \"%s\"",
+				  name, formation, region);
+
+		success = false;
+	}
+
+	return success;
+}
+
+
+/*
+ * monitor_get_node_region retrieves the region label of a node from the
+ * monitor.
+ */
+bool
+monitor_get_node_region(Monitor *monitor,
+						char *name,
+						char *region, size_t size)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT region FROM pgautofailover.node WHERE nodename = $1";
+
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	NodeRegionParseContext parseContext = { { 0 }, region, size, false };
+
+	paramValues[0] = name;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeRegion))
+	{
+		log_error("Failed to retrieve region for node \"%s\".", name);
+
+		return false;
+	}
+
+	return parseContext.parsedOK;
+}
+
+
+/*
+ * parseNodeRegion parses the region label from query output.
+ */
+static void
+parseNodeRegion(void *ctx, PGresult *result)
+{
+	NodeRegionParseContext *context = (NodeRegionParseContext *) ctx;
+
+	if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQnfields(result) != 1)
+	{
+		log_error("Query returned %d columns, expected 1", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	char *value = PQgetvalue(result, 0, 0);
+
+	strlcpy(context->region, value, context->size);
+
+	context->parsedOK = true;
 }
 
 

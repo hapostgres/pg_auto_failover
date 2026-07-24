@@ -818,6 +818,30 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 		free_program(&prog);
 	}
 
+	if (strcmp(new_spec->region, old_spec->region) != 0)
+	{
+		Program prog = run_program(pg_autoctl_program,
+								   "set", "node", "region",
+								   "--pgdata", new_spec->pgdata,
+								   new_spec->region, NULL);
+
+		if (prog.returnCode != 0)
+		{
+			log_warn("nodespec_apply: set region %s failed (rc=%d)",
+					 new_spec->region, prog.returnCode);
+			if (prog.stdOut)
+			{
+				log_warn("%s", prog.stdOut);
+			}
+		}
+		else
+		{
+			log_info("nodespec: applied region = %s", new_spec->region);
+			changed = true;
+		}
+		free_program(&prog);
+	}
+
 	/* immediate → deferred on an already-started node: non-fatal, ignored */
 	if (!old_spec->launchDeferred && new_spec->launchDeferred)
 	{
@@ -1002,15 +1026,42 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
  * ----------------------------------------------------------------------- */
 
 /*
+ * nodespec_file_crc computes the CRC32C of the current content of *path
+ * into *crc.  Returns false (leaving *crc untouched) if the file can't be
+ * read right now — a transient condition while it's being rewritten, not
+ * treated as a change.
+ */
+static bool
+nodespec_file_crc(const char *path, pg_crc32c *crc)
+{
+	char *contents = NULL;
+	long fileSize = 0;
+
+	if (!read_file(path, &contents, &fileSize))
+	{
+		return false;
+	}
+
+	pg_crc32c newCrc;
+	INIT_CRC32C(newCrc);
+	COMP_CRC32C(newCrc, contents, fileSize);
+	FIN_CRC32C(newCrc);
+
+	free(contents);
+
+	*crc = newCrc;
+	return true;
+}
+
+
+/*
  * nodespec_watcher_init sets up file watching for *path.
- * On Linux we try inotify first; everywhere else (and on failure) we fall
- * back to mtime polling every NODESPEC_WATCH_INTERVAL_SECS.
+ * On Linux, inotify is also armed as a low-latency hint; see
+ * nodespec_watcher_check for why it is never the sole source of truth.
  */
 bool
 nodespec_watcher_init(NodeSpecWatcher *w, const char *path)
 {
-	struct stat st;
-
 	memset(w, 0, sizeof(*w));
 	strlcpy(w->path, path, sizeof(w->path));
 
@@ -1026,32 +1077,31 @@ nodespec_watcher_init(NodeSpecWatcher *w, const char *path)
 		if (w->watch_fd < 0)
 		{
 			log_debug("nodespec_watcher_init: inotify_add_watch(\"%s\"): %m; "
-					  "falling back to mtime poll", path);
+					  "relying on the CRC hash poll instead", path);
 			close(w->inotify_fd);
 			w->inotify_fd = -1;
 		}
 		else
 		{
-			log_info("nodespec: watching \"%s\" via inotify", path);
+			log_info("nodespec: watching \"%s\" via inotify "
+					 "(plus a %ds CRC hash poll as a reliability net)",
+					 path, NODESPEC_HASH_POLL_INTERVAL_SECS);
 		}
 	}
 	else
 	{
 		log_debug("nodespec_watcher_init: inotify_init1: %m; "
-				  "falling back to mtime poll");
+				  "relying on the CRC hash poll instead");
 		w->inotify_fd = -1;
 		w->watch_fd = -1;
 	}
 #endif
 
-	/* record initial mtime so we don't fire on the very first check */
-	if (stat(path, &st) == 0)
+	/* record initial CRC so we don't fire on the very first check */
+	if (!nodespec_file_crc(path, &w->last_crc))
 	{
-		w->last_mtime = st.st_mtime;
-	}
-	else
-	{
-		w->last_mtime = 0;
+		INIT_CRC32C(w->last_crc);
+		FIN_CRC32C(w->last_crc);
 	}
 
 	w->active = true;
@@ -1062,12 +1112,21 @@ nodespec_watcher_init(NodeSpecWatcher *w, const char *path)
 /*
  * nodespec_watcher_check is called from the supervisor's 100 ms tick.
  *
+ * Change detection is always CRC32C-hash based: inotify (when available) is
+ * only used to check sooner than the next scheduled hash poll, never as the
+ * sole signal that something changed. inotify has been observed to silently
+ * miss host-originated writes to a bind-mounted file under some
+ * containerized/virtualized filesystems (e.g. Docker Desktop for macOS's
+ * virtiofs: the write's content lands in the container right away, but no
+ * IN_CLOSE_WRITE event is ever raised) — the hash poll guarantees a change
+ * is still picked up within NODESPEC_HASH_POLL_INTERVAL_SECS regardless.
+ *
  * Returns true if the file changed and nodespec_apply() was attempted.
  */
 bool
 nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 {
-	bool file_changed = false;
+	bool inotify_hint = false;
 
 	if (!w->active)
 	{
@@ -1078,51 +1137,52 @@ nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 	if (w->inotify_fd >= 0)
 	{
 		/*
-		 * Drain all pending inotify events.  We don't care about the event
-		 * details — any event means the file was written.
+		 * Drain all pending inotify events.  This only decides whether to
+		 * hash-check *now* instead of waiting for the next poll interval —
+		 * see the function comment for why it can't be trusted alone.
 		 */
 		char buf[sizeof(struct inotify_event) + NAME_MAX + 1];
 		ssize_t n;
 
 		while ((n = read(w->inotify_fd, buf, sizeof(buf))) > 0)
 		{
-			file_changed = true;
+			inotify_hint = true;
 		}
 
 		if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 		{
 			log_warn("nodespec watcher: inotify read error: %m; "
-					 "switching to mtime poll");
+					 "continuing with the CRC hash poll");
 			close(w->inotify_fd);
 			w->inotify_fd = -1;
 			w->watch_fd = -1;
 		}
 	}
-	else
 #endif
-	{
-		/* mtime poll — only stat every NODESPEC_WATCH_INTERVAL_SECS */
-		time_t now = time(NULL);
 
-		if (now - w->last_checked < NODESPEC_WATCH_INTERVAL_SECS)
-		{
-			return false;
-		}
+	time_t now = time(NULL);
 
-		w->last_checked = now;
-
-		struct stat st;
-		if (stat(w->path, &st) == 0 && st.st_mtime != w->last_mtime)
-		{
-			w->last_mtime = st.st_mtime;
-			file_changed = true;
-		}
-	}
-
-	if (!file_changed)
+	if (!inotify_hint &&
+		now - w->last_checked < NODESPEC_HASH_POLL_INTERVAL_SECS)
 	{
 		return false;
 	}
+
+	w->last_checked = now;
+
+	pg_crc32c newCrc;
+	if (!nodespec_file_crc(w->path, &newCrc))
+	{
+		/* file transiently unreadable; try again on the next poll */
+		return false;
+	}
+
+	if (EQ_CRC32C(newCrc, w->last_crc))
+	{
+		return false;
+	}
+
+	w->last_crc = newCrc;
 
 	/* File changed — re-parse and apply */
 	log_info("nodespec: \"%s\" changed, re-reading and converging", w->path);

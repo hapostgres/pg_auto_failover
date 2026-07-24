@@ -103,6 +103,14 @@ your terminal window size changes:
 	the Node column contains the groupId and the nodeId, separated by a
 	colon, such as ``0:1`` for the first coordinator node.
 
+  - Region
+
+	The data-centre or availability zone label set for the node at
+	creation time, either with ``--region`` or the ``[settings] region``
+	property of a ``pg_autoctl_node.ini`` file. Only shown in wider
+	terminal windows, alongside more detailed columns. Defaults to
+	``default`` when not set.
+
   - Last Report, or Report
 
 	Time interval between now and the last known time when a node has

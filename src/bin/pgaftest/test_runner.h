@@ -156,6 +156,12 @@ bool runner_network(TestSpec *spec, const char *workDir,
 					const char *nodeName, bool connect);
 bool runner_assert(TestSpec *spec, const char *workDir,
 				   const char *nodeName, const char *targetState);
+bool runner_nodeini_set(TestSpec *spec, const char *workDir,
+						const char *nodeName, const char *key,
+						const char *value);
+bool runner_nodeini_get(TestSpec *spec, const char *workDir,
+						const char *nodeName, const char *key,
+						char *value, int valueLen);
 
 /*
  * Prepare an output directory with docker-compose.yml, *.ini files, and a

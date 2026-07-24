@@ -41,6 +41,7 @@ registered too, and is known to be healthy).
      --candidate-priority    priority of the node to be promoted to become primary
      --replication-quorum    true if node participates in write quorum
      --maximum-backup-rate   maximum transfer rate of data transferred from the server during initial sync
+     --region                data-centre or availability-zone label for this node
 
 Description
 -----------
@@ -267,6 +268,15 @@ The following options are available to ``pg_autoctl create postgres``:
   Sets the maximum transfer rate of data transferred from the server during
   initial sync. This is used by ``pg_basebackup``.
   Defaults to ``100M``.
+
+--region
+
+  Sets a free-form label identifying the data-centre or availability zone
+  this node runs in, at node registration on the monitor. Defaults to
+  ``default``. Purely informational at the moment: it is displayed as its
+  own column by ``pg_autoctl watch`` in the verbose and higher policies, to
+  help make sense of the topology of a multi-region deployment. It does not
+  currently affect any failover or quorum decision.
 
 --run
 

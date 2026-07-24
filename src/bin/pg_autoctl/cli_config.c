@@ -479,6 +479,16 @@ cli_keeper_config_get(int argc, char **argv)
 			char *path = argv[0];
 			char value[BUFSIZE];
 
+			if (strcmp(path, "pg_autoctl.region") == 0)
+			{
+				log_error("pg_autoctl.region is not available through "
+						  "\"pg_autoctl config get\"; use "
+						  "\"pg_autoctl get node region\" instead, which "
+						  "reflects the monitor's view rather than a local, "
+						  "disconnected copy");
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+
 			if (keeper_config_get_setting(&config,
 										  path,
 										  value,
@@ -645,6 +655,16 @@ cli_keeper_config_set(int argc, char **argv)
 	{
 		/* we print out the value that we parsed, as a double-check */
 		char value[BUFSIZE];
+
+		if (strcmp(argv[0], "pg_autoctl.region") == 0)
+		{
+			log_error("pg_autoctl.region is not settable through "
+					  "\"pg_autoctl config set\"; use "
+					  "\"pg_autoctl set node region\" instead, which "
+					  "updates the monitor directly, same as editing "
+					  "node.ini's region entry does");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
 
 		if (!keeper_config_set_setting(&config,
 									   argv[0],

@@ -1730,6 +1730,51 @@ ReportAutoFailoverNodeReplicationSetting(int64 nodeid,
 
 
 /*
+ * ReportAutoFailoverNodeRegion persists the region label of a node.
+ *
+ * We use SPI to automatically handle triggers, function calls, etc.
+ */
+void
+ReportAutoFailoverNodeRegion(int64 nodeid,
+							 char *nodeHost, int nodePort,
+							 char *region)
+{
+	Oid argTypes[] = {
+		TEXTOID,                 /* region */
+		INT8OID,                 /* nodeid */
+		TEXTOID,                 /* nodehost */
+		INT4OID                  /* nodeport */
+	};
+
+	Datum argValues[] = {
+		CStringGetTextDatum(region),           /* region */
+		Int64GetDatum(nodeid),                 /* nodeid */
+		CStringGetTextDatum(nodeHost),          /* nodehost */
+		Int32GetDatum(nodePort)                 /* nodeport */
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+
+	const char *updateQuery =
+		"UPDATE " AUTO_FAILOVER_NODE_TABLE
+		"   SET region = $1 "
+		" WHERE nodeid = $2 and nodehost = $3 AND nodeport = $4";
+
+	SPI_connect();
+
+	int spiStatus = SPI_execute_with_args(updateQuery,
+										  argCount, argTypes, argValues,
+										  NULL, false, 0);
+
+	if (spiStatus != SPI_OK_UPDATE)
+	{
+		elog(ERROR, "could not update " AUTO_FAILOVER_NODE_TABLE);
+	}
+
+	SPI_finish();
+}
+
+
+/*
  * UpdateAutoFailoverNodeMetadata updates a node registration to a possibly new
  * nodeName, nodeHost, and nodePort. Those are NULL (or zero) when not changed.
  *

@@ -8,7 +8,7 @@
 cluster {
     monitor
     formation {
-        node1
+        node1 region dc1
     }
 }
 
@@ -45,4 +45,40 @@ step test_002b_config_set_node {
     exec-fails node1  pg_autoctl config set postgresql.pg_ctl invalid
     exec node1  pg_autoctl config get postgresql.pg_ctl
     expect { /bin/pg_ctl }
+}
+
+# region is set at create time (node1 region dc1) and, unlike
+# candidate-priority/replication-quorum, has no FSM impact -- changing it
+# should not require a wait for convergence.
+step test_003_region_cli_roundtrip {
+    exec node1  pg_autoctl get node region
+    expect { dc1 }
+    exec node1  pg_autoctl set node region dc2
+    exec node1  pg_autoctl get node region
+    expect { dc2 }
+}
+
+# Edit node1's host-side .ini file directly, bypassing the CLI entirely, to
+# exercise the supervisor's automatic file-watch apply path (nodespec.c) --
+# region must be picked up with no restart and no explicit apply command.
+#
+# Known local-only limitation: under Docker Desktop for macOS (virtiofs),
+# host-side writes to a bind-mounted file sync content into the container
+# immediately, but do NOT reliably raise the inotify event the supervisor's
+# watcher listens for -- confirmed by editing the file, `compose exec`-ing a
+# `cat` of it (shows the new value right away), yet seeing no "nodespec:
+# applied" log line and no monitor-side update. This is a virtiofs/gRPC-fuse
+# gap in relaying host-originated filesystem events into the Linux guest,
+# not a bug in nodespec.c/nodeini -- native Linux Docker (CI runners) has no
+# such VM boundary and should pick the change up within one ~100ms tick.
+step test_004_region_nodeini_live_apply {
+    nodeini set node1 region dc3
+    nodeini get node1 region dc3
+
+    # The supervisor checks the spec file on its ~100ms tick; give it a
+    # little room before asserting the change was applied automatically.
+    sleep 8s
+
+    exec node1  pg_autoctl get node region
+    expect { dc3 }
 }
