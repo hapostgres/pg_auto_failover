@@ -205,7 +205,8 @@ CREATE TABLE pgautofailover.event
 -- it -- nodeid is provenance (who told us), not part of what the row means.
 CREATE TABLE pgautofailover.node_timeline_history
  (
-    nodeid          bigint not null references pgautofailover.node(nodeid),
+    nodeid          bigint not null
+                    references pgautofailover.node(nodeid) on delete cascade,
     tli             int not null,
     parenttli       int not null,
     switchpoint_lsn pg_lsn not null,
