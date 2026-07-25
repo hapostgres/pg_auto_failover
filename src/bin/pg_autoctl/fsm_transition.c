@@ -1050,6 +1050,42 @@ fsm_rewind_or_init(Keeper *keeper)
 
 
 /*
+ * keeper_defensive_publish_timeline_history does a synchronous, defensive
+ * publish of what we know about our own timeline history right now,
+ * immediately before code that might rewind us: rewinding to reach a common
+ * history with a new upstream (see #683) erases the local evidence of a
+ * fork (pg_control's timeline_id goes back down), and the periodic per-tick
+ * publish (service_keeper.c) runs on the same cadence as FSM transition
+ * processing, so a fork that both appears and gets rewound within one tick
+ * can otherwise go completely unpublished, taking away the operator's only
+ * record that it ever happened.
+ */
+static void
+keeper_defensive_publish_timeline_history(Keeper *keeper)
+{
+	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
+	uint32_t currentTLI = pgSetup->control.timeline_id;
+	IdentifySystem system = { 0 };
+
+	if (currentTLI > 0 &&
+		keeper_fetch_local_timeline_history(pgSetup, currentTLI, &system))
+	{
+		char *historyJSON = timeline_history_to_json(&system);
+
+		if (historyJSON != NULL)
+		{
+			(void) monitor_report_timeline_history(
+				&(keeper->monitor),
+				keeper->state.current_node_id,
+				historyJSON);
+
+			json_free_serialized_string(historyJSON);
+		}
+	}
+}
+
+
+/*
  * fsm_prepare_for_secondary is used when going from CATCHINGUP to SECONDARY,
  * to create missing replication slots. We want to maintain a replication slot
  * for each of the other nodes in the system, so that we make sure we have the
@@ -1106,6 +1142,15 @@ fsm_prepare_for_secondary(Keeper *keeper)
 	}
 
 	postgres->pgIsRunning = true;
+
+	/*
+	 * Defensively publish what we know about our own timeline history right
+	 * now, before the ancestry check below might rewind us and erase the
+	 * local evidence (see #683 and keeper_defensive_publish_timeline_history
+	 * for why: the periodic per-tick publish alone can otherwise miss a
+	 * fork that both appears and gets rewound within a single tick).
+	 */
+	keeper_defensive_publish_timeline_history(keeper);
 
 	/* check that we're on the same timeline as the new primary */
 	if (!standby_check_timeline_with_upstream(postgres))
@@ -1312,26 +1357,7 @@ fsm_report_lsn(Keeper *keeper)
 	 * node's very first tick after a restart, before that periodic path
 	 * has had a chance to run.
 	 */
-	{
-		uint32_t currentTLI = pgSetup->control.timeline_id;
-		IdentifySystem system = { 0 };
-
-		if (currentTLI > 0 &&
-			keeper_fetch_local_timeline_history(pgSetup, currentTLI, &system))
-		{
-			char *historyJSON = timeline_history_to_json(&system);
-
-			if (historyJSON != NULL)
-			{
-				(void) monitor_report_timeline_history(
-					&(keeper->monitor),
-					keeper->state.current_node_id,
-					historyJSON);
-
-				json_free_serialized_string(historyJSON);
-			}
-		}
-	}
+	keeper_defensive_publish_timeline_history(keeper);
 
 	log_info("Restarting standby node to disconnect replication "
 			 "from failed primary node, to prepare failover");
@@ -1540,12 +1566,17 @@ fsm_follow_new_primary(Keeper *keeper)
 	}
 
 	/*
-	 * Finally, check that we're on the same timeline as the new primary when
-	 * assigned secondary as a goal state. This transition function is also
-	 * used when going from secondary to catchingup, as the primary might have
-	 * changed also in that situation.
+	 * Finally, check that we're on the same timeline as the new primary.
+	 * This transition function is also used when going from secondary to
+	 * catchingup (assigned_role == CATCHINGUP_STATE), as the primary might
+	 * have changed also in that situation -- and the underlying
+	 * standby_follow_new_primary() call above just reconfigured and
+	 * restarted Postgres to point at it either way, so the same divergence
+	 * risk (#683) applies regardless of which of the two goal states we're
+	 * headed to.
 	 */
-	if (keeper->state.assigned_role == SECONDARY_STATE)
+	if (keeper->state.assigned_role == SECONDARY_STATE ||
+		keeper->state.assigned_role == CATCHINGUP_STATE)
 	{
 		PGSQL *pgsql = &(postgres->sqlClient);
 
@@ -1570,6 +1601,13 @@ fsm_follow_new_primary(Keeper *keeper)
 		}
 
 		postgres->pgIsRunning = true;
+
+		/*
+		 * Defensively publish our own timeline history before the ancestry
+		 * check below might rewind us -- see #683 and
+		 * keeper_defensive_publish_timeline_history.
+		 */
+		keeper_defensive_publish_timeline_history(keeper);
 
 		return standby_check_timeline_with_upstream(postgres);
 	}

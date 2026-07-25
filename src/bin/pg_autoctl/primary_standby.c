@@ -1872,24 +1872,60 @@ standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
 	}
 
 	/*
-	 * We only allow this transition when the standby node as caught-up with
-	 * the upstream timeline. As streaming replication is supposed to be a
-	 * clean history replay (no PITR shenanigans), it is never expected that
-	 * the local timeline would be greater than the timeline found on the
-	 * upstream node.
+	 * Streaming replication is supposed to be a clean history replay (no
+	 * PITR shenanigans), so it is not normally expected that our local
+	 * timeline would be ahead of the upstream's. When it happens (#683: this
+	 * node was promoted, or otherwise advanced, outside of pg_autoctl's
+	 * control, and is now being pointed at an upstream that never saw that
+	 * promotion), there is no common-ancestor question to settle first the
+	 * way there is when we're behind: we hold local WAL the upstream does
+	 * not have, on a timeline it will never grow into, so no amount of
+	 * waiting resolves it and pg_rewind is unconditionally required to
+	 * reach a common history.
 	 */
 	if (upstreamTimeline < localTimeline)
 	{
-		log_error("Current timeline on upstream node " NODE_FORMAT
-				  " is %d, and current timeline on this standby node is %d",
-				  primaryNode->nodeId,
-				  primaryNode->name,
-				  primaryNode->host,
-				  primaryNode->port,
-				  upstreamTimeline,
-				  localTimeline);
+		log_warn("Local timeline %d is ahead of upstream " NODE_FORMAT
+				 "'s timeline %d; rewinding to reach a common history",
+				 localTimeline,
+				 primaryNode->nodeId,
+				 primaryNode->name,
+				 primaryNode->host,
+				 primaryNode->port,
+				 upstreamTimeline);
 
-		return false;
+		if (!primary_rewind_to_standby(postgres))
+		{
+			log_error("Failed to rewind after detecting that our local "
+					  "timeline is ahead of the upstream, see above for "
+					  "details");
+			return false;
+		}
+
+		/* re-fetch local metadata: the rewind changed our timeline/LSN */
+		if (!pgsql_get_postgres_metadata(&(postgres->sqlClient),
+										 &(postgres->postgresSetup.is_in_recovery),
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN,
+										 &(postgres->postgresSetup.control)))
+		{
+			log_error("Failed to update the local Postgres metadata "
+					  "after rewind");
+			return false;
+		}
+
+		localTimeline = postgres->postgresSetup.control.timeline_id;
+
+		log_info("Reached timeline %d after rewind, upstream node " NODE_FORMAT
+				 " is at timeline %d",
+				 localTimeline,
+				 primaryNode->nodeId,
+				 primaryNode->name,
+				 primaryNode->host,
+				 primaryNode->port,
+				 upstreamTimeline);
+
+		return upstreamTimeline == localTimeline;
 	}
 	else if (upstreamTimeline > localTimeline)
 	{
