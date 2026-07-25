@@ -1,0 +1,82 @@
+# Reproduces https://github.com/hapostgres/pg_auto_failover/issues/1025.
+#
+# node2 enters maintenance, a routine, non-failover event: the monitor
+# assigns node1 (primary) the goal state "wait_primary" so it stops
+# requiring a synchronous standby, and node2 the goal state
+# "wait_maintenance". node1 has not yet locally converged to "wait_primary"
+# (its current_role is still PRIMARY_STATE) when it loses contact with
+# *both* the monitor and node2 for longer than network_partition_timeout
+# (20s by default).
+#
+# check_for_network_partitions() in service_keeper.c only looks at node1's
+# own current_role (still PRIMARY_STATE) to decide whether to self-fence; it
+# has no idea the monitor already reassigned this node to "wait_primary" for
+# an unrelated, benign reason. So it locally forces
+# assigned_role = DEMOTE_TIMEOUT_STATE, Postgres is stopped, and node1
+# starts reporting "demote_timeout" -- without the monitor ever having been
+# told. Once node1 reconnects, the monitor still has goalstate =
+# "wait_primary" from before, and the keeper FSM has no
+# demote_timeout -> wait_primary edge, so node1 fatals forever with:
+#
+#     FATAL pg_autoctl does not know how to reach state
+#     "wait_primary" from "demote_timeout"
+#
+# and node2 is stuck in wait_maintenance waiting for node1 to converge.
+#
+# Fixed by a guard in ProceedGroupStateFromContext (group_state_machine.c):
+# when a node reports demote_timeout but its assigned goal isn't one
+# demote_timeout can actually reach, the monitor re-targets it to demoted --
+# a real demote_timeout -> demoted FSM edge (fsm.c:355) -- instead of
+# leaving it assigned an unreachable goal forever.
+#
+# demoted is a safe, conservative landing spot (the node stays fenced from
+# writes) but not a self-healing one: with no failover ever triggered, node2
+# never became a promotion candidate (report_lsn), so there is no existing
+# monitor mechanism (perform_failover included -- see
+# GetNodeToFailoverFromInGroup) to elect a new primary from here. Recovering
+# the formation to a working primary again is a separate, pre-existing gap
+# and out of scope for this fix; this spec only covers the #1025 deadlock
+# itself, i.e. that node1 no longer fatals forever.
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_1025_self_fence_recovers_instead_of_deadlocking {
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 60s
+    network disconnect node1
+    sql monitor {
+        SELECT pgautofailover.start_maintenance(nodeid)
+        FROM pgautofailover.node
+        WHERE nodename = 'node2';
+    }
+    wait until node1 assigned-state = wait_primary  timeout 60s
+    sleep 90s
+    network connect node1
+
+    # Before the fix: the monitor still has goalstate = wait_primary from
+    # before the self-fence -- a state demote_timeout has no FSM edge to --
+    # so pg_autoctl fatals forever. After the fix: as soon as node1 reports
+    # demote_timeout, the monitor's guard notices the assigned goalState is
+    # unreachable from there and re-targets to demoted in that same
+    # node_active() call -- so goalState jumps straight from wait_primary to
+    # demoted without ever stably sitting at demote_timeout, and only the
+    # fully-converged "demoted" state is observable here.
+    wait until node1 state is demoted  timeout 60s
+    logs node1 not contains "does not know how to reach state"
+}

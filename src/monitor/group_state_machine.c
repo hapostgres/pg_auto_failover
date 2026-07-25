@@ -190,6 +190,46 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	}
 
 	/*
+	 * A node reporting demote_timeout may have gotten there on its own
+	 * initiative (check_for_network_partitions() in service_keeper.c
+	 * self-fences independently of whatever goal the monitor last assigned --
+	 * see #1025). If the currently assigned goal isn't one demote_timeout can
+	 * actually reach, the keeper would fatal forever trying to get there.
+	 * Re-target to demoted: always a valid demote_timeout exit
+	 * (DEMOTE_TIMEOUT_STATE -> DEMOTED_STATE, fsm.c:355), and the safe,
+	 * conservative choice -- the node stays fenced from writes until the
+	 * existing "demoted -> catchingup" reintegration path
+	 * (group_state_machine.c:909) or an operator decides otherwise.
+	 *
+	 * Deliberately a plain reportedState check, not IsCurrentState(): the
+	 * whole point is to catch reportedState == demote_timeout while
+	 * goalState is still whatever was assigned before the self-fence --
+	 * IsCurrentState() requires goalState == reportedState == state, which
+	 * is exactly the case that does NOT need re-targeting (the node is
+	 * already headed somewhere demote_timeout can reach).
+	 */
+	if (activeNode->reportedState == REPLICATION_STATE_DEMOTE_TIMEOUT &&
+		activeNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT &&
+		activeNode->goalState != REPLICATION_STATE_DEMOTED &&
+		activeNode->goalState != REPLICATION_STATE_PRIMARY &&
+		activeNode->goalState != REPLICATION_STATE_SINGLE)
+	{
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to demoted: it reports demote_timeout but is assigned %s, "
+			"which demote_timeout cannot reach.",
+			NODE_FORMAT_ARGS(activeNode),
+			ReplicationStateGetName(activeNode->goalState));
+
+		AssignGoalState(activeNode, REPLICATION_STATE_DEMOTED, message);
+
+		return true;
+	}
+
+	/*
 	 * A node that is alone in its group should be SINGLE.
 	 *
 	 * Exception arises when it used to be other nodes in the group, and the

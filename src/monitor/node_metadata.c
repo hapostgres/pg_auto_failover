@@ -557,7 +557,20 @@ GetPrimaryOrDemotedNodeInGroupFromList(List *groupNodeList)
 	{
 		AutoFailoverNode *currentNode = (AutoFailoverNode *) lfirst(nodeCell);
 
-		if (StateBelongsToPrimary(currentNode->reportedState) &&
+		/*
+		 * StateBelongsToPrimary() only covers the transitional states that
+		 * lead up to a demotion (draining, demote_timeout,
+		 * prepare_maintenance); it deliberately excludes the terminal
+		 * "demoted" state itself, exactly like IsDemotedPrimary() below
+		 * already accounts for. Without the explicit check here, a primary
+		 * that fully converged to demoted (reportedState == goalState ==
+		 * demoted) with no other node ever promoted in its place -- e.g. a
+		 * node recovering from a #1025 self-fence -- would not be found by
+		 * either loop in this function, and callers relying on this
+		 * function to always identify such a node would fail.
+		 */
+		if ((StateBelongsToPrimary(currentNode->reportedState) ||
+			 currentNode->reportedState == REPLICATION_STATE_DEMOTED) &&
 			(!IsBeingDemotedPrimary(primaryNode) ||
 			 !IsDemotedPrimary(currentNode)))
 		{
