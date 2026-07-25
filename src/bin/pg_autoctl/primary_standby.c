@@ -1746,6 +1746,91 @@ standby_cleanup_as_primary(LocalPostgresServer *postgres)
 
 
 /*
+ * standby_verify_timeline_ancestry checks whether the local timeline is a
+ * genuine ancestor of the upstream's current timeline, using the upstream's
+ * own TIMELINE_HISTORY data (already fetched into
+ * postgres->replicationSource.system.timelines by the pgctl_identify_system()
+ * call that standby_check_timeline_with_upstream() makes before calling us).
+ *
+ * Unlike a bare timeline-number comparison, this can tell "genuine ancestor,
+ * just behind" apart from "diverged, but the timeline number still happens to
+ * be lower": it walks the upstream's linear timeline history (oldest ancestor
+ * first, current tip last) looking for the entry whose tli matches our local
+ * timeline, and confirms our local checkpoint LSN lies strictly before the
+ * point where that timeline was superseded (entry.end). If our checkpoint is
+ * past that point, we replayed WAL that the upstream's lineage never
+ * produced: a genuine fork, not just lag.
+ *
+ * Returns true when ancestry is confirmed (or trivially, when the timelines
+ * already match). Returns false both when a genuine divergence is detected
+ * and when the local timeline doesn't appear in the upstream's history at
+ * all (unrelated history); callers should treat both as "needs pg_rewind",
+ * not "just keep retrying".
+ */
+static bool
+standby_verify_timeline_ancestry(LocalPostgresServer *postgres)
+{
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+	TimeLineHistory *timelines = &(replicationSource->system.timelines);
+
+	uint32_t localTLI = postgres->postgresSetup.control.timeline_id;
+	uint64_t localLSN = 0;
+
+	if (!parseLSN(postgres->postgresSetup.control.latestCheckpointLSN,
+				  &localLSN))
+	{
+		log_error("Failed to parse local latest checkpoint LSN \"%s\"",
+				  postgres->postgresSetup.control.latestCheckpointLSN);
+		return false;
+	}
+
+	for (int i = 0; i < timelines->count; i++)
+	{
+		TimeLineHistoryEntry *entry = &(timelines->history[i]);
+
+		if (entry->tli != localTLI)
+		{
+			continue;
+		}
+
+		/* entry->end is InvalidXLogRecPtr (0) only for the current tip */
+		bool isAncestor =
+			XLogRecPtrIsInvalid(entry->end) || localLSN < entry->end;
+
+		if (!isAncestor)
+		{
+			log_error("Local timeline %d diverges from upstream " NODE_FORMAT
+					  ": local checkpoint is at %X/%X, but timeline %d was "
+					  "superseded at %X/%X -- pg_rewind is required",
+					  localTLI,
+					  primaryNode->nodeId,
+					  primaryNode->name,
+					  primaryNode->host,
+					  primaryNode->port,
+					  (uint32) (localLSN >> 32),
+					  (uint32) localLSN,
+					  localTLI,
+					  (uint32) (entry->end >> 32),
+					  (uint32) entry->end);
+		}
+
+		return isAncestor;
+	}
+
+	log_error("Local timeline %d does not appear in the timeline history "
+			  "reported by upstream " NODE_FORMAT,
+			  localTLI,
+			  primaryNode->nodeId,
+			  primaryNode->name,
+			  primaryNode->host,
+			  primaryNode->port);
+
+	return false;
+}
+
+
+/*
  * standby_check_timeline_with_upstream returns true when the current timeline
  * on the local node (a standby) is the same as the timeline fetched on the
  * upstream node setup in its replicationSource.
@@ -1808,16 +1893,69 @@ standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
 	}
 	else if (upstreamTimeline > localTimeline)
 	{
-		log_warn("Current timeline on upstream node " NODE_FORMAT
-				 " is %d, and current timeline on this standby node is still %d",
+		/*
+		 * Being behind is normal while still catching up: most of the time
+		 * our local timeline is a genuine ancestor of the upstream's, and we
+		 * just haven't replayed our way to its tip yet. But it can also mean
+		 * we've diverged onto a dead branch (see #683) -- in which case no
+		 * amount of retrying will ever let us reach it through ordinary
+		 * streaming replication. Tell the two apart using the upstream's own
+		 * timeline history.
+		 */
+		if (standby_verify_timeline_ancestry(postgres))
+		{
+			log_warn("Current timeline on upstream node " NODE_FORMAT
+					 " is %d, and current timeline on this standby node is "
+					 "still %d",
+					 primaryNode->nodeId,
+					 primaryNode->name,
+					 primaryNode->host,
+					 primaryNode->port,
+					 upstreamTimeline,
+					 localTimeline);
+
+			return false;
+		}
+
+		log_warn("Local timeline %d has diverged from upstream " NODE_FORMAT
+				 "; rewinding to reach a common history",
+				 localTimeline,
+				 primaryNode->nodeId,
+				 primaryNode->name,
+				 primaryNode->host,
+				 primaryNode->port);
+
+		if (!primary_rewind_to_standby(postgres))
+		{
+			log_error("Failed to rewind after detecting a timeline "
+					  "divergence, see above for details");
+			return false;
+		}
+
+		/* re-fetch local metadata: the rewind changed our timeline/LSN */
+		if (!pgsql_get_postgres_metadata(&(postgres->sqlClient),
+										 &(postgres->postgresSetup.is_in_recovery),
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN,
+										 &(postgres->postgresSetup.control)))
+		{
+			log_error("Failed to update the local Postgres metadata "
+					  "after rewind");
+			return false;
+		}
+
+		localTimeline = postgres->postgresSetup.control.timeline_id;
+
+		log_info("Reached timeline %d after rewind, upstream node " NODE_FORMAT
+				 " is at timeline %d",
+				 localTimeline,
 				 primaryNode->nodeId,
 				 primaryNode->name,
 				 primaryNode->host,
 				 primaryNode->port,
-				 upstreamTimeline,
-				 localTimeline);
+				 upstreamTimeline);
 
-		return false;
+		return upstreamTimeline == localTimeline;
 	}
 	else if (upstreamTimeline == localTimeline)
 	{
