@@ -208,11 +208,6 @@ occurred.
 Monitoring protocol
 -------------------
 
-.. figure:: ./tikz/seq-monitoring-protocol.svg
-   :alt: Sequence diagram of the node_active polling and health check protocols
-
-   The two protocols between a node's keeper and the monitor
-
 The monitor interacts with the data nodes in 2 ways:
 
   - Data nodes periodically connect and run `SELECT
@@ -239,6 +234,11 @@ To simplify operations, a node is only considered unhealthy if the monitor
 cannot connect *and* it hasn't reported its state through `node_active` for
 a while. This allows, for example, PostgreSQL to be restarted without
 causing a health check failure.
+
+.. figure:: ./tikz/seq-monitoring-protocol.svg
+   :alt: Sequence diagram of the node_active polling and health check protocols
+
+   The two protocols between a node's keeper and the monitor
 
 Synchronous vs. asynchronous replication
 ----------------------------------------
