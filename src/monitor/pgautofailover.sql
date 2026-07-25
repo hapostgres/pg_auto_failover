@@ -925,7 +925,7 @@ CREATE FUNCTION pgautofailover.accept_timeline
  (
     IN formation_id text,
     IN group_id     int,
-    IN tli          int,
+    IN target_tli   int,
     IN decided_by   text default null
  )
 RETURNS bool LANGUAGE plpgsql SECURITY DEFINER
@@ -939,18 +939,18 @@ BEGIN
           JOIN pgautofailover.node n ON n.nodeid = h.nodeid
          WHERE n.formationid = formation_id
            AND n.groupid = group_id
-           AND h.tli = tli
+           AND h.tli = target_tli
     ) INTO known;
 
     IF NOT known THEN
         RAISE EXCEPTION
             'timeline % has never been reported by any node in formation "%" group %',
-            tli, formation_id, group_id;
+            target_tli, formation_id, group_id;
     END IF;
 
     INSERT INTO pgautofailover.accepted_timeline
            (formationid, groupid, accepted_tli, decided_by)
-    VALUES (formation_id, group_id, tli, decided_by);
+    VALUES (formation_id, group_id, target_tli, decided_by);
 
     RETURN true;
 END;
