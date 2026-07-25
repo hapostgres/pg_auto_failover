@@ -2087,13 +2087,37 @@ stop_maintenance(PG_FUNCTION_ARGS)
 						"group %d",
 						currentNode->formationId, currentNode->groupId)));
 	}
-	else if (primaryNode == NULL && totalNodesCount > 2)
+	else if ((primaryNode == NULL || IsDemotedPrimary(primaryNode)) &&
+			 totalNodesCount > 2)
 	{
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
 			" to report_lsn  after a user-initiated stop_maintenance call.",
 			NODE_FORMAT_ARGS(currentNode));
+
+		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
+
+		PG_RETURN_BOOL(true);
+	}
+	else if (IsDemotedPrimary(primaryNode))
+	{
+		/*
+		 * The primary is fully demoted (Postgres stopped, e.g. after a
+		 * #1025 self-fence recovery): there's nothing left running to
+		 * stream from, so catchingup would just retry a doomed replication
+		 * connection forever. Join the report_lsn crew instead -- once this
+		 * node reports its LSN, the candidate-scanning code in
+		 * ProceedGroupStateForMSFailover() picks up the demoted primary too
+		 * (it's still IsDemotedPrimary()) and the normal election proceeds.
+		 */
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to report_lsn after a user-initiated stop_maintenance call, "
+			"as " NODE_FORMAT " is demoted and has nothing to catch up from.",
+			NODE_FORMAT_ARGS(currentNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
 
