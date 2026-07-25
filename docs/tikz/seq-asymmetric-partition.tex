@@ -16,7 +16,7 @@
 \def\px{0}
 \def\sx{9}
 \def\mx{19}
-\def\ybot{14.4}
+\def\ybot{22.2}
 
 \begin{tikzpicture}[
   >=Stealth,
@@ -31,6 +31,7 @@
 \tikzstyle{lldead}=[densely dashed, orange!60, line width=0.5pt]
 \tikzstyle{msg}=[->, line width=0.65pt]
 \tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{broken}=[red!70, densely dotted, line width=0.8pt]
 \tikzstyle{lbl}=[font=\small, inner sep=2pt]
 \tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
   font=\small, align=center]
@@ -46,55 +47,77 @@
 \draw[ll] (\sx,0.35) -- (\sx,\ybot);
 \draw[ll] (\mx,0.35) -- (\mx,\ybot);
 
-%% ── asymmetric partition ────────────────────────────────────────────────
-\node[seclbl] at (-3.4,1.3) {asymmetric partition};
+%% ── steady state ────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,1.3) {steady state};
 
 \draw[msg] (\px,1.6) -- (\sx,1.6)
-  node[lbl,midway,above] {WAL stream (still fine)};
+  node[lbl,midway,above] {WAL stream};
 
-\node[note, fill=red!12, draw=red!50, text width=8.5cm]
-  at (\px, 2.5)
-  {\color{red!80!black} Primary $\leftrightarrow$ Monitor unreachable\\
-   Monitor $\leftrightarrow$ Secondary still fine};
+\draw[msg] (\px,2.7) -- (\mx,2.7);
+\node[lbl, above] at (\px+4.5,2.7) {node\_active(reported=primary)};
+\draw[rsp] (\mx,3.3) -- (\px,3.3);
+\node[lbl, above] at (\mx-2.2,3.3) {goal=primary};
+
+\draw[msg] (\sx,4.3) -- (\mx,4.3);
+\node[lbl, above] at (\sx+3.3,4.3) {node\_active(reported=secondary)};
+\draw[rsp] (\mx,4.9) -- (\sx,4.9);
+\node[lbl, above] at (\mx-2.2,4.9) {goal=secondary};
+
+%% ── asymmetric partition ────────────────────────────────────────────────
+\node[seclbl] at (-3.4,6.3) {asymmetric partition: only the Primary-Monitor link breaks};
+
+\draw[broken] (\px,7.2) -- (13,7.2);
+\node[red!70!black, font=\Large] at (13.4,7.2) {$\times$};
+\node[lbl, above, text=red!70!black] at (6.5,7.2)
+  {node\_active(reported=primary) attempted -- no response};
+
+\node[note, fill=gray!10, draw=gray!45, text width=13.5cm, font=\small]
+  at (9.5, 8.4)
+  {the primary keeps replicating normally to the secondary throughout --
+   only its link to the monitor is down};
 
 %% ── monitor initiates failover ─────────────────────────────────────────
-\node[seclbl] at (-3.4,4.2) {monitor initiates failover};
+\node[seclbl] at (-3.4,9.8) {secondary is still reachable, monitor initiates failover};
 
-\draw[msg, color=pbox, line width=0.8pt] (\mx,4.5) -- (\sx,4.5);
-\node[lbl, above, text=pbox] at (\mx-2.4, 4.5) {goal: stop\_replication};
+\draw[msg] (\sx,10.7) -- (\mx,10.7);
+\node[lbl, above] at (\sx+3.3,10.7) {node\_active(reported=secondary)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,11.3) -- (\sx,11.3);
+\node[lbl, above, text=pbox] at (\mx-2.6, 11.3) {goal=stop\_replication};
 
 \node[note, fill=sbox!25, draw=sbox!70!black, text width=8cm]
-  at (\sx, 5.4) {\small disconnects from Primary};
+  at (\sx, 12.3) {\small disconnects from Primary};
 
 %% ── primary loses its last connection ──────────────────────────────────
-\node[seclbl] at (-3.4,7.0) {primary loses its last connection};
+\node[seclbl] at (-3.4,13.7) {primary loses its last connection};
 
 \node[note, fill=orange!15, draw=orange!70!black, text width=12.5cm]
-  at (4.5, 7.9)
+  at (4.5, 14.6)
   {\small with the secondary gone too, the primary self-fences the same
    way as a full partition (previous diagram): expected to stop within
    30--60s};
 
-\draw[lldead] (\px,8.7) -- (\px,\ybot);
+\draw[lldead] (\px,15.4) -- (\px,\ybot);
 
 %% ── 90s safety wait ─────────────────────────────────────────────────────
-\node[seclbl] at (-3.4,10.0) {90s safety wait};
+\node[seclbl] at (-3.4,16.9) {90s safety wait};
 
 \node[note, fill=blue!8, draw=blue!40, text width=13.5cm]
-  at (\mx-1, 10.9)
+  at (\mx-1, 17.8)
   {\small worst case is 60s, so the monitor waits a full 90s before
    promoting -- a margin against edge cases};
 
 \draw[gray!50, line width=0.5pt, ->]
-  (\mx+2.6, 9.6) .. controls (\mx+4.3,9.9) and (\mx+4.3,11.9) .. (\mx+2.6,12.2)
+  (\mx+2.6, 16.5) .. controls (\mx+4.3,16.8) and (\mx+4.3,18.8) .. (\mx+2.6,19.1)
   node[right, font=\small\itshape, text=gray!70] {waiting\ldots};
 
 %% ── promotion ────────────────────────────────────────────────────────────
-\node[seclbl] at (-3.4,13.0) {promotion};
+\node[seclbl] at (-3.4,20.2) {promotion};
 
-\draw[msg, color=pbox, line width=1pt] (\mx,13.3) -- (\sx,13.3);
-\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.6,13.3)
-  {goal: wait\_primary};
+\draw[msg] (\sx,21.1) -- (\mx,21.1);
+\node[lbl, above] at (\sx+3.7,21.1) {node\_active(reported=stop\_replication)};
+\draw[rsp, color=pbox, line width=1pt] (\mx,21.7) -- (\sx,21.7);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.4,21.7)
+  {goal=wait\_primary};
 
 %% ── actor footers ───────────────────────────────────────────────────────
 \node[actor, fill=orange!25, draw=orange!70!black, text=orange!30!black]

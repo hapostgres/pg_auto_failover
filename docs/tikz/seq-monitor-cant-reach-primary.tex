@@ -16,7 +16,7 @@
 \def\px{0}
 \def\sx{9}
 \def\mx{19}
-\def\ybot{16.4}
+\def\ybot{28.8}
 
 \begin{tikzpicture}[
   >=Stealth,
@@ -46,66 +46,103 @@
 \draw[ll] (\sx,0.35) -- (\sx,\ybot);
 \draw[ll] (\mx,0.35) -- (\mx,\ybot);
 
-%% ── steady state ────────────────────────────────────────────────────────
+%% ── steady state: both nodes reachable ─────────────────────────────────
 \node[seclbl] at (-3.4,1.3) {steady state};
 
 \draw[msg] (\px,1.6) -- (\sx,1.6)
   node[lbl,midway,above] {WAL stream};
 
-%% ── health checks fail ─────────────────────────────────────────────────
-\node[seclbl] at (-3.4,2.8) {monitor's health checks to primary fail};
+\draw[msg] (\px,2.7) -- (\mx,2.7);
+\node[lbl, above] at (\px+4.5,2.7) {node\_active(reported=primary)};
+\draw[rsp] (\mx,3.3) -- (\px,3.3);
+\node[lbl, above] at (\mx-2.2,3.3) {goal=primary};
 
-\draw[broken] (\mx,3.7) -- (6,3.7);
-\node[red!70!black, font=\Large] at (5.6,3.7) {$\times$};
-\node[lbl, above, text=red!70!black] at (13,3.7)
+\draw[msg] (\sx,4.3) -- (\mx,4.3);
+\node[lbl, above] at (\sx+3.3,4.3) {node\_active(reported=secondary)};
+\draw[rsp] (\mx,4.9) -- (\sx,4.9);
+\node[lbl, above] at (\mx-2.2,4.9) {goal=secondary};
+
+%% ── primary goes silent ─────────────────────────────────────────────────
+\node[seclbl] at (-3.4,6.3)
+  {primary goes silent: health checks and its own node\_active both fail};
+
+\draw[broken] (\mx,7.2) -- (6,7.2);
+\node[red!70!black, font=\Large] at (5.6,7.2) {$\times$};
+\node[lbl, above, text=red!70!black] at (13,7.2)
   {health check: no response (retried)};
 
+\draw[broken] (\px,8.3) -- (13,8.3);
+\node[red!70!black, font=\Large] at (13.4,8.3) {$\times$};
+\node[lbl, above, text=red!70!black] at (6.5,8.3)
+  {node\_active(reported=primary) attempted -- no response};
+
 \node[note, fill=red!10, draw=red!50, text width=13cm, font=\small]
-  at (9.5, 5.0)
+  at (9.5, 9.6)
   {after \texttt{health\_check\_max\_retries} (2 by default), the primary is
-   marked unhealthy -- this says nothing about whether it is actually
-   down, only that the monitor can no longer reach it};
+   marked unhealthy -- meanwhile it cannot even poll for a goal state, so
+   it has no way to learn anything changed};
+
+%% ── secondary is still reachable ────────────────────────────────────────
+\node[seclbl] at (-3.4,11.0) {secondary is unaffected, still polling normally};
+
+\draw[msg] (\sx,11.9) -- (\mx,11.9);
+\node[lbl, above] at (\sx+3.3,11.9) {node\_active(reported=secondary)};
+\draw[rsp] (\mx,12.5) -- (\sx,12.5);
+\node[lbl, above] at (\mx-2.2,12.5) {goal=secondary};
 
 %% ── failover begins ─────────────────────────────────────────────────────
-\node[seclbl] at (-3.4,6.6) {failover begins: promote the secondary};
+\node[seclbl] at (-3.4,13.9) {failover begins: promote the secondary};
 
-\draw[msg, color=pbox, line width=0.8pt] (\mx,7.4) -- (\sx,7.4);
-\node[lbl, above, text=pbox] at (\mx-2.6,7.4) {goal: prepare\_promotion};
+\draw[msg] (\sx,14.8) -- (\mx,14.8);
+\node[lbl, above] at (\sx+3.3,14.8) {node\_active(reported=secondary)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,15.4) -- (\sx,15.4);
+\node[lbl, above, text=pbox] at (\mx-2.6,15.4) {goal=prepare\_promotion};
 
 \node[note, fill=sbox!25, draw=sbox!70!black, text width=11cm]
-  at (\sx, 8.4)
-  {\small catches up on any last WAL still available from the primary,
-   then reports success};
+  at (\sx, 16.4)
+  {\small catches up on any last WAL still available from the primary};
 
-\node[note, fill=blue!8, draw=blue!40, text width=13.5cm, font=\small]
-  at (9.5, 9.7)
-  {if the WAL delta doesn't resorb within 30s (default), the secondary is
-   promoted anyway -- with uncertainty about data durability};
+\draw[msg] (\sx,17.4) -- (\mx,17.4);
+\node[lbl, above] at (\sx+3.5,17.4) {node\_active(reported=prepare\_promotion)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,18.0) -- (\sx,18.0);
+\node[lbl, above, text=pbox] at (\mx-2.6,18.0) {goal=stop\_replication};
+
+\node[note, fill=blue!8, draw=blue!40, text width=15cm, font=\small]
+  at (9.5, 19.2)
+  {if the WAL delta hadn't resorbed within 30s (default), the secondary
+   would have been promoted anyway -- with uncertainty about data
+   durability. Remaining hops (\texttt{stop\_replication} $\rightarrow$
+   \texttt{wait\_primary}) are the same as any promotion; see the
+   Failover State Machine page};
 
 %% ── old primary fenced ──────────────────────────────────────────────────
-\node[seclbl] at (-3.4,11.1) {old primary fenced (STONITH)};
+\node[seclbl] at (-3.4,21.4) {old primary fenced (STONITH) -- monitor-side only};
 
-\node[note, fill=gray!12, draw=gray!55, text width=13.5cm, font=\small]
-  at (9.5, 12.0)
-  {goal recorded as \texttt{draining} $\rightarrow$ \texttt{demoted},
-   whether or not the primary is actually reachable right now};
-
-\node[note, fill=gray!12, draw=gray!55, text width=13.5cm, font=\small]
-  at (9.5, 13.4)
-  {if the primary is in fact still alive, it demotes itself as soon as it
-   can reach the monitor again -- or it may have already self-fenced
-   independently (see the previous diagram)};
+\node[note, fill=gray!12, draw=gray!55, text width=15cm, font=\small]
+  at (9.5, 22.8)
+  {records goal \texttt{draining} $\rightarrow$ \texttt{demoted} for the
+   primary in its own table -- no delivery attempted, since the primary
+   hasn't polled since this section started. If it's in fact still alive,
+   it learns this (and demotes itself) the next time it can reach the
+   monitor -- or it may have already self-fenced independently (see the
+   previous diagram)};
 
 %% ── promotion complete ──────────────────────────────────────────────────
-\node[seclbl] at (-3.4,14.8) {promotion complete};
+\node[seclbl] at (-3.4,25.3) {promotion complete};
 
-\draw[msg, color=pbox, line width=1pt] (\mx,15.1) -- (\sx,15.1);
-\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.4,15.1)
-  {goal: wait\_primary};
+\draw[msg] (\sx,26.2) -- (\mx,26.2);
+\node[lbl, above] at (\sx+3.7,26.2) {node\_active(reported=stop\_replication)};
+\draw[rsp, color=pbox, line width=1pt] (\mx,26.8) -- (\sx,26.8);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.4,26.8)
+  {goal=wait\_primary};
+
+\node[note, fill=green!15, draw=green!50!black,
+      font=\small\bfseries, minimum width=8cm]
+  at (14, 27.9) {$\checkmark$~~Secondary is the new primary};
 
 %% ── actor footers ───────────────────────────────────────────────────────
 \node[actor, fill=gray!30, draw=gray!60, text=gray!30!black]
-  at (\px, \ybot+0.35) {\small Primary (fenced)};
+  at (\px, \ybot+0.35) {\small Primary (fenced, unaware)};
 \node[actor, fill=pbox, text=ptxt] at (\sx, \ybot+0.35) {New Primary};
 \node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
 

@@ -16,7 +16,7 @@
 \def\px{0}
 \def\sx{9}
 \def\mx{19}
-\def\ybot{14.6}
+\def\ybot{21.0}
 
 \begin{tikzpicture}[
   >=Stealth,
@@ -53,46 +53,64 @@
 \draw[msg] (\px,1.6) -- (\sx,1.6)
   node[lbl,midway,above] {WAL stream};
 
-%% ── network partition: both connections lost ──────────────────────────
-\node[seclbl] at (-3.4,2.8) {network partition: both connections lost};
+\draw[msg] (\px,2.7) -- (\mx,2.7);
+\node[lbl, above] at (\px+4.5,2.7) {node\_active(reported=primary)};
+\draw[rsp] (\mx,3.3) -- (\px,3.3);
+\node[lbl, above] at (\mx-2.2,3.3) {goal=primary};
 
-\draw[broken] (\px,3.7) -- (13,3.7);
-\node[red!70!black, font=\Large] at (13.4,3.7) {$\times$};
-\node[lbl, above, text=red!70!black] at (6.5,3.7)
-  {node\_active(\ldots) attempted -- no response};
+\draw[msg] (\sx,4.3) -- (\mx,4.3);
+\node[lbl, above] at (\sx+3.3,4.3) {node\_active(reported=secondary)};
+\draw[rsp] (\mx,4.9) -- (\sx,4.9);
+\node[lbl, above] at (\mx-2.2,4.9) {goal=secondary};
 
-\draw[broken] (\px,4.9) -- (6,4.9);
-\node[red!70!black, font=\Large] at (6.4,4.9) {$\times$};
-\node[lbl, above, text=red!70!black] at (3,4.9)
+%% ── network partition: primary isolated ────────────────────────────────
+\node[seclbl] at (-3.4,6.3) {network partition: primary isolated};
+
+\draw[broken] (\px,7.2) -- (13,7.2);
+\node[red!70!black, font=\Large] at (13.4,7.2) {$\times$};
+\node[lbl, above, text=red!70!black] at (6.5,7.2)
+  {node\_active(reported=primary) attempted -- no response};
+
+\draw[broken] (\px,8.4) -- (6,8.4);
+\node[red!70!black, font=\Large] at (6.4,8.4) {$\times$};
+\node[lbl, above, text=red!70!black] at (3,8.4)
   {WAL stream -- connection lost};
 
+%% ── secondary is unaffected ─────────────────────────────────────────────
+\node[seclbl] at (-3.4,9.8) {secondary is unaffected, still polling normally};
+
+\draw[msg] (\sx,10.7) -- (\mx,10.7);
+\node[lbl, above] at (\sx+3.3,10.7) {node\_active(reported=secondary)};
+\draw[rsp] (\mx,11.3) -- (\sx,11.3);
+\node[lbl, above] at (\mx-2.2,11.3) {goal=secondary};
+
 %% ── local decision on the primary ──────────────────────────────────────
-\node[seclbl] at (-3.4,6.3) {primary's local decision};
+\node[seclbl] at (-3.4,12.7) {primary's local decision};
 
 \node[note, fill=blue!8, draw=blue!40, text width=13.5cm]
-  at (9.5, 7.3)
+  at (9.5, 13.7)
   {\small no secondary, no monitor $\Rightarrow$ wait
    \texttt{network\_partition\_timeout} (20s by default), then self-fence\\
    \normalfont\itshape\small (if the secondary were still reachable, the
    primary would just keep serving instead)};
 
 %% ── self-fence ──────────────────────────────────────────────────────────
-\node[seclbl] at (-3.4,9.3) {self-fence (timeout elapsed)};
+\node[seclbl] at (-3.4,15.7) {self-fence (timeout elapsed)};
 
 \node[note, fill=orange!15, draw=orange!70!black, text width=8cm]
-  at (\px, 10.2)
+  at (\px, 16.6)
   {\small stop Postgres\\ local state $\rightarrow$ \texttt{demote\_timeout}};
 
-\draw[lldead] (\px,10.9) -- (\px,\ybot);
+\draw[lldead] (\px,17.3) -- (\px,\ybot);
 
 \node[note, fill=orange!10, draw=orange!60, text width=13cm, font=\small]
-  at (9.5, 12.1)
+  at (9.5, 18.5)
   {avoids a split brain: with no secondary and no monitor reachable, the
    primary cannot be sure it isn't isolated, so it refuses to keep
    accepting writes};
 
 \node[note, fill=gray!10, draw=gray!50, text width=13cm, font=\small]
-  at (9.5, 13.6)
+  at (9.5, 20.0)
   {reported to the monitor as \texttt{demote\_timeout} once connectivity is
    restored};
 
