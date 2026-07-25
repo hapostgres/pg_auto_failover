@@ -389,6 +389,12 @@ bool pgsql_get_postgres_metadata(PGSQL *pgsql,
 								 char *pgsrSyncState, char *currentLSN,
 								 PostgresControlData *control);
 
+bool pgsql_get_postgres_version(PGSQL *pgsql,
+								int *versionNum,
+								char *version,
+								char *versionString,
+								char *citusVersion);
+
 bool pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 										   char *targetLSN,
 										   char *currentLSN,

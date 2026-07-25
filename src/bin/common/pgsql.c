@@ -50,6 +50,7 @@ static bool pgsql_alter_system_set(PGSQL *pgsql, GUC setting);
 static bool pgsql_get_current_setting(PGSQL *pgsql, char *settingName,
 									  char **currentValue);
 static void parsePgMetadata(void *ctx, PGresult *result);
+static void parsePgVersion(void *ctx, PGresult *result);
 static void parsePgReachedTargetLSN(void *ctx, PGresult *result);
 static void parseReplicationSlotMaintain(void *ctx, PGresult *result);
 static void parsePgReachedTargetLSN(void *ctx, PGresult *result);
@@ -2772,6 +2773,118 @@ parsePgMetadata(void *ctx, PGresult *result)
 			context->parsedOk = true;
 			return;
 		}
+	}
+
+	context->parsedOk = true;
+}
+
+
+/*
+ * PgVersionInfo carries the parsed result of pgsql_get_postgres_version's
+ * query. Deliberately not PostgresVersionInfo (primary_standby.h): that
+ * struct also carries needsReport, a keeper-side bookkeeping field this
+ * generic pgsql.c layer has no business setting.
+ */
+typedef struct PgVersionInfo
+{
+	char sqlstate[6];
+	bool parsedOk;
+	int versionNum;
+	char version[NAMEDATALEN];
+	char versionString[BUFSIZE];
+	char citusVersion[NAMEDATALEN];
+} PgVersionInfo;
+
+
+/*
+ * pgsql_get_postgres_version fetches the connected server's own version
+ * (server_version_num/server_version/version()) and, when installed, the
+ * Citus extension's version. Unlike pgsql_get_postgres_metadata, none of
+ * this can change without a Postgres restart, so callers should fetch it
+ * once per restart rather than on every periodic report.
+ */
+bool
+pgsql_get_postgres_version(PGSQL *pgsql,
+						   int *versionNum,
+						   char *version,
+						   char *versionString,
+						   char *citusVersion)
+{
+	PgVersionInfo context = { 0 };
+
+	char *sql =
+		"select current_setting('server_version_num')::int,"
+		" current_setting('server_version'),"
+		" version(),"
+		" (select extversion from pg_extension where extname = 'citus')";
+
+	if (!pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL,
+								   &context, &parsePgVersion))
+	{
+		/* errors have been logged already */
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse the Postgres version");
+		return false;
+	}
+
+	*versionNum = context.versionNum;
+	strlcpy(version, context.version, NAMEDATALEN);
+	strlcpy(versionString, context.versionString, BUFSIZE);
+	strlcpy(citusVersion, context.citusVersion, NAMEDATALEN);
+
+	pgsql_finish(pgsql);
+
+	return true;
+}
+
+
+/*
+ * parsePgVersion parses the result from pgsql_get_postgres_version's query:
+ * server_version_num, server_version, version(), and Citus's extversion
+ * (NULL when Citus isn't installed).
+ */
+static void
+parsePgVersion(void *ctx, PGresult *result)
+{
+	PgVersionInfo *context = (PgVersionInfo *) ctx;
+	char *value;
+
+	if (PQnfields(result) != 4)
+	{
+		log_error("Query returned %d columns, expected 4", PQnfields(result));
+		context->parsedOk = false;
+		return;
+	}
+
+	if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOk = false;
+		return;
+	}
+
+	value = PQgetvalue(result, 0, 0);
+	if (!stringToInt(value, &(context->versionNum)))
+	{
+		log_error("Failed to parse server_version_num \"%s\"", value);
+		context->parsedOk = false;
+		return;
+	}
+
+	strlcpy(context->version, PQgetvalue(result, 0, 1), NAMEDATALEN);
+	strlcpy(context->versionString, PQgetvalue(result, 0, 2), BUFSIZE);
+
+	if (PQgetisnull(result, 0, 3))
+	{
+		context->citusVersion[0] = '\0';
+	}
+	else
+	{
+		strlcpy(context->citusVersion, PQgetvalue(result, 0, 3), NAMEDATALEN);
 	}
 
 	context->parsedOk = true;

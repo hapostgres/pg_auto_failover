@@ -1,0 +1,48 @@
+# Test that the monitor's pgautofailover.node row gets the connected node's
+# Postgres server version (and, when installed, Citus extension version)
+# populated automatically, with no operator action -- the keeper reports
+# this once at startup via its own not-running -> running edge detection
+# in keeper_update_pg_state(), not through the periodic node_active() report
+# (neither piece of information can change without a Postgres restart).
+#
+# See src/monitor/sql/node_active_protocol.sql's test_008 for direct SQL
+# coverage of pgautofailover.report_postgres_version() itself; this spec
+# instead exercises the real keeper-side edge-detection and reporting path
+# end to end, against a plain (non-Citus) formation.
+
+cluster {
+    monitor
+    formation {
+        node1
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_version_reported_on_startup {
+    # "single" state (waited on in setup{}) is confirmed via the initial
+    # registration call, which can land before the keeper's periodic loop
+    # has run its first keeper_update_pg_state()+keeper_node_active() tick
+    # -- the actual pairing that fetches and reports version info. Give it
+    # a moment to complete at least once.
+    sleep 3s
+
+    sql monitor { SELECT pg_versionnum IS NOT NULL FROM pgautofailover.node WHERE nodename = 'node1'; }
+    expect { t }
+
+    sql monitor { SELECT pg_version IS NOT NULL FROM pgautofailover.node WHERE nodename = 'node1'; }
+    expect { t }
+
+    sql monitor { SELECT pg_versionstring LIKE 'PostgreSQL%' FROM pgautofailover.node WHERE nodename = 'node1'; }
+    expect { t }
+
+    # this formation has no Citus workers; citus_version must stay NULL
+    sql monitor { SELECT citus_version IS NULL FROM pgautofailover.node WHERE nodename = 'node1'; }
+    expect { t }
+}

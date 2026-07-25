@@ -1151,6 +1151,51 @@ monitor_set_node_region(Monitor *monitor,
 
 
 /*
+ * monitor_report_postgres_version reports the connected Postgres server's
+ * own version and, when installed, the Citus extension's version, for the
+ * given node. Called once per Postgres restart (see
+ * keeper_update_pg_state()'s pgIsRunning edge detection), never on every
+ * periodic report -- neither piece of information can change without a
+ * Postgres restart. citusVersion may legitimately be an empty string
+ * (Citus not installed on this node), reported as SQL NULL.
+ */
+bool
+monitor_report_postgres_version(Monitor *monitor, int64_t nodeId,
+								PostgresVersionInfo *pgVersion)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_postgres_version($1, $2, $3, $4, $5)";
+
+	int paramCount = 5;
+	Oid paramTypes[5] = { INT8OID, INT4OID, TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[5];
+
+	IntString nodeIdString = intToString(nodeId);
+	IntString versionNumString = intToString(pgVersion->versionNum);
+
+	paramValues[0] = nodeIdString.strValue;
+	paramValues[1] = versionNumString.strValue;
+	paramValues[2] = pgVersion->version;
+	paramValues[3] = pgVersion->versionString;
+	paramValues[4] = IS_EMPTY_STRING_BUFFER(pgVersion->citusVersion)
+					 ? NULL
+					 : pgVersion->citusVersion;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to report Postgres/Citus version for node %" PRId64,
+				  nodeId);
+
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_get_node_region retrieves the region label of a node from the
  * monitor.
  */

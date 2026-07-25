@@ -163,6 +163,8 @@ bool monitor_set_node_region(Monitor *monitor,
 bool monitor_get_node_region(Monitor *monitor,
 							 char *name,
 							 char *region, size_t size);
+bool monitor_report_postgres_version(Monitor *monitor, int64_t nodeId,
+									 PostgresVersionInfo *pgVersion);
 bool monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 												int *numberSyncStandbys);
 bool monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
