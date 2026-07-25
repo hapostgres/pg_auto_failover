@@ -124,6 +124,17 @@ CREATE TABLE pgautofailover.node
     region               text not null default 'default',
     replication_stall_since timestamptz,
 
+    -- Postgres/Citus version info, reported once per Postgres restart
+    -- (see pg_autoctl's keeper_update_pg_state) rather than on every
+    -- periodic report -- neither can change without a Postgres restart.
+    -- NULL until the first report; pg_versionnum/pg_version/
+    -- pg_versionstring are always reported together, citus_version is
+    -- NULL whenever Citus isn't installed on that node.
+    pg_versionnum        int,
+    pg_version           text,
+    pg_versionstring     text,
+    citus_version        text,
+
     -- node names must be unique in a given formation
     UNIQUE (formationid, nodename),
     -- any nodehost:port can only be a unique node in the system
@@ -817,6 +828,30 @@ comment on function pgautofailover.set_node_region(text, text, text)
 
 grant execute on function
       pgautofailover.set_node_region(text, text, text)
+   to autoctl_node;
+
+-- Deliberately NOT STRICT: version_num/version/versionstring/citus_version
+-- are all allowed to be NULL. citus_version legitimately is, whenever
+-- Citus isn't installed on that node. This is a plain self-report, called
+-- once per Postgres restart by the keeper -- not part of the FSM, and not
+-- routed through node_active() since none of this can change without a
+-- restart.
+CREATE FUNCTION pgautofailover.report_postgres_version
+ (
+    IN node_id          bigint,
+    IN pg_versionnum    int  default null,
+    IN pg_version       text default null,
+    IN pg_versionstring text default null,
+    IN citus_version    text default null
+ )
+RETURNS void LANGUAGE C SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$report_postgres_version$$;
+
+comment on function pgautofailover.report_postgres_version(bigint,int,text,text,text)
+        is 'reports a node''s Postgres server version and, when installed, Citus extension version';
+
+grant execute on function
+      pgautofailover.report_postgres_version(bigint,int,text,text,text)
    to autoctl_node;
 
 

@@ -435,6 +435,27 @@ keeper_update_pg_state(Keeper *keeper, int logLevel)
 
 	bool pgIsNotRunningIsOk = true;
 
+	/*
+	 * true iff *this function* already determined Postgres was running as
+	 * of its own previous call. Compared against the freshly determined
+	 * postgres->pgIsRunning further down to detect a not-running ->
+	 * running edge -- the trigger for re-fetching version info that can't
+	 * change without a Postgres restart (see PostgresVersionInfo).
+	 *
+	 * Deliberately NOT postgres->pgIsRunning's own previous value: that
+	 * field is also written directly by fsm_transition.c/primary_standby.c
+	 * during FSM transitions (e.g. the initial init -> single transition),
+	 * outside of this function entirely. Comparing against those writes
+	 * would make the very first, most important edge -- Postgres coming up
+	 * for the first time after `pg_autoctl create`/`run` -- invisible,
+	 * since pgIsRunning could already read true by the time this function
+	 * next runs. postgres->pgVersion.lastKnownRunning is written only
+	 * here, immediately below, so it always reflects this function's own
+	 * last determination, regardless of what else touches pgIsRunning in
+	 * between two of its calls.
+	 */
+	bool wasRunning = postgres->pgVersion.lastKnownRunning;
+
 	log_debug("Update local PostgreSQL state");
 
 	/* reinitialize the replication state values each time we update */
@@ -513,6 +534,34 @@ keeper_update_pg_state(Keeper *keeper, int logLevel)
 		keeperState->pg_control_version = pgSetup->control.pg_control_version;
 		keeperState->catalog_version_no = pgSetup->control.catalog_version_no;
 		keeperState->system_identifier = pgSetup->control.system_identifier;
+
+		/*
+		 * Postgres just transitioned from not-running to running: fetch its
+		 * version (and Citus's, if installed) once now, rather than on
+		 * every periodic report -- neither can change without a Postgres
+		 * restart. needsReport is cleared by keeper_node_active() once it's
+		 * been successfully sent to the monitor; a failed fetch here simply
+		 * leaves it unset, to be retried on the next such edge (i.e. the
+		 * next Postgres restart) rather than every tick.
+		 */
+		if (!wasRunning && postgres->pgIsRunning)
+		{
+			PostgresVersionInfo *pgVersion = &(postgres->pgVersion);
+
+			if (pgsql_get_postgres_version(pgsql,
+										   &(pgVersion->versionNum),
+										   pgVersion->version,
+										   pgVersion->versionString,
+										   pgVersion->citusVersion))
+			{
+				pgVersion->needsReport = true;
+			}
+			else
+			{
+				log_level(logLevel,
+						  "Failed to fetch Postgres/Citus version info");
+			}
+		}
 	}
 	else
 	{
@@ -542,6 +591,14 @@ keeper_update_pg_state(Keeper *keeper, int logLevel)
 			}
 		}
 	}
+
+	/*
+	 * Sync our own edge-tracker to what this function just determined,
+	 * regardless of which branch above ran -- see the comment on
+	 * wasRunning above for why this is deliberately not the same as
+	 * postgres->pgIsRunning's own (multiply-written) value.
+	 */
+	postgres->pgVersion.lastKnownRunning = postgres->pgIsRunning;
 
 	/*
 	 * In some states, PostgreSQL isn't expected to be running, or not expected
@@ -1305,16 +1362,42 @@ keeper_node_active(Keeper *keeper, bool doInit,
 	/*
 	 * Report the current state to the monitor and get the assigned state.
 	 */
-	return monitor_node_active(monitor,
-							   config->formation,
-							   keeperState->current_node_id,
-							   keeperState->current_group,
-							   keeperState->current_role,
-							   reportPgIsRunning,
-							   postgres->postgresSetup.control.timeline_id,
-							   postgres->currentLSN,
-							   postgres->pgsrSyncState,
-							   assignedState);
+	bool nodeActiveReturned =
+		monitor_node_active(monitor,
+							config->formation,
+							keeperState->current_node_id,
+							keeperState->current_group,
+							keeperState->current_role,
+							reportPgIsRunning,
+							postgres->postgresSetup.control.timeline_id,
+							postgres->currentLSN,
+							postgres->pgsrSyncState,
+							assignedState);
+
+	/*
+	 * Postgres/Citus version info doesn't change without a Postgres
+	 * restart, so it's reported separately from the per-tick node_active
+	 * call above, only when keeper_update_pg_state() detected a fresh
+	 * not-running -> running edge. Only attempt it once node_active itself
+	 * succeeded, so we know the monitor connection is good; leave
+	 * needsReport set on failure so the next tick retries.
+	 */
+	if (nodeActiveReturned && postgres->pgVersion.needsReport)
+	{
+		if (monitor_report_postgres_version(monitor,
+											keeperState->current_node_id,
+											&(postgres->pgVersion)))
+		{
+			postgres->pgVersion.needsReport = false;
+		}
+		else
+		{
+			log_warn("Failed to report Postgres/Citus version to the "
+					 "monitor, will retry");
+		}
+	}
+
+	return nodeActiveReturned;
 }
 
 

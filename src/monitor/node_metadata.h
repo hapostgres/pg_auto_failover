@@ -238,6 +238,11 @@ extern void ReportAutoFailoverNodeRegion(int64 nodeid,
 										 char *nodeHost,
 										 int nodePort,
 										 char *region);
+extern void ReportAutoFailoverNodeVersion(int64 nodeid,
+										  int *versionNum,
+										  char *version,
+										  char *versionString,
+										  char *citusVersion);
 extern void UpdateAutoFailoverNodeMetadata(int64 nodeid,
 										   char *nodeName,
 										   char *nodeHost,

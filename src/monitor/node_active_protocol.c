@@ -69,6 +69,7 @@ PG_FUNCTION_INFO_V1(stop_maintenance);
 PG_FUNCTION_INFO_V1(set_node_candidate_priority);
 PG_FUNCTION_INFO_V1(set_node_replication_quorum);
 PG_FUNCTION_INFO_V1(set_node_region);
+PG_FUNCTION_INFO_V1(report_postgres_version);
 PG_FUNCTION_INFO_V1(synchronous_standby_names);
 PG_FUNCTION_INFO_V1(testing_lock_formation);
 PG_FUNCTION_INFO_V1(testing_lock_node_group);
@@ -2491,6 +2492,53 @@ set_node_region(PG_FUNCTION_ARGS)
 	NotifyStateChange(currentNode, message);
 
 	PG_RETURN_BOOL(true);
+}
+
+
+/*
+ * report_postgres_version persists a node's Postgres server version and,
+ * when installed, Citus extension version. This is a plain self-report,
+ * called once by the keeper per Postgres restart (see pg_autoctl's
+ * keeper_update_pg_state()) -- not routed through node_active() since
+ * neither piece of information can change without a restart, and not
+ * requiring the node to exist (like set_node_region does for its
+ * operator-facing, named-node lookup): a keeper reporting on its own
+ * already-known nodeId that no longer exists is a harmless no-op, the same
+ * as ReportAutoFailoverNodeState()'s own report path.
+ */
+Datum
+report_postgres_version(PG_FUNCTION_ARGS)
+{
+	checkPgAutoFailoverVersion();
+
+	if (PG_ARGISNULL(0))
+	{
+		ereport(ERROR,
+				(errmsg("report_postgres_version requires a non-null "
+						"node_id")));
+	}
+
+	int64 nodeId = PG_GETARG_INT64(0);
+
+	bool versionNumIsNull = PG_ARGISNULL(1);
+	int32 versionNum = versionNumIsNull ? 0 : PG_GETARG_INT32(1);
+
+	char *version =
+		PG_ARGISNULL(2) ? NULL : text_to_cstring(PG_GETARG_TEXT_P(2));
+
+	char *versionString =
+		PG_ARGISNULL(3) ? NULL : text_to_cstring(PG_GETARG_TEXT_P(3));
+
+	char *citusVersion =
+		PG_ARGISNULL(4) ? NULL : text_to_cstring(PG_GETARG_TEXT_P(4));
+
+	ReportAutoFailoverNodeVersion(nodeId,
+								  versionNumIsNull ? NULL : &versionNum,
+								  version,
+								  versionString,
+								  citusVersion);
+
+	PG_RETURN_VOID();
 }
 
 

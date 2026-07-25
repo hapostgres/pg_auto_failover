@@ -1775,6 +1775,72 @@ ReportAutoFailoverNodeRegion(int64 nodeid,
 
 
 /*
+ * ReportAutoFailoverNodeVersion persists a node's Postgres server version
+ * and, when installed, Citus extension version. Unlike the region/state
+ * report functions, several arguments here are legitimately allowed to be
+ * NULL (citusVersion whenever Citus isn't installed; the whole trio of
+ * Postgres version fields, in principle, though the keeper only ever calls
+ * this once it has all three) -- pass NULL pointers for whichever of
+ * version/versionString/citusVersion aren't available, and NULL for
+ * versionNum itself to mean "no Postgres version to report".
+ *
+ * We use SPI to automatically handle triggers, function calls, etc.
+ */
+void
+ReportAutoFailoverNodeVersion(int64 nodeid,
+							  int *versionNum,
+							  char *version,
+							  char *versionString,
+							  char *citusVersion)
+{
+	Oid argTypes[] = {
+		INT4OID,                 /* pg_versionnum */
+		TEXTOID,                 /* pg_version */
+		TEXTOID,                 /* pg_versionstring */
+		TEXTOID,                 /* citus_version */
+		INT8OID                  /* nodeid */
+	};
+
+	Datum argValues[] = {
+		versionNum != NULL ? Int32GetDatum(*versionNum) : (Datum) 0,
+		version != NULL ? CStringGetTextDatum(version) : (Datum) 0,
+		versionString != NULL ? CStringGetTextDatum(versionString) : (Datum) 0,
+		citusVersion != NULL ? CStringGetTextDatum(citusVersion) : (Datum) 0,
+		Int64GetDatum(nodeid)
+	};
+
+	char argNulls[] = {
+		versionNum != NULL ? ' ' : 'n',
+		version != NULL ? ' ' : 'n',
+		versionString != NULL ? ' ' : 'n',
+		citusVersion != NULL ? ' ' : 'n',
+		' '
+	};
+
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+
+	const char *updateVersionQuery =
+		"UPDATE " AUTO_FAILOVER_NODE_TABLE
+		"   SET pg_versionnum = $1, pg_version = $2, "
+		"       pg_versionstring = $3, citus_version = $4 "
+		" WHERE nodeid = $5";
+
+	SPI_connect();
+
+	int versionSpiStatus = SPI_execute_with_args(updateVersionQuery,
+												 argCount, argTypes, argValues,
+												 argNulls, false, 0);
+
+	if (versionSpiStatus != SPI_OK_UPDATE)
+	{
+		elog(ERROR, "could not update " AUTO_FAILOVER_NODE_TABLE);
+	}
+
+	SPI_finish();
+}
+
+
+/*
  * UpdateAutoFailoverNodeMetadata updates a node registration to a possibly new
  * nodeName, nodeHost, and nodePort. Those are NULL (or zero) when not changed.
  *
