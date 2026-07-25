@@ -118,6 +118,15 @@ extern CommandLine perform_switchover_command;
 extern CommandLine *perform_subcommands[];
 extern CommandLine perform_commands;
 
+/* cli_accept.c */
+extern CommandLine accept_timeline_command;
+
+extern CommandLine *accept_subcommands[];
+extern CommandLine accept_commands;
+
+/* cli_show.c (show timeline) */
+extern CommandLine show_timeline_command;
+
 /* cli_service.c */
 extern CommandLine service_run_command;
 extern CommandLine service_stop_command;

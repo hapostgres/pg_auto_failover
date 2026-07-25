@@ -251,6 +251,42 @@ GetAcceptedTimeline(char *formationId, int groupId)
 
 
 /*
+ * ResolveAcceptedTimeline marks the current unresolved accepted_timeline
+ * pin, if any, resolved for the given (formation, group). Called once a
+ * primary has been selected for promotion on the (now filtered, so
+ * necessarily on the accepted or auto-detected lineage) candidate pool: a
+ * no-op when there was no pin to begin with, which is the normal case.
+ */
+void
+ResolveAcceptedTimeline(char *formationId, int groupId)
+{
+	Oid argTypes[] = { TEXTOID, INT4OID };
+	Datum argValues[] = {
+		CStringGetTextDatum(formationId),
+		Int32GetDatum(groupId)
+	};
+	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
+
+	const char *updateQuery =
+		"UPDATE pgautofailover.accepted_timeline "
+		"   SET resolved_at = now() "
+		" WHERE formationid = $1 AND groupid = $2 AND resolved_at IS NULL";
+
+	SPI_connect();
+
+	int spiStatus = SPI_execute_with_args(updateQuery, argCount, argTypes,
+										  argValues, NULL, false, 0);
+
+	if (spiStatus != SPI_OK_UPDATE)
+	{
+		elog(ERROR, "could not update pgautofailover.accepted_timeline");
+	}
+
+	SPI_finish();
+}
+
+
+/*
  * FilterNodesByTimelineAncestry returns the subset of nodeList whose
  * reportedTLI is genuinely comparable to the group's reference lineage --
  * either pinned explicitly via pgautofailover.accepted_timeline, or, in the

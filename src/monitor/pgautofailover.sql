@@ -916,6 +916,79 @@ grant execute on function
       pgautofailover.report_timeline_history(bigint,jsonb)
    to autoctl_node;
 
+-- Explicit operator resolution of a detected timeline fork: pins which
+-- lineage is ground truth for a (formation, group), so the election's
+-- ancestry filter uses it instead of auto-detecting (see
+-- FilterNodesByTimelineAncestry() in timeline_history.c). Refuses to pin a
+-- timeline nobody in the group has ever reported.
+CREATE FUNCTION pgautofailover.accept_timeline
+ (
+    IN formation_id text,
+    IN group_id     int,
+    IN tli          int,
+    IN decided_by   text default null
+ )
+RETURNS bool LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+    known bool;
+BEGIN
+    SELECT EXISTS (
+        SELECT 1
+          FROM pgautofailover.node_timeline_history h
+          JOIN pgautofailover.node n ON n.nodeid = h.nodeid
+         WHERE n.formationid = formation_id
+           AND n.groupid = group_id
+           AND h.tli = tli
+    ) INTO known;
+
+    IF NOT known THEN
+        RAISE EXCEPTION
+            'timeline % has never been reported by any node in formation "%" group %',
+            tli, formation_id, group_id;
+    END IF;
+
+    INSERT INTO pgautofailover.accepted_timeline
+           (formationid, groupid, accepted_tli, decided_by)
+    VALUES (formation_id, group_id, tli, decided_by);
+
+    RETURN true;
+END;
+$$;
+
+comment on function pgautofailover.accept_timeline(text,int,int,text)
+        is 'pins the accepted timeline for a (formation, group) after an operator resolves a detected fork';
+
+grant execute on function
+      pgautofailover.accept_timeline(text,int,int,text)
+   to autoctl_node;
+
+-- Marks the most recent unresolved accepted_timeline pin for a
+-- (formation, group) as resolved, once a primary has been promoted on the
+-- accepted lineage. Kept as a permanent audit record rather than deleted.
+CREATE FUNCTION pgautofailover.resolve_accepted_timeline
+ (
+    IN formation_id text,
+    IN group_id     int
+ )
+RETURNS bool LANGUAGE SQL SECURITY DEFINER
+AS $$
+    UPDATE pgautofailover.accepted_timeline
+       SET resolved_at = now()
+     WHERE formationid = formation_id
+       AND groupid = group_id
+       AND resolved_at IS NULL;
+
+    SELECT true;
+$$;
+
+comment on function pgautofailover.resolve_accepted_timeline(text,int)
+        is 'marks the current accepted timeline pin resolved, once a primary has been promoted on it';
+
+grant execute on function
+      pgautofailover.resolve_accepted_timeline(text,int)
+   to autoctl_node;
+
 
 create function pgautofailover.synchronous_standby_names
  (

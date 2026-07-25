@@ -2155,6 +2155,14 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 	}
 
 	/*
+	 * A candidate was selected from a pool already filtered to the
+	 * accepted (or auto-detected) lineage: whatever operator-pinned fork
+	 * resolution was in effect has done its job. Mark it resolved so a
+	 * future, unrelated fork doesn't inherit a stale pin.
+	 */
+	ResolveAcceptedTimeline(selectedNode->formationId, selectedNode->groupId);
+
+	/*
 	 * Ok so we now may start the failover process, we have selected a
 	 * candidate after all nodes reported their LSN. We still have two
 	 * possible situations here:

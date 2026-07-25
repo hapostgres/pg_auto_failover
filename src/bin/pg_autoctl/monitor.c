@@ -1233,6 +1233,46 @@ monitor_report_timeline_history(Monitor *monitor, int64_t nodeId,
 
 
 /*
+ * monitor_accept_timeline pins the accepted timeline for a (formation,
+ * group) after an operator has resolved a detected fork, by calling
+ * pgautofailover.accept_timeline() on the monitor.
+ */
+bool
+monitor_accept_timeline(Monitor *monitor, char *formation, int group,
+						int tli, char *decidedBy)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.accept_timeline($1, $2, $3, $4)";
+
+	int paramCount = 4;
+	Oid paramTypes[4] = { TEXTOID, INT4OID, INT4OID, TEXTOID };
+	const char *paramValues[4];
+
+	IntString groupString = intToString(group);
+	IntString tliString = intToString(tli);
+
+	paramValues[0] = formation;
+	paramValues[1] = groupString.strValue;
+	paramValues[2] = tliString.strValue;
+	paramValues[3] = (decidedBy == NULL || IS_EMPTY_STRING_BUFFER(decidedBy))
+					 ? NULL
+					 : decidedBy;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to accept timeline %d for formation %s and group %d",
+				  tli, formation, group);
+
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_get_node_region retrieves the region label of a node from the
  * monitor.
  */

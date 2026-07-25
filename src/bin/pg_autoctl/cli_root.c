@@ -99,6 +99,7 @@ CommandLine *root_subcommands[] = {
 	&get_commands,
 	&set_commands,
 	&perform_commands,
+	&accept_commands,
 	&activate_node_command,
 	&inspect_commands,
 	&manual_commands,

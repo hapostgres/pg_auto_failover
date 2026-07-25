@@ -167,6 +167,8 @@ bool monitor_report_postgres_version(Monitor *monitor, int64_t nodeId,
 									 PostgresVersionInfo *pgVersion);
 bool monitor_report_timeline_history(Monitor *monitor, int64_t nodeId,
 									 const char *historyJSON);
+bool monitor_accept_timeline(Monitor *monitor, char *formation, int group,
+							 int tli, char *decidedBy);
 bool monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 												int *numberSyncStandbys);
 bool monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,

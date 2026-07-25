@@ -30,6 +30,8 @@ extern bool TimelineIsAncestor(List *history, int candidateTli,
 
 extern int GetAcceptedTimeline(char *formationId, int groupId);
 
+extern void ResolveAcceptedTimeline(char *formationId, int groupId);
+
 extern List * FilterNodesByTimelineAncestry(List *nodeList,
 											char *formationId, int groupId,
 											int *outReferenceTli);
