@@ -20,14 +20,16 @@ __ https://github.com/hapostgres/pg_auto_failover
 
 .. note::
 
-   The development of pg_auto_failover has been driven by Citus Data, since
-   then a team at Microsoft. The Citus Data team at Microsoft generously
-   maintains the pg_auto_failover Open Source Software so that its users may
-   continue using it in production.
+   The development of pg_auto_failover was originally driven by Citus Data,
+   and then a team at Microsoft. The project is now orphaned in terms of
+   financial support: maintenance and development happen on volunteers'
+   free time.
 
    For enhancements, improvements, and new features, consider contributing
-   to the project. Pull Requests are reviewed as part of the offered
-   maintenance.
+   to the project. Pull Requests are reviewed as time allows.
+
+   For professional support or to sponsor ongoing maintenance, see
+   `oss.theartofpostgresql.com <https://oss.theartofpostgresql.com>`_.
 
 .. note::
 

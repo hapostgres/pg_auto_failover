@@ -1,0 +1,209 @@
+\RequirePackage{luatex85}
+\documentclass[border=10pt,12pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{amssymb}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+
+\begin{document}
+
+\sffamily\bfseries
+
+%% Actor x-positions (cm)
+%% P=0  S=9  M=19
+\def\px{0}
+\def\sx{9}
+\def\mx{19}
+\def\ybot{44.9}
+
+\begin{tikzpicture}[
+  >=Stealth,
+  yscale=-1,
+]
+
+\input{common.tex}
+
+\tikzstyle{actor}=[rectangle, minimum width=3.6cm, minimum height=0.7cm,
+  inner sep=4pt, rounded corners=2pt, align=center, font=\bfseries]
+\tikzstyle{ll}=[densely dashed, gray!60, line width=0.5pt]
+\tikzstyle{lldead}=[densely dashed, orange!60, line width=0.5pt]
+\tikzstyle{msg}=[->, line width=0.65pt]
+\tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{broken}=[red!70, densely dotted, line width=0.8pt]
+\tikzstyle{lbl}=[font=\small, inner sep=2pt]
+\tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
+  font=\small, align=center]
+\tikzstyle{seclbl}=[font=\small\itshape, text=gray!70!black, anchor=west]
+
+%% ── actor headers ───────────────────────────────────────────────────────
+\node[actor, fill=pbox, text=ptxt] (Ph) at (\px,0) {Primary};
+\node[actor, fill=sbox, text=stxt] (Sh) at (\sx,0) {Secondary};
+\node[actor, fill=mbox, text=mtxt] (Mh) at (\mx,0) {Monitor};
+
+%% lifelines
+\draw[ll] (\px,0.35) -- (\px,\ybot);
+\draw[ll] (\sx,0.35) -- (\sx,\ybot);
+\draw[ll] (\mx,0.35) -- (\mx,\ybot);
+
+%% ── steady state ────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,1.3) {steady state};
+
+\draw[msg] (\px,1.6) -- (\sx,1.6)
+  node[lbl,midway,above] {WAL stream};
+
+\draw[msg] (\px,2.7) -- (\mx,2.7);
+\node[lbl, above] at (\px+4.5,2.7) {node\_active(reported=primary)};
+\draw[rsp] (\mx,3.3) -- (\px,3.3);
+\node[lbl, above] at (\mx-2.2,3.3) {goal=primary};
+
+\draw[msg] (\sx,4.3) -- (\mx,4.3);
+\node[lbl, above] at (\sx+3.3,4.3) {node\_active(reported=secondary)};
+\draw[rsp] (\mx,4.9) -- (\sx,4.9);
+\node[lbl, above] at (\mx-2.2,4.9) {goal=secondary};
+
+%% ── network partition: primary isolated ────────────────────────────────
+\node[seclbl] at (-3.4,6.3) {network partition: primary isolated};
+
+\draw[broken] (\px,7.2) -- (13,7.2);
+\node[red!70!black, font=\Large] at (13.4,7.2) {$\times$};
+\node[lbl, above, text=red!70!black] at (6.5,7.2)
+  {node\_active(reported=primary) attempted -- no response};
+
+\draw[broken] (\px,8.4) -- (6,8.4);
+\node[red!70!black, font=\Large] at (6.4,8.4) {$\times$};
+\node[lbl, above, text=red!70!black] at (3,8.4)
+  {WAL stream -- connection lost};
+
+%% ── secondary is unaffected ─────────────────────────────────────────────
+\node[seclbl] at (-3.4,9.8) {secondary is unaffected, still polling normally};
+
+\draw[msg] (\sx,10.7) -- (\mx,10.7);
+\node[lbl, above] at (\sx+3.3,10.7) {node\_active(reported=secondary)};
+\draw[rsp] (\mx,11.3) -- (\sx,11.3);
+\node[lbl, above] at (\mx-2.2,11.3) {goal=secondary};
+
+%% ── local decision on the primary ──────────────────────────────────────
+\node[seclbl] at (-3.4,12.7) {primary's local decision};
+
+\node[note, fill=blue!8, draw=blue!40, text width=13.5cm]
+  at (9.5, 13.7)
+  {\small no secondary, no monitor $\Rightarrow$ wait
+   \texttt{network\_partition\_timeout} (20s by default), then self-fence\\
+   \normalfont\itshape\small (if the secondary were still reachable, the
+   primary would just keep serving instead)};
+
+%% ── self-fence ──────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,15.7) {self-fence (timeout elapsed)};
+
+\node[note, fill=orange!15, draw=orange!70!black, text width=8cm]
+  at (\px, 16.6)
+  {\small stop Postgres\\ local state $\rightarrow$ \texttt{demote\_timeout}};
+
+\draw[lldead] (\px,17.3) -- (\px,33.3);
+\draw[ll] (\px,33.3) -- (\px,\ybot);
+
+\node[note, fill=orange!10, draw=orange!60, text width=13cm, font=\small]
+  at (9.5, 18.5)
+  {avoids a split brain: with no secondary and no monitor reachable, the
+   primary cannot be sure it isn't isolated, so it refuses to keep
+   accepting writes};
+
+%% ── meanwhile: monitor's own health checks to primary also fail ────────
+\node[seclbl] at (-3.4,20.0)
+  {meanwhile: monitor's own health checks to primary also fail};
+
+\draw[broken] (\mx,20.9) -- (6,20.9);
+\node[red!70!black, font=\Large] at (5.6,20.9) {$\times$};
+\node[lbl, above, text=red!70!black] at (13,20.9)
+  {health check: no response (retried)};
+
+\node[note, fill=gray!10, draw=gray!45, text width=14cm, font=\small]
+  at (9.5, 22.1)
+  {\texttt{health\_check\_max\_retries} (2) $\times$
+   \texttt{health\_check\_period} (5s) $\approx$ 10s -- shorter than the
+   primary's own 20s timer, so the monitor's failover starts first};
+
+%% ── monitor fails over: secondary is promoted ───────────────────────────
+\node[seclbl] at (-3.4,23.5) {monitor fails over: secondary is promoted};
+
+\draw[msg] (\sx,24.4) -- (\mx,24.4);
+\node[lbl, above] at (\sx+3.3,24.4) {node\_active(reported=secondary)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,25.0) -- (\sx,25.0);
+\node[lbl, above, text=pbox] at (\mx-2.6, 25.0) {goal=prepare\_promotion};
+
+\draw[msg] (\sx,26.2) -- (\mx,26.2);
+\node[lbl, above] at (\sx+3.9,26.2) {node\_active(reported=prepare\_promotion)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,26.8) -- (\sx,26.8);
+\node[lbl, above, text=pbox] at (\mx-2.4, 26.8) {goal=stop\_replication};
+
+\node[note, fill=blue!8, draw=blue!40, text width=14cm, font=\small]
+  at (9.5, 28.0)
+  {\texttt{stop\_replication} is a safety gate: the candidate waits until
+   it's confident the old primary has actually stopped, before promotion
+   completes};
+
+\draw[msg] (\sx,29.2) -- (\mx,29.2);
+\node[lbl, above] at (\sx+3.7,29.2) {node\_active(reported=stop\_replication)};
+\draw[rsp, color=pbox, line width=1pt] (\mx,29.8) -- (\sx,29.8);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.4,29.8)
+  {goal=wait\_primary};
+
+\node[note, fill=gray!12, draw=gray!55, text width=14cm, font=\small]
+  at (9.5, 31.0)
+  {records the old primary's goal: \texttt{draining} $\rightarrow$
+   \texttt{demoted} -- no delivery attempted, it still isn't reachable};
+
+%% ── primary reconnects ──────────────────────────────────────────────────
+\node[seclbl] at (-3.4,32.4) {primary reconnects: finds an already-resolved state};
+
+\draw[msg] (\px,33.3) -- (\mx,33.3);
+\node[lbl, above] at (\px+4.8,33.3) {node\_active(reported=demote\_timeout)};
+\draw[rsp] (\mx,33.9) -- (\px,33.9);
+\node[lbl, above] at (\mx-2.2,33.9) {goal=demoted};
+
+\node[note, fill=gray!10, draw=gray!50, text width=14cm, font=\small]
+  at (9.5, 35.1)
+  {the goal was already \texttt{demoted} from the STONITH action above --
+   a real \texttt{demote\_timeout} $\rightarrow$ \texttt{demoted} edge, so
+   the primary complies immediately. No extra guard logic is even needed
+   for this case};
+
+%% ── later: the demoted primary rejoins as a secondary ───────────────────
+\node[seclbl] at (-3.4,36.5) {later: the demoted primary rejoins as a secondary};
+
+\node[note, fill=gray!10, draw=gray!45, text width=14cm, font=\small]
+  at (9.5, 37.6)
+  {by now the new primary has confirmed reaching \texttt{wait\_primary} on
+   its own next poll (not shown), so \texttt{demoted} $\rightarrow$
+   \texttt{catchingup} is a valid FSM edge
+   (\texttt{group\_state\_machine.c:909})};
+
+\draw[msg] (\px,39.0) -- (\mx,39.0);
+\node[lbl, above] at (\px+4.4,39.0) {node\_active(reported=demoted)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,39.6) -- (\px,39.6);
+\node[lbl, above, text=pbox] at (\mx-2.2,39.6) {goal=catchingup};
+
+\node[note, fill=gray!12, draw=gray!55, text width=10cm]
+  at (\px, 40.7)
+  {\small \texttt{pg\_rewind} or \texttt{pg\_basebackup}, reconnects as a
+   hot standby to the new primary};
+
+\draw[msg] (\px,42.1) -- (\mx,42.1);
+\node[lbl, above] at (\px+4.4,42.1) {node\_active(reported=catchingup)};
+\draw[rsp, color=pbox, line width=1pt] (\mx,42.7) -- (\px,42.7);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.2,42.7)
+  {goal=secondary};
+
+\node[note, fill=green!15, draw=green!50!black,
+      font=\small\bfseries, minimum width=8cm]
+  at (9.5, 43.9) {$\checkmark$~~roles swapped, cluster healthy again};
+
+%% ── actor footers ───────────────────────────────────────────────────────
+\node[actor, fill=sbox, text=stxt] at (\px, \ybot+0.35) {Secondary};
+\node[actor, fill=pbox, text=ptxt] at (\sx, \ybot+0.35) {Primary};
+\node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
+
+\end{tikzpicture}
+\end{document}

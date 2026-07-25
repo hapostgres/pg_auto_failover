@@ -1,0 +1,138 @@
+\RequirePackage{luatex85}
+\documentclass[border=10pt,12pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{amssymb}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+
+\begin{document}
+
+\sffamily\bfseries
+
+%% Actor x-positions (cm)
+%% P=0  S=9  M=19
+\def\px{0}
+\def\sx{9}
+\def\mx{19}
+\def\ybot{28.4}
+
+\begin{tikzpicture}[
+  >=Stealth,
+  yscale=-1,
+]
+
+\input{common.tex}
+
+\tikzstyle{actor}=[rectangle, minimum width=3.6cm, minimum height=0.7cm,
+  inner sep=4pt, rounded corners=2pt, align=center, font=\bfseries]
+\tikzstyle{ll}=[densely dashed, gray!60, line width=0.5pt]
+\tikzstyle{msg}=[->, line width=0.65pt]
+\tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{broken}=[red!70, densely dotted, line width=0.8pt]
+\tikzstyle{lbl}=[font=\small, inner sep=2pt]
+\tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
+  font=\small, align=center]
+\tikzstyle{seclbl}=[font=\small\itshape, text=gray!70!black, anchor=west]
+
+%% ── actor headers ───────────────────────────────────────────────────────
+\node[actor, fill=pbox, text=ptxt] (Ph) at (\px,0) {Primary};
+\node[actor, fill=sbox, text=stxt] (Sh) at (\sx,0) {Secondary};
+\node[actor, fill=mbox, text=mtxt] (Mh) at (\mx,0) {Monitor};
+
+%% lifelines
+\draw[ll] (\px,0.35) -- (\px,\ybot);
+\draw[ll] (\sx,0.35) -- (\sx,\ybot);
+\draw[ll] (\mx,0.35) -- (\mx,\ybot);
+
+%% ── steady state: synchronous ──────────────────────────────────────────
+\node[seclbl] at (-3.4,1.3) {steady state (synchronous)};
+
+\draw[msg] (\px,1.6) -- (\sx,1.6)
+  node[lbl,midway,above] {WAL stream};
+\draw[rsp] (\sx,2.4) -- (\px,2.4)
+  node[lbl,midway,above] {sync ack};
+
+\draw[msg] (\px,3.6) -- (\mx,3.6);
+\node[lbl, above] at (\px+4.5,3.6) {node\_active(reported=primary)};
+\draw[rsp] (\mx,4.2) -- (\px,4.2);
+\node[lbl, above] at (\mx-2.2,4.2) {goal=primary};
+
+\draw[msg] (\sx,5.4) -- (\mx,5.4);
+\node[lbl, above] at (\sx+3.3,5.4) {node\_active(reported=secondary)};
+\draw[rsp] (\mx,6.0) -- (\sx,6.0);
+\node[lbl, above] at (\mx-2.2,6.0) {goal=secondary};
+
+%% ── secondary goes unhealthy ────────────────────────────────────────────
+\node[seclbl] at (-3.4,7.4) {secondary goes unhealthy};
+
+\draw[broken] (\sx,8.3) -- (13,8.3);
+\node[red!70!black, font=\Large] at (13.4,8.3) {$\times$};
+\node[lbl, above, text=red!70!black] at (\sx+3.4,8.3)
+  {node\_active(reported=secondary) attempted -- no response};
+
+\node[note, fill=red!12, draw=red!50, text width=13cm, font=\small]
+  at (9.5, 9.5)
+  {after \texttt{health\_check\_max\_retries} (2 by default), the secondary
+   is marked unhealthy};
+
+%% ── fallback to async ───────────────────────────────────────────────────
+\node[seclbl] at (-3.4,11.0) {fallback to async};
+
+\node[note, fill=gray!12, draw=gray!55, text width=13.5cm, font=\small]
+  at (9.5, 11.9)
+  {records goal=\texttt{catchingup} for the secondary -- no delivery
+   attempted, it isn't reachable right now};
+
+\draw[msg] (\px,13.3) -- (\mx,13.3);
+\node[lbl, above] at (\px+4.5,13.3) {node\_active(reported=primary)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,13.9) -- (\px,13.9);
+\node[lbl, above, text=pbox] at (\mx-2.2,13.9) {goal=wait\_primary};
+
+\node[note, fill=async, draw=gray!50, text width=13.5cm, font=\small]
+  at (9.5, 15.3)
+  {synchronous replication disabled -- writes on the primary no longer
+   wait for the secondary; it can't be promoted while it isn't in state
+   \texttt{secondary}};
+
+\draw[msg, color=pbox, line width=0.8pt] (\px,17.0) -- (\sx,17.0)
+  node[lbl,midway,above] {WAL stream (async)};
+
+%% ── secondary recovers, catches up ──────────────────────────────────────
+\node[seclbl] at (-3.4,18.4) {secondary recovers, catches up};
+
+\draw[msg] (\sx,19.3) -- (\mx,19.3);
+\node[lbl, above] at (\sx+3.3,19.3) {node\_active(reported=secondary)};
+\draw[rsp] (\mx,19.9) -- (\sx,19.9);
+\node[lbl, above] at (\mx-2.4,19.9) {goal=catchingup};
+
+\node[note, fill=sbox!25, draw=sbox!70!black, text width=11cm]
+  at (\sx, 21.1)
+  {\small reconnects and catches up on replication lag};
+
+\draw[msg] (\sx,22.3) -- (\mx,22.3);
+\node[lbl, above] at (\sx+3.5,22.3) {node\_active(reported=catchingup)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,22.9) -- (\sx,22.9);
+\node[lbl, above, text=pbox] at (\mx-2.2,22.9) {goal=secondary};
+
+%% ── back to synchronous ─────────────────────────────────────────────────
+\node[seclbl] at (-3.4,24.3) {back to synchronous};
+
+\draw[msg] (\px,25.2) -- (\mx,25.2);
+\node[lbl, above] at (\px+4.6,25.2) {node\_active(reported=wait\_primary)};
+\draw[rsp, color=pbox, line width=1pt] (\mx,25.8) -- (\px,25.8);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.2,25.8)
+  {goal=primary};
+
+\node[note, fill=green!15, draw=green!50!black,
+      font=\small\bfseries, minimum width=8cm]
+  at (4.5, 27.0) {$\checkmark$~~synchronous replication restored};
+
+%% ── actor footers ───────────────────────────────────────────────────────
+\node[actor, fill=pbox, text=ptxt] at (\px, \ybot+0.35) {Primary};
+\node[actor, fill=sbox, text=stxt] at (\sx, \ybot+0.35) {Secondary};
+\node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
+
+\end{tikzpicture}
+\end{document}

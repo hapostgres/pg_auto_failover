@@ -114,6 +114,11 @@ PostgreSQL service:
     The network\_partition\_timeout can be setup in the keeper's
     configuration and defaults to 20s.
 
+    .. figure:: ./tikz/seq-primary-self-fence.svg
+       :alt: Sequence diagram of a primary self-fencing to demote_timeout after losing contact with both the monitor and the secondary
+
+       The primary self-fences rather than risk a split brain
+
   - Monitor can't connect to Primary
 
     Once all the retries have been done and the timeouts are elapsed, then
@@ -125,6 +130,11 @@ PostgreSQL service:
     caught-up with the primary. Only if we timeout while waiting for the WAL
     delta to resorb (30s by default) then the secondary can be promoted with
     uncertainty about the data durability in the group.
+
+    .. figure:: ./tikz/seq-monitor-cant-reach-primary.svg
+       :alt: Sequence diagram of the monitor failing over to the secondary after losing contact with the primary
+
+       The monitor promotes the secondary and fences the old primary
 
   - Monitor can't connect to Secondary
 
@@ -139,6 +149,11 @@ PostgreSQL service:
     as soon as it's caught-up with the primary again, and at this time it is
     assigned the SECONDARY state, and the replication will be switched back to
     synchronous.
+
+    .. figure:: ./tikz/seq-secondary-unhealthy.svg
+       :alt: Sequence diagram of the fallback to asynchronous replication and back
+
+       Falling back to asynchronous replication and resynchronizing
 
 Failure handling and network partition detection
 ------------------------------------------------
@@ -170,6 +185,10 @@ expected to shut down after at least 30 and at most 60 seconds. To factor in
 worst-case scenarios, the monitor waits for 90 seconds before promoting the
 secondary to become the new primary.
 
+.. figure:: ./tikz/seq-asymmetric-partition.svg
+   :alt: Sequence diagram of an asymmetric partition where the primary can still reach the secondary but not the monitor
+
+   Asymmetric partition: the monitor's 90s safety wait before promoting
 
 See also
 --------

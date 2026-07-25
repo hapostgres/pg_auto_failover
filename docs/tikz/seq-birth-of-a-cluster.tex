@@ -1,0 +1,133 @@
+\RequirePackage{luatex85}
+\documentclass[border=10pt,12pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{amssymb}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+
+\begin{document}
+
+\sffamily\bfseries
+
+%% Actor x-positions (cm)
+%% A=0  B=9  M=19
+\def\ax{0}
+\def\bx{9}
+\def\mx{19}
+\def\ybot{26.6}
+
+\begin{tikzpicture}[
+  >=Stealth,
+  yscale=-1,
+]
+
+\input{common.tex}
+
+\tikzstyle{actor}=[rectangle, minimum width=3.2cm, minimum height=0.7cm,
+  inner sep=4pt, rounded corners=2pt, align=center, font=\bfseries]
+\tikzstyle{actorn}=[actor, fill=gray!15, text=stxt, draw=gray!50]
+\tikzstyle{ll}=[densely dashed, gray!60, line width=0.5pt]
+\tikzstyle{msg}=[->, line width=0.65pt]
+\tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{lbl}=[font=\small, inner sep=2pt]
+\tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
+  font=\small, align=center]
+\tikzstyle{seclbl}=[font=\small\itshape, text=gray!70!black, anchor=west]
+
+%% ── actor headers ───────────────────────────────────────────────────────
+\node[actorn] (Ah) at (\ax,0) {Node A};
+\node[actorn] (Bh) at (\bx,0) {Node B};
+\node[actor, fill=mbox, text=mtxt] (Mh) at (\mx,0) {Monitor};
+
+%% lifelines
+\draw[ll] (\ax,0.35) -- (\ax,\ybot);
+\draw[ll] (\bx,0.35) -- (\bx,\ybot);
+\draw[ll] (\mx,0.35) -- (\mx,\ybot);
+
+%% ── node A registers, converges alone ──────────────────────────────────
+\node[seclbl] at (-3.4,1.3) {node A registers, converges alone};
+
+\draw[msg] (\ax,1.6) -- (\mx,1.6)
+  node[lbl,midway,above] {register\_node(\ldots)};
+\draw[rsp] (\mx,2.2) -- (\ax,2.2);
+\node[lbl, above] at (\mx-2.6,2.2) {state=init, goal=single};
+
+\draw[msg] (\ax,3.3) -- (\mx,3.3);
+\node[lbl, above] at (\ax+4.2,3.3) {node\_active(reported=single)};
+\draw[rsp] (\mx,3.9) -- (\ax,3.9);
+\node[lbl, above] at (\mx-2.2,3.9) {goal=single};
+
+%% ── node B joins ────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,5.1) {node B joins};
+
+\draw[msg] (\bx,5.4) -- (\mx,5.4)
+  node[lbl,midway,above] {register\_node(\ldots)};
+\draw[rsp] (\mx,6.0) -- (\bx,6.0);
+\node[lbl, above] at (\mx-2.9,6.0) {state=init, goal=wait\_standby};
+
+%% ── A's next poll reveals the new goal ──────────────────────────────────
+\node[seclbl] at (-3.4,7.4) {A's next poll reveals the new goal};
+
+\draw[msg] (\ax,8.3) -- (\mx,8.3);
+\node[lbl, above] at (\ax+4.2,8.3) {node\_active(reported=single)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,8.9) -- (\ax,8.9);
+\node[lbl, above, text=pbox] at (\mx-2.4,8.9) {goal=wait\_primary};
+
+\node[note, fill=pbox!12, draw=pbox!60, text width=6.2cm]
+  at (\ax, 10.0) {\small allows B in \texttt{pg\_hba.conf}};
+
+%% ── A converges to wait_primary ─────────────────────────────────────────
+\node[seclbl] at (-3.4,11.4) {A converges to wait\_primary};
+
+\draw[msg] (\ax,12.3) -- (\mx,12.3);
+\node[lbl, above] at (\ax+4.6,12.3) {node\_active(reported=wait\_primary)};
+\draw[rsp] (\mx,12.9) -- (\ax,12.9);
+\node[lbl, above] at (\mx-2.2,12.9) {goal=wait\_primary};
+
+%% ── B's next poll reveals catchingup ────────────────────────────────────
+\node[seclbl] at (-3.4,14.3) {B's next poll reveals catchingup};
+
+\draw[msg] (\bx,15.2) -- (\mx,15.2);
+\node[lbl, above] at (\bx+3.7,15.2) {node\_active(reported=wait\_standby)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,15.8) -- (\bx,15.8);
+\node[lbl, above, text=pbox] at (\mx-2.4,15.8) {goal=catchingup};
+
+\node[note, fill=sbox!25, draw=sbox!70!black, text width=7.5cm]
+  at (\bx, 16.9) {\small \texttt{pg\_basebackup}, hot standby};
+
+%% ── B converges; A promoted in the same pass ────────────────────────────
+\node[seclbl] at (-3.4,18.3) {B converges; monitor promotes A in the same pass};
+
+\draw[msg] (\bx,19.2) -- (\mx,19.2);
+\node[lbl, above] at (\bx+3.8,19.2) {node\_active(reported=catchingup)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,19.8) -- (\bx,19.8);
+\node[lbl, above, text=pbox] at (\mx-2.2,19.8) {goal=secondary};
+
+%% ── A's next poll reveals primary ───────────────────────────────────────
+\node[seclbl] at (-3.4,21.2) {A's next poll reveals primary};
+
+\draw[msg] (\ax,22.1) -- (\mx,22.1);
+\node[lbl, above] at (\ax+4.6,22.1) {node\_active(reported=wait\_primary)};
+\draw[rsp, color=pbox, line width=1pt] (\mx,22.7) -- (\ax,22.7);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.2,22.7)
+  {goal=primary};
+
+%% ── convergence ─────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,24.1) {convergence};
+
+\draw[msg, color=pbox, line width=0.8pt] (\ax,25.0) -- (\bx,25.0)
+  node[lbl,midway,above] {WAL stream};
+
+\node[note, fill=green!15, draw=green!50!black,
+      font=\small\bfseries, minimum width=8cm]
+  at (9.5, 25.9) {$\checkmark$~~A primary, B secondary};
+
+%% ── actor footers ───────────────────────────────────────────────────────
+\node[actor, fill=pbox, text=ptxt] at (\ax, \ybot+0.35) {Primary A};
+\node[actor, fill=sbox, text=stxt] at (\bx, \ybot+0.35) {Secondary B};
+\node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
+
+\end{tikzpicture}
+\end{document}
