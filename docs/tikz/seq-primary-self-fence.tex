@@ -16,7 +16,7 @@
 \def\px{0}
 \def\sx{9}
 \def\mx{19}
-\def\ybot{12.9}
+\def\ybot{14.6}
 
 \begin{tikzpicture}[
   >=Stealth,
@@ -31,6 +31,7 @@
 \tikzstyle{lldead}=[densely dashed, orange!60, line width=0.5pt]
 \tikzstyle{msg}=[->, line width=0.65pt]
 \tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{broken}=[red!70, densely dotted, line width=0.8pt]
 \tikzstyle{lbl}=[font=\small, inner sep=2pt]
 \tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
   font=\small, align=center]
@@ -52,38 +53,46 @@
 \draw[msg] (\px,1.6) -- (\sx,1.6)
   node[lbl,midway,above] {WAL stream};
 
-%% ── network partition ──────────────────────────────────────────────────
-\node[seclbl] at (-3.4,2.6) {network partition};
+%% ── network partition: both connections lost ──────────────────────────
+\node[seclbl] at (-3.4,2.8) {network partition: both connections lost};
 
-\node[note, fill=red!12, draw=red!50, text width=10.5cm]
-  at (9.5, 3.0)
-  {\color{red!80!black} Primary $\leftrightarrow$ Monitor unreachable};
+\draw[broken] (\px,3.7) -- (13,3.7);
+\node[red!70!black, font=\Large] at (13.4,3.7) {$\times$};
+\node[lbl, above, text=red!70!black] at (6.5,3.7)
+  {node\_active(\ldots) attempted -- no response};
+
+\draw[broken] (\px,4.9) -- (6,4.9);
+\node[red!70!black, font=\Large] at (6.4,4.9) {$\times$};
+\node[lbl, above, text=red!70!black] at (3,4.9)
+  {WAL stream -- connection lost};
 
 %% ── local decision on the primary ──────────────────────────────────────
-\node[seclbl] at (-3.4,4.3) {primary checks: secondary still connected?};
+\node[seclbl] at (-3.4,6.3) {primary's local decision};
 
 \node[note, fill=blue!8, draw=blue!40, text width=13.5cm]
-  at (9.5, 5.2)
-  {\small \textbf{yes} $\Rightarrow$ keep serving reads/writes, nothing else to do\\
-   \textbf{no} $\Rightarrow$ wait \texttt{network\_partition\_timeout} (20s by default)};
+  at (9.5, 7.3)
+  {\small no secondary, no monitor $\Rightarrow$ wait
+   \texttt{network\_partition\_timeout} (20s by default), then self-fence\\
+   \normalfont\itshape\small (if the secondary were still reachable, the
+   primary would just keep serving instead)};
 
 %% ── self-fence ──────────────────────────────────────────────────────────
-\node[seclbl] at (-3.4,7.0) {self-fence (no secondary, timeout elapsed)};
+\node[seclbl] at (-3.4,9.3) {self-fence (timeout elapsed)};
 
 \node[note, fill=orange!15, draw=orange!70!black, text width=8cm]
-  at (\px, 7.9)
+  at (\px, 10.2)
   {\small stop Postgres\\ local state $\rightarrow$ \texttt{demote\_timeout}};
 
-\draw[lldead] (\px,8.6) -- (\px,\ybot);
+\draw[lldead] (\px,10.9) -- (\px,\ybot);
 
 \node[note, fill=orange!10, draw=orange!60, text width=13cm, font=\small]
-  at (9.5, 9.6)
+  at (9.5, 12.1)
   {avoids a split brain: with no secondary and no monitor reachable, the
    primary cannot be sure it isn't isolated, so it refuses to keep
    accepting writes};
 
 \node[note, fill=gray!10, draw=gray!50, text width=13cm, font=\small]
-  at (9.5, 11.1)
+  at (9.5, 13.6)
   {reported to the monitor as \texttt{demote\_timeout} once connectivity is
    restored};
 
