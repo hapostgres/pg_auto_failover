@@ -1,0 +1,97 @@
+\RequirePackage{luatex85}
+\documentclass[border=10pt,12pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{amssymb}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+
+\begin{document}
+
+\sffamily\bfseries
+
+%% Actor x-positions (cm)
+%% P=0  S=9  M=19
+\def\px{0}
+\def\sx{9}
+\def\mx{19}
+\def\ybot{12.9}
+
+\begin{tikzpicture}[
+  >=Stealth,
+  yscale=-1,
+]
+
+\input{common.tex}
+
+\tikzstyle{actor}=[rectangle, minimum width=3.6cm, minimum height=0.7cm,
+  inner sep=4pt, rounded corners=2pt, align=center, font=\bfseries]
+\tikzstyle{ll}=[densely dashed, gray!60, line width=0.5pt]
+\tikzstyle{lldead}=[densely dashed, orange!60, line width=0.5pt]
+\tikzstyle{msg}=[->, line width=0.65pt]
+\tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{lbl}=[font=\small, inner sep=2pt]
+\tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
+  font=\small, align=center]
+\tikzstyle{seclbl}=[font=\small\itshape, text=gray!70!black, anchor=west]
+
+%% ── actor headers ───────────────────────────────────────────────────────
+\node[actor, fill=pbox, text=ptxt] (Ph) at (\px,0) {Primary};
+\node[actor, fill=sbox, text=stxt] (Sh) at (\sx,0) {Secondary};
+\node[actor, fill=mbox, text=mtxt] (Mh) at (\mx,0) {Monitor};
+
+%% lifelines
+\draw[ll] (\px,0.35) -- (\px,\ybot);
+\draw[ll] (\sx,0.35) -- (\sx,\ybot);
+\draw[ll] (\mx,0.35) -- (\mx,\ybot);
+
+%% ── steady state ────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,1.3) {steady state};
+
+\draw[msg] (\px,1.6) -- (\sx,1.6)
+  node[lbl,midway,above] {WAL stream};
+
+%% ── network partition ──────────────────────────────────────────────────
+\node[seclbl] at (-3.4,2.6) {network partition};
+
+\node[note, fill=red!12, draw=red!50, text width=10.5cm]
+  at (9.5, 3.0)
+  {\color{red!80!black} Primary $\leftrightarrow$ Monitor unreachable};
+
+%% ── local decision on the primary ──────────────────────────────────────
+\node[seclbl] at (-3.4,4.3) {primary checks: secondary still connected?};
+
+\node[note, fill=blue!8, draw=blue!40, text width=13.5cm]
+  at (9.5, 5.2)
+  {\small \textbf{yes} $\Rightarrow$ keep serving reads/writes, nothing else to do\\
+   \textbf{no} $\Rightarrow$ wait \texttt{network\_partition\_timeout} (20s by default)};
+
+%% ── self-fence ──────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,7.0) {self-fence (no secondary, timeout elapsed)};
+
+\node[note, fill=orange!15, draw=orange!70!black, text width=8cm]
+  at (\px, 7.9)
+  {\small stop Postgres\\ local state $\rightarrow$ \texttt{demote\_timeout}};
+
+\draw[lldead] (\px,8.6) -- (\px,\ybot);
+
+\node[note, fill=orange!10, draw=orange!60, text width=13cm, font=\small]
+  at (9.5, 9.6)
+  {avoids a split brain: with no secondary and no monitor reachable, the
+   primary cannot be sure it isn't isolated, so it refuses to keep
+   accepting writes};
+
+\node[note, fill=gray!10, draw=gray!50, text width=13cm, font=\small]
+  at (9.5, 11.1)
+  {reported to the monitor as \texttt{demote\_timeout} once connectivity is
+   restored};
+
+%% ── actor footers ───────────────────────────────────────────────────────
+\node[actor, fill=orange!25, draw=orange!70!black, text=orange!30!black]
+  at (\px, \ybot+0.35) {\small Primary (self-fenced)};
+\node[actor, fill=sbox, text=stxt] at (\sx, \ybot+0.35) {Secondary};
+\node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
+
+\end{tikzpicture}
+\end{document}

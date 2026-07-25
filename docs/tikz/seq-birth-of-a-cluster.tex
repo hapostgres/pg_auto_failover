@@ -1,0 +1,111 @@
+\RequirePackage{luatex85}
+\documentclass[border=10pt,12pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{amssymb}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+
+\begin{document}
+
+\sffamily\bfseries
+
+%% Actor x-positions (cm)
+%% A=0  B=9  M=19
+\def\ax{0}
+\def\bx{9}
+\def\mx{19}
+\def\ybot{16.6}
+
+\begin{tikzpicture}[
+  >=Stealth,
+  yscale=-1,
+]
+
+\input{common.tex}
+
+\tikzstyle{actor}=[rectangle, minimum width=3.2cm, minimum height=0.7cm,
+  inner sep=4pt, rounded corners=2pt, align=center, font=\bfseries]
+\tikzstyle{actorn}=[actor, fill=gray!15, text=stxt, draw=gray!50]
+\tikzstyle{ll}=[densely dashed, gray!60, line width=0.5pt]
+\tikzstyle{msg}=[->, line width=0.65pt]
+\tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{lbl}=[font=\small, inner sep=2pt]
+\tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
+  font=\small, align=center]
+\tikzstyle{seclbl}=[font=\small\itshape, text=gray!70!black, anchor=west]
+
+%% ── actor headers ───────────────────────────────────────────────────────
+\node[actorn] (Ah) at (\ax,0) {Node A};
+\node[actorn] (Bh) at (\bx,0) {Node B};
+\node[actor, fill=mbox, text=mtxt] (Mh) at (\mx,0) {Monitor};
+
+%% lifelines
+\draw[ll] (\ax,0.35) -- (\ax,\ybot);
+\draw[ll] (\bx,0.35) -- (\bx,\ybot);
+\draw[ll] (\mx,0.35) -- (\mx,\ybot);
+
+%% ── node A registers ───────────────────────────────────────────────────
+\node[seclbl] at (-3.4,1.3) {node A registers};
+
+\draw[msg] (\ax,1.6) -- (\mx,1.6)
+  node[lbl,midway,above] {keeper init};
+
+\draw[rsp] (\mx,2.5) -- (\ax,2.5);
+\node[lbl, above] at (\mx-3.0, 2.5) {init $\rightarrow$ single (goal: single)};
+
+%% ── node B joins ────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,3.6) {node B joins};
+
+\draw[msg] (\bx,3.9) -- (\mx,3.9)
+  node[lbl,midway,above] {keeper init};
+
+\draw[rsp] (\mx,4.8) -- (\ax,4.8)
+  node[lbl,midway,above] {goal: wait\_primary};
+\draw[rsp] (\mx,5.6) -- (\bx,5.6);
+\node[lbl, above] at (\mx-2.6, 5.6) {init $\rightarrow$ wait\_standby};
+
+%% ── A prepares, B catches up ───────────────────────────────────────────
+\node[seclbl] at (-3.4,6.7) {A prepares, B catches up};
+
+\node[note, fill=pbox!12, draw=pbox!60, text width=6.2cm]
+  at (\ax, 7.6) {\small allows B in \texttt{pg\_hba.conf}};
+
+\draw[msg] (\ax,8.4) -- (\mx,8.4)
+  node[lbl,midway,above] {report: wait\_primary};
+
+\draw[rsp] (\mx,9.0) -- (\bx,9.0)
+  node[lbl,midway,above] {goal: catchingup};
+
+\node[note, fill=sbox!25, draw=sbox!70!black, text width=7.5cm]
+  at (\bx, 9.9) {\small \texttt{pg\_basebackup}, hot standby};
+
+\draw[msg] (\bx,10.9) -- (\mx,10.9)
+  node[lbl,midway,above] {report: catchingup, connected};
+
+%% ── convergence ─────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,12.0) {convergence};
+
+\draw[rsp] (\mx,12.3) -- (\bx,12.3)
+  node[lbl,midway,above] {goal: secondary};
+\draw[rsp] (\mx,13.1) -- (\ax,13.1)
+  node[lbl,midway,above] {goal: primary};
+
+\draw[msg, color=pbox, line width=0.8pt] (\ax,14.0) -- (\bx,14.0)
+  node[lbl,midway,above] {WAL stream};
+
+\draw[msg] (\bx,14.9) -- (\mx,14.9);
+\node[lbl, above] at (\bx+3.6, 14.9) {sync\_state=sync, lag=0};
+
+\node[note, fill=green!15, draw=green!50!black,
+      font=\small\bfseries, minimum width=8cm]
+  at (9.5, 15.9) {$\checkmark$~~A primary, B secondary};
+
+%% ── actor footers ───────────────────────────────────────────────────────
+\node[actor, fill=pbox, text=ptxt] at (\ax, \ybot+0.35) {Primary A};
+\node[actor, fill=sbox, text=stxt] at (\bx, \ybot+0.35) {Secondary B};
+\node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
+
+\end{tikzpicture}
+\end{document}

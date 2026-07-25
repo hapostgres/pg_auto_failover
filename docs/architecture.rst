@@ -208,6 +208,11 @@ occurred.
 Monitoring protocol
 -------------------
 
+.. figure:: ./tikz/seq-monitoring-protocol.svg
+   :alt: Sequence diagram of the node_active polling and health check protocols
+
+   The two protocols between a node's keeper and the monitor
+
 The monitor interacts with the data nodes in 2 ways:
 
   - Data nodes periodically connect and run `SELECT

@@ -19,6 +19,11 @@ Example of state transitions in a new cluster
 A good way to get acquainted with the states is by examining the
 transitions of a cluster from birth to high availability.
 
+.. figure:: ./tikz/seq-birth-of-a-cluster.svg
+   :alt: Sequence diagram of two nodes and the monitor from registration to primary/secondary
+
+   From two freshly registered nodes to a converged primary/secondary pair
+
 After starting a monitor and running keeper init for the first data node
 ("node A"), the monitor registers the state of that node as "init" with
 a goal state of "single." The init state means the monitor knows nothing
