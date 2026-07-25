@@ -81,7 +81,7 @@ step test_002_hand_node2_back_to_pg_autoctl {
     # node2 is back. Both sides may or may not have already noticed anything
     # is wrong by the time this step's assertions run -- the health checker
     # runs on its own schedule and, once it marks node2 unhealthy, drives it
-    # through the very same catchingup cycle test_003 forces explicitly
+    # through the very same catchingup cycle test_004 forces explicitly
     # below, so whether that has already happened here is a race this spec
     # doesn't need to pin down. What's NOT racy is node_timeline_history: it
     # is append-only, so node2's diverged branch being in there at all is
@@ -98,7 +98,35 @@ step test_002_hand_node2_back_to_pg_autoctl {
     expect { t }
 }
 
-step test_003_maintenance_cycle_recovers {
+step test_003_show_and_accept_timeline_cli {
+    # `pg_autoctl show timeline` and `pg_autoctl accept timeline` (Part 3/4)
+    # are otherwise only covered at the monitor-SQL level
+    # (timeline_fork_detection.sql) -- exercise the actual CLI against a
+    # live cluster here.  Note this is orthogonal to
+    # test_004_maintenance_cycle_recovers below: standby_check_timeline_with_upstream()
+    # (the #683 fix) is a purely local, standby-side check against whatever
+    # primary it's currently following, and never consults accepted_timeline
+    # -- that pin only ever matters to a monitor-side *election*
+    # (ProceedGroupStateForMSFailover), which this 2-node spec never
+    # triggers. This step is a self-contained demonstration of the CLI, not
+    # a precondition for node2's recovery.
+    # Unpinned, node2's fork (tli=2) IS the reference by default (highest
+    # reported tli, and nobody else is arguing) -- this is the "known,
+    # separate limitation" from the header comment, and it reads as clean.
+    exec node1  pg_autoctl show timeline
+    expect { ok, on accepted lineage }
+
+    exec-fails node1  pg_autoctl accept timeline --tli 99
+    exec node1  pg_autoctl accept timeline --tli 1 --reason "node2 self-promoted out of band"
+    expect { accepted as ground truth }
+
+    # With tli=1 pinned as ground truth instead, node2 is now unambiguously
+    # flagged as diverged.
+    exec node1  pg_autoctl show timeline
+    expect { FORK }
+}
+
+step test_004_maintenance_cycle_recovers {
     # Force node2 through catchingup against node1 -- the same transition an
     # ordinary "briefly unreachable, please resync" health-check cycle would
     # drive.  Pre-fix, this is exactly where Postgres would get stuck
@@ -137,7 +165,7 @@ step test_003_maintenance_cycle_recovers {
     expect { primary }
 }
 
-step test_004_writes_still_flow_after_recovery {
+step test_005_writes_still_flow_after_recovery {
     # The cluster is fully healthy again: a real write on the primary
     # replicates to the now-recovered node2, proving this isn't just a
     # state-label reshuffle.
