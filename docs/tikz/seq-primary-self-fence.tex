@@ -16,7 +16,7 @@
 \def\px{0}
 \def\sx{9}
 \def\mx{19}
-\def\ybot{35.5}
+\def\ybot{44.9}
 
 \begin{tikzpicture}[
   >=Stealth,
@@ -101,7 +101,8 @@
   at (\px, 16.6)
   {\small stop Postgres\\ local state $\rightarrow$ \texttt{demote\_timeout}};
 
-\draw[lldead] (\px,17.3) -- (\px,\ybot);
+\draw[lldead] (\px,17.3) -- (\px,33.3);
+\draw[ll] (\px,33.3) -- (\px,\ybot);
 
 \node[note, fill=orange!10, draw=orange!60, text width=13cm, font=\small]
   at (9.5, 18.5)
@@ -132,46 +133,76 @@
 \draw[rsp, color=pbox, line width=0.8pt] (\mx,25.0) -- (\sx,25.0);
 \node[lbl, above, text=pbox] at (\mx-2.6, 25.0) {goal=prepare\_promotion};
 
-\node[note, fill=blue!8, draw=blue!40, text width=14cm, font=\small]
-  at (9.5, 26.2)
-  {same promotion sequence as the ``Monitor can't connect to Primary''
-   diagram: \texttt{prepare\_promotion} $\rightarrow$
-   \texttt{stop\_replication} $\rightarrow$ \texttt{wait\_primary}};
+\draw[msg] (\sx,26.2) -- (\mx,26.2);
+\node[lbl, above] at (\sx+3.9,26.2) {node\_active(reported=prepare\_promotion)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,26.8) -- (\sx,26.8);
+\node[lbl, above, text=pbox] at (\mx-2.4, 26.8) {goal=stop\_replication};
 
-\draw[msg] (\sx,27.4) -- (\mx,27.4);
-\node[lbl, above] at (\sx+3.7,27.4) {node\_active(reported=stop\_replication)};
-\draw[rsp, color=pbox, line width=1pt] (\mx,28.0) -- (\sx,28.0);
-\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.4,28.0)
+\node[note, fill=blue!8, draw=blue!40, text width=14cm, font=\small]
+  at (9.5, 28.0)
+  {\texttt{stop\_replication} is a safety gate: the candidate waits until
+   it's confident the old primary has actually stopped, before promotion
+   completes};
+
+\draw[msg] (\sx,29.2) -- (\mx,29.2);
+\node[lbl, above] at (\sx+3.7,29.2) {node\_active(reported=stop\_replication)};
+\draw[rsp, color=pbox, line width=1pt] (\mx,29.8) -- (\sx,29.8);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.4,29.8)
   {goal=wait\_primary};
 
 \node[note, fill=gray!12, draw=gray!55, text width=14cm, font=\small]
-  at (9.5, 29.2)
+  at (9.5, 31.0)
   {records the old primary's goal: \texttt{draining} $\rightarrow$
    \texttt{demoted} -- no delivery attempted, it still isn't reachable};
 
 %% ── primary reconnects ──────────────────────────────────────────────────
-\node[seclbl] at (-3.4,30.6) {primary reconnects: finds an already-resolved state};
+\node[seclbl] at (-3.4,32.4) {primary reconnects: finds an already-resolved state};
 
-\draw[msg] (\px,31.5) -- (\mx,31.5);
-\node[lbl, above] at (\px+4.8,31.5) {node\_active(reported=demote\_timeout)};
-\draw[rsp] (\mx,32.1) -- (\px,32.1);
-\node[lbl, above] at (\mx-2.2,32.1) {goal=demoted};
+\draw[msg] (\px,33.3) -- (\mx,33.3);
+\node[lbl, above] at (\px+4.8,33.3) {node\_active(reported=demote\_timeout)};
+\draw[rsp] (\mx,33.9) -- (\px,33.9);
+\node[lbl, above] at (\mx-2.2,33.9) {goal=demoted};
 
 \node[note, fill=gray!10, draw=gray!50, text width=14cm, font=\small]
-  at (9.5, 33.3)
+  at (9.5, 35.1)
   {the goal was already \texttt{demoted} from the STONITH action above --
    a real \texttt{demote\_timeout} $\rightarrow$ \texttt{demoted} edge, so
    the primary complies immediately. No extra guard logic is even needed
    for this case};
 
+%% ── later: the demoted primary rejoins as a secondary ───────────────────
+\node[seclbl] at (-3.4,36.5) {later: the demoted primary rejoins as a secondary};
+
+\node[note, fill=gray!10, draw=gray!45, text width=14cm, font=\small]
+  at (9.5, 37.6)
+  {by now the new primary has confirmed reaching \texttt{wait\_primary} on
+   its own next poll (not shown), so \texttt{demoted} $\rightarrow$
+   \texttt{catchingup} is a valid FSM edge
+   (\texttt{group\_state\_machine.c:909})};
+
+\draw[msg] (\px,39.0) -- (\mx,39.0);
+\node[lbl, above] at (\px+4.4,39.0) {node\_active(reported=demoted)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,39.6) -- (\px,39.6);
+\node[lbl, above, text=pbox] at (\mx-2.2,39.6) {goal=catchingup};
+
+\node[note, fill=gray!12, draw=gray!55, text width=10cm]
+  at (\px, 40.7)
+  {\small \texttt{pg\_rewind} or \texttt{pg\_basebackup}, reconnects as a
+   hot standby to the new primary};
+
+\draw[msg] (\px,42.1) -- (\mx,42.1);
+\node[lbl, above] at (\px+4.4,42.1) {node\_active(reported=catchingup)};
+\draw[rsp, color=pbox, line width=1pt] (\mx,42.7) -- (\px,42.7);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.2,42.7)
+  {goal=secondary};
+
 \node[note, fill=green!15, draw=green!50!black,
       font=\small\bfseries, minimum width=8cm]
-  at (14, 34.5) {$\checkmark$~~cluster converged: old primary stays fenced};
+  at (9.5, 43.9) {$\checkmark$~~roles swapped, cluster healthy again};
 
 %% ── actor footers ───────────────────────────────────────────────────────
-\node[actor, fill=gray!25, draw=gray!55, text=gray!30!black]
-  at (\px, \ybot+0.35) {\small Primary (demoted)};
-\node[actor, fill=pbox, text=ptxt] at (\sx, \ybot+0.35) {New Primary};
+\node[actor, fill=sbox, text=stxt] at (\px, \ybot+0.35) {Secondary};
+\node[actor, fill=pbox, text=ptxt] at (\sx, \ybot+0.35) {Primary};
 \node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
 
 \end{tikzpicture}
