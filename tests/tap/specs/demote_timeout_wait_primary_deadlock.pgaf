@@ -1,36 +1,20 @@
 # Reproduces https://github.com/hapostgres/pg_auto_failover/issues/1025.
 #
-# node2 enters maintenance, a routine, non-failover event: the monitor
-# assigns node1 (primary) the goal state "wait_primary" so it stops
-# requiring a synchronous standby, and node2 the goal state
-# "wait_maintenance". node1 has not yet locally converged to "wait_primary"
-# (its current_role is still PRIMARY_STATE) when it loses contact with
-# *both* the monitor and node2 for longer than network_partition_timeout
-# (20s by default).
-#
-# check_for_network_partitions() in service_keeper.c only looks at node1's
-# own current_role (still PRIMARY_STATE) to decide whether to self-fence; it
-# has no idea the monitor already reassigned this node to "wait_primary" for
-# an unrelated, benign reason. So it locally forces
-# assigned_role = DEMOTE_TIMEOUT_STATE, Postgres is stopped, and node1
-# starts reporting "demote_timeout" -- without the monitor ever having been
-# told. Once node1 reconnects, the monitor still has goalstate =
-# "wait_primary" from before, and the keeper FSM has no
-# demote_timeout -> wait_primary edge, so node1 fatals forever with:
+# node2 enters maintenance (benign, no failover): monitor assigns node1
+# (primary) goal wait_primary so it stops requiring a sync standby. node1
+# hasn't locally converged to that yet when it loses contact with the
+# monitor and node2 for longer than network_partition_timeout (20s default).
+# check_for_network_partitions() (service_keeper.c) only looks at node1's own
+# current_role, has no idea the monitor reassigned it, and self-fences to
+# demote_timeout. The monitor still has goalstate = wait_primary, a state
+# demote_timeout has no FSM edge to, so node1 used to fatal forever:
 #
 #     FATAL pg_autoctl does not know how to reach state
 #     "wait_primary" from "demote_timeout"
 #
-# and node2 is stuck in wait_maintenance waiting for node1 to converge.
-#
 # Fixed by a guard in ProceedGroupStateFromContext (group_state_machine.c):
-# when a node reports demote_timeout but its assigned goal isn't one
-# demote_timeout can actually reach, the monitor re-targets it to demoted --
-# a real demote_timeout -> demoted FSM edge (fsm.c:355) -- instead of
-# leaving it assigned an unreachable goal forever.
-#
-# demoted is a safe, conservative landing spot (the node stays fenced from
-# writes) but, as steps 002 and 003 below show, not a self-healing one.
+# a node reporting demote_timeout with an unreachable goal gets re-targeted
+# to demoted (a real demote_timeout -> demoted FSM edge, fsm.c:355).
 
 cluster {
     monitor
@@ -54,6 +38,11 @@ step test_001_1025_self_fence_recovers_instead_of_deadlocking {
         and node2 state is secondary
         timeout 60s
     network disconnect node1
+
+    # Not `pg_autoctl enable maintenance`: that CLI blocks until node2
+    # reaches "maintenance", which can't happen while node1 is disconnected
+    # (see test_002) -- the whole point here is node1 stays disconnected
+    # while node2's request is only assigned, not yet converged.
     sql monitor {
         SELECT pgautofailover.start_maintenance(nodeid)
         FROM pgautofailover.node
@@ -61,126 +50,61 @@ step test_001_1025_self_fence_recovers_instead_of_deadlocking {
     }
     wait until node1 assigned-state = wait_primary  timeout 60s
 
-    # While node1 is disconnected: this is the monitor's own view of it --
-    # the last state it successfully reported before going silent (still
-    # "primary": the monitor doesn't yet know a self-fence is about to happen
-    # locally on node1), an assigned goal of "wait_primary" from
-    # start_maintenance() above, and health that will degrade once the
-    # monitor's own health checks start timing out. node2 may still be mid
-    # transition to "maintenance" at this exact instant (stopping its own
-    # replication takes a moment) -- either way, it needs nothing further
-    # from node1 to get there.
     sleep 10s
     sql monitor {
         SELECT nodename, reportedstate, goalstate, health
         FROM pgautofailover.node ORDER BY nodeid;
     }
 
-    # Let the self-fence complete locally on node1 (demote_timeout, Postgres
-    # stopped: network_partition_timeout defaults to 20s), then reconnect it.
     sleep 80s
     network connect node1
 
-    # Before the fix: the monitor still has goalstate = wait_primary from
-    # before the self-fence -- a state demote_timeout has no FSM edge to --
-    # so pg_autoctl fatals forever. After the fix: as soon as node1 reports
-    # demote_timeout, the monitor's guard notices the assigned goalState is
-    # unreachable from there and re-targets to demoted in that same
-    # node_active() call -- so goalState jumps straight from wait_primary to
-    # demoted without ever stably sitting at demote_timeout, and only the
-    # fully-converged "demoted" state is observable here.
+    # goalState jumps wait_primary -> demoted in one node_active() call, so
+    # "demote_timeout" itself is never observable here.
     wait until node1 state is demoted  timeout 60s
     logs node1 not contains "does not know how to reach state"
 }
 
-# What happened to node2 (the former secondary) throughout all of this, and
-# what state is it in now that node1 has converged to demoted?
+# node2 is stuck at wait_maintenance (not maintenance) for the entire
+# disconnect: group_state_machine.c:664 only promotes wait_maintenance ->
+# maintenance once the primary's *reported* state is wait_primary, or
+# (:689) once the primary's *goal* moves off wait_primary. Neither happens
+# while node1 is unreachable with goal stuck at wait_primary. The moment the
+# #1025 guard re-targets node1's goal to demoted, rule :689 fires and node2
+# reaches maintenance in the same beat -- which is why test_001 saw node1
+# converge to demoted and node2 to maintenance together.
 #
-# Untouched, the whole way through. node2's entry into "maintenance" is
-# fully independent of node1: stop_replication/maintenance only requires
-# node2 to disconnect from its own upstream and tell the monitor, which
-# needs no cooperation from node1. Once node2 reports "maintenance", the
-# MAINTENANCE early-exit at the top of ProceedGroupStateFromContext
-# (group_state_machine.c:187-190) means the monitor will not touch its goal
-# state again until an explicit stop_maintenance() call -- regardless of
-# anything happening to node1 in the meantime. node2 has been sitting there
-# since test_001's start_maintenance() call, completely unaware that node1
-# ever disconnected, self-fenced, or came back as demoted.
+# From here on node2 is independent: the MAINTENANCE early-exit in
+# ProceedGroupStateFromContext (line 187) holds its goal state until an
+# explicit disable maintenance call.
 step test_002_secondary_is_unaffected_by_primarys_self_fence {
     wait until node2 state is maintenance  timeout 30s
     assert node2 assigned-state = maintenance
-
-    # Full picture at this point: node1 fully converged to demoted (fenced,
-    # Postgres stopped, no writes possible anywhere), node2 still parked in
-    # maintenance exactly where test_001 left it. Two independent islands.
     sql monitor {
         SELECT nodename, reportedstate, goalstate, health
         FROM pgautofailover.node ORDER BY nodeid;
     }
 }
 
-# How do we repair the cluster and converge back to a working primary?
+# Repair: disable maintenance on node2 while node1 is demoted.
 #
-# With the tools that exist today: we can't, not without further operator
-# intervention beyond what the monitor offers. This step demonstrates the
-# dead end precisely so it's not lost knowledge:
+# stop_maintenance() finds node1 via GetPrimaryOrDemotedNodeInGroupFromList()
+# -- recognizing a fully-converged demoted node is itself a #1025 fix
+# prerequisite. Seeing node1 is demoted (not actually running),
+# stop_maintenance() now assigns node2 report_lsn instead of catchingup:
+# catchingup would mean "stream from node1", but node1's Postgres is
+# stopped, so that used to retry a doomed connection forever.
 #
-#  1. stop_maintenance(node2) is the obvious next move -- but at the moment
-#     it's called, IsFailoverInProgress() (node_metadata.c:657) is false:
-#     nothing is in report_lsn/join_secondary yet, and node1 being "demoted"
-#     alone doesn't count. So stop_maintenance() takes the plain
-#     "rejoin the existing primary" branch and assigns node2 the goal
-#     "catchingup" (node_active_protocol.c:2119-2128) -- meaning "stream from
-#     whichever node is currently primary". But node1 is demoted, not
-#     primary, and its Postgres is stopped: node2 retries the replication
-#     connection to node1 forever and never reaches "secondary".
-#
-#  2. pgautofailover.perform_failover() can't rescue it either:
-#     GetNodeToFailoverFromInGroup() only considers a node a valid failover
-#     source when CanInitiateFailover(goalState) is true (single, primary, or
-#     join_primary -- node_metadata.c:2056-2063); "demoted" isn't one of
-#     them, and no node is in report_lsn to fall back on, so it errors out
-#     with "couldn't find the primary node".
-#
-#  3. pgautofailover.perform_promotion() can't either: it requires its target
-#     node to be in "secondary" or "report_lsn" (node_active_protocol.c:
-#     1668-1682); node2 is stuck in "catchingup" by this point, so it errors
-#     out with "promotion can only be performed when in state secondary".
-#
-# The underlying gap: a demoted primary only ever gets swept into the
-# report_lsn candidate pool by the candidate-list-building code inside
-# ProceedGroupStateForMSFailover() (group_state_machine.c:~1879), but that
-# function is only entered once a failover is already considered "in
-# progress" -- which itself requires some node to already be in report_lsn.
-# Nothing in this formation ever puts a node into report_lsn in the first
-# place, so the group is stuck: demoted primary, no candidate, no automatic
-# or documented manual path back. This is a separate, pre-existing gap from
-# #1025 (which is only about the deadlock/fatal-crash-loop, now fixed) --
-# recovering formations like this one is unsolved and needs its own fix.
-step test_003_no_existing_mechanism_converges_the_cluster_back {
-    sql monitor {
-        SELECT pgautofailover.stop_maintenance(nodeid)
-        FROM pgautofailover.node
-        WHERE nodename = 'node2';
-    }
-    wait until node2 assigned-state = catchingup  timeout 30s
-
-    # Give node2 a few retry cycles against node1's stopped Postgres.
-    sleep 20s
-    logs node2 contains "Connection refused"
-
-    sql monitor {
-        SELECT nodename, reportedstate, goalstate, health
-        FROM pgautofailover.node ORDER BY nodeid;
-    }
-
-    sql monitor {
-        SELECT pgautofailover.perform_failover('default', 0);
-    }
-    expect error
-
-    sql monitor {
-        SELECT pgautofailover.perform_promotion('default', 'node2');
-    }
-    expect error
+# node2 reaching report_lsn is what seeds the election:
+# ProceedGroupStateForMSFailover()'s candidate scan (~line 1879) then also
+# picks up node1 (IsDemotedPrimary() matches it), both report their LSN, and
+# the most advanced one wins -- node1, since node2 stopped replicating when
+# it went into maintenance. `pg_autoctl disable maintenance` blocks on the
+# monitor until node2 itself reaches secondary or primary, so by the time it
+# returns the election is already settled.
+step test_003_disable_maintenance_converges_the_cluster_back {
+    exec node2  pg_autoctl disable maintenance
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 10s
 }
