@@ -131,6 +131,11 @@ PostgreSQL service:
     delta to resorb (30s by default) then the secondary can be promoted with
     uncertainty about the data durability in the group.
 
+    .. figure:: ./tikz/seq-monitor-cant-reach-primary.svg
+       :alt: Sequence diagram of the monitor failing over to the secondary after losing contact with the primary
+
+       The monitor promotes the secondary and fences the old primary
+
   - Monitor can't connect to Secondary
 
     As soon as the secondary is considered unhealthy then the monitor

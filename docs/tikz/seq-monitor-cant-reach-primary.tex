@@ -1,0 +1,113 @@
+\RequirePackage{luatex85}
+\documentclass[border=10pt,12pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{amssymb}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+
+\begin{document}
+
+\sffamily\bfseries
+
+%% Actor x-positions (cm)
+%% P=0  S=9  M=19
+\def\px{0}
+\def\sx{9}
+\def\mx{19}
+\def\ybot{16.4}
+
+\begin{tikzpicture}[
+  >=Stealth,
+  yscale=-1,
+]
+
+\input{common.tex}
+
+\tikzstyle{actor}=[rectangle, minimum width=3.6cm, minimum height=0.7cm,
+  inner sep=4pt, rounded corners=2pt, align=center, font=\bfseries]
+\tikzstyle{ll}=[densely dashed, gray!60, line width=0.5pt]
+\tikzstyle{msg}=[->, line width=0.65pt]
+\tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{broken}=[red!70, densely dotted, line width=0.8pt]
+\tikzstyle{lbl}=[font=\small, inner sep=2pt]
+\tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
+  font=\small, align=center]
+\tikzstyle{seclbl}=[font=\small\itshape, text=gray!70!black, anchor=west]
+
+%% ── actor headers ───────────────────────────────────────────────────────
+\node[actor, fill=pbox, text=ptxt] (Ph) at (\px,0) {Primary};
+\node[actor, fill=sbox, text=stxt] (Sh) at (\sx,0) {Secondary};
+\node[actor, fill=mbox, text=mtxt] (Mh) at (\mx,0) {Monitor};
+
+%% lifelines
+\draw[ll] (\px,0.35) -- (\px,\ybot);
+\draw[ll] (\sx,0.35) -- (\sx,\ybot);
+\draw[ll] (\mx,0.35) -- (\mx,\ybot);
+
+%% ── steady state ────────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,1.3) {steady state};
+
+\draw[msg] (\px,1.6) -- (\sx,1.6)
+  node[lbl,midway,above] {WAL stream};
+
+%% ── health checks fail ─────────────────────────────────────────────────
+\node[seclbl] at (-3.4,2.8) {monitor's health checks to primary fail};
+
+\draw[broken] (\mx,3.7) -- (6,3.7);
+\node[red!70!black, font=\Large] at (5.6,3.7) {$\times$};
+\node[lbl, above, text=red!70!black] at (13,3.7)
+  {health check: no response (retried)};
+
+\node[note, fill=red!10, draw=red!50, text width=13cm, font=\small]
+  at (9.5, 5.0)
+  {after \texttt{health\_check\_max\_retries} (2 by default), the primary is
+   marked unhealthy -- this says nothing about whether it is actually
+   down, only that the monitor can no longer reach it};
+
+%% ── failover begins ─────────────────────────────────────────────────────
+\node[seclbl] at (-3.4,6.6) {failover begins: promote the secondary};
+
+\draw[msg, color=pbox, line width=0.8pt] (\mx,7.4) -- (\sx,7.4);
+\node[lbl, above, text=pbox] at (\mx-2.6,7.4) {goal: prepare\_promotion};
+
+\node[note, fill=sbox!25, draw=sbox!70!black, text width=11cm]
+  at (\sx, 8.4)
+  {\small catches up on any last WAL still available from the primary,
+   then reports success};
+
+\node[note, fill=blue!8, draw=blue!40, text width=13.5cm, font=\small]
+  at (9.5, 9.7)
+  {if the WAL delta doesn't resorb within 30s (default), the secondary is
+   promoted anyway -- with uncertainty about data durability};
+
+%% ── old primary fenced ──────────────────────────────────────────────────
+\node[seclbl] at (-3.4,11.1) {old primary fenced (STONITH)};
+
+\node[note, fill=gray!12, draw=gray!55, text width=13.5cm, font=\small]
+  at (9.5, 12.0)
+  {goal recorded as \texttt{draining} $\rightarrow$ \texttt{demoted},
+   whether or not the primary is actually reachable right now};
+
+\node[note, fill=gray!12, draw=gray!55, text width=13.5cm, font=\small]
+  at (9.5, 13.4)
+  {if the primary is in fact still alive, it demotes itself as soon as it
+   can reach the monitor again -- or it may have already self-fenced
+   independently (see the previous diagram)};
+
+%% ── promotion complete ──────────────────────────────────────────────────
+\node[seclbl] at (-3.4,14.8) {promotion complete};
+
+\draw[msg, color=pbox, line width=1pt] (\mx,15.1) -- (\sx,15.1);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.4,15.1)
+  {goal: wait\_primary};
+
+%% ── actor footers ───────────────────────────────────────────────────────
+\node[actor, fill=gray!30, draw=gray!60, text=gray!30!black]
+  at (\px, \ybot+0.35) {\small Primary (fenced)};
+\node[actor, fill=pbox, text=ptxt] at (\sx, \ybot+0.35) {New Primary};
+\node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
+
+\end{tikzpicture}
+\end{document}
