@@ -16,7 +16,7 @@
 \def\px{0}
 \def\sx{9}
 \def\mx{19}
-\def\ybot{21.0}
+\def\ybot{35.5}
 
 \begin{tikzpicture}[
   >=Stealth,
@@ -109,15 +109,69 @@
    primary cannot be sure it isn't isolated, so it refuses to keep
    accepting writes};
 
-\node[note, fill=gray!10, draw=gray!50, text width=13cm, font=\small]
-  at (9.5, 20.0)
-  {reported to the monitor as \texttt{demote\_timeout} once connectivity is
-   restored};
+%% ── meanwhile: monitor's own health checks to primary also fail ────────
+\node[seclbl] at (-3.4,20.0)
+  {meanwhile: monitor's own health checks to primary also fail};
+
+\draw[broken] (\mx,20.9) -- (6,20.9);
+\node[red!70!black, font=\Large] at (5.6,20.9) {$\times$};
+\node[lbl, above, text=red!70!black] at (13,20.9)
+  {health check: no response (retried)};
+
+\node[note, fill=gray!10, draw=gray!45, text width=14cm, font=\small]
+  at (9.5, 22.1)
+  {\texttt{health\_check\_max\_retries} (2) $\times$
+   \texttt{health\_check\_period} (5s) $\approx$ 10s -- shorter than the
+   primary's own 20s timer, so the monitor's failover starts first};
+
+%% ── monitor fails over: secondary is promoted ───────────────────────────
+\node[seclbl] at (-3.4,23.5) {monitor fails over: secondary is promoted};
+
+\draw[msg] (\sx,24.4) -- (\mx,24.4);
+\node[lbl, above] at (\sx+3.3,24.4) {node\_active(reported=secondary)};
+\draw[rsp, color=pbox, line width=0.8pt] (\mx,25.0) -- (\sx,25.0);
+\node[lbl, above, text=pbox] at (\mx-2.6, 25.0) {goal=prepare\_promotion};
+
+\node[note, fill=blue!8, draw=blue!40, text width=14cm, font=\small]
+  at (9.5, 26.2)
+  {same promotion sequence as the ``Monitor can't connect to Primary''
+   diagram: \texttt{prepare\_promotion} $\rightarrow$
+   \texttt{stop\_replication} $\rightarrow$ \texttt{wait\_primary}};
+
+\draw[msg] (\sx,27.4) -- (\mx,27.4);
+\node[lbl, above] at (\sx+3.7,27.4) {node\_active(reported=stop\_replication)};
+\draw[rsp, color=pbox, line width=1pt] (\mx,28.0) -- (\sx,28.0);
+\node[lbl, above, text=pbox, font=\small\bfseries] at (\mx-2.4,28.0)
+  {goal=wait\_primary};
+
+\node[note, fill=gray!12, draw=gray!55, text width=14cm, font=\small]
+  at (9.5, 29.2)
+  {records the old primary's goal: \texttt{draining} $\rightarrow$
+   \texttt{demoted} -- no delivery attempted, it still isn't reachable};
+
+%% ── primary reconnects ──────────────────────────────────────────────────
+\node[seclbl] at (-3.4,30.6) {primary reconnects: finds an already-resolved state};
+
+\draw[msg] (\px,31.5) -- (\mx,31.5);
+\node[lbl, above] at (\px+4.8,31.5) {node\_active(reported=demote\_timeout)};
+\draw[rsp] (\mx,32.1) -- (\px,32.1);
+\node[lbl, above] at (\mx-2.2,32.1) {goal=demoted};
+
+\node[note, fill=gray!10, draw=gray!50, text width=14cm, font=\small]
+  at (9.5, 33.3)
+  {the goal was already \texttt{demoted} from the STONITH action above --
+   a real \texttt{demote\_timeout} $\rightarrow$ \texttt{demoted} edge, so
+   the primary complies immediately. No extra guard logic is even needed
+   for this case};
+
+\node[note, fill=green!15, draw=green!50!black,
+      font=\small\bfseries, minimum width=8cm]
+  at (14, 34.5) {$\checkmark$~~cluster converged: old primary stays fenced};
 
 %% ── actor footers ───────────────────────────────────────────────────────
-\node[actor, fill=orange!25, draw=orange!70!black, text=orange!30!black]
-  at (\px, \ybot+0.35) {\small Primary (self-fenced)};
-\node[actor, fill=sbox, text=stxt] at (\sx, \ybot+0.35) {Secondary};
+\node[actor, fill=gray!25, draw=gray!55, text=gray!30!black]
+  at (\px, \ybot+0.35) {\small Primary (demoted)};
+\node[actor, fill=pbox, text=ptxt] at (\sx, \ybot+0.35) {New Primary};
 \node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+0.35) {Monitor};
 
 \end{tikzpicture}
