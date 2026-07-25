@@ -22,6 +22,7 @@
 #include "node_metadata.h"
 #include "notifications.h"
 #include "replication_state.h"
+#include "timeline_history.h"
 #include "version_compat.h"
 
 #include "access/htup_details.h"
@@ -1561,10 +1562,24 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	 * or get unhealthy: then the next call to node_active() might build a
 	 * different candidateNodesGroupList in which every node has reported their
 	 * LSN position, allowing progress to be made.
+	 *
+	 * Before any of that: filter out nodes whose reported timeline has
+	 * genuinely diverged from the group's reference lineage (see #683).
+	 * They are excluded, not deprioritized -- a diverged node can never
+	 * become comparable no matter how long we wait for it, so leaving it
+	 * in would risk either comparing incomparable LSNs, or blocking the
+	 * whole election on a node that will never resolve on its own.
 	 */
+	int referenceTli = 0;
+	List *comparableNodesGroupList =
+		FilterNodesByTimelineAncestry(nodesGroupList,
+									  ctx->formationId,
+									  ctx->groupId,
+									  &referenceTli);
+
 	candidateList.numberSyncStandbys = ctx->formation->number_sync_standbys;
 
-	BuildCandidateList(ctx, nodesGroupList, &candidateList);
+	BuildCandidateList(ctx, comparableNodesGroupList, &candidateList);
 
 	/*
 	 * Time to select a candidate?
@@ -1670,7 +1685,7 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	{
 		/* build the list of most advanced standby nodes, not ordered */
 		List *mostAdvancedNodeList =
-			ListMostAdvancedStandbyNodes(nodesGroupList);
+			ListMostAdvancedStandbyNodes(comparableNodesGroupList);
 
 		/* select a node to failover to */
 
