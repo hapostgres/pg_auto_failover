@@ -198,6 +198,36 @@ CREATE TABLE pgautofailover.event
     PRIMARY KEY (eventid)
  );
 
+-- Every Postgres timeline has exactly one parent and one fork LSN, so the
+-- union of every node's known history forms a single tree. Append-only: a
+-- (tli, parenttli, switchpoint_lsn) triple never changes once recorded, and
+-- is an objective fact about that timeline, not about which node reported
+-- it -- nodeid is provenance (who told us), not part of what the row means.
+CREATE TABLE pgautofailover.node_timeline_history
+ (
+    nodeid          bigint not null references pgautofailover.node(nodeid),
+    tli             int not null,
+    parenttli       int not null,
+    switchpoint_lsn pg_lsn not null,
+
+    PRIMARY KEY (nodeid, tli)
+ );
+
+-- An operator's explicit pin of which timeline is ground truth after a
+-- detected fork. Normally empty: absent any unresolved row, the election
+-- runs its ordinary auto-detection unchanged.
+CREATE TABLE pgautofailover.accepted_timeline
+ (
+    formationid   text not null,
+    groupid       int not null,
+    accepted_tli  int not null,
+    decided_by    text,
+    decided_at    timestamptz not null default now(),
+    resolved_at   timestamptz,
+
+    PRIMARY KEY (formationid, groupid, decided_at)
+ );
+
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
 CREATE FUNCTION pgautofailover.set_node_system_identifier
@@ -852,6 +882,38 @@ comment on function pgautofailover.report_postgres_version(bigint,int,text,text,
 
 grant execute on function
       pgautofailover.report_postgres_version(bigint,int,text,text,text)
+   to autoctl_node;
+
+-- history is a JSON array of {"tli": int, "parenttli": int,
+-- "switchpoint": text} objects, oldest first, as produced by the keeper's
+-- timeline_history_to_json(). Called both periodically (whenever the local
+-- timeline has advanced) and synchronously right before a report_lsn
+-- restart, so this needs to be cheap and idempotent: an unconditional
+-- ON CONFLICT DO NOTHING insert of already-known facts is a no-op.
+CREATE FUNCTION pgautofailover.report_timeline_history
+ (
+    IN node_id bigint,
+    IN history jsonb
+ )
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+BEGIN
+    INSERT INTO pgautofailover.node_timeline_history
+           (nodeid, tli, parenttli, switchpoint_lsn)
+    SELECT node_id,
+           (entry->>'tli')::int,
+           (entry->>'parenttli')::int,
+           (entry->>'switchpoint')::pg_lsn
+      FROM jsonb_array_elements(history) AS entry
+     ON CONFLICT (nodeid, tli) DO NOTHING;
+END;
+$$;
+
+comment on function pgautofailover.report_timeline_history(bigint,jsonb)
+        is 'reports a node''s own known timeline history (tli, parent tli, switchpoint LSN)';
+
+grant execute on function
+      pgautofailover.report_timeline_history(bigint,jsonb)
    to autoctl_node;
 
 

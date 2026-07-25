@@ -1196,6 +1196,43 @@ monitor_report_postgres_version(Monitor *monitor, int64_t nodeId,
 
 
 /*
+ * monitor_report_timeline_history reports this node's own timeline history
+ * (as encoded by timeline_history_to_json()) to the monitor. Called from
+ * the keeper's main loop whenever the local timeline has advanced since the
+ * last successful report (see service_keeper.c), and once more,
+ * synchronously, right before fsm_report_lsn() restarts Postgres.
+ */
+bool
+monitor_report_timeline_history(Monitor *monitor, int64_t nodeId,
+								const char *historyJSON)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_timeline_history($1, $2::jsonb)";
+
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, TEXTOID };
+	const char *paramValues[2];
+
+	IntString nodeIdString = intToString(nodeId);
+
+	paramValues[0] = nodeIdString.strValue;
+	paramValues[1] = historyJSON;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to report timeline history for node %" PRId64,
+				  nodeId);
+
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_get_node_region retrieves the region label of a node from the
  * monitor.
  */

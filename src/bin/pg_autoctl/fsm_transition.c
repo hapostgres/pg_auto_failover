@@ -36,9 +36,11 @@
 #include "keeper_pg_init.h"
 #include "log.h"
 #include "monitor.h"
+#include "parson.h"
 #include "pghba.h"
 #include "primary_standby.h"
 #include "state.h"
+#include "timeline_history.h"
 
 
 static bool fsm_init_standby_from_upstream(Keeper *keeper);
@@ -1298,6 +1300,37 @@ fsm_report_lsn(Keeper *keeper)
 	{
 		/* can't happen at the moment */
 		return false;
+	}
+
+	/*
+	 * One more, synchronous, defensive publish of what we know about our
+	 * own timeline history right now, immediately before the risky part:
+	 * restarting standalone (no primary_conninfo) can hit a hard Postgres
+	 * FATAL if we've diverged (see #683) and never get to report anything
+	 * again. The periodic per-tick publish (service_keeper.c) already
+	 * covers the common case; this call guarantees freshness even on a
+	 * node's very first tick after a restart, before that periodic path
+	 * has had a chance to run.
+	 */
+	{
+		uint32_t currentTLI = pgSetup->control.timeline_id;
+		IdentifySystem system = { 0 };
+
+		if (currentTLI > 0 &&
+			keeper_fetch_local_timeline_history(pgSetup, currentTLI, &system))
+		{
+			char *historyJSON = timeline_history_to_json(&system);
+
+			if (historyJSON != NULL)
+			{
+				(void) monitor_report_timeline_history(
+					&(keeper->monitor),
+					keeper->state.current_node_id,
+					historyJSON);
+
+				json_free_serialized_string(historyJSON);
+			}
+		}
 	}
 
 	log_info("Restarting standby node to disconnect replication "
