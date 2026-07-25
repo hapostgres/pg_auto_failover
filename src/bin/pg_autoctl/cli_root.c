@@ -46,6 +46,7 @@ CommandLine *show_subcommands_with_debug[] = {
 	&show_state_command,
 	&show_settings_command,
 	&show_standby_names_command,
+	&show_timeline_command,
 	&show_file_command,
 	&systemd_cat_service_file_command,
 	NULL
@@ -62,6 +63,7 @@ CommandLine *show_subcommands[] = {
 	&show_state_command,
 	&show_settings_command,
 	&show_standby_names_command,
+	&show_timeline_command,
 	&show_file_command,
 	&systemd_cat_service_file_command,
 	NULL

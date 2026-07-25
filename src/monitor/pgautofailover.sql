@@ -989,6 +989,73 @@ grant execute on function
       pgautofailover.resolve_accepted_timeline(text,int)
    to autoctl_node;
 
+-- Per-node status used by `pg_autoctl show timeline`: whether each node's
+-- reported timeline is on the group's reference lineage (an operator's pin
+-- in accepted_timeline if any, otherwise the branch containing the highest
+-- reported tli in the group), the same rule
+-- FilterNodesByTimelineAncestry() applies during an election, expressed
+-- here as SQL for read-only reporting.
+CREATE FUNCTION pgautofailover.node_timeline_status
+ (
+    IN formation_id           text,
+    IN group_id               int,
+   OUT node_id                bigint,
+   OUT node_name              text,
+   OUT tli                    int,
+   OUT lsn                    pg_lsn,
+   OUT reference_tli          int,
+   OUT on_accepted_lineage    bool
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT
+AS $$
+    WITH reference AS (
+        SELECT COALESCE(
+            (SELECT accepted_tli
+               FROM pgautofailover.accepted_timeline
+              WHERE formationid = formation_id AND groupid = group_id
+                AND resolved_at IS NULL
+              ORDER BY decided_at DESC LIMIT 1),
+            (SELECT max(reportedtli)
+               FROM pgautofailover.node
+              WHERE formationid = formation_id AND groupid = group_id)
+        ) AS tli
+    ),
+    ancestry AS (
+        WITH RECURSIVE chain AS (
+            SELECT h.tli, h.parenttli
+              FROM pgautofailover.node_timeline_history h
+              JOIN pgautofailover.node n ON n.nodeid = h.nodeid
+             WHERE n.formationid = formation_id AND n.groupid = group_id
+               AND h.tli = (SELECT tli FROM reference)
+          UNION ALL
+            SELECT h.tli, h.parenttli
+              FROM pgautofailover.node_timeline_history h
+              JOIN pgautofailover.node n ON n.nodeid = h.nodeid
+              JOIN chain c ON h.tli = c.parenttli
+             WHERE n.formationid = formation_id AND n.groupid = group_id
+        )
+        SELECT tli FROM chain
+        UNION
+        SELECT tli FROM reference
+    )
+    SELECT n.nodeid,
+           n.nodename,
+           n.reportedtli,
+           n.reportedlsn,
+           (SELECT tli FROM reference),
+           (n.reportedtli IN (SELECT tli FROM ancestry))
+      FROM pgautofailover.node n
+     WHERE n.formationid = formation_id AND n.groupid = group_id
+     ORDER BY n.nodeid;
+$$;
+
+comment on function pgautofailover.node_timeline_status(text,int)
+        is 'per-node timeline ancestry status against the group''s reference lineage, for pg_autoctl show timeline';
+
+grant execute on function
+      pgautofailover.node_timeline_status(text,int)
+   to autoctl_node;
+
 
 create function pgautofailover.synchronous_standby_names
  (
