@@ -18,9 +18,10 @@
 #   • node1 (primary) and node3 (the WAL-source standby) are killed together.
 #   • node2 is the only survivor.  With guard_data_loss=true the SQL health
 #     filter sees a missing quorum member and keeps node2 at report_lsn.
-#   • After running `pg_autoctl perform failover --allow-data-loss`, the
-#     guard_data_loss GUC is set to false for that transaction and the monitor
-#     promotes node2 even though its WAL source (node3) is unreachable.
+#   • After running the SQL equivalent of `pg_autoctl perform failover
+#     --allow-data-loss` (see step 3), the guard_data_loss GUC is set to
+#     false for that transaction and the monitor promotes node2 even though
+#     its WAL source (node3) is unreachable.
 #   • node3 and node1 are brought back; the cluster stabilises at
 #     primary + secondary + secondary.
 #
@@ -84,17 +85,25 @@ step test_002_verify_stuck {
 }
 
 #
-# Step 3: unblock with --allow-data-loss.
+# Step 3: unblock with the SQL equivalent of --allow-data-loss.
 #
 # pg_autoctl perform failover --allow-data-loss opens a transaction on the
 # monitor, sets LOCAL pgautofailover.guard_data_loss = false, and calls
-# perform_failover().  The health filter no longer blocks on the missing WAL
-# source; node2 is selected as the only available candidate and driven toward
-# prepare_promotion then wait_primary.
+# perform_failover().  We replicate that directly via SQL so the call is
+# non-blocking: the CLI version waits for a node to reach "primary", which
+# cannot happen until node3 is brought back in step 4 (quorum requires a
+# second live standby) -- creating a deadlock where the exec blocks and
+# step 4 never runs. Same fix as guard_data_loss.pgaf's test_003, which hits
+# the identical shape of this problem.
 #
 
 step test_003_allow_data_loss_failover {
-    exec monitor  pg_autoctl perform failover --allow-data-loss --formation default
+    sql monitor {
+        BEGIN;
+        SET LOCAL pgautofailover.guard_data_loss TO false;
+        SELECT pgautofailover.perform_failover('default', 0::int);
+        COMMIT;
+    }
     wait until node2 state is wait_primary  timeout 120s
 }
 
