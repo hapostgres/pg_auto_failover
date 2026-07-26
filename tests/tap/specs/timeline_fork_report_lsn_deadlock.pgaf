@@ -19,13 +19,18 @@
 #
 # When node2 is handed back to pg_autoctl, its current_role assumption
 # ("secondary", should be in recovery) no longer matches Postgres reality
-# (promoted, writable). Steady-state streaming never re-checks ancestry (no
-# FSM transition fires while a node just sits in "secondary"), so this goes
-# unnoticed until node2 is forced through a real transition back to
-# catchingup -- exactly what a normal health-check-driven "briefly
-# unreachable, please resync" cycle would also do. That's the moment the fix
-# actually matters, and it's driven here deterministically via maintenance
-# rather than racing the health checker's own timing.
+# (promoted, writable). Node2 keeps reporting "secondary" throughout and the
+# fork stays invisible to auto-detection -- no sibling standby to disagree
+# with it, see the known limitation below -- so nothing forces a real
+# transition on its own *until* the reference lineage is pinned. Once
+# test_003 below pins tli=1, the monitor's own ancestry check on every
+# currently-secondary node (ProceedGroupStateFromContext) picks up the
+# mismatch on node2's very next report and pushes it to catchingup within
+# about a second, with no maintenance toggle or health-check cycle needed to
+# trigger it -- test_004 asserts this directly. That's the moment the #683
+# fix actually runs; test_005 re-drives the same recovery through the older,
+# maintenance-cycle path as a belt-and-suspenders check that it still works
+# when triggered that way too.
 #
 # Known, separate limitation, not exercised here: in a 2-node formation with
 # no other standby to compare against, an explicit `perform failover` while
@@ -102,14 +107,12 @@ step test_003_show_and_accept_timeline_cli {
     # `pg_autoctl show timeline` and `pg_autoctl accept timeline` (Part 3/4)
     # are otherwise only covered at the monitor-SQL level
     # (timeline_fork_detection.sql) -- exercise the actual CLI against a
-    # live cluster here.  Note this is orthogonal to
-    # test_004_maintenance_cycle_recovers below: standby_check_timeline_with_upstream()
-    # (the #683 fix) is a purely local, standby-side check against whatever
-    # primary it's currently following, and never consults accepted_timeline
-    # -- that pin only ever matters to a monitor-side *election*
-    # (ProceedGroupStateForMSFailover), which this 2-node spec never
-    # triggers. This step is a self-contained demonstration of the CLI, not
-    # a precondition for node2's recovery.
+    # live cluster here. Pinning tli=1 below is what test_004 immediately
+    # reacts to: standby_check_timeline_with_upstream() (the #683 fix) is a
+    # purely local, standby-side check that runs once node2 reaches
+    # catchingup, but the monitor-side push into catchingup in the first
+    # place -- test_004's whole point -- is exactly what accepting a pin
+    # here triggers.
     # Unpinned, node2's fork (tli=2) IS the reference by default (highest
     # reported tli, and nobody else is arguing) -- this is the "known,
     # separate limitation" from the header comment, and it reads as clean.
@@ -126,16 +129,37 @@ step test_003_show_and_accept_timeline_cli {
     expect { FORK }
 }
 
-step test_004_maintenance_cycle_recovers {
-    # Force node2 through catchingup against node1 -- the same transition an
-    # ordinary "briefly unreachable, please resync" health-check cycle would
-    # drive.  Pre-fix, this is exactly where Postgres would get stuck
-    # retrying a doomed reconnect forever (the ancestry check that would
-    # have caught it either didn't run for this particular goal state, or
-    # only knew how to rewind a standby that was *behind*, not *ahead of*,
-    # its upstream).  Post-fix, node2 rewinds (or, if pg_rewind itself can't
-    # connect, falls back to a full pg_basebackup -- both already-existing
-    # recovery paths) and rejoins cleanly.
+step test_004_automatic_catchingup_without_maintenance {
+    # No enable/disable maintenance anywhere in this step -- that used to be
+    # required to force node2 through a real transition. Now the monitor's
+    # own ProceedGroupState() detects the ancestry mismatch on node2's very
+    # next report after test_003's pin and pushes it to catchingup by
+    # itself, without needing any operator action or incidental
+    # health-check cycle to drive it there.
+    #
+    # node2 is this formation's only standby, so excluding it also means
+    # node1 can no longer keep synchronous replication -- node1 transitions
+    # through wait_primary at the same time, settling back to primary once
+    # node2's automatic recovery (pg_rewind, or a fresh pg_basebackup if
+    # pg_rewind itself can't connect) completes. Waiting for both to settle
+    # here, rather than just asserting the initial catchingup assignment,
+    # is what makes test_005 below safe to run immediately after: without
+    # it, test_005's `enable maintenance` can race node1's own wait_primary
+    # dance and get rejected by the monitor's start-maintenance precondition
+    # (seen intermittently in CI before this step existed).
+    wait until node2 assigned-state = catchingup  timeout 15s
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 60s
+}
+
+step test_005_maintenance_cycle_recovers {
+    # By this point node2 has already recovered automatically (test_004).
+    # This re-drives the same recovery through the older, operator-forced
+    # maintenance-cycle path -- the same transition an ordinary "briefly
+    # unreachable, please resync" health-check cycle would also drive --
+    # as a belt-and-suspenders check that it still works when triggered
+    # that way, not because it's still the only way to recover here.
     exec node2  pg_autoctl enable maintenance
     wait until node2 state is maintenance  timeout 60s
     exec node2  pg_autoctl disable maintenance
@@ -165,7 +189,7 @@ step test_004_maintenance_cycle_recovers {
     expect { primary }
 }
 
-step test_005_writes_still_flow_after_recovery {
+step test_006_writes_still_flow_after_recovery {
     # The cluster is fully healthy again: a real write on the primary
     # replicates to the now-recovered node2, proving this isn't just a
     # state-label reshuffle.
