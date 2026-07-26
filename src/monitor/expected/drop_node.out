@@ -1,0 +1,240 @@
+-- Copyright (c) Microsoft Corporation. All rights reserved.
+-- Licensed under the PostgreSQL License.
+--
+-- Regression tests for pgautofailover.remove_node() dropping a secondary
+-- from a two-node group, leaving the primary alone.
+--
+-- Background (see citus_nonha_operation.pgaf / test_008_remove_old_primaries):
+-- occasionally, after a real pg_autoctl deployment drops the last standby of
+-- a two-node group, the primary is observed stuck at "wait_primary" instead
+-- of moving straight to "single", and "pg_autoctl drop node" times out after
+-- 60s waiting for the standby's row to disappear. This file checks the
+-- monitor-side half of that sequence directly via SQL, bypassing the actual
+-- keeper processes, to determine whether the monitor's own bookkeeping
+-- (AutoFailoverNodeGroup's "goalstate <> 'dropped'" filter, RemoveNode()'s
+-- inline ProceedGroupState(primaryNode) call, and the two-step
+-- goalstate=dropped / reportedstate=dropped removal protocol) accounts for
+-- the observed symptom, or whether it must originate elsewhere (e.g. the
+-- keeper's own FSM not honoring a pending "dropped" goal, which this file
+-- cannot exercise since it never runs the real pg_autoctl keeper).
+\x on
+-- ── formation and node registration ─────────────────────────────────────────
+SELECT pgautofailover.create_formation('dn_test', 'pgsql', 'postgres', true, 0);
+-[ RECORD 1 ]----+-----------------------------
+create_formation | (dn_test,pgsql,postgres,t,0)
+
+SELECT *
+  FROM pgautofailover.register_node('dn_test', 'dn_p', 5432,
+                                    'postgres', 'dn_p', 1);
+-[ RECORD 1 ]---------------+-------
+assigned_node_id            | 16
+assigned_group_id           | 0
+assigned_group_state        | single
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+assigned_node_name          | dn_p
+
+SELECT nodeid AS np FROM pgautofailover.node
+ WHERE formationid = 'dn_test' AND nodename = 'dn_p' \gset
+SELECT *
+  FROM pgautofailover.register_node('dn_test', 'dn_s', 5432,
+                                    'postgres', 'dn_s', 1);
+-[ RECORD 1 ]---------------+-------------
+assigned_node_id            | 17
+assigned_group_id           | 0
+assigned_group_state        | wait_standby
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+assigned_node_name          | dn_s
+
+SELECT nodeid AS ns FROM pgautofailover.node
+ WHERE formationid = 'dn_test' AND nodename = 'dn_s' \gset
+-- ── bootstrap: drive the FSM to primary + secondary ─────────────────────────
+--
+-- Mirrors guard_data_loss.sql's bootstrap sequence (register -> single ->
+-- wait_primary -> [standby: wait_standby -> catchingup -> secondary] ->
+-- primary), including its "confirm" round-trips: the monitor only advances a
+-- node past wait_primary/secondary once it sees that same reported role
+-- confirmed on a second call.
+-- p: single (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :np, 0,
+                                  current_group_role => 'single');
+-[ RECORD 1 ]--------+-------
+assigned_group_state | single
+
+-- s: wait_standby (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :ns, 0,
+                                  current_group_role => 'wait_standby');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_standby
+
+-- p: single → wait_primary
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :np, 0,
+                                  current_group_role => 'single',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_primary
+
+-- p: wait_primary (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_primary
+
+-- s: wait_standby → catchingup
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :ns, 0,
+                                  current_group_role => 'wait_standby');
+-[ RECORD 1 ]--------+-----------
+assigned_group_state | catchingup
+
+-- s: catchingup → secondary
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :ns, 0,
+                                  current_group_role => 'catchingup',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+-- s: secondary (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :ns, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+-- p: wait_primary → primary (now that s is secondary)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | primary
+
+-- p: primary (confirm)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :np, 0,
+                                  current_group_role => 'primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | primary
+
+-- s: secondary (confirm after primary confirmed)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :ns, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+-- Verify bootstrap: p=primary, s=secondary.
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'dn_test'
+ ORDER BY nodename;
+-[ RECORD 1 ]-+----------
+nodename      | dn_p
+goalstate     | primary
+reportedstate | primary
+-[ RECORD 2 ]-+----------
+nodename      | dn_s
+goalstate     | secondary
+reportedstate | secondary
+
+-- ── test 1: remove_node(s) sets s to "dropped" and moves p straight to
+--            "single" in the SAME call, without an intermediate
+--            "wait_primary" -────────────────────────────────────────────────
+--
+-- RemoveNode() sets s's goal to DROPPED and then calls ProceedGroupState(p)
+-- inline, in the same transaction. AutoFailoverNodeGroup() filters out rows
+-- with goalstate = 'dropped', so at the point ProceedGroupState(p) runs the
+-- group should already look like a 1-node group to it, and p should be
+-- assigned "single" directly -- not "wait_primary" (the path taken when a
+-- standby is merely unhealthy/missing, not being deliberately removed).
+SELECT pgautofailover.remove_node(:ns);
+-[ RECORD 1 ]--
+remove_node | t
+
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'dn_test'
+ ORDER BY nodename;
+-[ RECORD 1 ]-+----------
+nodename      | dn_p
+goalstate     | single
+reportedstate | primary
+-[ RECORD 2 ]-+----------
+nodename      | dn_s
+goalstate     | dropped
+reportedstate | secondary
+
+-- ── test 2: a stale/racing node_active() report from the about-to-be-dropped
+--            node does not resurrect it or corrupt the primary's state ──────
+--
+-- Simulate a keeper report that raced the drop and still claims a normal
+-- replication role (as if the "drop" goal hadn't been observed yet). The
+-- early-return in ProceedGroupState() for goalState = DROPPED means no new
+-- goal should be assigned to s, but reportedstate is updated unconditionally
+-- as part of node_active()'s bookkeeping -- this is the exact shape of the
+-- "New state for this node ... : single -> single" symptom seen in CI, where
+-- the about-to-be-dropped node reports something other than "dropped" and
+-- the row is left stranded until it eventually complies.
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :ns, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | dropped
+
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'dn_test'
+ ORDER BY nodename;
+-[ RECORD 1 ]-+----------
+nodename      | dn_p
+goalstate     | single
+reportedstate | primary
+-[ RECORD 2 ]-+----------
+nodename      | dn_s
+goalstate     | dropped
+reportedstate | secondary
+
+-- remove_node() called again while s still hasn't complied must be a safe
+-- no-op (idempotent): s's goal is already 'dropped', RemoveNode() returns
+-- early without re-running ProceedGroupState(p) or re-adjusting
+-- number_sync_standbys a second time.
+SELECT pgautofailover.remove_node(:ns);
+-[ RECORD 1 ]--
+remove_node | t
+
+SELECT formationid, number_sync_standbys
+  FROM pgautofailover.formation
+ WHERE formationid = 'dn_test';
+-[ RECORD 1 ]--------+--------
+formationid          | dn_test
+number_sync_standbys | 0
+
+-- ── test 3: once s reports "dropped", its row is actually removed and p is
+--            left alone, unaffected ───────────────────────────────────────
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('dn_test', :ns, 0,
+                                  current_group_role => 'dropped');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | dropped
+
+-- s's row is gone; only p remains, still "single".
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'dn_test'
+ ORDER BY nodename;
+-[ RECORD 1 ]-+--------
+nodename      | dn_p
+goalstate     | single
+reportedstate | primary
+

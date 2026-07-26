@@ -17,9 +17,6 @@ def setup_module():
 
 
 def teardown_module():
-    if coordinator1b is not None:
-        coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
-        coordinator1b.run_sql_query("DROP TABLE t1")
     cluster.destroy()
 
 
@@ -86,7 +83,12 @@ def test_003_init_workers():
 def test_004_create_distributed_table():
     assert coordinator1a.wait_until_pg_is_running()
     coordinator1a.run_sql_query("CREATE TABLE t1 (a int)")
-    coordinator1a.run_sql_query("SELECT create_distributed_table('t1', 'a')")
+    # create_distributed_table contacts each worker node; a worker may still
+    # be initialising at the Citus level even after its pg_autoctl state
+    # reached 'single'.  Retry for up to 30s on transient connectivity errors.
+    coordinator1a.run_sql_query_retry(
+        "SELECT create_distributed_table('t1', 'a')", timeout=30
+    )
     coordinator1a.run_sql_query("INSERT INTO t1 VALUES (1), (2)")
 
 
@@ -137,6 +139,10 @@ def test_006_add_secondaries():
 def test_007_fail_when_disabling_with_secondaries():
     global monitor
     monitor.disable(pgautofailover.Feature.Secondary, formation="non-ha")
+
+
+def test_007b_drop_table():
+    coordinator1a.citus_run_ddl_after_sync("DROP TABLE t1")
 
 
 def test_008_shutdown_primaries():

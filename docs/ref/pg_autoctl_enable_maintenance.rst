@@ -16,6 +16,14 @@ for promotion.
 Typical use of the maintenance state include Operating System or Postgres
 reboot, e.g. when applying security upgrades.
 
+A plain ``pg_autoctl stop`` (a graceful ``SIGTERM``, see
+:ref:`pg_autoctl_stop`) requests maintenance the same way on its own,
+automatically, before stopping — there is no need to run this command
+first just to get a clean handoff before stopping a node. A node that
+entered maintenance that way also leaves it automatically on its next
+start. Use this command directly when you want the node to stay
+registered in maintenance mode for a while, independently of any restart.
+
 ::
 
    usage: pg_autoctl enable maintenance  [ --pgdata --allow-failover ]

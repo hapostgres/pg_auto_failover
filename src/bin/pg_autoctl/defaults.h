@@ -13,13 +13,13 @@
 #include "git-version.h"
 
 /* to be written in the state file */
-#define PG_AUTOCTL_STATE_VERSION 1
+#define PG_AUTOCTL_STATE_VERSION 2
 
 /* additional version information for printing version on CLI */
 #define PG_AUTOCTL_VERSION GIT_VERSION
 
 /* version of the extension that we requite to talk to on the monitor */
-#define PG_AUTOCTL_EXTENSION_VERSION "2.2"
+#define PG_AUTOCTL_EXTENSION_VERSION "2.3"
 
 /* environment variable to use to make DEBUG facilities available */
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
@@ -93,6 +93,22 @@
 #define PG_AUTOCTL_KEEPER_RETRY_TIME_MS 350 /* milliseconds */
 #define PG_AUTOCTL_MONITOR_SLEEP_TIME 10 /* seconds */
 #define PG_AUTOCTL_MONITOR_RETRY_TIME 1  /* seconds */
+
+/*
+ * A primary's graceful SIGTERM shutdown (see keeper_graceful_shutdown() in
+ * service_keeper.c) may spend up to KEEPER_MAINTENANCE_SHUTDOWN_LOOP_MAX_SECS
+ * attempting a maintenance handoff, and if that does not complete in time,
+ * up to another KEEPER_SHUTDOWN_LOOP_MAX_SECS in the fallback reporting
+ * loop. The supervisor (supervisor.c) must not treat the keeper as "stuck"
+ * and escalate a plain SIGTERM to the rest of the services before that full
+ * combined window has elapsed.
+ */
+#define KEEPER_SHUTDOWN_LOOP_MAX_SECS 30
+#define KEEPER_SHUTDOWN_LOOP_STOPPED_REPORT_INTERVAL_SECS 5
+#define KEEPER_SHUTDOWN_STOPPED_REPORT_MAX_ATTEMPTS 2
+#define KEEPER_MAINTENANCE_SHUTDOWN_LOOP_MAX_SECS 30
+#define KEEPER_GRACEFUL_SHUTDOWN_MAX_SECS \
+	(KEEPER_MAINTENANCE_SHUTDOWN_LOOP_MAX_SECS + KEEPER_SHUTDOWN_LOOP_MAX_SECS)
 
 #define PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT 60
 

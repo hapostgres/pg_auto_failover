@@ -536,7 +536,7 @@ cli_show_state(int argc, char **argv)
  * file for the local (keeper) node.
  */
 static void
-cli_show_local_state()
+cli_show_local_state(void)
 {
 	KeeperConfig config = keeperOptions;
 	int optionGroupId = keeperOptions.groupId;

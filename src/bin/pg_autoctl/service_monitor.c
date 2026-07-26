@@ -16,10 +16,12 @@
 #include "cli_common.h"
 #include "cli_root.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "log.h"
 #include "monitor.h"
 #include "monitor_config.h"
 #include "monitor_pg_init.h"
+#include "nodespec.h"
 #include "pidfile.h"
 #include "service_monitor.h"
 #include "service_postgres_ctl.h"
@@ -32,6 +34,66 @@
 
 static void reload_configuration(Monitor *monitor);
 static bool monitor_ensure_configuration(Monitor *monitor);
+static bool service_post_init_start(void *ctx, pid_t *pid);
+
+/*
+ * Static storage for the post-init spec.  Populated by start_monitor() from
+ * PG_AUTOCTL_NODESPEC before supervisor_start() is called, and referenced by
+ * the RP_TEMPORARY "post-init" service entry as its context pointer.
+ */
+static NodeSpec post_init_spec = { 0 };
+
+
+/*
+ * service_post_init_start forks and execs `pg_autoctl node post-init` which
+ * waits for local Postgres to be ready and then creates the non-default
+ * formations declared in the node spec.  Called once by the supervisor at
+ * startup; RP_TEMPORARY ensures the supervisor never restarts it.
+ */
+static bool
+service_post_init_start(void *ctx, pid_t *pid)
+{
+	NodeSpec *spec = (NodeSpec *) ctx;
+
+	fflush(stdout);
+	fflush(stderr);
+
+	pid_t fpid = fork();
+
+	switch (fpid)
+	{
+		case -1:
+		{
+			log_error("Failed to fork post-init service: %m");
+			return false;
+		}
+
+		case 0:
+		{
+			/* Detach so a SIGINT to the parent process group does not kill us
+			 * before formations have been created. */
+			(void) setsid();
+
+			char *argv_f[] = {
+				(char *) pg_autoctl_program,
+				"node", "post-init",
+				"--pgdata", (char *) spec->pgdata,
+				NULL
+			};
+
+			execv(argv_f[0], argv_f);
+			log_fatal("execv pg_autoctl node post-init: %m");
+			_exit(1);
+		}
+
+		default:
+		{
+			log_info("post-init service started in subprocess %d", fpid);
+			*pid = fpid;
+			return true;
+		}
+	}
+}
 
 
 /*
@@ -45,7 +107,32 @@ start_monitor(Monitor *monitor)
 	PostgresSetup *pgSetup = &(config->pgSetup);
 	LocalPostgresServer postgres = { 0 };
 
-	Service subprocesses[] = {
+	/*
+	 * If started via `pg_autoctl node run`, PG_AUTOCTL_NODESPEC names the
+	 * node.ini file.  For a monitor cold-start, the spec may declare
+	 * non-default formations (e.g. a Citus formation with secondary=false).
+	 * Register a RP_TEMPORARY post-init service that forks and creates those
+	 * formations once Postgres is accepting connections.
+	 */
+	bool hasPostInit = false;
+	{
+		char specPath[MAXPGPATH] = { 0 };
+
+		if (env_exists("PG_AUTOCTL_NODESPEC") &&
+			get_env_copy("PG_AUTOCTL_NODESPEC", specPath, sizeof(specPath)) &&
+			!IS_EMPTY_STRING_BUFFER(specPath) &&
+			nodespec_read(specPath, &post_init_spec) &&
+			post_init_spec.kind == NODE_KIND_UNKNOWN &&
+			post_init_spec.formationCount > 0)
+		{
+			hasPostInit = true;
+			log_info(
+				"Monitor will create %d non-default formation(s) via post-init service",
+				post_init_spec.formationCount);
+		}
+	}
+
+	Service subprocesses_base[] = {
 		{
 			SERVICE_NAME_POSTGRES,
 			RP_PERMANENT,
@@ -61,7 +148,43 @@ start_monitor(Monitor *monitor)
 		}
 	};
 
-	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
+	Service subprocesses_with_postinit[] = {
+		{
+			SERVICE_NAME_POSTGRES,
+			RP_PERMANENT,
+			-1,
+			&service_postgres_ctl_start
+		},
+		{
+			SERVICE_NAME_MONITOR,
+			RP_PERMANENT,
+			-1,
+			&service_monitor_start,
+			(void *) monitor
+		},
+		{
+			"post-init",
+			RP_TEMPORARY,
+			-1,
+			&service_post_init_start,
+			(void *) &post_init_spec
+		}
+	};
+
+	Service *subprocesses;
+	int subprocessesCount;
+
+	if (hasPostInit)
+	{
+		subprocesses = subprocesses_with_postinit;
+		subprocessesCount = sizeof(subprocesses_with_postinit) /
+							sizeof(subprocesses_with_postinit[0]);
+	}
+	else
+	{
+		subprocesses = subprocesses_base;
+		subprocessesCount = sizeof(subprocesses_base) / sizeof(subprocesses_base[0]);
+	}
 
 	/* initialize our local Postgres instance representation */
 	(void) local_postgres_init(&postgres, pgSetup);

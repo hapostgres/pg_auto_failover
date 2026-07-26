@@ -149,7 +149,7 @@ main(int argc, char **argv)
  * as using colors in an interactive terminal and the default log level.
  */
 static void
-set_logger()
+set_logger(void)
 {
 	/* we're verbose by default */
 	log_set_level(LOG_INFO);

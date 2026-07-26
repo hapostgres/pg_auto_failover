@@ -26,6 +26,7 @@
 
 #define STR_ERRCODE_OBJECT_IN_USE "55006"
 #define STR_ERRCODE_EXCLUSION_VIOLATION "23P01"
+#define STR_ERRCODE_INVALID_OBJECT_DEFINITION "42P17"
 
 #define STR_ERRCODE_SERIALIZATION_FAILURE "40001"
 #define STR_ERRCODE_STATEMENT_COMPLETION_UNKNOWN "40003"
@@ -71,6 +72,14 @@ typedef struct NodeReplicationSettingsParseContext
 	bool parsedOK;
 } NodeReplicationSettingsParseContext;
 
+typedef struct NodeRegionParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	char *region;
+	size_t size;
+	bool parsedOK;
+} NodeRegionParseContext;
+
 typedef struct CurrentNodeStateContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
@@ -112,6 +121,7 @@ static void parseNodeResult(void *ctx, PGresult *result);
 static void parseNodeArray(void *ctx, PGresult *result);
 static void parseNodeState(void *ctx, PGresult *result);
 static void parseNodeReplicationSettings(void *ctx, PGresult *result);
+static void parseNodeRegion(void *ctx, PGresult *result);
 static bool parseCurrentNodeState(PGresult *result, int rowNumber,
 								  CurrentNodeState *nodeState);
 static bool parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray,
@@ -155,8 +165,18 @@ typedef struct LogNotificationContext
 typedef struct ApplySettingsNotificationContext
 {
 	char *formation;
+	int64_t primaryNodeId;           /* set on first primary/apply_settings */
 	bool applySettingsTransitionInProgress;
 	bool applySettingsTransitionDone;
+
+	/*
+	 * Set when the priority change triggered a full failover rather than an
+	 * apply_settings round.  This happens when the old primary is assigned
+	 * report_lsn (the first step of a priority-induced failover election)
+	 * instead of apply_settings.  Once detected, any node that reaches
+	 * primary/primary satisfies the "new setting is in effect" condition.
+	 */
+	bool failoverInProgress;
 } ApplySettingsNotificationContext;
 
 
@@ -850,19 +870,20 @@ monitor_register_node(Monitor *monitor, char *formation,
 					  NodeState initialState,
 					  PgInstanceKind kind, int candidatePriority, bool quorum,
 					  char *citusClusterName,
+					  char *region,
 					  bool *mayRetry,
 					  MonitorAssignedState *assignedState)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT * FROM pgautofailover.register_node($1, $2, $3, $4, $5, $6, $7, "
-		"$8, $9::pgautofailover.replication_state, $10, $11, $12, $13)";
-	int paramCount = 13;
-	Oid paramTypes[13] = {
+		"$8, $9::pgautofailover.replication_state, $10, $11, $12, $13, $14)";
+	int paramCount = 14;
+	Oid paramTypes[14] = {
 		TEXTOID, TEXTOID, INT4OID, NAMEOID, TEXTOID, INT8OID,
-		INT8OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID
+		INT8OID, INT4OID, TEXTOID, TEXTOID, INT4OID, BOOLOID, TEXTOID, TEXTOID
 	};
-	const char *paramValues[13];
+	const char *paramValues[14];
 	MonitorAssignedStateParseContext parseContext =
 	{ { 0 }, assignedState, false };
 	const char *nodeStateString = NodeStateToString(initialState);
@@ -888,13 +909,19 @@ monitor_register_node(Monitor *monitor, char *formation,
 		IS_EMPTY_STRING_BUFFER(citusClusterName)
 		? DEFAULT_CITUS_CLUSTER_NAME
 		: citusClusterName;
+	paramValues[13] =
+		IS_EMPTY_STRING_BUFFER(region)
+		? "default"
+		: region;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
 								   &parseContext, parseNodeState))
 	{
 		if (monitor_retryable_error(parseContext.sqlstate) ||
-			strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0)
+			strcmp(parseContext.sqlstate, STR_ERRCODE_OBJECT_IN_USE) == 0 ||
+			strcmp(parseContext.sqlstate,
+				   STR_ERRCODE_INVALID_OBJECT_DEFINITION) == 0)
 		{
 			*mayRetry = true;
 			return false;
@@ -1085,6 +1112,150 @@ monitor_set_node_replication_quorum(Monitor *monitor,
 	}
 
 	return success;
+}
+
+
+/*
+ * monitor_set_node_region updates the monitor on the changes in the node
+ * region label.
+ */
+bool
+monitor_set_node_region(Monitor *monitor,
+						char *formation, char *name,
+						char *region)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.set_node_region($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[3];
+	bool success = true;
+
+	paramValues[0] = formation;
+	paramValues[1] = name;
+	paramValues[2] = region;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to update node region on node \"%s\" "
+				  "in formation \"%s\" to \"%s\"",
+				  name, formation, region);
+
+		success = false;
+	}
+
+	return success;
+}
+
+
+/*
+ * monitor_report_postgres_version reports the connected Postgres server's
+ * own version and, when installed, the Citus extension's version, for the
+ * given node. Called once per Postgres restart (see
+ * keeper_update_pg_state()'s pgIsRunning edge detection), never on every
+ * periodic report -- neither piece of information can change without a
+ * Postgres restart. citusVersion may legitimately be an empty string
+ * (Citus not installed on this node), reported as SQL NULL.
+ */
+bool
+monitor_report_postgres_version(Monitor *monitor, int64_t nodeId,
+								PostgresVersionInfo *pgVersion)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_postgres_version($1, $2, $3, $4, $5)";
+
+	int paramCount = 5;
+	Oid paramTypes[5] = { INT8OID, INT4OID, TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[5];
+
+	IntString nodeIdString = intToString(nodeId);
+	IntString versionNumString = intToString(pgVersion->versionNum);
+
+	paramValues[0] = nodeIdString.strValue;
+	paramValues[1] = versionNumString.strValue;
+	paramValues[2] = pgVersion->version;
+	paramValues[3] = pgVersion->versionString;
+	paramValues[4] = IS_EMPTY_STRING_BUFFER(pgVersion->citusVersion)
+					 ? NULL
+					 : pgVersion->citusVersion;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to report Postgres/Citus version for node %" PRId64,
+				  nodeId);
+
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_get_node_region retrieves the region label of a node from the
+ * monitor.
+ */
+bool
+monitor_get_node_region(Monitor *monitor,
+						char *name,
+						char *region, size_t size)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT region FROM pgautofailover.node WHERE nodename = $1";
+
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	NodeRegionParseContext parseContext = { { 0 }, region, size, false };
+
+	paramValues[0] = name;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeRegion))
+	{
+		log_error("Failed to retrieve region for node \"%s\".", name);
+
+		return false;
+	}
+
+	return parseContext.parsedOK;
+}
+
+
+/*
+ * parseNodeRegion parses the region label from query output.
+ */
+static void
+parseNodeRegion(void *ctx, PGresult *result)
+{
+	NodeRegionParseContext *context = (NodeRegionParseContext *) ctx;
+
+	if (PQntuples(result) != 1)
+	{
+		log_error("Query returned %d rows, expected 1", PQntuples(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQnfields(result) != 1)
+	{
+		log_error("Query returned %d columns, expected 1", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	char *value = PQgetvalue(result, 0, 0);
+
+	strlcpy(context->region, value, context->size);
+
+	context->parsedOK = true;
 }
 
 
@@ -1937,7 +2108,7 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 				"         current_group_state, assigned_group_state, "
 				"         candidate_priority, replication_quorum, "
 				"         reported_tli, reported_lsn, health, nodecluster, "
-				"         healthlag, reportlag"
+				"         noderegion, healthlag, reportlag"
 				"    FROM pgautofailover.current_state($1) cs "
 				"    JOIN ("
 				"          select nodeid, "
@@ -1963,7 +2134,7 @@ monitor_get_current_state(Monitor *monitor, char *formation, int group,
 				"         current_group_state, assigned_group_state, "
 				"         candidate_priority, replication_quorum, "
 				"         reported_tli, reported_lsn, health, nodecluster, "
-				"         healthlag, reportlag"
+				"         noderegion, healthlag, reportlag"
 				"    FROM pgautofailover.current_state($1, $2) cs "
 				"    JOIN ("
 				"          select nodeid, "
@@ -2016,7 +2187,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	int errors = 0;
 
 	/* we don't expect any of the column to be NULL */
-	for (colNumber = 0; colNumber < 16; colNumber++)
+	for (colNumber = 0; colNumber < 17; colNumber++)
 	{
 		if (PQgetisnull(result, rowNumber, 0))
 		{
@@ -2041,8 +2212,9 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	 * 11 - OUT reported_lsn         pg_lsn,
 	 * 12 - OUT health               integer
 	 * 13 - OUT nodecluster          text
-	 * 14 -     healthlag            int (extract epoch from interval)
-	 * 15 -     reportlag            int (extract epoch from interval)
+	 * 14 - OUT noderegion           text
+	 * 15 -     healthlag            int (extract epoch from interval)
+	 * 16 -     reportlag            int (extract epoch from interval)
 	 *
 	 * We need the groupId to parse the formation kind into a nodeKind, so we
 	 * begin at column 1 and get back to column 0 later, after column 4.
@@ -2178,6 +2350,16 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 	}
 
 	value = PQgetvalue(result, rowNumber, 14);
+	length = strlcpy(nodeState->region, value, NAMEDATALEN);
+	if (length >= NAMEDATALEN)
+	{
+		log_error("Region \"%s\" returned by monitor is %d characters, "
+				  "the maximum supported by pg_autoctl is %d",
+				  value, length, NAMEDATALEN - 1);
+		++errors;
+	}
+
+	value = PQgetvalue(result, rowNumber, 15);
 
 	if (!stringToDouble(value, &(nodeState->healthLag)))
 	{
@@ -2185,7 +2367,7 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 		++errors;
 	}
 
-	value = PQgetvalue(result, rowNumber, 15);
+	value = PQgetvalue(result, rowNumber, 16);
 
 	if (!stringToDouble(value, &(nodeState->reportLag)))
 	{
@@ -2218,10 +2400,10 @@ parseCurrentNodeStateArray(CurrentNodeStateArray *nodesArray, PGresult *result)
 		return false;
 	}
 
-	/* pgautofailover.current_state returns 11 columns */
-	if (PQnfields(result) != 16)
+	/* monitor_get_current_state selects 17 columns (0–16) */
+	if (PQnfields(result) != 17)
 	{
-		log_error("Query returned %d columns, expected 16", PQnfields(result));
+		log_error("Query returned %d columns, expected 17", PQnfields(result));
 		return false;
 	}
 
@@ -4012,6 +4194,8 @@ monitor_notification_process_apply_settings(void *context,
 	if (nodeState->reportedState == PRIMARY_STATE &&
 		nodeState->goalState == APPLY_SETTINGS_STATE)
 	{
+		/* first notification: learn which primary is being transitioned */
+		ctx->primaryNodeId = nodeState->node.nodeId;
 		ctx->applySettingsTransitionInProgress = true;
 
 		log_debug("step 1/4: primary node " NODE_FORMAT " is assigned \"%s\"",
@@ -4020,9 +4204,64 @@ monitor_notification_process_apply_settings(void *context,
 				  nodeState->node.host,
 				  nodeState->node.port,
 				  NodeStateToString(nodeState->goalState));
+
+		return;
 	}
-	else if (nodeState->reportedState == APPLY_SETTINGS_STATE &&
-			 nodeState->goalState == APPLY_SETTINGS_STATE)
+
+	/*
+	 * A priority change can trigger a full failover instead of an
+	 * apply_settings round when the new candidate has higher priority than
+	 * the current primary.  The monitor assigns the old primary report_lsn
+	 * (not apply_settings) as its first move.  Detect this and switch to
+	 * waiting for any node to reach primary/primary rather than waiting for
+	 * the apply_settings cycle that will never come.
+	 */
+	if (ctx->primaryNodeId != 0 &&
+		ctx->primaryNodeId == nodeState->node.nodeId &&
+		nodeState->goalState == REPORT_LSN_STATE)
+	{
+		log_info("candidate-priority change triggered a failover on node "
+				 NODE_FORMAT "; waiting for new primary instead of apply_settings",
+				 nodeState->node.nodeId,
+				 nodeState->node.name,
+				 nodeState->node.host,
+				 nodeState->node.port);
+		ctx->failoverInProgress = true;
+	}
+
+	/*
+	 * When a failover is in progress (not an apply_settings round), any node
+	 * reaching primary/primary means the new priority setting is in effect.
+	 */
+	if (ctx->failoverInProgress)
+	{
+		if (nodeState->reportedState == PRIMARY_STATE &&
+			nodeState->goalState == PRIMARY_STATE)
+		{
+			log_debug("failover complete: node " NODE_FORMAT " is now primary",
+					  nodeState->node.nodeId,
+					  nodeState->node.name,
+					  nodeState->node.host,
+					  nodeState->node.port);
+			ctx->applySettingsTransitionDone = true;
+		}
+		return;
+	}
+
+	/*
+	 * After step 1 we know which node is being transitioned. All further
+	 * checks filter on that node so that keepalives from other nodes in the
+	 * formation (e.g. secondaries reporting secondary/secondary) cannot
+	 * satisfy the completion condition prematurely.
+	 */
+	if (ctx->primaryNodeId != 0 &&
+		ctx->primaryNodeId != nodeState->node.nodeId)
+	{
+		return;
+	}
+
+	if (nodeState->reportedState == APPLY_SETTINGS_STATE &&
+		nodeState->goalState == APPLY_SETTINGS_STATE)
 	{
 		ctx->applySettingsTransitionInProgress = true;
 
@@ -4066,11 +4305,16 @@ monitor_notification_process_apply_settings(void *context,
 	 * through APPLY_SETTINGS. One such case is when changing candidate
 	 * priority to trigger a failover when all the available nodes have
 	 * candidate priority set to zero.
+	 *
+	 * We only use this shortcut when InProgress is already true (we saw the
+	 * primary/apply_settings step 1 notification), ensuring we don't exit
+	 * early on a keepalive from the same node before the transition starts.
 	 */
-	if ((nodeState->reportedState == PRIMARY_STATE &&
-		 nodeState->reportedState == nodeState->goalState) ||
-		(nodeState->reportedState == WAIT_PRIMARY_STATE &&
-		 nodeState->reportedState == nodeState->goalState))
+	if (ctx->applySettingsTransitionInProgress &&
+		((nodeState->reportedState == PRIMARY_STATE &&
+		  nodeState->reportedState == nodeState->goalState) ||
+		 (nodeState->reportedState == WAIT_PRIMARY_STATE &&
+		  nodeState->reportedState == nodeState->goalState)))
 	{
 		ctx->applySettingsTransitionDone = true;
 	}
@@ -4097,6 +4341,7 @@ monitor_wait_until_primary_applied_settings(Monitor *monitor,
 	PGconn *connection = monitor->notificationClient.connection;
 	ApplySettingsNotificationContext context = {
 		(char *) formation,
+		0,    /* primaryNodeId: set on first primary/apply_settings notification */
 		false,
 		false
 	};
@@ -4501,7 +4746,8 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 									   int64_t nodeId,
 									   PgInstanceKind nodeKind,
 									   NodeState *targetStates,
-									   int targetStatesLength)
+									   int targetStatesLength,
+									   int timeoutSecs)
 {
 	PGconn *connection = monitor->notificationClient.connection;
 
@@ -4536,7 +4782,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 	{
 		uint64_t now = time(NULL);
 
-		if ((now - start) > PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT)
+		if ((now - start) > (uint64_t) timeoutSecs)
 		{
 			log_error("Failed to receive monitor's notifications");
 			break;
@@ -4544,7 +4790,7 @@ monitor_wait_until_node_reported_state(Monitor *monitor,
 
 		if (!monitor_process_notifications(
 				monitor,
-				PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT * 1000,
+				timeoutSecs * 1000,
 				channels,
 				(void *) &context,
 				&monitor_check_node_report_state))

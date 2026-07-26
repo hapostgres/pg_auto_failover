@@ -443,6 +443,22 @@ CommandLine internal_commands =
 							"Internal subprocess entry points — not for direct use",
 							NULL, NULL, NULL, do_subcommands);
 
+/*
+ * pg_autoctl do  — v2.2 compatibility alias for "internal".
+ *
+ * Before v2.3 (commit c32eb03) the supervisor spawned service subprocesses
+ * via "pg_autoctl do service {postgres,listener,node-active}".  The command
+ * was renamed to "pg_autoctl internal service X" in v2.3.  During an in-place
+ * upgrade the v2.2 supervisor (still running as PID 1) re-execs after the
+ * symlink flip, so the v2.3 binary must still accept the old "do service X"
+ * form.  Routing to the same do_subcommands[] array ensures the exact same
+ * callbacks fire regardless of which prefix is used.
+ */
+CommandLine do_compat_commands =
+	make_hidden_command_set("do",
+							"v2.2 compat alias for 'internal' — not for direct use",
+							NULL, NULL, NULL, do_subcommands);
+
 
 /*
  * keeper_cli_keeper_setup_getopts parses command line options and set the

@@ -26,7 +26,7 @@
  * indices must match with the columns given
  * in the following definition.
  */
-#define Natts_pgautofailover_node 19
+#define Natts_pgautofailover_node 21
 #define Anum_pgautofailover_node_formationid 1
 #define Anum_pgautofailover_node_nodeid 2
 #define Anum_pgautofailover_node_groupid 3
@@ -48,6 +48,8 @@
 #define Anum_pgautofailover_node_candidate_priority 19
 #define Anum_pgautofailover_node_replication_quorum 20
 #define Anum_pgautofailover_node_nodecluster 21
+#define Anum_pgautofailover_node_region 22
+#define Anum_pgautofailover_node_replication_stall_since 23
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
 	"formationid, " \
@@ -70,7 +72,9 @@
 	"statechangetime, " \
 	"candidatepriority, " \
 	"replicationquorum, " \
-	"nodecluster"
+	"nodecluster, " \
+	"region, " \
+	"replication_stall_since"
 
 
 #define SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE \
@@ -133,6 +137,8 @@ typedef struct AutoFailoverNode
 	int candidatePriority;
 	bool replicationQuorum;
 	char *nodeCluster;
+	char *region;
+	TimestampTz replicationStallSince; /* 0 = not stalled */
 } AutoFailoverNode;
 
 
@@ -160,9 +166,11 @@ extern List * AutoFailoverOtherNodesListInState(AutoFailoverNode *pgAutoFailover
 extern List * AutoFailoverCandidateNodesListInState(AutoFailoverNode *pgAutoFailoverNode,
 													ReplicationState currentState);
 extern AutoFailoverNode * GetPrimaryNodeInGroup(char *formationId, int32 groupId);
+extern AutoFailoverNode * GetPrimaryNodeInGroupFromList(List *groupNodeList);
 AutoFailoverNode * GetNodeToFailoverFromInGroup(char *formationId, int32 groupId);
 extern AutoFailoverNode * GetPrimaryOrDemotedNodeInGroup(char *formationId,
 														 int32 groupId);
+extern AutoFailoverNode * GetPrimaryOrDemotedNodeInGroupFromList(List *groupNodeList);
 extern AutoFailoverNode * FindFailoverNewStandbyNode(List *groupNodeList);
 extern List * GroupListCandidates(List *groupNodeList);
 extern List * ListMostAdvancedStandbyNodes(List *groupNodeList);
@@ -178,6 +186,17 @@ extern AutoFailoverNode * FindCandidateNodeBeingPromoted(List *groupNodeList);
 
 extern AutoFailoverNode * GetAutoFailoverNode(char *nodeHost, int nodePort);
 extern AutoFailoverNode * GetAutoFailoverNodeById(int64 nodeId);
+extern AutoFailoverNode * LockNodeGroupAndFetch(int64 nodeId);
+extern AutoFailoverNode * LockNodeGroupAndFetchByName(char *formationId,
+													  char *nodeName);
+extern void SetNodeHealthAndTimestampsForTesting(int64 nodeId,
+												 bool healthIsNull, int health,
+												 bool reportTimeAgoIsNull,
+												 Interval *reportTimeAgo,
+												 bool stateChangeTimeAgoIsNull,
+												 Interval *stateChangeTimeAgo,
+												 bool healthCheckTimeAgoIsNull,
+												 Interval *healthCheckTimeAgo);
 extern AutoFailoverNode * GetAutoFailoverNodeByName(char *formationId,
 													char *nodeName);
 extern AutoFailoverNode * OtherNodeInGroup(AutoFailoverNode *pgAutoFailoverNode);
@@ -196,7 +215,8 @@ extern int AddAutoFailoverNode(char *formationId,
 							   ReplicationState reportedState,
 							   int candidatePriority,
 							   bool replicationQuorum,
-							   char *nodeCluster);
+							   char *nodeCluster,
+							   char *region);
 extern void SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							 ReplicationState goalState,
 							 const char *message);
@@ -214,6 +234,15 @@ extern void ReportAutoFailoverNodeReplicationSetting(int64 nodeid,
 													 int nodePort,
 													 int candidatePriority,
 													 bool replicationQuorum);
+extern void ReportAutoFailoverNodeRegion(int64 nodeid,
+										 char *nodeHost,
+										 int nodePort,
+										 char *region);
+extern void ReportAutoFailoverNodeVersion(int64 nodeid,
+										  int *versionNum,
+										  char *version,
+										  char *versionString,
+										  char *citusVersion);
 extern void UpdateAutoFailoverNodeMetadata(int64 nodeid,
 										   char *nodeName,
 										   char *nodeHost,

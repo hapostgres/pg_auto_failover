@@ -1,0 +1,44 @@
+# Regression test schedule for the pgautofailover monitor extension.
+#
+# pg_regress runs an unscheduled (bare) REGRESS list as a single parallel
+# group. None of these tests were written to tolerate that: they all
+# register nodes via pgautofailover.register_node() against the one
+# pgautofailover.node table (and its one shared nodeid sequence) in the
+# whole contrib_regression database, and their expected/*.out files
+# hardcode small literal node ids (e.g. "assigned_node_id | 2") on the
+# assumption that they have that sequence -- and the table -- to
+# themselves. Running any two of them concurrently lets one test's inserts
+# bump the other's node ids and leak extra rows into the other's
+# "select * from pgautofailover.node" style queries. dummy_update.sql and
+# upgrade.sql additionally run their own CREATE/ALTER/DROP EXTENSION
+# pgautofailover against the single shared extension object, which is its
+# own, separate way for two tests to corrupt each other if run at once.
+#
+# Net effect: every test here needs the whole database to itself, in the
+# exact dependency order below. This is why each gets its own "test:"
+# line (pg_regress runs schedule lines strictly one after another, so a
+# solo line is a full serial step). Observed in CI as sporadic
+# "not ok - upgrade" / "not ok - lock_and_fetch_migration" / node-id
+# mismatches in other tests, depending on which pair the scheduler
+# happened to interleave that run.
+#
+# create_extension must run first: every other test needs the extension
+# to exist. dummy_update, drop_extension, and upgrade must run last, in
+# this exact order: dummy_update leaves the extension at a fake "dummy"
+# version, drop_extension removes it outright, and upgrade does its own
+# from-scratch CREATE EXTENSION '1.0' -> ALTER EXTENSION UPDATE TO ... ->
+# DROP EXTENSION cycle that assumes it owns the extension's version state
+# exclusively.
+
+test: create_extension
+test: monitor
+test: workers
+test: node_active_protocol
+test: guard_data_loss
+test: fast_forward
+test: drop_node
+test: stale_primary_report
+test: lock_and_fetch_migration
+test: dummy_update
+test: drop_extension
+test: upgrade

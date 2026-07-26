@@ -24,9 +24,6 @@ def setup_module():
 
 
 def teardown_module():
-    # make sure all Citus nodes are in-sync before DROP TABLE
-    coordinator1a.run_sql_query("select public.wait_until_metadata_sync()")
-    coordinator1a.run_sql_query("DROP TABLE t1")
     cluster.destroy()
 
 
@@ -293,3 +290,7 @@ def test_011_start_worker2b_again():
     ssn = "ANY 1 (pgautofailover_standby_8)"
     eq_(worker2a.get_synchronous_standby_names(), ssn)
     eq_(worker2a.get_synchronous_standby_names_local(), ssn)
+
+
+def test_012_drop_table():
+    coordinator1a.citus_run_ddl_after_sync("DROP TABLE t1")

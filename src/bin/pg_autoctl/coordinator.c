@@ -556,6 +556,39 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * Bound the time this transaction can spend waiting for locks on the
+	 * coordinator.  master_update_node() takes a distributed lock that
+	 * conflicts with active queries on the old worker shard.  Without a
+	 * timeout the FSM transition blocks indefinitely — observed as a 20-minute
+	 * hang in CI when the coordinator itself just finished its own failover and
+	 * had in-flight distributed transactions.
+	 *
+	 * lock_timeout fires if the lock isn't acquired within the cooldown window.
+	 * statement_timeout is a backstop for the whole call (2× cooldown) in case
+	 * something else inside master_update_node stalls after acquiring the lock.
+	 * Both are SET LOCAL so they are automatically reset at transaction end and
+	 * do not affect other uses of this connection.
+	 *
+	 * On timeout the transaction is aborted; the FSM will retry the transition
+	 * on the next keeper tick rather than hanging forever.
+	 */
+	int lockCooldown = keeper->config.citus_master_update_node_lock_cooldown;
+
+	sformat(sql, sizeof(sql),
+			"SET LOCAL lock_timeout = '%dms'; "
+			"SET LOCAL statement_timeout = '%dms'",
+			lockCooldown,
+			lockCooldown * 2);
+
+	if (!pgsql_execute(pgsql, sql))
+	{
+		log_error("Failed to set lock_timeout/statement_timeout on the "
+				  "coordinator connection, see above for details.");
+		pgsql_rollback(pgsql);
+		return false;
+	}
+
 	bool transactionHasAlreadyBeenPrepared = false;
 
 	if (!coordinator_udpate_node_transaction_is_prepared(
@@ -566,6 +599,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		log_error("Failed to update node %s:%d on the coordinator, "
 				  "see above for details",
 				  keeper->config.hostname, keeper->config.pgSetup.pgport);
+		pgsql_rollback(pgsql);
 		return false;
 	}
 
@@ -590,6 +624,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		log_error("Failed to update node %s:%d on the coordinator, "
 				  "see above for details",
 				  keeper->config.hostname, keeper->config.pgSetup.pgport);
+		pgsql_rollback(pgsql);
 		return false;
 	}
 
@@ -647,6 +682,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		{
 			log_error("Failed to update node on the coordinator, "
 					  "see above for details.");
+			pgsql_rollback(pgsql);
 			return false;
 		}
 	}
@@ -678,6 +714,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		{
 			log_error("Failed to update node on the coordinator, "
 					  "see above for details.");
+			pgsql_rollback(pgsql);
 			return false;
 		}
 	}
@@ -712,6 +749,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 		{
 			log_error("Failed to add proxyport to pg_dist_poolinfo, "
 					  "see above for details");
+			pgsql_rollback(pgsql);
 			return false;
 		}
 	}
@@ -722,6 +760,7 @@ coordinator_update_node_prepare(Coordinator *coordinator, Keeper *keeper)
 	{
 		log_error("Failed to update node on the coordinator, "
 				  "see above for details.");
+		pgsql_rollback(pgsql);
 		return false;
 	}
 

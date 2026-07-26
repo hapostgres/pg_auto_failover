@@ -97,7 +97,8 @@ assigned_replication_quorum | t
 assigned_node_name          | node_3
 
 select formationid, nodename, goalstate, reportedstate
-  from pgautofailover.node;
+  from pgautofailover.node
+ order by nodeid;
 -[ RECORD 1 ]-+-------------
 formationid   | default
 nodename      | node_1

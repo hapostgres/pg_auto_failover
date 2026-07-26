@@ -421,7 +421,15 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 												   sizeof(props[0].val)); pc++; \
 } while (0)
 #define ADDF(k) do { props[pc].kw = (k); props[pc].val[0] = '\0'; pc++; } while (0)
-	if (n->launchDeferred)
+	if (n->createDeferred && n->launchDeferred)
+	{
+		ADDF("create and launch deferred");
+	}
+	else if (n->createDeferred)
+	{
+		ADDF("create deferred");
+	}
+	else if (n->launchDeferred)
 	{
 		ADDF("launch deferred");
 	}
@@ -441,6 +449,10 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 	{
 		sformat(numbuf, sizeof(numbuf), "%d", n->candidatePriority);
 		ADD("candidate-priority", numbuf);
+	}
+	if (n->region[0])
+	{
+		ADD("region", n->region);
 	}
 	if (!n->replicationQuorum)
 	{
@@ -828,6 +840,12 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_RUN:
+		{
+			fformat(out, "%*srun %s  %s\n", indent, "", cmd->service, cmd->args);
+			break;
+		}
+
 		case CMD_WAIT_STATE:
 		case CMD_ASSERT_STATE:
 		case CMD_ASSERT_ASSIGNED:
@@ -966,6 +984,20 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_NODEINI_SET:
+		{
+			fformat(out, "%*snodeini set %s %s %s\n",
+					indent, "", cmd->service, cmd->state, cmd->args);
+			break;
+		}
+
+		case CMD_NODEINI_GET:
+		{
+			fformat(out, "%*snodeini get %s %s %s\n",
+					indent, "", cmd->service, cmd->state, cmd->args);
+			break;
+		}
+
 		case CMD_COMPOSE_DOWN:
 		{
 			fformat(out, "%*scompose down\n", indent, "");
@@ -1034,6 +1066,30 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 		case CMD_SET_MONITOR:
 		{
 			fformat(out, "%*sset monitor %s\n", indent, "", cmd->service);
+			break;
+		}
+
+		case CMD_FAILOVER:
+		{
+			/*
+			 * service holds the formation name ("default" when omitted in
+			 * the source); waitGroups[0] holds the group (0 when omitted).
+			 * Reconstruct whichever of the four "perform failover" forms
+			 * matches (see the perform_cmd grammar rule).
+			 */
+			bool hasFormation = strcmp(cmd->service, "default") != 0;
+			bool hasGroup = cmd->waitGroups[0] != 0;
+
+			fformat(out, "%*sperform failover", indent, "");
+			if (hasFormation)
+			{
+				fformat(out, " in formation %s", cmd->service);
+			}
+			if (hasGroup)
+			{
+				fformat(out, " group %d", cmd->waitGroups[0]);
+			}
+			fformat(out, "\n");
 			break;
 		}
 

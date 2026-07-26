@@ -63,6 +63,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 	char replicationQuorumStr[8] = { 0 };
 	char pgHbaLanStr[8] = { 0 };
 	char launchModeStr[16] = { 0 };
+	char createDeferredStr[16] = { 0 };
 	char noMonitorStr[8] = { 0 };
 	char citusRoleStr[NAMEDATALEN] = { 0 };
 	int port = 5432;
@@ -113,6 +114,9 @@ nodespec_read(const char *path, NodeSpec *spec)
 		make_strbuf_option_default("settings", "replication_quorum", NULL, false,
 								   sizeof(replicationQuorumStr),
 								   replicationQuorumStr, "true"),
+		make_strbuf_option_default("settings", "region", NULL, false,
+								   sizeof(spec->region), spec->region,
+								   ""),
 
 		/* [options] — immutable, used only at create time */
 		make_strbuf_option_default("options", "ssl", NULL, false,
@@ -125,6 +129,11 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(pgHbaLanStr), pgHbaLanStr,
 								   "true"),
 
+		/* [options] — debian_cluster: run pg_createcluster before create */
+		make_strbuf_option_default("options", "debian_cluster", NULL, false,
+								   sizeof(spec->debianCluster),
+								   spec->debianCluster, ""),
+
 		/* [ssl] — certificate paths for verify-ca / verify-full mode */
 		make_strbuf_option_default("ssl", "ca_file", NULL, false,
 								   sizeof(spec->ssl_ca_file),
@@ -136,10 +145,13 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(spec->ssl_key_file),
 								   spec->ssl_key_file, ""),
 
-		/* [launch] — optional section; mode=deferred delays node init */
-		make_strbuf_option_default("launch", "mode", NULL, false,
+		/* [launch] — optional section; run=deferred delays node run */
+		make_strbuf_option_default("launch", "run", NULL, false,
 								   sizeof(launchModeStr), launchModeStr,
 								   "immediate"),
+		make_strbuf_option_default("launch", "create", NULL, false,
+								   sizeof(createDeferredStr),
+								   createDeferredStr, "immediate"),
 
 		/* [pg_auto_failover] — monitor: password for autoctl_node role */
 		make_strbuf_option_default("pg_auto_failover", "autoctl_node_password",
@@ -215,6 +227,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 		 strcmp(pgHbaLanStr, "1") == 0);
 
 	spec->launchDeferred = (strcmp(launchModeStr, "deferred") == 0);
+	spec->createDeferred = (strcmp(createDeferredStr, "deferred") == 0);
 	spec->noMonitor =
 		(strcmp(noMonitorStr, "true") == 0 ||
 		 strcmp(noMonitorStr, "yes") == 0 ||
@@ -269,8 +282,9 @@ nodespec_read(const char *path, NodeSpec *spec)
 					int fi = spec->formationCount++;
 					strlcpy(spec->formationNames[fi], fname,
 							sizeof(spec->formationNames[fi]));
+					spec->formationNumSync[fi] = -1; /* default: don't override */
 
-					/* optional: kind = ha (default) */
+					/* optional: kind = citus (default pgsql) */
 					int ki = ini_find_property(raw, si, "kind", 0);
 					if (ki != INI_NOT_FOUND)
 					{
@@ -290,6 +304,34 @@ nodespec_read(const char *path, NodeSpec *spec)
 					{
 						strlcpy(spec->formationKinds[fi], "pgsql",
 								sizeof(spec->formationKinds[fi]));
+					}
+
+					/* optional: secondary = false disables failover secondaries */
+					int si2 = ini_find_property(raw, si, "secondary", 0);
+					if (si2 != INI_NOT_FOUND)
+					{
+						const char *sv = ini_property_value(raw, si, si2);
+						if (sv && (strcmp(sv, "false") == 0 ||
+								   strcmp(sv, "no") == 0 ||
+								   strcmp(sv, "0") == 0))
+						{
+							spec->formationDisableSecondary[fi] = true;
+						}
+					}
+
+					/* optional: num_sync_standbys = N */
+					int ni = ini_find_property(raw, si, "num_sync_standbys", 0);
+					if (ni != INI_NOT_FOUND)
+					{
+						const char *nv = ini_property_value(raw, si, ni);
+						if (nv && nv[0])
+						{
+							int n = 0;
+							if (stringToInt(nv, &n))
+							{
+								spec->formationNumSync[fi] = n;
+							}
+						}
 					}
 				}
 				ini_destroy(raw);
@@ -415,10 +457,23 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			spec->auth,
 			spec->pg_hba_lan ? "true" : "false");
 
-	/* only emit [launch] when deferred — omitting the section means immediate */
-	if (spec->launchDeferred)
+	if (spec->debianCluster[0])
 	{
-		fformat(out, "\n[launch]\nmode = deferred\n");
+		fformat(out, "debian_cluster = %s\n", spec->debianCluster);
+	}
+
+	/* only emit [launch] when deferred — omitting the section means immediate */
+	if (spec->launchDeferred || spec->createDeferred)
+	{
+		fformat(out, "\n[launch]\n");
+		if (spec->createDeferred)
+		{
+			fformat(out, "create = deferred\n");
+		}
+		if (spec->launchDeferred)
+		{
+			fformat(out, "run = deferred\n");
+		}
 	}
 
 	/* [formation <name>] sections — monitor kind only */
@@ -429,6 +484,14 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			strcmp(spec->formationKinds[fi], "pgsql") != 0)
 		{
 			fformat(out, "kind = %s\n", spec->formationKinds[fi]);
+		}
+		if (spec->formationDisableSecondary[fi])
+		{
+			fformat(out, "secondary = false\n");
+		}
+		if (spec->formationNumSync[fi] >= 0)
+		{
+			fformat(out, "num_sync_standbys = %d\n", spec->formationNumSync[fi]);
 		}
 	}
 
@@ -601,15 +664,11 @@ nodespec_create_argv(const NodeSpec *spec,
 		PUSH(spec->autoctl_node_password);
 	}
 
-	/* non-default formations to create during monitor init */
-	if (spec->kind == NODE_KIND_UNKNOWN)
-	{
-		for (int fi = 0; fi < spec->formationCount; fi++)
-		{
-			PUSH("--formation");
-			PUSH(spec->formationNames[fi]);
-		}
-	}
+	/*
+	 * Non-default formations are created by a post-init child in cli_node_run
+	 * after pg_autoctl run starts postgres, so that each formation's kind and
+	 * secondary flag can be applied correctly.  Nothing to add to the argv here.
+	 */
 
 	if (spec->kind != NODE_KIND_UNKNOWN)
 	{
@@ -636,6 +695,13 @@ nodespec_create_argv(const NodeSpec *spec,
 		{
 			PUSH("--replication-quorum");
 			PUSH("false");
+		}
+
+		/* region label (omit when empty — monitor defaults to "default") */
+		if (!IS_EMPTY_STRING_BUFFER(spec->region))
+		{
+			PUSH("--region");
+			PUSH(spec->region);
 		}
 
 		/* Citus secondary/read-replica cluster settings */
@@ -674,7 +740,7 @@ nodespec_write_to_path(const NodeSpec *spec, const char *path)
 		return false;
 	}
 	bool ok = nodespec_write(spec, f);
-	fclose(f);
+	fclose(f); /* IGNORE-BANNED */
 	return ok;
 }
 
@@ -688,7 +754,7 @@ nodespec_write_to_path(const NodeSpec *spec, const char *path)
  *   - replication_quorum   → monitor_set_node_replication_quorum()
  *
  * The [launch] mode field is handled separately by pg_autoctl node start.
- * Applying a spec with mode=deferred to an already-started node is a
+ * Applying a spec with run=deferred to an already-started node is a
  * non-fatal warning (ignored).
  *
  * Immutable fields (kind, pgdata, ssl, auth, pg_hba_lan) are not checked here.
@@ -752,11 +818,198 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 		free_program(&prog);
 	}
 
+	if (strcmp(new_spec->region, old_spec->region) != 0)
+	{
+		Program prog = run_program(pg_autoctl_program,
+								   "set", "node", "region",
+								   "--pgdata", new_spec->pgdata,
+								   new_spec->region, NULL);
+
+		if (prog.returnCode != 0)
+		{
+			log_warn("nodespec_apply: set region %s failed (rc=%d)",
+					 new_spec->region, prog.returnCode);
+			if (prog.stdOut)
+			{
+				log_warn("%s", prog.stdOut);
+			}
+		}
+		else
+		{
+			log_info("nodespec: applied region = %s", new_spec->region);
+			changed = true;
+		}
+		free_program(&prog);
+	}
+
 	/* immediate → deferred on an already-started node: non-fatal, ignored */
 	if (!old_spec->launchDeferred && new_spec->launchDeferred)
 	{
 		log_warn("nodespec_apply: ignoring attempt to set launch=deferred "
 				 "on a node that is already running");
+	}
+
+	/*
+	 * For monitor nodes, apply formation-level changes.
+	 *
+	 * New [formation <name>] sections → pg_autoctl create formation.
+	 * Changed secondary setting     → pg_autoctl enable/disable secondary.
+	 */
+	if (new_spec->kind == NODE_KIND_UNKNOWN)
+	{
+		for (int fi = 0; fi < new_spec->formationCount; fi++)
+		{
+			const char *fname = new_spec->formationNames[fi];
+			const char *fkind = new_spec->formationKinds[fi][0]
+								? new_spec->formationKinds[fi] : "pgsql";
+			bool newDisabled = new_spec->formationDisableSecondary[fi];
+
+			/* look for this formation in the previous spec */
+			int oi = -1;
+			for (int k = 0; k < old_spec->formationCount; k++)
+			{
+				if (strcmp(old_spec->formationNames[k], fname) == 0)
+				{
+					oi = k;
+					break;
+				}
+			}
+
+			if (oi < 0)
+			{
+				/* formation is new: create it, passing --number-sync-standbys
+				 * directly so there is no separate set call needed. */
+				int newNs = new_spec->formationNumSync[fi];
+				static char nsbuf[16];
+				Program prog;
+
+				if (newDisabled && newNs >= 0)
+				{
+					sformat(nsbuf, sizeof(nsbuf), "%d", newNs);
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   "--disable-secondary",
+									   "--number-sync-standbys", nsbuf,
+									   NULL);
+				}
+				else if (newDisabled)
+				{
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   "--disable-secondary",
+									   NULL);
+				}
+				else if (newNs >= 0)
+				{
+					sformat(nsbuf, sizeof(nsbuf), "%d", newNs);
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   "--number-sync-standbys", nsbuf,
+									   NULL);
+				}
+				else
+				{
+					prog = run_program(pg_autoctl_program,
+									   "create", "formation",
+									   "--pgdata", new_spec->pgdata,
+									   "--formation", fname,
+									   "--kind", fkind,
+									   NULL);
+				}
+
+				if (prog.returnCode != 0)
+				{
+					log_warn("nodespec_apply: create formation \"%s\" failed (rc=%d)",
+							 fname, prog.returnCode);
+					if (prog.stdOut)
+					{
+						log_warn("%s", prog.stdOut);
+					}
+				}
+				else
+				{
+					log_info("nodespec: created formation \"%s\" (kind=%s%s)",
+							 fname, fkind,
+							 newNs >= 0 ? ", num_sync_standbys set" : "");
+					changed = true;
+				}
+				free_program(&prog);
+			}
+			else if (old_spec->formationDisableSecondary[oi] != newDisabled)
+			{
+				/* secondary setting changed: enable or disable */
+				const char *verb = newDisabled ? "disable" : "enable";
+
+				Program prog = run_program(pg_autoctl_program,
+										   verb, "secondary",
+										   "--pgdata", new_spec->pgdata,
+										   "--formation", fname,
+										   NULL);
+
+				if (prog.returnCode != 0)
+				{
+					log_warn("nodespec_apply: %s secondary for \"%s\" failed (rc=%d)",
+							 verb, fname, prog.returnCode);
+					if (prog.stdOut)
+					{
+						log_warn("%s", prog.stdOut);
+					}
+				}
+				else
+				{
+					log_info("nodespec: %sd secondary for formation \"%s\"",
+							 verb, fname);
+					changed = true;
+				}
+				free_program(&prog);
+			}
+
+			/*
+			 * num_sync_standbys for existing formations (including "default"):
+			 * the formation already exists so use the set command.
+			 * Skip when oi < 0 (new formation) — handled above via create.
+			 */
+			int newNs = new_spec->formationNumSync[fi];
+			int oldNs = (oi >= 0) ? old_spec->formationNumSync[oi] : -1;
+			if (oi >= 0 && newNs >= 0 && newNs != oldNs)
+			{
+				static char nsbuf[16];
+				sformat(nsbuf, sizeof(nsbuf), "%d", newNs);
+				Program nsp = run_program(pg_autoctl_program,
+										  "set", "formation",
+										  "number-sync-standbys",
+										  nsbuf,
+										  "--pgdata", new_spec->pgdata,
+										  "--formation", fname,
+										  NULL);
+				if (nsp.returnCode != 0)
+				{
+					log_warn("nodespec_apply: set number-sync-standbys %d "
+							 "for \"%s\" failed (rc=%d)",
+							 newNs, fname, nsp.returnCode);
+					if (nsp.stdOut)
+					{
+						log_warn("%s", nsp.stdOut);
+					}
+				}
+				else
+				{
+					log_info("nodespec: set formation \"%s\" number-sync-standbys = %d",
+							 fname, newNs);
+					changed = true;
+				}
+				free_program(&nsp);
+			}
+		}
 	}
 
 	if (!changed)
@@ -773,15 +1026,42 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
  * ----------------------------------------------------------------------- */
 
 /*
+ * nodespec_file_crc computes the CRC32C of the current content of *path
+ * into *crc.  Returns false (leaving *crc untouched) if the file can't be
+ * read right now — a transient condition while it's being rewritten, not
+ * treated as a change.
+ */
+static bool
+nodespec_file_crc(const char *path, pg_crc32c *crc)
+{
+	char *contents = NULL;
+	long fileSize = 0;
+
+	if (!read_file(path, &contents, &fileSize))
+	{
+		return false;
+	}
+
+	pg_crc32c newCrc;
+	INIT_CRC32C(newCrc);
+	COMP_CRC32C(newCrc, contents, fileSize);
+	FIN_CRC32C(newCrc);
+
+	free(contents);
+
+	*crc = newCrc;
+	return true;
+}
+
+
+/*
  * nodespec_watcher_init sets up file watching for *path.
- * On Linux we try inotify first; everywhere else (and on failure) we fall
- * back to mtime polling every NODESPEC_WATCH_INTERVAL_SECS.
+ * On Linux, inotify is also armed as a low-latency hint; see
+ * nodespec_watcher_check for why it is never the sole source of truth.
  */
 bool
 nodespec_watcher_init(NodeSpecWatcher *w, const char *path)
 {
-	struct stat st;
-
 	memset(w, 0, sizeof(*w));
 	strlcpy(w->path, path, sizeof(w->path));
 
@@ -797,32 +1077,31 @@ nodespec_watcher_init(NodeSpecWatcher *w, const char *path)
 		if (w->watch_fd < 0)
 		{
 			log_debug("nodespec_watcher_init: inotify_add_watch(\"%s\"): %m; "
-					  "falling back to mtime poll", path);
+					  "relying on the CRC hash poll instead", path);
 			close(w->inotify_fd);
 			w->inotify_fd = -1;
 		}
 		else
 		{
-			log_info("nodespec: watching \"%s\" via inotify", path);
+			log_info("nodespec: watching \"%s\" via inotify "
+					 "(plus a %ds CRC hash poll as a reliability net)",
+					 path, NODESPEC_HASH_POLL_INTERVAL_SECS);
 		}
 	}
 	else
 	{
 		log_debug("nodespec_watcher_init: inotify_init1: %m; "
-				  "falling back to mtime poll");
+				  "relying on the CRC hash poll instead");
 		w->inotify_fd = -1;
 		w->watch_fd = -1;
 	}
 #endif
 
-	/* record initial mtime so we don't fire on the very first check */
-	if (stat(path, &st) == 0)
+	/* record initial CRC so we don't fire on the very first check */
+	if (!nodespec_file_crc(path, &w->last_crc))
 	{
-		w->last_mtime = st.st_mtime;
-	}
-	else
-	{
-		w->last_mtime = 0;
+		INIT_CRC32C(w->last_crc);
+		FIN_CRC32C(w->last_crc);
 	}
 
 	w->active = true;
@@ -833,12 +1112,21 @@ nodespec_watcher_init(NodeSpecWatcher *w, const char *path)
 /*
  * nodespec_watcher_check is called from the supervisor's 100 ms tick.
  *
+ * Change detection is always CRC32C-hash based: inotify (when available) is
+ * only used to check sooner than the next scheduled hash poll, never as the
+ * sole signal that something changed. inotify has been observed to silently
+ * miss host-originated writes to a bind-mounted file under some
+ * containerized/virtualized filesystems (e.g. Docker Desktop for macOS's
+ * virtiofs: the write's content lands in the container right away, but no
+ * IN_CLOSE_WRITE event is ever raised) — the hash poll guarantees a change
+ * is still picked up within NODESPEC_HASH_POLL_INTERVAL_SECS regardless.
+ *
  * Returns true if the file changed and nodespec_apply() was attempted.
  */
 bool
 nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 {
-	bool file_changed = false;
+	bool inotify_hint = false;
 
 	if (!w->active)
 	{
@@ -849,51 +1137,52 @@ nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 	if (w->inotify_fd >= 0)
 	{
 		/*
-		 * Drain all pending inotify events.  We don't care about the event
-		 * details — any event means the file was written.
+		 * Drain all pending inotify events.  This only decides whether to
+		 * hash-check *now* instead of waiting for the next poll interval —
+		 * see the function comment for why it can't be trusted alone.
 		 */
 		char buf[sizeof(struct inotify_event) + NAME_MAX + 1];
 		ssize_t n;
 
 		while ((n = read(w->inotify_fd, buf, sizeof(buf))) > 0)
 		{
-			file_changed = true;
+			inotify_hint = true;
 		}
 
 		if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 		{
 			log_warn("nodespec watcher: inotify read error: %m; "
-					 "switching to mtime poll");
+					 "continuing with the CRC hash poll");
 			close(w->inotify_fd);
 			w->inotify_fd = -1;
 			w->watch_fd = -1;
 		}
 	}
-	else
 #endif
-	{
-		/* mtime poll — only stat every NODESPEC_WATCH_INTERVAL_SECS */
-		time_t now = time(NULL);
 
-		if (now - w->last_checked < NODESPEC_WATCH_INTERVAL_SECS)
-		{
-			return false;
-		}
+	time_t now = time(NULL);
 
-		w->last_checked = now;
-
-		struct stat st;
-		if (stat(w->path, &st) == 0 && st.st_mtime != w->last_mtime)
-		{
-			w->last_mtime = st.st_mtime;
-			file_changed = true;
-		}
-	}
-
-	if (!file_changed)
+	if (!inotify_hint &&
+		now - w->last_checked < NODESPEC_HASH_POLL_INTERVAL_SECS)
 	{
 		return false;
 	}
+
+	w->last_checked = now;
+
+	pg_crc32c newCrc;
+	if (!nodespec_file_crc(w->path, &newCrc))
+	{
+		/* file transiently unreadable; try again on the next poll */
+		return false;
+	}
+
+	if (EQ_CRC32C(newCrc, w->last_crc))
+	{
+		return false;
+	}
+
+	w->last_crc = newCrc;
 
 	/* File changed — re-parse and apply */
 	log_info("nodespec: \"%s\" changed, re-reading and converging", w->path);

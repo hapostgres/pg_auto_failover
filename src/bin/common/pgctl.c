@@ -1647,6 +1647,23 @@ pg_ctl_postgres(const char *pg_ctl, const char *pgdata, int pgport,
 		args[argsIndex++] = "-h";
 		args[argsIndex++] = (char *) listen_addresses;
 	}
+	else if (env_found_empty("PG_REGRESS_SOCK_DIR"))
+	{
+		/*
+		 * PG_REGRESS_SOCK_DIR="" means unix sockets are unavailable in this
+		 * environment (see pg_setup_get_local_connection_string, which then
+		 * forces client connections to use "host=localhost" instead). If we
+		 * also pass an empty listen_addresses here, postgres has no way to
+		 * create any socket at all -- TCP disabled by "-h ''", unix socket
+		 * disabled by the "-k" added below -- and fails outright with
+		 * "FATAL: no socket created for listening", even though nothing
+		 * external is meant to connect to it in this "do not open the
+		 * service just yet" mode. Fall back to the loopback interface only,
+		 * matching the same PG_REGRESS_SOCK_DIR convention used elsewhere.
+		 */
+		args[argsIndex++] = "-h";
+		args[argsIndex++] = "localhost";
+	}
 	else
 	{
 		args[argsIndex++] = "-h";
@@ -2350,12 +2367,22 @@ prepare_recovery_settings(const char *pgdata,
 				  primaryNode->host,
 				  primaryNode->port);
 
+		/*
+		 * PG17 introduced synchronized_standby_slots for logical slot
+		 * failover; pg_sync_replication_slots() requires primary_conninfo
+		 * to include a dbname keyword.  Pass it when available.
+		 */
+		const char *dbname =
+			IS_EMPTY_STRING_BUFFER(replicationSource->dbname)
+			? NULL
+			: replicationSource->dbname;
+
 		if (!prepare_primary_conninfo(primaryConnInfo,
 									  MAXCONNINFO,
 									  primaryNode->host,
 									  primaryNode->port,
 									  replicationSource->userName,
-									  NULL, /* no database */
+									  dbname,
 									  replicationSource->password,
 									  replicationSource->applicationName,
 									  replicationSource->sslOptions,

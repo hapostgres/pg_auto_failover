@@ -11,7 +11,7 @@
  * Licensed under the PostgreSQL License.
  */
 
-#include <ctype.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,12 +20,14 @@
 #include "cli_common.h"
 #include "cli_node.h"
 #include "cli_root.h"
+#include "debian.h"
 #include "commandline.h"
 #include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
 #include "keeper_config.h"
 #include "log.h"
+#include "monitor_config.h"
 #include "nodespec.h"
 #include "pgsetup.h"
 #include "runprogram.h"
@@ -34,6 +36,8 @@
 
 static int cli_node_run_getopts(int argc, char **argv);
 static void cli_node_run(int argc, char **argv);
+static int cli_node_init_getopts(int argc, char **argv);
+static void cli_node_init(int argc, char **argv);
 static int cli_node_apply_getopts(int argc, char **argv);
 static void cli_node_apply(int argc, char **argv);
 static int cli_node_start_getopts(int argc, char **argv);
@@ -42,6 +46,8 @@ static int cli_node_show_getopts(int argc, char **argv);
 static void cli_node_show(int argc, char **argv);
 static int cli_node_check_getopts(int argc, char **argv);
 static void cli_node_check(int argc, char **argv);
+static int cli_node_post_init_getopts(int argc, char **argv);
+static void cli_node_post_init(int argc, char **argv);
 
 
 static CommandLine node_run_command =
@@ -53,6 +59,21 @@ static CommandLine node_run_command =
 		"               (default: " PG_AUTOCTL_NODESPEC_PATH ")\n",
 		cli_node_run_getopts,
 		cli_node_run);
+
+static CommandLine node_init_command =
+	make_command(
+		"init",
+		"Initialize a node's PGDATA from a pg_autoctl_node.ini file (no --run)",
+		"<file.ini>",
+		"  <file.ini>   path to the pg_autoctl_node.ini file\n"
+		"\n"
+		"  Runs `pg_autoctl create <kind> ...` without --run, so that the\n"
+		"  Postgres data directory is initialized (and the monitor registered)\n"
+		"  without starting the supervisor.  Useful in Dockerfile stages to\n"
+		"  pre-bake initdb into an image layer.  For a monitor node, no external\n"
+		"  dependencies are needed.  For data nodes the monitor must be reachable.\n",
+		cli_node_init_getopts,
+		cli_node_init);
 
 static CommandLine node_apply_command =
 	make_command(
@@ -91,12 +112,28 @@ static CommandLine node_check_command =
 		cli_node_check_getopts,
 		cli_node_check);
 
+static CommandLine node_post_init_command =
+	make_command(
+		"post-init",
+		"Create non-default formations listed in the node spec (monitor only)",
+		"[--pgdata <dir>]",
+		"  --pgdata <dir>   location of the monitor Postgres data directory\n"
+		"\n"
+		"  Reads the node spec from PG_AUTOCTL_NODESPEC (or derives it from\n"
+		"  --pgdata), waits for local Postgres to be ready, then creates each\n"
+		"  [formation <name>] section declared in the spec.  Called automatically\n"
+		"  by the supervisor as a RP_TEMPORARY service on monitor cold-start.\n",
+		cli_node_post_init_getopts,
+		cli_node_post_init);
+
 static CommandLine *node_subcommands[] = {
 	&node_run_command,
+	&node_init_command,
 	&node_apply_command,
 	&node_start_command,
 	&node_show_command,
 	&node_check_command,
+	&node_post_init_command,
 	NULL
 };
 
@@ -112,6 +149,245 @@ CommandLine node_commands =
  * ----------------------------------------------------------------------- */
 
 static char nodeSpecPath[MAXPGPATH] = { 0 };
+
+
+/* -----------------------------------------------------------------------
+ * Shared helpers used by cli_node_run and cli_node_init
+ * ----------------------------------------------------------------------- */
+
+/*
+ * copy_file copies src to dst using read()/write().  Returns true on success.
+ */
+static bool
+copy_file(const char *src, const char *dst)
+{
+	if (strcmp(src, dst) == 0)
+	{
+		return true;
+	}
+
+	int in_fd = open(src, O_RDONLY);
+	if (in_fd < 0)
+	{
+		log_error("Cannot open \"%s\": %m", src);
+		return false;
+	}
+
+	int out_fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (out_fd < 0)
+	{
+		log_error("Cannot open \"%s\" for writing: %m", dst);
+		close(in_fd);
+		return false;
+	}
+
+	char buf[4096];
+	ssize_t n;
+	bool ok = true;
+
+	while ((n = read(in_fd, buf, sizeof(buf))) > 0)
+	{
+		if (write(out_fd, buf, (size_t) n) != n)
+		{
+			log_error("Write error on \"%s\": %m", dst);
+			ok = false;
+			break;
+		}
+	}
+	if (n < 0)
+	{
+		log_error("Read error on \"%s\": %m", src);
+		ok = false;
+	}
+
+	close(in_fd);
+	close(out_fd);
+	return ok;
+}
+
+
+/*
+ * node_copy_ssl_certs copies server and client certificates into the
+ * locations that PostgreSQL and libpq expect:
+ *
+ *   server cert/key  → $HOME/{server.crt,server.key}
+ *   client cert/key  → $HOME/.postgresql/{postgresql.crt,.key}
+ *   CA cert          → $HOME/.postgresql/root.crt
+ *
+ * Source paths are derived from spec->ssl_ca_file (the directory containing
+ * it also has server/ and client/ subdirectories).
+ */
+static bool
+node_copy_ssl_certs(const NodeSpec *spec)
+{
+	const char *home = getenv("HOME"); /* IGNORE-BANNED */
+	if (!home || home[0] == '\0')
+	{
+		home = "/var/lib/postgres";
+	}
+
+	/* Derive SSL root dir from ssl_ca_file, e.g. /etc/pgaf/ssl/ca.crt → /etc/pgaf/ssl */
+	char ssl_dir[MAXPGPATH];
+	strlcpy(ssl_dir, spec->ssl_ca_file, sizeof(ssl_dir));
+	char *last_slash = strrchr(ssl_dir, '/');
+	if (last_slash)
+	{
+		*last_slash = '\0';
+	}
+
+	/* Server cert and key → home dir (PostgreSQL reads them there) */
+	char dst_crt[MAXPGPATH], dst_key[MAXPGPATH];
+	sformat(dst_crt, sizeof(dst_crt), "%s/server.crt", home);
+	sformat(dst_key, sizeof(dst_key), "%s/server.key", home);
+
+	if (!copy_file(spec->ssl_cert_file, dst_crt))
+	{
+		return false;
+	}
+	if (!copy_file(spec->ssl_key_file, dst_key))
+	{
+		return false;
+	}
+	if (chmod(dst_key, 0600) != 0)
+	{
+		log_error("chmod 0600 \"%s\": %m", dst_key);
+		return false;
+	}
+
+	/* ~/.postgresql/ for libpq client certs */
+	char pg_dir[MAXPGPATH];
+	sformat(pg_dir, sizeof(pg_dir), "%s/.postgresql", home);
+	if (mkdir(pg_dir, 0700) != 0 && errno != EEXIST)
+	{
+		log_error("mkdir \"%s\": %m", pg_dir);
+		return false;
+	}
+
+	char src_client_crt[MAXPGPATH], src_client_key[MAXPGPATH];
+	char dst_client_crt[MAXPGPATH], dst_client_key[MAXPGPATH], dst_root[MAXPGPATH];
+	sformat(src_client_crt, sizeof(src_client_crt), "%s/client/postgresql.crt", ssl_dir);
+	sformat(src_client_key, sizeof(src_client_key), "%s/client/postgresql.key", ssl_dir);
+	sformat(dst_client_crt, sizeof(dst_client_crt), "%s/.postgresql/postgresql.crt",
+			home);
+	sformat(dst_client_key, sizeof(dst_client_key), "%s/.postgresql/postgresql.key",
+			home);
+	sformat(dst_root, sizeof(dst_root), "%s/.postgresql/root.crt", home);
+
+	if (!copy_file(src_client_crt, dst_client_crt))
+	{
+		return false;
+	}
+	if (!copy_file(src_client_key, dst_client_key))
+	{
+		return false;
+	}
+	if (chmod(dst_client_key, 0600) != 0)
+	{
+		log_error("chmod 0600 \"%s\": %m", dst_client_key);
+		return false;
+	}
+	if (!copy_file(spec->ssl_ca_file, dst_root))
+	{
+		return false;
+	}
+
+	log_info("SSL certs copied to %s and %s/.postgresql/", home, home);
+	return true;
+}
+
+
+/*
+ * log_argv prints an argv[] to the log, masking password arguments.
+ */
+static void
+log_argv(const char *prefix, char **args, int nargs)
+{
+	PQExpBuffer cmd = createPQExpBuffer();
+	static const char *pwFlags[] = {
+		"--monitor-password",
+		"--replication-password",
+		"--autoctl-node-password",
+		NULL
+	};
+
+	for (int i = 0; i < nargs; i++)
+	{
+		if (i > 0)
+		{
+			appendPQExpBufferChar(cmd, ' ');
+		}
+
+		bool maskThis = false;
+		if (i > 0)
+		{
+			for (int k = 0; pwFlags[k]; k++)
+			{
+				if (strcmp(args[i - 1], pwFlags[k]) == 0)
+				{
+					maskThis = true;
+					break;
+				}
+			}
+		}
+		appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
+	}
+	log_info("%s: %s", prefix, cmd->data);
+	destroyPQExpBuffer(cmd);
+}
+
+
+/*
+ * node_do_init runs `pg_autoctl create <kind>` (no --run) and waits for it
+ * to finish.  Used both by cli_node_init and the cold-start path of
+ * cli_node_run so that both share the same underlying initialisation logic.
+ *
+ * Returns true on success (exit code 0), false otherwise.
+ */
+static bool
+node_do_init(const NodeSpec *spec)
+{
+	char *args[40];
+	int nargs = nodespec_create_argv(spec, pg_autoctl_program, args, 32);
+	if (nargs < 0)
+	{
+		return false;
+	}
+
+	/* nodespec_create_argv always appends --run; strip it */
+	if (nargs >= 2 && strcmp(args[nargs - 1], "--run") == 0)
+	{
+		args[nargs - 1] = NULL;
+		nargs--;
+	}
+
+	log_argv("pg_autoctl node init", args, nargs);
+
+	pid_t pid = fork();
+	if (pid < 0)
+	{
+		log_fatal("fork: %m");
+		return false;
+	}
+
+	if (pid == 0)
+	{
+		execv(args[0], args);
+		_exit(127);
+	}
+
+	int status = 0;
+	while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+	{ }
+
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+	{
+		log_error("pg_autoctl create exited with status %d",
+				  WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+		return false;
+	}
+
+	return true;
+}
 
 
 /* -----------------------------------------------------------------------
@@ -148,8 +424,6 @@ static void
 cli_node_run(int argc, char **argv)
 {
 	NodeSpec spec = { 0 };
-	char *args[40];
-	int nargs;
 
 	if (!nodespec_read(nodeSpecPath, &spec))
 	{
@@ -157,10 +431,162 @@ cli_node_run(int argc, char **argv)
 	}
 
 	/*
+	 * Delete any leftover PID file from a previous run.  This is safe here
+	 * because we have not started a supervisor yet.  Stale PID files cause
+	 * pg_autoctl to refuse to start, so remove them unconditionally.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
+	{
+		char pidPath[MAXPGPATH];
+		sformat(pidPath, sizeof(pidPath),
+				"/tmp/pg_autoctl%s/pg_autoctl.pid", spec.pgdata);
+		(void) unlink(pidPath);   /* ignore ENOENT */
+	}
+
+	/*
+	 * CA-signed SSL: copy server and client certs into the locations that
+	 * PostgreSQL and libpq expect.  This must happen before pg_autoctl
+	 * create (which configures SSL) and before pg_autoctl run.
+	 * SSL certs are always copied immediately — no monitor dependency.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(spec.ssl_ca_file))
+	{
+		if (!node_copy_ssl_certs(&spec))
+		{
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+
+	/*
+	 * [launch] create = deferred: spin here re-reading nodeSpecPath until
+	 * pg_autoctl node start clears the flag, then proceed with node creation.
+	 */
+	if (spec.createDeferred)
+	{
+		log_info("Node configured with create = deferred in \"%s\"; "
+				 "waiting for pg_autoctl node start", nodeSpecPath);
+
+		for (;;)
+		{
+			pg_usleep(500 * 1000);   /* 0.5 s poll */
+
+			NodeSpec polled = { 0 };
+			if (nodespec_read(nodeSpecPath, &polled) && !polled.createDeferred)
+			{
+				spec = polled;
+				break;
+			}
+		}
+
+		log_info("create = immediate; proceeding with node initialization");
+	}
+
+	/*
+	 * Check whether this node has already been initialised by looking for the
+	 * pg_autoctl config file at its canonical XDG location.  The old check
+	 * used PGDATA/pg_autoctl.cfg which is never written, so cfgExists was
+	 * always false; now we use the real path.
+	 */
+	bool cfgExists = false;
+
+	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
+	{
+		ConfigFilePaths pathnames = { 0 };
+		if (keeper_config_set_pathnames_from_pgdata(&pathnames, spec.pgdata))
+		{
+			cfgExists = file_exists(pathnames.config);
+		}
+	}
+
+	if (!cfgExists)
+	{
+		/*
+		 * Cold start: the node has never been initialized.
+		 *
+		 * If debian_cluster is set, run pg_createcluster first so that
+		 * pg_autoctl create detects the Debian-style split-config layout.
+		 */
+		if (!IS_EMPTY_STRING_BUFFER(spec.debianCluster))
+		{
+			/*
+			 * debian_cluster is a pgaftest testing facility: it creates a
+			 * Debian-style PostgreSQL cluster inside a test container so that
+			 * pg_autoctl create postgres picks up the split-config layout.
+			 * This code path is NOT intended for production use.
+			 */
+			pg_createcluster_for_test(spec.pgdata, spec.debianCluster);
+		}
+
+		/*
+		 * PG_AUTOCTL_TEST_DELAY: stagger node registration so that node IDs
+		 * are assigned in cluster{} declaration order.  The value is the
+		 * node's 0-based ordinal position across the whole spec (set by
+		 * pgaftest's compose_gen.c), not anything derived from the node's
+		 * name, so this works the same way for plain "node1"/"node2"
+		 * naming and for Citus-style "worker1a"/"coordinator1b" naming.
+		 */
+		char delayValue[12] = { 0 };
+
+		if (env_exists("PG_AUTOCTL_TEST_DELAY") &&
+			get_env_copy("PG_AUTOCTL_TEST_DELAY", delayValue, sizeof(delayValue)))
+		{
+			int n = 0;
+
+			if (!stringToInt(delayValue, &n))
+			{
+				log_warn("PG_AUTOCTL_TEST_DELAY: invalid value \"%s\", ignoring",
+						 delayValue);
+			}
+			else if (n > 0)
+			{
+				int secs = 2 * n;
+
+				log_info("PG_AUTOCTL_TEST_DELAY: sleeping %ds before "
+						 "registration (node %s, ordinal %d)",
+						 secs, spec.name, n);
+				sleep(secs);
+			}
+		}
+
+		if (!node_do_init(&spec))
+		{
+			/*
+			 * Check whether the config was written before the failure (e.g.
+			 * monitor registration succeeded but coordinator activation failed
+			 * because pg_hba.conf blocked the connection with auth=skip).  In
+			 * that case the keeper can take over and retry activation once
+			 * external conditions are fixed.
+			 */
+			ConfigFilePaths pathnames = { 0 };
+			if (!IS_EMPTY_STRING_BUFFER(spec.pgdata) &&
+				keeper_config_set_pathnames_from_pgdata(&pathnames, spec.pgdata) &&
+				file_exists(pathnames.config))
+			{
+				log_warn("pg_autoctl create failed but config was written; "
+						 "handing off to keeper to retry");
+
+				/* fall through to exec pg_autoctl run below */
+			}
+			else
+			{
+				exit(EXIT_CODE_INTERNAL_ERROR);
+			}
+		}
+	}
+	else
+	{
+		/*
+		 * Warm start: pg_autoctl.cfg already exists.  Apply any mutable
+		 * changes that might have been made to the spec file since the last run.
+		 */
+		NodeSpec prev = { 0 };
+		(void) nodespec_read(nodeSpecPath, &prev);
+		(void) nodespec_apply(&spec, &prev);
+	}
+
+	/*
 	 * [launch] mode = deferred: spin here re-reading nodeSpecPath until
-	 * pg_autoctl node start rewrites it with mode = immediate (or removes
-	 * the [launch] section).  The file is the rendezvous point — no external
-	 * sentinel needed.
+	 * pg_autoctl node start clears the flag, then exec pg_autoctl run.
 	 */
 	if (spec.launchDeferred)
 	{
@@ -179,81 +605,107 @@ cli_node_run(int argc, char **argv)
 			}
 		}
 
-		log_info("launch = immediate; proceeding with node initialization");
+		log_info("launch = immediate; proceeding to run");
 	}
 
 	/*
-	 * If PGDATA already has a pg_autoctl.cfg, the node was created before.
-	 * In that case run `pg_autoctl run` (no --run, no create flags).
-	 * Otherwise run `pg_autoctl create <kind> ... --run`.
+	 * Tell the supervisor which spec file to watch for live changes, and to
+	 * create any non-default formations declared in the spec (monitor
+	 * cold-start only).  Set just before execv so the child inherits it.
 	 */
-	char cfgPath[MAXPGPATH];
-	bool cfgExists = false;
-
-	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
-	{
-		sformat(cfgPath, sizeof(cfgPath),
-				"%s/pg_autoctl.cfg", spec.pgdata);
-		cfgExists = file_exists(cfgPath);
-	}
-
-	if (cfgExists)
-	{
-		/*
-		 * Node was already created.  Apply any mutable changes that might
-		 * have been made to the spec file since the last run, then hand off
-		 * to the normal run path.
-		 */
-		NodeSpec prev = { 0 };
-
-		/* best-effort: ignore errors if we can't re-read the spec */
-		(void) nodespec_read(nodeSpecPath, &prev);
-		(void) nodespec_apply(&spec, &prev);
-
-		args[0] = (char *) pg_autoctl_program;
-		args[1] = "run";
-		args[2] = "--pgdata";
-		args[3] = spec.pgdata;
-		args[4] = NULL;
-		nargs = 4;
-	}
-	else
-	{
-		nargs = nodespec_create_argv(&spec, pg_autoctl_program,
-									 args, 32);
-		if (nargs < 0)
-		{
-			exit(EXIT_CODE_INTERNAL_ERROR);
-		}
-	}
-
-	/* Tell the supervisor which spec file to watch for live changes */
 	setenv("PG_AUTOCTL_NODESPEC", nodeSpecPath, 1);
 
 	/*
-	 * PG_AUTOCTL_TEST_DELAY: stagger node registration so that node IDs
-	 * are assigned in name order (node1 → id 1, node2 → id 2, …).
-	 * Extract the trailing integer from the node name and sleep 2×N seconds.
+	 * Both paths end here: exec `pg_autoctl run --pgdata <dir>`.
 	 */
-	if (env_exists("PG_AUTOCTL_TEST_DELAY") && spec.name[0] != '\0')
+	char *run_args[] = {
+		(char *) pg_autoctl_program,
+		"run",
+		"--pgdata",
+		spec.pgdata,
+		NULL
+	};
+	log_argv("pg_autoctl node run", run_args, 4);
+	execv(run_args[0], run_args);
+
+	log_fatal("execv(\"%s\"): %m", run_args[0]);
+	exit(EXIT_CODE_INTERNAL_ERROR);
+}
+
+
+/* -----------------------------------------------------------------------
+ * pg_autoctl node init <file>
+ *
+ * Like node run, but runs `pg_autoctl create <kind> ...` without --run.
+ * The node's PGDATA is initialized (and the monitor is registered) without
+ * starting the supervisor.  Intended for Dockerfile stages that pre-bake
+ * initdb into a named image layer so that test startup skips the slow
+ * initdb + registration step.
+ *
+ * For the monitor node this is fully self-contained.  For data nodes the
+ * monitor must be reachable during the init step.
+ * ----------------------------------------------------------------------- */
+static int
+cli_node_init_getopts(int argc, char **argv)
+{
+	if (argc > 1 && argv[1][0] != '-')
 	{
-		const char *p = spec.name + strlen(spec.name);
-		while (p > spec.name && isdigit((unsigned char) p[-1]))
-		{
-			p--;
-		}
-		if (*p != '\0')
-		{
-			int n = atoi(p) /* IGNORE-BANNED */;
-			int secs = 2 * n;
-			log_info("PG_AUTOCTL_TEST_DELAY: sleeping %ds before "
-					 "registration (node %s, index %d)",
-					 secs, spec.name, n);
-			sleep(secs);
-		}
+		strlcpy(nodeSpecPath, argv[1], sizeof(nodeSpecPath));
+	}
+	else
+	{
+		strlcpy(nodeSpecPath, PG_AUTOCTL_NODESPEC_PATH, sizeof(nodeSpecPath));
 	}
 
-	/* Log the command we're about to exec, masking password arguments. */
+	return 0;
+}
+
+
+static void
+cli_node_init(int argc, char **argv)
+{
+	NodeSpec spec = { 0 };
+	char *args[40];
+	int nargs;
+
+	if (!nodespec_read(nodeSpecPath, &spec))
+	{
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	char cfgPath[MAXPGPATH];
+
+	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
+	{
+		sformat(cfgPath, sizeof(cfgPath), "%s/pg_autoctl.cfg", spec.pgdata);
+	}
+
+	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata) && file_exists(cfgPath))
+	{
+		log_info("Node already initialized at \"%s\"; nothing to do", spec.pgdata);
+		exit(0);
+	}
+
+	/*
+	 * Build the same argv as node run, but nodespec_create_argv always appends
+	 * --run.  We build the argv and drop the final --run entry so that
+	 * pg_autoctl create <kind> returns after initialization, without starting
+	 * the supervisor.
+	 */
+	nargs = nodespec_create_argv(&spec, pg_autoctl_program, args, 32);
+	if (nargs < 0)
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	/* Drop the trailing "--run" that nodespec_create_argv always appends. */
+	if (nargs >= 2 && strcmp(args[nargs - 1], "--run") == 0)
+	{
+		args[nargs - 1] = NULL;
+		nargs--;
+	}
+
+	/* Log the command (masking passwords). */
 	{
 		PQExpBuffer cmd = createPQExpBuffer();
 		static const char *pwFlags[] = {
@@ -268,8 +720,6 @@ cli_node_run(int argc, char **argv)
 			{
 				appendPQExpBufferChar(cmd, ' ');
 			}
-
-			/* Check if the previous arg was a password flag. */
 			bool maskThis = false;
 			if (i > 0)
 			{
@@ -284,7 +734,7 @@ cli_node_run(int argc, char **argv)
 			}
 			appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
 		}
-		log_info("pg_autoctl node run: %s", cmd->data);
+		log_info("pg_autoctl node init: %s", cmd->data);
 		destroyPQExpBuffer(cmd);
 	}
 
@@ -369,14 +819,15 @@ cli_node_start(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (!spec.launchDeferred)
+	if (!spec.launchDeferred && !spec.createDeferred)
 	{
-		log_info("Node \"%s\" launch is already immediate; nothing to do",
+		log_info("Node \"%s\" is already immediate; nothing to do",
 				 nodeSpecPath);
 		exit(0);
 	}
 
 	spec.launchDeferred = false;
+	spec.createDeferred = false;
 
 	if (!nodespec_write_to_path(&spec, nodeSpecPath))
 	{
@@ -384,7 +835,7 @@ cli_node_start(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 
-	log_info("Cleared launch = deferred in \"%s\"; node will now start",
+	log_info("Cleared deferred flags in \"%s\"; node will now proceed",
 			 nodeSpecPath);
 }
 
@@ -531,4 +982,173 @@ cli_node_check(int argc, char **argv)
 	fformat(stdout, "  auth               : %s\n", spec.auth);
 	fformat(stdout, "  pg_hba_lan         : %s\n",
 			spec.pg_hba_lan ? "true" : "false");
+}
+
+
+/* -----------------------------------------------------------------------
+ * pg_autoctl node post-init [--pgdata <dir>]
+ *
+ * Creates non-default formations declared in the [formation <name>] sections
+ * of the node spec.  Called by the supervisor as a RP_TEMPORARY service on
+ * monitor cold-start; the PG_AUTOCTL_NODESPEC env var names the spec file.
+ * May also be run manually for debugging: just point --pgdata at the monitor.
+ * ----------------------------------------------------------------------- */
+static int
+cli_node_post_init_getopts(int argc, char **argv)
+{
+	return cli_getopt_pgdata(argc, argv);
+}
+
+
+static void
+cli_node_post_init(int argc, char **argv)
+{
+	/*
+	 * Find the spec file.  When invoked by the supervisor the env var is set;
+	 * when run manually --pgdata was parsed into keeperOptions by getopts.
+	 */
+	char specPath[MAXPGPATH] = { 0 };
+
+	if (env_exists("PG_AUTOCTL_NODESPEC") &&
+		get_env_copy("PG_AUTOCTL_NODESPEC", specPath, sizeof(specPath)) &&
+		!IS_EMPTY_STRING_BUFFER(specPath))
+	{
+		/* env var takes precedence */
+	}
+	else if (!IS_EMPTY_STRING_BUFFER(keeperOptions.pgSetup.pgdata))
+	{
+		sformat(specPath, sizeof(specPath), "%s/pg_autoctl_node.ini",
+				keeperOptions.pgSetup.pgdata);
+	}
+	else
+	{
+		log_error("pg_autoctl node post-init: "
+				  "set PG_AUTOCTL_NODESPEC or pass --pgdata");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	NodeSpec spec = { 0 };
+
+	if (!nodespec_read(specPath, &spec))
+	{
+		log_error("Failed to read node spec from \"%s\"", specPath);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (spec.kind != NODE_KIND_UNKNOWN)
+	{
+		log_error("pg_autoctl node post-init is only valid for monitor nodes "
+				  "(got kind %d from \"%s\")", spec.kind, specPath);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (spec.formationCount == 0)
+	{
+		log_info("pg_autoctl node post-init: no non-default formations in \"%s\"",
+				 specPath);
+		exit(EXIT_CODE_QUIT);
+	}
+
+	/*
+	 * Wait until local Postgres is ready.  The monitor Postgres config lives
+	 * at <pgdata>/pg_autoctl.cfg; read it so we have a fully populated
+	 * PostgresSetup with the right port, socket directory, etc.
+	 */
+	MonitorConfig monitorConfig = { 0 };
+
+	strlcpy(monitorConfig.pgSetup.pgdata, spec.pgdata,
+			sizeof(monitorConfig.pgSetup.pgdata));
+
+	if (!monitor_config_set_pathnames_from_pgdata(&monitorConfig))
+	{
+		log_error("Failed to derive monitor config pathnames from pgdata \"%s\"",
+				  spec.pgdata);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!monitor_config_read_file(&monitorConfig,
+								  false, /* missing pgdata is NOT ok */
+								  true /* pg not running is ok at this point */))
+	{
+		log_error("Failed to read monitor config from \"%s\"",
+				  monitorConfig.pathnames.config);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	log_info("post-init: waiting for local Postgres to be ready on port %d",
+			 monitorConfig.pgSetup.pgport);
+
+	if (!pg_setup_wait_until_is_ready(&monitorConfig.pgSetup, 120, LOG_INFO))
+	{
+		log_error("post-init: timed out waiting for local Postgres");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("post-init: local Postgres is ready; creating %d formation(s)",
+			 spec.formationCount);
+
+	/*
+	 * Create each non-default formation declared in the spec.  Use
+	 * run_program() so that connection retry, logging, and error handling
+	 * are handled consistently with the rest of pg_autoctl.
+	 */
+	bool allOk = true;
+
+	for (int fi = 0; fi < spec.formationCount; fi++)
+	{
+		const char *fname = spec.formationNames[fi];
+		const char *fkind = spec.formationKinds[fi][0]
+							? spec.formationKinds[fi] : "pgsql";
+
+		log_info("post-init: creating formation \"%s\" (kind=%s, secondary=%s)",
+				 fname, fkind,
+				 spec.formationDisableSecondary[fi] ? "disabled" : "enabled");
+
+		Program prog;
+
+		if (spec.formationDisableSecondary[fi])
+		{
+			prog = run_program(pg_autoctl_program,
+							   "create", "formation",
+							   "--pgdata", spec.pgdata,
+							   "--formation", fname,
+							   "--kind", fkind,
+							   "--disable-secondary",
+							   NULL);
+		}
+		else
+		{
+			prog = run_program(pg_autoctl_program,
+							   "create", "formation",
+							   "--pgdata", spec.pgdata,
+							   "--formation", fname,
+							   "--kind", fkind,
+							   NULL);
+		}
+
+		if (prog.returnCode != 0)
+		{
+			log_error("post-init: failed to create formation \"%s\" (rc=%d)",
+					  fname, prog.returnCode);
+			if (prog.stdOut)
+			{
+				log_error("%s", prog.stdOut);
+			}
+			allOk = false;
+		}
+		else
+		{
+			log_info("post-init: formation \"%s\" created", fname);
+		}
+
+		free_program(&prog);
+	}
+
+	if (!allOk)
+	{
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	log_info("post-init: done");
+	exit(EXIT_CODE_QUIT);
 }

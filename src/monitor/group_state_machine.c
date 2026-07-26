@@ -81,6 +81,7 @@ static bool WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 /* GUC variables */
 int EnableSyncXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
 int PromoteXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
+int ReplicationStallTimeoutMs = 10 * 1000;
 
 
 /*
@@ -106,6 +107,7 @@ BuildGroupStateContext(GroupStateContext *ctx, AutoFailoverNode *activeNode)
 	ctx->unhealthyTimeoutMs = UnhealthyTimeoutMs;
 	ctx->drainTimeoutMs = DrainTimeoutMs;
 	ctx->startupGracePeriodMs = StartupGracePeriodMs;
+	ctx->replicationStallTimeoutMs = ReplicationStallTimeoutMs;
 
 	if (ctx->formation == NULL)
 	{
@@ -188,6 +190,46 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	}
 
 	/*
+	 * A node reporting demote_timeout may have gotten there on its own
+	 * initiative (check_for_network_partitions() in service_keeper.c
+	 * self-fences independently of whatever goal the monitor last assigned --
+	 * see #1025). If the currently assigned goal isn't one demote_timeout can
+	 * actually reach, the keeper would fatal forever trying to get there.
+	 * Re-target to demoted: always a valid demote_timeout exit
+	 * (DEMOTE_TIMEOUT_STATE -> DEMOTED_STATE, fsm.c:355), and the safe,
+	 * conservative choice -- the node stays fenced from writes until the
+	 * existing "demoted -> catchingup" reintegration path
+	 * (group_state_machine.c:909) or an operator decides otherwise.
+	 *
+	 * Deliberately a plain reportedState check, not IsCurrentState(): the
+	 * whole point is to catch reportedState == demote_timeout while
+	 * goalState is still whatever was assigned before the self-fence --
+	 * IsCurrentState() requires goalState == reportedState == state, which
+	 * is exactly the case that does NOT need re-targeting (the node is
+	 * already headed somewhere demote_timeout can reach).
+	 */
+	if (activeNode->reportedState == REPLICATION_STATE_DEMOTE_TIMEOUT &&
+		activeNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT &&
+		activeNode->goalState != REPLICATION_STATE_DEMOTED &&
+		activeNode->goalState != REPLICATION_STATE_PRIMARY &&
+		activeNode->goalState != REPLICATION_STATE_SINGLE)
+	{
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to demoted: it reports demote_timeout but is assigned %s, "
+			"which demote_timeout cannot reach.",
+			NODE_FORMAT_ARGS(activeNode),
+			ReplicationStateGetName(activeNode->goalState));
+
+		AssignGoalState(activeNode, REPLICATION_STATE_DEMOTED, message);
+
+		return true;
+	}
+
+	/*
 	 * A node that is alone in its group should be SINGLE.
 	 *
 	 * Exception arises when it used to be other nodes in the group, and the
@@ -243,8 +285,15 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 		return ProceedGroupStateForPrimaryNode(ctx, activeNode);
 	}
 
+	/*
+	 * Derive primaryNode from ctx->groupNodeList (already fetched under the
+	 * lock NodeActive() holds for the whole call) instead of running a
+	 * second, independent AutoFailoverNodeGroup() query -- see
+	 * GetPrimaryOrDemotedNodeInGroupFromList()'s comment for why this
+	 * matters even though every writer now shares the same lock.
+	 */
 	AutoFailoverNode *primaryNode =
-		GetPrimaryOrDemotedNodeInGroup(formationId, groupId);
+		GetPrimaryOrDemotedNodeInGroupFromList(ctx->groupNodeList);
 
 	/*
 	 * We want to have a primaryNode around for most operations, but also need
@@ -273,6 +322,40 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 						   " in state %s",
 						   NODE_FORMAT_ARGS(activeNode),
 						   ReplicationStateGetName(activeNode->goalState))));
+	}
+
+	/*
+	 * Replication stall detection (issue #997 — 3-DC split-brain).
+	 *
+	 * When the primary is healthy (monitor can reach it) but no standby has
+	 * appeared in pg_stat_replication for longer than
+	 * pgautofailover.replication_stall_timeout, we assign wait_primary.
+	 * That clears synchronous_standby_names so COMMIT no longer hangs.
+	 *
+	 * replication_stall_since is set/cleared by ReportAutoFailoverNodeState()
+	 * each time the keeper calls node_active().
+	 */
+	if (IsInPrimaryState(primaryNode) &&
+		NodeIsHealthy(primaryNode, ctx) &&
+		primaryNode->replicationStallSince != 0 &&
+		TimestampDifferenceExceeds(primaryNode->replicationStallSince,
+								   ctx->now,
+								   ctx->replicationStallTimeoutMs))
+	{
+		char message[BUFSIZE] = { 0 };
+
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to wait_primary: no standby has been connected in "
+			"pg_stat_replication for more than %dms "
+			"(pgautofailover.replication_stall_timeout).",
+			NODE_FORMAT_ARGS(primaryNode),
+			ctx->replicationStallTimeoutMs);
+
+		AssignGoalState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+
+		return true;
 	}
 
 	/* Multiple Standby failover is handled in its own function. */

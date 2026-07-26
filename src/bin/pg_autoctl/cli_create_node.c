@@ -343,6 +343,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
 		{ "maximum-backup-rate", required_argument, NULL, 'R' },
+		{ "region", required_argument, NULL, 'G' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
@@ -356,7 +357,7 @@ cli_create_postgres_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:W:w:RVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:W:w:RGVvqhP:r:xsN",
 								&options);
 
 	/* publish our option parsing in the global variable */
@@ -441,6 +442,7 @@ cli_create_coordinator_getopts(int argc, char **argv)
 		{ "citus-cluster", required_argument, NULL, 'Z' },
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
+		{ "region", required_argument, NULL, 'G' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
@@ -454,7 +456,7 @@ cli_create_coordinator_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:SLd:a:n:f:m:MRVvqhzZ:P:r:xsN",
+								"C:D:H:p:l:U:A:SLd:a:n:f:m:MRGVvqhzZ:P:r:xsN",
 								&options);
 
 	options.groupId = 0;
@@ -551,6 +553,7 @@ cli_create_worker_getopts(int argc, char **argv)
 		{ "citus-cluster", required_argument, NULL, 'Z' },
 		{ "candidate-priority", required_argument, NULL, 'P' },
 		{ "replication-quorum", required_argument, NULL, 'r' },
+		{ "region", required_argument, NULL, 'G' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
@@ -564,7 +567,7 @@ cli_create_worker_getopts(int argc, char **argv)
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:y:zZ:U:A:SLd:a:n:f:m:MRVvqhzP:r:xsN",
+								"C:D:H:p:l:y:zZ:U:A:SLd:a:n:f:m:MRGVvqhzP:r:xsN",
 								&options);
 
 	if (options.groupId == 0)

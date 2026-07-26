@@ -26,6 +26,37 @@ typedef struct LocalExpectedPostgresStatus
 
 
 /*
+ * PostgresVersionInfo holds the connected Postgres server's own version
+ * (server_version_num/server_version/version()) and, when installed, the
+ * Citus extension's version. Unlike pgsrSyncState/currentLSN, none of this
+ * can change without a Postgres restart, so it's fetched once per restart
+ * (see keeper_update_pg_state()'s pgIsRunning edge detection) rather than
+ * on every periodic report. needsReport stays true from the moment it's
+ * fetched until the next successful monitor_report_postgres_version() call.
+ */
+typedef struct PostgresVersionInfo
+{
+	int versionNum;                 /* server_version_num */
+	char version[NAMEDATALEN];      /* server_version, e.g. "16.3" */
+	char versionString[BUFSIZE];    /* version(), full descriptive string */
+	char citusVersion[NAMEDATALEN]; /* citus extversion; "" when not installed */
+	bool needsReport;
+
+	/*
+	 * lastKnownRunning is keeper_update_pg_state()'s own private edge
+	 * tracker, exclusively written by that function -- deliberately NOT
+	 * the same thing as LocalPostgresServer.pgIsRunning above, which other
+	 * code (fsm_transition.c, primary_standby.c) also writes directly
+	 * during FSM transitions. Comparing against a value only this
+	 * function ever sets is what makes a not-running -> running edge
+	 * reliably observable here, regardless of what else touches
+	 * pgIsRunning in between two of this function's own calls.
+	 */
+	bool lastKnownRunning;
+} PostgresVersionInfo;
+
+
+/*
  * LocalPostgresServer represents a local postgres database cluster that
  * we can manage via a SQL connection and operations on the database
  * directory contained in the PostgresSetup.
@@ -47,6 +78,7 @@ typedef struct LocalPostgresServer
 	LocalExpectedPostgresStatus expectedPgStatus;
 	char standbyTargetLSN[PG_LSN_MAXLENGTH];
 	char synchronousStandbyNames[BUFSIZE];
+	PostgresVersionInfo pgVersion;
 } LocalPostgresServer;
 
 

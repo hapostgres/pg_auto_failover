@@ -1203,7 +1203,7 @@ print_reachable_states(KeeperStateData *keeperState)
  *   pg_autoctl do fsm gv | dot -Tpng > fsm.png
  */
 void
-print_fsm_for_graphviz()
+print_fsm_for_graphviz(void)
 {
 	KeeperFSMTransition transition = KeeperFSM[0];
 	int transitionIndex = 0;

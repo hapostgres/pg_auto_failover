@@ -30,6 +30,7 @@
 #include "storage/latch.h"
 #include "storage/lmgr.h"
 #include "storage/lwlock.h"
+#include "utils/wait_event.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
 
@@ -221,7 +222,7 @@ HealthCheckWorkerLauncherMain(Datum arg)
 
 	/* Establish signal handlers before unblocking signals. */
 	pqsignal(SIGHUP, pg_auto_failover_monitor_sighup);
-	pqsignal(SIGINT, SIG_IGN);
+	pqsignal(SIGINT, PG_SIG_IGN);
 	pqsignal(SIGTERM, pg_auto_failover_monitor_sigterm);
 
 	/* We're now ready to receive signals */
@@ -518,7 +519,7 @@ HealthCheckWorkerMain(Datum arg)
 
 	/* Establish signal handlers before unblocking signals. */
 	pqsignal(SIGHUP, pg_auto_failover_monitor_sighup);
-	pqsignal(SIGINT, SIG_IGN);
+	pqsignal(SIGINT, PG_SIG_IGN);
 	pqsignal(SIGTERM, pg_auto_failover_monitor_sigterm);
 
 	/* We're now ready to receive signals */
@@ -864,10 +865,10 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 				break;
 			}
 
-			/* Fall through to re-connect */
+			/* fall through to re-connect */
+			pg_fallthrough;
 		}
 
-		/* fallthrough */
 		case HEALTH_CHECK_INITIAL:
 		{
 			StringInfo connInfoString = makeStringInfo();
@@ -1120,11 +1121,10 @@ HealthCheckWorkerShmemInit(void)
 	 */
 	if (!alreadyInitialized)
 	{
-		HealthCheckHelperControl->trancheId = LWLockNewTrancheId();
 		HealthCheckHelperControl->lockTrancheName =
 			"pg_auto_failover Health Check Daemon";
-		LWLockRegisterTranche(HealthCheckHelperControl->trancheId,
-							  HealthCheckHelperControl->lockTrancheName);
+		LWLockNewTrancheIdCompat(HealthCheckHelperControl->trancheId,
+								 HealthCheckHelperControl->lockTrancheName);
 
 		LWLockInitialize(&HealthCheckHelperControl->lock,
 						 HealthCheckHelperControl->trancheId);
@@ -1136,10 +1136,9 @@ HealthCheckWorkerShmemInit(void)
 	hashInfo.hash = tag_hash;
 	int hashFlags = (HASH_ELEM | HASH_FUNCTION);
 
-	HealthCheckWorkerDBHash = ShmemInitHash("pg_auto_failover Database Hash",
-											max_worker_processes,
-											max_worker_processes,
-											&hashInfo, hashFlags);
+	HealthCheckWorkerDBHash = ShmemInitHashCompat("pg_auto_failover Database Hash",
+												  max_worker_processes,
+												  &hashInfo, hashFlags);
 
 	LWLockRelease(AddinShmemInitLock);
 

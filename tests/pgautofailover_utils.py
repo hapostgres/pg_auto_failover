@@ -5,6 +5,7 @@ import shutil
 import time
 import tests.network as network
 import psycopg2
+import psycopg2.errors
 import subprocess
 import datetime as dt
 from collections import namedtuple
@@ -394,6 +395,22 @@ class PGNode(QueryRunner):
         self.pg_autoctl = PGAutoCtl(self)
         self.pg_autoctl.run(name=name, host=host, port=port)
 
+    def wait_until_pg_autoctl_is_running(self, timeout=STATE_CHANGE_TIMEOUT):
+        """
+        Polls until pg_autoctl has written its config file (i.e. its
+        initialization is far enough that inspect/state commands work).
+        Raises if the config file is not present within timeout seconds.
+        """
+        deadline = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while dt.datetime.now() < deadline:
+            if os.path.exists(self.config_file_path()):
+                return
+            time.sleep(POLLING_INTERVAL)
+        raise Exception(
+            "pg_autoctl config file for %s not found after %d seconds"
+            % (self.datadir, timeout)
+        )
+
     def running(self):
         return self.pg_autoctl and self.pg_autoctl.run_proc
 
@@ -417,6 +434,52 @@ class PGNode(QueryRunner):
 
     def run_sql_query(self, query, *args):
         return super().run_sql_query(query, False, *args)
+
+    def run_sql_query_retry(self, query, *args, timeout=30):
+        """
+        Like run_sql_query but retries on transient connectivity errors such as
+        "the database system is starting up" (ERRCODE 57P03, CannotConnectNow)
+        or plain OperationalError (connection refused / reset).  Retries for up
+        to timeout seconds with 0.5s back-off.
+        """
+        deadline = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while True:
+            try:
+                return self.run_sql_query(query, *args)
+            except (psycopg2.OperationalError,
+                    psycopg2.errors.CannotConnectNow) as e:
+                if dt.datetime.now() >= deadline:
+                    raise
+                print(
+                    "transient connectivity error on %s (%s), retrying ..."
+                    % (self.datadir, e)
+                )
+                time.sleep(0.5)
+
+    def citus_run_ddl_after_sync(self, query, timeout=60):
+        """
+        Run a Citus DDL statement (e.g. DROP TABLE on a distributed table)
+        after waiting for metadata to be in sync on all nodes.
+
+        wait_until_metadata_sync() covers the coordinator's view of sync, but
+        a recently-rejoined worker node may still be applying metadata updates
+        when the coordinator considers sync complete.  If the DDL fails with
+        ObjectNotInPrerequisiteState ("is a metadata node, but is out of sync"),
+        wait again and retry the DDL for up to timeout seconds.
+        """
+        deadline = dt.datetime.now() + dt.timedelta(seconds=timeout)
+        while True:
+            self.run_sql_query("select public.wait_until_metadata_sync()")
+            try:
+                return self.run_sql_query(query)
+            except psycopg2.errors.ObjectNotInPrerequisiteState as e:
+                if dt.datetime.now() >= deadline:
+                    raise
+                print(
+                    "Citus metadata not yet in sync on %s (%s), retrying ..."
+                    % (self.datadir, e)
+                )
+                time.sleep(1)
 
     def pg_config_get(self, settings):
         """
@@ -452,12 +515,15 @@ class PGNode(QueryRunner):
         self.vnode.run_and_wait(passwd_command, name="user passwd")
         self.authenticatedUsers[username] = password
 
-    def stop_pg_autoctl(self):
+    def stop_pg_autoctl(self, sig=signal.SIGTERM):
         """
-        Kills the keeper by sending a SIGTERM to keeper's process group.
+        Kills the keeper by sending "sig" to keeper's process group. Default
+        SIGTERM is a graceful stop, used by tests that want a plain
+        restart (not a simulated failure -- see DataNode.fail() for that).
+        See PGAutoCtl.stop() for what signal choice controls.
         """
         if self.pg_autoctl:
-            return self.pg_autoctl.stop()
+            return self.pg_autoctl.stop(sig)
 
     def stop_postgres(self):
         """
@@ -552,17 +618,40 @@ class PGNode(QueryRunner):
         """
         command = PGAutoCtl(self)
         out, err, ret = command.execute(
-            "pgsetup ready", "inspect", "pgsetup", "wait", "-vvv"
+            "pgsetup ready",
+            "inspect",
+            "pgsetup",
+            "wait",
+            "-vvv",
+            "--timeout",
+            str(timeout),
+            timeout=timeout + 10,
         )
 
         return ret == 0
 
-    def fail(self):
+    def fail(self, sig=signal.SIGQUIT):
         """
         Simulates a data node failure by terminating the keeper and stopping
         postgres.
+
+        Default SIGQUIT exits immediately, without running pg_autoctl's own
+        signal handler cleanup (see PGAutoCtl.stop()) -- the closest
+        simulation of a real crash. SIGTERM is no longer a hard-crash
+        simulation: it now triggers a graceful shutdown that, for a primary,
+        requests maintenance so a standby can take over immediately (see
+        keeper_shutdown_via_maintenance() in service_keeper.c); most tests
+        asserting on a node being permanently excluded from candidate
+        selection right after a failure need the default here, not SIGTERM.
+
+        If a specific test turns out to be flaky with SIGQUIT (too little
+        control over exactly how abruptly the process exits), pass
+        sig=signal.SIGINT instead: it is still an immediate exit request that
+        bypasses the graceful/maintenance path, but runs one more loop
+        iteration and a clean libpq disconnect before exiting, which can be
+        easier to reason about under test-timing pressure.
         """
-        self.stop_pg_autoctl()
+        self.stop_pg_autoctl(sig)
 
         # stopping pg_autoctl also stops Postgres, unless bugs.
         if self.pg_is_running():
@@ -985,12 +1074,22 @@ class StatefulNode:
         target_state,
         timeout=STATE_CHANGE_TIMEOUT,
         sleep_time=POLLING_INTERVAL,
+        or_state=None,
     ):
         """
         Waits until this data node is assigned the target state. Typically used
         when the node has been stopped or failed and we want to check the
         monitor FSM.
+
+        Pass or_state to accept either target_state or or_state as success —
+        useful when the FSM can skip through a transient state faster than the
+        poll interval (e.g. draining vs demote_timeout).
         """
+        target_states = {target_state}
+        if or_state is not None:
+            target_states.add(or_state)
+
+        label = " or ".join(sorted(target_states))
         prev_state = None
         wait_until = dt.datetime.now() + dt.timedelta(seconds=timeout)
 
@@ -1004,7 +1103,7 @@ class StatefulNode:
 
             # only log the state if it has changed
             if assigned_state != prev_state:
-                if assigned_state == target_state:
+                if assigned_state in target_states:
                     print(
                         "assigned state of %s is '%s', done waiting"
                         % (self.datadir, assigned_state)
@@ -1012,20 +1111,20 @@ class StatefulNode:
                 else:
                     print(
                         "assigned state of %s is '%s', waiting for '%s' ..."
-                        % (self.datadir, assigned_state, target_state)
+                        % (self.datadir, assigned_state, label)
                     )
 
-            if assigned_state == target_state:
+            if assigned_state in target_states:
                 return True
 
             prev_state = assigned_state
 
         print(
             "%s didn't reach %s after %d seconds"
-            % (self.logger_name(), target_state, timeout)
+            % (self.logger_name(), label, timeout)
         )
         error_msg = (
-            f"{self.logger_name()} failed to reach {target_state} "
+            f"{self.logger_name()} failed to reach {label} "
             f"after {timeout} seconds\n"
         )
         self.print_debug_logs()
@@ -1091,6 +1190,103 @@ class DataNode(PGNode, StatefulNode):
         self.listen_flag = listen_flag
         self.formation = formation
         self.monitorDisabled = None
+
+    def run_and_wait_with_retry(
+        self,
+        target_state,
+        timeout=STATE_CHANGE_TIMEOUT,
+        retries=3,
+        name=None,
+        host=None,
+        port=None,
+    ):
+        """
+        Runs pg_autoctl and waits for this node to reach target_state,
+        restarting (not just re-waiting) up to `retries` times if it
+        doesn't get there.
+
+        This exists for restarting a node after a hard-crash simulation
+        (node.fail()): Postgres occasionally fails to (re)bind its port
+        with "no socket created for listening" even though nothing else
+        holds it -- suspected to be a pyroute2/network-namespace-
+        attachment race in this test harness's per-node namespace
+        simulation, not a pg_autoctl bug, since the port is confirmed
+        free at the OS level when this happens. pg_autoctl's own keeper
+        does not retry that internally, so plain node.run() can get
+        stuck. Use this instead of a plain node.run() wherever a test
+        restarts a node that was previously killed hard.
+
+        Deliberately polls directly (like wait_until_state() does
+        internally) rather than calling wait_until_state() itself: despite
+        its docstring ("returns False" on timeout), it actually *raises* on
+        timeout, and before doing so it calls print_debug_logs(), which
+        iterates every node in the cluster and stop_pg_autoctl()'s any that
+        are still running -- a much bigger side effect than "log something
+        and let the caller retry". Since this method only restarts *this*
+        node on the next attempt, that would silently leave every other
+        node in the cluster stopped and never restarted, turning one node's
+        transient bind race into the whole cluster wedging. Polling
+        directly avoids that side effect entirely.
+        """
+        per_attempt_timeout = max(timeout // retries, 30)
+
+        for attempt in range(1, retries + 1):
+            self.run(name=name, host=host, port=port)
+
+            deadline = dt.datetime.now() + dt.timedelta(
+                seconds=per_attempt_timeout
+            )
+            reached = False
+
+            while dt.datetime.now() < deadline:
+                self.sleep(POLLING_INTERVAL)
+
+                try:
+                    current_state, _ = self.get_state()
+                except Exception:
+                    continue
+
+                if current_state == target_state:
+                    reached = True
+                    break
+
+            if reached:
+                return True
+
+            print(
+                "%s did not reach '%s' within %ds (attempt %d/%d), "
+                "restarting and retrying"
+                % (
+                    self.logger_name(),
+                    target_state,
+                    per_attempt_timeout,
+                    attempt,
+                    retries,
+                )
+            )
+
+            # the stuck attempt's pg_autoctl may not be responsive to a
+            # plain stop if it's wedged on the failed bind; fail() (SIGQUIT,
+            # then a direct Postgres stop if needed) is more likely to
+            # actually free the pgdata lock before the next attempt.
+            #
+            # fail() itself can raise subprocess.TimeoutExpired here: its
+            # underlying Cluster.communicate() waits up to its own timeout
+            # in 1-second steps, then makes one last attempt with whatever
+            # is left of the budget, which by then can be ~0 (or a tiny
+            # negative float from rounding) and raise even though the
+            # SIGQUIT'd process is, in practice, already gone -- that's a
+            # pre-existing quirk of that helper, unrelated to the bind race
+            # this method exists for. Don't let it abort the retry loop.
+            try:
+                self.fail()
+            except subprocess.TimeoutExpired as e:
+                print(
+                    "%s: cleanup before retry raised %s (continuing anyway)"
+                    % (self.logger_name(), e)
+                )
+
+        return False
 
     def create(
         self,
@@ -1633,7 +1829,7 @@ class DataNode(PGNode, StatefulNode):
             self.print_debug_logs()
             raise e
 
-    def has_needed_replication_slots(self):
+    def has_needed_replication_slots(self, retry_timeout=5):
         """
         Each node is expected to maintain a slot for each of the other nodes
         the primary through streaming replication, the secondary(s) manually
@@ -1642,33 +1838,53 @@ class DataNode(PGNode, StatefulNode):
         Postgres 10 lacks the function pg_replication_slot_advance() so when
         the local Postgres is version 10 we don't create any replication
         slot on the standby servers.
+
+        A newly-promoted or rejoined node can transiently reject connections
+        right after the FSM state converges.  Retry for up to retry_timeout
+        seconds on any connectivity error before surfacing the exception.
+        The retry covers both the pgmajor() probe and the subsequent
+        list_replication_slot_names() call, since Postgres can drop the
+        socket between the two.
         """
-        if self.pgmajor() == 10:
-            return True
+        deadline = dt.datetime.now() + dt.timedelta(seconds=retry_timeout)
+        while True:
+            try:
+                pgmajor = self.pgmajor()
 
-        hostname = str(self.vnode.address)
-        other_nodes = self.monitor.get_other_nodes(self.nodeid)
-        expected_slots = [
-            "pgautofailover_standby_%s" % n[0] for n in other_nodes
-        ]
-        current_slots = self.list_replication_slot_names()
+                if pgmajor == 10:
+                    return True
 
-        # just to make it easier to read through the print()ed list
-        expected_slots.sort()
-        current_slots.sort()
+                other_nodes = self.monitor.get_other_nodes(self.nodeid)
+                expected_slots = [
+                    "pgautofailover_standby_%s" % n[0] for n in other_nodes
+                ]
+                current_slots = self.list_replication_slot_names()
 
-        if set(expected_slots) == set(current_slots):
-            # print("slots list on %s is %s, as expected" %
-            #       (self.datadir, current_slots))
-            return True
+                # just to make it easier to read through the print()ed list
+                expected_slots.sort()
+                current_slots.sort()
 
-        self.print_debug_logs()
-        print()
-        print(
-            "slots list on %s is %s, expected %s"
-            % (self.datadir, current_slots, expected_slots)
-        )
-        return False
+                if set(expected_slots) == set(current_slots):
+                    return True
+
+                self.print_debug_logs()
+                print()
+                print(
+                    "slots list on %s is %s, expected %s"
+                    % (self.datadir, current_slots, expected_slots)
+                )
+                return False
+
+            except psycopg2.OperationalError:
+                if dt.datetime.now() >= deadline:
+                    raise
+                print(
+                    "transient connectivity error on %s, retrying has_needed_replication_slots ..."
+                    % self.datadir
+                )
+                time.sleep(0.5)
+                self._pgversion = None
+                self._pgmajor = None
 
     def create_wait_until_metadata_sync(self):
         """
@@ -1813,7 +2029,6 @@ class MonitorNode(PGNode):
             )
         except Exception as e:
             print(str(e))
-            raise
 
         try:
             os.remove(self.config_file_path())
@@ -1904,6 +2119,28 @@ class MonitorNode(PGNode):
         """
         performs manual failover for given formation and group id
         """
+        # Wait until the monitor sees a stable primary (reportedstate ==
+        # goalstate, both in a CanInitiateFailover state) before calling
+        # perform_failover.  Without this, perform_failover can race with the
+        # last node_active round-trip and fail with "couldn't find the primary
+        # node" even though wait_until_state("primary") already returned.
+        wait_until = dt.datetime.now() + dt.timedelta(seconds=STATE_CHANGE_TIMEOUT)
+        while dt.datetime.now() < wait_until:
+            rows = self.run_sql_query(
+                """
+                SELECT count(*) FROM pgautofailover.node
+                 WHERE formationid = %s
+                   AND groupid = %s
+                   AND reportedstate IN ('primary', 'single', 'join_primary')
+                   AND goalstate = reportedstate
+                """,
+                formation,
+                group,
+            )
+            if rows[0][0] > 0:
+                break
+            time.sleep(POLLING_INTERVAL)
+
         failover_command_text = (
             "select * from pgautofailover.perform_failover('%s', %s)"
             % (formation, group)
@@ -1999,6 +2236,14 @@ class PGAutoCtl:
         self.err = ""
         self.cmd = ""
 
+        # Only set by run(): stdout/stderr log files for the long-running
+        # background process it starts, in place of pipes (see its
+        # docstring). None for anything started via execute() instead.
+        self.stdout_path = None
+        self.stderr_path = None
+        self.stdout_file = None
+        self.stderr_file = None
+
         if argv:
             self.command = [self.program] + argv
 
@@ -2032,7 +2277,43 @@ class PGAutoCtl:
         if self.run_proc:
             self.run_proc.release()
 
-        self.run_proc = self.vnode.run_unmanaged(self.command)
+        # In case a previous run() was never followed by a communicate()
+        # call (e.g. release()'d directly), don't leak its file handles.
+        if self.stdout_file is not None:
+            self.stdout_file.close()
+
+        if self.stderr_file is not None:
+            self.stderr_file.close()
+
+        # `pg_autoctl run` is a long-running background process: this method
+        # returns immediately, and nothing calls communicate() on it again
+        # until much later (stop()/fail()), if ever. Redirecting its stdout/
+        # stderr to files rather than pipes means its own (possibly `-vv`)
+        # logging can never fill an undrained pipe buffer and deadlock it --
+        # see run_unmanaged()'s docstring in network.py.
+        self.stdout_path = self.datadir.rstrip("/") + ".stdout.log"
+        self.stderr_path = self.datadir.rstrip("/") + ".stderr.log"
+
+        # The parent directory only exists already by accident, when some
+        # earlier step in the same test (e.g. creating the monitor) happened
+        # to create it first: nothing guarantees it in monitor-disabled
+        # tests, where this can be the very first path created under
+        # datadir's parent. Chmod it wide open: pytest itself runs as root
+        # (via plain `sudo`), so a bare os.makedirs() here leaves the
+        # directory root-owned and mode 0755 -- but pg_autoctl itself runs as
+        # the unprivileged "docker" user (via `sudo -u docker`), and needs to
+        # create its own subdirectories under the same parent (e.g. its
+        # backup directory), which then fails with "Permission denied".
+        parent_dir = os.path.dirname(self.stdout_path)
+        os.makedirs(parent_dir, exist_ok=True)
+        os.chmod(parent_dir, 0o777)
+
+        self.stdout_file = open(self.stdout_path, "w")
+        self.stderr_file = open(self.stderr_path, "w")
+
+        self.run_proc = self.vnode.run_unmanaged(
+            self.command, stdout=self.stdout_file, stderr=self.stderr_file
+        )
 
     def execute(self, name, *args, timeout=COMMAND_TIMEOUT):
         """
@@ -2058,13 +2339,23 @@ class PGAutoCtl:
 
             return out, err, proc.returncode
 
-    def stop(self):
+    def stop(self, sig=signal.SIGTERM):
         """
-        Kills the keeper by sending a SIGTERM to keeper's process group.
+        Kills the keeper by sending "sig" to keeper's process group.
+
+        SIGTERM triggers pg_autoctl's graceful shutdown path (see
+        keeper_graceful_shutdown() in service_keeper.c): for a primary, this
+        now requests maintenance so a standby can take over immediately,
+        driving the FSM through prepare_maintenance -> maintenance; for
+        anything else (or if maintenance isn't possible, e.g. no candidate
+        is available), it falls back to reporting node state to the
+        monitor for up to 30s while PostgreSQL stops. SIGINT/SIGQUIT skip
+        all of that and exit immediately -- pass one of those to simulate a
+        true hard crash instead of a graceful, operator-initiated stop.
         """
         if self.run_proc and self.run_proc.pid:
             try:
-                os.kill(self.run_proc.pid, signal.SIGTERM)
+                os.kill(self.run_proc.pid, sig)
 
                 return self.pgnode.cluster.communicate(self, COMMAND_TIMEOUT)
 
@@ -2080,7 +2371,9 @@ class PGAutoCtl:
 
     def communicate(self, timeout=COMMAND_TIMEOUT):
         """
-        Read all data from the Unix PIPE
+        Read all data from the Unix PIPE, or from the stdout/stderr log
+        files when run() redirected them there instead (see run()'s
+        docstring for why).
 
         This call is idempotent. If it is called a second time after an earlier
         successful call, then it returns the results from when the process
@@ -2090,6 +2383,23 @@ class PGAutoCtl:
             return self.out, self.err
 
         self.out, self.err = self.run_proc.communicate(timeout=timeout)
+
+        # run() redirects to files rather than pipes for a process it
+        # doesn't communicate() with right away (see its docstring): in that
+        # case the line above returns (None, None), since Popen only ever
+        # captures output itself when it owns the pipes. Read it back from
+        # the files instead, now that the process has exited.
+        if self.stdout_file is not None:
+            self.stdout_file.close()
+            self.stdout_file = None
+            with open(self.stdout_path, "r") as f:
+                self.out = f.read()
+
+        if self.stderr_file is not None:
+            self.stderr_file.close()
+            self.stderr_file = None
+            with open(self.stderr_path, "r") as f:
+                self.err = f.read()
 
         # The process exited, so let's clean this process up. Calling
         # communicate again would otherwise cause an "Invalid file object"

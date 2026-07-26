@@ -43,12 +43,13 @@ static AutoFailoverNodeState * NodeActive(char *formationId,
 static void JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 									  char *nodeName, char *nodeHost, int nodePort,
 									  uint64 sysIdentifier, char *nodeCluster,
+									  char *region,
 									  AutoFailoverNodeState *currentNodeState);
 static int AssignGroupId(AutoFailoverFormation *formation,
 						 char *nodeHost, int nodePort,
 						 ReplicationState *initialState);
 
-static bool RemoveNode(AutoFailoverNode *currentNode, bool force);
+static bool RemoveNode(int64 nodeId, bool force);
 
 /* SQL-callable function declarations */
 PG_FUNCTION_INFO_V1(register_node);
@@ -67,7 +68,12 @@ PG_FUNCTION_INFO_V1(start_maintenance);
 PG_FUNCTION_INFO_V1(stop_maintenance);
 PG_FUNCTION_INFO_V1(set_node_candidate_priority);
 PG_FUNCTION_INFO_V1(set_node_replication_quorum);
+PG_FUNCTION_INFO_V1(set_node_region);
+PG_FUNCTION_INFO_V1(report_postgres_version);
 PG_FUNCTION_INFO_V1(synchronous_standby_names);
+PG_FUNCTION_INFO_V1(testing_lock_formation);
+PG_FUNCTION_INFO_V1(testing_lock_node_group);
+PG_FUNCTION_INFO_V1(testing_set_node_health);
 
 
 /*
@@ -110,6 +116,9 @@ register_node(PG_FUNCTION_ARGS)
 
 	text *nodeClusterText = PG_GETARG_TEXT_P(12);
 	char *nodeCluster = text_to_cstring(nodeClusterText);
+
+	text *nodeRegionText = PG_GETARG_TEXT_P(13);
+	char *nodeRegion = text_to_cstring(nodeRegionText);
 
 	AutoFailoverNodeState currentNodeState = { 0 };
 
@@ -194,6 +203,7 @@ register_node(PG_FUNCTION_ARGS)
 							  nodePort,
 							  sysIdentifier,
 							  nodeCluster,
+							  nodeRegion,
 							  &currentNodeState);
 
 	AutoFailoverNode *pgAutoFailoverNode = GetAutoFailoverNode(nodeHost, nodePort);
@@ -413,6 +423,14 @@ node_active(PG_FUNCTION_ARGS)
 
 /*
  * NodeActive reports the current state of a node and returns the assigned state.
+ *
+ * Does not use LockNodeGroupAndFetch(): this needs the pre-lock read to
+ * validate currentNodeState->formationId/groupId (caller-supplied, over
+ * the wire) against the node's actual registration before ever taking a
+ * lock, and locks on the caller-supplied groupId rather than re-deriving
+ * it from the row. The lock-then-refetch shape below (see the comment at
+ * the re-read) is otherwise the same pattern LockNodeGroupAndFetch()
+ * generalizes.
  */
 static AutoFailoverNodeState *
 NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
@@ -437,6 +455,33 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 	{
 		LockFormation(formationId, ShareLock);
 		LockNodeGroup(formationId, currentNodeState->groupId, ExclusiveLock);
+
+		/*
+		 * Re-read the node now that we hold the lock: the initial read above
+		 * happened before we tried to acquire it, so if this call was
+		 * blocked behind a concurrent remove_node() on this same node, the
+		 * struct above is stale by exactly the transaction we were waiting
+		 * on. Using it as-is would mean a node whose goalState just became
+		 * DROPPED (in the transaction that held the lock we were waiting
+		 * for) reports back in on its stale, pre-drop goalState -- missing
+		 * the "already dropped, do nothing" checks in ProceedGroupState()
+		 * entirely, and falling through to ordinary FSM logic instead. In
+		 * particular, AutoFailoverNodeGroup()'s nodesCount (a fresh SPI
+		 * query, unaffected by this staleness) would already correctly see
+		 * a one-node group once the drop has committed, and the
+		 * nodesCount==1 case in ProceedGroupState() would then reassign
+		 * this node's own goal to SINGLE -- undoing the drop it was just
+		 * given, from the dropped node's own next report.
+		 */
+		pgAutoFailoverNode = GetAutoFailoverNodeById(currentNodeState->nodeId);
+
+		if (pgAutoFailoverNode == NULL)
+		{
+			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+							errmsg("node %lld was removed while node_active() "
+								   "was waiting for a lock",
+								   (long long) currentNodeState->nodeId)));
+		}
 
 		if (pgAutoFailoverNode->reportedState != currentNodeState->replicationState)
 		{
@@ -529,6 +574,7 @@ static void
 JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 						  char *nodeName, char *nodeHost, int nodePort,
 						  uint64 sysIdentifier, char *nodeCluster,
+						  char *region,
 						  AutoFailoverNodeState *currentNodeState)
 {
 	int groupId = -1;
@@ -586,11 +632,13 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 		{
 			initialState = REPLICATION_STATE_WAIT_STANDBY;
 
-			/* if we have a primary node, pg_basebackup from it */
+			/*
+			 * if we have a primary node, pg_basebackup from it -- derived
+			 * from groupNodeList (already fetched above, under the lock
+			 * just taken) rather than a second, independent query.
+			 */
 			AutoFailoverNode *primaryNode =
-				GetPrimaryNodeInGroup(
-					formation->formationId,
-					currentNodeState->groupId);
+				GetPrimaryNodeInGroupFromList(groupNodeList);
 
 			/* we might be in the middle of a failover */
 			List *nodesGroupList =
@@ -695,7 +743,8 @@ JoinAutoFailoverFormation(AutoFailoverFormation *formation,
 						currentNodeState->replicationState,
 						currentNodeState->candidatePriority,
 						currentNodeState->replicationQuorum,
-						nodeCluster);
+						nodeCluster,
+						region);
 
 	currentNodeState->groupId = groupId;
 }
@@ -1047,16 +1096,21 @@ remove_node_by_nodeid(PG_FUNCTION_ARGS)
 	int64 nodeId = PG_GETARG_INT64(0);
 	bool force = PG_GETARG_BOOL(1);
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
-
-	if (currentNode == NULL)
+	/*
+	 * Unlocked existence check, only to give a precise error message when
+	 * the nodeId is simply wrong. RemoveNode() re-reads the node itself
+	 * once it holds the formation lock, so a benign TOCTOU race here (the
+	 * node gets removed by a concurrent call between this check and the
+	 * lock being acquired) is already handled there.
+	 */
+	if (GetAutoFailoverNodeById(nodeId) == NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
 						errmsg("couldn't find node with nodeid %lld",
 							   (long long) nodeId)));
 	}
 
-	PG_RETURN_BOOL(RemoveNode(currentNode, force));
+	PG_RETURN_BOOL(RemoveNode(nodeId, force));
 }
 
 
@@ -1083,23 +1137,70 @@ remove_node_by_host(PG_FUNCTION_ARGS)
 							   nodeHost, nodePort)));
 	}
 
-	PG_RETURN_BOOL(RemoveNode(currentNode, force));
+	/* same TOCTOU note as remove_node_by_nodeid: RemoveNode() re-reads fresh */
+	PG_RETURN_BOOL(RemoveNode(currentNode->nodeId, force));
 }
 
 
-/* RemoveNode removes the given node from the monitor. */
+/*
+ * RemoveNode removes the given node from the monitor.
+ *
+ * nodeId is resolved to the authoritative AutoFailoverNode only after
+ * LockFormation() is acquired below. Looking the node up before the lock
+ * (as this used to do, taking a pre-resolved AutoFailoverNode* from the
+ * caller) meant a caller that blocked on a concurrent RemoveNode() call for
+ * the same node would resume, once unblocked, still holding the snapshot
+ * it read before it ever tried to acquire the lock -- stale by exactly the
+ * transaction that just committed and released the lock it was waiting on.
+ * That broke the "goalState == DROPPED -> return early" idempotency check
+ * below: a second concurrent call would see the pre-drop goalState, skip
+ * the early return, and redundantly redo the whole removal, including a
+ * second ProceedGroupState(primaryNode) call whose "goal didn't change"
+ * fallback would then force an already-settled primary into
+ * APPLY_SETTINGS for no reason.
+ */
 static bool
-RemoveNode(AutoFailoverNode *currentNode, bool force)
+RemoveNode(int64 nodeId, bool force)
 {
 	ListCell *nodeCell = NULL;
 	char message[BUFSIZE] = { 0 };
 
-	if (currentNode == NULL)
+	/*
+	 * Does not use LockNodeGroupAndFetch(): removing a node needs a
+	 * formation-wide ExclusiveLock (it can affect sync-standby bookkeeping
+	 * across the whole formation), not the ShareLock-formation +
+	 * ExclusiveLock-nodegroup pair every other entry point takes. The
+	 * lock-then-refetch shape below is otherwise the same pattern
+	 * LockNodeGroupAndFetch() generalizes.
+	 *
+	 * Look the node up once, unlocked, only to learn which formation to
+	 * lock -- a node's formationId is immutable for the life of the row,
+	 * so this initial read being racy doesn't matter. Everything else is
+	 * re-read immediately below, once the lock is held.
+	 */
+	AutoFailoverNode *probeNode = GetAutoFailoverNodeById(nodeId);
+
+	if (probeNode == NULL)
 	{
 		return false;
 	}
 
-	LockFormation(currentNode->formationId, ExclusiveLock);
+	LockFormation(probeNode->formationId, ExclusiveLock);
+
+	/*
+	 * Now that we hold the formation lock, get the authoritative, current
+	 * state of the node: any concurrent RemoveNode()/node_active() call
+	 * that touched this node has either already committed (and we now see
+	 * its effects) or is blocked behind us (and will see ours once we
+	 * commit).
+	 */
+	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
+
+	if (currentNode == NULL)
+	{
+		/* removed by a concurrent call while we waited for the lock */
+		return true;
+	}
 
 	AutoFailoverFormation *formation = GetFormation(currentNode->formationId);
 
@@ -1368,6 +1469,30 @@ perform_failover(PG_FUNCTION_ARGS)
 
 		AutoFailoverNode *secondaryNode = linitial(standbyNodesGroupList);
 
+		/*
+		 * Read-replica / citus-secondary nodes always have candidate
+		 * priority zero (enforced in set_node_candidate_priority) and are
+		 * never eligible as a failover target: that's the same rule the
+		 * BuildCandidateList path applies for groups with more than two
+		 * nodes. The two-node fast path here was missing the check, so a
+		 * manual "pg_autoctl perform switchover" against such a group
+		 * would promote a node that Citus still has registered as a
+		 * read-only secondary elsewhere, which then fails permanently on
+		 * the coordinator with "there is already another node with the
+		 * specified hostname and port" instead of failing here with a
+		 * clear error up front.
+		 */
+		if (secondaryNode->candidatePriority == 0)
+		{
+			ereport(ERROR,
+					(errmsg("cannot fail over: standby " NODE_FORMAT
+							" has candidate priority set to zero",
+							NODE_FORMAT_ARGS(secondaryNode)),
+					 errdetail("Read-replica and citus-secondary nodes always "
+							   "have candidate priority zero and are never "
+							   "eligible as a failover or switchover target.")));
+		}
+
 		if (secondaryNode->goalState != REPLICATION_STATE_SECONDARY)
 		{
 			const char *secondaryState =
@@ -1493,9 +1618,14 @@ perform_promotion(PG_FUNCTION_ARGS)
 	text *nodeNameText = PG_GETARG_TEXT_P(1);
 	char *nodeName = text_to_cstring(nodeNameText);
 
-
+	/*
+	 * LockNodeGroupAndFetch resolves nodeName, locks, and returns a
+	 * post-lock fresh read -- every check below (IsCurrentState etc.) that
+	 * used to run against the pre-lock struct now sees state as of the
+	 * moment the lock was acquired, not as of an earlier, unlocked read.
+	 */
 	AutoFailoverNode *currentNode =
-		GetAutoFailoverNodeByName(formationId, nodeName);
+		LockNodeGroupAndFetchByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
@@ -1504,9 +1634,6 @@ perform_promotion(PG_FUNCTION_ARGS)
 				 errmsg("node \"%s\" is not registered in formation \"%s\"",
 						nodeName, formationId)));
 	}
-
-	LockFormation(formationId, ShareLock);
-	LockNodeGroup(formationId, currentNode->groupId, ExclusiveLock);
 
 	/*
 	 * If the current node is the primary, that's done.
@@ -1643,14 +1770,11 @@ start_maintenance(PG_FUNCTION_ARGS)
 
 	char message[BUFSIZE];
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
+	AutoFailoverNode *currentNode = LockNodeGroupAndFetch(nodeId);
 	if (currentNode == NULL)
 	{
 		PG_RETURN_BOOL(false);
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	AutoFailoverFormation *formation = GetFormation(currentNode->formationId);
 
@@ -1907,14 +2031,11 @@ stop_maintenance(PG_FUNCTION_ARGS)
 
 	char message[BUFSIZE] = { 0 };
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeId);
+	AutoFailoverNode *currentNode = LockNodeGroupAndFetch(nodeId);
 	if (currentNode == NULL)
 	{
 		PG_RETURN_BOOL(false);
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	List *groupNodesList =
 		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
@@ -1941,10 +2062,13 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	 * We need to find the primary node even if we are in the middle of a
 	 * failover, and it's already set to draining. That way we may rejoin the
 	 * cluster, report our LSN, and help proceed to reach a consistent state.
+	 *
+	 * Derived from groupNodesList (already fetched above, under the lock
+	 * LockNodeGroupAndFetch() took) rather than a second, independent
+	 * query -- see GetPrimaryOrDemotedNodeInGroupFromList()'s comment.
 	 */
 	AutoFailoverNode *primaryNode =
-		GetPrimaryOrDemotedNodeInGroup(currentNode->formationId,
-									   currentNode->groupId);
+		GetPrimaryOrDemotedNodeInGroupFromList(groupNodesList);
 
 	/*
 	 * When there is no primary, we might be in trouble, we just want to join
@@ -1963,13 +2087,37 @@ stop_maintenance(PG_FUNCTION_ARGS)
 						"group %d",
 						currentNode->formationId, currentNode->groupId)));
 	}
-	else if (primaryNode == NULL && totalNodesCount > 2)
+	else if ((primaryNode == NULL || IsDemotedPrimary(primaryNode)) &&
+			 totalNodesCount > 2)
 	{
 		LogAndNotifyMessage(
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
 			" to report_lsn  after a user-initiated stop_maintenance call.",
 			NODE_FORMAT_ARGS(currentNode));
+
+		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
+
+		PG_RETURN_BOOL(true);
+	}
+	else if (IsDemotedPrimary(primaryNode))
+	{
+		/*
+		 * The primary is fully demoted (Postgres stopped, e.g. after a
+		 * #1025 self-fence recovery): there's nothing left running to
+		 * stream from, so catchingup would just retry a doomed replication
+		 * connection forever. Join the report_lsn crew instead -- once this
+		 * node reports its LSN, the candidate-scanning code in
+		 * ProceedGroupStateForMSFailover() picks up the demoted primary too
+		 * (it's still IsDemotedPrimary()) and the normal election proceeds.
+		 */
+		LogAndNotifyMessage(
+			message, BUFSIZE,
+			"Setting goal state of " NODE_FORMAT
+			" to report_lsn after a user-initiated stop_maintenance call, "
+			"as " NODE_FORMAT " is demoted and has nothing to catch up from.",
+			NODE_FORMAT_ARGS(currentNode),
+			NODE_FORMAT_ARGS(primaryNode));
 
 		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
 
@@ -2028,7 +2176,7 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	int nonZeroCandidatePriorityNodeCount = 0;
 
 	AutoFailoverNode *currentNode =
-		GetAutoFailoverNodeByName(formationId, nodeName);
+		LockNodeGroupAndFetchByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
@@ -2037,9 +2185,6 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 				 errmsg("node \"%s\" is not registered in formation \"%s\"",
 						nodeName, formationId)));
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	List *nodesGroupList =
 		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
@@ -2187,7 +2332,7 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 
 	AutoFailoverNode *currentNode =
-		GetAutoFailoverNodeByName(formationId, nodeName);
+		LockNodeGroupAndFetchByName(formationId, nodeName);
 
 	if (currentNode == NULL)
 	{
@@ -2196,9 +2341,6 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 				 errmsg("node \"%s\" is not registered in formation \"%s\"",
 						nodeName, formationId)));
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	List *nodesGroupList =
 		AutoFailoverNodeGroup(currentNode->formationId, currentNode->groupId);
@@ -2318,6 +2460,113 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 
 
 /*
+ * set_node_region sets the node region property. Unlike candidate_priority
+ * and replication_quorum, region is purely an informational label: it does
+ * not affect replication settings or failover eligibility, so no FSM
+ * transition is needed on the primary after updating it.
+ */
+Datum
+set_node_region(PG_FUNCTION_ARGS)
+{
+	checkPgAutoFailoverVersion();
+
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	text *nodeNameText = PG_GETARG_TEXT_P(1);
+	char *nodeName = text_to_cstring(nodeNameText);
+
+	text *regionText = PG_GETARG_TEXT_P(2);
+	char *region = text_to_cstring(regionText);
+
+	AutoFailoverNode *currentNode =
+		LockNodeGroupAndFetchByName(formationId, nodeName);
+
+	if (currentNode == NULL)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_UNDEFINED_OBJECT),
+				 errmsg("node \"%s\" is not registered in formation \"%s\"",
+						nodeName, formationId)));
+	}
+
+	if (region == NULL || region[0] == '\0')
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid value for region: expected a non-empty "
+						"string")));
+	}
+
+	currentNode->region = region;
+
+	ReportAutoFailoverNodeRegion(currentNode->nodeId,
+								 currentNode->nodeHost,
+								 currentNode->nodePort,
+								 currentNode->region);
+
+	char message[BUFSIZE];
+
+	LogAndNotifyMessage(
+		message, BUFSIZE,
+		"Updating region to \"%s\" for " NODE_FORMAT,
+		currentNode->region,
+		NODE_FORMAT_ARGS(currentNode));
+
+	NotifyStateChange(currentNode, message);
+
+	PG_RETURN_BOOL(true);
+}
+
+
+/*
+ * report_postgres_version persists a node's Postgres server version and,
+ * when installed, Citus extension version. This is a plain self-report,
+ * called once by the keeper per Postgres restart (see pg_autoctl's
+ * keeper_update_pg_state()) -- not routed through node_active() since
+ * neither piece of information can change without a restart, and not
+ * requiring the node to exist (like set_node_region does for its
+ * operator-facing, named-node lookup): a keeper reporting on its own
+ * already-known nodeId that no longer exists is a harmless no-op, the same
+ * as ReportAutoFailoverNodeState()'s own report path.
+ */
+Datum
+report_postgres_version(PG_FUNCTION_ARGS)
+{
+	checkPgAutoFailoverVersion();
+
+	if (PG_ARGISNULL(0))
+	{
+		ereport(ERROR,
+				(errmsg("report_postgres_version requires a non-null "
+						"node_id")));
+	}
+
+	int64 nodeId = PG_GETARG_INT64(0);
+
+	bool versionNumIsNull = PG_ARGISNULL(1);
+	int32 versionNum = versionNumIsNull ? 0 : PG_GETARG_INT32(1);
+
+	char *version =
+		PG_ARGISNULL(2) ? NULL : text_to_cstring(PG_GETARG_TEXT_P(2));
+
+	char *versionString =
+		PG_ARGISNULL(3) ? NULL : text_to_cstring(PG_GETARG_TEXT_P(3));
+
+	char *citusVersion =
+		PG_ARGISNULL(4) ? NULL : text_to_cstring(PG_GETARG_TEXT_P(4));
+
+	ReportAutoFailoverNodeVersion(nodeId,
+								  versionNumIsNull ? NULL : &versionNum,
+								  version,
+								  versionString,
+								  citusVersion);
+
+	PG_RETURN_VOID();
+}
+
+
+/*
  * update_node_metadata allows to update a node's nodename, hostname, and port.
  *
  * The pg_autoctl client fetches the list of "other" nodes on each iteration
@@ -2345,7 +2594,7 @@ update_node_metadata(PG_FUNCTION_ARGS)
 		nodeid = PG_GETARG_INT64(0);
 	}
 
-	AutoFailoverNode *currentNode = GetAutoFailoverNodeById(nodeid);
+	AutoFailoverNode *currentNode = LockNodeGroupAndFetch(nodeid);
 
 	if (currentNode == NULL)
 	{
@@ -2353,9 +2602,6 @@ update_node_metadata(PG_FUNCTION_ARGS)
 						errmsg("node %lld is not registered",
 							   (long long) nodeid)));
 	}
-
-	LockFormation(currentNode->formationId, ShareLock);
-	LockNodeGroup(currentNode->formationId, currentNode->groupId, ExclusiveLock);
 
 	/*
 	 * When arguments are NULL, replace them with the current value of the node
@@ -2533,4 +2779,96 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
 		}
 	}
+}
+
+
+/*
+ * testing_lock_formation is a testing-only function that lets an isolation
+ * test hold LockFormation() explicitly, from plain SQL, for as long as its
+ * surrounding transaction stays open. This lets a test construct a
+ * deterministic blocking scenario against any other entry point that takes
+ * the same lock (NodeActive, RemoveNode, perform_failover, ...) without
+ * needing a second real FSM call in flight to create the contention.
+ *
+ * Uses ExclusiveLock unconditionally: production call sites mostly take
+ * ShareLock here, and ExclusiveLock is the mode that reliably conflicts with
+ * every one of them, maximizing what a test can block.
+ */
+Datum
+testing_lock_formation(PG_FUNCTION_ARGS)
+{
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	LockFormation(formationId, ExclusiveLock);
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * testing_lock_node_group is the LockNodeGroup() counterpart of
+ * testing_lock_formation -- see there for the rationale. This is the lock
+ * that matters most for testing races against the FSM: NodeActive() holds
+ * LockNodeGroup(ExclusiveLock) for the entire duration of a node_active()
+ * call, including its GroupStateContext snapshot and any later, separately
+ * fetched reads of the same group (e.g. GetPrimaryOrDemotedNodeInGroup()).
+ */
+Datum
+testing_lock_node_group(PG_FUNCTION_ARGS)
+{
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+	int32 groupId = PG_GETARG_INT32(1);
+
+	LockNodeGroup(formationId, groupId, ExclusiveLock);
+
+	PG_RETURN_VOID();
+}
+
+
+/*
+ * testing_set_node_health is a testing-only function that lets a
+ * regression/isolation test simulate a health-check-worker observation
+ * and/or the passage of time, in one locked call, instead of a raw UPDATE
+ * to pgautofailover.node that bypasses the monitor's locking entirely (and
+ * so cannot exercise -- or race against -- the real lock discipline).
+ *
+ * All of health, report_time_ago, state_change_time_ago, and
+ * health_check_time_ago are optional (SQL NULL = leave unchanged).
+ * *_ago backdates the corresponding timestamp column by the given
+ * interval; there is no production code path that moves these timestamps
+ * backwards, so this part is unavoidably a test-only shortcut for
+ * compressing real elapsed time (e.g. pgautofailover.node_considered_
+ * unhealthy_timeout, pgautofailover.primary_demote_timeout) into an
+ * instant, the same way SET pgautofailover.startup_grace_period already
+ * does for that GUC elsewhere in these tests.
+ */
+Datum
+testing_set_node_health(PG_FUNCTION_ARGS)
+{
+	int64 nodeId = PG_GETARG_INT64(0);
+
+	bool healthIsNull = PG_ARGISNULL(1);
+	int health = healthIsNull ? 0 : PG_GETARG_INT32(1);
+
+	bool reportTimeAgoIsNull = PG_ARGISNULL(2);
+	Interval *reportTimeAgo =
+		reportTimeAgoIsNull ? NULL : PG_GETARG_INTERVAL_P(2);
+
+	bool stateChangeTimeAgoIsNull = PG_ARGISNULL(3);
+	Interval *stateChangeTimeAgo =
+		stateChangeTimeAgoIsNull ? NULL : PG_GETARG_INTERVAL_P(3);
+
+	bool healthCheckTimeAgoIsNull = PG_ARGISNULL(4);
+	Interval *healthCheckTimeAgo =
+		healthCheckTimeAgoIsNull ? NULL : PG_GETARG_INTERVAL_P(4);
+
+	SetNodeHealthAndTimestampsForTesting(nodeId,
+										 healthIsNull, health,
+										 reportTimeAgoIsNull, reportTimeAgo,
+										 stateChangeTimeAgoIsNull, stateChangeTimeAgo,
+										 healthCheckTimeAgoIsNull, healthCheckTimeAgo);
+
+	PG_RETURN_VOID();
 }

@@ -62,6 +62,7 @@ typedef struct TestNode
 
 	/* create-time options — passed to pg_autoctl create via [options] ini */
 	bool noMonitor;              /* --no-monitor: standalone node */
+	bool createDeferred;         /* node waits before pg_autoctl create */
 	bool launchDeferred;         /* node waits for pg_autoctl node start */
 	bool listen;                 /* --listen 0.0.0.0: bind all interfaces */
 	bool citusSecondary;         /* --citus-secondary */
@@ -72,6 +73,7 @@ typedef struct TestNode
 	char auth[32];               /* per-node auth override; "" = use cluster */
 	char replicationPassword[256]; /* replication.password written to node ini */
 	char monitorPassword[256];   /* pg_auto_failover.monitor_password written to node ini */
+	char region[64];             /* --region NAME; "" = omit (defaults to "default" on monitor) */
 
 	/* Extra Docker named volumes: volume <name> <containerPath> */
 	struct
@@ -86,6 +88,7 @@ typedef struct TestFormation
 {
 	char name[128];               /* formation name; default "default" */
 	int numSync;                 /* number-sync-standbys, -1 = unset */
+	bool disableSecondary;       /* secondary = false in [formation] ini section */
 	TestNode nodes[PGAF_MAX_NODES];
 	int nodeCount;
 } TestFormation;
@@ -98,6 +101,7 @@ typedef struct TestCluster
 	bool withMonitor;            /* true when "monitor" keyword appears in cluster{} */
 	bool withCitus;
 	bool bindSource;             /* bind-source: mount repo root → /usr/src/pg_auto_failover */
+	bool legacyStartup;          /* legacy-startup: use pg_autoctl create <kind> --run (v2.2 style) */
 
 	/* cluster-level Docker / network options */
 	char image[256];             /* Docker image tag; "" = build from source */
@@ -138,6 +142,7 @@ typedef enum TestCmdKind
 {
 	CMD_EXEC,            /* exec <svc> <args...>                        */
 	CMD_EXEC_FAILS,      /* exec-fails <svc> <args...>                  */
+	CMD_RUN,             /* run <svc> <args...> — compose run --rm      */
 	CMD_WAIT_STATE,      /* wait until <node> state = <s> [timeout Ns] */
 	CMD_WAIT_STATES,     /* wait until s1, s2 [in group N,...] [timeout Ns] */
 	CMD_ASSERT_STATE,              /* assert <node> state = <s>                   */
@@ -162,6 +167,20 @@ typedef enum TestCmdKind
 	CMD_SET_MONITOR,     /* set monitor <svc>  — switch active monitor service  */
 	CMD_LOGS_CHECK,      /* logs <svc> [not] <pattern> — grep container logs    */
 	CMD_COMPOSE_INJECT,  /* compose inject <image> <src> <svc>:<dst>            */
+	CMD_FAILOVER,        /* perform failover [in formation F] [group G]
+	                      * — calls pgautofailover.perform_failover() directly
+	                      * on the monitor; service = formation, waitGroups[0] = group */
+	CMD_NODEINI_SET,     /* nodeini set <node> <key> <value> — edits the
+	                      * node's host-side pg_autoctl_node.ini [settings]
+	                      * entry directly, exercising the supervisor's
+	                      * file-watch live-apply path (the ini is read-only
+	                      * inside the node's own container, so this can't go
+	                      * through exec/compose). service = node,
+	                      * state = key, args = value. */
+	CMD_NODEINI_GET,     /* nodeini get <node> <key> <value> — reads the
+	                      * node's host-side .ini [settings] entry directly
+	                      * and asserts it equals <value>. service = node,
+	                      * state = key, args = expected value. */
 } TestCmdKind;
 
 typedef struct TestCmd

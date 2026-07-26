@@ -1,0 +1,84 @@
+\RequirePackage{luatex85}
+\documentclass[border=10pt,12pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{amssymb}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,positioning}
+
+\begin{document}
+
+\sffamily\bfseries
+
+%% Actor x-positions (cm)
+%% N=0  M=12
+\def\nx{0}
+\def\mx{12}
+\def\ybot{9.6}
+
+\begin{tikzpicture}[
+  >=Stealth,
+  yscale=-1,
+]
+
+\input{common.tex}
+
+\tikzstyle{actor}=[rectangle, minimum width=3.2cm, minimum height=0.7cm,
+  inner sep=4pt, rounded corners=2pt, align=center, font=\bfseries]
+\tikzstyle{ll}=[densely dashed, gray!60, line width=0.5pt]
+\tikzstyle{msg}=[->, line width=0.65pt]
+\tikzstyle{rsp}=[->, densely dashed, line width=0.65pt]
+\tikzstyle{lbl}=[font=\small, inner sep=2pt]
+\tikzstyle{note}=[rectangle, rounded corners=2pt, inner sep=5pt,
+  font=\small, align=center]
+\tikzstyle{seclbl}=[font=\small\itshape, text=gray!70!black, anchor=west]
+
+%% ── actor headers ───────────────────────────────────────────────────────
+\node[actor, fill=sbox, text=stxt] (Nh) at (\nx,0) {Node};
+\node[actor, fill=mbox, text=mtxt] (Mh) at (\mx,0) {Monitor};
+
+%% lifelines
+\draw[ll] (\nx,0.35) -- (\nx,\ybot);
+\draw[ll] (\mx,0.35) -- (\mx,\ybot);
+
+%% ── node_active polling (node-initiated) ──────────────────────────────────
+\node[seclbl] at (-4.4,1.3) {state reporting};
+
+\draw[msg] (\nx,1.6) -- (\mx,1.6);
+\node[lbl, above] at (\nx+3.4, 1.6) {node\_active(reported\_state, lsn, \ldots)};
+
+\node[note, fill=mbox!25, draw=mbox!70!black, text width=6.5cm]
+  at (\mx, 2.6)
+  {\small store reported state\\ compute goal state};
+
+\draw[rsp] (\mx,3.6) -- (\nx,3.6)
+  node[lbl,midway,above] {goal\_state};
+
+\draw[gray!50, line width=0.5pt, ->]
+  (\nx-0.5, 4.0) .. controls (\nx-2.2,4.3) and (\nx-2.2,5.6) .. (\nx-0.5,5.9)
+  node[left, font=\small\itshape, text=gray!70] {repeat\ldots};
+
+%% ── health check (monitor-initiated) ──────────────────────────────────────
+\node[seclbl] at (-4.4,6.6) {health check};
+
+\draw[msg, color=mbox!70!black] (\mx,6.9) -- (\nx,6.9);
+\node[lbl, above, text=mbox!70!black] at (\mx-3.4, 6.9)
+  {connect (\texttt{pg\_isready}-equivalent)};
+
+\draw[rsp] (\nx,7.8) -- (\mx,7.8)
+  node[lbl,midway,above] {ready};
+
+%% ── unhealthy note ──────────────────────────────────────────────────────
+\node[note, fill=red!10, draw=red!40, text width=12.5cm, font=\small]
+  at (6, \ybot-0.3)
+  {\color{red!80!black}\bfseries unhealthy \normalfont only when \emph{both}
+   signals are missing: the monitor cannot connect, \emph{and} no
+   node\_active report has arrived for a while};
+
+%% ── actor footers ───────────────────────────────────────────────────────
+\node[actor, fill=sbox, text=stxt] at (\nx, \ybot+1.1) {Node};
+\node[actor, fill=mbox, text=mtxt] at (\mx, \ybot+1.1) {Monitor};
+
+\end{tikzpicture}
+\end{document}

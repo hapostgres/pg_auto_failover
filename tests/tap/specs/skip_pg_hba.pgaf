@@ -38,7 +38,7 @@ step test_004a_hba_have_not_been_edited {
 }
 
 step test_005_failover {
-    exec monitor  pg_autoctl perform failover
+    perform failover
     wait until node2 state is primary
         and node1 state is secondary
         timeout 90s

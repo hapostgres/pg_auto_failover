@@ -28,6 +28,7 @@
 #include "postgres_fe.h"  /* MAXPGPATH, NAMEDATALEN, etc. */
 #include "pgsql.h"        /* MAXCONNINFO */
 #include "pgsetup.h"      /* PgInstanceKind, NODE_KIND_* */
+#include "port/pg_crc32c.h"
 
 /*
  * Fixed location inside every container.  The compose generator writes one
@@ -39,10 +40,15 @@
 #define PG_AUTOCTL_NODESPEC_PATH "/etc/pgaf/node.ini"
 
 /*
- * How often the supervisor polls the spec file for changes (seconds).
- * inotify/kqueue are used when available; this is the fallback interval.
+ * How often the supervisor re-hashes the spec file to check for changes
+ * (seconds). This is the ground truth check: inotify is used to react
+ * sooner when it's available and actually delivering events, but content
+ * hashing runs on this interval regardless of inotify's reported state, so
+ * a silently-broken inotify backend (observed under Docker Desktop for
+ * macOS/virtiofs: host-side writes land in the container but never raise
+ * the IN_CLOSE_WRITE event) can never cause a change to go undetected.
  */
-#define NODESPEC_WATCH_INTERVAL_SECS 10
+#define NODESPEC_HASH_POLL_INTERVAL_SECS 1
 
 /* -----------------------------------------------------------------------
  * NodeSpec — one-to-one with the [sections] of pg_autoctl_node.ini
@@ -71,6 +77,7 @@ typedef struct NodeSpec
 	/* [settings]  — mutable; applied on SIGHUP / file change */
 	int candidate_priority;      /* 0-100, default 50 */
 	bool replication_quorum;     /* sync quorum participant, default true */
+	char region[NAMEDATALEN];    /* data-centre / availability zone label */
 
 	/* [options]    — immutable; used only at pg_autoctl create time */
 	char ssl[32];                /* self-signed | verify-ca | verify-full | off */
@@ -81,13 +88,17 @@ typedef struct NodeSpec
 	char ssl_ca_file[MAXPGPATH];
 	char ssl_cert_file[MAXPGPATH];
 	char ssl_key_file[MAXPGPATH];
-	bool launchDeferred;         /* [launch] mode=deferred: wait for node start */
+	bool createDeferred;         /* [launch] create=deferred: wait before create */
+	bool launchDeferred;         /* [launch] run=deferred: wait for node start */
+	char debianCluster[64];      /* [options] debian_cluster: run pg_createcluster */
 
 	/* [formation <name>]  — monitor kind: non-default formations to create */
 #define NODESPEC_MAX_FORMATIONS 16
 	int formationCount;
 	char formationNames[NODESPEC_MAX_FORMATIONS][NAMEDATALEN];
 	char formationKinds[NODESPEC_MAX_FORMATIONS][NAMEDATALEN]; /* "pgsql" default */
+	bool formationDisableSecondary[NODESPEC_MAX_FORMATIONS];    /* true → secondary=false */
+	int formationNumSync[NODESPEC_MAX_FORMATIONS];              /* -1 = use monitor default */
 
 	/* [pg_auto_failover]  — monitor kind: password for autoctl_node role */
 	char autoctl_node_password[MAXCONNINFO];
@@ -111,8 +122,8 @@ typedef struct NodeSpecWatcher
 {
 	bool active;                 /* true once nodespec_watcher_init() succeeds */
 	char path[MAXPGPATH];       /* path of the watched file                   */
-	time_t last_mtime;          /* mtime at last check                        */
-	time_t last_checked;        /* wall-clock time of last poll               */
+	pg_crc32c last_crc;          /* CRC32C of the file content at last check   */
+	time_t last_checked;        /* wall-clock time of last hash check         */
 
 #ifdef __linux__
 	int inotify_fd;             /* inotify instance fd, -1 if unavailable     */
@@ -150,7 +161,8 @@ bool nodespec_write_to_path(const NodeSpec *spec, const char *path);
 /* Initialise watcher state.  Sets up inotify on Linux if available. */
 bool nodespec_watcher_init(NodeSpecWatcher *w, const char *path);
 
-/* Called from the supervisor's 100 ms tick.
+/* Called from the supervisor's 100 ms tick.  Actually re-hashes the file at
+ * most once every NODESPEC_HASH_POLL_INTERVAL_SECS (sooner if inotify fires).
  * Returns true if the file changed and nodespec_apply() was called. */
 bool nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current);
 

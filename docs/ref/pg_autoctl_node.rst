@@ -164,6 +164,15 @@ Settings in this section are applied live without restarting the node.
   Whether this node participates in the synchronous replication quorum.
   Boolean, defaults to ``true``.  **Mutable**.
 
+``region``
+
+  Free-form label identifying the data-centre or availability zone this
+  node runs in.  Defaults to ``default``.  **Mutable**: changes are applied
+  via ``pg_autoctl set node region`` (see :ref:`pg_autoctl_set_node_region`).
+  Purely informational: shown as its own column by ``pg_autoctl watch`` in
+  the verbose and higher policies, and does not currently affect any
+  failover or quorum decision.
+
 ``[options]``
 ^^^^^^^^^^^^^
 
@@ -248,7 +257,7 @@ The supervisor that ``pg_autoctl node run`` exec's into watches the ini file
 for changes.  When it detects a write it re-reads the file and converges any
 **mutable** fields without restarting the node or interrupting replication:
 
-``candidate_priority`` and ``replication_quorum``
+``candidate_priority``, ``replication_quorum``, and ``region``
     Applied by calling ``pg_autoctl set node`` against the running node.
 
 ``ssl``, ``ca_file``, ``cert_file``, ``key_file``

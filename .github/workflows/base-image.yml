@@ -1,0 +1,108 @@
+name: Base image
+
+# Builds and pushes the pgaf-base image to ghcr.io.
+#
+# The base image contains every supported Postgres major version
+# (from apt.postgresql.org) plus one Citus build per Postgres version.
+# Per-PG pg_auto_failover builds use it as their FROM so the heavy
+# apt/Citus work is cached long-term across all PR runs.
+#
+# Triggered by:
+#   - push:  changes to Dockerfile.base on main
+#   - workflow_dispatch:  manual rebuild (optionally force)
+#   - workflow_call:  called by run-pgaftest.yml on cache-miss
+#   - check-versions.yml:  when PGDG or Citus versions change
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile.base
+
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Rebuild even if the image already exists'
+        type: boolean
+        default: false
+
+  workflow_call:
+    inputs:
+      force_rebuild:
+        description: 'Rebuild even if the image already exists'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/hapostgres/pg_auto_failover/pgaf-base:bookworm
+  CITUSTAG_14: v12.1.5
+  CITUSTAG_15: v12.1.5
+  CITUSTAG_16: v13.2.0
+  CITUSTAG_17: v13.2.0
+  CITUSTAG_18: v14.1.0
+  CITUSTAG_19: none
+
+jobs:
+  build-base:
+    name: Build / push base image
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check whether base image already exists
+        id: check
+        run: |
+          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker BuildKit
+        if: steps.check.outputs.exists == 'false' || inputs.force_rebuild == true || github.event_name == 'push'
+        uses: docker/setup-buildx-action@v4.2.0
+
+      - name: Build and push base image
+        if: steps.check.outputs.exists == 'false' || inputs.force_rebuild == true || github.event_name == 'push'
+        run: |
+          docker buildx build \
+            -f Dockerfile.base \
+            --build-arg CITUSTAG_14="${CITUSTAG_14}" \
+            --build-arg CITUSTAG_15="${CITUSTAG_15}" \
+            --build-arg CITUSTAG_16="${CITUSTAG_16}" \
+            --build-arg CITUSTAG_17="${CITUSTAG_17}" \
+            --build-arg CITUSTAG_18="${CITUSTAG_18}" \
+            --build-arg CITUSTAG_19="${CITUSTAG_19}" \
+            --label "org.pgaf.citustag.14=${CITUSTAG_14}" \
+            --label "org.pgaf.citustag.15=${CITUSTAG_15}" \
+            --label "org.pgaf.citustag.16=${CITUSTAG_16}" \
+            --label "org.pgaf.citustag.17=${CITUSTAG_17}" \
+            --label "org.pgaf.citustag.18=${CITUSTAG_18}" \
+            --label "org.pgaf.citustag.19=${CITUSTAG_19}" \
+            --platform linux/amd64 \
+            -t "$IMAGE" \
+            --push \
+            .
+
+      - name: Report
+        run: |
+          if [ "${{ steps.check.outputs.exists }}" = "true" ] && \
+             [ "${{ inputs.force_rebuild }}" != "true" ] && \
+             [ "${{ github.event_name }}" != "push" ]; then
+            echo "Base image already exists at ${IMAGE} — skipped build."
+          else
+            echo "Base image built and pushed: ${IMAGE}"
+          fi

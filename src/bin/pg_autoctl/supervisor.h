@@ -126,6 +126,16 @@ typedef struct Supervisor
 	int stoppingLoopCounter;
 
 	/*
+	 * Tracking for the keeper-only SIGTERM graceful shutdown (see
+	 * supervisor_stop_subprocesses() in supervisor.c): whether the
+	 * node-active (keeper) service has exited yet, and the stoppingLoopCounter
+	 * value at which the stuck-process escalation should kick in, computed
+	 * once when the shutdown sequence begins.
+	 */
+	bool keeperExited;
+	int stuckThresholdLoops;
+
+	/*
 	 * Optional node spec watcher.  When pg_autoctl is started via
 	 * `pg_autoctl node run <file>`, the supervisor watches the ini file for
 	 * changes and converges mutable settings automatically.

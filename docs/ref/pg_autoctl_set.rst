@@ -11,3 +11,4 @@ pg_autoctl set - Set a pg_auto_failover node, or formation setting
    pg_autoctl_set_formation_number_sync_standbys
    pg_autoctl_set_node_replication_quorum
    pg_autoctl_set_node_candidate_priority
+   pg_autoctl_set_node_region

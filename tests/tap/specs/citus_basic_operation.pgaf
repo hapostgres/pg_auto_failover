@@ -20,7 +20,9 @@ setup {
     wait until primary, secondary in group 0  timeout 90s
     wait until primary, secondary in group 1  timeout 90s
     wait until primary, secondary in group 2  timeout 90s
-    promote coordinator1a, worker1a, worker2a
+    promote coordinator1a
+    promote worker1a
+    promote worker2a
 }
 
 teardown {
@@ -118,14 +120,14 @@ step test_008_read_from_workers_via_coordinator {
 }
 
 step test_009_perform_failover_worker2 {
-    exec monitor  pg_autoctl perform failover --group 2
+    perform failover group 2
     wait until worker2b state is primary
         and worker2a state is secondary
         timeout 180s
 }
 
 step test_010_perform_failover_coordinator {
-    exec monitor  pg_autoctl perform failover --group 0
+    perform failover
     wait until coordinator1a state is secondary
         and coordinator1b state is primary
         timeout 90s

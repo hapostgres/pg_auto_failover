@@ -160,7 +160,7 @@ step test_014_secondary_reports_lsn {
     # Blocking perform failover: waits until one node reports the new primary
     # state before returning (exits 0).  With all three nodes healthy the
     # report_lsn election finishes in under 5s, well within the exec timeout.
-    exec monitor  pg_autoctl perform failover
+    perform failover
 }
 
 #

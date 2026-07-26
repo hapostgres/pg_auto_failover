@@ -407,6 +407,16 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'G':
+			{
+				/* { "region", required_argument, NULL, 'G' } */
+				strlcpy(LocalOptionConfig.pgSetup.settings.region,
+						optarg, NAMEDATALEN);
+				log_trace("--region %s",
+						  LocalOptionConfig.pgSetup.settings.region);
+				break;
+			}
+
 			case 'V':
 			{
 				/* keeper_cli_print_version prints version and exits. */

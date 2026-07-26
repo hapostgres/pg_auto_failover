@@ -7,7 +7,7 @@
 # pre-existing pg_basebackup PGDATA and sets up streaming replication without
 # running another pg_basebackup (skipBaseBackup path in fsm_init_standby).
 #
-# Both node2 and node3 are declared launch deferred: their containers sleep
+# Both node2 and node3 are declared create and launch deferred: their containers sleep
 # until a step explicitly calls pg_autoctl node start (which rewrites the ini
 # from mode=deferred to mode=immediate and unblocks the waiting node run loop).
 #
@@ -18,8 +18,8 @@ cluster {
     monitor
     formation {
         node1
-        node2 launch deferred
-        node3 launch deferred
+        node2 create and launch deferred
+        node3 create and launch deferred
     }
 }
 
@@ -73,7 +73,7 @@ step test_006_init_secondary {
 #
 
 step test_007_failover {
-    exec monitor  pg_autoctl perform failover
+    perform failover
     wait until node3 state is primary
         and node1 state is secondary
         timeout 90s

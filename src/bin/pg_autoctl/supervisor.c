@@ -43,6 +43,10 @@ static bool supervisor_find_service(Supervisor *supervisor, pid_t pid,
 
 static void supervisor_stop_subprocesses(Supervisor *supervisor);
 
+static bool supervisor_have_keeper_service(Supervisor *supervisor);
+
+static int supervisor_stuck_threshold_loops(Supervisor *supervisor);
+
 static void supervisor_stop_other_services(Supervisor *supervisor, pid_t pid);
 
 static bool supervisor_signal_process_group(int signal);
@@ -312,7 +316,22 @@ supervisor_loop(Supervisor *supervisor)
 				/* map the dead child pid to the known dead internal service */
 				if (!supervisor_find_service(supervisor, pid, &dead))
 				{
-					log_error("Unknown subprocess died with pid %d", pid);
+					/*
+					 * When running as PID 1 (inside a container), orphaned
+					 * grandchildren are reparented to us by the kernel and
+					 * we will reap them here.  This is expected behaviour;
+					 * log at INFO rather than ERROR so it doesn't look like
+					 * a bug.
+					 */
+					if (getpid() == 1)
+					{
+						log_info("Reaped orphaned subprocess with pid %d "
+								 "(reparented to PID 1)", pid);
+					}
+					else
+					{
+						log_error("Unknown subprocess died with pid %d", pid);
+					}
 					break;
 				}
 
@@ -389,17 +408,68 @@ supervisor_reload_services(Supervisor *supervisor)
 /*
  * supervisor_stop_subprocesses calls the stopFunction for all the registered
  * services to initiate the shutdown sequence.
+ *
+ * A plain SIGTERM is forwarded to the node-active (keeper) service only,
+ * when one is present in this supervisor's service list. This lets the
+ * keeper drive a graceful shutdown through the ordinary FSM transitions
+ * (routing a primary through maintenance, see fsm_stop_postgres_for_
+ * primary_maintenance) using the existing keeper/postgres-controller
+ * state-file protocol to decide when Postgres actually stops, rather than
+ * the Postgres controller reacting to its own independently-delivered
+ * SIGTERM and racing the keeper's FSM-driven shutdown.
+ *
+ * SIGINT/SIGQUIT -- whether received directly (e.g. Docker/Kubernetes/
+ * systemd escalating to a harder signal after a grace period) or via our
+ * own internal escalation in supervisor_shutdown_sequence -- mean "stop
+ * now, no graceful handoff", and are forwarded to every service exactly as
+ * before.
+ *
+ * Supervisors with no service named SERVICE_NAME_KEEPER (the monitor's
+ * services, or the keeper before `--run` has handed control to the
+ * node-active service) have no FSM handoff to drive either way, so this
+ * signal-restriction does not apply to them: every service is signalled,
+ * same as for SIGINT/SIGQUIT.
+ *
+ * Once the keeper service has actually exited (supervisor->keeperExited),
+ * there is no FSM handoff left to protect: this function is called again
+ * from supervisor_restart_service() at that point specifically to cascade
+ * the signal to the remaining services right away, rather than waiting on
+ * supervisor_shutdown_sequence()'s stuck-process timer.
+ *
+ * That cascade call happens outside of direct signal reception, so it can't
+ * rely on get_current_signal(): the asked_to_stop/asked_to_stop_fast/
+ * asked_to_quit flags it reads are reset right after being processed (see
+ * supervisor_handle_signals()), so by the time the cascade runs they no
+ * longer reflect the signal that actually started this shutdown -- it would
+ * silently fall back to the SIGTERM default and downgrade, say, a SIGQUIT-
+ * driven shutdown. supervisor->shutdownSignal is the sticky, escalation-
+ * aware value that survives that reset, so prefer it whenever a shutdown is
+ * genuinely already in flight (it stays 0, its zero-initialized value, for
+ * the one synthetic caller that isn't -- the pidfile-write-failure path in
+ * supervisor_start() -- which is exactly when falling back to
+ * get_current_signal()'s SIGTERM default is still correct).
  */
 static void
 supervisor_stop_subprocesses(Supervisor *supervisor)
 {
-	int signal = get_current_signal(SIGTERM);
+	int signal = supervisor->shutdownSignal != 0
+				 ? supervisor->shutdownSignal
+				 : get_current_signal(SIGTERM);
 	int serviceCount = supervisor->serviceCount;
 	int serviceIndex = 0;
+
+	bool keeperOnly = signal == SIGTERM &&
+					  !supervisor->keeperExited &&
+					  supervisor_have_keeper_service(supervisor);
 
 	for (serviceIndex = 0; serviceIndex < serviceCount; serviceIndex++)
 	{
 		Service *service = &(supervisor->services[serviceIndex]);
+
+		if (keeperOnly && strcmp(service->name, SERVICE_NAME_KEEPER) != 0)
+		{
+			continue;
+		}
 
 		if (kill(service->pid, signal) != 0)
 		{
@@ -407,6 +477,58 @@ supervisor_stop_subprocesses(Supervisor *supervisor)
 					  strsignal(signal), service->name, service->pid);
 		}
 	}
+}
+
+
+/*
+ * supervisor_have_keeper_service returns true when this supervisor has a
+ * service named SERVICE_NAME_KEEPER registered, regardless of whether it is
+ * still running.
+ */
+static bool
+supervisor_have_keeper_service(Supervisor *supervisor)
+{
+	int serviceIndex = 0;
+
+	for (serviceIndex = 0; serviceIndex < supervisor->serviceCount; serviceIndex++)
+	{
+		if (strcmp(supervisor->services[serviceIndex].name,
+				   SERVICE_NAME_KEEPER) == 0)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
+ * supervisor_stuck_threshold_loops computes the stoppingLoopCounter value at
+ * which supervisor_shutdown_sequence() should stop waiting and escalate to
+ * the whole process group.
+ *
+ * When a plain SIGTERM shutdown is relying on the keeper alone to drive a
+ * graceful maintenance handoff (see supervisor_stop_subprocesses()), that
+ * handoff has its own grace period of up to KEEPER_GRACEFUL_SHUTDOWN_MAX_SECS
+ * (see defaults.h): escalating sooner would signal the Postgres controller
+ * directly and race the very FSM-driven handoff this is all for. A short
+ * margin is added on top for the reporting/logging done in between. In every
+ * other case (no keeper service, or the signal has already been escalated to
+ * SIGINT/SIGQUIT), fall back to the original, much shorter threshold.
+ */
+static int
+supervisor_stuck_threshold_loops(Supervisor *supervisor)
+{
+	bool keeperGraceActive = supervisor->shutdownSignal == SIGTERM &&
+							 supervisor_have_keeper_service(supervisor);
+
+	if (keeperGraceActive)
+	{
+		return ((KEEPER_GRACEFUL_SHUTDOWN_MAX_SECS + 5) * 1000) / 100;
+	}
+
+	return 50;
 }
 
 
@@ -573,6 +695,16 @@ supervisor_handle_signals(Supervisor *supervisor)
 	{
 		supervisor->exitMode = SUPERVISOR_EXIT_CLEAN;
 		supervisor->shutdownSequenceInProgress = true;
+
+		/*
+		 * Freeze the stuck-process threshold now, based on the shutdown
+		 * signal we're starting from. It must not be recomputed on every
+		 * loop: shutdownSignal itself gets escalated later on in
+		 * supervisor_shutdown_sequence() as part of applying that very
+		 * threshold, which would otherwise make it a moving target.
+		 */
+		supervisor->stuckThresholdLoops =
+			supervisor_stuck_threshold_loops(supervisor);
 	}
 
 	/* forward the signal to all our service to terminate them */
@@ -611,14 +743,17 @@ supervisor_handle_signals(Supervisor *supervisor)
  * it's 1 we have been waiting once without any child process reported absent
  * by waitpid(), tell the user we are waiting.
  *
- * At 50 loops (typically we add a 100ms wait per loop), send either SIGTERM or
- * SIGINT.
+ * At stuckThresholdLoops loops (typically we add a 100ms wait per loop, so
+ * that's 50 loops / 5s in the ordinary case, see supervisor_stuck_threshold_
+ * loops()), send either SIGTERM or SIGINT.
  *
- * At every 100 loops, send SIGINT.
+ * At every 100 loops after that, send SIGINT.
  */
 static void
 supervisor_shutdown_sequence(Supervisor *supervisor)
 {
+	int stuckThresholdLoops = supervisor->stuckThresholdLoops;
+
 	if (supervisor->stoppingLoopCounter == 1)
 	{
 		log_info("Waiting for subprocesses to terminate.");
@@ -629,7 +764,7 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 	 * Let's signal again all our process group ourselves and see what happens
 	 * next.
 	 */
-	if (supervisor->stoppingLoopCounter == 50)
+	if (supervisor->stoppingLoopCounter == stuckThresholdLoops)
 	{
 		log_info("pg_autoctl services are still running, "
 				 "signaling them with %s.",
@@ -644,8 +779,8 @@ supervisor_shutdown_sequence(Supervisor *supervisor)
 	/*
 	 * Wow it's been a very long time now...
 	 */
-	if (supervisor->stoppingLoopCounter > 0 &&
-		supervisor->stoppingLoopCounter % 100 == 0)
+	if (supervisor->stoppingLoopCounter > stuckThresholdLoops &&
+		(supervisor->stoppingLoopCounter - stuckThresholdLoops) % 100 == 0)
 	{
 		log_info("pg_autoctl services are still running, "
 				 "signaling them with SIGINT.");
@@ -684,6 +819,37 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	if (supervisor->shutdownSequenceInProgress)
 	{
 		log_trace("supervisor_restart_service: shutdownSequenceInProgress");
+
+		/*
+		 * A plain SIGTERM only ever signalled the keeper service directly
+		 * (see supervisor_stop_subprocesses()), so that it could drive a
+		 * graceful maintenance handoff without racing the Postgres
+		 * controller. Now that the keeper itself has exited -- one way or
+		 * another, its own graceful shutdown is done -- there is no handoff
+		 * left to protect, so cascade the signal to whichever other
+		 * services are still running right away, rather than waiting on
+		 * the stuck-process timer in supervisor_shutdown_sequence().
+		 *
+		 * Only do that cascade when the shutdown actually started as a
+		 * keeper-only SIGTERM: for SIGINT/SIGQUIT, supervisor_stop_
+		 * subprocesses() already signalled every service directly up front
+		 * (keeperOnly never applied), so the Postgres controller already
+		 * has its signal -- re-sending it here would deliver a second,
+		 * redundant signal while it may still be mid-shutdown (e.g.
+		 * stopping Postgres gracefully in reaction to the first one),
+		 * which is exactly the kind of double-delivery this code must not
+		 * cause.
+		 */
+		if (strcmp(service->name, SERVICE_NAME_KEEPER) == 0)
+		{
+			supervisor->keeperExited = true;
+
+			if (supervisor->shutdownSignal == SIGTERM)
+			{
+				(void) supervisor_stop_subprocesses(supervisor);
+			}
+		}
+
 		return false;
 	}
 
@@ -934,8 +1100,25 @@ supervisor_update_pidfile(Supervisor *supervisor)
 		appendPQExpBuffer(content, "%d %s\n", service->pid, service->name);
 	}
 
-	bool success = write_file(content->data, content->len, supervisor->pidfile);
+	/*
+	 * Write atomically via a temp file + rename so that concurrent readers of
+	 * the pidfile never see a truncated (empty) file during the update.
+	 * POSIX rename(2) is atomic: a reader sees either the old complete file
+	 * or the new complete one, never a partially-written version.
+	 */
+	char tmpfile[MAXPGPATH];
+	sformat(tmpfile, MAXPGPATH, "%s.tmp", supervisor->pidfile);
+
+	bool success = write_file(content->data, content->len, tmpfile);
 	destroyPQExpBuffer(content);
+
+	if (success && rename(tmpfile, supervisor->pidfile) != 0)
+	{
+		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpfile,
+				  supervisor->pidfile);
+		(void) unlink(tmpfile);
+		success = false;
+	}
 
 	return success;
 }

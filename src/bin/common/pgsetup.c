@@ -907,8 +907,12 @@ pg_setup_is_running(PostgresSetup *pgSetup)
 
 
 /*
- * pg_setup_is_ready returns true when the postmaster.pid file has a "ready"
- * status in it, which we parse in pgSetup->pm_status.
+ * pg_setup_is_ready returns true when the postmaster is accepting connections.
+ * That means pm_status "ready" (primary or promoted standby) or "standby" (hot
+ * standby still in streaming recovery).  PostgreSQL writes "standby" to
+ * postmaster.pid when hot_standby=on and the instance is accepting read-only
+ * connections but has not yet been promoted; pg_ctl -w treats both statuses as
+ * "server started", and so do we.
  */
 bool
 pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
@@ -935,7 +939,7 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	/*
 	 * Sometimes `pg_ctl start` returns with success and Postgres is still
 	 * in crash recovery replaying WAL files, in the "starting" state
-	 * rather than the "ready" state.
+	 * rather than the "ready" or "standby" state.
 	 *
 	 * In that case, we wait until Postgres is ready for connections. The
 	 * whole pg_autoctl code is expecting to be able to connect to
@@ -945,7 +949,8 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	 * ERROR Connection to database failed: FATAL: the database system is
 	 * starting up
 	 */
-	while (pgSetup->pm_status != POSTMASTER_STATUS_READY)
+	while (pgSetup->pm_status != POSTMASTER_STATUS_READY &&
+		   pgSetup->pm_status != POSTMASTER_STATUS_STANDBY)
 	{
 		int maxRetries = 5;
 
@@ -996,7 +1001,8 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 		}
 
 		/* avoid an extra wait if that's possible */
-		if (pgSetup->pm_status == POSTMASTER_STATUS_READY)
+		if (pgSetup->pm_status == POSTMASTER_STATUS_READY ||
+			pgSetup->pm_status == POSTMASTER_STATUS_STANDBY)
 		{
 			break;
 		}
@@ -1013,7 +1019,8 @@ pg_setup_is_ready(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 		log_trace("pg_setup_is_ready: %s", pmStatusToString(pgSetup->pm_status));
 	}
 
-	return pgSetup->pm_status == POSTMASTER_STATUS_READY;
+	return pgSetup->pm_status == POSTMASTER_STATUS_READY ||
+		   pgSetup->pm_status == POSTMASTER_STATUS_STANDBY;
 }
 
 
@@ -1091,14 +1098,15 @@ pg_setup_wait_until_is_ready(PostgresSetup *pgSetup, int timeout, int logLevel)
 		*pgSetup = newPgSetup;
 
 		/* avoid an extra pg_setup_is_ready call if we're all good already */
-		pgIsReady = pgSetup->pm_status == POSTMASTER_STATUS_READY;
+		pgIsReady = pgSetup->pm_status == POSTMASTER_STATUS_READY ||
+					pgSetup->pm_status == POSTMASTER_STATUS_STANDBY;
 	}
 
 	/*
 	 * Ok so we have a postmaster.pid file with a pid > 0 (not a standalone
 	 * backend, the service has started). Postgres might still be "starting"
-	 * rather than "ready" though, so let's continue our attempts and make sure
-	 * that Postgres is ready.
+	 * rather than "ready" or "standby" though, so let's continue our attempts
+	 * and make sure that Postgres is ready.
 	 */
 	for (; !pgIsReady; attempts++)
 	{
@@ -1580,7 +1588,7 @@ pmStatusToString(PostmasterStatus pm_status)
  * environment variable, or from our default hard-coded value of 5432.
  */
 int
-pgsetup_get_pgport()
+pgsetup_get_pgport(void)
 {
 	char pgport_env[NAMEDATALEN];
 	int pgport = 0;

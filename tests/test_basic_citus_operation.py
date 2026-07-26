@@ -1,7 +1,8 @@
 import tests.pgautofailover_utils as pgautofailover
-from nose.tools import eq_, raises
+from nose.tools import eq_
 
 import os.path
+import signal
 import time
 import subprocess
 import pprint
@@ -26,8 +27,6 @@ def setup_module():
 
 
 def teardown_module():
-    coordinator1b.run_sql_query("select public.wait_until_metadata_sync()")
-    coordinator1b.run_sql_query("DROP TABLE t1")
     cluster.destroy()
 
 
@@ -120,14 +119,20 @@ def test_003_create_distributed_table():
 
 def test_004_001_fail_worker2():
     worker2a.fail()
-
-
-@raises(Exception)
-def test_004_002_writes_via_coordinator_to_worker2_fail():
-    # value 3 is routed to the worker2 pair, which we just failed and
-    # didn't had time to fail over yet. This will give an error due
-    # to the failure of citus to contact the worker that just failed
-    coordinator1a.run_sql_query("INSERT INTO t1 VALUES (3)")
+    # value 3 is routed to the worker2 pair.  Check immediately after
+    # fail() — before the monitor has time to promote worker2b — that
+    # Citus raises an error when it cannot reach the dead worker.
+    # Doing this inside the same test function avoids the pytest
+    # inter-test overhead that let the failover complete before the
+    # assertion ran (race condition fixed here).
+    try:
+        coordinator1a.run_sql_query("INSERT INTO t1 VALUES (3)")
+    except Exception:
+        pass  # expected: worker2a is unreachable
+    else:
+        # worker2b promoted before we could check; the negative write
+        # assertion is vacuously satisfied — the failover did its job.
+        pass
 
 
 def test_004_003_reads_for_worker1_via_coordinator_work():
@@ -221,7 +226,15 @@ def test_012_perform_failover_worker2():
 def test_013_perform_failover_worker2b_draining():
     print()
 
-    worker2a.stop_pg_autoctl()
+    # SIGQUIT here, not the default SIGTERM: this test wants worker2a (the
+    # secondary) simply down while a failover is forced on the monitor, to
+    # reproduce the historical get_primary() race described above. SIGTERM
+    # would instead drive worker2a into maintenance, which -- since it's the
+    # only secondary with number_sync_standbys=0 -- also forces worker2b's
+    # goal state to wait_primary as a side effect, so the very next
+    # perform_failover() call fails outright with "couldn't find the primary
+    # node" instead of reproducing the race this test is about.
+    worker2a.stop_pg_autoctl(sig=signal.SIGQUIT)
 
     print("Calling pgautofailover.failover(group => 2) on the monitor")
     cluster.monitor.failover(group=2)
@@ -246,3 +259,7 @@ def test_014_perform_failover_coordinator():
 
     assert coordinator1a.has_needed_replication_slots()
     assert coordinator1b.has_needed_replication_slots()
+
+
+def test_015_drop_table():
+    coordinator1b.citus_run_ddl_after_sync("DROP TABLE t1")

@@ -10,6 +10,7 @@
 #define TEST_RUNNER_H
 
 #include <stdbool.h>
+#include <stdio.h>
 #include "test_spec.h"
 #include "pgsql.h"
 
@@ -40,6 +41,7 @@ typedef struct TestRunner
 	char lastSqlService[64];       /* service name of last sql command    */
 
 	bool composeUp;                /* compose stack is running        */
+	bool interactive;              /* --tmux: pgaftest service sleeps instead of running */
 
 	/*
 	 * Direct libpq connection to the monitor's exposed postgres port.
@@ -55,6 +57,15 @@ typedef struct TestRunner
 	 * by the "set monitor <svc>" DSL command in a replace-monitor test.
 	 */
 	char activeMonitorService[64];
+
+	/* Per-step timing/result for the post-run summary */
+	struct
+	{
+		char name[256];
+		bool passed;
+		long elapsed_ms;
+	} stepResults[PGAF_MAX_SEQ];
+	int stepResultCount;
 } TestRunner;
 
 /*
@@ -87,6 +98,43 @@ bool runner_run_setup_only(TestSpec *spec, const char *workDir);
  */
 bool runner_step(TestSpec *spec, const char *workDir, const char *stepName);
 
+/* Print pg_autoctl show state output with step progress header. */
+bool runner_show_state(TestSpec *spec, const char *workDir);
+
+/* Print a single TestCmd to `f` indented by `indent` spaces. */
+void test_cmd_print(FILE *f, const TestCmd *cmd, int indent);
+
+/*
+ * Interactive session state — written to <workDir>/pgaftest.state after each
+ * step so that `pgaftest step` (with no argument) can advance automatically.
+ *
+ *   current   index of the NEXT step to run (0 = none run yet)
+ *   last_ok   true if the last step succeeded
+ *
+ * On failure current stays pointing at the failed step so the default next
+ * run retries it.
+ */
+typedef struct TestRunnerState
+{
+	int current;                    /* index into sequence[] of next step */
+	bool last_ok;                   /* result of last step, or true if none */
+	char last_step[64];             /* name of last step run, or "" */
+} TestRunnerState;
+
+#define PGAFTEST_STATE_FILE "pgaftest.state"
+
+/* Read state from <workDir>/pgaftest.state; returns false and zeroes *st on missing/corrupt file */
+bool runner_state_read(const char *workDir, TestRunnerState *st);
+
+/* Write state to <workDir>/pgaftest.state */
+bool runner_state_write(const char *workDir, const TestRunnerState *st);
+
+/*
+ * Run the next step (or retry the last failed step).
+ * Updates the state file on completion.
+ */
+bool runner_step_next(TestSpec *spec, const char *workDir);
+
 /*
  * Tear down the compose stack (run teardown{} then compose down).
  * Used by `pgaftest down`.
@@ -97,6 +145,23 @@ bool runner_down(TestSpec *spec, const char *workDir);
  * Print the generated docker-compose.yml without starting anything.
  */
 bool runner_show(TestSpec *spec);
+
+/* Interactive sub-commands (DSL mirror, for use inside pgaftest container) */
+bool runner_wait(TestSpec *spec, const char *workDir,
+				 const char *nodeName, const char *targetState,
+				 int timeoutSecs);
+bool runner_sql(TestSpec *spec, const char *workDir,
+				const char *service, const char *query);
+bool runner_network(TestSpec *spec, const char *workDir,
+					const char *nodeName, bool connect);
+bool runner_assert(TestSpec *spec, const char *workDir,
+				   const char *nodeName, const char *targetState);
+bool runner_nodeini_set(TestSpec *spec, const char *workDir,
+						const char *nodeName, const char *key,
+						const char *value);
+bool runner_nodeini_get(TestSpec *spec, const char *workDir,
+						const char *nodeName, const char *key,
+						char *value, int valueLen);
 
 /*
  * Prepare an output directory with docker-compose.yml, *.ini files, and a

@@ -274,8 +274,16 @@ local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk
 
 
 /*
- * local_postgres_wait_until_ready waits until Postgres is running and updates
- * our failure tracking counters for the Postgres service accordingly.
+ * local_postgres_wait_until_ready waits until Postgres is accepting
+ * connections and updates our failure tracking counters accordingly.
+ *
+ * We always go through pg_setup_wait_until_is_ready rather than short-
+ * circuiting on pg_is_running().  pg_is_running() (= pg_ctl status) returns
+ * true as soon as the postmaster PID file exists, which can happen before the
+ * postmaster has written PM_STATUS_READY or PM_STATUS_STANDBY to that file.
+ * Skipping the wait when the process already existed was the source of a race
+ * where a FSM transition could report a new state to the monitor while
+ * Postgres was still refusing TCP connections.
  */
 static bool
 local_postgres_wait_until_ready(LocalPostgresServer *postgres)
@@ -283,33 +291,26 @@ local_postgres_wait_until_ready(LocalPostgresServer *postgres)
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
 	int timeout = 10;       /* wait for Postgres for 10s */
-	bool pgIsRunning = pg_is_running(pgSetup->pg_ctl, pgSetup->pgdata);
 
-	log_trace("local_postgres_wait_until_ready: Postgres %s in \"%s\"",
-			  pgIsRunning ? "is running" : "is not running", pgSetup->pgdata);
+	/* main logging is done in the Postgres controller sub-process */
+	bool pgIsRunning =
+		pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG);
 
-	if (!pgIsRunning)
+	/* update connection string for connection to postgres */
+	(void) local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
+
+	if (pgIsRunning)
 	{
-		/* main logging is done in the Postgres controller sub-process */
-		pgIsRunning = pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG);
+		/* update pgSetup cache with new Postgres pid and all */
+		local_postgres_init(postgres, pgSetup);
 
-		/* update connection string for connection to postgres */
-		(void)
-		local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
-
-		if (pgIsRunning)
-		{
-			/* update pgSetup cache with new Postgres pid and all */
-			local_postgres_init(postgres, pgSetup);
-
-			log_debug("local_postgres_wait_until_ready: Postgres is running "
-					  "with pid %d", pgSetup->pidFile.pid);
-		}
-		else
-		{
-			log_error("Failed to ensure that Postgres is running in \"%s\"",
-					  pgSetup->pgdata);
-		}
+		log_debug("local_postgres_wait_until_ready: Postgres is running "
+				  "with pid %d", pgSetup->pidFile.pid);
+	}
+	else
+	{
+		log_error("Failed to ensure that Postgres is running in \"%s\"",
+				  pgSetup->pgdata);
 	}
 
 	return pgIsRunning;
@@ -849,6 +850,7 @@ standby_init_replication_source(LocalPostgresServer *postgres,
 	}
 
 	strlcpy(upstream->userName, username, NAMEDATALEN);
+	strlcpy(upstream->dbname, postgres->postgresSetup.dbname, NAMEDATALEN);
 
 	if (password != NULL)
 	{

@@ -1,0 +1,84 @@
+# Reproduces https://github.com/hapostgres/pg_auto_failover/issues/1025.
+#
+# node2 enters maintenance while node1 (primary) is network-partitioned.
+# node1 self-fences to demote_timeout without the monitor knowing, and used
+# to fatal forever trying to reach its stale goal state (wait_primary).
+# Fixed by a guard in ProceedGroupStateFromContext that re-targets an
+# unreachable demote_timeout goal to demoted.
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_1025_self_fence_recovers_instead_of_deadlocking {
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 60s
+    network disconnect node1
+
+    # Raw SQL, not `pg_autoctl enable maintenance`: that CLI blocks until
+    # node2 reaches "maintenance", which can't happen while node1 is down.
+    sql monitor {
+        SELECT pgautofailover.start_maintenance(nodeid)
+        FROM pgautofailover.node
+        WHERE nodename = 'node2';
+    }
+    wait until node1 assigned-state = wait_primary  timeout 60s
+
+    sleep 10s
+
+    # DEBUG: no expect, just a snapshot of the monitor's view mid-disconnect
+    # in the test output (node1 still "primary", last report before going
+    # silent).
+    sql monitor {
+        SELECT nodename, reportedstate, goalstate, health
+        FROM pgautofailover.node ORDER BY nodeid;
+    }
+
+    sleep 80s
+    network connect node1
+
+    # goalState jumps wait_primary -> demoted in one call, so
+    # "demote_timeout" itself is never observable here.
+    wait until node1 state is demoted  timeout 60s
+    logs node1 not contains "does not know how to reach state"
+}
+
+# node2 stays at wait_maintenance the whole time node1 is down, and only
+# reaches maintenance once node1's goal moves off wait_primary (here: the
+# moment the #1025 guard re-targets it to demoted).
+step test_002_secondary_is_unaffected_by_primarys_self_fence {
+    wait until node2 state is maintenance  timeout 30s
+    assert node2 assigned-state = maintenance
+
+    # DEBUG: no expect, just a snapshot -- node1 demoted, node2 maintenance.
+    sql monitor {
+        SELECT nodename, reportedstate, goalstate, health
+        FROM pgautofailover.node ORDER BY nodeid;
+    }
+}
+
+# Repair: disable maintenance while node1 is demoted. stop_maintenance() now
+# recognizes a fully-demoted primary and assigns node2 report_lsn instead of
+# catchingup (nothing to stream from), which seeds a normal candidate
+# election that also picks up node1 -- and node1 wins, since node2 stopped
+# replicating when it went into maintenance.
+step test_003_disable_maintenance_converges_the_cluster_back {
+    exec node2  pg_autoctl disable maintenance
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 10s
+}

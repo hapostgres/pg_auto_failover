@@ -43,6 +43,8 @@
 static int cli_watch_getopts(int argc, char **argv);
 static void cli_watch(int argc, char **argv);
 
+static bool watchWaitForMonitor = false;
+
 CommandLine watch_command =
 	make_command("watch",
 				 "Display a dashboard to watch monitor's events and state",
@@ -51,7 +53,8 @@ CommandLine watch_command =
 				 "  --monitor     show the monitor uri\n"
 				 "  --formation   formation to query, defaults to 'default' \n"
 				 "  --group       group to query formation, defaults to all \n"
-				 "  --json        output data in the JSON format\n",
+				 "  --json        output data in the JSON format\n"
+				 "  --wait        wait for the monitor to be ready before starting\n",
 				 cli_watch_getopts,
 				 cli_watch);
 
@@ -67,6 +70,7 @@ cli_watch_getopts(int argc, char **argv)
 		{ "monitor", required_argument, NULL, 'm' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "group", required_argument, NULL, 'g' },
+		{ "wait", no_argument, NULL, 'w' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -84,7 +88,7 @@ cli_watch_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:f:g:n:Vvqh",
+	while ((c = getopt_long(argc, argv, "D:f:g:n:wVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -125,6 +129,13 @@ cli_watch_getopts(int argc, char **argv)
 					exit(EXIT_CODE_BAD_ARGS);
 				}
 				log_trace("--group %d", options.groupId);
+				break;
+			}
+
+			case 'w':
+			{
+				watchWaitForMonitor = true;
+				log_trace("--wait");
 				break;
 			}
 
@@ -237,6 +248,12 @@ cli_watch(int argc, char **argv)
 	KeeperConfig config = keeperOptions;
 
 	(void) cli_monitor_init_from_option_or_config(&(context.monitor), &config);
+
+	if (watchWaitForMonitor)
+	{
+		pgsql_set_monitor_interactive_retry_policy(
+			&(context.monitor.pgsql.retryPolicy));
+	}
 
 	strlcpy(context.formation, config.formation, sizeof(context.formation));
 	context.groupId = config.groupId;

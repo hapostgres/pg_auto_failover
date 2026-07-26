@@ -155,7 +155,7 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"ssl"                { return T_SSL; }
 <CLUSTER_BODY>"auth-method"        { return T_AUTH_METHOD; }
 <CLUSTER_BODY>"auth"               { return T_AUTH; }
-<CLUSTER_BODY>"formation"          { return T_FORMATION; }
+<CLUSTER_BODY,STEP_BODY>"formation"  { return T_FORMATION; }
 <CLUSTER_BODY>"num-sync"           { return T_NUM_SYNC; }
 <CLUSTER_BODY>"node"               { return T_NODE; }
 
@@ -166,14 +166,19 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"password"           { return T_PASSWORD; }
 <CLUSTER_BODY>"monitor-password"   { return T_MONITOR_PASSWORD; }
 <CLUSTER_BODY>"launch"             { return T_LAUNCH; }
+<CLUSTER_BODY>"create"             { return T_CREATE; }
 <CLUSTER_BODY>"deferred"           { return T_DEFERRED; }
 <CLUSTER_BODY>"immediate"          { return T_IMMEDIATE; }
+<CLUSTER_BODY>"false"              { return T_FALSE; }
+<CLUSTER_BODY>"true"               { return T_TRUE; }
+<CLUSTER_BODY>"and"                { return T_AND; }
 <CLUSTER_BODY>"initially"          { return T_INITIALLY; }
 <CLUSTER_BODY>"stopped"            { return T_STOPPED; }
 <CLUSTER_BODY>"volume"             { return T_VOLUME; }
 <CLUSTER_BODY>"listen"             { return T_LISTEN; }
 <CLUSTER_BODY>"citus-secondary"    { return T_CITUS_SECONDARY; }
 <CLUSTER_BODY>"candidate-priority" { return T_CANDIDATE_PRIORITY; }
+<CLUSTER_BODY>"region"             { return T_REGION; }
 <CLUSTER_BODY>"group"              { return T_GROUP; }
 <CLUSTER_BODY>"port"               { return T_PORT; }
 <CLUSTER_BODY>"citus-cluster-name" { return T_CITUS_CLUSTER_NAME; }
@@ -182,6 +187,7 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"replication-password"  { return T_REPLICATION_PASSWORD; }
 <CLUSTER_BODY>"extension-version"   { return T_EXTENSION_VERSION; }
 <CLUSTER_BODY>"bind-source"         { return T_BIND_SOURCE; }
+<CLUSTER_BODY>"legacy-startup"      { return T_LEGACY_STARTUP; }
 
 <CLUSTER_BODY>"="  { return T_EQUALS; }
 
@@ -253,6 +259,7 @@ static void pgaf_read_raw_block(void);
 
 <STEP_BODY>"exec-fails"    { BEGIN(EXEC_ARGS); return T_EXEC_FAILS; }
 <STEP_BODY>"exec"          { BEGIN(EXEC_ARGS); return T_EXEC; }
+<STEP_BODY>"run"           { BEGIN(EXEC_ARGS); return T_RUN; }
 <STEP_BODY>"pg_autoctl"    { BEGIN(EXEC_ARGS); return T_PG_AUTOCTL; }
 
 <STEP_BODY>"wait"          { return T_WAIT; }
@@ -263,11 +270,14 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"expect"        { return T_EXPECT; }
 <STEP_BODY>"error"         { return T_ERROR; }
 <STEP_BODY>"promote"       { return T_PROMOTE; }
+<STEP_BODY>"perform"       { return T_PERFORM; }
+<STEP_BODY>"failover"      { return T_FAILOVER; }
 <STEP_BODY>"network"       { return T_NETWORK; }
 <STEP_BODY>"disconnect"    { return T_DISCONNECT; }
 <STEP_BODY>"connect"       { return T_CONNECT; }
 <STEP_BODY>"sleep"         { return T_SLEEP; }
 <STEP_BODY>"compose"       { return T_COMPOSE; }
+<STEP_BODY>"nodeini"       { return T_NODEINI; }
 <STEP_BODY>"down"          { return T_DOWN; }
 <STEP_BODY>"start"         { return T_START; }
 <STEP_BODY>"stop"           { return T_STOP; }
@@ -286,8 +296,10 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"postgres"      { return T_POSTGRES; }
 <STEP_BODY>"stays"         { return T_STAYS; }
 <STEP_BODY>"while"         { return T_WHILE; }
+<STEP_BODY>"passing"[ \t\r\n]+"through"  { return T_THROUGH; }
 <STEP_BODY>"through"       { return T_THROUGH; }
 <STEP_BODY>"set"           { return T_SET; }
+<STEP_BODY>"get"           { return T_GET; }
 <STEP_BODY>"inject"        { BEGIN(EXEC_ARGS); return T_INJECT; }
 <STEP_BODY>"logs"          { return T_LOGS; }
 <STEP_BODY>"not"           { return T_NOT; }

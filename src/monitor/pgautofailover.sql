@@ -121,6 +121,19 @@ CREATE TABLE pgautofailover.node
     candidatepriority	 int not null default 100,
     replicationquorum	 bool not null default true,
     nodecluster          text not null default 'default',
+    region               text not null default 'default',
+    replication_stall_since timestamptz,
+
+    -- Postgres/Citus version info, reported once per Postgres restart
+    -- (see pg_autoctl's keeper_update_pg_state) rather than on every
+    -- periodic report -- neither can change without a Postgres restart.
+    -- NULL until the first report; pg_versionnum/pg_version/
+    -- pg_versionstring are always reported together, citus_version is
+    -- NULL whenever Citus isn't installed on that node.
+    pg_versionnum        int,
+    pg_version           text,
+    pg_versionstring     text,
+    citus_version        text,
 
     -- node names must be unique in a given formation
     UNIQUE (formationid, nodename),
@@ -256,6 +269,7 @@ CREATE FUNCTION pgautofailover.register_node
     IN candidate_priority 	int default 100,
     IN replication_quorum	bool default true,
     IN node_cluster         text default 'default',
+    IN node_region          text default 'default',
    OUT assigned_node_id     bigint,
    OUT assigned_group_id    int,
    OUT assigned_group_state pgautofailover.replication_state,
@@ -269,7 +283,7 @@ AS 'MODULE_PATHNAME', $$register_node$$;
 grant execute on function
       pgautofailover.register_node(text,text,int,name,text,bigint,bigint,int,
                                    pgautofailover.replication_state,text,
-                                   int,bool,text)
+                                   int,bool,text,text)
    to autoctl_node;
 
 
@@ -603,14 +617,15 @@ CREATE FUNCTION pgautofailover.current_state
    OUT reported_tli         int,
    OUT reported_lsn         pg_lsn,
    OUT health               integer,
-   OUT nodecluster          text
+   OUT nodecluster          text,
+   OUT noderegion           text
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedtli, reportedlsn, health, nodecluster
+          reportedtli, reportedlsn, health, nodecluster, region
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id
@@ -640,14 +655,15 @@ CREATE FUNCTION pgautofailover.current_state
    OUT reported_tli         int,
    OUT reported_lsn         pg_lsn,
    OUT health               integer,
-   OUT nodecluster          text
+   OUT nodecluster          text,
+   OUT noderegion           text
  )
 RETURNS SETOF record LANGUAGE SQL STRICT
 AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedtli, reportedlsn, health, nodecluster
+          reportedtli, reportedlsn, health, nodecluster, region
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id
@@ -798,6 +814,46 @@ grant execute on function
       pgautofailover.set_node_replication_quorum(text, text, bool)
    to autoctl_node;
 
+CREATE FUNCTION pgautofailover.set_node_region
+ (
+    IN formation_id text,
+    IN node_name    text,
+    IN region       text
+ )
+RETURNS bool LANGUAGE C STRICT SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$set_node_region$$;
+
+comment on function pgautofailover.set_node_region(text, text, text)
+        is 'sets the region label for a node, identifying its data-centre or availability zone';
+
+grant execute on function
+      pgautofailover.set_node_region(text, text, text)
+   to autoctl_node;
+
+-- Deliberately NOT STRICT: version_num/version/versionstring/citus_version
+-- are all allowed to be NULL. citus_version legitimately is, whenever
+-- Citus isn't installed on that node. This is a plain self-report, called
+-- once per Postgres restart by the keeper -- not part of the FSM, and not
+-- routed through node_active() since none of this can change without a
+-- restart.
+CREATE FUNCTION pgautofailover.report_postgres_version
+ (
+    IN node_id          bigint,
+    IN pg_versionnum    int  default null,
+    IN pg_version       text default null,
+    IN pg_versionstring text default null,
+    IN citus_version    text default null
+ )
+RETURNS void LANGUAGE C SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$report_postgres_version$$;
+
+comment on function pgautofailover.report_postgres_version(bigint,int,text,text,text)
+        is 'reports a node''s Postgres server version and, when installed, Citus extension version';
+
+grant execute on function
+      pgautofailover.report_postgres_version(bigint,int,text,text,text)
+   to autoctl_node;
+
 
 create function pgautofailover.synchronous_standby_names
  (
@@ -877,3 +933,47 @@ $$;
 
 comment on function pgautofailover.formation_settings(text)
         is 'get the current replication settings a formation';
+
+--
+-- Testing-only functions, not granted to autoctl_node: they let
+-- regression/isolation tests hold the monitor's own LockFormation()/
+-- LockNodeGroup() locks explicitly, and simulate a health-check-worker
+-- observation or the passage of time through the same lock discipline
+-- production writers use, rather than bypassing it via a raw UPDATE to
+-- pgautofailover.node.
+--
+
+CREATE FUNCTION pgautofailover.testing_lock_formation
+ (
+    IN formation_id text
+ )
+RETURNS void LANGUAGE C STRICT
+AS 'MODULE_PATHNAME', $$testing_lock_formation$$;
+
+comment on function pgautofailover.testing_lock_formation(text)
+        is 'testing only: hold LockFormation() until the current transaction ends';
+
+CREATE FUNCTION pgautofailover.testing_lock_node_group
+ (
+    IN formation_id text,
+    IN group_id     int
+ )
+RETURNS void LANGUAGE C STRICT
+AS 'MODULE_PATHNAME', $$testing_lock_node_group$$;
+
+comment on function pgautofailover.testing_lock_node_group(text,int)
+        is 'testing only: hold LockNodeGroup() until the current transaction ends';
+
+CREATE FUNCTION pgautofailover.testing_set_node_health
+ (
+    IN node_id                bigint,
+    IN health                 int      default NULL,
+    IN report_time_ago        interval default NULL,
+    IN state_change_time_ago  interval default NULL,
+    IN health_check_time_ago  interval default NULL
+ )
+RETURNS void LANGUAGE C
+AS 'MODULE_PATHNAME', $$testing_set_node_health$$;
+
+comment on function pgautofailover.testing_set_node_health(bigint,int,interval,interval,interval)
+        is 'testing only: simulate a health-check-worker write and/or backdate timestamps, through the real lock discipline';

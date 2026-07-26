@@ -167,14 +167,28 @@ class VirtualNode:
             start_new_session=True,
         )
 
-    def run_unmanaged(self, command, user=os.getenv("USER")):
+    def run_unmanaged(self, command, user=os.getenv("USER"), stdout=None, stderr=None):
         """
         Executes a command under the given user from this virtual node. Returns
         an NSPopen object to control the process. NSOpen has the same API as
         subprocess.Popen. This NSPopen object needs to be manually release. In
         general you should prefer using run, where this is done automatically
         by the context manager.
+
+        stdout/stderr default to subprocess.PIPE, matching Popen's own
+        default -- pass real file objects instead for a long-running
+        background process (one that isn't communicate()'d with soon after
+        starting): nothing drains a PIPE while the process keeps running, so
+        once its cumulative output exceeds the OS pipe buffer the child
+        blocks on write() and, since nothing reads it until much later,
+        deadlocks. A real file never blocks regardless of volume.
         """
+        if stdout is None:
+            stdout = subprocess.PIPE
+
+        if stderr is None:
+            stderr = subprocess.PIPE
+
         sudo_command = [
             "sudo",
             "-E",
@@ -189,8 +203,8 @@ class VirtualNode:
             self.namespace,
             sudo_command,
             stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=stdout,
+            stderr=stderr,
             encoding="utf-8",
             errors="replace",
             start_new_session=True,

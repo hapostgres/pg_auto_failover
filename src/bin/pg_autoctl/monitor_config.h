@@ -38,6 +38,7 @@ typedef struct MonitorConfig
 	int formationCount;
 	char formationNames[MONITOR_MAX_FORMATIONS][NAMEDATALEN];
 	char formationKinds[MONITOR_MAX_FORMATIONS][NAMEDATALEN]; /* "pgsql" = default */
+	bool formationDisableSecondary[MONITOR_MAX_FORMATIONS];    /* true → secondary=false */
 } MonitorConfig;
 
 

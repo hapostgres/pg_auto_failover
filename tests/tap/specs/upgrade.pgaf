@@ -7,35 +7,52 @@
 #      monitor extension version matches the NEW binary's required version,
 #      so pre-staging the binary is safe and does not trigger self-restart yet.
 #
-#   2. Install new binary + new extension files on the monitor, then restart
-#      just the monitor listener child (not the container).  The listener
-#      detects the installed extension version ("2.1") differs from what the
-#      new binary requires ("2.2"), runs ALTER EXTENSION pgautofailover
-#      UPDATE TO '2.2', and restarts Postgres — all without stopping the
-#      supervisor (PID 1).
+#   2. Install new binary + new extension files on the monitor, then upgrade
+#      the extension with ALTER EXTENSION pgautofailover UPDATE TO '<new>',
+#      and restart the monitor container.  A full container restart (compose
+#      stop + start) is used rather than just restarting postgres in-process:
+#      without it the old .so stays resident in memory and keepers get a
+#      "loaded library requires <old> but control file specifies <new>" error.
 #
 #   3. Each keeper's node-active child polls the monitor, sees the extension
-#      is now "2.2", compares against the on-disk binary's required version
-#      ("2.2"), finds a match, and calls exit(EXIT_CODE_MONITOR).  The
-#      supervisor re-execs the node-active child from the new on-disk binary.
-#      Postgres is never restarted; only the pg_autoctl child re-execs.
+#      version now matches the new binary's required version, and calls
+#      exit(EXIT_CODE_MONITOR).  The supervisor re-execs the node-active child
+#      from the new binary.  Postgres is never restarted on data nodes; only
+#      the pg_autoctl child re-execs.
 #
 # Image build requirements — run before this spec:
-#   make -C tests/upgrade pgaf-current   → pgaf:current  (built from v2.1 tag)
+#   make -C tests/upgrade pgaf-current   → pgaf:current  (built from previous tag)
 #   make -C tests/upgrade pgaf-next      → pgaf:next     (built from current branch)
 #
-# pgaf:current contains BOTH binaries (2.1 and 2.2) and the v2.2 extension
-# files pre-staged at /usr/local/bin/pgaf/2.2/.  The "inject" steps below
-# flip an in-container symlink and copy those pre-staged files — no runtime
+# pgaf:current contains BOTH binaries (prev and next) and the next extension
+# files pre-staged at /usr/local/bin/pgaf/next/.  The "inject" steps below
+# flip an in-container symlink and install those pre-staged files — no runtime
 # dependency on pgaf:next once the images are built.
 #
-# PGVERSION defaults to 16 (the latest PG that v2.1 supports).  Rebuild with
+# PGVERSION defaults to 16.  Rebuild with
 #   PGVERSION=17 make -C tests/upgrade pgaf-current pgaf-next
-# if PREV_TAG supports PG17+ (and update the /16/ paths in test_003 below).
+# if needed.
+#
+# Note on Postgres restart: PREV_TAG auto-detects to the latest released tag
+# that isn't the current in-development version (see tests/upgrade/Makefile),
+# so this spec now exercises v2.2 -> v2.3. v2.1 had a bug where
+# keeper_pg_init_and_register called keeper_ensure_node_has_been_dropped
+# without first calling monitor_init, so the check connected to local
+# Postgres instead of the monitor and failed with "schema pgautofailover
+# does not exist" -- the v2.1 supervisor retried 5 times in rapid succession,
+# then exited, taking the container down, and the upgrade procedure had to
+# restart each data-node container to recover. v2.2 already carries the fix
+# (monitor_init is now called first), so for a v2.2 -> v2.3 upgrade the old
+# supervisor's node-active child re-execs in place and the container never
+# goes down. The "compose start" calls below (test_003b_wait_keeper_restart)
+# are consequently expected to be harmless no-ops against still-running
+# containers, kept so this spec still exercises the restart path correctly
+# whenever PREV_TAG is later pinned back to a pre-v2.2 release.
 
 cluster {
     monitor
     image "pgaf:current"
+    legacy-startup
     formation {
         node1
         node2
@@ -47,7 +64,7 @@ setup {
     wait until node1 state is primary
         and node2 state is secondary
         and node3 state is secondary
-        timeout 120s
+        timeout 300s
 }
 
 teardown {
@@ -55,7 +72,7 @@ teardown {
 }
 
 # -------------------------------------------------------------------------
-# Baseline: cluster running on pgaf:current (v2.1), extension at "2.1".
+# Baseline: cluster running on pgaf:current (previous release).
 # Write a marker row that must survive through the upgrade.
 # -------------------------------------------------------------------------
 
@@ -67,73 +84,124 @@ step test_001_baseline {
         FROM pg_available_extensions
         WHERE name = 'pgautofailover';
     }
-    expect { 2.1 }
+    expect { 2.2 }
 }
 
 # -------------------------------------------------------------------------
-# Phase 1: flip the "current" symlink on data nodes to point at the v2.2
+# Phase 1: flip the "current" symlink on data nodes to point at the next
 # binary.  Both binaries are already baked into pgaf:current — no docker cp
-# is needed.  The static shim at /usr/local/bin/pg_autoctl delegates to
+# is needed.  The symlink at /usr/local/bin/pg_autoctl delegates to
 # pgaf/current/pg_autoctl, so after the flip:
 #   - The keeper's on-disk version check (argv0 version --json) returns "2.2"
-#   - The v2.1 supervisor's next child spawn also uses v2.2 (PG_AUTOCTL_DEBUG_BIN_PATH)
-# No self-restart fires yet: the monitor extension is still "2.1" and the
-# keeper only exits when installed "2.2" matches on-disk required "2.2".
+#   - The previous supervisor's next child spawn also uses next binary
+#     (via PG_AUTOCTL_DEBUG_BIN_PATH)
+# No self-restart fires yet: the monitor extension is still at the previous
+# version and the keeper only exits when installed matches on-disk required.
 # -------------------------------------------------------------------------
 
 step test_002_inject_node_binaries {
-    exec node1  ln -sfn /usr/local/bin/pgaf/2.2 /usr/local/bin/pgaf/current
-    exec node2  ln -sfn /usr/local/bin/pgaf/2.2 /usr/local/bin/pgaf/current
-    exec node3  ln -sfn /usr/local/bin/pgaf/2.2 /usr/local/bin/pgaf/current
+    exec node1  ln -sfn /usr/local/bin/pgaf/next /usr/local/bin/pgaf/current
+    exec node2  ln -sfn /usr/local/bin/pgaf/next /usr/local/bin/pgaf/current
+    exec node3  ln -sfn /usr/local/bin/pgaf/next /usr/local/bin/pgaf/current
 }
 
 # -------------------------------------------------------------------------
-# Phase 2: flip the symlink on the monitor and install the v2.2 extension
-# files (also pre-baked into pgaf:current at /usr/local/bin/pgaf/2.2/).
-# Then restart just the listener child; the v2.2 listener runs:
-#   ALTER EXTENSION pgautofailover UPDATE TO '2.2'
+# Phase 2: install the next extension files on the monitor, restart the
+# monitor container so postgres loads the next pgautofailover.so, flip the
+# monitor symlink, then upgrade the extension catalog.
+#
+# The restart must happen BEFORE "ALTER EXTENSION ... UPDATE", not after:
+# pgautofailover is loaded via shared_preload_libraries, so the running
+# postmaster keeps the OLD .so mapped in memory even after install-extension
+# overwrites the file on disk -- new backends forked from it still see the
+# old, pre-restart library image. "ALTER EXTENSION ... UPDATE" validates
+# every CREATE FUNCTION in the upgrade script by dlsym-ing that in-memory
+# library; a function that exists only in the new .so (added after the
+# PREV_TAG release, with no equivalent there) can't resolve there and
+# CREATE FUNCTION fails with
+# "could not find function ... in file ...". Existing, unchanged functions
+# don't expose this because their symbols were already present pre-restart.
+# Restarting first makes the new postmaster load the new .so (already on
+# disk) via shared_preload_libraries, so the upgrade script's new symbols
+# resolve normally.
+#
+# compose stop + start avoids a race where the previous listener reconnects
+# to the freshly-restarted postgres at the same moment data-node keepers do,
+# producing transient "schema pgautofailover does not exist" errors that
+# exhaust the previous supervisor's restart limit.  A full container restart
+# gives data nodes a clean "monitor is down, keep retrying" signal. The
+# healthcheck (pg_autoctl status) makes "compose start" block until the
+# pg_autoctl process itself reports running -- but that fires slightly
+# before postgres finishes its own restart, so the ALTER EXTENSION call
+# right after can still race "the database system is starting up".
+# "pg_autoctl inspect pgsetup wait" closes that last, short window: it's
+# the project's own native retry-with-timeout primitive for exactly this
+# condition, rather than a hand-rolled shell polling loop.
 # -------------------------------------------------------------------------
 
 step test_003_upgrade_monitor {
-    # Install v2.2 extension files into system paths.  The script is baked into
-    # the image with PGVERSION resolved at build time (no hardcoded /16/ here).
-    exec monitor  sudo /usr/local/bin/pgaf/2.2/install-extension
-    # Run ALTER EXTENSION via psql BEFORE flipping the symlink so the v2.2
-    # listener that starts next already sees installed_version = "2.2" and
-    # skips the Postgres-restart code path (which races with the supervisor).
-    exec monitor  psql -U docker -d pg_auto_failover -c "ALTER EXTENSION pgautofailover UPDATE TO '2.2'"
-    # Flip the monitor symlink; from here pg_autoctl = v2.2.
-    exec monitor  ln -sfn /usr/local/bin/pgaf/2.2 /usr/local/bin/pgaf/current
-    # Restart postgres on the monitor so it loads the v2.2 pgautofailover.so.
-    # Without this, the old .so is still resident in memory even though the
-    # control file and SQL catalog were updated; every keeper call to the
-    # monitor functions fails with "loaded library requires 2.1 but control
-    # file specifies 2.2", exhausting the supervisor restart limit.
-    exec monitor  pg_autoctl manual service restart postgres --pgdata /var/lib/postgres/pgaf
+    # Install next extension files into system paths.
+    exec monitor  sudo /usr/local/bin/pgaf/next/install-extension
+    # Flip the monitor symlink; from here pg_autoctl = next binary.
+    exec monitor  ln -sfn /usr/local/bin/pgaf/next /usr/local/bin/pgaf/current
+    compose stop monitor
+    compose start monitor
+    exec monitor  pg_autoctl inspect pgsetup wait --pgdata /var/lib/postgres/pgaf --read-write --timeout 30
+    # Upgrade the extension catalog, now that the restarted postmaster has
+    # the next pgautofailover.so loaded.
+    exec monitor  psql -U docker -d pg_auto_failover -c "ALTER EXTENSION pgautofailover UPDATE TO '2.3'"
 }
 
 # -------------------------------------------------------------------------
-# Phase 3: wait for keepers to self-restart.
+# Phase 3: allow old keepers to exit, then restart containers with new binary.
 #
-# After the monitor extension becomes "2.2", the keeper children compare
-# installed "2.2" against the on-disk binary's required "2.2" — they match,
-# so each child calls exit(EXIT_CODE_MONITOR) and the supervisor re-execs
-# from the new binary.  No Postgres restart, no container restart.
+# After the monitor extension becomes "2.2", the v2.1 node-active children
+# compare the installed version against the on-disk binary's required version
+# — they match, so each child calls exit(EXIT_CODE_MONITOR).  The v2.1
+# supervisor then attempts to restart via keeper_pg_init_and_register, but
+# hits a bug (no monitor_init before the dropped-node check) and fails 5
+# times.  The supervisor gives up and exits, taking the container with it.
+#
+# We then restart the data-node containers.  The symlink already points at
+# the next binary, so they start with v2.2 pg_autoctl.  The v2.2 binary
+# handles the state-file restart path correctly (monitor_init is called first)
+# and Postgres comes back up cleanly from its persisted on-disk state.
 # -------------------------------------------------------------------------
 
 step test_003b_wait_keeper_restart {
-    # Give keepers time to detect the extension upgrade and self-restart.
-    # v2.1 keeper polls every ~5 s; the listener restart + ALTER EXTENSION adds
-    # another 1-2 s.  45 s gives ample time on slow CI runners.
-    exec monitor sleep 45
+    # Wait for old node-active processes to detect the extension version
+    # mismatch and exit with EXIT_CODE_MONITOR. The v2.1 supervisor then
+    # tries to restart via keeper_pg_init_and_register, which fails 5 times
+    # in rapid succession (v2.1 bug: no monitor_init before the dropped-node
+    # check). The supervisor then gives up and exits, taking the container
+    # with it. 20 s is ample time for this on any runner.
+    exec monitor sleep 20
+
+    # The data node containers are now Exited. Restart them; the symlink
+    # already points at the next binary so these containers run v2.2.
+    # The v2.2 keeper_pg_init_and_register calls monitor_init first and
+    # handles the state-file path correctly. Postgres restarts cleanly from
+    # its on-disk state (the v2.1 supervisor called pg_ctl stop before
+    # exiting, so the data directory is consistent).
+    compose start node1
+    compose start node2
+    compose start node3
+
+    # Give the restarted keepers time to initialize and start reporting.
+    exec monitor sleep 30
 }
 
 step test_004_wait_convergence {
-    # 300s: 3-node post-upgrade reconvergence can be slow on shared CI runners
-    wait until node1 state is primary
-        and node2 state is secondary
-        and node3 state is secondary
-        timeout 300s
+    # 300s: 3-node post-upgrade reconvergence can be slow on shared CI runners.
+    #
+    # Role-agnostic on purpose: test_003b's container restart dance can leave
+    # node1 down long enough (container stop + restart lag) to cross the
+    # monitor's unhealthy/demote thresholds, triggering a genuine failover to
+    # node2 before node1 comes back as a secondary. That's a legitimate FSM
+    # outcome, not a bug -- so this only asserts the shape of convergence
+    # (exactly one primary, the other two secondary), not which node ends up
+    # primary.
+    wait until primary, secondary, secondary in group 0 timeout 300s
 }
 
 # -------------------------------------------------------------------------
@@ -152,7 +220,7 @@ step test_006_verify_extension_version {
         FROM pg_available_extensions
         WHERE name = 'pgautofailover';
     }
-    expect { 2.2 }
+    expect { 2.3 }
 }
 
 # -------------------------------------------------------------------------
@@ -161,6 +229,11 @@ step test_006_verify_extension_version {
 # -------------------------------------------------------------------------
 
 step test_007_verify_data_intact {
+    # Role-agnostic for the same reason as test_004_wait_convergence: node1
+    # may have lost the primary role to node2 during test_003b's restart.
+    # The data-integrity checks below are already keyed by node name, not
+    # role, so they don't need to change.
+    wait until primary, secondary, secondary in group 0 timeout 120s
     sql node1 { SELECT count(*) FROM upgrade_marker; }
     expect { 1 }
     sql node2 { SELECT count(*) FROM upgrade_marker; }
@@ -174,7 +247,7 @@ step test_007_verify_data_intact {
 # -------------------------------------------------------------------------
 
 step test_008_failover_post_upgrade {
-    exec monitor  pg_autoctl perform promotion --name node2
+    promote node2
     wait until node2 state is primary
         and node1 state is secondary
         and node3 state is secondary

@@ -169,8 +169,11 @@ def test_009_read_from_new_primary():
 
 
 def test_010_start_node1_again():
-    node1.run()
-    assert node1.wait_until_state(target_state="secondary")
+    # node1 was hard-killed in test_008 (node1.fail()); restarting it right
+    # after occasionally hits a Postgres bind race in this test harness (see
+    # run_and_wait_with_retry()'s docstring), so retry the restart itself
+    # rather than a plain node1.run().
+    assert node1.run_and_wait_with_retry(target_state="secondary")
 
     assert node2.wait_until_state(target_state="secondary")
     assert node3.wait_until_state(target_state="primary")
@@ -195,6 +198,13 @@ def test_011_prepare_candidate_priorities():
     # priority
     assert node1.get_candidate_priority() == 90
     assert node3.get_candidate_priority() == 90
+
+    # set_candidate_priority triggers the monitor to rewrite
+    # synchronous_standby_names on the primary (node3), which goes through
+    # apply_settings before converging back. Wait for that convergence here,
+    # otherwise test_012's set_number_sync_standbys can race a primary that's
+    # still mid-transition.
+    assert node3.wait_until_state(target_state="primary")
 
 
 def test_012_prepare_replication_quorums():

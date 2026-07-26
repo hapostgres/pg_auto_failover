@@ -391,3 +391,52 @@ SELECT *
                                   current_lsn => '0/3000');
 
 RESET pgautofailover.startup_grace_period;
+
+-- ── test_007: set_node_region ────────────────────────────────────────────────
+--
+-- region is purely informational: setting it must not touch any FSM state,
+-- and must be rejected for an unknown node or an empty value.
+
+SELECT region FROM pgautofailover.node WHERE nodename = 'node1';
+
+SELECT pgautofailover.set_node_region('fsm_test', 'node1', 'dc2');
+
+SELECT region FROM pgautofailover.node WHERE nodename = 'node1';
+
+-- unknown node: error
+SELECT pgautofailover.set_node_region('fsm_test', 'unknown_node', 'dc2');
+
+-- empty region: error
+SELECT pgautofailover.set_node_region('fsm_test', 'node1', '');
+
+-- ── test_008: report_postgres_version ────────────────────────────────────────
+--
+-- Postgres/Citus version info is a plain self-report: not part of the FSM,
+-- never queried by node_active, and (unlike set_node_region) doesn't error
+-- on an unknown node -- a keeper reporting on its own already-known nodeid
+-- is a harmless no-op if that row no longer exists, same as
+-- ReportAutoFailoverNodeState()'s own report path.
+
+-- never reported yet: all four columns are NULL
+SELECT pg_versionnum, pg_version, pg_versionstring, citus_version
+  FROM pgautofailover.node WHERE nodeid = :n1;
+
+SELECT pgautofailover.report_postgres_version(
+    :n1, 170003, '17.3', 'PostgreSQL 17.3 on x86_64-linux', '12.1');
+
+SELECT pg_versionnum, pg_version, pg_versionstring, citus_version
+  FROM pgautofailover.node WHERE nodeid = :n1;
+
+-- citus_version omitted (defaults to NULL): a later report legitimately
+-- clears a previously-reported citus_version, e.g. Citus was removed
+SELECT pgautofailover.report_postgres_version(
+    :n1, 170003, '17.3', 'PostgreSQL 17.3 on x86_64-linux');
+
+SELECT pg_versionnum, pg_version, pg_versionstring, citus_version
+  FROM pgautofailover.node WHERE nodeid = :n1;
+
+-- null node_id: error
+SELECT pgautofailover.report_postgres_version(NULL, 170003);
+
+-- unknown node_id: silent no-op, not an error
+SELECT pgautofailover.report_postgres_version(-1, 170003);

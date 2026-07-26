@@ -19,6 +19,11 @@ Example of state transitions in a new cluster
 A good way to get acquainted with the states is by examining the
 transitions of a cluster from birth to high availability.
 
+.. figure:: ./tikz/seq-birth-of-a-cluster.svg
+   :alt: Sequence diagram of two nodes and the monitor from registration to primary/secondary
+
+   From two freshly registered nodes to a converged primary/secondary pair
+
 After starting a monitor and running keeper init for the first data node
 ("node A"), the monitor registers the state of that node as "init" with
 a goal state of "single." The init state means the monitor knows nothing
@@ -161,29 +166,37 @@ Maintenance
 ^^^^^^^^^^^
 
 The cluster administrator can manually move a secondary into the
-maintenance state to gracefully take it offline. The primary will then
-transition from state primary to wait_primary, during which time the
-secondary will be online to accept writes. When the old primary reaches
-the wait_primary state then the secondary is safe to take offline with
-minimal consequences.
+maintenance state to gracefully take it offline, and a secondary or
+catching-up node reaches this state on its own too when it receives a
+plain ``SIGTERM`` (see :ref:`pg_autoctl_stop`) — ``pg_autoctl`` requests
+maintenance on its own behalf as part of a graceful shutdown. The primary
+will then transition from state primary to wait_primary, during which time
+the secondary will be online to accept writes. When the old primary
+reaches the wait_primary state then the secondary is safe to take offline
+with minimal consequences.
 
 Prepare_maintenance
 ^^^^^^^^^^^^^^^^^^^
 
 The cluster administrator can manually move a primary node into the
-maintenance state to gracefully take it offline. The primary then
-transitions to the prepare_maintenance state to make sure the secondary is
-not missing any writes. In the prepare_maintenance state, the primary shuts
-down.
+maintenance state to gracefully take it offline, and a primary reaches this
+state on its own too when it receives a plain ``SIGTERM`` (see
+:ref:`pg_autoctl_stop`) — ``pg_autoctl`` requests maintenance on its own
+behalf as part of a graceful shutdown. The primary then transitions to the
+prepare_maintenance state to make sure the secondary is not missing any
+writes. In the prepare_maintenance state, the primary shuts down.
 
 Wait_maintenance
 ^^^^^^^^^^^^^^^^
 
-The custer administrator can manually move a secondary into the maintenance
-state to gracefully take it offline. Before reaching the maintenance state
-though, we want to switch the primary node to asynchronous replication, in
-order to avoid writes being blocked. In the state wait_maintenance the
-standby waits until the primary has reached wait_primary.
+The cluster administrator can manually move a secondary into the maintenance
+state to gracefully take it offline, and a secondary reaches this state on
+its own too when it receives a plain ``SIGTERM`` (see :ref:`pg_autoctl_stop`)
+— ``pg_autoctl`` requests maintenance on its own behalf as part of a
+graceful shutdown. Before reaching the maintenance state though, we want to
+switch the primary node to asynchronous replication, in order to avoid
+writes being blocked. In the state wait_maintenance the standby waits until
+the primary has reached wait_primary.
 
 Draining
 ^^^^^^^^

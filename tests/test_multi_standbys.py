@@ -342,7 +342,13 @@ def test_015_003_set_properties():
     q = "select pgautofailover.set_formation_number_sync_standbys('default', 1)"
     monitor.run_sql_query(q)
 
-    assert node1.wait_until_assigned_state(target_state="primary")
+    # Wait for node1 to enter apply_settings: fsm_apply_settings() runs and
+    # writes the new synchronous_standby_names to postgresql.conf.  The keeper
+    # then calls fsm_enable_sync_rep() which returns false (no standby is yet
+    # in quorum sync state), so node1 stays in apply_settings until node2/node3
+    # restart in test_015_004.  Don't wait for primary here — that would time
+    # out because the transition cannot complete without live sync standbys.
+    assert node1.wait_until_state(target_state="apply_settings")
 
     eq_(node1.get_number_sync_standbys(), 1)
 

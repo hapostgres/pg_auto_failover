@@ -23,16 +23,20 @@ multi_ifdown
 multi_maintenance
 multi_alternate
 guard_data_loss
+replication_stall_3dc
 fast_forward
 extension_update
 installcheck
 # Upgrade test — requires pgaf:current and pgaf:next images to be pre-built:
 #   make -C tests/upgrade pgaf-current pgaf-next
 upgrade
+# Debug/diagnostic specs — not run in CI, useful for interactive investigation:
+# debug_failover_pg19
+
 # Citus tests (uncomment when CITUS_CLUSTER=1):
-# basic_citus_operation
+# citus_basic_operation
 # citus_cluster_name
 # citus_force_failover
 # citus_multi_standbys
 # citus_skip_pg_hba
-# nonha_citus_operation
+# citus_nonha_operation

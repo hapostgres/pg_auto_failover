@@ -8,7 +8,7 @@ cluster {
     monitor
     formation {
         node1 listen
-        node2 launch deferred listen
+        node2 create and launch deferred listen
     }
 }
 

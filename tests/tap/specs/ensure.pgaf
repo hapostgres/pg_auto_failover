@@ -2,7 +2,7 @@
 # Postgres after an unexpected stop, survives a demoted transition, and
 # correctly orchestrates a failover when Postgres is broken on the primary.
 #
-# node2 is declared launch deferred so it starts in single mode for test_001,
+# node2 is declared create and launch deferred so it starts in single mode for test_001,
 # matching the Python test order (node2 is not created until test_003).
 #
 # Ported from tests/test_ensure.py
@@ -12,7 +12,7 @@ cluster {
     monitor
     formation {
         node1
-        node2 launch deferred
+        node2 create and launch deferred
     }
 }
 
@@ -41,10 +41,26 @@ step test_003_init_secondary {
     wait until node2 state is secondary
         and node1 state is primary
         timeout 90s
-    stop postgres node2
+    # Stop postgres directly via pg_ctl, bypassing pg_autoctl entirely, while
+    # pg_autoctl keeps running and still expects Postgres to be up.  This
+    # tests that the keeper's own "ensure" polling loop notices the
+    # unexpected death and restarts Postgres on its own.  Matches the Python
+    # predecessor's node2.stop_postgres() (pg_ctl --mode fast stop, bypassing
+    # pg_autoctl).  "stop postgres <node>" (pgctl off) cannot test this: it
+    # explicitly tells the keeper not to restart, which is the opposite of
+    # what "ensure" is supposed to demonstrate.
+    exec node2  pg_ctl --wait --mode fast stop
     wait until node2 state is secondary
         and node1 state is primary
         timeout 90s
+    # node2 self-reporting "secondary" above only means its own FSM converged;
+    # the monitor's independent health-check worker (5s probe period, 20s
+    # unhealthy-timeout) may not have re-confirmed node2 healthy yet after the
+    # forced restart. If test_004 kills node1 inside that window, the monitor
+    # can catch node2 mid-unhealthy and never fail over to it, stalling the
+    # next step. Give the health-check worker a few more probe cycles to
+    # clear the earlier "bad" mark before destabilizing node1.
+    sleep 15s
 }
 
 step test_004_demoted {

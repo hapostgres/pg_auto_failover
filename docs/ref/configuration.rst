@@ -106,6 +106,11 @@ database where the extension has been deployed::
   setting    | true
   unit       |
   short_desc | Refuse to proceed with failover when quorum nodes have not yet reported their LSN.
+  -[ RECORD 11 ]---------------------------------------------------------------------------------------------------
+  name       | pgautofailover.replication_stall_timeout
+  setting    | 10000
+  unit       | ms
+  short_desc | Assign wait_primary when the primary has had no standby connected in pg_stat_replication for this long.
 
 pgautofailover.guard_data_loss
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -129,6 +134,26 @@ Setting ``guard_data_loss = false`` globally in ``postgresql.conf`` is
 failovers.  Use ``ALTER DATABASE pg_auto_failover SET
 pgautofailover.guard_data_loss = false;`` only if you want the setting to
 persist across monitor restarts with explicit intent, and document the reason.
+
+pgautofailover.replication_stall_timeout
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This setting addresses a 3-datacentre split-brain scenario: the primary and
+its standby lose connectivity to each other, but both remain reachable from
+the monitor. In that situation the primary can neither detect the standby
+is gone (it's still reachable, just not to the standby) nor get demoted by
+the monitor (the monitor still sees it as healthy), so
+``synchronous_standby_names`` stays set and every ``COMMIT`` on the primary
+hangs indefinitely waiting for a standby acknowledgement that will never
+come.
+
+When a ``PRIMARY`` node reports an empty ``pg_stat_replication`` sync state
+for longer than ``pgautofailover.replication_stall_timeout`` (default
+``10s``), the monitor assigns ``wait_primary``. This clears
+``synchronous_standby_names`` and unblocks writes, without initiating a
+failover — the standby simply rejoins as ``secondary`` once the link is
+restored. See :ref:`pg_autoctl_show_state` and :ref:`pg_autoctl_watch` for
+how to observe a node in ``wait_primary``.
 
 You can edit the parameters as usual with PostgreSQL, either in the
 ``postgresql.conf`` file or using ``ALTER DATABASE pg_auto_failover SET parameter =
