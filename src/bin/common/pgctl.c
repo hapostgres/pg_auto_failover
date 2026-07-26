@@ -1452,12 +1452,26 @@ pg_rewind(const char *pgdata,
 		setenv("PGPASSWORD", replicationSource->password, 1);
 	}
 
+	/*
+	 * pg_rewind needs a database to connect to, but not any particular one --
+	 * it only runs a handful of catalog queries and a replication-mode
+	 * connection. Using the formation's own configured database name (rather
+	 * than a hardcoded "postgres") matters because pg_autoctl's own HBA rules
+	 * (pghba_ensure_host_rules_exist) are written for exactly that database
+	 * name plus the "replication" pseudo-database -- never literally
+	 * "postgres" unless that also happens to be the configured name. A
+	 * formation created with --dbname other than "postgres" would otherwise
+	 * have pg_rewind's connection rejected by every peer's pg_hba.conf,
+	 * every time, unconditionally.
+	 */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
-								  "postgres", /* pg_rewind needs a database */
+								  IS_EMPTY_STRING_BUFFER(replicationSource->dbname)
+								  ? "postgres"
+								  : replicationSource->dbname,
 								  NULL,       /* no password here */
 								  replicationSource->applicationName,
 								  replicationSource->sslOptions,
