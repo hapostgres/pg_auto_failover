@@ -115,20 +115,28 @@ XDG_DATA_HOME
 Examples
 --------
 
-Accepting a timeline that no node has ever reported fails::
+In this two-node example, ``node2`` was network-partitioned, promoted
+directly at the Postgres level, and given a few local-only writes — a
+genuine fork onto timeline 2. Unpinned, ``pg_autoctl show timeline`` reads
+both nodes as clean, because there's no sibling node to disagree with
+``node2``'s fork (see :ref:`pg_autoctl_show_timeline` for the full example
+this continues from)::
 
-   $ pg_autoctl accept timeline --tli 99 --formation default
-   07:50:28 522 INFO  Targetting group 0 in formation "default"
-   07:50:28 522 ERROR Monitor ERROR:  timeline 99 has never been reported by any node in formation "default" group 0
-   07:50:28 522 ERROR Monitor CONTEXT:  PL/pgSQL function pgautofailover.accept_timeline(text,integer,integer,text) line 15 at RAISE
-   07:50:28 522 ERROR SQL query: SELECT pgautofailover.accept_timeline($1, $2, $3, $4)
-   07:50:28 522 ERROR SQL params: 'default', '0', '99', NULL
-   07:50:28 522 ERROR Failed to accept timeline 99 for formation default and group 0
-   07:50:28 522 FATAL Failed to accept timeline 99 for formation "default" group 0, see above for details
+   $ pg_autoctl show timeline --formation default
+        TLI | Parent TLI | Switchpoint LSN
+   ---------+------------+----------------
+          1 |          0 |             0/0
+          2 |          1 |       0/3000130
 
-Pinning the real lineage after confirming it against ``pg_autoctl show
-timeline`` (see :ref:`pg_autoctl_show_timeline` for the full example this
-continues from) succeeds and immediately affects the next election::
+                   Name | NodeId |  TLI |         LSN | Status
+   ---------------------+--------+------+-------------+-----------------------------------------
+                  node1 |      1 |    1 |   0/3000130 | ok, on accepted lineage
+                  node2 |      2 |    2 |   0/3016330 | ok, on accepted lineage
+
+That's exactly the case ``pg_autoctl accept timeline`` is for: pinning
+which timeline is really ground truth, confirmed from other evidence (here,
+knowing which node was manually promoted). This succeeds and immediately
+affects the next election::
 
    $ pg_autoctl accept timeline --tli 1 --formation default \
        --reason "node2 self-promoted out of band during a network partition; tli 2 confirmed false via pg_controldata"

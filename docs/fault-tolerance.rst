@@ -212,11 +212,9 @@ never took.
 
 Ordinary streaming replication can never resolve this: it's not lag, it's
 divergence. Postgres itself refuses the reconnect (``requested timeline N
-is not a child of this server's history``), and pre-fix, ``pg_autoctl`` had
-no code path that recognized this case and just retried the same doomed
-reconnect forever.
+is not a child of this server's history``).
 
-pg_auto_failover now detects and resolves this automatically in the common
+pg_auto_failover detects and resolves this automatically in the common
 case: before trusting a bare timeline-number comparison, a standby
 reconnecting to a (possibly new) primary walks the primary's real
 timeline history to tell "still catching up" apart from "diverged onto a

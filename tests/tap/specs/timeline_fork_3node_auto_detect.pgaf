@@ -1,0 +1,126 @@
+# Companion to timeline_fork_report_lsn_deadlock.pgaf's 2-node scenario.
+#
+# The natural assumption is that a 3rd node fixes the auto-detection blind
+# spot documented in that spec's header ("no sibling to disagree with the
+# forked node"), since now there IS a sibling. That assumption is WRONG, and
+# demonstrating why is this spec's actual point.
+#
+# FilterNodesByTimelineAncestry()'s auto-detection heuristic (no operator
+# pin) is "the reference lineage is whichever branch contains the highest
+# reported tli". It only excludes a candidate when a genuinely COMPETING
+# branch is reported by someone else -- two nodes both diverging from the
+# same point onto two DIFFERENT tlis. A sibling that simply stays behind,
+# never advancing past the original timeline, isn't competing with
+# anything: node3 forking onto tli=2 while node1/node2 stay on tli=1 is,
+# structurally, indistinguishable from node3 having legitimately been
+# promoted past two normal, honestly-lagging standbys -- tli=1 really is
+# node3's own recorded parent, so it passes the ancestry check as tli=2's
+# ancestor. More nodes alone doesn't help; only a genuinely competing
+# report would. `pg_autoctl accept timeline` is still required here, same
+# as the 2-node case -- this spec exercises that explicitly instead of
+# leaving it as a documented-but-unexercised limitation.
+#
+# Same fork-manufacturing technique as timeline_fork_report_lsn_deadlock.pgaf
+# (network disconnect, pg_ctl promote, local writes), applied to node3
+# instead of node2, with node1 (primary) and node2 (secondary) continuing
+# to stream normally throughout.
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+        node3
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    wait until node2 state is secondary
+        and node3 state is secondary
+        timeout 60s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+step test_001_fork_node3_out_of_band {
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 60s
+    network disconnect node3
+    exec node3  pg_ctl promote --pgdata /var/lib/postgres/pgaf
+    sleep 3s
+    # node3's synchronous_standby_names is still the 3-node-formation value
+    # (set on every node's local config, not only the primary's, so it's
+    # ready to serve if promoted for real) -- ANY 1 (..., ...). Now that
+    # it's isolated and standalone, no write could ever satisfy that
+    # quorum, so ordinary writes would just hang forever. A real admin (or
+    # buggy tooling) forcing writes on an isolated, out-of-band-promoted
+    # node in this situation would hit the exact same wall and route
+    # around it the same way -- this is not a workaround specific to the
+    # test.
+    sql node3 { SET synchronous_commit TO local; CREATE TABLE divergent_data(a int); }
+    sql node3 { SET synchronous_commit TO local; INSERT INTO divergent_data VALUES (1), (2), (3); }
+    sql node3 { CHECKPOINT; }
+}
+
+step test_002_reconnect_and_confirm_published {
+    network connect node3
+    wait until node3 state is secondary  timeout 60s
+    # give node3's keeper at least one periodic tick to publish its new
+    # (diverged) timeline history before checking
+    sleep 5s
+    sql monitor {
+        SELECT EXISTS (
+            SELECT 1
+              FROM pgautofailover.node_timeline_history h
+              JOIN pgautofailover.node n ON n.nodeid = h.nodeid
+             WHERE n.nodename = 'node3' AND h.tli = 2 AND h.parenttli = 1
+        );
+    }
+    expect { t }
+}
+
+step test_003_show_timeline_still_reads_clean {
+    # node3 (tli=2) is not competing with node1/node2 (tli=1) -- it's simply
+    # ahead of them, and tli=1 genuinely is tli=2's recorded parent. The
+    # auto-detected reference becomes tli=2 (the highest reported), under
+    # which node1/node2 correctly show as ancestors and node3 shows as the
+    # (wrongly trusted) tip. Nothing here reads as a fork despite one
+    # genuinely existing -- three nodes, same blind spot as two.
+    exec node1  pg_autoctl show timeline
+    expect { ok, on accepted lineage }
+}
+
+step test_004_accept_timeline_flags_the_fork {
+    exec node1  pg_autoctl accept timeline --tli 1 --formation default --reason "node3 self-promoted out of band during a network partition"
+    expect { accepted as ground truth }
+
+    exec node1  pg_autoctl show timeline
+    expect { FORK }
+}
+
+step test_005_maintenance_cycle_recovers {
+    exec node3  pg_autoctl enable maintenance
+    wait until node3 state is maintenance  timeout 60s
+    exec node3  pg_autoctl disable maintenance
+    wait until node3 state is secondary  timeout 60s
+
+    sql monitor {
+        SELECT reportedtli FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { 1 }
+
+    sql node3 { SELECT to_regclass('public.divergent_data'); }
+    expect { }
+}
+
+step test_006_show_timeline_clean_after_recovery {
+    exec node1  pg_autoctl show timeline
+    expect { ok, on accepted lineage }
+}

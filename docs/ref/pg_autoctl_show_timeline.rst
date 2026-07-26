@@ -167,3 +167,88 @@ no need to run an "accept" or "resolve" command a second time::
 
 See :ref:`resolving_timeline_fork` for the full walkthrough, including how
 to drive the resync.
+
+More nodes doesn't fix the blind spot by itself
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+It's tempting to assume that a third node closes the gap above — surely,
+with a sibling around to disagree, auto-detection catches the fork? A
+normal three-node formation's ``show timeline`` looks like this::
+
+   $ pg_autoctl show timeline --formation default
+        TLI | Parent TLI | Switchpoint LSN
+   ---------+------------+----------------
+          1 |          0 |             0/0
+
+                   Name | NodeId |  TLI |         LSN | Status
+   ---------------------+--------+------+-------------+-----------------------------------------
+                  node1 |      1 |    1 |   0/5000060 | ok, on accepted lineage
+                  node2 |      2 |    1 |   0/5000060 | ok, on accepted lineage
+                  node3 |      3 |    1 |   0/5000060 | ok, on accepted lineage
+
+Now fork ``node3`` the same way as before (network-partition it, promote it
+directly at the Postgres level, give it a couple of local-only writes),
+while ``node1`` and ``node2`` keep streaming normally the whole time.
+Unpinned, this **still reads as clean**::
+
+   $ pg_autoctl show timeline --formation default
+        TLI | Parent TLI | Switchpoint LSN
+   ---------+------------+----------------
+          1 |          0 |             0/0
+          2 |          1 |       0/5089AC0
+
+                   Name | NodeId |  TLI |         LSN | Status
+   ---------------------+--------+------+-------------+-----------------------------------------
+                  node1 |      1 |    1 |   0/5089AC0 | ok, on accepted lineage
+                  node2 |      2 |    1 |   0/5089AC0 | ok, on accepted lineage
+                  node3 |      3 |    2 |   0/509FC88 | ok, on accepted lineage
+
+The auto-detection heuristic (no operator pin) is "the reference lineage is
+whichever branch contains the highest reported timeline" — and it only
+*excludes* a candidate when a genuinely **competing** branch is reported by
+someone else: two nodes each diverging from the same point onto two
+different timelines. ``node1`` and ``node2`` aren't competing with
+``node3`` here, they're simply behind it, and timeline 1 really is
+``node3``'s own recorded parent. Structurally that's indistinguishable from
+``node3`` having been legitimately promoted past two ordinary, honestly
+lagging standbys. A third node only helps when it *also* reports a
+divergent history from the same switchpoint; a sibling that just stays
+behind doesn't contest anything.
+
+:ref:`pg_autoctl_accept_timeline` is still the way out, exactly as in the
+two-node case::
+
+   $ pg_autoctl accept timeline --tli 1 --formation default --reason "node3 self-promoted out of band during a network partition"
+   Timeline 1 accepted as ground truth for formation "default" group 0. The election will now only consider nodes on that lineage; other nodes need pg_rewind before rejoining.
+
+   $ pg_autoctl show timeline --formation default
+        TLI | Parent TLI | Switchpoint LSN
+   ---------+------------+----------------
+          1 |          0 |             0/0
+          2 |          1 |       0/5089AC0
+
+                   Name | NodeId |  TLI |         LSN | Status
+   ---------------------+--------+------+-------------+-----------------------------------------
+                  node1 |      1 |    1 |   0/5089AC0 | ok, on accepted lineage
+                  node2 |      2 |    1 |   0/5089AC0 | ok, on accepted lineage
+                  node3 |      3 |    2 |   0/509FCC0 | FORK: diverges from the reference timeline, pg_rewind required
+
+   One or more nodes have diverged from the reference timeline (see FORK above).
+   See `pg_autoctl accept timeline --help` to resolve.
+
+Forcing ``node3`` through a resync then recovers it exactly as before::
+
+   $ pg_autoctl show timeline --formation default
+        TLI | Parent TLI | Switchpoint LSN
+   ---------+------------+----------------
+          1 |          0 |             0/0
+          2 |          1 |       0/5089AC0
+
+                   Name | NodeId |  TLI |         LSN | Status
+   ---------------------+--------+------+-------------+-----------------------------------------
+                  node1 |      1 |    1 |   0/7000060 | ok, on accepted lineage
+                  node2 |      2 |    1 |   0/7000060 | ok, on accepted lineage
+                  node3 |      3 |    1 |   0/7000060 | ok, on accepted lineage
+
+See ``tests/tap/specs/timeline_fork_3node_auto_detect.pgaf`` for the
+automated version of this exact scenario.
