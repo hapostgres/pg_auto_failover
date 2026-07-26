@@ -35,8 +35,8 @@
  */
 bool
 keeper_fetch_local_timeline_history(PostgresSetup *pgSetup,
-									 uint32_t currentTLI,
-									 IdentifySystem *system)
+									uint32_t currentTLI,
+									IdentifySystem *system)
 {
 	char historyFileName[MAXPGPATH] = { 0 };
 	char historyFilePath[MAXPGPATH] = { 0 };

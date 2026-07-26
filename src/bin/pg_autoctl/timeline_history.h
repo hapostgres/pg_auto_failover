@@ -19,8 +19,8 @@
 #include "pgsql.h"
 
 bool keeper_fetch_local_timeline_history(PostgresSetup *pgSetup,
-										  uint32_t currentTLI,
-										  IdentifySystem *system);
+										 uint32_t currentTLI,
+										 IdentifySystem *system);
 
 char * timeline_history_to_json(IdentifySystem *system);
 
