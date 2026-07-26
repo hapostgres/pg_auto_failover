@@ -24,6 +24,28 @@
  */
 typedef bool (*ReachAssignedStateFunction)(Keeper *keeper);
 
+/*
+ * FsmPhase groups NODE_KIND_ANY transitions into the narrative phase of a
+ * node's life they belong to -- used only to split "pg_autoctl inspect fsm
+ * mermaid" into several smaller diagrams instead of one dense graph (see
+ * fsm_mermaid.c). FSM_PHASE_NONE (the zero value) marks a row that either
+ * doesn't apply (Citus-specific rows never need a phase, since the mermaid
+ * generator skips non-NODE_KIND_ANY rows entirely) or that a NODE_KIND_ANY
+ * row was added without being classified -- fsm_mermaid.c warns on the
+ * latter rather than silently rendering nothing for it.
+ */
+typedef enum
+{
+	FSM_PHASE_NONE = 0,
+	FSM_PHASE_INIT,
+	FSM_PHASE_STEADY_STATE,
+	FSM_PHASE_FAILOVER,
+	FSM_PHASE_MAINTENANCE,
+	FSM_PHASE_REMOVAL,
+
+	FSM_PHASE_COUNT
+} FsmPhase;
+
 /* defines a possible transition in the FSM */
 typedef struct KeeperFSMTransition
 {
@@ -32,6 +54,7 @@ typedef struct KeeperFSMTransition
 	PgInstanceKind pgKind;
 	const char *comment;
 	ReachAssignedStateFunction transitionFunction;
+	FsmPhase phase;
 } KeeperFSMTransition;
 
 /* src/bin/pg_autoctl/fsm.c */

@@ -4,15 +4,15 @@
  *   fsm.c), split into narrative phases so each diagram stays small enough
  *   to read at a glance, instead of one dense 77-edge/20-state graph.
  *
- * The phase a given (current, assigned) edge belongs to is not derived
- * automatically from KeeperFSM[] -- it is a small, hand-curated
- * classification (FsmPhaseMap below), verified once against every edge's
- * real transition comment so it stays grounded in what the FSM actually
- * does rather than a guess. If a new transition is ever added to
- * KeeperFSM[], this table needs a matching new entry, and the generator
- * intentionally logs a warning (not silently drops the edge) if one is
- * missing, so that omission gets noticed instead of silently disappearing
- * from every diagram.
+ * There is exactly one FSM table: KeeperFSM[] in fsm.c. Its `phase` field
+ * (declared alongside the rest of KeeperFSMTransition in fsm.h) tags each
+ * NODE_KIND_ANY row with the narrative phase it belongs to, curated once
+ * against every edge's real transition comment. This generator walks
+ * KeeperFSM[] directly, the same way print_fsm_for_graphviz() does -- it
+ * just groups by that field instead of dumping every row into one graph.
+ * If a new NODE_KIND_ANY transition is ever added without setting `phase`,
+ * it defaults to FSM_PHASE_NONE and this generator logs a warning rather
+ * than silently omitting it from every diagram.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -29,7 +29,8 @@
 #include "state.h"
 
 
-const char *FsmMermaidPhaseName[FSM_PHASE_COUNT] = {
+const char *FsmPhaseName[FSM_PHASE_COUNT] = {
+	"none",                    /* FSM_PHASE_NONE, never requested via CLI */
 	"init",
 	"steady-state",
 	"failover",
@@ -37,107 +38,14 @@ const char *FsmMermaidPhaseName[FSM_PHASE_COUNT] = {
 	"removal"
 };
 
-const char *FsmMermaidPhaseTitle[FSM_PHASE_COUNT] = {
+const char *FsmPhaseTitle[FSM_PHASE_COUNT] = {
+	"(none)",
 	"Node init / join",
 	"Steady-state / config changes",
 	"Failover / promotion",
 	"Maintenance",
 	"Node removal / drop"
 };
-
-typedef struct FsmPhaseMapEntry
-{
-	NodeState current;
-	NodeState assigned;
-	FsmMermaidPhase phase;
-} FsmPhaseMapEntry;
-
-/*
- * One entry per unique (current, assigned) pair reachable from any node
- * kind (Citus coordinator/worker transitions never introduce a different
- * edge shape than NODE_KIND_ANY -- only a different transition function --
- * so this table, like the generator below, only needs to reason about the
- * ANY-kind graph). Verified against fsm.c: 77 real transitions plus the
- * ANY_STATE -> DROPPED_STATE catch-all = 78 rows here; the NO_STATE ->
- * NO_STATE sentinel row in KeeperFSM[] is skipped explicitly, never
- * classified.
- */
-static const FsmPhaseMapEntry FsmPhaseMap[] = {
-	{ INIT_STATE, SINGLE_STATE, FSM_PHASE_INIT },
-	{ DROPPED_STATE, SINGLE_STATE, FSM_PHASE_INIT },
-	{ DROPPED_STATE, REPORT_LSN_STATE, FSM_PHASE_INIT },
-	{ SINGLE_STATE, WAIT_PRIMARY_STATE, FSM_PHASE_INIT },
-	{ INIT_STATE, WAIT_STANDBY_STATE, FSM_PHASE_INIT },
-	{ DROPPED_STATE, WAIT_STANDBY_STATE, FSM_PHASE_INIT },
-	{ WAIT_STANDBY_STATE, CATCHINGUP_STATE, FSM_PHASE_INIT },
-	{ INIT_STATE, REPORT_LSN_STATE, FSM_PHASE_INIT },
-
-	{ PRIMARY_STATE, WAIT_PRIMARY_STATE, FSM_PHASE_STEADY_STATE },
-	{ WAIT_PRIMARY_STATE, PRIMARY_STATE, FSM_PHASE_STEADY_STATE },
-	{ SECONDARY_STATE, CATCHINGUP_STATE, FSM_PHASE_STEADY_STATE },
-	{ CATCHINGUP_STATE, SECONDARY_STATE, FSM_PHASE_STEADY_STATE },
-	{ SECONDARY_STATE, WAIT_STANDBY_STATE, FSM_PHASE_STEADY_STATE },
-	{ PRIMARY_STATE, APPLY_SETTINGS_STATE, FSM_PHASE_STEADY_STATE },
-	{ WAIT_PRIMARY_STATE, APPLY_SETTINGS_STATE, FSM_PHASE_STEADY_STATE },
-	{ APPLY_SETTINGS_STATE, PRIMARY_STATE, FSM_PHASE_STEADY_STATE },
-	{ APPLY_SETTINGS_STATE, WAIT_PRIMARY_STATE, FSM_PHASE_STEADY_STATE },
-
-	{ PRIMARY_STATE, DRAINING_STATE, FSM_PHASE_FAILOVER },
-	{ DRAINING_STATE, DEMOTED_STATE, FSM_PHASE_FAILOVER },
-	{ PRIMARY_STATE, DEMOTED_STATE, FSM_PHASE_FAILOVER },
-	{ PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, FSM_PHASE_FAILOVER },
-	{ APPLY_SETTINGS_STATE, DRAINING_STATE, FSM_PHASE_FAILOVER },
-	{ APPLY_SETTINGS_STATE, DEMOTED_STATE, FSM_PHASE_FAILOVER },
-	{ APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, FSM_PHASE_FAILOVER },
-	{ DRAINING_STATE, DEMOTE_TIMEOUT_STATE, FSM_PHASE_FAILOVER },
-	{ DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, FSM_PHASE_FAILOVER },
-	{ WAIT_PRIMARY_STATE, DEMOTED_STATE, FSM_PHASE_FAILOVER },
-	{ DEMOTE_TIMEOUT_STATE, PRIMARY_STATE, FSM_PHASE_FAILOVER },
-	{ DEMOTED_STATE, CATCHINGUP_STATE, FSM_PHASE_FAILOVER },
-	{ SECONDARY_STATE, PREP_PROMOTION_STATE, FSM_PHASE_FAILOVER },
-	{ CATCHINGUP_STATE, PREP_PROMOTION_STATE, FSM_PHASE_FAILOVER },
-	{ PREP_PROMOTION_STATE, STOP_REPLICATION_STATE, FSM_PHASE_FAILOVER },
-	{ STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, FSM_PHASE_FAILOVER },
-	{ PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, FSM_PHASE_FAILOVER },
-	{ SECONDARY_STATE, REPORT_LSN_STATE, FSM_PHASE_FAILOVER },
-	{ CATCHINGUP_STATE, REPORT_LSN_STATE, FSM_PHASE_FAILOVER },
-	{ REPORT_LSN_STATE, PREP_PROMOTION_STATE, FSM_PHASE_FAILOVER },
-	{ REPORT_LSN_STATE, FAST_FORWARD_STATE, FSM_PHASE_FAILOVER },
-	{ FAST_FORWARD_STATE, PREP_PROMOTION_STATE, FSM_PHASE_FAILOVER },
-	{ REPORT_LSN_STATE, JOIN_SECONDARY_STATE, FSM_PHASE_FAILOVER },
-	{ REPORT_LSN_STATE, SECONDARY_STATE, FSM_PHASE_FAILOVER },
-	{ JOIN_SECONDARY_STATE, SECONDARY_STATE, FSM_PHASE_FAILOVER },
-	{ DRAINING_STATE, REPORT_LSN_STATE, FSM_PHASE_FAILOVER },
-	{ DEMOTED_STATE, REPORT_LSN_STATE, FSM_PHASE_FAILOVER },
-
-	{ PRIMARY_STATE, PREPARE_MAINTENANCE_STATE, FSM_PHASE_MAINTENANCE },
-	{ PREPARE_MAINTENANCE_STATE, MAINTENANCE_STATE, FSM_PHASE_MAINTENANCE },
-	{ PRIMARY_STATE, MAINTENANCE_STATE, FSM_PHASE_MAINTENANCE },
-	{ SECONDARY_STATE, WAIT_MAINTENANCE_STATE, FSM_PHASE_MAINTENANCE },
-	{ CATCHINGUP_STATE, WAIT_MAINTENANCE_STATE, FSM_PHASE_MAINTENANCE },
-	{ SECONDARY_STATE, MAINTENANCE_STATE, FSM_PHASE_MAINTENANCE },
-	{ CATCHINGUP_STATE, MAINTENANCE_STATE, FSM_PHASE_MAINTENANCE },
-	{ WAIT_MAINTENANCE_STATE, MAINTENANCE_STATE, FSM_PHASE_MAINTENANCE },
-	{ MAINTENANCE_STATE, CATCHINGUP_STATE, FSM_PHASE_MAINTENANCE },
-	{ PREPARE_MAINTENANCE_STATE, CATCHINGUP_STATE, FSM_PHASE_MAINTENANCE },
-	{ MAINTENANCE_STATE, REPORT_LSN_STATE, FSM_PHASE_MAINTENANCE },
-	{ PREPARE_MAINTENANCE_STATE, REPORT_LSN_STATE, FSM_PHASE_MAINTENANCE },
-
-	{ PRIMARY_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ WAIT_PRIMARY_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ APPLY_SETTINGS_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ DEMOTED_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ DEMOTE_TIMEOUT_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ DRAINING_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ SECONDARY_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ CATCHINGUP_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ PREP_PROMOTION_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ STOP_REPLICATION_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ REPORT_LSN_STATE, SINGLE_STATE, FSM_PHASE_REMOVAL },
-	{ ANY_STATE, DROPPED_STATE, FSM_PHASE_REMOVAL },
-};
-
-#define FSM_PHASE_MAP_COUNT (sizeof(FsmPhaseMap) / sizeof(FsmPhaseMap[0]))
 
 /* the six colour classes used to shade the diagrams */
 typedef enum
@@ -249,15 +157,16 @@ FsmMermaidId(NodeState state)
 
 
 bool
-fsm_mermaid_phase_from_string(const char *name, FsmMermaidPhase *phase)
+fsm_mermaid_phase_from_string(const char *name, FsmPhase *phase)
 {
 	int i = 0;
 
-	for (i = 0; i < FSM_PHASE_COUNT; i++)
+	/* start at 1: FSM_PHASE_NONE (index 0) is never a valid CLI argument */
+	for (i = 1; i < FSM_PHASE_COUNT; i++)
 	{
-		if (strcmp(name, FsmMermaidPhaseName[i]) == 0)
+		if (strcmp(name, FsmPhaseName[i]) == 0)
 		{
-			*phase = (FsmMermaidPhase) i;
+			*phase = (FsmPhase) i;
 			return true;
 		}
 	}
@@ -286,55 +195,33 @@ StateSetContains(NodeState *set, int count, NodeState state)
 
 
 /*
- * FsmMermaidPhaseMaskForState returns a bitmask of every phase (1 <<
- * FSM_PHASE_*) in which the given state appears as either side of an edge,
- * by scanning FsmPhaseMap. Used to print "also appears in ..." notes.
+ * FsmPhaseMaskForState returns a bitmask of every phase (1 << FSM_PHASE_*)
+ * in which the given state appears as either side of a NODE_KIND_ANY edge,
+ * by walking KeeperFSM[] directly. Used to print "also appears in ..."
+ * notes.
  */
 static int
-FsmMermaidPhaseMaskForState(NodeState state)
+FsmPhaseMaskForState(NodeState state)
 {
+	KeeperFSMTransition transition = KeeperFSM[0];
+	int transitionIndex = 0;
 	int mask = 0;
-	int i = 0;
 
-	for (i = 0; i < FSM_PHASE_MAP_COUNT; i++)
+	while (transition.current != NO_STATE)
 	{
-		if (FsmPhaseMap[i].current == state || FsmPhaseMap[i].assigned == state)
+		if (transition.pgKind == NODE_KIND_ANY &&
+			transition.phase != FSM_PHASE_NONE &&
+			transition.current != JOIN_PRIMARY_STATE &&
+			transition.assigned != JOIN_PRIMARY_STATE &&
+			(transition.current == state || transition.assigned == state))
 		{
-			mask |= (1 << FsmPhaseMap[i].phase);
+			mask |= (1 << transition.phase);
 		}
+
+		transition = KeeperFSM[++transitionIndex];
 	}
 
 	return mask;
-}
-
-
-/*
- * FsmPhaseForEdge looks up the curated phase for a given (current, assigned)
- * pair. Returns false (logging a warning) when the edge isn't in
- * FsmPhaseMap at all -- this can only happen if KeeperFSM[] gained a new
- * NODE_KIND_ANY transition that FsmPhaseMap wasn't updated to cover.
- */
-static bool
-FsmPhaseForEdge(NodeState current, NodeState assigned, FsmMermaidPhase *phase)
-{
-	int i = 0;
-
-	for (i = 0; i < FSM_PHASE_MAP_COUNT; i++)
-	{
-		if (FsmPhaseMap[i].current == current &&
-			FsmPhaseMap[i].assigned == assigned)
-		{
-			*phase = FsmPhaseMap[i].phase;
-			return true;
-		}
-	}
-
-	log_warn("BUG: FSM transition \"%s\" -> \"%s\" has no entry in "
-			 "FsmPhaseMap (fsm_mermaid.c) -- it will not appear in any "
-			 "phase diagram until this is fixed",
-			 NodeStateToString(current), NodeStateToString(assigned));
-
-	return false;
 }
 
 
@@ -348,7 +235,7 @@ FsmPhaseForEdge(NodeState current, NodeState assigned, FsmMermaidPhase *phase)
  * phase to add.
  */
 void
-print_fsm_mermaid_for_phase(FsmMermaidPhase phase)
+print_fsm_mermaid_for_phase(FsmPhase phase)
 {
 	KeeperFSMTransition transition = KeeperFSM[0];
 	int transitionIndex = 0;
@@ -367,7 +254,6 @@ print_fsm_mermaid_for_phase(FsmMermaidPhase phase)
 	while (transition.current != NO_STATE)
 	{
 		bool alreadySeen = false;
-		FsmMermaidPhase edgePhase;
 
 		if (transition.pgKind != NODE_KIND_ANY)
 		{
@@ -386,6 +272,17 @@ print_fsm_mermaid_for_phase(FsmMermaidPhase phase)
 			 * on-disk state from old versions, but it should not clutter
 			 * diagrams describing current behaviour.
 			 */
+			transition = KeeperFSM[++transitionIndex];
+			continue;
+		}
+
+		if (transition.phase == FSM_PHASE_NONE)
+		{
+			log_warn("BUG: FSM transition \"%s\" -> \"%s\" (NODE_KIND_ANY) "
+					 "has no phase set in KeeperFSM[] (fsm.c) -- it will "
+					 "not appear in any phase diagram until this is fixed",
+					 NodeStateToString(transition.current),
+					 NodeStateToString(transition.assigned));
 			transition = KeeperFSM[++transitionIndex];
 			continue;
 		}
@@ -413,8 +310,7 @@ print_fsm_mermaid_for_phase(FsmMermaidPhase phase)
 			++seenCount;
 		}
 
-		if (FsmPhaseForEdge(transition.current, transition.assigned, &edgePhase) &&
-			edgePhase == phase)
+		if (transition.phase == phase)
 		{
 			fformat(stdout, "    %s --> %s : %s\n",
 					FsmMermaidId(transition.current),
@@ -443,7 +339,7 @@ print_fsm_mermaid_for_phase(FsmMermaidPhase phase)
 	/* notes: make it obvious when a state also lives in another diagram */
 	for (i = 0; i < diagramStateCount; i++)
 	{
-		int mask = FsmMermaidPhaseMaskForState(diagramStates[i]);
+		int mask = FsmPhaseMaskForState(diagramStates[i]);
 		int otherMask = mask & ~(1 << phase);
 		int p = 0;
 		bool first = true;
@@ -470,7 +366,7 @@ print_fsm_mermaid_for_phase(FsmMermaidPhase phase)
 				{
 					strlcat(note, ", ", BUFSIZE);
 				}
-				strlcat(note, FsmMermaidPhaseTitle[p], BUFSIZE);
+				strlcat(note, FsmPhaseTitle[p], BUFSIZE);
 				first = false;
 			}
 		}

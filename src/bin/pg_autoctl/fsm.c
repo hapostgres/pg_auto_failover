@@ -216,7 +216,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		INIT_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_INIT_TO_SINGLE,
-		&fsm_init_primary
+		&fsm_init_primary,
+		FSM_PHASE_INIT
 	},
 
 	{
@@ -228,13 +229,15 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		DROPPED_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_INIT_TO_SINGLE,
-		&fsm_init_primary
+		&fsm_init_primary,
+		FSM_PHASE_INIT
 	},
 
 	{
 		DROPPED_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
 		COMMENT_DROPPED_TO_REPORT_LSN,
-		&fsm_init_from_standby
+		&fsm_init_from_standby,
+		FSM_PHASE_INIT
 	},
 
 	/*
@@ -243,19 +246,22 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		PRIMARY_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_SINGLE,
-		&fsm_disable_replication
+		&fsm_disable_replication,
+		FSM_PHASE_REMOVAL
 	},
 
 	{
 		WAIT_PRIMARY_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_SINGLE,
-		&fsm_disable_replication
+		&fsm_disable_replication,
+		FSM_PHASE_REMOVAL
 	},
 
 	{
 		JOIN_PRIMARY_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_SINGLE,
-		&fsm_disable_replication
+		&fsm_disable_replication,
+		FSM_PHASE_REMOVAL
 	},
 
 	/*
@@ -264,61 +270,71 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		PRIMARY_STATE, DRAINING_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DRAINING,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		DRAINING_STATE, DEMOTED_STATE, NODE_KIND_ANY,
 		COMMENT_DRAINING_TO_DEMOTED,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		PRIMARY_STATE, DEMOTED_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DEMOTED,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DEMOTED,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		JOIN_PRIMARY_STATE, DRAINING_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DRAINING,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		JOIN_PRIMARY_STATE, DEMOTED_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DEMOTED,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		JOIN_PRIMARY_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DEMOTED,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		APPLY_SETTINGS_STATE, DRAINING_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DRAINING,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		APPLY_SETTINGS_STATE, DEMOTED_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DEMOTED,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		APPLY_SETTINGS_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DEMOTED,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	/*
@@ -327,19 +343,22 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		PRIMARY_STATE, PREPARE_MAINTENANCE_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_PREPARE_MAINTENANCE,
-		&fsm_stop_postgres_for_primary_maintenance
+		&fsm_stop_postgres_for_primary_maintenance,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
 		PREPARE_MAINTENANCE_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_MAINTENANCE,
-		&fsm_stop_postgres_and_setup_standby
+		&fsm_stop_postgres_and_setup_standby,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
 		PRIMARY_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_MAINTENANCE,
-		&fsm_stop_postgres_for_primary_maintenance
+		&fsm_stop_postgres_for_primary_maintenance,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	/*
@@ -348,13 +367,15 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		DRAINING_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
 		COMMENT_DRAINING_TO_DEMOTE_TIMEOUT,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		DEMOTE_TIMEOUT_STATE, DEMOTED_STATE, NODE_KIND_ANY,
 		COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	/*
@@ -363,7 +384,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		WAIT_PRIMARY_STATE, DEMOTED_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DEMOTED,
-		&fsm_stop_postgres
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	/*
@@ -378,7 +400,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		DEMOTED_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_DEMOTED_TO_SINGLE,
-		&fsm_resume_as_primary
+		&fsm_resume_as_primary,
+		FSM_PHASE_REMOVAL
 	},
 
 	{
@@ -390,7 +413,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		DEMOTE_TIMEOUT_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_DEMOTED_TO_SINGLE,
-		&fsm_resume_as_primary
+		&fsm_resume_as_primary,
+		FSM_PHASE_REMOVAL
 	},
 
 	{
@@ -402,7 +426,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		DRAINING_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_DEMOTED_TO_SINGLE,
-		&fsm_resume_as_primary
+		&fsm_resume_as_primary,
+		FSM_PHASE_REMOVAL
 	},
 
 	/*
@@ -423,7 +448,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		SECONDARY_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_LOST_PRIMARY,
-		&fsm_promote_standby
+		&fsm_promote_standby,
+		FSM_PHASE_REMOVAL
 	},
 
 	{
@@ -441,7 +467,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		CATCHINGUP_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_LOST_PRIMARY,
-		&fsm_promote_standby
+		&fsm_promote_standby,
+		FSM_PHASE_REMOVAL
 	},
 
 	{
@@ -459,7 +486,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		PREP_PROMOTION_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_LOST_PRIMARY,
-		&fsm_promote_standby
+		&fsm_promote_standby,
+		FSM_PHASE_REMOVAL
 	},
 
 	/*
@@ -474,7 +502,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		STOP_REPLICATION_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_REPLICATION_TO_SINGLE,
-		&fsm_promote_standby
+		&fsm_promote_standby,
+		FSM_PHASE_REMOVAL
 	},
 
 	/*
@@ -483,7 +512,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		REPORT_LSN_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_REPORT_LSN_TO_SINGLE,
-		&fsm_promote_standby
+		&fsm_promote_standby,
+		FSM_PHASE_REMOVAL
 	},
 
 
@@ -493,31 +523,36 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		SINGLE_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_SINGLE_TO_WAIT_PRIMARY,
-		&fsm_prepare_replication
+		&fsm_prepare_replication,
+		FSM_PHASE_INIT
 	},
 
 	{
 		PRIMARY_STATE, JOIN_PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_JOIN_PRIMARY,
-		&fsm_prepare_replication
+		&fsm_prepare_replication,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	{
 		PRIMARY_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_WAIT_PRIMARY,
-		&fsm_disable_sync_rep
+		&fsm_disable_sync_rep,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	{
 		JOIN_PRIMARY_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_WAIT_PRIMARY,
-		&fsm_disable_sync_rep
+		&fsm_disable_sync_rep,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	{
 		WAIT_PRIMARY_STATE, JOIN_PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_JOIN_PRIMARY,
-		&fsm_prepare_replication
+		&fsm_prepare_replication,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	/*
@@ -526,19 +561,22 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		WAIT_PRIMARY_STATE, PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_WAIT_PRIMARY_TO_PRIMARY,
-		&fsm_enable_sync_rep
+		&fsm_enable_sync_rep,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	{
 		JOIN_PRIMARY_STATE, PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_JOIN_PRIMARY_TO_PRIMARY,
-		&fsm_enable_sync_rep
+		&fsm_enable_sync_rep,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	{
 		DEMOTE_TIMEOUT_STATE, PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_DEMOTE_TO_PRIMARY,
-		&fsm_start_postgres
+		&fsm_start_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	/*
@@ -547,19 +585,22 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		WAIT_STANDBY_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
 		COMMENT_WAIT_STANDBY_TO_CATCHINGUP,
-		&fsm_init_standby
+		&fsm_init_standby,
+		FSM_PHASE_INIT
 	},
 
 	{
 		DEMOTED_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
 		COMMENT_DEMOTED_TO_CATCHINGUP,
-		&fsm_rewind_or_init
+		&fsm_rewind_or_init,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		SECONDARY_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_CATCHINGUP,
-		&fsm_follow_new_primary
+		&fsm_follow_new_primary,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	/*
@@ -574,7 +615,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		CATCHINGUP_STATE, SECONDARY_STATE, NODE_KIND_ANY,
 		COMMENT_CATCHINGUP_TO_SECONDARY,
-		&fsm_prepare_for_secondary
+		&fsm_prepare_for_secondary,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	/*
@@ -589,7 +631,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		SECONDARY_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_PREP_PROMOTION,
-		&fsm_prepare_standby_for_promotion
+		&fsm_prepare_standby_for_promotion,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
@@ -601,7 +644,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		CATCHINGUP_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_PREP_PROMOTION,
-		&fsm_prepare_standby_for_promotion
+		&fsm_prepare_standby_for_promotion,
+		FSM_PHASE_FAILOVER
 	},
 
 	/*
@@ -616,7 +660,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		PREP_PROMOTION_STATE, STOP_REPLICATION_STATE, NODE_KIND_ANY,
 		COMMENT_PROMOTION_TO_STOP_REPLICATION,
-		&fsm_stop_replication
+		&fsm_stop_replication,
+		FSM_PHASE_FAILOVER
 	},
 
 	/*
@@ -637,7 +682,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		STOP_REPLICATION_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY,
-		&fsm_promote_standby_to_primary
+		&fsm_promote_standby_to_primary,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
@@ -649,7 +695,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		PREP_PROMOTION_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_BLOCKED_WRITES,
-		&fsm_promote_standby
+		&fsm_promote_standby,
+		FSM_PHASE_FAILOVER
 	},
 
 	/*
@@ -658,13 +705,15 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		INIT_STATE, WAIT_STANDBY_STATE, NODE_KIND_ANY,
 		COMMENT_INIT_TO_WAIT_STANDBY,
-		NULL
+		NULL,
+		FSM_PHASE_INIT
 	},
 
 	{
 		DROPPED_STATE, WAIT_STANDBY_STATE, NODE_KIND_ANY,
 		COMMENT_INIT_TO_WAIT_STANDBY,
-		NULL
+		NULL,
+		FSM_PHASE_INIT
 	},
 
 	/*
@@ -674,7 +723,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		SECONDARY_STATE, WAIT_STANDBY_STATE, NODE_KIND_ANY,
 		COMMENT_SECONARY_TO_WAIT_STANDBY,
-		NULL
+		NULL,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	/*
@@ -683,43 +733,50 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		SECONDARY_STATE, WAIT_MAINTENANCE_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_WAIT_MAINTENANCE,
-		NULL
+		NULL,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
 		CATCHINGUP_STATE, WAIT_MAINTENANCE_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_WAIT_MAINTENANCE,
-		NULL
+		NULL,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
 		SECONDARY_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_MAINTENANCE,
-		&fsm_start_maintenance_on_standby
+		&fsm_start_maintenance_on_standby,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
 		CATCHINGUP_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_MAINTENANCE,
-		&fsm_start_maintenance_on_standby
+		&fsm_start_maintenance_on_standby,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
 		WAIT_MAINTENANCE_STATE, MAINTENANCE_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_MAINTENANCE,
-		&fsm_start_maintenance_on_standby
+		&fsm_start_maintenance_on_standby,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
 		MAINTENANCE_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
 		COMMENT_MAINTENANCE_TO_CATCHINGUP,
-		&fsm_restart_standby
+		&fsm_restart_standby,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
 		PREPARE_MAINTENANCE_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
 		COMMENT_MAINTENANCE_TO_CATCHINGUP,
-		&fsm_restart_standby
+		&fsm_restart_standby,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	/*
@@ -731,37 +788,43 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		PRIMARY_STATE, APPLY_SETTINGS_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_APPLY_SETTINGS,
-		NULL
+		NULL,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	{
 		WAIT_PRIMARY_STATE, APPLY_SETTINGS_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_APPLY_SETTINGS,
-		NULL
+		NULL,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	{
 		APPLY_SETTINGS_STATE, PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_APPLY_SETTINGS_TO_PRIMARY,
-		&fsm_enable_sync_rep
+		&fsm_enable_sync_rep,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	{
 		APPLY_SETTINGS_STATE, SINGLE_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_SINGLE,
-		&fsm_disable_replication
+		&fsm_disable_replication,
+		FSM_PHASE_REMOVAL
 	},
 
 	{
 		APPLY_SETTINGS_STATE, WAIT_PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_WAIT_PRIMARY,
-		&fsm_disable_sync_rep
+		&fsm_disable_sync_rep,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	{
 		APPLY_SETTINGS_STATE, JOIN_PRIMARY_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_JOIN_PRIMARY,
-		&fsm_prepare_replication
+		&fsm_prepare_replication,
+		FSM_PHASE_STEADY_STATE
 	},
 
 	/*
@@ -771,25 +834,29 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		SECONDARY_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_REPORT_LSN,
-		&fsm_report_lsn
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		CATCHINGUP_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_REPORT_LSN,
-		&fsm_report_lsn
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		MAINTENANCE_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_REPORT_LSN,
-		&fsm_report_lsn
+		&fsm_report_lsn,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
 		PREPARE_MAINTENANCE_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_REPORT_LSN,
-		&fsm_report_lsn
+		&fsm_report_lsn,
+		FSM_PHASE_MAINTENANCE
 	},
 
 	{
@@ -801,13 +868,15 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		REPORT_LSN_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
 		COMMENT_REPORT_LSN_TO_PREP_PROMOTION,
-		&fsm_prepare_standby_for_promotion
+		&fsm_prepare_standby_for_promotion,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		REPORT_LSN_STATE, FAST_FORWARD_STATE, NODE_KIND_ANY,
 		COMMENT_REPORT_LSN_TO_FAST_FORWARD,
-		&fsm_fast_forward
+		&fsm_fast_forward,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
@@ -819,25 +888,29 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		FAST_FORWARD_STATE, PREP_PROMOTION_STATE, NODE_KIND_ANY,
 		COMMENT_FAST_FORWARD_TO_PREP_PROMOTION,
-		&fsm_cleanup_as_primary
+		&fsm_cleanup_as_primary,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		REPORT_LSN_STATE, JOIN_SECONDARY_STATE, NODE_KIND_ANY,
 		COMMENT_REPORT_LSN_TO_JOIN_SECONDARY,
-		&fsm_checkpoint_and_stop_postgres
+		&fsm_checkpoint_and_stop_postgres,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		REPORT_LSN_STATE, SECONDARY_STATE, NODE_KIND_ANY,
 		COMMENT_REPORT_LSN_TO_JOIN_SECONDARY,
-		&fsm_follow_new_primary
+		&fsm_follow_new_primary,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		JOIN_SECONDARY_STATE, SECONDARY_STATE, NODE_KIND_ANY,
 		COMMENT_JOIN_SECONDARY_TO_SECONDARY,
-		&fsm_follow_new_primary
+		&fsm_follow_new_primary,
+		FSM_PHASE_FAILOVER
 	},
 
 	/*
@@ -847,13 +920,15 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		DRAINING_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
 		COMMENT_DRAINING_TO_REPORT_LSN,
-		&fsm_report_lsn_and_drop_replication_slots
+		&fsm_report_lsn_and_drop_replication_slots,
+		FSM_PHASE_FAILOVER
 	},
 
 	{
 		DEMOTED_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
 		COMMENT_DEMOTED_TO_REPORT_LSN,
-		&fsm_report_lsn_and_drop_replication_slots
+		&fsm_report_lsn_and_drop_replication_slots,
+		FSM_PHASE_FAILOVER
 	},
 
 	/*
@@ -863,7 +938,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		INIT_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
 		COMMENT_INIT_TO_REPORT_LSN,
-		&fsm_init_from_standby
+		&fsm_init_from_standby,
+		FSM_PHASE_INIT
 	},
 
 	/*
@@ -878,7 +954,8 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		ANY_STATE, DROPPED_STATE, NODE_KIND_ANY,
 		COMMENT_ANY_TO_DROPPED,
-		&fsm_drop_node
+		&fsm_drop_node,
+		FSM_PHASE_REMOVAL
 	},
 
 	/*
