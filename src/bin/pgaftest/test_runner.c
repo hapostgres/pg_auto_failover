@@ -4655,7 +4655,7 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 	/* setup{} */
 	if (spec->setup)
 	{
-		char err[512] = "";
+		char err[8192] = "";
 		log_info("Running setup block");
 		if (!runner_exec_step(&r, spec->setup, err, sizeof(err), 0))
 		{
@@ -4671,7 +4671,7 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 			/* teardown{} — always run, even on setup failure */
 			if (spec->teardown)
 			{
-				char tdErr[512] = "";
+				char tdErr[8192] = "";
 				log_info("Running teardown block");
 				runner_exec_step(&r, spec->teardown, tdErr, sizeof(tdErr), 0);
 			}
@@ -4693,7 +4693,7 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 		}
 
 		log_info("STEP %d: %s", i + 1, name);
-		char err[512] = "";
+		char err[8192] = "";
 
 		struct timespec t0, t1;
 		clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -4735,7 +4735,7 @@ runner_run(TestSpec *spec, const char *workDir, bool noCleanup)
 	/* teardown{} — always runs */
 	if (spec->teardown)
 	{
-		char err[512] = "";
+		char err[8192] = "";
 		log_info("Running teardown block");
 		runner_exec_step(&r, spec->teardown, err, sizeof(err), 0);
 	}
@@ -4870,7 +4870,7 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 		/* run setup{} block synchronously when not using tmux */
 		if (spec->setup)
 		{
-			char err[512] = "";
+			char err[8192] = "";
 			log_info("Running setup block");
 			if (!runner_exec_step(&r, spec->setup, err, sizeof(err), 0))
 			{
@@ -5051,7 +5051,7 @@ runner_step(TestSpec *spec, const char *workDir, const char *stepName)
 		return false;
 	}
 
-	char err[512] = "";
+	char err[8192] = "";
 	bool ok = runner_exec_step(&r, step, err, sizeof(err), 0);
 
 	/* Update interactive state file so `show step` markers stay accurate */
@@ -5102,7 +5102,7 @@ runner_run_setup_only(TestSpec *spec, const char *workDir)
 		return true;
 	}
 
-	char err[512] = "";
+	char err[8192] = "";
 	log_info("Running setup block");
 	if (!runner_exec_step(&r, spec->setup, err, sizeof(err), 0))
 	{
@@ -5124,7 +5124,7 @@ runner_down(TestSpec *spec, const char *workDir)
 	/* teardown{} */
 	if (spec->teardown)
 	{
-		char err[512] = "";
+		char err[8192] = "";
 		runner_exec_step(&r, spec->teardown, err, sizeof(err), 0);
 	}
 
