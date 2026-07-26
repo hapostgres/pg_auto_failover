@@ -122,12 +122,15 @@ the Postgres level, outside of ``pg_autoctl``'s control, during an incident.
 Postgres itself refuses the reconnect and logs something like ``requested
 timeline N is not a child of this server's history``.
 
-**This is usually automatic.** ``pg_autoctl`` now walks the upstream's real
+**This is usually automatic.** ``pg_autoctl`` walks the upstream's real
 timeline history to tell a standby that's simply behind apart from one
-that's genuinely diverged, and runs ``pg_rewind`` (or a fresh
-``pg_basebackup`` if ``pg_rewind`` can't connect) the next time the standby
-goes through a real transition — the next health-check-driven resync is
-usually enough. See :ref:`timeline_forks` for the full scenario.
+that's genuinely diverged, and the monitor checks every currently-healthy
+secondary's ancestry on each of its regular reports — not just at the next
+incidental transition. As soon as a genuine divergence is found, the node
+is pushed to ``catchingup`` and rewound with ``pg_rewind`` (or a fresh
+``pg_basebackup`` if ``pg_rewind`` can't connect), typically within about a
+second, with no health-check cycle or maintenance toggle to wait for. See
+:ref:`timeline_forks` for the full scenario.
 
 **If it doesn't resolve on its own,** check what the monitor knows::
 

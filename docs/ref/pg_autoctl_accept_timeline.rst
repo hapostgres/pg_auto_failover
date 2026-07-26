@@ -24,10 +24,12 @@ Description
 
 pg_auto_failover normally detects and resolves timeline forks on its own: a
 standby whose local WAL diverges from the group's reference lineage is
-rewound onto it automatically the next time it reconnects (see
-:ref:`timeline_forks` for the full scenario, and the ``Report_LSN`` and
-``Catchingup`` sections of :ref:`failover_state_machine` for how the
-election and the reconnect path use this).
+excluded from candidacy and pushed to ``catchingup`` — where it is rewound
+onto the reference lineage with ``pg_rewind`` — as soon as the mismatch is
+visible to the monitor, without waiting for a health-check cycle or a
+maintenance toggle (see :ref:`timeline_forks` for the full scenario, and the
+``Report_LSN`` and ``Catchingup`` sections of :ref:`failover_state_machine`
+for how the election and the automatic recovery path use this).
 
 Auto-detection compares each node's known timeline history against every
 other node's, and only reaches a confident answer when there is a sibling to
@@ -144,5 +146,9 @@ affects the next election::
    Timeline 1 accepted as ground truth for formation "default" group 0. The election will now only consider nodes on that lineage; other nodes need pg_rewind before rejoining.
 
 From this point on, ``node2`` is excluded from candidacy until it rewinds
-onto timeline 1, which happens automatically the next time it reconnects
-(see the recovery example in :ref:`pg_autoctl_show_timeline`).
+onto timeline 1. It doesn't have to reconnect or go through maintenance for
+that to happen: the monitor re-checks every currently-``secondary`` node's
+ancestry against the newly-pinned lineage right away, so ``node2`` is pushed
+to ``catchingup`` — and rewound with ``pg_rewind`` — within about a second of
+this command, with no further operator action (see the recovery example in
+:ref:`pg_autoctl_show_timeline`).

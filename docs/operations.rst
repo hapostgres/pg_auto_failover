@@ -436,20 +436,21 @@ logs — pin it explicitly::
   One or more nodes have diverged from the reference timeline (see FORK above).
   See `pg_autoctl accept timeline --help` to resolve.
 
-No further command is needed to make ``node2`` rewind: the pin only changes
-how the flagged node is evaluated, and the fix runs automatically the next
-time that node goes through a real transition. The next ordinary
-health-check-driven resync is usually enough; to force it immediately,
-cycle the node through maintenance::
+No further command is needed to make ``node2`` rewind. The pin doesn't just
+change how the flagged node is evaluated at the next election — the monitor
+re-checks every currently-``secondary`` node's ancestry against the
+freshly-pinned lineage right away, so ``node2`` is pushed to ``catchingup``
+within about a second of the ``accept timeline`` command above, with no
+health-check cycle or maintenance toggle needed to trigger it.
 
-  $ pg_autoctl enable maintenance --pgdata node2
-  $ pg_autoctl disable maintenance --pgdata node2
-
-``node2`` goes ``maintenance`` → ``catchingup`` → ``secondary``, running
+``node2`` goes ``secondary`` → ``catchingup`` → ``secondary``, running
 ``pg_rewind`` onto timeline 1 along the way (or, if ``pg_rewind`` itself
 can't connect, a fresh ``pg_basebackup`` — both pre-existing recovery
-paths). The fork clears on its own, with no need to run an "accept" or
-"resolve" command a second time::
+paths) — usually so quickly that polling ``pg_autoctl show state`` a second
+or two apart never even catches the intermediate ``catchingup`` state. The
+fork clears on its own, with no need to run an "accept" or "resolve"
+command a second time, and no need to cycle the node through maintenance to
+force anything::
 
   $ pg_autoctl show timeline
        TLI | Parent TLI | Switchpoint LSN

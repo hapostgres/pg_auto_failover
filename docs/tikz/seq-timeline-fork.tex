@@ -97,25 +97,26 @@
 
 \node[note, fill=async, draw=gray!50, text width=15cm, font=\small]
   at (9.5, 19.6)
-  {reported state never actually changed (``secondary'' throughout), so no
-   FSM transition fires -- steady-state streaming never re-checks ancestry.
-   The fork is durably published to
-   \texttt{pgautofailover.node\_timeline\_history} but otherwise goes
-   unnoticed};
+  {no sibling standby to disagree with, so auto-detection reads this as a
+   legitimate lineage rather than a fork. The divergence is durably
+   published to \texttt{pgautofailover.node\_timeline\_history} but stays
+   invisible until an operator pins the correct timeline};
 
-%% ── forced through a real transition ─────────────────────────────────────
-\node[seclbl] at (-3.4,21.4) {forced through a real transition};
+%% ── operator pins ground truth ───────────────────────────────────────────
+\node[seclbl] at (-3.4,21.4) {operator pins ground truth};
 
-\draw[msg] (\mx,22.3) -- (\sx,22.3);
-\node[lbl, above] at (\mx-3.4,22.3) {goal=maintenance};
+\draw[selfloop] (\mx,21.6) .. controls (\mx+2.6,21.6) and (\mx+2.6,22.6) .. (\mx,22.6);
+\node[lbl, right] at (\mx+2.7,22.1) {\texttt{pg\_autoctl accept timeline --tli 1}};
+
 \draw[msg] (\mx,23.5) -- (\sx,23.5);
-\node[lbl, above] at (\mx-3.2,23.5) {goal=catchingup};
+\node[lbl, above] at (\mx-2.2,23.5) {goal=catchingup};
 
 \node[note, fill=gray!12, draw=gray!55, text width=13cm, font=\small]
   at (9.5, 24.7)
-  {any ordinary ``briefly unreachable, please resync'' health-check cycle
-   drives the same transition -- an operator maintenance cycle is used
-   here only to trigger it deterministically};
+  {the monitor re-checks every currently-secondary node's ancestry against
+   the freshly-pinned lineage right away -- pushed to catchingup within
+   about a second, no maintenance toggle and no incidental health-check
+   cycle needed};
 
 %% ── ancestry check ───────────────────────────────────────────────────────
 \node[seclbl] at (-3.4,26.1) {ancestry check};

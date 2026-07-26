@@ -313,6 +313,12 @@ promoted, outside of ``pg_autoctl``'s control. Every node also periodically
 publishes its own known timeline lineage to the monitor
 (``pgautofailover.node_timeline_history``), so that a failover election can
 reason about forks centrally and exclude a diverged candidate rather than
-block on it. See :ref:`timeline_forks` for the full scenario, and
-:ref:`pg_autoctl_show_timeline` / :ref:`pg_autoctl_accept_timeline` for the
-commands that surface and, when needed, resolve this.
+block on it. The monitor uses this same lineage data proactively too: a
+node currently acting as a healthy secondary is checked against the
+group's reference lineage on every report, and gets pushed into
+``catchingup`` — where the rewind actually happens — as soon as a genuine
+divergence is found, rather than waiting for the node to go through some
+other, unrelated transition first. See :ref:`timeline_forks` for the full
+scenario, and :ref:`pg_autoctl_show_timeline` /
+:ref:`pg_autoctl_accept_timeline` for the commands that surface and, when
+needed, resolve this.

@@ -149,10 +149,13 @@ manually promoted), that timeline 1 is the real lineage, pin it with
    One or more nodes have diverged from the reference timeline (see FORK above).
    See `pg_autoctl accept timeline --help` to resolve.
 
-Forcing ``node2`` through a resync (here, a maintenance cycle) triggers the
-ancestry check and the automatic rewind. It rejoins on the accepted
-lineage, and the fork clears on its own — no further operator action, and
-no need to run an "accept" or "resolve" command a second time::
+No resync needs to be forced: the monitor re-checks every currently-secondary
+node's ancestry against the freshly-pinned lineage right away, so ``node2``
+is pushed to ``catchingup`` — and rewound onto timeline 1 with ``pg_rewind``
+— within about a second of the ``accept timeline`` command above. It rejoins
+on the accepted lineage, and the fork clears on its own — no maintenance
+cycle, no further operator action, and no need to run an "accept" or
+"resolve" command a second time::
 
    $ pg_autoctl show timeline --formation default
         TLI | Parent TLI | Switchpoint LSN
@@ -245,9 +248,11 @@ either::
    One or more nodes have diverged from the reference timeline (see FORK above).
    See `pg_autoctl accept timeline --help` to resolve.
 
-Forcing ``node3`` through a resync then recovers it exactly as before, and
-every row the application wrote to node1 in the meantime — 200 rows, none
-of them lost or delayed by node3's fork — is there once node3 rejoins::
+Same as before, no resync needs to be forced — the pin alone is enough, and
+node3 is caught and rewound within about a second, no maintenance cycle
+involved. Every row the application wrote to node1 in the meantime — 200
+rows, none of them lost or delayed by node3's fork — is there once node3
+rejoins::
 
    $ pg_autoctl show timeline --formation default
         TLI | Parent TLI | Switchpoint LSN

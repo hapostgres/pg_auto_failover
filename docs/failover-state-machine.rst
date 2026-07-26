@@ -175,6 +175,21 @@ A node with this state is acting as a hot standby for the primary, and
 is up to date with the WAL log there. In particular, it is within 16MB
 or 1 WAL segment of the primary.
 
+Streaming replication alone can look perfectly healthy even when the
+secondary is on a genuinely forked branch of history — the WAL receiver
+just keeps reporting progress against whatever local timeline the standby
+happens to be on. To catch this without waiting for an incidental
+transition, the monitor applies the same ``FilterNodesByTimelineAncestry()``
+check used during an election (see ``Report_LSN`` below) to every node
+currently in the secondary state, on each of its regular reports. As soon
+as a secondary's reported timeline is found not to be an ancestor of the
+group's reference lineage, the monitor assigns it the ``catchingup`` goal
+state right away — typically within about a second, on that very report —
+rather than waiting for a health-check cycle or an operator-forced resync
+to reveal the problem. See :ref:`timeline_forks` for the full scenario and
+:ref:`pg_autoctl_accept_timeline` for pinning the reference lineage when
+auto-detection can't tell which branch is real.
+
 Maintenance
 ^^^^^^^^^^^
 
