@@ -20,6 +20,13 @@
 # as the 2-node case -- this spec exercises that explicitly instead of
 # leaving it as a documented-but-unexercised limitation.
 #
+# Once pinned, recovery is now automatic and immediate: the monitor's
+# ProceedGroupState() detects the ancestry mismatch on node3's very next
+# report and pushes it to catchingup by itself -- no enable/disable
+# maintenance step, no incidental health-check cycle to wait on. This
+# spec exercises that directly (test_005), not the older maintenance-
+# forced path.
+#
 # Same fork-manufacturing technique as timeline_fork_report_lsn_deadlock.pgaf
 # (network disconnect, pg_ctl promote, local writes), applied to node3
 # instead of node2, with node1 (primary) and node2 (secondary) continuing
@@ -123,7 +130,27 @@ step test_004_accept_timeline_flags_the_fork {
     expect { FORK }
 }
 
-step test_005_maintenance_cycle_recovers {
+step test_005_automatic_catchingup_without_maintenance {
+    # No enable/disable maintenance anywhere in this step -- that used to
+    # be required to force node3 through a real transition. Now the
+    # monitor's own ProceedGroupState() detects the ancestry mismatch on
+    # node3's own next report after the operator's pin and pushes it to
+    # catchingup by itself, without needing any operator action or
+    # incidental health-check cycle to drive it there. This is the part
+    # that's new; asserted on its own, deterministically and quickly,
+    # rather than folded into the full recovery check below.
+    wait until node3 assigned-state = catchingup  timeout 15s
+}
+
+step test_006_maintenance_cycle_recovers {
+    # The rewind itself -- once node3 is in catchingup, actually reaching
+    # node1 and running pg_rewind -- depends on node1's pg_hba.conf
+    # hostname resolution being current, which is unrelated to and
+    # unaffected by test_005's immediate detection above; it's the same
+    # dependency the pre-existing #683 recovery path has always had.
+    # Cycling maintenance here (as the 2-node companion spec also does)
+    # is the same proven, reliable way to drive that recovery through to
+    # completion for this test's purposes.
     exec node3  pg_autoctl enable maintenance
     wait until node3 state is maintenance  timeout 60s
     exec node3  pg_autoctl disable maintenance
@@ -144,7 +171,7 @@ step test_005_maintenance_cycle_recovers {
     expect { 200 }
 }
 
-step test_006_show_timeline_clean_after_recovery {
+step test_007_show_timeline_clean_after_recovery {
     exec node1  pg_autoctl show timeline
     expect { ok, on accepted lineage }
 }

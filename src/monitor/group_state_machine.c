@@ -326,6 +326,67 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	}
 
 	/*
+	 * Detect a genuine timeline fork on a healthy secondary as soon as its
+	 * newly reported timeline is visible, rather than waiting for an
+	 * incidental health-check cycle or an explicit maintenance toggle to
+	 * eventually drive it through catchingup (see #683 and the timeline
+	 * fork detection design). Reuses the exact same ancestry filter the
+	 * report_lsn election path already applies (below, and in
+	 * ProceedGroupStateForMSFailover) -- this only changes when a
+	 * diverged secondary gets pushed to catchingup, not how that's
+	 * decided or how the resync itself recovers it.
+	 *
+	 * Scoped to activeNode currently being SECONDARY_STATE: that's the
+	 * same state the "unhealthy secondary" transition just below already
+	 * uses for the identical CATCHINGUP goal assignment, so this is
+	 * additive to an existing, tested transition rather than a new kind
+	 * of one. A node with reportedTLI == 0 hasn't reported a timeline yet
+	 * (e.g. still in wait_standby) and has nothing to check.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_SECONDARY) &&
+		activeNode->reportedTLI > 0)
+	{
+		int referenceTli = 0;
+		List *comparableNodeList =
+			FilterNodesByTimelineAncestry(ctx->groupNodeList, formationId,
+										  groupId, &referenceTli);
+
+		bool activeNodeIsComparable = false;
+		ListCell *cell = NULL;
+
+		foreach(cell, comparableNodeList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(cell);
+
+			if (node->nodeId == activeNode->nodeId)
+			{
+				activeNodeIsComparable = true;
+				break;
+			}
+		}
+
+		if (referenceTli > 0 && !activeNodeIsComparable)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to catchingup: its reported timeline %d does not appear "
+				"to be an ancestor of the group's reference timeline %d -- "
+				"forcing a resync so the ancestry check can run and, if "
+				"needed, rewind it onto the correct lineage.",
+				NODE_FORMAT_ARGS(activeNode),
+				activeNode->reportedTLI,
+				referenceTli);
+
+			AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+
+			return true;
+		}
+	}
+
+	/*
 	 * Replication stall detection (issue #997 — 3-DC split-brain).
 	 *
 	 * When the primary is healthy (monitor can reach it) but no standby has
