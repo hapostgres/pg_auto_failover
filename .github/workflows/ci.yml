@@ -34,10 +34,41 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # 0. Detect a docs-only change (docs/**, *.md, LICENSE) so the expensive
+  #    build/test jobs below can skip themselves. A *skipped* job still
+  #    reports a "skipped" conclusion under its required-check name, which
+  #    branch protection treats as passing -- unlike a top-level
+  #    push/pull_request `paths-ignore`, which would make the workflow never
+  #    run at all and leave this repo's required status checks permanently
+  #    pending on a docs-only PR.
+  # ---------------------------------------------------------------------------
+  check_docs_only:
+    name: Check if this is a docs-only change
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.diff.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Detect docs-only change
+        id: diff
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          if git diff --name-only "${BASE_REF}"...HEAD | grep -qvE '^(docs/|.*\.md$|LICENSE$)'; then
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "docs_only=true"  >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
   # 1. Style check
   # ---------------------------------------------------------------------------
   style_checker:
     name: Style check
+    needs: check_docs_only
+    if: needs.check_docs_only.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     container: citus/stylechecker:no-py
     steps:
@@ -58,6 +89,8 @@ jobs:
   # ---------------------------------------------------------------------------
   check_base_changed:
     name: Check if Dockerfile.base changed
+    needs: check_docs_only
+    if: needs.check_docs_only.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.diff.outputs.changed }}
