@@ -293,7 +293,11 @@ table, but too dense to read at a glance as a single diagram. ``pg_autoctl
 inspect fsm mermaid`` renders it instead as five smaller diagrams, one per
 phase of a node's life, generated directly from ``KeeperFSM[]``
 (``src/bin/pg_autoctl/fsm.c``) so they can never drift out of sync with the
-actual state machine the way a hand-maintained image can::
+actual state machine the way a hand-maintained image can. The 68 edges shown
+below exclude ``join_primary``, a deprecated state (see `Join_primary`_
+above) no longer assigned to any node -- ``KeeperFSM[]`` still carries its 9
+transitions for backward compatibility with on-disk state from old
+versions, but they would only add clutter here::
 
   $ pg_autoctl inspect fsm mermaid init
   $ pg_autoctl inspect fsm mermaid steady-state
@@ -367,12 +371,8 @@ leaving quorum, a settings change, a brief health blip and recovery.
 .. mermaid::
 
    stateDiagram-v2
-       primary --> join_primary : A new secondary was added
        primary --> wait_primary : Secondary became unhealthy
-       join_primary --> wait_primary : Secondary became unhealthy
-       wait_primary --> join_primary : A new secondary was added
        wait_primary --> primary : A healthy secondary appeared
-       join_primary --> primary : A healthy secondary appeared
        secondary --> catchingup : Failed to report back to the monitor, not eligible for promotion
        catchingup --> secondary : Convinced the monitor that I'm up and running, and eligible for promotion again
        secondary --> wait_standby : Registering to a new monitor
@@ -380,10 +380,8 @@ leaving quorum, a settings change, a brief health blip and recovery.
        wait_primary --> apply_settings : Apply new pg_auto_failover settings (synchronous_standby_names)
        apply_settings --> primary : Back to primary state after having applied new pg_auto_failover settings
        apply_settings --> wait_primary : Secondary became unhealthy
-       apply_settings --> join_primary : A new secondary was added
 
        note right of primary : also appears in Failover / promotion, Maintenance, Node removal / drop
-       note right of join_primary : also appears in Failover / promotion, Node removal / drop
        note right of wait_primary : also appears in Node init / join, Failover / promotion, Node removal / drop
        note right of secondary : also appears in Failover / promotion, Maintenance, Node removal / drop
        note right of catchingup : also appears in Node init / join, Failover / promotion, Maintenance, Node removal / drop
@@ -393,7 +391,6 @@ leaving quorum, a settings change, a brief health blip and recovery.
        classDef primaryState fill:#cfe2ff,stroke:#3b6fb6,color:#1a1a1a
        classDef secondaryState fill:#d4edda,stroke:#4c9a5b,color:#1a1a1a
        class primary primaryState
-       class join_primary primaryState
        class wait_primary primaryState
        class secondary secondaryState
        class catchingup secondaryState
@@ -419,9 +416,6 @@ be identical in shape to this one.
        draining --> demoted : Demoted after a failover, no longer primary
        primary --> demoted : A failover occurred, no longer primary
        primary --> demote_timeout : A failover occurred, no longer primary
-       join_primary --> draining : A failover occurred, stopping writes
-       join_primary --> demoted : A failover occurred, no longer primary
-       join_primary --> demote_timeout : A failover occurred, no longer primary
        apply_settings --> draining : A failover occurred, stopping writes
        apply_settings --> demoted : A failover occurred, no longer primary
        apply_settings --> demote_timeout : A failover occurred, no longer primary
@@ -450,7 +444,6 @@ be identical in shape to this one.
        note right of draining : also appears in Node removal / drop
        note right of demoted : also appears in Node removal / drop
        note right of demote_timeout : also appears in Node removal / drop
-       note right of join_primary : also appears in Steady-state / config changes, Node removal / drop
        note right of apply_settings : also appears in Steady-state / config changes, Node removal / drop
        note right of wait_primary : also appears in Node init / join, Steady-state / config changes, Node removal / drop
        note right of catchingup : also appears in Node init / join, Steady-state / config changes, Maintenance, Node removal / drop
@@ -467,7 +460,6 @@ be identical in shape to this one.
        class draining demotingState
        class demoted demotingState
        class demote_timeout demotingState
-       class join_primary primaryState
        class apply_settings primaryState
        class wait_primary primaryState
        class catchingup secondaryState
@@ -527,7 +519,6 @@ node reacting to the other side of that removal.
    stateDiagram-v2
        primary --> single : Other node was forcibly removed, now single
        wait_primary --> single : Other node was forcibly removed, now single
-       join_primary --> single : Other node was forcibly removed, now single
        demoted --> single : Was demoted after a failure, but secondary was forcibly removed
        demote_timeout --> single : Was demoted after a failure, but secondary was forcibly removed
        draining --> single : Was demoted after a failure, but secondary was forcibly removed
@@ -542,7 +533,6 @@ node reacting to the other side of that removal.
        note right of primary : also appears in Steady-state / config changes, Failover / promotion, Maintenance
        note right of single : also appears in Node init / join
        note right of wait_primary : also appears in Node init / join, Steady-state / config changes, Failover / promotion
-       note right of join_primary : also appears in Steady-state / config changes, Failover / promotion
        note right of demoted : also appears in Failover / promotion
        note right of demote_timeout : also appears in Failover / promotion
        note right of draining : also appears in Failover / promotion
@@ -562,7 +552,6 @@ node reacting to the other side of that removal.
        class primary primaryState
        class single metaState
        class wait_primary primaryState
-       class join_primary primaryState
        class demoted demotingState
        class demote_timeout demotingState
        class draining demotingState
@@ -580,9 +569,11 @@ node reacting to the other side of that removal.
    This replaces the previous single Graphviz diagram (``pg_autoctl inspect
    fsm gv | dot -Tsvg``, rendered from a checked-in ``fsm.png`` last
    regenerated by hand in 2021). The five diagrams above cover every
-   transition the old single diagram did -- 77 edges total, split by
-   phase rather than shown at once -- with no loss of coverage, so
+   currently-reachable transition the old single diagram did -- 68 edges,
+   split by phase rather than shown at once -- deliberately excluding only
+   the 9 transitions involving the deprecated ``join_primary`` state, so
    ``fsm.png`` is no longer needed as documentation. The ``pg_autoctl
    inspect fsm gv`` command itself is left in place for anyone who wants
-   the full graph as one Graphviz file (e.g. to pipe into their own
+   the full graph, ``join_primary`` included, as one Graphviz file (e.g.
+   to pipe into their own
    tooling), but it is no longer the documented way to visualize the FSM.
