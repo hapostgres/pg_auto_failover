@@ -1402,9 +1402,9 @@ monitor_print_timeline(Monitor *monitor, char *formation, int group)
 	if (sawFork)
 	{
 		fformat(stdout,
-				"At least one node has diverged. Automatic election is "
-				"refused for those nodes until this is resolved.\n"
-				"See `pg_autoctl accept timeline --help`.\n");
+				"One or more nodes have diverged from the reference "
+				"timeline (see FORK above).\n"
+				"See `pg_autoctl accept timeline --help` to resolve.\n");
 	}
 
 	return true;
