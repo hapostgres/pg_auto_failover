@@ -7,10 +7,12 @@ basic_operation
 basic_operation_listen_flag
 maintenance_and_drop
 create_standby_with_pgdata
+launch_deferred_set_metadata
 ensure
 monitor_disabled
 replace_monitor
 config_get_set
+postgres_version_tracking
 skip_pg_hba
 #debian_clusters
 auth
@@ -25,7 +27,10 @@ multi_alternate
 guard_data_loss
 replication_stall_3dc
 fast_forward
+demote_timeout_wait_primary_deadlock
+timeline_fork_report_lsn_deadlock
 extension_update
+tablespaces
 installcheck
 # Upgrade test — requires pgaf:current and pgaf:next images to be pre-built:
 #   make -C tests/upgrade pgaf-current pgaf-next

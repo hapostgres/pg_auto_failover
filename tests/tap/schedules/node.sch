@@ -10,3 +10,6 @@ replace_monitor
 extension_update
 debian_clusters
 tablespaces
+replication_stall_3dc
+demote_timeout_wait_primary_deadlock
+timeline_fork_report_lsn_deadlock
