@@ -304,3 +304,15 @@ goal state from the monitor. If the failed node was a primary and was demoted,
 it will learn this from the monitor. Once the node reports, it is allowed to
 come back as a standby by running ``pg_rewind``. If it is too far behind, the
 node performs a new ``pg_basebackup``.
+
+Whether ``pg_rewind`` is even the right call isn't decided from a bare
+timeline-number comparison. The node walks the upstream's real timeline
+history to distinguish "still catching up" from "genuinely diverged onto a
+dead branch" — the latter can happen when a standby was written to, or
+promoted, outside of ``pg_autoctl``'s control. Every node also periodically
+publishes its own known timeline lineage to the monitor
+(``pgautofailover.node_timeline_history``), so that a failover election can
+reason about forks centrally and exclude a diverged candidate rather than
+block on it. See :ref:`timeline_forks` for the full scenario, and
+:ref:`pg_autoctl_show_timeline` / :ref:`pg_autoctl_accept_timeline` for the
+commands that surface and, when needed, resolve this.

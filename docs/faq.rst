@@ -1,3 +1,5 @@
+.. _faq:
+
 Frequently Asked Questions
 ==========================
 
@@ -110,6 +112,40 @@ will be permanently lost once the new primary starts accepting writes.
 See :ref:`perform_failover_allow_data_loss` and the
 ``pgautofailover.guard_data_loss`` GUC in :ref:`configuration` for a full
 explanation.
+
+My standby won't rejoin — Postgres logs a timeline mismatch, what should I do?
+------------------------------------------------------------------------------
+
+This happens when a standby's local WAL has genuinely diverged from the
+rest of the group — for example, it was promoted or written to directly at
+the Postgres level, outside of ``pg_autoctl``'s control, during an incident.
+Postgres itself refuses the reconnect and logs something like ``requested
+timeline N is not a child of this server's history``.
+
+**This is usually automatic.** ``pg_autoctl`` now walks the upstream's real
+timeline history to tell a standby that's simply behind apart from one
+that's genuinely diverged, and runs ``pg_rewind`` (or a fresh
+``pg_basebackup`` if ``pg_rewind`` can't connect) the next time the standby
+goes through a real transition — the next health-check-driven resync is
+usually enough. See :ref:`timeline_forks` for the full scenario.
+
+**If it doesn't resolve on its own,** check what the monitor knows::
+
+  pg_autoctl show timeline
+
+A node flagged ``FORK: diverges from the reference timeline, pg_rewind
+required`` needs an operator decision. This most often means auto-detection
+couldn't tell which branch was real — for instance in a two-node formation,
+where there's no sibling node to disagree with the diverged one. Confirm
+which timeline is actually ground truth from other evidence (which node was
+manually promoted, ``pg_controldata`` output, etc.), then pin it::
+
+  pg_autoctl accept timeline --tli <N> --reason "..."
+
+The diverged node then rewinds and rejoins automatically. See
+:ref:`pg_autoctl_show_timeline`, :ref:`pg_autoctl_accept_timeline`, and
+:ref:`resolving_timeline_fork` for the full command reference and
+walkthrough.
 
 The state of the system is blocked, what should I do?
 -----------------------------------------------------

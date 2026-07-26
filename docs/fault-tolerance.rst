@@ -197,6 +197,52 @@ PostgreSQL service:
 
        Falling back to asynchronous replication and resynchronizing
 
+.. _timeline_forks:
+
+Timeline Forks
+--------------
+
+A different kind of failure doesn't come from a node being unreachable, but
+from a node whose local WAL has genuinely diverged from the rest of the
+group. This happens when a standby is written to, or promoted, outside of
+``pg_autoctl``'s control — a manual intervention during an incident, a
+monitoring bug elsewhere, a previous split-brain — and generates local WAL
+that no other node in the group has, on a branch of history the primary
+never took.
+
+Ordinary streaming replication can never resolve this: it's not lag, it's
+divergence. Postgres itself refuses the reconnect (``requested timeline N
+is not a child of this server's history``), and pre-fix, ``pg_autoctl`` had
+no code path that recognized this case and just retried the same doomed
+reconnect forever.
+
+pg_auto_failover now detects and resolves this automatically in the common
+case: before trusting a bare timeline-number comparison, a standby
+reconnecting to a (possibly new) primary walks the primary's real
+timeline history to tell "still catching up" apart from "diverged onto a
+dead branch," and runs ``pg_rewind`` in either direction as needed (falling
+back to a fresh ``pg_basebackup`` if ``pg_rewind`` itself can't connect).
+See the ``Catchingup`` section of :ref:`failover_state_machine` for where
+this check runs.
+
+When the automatic election also needs to reason about a fork — deciding
+which of several candidates is on the real lineage — it excludes genuinely
+diverged candidates rather than counting them as merely missing (see the
+``Report_LSN`` section of :ref:`failover_state_machine`). This only works
+when there's a sibling node to disagree with the diverged one; in a
+two-node formation, or whenever every surviving node happens to already be
+on the same diverged branch, the fork can read as clean, and an operator
+decision is needed. Use :ref:`pg_autoctl_show_timeline` to see the group's
+known timeline history and each node's status against it, and
+:ref:`pg_autoctl_accept_timeline` to pin the correct lineage explicitly —
+see :ref:`resolving_timeline_fork` for the full walkthrough.
+
+.. figure:: ./tikz/seq-timeline-fork.svg
+   :alt: Sequence diagram of a standby forking out-of-band and being detected and rewound back onto the real lineage
+
+   A standby forks out-of-band, goes unnoticed until its next real
+   transition, then is detected and rewound
+
 Failure handling and network partition detection
 ------------------------------------------------
 
