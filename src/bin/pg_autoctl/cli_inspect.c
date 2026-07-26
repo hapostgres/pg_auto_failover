@@ -25,6 +25,7 @@ static CommandLine *inspect_fsm_subcommands[] = {
 	&fsm_state,
 	&fsm_list,
 	&fsm_gv,
+	&fsm_mermaid,
 	NULL
 };
 

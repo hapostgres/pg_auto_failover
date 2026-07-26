@@ -19,6 +19,7 @@
 #include "commandline.h"
 #include "defaults.h"
 #include "fsm.h"
+#include "fsm_mermaid.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "parsing.h"
@@ -31,6 +32,11 @@ static void cli_do_fsm_init(int argc, char **argv);
 static void cli_do_fsm_state(int argc, char **argv);
 static void cli_do_fsm_list(int argc, char **argv);
 static void cli_do_fsm_gv(int argc, char **argv);
+static void cli_do_fsm_mermaid_init(int argc, char **argv);
+static void cli_do_fsm_mermaid_steady_state(int argc, char **argv);
+static void cli_do_fsm_mermaid_failover(int argc, char **argv);
+static void cli_do_fsm_mermaid_maintenance(int argc, char **argv);
+static void cli_do_fsm_mermaid_removal(int argc, char **argv);
 static void cli_do_fsm_assign(int argc, char **argv);
 static void cli_do_fsm_step(int argc, char **argv);
 
@@ -65,6 +71,47 @@ CommandLine fsm_gv =
 	make_command("gv",
 				 "Output the FSM as a .gv program suitable for graphviz/dot",
 				 "", NULL, NULL, cli_do_fsm_gv);
+
+static CommandLine fsm_mermaid_init =
+	make_command("init",
+				 "Mermaid diagram: how a node comes into existence or rejoins",
+				 "", NULL, NULL, cli_do_fsm_mermaid_init);
+
+static CommandLine fsm_mermaid_steady_state =
+	make_command("steady-state",
+				 "Mermaid diagram: normal operation, no failure",
+				 "", NULL, NULL, cli_do_fsm_mermaid_steady_state);
+
+static CommandLine fsm_mermaid_failover =
+	make_command("failover",
+				 "Mermaid diagram: primary failover/promotion, including "
+				 "multi-standby candidate election",
+				 "", NULL, NULL, cli_do_fsm_mermaid_failover);
+
+static CommandLine fsm_mermaid_maintenance =
+	make_command("maintenance",
+				 "Mermaid diagram: planned maintenance",
+				 "", NULL, NULL, cli_do_fsm_mermaid_maintenance);
+
+static CommandLine fsm_mermaid_removal =
+	make_command("removal",
+				 "Mermaid diagram: node removal/drop",
+				 "", NULL, NULL, cli_do_fsm_mermaid_removal);
+
+static CommandLine *fsm_mermaid_[] = {
+	&fsm_mermaid_init,
+	&fsm_mermaid_steady_state,
+	&fsm_mermaid_failover,
+	&fsm_mermaid_maintenance,
+	&fsm_mermaid_removal,
+	NULL
+};
+
+CommandLine fsm_mermaid =
+	make_command_set("mermaid",
+					 "Output the FSM as Mermaid stateDiagram-v2 programs, "
+					 "split by phase for readability", NULL, NULL,
+					 NULL, fsm_mermaid_);
 
 CommandLine fsm_assign =
 	make_command("assign",
@@ -115,6 +162,7 @@ static CommandLine *fsm[] = {
 	&fsm_state,
 	&fsm_list,
 	&fsm_gv,
+	&fsm_mermaid,
 	&fsm_assign,
 	&fsm_step,
 	&fsm_nodes,
@@ -274,6 +322,46 @@ static void
 cli_do_fsm_gv(int argc, char **argv)
 {
 	print_fsm_for_graphviz();
+}
+
+
+/*
+ * cli_do_fsm_mermaid_{init,steady_state,failover,maintenance,removal} each
+ * output one phase of the FSM as a Mermaid stateDiagram-v2 program. See
+ * fsm_mermaid.c for why the phases are split this way.
+ */
+static void
+cli_do_fsm_mermaid_init(int argc, char **argv)
+{
+	print_fsm_mermaid_for_phase(FSM_PHASE_INIT);
+}
+
+
+static void
+cli_do_fsm_mermaid_steady_state(int argc, char **argv)
+{
+	print_fsm_mermaid_for_phase(FSM_PHASE_STEADY_STATE);
+}
+
+
+static void
+cli_do_fsm_mermaid_failover(int argc, char **argv)
+{
+	print_fsm_mermaid_for_phase(FSM_PHASE_FAILOVER);
+}
+
+
+static void
+cli_do_fsm_mermaid_maintenance(int argc, char **argv)
+{
+	print_fsm_mermaid_for_phase(FSM_PHASE_MAINTENANCE);
+}
+
+
+static void
+cli_do_fsm_mermaid_removal(int argc, char **argv)
+{
+	print_fsm_mermaid_for_phase(FSM_PHASE_REMOVAL);
 }
 
 

@@ -21,6 +21,7 @@ extern CommandLine fsm_state;
 extern CommandLine fsm_node_state;
 extern CommandLine fsm_list;
 extern CommandLine fsm_gv;
+extern CommandLine fsm_mermaid;
 
 /* mutating sub-commands exposed via "pg_autoctl manual fsm" */
 extern CommandLine fsm_init;
