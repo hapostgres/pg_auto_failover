@@ -46,6 +46,23 @@ and the keeper (``pg_autoctl run``) is still active, but PostgreSQL has failed.
 Situations might include *File System is Full* on the WAL disk, some file
 system level corruption, missing files, etc.
 
+A node is only ever considered unhealthy from the combination of these two
+independent signals, not from either alone:
+
+- the monitor's own direct health checks (the periodic libpq connection
+  above), and
+- what the node's own keeper last reported through the node-active
+  protocol -- either that it has stopped reporting at all, or that it is
+  still reporting but says its local PostgreSQL is not running.
+
+A node whose keeper is still actively reporting ``pgIsRunning = true`` is
+never marked unhealthy on the strength of a failed direct health check
+alone -- that combination just means the monitor's own connection is
+having trouble, while the node itself is telling a different story, so the
+monitor keeps trusting the node's own report. Conversely, a keeper that
+reports ``pgIsRunning = false`` marks its node unhealthy immediately,
+whether or not the direct health check is currently failing too.
+
 Here's what happens to your PostgreSQL service in case of any single-node
 failure is observed:
 
@@ -68,6 +85,12 @@ failure is observed:
     reports success anyway, and the failover sequence continues from the
     monitor.
 
+    .. figure:: ./tikz/seq-primary-unhealthy.svg
+       :alt: Sequence diagram of the monitor failing over to the secondary after the primary's keeper reports Postgres down, and the resulting draining/catch-up/STONITH/promote sequence
+
+       Unhealthy from the keeper's own report (Postgres down, keeper still
+       reporting), then draining, catch-up, STONITH, promote
+
   - Secondary node is monitored unhealthy
 
     When the secondary node is unhealthy, the monitor assigns to it the
@@ -86,6 +109,25 @@ failure is observed:
     pg_auto_failover in the first place, as the keeper fails to report local state
     from the nodes. Also, health checks are not performed. It means that no
     automated failover may happen, even if needed.
+
+    pg_auto_failover's design target is to handle any **one** node failure.
+    Losing the monitor, by itself, isn't a problem: the primary and
+    secondary keep working, unattended, for as long as it takes to bring
+    the monitor back. But that node is now down, and while it's down the
+    formation has no automated protection left. If a second node then also
+    fails before the monitor is restored — the primary, say, while the
+    monitor is still out — that's two node failures out of three at the
+    same time, and pg_auto_failover has no automated repair for that: there
+    is no third, healthy node left for the monitor to orchestrate a
+    failover to even once it does come back. Restoring the monitor quickly
+    is what keeps a single further failure from turning into exactly that
+    situation.
+
+    .. figure:: ./tikz/seq-monitor-failed.svg
+       :alt: Sequence diagram showing that primary/secondary roles and application read-write access are unaffected while the monitor is down, only automated failover is unavailable
+
+       No monitor, no automated failover -- but roles and application
+       traffic are entirely unaffected
 
 .. _network_partitions:
 
