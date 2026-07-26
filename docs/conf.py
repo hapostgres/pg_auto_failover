@@ -49,6 +49,10 @@ PygmentsBridge.latex_formatter = CustomLatexFormatter
 # ones.
 extensions = ["sphinx.ext.githubpages", "sphinxcontrib.mermaid"]
 
+# Let readers pan/drag and scroll-to-zoom on rendered Mermaid diagrams --
+# useful for the FSM diagrams, several of which have 15-30 edges.
+mermaid_d3_zoom = True
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 
