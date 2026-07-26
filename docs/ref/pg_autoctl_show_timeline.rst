@@ -186,37 +186,46 @@ normal three-node formation's ``show timeline`` looks like this::
                   node2 |      2 |    1 |   0/5000060 | ok, on accepted lineage
                   node3 |      3 |    1 |   0/5000060 | ok, on accepted lineage
 
-Now fork ``node3`` the same way as before (network-partition it, promote it
-directly at the Postgres level, give it a couple of local-only writes),
-while ``node1`` and ``node2`` keep streaming normally the whole time.
+The application keeps writing to the primary the whole time below — a
+fork developing on one standby elsewhere in the formation is not a reason
+for the main system to pause traffic, and an example where node1/node2
+sit idle while only node3 does anything would be misleading about what
+this actually looks like in production. Fork ``node3`` the same way as
+before (network-partition it, promote it directly at the Postgres level,
+give it a couple of local-only writes) while ``node1`` keeps taking
+ordinary application writes and replicating them to ``node2`` throughout.
 Unpinned, this **still reads as clean**::
 
    $ pg_autoctl show timeline --formation default
         TLI | Parent TLI | Switchpoint LSN
    ---------+------------+----------------
           1 |          0 |             0/0
-          2 |          1 |       0/5089AC0
+          2 |          1 |       0/5016BC0
 
                    Name | NodeId |  TLI |         LSN | Status
    ---------------------+--------+------+-------------+-----------------------------------------
-                  node1 |      1 |    1 |   0/5089AC0 | ok, on accepted lineage
-                  node2 |      2 |    1 |   0/5089AC0 | ok, on accepted lineage
-                  node3 |      3 |    2 |   0/509FC88 | ok, on accepted lineage
+                  node1 |      1 |    1 |   0/5042910 | ok, on accepted lineage
+                  node2 |      2 |    1 |   0/5042910 | ok, on accepted lineage
+                  node3 |      3 |    2 |   0/502D758 | ok, on accepted lineage
 
-The auto-detection heuristic (no operator pin) is "the reference lineage is
+Notice ``node1``/``node2`` are well ahead of ``node3`` in LSN, on their own
+unbroken timeline 1 — that's the application's own ordinary traffic having
+kept flowing the entire time, completely unrelated to node3's fork. The
+auto-detection heuristic (no operator pin) is "the reference lineage is
 whichever branch contains the highest reported timeline" — and it only
 *excludes* a candidate when a genuinely **competing** branch is reported by
 someone else: two nodes each diverging from the same point onto two
 different timelines. ``node1`` and ``node2`` aren't competing with
-``node3`` here, they're simply behind it, and timeline 1 really is
-``node3``'s own recorded parent. Structurally that's indistinguishable from
-``node3`` having been legitimately promoted past two ordinary, honestly
-lagging standbys. A third node only helps when it *also* reports a
-divergent history from the same switchpoint; a sibling that just stays
-behind doesn't contest anything.
+``node3`` here, they're simply on a different, ongoing timeline, and
+timeline 1 really is ``node3``'s own recorded parent. Structurally that's
+indistinguishable from ``node3`` having been legitimately promoted past two
+ordinary, honestly lagging standbys. A third node only helps when it
+*also* reports a divergent history from the same switchpoint; a sibling
+that just keeps working on its own lineage doesn't contest anything.
 
 :ref:`pg_autoctl_accept_timeline` is still the way out, exactly as in the
-two-node case::
+two-node case. The application's writes to node1 don't stop for this
+either::
 
    $ pg_autoctl accept timeline --tli 1 --formation default --reason "node3 self-promoted out of band during a network partition"
    Timeline 1 accepted as ground truth for formation "default" group 0. The election will now only consider nodes on that lineage; other nodes need pg_rewind before rejoining.
@@ -225,24 +234,26 @@ two-node case::
         TLI | Parent TLI | Switchpoint LSN
    ---------+------------+----------------
           1 |          0 |             0/0
-          2 |          1 |       0/5089AC0
+          2 |          1 |       0/5016BC0
 
                    Name | NodeId |  TLI |         LSN | Status
    ---------------------+--------+------+-------------+-----------------------------------------
-                  node1 |      1 |    1 |   0/5089AC0 | ok, on accepted lineage
-                  node2 |      2 |    1 |   0/5089AC0 | ok, on accepted lineage
-                  node3 |      3 |    2 |   0/509FCC0 | FORK: diverges from the reference timeline, pg_rewind required
+                  node1 |      1 |    1 |   0/509CE00 | ok, on accepted lineage
+                  node2 |      2 |    1 |   0/509CE00 | ok, on accepted lineage
+                  node3 |      3 |    2 |   0/502D758 | FORK: diverges from the reference timeline, pg_rewind required
 
    One or more nodes have diverged from the reference timeline (see FORK above).
    See `pg_autoctl accept timeline --help` to resolve.
 
-Forcing ``node3`` through a resync then recovers it exactly as before::
+Forcing ``node3`` through a resync then recovers it exactly as before, and
+every row the application wrote to node1 in the meantime — 200 rows, none
+of them lost or delayed by node3's fork — is there once node3 rejoins::
 
    $ pg_autoctl show timeline --formation default
         TLI | Parent TLI | Switchpoint LSN
    ---------+------------+----------------
           1 |          0 |             0/0
-          2 |          1 |       0/5089AC0
+          2 |          1 |       0/5016BC0
 
                    Name | NodeId |  TLI |         LSN | Status
    ---------------------+--------+------+-------------+-----------------------------------------

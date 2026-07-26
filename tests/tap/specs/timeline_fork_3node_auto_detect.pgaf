@@ -41,6 +41,12 @@ setup {
         and node3 state is secondary
         timeout 60s
     promote node1
+    # The application keeps writing to the primary throughout this whole
+    # spec -- a forked standby elsewhere in the formation has no reason to
+    # pause traffic on the main system, and a doc example that freezes
+    # node1/node2 while only node3 does anything is misleading about what
+    # this actually looks like in production.
+    sql node1 { CREATE TABLE app_data(a int); }
 }
 
 teardown {
@@ -52,9 +58,15 @@ step test_001_fork_node3_out_of_band {
         and node2 state is secondary
         and node3 state is secondary
         timeout 60s
+    # ordinary application traffic, already flowing before node3 forks
+    sql node1 { INSERT INTO app_data SELECT generate_series(1, 50); }
     network disconnect node3
     exec node3  pg_ctl promote --pgdata /var/lib/postgres/pgaf
     sleep 3s
+    # more application traffic while node3 is isolated and forking -- the
+    # main system doesn't know or care that node3 is off doing its own
+    # thing
+    sql node1 { INSERT INTO app_data SELECT generate_series(51, 100); }
     # node3's synchronous_standby_names is still the 3-node-formation value
     # (set on every node's local config, not only the primary's, so it's
     # ready to serve if promoted for real) -- ANY 1 (..., ...). Now that
@@ -75,6 +87,9 @@ step test_002_reconnect_and_confirm_published {
     # give node3's keeper at least one periodic tick to publish its new
     # (diverged) timeline history before checking
     sleep 5s
+    # application traffic keeps flowing after node3 reconnects too --
+    # nothing about this scenario ever pauses the main system
+    sql node1 { INSERT INTO app_data SELECT generate_series(101, 150); }
     sql monitor {
         SELECT EXISTS (
             SELECT 1
@@ -98,6 +113,9 @@ step test_003_show_timeline_still_reads_clean {
 }
 
 step test_004_accept_timeline_flags_the_fork {
+    # still just ordinary application traffic on the main system, same as
+    # every other step in this spec
+    sql node1 { INSERT INTO app_data SELECT generate_series(151, 200); }
     exec node1  pg_autoctl accept timeline --tli 1 --formation default --reason "node3 self-promoted out of band during a network partition"
     expect { accepted as ground truth }
 
@@ -118,6 +136,12 @@ step test_005_maintenance_cycle_recovers {
 
     sql node3 { SELECT to_regclass('public.divergent_data'); }
     expect { }
+
+    # the main system's own data was never at risk and never paused --
+    # confirm all 200 application rows made it to node3 once it rejoined
+    # on the correct lineage
+    sql node3 { SELECT count(*) FROM app_data; }
+    expect { 200 }
 }
 
 step test_006_show_timeline_clean_after_recovery {
