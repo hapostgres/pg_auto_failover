@@ -28,6 +28,7 @@ guard_data_loss
 replication_stall_3dc
 fast_forward
 demote_timeout_wait_primary_deadlock
+wait_primary_draining_deadlock
 timeline_fork_report_lsn_deadlock
 extension_update
 tablespaces

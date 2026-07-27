@@ -2520,3 +2520,46 @@ NodeIsDrainTimeExpired(const AutoFailoverNode *node,
 	return TimestampDifferenceExceeds(node->stateChangeTime, ctx->now,
 									  ctx->drainTimeoutMs);
 }
+
+
+/*
+ * NodeIsWaitPrimaryPresumedDead is the wait_primary equivalent of
+ * NodeIsDrainTimeExpired (issue #1168): a primary already converged to
+ * wait_primary never had a synchronous standby to begin with, so there is
+ * nothing "live" to gracefully drain, and KeeperFSM[] has no
+ * wait_primary -> draining or wait_primary -> demote_timeout edge either.
+ *
+ * We still apply the exact same safety margin (drainTimeoutMs, not the
+ * shorter unhealthyTimeoutMs that triggers a failover attempt in the first
+ * place) before presuming it dead. NodeIsDrainTimeExpired anchors on
+ * primaryNode's own stateChangeTime, which only moves when the monitor
+ * (re)assigns its goal -- a timestamp the primary itself can't refresh
+ * just by resuming contact. We can't reuse that same trick on primaryNode
+ * here, because this path deliberately never reassigns its goal (there is
+ * nothing reachable to reassign it to); if we anchored on primaryNode's
+ * own reportTime instead, a primary that reconnects and resumes reporting
+ * wait_primary (without ever converging on the failover) would keep
+ * resetting the clock forever, even though it never actually completes
+ * the promotion -- a permanent stall, not a bounded wait.
+ *
+ * So we anchor on activeNode's stateChangeTime instead: it is only
+ * touched by the monitor (re)assigning activeNode's own goal, which stops
+ * once activeNode converges to stop_replication (no further rule targets
+ * it while it stays there), giving us the same "fixed once committed,
+ * immune to the other node's unrelated activity" property that
+ * NodeIsDrainTimeExpired gets from primaryNode's stateChangeTime.
+ */
+bool
+NodeIsWaitPrimaryPresumedDead(const AutoFailoverNode *primaryNode,
+							  const AutoFailoverNode *activeNode,
+							  const struct GroupStateContext *ctx)
+{
+	if (primaryNode == NULL || activeNode == NULL ||
+		primaryNode->goalState != REPLICATION_STATE_WAIT_PRIMARY)
+	{
+		return false;
+	}
+
+	return TimestampDifferenceExceeds(activeNode->stateChangeTime, ctx->now,
+									  ctx->drainTimeoutMs);
+}

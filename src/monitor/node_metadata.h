@@ -286,3 +286,6 @@ extern bool NodeIsReporting(const AutoFailoverNode *node,
 							const struct GroupStateContext *ctx);
 extern bool NodeIsDrainTimeExpired(const AutoFailoverNode *node,
 								   const struct GroupStateContext *ctx);
+extern bool NodeIsWaitPrimaryPresumedDead(const AutoFailoverNode *primaryNode,
+										  const AutoFailoverNode *activeNode,
+										  const struct GroupStateContext *ctx);
