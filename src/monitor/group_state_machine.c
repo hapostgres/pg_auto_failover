@@ -698,22 +698,46 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	{
 		char message[BUFSIZE];
 
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to draining and " NODE_FORMAT
-			" to prepare_promotion "
-			"after " NODE_FORMAT
-			" became unhealthy.",
-			NODE_FORMAT_ARGS(primaryNode),
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
+		/*
+		 * A primary already converged to wait_primary has no "draining" to
+		 * go through: it never had a synchronous standby to begin with, so
+		 * there's nothing live to gracefully drain, and KeeperFSM[] has no
+		 * wait_primary -> draining edge anyway (issue #1168). Leave its
+		 * goal untouched here; the prepare_promotion/stop_replication rules
+		 * below apply the same drainTimeoutMs safety margin via report
+		 * staleness instead of a goal-state timestamp, then commit the one
+		 * real, reachable wait_primary -> demoted transition once it has
+		 * genuinely expired.
+		 */
+		if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to prepare_promotion after " NODE_FORMAT
+				" (at wait_primary) became unhealthy.",
+				NODE_FORMAT_ARGS(activeNode),
+				NODE_FORMAT_ARGS(primaryNode));
+		}
+		else
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to draining and " NODE_FORMAT
+				" to prepare_promotion "
+				"after " NODE_FORMAT
+				" became unhealthy.",
+				NODE_FORMAT_ARGS(primaryNode),
+				NODE_FORMAT_ARGS(activeNode),
+				NODE_FORMAT_ARGS(primaryNode));
+
+			/* shut down the primary */
+			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+		}
 
 		/* keep reading until no more records are available */
 		AssignGoalState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
-
-		/* shut down the primary */
-		AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
 
 		return true;
 	}
@@ -854,21 +878,39 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	{
 		char message[BUFSIZE];
 
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to demote_timeout and " NODE_FORMAT
-			" to stop_replication after " NODE_FORMAT
-			" converged to prepare_promotion.",
-			NODE_FORMAT_ARGS(primaryNode),
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(activeNode));
+		/*
+		 * wait_primary has no reachable demote_timeout edge either (issue
+		 * #1168); leave its goal alone here and let the completion rule
+		 * below apply the drainTimeoutMs safety margin via report
+		 * staleness instead.
+		 */
+		if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to stop_replication after it converged to "
+				"prepare_promotion.",
+				NODE_FORMAT_ARGS(activeNode));
+		}
+		else
+		{
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to demote_timeout and " NODE_FORMAT
+				" to stop_replication after " NODE_FORMAT
+				" converged to prepare_promotion.",
+				NODE_FORMAT_ARGS(primaryNode),
+				NODE_FORMAT_ARGS(activeNode),
+				NODE_FORMAT_ARGS(activeNode));
+
+			/* wait for possibly-alive primary to kill itself */
+			AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT, message);
+		}
 
 		/* perform promotion to stop replication */
 		AssignGoalState(activeNode, REPLICATION_STATE_STOP_REPLICATION, message);
-
-		/* wait for possibly-alive primary to kill itself */
-		AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT, message);
 
 		return true;
 	}
@@ -926,10 +968,16 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	/*
 	 * when drain time expires or primary reports it's drained:
 	 *  draining -> demoted
+	 *
+	 * NodeIsWaitPrimaryPresumedDead covers the wait_primary equivalent
+	 * (issue #1168): the same drainTimeoutMs safety margin, applied via
+	 * report staleness instead of a demote_timeout goal-state timestamp
+	 * since that state is never reachable from wait_primary.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
 		(IsCurrentState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT) ||
-		 NodeIsDrainTimeExpired(primaryNode, ctx)))
+		 NodeIsDrainTimeExpired(primaryNode, ctx) ||
+		 NodeIsWaitPrimaryPresumedDead(primaryNode, activeNode, ctx)))
 	{
 		char message[BUFSIZE];
 
@@ -937,7 +985,7 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 			message, BUFSIZE,
 			"Setting goal state of " NODE_FORMAT
 			" to wait_primary and " NODE_FORMAT
-			" to demoted after the demote timeout expired.",
+			" to demoted after the primary was presumed dead.",
 			NODE_FORMAT_ARGS(activeNode),
 			NODE_FORMAT_ARGS(primaryNode));
 

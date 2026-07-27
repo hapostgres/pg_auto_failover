@@ -1,4 +1,4 @@
-# Reproduces https://github.com/hapostgres/pg_auto_failover/issues/1168.
+# Regression test for https://github.com/hapostgres/pg_auto_failover/issues/1168.
 #
 # node1 (primary) loses its only quorum-counted standby (node2) and gets
 # reassigned wait_primary, even though node3 -- an async standby
@@ -9,14 +9,23 @@
 # node1 then itself becomes unhealthy while sitting at (converged)
 # wait_primary. The auto-failover trigger in ProceedGroupStateFromContext
 # (`IsCurrentState(activeNode, SECONDARY) && IsInPrimaryState(primaryNode)
-# && NodeIsUnhealthy(primaryNode) && ...`) fires against node3 and assigns
+# && NodeIsUnhealthy(primaryNode) && ...`) used to unconditionally assign
 # node1 "draining" -- a goal state with no KeeperFSM[] edge from
 # wait_primary (only PRIMARY/JOIN_PRIMARY/APPLY_SETTINGS -> DRAINING
-# exist). node1's keeper fatals and retries forever on that specific
-# assignment. The cluster still recovers, but only via the unrelated,
-# purely time-based drain-timeout self-heal (goal jumps straight to
-# demoted once drain_timeout_ms elapses) -- not because the assignment was
-# ever reachable.
+# exist). node1's keeper would fatal and retry forever on that specific
+# assignment; the cluster still recovered, but only via the unrelated,
+# purely time-based drain-timeout self-heal, ~drain_timeout_ms late.
+#
+# Fixed by never reassigning primaryNode's goal away from wait_primary
+# along this path (there is nothing reachable to reassign it to) and
+# instead applying the same drain_timeout_ms safety margin via
+# NodeIsWaitPrimaryPresumedDead, anchored on the candidate's own
+# stateChangeTime rather than the primary's reportTime -- the primary
+# reconnecting and resuming reports (without ever converging) must not
+# reset that clock, or the promotion would stall forever instead of
+# completing on the same bounded timeline as any other primary failure.
+# This spec asserts the fatal never happens and the cluster still
+# converges within the same safety margin.
 
 cluster {
     monitor
@@ -45,29 +54,26 @@ step test_001_losing_the_only_sync_standby_reassigns_wait_primary {
     assert node3 state is secondary
 }
 
-step test_002_primary_failure_at_wait_primary_hits_1168 {
+step test_002_primary_failure_at_wait_primary_promotes_cleanly {
     network disconnect node1
 
     # node3 is the only remaining healthy candidate (async, candidate
-    # priority 50 > 0); the buggy trigger targets it once node1 is marked
-    # unhealthy by the monitor's own health checks. node1's goal moves
-    # draining -> demote_timeout within the same polling cycle (neither
-    # reachable from wait_primary), so we don't probe that intermediate
-    # value directly -- the FATAL log below is the stable signature.
+    # priority 50 > 0); the auto-failover trigger targets it once node1 is
+    # marked unhealthy by the monitor's own health checks. node1's own
+    # goal stays at wait_primary throughout (issue #1168 fix) instead of
+    # bouncing through the unreachable draining/demote_timeout states.
     wait until node3 assigned-state is prepare_promotion  timeout 90s
 
     network connect node1
 
-    # Recovers, but only via the unrelated drain-timeout self-heal (goal
-    # re-targeted straight to demoted once drain_timeout_ms elapses), not
-    # because "draining"/"demote_timeout" ever became reachable from
-    # wait_primary.
+    # Recovers within the same drain_timeout_ms safety margin as any other
+    # primary failure -- not sped up, not stalled by node1 reconnecting and
+    # resuming (fruitless) reports along the way.
     wait until node1 state is demoted  timeout 90s
 
-    # node1 reported back in still at wait_primary along the way, was
-    # handed one of those unreachable goals, and fataled/retried -- the
-    # bug this spec documents.
-    logs node1 contains "does not know how to reach state"
+    # The fix's whole point: no unreachable assignment was ever made, so
+    # node1's keeper never fatals.
+    logs node1 not contains "does not know how to reach state"
 }
 
 step test_003_cluster_converges_back_after_recovery {
@@ -80,5 +86,5 @@ step test_003_cluster_converges_back_after_recovery {
 
 sequence
     test_001_losing_the_only_sync_standby_reassigns_wait_primary
-    test_002_primary_failure_at_wait_primary_hits_1168
+    test_002_primary_failure_at_wait_primary_promotes_cleanly
     test_003_cluster_converges_back_after_recovery
