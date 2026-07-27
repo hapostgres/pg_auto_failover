@@ -192,7 +192,7 @@ def test_003_002_all_workers_have_data():
     results = worker2b.run_sql_query(q1)
     eq_(results, r2)
 
-    results = worker2c.run_sql_query(q1)
+    results = worker2c.run_sql_query_retry(q1)
     eq_(results, r2)
 
 
