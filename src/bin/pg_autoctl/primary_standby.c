@@ -2253,6 +2253,95 @@ standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
 	}
 	else if (upstreamTimeline == localTimeline)
 	{
+		/*
+		 * Matching timeline numbers alone is not proof of a shared history:
+		 * two nodes can each keep believing they're on timeline N when one
+		 * of them never genuinely left it through a real promotion (see
+		 * standby_promotion_advanced_timeline and the fast_forward race it
+		 * guards against) while independently generating its own local WAL
+		 * on that same numbered timeline. pg_rewind itself trusts a bare
+		 * timeline-number match without checking further -- a known,
+		 * documented limitation shared with Patroni's own rewind-decision
+		 * code -- so this check doesn't rely on it alone either.
+		 *
+		 * What a genuine, unbroken standby can never do is get ahead of its
+		 * own upstream in LSN terms while remaining on the exact same
+		 * timeline: ordinary streaming replication only ever replays WAL
+		 * the upstream produced. If our local position is past what the
+		 * upstream reports as its own current position, we hold WAL bytes
+		 * it never produced -- the same genuine divergence #683 handles for
+		 * differing timeline numbers, just not expressed as one here.
+		 */
+		uint64_t upstreamLSN = 0;
+		uint64_t localLSN = 0;
+
+		if (!parseLSN(replicationSource->system.xlogpos, &upstreamLSN))
+		{
+			log_error("Failed to parse upstream node " NODE_FORMAT
+					  "'s reported LSN \"%s\"",
+					  primaryNode->nodeId,
+					  primaryNode->name,
+					  primaryNode->host,
+					  primaryNode->port,
+					  replicationSource->system.xlogpos);
+			return false;
+		}
+
+		if (!parseLSN(postgres->currentLSN, &localLSN))
+		{
+			log_error("Failed to parse local current LSN \"%s\"",
+					  postgres->currentLSN);
+			return false;
+		}
+
+		if (localLSN > upstreamLSN)
+		{
+			log_warn("Local timeline %d matches upstream " NODE_FORMAT
+					 "'s timeline, but local LSN %s is past upstream's "
+					 "reported LSN %s; this is not reachable through "
+					 "ordinary streaming replication, rewinding to reach a "
+					 "common history",
+					 localTimeline,
+					 primaryNode->nodeId,
+					 primaryNode->name,
+					 primaryNode->host,
+					 primaryNode->port,
+					 postgres->currentLSN,
+					 replicationSource->system.xlogpos);
+
+			if (!primary_rewind_to_standby(postgres))
+			{
+				log_error("Failed to rewind after detecting a same-timeline "
+						  "LSN divergence, see above for details");
+				return false;
+			}
+
+			/* re-fetch local metadata: the rewind changed our timeline/LSN */
+			if (!pgsql_get_postgres_metadata(&(postgres->sqlClient),
+											 &(postgres->postgresSetup.is_in_recovery),
+											 postgres->pgsrSyncState,
+											 postgres->currentLSN,
+											 &(postgres->postgresSetup.control)))
+			{
+				log_error("Failed to update the local Postgres metadata "
+						  "after rewind");
+				return false;
+			}
+
+			localTimeline = postgres->postgresSetup.control.timeline_id;
+
+			log_info("Reached timeline %d after rewind, upstream node "
+					 NODE_FORMAT " is at timeline %d",
+					 localTimeline,
+					 primaryNode->nodeId,
+					 primaryNode->name,
+					 primaryNode->host,
+					 primaryNode->port,
+					 upstreamTimeline);
+
+			return upstreamTimeline == localTimeline;
+		}
+
 		log_info("Reached timeline %d, same as upstream node " NODE_FORMAT,
 				 localTimeline,
 				 primaryNode->nodeId,
