@@ -124,7 +124,7 @@ jobs:
             apt-get update -qq 2>/dev/null
             CHANGED=false
             for pg in 14 15 16 17; do
-              installed=$(dpkg-query -W -f="\\${Version}" postgresql-${pg} 2>/dev/null || echo "")
+              installed=$(dpkg-query -W -f="\${Version}" postgresql-${pg} 2>/dev/null || echo "")
               available=$(apt-cache show postgresql-${pg} 2>/dev/null \
                 | awk "/^Version:/{print \$2; exit}")
               if [ -z "$installed" ] && [ -z "$available" ]; then
