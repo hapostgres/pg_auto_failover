@@ -1,0 +1,93 @@
+# Diagnostic spec to reproduce the fast_forward + restart corruption bug on
+# the Citus worker path, mirroring tests/tap/specs/multi_ifdown.pgaf's
+# non-Citus repro of the same class of bug.
+#
+# Root cause under investigation: fsm_citus_cleanup_and_resume_as_primary()
+# (src/bin/pg_autoctl/fsm_transition_citus.c) is the Citus-node counterpart
+# of fsm_cleanup_as_primary() (src/bin/pg_autoctl/fsm_transition.c), both
+# firing at the FAST_FORWARD_STATE -> PREP_PROMOTION_STATE transition, i.e.
+# BEFORE the real pg_ctl promote (which only happens later, from
+# standby_promote() at PREP_PROMOTION_STATE -> STOP_REPLICATION_STATE via
+# fsm_promote_standby).
+#
+# The non-Citus path was already fixed: standby_cleanup_as_primary() no
+# longer restarts Postgres (see its docstring in primary_standby.c), because
+# restarting right after standby.signal is removed -- but before a genuine
+# promotion -- makes Postgres boot as an ordinary (non-standby) server via
+# plain crash recovery, reaching a not-in-recovery state on its OLD timeline
+# without ever genuinely promoting.
+#
+# fsm_citus_cleanup_and_resume_as_primary() calls standby_cleanup_as_primary()
+# and then unconditionally does its OWN explicit keeper_restart_postgres()
+# call right after -- the exact same unsafe restart, just not living inside
+# the shared function anymore. This spec sets up a 3-node Citus worker group
+# (worker1a primary, worker1b candidate-priority 0 kept always connected as
+# the fast_forward source, worker1c candidate-priority 90 disconnected then
+# reconnected while behind) so that failing worker1a over to worker1c forces
+# worker1c through fast_forward (catching up from worker1b) before promotion.
+
+cluster {
+    monitor
+    formation {
+        coordinator1a coordinator
+        worker1a worker group 1
+        worker1b worker group 1
+        worker1c worker group 1
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 90s
+    wait until primary, secondary in group 1  timeout 90s
+    promote worker1a
+}
+
+teardown {
+    compose down
+}
+
+step test_001_init {
+    wait until worker1a state is primary
+        and worker1b state is secondary
+        and worker1c state is secondary
+        timeout 90s
+    exec worker1a  sh -c 'for i in $(seq 1 30); do n=$(psql -U docker -d demo -tAc "SELECT count(*) FROM pg_dist_node WHERE metadatasynced = false AND isactive = true"); [ "$n" = "0" ] && exit 0; sleep 2; done; exit 1'
+    sql coordinator1a { ALTER DATABASE demo SET citus.shard_count TO 4; }
+    sql coordinator1a { CREATE TABLE t1 (a int); }
+    sql coordinator1a { SELECT create_distributed_table('t1', 'a'); }
+    sql coordinator1a { INSERT INTO t1 VALUES (1), (2); }
+}
+
+step test_002_set_candidate_priorities {
+    exec worker1a  pg_autoctl set node candidate-priority 90
+    exec worker1b  pg_autoctl set node candidate-priority 0
+    exec worker1c  pg_autoctl set node candidate-priority 90
+    wait until worker1a state = primary
+        and worker1b state = secondary
+        and worker1c state = secondary
+        timeout 60s
+}
+
+step test_003_ifdown_worker1c {
+    network disconnect worker1c
+}
+
+step test_004_insert_rows {
+    sql coordinator1a { INSERT INTO t1 SELECT x + 10 FROM generate_series(1, 1000) AS gs(x); }
+}
+
+step test_005_failover {
+    network disconnect worker1a
+    network connect worker1c
+    wait until worker1b state is secondary
+        and worker1c state is primary
+        timeout 300s
+}
+
+step test_006_verify_timeline_and_data {
+    exec worker1c  bash -c "psql -d demo -tAc 'select pg_is_in_recovery()'"
+    expect { f }
+    exec worker1c  bash -c "psql -d demo -tAc 'select timeline_id from pg_control_checkpoint()'"
+    sql coordinator1a { SELECT count(*) FROM t1; }
+    expect { 1002 }
+}
