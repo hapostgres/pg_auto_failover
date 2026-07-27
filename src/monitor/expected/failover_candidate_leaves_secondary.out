@@ -52,7 +52,7 @@ SELECT *
   FROM pgautofailover.register_node('fclma_test', 'fclma_p', 5432,
                                     'postgres', 'fclma_p', 1);
 -[ RECORD 1 ]---------------+--------
-assigned_node_id            | 24
+assigned_node_id            | 31
 assigned_group_id           | 0
 assigned_group_state        | single
 assigned_candidate_priority | 100
@@ -65,7 +65,7 @@ SELECT *
   FROM pgautofailover.register_node('fclma_test', 'fclma_s', 5432,
                                     'postgres', 'fclma_s', 1);
 -[ RECORD 1 ]---------------+-------------
-assigned_node_id            | 25
+assigned_node_id            | 32
 assigned_group_id           | 0
 assigned_group_state        | wait_standby
 assigned_candidate_priority | 100
