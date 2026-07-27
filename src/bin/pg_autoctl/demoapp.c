@@ -440,7 +440,9 @@ demoapp_process_perform_switchover(DemoAppOptions *demoAppOptions)
 			continue;
 		}
 
-		if (!monitor_perform_failover(&monitor, formation, groupId))
+		bool mayRetry = false;
+
+		if (!monitor_perform_failover(&monitor, formation, groupId, &mayRetry))
 		{
 			log_fatal("Failed to perform failover/switchover, "
 					  "see above for details");

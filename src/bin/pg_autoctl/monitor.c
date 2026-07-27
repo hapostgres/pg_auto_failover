@@ -1904,9 +1904,20 @@ monitor_get_groupId_from_name(Monitor *monitor, char *formation, char *name,
 /*
  * monitor_perform_failover calls the pgautofailover.monitor_perform_failover
  * function on the monitor.
+ *
+ * perform_failover() takes the same LockFormation()/LockNodeGroup() advisory
+ * locks every other node-mutating entry point does, so it can race a
+ * concurrent node_active()/health-check write and hit a genuine Postgres
+ * deadlock (see #1004) -- transient by nature, and already covered by
+ * monitor_retryable_error() for every other entry point that can hit it
+ * (monitor_start_maintenance, monitor_stop_maintenance,
+ * monitor_register_node, ...) except this one. *mayRetry follows that same
+ * convention: set it and return false so the caller can apply its own retry
+ * policy, exactly as for start_maintenance/stop_maintenance.
  */
 bool
-monitor_perform_failover(Monitor *monitor, char *formation, int group)
+monitor_perform_failover(Monitor *monitor, char *formation, int group,
+						 bool *mayRetry)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql = "SELECT pgautofailover.perform_failover($1, $2)";
@@ -1914,19 +1925,34 @@ monitor_perform_failover(Monitor *monitor, char *formation, int group)
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
 	IntString groupString = intToString(group);
+	AbstractResultContext context = {
+		{ 0 }
+	};
 
 	paramValues[0] = formation;
 	paramValues[1] = groupString.strValue;
 
 	/*
-	 * pgautofailover.perform_failover() returns VOID.
+	 * pgautofailover.perform_failover() returns VOID: we only need the
+	 * context to capture the SQLSTATE on failure, there is nothing to parse
+	 * on success.
 	 */
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   NULL, NULL))
+								   &context, NULL))
 	{
-		log_error("Failed to perform failover for formation %s and group %d",
-				  formation, group);
+		if (monitor_retryable_error(context.sqlstate))
+		{
+			*mayRetry = true;
+		}
+		else
+		{
+			/* when we may retry then it's up to the caller to handle errors */
+			log_error("Failed to perform failover for formation %s "
+					  "and group %d",
+					  formation, group);
+		}
+
 		return false;
 	}
 
@@ -1938,11 +1964,16 @@ monitor_perform_failover(Monitor *monitor, char *formation, int group)
  * monitor_perform_failover_allow_data_loss runs perform_failover in a
  * transaction with guard_data_loss disabled, accepting the risk of data
  * loss when quorum nodes have not reported their LSN.
+ *
+ * See monitor_perform_failover's docstring for why *mayRetry is needed here
+ * too: the underlying perform_failover() call is the same SQL function and
+ * can hit the exact same transient deadlock.
  */
 bool
 monitor_perform_failover_allow_data_loss(Monitor *monitor,
 										 char *formation,
-										 int group)
+										 int group,
+										 bool *mayRetry)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql = "SELECT pgautofailover.perform_failover($1, $2)";
@@ -1950,6 +1981,9 @@ monitor_perform_failover_allow_data_loss(Monitor *monitor,
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
 	IntString groupString = intToString(group);
+	AbstractResultContext context = {
+		{ 0 }
+	};
 
 	paramValues[0] = formation;
 	paramValues[1] = groupString.strValue;
@@ -1970,12 +2004,21 @@ monitor_perform_failover_allow_data_loss(Monitor *monitor,
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   NULL, NULL))
+								   &context, NULL))
 	{
-		log_error("Failed to perform failover with --allow-data-loss "
-				  "for formation %s and group %d",
-				  formation, group);
 		(void) pgsql_rollback(pgsql);
+
+		if (monitor_retryable_error(context.sqlstate))
+		{
+			*mayRetry = true;
+		}
+		else
+		{
+			log_error("Failed to perform failover with --allow-data-loss "
+					  "for formation %s and group %d",
+					  formation, group);
+		}
+
 		return false;
 	}
 
