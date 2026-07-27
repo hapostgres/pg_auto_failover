@@ -24,6 +24,7 @@
 #include "primary_standby.h"
 #include "signals.h"
 #include "state.h"
+#include "timeline_history.h"
 
 
 static bool local_postgres_wait_until_ready(LocalPostgresServer *postgres);
@@ -1182,6 +1183,14 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 				"pause",
 				sizeof(crashRecoveryReplicationSource.targetAction));
 
+		/*
+		 * "immediate" is always a well-defined, reachable target (the
+		 * earliest consistent state), unlike an arbitrary peer LSN
+		 * snapshot -- so it's safe to let Postgres enforce reaching it via
+		 * its own recovery_target_lsn/action GUCs.
+		 */
+		crashRecoveryReplicationSource.pauseAtRecoveryTarget = true;
+
 		strlcpy(crashRecoveryReplicationSource.targetTimeline,
 				"current",
 				sizeof(crashRecoveryReplicationSource.targetTimeline));
@@ -1314,6 +1323,92 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 
 
 /*
+ * standby_promotion_advanced_timeline verifies that reaching a not-in-recovery
+ * state genuinely came from a real Postgres promotion -- which always
+ * allocates a new, strictly higher timeline and writes a pg_wal/<TLI>.history
+ * file recording the switchpoint -- rather than from ordinary crash recovery
+ * of a data directory whose standby.signal had already been removed.
+ *
+ * That second case is not hypothetical: a premature standby.signal removal
+ * (or a restart racing one) can make Postgres boot as an ordinary,
+ * non-standby server and complete plain crash recovery on its current
+ * timeline -- reaching a not-in-recovery state without ever going through
+ * the real promotion code path at all, and ending up stuck on its old
+ * timeline, indistinguishable by number from a demoted former primary. See
+ * standby_cleanup_as_primary's own comment for the specific sequence this
+ * guards against.
+ *
+ * priorTLI is the timeline this node was on before this promotion attempt;
+ * pass 0 when checking idempotently (no promotion was attempted in this
+ * call, e.g. the "already not in recovery" early return below) to rely
+ * solely on the on-disk history-file evidence.
+ */
+static bool
+standby_promotion_advanced_timeline(LocalPostgresServer *postgres,
+									uint32_t priorTLI)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	if (!pgsql_get_postgres_metadata(pgsql,
+									 &(pgSetup->is_in_recovery),
+									 postgres->pgsrSyncState,
+									 postgres->currentLSN,
+									 &(pgSetup->control)))
+	{
+		log_error("Failed to fetch Postgres metadata to verify promotion");
+		return false;
+	}
+
+	uint32_t currentTLI = pgSetup->control.timeline_id;
+
+	if (currentTLI <= 1)
+	{
+		log_error("Promotion could not be confirmed: still on timeline %d, "
+				  "which is never reached by a genuine promotion",
+				  currentTLI);
+		return false;
+	}
+
+	if (priorTLI > 0 && currentTLI <= priorTLI)
+	{
+		log_error("Promotion did not advance the timeline: still on "
+				  "timeline %d, same as before promoting",
+				  currentTLI);
+		return false;
+	}
+
+	IdentifySystem system = { 0 };
+
+	if (!keeper_fetch_local_timeline_history(pgSetup, currentTLI, &system))
+	{
+		log_error("Failed to read local timeline history to verify promotion");
+		return false;
+	}
+
+	/*
+	 * A genuine promotion to currentTLI always writes a history file
+	 * recording its parent timeline's switchpoint, so the parsed history has
+	 * at least one ancestor entry plus the current tip (count > 1). A node
+	 * that never really left its prior timeline only ever has the bare tip
+	 * (count == 1, see keeper_fetch_local_timeline_history).
+	 */
+	if (system.timelines.count <= 1)
+	{
+		log_error("Promotion to timeline %d could not be confirmed: no "
+				  "local history file records how this timeline started; "
+				  "refusing to trust an unverified promotion",
+				  currentTLI);
+		return false;
+	}
+
+	log_info("Confirmed promotion to timeline %d", currentTLI);
+
+	return true;
+}
+
+
+/*
  * standby_promote promotes a standby postgres server to primary.
  */
 bool
@@ -1338,8 +1433,19 @@ standby_promote(LocalPostgresServer *postgres)
 
 		/*
 		 * Ensure idempotency: if in the last run we managed to promote, but
-		 * failed to checkpoint, we still need to checkpoint.
+		 * failed to checkpoint, we still need to checkpoint. But first make
+		 * sure this really is a prior promotion and not the "reached
+		 * not-in-recovery without ever really promoting" failure mode
+		 * documented on standby_promotion_advanced_timeline.
 		 */
+		if (!standby_promotion_advanced_timeline(postgres, 0))
+		{
+			log_error("Refusing to proceed: postgres is not in recovery "
+					  "mode, but this does not look like a genuine prior "
+					  "promotion, see above for details");
+			return false;
+		}
+
 		if (!pgsql_checkpoint(pgsql))
 		{
 			log_error("Failed to checkpoint after promotion");
@@ -1349,8 +1455,76 @@ standby_promote(LocalPostgresServer *postgres)
 		return true;
 	}
 
+	uint32_t priorTLI = pgSetup->control.timeline_id;
+
+	/*
+	 * When we were prepared by fast_forward (standby_fetch_missing_wal),
+	 * targetLSN is our own application-level "caught up enough to promote"
+	 * threshold (see ReplicationSource.pauseAtRecoveryTarget) rather than a
+	 * Postgres recovery target -- this node just streams normally.
+	 * Fast_forward itself already confirmed replay had reached that point
+	 * once -- but every Postgres restart since then (and there can be
+	 * several, e.g. the prepare_promotion / stop_replication transitions
+	 * each reconfigure and restart Postgres for unrelated reasons) starts
+	 * recovery over from the last checkpoint, which is not guaranteed to be
+	 * at or past the target either. Re-verify it here, on whichever
+	 * instance is actually about to receive the promote request, rather
+	 * than trusting a check some earlier, possibly since-restarted instance
+	 * made.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(postgres->replicationSource.targetLSN))
+	{
+		char currentLSN[PG_LSN_MAXLENGTH] = { 0 };
+		bool hasReachedLSN = false;
+
+		do {
+			if (asked_to_stop || asked_to_stop_fast)
+			{
+				log_trace("standby_promote: signaled");
+				pgsql_finish(pgsql);
+				return false;
+			}
+
+			if (!pgsql_has_reached_target_lsn(pgsql,
+											  postgres->replicationSource.targetLSN,
+											  currentLSN,
+											  &hasReachedLSN))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			if (!hasReachedLSN)
+			{
+				log_info("Waiting for recovery to reach LSN %s before "
+						 "promoting (currently at %s)",
+						 postgres->replicationSource.targetLSN,
+						 currentLSN);
+				pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
+			}
+		} while (!hasReachedLSN);
+	}
+
 	/* disconnect from PostgreSQL now */
 	pgsql_finish(pgsql);
+
+	/*
+	 * The Postgres controller service (service_postgres_ctl.c, a separate
+	 * process from this one) polls every 100ms and would otherwise
+	 * interpret Postgres's own transient unavailability while ending
+	 * recovery and switching timeline as "Postgres died", forcing a
+	 * restart of its own right in the middle of the promotion -- see the
+	 * same reasoning in standby_fetch_missing_wal. Tell it to stand down
+	 * for the duration of this wait and hand control back once we're done
+	 * either way.
+	 */
+	if (!keeper_set_postgres_state_unknown(&(postgres->expectedPgStatus.state),
+										   postgres->expectedPgStatus.pgStatusPath))
+	{
+		log_error("Failed to signal the Postgres controller service to "
+				  "stand down during promotion");
+		return false;
+	}
 
 	log_info("Promoting postgres");
 
@@ -1379,6 +1553,22 @@ standby_promote(LocalPostgresServer *postgres)
 			return false;
 		}
 	} while (inRecovery);
+
+	/* hand control back to the Postgres controller service */
+	if (!keeper_set_postgres_state_running(&(postgres->expectedPgStatus.state),
+										   postgres->expectedPgStatus.pgStatusPath))
+	{
+		log_error("Failed to signal the Postgres controller service to "
+				  "resume supervising Postgres after promotion");
+		return false;
+	}
+
+	if (!standby_promotion_advanced_timeline(postgres, priorTLI))
+	{
+		log_error("Failed to promote standby: reached a not-in-recovery "
+				  "state without genuinely promoting, see above for details");
+		return false;
+	}
 
 	/*
 	 * It's necessary to do a checkpoint before allowing the old primary to
@@ -1591,6 +1781,37 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 	}
 
 	/*
+	 * This node's recovery configuration is deliberately left WITHOUT a
+	 * recovery_target_lsn (see ReplicationSource.pauseAtRecoveryTarget):
+	 * targetLSN here is a snapshot of another standby's current replay
+	 * position, not necessarily a genuine WAL record boundary, and asking
+	 * Postgres to enforce it as a hard recovery target can leave it waiting
+	 * forever for a record that will never arrive. Instead this node just
+	 * streams normally, and we decide for ourselves, by polling
+	 * pg_last_wal_replay_lsn(), once replay has caught up to at least
+	 * targetLSN -- which is all fast-forward ever needed. The eventual
+	 * pg_ctl promote (issued later, by standby_promote) then completes
+	 * recovery at wherever replay genuinely stands, which is always a valid
+	 * position.
+	 *
+	 * The Postgres controller service (service_postgres_ctl.c, a separate
+	 * process from this one) polls every 100ms and, as long as the expected
+	 * status we just set via standby_restart_with_current_replication_source
+	 * above is RUNNING, would otherwise interpret any transient
+	 * unavailability during that wait as "Postgres died" and force a
+	 * restart of its own. Tell it to stand down for the duration -- same
+	 * mechanism postgres_maybe_do_crash_recovery uses -- and hand control
+	 * back once we're done either way.
+	 */
+	if (!keeper_set_postgres_state_unknown(&(postgres->expectedPgStatus.state),
+										   postgres->expectedPgStatus.pgStatusPath))
+	{
+		log_error("Failed to signal the Postgres controller service to "
+				  "stand down during fast-forward");
+		return false;
+	}
+
+	/*
 	 * Now loop until replay has reached our targetLSN.
 	 */
 	while (!hasReachedLSN)
@@ -1628,6 +1849,15 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 				  postgres->currentLSN,
 				  replicationSource->targetLSN);
 		pgsql_finish(pgsql);
+		return false;
+	}
+
+	/* hand control back to the Postgres controller service */
+	if (!keeper_set_postgres_state_running(&(postgres->expectedPgStatus.state),
+										   postgres->expectedPgStatus.pgStatusPath))
+	{
+		log_error("Failed to signal the Postgres controller service to "
+				  "resume supervising Postgres after fast-forward");
 		return false;
 	}
 
@@ -1719,9 +1949,37 @@ standby_restart_with_current_replication_source(LocalPostgresServer *postgres)
 
 
 /*
- * standby_cleanup_as_primary removes the setup for a standby server and
- * restarts as a primary. It's typically called after standby_fetch_missing_wal
- * so we expect Postgres to be running as a standby and be "paused".
+ * standby_cleanup_as_primary removes the standby setup (standby.signal,
+ * primary_conninfo, ...) from the data directory.
+ *
+ * This is called from two different moments in the FSM, with two different
+ * expectations of the currently-running Postgres process:
+ *
+ *  1. fast_forward -> prepare_promotion (fsm_citus_cleanup_and_resume_as_primary
+ *     for Citus nodes only -- fsm_cleanup_as_primary, its non-Citus
+ *     counterpart, deliberately does NOT call this function; see its own
+ *     comment): Postgres is still running as an ordinary streaming standby,
+ *     caught up to at least the fast-forward target LSN (see
+ *     standby_fetch_missing_wal) but NOT promoted yet -- the actual pg_ctl
+ *     promote only happens later, from standby_promote(). Restarting
+ *     Postgres here, after standby.signal has been removed but before a
+ *     real promotion took place, makes it boot as an ordinary (non-standby)
+ *     server and complete plain crash recovery on its CURRENT timeline --
+ *     reaching a not-in-recovery state without ever genuinely promoting,
+ *     indistinguishable by timeline number from a demoted former primary.
+ *     standby_promote()'s own standby_promotion_advanced_timeline check
+ *     catches that case defensively, but this function itself only removes
+ *     the on-disk standby setup and must NOT restart Postgres, leaving the
+ *     running process untouched and ready for the FSM's later, explicit
+ *     pg_ctl promote.
+ *
+ *  2. prepare_promotion -> stop_replication (fsm_promote_standby): called
+ *     right after standby_promote() has genuinely promoted this node (new,
+ *     strictly higher timeline, confirmed via standby_promotion_advanced_timeline).
+ *     Here too we only need to remove the on-disk standby setup so that a
+ *     later restart of this now-primary node doesn't accidentally pick stale
+ *     replication configuration back up; the already-promoted, running
+ *     process needs no restart of its own.
  */
 bool
 standby_cleanup_as_primary(LocalPostgresServer *postgres)

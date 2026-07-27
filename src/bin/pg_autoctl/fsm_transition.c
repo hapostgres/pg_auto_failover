@@ -44,6 +44,7 @@
 
 
 static bool fsm_init_standby_from_upstream(Keeper *keeper);
+static void keeper_defensive_publish_timeline_history(Keeper *keeper);
 
 
 /*
@@ -231,6 +232,8 @@ fsm_init_primary(Keeper *keeper)
 					  "postgres failed, see above for details");
 			return false;
 		}
+
+		keeper_defensive_publish_timeline_history(keeper);
 	}
 
 	/*
@@ -1282,6 +1285,14 @@ fsm_promote_standby(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * Publish our fresh timeline right away rather than waiting for the next
+	 * periodic tick: other nodes (and an operator running `pg_autoctl show
+	 * timeline`) should be able to see this promotion's timeline as soon as
+	 * it's genuinely confirmed, not several seconds later.
+	 */
+	keeper_defensive_publish_timeline_history(keeper);
+
 	if (!standby_cleanup_as_primary(postgres))
 	{
 		log_error("Failed to cleanup replication settings, "
@@ -1490,21 +1501,24 @@ fsm_fast_forward(Keeper *keeper)
 
 
 /*
- * fsm_cleanup_as_primary cleans-up the replication setting. It's called after
- * a fast-forward operation.
+ * fsm_cleanup_as_primary is called after a fast-forward operation, at the
+ * fast_forward -> prepare_promotion transition. Postgres is still running as
+ * a standby at this point, with standby.signal in place and replication
+ * caught up to at least our target LSN -- the actual promotion (pg_ctl
+ * promote) only happens later, from stop_replication.
+ *
+ * It must NOT remove standby.signal or otherwise clean up the replication
+ * setup here: Postgres's own promotion completion logic removes
+ * standby.signal itself as part of processing the promote request, and
+ * FATAL-crashes ("could not remove file "standby.signal": No such file or
+ * directory") if it's already gone by then. The correct place for that
+ * cleanup is after the real promotion, which fsm_promote_standby already
+ * does via its own standby_cleanup_as_primary call once standby_promote has
+ * genuinely completed.
  */
 bool
 fsm_cleanup_as_primary(Keeper *keeper)
 {
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	if (!standby_cleanup_as_primary(postgres))
-	{
-		log_error("Failed to cleanup replication settings and restart Postgres "
-				  "to continue as a primary, see above for details");
-		return false;
-	}
-
 	return true;
 }
 

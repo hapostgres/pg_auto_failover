@@ -2204,7 +2204,8 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 	};
 
 	GUC *recoverySettings =
-		IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN)
+		(!replicationSource->pauseAtRecoveryTarget ||
+		 IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
 		? recoverySettingsStandby
 		: recoverySettingsTargetLSN;
 
@@ -2273,7 +2274,8 @@ pg_write_standby_signal(const char *pgdata,
 	};
 
 	GUC *recoverySettings =
-		IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN)
+		(!replicationSource->pauseAtRecoveryTarget ||
+		 IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
 		? recoverySettingsStandby
 		: recoverySettingsTargetLSN;
 
@@ -2432,8 +2434,17 @@ prepare_recovery_settings(const char *pgdata,
 				replicationSource->targetTimeline);
 	}
 
-	/* We use the targetLSN only when doing a WAL fast_forward operation */
-	if (!IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
+	/*
+	 * Only write recovery_target_lsn when the caller explicitly wants
+	 * Postgres's own target-reached logic (see pauseAtRecoveryTarget's own
+	 * comment). Otherwise targetLSN, if set, is purely an application-level
+	 * polling threshold the caller checks for itself (pg_last_wal_replay_lsn
+	 * via pgsql_has_reached_target_lsn); leaving it out of the recovery
+	 * configuration means Postgres just streams normally, with no target of
+	 * its own to get stuck waiting on.
+	 */
+	if (replicationSource->pauseAtRecoveryTarget &&
+		!IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
 	{
 		sformat(targetLSN, PG_LSN_MAXLENGTH, "'%s'",
 				replicationSource->targetLSN);

@@ -252,6 +252,21 @@ typedef struct ReplicationSource
 	char targetLSN[PG_LSN_MAXLENGTH];
 	char targetAction[NAMEDATALEN];
 	char targetTimeline[NAMEDATALEN];
+
+	/*
+	 * When true, targetLSN is written into Postgres's own
+	 * recovery_target_lsn GUC, making Postgres itself refuse to consider
+	 * the target reached until it has replayed a genuine WAL record at or
+	 * past that exact LSN. That requires targetLSN to be a real record
+	 * boundary (or the special value "immediate"); an arbitrary snapshot of
+	 * another node's current replay position -- as used to fast-forward a
+	 * lagging standby -- is not guaranteed to be one, and Postgres will then
+	 * wait for a record that can never arrive. Callers that only want
+	 * targetLSN as their own application-level "catch up to at least this
+	 * much" polling threshold (see pgsql_has_reached_target_lsn), deciding
+	 * for themselves when to promote, should leave this false.
+	 */
+	bool pauseAtRecoveryTarget;
 	SSLOptions sslOptions;
 	IdentifySystem system;
 } ReplicationSource;
