@@ -138,6 +138,7 @@ FsmMermaidColorForState(NodeState state)
 	}
 }
 
+
 /*
  * FsmMermaidId returns the identifier to use for a state in Mermaid source.
  * NodeStateToString(ANY_STATE) returns "#any state#", which is not a valid

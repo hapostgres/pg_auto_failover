@@ -22,6 +22,7 @@
 #include "node_metadata.h"
 #include "notifications.h"
 #include "replication_state.h"
+#include "timeline_history.h"
 #include "version_compat.h"
 
 #include "access/htup_details.h"
@@ -322,6 +323,67 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 						   " in state %s",
 						   NODE_FORMAT_ARGS(activeNode),
 						   ReplicationStateGetName(activeNode->goalState))));
+	}
+
+	/*
+	 * Detect a genuine timeline fork on a healthy secondary as soon as its
+	 * newly reported timeline is visible, rather than waiting for an
+	 * incidental health-check cycle or an explicit maintenance toggle to
+	 * eventually drive it through catchingup (see #683 and the timeline
+	 * fork detection design). Reuses the exact same ancestry filter the
+	 * report_lsn election path already applies (below, and in
+	 * ProceedGroupStateForMSFailover) -- this only changes when a
+	 * diverged secondary gets pushed to catchingup, not how that's
+	 * decided or how the resync itself recovers it.
+	 *
+	 * Scoped to activeNode currently being SECONDARY_STATE: that's the
+	 * same state the "unhealthy secondary" transition just below already
+	 * uses for the identical CATCHINGUP goal assignment, so this is
+	 * additive to an existing, tested transition rather than a new kind
+	 * of one. A node with reportedTLI == 0 hasn't reported a timeline yet
+	 * (e.g. still in wait_standby) and has nothing to check.
+	 */
+	if (IsCurrentState(activeNode, REPLICATION_STATE_SECONDARY) &&
+		activeNode->reportedTLI > 0)
+	{
+		int referenceTli = 0;
+		List *comparableNodeList =
+			FilterNodesByTimelineAncestry(ctx->groupNodeList, formationId,
+										  groupId, &referenceTli);
+
+		bool activeNodeIsComparable = false;
+		ListCell *cell = NULL;
+
+		foreach(cell, comparableNodeList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(cell);
+
+			if (node->nodeId == activeNode->nodeId)
+			{
+				activeNodeIsComparable = true;
+				break;
+			}
+		}
+
+		if (referenceTli > 0 && !activeNodeIsComparable)
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to catchingup: its reported timeline %d does not appear "
+				"to be an ancestor of the group's reference timeline %d -- "
+				"forcing a resync so the ancestry check can run and, if "
+				"needed, rewind it onto the correct lineage.",
+				NODE_FORMAT_ARGS(activeNode),
+				activeNode->reportedTLI,
+				referenceTli);
+
+			AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
+
+			return true;
+		}
 	}
 
 	/*
@@ -1561,10 +1623,24 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	 * or get unhealthy: then the next call to node_active() might build a
 	 * different candidateNodesGroupList in which every node has reported their
 	 * LSN position, allowing progress to be made.
+	 *
+	 * Before any of that: filter out nodes whose reported timeline has
+	 * genuinely diverged from the group's reference lineage (see #683).
+	 * They are excluded, not deprioritized -- a diverged node can never
+	 * become comparable no matter how long we wait for it, so leaving it
+	 * in would risk either comparing incomparable LSNs, or blocking the
+	 * whole election on a node that will never resolve on its own.
 	 */
+	int referenceTli = 0;
+	List *comparableNodesGroupList =
+		FilterNodesByTimelineAncestry(nodesGroupList,
+									  ctx->formationId,
+									  ctx->groupId,
+									  &referenceTli);
+
 	candidateList.numberSyncStandbys = ctx->formation->number_sync_standbys;
 
-	BuildCandidateList(ctx, nodesGroupList, &candidateList);
+	BuildCandidateList(ctx, comparableNodesGroupList, &candidateList);
 
 	/*
 	 * Time to select a candidate?
@@ -1670,7 +1746,7 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	{
 		/* build the list of most advanced standby nodes, not ordered */
 		List *mostAdvancedNodeList =
-			ListMostAdvancedStandbyNodes(nodesGroupList);
+			ListMostAdvancedStandbyNodes(comparableNodesGroupList);
 
 		/* select a node to failover to */
 
@@ -2138,6 +2214,14 @@ PromoteSelectedNode(AutoFailoverNode *selectedNode,
 		ereport(ERROR,
 				(errmsg("BUG: selectedNode is NULL in PromoteSelectedNode")));
 	}
+
+	/*
+	 * A candidate was selected from a pool already filtered to the
+	 * accepted (or auto-detected) lineage: whatever operator-pinned fork
+	 * resolution was in effect has done its job. Mark it resolved so a
+	 * future, unrelated fork doesn't inherit a stale pin.
+	 */
+	ResolveAcceptedTimeline(selectedNode->formationId, selectedNode->groupId);
 
 	/*
 	 * Ok so we now may start the failover process, we have selected a

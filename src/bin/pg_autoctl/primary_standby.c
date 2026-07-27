@@ -24,6 +24,7 @@
 #include "primary_standby.h"
 #include "signals.h"
 #include "state.h"
+#include "timeline_history.h"
 
 
 static bool local_postgres_wait_until_ready(LocalPostgresServer *postgres);
@@ -1182,6 +1183,14 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 				"pause",
 				sizeof(crashRecoveryReplicationSource.targetAction));
 
+		/*
+		 * "immediate" is always a well-defined, reachable target (the
+		 * earliest consistent state), unlike an arbitrary peer LSN
+		 * snapshot -- so it's safe to let Postgres enforce reaching it via
+		 * its own recovery_target_lsn/action GUCs.
+		 */
+		crashRecoveryReplicationSource.pauseAtRecoveryTarget = true;
+
 		strlcpy(crashRecoveryReplicationSource.targetTimeline,
 				"current",
 				sizeof(crashRecoveryReplicationSource.targetTimeline));
@@ -1314,6 +1323,92 @@ postgres_maybe_do_crash_recovery(LocalPostgresServer *postgres)
 
 
 /*
+ * standby_promotion_advanced_timeline verifies that reaching a not-in-recovery
+ * state genuinely came from a real Postgres promotion -- which always
+ * allocates a new, strictly higher timeline and writes a pg_wal/<TLI>.history
+ * file recording the switchpoint -- rather than from ordinary crash recovery
+ * of a data directory whose standby.signal had already been removed.
+ *
+ * That second case is not hypothetical: a premature standby.signal removal
+ * (or a restart racing one) can make Postgres boot as an ordinary,
+ * non-standby server and complete plain crash recovery on its current
+ * timeline -- reaching a not-in-recovery state without ever going through
+ * the real promotion code path at all, and ending up stuck on its old
+ * timeline, indistinguishable by number from a demoted former primary. See
+ * standby_cleanup_as_primary's own comment for the specific sequence this
+ * guards against.
+ *
+ * priorTLI is the timeline this node was on before this promotion attempt;
+ * pass 0 when checking idempotently (no promotion was attempted in this
+ * call, e.g. the "already not in recovery" early return below) to rely
+ * solely on the on-disk history-file evidence.
+ */
+static bool
+standby_promotion_advanced_timeline(LocalPostgresServer *postgres,
+									uint32_t priorTLI)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	if (!pgsql_get_postgres_metadata(pgsql,
+									 &(pgSetup->is_in_recovery),
+									 postgres->pgsrSyncState,
+									 postgres->currentLSN,
+									 &(pgSetup->control)))
+	{
+		log_error("Failed to fetch Postgres metadata to verify promotion");
+		return false;
+	}
+
+	uint32_t currentTLI = pgSetup->control.timeline_id;
+
+	if (currentTLI <= 1)
+	{
+		log_error("Promotion could not be confirmed: still on timeline %d, "
+				  "which is never reached by a genuine promotion",
+				  currentTLI);
+		return false;
+	}
+
+	if (priorTLI > 0 && currentTLI <= priorTLI)
+	{
+		log_error("Promotion did not advance the timeline: still on "
+				  "timeline %d, same as before promoting",
+				  currentTLI);
+		return false;
+	}
+
+	IdentifySystem system = { 0 };
+
+	if (!keeper_fetch_local_timeline_history(pgSetup, currentTLI, &system))
+	{
+		log_error("Failed to read local timeline history to verify promotion");
+		return false;
+	}
+
+	/*
+	 * A genuine promotion to currentTLI always writes a history file
+	 * recording its parent timeline's switchpoint, so the parsed history has
+	 * at least one ancestor entry plus the current tip (count > 1). A node
+	 * that never really left its prior timeline only ever has the bare tip
+	 * (count == 1, see keeper_fetch_local_timeline_history).
+	 */
+	if (system.timelines.count <= 1)
+	{
+		log_error("Promotion to timeline %d could not be confirmed: no "
+				  "local history file records how this timeline started; "
+				  "refusing to trust an unverified promotion",
+				  currentTLI);
+		return false;
+	}
+
+	log_info("Confirmed promotion to timeline %d", currentTLI);
+
+	return true;
+}
+
+
+/*
  * standby_promote promotes a standby postgres server to primary.
  */
 bool
@@ -1338,8 +1433,19 @@ standby_promote(LocalPostgresServer *postgres)
 
 		/*
 		 * Ensure idempotency: if in the last run we managed to promote, but
-		 * failed to checkpoint, we still need to checkpoint.
+		 * failed to checkpoint, we still need to checkpoint. But first make
+		 * sure this really is a prior promotion and not the "reached
+		 * not-in-recovery without ever really promoting" failure mode
+		 * documented on standby_promotion_advanced_timeline.
 		 */
+		if (!standby_promotion_advanced_timeline(postgres, 0))
+		{
+			log_error("Refusing to proceed: postgres is not in recovery "
+					  "mode, but this does not look like a genuine prior "
+					  "promotion, see above for details");
+			return false;
+		}
+
 		if (!pgsql_checkpoint(pgsql))
 		{
 			log_error("Failed to checkpoint after promotion");
@@ -1349,8 +1455,76 @@ standby_promote(LocalPostgresServer *postgres)
 		return true;
 	}
 
+	uint32_t priorTLI = pgSetup->control.timeline_id;
+
+	/*
+	 * When we were prepared by fast_forward (standby_fetch_missing_wal),
+	 * targetLSN is our own application-level "caught up enough to promote"
+	 * threshold (see ReplicationSource.pauseAtRecoveryTarget) rather than a
+	 * Postgres recovery target -- this node just streams normally.
+	 * Fast_forward itself already confirmed replay had reached that point
+	 * once -- but every Postgres restart since then (and there can be
+	 * several, e.g. the prepare_promotion / stop_replication transitions
+	 * each reconfigure and restart Postgres for unrelated reasons) starts
+	 * recovery over from the last checkpoint, which is not guaranteed to be
+	 * at or past the target either. Re-verify it here, on whichever
+	 * instance is actually about to receive the promote request, rather
+	 * than trusting a check some earlier, possibly since-restarted instance
+	 * made.
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(postgres->replicationSource.targetLSN))
+	{
+		char currentLSN[PG_LSN_MAXLENGTH] = { 0 };
+		bool hasReachedLSN = false;
+
+		do {
+			if (asked_to_stop || asked_to_stop_fast)
+			{
+				log_trace("standby_promote: signaled");
+				pgsql_finish(pgsql);
+				return false;
+			}
+
+			if (!pgsql_has_reached_target_lsn(pgsql,
+											  postgres->replicationSource.targetLSN,
+											  currentLSN,
+											  &hasReachedLSN))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			if (!hasReachedLSN)
+			{
+				log_info("Waiting for recovery to reach LSN %s before "
+						 "promoting (currently at %s)",
+						 postgres->replicationSource.targetLSN,
+						 currentLSN);
+				pg_usleep(AWAIT_PROMOTION_SLEEP_TIME_MS * 1000);
+			}
+		} while (!hasReachedLSN);
+	}
+
 	/* disconnect from PostgreSQL now */
 	pgsql_finish(pgsql);
+
+	/*
+	 * The Postgres controller service (service_postgres_ctl.c, a separate
+	 * process from this one) polls every 100ms and would otherwise
+	 * interpret Postgres's own transient unavailability while ending
+	 * recovery and switching timeline as "Postgres died", forcing a
+	 * restart of its own right in the middle of the promotion -- see the
+	 * same reasoning in standby_fetch_missing_wal. Tell it to stand down
+	 * for the duration of this wait and hand control back once we're done
+	 * either way.
+	 */
+	if (!keeper_set_postgres_state_unknown(&(postgres->expectedPgStatus.state),
+										   postgres->expectedPgStatus.pgStatusPath))
+	{
+		log_error("Failed to signal the Postgres controller service to "
+				  "stand down during promotion");
+		return false;
+	}
 
 	log_info("Promoting postgres");
 
@@ -1379,6 +1553,22 @@ standby_promote(LocalPostgresServer *postgres)
 			return false;
 		}
 	} while (inRecovery);
+
+	/* hand control back to the Postgres controller service */
+	if (!keeper_set_postgres_state_running(&(postgres->expectedPgStatus.state),
+										   postgres->expectedPgStatus.pgStatusPath))
+	{
+		log_error("Failed to signal the Postgres controller service to "
+				  "resume supervising Postgres after promotion");
+		return false;
+	}
+
+	if (!standby_promotion_advanced_timeline(postgres, priorTLI))
+	{
+		log_error("Failed to promote standby: reached a not-in-recovery "
+				  "state without genuinely promoting, see above for details");
+		return false;
+	}
 
 	/*
 	 * It's necessary to do a checkpoint before allowing the old primary to
@@ -1591,6 +1781,37 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 	}
 
 	/*
+	 * This node's recovery configuration is deliberately left WITHOUT a
+	 * recovery_target_lsn (see ReplicationSource.pauseAtRecoveryTarget):
+	 * targetLSN here is a snapshot of another standby's current replay
+	 * position, not necessarily a genuine WAL record boundary, and asking
+	 * Postgres to enforce it as a hard recovery target can leave it waiting
+	 * forever for a record that will never arrive. Instead this node just
+	 * streams normally, and we decide for ourselves, by polling
+	 * pg_last_wal_replay_lsn(), once replay has caught up to at least
+	 * targetLSN -- which is all fast-forward ever needed. The eventual
+	 * pg_ctl promote (issued later, by standby_promote) then completes
+	 * recovery at wherever replay genuinely stands, which is always a valid
+	 * position.
+	 *
+	 * The Postgres controller service (service_postgres_ctl.c, a separate
+	 * process from this one) polls every 100ms and, as long as the expected
+	 * status we just set via standby_restart_with_current_replication_source
+	 * above is RUNNING, would otherwise interpret any transient
+	 * unavailability during that wait as "Postgres died" and force a
+	 * restart of its own. Tell it to stand down for the duration -- same
+	 * mechanism postgres_maybe_do_crash_recovery uses -- and hand control
+	 * back once we're done either way.
+	 */
+	if (!keeper_set_postgres_state_unknown(&(postgres->expectedPgStatus.state),
+										   postgres->expectedPgStatus.pgStatusPath))
+	{
+		log_error("Failed to signal the Postgres controller service to "
+				  "stand down during fast-forward");
+		return false;
+	}
+
+	/*
 	 * Now loop until replay has reached our targetLSN.
 	 */
 	while (!hasReachedLSN)
@@ -1628,6 +1849,15 @@ standby_fetch_missing_wal(LocalPostgresServer *postgres)
 				  postgres->currentLSN,
 				  replicationSource->targetLSN);
 		pgsql_finish(pgsql);
+		return false;
+	}
+
+	/* hand control back to the Postgres controller service */
+	if (!keeper_set_postgres_state_running(&(postgres->expectedPgStatus.state),
+										   postgres->expectedPgStatus.pgStatusPath))
+	{
+		log_error("Failed to signal the Postgres controller service to "
+				  "resume supervising Postgres after fast-forward");
 		return false;
 	}
 
@@ -1719,9 +1949,37 @@ standby_restart_with_current_replication_source(LocalPostgresServer *postgres)
 
 
 /*
- * standby_cleanup_as_primary removes the setup for a standby server and
- * restarts as a primary. It's typically called after standby_fetch_missing_wal
- * so we expect Postgres to be running as a standby and be "paused".
+ * standby_cleanup_as_primary removes the standby setup (standby.signal,
+ * primary_conninfo, ...) from the data directory.
+ *
+ * This is called from two different moments in the FSM, with two different
+ * expectations of the currently-running Postgres process:
+ *
+ *  1. fast_forward -> prepare_promotion (fsm_citus_cleanup_and_resume_as_primary
+ *     for Citus nodes only -- fsm_cleanup_as_primary, its non-Citus
+ *     counterpart, deliberately does NOT call this function; see its own
+ *     comment): Postgres is still running as an ordinary streaming standby,
+ *     caught up to at least the fast-forward target LSN (see
+ *     standby_fetch_missing_wal) but NOT promoted yet -- the actual pg_ctl
+ *     promote only happens later, from standby_promote(). Restarting
+ *     Postgres here, after standby.signal has been removed but before a
+ *     real promotion took place, makes it boot as an ordinary (non-standby)
+ *     server and complete plain crash recovery on its CURRENT timeline --
+ *     reaching a not-in-recovery state without ever genuinely promoting,
+ *     indistinguishable by timeline number from a demoted former primary.
+ *     standby_promote()'s own standby_promotion_advanced_timeline check
+ *     catches that case defensively, but this function itself only removes
+ *     the on-disk standby setup and must NOT restart Postgres, leaving the
+ *     running process untouched and ready for the FSM's later, explicit
+ *     pg_ctl promote.
+ *
+ *  2. prepare_promotion -> stop_replication (fsm_promote_standby): called
+ *     right after standby_promote() has genuinely promoted this node (new,
+ *     strictly higher timeline, confirmed via standby_promotion_advanced_timeline).
+ *     Here too we only need to remove the on-disk standby setup so that a
+ *     later restart of this now-primary node doesn't accidentally pick stale
+ *     replication configuration back up; the already-promoted, running
+ *     process needs no restart of its own.
  */
 bool
 standby_cleanup_as_primary(LocalPostgresServer *postgres)
@@ -1742,6 +2000,91 @@ standby_cleanup_as_primary(LocalPostgresServer *postgres)
 	}
 
 	return true;
+}
+
+
+/*
+ * standby_verify_timeline_ancestry checks whether the local timeline is a
+ * genuine ancestor of the upstream's current timeline, using the upstream's
+ * own TIMELINE_HISTORY data (already fetched into
+ * postgres->replicationSource.system.timelines by the pgctl_identify_system()
+ * call that standby_check_timeline_with_upstream() makes before calling us).
+ *
+ * Unlike a bare timeline-number comparison, this can tell "genuine ancestor,
+ * just behind" apart from "diverged, but the timeline number still happens to
+ * be lower": it walks the upstream's linear timeline history (oldest ancestor
+ * first, current tip last) looking for the entry whose tli matches our local
+ * timeline, and confirms our local checkpoint LSN lies strictly before the
+ * point where that timeline was superseded (entry.end). If our checkpoint is
+ * past that point, we replayed WAL that the upstream's lineage never
+ * produced: a genuine fork, not just lag.
+ *
+ * Returns true when ancestry is confirmed (or trivially, when the timelines
+ * already match). Returns false both when a genuine divergence is detected
+ * and when the local timeline doesn't appear in the upstream's history at
+ * all (unrelated history); callers should treat both as "needs pg_rewind",
+ * not "just keep retrying".
+ */
+static bool
+standby_verify_timeline_ancestry(LocalPostgresServer *postgres)
+{
+	ReplicationSource *replicationSource = &(postgres->replicationSource);
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+	TimeLineHistory *timelines = &(replicationSource->system.timelines);
+
+	uint32_t localTLI = postgres->postgresSetup.control.timeline_id;
+	uint64_t localLSN = 0;
+
+	if (!parseLSN(postgres->postgresSetup.control.latestCheckpointLSN,
+				  &localLSN))
+	{
+		log_error("Failed to parse local latest checkpoint LSN \"%s\"",
+				  postgres->postgresSetup.control.latestCheckpointLSN);
+		return false;
+	}
+
+	for (int i = 0; i < timelines->count; i++)
+	{
+		TimeLineHistoryEntry *entry = &(timelines->history[i]);
+
+		if (entry->tli != localTLI)
+		{
+			continue;
+		}
+
+		/* entry->end is InvalidXLogRecPtr (0) only for the current tip */
+		bool isAncestor =
+			XLogRecPtrIsInvalid(entry->end) || localLSN < entry->end;
+
+		if (!isAncestor)
+		{
+			log_error("Local timeline %d diverges from upstream " NODE_FORMAT
+					  ": local checkpoint is at %X/%X, but timeline %d was "
+					  "superseded at %X/%X -- pg_rewind is required",
+					  localTLI,
+					  primaryNode->nodeId,
+					  primaryNode->name,
+					  primaryNode->host,
+					  primaryNode->port,
+					  (uint32) (localLSN >> 32),
+					  (uint32) localLSN,
+					  localTLI,
+					  (uint32) (entry->end >> 32),
+					  (uint32) entry->end);
+		}
+
+		return isAncestor;
+	}
+
+	log_error("Local timeline %d does not appear in the timeline history "
+			  "reported by upstream " NODE_FORMAT,
+			  localTLI,
+			  primaryNode->nodeId,
+			  primaryNode->name,
+			  primaryNode->host,
+			  primaryNode->port);
+
+	return false;
 }
 
 
@@ -1787,40 +2130,218 @@ standby_check_timeline_with_upstream(LocalPostgresServer *postgres)
 	}
 
 	/*
-	 * We only allow this transition when the standby node as caught-up with
-	 * the upstream timeline. As streaming replication is supposed to be a
-	 * clean history replay (no PITR shenanigans), it is never expected that
-	 * the local timeline would be greater than the timeline found on the
-	 * upstream node.
+	 * Streaming replication is supposed to be a clean history replay (no
+	 * PITR shenanigans), so it is not normally expected that our local
+	 * timeline would be ahead of the upstream's. When it happens (#683: this
+	 * node was promoted, or otherwise advanced, outside of pg_autoctl's
+	 * control, and is now being pointed at an upstream that never saw that
+	 * promotion), there is no common-ancestor question to settle first the
+	 * way there is when we're behind: we hold local WAL the upstream does
+	 * not have, on a timeline it will never grow into, so no amount of
+	 * waiting resolves it and pg_rewind is unconditionally required to
+	 * reach a common history.
 	 */
 	if (upstreamTimeline < localTimeline)
 	{
-		log_error("Current timeline on upstream node " NODE_FORMAT
-				  " is %d, and current timeline on this standby node is %d",
-				  primaryNode->nodeId,
-				  primaryNode->name,
-				  primaryNode->host,
-				  primaryNode->port,
-				  upstreamTimeline,
-				  localTimeline);
-
-		return false;
-	}
-	else if (upstreamTimeline > localTimeline)
-	{
-		log_warn("Current timeline on upstream node " NODE_FORMAT
-				 " is %d, and current timeline on this standby node is still %d",
+		log_warn("Local timeline %d is ahead of upstream " NODE_FORMAT
+				 "'s timeline %d; rewinding to reach a common history",
+				 localTimeline,
 				 primaryNode->nodeId,
 				 primaryNode->name,
 				 primaryNode->host,
 				 primaryNode->port,
-				 upstreamTimeline,
-				 localTimeline);
+				 upstreamTimeline);
 
-		return false;
+		if (!primary_rewind_to_standby(postgres))
+		{
+			log_error("Failed to rewind after detecting that our local "
+					  "timeline is ahead of the upstream, see above for "
+					  "details");
+			return false;
+		}
+
+		/* re-fetch local metadata: the rewind changed our timeline/LSN */
+		if (!pgsql_get_postgres_metadata(&(postgres->sqlClient),
+										 &(postgres->postgresSetup.is_in_recovery),
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN,
+										 &(postgres->postgresSetup.control)))
+		{
+			log_error("Failed to update the local Postgres metadata "
+					  "after rewind");
+			return false;
+		}
+
+		localTimeline = postgres->postgresSetup.control.timeline_id;
+
+		log_info("Reached timeline %d after rewind, upstream node " NODE_FORMAT
+				 " is at timeline %d",
+				 localTimeline,
+				 primaryNode->nodeId,
+				 primaryNode->name,
+				 primaryNode->host,
+				 primaryNode->port,
+				 upstreamTimeline);
+
+		return upstreamTimeline == localTimeline;
+	}
+	else if (upstreamTimeline > localTimeline)
+	{
+		/*
+		 * Being behind is normal while still catching up: most of the time
+		 * our local timeline is a genuine ancestor of the upstream's, and we
+		 * just haven't replayed our way to its tip yet. But it can also mean
+		 * we've diverged onto a dead branch (see #683) -- in which case no
+		 * amount of retrying will ever let us reach it through ordinary
+		 * streaming replication. Tell the two apart using the upstream's own
+		 * timeline history.
+		 */
+		if (standby_verify_timeline_ancestry(postgres))
+		{
+			log_warn("Current timeline on upstream node " NODE_FORMAT
+					 " is %d, and current timeline on this standby node is "
+					 "still %d",
+					 primaryNode->nodeId,
+					 primaryNode->name,
+					 primaryNode->host,
+					 primaryNode->port,
+					 upstreamTimeline,
+					 localTimeline);
+
+			return false;
+		}
+
+		log_warn("Local timeline %d has diverged from upstream " NODE_FORMAT
+				 "; rewinding to reach a common history",
+				 localTimeline,
+				 primaryNode->nodeId,
+				 primaryNode->name,
+				 primaryNode->host,
+				 primaryNode->port);
+
+		if (!primary_rewind_to_standby(postgres))
+		{
+			log_error("Failed to rewind after detecting a timeline "
+					  "divergence, see above for details");
+			return false;
+		}
+
+		/* re-fetch local metadata: the rewind changed our timeline/LSN */
+		if (!pgsql_get_postgres_metadata(&(postgres->sqlClient),
+										 &(postgres->postgresSetup.is_in_recovery),
+										 postgres->pgsrSyncState,
+										 postgres->currentLSN,
+										 &(postgres->postgresSetup.control)))
+		{
+			log_error("Failed to update the local Postgres metadata "
+					  "after rewind");
+			return false;
+		}
+
+		localTimeline = postgres->postgresSetup.control.timeline_id;
+
+		log_info("Reached timeline %d after rewind, upstream node " NODE_FORMAT
+				 " is at timeline %d",
+				 localTimeline,
+				 primaryNode->nodeId,
+				 primaryNode->name,
+				 primaryNode->host,
+				 primaryNode->port,
+				 upstreamTimeline);
+
+		return upstreamTimeline == localTimeline;
 	}
 	else if (upstreamTimeline == localTimeline)
 	{
+		/*
+		 * Matching timeline numbers alone is not proof of a shared history:
+		 * two nodes can each keep believing they're on timeline N when one
+		 * of them never genuinely left it through a real promotion (see
+		 * standby_promotion_advanced_timeline and the fast_forward race it
+		 * guards against) while independently generating its own local WAL
+		 * on that same numbered timeline. pg_rewind itself trusts a bare
+		 * timeline-number match without checking further -- a known,
+		 * documented limitation shared with Patroni's own rewind-decision
+		 * code -- so this check doesn't rely on it alone either.
+		 *
+		 * What a genuine, unbroken standby can never do is get ahead of its
+		 * own upstream in LSN terms while remaining on the exact same
+		 * timeline: ordinary streaming replication only ever replays WAL
+		 * the upstream produced. If our local position is past what the
+		 * upstream reports as its own current position, we hold WAL bytes
+		 * it never produced -- the same genuine divergence #683 handles for
+		 * differing timeline numbers, just not expressed as one here.
+		 */
+		uint64_t upstreamLSN = 0;
+		uint64_t localLSN = 0;
+
+		if (!parseLSN(replicationSource->system.xlogpos, &upstreamLSN))
+		{
+			log_error("Failed to parse upstream node " NODE_FORMAT
+					  "'s reported LSN \"%s\"",
+					  primaryNode->nodeId,
+					  primaryNode->name,
+					  primaryNode->host,
+					  primaryNode->port,
+					  replicationSource->system.xlogpos);
+			return false;
+		}
+
+		if (!parseLSN(postgres->currentLSN, &localLSN))
+		{
+			log_error("Failed to parse local current LSN \"%s\"",
+					  postgres->currentLSN);
+			return false;
+		}
+
+		if (localLSN > upstreamLSN)
+		{
+			log_warn("Local timeline %d matches upstream " NODE_FORMAT
+					 "'s timeline, but local LSN %s is past upstream's "
+					 "reported LSN %s; this is not reachable through "
+					 "ordinary streaming replication, rewinding to reach a "
+					 "common history",
+					 localTimeline,
+					 primaryNode->nodeId,
+					 primaryNode->name,
+					 primaryNode->host,
+					 primaryNode->port,
+					 postgres->currentLSN,
+					 replicationSource->system.xlogpos);
+
+			if (!primary_rewind_to_standby(postgres))
+			{
+				log_error("Failed to rewind after detecting a same-timeline "
+						  "LSN divergence, see above for details");
+				return false;
+			}
+
+			/* re-fetch local metadata: the rewind changed our timeline/LSN */
+			if (!pgsql_get_postgres_metadata(&(postgres->sqlClient),
+											 &(postgres->postgresSetup.is_in_recovery),
+											 postgres->pgsrSyncState,
+											 postgres->currentLSN,
+											 &(postgres->postgresSetup.control)))
+			{
+				log_error("Failed to update the local Postgres metadata "
+						  "after rewind");
+				return false;
+			}
+
+			localTimeline = postgres->postgresSetup.control.timeline_id;
+
+			log_info("Reached timeline %d after rewind, upstream node "
+					 NODE_FORMAT " is at timeline %d",
+					 localTimeline,
+					 primaryNode->nodeId,
+					 primaryNode->name,
+					 primaryNode->host,
+					 primaryNode->port,
+					 upstreamTimeline);
+
+			return upstreamTimeline == localTimeline;
+		}
+
 		log_info("Reached timeline %d, same as upstream node " NODE_FORMAT,
 				 localTimeline,
 				 primaryNode->nodeId,

@@ -20,6 +20,7 @@ have their own manual page.
    pg_autoctl_get
    pg_autoctl_set
    pg_autoctl_perform
+   pg_autoctl_accept
    pg_autoctl_node
    pg_autoctl_inspect
    pg_autoctl_manual

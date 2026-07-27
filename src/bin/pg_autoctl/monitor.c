@@ -1196,6 +1196,222 @@ monitor_report_postgres_version(Monitor *monitor, int64_t nodeId,
 
 
 /*
+ * monitor_report_timeline_history reports this node's own timeline history
+ * (as encoded by timeline_history_to_json()) to the monitor. Called from
+ * the keeper's main loop whenever the local timeline has advanced since the
+ * last successful report (see service_keeper.c), and once more,
+ * synchronously, right before fsm_report_lsn() restarts Postgres.
+ */
+bool
+monitor_report_timeline_history(Monitor *monitor, int64_t nodeId,
+								const char *historyJSON)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_timeline_history($1, $2::jsonb)";
+
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, TEXTOID };
+	const char *paramValues[2];
+
+	IntString nodeIdString = intToString(nodeId);
+
+	paramValues[0] = nodeIdString.strValue;
+	paramValues[1] = historyJSON;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to report timeline history for node %" PRId64,
+				  nodeId);
+
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_accept_timeline pins the accepted timeline for a (formation,
+ * group) after an operator has resolved a detected fork, by calling
+ * pgautofailover.accept_timeline() on the monitor.
+ */
+bool
+monitor_accept_timeline(Monitor *monitor, char *formation, int group,
+						int tli, char *decidedBy)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.accept_timeline($1, $2, $3, $4)";
+
+	int paramCount = 4;
+	Oid paramTypes[4] = { TEXTOID, INT4OID, INT4OID, TEXTOID };
+	const char *paramValues[4];
+
+	IntString groupString = intToString(group);
+	IntString tliString = intToString(tli);
+
+	paramValues[0] = formation;
+	paramValues[1] = groupString.strValue;
+	paramValues[2] = tliString.strValue;
+	paramValues[3] = (decidedBy == NULL || IS_EMPTY_STRING_BUFFER(decidedBy))
+					 ? NULL
+					 : decidedBy;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to accept timeline %d for formation %s and group %d",
+				  tli, formation, group);
+
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * printTimelineHistoryResult is a ParsePostgresResultCB that prints one row
+ * per (tli, parenttli, switchpoint_lsn) known to the group.
+ */
+static void
+printTimelineHistoryResult(void *ctx, PGresult *result)
+{
+	fformat(stdout, "%8s | %10s | %15s\n", "TLI", "Parent TLI", "Switchpoint LSN");
+	fformat(stdout, "%8s-+-%10s-+-%15s\n",
+			"--------", "----------", "---------------");
+
+	for (int rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		char *tli = PQgetvalue(result, rowNumber, 0);
+		char *parentTli = PQgetvalue(result, rowNumber, 1);
+		char *switchpoint = PQgetvalue(result, rowNumber, 2);
+
+		fformat(stdout, "%8s | %10s | %15s\n", tli, parentTli, switchpoint);
+	}
+
+	fformat(stdout, "\n");
+}
+
+
+/*
+ * printTimelineStatusResult is a ParsePostgresResultCB that prints one row
+ * per node's current timeline/LSN position and whether it's on the group's
+ * reference lineage.
+ */
+static void
+printTimelineStatusResult(void *ctx, PGresult *result)
+{
+	bool *sawFork = (bool *) ctx;
+
+	fformat(stdout, "%20s | %6s | %4s | %11s | %s\n",
+			"Name", "NodeId", "TLI", "LSN", "Status");
+	fformat(stdout, "%20s-+-%6s-+-%4s-+-%11s-+-%s\n",
+			"--------------------", "------", "----", "-----------",
+			"----------------------------------------");
+
+	for (int rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		char *nodeName = PQgetvalue(result, rowNumber, 1);
+		char *tli = PQgetvalue(result, rowNumber, 2);
+		char *lsn = PQgetvalue(result, rowNumber, 3);
+		char *onLineage = PQgetvalue(result, rowNumber, 5);
+		bool isOnLineage = strcmp(onLineage, "t") == 0;
+
+		if (!isOnLineage && sawFork != NULL)
+		{
+			*sawFork = true;
+		}
+
+		fformat(stdout, "%20s | %6s | %4s | %11s | %s\n",
+				nodeName,
+				PQgetvalue(result, rowNumber, 0),
+				tli,
+				lsn,
+				isOnLineage
+				? "ok, on accepted lineage"
+				: "FORK: diverges from the reference timeline, "
+				  "pg_rewind required");
+	}
+
+	fformat(stdout, "\n");
+}
+
+
+/*
+ * monitor_print_timeline prints the group's known timeline history and each
+ * node's current position against it, for `pg_autoctl show timeline`.
+ */
+bool
+monitor_print_timeline(Monitor *monitor, char *formation, int group)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	bool sawFork = false;
+
+	{
+		const char *sql =
+			"SELECT h.tli, h.parenttli, h.switchpoint_lsn "
+			"  FROM pgautofailover.node_timeline_history h "
+			"  JOIN pgautofailover.node n ON n.nodeid = h.nodeid "
+			" WHERE n.formationid = $1 AND n.groupid = $2 "
+			" GROUP BY h.tli, h.parenttli, h.switchpoint_lsn "
+			" ORDER BY h.tli";
+
+		int paramCount = 2;
+		Oid paramTypes[2] = { TEXTOID, INT4OID };
+		const char *paramValues[2];
+		IntString groupString = intToString(group);
+
+		paramValues[0] = formation;
+		paramValues[1] = groupString.strValue;
+
+		if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+									   paramValues, NULL,
+									   &printTimelineHistoryResult))
+		{
+			log_error("Failed to retrieve the group's timeline history");
+			return false;
+		}
+	}
+
+	{
+		const char *sql =
+			"SELECT node_id, node_name, tli, lsn, reference_tli, "
+			"       on_accepted_lineage "
+			"  FROM pgautofailover.node_timeline_status($1, $2)";
+
+		int paramCount = 2;
+		Oid paramTypes[2] = { TEXTOID, INT4OID };
+		const char *paramValues[2];
+		IntString groupString = intToString(group);
+
+		paramValues[0] = formation;
+		paramValues[1] = groupString.strValue;
+
+		if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+									   paramValues, &sawFork,
+									   &printTimelineStatusResult))
+		{
+			log_error("Failed to retrieve per-node timeline status");
+			return false;
+		}
+	}
+
+	if (sawFork)
+	{
+		fformat(stdout,
+				"One or more nodes have diverged from the reference "
+				"timeline (see FORK above).\n"
+				"See `pg_autoctl accept timeline --help` to resolve.\n");
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_get_node_region retrieves the region label of a node from the
  * monitor.
  */

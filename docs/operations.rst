@@ -379,6 +379,93 @@ unplanned failover are all handled by the monitor, rather than the client
 side command line, at the client level the two command ``pg_autoctl perform
 failover`` and ``pg_autoctl perform switchover`` are synonyms, or aliases.
 
+.. _resolving_timeline_fork:
+
+Resolving a detected timeline fork
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A standby whose local WAL has genuinely diverged from the rest of the group
+— for example, one that was promoted or written to directly at the
+Postgres level, outside of ``pg_autoctl``'s control, during an incident —
+cannot resolve that divergence through ordinary streaming replication. See
+:ref:`timeline_forks` for the full scenario and how pg_auto_failover
+detects and, in most cases, automatically resolves this.
+
+Start by checking what the monitor currently knows::
+
+  $ pg_autoctl show timeline
+       TLI | Parent TLI | Switchpoint LSN
+  ---------+------------+----------------
+         1 |          0 |             0/0
+         2 |          1 |       0/3000130
+
+                  Name | NodeId |  TLI |         LSN | Status
+  ---------------------+--------+------+-------------+-----------------------------------------
+                 node1 |      1 |    1 |   0/3000130 | ok, on accepted lineage
+                 node2 |      2 |    2 |   0/3016330 | ok, on accepted lineage
+
+The first table is every timeline the group has ever seen; the second is
+each node's current position and whether it's on the group's reference
+lineage. Here both nodes read as clean — this is the known two-node
+limitation: auto-detection only has something to compare against when a
+sibling node disagrees, and with only ``node1`` (never advanced past
+timeline 1) and ``node2`` (the fork) in the group, ``node2``'s fork looks
+like a normal, legitimate promotion.
+
+Having confirmed from other evidence which timeline is really ground truth
+— which node was manually promoted, ``pg_controldata`` output, application
+logs — pin it explicitly::
+
+  $ pg_autoctl accept timeline --tli 1 --formation default \
+      --reason "node2 self-promoted out of band during a network partition"
+  Timeline 1 accepted as ground truth for formation "default" group 0. The election will now only consider nodes on that lineage; other nodes need pg_rewind before rejoining.
+
+``node2`` is now unambiguously flagged::
+
+  $ pg_autoctl show timeline
+       TLI | Parent TLI | Switchpoint LSN
+  ---------+------------+----------------
+         1 |          0 |             0/0
+         2 |          1 |       0/3000130
+
+                  Name | NodeId |  TLI |         LSN | Status
+  ---------------------+--------+------+-------------+-----------------------------------------
+                 node1 |      1 |    1 |   0/30599B8 | ok, on accepted lineage
+                 node2 |      2 |    2 |   0/3016330 | FORK: diverges from the reference timeline, pg_rewind required
+
+  One or more nodes have diverged from the reference timeline (see FORK above).
+  See `pg_autoctl accept timeline --help` to resolve.
+
+No further command is needed to make ``node2`` rewind. The pin doesn't just
+change how the flagged node is evaluated at the next election — the monitor
+re-checks every currently-``secondary`` node's ancestry against the
+freshly-pinned lineage right away, so ``node2`` is pushed to ``catchingup``
+within about a second of the ``accept timeline`` command above, with no
+health-check cycle or maintenance toggle needed to trigger it.
+
+``node2`` goes ``secondary`` → ``catchingup`` → ``secondary``, running
+``pg_rewind`` onto timeline 1 along the way (or, if ``pg_rewind`` itself
+can't connect, a fresh ``pg_basebackup`` — both pre-existing recovery
+paths) — usually so quickly that polling ``pg_autoctl show state`` a second
+or two apart never even catches the intermediate ``catchingup`` state. The
+fork clears on its own, with no need to run an "accept" or "resolve"
+command a second time, and no need to cycle the node through maintenance to
+force anything::
+
+  $ pg_autoctl show timeline
+       TLI | Parent TLI | Switchpoint LSN
+  ---------+------------+----------------
+         1 |          0 |             0/0
+         2 |          1 |       0/3000130
+
+                  Name | NodeId |  TLI |         LSN | Status
+  ---------------------+--------+------+-------------+-----------------------------------------
+                 node1 |      1 |    1 |   0/70000F8 | ok, on accepted lineage
+                 node2 |      2 |    1 |   0/70000F8 | ok, on accepted lineage
+
+See :ref:`pg_autoctl_show_timeline` and :ref:`pg_autoctl_accept_timeline`
+for the full command reference.
+
 Current state, last events
 --------------------------
 
@@ -457,6 +544,10 @@ time -- for instance because a firewall rule hasn't yet activated -- it's
 possible to try ``pg_autoctl create`` again. pg_auto_failover will review its previous
 progress and repeat idempotent operations (``create database``, ``create
 extension`` etc), gracefully handling errors.
+
+If a standby won't rejoin and Postgres logs a timeline mismatch, see
+:ref:`resolving_timeline_fork` and the related FAQ entry on the same
+topic in :ref:`faq`.
 
 .. _container-and-kubernetes-deployments:
 

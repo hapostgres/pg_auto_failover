@@ -546,30 +546,32 @@ fsm_citus_worker_promote_standby_to_single(Keeper *keeper)
 
 
 /*
- * fsm_citus_cleanup_and_resume_as_primary cleans-up the replication setting
- * and start the local node as primary. It's called after a fast-forward
- * operation.
+ * fsm_citus_cleanup_and_resume_as_primary prepares the coordinator-side
+ * master_update_node() call after a fast-forward operation. It's the Citus
+ * counterpart of fsm_cleanup_as_primary(), called at the same
+ * FAST_FORWARD_STATE -> PREP_PROMOTION_STATE transition, i.e. BEFORE the
+ * real pg_ctl promote (which only happens later, from standby_promote() via
+ * fsm_promote_standby at PREP_PROMOTION_STATE -> STOP_REPLICATION_STATE /
+ * WAIT_PRIMARY_STATE).
+ *
+ * This must NOT touch the on-disk standby setup: Postgres's own
+ * promotion-completion logic removes standby.signal itself while
+ * processing the later pg_ctl promote, and FATAL-crashes if it's already
+ * gone ("could not remove file \"standby.signal\": No such file or
+ * directory") -- reproduced live against tests/tap/specs/
+ * debug_citus_worker_fast_forward.pgaf. The crash-recovery restart that
+ * follows finds no standby.signal (already removed) and silently completes
+ * ordinary crash recovery of what looks like a primary, without ever
+ * genuinely promoting. This function used to call standby_cleanup_as_primary()
+ * here (and, before that, also restart Postgres) -- see the docstring on
+ * standby_cleanup_as_primary() in primary_standby.c for the full
+ * explanation of why that on-disk cleanup belongs solely in the
+ * post-promotion path (fsm_promote_standby), never here.
  */
 bool
 fsm_citus_cleanup_and_resume_as_primary(Keeper *keeper)
 {
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	if (!standby_cleanup_as_primary(postgres))
-	{
-		log_error("Failed to cleanup replication settings and restart Postgres "
-				  "to continue as a primary, see above for details");
-		return false;
-	}
-
-	if (!keeper_restart_postgres(keeper))
-	{
-		log_error("Failed to restart Postgres after changing its "
-				  "primary conninfo, see above for details");
-		return false;
-	}
-
-	/* now prepare and commit the call to master_update_node() */
+	/* prepare and commit the call to master_update_node() */
 	return fsm_citus_worker_prepare_standby_for_promotion(keeper);
 }
 

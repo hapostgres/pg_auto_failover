@@ -36,12 +36,15 @@
 #include "keeper_pg_init.h"
 #include "log.h"
 #include "monitor.h"
+#include "parson.h"
 #include "pghba.h"
 #include "primary_standby.h"
 #include "state.h"
+#include "timeline_history.h"
 
 
 static bool fsm_init_standby_from_upstream(Keeper *keeper);
+static void keeper_defensive_publish_timeline_history(Keeper *keeper);
 
 
 /*
@@ -229,6 +232,8 @@ fsm_init_primary(Keeper *keeper)
 					  "postgres failed, see above for details");
 			return false;
 		}
+
+		keeper_defensive_publish_timeline_history(keeper);
 	}
 
 	/*
@@ -1048,6 +1053,42 @@ fsm_rewind_or_init(Keeper *keeper)
 
 
 /*
+ * keeper_defensive_publish_timeline_history does a synchronous, defensive
+ * publish of what we know about our own timeline history right now,
+ * immediately before code that might rewind us: rewinding to reach a common
+ * history with a new upstream (see #683) erases the local evidence of a
+ * fork (pg_control's timeline_id goes back down), and the periodic per-tick
+ * publish (service_keeper.c) runs on the same cadence as FSM transition
+ * processing, so a fork that both appears and gets rewound within one tick
+ * can otherwise go completely unpublished, taking away the operator's only
+ * record that it ever happened.
+ */
+static void
+keeper_defensive_publish_timeline_history(Keeper *keeper)
+{
+	PostgresSetup *pgSetup = &(keeper->postgres.postgresSetup);
+	uint32_t currentTLI = pgSetup->control.timeline_id;
+	IdentifySystem system = { 0 };
+
+	if (currentTLI > 0 &&
+		keeper_fetch_local_timeline_history(pgSetup, currentTLI, &system))
+	{
+		char *historyJSON = timeline_history_to_json(&system);
+
+		if (historyJSON != NULL)
+		{
+			(void) monitor_report_timeline_history(
+				&(keeper->monitor),
+				keeper->state.current_node_id,
+				historyJSON);
+
+			json_free_serialized_string(historyJSON);
+		}
+	}
+}
+
+
+/*
  * fsm_prepare_for_secondary is used when going from CATCHINGUP to SECONDARY,
  * to create missing replication slots. We want to maintain a replication slot
  * for each of the other nodes in the system, so that we make sure we have the
@@ -1104,6 +1145,15 @@ fsm_prepare_for_secondary(Keeper *keeper)
 	}
 
 	postgres->pgIsRunning = true;
+
+	/*
+	 * Defensively publish what we know about our own timeline history right
+	 * now, before the ancestry check below might rewind us and erase the
+	 * local evidence (see #683 and keeper_defensive_publish_timeline_history
+	 * for why: the periodic per-tick publish alone can otherwise miss a
+	 * fork that both appears and gets rewound within a single tick).
+	 */
+	keeper_defensive_publish_timeline_history(keeper);
 
 	/* check that we're on the same timeline as the new primary */
 	if (!standby_check_timeline_with_upstream(postgres))
@@ -1235,6 +1285,14 @@ fsm_promote_standby(Keeper *keeper)
 		return false;
 	}
 
+	/*
+	 * Publish our fresh timeline right away rather than waiting for the next
+	 * periodic tick: other nodes (and an operator running `pg_autoctl show
+	 * timeline`) should be able to see this promotion's timeline as soon as
+	 * it's genuinely confirmed, not several seconds later.
+	 */
+	keeper_defensive_publish_timeline_history(keeper);
+
 	if (!standby_cleanup_as_primary(postgres))
 	{
 		log_error("Failed to cleanup replication settings, "
@@ -1299,6 +1357,18 @@ fsm_report_lsn(Keeper *keeper)
 		/* can't happen at the moment */
 		return false;
 	}
+
+	/*
+	 * One more, synchronous, defensive publish of what we know about our
+	 * own timeline history right now, immediately before the risky part:
+	 * restarting standalone (no primary_conninfo) can hit a hard Postgres
+	 * FATAL if we've diverged (see #683) and never get to report anything
+	 * again. The periodic per-tick publish (service_keeper.c) already
+	 * covers the common case; this call guarantees freshness even on a
+	 * node's very first tick after a restart, before that periodic path
+	 * has had a chance to run.
+	 */
+	keeper_defensive_publish_timeline_history(keeper);
 
 	log_info("Restarting standby node to disconnect replication "
 			 "from failed primary node, to prepare failover");
@@ -1431,21 +1501,24 @@ fsm_fast_forward(Keeper *keeper)
 
 
 /*
- * fsm_cleanup_as_primary cleans-up the replication setting. It's called after
- * a fast-forward operation.
+ * fsm_cleanup_as_primary is called after a fast-forward operation, at the
+ * fast_forward -> prepare_promotion transition. Postgres is still running as
+ * a standby at this point, with standby.signal in place and replication
+ * caught up to at least our target LSN -- the actual promotion (pg_ctl
+ * promote) only happens later, from stop_replication.
+ *
+ * It must NOT remove standby.signal or otherwise clean up the replication
+ * setup here: Postgres's own promotion completion logic removes
+ * standby.signal itself as part of processing the promote request, and
+ * FATAL-crashes ("could not remove file "standby.signal": No such file or
+ * directory") if it's already gone by then. The correct place for that
+ * cleanup is after the real promotion, which fsm_promote_standby already
+ * does via its own standby_cleanup_as_primary call once standby_promote has
+ * genuinely completed.
  */
 bool
 fsm_cleanup_as_primary(Keeper *keeper)
 {
-	LocalPostgresServer *postgres = &(keeper->postgres);
-
-	if (!standby_cleanup_as_primary(postgres))
-	{
-		log_error("Failed to cleanup replication settings and restart Postgres "
-				  "to continue as a primary, see above for details");
-		return false;
-	}
-
 	return true;
 }
 
@@ -1507,12 +1580,17 @@ fsm_follow_new_primary(Keeper *keeper)
 	}
 
 	/*
-	 * Finally, check that we're on the same timeline as the new primary when
-	 * assigned secondary as a goal state. This transition function is also
-	 * used when going from secondary to catchingup, as the primary might have
-	 * changed also in that situation.
+	 * Finally, check that we're on the same timeline as the new primary.
+	 * This transition function is also used when going from secondary to
+	 * catchingup (assigned_role == CATCHINGUP_STATE), as the primary might
+	 * have changed also in that situation -- and the underlying
+	 * standby_follow_new_primary() call above just reconfigured and
+	 * restarted Postgres to point at it either way, so the same divergence
+	 * risk (#683) applies regardless of which of the two goal states we're
+	 * headed to.
 	 */
-	if (keeper->state.assigned_role == SECONDARY_STATE)
+	if (keeper->state.assigned_role == SECONDARY_STATE ||
+		keeper->state.assigned_role == CATCHINGUP_STATE)
 	{
 		PGSQL *pgsql = &(postgres->sqlClient);
 
@@ -1537,6 +1615,13 @@ fsm_follow_new_primary(Keeper *keeper)
 		}
 
 		postgres->pgIsRunning = true;
+
+		/*
+		 * Defensively publish our own timeline history before the ancestry
+		 * check below might rewind us -- see #683 and
+		 * keeper_defensive_publish_timeline_history.
+		 */
+		keeper_defensive_publish_timeline_history(keeper);
 
 		return standby_check_timeline_with_upstream(postgres);
 	}

@@ -197,6 +197,64 @@ PostgreSQL service:
 
        Falling back to asynchronous replication and resynchronizing
 
+.. _timeline_forks:
+
+Timeline Forks
+--------------
+
+A different kind of failure doesn't come from a node being unreachable, but
+from a node whose local WAL has genuinely diverged from the rest of the
+group. This happens when a standby is written to, or promoted, outside of
+``pg_autoctl``'s control — a manual intervention during an incident, a
+monitoring bug elsewhere, a previous split-brain — and generates local WAL
+that no other node in the group has, on a branch of history the primary
+never took.
+
+Ordinary streaming replication can never resolve this: it's not lag, it's
+divergence. Postgres itself refuses the reconnect (``requested timeline N
+is not a child of this server's history``).
+
+pg_auto_failover detects and resolves this automatically in the common
+case: before trusting a bare timeline-number comparison, a standby
+reconnecting to a (possibly new) primary walks the primary's real
+timeline history to tell "still catching up" apart from "diverged onto a
+dead branch," and runs ``pg_rewind`` in either direction as needed (falling
+back to a fresh ``pg_basebackup`` if ``pg_rewind`` itself can't connect).
+See the ``Catchingup`` section of :ref:`failover_state_machine` for where
+this check runs.
+
+The monitor doesn't wait for that reconnect to notice, either. It applies
+the same ancestry check to every node currently reported as a healthy
+secondary, and as soon as one is found not to be an ancestor of the group's
+reference lineage, it is pushed to ``catchingup`` right away — typically
+within about a second, on that node's very next report — rather than
+waiting for an incidental health-check cycle or an operator-forced resync
+to reveal the problem (see the ``Report_LSN`` section of
+:ref:`failover_state_machine` for where the election applies this same
+ancestry filter, and this section's own diagram below for the monitor-side
+push).
+
+The reference lineage itself is either pinned explicitly, or auto-detected
+as the branch containing the highest reported timeline. Auto-detection only
+excludes a candidate when a genuinely *competing* branch is reported by
+someone else — two nodes each diverging from the same point onto two
+different timelines — in which case the loser is caught and rewound with no
+operator action at all. It doesn't help when there's no sibling to disagree
+with the diverged node: in a two-node formation, or whenever every
+surviving node happens to already be on the same diverged branch, the fork
+reads as clean and an operator decision is needed. Use
+:ref:`pg_autoctl_show_timeline` to see the group's known timeline history
+and each node's status against it, and :ref:`pg_autoctl_accept_timeline` to
+pin the correct lineage explicitly — once pinned, the same immediate,
+automatic push applies. See :ref:`resolving_timeline_fork` for the full
+walkthrough.
+
+.. figure:: ./tikz/seq-timeline-fork.svg
+   :alt: Sequence diagram of a standby forking out-of-band and being detected and rewound back onto the real lineage
+
+   A standby forks out-of-band; once the mismatch is visible to the
+   monitor, it is pushed to catchingup and rewound within about a second
+
 Failure handling and network partition detection
 ------------------------------------------------
 

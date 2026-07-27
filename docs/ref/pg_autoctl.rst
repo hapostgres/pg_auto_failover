@@ -20,6 +20,7 @@ pg_autoctl provides the following commands::
   + get       Get a pg_auto_failover node, or formation setting
   + set       Set a pg_auto_failover node, or formation setting
   + perform   Perform an action orchestrated by the monitor
+  + accept    Accept an operator decision orchestrated by the monitor
     activate  Activate a Citus worker from the Citus coordinator
     run       Run the pg_autoctl service (monitor or keeper)
     stop      signal the pg_autoctl service for it to stop
@@ -51,6 +52,7 @@ pg_autoctl provides the following commands::
     state          Prints monitor's state of nodes in a given formation and group
     settings       Print replication settings for a formation from the monitor
     standby-names  Prints synchronous_standby_names for a given group
+    timeline       Show the timeline history known to the monitor for a group, and each node's position against it
     file           List pg_autoctl internal files (config, state, pid)
     systemd        Print systemd service file for this node
 
@@ -96,6 +98,9 @@ pg_autoctl provides the following commands::
     failover    Perform a failover for given formation and group
     switchover  Perform a switchover for given formation and group
     promotion   Perform a failover that promotes a target node
+
+  pg_autoctl accept
+    timeline  Accept a timeline as the ground truth after a detected fork
 
 Description
 -----------

@@ -1452,12 +1452,26 @@ pg_rewind(const char *pgdata,
 		setenv("PGPASSWORD", replicationSource->password, 1);
 	}
 
+	/*
+	 * pg_rewind needs a database to connect to, but not any particular one --
+	 * it only runs a handful of catalog queries and a replication-mode
+	 * connection. Using the formation's own configured database name (rather
+	 * than a hardcoded "postgres") matters because pg_autoctl's own HBA rules
+	 * (pghba_ensure_host_rules_exist) are written for exactly that database
+	 * name plus the "replication" pseudo-database -- never literally
+	 * "postgres" unless that also happens to be the configured name. A
+	 * formation created with --dbname other than "postgres" would otherwise
+	 * have pg_rewind's connection rejected by every peer's pg_hba.conf,
+	 * every time, unconditionally.
+	 */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
-								  "postgres", /* pg_rewind needs a database */
+								  IS_EMPTY_STRING_BUFFER(replicationSource->dbname)
+								  ? "postgres"
+								  : replicationSource->dbname,
 								  NULL,       /* no password here */
 								  replicationSource->applicationName,
 								  replicationSource->sslOptions,
@@ -2190,7 +2204,8 @@ pg_write_recovery_conf(const char *pgdata, ReplicationSource *replicationSource)
 	};
 
 	GUC *recoverySettings =
-		IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN)
+		(!replicationSource->pauseAtRecoveryTarget ||
+		 IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
 		? recoverySettingsStandby
 		: recoverySettingsTargetLSN;
 
@@ -2259,7 +2274,8 @@ pg_write_standby_signal(const char *pgdata,
 	};
 
 	GUC *recoverySettings =
-		IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN)
+		(!replicationSource->pauseAtRecoveryTarget ||
+		 IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
 		? recoverySettingsStandby
 		: recoverySettingsTargetLSN;
 
@@ -2418,8 +2434,17 @@ prepare_recovery_settings(const char *pgdata,
 				replicationSource->targetTimeline);
 	}
 
-	/* We use the targetLSN only when doing a WAL fast_forward operation */
-	if (!IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
+	/*
+	 * Only write recovery_target_lsn when the caller explicitly wants
+	 * Postgres's own target-reached logic (see pauseAtRecoveryTarget's own
+	 * comment). Otherwise targetLSN, if set, is purely an application-level
+	 * polling threshold the caller checks for itself (pg_last_wal_replay_lsn
+	 * via pgsql_has_reached_target_lsn); leaving it out of the recovery
+	 * configuration means Postgres just streams normally, with no target of
+	 * its own to get stuck waiting on.
+	 */
+	if (replicationSource->pauseAtRecoveryTarget &&
+		!IS_EMPTY_STRING_BUFFER(replicationSource->targetLSN))
 	{
 		sformat(targetLSN, PG_LSN_MAXLENGTH, "'%s'",
 				replicationSource->targetLSN);

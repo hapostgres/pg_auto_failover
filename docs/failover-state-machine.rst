@@ -155,12 +155,40 @@ The standby node keeper runs pg_basebackup, connecting to the primary's
 hostname and port. The keeper then edits recovery.conf and starts
 PostgreSQL in hot standby node.
 
+Before doing so — and also when a healthy secondary is reconnecting to a
+(possibly new) primary rather than bootstrapping from scratch — the keeper
+compares its own timeline history against the upstream's. A node that is
+simply behind rewinds cleanly onto the upstream once it catches up; a node
+whose local WAL has genuinely diverged onto a dead branch (for example, one
+that was promoted directly at the Postgres level outside of
+``pg_autoctl``'s control) can never resolve that divergence through
+ordinary streaming replication, and Postgres itself will refuse the
+reconnect. In that case the keeper runs ``pg_rewind`` to discard the
+diverged WAL and rejoin the real lineage, falling back to a fresh
+``pg_basebackup`` if ``pg_rewind`` itself cannot connect. See
+:ref:`timeline_forks` for the full scenario.
+
 Secondary
 ^^^^^^^^^
 
 A node with this state is acting as a hot standby for the primary, and
 is up to date with the WAL log there. In particular, it is within 16MB
 or 1 WAL segment of the primary.
+
+Streaming replication alone can look perfectly healthy even when the
+secondary is on a genuinely forked branch of history — the WAL receiver
+just keeps reporting progress against whatever local timeline the standby
+happens to be on. To catch this without waiting for an incidental
+transition, the monitor applies the same ``FilterNodesByTimelineAncestry()``
+check used during an election (see ``Report_LSN`` below) to every node
+currently in the secondary state, on each of its regular reports. As soon
+as a secondary's reported timeline is found not to be an ancestor of the
+group's reference lineage, the monitor assigns it the ``catchingup`` goal
+state right away — typically within about a second, on that very report —
+rather than waiting for a health-check cycle or an operator-forced resync
+to reveal the problem. See :ref:`timeline_forks` for the full scenario and
+:ref:`pg_autoctl_accept_timeline` for pinning the reference lineage when
+auto-detection can't tell which branch is real.
 
 Maintenance
 ^^^^^^^^^^^
@@ -273,6 +301,18 @@ node cannot be recovered and the operator is willing to accept the potential
 data loss, the election can be unblocked with
 :ref:`pg_autoctl_perform_failover` ``--allow-data-loss``.  See
 :ref:`perform_failover_allow_data_loss` for details.
+
+Once quorum standbys have reported their LSN, candidates are further
+filtered by timeline ancestry (``FilterNodesByTimelineAncestry()``): a node
+whose reported timeline is not the group's reference lineage — the
+:ref:`pg_autoctl_accept_timeline`-pinned timeline if one has been set,
+otherwise the highest reported timeline that nothing else in the group
+disagrees with — is excluded from candidacy rather than counted as missing.
+This is what lets the election proceed among the remaining, non-diverged
+candidates instead of blocking on a node that can never actually win. Use
+:ref:`pg_autoctl_show_timeline` to see the group's known timeline history
+and each node's status against it. See :ref:`timeline_forks` for the
+failure scenario this guards against.
 
 Fast_forward
 ^^^^^^^^^^^^

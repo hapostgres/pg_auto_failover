@@ -23,6 +23,7 @@
 #include "keeper_pg_init.h"
 #include "log.h"
 #include "monitor.h"
+#include "parson.h"
 #include "pgctl.h"
 #include "pidfile.h"
 #include "primary_standby.h"
@@ -32,6 +33,7 @@
 #include "state.h"
 #include "string_utils.h"
 #include "supervisor.h"
+#include "timeline_history.h"
 
 #include "runprogram.h"
 
@@ -58,6 +60,7 @@ KeeperNodesArrayRefreshFunction *KeeperRefreshHooks =
 
 
 static bool service_keeper_node_active(Keeper *keeper, bool doInit);
+static bool keeper_maybe_report_timeline_history(Keeper *keeper);
 static void check_for_network_partitions(Keeper *keeper);
 static bool is_network_healthy(Keeper *keeper);
 static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
@@ -826,6 +829,22 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			}
 
 			couldContactMonitor = couldContactMonitorThisRound;
+
+			/*
+			 * Check for a new local timeline and publish it to the monitor,
+			 * unconditionally of the current FSM state: an uneventful
+			 * secondary quietly follows timeline switches through ordinary
+			 * streaming replication, with no fsm_* transition function ever
+			 * running, so this can't be hooked off specific transitions --
+			 * it has to poll every tick like this. Cheap: only touches the
+			 * filesystem when postgresSetup.control.timeline_id (already
+			 * refreshed above by keeper_update_pg_state) has advanced past
+			 * what we last published.
+			 */
+			if (couldContactMonitorThisRound)
+			{
+				(void) keeper_maybe_report_timeline_history(keeper);
+			}
 		}
 
 		if (keeperState->assigned_role != keeperState->current_role)
@@ -1145,6 +1164,73 @@ service_keeper_node_active(Keeper *keeper, bool doInit)
 	}
 
 	return true;
+}
+
+
+/*
+ * keeper_maybe_report_timeline_history checks the local node's current
+ * timeline (already refreshed this tick by keeper_update_pg_state(), from
+ * pg_control -- no extra syscall here) against the highest timeline this
+ * process has already published, and reports the local timeline history to
+ * the monitor when it has advanced.
+ *
+ * lastPublishedTLI is deliberately a plain in-memory watermark, not
+ * persisted state: on every fresh process start it's zero again, so the
+ * first tick after any pg_autoctl restart always re-publishes -- cheap
+ * (ON CONFLICT DO NOTHING makes the insert a no-op when nothing changed),
+ * and it means we don't need to worry about the watermark itself getting
+ * out of sync with what the monitor actually has on file.
+ */
+static bool
+keeper_maybe_report_timeline_history(Keeper *keeper)
+{
+	static uint32_t lastPublishedTLI = 0;
+	static IdentifySystem system = { 0 };
+
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	uint32_t currentTLI = postgres->postgresSetup.control.timeline_id;
+
+	if (currentTLI == 0 || currentTLI <= lastPublishedTLI)
+	{
+		return true;
+	}
+
+	if (!keeper_fetch_local_timeline_history(&(postgres->postgresSetup),
+											 currentTLI,
+											 &system))
+	{
+		log_warn("Failed to read the local timeline history for timeline %d",
+				 currentTLI);
+		return false;
+	}
+
+	char *historyJSON = timeline_history_to_json(&system);
+
+	if (historyJSON == NULL)
+	{
+		log_warn("Failed to encode the local timeline history as JSON");
+		return false;
+	}
+
+	bool reported =
+		monitor_report_timeline_history(&(keeper->monitor),
+										keeper->state.current_node_id,
+										historyJSON);
+
+	json_free_serialized_string(historyJSON);
+
+	if (reported)
+	{
+		lastPublishedTLI = currentTLI;
+	}
+	else
+	{
+		log_warn("Failed to report the local timeline history "
+				 "for timeline %d",
+				 currentTLI);
+	}
+
+	return reported;
 }
 
 

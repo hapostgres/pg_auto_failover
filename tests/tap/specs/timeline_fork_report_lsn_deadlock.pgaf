@@ -1,0 +1,200 @@
+# Reproduces and validates the fix for
+# https://github.com/hapostgres/pg_auto_failover/issues/683 ("Unrecoverable
+# state after failed switchover"): a standby that has generated local WAL
+# past the point its timeline actually diverged can never resolve via
+# ordinary streaming replication -- Postgres itself refuses ("requested
+# timeline N is not a child of this server's history" / "highest timeline N
+# of the primary is behind recovery timeline M"), and pre-fix, pg_autoctl had
+# no code path that ever called pg_rewind to get out of it: the standby just
+# retried the same doomed reconnect forever.
+#
+# node2 is cut off from the network, then promoted directly at the Postgres
+# level (bypassing pg_autoctl entirely) and given a couple of local-only
+# writes -- this
+# manufactures a genuine, local timeline fork on node2 without needing to
+# race the real production timing (an isolated primary keeps streaming to
+# one specific reachable standby while the rest of the cluster promotes
+# someone else, which pgaftest's node-granular network disconnect can't
+# selectively reproduce).
+#
+# When node2 is handed back to pg_autoctl, its current_role assumption
+# ("secondary", should be in recovery) no longer matches Postgres reality
+# (promoted, writable). Node2 keeps reporting "secondary" throughout and the
+# fork stays invisible to auto-detection -- no sibling standby to disagree
+# with it, see the known limitation below -- so nothing forces a real
+# transition on its own *until* the reference lineage is pinned. Once
+# test_003 below pins tli=1, the monitor's own ancestry check on every
+# currently-secondary node (ProceedGroupStateFromContext) picks up the
+# mismatch on node2's very next report and pushes it to catchingup within
+# about a second, with no maintenance toggle or health-check cycle needed to
+# trigger it -- test_004 asserts this directly. That's the moment the #683
+# fix actually runs; test_005 re-drives the same recovery through the older,
+# maintenance-cycle path as a belt-and-suspenders check that it still works
+# when triggered that way too.
+#
+# Known, separate limitation, not exercised here: in a 2-node formation with
+# no other standby to compare against, an explicit `perform failover` while
+# node2 is still forked will promote it anyway -- the ancestry filter only
+# excludes a candidate when a competing branch is reported by someone else,
+# and with only node1 (never advanced past its original timeline) and node2
+# (the fork) in the group, node2's fork looks like a normal, legitimate
+# promotion. See node_timeline_history.c's FilterNodesByTimelineAncestry().
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_fork_node2_out_of_band {
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 60s
+    # node2's own keeper stays running throughout: "stop postgres" (pgctl
+    # off) stops Postgres outright, which would defeat the raw promote
+    # below.  The keeper can't do anything about a promotion it never
+    # issued anyway -- it just keeps reporting what it observes, which is
+    # the whole point being tested here.
+    network disconnect node2
+    exec node2  pg_ctl promote --pgdata /var/lib/postgres/pgaf
+    sleep 3s
+    sql node2 { CREATE TABLE divergent_data(a int); }
+    sql node2 { INSERT INTO divergent_data VALUES (1), (2), (3); }
+    sql node2 { CHECKPOINT; }
+}
+
+step test_002_hand_node2_back_to_pg_autoctl {
+    network connect node2
+    wait until node2 state is secondary  timeout 60s
+    # Give node2's keeper at least one periodic tick (service_keeper.c's
+    # per-tick timeline-history publish) to run before checking -- reportedstate
+    # never actually changes here (it was "secondary" throughout), so "wait
+    # until ... secondary" above resolves immediately and doesn't itself wait
+    # for that tick.
+    sleep 5s
+    # node2 is back. Both sides may or may not have already noticed anything
+    # is wrong by the time this step's assertions run -- the health checker
+    # runs on its own schedule and, once it marks node2 unhealthy, drives it
+    # through the very same catchingup cycle test_004 forces explicitly
+    # below, so whether that has already happened here is a race this spec
+    # doesn't need to pin down. What's NOT racy is node_timeline_history: it
+    # is append-only, so node2's diverged branch being in there at all is
+    # permanent proof the fork was correctly detected and published,
+    # regardless of what's happened to node2's live state since.
+    sql monitor {
+        SELECT EXISTS (
+            SELECT 1
+              FROM pgautofailover.node_timeline_history h
+              JOIN pgautofailover.node n ON n.nodeid = h.nodeid
+             WHERE n.nodename = 'node2' AND h.tli = 2 AND h.parenttli = 1
+        );
+    }
+    expect { t }
+}
+
+step test_003_show_and_accept_timeline_cli {
+    # `pg_autoctl show timeline` and `pg_autoctl accept timeline` (Part 3/4)
+    # are otherwise only covered at the monitor-SQL level
+    # (timeline_fork_detection.sql) -- exercise the actual CLI against a
+    # live cluster here. Pinning tli=1 below is what test_004 immediately
+    # reacts to: standby_check_timeline_with_upstream() (the #683 fix) is a
+    # purely local, standby-side check that runs once node2 reaches
+    # catchingup, but the monitor-side push into catchingup in the first
+    # place -- test_004's whole point -- is exactly what accepting a pin
+    # here triggers.
+    # Unpinned, node2's fork (tli=2) IS the reference by default (highest
+    # reported tli, and nobody else is arguing) -- this is the "known,
+    # separate limitation" from the header comment, and it reads as clean.
+    exec node1  pg_autoctl show timeline
+    expect { ok, on accepted lineage }
+
+    exec-fails node1  pg_autoctl accept timeline --tli 99
+    exec node1  pg_autoctl accept timeline --tli 1 --reason "node2 self-promoted out of band"
+    expect { accepted as ground truth }
+
+    # With tli=1 pinned as ground truth instead, node2 is now unambiguously
+    # flagged as diverged.
+    exec node1  pg_autoctl show timeline
+    expect { FORK }
+}
+
+step test_004_automatic_catchingup_without_maintenance {
+    # No enable/disable maintenance anywhere in this step -- that used to be
+    # required to force node2 through a real transition. Now the monitor's
+    # own ProceedGroupState() detects the ancestry mismatch on node2's very
+    # next report after test_003's pin and pushes it to catchingup by
+    # itself, without needing any operator action or incidental
+    # health-check cycle to drive it there.
+    #
+    # node2 is this formation's only standby, so excluding it also means
+    # node1 can no longer keep synchronous replication -- node1 transitions
+    # through wait_primary at the same time, settling back to primary once
+    # node2's automatic recovery (pg_rewind, or a fresh pg_basebackup if
+    # pg_rewind itself can't connect) completes. Waiting for both to settle
+    # here, rather than just asserting the initial catchingup assignment,
+    # is what makes test_005 below safe to run immediately after: without
+    # it, test_005's `enable maintenance` can race node1's own wait_primary
+    # dance and get rejected by the monitor's start-maintenance precondition
+    # (seen intermittently in CI before this step existed).
+    wait until node2 assigned-state = catchingup  timeout 15s
+    wait until node1 state is primary
+        and node2 state is secondary
+        timeout 60s
+}
+
+step test_005_maintenance_cycle_recovers {
+    # By this point node2 has already recovered automatically (test_004).
+    # This re-drives the same recovery through the older, operator-forced
+    # maintenance-cycle path -- the same transition an ordinary "briefly
+    # unreachable, please resync" health-check cycle would also drive --
+    # as a belt-and-suspenders check that it still works when triggered
+    # that way, not because it's still the only way to recover here.
+    exec node2  pg_autoctl enable maintenance
+    wait until node2 state is maintenance  timeout 60s
+    exec node2  pg_autoctl disable maintenance
+    wait until node2 state is secondary  timeout 60s
+
+    # node2 must have actually resynced to node1's real lineage, not just
+    # gotten stuck reporting a stale state.
+    sql monitor {
+        SELECT reportedtli FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    expect { 1 }
+    sql monitor {
+        SELECT reportedtli FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { 1 }
+
+    # The out-of-band writes did not exist on any real lineage -- they must
+    # be gone after recovery, whichever recovery path was taken.
+    sql node2 { SELECT to_regclass('public.divergent_data'); }
+    expect { }
+
+    # node1 was never disturbed: still primary, still holds the one
+    # legitimate row of data throughout.
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    expect { primary }
+}
+
+step test_006_writes_still_flow_after_recovery {
+    # The cluster is fully healthy again: a real write on the primary
+    # replicates to the now-recovered node2, proving this isn't just a
+    # state-label reshuffle.
+    sql node1 { CREATE TABLE post_recovery(a int); INSERT INTO post_recovery VALUES (1); }
+    wait until node2 state is secondary  timeout 30s
+    sql node2 { SELECT * FROM post_recovery; }
+    expect { 1 }
+}
