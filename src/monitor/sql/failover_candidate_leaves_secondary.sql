@@ -215,7 +215,11 @@ SELECT assigned_group_state
                                   current_group_role => 'prepare_promotion',
                                   current_lsn => '0/5000');
 
--- ASSERT: fclmb_p's goalstate is still 'wait_primary', not 'demote_timeout'.
+-- ASSERT: fclmb_p's goalstate is still 'wait_primary', not 'demote_timeout',
+-- and fclmb_s is promoted directly to 'wait_primary' -- fclmb_p is stuck at
+-- wait_primary with no path to become a live primary, so it is treated the
+-- same as "no primary at all" (the primaryNode == NULL case) rather than
+-- waiting forever for a demote handshake that can never happen.
 -- Pre-fix: Rule 2 assigns demote_timeout unconditionally here, producing
 -- reportedstate=wait_primary / goalstate=demote_timeout -- no KeeperFSM[]
 -- edge between them, so the keeper would fatal on every retry.

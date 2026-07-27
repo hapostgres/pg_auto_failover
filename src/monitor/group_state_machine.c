@@ -892,11 +892,27 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	}
 
 	/*
-	 * when primary node has been removed and we are promoting one standby
-	 *  prepare_promotion -> stop_replication
+	 * when primary node has been removed, or never actually reached a state
+	 * with a real demote_timeout edge, and we are promoting one standby
+	 *  prepare_promotion -> wait_primary
+	 *
+	 * This is the complement of the rule above: primaryNode can be non-NULL
+	 * here and still have no live primary to hand off to -- e.g. a primary
+	 * candidate that reached wait_primary (a writable goal state, so it's
+	 * still found by GetPrimaryOrDemotedNodeInGroupFromList) but died before
+	 * ever getting a healthy secondary counted and being promoted the rest
+	 * of the way to primary. wait_primary has no KeeperFSM[] edge to
+	 * demote_timeout, so waiting for the rule above to fire would wait
+	 * forever (issue #774): there is no live primary to demote, so just
+	 * promote the candidate directly, exactly as when primaryNode is NULL.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
-		primaryNode == NULL)
+		(primaryNode == NULL ||
+		 (!IsInMaintenance(primaryNode) &&
+		  primaryNode->reportedState != REPLICATION_STATE_PRIMARY &&
+		  primaryNode->reportedState != REPLICATION_STATE_JOIN_PRIMARY &&
+		  primaryNode->reportedState != REPLICATION_STATE_APPLY_SETTINGS &&
+		  primaryNode->reportedState != REPLICATION_STATE_DRAINING)))
 	{
 		char message[BUFSIZE] = { 0 };
 
