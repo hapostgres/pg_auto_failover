@@ -300,31 +300,60 @@ cli_perform_failover(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	bool performOk;
+	/*
+	 * perform_failover() on the monitor can hit a genuine but transient
+	 * Postgres deadlock racing a concurrent node_active()/health-check
+	 * write (see #1004): retry it the same way enable/disable maintenance
+	 * already do for their own monitor calls, rather than failing the
+	 * whole command on the first transient error.
+	 */
+	ConnectionRetryPolicy retryPolicy = { 0 };
 
-	if (keeperOptions.allowDataLoss)
+	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		performOk = monitor_perform_failover_allow_data_loss(
-			&monitor, config.formation, config.groupId);
+		bool performOk;
+		bool mayRetry = false;
 
-		if (!performOk)
+		if (keeperOptions.allowDataLoss)
 		{
-			log_fatal("Failed to perform failover with --allow-data-loss, "
-					  "see above for details");
+			performOk = monitor_perform_failover_allow_data_loss(
+				&monitor, config.formation, config.groupId, &mayRetry);
+		}
+		else
+		{
+			performOk = monitor_perform_failover(
+				&monitor, config.formation, config.groupId, &mayRetry);
+		}
+
+		if (performOk)
+		{
+			break;
+		}
+
+		if (!mayRetry)
+		{
+			log_fatal("Failed to perform failover%s, see above for details",
+					  keeperOptions.allowDataLoss ? " with --allow-data-loss" : "");
 			exit(EXIT_CODE_MONITOR);
 		}
+
+		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+		log_warn("Failed to perform failover%s, retrying in %d ms.",
+				 keeperOptions.allowDataLoss ? " with --allow-data-loss" : "",
+				 sleepTimeMs);
+
+		/* we have milliseconds, pg_usleep() wants microseconds */
+		(void) pg_usleep(sleepTimeMs * 1000);
 	}
-	else
-	{
-		performOk = monitor_perform_failover(
-			&monitor, config.formation, config.groupId);
 
-		if (!performOk)
-		{
-			log_fatal("Failed to perform failover/switchover, "
-					  "see above for details");
-			exit(EXIT_CODE_MONITOR);
-		}
+	if (pgsql_retry_policy_expired(&retryPolicy))
+	{
+		log_fatal("Failed to perform failover/switchover, "
+				  "see above for details");
+		exit(EXIT_CODE_MONITOR);
 	}
 
 	/* process state changes notification until we have a new primary */
