@@ -40,6 +40,7 @@ test: drop_node
 test: stale_primary_report
 test: lock_and_fetch_migration
 test: timeline_fork_detection
+test: failover_candidate_leaves_secondary
 test: dummy_update
 test: drop_extension
 test: upgrade

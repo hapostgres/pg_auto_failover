@@ -847,10 +847,28 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	 * refrain from prepare_maintenance -> demote_timeout on the primary, which
 	 * might happen here when secondary has reached prepare_promotion before
 	 * primary has reached prepare_maintenance.
+	 *
+	 * Also require the primary to actually be in one of the states
+	 * demote_timeout has a real KeeperFSM[] edge from (primary, join_primary,
+	 * apply_settings, or draining -- verified against fsm.c) before assigning
+	 * it: this rule fires as soon as the candidate reports prepare_promotion,
+	 * which routinely happens while the primary is still reporting "primary"
+	 * itself (it hasn't locally converged to draining yet) -- that's the
+	 * normal case and demote_timeout is reachable from primary too, so it's
+	 * allowed. What's not reachable is wait_primary: a separate rule can
+	 * reassign the primary to wait_primary in the same window (issue #774),
+	 * and wait_primary has no FSM edge to demote_timeout at all, which fatals
+	 * the node forever. If the primary is at wait_primary (or anything else
+	 * with no edge to demote_timeout) when this fires, defer instead: do
+	 * nothing this tick and let the next node_active() round re-evaluate.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
 		primaryNode &&
-		!IsInMaintenance(primaryNode))
+		!IsInMaintenance(primaryNode) &&
+		(primaryNode->reportedState == REPLICATION_STATE_PRIMARY ||
+		 primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY ||
+		 primaryNode->reportedState == REPLICATION_STATE_APPLY_SETTINGS ||
+		 primaryNode->reportedState == REPLICATION_STATE_DRAINING))
 	{
 		char message[BUFSIZE];
 
@@ -1319,9 +1337,20 @@ ProceedGroupStateForPrimaryNode(GroupStateContext *ctx,
 		 * the two defective standby nodes is available again.
 		 */
 		if (!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-			secondaryQuorumNodesCount == 0)
+			secondaryQuorumNodesCount == 0 &&
+			!IsFailoverInProgress(ctx->groupNodeList))
 		{
 			/*
+			 * Do not second-guess an already-started failover: a candidate
+			 * that just converged to prepare_promotion (or later stages) has
+			 * left SECONDARY, dropping secondaryQuorumNodesCount to zero even
+			 * though it *is* the failover candidate. Without this guard the
+			 * primary can be reassigned wait_primary right as its own
+			 * candidate is converging, landing it on wait_primary while a
+			 * later rule still expects to find it in draining and assigns
+			 * demote_timeout -- an assignment with no FSM edge from
+			 * wait_primary (issue #774).
+			 *
 			 * Allow wait_primary when number_sync_standbys = 0, otherwise
 			 * block writes on the primary.
 			 */
