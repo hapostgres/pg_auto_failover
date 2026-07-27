@@ -1496,7 +1496,26 @@ class DataNode(PGNode, StatefulNode):
         Cleans up processes and files created for this data node.
         """
 
-        self.stop_pg_autoctl()
+        try:
+            # SIGINT (unlike the stop_pg_autoctl() default of SIGTERM) skips
+            # pg_autoctl's graceful-shutdown maintenance handoff: there's no
+            # standby to protect when we're about to tear down the whole
+            # cluster anyway, and that handoff can legitimately take up to
+            # KEEPER_MAINTENANCE_SHUTDOWN_LOOP_MAX_SECS +
+            # KEEPER_SHUTDOWN_LOOP_MAX_SECS (60s total, see defaults.h) --
+            # right up against this module's own COMMAND_TIMEOUT (60s), with
+            # no margin for overhead. A node that hits that ceiling used to
+            # raise TimeoutExpired straight out of this call (uncaught, since
+            # it ran before the try/except below), aborting the rest of
+            # Cluster.destroy()'s loop and leaking every remaining node plus
+            # the monitor as orphaned processes for the calling test to hang
+            # on.
+            self.stop_pg_autoctl(sig=signal.SIGINT)
+        except Exception as e:
+            if ignore_failure:
+                print(str(e))
+            else:
+                raise
 
         flags = ["--destroy"]
         if force:
@@ -2016,11 +2035,20 @@ class MonitorNode(PGNode):
         Cleans up processes and files created for this monitor node.
         """
         if self.pg_autoctl:
-            out, err, ret = self.pg_autoctl.stop()
+            try:
+                # see Datanode.destroy()'s use of SIGINT for the rationale;
+                # the monitor doesn't run the keeper FSM so it isn't subject
+                # to the same graceful-maintenance delay, but using the same
+                # signal here keeps teardown intent consistent, and catching
+                # the call keeps a slow/failed stop from aborting the rest of
+                # Cluster.destroy() (in particular self.vlan.destroy()).
+                out, err, ret = self.pg_autoctl.stop(signal.SIGINT)
 
-            if ret != 0:
-                print()
-                print("Monitor logs:\n%s\n%s\n" % (out, err))
+                if ret != 0:
+                    print()
+                    print("Monitor logs:\n%s\n%s\n" % (out, err))
+            except Exception as e:
+                print(str(e))
 
         try:
             destroy = PGAutoCtl(self)
