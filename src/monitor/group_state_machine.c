@@ -843,91 +843,105 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	/*
 	 * when node is seeing no more writes:
 	 *  prepare_promotion -> stop_replication
+	 *  (or, when there's no live primary to hand off to: -> wait_primary)
 	 *
-	 * refrain from prepare_maintenance -> demote_timeout on the primary, which
-	 * might happen here when secondary has reached prepare_promotion before
-	 * primary has reached prepare_maintenance.
-	 *
-	 * Also require the primary to actually be in one of the states
-	 * demote_timeout has a real KeeperFSM[] edge from (primary, join_primary,
-	 * apply_settings, or draining -- verified against fsm.c) before assigning
-	 * it: this rule fires as soon as the candidate reports prepare_promotion,
-	 * which routinely happens while the primary is still reporting "primary"
-	 * itself (it hasn't locally converged to draining yet) -- that's the
-	 * normal case and demote_timeout is reachable from primary too, so it's
-	 * allowed. What's not reachable is wait_primary: a separate rule can
-	 * reassign the primary to wait_primary in the same window (issue #774),
-	 * and wait_primary has no FSM edge to demote_timeout at all, which fatals
-	 * the node forever. If the primary is at wait_primary (or anything else
-	 * with no edge to demote_timeout) when this fires, defer instead: do
-	 * nothing this tick and let the next node_active() round re-evaluate.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
-		primaryNode &&
-		!IsInMaintenance(primaryNode) &&
-		(primaryNode->reportedState == REPLICATION_STATE_PRIMARY ||
-		 primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY ||
-		 primaryNode->reportedState == REPLICATION_STATE_APPLY_SETTINGS ||
-		 primaryNode->reportedState == REPLICATION_STATE_DRAINING))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to demote_timeout and " NODE_FORMAT
-			" to stop_replication after " NODE_FORMAT
-			" converged to prepare_promotion.",
-			NODE_FORMAT_ARGS(primaryNode),
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(activeNode));
-
-		/* perform promotion to stop replication */
-		AssignGoalState(activeNode, REPLICATION_STATE_STOP_REPLICATION, message);
-
-		/* wait for possibly-alive primary to kill itself */
-		AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT, message);
-
-		return true;
-	}
-
-	/*
-	 * when primary node has been removed, or never actually reached a state
-	 * with a real demote_timeout edge, and we are promoting one standby
-	 *  prepare_promotion -> wait_primary
-	 *
-	 * This is the complement of the rule above: primaryNode can be non-NULL
-	 * here and still have no live primary to hand off to -- e.g. a primary
-	 * candidate that reached wait_primary (a writable goal state, so it's
-	 * still found by GetPrimaryOrDemotedNodeInGroupFromList) but died before
-	 * ever getting a healthy secondary counted and being promoted the rest
-	 * of the way to primary. wait_primary has no KeeperFSM[] edge to
-	 * demote_timeout, so waiting for the rule above to fire would wait
-	 * forever (issue #774): there is no live primary to demote, so just
-	 * promote the candidate directly, exactly as when primaryNode is NULL.
+	 * Both of the two rules below act on primaryNode's reported state to
+	 * decide what to do with it, so neither may fire until primaryNode is
+	 * "settled": either it has fully converged to its own currently assigned
+	 * goal (reportedState == goalState), or it's confirmed unhealthy (not
+	 * responding, so it cannot make further progress toward that goal right
+	 * now regardless). If primaryNode is healthy but still mid-transition
+	 * toward its own goal, defer instead: it might complete that transition
+	 * (e.g. actually reach primary) on its own before we ever need to hand
+	 * off to a different candidate, and deciding based on a reportedState
+	 * that's just lagging behind an in-progress, healthy convergence risks
+	 * racing ahead of it -- producing two simultaneously-writable nodes,
+	 * which is strictly worse than the unreachable-goal-state bug (#774)
+	 * these two rules exist to prevent in the first place.
 	 */
 	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
 		(primaryNode == NULL ||
 		 (!IsInMaintenance(primaryNode) &&
-		  primaryNode->reportedState != REPLICATION_STATE_PRIMARY &&
-		  primaryNode->reportedState != REPLICATION_STATE_JOIN_PRIMARY &&
-		  primaryNode->reportedState != REPLICATION_STATE_APPLY_SETTINGS &&
-		  primaryNode->reportedState != REPLICATION_STATE_DRAINING)))
+		  (IsCurrentState(primaryNode, primaryNode->goalState) ||
+		   NodeIsUnhealthy(primaryNode, ctx)))))
 	{
-		char message[BUFSIZE] = { 0 };
+		/*
+		 * refrain from prepare_maintenance -> demote_timeout on the primary
+		 * (excluded via IsInMaintenance above), which might happen here when
+		 * secondary has reached prepare_promotion before primary has reached
+		 * prepare_maintenance -- deferring entirely rather than falling
+		 * through to the direct-promotion branch below, since a primary
+		 * that's deliberately in maintenance is not "gone", just paused.
+		 *
+		 * Also require the primary to actually be in one of the states
+		 * demote_timeout has a real KeeperFSM[] edge from (primary,
+		 * join_primary, apply_settings, or draining -- verified against
+		 * fsm.c) before assigning it: this rule fires as soon as the
+		 * candidate reports prepare_promotion, which routinely happens
+		 * while the primary is still reporting "primary" itself (it hasn't
+		 * locally converged to draining yet) -- that's the normal case and
+		 * demote_timeout is reachable from primary too, so it's allowed.
+		 * What's not reachable is wait_primary: a separate rule can
+		 * reassign the primary to wait_primary in the same window (issue
+		 * #774), and wait_primary has no FSM edge to demote_timeout at all,
+		 * which fatals the node forever.
+		 */
+		if (primaryNode != NULL &&
+			(primaryNode->reportedState == REPLICATION_STATE_PRIMARY ||
+			 primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY ||
+			 primaryNode->reportedState == REPLICATION_STATE_APPLY_SETTINGS ||
+			 primaryNode->reportedState == REPLICATION_STATE_DRAINING))
+		{
+			char message[BUFSIZE];
 
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to wait_primary after " NODE_FORMAT
-			" converged to prepare_promotion.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(activeNode));
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to demote_timeout and " NODE_FORMAT
+				" to stop_replication after " NODE_FORMAT
+				" converged to prepare_promotion.",
+				NODE_FORMAT_ARGS(primaryNode),
+				NODE_FORMAT_ARGS(activeNode),
+				NODE_FORMAT_ARGS(activeNode));
 
-		/* perform promotion to stop replication */
-		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+			/* perform promotion to stop replication */
+			AssignGoalState(activeNode, REPLICATION_STATE_STOP_REPLICATION,
+							message);
 
-		return true;
+			/* wait for possibly-alive primary to kill itself */
+			AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT,
+							message);
+
+			return true;
+		}
+
+		/*
+		 * primaryNode is either NULL (removed from the group entirely), or
+		 * settled (per the outer guard above) in a state with no real
+		 * demote_timeout edge -- e.g. a primary candidate that reached
+		 * wait_primary (a writable goal state, so it's still found by
+		 * GetPrimaryOrDemotedNodeInGroupFromList) but died before ever
+		 * getting a healthy secondary counted and being promoted the rest
+		 * of the way to primary. Waiting for the block above to fire would
+		 * wait forever (issue #774): there is no live primary to demote, so
+		 * just promote the candidate directly, exactly as when primaryNode
+		 * is NULL.
+		 */
+		{
+			char message[BUFSIZE] = { 0 };
+
+			LogAndNotifyMessage(
+				message, BUFSIZE,
+				"Setting goal state of " NODE_FORMAT
+				" to wait_primary after " NODE_FORMAT
+				" converged to prepare_promotion.",
+				NODE_FORMAT_ARGS(activeNode),
+				NODE_FORMAT_ARGS(activeNode));
+
+			AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
+
+			return true;
+		}
 	}
 
 	/*

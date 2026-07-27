@@ -227,3 +227,108 @@ SELECT nodename, reportedstate, goalstate
   FROM pgautofailover.node
  WHERE formationid = 'fclmb_test'
  ORDER BY nodename;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Scenario C (the "settled" guard): neither Rule 2's demote_timeout path nor
+-- its wait_primary fallback may fire while the primary is healthy but has
+-- not yet converged to its own assigned goal -- it might still complete
+-- that transition (e.g. reach a real primary) on its own, and deciding
+-- based on a reportedState that's just lagging behind an in-progress,
+-- healthy convergence risks promoting a second candidate while the first
+-- primary is still legitimately alive and progressing, producing two
+-- simultaneously-writable nodes.
+-- ═══════════════════════════════════════════════════════════════════════
+
+SELECT pgautofailover.create_formation('fclmc_test', 'pgsql', 'postgres', true, 0);
+
+SELECT *
+  FROM pgautofailover.register_node('fclmc_test', 'fclmc_p', 5432,
+                                    'postgres', 'fclmc_p', 1);
+
+SELECT nodeid AS np FROM pgautofailover.node
+ WHERE formationid = 'fclmc_test' AND nodename = 'fclmc_p' \gset
+
+SELECT *
+  FROM pgautofailover.register_node('fclmc_test', 'fclmc_s', 5432,
+                                    'postgres', 'fclmc_s', 1);
+
+SELECT nodeid AS ns FROM pgautofailover.node
+ WHERE formationid = 'fclmc_test' AND nodename = 'fclmc_s' \gset
+
+-- bootstrap: p = primary, s = secondary
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :np, 0,
+                                  current_group_role => 'single');
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :ns, 0,
+                                  current_group_role => 'wait_standby');
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :np, 0,
+                                  current_group_role => 'single',
+                                  current_lsn => '0/5000');
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :ns, 0,
+                                  current_group_role => 'wait_standby');
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :ns, 0,
+                                  current_group_role => 'catchingup',
+                                  current_lsn => '0/5000');
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :ns, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :np, 0,
+                                  current_group_role => 'primary',
+                                  current_lsn => '0/5000');
+
+SELECT nodename, reportedstate, goalstate
+  FROM pgautofailover.node
+ WHERE formationid = 'fclmc_test'
+ ORDER BY nodename;
+
+-- Manufacture the primary mid-transition toward its own goal: goalstate is
+-- already 'primary' (assigned by the monitor, e.g. after a replication
+-- property change), but the keeper has only reported back as far as
+-- 'apply_settings' -- a real, in-progress, healthy predecessor of primary
+-- (apply_settings -> primary is a genuine KeeperFSM[] edge), not a dead
+-- node. Recency of the last report (from the node_active() calls just
+-- above) keeps it "healthy" per NodeIsUnhealthy()'s reportTime check.
+UPDATE pgautofailover.node
+   SET reportedstate = 'apply_settings',
+       goalstate = 'primary'
+ WHERE formationid = 'fclmc_test' AND nodename = 'fclmc_p';
+
+-- Manufacture the candidate fully converged at prepare_promotion, same
+-- technique as Scenario A/B.
+UPDATE pgautofailover.node
+   SET reportedstate = 'prepare_promotion',
+       goalstate = 'prepare_promotion'
+ WHERE formationid = 'fclmc_test' AND nodename = 'fclmc_s';
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('fclmc_test', :ns, 0,
+                                  current_group_role => 'prepare_promotion',
+                                  current_lsn => '0/5000');
+
+-- ASSERT: fclmc_s's goalstate is still 'prepare_promotion' (deferred, no
+-- action taken this tick), and fclmc_p's goalstate is untouched at
+-- 'primary' -- neither Rule 2 branch may fire while the primary is healthy
+-- and still converging toward its own goal.
+-- Before the "settled" guard: this would have incorrectly matched the
+-- direct-promotion fallback (reportedState 'apply_settings' is not in the
+-- demote_timeout-reachable set), promoting fclmc_s to wait_primary right
+-- as fclmc_p was legitimately about to reach primary on its own -- two
+-- simultaneously-writable nodes.
+SELECT nodename, reportedstate, goalstate
+  FROM pgautofailover.node
+ WHERE formationid = 'fclmc_test'
+ ORDER BY nodename;
