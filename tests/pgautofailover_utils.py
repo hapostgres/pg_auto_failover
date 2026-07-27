@@ -1848,7 +1848,7 @@ class DataNode(PGNode, StatefulNode):
             self.print_debug_logs()
             raise e
 
-    def has_needed_replication_slots(self, retry_timeout=5):
+    def has_needed_replication_slots(self, retry_timeout=15):
         """
         Each node is expected to maintain a slot for each of the other nodes
         the primary through streaming replication, the secondary(s) manually

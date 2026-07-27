@@ -1319,9 +1319,20 @@ ProceedGroupStateForPrimaryNode(GroupStateContext *ctx,
 		 * the two defective standby nodes is available again.
 		 */
 		if (!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-			secondaryQuorumNodesCount == 0)
+			secondaryQuorumNodesCount == 0 &&
+			!IsFailoverInProgress(ctx->groupNodeList))
 		{
 			/*
+			 * Do not second-guess an already-started failover: a candidate
+			 * that just converged to prepare_promotion (or later stages) has
+			 * left SECONDARY, dropping secondaryQuorumNodesCount to zero even
+			 * though it *is* the failover candidate. Without this guard the
+			 * primary can be reassigned wait_primary right as its own
+			 * candidate is converging, landing it on wait_primary while a
+			 * later rule still expects to find it in draining and assigns
+			 * demote_timeout -- an assignment with no FSM edge from
+			 * wait_primary (issue #774).
+			 *
 			 * Allow wait_primary when number_sync_standbys = 0, otherwise
 			 * block writes on the primary.
 			 */
