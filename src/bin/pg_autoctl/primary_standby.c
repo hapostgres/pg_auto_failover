@@ -24,6 +24,7 @@
 #include "primary_standby.h"
 #include "signals.h"
 #include "state.h"
+#include "system_utils.h"
 #include "timeline_history.h"
 
 
@@ -285,17 +286,78 @@ local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk
  * Skipping the wait when the process already existed was the source of a race
  * where a FSM transition could report a new state to the monitor while
  * Postgres was still refusing TCP connections.
+ *
+ * A single 10s wait isn't enough when Postgres has a lot of WAL to replay
+ * before reaching consistency, typically after a pg_rewind. Rather than
+ * failing after that first timeout, we keep retrying and use pg_control's
+ * "Latest checkpoint's REDO location" (updated at every restartpoint) as a
+ * progress signal: we only give up once several consecutive attempts show
+ * no advance at all.
  */
+#define LOCAL_POSTGRES_MAX_STALLED_ATTEMPTS 5
+
 static bool
 local_postgres_wait_until_ready(LocalPostgresServer *postgres)
 {
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 
-	int timeout = 10;       /* wait for Postgres for 10s */
+	int timeout = 10;       /* wait for Postgres for 10s at a time */
+	bool pgIsRunning = false;
 
-	/* main logging is done in the Postgres controller sub-process */
-	bool pgIsRunning =
-		pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG);
+	uint64_t minRecoveryEndLSN = InvalidXLogRecPtr;
+	uint64_t previousRedoLSN = InvalidXLogRecPtr;
+	int stalledAttempts = 0;
+
+	if (pg_controldata(pgSetup, true) &&
+		parseLSN(pgSetup->control.minRecoveryEndLSN, &minRecoveryEndLSN) &&
+		!XLogRecPtrIsInvalid(minRecoveryEndLSN))
+	{
+		log_info("Waiting for Postgres to replay WAL up to the minimum "
+				 "recovery ending location %s before it accepts connections",
+				 pgSetup->control.minRecoveryEndLSN);
+	}
+
+	for (;;)
+	{
+		/* main logging is done in the Postgres controller sub-process */
+		pgIsRunning = pg_setup_wait_until_is_ready(pgSetup, timeout, LOG_DEBUG);
+
+		if (pgIsRunning)
+		{
+			break;
+		}
+
+		uint64_t currentRedoLSN = InvalidXLogRecPtr;
+		bool madeProgress = false;
+
+		if (pg_controldata(pgSetup, true) &&
+			parseLSN(pgSetup->control.latestCheckpointRedoLSN, &currentRedoLSN) &&
+			currentRedoLSN > previousRedoLSN)
+		{
+			previousRedoLSN = currentRedoLSN;
+			madeProgress = true;
+		}
+
+		if (!XLogRecPtrIsInvalid(minRecoveryEndLSN) &&
+			!XLogRecPtrIsInvalid(currentRedoLSN) &&
+			currentRedoLSN < minRecoveryEndLSN)
+		{
+			char bytesStr[BUFSIZE] = { 0 };
+
+			pretty_print_bytes(bytesStr, BUFSIZE,
+							   minRecoveryEndLSN - currentRedoLSN);
+
+			log_info("Postgres is still replaying WAL to reach consistency: "
+					 "%s left to replay", bytesStr);
+		}
+
+		stalledAttempts = madeProgress ? 0 : stalledAttempts + 1;
+
+		if (stalledAttempts >= LOCAL_POSTGRES_MAX_STALLED_ATTEMPTS)
+		{
+			break;
+		}
+	}
 
 	/* update connection string for connection to postgres */
 	(void) local_postgres_update_pg_failures_tracking(postgres, pgIsRunning);
@@ -310,8 +372,9 @@ local_postgres_wait_until_ready(LocalPostgresServer *postgres)
 	}
 	else
 	{
-		log_error("Failed to ensure that Postgres is running in \"%s\"",
-				  pgSetup->pgdata);
+		log_error("Failed to ensure that Postgres is running in \"%s\" "
+				  "after %d attempts without any recorded progress",
+				  pgSetup->pgdata, stalledAttempts);
 	}
 
 	return pgIsRunning;
