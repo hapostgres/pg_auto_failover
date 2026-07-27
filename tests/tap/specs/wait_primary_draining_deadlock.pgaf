@@ -1,0 +1,84 @@
+# Reproduces https://github.com/hapostgres/pg_auto_failover/issues/1168.
+#
+# node1 (primary) loses its only quorum-counted standby (node2) and gets
+# reassigned wait_primary, even though node3 -- an async standby
+# (candidate-priority 50, replication-quorum false) -- stays healthy
+# throughout: async standbys never count toward secondaryQuorumNodesCount,
+# so losing node2 alone is enough to zero it out.
+#
+# node1 then itself becomes unhealthy while sitting at (converged)
+# wait_primary. The auto-failover trigger in ProceedGroupStateFromContext
+# (`IsCurrentState(activeNode, SECONDARY) && IsInPrimaryState(primaryNode)
+# && NodeIsUnhealthy(primaryNode) && ...`) fires against node3 and assigns
+# node1 "draining" -- a goal state with no KeeperFSM[] edge from
+# wait_primary (only PRIMARY/JOIN_PRIMARY/APPLY_SETTINGS -> DRAINING
+# exist). node1's keeper fatals and retries forever on that specific
+# assignment. The cluster still recovers, but only via the unrelated,
+# purely time-based drain-timeout self-heal (goal jumps straight to
+# demoted once drain_timeout_ms elapses) -- not because the assignment was
+# ever reachable.
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+        node3  async
+    }
+}
+
+setup {
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_losing_the_only_sync_standby_reassigns_wait_primary {
+    network disconnect node2
+    wait until node1 assigned-state is wait_primary  timeout 60s
+    assert node3 state is secondary
+}
+
+step test_002_primary_failure_at_wait_primary_hits_1168 {
+    network disconnect node1
+
+    # node3 is the only remaining healthy candidate (async, candidate
+    # priority 50 > 0); the buggy trigger targets it once node1 is marked
+    # unhealthy by the monitor's own health checks. node1's goal moves
+    # draining -> demote_timeout within the same polling cycle (neither
+    # reachable from wait_primary), so we don't probe that intermediate
+    # value directly -- the FATAL log below is the stable signature.
+    wait until node3 assigned-state is prepare_promotion  timeout 90s
+
+    network connect node1
+
+    # Recovers, but only via the unrelated drain-timeout self-heal (goal
+    # re-targeted straight to demoted once drain_timeout_ms elapses), not
+    # because "draining"/"demote_timeout" ever became reachable from
+    # wait_primary.
+    wait until node1 state is demoted  timeout 90s
+
+    # node1 reported back in still at wait_primary along the way, was
+    # handed one of those unreachable goals, and fataled/retried -- the
+    # bug this spec documents.
+    logs node1 contains "does not know how to reach state"
+}
+
+step test_003_cluster_converges_back_after_recovery {
+    network connect node2
+    wait until node3 state is primary
+        and node1 state is secondary
+        and node2 state is secondary
+        timeout 120s
+}
+
+sequence
+    test_001_losing_the_only_sync_standby_reassigns_wait_primary
+    test_002_primary_failure_at_wait_primary_hits_1168
+    test_003_cluster_converges_back_after_recovery
