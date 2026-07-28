@@ -2408,7 +2408,7 @@ class PGAutoCtl:
         exited originally.
         """
         if not self.run_proc:
-            return self.out, self.err
+            return self.out, self.err, self.last_returncode
 
         self.out, self.err = self.run_proc.communicate(timeout=timeout)
 
@@ -2432,11 +2432,11 @@ class PGAutoCtl:
         # The process exited, so let's clean this process up. Calling
         # communicate again would otherwise cause an "Invalid file object"
         # error.
-        ret = self.run_proc.returncode
+        self.last_returncode = self.run_proc.returncode
         self.run_proc.release()
         self.run_proc = None
 
-        return self.out, self.err, ret
+        return self.out, self.err, self.last_returncode
 
     def consume_output(self, secs):
         """
