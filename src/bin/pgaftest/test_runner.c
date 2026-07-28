@@ -674,8 +674,58 @@ runner_compose_up(TestRunner *r)
 {
 	log_info("Starting compose stack (project: %s)", r->projectName);
 
-	int rc = run_cmd("%s up --build -d 2>&1",
-					 r->composeBase);
+	/*
+	 * The host ports we hand to Docker (see pick_free_port() in
+	 * compose_gen.c) are only known to be free at the moment we probe them;
+	 * nothing keeps that port reserved between then and when "docker compose
+	 * up" actually asks the kernel to bind it. When pgaftest runs many specs
+	 * back-to-back, a just-freed port from the previous spec's teardown can
+	 * still be settling when the next spec's probe picks the very same
+	 * number, and "up" fails with "address already in use". That is a
+	 * transient host-level race, not a real failure of this spec, so retry
+	 * a bounded number of times with a freshly regenerated compose file
+	 * (new random ports) before giving up for good.
+	 */
+	int maxAttempts = 3;
+	int rc = -1;
+	char output[16384];
+
+	for (int attempt = 1; attempt <= maxAttempts; attempt++)
+	{
+		rc = run_cmd_capture_both(output, sizeof(output),
+								  "%s up --build -d", r->composeBase);
+
+		/* keep the compose output visible in the log either way */
+		fformat(stdout, "%s\n", output);
+
+		if (rc == 0)
+		{
+			break;
+		}
+
+		bool portConflict =
+			strstr(output, "address already in use") != NULL ||
+			strstr(output, "port is already allocated") != NULL;
+
+		if (!portConflict || attempt == maxAttempts)
+		{
+			break;
+		}
+
+		log_warn("docker compose up hit a host port conflict "
+				 "(attempt %d/%d), regenerating ports and retrying",
+				 attempt, maxAttempts);
+
+		(void) run_cmd("%s down --volumes --remove-orphans 2>&1",
+					   r->composeBase);
+
+		if (!runner_compose_generate(r))
+		{
+			log_error("Failed to regenerate compose file for retry");
+			return false;
+		}
+	}
+
 	if (rc != 0)
 	{
 		log_error("docker compose up failed (exit %d)", rc);

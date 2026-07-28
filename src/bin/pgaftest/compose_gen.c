@@ -704,14 +704,30 @@ compose_write_extra_hosts(FILE *f, const TestCluster *cluster,
  * Ports already handed out in this process are remembered in a static array
  * so that consecutive calls never return the same port even though the OS
  * releases the probe socket between calls.
+ *
+ * The RNG is seeded once per process, the first time this is called, using
+ * sub-second (nanosecond) resolution combined with the pid. pgaftest runs
+ * one spec per process, and specs in a schedule are launched back-to-back;
+ * reseeding from time(NULL) (1s resolution) on every call, as this used to
+ * do, means two processes started within the same second produce the same
+ * first draw whenever their pids land close together, so consecutive specs
+ * could pick the very same "random" port.
  */
 static int
 pick_free_port(void)
 {
 	static int reserved[64];
 	static int reserved_count = 0;
+	static bool seeded = false;
 
-	srand((unsigned) time(NULL) ^ (unsigned) getpid());
+	if (!seeded)
+	{
+		struct timespec ts;
+		clock_gettime(CLOCK_MONOTONIC, &ts);
+		srand((unsigned) ts.tv_nsec ^ (unsigned) getpid());
+		seeded = true;
+	}
+
 	for (int attempt = 0; attempt < 64; attempt++)
 	{
 		int port = 32768 + rand() % (60999 - 32768 + 1);
