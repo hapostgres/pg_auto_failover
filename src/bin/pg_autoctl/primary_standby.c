@@ -293,6 +293,16 @@ local_postgres_update(LocalPostgresServer *postgres, bool postgresNotRunningIsOk
  * "Latest checkpoint's REDO location" (updated at every restartpoint) as a
  * progress signal: we only give up once several consecutive attempts show
  * no advance at all.
+ *
+ * That extra patience only makes sense when Postgres actually started and
+ * is busy recovering: pgSetup->pm_status is then STARTING (or another known
+ * status), because pg_setup_wait_until_is_ready() managed to read the
+ * postmaster.pid file at least once. When Postgres never starts at all
+ * (e.g. a fatal configuration error making it exit immediately on every
+ * attempt, as in test_ensure.py's inject_error_in_node2), postmaster.pid
+ * never appears and pm_status stays POSTMASTER_STATUS_UNKNOWN -- waiting
+ * longer can't help a process that never ran, so we fail on the spot
+ * instead of burning LOCAL_POSTGRES_MAX_STALLED_ATTEMPTS * 10s for nothing.
  */
 #define LOCAL_POSTGRES_MAX_STALLED_ATTEMPTS 5
 
@@ -324,6 +334,13 @@ local_postgres_wait_until_ready(LocalPostgresServer *postgres)
 
 		if (pgIsRunning)
 		{
+			break;
+		}
+
+		if (pgSetup->pm_status == POSTMASTER_STATUS_UNKNOWN)
+		{
+			/* Postgres never even started during this attempt: no point
+			 * in waiting for a progress signal that can't come. */
 			break;
 		}
 
