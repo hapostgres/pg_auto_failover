@@ -703,10 +703,13 @@ DispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
 /*
  * FindAndDispatchMonitorFSMRule bounds a search over MonitorFSM[] to
  * [startIndex, endIndex) and dispatches the first match, if any -- the one
- * building block every call site in this file needs (the top-level driver's
- * three straight-line lookups, and the two extraActions that perform their
- * own single bounded nested search: ActionRunMultiStandbyFailoverCascade and
- * ActionRunPrimaryNodeTransition below). Returns whether a row matched, so
+ * building block every call site in this file needs: the top-level driver's
+ * own two straight-line lookups (early checks, then either the primary-role
+ * section or the rest of ProceedGroupStateFromContext()'s rows -- see its
+ * comment for why two, not the design doc's one), plus the two extraActions
+ * that each perform one further, separate bounded nested search of their own
+ * when their row's own cascade declines: ActionRunMultiStandbyFailoverCascade
+ * and ActionRunPrimaryNodeTransition below. Returns whether a row matched, so
  * callers that need to distinguish "matched and handled" from "nothing in
  * this range applied" can.
  */
