@@ -54,8 +54,6 @@ typedef struct CandidateList
 
 
 /* private function forward declarations */
-static bool ProceedGroupStateForPrimaryNode(GroupStateContext *ctx,
-											AutoFailoverNode *primaryNode);
 static bool ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 										   AutoFailoverNode *primaryNode);
 static bool ProceedWithMSFailover(AutoFailoverNode *activeNode,
@@ -81,9 +79,10 @@ static bool WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 
 /*
  * ---------------------------------------------------------------------
- * Declarative dispatch for ProceedGroupStateFromContext() and
- * ProceedGroupStateForPrimaryNode(): each function's own sequential
- * if-chain is replaced by a table of MonitorFSMTransition rows, matched
+ * Declarative dispatch for ProceedGroupStateFromContext(): its own
+ * sequential if-chain, and the sequential if-chain that used to be a
+ * separate ProceedGroupStateForPrimaryNode() function, are both replaced by
+ * one table of MonitorFSMTransition rows (MonitorFSM[] below), matched
  * first-match-wins by RuleMatches(). ProceedGroupStateForMSFailover() and
  * everything it calls (BuildCandidateList, SelectFailoverCandidateNode,
  * PromoteSelectedNode, ProceedWithMSFailover, WalSourceNodesAreAllUnhealthy)
@@ -512,19 +511,23 @@ typedef struct GoalStateAssignment
 #define GOAL(x) { .kind = GOAL_STATE_SET, .state = (x) }
 
 /*
- * Returns true when this row's match should stand and dispatch should stop
- * here (the overwhelming majority of extraActions -- a pure side effect
- * alongside a genuine, unconditional transition). Returns false when the
- * row's own facts didn't actually lead anywhere useful this round (the
- * MS-failover cascade declining because e.g. not all candidates have
- * reported yet) and the SAME call should keep searching later rows for
- * activeNode's own transition -- exactly what the real source's fallthrough
- * (no `return` after the DRAINING/MAINTENANCE assignment, see
- * ActionRunMultiStandbyFailoverCascade below) does. Assignments on the matched row
- * itself still apply either way; this only controls whether dispatch
- * continues afterward.
+ * A row's extraAction runs before its own activeNodeAssignedState/
+ * otherNodeAssignedState are applied (matching the original if-chain's
+ * order). When a row's real-source counterpart falls through to more of the
+ * function after its own assignment (the MS-failover cascade, the
+ * join_secondary -> nested primary pass), the action itself performs one
+ * bounded, explicitly-named nested search+dispatch over MonitorFSM[] --
+ * see ActionRunMultiStandbyFailoverCascade and ActionRunPrimaryNodeTransition
+ * below -- rather than signaling the top-level driver to keep scanning.
+ * There is deliberately no generic "continue dispatch" flag here: an earlier
+ * version of this file had extraAction return bool for exactly that purpose,
+ * and it reproduced a real bug (a sibling row in the same "family" matching
+ * a second time after the intended row declined -- see
+ * ActionRunMultiStandbyFailoverCascade's comment) that a bounded, named jump
+ * cannot have, because it can only ever land on one specific row family, not
+ * wander into whichever row happens to be next.
  */
-typedef bool (*MonitorExtraActionFunction) (GroupStateContext *ctx,
+typedef void (*MonitorExtraActionFunction) (GroupStateContext *ctx,
 											 NodeActiveContext *nac,
 											 char *message);
 
@@ -541,6 +544,64 @@ typedef struct MonitorFSMTransition
 
 	const char *comment;
 } MonitorFSMTransition;
+
+/*
+ * MonitorFSM[] is one array, not several: see its own definition far below
+ * for why ("One array, not three" in the design doc this table implements).
+ * Forward-declared here so the extraActions defined above it (which each
+ * perform one bounded, named nested search over it) can reference it by
+ * name; the boundary constants below are forward-declared the same way, for
+ * the same reason -- both actions and the top-level driver need them.
+ *
+ * These three indices partition MonitorFSM[] into the sections the real
+ * if-chain's control flow actually has:
+ *
+ *   [0, MonitorFSM_FromContextStart)         the six checks
+ *                                            ProceedGroupStateFromContext()
+ *                                            runs before its one real branch
+ *                                            point (IsInPrimaryState(activeNode)),
+ *                                            regardless of which way that
+ *                                            branch goes.
+ *   [MonitorFSM_FromContextStart,             the rest of
+ *    MonitorFSM_PrimaryNodeSectionStart)      ProceedGroupStateFromContext(),
+ *                                            reached only when activeNode is
+ *                                            NOT currently primary-role.
+ *   [MonitorFSM_MSFailoverClusterStart,       the sub-range of the row above
+ *    MonitorFSM_PrimaryNodeSectionStart)      that ActionRunMultiStandby
+ *                                            FailoverCascade resumes into
+ *                                            when ProceedGroupStateForMSFailover()
+ *                                            declines, mirroring the real
+ *                                            source's fallthrough to
+ *                                            "whatever is textually next".
+ *   [MonitorFSM_PrimaryNodeSectionStart,      ProceedGroupStateForPrimaryNode()'s
+ *    MonitorFSM_SIZE)                        own rows, reached either directly
+ *                                            by the top-level driver (activeNode
+ *                                            already primary-role) or via
+ *                                            ActionRunPrimaryNodeTransition's
+ *                                            nested pass on primaryNode
+ *                                            (join_secondary's cascade row).
+ *
+ * Kept as plain hardcoded integers, exactly as the design doc's own
+ * placeholders are -- recomputed by hand whenever a row is added, removed,
+ * or moved across a boundary. A wrong value here fails loudly and
+ * immediately (either a compile-time out-of-bounds slice that scans zero
+ * rows and never matches, or a row from the wrong section matching
+ * unexpectedly) rather than silently: the regress/isolation suite this
+ * table is checked against covers every one of these boundaries already.
+ */
+static const MonitorFSMTransition MonitorFSM[];
+
+#define MonitorFSM_FromContextStart        6
+#define MonitorFSM_MSFailoverClusterStart  9
+#define MonitorFSM_PrimaryNodeSectionStart 37
+#define MonitorFSM_SIZE                    48
+
+/* Forward-declared for the same reason as MonitorFSM[] above: used by
+ * extraActions (ActionRunPrimaryNodeTransition) defined before its real
+ * definition further down. */
+static void BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx,
+												 AutoFailoverNode *primaryNode,
+												 NodeActiveContext *nac);
 
 
 static bool
@@ -586,14 +647,6 @@ FindMatchingMonitorFSMRuleIndexFrom(const MonitorFSMTransition table[], int tabl
 }
 
 
-static int
-FindMatchingMonitorFSMRuleIndex(const MonitorFSMTransition table[], int tableSize,
-								 const NodeActiveContext *nac)
-{
-	return FindMatchingMonitorFSMRuleIndexFrom(table, tableSize, 0, nac);
-}
-
-
 /*
  * AssignDeclaredGoalState asserts that a rule only ever assigns a state it
  * actually declared: drift between a row's own assignment slots and what it
@@ -617,12 +670,11 @@ AssignDeclaredGoalState(const MonitorFSMTransition *rule, AutoFailoverNode *node
 }
 
 
-static bool
+static void
 DispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
 						const MonitorFSMTransition *rule)
 {
 	char message[BUFSIZE] = { 0 };
-	bool stopDispatch = true;
 
 	if (rule->comment != NULL)
 	{
@@ -631,7 +683,7 @@ DispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
 
 	if (rule->extraAction != NULL)
 	{
-		stopDispatch = rule->extraAction(ctx, nac, message);
+		rule->extraAction(ctx, nac, message);
 	}
 
 	if (rule->activeNodeAssignedState.kind == GOAL_STATE_SET)
@@ -645,8 +697,33 @@ DispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
 		AssignDeclaredGoalState(rule, nac->primaryNode.node,
 								 rule->otherNodeAssignedState.state, message);
 	}
+}
 
-	return stopDispatch;
+
+/*
+ * FindAndDispatchMonitorFSMRule bounds a search over MonitorFSM[] to
+ * [startIndex, endIndex) and dispatches the first match, if any -- the one
+ * building block every call site in this file needs (the top-level driver's
+ * three straight-line lookups, and the two extraActions that perform their
+ * own single bounded nested search: ActionRunMultiStandbyFailoverCascade and
+ * ActionRunPrimaryNodeTransition below). Returns whether a row matched, so
+ * callers that need to distinguish "matched and handled" from "nothing in
+ * this range applied" can.
+ */
+static bool
+FindAndDispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
+							  int startIndex, int endIndex)
+{
+	int index = FindMatchingMonitorFSMRuleIndexFrom(MonitorFSM, endIndex, startIndex, nac);
+
+	if (index < 0)
+	{
+		return false;
+	}
+
+	DispatchMonitorFSMRule(ctx, nac, &MonitorFSM[index]);
+
+	return true;
 }
 
 
@@ -726,12 +803,10 @@ OtherNodeIsDueForCatchingUp(GroupStateContext *ctx, AutoFailoverNode *otherNode)
 }
 
 
-static bool
+static void
 ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
 {
 	RemoveAutoFailoverNode(ctx->activeNode);
-
-	return true;
 }
 
 
@@ -757,8 +832,16 @@ ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *me
  * death_report and concurrent_health_check_and_report, which got stuck (the
  * former) or produced a spurious second cascade invocation changing the
  * outcome (the latter) until this was folded into a single row/action pair.
+ *
+ * When ProceedGroupStateForMSFailover() declines, the fallthrough to "the
+ * rest of ProceedGroupStateFromContext" is a single bounded nested search
+ * from MonitorFSM_MSFailoverClusterStart, not a flag back to the top-level
+ * driver: FindAndDispatchMonitorFSMRule's own internal loop already finds
+ * whichever row is the correct next match, however many rows down that is,
+ * in one call -- no repeated re-dispatch needed to walk past intervening
+ * non-matches.
  */
-static bool
+static void
 ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac,
 									  char *message)
 {
@@ -793,7 +876,11 @@ ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *
 		AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, maintenanceMessage);
 	}
 
-	return ProceedGroupStateForMSFailover(ctx, primaryNode);
+	if (!ProceedGroupStateForMSFailover(ctx, primaryNode))
+	{
+		(void) FindAndDispatchMonitorFSMRule(ctx, nac, MonitorFSM_MSFailoverClusterStart,
+											 MonitorFSM_PrimaryNodeSectionStart);
+	}
 }
 
 
@@ -801,25 +888,37 @@ ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *
  * ActionRunPlainMSFailoverCascade is the "continue an already-started
  * failover" call site: activeNode itself is REPORT_LSN or FAST_FORWARD, and
  * the real source just `return`s ProceedGroupStateForMSFailover()'s result
- * directly, with no DRAINING/MAINTENANCE decision attached.
+ * directly, with no DRAINING/MAINTENANCE decision attached and no further
+ * fallthrough either way -- so its return value is simply discarded here.
  */
-static bool
+static void
 ActionRunPlainMSFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
 {
-	return ProceedGroupStateForMSFailover(ctx, nac->primaryNode.node);
+	(void) ProceedGroupStateForMSFailover(ctx, nac->primaryNode.node);
 }
 
 
-static bool
+/*
+ * ActionRunPrimaryNodeTransition is the join_secondary cascade: the real
+ * source's tail call into ProceedGroupStateForPrimaryNode(ctx, primaryNode)
+ * substitutes primaryNode for activeNode and re-enters that function's own
+ * dispatch from scratch -- modeled here as one bounded nested search over
+ * MonitorFSM[]'s ForPrimaryNode section, built with primaryNode playing the
+ * activeNode role (see BuildForPrimaryNodeNodeActiveContext).
+ */
+static void
 ActionRunPrimaryNodeTransition(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
 {
-	(void) ProceedGroupStateForPrimaryNode(ctx, nac->primaryNode.node);
+	NodeActiveContext primaryNac;
 
-	return true;
+	BuildForPrimaryNodeNodeActiveContext(ctx, nac->primaryNode.node, &primaryNac);
+
+	(void) FindAndDispatchMonitorFSMRule(ctx, &primaryNac, MonitorFSM_PrimaryNodeSectionStart,
+										 MonitorFSM_SIZE);
 }
 
 
-static bool
+static void
 ActionCatchupUnhealthySecondaries(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
 {
 	AutoFailoverNode *primaryNode = nac->activeNode.node;
@@ -842,8 +941,6 @@ ActionCatchupUnhealthySecondaries(GroupStateContext *ctx, NodeActiveContext *nac
 			AssignGoalState(otherNode, REPLICATION_STATE_CATCHINGUP, otherMessage);
 		}
 	}
-
-	return true;
 }
 
 
@@ -926,10 +1023,11 @@ BuildFromContextNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *prim
 
 
 /*
- * BuildForPrimaryNodeNodeActiveContext computes every fact
- * MonitorFSM_ForPrimaryNode needs, mirroring the counting loop that used to
- * be inline at the top of ProceedGroupStateForPrimaryNode() (the same loop
- * OtherNodeIsDueForCatchingUp's condition drives the fan-out assignment
+ * BuildForPrimaryNodeNodeActiveContext computes every fact the
+ * ForPrimaryNode section of MonitorFSM[] (from MonitorFSM_PrimaryNodeSectionStart
+ * onward) needs, mirroring the counting loop that used to be inline at the
+ * top of the old, now-folded-in ProceedGroupStateForPrimaryNode() (the same
+ * loop OtherNodeIsDueForCatchingUp's condition drives the fan-out assignment
  * for, in ActionCatchupUnhealthySecondaries above).
  */
 static void
@@ -939,8 +1037,9 @@ BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *p
 	memset(nac, 0, sizeof(NodeActiveContext));
 
 	BuildNodeStatus(ctx, primaryNode, &nac->activeNode);
-	/* .primaryNode role is unused by every MonitorFSM_ForPrimaryNode row -- primaryNode IS
-	 * activeNode here, so every condition is expressed against .activeNode directly. */
+	/* .primaryNode role is unused by every row in MonitorFSM[]'s ForPrimaryNode section --
+	 * primaryNode IS activeNode here, so every condition is expressed against .activeNode
+	 * directly. */
 
 	List *otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 	int otherNodesCount = list_length(otherNodesGroupList);
@@ -991,20 +1090,28 @@ BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *p
 
 
 /*
- * MonitorFSM_EarlyChecks: the six checks the real if-chain runs BEFORE the
- * IsInPrimaryState(activeNode) early return (group_state_machine.c:284) --
- * DROPPED, goal==DROPPED, MAINTENANCE, the demote_timeout self-fence, and
- * both "alone in group" rows. These fire regardless of whether activeNode is
- * currently the primary (a primary that just lost its only standby must
- * still reach SINGLE here, before ever redirecting to
- * ProceedGroupStateForPrimaryNode) -- confirmed by the drop_node regression
- * test, which failed the first time this table put the primary-state
- * redirect ahead of these six checks instead of after them. None of these
- * six rows reference .primaryNode at all, so they can be matched against a
- * NodeActiveContext built with primaryNode == NULL, before primaryNode is
- * even resolved.
+ * MonitorFSM[]: one array, not several -- see the boundary-constant comment
+ * above the MonitorFSMTransition typedef for the section layout and why it's
+ * a single ordered list rather than one array per real C function. Rows are
+ * kept in the exact order the original if-chain(s) checked them in:
+ * first-match-wins over this array is a straight extraction, not a
+ * behaviour change, exactly as it was over the three separate arrays this
+ * replaces.
+ *
+ * --- [0, MonitorFSM_FromContextStart): the six checks the real if-chain
+ * runs BEFORE the IsInPrimaryState(activeNode) early return
+ * (group_state_machine.c:284) -- DROPPED, goal==DROPPED, MAINTENANCE, the
+ * demote_timeout self-fence, and both "alone in group" rows. These fire
+ * regardless of whether activeNode is currently the primary (a primary that
+ * just lost its only standby must still reach SINGLE here, before ever
+ * redirecting into the ProceedGroupStateForPrimaryNode section) -- confirmed
+ * by the drop_node regression test, which failed the first time this table
+ * put the primary-state redirect ahead of these six checks instead of after
+ * them. None of these six rows reference .primaryNode at all, so they can be
+ * matched against a NodeActiveContext built with primaryNode == NULL, before
+ * primaryNode is even resolved.
  */
-static const MonitorFSMTransition MonitorFSM_EarlyChecks[] = {
+static const MonitorFSMTransition MonitorFSM[] = {
 	/* converged to dropped -> remove the node from the catalog entirely */
 	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_DROPPED) },
 	  .extraAction = ActionRemoveDroppedNode,
@@ -1037,21 +1144,13 @@ static const MonitorFSMTransition MonitorFSM_EarlyChecks[] = {
 	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
 	  .comment = "alone in group, candidatePriority zero -> report_lsn" },
-};
 
-#define MonitorFSM_EarlyChecks_SIZE \
-	(sizeof(MonitorFSM_EarlyChecks) / sizeof(MonitorFSMTransition))
+	/* --- [MonitorFSM_FromContextStart, MonitorFSM_PrimaryNodeSectionStart): the rest of
+	 * ProceedGroupStateFromContext()'s own sequential if-chain -- everything from the
+	 * timeline-fork check (group_state_machine.c:328, right after the
+	 * IsInPrimaryState(activeNode) early return) onward. Reached only when activeNode is
+	 * NOT currently primary-role. */
 
-
-/*
- * MonitorFSM_FromContext: the declarative replacement for the rest of
- * ProceedGroupStateFromContext()'s own sequential if-chain -- everything
- * from the timeline-fork check (group_state_machine.c:328, right after the
- * IsInPrimaryState(activeNode) early return) onward. Rows are kept in the
- * exact order the original if-chain checked them in: first-match-wins over
- * this array is a straight extraction, not a behaviour change.
- */
-static const MonitorFSMTransition MonitorFSM_FromContext[] = {
 	/* converged secondary, reportedTLI not an ancestor of the group's reference timeline */
 	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
 					  .isComparableToReferenceTli = BOOL_FALSE },
@@ -1288,19 +1387,13 @@ static const MonitorFSMTransition MonitorFSM_FromContext[] = {
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
 	  .comment = "join_secondary, primary converged primary -> secondary" },
-};
 
-#define MonitorFSM_FromContext_SIZE \
-	(sizeof(MonitorFSM_FromContext) / sizeof(MonitorFSMTransition))
+	/* --- [MonitorFSM_PrimaryNodeSectionStart, MonitorFSM_SIZE): the declarative replacement
+	 * for ProceedGroupStateForPrimaryNode()'s own sequential if-chain. Here .activeNode maps
+	 * to the primaryNode parameter, not a reporting node -- reached either directly by the
+	 * top-level driver (activeNode already primary-role) or via ActionRunPrimaryNodeTransition's
+	 * nested pass on primaryNode (the join_secondary cascade row above). */
 
-
-/*
- * MonitorFSM_ForPrimaryNode: the declarative replacement for
- * ProceedGroupStateForPrimaryNode()'s own sequential if-chain. Here
- * .activeNode maps to the primaryNode parameter, not a reporting node --
- * see ProceedGroupStateForPrimaryNode() below.
- */
-static const MonitorFSMTransition MonitorFSM_ForPrimaryNode[] = {
 	/* primary alone, another node reached wait_standby */
 	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SINGLE) },
 	  .conditions = { .anyOtherNodeWaitingStandby = BOOL_TRUE },
@@ -1386,9 +1479,6 @@ static const MonitorFSMTransition MonitorFSM_ForPrimaryNode[] = {
 	  .comment = "backwards-compat: join_primary -> primary" },
 };
 
-#define MonitorFSM_ForPrimaryNode_SIZE \
-	(sizeof(MonitorFSM_ForPrimaryNode) / sizeof(MonitorFSMTransition))
-
 
 /*
  * ProceedGroupStateFromContext is the core FSM logic, operating entirely on
@@ -1397,6 +1487,24 @@ static const MonitorFSMTransition MonitorFSM_ForPrimaryNode[] = {
  *
  * This separation lets test code inject a synthetic context and exercise the
  * FSM without a live database connection.
+ *
+ * Single-shot, three straight-line lookups at most -- matching the design
+ * doc's own top-level driver, not a loop: the cascades that need more than
+ * one row's worth of assignment in a single call (the MS-failover cascade,
+ * the join_secondary -> nested primary pass) get there via a bounded, named
+ * nested search inside their own extraAction (see ActionRunMultiStandby
+ * FailoverCascade and ActionRunPrimaryNodeTransition), not by this driver
+ * looping.
+ *
+ * Two lookups, not the design doc's one ("startIndex = isInPrimaryState ?
+ * MonitorFSM_PrimaryNodeSectionStart : 0"): the six early-check rows must
+ * always be tried first, regardless of whether activeNode is already
+ * primary-role -- a primary that just lost its only standby must still
+ * reach SINGLE via those checks, not get redirected to the
+ * ProceedGroupStateForPrimaryNode section first. Jumping straight past them
+ * whenever activeNode is already primary-role would skip that case
+ * entirely; confirmed by the drop_node regression test, which failed
+ * exactly this way the first time this table's ordering got this wrong.
  */
 bool
 ProceedGroupStateFromContext(GroupStateContext *ctx)
@@ -1406,39 +1514,40 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	int groupId = ctx->groupId;
 
 	/*
-	 * MonitorFSM_EarlyChecks first, before the IsInPrimaryState redirect
-	 * below -- these six checks run unconditionally in the real source,
-	 * regardless of whether activeNode currently is the primary (a primary
-	 * that just lost its only standby must still reach SINGLE here, not get
-	 * redirected to ProceedGroupStateForPrimaryNode first). primaryNode
-	 * isn't resolved yet at this point -- and none of these six rows
-	 * reference it -- so NULL is passed and is safe.
+	 * The six early checks run unconditionally, before the IsInPrimaryState
+	 * redirect below -- regardless of whether activeNode currently is the
+	 * primary. primaryNode isn't resolved yet at this point -- and none of
+	 * these six rows reference it -- so NULL is passed and is safe.
 	 */
 	NodeActiveContext earlyNac;
 
 	BuildFromContextNodeActiveContext(ctx, NULL, &earlyNac);
 
-	int earlyIndex = FindMatchingMonitorFSMRuleIndex(MonitorFSM_EarlyChecks,
-													 MonitorFSM_EarlyChecks_SIZE, &earlyNac);
-
-	if (earlyIndex >= 0)
+	if (FindAndDispatchMonitorFSMRule(ctx, &earlyNac, 0, MonitorFSM_FromContextStart))
 	{
-		return DispatchMonitorFSMRule(ctx, &earlyNac, &MonitorFSM_EarlyChecks[earlyIndex]);
+		return true;
 	}
 
 	/*
 	 * We separate out the FSM for the primary server, because that one needs
 	 * to loop over every other node to take decisions. That induces some
-	 * complexity that is best managed in a specialized function.
+	 * complexity that is best managed with its own NodeActiveContext, built
+	 * with primaryNode substituted for activeNode's role (see
+	 * BuildForPrimaryNodeNodeActiveContext).
 	 *
-	 * This early return can't become a MonitorFSM_FromContext row: it's
-	 * exactly the branch point the whole table design has to preserve as an
-	 * *entry* decision, not a matched condition -- see the note above
-	 * MonitorFSM_FromContext.
+	 * This early return can't become an ordinary row: it's exactly the
+	 * branch point the whole table design has to preserve as an *entry*
+	 * decision, not a matched condition.
 	 */
 	if (IsInPrimaryState(activeNode))
 	{
-		return ProceedGroupStateForPrimaryNode(ctx, activeNode);
+		NodeActiveContext primaryNac;
+
+		BuildForPrimaryNodeNodeActiveContext(ctx, activeNode, &primaryNac);
+
+		return FindAndDispatchMonitorFSMRule(ctx, &primaryNac,
+											 MonitorFSM_PrimaryNodeSectionStart,
+											 MonitorFSM_SIZE);
 	}
 
 	/*
@@ -1484,60 +1593,8 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 
 	BuildFromContextNodeActiveContext(ctx, primaryNode, &nac);
 
-	/*
-	 * A matched row's extraAction may return false ("continue") to mirror
-	 * the real source's fallthrough after the MS-failover cascade: when
-	 * ProceedGroupStateForMSFailover() (via ActionRunMultiStandbyFailoverCascade)
-	 * declines to act, the original if-chain keeps evaluating the rest of
-	 * its conditions in the very same call instead of stopping. Re-scanning
-	 * from startIndex on the same nac is safe here: RuleMatches() reads node
-	 * state through the live AutoFailoverNode pointers stored in nac, so any
-	 * goal state just assigned by this same dispatch (e.g. DRAINING on
-	 * primaryNode) is already visible to the next match attempt.
-	 */
-	int startIndex = 0;
-
-	while (true)
-	{
-		int index = FindMatchingMonitorFSMRuleIndexFrom(MonitorFSM_FromContext,
-														MonitorFSM_FromContext_SIZE,
-														startIndex, &nac);
-
-		if (index < 0)
-		{
-			return false;
-		}
-
-		if (DispatchMonitorFSMRule(ctx, &nac, &MonitorFSM_FromContext[index]))
-		{
-			return true;
-		}
-
-		startIndex = index + 1;
-	}
-}
-
-
-/*
- * Group State Machine when a primary node contacts the monitor.
- */
-static bool
-ProceedGroupStateForPrimaryNode(GroupStateContext *ctx,
-								AutoFailoverNode *primaryNode)
-{
-	NodeActiveContext nac;
-
-	BuildForPrimaryNodeNodeActiveContext(ctx, primaryNode, &nac);
-
-	int index = FindMatchingMonitorFSMRuleIndex(MonitorFSM_ForPrimaryNode,
-												MonitorFSM_ForPrimaryNode_SIZE, &nac);
-
-	if (index < 0)
-	{
-		return false;
-	}
-
-	return DispatchMonitorFSMRule(ctx, &nac, &MonitorFSM_ForPrimaryNode[index]);
+	return FindAndDispatchMonitorFSMRule(ctx, &nac, MonitorFSM_FromContextStart,
+										 MonitorFSM_PrimaryNodeSectionStart);
 }
 
 
