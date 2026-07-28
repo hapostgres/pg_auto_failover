@@ -566,7 +566,7 @@ pgsql_open_connection(PGSQL *pgsql)
 			log_error("Failed to connect to %s database at \"%s\", "
 					  "see above for details",
 					  ConnectionTypeToString(pgsql->connectionType),
-					  pgsql->connectionString);
+					  scrubbedConnectionString);
 
 			pgsql->status = PG_CONNECTION_BAD;
 
@@ -2471,7 +2471,12 @@ hostname_from_uri(const char *pguri,
 	conninfo = PQconninfoParse(pguri, &errmsg);
 	if (conninfo == NULL)
 	{
-		log_error("Failed to parse pguri \"%s\": %s", pguri, errmsg);
+		char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+
+		(void) parse_and_scrub_connection_string(pguri, scrubbedConnectionString);
+
+		log_error("Failed to parse pguri \"%s\": %s",
+				  scrubbedConnectionString, errmsg);
 		PQfreemem(errmsg);
 		return false;
 	}
@@ -2542,17 +2547,24 @@ validate_connection_string(const char *connectionString)
 	int length = strlen(connectionString);
 	if (length >= MAXCONNINFO)
 	{
-		log_error("Connection string \"%s\" is %d "
+		/* don't print the connection string here: it may be too long for
+		 * scrubbing to safely handle, and might still contain a password */
+		log_error("Connection string is %d "
 				  "characters, the maximum supported by pg_autoctl is %d",
-				  connectionString, length, MAXCONNINFO);
+				  length, MAXCONNINFO);
 		return false;
 	}
 
 	PQconninfoOption *connInfo = PQconninfoParse(connectionString, &errorMessage);
 	if (connInfo == NULL)
 	{
+		char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+
+		(void) parse_and_scrub_connection_string(connectionString,
+												 scrubbedConnectionString);
+
 		log_error("Failed to parse connection string \"%s\": %s ",
-				  connectionString, errorMessage);
+				  scrubbedConnectionString, errorMessage);
 		PQfreemem(errorMessage);
 		return false;
 	}

@@ -636,7 +636,14 @@ keeper_config_to_json(KeeperConfig *config, JSON_Value *js)
 void
 keeper_config_log_settings(KeeperConfig config)
 {
-	log_debug("pg_autoctl.monitor: %s", config.monitor_pguri);
+	{
+		char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+
+		(void) parse_and_scrub_connection_string(config.monitor_pguri,
+												 scrubbedConnectionString);
+
+		log_debug("pg_autoctl.monitor: %s", scrubbedConnectionString);
+	}
 	log_debug("pg_autoctl.formation: %s", config.formation);
 
 	log_debug("postgresql.hostname: %s", config.hostname);

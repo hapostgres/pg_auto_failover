@@ -2119,7 +2119,7 @@ cli_get_name_getopts(int argc, char **argv)
 		if (!IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
 		{
 			log_warn("Given --monitor URI, the --pgdata option is ignored");
-			log_info("Connecting to monitor at \"%s\"", options.monitor_pguri);
+			log_connecting_to_monitor(options.monitor_pguri);
 
 			/* the rest of the program needs pgdata actually empty */
 			bzero((void *) options.pgSetup.pgdata,
@@ -2142,6 +2142,28 @@ cli_get_name_getopts(int argc, char **argv)
 	keeperOptions = options;
 
 	return optind;
+}
+
+
+/*
+ * log_connecting_to_monitor logs an INFO message about connecting to the
+ * given monitor URI, with any embedded password replaced by **** (see #1043
+ * -- the monitor URI carries the autoctl_node password in clear text, and
+ * this used to get logged as-is).
+ */
+void
+log_connecting_to_monitor(const char *monitorURI)
+{
+	char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+
+	if (parse_and_scrub_connection_string(monitorURI, scrubbedConnectionString))
+	{
+		log_info("Connecting to monitor at \"%s\"", scrubbedConnectionString);
+	}
+	else
+	{
+		log_info("Connecting to monitor");
+	}
 }
 
 
