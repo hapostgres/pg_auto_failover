@@ -9,12 +9,14 @@
  *
  */
 
+#include <errno.h>
 #include <inttypes.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -434,6 +436,52 @@ pg_setup_init(PostgresSetup *pgSetup,
 
 
 /*
+ * pid_is_alive tells whether pid refers to a genuinely running process.
+ *
+ * A bare kill(pid, 0) cannot tell a zombie apart from a live process: a
+ * process that already exited but hasn't been reaped yet still holds a
+ * process-table entry, so the kernel reports it as "alive" even though it
+ * will never do anything again. When pid is one of our own children (as
+ * Postgres is for the postgres controller sub-process, which forks() and
+ * execv()s the postgres binary directly in service_postgres_start()),
+ * waitpid(pid, WNOHANG) resolves the ambiguity precisely: it reaps the
+ * zombie right here and reports "not alive", or reports that the child is
+ * still genuinely running.
+ *
+ * get_pgpid() is also called from processes that are not the postmaster's
+ * parent -- the keeper/node-active process, the monitor reporting service,
+ * one-shot CLI commands -- all reading the same on-disk postmaster.pid
+ * file. For those, waitpid() on a pid that isn't their own child returns
+ * -1/ECHILD immediately, and we fall back to the historical kill(pid, 0)
+ * probe, unchanged.
+ */
+static bool
+pid_is_alive(pid_t pid)
+{
+	int status;
+	pid_t ret;
+
+	do {
+		ret = waitpid(pid, &status, WNOHANG);
+	} while (ret == -1 && errno == EINTR);
+
+	if (ret == pid)
+	{
+		/* our own child, and it just exited: reaped, no longer alive */
+		return false;
+	}
+	else if (ret == 0)
+	{
+		/* our own child, still running */
+		return true;
+	}
+
+	/* not our child (ECHILD), or some other waitpid() failure */
+	return kill(pid, 0) == 0;
+}
+
+
+/*
  * Read the first line of the PGDATA/postmaster.pid file to get Postgres PID.
  */
 static bool
@@ -494,7 +542,7 @@ get_pgpid(PostgresSetup *pgSetup, bool pgIsNotRunningIsOk)
 	}
 	else if (pid > 0 && pid <= INT_MAX)
 	{
-		if (kill(pid, 0) == 0)
+		if (pid_is_alive(pid))
 		{
 			pgSetup->pidFile.pid = pid;
 			return true;
