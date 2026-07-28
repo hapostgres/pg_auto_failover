@@ -42,18 +42,32 @@ static void diff_nodesArray(NodeAddressArray *previousNodesArray,
 
 
 /*
- * keeper_init initializes the keeper logic according to the given keeper
- * configuration. It also reads the state file from disk. The state file
- * must be generated before calling keeper_init.
+ * keeper_init_internal initializes the keeper logic according to the given
+ * keeper configuration. It also reads the state file from disk. The state
+ * file must be generated before calling keeper_init/keeper_init_read_only.
+ *
+ * manageLocalPostgres controls whether we take over the pg_autoctl.pg
+ * status file used to talk to the Postgres controller sub-process: a
+ * read-only, one-shot command (see keeper_init_read_only, #1154) must not
+ * remove that file out from under a controller that might currently be
+ * managing this same PGDATA.
  */
-bool
-keeper_init(Keeper *keeper, KeeperConfig *config)
+static bool
+keeper_init_internal(Keeper *keeper, KeeperConfig *config,
+					 bool manageLocalPostgres)
 {
 	PostgresSetup *pgSetup = &(config->pgSetup);
 
 	keeper->config = *config;
 
-	local_postgres_init(&keeper->postgres, pgSetup);
+	if (manageLocalPostgres)
+	{
+		local_postgres_init(&keeper->postgres, pgSetup);
+	}
+	else
+	{
+		local_postgres_init_read_only(&keeper->postgres, pgSetup);
+	}
 
 	if (!config->monitorDisabled)
 	{
@@ -70,6 +84,32 @@ keeper_init(Keeper *keeper, KeeperConfig *config)
 	}
 
 	return true;
+}
+
+
+/*
+ * keeper_init initializes the keeper logic according to the given keeper
+ * configuration. It also reads the state file from disk. The state file
+ * must be generated before calling keeper_init.
+ */
+bool
+keeper_init(Keeper *keeper, KeeperConfig *config)
+{
+	return keeper_init_internal(keeper, config, true);
+}
+
+
+/*
+ * keeper_init_read_only is the same as keeper_init, without removing a
+ * pre-existing pg_autoctl.pg file: for read-only, one-shot commands such as
+ * `pg_autoctl show state --local` that must not interfere with a Postgres
+ * controller process that might currently be managing this same PGDATA
+ * (see #1154).
+ */
+bool
+keeper_init_read_only(Keeper *keeper, KeeperConfig *config)
+{
+	return keeper_init_internal(keeper, config, false);
 }
 
 

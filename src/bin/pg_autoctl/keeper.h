@@ -44,6 +44,7 @@ typedef struct KeeperVersion
 
 
 bool keeper_init(Keeper *keeper, KeeperConfig *config);
+bool keeper_init_read_only(Keeper *keeper, KeeperConfig *config);
 bool keeper_init_fsm(Keeper *keeper);
 bool keeper_register_and_init(Keeper *keeper, NodeState initialState);
 bool keeper_register_again(Keeper *keeper);
