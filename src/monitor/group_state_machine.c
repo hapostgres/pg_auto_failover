@@ -79,6 +79,577 @@ static bool WalDifferenceWithin(AutoFailoverNode *secondaryNode,
 								AutoFailoverNode *primaryNode,
 								int64 delta);
 
+/*
+ * ---------------------------------------------------------------------
+ * Declarative dispatch for ProceedGroupStateFromContext() and
+ * ProceedGroupStateForPrimaryNode(): each function's own sequential
+ * if-chain is replaced by a table of MonitorFSMTransition rows, matched
+ * first-match-wins by RuleMatches(). ProceedGroupStateForMSFailover() and
+ * everything it calls (BuildCandidateList, SelectFailoverCandidateNode,
+ * PromoteSelectedNode, ProceedWithMSFailover, WalSourceNodesAreAllUnhealthy)
+ * stays hand-written C exactly as before, reached from the table via
+ * extraAction -- the candidate-selection algorithm (priority sort, LSN
+ * comparison, WAL-fetch orchestration) doesn't reduce to declarative
+ * conditions any more cleanly than it did before this change.
+ * ---------------------------------------------------------------------
+ */
+
+typedef enum BoolPattern
+{
+	BOOL_ANY = 0,
+	BOOL_FALSE,
+	BOOL_TRUE
+} BoolPattern;
+
+static bool
+MatchBoolPattern(bool actual, BoolPattern pattern)
+{
+	switch (pattern)
+	{
+		case BOOL_FALSE:
+		{
+			return !actual;
+		}
+
+		case BOOL_TRUE:
+		{
+			return actual;
+		}
+
+		case BOOL_ANY:
+		default:
+		{
+			return true;
+		}
+	}
+}
+
+
+typedef enum NodeStatePatternKind
+{
+	NODE_STATE_ANY = 0,
+	NODE_STATE_STABLE,
+	NODE_STATE_NOT_STABLE,
+	NODE_STATE_REPORTED,
+	NODE_STATE_ASSIGNED,
+	NODE_STATE_NOT_ASSIGNED,
+	NODE_STATE_TRANSITIONING
+} NodeStatePatternKind;
+
+/* Fixed-size (not pointer-based): a pointer initialized from the address of
+ * a compound literal nested inside another compound literal is not a
+ * constant expression by the C standard -- clang accepts it as an extension
+ * in file-scope initializers, but gcc (used by the project's Debian/CI
+ * build) rejects it with "initializer element is not constant". A fixed-size
+ * value member sidesteps the whole address-of-compound-literal question:
+ * no STATES() call in this file passes more than 3 states.
+ */
+typedef struct ReplicationStateSet
+{
+	ReplicationState states[4];
+	int count;
+} ReplicationStateSet;
+
+#define STATES_NARG_(_1, _2, _3, _4, N, ...) N
+#define STATES_NARG(...) STATES_NARG_(__VA_ARGS__, 4, 3, 2, 1)
+
+/* Builds a { states[4], count } pair inline -- no NONE-terminated array to
+ * remember to close, no separate _STATES[] declaration to name. Deliberately
+ * NOT wrapped in a "(ReplicationStateSet) { ... }" compound-literal cast:
+ * every use is as a designated-initializer value nested inside another
+ * static aggregate (a MonitorFSMTransition table row, or one of the named
+ * FSM_* pattern constants below), and a bare brace-list is a plain
+ * sub-object initializer there -- fully portable ISO C. A compound-literal
+ * cast would make it a distinct object in its own right, and gcc (unlike
+ * clang) rejects using one of those, even by value, to initialize part of
+ * another object with static storage duration ("initializer element is not
+ * constant") -- see the note on ReplicationStateSet above for the same
+ * problem one level down.
+ */
+#define STATES(...) \
+	{ \
+		 .states = { __VA_ARGS__ }, \
+		 .count = STATES_NARG(__VA_ARGS__) \
+	}
+
+typedef struct NodeStatePattern
+{
+	NodeStatePatternKind kind;
+	ReplicationStateSet reportedStates;
+	ReplicationStateSet assignedStates;
+} NodeStatePattern;
+
+static bool
+MatchStateSet(ReplicationState actual, ReplicationStateSet declared)
+{
+	for (int i = 0; i < declared.count; i++)
+	{
+		if (declared.states[i] == actual)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+
+/* Same reasoning as STATES() above: no compound-literal cast, since every
+ * use is nested inside another static aggregate's designated initializer
+ * (e.g. ".statePattern = FSM_STATE(x)" inside a MonitorFSMTransition row). */
+#define FSM_STATE(x) \
+	{ .kind = NODE_STATE_STABLE, .reportedStates = STATES(x) }
+
+/* group_state_machine.c:504-523/1059-1106 -- three IsCurrentState(primaryNode, X) ORed */
+static const NodeStatePattern FSM_PRIMARY_OR_WAIT_OR_JOIN = {
+	.kind = NODE_STATE_STABLE,
+	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY,
+							  REPLICATION_STATE_JOIN_PRIMARY,
+							  REPLICATION_STATE_PRIMARY),
+};
+
+/* WAIT_PRIMARY/JOIN_PRIMARY only, not PRIMARY -- a distinct, narrower set from the one above */
+static const NodeStatePattern FSM_WAIT_OR_JOIN_PRIMARY = {
+	.kind = NODE_STATE_STABLE,
+	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY,
+							  REPLICATION_STATE_JOIN_PRIMARY),
+};
+
+/* the "primary role" states inside ProceedGroupStateForPrimaryNode -- a different
+ * three-element set from FSM_PRIMARY_OR_WAIT_OR_JOIN above (no JOIN_PRIMARY, has APPLY_SETTINGS) */
+static const NodeStatePattern FSM_PRIMARY_ROLE_STATES = {
+	.kind = NODE_STATE_STABLE,
+	.reportedStates = STATES(REPLICATION_STATE_PRIMARY,
+							  REPLICATION_STATE_WAIT_PRIMARY,
+							  REPLICATION_STATE_APPLY_SETTINGS),
+};
+
+/* same "primary role" scope, minus WAIT_PRIMARY -- a narrower enumerated STABLE set */
+static const NodeStatePattern FSM_PRIMARY_OR_APPLY_SETTINGS_ONLY = {
+	.kind = NODE_STATE_STABLE,
+	.reportedStates = STATES(REPLICATION_STATE_PRIMARY,
+							  REPLICATION_STATE_APPLY_SETTINGS),
+};
+
+/* reported WAIT_PRIMARY, goal in {WAIT_PRIMARY, PRIMARY} -- join_secondary's cascade row */
+static const NodeStatePattern FSM_WAIT_PRIMARY_TRANSITIONING_TO_PRIMARY = {
+	.kind = NODE_STATE_TRANSITIONING,
+	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY),
+	.assignedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY, REPLICATION_STATE_PRIMARY),
+};
+
+/* reported in {WAIT_PRIMARY,JOIN_PRIMARY}, goal PRIMARY -- demoted->catchingup, first disjunct */
+static const NodeStatePattern FSM_WAIT_OR_JOIN_PRIMARY_TRANSITIONING_TO_PRIMARY = {
+	.kind = NODE_STATE_TRANSITIONING,
+	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY, REPLICATION_STATE_JOIN_PRIMARY),
+	.assignedStates = STATES(REPLICATION_STATE_PRIMARY),
+};
+
+/* goalState != WAIT_PRIMARY, reportedState irrelevant -- wait_maintenance's second row */
+static const NodeStatePattern FSM_NOT_ASSIGNED_WAIT_PRIMARY = {
+	.kind = NODE_STATE_NOT_ASSIGNED,
+	.assignedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY),
+};
+
+/* !IsCurrentState(node, WAIT_PRIMARY): not converged to wait_primary, for any reason */
+static const NodeStatePattern FSM_NOT_STABLE_WAIT_PRIMARY = {
+	.kind = NODE_STATE_NOT_STABLE,
+	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY),
+};
+
+/* !IsCurrentState(node, SINGLE) */
+static const NodeStatePattern FSM_NOT_STABLE_SINGLE = {
+	.kind = NODE_STATE_NOT_STABLE,
+	.reportedStates = STATES(REPLICATION_STATE_SINGLE),
+};
+
+/* goalState == DROPPED, reportedState irrelevant */
+static const NodeStatePattern FSM_DROPPED_GOAL = {
+	.kind = NODE_STATE_ASSIGNED,
+	.assignedStates = STATES(REPLICATION_STATE_DROPPED),
+};
+
+/* reportedState == DEMOTE_TIMEOUT, goalState irrelevant. NOT FSM_STATE(DEMOTE_TIMEOUT), which
+ * would also require goalState == DEMOTE_TIMEOUT -- the opposite of what this self-fence guard
+ * needs: it must catch a node whose goalState is still whatever was assigned before the
+ * self-fence fired (see the real comment on this guard, preserved below). */
+static const NodeStatePattern FSM_REPORTED_DEMOTE_TIMEOUT = {
+	.kind = NODE_STATE_REPORTED,
+	.reportedStates = STATES(REPLICATION_STATE_DEMOTE_TIMEOUT),
+};
+
+/* reportedState in {REPORT_LSN, FAST_FORWARD}, converged -- "continue an already started
+ * failover" guard, the direct (non-cascading) entry into ProceedGroupStateForMSFailover */
+static const NodeStatePattern FSM_REPORT_LSN_OR_FAST_FORWARD = {
+	.kind = NODE_STATE_STABLE,
+	.reportedStates = STATES(REPLICATION_STATE_REPORT_LSN, REPLICATION_STATE_FAST_FORWARD),
+};
+
+
+static bool
+NodeStateMatchesPattern(const AutoFailoverNode *node, const NodeStatePattern *pattern)
+{
+	if (node == NULL)
+	{
+		/* No node this round (no primary). Only NODE_STATE_ANY can still match -- every other
+		 * kind needs a real reportedState/goalState to compare, which a nonexistent node simply
+		 * doesn't have. Existence itself is checked separately via NodeStatusPattern.exists. */
+		return pattern->kind == NODE_STATE_ANY;
+	}
+
+	ReplicationState reported = node->reportedState;
+	ReplicationState goal = node->goalState;
+
+	switch (pattern->kind)
+	{
+		case NODE_STATE_ANY:
+		{
+			return true;
+		}
+
+		case NODE_STATE_STABLE:
+		{
+			return (reported == goal) && MatchStateSet(reported, pattern->reportedStates);
+		}
+
+		case NODE_STATE_NOT_STABLE:
+		{
+			return !((reported == goal) && MatchStateSet(reported, pattern->reportedStates));
+		}
+
+		case NODE_STATE_REPORTED:
+		{
+			return MatchStateSet(reported, pattern->reportedStates);
+		}
+
+		case NODE_STATE_ASSIGNED:
+		{
+			return MatchStateSet(goal, pattern->assignedStates);
+		}
+
+		case NODE_STATE_NOT_ASSIGNED:
+		{
+			return !MatchStateSet(goal, pattern->assignedStates);
+		}
+
+		case NODE_STATE_TRANSITIONING:
+		{
+			return MatchStateSet(reported, pattern->reportedStates) &&
+				   MatchStateSet(goal, pattern->assignedStates);
+		}
+
+		default:
+		{
+			return false;
+		}
+	}
+}
+
+
+/*
+ * NodeStatus: every per-node fact this table's conditions need, computed once
+ * per role (activeNode, primaryNode) at the top of dispatch by BuildNodeStatus().
+ */
+typedef struct NodeStatus
+{
+	AutoFailoverNode *node;
+	GroupStateContext *ctx;
+	bool isHealthy;
+	bool isUnhealthy;
+	bool candidateEligible;
+	bool isCitusWorkerGroup;
+	bool replicationQuorum;
+	bool isComparableToReferenceTli;
+} NodeStatus;
+
+typedef struct NodeStatusPattern
+{
+	BoolPattern exists;
+	NodeStatePattern statePattern;
+	BoolPattern isHealthy;
+	BoolPattern isUnhealthy;
+	BoolPattern candidateEligible;
+	BoolPattern isInPrimaryState;
+	BoolPattern isInMaintenance;
+	BoolPattern drainTimeExpired;
+	BoolPattern isCitusWorkerGroup;
+	BoolPattern replicationQuorum;
+	BoolPattern isComparableToReferenceTli;
+	BoolPattern unreachableFromDemoteTimeout;
+} NodeStatusPattern;
+
+static void
+BuildNodeStatus(GroupStateContext *ctx, AutoFailoverNode *node, NodeStatus *status)
+{
+	memset(status, 0, sizeof(NodeStatus));
+	status->node = node;
+	status->ctx = ctx;
+
+	if (node == NULL)
+	{
+		/* NodeIsUnhealthy(NULL, ctx) returns true -- a nonexistent node being "unhealthy" is
+		 * exactly the semantics the original if-chain relies on. */
+		status->isUnhealthy = true;
+		return;
+	}
+
+	status->isHealthy = NodeIsHealthy(node, ctx);
+	status->isUnhealthy = NodeIsUnhealthy(node, ctx);
+	status->candidateEligible = node->candidatePriority > 0;
+	status->isCitusWorkerGroup = IsCitusFormation(ctx->formation) && node->groupId > 0;
+	status->replicationQuorum = node->replicationQuorum;
+}
+
+
+/*
+ * isInPrimaryState/isInMaintenance/drainTimeExpired/unreachableFromDemoteTimeout
+ * are deliberately NOT cached in NodeStatus and computed live here from
+ * status->node instead: unlike isHealthy/isUnhealthy/candidateEligible
+ * (health/priority facts that can't change mid-dispatch), these four are
+ * pure functions of node->goalState/reportedState, and a matched row's
+ * extraAction can reassign the very node being matched (e.g. DRAINING on
+ * primaryNode) in the SAME node_active() call, before dispatch continues to
+ * a later row -- exactly like NodeStateMatchesPattern below, which reads
+ * status->node's fields live for the same reason. Caching these as
+ * snapshot booleans (an earlier version of this code did) left later rows
+ * in the same call matching against a stale "still in primary state" fact
+ * even after primaryNode had just been moved to DRAINING -- confirmed by
+ * concurrent_health_check_and_report, which requires the "secondary ->
+ * prepare_promotion" row to correctly stop matching once primaryNode is no
+ * longer IsInPrimaryState().
+ */
+static bool
+NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
+{
+	bool unreachableFromDemoteTimeout =
+		status->node != NULL &&
+		status->node->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT &&
+		status->node->goalState != REPLICATION_STATE_DEMOTED &&
+		status->node->goalState != REPLICATION_STATE_PRIMARY &&
+		status->node->goalState != REPLICATION_STATE_SINGLE;
+
+	return MatchBoolPattern(status->node != NULL, pattern->exists) &&
+		   NodeStateMatchesPattern(status->node, &pattern->statePattern) &&
+		   MatchBoolPattern(status->isHealthy, pattern->isHealthy) &&
+		   MatchBoolPattern(status->isUnhealthy, pattern->isUnhealthy) &&
+		   MatchBoolPattern(status->candidateEligible, pattern->candidateEligible) &&
+		   MatchBoolPattern(IsInPrimaryState(status->node), pattern->isInPrimaryState) &&
+		   MatchBoolPattern(IsInMaintenance(status->node), pattern->isInMaintenance) &&
+		   MatchBoolPattern(NodeIsDrainTimeExpired(status->node, status->ctx),
+							 pattern->drainTimeExpired) &&
+		   MatchBoolPattern(status->isCitusWorkerGroup, pattern->isCitusWorkerGroup) &&
+		   MatchBoolPattern(status->replicationQuorum, pattern->replicationQuorum) &&
+		   MatchBoolPattern(status->isComparableToReferenceTli,
+							 pattern->isComparableToReferenceTli) &&
+		   MatchBoolPattern(unreachableFromDemoteTimeout,
+							 pattern->unreachableFromDemoteTimeout);
+}
+
+
+/*
+ * NodeActiveContext: group-level facts, computed once per dispatch call
+ * alongside the two NodeStatus roles above.
+ */
+typedef struct NodeActiveContext
+{
+	NodeStatus activeNode;
+	NodeStatus primaryNode;
+
+	bool groupHasExactlyOneNode;
+	bool groupHasMoreThanTwoNodes;
+	bool anyOtherNodeWaitingStandby;
+
+	bool numberSyncStandbysIsZero;
+	bool replicationQuorumCountIsZero;
+	bool secondaryNodesCountIsZero;
+	bool secondaryQuorumNodesCountIsZero;
+	bool atLeastOneHealthyCandidate;
+
+	bool walWithinPromoteThreshold;
+	bool walWithinSyncThreshold;
+	bool activeAndPrimaryTliMatch;
+
+	bool primaryIsWaitPrimaryPresumedDead;
+	bool failoverInProgress;
+	bool replicationStallExceeded;
+} NodeActiveContext;
+
+typedef struct NodeActiveContextPattern
+{
+	BoolPattern groupHasExactlyOneNode;
+	BoolPattern groupHasMoreThanTwoNodes;
+	BoolPattern anyOtherNodeWaitingStandby;
+
+	BoolPattern numberSyncStandbysIsZero;
+	BoolPattern replicationQuorumCountIsZero;
+	BoolPattern secondaryNodesCountIsZero;
+	BoolPattern secondaryQuorumNodesCountIsZero;
+	BoolPattern atLeastOneHealthyCandidate;
+
+	BoolPattern walWithinPromoteThreshold;
+	BoolPattern walWithinSyncThreshold;
+	BoolPattern activeAndPrimaryTliMatch;
+
+	BoolPattern primaryIsWaitPrimaryPresumedDead;
+	BoolPattern failoverInProgress;
+	BoolPattern replicationStallExceeded;
+} NodeActiveContextPattern;
+
+
+typedef enum GoalStateAssignmentKind
+{
+	GOAL_STATE_NONE = 0,
+	GOAL_STATE_SET
+} GoalStateAssignmentKind;
+
+typedef struct GoalStateAssignment
+{
+	GoalStateAssignmentKind kind;
+	ReplicationState state;
+} GoalStateAssignment;
+
+/* No compound-literal cast -- see STATES()'s comment: every use nests inside
+ * another static aggregate's designated initializer. */
+#define GOAL(x) { .kind = GOAL_STATE_SET, .state = (x) }
+
+/*
+ * Returns true when this row's match should stand and dispatch should stop
+ * here (the overwhelming majority of extraActions -- a pure side effect
+ * alongside a genuine, unconditional transition). Returns false when the
+ * row's own facts didn't actually lead anywhere useful this round (the
+ * MS-failover cascade declining because e.g. not all candidates have
+ * reported yet) and the SAME call should keep searching later rows for
+ * activeNode's own transition -- exactly what the real source's fallthrough
+ * (no `return` after the DRAINING/MAINTENANCE assignment, see
+ * ActionRunMultiStandbyFailoverCascade below) does. Assignments on the matched row
+ * itself still apply either way; this only controls whether dispatch
+ * continues afterward.
+ */
+typedef bool (*MonitorExtraActionFunction) (GroupStateContext *ctx,
+											 NodeActiveContext *nac,
+											 char *message);
+
+typedef struct MonitorFSMTransition
+{
+	NodeStatusPattern activeNode;
+	NodeStatusPattern primaryNode;
+	NodeActiveContextPattern conditions;
+
+	GoalStateAssignment activeNodeAssignedState;
+	GoalStateAssignment otherNodeAssignedState;  /* target: nac->primaryNode.node */
+
+	MonitorExtraActionFunction extraAction;
+
+	const char *comment;
+} MonitorFSMTransition;
+
+
+static bool
+RuleMatches(const NodeActiveContext *nac, const MonitorFSMTransition *rule)
+{
+	const NodeActiveContextPattern *cond = &rule->conditions;
+
+	return NodeMatchesPattern(&nac->activeNode, &rule->activeNode) &&
+		   NodeMatchesPattern(&nac->primaryNode, &rule->primaryNode) &&
+
+		   MatchBoolPattern(nac->groupHasExactlyOneNode, cond->groupHasExactlyOneNode) &&
+		   MatchBoolPattern(nac->groupHasMoreThanTwoNodes, cond->groupHasMoreThanTwoNodes) &&
+		   MatchBoolPattern(nac->anyOtherNodeWaitingStandby, cond->anyOtherNodeWaitingStandby) &&
+		   MatchBoolPattern(nac->numberSyncStandbysIsZero, cond->numberSyncStandbysIsZero) &&
+		   MatchBoolPattern(nac->replicationQuorumCountIsZero,
+							 cond->replicationQuorumCountIsZero) &&
+		   MatchBoolPattern(nac->secondaryNodesCountIsZero, cond->secondaryNodesCountIsZero) &&
+		   MatchBoolPattern(nac->secondaryQuorumNodesCountIsZero,
+							 cond->secondaryQuorumNodesCountIsZero) &&
+		   MatchBoolPattern(nac->atLeastOneHealthyCandidate, cond->atLeastOneHealthyCandidate) &&
+		   MatchBoolPattern(nac->walWithinPromoteThreshold, cond->walWithinPromoteThreshold) &&
+		   MatchBoolPattern(nac->walWithinSyncThreshold, cond->walWithinSyncThreshold) &&
+		   MatchBoolPattern(nac->activeAndPrimaryTliMatch, cond->activeAndPrimaryTliMatch) &&
+		   MatchBoolPattern(nac->primaryIsWaitPrimaryPresumedDead,
+							 cond->primaryIsWaitPrimaryPresumedDead) &&
+		   MatchBoolPattern(nac->failoverInProgress, cond->failoverInProgress) &&
+		   MatchBoolPattern(nac->replicationStallExceeded, cond->replicationStallExceeded);
+}
+
+
+static int
+FindMatchingMonitorFSMRuleIndexFrom(const MonitorFSMTransition table[], int tableSize,
+									 int startIndex, const NodeActiveContext *nac)
+{
+	for (int i = startIndex; i < tableSize; i++)
+	{
+		if (RuleMatches(nac, &table[i]))
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+
+static int
+FindMatchingMonitorFSMRuleIndex(const MonitorFSMTransition table[], int tableSize,
+								 const NodeActiveContext *nac)
+{
+	return FindMatchingMonitorFSMRuleIndexFrom(table, tableSize, 0, nac);
+}
+
+
+/*
+ * AssignDeclaredGoalState asserts that a rule only ever assigns a state it
+ * actually declared: drift between a row's own assignment slots and what it
+ * assigns fails loudly (an Assert) instead of silently rotting.
+ */
+static void
+AssignDeclaredGoalState(const MonitorFSMTransition *rule, AutoFailoverNode *node,
+						 ReplicationState state, char *message)
+{
+#ifdef USE_ASSERT_CHECKING
+	bool declared =
+		(rule->activeNodeAssignedState.kind == GOAL_STATE_SET &&
+		 rule->activeNodeAssignedState.state == state) ||
+		(rule->otherNodeAssignedState.kind == GOAL_STATE_SET &&
+		 rule->otherNodeAssignedState.state == state);
+
+	Assert(declared);
+#endif
+
+	AssignGoalState(node, state, message);
+}
+
+
+static bool
+DispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
+						const MonitorFSMTransition *rule)
+{
+	char message[BUFSIZE] = { 0 };
+	bool stopDispatch = true;
+
+	if (rule->comment != NULL)
+	{
+		snprintf(message, BUFSIZE, "%s", rule->comment);
+	}
+
+	if (rule->extraAction != NULL)
+	{
+		stopDispatch = rule->extraAction(ctx, nac, message);
+	}
+
+	if (rule->activeNodeAssignedState.kind == GOAL_STATE_SET)
+	{
+		AssignDeclaredGoalState(rule, nac->activeNode.node,
+								 rule->activeNodeAssignedState.state, message);
+	}
+
+	if (rule->otherNodeAssignedState.kind == GOAL_STATE_SET)
+	{
+		AssignDeclaredGoalState(rule, nac->primaryNode.node,
+								 rule->otherNodeAssignedState.state, message);
+	}
+
+	return stopDispatch;
+}
+
+
 /* GUC variables */
 int EnableSyncXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
 int PromoteXlogThreshold = DEFAULT_XLOG_SEG_SIZE;
@@ -138,6 +709,688 @@ ProceedGroupState(AutoFailoverNode *activeNode)
 
 
 /*
+ * OtherNodeIsDueForCatchingUp is shared between the count computation in
+ * BuildForPrimaryNodeNodeActiveContext() and the fan-out assignment in
+ * ActionCatchupUnhealthySecondaries() below, so the two can never drift
+ * apart on which nodes they mean by "unhealthy secondary" -- both need to
+ * agree, since the counts drive which row matches and the fan-out is that
+ * row's own side effect.
+ */
+static bool
+OtherNodeIsDueForCatchingUp(GroupStateContext *ctx, AutoFailoverNode *otherNode)
+{
+	return otherNode->goalState == REPLICATION_STATE_SECONDARY &&
+		   otherNode->reportedState != REPLICATION_STATE_REPORT_LSN &&
+		   otherNode->reportedState != REPLICATION_STATE_JOIN_SECONDARY &&
+		   NodeIsUnhealthy(otherNode, ctx);
+}
+
+
+static bool
+ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
+{
+	RemoveAutoFailoverNode(ctx->activeNode);
+
+	return true;
+}
+
+
+/*
+ * ActionRunMultiStandbyFailoverCascade implements the whole
+ * nodesCount>2-unhealthy-primary block as a single extraAction: the DRAINING/
+ * MAINTENANCE/nothing if/else-if decision, followed unconditionally by
+ * ProceedGroupStateForMSFailover(). The real source never `return`s after
+ * assigning DRAINING/MAINTENANCE to the primary -- it always falls through to
+ * try ProceedGroupStateForMSFailover next, in the SAME outer if-block, and if
+ * THAT declines (returns false), falls through further still to the rest of
+ * ProceedGroupStateFromContext's own if-chain (the report_lsn/prepare_
+ * promotion/stop_replication/... rows, for this SAME activeNode).
+ *
+ * This has to be ONE row/action, not three separate declarative rows sharing
+ * this action (as an earlier version of this file had it): once dispatch
+ * continues past a declined row, it keeps scanning forward and a later,
+ * broader row matching the same outer "nodesCount>2, primary unhealthy"
+ * condition (the catch-all "neither DRAINING nor MAINTENANCE applies" case)
+ * would match too and re-invoke ProceedGroupStateForMSFailover a *second*
+ * time in the same node_active() call -- something the original single-pass
+ * if/else-if structure never does. Confirmed by concurrent_second_primary_
+ * death_report and concurrent_health_check_and_report, which got stuck (the
+ * former) or produced a spurious second cascade invocation changing the
+ * outcome (the latter) until this was folded into a single row/action pair.
+ */
+static bool
+ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac,
+									  char *message)
+{
+	AutoFailoverNode *primaryNode = nac->primaryNode.node;
+
+	List *candidateNodesList =
+		AutoFailoverOtherNodesListInState(primaryNode, REPLICATION_STATE_SECONDARY);
+	int candidatesCount = CountHealthyCandidates(candidateNodesList);
+
+	if (IsInPrimaryState(primaryNode) &&
+		!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
+		candidatesCount >= 1)
+	{
+		char drainingMessage[BUFSIZE] = { 0 };
+
+		snprintf(drainingMessage, BUFSIZE,
+				 "Setting goal state of " NODE_FORMAT
+				 " to draining after it became unhealthy.",
+				 NODE_FORMAT_ARGS(primaryNode));
+
+		AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, drainingMessage);
+	}
+	else if (IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
+	{
+		char maintenanceMessage[BUFSIZE] = { 0 };
+
+		snprintf(maintenanceMessage, BUFSIZE,
+				 "Setting goal state of " NODE_FORMAT
+				 " to maintenance after it converged to prepare_maintenance.",
+				 NODE_FORMAT_ARGS(primaryNode));
+
+		AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, maintenanceMessage);
+	}
+
+	return ProceedGroupStateForMSFailover(ctx, primaryNode);
+}
+
+
+/*
+ * ActionRunPlainMSFailoverCascade is the "continue an already-started
+ * failover" call site: activeNode itself is REPORT_LSN or FAST_FORWARD, and
+ * the real source just `return`s ProceedGroupStateForMSFailover()'s result
+ * directly, with no DRAINING/MAINTENANCE decision attached.
+ */
+static bool
+ActionRunPlainMSFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
+{
+	return ProceedGroupStateForMSFailover(ctx, nac->primaryNode.node);
+}
+
+
+static bool
+ActionRunPrimaryNodeTransition(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
+{
+	(void) ProceedGroupStateForPrimaryNode(ctx, nac->primaryNode.node);
+
+	return true;
+}
+
+
+static bool
+ActionCatchupUnhealthySecondaries(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
+{
+	AutoFailoverNode *primaryNode = nac->activeNode.node;
+	List *otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	ListCell *nodeCell = NULL;
+
+	foreach(nodeCell, otherNodesGroupList)
+	{
+		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (OtherNodeIsDueForCatchingUp(ctx, otherNode))
+		{
+			char otherMessage[BUFSIZE] = { 0 };
+
+			snprintf(otherMessage, BUFSIZE,
+					 "Setting goal state of " NODE_FORMAT
+					 " to catchingup after it became unhealthy.",
+					 NODE_FORMAT_ARGS(otherNode));
+
+			AssignGoalState(otherNode, REPLICATION_STATE_CATCHINGUP, otherMessage);
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * BuildFromContextNodeActiveContext computes every fact MonitorFSM_FromContext
+ * needs, mirroring exactly what the original ProceedGroupStateFromContext()
+ * if-chain read inline. primaryNode may be NULL (failover already in
+ * progress, primary removed).
+ */
+static void
+BuildFromContextNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *primaryNode,
+								  NodeActiveContext *nac)
+{
+	AutoFailoverNode *activeNode = ctx->activeNode;
+
+	memset(nac, 0, sizeof(NodeActiveContext));
+
+	BuildNodeStatus(ctx, activeNode, &nac->activeNode);
+	BuildNodeStatus(ctx, primaryNode, &nac->primaryNode);
+
+	/* isComparableToReferenceTli defaults to true (row :328 doesn't fire) -- a node that hasn't
+	 * reported a timeline yet (reportedTLI == 0) has nothing to check, same as the original. */
+	nac->activeNode.isComparableToReferenceTli = true;
+	if (activeNode->reportedTLI > 0)
+	{
+		int referenceTli = 0;
+		List *comparableNodeList =
+			FilterNodesByTimelineAncestry(ctx->groupNodeList, ctx->formationId,
+										  ctx->groupId, &referenceTli);
+
+		if (referenceTli > 0)
+		{
+			bool comparable = false;
+			ListCell *cell = NULL;
+
+			foreach(cell, comparableNodeList)
+			{
+				AutoFailoverNode *node = (AutoFailoverNode *) lfirst(cell);
+
+				if (node->nodeId == activeNode->nodeId)
+				{
+					comparable = true;
+					break;
+				}
+			}
+
+			nac->activeNode.isComparableToReferenceTli = comparable;
+		}
+	}
+
+	nac->groupHasExactlyOneNode = (ctx->groupNodeCount == 1);
+	nac->groupHasMoreThanTwoNodes = (ctx->groupNodeCount > 2);
+	nac->failoverInProgress = IsFailoverInProgress(ctx->groupNodeList);
+
+	nac->activeAndPrimaryTliMatch =
+		primaryNode != NULL && activeNode->reportedTLI == primaryNode->reportedTLI;
+
+	nac->walWithinPromoteThreshold =
+		WalDifferenceWithin(activeNode, primaryNode, PromoteXlogThreshold);
+	nac->walWithinSyncThreshold =
+		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold);
+
+	nac->primaryIsWaitPrimaryPresumedDead =
+		NodeIsWaitPrimaryPresumedDead(primaryNode, activeNode, ctx);
+
+	nac->replicationStallExceeded =
+		primaryNode != NULL &&
+		primaryNode->replicationStallSince != 0 &&
+		TimestampDifferenceExceeds(primaryNode->replicationStallSince,
+								   ctx->now, ctx->replicationStallTimeoutMs);
+
+	if (ctx->groupNodeCount > 2 && nac->primaryNode.isUnhealthy)
+	{
+		List *candidateNodesList =
+			AutoFailoverOtherNodesListInState(primaryNode, REPLICATION_STATE_SECONDARY);
+
+		nac->atLeastOneHealthyCandidate = CountHealthyCandidates(candidateNodesList) >= 1;
+	}
+}
+
+
+/*
+ * BuildForPrimaryNodeNodeActiveContext computes every fact
+ * MonitorFSM_ForPrimaryNode needs, mirroring the counting loop that used to
+ * be inline at the top of ProceedGroupStateForPrimaryNode() (the same loop
+ * OtherNodeIsDueForCatchingUp's condition drives the fan-out assignment
+ * for, in ActionCatchupUnhealthySecondaries above).
+ */
+static void
+BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *primaryNode,
+									 NodeActiveContext *nac)
+{
+	memset(nac, 0, sizeof(NodeActiveContext));
+
+	BuildNodeStatus(ctx, primaryNode, &nac->activeNode);
+	/* .primaryNode role is unused by every MonitorFSM_ForPrimaryNode row -- primaryNode IS
+	 * activeNode here, so every condition is expressed against .activeNode directly. */
+
+	List *otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	int otherNodesCount = list_length(otherNodesGroupList);
+
+	int replicationQuorumCount = otherNodesCount;
+	int secondaryNodesCount = otherNodesCount;
+	int secondaryQuorumNodesCount = otherNodesCount;
+
+	ListCell *nodeCell = NULL;
+
+	foreach(nodeCell, otherNodesGroupList)
+	{
+		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (OtherNodeIsDueForCatchingUp(ctx, otherNode))
+		{
+			--secondaryNodesCount;
+			--secondaryQuorumNodesCount;
+		}
+		else if (!IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY))
+		{
+			--secondaryNodesCount;
+			--secondaryQuorumNodesCount;
+		}
+		else if (IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY) &&
+				 !otherNode->replicationQuorum)
+		{
+			--secondaryQuorumNodesCount;
+		}
+
+		if (!otherNode->replicationQuorum)
+		{
+			--replicationQuorumCount;
+		}
+
+		if (IsCurrentState(otherNode, REPLICATION_STATE_WAIT_STANDBY))
+		{
+			nac->anyOtherNodeWaitingStandby = true;
+		}
+	}
+
+	nac->replicationQuorumCountIsZero = (replicationQuorumCount == 0);
+	nac->secondaryNodesCountIsZero = (secondaryNodesCount == 0);
+	nac->secondaryQuorumNodesCountIsZero = (secondaryQuorumNodesCount == 0);
+	nac->numberSyncStandbysIsZero = (ctx->formation->number_sync_standbys == 0);
+	nac->failoverInProgress = IsFailoverInProgress(ctx->groupNodeList);
+}
+
+
+/*
+ * MonitorFSM_EarlyChecks: the six checks the real if-chain runs BEFORE the
+ * IsInPrimaryState(activeNode) early return (group_state_machine.c:284) --
+ * DROPPED, goal==DROPPED, MAINTENANCE, the demote_timeout self-fence, and
+ * both "alone in group" rows. These fire regardless of whether activeNode is
+ * currently the primary (a primary that just lost its only standby must
+ * still reach SINGLE here, before ever redirecting to
+ * ProceedGroupStateForPrimaryNode) -- confirmed by the drop_node regression
+ * test, which failed the first time this table put the primary-state
+ * redirect ahead of these six checks instead of after them. None of these
+ * six rows reference .primaryNode at all, so they can be matched against a
+ * NodeActiveContext built with primaryNode == NULL, before primaryNode is
+ * even resolved.
+ */
+static const MonitorFSMTransition MonitorFSM_EarlyChecks[] = {
+	/* converged to dropped -> remove the node from the catalog entirely */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_DROPPED) },
+	  .extraAction = ActionRemoveDroppedNode,
+	  .comment = "converged to dropped -> remove the node from the catalog" },
+
+	/* goal already dropped (mid-drop, row above hasn't converged yet) -> no-op */
+	{ .activeNode = { .statePattern = FSM_DROPPED_GOAL },
+	  .comment = "goal already dropped -> no-op" },
+
+	/* converged to maintenance -> no-op, frozen until stop_maintenance() */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_MAINTENANCE) },
+	  .comment = "converged to maintenance -> no-op, frozen until stop_maintenance()" },
+
+	/* demote_timeout self-fence re-target (issue #1025) */
+	{ .activeNode = { .statePattern = FSM_REPORTED_DEMOTE_TIMEOUT,
+					  .unreachableFromDemoteTimeout = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTED),
+	  .comment = "reported demote_timeout, assigned goal can't reach it -> demoted" },
+
+	/* alone in group, candidate-eligible */
+	{ .activeNode = { .statePattern = FSM_NOT_STABLE_SINGLE,
+					  .candidateEligible = BOOL_TRUE },
+	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SINGLE),
+	  .comment = "alone in group, candidate-eligible -> single" },
+
+	/* alone in group, not candidate-eligible */
+	{ .activeNode = { .statePattern = FSM_NOT_STABLE_SINGLE,
+					  .candidateEligible = BOOL_FALSE },
+	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
+	  .comment = "alone in group, candidatePriority zero -> report_lsn" },
+};
+
+#define MonitorFSM_EarlyChecks_SIZE \
+	(sizeof(MonitorFSM_EarlyChecks) / sizeof(MonitorFSMTransition))
+
+
+/*
+ * MonitorFSM_FromContext: the declarative replacement for the rest of
+ * ProceedGroupStateFromContext()'s own sequential if-chain -- everything
+ * from the timeline-fork check (group_state_machine.c:328, right after the
+ * IsInPrimaryState(activeNode) early return) onward. Rows are kept in the
+ * exact order the original if-chain checked them in: first-match-wins over
+ * this array is a straight extraction, not a behaviour change.
+ */
+static const MonitorFSMTransition MonitorFSM_FromContext[] = {
+	/* converged secondary, reportedTLI not an ancestor of the group's reference timeline */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
+					  .isComparableToReferenceTli = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
+	  .comment = "converged secondary, reportedTLI not an ancestor of reference -> catchingup" },
+
+	/* replication stall (#997): primary healthy, no standby past replication_stall_timeout */
+	{ .primaryNode = { .isInPrimaryState = BOOL_TRUE,
+					   .isHealthy = BOOL_TRUE },
+	  .conditions = { .replicationStallExceeded = BOOL_TRUE },
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .comment = "primary healthy, no standby past replication_stall_timeout -> wait_primary" },
+
+	/* nodesCount>2, primary unhealthy -- draining/maintenance/nothing decided inside the
+	 * action, then the MS-failover cascade unconditionally; must be a single row, see
+	 * ActionRunMultiStandbyFailoverCascade's comment for why. */
+	{ .primaryNode = { .isUnhealthy = BOOL_TRUE },
+	  .conditions = { .groupHasMoreThanTwoNodes = BOOL_TRUE },
+	  .extraAction = ActionRunMultiStandbyFailoverCascade,
+	  .comment = "nodesCount>2, primary unhealthy -> draining/maintenance + MS-failover cascade" },
+
+	/* report_lsn, primary converged wait/join_primary, healthy */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN) },
+	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY,
+					   .isHealthy = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
+	  .comment = "report_lsn, primary converged wait/join_primary, healthy -> secondary" },
+
+	/* report_lsn, primary converged primary, healthy */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN) },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY),
+					   .isHealthy = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
+	  .comment = "report_lsn, primary converged primary, healthy -> secondary" },
+
+	/* fast_forward done -> prepare_promotion */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_FAST_FORWARD) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PREPARE_PROMOTION),
+	  .comment = "fast_forward done -> prepare_promotion" },
+
+	/* continue an already-started MS failover -- a direct `return` in the real source, and no
+	 * later row in this table matches activeNode in REPORT_LSN/FAST_FORWARD, so it doesn't
+	 * matter here whether the extraAction's bool stops dispatch or lets it keep scanning. */
+	{ .activeNode = { .statePattern = FSM_REPORT_LSN_OR_FAST_FORWARD },
+	  .extraAction = ActionRunPlainMSFailoverCascade,
+	  .comment = "report_lsn or fast_forward, continuing an already-started failover -> "
+				 "MS-failover cascade" },
+
+	/* wait_standby, primary converged wait/join_primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY) },
+	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
+	  .comment = "wait_standby, primary converged wait/join_primary -> catchingup" },
+
+	/* wait_standby (quorum member), primary converged primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
+					  .replicationQuorum = BOOL_TRUE },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_APPLY_SETTINGS),
+	  .comment = "wait_standby (quorum member), primary converged primary -> "
+				 "catchingup + apply_settings" },
+
+	/* wait_standby (not a quorum member), primary converged primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
+					  .replicationQuorum = BOOL_FALSE },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
+	  .comment = "wait_standby (not a quorum member), primary converged primary -> catchingup" },
+
+	/* caught up, same TLI as primary, within sync threshold */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_CATCHINGUP),
+					  .isHealthy = BOOL_TRUE },
+	  .primaryNode = { .statePattern = FSM_PRIMARY_OR_WAIT_OR_JOIN },
+	  .conditions = { .activeAndPrimaryTliMatch = BOOL_TRUE,
+					  .walWithinSyncThreshold = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
+	  .comment = "caught up, same TLI as primary, within sync threshold -> secondary" },
+
+	/* primary fails, already converged wait_primary (no draining edge, issue #1168) */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
+					  .isHealthy = BOOL_TRUE,
+					  .candidateEligible = BOOL_TRUE },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_PRIMARY),
+					   .isUnhealthy = BOOL_TRUE },
+	  .conditions = { .walWithinPromoteThreshold = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PREPARE_PROMOTION),
+	  .comment = "primary fails, already converged wait_primary (issue #1168) -> "
+				 "secondary -> prepare_promotion only (1 of 2)" },
+
+	/* primary fails, not already wait_primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
+					  .isHealthy = BOOL_TRUE,
+					  .candidateEligible = BOOL_TRUE },
+	  .primaryNode = { .statePattern = FSM_NOT_STABLE_WAIT_PRIMARY,
+					   .isInPrimaryState = BOOL_TRUE,
+					   .isUnhealthy = BOOL_TRUE },
+	  .conditions = { .walWithinPromoteThreshold = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PREPARE_PROMOTION),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DRAINING),
+	  .comment = "primary fails, not already wait_primary -> secondary -> prepare_promotion, "
+				 "primary -> draining (2 of 2)" },
+
+	/* wait_maintenance, primary converged wait_primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_MAINTENANCE) },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_PRIMARY) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_MAINTENANCE),
+	  .comment = "wait_maintenance, primary converged wait_primary -> maintenance" },
+
+	/* wait_maintenance, primary's goal no longer wait_primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_MAINTENANCE) },
+	  .primaryNode = { .statePattern = FSM_NOT_ASSIGNED_WAIT_PRIMARY },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_MAINTENANCE),
+	  .comment = "wait_maintenance, primary's goal no longer wait_primary -> maintenance" },
+
+	/* prepare_promotion, primary converged prepare_maintenance */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION) },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_MAINTENANCE) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_STOP_REPLICATION),
+	  .comment = "prepare_promotion, primary converged prepare_maintenance -> stop_replication" },
+
+	/* Citus worker, primary present */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION),
+					  .isCitusWorkerGroup = BOOL_TRUE },
+	  .primaryNode = { .exists = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTED),
+	  .comment = "Citus worker prepare_promotion, primary present -> wait_primary + demoted" },
+
+	/* Citus worker, primary removed */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION),
+					  .isCitusWorkerGroup = BOOL_TRUE },
+	  .primaryNode = { .exists = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .comment = "Citus worker prepare_promotion, primary removed -> wait_primary" },
+
+	/* prepare_promotion, primary present, already converged wait_primary (issue #1168) */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION) },
+	  .primaryNode = { .exists = BOOL_TRUE,
+					   .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_PRIMARY),
+					   .isInMaintenance = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_STOP_REPLICATION),
+	  .comment = "prepare_promotion, primary already converged wait_primary (issue #1168) -> "
+				 "stop_replication only (1 of 2)" },
+
+	/* prepare_promotion, primary present, not in maintenance, not already wait_primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION) },
+	  .primaryNode = { .exists = BOOL_TRUE,
+					   .statePattern = FSM_NOT_STABLE_WAIT_PRIMARY,
+					   .isInMaintenance = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_STOP_REPLICATION),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTE_TIMEOUT),
+	  .comment = "prepare_promotion, primary present, not in maintenance -> "
+				 "stop_replication + demote_timeout (2 of 2)" },
+
+	/* prepare_promotion, primary removed */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION) },
+	  .primaryNode = { .exists = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .comment = "prepare_promotion, primary removed -> wait_primary" },
+
+	/* stop_replication, primary converged prepare_maintenance */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION) },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_MAINTENANCE) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_MAINTENANCE),
+	  .comment = "stop_replication, primary converged prepare_maintenance -> "
+				 "wait_primary + maintenance" },
+
+	/* stop_replication, primary converged demote_timeout (3-way OR, 1 of 3) */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION) },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_DEMOTE_TIMEOUT) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTED),
+	  .comment = "stop_replication, primary converged demote_timeout -> "
+				 "wait_primary + demoted (1 of 3)" },
+
+	/* stop_replication, primary's drain time expired (3-way OR, 2 of 3) */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION) },
+	  .primaryNode = { .drainTimeExpired = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTED),
+	  .comment = "stop_replication, primary's drain time expired -> "
+				 "wait_primary + demoted (2 of 3)" },
+
+	/* stop_replication, primary's goal is wait_primary but presumed dead (3-way OR, 3 of 3) */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION) },
+	  .conditions = { .primaryIsWaitPrimaryPresumedDead = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTED),
+	  .comment = "stop_replication, primary's goal wait_primary but presumed dead -> "
+				 "wait_primary + demoted (3 of 3)" },
+
+	/* Citus worker, primary present */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION),
+					  .isCitusWorkerGroup = BOOL_TRUE },
+	  .primaryNode = { .exists = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTED),
+	  .comment = "Citus worker stop_replication, primary present -> wait_primary + demoted" },
+
+	/* Citus worker, primary removed */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION),
+					  .isCitusWorkerGroup = BOOL_TRUE },
+	  .primaryNode = { .exists = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .comment = "Citus worker stop_replication, primary removed -> wait_primary" },
+
+	/* demoted, primary reported wait/join_primary with goal primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_DEMOTED) },
+	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY_TRANSITIONING_TO_PRIMARY,
+					   .isHealthy = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
+	  .comment = "demoted, primary reported wait/join_primary with goal primary -> catchingup" },
+
+	/* demoted, primary converged wait/join_primary/primary, healthy */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_DEMOTED) },
+	  .primaryNode = { .statePattern = FSM_PRIMARY_OR_WAIT_OR_JOIN,
+					   .isHealthy = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
+	  .comment = "demoted, primary converged wait/join_primary/primary, healthy -> catchingup" },
+
+	/* join_secondary, primary reported wait_primary with goal wait/primary -- cascades into a
+	 * nested pass on primaryNode */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_JOIN_SECONDARY) },
+	  .primaryNode = { .statePattern = FSM_WAIT_PRIMARY_TRANSITIONING_TO_PRIMARY },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
+	  .extraAction = ActionRunPrimaryNodeTransition,
+	  .comment = "join_secondary, primary reported wait_primary with goal wait/primary -> "
+				 "secondary" },
+
+	/* join_secondary, primary converged primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_JOIN_SECONDARY) },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
+	  .comment = "join_secondary, primary converged primary -> secondary" },
+};
+
+#define MonitorFSM_FromContext_SIZE \
+	(sizeof(MonitorFSM_FromContext) / sizeof(MonitorFSMTransition))
+
+
+/*
+ * MonitorFSM_ForPrimaryNode: the declarative replacement for
+ * ProceedGroupStateForPrimaryNode()'s own sequential if-chain. Here
+ * .activeNode maps to the primaryNode parameter, not a reporting node --
+ * see ProceedGroupStateForPrimaryNode() below.
+ */
+static const MonitorFSMTransition MonitorFSM_ForPrimaryNode[] = {
+	/* primary alone, another node reached wait_standby */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SINGLE) },
+	  .conditions = { .anyOtherNodeWaitingStandby = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .comment = "primary alone, another node reached wait_standby -> wait_primary" },
+
+	/* all nodes async, zero secondaries */
+	{ .activeNode = { .statePattern = FSM_PRIMARY_ROLE_STATES },
+	  .conditions = { .replicationQuorumCountIsZero = BOOL_TRUE,
+					  .secondaryNodesCountIsZero = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .extraAction = ActionCatchupUnhealthySecondaries,
+	  .comment = "all nodes async, zero secondaries -> wait_primary" },
+
+	/* all nodes async, >=1 secondary */
+	{ .activeNode = { .statePattern = FSM_PRIMARY_ROLE_STATES },
+	  .conditions = { .replicationQuorumCountIsZero = BOOL_TRUE,
+					  .secondaryNodesCountIsZero = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
+	  .extraAction = ActionCatchupUnhealthySecondaries,
+	  .comment = "all nodes async, >=1 secondary -> primary" },
+
+	/* converged primary/apply_settings (not wait_primary), no quorum secondaries,
+	 * number_sync_standbys=0, no failover in progress (issue #774) */
+	{ .activeNode = { .statePattern = FSM_PRIMARY_OR_APPLY_SETTINGS_ONLY },
+	  .conditions = { .secondaryQuorumNodesCountIsZero = BOOL_TRUE,
+					  .failoverInProgress = BOOL_FALSE,
+					  .numberSyncStandbysIsZero = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .extraAction = ActionCatchupUnhealthySecondaries,
+	  .comment = "converged primary/apply_settings, no quorum secondaries, no failover in "
+				 "progress, number_sync_standbys=0 -> wait_primary" },
+
+	/* same, but number_sync_standbys>0 -> block writes on primary */
+	{ .activeNode = { .statePattern = FSM_PRIMARY_OR_APPLY_SETTINGS_ONLY },
+	  .conditions = { .secondaryQuorumNodesCountIsZero = BOOL_TRUE,
+					  .failoverInProgress = BOOL_FALSE,
+					  .numberSyncStandbysIsZero = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
+	  .extraAction = ActionCatchupUnhealthySecondaries,
+	  .comment = "converged primary/apply_settings, no quorum secondaries, no failover in "
+				 "progress, number_sync_standbys>0 -> primary (block writes)" },
+
+	/* wait_primary, >=1 quorum secondary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_PRIMARY) },
+	  .conditions = { .secondaryQuorumNodesCountIsZero = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
+	  .extraAction = ActionCatchupUnhealthySecondaries,
+	  .comment = "wait_primary, >=1 quorum secondary -> primary" },
+
+	/* apply_settings, both zero */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_APPLY_SETTINGS) },
+	  .conditions = { .numberSyncStandbysIsZero = BOOL_TRUE,
+					  .secondaryQuorumNodesCountIsZero = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
+	  .extraAction = ActionCatchupUnhealthySecondaries,
+	  .comment = "apply_settings, both zero -> wait_primary" },
+
+	/* apply_settings, number_sync_standbys != 0 (1 of 2 disjuncts) */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_APPLY_SETTINGS) },
+	  .conditions = { .numberSyncStandbysIsZero = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
+	  .extraAction = ActionCatchupUnhealthySecondaries,
+	  .comment = "apply_settings, number_sync_standbys != 0 -> primary (1 of 2 disjuncts)" },
+
+	/* apply_settings, sync_standbys=0 but >=1 quorum secondary (2 of 2) */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_APPLY_SETTINGS) },
+	  .conditions = { .numberSyncStandbysIsZero = BOOL_TRUE,
+					  .secondaryQuorumNodesCountIsZero = BOOL_FALSE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
+	  .extraAction = ActionCatchupUnhealthySecondaries,
+	  .comment = "apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2)" },
+
+	/* converged primary/wait_primary/apply_settings, no other condition applies */
+	{ .activeNode = { .statePattern = FSM_PRIMARY_ROLE_STATES },
+	  .extraAction = ActionCatchupUnhealthySecondaries,
+	  .comment = "converged primary/wait_primary/apply_settings, no other condition applies -> "
+				 "no-op besides the unhealthy-secondary fan-out" },
+
+	/* backwards-compat: join_primary -> primary */
+	{ .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_JOIN_PRIMARY) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
+	  .comment = "backwards-compat: join_primary -> primary" },
+};
+
+#define MonitorFSM_ForPrimaryNode_SIZE \
+	(sizeof(MonitorFSM_ForPrimaryNode) / sizeof(MonitorFSMTransition))
+
+
+/*
  * ProceedGroupStateFromContext is the core FSM logic, operating entirely on
  * the pre-built GroupStateContext.  It does not touch the database for reads;
  * writes (AssignGoalState, NotifyStateChange) still go to the DB.
@@ -151,135 +1404,37 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 	AutoFailoverNode *activeNode = ctx->activeNode;
 	char *formationId = ctx->formationId;
 	int groupId = ctx->groupId;
-	int nodesCount = ctx->groupNodeCount;
 
 	/*
-	 * If the active node just reached the DROPPED state, proceed to remove it
-	 * from the pgautofailover.node table.
+	 * MonitorFSM_EarlyChecks first, before the IsInPrimaryState redirect
+	 * below -- these six checks run unconditionally in the real source,
+	 * regardless of whether activeNode currently is the primary (a primary
+	 * that just lost its only standby must still reach SINGLE here, not get
+	 * redirected to ProceedGroupStateForPrimaryNode first). primaryNode
+	 * isn't resolved yet at this point -- and none of these six rows
+	 * reference it -- so NULL is passed and is safe.
 	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_DROPPED))
+	NodeActiveContext earlyNac;
+
+	BuildFromContextNodeActiveContext(ctx, NULL, &earlyNac);
+
+	int earlyIndex = FindMatchingMonitorFSMRuleIndex(MonitorFSM_EarlyChecks,
+													 MonitorFSM_EarlyChecks_SIZE, &earlyNac);
+
+	if (earlyIndex >= 0)
 	{
-		char message[BUFSIZE] = { 0 };
-
-		/* time to actually remove the current node */
-		RemoveAutoFailoverNode(activeNode);
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Removing " NODE_FORMAT " from formation \"%s\" and group %d",
-			NODE_FORMAT_ARGS(activeNode),
-			activeNode->formationId,
-			activeNode->groupId);
-
-		return true;
-	}
-
-	/* node reports secondary/dropped */
-	if (activeNode->goalState == REPLICATION_STATE_DROPPED)
-	{
-		return true;
-	}
-
-	/*
-	 * A node in "maintenance" state can only get out of maintenance through an
-	 * explicit call to stop_maintenance(), the FSM will not assign a new state
-	 * to a node that is currently in maintenance.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_MAINTENANCE))
-	{
-		return true;
-	}
-
-	/*
-	 * A node reporting demote_timeout may have gotten there on its own
-	 * initiative (check_for_network_partitions() in service_keeper.c
-	 * self-fences independently of whatever goal the monitor last assigned --
-	 * see #1025). If the currently assigned goal isn't one demote_timeout can
-	 * actually reach, the keeper would fatal forever trying to get there.
-	 * Re-target to demoted: always a valid demote_timeout exit
-	 * (DEMOTE_TIMEOUT_STATE -> DEMOTED_STATE, fsm.c:355), and the safe,
-	 * conservative choice -- the node stays fenced from writes until the
-	 * existing "demoted -> catchingup" reintegration path
-	 * (group_state_machine.c:909) or an operator decides otherwise.
-	 *
-	 * Deliberately a plain reportedState check, not IsCurrentState(): the
-	 * whole point is to catch reportedState == demote_timeout while
-	 * goalState is still whatever was assigned before the self-fence --
-	 * IsCurrentState() requires goalState == reportedState == state, which
-	 * is exactly the case that does NOT need re-targeting (the node is
-	 * already headed somewhere demote_timeout can reach).
-	 */
-	if (activeNode->reportedState == REPLICATION_STATE_DEMOTE_TIMEOUT &&
-		activeNode->goalState != REPLICATION_STATE_DEMOTE_TIMEOUT &&
-		activeNode->goalState != REPLICATION_STATE_DEMOTED &&
-		activeNode->goalState != REPLICATION_STATE_PRIMARY &&
-		activeNode->goalState != REPLICATION_STATE_SINGLE)
-	{
-		char message[BUFSIZE] = { 0 };
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to demoted: it reports demote_timeout but is assigned %s, "
-			"which demote_timeout cannot reach.",
-			NODE_FORMAT_ARGS(activeNode),
-			ReplicationStateGetName(activeNode->goalState));
-
-		AssignGoalState(activeNode, REPLICATION_STATE_DEMOTED, message);
-
-		return true;
-	}
-
-	/*
-	 * A node that is alone in its group should be SINGLE.
-	 *
-	 * Exception arises when it used to be other nodes in the group, and the
-	 * only node left has Candidate Priority of zero. In that case the setup is
-	 * clear, it can't allow writes, so it can't be SINGLE. In that case, it
-	 * should be REPORT_LSN, waiting for either a change of settings, or the
-	 * introduction of a new node.
-	 */
-	if (nodesCount == 1 &&
-		!IsCurrentState(activeNode, REPLICATION_STATE_SINGLE) &&
-		activeNode->candidatePriority > 0)
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to single as there is no other node.",
-			NODE_FORMAT_ARGS(activeNode));
-
-		/* other node may have been removed */
-		AssignGoalState(activeNode, REPLICATION_STATE_SINGLE, message);
-
-		return true;
-	}
-	else if (nodesCount == 1 &&
-			 !IsCurrentState(activeNode, REPLICATION_STATE_SINGLE) &&
-			 activeNode->candidatePriority == 0)
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to report_lsn as there is no other node"
-			" and candidate priority is %d.",
-			NODE_FORMAT_ARGS(activeNode),
-			activeNode->candidatePriority);
-
-		/* other node may have been removed */
-		AssignGoalState(activeNode, REPLICATION_STATE_REPORT_LSN, message);
-
-		return true;
+		return DispatchMonitorFSMRule(ctx, &earlyNac, &MonitorFSM_EarlyChecks[earlyIndex]);
 	}
 
 	/*
 	 * We separate out the FSM for the primary server, because that one needs
 	 * to loop over every other node to take decisions. That induces some
 	 * complexity that is best managed in a specialized function.
+	 *
+	 * This early return can't become a MonitorFSM_FromContext row: it's
+	 * exactly the branch point the whole table design has to preserve as an
+	 * *entry* decision, not a matched condition -- see the note above
+	 * MonitorFSM_FromContext.
 	 */
 	if (IsInPrimaryState(activeNode))
 	{
@@ -325,851 +1480,41 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 						   ReplicationStateGetName(activeNode->goalState))));
 	}
 
-	/*
-	 * Detect a genuine timeline fork on a healthy secondary as soon as its
-	 * newly reported timeline is visible, rather than waiting for an
-	 * incidental health-check cycle or an explicit maintenance toggle to
-	 * eventually drive it through catchingup (see #683 and the timeline
-	 * fork detection design). Reuses the exact same ancestry filter the
-	 * report_lsn election path already applies (below, and in
-	 * ProceedGroupStateForMSFailover) -- this only changes when a
-	 * diverged secondary gets pushed to catchingup, not how that's
-	 * decided or how the resync itself recovers it.
-	 *
-	 * Scoped to activeNode currently being SECONDARY_STATE: that's the
-	 * same state the "unhealthy secondary" transition just below already
-	 * uses for the identical CATCHINGUP goal assignment, so this is
-	 * additive to an existing, tested transition rather than a new kind
-	 * of one. A node with reportedTLI == 0 hasn't reported a timeline yet
-	 * (e.g. still in wait_standby) and has nothing to check.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_SECONDARY) &&
-		activeNode->reportedTLI > 0)
-	{
-		int referenceTli = 0;
-		List *comparableNodeList =
-			FilterNodesByTimelineAncestry(ctx->groupNodeList, formationId,
-										  groupId, &referenceTli);
+	NodeActiveContext nac;
 
-		bool activeNodeIsComparable = false;
-		ListCell *cell = NULL;
-
-		foreach(cell, comparableNodeList)
-		{
-			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(cell);
-
-			if (node->nodeId == activeNode->nodeId)
-			{
-				activeNodeIsComparable = true;
-				break;
-			}
-		}
-
-		if (referenceTli > 0 && !activeNodeIsComparable)
-		{
-			char message[BUFSIZE] = { 0 };
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to catchingup: its reported timeline %d does not appear "
-				"to be an ancestor of the group's reference timeline %d -- "
-				"forcing a resync so the ancestry check can run and, if "
-				"needed, rewind it onto the correct lineage.",
-				NODE_FORMAT_ARGS(activeNode),
-				activeNode->reportedTLI,
-				referenceTli);
-
-			AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
-
-			return true;
-		}
-	}
+	BuildFromContextNodeActiveContext(ctx, primaryNode, &nac);
 
 	/*
-	 * Replication stall detection (issue #997 — 3-DC split-brain).
-	 *
-	 * When the primary is healthy (monitor can reach it) but no standby has
-	 * appeared in pg_stat_replication for longer than
-	 * pgautofailover.replication_stall_timeout, we assign wait_primary.
-	 * That clears synchronous_standby_names so COMMIT no longer hangs.
-	 *
-	 * replication_stall_since is set/cleared by ReportAutoFailoverNodeState()
-	 * each time the keeper calls node_active().
+	 * A matched row's extraAction may return false ("continue") to mirror
+	 * the real source's fallthrough after the MS-failover cascade: when
+	 * ProceedGroupStateForMSFailover() (via ActionRunMultiStandbyFailoverCascade)
+	 * declines to act, the original if-chain keeps evaluating the rest of
+	 * its conditions in the very same call instead of stopping. Re-scanning
+	 * from startIndex on the same nac is safe here: RuleMatches() reads node
+	 * state through the live AutoFailoverNode pointers stored in nac, so any
+	 * goal state just assigned by this same dispatch (e.g. DRAINING on
+	 * primaryNode) is already visible to the next match attempt.
 	 */
-	if (IsInPrimaryState(primaryNode) &&
-		NodeIsHealthy(primaryNode, ctx) &&
-		primaryNode->replicationStallSince != 0 &&
-		TimestampDifferenceExceeds(primaryNode->replicationStallSince,
-								   ctx->now,
-								   ctx->replicationStallTimeoutMs))
+	int startIndex = 0;
+
+	while (true)
 	{
-		char message[BUFSIZE] = { 0 };
+		int index = FindMatchingMonitorFSMRuleIndexFrom(MonitorFSM_FromContext,
+														MonitorFSM_FromContext_SIZE,
+														startIndex, &nac);
 
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to wait_primary: no standby has been connected in "
-			"pg_stat_replication for more than %dms "
-			"(pgautofailover.replication_stall_timeout).",
-			NODE_FORMAT_ARGS(primaryNode),
-			ctx->replicationStallTimeoutMs);
-
-		AssignGoalState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-		return true;
-	}
-
-	/* Multiple Standby failover is handled in its own function. */
-	if (nodesCount > 2 && NodeIsUnhealthy(primaryNode, ctx))
-	{
-		/*
-		 * The WAIT_PRIMARY state encodes the fact that we know there is no
-		 * failover candidate, so there's no point in orchestrating a failover,
-		 * even though the primary node is currently not available.
-		 *
-		 * To be in the WAIT_PRIMARY means that the other nodes are all either
-		 * unhealty or with candidate priority set to zero.
-		 *
-		 * Otherwise stop replication from the primary and proceed with
-		 * candidate election for primary replacement, whenever we have at
-		 * least one candidates for failover.
-		 */
-		List *candidateNodesList =
-			AutoFailoverOtherNodesListInState(primaryNode,
-											  REPLICATION_STATE_SECONDARY);
-
-		int candidatesCount = CountHealthyCandidates(candidateNodesList);
-
-		if (IsInPrimaryState(primaryNode) &&
-			!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-			candidatesCount >= 1)
+		if (index < 0)
 		{
-			char message[BUFSIZE] = { 0 };
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to draining after it became unhealthy.",
-				NODE_FORMAT_ARGS(primaryNode));
-
-			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+			return false;
 		}
 
-		/*
-		 * In a multiple standby system we can assign maintenance as soon as
-		 * prepare_maintenance has been reached, at the same time than an
-		 * election is triggered. This also allows the operator to disable
-		 * maintenance on the old-primary and have it join the election.
-		 */
-		else if (IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
-		{
-			char message[BUFSIZE] = { 0 };
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to maintenance after it converged to prepare_maintenance.",
-				NODE_FORMAT_ARGS(primaryNode));
-
-			AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, message);
-		}
-
-		/*
-		 * ProceedGroupStateForMSFailover chooses the failover candidate when
-		 * there's more than one standby node around, by applying the
-		 * candidatePriority and comparing the reportedLSN. The function also
-		 * orchestrate fetching the missing WAL from the failover candidate if
-		 * that's needed.
-		 *
-		 * When ProceedGroupStateForMSFailover returns true, it means it was
-		 * successfull in driving the failover to the next step, and we should
-		 * stop here. When it return false, it did nothing, and so we want to
-		 * apply the common orchestration code for a failover.
-		 */
-		if (ProceedGroupStateForMSFailover(ctx, primaryNode))
+		if (DispatchMonitorFSMRule(ctx, &nac, &MonitorFSM_FromContext[index]))
 		{
 			return true;
 		}
+
+		startIndex = index + 1;
 	}
-
-	/*
-	 * when report_lsn and the promotion has been done already:
-	 *      report_lsn -> secondary
-	 *
-	 *
-	 * Let the main primary loop account for allSecondariesAreHealthy and only
-	 * then decide to assign PRIMARY to the primaryNode.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
-		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)) &&
-		NodeIsHealthy(primaryNode, ctx))
-	{
-		char message[BUFSIZE] = { 0 };
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to secondary after " NODE_FORMAT
-			" converged to %s and has been marked healthy.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode),
-			ReplicationStateGetName(primaryNode->reportedState));
-
-		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-
-		return true;
-	}
-
-	/*
-	 * when report_lsn and the promotion has been done already:
-	 *      report_lsn -> secondary
-	 *
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
-		NodeIsHealthy(primaryNode, ctx))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to secondary after " NODE_FORMAT
-			" got selected as the failover candidate.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-
-		return true;
-	}
-
-	/*
-	 * When the candidate is done fast forwarding the locally missing WAL bits,
-	 * it can be promoted.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
-	{
-		char message[BUFSIZE] = { 0 };
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to prepare_promotion",
-			NODE_FORMAT_ARGS(activeNode));
-
-		AssignGoalState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
-
-		return true;
-	}
-
-	/*
-	 * There are other cases when we want to continue an already started
-	 * failover.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_REPORT_LSN) ||
-		IsCurrentState(activeNode, REPLICATION_STATE_FAST_FORWARD))
-	{
-		return ProceedGroupStateForMSFailover(ctx, primaryNode);
-	}
-
-	/*
-	 * when primary node is ready for replication:
-	 *  wait_standby -> catchingup
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
-		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY)))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to catchingup after " NODE_FORMAT
-			" converged to %s.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode),
-			ReplicationStateGetName(primaryNode->reportedState));
-
-		/* start replication */
-		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
-
-		return true;
-	}
-
-	/*
-	 * when primary node is ready for replication:
-	 *  wait_standby -> catchingup
-	 *  primary -> apply_settings
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
-		activeNode->replicationQuorum)
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to catchingup and " NODE_FORMAT
-			" to %s to edit synchronous_standby_names.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode),
-			ReplicationStateGetName(primaryNode->reportedState));
-
-		/* start replication */
-		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
-
-		/* edit synchronous_standby_names to add the new standby now */
-		AssignGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
-
-		return true;
-	}
-
-	/*
-	 * when primary node is ready for replication:
-	 *  wait_standby -> catchingup
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_STANDBY) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) &&
-		!activeNode->replicationQuorum)
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to catchingup.",
-			NODE_FORMAT_ARGS(activeNode));
-
-		/* start replication */
-		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
-
-		return true;
-	}
-
-	/*
-	 * when secondary caught up:
-	 *      catchingup -> secondary
-	 *  + wait_primary -> primary
-	 *
-	 * When we have multiple standby nodes and one of them is joining, or
-	 * re-joining after maintenance, we have to edit the replication setting
-	 * synchronous_standby_names on the primary. The transition from another
-	 * state to PRIMARY includes that edit. If the primary already is in the
-	 * primary state, we assign APPLY_SETTINGS to it to make sure its
-	 * repication settings are updated now.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_CATCHINGUP) &&
-		(IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)) &&
-		NodeIsHealthy(activeNode, ctx) &&
-		activeNode->reportedTLI == primaryNode->reportedTLI &&
-		WalDifferenceWithin(activeNode, primaryNode, EnableSyncXlogThreshold))
-	{
-		char message[BUFSIZE] = { 0 };
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to secondary after it caught up.",
-			NODE_FORMAT_ARGS(activeNode));
-
-		/* node is ready for promotion */
-		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-
-		return true;
-	}
-
-	/*
-	 * when primary fails:
-	 *   secondary -> prepare_promotion
-	 * +   primary -> draining
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_SECONDARY) &&
-		IsInPrimaryState(primaryNode) &&
-		NodeIsUnhealthy(primaryNode, ctx) && NodeIsHealthy(activeNode, ctx) &&
-		activeNode->candidatePriority > 0 &&
-		WalDifferenceWithin(activeNode, primaryNode, PromoteXlogThreshold))
-	{
-		char message[BUFSIZE];
-
-		/*
-		 * A primary already converged to wait_primary has no "draining" to
-		 * go through: it never had a synchronous standby to begin with, so
-		 * there's nothing live to gracefully drain, and KeeperFSM[] has no
-		 * wait_primary -> draining edge anyway (issue #1168). Leave its
-		 * goal untouched here; the prepare_promotion/stop_replication rules
-		 * below apply the same drainTimeoutMs safety margin via report
-		 * staleness instead of a goal-state timestamp, then commit the one
-		 * real, reachable wait_primary -> demoted transition once it has
-		 * genuinely expired.
-		 */
-		if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
-		{
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to prepare_promotion after " NODE_FORMAT
-				" (at wait_primary) became unhealthy.",
-				NODE_FORMAT_ARGS(activeNode),
-				NODE_FORMAT_ARGS(primaryNode));
-		}
-		else
-		{
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to draining and " NODE_FORMAT
-				" to prepare_promotion "
-				"after " NODE_FORMAT
-				" became unhealthy.",
-				NODE_FORMAT_ARGS(primaryNode),
-				NODE_FORMAT_ARGS(activeNode),
-				NODE_FORMAT_ARGS(primaryNode));
-
-			/* shut down the primary */
-			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
-		}
-
-		/* keep reading until no more records are available */
-		AssignGoalState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION, message);
-
-		return true;
-	}
-
-	/*
-	 * when secondary is put to maintenance and there's no standby left
-	 *  wait_maintenance -> maintenance
-	 *  wait_primary
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_MAINTENANCE) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to maintenance after " NODE_FORMAT
-			" converged to wait_primary.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		/* secondary reached maintenance */
-		AssignGoalState(activeNode, REPLICATION_STATE_MAINTENANCE, message);
-
-		return true;
-	}
-
-	/*
-	 * when secondary is in wait_maintenance state and goal state of primary is
-	 * not wait_primary anymore, e.g. another node joined and made it primary
-	 * again or it got demoted. Then we don't need to wait anymore and we can
-	 * transition directly to maintenance.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_WAIT_MAINTENANCE) &&
-		primaryNode->goalState != REPLICATION_STATE_WAIT_PRIMARY)
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to maintenance after " NODE_FORMAT
-			" got assigned %s as goal state.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode),
-			ReplicationStateGetName(primaryNode->goalState));
-
-		/* secondary reached maintenance */
-		AssignGoalState(activeNode, REPLICATION_STATE_MAINTENANCE, message);
-
-		return true;
-	}
-
-	/*
-	 * when primary is put to maintenance
-	 *  prepare_promotion -> stop_replication
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to stop_replication after " NODE_FORMAT
-			" converged to prepare_maintenance.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		/* promote the secondary */
-		AssignGoalState(activeNode, REPLICATION_STATE_STOP_REPLICATION, message);
-
-		return true;
-	}
-
-	/*
-	 * when a worker blocked writes:
-	 *   prepare_promotion -> wait_primary
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
-		primaryNode &&
-		IsCitusFormation(ctx->formation) && activeNode->groupId > 0)
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to wait_primary and " NODE_FORMAT
-			" to demoted after the coordinator metadata was updated.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		/* node is now taking writes */
-		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-		/* done draining, node is presumed dead */
-		AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTED, message);
-
-		return true;
-	}
-
-	/*
-	 * when a worker blocked writes and the primary has been removed:
-	 *   prepare_promotion -> wait_primary
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
-		primaryNode == NULL &&
-		IsCitusFormation(ctx->formation) && activeNode->groupId > 0)
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to wait_primary after the coordinator metadata was updated.",
-			NODE_FORMAT_ARGS(activeNode));
-
-		/* node is now taking writes */
-		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-		return true;
-	}
-
-	/*
-	 * when node is seeing no more writes:
-	 *  prepare_promotion -> stop_replication
-	 *
-	 * refrain from prepare_maintenance -> demote_timeout on the primary, which
-	 * might happen here when secondary has reached prepare_promotion before
-	 * primary has reached prepare_maintenance.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
-		primaryNode &&
-		!IsInMaintenance(primaryNode))
-	{
-		char message[BUFSIZE];
-
-		/*
-		 * wait_primary has no reachable demote_timeout edge either (issue
-		 * #1168); leave its goal alone here and let the completion rule
-		 * below apply the drainTimeoutMs safety margin via report
-		 * staleness instead.
-		 */
-		if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY))
-		{
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to stop_replication after it converged to "
-				"prepare_promotion.",
-				NODE_FORMAT_ARGS(activeNode));
-		}
-		else
-		{
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to demote_timeout and " NODE_FORMAT
-				" to stop_replication after " NODE_FORMAT
-				" converged to prepare_promotion.",
-				NODE_FORMAT_ARGS(primaryNode),
-				NODE_FORMAT_ARGS(activeNode),
-				NODE_FORMAT_ARGS(activeNode));
-
-			/* wait for possibly-alive primary to kill itself */
-			AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT, message);
-		}
-
-		/* perform promotion to stop replication */
-		AssignGoalState(activeNode, REPLICATION_STATE_STOP_REPLICATION, message);
-
-		return true;
-	}
-
-	/*
-	 * when primary node has been removed and we are promoting one standby
-	 *  prepare_promotion -> stop_replication
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_PREPARE_PROMOTION) &&
-		primaryNode == NULL)
-	{
-		char message[BUFSIZE] = { 0 };
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to wait_primary after " NODE_FORMAT
-			" converged to prepare_promotion.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(activeNode));
-
-		/* perform promotion to stop replication */
-		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-		return true;
-	}
-
-	/*
-	 * when primary node is going to maintenance
-	 *  stop_replication -> wait_primary
-	 *  prepare_maintenance -> maintenance
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to wait_primary and " NODE_FORMAT
-			" to maintenance.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		/* node is now taking writes */
-		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-		/* old primary node is now ready for maintenance operations */
-		AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, message);
-
-		return true;
-	}
-
-	/*
-	 * when drain time expires or primary reports it's drained:
-	 *  draining -> demoted
-	 *
-	 * NodeIsWaitPrimaryPresumedDead covers the wait_primary equivalent
-	 * (issue #1168): the same drainTimeoutMs safety margin, applied via
-	 * report staleness instead of a demote_timeout goal-state timestamp
-	 * since that state is never reachable from wait_primary.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
-		(IsCurrentState(primaryNode, REPLICATION_STATE_DEMOTE_TIMEOUT) ||
-		 NodeIsDrainTimeExpired(primaryNode, ctx) ||
-		 NodeIsWaitPrimaryPresumedDead(primaryNode, activeNode, ctx)))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to wait_primary and " NODE_FORMAT
-			" to demoted after the primary was presumed dead.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		/* node is now taking writes */
-		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-		/* done draining, node is presumed dead */
-		AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTED, message);
-
-		return true;
-	}
-
-	/*
-	 * when a worker blocked writes:
-	 *   stop_replication -> wait_primary
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
-		primaryNode &&
-		IsCitusFormation(ctx->formation) && activeNode->groupId > 0)
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to wait_primary and " NODE_FORMAT
-			" to demoted after the coordinator metadata was updated.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		/* node is now taking writes */
-		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-		/* done draining, node is presumed dead */
-		AssignGoalState(primaryNode, REPLICATION_STATE_DEMOTED, message);
-
-		return true;
-	}
-
-	/*
-	 * when a worker blocked writes, and the primary has been dropped:
-	 *   stop_replication -> wait_primary
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_STOP_REPLICATION) &&
-		primaryNode == NULL &&
-		IsCitusFormation(ctx->formation) && activeNode->groupId > 0)
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to wait_primary after the coordinator metadata was updated.",
-			NODE_FORMAT_ARGS(activeNode));
-
-		/* node is now taking writes */
-		AssignGoalState(activeNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-
-		return true;
-	}
-
-	/*
-	 * when a new primary is ready:
-	 *  demoted -> catchingup
-	 *
-	 * We accept to move from demoted to catching up as soon as the primary
-	 * node is has reported either wait_primary or join_primary, and even when
-	 * it's already transitioning to primary, thanks to another standby
-	 * concurrently making progress.
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
-		NodeIsHealthy(primaryNode, ctx) &&
-		((primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY ||
-		  primaryNode->reportedState == REPLICATION_STATE_JOIN_PRIMARY) &&
-		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to catchingup after it converged to demotion and " NODE_FORMAT
-			" converged to primary.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		/* it's safe to rejoin as a secondary */
-		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
-
-		return true;
-	}
-
-	/*
-	 * when a new primary is ready:
-	 *  demoted -> catchingup
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_DEMOTED) &&
-		NodeIsHealthy(primaryNode, ctx) &&
-		(IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		 IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY)))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to catchingup after it converged to demotion and " NODE_FORMAT
-			" converged to %s.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode),
-			ReplicationStateGetName(primaryNode->reportedState));
-
-		/* it's safe to rejoin as a secondary */
-		AssignGoalState(activeNode, REPLICATION_STATE_CATCHINGUP, message);
-
-		return true;
-	}
-
-	/*
-	 * when a new primary is ready:
-	 *  join_secondary -> secondary
-	 *
-	 * As there's no action to implement on the new selected primary for that
-	 * step, we can make progress as soon as we want to.
-	 *
-	 * The primary could be in one of those states:
-	 *  - wait_primary/wait_primary
-	 *  - wait_primary/primary
-	 *
-	 * This transition also happens when a former primary node has been
-	 * demoted, and a multiple standbys has taken effect, we have a new primary
-	 * being promoted, and several standby nodes following the new primary.
-	 *
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_JOIN_SECONDARY) &&
-		primaryNode->reportedState == REPLICATION_STATE_WAIT_PRIMARY &&
-		(primaryNode->goalState == REPLICATION_STATE_WAIT_PRIMARY ||
-		 primaryNode->goalState == REPLICATION_STATE_PRIMARY))
-	{
-		char message[BUFSIZE] = { 0 };
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to secondary after " NODE_FORMAT
-			" converged to wait_primary.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		/* it's safe to rejoin as a secondary */
-		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-
-		/* compute next step for the primary depending on node settings */
-		return ProceedGroupStateForPrimaryNode(ctx, primaryNode);
-	}
-
-	/*
-	 * when a new secondary re-appears after a failover or at a "random" time
-	 * in the FSM cycle, and the wait_primary or join_primary node has already
-	 * made progress to primary.
-	 *
-	 *  join_secondary -> secondary
-	 */
-	if (IsCurrentState(activeNode, REPLICATION_STATE_JOIN_SECONDARY) &&
-		IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY))
-	{
-		char message[BUFSIZE];
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to secondary after " NODE_FORMAT
-			" converged to primary.",
-			NODE_FORMAT_ARGS(activeNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		/* it's safe to rejoin as a secondary */
-		AssignGoalState(activeNode, REPLICATION_STATE_SECONDARY, message);
-
-		return true;
-	}
-
-	return false;
 }
 
 
@@ -1180,319 +1525,19 @@ static bool
 ProceedGroupStateForPrimaryNode(GroupStateContext *ctx,
 								AutoFailoverNode *primaryNode)
 {
-	List *otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
-	int otherNodesCount = list_length(otherNodesGroupList);
+	NodeActiveContext nac;
 
-	/*
-	 * when a first "other" node wants to become standby:
-	 *  single -> wait_primary
-	 */
-	if (IsCurrentState(primaryNode, REPLICATION_STATE_SINGLE))
+	BuildForPrimaryNodeNodeActiveContext(ctx, primaryNode, &nac);
+
+	int index = FindMatchingMonitorFSMRuleIndex(MonitorFSM_ForPrimaryNode,
+												MonitorFSM_ForPrimaryNode_SIZE, &nac);
+
+	if (index < 0)
 	{
-		ListCell *nodeCell = NULL;
-
-		foreach(nodeCell, otherNodesGroupList)
-		{
-			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-			if (IsCurrentState(otherNode, REPLICATION_STATE_WAIT_STANDBY))
-			{
-				char message[BUFSIZE];
-
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of " NODE_FORMAT
-					" to wait_primary after " NODE_FORMAT
-					" joined.",
-					NODE_FORMAT_ARGS(primaryNode),
-					NODE_FORMAT_ARGS(otherNode));
-
-				/* prepare replication slot and pg_hba.conf */
-				AssignGoalState(primaryNode,
-								REPLICATION_STATE_WAIT_PRIMARY,
-								message);
-
-				return true;
-			}
-		}
+		return false;
 	}
 
-	/*
-	 * when secondary unhealthy:
-	 *   secondary ➜ catchingup
-	 *     primary ➜ wait_primary
-	 *
-	 * We only swith the primary to wait_primary when there's no healthy
-	 * secondary anymore. In other cases, there's by definition at least one
-	 * candidate for failover.
-	 *
-	 * Also we might lose a standby node while already in WAIT_PRIMARY, when
-	 * all the left standby nodes are assigned a candidatePriority of zero.
-	 */
-	if (IsCurrentState(primaryNode, REPLICATION_STATE_PRIMARY) ||
-		IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) ||
-		IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
-	{
-		/*
-		 * We count our nodes in different ways, because of special cases we
-		 * want to be able to address. We want to distinguish nodes that are in
-		 * the replication quorum, nodes that are secondary, and nodes that are
-		 * secondary but do not participate in the quorum.
-		 *
-		 * - replicationQuorumCount is the count of nodes with
-		 *   replicationQuorum true, whether or not those nodes are currently
-		 *   in the SECONDARY state.
-		 *
-		 * - secondaryNodesCount is the count of nodes that are currently in
-		 *   the SECONDARY state.
-		 *
-		 * - secondaryQuorumNodesCount is the count of nodes that are both
-		 *   setup to participate in the replication quorum and also currently
-		 *   in the SECONDARY state.
-		 */
-		int replicationQuorumCount = otherNodesCount;
-		int secondaryNodesCount = otherNodesCount;
-		int secondaryQuorumNodesCount = otherNodesCount;
-
-		ListCell *nodeCell = NULL;
-
-		foreach(nodeCell, otherNodesGroupList)
-		{
-			AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
-
-			/*
-			 * We force secondary nodes to catching-up even if the node is on
-			 * its way to being a secondary... unless it is currently in the
-			 * reportLSN or join_secondary state, because in those states
-			 * Postgres is stopped, waiting for the new primary to be
-			 * available.
-			 */
-			if (otherNode->goalState == REPLICATION_STATE_SECONDARY &&
-				otherNode->reportedState != REPLICATION_STATE_REPORT_LSN &&
-				otherNode->reportedState != REPLICATION_STATE_JOIN_SECONDARY &&
-				NodeIsUnhealthy(otherNode, ctx))
-			{
-				char message[BUFSIZE];
-
-				--secondaryNodesCount;
-				--secondaryQuorumNodesCount;
-
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of " NODE_FORMAT
-					" to catchingup after it became unhealthy.",
-					NODE_FORMAT_ARGS(otherNode));
-
-				/* other node is behind, no longer eligible for promotion */
-				AssignGoalState(otherNode,
-								REPLICATION_STATE_CATCHINGUP, message);
-			}
-			else if (!IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY))
-			{
-				--secondaryNodesCount;
-				--secondaryQuorumNodesCount;
-			}
-
-			/* at this point we are left with nodes in SECONDARY state */
-			else if (IsCurrentState(otherNode, REPLICATION_STATE_SECONDARY) &&
-					 !otherNode->replicationQuorum)
-			{
-				--secondaryQuorumNodesCount;
-			}
-
-			/* now separately count nodes setup with replication quorum */
-			if (!otherNode->replicationQuorum)
-			{
-				--replicationQuorumCount;
-			}
-		}
-
-		/*
-		 * Special case first: when given a setup where all the nodes are async
-		 * (replicationQuorumCount == 0) we allow the "primary" state in almost
-		 * all cases, knowing that synchronous_standby_names is still going to
-		 * be computed as ''.
-		 *
-		 * That said, if we don't have a single node in the SECONDARY state, we
-		 * still want to switch to WAIT_PRIMARY to show that something
-		 * unexpected is happening.
-		 */
-		if (replicationQuorumCount == 0)
-		{
-			Assert(ctx->formation->number_sync_standbys == 0);
-
-			ReplicationState primaryGoalState =
-				secondaryNodesCount == 0
-				? REPLICATION_STATE_WAIT_PRIMARY
-				: REPLICATION_STATE_PRIMARY;
-
-			if (primaryNode->goalState != primaryGoalState)
-			{
-				char message[BUFSIZE] = { 0 };
-
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of " NODE_FORMAT
-					" to %s because none of the secondary nodes"
-					" are healthy at the moment.",
-					NODE_FORMAT_ARGS(primaryNode),
-					ReplicationStateGetName(primaryGoalState));
-
-				AssignGoalState(primaryNode, primaryGoalState, message);
-
-				return true;
-			}
-
-			/* when all nodes are async, we're done here */
-			return true;
-		}
-
-		/*
-		 * Disable synchronous replication to maintain availability.
-		 *
-		 * Note that we implement here a trade-off between availability (of
-		 * writes) against durability of the written data. In the case when
-		 * there's a single standby in the group, pg_auto_failover choice is to
-		 * maintain availability of the service, including writes.
-		 *
-		 * In the case when the user has setup a replication quorum of 1 or
-		 * more, then pg_auto_failover does not get in the way. You get what
-		 * you ask for, which is a strong guarantee on durability.
-		 *
-		 * To have number_sync_standbys == 1, you need to have at least 2
-		 * standby servers. To get to a point where writes are not possible
-		 * anymore, there needs to be a point in time where 2 of the 2 standby
-		 * nodes are unavailable. In that case, pg_auto_failover does not
-		 * change the configured trade-offs. Writes are blocked until one of
-		 * the two defective standby nodes is available again.
-		 */
-		if (!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-			secondaryQuorumNodesCount == 0 &&
-			!IsFailoverInProgress(ctx->groupNodeList))
-		{
-			/*
-			 * Do not second-guess an already-started failover: a candidate
-			 * that just converged to prepare_promotion (or later stages) has
-			 * left SECONDARY, dropping secondaryQuorumNodesCount to zero even
-			 * though it *is* the failover candidate. Without this guard the
-			 * primary can be reassigned wait_primary right as its own
-			 * candidate is converging, landing it on wait_primary while a
-			 * later rule still expects to find it in draining and assigns
-			 * demote_timeout -- an assignment with no FSM edge from
-			 * wait_primary (issue #774).
-			 *
-			 * Allow wait_primary when number_sync_standbys = 0, otherwise
-			 * block writes on the primary.
-			 */
-			ReplicationState primaryGoalState =
-				ctx->formation->number_sync_standbys == 0
-				? REPLICATION_STATE_WAIT_PRIMARY
-				: REPLICATION_STATE_PRIMARY;
-
-			if (primaryNode->goalState != primaryGoalState)
-			{
-				char message[BUFSIZE] = { 0 };
-
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of " NODE_FORMAT
-					" to %s because none of the standby nodes in the quorum"
-					" are healthy at the moment.",
-					NODE_FORMAT_ARGS(primaryNode),
-					ReplicationStateGetName(primaryGoalState));
-
-				AssignGoalState(primaryNode, primaryGoalState, message);
-
-				return true;
-			}
-		}
-
-		/*
-		 * when a node is wait_primary and has at least one healthy candidate
-		 * secondary
-		 *     wait_primary ➜ primary
-		 */
-		if (IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-			secondaryQuorumNodesCount > 0)
-		{
-			char message[BUFSIZE] = { 0 };
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to primary now that we have %d healthy "
-				" secondary nodes in the quorum.",
-				NODE_FORMAT_ARGS(primaryNode),
-				secondaryQuorumNodesCount);
-
-			AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
-
-			return true;
-		}
-
-		/*
-		 * when a node has changed its replication settings:
-		 *     apply_settings ➜ wait_primary
-		 *     apply_settings ➜ primary
-		 *
-		 * Even when we don't currently have healthy standby nodes to failover
-		 * to, if the number_sync_standbys is greater than zero that means the
-		 * user wants to block writes on the primary, and we do that by
-		 * switching to the primary state after having applied replication
-		 * settings. Think
-		 *
-		 *  $ pg_autoctl set formation number-sync-standbys 1
-		 *
-		 * during an incident to stop the amount of potential data loss.
-		 *
-		 */
-		if (IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
-		{
-			char message[BUFSIZE] = { 0 };
-
-			ReplicationState primaryGoalState =
-				ctx->formation->number_sync_standbys == 0 &&
-				secondaryQuorumNodesCount == 0
-				? REPLICATION_STATE_WAIT_PRIMARY
-				: REPLICATION_STATE_PRIMARY;
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to %s after it applied replication properties change.",
-				NODE_FORMAT_ARGS(primaryNode),
-				ReplicationStateGetName(primaryGoalState));
-
-			AssignGoalState(primaryNode, primaryGoalState, message);
-
-			return true;
-		}
-
-		return true;
-	}
-
-	/*
-	 * We don't use the join_primary state any more, though for backwards
-	 * compatibility if a node reports JOIN_PRIMARY well then we assign PRIMARY
-	 * to the node. After all it might be that an operator upgrades while a
-	 * node is in JOIN_PRIMARY and we certainly want to be able to handle the
-	 * situation.
-	 */
-	if (IsCurrentState(primaryNode, REPLICATION_STATE_JOIN_PRIMARY))
-	{
-		char message[BUFSIZE] = { 0 };
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT " to primary",
-			NODE_FORMAT_ARGS(primaryNode));
-
-		AssignGoalState(primaryNode, REPLICATION_STATE_PRIMARY, message);
-
-		return true;
-	}
-
-	return false;
+	return DispatchMonitorFSMRule(ctx, &nac, &MonitorFSM_ForPrimaryNode[index]);
 }
 
 
