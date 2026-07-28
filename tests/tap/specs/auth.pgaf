@@ -75,3 +75,16 @@ step test_005_logging_of_passwords {
     logs node2 contains "monitor-password ****"
     logs node2 contains "replication-password ****"
 }
+
+step test_006_no_password_leak_on_monitor_disconnect {
+    # node1 (secondary) cannot reach the monitor while cut off from the
+    # network: its node-active loop keeps retrying node_active() and hitting
+    # the "Failed to connect to monitor database" error path (see #1043).
+    network disconnect node1
+    sleep 5s
+    logs node1 contains "Failed to connect to monitor database"
+    logs node1 contains "****"
+    logs node1 not contains "pg-auto-failover"
+    network connect node1
+    wait until node1 state is secondary  timeout 90s
+}

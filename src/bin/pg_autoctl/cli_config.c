@@ -22,6 +22,7 @@
 #include "keeper.h"
 #include "monitor.h"
 #include "monitor_config.h"
+#include "parsing.h"
 #include "pidfile.h"
 
 
@@ -366,7 +367,15 @@ cli_config_check_connections(PostgresSetup *pgSetup,
 	/* disconnect from the monitor now */
 	pgsql_finish(&(monitor.pgsql));
 
-	log_info("Connection to monitor ok, using \"%s\"", monitor_pguri);
+	{
+		char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+
+		(void) parse_and_scrub_connection_string(monitor_pguri,
+												 scrubbedConnectionString);
+
+		log_info("Connection to monitor ok, using \"%s\"",
+				 scrubbedConnectionString);
+	}
 
 	if (strcmp(version.installedVersion, PG_AUTOCTL_EXTENSION_VERSION) == 0)
 	{

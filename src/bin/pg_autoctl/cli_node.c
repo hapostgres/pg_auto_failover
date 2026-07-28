@@ -29,6 +29,7 @@
 #include "log.h"
 #include "monitor_config.h"
 #include "nodespec.h"
+#include "parsing.h"
 #include "pgsetup.h"
 #include "runprogram.h"
 #include "string_utils.h"
@@ -297,7 +298,11 @@ node_copy_ssl_certs(const NodeSpec *spec)
 
 
 /*
- * log_argv prints an argv[] to the log, masking password arguments.
+ * log_argv prints an argv[] to the log, masking password arguments. The
+ * --monitor argument is a full connection string rather than a bare
+ * password, so it's scrubbed (password replaced by ****) rather than
+ * blanked outright, to keep the rest of the URI visible for context (see
+ * #1043).
  */
 static void
 log_argv(const char *prefix, char **args, int nargs)
@@ -329,7 +334,29 @@ log_argv(const char *prefix, char **args, int nargs)
 				}
 			}
 		}
-		appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
+
+		if (maskThis)
+		{
+			appendPQExpBufferStr(cmd, "****");
+		}
+		else if (i > 0 && strcmp(args[i - 1], "--monitor") == 0)
+		{
+			char scrubbedConnectionString[MAXCONNINFO] = { 0 };
+
+			if (parse_and_scrub_connection_string(args[i],
+												  scrubbedConnectionString))
+			{
+				appendPQExpBufferStr(cmd, scrubbedConnectionString);
+			}
+			else
+			{
+				appendPQExpBufferStr(cmd, "****");
+			}
+		}
+		else
+		{
+			appendPQExpBufferStr(cmd, args[i]);
+		}
 	}
 	log_info("%s: %s", prefix, cmd->data);
 	destroyPQExpBuffer(cmd);
@@ -706,37 +733,7 @@ cli_node_init(int argc, char **argv)
 	}
 
 	/* Log the command (masking passwords). */
-	{
-		PQExpBuffer cmd = createPQExpBuffer();
-		static const char *pwFlags[] = {
-			"--monitor-password",
-			"--replication-password",
-			"--autoctl-node-password",
-			NULL
-		};
-		for (int i = 0; i < nargs; i++)
-		{
-			if (i > 0)
-			{
-				appendPQExpBufferChar(cmd, ' ');
-			}
-			bool maskThis = false;
-			if (i > 0)
-			{
-				for (int k = 0; pwFlags[k]; k++)
-				{
-					if (strcmp(args[i - 1], pwFlags[k]) == 0)
-					{
-						maskThis = true;
-						break;
-					}
-				}
-			}
-			appendPQExpBufferStr(cmd, maskThis ? "****" : args[i]);
-		}
-		log_info("pg_autoctl node init: %s", cmd->data);
-		destroyPQExpBuffer(cmd);
-	}
+	log_argv("pg_autoctl node init", args, nargs);
 
 	execv(args[0], args);
 
