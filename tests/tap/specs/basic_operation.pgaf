@@ -64,6 +64,17 @@ step test_003_create_t1 {
     expect { 2 }
 }
 
+step test_003_show_state_local_is_read_only {
+    # `pg_autoctl show state --local` must never delete pg_autoctl.pg, the
+    # postgres controller's only signal for whether Postgres is expected to
+    # be running (see #1154): plant a stand-in for that file and confirm the
+    # command leaves it alone.
+    exec node1  bash -c 'touch "${XDG_RUNTIME_DIR:-/tmp}/pg_autoctl${PGDATA}/pg_autoctl.pg"'
+    exec node1  pg_autoctl show state --local
+    exec node1  bash -c 'test -f "${XDG_RUNTIME_DIR:-/tmp}/pg_autoctl${PGDATA}/pg_autoctl.pg"'
+    exec node1  bash -c 'rm -f "${XDG_RUNTIME_DIR:-/tmp}/pg_autoctl${PGDATA}/pg_autoctl.pg"'
+}
+
 #
 # test_004: verify synchronous_standby_names and replication slots
 #           after secondary joins.  Both nodes must have a physical slot

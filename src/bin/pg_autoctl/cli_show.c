@@ -583,7 +583,7 @@ cli_show_local_state(void)
 				exit(EXIT_CODE_BAD_CONFIG);
 			}
 
-			if (!keeper_init(&keeper, &config))
+			if (!keeper_init_read_only(&keeper, &config))
 			{
 				/* errors have already been logged */
 				exit(EXIT_CODE_BAD_CONFIG);

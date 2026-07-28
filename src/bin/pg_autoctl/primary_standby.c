@@ -110,11 +110,19 @@ GUC citus_default_settings_13[] = {
 
 
 /*
- * local_postgres_init initializes an interface for managing a local
- * postgres server with the given setup.
+ * local_postgres_init_internal initializes an interface for managing a local
+ * postgres server with the given setup. unlinkStatusFile controls whether
+ * any stale pg_autoctl.pg file is removed: that file is the postgres
+ * controller sub-process's only signal for whether Postgres is expected to
+ * be running, so removing it is only safe when this process is actually
+ * going to take over managing Postgres. A read-only, one-shot command
+ * sharing this init path (e.g. `pg_autoctl show state --local`, see #1154)
+ * must not delete it out from under a live controller.
  */
-void
-local_postgres_init(LocalPostgresServer *postgres, PostgresSetup *pgSetup)
+static void
+local_postgres_init_internal(LocalPostgresServer *postgres,
+							 PostgresSetup *pgSetup,
+							 bool unlinkStatusFile)
 {
 	char connInfo[MAXCONNINFO];
 
@@ -130,11 +138,36 @@ local_postgres_init(LocalPostgresServer *postgres, PostgresSetup *pgSetup)
 	/* set the local instance kind from the configuration. */
 	postgres->pgKind = pgSetup->pgKind;
 
-	if (!local_postgres_set_status_path(postgres, true))
+	if (!local_postgres_set_status_path(postgres, unlinkStatusFile))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_STATE);
 	}
+}
+
+
+/*
+ * local_postgres_init initializes an interface for managing a local
+ * postgres server with the given setup.
+ */
+void
+local_postgres_init(LocalPostgresServer *postgres, PostgresSetup *pgSetup)
+{
+	local_postgres_init_internal(postgres, pgSetup, true);
+}
+
+
+/*
+ * local_postgres_init_read_only is the same as local_postgres_init, without
+ * removing a pre-existing pg_autoctl.pg file: for read-only, one-shot
+ * commands that must not interfere with a Postgres controller process that
+ * might currently be managing this same PGDATA (see #1154).
+ */
+void
+local_postgres_init_read_only(LocalPostgresServer *postgres,
+							  PostgresSetup *pgSetup)
+{
+	local_postgres_init_internal(postgres, pgSetup, false);
 }
 
 
