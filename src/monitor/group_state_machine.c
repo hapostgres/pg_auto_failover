@@ -566,13 +566,36 @@ typedef struct MonitorFSMTransition
  *    MonitorFSM_PrimaryNodeSectionStart)      ProceedGroupStateFromContext(),
  *                                            reached only when activeNode is
  *                                            NOT currently primary-role.
- *   [MonitorFSM_MSFailoverClusterStart,       the sub-range of the row above
+ *   [MonitorFSM_FromContextResumeStart,       the sub-range of the row above
  *    MonitorFSM_PrimaryNodeSectionStart)      that ActionRunMultiStandby
  *                                            FailoverCascade resumes into
  *                                            when ProceedGroupStateForMSFailover()
  *                                            declines, mirroring the real
  *                                            source's fallthrough to
  *                                            "whatever is textually next".
+ *                                            NOTE: unlike the design doc this
+ *                                            table otherwise follows, there is
+ *                                            no declarative "MS-failover /
+ *                                            candidate-selection cluster"
+ *                                            section here at all --
+ *                                            ProceedGroupStateForMSFailover()
+ *                                            and everything it calls
+ *                                            (BuildCandidateList,
+ *                                            SelectFailoverCandidateNode,
+ *                                            PromoteSelectedNode) stayed one
+ *                                            opaque hand-written function,
+ *                                            invoked wholesale, not spread
+ *                                            across new rows/roles/conditions
+ *                                            the way the doc's own
+ *                                            candidateNode-based rows do. This
+ *                                            constant just marks "resume
+ *                                            scanning ordinary FromContext
+ *                                            rows from here" -- it is NOT the
+ *                                            doc's MonitorFSM_MSFailoverCluster
+ *                                            Start, which names a real section
+ *                                            of converted candidate-selection
+ *                                            rows that doesn't exist in this
+ *                                            table.
  *   [MonitorFSM_PrimaryNodeSectionStart,      ProceedGroupStateForPrimaryNode()'s
  *    MonitorFSM_SIZE)                        own rows, reached either directly
  *                                            by the top-level driver (activeNode
@@ -592,7 +615,7 @@ typedef struct MonitorFSMTransition
 static const MonitorFSMTransition MonitorFSM[];
 
 #define MonitorFSM_FromContextStart        6
-#define MonitorFSM_MSFailoverClusterStart  9
+#define MonitorFSM_FromContextResumeStart  9
 #define MonitorFSM_PrimaryNodeSectionStart 37
 #define MonitorFSM_SIZE                    48
 
@@ -838,11 +861,25 @@ ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *me
  *
  * When ProceedGroupStateForMSFailover() declines, the fallthrough to "the
  * rest of ProceedGroupStateFromContext" is a single bounded nested search
- * from MonitorFSM_MSFailoverClusterStart, not a flag back to the top-level
+ * from MonitorFSM_FromContextResumeStart, not a flag back to the top-level
  * driver: FindAndDispatchMonitorFSMRule's own internal loop already finds
  * whichever row is the correct next match, however many rows down that is,
  * in one call -- no repeated re-dispatch needed to walk past intervening
  * non-matches.
+ *
+ * NOTE on naming: MonitorFSM_FromContextResumeStart is NOT the design doc's
+ * MonitorFSM_MSFailoverClusterStart, despite marking a conceptually similar
+ * "resume point". The doc's constant names the start of a real, converted
+ * section -- roughly ten declarative rows (a fourth candidateNode role,
+ * conditions like candidatePromotionInProgress and
+ * mostAdvancedCandidateWithinPromoteThreshold, an otherNodesFn hook) that
+ * partially replace BuildCandidateList/SelectFailoverCandidateNode/
+ * PromoteSelectedNode. No such section exists in this table:
+ * ProceedGroupStateForMSFailover() and everything it calls stayed one
+ * opaque hand-written function, called wholesale, exactly as before this
+ * refactor. MonitorFSM_FromContextResumeStart just marks "resume scanning
+ * ordinary FromContext rows here" -- a narrower thing than what the doc's
+ * identically-purposed constant was named for.
  */
 static void
 ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac,
@@ -881,7 +918,7 @@ ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *
 
 	if (!ProceedGroupStateForMSFailover(ctx, primaryNode))
 	{
-		(void) FindAndDispatchMonitorFSMRule(ctx, nac, MonitorFSM_MSFailoverClusterStart,
+		(void) FindAndDispatchMonitorFSMRule(ctx, nac, MonitorFSM_FromContextResumeStart,
 											 MonitorFSM_PrimaryNodeSectionStart);
 	}
 }
