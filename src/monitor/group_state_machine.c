@@ -553,6 +553,28 @@ typedef struct NodeActiveContext
 	NodeStatus primaryNode;
 
 	/*
+	 * otherNode is who otherNodeAssignedState actually assigns to (see
+	 * DispatchMonitorFSMRule). Set to a plain copy of primaryNode by every
+	 * builder that populates a real primaryNode (BuildFromContextNodeActive
+	 * Context, BuildApiTriggerNodeActiveContext) -- today, "the other node
+	 * in this transition" and "the group's primary" are always the same
+	 * node, so otherNode.node == primaryNode.node everywhere. Kept as its
+	 * own field rather than reusing .primaryNode directly so that role
+	 * stays conceptually activeNode/otherNode, matching the design doc's
+	 * own framing and this array's own dispatch semantics ("assign
+	 * activeNodeAssignedState to activeNode, otherNodeAssignedState to
+	 * otherNode") independently of whichever node the monitor's own
+	 * domain concepts (primary, candidate, ...) say it happens to be. A
+	 * future otherNodesFn-resolved row (see the design doc's "MS-failover
+	 * / candidate-selection cluster" section) could populate this from
+	 * some other resolution entirely -- e.g. a dynamically selected
+	 * failover candidate, not the primary -- without disturbing every
+	 * existing row's own primaryNode-shaped conditions, which keep reading
+	 * .primaryNode exactly as before.
+	 */
+	NodeStatus otherNode;
+
+	/*
 	 * candidateNode is only populated by BuildMSFailoverNodeActiveContext
 	 * (the MS-failover cluster's own nested-dispatch context builder,
 	 * mirroring BuildForPrimaryNodeNodeActiveContext's role-specific
@@ -765,13 +787,38 @@ typedef struct MonitorFSMTransition
 
 	NodeStatusPattern activeNode;
 	NodeStatusPattern primaryNode;
+
+	/*
+	 * otherNode is the role otherNodeAssignedState actually targets (see
+	 * that field's own comment): a genuinely distinct role from primaryNode,
+	 * even though every row today has nac->otherNode.node ==
+	 * nac->primaryNode.node (see NodeActiveContext's own comment on
+	 * .otherNode for why). Kept separate from primaryNode in this struct --
+	 * rather than just reusing .primaryNode wherever a row wants to
+	 * constrain otherNodeAssignedState's target -- so a future row whose
+	 * target is resolved some other way (e.g. a candidate an otherNodesFn
+	 * selects, not simply "the primary") has a role to write conditions
+	 * against without a name that falsely implies it's always the primary.
+	 * Every row written before this field existed omits it, which matches
+	 * NodeStatusPattern's own "omitted means don't-care" default -- exactly
+	 * the same zero-risk-to-existing-rows guarantee apiFunction/inMSFailover
+	 * Cluster/etc. already established when each was added.
+	 */
+	NodeStatusPattern otherNode;
+
 	NodeStatusPattern candidateNode;  /* MS-failover sub-section rows only; see
 	                                   *  NodeActiveContext's own comment on
 	                                   *  .candidateNode */
 	NodeActiveContextPattern conditions;
 
 	GoalStateAssignment activeNodeAssignedState;
-	GoalStateAssignment otherNodeAssignedState;  /* target: nac->primaryNode.node */
+
+	/*
+	 * otherNodeAssignedState targets nac->otherNode.node (see
+	 * NodeActiveContext's own comment) -- not nac->primaryNode.node
+	 * directly, even though today the two are always the same pointer.
+	 */
+	GoalStateAssignment otherNodeAssignedState;
 
 	MonitorExtraActionFunction extraAction;
 
@@ -915,6 +962,7 @@ RuleMatches(const NodeActiveContext *nac, const MonitorFSMTransition *rule)
 
 		   NodeMatchesPattern(&nac->activeNode, &rule->activeNode) &&
 		   NodeMatchesPattern(&nac->primaryNode, &rule->primaryNode) &&
+		   NodeMatchesPattern(&nac->otherNode, &rule->otherNode) &&
 		   NodeMatchesPattern(&nac->candidateNode, &rule->candidateNode) &&
 
 		   BoolMatchesPattern(nac->groupHasExactlyOneNode,
@@ -1039,7 +1087,7 @@ DispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
 
 	if (rule->otherNodeAssignedState.kind == GOAL_STATE_SET)
 	{
-		AssignDeclaredGoalState(rule, nac->primaryNode.node,
+		AssignDeclaredGoalState(rule, nac->otherNode.node,
 								rule->otherNodeAssignedState.state, message);
 	}
 
@@ -1372,6 +1420,7 @@ BuildFromContextNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *prim
 
 	BuildNodeStatus(ctx, activeNode, &nac->activeNode);
 	BuildNodeStatus(ctx, primaryNode, &nac->primaryNode);
+	nac->otherNode = nac->primaryNode;  /* see NodeActiveContext's own comment on .otherNode */
 
 	/* isComparableToReferenceTli defaults to true (row :328 doesn't fire) -- a node that hasn't
 	 * reported a timeline yet (reportedTLI == 0) has nothing to check, same as the original. */
@@ -1579,6 +1628,7 @@ BuildApiTriggerNodeActiveContext(GroupStateContext *ctx, MonitorApiFunction apiF
 
 	BuildNodeStatus(ctx, activeNode, &nac->activeNode);
 	BuildNodeStatus(ctx, primaryNode, &nac->primaryNode);
+	nac->otherNode = nac->primaryNode;  /* see NodeActiveContext's own comment on .otherNode */
 
 	nac->groupHasExactlyOneNode = (ctx->groupNodeCount == 1);
 	nac->groupHasExactlyTwoNodes = (ctx->groupNodeCount == 2);
