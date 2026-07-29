@@ -1,0 +1,1031 @@
+-- Copyright (c) Microsoft Corporation. All rights reserved.
+-- Licensed under the PostgreSQL License.
+--
+-- Plain dump of the monitor's declarative dispatch table, via the
+-- pgautofailover.fsm view (pgautofailover.dump_fsm() ordered by pos). This
+-- is a static, compile-time-fixed table -- unaffected by any node/formation
+-- state -- so its expected output changes only when a row is added,
+-- removed, or edited in MonitorFSM[] (group_state_machine.c), giving that
+-- change an explicit, reviewable regression diff.
+--
+-- \x on: with the *_conditions columns added, a plain tabular row is far
+-- wider than a terminal (or this file's own diff-ability), and reads far
+-- worse than one field-per-line.
+\x on
+SELECT pos, section,
+       active_node_current_state, other_node_current_state, candidate_node_current_state,
+       active_node_conditions, other_node_conditions, candidate_node_conditions,
+       group_conditions,
+       active_node_assigned_state, other_node_assigned_state, has_extra_action,
+       comment
+  FROM pgautofailover.fsm
+ ORDER BY pos;
+-[ RECORD 1 ]----------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 101
+section                      | api_triggered: remove_node
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | canTakeWrites=true
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | dropped
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | remove_node, removed node can take writes -> dropped, every surviving non-maintenance standby joins report_lsn
+-[ RECORD 2 ]----------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 103
+section                      | api_triggered: remove_node
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | dropped
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | remove_node, removed node cannot take writes -> dropped
+-[ RECORD 3 ]----------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 105
+section                      | api_triggered: perform_failover
+active_node_current_state    | secondary
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | groupHasExactlyTwoNodes=true
+active_node_assigned_state   | prepare_promotion
+other_node_assigned_state    | draining
+has_extra_action             | f
+comment                      | manual failover, 2-node group, primary+standby both converged -> standby prepare_promotion, primary draining
+-[ RECORD 4 ]----------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 107
+section                      | api_triggered: perform_failover
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | isInPrimaryState=true
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | groupHasMoreThanTwoNodes=true
+active_node_assigned_state   | draining
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | manual failover, >2-node group -> primary drains, election proceeds via the heartbeat-driven MS-failover cluster rows
+-[ RECORD 5 ]----------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 109
+section                      | api_triggered: start_maintenance
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | isInPrimaryState=true
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | groupHasExactlyTwoNodes=true
+active_node_assigned_state   | prepare_maintenance
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | start_maintenance, primary, 2-node group -> prepare_maintenance (standby separately assigned prepare_promotion)
+-[ RECORD 6 ]----------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 111
+section                      | api_triggered: start_maintenance
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | isInPrimaryState=true
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | groupHasMoreThanTwoNodes=true
+active_node_assigned_state   | prepare_maintenance
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | start_maintenance, primary, >2-node group -> prepare_maintenance, election proceeds via the heartbeat-driven MS-failover cluster rows
+-[ RECORD 7 ]----------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 113
+section                      | api_triggered: start_maintenance
+active_node_current_state    | secondary, catchingup
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | lastHealthySyncStandbyGoingToMaintenance=true
+active_node_assigned_state   | wait_maintenance
+other_node_assigned_state    | wait_primary
+has_extra_action             | f
+comment                      | start_maintenance, secondary, last healthy sync standby -> wait_maintenance, primary wait_primary (disables sync rep)
+-[ RECORD 8 ]----------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 115
+section                      | api_triggered: start_maintenance
+active_node_current_state    | secondary, catchingup
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | maintenance
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | start_maintenance, secondary, ordinary case -> maintenance
+-[ RECORD 9 ]----------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 117
+section                      | api_triggered: stop_maintenance
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | exists=false
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | report_lsn
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | stop_maintenance, no primary -> report_lsn
+-[ RECORD 10 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 119
+section                      | api_triggered: stop_maintenance
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | isDemotedPrimary=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | report_lsn
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | stop_maintenance, primary demoted -> report_lsn
+-[ RECORD 11 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 121
+section                      | api_triggered: stop_maintenance
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | failoverInProgress=true
+active_node_assigned_state   | report_lsn
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | stop_maintenance, failover in progress -> report_lsn (source's own log message says "catchingup" here, but the actual call assigns REPORT_LSN -- see this row's own comment above)
+-[ RECORD 12 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 123
+section                      | api_triggered: stop_maintenance
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | catchingup
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | stop_maintenance, ordinary case -> catchingup
+-[ RECORD 13 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 125
+section                      | api_triggered: set_node_candidate_priority
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | apply_settings
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | set_node_candidate_priority, primary not already apply_settings -> apply_settings
+-[ RECORD 14 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 127
+section                      | api_triggered: set_node_replication_quorum
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | apply_settings
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | set_node_replication_quorum, primary not already apply_settings -> apply_settings
+-[ RECORD 15 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 129
+section                      | api_triggered: set_formation_number_sync_standbys
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | goal=primary|wait_primary
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | apply_settings
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | set_formation_number_sync_standbys, primary in primary/wait_primary -> apply_settings
+-[ RECORD 16 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 201
+section                      | early_checks
+active_node_current_state    | dropped
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | 
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | converged to dropped -> remove the node from the catalog
+-[ RECORD 17 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 203
+section                      | early_checks
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | goal=dropped
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | 
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | goal already dropped -> no-op
+-[ RECORD 18 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 205
+section                      | early_checks
+active_node_current_state    | maintenance
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | 
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | converged to maintenance -> no-op, frozen until stop_maintenance()
+-[ RECORD 19 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 207
+section                      | early_checks
+active_node_current_state    | demote_timeout
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | unreachableFromDemoteTimeout=true
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | demoted
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | reported demote_timeout, assigned goal can't reach it -> demoted
+-[ RECORD 20 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 209
+section                      | early_checks
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | candidateEligible=true
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | groupHasExactlyOneNode=true
+active_node_assigned_state   | single
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | alone in group, candidate-eligible -> single
+-[ RECORD 21 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 211
+section                      | early_checks
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | candidateEligible=false
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | groupHasExactlyOneNode=true
+active_node_assigned_state   | report_lsn
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | alone in group, candidatePriority zero -> report_lsn
+-[ RECORD 22 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 301
+section                      | reporting_node
+active_node_current_state    | secondary
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | isComparableToReferenceTli=false
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | catchingup
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | converged secondary, reportedTLI not an ancestor of reference -> catchingup
+-[ RECORD 23 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 303
+section                      | reporting_node
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | isHealthy=true, isInPrimaryState=true
+candidate_node_conditions    | 
+group_conditions             | replicationStallExceeded=true
+active_node_assigned_state   | 
+other_node_assigned_state    | wait_primary
+has_extra_action             | f
+comment                      | primary healthy, no standby past replication_stall_timeout -> wait_primary
+-[ RECORD 24 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 305
+section                      | reporting_node
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | isUnhealthy=true
+candidate_node_conditions    | 
+group_conditions             | groupHasMoreThanTwoNodes=true
+active_node_assigned_state   | 
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | nodesCount>2, primary unhealthy -> draining/maintenance + MS-failover cascade
+-[ RECORD 25 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 307
+section                      | reporting_node
+active_node_current_state    | report_lsn
+other_node_current_state     | wait_primary, join_primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | isHealthy=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | secondary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | report_lsn, primary converged wait/join_primary, healthy -> secondary
+-[ RECORD 26 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 309
+section                      | reporting_node
+active_node_current_state    | report_lsn
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | isHealthy=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | secondary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | report_lsn, primary converged primary, healthy -> secondary
+-[ RECORD 27 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 311
+section                      | reporting_node
+active_node_current_state    | fast_forward
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | prepare_promotion
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | fast_forward done -> prepare_promotion
+-[ RECORD 28 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 313
+section                      | reporting_node
+active_node_current_state    | report_lsn, fast_forward
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | 
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | report_lsn or fast_forward, continuing an already-started failover -> MS-failover cascade
+-[ RECORD 29 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 315
+section                      | reporting_node
+active_node_current_state    | wait_standby
+other_node_current_state     | wait_primary, join_primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | catchingup
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | wait_standby, primary converged wait/join_primary -> catchingup
+-[ RECORD 30 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 317
+section                      | reporting_node
+active_node_current_state    | wait_standby
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | replicationQuorum=true
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | catchingup
+other_node_assigned_state    | apply_settings
+has_extra_action             | f
+comment                      | wait_standby (quorum member), primary converged primary -> catchingup + apply_settings
+-[ RECORD 31 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 319
+section                      | reporting_node
+active_node_current_state    | wait_standby
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | replicationQuorum=false
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | catchingup
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | wait_standby (not a quorum member), primary converged primary -> catchingup
+-[ RECORD 32 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 321
+section                      | reporting_node
+active_node_current_state    | catchingup
+other_node_current_state     | wait_primary, join_primary, primary
+candidate_node_current_state | 
+active_node_conditions       | isHealthy=true
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | walWithinSyncThreshold=true, activeAndPrimaryTliMatch=true
+active_node_assigned_state   | secondary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | caught up, same TLI as primary, within sync threshold -> secondary
+-[ RECORD 33 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 323
+section                      | reporting_node
+active_node_current_state    | secondary
+other_node_current_state     | wait_primary
+candidate_node_current_state | 
+active_node_conditions       | isHealthy=true, candidateEligible=true
+other_node_conditions        | isUnhealthy=true
+candidate_node_conditions    | 
+group_conditions             | walWithinPromoteThreshold=true
+active_node_assigned_state   | prepare_promotion
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | primary fails, already converged wait_primary (issue #1168) -> secondary -> prepare_promotion only (1 of 2)
+-[ RECORD 34 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 325
+section                      | reporting_node
+active_node_current_state    | secondary
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | isHealthy=true, candidateEligible=true
+other_node_conditions        | isUnhealthy=true, isInPrimaryState=true
+candidate_node_conditions    | 
+group_conditions             | walWithinPromoteThreshold=true
+active_node_assigned_state   | prepare_promotion
+other_node_assigned_state    | draining
+has_extra_action             | f
+comment                      | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
+-[ RECORD 35 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 327
+section                      | reporting_node
+active_node_current_state    | wait_maintenance
+other_node_current_state     | wait_primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | maintenance
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | wait_maintenance, primary converged wait_primary -> maintenance
+-[ RECORD 36 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 329
+section                      | reporting_node
+active_node_current_state    | wait_maintenance
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | goal!=wait_primary
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | maintenance
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | wait_maintenance, primary's goal no longer wait_primary -> maintenance
+-[ RECORD 37 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 331
+section                      | reporting_node
+active_node_current_state    | prepare_promotion
+other_node_current_state     | prepare_maintenance
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | stop_replication
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | prepare_promotion, primary converged prepare_maintenance -> stop_replication
+-[ RECORD 38 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 333
+section                      | reporting_node
+active_node_current_state    | prepare_promotion
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | isCitusWorkerGroup=true
+other_node_conditions        | exists=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | demoted
+has_extra_action             | f
+comment                      | Citus worker prepare_promotion, primary present -> wait_primary + demoted
+-[ RECORD 39 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 335
+section                      | reporting_node
+active_node_current_state    | prepare_promotion
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | isCitusWorkerGroup=true
+other_node_conditions        | exists=false
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | Citus worker prepare_promotion, primary removed -> wait_primary
+-[ RECORD 40 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 337
+section                      | reporting_node
+active_node_current_state    | prepare_promotion
+other_node_current_state     | wait_primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | exists=true, isInMaintenance=false
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | stop_replication
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | prepare_promotion, primary already converged wait_primary (issue #1168) -> stop_replication only (1 of 2)
+-[ RECORD 41 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 339
+section                      | reporting_node
+active_node_current_state    | prepare_promotion
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | exists=true, isInMaintenance=false
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | stop_replication
+other_node_assigned_state    | demote_timeout
+has_extra_action             | f
+comment                      | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
+-[ RECORD 42 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 341
+section                      | reporting_node
+active_node_current_state    | prepare_promotion
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | exists=false
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | prepare_promotion, primary removed -> wait_primary
+-[ RECORD 43 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 343
+section                      | reporting_node
+active_node_current_state    | stop_replication
+other_node_current_state     | prepare_maintenance
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | maintenance
+has_extra_action             | f
+comment                      | stop_replication, primary converged prepare_maintenance -> wait_primary + maintenance
+-[ RECORD 44 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 345
+section                      | reporting_node
+active_node_current_state    | stop_replication
+other_node_current_state     | demote_timeout
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | demoted
+has_extra_action             | f
+comment                      | stop_replication, primary converged demote_timeout -> wait_primary + demoted (1 of 3)
+-[ RECORD 45 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 347
+section                      | reporting_node
+active_node_current_state    | stop_replication
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | drainTimeExpired=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | demoted
+has_extra_action             | f
+comment                      | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
+-[ RECORD 46 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 349
+section                      | reporting_node
+active_node_current_state    | stop_replication
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | primaryIsWaitPrimaryPresumedDead=true
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | demoted
+has_extra_action             | f
+comment                      | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
+-[ RECORD 47 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 351
+section                      | reporting_node
+active_node_current_state    | stop_replication
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | isCitusWorkerGroup=true
+other_node_conditions        | exists=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | demoted
+has_extra_action             | f
+comment                      | Citus worker stop_replication, primary present -> wait_primary + demoted
+-[ RECORD 48 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 353
+section                      | reporting_node
+active_node_current_state    | stop_replication
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | isCitusWorkerGroup=true
+other_node_conditions        | exists=false
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | Citus worker stop_replication, primary removed -> wait_primary
+-[ RECORD 49 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 355
+section                      | reporting_node
+active_node_current_state    | demoted
+other_node_current_state     | wait_primary, join_primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | isHealthy=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | catchingup
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | demoted, primary reported wait/join_primary with goal primary -> catchingup
+-[ RECORD 50 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 357
+section                      | reporting_node
+active_node_current_state    | demoted
+other_node_current_state     | wait_primary, join_primary, primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | isHealthy=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | catchingup
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | demoted, primary converged wait/join_primary/primary, healthy -> catchingup
+-[ RECORD 51 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 359
+section                      | reporting_node
+active_node_current_state    | join_secondary
+other_node_current_state     | wait_primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | secondary
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | join_secondary, primary reported wait_primary with goal wait/primary -> secondary
+-[ RECORD 52 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 361
+section                      | reporting_node
+active_node_current_state    | join_secondary
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | secondary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | join_secondary, primary converged primary -> secondary
+-[ RECORD 53 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 363
+section                      | reporting_node
+active_node_current_state    | report_lsn
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | activeNodeAllWalSourcesUnhealthy=true, guardDataLossEnabled=true
+active_node_assigned_state   | report_lsn
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | MS-failover: candidate stuck in fast_forward, all WAL sources unhealthy, guard_data_loss=true -> report_lsn (retry once a source recovers)
+-[ RECORD 54 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 365
+section                      | reporting_node
+active_node_current_state    | report_lsn
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | isReadyToStreamWAL=true
+group_conditions             | candidatePromotionInProgress=true
+active_node_assigned_state   | join_secondary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | MS-failover: activeNode in report_lsn, failover candidate ready to stream WAL -> join_secondary
+-[ RECORD 55 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 367
+section                      | reporting_node
+active_node_current_state    | secondary, catchingup
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | inMSFailoverCluster=true
+active_node_assigned_state   | report_lsn
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | MS-failover fan-out: secondary/catchingup, not yet converged -> report_lsn (1 of 4)
+-[ RECORD 56 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 369
+section                      | reporting_node
+active_node_current_state    | maintenance
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | inMSFailoverCluster=true
+active_node_assigned_state   | report_lsn
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | MS-failover fan-out: rejoining from maintenance -> report_lsn (2 of 4)
+-[ RECORD 57 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 371
+section                      | reporting_node
+active_node_current_state    | draining, demoted
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | inMSFailoverCluster=true
+active_node_assigned_state   | report_lsn
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | MS-failover fan-out: old primary converged draining or demoted -> report_lsn (3 of 4)
+-[ RECORD 58 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 373
+section                      | reporting_node
+active_node_current_state    | demoted
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | inMSFailoverCluster=true
+active_node_assigned_state   | report_lsn
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | MS-failover fan-out: old primary demoted, was rejoining a now-failed primary -> report_lsn (4 of 4)
+-[ RECORD 59 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 375
+section                      | reporting_node
+active_node_current_state    | report_lsn
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | candidatePromotionInProgress=false, mostAdvancedCandidateWithinPromoteThreshold=true, inMSFailoverCluster=true
+active_node_assigned_state   | prepare_promotion
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | MS-failover: no promotion in flight, most-advanced candidate within threshold, selected candidate already has all WAL -> prepare_promotion (1 of 2 -- see this row's own comment on why both are listed)
+-[ RECORD 60 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 377
+section                      | reporting_node
+active_node_current_state    | report_lsn
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | candidatePromotionInProgress=false, mostAdvancedCandidateWithinPromoteThreshold=true, inMSFailoverCluster=true
+active_node_assigned_state   | fast_forward
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | MS-failover: no promotion in flight, most-advanced candidate within threshold, selected candidate is lagging -> fast_forward (2 of 2)
+-[ RECORD 61 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 379
+section                      | reporting_node
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | candidatePromotionInProgress=false, inMSFailoverCluster=true
+active_node_assigned_state   | 
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | MS-failover: no promotion in flight, not enough (or not safe enough) candidates yet -> no-op besides the fan-out above
+-[ RECORD 62 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 401
+section                      | primary_node
+active_node_current_state    | single
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | anyOtherNodeWaitingStandby=true
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | primary alone, another node reached wait_standby -> wait_primary
+-[ RECORD 63 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 403
+section                      | primary_node
+active_node_current_state    | primary, wait_primary, apply_settings
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | replicationQuorumCountIsZero=true, secondaryNodesCountIsZero=true
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | all nodes async, zero secondaries -> wait_primary
+-[ RECORD 64 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 405
+section                      | primary_node
+active_node_current_state    | primary, wait_primary, apply_settings
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | replicationQuorumCountIsZero=true, secondaryNodesCountIsZero=false
+active_node_assigned_state   | primary
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | all nodes async, >=1 secondary -> primary
+-[ RECORD 65 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 407
+section                      | primary_node
+active_node_current_state    | primary, apply_settings
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | numberSyncStandbysIsZero=true, secondaryQuorumNodesCountIsZero=true, failoverInProgress=false
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys=0 -> wait_primary
+-[ RECORD 66 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 409
+section                      | primary_node
+active_node_current_state    | primary, apply_settings
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | numberSyncStandbysIsZero=false, secondaryQuorumNodesCountIsZero=true, failoverInProgress=false
+active_node_assigned_state   | primary
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys>0 -> primary (block writes)
+-[ RECORD 67 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 411
+section                      | primary_node
+active_node_current_state    | wait_primary
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | secondaryQuorumNodesCountIsZero=false
+active_node_assigned_state   | primary
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | wait_primary, >=1 quorum secondary -> primary
+-[ RECORD 68 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 413
+section                      | primary_node
+active_node_current_state    | apply_settings
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | numberSyncStandbysIsZero=true, secondaryQuorumNodesCountIsZero=true
+active_node_assigned_state   | wait_primary
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | apply_settings, both zero -> wait_primary
+-[ RECORD 69 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 415
+section                      | primary_node
+active_node_current_state    | apply_settings
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | numberSyncStandbysIsZero=false
+active_node_assigned_state   | primary
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | apply_settings, number_sync_standbys != 0 -> primary (1 of 2 disjuncts)
+-[ RECORD 70 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 417
+section                      | primary_node
+active_node_current_state    | apply_settings
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | numberSyncStandbysIsZero=true, secondaryQuorumNodesCountIsZero=false
+active_node_assigned_state   | primary
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2)
+-[ RECORD 71 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 419
+section                      | primary_node
+active_node_current_state    | primary, wait_primary, apply_settings
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | 
+other_node_assigned_state    | 
+has_extra_action             | t
+comment                      | converged primary/wait_primary/apply_settings, no other condition applies -> no-op besides the unhealthy-secondary fan-out
+-[ RECORD 72 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 421
+section                      | primary_node
+active_node_current_state    | join_primary
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | primary
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | backwards-compat: join_primary -> primary
+

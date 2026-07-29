@@ -31,6 +31,7 @@
 # exclusively.
 
 test: create_extension
+test: fsm
 test: monitor
 test: workers
 test: node_active_protocol
@@ -41,6 +42,7 @@ test: stale_primary_report
 test: lock_and_fetch_migration
 test: timeline_fork_detection
 test: failover_candidate_leaves_secondary
+test: cluster_init_failover_rule_attribution
 test: dummy_update
 test: drop_extension
 test: upgrade

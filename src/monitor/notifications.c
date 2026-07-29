@@ -28,6 +28,13 @@
 #include "utils/json.h"
 #include "utils/pg_lsn.h"
 
+#include "group_state_machine.h"
+
+
+/* see notifications.h for why these exist and how they're used */
+int CurrentMonitorFSMRulePos = 0;
+int CurrentMonitorFSMRuleSection = 0;
+
 
 /*
  * LogAndNotifyMessage emits the given message both as a log entry and also as
@@ -123,6 +130,17 @@ InsertEvent(AutoFailoverNode *node, char *description)
 	Oid goalStateOid = ReplicationStateGetEnum(node->goalState);
 	Oid reportedStateOid = ReplicationStateGetEnum(node->reportedState);
 	Oid replicationStateTypeOid = ReplicationStateTypeOid();
+	Oid fsmSectionTypeOid = MonitorFSMSectionTypeOid();
+
+	/*
+	 * CurrentMonitorFSMRulePos/Section (see notifications.h) are only set
+	 * while a MonitorFSM[] row's own extraAction/goal-state assignment is
+	 * actually running; 0 means this event was produced by an ordinary
+	 * AssignGoalState call from outside the declarative dispatch table, so
+	 * rule_pos/rule_section stay NULL for it rather than a misleading 0
+	 * (not a valid .pos value -- every real section starts at 101 or above).
+	 */
+	bool haveRule = CurrentMonitorFSMRulePos != 0;
 
 	Oid argTypes[] = {
 		TEXTOID, /* formationid */
@@ -138,7 +156,9 @@ InsertEvent(AutoFailoverNode *node, char *description)
 		LSNOID,  /* reportedLSN */
 		INT4OID, /* candidate_priority */
 		BOOLOID, /* replication_quorum */
-		TEXTOID  /* description */
+		TEXTOID, /* description */
+		INT4OID, /* rule_pos */
+		fsmSectionTypeOid /* rule_section */
 	};
 
 	Datum argValues[] = {
@@ -155,7 +175,18 @@ InsertEvent(AutoFailoverNode *node, char *description)
 		LSNGetDatum(node->reportedLSN),           /* reportedLSN */
 		Int32GetDatum(node->candidatePriority),   /* candidate_priority */
 		BoolGetDatum(node->replicationQuorum),    /* replication_quorum */
-		CStringGetTextDatum(description)          /* description */
+		CStringGetTextDatum(description),         /* description */
+		Int32GetDatum(CurrentMonitorFSMRulePos),  /* rule_pos, ignored if NULL below */
+		haveRule
+		? ObjectIdGetDatum(MonitorFSMSectionGetEnum(
+							   (MonitorFSMSection) CurrentMonitorFSMRuleSection))
+		: ObjectIdGetDatum(InvalidOid) /* rule_section, ignored if NULL below */
+	};
+
+	char argNulls[] = {
+		' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+		haveRule ? ' ' : 'n', /* rule_pos */
+		haveRule ? ' ' : 'n'  /* rule_section */
 	};
 
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
@@ -165,14 +196,14 @@ InsertEvent(AutoFailoverNode *node, char *description)
 		"INSERT INTO " AUTO_FAILOVER_EVENT_TABLE
 		"(formationid, nodeid, groupid, nodename, nodehost, nodeport,"
 		" reportedstate, goalstate, reportedrepstate, reportedtli, reportedlsn,"
-		" candidatepriority, replicationquorum, description) "
-		"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) "
+		" candidatepriority, replicationquorum, description, rule_pos, rule_section) "
+		"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) "
 		"RETURNING eventid";
 
 	SPI_connect();
 
 	int spiStatus = SPI_execute_with_args(insertQuery, argCount, argTypes,
-										  argValues, NULL, false, 0);
+										  argValues, argNulls, false, 0);
 
 	if (spiStatus == SPI_OK_INSERT_RETURNING && SPI_processed > 0)
 	{

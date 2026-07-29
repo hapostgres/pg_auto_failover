@@ -22,6 +22,7 @@
 #define AUTO_FAILOVER_NODE_TABLE "pgautofailover.node"
 #define AUTO_FAILOVER_EVENT_TABLE "pgautofailover.event"
 #define REPLICATION_STATE_TYPE_NAME "replication_state"
+#define FSM_SECTION_TYPE_NAME "fsm_section"
 
 
 /*

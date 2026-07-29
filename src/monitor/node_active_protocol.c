@@ -1162,7 +1162,6 @@ remove_node_by_host(PG_FUNCTION_ARGS)
 static bool
 RemoveNode(int64 nodeId, bool force)
 {
-	ListCell *nodeCell = NULL;
 	char message[BUFSIZE] = { 0 };
 
 	/*
@@ -1248,50 +1247,15 @@ RemoveNode(int64 nodeId, bool force)
 		return true;
 	}
 
-	/* review the FSM for every other node, when removing the primary */
-	if (currentNodeIsPrimary)
-	{
-		foreach(nodeCell, otherNodesGroupList)
-		{
-			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-			if (node == NULL)
-			{
-				/* shouldn't happen */
-				ereport(ERROR, (errmsg("BUG: node is NULL")));
-				continue;
-			}
-
-			/* skip nodes that are currently in maintenance */
-			if (IsInMaintenance(node))
-			{
-				continue;
-			}
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to report_lsn after primary node removal.",
-				NODE_FORMAT_ARGS(node));
-
-			SetNodeGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
-		}
-	}
-
 	/*
-	 * Mark the node as being dropped, so that the pg_autoctl node-active
-	 * process can implement further actions at drop time.
+	 * Dispatch through MonitorFSM[]'s API_TRIGGERED section (see
+	 * ProceedGroupStateForApiTrigger's own comment): assigns dropped to
+	 * currentNode, and, when it canTakeWrites, fans out report_lsn to every
+	 * surviving non-maintenance standby first (both folded into one row --
+	 * see that row's own comment for why splitting them across two rows,
+	 * as an earlier draft of this table did, would have been a real bug).
 	 */
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Setting goal state of " NODE_FORMAT
-		" from formation \"%s\" and group %d to \"dropped\""
-		" to implement node removal.",
-		NODE_FORMAT_ARGS(currentNode),
-		currentNode->formationId,
-		currentNode->groupId);
-
-	SetNodeGoalState(currentNode, REPLICATION_STATE_DROPPED, message);
+	(void) ProceedGroupStateForApiTrigger(API_FUNCTION_REMOVE_NODE, currentNode, NULL);
 
 	/*
 	 * Adjust number-sync-standbys if necessary.
@@ -1536,21 +1500,13 @@ perform_failover(PG_FUNCTION_ARGS)
 							 "perform a manual failover")));
 		}
 
-		char message[BUFSIZE] = { 0 };
-
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to draining and " NODE_FORMAT
-			" to prepare_promotion after a user-initiated failover.",
-			NODE_FORMAT_ARGS(primaryNode),
-			NODE_FORMAT_ARGS(secondaryNode));
-
-		SetNodeGoalState(primaryNode,
-						 REPLICATION_STATE_DRAINING, message);
-
-		SetNodeGoalState(secondaryNode,
-						 REPLICATION_STATE_PREPARE_PROMOTION, message);
+		/*
+		 * Dispatch through MonitorFSM[]'s API_TRIGGERED section (see
+		 * ProceedGroupStateForApiTrigger's own comment): standby ->
+		 * prepare_promotion, primary -> draining.
+		 */
+		(void) ProceedGroupStateForApiTrigger(API_FUNCTION_PERFORM_FAILOVER,
+											  secondaryNode, primaryNode);
 	}
 	else
 	{
@@ -1558,16 +1514,15 @@ perform_failover(PG_FUNCTION_ARGS)
 		AutoFailoverNode *firstStandbyNode = linitial(standbyNodesGroupList);
 		char message[BUFSIZE] = { 0 };
 
-		/* so we have at least one candidate, let's get started */
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			"at LSN %X/%X to draining after a user-initiated failover.",
-			NODE_FORMAT_ARGS(primaryNode),
-			(uint32) (primaryNode->reportedLSN >> 32),
-			(uint32) primaryNode->reportedLSN);
-
-		SetNodeGoalState(primaryNode, REPLICATION_STATE_DRAINING, message);
+		/*
+		 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: primary ->
+		 * draining. The candidatePriority trick and the continuation
+		 * dispatch below are POST side effects, hand-written here exactly
+		 * as before -- see that row's own comment for why they don't
+		 * become part of the row itself.
+		 */
+		(void) ProceedGroupStateForApiTrigger(API_FUNCTION_PERFORM_FAILOVER,
+											  primaryNode, NULL);
 
 		/*
 		 * When a failover is performed with all the nodes up and running, the
@@ -1901,49 +1856,37 @@ start_maintenance(PG_FUNCTION_ARGS)
 		if (totalNodesCount == 2)
 		{
 			/*
-			 * Set the primary to prepare_maintenance now, and if we have a
-			 * single secondary we assign it prepare_promotion, otherwise we
-			 * need to elect a secondary, same as in perform_failover.
+			 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: primary
+			 * -> prepare_maintenance. The lone standby -> prepare_promotion
+			 * is a POST side effect, hand-written here: it has no ordering
+			 * dependency on this row's own assignment (neither reads the
+			 * other's freshly-committed state), so it doesn't need
+			 * extraAction to sequence correctly.
 			 */
+			(void) ProceedGroupStateForApiTrigger(API_FUNCTION_START_MAINTENANCE,
+												  currentNode, NULL);
+
 			LogAndNotifyMessage(
 				message, BUFSIZE,
 				"Setting goal state of " NODE_FORMAT
-				" to prepare_maintenance "
-				"after a user-initiated start_maintenance call.",
-				NODE_FORMAT_ARGS(currentNode));
-
-			SetNodeGoalState(currentNode,
-							 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
-
-			AutoFailoverNode *otherNode = firstStandbyNode;
-
-			/*
-			 * We put the only secondary node straight to prepare_replication.
-			 */
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to prepare_maintenance and " NODE_FORMAT
 				" to prepare_promotion "
 				"after a user-initiated start_maintenance call.",
-				NODE_FORMAT_ARGS(currentNode),
-				NODE_FORMAT_ARGS(otherNode));
+				NODE_FORMAT_ARGS(firstStandbyNode));
 
-			SetNodeGoalState(otherNode,
+			SetNodeGoalState(firstStandbyNode,
 							 REPLICATION_STATE_PREPARE_PROMOTION, message);
 		}
 		else
 		{
-			/* put the primary directly to maintenance */
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to maintenance "
-				"after a user-initiated start_maintenance call.",
-				NODE_FORMAT_ARGS(currentNode));
-
-			SetNodeGoalState(currentNode,
-							 REPLICATION_STATE_PREPARE_MAINTENANCE, message);
+			/*
+			 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: primary
+			 * -> prepare_maintenance. The continuation dispatch below is a
+			 * POST side effect, hand-written here, called after this row's
+			 * own assignment has committed (it re-fetches fresh state, so
+			 * ordering matters here, unlike the 2-node case above).
+			 */
+			(void) ProceedGroupStateForApiTrigger(API_FUNCTION_START_MAINTENANCE,
+												  currentNode, NULL);
 
 			/* now proceed with the failover, starting with the first standby */
 			(void) ProceedGroupState(firstStandbyNode);
@@ -1970,30 +1913,17 @@ start_maintenance(PG_FUNCTION_ARGS)
 		 * state of any standby node yet, we get there when the count is one
 		 * (not zero).
 		 */
-		if (formation->number_sync_standbys == 0 && secondaryNodesCount == 1 &&
-			IsHealthySyncStandby(currentNode))
-		{
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to wait_primary and " NODE_FORMAT
-				" to wait_maintenance "
-				"after a user-initiated start_maintenance call.",
-				NODE_FORMAT_ARGS(primaryNode),
-				NODE_FORMAT_ARGS(currentNode));
-			SetNodeGoalState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY, message);
-			SetNodeGoalState(currentNode, REPLICATION_STATE_WAIT_MAINTENANCE, message);
-		}
-		else
-		{
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to maintenance "
-				"after a user-initiated start_maintenance call.",
-				NODE_FORMAT_ARGS(currentNode));
-			SetNodeGoalState(currentNode, REPLICATION_STATE_MAINTENANCE, message);
-		}
+		/*
+		 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: the
+		 * last-healthy-sync-standby row (wait_maintenance + primary
+		 * wait_primary) and the ordinary row (maintenance) are both
+		 * declarative, dual-role rows there -- see
+		 * BuildApiTriggerNodeActiveContext's own comment for how
+		 * lastHealthySyncStandbyGoingToMaintenance mirrors this exact
+		 * condition.
+		 */
+		(void) ProceedGroupStateForApiTrigger(API_FUNCTION_START_MAINTENANCE,
+											  currentNode, primaryNode);
 	}
 	else
 	{
@@ -2028,8 +1958,6 @@ stop_maintenance(PG_FUNCTION_ARGS)
 	checkPgAutoFailoverVersion();
 
 	int64 nodeId = PG_GETARG_INT64(0);
-
-	char message[BUFSIZE] = { 0 };
 
 	AutoFailoverNode *currentNode = LockNodeGroupAndFetch(nodeId);
 	if (currentNode == NULL)
@@ -2087,69 +2015,17 @@ stop_maintenance(PG_FUNCTION_ARGS)
 						"group %d",
 						currentNode->formationId, currentNode->groupId)));
 	}
-	else if ((primaryNode == NULL || IsDemotedPrimary(primaryNode)) &&
-			 totalNodesCount > 2)
-	{
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to report_lsn  after a user-initiated stop_maintenance call.",
-			NODE_FORMAT_ARGS(currentNode));
-
-		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
-
-		PG_RETURN_BOOL(true);
-	}
-	else if (IsDemotedPrimary(primaryNode))
-	{
-		/*
-		 * The primary is fully demoted (Postgres stopped, e.g. after a
-		 * #1025 self-fence recovery): there's nothing left running to
-		 * stream from, so catchingup would just retry a doomed replication
-		 * connection forever. Join the report_lsn crew instead -- once this
-		 * node reports its LSN, the candidate-scanning code in
-		 * ProceedGroupStateForMSFailover() picks up the demoted primary too
-		 * (it's still IsDemotedPrimary()) and the normal election proceeds.
-		 */
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to report_lsn after a user-initiated stop_maintenance call, "
-			"as " NODE_FORMAT " is demoted and has nothing to catch up from.",
-			NODE_FORMAT_ARGS(currentNode),
-			NODE_FORMAT_ARGS(primaryNode));
-
-		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
-
-		PG_RETURN_BOOL(true);
-	}
 
 	/*
-	 * When a failover is in progress and stop_maintenance() is called (by
-	 * means of pg_autoctl disable maintenance or otherwise), then we should
-	 * join the crew on REPORT_LSN: the last known primary can be presumed
-	 * down.
+	 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: no-primary,
+	 * primary-demoted, failover-in-progress, and the ordinary catchingup
+	 * catchall are all declarative rows there -- see each row's own
+	 * comment. Every one of the four real branches this replaces produces
+	 * the same PG_RETURN_BOOL(true), so they collapse to a single dispatch
+	 * call followed by one shared return.
 	 */
-	if (IsFailoverInProgress(groupNodesList))
-	{
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to catchingup  after a user-initiated stop_maintenance call.",
-			NODE_FORMAT_ARGS(currentNode));
-
-		SetNodeGoalState(currentNode, REPLICATION_STATE_REPORT_LSN, message);
-	}
-	else
-	{
-		LogAndNotifyMessage(
-			message, BUFSIZE,
-			"Setting goal state of " NODE_FORMAT
-			" to catchingup  after a user-initiated stop_maintenance call.",
-			NODE_FORMAT_ARGS(currentNode));
-
-		SetNodeGoalState(currentNode, REPLICATION_STATE_CATCHINGUP, message);
-	}
+	(void) ProceedGroupStateForApiTrigger(API_FUNCTION_STOP_MAINTENANCE,
+										  currentNode, primaryNode);
 
 	PG_RETURN_BOOL(true);
 }
@@ -2265,8 +2141,6 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 	}
 	else
 	{
-		char message[BUFSIZE];
-
 		AutoFailoverNode *primaryNode =
 			GetPrimaryNodeInGroup(currentNode->formationId,
 								  currentNode->groupId);
@@ -2278,21 +2152,17 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 		 *
 		 * If we don't currently have a primary node anyway, we can just
 		 * proceed with the change.
+		 *
+		 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: primary ->
+		 * apply_settings. Kept hand-written, not routed through the
+		 * table's own no-match ERROR: this exact message text is
+		 * preserved unchanged so it stays test-stable.
 		 */
 		if (primaryNode &&
 			!IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 		{
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to apply_settings after updating " NODE_FORMAT
-				" candidate priority to %d.",
-				NODE_FORMAT_ARGS(primaryNode),
-				NODE_FORMAT_ARGS(currentNode),
-				currentNode->candidatePriority);
-
-			SetNodeGoalState(primaryNode,
-							 REPLICATION_STATE_APPLY_SETTINGS, message);
+			(void) ProceedGroupStateForApiTrigger(
+				API_FUNCTION_SET_NODE_CANDIDATE_PRIORITY, primaryNode, NULL);
 		}
 
 		/* if primaryNode is not NULL, then current state is APPLY_SETTINGS */
@@ -2410,8 +2280,6 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 	}
 	else
 	{
-		char message[BUFSIZE];
-
 		AutoFailoverNode *primaryNode =
 			GetPrimaryNodeInGroup(currentNode->formationId,
 								  currentNode->groupId);
@@ -2423,21 +2291,17 @@ set_node_replication_quorum(PG_FUNCTION_ARGS)
 		 *
 		 * If we don't currently have a primary node anyway, we can just
 		 * proceed with the change.
+		 *
+		 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: primary ->
+		 * apply_settings. Kept hand-written, not routed through the table's
+		 * own no-match ERROR: this exact message text is preserved
+		 * unchanged so it stays test-stable.
 		 */
 		if (primaryNode &&
 			!IsCurrentState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS))
 		{
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to apply_settings after updating " NODE_FORMAT
-				" replication quorum to %s.",
-				NODE_FORMAT_ARGS(primaryNode),
-				NODE_FORMAT_ARGS(currentNode),
-				currentNode->replicationQuorum ? "true" : "false");
-
-			SetNodeGoalState(primaryNode,
-							 REPLICATION_STATE_APPLY_SETTINGS, message);
+			(void) ProceedGroupStateForApiTrigger(
+				API_FUNCTION_SET_NODE_REPLICATION_QUORUM, primaryNode, NULL);
 		}
 
 		/* if primaryNode is not NULL, then current state is APPLY_SETTINGS */

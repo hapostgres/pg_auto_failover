@@ -41,3 +41,23 @@ void LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...) __att
 
 int64 NotifyStateChange(AutoFailoverNode *node, char *description);
 int64 InsertEvent(AutoFailoverNode *node, char *description);
+
+/*
+ * Set by group_state_machine.c's declarative dispatch just before invoking a
+ * matched MonitorFSM[] row's extraAction/goal-state assignment, and restored
+ * to whatever it was before immediately after (nested dispatch -- the
+ * MS-failover cascade's and join_secondary's own bounded nested searches --
+ * saves/restores rather than clobbers, so the outer row's own subsequent
+ * assignments are still attributed correctly). Lets InsertEvent() attribute
+ * the resulting pgautofailover.event row to the rule that produced it
+ * (rule_pos/rule_section columns), without threading an extra parameter
+ * through AssignGoalState/SetNodeGoalState/NotifyStateChange and every one
+ * of their many call sites outside the declarative dispatch table. 0 means
+ * "no rule attributed" (an ordinary AssignGoalState call from outside the
+ * table, e.g. an operator-triggered SQL function, or ProceedGroupStateFor
+ * MSFailover's own hand-written internals): rule_pos/rule_section are left
+ * NULL in that case, since 0 is not a valid .pos value (every real section
+ * starts at 100 or above).
+ */
+extern int CurrentMonitorFSMRulePos;
+extern int CurrentMonitorFSMRuleSection;

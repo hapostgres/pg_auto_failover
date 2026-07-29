@@ -176,6 +176,20 @@ CREATE TABLE pgautofailover.node
  -- we expect few rows and lots of UPDATE, let's benefit from HOT
  WITH (fillfactor = 25);
 
+-- Mirrors group_state_machine.h's MonitorFSMSection: which of the three
+-- real control-flow regions of the monitor's declarative dispatch table
+-- (MonitorFSM[] in group_state_machine.c) a rule belongs to. See dump_fsm()
+-- and pgautofailover.fsm below, and the rule_section column on
+-- pgautofailover.event.
+CREATE TYPE pgautofailover.fsm_section
+    AS ENUM
+ (
+    'api_triggered',
+    'early_checks',
+    'reporting_node',
+    'primary_node'
+ );
+
 CREATE TABLE pgautofailover.event
  (
     eventid           bigserial not null,
@@ -194,6 +208,16 @@ CREATE TABLE pgautofailover.event
     candidatepriority int,
     replicationquorum bool,
     description       text,
+
+    -- Which MonitorFSM[] row (if any) produced this event: NULL when the
+    -- goal-state assignment came from outside the declarative dispatch
+    -- table (an operator-triggered SQL function, or ProceedGroupStateFor
+    -- MSFailover's own hand-written internals -- see CurrentMonitorFSMRulePos
+    -- in notifications.h for how this gets attributed). rule_pos is the
+    -- row's human-facing position (see dump_fsm()/pgautofailover.fsm),
+    -- not an array index.
+    rule_pos          int,
+    rule_section      pgautofailover.fsm_section,
 
     PRIMARY KEY (eventid)
  );
@@ -228,6 +252,39 @@ CREATE TABLE pgautofailover.accepted_timeline
 
     PRIMARY KEY (formationid, groupid, decided_at)
  );
+
+-- Exposes the monitor's declarative dispatch table (MonitorFSM[] in
+-- group_state_machine.c) to SQL, one row per rule, in first-match-wins
+-- order -- see dump_fsm()'s own C-side comment for exactly what this does
+-- and doesn't cover. pgautofailover.event.rule_pos/rule_section (added
+-- above) join back to this view's pos column to show which rule produced
+-- a given event. section is plain text here (not pgautofailover.fsm_section):
+-- an api_triggered row's section names its specific operator-triggered
+-- entry point too, e.g. "api_triggered: remove_node".
+CREATE FUNCTION pgautofailover.dump_fsm()
+RETURNS TABLE
+ (
+    pos                          int,
+    section                      text,
+    comment                      text,
+    active_node_current_state    text,
+    other_node_current_state     text,
+    candidate_node_current_state text,
+    active_node_conditions       text,
+    other_node_conditions        text,
+    candidate_node_conditions    text,
+    group_conditions             text,
+    active_node_assigned_state   pgautofailover.replication_state,
+    other_node_assigned_state    pgautofailover.replication_state,
+    has_extra_action             bool
+ )
+LANGUAGE C SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$dump_fsm$$;
+
+grant execute on function pgautofailover.dump_fsm() to autoctl_node;
+
+CREATE VIEW pgautofailover.fsm AS
+    SELECT * FROM pgautofailover.dump_fsm() ORDER BY pos;
 
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
