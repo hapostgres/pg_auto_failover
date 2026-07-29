@@ -132,6 +132,7 @@ static List * CreateHealthChecks(List *nodeHealthList);
 static HealthCheck * CreateHealthCheck(NodeHealth *nodeHealth);
 static void DoHealthChecks(List *healthCheckList);
 static void ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime);
+static void FinishHealthCheckConnection(PGconn *connection);
 static int WaitForEvent(List *healthCheckList);
 static int CompareTimes(struct timeval *leftTime, struct timeval *rightTime);
 static int SubtractTimes(struct timeval base, struct timeval subtract);
@@ -923,7 +924,7 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			{
 				struct timeval nextTryTime = { 0, 0 };
 
-				PQfinish(connection);
+				FinishHealthCheckConnection(connection);
 
 				nextTryTime = AddTimeMillis(currentTime, HealthCheckRetryDelay);
 
@@ -943,7 +944,7 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 
 			if (pollingStatus == PGRES_POLLING_OK)
 			{
-				PQfinish(connection);
+				FinishHealthCheckConnection(connection);
 
 				SetNodeHealthState(healthCheck->node->nodeId,
 								   healthCheck->node->nodeName,
@@ -960,7 +961,7 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			{
 				struct timeval nextTryTime = { 0, 0 };
 
-				PQfinish(connection);
+				FinishHealthCheckConnection(connection);
 
 				nextTryTime = AddTimeMillis(currentTime, HealthCheckRetryDelay);
 
@@ -985,6 +986,35 @@ ManageHealthCheck(HealthCheck *healthCheck, struct timeval currentTime)
 			/* Health check is done */
 		}
 	}
+}
+
+
+/*
+ * FinishHealthCheckConnection closes a health check connection.
+ *
+ * By the time we decide to close a health check connection, the target
+ * Postgres server may have already sent us a few bytes we haven't read yet
+ * (e.g. trailing ParameterStatus/BackendKeyData/ReadyForQuery messages that
+ * arrived in a TCP segment separate from the one that got us to our current
+ * polling status). Closing a socket that still has unread data sitting in
+ * its receive buffer makes the kernel send the peer an RST instead of a
+ * plain FIN, which the target then logs as "could not receive data from
+ * client: Connection reset by peer" -- confusing operators into thinking
+ * something is actually wrong (see issue #916), even though the health
+ * check itself completed (or failed) exactly as expected.
+ *
+ * A single non-blocking PQconsumeInput() call drains whatever is currently
+ * sitting in the socket's receive buffer into libpq's own memory before we
+ * close it, which is enough to avoid the spurious RST in the common case.
+ * It never blocks: on a non-blocking connection it just reads whatever the
+ * kernel already has buffered and returns immediately either way.
+ */
+static void
+FinishHealthCheckConnection(PGconn *connection)
+{
+	(void) PQconsumeInput(connection);
+
+	PQfinish(connection);
 }
 
 
