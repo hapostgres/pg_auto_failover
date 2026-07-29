@@ -24,7 +24,7 @@ step test_001_init_primary {
     exec node1  pg_autoctl set node metadata --name "node a"
     exec node1  pg_autoctl show state
     exec node1  pg_autoctl config set pg_autoctl.name a
-    sleep 2s
+    sleep 5s
     exec node1  pg_autoctl show settings
 }
 
@@ -50,8 +50,10 @@ step test_002b_config_set_node {
     # running supervisor to reload, which restarts its sub-services -- give
     # it the same settle time test_001_init_primary already does after its
     # own config-set, so the next step's monitor query doesn't race a node
-    # still re-registering after the restart cascade.
-    sleep 2s
+    # still re-registering after the restart cascade. CI hit this race with
+    # 2s (test_003_region_cli_roundtrip got "Query returned 0 rows" from the
+    # monitor for node1's freshly-renamed identity); bumped to 5s.
+    sleep 5s
 }
 
 # region is set at create time (node1 region dc1) and, unlike
