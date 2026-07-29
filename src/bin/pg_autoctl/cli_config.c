@@ -649,6 +649,15 @@ cli_config_set(int argc, char **argv)
 
 /*
  * cli_keeper_config_set sets the given option path to the given value.
+ *
+ * pg_autoctl.name and pg_autoctl.hostname are node metadata that the monitor
+ * also carries a copy of: pushing the change there is normally left to the
+ * running supervisor's own config-reload handling, which this one-shot
+ * command can only trigger asynchronously (a SIGHUP) and has no way to wait
+ * on. Push those two synchronously here instead, the same way "pg_autoctl
+ * set node metadata" already does, so that by the time this command returns
+ * the monitor is guaranteed to be caught up -- no polling or sleep needed by
+ * the caller.
  */
 static void
 cli_keeper_config_set(int argc, char **argv)
@@ -675,6 +684,36 @@ cli_keeper_config_set(int argc, char **argv)
 			exit(EXIT_CODE_BAD_ARGS);
 		}
 
+		bool isNodeMetadata = streq(argv[0], "pg_autoctl.name") ||
+							  streq(argv[0], "pg_autoctl.hostname");
+
+		/*
+		 * Capture the pre-change values now: keeper_config_set_setting()
+		 * below both patches this exact file on disk and repopulates config
+		 * from it, so config itself won't hold the "old" values anymore by
+		 * the time we'd want to compare.
+		 */
+		KeeperConfig oldConfig = { 0 };
+
+		if (isNodeMetadata)
+		{
+			bool missingPgdataIsOk = true;
+			bool pgIsNotRunningIsOk = true;
+			bool monitorDisabledIsOk = true;
+
+			oldConfig = keeperOptions;
+
+			if (!keeper_config_read_file(&oldConfig,
+										 missingPgdataIsOk,
+										 pgIsNotRunningIsOk,
+										 monitorDisabledIsOk))
+			{
+				log_fatal("Failed to read configuration file \"%s\"",
+						  config.pathnames.config);
+				exit(EXIT_CODE_BAD_CONFIG);
+			}
+		}
+
 		if (!keeper_config_set_setting(&config,
 									   argv[0],
 									   argv[1]))
@@ -690,6 +729,31 @@ cli_keeper_config_set(int argc, char **argv)
 					  "see above for details",
 					  config.pathnames.config);
 			exit(EXIT_CODE_BAD_CONFIG);
+		}
+
+		/*
+		 * Push the name/hostname change to the monitor synchronously,
+		 * unless this node runs with its monitor disabled, in which case
+		 * there is nothing to synchronize with.
+		 */
+		if (isNodeMetadata && !oldConfig.monitorDisabled)
+		{
+			Keeper keeper = { 0 };
+
+			keeper.config = config;
+
+			if (!monitor_init(&(keeper.monitor), config.monitor_pguri))
+			{
+				/* errors have already been logged */
+				exit(EXIT_CODE_BAD_ARGS);
+			}
+
+			if (!keeper_set_node_metadata(&keeper, &oldConfig))
+			{
+				log_error("Failed to update \"%s\" on the monitor, "
+						  "see above for details", argv[0]);
+				exit(EXIT_CODE_MONITOR);
+			}
 		}
 
 		/* now read the value from just written file */

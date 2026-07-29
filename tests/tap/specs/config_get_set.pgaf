@@ -23,8 +23,12 @@ teardown {
 step test_001_init_primary {
     exec node1  pg_autoctl set node metadata --name "node a"
     exec node1  pg_autoctl show state
+
+    # "config set pg_autoctl.name/hostname" pushes the change to the monitor
+    # synchronously (same code path as "set node metadata"), so there's
+    # nothing left to settle here -- no sleep needed before the next step
+    # queries the monitor for this node's identity.
     exec node1  pg_autoctl config set pg_autoctl.name a
-    sleep 5s
     exec node1  pg_autoctl show settings
 }
 
