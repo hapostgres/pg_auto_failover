@@ -2908,7 +2908,7 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 		{
 			sql =
 				"SELECT eventTime, nodeid, groupid, "
-				"       reportedstate, goalState, description "
+				"       reportedstate, goalState, description, rule_pos "
 				"  FROM pgautofailover.last_events($1, count => $2)";
 
 			countStr = intToString(count);
@@ -2926,7 +2926,7 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 		{
 			sql =
 				"SELECT eventTime, nodeid, groupid, "
-				"       reportedstate, goalState, description "
+				"       reportedstate, goalState, description, rule_pos "
 				"  FROM pgautofailover.last_events($1,$2,$3)";
 
 			countStr = intToString(count);
@@ -3004,7 +3004,7 @@ monitor_print_last_events_as_json(Monitor *monitor,
 		{
 			sql = "SELECT jsonb_pretty("
 				  "coalesce(jsonb_agg(row_to_json(event)), '[]'))"
-				  " FROM * FROM pgautofailover.last_events($1,$2,$3) as event";
+				  " FROM pgautofailover.last_events($1,$2,$3) as event";
 
 			countStr = intToString(count);
 			groupStr = intToString(group);
@@ -3062,20 +3062,20 @@ printLastEvents(void *ctx, PGresult *result)
 
 	log_trace("printLastEvents: %d tuples", nTuples);
 
-	if (PQnfields(result) != 6)
+	if (PQnfields(result) != 7)
 	{
-		log_error("Query returned %d columns, expected 6", PQnfields(result));
+		log_error("Query returned %d columns, expected 7", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
 
-	fformat(stdout, "%30s | %6s | %19s | %19s | %s\n",
+	fformat(stdout, "%30s | %6s | %19s | %19s | %6s | %s\n",
 			"Event Time", "Node",
-			"Current State", "Assigned State", "Comment");
-	fformat(stdout, "%30s-+-%6s-+-%19s-+-%19s-+-%10s\n",
+			"Current State", "Assigned State", "Rule", "Comment");
+	fformat(stdout, "%30s-+-%6s-+-%19s-+-%19s-+-%6s-+-%10s\n",
 			"------------------------------",
 			"------", "-------------------",
-			"-------------------", "----------");
+			"-------------------", "------", "----------");
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
@@ -3085,14 +3085,16 @@ printLastEvents(void *ctx, PGresult *result)
 		char *currentState = PQgetvalue(result, currentTupleIndex, 3);
 		char *goalState = PQgetvalue(result, currentTupleIndex, 4);
 		char *description = PQgetvalue(result, currentTupleIndex, 5);
+		bool rulePosIsNull = PQgetisnull(result, currentTupleIndex, 6);
+		char *rulePos = rulePosIsNull ? "" : PQgetvalue(result, currentTupleIndex, 6);
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */
 		sformat(node, BUFSIZE, "%s/%s", groupId, nodeId);
 
-		fformat(stdout, "%30s | %6s | %19s | %19s | %s\n",
+		fformat(stdout, "%30s | %6s | %19s | %19s | %6s | %s\n",
 				eventTime, node,
-				currentState, goalState, description);
+				currentState, goalState, rulePos, description);
 	}
 	fformat(stdout, "\n");
 
@@ -3132,7 +3134,7 @@ monitor_get_last_events(Monitor *monitor, char *formation, int group, int count,
 				"       reportedstate, goalState, "
 				"       reportedrepstate, reportedtli, reportedlsn, "
 				"       candidatepriority, replicationquorum, "
-				"       description "
+				"       description, rule_pos, rule_section "
 				"  FROM pgautofailover.last_events($1, count => $2)";
 
 			countStr = intToString(count);
@@ -3151,10 +3153,11 @@ monitor_get_last_events(Monitor *monitor, char *formation, int group, int count,
 			sql =
 				"SELECT eventId, to_char(eventTime, 'YYYY-MM-DD HH24:MI:SS'), "
 				"       formationId, nodeid, groupid, "
+				"       nodename, nodehost, nodeport, "
 				"       reportedstate, goalState, "
 				"       reportedrepstate, reportedtli, reportedlsn, "
 				"       candidatepriority, replicationquorum, "
-				"       description "
+				"       description, rule_pos, rule_section "
 				"  FROM pgautofailover.last_events($1,$2,$3)";
 
 			countStr = intToString(count);
@@ -3219,9 +3222,9 @@ getLastEvents(void *ctx, PGresult *result)
 		return;
 	}
 
-	if (PQnfields(result) != 16)
+	if (PQnfields(result) != 18)
 	{
-		log_error("Query returned %d columns, expected 16", PQnfields(result));
+		log_error("Query returned %d columns, expected 18", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -3337,6 +3340,27 @@ getLastEvents(void *ctx, PGresult *result)
 		/* description */
 		value = PQgetvalue(result, currentTupleIndex, 15);
 		strlcpy(event->description, value, sizeof(event->description));
+
+		/* rule_pos: NULL means "no rule attributed", represented as 0 */
+		if (PQgetisnull(result, currentTupleIndex, 16))
+		{
+			event->rulePos = 0;
+			event->ruleSection[0] = '\0';
+		}
+		else
+		{
+			value = PQgetvalue(result, currentTupleIndex, 16);
+
+			if (!stringToInt(value, &(event->rulePos)))
+			{
+				log_error("Invalid rule_pos \"%s\" returned by monitor", value);
+				++errors;
+			}
+
+			/* rule_section, only meaningful alongside a real rule_pos */
+			value = PQgetvalue(result, currentTupleIndex, 17);
+			strlcpy(event->ruleSection, value, sizeof(event->ruleSection));
+		}
 
 		if (errors > 0)
 		{

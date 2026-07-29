@@ -68,6 +68,17 @@ typedef struct MonitorEvent
 	int candidatePriority;
 	bool replicationQuorum;
 	char description[BUFSIZE];
+
+	/*
+	 * Which MonitorFSM[] row (if any) produced this event -- see
+	 * pgautofailover.event's own rule_pos/rule_section comment
+	 * (pgautofailover.sql) for exactly what NULL does and doesn't mean.
+	 * rulePos 0 here represents SQL NULL (matches the monitor-side
+	 * CurrentMonitorFSMRulePos convention: 0 is never a real row position),
+	 * in which case ruleSection is left empty.
+	 */
+	int rulePos;
+	char ruleSection[NAMEDATALEN];
 } MonitorEvent;
 
 #define EVENTS_ARRAY_MAX_COUNT 1024
