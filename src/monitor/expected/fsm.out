@@ -875,6 +875,34 @@ other_node_assigned_state    |
 has_extra_action             | f
 comment                      | MS-failover: no promotion in flight, not enough (or not safe enough) candidates yet -> no-op besides the fan-out above
 -[ RECORD 62 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 381
+section                      | reporting_node
+active_node_current_state    | 
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | isUnhealthy=true, isInPrimaryState=true
+candidate_node_conditions    | 
+group_conditions             | groupHasMoreThanTwoNodes=true, atLeastOneHealthyCandidate=true
+active_node_assigned_state   | 
+other_node_assigned_state    | draining
+has_extra_action             | f
+comment                      | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
+-[ RECORD 63 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 383
+section                      | reporting_node
+active_node_current_state    | 
+other_node_current_state     | prepare_maintenance
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | isUnhealthy=true
+candidate_node_conditions    | 
+group_conditions             | groupHasMoreThanTwoNodes=true
+active_node_assigned_state   | 
+other_node_assigned_state    | maintenance
+has_extra_action             | f
+comment                      | nodesCount>2, primary unhealthy, converged prepare_maintenance -> primary maintenance
+-[ RECORD 64 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 401
 section                      | primary_node
 active_node_current_state    | single
@@ -888,7 +916,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | primary alone, another node reached wait_standby -> wait_primary
--[ RECORD 63 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 65 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 403
 section                      | primary_node
 active_node_current_state    | primary, wait_primary, apply_settings
@@ -902,7 +930,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | all nodes async, zero secondaries -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 64 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 66 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 405
 section                      | primary_node
 active_node_current_state    | primary, wait_primary, apply_settings
@@ -916,7 +944,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | all nodes async, >=1 secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 65 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 67 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 407
 section                      | primary_node
 active_node_current_state    | primary, apply_settings
@@ -930,7 +958,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys=0 -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 66 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 68 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 409
 section                      | primary_node
 active_node_current_state    | primary, apply_settings
@@ -944,7 +972,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys>0 -> primary (block writes) (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 67 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 69 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 411
 section                      | primary_node
 active_node_current_state    | wait_primary
@@ -958,7 +986,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 68 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 70 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 413
 section                      | primary_node
 active_node_current_state    | apply_settings
@@ -972,7 +1000,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | apply_settings, both zero -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 69 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 71 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 415
 section                      | primary_node
 active_node_current_state    | apply_settings
@@ -986,7 +1014,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | apply_settings, number_sync_standbys != 0 -> primary (1 of 2 disjuncts) (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 70 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 72 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 417
 section                      | primary_node
 active_node_current_state    | apply_settings
@@ -1000,7 +1028,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2) (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 71 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 73 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 419
 section                      | primary_node
 active_node_current_state    | primary, wait_primary, apply_settings
@@ -1014,7 +1042,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | converged primary/wait_primary/apply_settings, no other condition applies -> no-op besides the unhealthy-secondary fan-out
--[ RECORD 72 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 74 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 421
 section                      | primary_node
 active_node_current_state    | join_primary

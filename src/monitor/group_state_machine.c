@@ -855,7 +855,7 @@ typedef struct MonitorFSMTransition
  *     completeness, never itself dispatched. None reached through the
  *     ordinary top-level driver.
  *
- *   MonitorFSM_PrimaryNodeSectionStart = 61
+ *   MonitorFSM_PrimaryNodeSectionStart = 63
  *     Where MONITOR_FSM_SECTION_PRIMARY_NODE begins: the declarative
  *     replacement for ProceedGroupStateForPrimaryNode()'s own if-chain, in
  *     which .activeNode means the *primary* node, not the reporting node.
@@ -864,9 +864,13 @@ typedef struct MonitorFSMTransition
  *     NodeActiveContext), (b) start the primary-role lookup here, both from
  *     the top-level driver (activeNode already primary-role) and from
  *     ActionRunPrimaryNodeTransition's nested pass on primaryNode
- *     (join_secondary's cascade row).
+ *     (join_secondary's cascade row). Two rows short of MonitorFSM_MSFailoverStart's
+ *     own eleven-row span (363-383, not 363-379): ActionRunMultiStandbyFailoverCascade's
+ *     own DRAINING/MAINTENANCE outcomes (pos 381/383) share this same bound,
+ *     appended at the end of the MS-failover cluster rather than renumbered
+ *     into the ordinary REPORTING_NODE rows above -- see their own comment.
  *
- *   MonitorFSM_SIZE = 72
+ *   MonitorFSM_SIZE = 74
  *     Total row count -- the end bound for the primary-role lookup (nothing
  *     comes after MONITOR_FSM_SECTION_PRIMARY_NODE), and the size every
  *     other bounded search is checked against.
@@ -891,8 +895,8 @@ static const MonitorFSMTransition MonitorFSM[];
 #define MonitorFSM_FromContextStart 21
 #define MonitorFSM_FromContextResumeStart 24
 #define MonitorFSM_MSFailoverStart 52
-#define MonitorFSM_PrimaryNodeSectionStart 61
-#define MonitorFSM_SIZE 72
+#define MonitorFSM_PrimaryNodeSectionStart 63
+#define MonitorFSM_SIZE 74
 
 /* Forward-declared for the same reason as MonitorFSM[] above: used by
  * extraActions (ActionRunPrimaryNodeTransition) defined before its real
@@ -1177,7 +1181,11 @@ ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *me
  * ActionRunMultiStandbyFailoverCascade implements the whole
  * nodesCount>2-unhealthy-primary block as a single extraAction: the DRAINING/
  * MAINTENANCE/nothing if/else-if decision, followed unconditionally by
- * ProceedGroupStateForMSFailover(). The real source never `return`s after
+ * ProceedGroupStateForMSFailover(). The DRAINING/MAINTENANCE decision itself
+ * is dispatched through MonitorFSM[]'s own pos 381/383 rows first (see their
+ * own comment) -- the hand-written if/else-if below only runs as a fallback
+ * if neither row's own conditions somehow line up with the ones just
+ * checked (should never happen). The real source never `return`s after
  * assigning DRAINING/MAINTENANCE to the primary -- it always falls through to
  * try ProceedGroupStateForMSFailover next, in the SAME outer if-block, and if
  * THAT declines (returns false), falls through further still to the rest of
@@ -1215,8 +1223,8 @@ ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *me
  * wholesale from here exactly as before this refactor (the candidate-selection
  * algorithm itself doesn't reduce to declarative conditions any more cleanly
  * than it did before -- see this file's own top-of-file design comment).
- * MonitorFSM_MSFailoverStart, by contrast, bounds the *separate* nine-row
- * MS-failover cluster (pos 363-379, "MS-failover / candidate-selection
+ * MonitorFSM_MSFailoverStart, by contrast, bounds the *separate* eleven-row
+ * MS-failover cluster (pos 363-383, "MS-failover / candidate-selection
  * cluster" section below) that those same hand-written functions now reach
  * *into*, at their own tail end, via TryMSFailoverDeclarativeRow/
  * TryFanOutReportLsnRow/DispatchMonitorFSMRuleByPos -- covering the plain
@@ -1224,8 +1232,13 @@ ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *me
  * own report_lsn fan-out, PromoteSelectedNode's prepare_promotion/fast_forward
  * choice) that those functions used to make via a raw AssignGoalState call,
  * with the original call kept as an unconditional fallback on no match. The
- * candidate-selection algorithm's own logic (priority sort, LSN comparison,
- * WAL-fetch orchestration) is not part of either bounded range.
+ * last two rows in that same cluster (pos 381/383) are a fourth, unrelated
+ * caller reusing the same bounded range: ActionRunMultiStandbyFailoverCascade's
+ * own DRAINING/MAINTENANCE outcomes (see that function's own comment) -- not
+ * part of the candidate-selection machinery at all, just sharing the same
+ * "safe to scan with the ordinary nac" bound. The candidate-selection
+ * algorithm's own logic (priority sort, LSN comparison, WAL-fetch
+ * orchestration) is not part of either bounded range.
  */
 static void
 ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac,
@@ -1233,33 +1246,42 @@ ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *
 {
 	AutoFailoverNode *primaryNode = nac->primaryNode.node;
 
-	List *candidateNodesList =
-		AutoFailoverOtherNodesListInState(primaryNode, REPLICATION_STATE_SECONDARY);
-	int candidatesCount = CountHealthyCandidates(candidateNodesList);
-
-	if (IsInPrimaryState(primaryNode) &&
-		!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-		candidatesCount >= 1)
+	if (!FindAndDispatchMonitorFSMRule(ctx, nac, MonitorFSM_MSFailoverStart,
+									  MonitorFSM_PrimaryNodeSectionStart))
 	{
-		char drainingMessage[BUFSIZE] = { 0 };
+		/*
+		 * Neither pos 381 nor pos 383 matched -- reproduce the original
+		 * hand-written condition exactly. nac->atLeastOneHealthyCandidate is
+		 * already the exact same fact those rows' own
+		 * atLeastOneHealthyCandidate condition checks (same
+		 * AutoFailoverOtherNodesListInState + CountHealthyCandidates
+		 * computation, see BuildFromContextNodeActiveContext), so it's reused
+		 * here rather than recomputed.
+		 */
+		if (IsInPrimaryState(primaryNode) &&
+			!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
+			nac->atLeastOneHealthyCandidate)
+		{
+			char drainingMessage[BUFSIZE] = { 0 };
 
-		snprintf(drainingMessage, BUFSIZE,
-				 "Setting goal state of " NODE_FORMAT
-				 " to draining after it became unhealthy.",
-				 NODE_FORMAT_ARGS(primaryNode));
+			snprintf(drainingMessage, BUFSIZE,
+					 "Setting goal state of " NODE_FORMAT
+					 " to draining after it became unhealthy.",
+					 NODE_FORMAT_ARGS(primaryNode));
 
-		AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, drainingMessage);
-	}
-	else if (IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
-	{
-		char maintenanceMessage[BUFSIZE] = { 0 };
+			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, drainingMessage);
+		}
+		else if (IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
+		{
+			char maintenanceMessage[BUFSIZE] = { 0 };
 
-		snprintf(maintenanceMessage, BUFSIZE,
-				 "Setting goal state of " NODE_FORMAT
-				 " to maintenance after it converged to prepare_maintenance.",
-				 NODE_FORMAT_ARGS(primaryNode));
+			snprintf(maintenanceMessage, BUFSIZE,
+					 "Setting goal state of " NODE_FORMAT
+					 " to maintenance after it converged to prepare_maintenance.",
+					 NODE_FORMAT_ARGS(primaryNode));
 
-		AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, maintenanceMessage);
+			AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, maintenanceMessage);
+		}
 	}
 
 	if (!ProceedGroupStateForMSFailover(ctx, primaryNode))
@@ -2443,6 +2465,42 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					  .candidatePromotionInProgress = BOOL_FALSE },
 	  .comment = "MS-failover: no promotion in flight, not enough (or not safe enough) "
 				 "candidates yet -> no-op besides the fan-out above" },
+
+	/*
+	 * ActionRunMultiStandbyFailoverCascade's own two outcomes (pos 305's
+	 * extraAction, group_state_machine.c). Both rows below share pos 305's
+	 * own gating conditions (primaryNode.isUnhealthy, groupHasMoreThanTwoNodes)
+	 * verbatim -- not a new marker field -- which is what keeps them safe
+	 * from the ordinary top-level lookup: that lookup can only ever reach
+	 * these two rows by first reaching pos 305 itself (earlier in the array,
+	 * with no activeNode-state restriction of its own), which unconditionally
+	 * dispatches through here via its own extraAction before the ordinary
+	 * scan could ever resume past it in the same call. atLeastOneHealthyCandidate
+	 * is the exact same fact (same AutoFailoverOtherNodesListInState +
+	 * CountHealthyCandidates computation, same isUnhealthy/groupNodeCount>2
+	 * gate) ActionRunMultiStandbyFailoverCascade used to compute locally --
+	 * reused here instead of duplicated. ResolveAcceptedTimeline-style side
+	 * effects don't apply to either row (there are none here); only the
+	 * plain AssignGoalState calls these replace, each falling back to the
+	 * original hand-written condition on no match.
+	 */
+	{ .pos = 381, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
+	  .primaryNode = { .statePattern = FSM_NOT_STABLE_WAIT_PRIMARY,
+					   .isInPrimaryState = BOOL_TRUE,
+					   .isUnhealthy = BOOL_TRUE },
+	  .conditions = { .groupHasMoreThanTwoNodes = BOOL_TRUE,
+					  .atLeastOneHealthyCandidate = BOOL_TRUE },
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DRAINING),
+	  .comment = "nodesCount>2, primary unhealthy, in primary role but not yet "
+				 "wait_primary, >=1 healthy candidate -> primary draining" },
+
+	{ .pos = 383, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_MAINTENANCE),
+					   .isUnhealthy = BOOL_TRUE },
+	  .conditions = { .groupHasMoreThanTwoNodes = BOOL_TRUE },
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_MAINTENANCE),
+	  .comment = "nodesCount>2, primary unhealthy, converged prepare_maintenance -> "
+				 "primary maintenance" },
 
 	/* --- [MonitorFSM_PrimaryNodeSectionStart, MonitorFSM_SIZE): the declarative replacement
 	 * for ProceedGroupStateForPrimaryNode()'s own sequential if-chain. Here .activeNode maps
