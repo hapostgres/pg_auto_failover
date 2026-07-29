@@ -545,8 +545,51 @@ pgsql_open_connection(PGSQL *pgsql)
 	INSTR_TIME_SET_CURRENT(pgsql->retryPolicy.startTime);
 	INSTR_TIME_SET_ZERO(pgsql->retryPolicy.connectTime);
 
-	/* Make a connection to the database */
-	pgsql->connection = PQconnectdb(pgsql->connectionString);
+	if (pgsql->connectionType == PGSQL_CONN_MONITOR)
+	{
+		/*
+		 * Bound how long a query already in flight when the network
+		 * disappears without a graceful FIN/RST (a hard network partition,
+		 * or `docker network disconnect` in our own test suite) can block
+		 * on read(), instead of relying on the OS default TCP retransmission
+		 * timeout (many minutes). PGCONNECT_TIMEOUT above only bounds the
+		 * initial handshake, not an already-established connection.
+		 *
+		 * Two distinct mechanisms, both needed: keepalives only start
+		 * probing once a connection has been fully idle (no unacknowledged
+		 * data) for keepalives_idle seconds -- if the query's own bytes are
+		 * still unacknowledged at the moment the network vanishes, plain
+		 * data retransmission (governed by the kernel's tcp_retries2, not
+		 * by our keepalive settings) takes over instead and keepalives never
+		 * get a chance to apply. tcp_user_timeout bounds that unacknowledged
+		 * -data case directly, regardless of which timer the kernel is
+		 * currently running.
+		 *
+		 * dbname carries the full connection string/URI as given by the
+		 * caller; expand_dbname=1 tells libpq to parse it as such rather
+		 * than take it literally, so this works whichever form (URI or
+		 * keyword=value) pgsql->connectionString happens to be in, without
+		 * us having to parse and rebuild it here ourselves.
+		 */
+		const char *keywords[] = {
+			"dbname", "keepalives", "keepalives_idle",
+			"keepalives_interval", "keepalives_count",
+			"tcp_user_timeout", NULL
+		};
+		const char *values[] = {
+			pgsql->connectionString, "1", POSTGRES_MONITOR_KEEPALIVES_IDLE,
+			POSTGRES_MONITOR_KEEPALIVES_INTERVAL,
+			POSTGRES_MONITOR_KEEPALIVES_COUNT,
+			POSTGRES_MONITOR_TCP_USER_TIMEOUT, NULL
+		};
+
+		pgsql->connection = PQconnectdbParams(keywords, values, 1);
+	}
+	else
+	{
+		/* Make a connection to the database */
+		pgsql->connection = PQconnectdb(pgsql->connectionString);
+	}
 
 	/* Check to see that the backend connection was successfully made */
 	if (PQstatus(pgsql->connection) != CONNECTION_OK)

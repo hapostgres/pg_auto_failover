@@ -61,6 +61,28 @@
 #define MAXIMUM_BACKUP_RATE "100M"
 #define MAXIMUM_BACKUP_RATE_LEN 32
 
+/*
+ * TCP keepalives for the keeper-to-monitor connection. PGCONNECT_TIMEOUT
+ * only bounds the initial TCP handshake -- once connected, a query that's
+ * in flight when the network vanishes without a graceful FIN/RST (e.g. a
+ * hard `docker network disconnect`, or a real network partition) blocks on
+ * a plain read() with no libpq-level timeout of its own, relying entirely
+ * on the OS's default TCP retransmission timeout (many minutes). These
+ * values bound that worst case to keepalives_idle + keepalives_interval *
+ * keepalives_count =~ 11 seconds instead.
+ */
+#define POSTGRES_MONITOR_KEEPALIVES_IDLE "5"
+#define POSTGRES_MONITOR_KEEPALIVES_INTERVAL "2"
+#define POSTGRES_MONITOR_KEEPALIVES_COUNT "3"
+
+/*
+ * Milliseconds. Bounds how long already-transmitted, unacknowledged data
+ * may go unacknowledged before the kernel gives up on the connection --
+ * the case plain keepalives don't cover (see the comment at the
+ * PQconnectdbParams() call site in pgsql_open_connection()).
+ */
+#define POSTGRES_MONITOR_TCP_USER_TIMEOUT "10000"
+
 
 /*
  * Microsoft approved cipher string.

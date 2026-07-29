@@ -264,6 +264,7 @@ static void pgaf_read_raw_block(void);
 
 <STEP_BODY>"wait"          { return T_WAIT; }
 <STEP_BODY>"until"         { return T_UNTIL; }
+<STEP_BODY>"replays"       { return T_REPLAYS; }
 <STEP_BODY>"timeout"       { return T_TIMEOUT; }
 <STEP_BODY>"assert"        { return T_ASSERT; }
 <STEP_BODY>"sql"           { return T_SQL; }

@@ -181,6 +181,13 @@ typedef enum TestCmdKind
 	                      * node's host-side .ini [settings] entry directly
 	                      * and asserts it equals <value>. service = node,
 	                      * state = key, args = expected value. */
+	CMD_WAIT_LSN,        /* wait until <node> replays <source> [timeout Ns] —
+	                      * captures <source>'s current (or, if it's itself a
+	                      * standby, last-replayed) WAL LSN at the moment this
+	                      * command runs, then polls <node> until its own
+	                      * last-replayed LSN has caught up to that captured
+	                      * value. service = node to poll, state = source
+	                      * node to capture the LSN from. */
 } TestCmdKind;
 
 typedef struct TestCmd

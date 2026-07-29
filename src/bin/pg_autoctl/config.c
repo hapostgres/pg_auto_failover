@@ -122,8 +122,15 @@ build_xdg_path(char *dst,
 		join_path_components(filename, filename, pgdata);
 	}
 
-	/* mkdir -p the target directory */
-	if (pg_mkdir_p(filename, 0755) == -1)
+	/*
+	 * mkdir -p the target directory. Several pg_autoctl processes (e.g. a
+	 * freshly started node's own supervisor and a one-shot CLI command
+	 * invoked against it) can race to create the same XDG_RUNTIME_DIR
+	 * fallback ancestor (typically "/tmp/pg_autoctl") the first time either
+	 * of them runs -- tolerate losing that race rather than failing, as
+	 * long as the directory exists by the time we're done.
+	 */
+	if (pg_mkdir_p(filename, 0755) == -1 && !directory_exists(filename))
 	{
 		log_error("Failed to create state directory \"%s\": %m", filename);
 		return false;

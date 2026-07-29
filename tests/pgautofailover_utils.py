@@ -252,7 +252,18 @@ class Cluster:
                 pass
 
         self.flush_output()
-        return proc.communicate(timeout=timeout - full_secs)
+
+        # When timeout is a whole number (the common case, e.g. the plain
+        # int COMMAND_TIMEOUT), the loop above already consumed the entire
+        # budget and this remainder is exactly 0 -- passing that (or an
+        # epsilon-negative value, depending on float rounding) straight into
+        # subprocess.communicate() lets its internal deadline arithmetic
+        # decide whether to wait at all, and it can flip a "still not done"
+        # into a spurious TimeoutExpired reporting a nonsensical negative
+        # timeout. Clamp to a small positive value so we always make one
+        # real last check instead.
+        remaining = timeout - full_secs
+        return proc.communicate(timeout=remaining if remaining > 0 else 0.1)
 
     def create_root_cert(self, directory, basename="root", CN="root"):
         self.cert = cert.SSLCert(directory, basename, CN)

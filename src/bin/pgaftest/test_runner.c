@@ -89,6 +89,13 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_WAIT_LSN:
+		{
+			fprintf(f, "%swait until %s replays %s  timeout %ds\n", /* IGNORE-BANNED */
+					pad, cmd->service, cmd->state, cmd->timeoutSeconds);
+			break;
+		}
+
 		case CMD_ASSERT_STATE:
 		{
 			fprintf(f, "%sassert %s state = %s\n", /* IGNORE-BANNED */
@@ -3410,11 +3417,25 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 * `--no-deps` is critical: without it, `start` (and `up`) would
 			 * also start any stopped services listed in `depends_on`, which
 			 * interferes with tests that restart a single node.
+			 *
+			 * `--wait --wait-timeout` lets compose's own daemon-side readiness
+			 * check do the work, instead of a hand-rolled `docker compose ps
+			 * -q | xargs docker inspect` poll loop from here: one call instead
+			 * of up to N subprocess pairs, and it uses the service's own
+			 * healthcheck when one is defined rather than only "process
+			 * started". 30s (vs the previous 10s poll) gives real headroom
+			 * for a loaded CI runner -- this restart briefly overlaps with
+			 * the node's own in-flight config-reload-triggered Postgres
+			 * restart on a slow runner (see the "did not report running
+			 * within 10000 ms" flake on pgaftest/ssl this was sized for).
 			 */
 			char out[4096] = "";
+			const int waitTimeoutSecs = 30;
 			int rc = run_cmd_capture(out, sizeof(out),
-									 "%s up -d --no-recreate --no-deps %s 2>&1",
-									 r->composeBase, cmd->service);
+									 "%s up -d --no-recreate --no-deps "
+									 "--wait --wait-timeout %d %s 2>&1",
+									 r->composeBase, waitTimeoutSecs,
+									 cmd->service);
 			if (out[0])
 			{
 				log_output("   compose: ", out);
@@ -3422,53 +3443,10 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			if (rc != 0)
 			{
 				sformat(errBuf, errLen,
-						"docker compose start %s failed (exit %d)",
-						cmd->service, rc);
+						"docker compose start %s: container did not "
+						"become running/healthy within %ds (exit %d)",
+						cmd->service, waitTimeoutSecs, rc);
 				return false;
-			}
-
-			/*
-			 * `docker compose up -d` (and its own "Started"/"Running" status
-			 * line) returns as soon as the daemon has issued the start, not
-			 * once the container is actually registered as running -- a
-			 * following `docker exec` can still race that with "container
-			 * ... is not running" for a few hundred ms.  Poll the daemon's
-			 * own view of the container state before declaring success.
-			 */
-			{
-				bool running = false;
-				int elapsedMs = 0;
-				const int pollIntervalMs = 200;
-				const int pollTimeoutMs = 10000;
-
-				while (elapsedMs < pollTimeoutMs)
-				{
-					char state[64] = "";
-					int stateRc = run_cmd_capture(state, sizeof(state),
-												  "%s ps -q %s | "
-												  "xargs -r docker inspect "
-												  "--format '{{.State.Running}}' "
-												  "2>/dev/null",
-												  r->composeBase, cmd->service);
-
-					if (stateRc == 0 && strcmp(state, "true") == 0)
-					{
-						running = true;
-						break;
-					}
-
-					pg_usleep(pollIntervalMs * 1000);
-					elapsedMs += pollIntervalMs;
-				}
-
-				if (!running)
-				{
-					sformat(errBuf, errLen,
-							"docker compose start %s: container did not "
-							"report running within %d ms",
-							cmd->service, pollTimeoutMs);
-					return false;
-				}
 			}
 
 			return true;
@@ -3810,6 +3788,66 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			sformat(errBuf, errLen,
 					"timeout: service %s did not stop within %ds",
 					svc, timeoutSecs);
+			return false;
+		}
+
+		case CMD_WAIT_LSN:
+		{
+			const char *targetNode = cmd->service;
+			const char *sourceNode = cmd->state;
+			int timeoutSecs = cmd->timeoutSeconds;
+
+			/*
+			 * Capture the source's WAL position now, once, at the moment
+			 * this command runs -- not something re-evaluated on every poll
+			 * iteration, which could chase a moving target forever on a
+			 * busy primary. pg_is_in_recovery() lets this work whichever
+			 * role the source currently has.
+			 */
+			char lsn[64] = "";
+			if (!exec_sql_on_service(
+					r, sourceNode,
+					"SELECT CASE WHEN pg_is_in_recovery() "
+					"THEN pg_last_wal_replay_lsn() "
+					"ELSE pg_current_wal_lsn() END;",
+					lsn, sizeof(lsn)))
+			{
+				sformat(errBuf, errLen,
+						"wait until %s replays %s: failed to capture %s's LSN: %s",
+						targetNode, sourceNode, sourceNode, lsn);
+				return false;
+			}
+
+			int n = strlen(lsn);
+			while (n > 0 && (lsn[n - 1] == '\n' || lsn[n - 1] == ' '))
+			{
+				lsn[--n] = '\0';
+			}
+
+			log_info("  Waiting for %s to replay %s's LSN %s (timeout %ds)",
+					 targetNode, sourceNode, lsn, timeoutSecs);
+
+			char query[256];
+			sformat(query, sizeof(query),
+					"SELECT pg_last_wal_replay_lsn() >= '%s';", lsn);
+
+			time_t deadline = time(NULL) + timeoutSecs;
+			while (time(NULL) < deadline)
+			{
+				char caughtUp[64] = "";
+				if (exec_sql_on_service(r, targetNode, query,
+										caughtUp, sizeof(caughtUp)) &&
+					caughtUp[0] == 't')
+				{
+					return true;
+				}
+
+				usleep(500000); /* 500ms */
+			}
+
+			sformat(errBuf, errLen,
+					"timeout: %s did not replay %s's LSN %s within %ds",
+					targetNode, sourceNode, lsn, timeoutSecs);
 			return false;
 		}
 
@@ -4347,6 +4385,13 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 		{
 			sformat(buf, len, "wait until %s stopped  timeout %ds",
 					cmd->service, cmd->timeoutSeconds);
+			break;
+		}
+
+		case CMD_WAIT_LSN:
+		{
+			sformat(buf, len, "wait until %s replays %s  timeout %ds",
+					cmd->service, cmd->state, cmd->timeoutSeconds);
 			break;
 		}
 

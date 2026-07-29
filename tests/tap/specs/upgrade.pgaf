@@ -256,6 +256,14 @@ step test_008_failover_post_upgrade {
 
 step test_009_write_on_new_primary {
     sql node2 { INSERT INTO upgrade_marker DEFAULT VALUES; }
+
+    # The FSM reports node1/node3 as secondary as soon as the promotion
+    # converges, which isn't the same instant a write issued a moment later
+    # has actually replicated -- wait for each standby to catch up to
+    # node2's post-INSERT LSN before reading, instead of racing that gap.
+    wait until node1 replays node2  timeout 30s
+    wait until node3 replays node2  timeout 30s
+
     sql node1 { SELECT count(*) FROM upgrade_marker; }
     expect { 2 }
     sql node3 { SELECT count(*) FROM upgrade_marker; }

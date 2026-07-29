@@ -485,5 +485,13 @@ jobs:
           echo "TRAVIS_BUILD_DIR=$(pwd)"           >> $GITHUB_ENV
 
       - name: Run pytest / ${{ matrix.TEST }} (PG${{ matrix.PGVERSION }})
-        timeout-minutes: 15
+        # citus is the heaviest TEST value in this matrix (6 files, ~76 items,
+        # several multi-coordinator/multi-worker convergence waits) and has
+        # been seen to run right up against a 15-minute step timeout while
+        # still making forward progress, not stuck -- e.g. citus (PG14)
+        # timed out mid-suite on 2026-07-29 with ~4-5 minutes of the job's
+        # own 20-minute ceiling (see above) left completely unused. 18
+        # minutes gives real headroom while still leaving margin under the
+        # job-level timeout once checkout/download/docker-load are counted.
+        timeout-minutes: 18
         run: make run-test-prebuilt

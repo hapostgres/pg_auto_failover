@@ -138,6 +138,19 @@ step test_003_005_check_slots_after_series_003 {
 }
 
 step test_005_001_fail_primary_again {
+    # Force node3 to win the upcoming test_005_002 election even if node2
+    # (restarted there) manages to stream-catch-up to the exact same LSN as
+    # node3 before the monitor notices node1 is gone: on an LSN tie, the
+    # monitor's SelectFailoverCandidateNode() keeps the first candidate seen
+    # at equal priority (lowest node id), so without this node2 (id=2) would
+    # beat node3 (id=3) on any tie -- the opposite of what this step name and
+    # the series 005 diagram above document. candidate-priority 0 removes
+    # node2 from GroupListCandidates' selection pool entirely while still
+    # letting it report its LSN, which is required to satisfy this
+    # formation's number_sync_standbys=1 quorum (2 reports needed) -- see the
+    # comment on test_005_002 below. Restored once node2 rejoins as
+    # secondary, in test_005_003, before series 006 needs it eligible again.
+    exec node2  pg_autoctl set node candidate-priority 0
     compose kill node2
     wait until node1 state is primary
         and node3 state is secondary
@@ -183,6 +196,10 @@ step test_005_003_bring_up_first_failed_primary {
     wait until node2 state is secondary
         and node3 state is primary
         timeout 300s
+    # Restore node2's normal candidate priority now that it's back as a
+    # healthy secondary: series 006 (test_006_002) expects node2 to win a
+    # later election, so it must be a normal-priority candidate again by then.
+    exec node2  pg_autoctl set node candidate-priority 50
 }
 
 step test_005_004_bring_up_last_failed_primary {
