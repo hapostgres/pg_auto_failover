@@ -3417,11 +3417,25 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			 * `--no-deps` is critical: without it, `start` (and `up`) would
 			 * also start any stopped services listed in `depends_on`, which
 			 * interferes with tests that restart a single node.
+			 *
+			 * `--wait --wait-timeout` lets compose's own daemon-side readiness
+			 * check do the work, instead of a hand-rolled `docker compose ps
+			 * -q | xargs docker inspect` poll loop from here: one call instead
+			 * of up to N subprocess pairs, and it uses the service's own
+			 * healthcheck when one is defined rather than only "process
+			 * started". 30s (vs the previous 10s poll) gives real headroom
+			 * for a loaded CI runner -- this restart briefly overlaps with
+			 * the node's own in-flight config-reload-triggered Postgres
+			 * restart on a slow runner (see the "did not report running
+			 * within 10000 ms" flake on pgaftest/ssl this was sized for).
 			 */
 			char out[4096] = "";
+			const int waitTimeoutSecs = 30;
 			int rc = run_cmd_capture(out, sizeof(out),
-									 "%s up -d --no-recreate --no-deps %s 2>&1",
-									 r->composeBase, cmd->service);
+									 "%s up -d --no-recreate --no-deps "
+									 "--wait --wait-timeout %d %s 2>&1",
+									 r->composeBase, waitTimeoutSecs,
+									 cmd->service);
 			if (out[0])
 			{
 				log_output("   compose: ", out);
@@ -3429,53 +3443,10 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			if (rc != 0)
 			{
 				sformat(errBuf, errLen,
-						"docker compose start %s failed (exit %d)",
-						cmd->service, rc);
+						"docker compose start %s: container did not "
+						"become running/healthy within %ds (exit %d)",
+						cmd->service, waitTimeoutSecs, rc);
 				return false;
-			}
-
-			/*
-			 * `docker compose up -d` (and its own "Started"/"Running" status
-			 * line) returns as soon as the daemon has issued the start, not
-			 * once the container is actually registered as running -- a
-			 * following `docker exec` can still race that with "container
-			 * ... is not running" for a few hundred ms.  Poll the daemon's
-			 * own view of the container state before declaring success.
-			 */
-			{
-				bool running = false;
-				int elapsedMs = 0;
-				const int pollIntervalMs = 200;
-				const int pollTimeoutMs = 10000;
-
-				while (elapsedMs < pollTimeoutMs)
-				{
-					char state[64] = "";
-					int stateRc = run_cmd_capture(state, sizeof(state),
-												  "%s ps -q %s | "
-												  "xargs -r docker inspect "
-												  "--format '{{.State.Running}}' "
-												  "2>/dev/null",
-												  r->composeBase, cmd->service);
-
-					if (stateRc == 0 && strcmp(state, "true") == 0)
-					{
-						running = true;
-						break;
-					}
-
-					pg_usleep(pollIntervalMs * 1000);
-					elapsedMs += pollIntervalMs;
-				}
-
-				if (!running)
-				{
-					sformat(errBuf, errLen,
-							"docker compose start %s: container did not "
-							"report running within %d ms",
-							cmd->service, pollTimeoutMs);
-					return false;
-				}
 			}
 
 			return true;
