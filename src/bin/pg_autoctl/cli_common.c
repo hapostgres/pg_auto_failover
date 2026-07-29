@@ -1209,6 +1209,140 @@ cli_getopt_pgdata(int argc, char **argv)
 
 
 /*
+ * cli_getopt_pgdata_or_json is a variant of cli_getopt_pgdata used only by
+ * "pg_autoctl inspect fsm list": with --json, that command dumps the
+ * keeper's own static KeeperFSM[] table (cli_do_fsm_list, cli_do_fsm.c),
+ * which has no dependency on any node's actual config or on-disk state, so
+ * it must be able to run with neither --pgdata nor an existing
+ * configuration file. Without --json it behaves exactly like
+ * cli_getopt_pgdata, because that mode reports on the keeper's current
+ * state and does need a real config. This parses the identical option set
+ * as cli_getopt_pgdata; only the decision of whether to call
+ * prepare_keeper_options differs, so as not to change cli_getopt_pgdata
+ * itself (used, unconditionally, by every other terminal command).
+ */
+int
+cli_getopt_pgdata_or_json(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+	int verboseCount = 0;
+	bool printVersion = false;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "json", no_argument, NULL, 'J' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+	optind = 0;
+
+	unsetenv("POSIXLY_CORRECT");
+
+	while ((c = getopt_long(argc, argv, "D:JVvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'J':
+			{
+				outputJSON = true;
+				log_trace("--json");
+				break;
+			}
+
+			case 'V':
+			{
+				printVersion = true;
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				/* getopt_long already wrote an error message */
+				errors++;
+				break;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (printVersion)
+	{
+		keeper_cli_print_version(argc, argv);
+	}
+
+	/*
+	 * --json needs neither --pgdata nor an existing config file (see this
+	 * function's own comment); anything else still needs the full
+	 * pgdata/config validation cli_getopt_pgdata itself always applies.
+	 */
+	if (!outputJSON)
+	{
+		(void) prepare_keeper_options(&options);
+	}
+
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
  * prepare_keeper_options finishes the preparation of the keeperOptions that
  * hosts the command line options.
  */

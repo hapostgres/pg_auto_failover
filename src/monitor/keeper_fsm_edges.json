@@ -1,0 +1,562 @@
+[
+  {
+    "current": "init",
+    "assigned": "single"
+  },
+  {
+    "current": "init",
+    "assigned": "single"
+  },
+  {
+    "current": "init",
+    "assigned": "single"
+  },
+  {
+    "current": "dropped",
+    "assigned": "single"
+  },
+  {
+    "current": "dropped",
+    "assigned": "single"
+  },
+  {
+    "current": "dropped",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "primary",
+    "assigned": "single"
+  },
+  {
+    "current": "wait_primary",
+    "assigned": "single"
+  },
+  {
+    "current": "join_primary",
+    "assigned": "single"
+  },
+  {
+    "current": "primary",
+    "assigned": "draining"
+  },
+  {
+    "current": "draining",
+    "assigned": "demoted"
+  },
+  {
+    "current": "primary",
+    "assigned": "demoted"
+  },
+  {
+    "current": "primary",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "join_primary",
+    "assigned": "draining"
+  },
+  {
+    "current": "join_primary",
+    "assigned": "demoted"
+  },
+  {
+    "current": "join_primary",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "apply_settings",
+    "assigned": "draining"
+  },
+  {
+    "current": "apply_settings",
+    "assigned": "demoted"
+  },
+  {
+    "current": "apply_settings",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "primary",
+    "assigned": "prepare_maintenance"
+  },
+  {
+    "current": "prepare_maintenance",
+    "assigned": "maintenance"
+  },
+  {
+    "current": "primary",
+    "assigned": "maintenance"
+  },
+  {
+    "current": "draining",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "demote_timeout",
+    "assigned": "demoted"
+  },
+  {
+    "current": "wait_primary",
+    "assigned": "demoted"
+  },
+  {
+    "current": "demoted",
+    "assigned": "single"
+  },
+  {
+    "current": "demoted",
+    "assigned": "single"
+  },
+  {
+    "current": "demote_timeout",
+    "assigned": "single"
+  },
+  {
+    "current": "demote_timeout",
+    "assigned": "single"
+  },
+  {
+    "current": "draining",
+    "assigned": "single"
+  },
+  {
+    "current": "draining",
+    "assigned": "single"
+  },
+  {
+    "current": "secondary",
+    "assigned": "single"
+  },
+  {
+    "current": "secondary",
+    "assigned": "single"
+  },
+  {
+    "current": "secondary",
+    "assigned": "single"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "single"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "single"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "single"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "single"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "single"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "single"
+  },
+  {
+    "current": "stop_replication",
+    "assigned": "single"
+  },
+  {
+    "current": "stop_replication",
+    "assigned": "single"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "single"
+  },
+  {
+    "current": "single",
+    "assigned": "wait_primary"
+  },
+  {
+    "current": "primary",
+    "assigned": "join_primary"
+  },
+  {
+    "current": "primary",
+    "assigned": "wait_primary"
+  },
+  {
+    "current": "join_primary",
+    "assigned": "wait_primary"
+  },
+  {
+    "current": "wait_primary",
+    "assigned": "join_primary"
+  },
+  {
+    "current": "wait_primary",
+    "assigned": "primary"
+  },
+  {
+    "current": "join_primary",
+    "assigned": "primary"
+  },
+  {
+    "current": "demote_timeout",
+    "assigned": "primary"
+  },
+  {
+    "current": "wait_standby",
+    "assigned": "catchingup"
+  },
+  {
+    "current": "demoted",
+    "assigned": "catchingup"
+  },
+  {
+    "current": "secondary",
+    "assigned": "catchingup"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "secondary"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "secondary"
+  },
+  {
+    "current": "secondary",
+    "assigned": "prepare_promotion"
+  },
+  {
+    "current": "secondary",
+    "assigned": "prepare_promotion"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "prepare_promotion"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "prepare_promotion"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "stop_replication"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "stop_replication"
+  },
+  {
+    "current": "stop_replication",
+    "assigned": "wait_primary"
+  },
+  {
+    "current": "stop_replication",
+    "assigned": "wait_primary"
+  },
+  {
+    "current": "stop_replication",
+    "assigned": "wait_primary"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "wait_primary"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "wait_primary"
+  },
+  {
+    "current": "init",
+    "assigned": "wait_standby"
+  },
+  {
+    "current": "dropped",
+    "assigned": "wait_standby"
+  },
+  {
+    "current": "secondary",
+    "assigned": "wait_standby"
+  },
+  {
+    "current": "secondary",
+    "assigned": "wait_maintenance"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "wait_maintenance"
+  },
+  {
+    "current": "secondary",
+    "assigned": "maintenance"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "maintenance"
+  },
+  {
+    "current": "wait_maintenance",
+    "assigned": "maintenance"
+  },
+  {
+    "current": "maintenance",
+    "assigned": "catchingup"
+  },
+  {
+    "current": "prepare_maintenance",
+    "assigned": "catchingup"
+  },
+  {
+    "current": "primary",
+    "assigned": "apply_settings"
+  },
+  {
+    "current": "wait_primary",
+    "assigned": "apply_settings"
+  },
+  {
+    "current": "apply_settings",
+    "assigned": "primary"
+  },
+  {
+    "current": "apply_settings",
+    "assigned": "single"
+  },
+  {
+    "current": "apply_settings",
+    "assigned": "wait_primary"
+  },
+  {
+    "current": "apply_settings",
+    "assigned": "join_primary"
+  },
+  {
+    "current": "secondary",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "maintenance",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "prepare_maintenance",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "prepare_promotion"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "prepare_promotion"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "fast_forward"
+  },
+  {
+    "current": "fast_forward",
+    "assigned": "prepare_promotion"
+  },
+  {
+    "current": "fast_forward",
+    "assigned": "prepare_promotion"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "join_secondary"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "secondary"
+  },
+  {
+    "current": "join_secondary",
+    "assigned": "secondary"
+  },
+  {
+    "current": "draining",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "demoted",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "init",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "init",
+    "assigned": "dropped"
+  },
+  {
+    "current": "single",
+    "assigned": "dropped"
+  },
+  {
+    "current": "primary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "wait_primary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "wait_standby",
+    "assigned": "dropped"
+  },
+  {
+    "current": "demoted",
+    "assigned": "dropped"
+  },
+  {
+    "current": "demote_timeout",
+    "assigned": "dropped"
+  },
+  {
+    "current": "draining",
+    "assigned": "dropped"
+  },
+  {
+    "current": "secondary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "dropped"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "dropped"
+  },
+  {
+    "current": "stop_replication",
+    "assigned": "dropped"
+  },
+  {
+    "current": "maintenance",
+    "assigned": "dropped"
+  },
+  {
+    "current": "join_primary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "apply_settings",
+    "assigned": "dropped"
+  },
+  {
+    "current": "prepare_maintenance",
+    "assigned": "dropped"
+  },
+  {
+    "current": "wait_maintenance",
+    "assigned": "dropped"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "dropped"
+  },
+  {
+    "current": "fast_forward",
+    "assigned": "dropped"
+  },
+  {
+    "current": "join_secondary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "dropped",
+    "assigned": "dropped"
+  },
+  {
+    "current": "init",
+    "assigned": "dropped"
+  },
+  {
+    "current": "single",
+    "assigned": "dropped"
+  },
+  {
+    "current": "primary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "wait_primary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "wait_standby",
+    "assigned": "dropped"
+  },
+  {
+    "current": "demoted",
+    "assigned": "dropped"
+  },
+  {
+    "current": "demote_timeout",
+    "assigned": "dropped"
+  },
+  {
+    "current": "draining",
+    "assigned": "dropped"
+  },
+  {
+    "current": "secondary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "dropped"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "dropped"
+  },
+  {
+    "current": "stop_replication",
+    "assigned": "dropped"
+  },
+  {
+    "current": "maintenance",
+    "assigned": "dropped"
+  },
+  {
+    "current": "join_primary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "apply_settings",
+    "assigned": "dropped"
+  },
+  {
+    "current": "prepare_maintenance",
+    "assigned": "dropped"
+  },
+  {
+    "current": "wait_maintenance",
+    "assigned": "dropped"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "dropped"
+  },
+  {
+    "current": "fast_forward",
+    "assigned": "dropped"
+  },
+  {
+    "current": "join_secondary",
+    "assigned": "dropped"
+  },
+  {
+    "current": "dropped",
+    "assigned": "dropped"
+  }
+]

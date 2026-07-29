@@ -33,6 +33,7 @@
 test: create_extension
 test: fsm
 test: check_fsm_reachability
+test: keeper_fsm_edges
 test: monitor
 test: workers
 test: node_active_protocol

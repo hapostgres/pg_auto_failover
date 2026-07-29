@@ -70,7 +70,7 @@ CommandLine fsm_list =
 				 "List reachable FSM states from current state",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 cli_getopt_pgdata_or_json,
 				 cli_do_fsm_list);
 
 CommandLine fsm_check =
@@ -332,11 +332,39 @@ cli_do_fsm_state(int argc, char **argv)
 
 
 /*
- * cli_do_fsm_list lists reachable states from the current one.
+ * cli_do_fsm_list lists reachable states from the current one, or (with
+ * --json) dumps the full KeeperFSM[] edge set as JSON -- the design doc's
+ * own proposed standalone use of KeeperFSMToJSON() ("a human or another
+ * tool may want the raw edge list without a monitor round trip at all"),
+ * and the source this project's own keeper_fsm_edges.json regress fixture
+ * (src/monitor/) is regenerated from.
+ *
+ * --json needs neither a keeper config nor an on-disk state file at all:
+ * KeeperFSM[] is pure static data with no dependency on any node's actual
+ * config or reported state (unlike the ordinary, current-state-filtered
+ * list output below, which needs keeperState.current_role) -- so it's
+ * checked first and short-circuits before either read, meaning this mode
+ * can run with zero setup: no --pgdata, no live cluster, just the binary.
+ * This is only reachable because fsm_list's own CommandLine (above) uses
+ * cli_getopt_pgdata_or_json rather than the shared cli_getopt_pgdata: the
+ * latter unconditionally requires an existing config file
+ * (prepare_keeper_options, cli_common.c) before this function is ever
+ * called, regardless of --json.
  */
 static void
 cli_do_fsm_list(int argc, char **argv)
 {
+	if (outputJSON)
+	{
+		char *keeperEdgesJSON = KeeperFSMToJSON();
+
+		fformat(stdout, "%s\n", keeperEdgesJSON);
+
+		json_free_serialized_string(keeperEdgesJSON);
+
+		return;
+	}
+
 	KeeperStateData keeperState = { 0 };
 	KeeperConfig config = keeperOptions;
 
@@ -358,11 +386,6 @@ cli_do_fsm_list(int argc, char **argv)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_STATE);
-	}
-
-	if (outputJSON)
-	{
-		log_warn("This command does not support JSON output at the moment");
 	}
 
 	print_reachable_states(&keeperState);
