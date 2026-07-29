@@ -885,6 +885,13 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_WAIT_LSN:
+		{
+			fformat(out, "%*swait until %s replays %s  timeout %ds\n",
+					indent, "", cmd->service, cmd->state, cmd->timeoutSeconds);
+			break;
+		}
+
 		case CMD_PROMOTE:
 		{
 			fformat(out, "%*spromote", indent, "");

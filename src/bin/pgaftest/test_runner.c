@@ -89,6 +89,13 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_WAIT_LSN:
+		{
+			fprintf(f, "%swait until %s replays %s  timeout %ds\n", /* IGNORE-BANNED */
+					pad, cmd->service, cmd->state, cmd->timeoutSeconds);
+			break;
+		}
+
 		case CMD_ASSERT_STATE:
 		{
 			fprintf(f, "%sassert %s state = %s\n", /* IGNORE-BANNED */
@@ -3813,6 +3820,66 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			return false;
 		}
 
+		case CMD_WAIT_LSN:
+		{
+			const char *targetNode = cmd->service;
+			const char *sourceNode = cmd->state;
+			int timeoutSecs = cmd->timeoutSeconds;
+
+			/*
+			 * Capture the source's WAL position now, once, at the moment
+			 * this command runs -- not something re-evaluated on every poll
+			 * iteration, which could chase a moving target forever on a
+			 * busy primary. pg_is_in_recovery() lets this work whichever
+			 * role the source currently has.
+			 */
+			char lsn[64] = "";
+			if (!exec_sql_on_service(
+					r, sourceNode,
+					"SELECT CASE WHEN pg_is_in_recovery() "
+					"THEN pg_last_wal_replay_lsn() "
+					"ELSE pg_current_wal_lsn() END;",
+					lsn, sizeof(lsn)))
+			{
+				sformat(errBuf, errLen,
+						"wait until %s replays %s: failed to capture %s's LSN: %s",
+						targetNode, sourceNode, sourceNode, lsn);
+				return false;
+			}
+
+			int n = strlen(lsn);
+			while (n > 0 && (lsn[n - 1] == '\n' || lsn[n - 1] == ' '))
+			{
+				lsn[--n] = '\0';
+			}
+
+			log_info("  Waiting for %s to replay %s's LSN %s (timeout %ds)",
+					 targetNode, sourceNode, lsn, timeoutSecs);
+
+			char query[256];
+			sformat(query, sizeof(query),
+					"SELECT pg_last_wal_replay_lsn() >= '%s';", lsn);
+
+			time_t deadline = time(NULL) + timeoutSecs;
+			while (time(NULL) < deadline)
+			{
+				char caughtUp[64] = "";
+				if (exec_sql_on_service(r, targetNode, query,
+										caughtUp, sizeof(caughtUp)) &&
+					caughtUp[0] == 't')
+				{
+					return true;
+				}
+
+				usleep(500000); /* 500ms */
+			}
+
+			sformat(errBuf, errLen,
+					"timeout: %s did not replay %s's LSN %s within %ds",
+					targetNode, sourceNode, lsn, timeoutSecs);
+			return false;
+		}
+
 		case CMD_STOP_POSTGRES:
 		{
 			/*
@@ -4347,6 +4414,13 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 		{
 			sformat(buf, len, "wait until %s stopped  timeout %ds",
 					cmd->service, cmd->timeoutSeconds);
+			break;
+		}
+
+		case CMD_WAIT_LSN:
+		{
+			sformat(buf, len, "wait until %s replays %s  timeout %ds",
+					cmd->service, cmd->state, cmd->timeoutSeconds);
 			break;
 		}
 

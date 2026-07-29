@@ -176,7 +176,7 @@ static TestNode      *current_node        = NULL;
 
 /* ---- Step-body tokens (used in STEP_BODY lex state) ---- */
 %token T_EXEC T_EXEC_FAILS T_RUN T_PG_AUTOCTL
-%token T_WAIT T_UNTIL T_TIMEOUT T_AND T_IS T_WITH
+%token T_WAIT T_UNTIL T_TIMEOUT T_AND T_IS T_WITH T_REPLAYS
 %token T_ASSERT
 %token T_SQL T_EXPECT T_ERROR
 %token T_PROMOTE
@@ -977,6 +977,21 @@ wait_cmd:
 		strlcpy($$->service, $3, sizeof($$->service));
 		$$->timeoutSeconds = $5;
 		free($3);
+	}
+	/*
+	 * wait until node1 replays node2  timeout 90s
+	 *
+	 * Captures node2's current WAL LSN at the moment this command runs, then
+	 * polls node1 until it has replayed at least that far -- avoids racing a
+	 * write against replication catch-up right after a promotion/failover.
+	 */
+	| T_WAIT T_UNTIL T_IDENT T_REPLAYS T_IDENT opt_timeout
+	{
+		$$ = make_cmd(CMD_WAIT_LSN);
+		strlcpy($$->service, $3, sizeof($$->service));
+		strlcpy($$->state,   $5, sizeof($$->state));
+		$$->timeoutSeconds = $6;
+		free($3); free($5);
 	}
 	| T_WAIT T_UNTIL state_name_list opt_in_group opt_timeout
 	{

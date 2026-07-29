@@ -488,6 +488,17 @@ Commands inside ``setup``, ``teardown``, and ``step`` blocks
    wait until <node> state is <state>  [timeout <N>s]
    wait until primary, secondary       [timeout <N>s]
    wait until <node> stopped           [timeout <N>s]
+   wait until <node> replays <source>  [timeout <N>s]
+
+``wait until <node> replays <source>`` captures ``<source>``'s current WAL
+position (or, if ``<source>`` is itself a standby, its own last-replayed
+position) once, at the moment the command runs, then polls ``<node>`` until
+it has replayed at least that far. Use it right after a write on ``<source>``
+and before reading that data back from ``<node>``, instead of racing a fixed
+``sleep`` against replication catch-up -- especially right after a
+promotion/failover, when a node's FSM state can flip to
+``primary``/``secondary`` a moment before a subsequent write has actually
+propagated.
 
 **Assertions**
 
