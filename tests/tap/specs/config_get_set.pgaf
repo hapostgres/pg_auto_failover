@@ -45,6 +45,13 @@ step test_002b_config_set_node {
     exec-fails node1  pg_autoctl config set postgresql.pg_ctl invalid
     exec node1  pg_autoctl config get postgresql.pg_ctl
     expect { /bin/pg_ctl }
+
+    # config set (even one that's ultimately rejected, above) signals node1's
+    # running supervisor to reload, which restarts its sub-services -- give
+    # it the same settle time test_001_init_primary already does after its
+    # own config-set, so the next step's monitor query doesn't race a node
+    # still re-registering after the restart cascade.
+    sleep 2s
 }
 
 # region is set at create time (node1 region dc1) and, unlike

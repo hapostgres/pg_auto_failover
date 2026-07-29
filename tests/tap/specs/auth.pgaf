@@ -80,8 +80,12 @@ step test_006_no_password_leak_on_monitor_disconnect {
     # node1 (secondary) cannot reach the monitor while cut off from the
     # network: its node-active loop keeps retrying node_active() and hitting
     # the "Failed to connect to monitor database" error path (see #1043).
+    #
+    # 5s wasn't always enough margin under a loaded CI runner (same class of
+    # flake as has_needed_replication_slots()'s retry_timeout bump 5s -> 15s),
+    # so give it the same headroom here.
     network disconnect node1
-    sleep 5s
+    sleep 15s
     logs node1 contains "Failed to connect to monitor database"
     logs node1 contains "****"
     logs node1 not contains "pg-auto-failover"
