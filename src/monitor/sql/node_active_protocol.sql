@@ -440,3 +440,21 @@ SELECT pgautofailover.report_postgres_version(NULL, 170003);
 
 -- unknown node_id: silent no-op, not an error
 SELECT pgautofailover.report_postgres_version(-1, 170003);
+
+-- event summary: which MonitorFSM[] rule (if any) produced each of this
+-- test's own state-change events, for each of the two formations used
+-- above. Exercises pgautofailover.last_events() against a real scenario --
+-- its own SELECT list didn't match pgautofailover.event's column set for a
+-- long time, breaking it outright, and nothing in this suite ever called
+-- it to notice (see monitor.sql's own minimal-repro coverage). Filtering
+-- by formationid isolates each summary from the other, and from every
+-- other test in this schedule sharing the same event table -- safe
+-- regardless of where in this file (or the whole schedule) it runs.
+-- eventid/eventtime omitted: eventid is a database-wide sequence shared by
+-- every test in this schedule (see regress_schedule's own comment) and
+-- eventtime is a live timestamp -- neither is a stable value to pin here.
+SELECT reportedstate, goalstate, rule_pos, rule_section, description
+  FROM pgautofailover.last_events('fsm_test', count => 100);
+
+SELECT reportedstate, goalstate, rule_pos, rule_section, description
+  FROM pgautofailover.last_events('killed_test', count => 100);

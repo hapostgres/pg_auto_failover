@@ -172,3 +172,15 @@ SELECT nodename, goalstate, reportedstate
   FROM pgautofailover.node
  WHERE formationid = 'lafm_test'
  ORDER BY nodename;
+
+-- event summary: which MonitorFSM[] rule (if any) produced each of this
+-- test's own state-change events. Exercises pgautofailover.last_events()
+-- against a real scenario -- its own SELECT list didn't match
+-- pgautofailover.event's column set for a long time, breaking it outright,
+-- and nothing in this suite ever called it to notice (see monitor.sql's
+-- own minimal-repro coverage). eventid/eventtime omitted: eventid is a
+-- database-wide sequence shared by every test in this schedule (see
+-- regress_schedule's own comment) and eventtime is a live timestamp --
+-- neither is a stable value to pin in this file's own expected output.
+SELECT reportedstate, goalstate, rule_pos, rule_section, description
+  FROM pgautofailover.last_events('lafm_test', count => 100);

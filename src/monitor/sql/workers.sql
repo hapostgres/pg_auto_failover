@@ -30,3 +30,15 @@ select *
                                     dbname => 'citus',
                                     desired_group_id => 1,
                                     node_kind => 'worker');
+
+-- event summary: which MonitorFSM[] rule (if any) produced each of this
+-- test's own state-change events. Exercises pgautofailover.last_events()
+-- against a real scenario -- its own SELECT list didn't match
+-- pgautofailover.event's column set for a long time, breaking it outright,
+-- and nothing in this suite ever called it to notice (see monitor.sql's
+-- own minimal-repro coverage). eventid/eventtime omitted: eventid is a
+-- database-wide sequence shared by every test in this schedule (see
+-- regress_schedule's own comment) and eventtime is a live timestamp --
+-- neither is a stable value to pin in this file's own expected output.
+select reportedstate, goalstate, rule_pos, rule_section, description
+  from pgautofailover.last_events('citus', count => 100);
