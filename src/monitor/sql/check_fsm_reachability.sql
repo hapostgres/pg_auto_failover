@@ -1,0 +1,80 @@
+-- Copyright (c) Microsoft Corporation. All rights reserved.
+-- Licensed under the PostgreSQL License.
+--
+-- Exercises the mechanics of pgautofailover.check_fsm_reachability(jsonb)
+-- (and the pgautofailover.dump_fsm_edges() it's built on) against small,
+-- synthetic keeper-edge inputs -- not the real KeeperFSM[] table, which
+-- lives in the pg_autoctl binary, not this database. The real, end-to-end
+-- completeness check (does the real KeeperFSM[] cover every real
+-- MonitorFSM[] edge) is run separately, live, via
+-- "pg_autoctl inspect fsm check" against a real monitor+keeper pair -- this
+-- test only confirms the SQL-side comparison mechanism itself behaves
+-- correctly: an edge present in the keeper_edges parameter drops out of the
+-- mismatch list, an edge absent from it stays in, and an unrecognized state
+-- name fails loudly rather than silently never matching.
+
+-- Every edge dump_fsm_edges() can produce, fully resolved: a fixed,
+-- reviewable count for the current MonitorFSM[] -- changes only when a row
+-- is added, removed, or edited there, same as fsm.sql's own row count.
+SELECT count(*) AS total_edge_count FROM pgautofailover.dump_fsm_edges();
+
+-- pos 301 ("converged secondary, reportedTLI not an ancestor of reference
+-- -> catchingup", single edge) and pos 343 ("stop_replication, primary
+-- converged prepare_maintenance -> wait_primary + maintenance", two edges,
+-- one per role) are stable, non-reflexive, non-api_triggered rows -- good,
+-- deterministic targets to check both single- and dual-edge rows against.
+SELECT pos, current_state, assigned_state
+  FROM pgautofailover.dump_fsm_edges()
+ WHERE pos IN (301, 343)
+ ORDER BY pos, current_state;
+
+-- Two categories of edges dump_fsm_edges() deliberately never produces, see
+-- its own comment for why: reflexive (current == assigned) edges, and the
+-- whole api_triggered section (every row there resolves activeNode to a
+-- specific role via hand-written C before dispatch, so its own
+-- NodeStatePattern was never meant to double as a full reachability
+-- precondition). pos 403 ("all nodes async, zero secondaries ->
+-- wait_primary") has both an ordinary edge (primary/apply_settings ->
+-- wait_primary) and a reflexive one (wait_primary -> wait_primary) in its
+-- own source pattern -- only the former should appear. pos 105 (api
+-- triggered: perform_failover) should produce no edges at all.
+SELECT pos, current_state, assigned_state
+  FROM pgautofailover.dump_fsm_edges()
+ WHERE pos = 403
+ ORDER BY current_state;
+
+SELECT count(*) AS api_triggered_edge_count
+  FROM pgautofailover.dump_fsm_edges() e
+  JOIN pgautofailover.fsm f ON f.pos = e.pos
+ WHERE f.section LIKE 'api_triggered%';
+
+-- An empty keeper_edges: every single edge dump_fsm_edges() produces comes
+-- back as a mismatch, so this count must equal total_edge_count above.
+SELECT count(*) AS missing_with_empty_keeper_edges
+  FROM pgautofailover.check_fsm_reachability('[]'::jsonb);
+
+-- Providing exactly pos 301's own edge, plus one of pos 343's two edges
+-- (leaving its other edge, prepare_maintenance->maintenance, still
+-- unmatched): pos 301 must disappear entirely from the mismatch list, pos
+-- 343 must still appear, but only once.
+SELECT pos, current_state, assigned_state
+  FROM pgautofailover.check_fsm_reachability(
+    '[{"current":"secondary","assigned":"catchingup"},
+      {"current":"stop_replication","assigned":"wait_primary"}]'::jsonb)
+ WHERE pos IN (301, 343)
+ ORDER BY pos, current_state;
+
+-- Providing both of pos 343's edges too: it must now disappear as well.
+SELECT pos, current_state, assigned_state
+  FROM pgautofailover.check_fsm_reachability(
+    '[{"current":"secondary","assigned":"catchingup"},
+      {"current":"stop_replication","assigned":"wait_primary"},
+      {"current":"prepare_maintenance","assigned":"maintenance"}]'::jsonb)
+ WHERE pos IN (301, 343)
+ ORDER BY pos, current_state;
+
+-- An unrecognized state name in keeper_edges must fail loudly (a real cast
+-- error), not silently never match -- the same "fail loudly on drift"
+-- instinct as AssignDeclaredGoalState's own trust-check.
+SELECT * FROM pgautofailover.check_fsm_reachability(
+  '[{"current":"not_a_real_state","assigned":"catchingup"}]'::jsonb);

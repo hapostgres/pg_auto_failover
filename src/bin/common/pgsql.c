@@ -1052,6 +1052,15 @@ pgsql_execute(PGSQL *pgsql, const char *sql)
 
 
 /*
+ * Cap on how much of a single query parameter's own value gets printed in
+ * pgsql_execute_with_params' debug trace (see its own comment at the one
+ * call site that truncates). Keeps that trace's fixed BUFSIZE buffer from
+ * overflowing on a large parameter, without limiting what's actually sent
+ * to Postgres (PQexecParams always gets the real, untruncated value).
+ */
+#define DEBUG_PARAM_VALUE_MAX_LEN 200
+
+/*
  * pgsql_execute_with_params opens a connection, runs a given SQL command,
  * and closes the connection again.
  *
@@ -1081,7 +1090,9 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 		int remainingBytes = BUFSIZE;
 		char *writePointer = (char *) debugParameters;
 
-		for (paramIndex = 0; paramIndex < paramCount; paramIndex++)
+		for (paramIndex = 0;
+			 paramIndex < paramCount && remainingBytes > 0;
+			 paramIndex++)
 		{
 			int bytesWritten = 0;
 			const char *value = paramValues[paramIndex];
@@ -1091,11 +1102,36 @@ pgsql_execute_with_params(PGSQL *pgsql, const char *sql, int paramCount,
 				bytesWritten = sformat(writePointer, remainingBytes, ", ");
 				remainingBytes -= bytesWritten;
 				writePointer += bytesWritten;
+
+				if (remainingBytes <= 0)
+				{
+					break;
+				}
 			}
 
 			if (value == NULL)
 			{
 				bytesWritten = sformat(writePointer, remainingBytes, "NULL");
+			}
+			else if (strlen(value) > DEBUG_PARAM_VALUE_MAX_LEN)
+			{
+				/*
+				 * A parameter can be arbitrarily large (e.g. the JSON payload
+				 * "pg_autoctl inspect fsm check" sends to
+				 * pgautofailover.check_fsm_reachability(), several KB) --
+				 * printing it here in full would overflow debugParameters'
+				 * own fixed BUFSIZE and make sformat() itself log a "BUG:"
+				 * about it on every single call, which is exactly what
+				 * happened the first time that command ran for real. This is
+				 * a debug-only trace, not the actual query (PQexecParams
+				 * below always gets the real, untruncated paramValues), so
+				 * truncating what gets logged here changes nothing about
+				 * query correctness.
+				 */
+				bytesWritten = sformat(writePointer, remainingBytes,
+									   "'%.*s...' (%zu bytes total)",
+									   DEBUG_PARAM_VALUE_MAX_LEN, value,
+									   strlen(value));
 			}
 			else
 			{

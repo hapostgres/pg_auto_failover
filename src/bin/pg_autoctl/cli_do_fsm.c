@@ -15,6 +15,8 @@
 
 #include "postgres_fe.h"
 
+#include "parson.h"
+
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
@@ -23,6 +25,7 @@
 #include "fsm_mermaid.h"
 #include "keeper_config.h"
 #include "keeper.h"
+#include "monitor.h"
 #include "parsing.h"
 #include "pgctl.h"
 #include "state.h"
@@ -33,6 +36,7 @@
 static void cli_do_fsm_init(int argc, char **argv);
 static void cli_do_fsm_state(int argc, char **argv);
 static void cli_do_fsm_list(int argc, char **argv);
+static void cli_do_fsm_check(int argc, char **argv);
 static void cli_do_fsm_gv(int argc, char **argv);
 static void cli_do_fsm_mermaid_init(int argc, char **argv);
 static void cli_do_fsm_mermaid_steady_state(int argc, char **argv);
@@ -68,6 +72,14 @@ CommandLine fsm_list =
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_do_fsm_list);
+
+CommandLine fsm_check =
+	make_command("check",
+				 "Check that every monitor FSM transition has a matching keeper edge",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_check);
 
 CommandLine fsm_gv =
 	make_command("gv",
@@ -355,6 +367,103 @@ cli_do_fsm_list(int argc, char **argv)
 
 	print_reachable_states(&keeperState);
 	fformat(stdout, "\n");
+}
+
+
+/*
+ * cli_do_fsm_check serializes this node's own KeeperFSM[] to JSON
+ * (KeeperFSMToJSON(), fsm.c) and sends it to the monitor's
+ * pgautofailover.check_fsm_reachability(jsonb) (via
+ * monitor_check_fsm_reachability(), monitor.c) to confirm every transition
+ * the monitor's own MonitorFSM[] (group_state_machine.c) can ever assign
+ * has a matching edge here. Unlike cli_do_fsm_list/cli_do_fsm_gv (purely
+ * local, no monitor connection at all), this genuinely needs one -- mirrors
+ * cli_do_monitor_get_primary_node's own shape in cli_do_monitor.c.
+ */
+static void
+cli_do_fsm_check(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+	Monitor monitor = { 0 };
+	FsmReachabilityResult result = { 0 };
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!monitor_init(&monitor, config.monitor_pguri))
+	{
+		log_fatal("Failed to contact the monitor because its URL is invalid, "
+				  "see above for details");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	char *keeperEdgesJSON = KeeperFSMToJSON();
+
+	if (!monitor_check_fsm_reachability(&monitor, keeperEdgesJSON, &result))
+	{
+		log_error("Failed to check FSM reachability against the monitor, "
+				  "see above for details");
+		json_free_serialized_string(keeperEdgesJSON);
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	json_free_serialized_string(keeperEdgesJSON);
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *root = json_value_get_object(js);
+		JSON_Value *jsMismatches = json_value_init_array();
+		JSON_Array *mismatches = json_value_get_array(jsMismatches);
+
+		for (int i = 0; i < result.count; i++)
+		{
+			FsmReachabilityMismatch *mismatch = &(result.mismatches[i]);
+			JSON_Value *jsEntry = json_value_init_object();
+			JSON_Object *jsObj = json_value_get_object(jsEntry);
+
+			json_object_set_number(jsObj, "pos", (double) mismatch->pos);
+			json_object_set_string(jsObj, "current", mismatch->currentState);
+			json_object_set_string(jsObj, "assigned", mismatch->assignedState);
+			json_object_set_string(jsObj, "comment", mismatch->comment);
+
+			json_array_append_value(mismatches, jsEntry);
+		}
+
+		json_object_set_boolean(root, "ok", result.count == 0);
+		json_object_set_value(root, "mismatches", jsMismatches);
+
+		cli_pprint_json(js);
+	}
+	else if (result.count == 0)
+	{
+		log_info("OK: every monitor FSM transition has a matching keeper edge");
+	}
+	else
+	{
+		for (int i = 0; i < result.count; i++)
+		{
+			FsmReachabilityMismatch *mismatch = &(result.mismatches[i]);
+
+			log_error("pos %d: %s -> %s has no matching keeper edge (%s)",
+					  mismatch->pos,
+					  mismatch->currentState,
+					  mismatch->assignedState,
+					  mismatch->comment);
+		}
+	}
+
+	exit(result.count == 0 ? EXIT_CODE_QUIT : EXIT_CODE_INTERNAL_ERROR);
 }
 
 

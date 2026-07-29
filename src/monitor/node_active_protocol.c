@@ -1913,6 +1913,7 @@ start_maintenance(PG_FUNCTION_ARGS)
 		 * state of any standby node yet, we get there when the count is one
 		 * (not zero).
 		 */
+
 		/*
 		 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: the
 		 * last-healthy-sync-standby row (wait_maintenance + primary

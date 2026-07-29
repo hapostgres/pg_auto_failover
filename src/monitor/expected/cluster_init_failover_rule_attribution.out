@@ -249,7 +249,7 @@ reportedstate | wait_primary
 goalstate     | primary
 rule_pos      | 411
 rule_section  | primary_node
-rule_comment  | wait_primary, >=1 quorum secondary -> primary
+rule_comment  | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 11 ]+-------------------------------------------------------------------------------------------------------------
 eventid       | 196
 nodename      | cifra_p

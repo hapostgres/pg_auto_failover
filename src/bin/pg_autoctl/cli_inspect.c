@@ -18,12 +18,14 @@
 
 /*
  * Read-only FSM sub-commands: display the current state, list reachable
- * transitions, or dump the full FSM as a graphviz .gv file.
+ * transitions, check that every monitor transition has a matching keeper
+ * edge, or dump the full FSM as a graphviz .gv file.
  * Mutating operations (init, assign, step, nodes set) live under "manual fsm".
  */
 static CommandLine *inspect_fsm_subcommands[] = {
 	&fsm_state,
 	&fsm_list,
+	&fsm_check,
 	&fsm_gv,
 	&fsm_mermaid,
 	NULL
@@ -31,7 +33,8 @@ static CommandLine *inspect_fsm_subcommands[] = {
 
 static CommandLine inspect_fsm_commands =
 	make_command_set("fsm",
-					 "Display keeper FSM state and transitions (read-only)",
+					 "Display keeper FSM state and transitions, and check "
+					 "monitor/keeper FSM reachability (read-only)",
 					 NULL, NULL, NULL, inspect_fsm_subcommands);
 
 /*

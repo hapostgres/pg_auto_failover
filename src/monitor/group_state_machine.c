@@ -176,8 +176,8 @@ typedef struct ReplicationStateSet
  */
 #define STATES(...) \
 	{ \
-		 .states = { __VA_ARGS__ }, \
-		 .count = STATES_NARG(__VA_ARGS__) \
+		.states = { __VA_ARGS__ }, \
+		.count = STATES_NARG(__VA_ARGS__) \
 	}
 
 typedef struct NodeStatePattern
@@ -211,31 +211,33 @@ MatchStateSet(ReplicationState actual, ReplicationStateSet declared)
 static const NodeStatePattern FSM_PRIMARY_OR_WAIT_OR_JOIN = {
 	.kind = NODE_STATE_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY,
-							  REPLICATION_STATE_JOIN_PRIMARY,
-							  REPLICATION_STATE_PRIMARY),
+							 REPLICATION_STATE_JOIN_PRIMARY,
+							 REPLICATION_STATE_PRIMARY),
 };
 
 /* WAIT_PRIMARY/JOIN_PRIMARY only, not PRIMARY -- a distinct, narrower set from the one above */
 static const NodeStatePattern FSM_WAIT_OR_JOIN_PRIMARY = {
 	.kind = NODE_STATE_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY,
-							  REPLICATION_STATE_JOIN_PRIMARY),
+							 REPLICATION_STATE_JOIN_PRIMARY),
 };
 
-/* the "primary role" states inside ProceedGroupStateForPrimaryNode -- a different
- * three-element set from FSM_PRIMARY_OR_WAIT_OR_JOIN above (no JOIN_PRIMARY, has APPLY_SETTINGS) */
+/* the "primary role" states MONITOR_FSM_SECTION_PRIMARY_NODE's own rows match
+ * against (the declarative replacement for the old, now-removed
+ * ProceedGroupStateForPrimaryNode()) -- a different three-element set from
+ * FSM_PRIMARY_OR_WAIT_OR_JOIN above (no JOIN_PRIMARY, has APPLY_SETTINGS) */
 static const NodeStatePattern FSM_PRIMARY_ROLE_STATES = {
 	.kind = NODE_STATE_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_PRIMARY,
-							  REPLICATION_STATE_WAIT_PRIMARY,
-							  REPLICATION_STATE_APPLY_SETTINGS),
+							 REPLICATION_STATE_WAIT_PRIMARY,
+							 REPLICATION_STATE_APPLY_SETTINGS),
 };
 
 /* same "primary role" scope, minus WAIT_PRIMARY -- a narrower enumerated STABLE set */
 static const NodeStatePattern FSM_PRIMARY_OR_APPLY_SETTINGS_ONLY = {
 	.kind = NODE_STATE_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_PRIMARY,
-							  REPLICATION_STATE_APPLY_SETTINGS),
+							 REPLICATION_STATE_APPLY_SETTINGS),
 };
 
 /* reported WAIT_PRIMARY, goal in {WAIT_PRIMARY, PRIMARY} -- join_secondary's cascade row */
@@ -248,7 +250,8 @@ static const NodeStatePattern FSM_WAIT_PRIMARY_TRANSITIONING_TO_PRIMARY = {
 /* reported in {WAIT_PRIMARY,JOIN_PRIMARY}, goal PRIMARY -- demoted->catchingup, first disjunct */
 static const NodeStatePattern FSM_WAIT_OR_JOIN_PRIMARY_TRANSITIONING_TO_PRIMARY = {
 	.kind = NODE_STATE_TRANSITIONING,
-	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY, REPLICATION_STATE_JOIN_PRIMARY),
+	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY,
+							 REPLICATION_STATE_JOIN_PRIMARY),
 	.assignedStates = STATES(REPLICATION_STATE_PRIMARY),
 };
 
@@ -289,7 +292,8 @@ static const NodeStatePattern FSM_REPORTED_DEMOTE_TIMEOUT = {
  * failover" guard, the direct (non-cascading) entry into ProceedGroupStateForMSFailover */
 static const NodeStatePattern FSM_REPORT_LSN_OR_FAST_FORWARD = {
 	.kind = NODE_STATE_STABLE,
-	.reportedStates = STATES(REPLICATION_STATE_REPORT_LSN, REPLICATION_STATE_FAST_FORWARD),
+	.reportedStates = STATES(REPLICATION_STATE_REPORT_LSN,
+							 REPLICATION_STATE_FAST_FORWARD),
 };
 
 
@@ -321,7 +325,8 @@ NodeStateMatchesPattern(const AutoFailoverNode *node, const NodeStatePattern *pa
 
 		case NODE_STATE_NOT_STABLE:
 		{
-			return !((reported == goal) && MatchStateSet(reported, pattern->reportedStates));
+			return !((reported == goal) && MatchStateSet(reported,
+														 pattern->reportedStates));
 		}
 
 		case NODE_STATE_REPORTED:
@@ -453,22 +458,24 @@ NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
 		   BoolMatchesPattern(status->isHealthy, pattern->isHealthy) &&
 		   BoolMatchesPattern(status->isUnhealthy, pattern->isUnhealthy) &&
 		   BoolMatchesPattern(status->candidateEligible, pattern->candidateEligible) &&
-		   BoolMatchesPattern(IsInPrimaryState(status->node), pattern->isInPrimaryState) &&
+		   BoolMatchesPattern(IsInPrimaryState(status->node),
+							  pattern->isInPrimaryState) &&
 		   BoolMatchesPattern(IsInMaintenance(status->node), pattern->isInMaintenance) &&
-		   BoolMatchesPattern(IsDemotedPrimary(status->node), pattern->isDemotedPrimary) &&
+		   BoolMatchesPattern(IsDemotedPrimary(status->node),
+							  pattern->isDemotedPrimary) &&
 		   BoolMatchesPattern(status->node != NULL &&
-							 CanTakeWritesInState(status->node->goalState),
-							 pattern->canTakeWrites) &&
+							  CanTakeWritesInState(status->node->goalState),
+							  pattern->canTakeWrites) &&
 		   BoolMatchesPattern(CandidateNodeIsReadyToStreamWAL(status->node),
-							 pattern->isReadyToStreamWAL) &&
+							  pattern->isReadyToStreamWAL) &&
 		   BoolMatchesPattern(NodeIsDrainTimeExpired(status->node, status->ctx),
-							 pattern->drainTimeExpired) &&
+							  pattern->drainTimeExpired) &&
 		   BoolMatchesPattern(status->isCitusWorkerGroup, pattern->isCitusWorkerGroup) &&
 		   BoolMatchesPattern(status->replicationQuorum, pattern->replicationQuorum) &&
 		   BoolMatchesPattern(status->isComparableToReferenceTli,
-							 pattern->isComparableToReferenceTli) &&
+							  pattern->isComparableToReferenceTli) &&
 		   BoolMatchesPattern(unreachableFromDemoteTimeout,
-							 pattern->unreachableFromDemoteTimeout);
+							  pattern->unreachableFromDemoteTimeout);
 }
 
 
@@ -514,7 +521,8 @@ typedef struct ApiTriggerPattern
 	MonitorApiFunction function; /* meaningful only when kind == API_TRIGGER_SPECIFIC */
 } ApiTriggerPattern;
 
-#define API_TRIGGER(fn) ((ApiTriggerPattern){ .kind = API_TRIGGER_SPECIFIC, .function = (fn) })
+#define API_TRIGGER(fn) ((ApiTriggerPattern) { .kind = API_TRIGGER_SPECIFIC, .function = \
+												   (fn) })
 
 static bool
 MatchApiTrigger(MonitorApiFunction actual, ApiTriggerPattern pattern)
@@ -649,7 +657,7 @@ typedef struct NodeActiveContext
 typedef struct NodeActiveContextPattern
 {
 	ApiTriggerPattern apiTrigger; /* omitted -> {0} -> API_TRIGGER_NODE_ACTIVE, matching every
-									  row's existing meaning with no changes required elsewhere */
+	                               *   row's existing meaning with no changes required elsewhere */
 
 	BoolPattern groupHasExactlyOneNode;
 	BoolPattern groupHasExactlyTwoNodes;
@@ -713,8 +721,8 @@ typedef struct GoalStateAssignment
  * wander into whichever row happens to be next.
  */
 typedef void (*MonitorExtraActionFunction) (GroupStateContext *ctx,
-											 NodeActiveContext *nac,
-											 char *message);
+											NodeActiveContext *nac,
+											char *message);
 
 /*
  * MonitorFSMSection itself is declared in group_state_machine.h, not here:
@@ -758,8 +766,8 @@ typedef struct MonitorFSMTransition
 	NodeStatusPattern activeNode;
 	NodeStatusPattern primaryNode;
 	NodeStatusPattern candidateNode;  /* MS-failover sub-section rows only; see
-										  NodeActiveContext's own comment on
-										  .candidateNode */
+	                                   *  NodeActiveContext's own comment on
+	                                   *  .candidateNode */
 	NodeActiveContextPattern conditions;
 
 	GoalStateAssignment activeNodeAssignedState;
@@ -879,12 +887,12 @@ typedef struct MonitorFSMTransition
  */
 static const MonitorFSMTransition MonitorFSM[];
 
-#define MonitorFSM_EarlyChecksStart        15
-#define MonitorFSM_FromContextStart        21
-#define MonitorFSM_FromContextResumeStart  24
-#define MonitorFSM_MSFailoverStart         52
+#define MonitorFSM_EarlyChecksStart 15
+#define MonitorFSM_FromContextStart 21
+#define MonitorFSM_FromContextResumeStart 24
+#define MonitorFSM_MSFailoverStart 52
 #define MonitorFSM_PrimaryNodeSectionStart 61
-#define MonitorFSM_SIZE                    72
+#define MonitorFSM_SIZE 72
 
 /* Forward-declared for the same reason as MonitorFSM[] above: used by
  * extraActions (ActionRunPrimaryNodeTransition) defined before its real
@@ -905,32 +913,43 @@ RuleMatches(const NodeActiveContext *nac, const MonitorFSMTransition *rule)
 		   NodeMatchesPattern(&nac->primaryNode, &rule->primaryNode) &&
 		   NodeMatchesPattern(&nac->candidateNode, &rule->candidateNode) &&
 
-		   BoolMatchesPattern(nac->groupHasExactlyOneNode, cond->groupHasExactlyOneNode) &&
-		   BoolMatchesPattern(nac->groupHasExactlyTwoNodes, cond->groupHasExactlyTwoNodes) &&
-		   BoolMatchesPattern(nac->groupHasMoreThanTwoNodes, cond->groupHasMoreThanTwoNodes) &&
-		   BoolMatchesPattern(nac->anyOtherNodeWaitingStandby, cond->anyOtherNodeWaitingStandby) &&
-		   BoolMatchesPattern(nac->numberSyncStandbysIsZero, cond->numberSyncStandbysIsZero) &&
+		   BoolMatchesPattern(nac->groupHasExactlyOneNode,
+							  cond->groupHasExactlyOneNode) &&
+		   BoolMatchesPattern(nac->groupHasExactlyTwoNodes,
+							  cond->groupHasExactlyTwoNodes) &&
+		   BoolMatchesPattern(nac->groupHasMoreThanTwoNodes,
+							  cond->groupHasMoreThanTwoNodes) &&
+		   BoolMatchesPattern(nac->anyOtherNodeWaitingStandby,
+							  cond->anyOtherNodeWaitingStandby) &&
+		   BoolMatchesPattern(nac->numberSyncStandbysIsZero,
+							  cond->numberSyncStandbysIsZero) &&
 		   BoolMatchesPattern(nac->replicationQuorumCountIsZero,
-							 cond->replicationQuorumCountIsZero) &&
-		   BoolMatchesPattern(nac->secondaryNodesCountIsZero, cond->secondaryNodesCountIsZero) &&
+							  cond->replicationQuorumCountIsZero) &&
+		   BoolMatchesPattern(nac->secondaryNodesCountIsZero,
+							  cond->secondaryNodesCountIsZero) &&
 		   BoolMatchesPattern(nac->secondaryQuorumNodesCountIsZero,
-							 cond->secondaryQuorumNodesCountIsZero) &&
-		   BoolMatchesPattern(nac->atLeastOneHealthyCandidate, cond->atLeastOneHealthyCandidate) &&
-		   BoolMatchesPattern(nac->walWithinPromoteThreshold, cond->walWithinPromoteThreshold) &&
-		   BoolMatchesPattern(nac->walWithinSyncThreshold, cond->walWithinSyncThreshold) &&
-		   BoolMatchesPattern(nac->activeAndPrimaryTliMatch, cond->activeAndPrimaryTliMatch) &&
+							  cond->secondaryQuorumNodesCountIsZero) &&
+		   BoolMatchesPattern(nac->atLeastOneHealthyCandidate,
+							  cond->atLeastOneHealthyCandidate) &&
+		   BoolMatchesPattern(nac->walWithinPromoteThreshold,
+							  cond->walWithinPromoteThreshold) &&
+		   BoolMatchesPattern(nac->walWithinSyncThreshold,
+							  cond->walWithinSyncThreshold) &&
+		   BoolMatchesPattern(nac->activeAndPrimaryTliMatch,
+							  cond->activeAndPrimaryTliMatch) &&
 		   BoolMatchesPattern(nac->primaryIsWaitPrimaryPresumedDead,
-							 cond->primaryIsWaitPrimaryPresumedDead) &&
+							  cond->primaryIsWaitPrimaryPresumedDead) &&
 		   BoolMatchesPattern(nac->failoverInProgress, cond->failoverInProgress) &&
-		   BoolMatchesPattern(nac->replicationStallExceeded, cond->replicationStallExceeded) &&
+		   BoolMatchesPattern(nac->replicationStallExceeded,
+							  cond->replicationStallExceeded) &&
 		   BoolMatchesPattern(nac->lastHealthySyncStandbyGoingToMaintenance,
-							 cond->lastHealthySyncStandbyGoingToMaintenance) &&
+							  cond->lastHealthySyncStandbyGoingToMaintenance) &&
 		   BoolMatchesPattern(nac->activeNodeAllWalSourcesUnhealthy,
-							 cond->activeNodeAllWalSourcesUnhealthy) &&
+							  cond->activeNodeAllWalSourcesUnhealthy) &&
 		   BoolMatchesPattern(nac->candidatePromotionInProgress,
-							 cond->candidatePromotionInProgress) &&
+							  cond->candidatePromotionInProgress) &&
 		   BoolMatchesPattern(nac->mostAdvancedCandidateWithinPromoteThreshold,
-							 cond->mostAdvancedCandidateWithinPromoteThreshold) &&
+							  cond->mostAdvancedCandidateWithinPromoteThreshold) &&
 		   BoolMatchesPattern(nac->guardDataLossEnabled, cond->guardDataLossEnabled) &&
 		   BoolMatchesPattern(nac->inMSFailoverCluster, cond->inMSFailoverCluster);
 }
@@ -938,7 +957,7 @@ RuleMatches(const NodeActiveContext *nac, const MonitorFSMTransition *rule)
 
 static int
 FindMatchingMonitorFSMRuleIndexFrom(const MonitorFSMTransition table[], int tableSize,
-									 int startIndex, const NodeActiveContext *nac)
+									int startIndex, const NodeActiveContext *nac)
 {
 	for (int i = startIndex; i < tableSize; i++)
 	{
@@ -958,7 +977,7 @@ FindMatchingMonitorFSMRuleIndexFrom(const MonitorFSMTransition table[], int tabl
  */
 static void
 AssignDeclaredGoalState(const MonitorFSMTransition *rule, AutoFailoverNode *node,
-						 ReplicationState state, char *message)
+						ReplicationState state, char *message)
 {
 #ifdef USE_ASSERT_CHECKING
 	bool declared =
@@ -976,7 +995,7 @@ AssignDeclaredGoalState(const MonitorFSMTransition *rule, AutoFailoverNode *node
 
 static void
 DispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
-						const MonitorFSMTransition *rule)
+					   const MonitorFSMTransition *rule)
 {
 	char message[BUFSIZE] = { 0 };
 
@@ -1011,13 +1030,13 @@ DispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
 	if (rule->activeNodeAssignedState.kind == GOAL_STATE_SET)
 	{
 		AssignDeclaredGoalState(rule, nac->activeNode.node,
-								 rule->activeNodeAssignedState.state, message);
+								rule->activeNodeAssignedState.state, message);
 	}
 
 	if (rule->otherNodeAssignedState.kind == GOAL_STATE_SET)
 	{
 		AssignDeclaredGoalState(rule, nac->primaryNode.node,
-								 rule->otherNodeAssignedState.state, message);
+								rule->otherNodeAssignedState.state, message);
 	}
 
 	CurrentMonitorFSMRulePos = savedRulePos;
@@ -1042,7 +1061,8 @@ static bool
 FindAndDispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
 							  int startIndex, int endIndex)
 {
-	int index = FindMatchingMonitorFSMRuleIndexFrom(MonitorFSM, endIndex, startIndex, nac);
+	int index = FindMatchingMonitorFSMRuleIndexFrom(MonitorFSM, endIndex, startIndex,
+													nac);
 
 	if (index < 0)
 	{
@@ -1161,8 +1181,9 @@ ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *me
  * assigning DRAINING/MAINTENANCE to the primary -- it always falls through to
  * try ProceedGroupStateForMSFailover next, in the SAME outer if-block, and if
  * THAT declines (returns false), falls through further still to the rest of
- * ProceedGroupStateFromContext's own if-chain (the report_lsn/prepare_
- * promotion/stop_replication/... rows, for this SAME activeNode).
+ * the original source's own if-chain inside ProceedGroupStateFromContext (now
+ * the report_lsn/prepare_promotion/stop_replication/... rows further down
+ * MonitorFSM[]'s REPORTING_NODE section, for this SAME activeNode).
  *
  * This has to be ONE row/action, not three separate declarative rows sharing
  * this action (as an earlier version of this file had it): once dispatch
@@ -1184,23 +1205,31 @@ ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *me
  * in one call -- no repeated re-dispatch needed to walk past intervening
  * non-matches.
  *
- * NOTE on naming: MonitorFSM_FromContextResumeStart is NOT the design doc's
- * MonitorFSM_MSFailoverClusterStart, despite marking a conceptually similar
- * "resume point". The doc's constant names the start of a real, converted
- * section -- roughly ten declarative rows (a fourth candidateNode role,
- * conditions like candidatePromotionInProgress and
- * mostAdvancedCandidateWithinPromoteThreshold, an otherNodesFn hook) that
- * partially replace BuildCandidateList/SelectFailoverCandidateNode/
- * PromoteSelectedNode. No such section exists in this table:
- * ProceedGroupStateForMSFailover() and everything it calls stayed one
- * opaque hand-written function, called wholesale, exactly as before this
- * refactor. MonitorFSM_FromContextResumeStart just marks "resume scanning
- * ordinary FromContext rows here" -- a narrower thing than what the doc's
- * identically-purposed constant was named for.
+ * NOTE on naming: MonitorFSM_FromContextResumeStart is NOT
+ * MonitorFSM_MSFailoverStart, despite both marking a conceptually similar
+ * "resume point" -- they bound two different things. MonitorFSM_FromContextResumeStart
+ * (used here) just marks "resume scanning ordinary REPORTING_NODE rows after
+ * ProceedGroupStateForMSFailover declines" -- ProceedGroupStateForMSFailover()
+ * itself, and the BuildCandidateList/SelectFailoverCandidateNode/
+ * PromoteSelectedNode functions it calls, stay hand-written C, called
+ * wholesale from here exactly as before this refactor (the candidate-selection
+ * algorithm itself doesn't reduce to declarative conditions any more cleanly
+ * than it did before -- see this file's own top-of-file design comment).
+ * MonitorFSM_MSFailoverStart, by contrast, bounds the *separate* nine-row
+ * MS-failover cluster (pos 363-379, "MS-failover / candidate-selection
+ * cluster" section below) that those same hand-written functions now reach
+ * *into*, at their own tail end, via TryMSFailoverDeclarativeRow/
+ * TryFanOutReportLsnRow/DispatchMonitorFSMRuleByPos -- covering the plain
+ * per-node goal assignments (retry-reset, join_secondary, BuildCandidateList's
+ * own report_lsn fan-out, PromoteSelectedNode's prepare_promotion/fast_forward
+ * choice) that those functions used to make via a raw AssignGoalState call,
+ * with the original call kept as an unconditional fallback on no match. The
+ * candidate-selection algorithm's own logic (priority sort, LSN comparison,
+ * WAL-fetch orchestration) is not part of either bounded range.
  */
 static void
 ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac,
-									  char *message)
+									 char *message)
 {
 	AutoFailoverNode *primaryNode = nac->primaryNode.node;
 
@@ -1249,7 +1278,8 @@ ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *
  * fallthrough either way -- so its return value is simply discarded here.
  */
 static void
-ActionRunPlainMSFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
+ActionRunPlainMSFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac,
+								char *message)
 {
 	(void) ProceedGroupStateForMSFailover(ctx, nac->primaryNode.node);
 }
@@ -1264,19 +1294,22 @@ ActionRunPlainMSFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac, 
  * activeNode role (see BuildForPrimaryNodeNodeActiveContext).
  */
 static void
-ActionRunPrimaryNodeTransition(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
+ActionRunPrimaryNodeTransition(GroupStateContext *ctx, NodeActiveContext *nac,
+							   char *message)
 {
 	NodeActiveContext primaryNac;
 
 	BuildForPrimaryNodeNodeActiveContext(ctx, nac->primaryNode.node, &primaryNac);
 
-	(void) FindAndDispatchMonitorFSMRule(ctx, &primaryNac, MonitorFSM_PrimaryNodeSectionStart,
+	(void) FindAndDispatchMonitorFSMRule(ctx, &primaryNac,
+										 MonitorFSM_PrimaryNodeSectionStart,
 										 MonitorFSM_SIZE);
 }
 
 
 static void
-ActionCatchupUnhealthySecondaries(GroupStateContext *ctx, NodeActiveContext *nac, char *message)
+ActionCatchupUnhealthySecondaries(GroupStateContext *ctx, NodeActiveContext *nac,
+								  char *message)
 {
 	AutoFailoverNode *primaryNode = nac->activeNode.node;
 	List *otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
@@ -1389,12 +1422,14 @@ BuildFromContextNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *prim
  * for, in ActionCatchupUnhealthySecondaries above).
  */
 static void
-BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *primaryNode,
+BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx,
+									 AutoFailoverNode *primaryNode,
 									 NodeActiveContext *nac)
 {
 	memset(nac, 0, sizeof(NodeActiveContext));
 
 	BuildNodeStatus(ctx, primaryNode, &nac->activeNode);
+
 	/* .primaryNode role is unused by every row in MonitorFSM[]'s ForPrimaryNode section --
 	 * primaryNode IS activeNode here, so every condition is expressed against .activeNode
 	 * directly. */
@@ -1512,7 +1547,8 @@ ActionFanOutReportLsnOnPrimaryRemoval(GroupStateContext *ctx, NodeActiveContext 
  */
 static void
 BuildApiTriggerNodeActiveContext(GroupStateContext *ctx, MonitorApiFunction apiFunction,
-								 AutoFailoverNode *activeNode, AutoFailoverNode *primaryNode,
+								 AutoFailoverNode *activeNode,
+								 AutoFailoverNode *primaryNode,
 								 NodeActiveContext *nac)
 {
 	memset(nac, 0, sizeof(NodeActiveContext));
@@ -1592,7 +1628,8 @@ ProceedGroupStateForApiTrigger(MonitorApiFunction apiFunction,
 	BuildGroupStateContext(&ctx, activeNode);
 	BuildApiTriggerNodeActiveContext(&ctx, apiFunction, activeNode, primaryNode, &nac);
 
-	int index = FindMatchingMonitorFSMRuleIndexFrom(MonitorFSM, MonitorFSM_EarlyChecksStart,
+	int index = FindMatchingMonitorFSMRuleIndexFrom(MonitorFSM,
+													MonitorFSM_EarlyChecksStart,
 													0, &nac);
 
 	if (index < 0)
@@ -1772,8 +1809,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_START_MAINTENANCE),
 					  .lastHealthySyncStandbyGoingToMaintenance = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_REPORTED,
-										.reportedStates = STATES(REPLICATION_STATE_SECONDARY,
-																 REPLICATION_STATE_CATCHINGUP) } },
+										.reportedStates = STATES(
+											REPLICATION_STATE_SECONDARY,
+											REPLICATION_STATE_CATCHINGUP) }
+	  },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_MAINTENANCE),
 	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
@@ -1787,8 +1826,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	{ .pos = 115, .section = MONITOR_FSM_SECTION_API_TRIGGERED,
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_START_MAINTENANCE) },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_REPORTED,
-										.reportedStates = STATES(REPLICATION_STATE_SECONDARY,
-																 REPLICATION_STATE_CATCHINGUP) } },
+										.reportedStates = STATES(
+											REPLICATION_STATE_SECONDARY,
+											REPLICATION_STATE_CATCHINGUP) }
+	  },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_MAINTENANCE),
 	  .comment = "start_maintenance, secondary, ordinary case -> maintenance" },
@@ -1863,9 +1904,12 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 * exists and isn't already apply_settings.
 	 */
 	{ .pos = 125, .section = MONITOR_FSM_SECTION_API_TRIGGERED,
-	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_SET_NODE_CANDIDATE_PRIORITY) },
+	  .conditions = { .apiTrigger = API_TRIGGER(
+						  API_FUNCTION_SET_NODE_CANDIDATE_PRIORITY) },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_NOT_STABLE,
-									   .reportedStates = STATES(REPLICATION_STATE_APPLY_SETTINGS) } },
+										.reportedStates = STATES(
+											REPLICATION_STATE_APPLY_SETTINGS) }
+	  },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_APPLY_SETTINGS),
 	  .comment = "set_node_candidate_priority, primary not already apply_settings -> "
 				 "apply_settings" },
@@ -1875,9 +1919,12 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 * shape as set_node_candidate_priority above.
 	 */
 	{ .pos = 127, .section = MONITOR_FSM_SECTION_API_TRIGGERED,
-	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_SET_NODE_REPLICATION_QUORUM) },
+	  .conditions = { .apiTrigger = API_TRIGGER(
+						  API_FUNCTION_SET_NODE_REPLICATION_QUORUM) },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_NOT_STABLE,
-									   .reportedStates = STATES(REPLICATION_STATE_APPLY_SETTINGS) } },
+										.reportedStates = STATES(
+											REPLICATION_STATE_APPLY_SETTINGS) }
+	  },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_APPLY_SETTINGS),
 	  .comment = "set_node_replication_quorum, primary not already apply_settings -> "
 				 "apply_settings" },
@@ -1891,10 +1938,13 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 * via this row's own no-match ERROR rather than silently).
 	 */
 	{ .pos = 129, .section = MONITOR_FSM_SECTION_API_TRIGGERED,
-	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_SET_FORMATION_NUMBER_SYNC_STANDBYS) },
+	  .conditions = { .apiTrigger = API_TRIGGER(
+						  API_FUNCTION_SET_FORMATION_NUMBER_SYNC_STANDBYS) },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_ASSIGNED,
-									   .assignedStates = STATES(REPLICATION_STATE_PRIMARY,
-																REPLICATION_STATE_WAIT_PRIMARY) } },
+										.assignedStates = STATES(
+											REPLICATION_STATE_PRIMARY,
+											REPLICATION_STATE_WAIT_PRIMARY) }
+	  },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_APPLY_SETTINGS),
 	  .comment = "set_formation_number_sync_standbys, primary in primary/wait_primary "
 				 "-> apply_settings" },
@@ -1949,7 +1999,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
 					  .isComparableToReferenceTli = BOOL_FALSE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
-	  .comment = "converged secondary, reportedTLI not an ancestor of reference -> catchingup" },
+	  .comment =
+		  "converged secondary, reportedTLI not an ancestor of reference -> catchingup" },
 
 	/* replication stall (#997): primary healthy, no standby past replication_stall_timeout */
 	{ .pos = 303, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -1957,7 +2008,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					   .isHealthy = BOOL_TRUE },
 	  .conditions = { .replicationStallExceeded = BOOL_TRUE },
 	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
-	  .comment = "primary healthy, no standby past replication_stall_timeout -> wait_primary" },
+	  .comment =
+		  "primary healthy, no standby past replication_stall_timeout -> wait_primary" },
 
 	/* nodesCount>2, primary unhealthy -- draining/maintenance/nothing decided inside the
 	 * action, then the MS-failover cascade unconditionally; must be a single row, see
@@ -1966,7 +2018,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .primaryNode = { .isUnhealthy = BOOL_TRUE },
 	  .conditions = { .groupHasMoreThanTwoNodes = BOOL_TRUE },
 	  .extraAction = ActionRunMultiStandbyFailoverCascade,
-	  .comment = "nodesCount>2, primary unhealthy -> draining/maintenance + MS-failover cascade" },
+	  .comment =
+		  "nodesCount>2, primary unhealthy -> draining/maintenance + MS-failover cascade" },
 
 	/* report_lsn, primary converged wait/join_primary, healthy */
 	{ .pos = 307, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -1974,7 +2027,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY,
 					   .isHealthy = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
-	  .comment = "report_lsn, primary converged wait/join_primary, healthy -> secondary" },
+	  .comment =
+		  "report_lsn, primary converged wait/join_primary, healthy -> secondary" },
 
 	/* report_lsn, primary converged primary, healthy */
 	{ .pos = 309, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2022,7 +2076,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					  .replicationQuorum = BOOL_FALSE },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
-	  .comment = "wait_standby (not a quorum member), primary converged primary -> catchingup" },
+	  .comment =
+		  "wait_standby (not a quorum member), primary converged primary -> catchingup" },
 
 	/* caught up, same TLI as primary, within sync threshold */
 	{ .pos = 321, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2057,8 +2112,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .conditions = { .walWithinPromoteThreshold = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PREPARE_PROMOTION),
 	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DRAINING),
-	  .comment = "primary fails, not already wait_primary -> secondary -> prepare_promotion, "
-				 "primary -> draining (2 of 2)" },
+	  .comment =
+		  "primary fails, not already wait_primary -> secondary -> prepare_promotion, "
+		  "primary -> draining (2 of 2)" },
 
 	/* wait_maintenance, primary converged wait_primary */
 	{ .pos = 327, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2072,14 +2128,16 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_MAINTENANCE) },
 	  .primaryNode = { .statePattern = FSM_NOT_ASSIGNED_WAIT_PRIMARY },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_MAINTENANCE),
-	  .comment = "wait_maintenance, primary's goal no longer wait_primary -> maintenance" },
+	  .comment =
+		  "wait_maintenance, primary's goal no longer wait_primary -> maintenance" },
 
 	/* prepare_promotion, primary converged prepare_maintenance */
 	{ .pos = 331, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION) },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_MAINTENANCE) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_STOP_REPLICATION),
-	  .comment = "prepare_promotion, primary converged prepare_maintenance -> stop_replication" },
+	  .comment =
+		  "prepare_promotion, primary converged prepare_maintenance -> stop_replication" },
 
 	/* Citus worker, primary present */
 	{ .pos = 333, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2088,7 +2146,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .primaryNode = { .exists = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
 	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTED),
-	  .comment = "Citus worker prepare_promotion, primary present -> wait_primary + demoted" },
+	  .comment =
+		  "Citus worker prepare_promotion, primary present -> wait_primary + demoted" },
 
 	/* Citus worker, primary removed */
 	{ .pos = 335, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2105,8 +2164,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					   .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_PRIMARY),
 					   .isInMaintenance = BOOL_FALSE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_STOP_REPLICATION),
-	  .comment = "prepare_promotion, primary already converged wait_primary (issue #1168) -> "
-				 "stop_replication only (1 of 2)" },
+	  .comment =
+		  "prepare_promotion, primary already converged wait_primary (issue #1168) -> "
+		  "stop_replication only (1 of 2)" },
 
 	/* prepare_promotion, primary present, not in maintenance, not already wait_primary */
 	{ .pos = 339, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2169,7 +2229,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .primaryNode = { .exists = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
 	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTED),
-	  .comment = "Citus worker stop_replication, primary present -> wait_primary + demoted" },
+	  .comment =
+		  "Citus worker stop_replication, primary present -> wait_primary + demoted" },
 
 	/* Citus worker, primary removed */
 	{ .pos = 353, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2185,7 +2246,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY_TRANSITIONING_TO_PRIMARY,
 					   .isHealthy = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
-	  .comment = "demoted, primary reported wait/join_primary with goal primary -> catchingup" },
+	  .comment =
+		  "demoted, primary reported wait/join_primary with goal primary -> catchingup" },
 
 	/* demoted, primary converged wait/join_primary/primary, healthy */
 	{ .pos = 357, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2193,7 +2255,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .primaryNode = { .statePattern = FSM_PRIMARY_OR_WAIT_OR_JOIN,
 					   .isHealthy = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
-	  .comment = "demoted, primary converged wait/join_primary/primary, healthy -> catchingup" },
+	  .comment =
+		  "demoted, primary converged wait/join_primary/primary, healthy -> catchingup" },
 
 	/* join_secondary, primary reported wait_primary with goal wait/primary -- cascades into a
 	 * nested pass on primaryNode */
@@ -2202,8 +2265,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .primaryNode = { .statePattern = FSM_WAIT_PRIMARY_TRANSITIONING_TO_PRIMARY },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
 	  .extraAction = ActionRunPrimaryNodeTransition,
-	  .comment = "join_secondary, primary reported wait_primary with goal wait/primary -> "
-				 "secondary" },
+	  .comment =
+		  "join_secondary, primary reported wait_primary with goal wait/primary -> "
+		  "secondary" },
 
 	/* join_secondary, primary converged primary */
 	{ .pos = 361, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2233,11 +2297,15 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .conditions = { .activeNodeAllWalSourcesUnhealthy = BOOL_TRUE,
 					  .guardDataLossEnabled = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_TRANSITIONING,
-									   .reportedStates = STATES(REPLICATION_STATE_REPORT_LSN),
-									   .assignedStates = STATES(REPLICATION_STATE_FAST_FORWARD) } },
+										.reportedStates = STATES(
+											REPLICATION_STATE_REPORT_LSN),
+										.assignedStates = STATES(
+											REPLICATION_STATE_FAST_FORWARD) }
+	  },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
-	  .comment = "MS-failover: candidate stuck in fast_forward, all WAL sources unhealthy, "
-				 "guard_data_loss=true -> report_lsn (retry once a source recovers)" },
+	  .comment =
+		  "MS-failover: candidate stuck in fast_forward, all WAL sources unhealthy, "
+		  "guard_data_loss=true -> report_lsn (retry once a source recovers)" },
 
 	/* MS-failover: candidate ready to stream WAL -> follower joins as secondary */
 	{ .pos = 365, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2245,8 +2313,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN) },
 	  .candidateNode = { .isReadyToStreamWAL = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_JOIN_SECONDARY),
-	  .comment = "MS-failover: activeNode in report_lsn, failover candidate ready to stream "
-				 "WAL -> join_secondary" },
+	  .comment =
+		  "MS-failover: activeNode in report_lsn, failover candidate ready to stream "
+		  "WAL -> join_secondary" },
 
 	/*
 	 * MS-failover: BuildCandidateList's own fan-out (group_state_machine.c,
@@ -2276,27 +2345,37 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	{ .pos = 367, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_TRANSITIONING,
-									   .reportedStates = STATES(REPLICATION_STATE_SECONDARY,
-																REPLICATION_STATE_CATCHINGUP),
-									   .assignedStates = STATES(REPLICATION_STATE_SECONDARY,
-																REPLICATION_STATE_CATCHINGUP) } },
+										.reportedStates = STATES(
+											REPLICATION_STATE_SECONDARY,
+											REPLICATION_STATE_CATCHINGUP),
+										.assignedStates = STATES(
+											REPLICATION_STATE_SECONDARY,
+											REPLICATION_STATE_CATCHINGUP) }
+	  },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
-	  .comment = "MS-failover fan-out: secondary/catchingup, not yet converged -> report_lsn "
-				 "(1 of 4)" },
+	  .comment =
+		  "MS-failover fan-out: secondary/catchingup, not yet converged -> report_lsn "
+		  "(1 of 4)" },
 
 	{ .pos = 369, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_TRANSITIONING,
-									   .reportedStates = STATES(REPLICATION_STATE_MAINTENANCE),
-									   .assignedStates = STATES(REPLICATION_STATE_CATCHINGUP) } },
+										.reportedStates = STATES(
+											REPLICATION_STATE_MAINTENANCE),
+										.assignedStates = STATES(
+											REPLICATION_STATE_CATCHINGUP) }
+	  },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
-	  .comment = "MS-failover fan-out: rejoining from maintenance -> report_lsn (2 of 4)" },
+	  .comment =
+		  "MS-failover fan-out: rejoining from maintenance -> report_lsn (2 of 4)" },
 
 	{ .pos = 371, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_STABLE,
-									   .reportedStates = STATES(REPLICATION_STATE_DRAINING,
-																REPLICATION_STATE_DEMOTED) } },
+										.reportedStates = STATES(
+											REPLICATION_STATE_DRAINING,
+											REPLICATION_STATE_DEMOTED) }
+	  },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
 	  .comment = "MS-failover fan-out: old primary converged draining or demoted -> "
 				 "report_lsn (3 of 4)" },
@@ -2304,8 +2383,11 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	{ .pos = 373, .section = MONITOR_FSM_SECTION_REPORTING_NODE,
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_TRANSITIONING,
-									   .reportedStates = STATES(REPLICATION_STATE_DEMOTED),
-									   .assignedStates = STATES(REPLICATION_STATE_CATCHINGUP) } },
+										.reportedStates = STATES(
+											REPLICATION_STATE_DEMOTED),
+										.assignedStates = STATES(
+											REPLICATION_STATE_CATCHINGUP) }
+	  },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
 	  .comment = "MS-failover fan-out: old primary demoted, was rejoining a now-failed "
 				 "primary -> report_lsn (4 of 4)" },
@@ -2382,7 +2464,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					  .secondaryNodesCountIsZero = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
 	  .extraAction = ActionCatchupUnhealthySecondaries,
-	  .comment = "all nodes async, zero secondaries -> wait_primary" },
+	  .comment = "all nodes async, zero secondaries -> wait_primary "
+				 "(+ unhealthy-secondary fan-out to catchingup)" },
 
 	/* all nodes async, >=1 secondary */
 	{ .pos = 405, .section = MONITOR_FSM_SECTION_PRIMARY_NODE,
@@ -2391,7 +2474,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					  .secondaryNodesCountIsZero = BOOL_FALSE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
 	  .extraAction = ActionCatchupUnhealthySecondaries,
-	  .comment = "all nodes async, >=1 secondary -> primary" },
+	  .comment = "all nodes async, >=1 secondary -> primary "
+				 "(+ unhealthy-secondary fan-out to catchingup)" },
 
 	/* converged primary/apply_settings (not wait_primary), no quorum secondaries,
 	 * number_sync_standbys=0, no failover in progress (issue #774) */
@@ -2402,8 +2486,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					  .numberSyncStandbysIsZero = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
 	  .extraAction = ActionCatchupUnhealthySecondaries,
-	  .comment = "converged primary/apply_settings, no quorum secondaries, no failover in "
-				 "progress, number_sync_standbys=0 -> wait_primary" },
+	  .comment =
+		  "converged primary/apply_settings, no quorum secondaries, no failover in "
+		  "progress, number_sync_standbys=0 -> wait_primary "
+		  "(+ unhealthy-secondary fan-out to catchingup)" },
 
 	/* same, but number_sync_standbys>0 -> block writes on primary */
 	{ .pos = 409, .section = MONITOR_FSM_SECTION_PRIMARY_NODE,
@@ -2413,8 +2499,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					  .numberSyncStandbysIsZero = BOOL_FALSE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
 	  .extraAction = ActionCatchupUnhealthySecondaries,
-	  .comment = "converged primary/apply_settings, no quorum secondaries, no failover in "
-				 "progress, number_sync_standbys>0 -> primary (block writes)" },
+	  .comment =
+		  "converged primary/apply_settings, no quorum secondaries, no failover in "
+		  "progress, number_sync_standbys>0 -> primary (block writes) "
+		  "(+ unhealthy-secondary fan-out to catchingup)" },
 
 	/* wait_primary, >=1 quorum secondary */
 	{ .pos = 411, .section = MONITOR_FSM_SECTION_PRIMARY_NODE,
@@ -2422,7 +2510,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .conditions = { .secondaryQuorumNodesCountIsZero = BOOL_FALSE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
 	  .extraAction = ActionCatchupUnhealthySecondaries,
-	  .comment = "wait_primary, >=1 quorum secondary -> primary" },
+	  .comment = "wait_primary, >=1 quorum secondary -> primary "
+				 "(+ unhealthy-secondary fan-out to catchingup)" },
 
 	/* apply_settings, both zero */
 	{ .pos = 413, .section = MONITOR_FSM_SECTION_PRIMARY_NODE,
@@ -2431,7 +2520,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					  .secondaryQuorumNodesCountIsZero = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
 	  .extraAction = ActionCatchupUnhealthySecondaries,
-	  .comment = "apply_settings, both zero -> wait_primary" },
+	  .comment = "apply_settings, both zero -> wait_primary "
+				 "(+ unhealthy-secondary fan-out to catchingup)" },
 
 	/* apply_settings, number_sync_standbys != 0 (1 of 2 disjuncts) */
 	{ .pos = 415, .section = MONITOR_FSM_SECTION_PRIMARY_NODE,
@@ -2439,7 +2529,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .conditions = { .numberSyncStandbysIsZero = BOOL_FALSE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
 	  .extraAction = ActionCatchupUnhealthySecondaries,
-	  .comment = "apply_settings, number_sync_standbys != 0 -> primary (1 of 2 disjuncts)" },
+	  .comment =
+		  "apply_settings, number_sync_standbys != 0 -> primary (1 of 2 disjuncts) "
+		  "(+ unhealthy-secondary fan-out to catchingup)" },
 
 	/* apply_settings, sync_standbys=0 but >=1 quorum secondary (2 of 2) */
 	{ .pos = 417, .section = MONITOR_FSM_SECTION_PRIMARY_NODE,
@@ -2448,14 +2540,17 @@ static const MonitorFSMTransition MonitorFSM[] = {
 					  .secondaryQuorumNodesCountIsZero = BOOL_FALSE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
 	  .extraAction = ActionCatchupUnhealthySecondaries,
-	  .comment = "apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2)" },
+	  .comment =
+		  "apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2) "
+		  "(+ unhealthy-secondary fan-out to catchingup)" },
 
 	/* converged primary/wait_primary/apply_settings, no other condition applies */
 	{ .pos = 419, .section = MONITOR_FSM_SECTION_PRIMARY_NODE,
 	  .activeNode = { .statePattern = FSM_PRIMARY_ROLE_STATES },
 	  .extraAction = ActionCatchupUnhealthySecondaries,
-	  .comment = "converged primary/wait_primary/apply_settings, no other condition applies -> "
-				 "no-op besides the unhealthy-secondary fan-out" },
+	  .comment =
+		  "converged primary/wait_primary/apply_settings, no other condition applies -> "
+		  "no-op besides the unhealthy-secondary fan-out" },
 
 	/* backwards-compat: join_primary -> primary */
 	{ .pos = 421, .section = MONITOR_FSM_SECTION_PRIMARY_NODE,
@@ -2800,7 +2895,8 @@ NodeStatePatternReportedStatesText(const NodeStatePattern *pattern, bool *isNull
 		}
 
 		appendStringInfoString(&buf,
-							   ReplicationStateGetName(pattern->reportedStates.states[i]));
+							   ReplicationStateGetName(
+								   pattern->reportedStates.states[i]));
 	}
 
 	*isNull = false;
@@ -2863,7 +2959,8 @@ AppendNodeStateGoalCondition(StringInfoData *buf, const NodeStatePattern *patter
 		appendStringInfoString(buf, ", ");
 	}
 
-	appendStringInfoString(buf, pattern->kind == NODE_STATE_ASSIGNED ? "goal=" : "goal!=");
+	appendStringInfoString(buf, pattern->kind == NODE_STATE_ASSIGNED ? "goal=" :
+						   "goal!=");
 
 	for (int i = 0; i < pattern->assignedStates.count; i++)
 	{
@@ -2872,7 +2969,8 @@ AppendNodeStateGoalCondition(StringInfoData *buf, const NodeStatePattern *patter
 			appendStringInfoString(buf, "|");
 		}
 
-		appendStringInfoString(buf, ReplicationStateGetName(pattern->assignedStates.states[i]));
+		appendStringInfoString(buf, ReplicationStateGetName(
+								   pattern->assignedStates.states[i]));
 	}
 }
 
@@ -2908,7 +3006,8 @@ NodeStatusPatternConditionsText(const NodeStatusPattern *pattern, bool *isNull)
 	APPEND_BOOL_CONDITION(&buf, "drainTimeExpired", pattern->drainTimeExpired);
 	APPEND_BOOL_CONDITION(&buf, "isCitusWorkerGroup", pattern->isCitusWorkerGroup);
 	APPEND_BOOL_CONDITION(&buf, "replicationQuorum", pattern->replicationQuorum);
-	APPEND_BOOL_CONDITION(&buf, "isComparableToReferenceTli", pattern->isComparableToReferenceTli);
+	APPEND_BOOL_CONDITION(&buf, "isComparableToReferenceTli",
+						  pattern->isComparableToReferenceTli);
 	APPEND_BOOL_CONDITION(&buf, "unreachableFromDemoteTimeout",
 						  pattern->unreachableFromDemoteTimeout);
 
@@ -2942,22 +3041,30 @@ NodeActiveContextPatternConditionsText(const NodeActiveContextPattern *cond, boo
 
 	APPEND_BOOL_CONDITION(&buf, "groupHasExactlyOneNode", cond->groupHasExactlyOneNode);
 	APPEND_BOOL_CONDITION(&buf, "groupHasExactlyTwoNodes", cond->groupHasExactlyTwoNodes);
-	APPEND_BOOL_CONDITION(&buf, "groupHasMoreThanTwoNodes", cond->groupHasMoreThanTwoNodes);
-	APPEND_BOOL_CONDITION(&buf, "anyOtherNodeWaitingStandby", cond->anyOtherNodeWaitingStandby);
-	APPEND_BOOL_CONDITION(&buf, "numberSyncStandbysIsZero", cond->numberSyncStandbysIsZero);
+	APPEND_BOOL_CONDITION(&buf, "groupHasMoreThanTwoNodes",
+						  cond->groupHasMoreThanTwoNodes);
+	APPEND_BOOL_CONDITION(&buf, "anyOtherNodeWaitingStandby",
+						  cond->anyOtherNodeWaitingStandby);
+	APPEND_BOOL_CONDITION(&buf, "numberSyncStandbysIsZero",
+						  cond->numberSyncStandbysIsZero);
 	APPEND_BOOL_CONDITION(&buf, "replicationQuorumCountIsZero",
 						  cond->replicationQuorumCountIsZero);
-	APPEND_BOOL_CONDITION(&buf, "secondaryNodesCountIsZero", cond->secondaryNodesCountIsZero);
+	APPEND_BOOL_CONDITION(&buf, "secondaryNodesCountIsZero",
+						  cond->secondaryNodesCountIsZero);
 	APPEND_BOOL_CONDITION(&buf, "secondaryQuorumNodesCountIsZero",
 						  cond->secondaryQuorumNodesCountIsZero);
-	APPEND_BOOL_CONDITION(&buf, "atLeastOneHealthyCandidate", cond->atLeastOneHealthyCandidate);
-	APPEND_BOOL_CONDITION(&buf, "walWithinPromoteThreshold", cond->walWithinPromoteThreshold);
+	APPEND_BOOL_CONDITION(&buf, "atLeastOneHealthyCandidate",
+						  cond->atLeastOneHealthyCandidate);
+	APPEND_BOOL_CONDITION(&buf, "walWithinPromoteThreshold",
+						  cond->walWithinPromoteThreshold);
 	APPEND_BOOL_CONDITION(&buf, "walWithinSyncThreshold", cond->walWithinSyncThreshold);
-	APPEND_BOOL_CONDITION(&buf, "activeAndPrimaryTliMatch", cond->activeAndPrimaryTliMatch);
+	APPEND_BOOL_CONDITION(&buf, "activeAndPrimaryTliMatch",
+						  cond->activeAndPrimaryTliMatch);
 	APPEND_BOOL_CONDITION(&buf, "primaryIsWaitPrimaryPresumedDead",
 						  cond->primaryIsWaitPrimaryPresumedDead);
 	APPEND_BOOL_CONDITION(&buf, "failoverInProgress", cond->failoverInProgress);
-	APPEND_BOOL_CONDITION(&buf, "replicationStallExceeded", cond->replicationStallExceeded);
+	APPEND_BOOL_CONDITION(&buf, "replicationStallExceeded",
+						  cond->replicationStallExceeded);
 	APPEND_BOOL_CONDITION(&buf, "lastHealthySyncStandbyGoingToMaintenance",
 						  cond->lastHealthySyncStandbyGoingToMaintenance);
 	APPEND_BOOL_CONDITION(&buf, "activeNodeAllWalSourcesUnhealthy",
@@ -3102,6 +3209,285 @@ dump_fsm(PG_FUNCTION_ARGS)
 		values[12] = BoolGetDatum(rule->extraAction != NULL);
 
 		tuplestore_putvalues(tupstore, tupdesc, values, isNull);
+	}
+
+	return (Datum) 0;
+}
+
+
+/*
+ * AllReplicationStates is the full universe of "real" (non-sentinel)
+ * ReplicationState values -- every one a node can genuinely report or be
+ * assigned, in the order replication_state.h declares them. Deliberately
+ * excludes REPLICATION_STATE_UNKNOWN: a meta/sentinel value no MonitorFSM[]
+ * row ever reports or assigns, and no KeeperFSM[] edge ever targets either.
+ * Used only to resolve NodeStatePatternResolveFromStates' wildcard/negation
+ * kinds (ANY, NOT_STABLE, ASSIGNED, NOT_ASSIGNED) into concrete states.
+ */
+static const ReplicationState AllReplicationStates[] = {
+	REPLICATION_STATE_INITIAL,
+	REPLICATION_STATE_SINGLE,
+	REPLICATION_STATE_WAIT_PRIMARY,
+	REPLICATION_STATE_PRIMARY,
+	REPLICATION_STATE_DRAINING,
+	REPLICATION_STATE_DEMOTE_TIMEOUT,
+	REPLICATION_STATE_DEMOTED,
+	REPLICATION_STATE_CATCHINGUP,
+	REPLICATION_STATE_SECONDARY,
+	REPLICATION_STATE_PREPARE_PROMOTION,
+	REPLICATION_STATE_STOP_REPLICATION,
+	REPLICATION_STATE_WAIT_STANDBY,
+	REPLICATION_STATE_MAINTENANCE,
+	REPLICATION_STATE_JOIN_PRIMARY,
+	REPLICATION_STATE_APPLY_SETTINGS,
+	REPLICATION_STATE_PREPARE_MAINTENANCE,
+	REPLICATION_STATE_WAIT_MAINTENANCE,
+	REPLICATION_STATE_REPORT_LSN,
+	REPLICATION_STATE_FAST_FORWARD,
+	REPLICATION_STATE_JOIN_SECONDARY,
+	REPLICATION_STATE_DROPPED
+};
+
+#define ALL_REPLICATION_STATES_COUNT \
+	((int) (sizeof(AllReplicationStates) / sizeof(AllReplicationStates[0])))
+
+
+/*
+ * NodeStatePatternResolveFromStates resolves a NodeStatePattern's own "from"
+ * (reported-state) constraint into a concrete, palloc'd array of
+ * ReplicationState values -- the genuine edge-source set dump_fsm_edges()
+ * needs, as opposed to NodeStatePatternReportedStatesText's rendering (which
+ * only handles STABLE/REPORTED/TRANSITIONING and returns NULL for
+ * everything else, since that one exists for human display, not edge
+ * enumeration).
+ *
+ * ASSIGNED/NOT_ASSIGNED only ever constrain the node's *goal*, never what it
+ * currently reports (see each's own comment where declared above), so both
+ * resolve to the full state universe here, same as ANY. NOT_STABLE resolves
+ * to the complement of its own reportedStates within that universe. *outCount
+ * is set to the returned array's length; the caller does not need to free it
+ * (called only from dump_fsm_edges(), itself already running inside a
+ * per-query memory context the executor resets on its own).
+ */
+static ReplicationState *
+NodeStatePatternResolveFromStates(const NodeStatePattern *pattern, int *outCount)
+{
+	ReplicationState *out;
+
+	switch (pattern->kind)
+	{
+		case NODE_STATE_STABLE:
+		case NODE_STATE_REPORTED:
+		case NODE_STATE_TRANSITIONING:
+		{
+			out = (ReplicationState *)
+				  palloc(pattern->reportedStates.count * sizeof(ReplicationState));
+
+			for (int i = 0; i < pattern->reportedStates.count; i++)
+			{
+				out[i] = pattern->reportedStates.states[i];
+			}
+
+			*outCount = pattern->reportedStates.count;
+			return out;
+		}
+
+		case NODE_STATE_NOT_STABLE:
+		{
+			out = (ReplicationState *)
+				  palloc(ALL_REPLICATION_STATES_COUNT * sizeof(ReplicationState));
+			*outCount = 0;
+
+			for (int i = 0; i < ALL_REPLICATION_STATES_COUNT; i++)
+			{
+				if (!MatchStateSet(AllReplicationStates[i], pattern->reportedStates))
+				{
+					out[(*outCount)++] = AllReplicationStates[i];
+				}
+			}
+
+			return out;
+		}
+
+		case NODE_STATE_ANY:
+		case NODE_STATE_ASSIGNED:
+		case NODE_STATE_NOT_ASSIGNED:
+		default:
+		{
+			out = (ReplicationState *)
+				  palloc(ALL_REPLICATION_STATES_COUNT * sizeof(ReplicationState));
+			memcpy(out, AllReplicationStates, sizeof(AllReplicationStates));
+			*outCount = ALL_REPLICATION_STATES_COUNT;
+			return out;
+		}
+	}
+}
+
+
+PG_FUNCTION_INFO_V1(dump_fsm_edges);
+
+/*
+ * dump_fsm_edges exposes MonitorFSM[] as a flat set of concrete
+ * (pos, current_state, assigned_state) edges -- one row per actual
+ * (reportedState, assignedState) pair a row can produce, fully resolved
+ * (never NULL, unlike dump_fsm()'s own pattern-summary columns, which stay
+ * unresolved for human display). This is the keeper-cross-check surface the
+ * design doc's check_fsm_reachability() proposal needs: pgautofailover.
+ * check_fsm_reachability(jsonb) anti-joins this against a keeper's own
+ * KeeperFSM[] edges (see KeeperFSMToJSON(), src/bin/pg_autoctl/fsm.c) to
+ * find any monitor transition with no matching keeper edge -- exactly the
+ * bug class issue #774 was.
+ *
+ * Two potential edges per row, resolved independently: activeNode's own
+ * (statePattern -> activeNodeAssignedState) when the row actually assigns
+ * one, and primaryNode's own (statePattern -> otherNodeAssignedState) when
+ * it does. candidateNode never has an assignment slot of its own (see
+ * MonitorFSMTransition's own comment), so it never contributes an edge.
+ * pgKind is deliberately not modeled here -- see this function's own header
+ * comment in the design doc discussion; every Citus-specific KeeperFSM[]
+ * edge already has a NODE_KIND_ANY counterpart with the same
+ * (current, assigned) shape (fsm_mermaid.c's own comment establishes this
+ * as an invariant this codebase already relies on elsewhere), so a flat,
+ * pgKind-blind edge set on both sides is already correct.
+ *
+ * Two categories of edges are deliberately never emitted, both confirmed by
+ * running pg_autoctl inspect fsm check for real and tracing every one of the
+ * mismatches it reported back to its actual root cause rather than assuming:
+ *
+ * - Reflexive (current == assigned) edges. keeper_fsm_reach_assigned_state()
+ *   (src/bin/pg_autoctl/fsm.c) returns true the moment
+ *   current_role == assigned_role, before ever consulting KeeperFSM[] --
+ *   confirmed by reading that function directly. A self-loop can therefore
+ *   never have (or need) a matching keeper edge; including one here would
+ *   always report a false gap. This alone explained every mismatch on pos
+ *   363, 403, 405, 409 during that live run.
+ *
+ * - MONITOR_FSM_SECTION_API_TRIGGERED rows entirely. Every one of these is
+ *   reached from an operator-facing SQL wrapper (remove_node,
+ *   perform_failover, start_maintenance, ...) that resolves activeNode to a
+ *   specific, already-validated role (almost always the primary) via
+ *   hand-written C *before* dispatch ever runs -- ProceedGroupStateForApiTrigger's
+ *   own comment, and several of these rows' own comments ("there's nothing
+ *   else for activeNode to be here but the primary itself", "activeNode IS
+ *   the primary here"), document this explicitly. The row's own
+ *   NodeStatePattern for these (typically ANY, or a BoolPattern condition
+ *   like isInPrimaryState with no accompanying state-set restriction) is
+ *   consequently far broader than what's actually reachable: it was never
+ *   meant to double as a full reachability precondition, because that
+ *   precondition already lives in hand-written C outside this table, per
+ *   this design's own "pre/post side effects stay hand-written, not modeled
+ *   as a row" principle. Expanding it here (as this function otherwise
+ *   correctly does for the ordinary heartbeat-driven sections) manufactures
+ *   the exact same kind of false gap for every one of these ten rows, all
+ *   confirmed by that same live run.
+ *
+ * Every other mismatch that same run found (early_checks 209/211,
+ * reporting_node 303/325/333/339/347/349/351) stayed reachable from a live
+ * node's own genuine reported state with no such structural excuse, so
+ * they're deliberately NOT filtered here -- each is a real candidate for
+ * individual investigation against the keeper's actual KeeperFSM[] rows,
+ * not a known-safe artifact of this function's own edge derivation.
+ */
+Datum
+dump_fsm_edges(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context that "
+						"cannot accept a set")));
+	}
+
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not "
+						"allowed in this context")));
+	}
+
+	TupleDesc tupdesc;
+
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+	{
+		ereport(ERROR,
+				(errmsg("function returning record called in context "
+						"that cannot accept type record")));
+	}
+
+	MemoryContext perQueryContext = rsinfo->econtext->ecxt_per_query_memory;
+	MemoryContext oldContext = MemoryContextSwitchTo(perQueryContext);
+
+	Tuplestorestate *tupstore = tuplestore_begin_heap(true, false, work_mem);
+
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldContext);
+
+	for (int i = 0; i < MonitorFSM_SIZE; i++)
+	{
+		const MonitorFSMTransition *rule = &MonitorFSM[i];
+
+		if (rule->section == MONITOR_FSM_SECTION_API_TRIGGERED)
+		{
+			continue;
+		}
+
+		if (rule->activeNodeAssignedState.kind == GOAL_STATE_SET)
+		{
+			int count;
+			ReplicationState *states =
+				NodeStatePatternResolveFromStates(&rule->activeNode.statePattern, &count);
+
+			for (int j = 0; j < count; j++)
+			{
+				Datum values[3];
+				bool isNull[3] = { false };
+
+				if (states[j] == rule->activeNodeAssignedState.state)
+				{
+					continue;
+				}
+
+				values[0] = Int32GetDatum(rule->pos);
+				values[1] = ObjectIdGetDatum(ReplicationStateGetEnum(states[j]));
+				values[2] = ObjectIdGetDatum(
+					ReplicationStateGetEnum(rule->activeNodeAssignedState.state));
+
+				tuplestore_putvalues(tupstore, tupdesc, values, isNull);
+			}
+		}
+
+		if (rule->otherNodeAssignedState.kind == GOAL_STATE_SET)
+		{
+			int count;
+			ReplicationState *states =
+				NodeStatePatternResolveFromStates(&rule->primaryNode.statePattern,
+												  &count);
+
+			for (int j = 0; j < count; j++)
+			{
+				Datum values[3];
+				bool isNull[3] = { false };
+
+				if (states[j] == rule->otherNodeAssignedState.state)
+				{
+					continue;
+				}
+
+				values[0] = Int32GetDatum(rule->pos);
+				values[1] = ObjectIdGetDatum(ReplicationStateGetEnum(states[j]));
+				values[2] = ObjectIdGetDatum(
+					ReplicationStateGetEnum(rule->otherNodeAssignedState.state));
+
+				tuplestore_putvalues(tupstore, tupdesc, values, isNull);
+			}
+		}
 	}
 
 	return (Datum) 0;

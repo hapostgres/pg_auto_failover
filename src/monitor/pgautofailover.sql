@@ -286,6 +286,55 @@ grant execute on function pgautofailover.dump_fsm() to autoctl_node;
 CREATE VIEW pgautofailover.fsm AS
     SELECT * FROM pgautofailover.dump_fsm() ORDER BY pos;
 
+-- Flat, fully-resolved (pos, current_state, assigned_state) edges derived
+-- from MonitorFSM[] -- see dump_fsm_edges()'s own C-side comment. Never
+-- queried directly by an operator; check_fsm_reachability() below is built
+-- on top of it.
+CREATE FUNCTION pgautofailover.dump_fsm_edges()
+RETURNS TABLE
+ (
+    pos            int,
+    current_state  pgautofailover.replication_state,
+    assigned_state pgautofailover.replication_state
+ )
+LANGUAGE C SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$dump_fsm_edges$$;
+
+grant execute on function pgautofailover.dump_fsm_edges() to autoctl_node;
+
+-- Compares the monitor's own declarative dispatch table against a keeper's
+-- KeeperFSM[] edges (serialized to JSON by KeeperFSMToJSON(),
+-- src/bin/pg_autoctl/fsm.c, and sent here by "pg_autoctl inspect fsm check")
+-- and returns every monitor edge with no matching keeper entry -- an empty
+-- result means every transition the monitor can ever assign has somewhere
+-- for the keeper to go. keeper_edges is expected to be a jsonb array of
+-- {"current": ..., "assigned": ...} objects, one per KeeperFSMTransition
+-- row; casting both fields to pgautofailover.replication_state means a
+-- keeper reporting a state name this enum doesn't recognize fails loudly,
+-- with a real cast error, rather than silently never matching.
+CREATE FUNCTION pgautofailover.check_fsm_reachability(keeper_edges jsonb)
+RETURNS TABLE
+ (
+    pos            int,
+    current_state  pgautofailover.replication_state,
+    assigned_state pgautofailover.replication_state,
+    comment        text
+ )
+LANGUAGE sql
+AS $$
+    SELECT e.pos, e.current_state, e.assigned_state, f.comment
+      FROM pgautofailover.dump_fsm_edges() e
+      JOIN pgautofailover.fsm f ON f.pos = e.pos
+     WHERE NOT EXISTS (
+       SELECT 1
+         FROM jsonb_to_recordset(keeper_edges) AS k(current text, assigned text)
+        WHERE k.current::pgautofailover.replication_state = e.current_state
+          AND k.assigned::pgautofailover.replication_state = e.assigned_state)
+     ORDER BY e.pos;
+$$;
+
+grant execute on function pgautofailover.check_fsm_reachability(jsonb) to autoctl_node;
+
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
 CREATE FUNCTION pgautofailover.set_node_system_identifier

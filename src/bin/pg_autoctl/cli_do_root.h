@@ -20,6 +20,7 @@ extern CommandLine do_fsm_commands;
 extern CommandLine fsm_state;
 extern CommandLine fsm_node_state;
 extern CommandLine fsm_list;
+extern CommandLine fsm_check;
 extern CommandLine fsm_gv;
 extern CommandLine fsm_mermaid;
 

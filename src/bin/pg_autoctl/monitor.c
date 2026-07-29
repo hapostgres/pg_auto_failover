@@ -115,6 +115,13 @@ typedef struct MonitorExtensionVersionParseContext
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
 
+typedef struct FsmReachabilityParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	FsmReachabilityResult *result;
+	bool parsedOK;
+} FsmReachabilityParseContext;
+
 
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
@@ -134,6 +141,7 @@ static void printFormationSettings(void *ctx, PGresult *result);
 static void printFormationURI(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
 static void parseExtensionVersion(void *ctx, PGresult *result);
+static void parseFsmReachabilityResult(void *ctx, PGresult *result);
 
 static bool prepare_connection_to_current_system_user(Monitor *source,
 													  Monitor *target);
@@ -1229,6 +1237,102 @@ monitor_report_timeline_history(Monitor *monitor, int64_t nodeId,
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_check_fsm_reachability sends this node's own KeeperFSM[] edges
+ * (as encoded by KeeperFSMToJSON()) to the monitor's
+ * pgautofailover.check_fsm_reachability(jsonb), and fills in result with
+ * every monitor FSM transition (MonitorFSM[], group_state_machine.c) that
+ * has no matching keeper edge. An empty result (result->count == 0) means
+ * every transition the monitor can ever assign has somewhere for this
+ * keeper to go. Called from "pg_autoctl inspect fsm check"
+ * (cli_do_fsm.c).
+ */
+bool
+monitor_check_fsm_reachability(Monitor *monitor,
+							   const char *keeperEdgesJSON,
+							   FsmReachabilityResult *result)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pos, current_state, assigned_state, comment "
+		"  FROM pgautofailover.check_fsm_reachability($1::jsonb)";
+
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	FsmReachabilityParseContext context = { { 0 }, result, false };
+
+	paramValues[0] = keeperEdgesJSON;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues,
+								   &context, parseFsmReachabilityResult))
+	{
+		log_error("Failed to check FSM reachability against the monitor");
+
+		return false;
+	}
+
+	return context.parsedOK;
+}
+
+
+/*
+ * parseFsmReachabilityResult parses the result of
+ * pgautofailover.check_fsm_reachability(jsonb) into the given
+ * FsmReachabilityResult.
+ */
+static void
+parseFsmReachabilityResult(void *ctx, PGresult *result)
+{
+	FsmReachabilityParseContext *context = (FsmReachabilityParseContext *) ctx;
+	FsmReachabilityResult *fsmResult = context->result;
+
+	int nTuples = PQntuples(result);
+
+	if (nTuples > FSM_REACHABILITY_MISMATCH_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only up "
+				  "to %d FSM reachability mismatches at the moment",
+				  nTuples, FSM_REACHABILITY_MISMATCH_MAX_COUNT);
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQnfields(result) != 4)
+	{
+		log_error("Query returned %d columns, expected 4", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	fsmResult->count = nTuples;
+
+	for (int i = 0; i < nTuples; i++)
+	{
+		FsmReachabilityMismatch *mismatch = &(fsmResult->mismatches[i]);
+
+		if (!stringToInt(PQgetvalue(result, i, 0), &mismatch->pos))
+		{
+			log_error("Failed to parse FSM reachability pos \"%s\"",
+					  PQgetvalue(result, i, 0));
+			context->parsedOK = false;
+			return;
+		}
+
+		strlcpy(mismatch->currentState, PQgetvalue(result, i, 1),
+				sizeof(mismatch->currentState));
+		strlcpy(mismatch->assignedState, PQgetvalue(result, i, 2),
+				sizeof(mismatch->assignedState));
+		strlcpy(mismatch->comment, PQgetvalue(result, i, 3),
+				sizeof(mismatch->comment));
+	}
+
+	context->parsedOK = true;
 }
 
 

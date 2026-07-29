@@ -32,6 +32,7 @@
 
 test: create_extension
 test: fsm
+test: check_fsm_reachability
 test: monitor
 test: workers
 test: node_active_protocol

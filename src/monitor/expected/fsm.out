@@ -901,7 +901,7 @@ group_conditions             | replicationQuorumCountIsZero=true, secondaryNodes
 active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | t
-comment                      | all nodes async, zero secondaries -> wait_primary
+comment                      | all nodes async, zero secondaries -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 64 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 405
 section                      | primary_node
@@ -915,7 +915,7 @@ group_conditions             | replicationQuorumCountIsZero=true, secondaryNodes
 active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
-comment                      | all nodes async, >=1 secondary -> primary
+comment                      | all nodes async, >=1 secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 65 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 407
 section                      | primary_node
@@ -929,7 +929,7 @@ group_conditions             | numberSyncStandbysIsZero=true, secondaryQuorumNod
 active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | t
-comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys=0 -> wait_primary
+comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys=0 -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 66 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 409
 section                      | primary_node
@@ -943,7 +943,7 @@ group_conditions             | numberSyncStandbysIsZero=false, secondaryQuorumNo
 active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
-comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys>0 -> primary (block writes)
+comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys>0 -> primary (block writes) (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 67 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 411
 section                      | primary_node
@@ -957,7 +957,7 @@ group_conditions             | secondaryQuorumNodesCountIsZero=false
 active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
-comment                      | wait_primary, >=1 quorum secondary -> primary
+comment                      | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 68 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 413
 section                      | primary_node
@@ -971,7 +971,7 @@ group_conditions             | numberSyncStandbysIsZero=true, secondaryQuorumNod
 active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | t
-comment                      | apply_settings, both zero -> wait_primary
+comment                      | apply_settings, both zero -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 69 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 415
 section                      | primary_node
@@ -985,7 +985,7 @@ group_conditions             | numberSyncStandbysIsZero=false
 active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
-comment                      | apply_settings, number_sync_standbys != 0 -> primary (1 of 2 disjuncts)
+comment                      | apply_settings, number_sync_standbys != 0 -> primary (1 of 2 disjuncts) (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 70 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 417
 section                      | primary_node
@@ -999,7 +999,7 @@ group_conditions             | numberSyncStandbysIsZero=true, secondaryQuorumNod
 active_node_assigned_state   | primary
 other_node_assigned_state    | 
 has_extra_action             | t
-comment                      | apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2)
+comment                      | apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2) (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 71 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 419
 section                      | primary_node
