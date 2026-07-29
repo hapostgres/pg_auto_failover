@@ -34,7 +34,17 @@ BASE ?= ghcr.io/hapostgres/pg_auto_failover/pgaf-base:bookworm
 
 CONTAINER_NAME      = pg_auto_failover
 TEST_CONTAINER_NAME = pg_auto_failover_test
-DOCKER_RUN_OPTS     = --privileged --rm
+
+# --init runs Docker's built-in tini as PID 1 instead of the test's own
+# `make` invocation. Without it, `make` (which installs its own SIGHUP
+# handler to clean up partial targets on interrupt) is PID 1 itself, which
+# strips away the kernel's usual "PID 1 ignores signals with no explicit
+# handler" protection -- any stray SIGHUP reaching the container then kills
+# the whole test run outright ("make: *** [Makefile:67: test] Hangup"),
+# with no resilience at all. Seen recurring on pytest/single (PG19) across
+# unrelated PRs; tini reaping/forwarding signals properly as a real PID 1
+# is the standard fix for this class of Docker footgun.
+DOCKER_RUN_OPTS     = --init --privileged --rm
 
 # DOCKER BUILDS
 #
