@@ -53,11 +53,20 @@ int64 InsertEvent(AutoFailoverNode *node, char *description);
  * (rule_pos/rule_section columns), without threading an extra parameter
  * through AssignGoalState/SetNodeGoalState/NotifyStateChange and every one
  * of their many call sites outside the declarative dispatch table. 0 means
- * "no rule attributed" (an ordinary AssignGoalState call from outside the
- * table, e.g. an operator-triggered SQL function, or ProceedGroupStateFor
- * MSFailover's own hand-written internals): rule_pos/rule_section are left
- * NULL in that case, since 0 is not a valid .pos value (every real section
- * starts at 100 or above).
+ * "no rule attributed": rule_pos/rule_section are left NULL in that case,
+ * since 0 is not a valid .pos value (every real section starts at 100 or
+ * above). This is NOT the case for operator-triggered SQL functions or for
+ * ProceedGroupStateForMSFailover's own hand-written internals -- both DO
+ * get a real, non-NULL rule_pos: the former dispatch via
+ * ProceedGroupStateForApiTrigger, which itself calls DispatchMonitorFSMRule;
+ * the latter (BuildCandidateList, PromoteSelectedNode, etc.) are only ever
+ * invoked from inside an outer row's own extraAction, so this global is
+ * already non-zero (attributed to that OUTER row, not one of their own --
+ * misleading, since MS-failover's candidate-selection internals were never
+ * decomposed into declarative rows) by the time they call AssignGoalState
+ * directly. 0/NULL only really happens for call sites genuinely outside any
+ * DispatchMonitorFSMRule call at all -- e.g. perform_failover()'s own
+ * candidate-priority bookkeeping in node_active_protocol.c.
  */
 extern int CurrentMonitorFSMRulePos;
 extern int CurrentMonitorFSMRuleSection;

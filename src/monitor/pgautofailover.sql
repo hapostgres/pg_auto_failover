@@ -209,11 +209,27 @@ CREATE TABLE pgautofailover.event
     replicationquorum bool,
     description       text,
 
-    -- Which MonitorFSM[] row (if any) produced this event: NULL when the
-    -- goal-state assignment came from outside the declarative dispatch
-    -- table (an operator-triggered SQL function, or ProceedGroupStateFor
-    -- MSFailover's own hand-written internals -- see CurrentMonitorFSMRulePos
-    -- in notifications.h for how this gets attributed). rule_pos is the
+    -- Which MonitorFSM[] row this event is attributed to (see
+    -- CurrentMonitorFSMRulePos in notifications.h for the mechanism): set
+    -- for the whole duration of DispatchMonitorFSMRule's call to a row,
+    -- including everything that row's own extraAction runs -- which
+    -- covers BOTH operator-triggered SQL functions (dispatched via
+    -- ProceedGroupStateForApiTrigger, itself a DispatchMonitorFSMRule
+    -- call) and ProceedGroupStateForMSFailover's raw AssignGoalState
+    -- calls (only ever reached from inside an outer row's extraAction,
+    -- e.g. pos 305/363 -- see ActionRunMultiStandbyFailoverCascade/
+    -- ActionRunPlainMSFailoverCascade). Neither is NULL: both get
+    -- attributed to that OUTER triggering row, not a row of their own,
+    -- since MS-failover's candidate-selection internals were never
+    -- decomposed into declarative rows (see this array's own comment on
+    -- BuildCandidateList/PromoteSelectedNode) -- this can be misleading
+    -- (an event from PromoteSelectedNode's LSN-driven promotion decision
+    -- shows up attributed to pos 305/363's own, quite different,
+    -- comment). Truly NULL only when the assignment happened from a code
+    -- path that never runs inside any DispatchMonitorFSMRule call at all
+    -- (e.g. perform_failover()'s own candidate-priority bookkeeping in
+    -- node_active_protocol.c, or a handful of other NotifyStateChange
+    -- call sites outside group_state_machine.c entirely). rule_pos is the
     -- row's human-facing position (see dump_fsm()/pgautofailover.fsm),
     -- not an array index.
     rule_pos          int,
@@ -666,7 +682,8 @@ with last_events as
          nodeid, groupid, nodename, nodehost, nodeport,
          reportedstate, goalstate,
          reportedrepstate, reportedtli, reportedlsn,
-         candidatepriority, replicationquorum, description
+         candidatepriority, replicationquorum, description,
+         rule_pos, rule_section
     from pgautofailover.event
 order by eventid desc
    limit count
@@ -693,7 +710,8 @@ with last_events as
            nodeid, groupid, nodename, nodehost, nodeport,
            reportedstate, goalstate,
            reportedrepstate, reportedtli, reportedlsn,
-           candidatepriority, replicationquorum, description
+           candidatepriority, replicationquorum, description,
+           rule_pos, rule_section
       from pgautofailover.event
      where formationid = formation_id
   order by eventid desc
@@ -722,7 +740,8 @@ with last_events as
            nodeid, groupid, nodename, nodehost, nodeport,
            reportedstate, goalstate,
            reportedrepstate, reportedtli, reportedlsn,
-           candidatepriority, replicationquorum, description
+           candidatepriority, replicationquorum, description,
+           rule_pos, rule_section
       from pgautofailover.event
      where formationid = formation_id
        and groupid = group_id

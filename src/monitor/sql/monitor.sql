@@ -79,3 +79,20 @@ select *
 
 -- should fail as there's no primary at this point
 select pgautofailover.perform_failover();
+
+-- last_events() (all three overloads) returns SETOF pgautofailover.event, so
+-- its own SELECT list must match that composite type's full column set --
+-- including rule_pos/rule_section -- or the call errors at parse time
+-- ("Final statement returns too few columns") before ever running. Not
+-- exercised anywhere else in this test suite, so a regression here (e.g. a
+-- future column added to pgautofailover.event without updating these three
+-- function bodies) would otherwise go unnoticed until a live
+-- "pg_autoctl show events"/"pg_autoctl watch" call broke in production.
+select count(*) >= 0 as last_events_count_ok
+  from pgautofailover.last_events(10);
+
+select count(*) >= 0 as last_events_by_formation_count_ok
+  from pgautofailover.last_events(formation_id => 'default', count => 10);
+
+select count(*) >= 0 as last_events_by_formation_and_group_count_ok
+  from pgautofailover.last_events('default', 0, 10);
