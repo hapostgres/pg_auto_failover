@@ -32,15 +32,15 @@ create_formation | (lafm_test,pgsql,postgres,t,1)
 
 SELECT pgautofailover.register_node('lafm_test', 'lafm_p', 5432, 'postgres', 'lafm_p', 1);
 -[ RECORD 1 ]-+---------------------------
-register_node | (21,0,single,100,t,lafm_p)
+register_node | (24,0,single,100,t,lafm_p)
 
 SELECT pgautofailover.register_node('lafm_test', 'lafm_s1', 5432, 'postgres', 'lafm_s1', 1);
 -[ RECORD 1 ]-+----------------------------------
-register_node | (22,0,wait_standby,100,t,lafm_s1)
+register_node | (25,0,wait_standby,100,t,lafm_s1)
 
 SELECT pgautofailover.register_node('lafm_test', 'lafm_s2', 5432, 'postgres', 'lafm_s2', 1);
 -[ RECORD 1 ]-+----------------------------------
-register_node | (23,0,wait_standby,100,t,lafm_s2)
+register_node | (26,0,wait_standby,100,t,lafm_s2)
 
 SELECT nodeid AS np FROM pgautofailover.node
  WHERE formationid = 'lafm_test' AND nodename = 'lafm_p' \gset
@@ -267,7 +267,7 @@ SELECT assigned_group_state FROM pgautofailover.node_active('lafm_test', :np, 0,
 assigned_group_state | primary
 
 SELECT pgautofailover.start_maintenance(:ns1);
-WARNING:  Starting maintenance on node 22 "lafm_s1" (lafm_s1:5432) will block writes on the primary node 21 "lafm_p" (lafm_p:5432)
+WARNING:  Starting maintenance on node 25 "lafm_s1" (lafm_s1:5432) will block writes on the primary node 24 "lafm_p" (lafm_p:5432)
 DETAIL:  we now have 0 healthy node(s) left in the "secondary" state and formation "lafm_test" number-sync-standbys requires 1 sync standbys
 -[ RECORD 1 ]-----+--
 start_maintenance | t
@@ -338,13 +338,13 @@ reportedstate | single
 goalstate     | single
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 21 "lafm_p" (lafm_p:5432): "single"
+description   | New state is reported by node 24 "lafm_p" (lafm_p:5432): "single"
 -[ RECORD 3 ]-+----------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | wait_standby
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 22 "lafm_s1" (lafm_s1:5432): "wait_standby"
+description   | New state is reported by node 25 "lafm_s1" (lafm_s1:5432): "wait_standby"
 -[ RECORD 4 ]-+----------------------------------------------------------------------------------------------------------------------
 reportedstate | single
 goalstate     | wait_primary
@@ -356,7 +356,7 @@ reportedstate | wait_primary
 goalstate     | wait_primary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 21 "lafm_p" (lafm_p:5432): "wait_primary"
+description   | New state is reported by node 24 "lafm_p" (lafm_p:5432): "wait_primary"
 -[ RECORD 6 ]-+----------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | catchingup
@@ -368,7 +368,7 @@ reportedstate | catchingup
 goalstate     | catchingup
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 22 "lafm_s1" (lafm_s1:5432): "catchingup"
+description   | New state is reported by node 25 "lafm_s1" (lafm_s1:5432): "catchingup"
 -[ RECORD 8 ]-+----------------------------------------------------------------------------------------------------------------------
 reportedstate | catchingup
 goalstate     | secondary
@@ -380,7 +380,7 @@ reportedstate | secondary
 goalstate     | secondary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 22 "lafm_s1" (lafm_s1:5432): "secondary"
+description   | New state is reported by node 25 "lafm_s1" (lafm_s1:5432): "secondary"
 -[ RECORD 10 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_primary
 goalstate     | primary
@@ -392,13 +392,13 @@ reportedstate | primary
 goalstate     | primary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 21 "lafm_p" (lafm_p:5432): "primary"
+description   | New state is reported by node 24 "lafm_p" (lafm_p:5432): "primary"
 -[ RECORD 12 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | wait_standby
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 23 "lafm_s2" (lafm_s2:5432): "wait_standby"
+description   | New state is reported by node 26 "lafm_s2" (lafm_s2:5432): "wait_standby"
 -[ RECORD 13 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | catchingup
@@ -416,19 +416,19 @@ reportedstate | catchingup
 goalstate     | catchingup
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 23 "lafm_s2" (lafm_s2:5432): "catchingup"
+description   | New state is reported by node 26 "lafm_s2" (lafm_s2:5432): "catchingup"
 -[ RECORD 16 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | secondary
 goalstate     | catchingup
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 23 "lafm_s2" (lafm_s2:5432): "secondary"
+description   | New state is reported by node 26 "lafm_s2" (lafm_s2:5432): "secondary"
 -[ RECORD 17 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | apply_settings
 goalstate     | apply_settings
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 21 "lafm_p" (lafm_p:5432): "apply_settings"
+description   | New state is reported by node 24 "lafm_p" (lafm_p:5432): "apply_settings"
 -[ RECORD 18 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | apply_settings
 goalstate     | primary
@@ -440,7 +440,7 @@ reportedstate | primary
 goalstate     | primary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 21 "lafm_p" (lafm_p:5432): "primary"
+description   | New state is reported by node 24 "lafm_p" (lafm_p:5432): "primary"
 -[ RECORD 20 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | primary
 goalstate     | apply_settings
@@ -476,7 +476,7 @@ reportedstate | apply_settings
 goalstate     | apply_settings
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 21 "lafm_p" (lafm_p:5432): "apply_settings"
+description   | New state is reported by node 24 "lafm_p" (lafm_p:5432): "apply_settings"
 -[ RECORD 26 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | apply_settings
 goalstate     | primary
@@ -488,7 +488,7 @@ reportedstate | primary
 goalstate     | primary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 21 "lafm_p" (lafm_p:5432): "primary"
+description   | New state is reported by node 24 "lafm_p" (lafm_p:5432): "primary"
 -[ RECORD 28 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | secondary
 goalstate     | maintenance
@@ -500,7 +500,7 @@ reportedstate | maintenance
 goalstate     | maintenance
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 22 "lafm_s1" (lafm_s1:5432): "maintenance"
+description   | New state is reported by node 25 "lafm_s1" (lafm_s1:5432): "maintenance"
 -[ RECORD 30 ]+----------------------------------------------------------------------------------------------------------------------
 reportedstate | maintenance
 goalstate     | catchingup

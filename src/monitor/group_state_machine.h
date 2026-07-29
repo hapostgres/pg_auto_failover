@@ -20,12 +20,27 @@
 #include "node_metadata.h"
 
 /*
- * MonitorFSMSection identifies which of the four real control-flow regions
- * of the monitor's declarative dispatch table (MonitorFSM[] in
- * group_state_machine.c) a row belongs to -- see that array's own comment
- * for what each region corresponds to in the original if-chain/call sites.
- * Declared here (not just in the .c file) so it can be exposed to SQL as
- * pgautofailover.fsm_section, the same way ReplicationState is exposed as
+ * MonitorFSMSection identifies which node of the section hierarchy a row's
+ * .sectionPath (see MonitorFSMTransition/MonitorFSMSectionPath in
+ * group_state_machine.c) belongs to at some depth -- a row's own path is a
+ * small array of these, e.g. { MONITOR_FSM_SECTION_REPORTING_NODE,
+ * MONITOR_FSM_SECTION_MS_FAILOVER, MONITOR_FSM_SECTION_MS_FAILOVER_RETRY_RESET },
+ * matched via prefix/ancestor containment (SectionPathIsUnderPrefix) instead
+ * of the hand-maintained array-index-range constants this replaces -- see
+ * that mechanism's own comment for why (the design doc's own "Open items"
+ * flagged the old index constants as needing "to stay in sync with the
+ * table by hand as rows are added, removed, or reordered").
+ *
+ * Only the first four values below (API_TRIGGERED/EARLY_CHECKS/
+ * REPORTING_NODE/PRIMARY_NODE, unchanged in name and meaning from before this
+ * mechanism existed) are ever legal as a row's .sectionPath[0] -- every row's
+ * path always starts with exactly one of these four, enforced by
+ * AssertMonitorFSMWellFormed(). Declared here (not just in the .c file) so
+ * this top-level tag can be exposed to SQL as pgautofailover.fsm_section
+ * (mapped by NAME, not ordinal -- see MonitorFSMSectionGetEnum/
+ * EnumGetMonitorFSMSection -- so inserting MONITOR_FSM_SECTION_NONE ahead of
+ * them, or appending new fine-grained values after PRIMARY_NODE, changes no
+ * SQL-visible behavior at all), the same way ReplicationState is exposed as
  * pgautofailover.replication_state (see replication_state.h/.c for that
  * pattern, mirrored below).
  *
@@ -39,13 +54,33 @@
  * contiguous pos range, matching one real entry point" property the other
  * three sections already have, rather than wedging operator rows into gaps
  * within the heartbeat sections.
+ *
+ * Values from MONITOR_FSM_SECTION_FROM_CONTEXT onward are fine-grained leaf
+ * labels, only ever used at path depth 1+ (reporting_node.from_context,
+ * reporting_node.ms_failover, and its own sub-leaves) -- purely for
+ * dump_fsm()'s own section_path column readability today; no caller needs
+ * to bound a search this narrowly (see each leaf's own row comment in
+ * MonitorFSM[]).
  */
 typedef enum MonitorFSMSection
 {
-	MONITOR_FSM_SECTION_API_TRIGGERED = 0,
+	MONITOR_FSM_SECTION_NONE = 0,      /* terminator / unused trailing path slot */
+	MONITOR_FSM_SECTION_API_TRIGGERED,
 	MONITOR_FSM_SECTION_EARLY_CHECKS,
 	MONITOR_FSM_SECTION_REPORTING_NODE,
 	MONITOR_FSM_SECTION_PRIMARY_NODE,
+
+	MONITOR_FSM_SECTION_FROM_CONTEXT,  /* reporting_node.from_context */
+	MONITOR_FSM_SECTION_MS_FAILOVER,   /* reporting_node.ms_failover */
+	MONITOR_FSM_SECTION_MS_FAILOVER_RETRY_RESET,
+	MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_JOIN,
+	MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_FANOUT,
+	MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
+	MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_MISSING_NODES_GATE,
+	MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_CANDIDATE_COUNT_GATE,
+	MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_QUORUM_CANDIDATE_GATE,
+	MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_NO_CANDIDATE_YET,
+	MONITOR_FSM_SECTION_MS_FAILOVER_DRAINING_OR_MAINTENANCE,
 } MonitorFSMSection;
 
 /* public function declarations, mirroring replication_state.h's pattern */

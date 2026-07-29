@@ -22,7 +22,7 @@ SELECT *
   FROM pgautofailover.register_node('cifra_test', 'cifra_p', 5432,
                                     'postgres', 'cifra_p', 1);
 -[ RECORD 1 ]---------------+--------
-assigned_node_id            | 33
+assigned_node_id            | 36
 assigned_group_id           | 0
 assigned_group_state        | single
 assigned_candidate_priority | 100
@@ -35,7 +35,7 @@ SELECT *
   FROM pgautofailover.register_node('cifra_test', 'cifra_s', 5432,
                                     'postgres', 'cifra_s', 1);
 -[ RECORD 1 ]---------------+-------------
-assigned_node_id            | 34
+assigned_node_id            | 37
 assigned_group_id           | 0
 assigned_group_state        | wait_standby
 assigned_candidate_priority | 100
@@ -171,7 +171,7 @@ SELECT e.eventid, e.nodename, e.reportedstate, e.goalstate,
  WHERE e.formationid = 'cifra_test'
  ORDER BY e.eventid;
 -[ RECORD 1 ]-+-------------------------------------------------------------------------------------------------------------
-eventid       | 186
+eventid       | 204
 nodename      | cifra_p
 reportedstate | init
 goalstate     | single
@@ -179,7 +179,7 @@ rule_pos      | 209
 rule_section  | early_checks
 rule_comment  | alone in group, candidate-eligible -> single
 -[ RECORD 2 ]-+-------------------------------------------------------------------------------------------------------------
-eventid       | 187
+eventid       | 205
 nodename      | cifra_p
 reportedstate | single
 goalstate     | single
@@ -187,7 +187,7 @@ rule_pos      |
 rule_section  | 
 rule_comment  | 
 -[ RECORD 3 ]-+-------------------------------------------------------------------------------------------------------------
-eventid       | 188
+eventid       | 206
 nodename      | cifra_s
 reportedstate | wait_standby
 goalstate     | wait_standby
@@ -195,7 +195,7 @@ rule_pos      |
 rule_section  | 
 rule_comment  | 
 -[ RECORD 4 ]-+-------------------------------------------------------------------------------------------------------------
-eventid       | 189
+eventid       | 207
 nodename      | cifra_p
 reportedstate | single
 goalstate     | wait_primary
@@ -203,7 +203,7 @@ rule_pos      | 401
 rule_section  | primary_node
 rule_comment  | primary alone, another node reached wait_standby -> wait_primary
 -[ RECORD 5 ]-+-------------------------------------------------------------------------------------------------------------
-eventid       | 190
+eventid       | 208
 nodename      | cifra_p
 reportedstate | wait_primary
 goalstate     | wait_primary
@@ -211,7 +211,7 @@ rule_pos      |
 rule_section  | 
 rule_comment  | 
 -[ RECORD 6 ]-+-------------------------------------------------------------------------------------------------------------
-eventid       | 191
+eventid       | 209
 nodename      | cifra_s
 reportedstate | wait_standby
 goalstate     | catchingup
@@ -219,7 +219,7 @@ rule_pos      | 315
 rule_section  | reporting_node
 rule_comment  | wait_standby, primary converged wait/join_primary -> catchingup
 -[ RECORD 7 ]-+-------------------------------------------------------------------------------------------------------------
-eventid       | 192
+eventid       | 210
 nodename      | cifra_s
 reportedstate | catchingup
 goalstate     | catchingup
@@ -227,7 +227,7 @@ rule_pos      |
 rule_section  | 
 rule_comment  | 
 -[ RECORD 8 ]-+-------------------------------------------------------------------------------------------------------------
-eventid       | 193
+eventid       | 211
 nodename      | cifra_s
 reportedstate | catchingup
 goalstate     | secondary
@@ -235,7 +235,7 @@ rule_pos      | 321
 rule_section  | reporting_node
 rule_comment  | caught up, same TLI as primary, within sync threshold -> secondary
 -[ RECORD 9 ]-+-------------------------------------------------------------------------------------------------------------
-eventid       | 194
+eventid       | 212
 nodename      | cifra_s
 reportedstate | secondary
 goalstate     | secondary
@@ -243,7 +243,7 @@ rule_pos      |
 rule_section  | 
 rule_comment  | 
 -[ RECORD 10 ]+-------------------------------------------------------------------------------------------------------------
-eventid       | 195
+eventid       | 213
 nodename      | cifra_p
 reportedstate | wait_primary
 goalstate     | primary
@@ -251,7 +251,7 @@ rule_pos      | 411
 rule_section  | primary_node
 rule_comment  | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
 -[ RECORD 11 ]+-------------------------------------------------------------------------------------------------------------
-eventid       | 196
+eventid       | 214
 nodename      | cifra_p
 reportedstate | primary
 goalstate     | primary
@@ -259,7 +259,7 @@ rule_pos      |
 rule_section  | 
 rule_comment  | 
 -[ RECORD 12 ]+-------------------------------------------------------------------------------------------------------------
-eventid       | 197
+eventid       | 215
 nodename      | cifra_s
 reportedstate | secondary
 goalstate     | prepare_promotion
@@ -267,7 +267,7 @@ rule_pos      | 105
 rule_section  | api_triggered
 rule_comment  | manual failover, 2-node group, primary+standby both converged -> standby prepare_promotion, primary draining
 -[ RECORD 13 ]+-------------------------------------------------------------------------------------------------------------
-eventid       | 198
+eventid       | 216
 nodename      | cifra_p
 reportedstate | primary
 goalstate     | draining

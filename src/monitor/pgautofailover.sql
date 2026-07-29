@@ -292,15 +292,35 @@ RETURNS TABLE
     group_conditions             text,
     active_node_assigned_state   pgautofailover.replication_state,
     other_node_assigned_state    pgautofailover.replication_state,
-    has_extra_action             bool
+    has_extra_action             bool,
+    section_path                 text
  )
 LANGUAGE C SECURITY DEFINER
 AS 'MODULE_PATHNAME', $$dump_fsm$$;
 
 grant execute on function pgautofailover.dump_fsm() to autoctl_node;
 
+-- section_path is cast to ltree here (a plain SQL cast, going through
+-- Postgres's own ordinary type-casting machinery) rather than in the C
+-- function itself: dump_fsm() only ever builds the dotted text, this view
+-- is the sole place pgautofailover takes a dependency on ltree.
 CREATE VIEW pgautofailover.fsm AS
-    SELECT * FROM pgautofailover.dump_fsm() ORDER BY pos;
+    SELECT pos,
+           section,
+           comment,
+           active_node_current_state,
+           other_node_current_state,
+           candidate_node_current_state,
+           active_node_conditions,
+           other_node_conditions,
+           candidate_node_conditions,
+           group_conditions,
+           active_node_assigned_state,
+           other_node_assigned_state,
+           has_extra_action,
+           section_path::ltree AS section_path
+      FROM pgautofailover.dump_fsm()
+     ORDER BY pos;
 
 -- Flat, fully-resolved (pos, current_state, assigned_state) edges derived
 -- from MonitorFSM[] -- see dump_fsm_edges()'s own C-side comment. Never

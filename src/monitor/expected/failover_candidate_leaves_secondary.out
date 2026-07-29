@@ -52,7 +52,7 @@ SELECT *
   FROM pgautofailover.register_node('fclma_test', 'fclma_p', 5432,
                                     'postgres', 'fclma_p', 1);
 -[ RECORD 1 ]---------------+--------
-assigned_node_id            | 31
+assigned_node_id            | 34
 assigned_group_id           | 0
 assigned_group_state        | single
 assigned_candidate_priority | 100
@@ -65,7 +65,7 @@ SELECT *
   FROM pgautofailover.register_node('fclma_test', 'fclma_s', 5432,
                                     'postgres', 'fclma_s', 1);
 -[ RECORD 1 ]---------------+-------------
-assigned_node_id            | 32
+assigned_node_id            | 35
 assigned_group_id           | 0
 assigned_group_state        | wait_standby
 assigned_candidate_priority | 100
@@ -204,13 +204,13 @@ reportedstate | single
 goalstate     | single
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 31 "fclma_p" (fclma_p:5432): "single"
+description   | New state is reported by node 34 "fclma_p" (fclma_p:5432): "single"
 -[ RECORD 3 ]-+--------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | wait_standby
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 32 "fclma_s" (fclma_s:5432): "wait_standby"
+description   | New state is reported by node 35 "fclma_s" (fclma_s:5432): "wait_standby"
 -[ RECORD 4 ]-+--------------------------------------------------------------------------------------------
 reportedstate | single
 goalstate     | wait_primary
@@ -222,7 +222,7 @@ reportedstate | wait_primary
 goalstate     | wait_primary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 31 "fclma_p" (fclma_p:5432): "wait_primary"
+description   | New state is reported by node 34 "fclma_p" (fclma_p:5432): "wait_primary"
 -[ RECORD 6 ]-+--------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | catchingup
@@ -234,7 +234,7 @@ reportedstate | catchingup
 goalstate     | catchingup
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 32 "fclma_s" (fclma_s:5432): "catchingup"
+description   | New state is reported by node 35 "fclma_s" (fclma_s:5432): "catchingup"
 -[ RECORD 8 ]-+--------------------------------------------------------------------------------------------
 reportedstate | catchingup
 goalstate     | secondary
@@ -246,7 +246,7 @@ reportedstate | secondary
 goalstate     | secondary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 32 "fclma_s" (fclma_s:5432): "secondary"
+description   | New state is reported by node 35 "fclma_s" (fclma_s:5432): "secondary"
 -[ RECORD 10 ]+--------------------------------------------------------------------------------------------
 reportedstate | wait_primary
 goalstate     | primary
@@ -258,5 +258,5 @@ reportedstate | primary
 goalstate     | primary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 31 "fclma_p" (fclma_p:5432): "primary"
+description   | New state is reported by node 34 "fclma_p" (fclma_p:5432): "primary"
 

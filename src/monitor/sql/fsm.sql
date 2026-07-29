@@ -14,7 +14,7 @@
 
 \x on
 
-SELECT pos, section,
+SELECT pos, section, section_path,
        active_node_current_state, other_node_current_state, candidate_node_current_state,
        active_node_conditions, other_node_conditions, candidate_node_conditions,
        group_conditions,
