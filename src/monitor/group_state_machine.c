@@ -264,13 +264,18 @@ MatchStateSet(ReplicationState actual, ReplicationStateSet declared)
 }
 
 
-/* Same reasoning as STATES() above: no compound-literal cast, since every
- * use is nested inside another static aggregate's designated initializer
- * (e.g. ".statePattern = FSM_STATE(x)" inside a MonitorFSMTransition row). */
+/*
+ * Same reasoning as STATES() above: no compound-literal cast, since every use
+ * is nested inside another static aggregate's designated initializer (e.g.
+ * ".statePattern = FSM_STATE(x)" inside a MonitorFSMTransition row).
+ */
 #define FSM_STATE(x) \
 	{ .kind = NODE_STATE_STABLE, .reportedStates = STATES(x) }
 
-/* group_state_machine.c:504-523/1059-1106 -- three IsCurrentState(primaryNode, X) ORed */
+/*
+ * group_state_machine.c:504-523/1059-1106 -- three IsCurrentState(primaryNode,
+ * X) ORed
+ */
 static const NodeStatePattern FSM_PRIMARY_OR_WAIT_OR_JOIN = {
 	.kind = NODE_STATE_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY,
@@ -278,17 +283,22 @@ static const NodeStatePattern FSM_PRIMARY_OR_WAIT_OR_JOIN = {
 							 REPLICATION_STATE_PRIMARY),
 };
 
-/* WAIT_PRIMARY/JOIN_PRIMARY only, not PRIMARY -- a distinct, narrower set from the one above */
+/*
+ * WAIT_PRIMARY/JOIN_PRIMARY only, not PRIMARY -- a distinct, narrower set from
+ * the one above
+ */
 static const NodeStatePattern FSM_WAIT_OR_JOIN_PRIMARY = {
 	.kind = NODE_STATE_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY,
 							 REPLICATION_STATE_JOIN_PRIMARY),
 };
 
-/* the "primary role" states MONITOR_FSM_SECTION_PRIMARY_NODE's own rows match
+/*
+ * the "primary role" states MONITOR_FSM_SECTION_PRIMARY_NODE's own rows match
  * against (the declarative replacement for the old, now-removed
  * ProceedGroupStateForPrimaryNode()) -- a different three-element set from
- * FSM_PRIMARY_OR_WAIT_OR_JOIN above (no JOIN_PRIMARY, has APPLY_SETTINGS) */
+ * FSM_PRIMARY_OR_WAIT_OR_JOIN above (no JOIN_PRIMARY, has APPLY_SETTINGS)
+ */
 static const NodeStatePattern FSM_PRIMARY_ROLE_STATES = {
 	.kind = NODE_STATE_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_PRIMARY,
@@ -296,21 +306,30 @@ static const NodeStatePattern FSM_PRIMARY_ROLE_STATES = {
 							 REPLICATION_STATE_APPLY_SETTINGS),
 };
 
-/* same "primary role" scope, minus WAIT_PRIMARY -- a narrower enumerated STABLE set */
+/*
+ * same "primary role" scope, minus WAIT_PRIMARY -- a narrower enumerated STABLE
+ * set
+ */
 static const NodeStatePattern FSM_PRIMARY_OR_APPLY_SETTINGS_ONLY = {
 	.kind = NODE_STATE_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_PRIMARY,
 							 REPLICATION_STATE_APPLY_SETTINGS),
 };
 
-/* reported WAIT_PRIMARY, goal in {WAIT_PRIMARY, PRIMARY} -- join_secondary's cascade row */
+/*
+ * reported WAIT_PRIMARY, goal in {WAIT_PRIMARY, PRIMARY} -- join_secondary's
+ * cascade row
+ */
 static const NodeStatePattern FSM_WAIT_PRIMARY_TRANSITIONING_TO_PRIMARY = {
 	.kind = NODE_STATE_TRANSITIONING,
 	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY),
 	.assignedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY, REPLICATION_STATE_PRIMARY),
 };
 
-/* reported in {WAIT_PRIMARY,JOIN_PRIMARY}, goal PRIMARY -- demoted->catchingup, first disjunct */
+/*
+ * reported in {WAIT_PRIMARY,JOIN_PRIMARY}, goal PRIMARY -- demoted->catchingup,
+ * first disjunct
+ */
 static const NodeStatePattern FSM_WAIT_OR_JOIN_PRIMARY_TRANSITIONING_TO_PRIMARY = {
 	.kind = NODE_STATE_TRANSITIONING,
 	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY,
@@ -318,13 +337,19 @@ static const NodeStatePattern FSM_WAIT_OR_JOIN_PRIMARY_TRANSITIONING_TO_PRIMARY 
 	.assignedStates = STATES(REPLICATION_STATE_PRIMARY),
 };
 
-/* goalState != WAIT_PRIMARY, reportedState irrelevant -- wait_maintenance's second row */
+/*
+ * goalState != WAIT_PRIMARY, reportedState irrelevant -- wait_maintenance's
+ * second row
+ */
 static const NodeStatePattern FSM_NOT_ASSIGNED_WAIT_PRIMARY = {
 	.kind = NODE_STATE_NOT_ASSIGNED,
 	.assignedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY),
 };
 
-/* !IsCurrentState(node, WAIT_PRIMARY): not converged to wait_primary, for any reason */
+/*
+ * !IsCurrentState(node, WAIT_PRIMARY): not converged to wait_primary, for any
+ * reason
+ */
 static const NodeStatePattern FSM_NOT_STABLE_WAIT_PRIMARY = {
 	.kind = NODE_STATE_NOT_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_WAIT_PRIMARY),
@@ -342,17 +367,23 @@ static const NodeStatePattern FSM_DROPPED_GOAL = {
 	.assignedStates = STATES(REPLICATION_STATE_DROPPED),
 };
 
-/* reportedState == DEMOTE_TIMEOUT, goalState irrelevant. NOT FSM_STATE(DEMOTE_TIMEOUT), which
- * would also require goalState == DEMOTE_TIMEOUT -- the opposite of what this self-fence guard
- * needs: it must catch a node whose goalState is still whatever was assigned before the
- * self-fence fired (see the real comment on this guard, preserved below). */
+/*
+ * reportedState == DEMOTE_TIMEOUT, goalState irrelevant. NOT
+ * FSM_STATE(DEMOTE_TIMEOUT), which would also require goalState ==
+ * DEMOTE_TIMEOUT -- the opposite of what this self-fence guard needs: it must
+ * catch a node whose goalState is still whatever was assigned before the
+ * self-fence fired (see the real comment on this guard, preserved below).
+ */
 static const NodeStatePattern FSM_REPORTED_DEMOTE_TIMEOUT = {
 	.kind = NODE_STATE_REPORTED,
 	.reportedStates = STATES(REPLICATION_STATE_DEMOTE_TIMEOUT),
 };
 
-/* reportedState in {REPORT_LSN, FAST_FORWARD}, converged -- "continue an already started
- * failover" guard, the direct (non-cascading) entry into ProceedGroupStateForMSFailover */
+/*
+ * reportedState in {REPORT_LSN, FAST_FORWARD}, converged -- "continue an
+ * already started failover" guard, the direct (non-cascading) entry into
+ * ProceedGroupStateForMSFailover
+ */
 static const NodeStatePattern FSM_REPORT_LSN_OR_FAST_FORWARD = {
 	.kind = NODE_STATE_STABLE,
 	.reportedStates = STATES(REPLICATION_STATE_REPORT_LSN,
@@ -365,9 +396,12 @@ NodeStateMatchesPattern(const AutoFailoverNode *node, const NodeStatePattern *pa
 {
 	if (node == NULL)
 	{
-		/* No node this round (no primary). Only NODE_STATE_ANY can still match -- every other
-		 * kind needs a real reportedState/goalState to compare, which a nonexistent node simply
-		 * doesn't have. Existence itself is checked separately via NodeStatusPattern.exists. */
+		/*
+		 * No node this round (no primary). Only NODE_STATE_ANY can still match
+		 * -- every other kind needs a real reportedState/goalState to compare,
+		 * which a nonexistent node simply doesn't have. Existence itself is
+		 * checked separately via NodeStatusPattern.exists.
+		 */
 		return pattern->kind == NODE_STATE_ANY;
 	}
 
@@ -423,7 +457,8 @@ NodeStateMatchesPattern(const AutoFailoverNode *node, const NodeStatePattern *pa
 
 /*
  * NodeStatus: every per-node fact this table's conditions need, computed once
- * per role (activeNode, primaryNode) at the top of dispatch by BuildNodeStatus().
+ * per role (activeNode, primaryNode) at the top of dispatch by
+ * BuildNodeStatus().
  */
 typedef struct NodeStatus
 {
@@ -465,8 +500,10 @@ BuildNodeStatus(GroupStateContext *ctx, AutoFailoverNode *node, NodeStatus *stat
 
 	if (node == NULL)
 	{
-		/* NodeIsUnhealthy(NULL, ctx) returns true -- a nonexistent node being "unhealthy" is
-		 * exactly the semantics the original if-chain relies on. */
+		/*
+		 * NodeIsUnhealthy(NULL, ctx) returns true -- a nonexistent node being
+		 * "unhealthy" is exactly the semantics the original if-chain relies on.
+		 */
 		status->isUnhealthy = true;
 		return;
 	}
@@ -692,30 +729,37 @@ typedef struct NodeActiveContext
 	 * default) for every other dispatch pass.
 	 */
 
-	/* WalSourceNodesAreAllUnhealthy(ctx, ctx->groupNodeList, activeNode) --
-	 * activeNode-specific despite living at this level (not on NodeStatus):
-	 * it depends on the whole group's other REPORT_LSN peers, not on
-	 * activeNode's own state alone. */
+	/*
+	 * WalSourceNodesAreAllUnhealthy(ctx, ctx->groupNodeList, activeNode) --
+	 * activeNode-specific despite living at this level (not on NodeStatus): it
+	 * depends on the whole group's other REPORT_LSN peers, not on activeNode's
+	 * own state alone.
+	 */
 	bool activeNodeAllWalSourcesUnhealthy;
 
-	/* mirrors whether ProceedGroupStateForMSFailover's own
-	 * "nodeBeingPromoted != NULL" branch will actually drive that candidate
-	 * via ProceedWithMSFailover this round, rather than falling through to
+	/*
+	 * mirrors whether ProceedGroupStateForMSFailover's own "nodeBeingPromoted
+	 * != NULL" branch will actually drive that candidate via
+	 * ProceedWithMSFailover this round, rather than falling through to
 	 * BuildCandidateList/selection instead -- see this file's own
 	 * ActionRunMultiStandbyFailoverCascade comment and the design doc's
-	 * identically-named fact for the full derivation. */
+	 * identically-named fact for the full derivation.
+	 */
 	bool candidatePromotionInProgress;
 
-	/* WalDifferenceWithin(mostAdvancedNode, ctx->primaryNode,
-	 * PromoteXlogThreshold) for the current MS-failover candidate pool's
-	 * own most-advanced member -- SelectFailoverCandidateNode's own
-	 * data-loss guard. */
+	/*
+	 * WalDifferenceWithin(mostAdvancedNode, ctx->primaryNode,
+	 * PromoteXlogThreshold) for the current MS-failover candidate pool's own
+	 * most-advanced member -- SelectFailoverCandidateNode's own data-loss
+	 * guard.
+	 */
 	bool mostAdvancedCandidateWithinPromoteThreshold;
 
-	/* GuardDataLoss (metadata.c), the pgautofailover.guard_data_loss GUC --
-	 * a single global process-wide bool, grouped here (not read directly
-	 * inside an extraAction) so any row gated on it says so in its own
-	 * conditions. */
+	/*
+	 * GuardDataLoss (metadata.c), the pgautofailover.guard_data_loss GUC -- a
+	 * single global process-wide bool, grouped here (not read directly inside
+	 * an extraAction) so any row gated on it says so in its own conditions.
+	 */
 	bool guardDataLossEnabled;
 
 	/*
@@ -739,17 +783,19 @@ typedef struct NodeActiveContext
 	bool inMSFailoverCluster;
 
 	/*
-	 * Set unconditionally true by BuildMSFailoverCandidateGateNodeActiveContext,
-	 * false (the memset default) everywhere else -- narrows the 5 counting-gate
-	 * rows (reporting_node.ms_failover.promotion_outcome.*_gate) to only ever
-	 * match when dispatched from ProceedGroupStateForMSFailover's own gate
-	 * checks. Without this, TryFanOutReportLsnRow's own candidateNode=NULL call
-	 * (BuildMSFailoverNodeActiveContext) leaves candidateCount/missingNodesCount
-	 * at their memset-0 default and candidatePromotionInProgress false -- the
-	 * exact values the missing-nodes and candidate-count gate rows themselves
-	 * match on -- so its own SectionMSFailover-wide scan could spuriously hit
-	 * one of these gate rows instead of correctly falling through to its own
-	 * plain-AssignGoalState fallback whenever pos 367-373 somehow didn't match.
+	 * Set unconditionally true by
+	 * BuildMSFailoverCandidateGateNodeActiveContext, false (the memset default)
+	 * everywhere else -- narrows the 5 counting-gate rows
+	 * (reporting_node.ms_failover.promotion_outcome.*_gate) to only ever match
+	 * when dispatched from ProceedGroupStateForMSFailover's own gate checks.
+	 * Without this, TryFanOutReportLsnRow's own candidateNode=NULL call
+	 * (BuildMSFailoverNodeActiveContext) leaves
+	 * candidateCount/missingNodesCount at their memset-0 default and
+	 * candidatePromotionInProgress false -- the exact values the missing-nodes
+	 * and candidate-count gate rows themselves match on -- so its own
+	 * SectionMSFailover-wide scan could spuriously hit one of these gate rows
+	 * instead of correctly falling through to its own plain-AssignGoalState
+	 * fallback whenever pos 367-373 somehow didn't match.
 	 */
 	bool inMSFailoverCandidateGate;
 
@@ -780,8 +826,9 @@ typedef struct NodeActiveContext
 
 typedef struct NodeActiveContextPattern
 {
-	ApiTriggerPattern apiTrigger; /* omitted -> {0} -> API_TRIGGER_NODE_ACTIVE, matching every
-	                               *   row's existing meaning with no changes required elsewhere */
+	ApiTriggerPattern apiTrigger; /* omitted -> {0} -> API_TRIGGER_NODE_ACTIVE,
+	                               * matching every row's existing meaning with
+	                               * no changes required elsewhere */
 
 	BoolPattern groupHasExactlyOneNode;
 	BoolPattern groupHasExactlyTwoNodes;
@@ -829,8 +876,10 @@ typedef struct GoalStateAssignment
 	ReplicationState state;
 } GoalStateAssignment;
 
-/* No compound-literal cast -- see STATES()'s comment: every use nests inside
- * another static aggregate's designated initializer. */
+/*
+ * No compound-literal cast -- see STATES()'s comment: every use nests inside
+ * another static aggregate's designated initializer.
+ */
 #define GOAL(x) { .kind = GOAL_STATE_SET, .state = (x) }
 
 /*
@@ -895,12 +944,12 @@ typedef MonitorFSMSection MonitorFSMSectionPath[MONITOR_FSM_SECTION_PATH_MAX_DEP
 
 /*
  * SectionPathIsUnderPrefix returns whether path is prefix (an ancestor of it,
- * or itself) -- pure C, no parsing, no cache, no dependency on anything
- * outside this file: comparing two small fixed-size enum arrays element by
- * element. This is the replacement for FindMatchingMonitorFSMRuleIndexFrom's
- * old [startIndex, endIndex) bound (see FindMatchingMonitorFSMRuleIndexUnderPath
- * below): a search is now "every row whose sectionPath is under this
- * prefix", not "every row between these two array indices".
+ * or itself) -- pure C, no parsing, no cache, no dependency on anything outside
+ * this file: comparing two small fixed-size enum arrays element by element.
+ * This is the replacement for FindMatchingMonitorFSMRuleIndexFrom's old
+ * [startIndex, endIndex) bound (see FindMatchingMonitorFSMRuleIndexUnderPath
+ * below): a search is now "every row whose sectionPath is under this prefix",
+ * not "every row between these two array indices".
  */
 static bool
 SectionPathIsUnderPrefix(const MonitorFSMSectionPath path, const MonitorFSMSectionPath prefix)
@@ -1074,7 +1123,8 @@ typedef struct MonitorFSMTransition
  *     ActionRunMultiStandbyFailoverCascade's own comment for the
  *     distinction.
  *
- *   SectionMSFailover = { MONITOR_FSM_SECTION_REPORTING_NODE, MONITOR_FSM_SECTION_MS_FAILOVER }
+ *   SectionMSFailover = { MONITOR_FSM_SECTION_REPORTING_NODE,
+ *                         MONITOR_FSM_SECTION_MS_FAILOVER }
  *     Rows under the MS-failover / candidate-selection cluster's own
  *     declarative transitions (see that section's own comment below) --
  *     two (retry-reset, join_secondary) reached through
@@ -1168,9 +1218,11 @@ static const MonitorFSMSectionPath SectionMSFailoverQuorumCandidateGate =
 	  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
 	  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_QUORUM_CANDIDATE_GATE };
 
-/* Forward-declared for the same reason as MonitorFSM[] above: used by
+/*
+ * Forward-declared for the same reason as MonitorFSM[] above: used by
  * extraActions (ActionRunPrimaryNodeTransition) defined before its real
- * definition further down. */
+ * definition further down.
+ */
 static void BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx,
 												 AutoFailoverNode *primaryNode,
 												 NodeActiveContext *nac);
@@ -1241,14 +1293,14 @@ RuleMatches(const NodeActiveContext *nac, const MonitorFSMTransition *rule)
 /*
  * FindMatchingMonitorFSMRuleIndexUnderPath scans the whole table in array
  * order, considering only rows whose own sectionPath is under prefix (see
- * SectionPathIsUnderPrefix) and whose pos is greater than afterPos --
- * replacing the old [startIndex, endIndex) index-range bound with a
- * section-membership one. pos is strictly increasing == array order (see
- * AssertMonitorFSMWellFormed), so "pos > afterPos" is exactly "resume
- * scanning after this row" -- afterPos = 0 (no real row has pos <= 0) means
- * "from the very start of whichever rows are under prefix", the ordinary
- * case; a specific pos is only ever passed for the one genuine mid-section
- * resume point this table has (see MonitorFSM_MultiStandbyCascadeResumeAfterPos).
+ * SectionPathIsUnderPrefix) and whose pos is greater than afterPos -- replacing
+ * the old [startIndex, endIndex) index-range bound with a section-membership
+ * one. pos is strictly increasing == array order (see
+ * AssertMonitorFSMWellFormed), so "pos > afterPos" is exactly "resume scanning
+ * after this row" -- afterPos = 0 (no real row has pos <= 0) means "from the
+ * very start of whichever rows are under prefix", the ordinary case; a specific
+ * pos is only ever passed for the one genuine mid-section resume point this
+ * table has (see MonitorFSM_MultiStandbyCascadeResumeAfterPos).
  */
 static int
 FindMatchingMonitorFSMRuleIndexUnderPath(const MonitorFSMTransition table[], int tableSize,
@@ -1502,50 +1554,50 @@ ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *me
  * MAINTENANCE/nothing if/else-if decision, followed unconditionally by
  * ProceedGroupStateForMSFailover(). The DRAINING/MAINTENANCE decision itself
  * is dispatched through MonitorFSM[]'s own pos 381/383 rows first (see their
- * own comment) -- the hand-written if/else-if below only runs as a fallback
- * if neither row's own conditions somehow line up with the ones just
- * checked (should never happen). The real source never `return`s after
- * assigning DRAINING/MAINTENANCE to the primary -- it always falls through to
- * try ProceedGroupStateForMSFailover next, in the SAME outer if-block, and if
- * THAT declines (returns false), falls through further still to the rest of
- * the original source's own if-chain inside ProceedGroupStateFromContext (now
- * the report_lsn/prepare_promotion/stop_replication/... rows further down
+ * own comment) -- the hand-written if/else-if below only runs as a fallback if
+ * neither row's own conditions somehow line up with the ones just checked
+ * (should never happen). The real source never `return`s after assigning
+ * DRAINING/MAINTENANCE to the primary -- it always falls through to try
+ * ProceedGroupStateForMSFailover next, in the SAME outer if-block, and if THAT
+ * declines (returns false), falls through further still to the rest of the
+ * original source's own if-chain inside ProceedGroupStateFromContext (now the
+ * report_lsn/prepare_promotion/stop_replication/... rows further down
  * MonitorFSM[]'s REPORTING_NODE section, for this SAME activeNode).
  *
  * This has to be ONE row/action, not three separate declarative rows sharing
  * this action (as an earlier version of this file had it): once dispatch
- * continues past a declined row, it keeps scanning forward and a later,
- * broader row matching the same outer "nodesCount>2, primary unhealthy"
- * condition (the catch-all "neither DRAINING nor MAINTENANCE applies" case)
- * would match too and re-invoke ProceedGroupStateForMSFailover a *second*
- * time in the same node_active() call -- something the original single-pass
- * if/else-if structure never does. Confirmed by concurrent_second_primary_
- * death_report and concurrent_health_check_and_report, which got stuck (the
- * former) or produced a spurious second cascade invocation changing the
- * outcome (the latter) until this was folded into a single row/action pair.
+ * continues past a declined row, it keeps scanning forward and a later, broader
+ * row matching the same outer "nodesCount>2, primary unhealthy" condition (the
+ * catch-all "neither DRAINING nor MAINTENANCE applies" case) would match too
+ * and re-invoke ProceedGroupStateForMSFailover a *second* time in the same
+ * node_active() call -- something the original single-pass if/else-if structure
+ * never does. Confirmed by concurrent_second_primary_ death_report and
+ * concurrent_health_check_and_report, which got stuck (the former) or produced
+ * a spurious second cascade invocation changing the outcome (the latter) until
+ * this was folded into a single row/action pair.
  *
- * When ProceedGroupStateForMSFailover() declines, the fallthrough to "the
- * rest of ProceedGroupStateFromContext" is a single bounded nested search
- * from MonitorFSM_FromContextResumeStart, not a flag back to the top-level
- * driver: FindAndDispatchMonitorFSMRule's own internal loop already finds
- * whichever row is the correct next match, however many rows down that is,
- * in one call -- no repeated re-dispatch needed to walk past intervening
- * non-matches.
+ * When ProceedGroupStateForMSFailover() declines, the fallthrough to "the rest
+ * of ProceedGroupStateFromContext" is a single bounded nested search from
+ * MonitorFSM_FromContextResumeStart, not a flag back to the top-level driver:
+ * FindAndDispatchMonitorFSMRule's own internal loop already finds whichever row
+ * is the correct next match, however many rows down that is, in one call -- no
+ * repeated re-dispatch needed to walk past intervening non-matches.
  *
  * NOTE on naming: MonitorFSM_FromContextResumeStart is NOT
  * MonitorFSM_MSFailoverStart, despite both marking a conceptually similar
- * "resume point" -- they bound two different things. MonitorFSM_FromContextResumeStart
- * (used here) just marks "resume scanning ordinary REPORTING_NODE rows after
- * ProceedGroupStateForMSFailover declines" -- ProceedGroupStateForMSFailover()
- * itself, and the BuildCandidateList/SelectFailoverCandidateNode/
- * PromoteSelectedNode functions it calls, stay hand-written C, called
- * wholesale from here exactly as before this refactor (the candidate-selection
- * algorithm itself doesn't reduce to declarative conditions any more cleanly
- * than it did before -- see this file's own top-of-file design comment).
- * MonitorFSM_MSFailoverStart, by contrast, bounds the *separate* eleven-row
- * MS-failover cluster (pos 363-383, "MS-failover / candidate-selection
- * cluster" section below) that those same hand-written functions now reach
- * *into*, at their own tail end, via TryMSFailoverDeclarativeRow/
+ * "resume point" -- they bound two different things.
+ * MonitorFSM_FromContextResumeStart (used here) just marks "resume scanning
+ * ordinary REPORTING_NODE rows after ProceedGroupStateForMSFailover declines"
+ * -- ProceedGroupStateForMSFailover() itself, and the
+ * BuildCandidateList/SelectFailoverCandidateNode/ PromoteSelectedNode functions
+ * it calls, stay hand-written C, called wholesale from here exactly as before
+ * this refactor (the candidate-selection algorithm itself doesn't reduce to
+ * declarative conditions any more cleanly than it did before -- see this file's
+ * own top-of-file design comment). MonitorFSM_MSFailoverStart, by contrast,
+ * bounds the *separate* eleven-row MS-failover cluster (pos 363-383,
+ * "MS-failover / candidate-selection cluster" section below) that those same
+ * hand-written functions now reach *into*, at their own tail end, via
+ * TryMSFailoverDeclarativeRow/
  * TryFanOutReportLsnRow/DispatchMonitorFSMRuleByPos -- covering the plain
  * per-node goal assignments (retry-reset, join_secondary, BuildCandidateList's
  * own report_lsn fan-out, PromoteSelectedNode's prepare_promotion/fast_forward
@@ -1554,10 +1606,10 @@ ActionRemoveDroppedNode(GroupStateContext *ctx, NodeActiveContext *nac, char *me
  * last two rows in that same cluster (pos 381/383) are a fourth, unrelated
  * caller reusing the same bounded range: ActionRunMultiStandbyFailoverCascade's
  * own DRAINING/MAINTENANCE outcomes (see that function's own comment) -- not
- * part of the candidate-selection machinery at all, just sharing the same
- * "safe to scan with the ordinary nac" bound. The candidate-selection
- * algorithm's own logic (priority sort, LSN comparison, WAL-fetch
- * orchestration) is not part of either bounded range.
+ * part of the candidate-selection machinery at all, just sharing the same "safe
+ * to scan with the ordinary nac" bound. The candidate-selection algorithm's own
+ * logic (priority sort, LSN comparison, WAL-fetch orchestration) is not part of
+ * either bounded range.
  */
 static void
 ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *nac,
@@ -1669,8 +1721,11 @@ BuildFromContextNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *prim
 	BuildNodeStatus(ctx, primaryNode, &nac->primaryNode);
 	nac->otherNode = nac->primaryNode;  /* see NodeActiveContext's own comment on .otherNode */
 
-	/* isComparableToReferenceTli defaults to true (row :328 doesn't fire) -- a node that hasn't
-	 * reported a timeline yet (reportedTLI == 0) has nothing to check, same as the original. */
+	/*
+	 * isComparableToReferenceTli defaults to true (row :328 doesn't fire) -- a
+	 * node that hasn't reported a timeline yet (reportedTLI == 0) has nothing
+	 * to check, same as the original.
+	 */
 	nac->activeNode.isComparableToReferenceTli = true;
 	if (activeNode->reportedTLI > 0)
 	{
@@ -1732,12 +1787,12 @@ BuildFromContextNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *prim
 
 
 /*
- * BuildForPrimaryNodeNodeActiveContext computes every fact the
- * ForPrimaryNode section of MonitorFSM[] (from MonitorFSM_PrimaryNodeSectionStart
- * onward) needs, mirroring the counting loop that used to be inline at the
- * top of the old, now-folded-in ProceedGroupStateForPrimaryNode() (the same
- * loop OtherNodeIsDueForCatchingUp's condition drives the fan-out assignment
- * for, in ActionCatchupUnhealthySecondaries above).
+ * BuildForPrimaryNodeNodeActiveContext computes every fact the ForPrimaryNode
+ * section of MonitorFSM[] (from MonitorFSM_PrimaryNodeSectionStart onward)
+ * needs, mirroring the counting loop that used to be inline at the top of the
+ * old, now-folded-in ProceedGroupStateForPrimaryNode() (the same loop
+ * OtherNodeIsDueForCatchingUp's condition drives the fan-out assignment for,
+ * in ActionCatchupUnhealthySecondaries above).
  */
 static void
 BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx,
@@ -1748,9 +1803,11 @@ BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx,
 
 	BuildNodeStatus(ctx, primaryNode, &nac->activeNode);
 
-	/* .primaryNode role is unused by every row in MonitorFSM[]'s ForPrimaryNode section --
-	 * primaryNode IS activeNode here, so every condition is expressed against .activeNode
-	 * directly. */
+	/*
+	 * .primaryNode role is unused by every row in MonitorFSM[]'s
+	 * ForPrimaryNode section -- primaryNode IS activeNode here, so every
+	 * condition is expressed against .activeNode directly.
+	 */
 
 	List *otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 	int otherNodesCount = list_length(otherNodesGroupList);
@@ -2129,14 +2186,14 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	/*
 	 * start_maintenance(), secondary, last healthy sync standby --
-	 * node_active_protocol.c:1973-1986. lastHealthySyncStandbyGoingToMaintenance
-	 * is computed by BuildApiTriggerNodeActiveContext (see its own comment)
-	 * only for this apiFunction, mirroring the real source's own
-	 * number_sync_standbys==0 && secondaryNodesCount==1 &&
-	 * IsHealthySyncStandby(currentNode) check verbatim. Must come before the
-	 * ordinary-secondary row below: both match the same activeNode/
-	 * primaryNode state pattern, and only the more specific condition should
-	 * win.
+	 * node_active_protocol.c:1973-1986.
+	 * lastHealthySyncStandbyGoingToMaintenance is computed by
+	 * BuildApiTriggerNodeActiveContext (see its own comment) only for this
+	 * apiFunction, mirroring the real source's own number_sync_standbys==0 &&
+	 * secondaryNodesCount==1 && IsHealthySyncStandby(currentNode) check
+	 * verbatim. Must come before the ordinary-secondary row below: both match
+	 * the same activeNode/ primaryNode state pattern, and only the more
+	 * specific condition should win.
 	 */
 	{ .pos = 113,
 	  .sectionPath = {
@@ -2245,14 +2302,14 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	/*
 	 * set_node_candidate_priority(), node_active_protocol.c:2282-2296.
-	 * activeNode IS the primary here (mirrors BuildForPrimaryNodeNodeActiveContext's
-	 * own "primaryNode IS activeNode" convention): the row's only real target
-	 * is the primary's own apply_settings transition. The "primary is
-	 * already apply_settings" ereport(ERROR) and the "no primary yet, just
-	 * proceed" no-op both stay hand-written pre-dispatch in
-	 * set_node_candidate_priority() itself, exactly where they already are
-	 * -- this row is only reached once the wrapper has confirmed a primary
-	 * exists and isn't already apply_settings.
+	 * activeNode IS the primary here (mirrors
+	 * BuildForPrimaryNodeNodeActiveContext's own "primaryNode IS activeNode"
+	 * convention): the row's only real target is the primary's own
+	 * apply_settings transition. The "primary is already apply_settings"
+	 * ereport(ERROR) and the "no primary yet, just proceed" no-op both stay
+	 * hand-written pre-dispatch in set_node_candidate_priority() itself,
+	 * exactly where they already are -- this row is only reached once the
+	 * wrapper has confirmed a primary exists and isn't already apply_settings.
 	 */
 	{ .pos = 125,
 	  .sectionPath = {
@@ -2318,7 +2375,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .extraAction = ActionRemoveDroppedNode,
 	  .comment = "converged to dropped -> remove the node from the catalog" },
 
-	/* goal already dropped (mid-drop, row above hasn't converged yet) -> no-op */
+	/*
+	 * goal already dropped (mid-drop, row above hasn't converged yet) -> no-op
+	 */
 	{ .pos = 203,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_EARLY_CHECKS
@@ -2366,13 +2425,18 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
 	  .comment = "alone in group, candidatePriority zero -> report_lsn" },
 
-	/* --- [MonitorFSM_FromContextStart, MonitorFSM_PrimaryNodeSectionStart): the rest of
-	 * ProceedGroupStateFromContext()'s own sequential if-chain -- everything from the
-	 * timeline-fork check (group_state_machine.c:328, right after the
-	 * IsInPrimaryState(activeNode) early return) onward. Reached only when activeNode is
-	 * NOT currently primary-role. */
+	/*
+	 * --- [MonitorFSM_FromContextStart, MonitorFSM_PrimaryNodeSectionStart):
+	 * the rest of ProceedGroupStateFromContext()'s own sequential if-chain --
+	 * everything from the timeline-fork check (group_state_machine.c:328, right
+	 * after the IsInPrimaryState(activeNode) early return) onward. Reached only
+	 * when activeNode is NOT currently primary-role.
+	 */
 
-	/* converged secondary, reportedTLI not an ancestor of the group's reference timeline */
+	/*
+	 * converged secondary, reportedTLI not an ancestor of the group's reference
+	 * timeline
+	 */
 	{ .pos = 301,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2384,7 +2448,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment =
 		  "converged secondary, reportedTLI not an ancestor of reference -> catchingup" },
 
-	/* replication stall (#997): primary healthy, no standby past replication_stall_timeout */
+	/*
+	 * replication stall (#997): primary healthy, no standby past
+	 * replication_stall_timeout
+	 */
 	{ .pos = 303,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2397,9 +2464,11 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment =
 		  "primary healthy, no standby past replication_stall_timeout -> wait_primary" },
 
-	/* nodesCount>2, primary unhealthy -- draining/maintenance/nothing decided inside the
-	 * action, then the MS-failover cascade unconditionally; must be a single row, see
-	 * ActionRunMultiStandbyFailoverCascade's comment for why. */
+	/*
+	 * nodesCount>2, primary unhealthy -- draining/maintenance/nothing decided
+	 * inside the action, then the MS-failover cascade unconditionally; must be
+	 * a single row, see ActionRunMultiStandbyFailoverCascade's comment for why.
+	 */
 	{ .pos = 305,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2446,9 +2515,12 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PREPARE_PROMOTION),
 	  .comment = "fast_forward done -> prepare_promotion" },
 
-	/* continue an already-started MS failover -- a direct `return` in the real source, and no
-	 * later row in this table matches activeNode in REPORT_LSN/FAST_FORWARD, so it doesn't
-	 * matter here whether the extraAction's bool stops dispatch or lets it keep scanning. */
+	/*
+	 * continue an already-started MS failover -- a direct `return` in the real
+	 * source, and no later row in this table matches activeNode in
+	 * REPORT_LSN/FAST_FORWARD, so it doesn't matter here whether the
+	 * extraAction's bool stops dispatch or lets it keep scanning.
+	 */
 	{ .pos = 313,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2511,7 +2583,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
 	  .comment = "caught up, same TLI as primary, within sync threshold -> secondary" },
 
-	/* primary fails, already converged wait_primary (no draining edge, issue #1168) */
+	/*
+	 * primary fails, already converged wait_primary (no draining edge, issue
+	 * #1168)
+	 */
 	{ .pos = 323,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2607,7 +2682,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_WAIT_PRIMARY),
 	  .comment = "Citus worker prepare_promotion, primary removed -> wait_primary" },
 
-	/* prepare_promotion, primary present, already converged wait_primary (issue #1168) */
+	/*
+	 * prepare_promotion, primary present, already converged wait_primary (issue
+	 * #1168)
+	 */
 	{ .pos = 337,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2622,7 +2700,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 		  "prepare_promotion, primary already converged wait_primary (issue #1168) -> "
 		  "stop_replication only (1 of 2)" },
 
-	/* prepare_promotion, primary present, not in maintenance, not already wait_primary */
+	/*
+	 * prepare_promotion, primary present, not in maintenance, not already
+	 * wait_primary
+	 */
 	{ .pos = 339,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2687,7 +2768,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "stop_replication, primary's drain time expired -> "
 				 "wait_primary + demoted (2 of 3)" },
 
-	/* stop_replication, primary's goal is wait_primary but presumed dead (3-way OR, 3 of 3) */
+	/*
+	 * stop_replication, primary's goal is wait_primary but presumed dead (3-way
+	 * OR, 3 of 3)
+	 */
 	{ .pos = 349,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2752,8 +2836,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment =
 		  "demoted, primary converged wait/join_primary/primary, healthy -> catchingup" },
 
-	/* join_secondary, primary reported wait_primary with goal wait/primary -- cascades into a
-	 * nested pass on primaryNode */
+	/*
+	 * join_secondary, primary reported wait_primary with goal wait/primary --
+	 * cascades into a nested pass on primaryNode
+	 */
 	{ .pos = 359,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2794,7 +2880,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 * renumbered into them, so nothing else shifts.
 	 */
 
-	/* MS-failover: candidate stuck in fast_forward, all WAL sources unhealthy, retry */
+	/*
+	 * MS-failover: candidate stuck in fast_forward, all WAL sources unhealthy,
+	 * retry
+	 */
 	{ .pos = 363,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2814,7 +2903,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 		  "MS-failover: candidate stuck in fast_forward, all WAL sources unhealthy, "
 		  "guard_data_loss=true -> report_lsn (retry once a source recovers)" },
 
-	/* MS-failover: candidate ready to stream WAL -> follower joins as secondary */
+	/*
+	 * MS-failover: candidate ready to stream WAL -> follower joins as secondary
+	 */
 	{ .pos = 365,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -3015,9 +3106,12 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "MS-failover: >=1 node(s) yet to report their LSN, guard_data_loss=false "
 				 "-> proceed despite possible data loss (2 of 2)" },
 
-	/* MS-failover: zero candidates have reported their LSN yet -- a hard, silent decline
-	 * (the original code never logged here either). Never itself dispatched, listed for
-	 * dump_fsm() completeness only, same as the no_candidate_yet row below. */
+	/*
+	 * MS-failover: zero candidates have reported their LSN yet -- a hard,
+	 * silent decline (the original code never logged here either). Never itself
+	 * dispatched, listed for dump_fsm() completeness only, same as the
+	 * no_candidate_yet row below.
+	 */
 	{ .pos = 383,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -3060,15 +3154,19 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "MS-failover: not enough quorum candidates reported yet, guard_data_loss=false "
 				 "-> proceed with fewer than required (2 of 2)" },
 
-	/* MS-failover: no promotion in flight, either not enough candidates have reported yet
-	 * or the most-advanced one is still too far behind the primary to safely promote --
-	 * a pure no-op besides BuildCandidateList's own fan-out (the four rows above); listed
-	 * for dump_fsm() completeness, never itself dispatched (no assignment to attribute).
+	/*
+	 * MS-failover: no promotion in flight, either not enough candidates have
+	 * reported yet or the most-advanced one is still too far behind the primary
+	 * to safely promote -- a pure no-op besides BuildCandidateList's own
+	 * fan-out (the four rows above); listed for dump_fsm() completeness, never
+	 * itself dispatched (no assignment to attribute).
 	 * inMSFailoverCluster=BOOL_TRUE despite that: without it this row's bare
-	 * candidatePromotionInProgress=BOOL_FALSE (true by default everywhere) plus its
-	 * missing activeNode state pattern (matches ANY state) would let it swallow the
-	 * ordinary top-level lookup's own "BUG: no MonitorFSM row matches" detection for
-	 * any otherwise-unmatched heartbeat, silently no-op'ing instead of erroring. */
+	 * candidatePromotionInProgress=BOOL_FALSE (true by default everywhere) plus
+	 * its missing activeNode state pattern (matches ANY state) would let it
+	 * swallow the ordinary top-level lookup's own "BUG: no MonitorFSM row
+	 * matches" detection for any otherwise-unmatched heartbeat, silently
+	 * no-op'ing instead of erroring.
+	 */
 	{ .pos = 389,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -3083,21 +3181,21 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	/*
 	 * ActionRunMultiStandbyFailoverCascade's own two outcomes (pos 305's
-	 * extraAction, group_state_machine.c). Both rows below share pos 305's
-	 * own gating conditions (primaryNode.isUnhealthy, groupHasMoreThanTwoNodes)
-	 * verbatim -- not a new marker field -- which is what keeps them safe
-	 * from the ordinary top-level lookup: that lookup can only ever reach
-	 * these two rows by first reaching pos 305 itself (earlier in the array,
-	 * with no activeNode-state restriction of its own), which unconditionally
-	 * dispatches through here via its own extraAction before the ordinary
-	 * scan could ever resume past it in the same call. atLeastOneHealthyCandidate
-	 * is the exact same fact (same AutoFailoverOtherNodesListInState +
+	 * extraAction, group_state_machine.c). Both rows below share pos 305's own
+	 * gating conditions (primaryNode.isUnhealthy, groupHasMoreThanTwoNodes)
+	 * verbatim -- not a new marker field -- which is what keeps them safe from
+	 * the ordinary top-level lookup: that lookup can only ever reach these two
+	 * rows by first reaching pos 305 itself (earlier in the array, with no
+	 * activeNode-state restriction of its own), which unconditionally
+	 * dispatches through here via its own extraAction before the ordinary scan
+	 * could ever resume past it in the same call. atLeastOneHealthyCandidate is
+	 * the exact same fact (same AutoFailoverOtherNodesListInState +
 	 * CountHealthyCandidates computation, same isUnhealthy/groupNodeCount>2
 	 * gate) ActionRunMultiStandbyFailoverCascade used to compute locally --
 	 * reused here instead of duplicated. ResolveAcceptedTimeline-style side
-	 * effects don't apply to either row (there are none here); only the
-	 * plain AssignGoalState calls these replace, each falling back to the
-	 * original hand-written condition on no match.
+	 * effects don't apply to either row (there are none here); only the plain
+	 * AssignGoalState calls these replace, each falling back to the original
+	 * hand-written condition on no match.
 	 */
 	{ .pos = 391,
 	  .sectionPath = {
@@ -3127,11 +3225,14 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "nodesCount>2, primary unhealthy, converged prepare_maintenance -> "
 				 "primary maintenance" },
 
-	/* --- [MonitorFSM_PrimaryNodeSectionStart, MonitorFSM_SIZE): the declarative replacement
-	 * for ProceedGroupStateForPrimaryNode()'s own sequential if-chain. Here .activeNode maps
-	 * to the primaryNode parameter, not a reporting node -- reached either directly by the
-	 * top-level driver (activeNode already primary-role) or via ActionRunPrimaryNodeTransition's
-	 * nested pass on primaryNode (the join_secondary cascade row above). */
+	/*
+	 * --- [MonitorFSM_PrimaryNodeSectionStart, MonitorFSM_SIZE): the
+	 * declarative replacement for ProceedGroupStateForPrimaryNode()'s own
+	 * sequential if-chain. Here .activeNode maps to the primaryNode parameter,
+	 * not a reporting node -- reached either directly by the top-level driver
+	 * (activeNode already primary-role) or via ActionRunPrimaryNodeTransition's
+	 * nested pass on primaryNode (the join_secondary cascade row above).
+	 */
 
 	/* primary alone, another node reached wait_standby */
 	{ .pos = 401,
@@ -3171,8 +3272,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "all nodes async, >=1 secondary -> primary "
 				 "(+ unhealthy-secondary fan-out to catchingup)" },
 
-	/* converged primary/apply_settings (not wait_primary), no quorum secondaries,
-	 * number_sync_standbys=0, no failover in progress (issue #774) */
+	/*
+	 * converged primary/apply_settings (not wait_primary), no quorum
+	 * secondaries, number_sync_standbys=0, no failover in progress (issue #774)
+	 */
 	{ .pos = 407,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_PRIMARY_NODE
@@ -3262,7 +3365,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 		  "apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2) "
 		  "(+ unhealthy-secondary fan-out to catchingup)" },
 
-	/* converged primary/wait_primary/apply_settings, no other condition applies */
+	/*
+	 * converged primary/wait_primary/apply_settings, no other condition applies
+	 */
 	{ .pos = 419,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_PRIMARY_NODE
@@ -3760,13 +3865,15 @@ NodeStatePatternReportedStatesText(const NodeStatePattern *pattern, bool *isNull
 }
 
 
-/* Appends "name=true"/"name=false" to buf (with a ", " separator when buf
- * isn't empty), skipping BOOL_ANY entirely -- BOOL_ANY means this row
- * doesn't care about the fact at all, so it's noise, not a guard. Shared by
+/*
+ * Appends "name=true"/"name=false" to buf (with a ", " separator when buf isn't
+ * empty), skipping BOOL_ANY entirely -- BOOL_ANY means this row doesn't care
+ * about the fact at all, so it's noise, not a guard. Shared by
  * NodeStatusPatternConditionsText and NodeActiveContextPatternConditionsText
- * below, one line per BoolPattern field rather than a loop: there's no
- * runtime array of (name, value) pairs to iterate, since the field names
- * only exist at compile time. */
+ * below, one line per BoolPattern field rather than a loop: there's no runtime
+ * array of (name, value) pairs to iterate, since the field names only exist at
+ * compile time.
+ */
 #define APPEND_BOOL_CONDITION(buf, name, boolPattern) \
 	do { \
 		if ((boolPattern) != BOOL_ANY) \
@@ -3780,9 +3887,11 @@ NodeStatePatternReportedStatesText(const NodeStatePattern *pattern, bool *isNull
 		} \
 	} while (0)
 
-/* Same idea as APPEND_BOOL_CONDITION, for an IntPattern field: skips
- * INT_PATTERN_ANY, otherwise renders "name=n"/"name>=n"/"name<=n" matching
- * the EXACTLY/AT_LEAST/AT_MOST macro that built the pattern. */
+/*
+ * Same idea as APPEND_BOOL_CONDITION, for an IntPattern field: skips
+ * INT_PATTERN_ANY, otherwise renders "name=n"/"name>=n"/"name<=n" matching the
+ * EXACTLY/AT_LEAST/AT_MOST macro that built the pattern.
+ */
 #define APPEND_INT_CONDITION(buf, name, intPattern) \
 	do { \
 		if ((intPattern).kind != INT_PATTERN_ANY) \
@@ -3975,22 +4084,22 @@ PG_FUNCTION_INFO_V1(dump_fsm);
  * (first-match-wins order -- the same order RuleMatches() itself scans in).
  * This is the cross-check surface the design doc's dump_fsm()/
  * check_fsm_reachability() proposal calls for: enough to correlate a
- * pgautofailover.event row's rule_pos/rule_section (see notifications.h)
- * back to the exact rule that produced it, and enough for an operator or a
- * future keeper-side reachability check to see every transition the
- * monitor's table can produce, without reading the C source. The
- * active_node_current_state/other_node_current_state/candidate_node_current_state
- * columns (rendered via NodeStatePatternReportedStatesText, see its own
+ * pgautofailover.event row's rule_pos/rule_section (see notifications.h) back
+ * to the exact rule that produced it, and enough for an operator or a future
+ * keeper-side reachability check to see every transition the monitor's table
+ * can produce, without reading the C source. The active_node_current_state/
+ * other_node_current_state/candidate_node_current_state columns (rendered via
+ * NodeStatePatternReportedStatesText, see its own
  * comment) plus the assigned-state columns already here give a keeper-
  * cross-check tool the full (fromState, toState) shape it needs to compare
  * against KeeperFSMTransition. The *_conditions columns (rendered via
- * NodeStatusPatternConditionsText/NodeActiveContextPatternConditionsText,
- * see their own comments) additionally surface every non-default BoolPattern
- * guard on the row -- health foremost among them, but also maintenance,
- * candidate eligibility, WAL thresholds, guard_data_loss, and the rest --
- * so a reader (or a future automated check) doesn't have to open the C
- * source to see what else has to be true for a given row to fire. The
- * section column (rendered via MonitorFSMTransitionSectionText) also names
+ * NodeStatusPatternConditionsText/NodeActiveContextPatternConditionsText, see
+ * their own comments) additionally surface every non-default BoolPattern guard
+ * on the row -- health foremost among them, but also maintenance, candidate
+ * eligibility, WAL thresholds, guard_data_loss, and the rest -- so a reader (or
+ * a future automated check) doesn't have to open the C source to see what else
+ * has to be true for a given row to fire. The section column (rendered via
+ * MonitorFSMTransitionSectionText) also names
  * which operator-triggered SQL entry point a MONITOR_FSM_SECTION_API_TRIGGERED
  * row requires, e.g. "api_triggered: remove_node" -- just the plain section
  * name for every other row, since only that section's rows carry a specific
@@ -4211,64 +4320,63 @@ PG_FUNCTION_INFO_V1(dump_fsm_edges);
 /*
  * dump_fsm_edges exposes MonitorFSM[] as a flat set of concrete
  * (pos, current_state, assigned_state) edges -- one row per actual
- * (reportedState, assignedState) pair a row can produce, fully resolved
- * (never NULL, unlike dump_fsm()'s own pattern-summary columns, which stay
- * unresolved for human display). This is the keeper-cross-check surface the
- * design doc's check_fsm_reachability() proposal needs: pgautofailover.
+ * (reportedState, assignedState) pair a row can produce, fully resolved (never
+ * NULL, unlike dump_fsm()'s own pattern-summary columns, which stay unresolved
+ * for human display). This is the keeper-cross-check surface the design doc's
+ * check_fsm_reachability() proposal needs: pgautofailover.
  * check_fsm_reachability(jsonb) anti-joins this against a keeper's own
- * KeeperFSM[] edges (see KeeperFSMToJSON(), src/bin/pg_autoctl/fsm.c) to
- * find any monitor transition with no matching keeper edge -- exactly the
- * bug class issue #774 was.
+ * KeeperFSM[] edges (see KeeperFSMToJSON(), src/bin/pg_autoctl/fsm.c) to find
+ * any monitor transition with no matching keeper edge -- exactly the bug class
+ * issue #774 was.
  *
  * Two potential edges per row, resolved independently: activeNode's own
- * (statePattern -> activeNodeAssignedState) when the row actually assigns
- * one, and primaryNode's own (statePattern -> otherNodeAssignedState) when
- * it does. candidateNode never has an assignment slot of its own (see
- * MonitorFSMTransition's own comment), so it never contributes an edge.
- * pgKind is deliberately not modeled here -- see this function's own header
- * comment in the design doc discussion; every Citus-specific KeeperFSM[]
- * edge already has a NODE_KIND_ANY counterpart with the same
- * (current, assigned) shape (fsm_mermaid.c's own comment establishes this
- * as an invariant this codebase already relies on elsewhere), so a flat,
- * pgKind-blind edge set on both sides is already correct.
+ * (statePattern -> activeNodeAssignedState) when the row actually assigns one,
+ * and primaryNode's own (statePattern -> otherNodeAssignedState) when it does.
+ * candidateNode never has an assignment slot of its own (see
+ * MonitorFSMTransition's own comment), so it never contributes an edge. pgKind
+ * is deliberately not modeled here -- see this function's own header comment in
+ * the design doc discussion; every Citus-specific KeeperFSM[] edge already has
+ * a NODE_KIND_ANY counterpart with the same (current, assigned) shape
+ * (fsm_mermaid.c's own comment establishes this as an invariant this codebase
+ * already relies on elsewhere), so a flat, pgKind-blind edge set on both sides
+ * is already correct.
  *
  * Two categories of edges are deliberately never emitted, both confirmed by
  * running pg_autoctl inspect fsm check for real and tracing every one of the
  * mismatches it reported back to its actual root cause rather than assuming:
  *
  * - Reflexive (current == assigned) edges. keeper_fsm_reach_assigned_state()
- *   (src/bin/pg_autoctl/fsm.c) returns true the moment
- *   current_role == assigned_role, before ever consulting KeeperFSM[] --
- *   confirmed by reading that function directly. A self-loop can therefore
- *   never have (or need) a matching keeper edge; including one here would
- *   always report a false gap. This alone explained every mismatch on pos
- *   363, 403, 405, 409 during that live run.
+ * (src/bin/pg_autoctl/fsm.c) returns true the moment current_role ==
+ * assigned_role, before ever consulting KeeperFSM[] -- confirmed by reading
+ * that function directly. A self-loop can therefore never have (or need) a
+ * matching keeper edge; including one here would always report a false gap.
+ * This alone explained every mismatch on pos 363, 403, 405, 409 during that
+ * live run.
  *
  * - MONITOR_FSM_SECTION_API_TRIGGERED rows entirely. Every one of these is
- *   reached from an operator-facing SQL wrapper (remove_node,
- *   perform_failover, start_maintenance, ...) that resolves activeNode to a
- *   specific, already-validated role (almost always the primary) via
- *   hand-written C *before* dispatch ever runs -- ProceedGroupStateForApiTrigger's
- *   own comment, and several of these rows' own comments ("there's nothing
- *   else for activeNode to be here but the primary itself", "activeNode IS
- *   the primary here"), document this explicitly. The row's own
- *   NodeStatePattern for these (typically ANY, or a BoolPattern condition
- *   like isInPrimaryState with no accompanying state-set restriction) is
- *   consequently far broader than what's actually reachable: it was never
- *   meant to double as a full reachability precondition, because that
- *   precondition already lives in hand-written C outside this table, per
- *   this design's own "pre/post side effects stay hand-written, not modeled
- *   as a row" principle. Expanding it here (as this function otherwise
- *   correctly does for the ordinary heartbeat-driven sections) manufactures
- *   the exact same kind of false gap for every one of these ten rows, all
- *   confirmed by that same live run.
+ * reached from an operator-facing SQL wrapper (remove_node, perform_failover,
+ * start_maintenance, ...) that resolves activeNode to a specific,
+ * already-validated role (almost always the primary) via hand-written C
+ * *before* dispatch ever runs -- ProceedGroupStateForApiTrigger's own comment,
+ * and several of these rows' own comments ("there's nothing else for activeNode
+ * to be here but the primary itself", "activeNode IS the primary here"),
+ * document this explicitly. The row's own NodeStatePattern for these (typically
+ * ANY, or a BoolPattern condition like isInPrimaryState with no accompanying
+ * state-set restriction) is consequently far broader than what's actually
+ * reachable: it was never meant to double as a full reachability precondition,
+ * because that precondition already lives in hand-written C outside this table,
+ * per this design's own "pre/post side effects stay hand-written, not modeled
+ * as a row" principle. Expanding it here (as this function otherwise correctly
+ * does for the ordinary heartbeat-driven sections) manufactures the exact same
+ * kind of false gap for every one of these ten rows, all confirmed by that same
+ * live run.
  *
  * Every other mismatch that same run found (early_checks 209/211,
  * reporting_node 303/325/333/339/347/349/351) stayed reachable from a live
- * node's own genuine reported state with no such structural excuse, so
- * they're deliberately NOT filtered here -- each is a real candidate for
- * individual investigation against the keeper's actual KeeperFSM[] rows,
- * not a known-safe artifact of this function's own edge derivation.
+ * node's own genuine reported state with no such structural excuse, so they're
+ * deliberately NOT filtered here -- each is a real candidate for individual
+ * investigation against the keeper's actual KeeperFSM[] rows, not a known-safe
+ * artifact of this function's own edge derivation.
  */
 Datum
 dump_fsm_edges(PG_FUNCTION_ARGS)
@@ -4544,17 +4652,16 @@ WalSourceNodesAreAllUnhealthy(GroupStateContext *ctx,
 
 
 /*
- * BuildMSFailoverNodeActiveContext computes the facts the MS-failover
- * cluster's own declarative rows (MonitorFSM_MSFailoverStart onwards) need.
- * candidateNode is NULL at exactly one call site (TryFanOutReportLsnRow,
- * wrapping BuildCandidateList's own fan-out loop, which hasn't selected a
- * candidate yet) -- everywhere else (both call sites TryMSFailoverDeclarativeRow
- * wraps) it's non-NULL, called from within ProceedGroupStateForMSFailover's
- * own "nodeBeingPromoted != NULL" branch. Either way
- * candidatePromotionInProgress is exactly (candidateNode != NULL), and the
- * activeNodeAllWalSourcesUnhealthy computation below is skipped whenever
- * candidateNode is NULL, so passing NULL never risks matching it against
- * the wrong node.
+ * BuildMSFailoverNodeActiveContext computes the facts the MS-failover cluster's
+ * own declarative rows (MonitorFSM_MSFailoverStart onwards) need. candidateNode
+ * is NULL at exactly one call site (TryFanOutReportLsnRow, wrapping
+ * BuildCandidateList's own fan-out loop, which hasn't selected a candidate yet)
+ * -- everywhere else (both call sites TryMSFailoverDeclarativeRow wraps) it's
+ * non-NULL, called from within ProceedGroupStateForMSFailover's own
+ * "nodeBeingPromoted != NULL" branch. Either way candidatePromotionInProgress
+ * is exactly (candidateNode != NULL), and the activeNodeAllWalSourcesUnhealthy
+ * computation below is skipped whenever candidateNode is NULL, so passing NULL
+ * never risks matching it against the wrong node.
  */
 static void
 BuildMSFailoverNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *activeNode,
@@ -5017,9 +5124,12 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	 */
 	int minCandidates = ctx->formation->number_sync_standbys + 1;
 
-	/* no candidates is a hard pass -- see MonitorFSM[]'s own candidate_count_gate
-	 * row for this same fact, matched declaratively but never itself dispatched
-	 * (a silent decline, same as the original code: no log here either). */
+	/*
+	 * no candidates is a hard pass -- see MonitorFSM[]'s own
+	 * candidate_count_gate row for this same fact, matched declaratively but
+	 * never itself dispatched (a silent decline, same as the original code:
+	 * no log here either).
+	 */
 	if (candidateList.candidateCount == 0)
 	{
 		return false;
@@ -5648,9 +5758,11 @@ PromoteSelectedNode(GroupStateContext *ctx,
 
 		if (!DispatchMonitorFSMRuleByPos(ctx, &promotionNac, 375))
 		{
-			/* can't happen: pos 375 is a fixed, always-present row (see
+			/*
+			 * can't happen: pos 375 is a fixed, always-present row (see
 			 * AssertMonitorFSMWellFormed) -- DispatchMonitorFSMRuleByPos only
-			 * fails to find a pos that doesn't exist in the table at all. */
+			 * fails to find a pos that doesn't exist in the table at all.
+			 */
 			ereport(ERROR,
 					(errmsg("BUG: MonitorFSM[] has no row with pos = 375")));
 		}
@@ -5689,9 +5801,11 @@ PromoteSelectedNode(GroupStateContext *ctx,
 
 		if (!DispatchMonitorFSMRuleByPos(ctx, &promotionNac, 377))
 		{
-			/* can't happen: pos 377 is a fixed, always-present row (see
+			/*
+			 * can't happen: pos 377 is a fixed, always-present row (see
 			 * AssertMonitorFSMWellFormed) -- DispatchMonitorFSMRuleByPos only
-			 * fails to find a pos that doesn't exist in the table at all. */
+			 * fails to find a pos that doesn't exist in the table at all.
+			 */
 			ereport(ERROR,
 					(errmsg("BUG: MonitorFSM[] has no row with pos = 377")));
 		}
