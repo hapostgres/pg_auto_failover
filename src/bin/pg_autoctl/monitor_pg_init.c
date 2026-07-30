@@ -55,6 +55,16 @@ GUC monitor_default_settings[] = {
 	{ "ssl_cert_file", "" },
 	{ "ssl_key_file", "" },
 	{ "ssl_ciphers", "'" DEFAULT_SSL_CIPHERS "'" },
+
+	/*
+	 * Detect (and mostly prevent) nodes' connections silently going
+	 * half-open -- see the comment at POSTGRES_MONITOR_SERVER_TCP_KEEPALIVES_IDLE
+	 * in defaults.h for the full rationale (issue #1028).
+	 */
+	{ "tcp_keepalives_idle", POSTGRES_MONITOR_SERVER_TCP_KEEPALIVES_IDLE },
+	{ "tcp_keepalives_interval", POSTGRES_MONITOR_SERVER_TCP_KEEPALIVES_INTERVAL },
+	{ "tcp_keepalives_count", POSTGRES_MONITOR_SERVER_TCP_KEEPALIVES_COUNT },
+	{ "tcp_user_timeout", POSTGRES_MONITOR_SERVER_TCP_USER_TIMEOUT },
 #ifdef TEST
 	{ "unix_socket_directories", "''" },
 #endif

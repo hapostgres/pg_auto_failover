@@ -83,6 +83,42 @@
  */
 #define POSTGRES_MONITOR_TCP_USER_TIMEOUT "10000"
 
+/*
+ * Server-side TCP keepalives for the monitor's own Postgres instance
+ * (postgresql.conf, applies to every backend it accepts -- notably the
+ * long-lived LISTEN/NOTIFY connections nodes keep open to react to state
+ * changes). The client-side keepalives above bound how long the *keeper*
+ * waits before it notices a dead monitor connection and reconnects; they do
+ * nothing for the monitor's side of that same TCP pair. Without a
+ * server-side equivalent, a connection that goes silently half-open (a NAT
+ * or firewall dropping its idle mapping without ever sending a FIN/RST to
+ * either side -- observed after ordinary "network lag", not a hard
+ * partition) leaves an orphaned backend idle in pg_stat_activity
+ * indefinitely: neither idle_session_timeout nor
+ * client_connection_check_interval catch this, since both are passive (is
+ * there data to read?) rather than an active probe (issue #1028, backends
+ * observed idle for 8+ days).
+ *
+ * keepalives_idle is deliberately short enough to double as prevention, not
+ * just detection: a keepalive exchange every 30s means the connection never
+ * actually goes idle long enough, from the network's point of view, to hit
+ * most NAT/firewall inactivity timeouts in the first place. When a peer
+ * really is gone, worst-case detection is keepalives_idle +
+ * keepalives_interval * keepalives_count =~ 90 seconds, vs. the OS default
+ * of multiple hours (or effectively forever, on a path that never returns a
+ * hard error) -- an orphaned backend can no longer accumulate for days.
+ */
+#define POSTGRES_MONITOR_SERVER_TCP_KEEPALIVES_IDLE "30"
+#define POSTGRES_MONITOR_SERVER_TCP_KEEPALIVES_INTERVAL "10"
+#define POSTGRES_MONITOR_SERVER_TCP_KEEPALIVES_COUNT "6"
+
+/*
+ * Milliseconds. Same rationale as POSTGRES_MONITOR_TCP_USER_TIMEOUT above,
+ * server-side: bounds the case where the monitor has unacknowledged data
+ * still in flight to a now-unreachable node when the network disappears.
+ */
+#define POSTGRES_MONITOR_SERVER_TCP_USER_TIMEOUT "60000"
+
 
 /*
  * Microsoft approved cipher string.
