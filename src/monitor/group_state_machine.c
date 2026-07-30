@@ -4315,6 +4315,269 @@ NodeStatePatternResolveFromStates(const NodeStatePattern *pattern, int *outCount
 }
 
 
+/*
+ * NodeStatePatternIncludesState is a single-state membership query built on
+ * top of NodeStatePatternResolveFromStates -- used by the shadowing check
+ * below, which needs to ask "does this OTHER row's own pattern also match
+ * this one concrete state" without caring about the rest of that row's
+ * resolved set.
+ */
+static bool
+NodeStatePatternIncludesState(const NodeStatePattern *pattern, ReplicationState state)
+{
+	int count;
+	ReplicationState *states = NodeStatePatternResolveFromStates(pattern, &count);
+
+	for (int i = 0; i < count; i++)
+	{
+		if (states[i] == state)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
+ * NodeStatePatternKindIsReportedStateOnly: true for the pattern kinds whose
+ * match genuinely depends only on reportedState (ignoring, for STABLE, its
+ * own additional "reported == goal" requirement -- see this function's own
+ * comment for why that specific simplification is deliberate). ASSIGNED,
+ * NOT_ASSIGNED, and TRANSITIONING all have a real, separate dependency on
+ * goalState (NodeStateMatchesPattern's own switch: ASSIGNED/NOT_ASSIGNED
+ * check goalState exclusively, TRANSITIONING checks both), which
+ * NodeStatePatternResolveFromStates papers over for edge-SOURCE purposes by
+ * resolving them to either the literal reportedStates list (TRANSITIONING,
+ * silently dropping its own assignedStates half) or the full state universe
+ * (ASSIGNED/NOT_ASSIGNED, since goalState alone decides those, independently
+ * of reportedState) -- both correct over-approximations for "what could this
+ * row's reported-state source legitimately be", but wrong for this function's
+ * different question, "does this row match unconditionally whenever reported
+ * state equals state". A row like pos 203 ("goalState == DROPPED,
+ * reportedState irrelevant", ASSIGNED kind) would otherwise look like it
+ * resolves to (and therefore unconditionally matches) every one of the 21
+ * states, when it actually still requires a completely separate, real fact
+ * (goalState == DROPPED) that has nothing to do with reportedState at all --
+ * confirmed by dump_fsm_edges()'s own regression: an early, buggy version of
+ * this shadowing check treated pos 203 as unconditional and wrongly
+ * suppressed several of pos 209's genuinely reachable fanned-out states
+ * (wait_standby, prepare_maintenance, wait_maintenance, fast_forward,
+ * join_secondary) that have nothing to do with the node's goal being
+ * DROPPED.
+ *
+ * STABLE is kept eligible despite its own "reported == goal" wrinkle: for
+ * every row actually written using it (a bare FSM_STATE(x), no other
+ * condition), the codebase's own edge-source resolution
+ * (NodeStatePatternResolveFromStates) already treats STABLE identically to
+ * REPORTED, and confirmed live (this file's own comment on pos 205/pos 209)
+ * that treatment is what makes real shadowing detection work at all --
+ * requiring the stricter, fully rigorous "and goal really does equal
+ * reported in every possible calling context" would need modeling whether
+ * some OTHER row's otherNodeAssignedState could have changed this exact
+ * node's own goalState moments earlier, out of scope for a static,
+ * per-table check like this one.
+ */
+static bool
+NodeStatePatternKindIsReportedStateOnly(NodeStatePatternKind kind)
+{
+	switch (kind)
+	{
+		case NODE_STATE_ANY:
+		case NODE_STATE_STABLE:
+		case NODE_STATE_REPORTED:
+		case NODE_STATE_NOT_STABLE:
+		{
+			return true;
+		}
+
+		case NODE_STATE_ASSIGNED:
+		case NODE_STATE_NOT_ASSIGNED:
+		case NODE_STATE_TRANSITIONING:
+		default:
+		{
+			return false;
+		}
+	}
+}
+
+
+/*
+ * NodeStatusPatternOtherFieldsAreAny/NodeStatusPatternIsFullyAny/
+ * NodeActiveContextPatternIsAny mirror RuleMatches()'s own field list,
+ * field-for-field, checking each is at its BOOL_ANY/INT_PATTERN_ANY/
+ * API_TRIGGER_NODE_ACTIVE "don't care" default -- if MonitorFSMTransition's
+ * pattern structs ever gain a new field, RuleMatches() needs to grow a new
+ * conjunct for it, and these three functions need the matching ANY-check
+ * added right alongside, or the shadowing detection below silently starts
+ * ignoring that new field (treating a row as unconditional when it no
+ * longer is).
+ */
+static bool
+NodeStatusPatternOtherFieldsAreAny(const NodeStatusPattern *pattern)
+{
+	return pattern->exists == BOOL_ANY &&
+		   pattern->isHealthy == BOOL_ANY &&
+		   pattern->isUnhealthy == BOOL_ANY &&
+		   pattern->candidateEligible == BOOL_ANY &&
+		   pattern->isInPrimaryState == BOOL_ANY &&
+		   pattern->isInMaintenance == BOOL_ANY &&
+		   pattern->isDemotedPrimary == BOOL_ANY &&
+		   pattern->canTakeWrites == BOOL_ANY &&
+		   pattern->isReadyToStreamWAL == BOOL_ANY &&
+		   pattern->drainTimeExpired == BOOL_ANY &&
+		   pattern->isCitusWorkerGroup == BOOL_ANY &&
+		   pattern->replicationQuorum == BOOL_ANY &&
+		   pattern->isComparableToReferenceTli == BOOL_ANY &&
+		   pattern->unreachableFromDemoteTimeout == BOOL_ANY;
+}
+
+
+static bool
+NodeStatusPatternIsFullyAny(const NodeStatusPattern *pattern)
+{
+	return pattern->statePattern.kind == NODE_STATE_ANY &&
+		   NodeStatusPatternOtherFieldsAreAny(pattern);
+}
+
+
+static bool
+NodeActiveContextPatternIsAny(const NodeActiveContextPattern *cond)
+{
+	return cond->apiTrigger.kind == API_TRIGGER_NODE_ACTIVE &&
+
+		   cond->groupHasExactlyOneNode == BOOL_ANY &&
+		   cond->groupHasExactlyTwoNodes == BOOL_ANY &&
+		   cond->groupHasMoreThanTwoNodes == BOOL_ANY &&
+		   cond->anyOtherNodeWaitingStandby == BOOL_ANY &&
+		   cond->numberSyncStandbysIsZero == BOOL_ANY &&
+		   cond->replicationQuorumCountIsZero == BOOL_ANY &&
+		   cond->secondaryNodesCountIsZero == BOOL_ANY &&
+		   cond->secondaryQuorumNodesCountIsZero == BOOL_ANY &&
+		   cond->atLeastOneHealthyCandidate == BOOL_ANY &&
+		   cond->walWithinPromoteThreshold == BOOL_ANY &&
+		   cond->walWithinSyncThreshold == BOOL_ANY &&
+		   cond->activeAndPrimaryTliMatch == BOOL_ANY &&
+		   cond->primaryIsWaitPrimaryPresumedDead == BOOL_ANY &&
+		   cond->failoverInProgress == BOOL_ANY &&
+		   cond->replicationStallExceeded == BOOL_ANY &&
+		   cond->lastHealthySyncStandbyGoingToMaintenance == BOOL_ANY &&
+		   cond->activeNodeAllWalSourcesUnhealthy == BOOL_ANY &&
+		   cond->candidatePromotionInProgress == BOOL_ANY &&
+		   cond->mostAdvancedCandidateWithinPromoteThreshold == BOOL_ANY &&
+		   cond->guardDataLossEnabled == BOOL_ANY &&
+		   cond->inMSFailoverCluster == BOOL_ANY &&
+		   cond->inMSFailoverCandidateGate == BOOL_ANY &&
+
+		   cond->candidateCount.kind == INT_PATTERN_ANY &&
+		   cond->quorumCandidateCount.kind == INT_PATTERN_ANY &&
+		   cond->missingNodesCount.kind == INT_PATTERN_ANY &&
+		   cond->sufficientQuorumCandidates == BOOL_ANY;
+}
+
+
+/*
+ * RuleUnconditionallyMatchesActiveNodeState/RuleUnconditionallyMatchesPrimary
+ * NodeState: true iff rule's own RuleMatches() would return true for EVERY
+ * possible NodeActiveContext whose activeNode (resp. primaryNode) reports
+ * state -- i.e. rule's activeNode.statePattern (resp. primaryNode.
+ * statePattern) accepts state, and nothing else about the row narrows it any
+ * further: every other NodeStatus role is entirely unconstrained, the role
+ * being tested has no OTHER constraint beyond its own state, and every
+ * .conditions field is at its own "don't care" default. A row like this is
+ * a pure, unconditional catch-all for that one reported state -- exactly pos
+ * 205's "converged to maintenance -> no-op" row (see dump_fsm_edges()'s own
+ * comment on the confirmed pos 209/maintenance case this was built to catch).
+ *
+ * Deliberately does NOT require rule->otherNodesFn == NULL: otherNodesFn only
+ * changes who a matched row's otherNodeAssignedState is assigned to, not
+ * whether the row matches in the first place, so it has no bearing on
+ * whether this row shadows another one.
+ */
+static bool
+RuleUnconditionallyMatchesActiveNodeState(const MonitorFSMTransition *rule,
+										  ReplicationState state)
+{
+	return NodeStatePatternKindIsReportedStateOnly(rule->activeNode.statePattern.kind) &&
+		   NodeStatePatternIncludesState(&rule->activeNode.statePattern, state) &&
+		   NodeStatusPatternOtherFieldsAreAny(&rule->activeNode) &&
+		   NodeStatusPatternIsFullyAny(&rule->primaryNode) &&
+		   NodeStatusPatternIsFullyAny(&rule->otherNode) &&
+		   NodeStatusPatternIsFullyAny(&rule->candidateNode) &&
+		   NodeActiveContextPatternIsAny(&rule->conditions);
+}
+
+
+static bool
+RuleUnconditionallyMatchesPrimaryNodeState(const MonitorFSMTransition *rule,
+										   ReplicationState state)
+{
+	return NodeStatePatternKindIsReportedStateOnly(rule->primaryNode.statePattern.kind) &&
+		   NodeStatePatternIncludesState(&rule->primaryNode.statePattern, state) &&
+		   NodeStatusPatternOtherFieldsAreAny(&rule->primaryNode) &&
+		   NodeStatusPatternIsFullyAny(&rule->activeNode) &&
+		   NodeStatusPatternIsFullyAny(&rule->otherNode) &&
+		   NodeStatusPatternIsFullyAny(&rule->candidateNode) &&
+		   NodeActiveContextPatternIsAny(&rule->conditions);
+}
+
+
+/*
+ * EdgeIsShadowedByEarlierRule scans MonitorFSM[0 .. beforeIndex) for a row
+ * that would unconditionally intercept state before dispatch ever reaches
+ * beforeIndex -- i.e. a real, always-invoked scan of this section (the
+ * default one, starting from array position 0, which every top-level
+ * section has independently of any narrower resume-point scan some specific
+ * caller might also use) would never actually reach beforeIndex for a node
+ * reporting state, making an edge reported for it purely an artifact of this
+ * function resolving each row independently (see dump_fsm_edges()'s own
+ * comment).
+ *
+ * Deliberately bounded to rows sharing beforeIndex's own top-level section,
+ * not the whole array: every section IS reachable via its own independent
+ * top-level scan (FindAndDispatchMonitorFSMRuleUnderPath's callers), so
+ * shadowing within one section is straightforward to prove -- the section's
+ * own default scan, starting from array position 0, is a real call that
+ * genuinely exists and always runs in that order. Note this is a
+ * conservative under-approximation, not a claim that cross-section
+ * shadowing is impossible: EARLY_CHECKS always runs before REPORTING_NODE in
+ * the same overall dispatch chain (ProceedGroupStateFromContext), so an
+ * unconditional EARLY_CHECKS row (pos 201's "converged to dropped", say)
+ * could in principle also shadow a REPORTING_NODE row's own "dropped"
+ * fanned-out state -- this function does not attempt to detect that, since
+ * doing so soundly requires modeling the fixed section-to-section call
+ * order across the whole dispatch entry point graph, not just one section's
+ * own internal array order. Left as a known limitation rather than a false
+ * suppression risk: this scoping can only ever under-detect shadowing
+ * (leaving a real-but-unreachable edge in the output), never wrongly hide a
+ * genuinely reachable one.
+ */
+static bool
+EdgeIsShadowedByEarlierRule(int beforeIndex, ReplicationState state, bool primaryNodeSide,
+						   MonitorFSMSection topLevelSection)
+{
+	for (int j = 0; j < beforeIndex; j++)
+	{
+		const MonitorFSMTransition *earlier = &MonitorFSM[j];
+
+		if (earlier->sectionPath[0] != topLevelSection)
+		{
+			continue;
+		}
+
+		if (primaryNodeSide
+			? RuleUnconditionallyMatchesPrimaryNodeState(earlier, state)
+			: RuleUnconditionallyMatchesActiveNodeState(earlier, state))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
 PG_FUNCTION_INFO_V1(dump_fsm_edges);
 
 /*
@@ -4371,33 +4634,41 @@ PG_FUNCTION_INFO_V1(dump_fsm_edges);
  * kind of false gap for every one of these ten rows, all confirmed by that same
  * live run.
  *
- * Every other mismatch that same run found (early_checks 209/211,
- * reporting_node 303/325/333/339/347/349/351) is deliberately NOT filtered
- * here -- each is a real candidate for individual investigation against the
- * keeper's actual KeeperFSM[] rows, not a known-safe artifact of this
- * function's own edge derivation in the same structural sense as the two
- * categories above.
+ * A third category is filtered the same way, for a different reason: this
+ * function used to resolve each row's own edges entirely independently,
+ * never considering any OTHER row, so it could report an edge for a
+ * current_state that an EARLIER row (lower array index, matching
+ * unconditionally -- e.g. a bare no-op like pos 205's "converged to
+ * maintenance -> no-op, frozen until stop_maintenance()") would actually
+ * intercept first in real first-match-wins dispatch, making that edge
+ * practically unreachable. Confirmed concretely via a live pgaftest run
+ * (tests/tap/specs/keeper_fsm_gap_211_primary_priority_zero.pgaf's own
+ * investigation): pos 209's "maintenance" edge looked like a real gap here,
+ * but pos 205 comes first in array order and intercepts every node_active()
+ * call from a node in MAINTENANCE_STATE regardless of group size, so pos
+ * 209 can never actually fire for that state at all.
  *
- * That said, this function resolves each row's own edges independently (the
- * for-loop above never looks at any OTHER row), so it does NOT model
- * first-match-wins shadowing between rows: a row can report an edge for a
- * current_state that an EARLIER row (lower array index, matched
- * unconditionally or under a broader condition) would actually intercept
- * first in real dispatch, making that edge practically unreachable even
- * though this function still emits it. Confirmed concretely for one such
- * case via a live pgaftest run (tests/tap/specs/
- * keeper_fsm_gap_211_primary_priority_zero.pgaf's own investigation): pos
- * 209's "maintenance" edge looked like a real gap here, but pos 205
- * ("converged to maintenance -> no-op, frozen until stop_maintenance()",
- * unconditional on MAINTENANCE_STATE, no groupHasExactlyOneNode check) comes
- * first in array order and intercepts every node_active() call from a node
- * in MAINTENANCE_STATE regardless of group size -- pos 209 can never
- * actually fire for that state, single-node group or not. Anyone
- * individually investigating one of the mismatches named above should rule
- * this out first (does an earlier row in MonitorFSM[] match the same
- * current_state unconditionally, or under a condition the one being
- * investigated doesn't also exclude?) before concluding a row's own
- * fanned-out current_state is a real, reachable gap.
+ * EdgeIsShadowedByEarlierRule (below) now detects exactly this: for each
+ * candidate edge, it scans every earlier row sharing the same top-level
+ * section (every section is its own independent top-level scan, so a row
+ * outside it is never reachable in the same dispatch pass regardless of
+ * array order -- see FindAndDispatchMonitorFSMRuleUnderPath's callers) for
+ * one that would match unconditionally whenever the same NodeStatus role
+ * reports that same state, regardless of anything else in the dispatch
+ * context. This is a sound, deliberately conservative check: it only
+ * suppresses an edge when an earlier row is PROVABLY unconditional for that
+ * state (every other pattern field at its own "don't care" default -- see
+ * RuleUnconditionallyMatchesActiveNodeState/...PrimaryNodeState's own
+ * comment), never merely "plausibly likely to match first" -- a row with
+ * even one real extra condition is left alone, since whether it actually
+ * fires first still depends on runtime facts this function can't know
+ * statically. Every mismatch that live pgaftest run found beyond pos 209's
+ * (early_checks 211, reporting_node 303/325/333/339/347/349/351) survived
+ * this check and remains a real, reachable gap -- pos 211's specifically was
+ * independently confirmed live in that same investigation (a lone
+ * priority-zero primary really does get assigned report_lsn from PRIMARY_
+ * STATE with no shadowing row in front of it, and the keeper really has no
+ * transition for it).
  */
 Datum
 dump_fsm_edges(PG_FUNCTION_ARGS)
@@ -4465,6 +4736,11 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
+				if (EdgeIsShadowedByEarlierRule(i, states[j], false, rule->sectionPath[0]))
+				{
+					continue;
+				}
+
 				values[0] = Int32GetDatum(rule->pos);
 				values[1] = ObjectIdGetDatum(ReplicationStateGetEnum(states[j]));
 				values[2] = ObjectIdGetDatum(
@@ -4499,6 +4775,11 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 				bool isNull[3] = { false };
 
 				if (states[j] == rule->otherNodeAssignedState.state)
+				{
+					continue;
+				}
+
+				if (EdgeIsShadowedByEarlierRule(i, states[j], true, rule->sectionPath[0]))
 				{
 					continue;
 				}

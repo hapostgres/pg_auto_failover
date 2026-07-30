@@ -179,9 +179,8 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
  ORDER BY e.pos, e.assigned_state, e.current_state NULLS FIRST;
  rule | n  |    current_state    | assigned_state |                                                       comment                                                        
 ------+----+---------------------+----------------+----------------------------------------------------------------------------------------------------------------------
-  209 |  6 |                     | single         | alone in group, candidate-eligible -> single
+  209 |  5 |                     | single         | alone in group, candidate-eligible -> single
   209 |  1 | wait_standby        | single         | alone in group, candidate-eligible -> single
-  209 |  1 | maintenance         | single         | alone in group, candidate-eligible -> single
   209 |  1 | prepare_maintenance | single         | alone in group, candidate-eligible -> single
   209 |  1 | wait_maintenance    | single         | alone in group, candidate-eligible -> single
   209 |  1 | fast_forward        | single         | alone in group, candidate-eligible -> single
@@ -323,7 +322,7 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
   391 |  1 | fast_forward        | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
   391 |  1 | join_secondary      | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
   391 |  1 | dropped             | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-(144 rows)
+(143 rows)
 
 -- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
 -- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the
@@ -367,18 +366,23 @@ SELECT k.current_state, k.assigned_state
  catchingup          | maintenance
  catchingup          | wait_maintenance
  demote_timeout      | primary
+ dropped             | single
  dropped             | wait_standby
+ dropped             | report_lsn
  init                | wait_standby
  maintenance         | catchingup
  prepare_maintenance | catchingup
  primary             | maintenance
  primary             | join_primary
  primary             | prepare_maintenance
+ report_lsn          | prepare_promotion
+ report_lsn          | fast_forward
+ report_lsn          | join_secondary
  secondary           | wait_standby
  secondary           | maintenance
  secondary           | wait_maintenance
  wait_primary        | join_primary
  wait_primary        | apply_settings
-(18 rows)
+(23 rows)
 
 DROP TABLE keeper_fsm_edges;

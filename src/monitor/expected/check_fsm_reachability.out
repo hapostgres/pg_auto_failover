@@ -18,7 +18,7 @@
 SELECT count(*) AS total_edge_count FROM pgautofailover.dump_fsm_edges();
  total_edge_count 
 ------------------
-              251
+              244
 (1 row)
 
 -- pos 301 ("converged secondary, reportedTLI not an ancestor of reference
@@ -72,7 +72,7 @@ SELECT count(*) AS missing_with_empty_keeper_edges
   FROM pgautofailover.check_fsm_reachability('[]'::jsonb);
  missing_with_empty_keeper_edges 
 ---------------------------------
-                             251
+                             244
 (1 row)
 
 -- Providing exactly pos 301's own edge, plus one of pos 343's two edges
