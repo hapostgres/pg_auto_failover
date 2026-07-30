@@ -68,6 +68,23 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- states at once) is immediately visible as one big number instead of
 -- having to count its own detail rows by hand. NULLS FIRST puts each rule's
 -- summary row right before its own detail rows, as a header.
+--
+-- As of this writing the gap list is exactly 10 rules this way (134 detail
+-- rows total), each an "alone in group"/failover/Citus-worker rule whose
+-- NodeStatePattern is a role or predicate check (e.g. !IsCurrentState(...),
+-- an opaque NodeIsXxx() helper, or no state restriction at all) rather than
+-- an enumerated state list -- investigated rule by rule against the
+-- pre-refactor hand-written code (commit 9c9c9b9^): in every one of the 10,
+-- that breadth already existed before this refactor (this is a faithful,
+-- behavior-preserving translation, not a widening introduced here). Real
+-- regression/tap-spec precedent exists for the "obvious" current_state each
+-- rule is clearly meant for (e.g. issue #997 for pos 303, issue #1168 for
+-- pos 325/347/349's sibling branches), but none of the 10 has a test
+-- exercising the transition from one of the other, more exotic fanned-out
+-- current_states (dropped, fast_forward, join_secondary, and similar) --
+-- this is Step 2a's own structural artifact of enumerating a role/predicate
+-- gate across every syntactically possible current_state, not a sign of 10
+-- separate functional bugs.
 SELECT e.pos AS rule, e.current_state, e.assigned_state, f.comment, count(*) AS n
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos
