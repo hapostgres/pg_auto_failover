@@ -85,7 +85,7 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- this is Step 2a's own structural artifact of enumerating a role/predicate
 -- gate across every syntactically possible current_state, not a sign of 10
 -- separate functional bugs.
-SELECT e.pos AS rule, e.current_state, e.assigned_state, f.comment, count(*) AS n
+SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.comment
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos
  WHERE NOT EXISTS (
