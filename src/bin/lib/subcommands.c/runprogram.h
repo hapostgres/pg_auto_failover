@@ -7,6 +7,7 @@
  */
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -182,6 +183,8 @@ execute_subprogram(Program *prog)
 	pid_t pid;
 	int outpipe[2] = { 0, 0 };
 	int errpipe[2] = { 0, 0 };
+	struct sigaction ignoreHup = { 0 };
+	struct sigaction oldHupAction = { 0 };
 
 	/* first level sanity check */
 	if (access(prog->program, F_OK | X_OK) == -1)
@@ -217,6 +220,28 @@ execute_subprogram(Program *prog)
 		}
 	}
 
+	/*
+	 * A caller (e.g. a long-running pg_autoctl service) may receive a
+	 * config-reload SIGHUP at any moment, including while we're blocked
+	 * here waiting on this child. SIGHUP's default disposition is to
+	 * terminate the receiving process, and that default applies to the
+	 * external program we're about to exec() (openssl, pg_basebackup,
+	 * pg_ctl, ...) regardless of whatever handler our caller has installed
+	 * for itself -- only an *ignored* signal survives exec(), a handler
+	 * function does not. Without this, a reload landing mid-subprocess
+	 * kills that subprocess outright (observed: "openssl failed with
+	 * return code: 129", 128+SIGHUP, during node registration racing a
+	 * concurrent `pg_autoctl set node metadata`).
+	 *
+	 * Ignore SIGHUP here, before fork(), so the child inherits the ignored
+	 * disposition through both fork() and exec(): the external program can
+	 * no longer be killed by a reload signal that has nothing to do with
+	 * it. Restored once the child is done, so our own SIGHUP handling
+	 * resumes normally afterward.
+	 */
+	ignoreHup.sa_handler = SIG_IGN;
+	sigaction(SIGHUP, &ignoreHup, &oldHupAction);
+
 	pid = fork();
 
 	switch (pid)
@@ -226,6 +251,7 @@ execute_subprogram(Program *prog)
 			/* fork failed */
 			prog->returnCode = -1;
 			prog->error = errno;
+			sigaction(SIGHUP, &oldHupAction, NULL);
 			return;
 		}
 
@@ -310,6 +336,8 @@ execute_subprogram(Program *prog)
 			{
 				(void) waitprogram(prog, pid);
 			}
+
+			sigaction(SIGHUP, &oldHupAction, NULL);
 			return;
 		}
 	}
