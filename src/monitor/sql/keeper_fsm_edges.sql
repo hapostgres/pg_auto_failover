@@ -61,9 +61,31 @@ SELECT e.pos, e.current_state, e.assigned_state, f.comment
 -- never assign -- either genuinely dead keeper code, or a real coverage
 -- gap on the monitor side, same "investigate before assuming which" caveat
 -- as step 2a's own comment.
+--
+-- assigned_state <> 'dropped' excludes a known, 100%-explained artifact,
+-- not a real gap: KeeperFSM[]'s two ANY_STATE -> DROPPED rows (fsm.c) get
+-- expanded by KeeperFSMToJSON() into one edge per concrete current_state
+-- (21 of them), but the monitor's own equivalent (remove_node(), pos
+-- 101/103) lives entirely in the api_triggered section, which
+-- dump_fsm_edges() deliberately excludes (see its own comment) since those
+-- rows resolve their target via hand-written C, not a NodeStatePattern --
+-- so dump_fsm_edges() can never produce a single edge assigning 'dropped',
+-- by construction, regardless of current_state. Filtering these out here
+-- avoids drowning the rows below in guaranteed noise.
+--
+-- The rows that remain still need the same per-row judgment as step 2a:
+-- some of their target states (e.g. maintenance, prepare_maintenance,
+-- wait_standby, join_primary, wait_maintenance) are ALSO only reachable
+-- through api_triggered rows and so are equally artifacts of that same
+-- exclusion; others (e.g. primary, catchingup, prepare_promotion) do have
+-- some non-api_triggered coverage in dump_fsm_edges(), so a gap against
+-- one of those is more likely a genuine reachability question worth
+-- investigating -- don't assume either way without checking the specific
+-- (current, assigned) pair against dump_fsm_edges() and pgautofailover.fsm.
 SELECT k.current_state, k.assigned_state
   FROM keeper_fsm_edges k
- WHERE NOT EXISTS (
+ WHERE k.assigned_state <> 'dropped'
+   AND NOT EXISTS (
          SELECT 1
            FROM pgautofailover.dump_fsm_edges() e
           WHERE e.current_state = k.current_state
