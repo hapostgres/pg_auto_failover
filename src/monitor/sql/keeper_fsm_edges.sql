@@ -60,7 +60,15 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- covering every current state also covers this specific one, so it counts
 -- as a match here exactly like a literal (e.current_state, e.assigned_state)
 -- row would.
-SELECT e.pos, e.current_state, e.assigned_state, f.comment
+--
+-- GROUPING SETS adds one summary row per rule (pos, assigned_state, comment)
+-- -- current_state NULL, n = how many current_states that single
+-- MonitorFSM[] rule fans out to -- alongside the ordinary per-current_state
+-- detail rows, so a rule using a broad NodeStatePattern (matching many
+-- states at once) is immediately visible as one big number instead of
+-- having to count its own detail rows by hand. NULLS FIRST puts each rule's
+-- summary row right before its own detail rows, as a header.
+SELECT e.pos AS rule, e.current_state, e.assigned_state, f.comment, count(*) AS n
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos
  WHERE NOT EXISTS (
@@ -69,7 +77,11 @@ SELECT e.pos, e.current_state, e.assigned_state, f.comment
           WHERE k.assigned_state = e.assigned_state
             AND (k.current_state = 'any' OR k.current_state = e.current_state::text)
        )
- ORDER BY e.pos, e.current_state;
+ GROUP BY GROUPING SETS (
+           (e.pos, e.assigned_state, f.comment, e.current_state),
+           (e.pos, e.assigned_state, f.comment)
+         )
+ ORDER BY e.pos, e.assigned_state, e.current_state NULLS FIRST;
 
 -- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
 -- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the

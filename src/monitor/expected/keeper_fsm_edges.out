@@ -138,7 +138,15 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- covering every current state also covers this specific one, so it counts
 -- as a match here exactly like a literal (e.current_state, e.assigned_state)
 -- row would.
-SELECT e.pos, e.current_state, e.assigned_state, f.comment
+--
+-- GROUPING SETS adds one summary row per rule (pos, assigned_state, comment)
+-- -- current_state NULL, n = how many current_states that single
+-- MonitorFSM[] rule fans out to -- alongside the ordinary per-current_state
+-- detail rows, so a rule using a broad NodeStatePattern (matching many
+-- states at once) is immediately visible as one big number instead of
+-- having to count its own detail rows by hand. NULLS FIRST puts each rule's
+-- summary row right before its own detail rows, as a header.
+SELECT e.pos AS rule, e.current_state, e.assigned_state, f.comment, count(*) AS n
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos
  WHERE NOT EXISTS (
@@ -147,144 +155,158 @@ SELECT e.pos, e.current_state, e.assigned_state, f.comment
           WHERE k.assigned_state = e.assigned_state
             AND (k.current_state = 'any' OR k.current_state = e.current_state::text)
        )
- ORDER BY e.pos, e.current_state;
- pos |    current_state    | assigned_state |                                                       comment                                                        
------+---------------------+----------------+----------------------------------------------------------------------------------------------------------------------
- 209 | wait_standby        | single         | alone in group, candidate-eligible -> single
- 209 | maintenance         | single         | alone in group, candidate-eligible -> single
- 209 | prepare_maintenance | single         | alone in group, candidate-eligible -> single
- 209 | wait_maintenance    | single         | alone in group, candidate-eligible -> single
- 209 | fast_forward        | single         | alone in group, candidate-eligible -> single
- 209 | join_secondary      | single         | alone in group, candidate-eligible -> single
- 211 | wait_primary        | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | primary             | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | demote_timeout      | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | prepare_promotion   | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | stop_replication    | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | wait_standby        | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | join_primary        | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | apply_settings      | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | wait_maintenance    | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | fast_forward        | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 211 | join_secondary      | report_lsn     | alone in group, candidatePriority zero -> report_lsn
- 303 | init                | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | draining            | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | demote_timeout      | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | demoted             | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | catchingup          | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | secondary           | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | wait_standby        | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | maintenance         | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | prepare_maintenance | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | wait_maintenance    | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | report_lsn          | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | fast_forward        | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | join_secondary      | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 303 | dropped             | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
- 325 | init                | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | single              | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | demote_timeout      | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | demoted             | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | catchingup          | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | secondary           | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | prepare_promotion   | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | stop_replication    | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | wait_standby        | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | maintenance         | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | prepare_maintenance | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | wait_maintenance    | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | report_lsn          | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | fast_forward        | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | join_secondary      | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 325 | dropped             | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
- 333 | init                | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | single              | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | catchingup          | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | secondary           | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | prepare_promotion   | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | stop_replication    | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | wait_standby        | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | maintenance         | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | prepare_maintenance | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | wait_maintenance    | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | report_lsn          | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | fast_forward        | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | join_secondary      | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 333 | dropped             | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
- 339 | init                | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | single              | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | demoted             | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | catchingup          | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | secondary           | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | prepare_promotion   | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | stop_replication    | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | wait_standby        | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | maintenance         | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | prepare_maintenance | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | wait_maintenance    | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | report_lsn          | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | fast_forward        | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | join_secondary      | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 339 | dropped             | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
- 347 | init                | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | single              | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | catchingup          | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | secondary           | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | prepare_promotion   | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | stop_replication    | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | wait_standby        | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | maintenance         | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | prepare_maintenance | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | wait_maintenance    | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | report_lsn          | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | fast_forward        | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | join_secondary      | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 347 | dropped             | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
- 349 | init                | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | single              | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | catchingup          | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | secondary           | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | prepare_promotion   | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | stop_replication    | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | wait_standby        | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | maintenance         | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | prepare_maintenance | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | wait_maintenance    | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | report_lsn          | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | fast_forward        | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | join_secondary      | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 349 | dropped             | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
- 351 | init                | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | single              | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | catchingup          | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | secondary           | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | prepare_promotion   | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | stop_replication    | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | wait_standby        | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | maintenance         | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | prepare_maintenance | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | wait_maintenance    | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | report_lsn          | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | fast_forward        | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | join_secondary      | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 351 | dropped             | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
- 391 | init                | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | single              | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | demote_timeout      | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | demoted             | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | catchingup          | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | secondary           | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | prepare_promotion   | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | stop_replication    | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | wait_standby        | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | maintenance         | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | prepare_maintenance | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | wait_maintenance    | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | report_lsn          | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | fast_forward        | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | join_secondary      | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
- 391 | dropped             | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-(134 rows)
+ GROUP BY GROUPING SETS (
+           (e.pos, e.assigned_state, f.comment, e.current_state),
+           (e.pos, e.assigned_state, f.comment)
+         )
+ ORDER BY e.pos, e.assigned_state, e.current_state NULLS FIRST;
+ rule |    current_state    | assigned_state |                                                       comment                                                        | n  
+------+---------------------+----------------+----------------------------------------------------------------------------------------------------------------------+----
+  209 |                     | single         | alone in group, candidate-eligible -> single                                                                         |  6
+  209 | wait_standby        | single         | alone in group, candidate-eligible -> single                                                                         |  1
+  209 | maintenance         | single         | alone in group, candidate-eligible -> single                                                                         |  1
+  209 | prepare_maintenance | single         | alone in group, candidate-eligible -> single                                                                         |  1
+  209 | wait_maintenance    | single         | alone in group, candidate-eligible -> single                                                                         |  1
+  209 | fast_forward        | single         | alone in group, candidate-eligible -> single                                                                         |  1
+  209 | join_secondary      | single         | alone in group, candidate-eligible -> single                                                                         |  1
+  211 |                     | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 | 11
+  211 | wait_primary        | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | primary             | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | demote_timeout      | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | prepare_promotion   | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | stop_replication    | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | wait_standby        | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | join_primary        | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | apply_settings      | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | wait_maintenance    | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | fast_forward        | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  211 | join_secondary      | report_lsn     | alone in group, candidatePriority zero -> report_lsn                                                                 |  1
+  303 |                     | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           | 14
+  303 | init                | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | draining            | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | demote_timeout      | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | demoted             | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | catchingup          | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | secondary           | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | wait_standby        | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | maintenance         | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | prepare_maintenance | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | wait_maintenance    | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | report_lsn          | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | fast_forward        | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | join_secondary      | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  303 | dropped             | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary                                           |  1
+  325 |                     | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              | 16
+  325 | init                | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | single              | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | demote_timeout      | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | demoted             | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | catchingup          | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | secondary           | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | prepare_promotion   | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | stop_replication    | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | wait_standby        | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | maintenance         | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | prepare_maintenance | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | wait_maintenance    | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | report_lsn          | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | fast_forward        | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | join_secondary      | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  325 | dropped             | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)              |  1
+  333 |                     | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            | 14
+  333 | init                | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | single              | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | catchingup          | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | secondary           | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | prepare_promotion   | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | stop_replication    | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | wait_standby        | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | maintenance         | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | prepare_maintenance | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | wait_maintenance    | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | report_lsn          | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | fast_forward        | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | join_secondary      | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  333 | dropped             | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted                                            |  1
+  339 |                     | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 | 15
+  339 | init                | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | single              | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | demoted             | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | catchingup          | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | secondary           | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | prepare_promotion   | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | stop_replication    | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | wait_standby        | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | maintenance         | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | prepare_maintenance | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | wait_maintenance    | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | report_lsn          | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | fast_forward        | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | join_secondary      | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  339 | dropped             | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)                 |  1
+  347 |                     | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    | 14
+  347 | init                | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | single              | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | catchingup          | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | secondary           | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | prepare_promotion   | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | stop_replication    | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | wait_standby        | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | maintenance         | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | prepare_maintenance | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | wait_maintenance    | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | report_lsn          | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | fast_forward        | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | join_secondary      | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  347 | dropped             | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)                                    |  1
+  349 |                     | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   | 14
+  349 | init                | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | single              | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | catchingup          | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | secondary           | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | prepare_promotion   | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | stop_replication    | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | wait_standby        | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | maintenance         | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | prepare_maintenance | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | wait_maintenance    | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | report_lsn          | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | fast_forward        | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | join_secondary      | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  349 | dropped             | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)                   |  1
+  351 |                     | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             | 14
+  351 | init                | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | single              | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | catchingup          | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | secondary           | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | prepare_promotion   | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | stop_replication    | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | wait_standby        | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | maintenance         | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | prepare_maintenance | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | wait_maintenance    | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | report_lsn          | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | fast_forward        | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | join_secondary      | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  351 | dropped             | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted                                             |  1
+  391 |                     | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining | 16
+  391 | init                | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | single              | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | demote_timeout      | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | demoted             | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | catchingup          | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | secondary           | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | prepare_promotion   | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | stop_replication    | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | wait_standby        | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | maintenance         | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | prepare_maintenance | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | wait_maintenance    | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | report_lsn          | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | fast_forward        | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | join_secondary      | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+  391 | dropped             | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining |  1
+(144 rows)
 
 -- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
 -- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the
