@@ -1565,57 +1565,16 @@ ActionRunMultiStandbyFailoverCascade(GroupStateContext *ctx, NodeActiveContext *
 {
 	AutoFailoverNode *primaryNode = nac->primaryNode.node;
 
-	if (!FindAndDispatchMonitorFSMRuleUnderPath(ctx, nac, SectionMSFailover, 0))
-	{
-		/*
-		 * Neither pos 391 nor pos 393 matched -- reproduce the original
-		 * hand-written condition exactly. nac->atLeastOneHealthyCandidate is
-		 * already the exact same fact those rows' own
-		 * atLeastOneHealthyCandidate condition checks (same
-		 * AutoFailoverOtherNodesListInState + CountHealthyCandidates
-		 * computation, see BuildFromContextNodeActiveContext), so it's reused
-		 * here rather than recomputed.
-		 *
-		 * Should never happen: verified by inspection that pos 391/393's own
-		 * conditions are exactly this hand-written condition, transcribed
-		 * 1:1, and confirmed by grepping every expected output file in the full
-		 * regress+isolation suite for this branch's own message text -- zero
-		 * matches, so nothing has ever exercised it. Kept as a hard
-		 * assertion (not silently dropped) rather than removed outright: if
-		 * a future edit to either the row's conditions or this hand-written
-		 * one ever makes them diverge, USE_ASSERT_CHECKING builds (regress,
-		 * isolation, any dev build) fail loudly and immediately instead of
-		 * silently falling back to this branch forever, unnoticed. See
-		 * AssignDeclaredGoalState's own Assert for the same idea applied to
-		 * a single declared state instead of a whole condition.
-		 */
-		Assert(false);
-
-		if (IsInPrimaryState(primaryNode) &&
-			!IsCurrentState(primaryNode, REPLICATION_STATE_WAIT_PRIMARY) &&
-			nac->atLeastOneHealthyCandidate)
-		{
-			char drainingMessage[BUFSIZE] = { 0 };
-
-			snprintf(drainingMessage, BUFSIZE,
-					 "Setting goal state of " NODE_FORMAT
-					 " to draining after it became unhealthy.",
-					 NODE_FORMAT_ARGS(primaryNode));
-
-			AssignGoalState(primaryNode, REPLICATION_STATE_DRAINING, drainingMessage);
-		}
-		else if (IsCurrentState(primaryNode, REPLICATION_STATE_PREPARE_MAINTENANCE))
-		{
-			char maintenanceMessage[BUFSIZE] = { 0 };
-
-			snprintf(maintenanceMessage, BUFSIZE,
-					 "Setting goal state of " NODE_FORMAT
-					 " to maintenance after it converged to prepare_maintenance.",
-					 NODE_FORMAT_ARGS(primaryNode));
-
-			AssignGoalState(primaryNode, REPLICATION_STATE_MAINTENANCE, maintenanceMessage);
-		}
-	}
+	/*
+	 * pos 391/393 are the only two rows FindAndDispatchMonitorFSMRuleUnderPath
+	 * can reach here (nac->inMSFailoverCluster is false for this nac, so
+	 * every other row under SectionMSFailover is unreachable -- see
+	 * inMSFailoverCluster's own comment). A false return means neither
+	 * row's own condition held: a genuine, expected no-op (the primary is
+	 * unhealthy but neither draining nor prepare_maintenance applies yet),
+	 * not a bug -- nothing further to do this round.
+	 */
+	(void) FindAndDispatchMonitorFSMRuleUnderPath(ctx, nac, SectionMSFailover, 0);
 
 	if (!ProceedGroupStateForMSFailover(ctx, primaryNode))
 	{
@@ -4911,24 +4870,18 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 					 */
 					if (!TryMSFailoverDeclarativeRow(ctx, activeNode, activeNode))
 					{
-						/* should never happen -- see ActionRunMultiStandbyFailoverCascade's
-						 * own Assert(false) comment for why this stays a hard assertion
-						 * rather than a silently-kept fallback. */
-						Assert(false);
-
-						LogAndNotifyMessage(
-							message, BUFSIZE,
-							"Failover candidate " NODE_FORMAT
-							" is stuck in fast_forward: all WAL source nodes are "
-							"unhealthy and pgautofailover.guard_data_loss is true. "
-							"Resetting candidate to report_lsn to retry when a "
-							"source recovers. Use pg_autoctl perform failover "
-							"--allow-data-loss to promote with available WAL.",
-							NODE_FORMAT_ARGS(activeNode));
-
-						AssignGoalState(activeNode,
-										REPLICATION_STATE_REPORT_LSN,
-										message);
+						/*
+						 * Can't happen: the if-condition just above already
+						 * establishes exactly what pos 363's own conditions
+						 * require (same activeNodeAllWalSourcesUnhealthy/
+						 * guardDataLossEnabled facts, see
+						 * BuildMSFailoverNodeActiveContext).
+						 */
+						ereport(ERROR,
+								(errmsg("BUG: pos 363 didn't match " NODE_FORMAT
+										" although its own conditions should "
+										"always hold here",
+										NODE_FORMAT_ARGS(activeNode))));
 					}
 
 					return true;
@@ -5299,24 +5252,20 @@ BuildCandidateList(GroupStateContext *ctx, List *nodesGroupList,
 			  (node->reportedState == REPLICATION_STATE_DEMOTED &&
 			   node->goalState == REPLICATION_STATE_CATCHINGUP))))
 		{
-			char message[BUFSIZE] = { 0 };
-
 			++(candidateList->missingNodesCount);
 
 			if (!TryFanOutReportLsnRow(ctx, node))
 			{
-				/* should never happen -- see ActionRunMultiStandbyFailoverCascade's
-				 * own Assert(false) comment for why this stays a hard assertion
-				 * rather than a silently-kept fallback. */
-				Assert(false);
-
-				LogAndNotifyMessage(
-					message, BUFSIZE,
-					"Setting goal state of " NODE_FORMAT
-					" to report_lsn to find the failover candidate",
-					NODE_FORMAT_ARGS(node));
-
-				AssignGoalState(node, REPLICATION_STATE_REPORT_LSN, message);
+				/*
+				 * Can't happen: the if-condition just above already
+				 * establishes exactly what pos 367-373's own conditions
+				 * require.
+				 */
+				ereport(ERROR,
+						(errmsg("BUG: no MS-failover fan-out row matched "
+								NODE_FORMAT " although its own conditions "
+								"should always hold here",
+								NODE_FORMAT_ARGS(node))));
 			}
 
 			continue;
@@ -5364,22 +5313,15 @@ ProceedWithMSFailover(GroupStateContext *ctx, AutoFailoverNode *activeNode,
 		 */
 		if (!TryMSFailoverDeclarativeRow(ctx, activeNode, candidateNode))
 		{
-			char message[BUFSIZE];
-
-			/* should never happen -- see ActionRunMultiStandbyFailoverCascade's
-			 * own Assert(false) comment for why this stays a hard assertion
-			 * rather than a silently-kept fallback. */
-			Assert(false);
-
-			LogAndNotifyMessage(
-				message, BUFSIZE,
-				"Setting goal state of " NODE_FORMAT
-				" to join_secondary after " NODE_FORMAT
-				" got selected as the failover candidate.",
-				NODE_FORMAT_ARGS(activeNode),
-				NODE_FORMAT_ARGS(candidateNode));
-
-			AssignGoalState(activeNode, REPLICATION_STATE_JOIN_SECONDARY, message);
+			/*
+			 * Can't happen: the if-condition just above already establishes
+			 * exactly what pos 365's own conditions require.
+			 */
+			ereport(ERROR,
+					(errmsg("BUG: pos 365 didn't match " NODE_FORMAT
+							" although its own conditions should always "
+							"hold here",
+							NODE_FORMAT_ARGS(activeNode))));
 		}
 
 		return true;
@@ -5706,14 +5648,11 @@ PromoteSelectedNode(GroupStateContext *ctx,
 
 		if (!DispatchMonitorFSMRuleByPos(ctx, &promotionNac, 375))
 		{
-			/* should never happen -- see ActionRunMultiStandbyFailoverCascade's
-			 * own Assert(false) comment for why this stays a hard assertion
-			 * rather than a silently-kept fallback. */
-			Assert(false);
-
-			AssignGoalState(selectedNode,
-							REPLICATION_STATE_PREPARE_PROMOTION,
-							message);
+			/* can't happen: pos 375 is a fixed, always-present row (see
+			 * AssertMonitorFSMWellFormed) -- DispatchMonitorFSMRuleByPos only
+			 * fails to find a pos that doesn't exist in the table at all. */
+			ereport(ERROR,
+					(errmsg("BUG: MonitorFSM[] has no row with pos = 375")));
 		}
 
 		/* leave the other nodes in ReportLSN state for now */
@@ -5750,13 +5689,11 @@ PromoteSelectedNode(GroupStateContext *ctx,
 
 		if (!DispatchMonitorFSMRuleByPos(ctx, &promotionNac, 377))
 		{
-			/* should never happen -- see ActionRunMultiStandbyFailoverCascade's
-			 * own Assert(false) comment for why this stays a hard assertion
-			 * rather than a silently-kept fallback. */
-			Assert(false);
-
-			AssignGoalState(selectedNode,
-							REPLICATION_STATE_FAST_FORWARD, message);
+			/* can't happen: pos 377 is a fixed, always-present row (see
+			 * AssertMonitorFSMWellFormed) -- DispatchMonitorFSMRuleByPos only
+			 * fails to find a pos that doesn't exist in the table at all. */
+			ereport(ERROR,
+					(errmsg("BUG: MonitorFSM[] has no row with pos = 377")));
 		}
 
 		return true;
