@@ -197,38 +197,8 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
   211 |  1 | wait_maintenance    | report_lsn     | alone in group, candidatePriority zero -> report_lsn
   211 |  1 | fast_forward        | report_lsn     | alone in group, candidatePriority zero -> report_lsn
   211 |  1 | join_secondary      | report_lsn     | alone in group, candidatePriority zero -> report_lsn
-  303 | 14 |                     | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | init                | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | draining            | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | demote_timeout      | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | demoted             | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | catchingup          | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | secondary           | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | wait_standby        | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | maintenance         | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | prepare_maintenance | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | wait_maintenance    | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | report_lsn          | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | fast_forward        | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | join_secondary      | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  303 |  1 | dropped             | wait_primary   | primary healthy, no standby past replication_stall_timeout -> wait_primary
-  325 | 16 |                     | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | init                | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
+  325 |  1 |                     | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
   325 |  1 | single              | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | demote_timeout      | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | demoted             | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | catchingup          | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | secondary           | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | prepare_promotion   | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | stop_replication    | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | wait_standby        | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | maintenance         | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | prepare_maintenance | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | wait_maintenance    | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | report_lsn          | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | fast_forward        | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | join_secondary      | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
-  325 |  1 | dropped             | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
   333 | 14 |                     | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
   333 |  1 | init                | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
   333 |  1 | single              | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
@@ -305,24 +275,9 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
   351 |  1 | fast_forward        | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
   351 |  1 | join_secondary      | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
   351 |  1 | dropped             | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
-  391 | 16 |                     | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | init                | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
+  391 |  1 |                     | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
   391 |  1 | single              | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | demote_timeout      | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | demoted             | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | catchingup          | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | secondary           | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | prepare_promotion   | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | stop_replication    | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | wait_standby        | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | maintenance         | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | prepare_maintenance | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | wait_maintenance    | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | report_lsn          | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | fast_forward        | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | join_secondary      | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-  391 |  1 | dropped             | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-(143 rows)
+(98 rows)
 
 -- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
 -- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the

@@ -4341,6 +4341,92 @@ NodeStatePatternIncludesState(const NodeStatePattern *pattern, ReplicationState 
 
 
 /*
+ * StateCanSatisfyIsInPrimaryState answers, for a hypothetical reportedState
+ * of state, whether SOME goalState exists making IsInPrimaryState()
+ * (node_metadata.c) evaluate to required -- i.e. whether state is a genuinely
+ * possible edge SOURCE for a row whose own .isInPrimaryState field demands
+ * required, as opposed to merely a state dump_fsm_edges()'s own
+ * NodeStatePatternResolveFromStates() would enumerate without knowing
+ * anything about IsInPrimaryState() at all (that function only ever reads
+ * .statePattern; every other NodeStatusPattern field, isInPrimaryState
+ * included, is invisible to it by construction, see its own comment).
+ *
+ * IsInPrimaryState(node) is exactly:
+ *   (goal == reported && CanTakeWritesInState(goal))
+ *   || ((goal in {APPLY_SETTINGS, PRIMARY}) && (reported in {PRIMARY, APPLY_SETTINGS}))
+ *
+ * For required == true: choosing goal == state makes the first disjunct
+ * CanTakeWritesInState(state) -- always achievable when true. The second
+ * disjunct additionally admits state == PRIMARY or APPLY_SETTINGS via an
+ * appropriate goal choice even when CanTakeWritesInState(state) doesn't
+ * already cover it (it does, today -- CanTakeWritesInState already includes
+ * both -- but this is spelled out explicitly since the two conditions are
+ * independently maintained code and could diverge later).
+ *
+ * For required == false: some goal can always be chosen making both
+ * disjuncts fail (goal different from state, and not the specific
+ * APPLY_SETTINGS/PRIMARY pairing) -- IsInPrimaryState is never forced true
+ * for every possible goal by reportedState alone, so "false" is always
+ * satisfiable regardless of state.
+ *
+ * Confirmed real-world impact: pos 303's own .primaryNode.statePattern is
+ * NODE_STATE_ANY (no restriction at all) alongside .isInPrimaryState =
+ * BOOL_TRUE -- so dump_fsm_edges() would otherwise enumerate all 21 states
+ * as candidate primaryNode "current_state" sources for it, most of which
+ * (catchingup, secondary, dropped, maintenance, ...) IsInPrimaryState()
+ * could never actually accept regardless of goalState. This function
+ * narrows that down to the 5 states IsInPrimaryState can ever admit:
+ * single, primary, wait_primary, join_primary, apply_settings (from
+ * CanTakeWritesInState's own set).
+ *
+ * Deliberately narrow in scope: only .isInPrimaryState is modeled this way.
+ * Several sibling fields (isInMaintenance, canTakeWrites, drainTimeExpired,
+ * unreachableFromDemoteTimeout) are ALSO state-dependent in the same sense
+ * and could in principle be filtered the same way, but each needs its own
+ * careful satisfiability proof first -- isInMaintenance in particular looks
+ * deceptively similar to isInPrimaryState but is NOT safe to treat the same
+ * way without one: EdgeIsShadowedByEarlierRule's own comment documents a
+ * concrete case (pos 369) where a reportedState commonly assumed
+ * incompatible with a goal-dependent condition turned out to be reachable
+ * anyway, once a real, separate write path (stop_maintenance()'s
+ * api_triggered dispatch) was accounted for. Extending this file naively to
+ * every state-dependent field without doing that same due diligence for
+ * each risks reintroducing exactly that class of bug.
+ */
+static bool
+StateCanSatisfyIsInPrimaryState(ReplicationState state, bool required)
+{
+	if (!required)
+	{
+		return true;
+	}
+
+	return CanTakeWritesInState(state) ||
+		   state == REPLICATION_STATE_PRIMARY ||
+		   state == REPLICATION_STATE_APPLY_SETTINGS;
+}
+
+
+/*
+ * NodeStatusPatternSurvivesIsInPrimaryState filters a candidate edge-source
+ * state against pattern's own .isInPrimaryState field (BOOL_ANY -- the vast
+ * majority of rows -- always survives; see StateCanSatisfyIsInPrimaryState's
+ * own comment for BOOL_TRUE/BOOL_FALSE).
+ */
+static bool
+NodeStatusPatternSurvivesIsInPrimaryState(const NodeStatusPattern *pattern,
+										  ReplicationState state)
+{
+	if (pattern->isInPrimaryState == BOOL_ANY)
+	{
+		return true;
+	}
+
+	return StateCanSatisfyIsInPrimaryState(state, pattern->isInPrimaryState == BOOL_TRUE);
+}
+
+
+/*
  * NodeStatePatternKindIsReportedStateOnly: true for the pattern kinds whose
  * match genuinely depends only on reportedState (ignoring, for STABLE, its
  * own additional "reported == goal" requirement -- see this function's own
@@ -4751,6 +4837,11 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
+				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->activeNode, states[j]))
+				{
+					continue;
+				}
+
 				if (EdgeIsShadowedByEarlierRule(i, states[j], false, rule->sectionPath[0]))
 				{
 					continue;
@@ -4790,6 +4881,11 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 				bool isNull[3] = { false };
 
 				if (states[j] == rule->otherNodeAssignedState.state)
+				{
+					continue;
+				}
+
+				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->primaryNode, states[j]))
 				{
 					continue;
 				}
