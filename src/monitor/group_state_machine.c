@@ -4372,11 +4372,32 @@ PG_FUNCTION_INFO_V1(dump_fsm_edges);
  * live run.
  *
  * Every other mismatch that same run found (early_checks 209/211,
- * reporting_node 303/325/333/339/347/349/351) stayed reachable from a live
- * node's own genuine reported state with no such structural excuse, so they're
- * deliberately NOT filtered here -- each is a real candidate for individual
- * investigation against the keeper's actual KeeperFSM[] rows, not a known-safe
- * artifact of this function's own edge derivation.
+ * reporting_node 303/325/333/339/347/349/351) is deliberately NOT filtered
+ * here -- each is a real candidate for individual investigation against the
+ * keeper's actual KeeperFSM[] rows, not a known-safe artifact of this
+ * function's own edge derivation in the same structural sense as the two
+ * categories above.
+ *
+ * That said, this function resolves each row's own edges independently (the
+ * for-loop above never looks at any OTHER row), so it does NOT model
+ * first-match-wins shadowing between rows: a row can report an edge for a
+ * current_state that an EARLIER row (lower array index, matched
+ * unconditionally or under a broader condition) would actually intercept
+ * first in real dispatch, making that edge practically unreachable even
+ * though this function still emits it. Confirmed concretely for one such
+ * case via a live pgaftest run (tests/tap/specs/
+ * keeper_fsm_gap_211_primary_priority_zero.pgaf's own investigation): pos
+ * 209's "maintenance" edge looked like a real gap here, but pos 205
+ * ("converged to maintenance -> no-op, frozen until stop_maintenance()",
+ * unconditional on MAINTENANCE_STATE, no groupHasExactlyOneNode check) comes
+ * first in array order and intercepts every node_active() call from a node
+ * in MAINTENANCE_STATE regardless of group size -- pos 209 can never
+ * actually fire for that state, single-node group or not. Anyone
+ * individually investigating one of the mismatches named above should rule
+ * this out first (does an earlier row in MonitorFSM[] match the same
+ * current_state unconditionally, or under a condition the one being
+ * investigated doesn't also exclude?) before concluding a row's own
+ * fanned-out current_state is a real, reachable gap.
  */
 Datum
 dump_fsm_edges(PG_FUNCTION_ARGS)
