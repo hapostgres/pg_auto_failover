@@ -1,42 +1,42 @@
-# Diagnostic spec for MonitorFSM[] pos 211 ("alone in group,
-# candidatePriority zero -> report_lsn", src/monitor/group_state_machine.c)
-# -- NOT in the CI schedule, same convention as debug_failover_pg19.pgaf,
-# since it is expected to FAIL until the missing KeeperFSM[] transition
-# documented below is implemented.
+# Regression spec for MonitorFSM[] pos 210/211 ("alone in group,
+# candidatePriority zero", src/monitor/group_state_machine.c).
 #
-# src/monitor/sql/keeper_fsm_edges.sql's Step 2a found that pos 211's
-# NodeStatePattern is willing to assign REPORT_LSN_STATE to a lone remaining
-# node reporting PRIMARY_STATE as its current_state (among ten other
-# fanned-out states), but KeeperFSM[] (src/bin/pg_autoctl/fsm.c) has no
-# PRIMARY_STATE -> REPORT_LSN_STATE row at all.
+# This spec originally documented a real gap: pos 211 ("alone in group,
+# candidatePriority zero -> report_lsn") fired even when the lone remaining
+# node was already serving as primary, and KeeperFSM[] (src/bin/pg_autoctl/
+# fsm.c) has no PRIMARY_STATE -> REPORT_LSN_STATE row -- so the node got
+# stuck reporting "primary" forever, still accepting writes, while the
+# monitor believed it had been demoted.
 #
-# This spec manufactures that exact (current, assigned) pair deterministically
-# (no timing race: candidate-priority and node role are both explicit,
-# durable node properties, not transient states):
+# The fix is on the monitor side, not the keeper side: demoting the
+# cluster's only remaining writable node to report_lsn once every other
+# node is gone serves no purpose (there is no alternative candidate left to
+# promote instead), so pos 210 now assigns SINGLE instead, exactly as a
+# candidate-eligible lone primary already gets via pos 209.
+#
+# This spec now asserts that fixed behavior:
 #
 #   1. node2 is promoted to primary, then its own candidate-priority is set
 #      to 0.
 #   2. node1 (now the only secondary) is dropped, leaving node2 alone in the
 #      group -- still reporting PRIMARY_STATE, since nothing prompts it to
 #      change role on its own.
-#   3. The monitor recomputes: groupHasExactlyOneNode is now true, node2's
-#      own reported current_state is "primary", and its candidate priority
-#      is 0 (not eligible), so pos 211 fires and the monitor assigns
-#      REPORT_LSN.
-#   4. node2's keeper receives that assigned state, but
-#      keeper_fsm_reach_assigned_state() (fsm.c) finds no matching
-#      KeeperFSM[] row for (primary -> report_lsn) and logs
-#      "pg_autoctl does not know how to reach state \"report_lsn\" from
-#      \"primary\"" (fsm.c's own log_fatal call) -- node2 never converges,
-#      staying stuck reporting "primary" forever (still accepting writes,
-#      which the monitor no longer expects once "report_lsn" is assigned).
+#   3. The monitor recomputes: groupHasExactlyOneNode is now true, node2 is
+#      still primary-role (reportedState in {primary, wait_primary,
+#      join_primary, apply_settings}), and its candidate priority is 0 (not
+#      eligible) -- pos 210 fires and the monitor assigns SINGLE.
+#   4. node2's keeper has an ordinary PRIMARY_STATE -> SINGLE_STATE
+#      transition (KeeperFSM[]), so it actually converges: reportedstate
+#      becomes "single", matching the assigned goal.
 #
-# Expected fix: add a PRIMARY_STATE -> REPORT_LSN_STATE row to KeeperFSM[],
-# see this file's own header comment in fsm.c for the reusable-code question
-# (a lone priority-zero primary demoting itself to report_lsn is a novel
-# transition shape; check whether any existing transition function already
-# does "stop being a writable primary without a promotion counterpart" that
-# could be reused, e.g. the DEMOTED_STATE-family transitions).
+# pos 210's own condition is gated on node2's *reported* state alone (not
+# IsInPrimaryState(), which also requires goalState to already agree) --
+# an earlier version of this row used isInPrimaryState=true and, live in
+# this exact scenario, self-undermined one dispatch after firing: assigning
+# SINGLE changed goalState away from what IsInPrimaryState() requires, so
+# the row stopped matching on the very next dispatch and pos 211 (no such
+# requirement) fired right behind it, overwriting the assignment back to
+# REPORT_LSN. This spec is what caught that oscillation live.
 
 cluster {
     monitor
@@ -67,35 +67,24 @@ step test_002_drop_secondary_leaves_lone_priority_zero_primary {
     exec node1  pg_autoctl drop node --no-wait
     wait until node1 stopped  timeout 60s
     # The monitor now sees exactly one node (node2) in the group, still
-    # reporting "primary", with candidate-priority 0 -- pos 211 must fire
-    # and assign "report_lsn".
-    wait until node2 assigned-state = report_lsn  timeout 60s
+    # reporting "primary", with candidate-priority 0 -- pos 210 must fire
+    # and assign "single" (not pos 211's "report_lsn": that would strand a
+    # node with no alternative candidate left to hand off to).
+    wait until node2 assigned-state = single  timeout 60s
 }
 
-step test_003_node2_cannot_reach_report_lsn_from_primary {
-    # This is the failure this spec exists to demonstrate: node2 is assigned
-    # "report_lsn" (confirmed above) but has no KeeperFSM[] transition to get
-    # there from "primary", so it never converges -- it keeps reporting
-    # "primary" indefinitely instead, retrying the failed transition on every
-    # loop iteration. Queried directly against pgautofailover.node rather
-    # than via "assert ... state is ..."/"assert ... stays ... while { }":
-    # neither of those constructs fit here, since node2's *reported* state
-    # (reportedstate) and its *goal* state (goalstate) have genuinely and
-    # permanently diverged -- there's no single moment to "wait until", and
-    # no unchanged baseline to assert "stays" against.
-    #
-    # Once the missing transition is implemented, this query's second column
-    # is expected to change to "report_lsn" (node2 actually converges), at
-    # which point this spec should be rewritten to assert that convergence
-    # instead.
-    sleep 5s
+step test_003_node2_converges_to_single {
+    # node2 has an ordinary PRIMARY_STATE -> SINGLE_STATE transition
+    # (KeeperFSM[]), so unlike the original report_lsn assignment, this one
+    # is actually reachable -- confirm it converges rather than getting
+    # stuck reporting "primary" forever.
+    wait until node2 state is single  timeout 60s
     sql monitor {
         SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
     }
-    expect { primary }
+    expect { single }
     sql monitor {
         SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node2';
     }
-    expect { report_lsn }
-    logs node2 contains "does not know how to reach state"
+    expect { single }
 }

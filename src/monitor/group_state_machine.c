@@ -317,6 +317,25 @@ static const NodeStatePattern FSM_PRIMARY_OR_APPLY_SETTINGS_ONLY = {
 };
 
 /*
+ * reportedState alone (goalState irrelevant) is one of the roles
+ * CanTakeWritesInState() recognizes as "serving as primary", minus SINGLE --
+ * NODE_STATE_REPORTED, deliberately not NODE_STATE_STABLE: a STABLE pattern
+ * requires reportedState == goalState, which breaks the moment a row using
+ * this pattern reassigns goalState itself (see pos 210's own comment for the
+ * real oscillation this caused when it instead relied on IsInPrimaryState(),
+ * which has the same reported == goal requirement built in). Matching on
+ * reportedState only means the match survives across the row's own
+ * extraAction, since nothing here ever touches reportedState directly.
+ */
+static const NodeStatePattern FSM_REPORTED_PRIMARY_ROLE_STATES = {
+	.kind = NODE_STATE_REPORTED,
+	.reportedStates = STATES(REPLICATION_STATE_PRIMARY,
+							 REPLICATION_STATE_WAIT_PRIMARY,
+							 REPLICATION_STATE_JOIN_PRIMARY,
+							 REPLICATION_STATE_APPLY_SETTINGS),
+};
+
+/*
  * reported WAIT_PRIMARY, goal in {WAIT_PRIMARY, PRIMARY} -- join_secondary's
  * cascade row
  */
@@ -1149,11 +1168,13 @@ typedef struct MonitorFSMTransition
  *     already primary-role) and from ActionRunPrimaryNodeTransition's
  *     nested pass on primaryNode (join_secondary's cascade row).
  *
- *   MonitorFSM_SIZE
- *     Total row count -- the size every bounded search's own linear scan
- *     runs over (see FindMatchingMonitorFSMRuleIndexUnderPath), and the end
- *     bound dump_fsm()/dump_fsm_edges()/AssertMonitorFSMWellFormed() each
- *     iterate to.
+ *   Table end
+ *     MonitorFSM[] ends with a terminator row (.pos left at its zero
+ *     default, which no real row ever has) rather than a separately
+ *     maintained count -- every bounded search's own linear scan (see
+ *     FindMatchingMonitorFSMRuleIndexUnderPath) and every full-table walk
+ *     (dump_fsm()/dump_fsm_edges()/AssertMonitorFSMWellFormed()) stops there
+ *     instead.
  *
  * What makes a row's own sectionPath safe to hand-write (rather than a
  * foot-gun): every row also carries its own .pos (see MonitorFSMTransition
@@ -1187,7 +1208,6 @@ static void ActionLogMSFailoverQuorumContinue(GroupStateContext *ctx,
 											  NodeActiveContext *nac,
 											  char *message);
 
-#define MonitorFSM_SIZE 79
 #define MonitorFSM_MultiStandbyCascadeResumeAfterPos 305
 
 static const MonitorFSMSectionPath SectionApiTriggered =
@@ -1301,13 +1321,20 @@ RuleMatches(const NodeActiveContext *nac, const MonitorFSMTransition *rule)
  * very start of whichever rows are under prefix", the ordinary case; a specific
  * pos is only ever passed for the one genuine mid-section resume point this
  * table has (see MonitorFSM_MultiStandbyCascadeResumeAfterPos).
+ *
+ * table is always MonitorFSM[] itself, terminated by a sentinel row whose
+ * .pos is left at its zero default (no real row ever has pos <= 0) -- the
+ * loop below stops there instead of at a separately hand-maintained count,
+ * which is exactly the mechanism that once let a row silently fall out of
+ * every bounded search in this file when it drifted out of sync (see the
+ * MonitorFSM[] array's own trailing comment, right after its last real row).
  */
 static int
-FindMatchingMonitorFSMRuleIndexUnderPath(const MonitorFSMTransition table[], int tableSize,
+FindMatchingMonitorFSMRuleIndexUnderPath(const MonitorFSMTransition table[],
 										 const MonitorFSMSectionPath prefix, int afterPos,
 										 const NodeActiveContext *nac)
 {
-	for (int i = 0; i < tableSize; i++)
+	for (int i = 0; table[i].pos != 0; i++)
 	{
 		if (table[i].pos <= afterPos)
 		{
@@ -1436,8 +1463,7 @@ static bool
 FindAndDispatchMonitorFSMRuleUnderPath(GroupStateContext *ctx, NodeActiveContext *nac,
 									   const MonitorFSMSectionPath prefix, int afterPos)
 {
-	int index = FindMatchingMonitorFSMRuleIndexUnderPath(MonitorFSM, MonitorFSM_SIZE,
-														 prefix, afterPos, nac);
+	int index = FindMatchingMonitorFSMRuleIndexUnderPath(MonitorFSM, prefix, afterPos, nac);
 
 	if (index < 0)
 	{
@@ -2000,7 +2026,7 @@ ProceedGroupStateForApiTrigger(MonitorApiFunction apiFunction,
 	BuildGroupStateContext(&ctx, activeNode);
 	BuildApiTriggerNodeActiveContext(&ctx, apiFunction, activeNode, primaryNode, &nac);
 
-	int index = FindMatchingMonitorFSMRuleIndexUnderPath(MonitorFSM, MonitorFSM_SIZE,
+	int index = FindMatchingMonitorFSMRuleIndexUnderPath(MonitorFSM,
 														 SectionApiTriggered, 0, &nac);
 
 	if (index < 0)
@@ -2414,7 +2440,51 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SINGLE),
 	  .comment = "alone in group, candidate-eligible -> single" },
 
-	/* alone in group, not candidate-eligible */
+	/*
+	 * alone in group, not candidate-eligible, but already serving as primary
+	 * -- candidatePriority=0 exists to steer a FUTURE election away from
+	 * this node when an alternative exists; once every other node is gone,
+	 * there is no alternative left to prefer, and demoting the cluster's
+	 * only remaining writable node to report_lsn would strand it there
+	 * indefinitely (no candidate will ever appear to promote instead) for
+	 * no operational benefit -- the least-surprising behavior is to let it
+	 * keep serving as SINGLE, exactly as a candidate-eligible lone primary
+	 * already does via pos 209. Checked before pos 211 below (a strict
+	 * subset of its own condition -- candidateEligible=FALSE, plus
+	 * "already primary-role") so first-match-wins routes this specific case
+	 * here instead.
+	 *
+	 * Gated on FSM_REPORTED_PRIMARY_ROLE_STATES (reportedState alone), not
+	 * isInPrimaryState() (which also requires goalState to already agree):
+	 * a live pgaftest run (keeper_fsm_gap_211_primary_priority_zero.pgaf)
+	 * caught a real self-undermining oscillation with the isInPrimaryState
+	 * version -- this row's own extraAction reassigns goalState to SINGLE,
+	 * which makes isInPrimaryState() evaluate false on the very next
+	 * dispatch (goalState=single no longer agrees with reportedState, which
+	 * is still primary, and single isn't in isInPrimaryState()'s own
+	 * {PRIMARY,APPLY_SETTINGS} second disjunct either) -- so this row
+	 * stopped matching one dispatch after firing, and pos 211 (which has no
+	 * such requirement) fired right behind it and overwrote the assignment
+	 * back to REPORT_LSN. reportedState is untouched by this row's own
+	 * action, so matching on it alone stays stable across dispatches until
+	 * the keeper itself actually converges to single.
+	 */
+	{ .pos = 210,
+	  .sectionPath = {
+	      MONITOR_FSM_SECTION_EARLY_CHECKS
+	  },
+	  .activeNode = { .statePattern = FSM_REPORTED_PRIMARY_ROLE_STATES,
+					  .candidateEligible = BOOL_FALSE },
+	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SINGLE),
+	  .comment = "alone in group, already primary despite candidatePriority "
+				 "zero -> single" },
+
+	/*
+	 * alone in group, not candidate-eligible, and was never already primary
+	 * (a lone surviving standby) -- candidatePriority=0 is honored here:
+	 * wait for an operator or a new peer, don't self-promote.
+	 */
 	{ .pos = 211,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_EARLY_CHECKS
@@ -3226,10 +3296,11 @@ static const MonitorFSMTransition MonitorFSM[] = {
 				 "primary maintenance" },
 
 	/*
-	 * --- [MonitorFSM_PrimaryNodeSectionStart, MonitorFSM_SIZE): the
-	 * declarative replacement for ProceedGroupStateForPrimaryNode()'s own
-	 * sequential if-chain. Here .activeNode maps to the primaryNode parameter,
-	 * not a reporting node -- reached either directly by the top-level driver
+	 * --- the PRIMARY_NODE section (sectionPath[0] ==
+	 * MONITOR_FSM_SECTION_PRIMARY_NODE, pos 401 onward): the declarative
+	 * replacement for ProceedGroupStateForPrimaryNode()'s own sequential
+	 * if-chain. Here .activeNode maps to the primaryNode parameter, not a
+	 * reporting node -- reached either directly by the top-level driver
 	 * (activeNode already primary-role) or via ActionRunPrimaryNodeTransition's
 	 * nested pass on primaryNode (the join_secondary cascade row above).
 	 */
@@ -3387,6 +3458,20 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_JOIN_PRIMARY) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
 	  .comment = "backwards-compat: join_primary -> primary" },
+
+	/*
+	 * Terminator, not a real rule -- .pos is deliberately left unset (its
+	 * zero default), which no real row above ever has (every real .pos
+	 * starts at 101). Every loop over MonitorFSM[] in this file stops here
+	 * instead of at a separately hand-maintained size constant (see this
+	 * array's own leading comment and AssertMonitorFSMWellFormed() for why
+	 * that constant was removed): a row inserted anywhere above this one is
+	 * automatically in scope for every one of those loops, and a row
+	 * mistakenly inserted after this one instead is caught by
+	 * AssertMonitorFSMWellFormed()'s own iteration-count sanity check. This
+	 * row must always stay last.
+	 */
+	{ .comment = "terminator -- do not add rows after this one" }
 };
 
 /*
@@ -3420,11 +3505,30 @@ static void
 AssertMonitorFSMWellFormed(void)
 {
 #ifdef USE_ASSERT_CHECKING
+
 	int previousPos = 0;
 	bool foundResumeAnchor = false;
 
-	for (int i = 0; i < MonitorFSM_SIZE; i++)
+	/*
+	 * MonitorFSM[] ends with a terminator row (.pos left at its zero
+	 * default) rather than a separately maintained count -- a hand-
+	 * maintained MonitorFSM_SIZE #define used to serve this purpose, and
+	 * adding a row without also bumping it once silently dropped pos 421
+	 * (the actual last row at the time) out of every loop bounded by it,
+	 * including dispatch itself -- caught only by chance, cross-checking
+	 * dump_fsm_edges() output by hand against expected keeper edges, not by
+	 * anything in this file. A terminator can't go stale the same way: it's
+	 * part of the array's own literal initializer, so any row added before
+	 * it is automatically in scope for every loop below. The iteration cap
+	 * here is just a sanity net against the terminator itself ever being
+	 * removed or a new row accidentally inserted after it, which would
+	 * otherwise turn every one of these loops into an unbounded scan past
+	 * the end of the array.
+	 */
+	for (int i = 0; MonitorFSM[i].pos != 0; i++)
 	{
+		Assert(i < 1000);
+
 		int pos = MonitorFSM[i].pos;
 		MonitorFSMSection top = MonitorFSM[i].sectionPath[0];
 
@@ -4146,7 +4250,7 @@ dump_fsm(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldContext);
 
-	for (int i = 0; i < MonitorFSM_SIZE; i++)
+	for (int i = 0; MonitorFSM[i].pos != 0; i++)
 	{
 		const MonitorFSMTransition *rule = &MonitorFSM[i];
 		Datum values[14];
@@ -4812,7 +4916,7 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldContext);
 
-	for (int i = 0; i < MonitorFSM_SIZE; i++)
+	for (int i = 0; MonitorFSM[i].pos != 0; i++)
 	{
 		const MonitorFSMTransition *rule = &MonitorFSM[i];
 
@@ -5297,7 +5401,7 @@ TryFanOutReportLsnRow(GroupStateContext *ctx, AutoFailoverNode *node)
 static bool
 DispatchMonitorFSMRuleByPos(GroupStateContext *ctx, NodeActiveContext *nac, int pos)
 {
-	for (int i = 0; i < MonitorFSM_SIZE; i++)
+	for (int i = 0; MonitorFSM[i].pos != 0; i++)
 	{
 		if (MonitorFSM[i].pos == pos)
 		{
