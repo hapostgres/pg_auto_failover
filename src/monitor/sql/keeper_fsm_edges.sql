@@ -34,7 +34,7 @@ SELECT DISTINCT
 
 SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 
--- Step 2: the actual cross-check -- every pgautofailover.dump_fsm_edges()
+-- Step 2a: monitor -> keeper direction -- every pgautofailover.dump_fsm_edges()
 -- edge the keeper_fsm_edges table above has no matching row for. A
 -- non-empty result here is a real, actionable gap (unlike
 -- check_fsm_reachability.sql's own synthetic-input test, which only
@@ -52,5 +52,23 @@ SELECT e.pos, e.current_state, e.assigned_state, f.comment
             AND k.assigned_state = e.assigned_state
        )
  ORDER BY e.pos, e.current_state;
+
+-- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
+-- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the
+-- full, fully-resolved edge set the monitor's table can reach, see its own
+-- comment). A non-empty result here means the keeper is prepared to
+-- transition through a (current, assigned) pair the monitor itself would
+-- never assign -- either genuinely dead keeper code, or a real coverage
+-- gap on the monitor side, same "investigate before assuming which" caveat
+-- as step 2a's own comment.
+SELECT k.current_state, k.assigned_state
+  FROM keeper_fsm_edges k
+ WHERE NOT EXISTS (
+         SELECT 1
+           FROM pgautofailover.dump_fsm_edges() e
+          WHERE e.current_state = k.current_state
+            AND e.assigned_state = k.assigned_state
+       )
+ ORDER BY k.current_state, k.assigned_state;
 
 DROP TABLE keeper_fsm_edges;

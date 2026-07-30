@@ -132,7 +132,7 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
  dropped             | dropped
 (97 rows)
 
--- Step 2: the actual cross-check -- every pgautofailover.dump_fsm_edges()
+-- Step 2a: monitor -> keeper direction -- every pgautofailover.dump_fsm_edges()
 -- edge the keeper_fsm_edges table above has no matching row for. A
 -- non-empty result here is a real, actionable gap (unlike
 -- check_fsm_reachability.sql's own synthetic-input test, which only
@@ -287,5 +287,64 @@ SELECT e.pos, e.current_state, e.assigned_state, f.comment
  391 | join_secondary      | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
  391 | dropped             | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
 (134 rows)
+
+-- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
+-- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the
+-- full, fully-resolved edge set the monitor's table can reach, see its own
+-- comment). A non-empty result here means the keeper is prepared to
+-- transition through a (current, assigned) pair the monitor itself would
+-- never assign -- either genuinely dead keeper code, or a real coverage
+-- gap on the monitor side, same "investigate before assuming which" caveat
+-- as step 2a's own comment.
+SELECT k.current_state, k.assigned_state
+  FROM keeper_fsm_edges k
+ WHERE NOT EXISTS (
+         SELECT 1
+           FROM pgautofailover.dump_fsm_edges() e
+          WHERE e.current_state = k.current_state
+            AND e.assigned_state = k.assigned_state
+       )
+ ORDER BY k.current_state, k.assigned_state;
+    current_state    |   assigned_state    
+---------------------+---------------------
+ init                | wait_standby
+ init                | dropped
+ single              | dropped
+ wait_primary        | join_primary
+ wait_primary        | apply_settings
+ wait_primary        | dropped
+ primary             | maintenance
+ primary             | join_primary
+ primary             | prepare_maintenance
+ primary             | dropped
+ draining            | dropped
+ demote_timeout      | primary
+ demote_timeout      | dropped
+ demoted             | dropped
+ catchingup          | prepare_promotion
+ catchingup          | maintenance
+ catchingup          | wait_maintenance
+ catchingup          | dropped
+ secondary           | wait_standby
+ secondary           | maintenance
+ secondary           | wait_maintenance
+ secondary           | dropped
+ prepare_promotion   | dropped
+ stop_replication    | dropped
+ wait_standby        | dropped
+ maintenance         | catchingup
+ maintenance         | dropped
+ join_primary        | dropped
+ apply_settings      | join_primary
+ apply_settings      | dropped
+ prepare_maintenance | catchingup
+ prepare_maintenance | dropped
+ wait_maintenance    | dropped
+ report_lsn          | dropped
+ fast_forward        | dropped
+ join_secondary      | dropped
+ dropped             | wait_standby
+ dropped             | dropped
+(38 rows)
 
 DROP TABLE keeper_fsm_edges;
