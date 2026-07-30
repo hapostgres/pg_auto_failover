@@ -502,6 +502,7 @@ typedef struct NodeStatusPattern
 	BoolPattern isInMaintenance;
 	BoolPattern isDemotedPrimary;
 	BoolPattern canTakeWrites;
+	BoolPattern reportedCanTakeWrites;
 	BoolPattern isReadyToStreamWAL;
 	BoolPattern drainTimeExpired;
 	BoolPattern isCitusWorkerGroup;
@@ -561,6 +562,16 @@ BuildNodeStatus(GroupStateContext *ctx, AutoFailoverNode *node, NodeStatus *stat
  * transition node (goalState allows writes, reportedState hasn't caught up
  * yet) still satisfies where isInPrimaryState (which additionally requires
  * stability) would not.
+ *
+ * reportedCanTakeWrites is CanTakeWritesInState applied to reportedState
+ * instead of goalState -- the reported-only counterpart pos 210's own
+ * comment explains the need for: a row whose extraAction reassigns
+ * goalState (any GOAL(...) assignment) can't gate its own match on anything
+ * that reads goalState (canTakeWrites, isInPrimaryState) without risking the
+ * exact self-undermining oscillation documented there, since the row's own
+ * action changes the very fact its condition is testing. reportedState is
+ * never written by this row's own action, so a condition built purely from
+ * it stays stable across dispatches until the keeper itself converges.
  */
 static bool
 NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
@@ -585,6 +596,9 @@ NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
 		   BoolMatchesPattern(status->node != NULL &&
 							  CanTakeWritesInState(status->node->goalState),
 							  pattern->canTakeWrites) &&
+		   BoolMatchesPattern(status->node != NULL &&
+							  CanTakeWritesInState(status->node->reportedState),
+							  pattern->reportedCanTakeWrites) &&
 		   BoolMatchesPattern(CandidateNodeIsReadyToStreamWAL(status->node),
 							  pattern->isReadyToStreamWAL) &&
 		   BoolMatchesPattern(NodeIsDrainTimeExpired(status->node, status->ctx),
@@ -2484,13 +2498,35 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 * alone in group, not candidate-eligible, and was never already primary
 	 * (a lone surviving standby) -- candidatePriority=0 is honored here:
 	 * wait for an operator or a new peer, don't self-promote.
+	 *
+	 * reportedCanTakeWrites=FALSE explicitly excludes the 4 primary-role
+	 * states pos 210 above already owns (a strict subset of this row's own
+	 * candidateEligible=FALSE + groupHasExactlyOneNode=TRUE condition, so
+	 * pos 210 always intercepts them first regardless of this exclusion --
+	 * first-match-wins alone already makes this row unreachable for those
+	 * states in practice). The exclusion is added anyway because
+	 * dump_fsm_edges()'s own shadow-detector (EdgeIsShadowedByEarlierRule)
+	 * only recognizes an earlier row as shadowing when it's *fully*
+	 * unconditional for the state -- pos 210 additionally requires
+	 * candidateEligible=FALSE and groupHasExactlyOneNode=TRUE, so it doesn't
+	 * qualify even though those conditions are identical to this row's own.
+	 * Without this exclusion, dump_fsm_edges() (and hence
+	 * keeper_fsm_edges.sql's Step 2a) kept listing "primary/wait_primary/
+	 * join_primary/apply_settings -> report_lsn" as a live keeper-coverage
+	 * gap even after pos 210 made it unreachable at runtime -- a real
+	 * runtime fix that the diagnostic didn't reflect. Making this row's own
+	 * pattern match its comment ("was never already primary") directly is
+	 * simpler and safer than generalizing the shadow-detector to prove
+	 * conditional (not just unconditional) shadowing between arbitrary row
+	 * pairs.
 	 */
 	{ .pos = 211,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_NOT_STABLE_SINGLE,
-					  .candidateEligible = BOOL_FALSE },
+					  .candidateEligible = BOOL_FALSE,
+					  .reportedCanTakeWrites = BOOL_FALSE },
 	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
 	  .comment = "alone in group, candidatePriority zero -> report_lsn" },
@@ -4088,6 +4124,7 @@ NodeStatusPatternConditionsText(const NodeStatusPattern *pattern, bool *isNull)
 	APPEND_BOOL_CONDITION(&buf, "isInMaintenance", pattern->isInMaintenance);
 	APPEND_BOOL_CONDITION(&buf, "isDemotedPrimary", pattern->isDemotedPrimary);
 	APPEND_BOOL_CONDITION(&buf, "canTakeWrites", pattern->canTakeWrites);
+	APPEND_BOOL_CONDITION(&buf, "reportedCanTakeWrites", pattern->reportedCanTakeWrites);
 	APPEND_BOOL_CONDITION(&buf, "isReadyToStreamWAL", pattern->isReadyToStreamWAL);
 	APPEND_BOOL_CONDITION(&buf, "drainTimeExpired", pattern->drainTimeExpired);
 	APPEND_BOOL_CONDITION(&buf, "isCitusWorkerGroup", pattern->isCitusWorkerGroup);
@@ -4531,6 +4568,32 @@ NodeStatusPatternSurvivesIsInPrimaryState(const NodeStatusPattern *pattern,
 
 
 /*
+ * NodeStatusPatternSurvivesReportedCanTakeWrites filters a candidate
+ * edge-source state against pattern's own .reportedCanTakeWrites field
+ * (BOOL_ANY -- the vast majority of rows -- always survives). Unlike
+ * isInPrimaryState, this needs no separate "does some goal exist making this
+ * true" satisfiability proof: reportedCanTakeWrites is CanTakeWritesInState
+ * applied to reportedState alone (see NodeMatchesPattern's own comment), so
+ * for a hypothetical reportedState of state, whether the pattern's demand is
+ * satisfiable is just CanTakeWritesInState(state) itself -- no goalState
+ * involved at all.
+ */
+static bool
+NodeStatusPatternSurvivesReportedCanTakeWrites(const NodeStatusPattern *pattern,
+												ReplicationState state)
+{
+	if (pattern->reportedCanTakeWrites == BOOL_ANY)
+	{
+		return true;
+	}
+
+	bool required = (pattern->reportedCanTakeWrites == BOOL_TRUE);
+
+	return CanTakeWritesInState(state) == required;
+}
+
+
+/*
  * NodeStatePatternKindIsReportedStateOnly: true for the pattern kinds whose
  * match genuinely depends only on reportedState (ignoring, for STABLE, its
  * own additional "reported == goal" requirement -- see this function's own
@@ -4615,6 +4678,7 @@ NodeStatusPatternOtherFieldsAreAny(const NodeStatusPattern *pattern)
 		   pattern->isInMaintenance == BOOL_ANY &&
 		   pattern->isDemotedPrimary == BOOL_ANY &&
 		   pattern->canTakeWrites == BOOL_ANY &&
+		   pattern->reportedCanTakeWrites == BOOL_ANY &&
 		   pattern->isReadyToStreamWAL == BOOL_ANY &&
 		   pattern->drainTimeExpired == BOOL_ANY &&
 		   pattern->isCitusWorkerGroup == BOOL_ANY &&
@@ -4946,6 +5010,12 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
+				if (!NodeStatusPatternSurvivesReportedCanTakeWrites(&rule->activeNode,
+																	states[j]))
+				{
+					continue;
+				}
+
 				if (EdgeIsShadowedByEarlierRule(i, states[j], false, rule->sectionPath[0]))
 				{
 					continue;
@@ -4990,6 +5060,12 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 				}
 
 				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->primaryNode, states[j]))
+				{
+					continue;
+				}
+
+				if (!NodeStatusPatternSurvivesReportedCanTakeWrites(&rule->primaryNode,
+																	states[j]))
 				{
 					continue;
 				}
