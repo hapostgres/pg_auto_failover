@@ -4539,19 +4539,34 @@ RuleUnconditionallyMatchesPrimaryNodeState(const MonitorFSMTransition *rule,
  * top-level scan (FindAndDispatchMonitorFSMRuleUnderPath's callers), so
  * shadowing within one section is straightforward to prove -- the section's
  * own default scan, starting from array position 0, is a real call that
- * genuinely exists and always runs in that order. Note this is a
- * conservative under-approximation, not a claim that cross-section
- * shadowing is impossible: EARLY_CHECKS always runs before REPORTING_NODE in
- * the same overall dispatch chain (ProceedGroupStateFromContext), so an
- * unconditional EARLY_CHECKS row (pos 201's "converged to dropped", say)
- * could in principle also shadow a REPORTING_NODE row's own "dropped"
- * fanned-out state -- this function does not attempt to detect that, since
- * doing so soundly requires modeling the fixed section-to-section call
- * order across the whole dispatch entry point graph, not just one section's
- * own internal array order. Left as a known limitation rather than a false
- * suppression risk: this scoping can only ever under-detect shadowing
- * (leaving a real-but-unreachable edge in the output), never wrongly hide a
- * genuinely reachable one.
+ * genuinely exists and always runs in that order.
+ *
+ * A cross-section version of this check was tried and REJECTED, not merely
+ * left as a TODO: ProceedGroupStateFromContext() does always try
+ * SectionEarlyChecks first, before SectionPrimaryNode/SectionReportingNode
+ * (see its own comment), which looks like it should let an unconditional
+ * early_checks row (pos 205's "converged to maintenance -> no-op") shadow a
+ * same-state edge in a later section too. It doesn't, in general: pos 205's
+ * own STABLE-kind pattern requires reportedState == goalState == maintenance,
+ * and that equality is NOT guaranteed just because reportedState ==
+ * maintenance -- stop_maintenance() on a multi-node group dispatches through
+ * the *separate* MONITOR_FSM_SECTION_API_TRIGGERED path (ProceedGroupStateFor
+ * ApiTrigger, not ProceedGroupStateFromContext at all) and assigns a new goal
+ * directly, independently of the target node's own next heartbeat -- so a
+ * node can genuinely present reportedState == maintenance with goalState
+ * already advanced past it. A first attempt at this cross-section extension
+ * treated pos 205 as shadowing pos 369 ("MS-failover fan-out: rejoining from
+ * maintenance -> report_lsn", a TRANSITIONING-kind row requiring exactly
+ * reportedState == maintenance AND goalState == catchingup) this way, and
+ * would have wrongly deleted a real, reachable edge -- caught before
+ * committing by checking the field-level trace by hand, not by any test.
+ * Soundly generalizing this would require modeling every place a node's own
+ * goalState can be written independently of its own next reportedState
+ * update (every apiTrigger row, not just stop_maintenance), which is a much
+ * larger undertaking than this function's own scope; same-section-only
+ * stays the safe, committed behavior. This under-approximates real
+ * shadowing (some cross-section cases go undetected), never over-approximates
+ * (no risk of wrongly hiding a genuinely reachable edge).
  */
 static bool
 EdgeIsShadowedByEarlierRule(int beforeIndex, ReplicationState state, bool primaryNodeSide,
