@@ -1319,45 +1319,12 @@ print_fsm_for_graphviz(void)
 
 
 /*
- * AllRealNodeStates is every "real" (non-sentinel) NodeState a keeper can
- * genuinely report or be assigned, used only to expand a KeeperFSMTransition
- * row's ANY_STATE wildcard (see KeeperFSMToJSON's own comment) into concrete
- * states -- NO_STATE (the array terminator) and ANY_STATE itself excluded.
- */
-static const NodeState AllRealNodeStates[] = {
-	INIT_STATE,
-	SINGLE_STATE,
-	PRIMARY_STATE,
-	WAIT_PRIMARY_STATE,
-	WAIT_STANDBY_STATE,
-	DEMOTED_STATE,
-	DEMOTE_TIMEOUT_STATE,
-	DRAINING_STATE,
-	SECONDARY_STATE,
-	CATCHINGUP_STATE,
-	PREP_PROMOTION_STATE,
-	STOP_REPLICATION_STATE,
-	MAINTENANCE_STATE,
-	JOIN_PRIMARY_STATE,
-	APPLY_SETTINGS_STATE,
-	PREPARE_MAINTENANCE_STATE,
-	WAIT_MAINTENANCE_STATE,
-	REPORT_LSN_STATE,
-	FAST_FORWARD_STATE,
-	JOIN_SECONDARY_STATE,
-	DROPPED_STATE
-};
-
-#define ALL_REAL_NODE_STATES_COUNT \
-	((int) (sizeof(AllRealNodeStates) / sizeof(AllRealNodeStates[0])))
-
-
-/*
  * KeeperFSMToJSONAppendEdge appends one {"current": ..., "assigned": ...}
- * object to array for a single, already-concrete (current, assigned) pair.
- * Factored out of KeeperFSMToJSON so its own ANY_STATE-expansion loop (see
- * that function's comment) can call it once per expanded state instead of
- * duplicating the object-building code.
+ * object to array for a single KeeperFSMTransition row. current is rendered
+ * as the literal string "any" for ANY_STATE (state_matches()'s wildcard,
+ * e.g. fsm.c's "drop node from any state" rows) instead of
+ * NodeStateToString(ANY_STATE)'s own "#any state#" -- see KeeperFSMToJSON's
+ * own comment for why this sentinel exists and how the SQL side matches it.
  */
 static void
 KeeperFSMToJSONAppendEdge(JSON_Array *array, NodeState current, NodeState assigned)
@@ -1365,7 +1332,8 @@ KeeperFSMToJSONAppendEdge(JSON_Array *array, NodeState current, NodeState assign
 	JSON_Value *jsEntry = json_value_init_object();
 	JSON_Object *jsObj = json_value_get_object(jsEntry);
 
-	json_object_set_string(jsObj, "current", NodeStateToString(current));
+	json_object_set_string(jsObj, "current",
+							current == ANY_STATE ? "any" : NodeStateToString(current));
 	json_object_set_string(jsObj, "assigned", NodeStateToString(assigned));
 
 	json_array_append_value(array, jsEntry);
@@ -1374,25 +1342,28 @@ KeeperFSMToJSONAppendEdge(JSON_Array *array, NodeState current, NodeState assign
 
 /*
  * KeeperFSMToJSON serializes KeeperFSM[] into a JSON array of
- * {"current": ..., "assigned": ...} objects -- one per concrete
- * (current, assigned) edge a KeeperFSMTransition row produces, walked the
- * same way print_fsm_for_graphviz/print_reachable_states already do. This
- * is the keeper-side half of the monitor/keeper FSM reachability
- * cross-check: "pg_autoctl inspect fsm check" sends this verbatim to the
- * monitor's pgautofailover.check_fsm_reachability(jsonb), which anti-joins
- * it against every edge the monitor's own MonitorFSM[] table
- * (group_state_machine.c) can produce (see dump_fsm_edges()'s own comment
- * there) and reports any monitor transition with no matching entry here.
+ * {"current": ..., "assigned": ...} objects -- one per KeeperFSMTransition
+ * row, walked the same way print_fsm_for_graphviz/print_reachable_states
+ * already do. This is the keeper-side half of the monitor/keeper FSM
+ * reachability cross-check: "pg_autoctl inspect fsm check" sends this
+ * verbatim to the monitor's pgautofailover.check_fsm_reachability(jsonb),
+ * which anti-joins it against every edge the monitor's own MonitorFSM[]
+ * table (group_state_machine.c) can produce (see dump_fsm_edges()'s own
+ * comment there) and reports any monitor transition with no matching entry
+ * here.
  *
- * A row's own .current can be ANY_STATE (state_matches()'s wildcard, e.g.
- * fsm.c's "drop node from any state" rows) -- NodeStateToString(ANY_STATE)
- * returns the literal string "#any state#", which is not a valid
- * pgautofailover.replication_state and would fail check_fsm_reachability()'s
- * own cast loudly (confirmed: this is exactly what happened the first time
- * this function ran for real, against a live monitor+keeper pair). Expanded
- * here into one concrete edge per AllRealNodeStates entry instead, mirroring
- * NodeStatePatternResolveFromStates' own ANY-kind handling on the monitor
- * side. .assigned is never ANY_STATE in any current KeeperFSM[] row (an
+ * A row's own .current can be ANY_STATE -- rendered here as the literal
+ * sentinel "any" (see KeeperFSMToJSONAppendEdge), not expanded into one
+ * edge per concrete state: an earlier version of this function expanded it
+ * against a hand-maintained list of "every real NodeState", which silently
+ * under-covers the real ANY_STATE semantics the moment that list drifts out
+ * of sync with the actual NodeState enum -- a false negative baked
+ * permanently into the fixture, with nothing to ever catch it. Emitting the
+ * wildcard literally instead lets the SQL comparison (check_fsm_reachability(),
+ * and this project's own keeper_fsm_edges.sql regress test) match it against
+ * whatever current_state values pgautofailover.dump_fsm_edges() actually
+ * produces, so it can never drift out of sync with the real state universe.
+ * .assigned is never ANY_STATE in any current KeeperFSM[] row (an
  * assignment target wildcard has no sensible meaning), so it's passed
  * through as-is.
  *
@@ -1416,18 +1387,7 @@ KeeperFSMToJSON(void)
 
 	while (transition.current != NO_STATE)
 	{
-		if (transition.current == ANY_STATE)
-		{
-			for (int i = 0; i < ALL_REAL_NODE_STATES_COUNT; i++)
-			{
-				KeeperFSMToJSONAppendEdge(array, AllRealNodeStates[i],
-										  transition.assigned);
-			}
-		}
-		else
-		{
-			KeeperFSMToJSONAppendEdge(array, transition.current, transition.assigned);
-		}
+		KeeperFSMToJSONAppendEdge(array, transition.current, transition.assigned);
 
 		transition = KeeperFSM[++transitionIndex];
 	}

@@ -18,17 +18,30 @@
 -- distinct keeper edge, so this test's own expected/keeper_fsm_edges.out
 -- shows the whole keeper FSM line by line, human-reviewable, with a diff on
 -- every change to KeeperFSM[] -- the same discipline fsm.sql's own dump
--- already gives MonitorFSM[]. DISTINCT: KeeperFSMToJSON()'s ANY_STATE
--- expansion (see its own comment, fsm.c) can make two different
--- KeeperFSM[] rows resolve to the exact same (current, assigned) pair --
--- the JSON has no per-row provenance to tell such duplicates apart by, so
--- they carry no extra information here and would only clutter the
--- reviewable list.
+-- already gives MonitorFSM[].
+--
+-- current_state is plain text, not pgautofailover.replication_state: a row
+-- whose real KeeperFSM[] .current is ANY_STATE (state_matches()'s wildcard)
+-- is serialized by KeeperFSMToJSON() as the literal string "any" (see its
+-- own comment, fsm.c), which is not a legal enum value by design -- it's a
+-- sentinel Step 2a/2b below match structurally, not a real reported state.
+-- Every other value is still round-tripped through the enum (CASE ... ELSE
+-- ... ::pgautofailover.replication_state ... END) so a typo'd or unrecognized
+-- state name in the fixture still fails loudly here, same as
+-- check_fsm_reachability()'s own cast does for the live-cluster path.
+--
+-- DISTINCT: nothing in KeeperFSM[] guarantees two different rows can't
+-- resolve to the exact same (current, assigned) pair, and the JSON has no
+-- per-row provenance to tell such duplicates apart by, so they carry no
+-- extra information here and would only clutter the reviewable list.
 \set keeper_json `cat keeper_fsm_edges.json`
 
 CREATE TABLE keeper_fsm_edges AS
 SELECT DISTINCT
-       (edge ->> 'current')::pgautofailover.replication_state AS current_state,
+       CASE WHEN (edge ->> 'current') = 'any'
+            THEN 'any'
+            ELSE ((edge ->> 'current')::pgautofailover.replication_state)::text
+       END AS current_state,
        (edge ->> 'assigned')::pgautofailover.replication_state AS assigned_state
   FROM jsonb_array_elements(:'keeper_json'::jsonb) AS edge;
 
@@ -42,14 +55,19 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- project's own investigation of these mismatches (dump_fsm_edges()'s own
 -- comment, group_state_machine.c, and the design doc) for which of them
 -- are genuine keeper gaps versus artifacts already excluded upstream.
+--
+-- k.current_state = 'any' matches every e.current_state -- a keeper row
+-- covering every current state also covers this specific one, so it counts
+-- as a match here exactly like a literal (e.current_state, e.assigned_state)
+-- row would.
 SELECT e.pos, e.current_state, e.assigned_state, f.comment
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos
  WHERE NOT EXISTS (
          SELECT 1
            FROM keeper_fsm_edges k
-          WHERE k.current_state = e.current_state
-            AND k.assigned_state = e.assigned_state
+          WHERE k.assigned_state = e.assigned_state
+            AND (k.current_state = 'any' OR k.current_state = e.current_state::text)
        )
  ORDER BY e.pos, e.current_state;
 
@@ -62,34 +80,29 @@ SELECT e.pos, e.current_state, e.assigned_state, f.comment
 -- gap on the monitor side, same "investigate before assuming which" caveat
 -- as step 2a's own comment.
 --
--- assigned_state <> 'dropped' excludes a known, 100%-explained artifact,
--- not a real gap: KeeperFSM[]'s two ANY_STATE -> DROPPED rows (fsm.c) get
--- expanded by KeeperFSMToJSON() into one edge per concrete current_state
--- (21 of them), but the monitor's own equivalent (remove_node(), pos
--- 101/103) lives entirely in the api_triggered section, which
--- dump_fsm_edges() deliberately excludes (see its own comment) since those
--- rows resolve their target via hand-written C, not a NodeStatePattern --
--- so dump_fsm_edges() can never produce a single edge assigning 'dropped',
--- by construction, regardless of current_state. Filtering these out here
--- avoids drowning the rows below in guaranteed noise.
---
--- The rows that remain still need the same per-row judgment as step 2a:
--- some of their target states (e.g. maintenance, prepare_maintenance,
--- wait_standby, join_primary, wait_maintenance) are ALSO only reachable
--- through api_triggered rows and so are equally artifacts of that same
--- exclusion; others (e.g. primary, catchingup, prepare_promotion) do have
--- some non-api_triggered coverage in dump_fsm_edges(), so a gap against
--- one of those is more likely a genuine reachability question worth
--- investigating -- don't assume either way without checking the specific
--- (current, assigned) pair against dump_fsm_edges() and pgautofailover.fsm.
+-- For a k.current_state = 'any' row, "matches" is existential: at least one
+-- current_state for which the monitor assigns this same target is enough
+-- to say the target is implementable at all, so a gap here means the
+-- monitor can NEVER produce this assigned_state from ANY current state --
+-- e.g. "any -> dropped": KeeperFSM[]'s two ANY_STATE -> DROPPED rows
+-- collapse to this single row (see Step 1's own comment on why "any" isn't
+-- expanded per-state anymore -- the previous per-state expansion turned
+-- this one keeper rule into 21 separate flagged rows here, a lot of
+-- redundant noise for a single underlying fact), and it stays flagged
+-- because dump_fsm_edges() really can never produce a 'dropped' edge at
+-- all: the monitor's own equivalent (remove_node(), pos 101/103) lives
+-- entirely in the api_triggered section, which dump_fsm_edges()
+-- deliberately excludes (see its own comment) since those rows resolve
+-- their target via hand-written C, not a NodeStatePattern. Same
+-- "investigate before assuming which" caveat as the rest of this file
+-- applies to every row below, "any" or not.
 SELECT k.current_state, k.assigned_state
   FROM keeper_fsm_edges k
- WHERE k.assigned_state <> 'dropped'
-   AND NOT EXISTS (
+ WHERE NOT EXISTS (
          SELECT 1
            FROM pgautofailover.dump_fsm_edges() e
-          WHERE e.current_state = k.current_state
-            AND e.assigned_state = k.assigned_state
+          WHERE e.assigned_state = k.assigned_state
+            AND (k.current_state = 'any' OR k.current_state = e.current_state::text)
        )
  ORDER BY k.current_state, k.assigned_state;
 

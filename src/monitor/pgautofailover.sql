@@ -345,9 +345,16 @@ grant execute on function pgautofailover.dump_fsm_edges() to autoctl_node;
 -- result means every transition the monitor can ever assign has somewhere
 -- for the keeper to go. keeper_edges is expected to be a jsonb array of
 -- {"current": ..., "assigned": ...} objects, one per KeeperFSMTransition
--- row; casting both fields to pgautofailover.replication_state means a
--- keeper reporting a state name this enum doesn't recognize fails loudly,
--- with a real cast error, rather than silently never matching.
+-- row. "current" can be the literal string "any" (KeeperFSMToJSON()'s own
+-- sentinel for a row whose real .current is ANY_STATE): matched against
+-- every e.current_state without ever casting it to
+-- pgautofailover.replication_state, via a CASE (not "k.current = 'any' OR
+-- k.current::...= e.current_state", which does not reliably guarantee the
+-- cast is skipped once the left side matches -- CASE WHEN/THEN is the only
+-- construct Postgres guarantees short-circuits). Any other current value,
+-- and "assigned" always, still go through the enum cast unconditionally --
+-- a keeper reporting a state name this enum doesn't recognize still fails
+-- loudly, with a real cast error, rather than silently never matching.
 CREATE FUNCTION pgautofailover.check_fsm_reachability(keeper_edges jsonb)
 RETURNS TABLE
  (
@@ -364,8 +371,10 @@ AS $$
      WHERE NOT EXISTS (
        SELECT 1
          FROM jsonb_to_recordset(keeper_edges) AS k(current text, assigned text)
-        WHERE k.current::pgautofailover.replication_state = e.current_state
-          AND k.assigned::pgautofailover.replication_state = e.assigned_state)
+        WHERE k.assigned::pgautofailover.replication_state = e.assigned_state
+          AND CASE WHEN k.current = 'any' THEN true
+                   ELSE k.current::pgautofailover.replication_state = e.current_state
+              END)
      ORDER BY e.pos;
 $$;
 
