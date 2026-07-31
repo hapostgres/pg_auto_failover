@@ -1,4 +1,4 @@
-# Node lifecycle, monitor operations, and Debian/tablespace layouts (~32 min).
+# Node lifecycle, monitor operations, and Debian/tablespace layouts (~34 min).
 # Merged from former node, monitor, and node-extra schedules to reduce CI job
 # count and GitHub Actions runner queue pressure.
 create_standby_with_pgdata
@@ -16,4 +16,7 @@ demote_timeout_wait_primary_deadlock
 timeline_fork_report_lsn_deadlock
 timeline_fork_3node_auto_detect
 keeper_fsm_gap_209_wait_maintenance
+keeper_fsm_gap_211_wait_maintenance
+keeper_fsm_gap_209_wait_standby
+keeper_fsm_gap_211_wait_standby
 keeper_fsm_gap_211_primary_priority_zero
