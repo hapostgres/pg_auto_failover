@@ -936,6 +936,70 @@ KeeperFSMTransition KeeperFSM[] = {
 		FSM_PHASE_FAILOVER
 	},
 
+	/*
+	 * was mid-promotion (selected as the MS-failover candidate, assigned
+	 * prepare_promotion) but every other node vanished and this node's own
+	 * candidate-priority is 0 -- reuse fsm_report_lsn exactly like every
+	 * other converged-standby source state above. Safe to reuse directly,
+	 * with no intermediate hop: entering prepare_promotion itself runs
+	 * fsm_prepare_standby_for_promotion, which is a no-op (see its own
+	 * comment, fsm_transition.c) -- Postgres is still running, still an
+	 * ordinary streaming standby, completely untouched. fsm_report_lsn's
+	 * own restart (standby_restart_with_current_replication_source,
+	 * primary_standby.c) writes a fresh disconnected-standby recovery
+	 * config and restarts Postgres itself, so it doesn't matter that there
+	 * is no live upstream to reach -- it never tries to reach one.
+	 */
+	{
+		PREP_PROMOTION_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
+	 * was demoting after losing the primary role (draining timed out, or a
+	 * manual failover put another node in charge) but every other node
+	 * vanished and this node's own candidate-priority is 0 -- reuse
+	 * fsm_report_lsn exactly like every other converged-standby source
+	 * state above. Safe for the same reason as prepare_promotion just
+	 * above: fsm_stop_replication's own default_transaction_read_only=on
+	 * already blocks this node from taking writes while in demote_timeout,
+	 * so no writes have landed here that a real primary elsewhere
+	 * wouldn't also have; fsm_report_lsn's own restart reconfigures and
+	 * restarts Postgres unconditionally, with no live peer required.
+	 */
+	{
+		DEMOTE_TIMEOUT_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
+	 * was following a newly-elected primary (report_lsn -> join_secondary,
+	 * Postgres cleanly checkpointed and stopped by
+	 * fsm_checkpoint_and_stop_postgres while switching allegiance) but
+	 * every other node vanished before it could finish, including the new
+	 * primary it was about to follow, and this node's own candidate-
+	 * priority is 0 -- reuse fsm_report_lsn exactly like every other
+	 * converged-standby source state above. Safe for the same reason as
+	 * prepare_promotion above despite Postgres currently being stopped:
+	 * fsm_report_lsn's own restart (standby_restart_with_current_
+	 * replication_source) stops Postgres if running, reconfigures it as a
+	 * disconnected standby, and starts it back up -- it handles "already
+	 * stopped" and "still running" identically, and never needs to reach
+	 * any peer to do it. The data itself is trustworthy: the checkpoint
+	 * that stopped Postgres happened before any new primary could have
+	 * taken a single write this node doesn't already have.
+	 */
+	{
+		JOIN_SECONDARY_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
 	{
 		REPORT_LSN_STATE, PREP_PROMOTION_STATE, NODE_KIND_CITUS_WORKER,
 		COMMENT_REPORT_LSN_TO_PREP_PROMOTION,

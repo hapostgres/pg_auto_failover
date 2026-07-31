@@ -97,13 +97,14 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 --     KeeperFSM[] rows (FAST_FORWARD_STATE -> SINGLE_STATE /
 --     REPORT_LSN_STATE, fsm.c, reusing fsm_promote_standby/fsm_report_lsn
 --     exactly like every other converged-standby source state) and real
---     pgaftest coverage (keeper_fsm_gap_209_fast_forward.pgaf,
---     keeper_fsm_gap_211_fast_forward.pgaf) reproducing a genuine MS-failover
---     candidate falling behind, fetching real WAL, and then being left alone
---     -- see those specs' own headers for why node1/node2 must be removed
---     from the group while node3 is still fetching (not after it reports
---     fast_forward) to actually exercise these rows instead of racing
---     against the monitor's own cascade continuation.
+--     pgaftest coverage (keeper_fsm_gap_candidate_fast_forward_left_alone.pgaf,
+--     keeper_fsm_gap_priority_zero_fast_forward_left_alone.pgaf) reproducing
+--     a genuine MS-failover candidate falling behind, fetching real WAL, and
+--     then being left alone -- see those specs' own headers for why
+--     node1/node2 must be removed from the group while node3 is still
+--     fetching (not after it reports fast_forward) to actually exercise
+--     these rows instead of racing against the monitor's own cascade
+--     continuation.
 --   * pos 209's join_secondary and prepare_maintenance current_states are no
 --     longer even in this gap list at all: both were found to be a genuine
 --     data-loss risk, not a missing convenience -- promoting either straight
@@ -124,25 +125,68 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 --     pos 209 alone would have left ProceedGroupStateFromContext's own
 --     "couldn't find the primary node" guard to ereport(ERROR) on every
 --     single subsequent heartbeat -- worse than the original bug. Both
---     fixes verified live: keeper_fsm_gap_209_prepare_maintenance.pgaf
+--     fixes verified live: keeper_fsm_gap_primary_left_alone_mid_maintenance_handoff.pgaf
 --     reproduces a lone prepare_maintenance primary staying safely parked
 --     (goalstate never becomes single) and confirms it keeps successfully
 --     checking in (reporttime advancing) rather than looping on that error.
---   * pos 211's own join_secondary/prepare_maintenance current_states are
---     untouched by the above -- report_lsn is a far less dangerous target
---     than single (it doesn't let the node accept writes), so the same
---     split-brain argument doesn't automatically carry over; not
---     investigated further this pass.
---   * pos 209/211's remaining states (demote_timeout, prepare_promotion,
---     stop_replication) were each checked for real reachability under
---     "alone in group" and found contrived: each implies an internal tension
---     with candidateEligible=FALSE (prepare_promotion/stop_replication imply
---     having already been selected as a promotion candidate; demote_timeout's
---     genuinely-stuck case is already intercepted earlier by pos 207). None
---     ruled out as impossible, but none reproducible via a single, realistic
---     operator/network-failure sequence the way wait_maintenance and
---     wait_standby were -- left as documented artifacts, not pursued further
---     this pass.
+--   * pos 211's own join_secondary/prepare_promotion/demote_timeout
+--     current_states are now genuinely fixed and covered too, via a much
+--     simpler path than pos 209's: report_lsn never grants write access, so
+--     none of pos 209's split-brain argument carries over here -- there was
+--     nothing *unsafe* about these, they were simply missing KeeperFSM[]
+--     rows, the exact same shape of gap fast_forward had. All three reuse
+--     fsm_report_lsn directly:
+--       - prepare_promotion: entering it (fsm_prepare_standby_for_promotion)
+--         is a no-op -- Postgres is untouched, still an ordinary streaming
+--         standby -- so this is exactly as safe as SECONDARY/CATCHINGUP's
+--         own existing rows.
+--       - demote_timeout: fsm_stop_replication already sets
+--         default_transaction_read_only=on before this state is ever
+--         reported, so no writes can have landed here that a real primary
+--         elsewhere wouldn't also already have.
+--       - join_secondary: Postgres was cleanly checkpointed and stopped
+--         (fsm_checkpoint_and_stop_postgres) before reaching this state --
+--         a trustworthy, consistent copy of data that hasn't been
+--         superseded by anything (unlike pos 209's own join_secondary
+--         concern, there is no new primary for this data to have fallen
+--         behind, since candidatePriority=0 was never in the running to
+--         become one).
+--     fsm_report_lsn's own restart (standby_restart_with_current_
+--     replication_source, primary_standby.c) handles all three uniformly:
+--     it stops Postgres if running, rewrites the recovery config with no
+--     primary_conninfo, and restarts -- it never needs to reach any peer,
+--     so it doesn't matter that none exist.
+--
+--     Verified via this test (Step 1/2a, the keeper_fsm_edges.json fixture
+--     and dump_fsm_edges() both resolving these three edges consistently)
+--     and the code reasoning above, not a live pgaftest reproduction: a
+--     live attempt for prepare_promotion specifically found the race
+--     fast_forward's own fix doesn't have -- fsm_prepare_standby_for_
+--     promotion is a no-op, so the monitor's cascade advances from
+--     assigned=prepare_promotion straight through to stop_replication
+--     within the same heartbeat, before any external test script's own
+--     "remove the other peers" SQL call can land in between. (That same
+--     attempt did incidentally confirm live that stop_replication really
+--     is a dead end below: node3 sat reporting stop_replication,
+--     endlessly reassigned report_lsn by this same pos 211 row, with no
+--     KeeperFSM[] row able to reach it.) demote_timeout and join_secondary
+--     were not attempted live given the identical instantaneous-transition
+--     shape.
+--   * pos 211's stop_replication current_state is the one exception left
+--     unfixed, and unlike the three above it is not simply "missing a row":
+--     fsm_stop_replication doesn't just stop a process, its own comment
+--     says it shuts down the replication stream "by promoting the
+--     replica" -- Postgres has already left recovery onto a new timeline
+--     by the time this state is reported. Getting back to an ordinary,
+--     disconnected-standby report_lsn state from there needs a real
+--     pg_rewind/basebackup style re-sync (fsm_restart_standby ->
+--     fsm_rewind_or_init, already used for MAINTENANCE_STATE/
+--     PREPARE_MAINTENANCE_STATE -> CATCHINGUP_STATE), and that function's
+--     own first step, keeper_get_primary(), hard-requires a live,
+--     reachable primary to rewind against or basebackup from -- which
+--     cannot exist by pos 211's own "alone in group" precondition. No
+--     existing function can do this safely when truly alone; left as a
+--     documented, unfixed gap.
 --   * pos 325's remaining "single" state (the primaryNode side) is a
 --     genuine model contradiction, not just a contrived scenario: it would
 --     require the primary to report goalState == reportedState == single

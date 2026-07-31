@@ -414,5 +414,17 @@
   {
     "current": "fast_forward",
     "assigned": "report_lsn"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "demote_timeout",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "join_secondary",
+    "assigned": "report_lsn"
   }
 ]

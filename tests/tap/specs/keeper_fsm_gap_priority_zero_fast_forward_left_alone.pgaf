@@ -1,7 +1,7 @@
 # Regression spec for MonitorFSM[] pos 211 ("alone in group,
 # candidatePriority zero -> report_lsn", src/monitor/group_state_machine.c),
 # for its fast_forward current_state -- the candidatePriority=0 sibling of
-# keeper_fsm_gap_209_fast_forward.pgaf's own scenario. See that spec's header
+# keeper_fsm_gap_candidate_fast_forward_left_alone.pgaf's own scenario. See that spec's header
 # for the full story of how a real fast_forward state is forced (network
 # disconnect + INSERT + CHECKPOINT to create genuine LSN divergence, the
 # same recipe already established by tests/tap/specs/multi_ifdown.pgaf and
@@ -36,7 +36,7 @@
 # selection entirely, so a node can only reach fast_forward while still
 # candidate-eligible. Its priority is only dropped to 0 afterwards, once it
 # is already assigned fast_forward (confirmed via "assigned-state =
-# fast_forward", the same checkpoint keeper_fsm_gap_209_fast_forward.pgaf
+# fast_forward", the same checkpoint keeper_fsm_gap_candidate_fast_forward_left_alone.pgaf
 # uses before removing peers) -- and, same as the peer removal, done via
 # the underlying pgautofailover.set_node_candidate_priority() SQL function
 # directly rather than the `pg_autoctl set node candidate-priority` CLI:
@@ -48,7 +48,7 @@
 # those remove_node() calls, closing the window instead of losing the race
 # to confirm against at that point:
 #
-#   1. Identical setup to keeper_fsm_gap_209_fast_forward.pgaf: node2
+#   1. Identical setup to keeper_fsm_gap_candidate_fast_forward_left_alone.pgaf: node2
 #      (candidate-priority 0, WAL source) stays connected and caught up;
 #      node3 (default nonzero candidate-priority) is disconnected while
 #      node1 receives writes, then reconnected as node1 is disconnected --

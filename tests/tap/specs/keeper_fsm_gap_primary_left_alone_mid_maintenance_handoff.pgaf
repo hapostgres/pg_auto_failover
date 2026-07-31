@@ -54,7 +54,7 @@
 #      for full convergence to "maintenance", which would race against the
 #      very next step below; calling the SQL function directly gives full
 #      control over timing, the same lesson learned constructing
-#      keeper_fsm_gap_211_fast_forward.pgaf). This assigns node1
+#      keeper_fsm_gap_priority_zero_fast_forward_left_alone.pgaf). This assigns node1
 #      PREPARE_MAINTENANCE_STATE and node2 (the only standby)
 #      PREPARE_PROMOTION_STATE in the same call.
 #   2. Once node1 is confirmed *assigned* prepare_maintenance (still
