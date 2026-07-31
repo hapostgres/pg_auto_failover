@@ -1,0 +1,96 @@
+# Regression spec confirming a real requirement flagged during the pos
+# 209/211 "alone in group" investigation: once a lone node is parked at
+# report_lsn with candidate-priority 0 (pos 211's own "wait for an operator
+# or a new peer" outcome), is there actually a way for the cluster to
+# recover once a new peer DOES show up?
+#
+# Answer: yes, already fully working, no monitor or keeper change needed --
+# confirmed live. register_node()'s own logic (RegisterNode,
+# node_active_protocol.c ~line 662-694) already handles this exact case: if
+# there's no primary and no promotion already in flight, it searches for a
+# node with candidatePriority == 0 AND IsCurrentState(REPORT_LSN); if found,
+# the new node is ALSO assigned initialState = REPORT_LSN (not
+# WAIT_STANDBY), which uses fsm_init_from_standby / keeper_get_most_
+# advanced_standby (NOT keeper_get_primary, which would find nothing here --
+# GetPrimaryOrDemotedNodeInGroupFromList requires CanTakeWritesInState or
+# StateBelongsToPrimary, neither of which report_lsn satisfies) to
+# basebackup from the existing report_lsn node instead of a "real" primary.
+#
+# Once the new node registers, the group now has TWO report_lsn-reporting
+# nodes -- exactly the ordinary MS-failover candidate-selection scenario
+# (BuildCandidateList/SelectFailoverCandidateNode/PromoteSelectedNode).
+# Since the new node has ordinary (nonzero) candidate-priority while the
+# original node is still 0, the new node is selected as the failover
+# candidate and promoted -- through fast_forward (if marginally behind the
+# original node's exact LSN after basebackup), prepare_promotion,
+# wait_primary, primary -- while the ORIGINAL report_lsn node transitions
+# report_lsn -> join_secondary -> secondary, following the new node as its
+# primary. The cluster ends up fully HA again with zero manual
+# intervention beyond starting the new node.
+#
+# This was discovered by literally trying it live: an earlier draft of this
+# spec asserted the new node would become a plain secondary of the
+# original node, which is backwards -- it actually becomes the new
+# primary, and the original (priority-zero) node becomes its secondary.
+#
+#   1. node1 (primary) + node2 (secondary) bootstrap normally.
+#   2. node2's candidate-priority is set to 0.
+#   3. node1 is network-disconnected, node2 told to enter maintenance (last
+#      quorum member -> wait_maintenance), then node1 is dropped directly --
+#      leaving node2 alone, converged at report_lsn (candidate-priority 0).
+#      (Same mechanism as keeper_fsm_gap_211_wait_maintenance.pgaf.)
+#   4. node3 (created with launch deferred) is started only now, once node2
+#      is confirmed stuck at report_lsn. It registers, basebackups from
+#      node2, and the cluster elects it as the new primary.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+        node3 create and launch deferred
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+step test_001_zero_priority_and_disconnect_primary {
+    exec node2  pg_autoctl set node candidate-priority 0
+    network disconnect node1
+}
+
+step test_002_secondary_stuck_at_wait_maintenance {
+    exec-fails node2  pg_autoctl enable maintenance
+    wait until node2 state is wait_maintenance  timeout 60s
+}
+
+step test_003_drop_primary_converges_to_report_lsn {
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    wait until node2 assigned-state = report_lsn  timeout 60s
+    wait until node2 state is report_lsn  timeout 60s
+}
+
+step test_004_node3_joins_and_becomes_primary {
+    exec node3  pg_autoctl node start
+    wait until node3 state is primary
+        and node2 state is secondary
+        timeout 90s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { primary }
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { secondary }
+}

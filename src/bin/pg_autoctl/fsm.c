@@ -165,6 +165,10 @@
 	"Was waiting to be sent to maintenance, but the primary vanished, " \
 	"promote this node"
 
+#define COMMENT_FAST_FORWARD_TO_SINGLE \
+	"Was fetching missing WAL from another standby, but every other node " \
+	"vanished, promote this node with whatever it has"
+
 #define COMMENT_FOLLOW_NEW_PRIMARY \
 	"Switch replication to the new primary"
 
@@ -539,6 +543,27 @@ KeeperFSMTransition KeeperFSM[] = {
 	},
 
 	/*
+	 * was fetching missing WAL from another standby to catch up before
+	 * promotion (a converged-enough standby -- Postgres is already running
+	 * and replicating, same shape as the other converged-standby source
+	 * states above), but every other node vanished, including the peer we
+	 * were fetching from: fsm_fast_forward's own "no upstream found" branch
+	 * already accepts this (skips the fetch, treats local data as the best
+	 * available -- there is nothing more advanced left anywhere to lose),
+	 * so promoting with whatever this node already has is exactly as safe
+	 * as it gets. Reuse fsm_promote_standby exactly like every other
+	 * converged-standby source state -- no separate WAL fetch is attempted
+	 * or needed here, matching PREP_PROMOTION_STATE/STOP_REPLICATION_STATE's
+	 * own direct-to-SINGLE shortcut for "was mid-promotion, peer vanished".
+	 */
+	{
+		FAST_FORWARD_STATE, SINGLE_STATE, NODE_KIND_ANY,
+		COMMENT_FAST_FORWARD_TO_SINGLE,
+		&fsm_promote_standby,
+		FSM_PHASE_REMOVAL
+	},
+
+	/*
 	 * On the Primary, wait for a standby to be ready: WAIT_PRIMARY
 	 */
 	{
@@ -893,6 +918,22 @@ KeeperFSMTransition KeeperFSM[] = {
 		COMMENT_SECONDARY_TO_REPORT_LSN,
 		&fsm_report_lsn,
 		FSM_PHASE_MAINTENANCE
+	},
+
+	/*
+	 * was fetching missing WAL from another standby to catch up before
+	 * promotion (same converged-enough shape as the source states above),
+	 * but every other node vanished and this node's own candidate-priority
+	 * is 0 -- reuse fsm_report_lsn exactly like SECONDARY/CATCHINGUP/
+	 * MAINTENANCE/PREPARE_MAINTENANCE/WAIT_MAINTENANCE above. No WAL fetch
+	 * is attempted here either, same reasoning as FAST_FORWARD_STATE ->
+	 * SINGLE_STATE's own comment.
+	 */
+	{
+		FAST_FORWARD_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
 	},
 
 	{

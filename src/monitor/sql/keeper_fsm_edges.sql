@@ -91,19 +91,31 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- group_state_machine.c's reportedIsWaitStandby field (NodeStatusPattern)
 -- and KeeperFSM[]'s new WAIT_MAINTENANCE_STATE rows, fsm.c):
 --
+--   * pos 209/211's fast_forward current_state is now genuinely fixed and
+--     covered: a lone node reporting fast_forward (its WAL-source peer and
+--     the old primary both gone mid MS-failover) now has matching
+--     KeeperFSM[] rows (FAST_FORWARD_STATE -> SINGLE_STATE /
+--     REPORT_LSN_STATE, fsm.c, reusing fsm_promote_standby/fsm_report_lsn
+--     exactly like every other converged-standby source state) and real
+--     pgaftest coverage (keeper_fsm_gap_209_fast_forward.pgaf,
+--     keeper_fsm_gap_211_fast_forward.pgaf) reproducing a genuine MS-failover
+--     candidate falling behind, fetching real WAL, and then being left alone
+--     -- see those specs' own headers for why node1/node2 must be removed
+--     from the group while node3 is still fetching (not after it reports
+--     fast_forward) to actually exercise these rows instead of racing
+--     against the monitor's own cascade continuation.
 --   * pos 209/211's remaining states (prepare_maintenance, demote_timeout,
---     prepare_promotion, stop_replication, fast_forward, join_secondary)
---     were each checked for real reachability under "alone in group" and
---     found contrived: reaching them normally implies a multi-node context
---     (fast_forward/join_secondary need another standby to fetch WAL from
---     or a newly-elected primary to join, respectively) or an internal
---     tension with candidateEligible=FALSE (prepare_promotion/stop_
---     replication imply having already been selected as a promotion
---     candidate; demote_timeout's genuinely-stuck case is already
---     intercepted earlier by pos 207). None ruled out as impossible, but
---     none reproducible via a single, realistic operator/network-failure
---     sequence the way wait_maintenance and wait_standby were -- left as
---     documented artifacts, not pursued further this pass.
+--     prepare_promotion, stop_replication, join_secondary) were each checked
+--     for real reachability under "alone in group" and found contrived:
+--     reaching them normally implies a multi-node context (join_secondary
+--     needs a newly-elected primary to join) or an internal tension with
+--     candidateEligible=FALSE (prepare_promotion/stop_replication imply
+--     having already been selected as a promotion candidate; demote_timeout's
+--     genuinely-stuck case is already intercepted earlier by pos 207). None
+--     ruled out as impossible, but none reproducible via a single, realistic
+--     operator/network-failure sequence the way wait_maintenance and
+--     wait_standby were -- left as documented artifacts, not pursued further
+--     this pass.
 --   * pos 325's remaining "single" state (the primaryNode side) is a
 --     genuine model contradiction, not just a contrived scenario: it would
 --     require the primary to report goalState == reportedState == single

@@ -1,0 +1,154 @@
+# Regression spec for MonitorFSM[] pos 211 ("alone in group,
+# candidatePriority zero -> report_lsn", src/monitor/group_state_machine.c),
+# for its fast_forward current_state -- the candidatePriority=0 sibling of
+# keeper_fsm_gap_209_fast_forward.pgaf's own scenario. See that spec's header
+# for the full story of how a real fast_forward state is forced (network
+# disconnect + INSERT + CHECKPOINT to create genuine LSN divergence, the
+# same recipe already established by tests/tap/specs/multi_ifdown.pgaf and
+# tests/tap/specs/debug_citus_worker_fast_forward.pgaf) and, critically, why
+# node1's and node2's rows must be dropped immediately once node3 is
+# *assigned* fast_forward -- not after it *reports* fast_forward -- to
+# reliably exercise the KeeperFSM[] row under test instead of racing against
+# the monitor's own MS-failover cascade (which, left alone, advances
+# fast_forward -> prepare_promotion -> stop_replication within about a
+# second of node3 reporting convergence, converging to single via a
+# different, pre-existing row instead).
+#
+# This spec asserts the candidatePriority=0 sibling row that was added
+# alongside pos 209's:
+#
+#   {
+#       FAST_FORWARD_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+#       COMMENT_SECONDARY_TO_REPORT_LSN,
+#       &fsm_report_lsn,
+#       FSM_PHASE_FAILOVER
+#   },
+#
+# reusing fsm_report_lsn exactly like every other converged-standby source
+# state that already had a REPORT_LSN_STATE-bound row (SECONDARY/CATCHINGUP/
+# MAINTENANCE/PREPARE_MAINTENANCE/WAIT_MAINTENANCE) -- no separate WAL fetch
+# is attempted or needed, fast_forward already means Postgres is running as
+# a caught-up-enough standby.
+#
+# node3 needs its ordinary (nonzero) candidate-priority to actually be
+# selected as the failover candidate and assigned fast_forward in the first
+# place -- GroupListCandidates excludes candidatePriority == 0 nodes from
+# selection entirely, so a node can only reach fast_forward while still
+# candidate-eligible. Its priority is only dropped to 0 afterwards, once it
+# is already assigned fast_forward (confirmed via "assigned-state =
+# fast_forward", the same checkpoint keeper_fsm_gap_209_fast_forward.pgaf
+# uses before removing peers) -- and, same as the peer removal, done via
+# the underlying pgautofailover.set_node_candidate_priority() SQL function
+# directly rather than the `pg_autoctl set node candidate-priority` CLI:
+# that CLI spawns a docker exec plus its own "wait for the settings to be
+# applied to ... the primary node" confirmation loop, slow enough that the
+# monitor's own MS-failover cascade (fast_forward -> prepare_promotion)
+# already won the race by the time an earlier draft of this spec got around
+# to removing node1/node2 below -- the plain SQL call is exactly as fast as
+# those remove_node() calls, closing the window instead of losing the race
+# to confirm against at that point:
+#
+#   1. Identical setup to keeper_fsm_gap_209_fast_forward.pgaf: node2
+#      (candidate-priority 0, WAL source) stays connected and caught up;
+#      node3 (default nonzero candidate-priority) is disconnected while
+#      node1 receives writes, then reconnected as node1 is disconnected --
+#      forcing an MS-failover election that selects node3 (the only
+#      candidate) and assigns it FAST_FORWARD_STATE to fetch the missing
+#      WAL from node2.
+#   2. Once node3 is confirmed *assigned* fast_forward (still fetching,
+#      not yet converged): its own candidate-priority is set to 0, and
+#      node1's and node2's rows are dropped directly via
+#      pgautofailover.remove_node(..., true) (node2 is still alive and
+#      connected, so force=true is required; its actual Postgres instance
+#      and the already-established direct fetch from node3 are
+#      unaffected by removing its monitor row). This makes "alone in
+#      group" true well before node3 finishes catching up.
+#   3. Once node3's own local recovery genuinely completes and it reports
+#      "fast_forward" for the first time, the monitor evaluates pos 211
+#      immediately on that exact report (alone=true, candidate-priority=0,
+#      reported=fast_forward) and assigns REPORT_LSN directly -- no
+#      cascade through prepare_promotion is possible, since node2's row is
+#      already gone.
+#   4. node3's keeper now has a matching KeeperFSM[] row (the fix under
+#      test) and actually converges to report_lsn, instead of getting
+#      stuck logging "does not know how to reach state \"report_lsn\"
+#      from \"fast_forward\"".
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+        node3
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    wait until node3 state is secondary  timeout 60s
+    promote node1
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_set_candidate_priorities {
+    exec node2  pg_autoctl set node candidate-priority 0
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 60s
+    sql node1 { CREATE TABLE t1 (a int); }
+}
+
+step test_002_disconnect_node3_and_diverge {
+    network disconnect node3
+    sql node1 {
+        INSERT INTO t1 SELECT x FROM generate_series(1, 5000) as gs(x);
+    }
+    sql node1 { CHECKPOINT; }
+}
+
+step test_003_failover_zero_priority_and_remove_peers_while_still_fetching {
+    network disconnect node1
+    network connect node3
+    wait until node3 assigned-state = fast_forward  timeout 60s
+    # Zero node3's own candidate-priority via the underlying SQL function
+    # (pgautofailover.set_node_candidate_priority), not the
+    # `pg_autoctl set node candidate-priority` CLI: that CLI spawns a new
+    # docker exec + its own "wait for settings to be applied" confirmation
+    # loop, slow enough that the monitor's own cascade (fast_forward ->
+    # prepare_promotion) already wins the race by the time it would get to
+    # removing node1/node2 below. A direct SQL call is just as fast as the
+    # remove_node() calls that follow it.
+    sql monitor {
+        SELECT pgautofailover.set_node_candidate_priority('default', 'node3', 0);
+    }
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+}
+
+step test_004_node3_converges_straight_to_report_lsn {
+    wait until node3 assigned-state = report_lsn  timeout 180s
+    wait until node3 state is report_lsn  timeout 60s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+}

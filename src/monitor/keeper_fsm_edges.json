@@ -406,5 +406,13 @@
   {
     "current": "wait_maintenance",
     "assigned": "report_lsn"
+  },
+  {
+    "current": "fast_forward",
+    "assigned": "single"
+  },
+  {
+    "current": "fast_forward",
+    "assigned": "report_lsn"
   }
 ]

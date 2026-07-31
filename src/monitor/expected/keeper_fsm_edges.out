@@ -73,7 +73,9 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
  dropped             | single
  dropped             | wait_standby
  dropped             | report_lsn
+ fast_forward        | single
  fast_forward        | prepare_promotion
+ fast_forward        | report_lsn
  init                | single
  init                | wait_standby
  init                | report_lsn
@@ -125,7 +127,7 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
  wait_primary        | join_primary
  wait_primary        | apply_settings
  wait_standby        | catchingup
-(79 rows)
+(81 rows)
 
 -- Step 2a: monitor -> keeper direction -- every pgautofailover.dump_fsm_edges()
 -- edge the keeper_fsm_edges table above has no matching row for. A
@@ -171,19 +173,31 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- group_state_machine.c's reportedIsWaitStandby field (NodeStatusPattern)
 -- and KeeperFSM[]'s new WAIT_MAINTENANCE_STATE rows, fsm.c):
 --
+--   * pos 209/211's fast_forward current_state is now genuinely fixed and
+--     covered: a lone node reporting fast_forward (its WAL-source peer and
+--     the old primary both gone mid MS-failover) now has matching
+--     KeeperFSM[] rows (FAST_FORWARD_STATE -> SINGLE_STATE /
+--     REPORT_LSN_STATE, fsm.c, reusing fsm_promote_standby/fsm_report_lsn
+--     exactly like every other converged-standby source state) and real
+--     pgaftest coverage (keeper_fsm_gap_209_fast_forward.pgaf,
+--     keeper_fsm_gap_211_fast_forward.pgaf) reproducing a genuine MS-failover
+--     candidate falling behind, fetching real WAL, and then being left alone
+--     -- see those specs' own headers for why node1/node2 must be removed
+--     from the group while node3 is still fetching (not after it reports
+--     fast_forward) to actually exercise these rows instead of racing
+--     against the monitor's own cascade continuation.
 --   * pos 209/211's remaining states (prepare_maintenance, demote_timeout,
---     prepare_promotion, stop_replication, fast_forward, join_secondary)
---     were each checked for real reachability under "alone in group" and
---     found contrived: reaching them normally implies a multi-node context
---     (fast_forward/join_secondary need another standby to fetch WAL from
---     or a newly-elected primary to join, respectively) or an internal
---     tension with candidateEligible=FALSE (prepare_promotion/stop_
---     replication imply having already been selected as a promotion
---     candidate; demote_timeout's genuinely-stuck case is already
---     intercepted earlier by pos 207). None ruled out as impossible, but
---     none reproducible via a single, realistic operator/network-failure
---     sequence the way wait_maintenance and wait_standby were -- left as
---     documented artifacts, not pursued further this pass.
+--     prepare_promotion, stop_replication, join_secondary) were each checked
+--     for real reachability under "alone in group" and found contrived:
+--     reaching them normally implies a multi-node context (join_secondary
+--     needs a newly-elected primary to join) or an internal tension with
+--     candidateEligible=FALSE (prepare_promotion/stop_replication imply
+--     having already been selected as a promotion candidate; demote_timeout's
+--     genuinely-stuck case is already intercepted earlier by pos 207). None
+--     ruled out as impossible, but none reproducible via a single, realistic
+--     operator/network-failure sequence the way wait_maintenance and
+--     wait_standby were -- left as documented artifacts, not pursued further
+--     this pass.
 --   * pos 325's remaining "single" state (the primaryNode side) is a
 --     genuine model contradiction, not just a contrived scenario: it would
 --     require the primary to report goalState == reportedState == single
@@ -209,15 +223,13 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
  ORDER BY e.pos, e.assigned_state, e.current_state NULLS FIRST;
  rule | n  |    current_state    | assigned_state |                                                       comment                                                        
 ------+----+---------------------+----------------+----------------------------------------------------------------------------------------------------------------------
-  209 |  3 |                     | single         | alone in group, candidate-eligible -> single
+  209 |  2 |                     | single         | alone in group, candidate-eligible -> single
   209 |  1 | prepare_maintenance | single         | alone in group, candidate-eligible -> single
-  209 |  1 | fast_forward        | single         | alone in group, candidate-eligible -> single
   209 |  1 | join_secondary      | single         | alone in group, candidate-eligible -> single
-  211 |  5 |                     | report_lsn     | alone in group, candidatePriority zero -> report_lsn
+  211 |  4 |                     | report_lsn     | alone in group, candidatePriority zero -> report_lsn
   211 |  1 | demote_timeout      | report_lsn     | alone in group, candidatePriority zero -> report_lsn
   211 |  1 | prepare_promotion   | report_lsn     | alone in group, candidatePriority zero -> report_lsn
   211 |  1 | stop_replication    | report_lsn     | alone in group, candidatePriority zero -> report_lsn
-  211 |  1 | fast_forward        | report_lsn     | alone in group, candidatePriority zero -> report_lsn
   211 |  1 | join_secondary      | report_lsn     | alone in group, candidatePriority zero -> report_lsn
   325 |  1 |                     | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
   325 |  1 | single              | draining       | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
@@ -299,7 +311,7 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
   351 |  1 | dropped             | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
   391 |  1 |                     | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
   391 |  1 | single              | draining       | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
-(90 rows)
+(88 rows)
 
 -- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
 -- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the
