@@ -504,6 +504,8 @@ typedef struct NodeStatusPattern
 	BoolPattern canTakeWrites;
 	BoolPattern reportedCanTakeWrites;
 	BoolPattern reportedIsWaitStandby;
+	BoolPattern reportedIsJoinSecondary;
+	BoolPattern reportedIsPrepareMaintenance;
 	BoolPattern isReadyToStreamWAL;
 	BoolPattern drainTimeExpired;
 	BoolPattern isCitusWorkerGroup;
@@ -589,6 +591,36 @@ BuildNodeStatus(GroupStateContext *ctx, AutoFailoverNode *node, NodeStatus *stat
  * sees pos 101's cross-row goalState write) but still let pos 209/211 fire
  * for a real wait_standby node in a live pgaftest run, exactly because of
  * this. Matching on reportedState alone sidesteps it entirely.
+ *
+ * reportedIsJoinSecondary, same reported-only shape as reportedIsWaitStandby
+ * just above, excludes JOIN_SECONDARY_STATE from pos 209's own "alone in
+ * group, candidate-eligible -> single" match. A node reporting
+ * join_secondary has already had Postgres cleanly checkpointed and stopped
+ * (fsm_checkpoint_and_stop_postgres, fsm.c) as part of switching its
+ * replication target to a newly-elected primary -- its on-disk data is a
+ * trustworthy copy, but only of *this node's own* last moment as the old
+ * primary, frozen before that new primary ever took a single write.
+ * Promoting it straight to SINGLE if it ends up alone risks silently
+ * discarding whatever the new primary committed in the meantime -- a real
+ * split-brain/data-loss risk, unlike every other source state pos 209
+ * matches, where the reporting node's own data is either already the most
+ * advanced available or was safely fetched from whichever node was.
+ *
+ * reportedIsPrepareMaintenance, same reported-only shape and same pos 209
+ * exclusion, for the primary-role counterpart of join_secondary's own risk.
+ * start_maintenance() assigns PREPARE_MAINTENANCE_STATE to the primary and
+ * PREPARE_PROMOTION_STATE to its chosen standby in the very same call (see
+ * pos 109/111's own comment) -- and pos 343 lets that standby advance all
+ * the way to WAIT_PRIMARY/PRIMARY the moment the old primary's own
+ * reportedState merely *converges* to prepare_maintenance (Postgres
+ * cleanly stopped, fsm_stop_postgres_for_primary_maintenance), with no
+ * requirement that the old primary's row ever be removed first. So a node
+ * can sit in prepare_maintenance indefinitely while a different, already
+ * fully-promoted primary is live and taking writes elsewhere -- if that new
+ * primary later also vanishes, promoting the OLD node straight to SINGLE
+ * would discard everything the new primary committed in between, the exact
+ * same split-brain risk reportedIsJoinSecondary guards against, just
+ * reached one step earlier in the handoff.
  */
 static bool
 NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
@@ -619,6 +651,13 @@ NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
 		   BoolMatchesPattern(status->node != NULL &&
 							  status->node->reportedState == REPLICATION_STATE_WAIT_STANDBY,
 							  pattern->reportedIsWaitStandby) &&
+		   BoolMatchesPattern(status->node != NULL &&
+							  status->node->reportedState == REPLICATION_STATE_JOIN_SECONDARY,
+							  pattern->reportedIsJoinSecondary) &&
+		   BoolMatchesPattern(status->node != NULL &&
+							  status->node->reportedState ==
+							  REPLICATION_STATE_PREPARE_MAINTENANCE,
+							  pattern->reportedIsPrepareMaintenance) &&
 		   BoolMatchesPattern(CandidateNodeIsReadyToStreamWAL(status->node),
 							  pattern->isReadyToStreamWAL) &&
 		   BoolMatchesPattern(NodeIsDrainTimeExpired(status->node, status->ctx),
@@ -2464,6 +2503,35 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "reported demote_timeout, assigned goal can't reach it -> demoted" },
 
 	/*
+	 * alone in group, still preparing for primary maintenance -- no-op,
+	 * same shape as pos 205's own "converged to maintenance" row. This row
+	 * exists purely to keep pos 209's own reportedIsPrepareMaintenance
+	 * exclusion (see its comment on NodeMatchesPattern) from turning into a
+	 * *worse* bug than the one it fixes: join_secondary is safely tolerated
+	 * when left alone because IsParticipatingInPromotion (node_metadata.c)
+	 * already recognizes it, but prepare_maintenance isn't recognized by
+	 * that function, by IsBeingPromoted, or by IsInPrimaryState
+	 * (CanTakeWritesInState(prepare_maintenance) is false) -- so without an
+	 * explicit match here, ProceedGroupStateFromContext's own "primaryNode
+	 * == NULL && !IsFailoverInProgress(...)" guard would ereport(ERROR) on
+	 * every single subsequent heartbeat from this node, instead of safely
+	 * leaving it stuck. Frozen here (no assignment) until an operator
+	 * intervenes -- the same "wait for an operator" outcome pos 211's own
+	 * candidatePriority=0 case already accepts for other source states.
+	 * Only fires when alone: in an ordinary (non-alone) group, the
+	 * candidate standby being promoted in parallel already satisfies
+	 * IsFailoverInProgress for the whole group, so this row must not
+	 * intercept that already-working path.
+	 */
+	{ .pos = 208,
+	  .sectionPath = {
+	      MONITOR_FSM_SECTION_EARLY_CHECKS
+	  },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_MAINTENANCE) },
+	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
+	  .comment = "alone in group, still preparing for maintenance -> no-op" },
+
+	/*
 	 * alone in group, candidate-eligible -- excludes WAIT_STANDBY_STATE too
 	 * (reportedIsWaitStandby's own comment on NodeMatchesPattern): a node
 	 * stuck there never actually started streaming, so there is no safe way
@@ -2475,6 +2543,30 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 * to report_lsn before this row's own next evaluation, which would
 	 * defeat a goalState-dependent (NOT_STABLE) exclusion the same way pos
 	 * 210's own isInPrimaryState condition was defeated -- confirmed live.
+	 *
+	 * Also excludes JOIN_SECONDARY_STATE (reportedIsJoinSecondary's own
+	 * comment on NodeMatchesPattern): unlike every other source state this
+	 * row matches, a node reporting join_secondary has already had Postgres
+	 * cleanly checkpointed and stopped as part of switching its replication
+	 * target to a newly-elected primary. Its on-disk data is only a
+	 * trustworthy copy of its own last moment as the OLD primary, frozen
+	 * before that new primary ever took a single write -- resuming it
+	 * straight to SINGLE if it ends up alone risks silently discarding
+	 * whatever the new primary committed in the meantime, a real
+	 * split-brain/data-loss risk this row must not create. Same reported-
+	 * only reasoning as reportedIsWaitStandby above for why this is gated on
+	 * reportedState alone rather than folded into FSM_NOT_STABLE_SINGLE.
+	 *
+	 * Also excludes PREPARE_MAINTENANCE_STATE (reportedIsPrepareMaintenance's
+	 * own comment on NodeMatchesPattern): the same split-brain risk as
+	 * join_secondary, reached one step earlier -- start_maintenance()
+	 * assigns this node PREPARE_MAINTENANCE_STATE and its chosen standby
+	 * PREPARE_PROMOTION_STATE in the very same call, and pos 343 lets that
+	 * standby advance all the way to primary the moment this node's own
+	 * reportedState merely converges to prepare_maintenance, with no
+	 * requirement that this node's row ever be removed first. A different,
+	 * already fully-promoted primary can be live and taking writes while
+	 * this node still sits in prepare_maintenance indefinitely.
 	 */
 	{ .pos = 209,
 	  .sectionPath = {
@@ -2482,7 +2574,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  },
 	  .activeNode = { .statePattern = FSM_NOT_STABLE_SINGLE,
 					  .candidateEligible = BOOL_TRUE,
-					  .reportedIsWaitStandby = BOOL_FALSE },
+					  .reportedIsWaitStandby = BOOL_FALSE,
+					  .reportedIsJoinSecondary = BOOL_FALSE,
+					  .reportedIsPrepareMaintenance = BOOL_FALSE },
 	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SINGLE),
 	  .comment = "alone in group, candidate-eligible -> single" },
@@ -4169,6 +4263,9 @@ NodeStatusPatternConditionsText(const NodeStatusPattern *pattern, bool *isNull)
 	APPEND_BOOL_CONDITION(&buf, "canTakeWrites", pattern->canTakeWrites);
 	APPEND_BOOL_CONDITION(&buf, "reportedCanTakeWrites", pattern->reportedCanTakeWrites);
 	APPEND_BOOL_CONDITION(&buf, "reportedIsWaitStandby", pattern->reportedIsWaitStandby);
+	APPEND_BOOL_CONDITION(&buf, "reportedIsJoinSecondary", pattern->reportedIsJoinSecondary);
+	APPEND_BOOL_CONDITION(&buf, "reportedIsPrepareMaintenance",
+						  pattern->reportedIsPrepareMaintenance);
 	APPEND_BOOL_CONDITION(&buf, "isReadyToStreamWAL", pattern->isReadyToStreamWAL);
 	APPEND_BOOL_CONDITION(&buf, "drainTimeExpired", pattern->drainTimeExpired);
 	APPEND_BOOL_CONDITION(&buf, "isCitusWorkerGroup", pattern->isCitusWorkerGroup);
@@ -4660,6 +4757,50 @@ NodeStatusPatternSurvivesReportedIsWaitStandby(const NodeStatusPattern *pattern,
 
 
 /*
+ * NodeStatusPatternSurvivesReportedIsJoinSecondary filters a candidate
+ * edge-source state against pattern's own .reportedIsJoinSecondary field,
+ * the same shape as NodeStatusPatternSurvivesReportedIsWaitStandby just
+ * above -- a plain equality on reportedState alone, no goalState-dependent
+ * satisfiability proof needed.
+ */
+static bool
+NodeStatusPatternSurvivesReportedIsJoinSecondary(const NodeStatusPattern *pattern,
+												  ReplicationState state)
+{
+	if (pattern->reportedIsJoinSecondary == BOOL_ANY)
+	{
+		return true;
+	}
+
+	bool required = (pattern->reportedIsJoinSecondary == BOOL_TRUE);
+
+	return (state == REPLICATION_STATE_JOIN_SECONDARY) == required;
+}
+
+
+/*
+ * NodeStatusPatternSurvivesReportedIsPrepareMaintenance filters a candidate
+ * edge-source state against pattern's own .reportedIsPrepareMaintenance
+ * field, the same shape as NodeStatusPatternSurvivesReportedIsJoinSecondary
+ * just above -- a plain equality on reportedState alone, no goalState-
+ * dependent satisfiability proof needed.
+ */
+static bool
+NodeStatusPatternSurvivesReportedIsPrepareMaintenance(const NodeStatusPattern *pattern,
+													   ReplicationState state)
+{
+	if (pattern->reportedIsPrepareMaintenance == BOOL_ANY)
+	{
+		return true;
+	}
+
+	bool required = (pattern->reportedIsPrepareMaintenance == BOOL_TRUE);
+
+	return (state == REPLICATION_STATE_PREPARE_MAINTENANCE) == required;
+}
+
+
+/*
  * NodeStatePatternKindIsReportedStateOnly: true for the pattern kinds whose
  * match genuinely depends only on reportedState (ignoring, for STABLE, its
  * own additional "reported == goal" requirement -- see this function's own
@@ -4746,6 +4887,8 @@ NodeStatusPatternOtherFieldsAreAny(const NodeStatusPattern *pattern)
 		   pattern->canTakeWrites == BOOL_ANY &&
 		   pattern->reportedCanTakeWrites == BOOL_ANY &&
 		   pattern->reportedIsWaitStandby == BOOL_ANY &&
+		   pattern->reportedIsJoinSecondary == BOOL_ANY &&
+		   pattern->reportedIsPrepareMaintenance == BOOL_ANY &&
 		   pattern->isReadyToStreamWAL == BOOL_ANY &&
 		   pattern->drainTimeExpired == BOOL_ANY &&
 		   pattern->isCitusWorkerGroup == BOOL_ANY &&
@@ -5089,6 +5232,18 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
+				if (!NodeStatusPatternSurvivesReportedIsJoinSecondary(&rule->activeNode,
+																	  states[j]))
+				{
+					continue;
+				}
+
+				if (!NodeStatusPatternSurvivesReportedIsPrepareMaintenance(
+						&rule->activeNode, states[j]))
+				{
+					continue;
+				}
+
 				if (EdgeIsShadowedByEarlierRule(i, states[j], false, rule->sectionPath[0]))
 				{
 					continue;
@@ -5145,6 +5300,18 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 
 				if (!NodeStatusPatternSurvivesReportedIsWaitStandby(&rule->primaryNode,
 																	states[j]))
+				{
+					continue;
+				}
+
+				if (!NodeStatusPatternSurvivesReportedIsJoinSecondary(&rule->primaryNode,
+																	  states[j]))
+				{
+					continue;
+				}
+
+				if (!NodeStatusPatternSurvivesReportedIsPrepareMaintenance(
+						&rule->primaryNode, states[j]))
 				{
 					continue;
 				}

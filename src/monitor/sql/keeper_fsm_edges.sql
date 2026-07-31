@@ -104,12 +104,39 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 --     from the group while node3 is still fetching (not after it reports
 --     fast_forward) to actually exercise these rows instead of racing
 --     against the monitor's own cascade continuation.
---   * pos 209/211's remaining states (prepare_maintenance, demote_timeout,
---     prepare_promotion, stop_replication, join_secondary) were each checked
---     for real reachability under "alone in group" and found contrived:
---     reaching them normally implies a multi-node context (join_secondary
---     needs a newly-elected primary to join) or an internal tension with
---     candidateEligible=FALSE (prepare_promotion/stop_replication imply
+--   * pos 209's join_secondary and prepare_maintenance current_states are no
+--     longer even in this gap list at all: both were found to be a genuine
+--     data-loss risk, not a missing convenience -- promoting either straight
+--     to SINGLE if left alone can silently discard writes a *different,
+--     already-promoted* primary made in the meantime (join_secondary: that
+--     new primary already exists by the time this node reaches
+--     join_secondary; prepare_maintenance: pos 343 lets the candidate
+--     standby reach primary the moment this node's own reportedState merely
+--     converges to prepare_maintenance, no removal required). Fixed by
+--     excluding both from pos 209 itself (reportedIsJoinSecondary,
+--     reportedIsPrepareMaintenance on NodeMatchesPattern) rather than adding
+--     KeeperFSM[] rows -- there is nothing safe to promote either one to.
+--     prepare_maintenance additionally needed a new no-op row (pos 208):
+--     unlike join_secondary (already recognized by node_metadata.c's
+--     IsParticipatingInPromotion, so a lone node there safely no-ops on its
+--     own), a lone prepare_maintenance node isn't recognized by that
+--     function, IsBeingPromoted, or IsInPrimaryState, so excluding it from
+--     pos 209 alone would have left ProceedGroupStateFromContext's own
+--     "couldn't find the primary node" guard to ereport(ERROR) on every
+--     single subsequent heartbeat -- worse than the original bug. Both
+--     fixes verified live: keeper_fsm_gap_209_prepare_maintenance.pgaf
+--     reproduces a lone prepare_maintenance primary staying safely parked
+--     (goalstate never becomes single) and confirms it keeps successfully
+--     checking in (reporttime advancing) rather than looping on that error.
+--   * pos 211's own join_secondary/prepare_maintenance current_states are
+--     untouched by the above -- report_lsn is a far less dangerous target
+--     than single (it doesn't let the node accept writes), so the same
+--     split-brain argument doesn't automatically carry over; not
+--     investigated further this pass.
+--   * pos 209/211's remaining states (demote_timeout, prepare_promotion,
+--     stop_replication) were each checked for real reachability under
+--     "alone in group" and found contrived: each implies an internal tension
+--     with candidateEligible=FALSE (prepare_promotion/stop_replication imply
 --     having already been selected as a promotion candidate; demote_timeout's
 --     genuinely-stuck case is already intercepted earlier by pos 207). None
 --     ruled out as impossible, but none reproducible via a single, realistic

@@ -306,13 +306,28 @@ other_node_assigned_state    |
 has_extra_action             | f
 comment                      | reported demote_timeout, assigned goal can't reach it -> demoted
 -[ RECORD 20 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 208
+section                      | early_checks
+section_path                 | early_checks
+active_node_current_state    | prepare_maintenance
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | 
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | groupHasExactlyOneNode=true
+active_node_assigned_state   | 
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | alone in group, still preparing for maintenance -> no-op
+-[ RECORD 21 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 209
 section                      | early_checks
 section_path                 | early_checks
 active_node_current_state    | 
 other_node_current_state     | 
 candidate_node_current_state | 
-active_node_conditions       | candidateEligible=true, reportedIsWaitStandby=false
+active_node_conditions       | candidateEligible=true, reportedIsWaitStandby=false, reportedIsJoinSecondary=false, reportedIsPrepareMaintenance=false
 other_node_conditions        | 
 candidate_node_conditions    | 
 group_conditions             | groupHasExactlyOneNode=true
@@ -320,7 +335,7 @@ active_node_assigned_state   | single
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | alone in group, candidate-eligible -> single
--[ RECORD 21 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 22 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 210
 section                      | early_checks
 section_path                 | early_checks
@@ -335,7 +350,7 @@ active_node_assigned_state   | single
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | alone in group, already primary despite candidatePriority zero -> single
--[ RECORD 22 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 23 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 211
 section                      | early_checks
 section_path                 | early_checks
@@ -350,7 +365,7 @@ active_node_assigned_state   | report_lsn
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | alone in group, candidatePriority zero -> report_lsn
--[ RECORD 23 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 24 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 301
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -365,7 +380,7 @@ active_node_assigned_state   | catchingup
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | converged secondary, reportedTLI not an ancestor of reference -> catchingup
--[ RECORD 24 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 25 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 303
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -380,7 +395,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | wait_primary
 has_extra_action             | f
 comment                      | primary healthy, no standby past replication_stall_timeout -> wait_primary
--[ RECORD 25 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 26 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 305
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -395,7 +410,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | nodesCount>2, primary unhealthy -> draining/maintenance + MS-failover cascade
--[ RECORD 26 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 27 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 307
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -410,7 +425,7 @@ active_node_assigned_state   | secondary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | report_lsn, primary converged wait/join_primary, healthy -> secondary
--[ RECORD 27 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 28 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 309
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -425,7 +440,7 @@ active_node_assigned_state   | secondary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | report_lsn, primary converged primary, healthy -> secondary
--[ RECORD 28 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 29 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 311
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -440,7 +455,7 @@ active_node_assigned_state   | prepare_promotion
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | fast_forward done -> prepare_promotion
--[ RECORD 29 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 30 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 313
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -455,7 +470,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | report_lsn or fast_forward, continuing an already-started failover -> MS-failover cascade
--[ RECORD 30 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 31 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 315
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -470,7 +485,7 @@ active_node_assigned_state   | catchingup
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | wait_standby, primary converged wait/join_primary -> catchingup
--[ RECORD 31 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 32 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 317
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -485,7 +500,7 @@ active_node_assigned_state   | catchingup
 other_node_assigned_state    | apply_settings
 has_extra_action             | f
 comment                      | wait_standby (quorum member), primary converged primary -> catchingup + apply_settings
--[ RECORD 32 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 33 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 319
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -500,7 +515,7 @@ active_node_assigned_state   | catchingup
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | wait_standby (not a quorum member), primary converged primary -> catchingup
--[ RECORD 33 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 34 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 321
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -515,7 +530,7 @@ active_node_assigned_state   | secondary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | caught up, same TLI as primary, within sync threshold -> secondary
--[ RECORD 34 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 35 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 323
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -530,7 +545,7 @@ active_node_assigned_state   | prepare_promotion
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | primary fails, already converged wait_primary (issue #1168) -> secondary -> prepare_promotion only (1 of 2)
--[ RECORD 35 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 36 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 325
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -545,7 +560,7 @@ active_node_assigned_state   | prepare_promotion
 other_node_assigned_state    | draining
 has_extra_action             | f
 comment                      | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
--[ RECORD 36 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 37 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 327
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -560,7 +575,7 @@ active_node_assigned_state   | maintenance
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | wait_maintenance, primary converged wait_primary -> maintenance
--[ RECORD 37 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 38 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 329
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -575,7 +590,7 @@ active_node_assigned_state   | maintenance
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | wait_maintenance, primary's goal no longer wait_primary -> maintenance
--[ RECORD 38 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 39 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 331
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -590,7 +605,7 @@ active_node_assigned_state   | stop_replication
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | prepare_promotion, primary converged prepare_maintenance -> stop_replication
--[ RECORD 39 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 40 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 333
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -605,7 +620,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | demoted
 has_extra_action             | f
 comment                      | Citus worker prepare_promotion, primary present -> wait_primary + demoted
--[ RECORD 40 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 41 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 335
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -620,7 +635,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | Citus worker prepare_promotion, primary removed -> wait_primary
--[ RECORD 41 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 42 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 337
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -635,7 +650,7 @@ active_node_assigned_state   | stop_replication
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | prepare_promotion, primary already converged wait_primary (issue #1168) -> stop_replication only (1 of 2)
--[ RECORD 42 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 43 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 339
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -650,7 +665,7 @@ active_node_assigned_state   | stop_replication
 other_node_assigned_state    | demote_timeout
 has_extra_action             | f
 comment                      | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
--[ RECORD 43 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 44 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 341
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -665,7 +680,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | prepare_promotion, primary removed -> wait_primary
--[ RECORD 44 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 45 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 343
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -680,7 +695,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | maintenance
 has_extra_action             | f
 comment                      | stop_replication, primary converged prepare_maintenance -> wait_primary + maintenance
--[ RECORD 45 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 46 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 345
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -695,7 +710,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | demoted
 has_extra_action             | f
 comment                      | stop_replication, primary converged demote_timeout -> wait_primary + demoted (1 of 3)
--[ RECORD 46 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 47 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 347
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -710,7 +725,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | demoted
 has_extra_action             | f
 comment                      | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
--[ RECORD 47 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 48 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 349
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -725,7 +740,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | demoted
 has_extra_action             | f
 comment                      | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
--[ RECORD 48 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 49 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 351
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -740,7 +755,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | demoted
 has_extra_action             | f
 comment                      | Citus worker stop_replication, primary present -> wait_primary + demoted
--[ RECORD 49 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 50 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 353
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -755,7 +770,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | Citus worker stop_replication, primary removed -> wait_primary
--[ RECORD 50 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 51 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 355
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -770,7 +785,7 @@ active_node_assigned_state   | catchingup
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | demoted, primary reported wait/join_primary with goal primary -> catchingup
--[ RECORD 51 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 52 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 357
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -785,7 +800,7 @@ active_node_assigned_state   | catchingup
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | demoted, primary converged wait/join_primary/primary, healthy -> catchingup
--[ RECORD 52 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 53 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 359
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -800,7 +815,7 @@ active_node_assigned_state   | secondary
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | join_secondary, primary reported wait_primary with goal wait/primary -> secondary
--[ RECORD 53 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 54 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 361
 section                      | reporting_node
 section_path                 | reporting_node.from_context
@@ -815,7 +830,7 @@ active_node_assigned_state   | secondary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | join_secondary, primary converged primary -> secondary
--[ RECORD 54 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 55 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 363
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.retry_reset
@@ -830,7 +845,7 @@ active_node_assigned_state   | report_lsn
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover: candidate stuck in fast_forward, all WAL sources unhealthy, guard_data_loss=true -> report_lsn (retry once a source recovers)
--[ RECORD 55 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 56 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 365
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.candidate_join
@@ -845,7 +860,7 @@ active_node_assigned_state   | join_secondary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover: activeNode in report_lsn, failover candidate ready to stream WAL -> join_secondary
--[ RECORD 56 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 57 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 367
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.candidate_fanout
@@ -860,7 +875,7 @@ active_node_assigned_state   | report_lsn
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover fan-out: secondary/catchingup, not yet converged -> report_lsn (1 of 4)
--[ RECORD 57 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 58 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 369
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.candidate_fanout
@@ -875,7 +890,7 @@ active_node_assigned_state   | report_lsn
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover fan-out: rejoining from maintenance -> report_lsn (2 of 4)
--[ RECORD 58 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 59 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 371
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.candidate_fanout
@@ -890,7 +905,7 @@ active_node_assigned_state   | report_lsn
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover fan-out: old primary converged draining or demoted -> report_lsn (3 of 4)
--[ RECORD 59 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 60 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 373
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.candidate_fanout
@@ -905,7 +920,7 @@ active_node_assigned_state   | report_lsn
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover fan-out: old primary demoted, was rejoining a now-failed primary -> report_lsn (4 of 4)
--[ RECORD 60 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 61 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 375
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.promotion_outcome
@@ -920,7 +935,7 @@ active_node_assigned_state   | prepare_promotion
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover: no promotion in flight, most-advanced candidate within threshold, selected candidate already has all WAL -> prepare_promotion (1 of 2 -- see this row's own comment on why both are listed)
--[ RECORD 61 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 62 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 377
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.promotion_outcome
@@ -935,7 +950,7 @@ active_node_assigned_state   | fast_forward
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover: no promotion in flight, most-advanced candidate within threshold, selected candidate is lagging -> fast_forward (2 of 2)
--[ RECORD 62 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 63 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 379
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.promotion_outcome.missing_nodes_gate
@@ -950,7 +965,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | MS-failover: >=1 node(s) yet to report their LSN, guard_data_loss=true -> decline, wait for more reports (1 of 2)
--[ RECORD 63 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 64 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 381
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.promotion_outcome.missing_nodes_gate
@@ -965,7 +980,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | MS-failover: >=1 node(s) yet to report their LSN, guard_data_loss=false -> proceed despite possible data loss (2 of 2)
--[ RECORD 64 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 65 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 383
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.promotion_outcome.candidate_count_gate
@@ -980,7 +995,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover: zero candidates have reported their LSN yet -> silent decline
--[ RECORD 65 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 66 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 385
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.promotion_outcome.quorum_candidate_gate
@@ -995,7 +1010,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | MS-failover: not enough quorum candidates reported yet, guard_data_loss=true -> decline (1 of 2)
--[ RECORD 66 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 67 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 387
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.promotion_outcome.quorum_candidate_gate
@@ -1010,7 +1025,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | 
 has_extra_action             | t
 comment                      | MS-failover: not enough quorum candidates reported yet, guard_data_loss=false -> proceed with fewer than required (2 of 2)
--[ RECORD 67 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 68 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 389
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.promotion_outcome.no_candidate_yet
@@ -1025,7 +1040,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | MS-failover: no promotion in flight, not enough (or not safe enough) candidates yet -> no-op besides the fan-out above
--[ RECORD 68 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 69 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 391
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.draining_or_maintenance
@@ -1040,7 +1055,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | draining
 has_extra_action             | f
 comment                      | nodesCount>2, primary unhealthy, in primary role but not yet wait_primary, >=1 healthy candidate -> primary draining
--[ RECORD 69 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 70 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 393
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.draining_or_maintenance
@@ -1055,7 +1070,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | maintenance
 has_extra_action             | f
 comment                      | nodesCount>2, primary unhealthy, converged prepare_maintenance -> primary maintenance
--[ RECORD 70 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 71 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 401
 section                      | primary_node
 section_path                 | primary_node
@@ -1070,7 +1085,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | primary alone, another node reached wait_standby -> wait_primary
--[ RECORD 71 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 72 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 403
 section                      | primary_node
 section_path                 | primary_node
@@ -1085,7 +1100,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | all nodes async, zero secondaries -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 72 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 73 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 405
 section                      | primary_node
 section_path                 | primary_node
@@ -1100,7 +1115,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | all nodes async, >=1 secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 73 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 74 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 407
 section                      | primary_node
 section_path                 | primary_node
@@ -1115,7 +1130,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys=0 -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 74 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 75 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 409
 section                      | primary_node
 section_path                 | primary_node
@@ -1130,7 +1145,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys>0 -> primary (block writes) (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 75 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 76 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 411
 section                      | primary_node
 section_path                 | primary_node
@@ -1145,7 +1160,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 76 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 77 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 413
 section                      | primary_node
 section_path                 | primary_node
@@ -1160,7 +1175,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | apply_settings, both zero -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 77 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 78 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 415
 section                      | primary_node
 section_path                 | primary_node
@@ -1175,7 +1190,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | apply_settings, number_sync_standbys != 0 -> primary (1 of 2 disjuncts) (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 78 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 79 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 417
 section                      | primary_node
 section_path                 | primary_node
@@ -1190,7 +1205,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2) (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 79 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 80 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 419
 section                      | primary_node
 section_path                 | primary_node
@@ -1205,7 +1220,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | converged primary/wait_primary/apply_settings, no other condition applies -> no-op besides the unhealthy-secondary fan-out to catchingup
--[ RECORD 80 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 81 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 421
 section                      | primary_node
 section_path                 | primary_node
