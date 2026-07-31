@@ -1,0 +1,84 @@
+# Regression spec for MonitorFSM[] pos 209 ("alone in group,
+# candidate-eligible -> single", src/monitor/group_state_machine.c), for its
+# wait_standby current_state.
+#
+# This spec originally set out to reproduce the same kind of gap as
+# keeper_fsm_gap_209_wait_maintenance.pgaf: pos 209's NodeStatePattern was
+# willing to assign SINGLE_STATE to a lone remaining node reporting
+# WAIT_STANDBY_STATE, but KeeperFSM[] had no matching row. Reproducing it
+# live (network-disconnect node1 before node2 ever streams, then drop node1)
+# confirmed the gap is real -- but also surfaced something worse than a
+# missing keeper transition: a node stuck at WAIT_STANDBY_STATE has never
+# actually started streaming (no pg_basebackup done, see fsm_init_standby,
+# the WAIT_STANDBY_STATE -> CATCHINGUP_STATE transition, fsm.c), so there is
+# no safe way to reach SINGLE_STATE from it at all. The only local action
+# available (fsm_init_primary, the same one used for INIT_STATE/
+# DROPPED_STATE -> SINGLE_STATE) does a *fresh* initdb, generating a new
+# system_identifier -- which conflicts with the one this node already
+# registered under, tripping the monitor's own same_system_identifier_
+# within_group exclusion constraint (confirmed live: "Failed to transition
+# from state \"wait_standby\" to state \"single\"").
+#
+# Rather than force this through on the keeper side, pos 209 was narrowed
+# instead (the reportedIsWaitStandby field, group_state_machine.c) to stop
+# assigning SINGLE to a wait_standby node at all.
+#
+# Note this does NOT mean node2's own goalstate stays "wait_standby"
+# forever: pos 101 (remove_node()'s own fan-out, a separate, unconditional
+# row -- ".otherNodeAssignedState = GOAL(REPORT_LSN)" for "every surviving
+# non-maintenance standby") still reassigns it to report_lsn as a direct,
+# synchronous side effect of dropping node1, regardless of pos 209/211. That
+# reassignment is harmless here: KeeperFSM[] has no WAIT_STANDBY_STATE ->
+# REPORT_LSN_STATE row either, so node2's keeper simply stays parked (its
+# own reportedstate never leaves wait_standby) instead of attempting
+# anything -- the actual safety property this spec cares about. An earlier
+# version of this spec asserted goalstate also stays at wait_standby, which
+# is not what actually happens and isn't the real invariant to check.
+#
+#   1. node2 is created with launch deferred, then started with node1
+#      already network-disconnected -- it registers (reaching
+#      WAIT_STANDBY_STATE) but can never reach node1 to fetch its initial
+#      pg_basebackup, so it's durably stuck reporting wait_standby,
+#      unhealthy -- not a narrow timing window.
+#   2. node1 is dropped directly via pgautofailover.remove_node(), leaving
+#      node2 alone in the group, still reporting wait_standby, with default
+#      (nonzero) candidate-priority.
+#   3. The monitor recomputes: groupHasExactlyOneNode is now true, but pos
+#      209 no longer matches wait_standby at all, so it never assigns
+#      SINGLE. node2's reportedstate stays wait_standby -- it never attempts
+#      (and never risks) an unsafe fresh-init transition.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2 create and launch deferred
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_start_node2_isolated_from_node1 {
+    network disconnect node1
+    exec node2  pg_autoctl node start
+    wait until node2 state is wait_standby  timeout 60s
+}
+
+step test_002_drop_node1_leaves_node2_reportedstate_untouched {
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    sleep 10s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { wait_standby }
+    logs node2 contains "Still waiting for the monitor to drive us to state"
+}

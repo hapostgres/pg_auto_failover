@@ -1,16 +1,23 @@
-# Diagnostic spec for MonitorFSM[] pos 209 ("alone in group,
-# candidate-eligible -> single", src/monitor/group_state_machine.c) -- NOT in
-# the CI schedule, same convention as debug_failover_pg19.pgaf, since it is
-# expected to FAIL until the missing KeeperFSM[] transition documented below
-# is implemented.
+# Regression spec for MonitorFSM[] pos 209 ("alone in group,
+# candidate-eligible -> single", src/monitor/group_state_machine.c).
 #
-# src/monitor/sql/keeper_fsm_edges.sql's Step 2a found that pos 209's
-# NodeStatePattern is willing to assign SINGLE_STATE to a lone remaining
-# node reporting WAIT_MAINTENANCE_STATE as its current_state, but KeeperFSM[]
-# (src/bin/pg_autoctl/fsm.c) has no WAIT_MAINTENANCE_STATE -> SINGLE_STATE
-# row at all.
+# This spec originally documented a real gap: pos 209's NodeStatePattern is
+# willing to assign SINGLE_STATE to a lone remaining node reporting
+# WAIT_MAINTENANCE_STATE as its current_state, but KeeperFSM[]
+# (src/bin/pg_autoctl/fsm.c) had no WAIT_MAINTENANCE_STATE -> SINGLE_STATE
+# row at all -- node2 would get stuck reporting wait_maintenance forever,
+# logging "pg_autoctl does not know how to reach state \"single\" from
+# \"wait_maintenance\"".
 #
-# This spec manufactures that exact (current, assigned) pair:
+# Fixed by adding that row to KeeperFSM[], reusing fsm_promote_standby (the
+# same function already reused by every other converged-standby source
+# state: SECONDARY/CATCHINGUP/PREP_PROMOTION/STOP_REPLICATION/REPORT_LSN) --
+# entering WAIT_MAINTENANCE_STATE itself runs no transition function (a
+# converged standby just marks intent to go to maintenance, Postgres keeps
+# running and replicating normally), so promoting it exactly like any other
+# actively-replicating standby is safe.
+#
+# This spec now asserts that fixed behavior:
 #
 #   1. node1 (primary) is network-disconnected, so it can never acknowledge
 #      a replication-quorum change.
@@ -28,18 +35,8 @@
 #   4. The monitor recomputes: groupHasExactlyOneNode is now true, node2's
 #      own reported current_state is "wait_maintenance", and its candidate
 #      priority is > 0, so pos 209 fires and the monitor assigns SINGLE.
-#   5. node2's keeper receives that assigned state, but
-#      keeper_fsm_reach_assigned_state() (fsm.c) finds no matching
-#      KeeperFSM[] row for (wait_maintenance -> single) and logs
-#      "pg_autoctl does not know how to reach state \"single\" from
-#      \"wait_maintenance\"" -- node2 never converges, staying stuck
-#      reporting wait_maintenance forever.
-#
-# Expected fix: add a WAIT_MAINTENANCE_STATE -> SINGLE_STATE row to
-# KeeperFSM[]. Check for reuse first: WAIT_MAINTENANCE_STATE ->
-# MAINTENANCE_STATE already exists (fsm.c) and its transition function may
-# be adaptable, since both targets ultimately mean "stop waiting for a peer
-# that isn't coming."
+#   5. node2's keeper now has a matching KeeperFSM[] row and actually
+#      converges to single.
 
 cluster {
     monitor
@@ -72,16 +69,19 @@ step test_002_secondary_stuck_at_wait_maintenance {
     wait until node2 state is wait_maintenance  timeout 60s
 }
 
-step test_003_drop_primary_bypass_and_check_stuck {
+step test_003_drop_primary_converges_to_single {
     sql monitor {
         SELECT pgautofailover.remove_node(nodehost, nodeport)
         FROM pgautofailover.node WHERE nodename = 'node1';
     }
     wait until node2 assigned-state = single  timeout 60s
-    sleep 5s
+    wait until node2 state is single  timeout 60s
     sql monitor {
         SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
     }
-    expect { wait_maintenance }
-    logs node2 contains "does not know how to reach state"
+    expect { single }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { single }
 }

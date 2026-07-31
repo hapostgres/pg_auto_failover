@@ -503,6 +503,7 @@ typedef struct NodeStatusPattern
 	BoolPattern isDemotedPrimary;
 	BoolPattern canTakeWrites;
 	BoolPattern reportedCanTakeWrites;
+	BoolPattern reportedIsWaitStandby;
 	BoolPattern isReadyToStreamWAL;
 	BoolPattern drainTimeExpired;
 	BoolPattern isCitusWorkerGroup;
@@ -572,6 +573,22 @@ BuildNodeStatus(GroupStateContext *ctx, AutoFailoverNode *node, NodeStatus *stat
  * action changes the very fact its condition is testing. reportedState is
  * never written by this row's own action, so a condition built purely from
  * it stays stable across dispatches until the keeper itself converges.
+ *
+ * reportedIsWaitStandby is a plain reportedState equality check, for the
+ * same reported-only reason as reportedCanTakeWrites above, but forced by a
+ * DIFFERENT row's action this time, not this row's own: pos 101's own
+ * remove_node() fan-out (.otherNodeAssignedState = GOAL(REPORT_LSN),
+ * unconditional on every surviving non-maintenance standby) can rewrite a
+ * lone wait_standby node's own goalState to report_lsn synchronously,
+ * before pos 209/211's own early_checks evaluation ever runs on that node's
+ * next heartbeat -- a goalState-dependent exclusion (e.g. NOT_STABLE) would
+ * see reported != goal at that point and treat wait_standby as "no longer
+ * stable", reviving a match it was supposed to permanently exclude.
+ * Confirmed live: an earlier NOT_STABLE-based version of this exclusion
+ * looked correct in dump_fsm_edges()'s own static analysis (which never
+ * sees pos 101's cross-row goalState write) but still let pos 209/211 fire
+ * for a real wait_standby node in a live pgaftest run, exactly because of
+ * this. Matching on reportedState alone sidesteps it entirely.
  */
 static bool
 NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
@@ -599,6 +616,9 @@ NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
 		   BoolMatchesPattern(status->node != NULL &&
 							  CanTakeWritesInState(status->node->reportedState),
 							  pattern->reportedCanTakeWrites) &&
+		   BoolMatchesPattern(status->node != NULL &&
+							  status->node->reportedState == REPLICATION_STATE_WAIT_STANDBY,
+							  pattern->reportedIsWaitStandby) &&
 		   BoolMatchesPattern(CandidateNodeIsReadyToStreamWAL(status->node),
 							  pattern->isReadyToStreamWAL) &&
 		   BoolMatchesPattern(NodeIsDrainTimeExpired(status->node, status->ctx),
@@ -2443,13 +2463,26 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_DEMOTED),
 	  .comment = "reported demote_timeout, assigned goal can't reach it -> demoted" },
 
-	/* alone in group, candidate-eligible */
+	/*
+	 * alone in group, candidate-eligible -- excludes WAIT_STANDBY_STATE too
+	 * (reportedIsWaitStandby's own comment on NodeMatchesPattern): a node
+	 * stuck there never actually started streaming, so there is no safe way
+	 * for the keeper to reach SINGLE from it without risking a system_
+	 * identifier conflict with its own prior registration. Gated via the
+	 * reported-only reportedIsWaitStandby field rather than folding
+	 * WAIT_STANDBY into FSM_NOT_STABLE_SINGLE's own NOT_STABLE-kind pattern:
+	 * pos 101's own remove_node() fan-out can rewrite this node's goalState
+	 * to report_lsn before this row's own next evaluation, which would
+	 * defeat a goalState-dependent (NOT_STABLE) exclusion the same way pos
+	 * 210's own isInPrimaryState condition was defeated -- confirmed live.
+	 */
 	{ .pos = 209,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_NOT_STABLE_SINGLE,
-					  .candidateEligible = BOOL_TRUE },
+					  .candidateEligible = BOOL_TRUE,
+					  .reportedIsWaitStandby = BOOL_FALSE },
 	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SINGLE),
 	  .comment = "alone in group, candidate-eligible -> single" },
@@ -2519,6 +2552,15 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 * simpler and safer than generalizing the shadow-detector to prove
 	 * conditional (not just unconditional) shadowing between arbitrary row
 	 * pairs.
+	 *
+	 * reportedIsWaitStandby=FALSE also excludes WAIT_STANDBY_STATE (see its
+	 * own comment on NodeMatchesPattern): a node stuck there never actually
+	 * started streaming, so there's no safe way for the keeper to reach
+	 * REPORT_LSN from it either, for the same system_identifier-conflict
+	 * reason pos 209 documents. Reported-only for the same reason as pos
+	 * 209's own use of this field: pos 101's remove_node() fan-out can
+	 * rewrite this node's goalState to report_lsn before this row's own
+	 * next evaluation, which would defeat a goalState-dependent exclusion.
 	 */
 	{ .pos = 211,
 	  .sectionPath = {
@@ -2526,7 +2568,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  },
 	  .activeNode = { .statePattern = FSM_NOT_STABLE_SINGLE,
 					  .candidateEligible = BOOL_FALSE,
-					  .reportedCanTakeWrites = BOOL_FALSE },
+					  .reportedCanTakeWrites = BOOL_FALSE,
+					  .reportedIsWaitStandby = BOOL_FALSE },
 	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
 	  .comment = "alone in group, candidatePriority zero -> report_lsn" },
@@ -4125,6 +4168,7 @@ NodeStatusPatternConditionsText(const NodeStatusPattern *pattern, bool *isNull)
 	APPEND_BOOL_CONDITION(&buf, "isDemotedPrimary", pattern->isDemotedPrimary);
 	APPEND_BOOL_CONDITION(&buf, "canTakeWrites", pattern->canTakeWrites);
 	APPEND_BOOL_CONDITION(&buf, "reportedCanTakeWrites", pattern->reportedCanTakeWrites);
+	APPEND_BOOL_CONDITION(&buf, "reportedIsWaitStandby", pattern->reportedIsWaitStandby);
 	APPEND_BOOL_CONDITION(&buf, "isReadyToStreamWAL", pattern->isReadyToStreamWAL);
 	APPEND_BOOL_CONDITION(&buf, "drainTimeExpired", pattern->drainTimeExpired);
 	APPEND_BOOL_CONDITION(&buf, "isCitusWorkerGroup", pattern->isCitusWorkerGroup);
@@ -4594,6 +4638,28 @@ NodeStatusPatternSurvivesReportedCanTakeWrites(const NodeStatusPattern *pattern,
 
 
 /*
+ * NodeStatusPatternSurvivesReportedIsWaitStandby filters a candidate
+ * edge-source state against pattern's own .reportedIsWaitStandby field, the
+ * same shape as NodeStatusPatternSurvivesReportedCanTakeWrites just above --
+ * a plain equality on reportedState alone, no goalState-dependent
+ * satisfiability proof needed.
+ */
+static bool
+NodeStatusPatternSurvivesReportedIsWaitStandby(const NodeStatusPattern *pattern,
+												ReplicationState state)
+{
+	if (pattern->reportedIsWaitStandby == BOOL_ANY)
+	{
+		return true;
+	}
+
+	bool required = (pattern->reportedIsWaitStandby == BOOL_TRUE);
+
+	return (state == REPLICATION_STATE_WAIT_STANDBY) == required;
+}
+
+
+/*
  * NodeStatePatternKindIsReportedStateOnly: true for the pattern kinds whose
  * match genuinely depends only on reportedState (ignoring, for STABLE, its
  * own additional "reported == goal" requirement -- see this function's own
@@ -4679,6 +4745,7 @@ NodeStatusPatternOtherFieldsAreAny(const NodeStatusPattern *pattern)
 		   pattern->isDemotedPrimary == BOOL_ANY &&
 		   pattern->canTakeWrites == BOOL_ANY &&
 		   pattern->reportedCanTakeWrites == BOOL_ANY &&
+		   pattern->reportedIsWaitStandby == BOOL_ANY &&
 		   pattern->isReadyToStreamWAL == BOOL_ANY &&
 		   pattern->drainTimeExpired == BOOL_ANY &&
 		   pattern->isCitusWorkerGroup == BOOL_ANY &&
@@ -5016,6 +5083,12 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
+				if (!NodeStatusPatternSurvivesReportedIsWaitStandby(&rule->activeNode,
+																	states[j]))
+				{
+					continue;
+				}
+
 				if (EdgeIsShadowedByEarlierRule(i, states[j], false, rule->sectionPath[0]))
 				{
 					continue;
@@ -5065,6 +5138,12 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 				}
 
 				if (!NodeStatusPatternSurvivesReportedCanTakeWrites(&rule->primaryNode,
+																	states[j]))
+				{
+					continue;
+				}
+
+				if (!NodeStatusPatternSurvivesReportedIsWaitStandby(&rule->primaryNode,
 																	states[j]))
 				{
 					continue;

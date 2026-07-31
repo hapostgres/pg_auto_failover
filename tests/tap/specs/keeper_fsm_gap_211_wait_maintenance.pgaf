@@ -1,0 +1,86 @@
+# Regression spec for MonitorFSM[] pos 211 ("alone in group,
+# candidatePriority zero -> report_lsn", src/monitor/group_state_machine.c),
+# for its wait_maintenance current_state -- a separate gap from
+# keeper_fsm_gap_209_wait_maintenance.pgaf's own scenario (that one is pos
+# 209's candidate-eligible sibling, assigning single instead of report_lsn).
+#
+# This spec originally documented a real gap: pos 211's NodeStatePattern is
+# willing to assign REPORT_LSN_STATE to a lone remaining node reporting
+# WAIT_MAINTENANCE_STATE as its current_state, but KeeperFSM[]
+# (src/bin/pg_autoctl/fsm.c) had no WAIT_MAINTENANCE_STATE -> REPORT_LSN_STATE
+# row at all -- node2 would get stuck reporting wait_maintenance forever.
+#
+# Fixed by adding that row to KeeperFSM[], reusing fsm_report_lsn (the same
+# function already reused by SECONDARY/CATCHINGUP/MAINTENANCE/
+# PREPARE_MAINTENANCE_STATE -> REPORT_LSN_STATE) -- entering
+# WAIT_MAINTENANCE_STATE itself runs no transition function (a converged
+# standby just marks intent to go to maintenance, Postgres keeps running and
+# replicating normally), so it's safe to treat exactly like those other
+# actively-replicating standby states.
+#
+# Scenario: identical to keeper_fsm_gap_209_wait_maintenance.pgaf's own,
+# except node2's candidate-priority is set to 0 first, so pos 211 (not pos
+# 209) is the one that fires once node2 is alone:
+#
+#   1. node2's candidate-priority is set to 0.
+#   2. node1 (primary) is network-disconnected, so it can never acknowledge
+#      a replication-quorum change.
+#   3. node2 (the only secondary, hence the last quorum member) is told to
+#      enter maintenance, and gets durably stuck at WAIT_MAINTENANCE_STATE
+#      for the same reason as the pos 209 spec (node1 can never see or
+#      acknowledge the request).
+#   4. node1 is dropped directly via pgautofailover.remove_node(), leaving
+#      node2 alone in the group, still reporting wait_maintenance, with
+#      candidate-priority 0 -- pos 211 fires and the monitor assigns
+#      REPORT_LSN.
+#   5. node2's keeper now has a matching KeeperFSM[] row and actually
+#      converges to report_lsn.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+step test_001_zero_priority_and_disconnect_primary {
+    exec node2  pg_autoctl set node candidate-priority 0
+    network disconnect node1
+}
+
+step test_002_secondary_stuck_at_wait_maintenance {
+    # pg_autoctl enable maintenance itself polls for convergence and exits
+    # non-zero when it can't reach "maintenance" quickly (the primary is
+    # unreachable, exactly the point of this scenario) -- the real state
+    # transition still happens regardless of this command's own exit code,
+    # confirmed by the wait below.
+    exec-fails node2  pg_autoctl enable maintenance
+    wait until node2 state is wait_maintenance  timeout 60s
+}
+
+step test_003_drop_primary_converges_to_report_lsn {
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    wait until node2 assigned-state = report_lsn  timeout 60s
+    wait until node2 state is report_lsn  timeout 60s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { report_lsn }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { report_lsn }
+}

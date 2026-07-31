@@ -1,0 +1,78 @@
+# Regression spec for MonitorFSM[] pos 211 ("alone in group,
+# candidatePriority zero -> report_lsn", src/monitor/group_state_machine.c),
+# for its wait_standby current_state -- the candidatePriority=0 sibling of
+# keeper_fsm_gap_209_wait_standby.pgaf's own scenario. See that spec's header
+# for the full story: a node stuck at WAIT_STANDBY_STATE never actually
+# started streaming, so there is no safe way to reach REPORT_LSN_STATE (or
+# SINGLE_STATE) from it without risking a system_identifier conflict with
+# its own prior registration.
+#
+# pos 211 was narrowed the same way pos 209 was (the reportedIsWaitStandby
+# field, group_state_machine.c) -- this spec asserts the same safe,
+# conservative behavior for the candidatePriority=0 case.
+#
+# Note this does NOT mean node2's own goalstate stays "wait_standby"
+# forever: pos 101 (remove_node()'s own fan-out, a separate, unconditional
+# row -- ".otherNodeAssignedState = GOAL(REPORT_LSN)" for "every surviving
+# non-maintenance standby") still reassigns it to report_lsn as a direct,
+# synchronous side effect of dropping node1, regardless of pos 209/211 --
+# happens to be the very state pos 211 would itself assign anyway, so
+# there's nothing to "correct" it. That reassignment is harmless here:
+# KeeperFSM[] has no WAIT_STANDBY_STATE -> REPORT_LSN_STATE row either, so
+# node2's keeper simply stays parked (its own reportedstate never leaves
+# wait_standby) instead of attempting anything -- the actual safety
+# property this spec cares about.
+#
+#   1. node2 is created with launch deferred, then started with node1
+#      already network-disconnected -- it registers (reaching
+#      WAIT_STANDBY_STATE) but can never reach node1 to fetch its initial
+#      pg_basebackup, so it's durably stuck reporting wait_standby,
+#      unhealthy.
+#   2. node2's candidate-priority is set to 0 (registration itself must
+#      complete first for this CLI call to have a monitor connection to
+#      use, even though the node is otherwise stuck), so pos 211 (not pos
+#      209) is the one that would otherwise apply once node2 is alone.
+#   3. node1 is dropped directly via pgautofailover.remove_node(), leaving
+#      node2 alone in the group, still reporting wait_standby, with
+#      candidate-priority 0.
+#   4. The monitor recomputes: groupHasExactlyOneNode is now true, but pos
+#      211 no longer matches wait_standby at all, so it never (re)assigns
+#      REPORT_LSN on its own account. node2's reportedstate stays
+#      wait_standby -- it never attempts (and never risks) an unsafe
+#      fresh-init transition.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2 create and launch deferred
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_start_node2_isolated_and_zero_priority {
+    network disconnect node1
+    exec node2  pg_autoctl node start
+    wait until node2 state is wait_standby  timeout 60s
+    exec node2  pg_autoctl set node candidate-priority 0
+}
+
+step test_002_drop_node1_leaves_node2_reportedstate_untouched {
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    sleep 10s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { wait_standby }
+    logs node2 contains "Still waiting for the monitor to drive us to state"
+}

@@ -398,5 +398,13 @@
   {
     "current": "any",
     "assigned": "dropped"
+  },
+  {
+    "current": "wait_maintenance",
+    "assigned": "single"
+  },
+  {
+    "current": "wait_maintenance",
+    "assigned": "report_lsn"
   }
 ]

@@ -85,6 +85,34 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- this is Step 2a's own structural artifact of enumerating a role/predicate
 -- gate across every syntactically possible current_state, not a sign of 10
 -- separate functional bugs.
+--
+-- Follow-up investigation of pos 209/211/325's own remaining gap states
+-- (after wait_maintenance and wait_standby were resolved -- see
+-- group_state_machine.c's reportedIsWaitStandby field (NodeStatusPattern)
+-- and KeeperFSM[]'s new WAIT_MAINTENANCE_STATE rows, fsm.c):
+--
+--   * pos 209/211's remaining states (prepare_maintenance, demote_timeout,
+--     prepare_promotion, stop_replication, fast_forward, join_secondary)
+--     were each checked for real reachability under "alone in group" and
+--     found contrived: reaching them normally implies a multi-node context
+--     (fast_forward/join_secondary need another standby to fetch WAL from
+--     or a newly-elected primary to join, respectively) or an internal
+--     tension with candidateEligible=FALSE (prepare_promotion/stop_
+--     replication imply having already been selected as a promotion
+--     candidate; demote_timeout's genuinely-stuck case is already
+--     intercepted earlier by pos 207). None ruled out as impossible, but
+--     none reproducible via a single, realistic operator/network-failure
+--     sequence the way wait_maintenance and wait_standby were -- left as
+--     documented artifacts, not pursued further this pass.
+--   * pos 325's remaining "single" state (the primaryNode side) is a
+--     genuine model contradiction, not just a contrived scenario: it would
+--     require the primary to report goalState == reportedState == single
+--     while a *separate* node in the same group is simultaneously converged
+--     and reporting secondary -- but the instant a second node registers,
+--     the primary's own goal moves off single (to wait_primary) as part of
+--     that registration, before the joining node could ever reach
+--     secondary. No real sequence of monitor/keeper actions can produce
+--     this combination.
 SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.comment
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos

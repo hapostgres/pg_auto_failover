@@ -312,7 +312,7 @@ section_path                 | early_checks
 active_node_current_state    | 
 other_node_current_state     | 
 candidate_node_current_state | 
-active_node_conditions       | candidateEligible=true
+active_node_conditions       | candidateEligible=true, reportedIsWaitStandby=false
 other_node_conditions        | 
 candidate_node_conditions    | 
 group_conditions             | groupHasExactlyOneNode=true
@@ -342,7 +342,7 @@ section_path                 | early_checks
 active_node_current_state    | 
 other_node_current_state     | 
 candidate_node_current_state | 
-active_node_conditions       | candidateEligible=false, reportedCanTakeWrites=false
+active_node_conditions       | candidateEligible=false, reportedCanTakeWrites=false, reportedIsWaitStandby=false
 other_node_conditions        | 
 candidate_node_conditions    | 
 group_conditions             | groupHasExactlyOneNode=true

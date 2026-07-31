@@ -161,6 +161,10 @@
 #define COMMENT_REPORT_LSN_TO_SINGLE \
 	"There is no other node anymore, promote this node"
 
+#define COMMENT_WAIT_MAINTENANCE_TO_SINGLE \
+	"Was waiting to be sent to maintenance, but the primary vanished, " \
+	"promote this node"
+
 #define COMMENT_FOLLOW_NEW_PRIMARY \
 	"Switch replication to the new primary"
 
@@ -517,6 +521,22 @@ KeeperFSMTransition KeeperFSM[] = {
 		FSM_PHASE_REMOVAL
 	},
 
+	/*
+	 * was waiting for the primary to disable sync replication before going
+	 * to maintenance (a converged, actively-streaming standby -- entering
+	 * WAIT_MAINTENANCE_STATE itself runs no transition function, see its own
+	 * comment below), but the primary was forcibly removed instead: reuse
+	 * fsm_promote_standby exactly like every other converged-standby source
+	 * state above (SECONDARY/CATCHINGUP/PREP_PROMOTION/STOP_REPLICATION/
+	 * REPORT_LSN), since Postgres here is already running and replicating,
+	 * with no special handling wait_maintenance itself needs.
+	 */
+	{
+		WAIT_MAINTENANCE_STATE, SINGLE_STATE, NODE_KIND_ANY,
+		COMMENT_WAIT_MAINTENANCE_TO_SINGLE,
+		&fsm_promote_standby,
+		FSM_PHASE_REMOVAL
+	},
 
 	/*
 	 * On the Primary, wait for a standby to be ready: WAIT_PRIMARY
@@ -855,6 +875,21 @@ KeeperFSMTransition KeeperFSM[] = {
 
 	{
 		PREPARE_MAINTENANCE_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_MAINTENANCE
+	},
+
+	/*
+	 * was waiting for the primary to disable sync replication before going
+	 * to maintenance (a converged, actively-streaming standby, same as the
+	 * other reused source states just above), but the primary was forcibly
+	 * removed and this node's own candidate-priority is 0 -- reuse
+	 * fsm_report_lsn exactly like SECONDARY/CATCHINGUP/MAINTENANCE/
+	 * PREPARE_MAINTENANCE above.
+	 */
+	{
+		WAIT_MAINTENANCE_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
 		COMMENT_SECONDARY_TO_REPORT_LSN,
 		&fsm_report_lsn,
 		FSM_PHASE_MAINTENANCE
