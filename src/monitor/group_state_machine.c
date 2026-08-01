@@ -163,9 +163,9 @@ typedef struct IntPattern
 	int value;                    /* meaningful only when kind != INT_PATTERN_ANY */
 } IntPattern;
 
-#define EXACTLY(n)  ((IntPattern) { .kind = INT_PATTERN_EXACTLY,  .value = (n) })
+#define EXACTLY(n) ((IntPattern) { .kind = INT_PATTERN_EXACTLY, .value = (n) })
 #define AT_LEAST(n) ((IntPattern) { .kind = INT_PATTERN_AT_LEAST, .value = (n) })
-#define AT_MOST(n)  ((IntPattern) { .kind = INT_PATTERN_AT_MOST,  .value = (n) })
+#define AT_MOST(n) ((IntPattern) { .kind = INT_PATTERN_AT_MOST, .value = (n) })
 
 static bool
 IntMatchesPattern(int actual, IntPattern pattern)
@@ -649,10 +649,12 @@ NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
 							  CanTakeWritesInState(status->node->reportedState),
 							  pattern->reportedCanTakeWrites) &&
 		   BoolMatchesPattern(status->node != NULL &&
-							  status->node->reportedState == REPLICATION_STATE_WAIT_STANDBY,
+							  status->node->reportedState ==
+							  REPLICATION_STATE_WAIT_STANDBY,
 							  pattern->reportedIsWaitStandby) &&
 		   BoolMatchesPattern(status->node != NULL &&
-							  status->node->reportedState == REPLICATION_STATE_JOIN_SECONDARY,
+							  status->node->reportedState ==
+							  REPLICATION_STATE_JOIN_SECONDARY,
 							  pattern->reportedIsJoinSecondary) &&
 		   BoolMatchesPattern(status->node != NULL &&
 							  status->node->reportedState ==
@@ -1044,7 +1046,8 @@ typedef MonitorFSMSection MonitorFSMSectionPath[MONITOR_FSM_SECTION_PATH_MAX_DEP
  * not "every row between these two array indices".
  */
 static bool
-SectionPathIsUnderPrefix(const MonitorFSMSectionPath path, const MonitorFSMSectionPath prefix)
+SectionPathIsUnderPrefix(const MonitorFSMSectionPath path, const MonitorFSMSectionPath
+						 prefix)
 {
 	for (int i = 0; i < MONITOR_FSM_SECTION_PATH_MAX_DEPTH; i++)
 	{
@@ -1061,6 +1064,7 @@ SectionPathIsUnderPrefix(const MonitorFSMSectionPath path, const MonitorFSMSecti
 
 	return true;
 }
+
 
 typedef struct MonitorFSMTransition
 {
@@ -1284,15 +1288,15 @@ static void ActionLogMSFailoverQuorumContinue(GroupStateContext *ctx,
 #define MonitorFSM_MultiStandbyCascadeResumeAfterPos 305
 
 static const MonitorFSMSectionPath SectionApiTriggered =
-	{ MONITOR_FSM_SECTION_API_TRIGGERED };
+{ MONITOR_FSM_SECTION_API_TRIGGERED };
 static const MonitorFSMSectionPath SectionEarlyChecks =
-	{ MONITOR_FSM_SECTION_EARLY_CHECKS };
+{ MONITOR_FSM_SECTION_EARLY_CHECKS };
 static const MonitorFSMSectionPath SectionReportingNode =
-	{ MONITOR_FSM_SECTION_REPORTING_NODE };
+{ MONITOR_FSM_SECTION_REPORTING_NODE };
 static const MonitorFSMSectionPath SectionPrimaryNode =
-	{ MONITOR_FSM_SECTION_PRIMARY_NODE };
+{ MONITOR_FSM_SECTION_PRIMARY_NODE };
 static const MonitorFSMSectionPath SectionMSFailover =
-	{ MONITOR_FSM_SECTION_REPORTING_NODE, MONITOR_FSM_SECTION_MS_FAILOVER };
+{ MONITOR_FSM_SECTION_REPORTING_NODE, MONITOR_FSM_SECTION_MS_FAILOVER };
 
 /*
  * Leaf prefixes for the 3 MS-failover counting gates (missingNodesCount/
@@ -1303,13 +1307,17 @@ static const MonitorFSMSectionPath SectionMSFailover =
  * own comment on NodeActiveContext for why that distinction matters).
  */
 static const MonitorFSMSectionPath SectionMSFailoverMissingNodesGate =
-	{ MONITOR_FSM_SECTION_REPORTING_NODE, MONITOR_FSM_SECTION_MS_FAILOVER,
-	  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
-	  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_MISSING_NODES_GATE };
+{
+	MONITOR_FSM_SECTION_REPORTING_NODE, MONITOR_FSM_SECTION_MS_FAILOVER,
+	MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
+	MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_MISSING_NODES_GATE
+};
 static const MonitorFSMSectionPath SectionMSFailoverQuorumCandidateGate =
-	{ MONITOR_FSM_SECTION_REPORTING_NODE, MONITOR_FSM_SECTION_MS_FAILOVER,
-	  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
-	  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_QUORUM_CANDIDATE_GATE };
+{
+	MONITOR_FSM_SECTION_REPORTING_NODE, MONITOR_FSM_SECTION_MS_FAILOVER,
+	MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
+	MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_QUORUM_CANDIDATE_GATE
+};
 
 /*
  * Forward-declared for the same reason as MonitorFSM[] above: used by
@@ -1536,7 +1544,8 @@ static bool
 FindAndDispatchMonitorFSMRuleUnderPath(GroupStateContext *ctx, NodeActiveContext *nac,
 									   const MonitorFSMSectionPath prefix, int afterPos)
 {
-	int index = FindMatchingMonitorFSMRuleIndexUnderPath(MonitorFSM, prefix, afterPos, nac);
+	int index = FindMatchingMonitorFSMRuleIndexUnderPath(MonitorFSM, prefix, afterPos,
+														 nac);
 
 	if (index < 0)
 	{
@@ -1766,7 +1775,8 @@ ActionRunPrimaryNodeTransition(GroupStateContext *ctx, NodeActiveContext *nac,
 
 	BuildForPrimaryNodeNodeActiveContext(ctx, nac->primaryNode.node, &primaryNac);
 
-	(void) FindAndDispatchMonitorFSMRuleUnderPath(ctx, &primaryNac, SectionPrimaryNode, 0);
+	(void) FindAndDispatchMonitorFSMRuleUnderPath(ctx, &primaryNac, SectionPrimaryNode,
+												  0);
 }
 
 
@@ -2165,7 +2175,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 101,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_REMOVE_NODE) },
 	  .activeNode = { .canTakeWrites = BOOL_TRUE },
@@ -2192,7 +2202,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 103,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_REMOVE_NODE) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_DROPPED),
@@ -2208,7 +2218,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 105,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_PERFORM_FAILOVER),
 					  .groupHasExactlyTwoNodes = BOOL_TRUE },
@@ -2233,7 +2243,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 107,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_PERFORM_FAILOVER),
 					  .groupHasMoreThanTwoNodes = BOOL_TRUE },
@@ -2255,7 +2265,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 109,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_START_MAINTENANCE),
 					  .groupHasExactlyTwoNodes = BOOL_TRUE },
@@ -2274,7 +2284,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 111,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_START_MAINTENANCE),
 					  .groupHasMoreThanTwoNodes = BOOL_TRUE },
@@ -2296,7 +2306,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 113,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_START_MAINTENANCE),
 					  .lastHealthySyncStandbyGoingToMaintenance = BOOL_TRUE },
@@ -2317,7 +2327,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 115,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_START_MAINTENANCE) },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_REPORTED,
@@ -2343,7 +2353,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 117,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_STOP_MAINTENANCE) },
 	  .primaryNode = { .exists = BOOL_FALSE },
@@ -2360,7 +2370,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 119,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_STOP_MAINTENANCE) },
 	  .primaryNode = { .isDemotedPrimary = BOOL_TRUE },
@@ -2376,7 +2386,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 121,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_STOP_MAINTENANCE),
 					  .failoverInProgress = BOOL_TRUE },
@@ -2393,7 +2403,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 123,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(API_FUNCTION_STOP_MAINTENANCE) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
@@ -2412,7 +2422,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 125,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(
 						  API_FUNCTION_SET_NODE_CANDIDATE_PRIORITY) },
@@ -2430,7 +2440,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 127,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(
 						  API_FUNCTION_SET_NODE_REPLICATION_QUORUM) },
@@ -2452,7 +2462,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 129,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_API_TRIGGERED
+		  MONITOR_FSM_SECTION_API_TRIGGERED
 	  },
 	  .conditions = { .apiTrigger = API_TRIGGER(
 						  API_FUNCTION_SET_FORMATION_NUMBER_SYNC_STANDBYS) },
@@ -2468,7 +2478,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* converged to dropped -> remove the node from the catalog entirely */
 	{ .pos = 201,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_EARLY_CHECKS
+		  MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_DROPPED) },
 	  .extraAction = ActionRemoveDroppedNode,
@@ -2479,7 +2489,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 203,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_EARLY_CHECKS
+		  MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_DROPPED_GOAL },
 	  .comment = "goal already dropped -> no-op" },
@@ -2487,7 +2497,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* converged to maintenance -> no-op, frozen until stop_maintenance() */
 	{ .pos = 205,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_EARLY_CHECKS
+		  MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_MAINTENANCE) },
 	  .comment = "converged to maintenance -> no-op, frozen until stop_maintenance()" },
@@ -2495,7 +2505,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* demote_timeout self-fence re-target (issue #1025) */
 	{ .pos = 207,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_EARLY_CHECKS
+		  MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_REPORTED_DEMOTE_TIMEOUT,
 					  .unreachableFromDemoteTimeout = BOOL_TRUE },
@@ -2525,7 +2535,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 208,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_EARLY_CHECKS
+		  MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_MAINTENANCE) },
 	  .conditions = { .groupHasExactlyOneNode = BOOL_TRUE },
@@ -2570,7 +2580,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 209,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_EARLY_CHECKS
+		  MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_NOT_STABLE_SINGLE,
 					  .candidateEligible = BOOL_TRUE,
@@ -2612,7 +2622,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 210,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_EARLY_CHECKS
+		  MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_REPORTED_PRIMARY_ROLE_STATES,
 					  .candidateEligible = BOOL_FALSE },
@@ -2658,7 +2668,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 211,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_EARLY_CHECKS
+		  MONITOR_FSM_SECTION_EARLY_CHECKS
 	  },
 	  .activeNode = { .statePattern = FSM_NOT_STABLE_SINGLE,
 					  .candidateEligible = BOOL_FALSE,
@@ -2682,8 +2692,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 301,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
 					  .isComparableToReferenceTli = BOOL_FALSE },
@@ -2697,8 +2707,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 303,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .primaryNode = { .isInPrimaryState = BOOL_TRUE,
 					   .isHealthy = BOOL_TRUE },
@@ -2714,8 +2724,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 305,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .primaryNode = { .isUnhealthy = BOOL_TRUE },
 	  .conditions = { .groupHasMoreThanTwoNodes = BOOL_TRUE },
@@ -2726,8 +2736,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* report_lsn, primary converged wait/join_primary, healthy */
 	{ .pos = 307,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN) },
 	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY,
@@ -2739,8 +2749,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* report_lsn, primary converged primary, healthy */
 	{ .pos = 309,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN) },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY),
@@ -2751,8 +2761,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* fast_forward done -> prepare_promotion */
 	{ .pos = 311,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_FAST_FORWARD) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PREPARE_PROMOTION),
@@ -2766,8 +2776,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 313,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_REPORT_LSN_OR_FAST_FORWARD },
 	  .extraAction = ActionRunPlainMSFailoverCascade,
@@ -2777,8 +2787,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* wait_standby, primary converged wait/join_primary */
 	{ .pos = 315,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY) },
 	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY },
@@ -2788,8 +2798,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* wait_standby (quorum member), primary converged primary */
 	{ .pos = 317,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
 					  .replicationQuorum = BOOL_TRUE },
@@ -2802,8 +2812,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* wait_standby (not a quorum member), primary converged primary */
 	{ .pos = 319,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
 					  .replicationQuorum = BOOL_FALSE },
@@ -2815,8 +2825,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* caught up, same TLI as primary, within sync threshold */
 	{ .pos = 321,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_CATCHINGUP),
 					  .isHealthy = BOOL_TRUE },
@@ -2832,8 +2842,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 323,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
 					  .isHealthy = BOOL_TRUE,
@@ -2859,8 +2869,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 325,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
 					  .isHealthy = BOOL_TRUE,
@@ -2879,8 +2889,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* wait_maintenance, primary converged wait_primary */
 	{ .pos = 327,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_MAINTENANCE) },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_PRIMARY) },
@@ -2890,8 +2900,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* wait_maintenance, primary's goal no longer wait_primary */
 	{ .pos = 329,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_MAINTENANCE) },
 	  .primaryNode = { .statePattern = FSM_NOT_ASSIGNED_WAIT_PRIMARY },
@@ -2902,8 +2912,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* prepare_promotion, primary converged prepare_maintenance */
 	{ .pos = 331,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION) },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_MAINTENANCE) },
@@ -2927,8 +2937,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 333,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION),
 					  .isCitusWorkerGroup = BOOL_TRUE },
@@ -2941,8 +2951,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* Citus worker, primary removed */
 	{ .pos = 335,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION),
 					  .isCitusWorkerGroup = BOOL_TRUE },
@@ -2956,8 +2966,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 337,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION) },
 	  .primaryNode = { .exists = BOOL_TRUE,
@@ -2976,8 +2986,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 339,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION) },
 	  .primaryNode = { .exists = BOOL_TRUE,
@@ -2991,8 +3001,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* prepare_promotion, primary removed */
 	{ .pos = 341,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_PROMOTION) },
 	  .primaryNode = { .exists = BOOL_FALSE },
@@ -3002,8 +3012,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* stop_replication, primary converged prepare_maintenance */
 	{ .pos = 343,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION) },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_MAINTENANCE) },
@@ -3015,8 +3025,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* stop_replication, primary converged demote_timeout (3-way OR, 1 of 3) */
 	{ .pos = 345,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION) },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_DEMOTE_TIMEOUT) },
@@ -3035,8 +3045,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 347,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION) },
 	  .primaryNode = { .drainTimeExpired = BOOL_TRUE },
@@ -3058,8 +3068,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 349,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION) },
 	  .conditions = { .primaryIsWaitPrimaryPresumedDead = BOOL_TRUE },
@@ -3075,8 +3085,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 351,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION),
 					  .isCitusWorkerGroup = BOOL_TRUE },
@@ -3089,8 +3099,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* Citus worker, primary removed */
 	{ .pos = 353,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_STOP_REPLICATION),
 					  .isCitusWorkerGroup = BOOL_TRUE },
@@ -3101,8 +3111,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* demoted, primary reported wait/join_primary with goal primary */
 	{ .pos = 355,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_DEMOTED) },
 	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY_TRANSITIONING_TO_PRIMARY,
@@ -3114,8 +3124,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* demoted, primary converged wait/join_primary/primary, healthy */
 	{ .pos = 357,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_DEMOTED) },
 	  .primaryNode = { .statePattern = FSM_PRIMARY_OR_WAIT_OR_JOIN,
@@ -3130,8 +3140,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 359,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_JOIN_SECONDARY) },
 	  .primaryNode = { .statePattern = FSM_WAIT_PRIMARY_TRANSITIONING_TO_PRIMARY },
@@ -3144,8 +3154,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* join_secondary, primary converged primary */
 	{ .pos = 361,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_FROM_CONTEXT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_JOIN_SECONDARY) },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
@@ -3174,9 +3184,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 363,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_RETRY_RESET
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_RETRY_RESET
 	  },
 	  .conditions = { .activeNodeAllWalSourcesUnhealthy = BOOL_TRUE,
 					  .guardDataLossEnabled = BOOL_TRUE },
@@ -3196,9 +3206,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 365,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_JOIN
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_JOIN
 	  },
 	  .conditions = { .candidatePromotionInProgress = BOOL_TRUE },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN) },
@@ -3235,9 +3245,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 367,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_FANOUT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_FANOUT
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_TRANSITIONING,
@@ -3255,9 +3265,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	{ .pos = 369,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_FANOUT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_FANOUT
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_TRANSITIONING,
@@ -3272,9 +3282,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	{ .pos = 371,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_FANOUT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_FANOUT
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_STABLE,
@@ -3288,9 +3298,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	{ .pos = 373,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_FANOUT
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_FANOUT
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE },
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_TRANSITIONING,
@@ -3323,9 +3333,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 375,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE,
 					  .candidatePromotionInProgress = BOOL_FALSE,
@@ -3338,9 +3348,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	{ .pos = 377,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE,
 					  .candidatePromotionInProgress = BOOL_FALSE,
@@ -3366,10 +3376,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 379,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_MISSING_NODES_GATE
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_MISSING_NODES_GATE
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE,
 					  .inMSFailoverCandidateGate = BOOL_TRUE,
@@ -3381,18 +3391,19 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	{ .pos = 381,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_MISSING_NODES_GATE
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_MISSING_NODES_GATE
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE,
 					  .inMSFailoverCandidateGate = BOOL_TRUE,
 					  .missingNodesCount = AT_LEAST(1),
 					  .guardDataLossEnabled = BOOL_FALSE },
 	  .extraAction = ActionLogMSFailoverMissingNodesContinue,
-	  .comment = "MS-failover: >=1 node(s) yet to report their LSN, guard_data_loss=false "
-				 "-> proceed despite possible data loss (2 of 2)" },
+	  .comment =
+		  "MS-failover: >=1 node(s) yet to report their LSN, guard_data_loss=false "
+		  "-> proceed despite possible data loss (2 of 2)" },
 
 	/*
 	 * MS-failover: zero candidates have reported their LSN yet -- a hard,
@@ -3402,45 +3413,48 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 383,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_CANDIDATE_COUNT_GATE
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_CANDIDATE_COUNT_GATE
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE,
 					  .inMSFailoverCandidateGate = BOOL_TRUE,
 					  .candidateCount = EXACTLY(0) },
-	  .comment = "MS-failover: zero candidates have reported their LSN yet -> silent decline" },
+	  .comment =
+		  "MS-failover: zero candidates have reported their LSN yet -> silent decline" },
 
 	{ .pos = 385,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_QUORUM_CANDIDATE_GATE
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_QUORUM_CANDIDATE_GATE
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE,
 					  .inMSFailoverCandidateGate = BOOL_TRUE,
 					  .sufficientQuorumCandidates = BOOL_FALSE,
 					  .guardDataLossEnabled = BOOL_TRUE },
 	  .extraAction = ActionLogMSFailoverQuorumDecline,
-	  .comment = "MS-failover: not enough quorum candidates reported yet, guard_data_loss=true "
-				 "-> decline (1 of 2)" },
+	  .comment =
+		  "MS-failover: not enough quorum candidates reported yet, guard_data_loss=true "
+		  "-> decline (1 of 2)" },
 
 	{ .pos = 387,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_QUORUM_CANDIDATE_GATE
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_QUORUM_CANDIDATE_GATE
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE,
 					  .inMSFailoverCandidateGate = BOOL_TRUE,
 					  .sufficientQuorumCandidates = BOOL_FALSE,
 					  .guardDataLossEnabled = BOOL_FALSE },
 	  .extraAction = ActionLogMSFailoverQuorumContinue,
-	  .comment = "MS-failover: not enough quorum candidates reported yet, guard_data_loss=false "
-				 "-> proceed with fewer than required (2 of 2)" },
+	  .comment =
+		  "MS-failover: not enough quorum candidates reported yet, guard_data_loss=false "
+		  "-> proceed with fewer than required (2 of 2)" },
 
 	/*
 	 * MS-failover: no promotion in flight, either not enough candidates have
@@ -3457,10 +3471,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 389,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_NO_CANDIDATE_YET
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_PROMOTION_OUTCOME_NO_CANDIDATE_YET
 	  },
 	  .conditions = { .inMSFailoverCluster = BOOL_TRUE,
 					  .candidatePromotionInProgress = BOOL_FALSE },
@@ -3487,9 +3501,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 391,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_DRAINING_OR_MAINTENANCE
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_DRAINING_OR_MAINTENANCE
 	  },
 	  .primaryNode = { .statePattern = FSM_NOT_STABLE_WAIT_PRIMARY,
 					   .isInPrimaryState = BOOL_TRUE,
@@ -3502,9 +3516,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	{ .pos = 393,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_REPORTING_NODE,
-	      MONITOR_FSM_SECTION_MS_FAILOVER,
-	      MONITOR_FSM_SECTION_MS_FAILOVER_DRAINING_OR_MAINTENANCE
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_DRAINING_OR_MAINTENANCE
 	  },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PREPARE_MAINTENANCE),
 					   .isUnhealthy = BOOL_TRUE },
@@ -3526,7 +3540,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* primary alone, another node reached wait_standby */
 	{ .pos = 401,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SINGLE) },
 	  .conditions = { .anyOtherNodeWaitingStandby = BOOL_TRUE },
@@ -3536,7 +3550,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* all nodes async, zero secondaries */
 	{ .pos = 403,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_PRIMARY_ROLE_STATES },
 	  .conditions = { .replicationQuorumCountIsZero = BOOL_TRUE,
@@ -3550,7 +3564,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* all nodes async, >=1 secondary */
 	{ .pos = 405,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_PRIMARY_ROLE_STATES },
 	  .conditions = { .replicationQuorumCountIsZero = BOOL_TRUE,
@@ -3567,7 +3581,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 407,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_PRIMARY_OR_APPLY_SETTINGS_ONLY },
 	  .conditions = { .secondaryQuorumNodesCountIsZero = BOOL_TRUE,
@@ -3584,7 +3598,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* same, but number_sync_standbys>0 -> block writes on primary */
 	{ .pos = 409,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_PRIMARY_OR_APPLY_SETTINGS_ONLY },
 	  .conditions = { .secondaryQuorumNodesCountIsZero = BOOL_TRUE,
@@ -3601,7 +3615,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* wait_primary, >=1 quorum secondary */
 	{ .pos = 411,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_PRIMARY) },
 	  .conditions = { .secondaryQuorumNodesCountIsZero = BOOL_FALSE },
@@ -3614,7 +3628,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* apply_settings, both zero */
 	{ .pos = 413,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_APPLY_SETTINGS) },
 	  .conditions = { .numberSyncStandbysIsZero = BOOL_TRUE,
@@ -3628,7 +3642,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* apply_settings, number_sync_standbys != 0 (1 of 2 disjuncts) */
 	{ .pos = 415,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_APPLY_SETTINGS) },
 	  .conditions = { .numberSyncStandbysIsZero = BOOL_FALSE },
@@ -3642,7 +3656,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* apply_settings, sync_standbys=0 but >=1 quorum secondary (2 of 2) */
 	{ .pos = 417,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_APPLY_SETTINGS) },
 	  .conditions = { .numberSyncStandbysIsZero = BOOL_TRUE,
@@ -3659,7 +3673,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 */
 	{ .pos = 419,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_PRIMARY_ROLE_STATES },
 	  .otherNodesFn = OtherNodesDueForCatchingUp,
@@ -3671,7 +3685,7 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/* backwards-compat: join_primary -> primary */
 	{ .pos = 421,
 	  .sectionPath = {
-	      MONITOR_FSM_SECTION_PRIMARY_NODE
+		  MONITOR_FSM_SECTION_PRIMARY_NODE
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_JOIN_PRIMARY) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PRIMARY),
@@ -3777,7 +3791,8 @@ AssertMonitorFSMWellFormed(void)
 		if (pos == MonitorFSM_MultiStandbyCascadeResumeAfterPos)
 		{
 			foundResumeAnchor = true;
-			Assert(SectionPathIsUnderPrefix(MonitorFSM[i].sectionPath, SectionReportingNode));
+			Assert(SectionPathIsUnderPrefix(MonitorFSM[i].sectionPath,
+											SectionReportingNode));
 		}
 	}
 
@@ -4308,7 +4323,8 @@ NodeStatusPatternConditionsText(const NodeStatusPattern *pattern, bool *isNull)
 	APPEND_BOOL_CONDITION(&buf, "canTakeWrites", pattern->canTakeWrites);
 	APPEND_BOOL_CONDITION(&buf, "reportedCanTakeWrites", pattern->reportedCanTakeWrites);
 	APPEND_BOOL_CONDITION(&buf, "reportedIsWaitStandby", pattern->reportedIsWaitStandby);
-	APPEND_BOOL_CONDITION(&buf, "reportedIsJoinSecondary", pattern->reportedIsJoinSecondary);
+	APPEND_BOOL_CONDITION(&buf, "reportedIsJoinSecondary",
+						  pattern->reportedIsJoinSecondary);
 	APPEND_BOOL_CONDITION(&buf, "reportedIsPrepareMaintenance",
 						  pattern->reportedIsPrepareMaintenance);
 	APPEND_BOOL_CONDITION(&buf, "isReadyToStreamWAL", pattern->isReadyToStreamWAL);
@@ -4871,7 +4887,7 @@ PrimaryNodeReportedStateCanBeResolved(ReplicationState state)
  */
 static bool
 NodeStatusPatternSurvivesReportedCanTakeWrites(const NodeStatusPattern *pattern,
-												ReplicationState state)
+											   ReplicationState state)
 {
 	if (pattern->reportedCanTakeWrites == BOOL_ANY)
 	{
@@ -4893,7 +4909,7 @@ NodeStatusPatternSurvivesReportedCanTakeWrites(const NodeStatusPattern *pattern,
  */
 static bool
 NodeStatusPatternSurvivesReportedIsWaitStandby(const NodeStatusPattern *pattern,
-												ReplicationState state)
+											   ReplicationState state)
 {
 	if (pattern->reportedIsWaitStandby == BOOL_ANY)
 	{
@@ -4915,7 +4931,7 @@ NodeStatusPatternSurvivesReportedIsWaitStandby(const NodeStatusPattern *pattern,
  */
 static bool
 NodeStatusPatternSurvivesReportedIsJoinSecondary(const NodeStatusPattern *pattern,
-												  ReplicationState state)
+												 ReplicationState state)
 {
 	if (pattern->reportedIsJoinSecondary == BOOL_ANY)
 	{
@@ -4937,7 +4953,7 @@ NodeStatusPatternSurvivesReportedIsJoinSecondary(const NodeStatusPattern *patter
  */
 static bool
 NodeStatusPatternSurvivesReportedIsPrepareMaintenance(const NodeStatusPattern *pattern,
-													   ReplicationState state)
+													  ReplicationState state)
 {
 	if (pattern->reportedIsPrepareMaintenance == BOOL_ANY)
 	{
@@ -5184,7 +5200,7 @@ RuleUnconditionallyMatchesPrimaryNodeState(const MonitorFSMTransition *rule,
  */
 static bool
 EdgeIsShadowedByEarlierRule(int beforeIndex, ReplicationState state, bool primaryNodeSide,
-						   MonitorFSMSection topLevelSection)
+							MonitorFSMSection topLevelSection)
 {
 	for (int j = 0; j < beforeIndex; j++)
 	{
@@ -5367,7 +5383,8 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
-				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->activeNode, states[j],
+				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->activeNode,
+															   states[j],
 															   singleExcluded))
 				{
 					continue;
@@ -5397,7 +5414,8 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
-				if (EdgeIsShadowedByEarlierRule(i, states[j], false, rule->sectionPath[0]))
+				if (EdgeIsShadowedByEarlierRule(i, states[j], false,
+												rule->sectionPath[0]))
 				{
 					continue;
 				}
@@ -5440,7 +5458,8 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
-				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->primaryNode, states[j],
+				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->primaryNode,
+															   states[j],
 															   singleExcluded))
 				{
 					continue;
@@ -5559,7 +5578,8 @@ ProceedGroupStateFromContext(GroupStateContext *ctx)
 
 		BuildForPrimaryNodeNodeActiveContext(ctx, activeNode, &primaryNac);
 
-		return FindAndDispatchMonitorFSMRuleUnderPath(ctx, &primaryNac, SectionPrimaryNode, 0);
+		return FindAndDispatchMonitorFSMRuleUnderPath(ctx, &primaryNac,
+													  SectionPrimaryNode, 0);
 	}
 
 	/*
@@ -5737,7 +5757,7 @@ BuildMSFailoverCandidateGateNodeActiveContext(GroupStateContext *ctx,
  */
 static void
 ActionLogMSFailoverMissingNodesDecline(GroupStateContext *ctx, NodeActiveContext *nac,
-										char *message)
+									   char *message)
 {
 	AutoFailoverNode *activeNode = nac->activeNode.node;
 
@@ -5756,7 +5776,7 @@ ActionLogMSFailoverMissingNodesDecline(GroupStateContext *ctx, NodeActiveContext
 
 static void
 ActionLogMSFailoverMissingNodesContinue(GroupStateContext *ctx, NodeActiveContext *nac,
-										 char *message)
+										char *message)
 {
 	AutoFailoverNode *activeNode = nac->activeNode.node;
 
@@ -5774,7 +5794,7 @@ ActionLogMSFailoverMissingNodesContinue(GroupStateContext *ctx, NodeActiveContex
 
 static void
 ActionLogMSFailoverQuorumDecline(GroupStateContext *ctx, NodeActiveContext *nac,
-								  char *message)
+								 char *message)
 {
 	AutoFailoverNode *activeNode = nac->activeNode.node;
 	int minCandidates = ctx->formation->number_sync_standbys + 1;
@@ -5797,7 +5817,7 @@ ActionLogMSFailoverQuorumDecline(GroupStateContext *ctx, NodeActiveContext *nac,
 
 static void
 ActionLogMSFailoverQuorumContinue(GroupStateContext *ctx, NodeActiveContext *nac,
-								   char *message)
+								  char *message)
 {
 	AutoFailoverNode *activeNode = nac->activeNode.node;
 	int minCandidates = ctx->formation->number_sync_standbys + 1;
@@ -6085,7 +6105,8 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	 */
 	NodeActiveContext gateNac;
 
-	BuildMSFailoverCandidateGateNodeActiveContext(ctx, primaryNode, &candidateList, &gateNac);
+	BuildMSFailoverCandidateGateNodeActiveContext(ctx, primaryNode, &candidateList,
+												  &gateNac);
 
 	/*
 	 * Time to select a candidate?
@@ -6101,7 +6122,8 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	if (candidateList.missingNodesCount > 0)
 	{
 		(void) FindAndDispatchMonitorFSMRuleUnderPath(ctx, &gateNac,
-													  SectionMSFailoverMissingNodesGate, 0);
+													  SectionMSFailoverMissingNodesGate,
+													  0);
 
 		if (GuardDataLoss)
 		{
@@ -6137,7 +6159,8 @@ ProceedGroupStateForMSFailover(GroupStateContext *ctx,
 	if (candidateList.quorumCandidateCount < minCandidates)
 	{
 		(void) FindAndDispatchMonitorFSMRuleUnderPath(ctx, &gateNac,
-													  SectionMSFailoverQuorumCandidateGate, 0);
+													  SectionMSFailoverQuorumCandidateGate,
+													  0);
 
 		if (GuardDataLoss)
 		{
@@ -6372,7 +6395,7 @@ BuildCandidateList(GroupStateContext *ctx, List *nodesGroupList,
 				ereport(ERROR,
 						(errmsg("BUG: no MS-failover fan-out row matched "
 								NODE_FORMAT " although its own conditions "
-								"should always hold here",
+											"should always hold here",
 								NODE_FORMAT_ARGS(node))));
 			}
 
