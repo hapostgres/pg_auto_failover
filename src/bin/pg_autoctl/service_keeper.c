@@ -17,6 +17,7 @@
 #include "cli_common.h"
 #include "cli_root.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -31,6 +32,7 @@
 #include "service_postgres_ctl.h"
 #include "signals.h"
 #include "state.h"
+#include "step_socket.h"
 #include "string_utils.h"
 #include "supervisor.h"
 #include "timeline_history.h"
@@ -408,7 +410,7 @@ keeper_node_active_shutdown_loop(Keeper *keeper)
  * start_maintenance() on the node's own behalf -- the same monitor call
  * `pg_autoctl enable maintenance [--allow-failover]` already uses -- then
  * driving the ordinary FSM towards maintenance with the same
- * keeper_fsm_step() primitive used by `pg_autoctl do fsm step`.
+ * keeper_fsm_step() primitive used by `pg_autoctl manual fsm step`.
  *
  * This covers both roles start_maintenance() accepts:
  *
@@ -627,7 +629,27 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 	bool nodeHasBeenDroppedFromTheMonitor = false;
 
+	bool stepMode = env_exists(PG_AUTOCTL_STEP_MODE);
+	int stepListenFd = -1;
+	char stepSocketPath[MAXPGPATH] = { 0 };
+
 	log_debug("pg_autoctl service is starting");
+
+	if (stepMode)
+	{
+		if (!step_socket_listen(config->pathnames.pid,
+								stepSocketPath, sizeof(stepSocketPath),
+								&stepListenFd))
+		{
+			log_fatal("Failed to create the pg_autoctl step-mode control "
+					  "socket, see above for details");
+			return false;
+		}
+
+		log_info("pg_autoctl step mode is enabled: waiting for "
+				 "\"pg_autoctl manual fsm step\" commands on \"%s\" instead of "
+				 "ticking automatically", stepSocketPath);
+	}
 
 	/* setup our monitor client connection with our notification handler */
 	(void) monitor_setup_notifications(monitor,
@@ -674,13 +696,27 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		bool needStateChange = false;
 		bool transitionFailed = false;
 
+		bool stepCommandReceived = false;
+		int stepClientFd = -1;
+
 		/*
 		 * If we're in a stable state (current state and goal state are the
 		 * same, and this didn't change in the previous loop), then we can
 		 * sleep for a while. As the monitor notifies every state change, we
 		 * can also interrupt our sleep as soon as we get the hint.
+		 *
+		 * In step mode, we never tick on our own: instead of sleeping, we
+		 * block (with a timeout, so signals are still handled promptly) on
+		 * our control socket for the next externally-issued "step" command.
 		 */
-		if (doSleep && !config->monitorDisabled)
+		if (doSleep && stepMode)
+		{
+			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
+
+			stepCommandReceived =
+				step_socket_wait_for_command(stepListenFd, timeoutMs, &stepClientFd);
+		}
+		else if (doSleep && !config->monitorDisabled)
 		{
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
 
@@ -737,6 +773,50 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		(void) check_pidfile(config->pathnames.pid, start_pid);
 
 		CHECK_FOR_FAST_SHUTDOWN;
+
+		/*
+		 * In step mode, bypass the rest of this loop entirely: either we
+		 * timed out waiting for a command (nothing to do, go back around
+		 * and poll again), or we have one client connection with a "step"
+		 * command pending, in which case we reuse the exact same
+		 * keeper_fsm_step() that "pg_autoctl manual fsm step" itself calls --
+		 * the only difference is that it now runs inside this already
+		 * long-lived process instead of a fresh one-shot CLI invocation,
+		 * which is what makes step mode safe to use repeatedly without
+		 * disturbing the persistent postgres subprocess's own status file.
+		 */
+		if (stepMode)
+		{
+			if (firstLoop)
+			{
+				firstLoop = false;
+			}
+
+			if (!stepCommandReceived)
+			{
+				continue;
+			}
+
+			NodeState oldRole = keeperState->current_role;
+			bool stepOk = keeper_fsm_step(keeper);
+
+			if (stepOk)
+			{
+				(void) step_socket_respond_ok(stepClientFd,
+											  NodeStateToString(oldRole),
+											  NodeStateToString(keeperState->assigned_role));
+			}
+			else
+			{
+				(void) step_socket_respond_error(stepClientFd,
+												 "failed to step the keeper's FSM, "
+												 "see the pg_autoctl logs for details");
+			}
+
+			close(stepClientFd);
+
+			continue;
+		}
 
 		/*
 		 * Read the current state. While we could preserve the state in memory,
@@ -1050,6 +1130,11 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	/* One last check that we do not have any connections open */
 	pgsql_finish(&(keeper->monitor.pgsql));
 	pgsql_finish(&(monitor->notificationClient));
+
+	if (stepMode)
+	{
+		(void) step_socket_close(stepListenFd, stepSocketPath);
+	}
 
 	if (nodeHasBeenDroppedFromTheMonitor)
 	{

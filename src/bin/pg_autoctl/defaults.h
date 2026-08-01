@@ -25,6 +25,14 @@
 #define PG_AUTOCTL_DEBUG "PG_AUTOCTL_DEBUG"
 #define PG_AUTOCTL_EXTENSION_VERSION_VAR "PG_AUTOCTL_EXTENSION_VERSION"
 
+/*
+ * environment variable that switches the node-active service into
+ * step mode: instead of ticking on its own, it waits for explicit
+ * "pg_autoctl do fsm step" commands on a Unix-domain control socket.
+ * See step_socket.c.
+ */
+#define PG_AUTOCTL_STEP_MODE "PG_AUTOCTL_STEP_MODE"
+
 /* environment variable for containing the id of the logging semaphore */
 #define PG_AUTOCTL_LOG_SEMAPHORE "PG_AUTOCTL_LOG_SEMAPHORE"
 

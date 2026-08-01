@@ -18,6 +18,7 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "file_utils.h"
 #include "fsm.h"
 #include "fsm_mermaid.h"
 #include "keeper_config.h"
@@ -25,6 +26,7 @@
 #include "parsing.h"
 #include "pgctl.h"
 #include "state.h"
+#include "step_socket.h"
 #include "string_utils.h"
 
 
@@ -489,11 +491,60 @@ cli_do_fsm_step(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
+	/*
+	 * When a node-active service is running in step mode (PG_AUTOCTL_STEP_MODE),
+	 * it owns the keeper's FSM: it's the one already holding the long-lived
+	 * state and Postgres process supervision. Delegate to it over its
+	 * control socket rather than stepping the FSM ourselves from a fresh
+	 * one-shot process, which would race the running service.
+	 */
+	char stepSocketPath[MAXPGPATH] = { 0 };
+
+	if (step_socket_path(keeper.config.pathnames.pid,
+						 stepSocketPath, sizeof(stepSocketPath)) &&
+		file_exists(stepSocketPath))
+	{
+		char response[BUFSIZE * 2] = { 0 };
+
+		if (!step_socket_send_command(stepSocketPath, "STEP",
+									  response, sizeof(response)))
+		{
+			log_fatal("Failed to reach the step-mode node-active service at "
+					  "\"%s\"", stepSocketPath);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		if (strncmp(response, "ERROR", 5) == 0)
+		{
+			log_fatal("%s", response);
+			exit(EXIT_CODE_BAD_STATE);
+		}
+
+		if (outputJSON)
+		{
+			log_warn("This command does not support JSON output at the moment");
+		}
+
+		/* response is "OK <oldRole> <newRole>" */
+		char oldRole[NAMEDATALEN] = { 0 };
+		char newRole[NAMEDATALEN] = { 0 };
+
+		if (sscanf(response, "OK %s %s", oldRole, newRole) != 2)
+		{
+			log_fatal("Failed to parse the step-mode service response: \"%s\"",
+					  response);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		fformat(stdout, "%s ➜ %s\n", oldRole, newRole);
+		return;
+	}
+
 	if (keeper.config.monitorDisabled)
 	{
-		log_fatal("The command `pg_autoctl do fsm step` is meant to step as "
+		log_fatal("The command `pg_autoctl manual fsm step` is meant to step as "
 				  "instructed by the monitor, and the monitor is disabled.");
-		log_info("HINT: see `pg_autoctl do fsm assign` instead");
+		log_info("HINT: see `pg_autoctl manual fsm assign` instead");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
