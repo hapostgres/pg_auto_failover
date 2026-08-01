@@ -163,6 +163,7 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"worker"             { return T_WORKER; }
 <CLUSTER_BODY>"async"              { return T_ASYNC; }
 <CLUSTER_BODY>"no-monitor"         { return T_NO_MONITOR; }
+<CLUSTER_BODY>"no-autopilot"       { return T_NO_AUTOPILOT; }
 <CLUSTER_BODY>"password"           { return T_PASSWORD; }
 <CLUSTER_BODY>"monitor-password"   { return T_MONITOR_PASSWORD; }
 <CLUSTER_BODY>"launch"             { return T_LAUNCH; }
@@ -295,6 +296,8 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"="             { return T_EQUALS; }
 <STEP_BODY>","             { return T_COMMA; }
 <STEP_BODY>"postgres"      { return T_POSTGRES; }
+<STEP_BODY>"fsm"           { return T_FSM; }
+<STEP_BODY>"step"          { return T_STEP; }
 <STEP_BODY>"stays"         { return T_STAYS; }
 <STEP_BODY>"while"         { return T_WHILE; }
 <STEP_BODY>"passing"[ \t\r\n]+"through"  { return T_THROUGH; }

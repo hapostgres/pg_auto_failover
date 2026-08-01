@@ -797,6 +797,29 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 				continue;
 			}
 
+			/*
+			 * Unlike the autonomous tick body (service_keeper_node_active(),
+			 * called from the branch below), keeper_fsm_step() never
+			 * refreshes our cached list of other nodes -- it wasn't written
+			 * to need to, since its only other caller is the one-shot
+			 * "pg_autoctl manual fsm step" CLI, where a fresh keeper_init()
+			 * per invocation already populates that cache from scratch each
+			 * time. This long-lived process only calls keeper_init() once,
+			 * so without an explicit refresh here that cache would stay
+			 * pinned to however many peers existed at step-mode startup --
+			 * silently stalling replication-slot and HBA maintenance for
+			 * any peer that joined afterwards. A failure here is not fatal:
+			 * fall through to keeper_fsm_step() regardless, exactly as a
+			 * failed refresh in autonomous mode just retries next tick.
+			 */
+			bool forceCacheInvalidation = false;
+
+			if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
+			{
+				log_warn("Failed to update our list of other nodes, "
+						 "stepping the FSM anyway");
+			}
+
 			NodeState oldRole = keeperState->current_role;
 			bool stepOk = keeper_fsm_step(keeper);
 

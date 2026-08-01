@@ -1099,10 +1099,22 @@ compose_gen_write(TestCluster *cluster,
 					"      PGDATA: %s\n"
 					"      PGUSER: demo\n"
 					"      PGDATABASE: demo\n"
-					"      PG_AUTOCTL_TEST_DELAY: \"%d\"\n"
-					"    expose:\n"
-					"      - 5432\n",
+					"      PG_AUTOCTL_TEST_DELAY: \"%d\"\n",
 					node_pgdata, thisOrdinal);
+
+			if (n->noAutopilot)
+			{
+				/*
+				 * Never tick on its own; only "fsm step <node>" advances
+				 * this node's FSM (see step_socket.c on the pg_autoctl
+				 * side, and fsm_step_cmd in test_spec_parse.y here).
+				 */
+				fformat(f, "      PG_AUTOCTL_STEP_MODE: \"1\"\n");
+			}
+
+			fformat(f,
+					"    expose:\n"
+					"      - 5432\n");
 
 			/*
 			 * No depends_on: keeper retry loops handle monitor not yet ready,

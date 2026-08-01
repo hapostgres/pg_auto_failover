@@ -203,6 +203,12 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_FSM_STEP:
+		{
+			fprintf(f, "%sfsm step %s\n", pad, cmd->service); /* IGNORE-BANNED */
+			break;
+		}
+
 		case CMD_PROMOTE:
 		{
 			fprintf(f, "%spromote", pad); /* IGNORE-BANNED */
@@ -3895,6 +3901,58 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			return true;
 		}
 
+		case CMD_FSM_STEP:
+		{
+			/*
+			 * Advance a "no-autopilot" node's FSM by exactly one transition.
+			 * The node-active service on that node is sitting in step mode
+			 * (PG_AUTOCTL_STEP_MODE), blocked on its control socket, so this
+			 * is the only thing that makes it progress.
+			 *
+			 * Right after that service (re)starts there's a brief handoff
+			 * window with its sibling postgres-controller subprocess during
+			 * which a step can transiently fail (e.g. postmaster.pid not
+			 * observed yet). In autopilot mode this self-heals silently on
+			 * the next tick; in step mode there's no next tick unless we
+			 * retry, so retry here rather than pushing a magic sleep onto
+			 * every spec that uses this command.
+			 */
+			log_info("Stepping the FSM on %s", cmd->service);
+
+			char fsmOut[4096] = "";
+			int rc = -1;
+			int elapsedMs = 0;
+			int retryTimeoutMs = 30000;
+
+			while (elapsedMs < retryTimeoutMs)
+			{
+				rc = run_cmd_capture_both(
+					fsmOut, sizeof(fsmOut),
+					"%s exec -T %s pg_autoctl manual fsm step"
+					" --pgdata /var/lib/postgres/pgaf",
+					r->composeBase, cmd->service);
+
+				if (rc == 0)
+				{
+					break;
+				}
+
+				usleep(500000); /* 500ms */
+				elapsedMs += 500;
+			}
+
+			if (rc != 0)
+			{
+				log_info("%s", fsmOut);
+				sformat(errBuf, errLen,
+						"fsm step %s failed (exit %d)",
+						cmd->service, rc);
+				return false;
+			}
+			log_info("%s", fsmOut);
+			return true;
+		}
+
 		case CMD_STAYS_WHILE:
 		{
 			/*
@@ -4429,6 +4487,12 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 		case CMD_START_POSTGRES:
 		{
 			sformat(buf, len, "start postgres %s", cmd->service);
+			break;
+		}
+
+		case CMD_FSM_STEP:
+		{
+			sformat(buf, len, "fsm step %s", cmd->service);
 			break;
 		}
 

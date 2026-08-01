@@ -156,7 +156,7 @@ static TestNode      *current_node        = NULL;
 
 /* ---- Cluster-body tokens ---- */
 %token T_IMAGE T_IMAGE_TARGET T_SSL T_AUTH T_AUTH_METHOD T_FORMATION T_NUM_SYNC
-%token T_COORDINATOR T_WORKER T_ASYNC T_NO_MONITOR
+%token T_COORDINATOR T_WORKER T_ASYNC T_NO_MONITOR T_NO_AUTOPILOT
 %token T_LAUNCH T_CREATE T_DEFERRED T_IMMEDIATE T_FALSE T_TRUE T_INITIALLY T_VOLUME
 %token T_LISTEN T_CITUS_SECONDARY T_CANDIDATE_PRIORITY T_PORT T_PASSWORD T_MONITOR_PASSWORD
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
@@ -188,6 +188,7 @@ static TestNode      *current_node        = NULL;
 %token T_IN T_GROUP
 %token T_LBRACE T_RBRACE T_COMMA
 %token T_POSTGRES T_STAYS T_WHILE T_THROUGH T_SET T_GET
+%token T_FSM
 %token T_LOGS T_NOT T_CONTAINS T_MATCHES
 
 /* ---- Tokens with values ---- */
@@ -204,6 +205,7 @@ static TestNode      *current_node        = NULL;
 %type <cmd>   exec_cmd wait_cmd assert_cmd sql_cmd expect_cmd
 %type <cmd>   promote_cmd network_cmd sleep_cmd compose_cmd
 %type <cmd>   postgres_ctl_cmd stays_while_cmd set_monitor_cmd logs_cmd perform_cmd
+%type <cmd>   fsm_step_cmd
 %type <cmd>   nodeini_cmd
 %type <ival>  opt_timeout
 %type <step>  while_body
@@ -521,6 +523,10 @@ node_opt:
 	{
 		current_node->noMonitor = true;
 	}
+	| T_NO_AUTOPILOT
+	{
+		current_node->noAutopilot = true;
+	}
 	| T_DEFERRED
 	{
 		/* bare "deferred" = create and launch deferred (both gates) */
@@ -734,6 +740,7 @@ step_cmd:
 	| sleep_cmd         { $$ = $1; }
 	| compose_cmd       { $$ = $1; }
 	| postgres_ctl_cmd  { $$ = $1; }
+	| fsm_step_cmd      { $$ = $1; }
 	| stays_while_cmd   { $$ = $1; }
 	| set_monitor_cmd   { $$ = $1; }
 	| logs_cmd          { $$ = $1; }
@@ -1397,6 +1404,26 @@ postgres_ctl_cmd:
 	| T_START T_POSTGRES node_name
 	{
 		$$ = make_cmd(CMD_START_POSTGRES);
+		strlcpy($$->service, $3, sizeof($$->service));
+		free($3);
+	}
+	;
+
+/* -----------------------------------------------------------------------
+ * fsm step <node>
+ *
+ * Sugar for `pg_autoctl manual fsm step --pgdata /var/lib/postgres/pgaf` run
+ * inside the named node's container. Only meaningful for a node declared
+ * "no-autopilot" in the cluster block: such a node's node-active service
+ * never ticks on its own (PG_AUTOCTL_STEP_MODE), so this is the only thing
+ * that advances its FSM -- one transition at a time, precisely when the
+ * spec asks for it. See src/bin/pg_autoctl/step_socket.c.
+ * ----------------------------------------------------------------------- */
+
+fsm_step_cmd:
+	  T_FSM T_STEP node_name
+	{
+		$$ = make_cmd(CMD_FSM_STEP);
 		strlcpy($$->service, $3, sizeof($$->service));
 		free($3);
 	}
