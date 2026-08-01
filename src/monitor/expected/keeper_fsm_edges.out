@@ -243,20 +243,40 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 --     so it doesn't matter that none exist.
 --
 --     Verified via this test (Step 1/2a, the keeper_fsm_edges.json fixture
---     and dump_fsm_edges() both resolving these three edges consistently)
---     and the code reasoning above, not a live pgaftest reproduction: a
---     live attempt for prepare_promotion specifically found the race
---     fast_forward's own fix doesn't have -- fsm_prepare_standby_for_
---     promotion is a no-op, so the monitor's cascade advances from
---     assigned=prepare_promotion straight through to stop_replication
+--     and dump_fsm_edges() both resolving these three edges consistently),
+--     the code reasoning above, AND real live pgaftest reproduction for all
+--     three (keeper_fsm_gap_priority_zero_candidate_left_alone_mid_promotion.pgaf,
+--     keeper_fsm_gap_priority_zero_primary_left_alone_mid_demotion.pgaf,
+--     keeper_fsm_gap_priority_zero_losing_candidate_left_alone_mid_handoff.pgaf).
+--     A first attempt at live reproduction (an earlier session) found
+--     exactly the race fast_forward's own fix doesn't have: fsm_prepare_
+--     standby_for_promotion is a no-op, so the monitor's cascade advances
+--     from assigned=prepare_promotion straight through to stop_replication
 --     within the same heartbeat, before any external test script's own
 --     "remove the other peers" SQL call can land in between. (That same
 --     attempt did incidentally confirm live that stop_replication really
---     is a dead end below: node3 sat reporting stop_replication,
---     endlessly reassigned report_lsn by this same pos 211 row, with no
---     KeeperFSM[] row able to reach it.) demote_timeout and join_secondary
---     were not attempted live given the identical instantaneous-transition
---     shape.
+--     is a dead end below: node3 sat reporting stop_replication, endlessly
+--     reassigned report_lsn by this same pos 211 row, with no KeeperFSM[]
+--     row able to reach it.)
+--
+--     Step mode (PG_AUTOCTL_STEP_MODE, src/bin/pg_autoctl/step_socket.c)
+--     removes that race entirely: a "no-autopilot" node's node-active
+--     service never ticks on its own, so a pgaftest spec can drive it to
+--     converge locally to prepare_promotion/demote_timeout/join_secondary
+--     via one explicit "fsm step <node>" (see fsm_step_cmd,
+--     src/bin/pgaftest/test_spec_parse.y) and then simply not issue the
+--     next one for as long as it likes -- there is no cascade to race
+--     against, because nothing happens without an explicit command. Once
+--     frozen there, unreported to the monitor, each spec zeroes the node's
+--     own candidate priority and force-removes its former peers, then a
+--     single further "fsm step" reports the frozen state, receives the
+--     newly-applicable report_lsn assignment from pos 211, and performs
+--     the transition under test in the very same call. See those three
+--     specs' own headers for the full mechanics, including why each one's
+--     particular current_state needs a different cluster shape to reach in
+--     the first place (a lone standby for prepare_promotion, the original
+--     primary itself for demote_timeout, and a losing MS-failover
+--     candidate for join_secondary).
 --   * pos 211's stop_replication current_state is the one exception left
 --     unfixed, and unlike the three above it is not simply "missing a row":
 --     fsm_stop_replication doesn't just stop a process, its own comment

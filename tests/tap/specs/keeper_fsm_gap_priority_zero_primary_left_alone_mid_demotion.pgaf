@@ -1,0 +1,123 @@
+# Regression spec for MonitorFSM[] pos 211 ("alone in group, candidatePriority
+# zero -> report_lsn", src/monitor/group_state_machine.c), for its
+# demote_timeout current_state, and for the matching KeeperFSM[] row added in
+# fsm.c:
+#
+#   {
+#       DEMOTE_TIMEOUT_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+#       COMMENT_SECONDARY_TO_REPORT_LSN,
+#       &fsm_report_lsn,
+#       FSM_PHASE_FAILOVER
+#   },
+#
+# Unlike the prepare_promotion sibling spec, here the node under test is the
+# primary being demoted, not a standby being promoted. node3 (no-autopilot)
+# is declared *second*, not first: compose_gen only attaches a healthcheck
+# to the first data node (so that later nodes can depend_on it being
+# healthy, making the initial election deterministic) -- a no-autopilot
+# node can never satisfy that healthcheck on its own (`pg_autoctl status`
+# requires Postgres to be running, and nothing restarts Postgres after the
+# one-shot node-init phase stops it until the very first "fsm step" call),
+# so it must never be the first node in the formation.
+#
+# This means node3 starts life as an ordinary standby and has to be
+# *promoted* into place before it can be demoted -- two separate
+# single-candidate MS-failover cycles chained together, both driven the
+# same deterministic way the sibling specs use: node3's node-active
+# service never ticks on its own, so every step below is an explicit,
+# non-racing "fsm step node3" call, and the spec is free to pause for as
+# long as it likes between any two of them.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node3  no-autopilot  candidate-priority 50
+    }
+}
+
+setup {
+    wait until node3 state = catchingup  timeout 60s
+    fsm step node3
+    fsm step node3
+    fsm step node3
+    wait until node1 state is primary
+        and node3 state is secondary
+        timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_promote_node3 {
+    sql monitor {
+        SELECT pgautofailover.perform_promotion('default', 'node3');
+    }
+    wait until node3 assigned-state = prepare_promotion  timeout 60s
+}
+
+step test_002_step_node3_through_to_primary {
+    # node3 needs to walk secondary -> prepare_promotion -> stop_replication
+    # -> wait_primary -> primary, each hop its own explicit "fsm step".
+    # There's no harm in calling it a few more times than strictly
+    # necessary -- once a hop is already applied, the next call is simply a
+    # no-op "ensure current state" -- so blast enough of them to reach
+    # "primary" regardless of exactly how many hops this happened to take
+    # this time around, rather than hand-counting an exact number that's
+    # sensitive to timing.
+    fsm step node3
+    fsm step node3
+    fsm step node3
+    fsm step node3
+    wait until node1 state is secondary  timeout 90s
+    fsm step node3
+    fsm step node3
+    fsm step node3
+    wait until node3 state is primary  timeout 60s
+    # One more step to have node3 actually *report* primary to the monitor
+    # -- perform_failover() below requires a node already confirmed primary.
+    fsm step node3
+}
+
+step test_003_perform_failover_and_wait_demote_timeout_assignment {
+    sql monitor {
+        SELECT pgautofailover.perform_failover('default', 0);
+    }
+    wait until node3 assigned-state = demote_timeout  timeout 60s
+}
+
+step test_004_converge_locally_without_reporting {
+    # node3's own current_role is now demote_timeout, but this has not been
+    # reported back to the monitor yet, and won't be until the spec issues
+    # another explicit "fsm step node3" below.
+    fsm step node3
+}
+
+step test_005_zero_priority_and_remove_new_primary_row {
+    sql monitor {
+        SELECT pgautofailover.set_node_candidate_priority('default', 'node3', 0);
+    }
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+}
+
+step test_006_node3_converges_straight_to_report_lsn {
+    fsm step node3
+    # The call above already performed the demote_timeout -> report_lsn
+    # transition under test, but keeper_fsm_step() only reports the state
+    # it had *before* that transition -- one more call is needed for node3
+    # to actually report "report_lsn" back to the monitor.
+    fsm step node3
+    wait until node3 state = report_lsn  timeout 30s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+}

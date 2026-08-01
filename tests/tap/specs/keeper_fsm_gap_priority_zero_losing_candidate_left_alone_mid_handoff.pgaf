@@ -1,0 +1,145 @@
+# Regression spec for MonitorFSM[] pos 211 ("alone in group, candidatePriority
+# zero -> report_lsn", src/monitor/group_state_machine.c), for its
+# join_secondary current_state, and for the matching KeeperFSM[] row added in
+# fsm.c:
+#
+#   {
+#       JOIN_SECONDARY_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+#       COMMENT_SECONDARY_TO_REPORT_LSN,
+#       &fsm_report_lsn,
+#       FSM_PHASE_FAILOVER
+#   },
+#
+# Unlike its prepare_promotion and demote_timeout siblings, join_secondary
+# only exists on the *losing* side of a genuine MS-failover candidate
+# election, so this scenario needs three nodes and two candidates: node1 is
+# the original primary; node2 and node3 both start as ordinary (nonzero
+# candidate-priority) standbys, so both are eligible and get sent through
+# report_lsn to have their LSNs compared once node1 is gone. Both are
+# declared "no-autopilot" so the spec can pace the whole election by hand --
+# node2 is driven to actually win (report_lsn -> prepare_promotion), and
+# node3, the loser, is driven only as far as report_lsn and then frozen
+# there while node2 pulls ahead, exactly reproducing the real window in
+# which the monitor assigns join_secondary to the node that didn't win.
+#
+# Every "fsm step" call the setup/steps below make is deterministic and
+# non-racing precisely because both node2 and node3 are step-mode: nothing
+# advances except in response to an explicit command, so there is no
+# autonomous cascade to lose a race against, unlike attempting this same
+# scenario against ordinary (autonomous) standbys.
+#
+# test_003's first call steps node2 from prepare_promotion onward; whether
+# that particular attempt (reaching stop_replication) itself succeeds or
+# fails is irrelevant to what this spec is testing, and by this point node1
+# (the old primary) has already been force-killed, so it can go either way.
+# What matters is the side effect that already landed regardless: node2's
+# report of "I am now in prepare_promotion" reached the monitor, which is
+# what makes it assign join_secondary to node3 in the first place.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2  no-autopilot  candidate-priority 50
+        node3  no-autopilot  candidate-priority 50
+    }
+}
+
+setup {
+    wait until node2 state = catchingup  timeout 60s
+    wait until node3 state = catchingup  timeout 60s
+    fsm step node2
+    fsm step node3
+    fsm step node2
+    fsm step node3
+    fsm step node2
+    fsm step node3
+    fsm step node2
+    fsm step node3
+    wait until node1 state is primary  timeout 60s
+    wait until node2 state is secondary  timeout 60s
+    wait until node3 state is secondary  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_kill_primary_and_converge_both_locally_to_report_lsn {
+    # A hard kill never gives node1 a chance to self-report (unlike a
+    # graceful shutdown), so nothing recalculates either standby's own goal
+    # state until each makes its own contact -- neither node2 nor node3
+    # ticks on its own (no-autopilot), so it takes one explicit "fsm step"
+    # per node here, not a bare wait. Each call both discovers the new
+    # report_lsn assignment *and* performs the transition into it, in the
+    # same call -- there's no way to observe the assignment without also
+    # applying it. The sleep gives the monitor's own health-check worker
+    # (a periodic background process, unrelated to and slower than any of
+    # our explicit steps) time to actually notice node1 is gone before we
+    # step either standby -- stepping too early would just be a
+    # same-state no-op, since the monitor wouldn't yet have anything new
+    # to assign.
+    compose kill node1
+    sleep 30s
+    fsm step node2
+    fsm step node3
+    wait until node2 assigned-state = report_lsn  timeout 30s
+    wait until node3 assigned-state = report_lsn  timeout 30s
+}
+
+step test_002_winner_reports_report_lsn_and_converges_to_prepare_promotion {
+    # This call reports node2's own report_lsn state to the monitor (which
+    # is what lets it be selected) and, in the same call, converges node2
+    # locally to prepare_promotion -- still unreported at this point.
+    fsm step node2
+}
+
+step test_003_winner_reports_prepare_promotion_and_loser_gets_join_secondary {
+    # This call reports node2's own prepare_promotion state to the monitor
+    # and then attempts the prepare_promotion -> stop_replication
+    # transition. Whether that attempt itself succeeds or fails (it can go
+    # either way depending on exactly how reachable node1 still looks at
+    # this point) is irrelevant to what this spec is testing -- plain exec
+    # (not the "fsm step" sugar, which retries on failure) accepts either
+    # outcome without burning its retry budget. What matters is the report
+    # of "prepare_promotion" that already landed before that attempt: that
+    # is what makes the monitor assign join_secondary to node3 next.
+    exec node2  pg_autoctl manual fsm step --pgdata /var/lib/postgres/pgaf
+    # node3 still reports "report_lsn" (unreported since test_001); this
+    # call refreshes that report, and only now -- with node2's own
+    # prepare_promotion report already landed above -- does the monitor
+    # assign join_secondary in response.
+    fsm step node3
+}
+
+step test_004_zero_priority_and_remove_other_two_nodes {
+    sql monitor {
+        SELECT pgautofailover.set_node_candidate_priority('default', 'node3', 0);
+    }
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+}
+
+step test_005_node3_converges_straight_to_report_lsn {
+    fsm step node3
+    # The call above already performed the join_secondary -> report_lsn
+    # transition under test, but keeper_fsm_step() only reports the state
+    # it had *before* that transition -- one more call is needed for node3
+    # to actually report "report_lsn" back to the monitor.
+    fsm step node3
+    wait until node3 state = report_lsn  timeout 30s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+}
