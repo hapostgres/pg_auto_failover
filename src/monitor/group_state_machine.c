@@ -4794,21 +4794,22 @@ NodeStatusPatternSurvivesIsInPrimaryState(const NodeStatusPattern *pattern,
 
 
 /*
- * PrimaryNodeReportedStateCanBeResolved excludes REPLICATION_STATE_DROPPED
- * from the primaryNode/otherNode candidate-state loop only (never
- * activeNode's own loop, where DROPPED is a perfectly ordinary, real
- * current_state -- see pos 201's own row). Every row dump_fsm_edges()
- * reaches through that second loop (i.e. survives both the api_triggered
- * skip at the top of the function and the otherNodesFn skip guarding the
- * loop itself) is a reporting_node-section row whose primaryNode ultimately
+ * PrimaryNodeReportedStateCanBeResolved excludes 3 states from the
+ * primaryNode/otherNode candidate-state loop only (never activeNode's own
+ * loop, where all 3 are perfectly ordinary, real current_states -- see pos
+ * 201/315-319/359-361's own rows). Every row dump_fsm_edges() reaches
+ * through that second loop (i.e. survives both the api_triggered skip at
+ * the top of the function and the otherNodesFn skip guarding the loop
+ * itself) is a reporting_node-section row whose primaryNode ultimately
  * comes from the single call to GetPrimaryOrDemotedNodeInGroupFromList() at
  * the top of ProceedGroupStateFromContext() -- threaded through unchanged
  * into every nested dispatch (BuildFromContextNodeActiveContext's own
  * primaryNode/otherNode, and, via ActionRunMultiStandbyFailoverCascade/
  * ActionRunPlainMSFailoverCascade passing nac->primaryNode.node straight
- * through, the MS-failover cluster's own use of the same role). That
- * resolver can never return a node reporting DROPPED, on two independent
- * grounds:
+ * through, the MS-failover cluster's own use of the same role).
+ *
+ * REPLICATION_STATE_DROPPED: that resolver can never return a node
+ * reporting it, on two independent, purely structural grounds --
  *
  *   - Its own two-phase logic excludes it outright: phase 1 requires
  *     CanTakeWritesInState(goalState) (DROPPED is not one of the 5 writable
@@ -4826,14 +4827,34 @@ NodeStatusPatternSurvivesIsInPrimaryState(const NodeStatusPattern *pattern,
  *     a later, different node's own node_active() call to see it sitting in
  *     ctx->groupNodeList at all.
  *
- * Unlike singleExcluded, this doesn't depend on any row's own .conditions --
- * it's an invariant of the resolver itself, so it applies unconditionally to
- * every row reaching this loop, not just ones that happen to declare it.
+ * REPLICATION_STATE_WAIT_STANDBY and REPLICATION_STATE_JOIN_SECONDARY: a
+ * different, table-content argument, but resting on the same design intent
+ * pos 209's own exclusion of both already documents (a node reporting
+ * either has either not yet started streaming, or already stopped Postgres
+ * as the OLD primary mid-handoff -- promoting either straight to a writable
+ * role is exactly the split-brain/data-loss risk pos 209's own comment
+ * describes). Confirmed by exhaustive grep as of this writing: every row
+ * matching activeNode against WAIT_STANDBY (pos 315/317/319) or
+ * JOIN_SECONDARY (pos 359/361) assigns only CATCHINGUP/SECONDARY, never one
+ * of the 5 writable states -- so no row anywhere ever gives
+ * GetPrimaryOrDemotedNodeInGroupFromList()'s phase 1 a way to select a node
+ * reporting either, and neither is in phase 2's own target set. Unlike
+ * DROPPED's exclusion, this rests on the current table's own contents, not
+ * a structural invariant -- if a future row is ever added assigning a
+ * writable goal from either state (which would itself need to defend
+ * against the same split-brain risk pos 209 already flags), this exclusion
+ * needs revisiting alongside it.
+ *
+ * Unlike singleExcluded, none of this depends on any row's own .conditions
+ * -- it applies unconditionally to every row reaching this loop, not just
+ * ones that happen to declare it.
  */
 static bool
 PrimaryNodeReportedStateCanBeResolved(ReplicationState state)
 {
-	return state != REPLICATION_STATE_DROPPED;
+	return state != REPLICATION_STATE_DROPPED &&
+		   state != REPLICATION_STATE_WAIT_STANDBY &&
+		   state != REPLICATION_STATE_JOIN_SECONDARY;
 }
 
 
