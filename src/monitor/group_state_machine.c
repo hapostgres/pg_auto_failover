@@ -2911,7 +2911,20 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment =
 		  "prepare_promotion, primary converged prepare_maintenance -> stop_replication" },
 
-	/* Citus worker, primary present */
+	/*
+	 * Citus worker, primary present. Unlike pos 325, this row's primaryNode
+	 * carries no .isInPrimaryState requirement, so its SINGLE gap can't be
+	 * ruled out the same way: a primary can converge to SINGLE, then a
+	 * second node register (bumping the primary's own *goal* to
+	 * WAIT_PRIMARY as part of that registration) -- and if the primary dies
+	 * or partitions in that exact window, before ever reporting the new
+	 * goal, its row sits with reportedState=SINGLE/goalState=WAIT_PRIMARY
+	 * indefinitely. GetPrimaryOrDemotedNodeInGroupFromList()'s own phase 1
+	 * checks only goalState, so it would still resolve this stale node as
+	 * primaryNode -- a genuinely reachable case, not a false positive (see
+	 * PrimaryNodeReportedStateCanBeResolved's own comment for the one
+	 * exclusion -- DROPPED -- that IS sound here, on different grounds).
+	 */
 	{ .pos = 333,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2957,7 +2970,9 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	/*
 	 * prepare_promotion, primary present, not in maintenance, not already
-	 * wait_primary
+	 * wait_primary. Same "no isInPrimaryState convergence requirement, so
+	 * SINGLE stays a genuinely reachable gap" reasoning as pos 333 -- see
+	 * its own comment.
 	 */
 	{ .pos = 339,
 	  .sectionPath = {
@@ -3010,7 +3025,14 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "stop_replication, primary converged demote_timeout -> "
 				 "wait_primary + demoted (1 of 3)" },
 
-	/* stop_replication, primary's drain time expired (3-way OR, 2 of 3) */
+	/*
+	 * stop_replication, primary's drain time expired (3-way OR, 2 of 3).
+	 * Same "no isInPrimaryState convergence requirement, so SINGLE stays a
+	 * genuinely reachable gap" reasoning as pos 333 -- see its own comment.
+	 * dump_fsm_edges() also has no filter for .drainTimeExpired itself
+	 * (unlike isInPrimaryState/reportedCanTakeWrites/etc.), so this row's
+	 * primaryNode candidate universe is the same unnarrowed ANY set.
+	 */
 	{ .pos = 347,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -3024,8 +3046,15 @@ static const MonitorFSMTransition MonitorFSM[] = {
 				 "wait_primary + demoted (2 of 3)" },
 
 	/*
-	 * stop_replication, primary's goal is wait_primary but presumed dead (3-way
-	 * OR, 3 of 3)
+	 * stop_replication, primary's goal is wait_primary but presumed dead
+	 * (3-way OR, 3 of 3). primaryIsWaitPrimaryPresumedDead is a .conditions
+	 * field, not a NodeStatusPattern on .primaryNode -- dump_fsm_edges()'s
+	 * state enumeration doesn't read .conditions at all when resolving
+	 * primaryNode's candidate states (only .groupHasExactlyOneNode/
+	 * .groupHasMoreThanTwoNodes ever feed into it, via singleExcluded), so
+	 * this row's primaryNode candidate universe is the full unnarrowed ANY
+	 * set, same as pos 333/347/351 -- see pos 333's own comment for why
+	 * SINGLE in particular stays a genuinely reachable gap here too.
 	 */
 	{ .pos = 349,
 	  .sectionPath = {
@@ -3039,7 +3068,11 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "stop_replication, primary's goal wait_primary but presumed dead -> "
 				 "wait_primary + demoted (3 of 3)" },
 
-	/* Citus worker, primary present */
+	/*
+	 * Citus worker, primary present. Same "no isInPrimaryState convergence
+	 * requirement, so SINGLE stays a genuinely reachable gap" reasoning as
+	 * pos 333 -- see its own comment.
+	 */
 	{ .pos = 351,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -4761,6 +4794,50 @@ NodeStatusPatternSurvivesIsInPrimaryState(const NodeStatusPattern *pattern,
 
 
 /*
+ * PrimaryNodeReportedStateCanBeResolved excludes REPLICATION_STATE_DROPPED
+ * from the primaryNode/otherNode candidate-state loop only (never
+ * activeNode's own loop, where DROPPED is a perfectly ordinary, real
+ * current_state -- see pos 201's own row). Every row dump_fsm_edges()
+ * reaches through that second loop (i.e. survives both the api_triggered
+ * skip at the top of the function and the otherNodesFn skip guarding the
+ * loop itself) is a reporting_node-section row whose primaryNode ultimately
+ * comes from the single call to GetPrimaryOrDemotedNodeInGroupFromList() at
+ * the top of ProceedGroupStateFromContext() -- threaded through unchanged
+ * into every nested dispatch (BuildFromContextNodeActiveContext's own
+ * primaryNode/otherNode, and, via ActionRunMultiStandbyFailoverCascade/
+ * ActionRunPlainMSFailoverCascade passing nac->primaryNode.node straight
+ * through, the MS-failover cluster's own use of the same role). That
+ * resolver can never return a node reporting DROPPED, on two independent
+ * grounds:
+ *
+ *   - Its own two-phase logic excludes it outright: phase 1 requires
+ *     CanTakeWritesInState(goalState) (DROPPED is not one of the 5 writable
+ *     states), and phase 2's fallback target set (StateBelongsToPrimary()
+ *     plus an explicit REPLICATION_STATE_DEMOTED check) doesn't include
+ *     DROPPED either.
+ *
+ *   - It's structurally unreachable in the first place: a node's own
+ *     reportedState only ever becomes DROPPED once its own goalState has
+ *     already been set to DROPPED (the API-triggered remove_node row is the
+ *     only place that ever assigns that goal), and pos 201 (early_checks)
+ *     removes the row from the catalog entirely, atomically, in that exact
+ *     same node_active() call the moment its own reportedState converges to
+ *     DROPPED -- so a DROPPED-reporting node never persists long enough for
+ *     a later, different node's own node_active() call to see it sitting in
+ *     ctx->groupNodeList at all.
+ *
+ * Unlike singleExcluded, this doesn't depend on any row's own .conditions --
+ * it's an invariant of the resolver itself, so it applies unconditionally to
+ * every row reaching this loop, not just ones that happen to declare it.
+ */
+static bool
+PrimaryNodeReportedStateCanBeResolved(ReplicationState state)
+{
+	return state != REPLICATION_STATE_DROPPED;
+}
+
+
+/*
  * NodeStatusPatternSurvivesReportedCanTakeWrites filters a candidate
  * edge-source state against pattern's own .reportedCanTakeWrites field
  * (BOOL_ANY -- the vast majority of rows -- always survives). Unlike
@@ -5344,6 +5421,11 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 
 				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->primaryNode, states[j],
 															   singleExcluded))
+				{
+					continue;
+				}
+
+				if (!PrimaryNodeReportedStateCanBeResolved(states[j]))
 				{
 					continue;
 				}

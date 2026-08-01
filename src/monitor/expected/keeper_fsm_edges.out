@@ -155,7 +155,7 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- summary row right before its own detail rows, as a header.
 --
 -- As of this writing the reporting_node role/predicate cohort below is down
--- to 5 rules this way (71 detail rows total: 333/351's Citus-worker rows
+-- to 5 rules this way (66 detail rows total: 333/351's Citus-worker rows
 -- and 339/347/349's generic siblings -- see each one's own discussion
 -- further down), each an "alone in group"/failover/Citus-worker rule whose
 -- NodeStatePattern is a role or predicate check (e.g. !IsCurrentState(...),
@@ -167,19 +167,56 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- regression/tap-spec precedent exists for the "obvious" current_state each
 -- rule is clearly meant for (e.g. issue #1168 for 339/347/349's sibling
 -- branches), but none of the 5 has a test exercising the transition from
--- one of the other, more exotic fanned-out current_states (dropped,
--- fast_forward, join_secondary, and similar) -- this is Step 2a's own
--- structural artifact of enumerating a role/predicate gate across every
--- syntactically possible current_state, not a sign of 5 separate
--- functional bugs. This cohort was originally 10 rules/134 detail rows
--- (including pos 303 and pos 325); both have since been narrowed to zero
--- remaining gap rows -- pos 303 by teaching StateCanSatisfyIsInPrimaryState()
--- the 5-state set IsInPrimaryState() can ever admit at all, pos 325 (and,
--- as a side effect, pos 391 in the MS-failover section below, which was
--- never part of this specific cohort but shares the same isInPrimaryState
--- field) by additionally teaching it to exclude SINGLE when a rule's own
--- .conditions already prove the group has more than one node -- see each's
--- own discussion further down.
+-- one of the other, more exotic fanned-out current_states (fast_forward,
+-- join_secondary, and similar) -- this is Step 2a's own structural artifact
+-- of enumerating a role/predicate gate across every syntactically possible
+-- current_state, not a sign of 5 separate functional bugs. This cohort was
+-- originally 10 rules/134 detail rows (including pos 303 and pos 325); both
+-- have since been narrowed to zero remaining gap rows -- pos 303 by teaching
+-- StateCanSatisfyIsInPrimaryState() the 5-state set IsInPrimaryState() can
+-- ever admit at all, pos 325 (and, as a side effect, pos 391 in the
+-- MS-failover section below, which was never part of this specific cohort
+-- but shares the same isInPrimaryState field) by additionally teaching it to
+-- exclude SINGLE when a rule's own .conditions already prove the group has
+-- more than one node -- see each's own discussion further down.
+--
+-- The remaining 5 rows' own DROPPED current_state was also a false
+-- positive, fixed at the source rather than merely explained: every one of
+-- them matches .primaryNode/.otherNode against
+-- GetPrimaryOrDemotedNodeInGroupFromList()'s own resolved node (see
+-- ProceedGroupStateFromContext's own call to it), and that resolver can
+-- never return a node reporting DROPPED -- its own two-phase logic
+-- excludes it outright (phase 1 requires a writable goalState, phase 2's
+-- fallback target set doesn't include it either), and it's structurally
+-- unreachable besides: a node's reportedState only becomes DROPPED once its
+-- own goalState is already DROPPED, and pos 201 (early_checks) removes that
+-- row from the catalog atomically, in the very same node_active() call that
+-- converges it -- so a DROPPED-reporting node never persists long enough
+-- for a later node's own node_active() call to see it. dump_fsm_edges()
+-- didn't know this before, since it enumerated the full, unconstrained
+-- reportedState universe for any row whose primaryNode/otherNode pattern
+-- doesn't otherwise narrow it (as none of these 5 do) -- see
+-- PrimaryNodeReportedStateCanBeResolved's own comment
+-- (group_state_machine.c) for the full argument. This is unconditional, not
+-- gated on any row's own .conditions, so it applies to every row reaching
+-- that part of dump_fsm_edges() -- confirmed by grep that every such row
+-- (i.e. every row surviving both the api_triggered skip at the top of the
+-- function and its own otherNodesFn skip) lives in this same reporting_node
+-- section and traces back to that identical resolver.
+--
+-- These 5 rows' own SINGLE current_state, by contrast, genuinely is
+-- reachable and was deliberately left alone: unlike pos 325/391, none of
+-- these 5 rows requires primaryNode's own .isInPrimaryState (a convergence
+-- requirement -- reportedState == goalState -- see
+-- StateCanSatisfyIsInPrimaryState's own comment), so nothing rules out a
+-- primary that converged to SINGLE, then had a second node register
+-- (bumping the primary's own *goal* to WAIT_PRIMARY as part of that
+-- registration), then died or partitioned before ever reporting that new
+-- goal -- its row would sit with reportedState=SINGLE/goalState=WAIT_PRIMARY
+-- indefinitely, and GetPrimaryOrDemotedNodeInGroupFromList()'s own phase 1
+-- checks only goalState, so it would still resolve this stale node as
+-- primaryNode. A real, if narrow, case -- not a false positive to narrow
+-- away the same way DROPPED was.
 --
 -- Follow-up investigation of pos 209/211/325's own remaining gap states
 -- (after wait_maintenance and wait_standby were resolved -- see
@@ -366,7 +403,7 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
 ------+----+---------------------+----------------+------------------------------------------------------------------------------------------------------
   211 |  1 |                     | report_lsn     | alone in group, candidatePriority zero -> report_lsn
   211 |  1 | stop_replication    | report_lsn     | alone in group, candidatePriority zero -> report_lsn
-  333 | 14 |                     | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
+  333 | 13 |                     | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
   333 |  1 | init                | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
   333 |  1 | single              | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
   333 |  1 | catchingup          | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
@@ -380,8 +417,7 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
   333 |  1 | report_lsn          | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
   333 |  1 | fast_forward        | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
   333 |  1 | join_secondary      | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
-  333 |  1 | dropped             | demoted        | Citus worker prepare_promotion, primary present -> wait_primary + demoted
-  339 | 15 |                     | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
+  339 | 14 |                     | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
   339 |  1 | init                | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
   339 |  1 | single              | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
   339 |  1 | demoted             | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
@@ -396,8 +432,7 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
   339 |  1 | report_lsn          | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
   339 |  1 | fast_forward        | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
   339 |  1 | join_secondary      | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
-  339 |  1 | dropped             | demote_timeout | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
-  347 | 14 |                     | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
+  347 | 13 |                     | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
   347 |  1 | init                | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
   347 |  1 | single              | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
   347 |  1 | catchingup          | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
@@ -411,8 +446,7 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
   347 |  1 | report_lsn          | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
   347 |  1 | fast_forward        | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
   347 |  1 | join_secondary      | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
-  347 |  1 | dropped             | demoted        | stop_replication, primary's drain time expired -> wait_primary + demoted (2 of 3)
-  349 | 14 |                     | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
+  349 | 13 |                     | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
   349 |  1 | init                | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
   349 |  1 | single              | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
   349 |  1 | catchingup          | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
@@ -426,8 +460,7 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
   349 |  1 | report_lsn          | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
   349 |  1 | fast_forward        | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
   349 |  1 | join_secondary      | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
-  349 |  1 | dropped             | demoted        | stop_replication, primary's goal wait_primary but presumed dead -> wait_primary + demoted (3 of 3)
-  351 | 14 |                     | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
+  351 | 13 |                     | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
   351 |  1 | init                | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
   351 |  1 | single              | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
   351 |  1 | catchingup          | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
@@ -441,8 +474,7 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
   351 |  1 | report_lsn          | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
   351 |  1 | fast_forward        | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
   351 |  1 | join_secondary      | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
-  351 |  1 | dropped             | demoted        | Citus worker stop_replication, primary present -> wait_primary + demoted
-(78 rows)
+(73 rows)
 
 -- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
 -- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the
