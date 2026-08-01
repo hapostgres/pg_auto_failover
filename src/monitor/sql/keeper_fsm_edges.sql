@@ -69,35 +69,29 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- having to count its own detail rows by hand. NULLS FIRST puts each rule's
 -- summary row right before its own detail rows, as a header.
 --
--- As of this writing the reporting_node role/predicate cohort below is down
--- to 5 rules this way (56 detail rows total: 333/351's Citus-worker rows
--- and 339/347/349's generic siblings -- see each one's own discussion
--- further down), each an "alone in group"/failover/Citus-worker rule whose
--- NodeStatePattern is a role or predicate check (e.g. !IsCurrentState(...),
--- an opaque NodeIsXxx() helper, or no state restriction at all) rather than
--- an enumerated state list -- investigated rule by rule against the
--- pre-refactor hand-written code (commit 9c9c9b9^): in every one of the 5,
--- that breadth already existed before this refactor (this is a faithful,
--- behavior-preserving translation, not a widening introduced here). Real
--- regression/tap-spec precedent exists for the "obvious" current_state each
--- rule is clearly meant for (e.g. issue #1168 for 339/347/349's sibling
--- branches), but none of the 5 has a test exercising the transition from
--- one of the other, more exotic fanned-out current_states (fast_forward and
--- similar) -- this is Step 2a's own structural artifact of enumerating a
--- role/predicate gate across every syntactically possible current_state,
--- not a sign of 5 separate functional bugs. This cohort was
--- originally 10 rules/134 detail rows (including pos 303 and pos 325); both
--- have since been narrowed to zero remaining gap rows -- pos 303 by teaching
--- StateCanSatisfyIsInPrimaryState() the 5-state set IsInPrimaryState() can
--- ever admit at all, pos 325 (and, as a side effect, pos 391 in the
--- MS-failover section below, which was never part of this specific cohort
--- but shares the same isInPrimaryState field) by additionally teaching it to
--- exclude SINGLE when a rule's own .conditions already prove the group has
--- more than one node -- see each's own discussion further down.
+-- As of this writing the reporting_node role/predicate cohort that used to
+-- live below (each an "alone in group"/failover/Citus-worker rule whose
+-- NodeStatePattern is a role or predicate check -- e.g. !IsCurrentState(...),
+-- an opaque NodeIsXxx() helper, or no state restriction at all -- rather than
+-- an enumerated state list) is down to zero remaining gap rows: originally
+-- 10 rules/134 detail rows (pos 303/325/333/339/347/349/351, plus pos 391 in
+-- the MS-failover section below, which was never part of this specific
+-- cohort but shares the same isInPrimaryState field), closed via three
+-- distinct mechanisms rather than one blanket fix:
 --
--- The remaining 5 rows' own DROPPED current_state was also a false
--- positive, fixed at the source rather than merely explained: every one of
--- them matches .primaryNode/.otherNode against
+--   * pos 303: StateCanSatisfyIsInPrimaryState() taught the 5-state set
+--     IsInPrimaryState() can ever admit at all.
+--   * pos 325 (and, as a side effect, pos 391): the same function
+--     additionally taught to exclude SINGLE when a rule's own .conditions
+--     already prove the group has more than one node.
+--   * pos 333/339/347/349/351: two rounds of dump_fsm_edges() narrowing
+--     (below) closed 4 of their up-to-15 current_states as false positives;
+--     the remaining 11 were then closed for real, by adding matching
+--     KeeperFSM[] rows -- see the second paragraph below.
+--
+-- pos 333/339/347/349/351's own DROPPED current_state was a false positive,
+-- fixed at the source rather than merely explained: every one of them
+-- matches .primaryNode/.otherNode against
 -- GetPrimaryOrDemotedNodeInGroupFromList()'s own resolved node (see
 -- ProceedGroupStateFromContext's own call to it), and that resolver can
 -- never return a node reporting DROPPED -- its own two-phase logic
@@ -107,52 +101,60 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- own goalState is already DROPPED, and pos 201 (early_checks) removes that
 -- row from the catalog atomically, in the very same node_active() call that
 -- converges it -- so a DROPPED-reporting node never persists long enough
--- for a later node's own node_active() call to see it. dump_fsm_edges()
--- didn't know this before, since it enumerated the full, unconstrained
--- reportedState universe for any row whose primaryNode/otherNode pattern
--- doesn't otherwise narrow it (as none of these 5 do) -- see
--- PrimaryNodeReportedStateCanBeResolved's own comment
--- (group_state_machine.c) for the full argument. This is unconditional, not
--- gated on any row's own .conditions, so it applies to every row reaching
--- that part of dump_fsm_edges() -- confirmed by grep that every such row
--- (i.e. every row surviving both the api_triggered skip at the top of the
--- function and its own otherNodesFn skip) lives in this same reporting_node
--- section and traces back to that identical resolver.
+-- for a later node's own node_active() call to see it. WAIT_STANDBY and
+-- JOIN_SECONDARY were two more false positives in the same cohort, found by
+-- asking a sharper version of the same question: is there any row
+-- *anywhere* in MonitorFSM[] that ever assigns one of the 5 writable goals
+-- to a node currently reporting this state? For most of these 5 rows'
+-- current_states the answer is yes (pos 209 alone, "alone in group ->
+-- SINGLE", covers most of them -- see its own comment), which is exactly
+-- what makes those genuinely reachable rather than false positives. But
+-- WAIT_STANDBY and JOIN_SECONDARY are two of the three states pos 209
+-- itself explicitly excludes (split-brain/data-loss risk, same reasoning as
+-- its own header comment), and an exhaustive grep of every other row
+-- matching either state (pos 315/317/319 for WAIT_STANDBY, pos 359/361 for
+-- JOIN_SECONDARY) shows all five assign only CATCHINGUP/SECONDARY, never a
+-- writable goal -- so no row anywhere ever gives
+-- GetPrimaryOrDemotedNodeInGroupFromList()'s phase 1 a way to select a node
+-- reporting either. All three exclusions (DROPPED, WAIT_STANDBY,
+-- JOIN_SECONDARY) live in PrimaryNodeReportedStateCanBeResolved()
+-- (group_state_machine.c) -- unconditional, not gated on any row's own
+-- .conditions, so it applies to every row reaching that part of
+-- dump_fsm_edges(). Unlike DROPPED's exclusion (a structural invariant),
+-- WAIT_STANDBY/JOIN_SECONDARY rest on the current table's own contents, so
+-- they'd need revisiting if a future row is ever added assigning a writable
+-- goal from either state.
 --
--- These 5 rows' own SINGLE current_state, by contrast, genuinely is
--- reachable and was deliberately left alone: unlike pos 325/391, none of
--- these 5 rows requires primaryNode's own .isInPrimaryState (a convergence
--- requirement -- reportedState == goalState -- see
--- StateCanSatisfyIsInPrimaryState's own comment), so nothing rules out a
--- primary that converged to SINGLE, then had a second node register
--- (bumping the primary's own *goal* to WAIT_PRIMARY as part of that
--- registration), then died or partitioned before ever reporting that new
--- goal -- its row would sit with reportedState=SINGLE/goalState=WAIT_PRIMARY
--- indefinitely, and GetPrimaryOrDemotedNodeInGroupFromList()'s own phase 1
--- checks only goalState, so it would still resolve this stale node as
--- primaryNode. A real, if narrow, case -- not a false positive to narrow
--- away the same way DROPPED was.
---
--- WAIT_STANDBY and JOIN_SECONDARY were two more false positives in this
--- same cohort, found by asking a sharper version of the SINGLE question
--- above: is there any row *anywhere* in MonitorFSM[] that ever assigns one
--- of the 5 writable goals to a node currently reporting this state? For
--- most of these 5 rows' remaining current_states the answer is yes (pos 209
--- alone, "alone in group -> SINGLE", covers most of them -- see its own
--- comment), which is exactly what keeps them real, reachable gaps rather
--- than bugs. But WAIT_STANDBY and JOIN_SECONDARY are two of the three
--- states pos 209 itself explicitly excludes (split-brain/data-loss risk,
--- same reasoning as its own header comment), and an exhaustive grep of
--- every other row matching either state (pos 315/317/319 for WAIT_STANDBY,
--- pos 359/361 for JOIN_SECONDARY) shows all five assign only
--- CATCHINGUP/SECONDARY, never a writable goal. So no row anywhere ever
--- gives GetPrimaryOrDemotedNodeInGroupFromList()'s phase 1 a way to select
--- a node reporting either, and neither is in phase 2's own target set
--- either -- a genuine false positive, fixed the same way DROPPED was (see
--- PrimaryNodeReportedStateCanBeResolved's own comment). Unlike DROPPED's
--- exclusion, this one rests on the current table's own contents rather
--- than a structural invariant, so it needs revisiting if a future row ever
--- assigns a writable goal from either state.
+-- Every one of these 5 rows' remaining current_states -- INIT, SINGLE,
+-- CATCHINGUP, SECONDARY, PREP_PROMOTION, STOP_REPLICATION, MAINTENANCE,
+-- PREPARE_MAINTENANCE, WAIT_MAINTENANCE, REPORT_LSN, FAST_FORWARD -- turned
+-- out to be genuinely reachable, not further false positives: primaryNode
+-- here carries no .isInPrimaryState requirement (unlike pos 325/391), so
+-- nothing rules out a primary that converged to some ordinary state via pos
+-- 209's own broad "alone in group -> SINGLE" row, then had a second node
+-- register (bumping the primary's own *goal* onward, e.g. to WAIT_PRIMARY,
+-- as part of that registration), then died or partitioned before ever
+-- reporting past whatever it last converged to -- GetPrimaryOrDemotedNode
+-- InGroupFromList()'s own phase 1 checks only goalState, so it would still
+-- resolve this stale node as primaryNode. PREP_PROMOTION/STOP_REPLICATION
+-- are additionally, independently reachable via pos 333/335/341 and pos
+-- 343-353's own self-referential edges; SINGLE and PREPARE_MAINTENANCE via
+-- the resolver's own phase 2 fallback directly. Since these are real, not
+-- false positives, the fix belongs on the keeper side, not another
+-- dump_fsm_edges() narrowing: KeeperFSM[] (fsm.c) gained 23 new rows (11
+-- states -> DEMOTED_STATE, covering 333/347/349/351's shared target; the
+-- same 11 plus DEMOTED_STATE itself -> DEMOTE_TIMEOUT_STATE, covering 339's
+-- own different target), all reusing the existing, role-agnostic
+-- fsm_stop_postgres action -- the same "make sure Postgres is stopped"
+-- function every ordinary primary-track source state (PRIMARY, JOIN_PRIMARY,
+-- APPLY_SETTINGS, DRAINING, WAIT_PRIMARY, DEMOTE_TIMEOUT) already reuses for
+-- this same target, safe here for the same reason: it doesn't matter what
+-- this node's Postgres was actually doing when it stopped reporting, only
+-- that it's stopped now. See the new KeeperFSM[] rows' own comment (fsm.c,
+-- right after the WAIT_PRIMARY_STATE -> DEMOTED_STATE row) for the full
+-- argument, and keeper_fsm_edges.json (regenerated via
+-- "pg_autoctl inspect fsm list --json" after this change, committed
+-- alongside it, per this file's own header comment on that fixture).
 --
 -- Follow-up investigation of pos 209/211/325's own remaining gap states
 -- (after wait_maintenance and wait_standby were resolved -- see

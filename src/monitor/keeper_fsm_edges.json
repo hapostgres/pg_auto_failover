@@ -100,6 +100,98 @@
     "assigned": "demoted"
   },
   {
+    "current": "init",
+    "assigned": "demoted"
+  },
+  {
+    "current": "single",
+    "assigned": "demoted"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "demoted"
+  },
+  {
+    "current": "secondary",
+    "assigned": "demoted"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "demoted"
+  },
+  {
+    "current": "stop_replication",
+    "assigned": "demoted"
+  },
+  {
+    "current": "maintenance",
+    "assigned": "demoted"
+  },
+  {
+    "current": "prepare_maintenance",
+    "assigned": "demoted"
+  },
+  {
+    "current": "wait_maintenance",
+    "assigned": "demoted"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "demoted"
+  },
+  {
+    "current": "fast_forward",
+    "assigned": "demoted"
+  },
+  {
+    "current": "init",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "single",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "demoted",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "catchingup",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "secondary",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "stop_replication",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "maintenance",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "prepare_maintenance",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "wait_maintenance",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "demote_timeout"
+  },
+  {
+    "current": "fast_forward",
+    "assigned": "demote_timeout"
+  },
+  {
     "current": "demoted",
     "assigned": "single"
   },
@@ -169,6 +261,14 @@
   },
   {
     "current": "report_lsn",
+    "assigned": "single"
+  },
+  {
+    "current": "wait_maintenance",
+    "assigned": "single"
+  },
+  {
+    "current": "fast_forward",
     "assigned": "single"
   },
   {
@@ -348,6 +448,26 @@
     "assigned": "report_lsn"
   },
   {
+    "current": "wait_maintenance",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "fast_forward",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "prepare_promotion",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "demote_timeout",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "join_secondary",
+    "assigned": "report_lsn"
+  },
+  {
     "current": "report_lsn",
     "assigned": "prepare_promotion"
   },
@@ -398,33 +518,5 @@
   {
     "current": "any",
     "assigned": "dropped"
-  },
-  {
-    "current": "wait_maintenance",
-    "assigned": "single"
-  },
-  {
-    "current": "wait_maintenance",
-    "assigned": "report_lsn"
-  },
-  {
-    "current": "fast_forward",
-    "assigned": "single"
-  },
-  {
-    "current": "fast_forward",
-    "assigned": "report_lsn"
-  },
-  {
-    "current": "prepare_promotion",
-    "assigned": "report_lsn"
-  },
-  {
-    "current": "demote_timeout",
-    "assigned": "report_lsn"
-  },
-  {
-    "current": "join_secondary",
-    "assigned": "report_lsn"
   }
 ]

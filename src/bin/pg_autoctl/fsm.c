@@ -81,6 +81,10 @@
 #define COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED \
 	"Demote timeout expired"
 
+#define COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED \
+	"A different node is taking over as primary, " \
+	"stopping Postgres in case it's still running"
+
 #define COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY \
 	"Confirmed promotion with the monitor"
 
@@ -393,6 +397,191 @@ KeeperFSMTransition KeeperFSM[] = {
 	{
 		WAIT_PRIMARY_STATE, DEMOTED_STATE, NODE_KIND_ANY,
 		COMMENT_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
+	 * A node resolved by the monitor as "the primary" (GetPrimaryOrDemoted
+	 * NodeInGroupFromList(), group_state_machine.c) is not always reporting
+	 * one of the ordinary primary-track states above: its own goalState can
+	 * be bumped to a writable state by an unrelated later event (e.g. pos
+	 * 209's "alone in group -> single", group_state_machine.c) well before
+	 * its own reportedState has had a chance to converge, so a genuinely
+	 * dead/partitioned node can present almost any reportedState by the
+	 * time the monitor assigns it demoted/demote_timeout (see
+	 * PrimaryNodeReportedStateCanBeResolved's own comment,
+	 * group_state_machine.c, for the full reachability argument -- this is
+	 * exactly the set of states it proves reachable). fsm_stop_postgres is
+	 * the same role-agnostic "make sure Postgres is stopped" action used by
+	 * every primary-track source state above: safe regardless of what this
+	 * node's own Postgres instance was actually doing when it stopped
+	 * reporting.
+	 */
+	{
+		INIT_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		SINGLE_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		CATCHINGUP_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		SECONDARY_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		PREP_PROMOTION_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		STOP_REPLICATION_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		MAINTENANCE_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		PREPARE_MAINTENANCE_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		WAIT_MAINTENANCE_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		REPORT_LSN_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		FAST_FORWARD_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
+	 * Same reasoning as the DEMOTED_STATE cluster just above, targeting
+	 * DEMOTE_TIMEOUT_STATE instead: MonitorFSM[] pos 339's own sibling row
+	 * assigns demote_timeout (not demoted) from the same 11 states, plus
+	 * DEMOTED_STATE itself (not a reflexive self-loop against this
+	 * different target).
+	 */
+	{
+		INIT_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		SINGLE_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		DEMOTED_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		CATCHINGUP_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		SECONDARY_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		PREP_PROMOTION_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		STOP_REPLICATION_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		MAINTENANCE_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		PREPARE_MAINTENANCE_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		WAIT_MAINTENANCE_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		REPORT_LSN_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		FAST_FORWARD_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
 		&fsm_stop_postgres,
 		FSM_PHASE_FAILOVER
 	},
@@ -1473,7 +1662,7 @@ KeeperFSMToJSONAppendEdge(JSON_Array *array, NodeState current, NodeState assign
 	JSON_Object *jsObj = json_value_get_object(jsEntry);
 
 	json_object_set_string(jsObj, "current",
-							current == ANY_STATE ? "any" : NodeStateToString(current));
+						   current == ANY_STATE ? "any" : NodeStateToString(current));
 	json_object_set_string(jsObj, "assigned", NodeStateToString(assigned));
 
 	json_array_append_value(array, jsEntry);
