@@ -69,22 +69,32 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- having to count its own detail rows by hand. NULLS FIRST puts each rule's
 -- summary row right before its own detail rows, as a header.
 --
--- As of this writing the gap list is exactly 10 rules this way (134 detail
--- rows total), each an "alone in group"/failover/Citus-worker rule whose
+-- As of this writing the reporting_node role/predicate cohort below is down
+-- to 5 rules this way (71 detail rows total: 333/351's Citus-worker rows
+-- and 339/347/349's generic siblings -- see each one's own discussion
+-- further down), each an "alone in group"/failover/Citus-worker rule whose
 -- NodeStatePattern is a role or predicate check (e.g. !IsCurrentState(...),
 -- an opaque NodeIsXxx() helper, or no state restriction at all) rather than
 -- an enumerated state list -- investigated rule by rule against the
--- pre-refactor hand-written code (commit 9c9c9b9^): in every one of the 10,
+-- pre-refactor hand-written code (commit 9c9c9b9^): in every one of the 5,
 -- that breadth already existed before this refactor (this is a faithful,
 -- behavior-preserving translation, not a widening introduced here). Real
 -- regression/tap-spec precedent exists for the "obvious" current_state each
--- rule is clearly meant for (e.g. issue #997 for pos 303, issue #1168 for
--- pos 325/347/349's sibling branches), but none of the 10 has a test
--- exercising the transition from one of the other, more exotic fanned-out
--- current_states (dropped, fast_forward, join_secondary, and similar) --
--- this is Step 2a's own structural artifact of enumerating a role/predicate
--- gate across every syntactically possible current_state, not a sign of 10
--- separate functional bugs.
+-- rule is clearly meant for (e.g. issue #1168 for 339/347/349's sibling
+-- branches), but none of the 5 has a test exercising the transition from
+-- one of the other, more exotic fanned-out current_states (dropped,
+-- fast_forward, join_secondary, and similar) -- this is Step 2a's own
+-- structural artifact of enumerating a role/predicate gate across every
+-- syntactically possible current_state, not a sign of 5 separate
+-- functional bugs. This cohort was originally 10 rules/134 detail rows
+-- (including pos 303 and pos 325); both have since been narrowed to zero
+-- remaining gap rows -- pos 303 by teaching StateCanSatisfyIsInPrimaryState()
+-- the 5-state set IsInPrimaryState() can ever admit at all, pos 325 (and,
+-- as a side effect, pos 391 in the MS-failover section below, which was
+-- never part of this specific cohort but shares the same isInPrimaryState
+-- field) by additionally teaching it to exclude SINGLE when a rule's own
+-- .conditions already prove the group has more than one node -- see each's
+-- own discussion further down.
 --
 -- Follow-up investigation of pos 209/211/325's own remaining gap states
 -- (after wait_maintenance and wait_standby were resolved -- see
@@ -207,15 +217,52 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 --     cannot exist by pos 211's own "alone in group" precondition. No
 --     existing function can do this safely when truly alone; left as a
 --     documented, unfixed gap.
---   * pos 325's remaining "single" state (the primaryNode side) is a
---     genuine model contradiction, not just a contrived scenario: it would
---     require the primary to report goalState == reportedState == single
---     while a *separate* node in the same group is simultaneously converged
---     and reporting secondary -- but the instant a second node registers,
---     the primary's own goal moves off single (to wait_primary) as part of
---     that registration, before the joining node could ever reach
---     secondary. No real sequence of monitor/keeper actions can produce
---     this combination.
+--   * pos 325's and pos 391's own "single" states (the primaryNode side, in
+--     both cases) are now fixed at the source rather than merely explained
+--     away: both rows' own preconditions already require a *second,
+--     distinctly-matched* node (activeNode for 325, the healthy candidate
+--     counted by atLeastOneHealthyCandidate for 391) to exist in the same
+--     group as primaryNode, which makes primaryNode genuinely reporting
+--     SINGLE ("alone in my own group") a real model contradiction -- the
+--     instant a second node registers, the primary's own goal moves off
+--     single (to wait_primary) as part of that registration, before the
+--     joining node could ever reach secondary. No real sequence of
+--     monitor/keeper actions can produce this combination.
+--
+--     Previously this was left as documented-but-unfixed, the same way the
+--     stop_replication gap right above stays unfixed today: correct, but
+--     dump_fsm_edges() itself had no way to know it, since
+--     NodeStatePatternResolveFromStates() only ever reads a row's own
+--     .statePattern -- every other NodeStatusPattern field, including
+--     isInPrimaryState (the field responsible for admitting "single" as a
+--     candidate primaryNode state at all), is invisible to it by
+--     construction. pos 325 now spells out explicitly, via its own
+--     .conditions, exactly the invariant its shape already implied
+--     (groupHasExactlyOneNode = BOOL_FALSE -- two distinctly-matched roles
+--     can't coexist in a one-node group); StateCanSatisfyIsInPrimaryState()
+--     was taught to read that (and the stronger, already-present
+--     groupHasMoreThanTwoNodes = BOOL_TRUE, which implies it) via a new
+--     singleExcluded parameter, and exclude SINGLE from the reachable state
+--     set whenever it's set. pos 391 needed no rule change at all: it
+--     already carried groupHasMoreThanTwoNodes = BOOL_TRUE for an unrelated
+--     reason (the MS-failover cascade's own "more than two nodes" gate),
+--     so it started benefiting from the same narrowing immediately.
+--
+--     This narrowing is deliberately still scoped to isInPrimaryState only,
+--     same restraint StateCanSatisfyIsInPrimaryState's own comment already
+--     documents for pos 303: several sibling NodeStatusPattern fields
+--     (isInMaintenance, canTakeWrites, drainTimeExpired,
+--     unreachableFromDemoteTimeout -- see pos 333/339/347/349/351's own
+--     still-wide gap lists below) are just as state-dependent in principle,
+--     but each is goal-state- or wall-clock-dependent rather than a plain
+--     reportedState equality check, and needs its own from-scratch
+--     satisfiability proof before narrowing it the same way is safe --
+--     isInMaintenance in particular already has a documented counterexample
+--     (pos 369, via EdgeIsShadowedByEarlierRule's own investigation) of a
+--     reportedState assumed incompatible with a goal-dependent condition
+--     turning out to be reachable anyway. Narrowing those without doing
+--     that same diligence for each risks reintroducing exactly that class
+--     of bug, so they remain unnarrowed for now.
 SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.comment
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos

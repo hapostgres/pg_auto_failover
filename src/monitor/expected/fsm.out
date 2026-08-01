@@ -555,7 +555,7 @@ candidate_node_current_state |
 active_node_conditions       | isHealthy=true, candidateEligible=true
 other_node_conditions        | isUnhealthy=true, isInPrimaryState=true
 candidate_node_conditions    | 
-group_conditions             | walWithinPromoteThreshold=true
+group_conditions             | groupHasExactlyOneNode=false, walWithinPromoteThreshold=true
 active_node_assigned_state   | prepare_promotion
 other_node_assigned_state    | draining
 has_extra_action             | f

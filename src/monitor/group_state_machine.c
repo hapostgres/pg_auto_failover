@@ -2845,7 +2845,18 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "primary fails, already converged wait_primary (issue #1168) -> "
 				 "secondary -> prepare_promotion only (1 of 2)" },
 
-	/* primary fails, not already wait_primary */
+	/*
+	 * primary fails, not already wait_primary. activeNode (secondary) and
+	 * primaryNode are necessarily two distinct nodes in the same group, so
+	 * groupHasExactlyOneNode = BOOL_FALSE is always true whenever this row
+	 * can match at all -- spelled out explicitly (rather than left implicit)
+	 * because dump_fsm_edges() reads it to prove primaryNode can never be
+	 * genuinely reporting SINGLE here (see
+	 * MonitorFSMTransitionExcludesSingleNode's own comment): SINGLE means
+	 * "alone in my own group," which can't coexist with this row's own
+	 * requirement that a second, distinctly-matched node (activeNode) also
+	 * exists in that same group.
+	 */
 	{ .pos = 325,
 	  .sectionPath = {
 	      MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -2857,7 +2868,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .primaryNode = { .statePattern = FSM_NOT_STABLE_WAIT_PRIMARY,
 					   .isInPrimaryState = BOOL_TRUE,
 					   .isUnhealthy = BOOL_TRUE },
-	  .conditions = { .walWithinPromoteThreshold = BOOL_TRUE },
+	  .conditions = { .walWithinPromoteThreshold = BOOL_TRUE,
+					  .groupHasExactlyOneNode = BOOL_FALSE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_PREPARE_PROMOTION),
 	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_DRAINING),
 	  .comment =
@@ -4661,7 +4673,22 @@ NodeStatePatternIncludesState(const NodeStatePattern *pattern, ReplicationState 
  * single, primary, wait_primary, join_primary, apply_settings (from
  * CanTakeWritesInState's own set).
  *
- * Deliberately narrow in scope: only .isInPrimaryState is modeled this way.
+ * singleExcluded narrows that 5-state set by one more, conditionally: a rule
+ * whose own .conditions already prove the group has more than one node
+ * (groupHasExactlyOneNode = BOOL_FALSE, or the stronger
+ * groupHasMoreThanTwoNodes = BOOL_TRUE which implies it -- see
+ * MonitorFSMTransitionExcludesSingleNode) can never have this same node
+ * simultaneously reporting SINGLE, since SINGLE means "alone in my own
+ * group" and the row's own precondition already requires a second,
+ * distinctly-matched node (activeNode/primaryNode's counterpart role) to
+ * exist in that same group. This is a genuine, provable exclusion (unlike
+ * the sibling fields discussed below) precisely because it's derived from
+ * .conditions rather than guessed: pos 325 is the confirmed real-world
+ * case (its own .conditions carries groupHasExactlyOneNode = BOOL_FALSE for
+ * exactly this reason).
+ *
+ * Deliberately narrow in scope beyond that: only .isInPrimaryState (plus the
+ * one group-cardinality-derived refinement above) is modeled this way.
  * Several sibling fields (isInMaintenance, canTakeWrites, drainTimeExpired,
  * unreachableFromDemoteTimeout) are ALSO state-dependent in the same sense
  * and could in principle be filtered the same way, but each needs its own
@@ -4676,11 +4703,17 @@ NodeStatePatternIncludesState(const NodeStatePattern *pattern, ReplicationState 
  * each risks reintroducing exactly that class of bug.
  */
 static bool
-StateCanSatisfyIsInPrimaryState(ReplicationState state, bool required)
+StateCanSatisfyIsInPrimaryState(ReplicationState state, bool required,
+								bool singleExcluded)
 {
 	if (!required)
 	{
 		return true;
+	}
+
+	if (singleExcluded && state == REPLICATION_STATE_SINGLE)
+	{
+		return false;
 	}
 
 	return CanTakeWritesInState(state) ||
@@ -4690,21 +4723,40 @@ StateCanSatisfyIsInPrimaryState(ReplicationState state, bool required)
 
 
 /*
+ * MonitorFSMTransitionExcludesSingleNode returns true when a rule's own
+ * .conditions already guarantee the group has more than one node -- either
+ * directly (groupHasExactlyOneNode = BOOL_FALSE) or via the stronger
+ * groupHasMoreThanTwoNodes = BOOL_TRUE, which implies it (more than two
+ * nodes can't be exactly one). Feeds StateCanSatisfyIsInPrimaryState's own
+ * singleExcluded parameter; see its comment for why this is a sound,
+ * provable narrowing rather than a guess.
+ */
+static bool
+MonitorFSMTransitionExcludesSingleNode(const NodeActiveContextPattern *cond)
+{
+	return cond->groupHasExactlyOneNode == BOOL_FALSE ||
+		   cond->groupHasMoreThanTwoNodes == BOOL_TRUE;
+}
+
+
+/*
  * NodeStatusPatternSurvivesIsInPrimaryState filters a candidate edge-source
  * state against pattern's own .isInPrimaryState field (BOOL_ANY -- the vast
  * majority of rows -- always survives; see StateCanSatisfyIsInPrimaryState's
- * own comment for BOOL_TRUE/BOOL_FALSE).
+ * own comment for BOOL_TRUE/BOOL_FALSE, and for singleExcluded).
  */
 static bool
 NodeStatusPatternSurvivesIsInPrimaryState(const NodeStatusPattern *pattern,
-										  ReplicationState state)
+										  ReplicationState state,
+										  bool singleExcluded)
 {
 	if (pattern->isInPrimaryState == BOOL_ANY)
 	{
 		return true;
 	}
 
-	return StateCanSatisfyIsInPrimaryState(state, pattern->isInPrimaryState == BOOL_TRUE);
+	return StateCanSatisfyIsInPrimaryState(state, pattern->isInPrimaryState == BOOL_TRUE,
+										   singleExcluded);
 }
 
 
@@ -5199,6 +5251,8 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 			continue;
 		}
 
+		bool singleExcluded = MonitorFSMTransitionExcludesSingleNode(&rule->conditions);
+
 		if (rule->activeNodeAssignedState.kind == GOAL_STATE_SET)
 		{
 			int count;
@@ -5215,7 +5269,8 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
-				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->activeNode, states[j]))
+				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->activeNode, states[j],
+															   singleExcluded))
 				{
 					continue;
 				}
@@ -5287,7 +5342,8 @@ dump_fsm_edges(PG_FUNCTION_ARGS)
 					continue;
 				}
 
-				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->primaryNode, states[j]))
+				if (!NodeStatusPatternSurvivesIsInPrimaryState(&rule->primaryNode, states[j],
+															   singleExcluded))
 				{
 					continue;
 				}
