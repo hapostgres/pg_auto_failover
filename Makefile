@@ -85,8 +85,20 @@ test ci-test run-test run-test-prebuilt:
 # To check or auto-fix locally without installing citus_indent:
 #   make docker-check    # check only
 #   make docker-indent   # auto-fix
+#
+# citus_indent calls `git ls-files` to find the files it should look at, so
+# the container needs a working .git. In a plain checkout that's already
+# true (.git lives under $(CURDIR), which is mounted at /workdir). In a git
+# worktree, $(CURDIR)/.git is only a pointer file ("gitdir: <main-repo>/.git/
+# worktrees/<name>") to a path outside $(CURDIR) -- GIT_COMMON_DIR resolves
+# that pointer on the host and the extra -v mounts it into the container at
+# the identical absolute path, so it still resolves there too. This is a
+# harmless no-op for a plain checkout (it just mounts $(CURDIR)/.git over
+# itself).
+GIT_COMMON_DIR := $(shell cd "$(CURDIR)" && cd "$$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)
 CITUS_INDENT_DOCKER = docker run --rm \
 	-v "$(CURDIR):/workdir" \
+	$(if $(GIT_COMMON_DIR),-v "$(GIT_COMMON_DIR):$(GIT_COMMON_DIR)") \
 	-w /workdir \
 	citus/stylechecker:no-py \
 	citus_indent
