@@ -1412,8 +1412,9 @@ postgres_ctl_cmd:
 /* -----------------------------------------------------------------------
  * fsm step <node>
  *
- * Sugar for `pg_autoctl manual fsm step --pgdata /var/lib/postgres/pgaf` run
- * inside the named node's container. Only meaningful for a node declared
+ * Sugar for `pg_autoctl manual fsm step` run inside the named node's
+ * container (PGDATA is already set in its environment -- see
+ * compose_gen.c). Only meaningful for a node declared
  * "no-autopilot" in the cluster block: such a node's node-active service
  * never ticks on its own (PG_AUTOCTL_STEP_MODE), so this is the only thing
  * that advances its FSM -- one transition at a time, precisely when the

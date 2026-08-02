@@ -3928,8 +3928,7 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			{
 				rc = run_cmd_capture_both(
 					fsmOut, sizeof(fsmOut),
-					"%s exec -T %s pg_autoctl manual fsm step"
-					" --pgdata /var/lib/postgres/pgaf",
+					"%s exec -T %s pg_autoctl manual fsm step",
 					r->composeBase, cmd->service);
 
 				if (rc == 0)

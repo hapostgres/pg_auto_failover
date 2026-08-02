@@ -52,7 +52,7 @@ step test_001_remove_primary_leaving_node2_alone {
 }
 
 step test_002_node2_reports_and_learns_single {
-    exec node2  pg_autoctl manual fsm step report --pgdata /var/lib/postgres/pgaf
+    exec node2  pg_autoctl manual fsm step report
     sql monitor {
         SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
     }
@@ -64,7 +64,7 @@ step test_002_node2_reports_and_learns_single {
 }
 
 step test_003_node2_advances_to_single {
-    exec node2  pg_autoctl manual fsm step advance --pgdata /var/lib/postgres/pgaf
+    exec node2  pg_autoctl manual fsm step advance
 }
 
 step test_004_node2_reports_the_new_single_state {
@@ -74,7 +74,7 @@ step test_004_node2_reports_the_new_single_state {
     # "step") call pushes the now-current single state -- exactly the
     # same "one more call needed" shape the existing gap specs rely on
     # when chaining repeated combined "fsm step" calls.
-    exec node2  pg_autoctl manual fsm step report --pgdata /var/lib/postgres/pgaf
+    exec node2  pg_autoctl manual fsm step report
     sql monitor {
         SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
     }

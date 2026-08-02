@@ -895,10 +895,10 @@ static const yytype_uint16 yyrline[] =
     1084,  1085,  1096,  1104,  1112,  1120,  1138,  1153,  1160,  1164,
     1170,  1183,  1191,  1199,  1220,  1227,  1234,  1242,  1258,  1264,
     1285,  1293,  1308,  1322,  1326,  1332,  1338,  1364,  1398,  1404,
-    1424,  1441,  1441,  1446,  1465,  1490,  1499,  1508,  1517,  1533,
-    1536,  1538,  1560,  1561,  1562,  1563,  1564,  1565,  1566,  1567,
-    1568,  1569,  1570,  1571,  1572,  1573,  1574,  1575,  1576,  1577,
-    1578,  1579,  1580,  1588,  1589
+    1425,  1442,  1442,  1447,  1466,  1491,  1500,  1509,  1518,  1534,
+    1537,  1539,  1561,  1562,  1563,  1564,  1565,  1566,  1567,  1568,
+    1569,  1570,  1571,  1572,  1573,  1574,  1575,  1576,  1577,  1578,
+    1579,  1580,  1581,  1589,  1590
 };
 #endif
 
@@ -3385,7 +3385,7 @@ yyreduce:
     break;
 
   case 180:
-#line 1425 "test_spec_parse.y"
+#line 1426 "test_spec_parse.y"
     {
 		(yyval.cmd) = make_cmd(CMD_FSM_STEP);
 		strlcpy((yyval.cmd)->service, (yyvsp[(3) - (3)].str), sizeof((yyval.cmd)->service));
@@ -3394,17 +3394,17 @@ yyreduce:
     break;
 
   case 181:
-#line 1441 "test_spec_parse.y"
+#line 1442 "test_spec_parse.y"
     { pgaf_next_brace_is_while = 1; ;}
     break;
 
   case 182:
-#line 1442 "test_spec_parse.y"
+#line 1443 "test_spec_parse.y"
     { (yyval.step) = (yyvsp[(4) - (5)].step); ;}
     break;
 
   case 183:
-#line 1447 "test_spec_parse.y"
+#line 1448 "test_spec_parse.y"
     {
 		(yyval.cmd) = make_cmd(CMD_STAYS_WHILE);
 		strlcpy((yyval.cmd)->service, (yyvsp[(2) - (5)].str), sizeof((yyval.cmd)->service));
@@ -3415,7 +3415,7 @@ yyreduce:
     break;
 
   case 184:
-#line 1466 "test_spec_parse.y"
+#line 1467 "test_spec_parse.y"
     {
 		/* only "set monitor <svc>" is supported; $2 must be "monitor" */
 		if (strcmp((yyvsp[(2) - (3)].str), "monitor") != 0)
@@ -3431,7 +3431,7 @@ yyreduce:
     break;
 
   case 185:
-#line 1491 "test_spec_parse.y"
+#line 1492 "test_spec_parse.y"
     {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[(2) - (4)].str), sizeof((yyval.cmd)->service));
@@ -3443,7 +3443,7 @@ yyreduce:
     break;
 
   case 186:
-#line 1500 "test_spec_parse.y"
+#line 1501 "test_spec_parse.y"
     {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[(2) - (5)].str), sizeof((yyval.cmd)->service));
@@ -3455,7 +3455,7 @@ yyreduce:
     break;
 
   case 187:
-#line 1509 "test_spec_parse.y"
+#line 1510 "test_spec_parse.y"
     {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[(2) - (4)].str), sizeof((yyval.cmd)->service));
@@ -3467,7 +3467,7 @@ yyreduce:
     break;
 
   case 188:
-#line 1518 "test_spec_parse.y"
+#line 1519 "test_spec_parse.y"
     {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[(2) - (5)].str), sizeof((yyval.cmd)->service));
@@ -3479,7 +3479,7 @@ yyreduce:
     break;
 
   case 191:
-#line 1539 "test_spec_parse.y"
+#line 1540 "test_spec_parse.y"
     {
 		int i = current_spec->sequenceLength;
 		if (i < PGAF_MAX_SEQ)
@@ -3494,117 +3494,117 @@ yyreduce:
     break;
 
   case 192:
-#line 1560 "test_spec_parse.y"
+#line 1561 "test_spec_parse.y"
     { (yyval.str) = "init"; ;}
     break;
 
   case 193:
-#line 1561 "test_spec_parse.y"
+#line 1562 "test_spec_parse.y"
     { (yyval.str) = "single"; ;}
     break;
 
   case 194:
-#line 1562 "test_spec_parse.y"
+#line 1563 "test_spec_parse.y"
     { (yyval.str) = "primary"; ;}
     break;
 
   case 195:
-#line 1563 "test_spec_parse.y"
+#line 1564 "test_spec_parse.y"
     { (yyval.str) = "wait_primary"; ;}
     break;
 
   case 196:
-#line 1564 "test_spec_parse.y"
+#line 1565 "test_spec_parse.y"
     { (yyval.str) = "wait_standby"; ;}
     break;
 
   case 197:
-#line 1565 "test_spec_parse.y"
+#line 1566 "test_spec_parse.y"
     { (yyval.str) = "demoted"; ;}
     break;
 
   case 198:
-#line 1566 "test_spec_parse.y"
+#line 1567 "test_spec_parse.y"
     { (yyval.str) = "demote_timeout"; ;}
     break;
 
   case 199:
-#line 1567 "test_spec_parse.y"
+#line 1568 "test_spec_parse.y"
     { (yyval.str) = "draining"; ;}
     break;
 
   case 200:
-#line 1568 "test_spec_parse.y"
+#line 1569 "test_spec_parse.y"
     { (yyval.str) = "secondary"; ;}
     break;
 
   case 201:
-#line 1569 "test_spec_parse.y"
+#line 1570 "test_spec_parse.y"
     { (yyval.str) = "catchingup"; ;}
     break;
 
   case 202:
-#line 1570 "test_spec_parse.y"
+#line 1571 "test_spec_parse.y"
     { (yyval.str) = "prepare_promotion"; ;}
     break;
 
   case 203:
-#line 1571 "test_spec_parse.y"
+#line 1572 "test_spec_parse.y"
     { (yyval.str) = "stop_replication"; ;}
     break;
 
   case 204:
-#line 1572 "test_spec_parse.y"
+#line 1573 "test_spec_parse.y"
     { (yyval.str) = "maintenance"; ;}
     break;
 
   case 205:
-#line 1573 "test_spec_parse.y"
+#line 1574 "test_spec_parse.y"
     { (yyval.str) = "join_primary"; ;}
     break;
 
   case 206:
-#line 1574 "test_spec_parse.y"
+#line 1575 "test_spec_parse.y"
     { (yyval.str) = "apply_settings"; ;}
     break;
 
   case 207:
-#line 1575 "test_spec_parse.y"
+#line 1576 "test_spec_parse.y"
     { (yyval.str) = "prepare_maintenance"; ;}
     break;
 
   case 208:
-#line 1576 "test_spec_parse.y"
+#line 1577 "test_spec_parse.y"
     { (yyval.str) = "wait_maintenance"; ;}
     break;
 
   case 209:
-#line 1577 "test_spec_parse.y"
+#line 1578 "test_spec_parse.y"
     { (yyval.str) = "report_lsn"; ;}
     break;
 
   case 210:
-#line 1578 "test_spec_parse.y"
+#line 1579 "test_spec_parse.y"
     { (yyval.str) = "fast_forward"; ;}
     break;
 
   case 211:
-#line 1579 "test_spec_parse.y"
+#line 1580 "test_spec_parse.y"
     { (yyval.str) = "join_secondary"; ;}
     break;
 
   case 212:
-#line 1580 "test_spec_parse.y"
+#line 1581 "test_spec_parse.y"
     { (yyval.str) = "dropped"; ;}
     break;
 
   case 213:
-#line 1588 "test_spec_parse.y"
+#line 1589 "test_spec_parse.y"
     { (yyval.str) = (yyvsp[(1) - (1)].str); ;}
     break;
 
   case 214:
-#line 1589 "test_spec_parse.y"
+#line 1590 "test_spec_parse.y"
     { (yyval.str) = (yyvsp[(1) - (1)].str); ;}
     break;
 
@@ -3824,7 +3824,7 @@ yyreturn:
 }
 
 
-#line 1592 "test_spec_parse.y"
+#line 1593 "test_spec_parse.y"
 
 
 /* -----------------------------------------------------------------------
