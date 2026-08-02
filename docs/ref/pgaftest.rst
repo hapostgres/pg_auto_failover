@@ -507,12 +507,11 @@ declared on.
 ``pg_autoctl manual fsm step`` command (report the current state, then
 immediately attempt whatever transition the monitor assigns). The underlying
 CLI also exposes the two halves separately as ``manual fsm step report`` and
-``manual fsm step advance`` — see :ref:`pg_autoctl_manual` — for scenarios
-that need to observe the monitor's assigned goal state before deciding
-whether, or when, to actually attempt the transition; the DSL does not yet
-have separate sugar for the split, so use ``exec <node>  pg_autoctl manual
-fsm step report --pgdata /var/lib/postgres/pgaf`` / ``... advance ...``
-directly for that.
+``manual fsm step advance`` — see :ref:`pg_autoctl_manual_fsm_step` — for
+scenarios that need to observe the monitor's assigned goal state before
+deciding whether, or when, to actually attempt the transition; the DSL does
+not yet have separate sugar for the split, so use ``exec <node>  pg_autoctl
+manual fsm step report`` / ``... advance`` directly for that.
 
 
 Commands inside ``setup``, ``teardown``, and ``step`` blocks

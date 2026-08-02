@@ -16,6 +16,7 @@ stopped or stuck, and for low-level diagnostic work. Using them while
 .. toctree::
    :maxdepth: 1
 
+   pg_autoctl_manual_fsm_step
    pg_autoctl_manual_service_restart
 
 ``pg_autoctl manual`` provides the following sub-command groups::
@@ -33,20 +34,6 @@ stopped or stuck, and for low-level diagnostic work. Using them while
       assign  Assign a new goal state to the keeper
       step    Make a state transition if instructed by the monitor
     + nodes   Manually manage the keeper's nodes list
-
-``pg_autoctl manual fsm step [report|advance]`` normally does both halves of
-a step in one call: report the node's current state to the monitor, then
-immediately attempt whatever transition the monitor assigns back. Passing
-``report`` or ``advance`` as an argument splits that into its two
-independently-issuable halves — ``report`` reports the current state and
-returns without transitioning; ``advance`` attempts the transition the
-monitor already assigned, without re-reporting first. Neither half re-runs
-the other, so observing the effect of ``advance`` on the monitor's own view
-still needs a following ``report`` (or plain ``step``) call. This is mainly
-useful against a node started with ``pgaftest``'s ``no-autopilot`` cluster
-modifier (see :ref:`pgaftest <pgaftest>`), where the node-active service
-never ticks the FSM on its own — ``step``/``report``/``advance`` become the
-only way to move it forward, one call at a time.
 
     pg_autoctl manual fsm nodes
       get  Get the list of nodes from file (see --disable-monitor)
