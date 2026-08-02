@@ -32,7 +32,7 @@ stopped or stuck, and for low-level diagnostic work. Using them while
     pg_autoctl manual fsm
       init    Initialize the keeper's state on-disk
       assign  Assign a new goal state to the keeper
-      step    Make a state transition if instructed by the monitor
+    + step    Make a state transition if instructed by the monitor
     + nodes   Manually manage the keeper's nodes list
 
     pg_autoctl manual fsm nodes
