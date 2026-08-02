@@ -25,6 +25,7 @@ multi_ifdown
 multi_maintenance
 multi_alternate
 guard_data_loss
+fsm_step_report_advance
 replication_stall_3dc
 fast_forward
 demote_timeout_wait_primary_deadlock

@@ -1,0 +1,88 @@
+# Regression spec for the new "pg_autoctl manual fsm step report"/"...
+# advance" split (src/bin/pg_autoctl/fsm.c's keeper_fsm_step_report/
+# _advance, service_keeper.c's step-mode socket dispatch, cli_do_fsm.c's
+# cli_do_fsm_step) -- see docs/ref/pgaftest.rst's own "Step mode" section
+# for the full protocol description.
+#
+# The combined "pg_autoctl manual fsm step" (and its pgaftest
+# "fsm step <node>" sugar) reports the current state to the monitor and,
+# in the very same call, immediately attempts whatever transition the
+# monitor just assigned -- atomically, with no way to observe (or hold a
+# node frozen at) the moment in between. "report" and "advance" split
+# that into two independently-issuable halves, so a test (or an operator
+# reproducing a race condition by hand) can freeze a node's own
+# reportedState at will and only decide later, explicitly, whether and
+# when it should attempt the transition the monitor already assigned.
+#
+# This spec proves the split mechanism itself, end to end, on the
+# simplest case that exercises it: node2 registers as node1's standby
+# (reaching reportedState catchingup), node1 is then forcibly removed,
+# leaving node2 alone in the group -- the monitor assigns node2's
+# goalState to single (an existing, pre-existing "alone in group ->
+# single" rule, unrelated to this spec's own point). node2 is running
+# no-autopilot (step mode), so:
+#
+#   - "manual fsm step report" reports node2's unchanged current state
+#     (catchingup) to the monitor and returns -- proven by the monitor
+#     bumping goalState to single while reportedState stays catchingup.
+#   - "manual fsm step advance" then performs the transition the
+#     monitor already assigned (catchingup -> single), without
+#     re-reporting first -- proven by reportedState becoming single.
+cluster {
+    monitor
+    formation {
+        node1
+        node2  no-autopilot
+    }
+}
+
+setup {
+    wait until node2 state = catchingup  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_remove_primary_leaving_node2_alone {
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+}
+
+step test_002_node2_reports_and_learns_single {
+    exec node2  pg_autoctl manual fsm step report --pgdata /var/lib/postgres/pgaf
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { catchingup }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { single }
+}
+
+step test_003_node2_advances_to_single {
+    exec node2  pg_autoctl manual fsm step advance --pgdata /var/lib/postgres/pgaf
+}
+
+step test_004_node2_reports_the_new_single_state {
+    # "advance" (like "report") only performs its own half of the split;
+    # neither one re-reports afterward, so the monitor's own view of
+    # node2 still lags until the next explicit "report" (or combined
+    # "step") call pushes the now-current single state -- exactly the
+    # same "one more call needed" shape the existing gap specs rely on
+    # when chaining repeated combined "fsm step" calls.
+    exec node2  pg_autoctl manual fsm step report --pgdata /var/lib/postgres/pgaf
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { single }
+}
+
+sequence
+    test_001_remove_primary_leaving_node2_alone
+    test_002_node2_reports_and_learns_single
+    test_003_node2_advances_to_single
+    test_004_node2_reports_the_new_single_state

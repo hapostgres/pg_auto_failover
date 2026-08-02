@@ -440,6 +440,10 @@ Node modifiers:
                                               (``--region``; default: ``default``)
 ``launch deferred``                           Container starts with ``sleep infinity``;
                                               use ``exec node  pg_autoctl node start``
+``no-autopilot``                              Step mode: the node-active service never
+                                              transitions on its own; drive it explicitly
+                                              with the ``fsm step <node>`` DSL command
+                                              (see `Step mode: no-autopilot nodes`_ below)
 ``coordinator`` / ``worker group <N>``        Citus role
 ``no-monitor``                                Standalone node (no monitor)
 ``listen``                                    Bind all interfaces (``--listen 0.0.0.0``)
@@ -476,6 +480,39 @@ the topology rather than because it's doing real work.
 See "Deterministic node registration order" in
 ``src/bin/pgaftest/README.md`` for the implementation (``compose_gen.c``
 and ``cli_node.c``).
+
+
+Step mode: ``no-autopilot`` nodes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A node declared with the ``no-autopilot`` modifier starts with
+``PG_AUTOCTL_STEP_MODE`` set, which changes what its node-active service does
+on each FSM tick: instead of reporting its current state to the monitor and
+immediately attempting whatever transition the monitor assigns back —
+atomically, on every tick, with no way to observe or freeze the moment in
+between — it opens a small Unix-domain-socket server and waits. Nothing
+happens to that node's FSM until the spec explicitly drives it with the
+``fsm step <node>`` command, documented under "Commands inside ``setup``,
+``teardown``, and ``step`` blocks" below.
+
+This exists so a test can hold a node frozen at a specific reported state on
+purpose — e.g. to prove the monitor assigns the right next state before the
+node itself races off to reach it, or to reproduce a specific ordering
+between two nodes that would otherwise be a race under the normal, freely
+ticking FSM. Every other node in the same spec (without the modifier) keeps
+autopiloting normally; ``no-autopilot`` only affects the node(s) it's
+declared on.
+
+``fsm step <node>`` is sugar for the combined
+``pg_autoctl manual fsm step`` command (report the current state, then
+immediately attempt whatever transition the monitor assigns). The underlying
+CLI also exposes the two halves separately as ``manual fsm step report`` and
+``manual fsm step advance`` — see :ref:`pg_autoctl_manual` — for scenarios
+that need to observe the monitor's assigned goal state before deciding
+whether, or when, to actually attempt the transition; the DSL does not yet
+have separate sugar for the split, so use ``exec <node>  pg_autoctl manual
+fsm step report --pgdata /var/lib/postgres/pgaf`` / ``... advance ...``
+directly for that.
 
 
 Commands inside ``setup``, ``teardown``, and ``step`` blocks
@@ -574,6 +611,12 @@ node ...`` which queries the running node/monitor instead of the file.
 
    stop postgres  <node>
    start postgres <node>
+
+**FSM step** (``no-autopilot`` nodes only — see `Step mode: no-autopilot nodes`_ above)
+
+.. code-block:: text
+
+   fsm step <node>
 
 **Failover**
 
@@ -761,6 +804,12 @@ Schedules under ``tests/tap/schedules/*.sch`` group these into CI jobs.
 
 ``fast_forward``
     Test fast-forward stuck detection and recovery.
+
+``fsm_step_report_advance``
+    Test the ``pg_autoctl manual fsm step report``/``... advance`` split
+    using a ``no-autopilot`` node: report a stale state to the monitor
+    without transitioning, then advance to the transition the monitor
+    already assigned, proving the two halves work independently.
 
 ``guard_data_loss``
     Test ``pgautofailover.guard_data_loss`` /
