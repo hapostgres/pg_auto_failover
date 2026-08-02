@@ -698,6 +698,7 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 		bool stepCommandReceived = false;
 		int stepClientFd = -1;
+		char stepCommand[NAMEDATALEN] = { 0 };
 
 		/*
 		 * If we're in a stable state (current state and goal state are the
@@ -714,7 +715,8 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
 
 			stepCommandReceived =
-				step_socket_wait_for_command(stepListenFd, timeoutMs, &stepClientFd);
+				step_socket_wait_for_command(stepListenFd, timeoutMs, &stepClientFd,
+											 stepCommand, sizeof(stepCommand));
 		}
 		else if (doSleep && !config->monitorDisabled)
 		{
@@ -821,13 +823,42 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 			}
 
 			NodeState oldRole = keeperState->current_role;
-			bool stepOk = keeper_fsm_step(keeper);
+			bool stepOk = false;
+
+			/*
+			 * REPORT and ADVANCE split keeper_fsm_step()'s own combined
+			 * "report to the monitor, then immediately attempt whatever
+			 * transition it just assigned" into two independently-issuable
+			 * commands -- see keeper_fsm_step_report/_advance's own
+			 * comments (fsm.c) for why a pgaftest spec needs that
+			 * separation to freeze a node's own reportedState while a
+			 * *different* node's report bumps this one's goalState via a
+			 * MonitorFSM[] fan-out, something keeper_fsm_step's atomic
+			 * shape makes unobservable.
+			 */
+			if (streq(stepCommand, STEP_SOCKET_COMMAND_REPORT))
+			{
+				stepOk = keeper_fsm_step_report(keeper);
+			}
+			else if (streq(stepCommand, STEP_SOCKET_COMMAND_ADVANCE))
+			{
+				stepOk = keeper_fsm_step_advance(keeper);
+			}
+			else
+			{
+				stepOk = keeper_fsm_step(keeper);
+			}
 
 			if (stepOk)
 			{
+				NodeState newRole =
+					streq(stepCommand, STEP_SOCKET_COMMAND_REPORT)
+					? keeperState->assigned_role
+					: keeperState->current_role;
+
 				(void) step_socket_respond_ok(stepClientFd,
 											  NodeStateToString(oldRole),
-											  NodeStateToString(keeperState->assigned_role));
+											  NodeStateToString(newRole));
 			}
 			else
 			{

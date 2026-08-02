@@ -126,7 +126,7 @@ CommandLine fsm_assign =
 CommandLine fsm_step =
 	make_command("step",
 				 "Make a state transition if instructed by the monitor",
-				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_USAGE "[report|advance]",
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_do_fsm_step);
@@ -470,6 +470,17 @@ cli_do_fsm_assign(int argc, char **argv)
  * cli_do_fsm_step gets the goal state from the monitor, makes
  * the necessary transition, and then reports the current state to
  * the monitor.
+ *
+ * An optional first positional argument, "report" or "advance", splits
+ * that combined behavior into its two halves -- see keeper_fsm_step_report/
+ * _advance's own comments (fsm.c) for why: keeper_fsm_step's own
+ * report-then-immediately-transition shape happens atomically, in one
+ * call, which makes it impossible to observe (or hold a node frozen at)
+ * the moment in between, something exercising some MonitorFSM[] gap-closing
+ * transitions live requires. Bare "step" (no argument) keeps its original,
+ * unchanged combined behavior -- every existing caller (the node-active
+ * service's own autopilot loop, service_keeper.c; already-written pgaftest
+ * specs) keeps working exactly as before.
  */
 static void
 cli_do_fsm_step(int argc, char **argv)
@@ -481,6 +492,23 @@ cli_do_fsm_step(int argc, char **argv)
 	bool monitorDisabledIsOk = true;
 
 	keeper.config = keeperOptions;
+
+	if (argc > 1)
+	{
+		log_error("USAGE: do fsm step [report|advance]");
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	bool reportOnly = argc == 1 && streq(argv[0], "report");
+	bool advanceOnly = argc == 1 && streq(argv[0], "advance");
+
+	if (argc == 1 && !reportOnly && !advanceOnly)
+	{
+		log_error("USAGE: do fsm step [report|advance]");
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
 
 	if (!keeper_config_read_file(&(keeper.config),
 								 missingPgdataIsOk,
@@ -506,7 +534,12 @@ cli_do_fsm_step(int argc, char **argv)
 	{
 		char response[BUFSIZE * 2] = { 0 };
 
-		if (!step_socket_send_command(stepSocketPath, "STEP",
+		const char *socketCommand =
+			reportOnly ? STEP_SOCKET_COMMAND_REPORT :
+			advanceOnly ? STEP_SOCKET_COMMAND_ADVANCE :
+			STEP_SOCKET_COMMAND_STEP;
+
+		if (!step_socket_send_command(stepSocketPath, socketCommand,
 									  response, sizeof(response)))
 		{
 			log_fatal("Failed to reach the step-mode node-active service at "
@@ -529,7 +562,8 @@ cli_do_fsm_step(int argc, char **argv)
 		char oldRole[NAMEDATALEN] = { 0 };
 		char newRole[NAMEDATALEN] = { 0 };
 
-		if (sscanf(response, "OK %s %s", oldRole, newRole) != 2)
+		if (sscanf(response, "OK %63s %63s", /* IGNORE-BANNED */
+				   oldRole, newRole) != 2)
 		{
 			log_fatal("Failed to parse the step-mode service response: \"%s\"",
 					  response);
@@ -556,13 +590,21 @@ cli_do_fsm_step(int argc, char **argv)
 
 	const char *oldRole = NodeStateToString(keeper.state.current_role);
 
-	if (!keeper_fsm_step(&keeper))
+	bool stepOk =
+		reportOnly ? keeper_fsm_step_report(&keeper) :
+		advanceOnly ? keeper_fsm_step_advance(&keeper) :
+		keeper_fsm_step(&keeper);
+
+	if (!stepOk)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	const char *newRole = NodeStateToString(keeper.state.assigned_role);
+	const char *newRole =
+		reportOnly
+		? NodeStateToString(keeper.state.assigned_role)
+		: NodeStateToString(keeper.state.current_role);
 
 	if (outputJSON)
 	{

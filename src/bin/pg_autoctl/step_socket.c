@@ -22,12 +22,12 @@
 #include "postgres_fe.h"
 
 #include "defaults.h"
+#include "file_utils.h"
 #include "log.h"
 #include "pgsetup.h"
 #include "step_socket.h"
 
 #define STEP_SOCKET_SUFFIX ".step"
-#define STEP_SOCKET_COMMAND_STEP "STEP"
 
 
 /*
@@ -40,7 +40,7 @@
 bool
 step_socket_path(const char *pidFilePath, char *path, size_t size)
 {
-	int n = snprintf(path, size, "%s%s", pidFilePath, STEP_SOCKET_SUFFIX);
+	int n = sformat(path, size, "%s%s", pidFilePath, STEP_SOCKET_SUFFIX);
 
 	return n > 0 && (size_t) n < size;
 }
@@ -127,14 +127,17 @@ step_socket_close(int listenFd, const char *path)
 /*
  * step_socket_wait_for_command polls the step-mode listening socket for up
  * to timeoutMs milliseconds waiting for a client to connect and send a
- * command. Returns true and sets *clientFd to an open connection when a
- * recognized command was received; returns false (with *clientFd left at
- * -1) on timeout, a transient error, or an unrecognized command -- the
- * caller treats all of those identically to "no command yet, keep going",
- * so a misbehaving client can never wedge the main loop.
+ * command. Returns true and sets *clientFd to an open connection, with
+ * command (a buffer of at least commandSize bytes) set to the exact command
+ * string received (one of STEP/REPORT/ADVANCE), when a recognized command
+ * was received; returns false (with *clientFd left at -1) on timeout, a
+ * transient error, or an unrecognized command -- the caller treats all of
+ * those identically to "no command yet, keep going", so a misbehaving
+ * client can never wedge the main loop.
  */
 bool
-step_socket_wait_for_command(int listenFd, int timeoutMs, int *clientFd)
+step_socket_wait_for_command(int listenFd, int timeoutMs, int *clientFd,
+							 char *command, size_t commandSize)
 {
 	*clientFd = -1;
 
@@ -170,13 +173,17 @@ step_socket_wait_for_command(int listenFd, int timeoutMs, int *clientFd)
 		buffer[--bytes] = '\0';
 	}
 
-	if (strcmp(buffer, STEP_SOCKET_COMMAND_STEP) != 0)
+	if (strcmp(buffer, STEP_SOCKET_COMMAND_STEP) != 0 &&
+		strcmp(buffer, STEP_SOCKET_COMMAND_REPORT) != 0 &&
+		strcmp(buffer, STEP_SOCKET_COMMAND_ADVANCE) != 0)
 	{
 		log_warn("Ignoring unrecognized step-mode command: \"%s\"", buffer);
 		(void) write(fd, "ERROR unrecognized command\n", 28);
 		close(fd);
 		return false;
 	}
+
+	strlcpy(command, buffer, commandSize);
 
 	*clientFd = fd;
 	return true;
@@ -190,7 +197,7 @@ void
 step_socket_respond_ok(int clientFd, const char *oldRole, const char *newRole)
 {
 	char response[BUFSIZE] = { 0 };
-	int n = snprintf(response, sizeof(response), "OK %s %s\n", oldRole, newRole);
+	int n = sformat(response, sizeof(response), "OK %s %s\n", oldRole, newRole);
 
 	if (n > 0)
 	{
@@ -206,7 +213,7 @@ void
 step_socket_respond_error(int clientFd, const char *message)
 {
 	char response[BUFSIZE] = { 0 };
-	int n = snprintf(response, sizeof(response), "ERROR %s\n", message);
+	int n = sformat(response, sizeof(response), "ERROR %s\n", message);
 
 	if (n > 0)
 	{
@@ -248,7 +255,7 @@ step_socket_send_command(const char *path, const char *command,
 	}
 
 	char commandLine[BUFSIZE];
-	snprintf(commandLine, sizeof(commandLine), "%s\n", command);
+	sformat(commandLine, sizeof(commandLine), "%s\n", command);
 
 	if (write(fd, commandLine, strlen(commandLine)) < 0)
 	{
