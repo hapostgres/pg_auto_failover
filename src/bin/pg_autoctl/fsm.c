@@ -1399,6 +1399,22 @@ keeper_fsm_step(Keeper *keeper)
 	}
 
 	/*
+	 * Repair our own groupId/replication slot name if the monitor's view of
+	 * who we are has drifted from ours -- see
+	 * keeper_maybe_update_group_and_slot's own comment for why this can't
+	 * be skipped here: unlike the autonomous tick body
+	 * (service_keeper_node_active), this is also the code path a suspended
+	 * (step-mode) node's every "fsm step"/"fsm step report" goes through,
+	 * and it's the only place such a node ever gets a fresh
+	 * MonitorAssignedState to check against.
+	 */
+	if (!keeper_maybe_update_group_and_slot(keeper, &assignedState))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
 	 * Assign the new state. We skip writing the state file here since we can
 	 * (and should) always get the assigned state from the monitor.
 	 */
@@ -1478,6 +1494,13 @@ keeper_fsm_step_report(Keeper *keeper)
 	{
 		log_fatal("Failed to get the goal state from the monitor, "
 				  "see above for details");
+		return false;
+	}
+
+	/* see keeper_fsm_step's own identical call for why this is here too */
+	if (!keeper_maybe_update_group_and_slot(keeper, &assignedState))
+	{
+		/* errors have already been logged */
 		return false;
 	}
 

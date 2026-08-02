@@ -1305,7 +1305,6 @@ keeper_suspended_loop(Keeper *keeper, pid_t start_pid)
 static bool
 service_keeper_node_active(Keeper *keeper, bool doInit)
 {
-	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *keeperState = &(keeper->state);
 
 	MonitorAssignedState assignedState = { 0 };
@@ -1362,36 +1361,13 @@ service_keeper_node_active(Keeper *keeper, bool doInit)
 
 	/*
 	 * Also update the groupId and replication slot name in the
-	 * configuration file.
+	 * configuration file, if the monitor's own view of who we are has
+	 * drifted from ours.
 	 */
-	char expectedSlotName[BUFSIZE] = { 0 };
-
-	(void) postgres_sprintf_replicationSlotName(assignedState.nodeId,
-												expectedSlotName,
-												sizeof(expectedSlotName));
-
-	if (assignedState.groupId != config->groupId ||
-		strneq(config->replication_slot_name, expectedSlotName))
+	if (!keeper_maybe_update_group_and_slot(keeper, &assignedState))
 	{
-		bool postgresNotRunningIsOk = false;
-
-		if (!keeper_config_update(config,
-								  assignedState.nodeId,
-								  assignedState.groupId))
-		{
-			log_error("Failed to update the configuration file "
-					  "with groupId %d and replication.slot \"%s\"",
-					  assignedState.groupId, expectedSlotName);
-			return false;
-		}
-
-		if (!keeper_ensure_configuration(keeper, postgresNotRunningIsOk))
-		{
-			log_error("Failed to update our Postgres configuration "
-					  "after a change of groupId or "
-					  "replication slot name, see above for details");
-			return false;
-		}
+		/* errors have already been logged */
+		return false;
 	}
 
 	return true;
