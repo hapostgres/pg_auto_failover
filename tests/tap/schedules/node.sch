@@ -1,6 +1,9 @@
-# Node lifecycle, monitor operations, and Debian/tablespace layouts (~34 min).
+# Node lifecycle, monitor operations, and Debian/tablespace layouts (~30 min).
 # Merged from former node, monitor, and node-extra schedules to reduce CI job
-# count and GitHub Actions runner queue pressure.
+# count and GitHub Actions runner queue pressure. The keeper/monitor FSM
+# edge-gap specs that used to live here were split out to node-fsm-gaps.sch
+# (PG17-only) once this schedule's own combined runtime started timing out
+# the CI step on every PG version -- see that file's own header comment.
 create_standby_with_pgdata
 launch_deferred_set_metadata
 fsm_step_report_advance
@@ -15,17 +18,3 @@ replication_stall_3dc
 demote_timeout_wait_primary_deadlock
 timeline_fork_report_lsn_deadlock
 timeline_fork_3node_auto_detect
-keeper_fsm_gap_209_wait_maintenance
-keeper_fsm_gap_211_wait_maintenance
-keeper_fsm_gap_209_wait_standby
-keeper_fsm_gap_211_wait_standby
-keeper_fsm_gap_211_primary_priority_zero
-keeper_fsm_gap_new_node_joins_report_lsn_group
-keeper_fsm_gap_candidate_fast_forward_left_alone
-keeper_fsm_gap_priority_zero_fast_forward_left_alone
-keeper_fsm_gap_primary_left_alone_mid_maintenance_handoff
-keeper_fsm_gap_priority_zero_candidate_left_alone_mid_promotion
-keeper_fsm_gap_priority_zero_primary_left_alone_mid_demotion
-keeper_fsm_gap_priority_zero_losing_candidate_left_alone_mid_handoff
-keeper_fsm_gap_stop_replication_report_lsn_priority
-keeper_fsm_gap_stop_replication_report_lsn_new_node
