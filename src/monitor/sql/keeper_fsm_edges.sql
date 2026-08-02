@@ -262,21 +262,40 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 --     the first place (a lone standby for prepare_promotion, the original
 --     primary itself for demote_timeout, and a losing MS-failover
 --     candidate for join_secondary).
---   * pos 211's stop_replication current_state is the one exception left
---     unfixed, and unlike the three above it is not simply "missing a row":
---     fsm_stop_replication doesn't just stop a process, its own comment
---     says it shuts down the replication stream "by promoting the
---     replica" -- Postgres has already left recovery onto a new timeline
---     by the time this state is reported. Getting back to an ordinary,
---     disconnected-standby report_lsn state from there needs a real
---     pg_rewind/basebackup style re-sync (fsm_restart_standby ->
---     fsm_rewind_or_init, already used for MAINTENANCE_STATE/
---     PREPARE_MAINTENANCE_STATE -> CATCHINGUP_STATE), and that function's
---     own first step, keeper_get_primary(), hard-requires a live,
---     reachable primary to rewind against or basebackup from -- which
---     cannot exist by pos 211's own "alone in group" precondition. No
---     existing function can do this safely when truly alone; left as a
---     documented, unfixed gap.
+--   * pos 211's stop_replication current_state is now fixed too, the same
+--     "missing a row" shape as the three above: reuse fsm_report_lsn
+--     directly, no new keeper code. This one was briefly misdiagnosed as
+--     unfixable, on the assumption that reaching report_lsn from here
+--     would need the same live-primary-dependent rewind/basebackup
+--     machinery fsm_restart_standby/fsm_rewind_or_init use elsewhere (for
+--     MAINTENANCE_STATE/PREPARE_MAINTENANCE_STATE -> CATCHINGUP_STATE, a
+--     materially different target that genuinely does need to stream from
+--     someone). fsm_report_lsn is not that function: its own restart
+--     (standby_restart_with_current_replication_source, primary_standby.c)
+--     is called with an all-zeroed upstream, so its own primaryNode.host
+--     check (IS_EMPTY_STRING_BUFFER) -- and pg_setup_standby_mode's own
+--     identical check -- skip the identify-system connection attempt
+--     entirely; it never contacts a peer. Concretely it just stops
+--     Postgres, writes a fresh standby.signal with no primary_conninfo,
+--     and restarts -- exactly what already turns every other source state
+--     in this list into a report_lsn candidate, and it's oblivious to
+--     whether this data directory's own history includes a promotion
+--     (fsm_stop_replication really did call fsm_promote_standby to get
+--     here, so Postgres is a genuinely writable, disconnected primary on
+--     its own new timeline by this point -- but Postgres itself decides
+--     "am I in recovery" purely from standby.signal's presence at this
+--     startup, not from promotion history). See fsm.c's own comment on
+--     this KeeperFSM[] row for the full argument, and
+--     keeper_fsm_gap_stop_replication_report_lsn.pgaf for the live
+--     reproduction of both ways out documented on pos 211's own comment
+--     (group_state_machine.c): raising candidate-priority back above 0
+--     (report_lsn -> single, already an existing edge, via pos 209), or a
+--     new node registering and RegisterNode's own existing
+--     report_lsn-candidate-priority-0 special case (node_active_
+--     protocol.c, already exercised by
+--     keeper_fsm_gap_new_node_joins_report_lsn_group.pgaf for a different
+--     source state) basebackupping from this node and taking over as
+--     primary while this node follows it back in as a secondary.
 --   * pos 325's and pos 391's own "single" states (the primaryNode side, in
 --     both cases) are now fixed at the source rather than merely explained
 --     away: both rows' own preconditions already require a *second,
@@ -290,8 +309,9 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 --     monitor/keeper actions can produce this combination.
 --
 --     Previously this was left as documented-but-unfixed, the same way the
---     stop_replication gap right above stays unfixed today: correct, but
---     dump_fsm_edges() itself had no way to know it, since
+--     stop_replication gap right above was (both are since fixed, by
+--     different mechanisms): correct, but dump_fsm_edges() itself had no
+--     way to know it, since
 --     NodeStatePatternResolveFromStates() only ever reads a row's own
 --     .statePattern -- every other NodeStatusPattern field, including
 --     isInPrimaryState (the field responsible for admitting "single" as a

@@ -142,6 +142,7 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
  stop_replication    | wait_primary
  stop_replication    | demote_timeout
  stop_replication    | demoted
+ stop_replication    | report_lsn
  wait_maintenance    | single
  wait_maintenance    | demote_timeout
  wait_maintenance    | demoted
@@ -153,7 +154,7 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
  wait_primary        | join_primary
  wait_primary        | apply_settings
  wait_standby        | catchingup
-(107 rows)
+(108 rows)
 
 -- Step 2a: monitor -> keeper direction -- every pgautofailover.dump_fsm_edges()
 -- edge the keeper_fsm_edges table above has no matching row for. A
@@ -445,11 +446,9 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
            (e.pos, e.assigned_state, f.comment)
          )
  ORDER BY e.pos, e.assigned_state, e.current_state NULLS FIRST;
- rule | n |  current_state   | assigned_state |                       comment                        
-------+---+------------------+----------------+------------------------------------------------------
-  211 | 1 |                  | report_lsn     | alone in group, candidatePriority zero -> report_lsn
-  211 | 1 | stop_replication | report_lsn     | alone in group, candidatePriority zero -> report_lsn
-(2 rows)
+ rule | n | current_state | assigned_state | comment 
+------+---+---------------+----------------+---------
+(0 rows)
 
 -- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
 -- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the

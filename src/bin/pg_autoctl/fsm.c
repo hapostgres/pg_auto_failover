@@ -1147,6 +1147,57 @@ KeeperFSMTransition KeeperFSM[] = {
 	},
 
 	/*
+	 * was one step further into that same promotion (prepare_promotion's own
+	 * no-op already gave way to fsm_stop_replication, which really did
+	 * promote Postgres onto a new timeline this time) but every other node
+	 * vanished before this node could finish becoming the new primary, and
+	 * its own candidate-priority is 0 -- reuse fsm_report_lsn exactly like
+	 * every other converged-standby source state above.
+	 *
+	 * Unlike prepare_promotion, Postgres here is no longer an ordinary
+	 * streaming standby -- fsm_stop_replication already promoted it, so it's
+	 * a genuinely writable, disconnected primary on its own new timeline.
+	 * That's still safe to hand to fsm_report_lsn unmodified: its own
+	 * restart (standby_restart_with_current_replication_source,
+	 * primary_standby.c) never contacts any peer at all -- it's a purely
+	 * local stop/reconfigure/restart sequence, entirely oblivious to
+	 * whether this instance was ever promoted. Concretely: it calls
+	 * standby_init_replication_source with an all-zeroed upstream (no
+	 * host), so the subsequent restart's own primaryNode.host check
+	 * (IS_EMPTY_STRING_BUFFER) skips the identify-system connection
+	 * attempt entirely, and pg_setup_standby_mode's own identical check
+	 * skips it too -- neither ever needs a reachable primary. It just
+	 * stops Postgres, writes a fresh standby.signal with no
+	 * primary_conninfo, and restarts -- exactly what turns an ordinary
+	 * disconnected standby into a report_lsn candidate elsewhere in this
+	 * table, and Postgres itself doesn't care that this data directory's
+	 * own history includes a promotion: recovery-on-restart is decided
+	 * purely by standby.signal's presence, not by promotion history.
+	 *
+	 * This was previously left as a documented, unfixed gap based on a
+	 * mistaken assumption that reaching report_lsn from here would need
+	 * the same live-primary-dependent rewind/basebackup machinery
+	 * fsm_restart_standby/fsm_rewind_or_init uses elsewhere (for reaching
+	 * catchingup, a materially different target that actually does need to
+	 * stream from someone) -- it doesn't; fsm_report_lsn was already the
+	 * right tool for this row the whole time. See
+	 * keeper_fsm_gap_stop_replication_report_lsn.pgaf for the live
+	 * reproduction, including both ways out documented on pos 211's own
+	 * comment (group_state_machine.c): raising candidate-priority back
+	 * above 0 (report_lsn -> single, already an existing edge, via pos
+	 * 209), or a new node registering and RegisterNode's own existing
+	 * report_lsn-candidate-priority-0 special case (node_active_protocol.c)
+	 * basebackupping from this node and taking over as primary while this
+	 * node follows it back in as a secondary.
+	 */
+	{
+		STOP_REPLICATION_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
 	 * was demoting after losing the primary role (draining timed out, or a
 	 * manual failover put another node in charge) but every other node
 	 * vanished and this node's own candidate-priority is 0 -- reuse

@@ -460,6 +460,10 @@
     "assigned": "report_lsn"
   },
   {
+    "current": "stop_replication",
+    "assigned": "report_lsn"
+  },
+  {
     "current": "demote_timeout",
     "assigned": "report_lsn"
   },
