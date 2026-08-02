@@ -19,6 +19,7 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "monitor.h"
@@ -603,5 +604,12 @@ cli_do_service_node_active(int argc, char **argv)
 	}
 
 	/* Start the node_active() protocol client */
-	(void) keeper_node_active_loop(&keeper, ppid);
+	if (env_exists(PG_AUTOCTL_STEP_MODE))
+	{
+		(void) keeper_step_mode_loop(&keeper, ppid);
+	}
+	else
+	{
+		(void) keeper_node_active_loop(&keeper, ppid);
+	}
 }
