@@ -5342,6 +5342,37 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 		}
 	}
 
+	/*
+	 * Same story as btree_gist above, this time for ltree: version 2.3 added
+	 * it to control's "requires" (pgautofailover.fsm's section_path column
+	 * is cast to ltree). ALTER EXTENSION ... UPDATE checks "requires" against
+	 * what's already installed before ever running the upgrade script body,
+	 * so putting a "CREATE EXTENSION IF NOT EXISTS ltree" inside
+	 * pgautofailover--2.2--2.3.sql itself is too late: the ALTER EXTENSION
+	 * statement already failed by the time that script would run.
+	 */
+	if (targetVersionNum >= 203)
+	{
+		char *ltreeExtName = "ltree";
+
+		if (!find_extension_control_file(monitor->config.pgSetup.pg_ctl,
+										 ltreeExtName))
+		{
+			log_warn("Failed to find extension control file for \"%s\"",
+					 ltreeExtName);
+			log_info("You might have to install a PostgreSQL contrib package");
+		}
+
+		if (!pgsql_create_extension(pgsql, ltreeExtName))
+		{
+			log_error("Failed to create extension \"%s\" "
+					  "required by \"%s\" extension version 2.3",
+					  ltreeExtName,
+					  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+			return false;
+		}
+	}
+
 	return pgsql_alter_extension_update_to(pgsql,
 										   PG_AUTOCTL_MONITOR_EXTENSION_NAME,
 										   targetVersion);
