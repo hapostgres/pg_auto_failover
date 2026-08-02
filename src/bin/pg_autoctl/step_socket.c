@@ -2,8 +2,8 @@
  * src/bin/pg_autoctl/step_socket.c
  *   A small Unix-domain-socket protocol used to drive a running
  *   pg_autoctl node-active service one FSM transition at a time, from
- *   an external "pg_autoctl manual fsm step" client, when step mode
- *   (PG_AUTOCTL_STEP_MODE) is enabled. This gives precise, gdb-step-like
+ *   an external "pg_autoctl manual fsm step" client, when the node is
+ *   suspended (PG_AUTOCTL_SUSPENDED). This gives precise, gdb-step-like
  *   external control over the keeper's FSM, without having to run a
  *   fresh one-shot CLI process per step (see keeper_fsm_step(), which
  *   this module calls into from within the already-running service).
@@ -31,7 +31,7 @@
 
 
 /*
- * step_socket_path derives the step-mode control socket path from the
+ * step_socket_path derives the suspended-node control socket path from the
  * node's existing pidfile path, so that no new pathname needs to be
  * computed, persisted, or kept in sync with PGDATA independently. Both
  * the server (service_keeper.c) and the client (cli_do_fsm.c) call this
@@ -47,8 +47,8 @@ step_socket_path(const char *pidFilePath, char *path, size_t size)
 
 
 /*
- * step_socket_listen creates, binds, and starts listening on the step-mode
- * control socket. Returns true and sets *listenFd on success.
+ * step_socket_listen creates, binds, and starts listening on the
+ * suspended-node control socket. Returns true and sets *listenFd on success.
  */
 bool
 step_socket_listen(const char *pidFilePath, char *path, size_t pathSize,
@@ -58,14 +58,14 @@ step_socket_listen(const char *pidFilePath, char *path, size_t pathSize,
 
 	if (!step_socket_path(pidFilePath, path, pathSize))
 	{
-		log_error("Failed to build the step-mode socket path from \"%s\": "
+		log_error("Failed to build the suspended-node socket path from \"%s\": "
 				  "path is too long", pidFilePath);
 		return false;
 	}
 
 	if (strlen(path) >= sizeof(addr.sun_path))
 	{
-		log_error("Step-mode socket path \"%s\" is too long for a "
+		log_error("Suspended-node socket path \"%s\" is too long for a "
 				  "Unix-domain socket (max %lu bytes)",
 				  path, (unsigned long) sizeof(addr.sun_path) - 1);
 		return false;
@@ -78,7 +78,7 @@ step_socket_listen(const char *pidFilePath, char *path, size_t pathSize,
 
 	if (fd < 0)
 	{
-		log_error("Failed to create the step-mode control socket: %m");
+		log_error("Failed to create the suspended-node control socket: %m");
 		return false;
 	}
 
@@ -87,14 +87,14 @@ step_socket_listen(const char *pidFilePath, char *path, size_t pathSize,
 
 	if (bind(fd, (struct sockaddr *) &addr, sizeof(addr)) != 0)
 	{
-		log_error("Failed to bind the step-mode control socket \"%s\": %m", path);
+		log_error("Failed to bind the suspended-node control socket \"%s\": %m", path);
 		close(fd);
 		return false;
 	}
 
 	if (listen(fd, 1) != 0)
 	{
-		log_error("Failed to listen on the step-mode control socket \"%s\": %m",
+		log_error("Failed to listen on the suspended-node control socket \"%s\": %m",
 				  path);
 		close(fd);
 		return false;
@@ -125,7 +125,7 @@ step_socket_close(int listenFd, const char *path)
 
 
 /*
- * step_socket_wait_for_command polls the step-mode listening socket for up
+ * step_socket_wait_for_command polls the suspended-node listening socket for up
  * to timeoutMs milliseconds waiting for a client to connect and send a
  * command. Returns true and sets *clientFd to an open connection, with
  * command (a buffer of at least commandSize bytes) set to the exact command
@@ -155,7 +155,7 @@ step_socket_wait_for_command(int listenFd, int timeoutMs, int *clientFd,
 
 	if (fd < 0)
 	{
-		log_warn("Failed to accept a step-mode client connection: %m");
+		log_warn("Failed to accept a suspended-node client connection: %m");
 		return false;
 	}
 
@@ -177,7 +177,7 @@ step_socket_wait_for_command(int listenFd, int timeoutMs, int *clientFd,
 		strcmp(buffer, STEP_SOCKET_COMMAND_REPORT) != 0 &&
 		strcmp(buffer, STEP_SOCKET_COMMAND_ADVANCE) != 0)
 	{
-		log_warn("Ignoring unrecognized step-mode command: \"%s\"", buffer);
+		log_warn("Ignoring unrecognized suspended-node command: \"%s\"", buffer);
 		(void) write(fd, "ERROR unrecognized command\n", 28);
 		close(fd);
 		return false;
@@ -223,7 +223,7 @@ step_socket_respond_error(int clientFd, const char *message)
 
 
 /*
- * step_socket_send_command connects to the step-mode control socket at
+ * step_socket_send_command connects to the suspended-node control socket at
  * path, sends command, and reads back the response into response (which
  * must be at least responseSize bytes). Returns true when a response was
  * received, regardless of whether it was an OK or ERROR response -- the
@@ -239,7 +239,7 @@ step_socket_send_command(const char *path, const char *command,
 
 	if (fd < 0)
 	{
-		log_error("Failed to create a step-mode client socket: %m");
+		log_error("Failed to create a suspended-node client socket: %m");
 		return false;
 	}
 
@@ -248,7 +248,7 @@ step_socket_send_command(const char *path, const char *command,
 
 	if (connect(fd, (struct sockaddr *) &addr, sizeof(addr)) != 0)
 	{
-		log_error("Failed to connect to the step-mode control socket \"%s\": %m",
+		log_error("Failed to connect to the suspended-node control socket \"%s\": %m",
 				  path);
 		close(fd);
 		return false;
@@ -259,7 +259,7 @@ step_socket_send_command(const char *path, const char *command,
 
 	if (write(fd, commandLine, strlen(commandLine)) < 0)
 	{
-		log_error("Failed to send command to the step-mode control socket: %m");
+		log_error("Failed to send command to the suspended-node control socket: %m");
 		close(fd);
 		return false;
 	}
@@ -270,7 +270,7 @@ step_socket_send_command(const char *path, const char *command,
 
 	if (bytes <= 0)
 	{
-		log_error("Failed to read a response from the step-mode control socket");
+		log_error("Failed to read a response from the suspended-node control socket");
 		return false;
 	}
 

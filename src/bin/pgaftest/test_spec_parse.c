@@ -87,7 +87,7 @@
      T_WORKER = 276,
      T_ASYNC = 277,
      T_NO_MONITOR = 278,
-     T_NO_AUTOPILOT = 279,
+     T_SUSPENDED = 279,
      T_LAUNCH = 280,
      T_CREATE = 281,
      T_DEFERRED = 282,
@@ -208,7 +208,7 @@
 #define T_WORKER 276
 #define T_ASYNC 277
 #define T_NO_MONITOR 278
-#define T_NO_AUTOPILOT 279
+#define T_SUSPENDED 279
 #define T_LAUNCH 280
 #define T_CREATE 281
 #define T_DEFERRED 282
@@ -911,7 +911,7 @@ static const char *const yytname[] =
   "T_CITUS_COORDINATOR", "T_CITUS_WORKER", "T_SETUP", "T_TEARDOWN",
   "T_STEP", "T_SEQUENCE", "T_EQUALS", "T_IMAGE", "T_IMAGE_TARGET", "T_SSL",
   "T_AUTH", "T_AUTH_METHOD", "T_FORMATION", "T_NUM_SYNC", "T_COORDINATOR",
-  "T_WORKER", "T_ASYNC", "T_NO_MONITOR", "T_NO_AUTOPILOT", "T_LAUNCH",
+  "T_WORKER", "T_ASYNC", "T_NO_MONITOR", "T_SUSPENDED", "T_LAUNCH",
   "T_CREATE", "T_DEFERRED", "T_IMMEDIATE", "T_FALSE", "T_TRUE",
   "T_INITIALLY", "T_VOLUME", "T_LISTEN", "T_CITUS_SECONDARY",
   "T_CANDIDATE_PRIORITY", "T_PORT", "T_PASSWORD", "T_MONITOR_PASSWORD",
@@ -2427,7 +2427,7 @@ yyreduce:
   case 63:
 #line 527 "test_spec_parse.y"
     {
-		current_node->noAutopilot = true;
+		current_node->suspended = true;
 	;}
     break;
 

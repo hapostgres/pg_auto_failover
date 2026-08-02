@@ -163,7 +163,7 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"worker"             { return T_WORKER; }
 <CLUSTER_BODY>"async"              { return T_ASYNC; }
 <CLUSTER_BODY>"no-monitor"         { return T_NO_MONITOR; }
-<CLUSTER_BODY>"no-autopilot"       { return T_NO_AUTOPILOT; }
+<CLUSTER_BODY>"suspended"         { return T_SUSPENDED; }
 <CLUSTER_BODY>"password"           { return T_PASSWORD; }
 <CLUSTER_BODY>"monitor-password"   { return T_MONITOR_PASSWORD; }
 <CLUSTER_BODY>"launch"             { return T_LAUNCH; }

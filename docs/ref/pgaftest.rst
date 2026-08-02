@@ -440,10 +440,10 @@ Node modifiers:
                                               (``--region``; default: ``default``)
 ``launch deferred``                           Container starts with ``sleep infinity``;
                                               use ``exec node  pg_autoctl node start``
-``no-autopilot``                              Step mode: the node-active service never
-                                              transitions on its own; drive it explicitly
-                                              with the ``fsm step <node>`` DSL command
-                                              (see `Step mode: no-autopilot nodes`_ below)
+``suspended``                                 The node-active service never transitions
+                                              on its own; drive it explicitly with the
+                                              ``fsm step <node>`` DSL command (see
+                                              `Suspended nodes`_ below)
 ``coordinator`` / ``worker group <N>``        Citus role
 ``no-monitor``                                Standalone node (no monitor)
 ``listen``                                    Bind all interfaces (``--listen 0.0.0.0``)
@@ -482,11 +482,11 @@ See "Deterministic node registration order" in
 and ``cli_node.c``).
 
 
-Step mode: ``no-autopilot`` nodes
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Suspended nodes
+~~~~~~~~~~~~~~~~
 
-A node declared with the ``no-autopilot`` modifier starts with
-``PG_AUTOCTL_STEP_MODE`` set, which changes what its node-active service does
+A node declared with the ``suspended`` modifier starts with
+``PG_AUTOCTL_SUSPENDED`` set, which changes what its node-active service does
 on each FSM tick: instead of reporting its current state to the monitor and
 immediately attempting whatever transition the monitor assigns back —
 atomically, on every tick, with no way to observe or freeze the moment in
@@ -500,7 +500,7 @@ purpose — e.g. to prove the monitor assigns the right next state before the
 node itself races off to reach it, or to reproduce a specific ordering
 between two nodes that would otherwise be a race under the normal, freely
 ticking FSM. Every other node in the same spec (without the modifier) keeps
-autopiloting normally; ``no-autopilot`` only affects the node(s) it's
+autopiloting normally; ``suspended`` only affects the node(s) it's
 declared on.
 
 ``fsm step <node>`` is sugar for the combined
@@ -611,7 +611,7 @@ node ...`` which queries the running node/monitor instead of the file.
    stop postgres  <node>
    start postgres <node>
 
-**FSM step** (``no-autopilot`` nodes only — see `Step mode: no-autopilot nodes`_ above)
+**FSM step** (``suspended`` nodes only — see `Suspended nodes`_ above)
 
 .. code-block:: text
 
@@ -806,7 +806,7 @@ Schedules under ``tests/tap/schedules/*.sch`` group these into CI jobs.
 
 ``fsm_step_report_advance``
     Test the ``pg_autoctl manual fsm step report``/``... advance`` split
-    using a ``no-autopilot`` node: report a stale state to the monitor
+    using a ``suspended`` node: report a stale state to the monitor
     without transitioning, then advance to the transition the monitor
     already assigned, proving the two halves work independently.
 

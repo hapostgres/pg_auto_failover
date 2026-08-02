@@ -40,13 +40,13 @@ Neither half re-runs the other, so observing the effect of ``advance`` on
 the monitor's own view still needs a following ``report`` (or plain
 ``step``) call.
 
-If the node's node-active service is currently running in step mode
-(``PG_AUTOCTL_STEP_MODE``), it owns the keeper's FSM already, so ``step``,
+If the node's node-active service is currently suspended
+(``PG_AUTOCTL_SUSPENDED``), it owns the keeper's FSM already, so ``step``,
 ``report``, and ``advance`` are all dispatched over a small Unix-domain
 control socket to that running service instead of stepping the FSM from
 this one-shot process, which would otherwise race the running service. See
-the ``no-autopilot`` node modifier in :ref:`pgaftest <pgaftest>`, which
-starts a ``pgaftest`` node in step mode so that a test spec can freeze its
+the ``suspended`` node modifier in :ref:`pgaftest <pgaftest>`, which
+starts a ``pgaftest`` node suspended so that a test spec can freeze its
 FSM and advance it one transition at a time via the ``fsm step <node>`` DSL
 command.
 

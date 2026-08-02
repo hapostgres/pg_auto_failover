@@ -3904,16 +3904,16 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 		case CMD_FSM_STEP:
 		{
 			/*
-			 * Advance a "no-autopilot" node's FSM by exactly one transition.
-			 * The node-active service on that node is sitting in step mode
-			 * (PG_AUTOCTL_STEP_MODE), blocked on its control socket, so this
+			 * Advance a "suspended" node's FSM by exactly one transition.
+			 * The node-active service on that node is suspended
+			 * (PG_AUTOCTL_SUSPENDED), blocked on its control socket, so this
 			 * is the only thing that makes it progress.
 			 *
 			 * Right after that service (re)starts there's a brief handoff
 			 * window with its sibling postgres-controller subprocess during
 			 * which a step can transiently fail (e.g. postmaster.pid not
 			 * observed yet). In autopilot mode this self-heals silently on
-			 * the next tick; in step mode there's no next tick unless we
+			 * the next tick; while suspended there's no next tick unless we
 			 * retry, so retry here rather than pushing a magic sleep onto
 			 * every spec that uses this command.
 			 */

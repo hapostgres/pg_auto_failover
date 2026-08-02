@@ -520,7 +520,7 @@ cli_do_fsm_step(int argc, char **argv)
 	}
 
 	/*
-	 * When a node-active service is running in step mode (PG_AUTOCTL_STEP_MODE),
+	 * When a node-active service is running suspended (PG_AUTOCTL_SUSPENDED),
 	 * it owns the keeper's FSM: it's the one already holding the long-lived
 	 * state and Postgres process supervision. Delegate to it over its
 	 * control socket rather than stepping the FSM ourselves from a fresh
@@ -542,7 +542,7 @@ cli_do_fsm_step(int argc, char **argv)
 		if (!step_socket_send_command(stepSocketPath, socketCommand,
 									  response, sizeof(response)))
 		{
-			log_fatal("Failed to reach the step-mode node-active service at "
+			log_fatal("Failed to reach the suspended node-active service at "
 					  "\"%s\"", stepSocketPath);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
@@ -565,7 +565,7 @@ cli_do_fsm_step(int argc, char **argv)
 		if (sscanf(response, "OK %63s %63s", /* IGNORE-BANNED */
 				   oldRole, newRole) != 2)
 		{
-			log_fatal("Failed to parse the step-mode service response: \"%s\"",
+			log_fatal("Failed to parse the suspended-node service response: \"%s\"",
 					  response);
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}

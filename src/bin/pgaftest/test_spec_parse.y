@@ -156,7 +156,7 @@ static TestNode      *current_node        = NULL;
 
 /* ---- Cluster-body tokens ---- */
 %token T_IMAGE T_IMAGE_TARGET T_SSL T_AUTH T_AUTH_METHOD T_FORMATION T_NUM_SYNC
-%token T_COORDINATOR T_WORKER T_ASYNC T_NO_MONITOR T_NO_AUTOPILOT
+%token T_COORDINATOR T_WORKER T_ASYNC T_NO_MONITOR T_SUSPENDED
 %token T_LAUNCH T_CREATE T_DEFERRED T_IMMEDIATE T_FALSE T_TRUE T_INITIALLY T_VOLUME
 %token T_LISTEN T_CITUS_SECONDARY T_CANDIDATE_PRIORITY T_PORT T_PASSWORD T_MONITOR_PASSWORD
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
@@ -523,9 +523,9 @@ node_opt:
 	{
 		current_node->noMonitor = true;
 	}
-	| T_NO_AUTOPILOT
+	| T_SUSPENDED
 	{
-		current_node->noAutopilot = true;
+		current_node->suspended = true;
 	}
 	| T_DEFERRED
 	{
@@ -1415,8 +1415,8 @@ postgres_ctl_cmd:
  * Sugar for `pg_autoctl manual fsm step` run inside the named node's
  * container (PGDATA is already set in its environment -- see
  * compose_gen.c). Only meaningful for a node declared
- * "no-autopilot" in the cluster block: such a node's node-active service
- * never ticks on its own (PG_AUTOCTL_STEP_MODE), so this is the only thing
+ * "suspended" in the cluster block: such a node's node-active service
+ * never ticks on its own (PG_AUTOCTL_SUSPENDED), so this is the only thing
  * that advances its FSM -- one transition at a time, precisely when the
  * spec asks for it. See src/bin/pg_autoctl/step_socket.c.
  * ----------------------------------------------------------------------- */

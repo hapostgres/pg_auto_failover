@@ -64,7 +64,7 @@ typedef struct TestNode
 	bool noMonitor;              /* --no-monitor: standalone node */
 	bool createDeferred;         /* node waits before pg_autoctl create */
 	bool launchDeferred;         /* node waits for pg_autoctl node start */
-	bool noAutopilot;            /* PG_AUTOCTL_STEP_MODE: node-active never
+	bool suspended;              /* PG_AUTOCTL_SUSPENDED: node-active never
 	                              * ticks on its own; only "fsm step <node>"
 	                              * advances its FSM, one transition at a
 	                              * time (see step_socket.c on the pg_autoctl
@@ -169,8 +169,8 @@ typedef enum TestCmdKind
 	CMD_STOP_POSTGRES,   /* stop postgres <node>  — pg_autoctl manual pgctl off */
 	CMD_START_POSTGRES,  /* start postgres <node> — pg_autoctl manual pgctl on  */
 	CMD_FSM_STEP,        /* fsm step <node> — pg_autoctl manual fsm step;
-	                      * only meaningful for a node declared "no-autopilot"
-	                      * (see TestNode.noAutopilot) */
+	                      * only meaningful for a node declared "suspended"
+	                      * (see TestNode.suspended) */
 	CMD_STAYS_WHILE,     /* assert <node> stays <state> while { cmds }  */
 	CMD_SET_MONITOR,     /* set monitor <svc>  — switch active monitor service  */
 	CMD_LOGS_CHECK,      /* logs <svc> [not] <pattern> — grep container logs    */

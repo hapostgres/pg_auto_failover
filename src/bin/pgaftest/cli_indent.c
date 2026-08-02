@@ -441,9 +441,9 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 	{
 		ADDF("no-monitor");
 	}
-	if (n->noAutopilot)
+	if (n->suspended)
 	{
-		ADDF("no-autopilot");
+		ADDF("suspended");
 	}
 	if (n->listen)
 	{

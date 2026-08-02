@@ -616,7 +616,7 @@ keeper_graceful_shutdown(Keeper *keeper)
  * (either the monitor is disabled, in which case there's nothing to check,
  * or the node has not been dropped); returns false on error, with details
  * already logged. Shared by keeper_node_active_loop() and
- * keeper_step_mode_loop(), since neither should enter its own main loop
+ * keeper_suspended_loop(), since neither should enter its own main loop
  * without this check.
  */
 static bool
@@ -1094,19 +1094,19 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 
 
 /*
- * keeper_step_mode_loop implements the main loop of the keeper when step
- * mode (PG_AUTOCTL_STEP_MODE) is active, in place of
+ * keeper_suspended_loop implements the main loop of the keeper when the
+ * node is suspended (PG_AUTOCTL_SUSPENDED), in place of
  * keeper_node_active_loop(): instead of ticking on its own, this node
  * blocks on a small Unix-domain control socket and only reports to the
  * monitor or attempts a transition when explicitly told to via
  * "pg_autoctl manual fsm step[ report|advance]" (see step_socket.c). This
  * gives precise, gdb-step-like external control over the keeper's FSM --
- * used by pgaftest's "no-autopilot" node modifier to freeze a node at a
+ * used by pgaftest's "suspended" node modifier to freeze a node at a
  * specific reported state, and available for an operator driving manual
  * recovery one transition at a time.
  */
 bool
-keeper_step_mode_loop(Keeper *keeper, pid_t start_pid)
+keeper_suspended_loop(Keeper *keeper, pid_t start_pid)
 {
 	KeeperConfig *config = &(keeper->config);
 	KeeperStateData *keeperState = &(keeper->state);
@@ -1117,18 +1117,18 @@ keeper_step_mode_loop(Keeper *keeper, pid_t start_pid)
 	int stepListenFd = -1;
 	char stepSocketPath[MAXPGPATH] = { 0 };
 
-	log_debug("pg_autoctl service is starting in step mode");
+	log_debug("pg_autoctl service is starting suspended");
 
 	if (!step_socket_listen(config->pathnames.pid,
 							stepSocketPath, sizeof(stepSocketPath),
 							&stepListenFd))
 	{
-		log_fatal("Failed to create the pg_autoctl step-mode control "
+		log_fatal("Failed to create the pg_autoctl suspended-node control "
 				  "socket, see above for details");
 		return false;
 	}
 
-	log_info("pg_autoctl step mode is enabled: waiting for "
+	log_info("pg_autoctl is suspended: waiting for "
 			 "\"pg_autoctl manual fsm step\" commands on \"%s\" instead of "
 			 "ticking automatically", stepSocketPath);
 
@@ -1213,7 +1213,7 @@ keeper_step_mode_loop(Keeper *keeper, pid_t start_pid)
 		 * per invocation already populates that cache from scratch each
 		 * time. This long-lived process only calls keeper_init() once,
 		 * so without an explicit refresh here that cache would stay
-		 * pinned to however many peers existed at step-mode startup --
+		 * pinned to however many peers existed at suspended-node startup --
 		 * silently stalling replication-slot and HBA maintenance for
 		 * any peer that joined afterwards. A failure here is not fatal:
 		 * fall through to keeper_fsm_step() regardless, exactly as a

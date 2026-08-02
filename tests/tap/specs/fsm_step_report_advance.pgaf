@@ -1,7 +1,7 @@
 # Regression spec for the new "pg_autoctl manual fsm step report"/"...
 # advance" split (src/bin/pg_autoctl/fsm.c's keeper_fsm_step_report/
-# _advance, service_keeper.c's step-mode socket dispatch, cli_do_fsm.c's
-# cli_do_fsm_step) -- see docs/ref/pgaftest.rst's own "Step mode" section
+# _advance, service_keeper.c's suspended-node socket dispatch, cli_do_fsm.c's
+# cli_do_fsm_step) -- see docs/ref/pgaftest.rst's own "Suspended nodes" section
 # for the full protocol description.
 #
 # The combined "pg_autoctl manual fsm step" (and its pgaftest
@@ -20,7 +20,7 @@
 # leaving node2 alone in the group -- the monitor assigns node2's
 # goalState to single (an existing, pre-existing "alone in group ->
 # single" rule, unrelated to this spec's own point). node2 is running
-# no-autopilot (step mode), so:
+# suspended, so:
 #
 #   - "manual fsm step report" reports node2's unchanged current state
 #     (catchingup) to the monitor and returns -- proven by the monitor
@@ -32,7 +32,7 @@ cluster {
     monitor
     formation {
         node1
-        node2  no-autopilot
+        node2  suspended
     }
 }
 

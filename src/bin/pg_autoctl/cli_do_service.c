@@ -604,9 +604,9 @@ cli_do_service_node_active(int argc, char **argv)
 	}
 
 	/* Start the node_active() protocol client */
-	if (env_exists(PG_AUTOCTL_STEP_MODE))
+	if (env_exists(PG_AUTOCTL_SUSPENDED))
 	{
-		(void) keeper_step_mode_loop(&keeper, ppid);
+		(void) keeper_suspended_loop(&keeper, ppid);
 	}
 	else
 	{

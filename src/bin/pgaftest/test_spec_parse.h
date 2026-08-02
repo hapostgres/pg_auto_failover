@@ -60,7 +60,7 @@
      T_WORKER = 276,
      T_ASYNC = 277,
      T_NO_MONITOR = 278,
-     T_NO_AUTOPILOT = 279,
+     T_SUSPENDED = 279,
      T_LAUNCH = 280,
      T_CREATE = 281,
      T_DEFERRED = 282,
@@ -181,7 +181,7 @@
 #define T_WORKER 276
 #define T_ASYNC 277
 #define T_NO_MONITOR 278
-#define T_NO_AUTOPILOT 279
+#define T_SUSPENDED 279
 #define T_LAUNCH 280
 #define T_CREATE 281
 #define T_DEFERRED 282
