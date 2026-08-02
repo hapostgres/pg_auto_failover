@@ -41,7 +41,7 @@ stopped or stuck, and for low-level diagnostic work. Using them while
 
     pg_autoctl manual service
     + restart  Restart pg_autoctl sub-processes (services)
-    + pgctl    Signal the pg_autoctl postgres controller
+    + pgctl    Signal the pg_autoctl postgres service
 
     pg_autoctl manual service restart
       postgres     Restart the pg_autoctl postgres controller service
@@ -68,8 +68,8 @@ stopped or stuck, and for low-level diagnostic work. Using them while
       drop    Drop a replication slot on the primary server
 
     pg_autoctl manual primary adduser
-      monitor  Add a local user for queries from the monitor
-      replica  Add a local user with replication privileges
+      monitor  add a local user for queries from the monitor
+      replica  add a local user with replication privileges
 
     pg_autoctl manual standby
       init            Initialize the standby server using pg_basebackup
@@ -78,12 +78,12 @@ stopped or stuck, and for low-level diagnostic work. Using them while
       promote         Promote a standby server to become writable
 
     pg_autoctl manual coordinator
-      add       Add this node to its formation's coordinator
-      activate  Activate this node on its formation's coordinator
-      remove    Remove this node from its formation's coordinator
+      add       Add this pg_auto_failover node to its formation's coordinator.
+      activate  Activate this pg_auto_failover node to its formation's coordinator.
+      remove    Remove this pg_auto_failover node to its formation's coordinator.
     + update    Update current node's host:port on the coordinator
 
     pg_autoctl manual coordinator update
-      prepare   Prepare a Citus coordinator metadata update
-      commit    Commit a Citus coordinator metadata update
-      rollback  Rollback a Citus coordinator metadata update
+      prepare   Prepare transaction for master_update_node on the coordinator
+      commit    Commit prepared transaction for master_update_node on the coordinator
+      rollback  Rollback prepared transaction for master_update_node on the coordinator
