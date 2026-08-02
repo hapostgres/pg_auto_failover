@@ -1485,7 +1485,7 @@ DispatchMonitorFSMRule(GroupStateContext *ctx, NodeActiveContext *nac,
 
 	if (rule->comment != NULL)
 	{
-		snprintf(message, BUFSIZE, "%s", rule->comment);
+		strlcpy(message, rule->comment, BUFSIZE);
 	}
 
 	if (rule->extraAction != NULL)
@@ -4650,7 +4650,12 @@ NodeStatePatternResolveFromStates(const NodeStatePattern *pattern, int *outCount
 		{
 			out = (ReplicationState *)
 				  palloc(ALL_REPLICATION_STATES_COUNT * sizeof(ReplicationState));
-			memcpy(out, AllReplicationStates, sizeof(AllReplicationStates));
+
+			for (int i = 0; i < ALL_REPLICATION_STATES_COUNT; i++)
+			{
+				out[i] = AllReplicationStates[i];
+			}
+
 			*outCount = ALL_REPLICATION_STATES_COUNT;
 			return out;
 		}
