@@ -21,6 +21,7 @@ bool service_keeper_start(void *context, pid_t *pid);
 void service_keeper_runprogram(Keeper *keeper);
 bool service_keeper_node_active_init(Keeper *keeper);
 bool keeper_node_active_loop(Keeper *keeper, pid_t start_pid);
+bool keeper_suspended_loop(Keeper *keeper, pid_t start_pid);
 
 
 #endif /* KEEPER_SERVICE_INIT_H */

@@ -18,6 +18,7 @@
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "file_utils.h"
 #include "fsm.h"
 #include "fsm_mermaid.h"
 #include "keeper_config.h"
@@ -25,6 +26,7 @@
 #include "parsing.h"
 #include "pgctl.h"
 #include "state.h"
+#include "step_socket.h"
 #include "string_utils.h"
 
 
@@ -121,13 +123,54 @@ CommandLine fsm_assign =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_assign);
 
-CommandLine fsm_step =
-	make_command("step",
-				 "Make a state transition if instructed by the monitor",
+/*
+ * "step" takes an optional positional argument ("report" or "advance",
+ * parsed by hand inside cli_do_fsm_step() -- see its own comment) rather
+ * than being a real command set with its own dispatch. The two entries
+ * below exist purely so the shared help-printing code
+ * (commandline_print_usage/commandline_pretty_print_subcommands) shows
+ * "report"/"advance" and the "+" marker consistently with genuine
+ * sub-commands elsewhere (e.g. "nodes"); they are never actually reached
+ * through normal dispatch, since commandline_run() calls a command's own
+ * "run" callback (set below, same as today) before ever consulting
+ * "subcommands". Their "run" still points at cli_do_fsm_step so behavior
+ * stays identical even if that dispatch priority ever changes.
+ */
+static CommandLine fsm_step_report =
+	make_command("report",
+				 "Report the current state to the monitor without "
+				 "transitioning",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_do_fsm_step);
+
+static CommandLine fsm_step_advance =
+	make_command("advance",
+				 "Attempt the transition already assigned by the monitor",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_step);
+
+static CommandLine *fsm_step_[] = {
+	&fsm_step_report,
+	&fsm_step_advance,
+	NULL
+};
+
+CommandLine fsm_step =
+{
+	"step",
+	"Make a state transition if instructed by the monitor",
+	CLI_PGDATA_USAGE "[report|advance]",
+	CLI_PGDATA_OPTION,
+	cli_getopt_pgdata,
+	cli_do_fsm_step,
+	fsm_step_,
+	NULL,
+	false
+};
 
 static CommandLine fsm_nodes_get =
 	make_command("get",
@@ -468,6 +511,17 @@ cli_do_fsm_assign(int argc, char **argv)
  * cli_do_fsm_step gets the goal state from the monitor, makes
  * the necessary transition, and then reports the current state to
  * the monitor.
+ *
+ * An optional first positional argument, "report" or "advance", splits
+ * that combined behavior into its two halves -- see keeper_fsm_step_report/
+ * _advance's own comments (fsm.c) for why: keeper_fsm_step's own
+ * report-then-immediately-transition shape happens atomically, in one
+ * call, which makes it impossible to observe (or hold a node frozen at)
+ * the moment in between, something exercising some MonitorFSM[] gap-closing
+ * transitions live requires. Bare "step" (no argument) keeps its original,
+ * unchanged combined behavior -- every existing caller (the node-active
+ * service's own autopilot loop, service_keeper.c; already-written pgaftest
+ * specs) keeps working exactly as before.
  */
 static void
 cli_do_fsm_step(int argc, char **argv)
@@ -480,6 +534,23 @@ cli_do_fsm_step(int argc, char **argv)
 
 	keeper.config = keeperOptions;
 
+	if (argc > 1)
+	{
+		log_error("USAGE: do fsm step [report|advance]");
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	bool reportOnly = argc == 1 && streq(argv[0], "report");
+	bool advanceOnly = argc == 1 && streq(argv[0], "advance");
+
+	if (argc == 1 && !reportOnly && !advanceOnly)
+	{
+		log_error("USAGE: do fsm step [report|advance]");
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	if (!keeper_config_read_file(&(keeper.config),
 								 missingPgdataIsOk,
 								 pgIsNotRunningIsOk,
@@ -489,11 +560,66 @@ cli_do_fsm_step(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
+	/*
+	 * When a node-active service is running suspended (PG_AUTOCTL_SUSPENDED),
+	 * it owns the keeper's FSM: it's the one already holding the long-lived
+	 * state and Postgres process supervision. Delegate to it over its
+	 * control socket rather than stepping the FSM ourselves from a fresh
+	 * one-shot process, which would race the running service.
+	 */
+	char stepSocketPath[MAXPGPATH] = { 0 };
+
+	if (step_socket_path(keeper.config.pathnames.pid,
+						 stepSocketPath, sizeof(stepSocketPath)) &&
+		file_exists(stepSocketPath))
+	{
+		char response[BUFSIZE * 2] = { 0 };
+
+		const char *socketCommand =
+			reportOnly ? STEP_SOCKET_COMMAND_REPORT :
+			advanceOnly ? STEP_SOCKET_COMMAND_ADVANCE :
+			STEP_SOCKET_COMMAND_STEP;
+
+		if (!step_socket_send_command(stepSocketPath, socketCommand,
+									  response, sizeof(response)))
+		{
+			log_fatal("Failed to reach the suspended node-active service at "
+					  "\"%s\"", stepSocketPath);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		if (strncmp(response, "ERROR", 5) == 0)
+		{
+			log_fatal("%s", response);
+			exit(EXIT_CODE_BAD_STATE);
+		}
+
+		if (outputJSON)
+		{
+			log_warn("This command does not support JSON output at the moment");
+		}
+
+		/* response is "OK <oldRole> <newRole>" */
+		char oldRole[NAMEDATALEN] = { 0 };
+		char newRole[NAMEDATALEN] = { 0 };
+
+		if (sscanf(response, "OK %63s %63s", /* IGNORE-BANNED */
+				   oldRole, newRole) != 2)
+		{
+			log_fatal("Failed to parse the suspended-node service response: \"%s\"",
+					  response);
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		fformat(stdout, "%s ➜ %s\n", oldRole, newRole);
+		return;
+	}
+
 	if (keeper.config.monitorDisabled)
 	{
-		log_fatal("The command `pg_autoctl do fsm step` is meant to step as "
+		log_fatal("The command `pg_autoctl manual fsm step` is meant to step as "
 				  "instructed by the monitor, and the monitor is disabled.");
-		log_info("HINT: see `pg_autoctl do fsm assign` instead");
+		log_info("HINT: see `pg_autoctl manual fsm assign` instead");
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
@@ -505,13 +631,21 @@ cli_do_fsm_step(int argc, char **argv)
 
 	const char *oldRole = NodeStateToString(keeper.state.current_role);
 
-	if (!keeper_fsm_step(&keeper))
+	bool stepOk =
+		reportOnly ? keeper_fsm_step_report(&keeper) :
+		advanceOnly ? keeper_fsm_step_advance(&keeper) :
+		keeper_fsm_step(&keeper);
+
+	if (!stepOk)
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	const char *newRole = NodeStateToString(keeper.state.assigned_role);
+	const char *newRole =
+		reportOnly
+		? NodeStateToString(keeper.state.assigned_role)
+		: NodeStateToString(keeper.state.current_role);
 
 	if (outputJSON)
 	{

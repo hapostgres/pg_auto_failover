@@ -1060,6 +1060,92 @@ keeper_fsm_step(Keeper *keeper)
 
 
 /*
+ * keeper_fsm_step_report implements only the first half of keeper_fsm_step:
+ * report our own current_role to the monitor via node_active() and persist
+ * whatever new assigned_role it hands back, but never attempt the local
+ * transition toward it. Unlike keeper_fsm_step (report + attempt-transition,
+ * atomically, in one call -- the ordinary autopilot shape), this lets a
+ * pgaftest spec observe "the monitor has assigned a new goal" as its own,
+ * separate, externally-controlled moment, with current_role held frozen at
+ * whatever it already was -- see keeper_fsm_step_advance's own comment for
+ * why that separation is what several MonitorFSM[] gap-closing test specs
+ * actually need: freezing a node's own reportedState while a fan-out from a
+ * *different* node's own report bumps this one's goalState is not otherwise
+ * observable, since keeper_fsm_step's own combined call would immediately
+ * re-converge past whatever intermediate state a spec wants to hold it at.
+ */
+bool
+keeper_fsm_step_report(Keeper *keeper)
+{
+	KeeperStateData *keeperState = &(keeper->state);
+	Monitor *monitor = &(keeper->monitor);
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	MonitorAssignedState assignedState = { 0 };
+
+	(void) keeper_update_pg_state(keeper, LOG_DEBUG);
+
+	if (!monitor_node_active(monitor,
+							 keeper->config.formation,
+							 keeperState->current_node_id,
+							 keeperState->current_group,
+							 keeperState->current_role,
+							 postgres->pgIsRunning,
+							 postgres->postgresSetup.control.timeline_id,
+							 postgres->currentLSN,
+							 postgres->pgsrSyncState,
+							 &assignedState))
+	{
+		log_fatal("Failed to get the goal state from the monitor, "
+				  "see above for details");
+		return false;
+	}
+
+	keeperState->assigned_role = assignedState.state;
+
+	if (!keeper_update_state(keeper, assignedState.nodeId, assignedState.groupId,
+							 assignedState.state, true))
+	{
+		log_error("Failed to write keepers state file, see above for details");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_fsm_step_advance implements only the second half of
+ * keeper_fsm_step: attempt the local transition from our own current_role
+ * to whatever assigned_role is already on file (typically from an earlier
+ * keeper_fsm_step_report call, possibly several node_active() calls to
+ * *other* nodes ago) -- no monitor round trip at all. Kept deliberately as
+ * thin a wrapper as possible around keeper_fsm_reach_assigned_state (which
+ * already updates current_role on success): the only other work here is
+ * persisting the result, via keeper_store_state rather than
+ * keeper_update_state, since there's no freshly-returned MonitorAssignedState
+ * to merge in (see the difference in what each caller has on hand between
+ * cli_do_fsm.c's own two call sites).
+ */
+bool
+keeper_fsm_step_advance(Keeper *keeper)
+{
+	if (!keeper_fsm_reach_assigned_state(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!keeper_store_state(keeper))
+	{
+		log_error("Failed to write keepers state file, see above for details");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * keeper_fsm_reach_assigned_state uses the KeeperFSM to drive a transition
  * from keeper->state->current_role to keeper->state->assigned_role, when
  * that's supported.

@@ -3,6 +3,7 @@
 # count and GitHub Actions runner queue pressure.
 create_standby_with_pgdata
 launch_deferred_set_metadata
+fsm_step_report_advance
 maintenance_and_drop
 auth
 monitor_disabled

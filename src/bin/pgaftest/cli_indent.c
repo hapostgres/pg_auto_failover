@@ -441,6 +441,10 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 	{
 		ADDF("no-monitor");
 	}
+	if (n->suspended)
+	{
+		ADDF("suspended");
+	}
 	if (n->listen)
 	{
 		ADDF("listen");
@@ -1044,6 +1048,12 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 		case CMD_START_POSTGRES:
 		{
 			fformat(out, "%*sstart postgres %s\n", indent, "", cmd->service);
+			break;
+		}
+
+		case CMD_FSM_STEP:
+		{
+			fformat(out, "%*sfsm step %s\n", indent, "", cmd->service);
 			break;
 		}
 

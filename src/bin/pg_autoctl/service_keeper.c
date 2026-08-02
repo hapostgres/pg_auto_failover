@@ -17,6 +17,7 @@
 #include "cli_common.h"
 #include "cli_root.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "fsm.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -31,6 +32,7 @@
 #include "service_postgres_ctl.h"
 #include "signals.h"
 #include "state.h"
+#include "step_socket.h"
 #include "string_utils.h"
 #include "supervisor.h"
 #include "timeline_history.h"
@@ -68,6 +70,7 @@ static bool in_network_partition(KeeperStateData *keeperState, uint64_t now,
 static void keeper_graceful_shutdown(Keeper *keeper);
 static bool keeper_shutdown_via_maintenance(Keeper *keeper);
 static void keeper_auto_recover_shutdown_maintenance(Keeper *keeper);
+static bool keeper_exit_if_previously_dropped(Keeper *keeper);
 
 
 /*
@@ -408,7 +411,7 @@ keeper_node_active_shutdown_loop(Keeper *keeper)
  * start_maintenance() on the node's own behalf -- the same monitor call
  * `pg_autoctl enable maintenance [--allow-failover]` already uses -- then
  * driving the ordinary FSM towards maintenance with the same
- * keeper_fsm_step() primitive used by `pg_autoctl do fsm step`.
+ * keeper_fsm_step() primitive used by `pg_autoctl manual fsm step`.
  *
  * This covers both roles start_maintenance() accepts:
  *
@@ -606,6 +609,56 @@ keeper_graceful_shutdown(Keeper *keeper)
 
 
 /*
+ * keeper_exit_if_previously_dropped exits the process immediately (does not
+ * return) when this node was already dropped from the monitor in a
+ * previous run -- e.g. restarted by systemd after "pg_autoctl drop node"
+ * ran from a distance. Returns true when it's safe to continue starting up
+ * (either the monitor is disabled, in which case there's nothing to check,
+ * or the node has not been dropped); returns false on error, with details
+ * already logged. Shared by keeper_node_active_loop() and
+ * keeper_suspended_loop(), since neither should enter its own main loop
+ * without this check.
+ */
+static bool
+keeper_exit_if_previously_dropped(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+	KeeperStateData *keeperState = &(keeper->state);
+
+	if (config->monitorDisabled)
+	{
+		return true;
+	}
+
+	bool dropped = false;
+
+	if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (dropped)
+	{
+		/* signal that it's time to shutdown everything */
+		log_fatal("This node with id %lld in formation \"%s\" and group %d "
+				  "has been dropped from the monitor",
+				  (long long) keeperState->current_node_id,
+				  config->formation,
+				  config->groupId);
+
+		log_info("To get rid of the configuration file and PGDATA directory, "
+				 "run pg_autoctl drop node --pgdata \"%s\" --destroy",
+				 config->pgSetup.pgdata);
+
+		exit(EXIT_CODE_FATAL);
+	}
+
+	return true;
+}
+
+
+/*
  * keeper_node_active_loop implements the main loop of the keeper, which
  * periodically gets the goal state from the monitor and makes the state
  * transitions.
@@ -640,31 +693,10 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 	 * node is restarted (by systemd, an interactive user, or another way) we
 	 * must realise the situation and refrain from entering our main loop.
 	 */
-	if (!config->monitorDisabled)
+	if (!keeper_exit_if_previously_dropped(keeper))
 	{
-		bool dropped = false;
-
-		if (!keeper_ensure_node_has_been_dropped(keeper, &dropped))
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		if (dropped)
-		{
-			/* signal that it's time to shutdown everything */
-			log_fatal("This node with id %lld in formation \"%s\" and group %d "
-					  "has been dropped from the monitor",
-					  (long long) keeperState->current_node_id,
-					  config->formation,
-					  config->groupId);
-
-			log_info("To get rid of the configuration file and PGDATA directory, "
-					 "run pg_autoctl drop node --pgdata \"%s\" --destroy",
-					 config->pgSetup.pgdata);
-
-			exit(EXIT_CODE_FATAL);
-		}
+		/* errors have already been logged */
+		return false;
 	}
 
 	while (keepRunning)
@@ -1056,6 +1088,205 @@ keeper_node_active_loop(Keeper *keeper, pid_t start_pid)
 		/* signal that it's time to shutdown everything */
 		exit(EXIT_CODE_DROPPED);
 	}
+
+	return true;
+}
+
+
+/*
+ * keeper_suspended_loop implements the main loop of the keeper when the
+ * node is suspended (PG_AUTOCTL_SUSPENDED), in place of
+ * keeper_node_active_loop(): instead of ticking on its own, this node
+ * blocks on a small Unix-domain control socket and only reports to the
+ * monitor or attempts a transition when explicitly told to via
+ * "pg_autoctl manual fsm step[ report|advance]" (see step_socket.c). This
+ * gives precise, gdb-step-like external control over the keeper's FSM --
+ * used by pgaftest's "suspended" node modifier to freeze a node at a
+ * specific reported state, and available for an operator driving manual
+ * recovery one transition at a time.
+ */
+bool
+keeper_suspended_loop(Keeper *keeper, pid_t start_pid)
+{
+	KeeperConfig *config = &(keeper->config);
+	KeeperStateData *keeperState = &(keeper->state);
+
+	bool doSleep = false;
+	bool firstLoop = true;
+
+	int stepListenFd = -1;
+	char stepSocketPath[MAXPGPATH] = { 0 };
+
+	log_debug("pg_autoctl service is starting suspended");
+
+	if (!step_socket_listen(config->pathnames.pid,
+							stepSocketPath, sizeof(stepSocketPath),
+							&stepListenFd))
+	{
+		log_fatal("Failed to create the pg_autoctl suspended-node control "
+				  "socket, see above for details");
+		return false;
+	}
+
+	log_info("pg_autoctl is suspended: waiting for "
+			 "\"pg_autoctl manual fsm step\" commands on \"%s\" instead of "
+			 "ticking automatically", stepSocketPath);
+
+	/*
+	 * When pg_autoctl drop node is used from a distance, then this node
+	 * transitions to the DROPPED_STATE and shutdown cleanly. Now, if a dropped
+	 * node is restarted (by systemd, an interactive user, or another way) we
+	 * must realise the situation and refrain from entering our main loop.
+	 */
+	if (!keeper_exit_if_previously_dropped(keeper))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	while (keepRunning)
+	{
+		bool stepCommandReceived = false;
+		int stepClientFd = -1;
+		char stepCommand[NAMEDATALEN] = { 0 };
+
+		/*
+		 * We never tick on our own: instead of sleeping, we block (with a
+		 * timeout, so signals are still handled promptly) on our control
+		 * socket for the next externally-issued "step" command. Skipped on
+		 * the very first pass through the loop so that first-loop-only
+		 * reload actions below run immediately at startup.
+		 */
+		if (doSleep)
+		{
+			int timeoutMs = PG_AUTOCTL_KEEPER_SLEEP_TIME * 1000;
+
+			stepCommandReceived =
+				step_socket_wait_for_command(stepListenFd, timeoutMs, &stepClientFd,
+											 stepCommand, sizeof(stepCommand));
+		}
+
+		doSleep = true;
+
+		/*
+		 * Handle signals.
+		 *
+		 * When asked to STOP, we always finish the current transaction before
+		 * doing so, which means we only check if asked_to_stop at the
+		 * beginning of the loop.
+		 *
+		 * We have several places where it's safe to check if SIGQUIT has been
+		 * signaled to us and from where we can immediately exit whatever we're
+		 * doing. It's important to avoid e.g. leaving state.new files behind.
+		 */
+		if (asked_to_reload || firstLoop)
+		{
+			(void) keeper_call_reload_hooks(keeper, firstLoop, false);
+		}
+
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
+		{
+			break;
+		}
+
+		/* Check that we still own our PID file, or quit now */
+		(void) check_pidfile(config->pathnames.pid, start_pid);
+
+		CHECK_FOR_FAST_SHUTDOWN;
+
+		if (firstLoop)
+		{
+			firstLoop = false;
+		}
+
+		if (!stepCommandReceived)
+		{
+			continue;
+		}
+
+		/*
+		 * Unlike the autonomous tick body (service_keeper_node_active(),
+		 * called from keeper_node_active_loop()), keeper_fsm_step() never
+		 * refreshes our cached list of other nodes -- it wasn't written
+		 * to need to, since its only other caller is the one-shot
+		 * "pg_autoctl manual fsm step" CLI, where a fresh keeper_init()
+		 * per invocation already populates that cache from scratch each
+		 * time. This long-lived process only calls keeper_init() once,
+		 * so without an explicit refresh here that cache would stay
+		 * pinned to however many peers existed at suspended-node startup --
+		 * silently stalling replication-slot and HBA maintenance for
+		 * any peer that joined afterwards. A failure here is not fatal:
+		 * fall through to keeper_fsm_step() regardless, exactly as a
+		 * failed refresh in autonomous mode just retries next tick.
+		 */
+		bool forceCacheInvalidation = false;
+
+		if (!keeper_refresh_other_nodes(keeper, forceCacheInvalidation))
+		{
+			log_warn("Failed to update our list of other nodes, "
+					 "stepping the FSM anyway");
+		}
+
+		NodeState oldRole = keeperState->current_role;
+		bool stepOk = false;
+
+		/*
+		 * REPORT and ADVANCE split keeper_fsm_step()'s own combined
+		 * "report to the monitor, then immediately attempt whatever
+		 * transition it just assigned" into two independently-issuable
+		 * commands -- see keeper_fsm_step_report/_advance's own
+		 * comments (fsm.c) for why a pgaftest spec needs that
+		 * separation to freeze a node's own reportedState while a
+		 * *different* node's report bumps this one's goalState via a
+		 * MonitorFSM[] fan-out, something keeper_fsm_step's atomic
+		 * shape makes unobservable.
+		 */
+		if (streq(stepCommand, STEP_SOCKET_COMMAND_REPORT))
+		{
+			stepOk = keeper_fsm_step_report(keeper);
+		}
+		else if (streq(stepCommand, STEP_SOCKET_COMMAND_ADVANCE))
+		{
+			stepOk = keeper_fsm_step_advance(keeper);
+		}
+		else
+		{
+			stepOk = keeper_fsm_step(keeper);
+		}
+
+		if (stepOk)
+		{
+			NodeState newRole =
+				streq(stepCommand, STEP_SOCKET_COMMAND_REPORT)
+				? keeperState->assigned_role
+				: keeperState->current_role;
+
+			(void) step_socket_respond_ok(stepClientFd,
+										  NodeStateToString(oldRole),
+										  NodeStateToString(newRole));
+		}
+		else
+		{
+			(void) step_socket_respond_error(stepClientFd,
+											 "failed to step the keeper's FSM, "
+											 "see the pg_autoctl logs for details");
+		}
+
+		close(stepClientFd);
+	}
+
+	/*
+	 * Graceful SIGTERM shutdown: route a primary through maintenance so a
+	 * standby can take over immediately, or otherwise make sure Postgres
+	 * stops as part of our own exit.  Skip on SIGINT/SIGQUIT which request
+	 * immediate exit.
+	 */
+	if (asked_to_stop && !asked_to_stop_fast && !asked_to_quit)
+	{
+		(void) keeper_graceful_shutdown(keeper);
+	}
+
+	(void) step_socket_close(stepListenFd, stepSocketPath);
 
 	return true;
 }
