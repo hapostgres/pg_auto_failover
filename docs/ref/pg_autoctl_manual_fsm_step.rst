@@ -15,6 +15,11 @@ Synopsis
   --pgdata      path to data directory
   --json        output data in the JSON format
 
+  Available commands:
+    pg_autoctl manual fsm step
+      report   Report the current state to the monitor without transitioning
+      advance  Attempt the transition already assigned by the monitor
+
 Description
 -----------
 

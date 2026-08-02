@@ -123,13 +123,54 @@ CommandLine fsm_assign =
 				 cli_getopt_pgdata,
 				 cli_do_fsm_assign);
 
-CommandLine fsm_step =
-	make_command("step",
-				 "Make a state transition if instructed by the monitor",
-				 CLI_PGDATA_USAGE "[report|advance]",
+/*
+ * "step" takes an optional positional argument ("report" or "advance",
+ * parsed by hand inside cli_do_fsm_step() -- see its own comment) rather
+ * than being a real command set with its own dispatch. The two entries
+ * below exist purely so the shared help-printing code
+ * (commandline_print_usage/commandline_pretty_print_subcommands) shows
+ * "report"/"advance" and the "+" marker consistently with genuine
+ * sub-commands elsewhere (e.g. "nodes"); they are never actually reached
+ * through normal dispatch, since commandline_run() calls a command's own
+ * "run" callback (set below, same as today) before ever consulting
+ * "subcommands". Their "run" still points at cli_do_fsm_step so behavior
+ * stays identical even if that dispatch priority ever changes.
+ */
+static CommandLine fsm_step_report =
+	make_command("report",
+				 "Report the current state to the monitor without "
+				 "transitioning",
+				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
 				 cli_getopt_pgdata,
 				 cli_do_fsm_step);
+
+static CommandLine fsm_step_advance =
+	make_command("advance",
+				 "Attempt the transition already assigned by the monitor",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_step);
+
+static CommandLine *fsm_step_[] = {
+	&fsm_step_report,
+	&fsm_step_advance,
+	NULL
+};
+
+CommandLine fsm_step =
+{
+	"step",
+	"Make a state transition if instructed by the monitor",
+	CLI_PGDATA_USAGE "[report|advance]",
+	CLI_PGDATA_OPTION,
+	cli_getopt_pgdata,
+	cli_do_fsm_step,
+	fsm_step_,
+	NULL,
+	false
+};
 
 static CommandLine fsm_nodes_get =
 	make_command("get",
