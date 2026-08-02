@@ -42,7 +42,7 @@ cluster {
     monitor
     formation {
         node1
-        node3  no-autopilot  candidate-priority 50
+        node3  suspended  candidate-priority 50
         node4 create and launch deferred
     }
 }
@@ -95,7 +95,7 @@ step test_003_node3_converges_to_report_lsn {
 }
 
 step test_004_node4_joins_and_becomes_primary {
-    # node3 stays no-autopilot for this whole spec (step mode is a
+    # node3 stays suspended for this whole spec (step mode is a
     # startup-time setting, not something a running spec can toggle off
     # again once the earlier steps no longer need it), and that turns out
     # to matter here in a way it didn't in the earlier steps:

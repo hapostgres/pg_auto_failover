@@ -16,7 +16,7 @@
 # the original primary; node2 and node3 both start as ordinary (nonzero
 # candidate-priority) standbys, so both are eligible and get sent through
 # report_lsn to have their LSNs compared once node1 is gone. Both are
-# declared "no-autopilot" so the spec can pace the whole election by hand --
+# declared "suspended" so the spec can pace the whole election by hand --
 # node2 is driven to actually win (report_lsn -> prepare_promotion), and
 # node3, the loser, is driven only as far as report_lsn and then frozen
 # there while node2 pulls ahead, exactly reproducing the real window in
@@ -40,8 +40,8 @@ cluster {
     monitor
     formation {
         node1
-        node2  no-autopilot  candidate-priority 50
-        node3  no-autopilot  candidate-priority 50
+        node2  suspended  candidate-priority 50
+        node3  suspended  candidate-priority 50
     }
 }
 
@@ -69,7 +69,7 @@ step test_001_kill_primary_and_converge_both_locally_to_report_lsn {
     # A hard kill never gives node1 a chance to self-report (unlike a
     # graceful shutdown), so nothing recalculates either standby's own goal
     # state until each makes its own contact -- neither node2 nor node3
-    # ticks on its own (no-autopilot), so it takes one explicit "fsm step"
+    # ticks on its own (suspended), so it takes one explicit "fsm step"
     # per node here, not a bare wait. Each call both discovers the new
     # report_lsn assignment *and* performs the transition into it, in the
     # same call -- there's no way to observe the assignment without also

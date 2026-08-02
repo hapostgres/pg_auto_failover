@@ -11,10 +11,10 @@
 #   },
 #
 # Unlike the prepare_promotion sibling spec, here the node under test is the
-# primary being demoted, not a standby being promoted. node3 (no-autopilot)
+# primary being demoted, not a standby being promoted. node3 (suspended)
 # is declared *second*, not first: compose_gen only attaches a healthcheck
 # to the first data node (so that later nodes can depend_on it being
-# healthy, making the initial election deterministic) -- a no-autopilot
+# healthy, making the initial election deterministic) -- a suspended
 # node can never satisfy that healthcheck on its own (`pg_autoctl status`
 # requires Postgres to be running, and nothing restarts Postgres after the
 # one-shot node-init phase stops it until the very first "fsm step" call),
@@ -32,7 +32,7 @@ cluster {
     monitor
     formation {
         node1
-        node3  no-autopilot  candidate-priority 50
+        node3  suspended  candidate-priority 50
     }
 }
 

@@ -37,7 +37,7 @@ cluster {
     monitor
     formation {
         node1
-        node3  no-autopilot  candidate-priority 50
+        node3  suspended  candidate-priority 50
     }
 }
 

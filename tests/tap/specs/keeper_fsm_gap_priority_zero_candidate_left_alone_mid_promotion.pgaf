@@ -42,7 +42,7 @@ cluster {
     monitor
     formation {
         node1
-        node3  no-autopilot  candidate-priority 50
+        node3  suspended  candidate-priority 50
     }
 }
 
@@ -66,7 +66,7 @@ step test_001_kill_primary_and_converge_locally_to_prepare_promotion {
     # way out and, as a side effect of processing *that* report, cascade a
     # fresh goal to node3 too) -- so nothing recalculates node3's own goal
     # state until node3 itself makes contact. node3 never ticks on its own
-    # (no-autopilot), so this explicit "fsm step node3" is what prompts
+    # (suspended), so this explicit "fsm step node3" is what prompts
     # that contact -- and, in the very same call, discovers the fresh
     # prepare_promotion assignment and performs the transition into it.
     # There's no way to observe the assignment without also applying it.
