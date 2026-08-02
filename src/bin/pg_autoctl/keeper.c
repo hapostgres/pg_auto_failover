@@ -867,8 +867,8 @@ keeper_create_self_signed_cert(Keeper *keeper)
  * keeper_maybe_update_group_and_slot compares what the monitor just told us
  * in assignedState (our own nodeId and groupId, as returned by this exact
  * node_active() contact) against our own persisted groupId and replication
- * slot name, and repairs the on-disk configuration plus the running
- * Postgres settings when they've drifted.
+ * slot name, and repairs the on-disk configuration file when they've
+ * drifted.
  *
  * This must run on every contact with the monitor, autonomous or step-mode
  * alike: keeper_suspended_loop() used to skip it entirely (it called
@@ -889,6 +889,20 @@ keeper_create_self_signed_cert(Keeper *keeper)
  * "we don't have a quorum candidate yet" (fsm_enable_sync_rep,
  * fsm_transition.c) even though a healthy, caught-up standby is right
  * there.
+ *
+ * We deliberately only call keeper_config_update() here, not the heavier
+ * keeper_ensure_configuration(): that function also reconfigures live
+ * standby settings (primary_conninfo) based on state->current_role, via
+ * keeper_get_primary(). Calling it from this drift check is unsafe, because
+ * this check can run *before* the FSM transition that would bring
+ * current_role up to date -- e.g. keeper_fsm_step_report() reports without
+ * transitioning, so a node that just lost its primary can still have
+ * current_role reflecting the old, now-gone primary, and
+ * keeper_ensure_configuration() would then try to reconnect Postgres to
+ * that stale/nonexistent primary. All that fsm_follow_new_primary() and
+ * friends actually need from this self-heal is a correct
+ * config->replication_slot_name the next time they read it, which a plain
+ * config-file update already provides.
  */
 bool
 keeper_maybe_update_group_and_slot(Keeper *keeper, MonitorAssignedState *assignedState)
@@ -904,8 +918,6 @@ keeper_maybe_update_group_and_slot(Keeper *keeper, MonitorAssignedState *assigne
 	if (assignedState->groupId != config->groupId ||
 		strneq(config->replication_slot_name, expectedSlotName))
 	{
-		bool postgresNotRunningIsOk = false;
-
 		if (!keeper_config_update(config,
 								  assignedState->nodeId,
 								  assignedState->groupId))
@@ -913,14 +925,6 @@ keeper_maybe_update_group_and_slot(Keeper *keeper, MonitorAssignedState *assigne
 			log_error("Failed to update the configuration file "
 					  "with groupId %d and replication.slot \"%s\"",
 					  assignedState->groupId, expectedSlotName);
-			return false;
-		}
-
-		if (!keeper_ensure_configuration(keeper, postgresNotRunningIsOk))
-		{
-			log_error("Failed to update our Postgres configuration "
-					  "after a change of groupId or "
-					  "replication slot name, see above for details");
 			return false;
 		}
 	}
