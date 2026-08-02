@@ -630,3 +630,157 @@ node reacting to the other side of that removal.
    the full graph, ``join_primary`` included, as one Graphviz file (e.g.
    to pipe into their own
    tooling), but it is no longer the documented way to visualize the FSM.
+
+The monitor's FSM: ``pgautofailover.fsm``
+------------------------------------------
+
+The diagrams above are rendered from the *keeper's* side of the FSM
+(``KeeperFSM[]``, ``src/bin/pg_autoctl/fsm.c``): the transitions a node
+knows how to perform. The *monitor's* side is a separate, matching
+declarative table, ``MonitorFSM[]`` (``src/monitor/group_state_machine.c``):
+the rules deciding, for every combination of reported states and cluster
+conditions, which goal state to assign next. It's exposed read-only via the
+``pgautofailover.fsm`` view, one row per rule, ordered by ``pos``:
+
+::
+
+  =# SELECT pos, section, comment FROM pgautofailover.fsm
+      WHERE pos BETWEEN 301 AND 305;
+   pos |      section      |                                    comment
+  -----+--------------------+---------------------------------------------------------------------------------
+   301 | reporting_node     | converged secondary, reportedTLI not an ancestor of reference -> catchingup
+   303 | reporting_node     | converged secondary/catchingup, primary reachable, primary not in the primary
+       |                    | states -> catchingup
+   305 | reporting_node     | multi-standby cascade resume point (see MonitorFSM_MultiStandbyCascadeResumeAfterPos)
+  (3 rows)
+
+Every column of a single rule, expanded (``\x on``):
+
+::
+
+  =# \x on
+  =# SELECT * FROM pgautofailover.fsm WHERE pos = 301;
+  -[ RECORD 1 ]-----------------+----------------------------------------------------------------
+  pos                           | 301
+  section                       | reporting_node
+  comment                       | converged secondary, reportedTLI not an ancestor of reference -> catchingup
+  active_node_current_state     | secondary
+  other_node_current_state      |
+  candidate_node_current_state  |
+  active_node_conditions        | isComparableToReferenceTli=false
+  other_node_conditions         |
+  candidate_node_conditions     |
+  group_conditions              |
+  active_node_assigned_state    | catchingup
+  other_node_assigned_state     |
+  has_extra_action              | f
+  section_path                  | reporting_node.from_context
+
+``section_path`` is an ``ltree`` column, so the table's rows can be queried
+hierarchically instead of by exact section name -- for example, every rule
+belonging to the multi-standby candidate-election machinery, regardless of
+how deep its own sub-leaf goes::
+
+  =# SELECT pos, comment FROM pgautofailover.fsm
+      WHERE section_path <@ 'reporting_node.ms_failover'::ltree
+      ORDER BY pos;
+
+Like the keeper diagrams above, this view is generated straight from the
+compiled-in ``MonitorFSM[]`` table -- it's the same on every fresh monitor of
+a given pg_auto_failover version, unaffected by any node or formation state,
+and changes only when a rule is added, removed, or edited in a new release.
+
+Cross-checking the monitor and keeper FSMs
+-------------------------------------------
+
+The monitor and the keeper are two different programs (the monitor extension
+runs inside Postgres, the keeper is the ``pg_autoctl run`` process on each
+node) with two independently-maintained tables: ``MonitorFSM[]`` decides
+*what* goal state to assign, ``KeeperFSM[]`` decides whether a node *can
+execute* the transition it's just been assigned. If a monitor rule is
+changed or added without a matching keeper edge, the keeper has no way to
+perform what it's told and fails at runtime with an error like
+``pg_autoctl does not know how to reach state "X" from "Y"`` -- historically
+only ever discovered when an operator's cluster actually reached that
+specific combination of states in production.
+
+Three building blocks turn that from a runtime surprise into something
+checked ahead of time:
+
+``pgautofailover.dump_fsm_edges()``
+  Resolves every ``MonitorFSM[]`` row's state pattern into its concrete
+  ``(pos, current_state, assigned_state)`` edges -- the same information
+  ``pgautofailover.fsm`` shows as a pattern, fully expanded one row per
+  reachable current state. Reflexive edges (current state == assigned
+  state) and the ``api_triggered`` section are deliberately excluded: the
+  former are no-ops, and the latter resolves which node plays which role
+  via hand-written C ahead of dispatch, so its own state pattern was never
+  meant to double as a full reachability precondition.
+
+``pgautofailover.check_fsm_reachability(keeper_edges jsonb)``
+  Takes a JSON array of ``{"current": ..., "assigned": ...}`` edges -- the
+  transitions *some* keeper knows how to perform -- and returns every
+  ``dump_fsm_edges()`` edge missing from it: every transition the monitor
+  could assign that this particular keeper has no edge for.
+
+``pg_autoctl inspect fsm check``
+  The live, end-to-end version of the same check, run from a node against
+  its own monitor: it serializes the *real*, compiled-in ``KeeperFSM[]``
+  (``KeeperFSMToJSON()``) and passes it straight to
+  ``check_fsm_reachability()`` above -- no synthetic input, no assumptions
+  about what the keeper can do. A clean cluster reports::
+
+    $ pg_autoctl inspect fsm check
+    12:00:00 1 INFO  OK: every monitor FSM transition has a matching keeper edge
+
+  A gap reports one line per missing edge and exits non-zero, so it can be
+  used as a build gate. For illustration, here is what running an
+  *older* keeper binary against a *newer* monitor -- one that has since
+  learned a transition the old keeper predates -- would report (this is a
+  hypothetical mismatch for illustration, not a gap that exists in the
+  current tables)::
+
+    $ pg_autoctl inspect fsm check
+    12:00:00 1 ERROR pos 381: draining -> single has no matching keeper edge
+      (other node was forcibly removed, now single)
+    $ echo $?
+    1
+
+  ``--json`` is also available, returning ``{"ok": false, "mismatches": [...]}``
+  for scripting.
+
+How this is tested in CI
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Three regress tests exercise this mechanism on every build, for every
+supported Postgres version, as part of the ``make -C src/monitor
+installcheck`` step run while building each ``pgaf:run-pgN`` Docker image
+(see the ``build_run_images`` job) -- so a gap fails CI directly, without
+needing a live two-process cluster:
+
+- ``fsm.sql`` -- a plain dump of the whole ``pgautofailover.fsm`` view.
+  Since the table is compile-time-fixed, its expected output changes only
+  when a rule is added, removed, or edited, giving that change an explicit,
+  reviewable diff.
+- ``check_fsm_reachability.sql`` -- exercises the SQL-side mechanism itself
+  against small, synthetic keeper-edge inputs (an edge present drops out of
+  the mismatch list, an edge absent stays in, an unrecognized state name
+  fails loudly). It doesn't touch the real ``KeeperFSM[]``, which lives in
+  the ``pg_autoctl`` binary, not the database -- it only proves the
+  comparison logic itself is correct.
+- ``keeper_fsm_edges.sql`` -- the real end-to-end static check, without
+  needing a live cluster. It loads ``keeper_fsm_edges.json``, a fixture
+  generated from the actual ``KeeperFSM[]`` via ``pg_autoctl inspect fsm
+  list --json`` and committed alongside the test (regenerated by hand
+  whenever ``KeeperFSM[]`` changes), then cross-references it against
+  ``dump_fsm_edges()`` in both directions: every monitor edge with no
+  matching keeper row (a real, actionable gap), and every keeper row the
+  monitor never actually dispatches to (dead weight worth a second look,
+  not a build failure).
+
+``pg_autoctl inspect fsm check`` itself -- talking to a real monitor over
+the network -- is exercised live rather than in the regress suite: it's
+part of the ``fsm_step_report_advance`` pgaftest spec (see
+:ref:`pg_autoctl_manual_fsm_step`) and is also the tool to reach for by hand
+after any manual edit to either FSM table, or when investigating a report
+that looks like a reachability gap.
