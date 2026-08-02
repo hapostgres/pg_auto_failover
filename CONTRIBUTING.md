@@ -24,6 +24,16 @@ We format all our code using the coding conventions in the
 tool. This tool uses uncrustify under the hood. To format the python test files
 we use [black](https://github.com/psf/black).
 
+If you have Docker available, the simplest way to check or fix formatting
+locally, without installing anything, is:
+
+```bash
+make docker-check    # check only -- matches CI's citus_indent --check exactly
+make docker-indent   # auto-fix
+```
+
+Otherwise, install citus_indent locally:
+
 ```bash
 # Uncrustify changes the way it formats code every release a bit. To make sure
 # everyone formats consistently we use version 0.68.1:
