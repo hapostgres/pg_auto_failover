@@ -269,3 +269,4 @@ select count(*) >= 0 as last_events_by_formation_and_group_count_ok
   from pgautofailover.last_events('default', 0, 10);
 -[ RECORD 1 ]-------------------------------+--
 last_events_by_formation_and_group_count_ok | t
+

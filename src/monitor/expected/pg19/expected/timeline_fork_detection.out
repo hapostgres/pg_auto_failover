@@ -21,7 +21,7 @@ SELECT *
   FROM pgautofailover.register_node('tlf_unit', 'tlfu-p', 5432,
                                     'postgres', 'p', 1);
 -[ RECORD 1 ]---------------+-------
-assigned_node_id            | 24
+assigned_node_id            | 27
 assigned_group_id           | 0
 assigned_group_state        | single
 assigned_candidate_priority | 100
@@ -34,7 +34,7 @@ SELECT *
   FROM pgautofailover.register_node('tlf_unit', 'tlfu-s1', 5432,
                                     'postgres', 's1', 1);
 -[ RECORD 1 ]---------------+-------------
-assigned_node_id            | 25
+assigned_node_id            | 28
 assigned_group_id           | 0
 assigned_group_state        | wait_standby
 assigned_candidate_priority | 100
@@ -47,7 +47,7 @@ SELECT *
   FROM pgautofailover.register_node('tlf_unit', 'tlfu-s2', 5432,
                                     'postgres', 's2', 1);
 -[ RECORD 1 ]---------------+-------------
-assigned_node_id            | 26
+assigned_node_id            | 29
 assigned_group_id           | 0
 assigned_group_state        | wait_standby
 assigned_candidate_priority | 100
@@ -88,27 +88,27 @@ SELECT nodeid, tli, parenttli, switchpoint_lsn
   FROM pgautofailover.node_timeline_history
  ORDER BY nodeid, tli;
 -[ RECORD 1 ]---+-----------
-nodeid          | 24
+nodeid          | 27
 tli             | 1
 parenttli       | 0
 switchpoint_lsn | 0/00000000
 -[ RECORD 2 ]---+-----------
-nodeid          | 25
+nodeid          | 28
 tli             | 1
 parenttli       | 0
 switchpoint_lsn | 0/00000000
 -[ RECORD 3 ]---+-----------
-nodeid          | 25
+nodeid          | 28
 tli             | 2
 parenttli       | 1
 switchpoint_lsn | 0/00006000
 -[ RECORD 4 ]---+-----------
-nodeid          | 26
+nodeid          | 29
 tli             | 1
 parenttli       | 0
 switchpoint_lsn | 0/00000000
 -[ RECORD 5 ]---+-----------
-nodeid          | 26
+nodeid          | 29
 tli             | 3
 parenttli       | 1
 switchpoint_lsn | 0/00006000
@@ -227,7 +227,7 @@ SELECT *
   FROM pgautofailover.register_node('tlf_election', 'tlfe-p', 5432,
                                     'postgres', 'p', 1);
 -[ RECORD 1 ]---------------+-------
-assigned_node_id            | 27
+assigned_node_id            | 30
 assigned_group_id           | 0
 assigned_group_state        | single
 assigned_candidate_priority | 100
@@ -240,7 +240,7 @@ SELECT *
   FROM pgautofailover.register_node('tlf_election', 'tlfe-s1', 5432,
                                     'postgres', 's1', 1);
 -[ RECORD 1 ]---------------+-------------
-assigned_node_id            | 28
+assigned_node_id            | 31
 assigned_group_id           | 0
 assigned_group_state        | wait_standby
 assigned_candidate_priority | 100
@@ -253,7 +253,7 @@ SELECT *
   FROM pgautofailover.register_node('tlf_election', 'tlfe-s2', 5432,
                                     'postgres', 's2', 1);
 -[ RECORD 1 ]---------------+-------------
-assigned_node_id            | 29
+assigned_node_id            | 32
 assigned_group_id           | 0
 assigned_group_state        | wait_standby
 assigned_candidate_priority | 100
@@ -266,7 +266,7 @@ SELECT *
   FROM pgautofailover.register_node('tlf_election', 'tlfe-s3', 5432,
                                     'postgres', 's3', 1);
 -[ RECORD 1 ]---------------+-------------
-assigned_node_id            | 30
+assigned_node_id            | 33
 assigned_group_id           | 0
 assigned_group_state        | wait_standby
 assigned_candidate_priority | 100
@@ -571,13 +571,13 @@ reportedstate | single
 goalstate     | single
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 27 "p" (tlfe-p:5432): "single"
+description   | New state is reported by node 30 "p" (tlfe-p:5432): "single"
 -[ RECORD 3 ]-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | wait_standby
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 28 "s1" (tlfe-s1:5432): "wait_standby"
+description   | New state is reported by node 31 "s1" (tlfe-s1:5432): "wait_standby"
 -[ RECORD 4 ]-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | single
 goalstate     | wait_primary
@@ -589,7 +589,7 @@ reportedstate | wait_primary
 goalstate     | wait_primary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 27 "p" (tlfe-p:5432): "wait_primary"
+description   | New state is reported by node 30 "p" (tlfe-p:5432): "wait_primary"
 -[ RECORD 6 ]-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | catchingup
@@ -601,7 +601,7 @@ reportedstate | catchingup
 goalstate     | catchingup
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 28 "s1" (tlfe-s1:5432): "catchingup"
+description   | New state is reported by node 31 "s1" (tlfe-s1:5432): "catchingup"
 -[ RECORD 8 ]-+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | catchingup
 goalstate     | secondary
@@ -613,7 +613,7 @@ reportedstate | secondary
 goalstate     | secondary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 28 "s1" (tlfe-s1:5432): "secondary"
+description   | New state is reported by node 31 "s1" (tlfe-s1:5432): "secondary"
 -[ RECORD 10 ]+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_primary
 goalstate     | primary
@@ -625,13 +625,13 @@ reportedstate | primary
 goalstate     | primary
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 27 "p" (tlfe-p:5432): "primary"
+description   | New state is reported by node 30 "p" (tlfe-p:5432): "primary"
 -[ RECORD 12 ]+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | wait_standby
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 29 "s2" (tlfe-s2:5432): "wait_standby"
+description   | New state is reported by node 32 "s2" (tlfe-s2:5432): "wait_standby"
 -[ RECORD 13 ]+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | catchingup
@@ -649,31 +649,31 @@ reportedstate | catchingup
 goalstate     | catchingup
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 29 "s2" (tlfe-s2:5432): "catchingup"
+description   | New state is reported by node 32 "s2" (tlfe-s2:5432): "catchingup"
 -[ RECORD 16 ]+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | secondary
 goalstate     | catchingup
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 29 "s2" (tlfe-s2:5432): "secondary"
+description   | New state is reported by node 32 "s2" (tlfe-s2:5432): "secondary"
 -[ RECORD 17 ]+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | wait_standby
 goalstate     | wait_standby
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 30 "s3" (tlfe-s3:5432): "wait_standby"
+description   | New state is reported by node 33 "s3" (tlfe-s3:5432): "wait_standby"
 -[ RECORD 18 ]+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | catchingup
 goalstate     | wait_standby
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 30 "s3" (tlfe-s3:5432): "catchingup"
+description   | New state is reported by node 33 "s3" (tlfe-s3:5432): "catchingup"
 -[ RECORD 19 ]+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | secondary
 goalstate     | wait_standby
 rule_pos      | 
 rule_section  | 
-description   | New state is reported by node 30 "s3" (tlfe-s3:5432): "secondary"
+description   | New state is reported by node 33 "s3" (tlfe-s3:5432): "secondary"
 -[ RECORD 20 ]+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 reportedstate | report_lsn
 goalstate     | prepare_promotion
