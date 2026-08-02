@@ -35,6 +35,10 @@ stopped or stuck, and for low-level diagnostic work. Using them while
     + step    Make a state transition if instructed by the monitor
     + nodes   Manually manage the keeper's nodes list
 
+    pg_autoctl manual fsm step
+      report   Report the current state to the monitor without transitioning
+      advance  Attempt the transition already assigned by the monitor
+
     pg_autoctl manual fsm nodes
       get  Get the list of nodes from file (see --disable-monitor)
       set  Set the list of nodes to file (see --disable-monitor)
