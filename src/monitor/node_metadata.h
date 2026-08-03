@@ -50,6 +50,7 @@
 #define Anum_pgautofailover_node_nodecluster 21
 #define Anum_pgautofailover_node_region 22
 #define Anum_pgautofailover_node_replication_stall_since 23
+#define Anum_pgautofailover_node_haspgdata 24
 
 #define AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS \
 	"formationid, " \
@@ -74,7 +75,8 @@
 	"replicationquorum, " \
 	"nodecluster, " \
 	"region, " \
-	"replication_stall_since"
+	"replication_stall_since, " \
+	"haspgdata"
 
 
 #define SELECT_ALL_FROM_AUTO_FAILOVER_NODE_TABLE \
@@ -139,6 +141,13 @@ typedef struct AutoFailoverNode
 	char *nodeCluster;
 	char *region;
 	TimestampTz replicationStallSince; /* 0 = not stalled */
+
+	/*
+	 * true for every ordinary Postgres node; false only for an ARCHIVING
+	 * membership row (a pg_receivewal client, no PGDATA, no postmaster to
+	 * manage). See pgautofailover.sql's own comment on the haspgdata column.
+	 */
+	bool hasPgData;
 } AutoFailoverNode;
 
 

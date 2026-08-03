@@ -487,6 +487,7 @@ typedef struct NodeStatus
 	bool isCitusWorkerGroup;
 	bool replicationQuorum;
 	bool isComparableToReferenceTli;
+	bool hasPgData;
 } NodeStatus;
 
 typedef struct NodeStatusPattern
@@ -510,6 +511,12 @@ typedef struct NodeStatusPattern
 	BoolPattern replicationQuorum;
 	BoolPattern isComparableToReferenceTli;
 	BoolPattern unreachableFromDemoteTimeout;
+
+	/*
+	 * true for every ordinary Postgres node; false only for an ARCHIVING
+	 * membership row. See AutoFailoverNode.hasPgData's own comment.
+	 */
+	BoolPattern hasPgData;
 } NodeStatusPattern;
 
 static void
@@ -535,6 +542,7 @@ BuildNodeStatus(GroupStateContext *ctx, AutoFailoverNode *node, NodeStatus *stat
 	status->candidateEligible = node->candidatePriority > 0;
 	status->isCitusWorkerGroup = IsCitusFormation(ctx->formation) && node->groupId > 0;
 	status->replicationQuorum = node->replicationQuorum;
+	status->hasPgData = node->hasPgData;
 }
 
 
@@ -667,7 +675,8 @@ NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
 		   BoolMatchesPattern(status->isComparableToReferenceTli,
 							  pattern->isComparableToReferenceTli) &&
 		   BoolMatchesPattern(unreachableFromDemoteTimeout,
-							  pattern->unreachableFromDemoteTimeout);
+							  pattern->unreachableFromDemoteTimeout) &&
+		   BoolMatchesPattern(status->hasPgData, pattern->hasPgData);
 }
 
 
@@ -2720,26 +2729,36 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment =
 		  "nodesCount>2, primary unhealthy -> draining/maintenance + MS-failover cascade" },
 
-	/* report_lsn, primary converged wait/join_primary, healthy */
+	/*
+	 * report_lsn, primary converged wait/join_primary, healthy -- hasPgData
+	 * = BOOL_TRUE restricts this to ordinary nodes now that pos 394 (below,
+	 * in the archiver mirror cluster appended after pos 393) is the
+	 * hasPgData = BOOL_FALSE sibling assigning ARCHIVING instead of
+	 * SECONDARY; the two are mutually exclusive on hasPgData alone, so
+	 * their relative order doesn't matter.
+	 */
 	{ .pos = 307,
 	  .sectionPath = {
 		  MONITOR_FSM_SECTION_REPORTING_NODE,
 		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
-	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN) },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN),
+					  .hasPgData = BOOL_TRUE },
 	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY,
 					   .isHealthy = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
 	  .comment =
 		  "report_lsn, primary converged wait/join_primary, healthy -> secondary" },
 
-	/* report_lsn, primary converged primary, healthy */
+	/* report_lsn, primary converged primary, healthy -- see pos 307's own
+	 * comment on hasPgData; pos 395 is this row's archiver mirror. */
 	{ .pos = 309,
 	  .sectionPath = {
 		  MONITOR_FSM_SECTION_REPORTING_NODE,
 		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
-	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN) },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN),
+					  .hasPgData = BOOL_TRUE },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY),
 					   .isHealthy = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_SECONDARY),
@@ -2771,39 +2790,51 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .comment = "report_lsn or fast_forward, continuing an already-started failover -> "
 				 "MS-failover cascade" },
 
-	/* wait_standby, primary converged wait/join_primary */
+	/*
+	 * wait_standby, primary converged wait/join_primary -- hasPgData =
+	 * BOOL_TRUE restricts this to ordinary nodes; pos 396 is the
+	 * hasPgData = BOOL_FALSE sibling assigning ARCHIVING (see pos 307's
+	 * own comment on why order between the two doesn't matter).
+	 */
 	{ .pos = 315,
 	  .sectionPath = {
 		  MONITOR_FSM_SECTION_REPORTING_NODE,
 		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
-	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY) },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
+					  .hasPgData = BOOL_TRUE },
 	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
 	  .comment = "wait_standby, primary converged wait/join_primary -> catchingup" },
 
-	/* wait_standby (quorum member), primary converged primary */
+	/* wait_standby (quorum member), primary converged primary -- see pos
+	 * 315's own comment on hasPgData; pos 397 is this row's archiver
+	 * mirror. */
 	{ .pos = 317,
 	  .sectionPath = {
 		  MONITOR_FSM_SECTION_REPORTING_NODE,
 		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
-					  .replicationQuorum = BOOL_TRUE },
+					  .replicationQuorum = BOOL_TRUE,
+					  .hasPgData = BOOL_TRUE },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
 	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_APPLY_SETTINGS),
 	  .comment = "wait_standby (quorum member), primary converged primary -> "
 				 "catchingup + apply_settings" },
 
-	/* wait_standby (not a quorum member), primary converged primary */
+	/* wait_standby (not a quorum member), primary converged primary -- see
+	 * pos 315's own comment on hasPgData; pos 398 is this row's archiver
+	 * mirror. */
 	{ .pos = 319,
 	  .sectionPath = {
 		  MONITOR_FSM_SECTION_REPORTING_NODE,
 		  MONITOR_FSM_SECTION_FROM_CONTEXT
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
-					  .replicationQuorum = BOOL_FALSE },
+					  .replicationQuorum = BOOL_FALSE,
+					  .hasPgData = BOOL_TRUE },
 	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_CATCHINGUP),
 	  .comment =
@@ -3239,15 +3270,17 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNode = { .statePattern = { .kind = NODE_STATE_TRANSITIONING,
 										.reportedStates = STATES(
 											REPLICATION_STATE_SECONDARY,
-											REPLICATION_STATE_CATCHINGUP),
+											REPLICATION_STATE_CATCHINGUP,
+											REPLICATION_STATE_ARCHIVING),
 										.assignedStates = STATES(
 											REPLICATION_STATE_SECONDARY,
-											REPLICATION_STATE_CATCHINGUP) }
+											REPLICATION_STATE_CATCHINGUP,
+											REPLICATION_STATE_ARCHIVING) }
 	  },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_REPORT_LSN),
 	  .comment =
-		  "MS-failover fan-out: secondary/catchingup, not yet converged -> report_lsn "
-		  "(1 of 4)" },
+		  "MS-failover fan-out: secondary/catchingup/archiving, not yet converged -> "
+		  "report_lsn (1 of 4)" },
 
 	{ .pos = 369,
 	  .sectionPath = {
@@ -3511,6 +3544,84 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_MAINTENANCE),
 	  .comment = "nodesCount>2, primary unhealthy, converged prepare_maintenance -> "
 				 "primary maintenance" },
+
+	/*
+	 * Archiver mirror cluster: the hasPgData = BOOL_FALSE siblings of pos
+	 * 307/309/315/317/319 above, assigning ARCHIVING instead of
+	 * SECONDARY/CATCHINGUP for an ARCHIVING membership row. Appended here
+	 * (still sectionPath'd under REPORTING_NODE/FROM_CONTEXT, like their
+	 * siblings) rather than interleaved next to each one, for the same
+	 * reason the MS-failover cluster above is appended rather than
+	 * renumbered into the ordinary rows: pos 307/309/315/317/319 are
+	 * numbered every 2 with no room between consecutive pairs for 5 more
+	 * rows, and since hasPgData makes each pair mutually exclusive, their
+	 * relative array order doesn't affect first-match-wins correctness --
+	 * see each of those rows' own comment for the exact pairing.
+	 */
+	{ .pos = 394,
+	  .sectionPath = {
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
+	  },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN),
+					  .hasPgData = BOOL_FALSE },
+	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY,
+					   .isHealthy = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_ARCHIVING),
+	  .comment = "archiver mirror of pos 307: report_lsn, primary converged "
+				 "wait/join_primary, healthy -> archiving" },
+
+	{ .pos = 395,
+	  .sectionPath = {
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
+	  },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN),
+					  .hasPgData = BOOL_FALSE },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY),
+					   .isHealthy = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_ARCHIVING),
+	  .comment = "archiver mirror of pos 309: report_lsn, primary converged "
+				 "primary, healthy -> archiving" },
+
+	{ .pos = 396,
+	  .sectionPath = {
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
+	  },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
+					  .hasPgData = BOOL_FALSE },
+	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_ARCHIVING),
+	  .comment = "archiver mirror of pos 315: wait_standby, primary converged "
+				 "wait/join_primary -> archiving" },
+
+	{ .pos = 397,
+	  .sectionPath = {
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
+	  },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
+					  .replicationQuorum = BOOL_TRUE,
+					  .hasPgData = BOOL_FALSE },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_ARCHIVING),
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_APPLY_SETTINGS),
+	  .comment = "archiver mirror of pos 317: wait_standby (quorum member), "
+				 "primary converged primary -> archiving + apply_settings" },
+
+	{ .pos = 398,
+	  .sectionPath = {
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
+	  },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
+					  .replicationQuorum = BOOL_FALSE,
+					  .hasPgData = BOOL_FALSE },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_ARCHIVING),
+	  .comment = "archiver mirror of pos 319: wait_standby (not a quorum member), "
+				 "primary converged primary -> archiving" },
 
 	/*
 	 * --- the PRIMARY_NODE section (sectionPath[0] ==
@@ -4316,6 +4427,7 @@ NodeStatusPatternConditionsText(const NodeStatusPattern *pattern, bool *isNull)
 						  pattern->isComparableToReferenceTli);
 	APPEND_BOOL_CONDITION(&buf, "unreachableFromDemoteTimeout",
 						  pattern->unreachableFromDemoteTimeout);
+	APPEND_BOOL_CONDITION(&buf, "hasPgData", pattern->hasPgData);
 
 	if (buf.len == 0)
 	{
@@ -6242,8 +6354,9 @@ BuildCandidateList(GroupStateContext *ctx, List *nodesGroupList,
 	ListCell *nodeCell = NULL;
 	List *candidateNodesGroupList = NIL;
 
-	List *secondaryStates = list_make2_int(REPLICATION_STATE_SECONDARY,
-										   REPLICATION_STATE_CATCHINGUP);
+	List *secondaryStates = list_make3_int(REPLICATION_STATE_SECONDARY,
+										   REPLICATION_STATE_CATCHINGUP,
+										   REPLICATION_STATE_ARCHIVING);
 
 	foreach(nodeCell, nodesGroupList)
 	{

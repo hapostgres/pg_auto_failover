@@ -175,8 +175,15 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- having to count its own detail rows by hand. NULLS FIRST puts each rule's
 -- summary row right before its own detail rows, as a header.
 --
--- Expected result: empty. Every MonitorFSM[] rule currently has a matching
--- KeeperFSM[] row for every current_state it can assign a transition from.
+-- Expected result: the 8 rows from pos 367/396/397/398's own archiver-
+-- related edges (reportedState/goalState = ARCHIVING) -- a real, currently
+-- expected gap: the monitor side of the ARCHIVING state (Archiving &
+-- Disaster Recovery design, milestone 2) landed first, on its own, with no
+-- corresponding KeeperFSM[] rows yet (no service_archiver process exists
+-- to report ARCHIVING or drive pg_receivewal at this milestone either) --
+-- see the Build order in ~/dev/temp/archiving-disaster-recovery.md.
+-- Every other MonitorFSM[] rule still has a matching KeeperFSM[] row for
+-- every current_state it can assign a transition from.
 SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.comment
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos
@@ -191,9 +198,17 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
            (e.pos, e.assigned_state, f.comment)
          )
  ORDER BY e.pos, e.assigned_state, e.current_state NULLS FIRST;
- rule | n | current_state | assigned_state | comment 
-------+---+---------------+----------------+---------
-(0 rows)
+ rule | n | current_state | assigned_state |                                                      comment                                                      
+------+---+---------------+----------------+-------------------------------------------------------------------------------------------------------------------
+  367 | 1 |               | report_lsn     | MS-failover fan-out: secondary/catchingup/archiving, not yet converged -> report_lsn (1 of 4)
+  367 | 1 | archiving     | report_lsn     | MS-failover fan-out: secondary/catchingup/archiving, not yet converged -> report_lsn (1 of 4)
+  396 | 1 |               | archiving      | archiver mirror of pos 315: wait_standby, primary converged wait/join_primary -> archiving
+  396 | 1 | wait_standby  | archiving      | archiver mirror of pos 315: wait_standby, primary converged wait/join_primary -> archiving
+  397 | 1 |               | archiving      | archiver mirror of pos 317: wait_standby (quorum member), primary converged primary -> archiving + apply_settings
+  397 | 1 | wait_standby  | archiving      | archiver mirror of pos 317: wait_standby (quorum member), primary converged primary -> archiving + apply_settings
+  398 | 1 |               | archiving      | archiver mirror of pos 319: wait_standby (not a quorum member), primary converged primary -> archiving
+  398 | 1 | wait_standby  | archiving      | archiver mirror of pos 319: wait_standby (not a quorum member), primary converged primary -> archiving
+(8 rows)
 
 -- Step 2b: keeper -> monitor direction, the reverse gap -- every keeper
 -- edge that no MonitorFSM[] row can ever produce (dump_fsm_edges() is the

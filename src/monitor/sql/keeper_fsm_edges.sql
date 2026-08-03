@@ -66,8 +66,15 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- having to count its own detail rows by hand. NULLS FIRST puts each rule's
 -- summary row right before its own detail rows, as a header.
 --
--- Expected result: empty. Every MonitorFSM[] rule currently has a matching
--- KeeperFSM[] row for every current_state it can assign a transition from.
+-- Expected result: the 8 rows from pos 367/396/397/398's own archiver-
+-- related edges (reportedState/goalState = ARCHIVING) -- a real, currently
+-- expected gap: the monitor side of the ARCHIVING state (Archiving &
+-- Disaster Recovery design, milestone 2) landed first, on its own, with no
+-- corresponding KeeperFSM[] rows yet (no service_archiver process exists
+-- to report ARCHIVING or drive pg_receivewal at this milestone either) --
+-- see the Build order in ~/dev/temp/archiving-disaster-recovery.md.
+-- Every other MonitorFSM[] rule still has a matching KeeperFSM[] row for
+-- every current_state it can assign a transition from.
 SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.comment
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos

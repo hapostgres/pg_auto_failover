@@ -179,6 +179,22 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 		heap_getattr(heapTuple,
 					 Anum_pgautofailover_node_replication_stall_since,
 					 tupleDescriptor, &stallIsNull);
+	/*
+	 * haspgdata is looked up by name, not by the Anum_ constant every other
+	 * field here uses: this function is also called against a "RETURNING
+	 * node.*" tuple descriptor (health_check_metadata.c), which reflects
+	 * the table's true physical column order -- pg_versionnum/pg_version/
+	 * pg_versionstring/citus_version were appended between
+	 * replication_stall_since and haspgdata by an earlier migration but
+	 * were never added to AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS, so
+	 * haspgdata's physical position (28) and its position in that
+	 * explicit column list (24) genuinely differ. SPI_fnumber resolves the
+	 * real attnum against whichever tupdesc was actually passed in, so
+	 * this works correctly for both callers.
+	 */
+	int hasPgDataAttNum = SPI_fnumber(tupleDescriptor, "haspgdata");
+	Datum hasPgData = heap_getattr(heapTuple, hasPgDataAttNum,
+								   tupleDescriptor, &isNull);
 
 	Oid goalStateOid = DatumGetObjectId(goalState);
 	Oid reportedStateOid = DatumGetObjectId(reportedState);
@@ -214,6 +230,7 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 		regionIsNull ? "" : TextDatumGetCString(region);
 	pgAutoFailoverNode->replicationStallSince =
 		stallIsNull ? 0 : DatumGetTimestampTz(replicationStallSince);
+	pgAutoFailoverNode->hasPgData = DatumGetBool(hasPgData);
 
 	return pgAutoFailoverNode;
 }

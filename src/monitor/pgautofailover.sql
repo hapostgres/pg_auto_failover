@@ -158,6 +158,15 @@ CREATE TABLE pgautofailover.node
     -- primary server from scratch, because we have not done pg_ctl initdb
     -- at the time we call the register_node() function.
     --
+    -- 'archiving' and 'report_lsn' are also allowed here: an ARCHIVING row
+    -- (haspgdata = false) has no PGDATA of its own, ever, so it never
+    -- acquires a real sysidentifier -- and 'report_lsn' is a state it
+    -- legitimately reaches too, pulled into elections the same as
+    -- SECONDARY/CATCHINGUP (see haspgdata's own comment). Loosening this
+    -- CHECK to also permit NULL in 'report_lsn' doesn't hide anything for
+    -- ordinary nodes: by the time a real node ever reaches report_lsn its
+    -- own bootstrap sequence has long since given it a real sysidentifier.
+    --
     CONSTRAINT system_identifier_is_null_at_init_only
          CHECK (
                   (
@@ -167,7 +176,9 @@ CREATE TABLE pgautofailover.node
                            'init',
                            'wait_standby',
                            'catchingup',
-                           'dropped'
+                           'dropped',
+                           'archiving',
+                           'report_lsn'
                           )
                    )
                 OR sysidentifier IS NOT NULL

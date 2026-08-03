@@ -1971,3 +1971,49 @@ comment on function pgautofailover.pitr_next_command(bigint)
 
 grant execute on function pgautofailover.pitr_next_command(bigint)
    to autoctl_node;
+
+
+--
+-- Archiving & Disaster Recovery, milestone 2: monitor-side FSM support for
+-- the ARCHIVING state (group_state_machine.c). Loosen
+-- system_identifier_is_null_at_init_only to also allow a NULL sysidentifier
+-- in 'archiving' and 'report_lsn': an ARCHIVING row (haspgdata = false) has
+-- no PGDATA of its own, ever, so it never acquires a real sysidentifier --
+-- see pgautofailover.sql's own comment on this constraint for why
+-- 'report_lsn' is safe to loosen too.
+--
+-- reportedstate::text IN (...) here, not reportedstate IN (...): this
+-- script's own earlier "ALTER TYPE ... ADD VALUE 'archiving'" added that
+-- label in this same transaction (ALTER EXTENSION ... UPDATE runs the whole
+-- upgrade script as one transaction), and Postgres refuses to cast a string
+-- literal to a not-yet-committed enum value ("unsafe use of new value...
+-- must be committed before they can be used") -- casting the *column*
+-- to text instead of the literals to the enum sidesteps that restriction
+-- entirely, since reportedstate's own stored value is already a valid,
+-- fully-committed enum datum by the time this constraint ever evaluates it.
+-- pgautofailover.sql's fresh-install CHECK constraint doesn't need this: a
+-- freshly CREATE TYPE'd enum has 'archiving' as a member from the start,
+-- never added mid-transaction, so the ordinary enum-typed comparison there
+-- is unaffected.
+--
+
+ALTER TABLE pgautofailover.node
+    DROP CONSTRAINT system_identifier_is_null_at_init_only;
+
+ALTER TABLE pgautofailover.node
+    ADD CONSTRAINT system_identifier_is_null_at_init_only
+         CHECK (
+                  (
+                       sysidentifier IS NULL
+                   AND reportedstate::text
+                       IN (
+                           'init',
+                           'wait_standby',
+                           'catchingup',
+                           'dropped',
+                           'archiving',
+                           'report_lsn'
+                          )
+                   )
+                OR sysidentifier IS NOT NULL
+               );
