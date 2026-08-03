@@ -670,3 +670,291 @@ SELECT pgautofailover.report_postgres_version(-1, 170003);
 -[ RECORD 1 ]-----------+-
 report_postgres_version | 
 
+-- event summary: which MonitorFSM[] rule (if any) produced each of this
+-- test's own state-change events, for each of the two formations used
+-- above. Exercises pgautofailover.last_events() against a real scenario --
+-- its own SELECT list didn't match pgautofailover.event's column set for a
+-- long time, breaking it outright, and nothing in this suite ever called
+-- it to notice (see monitor.sql's own minimal-repro coverage). Filtering
+-- by formationid isolates each summary from the other, and from every
+-- other test in this schedule sharing the same event table -- safe
+-- regardless of where in this file (or the whole schedule) it runs.
+-- eventid/eventtime omitted: eventid is a database-wide sequence shared by
+-- every test in this schedule (see regress_schedule's own comment) and
+-- eventtime is a live timestamp -- neither is a stable value to pin here.
+SELECT reportedstate, goalstate, rule_pos, rule_section, description
+  FROM pgautofailover.last_events('fsm_test', count => 100);
+-[ RECORD 1 ]-+----------------------------------------------------------------------------------------------------------------------
+reportedstate | init
+goalstate     | single
+rule_pos      | 209
+rule_section  | early_checks
+description   | alone in group, candidate-eligible -> single
+-[ RECORD 2 ]-+----------------------------------------------------------------------------------------------------------------------
+reportedstate | single
+goalstate     | single
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 6 "node1" (node1:5432): "single"
+-[ RECORD 3 ]-+----------------------------------------------------------------------------------------------------------------------
+reportedstate | wait_standby
+goalstate     | wait_standby
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 7 "node2" (node2:5432): "wait_standby"
+-[ RECORD 4 ]-+----------------------------------------------------------------------------------------------------------------------
+reportedstate | single
+goalstate     | wait_primary
+rule_pos      | 401
+rule_section  | primary_node
+description   | primary alone, another node reached wait_standby -> wait_primary
+-[ RECORD 5 ]-+----------------------------------------------------------------------------------------------------------------------
+reportedstate | wait_primary
+goalstate     | wait_primary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 6 "node1" (node1:5432): "wait_primary"
+-[ RECORD 6 ]-+----------------------------------------------------------------------------------------------------------------------
+reportedstate | wait_standby
+goalstate     | catchingup
+rule_pos      | 315
+rule_section  | reporting_node
+description   | wait_standby, primary converged wait/join_primary -> catchingup
+-[ RECORD 7 ]-+----------------------------------------------------------------------------------------------------------------------
+reportedstate | catchingup
+goalstate     | catchingup
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 7 "node2" (node2:5432): "catchingup"
+-[ RECORD 8 ]-+----------------------------------------------------------------------------------------------------------------------
+reportedstate | catchingup
+goalstate     | secondary
+rule_pos      | 321
+rule_section  | reporting_node
+description   | caught up, same TLI as primary, within sync threshold -> secondary
+-[ RECORD 9 ]-+----------------------------------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | secondary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 7 "node2" (node2:5432): "secondary"
+-[ RECORD 10 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | wait_primary
+goalstate     | primary
+rule_pos      | 411
+rule_section  | primary_node
+description   | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
+-[ RECORD 11 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | primary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 6 "node1" (node1:5432): "primary"
+-[ RECORD 12 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | prepare_promotion
+rule_pos      | 325
+rule_section  | reporting_node
+description   | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
+-[ RECORD 13 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | draining
+rule_pos      | 325
+rule_section  | reporting_node
+description   | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
+-[ RECORD 14 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | prepare_promotion
+goalstate     | prepare_promotion
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 7 "node2" (node2:5432): "prepare_promotion"
+-[ RECORD 15 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | prepare_promotion
+goalstate     | stop_replication
+rule_pos      | 339
+rule_section  | reporting_node
+description   | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
+-[ RECORD 16 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | demote_timeout
+rule_pos      | 339
+rule_section  | reporting_node
+description   | prepare_promotion, primary present, not in maintenance -> stop_replication + demote_timeout (2 of 2)
+-[ RECORD 17 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | demote_timeout
+goalstate     | demote_timeout
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 6 "node1" (node1:5432): "demote_timeout"
+-[ RECORD 18 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | stop_replication
+goalstate     | stop_replication
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 7 "node2" (node2:5432): "stop_replication"
+-[ RECORD 19 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | stop_replication
+goalstate     | wait_primary
+rule_pos      | 345
+rule_section  | reporting_node
+description   | stop_replication, primary converged demote_timeout -> wait_primary + demoted (1 of 3)
+-[ RECORD 20 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | demote_timeout
+goalstate     | demoted
+rule_pos      | 345
+rule_section  | reporting_node
+description   | stop_replication, primary converged demote_timeout -> wait_primary + demoted (1 of 3)
+-[ RECORD 21 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | wait_primary
+goalstate     | wait_primary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 7 "node2" (node2:5432): "wait_primary"
+-[ RECORD 22 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | demoted
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 6 "node1" (node1:5432): "primary"
+-[ RECORD 23 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | demoted
+goalstate     | demoted
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 6 "node1" (node1:5432): "demoted"
+-[ RECORD 24 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | demoted
+goalstate     | catchingup
+rule_pos      | 357
+rule_section  | reporting_node
+description   | demoted, primary converged wait/join_primary/primary, healthy -> catchingup
+-[ RECORD 25 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | catchingup
+goalstate     | catchingup
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 6 "node1" (node1:5432): "catchingup"
+-[ RECORD 26 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | catchingup
+goalstate     | secondary
+rule_pos      | 321
+rule_section  | reporting_node
+description   | caught up, same TLI as primary, within sync threshold -> secondary
+-[ RECORD 27 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | secondary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 6 "node1" (node1:5432): "secondary"
+-[ RECORD 28 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | wait_primary
+goalstate     | primary
+rule_pos      | 411
+rule_section  | primary_node
+description   | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
+-[ RECORD 29 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | primary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 7 "node2" (node2:5432): "primary"
+-[ RECORD 30 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | prepare_maintenance
+rule_pos      | 109
+rule_section  | api_triggered
+description   | start_maintenance, primary, 2-node group -> prepare_maintenance (standby separately assigned prepare_promotion)
+-[ RECORD 31 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | prepare_promotion
+rule_pos      | 
+rule_section  | 
+description   | Setting goal state of node 6 "node1" (node1:5432) to prepare_promotion after a user-initiated start_maintenance call.
+-[ RECORD 32 ]+----------------------------------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | prepare_promotion
+rule_pos      | 
+rule_section  | 
+description   | Updating region to "dc2" for node 6 "node1" (node1:5432)
+
+SELECT reportedstate, goalstate, rule_pos, rule_section, description
+  FROM pgautofailover.last_events('killed_test', count => 100);
+-[ RECORD 1 ]-+--------------------------------------------------------------------------------------------------------
+reportedstate | init
+goalstate     | single
+rule_pos      | 209
+rule_section  | early_checks
+description   | alone in group, candidate-eligible -> single
+-[ RECORD 2 ]-+--------------------------------------------------------------------------------------------------------
+reportedstate | single
+goalstate     | single
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 8 "ka" (ka:5432): "single"
+-[ RECORD 3 ]-+--------------------------------------------------------------------------------------------------------
+reportedstate | wait_standby
+goalstate     | wait_standby
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 9 "kb" (kb:5432): "wait_standby"
+-[ RECORD 4 ]-+--------------------------------------------------------------------------------------------------------
+reportedstate | single
+goalstate     | wait_primary
+rule_pos      | 401
+rule_section  | primary_node
+description   | primary alone, another node reached wait_standby -> wait_primary
+-[ RECORD 5 ]-+--------------------------------------------------------------------------------------------------------
+reportedstate | wait_primary
+goalstate     | wait_primary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 8 "ka" (ka:5432): "wait_primary"
+-[ RECORD 6 ]-+--------------------------------------------------------------------------------------------------------
+reportedstate | wait_standby
+goalstate     | catchingup
+rule_pos      | 315
+rule_section  | reporting_node
+description   | wait_standby, primary converged wait/join_primary -> catchingup
+-[ RECORD 7 ]-+--------------------------------------------------------------------------------------------------------
+reportedstate | catchingup
+goalstate     | catchingup
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 9 "kb" (kb:5432): "catchingup"
+-[ RECORD 8 ]-+--------------------------------------------------------------------------------------------------------
+reportedstate | catchingup
+goalstate     | secondary
+rule_pos      | 321
+rule_section  | reporting_node
+description   | caught up, same TLI as primary, within sync threshold -> secondary
+-[ RECORD 9 ]-+--------------------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | secondary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 9 "kb" (kb:5432): "secondary"
+-[ RECORD 10 ]+--------------------------------------------------------------------------------------------------------
+reportedstate | wait_primary
+goalstate     | primary
+rule_pos      | 411
+rule_section  | primary_node
+description   | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
+-[ RECORD 11 ]+--------------------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | primary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 8 "ka" (ka:5432): "primary"
+-[ RECORD 12 ]+--------------------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | prepare_promotion
+rule_pos      | 325
+rule_section  | reporting_node
+description   | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
+-[ RECORD 13 ]+--------------------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | draining
+rule_pos      | 325
+rule_section  | reporting_node
+description   | primary fails, not already wait_primary -> secondary -> prepare_promotion, primary -> draining (2 of 2)
+

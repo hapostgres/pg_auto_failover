@@ -308,3 +308,123 @@ nodename      | spr_s2
 goalstate     | report_lsn
 reportedstate | secondary
 
+-- event summary: which MonitorFSM[] rule (if any) produced each of this
+-- test's own state-change events. Exercises pgautofailover.last_events()
+-- against a real scenario -- its own SELECT list didn't match
+-- pgautofailover.event's column set for a long time, breaking it outright,
+-- and nothing in this suite ever called it to notice (see monitor.sql's
+-- own minimal-repro coverage). eventid/eventtime omitted: eventid is a
+-- database-wide sequence shared by every test in this schedule (see
+-- regress_schedule's own comment) and eventtime is a live timestamp --
+-- neither is a stable value to pin in this file's own expected output.
+SELECT reportedstate, goalstate, rule_pos, rule_section, description
+  FROM pgautofailover.last_events('spr_test', count => 100);
+-[ RECORD 1 ]-+--------------------------------------------------------------------------------------------
+reportedstate | init
+goalstate     | single
+rule_pos      | 209
+rule_section  | early_checks
+description   | alone in group, candidate-eligible -> single
+-[ RECORD 2 ]-+--------------------------------------------------------------------------------------------
+reportedstate | single
+goalstate     | single
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 18 "spr_p" (spr_p:5432): "single"
+-[ RECORD 3 ]-+--------------------------------------------------------------------------------------------
+reportedstate | wait_standby
+goalstate     | wait_standby
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 19 "spr_s1" (spr_s1:5432): "wait_standby"
+-[ RECORD 4 ]-+--------------------------------------------------------------------------------------------
+reportedstate | single
+goalstate     | wait_primary
+rule_pos      | 401
+rule_section  | primary_node
+description   | primary alone, another node reached wait_standby -> wait_primary
+-[ RECORD 5 ]-+--------------------------------------------------------------------------------------------
+reportedstate | wait_primary
+goalstate     | wait_primary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 18 "spr_p" (spr_p:5432): "wait_primary"
+-[ RECORD 6 ]-+--------------------------------------------------------------------------------------------
+reportedstate | wait_standby
+goalstate     | catchingup
+rule_pos      | 315
+rule_section  | reporting_node
+description   | wait_standby, primary converged wait/join_primary -> catchingup
+-[ RECORD 7 ]-+--------------------------------------------------------------------------------------------
+reportedstate | catchingup
+goalstate     | catchingup
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 19 "spr_s1" (spr_s1:5432): "catchingup"
+-[ RECORD 8 ]-+--------------------------------------------------------------------------------------------
+reportedstate | catchingup
+goalstate     | secondary
+rule_pos      | 321
+rule_section  | reporting_node
+description   | caught up, same TLI as primary, within sync threshold -> secondary
+-[ RECORD 9 ]-+--------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | secondary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 19 "spr_s1" (spr_s1:5432): "secondary"
+-[ RECORD 10 ]+--------------------------------------------------------------------------------------------
+reportedstate | wait_primary
+goalstate     | primary
+rule_pos      | 411
+rule_section  | primary_node
+description   | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
+-[ RECORD 11 ]+--------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | primary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 18 "spr_p" (spr_p:5432): "primary"
+-[ RECORD 12 ]+--------------------------------------------------------------------------------------------
+reportedstate | wait_standby
+goalstate     | wait_standby
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 20 "spr_s2" (spr_s2:5432): "wait_standby"
+-[ RECORD 13 ]+--------------------------------------------------------------------------------------------
+reportedstate | wait_standby
+goalstate     | catchingup
+rule_pos      | 317
+rule_section  | reporting_node
+description   | wait_standby (quorum member), primary converged primary -> catchingup + apply_settings
+-[ RECORD 14 ]+--------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | apply_settings
+rule_pos      | 317
+rule_section  | reporting_node
+description   | wait_standby (quorum member), primary converged primary -> catchingup + apply_settings
+-[ RECORD 15 ]+--------------------------------------------------------------------------------------------
+reportedstate | catchingup
+goalstate     | catchingup
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 20 "spr_s2" (spr_s2:5432): "catchingup"
+-[ RECORD 16 ]+--------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | catchingup
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 20 "spr_s2" (spr_s2:5432): "secondary"
+-[ RECORD 17 ]+--------------------------------------------------------------------------------------------
+reportedstate | primary
+goalstate     | secondary
+rule_pos      | 
+rule_section  | 
+description   | New state is reported by node 19 "spr_s1" (spr_s1:5432): "primary"
+-[ RECORD 18 ]+--------------------------------------------------------------------------------------------
+reportedstate | secondary
+goalstate     | report_lsn
+rule_pos      | 367
+rule_section  | reporting_node
+description   | MS-failover fan-out: secondary/catchingup, not yet converged -> report_lsn (1 of 4)
+

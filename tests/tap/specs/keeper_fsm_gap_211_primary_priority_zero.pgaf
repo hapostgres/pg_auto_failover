@@ -1,0 +1,90 @@
+# Regression spec for MonitorFSM[] pos 210/211 ("alone in group,
+# candidatePriority zero", src/monitor/group_state_machine.c).
+#
+# This spec originally documented a real gap: pos 211 ("alone in group,
+# candidatePriority zero -> report_lsn") fired even when the lone remaining
+# node was already serving as primary, and KeeperFSM[] (src/bin/pg_autoctl/
+# fsm.c) has no PRIMARY_STATE -> REPORT_LSN_STATE row -- so the node got
+# stuck reporting "primary" forever, still accepting writes, while the
+# monitor believed it had been demoted.
+#
+# The fix is on the monitor side, not the keeper side: demoting the
+# cluster's only remaining writable node to report_lsn once every other
+# node is gone serves no purpose (there is no alternative candidate left to
+# promote instead), so pos 210 now assigns SINGLE instead, exactly as a
+# candidate-eligible lone primary already gets via pos 209.
+#
+# This spec now asserts that fixed behavior:
+#
+#   1. node2 is promoted to primary, then its own candidate-priority is set
+#      to 0.
+#   2. node1 (now the only secondary) is dropped, leaving node2 alone in the
+#      group -- still reporting PRIMARY_STATE, since nothing prompts it to
+#      change role on its own.
+#   3. The monitor recomputes: groupHasExactlyOneNode is now true, node2 is
+#      still primary-role (reportedState in {primary, wait_primary,
+#      join_primary, apply_settings}), and its candidate priority is 0 (not
+#      eligible) -- pos 210 fires and the monitor assigns SINGLE.
+#   4. node2's keeper has an ordinary PRIMARY_STATE -> SINGLE_STATE
+#      transition (KeeperFSM[]), so it actually converges: reportedstate
+#      becomes "single", matching the assigned goal.
+#
+# pos 210's own condition is gated on node2's *reported* state alone (not
+# IsInPrimaryState(), which also requires goalState to already agree) --
+# an earlier version of this row used isInPrimaryState=true and, live in
+# this exact scenario, self-undermined one dispatch after firing: assigning
+# SINGLE changed goalState away from what IsInPrimaryState() requires, so
+# the row stopped matching on the very next dispatch and pos 211 (no such
+# requirement) fired right behind it, overwriting the assignment back to
+# REPORT_LSN. This spec is what caught that oscillation live.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+step test_001_promote_node2_and_zero_its_priority {
+    promote node2
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+    exec node2  pg_autoctl set node candidate-priority 0
+}
+
+step test_002_drop_secondary_leaves_lone_priority_zero_primary {
+    exec node1  pg_autoctl drop node --no-wait
+    wait until node1 stopped  timeout 60s
+    # The monitor now sees exactly one node (node2) in the group, still
+    # reporting "primary", with candidate-priority 0 -- pos 210 must fire
+    # and assign "single" (not pos 211's "report_lsn": that would strand a
+    # node with no alternative candidate left to hand off to).
+    wait until node2 assigned-state = single  timeout 60s
+}
+
+step test_003_node2_converges_to_single {
+    # node2 has an ordinary PRIMARY_STATE -> SINGLE_STATE transition
+    # (KeeperFSM[]), so unlike the original report_lsn assignment, this one
+    # is actually reachable -- confirm it converges rather than getting
+    # stuck reporting "primary" forever.
+    wait until node2 state is single  timeout 60s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { single }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { single }
+}

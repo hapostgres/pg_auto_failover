@@ -314,7 +314,9 @@ jobs:
           - { PGVERSION: 19, schedule: quick }
           # node: create_standby_with_pgdata, maintenance_and_drop, auth,
           #       monitor_disabled, replace_monitor, extension_update,
-          #       debian_clusters, tablespaces
+          #       debian_clusters, tablespaces, fsm_step_report_advance,
+          #       replication_stall/demote_timeout/timeline_fork deadlocks
+          #       — see tests/tap/schedules/node.sch for the full list
           - { PGVERSION: 14, schedule: node }
           - { PGVERSION: 15, schedule: node }
           - { PGVERSION: 16, schedule: node }
@@ -332,6 +334,7 @@ jobs:
           - { PGVERSION: 17, schedule: multi-alternate }
           - { PGVERSION: 17, schedule: multi-misc }
           - { PGVERSION: 17, schedule: multi-async }
+          - { PGVERSION: 17, schedule: node-fsm-gaps }
           - { PGVERSION: 17, schedule: citus-1 }
           - { PGVERSION: 17, schedule: citus-2 }
           # citus on PG18 (supported); allow failure until officially validated

@@ -176,6 +176,20 @@ CREATE TABLE pgautofailover.node
  -- we expect few rows and lots of UPDATE, let's benefit from HOT
  WITH (fillfactor = 25);
 
+-- Mirrors group_state_machine.h's MonitorFSMSection: which of the three
+-- real control-flow regions of the monitor's declarative dispatch table
+-- (MonitorFSM[] in group_state_machine.c) a rule belongs to. See dump_fsm()
+-- and pgautofailover.fsm below, and the rule_section column on
+-- pgautofailover.event.
+CREATE TYPE pgautofailover.fsm_section
+    AS ENUM
+ (
+    'api_triggered',
+    'early_checks',
+    'reporting_node',
+    'primary_node'
+ );
+
 CREATE TABLE pgautofailover.event
  (
     eventid           bigserial not null,
@@ -194,6 +208,32 @@ CREATE TABLE pgautofailover.event
     candidatepriority int,
     replicationquorum bool,
     description       text,
+
+    -- Which MonitorFSM[] row this event is attributed to (see
+    -- CurrentMonitorFSMRulePos in notifications.h for the mechanism): set
+    -- for the whole duration of DispatchMonitorFSMRule's call to a row,
+    -- including everything that row's own extraAction runs -- which
+    -- covers BOTH operator-triggered SQL functions (dispatched via
+    -- ProceedGroupStateForApiTrigger, itself a DispatchMonitorFSMRule
+    -- call) and ProceedGroupStateForMSFailover's raw AssignGoalState
+    -- calls (only ever reached from inside an outer row's extraAction,
+    -- e.g. pos 305/363 -- see ActionRunMultiStandbyFailoverCascade/
+    -- ActionRunPlainMSFailoverCascade). Neither is NULL: both get
+    -- attributed to that OUTER triggering row, not a row of their own,
+    -- since MS-failover's candidate-selection internals were never
+    -- decomposed into declarative rows (see this array's own comment on
+    -- BuildCandidateList/PromoteSelectedNode) -- this can be misleading
+    -- (an event from PromoteSelectedNode's LSN-driven promotion decision
+    -- shows up attributed to pos 305/363's own, quite different,
+    -- comment). Truly NULL only when the assignment happened from a code
+    -- path that never runs inside any DispatchMonitorFSMRule call at all
+    -- (e.g. perform_failover()'s own candidate-priority bookkeeping in
+    -- node_active_protocol.c, or a handful of other NotifyStateChange
+    -- call sites outside group_state_machine.c entirely). rule_pos is the
+    -- row's human-facing position (see dump_fsm()/pgautofailover.fsm),
+    -- not an array index.
+    rule_pos          int,
+    rule_section      pgautofailover.fsm_section,
 
     PRIMARY KEY (eventid)
  );
@@ -228,6 +268,117 @@ CREATE TABLE pgautofailover.accepted_timeline
 
     PRIMARY KEY (formationid, groupid, decided_at)
  );
+
+-- Exposes the monitor's declarative dispatch table (MonitorFSM[] in
+-- group_state_machine.c) to SQL, one row per rule, in first-match-wins
+-- order -- see dump_fsm()'s own C-side comment for exactly what this does
+-- and doesn't cover. pgautofailover.event.rule_pos/rule_section (added
+-- above) join back to this view's pos column to show which rule produced
+-- a given event. section is plain text here (not pgautofailover.fsm_section):
+-- an api_triggered row's section names its specific operator-triggered
+-- entry point too, e.g. "api_triggered: remove_node".
+CREATE FUNCTION pgautofailover.dump_fsm()
+RETURNS TABLE
+ (
+    pos                          int,
+    section                      text,
+    comment                      text,
+    active_node_current_state    text,
+    other_node_current_state     text,
+    candidate_node_current_state text,
+    active_node_conditions       text,
+    other_node_conditions        text,
+    candidate_node_conditions    text,
+    group_conditions             text,
+    active_node_assigned_state   pgautofailover.replication_state,
+    other_node_assigned_state    pgautofailover.replication_state,
+    has_extra_action             bool,
+    section_path                 text
+ )
+LANGUAGE C SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$dump_fsm$$;
+
+grant execute on function pgautofailover.dump_fsm() to autoctl_node;
+
+-- section_path is cast to ltree here (a plain SQL cast, going through
+-- Postgres's own ordinary type-casting machinery) rather than in the C
+-- function itself: dump_fsm() only ever builds the dotted text, this view
+-- is the sole place pgautofailover takes a dependency on ltree.
+CREATE VIEW pgautofailover.fsm AS
+    SELECT pos,
+           section,
+           comment,
+           active_node_current_state,
+           other_node_current_state,
+           candidate_node_current_state,
+           active_node_conditions,
+           other_node_conditions,
+           candidate_node_conditions,
+           group_conditions,
+           active_node_assigned_state,
+           other_node_assigned_state,
+           has_extra_action,
+           section_path::ltree AS section_path
+      FROM pgautofailover.dump_fsm()
+     ORDER BY pos;
+
+-- Flat, fully-resolved (pos, current_state, assigned_state) edges derived
+-- from MonitorFSM[] -- see dump_fsm_edges()'s own C-side comment. Never
+-- queried directly by an operator; check_fsm_reachability() below is built
+-- on top of it.
+CREATE FUNCTION pgautofailover.dump_fsm_edges()
+RETURNS TABLE
+ (
+    pos            int,
+    current_state  pgautofailover.replication_state,
+    assigned_state pgautofailover.replication_state
+ )
+LANGUAGE C SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$dump_fsm_edges$$;
+
+grant execute on function pgautofailover.dump_fsm_edges() to autoctl_node;
+
+-- Compares the monitor's own declarative dispatch table against a keeper's
+-- KeeperFSM[] edges (serialized to JSON by KeeperFSMToJSON(),
+-- src/bin/pg_autoctl/fsm.c, and sent here by "pg_autoctl inspect fsm check")
+-- and returns every monitor edge with no matching keeper entry -- an empty
+-- result means every transition the monitor can ever assign has somewhere
+-- for the keeper to go. keeper_edges is expected to be a jsonb array of
+-- {"current": ..., "assigned": ...} objects, one per KeeperFSMTransition
+-- row. "current" can be the literal string "any" (KeeperFSMToJSON()'s own
+-- sentinel for a row whose real .current is ANY_STATE): matched against
+-- every e.current_state without ever casting it to
+-- pgautofailover.replication_state, via a CASE (not "k.current = 'any' OR
+-- k.current::...= e.current_state", which does not reliably guarantee the
+-- cast is skipped once the left side matches -- CASE WHEN/THEN is the only
+-- construct Postgres guarantees short-circuits). Any other current value,
+-- and "assigned" always, still go through the enum cast unconditionally --
+-- a keeper reporting a state name this enum doesn't recognize still fails
+-- loudly, with a real cast error, rather than silently never matching.
+CREATE FUNCTION pgautofailover.check_fsm_reachability(keeper_edges jsonb)
+RETURNS TABLE
+ (
+    pos            int,
+    current_state  pgautofailover.replication_state,
+    assigned_state pgautofailover.replication_state,
+    comment        text
+ )
+LANGUAGE sql
+AS $$
+    SELECT e.pos, e.current_state, e.assigned_state, f.comment
+      FROM pgautofailover.dump_fsm_edges() e
+      JOIN pgautofailover.fsm f ON f.pos = e.pos
+     WHERE NOT EXISTS (
+       SELECT 1
+         FROM jsonb_to_recordset(keeper_edges) AS k(current text, assigned text)
+        WHERE k.assigned::pgautofailover.replication_state = e.assigned_state
+          AND CASE WHEN k.current = 'any' THEN true
+                   ELSE k.current::pgautofailover.replication_state = e.current_state
+              END)
+     ORDER BY e.pos;
+$$;
+
+grant execute on function pgautofailover.check_fsm_reachability(jsonb) to autoctl_node;
 
 GRANT SELECT ON ALL TABLES IN SCHEMA pgautofailover TO autoctl_node;
 
@@ -560,7 +711,8 @@ with last_events as
          nodeid, groupid, nodename, nodehost, nodeport,
          reportedstate, goalstate,
          reportedrepstate, reportedtli, reportedlsn,
-         candidatepriority, replicationquorum, description
+         candidatepriority, replicationquorum, description,
+         rule_pos, rule_section
     from pgautofailover.event
 order by eventid desc
    limit count
@@ -587,7 +739,8 @@ with last_events as
            nodeid, groupid, nodename, nodehost, nodeport,
            reportedstate, goalstate,
            reportedrepstate, reportedtli, reportedlsn,
-           candidatepriority, replicationquorum, description
+           candidatepriority, replicationquorum, description,
+           rule_pos, rule_section
       from pgautofailover.event
      where formationid = formation_id
   order by eventid desc
@@ -616,7 +769,8 @@ with last_events as
            nodeid, groupid, nodename, nodehost, nodeport,
            reportedstate, goalstate,
            reportedrepstate, reportedtli, reportedlsn,
-           candidatepriority, replicationquorum, description
+           candidatepriority, replicationquorum, description,
+           rule_pos, rule_section
       from pgautofailover.event
      where formationid = formation_id
        and groupid = group_id

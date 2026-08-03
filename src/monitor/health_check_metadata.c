@@ -28,6 +28,7 @@
 #include "pgstat.h"
 #include "utils/builtins.h"
 #include "utils/memutils.h"
+#include "utils/resowner.h"
 #include "utils/snapmgr.h"
 
 
@@ -76,13 +77,56 @@ LoadNodeHealthList(void)
 
 		pgstat_report_activity(STATE_RUNNING, query.data);
 
-		spiStatus = SPI_execute(query.data, false, 0);
-
 		/*
 		 * When we start the monitor during an upgrade (from 1.3 to 1.4), the
 		 * background worker might be reading the 1.3 pgautofailover catalogs
-		 * still, where the "nodehost" column does not exist.
+		 * still, where the "nodehost" column does not exist. The same
+		 * happens for the brief window a regress/isolation test spends with
+		 * the extension deliberately left at a non-2.3 (or dropped) schema
+		 * (dummy_update.sql, upgrade.sql): the query below is a genuine
+		 * parse-time ereport(ERROR) in either case, not a soft SPI-status
+		 * failure SPI_execute() itself can report -- it always throws,
+		 * aborting the enclosing transaction, so it has to be caught with a
+		 * subtransaction here rather than checked via spiStatus after the
+		 * fact (the "if (spiStatus != SPI_OK_SELECT)" shape this comment
+		 * used to describe never actually ran for this case; it only
+		 * covered a SPI-level failure with no matching real code path).
 		 */
+		MemoryContext spiErrContext = CurrentMemoryContext;
+		ResourceOwner spiErrOwner = CurrentResourceOwner;
+
+		BeginInternalSubTransaction(NULL);
+
+		PG_TRY();
+		{
+			spiStatus = SPI_execute(query.data, false, 0);
+
+			ReleaseCurrentSubTransaction();
+			MemoryContextSwitchTo(spiErrContext);
+			CurrentResourceOwner = spiErrOwner;
+		}
+		PG_CATCH();
+		{
+			ErrorData *edata;
+
+			MemoryContextSwitchTo(spiErrContext);
+			edata = CopyErrorData();
+			FlushErrorState();
+
+			RollbackAndReleaseCurrentSubTransaction();
+			MemoryContextSwitchTo(spiErrContext);
+			CurrentResourceOwner = spiErrOwner;
+
+			ereport(WARNING,
+					(errmsg("health check skipping this round: %s", edata->message)));
+
+			FreeErrorData(edata);
+
+			EndSPITransaction();
+			return NIL;
+		}
+		PG_END_TRY();
+
 		if (spiStatus != SPI_OK_SELECT)
 		{
 			EndSPITransaction();

@@ -38,6 +38,7 @@ typedef struct MonitorEventsHeaders
 	int maxEventIdSize;
 	int maxEventTimeSize;
 	int maxEventNodeNameSize;
+	int maxEventRulePosSize;
 	int maxEventDescSize;
 } MonitorEventsHeaders;
 

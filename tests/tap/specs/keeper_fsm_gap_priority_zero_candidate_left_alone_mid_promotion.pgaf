@@ -1,0 +1,120 @@
+# Regression spec for MonitorFSM[] pos 211 ("alone in group, candidatePriority
+# zero -> report_lsn", src/monitor/group_state_machine.c), for its
+# prepare_promotion current_state, and for the matching KeeperFSM[] row
+# added in fsm.c:
+#
+#   {
+#       PREP_PROMOTION_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+#       COMMENT_SECONDARY_TO_REPORT_LSN,
+#       &fsm_report_lsn,
+#       FSM_PHASE_FAILOVER
+#   },
+#
+# When this fix was first written, live pgaftest reproduction was attempted
+# and abandoned: fsm_prepare_standby_for_promotion (the transition INTO
+# prepare_promotion) is a no-op, so in ordinary autonomous operation the
+# monitor's own cascade advances assigned=prepare_promotion straight through
+# to stop_replication within the same heartbeat -- faster than any external
+# test script's own "remove the other peer" SQL call could land in between.
+# See src/monitor/sql/keeper_fsm_edges.sql's own comment for the full story
+# and the static/code-level verification that was used instead at the time.
+#
+# Step mode (PG_AUTOCTL_STEP_MODE, src/bin/pg_autoctl/step_socket.c) removes
+# that race entirely: node3's node-active service never ticks on its own, so
+# the spec can drive it to converge locally to prepare_promotion via one
+# explicit "fsm step node3" and then simply *not issue the next one* for as
+# long as it likes -- there is no cascade to race against, because nothing
+# happens without an explicit command. Once node3 is confirmed frozen there
+# (still unreported to the monitor), the spec zeroes its own candidate
+# priority and force-removes the old primary's row, then a single further
+# "fsm step node3" reports prepare_promotion, receives the newly-applicable
+# report_lsn assignment from pos 211, and performs the transition under
+# test in the very same call.
+#
+# Cluster shape: plain 2-node (no MS-failover candidate-selection ambiguity
+# needed here, unlike the join_secondary sibling spec) -- node3 is the
+# formation's only standby, so failing node1 assigns it straight through
+# secondary -> prepare_promotion with no report_lsn hop at all (confirmed
+# live: querying node3's own assigned-state right after node1 goes away
+# already shows "prepare_promotion", never "report_lsn" first).
+
+cluster {
+    monitor
+    formation {
+        node1
+        node3  suspended  candidate-priority 50
+    }
+}
+
+setup {
+    wait until node3 state = catchingup  timeout 60s
+    fsm step node3
+    fsm step node3
+    fsm step node3
+    wait until node1 state is primary
+        and node3 state is secondary
+        timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_kill_primary_and_converge_locally_to_prepare_promotion {
+    # A hard kill never gives node1 a chance to self-report (unlike a
+    # graceful shutdown, which would report prepare_maintenance on its own
+    # way out and, as a side effect of processing *that* report, cascade a
+    # fresh goal to node3 too) -- so nothing recalculates node3's own goal
+    # state until node3 itself makes contact. node3 never ticks on its own
+    # (suspended), so this explicit "fsm step node3" is what prompts
+    # that contact -- and, in the very same call, discovers the fresh
+    # prepare_promotion assignment and performs the transition into it.
+    # There's no way to observe the assignment without also applying it.
+    # The sleep gives the monitor's own health-check worker (a periodic
+    # background process, unrelated to and slower than any of our
+    # explicit steps) time to actually notice node1 is gone before we
+    # step node3 -- stepping too early would just be a same-state no-op,
+    # since the monitor wouldn't yet have anything new to assign.
+    compose kill node1
+    sleep 30s
+    fsm step node3
+    wait until node3 assigned-state = prepare_promotion  timeout 30s
+}
+
+step test_002_zero_priority_and_remove_old_primary_row {
+    # node3's own current_role is already prepare_promotion (from the step
+    # above), but that has not been reported back to the monitor yet -- the
+    # step above reported the *old* "secondary" state, before transitioning.
+    # This has to happen *before* node3's next contact, not after: the very
+    # next time node3 reports "prepare_promotion" as its current state, the
+    # monitor's ordinary cascade would advance it straight to
+    # stop_replication (a dead end -- see the header comment) unless pos
+    # 211's "alone in group, candidatePriority zero" condition is already
+    # true by then. So the priority drop and the peer removal both need to
+    # land while node3 is still sitting here, frozen, unreported.
+    sql monitor {
+        SELECT pgautofailover.set_node_candidate_priority('default', 'node3', 0);
+    }
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+}
+
+step test_003_node3_converges_straight_to_report_lsn {
+    fsm step node3
+    # The call above already performed the prepare_promotion -> report_lsn
+    # transition under test, but keeper_fsm_step() only reports the state
+    # it had *before* that transition -- one more call is needed for node3
+    # to actually report "report_lsn" back to the monitor.
+    fsm step node3
+    wait until node3 state = report_lsn  timeout 30s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+}

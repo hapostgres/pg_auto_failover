@@ -15,6 +15,7 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 
+#include "group_state_machine.h"
 #include "health_check.h"
 #include "metadata.h"
 #include "formation_metadata.h"
@@ -550,9 +551,6 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	int groupId = 0;
 	int standbyCount = 0;
 
-
-	char message[BUFSIZE] = { 0 };
-
 	if (formation == NULL)
 	{
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -626,17 +624,14 @@ set_formation_number_sync_standbys(PG_FUNCTION_ARGS)
 	/* SetFormationNumberSyncStandbys reports ERROR when returning false */
 	bool success = SetFormationNumberSyncStandbys(formationId, number_sync_standbys);
 
-	/* and now ask the primary to change its settings */
-	LogAndNotifyMessage(
-		message, BUFSIZE,
-		"Setting goal state of " NODE_FORMAT
-		" to apply_settings "
-		"after updating number_sync_standbys to %d for formation %s.",
-		NODE_FORMAT_ARGS(primaryNode),
-		formation->number_sync_standbys,
-		formation->formationId);
-
-	SetNodeGoalState(primaryNode, REPLICATION_STATE_APPLY_SETTINGS, message);
+	/*
+	 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: primary ->
+	 * apply_settings. Kept as this row's own condition too (see that row's
+	 * comment), in addition to the ereport(ERROR) guard above -- belt and
+	 * suspenders.
+	 */
+	(void) ProceedGroupStateForApiTrigger(
+		API_FUNCTION_SET_FORMATION_NUMBER_SYNC_STANDBYS, primaryNode, NULL);
 
 	PG_RETURN_BOOL(success);
 }

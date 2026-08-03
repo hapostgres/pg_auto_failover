@@ -1,0 +1,131 @@
+# Regression spec for MonitorFSM[] pos 209 ("alone in group,
+# candidate-eligible -> single", src/monitor/group_state_machine.c), for its
+# prepare_maintenance current_state -- and for the new pos 208 no-op row
+# added alongside it.
+#
+# Unlike keeper_fsm_gap_209_wait_maintenance.pgaf's own secondary-side
+# scenario (already fixed by adding a KeeperFSM[] row), prepare_maintenance
+# is deliberately NOT wired up the same way: it's the PRIMARY's own
+# pre-maintenance state (start_maintenance() only ever assigns it to a node
+# that .isInPrimaryState, see pos 109/111), entered via
+# fsm_stop_postgres_for_primary_maintenance (fsm.c) -- which cleanly
+# checkpoints and STOPS Postgres, in preparation for handing off to a
+# standby that was assigned PREPARE_PROMOTION_STATE in the very same
+# start_maintenance() call.
+#
+# Investigating this while looking at pos 209's own remaining Step 2a gaps
+# found that "prepare_maintenance -> single" would be a real data-loss bug,
+# not a missing convenience: pos 343 (this same file) lets that standby
+# advance all the way to WAIT_PRIMARY/PRIMARY the moment the old primary's
+# own reportedState merely *converges* to prepare_maintenance, with no
+# requirement that the old primary's row ever be removed first. So a node
+# can sit in prepare_maintenance indefinitely while a different,
+# already-fully-promoted primary is live and taking writes elsewhere -- if
+# that new primary later also vanishes, promoting the OLD node straight to
+# SINGLE would discard everything the new primary committed in between.
+# This is the exact same split-brain risk pos 209's own
+# reportedIsJoinSecondary exclusion already guards against for
+# join_secondary, just reached one step earlier in the handoff.
+#
+# Fixed by adding reportedIsPrepareMaintenance = BOOL_FALSE to pos 209
+# (excluding this source state, mirroring reportedIsJoinSecondary) -- NOT by
+# adding a KeeperFSM[] row. No keeper change was made at all: there's
+# nothing safe to promote it to.
+#
+# That exclusion alone would have been an improvement over a data-loss bug,
+# but a strictly worse *availability* bug on its own: unlike join_secondary
+# (already recognized by node_metadata.c's IsParticipatingInPromotion, so a
+# lone join_secondary node safely no-ops), a lone node reporting
+# prepare_maintenance is recognized by neither that function, IsBeingPromoted,
+# nor IsInPrimaryState (CanTakeWritesInState(prepare_maintenance) is false).
+# Without an explicit match, ProceedGroupStateFromContext's own "primaryNode
+# == NULL && !IsFailoverInProgress(...)" guard would ereport(ERROR) on
+# *every single subsequent heartbeat* from this node -- worse than the
+# original bug, which merely got the node stuck silently. Fixed by adding
+# pos 208, a plain no-op row (same shape as pos 205's own "converged to
+# maintenance" row) matching exactly this "alone, reporting
+# prepare_maintenance" combination.
+#
+# This spec proves both fixes live:
+#
+#   1. node1 (primary) is put into maintenance directly via
+#      pgautofailover.start_maintenance() (the underlying SQL function, not
+#      the `pg_autoctl enable maintenance` CLI -- that CLI blocks polling
+#      for full convergence to "maintenance", which would race against the
+#      very next step below; calling the SQL function directly gives full
+#      control over timing, the same lesson learned constructing
+#      keeper_fsm_gap_priority_zero_fast_forward_left_alone.pgaf). This assigns node1
+#      PREPARE_MAINTENANCE_STATE and node2 (the only standby)
+#      PREPARE_PROMOTION_STATE in the same call.
+#   2. Once node1 is confirmed *assigned* prepare_maintenance (still
+#      converging, Postgres not yet stopped): node2's row is force-removed
+#      (it's still alive and connected, so force=true is required) --
+#      before node2 could ever advance to wait_primary/primary. This makes
+#      "alone in group" true well before any handoff race could resolve
+#      either way.
+#   3. node1 finishes converging (Postgres stops, current_state becomes
+#      prepare_maintenance) with nothing left in its group. Before this
+#      session's fix, pos 209 would have assigned it SINGLE (a data-loss
+#      risk); after the fix, pos 209 declines (reportedIsPrepareMaintenance
+#      exclusion) and pos 208 matches instead (plain no-op).
+#   4. Assert node1 stays parked at prepare_maintenance (goalstate never
+#      becomes single) -- and, to prove pos 208 actually prevents the
+#      ereport(ERROR) rather than just happening not to fire yet, assert
+#      node1's own reporttime keeps advancing well after being left alone:
+#      if pos 208 were missing, every subsequent node_active() call from
+#      node1 would hit that ereport(ERROR) instead of successfully updating
+#      its own report time.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+step test_001_start_maintenance_and_remove_standby_while_still_converging {
+    sql monitor {
+        SELECT pgautofailover.start_maintenance(nodeid)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    wait until node1 assigned-state = prepare_maintenance  timeout 60s
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+}
+
+step test_002_node1_converges_and_stays_parked {
+    wait until node1 state is prepare_maintenance  timeout 60s
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    expect { prepare_maintenance }
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    expect { prepare_maintenance }
+}
+
+step test_003_node1_keeps_checking_in_not_stuck_erroring {
+    sleep 10s
+    sql monitor {
+        SELECT (now() - reporttime) < interval '10 seconds'
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    expect { t }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    expect { prepare_maintenance }
+}

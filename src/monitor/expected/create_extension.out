@@ -2,3 +2,4 @@
 -- Licensed under the PostgreSQL License.
 create extension pgautofailover cascade;
 NOTICE:  installing required extension "btree_gist"
+NOTICE:  installing required extension "ltree"

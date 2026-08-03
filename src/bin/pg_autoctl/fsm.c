@@ -18,6 +18,7 @@
 
 #include "defaults.h"
 #include "keeper.h"
+#include "parson.h"
 #include "pgctl.h"
 #include "fsm.h"
 #include "log.h"
@@ -79,6 +80,10 @@
 
 #define COMMENT_DEMOTE_TIMEOUT_TO_DEMOTED \
 	"Demote timeout expired"
+
+#define COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED \
+	"A different node is taking over as primary, " \
+	"stopping Postgres in case it's still running"
 
 #define COMMENT_STOP_REPLICATION_TO_WAIT_PRIMARY \
 	"Confirmed promotion with the monitor"
@@ -159,6 +164,14 @@
 
 #define COMMENT_REPORT_LSN_TO_SINGLE \
 	"There is no other node anymore, promote this node"
+
+#define COMMENT_WAIT_MAINTENANCE_TO_SINGLE \
+	"Was waiting to be sent to maintenance, but the primary vanished, " \
+	"promote this node"
+
+#define COMMENT_FAST_FORWARD_TO_SINGLE \
+	"Was fetching missing WAL from another standby, but every other node " \
+	"vanished, promote this node with whatever it has"
 
 #define COMMENT_FOLLOW_NEW_PRIMARY \
 	"Switch replication to the new primary"
@@ -389,6 +402,191 @@ KeeperFSMTransition KeeperFSM[] = {
 	},
 
 	/*
+	 * A node resolved by the monitor as "the primary" (GetPrimaryOrDemoted
+	 * NodeInGroupFromList(), group_state_machine.c) is not always reporting
+	 * one of the ordinary primary-track states above: its own goalState can
+	 * be bumped to a writable state by an unrelated later event (e.g. pos
+	 * 209's "alone in group -> single", group_state_machine.c) well before
+	 * its own reportedState has had a chance to converge, so a genuinely
+	 * dead/partitioned node can present almost any reportedState by the
+	 * time the monitor assigns it demoted/demote_timeout (see
+	 * PrimaryNodeReportedStateCanBeResolved's own comment,
+	 * group_state_machine.c, for the full reachability argument -- this is
+	 * exactly the set of states it proves reachable). fsm_stop_postgres is
+	 * the same role-agnostic "make sure Postgres is stopped" action used by
+	 * every primary-track source state above: safe regardless of what this
+	 * node's own Postgres instance was actually doing when it stopped
+	 * reporting.
+	 */
+	{
+		INIT_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		SINGLE_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		CATCHINGUP_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		SECONDARY_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		PREP_PROMOTION_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		STOP_REPLICATION_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		MAINTENANCE_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		PREPARE_MAINTENANCE_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		WAIT_MAINTENANCE_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		REPORT_LSN_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		FAST_FORWARD_STATE, DEMOTED_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
+	 * Same reasoning as the DEMOTED_STATE cluster just above, targeting
+	 * DEMOTE_TIMEOUT_STATE instead: MonitorFSM[] pos 339's own sibling row
+	 * assigns demote_timeout (not demoted) from the same 11 states, plus
+	 * DEMOTED_STATE itself (not a reflexive self-loop against this
+	 * different target).
+	 */
+	{
+		INIT_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		SINGLE_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		DEMOTED_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		CATCHINGUP_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		SECONDARY_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		PREP_PROMOTION_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		STOP_REPLICATION_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		MAINTENANCE_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		PREPARE_MAINTENANCE_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		WAIT_MAINTENANCE_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		REPORT_LSN_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		FAST_FORWARD_STATE, DEMOTE_TIMEOUT_STATE, NODE_KIND_ANY,
+		COMMENT_PRESUMED_DEAD_PRIMARY_TO_DEMOTED,
+		&fsm_stop_postgres,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
 	 * was demoted after a failure, but standby was forcibly removed
 	 */
 	{
@@ -516,6 +714,43 @@ KeeperFSMTransition KeeperFSM[] = {
 		FSM_PHASE_REMOVAL
 	},
 
+	/*
+	 * was waiting for the primary to disable sync replication before going
+	 * to maintenance (a converged, actively-streaming standby -- entering
+	 * WAIT_MAINTENANCE_STATE itself runs no transition function, see its own
+	 * comment below), but the primary was forcibly removed instead: reuse
+	 * fsm_promote_standby exactly like every other converged-standby source
+	 * state above (SECONDARY/CATCHINGUP/PREP_PROMOTION/STOP_REPLICATION/
+	 * REPORT_LSN), since Postgres here is already running and replicating,
+	 * with no special handling wait_maintenance itself needs.
+	 */
+	{
+		WAIT_MAINTENANCE_STATE, SINGLE_STATE, NODE_KIND_ANY,
+		COMMENT_WAIT_MAINTENANCE_TO_SINGLE,
+		&fsm_promote_standby,
+		FSM_PHASE_REMOVAL
+	},
+
+	/*
+	 * was fetching missing WAL from another standby to catch up before
+	 * promotion (a converged-enough standby -- Postgres is already running
+	 * and replicating, same shape as the other converged-standby source
+	 * states above), but every other node vanished, including the peer we
+	 * were fetching from: fsm_fast_forward's own "no upstream found" branch
+	 * already accepts this (skips the fetch, treats local data as the best
+	 * available -- there is nothing more advanced left anywhere to lose),
+	 * so promoting with whatever this node already has is exactly as safe
+	 * as it gets. Reuse fsm_promote_standby exactly like every other
+	 * converged-standby source state -- no separate WAL fetch is attempted
+	 * or needed here, matching PREP_PROMOTION_STATE/STOP_REPLICATION_STATE's
+	 * own direct-to-SINGLE shortcut for "was mid-promotion, peer vanished".
+	 */
+	{
+		FAST_FORWARD_STATE, SINGLE_STATE, NODE_KIND_ANY,
+		COMMENT_FAST_FORWARD_TO_SINGLE,
+		&fsm_promote_standby,
+		FSM_PHASE_REMOVAL
+	},
 
 	/*
 	 * On the Primary, wait for a standby to be ready: WAIT_PRIMARY
@@ -859,6 +1094,152 @@ KeeperFSMTransition KeeperFSM[] = {
 		FSM_PHASE_MAINTENANCE
 	},
 
+	/*
+	 * was waiting for the primary to disable sync replication before going
+	 * to maintenance (a converged, actively-streaming standby, same as the
+	 * other reused source states just above), but the primary was forcibly
+	 * removed and this node's own candidate-priority is 0 -- reuse
+	 * fsm_report_lsn exactly like SECONDARY/CATCHINGUP/MAINTENANCE/
+	 * PREPARE_MAINTENANCE above.
+	 */
+	{
+		WAIT_MAINTENANCE_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_MAINTENANCE
+	},
+
+	/*
+	 * was fetching missing WAL from another standby to catch up before
+	 * promotion (same converged-enough shape as the source states above),
+	 * but every other node vanished and this node's own candidate-priority
+	 * is 0 -- reuse fsm_report_lsn exactly like SECONDARY/CATCHINGUP/
+	 * MAINTENANCE/PREPARE_MAINTENANCE/WAIT_MAINTENANCE above. No WAL fetch
+	 * is attempted here either, same reasoning as FAST_FORWARD_STATE ->
+	 * SINGLE_STATE's own comment.
+	 */
+	{
+		FAST_FORWARD_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
+	 * was mid-promotion (selected as the MS-failover candidate, assigned
+	 * prepare_promotion) but every other node vanished and this node's own
+	 * candidate-priority is 0 -- reuse fsm_report_lsn exactly like every
+	 * other converged-standby source state above. Safe to reuse directly,
+	 * with no intermediate hop: entering prepare_promotion itself runs
+	 * fsm_prepare_standby_for_promotion, which is a no-op (see its own
+	 * comment, fsm_transition.c) -- Postgres is still running, still an
+	 * ordinary streaming standby, completely untouched. fsm_report_lsn's
+	 * own restart (standby_restart_with_current_replication_source,
+	 * primary_standby.c) writes a fresh disconnected-standby recovery
+	 * config and restarts Postgres itself, so it doesn't matter that there
+	 * is no live upstream to reach -- it never tries to reach one.
+	 */
+	{
+		PREP_PROMOTION_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
+	 * was one step further into that same promotion (prepare_promotion's own
+	 * no-op already gave way to fsm_stop_replication, which really did
+	 * promote Postgres onto a new timeline this time) but every other node
+	 * vanished before this node could finish becoming the new primary, and
+	 * its own candidate-priority is 0 -- reuse fsm_report_lsn exactly like
+	 * every other converged-standby source state above.
+	 *
+	 * Unlike prepare_promotion, Postgres here is no longer an ordinary
+	 * streaming standby -- fsm_stop_replication already promoted it, so it's
+	 * a genuinely writable, disconnected primary on its own new timeline.
+	 * That's still safe to hand to fsm_report_lsn unmodified: its own
+	 * restart (standby_restart_with_current_replication_source,
+	 * primary_standby.c) never contacts any peer at all -- it's a purely
+	 * local stop/reconfigure/restart sequence, entirely oblivious to
+	 * whether this instance was ever promoted. Concretely: it calls
+	 * standby_init_replication_source with an all-zeroed upstream (no
+	 * host), so the subsequent restart's own primaryNode.host check
+	 * (IS_EMPTY_STRING_BUFFER) skips the identify-system connection
+	 * attempt entirely, and pg_setup_standby_mode's own identical check
+	 * skips it too -- neither ever needs a reachable primary. It just
+	 * stops Postgres, writes a fresh standby.signal with no
+	 * primary_conninfo, and restarts -- exactly what turns an ordinary
+	 * disconnected standby into a report_lsn candidate elsewhere in this
+	 * table, and Postgres itself doesn't care that this data directory's
+	 * own history includes a promotion: recovery-on-restart is decided
+	 * purely by standby.signal's presence, not by promotion history.
+	 *
+	 * This was previously left as a documented, unfixed gap based on a
+	 * mistaken assumption that reaching report_lsn from here would need
+	 * the same live-primary-dependent rewind/basebackup machinery
+	 * fsm_restart_standby/fsm_rewind_or_init uses elsewhere (for reaching
+	 * catchingup, a materially different target that actually does need to
+	 * stream from someone) -- it doesn't; fsm_report_lsn was already the
+	 * right tool for this row the whole time. See
+	 * keeper_fsm_gap_stop_replication_report_lsn.pgaf for the live
+	 * reproduction, including both ways out documented on pos 211's own
+	 * comment (group_state_machine.c): raising candidate-priority back
+	 * above 0 (report_lsn -> single, already an existing edge, via pos
+	 * 209), or a new node registering and RegisterNode's own existing
+	 * report_lsn-candidate-priority-0 special case (node_active_protocol.c)
+	 * basebackupping from this node and taking over as primary while this
+	 * node follows it back in as a secondary.
+	 */
+	{
+		STOP_REPLICATION_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
+	 * was demoting after losing the primary role (draining timed out, or a
+	 * manual failover put another node in charge) but every other node
+	 * vanished and this node's own candidate-priority is 0 -- reuse
+	 * fsm_report_lsn exactly like every other converged-standby source
+	 * state above. Safe for the same reason as prepare_promotion just
+	 * above: fsm_stop_replication's own default_transaction_read_only=on
+	 * already blocks this node from taking writes while in demote_timeout,
+	 * so no writes have landed here that a real primary elsewhere
+	 * wouldn't also have; fsm_report_lsn's own restart reconfigures and
+	 * restarts Postgres unconditionally, with no live peer required.
+	 */
+	{
+		DEMOTE_TIMEOUT_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
+	/*
+	 * was following a newly-elected primary (report_lsn -> join_secondary,
+	 * Postgres cleanly checkpointed and stopped by
+	 * fsm_checkpoint_and_stop_postgres while switching allegiance) but
+	 * every other node vanished before it could finish, including the new
+	 * primary it was about to follow, and this node's own candidate-
+	 * priority is 0 -- reuse fsm_report_lsn exactly like every other
+	 * converged-standby source state above. Safe for the same reason as
+	 * prepare_promotion above despite Postgres currently being stopped:
+	 * fsm_report_lsn's own restart (standby_restart_with_current_
+	 * replication_source) stops Postgres if running, reconfigures it as a
+	 * disconnected standby, and starts it back up -- it handles "already
+	 * stopped" and "still running" identically, and never needs to reach
+	 * any peer to do it. The data itself is trustworthy: the checkpoint
+	 * that stopped Postgres happened before any new primary could have
+	 * taken a single write this node doesn't already have.
+	 */
+	{
+		JOIN_SECONDARY_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		COMMENT_SECONDARY_TO_REPORT_LSN,
+		&fsm_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
 	{
 		REPORT_LSN_STATE, PREP_PROMOTION_STATE, NODE_KIND_CITUS_WORKER,
 		COMMENT_REPORT_LSN_TO_PREP_PROMOTION,
@@ -1018,6 +1399,22 @@ keeper_fsm_step(Keeper *keeper)
 	}
 
 	/*
+	 * Repair our own groupId/replication slot name if the monitor's view of
+	 * who we are has drifted from ours -- see
+	 * keeper_maybe_update_group_and_slot's own comment for why this can't
+	 * be skipped here: unlike the autonomous tick body
+	 * (service_keeper_node_active), this is also the code path a suspended
+	 * (step-mode) node's every "fsm step"/"fsm step report" goes through,
+	 * and it's the only place such a node ever gets a fresh
+	 * MonitorAssignedState to check against.
+	 */
+	if (!keeper_maybe_update_group_and_slot(keeper, &assignedState))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
 	 * Assign the new state. We skip writing the state file here since we can
 	 * (and should) always get the assigned state from the monitor.
 	 */
@@ -1097,6 +1494,13 @@ keeper_fsm_step_report(Keeper *keeper)
 	{
 		log_fatal("Failed to get the goal state from the monitor, "
 				  "see above for details");
+		return false;
+	}
+
+	/* see keeper_fsm_step's own identical call for why this is here too */
+	if (!keeper_maybe_update_group_and_slot(keeper, &assignedState))
+	{
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -1314,4 +1718,86 @@ print_fsm_for_graphviz(void)
 		transition = KeeperFSM[++transitionIndex];
 	}
 	fformat(stdout, "}\n");
+}
+
+
+/*
+ * KeeperFSMToJSONAppendEdge appends one {"current": ..., "assigned": ...}
+ * object to array for a single KeeperFSMTransition row. current is rendered
+ * as the literal string "any" for ANY_STATE (state_matches()'s wildcard,
+ * e.g. fsm.c's "drop node from any state" rows) instead of
+ * NodeStateToString(ANY_STATE)'s own "#any state#" -- see KeeperFSMToJSON's
+ * own comment for why this sentinel exists and how the SQL side matches it.
+ */
+static void
+KeeperFSMToJSONAppendEdge(JSON_Array *array, NodeState current, NodeState assigned)
+{
+	JSON_Value *jsEntry = json_value_init_object();
+	JSON_Object *jsObj = json_value_get_object(jsEntry);
+
+	json_object_set_string(jsObj, "current",
+						   current == ANY_STATE ? "any" : NodeStateToString(current));
+	json_object_set_string(jsObj, "assigned", NodeStateToString(assigned));
+
+	json_array_append_value(array, jsEntry);
+}
+
+
+/*
+ * KeeperFSMToJSON serializes KeeperFSM[] into a JSON array of
+ * {"current": ..., "assigned": ...} objects -- one per KeeperFSMTransition
+ * row, walked the same way print_fsm_for_graphviz/print_reachable_states
+ * already do. This is the keeper-side half of the monitor/keeper FSM
+ * reachability cross-check: "pg_autoctl inspect fsm check" sends this
+ * verbatim to the monitor's pgautofailover.check_fsm_reachability(jsonb),
+ * which anti-joins it against every edge the monitor's own MonitorFSM[]
+ * table (group_state_machine.c) can produce (see dump_fsm_edges()'s own
+ * comment there) and reports any monitor transition with no matching entry
+ * here.
+ *
+ * A row's own .current can be ANY_STATE -- rendered here as the literal
+ * sentinel "any" (see KeeperFSMToJSONAppendEdge), not expanded into one
+ * edge per concrete state: an earlier version of this function expanded it
+ * against a hand-maintained list of "every real NodeState", which silently
+ * under-covers the real ANY_STATE semantics the moment that list drifts out
+ * of sync with the actual NodeState enum -- a false negative baked
+ * permanently into the fixture, with nothing to ever catch it. Emitting the
+ * wildcard literally instead lets the SQL comparison (check_fsm_reachability(),
+ * and this project's own keeper_fsm_edges.sql regress test) match it against
+ * whatever current_state values pgautofailover.dump_fsm_edges() actually
+ * produces, so it can never drift out of sync with the real state universe.
+ * .assigned is never ANY_STATE in any current KeeperFSM[] row (an
+ * assignment target wildcard has no sensible meaning), so it's passed
+ * through as-is.
+ *
+ * Deliberately omits pgKind and comment: pgKind is not modeled on the
+ * monitor side of this check at all (every Citus-specific KeeperFSM[] edge
+ * already has a NODE_KIND_ANY counterpart with the same (current, assigned)
+ * shape -- see this same file's fsm_mermaid.c-referencing comment), and
+ * comment is purely descriptive, never part of the comparison.
+ *
+ * Returns a malloc'd string (via json_serialize_to_string) the caller must
+ * free with json_free_serialized_string().
+ */
+char *
+KeeperFSMToJSON(void)
+{
+	JSON_Value *jsArray = json_value_init_array();
+	JSON_Array *array = json_value_get_array(jsArray);
+
+	KeeperFSMTransition transition = KeeperFSM[0];
+	int transitionIndex = 0;
+
+	while (transition.current != NO_STATE)
+	{
+		KeeperFSMToJSONAppendEdge(array, transition.current, transition.assigned);
+
+		transition = KeeperFSM[++transitionIndex];
+	}
+
+	char *serialized = json_serialize_to_string(jsArray);
+
+	json_value_free(jsArray);
+
+	return serialized;
 }

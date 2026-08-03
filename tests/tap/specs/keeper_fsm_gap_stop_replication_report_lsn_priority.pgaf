@@ -1,0 +1,137 @@
+# Regression spec for MonitorFSM[] pos 211's stop_replication current_state
+# ("alone in group, candidatePriority zero -> report_lsn",
+# src/monitor/group_state_machine.c), and for the matching KeeperFSM[] row
+# added in fsm.c:
+#
+#   {
+#       STOP_REPLICATION_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+#       COMMENT_SECONDARY_TO_REPORT_LSN,
+#       &fsm_report_lsn,
+#       FSM_PHASE_FAILOVER
+#   },
+#
+# This exercises the first of the two documented ways out of that parked
+# report_lsn state: raising candidate-priority back above 0. The second
+# way out (a new node registers and takes over as primary) is
+# keeper_fsm_gap_stop_replication_report_lsn_new_node.pgaf's own job.
+#
+# Same construction technique as
+# keeper_fsm_gap_priority_zero_candidate_left_alone_mid_promotion.pgaf, one
+# step further: that spec freezes node3 at prepare_promotion and lets
+# pos 211 assign it report_lsn directly (a no-op hop in, so nothing here
+# needs step-mode to hold still for it). Reaching stop_replication instead
+# needs one more explicit "fsm step node3" first, since entering
+# stop_replication is *not* a no-op -- fsm_stop_replication really does
+# call fsm_promote_standby, physically promoting node3's own Postgres onto
+# a new timeline -- and step mode is exactly what lets the spec hold node3
+# frozen there, unreported, for as long as it takes to zero its priority
+# and remove the old primary's row before node3's next contact.
+#
+# Cluster shape: plain 2-node, same reasoning as the prepare_promotion
+# sibling spec -- node3 is the formation's only standby, so failing node1
+# assigns it straight through secondary -> prepare_promotion -> (this
+# spec's own extra step) stop_replication, with no report_lsn hop in
+# between.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node3  suspended  candidate-priority 50
+    }
+}
+
+setup {
+    wait until node3 state = catchingup  timeout 60s
+    fsm step node3
+    fsm step node3
+    fsm step node3
+    wait until node1 state is primary
+        and node3 state is secondary
+        timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_kill_primary_and_converge_locally_to_stop_replication {
+    # First "fsm step node3": reports "secondary" (unchanged), receives
+    # the fresh prepare_promotion assignment, and performs that hop in the
+    # same call (fsm_prepare_standby_for_promotion is a no-op -- Postgres
+    # is untouched, still an ordinary streaming standby).
+    #
+    # Second "fsm step node3": reports "prepare_promotion" (the state the
+    # first call just reached, not yet reported before now), receives the
+    # ordinary promotion cascade's next assignment (stop_replication --
+    # node1's row still exists at this point, just unhealthy, so this is
+    # the everyday 2-node failover path, not pos 211 yet), and performs
+    # *that* hop in the same call -- this is where node3's own Postgres
+    # actually gets promoted (fsm_stop_replication -> fsm_promote_standby).
+    compose kill node1
+    sleep 30s
+    fsm step node3
+    wait until node3 assigned-state = prepare_promotion  timeout 30s
+    fsm step node3
+    wait until node3 assigned-state = stop_replication  timeout 30s
+}
+
+step test_002_zero_priority_and_remove_old_primary_row {
+    # Same timing requirement as the prepare_promotion sibling spec: both
+    # of these have to land before node3's next contact, while it's still
+    # frozen at stop_replication, unreported -- otherwise the ordinary
+    # cascade would carry on past stop_replication instead of pos 211's
+    # "alone in group, candidatePriority zero" condition ever getting a
+    # chance to apply.
+    sql monitor {
+        SELECT pgautofailover.set_node_candidate_priority('default', 'node3', 0);
+    }
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+}
+
+step test_003_node3_converges_to_report_lsn {
+    # First call performs the stop_replication -> report_lsn transition
+    # under test (reports "stop_replication", receives report_lsn from
+    # pos 211, applies it via the new KeeperFSM[] row -- fsm_report_lsn,
+    # no live peer contacted). Second call reports the result back.
+    fsm step node3
+    fsm step node3
+    wait until node3 state = report_lsn  timeout 30s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+}
+
+step test_004_raise_priority_and_converge_to_single {
+    # Respects the operator's own candidate-priority=0 declaration the
+    # whole time up to here: nothing auto-promotes node3 while it stays
+    # 0 (BuildCandidateList/GroupListCandidates would never select it).
+    # Only once priority is explicitly raised back above 0 does pos 209
+    # ("alone in group, candidate-eligible -> single") start matching, and
+    # report_lsn -> single is already an ordinary existing KeeperFSM[]
+    # edge -- no new keeper code needed for this half.
+    sql monitor {
+        SELECT pgautofailover.set_node_candidate_priority('default', 'node3', 50);
+    }
+    fsm step node3
+    fsm step node3
+    wait until node3 state = single  timeout 30s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { single }
+}
+
+sequence
+    test_001_kill_primary_and_converge_locally_to_stop_replication
+    test_002_zero_priority_and_remove_old_primary_row
+    test_003_node3_converges_to_report_lsn
+    test_004_raise_priority_and_converge_to_single

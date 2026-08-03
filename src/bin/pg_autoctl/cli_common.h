@@ -182,6 +182,7 @@ int cli_create_node_getopts(int argc, char **argv,
 							KeeperConfig *options);
 
 int cli_getopt_pgdata(int argc, char **argv);
+int cli_getopt_pgdata_or_json(int argc, char **argv);
 void prepare_keeper_options(KeeperConfig *options);
 
 void set_first_pgctl(PostgresSetup *pgSetup);

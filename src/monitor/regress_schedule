@@ -31,6 +31,9 @@
 # exclusively.
 
 test: create_extension
+test: fsm
+test: check_fsm_reachability
+test: keeper_fsm_edges
 test: monitor
 test: workers
 test: node_active_protocol
@@ -38,9 +41,11 @@ test: guard_data_loss
 test: fast_forward
 test: drop_node
 test: stale_primary_report
+test: candidate_count_gate
 test: lock_and_fetch_migration
 test: timeline_fork_detection
 test: failover_candidate_leaves_secondary
+test: cluster_init_failover_rule_attribution
 test: dummy_update
 test: drop_extension
 test: upgrade

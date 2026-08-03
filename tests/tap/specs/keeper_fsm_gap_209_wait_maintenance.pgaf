@@ -1,0 +1,87 @@
+# Regression spec for MonitorFSM[] pos 209 ("alone in group,
+# candidate-eligible -> single", src/monitor/group_state_machine.c).
+#
+# This spec originally documented a real gap: pos 209's NodeStatePattern is
+# willing to assign SINGLE_STATE to a lone remaining node reporting
+# WAIT_MAINTENANCE_STATE as its current_state, but KeeperFSM[]
+# (src/bin/pg_autoctl/fsm.c) had no WAIT_MAINTENANCE_STATE -> SINGLE_STATE
+# row at all -- node2 would get stuck reporting wait_maintenance forever,
+# logging "pg_autoctl does not know how to reach state \"single\" from
+# \"wait_maintenance\"".
+#
+# Fixed by adding that row to KeeperFSM[], reusing fsm_promote_standby (the
+# same function already reused by every other converged-standby source
+# state: SECONDARY/CATCHINGUP/PREP_PROMOTION/STOP_REPLICATION/REPORT_LSN) --
+# entering WAIT_MAINTENANCE_STATE itself runs no transition function (a
+# converged standby just marks intent to go to maintenance, Postgres keeps
+# running and replicating normally), so promoting it exactly like any other
+# actively-replicating standby is safe.
+#
+# This spec now asserts that fixed behavior:
+#
+#   1. node1 (primary) is network-disconnected, so it can never acknowledge
+#      a replication-quorum change.
+#   2. node2 (the only secondary, hence the last quorum member) is told to
+#      enter maintenance. Per service_keeper.c's own comment, a secondary
+#      that is the last quorum member goes SECONDARY -> WAIT_MAINTENANCE
+#      first, waiting for the primary to drop it from synchronous_standby_
+#      names before proceeding to MAINTENANCE -- since node1 can never see
+#      or acknowledge that request, node2 is durably stuck at
+#      WAIT_MAINTENANCE_STATE, not a narrow timing window.
+#   3. node1 is dropped directly via pgautofailover.remove_node(), bypassing
+#      node1 entirely (it doesn't need to cooperate for the monitor's own
+#      catalog to drop it) -- leaving node2 alone in the group, still
+#      reporting wait_maintenance.
+#   4. The monitor recomputes: groupHasExactlyOneNode is now true, node2's
+#      own reported current_state is "wait_maintenance", and its candidate
+#      priority is > 0, so pos 209 fires and the monitor assigns SINGLE.
+#   5. node2's keeper now has a matching KeeperFSM[] row and actually
+#      converges to single.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+}
+
+teardown {
+    compose down
+}
+
+step test_001_disconnect_primary {
+    network disconnect node1
+}
+
+step test_002_secondary_stuck_at_wait_maintenance {
+    # pg_autoctl enable maintenance itself polls for convergence and exits
+    # non-zero when it can't reach "maintenance" quickly (the primary is
+    # unreachable, exactly the point of this scenario) -- the real state
+    # transition still happens regardless of this command's own exit code,
+    # confirmed by the wait below.
+    exec-fails node2  pg_autoctl enable maintenance
+    wait until node2 state is wait_maintenance  timeout 60s
+}
+
+step test_003_drop_primary_converges_to_single {
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    wait until node2 assigned-state = single  timeout 60s
+    wait until node2 state is single  timeout 60s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { single }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+    expect { single }
+}

@@ -34,9 +34,18 @@ variable is required. All commands in this group are safe to run while
       tune      Compute and log some Postgres tuning options
 
     pg_autoctl inspect fsm
-      state  Read the keeper's state from disk and display it
-      list   List reachable FSM states from current state
-      gv     Output the FSM as a .gv program suitable for graphviz/dot
+      state    Read the keeper's state from disk and display it
+      list     List reachable FSM states from current state
+      check    Check that every monitor FSM transition has a matching keeper edge
+      gv       Output the FSM as a .gv program suitable for graphviz/dot
+      mermaid  Output the FSM as Mermaid stateDiagram-v2 programs, split by phase for readability
+
+    pg_autoctl inspect fsm mermaid
+      init           Mermaid diagram: how a node comes into existence or rejoins
+      steady-state   Mermaid diagram: normal operation, no failure
+      failover       Mermaid diagram: primary failover/promotion, including multi-standby candidate election
+      maintenance    Mermaid diagram: planned maintenance
+      removal        Mermaid diagram: node removal/drop
 
     pg_autoctl inspect show
       ipaddr    Print this node's IP address information

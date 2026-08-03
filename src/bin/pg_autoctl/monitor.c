@@ -115,6 +115,13 @@ typedef struct MonitorExtensionVersionParseContext
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
 
+typedef struct FsmReachabilityParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	FsmReachabilityResult *result;
+	bool parsedOK;
+} FsmReachabilityParseContext;
+
 
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
@@ -134,6 +141,7 @@ static void printFormationSettings(void *ctx, PGresult *result);
 static void printFormationURI(void *ctx, PGresult *result);
 static void parseCoordinatorNode(void *ctx, PGresult *result);
 static void parseExtensionVersion(void *ctx, PGresult *result);
+static void parseFsmReachabilityResult(void *ctx, PGresult *result);
 
 static bool prepare_connection_to_current_system_user(Monitor *source,
 													  Monitor *target);
@@ -1229,6 +1237,102 @@ monitor_report_timeline_history(Monitor *monitor, int64_t nodeId,
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_check_fsm_reachability sends this node's own KeeperFSM[] edges
+ * (as encoded by KeeperFSMToJSON()) to the monitor's
+ * pgautofailover.check_fsm_reachability(jsonb), and fills in result with
+ * every monitor FSM transition (MonitorFSM[], group_state_machine.c) that
+ * has no matching keeper edge. An empty result (result->count == 0) means
+ * every transition the monitor can ever assign has somewhere for this
+ * keeper to go. Called from "pg_autoctl inspect fsm check"
+ * (cli_do_fsm.c).
+ */
+bool
+monitor_check_fsm_reachability(Monitor *monitor,
+							   const char *keeperEdgesJSON,
+							   FsmReachabilityResult *result)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pos, current_state, assigned_state, comment "
+		"  FROM pgautofailover.check_fsm_reachability($1::jsonb)";
+
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+
+	FsmReachabilityParseContext context = { { 0 }, result, false };
+
+	paramValues[0] = keeperEdgesJSON;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues,
+								   &context, parseFsmReachabilityResult))
+	{
+		log_error("Failed to check FSM reachability against the monitor");
+
+		return false;
+	}
+
+	return context.parsedOK;
+}
+
+
+/*
+ * parseFsmReachabilityResult parses the result of
+ * pgautofailover.check_fsm_reachability(jsonb) into the given
+ * FsmReachabilityResult.
+ */
+static void
+parseFsmReachabilityResult(void *ctx, PGresult *result)
+{
+	FsmReachabilityParseContext *context = (FsmReachabilityParseContext *) ctx;
+	FsmReachabilityResult *fsmResult = context->result;
+
+	int nTuples = PQntuples(result);
+
+	if (nTuples > FSM_REACHABILITY_MISMATCH_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only up "
+				  "to %d FSM reachability mismatches at the moment",
+				  nTuples, FSM_REACHABILITY_MISMATCH_MAX_COUNT);
+		context->parsedOK = false;
+		return;
+	}
+
+	if (PQnfields(result) != 4)
+	{
+		log_error("Query returned %d columns, expected 4", PQnfields(result));
+		context->parsedOK = false;
+		return;
+	}
+
+	fsmResult->count = nTuples;
+
+	for (int i = 0; i < nTuples; i++)
+	{
+		FsmReachabilityMismatch *mismatch = &(fsmResult->mismatches[i]);
+
+		if (!stringToInt(PQgetvalue(result, i, 0), &mismatch->pos))
+		{
+			log_error("Failed to parse FSM reachability pos \"%s\"",
+					  PQgetvalue(result, i, 0));
+			context->parsedOK = false;
+			return;
+		}
+
+		strlcpy(mismatch->currentState, PQgetvalue(result, i, 1),
+				sizeof(mismatch->currentState));
+		strlcpy(mismatch->assignedState, PQgetvalue(result, i, 2),
+				sizeof(mismatch->assignedState));
+		strlcpy(mismatch->comment, PQgetvalue(result, i, 3),
+				sizeof(mismatch->comment));
+	}
+
+	context->parsedOK = true;
 }
 
 
@@ -2804,7 +2908,7 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 		{
 			sql =
 				"SELECT eventTime, nodeid, groupid, "
-				"       reportedstate, goalState, description "
+				"       reportedstate, goalState, description, rule_pos "
 				"  FROM pgautofailover.last_events($1, count => $2)";
 
 			countStr = intToString(count);
@@ -2822,7 +2926,7 @@ monitor_print_last_events(Monitor *monitor, char *formation, int group, int coun
 		{
 			sql =
 				"SELECT eventTime, nodeid, groupid, "
-				"       reportedstate, goalState, description "
+				"       reportedstate, goalState, description, rule_pos "
 				"  FROM pgautofailover.last_events($1,$2,$3)";
 
 			countStr = intToString(count);
@@ -2900,7 +3004,7 @@ monitor_print_last_events_as_json(Monitor *monitor,
 		{
 			sql = "SELECT jsonb_pretty("
 				  "coalesce(jsonb_agg(row_to_json(event)), '[]'))"
-				  " FROM * FROM pgautofailover.last_events($1,$2,$3) as event";
+				  " FROM pgautofailover.last_events($1,$2,$3) as event";
 
 			countStr = intToString(count);
 			groupStr = intToString(group);
@@ -2958,20 +3062,20 @@ printLastEvents(void *ctx, PGresult *result)
 
 	log_trace("printLastEvents: %d tuples", nTuples);
 
-	if (PQnfields(result) != 6)
+	if (PQnfields(result) != 7)
 	{
-		log_error("Query returned %d columns, expected 6", PQnfields(result));
+		log_error("Query returned %d columns, expected 7", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
 
-	fformat(stdout, "%30s | %6s | %19s | %19s | %s\n",
+	fformat(stdout, "%30s | %6s | %19s | %19s | %6s | %s\n",
 			"Event Time", "Node",
-			"Current State", "Assigned State", "Comment");
-	fformat(stdout, "%30s-+-%6s-+-%19s-+-%19s-+-%10s\n",
+			"Current State", "Assigned State", "Rule", "Comment");
+	fformat(stdout, "%30s-+-%6s-+-%19s-+-%19s-+-%6s-+-%10s\n",
 			"------------------------------",
 			"------", "-------------------",
-			"-------------------", "----------");
+			"-------------------", "------", "----------");
 
 	for (currentTupleIndex = 0; currentTupleIndex < nTuples; currentTupleIndex++)
 	{
@@ -2981,14 +3085,16 @@ printLastEvents(void *ctx, PGresult *result)
 		char *currentState = PQgetvalue(result, currentTupleIndex, 3);
 		char *goalState = PQgetvalue(result, currentTupleIndex, 4);
 		char *description = PQgetvalue(result, currentTupleIndex, 5);
+		bool rulePosIsNull = PQgetisnull(result, currentTupleIndex, 6);
+		char *rulePos = rulePosIsNull ? "" : PQgetvalue(result, currentTupleIndex, 6);
 		char node[BUFSIZE];
 
 		/* for our grid alignment output it's best to have a single col here */
 		sformat(node, BUFSIZE, "%s/%s", groupId, nodeId);
 
-		fformat(stdout, "%30s | %6s | %19s | %19s | %s\n",
+		fformat(stdout, "%30s | %6s | %19s | %19s | %6s | %s\n",
 				eventTime, node,
-				currentState, goalState, description);
+				currentState, goalState, rulePos, description);
 	}
 	fformat(stdout, "\n");
 
@@ -3028,7 +3134,7 @@ monitor_get_last_events(Monitor *monitor, char *formation, int group, int count,
 				"       reportedstate, goalState, "
 				"       reportedrepstate, reportedtli, reportedlsn, "
 				"       candidatepriority, replicationquorum, "
-				"       description "
+				"       description, rule_pos, rule_section "
 				"  FROM pgautofailover.last_events($1, count => $2)";
 
 			countStr = intToString(count);
@@ -3047,10 +3153,11 @@ monitor_get_last_events(Monitor *monitor, char *formation, int group, int count,
 			sql =
 				"SELECT eventId, to_char(eventTime, 'YYYY-MM-DD HH24:MI:SS'), "
 				"       formationId, nodeid, groupid, "
+				"       nodename, nodehost, nodeport, "
 				"       reportedstate, goalState, "
 				"       reportedrepstate, reportedtli, reportedlsn, "
 				"       candidatepriority, replicationquorum, "
-				"       description "
+				"       description, rule_pos, rule_section "
 				"  FROM pgautofailover.last_events($1,$2,$3)";
 
 			countStr = intToString(count);
@@ -3115,9 +3222,9 @@ getLastEvents(void *ctx, PGresult *result)
 		return;
 	}
 
-	if (PQnfields(result) != 16)
+	if (PQnfields(result) != 18)
 	{
-		log_error("Query returned %d columns, expected 16", PQnfields(result));
+		log_error("Query returned %d columns, expected 18", PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}
@@ -3233,6 +3340,27 @@ getLastEvents(void *ctx, PGresult *result)
 		/* description */
 		value = PQgetvalue(result, currentTupleIndex, 15);
 		strlcpy(event->description, value, sizeof(event->description));
+
+		/* rule_pos: NULL means "no rule attributed", represented as 0 */
+		if (PQgetisnull(result, currentTupleIndex, 16))
+		{
+			event->rulePos = 0;
+			event->ruleSection[0] = '\0';
+		}
+		else
+		{
+			value = PQgetvalue(result, currentTupleIndex, 16);
+
+			if (!stringToInt(value, &(event->rulePos)))
+			{
+				log_error("Invalid rule_pos \"%s\" returned by monitor", value);
+				++errors;
+			}
+
+			/* rule_section, only meaningful alongside a real rule_pos */
+			value = PQgetvalue(result, currentTupleIndex, 17);
+			strlcpy(event->ruleSection, value, sizeof(event->ruleSection));
+		}
 
 		if (errors > 0)
 		{
@@ -5209,6 +5337,37 @@ monitor_extension_update(Monitor *monitor, const char *targetVersion)
 			log_error("Failed to create extension \"%s\" "
 					  "required by \"%s\" extension version 1.4",
 					  btreeGistExtName,
+					  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
+			return false;
+		}
+	}
+
+	/*
+	 * Same story as btree_gist above, this time for ltree: version 2.3 added
+	 * it to control's "requires" (pgautofailover.fsm's section_path column
+	 * is cast to ltree). ALTER EXTENSION ... UPDATE checks "requires" against
+	 * what's already installed before ever running the upgrade script body,
+	 * so putting a "CREATE EXTENSION IF NOT EXISTS ltree" inside
+	 * pgautofailover--2.2--2.3.sql itself is too late: the ALTER EXTENSION
+	 * statement already failed by the time that script would run.
+	 */
+	if (targetVersionNum >= 203)
+	{
+		char *ltreeExtName = "ltree";
+
+		if (!find_extension_control_file(monitor->config.pgSetup.pg_ctl,
+										 ltreeExtName))
+		{
+			log_warn("Failed to find extension control file for \"%s\"",
+					 ltreeExtName);
+			log_info("You might have to install a PostgreSQL contrib package");
+		}
+
+		if (!pgsql_create_extension(pgsql, ltreeExtName))
+		{
+			log_error("Failed to create extension \"%s\" "
+					  "required by \"%s\" extension version 2.3",
+					  ltreeExtName,
 					  PG_AUTOCTL_MONITOR_EXTENSION_NAME);
 			return false;
 		}

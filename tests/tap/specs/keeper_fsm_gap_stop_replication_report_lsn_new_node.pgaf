@@ -1,0 +1,153 @@
+# Regression spec for MonitorFSM[] pos 211's stop_replication current_state
+# ("alone in group, candidatePriority zero -> report_lsn",
+# src/monitor/group_state_machine.c), and for the matching KeeperFSM[] row
+# added in fsm.c (see keeper_fsm_gap_stop_replication_report_lsn_priority.pgaf's
+# own header for the full row and the shared construction technique -- this
+# spec's setup/test_001/test_002/test_003 steps are identical to that one,
+# reaching the exact same "node3 parked at report_lsn, candidate-priority
+# 0, alone in group" state).
+#
+# This exercises the *second* documented way out of that parked state: a
+# new node registers, and RegisterNode's own existing report_lsn-
+# candidate-priority-0 special case (node_active_protocol.c, already
+# proven live for a different source state by
+# keeper_fsm_gap_new_node_joins_report_lsn_group.pgaf) basebackups it from
+# node3 instead of from a "real" primary, then the ordinary MS-failover
+# candidate-selection machinery (BuildCandidateList/
+# SelectFailoverCandidateNode/PromoteSelectedNode) picks the new node
+# (ordinary nonzero priority) over node3 (priority 0) and promotes it,
+# while node3 follows it back in as a secondary -- respecting node3's own
+# candidate-priority=0 the whole time, exactly like the priority-raise
+# sibling spec respects it by simply never promoting node3 on its own.
+#
+# node4 is basebacked up directly from node3's own frozen, disconnected
+# report_lsn snapshot; by the time node4 finishes and reports in, node3
+# has moved a little further along in real time, so node4 *does* pass
+# through a brief fast_forward hop (report_lsn -> fast_forward ->
+# prepare_promotion -> wait_primary -> primary) to pick up the small
+# remaining gap before promoting -- unlike
+# keeper_fsm_gap_new_node_joins_report_lsn_group.pgaf's own sibling
+# scenario, where the comment notes fast_forward is conditional on
+# exactly this kind of timing. node3 itself, once node4 is selected as
+# the winning candidate, goes straight report_lsn -> secondary -- not
+# through join_secondary as originally guessed here (join_secondary is
+# for a node still mid-handoff from an old primary it hasn't finished
+# checkpointing away from; node3 has no such old-primary handoff pending,
+# it's simply been sitting parked, so PromoteSelectedNode's own fan-out
+# takes the more direct edge). Confirmed live, the same way the sibling
+# spec's own header already flags having had to fix its first guess about
+# which node ends up primary.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node3  suspended  candidate-priority 50
+        node4 create and launch deferred
+    }
+}
+
+setup {
+    wait until node3 state = catchingup  timeout 60s
+    fsm step node3
+    fsm step node3
+    fsm step node3
+    wait until node1 state is primary
+        and node3 state is secondary
+        timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_kill_primary_and_converge_locally_to_stop_replication {
+    compose kill node1
+    sleep 30s
+    fsm step node3
+    wait until node3 assigned-state = prepare_promotion  timeout 30s
+    fsm step node3
+    wait until node3 assigned-state = stop_replication  timeout 30s
+}
+
+step test_002_zero_priority_and_remove_old_primary_row {
+    sql monitor {
+        SELECT pgautofailover.set_node_candidate_priority('default', 'node3', 0);
+    }
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+}
+
+step test_003_node3_converges_to_report_lsn {
+    fsm step node3
+    fsm step node3
+    wait until node3 state = report_lsn  timeout 30s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { report_lsn }
+}
+
+step test_004_node4_joins_and_becomes_primary {
+    # node3 stays suspended for this whole spec (step mode is a
+    # startup-time setting, not something a running spec can toggle off
+    # again once the earlier steps no longer need it), and that turns out
+    # to matter here in a way it didn't in the earlier steps:
+    # node_active()'s own HBA refresh (keeper_refresh_other_nodes,
+    # service_keeper.c's step-mode dispatch calls it before every step,
+    # same as autopilot's own per-tick loop does) is what grants node4's
+    # IP the pg_hba.conf rule it needs to even *reach* node3 for its
+    # initial basebackup -- and node3 never runs that refresh on its own
+    # while parked, unreported. Confirmed live: without an explicit "fsm
+    # step node3" right after starting node4, node4 spins forever on "no
+    # pg_hba.conf entry for replication connection", never even reaching
+    # report_lsn itself, let alone getting basebacked-up-from and
+    # promoted. So node3 needs a step immediately, before node4 can make
+    # any progress at all -- not just later, once node4's own report
+    # fans out a fresh join_secondary goal to node3 (which still needs
+    # its own later explicit steps too, same as every earlier step in
+    # this spec). One immediate step turned out not to be enough either:
+    # "pg_autoctl node start" returns as soon as the container process is
+    # up, before node4 has necessarily finished registering with the
+    # monitor -- stepping node3 too early just finds nothing new to
+    # refresh yet. node4's own supervisor keeps retrying every few
+    # seconds regardless, so a couple of staggered steps a few seconds
+    # apart reliably lands at least one after node4's row exists.
+    #
+    # node4 can't reach primary until node3 has actually converged to
+    # secondary and is counted as a synced standby -- so node3's own
+    # steps have to happen, and land, *before* waiting on node4's own
+    # final state, not after (confirmed live: waiting for node4 first
+    # just times out with node4 stuck at wait_primary forever, since
+    # nothing ever drives node3's own report_lsn -> secondary hop).
+    exec node4  pg_autoctl node start
+    sleep 10s
+    fsm step node3
+    sleep 10s
+    fsm step node3
+    wait until node3 assigned-state = secondary  timeout 60s
+    fsm step node3
+    fsm step node3
+    wait until node3 state is secondary  timeout 30s
+    wait until node4 state is primary  timeout 90s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node4';
+    }
+    expect { primary }
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { secondary }
+}
+
+sequence
+    test_001_kill_primary_and_converge_locally_to_stop_replication
+    test_002_zero_priority_and_remove_old_primary_row
+    test_003_node3_converges_to_report_lsn
+    test_004_node4_joins_and_becomes_primary

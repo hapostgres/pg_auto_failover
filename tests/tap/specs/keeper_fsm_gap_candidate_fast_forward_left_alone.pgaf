@@ -1,0 +1,221 @@
+# Regression spec for MonitorFSM[] pos 209 ("alone in group,
+# candidate-eligible -> single", src/monitor/group_state_machine.c), for its
+# fast_forward current_state.
+#
+# Until this session, KeeperFSM[] (src/bin/pg_autoctl/fsm.c) had no
+# FAST_FORWARD_STATE -> SINGLE_STATE row at all: a node that ends up alone
+# in its group while genuinely reporting "fast_forward" (its WAL-source peer
+# and the old primary both gone) would get assigned SINGLE by pos 209 (whose
+# own NodeStatePattern, FSM_NOT_STABLE_SINGLE, is broad enough to match a
+# node reporting fast_forward) but have no way to reach it -- stuck logging
+# "pg_autoctl does not know how to reach state \"single\" from
+# \"fast_forward\"".
+#
+# Fixed by adding that row to KeeperFSM[], reusing fsm_promote_standby (the
+# same function already reused by every other converged-standby source
+# state: SECONDARY/CATCHINGUP/PREP_PROMOTION/STOP_REPLICATION/REPORT_LSN/
+# WAIT_MAINTENANCE) -- fast_forward only means "Postgres is running as a
+# caught-up-enough standby", so promoting it directly is exactly as safe as
+# promoting any of those other states.
+#
+# A real fast_forward assignment only happens mid MS-failover, when the
+# monitor's selected candidate is behind the most advanced available node
+# and must fetch the missing WAL before it can safely promote (pos 377,
+# ProceedGroupStateForMSFailover / PromoteSelectedNode). This spec
+# reproduces that genuinely, using the same network-disconnect +
+# INSERT + CHECKPOINT recipe already established by
+# tests/tap/specs/multi_ifdown.pgaf and
+# tests/tap/specs/debug_citus_worker_fast_forward.pgaf.
+#
+# First draft of this spec drove node3 as an ordinary (autonomous) node and
+# tried to catch the narrow fast_forward *assigned*-state window by external
+# polling before removing node1/node2 -- confirmed live (CI run 30759600065)
+# that this is still genuinely racy: with a WAL gap this small (5000 rows),
+# node3's own local fetch completes and reports back to the monitor within
+# about 2 seconds of the assignment landing, and the monitor's own cascade
+# (node2, still alive, keeps re-triggering evaluation of node3's candidate
+# status) advances assigned-state on to prepare_promotion before the
+# external "wait until" poll can reliably observe fast_forward in between --
+# even though it polls assigned-state, not reported-state.
+#
+# Fixed for real this time by declaring node3 "suspended" (step mode,
+# PG_AUTOCTL_SUSPENDED -- src/bin/pg_autoctl/service_keeper.c): its
+# node-active service never ticks on its own, so nothing it reports to the
+# monitor ever changes except in direct response to an explicit "fsm step
+# node3" command. This removes the race entirely, for a reason confirmed
+# directly against FSM_REPORT_LSN_OR_FAST_FORWARD's own definition
+# (src/monitor/group_state_machine.c): the monitor's cascade past
+# fast_forward requires reportedState == goalState == FAST_FORWARD (a
+# NODE_STATE_STABLE match) -- as long as node3's own reportedState column
+# never updates (because node3 itself never contacts the monitor), the
+# *assignment* of fast_forward can still land purely from node2's own
+# regular ticking (which is what selects node3 as the candidate and points
+# it at node2 as WAL source in the first place), but the cascade *past* it
+# structurally cannot fire, however long node2 keeps re-triggering
+# evaluation -- there is no more race window to lose.
+#
+#   1. 3-node formation (node1 primary, node2 + node3 secondaries). node3 is
+#      declared suspended -- it must not be the first node in the
+#      formation (compose_gen only attaches a healthcheck to the first data
+#      node so that later nodes can depend_on it being healthy, and a
+#      suspended node can never satisfy that healthcheck on its own, since
+#      nothing restarts Postgres after the one-shot node-init phase until
+#      the first explicit "fsm step"). node2's candidate-priority is set to
+#      0 -- it stays a synchronous, always-caught-up standby that is never
+#      itself selected as a failover candidate, existing purely to be
+#      node3's WAL-fetch source later. node3 keeps its default (nonzero)
+#      candidate-priority -- pos 209's own candidate-eligible case.
+#   2. node3 is network-disconnected, then node1 (still primary) receives
+#      real write traffic + a CHECKPOINT -- node2 (still connected, still
+#      synchronous) replicates and catches up to the new LSN; node3, cut
+#      off, is now genuinely behind.
+#   3. node1 is network-disconnected (killing the primary) and node3 is
+#      reconnected in the same step -- this forces an MS-failover election.
+#      node2 (candidate-priority 0) is excluded from candidacy entirely
+#      (GroupListCandidates), so node3 is the only candidate -- but the
+#      monitor can't yet tell it needs a fetch: that decision depends on
+#      comparing node3's own current LSN against node2's, and the monitor
+#      has no fresh LSN for node3 until node3 itself makes contact. So the
+#      first thing that lands, driven purely by node2's own regular
+#      ticking, is the ordinary standby fan-out: goalState = REPORT_LSN.
+#      This can be polled with a comfortable timeout and no race at all --
+#      node3 itself (suspended) has made no contact yet, so nothing moves
+#      it off this goal until the explicit steps below.
+#   4. A first explicit "fsm step node3" reports node3's own still-stale
+#      "secondary" (unreported since before this whole scenario started)
+#      and, in the same call, performs the local secondary -> report_lsn
+#      transition -- recording node3's own genuinely-behind LSN, still
+#      unreported to the monitor.
+#   5. A second explicit "fsm step node3" reports "report_lsn" -- with
+#      node3's real LSN now visible to the monitor for the first time,
+#      BuildCandidateList can finally compare it against node2's LSN,
+#      discover node3 is behind, and assign FAST_FORWARD_STATE, pointing
+#      at node2 as the WAL source. node3 acts on that brand new goal in
+#      this very same call: a live, physical WAL fetch from node2's still-
+#      running Postgres instance -- still unreported. node1's and node2's
+#      rows still exist at both of these steps (node1 merely network-
+#      disconnected, not yet removed), so pos 209's "alone in group" check
+#      does not fire on either contact.
+#   6. Immediately (the fetch above already completed synchronously, inside
+#      that one call): node1's and node2's rows are dropped directly via
+#      pgautofailover.remove_node(..., true) -- "alone in group" is true
+#      from this point on. node2 is still alive and connected, so
+#      force=true is required (without it, remove_node() only marks
+#      goalState=dropped and waits on node2's own cooperative shutdown,
+#      which both takes an indeterminate amount of time and would kill the
+#      WAL source's Postgres mid-transfer for anyone still relying on it).
+#   7. A third explicit "fsm step node3" now reports "fast_forward" (the
+#      state the previous step already reached locally) -- with node1 and
+#      node2 both gone, pos 209's "alone in group, candidate-eligible" now
+#      matches this exact report and assigns SINGLE directly -- no cascade
+#      through prepare_promotion is possible, since node2's row is already
+#      gone. node3's keeper now has a matching KeeperFSM[] row (the fix
+#      under test) and actually converges to single via that same call.
+#   8. A fourth explicit "fsm step node3" has node3 actually report
+#      "single" back to the monitor.
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        node2
+        node3  suspended
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    wait until node3 state = catchingup  timeout 60s
+    fsm step node3
+    fsm step node3
+    fsm step node3
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 120s
+    promote node1
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_set_candidate_priorities {
+    exec node2  pg_autoctl set node candidate-priority 0
+    wait until node1 state is primary
+        and node2 state is secondary
+        and node3 state is secondary
+        timeout 60s
+    sql node1 { CREATE TABLE t1 (a int); }
+}
+
+step test_002_disconnect_node3_and_diverge {
+    network disconnect node3
+    sql node1 {
+        INSERT INTO t1 SELECT x FROM generate_series(1, 5000) as gs(x);
+    }
+    sql node1 { CHECKPOINT; }
+}
+
+step test_003_failover_and_remove_peers_while_still_fetching {
+    network disconnect node1
+    network connect node3
+    # node3 is suspended, so this can be polled with a comfortable timeout
+    # and no race at all: node3 itself has made no contact yet, and won't
+    # until the explicit "fsm step" calls below -- this assignment lands
+    # purely from node2's own regular ticking (the ordinary standby fan-out
+    # to REPORT_LSN once node1 is unhealthy), and then simply stays there.
+    # Confirmed live: the monitor cannot decide fast_forward vs. a direct
+    # promotion without first learning node3's own actual LSN, which needs
+    # a real contact from node3 itself -- so the goal genuinely stops here,
+    # not at fast_forward, until node3 makes contact.
+    wait until node3 assigned-state = report_lsn  timeout 60s
+    # This call reports node3's still-stale "secondary" and performs the
+    # local secondary -> report_lsn transition (recording its own current,
+    # genuinely-behind LSN) -- still unreported. node1's row still exists
+    # (just network-disconnected, not yet removed) and node2 is still
+    # present, so pos 209's "alone in group" check does not fire on this
+    # contact.
+    fsm step node3
+    # This call reports "report_lsn" (with node3's real LSN, now visible to
+    # the monitor for the first time) -- only now can BuildCandidateList
+    # compare it against node2's LSN, discover node3 is behind, and assign
+    # FAST_FORWARD_STATE pointing at node2. node3 acts on that brand new
+    # goal in this very same call: fsm_fast_forward, a live WAL fetch from
+    # node2's still-running Postgres instance -- still unreported.
+    fsm step node3
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node1';
+    }
+    sql monitor {
+        SELECT pgautofailover.remove_node(nodehost, nodeport, true)
+        FROM pgautofailover.node WHERE nodename = 'node2';
+    }
+}
+
+step test_004_node3_converges_straight_to_single {
+    # node3 is still suspended: this call reports "fast_forward" (the state
+    # the previous step already reached locally, but had not yet reported)
+    # -- with node1 and node2 both gone, pos 209's "alone in group,
+    # candidate-eligible" now fires on this exact report and assigns
+    # single, performing the fast_forward -> single transition under test
+    # in this very call.
+    fsm step node3
+    # One more call to have node3 actually report "single" back.
+    fsm step node3
+    wait until node3 state = single  timeout 30s
+    sql monitor {
+        SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { single }
+    sql monitor {
+        SELECT goalstate FROM pgautofailover.node WHERE nodename = 'node3';
+    }
+    expect { single }
+}

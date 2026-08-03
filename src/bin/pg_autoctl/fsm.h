@@ -129,6 +129,7 @@ bool prepare_replication(Keeper *keeper, NodeState otherNodeState);
  */
 void print_reachable_states(KeeperStateData *keeperState);
 void print_fsm_for_graphviz(void);
+char * KeeperFSMToJSON(void);
 bool keeper_fsm_step(Keeper *keeper);
 bool keeper_fsm_step_report(Keeper *keeper);
 bool keeper_fsm_step_advance(Keeper *keeper);

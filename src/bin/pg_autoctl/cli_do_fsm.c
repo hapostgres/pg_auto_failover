@@ -15,6 +15,8 @@
 
 #include "postgres_fe.h"
 
+#include "parson.h"
+
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
@@ -23,6 +25,7 @@
 #include "fsm_mermaid.h"
 #include "keeper_config.h"
 #include "keeper.h"
+#include "monitor.h"
 #include "parsing.h"
 #include "pgctl.h"
 #include "state.h"
@@ -33,6 +36,7 @@
 static void cli_do_fsm_init(int argc, char **argv);
 static void cli_do_fsm_state(int argc, char **argv);
 static void cli_do_fsm_list(int argc, char **argv);
+static void cli_do_fsm_check(int argc, char **argv);
 static void cli_do_fsm_gv(int argc, char **argv);
 static void cli_do_fsm_mermaid_init(int argc, char **argv);
 static void cli_do_fsm_mermaid_steady_state(int argc, char **argv);
@@ -66,8 +70,16 @@ CommandLine fsm_list =
 				 "List reachable FSM states from current state",
 				 CLI_PGDATA_USAGE,
 				 CLI_PGDATA_OPTION,
-				 cli_getopt_pgdata,
+				 cli_getopt_pgdata_or_json,
 				 cli_do_fsm_list);
+
+CommandLine fsm_check =
+	make_command("check",
+				 "Check that every monitor FSM transition has a matching keeper edge",
+				 CLI_PGDATA_USAGE,
+				 CLI_PGDATA_OPTION,
+				 cli_getopt_pgdata,
+				 cli_do_fsm_check);
 
 CommandLine fsm_gv =
 	make_command("gv",
@@ -320,11 +332,39 @@ cli_do_fsm_state(int argc, char **argv)
 
 
 /*
- * cli_do_fsm_list lists reachable states from the current one.
+ * cli_do_fsm_list lists reachable states from the current one, or (with
+ * --json) dumps the full KeeperFSM[] edge set as JSON -- the design doc's
+ * own proposed standalone use of KeeperFSMToJSON() ("a human or another
+ * tool may want the raw edge list without a monitor round trip at all"),
+ * and the source this project's own keeper_fsm_edges.json regress fixture
+ * (src/monitor/) is regenerated from.
+ *
+ * --json needs neither a keeper config nor an on-disk state file at all:
+ * KeeperFSM[] is pure static data with no dependency on any node's actual
+ * config or reported state (unlike the ordinary, current-state-filtered
+ * list output below, which needs keeperState.current_role) -- so it's
+ * checked first and short-circuits before either read, meaning this mode
+ * can run with zero setup: no --pgdata, no live cluster, just the binary.
+ * This is only reachable because fsm_list's own CommandLine (above) uses
+ * cli_getopt_pgdata_or_json rather than the shared cli_getopt_pgdata: the
+ * latter unconditionally requires an existing config file
+ * (prepare_keeper_options, cli_common.c) before this function is ever
+ * called, regardless of --json.
  */
 static void
 cli_do_fsm_list(int argc, char **argv)
 {
+	if (outputJSON)
+	{
+		char *keeperEdgesJSON = KeeperFSMToJSON();
+
+		fformat(stdout, "%s\n", keeperEdgesJSON);
+
+		json_free_serialized_string(keeperEdgesJSON);
+
+		return;
+	}
+
 	KeeperStateData keeperState = { 0 };
 	KeeperConfig config = keeperOptions;
 
@@ -348,13 +388,105 @@ cli_do_fsm_list(int argc, char **argv)
 		exit(EXIT_CODE_BAD_STATE);
 	}
 
-	if (outputJSON)
-	{
-		log_warn("This command does not support JSON output at the moment");
-	}
-
 	print_reachable_states(&keeperState);
 	fformat(stdout, "\n");
+}
+
+
+/*
+ * cli_do_fsm_check serializes this node's own KeeperFSM[] to JSON
+ * (KeeperFSMToJSON(), fsm.c) and sends it to the monitor's
+ * pgautofailover.check_fsm_reachability(jsonb) (via
+ * monitor_check_fsm_reachability(), monitor.c) to confirm every transition
+ * the monitor's own MonitorFSM[] (group_state_machine.c) can ever assign
+ * has a matching edge here. Unlike cli_do_fsm_list/cli_do_fsm_gv (purely
+ * local, no monitor connection at all), this genuinely needs one -- mirrors
+ * cli_do_monitor_get_primary_node's own shape in cli_do_monitor.c.
+ */
+static void
+cli_do_fsm_check(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+	Monitor monitor = { 0 };
+	FsmReachabilityResult result = { 0 };
+
+	bool missingPgdataIsOk = true;
+	bool pgIsNotRunningIsOk = true;
+	bool monitorDisabledIsOk = false;
+
+	if (!keeper_config_read_file(&config,
+								 missingPgdataIsOk,
+								 pgIsNotRunningIsOk,
+								 monitorDisabledIsOk))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!monitor_init(&monitor, config.monitor_pguri))
+	{
+		log_fatal("Failed to contact the monitor because its URL is invalid, "
+				  "see above for details");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	char *keeperEdgesJSON = KeeperFSMToJSON();
+
+	if (!monitor_check_fsm_reachability(&monitor, keeperEdgesJSON, &result))
+	{
+		log_error("Failed to check FSM reachability against the monitor, "
+				  "see above for details");
+		json_free_serialized_string(keeperEdgesJSON);
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	json_free_serialized_string(keeperEdgesJSON);
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *root = json_value_get_object(js);
+		JSON_Value *jsMismatches = json_value_init_array();
+		JSON_Array *mismatches = json_value_get_array(jsMismatches);
+
+		for (int i = 0; i < result.count; i++)
+		{
+			FsmReachabilityMismatch *mismatch = &(result.mismatches[i]);
+			JSON_Value *jsEntry = json_value_init_object();
+			JSON_Object *jsObj = json_value_get_object(jsEntry);
+
+			json_object_set_number(jsObj, "pos", (double) mismatch->pos);
+			json_object_set_string(jsObj, "current", mismatch->currentState);
+			json_object_set_string(jsObj, "assigned", mismatch->assignedState);
+			json_object_set_string(jsObj, "comment", mismatch->comment);
+
+			json_array_append_value(mismatches, jsEntry);
+		}
+
+		json_object_set_boolean(root, "ok", result.count == 0);
+		json_object_set_value(root, "mismatches", jsMismatches);
+
+		cli_pprint_json(js);
+	}
+	else if (result.count == 0)
+	{
+		log_info("OK: every monitor FSM transition has a matching keeper edge");
+	}
+	else
+	{
+		for (int i = 0; i < result.count; i++)
+		{
+			FsmReachabilityMismatch *mismatch = &(result.mismatches[i]);
+
+			log_error("pos %d: %s -> %s has no matching keeper edge (%s)",
+					  mismatch->pos,
+					  mismatch->currentState,
+					  mismatch->assignedState,
+					  mismatch->comment);
+		}
+	}
+
+	exit(result.count == 0 ? EXIT_CODE_QUIT : EXIT_CODE_INTERNAL_ERROR);
 }
 
 

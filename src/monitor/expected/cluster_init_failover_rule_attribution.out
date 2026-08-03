@@ -1,0 +1,277 @@
+-- Copyright (c) Microsoft Corporation. All rights reserved.
+-- Licensed under the PostgreSQL License.
+--
+-- End-to-end demonstration of the rule_pos/rule_section attribution
+-- mechanism (notifications.c's CurrentMonitorFSMRulePos/RuleSection,
+-- InsertEvent()): registers a two-node formation, drives it through the
+-- heartbeat-only bootstrap to primary + secondary, triggers a manual
+-- perform_failover(), and then joins pgautofailover.event against
+-- pgautofailover.fsm on rule_pos = pos to show, for every state
+-- transition the monitor produced, exactly which MonitorFSM[] row was
+-- selected and executed -- both for the ordinary heartbeat-driven
+-- bootstrap rows (api_triggered = false in this join, since rule_pos is
+-- only set for rows actually reached through the declarative dispatch
+-- table) and for the operator-triggered perform_failover call itself.
+\x on
+-- ── formation and node registration ─────────────────────────────────────────
+SELECT pgautofailover.create_formation('cifra_test', 'pgsql', 'postgres', true, 0);
+-[ RECORD 1 ]----+--------------------------------
+create_formation | (cifra_test,pgsql,postgres,t,0)
+
+SELECT *
+  FROM pgautofailover.register_node('cifra_test', 'cifra_p', 5432,
+                                    'postgres', 'cifra_p', 1);
+-[ RECORD 1 ]---------------+--------
+assigned_node_id            | 36
+assigned_group_id           | 0
+assigned_group_state        | single
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+assigned_node_name          | cifra_p
+
+SELECT nodeid AS np FROM pgautofailover.node
+ WHERE formationid = 'cifra_test' AND nodename = 'cifra_p' \gset
+SELECT *
+  FROM pgautofailover.register_node('cifra_test', 'cifra_s', 5432,
+                                    'postgres', 'cifra_s', 1);
+-[ RECORD 1 ]---------------+-------------
+assigned_node_id            | 37
+assigned_group_id           | 0
+assigned_group_state        | wait_standby
+assigned_candidate_priority | 100
+assigned_replication_quorum | t
+assigned_node_name          | cifra_s
+
+SELECT nodeid AS ns FROM pgautofailover.node
+ WHERE formationid = 'cifra_test' AND nodename = 'cifra_s' \gset
+-- ── bootstrap: drive the FSM to primary + secondary ─────────────────────────
+--
+-- Mirrors drop_node.sql's bootstrap sequence (register -> single ->
+-- wait_primary -> [standby: wait_standby -> catchingup -> secondary] ->
+-- primary), including its "confirm" round-trips.
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :np, 0,
+                                  current_group_role => 'single');
+-[ RECORD 1 ]--------+-------
+assigned_group_state | single
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :ns, 0,
+                                  current_group_role => 'wait_standby');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_standby
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :np, 0,
+                                  current_group_role => 'single',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_primary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_primary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :ns, 0,
+                                  current_group_role => 'wait_standby');
+-[ RECORD 1 ]--------+-----------
+assigned_group_state | catchingup
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :ns, 0,
+                                  current_group_role => 'catchingup',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :ns, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | primary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :np, 0,
+                                  current_group_role => 'primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | primary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('cifra_test', :ns, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+-- Verify bootstrap: p=primary, s=secondary.
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'cifra_test'
+ ORDER BY nodename;
+-[ RECORD 1 ]-+----------
+nodename      | cifra_p
+goalstate     | primary
+reportedstate | primary
+-[ RECORD 2 ]-+----------
+nodename      | cifra_s
+goalstate     | secondary
+reportedstate | secondary
+
+-- ── manual failover ──────────────────────────────────────────────────────
+--
+-- Two-node group: dispatches through MonitorFSM[]'s API_TRIGGERED section
+-- (pos 105, "manual failover, 2-node group, primary+standby both converged
+-- -> standby prepare_promotion, primary draining"), attributing both
+-- resulting event rows to that one rule.
+SELECT pgautofailover.perform_failover('cifra_test', 0);
+-[ RECORD 1 ]----+-
+perform_failover | 
+
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'cifra_test'
+ ORDER BY nodename;
+-[ RECORD 1 ]-+------------------
+nodename      | cifra_p
+goalstate     | draining
+reportedstate | primary
+-[ RECORD 2 ]-+------------------
+nodename      | cifra_s
+goalstate     | prepare_promotion
+reportedstate | secondary
+
+-- ── which rule fired for which event? ───────────────────────────────────────
+--
+-- Every event row this formation produced, joined against the FSM table on
+-- rule_pos = pos: rule_pos/rule_section are NULL for the ordinary
+-- heartbeat-driven bootstrap transitions above whenever the matched row
+-- happens to be identified only by array position in earlier sessions'
+-- tests -- here every one of them was reached through the same declarative
+-- MonitorFSM[] dispatch table, so each carries its own attribution too. The
+-- final two rows (both attributed to pos 105) are the perform_failover()
+-- call's own dual assignment (standby -> prepare_promotion, primary ->
+-- draining), selected and executed from the API_TRIGGERED section.
+SELECT e.eventid, e.nodename, e.reportedstate, e.goalstate,
+       e.rule_pos, e.rule_section, f.comment AS rule_comment
+  FROM pgautofailover.event e
+  LEFT JOIN pgautofailover.fsm f ON f.pos = e.rule_pos
+ WHERE e.formationid = 'cifra_test'
+ ORDER BY e.eventid;
+-[ RECORD 1 ]-+-------------------------------------------------------------------------------------------------------------
+eventid       | 204
+nodename      | cifra_p
+reportedstate | init
+goalstate     | single
+rule_pos      | 209
+rule_section  | early_checks
+rule_comment  | alone in group, candidate-eligible -> single
+-[ RECORD 2 ]-+-------------------------------------------------------------------------------------------------------------
+eventid       | 205
+nodename      | cifra_p
+reportedstate | single
+goalstate     | single
+rule_pos      | 
+rule_section  | 
+rule_comment  | 
+-[ RECORD 3 ]-+-------------------------------------------------------------------------------------------------------------
+eventid       | 206
+nodename      | cifra_s
+reportedstate | wait_standby
+goalstate     | wait_standby
+rule_pos      | 
+rule_section  | 
+rule_comment  | 
+-[ RECORD 4 ]-+-------------------------------------------------------------------------------------------------------------
+eventid       | 207
+nodename      | cifra_p
+reportedstate | single
+goalstate     | wait_primary
+rule_pos      | 401
+rule_section  | primary_node
+rule_comment  | primary alone, another node reached wait_standby -> wait_primary
+-[ RECORD 5 ]-+-------------------------------------------------------------------------------------------------------------
+eventid       | 208
+nodename      | cifra_p
+reportedstate | wait_primary
+goalstate     | wait_primary
+rule_pos      | 
+rule_section  | 
+rule_comment  | 
+-[ RECORD 6 ]-+-------------------------------------------------------------------------------------------------------------
+eventid       | 209
+nodename      | cifra_s
+reportedstate | wait_standby
+goalstate     | catchingup
+rule_pos      | 315
+rule_section  | reporting_node
+rule_comment  | wait_standby, primary converged wait/join_primary -> catchingup
+-[ RECORD 7 ]-+-------------------------------------------------------------------------------------------------------------
+eventid       | 210
+nodename      | cifra_s
+reportedstate | catchingup
+goalstate     | catchingup
+rule_pos      | 
+rule_section  | 
+rule_comment  | 
+-[ RECORD 8 ]-+-------------------------------------------------------------------------------------------------------------
+eventid       | 211
+nodename      | cifra_s
+reportedstate | catchingup
+goalstate     | secondary
+rule_pos      | 321
+rule_section  | reporting_node
+rule_comment  | caught up, same TLI as primary, within sync threshold -> secondary
+-[ RECORD 9 ]-+-------------------------------------------------------------------------------------------------------------
+eventid       | 212
+nodename      | cifra_s
+reportedstate | secondary
+goalstate     | secondary
+rule_pos      | 
+rule_section  | 
+rule_comment  | 
+-[ RECORD 10 ]+-------------------------------------------------------------------------------------------------------------
+eventid       | 213
+nodename      | cifra_p
+reportedstate | wait_primary
+goalstate     | primary
+rule_pos      | 411
+rule_section  | primary_node
+rule_comment  | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
+-[ RECORD 11 ]+-------------------------------------------------------------------------------------------------------------
+eventid       | 214
+nodename      | cifra_p
+reportedstate | primary
+goalstate     | primary
+rule_pos      | 
+rule_section  | 
+rule_comment  | 
+-[ RECORD 12 ]+-------------------------------------------------------------------------------------------------------------
+eventid       | 215
+nodename      | cifra_s
+reportedstate | secondary
+goalstate     | prepare_promotion
+rule_pos      | 105
+rule_section  | api_triggered
+rule_comment  | manual failover, 2-node group, primary+standby both converged -> standby prepare_promotion, primary draining
+-[ RECORD 13 ]+-------------------------------------------------------------------------------------------------------------
+eventid       | 216
+nodename      | cifra_p
+reportedstate | primary
+goalstate     | draining
+rule_pos      | 105
+rule_section  | api_triggered
+rule_comment  | manual failover, 2-node group, primary+standby both converged -> standby prepare_promotion, primary draining
+

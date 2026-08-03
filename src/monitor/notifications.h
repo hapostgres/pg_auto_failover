@@ -41,3 +41,32 @@ void LogAndNotifyMessage(char *message, size_t size, const char *fmt, ...) __att
 
 int64 NotifyStateChange(AutoFailoverNode *node, char *description);
 int64 InsertEvent(AutoFailoverNode *node, char *description);
+
+/*
+ * Set by group_state_machine.c's declarative dispatch just before invoking a
+ * matched MonitorFSM[] row's extraAction/goal-state assignment, and restored
+ * to whatever it was before immediately after (nested dispatch -- the
+ * MS-failover cascade's and join_secondary's own bounded nested searches --
+ * saves/restores rather than clobbers, so the outer row's own subsequent
+ * assignments are still attributed correctly). Lets InsertEvent() attribute
+ * the resulting pgautofailover.event row to the rule that produced it
+ * (rule_pos/rule_section columns), without threading an extra parameter
+ * through AssignGoalState/SetNodeGoalState/NotifyStateChange and every one
+ * of their many call sites outside the declarative dispatch table. 0 means
+ * "no rule attributed": rule_pos/rule_section are left NULL in that case,
+ * since 0 is not a valid .pos value (every real section starts at 100 or
+ * above). This is NOT the case for operator-triggered SQL functions or for
+ * ProceedGroupStateForMSFailover's own hand-written internals -- both DO
+ * get a real, non-NULL rule_pos: the former dispatch via
+ * ProceedGroupStateForApiTrigger, which itself calls DispatchMonitorFSMRule;
+ * the latter (BuildCandidateList, PromoteSelectedNode, etc.) are only ever
+ * invoked from inside an outer row's own extraAction, so this global is
+ * already non-zero (attributed to that OUTER row, not one of their own --
+ * misleading, since MS-failover's candidate-selection internals were never
+ * decomposed into declarative rows) by the time they call AssignGoalState
+ * directly. 0/NULL only really happens for call sites genuinely outside any
+ * DispatchMonitorFSMRule call at all -- e.g. perform_failover()'s own
+ * candidate-priority bookkeeping in node_active_protocol.c.
+ */
+extern int CurrentMonitorFSMRulePos;
+extern int CurrentMonitorFSMRuleSection;

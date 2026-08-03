@@ -457,3 +457,235 @@ $$;
 
 grant execute on function pgautofailover.get_most_advanced_standby(text,int,bigint)
    to autoctl_node;
+
+--
+-- Expose the monitor's declarative dispatch table (MonitorFSM[] in
+-- group_state_machine.c) to SQL: pgautofailover.dump_fsm()/dump_fsm_edges()/
+-- pgautofailover.fsm/check_fsm_reachability(), plus rule_pos/rule_section
+-- attribution on pgautofailover.event. See pgautofailover.sql's own
+-- comments on each object below for the full rationale -- unchanged here,
+-- this is the same DDL, just applied incrementally to an existing 2.2
+-- install instead of as part of a fresh CREATE EXTENSION.
+--
+
+-- pgautofailover.fsm's section_path column (below) is cast to ltree (a
+-- plain SQL cast through Postgres's own type-casting machinery, not a
+-- C-level dependency -- see that view's own comment). Note there is
+-- deliberately no "CREATE EXTENSION IF NOT EXISTS ltree" in this script:
+-- ALTER EXTENSION ... UPDATE checks every "requires" entry in the *target*
+-- version's control file is already installed before it ever runs the
+-- upgrade script body for any step on the path, so a CREATE EXTENSION
+-- placed here would never get a chance to run -- the ALTER EXTENSION
+-- statement itself already fails first ("required extension \"ltree\" is
+-- not installed"). The actual fix is client-side, in
+-- monitor_extension_update() (monitor.c), which now creates "ltree" before
+-- issuing the ALTER EXTENSION statement -- mirroring the exact same
+-- pre-existing pattern that function already uses for btree_gist.
+
+-- Mirrors group_state_machine.h's MonitorFSMSection: which of the three
+-- real control-flow regions of the monitor's declarative dispatch table
+-- (MonitorFSM[] in group_state_machine.c) a rule belongs to. See dump_fsm()
+-- and pgautofailover.fsm below, and the rule_section column on
+-- pgautofailover.event.
+CREATE TYPE pgautofailover.fsm_section
+    AS ENUM
+ (
+    'api_triggered',
+    'early_checks',
+    'reporting_node',
+    'primary_node'
+ );
+
+-- Which MonitorFSM[] row this event is attributed to (see
+-- CurrentMonitorFSMRulePos in notifications.h for the mechanism) -- see
+-- pgautofailover.sql's own comment on the pgautofailover.event table
+-- definition for the full rationale of what is and isn't attributed.
+ALTER TABLE pgautofailover.event
+    ADD COLUMN IF NOT EXISTS rule_pos     int,
+    ADD COLUMN IF NOT EXISTS rule_section pgautofailover.fsm_section;
+
+-- Exposes the monitor's declarative dispatch table (MonitorFSM[] in
+-- group_state_machine.c) to SQL, one row per rule, in first-match-wins
+-- order -- see dump_fsm()'s own C-side comment for exactly what this does
+-- and doesn't cover. pgautofailover.event.rule_pos/rule_section (added
+-- above) join back to this view's pos column to show which rule produced
+-- a given event. section is plain text here (not pgautofailover.fsm_section):
+-- an api_triggered row's section names its specific operator-triggered
+-- entry point too, e.g. "api_triggered: remove_node".
+CREATE FUNCTION pgautofailover.dump_fsm()
+RETURNS TABLE
+ (
+    pos                          int,
+    section                      text,
+    comment                      text,
+    active_node_current_state    text,
+    other_node_current_state     text,
+    candidate_node_current_state text,
+    active_node_conditions       text,
+    other_node_conditions        text,
+    candidate_node_conditions    text,
+    group_conditions             text,
+    active_node_assigned_state   pgautofailover.replication_state,
+    other_node_assigned_state    pgautofailover.replication_state,
+    has_extra_action             bool,
+    section_path                 text
+ )
+LANGUAGE C SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$dump_fsm$$;
+
+grant execute on function pgautofailover.dump_fsm() to autoctl_node;
+
+-- section_path is cast to ltree here (a plain SQL cast, going through
+-- Postgres's own ordinary type-casting machinery) rather than in the C
+-- function itself: dump_fsm() only ever builds the dotted text, this view
+-- is the sole place pgautofailover takes a dependency on ltree.
+CREATE VIEW pgautofailover.fsm AS
+    SELECT pos,
+           section,
+           comment,
+           active_node_current_state,
+           other_node_current_state,
+           candidate_node_current_state,
+           active_node_conditions,
+           other_node_conditions,
+           candidate_node_conditions,
+           group_conditions,
+           active_node_assigned_state,
+           other_node_assigned_state,
+           has_extra_action,
+           section_path::ltree AS section_path
+      FROM pgautofailover.dump_fsm()
+     ORDER BY pos;
+
+-- Flat, fully-resolved (pos, current_state, assigned_state) edges derived
+-- from MonitorFSM[] -- see dump_fsm_edges()'s own C-side comment. Never
+-- queried directly by an operator; check_fsm_reachability() below is built
+-- on top of it.
+CREATE FUNCTION pgautofailover.dump_fsm_edges()
+RETURNS TABLE
+ (
+    pos            int,
+    current_state  pgautofailover.replication_state,
+    assigned_state pgautofailover.replication_state
+ )
+LANGUAGE C SECURITY DEFINER
+AS 'MODULE_PATHNAME', $$dump_fsm_edges$$;
+
+grant execute on function pgautofailover.dump_fsm_edges() to autoctl_node;
+
+-- Compares the monitor's own declarative dispatch table against a keeper's
+-- KeeperFSM[] edges (serialized to JSON by KeeperFSMToJSON(),
+-- src/bin/pg_autoctl/fsm.c, and sent here by "pg_autoctl inspect fsm check")
+-- and returns every monitor edge with no matching keeper entry -- an empty
+-- result means every transition the monitor can ever assign has somewhere
+-- for the keeper to go. keeper_edges is expected to be a jsonb array of
+-- {"current": ..., "assigned": ...} objects, one per KeeperFSMTransition
+-- row. "current" can be the literal string "any" (KeeperFSMToJSON()'s own
+-- sentinel for a row whose real .current is ANY_STATE): matched against
+-- every e.current_state without ever casting it to
+-- pgautofailover.replication_state, via a CASE (not "k.current = 'any' OR
+-- k.current::...= e.current_state", which does not reliably guarantee the
+-- cast is skipped once the left side matches -- CASE WHEN/THEN is the only
+-- construct Postgres guarantees short-circuits). Any other current value,
+-- and "assigned" always, still go through the enum cast unconditionally --
+-- a keeper reporting a state name this enum doesn't recognize still fails
+-- loudly, with a real cast error, rather than silently never matching.
+CREATE FUNCTION pgautofailover.check_fsm_reachability(keeper_edges jsonb)
+RETURNS TABLE
+ (
+    pos            int,
+    current_state  pgautofailover.replication_state,
+    assigned_state pgautofailover.replication_state,
+    comment        text
+ )
+LANGUAGE sql
+AS $$
+    SELECT e.pos, e.current_state, e.assigned_state, f.comment
+      FROM pgautofailover.dump_fsm_edges() e
+      JOIN pgautofailover.fsm f ON f.pos = e.pos
+     WHERE NOT EXISTS (
+       SELECT 1
+         FROM jsonb_to_recordset(keeper_edges) AS k(current text, assigned text)
+        WHERE k.assigned::pgautofailover.replication_state = e.assigned_state
+          AND CASE WHEN k.current = 'any' THEN true
+                   ELSE k.current::pgautofailover.replication_state = e.current_state
+              END)
+     ORDER BY e.pos;
+$$;
+
+grant execute on function pgautofailover.check_fsm_reachability(jsonb) to autoctl_node;
+
+-- Re-create last_events()'s three overloads to also select the new
+-- rule_pos/rule_section columns added to pgautofailover.event above.
+-- Return type is SETOF pgautofailover.event (the whole row type), which
+-- already reflects the table's new columns automatically once ALTER TABLE
+-- above has run -- only the function bodies' own column lists need
+-- updating, via CREATE OR REPLACE (same signature, so no DROP needed).
+CREATE OR REPLACE FUNCTION pgautofailover.last_events
+ (
+  count int default 10
+ )
+RETURNS SETOF pgautofailover.event LANGUAGE SQL STRICT
+AS $$
+with last_events as
+(
+  select eventid, eventtime, formationid,
+         nodeid, groupid, nodename, nodehost, nodeport,
+         reportedstate, goalstate,
+         reportedrepstate, reportedtli, reportedlsn,
+         candidatepriority, replicationquorum, description,
+         rule_pos, rule_section
+    from pgautofailover.event
+order by eventid desc
+   limit count
+)
+select * from last_events order by eventtime, eventid;
+$$;
+
+CREATE OR REPLACE FUNCTION pgautofailover.last_events
+ (
+  formation_id text default 'default',
+  count        int  default 10
+ )
+RETURNS SETOF pgautofailover.event LANGUAGE SQL STRICT
+AS $$
+with last_events as
+(
+    select eventid, eventtime, formationid,
+           nodeid, groupid, nodename, nodehost, nodeport,
+           reportedstate, goalstate,
+           reportedrepstate, reportedtli, reportedlsn,
+           candidatepriority, replicationquorum, description,
+           rule_pos, rule_section
+      from pgautofailover.event
+     where formationid = formation_id
+  order by eventid desc
+     limit count
+)
+select * from last_events order by eventtime, eventid;
+$$;
+
+CREATE OR REPLACE FUNCTION pgautofailover.last_events
+ (
+  formation_id text,
+  group_id     int,
+  count        int default 10
+ )
+RETURNS SETOF pgautofailover.event LANGUAGE SQL STRICT
+AS $$
+with last_events as
+(
+    select eventid, eventtime, formationid,
+           nodeid, groupid, nodename, nodehost, nodeport,
+           reportedstate, goalstate,
+           reportedrepstate, reportedtli, reportedlsn,
+           candidatepriority, replicationquorum, description,
+           rule_pos, rule_section
+      from pgautofailover.event
+     where formationid = formation_id
+       and groupid = group_id
+  order by eventid desc
+     limit count
+)
+select * from last_events order by eventtime, eventid;
+$$;

@@ -68,6 +68,17 @@ typedef struct MonitorEvent
 	int candidatePriority;
 	bool replicationQuorum;
 	char description[BUFSIZE];
+
+	/*
+	 * Which MonitorFSM[] row (if any) produced this event -- see
+	 * pgautofailover.event's own rule_pos/rule_section comment
+	 * (pgautofailover.sql) for exactly what NULL does and doesn't mean.
+	 * rulePos 0 here represents SQL NULL (matches the monitor-side
+	 * CurrentMonitorFSMRulePos convention: 0 is never a real row position),
+	 * in which case ruleSection is left empty.
+	 */
+	int rulePos;
+	char ruleSection[NAMEDATALEN];
 } MonitorEvent;
 
 #define EVENTS_ARRAY_MAX_COUNT 1024
@@ -83,6 +94,29 @@ typedef struct MonitorExtensionVersion
 	char defaultVersion[BUFSIZE];
 	char installedVersion[BUFSIZE];
 } MonitorExtensionVersion;
+
+/*
+ * One row per monitor FSM transition (MonitorFSM[], group_state_machine.c)
+ * with no matching edge in this node's own KeeperFSM[] -- the result of
+ * "pg_autoctl inspect fsm check" (see monitor_check_fsm_reachability() and
+ * pgautofailover.check_fsm_reachability(jsonb)). Fixed-capacity, same
+ * pattern as MonitorEventsArray above.
+ */
+#define FSM_REACHABILITY_MISMATCH_MAX_COUNT 1024
+
+typedef struct FsmReachabilityMismatch
+{
+	int pos;
+	char currentState[NAMEDATALEN];
+	char assignedState[NAMEDATALEN];
+	char comment[BUFSIZE];
+} FsmReachabilityMismatch;
+
+typedef struct FsmReachabilityResult
+{
+	int count;
+	FsmReachabilityMismatch mismatches[FSM_REACHABILITY_MISMATCH_MAX_COUNT];
+} FsmReachabilityResult;
 
 typedef struct CoordinatorNodeAddress
 {
@@ -167,6 +201,9 @@ bool monitor_report_postgres_version(Monitor *monitor, int64_t nodeId,
 									 PostgresVersionInfo *pgVersion);
 bool monitor_report_timeline_history(Monitor *monitor, int64_t nodeId,
 									 const char *historyJSON);
+bool monitor_check_fsm_reachability(Monitor *monitor,
+									const char *keeperEdgesJSON,
+									FsmReachabilityResult *result);
 bool monitor_accept_timeline(Monitor *monitor, char *formation, int group,
 							 int tli, char *decidedBy);
 bool monitor_print_timeline(Monitor *monitor, char *formation, int group);
