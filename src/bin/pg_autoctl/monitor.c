@@ -2376,7 +2376,15 @@ parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 
 	value = PQgetvalue(result, rowNumber, 3);
 
-	if (!stringToInt(value, &node->port) || node->port == 0)
+	/*
+	 * nodeport = 0 is a real, intentional value for an ARCHIVING row (see
+	 * pgautofailover.sql's own comment on archiver_add_formation()'s
+	 * INSERT): it has no postmaster of its own to be reachable on. This
+	 * function parses whole-formation node listings (get_nodes/
+	 * get_other_nodes) that legitimately include those rows now, so a
+	 * parsed zero is not an error -- only a genuine parse failure is.
+	 */
+	if (!stringToInt(value, &node->port))
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);
 		return false;
@@ -2766,8 +2774,9 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 
 	value = PQgetvalue(result, rowNumber, 3);
 
-	if (!stringToInt(value, &(nodeState->node.port)) ||
-		nodeState->node.port == 0)
+	/* nodeport = 0 is a real, intentional value for an ARCHIVING row -- see
+	 * the sibling comment on this same check in parseNode() above */
+	if (!stringToInt(value, &(nodeState->node.port)))
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);
 		++errors;

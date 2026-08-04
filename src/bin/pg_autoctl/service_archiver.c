@@ -249,6 +249,20 @@ service_archiver_loop(Keeper *keeper)
 
 	log_info("pg_autoctl archiver service is starting");
 
+	/*
+	 * An archiver never calls keeper_update_pg_state() -- there's no real
+	 * Postgres instance to query (see haspgdata's own design comment) --
+	 * so keeper->postgres.currentLSN is otherwise left at its zero-valued
+	 * empty string for the lifetime of this process. keeper_node_active()
+	 * always sends it as one of node_active()'s own parameters, and the
+	 * monitor-side pg_lsn column rejects an empty string outright ("invalid
+	 * input syntax for type pg_lsn"). "0/0" is the same placeholder
+	 * keeper_update_pg_state() itself defaults to before it has a real
+	 * reading; an archiver's own WAL-capture progress is tracked
+	 * separately via archiver_wal, not through this per-node report.
+	 */
+	strlcpy(keeper->postgres.currentLSN, "0/0", sizeof(keeper->postgres.currentLSN));
+
 	while (!asked_to_stop && !asked_to_stop_fast && !asked_to_quit)
 	{
 		MonitorAssignedState assignedState = { 0 };

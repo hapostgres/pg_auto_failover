@@ -26,6 +26,11 @@
 #define SERVICE_NAME_KEEPER "node-active"
 #define SERVICE_NAME_MONITOR "listener"
 
+/* an archiver's two halves, supervised together by start_archiver()
+ * (service_archiver_run.c) -- see that file's own header comment */
+#define SERVICE_NAME_ARCHIVER_CAPTURE "archiver-capture"
+#define SERVICE_NAME_ARCHIVER_SERVE "archiver-serve"
+
 /*
  * At pg_autoctl create time we use a transient service to initialize our local
  * node. When using the --run option, the transient service is terminated and
