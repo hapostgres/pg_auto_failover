@@ -1062,6 +1062,99 @@ monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
 }
 
 
+/*
+ * monitor_report_basebackup_started calls
+ * pgautofailover.report_basebackup_started() to record the start of a new
+ * base-backup production job and returns its basebackupid, needed by the
+ * matching monitor_report_basebackup_completed() call once the backup
+ * finishes. source is hardcoded to 'live' and replaymode to NULL --
+ * Milestone 5's own first pass, "live" only (see
+ * service_archiver_basebackup.c's own header comment); 'replay' is a
+ * follow-up that will need both as real parameters.
+ */
+bool
+monitor_report_basebackup_started(Monitor *monitor, int64_t archiverId,
+								  const char *formationId, int groupId,
+								  const char *label, int timeline,
+								  const char *startLsn,
+								  int64_t *basebackupId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+	const char *sql =
+		"SELECT pgautofailover.report_basebackup_started("
+		"$1, $2, $3, $4, $5, $6, 'live'::pgautofailover.basebackup_source)";
+	int paramCount = 6;
+	Oid paramTypes[6] = {
+		INT8OID, TEXTOID, INT4OID, TEXTOID, INT4OID, LSNOID
+	};
+	IntString archiverIdString = intToString(archiverId);
+	IntString groupIdString = intToString(groupId);
+	IntString timelineString = intToString(timeline);
+	const char *paramValues[6] = {
+		archiverIdString.strValue, formationId, groupIdString.strValue,
+		label, timelineString.strValue, startLsn
+	};
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to report the start of base backup \"%s\" to "
+				 "the monitor", label);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to report the start of base backup \"%s\" to "
+				 "the monitor because it returned an unexpected result, "
+				 "see previous lines for details", label);
+		return false;
+	}
+
+	*basebackupId = context.bigint;
+
+	return true;
+}
+
+
+/*
+ * monitor_report_basebackup_completed calls
+ * pgautofailover.report_basebackup_completed() to record the successful
+ * completion of a base-backup production job previously created with
+ * monitor_report_basebackup_started().
+ */
+bool
+monitor_report_basebackup_completed(Monitor *monitor, int64_t basebackupId,
+									const char *endLsn, int64_t sizeBytes,
+									const char *storageLocation)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_basebackup_completed($1, $2, $3, $4)";
+	int paramCount = 4;
+	Oid paramTypes[4] = { INT8OID, LSNOID, INT8OID, TEXTOID };
+	IntString basebackupIdString = intToString(basebackupId);
+	IntString sizeBytesString = intToString(sizeBytes);
+	const char *paramValues[4] = {
+		basebackupIdString.strValue, endLsn, sizeBytesString.strValue,
+		storageLocation
+	};
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to report base backup %" PRId64 " as completed "
+				 "to the monitor", basebackupId);
+		return false;
+	}
+
+	return true;
+}
+
+
 bool
 monitor_register_node(Monitor *monitor, char *formation,
 					  char *name, char *host, int port,

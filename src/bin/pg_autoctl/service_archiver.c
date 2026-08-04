@@ -37,6 +37,7 @@
 #include "fsm.h"
 #include "log.h"
 #include "monitor.h"
+#include "service_archiver_basebackup.h"
 #include "signals.h"
 
 /*
@@ -503,6 +504,11 @@ service_archiver_loop(Keeper *keeper)
 			{
 				log_warn("Failed to report newly captured WAL segments to "
 						 "the monitor, will retry");
+			}
+
+			if (!service_archiver_maybe_generate_basebackup(keeper))
+			{
+				log_warn("Failed to generate a base backup, will retry");
 			}
 		}
 		else
