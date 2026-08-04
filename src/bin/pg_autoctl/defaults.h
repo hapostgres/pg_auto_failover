@@ -230,6 +230,11 @@
  * serve` -- matches src/bin/pg_walsender/defaults.h's own WS_DEFAULT_PORT */
 #define PG_AUTOCTL_ARCHIVER_SERVE_PORT 6543
 
+/* port the archiver's own throwaway replay-mode staging Postgres instance
+ * listens on, loopback only -- see service_archiver_basebackup.c's own
+ * replay/volatile implementation */
+#define PG_AUTOCTL_ARCHIVER_REPLAY_PORT 6899
+
 #define PG_AUTOCTL_MONITOR_DBNAME "pg_auto_failover"
 #define PG_AUTOCTL_MONITOR_EXTENSION_NAME "pgautofailover"
 #define PG_AUTOCTL_MONITOR_DBOWNER "autoctl"

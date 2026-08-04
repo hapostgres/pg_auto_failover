@@ -963,18 +963,63 @@ monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
 
 
 /*
- * monitor_get_latest_basebackup_location calls
+ * BasebackupInfoParseContext/parseBasebackupInfo parse the two columns
+ * monitor_get_latest_basebackup_info() needs out of a single-row result --
+ * SingleValueResultContext only carries one column, not enough here.
+ */
+typedef struct BasebackupInfoParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	bool parsedOk;
+	int ntuples;
+	char *storageLocation;
+	char *source;
+} BasebackupInfoParseContext;
+
+
+static void
+parseBasebackupInfo(void *ctx, PGresult *result)
+{
+	BasebackupInfoParseContext *context = (BasebackupInfoParseContext *) ctx;
+
+	context->ntuples = PQntuples(result);
+
+	if (context->ntuples != 1)
+	{
+		/* zero rows is a valid "no backup yet" signal, not a parse error */
+		context->parsedOk = (context->ntuples == 0);
+		return;
+	}
+
+	char *storageLocation = PQgetvalue(result, 0, 0);
+	char *source = PQgetvalue(result, 0, 1);
+
+	context->storageLocation = strdup(storageLocation);
+	context->source = strdup(source);
+
+	context->parsedOk =
+		context->storageLocation != NULL && context->source != NULL;
+
+	if (!context->parsedOk)
+	{
+		log_error(ALLOCATION_FAILED_ERROR);
+	}
+}
+
+
+/*
+ * monitor_get_latest_basebackup_info calls
  * pgautofailover.get_latest_basebackup(formationId, groupId) and returns
- * its storagelocation column. *found is set to false (not an error) when
- * the archiver hasn't taken a base backup for this group yet -- the "Base
- * backup generation" milestone this depends on hasn't landed, so every
- * caller of this function must already tolerate that.
+ * its storagelocation and source columns. *found is set to false (not an
+ * error) when the archiver hasn't taken a base backup for this group yet --
+ * every caller must already tolerate that.
  */
 bool
-monitor_get_latest_basebackup_location(Monitor *monitor,
-									   const char *formationId, int groupId,
-									   char *storageLocation, size_t size,
-									   bool *found)
+monitor_get_latest_basebackup_info(Monitor *monitor,
+								   const char *formationId, int groupId,
+								   char *storageLocation, size_t storageLocationSize,
+								   char *source, size_t sourceSize,
+								   bool *found)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
@@ -987,22 +1032,22 @@ monitor_get_latest_basebackup_location(Monitor *monitor,
 		 * composite downstream, is what makes context.ntuples == 0 below
 		 * an accurate "no backup yet" signal.
 		 */
-		"SELECT storagelocation "
+		"SELECT storagelocation, source::text "
 		"  FROM pgautofailover.get_latest_basebackup($1, $2) "
 		" WHERE storagelocation IS NOT NULL";
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	IntString groupIdString = intToString(groupId);
 	const char *paramValues[2] = { formationId, groupIdString.strValue };
-	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+	BasebackupInfoParseContext context = { { 0 }, false, 0, NULL, NULL };
 
 	*found = false;
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &context, &parseSingleValueResult))
+								   &context, &parseBasebackupInfo))
 	{
-		log_error("Failed to get the latest base backup location from the "
+		log_error("Failed to get the latest base backup info from the "
 				  "monitor for \"%s\"/%d", formationId, groupId);
 		return false;
 	}
@@ -1015,14 +1060,16 @@ monitor_get_latest_basebackup_location(Monitor *monitor,
 
 	if (!context.parsedOk)
 	{
-		log_error("Failed to parse the latest base backup location returned "
+		log_error("Failed to parse the latest base backup info returned "
 				  "by the monitor for \"%s\"/%d, see above for details",
 				  formationId, groupId);
 		return false;
 	}
 
-	strlcpy(storageLocation, context.strVal, size);
-	free(context.strVal);
+	strlcpy(storageLocation, context.storageLocation, storageLocationSize);
+	strlcpy(source, context.source, sourceSize);
+	free(context.storageLocation);
+	free(context.source);
 	*found = true;
 
 	return true;
@@ -1067,33 +1114,35 @@ monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
  * pgautofailover.report_basebackup_started() to record the start of a new
  * base-backup production job and returns its basebackupid, needed by the
  * matching monitor_report_basebackup_completed() call once the backup
- * finishes. source is hardcoded to 'live' and replaymode to NULL --
- * Milestone 5's own first pass, "live" only (see
- * service_archiver_basebackup.c's own header comment); 'replay' is a
- * follow-up that will need both as real parameters.
+ * finishes. source is one of "live"/"replay" (basebackup_source's own
+ * labels); replaymode is required when source is "replay" ("volatile"/
+ * "persistent"), NULL otherwise -- pass NULL for a "live" backup.
  */
 bool
 monitor_report_basebackup_started(Monitor *monitor, int64_t archiverId,
 								  const char *formationId, int groupId,
 								  const char *label, int timeline,
 								  const char *startLsn,
+								  const char *source, const char *replaymode,
 								  int64_t *basebackupId)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
 	const char *sql =
 		"SELECT pgautofailover.report_basebackup_started("
-		"$1, $2, $3, $4, $5, $6, 'live'::pgautofailover.basebackup_source)";
-	int paramCount = 6;
-	Oid paramTypes[6] = {
-		INT8OID, TEXTOID, INT4OID, TEXTOID, INT4OID, LSNOID
+		"$1, $2, $3, $4, $5, $6, "
+		"$7::pgautofailover.basebackup_source, "
+		"$8::pgautofailover.basebackup_replay_mode)";
+	int paramCount = 8;
+	Oid paramTypes[8] = {
+		INT8OID, TEXTOID, INT4OID, TEXTOID, INT4OID, LSNOID, TEXTOID, TEXTOID
 	};
 	IntString archiverIdString = intToString(archiverId);
 	IntString groupIdString = intToString(groupId);
 	IntString timelineString = intToString(timeline);
-	const char *paramValues[6] = {
+	const char *paramValues[8] = {
 		archiverIdString.strValue, formationId, groupIdString.strValue,
-		label, timelineString.strValue, startLsn
+		label, timelineString.strValue, startLsn, source, replaymode
 	};
 
 	if (!pgsql_execute_with_params(pgsql, sql,

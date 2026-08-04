@@ -17,7 +17,7 @@
  * to know an archiver's local WAL cache path, that's inherently
  * archiver-host-local information never sent to it. The one thing genuinely
  * worth asking the monitor is the latest base backup's storage location
- * (monitor_get_latest_basebackup_location), which is real, monitor-tracked
+ * (monitor_get_latest_basebackup_info), which is real, monitor-tracked
  * state once the "Base backup generation" milestone lands.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
@@ -204,14 +204,17 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 	KeeperConfig *config = &(keeper->config);
 
 	char basebackupLocation[MAXPGPATH] = { 0 };
+	char basebackupSource[NAMEDATALEN] = { 0 };
 	bool found = false;
 
-	if (!monitor_get_latest_basebackup_location(&(keeper->monitor),
-												config->formation,
-												config->groupId,
-												basebackupLocation,
-												sizeof(basebackupLocation),
-												&found))
+	if (!monitor_get_latest_basebackup_info(&(keeper->monitor),
+											config->formation,
+											config->groupId,
+											basebackupLocation,
+											sizeof(basebackupLocation),
+											basebackupSource,
+											sizeof(basebackupSource),
+											&found))
 	{
 		log_warn("Failed to fetch the latest base backup location from the "
 				 "monitor; the routes file will omit it for now");

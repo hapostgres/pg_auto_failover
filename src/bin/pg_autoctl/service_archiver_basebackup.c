@@ -1,31 +1,51 @@
 /*
  * src/bin/pg_autoctl/service_archiver_basebackup.c
- *   Archiving & Disaster Recovery: base backup generation, `live` source
- *   only (Milestone 5's own first half, per the Build order in
+ *   Archiving & Disaster Recovery: base backup generation, both `live` and
+ *   `replay`/`volatile` sources (Milestone 5, per the Build order in
  *   ~/dev/temp/archiving-disaster-recovery.md: "live first, then
- *   replay/volatile").
+ *   replay/volatile"). `replay`/`persistent` is a later milestone --
+ *   that mode keeps its staging instance resident as a `warm-standby`
+ *   `archiver_node` row, which doesn't exist until Milestone 6.
  *
- * Trigger scope for this pass: bootstrap only -- a group with zero
- * existing base backups gets one immediately, sourced live. Scheduled/
- * timeline-change/retention-driven triggers all need basebackup_policy
- * wired through the CLI first (a later milestone); get_archiver_policy()
- * already resolves a default policy row today, but nothing here reads its
- * frequency yet.
+ * Trigger scope for this pass: bootstrap, then exactly one replay-sourced
+ * backup to exercise that pipeline once -- both hardcoded here, not read
+ * from basebackup_policy. A group with zero existing base backups gets one
+ * immediately, sourced live (matching the design doc's own bootstrap rule:
+ * nothing to replay from yet on the first run). Once that lands, the very
+ * next tick takes exactly one more, this time sourced replay/volatile, and
+ * after that this file goes quiet for the group. Real frequency-driven
+ * scheduling (basebackup_policy's own `source`/`replaymode`/`frequency`/
+ * `onpromotion`/retention fields, resolved through `get_archiver_policy()`/
+ * `get_basebackup_policy()`) needs that policy wired through the CLI
+ * first -- out of scope here. This is a deliberate scope cut, not an
+ * oversight: the milestone-defining new capability is the replay mechanism
+ * itself (extract, replay, promote, snapshot, discard), not a general
+ * scheduler -- see the design doc's own build order, which lists "warm
+ * standby" and its `advance`/scheduling machinery as later milestones.
  *
- * Target selection follows the design doc's own `live` precedence, minus
- * its warm-standby tier (a later milestone, nothing to select from yet):
- * the first healthy secondary in the group, falling back to the primary
- * when none exists. "Healthy" here just means "reachable via
+ * Target selection ('live') follows the design doc's own precedence,
+ * minus its warm-standby tier (a later milestone, nothing to select from
+ * yet): the first healthy secondary in the group, falling back to the
+ * primary when none exists. "Healthy" here just means "reachable via
  * pgautofailover.get_nodes()", not "least-loaded" -- picking between
  * several healthy secondaries by load is a refinement, not required for
  * base-backup generation to work at all.
+ *
+ * Target selection ('replay') is entirely local: a throwaway staging
+ * Postgres instance, extracted from the last retained base backup and
+ * replayed forward using this archiver's own already-captured WAL (no
+ * network round trip to any live node at all) until it promotes on its
+ * own (see write_replay_recovery_config()'s own comment on why this
+ * targets "everything locally available" rather than a specific LSN),
+ * then sourced via pg_basebackup over loopback and discarded ('volatile':
+ * no persistent archiver_node row, nothing left running or on disk between
+ * cycles).
  *
  * Base backup generation itself is a one-shot forked child (tracked via
  * basebackupPid, the same pattern service_archiver.c uses for
  * pgReceivewalPid), not a persistent supervised service: it runs to
  * completion and exits, so it must not block service_archiver_loop()'s own
- * per-tick node_active()/WAL-report cycle for however long pg_basebackup
- * takes.
+ * per-tick node_active()/WAL-report cycle for however long it takes.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -41,6 +61,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "postgres_fe.h"
+
 #include "service_archiver_basebackup.h"
 
 #include "defaults.h"
@@ -48,6 +70,7 @@
 #include "log.h"
 #include "monitor.h"
 #include "pgsql.h"
+#include "runprogram.h"
 #include "signals.h"
 
 /*
@@ -59,6 +82,10 @@ static pid_t basebackupPid = -1;
 /* accumulator for directory_size()'s nftw() callback -- nftw() has no
  * user-data parameter, so this has to be file-scope */
 static uint64_t directorySizeAccumulator = 0;
+
+/* how long to wait for the replay staging instance to finish replaying
+ * available WAL and promote before giving up on this cycle */
+#define ARCHIVER_REPLAY_PROMOTE_TIMEOUT_SECONDS 60
 
 
 static bool
@@ -221,21 +248,21 @@ read_basebackup_label(const char *backupDir, char *lsnOut, size_t lsnOutSize,
 
 
 /*
- * query_wal_position runs a single ad hoc query against sourceConnInfo,
- * used right after a base backup finishes to capture the source's current
- * WAL write position (primary) or replay position (standby) -- recorded as
- * the backup's endlsn. Not the exact internal stop-backup LSN real
- * pg_basebackup computes server-side (not observable from a plain CLI
- * wrapper around it), but a reasonable upper bound: "WAL up to at least
- * this point must be replayed to reach consistency."
+ * query_wal_position runs a single ad hoc query against connInfo, used
+ * right after a base backup finishes to capture the source's current WAL
+ * write position (primary) or replay position (standby/staging instance)
+ * -- recorded as the backup's endlsn. Not the exact internal stop-backup
+ * LSN real pg_basebackup computes server-side (not observable from a plain
+ * CLI wrapper around it), but a reasonable upper bound: "WAL up to at
+ * least this point must be replayed to reach consistency."
  */
 static bool
-query_wal_position(const char *sourceConnInfo, bool isPrimary,
+query_wal_position(const char *connInfo, bool isPrimary,
 				   char *lsn, size_t lsnSize)
 {
 	PGSQL client = { 0 };
 
-	if (!pgsql_init(&client, (char *) sourceConnInfo, PGSQL_CONN_UPSTREAM))
+	if (!pgsql_init(&client, (char *) connInfo, PGSQL_CONN_UPSTREAM))
 	{
 		return false;
 	}
@@ -296,10 +323,11 @@ directory_size(const char *dirPath)
 /*
  * run_pg_basebackup execs the real, unmodified pg_basebackup client
  * against source, writing into backupDir. --wal-method=none: this backup
- * is deliberately not self-consistent on its own -- the archiver's already
- * -running WAL capture (service_archiver.c) is what supplies the WAL
- * needed to reach consistency on replay, so bundling a second independent
- * copy of it into every single backup would be pure waste.
+ * is deliberately not self-consistent on its own -- for a `live` backup,
+ * the archiver's already-running WAL capture (service_archiver.c) is what
+ * supplies the WAL needed to reach consistency on replay; for a `replay`
+ * backup, the source is itself already paused at a known-consistent LSN,
+ * so there is nothing further to bundle either way.
  */
 static bool
 run_pg_basebackup(KeeperConfig *config, NodeAddress *source,
@@ -316,8 +344,8 @@ run_pg_basebackup(KeeperConfig *config, NodeAddress *source,
 		return false;
 	}
 
-	log_info("Generating a live base backup from %s:%d into \"%s\"",
-			 source->host, source->port, backupDir);
+	log_info("Generating base backup \"%s\" from %s:%d into \"%s\"",
+			 label, source->host, source->port, backupDir);
 
 	pid_t pid = fork();
 
@@ -380,23 +408,17 @@ run_pg_basebackup(KeeperConfig *config, NodeAddress *source,
 
 
 /*
- * generate_basebackup is the forked child's own body: run pg_basebackup to
- * completion, then report start and completion to the monitor from the
- * authoritative backup_label it wrote. Runs in its own process, with its
- * own monitor connection (the parent's keeper->monitor is not fork-safe to
- * share, exactly as service_archiver_run.c's own supervised children
- * already document).
+ * report_basebackup reads backupDir's own backup_label for the
+ * authoritative start position, then reports both the start and
+ * completion of this base backup to the monitor. Shared by the live and
+ * replay paths; source/replaymode is the one thing that differs.
  */
 static bool
-generate_basebackup(Keeper *keeper, NodeAddress *source,
-					const char *backupDir, const char *label)
+report_basebackup(Keeper *keeper, NodeAddress *endLsnSource,
+				  const char *backupDir, const char *label,
+				  const char *source, const char *replaymode)
 {
 	KeeperConfig *config = &(keeper->config);
-
-	if (!run_pg_basebackup(config, source, backupDir, label))
-	{
-		return false;
-	}
 
 	char startLsn[PG_LSN_MAXLENGTH] = { 0 };
 	int timeline = 1;
@@ -423,6 +445,7 @@ generate_basebackup(Keeper *keeper, NodeAddress *source,
 										   config->formation,
 										   config->groupId,
 										   label, timeline, startLsn,
+										   source, replaymode,
 										   &basebackupId))
 	{
 		/* errors already logged */
@@ -435,18 +458,19 @@ generate_basebackup(Keeper *keeper, NodeAddress *source,
 	 * comment). DEFAULT_DATABASE_NAME ("postgres") is what every ordinary
 	 * node defaults its own --dbname to (cli_create_node.c), and is always
 	 * present regardless of that default, so it is a safe target for a
-	 * plain read-only SQL query.
+	 * plain read-only SQL query -- true of the replay staging instance too,
+	 * copied verbatim from a `live` backup of an ordinary node.
 	 */
-	char sourceConnInfo[MAXCONNINFO] = { 0 };
+	char connInfo[MAXCONNINFO] = { 0 };
 
-	sformat(sourceConnInfo, sizeof(sourceConnInfo),
+	sformat(connInfo, sizeof(connInfo),
 			"host=%s port=%d user=%s dbname=%s application_name=%s",
-			source->host, source->port,
+			endLsnSource->host, endLsnSource->port,
 			PG_AUTOCTL_REPLICA_USERNAME, DEFAULT_DATABASE_NAME, config->name);
 
 	char endLsn[PG_LSN_MAXLENGTH] = { 0 };
 
-	if (!query_wal_position(sourceConnInfo, source->isPrimary,
+	if (!query_wal_position(connInfo, endLsnSource->isPrimary,
 							endLsn, sizeof(endLsn)))
 	{
 		/* not fatal: the backup itself succeeded, only this one piece of
@@ -465,11 +489,373 @@ generate_basebackup(Keeper *keeper, NodeAddress *source,
 
 
 /*
+ * generate_live_basebackup is the forked child's own body for a `live`
+ * backup: run pg_basebackup against source to completion, then report it.
+ * Runs in its own process, with its own monitor connection (the parent's
+ * keeper->monitor is not fork-safe to share, exactly as
+ * service_archiver_run.c's own supervised children already document).
+ */
+static bool
+generate_live_basebackup(Keeper *keeper, NodeAddress *source,
+						 const char *backupDir, const char *label)
+{
+	if (!run_pg_basebackup(&(keeper->config), source, backupDir, label))
+	{
+		return false;
+	}
+
+	return report_basebackup(keeper, source, backupDir, label, "live", NULL);
+}
+
+
+/*
+ * copy_directory_tree shells out to `cp -R -p` (POSIX-portable across this
+ * project's actual dev/CI targets, unlike GNU cp's `-a`) to seed the
+ * replay staging directory from the last retained base backup. No
+ * existing recursive-copy helper exists in this codebase to reuse, and
+ * reimplementing one (special files, symlinks, permissions) is a much
+ * larger and riskier undertaking than reusing a battle-tested system
+ * utility -- the same reasoning this project already applies to
+ * pg_basebackup/pg_receivewal/pg_ctl themselves. Uses run_program()
+ * (runprogram.h), this project's own subprocess helper, rather than a
+ * hand-rolled fork()/exec(): matches every other external-program call in
+ * this codebase, and captures stderr for the error message below.
+ */
+static bool
+copy_directory_tree(const char *sourceDir, const char *destDir)
+{
+	char cpPath[MAXPGPATH] = { 0 };
+
+	if (!search_path_first("cp", cpPath, LOG_ERROR))
+	{
+		log_error("Failed to find \"cp\" in PATH");
+		return false;
+	}
+
+	Program program = run_program(cpPath, "-R", "-p", sourceDir, destDir, NULL);
+	bool success = program.returnCode == 0;
+
+	if (!success)
+	{
+		log_error("cp -R -p \"%s\" \"%s\" failed: %s",
+				 sourceDir, destDir,
+				 program.stdErr != NULL ? program.stdErr : "");
+	}
+
+	free_program(&program);
+
+	return success;
+}
+
+
+/*
+ * write_replay_recovery_config points the staging instance's recovery at
+ * this archiver's own local WAL cache (the colocated fast path -- no
+ * network round trip needed, matching service_archiver.c's own philosophy).
+ * No recovery_target_lsn: an idle-ish source produces mostly-zero-padded
+ * segments (a "complete", renamed segment file is always its full fixed
+ * size regardless of how much of it is real WAL), so "the end of the
+ * latest complete segment" is not actually a reachable record boundary --
+ * recovery correctly refuses to pause at a target that doesn't correspond
+ * to any real record, and errors out instead ("recovery ended before
+ * configured recovery target was reached"). Instead, this replays every
+ * available locally-captured record and lets Postgres promote once
+ * restore_command runs out of segments to fetch -- for a snapshot that
+ * gets pg_basebackup'd and discarded immediately after (this is
+ * `volatile`: nothing persists between cycles), a promoted instance is
+ * exactly as usable a source as a paused one; only a `persistent` replica
+ * kept resident between cycles (a later milestone) would need the more
+ * precise pause-at-target-LSN behavior the design doc describes for
+ * `pg_autoctl warm-standby advance`.
+ *
+ * recovery.signal, not standby.signal: this is a one-shot archive recovery
+ * of already-captured WAL, not open-ended standby streaming.
+ */
+static bool
+write_replay_recovery_config(const char *stagingDir, const char *walcacheDir)
+{
+	/*
+	 * recovery.signal is what actually puts Postgres into archive recovery
+	 * at startup (PG12+): without it, a data directory that still has
+	 * backup_label is treated as an ordinary crash-recovery restart, which
+	 * fails outright since the copied backup's pg_wal has no local WAL to
+	 * replay from ("could not locate required checkpoint record") --
+	 * restore_command is only ever consulted once recovery.signal (or
+	 * standby.signal) says this is a recovery in the first place.
+	 */
+	char signalPath[MAXPGPATH] = { 0 };
+
+	sformat(signalPath, sizeof(signalPath), "%s/recovery.signal", stagingDir);
+
+	if (!write_file("", 0, signalPath))
+	{
+		return false;
+	}
+
+	char confPath[MAXPGPATH] = { 0 };
+
+	sformat(confPath, sizeof(confPath), "%s/postgresql.auto.conf", stagingDir);
+
+	char conf[BUFSIZE] = { 0 };
+
+	sformat(conf, sizeof(conf),
+			"\n"
+			"# added by pg_autoctl's archiver replay/volatile base backup generation\n"
+			"restore_command = 'cp \"%s/%%f\" \"%%p\"'\n",
+			walcacheDir);
+
+	return append_to_file(conf, strlen(conf), confPath);
+}
+
+
+/*
+ * pid of the currently-running replay staging instance, if any -- tracked
+ * the same way service_archiver.c tracks pgReceivewalPid, so
+ * stop_staging_postgres() knows what to signal.
+ */
+static pid_t stagingPostgresPid = -1;
+
+
+/*
+ * start_staging_postgres execs the real "postgres" binary directly against
+ * stagingDir, loopback-only, on PG_AUTOCTL_ARCHIVER_REPLAY_PORT -- the same
+ * fork()/execv() pattern already used for pg_receivewal
+ * (service_archiver.c) and pg_basebackup (run_pg_basebackup(), this file),
+ * rather than going through pg_ctl: readiness is confirmed by
+ * wait_for_replay_pause()'s own connection-retry loop below, so pg_ctl's
+ * own "-w" startup wait buys nothing here, and this sidesteps it -- and the
+ * SQL-connection-based readiness check this needs anyway.
+ */
+static bool
+start_staging_postgres(KeeperConfig *config, const char *stagingDir)
+{
+	char postgresPath[MAXPGPATH] = { 0 };
+
+	path_in_same_directory(config->pgSetup.pg_ctl, "postgres", postgresPath);
+
+	if (!file_exists(postgresPath))
+	{
+		log_error("Failed to find postgres at \"%s\"", postgresPath);
+		return false;
+	}
+
+	char portStr[NAMEDATALEN] = { 0 };
+
+	sformat(portStr, sizeof(portStr), "%d", PG_AUTOCTL_ARCHIVER_REPLAY_PORT);
+
+	pid_t pid = fork();
+
+	if (pid == -1)
+	{
+		log_error("Failed to fork postgres: %m");
+		return false;
+	}
+
+	if (pid == 0)
+	{
+		char *args[8];
+		int argsIndex = 0;
+
+		args[argsIndex++] = postgresPath;
+		args[argsIndex++] = "-D";
+		args[argsIndex++] = (char *) stagingDir;
+		args[argsIndex++] = "-p";
+		args[argsIndex++] = portStr;
+		args[argsIndex++] = "-h";
+		args[argsIndex++] = "127.0.0.1";
+		args[argsIndex] = NULL;
+
+		execv(postgresPath, args);
+
+		/* execv only returns on failure */
+		log_fatal("execv(\"%s\"): %m", postgresPath);
+		_exit(127);
+	}
+
+	stagingPostgresPid = pid;
+
+	return true;
+}
+
+
+/*
+ * stop_staging_postgres stops the replay staging instance. Best effort:
+ * called during cleanup, including on failure paths where the instance may
+ * or may not have actually started.
+ */
+static void
+stop_staging_postgres(void)
+{
+	if (stagingPostgresPid <= 0)
+	{
+		return;
+	}
+
+	if (kill(stagingPostgresPid, SIGTERM) != 0 && errno != ESRCH)
+	{
+		log_warn("Failed to send SIGTERM to the replay staging instance "
+				"(pid %d): %m", stagingPostgresPid);
+	}
+
+	int status = 0;
+
+	if (waitpid(stagingPostgresPid, &status, 0) == -1 && errno != ECHILD)
+	{
+		log_warn("Failed to wait for the replay staging instance "
+				"(pid %d) to stop: %m", stagingPostgresPid);
+	}
+
+	stagingPostgresPid = -1;
+}
+
+
+/*
+ * wait_for_replay_promotion connects to the staging instance (retrying: it
+ * takes a moment after fork()/execv() to start accepting connections) and
+ * polls pg_is_in_recovery() until it reports false -- Postgres promotes on
+ * its own once restore_command runs out of segments to fetch (see
+ * write_replay_recovery_config()'s own comment on why this replays to "no
+ * more locally-captured WAL" rather than a specific target LSN) -- or
+ * timeoutSeconds elapses.
+ */
+static bool
+wait_for_replay_promotion(const char *connInfo, int timeoutSeconds)
+{
+	time_t deadline = time(NULL) + timeoutSeconds;
+	bool promoted = false;
+
+	while (!promoted && time(NULL) < deadline)
+	{
+		PGSQL client = { 0 };
+
+		if (pgsql_init(&client, (char *) connInfo, PGSQL_CONN_UPSTREAM))
+		{
+			SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+			const char *sql = "SELECT pg_is_in_recovery()";
+
+			if (pgsql_execute_with_params(&client, sql, 0, NULL, NULL,
+										  &context, &parseSingleValueResult) &&
+				context.parsedOk)
+			{
+				promoted = !context.boolVal;
+			}
+
+			PQfinish(client.connection);
+		}
+
+		if (!promoted)
+		{
+			sleep(1);
+		}
+	}
+
+	return promoted;
+}
+
+
+/*
+ * generate_replay_basebackup is the forked child's own body for a
+ * `replay`/`volatile` backup: extract the last retained base backup into a
+ * fresh staging directory, replay this archiver's own locally-captured WAL
+ * forward until it promotes (see write_replay_recovery_config()'s own
+ * comment for why this targets "everything locally available" rather than
+ * a specific LSN), snapshot the promoted instance via pg_basebackup over
+ * loopback, report it, then stop and discard the staging instance --
+ * 'volatile' means nothing survives between cycles, each one replays the
+ * whole gap since the last retained backup again.
+ */
+static bool
+generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
+						   const char *backupDir, const char *label)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	char stagingDir[MAXPGPATH] = { 0 };
+
+	sformat(stagingDir, sizeof(stagingDir), "%s/replay-staging",
+			config->pgSetup.pgdata);
+
+	if (directory_exists(stagingDir) && !rmtree(stagingDir, true))
+	{
+		log_error("Failed to remove leftover replay staging directory "
+				 "\"%s\" from a previous cycle", stagingDir);
+		return false;
+	}
+
+	log_info("Generating a replay base backup, extracting \"%s\" into \"%s\"",
+			 sourceBackupDir, stagingDir);
+
+	if (!copy_directory_tree(sourceBackupDir, stagingDir))
+	{
+		return false;
+	}
+
+	if (!write_replay_recovery_config(stagingDir, config->pgSetup.pgdata))
+	{
+		log_error("Failed to write replay recovery configuration in \"%s\"",
+				 stagingDir);
+		return false;
+	}
+
+	if (!start_staging_postgres(config, stagingDir))
+	{
+		return false;
+	}
+
+	char stagingConnInfo[MAXCONNINFO] = { 0 };
+
+	sformat(stagingConnInfo, sizeof(stagingConnInfo),
+			"host=127.0.0.1 port=%d user=%s dbname=%s application_name=%s",
+			PG_AUTOCTL_ARCHIVER_REPLAY_PORT,
+			PG_AUTOCTL_REPLICA_USERNAME, DEFAULT_DATABASE_NAME, config->name);
+
+	bool ok = wait_for_replay_promotion(stagingConnInfo,
+										ARCHIVER_REPLAY_PROMOTE_TIMEOUT_SECONDS);
+
+	if (!ok)
+	{
+		log_error("Replay staging instance at \"%s\" failed to replay "
+				 "available WAL and promote within %d seconds",
+				 stagingDir, ARCHIVER_REPLAY_PROMOTE_TIMEOUT_SECONDS);
+	}
+	else
+	{
+		NodeAddress stagingNode = { 0 };
+
+		strlcpy(stagingNode.host, "127.0.0.1", sizeof(stagingNode.host));
+		stagingNode.port = PG_AUTOCTL_ARCHIVER_REPLAY_PORT;
+
+		/* promoted by the time wait_for_replay_promotion() returns true --
+		 * report_basebackup()'s own endlsn query needs to know to use
+		 * pg_current_wal_lsn(), not pg_last_wal_replay_lsn() (NULL outside
+		 * recovery) */
+		stagingNode.isPrimary = true;
+
+		ok = run_pg_basebackup(config, &stagingNode, backupDir, label) &&
+			 report_basebackup(keeper, &stagingNode, backupDir, label,
+							   "replay", "volatile");
+	}
+
+	stop_staging_postgres();
+
+	/* volatile: discard the staging instance unconditionally, success or not */
+	if (!rmtree(stagingDir, true))
+	{
+		log_warn("Failed to remove replay staging directory \"%s\" after "
+				 "use, will be overwritten on the next cycle", stagingDir);
+	}
+
+	return ok;
+}
+
+
+/*
  * service_archiver_maybe_generate_basebackup checks, once per
- * service_archiver_loop() tick, whether this group has zero existing base
- * backups yet and -- if so, and no generation is already in flight -- forks
- * a child to produce one. See this file's own header comment for the full
- * scope of this first pass (bootstrap trigger, live source only).
+ * service_archiver_loop() tick, whether a base backup generation is due
+ * for this group and -- if so, and no generation is already in flight --
+ * forks a child to produce one. See this file's own header comment for
+ * the full trigger scope of this pass (bootstrap live, then exactly one
+ * replay/volatile backup to exercise that pipeline).
  */
 bool
 service_archiver_maybe_generate_basebackup(Keeper *keeper)
@@ -482,31 +868,26 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	KeeperConfig *config = &(keeper->config);
 	bool found = false;
 	char storageLocation[MAXPGPATH] = { 0 };
+	char latestSource[NAMEDATALEN] = { 0 };
 
-	if (!monitor_get_latest_basebackup_location(&(keeper->monitor),
-												config->formation,
-												config->groupId,
-												storageLocation,
-												sizeof(storageLocation),
-												&found))
+	if (!monitor_get_latest_basebackup_info(&(keeper->monitor),
+											config->formation,
+											config->groupId,
+											storageLocation,
+											sizeof(storageLocation),
+											latestSource,
+											sizeof(latestSource),
+											&found))
 	{
 		/* errors already logged */
 		return false;
 	}
 
-	if (found)
+	if (found && strcmp(latestSource, "replay") == 0)
 	{
-		/* bootstrap already satisfied; scheduled/retention-driven triggers
-		 * are a follow-up milestone, see this file's own header comment */
-		return true;
-	}
-
-	NodeAddress source = { 0 };
-
-	if (!select_basebackup_source(keeper, &source))
-	{
-		log_warn("No eligible node to source a live base backup from yet, "
-				 "will retry");
+		/* both the bootstrap live backup and this pass's own one-time
+		 * replay exercise are done; real scheduling is a follow-up, see
+		 * this file's own header comment */
 		return true;
 	}
 
@@ -528,11 +909,40 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 
 	char label[NAMEDATALEN] = { 0 };
 
-	strftime(label, sizeof(label), "basebackup-%Y%m%dT%H%M%SZ", &nowUTC);
+	strftime(label, sizeof(label),
+			found ? "basebackup-replay-%Y%m%dT%H%M%SZ"
+				  : "basebackup-%Y%m%dT%H%M%SZ",
+			&nowUTC);
 
 	char backupDir[MAXPGPATH] = { 0 };
 
 	sformat(backupDir, sizeof(backupDir), "%s/%s", backupsDir, label);
+
+	/*
+	 * sourceBackupDir must be captured now, in the parent, into a
+	 * fixed-size buffer the forked child can safely read after fork():
+	 * storageLocation itself is a local, stack-allocated array, still
+	 * valid across fork() (the child gets its own copy of the whole
+	 * address space), so this is really just documenting that fact.
+	 */
+	char sourceBackupDir[MAXPGPATH] = { 0 };
+
+	strlcpy(sourceBackupDir, storageLocation, sizeof(sourceBackupDir));
+
+	NodeAddress liveSource = { 0 };
+	bool haveLiveSource = false;
+
+	if (!found)
+	{
+		if (!select_basebackup_source(keeper, &liveSource))
+		{
+			log_warn("No eligible node to source a live base backup from "
+					 "yet, will retry");
+			return true;
+		}
+
+		haveLiveSource = true;
+	}
 
 	fflush(stdout);
 	fflush(stderr);
@@ -550,7 +960,10 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 		(void) set_signal_handlers(false);
 		(void) set_ps_title("pg_autoctl: archiver basebackup");
 
-		bool ok = generate_basebackup(keeper, &source, backupDir, label);
+		bool ok = haveLiveSource
+			? generate_live_basebackup(keeper, &liveSource, backupDir, label)
+			: generate_replay_basebackup(keeper, sourceBackupDir,
+										 backupDir, label);
 
 		exit(ok ? EXIT_CODE_QUIT : EXIT_CODE_INTERNAL_ERROR);
 	}

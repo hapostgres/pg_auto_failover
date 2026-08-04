@@ -158,16 +158,19 @@ bool monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
 							   int64_t *archiverId);
 bool monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
 									char *formation, int64_t *archiverNodeId);
-bool monitor_get_latest_basebackup_location(Monitor *monitor,
-											const char *formationId, int groupId,
-											char *storageLocation, size_t size,
-											bool *found);
+bool monitor_get_latest_basebackup_info(Monitor *monitor,
+										const char *formationId, int groupId,
+										char *storageLocation, size_t storageLocationSize,
+										char *source, size_t sourceSize,
+										bool *found);
 bool monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
 								 const char *walFileName, const char *lsn);
 bool monitor_report_basebackup_started(Monitor *monitor, int64_t archiverId,
 									   const char *formationId, int groupId,
 									   const char *label, int timeline,
 									   const char *startLsn,
+									   const char *source,
+									   const char *replaymode,
 									   int64_t *basebackupId);
 bool monitor_report_basebackup_completed(Monitor *monitor,
 										 int64_t basebackupId,
