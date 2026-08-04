@@ -32,7 +32,9 @@
 
 #include "defaults.h"
 #include "file_utils.h"
+#include "fsm.h"
 #include "log.h"
+#include "monitor.h"
 #include "signals.h"
 
 /*
@@ -215,6 +217,80 @@ service_archiver_start_pgreceivewal(Keeper *keeper, NodeAddress *primaryNode)
 
 	/* parent process: track the child, keep running our own loop */
 	pgReceivewalPid = pid;
+
+	return true;
+}
+
+
+/*
+ * service_archiver_loop is the archiver's own node_active() reporting loop
+ * -- deliberately not keeper_node_active_loop (service_keeper.c): that
+ * function's own per-tick keeper_update_pg_state()/keeper_ensure_current_
+ * state() calls assume a real Postgres instance with a real PGDATA to
+ * inspect, which an ARCHIVING node never has (see haspgdata's own design
+ * comment). This loop reuses everything that IS kind-agnostic --
+ * keeper_load_state()/keeper_store_state(), keeper_node_active() (the
+ * monitor RPC wrapper itself only ever reads Keeper's in-memory fields,
+ * never touches real Postgres), and keeper_fsm_reach_assigned_state()
+ * dispatching through the very same KeeperFSM[] table -- while replacing
+ * the two Postgres-specific calls with nothing at all: an ARCHIVING row's
+ * only "is it running" check is service_archiver_pgreceivewal_is_running(),
+ * consulted by the FSM transition functions themselves
+ * (fsm_init_archiver et al., fsm_transition.c), not by this loop.
+ *
+ * Milestone 2's own single-membership scope (see this file's own header
+ * comment): one archiver, one (formation, group) row, reported here
+ * directly rather than iterating a list the monitor refreshes.
+ */
+bool
+service_archiver_loop(Keeper *keeper)
+{
+	KeeperStateData *keeperState = &(keeper->state);
+
+	log_info("pg_autoctl archiver service is starting");
+
+	while (!asked_to_stop && !asked_to_stop_fast && !asked_to_quit)
+	{
+		MonitorAssignedState assignedState = { 0 };
+
+		if (!keeper_load_state(keeper))
+		{
+			log_error("Failed to read archiver state file, retrying...");
+		}
+		else if (keeper_node_active(keeper, false, &assignedState))
+		{
+			keeperState->assigned_role = assignedState.state;
+
+			if (keeperState->current_role != keeperState->assigned_role)
+			{
+				if (keeper_fsm_reach_assigned_state(keeper))
+				{
+					(void) keeper_store_state(keeper);
+				}
+				else
+				{
+					log_error("Failed to reach assigned state \"%s\", "
+							  "retrying...",
+							  NodeStateToString(keeperState->assigned_role));
+				}
+			}
+		}
+		else
+		{
+			log_warn("Failed to contact the monitor, retrying...");
+		}
+
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
+		{
+			break;
+		}
+
+		sleep(PG_AUTOCTL_KEEPER_SLEEP_TIME);
+	}
+
+	(void) service_archiver_stop_pgreceivewal();
+
+	log_info("pg_autoctl archiver service is stopping");
 
 	return true;
 }

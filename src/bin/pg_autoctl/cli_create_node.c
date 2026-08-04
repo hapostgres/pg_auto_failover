@@ -36,10 +36,12 @@
 #include "pghba.h"
 #include "pidfile.h"
 #include "primary_standby.h"
+#include "service_archiver.h"
 #include "service_keeper.h"
 #include "service_keeper_init.h"
 #include "service_monitor.h"
 #include "service_monitor_init.h"
+#include "signals.h"
 #include "string_utils.h"
 
 /*
@@ -61,6 +63,9 @@ static void cli_activate_node(int argc, char **argv);
 
 static int cli_create_monitor_getopts(int argc, char **argv);
 static void cli_create_monitor(int argc, char **argv);
+
+static int cli_create_archiver_getopts(int argc, char **argv);
+static void cli_create_archiver(int argc, char **argv);
 
 static void check_hostname(const char *hostname);
 
@@ -1292,6 +1297,323 @@ cli_create_monitor(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
+
+
+/*
+ * cli_create_archiver_getopts parses `pg_autoctl create archiver`'s own
+ * command line options -- deliberately not cli_create_node_getopts (used by
+ * every ordinary node kind): that shared parser and the KeeperConfig
+ * defaults it applies assume a real PostgresSetup (pgport, pghost, a real
+ * PGDATA to validate), none of which apply to an archiver (see haspgdata's
+ * own design comment, pgautofailover.sql). Milestone 2's own minimal flag
+ * set, matching the design doc's own Quickstart: --pgdata --monitor
+ * --hostname --name --formation --run.
+ */
+static int
+cli_create_archiver_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "pgctl", required_argument, NULL, 'C' },
+		{ "monitor", required_argument, NULL, 'm' },
+		{ "hostname", required_argument, NULL, 'n' },
+		{ "name", required_argument, NULL, 'a' },
+		{ "formation", required_argument, NULL, 'f' },
+		{ "run", no_argument, NULL, 'x' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:C:m:n:a:f:xVvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgSetup.pgdata);
+				break;
+			}
+
+			case 'C':
+			{
+				strlcpy(options.pgSetup.pg_ctl, optarg, MAXPGPATH);
+				log_trace("--pgctl %s", options.pgSetup.pg_ctl);
+				break;
+			}
+
+			case 'm':
+			{
+				if (!validate_connection_string(optarg))
+				{
+					log_fatal("Failed to parse --monitor connection string, "
+							  "see above for details.");
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				strlcpy(options.monitor_pguri, optarg, MAXCONNINFO);
+				log_trace("--monitor %s", options.monitor_pguri);
+				break;
+			}
+
+			case 'n':
+			{
+				strlcpy(options.hostname, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--hostname %s", options.hostname);
+				break;
+			}
+
+			case 'a':
+			{
+				strlcpy(options.name, optarg, _POSIX_HOST_NAME_MAX);
+				log_trace("--name %s", options.name);
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(options.formation, optarg, NAMEDATALEN);
+				log_trace("--formation %s", options.formation);
+				break;
+			}
+
+			case 'x':
+			{
+				createAndRun = true;
+				log_trace("--run");
+				break;
+			}
+
+			case 'V':
+			{
+				keeper_cli_print_version(argc, argv);
+				exit(EXIT_CODE_QUIT);
+			}
+
+			case 'v':
+			{
+				log_set_level(LOG_INFO);
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+			}
+
+			default:
+			{
+				++errors;
+				break;
+			}
+		}
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
+		log_fatal("Failed to get value for --pgdata");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
+	{
+		log_fatal("Failed to get value for --monitor");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.formation))
+	{
+		strlcpy(options.formation, "default", NAMEDATALEN);
+	}
+
+	options.pgSetup.pgKind = NODE_KIND_ARCHIVER;
+	strlcpy(options.nodeKind, "archiver", NAMEDATALEN);
+
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_create_archiver implements `pg_autoctl create archiver`: registers a
+ * new Archiver identity and attaches it to a formation via M1's own
+ * register_archiver()/archiver_add_formation() plpgsql functions (not the
+ * ordinary C register_node() RPC every other node kind goes through -- an
+ * Archiver is a process identity, not a (formation, group) membership by
+ * itself, see pgautofailover.sql's own comment on that function), writes a
+ * KeeperConfig + initial state file, and with --run hands off to
+ * service_archiver_loop() (service_archiver.c) -- deliberately not
+ * service_keeper_init()/keeper_node_active_loop(), which assume a real
+ * Postgres instance an ARCHIVING node never has.
+ */
+static void
+cli_create_archiver(int argc, char **argv)
+{
+	pid_t pid = 0;
+	Keeper keeper = { 0 };
+	KeeperConfig *config = &(keeper.config);
+
+	keeper.config = keeperOptions;
+
+	if (!check_or_discover_hostname(config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!keeper_config_set_pathnames_from_pgdata(&config->pathnames,
+												 config->pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (read_pidfile(config->pathnames.pid, &pid))
+	{
+		log_fatal("pg_autoctl is already running with pid %d", pid);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.pg_ctl) &&
+		!config_find_pg_ctl(&(config->pgSetup)))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!directory_exists(config->pgSetup.pgdata))
+	{
+		if (pg_mkdir_p(config->pgSetup.pgdata, 0700) != 0)
+		{
+			log_fatal("Failed to create archiver directory \"%s\": %m",
+					  config->pgSetup.pgdata);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
+	Monitor monitor = { 0 };
+
+	if (!monitor_init(&monitor, config->monitor_pguri))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	keeper.monitor = monitor;
+
+	int64_t archiverId = 0;
+	int64_t archiverNodeId = 0;
+
+	char *archiverName =
+		IS_EMPTY_STRING_BUFFER(config->name) ? config->hostname : config->name;
+
+	if (!monitor_register_archiver(&monitor, archiverName, config->hostname,
+								   &archiverId))
+	{
+		log_fatal("Failed to register archiver \"%s\" on the monitor, "
+				  "see above for details", archiverName);
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (!monitor_archiver_add_formation(&monitor, archiverId,
+										config->formation, &archiverNodeId))
+	{
+		log_fatal("Failed to attach archiver \"%s\" to formation \"%s\", "
+				  "see above for details", archiverName, config->formation);
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	log_info("Registered archiver \"%s\" (id %" PRId64 ") for formation "
+													   "\"%s\", ARCHIVING node id %"
+			 PRId64,
+			 archiverName, archiverId, config->formation, archiverNodeId);
+
+	strlcpy(config->role, KEEPER_ROLE, sizeof(config->role));
+	config->groupId = 0;
+	config->network_partition_timeout = NETWORK_PARTITION_TIMEOUT;
+	config->listen_notifications_timeout = PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
+
+	if (!keeper_config_write_file(config))
+	{
+		log_fatal("Failed to write archiver configuration file \"%s\", "
+				  "see above for details", config->pathnames.config);
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	/*
+	 * The ARCHIVING node row starts at (goalstate, reportedstate) =
+	 * (wait_standby, wait_standby) -- see archiver_add_formation()'s own
+	 * comment, pgautofailover.sql -- so our own local state mirrors that
+	 * starting point exactly, same as an ordinary node's INIT_STATE.
+	 */
+	keeper_state_init(&(keeper.state));
+	keeper.state.current_node_id = archiverNodeId;
+	keeper.state.current_group = 0;
+	keeper.state.current_role = WAIT_STANDBY_STATE;
+	keeper.state.assigned_role = WAIT_STANDBY_STATE;
+
+	if (!keeper_store_state(&keeper))
+	{
+		log_fatal("Failed to write archiver state file \"%s\", "
+				  "see above for details", config->pathnames.state);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (createAndRun)
+	{
+		if (!create_pidfile(config->pathnames.pid, getpid()))
+		{
+			log_fatal("Failed to write archiver pid file \"%s\"",
+					  config->pathnames.pid);
+			exit(EXIT_CODE_BAD_STATE);
+		}
+
+		(void) set_signal_handlers(false);
+
+		if (!service_archiver_loop(&keeper))
+		{
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+	}
+}
+
+
+CommandLine create_archiver_command =
+	make_command(
+		"archiver",
+		"Initialize a pg_auto_failover archiver node",
+		" [ --pgdata --pgctl --monitor --hostname --name --formation ] ",
+		"  --pgdata          path to the archiver's local data/cache directory\n"
+		"  --pgctl           path to pg_ctl (used to locate pg_receivewal)\n"
+		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
+		"  --hostname        hostname by which the archiver is reachable\n"
+		"  --name            archiver name (default: derived from hostname)\n"
+		"  --formation       formation to attach to (default: \"default\")\n"
+		"  --run             create node then run pg_autoctl service\n",
+		cli_create_archiver_getopts,
+		cli_create_archiver);
 
 
 /*

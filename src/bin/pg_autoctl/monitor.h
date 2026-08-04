@@ -154,6 +154,10 @@ bool monitor_print_other_nodes_as_json(Monitor *monitor,
 
 bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);
+bool monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
+							   int64_t *archiverId);
+bool monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
+									char *formation, int64_t *archiverNodeId);
 bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 CoordinatorNodeAddress *coordinatorNodeAddress);
 bool monitor_get_most_advanced_standby(Monitor *monitor,

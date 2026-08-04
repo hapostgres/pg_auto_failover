@@ -868,6 +868,100 @@ monitor_get_most_advanced_standby(Monitor *monitor,
  * The node ID and group ID selected by the monitor, as well as the goal
  * state, are set in assignedState, which must not be NULL.
  */
+
+
+/*
+ * monitor_register_archiver calls pgautofailover.register_archiver() on the
+ * monitor -- the Archiving & Disaster Recovery schema's own registration
+ * entry point (see ~/dev/temp/archiving-disaster-recovery.md), a plain
+ * plpgsql function rather than the C register_node() RPC every ordinary
+ * node kind goes through: an Archiver is a process identity, not a
+ * (formation, group) membership by itself (see that function's own comment,
+ * pgautofailover.sql).
+ */
+bool
+monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
+						  int64_t *archiverId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	const char *sql =
+		"SELECT * FROM pgautofailover.register_archiver($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2] = { name, hostname };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to register archiver \"%s\" on the monitor",
+				  name);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to register archiver \"%s\" on the monitor "
+				  "because it returned an unexpected result, "
+				  "see previous lines for details", name);
+		return false;
+	}
+
+	*archiverId = context.bigint;
+
+	return true;
+}
+
+
+/*
+ * monitor_archiver_add_formation calls pgautofailover.archiver_add_formation()
+ * on the monitor, attaching an already-registered archiver to every group of
+ * the given formation. Returns the nodeid of the ARCHIVING membership row
+ * created for group 0 -- the only group this milestone's own single-group
+ * scope (the "budget setup") ever attaches to; a Citus formation with more
+ * than one group would need every returned nodeid, not just the first.
+ */
+bool
+monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
+							   char *formation, int64_t *archiverNodeId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	const char *sql =
+		"SELECT * FROM pgautofailover.archiver_add_formation($1, $2) LIMIT 1";
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, TEXTOID };
+	IntString archiverIdString = intToString(archiverId);
+	const char *paramValues[2] = { archiverIdString.strValue, formation };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to attach archiver %" PRId64 " to formation \"%s\" "
+													   "on the monitor", archiverId,
+				  formation);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to attach archiver %" PRId64 " to formation \"%s\" "
+													   "on the monitor because it returned an unexpected result, "
+													   "see previous lines for details",
+				  archiverId, formation);
+		return false;
+	}
+
+	*archiverNodeId = context.bigint;
+
+	return true;
+}
+
+
 bool
 monitor_register_node(Monitor *monitor, char *formation,
 					  char *name, char *host, int port,

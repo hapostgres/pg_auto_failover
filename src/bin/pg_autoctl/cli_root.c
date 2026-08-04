@@ -31,6 +31,7 @@ CommandLine *create_subcommands[] = {
 	&create_postgres_command,
 	&create_coordinator_command,
 	&create_worker_command,
+	&create_archiver_command,
 	&create_formation_command,
 	NULL
 };
