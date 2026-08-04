@@ -17,6 +17,7 @@
 #include "defaults.h"
 #include "pgctl.h"
 #include "pgsql.h"
+#include "string_utils.h"
 
 /*
  * We support "primary" and "secondary" roles in Citus, when Citus support is
@@ -46,6 +47,19 @@ typedef struct KeeperConfig
 	char name[_POSIX_HOST_NAME_MAX];
 	char hostname[_POSIX_HOST_NAME_MAX];
 	char nodeKind[NAMEDATALEN];
+
+	/*
+	 * The archiver's own archiverid (distinct from keeper.state.
+	 * current_node_id, which holds the ARCHIVING membership row's nodeid --
+	 * see cli_create_archiver's own comment). Only meaningful when nodeKind
+	 * is "archiver"; 0 otherwise. archiverIdStr is the ini-persisted form
+	 * (ini_file.c's INI_INT_T only supports a plain int, too narrow for a
+	 * bigserial id -- same string-plus-parsed-value pattern citusRoleStr/
+	 * citusRole already use in this struct), archiverId is parsed from it
+	 * once at config-read time.
+	 */
+	char archiverIdStr[INTSTRING_MAX_DIGITS];
+	int64_t archiverId;
 
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;

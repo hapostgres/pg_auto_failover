@@ -158,6 +158,10 @@ bool monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
 							   int64_t *archiverId);
 bool monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
 									char *formation, int64_t *archiverNodeId);
+bool monitor_get_latest_basebackup_location(Monitor *monitor,
+											const char *formationId, int groupId,
+											char *storageLocation, size_t size,
+											bool *found);
 bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 CoordinatorNodeAddress *coordinatorNodeAddress);
 bool monitor_get_most_advanced_standby(Monitor *monitor,

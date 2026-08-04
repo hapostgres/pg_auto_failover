@@ -8,6 +8,7 @@
  *
  */
 
+#include "cli_archiver.h"
 #include "cli_common.h"
 #include "cli_do_root.h"
 #include "cli_inspect.h"
@@ -109,6 +110,7 @@ CommandLine *root_subcommands[] = {
 	&internal_commands,
 	&do_compat_commands,
 	&node_commands,
+	&archiver_commands,
 	&service_run_command,
 	&watch_command,
 	&service_stop_command,

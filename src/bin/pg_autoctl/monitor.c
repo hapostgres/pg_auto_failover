@@ -962,6 +962,73 @@ monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
 }
 
 
+/*
+ * monitor_get_latest_basebackup_location calls
+ * pgautofailover.get_latest_basebackup(formationId, groupId) and returns
+ * its storagelocation column. *found is set to false (not an error) when
+ * the archiver hasn't taken a base backup for this group yet -- the "Base
+ * backup generation" milestone this depends on hasn't landed, so every
+ * caller of this function must already tolerate that.
+ */
+bool
+monitor_get_latest_basebackup_location(Monitor *monitor,
+									   const char *formationId, int groupId,
+									   char *storageLocation, size_t size,
+									   bool *found)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+
+		/*
+		 * get_latest_basebackup() is not SETOF: called with no matching
+		 * backup, it still produces one row, with every output column
+		 * (including storagelocation) NULL -- not zero rows. Filtering on
+		 * "IS NOT NULL" here, rather than trying to detect that NULL
+		 * composite downstream, is what makes context.ntuples == 0 below
+		 * an accurate "no backup yet" signal.
+		 */
+		"SELECT storagelocation "
+		"  FROM pgautofailover.get_latest_basebackup($1, $2) "
+		" WHERE storagelocation IS NOT NULL";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[2] = { formationId, groupIdString.strValue };
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+
+	*found = false;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get the latest base backup location from the "
+				  "monitor for \"%s\"/%d", formationId, groupId);
+		return false;
+	}
+
+	if (context.ntuples == 0)
+	{
+		/* no base backup taken yet for this group -- not an error */
+		return true;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse the latest base backup location returned "
+				  "by the monitor for \"%s\"/%d, see above for details",
+				  formationId, groupId);
+		return false;
+	}
+
+	strlcpy(storageLocation, context.strVal, size);
+	free(context.strVal);
+	*found = true;
+
+	return true;
+}
+
+
 bool
 monitor_register_node(Monitor *monitor, char *formation,
 					  char *name, char *host, int port,

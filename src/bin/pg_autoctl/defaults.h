@@ -226,6 +226,10 @@
 #define PG_AUTOCTL_HEALTH_PASSWORD "pgautofailover_monitor"
 #define PG_AUTOCTL_REPLICA_USERNAME "pgautofailover_replicator"
 
+/* default port pg_walsender listens on, started via `pg_autoctl archiver
+ * serve` -- matches src/bin/pg_walsender/defaults.h's own WS_DEFAULT_PORT */
+#define PG_AUTOCTL_ARCHIVER_SERVE_PORT 6543
+
 #define PG_AUTOCTL_MONITOR_DBNAME "pg_auto_failover"
 #define PG_AUTOCTL_MONITOR_EXTENSION_NAME "pgautofailover"
 #define PG_AUTOCTL_MONITOR_DBOWNER "autoctl"

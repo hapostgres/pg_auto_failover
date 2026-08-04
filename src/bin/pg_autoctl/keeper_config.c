@@ -61,6 +61,11 @@
 	make_strbuf_option("pg_autoctl", "nodekind", NULL, false, NAMEDATALEN, \
 					   config->nodeKind)
 
+#define OPTION_AUTOCTL_ARCHIVER_ID(config) \
+	make_strbuf_option_default("pg_autoctl", "archiver_id", NULL, false, \
+							   INTSTRING_MAX_DIGITS, \
+							   config->archiverIdStr, "")
+
 #define OPTION_POSTGRESQL_PGDATA(config) \
 	make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
 					   config->pgSetup.pgdata)
@@ -227,6 +232,7 @@
 		OPTION_AUTOCTL_HOSTNAME(config), \
 		OPTION_AUTOCTL_NODENAME(config), \
 		OPTION_AUTOCTL_NODEKIND(config), \
+		OPTION_AUTOCTL_ARCHIVER_ID(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
 		OPTION_POSTGRESQL_USERNAME(config), \
@@ -514,6 +520,18 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	if (!keeper_config_init_nodekind(config))
 	{
 		/* errors have already been logged. */
+		return false;
+	}
+
+	/* parse archiverIdStr (see keeper_config.h's own comment) into archiverId */
+	if (IS_EMPTY_STRING_BUFFER(config->archiverIdStr))
+	{
+		config->archiverId = 0;
+	}
+	else if (!stringToInt64(config->archiverIdStr, &(config->archiverId)))
+	{
+		log_error("Failed to parse pg_autoctl.archiver_id \"%s\" as a number",
+				  config->archiverIdStr);
 		return false;
 	}
 

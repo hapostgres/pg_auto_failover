@@ -1555,6 +1555,17 @@ cli_create_archiver(int argc, char **argv)
 	config->network_partition_timeout = NETWORK_PARTITION_TIMEOUT;
 	config->listen_notifications_timeout = PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
+	/*
+	 * Persist the archiver's own archiverid (distinct from archiverNodeId
+	 * below, which is this specific ARCHIVING membership's nodeid) so that
+	 * `pg_autoctl archiver serve`'s supervisor loop can identify itself to
+	 * the monitor on a later, separate invocation -- see keeper_config.h's
+	 * own comment on archiverIdStr/archiverId.
+	 */
+	config->archiverId = archiverId;
+	sformat(config->archiverIdStr, sizeof(config->archiverIdStr),
+			"%" PRId64, archiverId);
+
 	if (!keeper_config_write_file(config))
 	{
 		log_fatal("Failed to write archiver configuration file \"%s\", "
