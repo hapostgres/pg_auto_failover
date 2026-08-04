@@ -484,6 +484,11 @@ NodeStateToString(NodeState s)
 			return "dropped";
 		}
 
+		case ARCHIVING_STATE:
+		{
+			return "archiving";
+		}
+
 		case ANY_STATE:
 		{
 			return "#any state#";
@@ -591,6 +596,10 @@ NodeStateFromString(const char *str)
 	else if (strcmp(str, "dropped") == 0)
 	{
 		return DROPPED_STATE;
+	}
+	else if (strcmp(str, "archiving") == 0)
+	{
+		return ARCHIVING_STATE;
 	}
 	else
 	{

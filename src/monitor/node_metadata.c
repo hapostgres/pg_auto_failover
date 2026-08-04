@@ -179,6 +179,7 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 		heap_getattr(heapTuple,
 					 Anum_pgautofailover_node_replication_stall_since,
 					 tupleDescriptor, &stallIsNull);
+
 	/*
 	 * haspgdata is looked up by name, not by the Anum_ constant every other
 	 * field here uses: this function is also called against a "RETURNING

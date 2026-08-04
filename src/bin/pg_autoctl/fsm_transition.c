@@ -39,6 +39,7 @@
 #include "parson.h"
 #include "pghba.h"
 #include "primary_standby.h"
+#include "service_archiver.h"
 #include "state.h"
 #include "timeline_history.h"
 
@@ -1695,4 +1696,74 @@ fsm_drop_node(Keeper *keeper)
 	}
 
 	return unlink_file(config->pathnames.init);
+}
+
+
+/*
+ * fsm_init_archiver starts pg_receivewal against the group's current
+ * primary. Reached from WAIT_STANDBY_STATE once the monitor has assigned
+ * ARCHIVING as the goal state instead of fsm_init_standby's own
+ * CATCHINGUP target -- the monitor makes that choice based on this node's
+ * own haspgdata = false row, see MonitorFSM[] pos 396-398
+ * (group_state_machine.c). Unlike fsm_init_standby, there is no local
+ * Postgres instance to configure as a standby: pg_receivewal is a real,
+ * unmodified Postgres client that streams straight from the primary's own
+ * walsender, so no new wire protocol is involved on this node's side
+ * either (see archiving-disaster-recovery.md's own milestone 2(a) scope).
+ */
+bool
+fsm_init_archiver(Keeper *keeper)
+{
+	NodeAddress primaryNode = { 0 };
+
+	/* get the primary node to stream WAL from */
+	if (!keeper_get_primary(keeper, &primaryNode))
+	{
+		log_error("Failed to initialize archiver for lack of a primary node, "
+				  "see above for details");
+		return false;
+	}
+
+	return service_archiver_start_pgreceivewal(keeper, &primaryNode);
+}
+
+
+/*
+ * fsm_archiver_report_lsn stops pg_receivewal: the group's primary is
+ * presumed gone (an election is starting), so the upstream this archiver
+ * was streaming from is no longer trustworthy to keep querying. Mirrors
+ * fsm_report_lsn's own "disconnect from current source" half without any
+ * of its real-Postgres recovery-config/restart machinery, which doesn't
+ * apply here -- an ARCHIVING row has no PGDATA to reconfigure (see
+ * haspgdata's own design comment, pgautofailover.sql).
+ */
+bool
+fsm_archiver_report_lsn(Keeper *keeper)
+{
+	return service_archiver_stop_pgreceivewal();
+}
+
+
+/*
+ * fsm_archiver_follow_new_primary re-points pg_receivewal at the group's
+ * newly elected primary -- the archiver's own mirror of
+ * fsm_follow_new_primary, without that function's live-Postgres-standby
+ * machinery: pg_receivewal has no "replaying, not caught up yet"
+ * continuum to wait out (see haspgdata's own design comment), just a
+ * fresh connection to make.
+ */
+bool
+fsm_archiver_follow_new_primary(Keeper *keeper)
+{
+	NodeAddress primaryNode = { 0 };
+
+	/* get the newly elected primary node to stream WAL from */
+	if (!keeper_get_primary(keeper, &primaryNode))
+	{
+		log_error("Failed to follow new primary for lack of a primary node, "
+				  "see above for details");
+		return false;
+	}
+
+	return service_archiver_start_pgreceivewal(keeper, &primaryNode);
 }

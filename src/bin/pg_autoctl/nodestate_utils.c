@@ -458,6 +458,9 @@ nodestateConnectionType(CurrentNodeState *nodeState)
 		case DEMOTE_TIMEOUT_STATE:
 		case DRAINING_STATE:
 		case MAINTENANCE_STATE:
+
+		/* an ARCHIVING row has no PGDATA/postmaster of its own, ever */
+		case ARCHIVING_STATE:
 		{
 			return "none";
 		}
