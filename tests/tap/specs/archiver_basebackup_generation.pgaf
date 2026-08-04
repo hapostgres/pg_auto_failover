@@ -1,0 +1,54 @@
+# Archiving & Disaster Recovery, Milestone 5: base backup generation,
+# `live` source then `replay`/`volatile`.
+#
+# Covers service_archiver_maybe_generate_basebackup() (service_archiver_
+# basebackup.c): a group with no base backups yet gets one immediately,
+# sourced live (pg_basebackup run directly against a real node); once that
+# lands, the very next tick exercises replay/volatile once -- extract that
+# live backup into a throwaway staging instance, replay this archiver's own
+# already-captured WAL forward until it promotes, pg_basebackup it over
+# loopback, then discard the staging instance. Both are real,
+# monitor-tracked pgautofailover.basebackup rows by the end.
+#
+# No explicit trigger step is needed here (unlike archiver_wal_capture.pgaf's
+# pg_switch_wal() calls): both backups fire on their own, a couple of
+# service_archiver_loop() ticks apart, as soon as the archiver starts.
+# get_latest_basebackup() only ever reports the single newest row, and this
+# pass's own trigger logic produces at most two rows total (live, then
+# replay) before going quiet for the group -- so the *final* state is
+# deterministic (source = 'replay') even though the intermediate 'live'-only
+# state is not something this spec can reliably catch mid-flight.
+#
+# Predecessor: archiver_wal_capture.pgaf (M4).
+
+cluster {
+    monitor
+    formation {
+        node1
+        archiver1 archiver
+    }
+}
+
+setup {
+    wait until primary  timeout 60s
+    wait until archiver1 state is archiving  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: both the bootstrap live backup and the one-time replay/volatile
+#           exercise complete on their own; check the final state.
+#
+
+step test_001_replay_backup_lands {
+    sleep 45s
+    sql monitor { SELECT source::text FROM pgautofailover.get_latest_basebackup('default', 0); }
+    expect { replay }
+    sql monitor { SELECT replaymode::text FROM pgautofailover.get_latest_basebackup('default', 0); }
+    expect { volatile }
+    sql monitor { SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0); }
+    expect { complete }
+}

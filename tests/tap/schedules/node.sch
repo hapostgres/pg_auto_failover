@@ -19,3 +19,4 @@ demote_timeout_wait_primary_deadlock
 timeline_fork_report_lsn_deadlock
 timeline_fork_3node_auto_detect
 archiver_wal_capture
+archiver_basebackup_generation
