@@ -39,6 +39,16 @@ typedef struct WsStartupParams
 	char database[NAMEDATALEN + 16];  /* "<formation>/<group>", may exceed a bare NAMEDATALEN */
 	char applicationName[NAMEDATALEN];
 	bool replication;
+
+	/*
+	 * True only when the client's startup packet set replication=database
+	 * (pg_basebackup's style) rather than a plain replication=1/true
+	 * (pg_receivewal's style). IDENTIFY_SYSTEM's own dbname column must be
+	 * NULL for the latter -- real pg_receivewal fatals out ("unexpectedly
+	 * database specific") if it isn't, since a non-NULL dbname is its
+	 * signal that the connection was accidentally database-qualified.
+	 */
+	bool replicationDatabase;
 } WsStartupParams;
 
 #endif /* WS_WALSENDER_H */

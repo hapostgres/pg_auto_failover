@@ -24,7 +24,9 @@ override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor
 # -----------------------------------------------------------------------
 LOCAL_SRC = main.c accept_loop.c startup.c auth.c framing.c repl_command.c \
             routes.c cmd_identify_system.c cmd_show.c cmd_base_backup.c \
-            tar_stream.c cmd_fetch_file.c fetch_client.c
+            tar_stream.c cmd_fetch_file.c fetch_client.c \
+            cmd_timeline_history.c cmd_replication_slot.c \
+            cmd_start_replication.c wal_dir_scan.c
 
 LOCAL_OBJS = $(patsubst %.c,%.o,$(LOCAL_SRC))
 

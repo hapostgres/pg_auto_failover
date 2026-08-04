@@ -188,7 +188,8 @@ handle_connection(int clientSock, const WsServerConfig *config)
 		}
 		else
 		{
-			ws_dispatch_command(clientSock, &cmd, route, params.database);
+			ws_dispatch_command(clientSock, &cmd, route,
+								params.replicationDatabase ? params.database : NULL);
 		}
 
 		free(payload);

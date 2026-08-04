@@ -26,6 +26,10 @@ typedef enum WsCommandType
 	WS_CMD_IDENTIFY_SYSTEM,
 	WS_CMD_SHOW,
 	WS_CMD_BASE_BACKUP,
+	WS_CMD_TIMELINE_HISTORY,
+	WS_CMD_CREATE_REPLICATION_SLOT,
+	WS_CMD_READ_REPLICATION_SLOT,
+	WS_CMD_START_REPLICATION,
 	WS_CMD_UNKNOWN
 } WsCommandType;
 
@@ -36,6 +40,11 @@ typedef struct WsCommand
 	char rawOptions[1024];        /* WS_CMD_BASE_BACKUP only: the "(...)" or
 	                               * trailing-token option list verbatim,
 	                               * parsed by cmd_base_backup.c itself */
+	int timeline;                  /* WS_CMD_TIMELINE_HISTORY only */
+	char rawArgs[512];              /* WS_CMD_{CREATE,READ}_REPLICATION_SLOT /
+	                                 * WS_CMD_START_REPLICATION: everything
+	                                 * after the keyword, verbatim, parsed by
+	                                 * each command's own cmd_*.c */
 } WsCommand;
 
 /*

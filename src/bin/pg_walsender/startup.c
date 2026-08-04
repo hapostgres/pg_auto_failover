@@ -113,9 +113,10 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 			}
 			else if (strcmp(key, "replication") == 0)
 			{
+				params->replicationDatabase = (strcasecmp(value, "database") == 0);
 				params->replication = (strcmp(value, "1") == 0 ||
 									   strcasecmp(value, "true") == 0 ||
-									   strcasecmp(value, "database") == 0);
+									   params->replicationDatabase);
 			}
 		}
 

@@ -2,12 +2,13 @@
  * src/bin/pg_walsender/cmd_identify_system.c
  *   See cmd_identify_system.h.
  *
- *   systemid/timeline come straight from the route (written by pg_autoctl's
+ *   systemid comes straight from the route (written by pg_autoctl's
  *   archiver-serve supervisor from the monitor's own tracked values -- see
- *   routes.h). xlogpos is reported as "0/0" for now: computing the real
- *   latest-captured position requires scanning the WAL cache directory,
- *   which is wired in alongside START_REPLICATION (milestone 2 step 5),
- *   not required for the protocol handshake itself to be correct.
+ *   routes.h). timeline/xlogpos prefer the newest fully-captured WAL
+ *   segment's own boundary (wal_dir_scan.h, filename-derived, not a
+ *   parsed WAL record position) when the WAL cache has one, falling back
+ *   to the route's static timeline and "0/0" when it doesn't (a brand
+ *   new archiver with nothing captured yet).
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -20,6 +21,7 @@
 
 #include "cmd_identify_system.h"
 #include "framing.h"
+#include "wal_dir_scan.h"
 
 
 void
@@ -33,17 +35,29 @@ cmd_identify_system(int sock, const WsRoute *route, const char *dbname)
 	};
 
 	char timelineStr[16];
+	char xlogpos[32] = "0/0";
 	const char *systemId = (route != NULL && route->systemId[0] != '\0')
 						   ? route->systemId
 						   : "0";
 	int timeline = (route != NULL && route->timeline > 0) ? route->timeline : 1;
+
+	if (route != NULL && route->walcacheDir[0] != '\0')
+	{
+		uint32_t foundTimeline;
+
+		if (wal_dir_find_latest(route->walcacheDir, &foundTimeline,
+								xlogpos, sizeof(xlogpos)))
+		{
+			timeline = (int) foundTimeline;
+		}
+	}
 
 	snprintf(timelineStr, sizeof(timelineStr), "%d", timeline);
 
 	const char *values[] = {
 		systemId,
 		timelineStr,
-		"0/0",
+		xlogpos,
 		dbname,
 	};
 
