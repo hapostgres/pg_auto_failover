@@ -36,6 +36,51 @@ setting on the *primary* node. Until the *secondary* is back to being
 monitored healthy, failover and switchover operations are not allowed,
 preventing data loss.
 
+.. _archiving_architecture:
+
+Archiving & Disaster Recovery Architecture
+-------------------------------------------
+
+.. figure:: ./tikz/arch-archiver.svg
+   :alt: pg_auto_failover Architecture with a primary, a standby, and an archiver
+
+   pg_auto_failover architecture with a primary, a standby, and an archiver
+
+An **archiver** is a separate physical entity, added on top of any of the
+architectures on this page — it applies just as well to the single-standby
+setup above as it does to a multi-standby fleet, since it addresses a
+different concern: disaster recovery, independent of how many nodes
+currently participate in the failover quorum.
+
+Unlike a standby, an archiver holds no copy of the primary's data directory
+and never takes writes or reads for the application. It runs its own
+`pg_receivewal`__ continuously against the group's current primary,
+capturing every WAL segment into a local cache the moment it's generated,
+and periodically produces full base backups from that cache. Both are
+reported back to the pg_auto_failover Monitor, the same way a standby
+reports its own replication state — so the Monitor can tell an operator,
+or a client library, when a given segment has landed durably on enough
+archivers to be considered safe (``archiver_quorum``), and where the most
+recent base backup lives.
+
+__ https://www.postgresql.org/docs/current/app-pgreceivewal.html
+
+The pg_auto_failover Monitor tracks an archiver's participation in a group
+as its own node, in the ``archiving`` **archiving node** state — reported
+and monitored the same way ``primary``/``secondary`` are, but never a
+candidate for promotion or failover: an archiving node holds no
+`PGDATA`__ of its own, so there is nothing to promote it *to*.
+
+__ https://www.postgresql.org/docs/current/app-initdb.html
+
+Because the archiver keeps a complete, continuously updated copy of the
+group's WAL stream and periodic base backups independent of any single
+standby, it serves two purposes beyond ordinary high availability: a new
+node can be provisioned straight from an archiver's cache instead of
+placing extra load on a live primary or secondary, and a group that has
+lost every other node still has everything needed to rebuild from scratch,
+as long as the archiver itself survived.
+
 Multiple Standby Architecture
 -----------------------------
 
