@@ -293,6 +293,27 @@ static const NodeStatePattern FSM_WAIT_OR_JOIN_PRIMARY = {
 };
 
 /*
+ * FSM_WAIT_OR_JOIN_PRIMARY plus SINGLE -- used only by the archiver mirror
+ * rows (pos 394/396), never by their ordinary hasPgData=true siblings (pos
+ * 307/315): a real secondary joining a lone primary always first bumps that
+ * primary from SINGLE to WAIT_PRIMARY (pos 401, "primary alone, another node
+ * reached wait_standby"), so pos 307/315 never actually need to match SINGLE
+ * themselves. An archiver attaching to a lone primary is different -- since
+ * BuildForPrimaryNodeNodeActiveContext excludes archiver rows from ever
+ * triggering that same pos 401 bump (an archiver isn't a quorum-eligible
+ * node kind, see that function's own comment), the primary legitimately
+ * stays SINGLE the entire time the archiver is only being watched by it.
+ * Without SINGLE in this set, an archiver attached to a genuinely
+ * single-node formation could never leave WAIT_STANDBY/REPORT_LSN at all.
+ */
+static const NodeStatePattern FSM_SINGLE_OR_WAIT_OR_JOIN_PRIMARY = {
+	.kind = NODE_STATE_STABLE,
+	.reportedStates = STATES(REPLICATION_STATE_SINGLE,
+							 REPLICATION_STATE_WAIT_PRIMARY,
+							 REPLICATION_STATE_JOIN_PRIMARY),
+};
+
+/*
  * the "primary role" states MONITOR_FSM_SECTION_PRIMARY_NODE's own rows
  * match against -- a different three-element set from
  * FSM_PRIMARY_OR_WAIT_OR_JOIN above (no JOIN_PRIMARY, has APPLY_SETTINGS)
@@ -1904,12 +1925,26 @@ BuildFromContextNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *prim
 
 /*
  * BuildForPrimaryNodeNodeActiveContext computes every fact SectionPrimaryNode
- * (MonitorFSM[]'s pos 401-421 rows) needs: it loops over every other node in
- * the primary's group, using the same OtherNodeIsDueForCatchingUp() test
- * OtherNodesDueForCatchingUp() (above) uses for its own fan-out, to derive
- * the group-level counts (replicationQuorumCount, secondaryNodesCount,
- * secondaryQuorumNodesCount) and the anyOtherNodeWaitingStandby flag those
- * rows match against.
+ * (MonitorFSM[]'s pos 401-421 rows) needs: it loops over every other *real*
+ * (hasPgData) node in the primary's group, using the same OtherNodeIsDueFor
+ * CatchingUp() test OtherNodesDueForCatchingUp() (above) uses for its own
+ * fan-out, to derive the group-level counts (replicationQuorumCount,
+ * secondaryNodesCount, secondaryQuorumNodesCount) and the anyOtherNode
+ * WaitingStandby flag those rows match against.
+ *
+ * An ARCHIVING node is skipped entirely here (see the hasPgData check inside
+ * the loop below): it is never a real Postgres secondary participating in
+ * synchronous-replication quorum, and it can never reach reported SECONDARY
+ * state. Counting it like an ordinary node would let it single-handedly
+ * block this primary's own SINGLE -> WAIT_PRIMARY -> PRIMARY progression --
+ * anyOtherNodeWaitingStandby would fire (pos 401) the moment the archiver's
+ * own bootstrap briefly passes through WAIT_STANDBY, bumping the primary off
+ * SINGLE, and it could then never reach PRIMARY since secondaryQuorumNodes
+ * Count could never legitimately drop to zero via an archiver's own reported
+ * state. Same hasPgData-based exclusion this file's own REPORTING_NODE
+ * section already applies for a different purpose (pos 365/399's own
+ * comment) -- an archiver simply isn't a quorum-eligible node kind, in
+ * either section.
  */
 static void
 BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx,
@@ -1927,17 +1962,26 @@ BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx,
 	 */
 
 	List *otherNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
-	int otherNodesCount = list_length(otherNodesGroupList);
 
-	int replicationQuorumCount = otherNodesCount;
-	int secondaryNodesCount = otherNodesCount;
-	int secondaryQuorumNodesCount = otherNodesCount;
+	int replicationQuorumCount = 0;
+	int secondaryNodesCount = 0;
+	int secondaryQuorumNodesCount = 0;
 
 	ListCell *nodeCell = NULL;
 
 	foreach(nodeCell, otherNodesGroupList)
 	{
 		AutoFailoverNode *otherNode = (AutoFailoverNode *) lfirst(nodeCell);
+
+		if (!otherNode->hasPgData)
+		{
+			/* an ARCHIVING row -- see this function's own header comment */
+			continue;
+		}
+
+		++replicationQuorumCount;
+		++secondaryNodesCount;
+		++secondaryQuorumNodesCount;
 
 		if (OtherNodeIsDueForCatchingUp(ctx, otherNode))
 		{
@@ -3221,6 +3265,21 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	/*
 	 * MS-failover: candidate ready to stream WAL -> follower joins as secondary
 	 */
+
+	/*
+	 * hasPgData = BOOL_TRUE restricts this to ordinary nodes now that pos
+	 * 399 (in the archiver mirror cluster, below) is the hasPgData =
+	 * BOOL_FALSE sibling assigning ARCHIVING directly instead of the
+	 * intermediate JOIN_SECONDARY -> SECONDARY dance an ARCHIVING row has
+	 * no real Postgres to actually perform (its client-side transition
+	 * function, fsm_checkpoint_and_stop_postgres, unconditionally fails
+	 * for a haspgdata=false node): REPORT_LSN_STATE -> ARCHIVING_STATE is
+	 * already a real, working transition on its own (fsm_archiver_follow_
+	 * new_primary, exercised by archiver_wal_capture.pgaf's own failover
+	 * test), so there's no need for an archiver to ever pass through
+	 * JOIN_SECONDARY_STATE at all -- unlike SECONDARY, ARCHIVING isn't
+	 * gated on the primary having fully converged first.
+	 */
 	{ .pos = 365,
 	  .sectionPath = {
 		  MONITOR_FSM_SECTION_REPORTING_NODE,
@@ -3228,7 +3287,8 @@ static const MonitorFSMTransition MonitorFSM[] = {
 		  MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_JOIN
 	  },
 	  .conditions = { .candidatePromotionInProgress = BOOL_TRUE },
-	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN) },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN),
+					  .hasPgData = BOOL_TRUE },
 	  .candidateNode = { .isReadyToStreamWAL = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_JOIN_SECONDARY),
 	  .comment =
@@ -3547,16 +3607,20 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	/*
 	 * Archiver mirror cluster: the hasPgData = BOOL_FALSE siblings of pos
-	 * 307/309/315/317/319 above, assigning ARCHIVING instead of
-	 * SECONDARY/CATCHINGUP for an ARCHIVING membership row. Appended here
-	 * (still sectionPath'd under REPORTING_NODE/FROM_CONTEXT, like their
-	 * siblings) rather than interleaved next to each one, for the same
+	 * 307/309/315/317/319/365 above, assigning ARCHIVING instead of
+	 * SECONDARY/CATCHINGUP/JOIN_SECONDARY for an ARCHIVING membership row.
+	 * Appended here rather than interleaved next to each one, for the same
 	 * reason the MS-failover cluster above is appended rather than
-	 * renumbered into the ordinary rows: pos 307/309/315/317/319 are
-	 * numbered every 2 with no room between consecutive pairs for 5 more
+	 * renumbered into the ordinary rows: pos 307/309/315/317/319/365 are
+	 * numbered every 2 with no room between consecutive pairs for 6 more
 	 * rows, and since hasPgData makes each pair mutually exclusive, their
 	 * relative array order doesn't affect first-match-wins correctness --
-	 * see each of those rows' own comment for the exact pairing.
+	 * see each of those rows' own comment for the exact pairing. Pos 399
+	 * is the one exception to "sectionPath'd under REPORTING_NODE/
+	 * FROM_CONTEXT, like their siblings": it mirrors pos 365, which lives
+	 * under the MS-failover cluster's own sectionPath, so it must too --
+	 * sectionPath is what the dispatcher actually matches evaluation
+	 * context against, not physical position in this array.
 	 */
 	{ .pos = 394,
 	  .sectionPath = {
@@ -3565,11 +3629,11 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN),
 					  .hasPgData = BOOL_FALSE },
-	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY,
+	  .primaryNode = { .statePattern = FSM_SINGLE_OR_WAIT_OR_JOIN_PRIMARY,
 					   .isHealthy = BOOL_TRUE },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_ARCHIVING),
 	  .comment = "archiver mirror of pos 307: report_lsn, primary converged "
-				 "wait/join_primary, healthy -> archiving" },
+				 "single/wait/join_primary, healthy -> archiving" },
 
 	{ .pos = 395,
 	  .sectionPath = {
@@ -3591,10 +3655,10 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  },
 	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_WAIT_STANDBY),
 					  .hasPgData = BOOL_FALSE },
-	  .primaryNode = { .statePattern = FSM_WAIT_OR_JOIN_PRIMARY },
+	  .primaryNode = { .statePattern = FSM_SINGLE_OR_WAIT_OR_JOIN_PRIMARY },
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_ARCHIVING),
 	  .comment = "archiver mirror of pos 315: wait_standby, primary converged "
-				 "wait/join_primary -> archiving" },
+				 "single/wait/join_primary -> archiving" },
 
 	{ .pos = 397,
 	  .sectionPath = {
@@ -3622,6 +3686,21 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_ARCHIVING),
 	  .comment = "archiver mirror of pos 319: wait_standby (not a quorum member), "
 				 "primary converged primary -> archiving" },
+
+	{ .pos = 399,
+	  .sectionPath = {
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_MS_FAILOVER,
+		  MONITOR_FSM_SECTION_MS_FAILOVER_CANDIDATE_JOIN
+	  },
+	  .conditions = { .candidatePromotionInProgress = BOOL_TRUE },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_REPORT_LSN),
+					  .hasPgData = BOOL_FALSE },
+	  .candidateNode = { .isReadyToStreamWAL = BOOL_TRUE },
+	  .activeNodeAssignedState = GOAL(REPLICATION_STATE_ARCHIVING),
+	  .comment = "archiver mirror of pos 365: MS-failover, activeNode in report_lsn, "
+				 "failover candidate ready to stream WAL -> archiving (no "
+				 "join_secondary detour -- see pos 365's own comment)" },
 
 	/*
 	 * --- the PRIMARY_NODE section (sectionPath[0] ==
