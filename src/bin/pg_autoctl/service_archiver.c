@@ -21,6 +21,8 @@
  *
  */
 
+#include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -36,6 +38,26 @@
 #include "log.h"
 #include "monitor.h"
 #include "signals.h"
+
+/*
+ * WAL segment filename layout, duplicated from pg_walsender/wal_dir_scan.c:
+ * pg_autoctl doesn't link that standalone binary's code (see this project's
+ * Makefile split), so the ~15-line segno/LSN arithmetic is small enough to
+ * repeat here rather than share.
+ */
+#define ARCHIVER_WAL_FNAME_LEN 24
+#define ARCHIVER_WAL_SEGMENT_SIZE ((uint64_t) 0x1000000)
+#define ARCHIVER_XLOG_SEGMENTS_PER_XLOGID \
+	(((uint64_t) 0x100000000) / ARCHIVER_WAL_SEGMENT_SIZE)
+
+/*
+ * Last WAL filename already reported to the monitor, so each tick only
+ * reports newly-appeared segments instead of re-scanning and re-reporting
+ * the whole cache directory every time (the monitor-side insert is
+ * idempotent, ON CONFLICT DO NOTHING, but that's a fallback for restarts,
+ * not meant to be relied on every tick).
+ */
+static char lastReportedWalFileName[ARCHIVER_WAL_FNAME_LEN + 1] = { 0 };
 
 /*
  * One pg_receivewal child per archiver process, matching milestone 2's own
@@ -223,6 +245,170 @@ service_archiver_start_pgreceivewal(Keeper *keeper, NodeAddress *primaryNode)
 
 
 /*
+ * is_wal_segment_filename returns true iff name has the shape of a real WAL
+ * segment file (24 hex digits) -- this also naturally excludes pg_receivewal's
+ * own "<segment>.partial" in-progress file, since it's longer than 24 chars.
+ */
+static bool
+is_wal_segment_filename(const char *name)
+{
+	size_t len = strlen(name);
+
+	if (len != ARCHIVER_WAL_FNAME_LEN)
+	{
+		return false;
+	}
+
+	for (size_t i = 0; i < len; i++)
+	{
+		if (!isxdigit((unsigned char) name[i]))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+/*
+ * wal_filename_compare is a qsort() comparator over an array of char*,
+ * ordering WAL segment filenames the same way their fixed-width hex names
+ * already sort lexicographically (== numerically, oldest to newest).
+ */
+static int
+wal_filename_compare(const void *a, const void *b)
+{
+	const char *nameA = *(const char *const *) a;
+	const char *nameB = *(const char *const *) b;
+
+	return strcmp(nameA, nameB);
+}
+
+
+/*
+ * wal_segment_end_lsn computes the LSN just past the end of the WAL segment
+ * named walFileName -- what report_wal_received() records as "captured up
+ * to", matching pg_walsender/wal_dir_scan.c's own wal_dir_find_latest()
+ * arithmetic for the same filename layout.
+ */
+static void
+wal_segment_end_lsn(const char *walFileName, char *lsn, size_t lsnSize)
+{
+	char logIdHex[9] = { 0 };
+	char segHex[9] = { 0 };
+
+	memcpy(logIdHex, walFileName + 8, 8);
+	memcpy(segHex, walFileName + 16, 8);
+
+	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
+	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
+
+	uint64_t segno = (uint64_t) logId * ARCHIVER_XLOG_SEGMENTS_PER_XLOGID + seg;
+	uint64_t endOfSegment = (segno + 1) * ARCHIVER_WAL_SEGMENT_SIZE;
+
+	snprintf(lsn, lsnSize, "%X/%08X",
+			 (uint32_t) (endOfSegment >> 32),
+			 (uint32_t) (endOfSegment & 0xFFFFFFFF));
+}
+
+
+/*
+ * service_archiver_report_captured_wal scans the archiver's local WAL cache
+ * directory for segments pg_receivewal has completed (i.e. no longer
+ * ".partial") since the last-reported filename, and reports each one to the
+ * monitor via monitor_report_wal_received() -- the mechanism backing
+ * archiver_wal/wal_archived(), so archive_command callers elsewhere in the
+ * cluster can learn when a segment has landed durably on quorum archivers.
+ *
+ * Reports oldest-to-newest and only advances lastReportedWalFileName past a
+ * segment once its report has actually succeeded, so a monitor hiccup
+ * retries that segment (and anything after it) on the next tick instead of
+ * silently skipping it.
+ */
+bool
+service_archiver_report_captured_wal(Keeper *keeper)
+{
+	const char *walcacheDir = keeper->config.pgSetup.pgdata;
+
+	DIR *dir = opendir(walcacheDir);
+
+	if (dir == NULL)
+	{
+		/* nothing captured yet -- not an error */
+		return true;
+	}
+
+	char **names = NULL;
+	int count = 0;
+	int capacity = 0;
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		if (!is_wal_segment_filename(entry->d_name))
+		{
+			continue;
+		}
+
+		if (strcmp(entry->d_name, lastReportedWalFileName) <= 0)
+		{
+			continue;
+		}
+
+		if (count == capacity)
+		{
+			capacity = capacity == 0 ? 16 : capacity * 2;
+			names = realloc(names, capacity * sizeof(char *));
+		}
+
+		names[count++] = strdup(entry->d_name);
+	}
+
+	closedir(dir);
+
+	if (count == 0)
+	{
+		return true;
+	}
+
+	qsort(names, count, sizeof(char *), wal_filename_compare);
+
+	bool success = true;
+
+	for (int i = 0; i < count; i++)
+	{
+		if (success)
+		{
+			char lsn[PG_LSN_MAXLENGTH] = { 0 };
+
+			wal_segment_end_lsn(names[i], lsn, sizeof(lsn));
+
+			if (monitor_report_wal_received(&(keeper->monitor),
+											keeper->state.current_node_id,
+											names[i], lsn))
+			{
+				strlcpy(lastReportedWalFileName, names[i],
+						sizeof(lastReportedWalFileName));
+			}
+			else
+			{
+				log_error("Failed to report WAL file \"%s\" to the monitor",
+						  names[i]);
+				success = false;
+			}
+		}
+
+		free(names[i]);
+	}
+
+	free(names);
+
+	return success;
+}
+
+
+/*
  * service_archiver_loop is the archiver's own node_active() reporting loop
  * -- deliberately not keeper_node_active_loop (service_keeper.c): that
  * function's own per-tick keeper_update_pg_state()/keeper_ensure_current_
@@ -287,6 +473,36 @@ service_archiver_loop(Keeper *keeper)
 							  "retrying...",
 							  NodeStateToString(keeperState->assigned_role));
 				}
+			}
+
+			/*
+			 * Liveness check: a state transition only (re)starts
+			 * pg_receivewal at the moment current_role becomes
+			 * ARCHIVING_STATE (fsm_init_archiver/fsm_archiver_follow_new_
+			 * primary, fsm_transition.c) -- it does not run again on later
+			 * ticks where current_role and assigned_role already agree.
+			 * Without this check, a pg_receivewal that dies (or an archiver
+			 * process that gets restarted while already ARCHIVING) would
+			 * stay down forever instead of being noticed and restarted here,
+			 * exactly the "is it running" check this loop's own header
+			 * comment describes.
+			 */
+			if (keeperState->current_role == ARCHIVING_STATE &&
+				!service_archiver_pgreceivewal_is_running())
+			{
+				NodeAddress primaryNode = { 0 };
+
+				if (!keeper_get_primary(keeper, &primaryNode) ||
+					!service_archiver_start_pgreceivewal(keeper, &primaryNode))
+				{
+					log_error("Failed to restart pg_receivewal, retrying...");
+				}
+			}
+
+			if (!service_archiver_report_captured_wal(keeper))
+			{
+				log_warn("Failed to report newly captured WAL segments to "
+						 "the monitor, will retry");
 			}
 		}
 		else

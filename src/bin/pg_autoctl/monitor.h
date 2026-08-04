@@ -162,6 +162,8 @@ bool monitor_get_latest_basebackup_location(Monitor *monitor,
 											const char *formationId, int groupId,
 											char *storageLocation, size_t size,
 											bool *found);
+bool monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
+								 const char *walFileName, const char *lsn);
 bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 CoordinatorNodeAddress *coordinatorNodeAddress);
 bool monitor_get_most_advanced_standby(Monitor *monitor,

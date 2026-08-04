@@ -20,6 +20,8 @@ bool service_archiver_start_pgreceivewal(Keeper *keeper, NodeAddress *primaryNod
 bool service_archiver_stop_pgreceivewal(void);
 bool service_archiver_pgreceivewal_is_running(void);
 
+bool service_archiver_report_captured_wal(Keeper *keeper);
+
 bool service_archiver_loop(Keeper *keeper);
 
 #endif /* SERVICE_ARCHIVER_H */

@@ -1029,6 +1029,39 @@ monitor_get_latest_basebackup_location(Monitor *monitor,
 }
 
 
+/*
+ * monitor_report_wal_received calls pgautofailover.report_wal_received()
+ * to record that nodeId (the ARCHIVING membership's own nodeid, not the
+ * archiver's archiverid) has durably captured walFileName up to lsn.
+ * Idempotent on the monitor side (ON CONFLICT DO NOTHING), so callers are
+ * free to re-report an already-known segment without checking first --
+ * see service_archiver.c's own use of this.
+ */
+bool
+monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
+							const char *walFileName, const char *lsn)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_wal_received($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { INT8OID, TEXTOID, LSNOID };
+	IntString nodeIdString = intToString(nodeId);
+	const char *paramValues[3] = { nodeIdString.strValue, walFileName, lsn };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to report WAL file \"%s\" received for node %"
+				 PRId64, walFileName, nodeId);
+		return false;
+	}
+
+	return true;
+}
+
+
 bool
 monitor_register_node(Monitor *monitor, char *formation,
 					  char *name, char *host, int port,

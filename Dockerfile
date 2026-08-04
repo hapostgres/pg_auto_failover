@@ -120,6 +120,7 @@ COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so \
 COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* \
                   /usr/share/postgresql/${PGVERSION}/extension/
 COPY --from=build /usr/local/bin/pg_autoctl /usr/local/bin/
+COPY --from=build /usr/local/bin/pg_walsender /usr/local/bin/
 
 RUN mkdir -p /var/lib/postgres \
  && chown -R docker /var/lib/postgres
