@@ -1077,6 +1077,71 @@ monitor_get_latest_basebackup_info(Monitor *monitor,
 
 
 /*
+ * monitor_get_group_system_identifier calls
+ * pgautofailover.get_group_system_identifier(formationId, groupId) --
+ * needed by an archiving node (which has no real Postgres instance of its
+ * own to report one) to serve a correct IDENTIFY_SYSTEM response, so a real
+ * standby streaming from it doesn't reject the connection with "database
+ * system identifier differs". *found is false (not an error) when no other
+ * node in the group has reported one yet.
+ */
+bool
+monitor_get_group_system_identifier(Monitor *monitor,
+									const char *formationId, int groupId,
+									uint64_t *systemIdentifier, bool *found)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+
+	/*
+	 * COALESCE to 0, the same "unset" sentinel this column already uses
+	 * elsewhere (node_metadata.c/pgautofailover.sql): the SQL function
+	 * itself is a plain scalar, not SETOF, so a no-match query still
+	 * produces one row with a NULL value rather than zero rows --
+	 * PGSQL_RESULT_BIGINT's own parser treats a NULL value as a parse
+	 * failure, which "not reported yet" is not.
+	 */
+	const char *sql =
+		"SELECT coalesce("
+		"pgautofailover.get_group_system_identifier($1, $2), 0)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[2] = { formationId, groupIdString.strValue };
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	*found = false;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get the system identifier for \"%s\"/%d "
+				 "from the monitor", formationId, groupId);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse the system identifier returned by the "
+				 "monitor for \"%s\"/%d, see above for details",
+				 formationId, groupId);
+		return false;
+	}
+
+	if (context.bigint == 0)
+	{
+		/* no node in the group has reported one yet -- not an error */
+		return true;
+	}
+
+	*systemIdentifier = context.bigint;
+	*found = true;
+
+	return true;
+}
+
+
+/*
  * monitor_report_wal_received calls pgautofailover.report_wal_received()
  * to record that nodeId (the ARCHIVING membership's own nodeid, not the
  * archiver's archiverid) has durably captured walFileName up to lsn.

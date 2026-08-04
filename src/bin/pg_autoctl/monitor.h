@@ -163,6 +163,10 @@ bool monitor_get_latest_basebackup_info(Monitor *monitor,
 										char *storageLocation, size_t storageLocationSize,
 										char *source, size_t sourceSize,
 										bool *found);
+bool monitor_get_group_system_identifier(Monitor *monitor,
+										 const char *formationId, int groupId,
+										 uint64_t *systemIdentifier,
+										 bool *found);
 bool monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
 								 const char *walFileName, const char *lsn);
 bool monitor_report_basebackup_started(Monitor *monitor, int64_t archiverId,

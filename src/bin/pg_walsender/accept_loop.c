@@ -35,6 +35,17 @@
  * instead of the normal replication command loop -- see cmd_fetch_file.h */
 #define WS_FETCH_DBNAME_PREFIX "fetch/"
 
+/*
+ * A real, unmodified Postgres standby's own internal walreceiver process
+ * (primary_conninfo-driven physical replication) always sends this literal
+ * string as its startup packet's dbname -- confirmed against a real
+ * standby: it does not forward whatever dbname the operator wrote into
+ * primary_conninfo the way a generic libpq client (psql, pg_receivewal,
+ * this project's own FETCH_FILE client) does. See the routeKey fallback
+ * below.
+ */
+#define WS_REAL_WALRECEIVER_DBNAME "replication"
+
 
 static int
 create_listen_socket(int port)
@@ -113,6 +124,25 @@ handle_connection(int clientSock, const WsServerConfig *config)
 	const char *routeKey = isFetchMode
 						   ? params.database + strlen(WS_FETCH_DBNAME_PREFIX)
 						   : params.database;
+
+	/*
+	 * dbname-based routing cannot work for a real walreceiver connection
+	 * (see WS_REAL_WALRECEIVER_DBNAME's own comment) -- fall back to the
+	 * single configured route unambiguously, matching this milestone's own
+	 * one-membership-per-archiver scope. Multiple routes with a real
+	 * walreceiver connecting is left as a clean auth rejection (routeKey
+	 * stays "replication", which never matches a real route.key) rather
+	 * than guessing; a multi-route archiver needs a different mechanism
+	 * for a real standby to identify its route (e.g. application_name,
+	 * which real walreceiver does forward from primary_conninfo, unlike
+	 * dbname) -- a later milestone's problem, not this one's.
+	 */
+	if (!isFetchMode &&
+		strcmp(routeKey, WS_REAL_WALRECEIVER_DBNAME) == 0 &&
+		routeCount == 1)
+	{
+		routeKey = routes[0].key;
+	}
 
 	const WsRoute *route = NULL;
 

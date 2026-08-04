@@ -221,6 +221,20 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 		found = false;
 	}
 
+	uint64_t systemIdentifier = 0;
+	bool foundSystemIdentifier = false;
+
+	if (!monitor_get_group_system_identifier(&(keeper->monitor),
+											 config->formation,
+											 config->groupId,
+											 &systemIdentifier,
+											 &foundSystemIdentifier))
+	{
+		log_warn("Failed to fetch the group's system identifier from the "
+				 "monitor; the routes file will omit it for now");
+		foundSystemIdentifier = false;
+	}
+
 	char routesPath[MAXPGPATH] = { 0 };
 
 	service_archiver_serve_routes_path(config, routesPath);
@@ -243,6 +257,11 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 	if (found)
 	{
 		fformat(fileStream, "basebackup = %s\n", basebackupLocation);
+	}
+
+	if (foundSystemIdentifier)
+	{
+		fformat(fileStream, "systemid = %" PRIu64 "\n", systemIdentifier);
 	}
 
 	if (fclose(fileStream) == EOF)

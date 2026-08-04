@@ -149,6 +149,37 @@ wait_for_more_data_or_client(int sock, uint64_t currentLsn, time_t *lastKeepaliv
 }
 
 
+/*
+ * trim_trailing_zeros returns the length of buffer with any trailing run of
+ * zero bytes removed. A ".partial" segment is pre-allocated to its full
+ * WS_WAL_SEGMENT_SIZE by pg_receivewal the moment it's created (matching
+ * real Postgres's own WAL file pre-allocation, XLogFileInitInternal) --
+ * unlike a real primary's own walsender, which only ever knows about bytes
+ * it has actually flushed, a plain fread() from a ".partial" file cannot
+ * tell real WAL content apart from the not-yet-written tail, which reads
+ * back as zeros. Sending that tail as if it were real WAL data is exactly
+ * what a real standby's own recovery logic detects as "invalid record
+ * length ... got 0" -- and, on that response, terminates its walreceiver
+ * outright rather than treating it as "no more data yet, retry" (which is
+ * pg_receivewal's own polling behavior, so it never noticed).
+ *
+ * Trimming any trailing zero run before ever sending it means an in-
+ * progress chunk boundary is re-read (and re-trimmed) on the next
+ * iteration rather than shipped as real data -- self-correcting, at worst
+ * a few bytes of redundant re-reads per tick, never sent out early.
+ */
+static size_t
+trim_trailing_zeros(const char *buffer, size_t len)
+{
+	while (len > 0 && buffer[len - 1] == 0)
+	{
+		len--;
+	}
+
+	return len;
+}
+
+
 static bool
 parse_lsn(const char *s, uint64_t *lsn, const char **endptr)
 {
@@ -330,6 +361,11 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 		size_t got = fread(buffer, 1, sizeof(buffer), file);
 
 		fclose(file);
+
+		if (!isComplete)
+		{
+			got = trim_trailing_zeros(buffer, got);
+		}
 
 		if (got == 0)
 		{

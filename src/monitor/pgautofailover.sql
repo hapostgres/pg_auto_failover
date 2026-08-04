@@ -2362,6 +2362,33 @@ comment on function pgautofailover.get_latest_basebackup(text,int)
 grant execute on function pgautofailover.get_latest_basebackup(text,int)
    to autoctl_node;
 
+-- an archiving node has no sysidentifier of its own (haspgdata = false,
+-- see that column's own comment): it never runs a real Postgres instance
+-- to report one. Every other node in the group shares the same physical
+-- cluster's identifier, so any one of them answers for the whole group --
+-- needed by pg_walsender's own IDENTIFY_SYSTEM response (cmd_identify_
+-- system.c) so a real standby streaming from the archiver doesn't reject
+-- it with "database system identifier differs between the primary and
+-- standby".
+CREATE FUNCTION pgautofailover.get_group_system_identifier
+    (formationid text, groupid int)
+ RETURNS bigint LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+    SELECT sysidentifier
+      FROM pgautofailover.node
+     WHERE node.formationid = get_group_system_identifier.formationid
+       AND node.groupid = get_group_system_identifier.groupid
+       AND sysidentifier IS NOT NULL
+       AND sysidentifier != 0
+     LIMIT 1;
+$$;
+
+comment on function pgautofailover.get_group_system_identifier(text,int)
+        is 'the Postgres system identifier shared by every node in a group, for an archiving node (which has none of its own) to serve via IDENTIFY_SYSTEM';
+
+grant execute on function pgautofailover.get_group_system_identifier(text,int)
+   to autoctl_node;
+
 -- for kind = 'warm-standby': raises if the owning archiver is already at
 -- its maxresidentreplay cap
 CREATE FUNCTION pgautofailover.create_archiver_node
