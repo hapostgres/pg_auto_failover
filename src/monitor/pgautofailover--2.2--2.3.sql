@@ -1538,7 +1538,7 @@ grant execute on function pgautofailover.get_archiver_policy(text,int)
 CREATE FUNCTION pgautofailover.wal_archived
     (formationid text, groupid int, walfilename text)
  RETURNS bool
- LANGUAGE sql STABLE
+ LANGUAGE sql STABLE SECURITY DEFINER
 AS $$
     SELECT count(DISTINCT aw.archiverid) >=
            (SELECT archiverquorum
