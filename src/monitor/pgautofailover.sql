@@ -2345,21 +2345,42 @@ grant execute on function
 -- SELECT grant on (e.g. archiver_add_formation) -- autoctl_node is only
 -- ever granted EXECUTE on the function, never SELECT on pgautofailover.
 -- basebackup itself.
-CREATE FUNCTION pgautofailover.get_latest_basebackup(formationid text, groupid int)
+--
+-- preferred_source (default NULL, meaning "any") exists for service_
+-- archiver_serve.c's own routes-file refresh: a 'replay' backup promotes a
+-- throwaway extracted copy, which genuinely puts it on a *later* timeline
+-- than whatever the archiver's own walcache has actually captured (which
+-- only ever advances on the real primary's timeline) -- serving that pair
+-- together breaks a real pg_basebackup's own timeline consistency check
+-- (receivelog.c). Since a 'live' backup is taken directly from the
+-- actively-followed primary, it always shares the walcache's timeline by
+-- construction; passing preferred_source = 'live' is how the routes
+-- refresh asks for one specifically, rather than "whatever is newest
+-- regardless of type".
+CREATE FUNCTION pgautofailover.get_latest_basebackup
+ (
+    formationid text,
+    groupid int,
+    preferred_source pgautofailover.basebackup_source default NULL
+ )
  RETURNS pgautofailover.basebackup LANGUAGE sql STABLE SECURITY DEFINER
 AS $$
     SELECT * FROM pgautofailover.basebackup b
      WHERE b.formationid = get_latest_basebackup.formationid
        AND b.groupid = get_latest_basebackup.groupid
        AND b.status = 'complete'
+       AND (get_latest_basebackup.preferred_source IS NULL
+            OR b.source = get_latest_basebackup.preferred_source)
   ORDER BY lower(b.period) DESC
      LIMIT 1;
 $$;
 
-comment on function pgautofailover.get_latest_basebackup(text,int)
-        is 'fetch the most recent complete base backup for (formation, group)';
+comment on function pgautofailover.get_latest_basebackup
+                    (text,int,pgautofailover.basebackup_source)
+        is 'fetch the most recent complete base backup for (formation, group), optionally filtered to one source';
 
-grant execute on function pgautofailover.get_latest_basebackup(text,int)
+grant execute on function pgautofailover.get_latest_basebackup
+                          (text,int,pgautofailover.basebackup_source)
    to autoctl_node;
 
 -- an archiving node has no sysidentifier of its own (haspgdata = false,
@@ -2387,6 +2408,43 @@ comment on function pgautofailover.get_group_system_identifier(text,int)
         is 'the Postgres system identifier shared by every node in a group, for an archiving node (which has none of its own) to serve via IDENTIFY_SYSTEM';
 
 grant execute on function pgautofailover.get_group_system_identifier(text,int)
+   to autoctl_node;
+
+-- `create postgres --from-archiver` needs the ARCHIVING row itself, not
+-- get_most_advanced_standby()'s election-only pool: that function filters
+-- on reportedstate = 'report_lsn', a transient state a group's ARCHIVING
+-- node only visits during a FAST_FORWARD election, never during its normal
+-- steady-state operation (reportedstate = 'archiving'). node_port is the
+-- port == 0 sentinel documented on get_most_advanced_standby's own C
+-- caller (keeper_get_most_advanced_standby, keeper.c) -- resolving it to
+-- the archiver's real pg_walsender serve port is this milestone's C
+-- caller's job too, same pattern.
+CREATE FUNCTION pgautofailover.get_archiver_node
+ (
+   IN formationid       text default 'default',
+   IN groupid           int default 0,
+   OUT node_id          bigint,
+   OUT node_name        text,
+   OUT node_host        text,
+   OUT node_port        int,
+   OUT node_lsn         pg_lsn,
+   OUT node_is_primary  bool
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT
+AS $$
+   select nodeid, nodename, nodehost, nodeport, reportedlsn, false
+     from pgautofailover.node
+    where formationid = $1
+      and groupid = $2
+      and reportedstate = 'archiving'
+ order by nodeid
+    limit 1;
+$$;
+
+comment on function pgautofailover.get_archiver_node(text,int)
+        is 'fetch the ARCHIVING node for (formation, group), for create postgres --from-archiver to bootstrap from';
+
+grant execute on function pgautofailover.get_archiver_node(text,int)
    to autoctl_node;
 
 -- for kind = 'warm-standby': raises if the owning archiver is already at

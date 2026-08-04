@@ -99,6 +99,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 
 	/* force some non-zero default values */
 	LocalOptionConfig.monitorDisabled = false;
+	LocalOptionConfig.fromArchiver = false;
 	LocalOptionConfig.groupId = -1;
 	LocalOptionConfig.network_partition_timeout = -1;
 	LocalOptionConfig.prepare_promotion_catchup = -1;
@@ -468,6 +469,14 @@ cli_common_keeper_getopts(int argc, char **argv,
 				/* { "run", no_argument, NULL, 'x' }, */
 				createAndRun = true;
 				log_trace("--run");
+				break;
+			}
+
+			case 'K':
+			{
+				/* { "from-archiver", no_argument, NULL, 'K' }, */
+				LocalOptionConfig.fromArchiver = true;
+				log_trace("--from-archiver");
 				break;
 			}
 

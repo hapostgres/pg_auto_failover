@@ -925,20 +925,64 @@ fsm_init_standby(Keeper *keeper)
 
 	NodeAddress *primaryNode = NULL;
 
+	/*
+	 * `pg_autoctl create postgres --from-archiver`: bootstrap from a
+	 * registered archiver's base backup + WAL cache instead of the group's
+	 * live primary -- the disaster-recovery case this flag exists for. The
+	 * archiver serves the same real replication protocol a live primary
+	 * does (pg_walsender), so standby_init_replication_source/
+	 * standby_init_database below don't need to know the difference, except
+	 * for one: pg_walsender has no slot-based retention in this milestone
+	 * (see cmd_start_replication.c's own header comment), so we mustn't ask
+	 * standby_init_database to first verify a replication slot exists on
+	 * the archiver -- it never will. Passing an empty slot name here
+	 * matches standby_init_database's own existing "initialising from
+	 * another standby, no primary yet" precedent (see that function's
+	 * comment on needsReplicationSlot).
+	 */
+	const char *slotName = config->replication_slot_name;
 
-	/* get the primary node to follow */
-	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
+	if (config->fromArchiver)
 	{
-		log_error("Failed to initialize standby for lack of a primary node, "
-				  "see above for details");
-		return false;
+		NodeAddress archiverNode = { 0 };
+		bool found = false;
+
+		if (!keeper_get_archiver_node(keeper, &archiverNode, &found))
+		{
+			log_error("Failed to initialize standby from an archiver, "
+					  "see above for details");
+			return false;
+		}
+
+		if (!found)
+		{
+			log_error("Failed to initialize standby from an archiver: "
+					  "no archiver is registered for formation \"%s\" "
+					  "group %d", config->formation,
+					  keeper->state.current_group);
+			return false;
+		}
+
+		postgres->replicationSource.primaryNode = archiverNode;
+		postgres->replicationSource.noManifest = true;
+		slotName = "";
+	}
+	else
+	{
+		/* get the primary node to follow */
+		if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
+		{
+			log_error("Failed to initialize standby for lack of a primary node, "
+					  "see above for details");
+			return false;
+		}
 	}
 
 	if (!standby_init_replication_source(postgres,
 										 primaryNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
-										 config->replication_slot_name,
+										 slotName,
 										 config->maximum_backup_rate,
 										 config->backupDirectory,
 										 NULL, /* no targetLSN */

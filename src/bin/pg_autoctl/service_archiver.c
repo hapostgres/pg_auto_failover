@@ -467,7 +467,7 @@ service_archiver_update_current_lsn(Keeper *keeper)
 	}
 
 	wal_segment_end_lsn(best, keeper->postgres.currentLSN,
-					   sizeof(keeper->postgres.currentLSN));
+						sizeof(keeper->postgres.currentLSN));
 }
 
 

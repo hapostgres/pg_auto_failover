@@ -160,8 +160,10 @@ bool monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
 									char *formation, int64_t *archiverNodeId);
 bool monitor_get_latest_basebackup_info(Monitor *monitor,
 										const char *formationId, int groupId,
+										const char *preferredSource,
 										char *storageLocation, size_t storageLocationSize,
 										char *source, size_t sourceSize,
+										int *timeline,
 										bool *found);
 bool monitor_get_group_system_identifier(Monitor *monitor,
 										 const char *formationId, int groupId,
@@ -187,6 +189,9 @@ bool monitor_get_most_advanced_standby(Monitor *monitor,
 									   char *formation, int groupId,
 									   int64_t callerNodeId,
 									   NodeAddress *node, bool *found);
+bool monitor_get_archiver_node(Monitor *monitor,
+							   char *formation, int groupId,
+							   NodeAddress *node, bool *found);
 bool monitor_register_node(Monitor *monitor,
 						   char *formation,
 						   char *name,

@@ -267,6 +267,17 @@ typedef struct ReplicationSource
 	 * for themselves when to promote, should leave this false.
 	 */
 	bool pauseAtRecoveryTarget;
+
+	/*
+	 * pg_walsender's BASE_BACKUP doesn't implement backup manifests yet
+	 * (~/dev/temp/archiving-disaster-recovery.md's own documented scope for
+	 * this milestone), which a real pg_basebackup requests by default from
+	 * PG13+ -- set for an archiver-sourced base backup (create postgres
+	 * --from-archiver) so pg_basebackup() knows to pass --no-manifest;
+	 * false (the default) for a real primary/standby upstream, which does
+	 * support manifests and should keep getting one.
+	 */
+	bool noManifest;
 	SSLOptions sslOptions;
 	IdentifySystem system;
 } ReplicationSource;

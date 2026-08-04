@@ -849,6 +849,80 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 
 
 /*
+ * monitor_get_archiver_node finds the ARCHIVING node for (formation, group),
+ * for a client-side bootstrap (create postgres --from-archiver) rather than
+ * an election: unlike monitor_get_most_advanced_standby, this doesn't filter
+ * on reportedstate = 'report_lsn' (a transient election-only state), since
+ * an archiver sits in its normal 'archiving' state outside of elections.
+ */
+bool
+monitor_get_archiver_node(Monitor *monitor,
+						  char *formation, int groupId,
+						  NodeAddress *node, bool *found)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.get_archiver_node($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2];
+
+	/* we expect zero or one entry */
+	NodeAddressArray nodeArray = { 0 };
+	NodeAddressArrayParseContext parseContext = { { 0 }, &nodeArray, false };
+
+	IntString groupIdString = intToString(groupId);
+
+	paramValues[0] = formation;
+	paramValues[1] = groupIdString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeArray))
+	{
+		log_error(
+			"Failed to get the archiver node in the HA group "
+			"from the monitor while running \"%s\" with "
+			"formation \"%s\" and group ID %d",
+			sql, formation, groupId);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error(
+			"Failed to get the archiver node from the monitor "
+			"while running \"%s\" with formation \"%s\" and group ID %d "
+			"because it returned an unexpected result. "
+			"See previous line for details.",
+			sql, formation, groupId);
+		return false;
+	}
+
+	if (nodeArray.count == 0)
+	{
+		*found = false;
+		return true;
+	}
+
+	/* copy the node we retrieved in the expected place */
+	node->nodeId = nodeArray.nodes[0].nodeId;
+	strlcpy(node->name, nodeArray.nodes[0].name, _POSIX_HOST_NAME_MAX);
+	strlcpy(node->host, nodeArray.nodes[0].host, _POSIX_HOST_NAME_MAX);
+	node->port = nodeArray.nodes[0].port;
+	strlcpy(node->lsn, nodeArray.nodes[0].lsn, PG_LSN_MAXLENGTH);
+	node->isPrimary = nodeArray.nodes[0].isPrimary;
+
+	log_debug("The archiver node for %s/%d is node " NODE_FORMAT,
+			  formation, groupId, node->nodeId, node->name,
+			  node->host, node->port);
+
+	*found = true;
+	return true;
+}
+
+
+/*
  * monitor_register_node performs the initial registration of a node with the
  * monitor in the given formation.
  *
@@ -974,6 +1048,7 @@ typedef struct BasebackupInfoParseContext
 	int ntuples;
 	char *storageLocation;
 	char *source;
+	int timeline;
 } BasebackupInfoParseContext;
 
 
@@ -993,9 +1068,11 @@ parseBasebackupInfo(void *ctx, PGresult *result)
 
 	char *storageLocation = PQgetvalue(result, 0, 0);
 	char *source = PQgetvalue(result, 0, 1);
+	char *timeline = PQgetvalue(result, 0, 2);
 
 	context->storageLocation = strdup(storageLocation);
 	context->source = strdup(source);
+	context->timeline = strtol(timeline, NULL, 10);
 
 	context->parsedOk =
 		context->storageLocation != NULL && context->source != NULL;
@@ -1010,15 +1087,30 @@ parseBasebackupInfo(void *ctx, PGresult *result)
 /*
  * monitor_get_latest_basebackup_info calls
  * pgautofailover.get_latest_basebackup(formationId, groupId) and returns
- * its storagelocation and source columns. *found is set to false (not an
- * error) when the archiver hasn't taken a base backup for this group yet --
- * every caller must already tolerate that.
+ * its storagelocation, source, and timeline columns. *found is set to false
+ * (not an error) when the archiver hasn't taken a base backup for this
+ * group yet -- every caller must already tolerate that.
+ *
+ * timeline matters beyond metadata: pg_walsender's BASE_BACKUP response
+ * reads it straight out of the served backup_label (cmd_base_backup.c's
+ * own read_backup_label), and a real pg_basebackup's own background WAL
+ * streaming then requests exactly that timeline back via START_REPLICATION
+ * -- for a "replay" base backup (basebackup_replay_mode), which promotes a
+ * throwaway extracted copy to make it self-consistent, that's genuinely a
+ * *later* timeline than what the archiver's own captured WAL cache holds
+ * (which only ever advances on the real primary's timeline). Passing it
+ * through into the routes file's own "timeline" key (already parsed by
+ * routes.c, previously never written by anyone) is what lets pg_walsender
+ * serve a START_REPLICATION request consistent with whichever backup it
+ * just described, instead of always defaulting to timeline 1.
  */
 bool
 monitor_get_latest_basebackup_info(Monitor *monitor,
 								   const char *formationId, int groupId,
+								   const char *preferredSource,
 								   char *storageLocation, size_t storageLocationSize,
 								   char *source, size_t sourceSize,
+								   int *timeline,
 								   bool *found)
 {
 	PGSQL *pgsql = &monitor->pgsql;
@@ -1031,15 +1123,22 @@ monitor_get_latest_basebackup_info(Monitor *monitor,
 		 * "IS NOT NULL" here, rather than trying to detect that NULL
 		 * composite downstream, is what makes context.ntuples == 0 below
 		 * an accurate "no backup yet" signal.
+		 *
+		 * preferredSource is passed as text plus an explicit cast (matching
+		 * this file's own established pattern for enum parameters, e.g.
+		 * monitor_register_node's use of ::pgautofailover.replication_
+		 * state below) rather than a raw enum OID -- NULL means "any", the
+		 * function's own default.
 		 */
-		"SELECT storagelocation, source::text "
-		"  FROM pgautofailover.get_latest_basebackup($1, $2) "
+		"SELECT storagelocation, source::text, timeline "
+		"  FROM pgautofailover.get_latest_basebackup("
+		"         $1, $2, $3::pgautofailover.basebackup_source) "
 		" WHERE storagelocation IS NOT NULL";
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	IntString groupIdString = intToString(groupId);
-	const char *paramValues[2] = { formationId, groupIdString.strValue };
-	BasebackupInfoParseContext context = { { 0 }, false, 0, NULL, NULL };
+	const char *paramValues[3] = { formationId, groupIdString.strValue, preferredSource };
+	BasebackupInfoParseContext context = { { 0 }, false, 0, NULL, NULL, 0 };
 
 	*found = false;
 
@@ -1068,6 +1167,7 @@ monitor_get_latest_basebackup_info(Monitor *monitor,
 
 	strlcpy(storageLocation, context.storageLocation, storageLocationSize);
 	strlcpy(source, context.source, sourceSize);
+	*timeline = context.timeline;
 	free(context.storageLocation);
 	free(context.source);
 	*found = true;
@@ -1116,15 +1216,15 @@ monitor_get_group_system_identifier(Monitor *monitor,
 								   &context, &parseSingleValueResult))
 	{
 		log_error("Failed to get the system identifier for \"%s\"/%d "
-				 "from the monitor", formationId, groupId);
+				  "from the monitor", formationId, groupId);
 		return false;
 	}
 
 	if (!context.parsedOk)
 	{
 		log_error("Failed to parse the system identifier returned by the "
-				 "monitor for \"%s\"/%d, see above for details",
-				 formationId, groupId);
+				  "monitor for \"%s\"/%d, see above for details",
+				  formationId, groupId);
 		return false;
 	}
 
@@ -1166,7 +1266,7 @@ monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
 								   NULL, NULL))
 	{
 		log_error("Failed to report WAL file \"%s\" received for node %"
-				 PRId64, walFileName, nodeId);
+				  PRId64, walFileName, nodeId);
 		return false;
 	}
 
@@ -1215,15 +1315,15 @@ monitor_report_basebackup_started(Monitor *monitor, int64_t archiverId,
 								   &context, &parseSingleValueResult))
 	{
 		log_error("Failed to report the start of base backup \"%s\" to "
-				 "the monitor", label);
+				  "the monitor", label);
 		return false;
 	}
 
 	if (!context.parsedOk)
 	{
 		log_error("Failed to report the start of base backup \"%s\" to "
-				 "the monitor because it returned an unexpected result, "
-				 "see previous lines for details", label);
+				  "the monitor because it returned an unexpected result, "
+				  "see previous lines for details", label);
 		return false;
 	}
 
@@ -1261,7 +1361,7 @@ monitor_report_basebackup_completed(Monitor *monitor, int64_t basebackupId,
 								   NULL, NULL))
 	{
 		log_error("Failed to report base backup %" PRId64 " as completed "
-				 "to the monitor", basebackupId);
+														  "to the monitor", basebackupId);
 		return false;
 	}
 

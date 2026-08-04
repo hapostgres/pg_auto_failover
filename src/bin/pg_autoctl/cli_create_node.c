@@ -107,7 +107,8 @@ CommandLine create_postgres_command =
 		KEEPER_CLI_SSL_OPTIONS
 		"  --candidate-priority    priority of the node to be promoted to become primary\n"
 		"  --replication-quorum    true if node participates in write quorum\n"
-		"  --maximum-backup-rate   maximum transfer rate of data transferred from the server during initial sync\n",
+		"  --maximum-backup-rate   maximum transfer rate of data transferred from the server during initial sync\n"
+		"  --from-archiver         bootstrap from a registered archiver's base backup and WAL cache\n",
 		cli_create_postgres_getopts,
 		cli_create_postgres);
 
@@ -357,12 +358,13 @@ cli_create_postgres_getopts(int argc, char **argv)
 		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
 		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
 		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
+		{ "from-archiver", no_argument, NULL, 'K' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int optind =
 		cli_create_node_getopts(argc, argv, long_options,
-								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:W:w:RGVvqhP:r:xsN",
+								"C:D:H:p:l:U:A:SLd:a:n:f:m:MI:W:w:RGVvqhP:r:xsNK",
 								&options);
 
 	/* publish our option parsing in the global variable */

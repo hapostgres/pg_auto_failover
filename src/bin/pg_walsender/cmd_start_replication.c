@@ -402,6 +402,24 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 
 	(void) ws_send_copy_done(sock);
 
+	/*
+	 * Real walsender.c's own controlled-shutdown path (WalSndDone) follows
+	 * CopyDone with a CommandComplete tagged "COPY" before returning to
+	 * the command loop -- required protocol, not optional decoration: a
+	 * real client's receivelog.c (ReceiveXlogStream) only accepts an
+	 * ended stream as a *successful* stop when it can read a matching
+	 * PGRES_COMMAND_OK result afterward; without it, a client that decided
+	 * on its own to stop here (e.g. pg_basebackup's --wal-method=stream
+	 * background receiver, once it reaches its target LSN) falls through
+	 * to "unexpected termination of replication stream" and exits
+	 * non-zero, even though nothing on the wire was actually wrong. A
+	 * genuinely long-lived streaming client (real walreceiver, primary_
+	 * conninfo) never triggers this path at all -- it never decides to
+	 * stop on its own -- which is why this went unnoticed until a real
+	 * pg_basebackup was tested end to end.
+	 */
+	(void) ws_send_command_complete(sock, "COPY");
+
 	log_info("START_REPLICATION: stream ended at %X/%08X",
 			 (uint32_t) (currentLsn >> 32), (uint32_t) currentLsn);
 }

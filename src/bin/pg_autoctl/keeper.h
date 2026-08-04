@@ -125,6 +125,8 @@ bool keeper_read_nodes_from_file(Keeper *keeper, NodeAddressArray *nodesArray);
 bool keeper_get_primary(Keeper *keeper, NodeAddress *primaryNode);
 bool keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *primaryNode,
 									  bool *found);
+bool keeper_get_archiver_node(Keeper *keeper, NodeAddress *archiverNode,
+							  bool *found);
 
 
 bool keeper_pg_autoctl_get_version_from_disk(Keeper *keeper,

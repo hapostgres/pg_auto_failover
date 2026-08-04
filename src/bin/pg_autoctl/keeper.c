@@ -3396,6 +3396,52 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode,
 
 
 /*
+ * keeper_get_archiver_node fetches the ARCHIVING node registered for our
+ * (formation, group), for `create postgres --from-archiver` to bootstrap
+ * from -- deliberately not keeper_get_most_advanced_standby's election
+ * machinery (see monitor_get_archiver_node's own comment for why that
+ * function can't find an archiver outside of an election). Monitor-only:
+ * a brand new node discovering an archiver to rebuild from is exactly the
+ * disaster-recovery case --disable-monitor's manually-populated otherNodes
+ * list isn't meant to serve.
+ */
+bool
+keeper_get_archiver_node(Keeper *keeper, NodeAddress *archiverNode, bool *found)
+{
+	KeeperConfig *config = &(keeper->config);
+	int groupId = keeper->state.current_group;
+
+	if (config->monitorDisabled)
+	{
+		log_error("Failed to find an archiver to bootstrap from: "
+				  "--from-archiver requires a monitor");
+		return false;
+	}
+
+	Monitor *monitor = &(keeper->monitor);
+
+	if (!monitor_get_archiver_node(monitor,
+								   config->formation,
+								   groupId,
+								   archiverNode,
+								   found))
+	{
+		log_error("Failed to get the archiver node from the monitor, "
+				  "see above for details");
+		return false;
+	}
+
+	/* see keeper_get_most_advanced_standby's own comment on this sentinel */
+	if (*found && archiverNode->port == 0)
+	{
+		archiverNode->port = PG_AUTOCTL_ARCHIVER_SERVE_PORT;
+	}
+
+	return true;
+}
+
+
+/*
  * keeper_pg_autoctl_get_version_from_disk calls pg_autoctl version --json and
  * parses the output to fill-in the keeper version.
  */

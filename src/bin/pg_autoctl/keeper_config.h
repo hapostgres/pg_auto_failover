@@ -89,6 +89,17 @@ typedef struct KeeperConfig
 
 	/* allow data loss during a perform failover operation */
 	bool allowDataLoss;
+
+	/*
+	 * `pg_autoctl create postgres --from-archiver`: bootstrap this standby
+	 * from a registered archiver's base backup + WAL cache instead of from
+	 * the group's live primary -- the disaster-recovery case where no live
+	 * standby (or even primary) is left to clone from. Runtime-only, same
+	 * as createAndRun (cli_common.c): only meaningful for the single
+	 * in-process reach_initial_state() call `create postgres` itself makes,
+	 * never persisted to the ini file.
+	 */
+	bool fromArchiver;
 } KeeperConfig;
 
 #define PG_AUTOCTL_MONITOR_IS_DISABLED(config) \

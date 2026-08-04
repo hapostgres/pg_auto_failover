@@ -268,8 +268,8 @@ query_wal_position(const char *connInfo, bool isPrimary,
 	}
 
 	const char *sql = isPrimary
-		? "SELECT pg_current_wal_lsn()::text"
-		: "SELECT pg_last_wal_replay_lsn()::text";
+					  ? "SELECT pg_current_wal_lsn()::text"
+					  : "SELECT pg_last_wal_replay_lsn()::text";
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
 
 	bool result = pgsql_execute_with_params(&client, sql, 0, NULL, NULL,
@@ -399,7 +399,7 @@ run_pg_basebackup(KeeperConfig *config, NodeAddress *source,
 	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
 	{
 		log_error("pg_basebackup failed while generating base backup \"%s\"",
-				 label);
+				  label);
 		return false;
 	}
 
@@ -427,14 +427,14 @@ report_basebackup(Keeper *keeper, NodeAddress *endLsnSource,
 							   &timeline))
 	{
 		log_error("Failed to read backup_label from \"%s\" after "
-				 "pg_basebackup completed", backupDir);
+				  "pg_basebackup completed", backupDir);
 		return false;
 	}
 
 	if (!monitor_init(&(keeper->monitor), config->monitor_pguri))
 	{
 		log_error("Failed to contact the monitor to report base backup "
-				 "\"%s\"", label);
+				  "\"%s\"", label);
 		return false;
 	}
 
@@ -538,8 +538,8 @@ copy_directory_tree(const char *sourceDir, const char *destDir)
 	if (!success)
 	{
 		log_error("cp -R -p \"%s\" \"%s\" failed: %s",
-				 sourceDir, destDir,
-				 program.stdErr != NULL ? program.stdErr : "");
+				  sourceDir, destDir,
+				  program.stdErr != NULL ? program.stdErr : "");
 	}
 
 	free_program(&program);
@@ -694,7 +694,7 @@ stop_staging_postgres(void)
 	if (kill(stagingPostgresPid, SIGTERM) != 0 && errno != ESRCH)
 	{
 		log_warn("Failed to send SIGTERM to the replay staging instance "
-				"(pid %d): %m", stagingPostgresPid);
+				 "(pid %d): %m", stagingPostgresPid);
 	}
 
 	int status = 0;
@@ -702,7 +702,7 @@ stop_staging_postgres(void)
 	if (waitpid(stagingPostgresPid, &status, 0) == -1 && errno != ECHILD)
 	{
 		log_warn("Failed to wait for the replay staging instance "
-				"(pid %d) to stop: %m", stagingPostgresPid);
+				 "(pid %d) to stop: %m", stagingPostgresPid);
 	}
 
 	stagingPostgresPid = -1;
@@ -778,7 +778,7 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 	if (directory_exists(stagingDir) && !rmtree(stagingDir, true))
 	{
 		log_error("Failed to remove leftover replay staging directory "
-				 "\"%s\" from a previous cycle", stagingDir);
+				  "\"%s\" from a previous cycle", stagingDir);
 		return false;
 	}
 
@@ -793,7 +793,7 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 	if (!write_replay_recovery_config(stagingDir, config->pgSetup.pgdata))
 	{
 		log_error("Failed to write replay recovery configuration in \"%s\"",
-				 stagingDir);
+				  stagingDir);
 		return false;
 	}
 
@@ -815,8 +815,8 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 	if (!ok)
 	{
 		log_error("Replay staging instance at \"%s\" failed to replay "
-				 "available WAL and promote within %d seconds",
-				 stagingDir, ARCHIVER_REPLAY_PROMOTE_TIMEOUT_SECONDS);
+				  "available WAL and promote within %d seconds",
+				  stagingDir, ARCHIVER_REPLAY_PROMOTE_TIMEOUT_SECONDS);
 	}
 	else
 	{
@@ -869,14 +869,17 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	bool found = false;
 	char storageLocation[MAXPGPATH] = { 0 };
 	char latestSource[NAMEDATALEN] = { 0 };
+	int latestTimeline = 0;
 
 	if (!monitor_get_latest_basebackup_info(&(keeper->monitor),
 											config->formation,
 											config->groupId,
+											NULL, /* any source */
 											storageLocation,
 											sizeof(storageLocation),
 											latestSource,
 											sizeof(latestSource),
+											&latestTimeline,
 											&found))
 	{
 		/* errors already logged */
@@ -910,9 +913,9 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	char label[NAMEDATALEN] = { 0 };
 
 	strftime(label, sizeof(label),
-			found ? "basebackup-replay-%Y%m%dT%H%M%SZ"
-				  : "basebackup-%Y%m%dT%H%M%SZ",
-			&nowUTC);
+			 found ? "basebackup-replay-%Y%m%dT%H%M%SZ"
+			 : "basebackup-%Y%m%dT%H%M%SZ",
+			 &nowUTC);
 
 	char backupDir[MAXPGPATH] = { 0 };
 
@@ -961,15 +964,15 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 		(void) set_ps_title("pg_autoctl: archiver basebackup");
 
 		bool ok = haveLiveSource
-			? generate_live_basebackup(keeper, &liveSource, backupDir, label)
-			: generate_replay_basebackup(keeper, sourceBackupDir,
-										 backupDir, label);
+				  ? generate_live_basebackup(keeper, &liveSource, backupDir, label)
+				  : generate_replay_basebackup(keeper, sourceBackupDir,
+											   backupDir, label);
 
 		exit(ok ? EXIT_CODE_QUIT : EXIT_CODE_INTERNAL_ERROR);
 	}
 
 	log_debug("pg_autoctl archiver basebackup process started in "
-			 "subprocess %d", pid);
+			  "subprocess %d", pid);
 	basebackupPid = pid;
 
 	return true;

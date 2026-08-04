@@ -25,6 +25,8 @@
  *
  */
 
+#include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -43,6 +45,10 @@
 /* how often service_archiver_serve_loop() re-checks pg_walsender's
  * liveness and refreshes the routes file, in seconds */
 #define ARCHIVER_SERVE_TICK_SECONDS 1
+
+/* matches service_archiver.c's own ARCHIVER_WAL_FNAME_LEN: a real WAL
+ * segment filename is 24 hex digits (8 TLI + 8 logId + 8 seg) */
+#define ARCHIVER_SERVE_WAL_FNAME_LEN 24
 #define ARCHIVER_SERVE_ROUTES_REFRESH_TICKS 30
 
 /*
@@ -198,6 +204,65 @@ service_archiver_serve_start_walsender(Keeper *keeper)
 }
 
 
+/*
+ * walcache_current_timeline scans walcacheDir for the newest captured WAL
+ * segment (same 24-hex-digit filename shape and sort order as service_
+ * archiver.c's own is_wal_segment_filename/wal_filename_compare, matching
+ * pg_walsender/wal_dir_scan.c's own wal_dir_find_latest arithmetic for the
+ * same layout) and returns its embedded timeline (the filename's first 8
+ * hex digits). Returns false (not an error) when the walcache has no
+ * complete segment yet -- too early to know, not "timeline 0".
+ */
+static bool
+walcache_current_timeline(const char *walcacheDir, int *timeline)
+{
+	DIR *dir = opendir(walcacheDir);
+
+	if (dir == NULL)
+	{
+		return false;
+	}
+
+	char best[ARCHIVER_SERVE_WAL_FNAME_LEN + 1] = { 0 };
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		size_t len = strlen(entry->d_name);
+		bool isWalSegment = (len == ARCHIVER_SERVE_WAL_FNAME_LEN);
+
+		for (size_t i = 0; isWalSegment && i < len; i++)
+		{
+			isWalSegment = isxdigit((unsigned char) entry->d_name[i]);
+		}
+
+		if (!isWalSegment)
+		{
+			continue;
+		}
+
+		if (best[0] == '\0' || strcmp(entry->d_name, best) > 0)
+		{
+			strlcpy(best, entry->d_name, sizeof(best));
+		}
+	}
+
+	closedir(dir);
+
+	if (best[0] == '\0')
+	{
+		return false;
+	}
+
+	char tliHex[9] = { 0 };
+
+	memcpy(tliHex, best, 8);
+	*timeline = (int) strtol(tliHex, NULL, 16);
+
+	return true;
+}
+
+
 bool
 service_archiver_serve_refresh_routes(Keeper *keeper)
 {
@@ -205,20 +270,63 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 
 	char basebackupLocation[MAXPGPATH] = { 0 };
 	char basebackupSource[NAMEDATALEN] = { 0 };
+	int basebackupTimeline = 0;
 	bool found = false;
 
+	/*
+	 * preferredSource = "live": a "replay" base backup (basebackup_replay_
+	 * mode) promotes a throwaway extracted copy to make it self-
+	 * consistent, which genuinely puts it on a *later* timeline than
+	 * whatever the walcache itself has captured (which only ever advances
+	 * on the real primary's own timeline). A real pg_basebackup rejects
+	 * that combination outright once it reaches its own background WAL
+	 * streaming step ("starting timeline N is not present in the server",
+	 * receivelog.c comparing the backup's own timeline against IDENTIFY_
+	 * SYSTEM's -- and IDENTIFY_SYSTEM itself correctly reports the
+	 * walcache's real captured timeline, see cmd_identify_system.c). A
+	 * "live" backup is taken directly from the actively-followed primary,
+	 * so it always shares the walcache's timeline by construction -- ask
+	 * for one specifically rather than "whatever is newest regardless of
+	 * type", which would otherwise serve an unusable pairing as soon as a
+	 * newer 'replay' backup exists (get_latest_basebackup's own comment,
+	 * pgautofailover.sql).
+	 */
 	if (!monitor_get_latest_basebackup_info(&(keeper->monitor),
 											config->formation,
 											config->groupId,
+											"live",
 											basebackupLocation,
 											sizeof(basebackupLocation),
 											basebackupSource,
 											sizeof(basebackupSource),
+											&basebackupTimeline,
 											&found))
 	{
 		log_warn("Failed to fetch the latest base backup location from the "
 				 "monitor; the routes file will omit it for now");
 		found = false;
+	}
+
+	/*
+	 * Defense in depth against the same mismatch, in case a future
+	 * 'live'-sourced backup mode is ever added that doesn't actually
+	 * guarantee walcache-timeline compatibility: never advertise a pairing
+	 * we can independently tell apart, even though preferredSource =
+	 * "live" above should already make this unreachable today.
+	 */
+	if (found)
+	{
+		int walcacheTimeline = 0;
+
+		if (walcache_current_timeline(config->pgSetup.pgdata, &walcacheTimeline) &&
+			walcacheTimeline != basebackupTimeline)
+		{
+			log_warn("The latest base backup is on timeline %d, but the "
+					 "walcache is capturing timeline %d; omitting the base "
+					 "backup from the routes file until they match",
+					 basebackupTimeline, walcacheTimeline);
+			found = false;
+		}
 	}
 
 	uint64_t systemIdentifier = 0;
@@ -257,6 +365,7 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 	if (found)
 	{
 		fformat(fileStream, "basebackup = %s\n", basebackupLocation);
+		fformat(fileStream, "timeline = %d\n", basebackupTimeline);
 	}
 
 	if (foundSystemIdentifier)
