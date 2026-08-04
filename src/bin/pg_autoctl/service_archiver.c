@@ -410,6 +410,68 @@ service_archiver_report_captured_wal(Keeper *keeper)
 
 
 /*
+ * service_archiver_update_current_lsn scans walcacheDir for the newest
+ * complete (non-".partial") WAL segment and updates keeper->postgres.
+ * currentLSN to the LSN just past its end -- the real, local, self-
+ * consistent "how far have I actually captured" position, reported to the
+ * monitor by keeper_node_active() the same way every other node kind
+ * reports its own currentLSN.
+ *
+ * This is what makes an archiving node a real, rankable candidate for
+ * pgautofailover.get_most_advanced_standby() during a failover election:
+ * that query already has no kind-based exclusion and already considers any
+ * node reporting REPORT_LSN_STATE (an archiving node passes through it
+ * during elections, see ARCHIVING_STATE -> REPORT_LSN_STATE in fsm.c) --
+ * the only thing that ever kept an archiver from being selected was this
+ * value staying "0/0" forever. Falls back to "0/0" itself when nothing has
+ * been captured yet, matching keeper_update_pg_state()'s own default
+ * before it has a real reading.
+ */
+static void
+service_archiver_update_current_lsn(Keeper *keeper)
+{
+	const char *walcacheDir = keeper->config.pgSetup.pgdata;
+
+	DIR *dir = opendir(walcacheDir);
+
+	if (dir == NULL)
+	{
+		strlcpy(keeper->postgres.currentLSN, "0/0",
+				sizeof(keeper->postgres.currentLSN));
+		return;
+	}
+
+	char best[ARCHIVER_WAL_FNAME_LEN + 1] = { 0 };
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		if (!is_wal_segment_filename(entry->d_name))
+		{
+			continue;
+		}
+
+		if (best[0] == '\0' || strcmp(entry->d_name, best) > 0)
+		{
+			strlcpy(best, entry->d_name, sizeof(best));
+		}
+	}
+
+	closedir(dir);
+
+	if (best[0] == '\0')
+	{
+		strlcpy(keeper->postgres.currentLSN, "0/0",
+				sizeof(keeper->postgres.currentLSN));
+		return;
+	}
+
+	wal_segment_end_lsn(best, keeper->postgres.currentLSN,
+					   sizeof(keeper->postgres.currentLSN));
+}
+
+
+/*
  * service_archiver_loop is the archiver's own node_active() reporting loop
  * -- deliberately not keeper_node_active_loop (service_keeper.c): that
  * function's own per-tick keeper_update_pg_state()/keeper_ensure_current_
@@ -439,20 +501,19 @@ service_archiver_loop(Keeper *keeper)
 	/*
 	 * An archiver never calls keeper_update_pg_state() -- there's no real
 	 * Postgres instance to query (see haspgdata's own design comment) --
-	 * so keeper->postgres.currentLSN is otherwise left at its zero-valued
-	 * empty string for the lifetime of this process. keeper_node_active()
-	 * always sends it as one of node_active()'s own parameters, and the
-	 * monitor-side pg_lsn column rejects an empty string outright ("invalid
-	 * input syntax for type pg_lsn"). "0/0" is the same placeholder
-	 * keeper_update_pg_state() itself defaults to before it has a real
-	 * reading; an archiver's own WAL-capture progress is tracked
-	 * separately via archiver_wal, not through this per-node report.
+	 * so keeper->postgres.currentLSN needs its own source of truth here.
+	 * keeper_node_active() always sends it as one of node_active()'s own
+	 * parameters, and the monitor-side pg_lsn column rejects an empty
+	 * string outright ("invalid input syntax for type pg_lsn"), so it must
+	 * hold a valid value even before the first tick's own scan runs.
 	 */
 	strlcpy(keeper->postgres.currentLSN, "0/0", sizeof(keeper->postgres.currentLSN));
 
 	while (!asked_to_stop && !asked_to_stop_fast && !asked_to_quit)
 	{
 		MonitorAssignedState assignedState = { 0 };
+
+		(void) service_archiver_update_current_lsn(keeper);
 
 		if (!keeper_load_state(keeper))
 		{
