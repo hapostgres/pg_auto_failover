@@ -2340,9 +2340,13 @@ grant execute on function
       pgautofailover.report_basebackup_remote_deleted(bigint,bigint)
    to autoctl_node;
 
--- filters status = 'complete' only
+-- filters status = 'complete' only. SECURITY DEFINER matches every other
+-- autoctl_node-callable helper reading a table that role has no direct
+-- SELECT grant on (e.g. archiver_add_formation) -- autoctl_node is only
+-- ever granted EXECUTE on the function, never SELECT on pgautofailover.
+-- basebackup itself.
 CREATE FUNCTION pgautofailover.get_latest_basebackup(formationid text, groupid int)
- RETURNS pgautofailover.basebackup LANGUAGE sql STABLE
+ RETURNS pgautofailover.basebackup LANGUAGE sql STABLE SECURITY DEFINER
 AS $$
     SELECT * FROM pgautofailover.basebackup b
      WHERE b.formationid = get_latest_basebackup.formationid
