@@ -1,0 +1,111 @@
+# Archiving & Disaster Recovery, Milestone 4: WAL-capture correctness and
+# failover continuity for an ARCHIVING node.
+#
+# Covers the mechanism added in service_archiver.c's
+# service_archiver_report_captured_wal(): once pg_receivewal completes a WAL
+# segment (no longer ".partial"), the archiver reports it to the monitor via
+# pgautofailover.report_wal_received(), which is what actually populates
+# pgautofailover.archiver_wal and makes wal_archived() -- the archive_command
+# confirmation check -- return true. Before this milestone nothing in the
+# codebase ever called that SQL function, so archiver_wal stayed permanently
+# empty no matter how much WAL an archiver captured.
+#
+# Segment filenames are deterministic: a freshly initialized primary starts
+# WAL at timeline 1, segment 000000010000000000000001, and each
+# pg_switch_wal() call on an otherwise idle test database advances exactly
+# one segment (confirmed against a real cluster while developing this spec).
+# The autoctl_node role has no direct SELECT on archiver_wal (see
+# report_wal_received()'s own SECURITY DEFINER indirection in
+# pgautofailover.sql) -- wal_archived() is the one function it can call to
+# observe that table's contents, so every check here goes through it rather
+# than a raw SELECT.
+#
+# Predecessor: none -- this is the first archiver-kind pgaftest spec.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+        archiver1 archiver
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+    wait until archiver1 state is archiving  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: force two WAL segment switches on the primary and confirm both
+#           land durably in archiver_wal (archiver_quorum defaults to 1, and
+#           there is exactly one archiver here, so wal_archived() flips to
+#           true as soon as service_archiver_report_captured_wal()'s next
+#           tick reports the segment).
+#
+
+step test_001_capture_wal {
+    sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
+    sql node1 { SELECT pg_switch_wal(); }
+    sql node1 { SELECT pg_switch_wal(); }
+    # PG_AUTOCTL_KEEPER_SLEEP_TIME is 1s; this margin covers a slow CI runner.
+    sleep 15s
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000001'); }
+    expect { t }
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000002'); }
+    expect { t }
+}
+
+#
+# test_002: kill and restart the archiver process while it is already
+#           ARCHIVING (persisted state, no FSM transition on restart). This
+#           exercises service_archiver_loop()'s own liveness check: without
+#           it, pg_receivewal never comes back up after a restart, because
+#           it is otherwise only (re)started from fsm_init_archiver /
+#           fsm_archiver_follow_new_primary -- the transition *into*
+#           ARCHIVING_STATE, which does not run again once current_role and
+#           assigned_role already agree.
+#
+
+step test_002_archiver_restart_liveness {
+    compose stop archiver1
+    wait until archiver1 stopped  timeout 60s
+    compose start archiver1
+    wait until archiver1 state is archiving  timeout 60s
+    sql node1 { SELECT pg_switch_wal(); }
+    sleep 15s
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
+    expect { t }
+}
+
+#
+# test_003: fail node1 (primary) over to node2. Every ARCHIVING row in the
+#           group is expected to pass through REPORT_LSN_STATE during the
+#           election (fsm_archiver_report_lsn stops pg_receivewal against the
+#           now-untrustworthy old primary) and back to ARCHIVING_STATE once
+#           node2 is confirmed primary (fsm_archiver_follow_new_primary
+#           re-points pg_receivewal at it) -- the same election phases every
+#           other node kind goes through, applied to an archiver for the
+#           first time here. Segments captured before the failover must stay
+#           recorded: report_wal_received() never deletes archiver_wal rows.
+#
+
+step test_003_failover_continuity {
+    compose stop node1
+    wait until node1 stopped  timeout 60s
+    wait until node2 state is primary
+        passing through wait_primary
+        timeout 120s
+    wait until archiver1 state is archiving
+        passing through report_lsn
+        timeout 120s
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000001'); }
+    expect { t }
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
+    expect { t }
+}
