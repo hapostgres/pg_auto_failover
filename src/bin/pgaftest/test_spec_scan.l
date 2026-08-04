@@ -161,6 +161,7 @@ static void pgaf_read_raw_block(void);
 
 <CLUSTER_BODY>"coordinator"        { return T_COORDINATOR; }
 <CLUSTER_BODY>"worker"             { return T_WORKER; }
+<CLUSTER_BODY>"archiver"           { return T_ARCHIVER; }
 <CLUSTER_BODY>"async"              { return T_ASYNC; }
 <CLUSTER_BODY>"no-monitor"         { return T_NO_MONITOR; }
 <CLUSTER_BODY>"suspended"         { return T_SUSPENDED; }

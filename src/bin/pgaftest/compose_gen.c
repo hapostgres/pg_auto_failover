@@ -1631,6 +1631,12 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 			break;
 		}
 
+		case NODE_KIND_ARCHIVER:
+		{
+			kindStr = "archiver";
+			break;
+		}
+
 		default:
 		{
 			kindStr = "postgres";

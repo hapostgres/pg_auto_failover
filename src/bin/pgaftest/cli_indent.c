@@ -415,6 +415,10 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 			strlcpy(kindbuf, "worker", sizeof(kindbuf));
 		}
 	}
+	else if (n->kind == NODE_KIND_ARCHIVER)
+	{
+		strlcpy(kindbuf, "archiver", sizeof(kindbuf));
+	}
 	const char *kind = kindbuf;
 
 #define ADD(k, v) do { props[pc].kw = (k); strlcpy(props[pc].val, (v), \
