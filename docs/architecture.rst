@@ -35,10 +35,10 @@ High Availability
 ------------------
 
 pg_auto_failover treats "High Availability" as two related but distinct
-guarantees, rather than one. Most of what follows on this page --
-the Monitor, the keeper, synchronous replication, node recovery -- is
-in service of the first of the two; :ref:`archiving_internals` and the
-pages it links to are in service of the second:
+guarantees, rather than one. Most of what follows on this page -- the
+Monitor, the keeper, synchronous replication, node recovery -- is in service
+of the first of the two; :ref:`archiving_architecture` and the pages it
+links to are in service of the second:
 
 - **Service Availability**: the Postgres *service* itself stays reachable
   and able to accept reads and writes, with as little downtime as
@@ -63,19 +63,34 @@ asynchronous replication`_ below) guaranteeing no committed write is lost
 in the process. This is the guarantee that answers "the primary just
 died -- who serves the next query?".
 
+Service Availability can be setup to obtain Business Continuity in the face
+of production incidents with a basic setup of two Postgres nodes, and
+Postgres High Availability starting with a setup of three Postgres nodes.
+
+Given integrated archiving support, a trade-off or *budget* architecture can
+be easily deployed with two Postgres nodes and an archiver to obtain an HA
+setup that complies with many production needs.
+
 Disaster Recovery
 ^^^^^^^^^^^^^^^^^^
 
-Service Availability alone can't answer "we lost every node that ever had
-this data" or "an operator dropped the wrong table an hour ago" -- a
-healthy failover just moves the same problem to a different node just as
-fast. Disaster Recovery is handled by a physically distinct kind of node,
-the **archiver**, added on top of any of the architectures on this page:
-it continuously captures WAL from the group's current primary and
-periodically produces base backups, independent of whether any standby is
-even healthy or present. See :ref:`archiving_architecture` for where an
-archiver fits alongside the architectures below, :ref:`archiving_internals`
-for exactly how WAL capture and base-backup generation work, and
+Service Availability only makes sense for a database system when there is a
+compliant setup for durability, or data safety. When using PostgreSQL, that
+means a proper archiving implementation that allows *Point in Time Recovery*
+operations.
+
+With PITR it's possible to mitigate data loss operations such as a missing
+WHERE clause in a DELETE or a DROP TABLE done in production instead of the
+development environment, also known as human errors.
+
+Disaster Recovery is handled by a physically distinct kind of node, the
+**archiver**, added on top of any of the architectures on this page: it
+continuously captures WAL from the group's current primary and periodically
+produces base backups.
+
+See :ref:`archiving_and_disaster_recovery` for where an archiver fits
+alongside the architectures below, :ref:`archiving_architecture` for exactly
+how WAL capture and base-backup generation work, and
 :ref:`archiving_fault_tolerance` for how this changes what a total loss of
 the rest of the formation actually means.
 
@@ -199,6 +214,25 @@ decide this state.
 As a result, refrain from naming your nodes with the role you intend for them.
 Their roles can change. If they didn't, your system wouldn't need
 pg_auto_failover!
+
+Archiver
+^^^^^^^^
+
+An archiver is a server (virtual or physical) that runs PostgreSQL archiving
+storage for one or many formations. The archiver hosts any number of
+*archiving nodes* and schedules *base backups* in order to be able to
+implement Postgres `Point in Time Recovery`__ which is the foundations for
+implementing Disaster Recovery.
+
+__ https://www.postgresql.org/docs/current/continuous-archiving.html
+
+Archiving Node
+^^^^^^^^^^^^^^
+
+A process managed in an archiver instance that reports to the monitor as a
+node in a group and that runs ``pg_receivewal``. An archiving node as no
+PGDATA, it can participate in the replication quorum but can not be a
+failover candidate: its ``candidate_priority`` is always zero.
 
 State
 ^^^^^

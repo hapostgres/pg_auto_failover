@@ -262,64 +262,61 @@ walkthrough.
 Archiving Nodes and Disaster Recovery
 --------------------------------------
 
-Everything above concerns keeping the PostgreSQL *service* available: a
-healthy primary always answering reads and writes, promoted from a healthy
-secondary within seconds of a failure. An **archiver**, introduced in
-:ref:`archiving_architecture`, addresses a different failure mode entirely
--- not "the primary went away for a moment," but "the data needs to survive
-even if every node that was ever a primary or a standby is gone."
+On-top of the Service Availability a database system needs Data
+Availability, and it is expected to survive some data loss scenarios that
+are not covered with the previous sections about fault tolerance.
 
-WAL capture independent of any standby
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Typically, an erroneous ``DELETE`` without a ``WHERE`` clause, or a ``DROP
+TABLE`` that happened on the wrong server, by mistake or because of a
+security exploit of some sorts.
 
-A standby's replication connection exists to keep a second copy of the data
-directory caught up for a possible promotion; it stops mattering to fault
-tolerance the moment that standby is unhealthy, dropped, or was never
-configured at all. An archiver's `pg_receivewal`__ connection has no such
-dependency: it streams continuously from whichever node is currently the
-group's primary, following it across promotions, and it does this whether
-the formation has zero standbys or five. A single-node formation with one
-archiver already has WAL protection a standby-less formation alone never
-would.
+.. note::
 
-__ https://www.postgresql.org/docs/current/app-pgreceivewal.html
+   Always make sure to have a separate role for the normal application
+   activities that is separate from the database owner, and use yet another
+   specific role for database schema upgrade, or migrations.
 
-Because archiving nodes hold no `PGDATA`__ of their own, they are outside
-the replication quorum entirely: an unhealthy archiver never triggers
-DRAINING on the primary, never disables synchronous replication, and never
-factors into ``number_sync_standbys``. Losing an archiver is a
-disaster-recovery-posture event the monitor reports, not a service-affecting
-one.
+   This alone avoids most of the security risk surface.
 
-__ https://www.postgresql.org/docs/current/app-initdb.html
+While the previous sections concerns keeping the PostgreSQL *service*
+available thanks to being able to failover from a primary node to its
+secondary within seconds of a failure, an **archiver** addresses a different
+failure mode entirely: either the loss of multiple (all) nodes at the same
+time, or a data loss that happens while the service is running fine.
 
-Base backups, on a policy
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+See also :ref:`archiving_architecture` for more details about the archiving
+support in pg_auto_failover.
 
-On top of continuous WAL capture, an archiver periodically produces full
-base backups from its own local WAL cache, on a schedule and retention
-policy attached to the formation or overridden per group (see
-:ref:`archiving_operations` for the operational details: creating a
-policy, attaching it, and how scheduling and pruning behave). Each
-completed backup, and each one pruned by retention, is reported to the
-monitor the same way WAL segments are, so an operator or a client library
-can always ask the monitor where the most recent recoverable base backup
-lives without needing to reach the archiver's storage directly.
+When an archiver is enabled on a pg_auto_failover architecture in
+production, the following operations are covered:
 
-Rebuilding after every other node is lost
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  - Point in Time Recovery can be driven on transient nodes created from the
+    archives.
 
-This is the scenario the rest of this page doesn't cover: not one node
-failing while others compensate, but the primary and every standby gone at
-once -- the kind of event no amount of failover automation can route
-around, because there is nothing healthy left to fail over *to*. As long as
-one archiver survived, the formation is not actually gone: its WAL cache
-and latest base backup are enough to rebuild a new primary from scratch,
-and from there re-grow standbys the ordinary way. This is the specific
-failure mode the split HA-tool/backup-tool approach described in
-:ref:`ha_dr_backups` tends to leave untested until the day it's needed --
-here it is the same monitor, the same node-registration path, and the same
-archiver that was already running throughout normal operation.
+  - Disaster Recovery can be implemented by copying the data recovered in a
+    transient PITR node up to the current primary, a manual operation, or by
+    reifying the transient PITR node into its own new group in the
+    formation, allowing to redeploy a new cluster from a selected position
+    in the WAL history.
+
+  - Archiving nodes may paritipate in the replication quorum, and as they
+    only implement ``pg_receivewal`` without maintaining a full PGDATA
+    directory, there is no crash recovery happening on the WAL stream -- it
+    is often the case that an archiving node would be the first to report
+    LSN progress.
+
+  - Taking base backup happens on the primary node by default (a live source
+    setting) and can also be setup as a replay source, meaning that a new
+    node is created from the latest base backup and instructed to replay all
+    the WAL that have been archived since this base backup, up to the
+    current moment in time. The replay source can in turn be setup as a
+    volatile or a persistent node.
+
+  - It is possible to maintain standby servers that only connect to the
+    archive, because we have added a way to serve the archives using the
+    Postgres protocol replication. Such a standby would be named a WARM
+    standby, even though it can be using WAL streaming, with a cascading hop
+    in the archives.
 
 How archiving nodes participate in failover
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

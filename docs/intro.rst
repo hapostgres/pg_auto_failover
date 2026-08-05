@@ -2,21 +2,27 @@ Introduction to pg_auto_failover
 ================================
 
 pg_auto_failover is a complete system for operating PostgreSQL in
-production, not just an extension. Its ``pg_autoctl`` process runs as its
-own pid 1, supervising the Postgres ``postmaster`` underneath it the way
-an init system supervises everything else running on a machine; a
-dedicated monitor node coordinates state across every node in the
-cluster. Together they provide full cluster management with a dynamic
-topology: nodes can be added, removed, and reconfigured while the cluster
-keeps serving production traffic, whether driven by an operator's own
-commands or automatically by the monitor's own health checks. Automated
-failover and full high availability are one deliberate configuration
-choice this system supports, not the only thing it does. Two modes of
-operation are available side by side: the traditional command-driven CLI
-(``pg_autoctl create ...``, ``pg_autoctl set ...``), and a specification-
-file-driven mode, where a single ``node.ini`` file describes a node's own
-desired configuration and ``pg_autoctl node run`` continuously reconciles
-reality to match it.
+production. Its ``pg_autoctl`` process may runs `pid 1` or init in a
+container based environment and supervises the Postgres ``postmaster``
+underneath it. A dedicated monitor node coordinates state across every node
+in the cluster: the monitor is a Postgres instance with the
+``pgautofailover`` extension installed to implement our inter-node
+communication protocol.
+
+Together they provide full cluster management with a dynamic topology: nodes
+can be added, removed, and reconfigured while the cluster keeps serving
+production traffic, whether driven by an operator's own commands or
+automatically by the monitor's own health checks.
+
+Automated failover and full high availability can both be implemented and a
+production cluster can evolve from simple failover capabilities to enhanced
+data protection settings.
+
+Two modes of operation are available side by side: the traditional
+command-driven CLI (``pg_autoctl create ...``, ``pg_autoctl set ...``), and
+a specification- file-driven mode, where a single ``node.ini`` file
+describes a node's own desired configuration and :ref:`pg_autoctl_node_run`
+continuously reconciles reality to match it.
 
 .. _ha_dr_backups:
 
@@ -36,30 +42,40 @@ High Availability and Disaster Recovery: One System
    With pg_auto_failover, High Availability and Disaster Recovery collapse
    into one system; Backups remains its own concern
 
-Most PostgreSQL setups treat these as two separate problems, solved by two
-separate products: an *HA tool* — Patroni, repmgr — watches the live
-cluster and promotes a standby when the primary goes away, and a *backup
-tool* — pgBackRest, pgBarman — usually entirely disconnected from the
-first, periodically archives WAL and base backups somewhere safe, reached
-for only once disaster strikes and someone needs to restore to a point in
-time. Running both means learning two tools, trusting two different
-failure domains, and, very often, discovering only during a real incident
-that they were never actually exercised together.
+With RDBMS such as PostgreSQL the concept of High Availability applies to
+the service and also the data. Where most PostgreSQL setups treat these as
+two separate problems, solved by two separate products, pg_auto_failover
+addresses both HA aspects into a single deployment.
 
-pg_auto_failover starts from a different question. The goal was never
-"have an HA tool" — it was always "don't lose the business's data, and
-keep serving it," and high availability and disaster recovery are two
-sides of that same problem, best solved by one system designed around it
-rather than by gluing together two tools each designed in isolation. The
-same monitor that orchestrates failover also tracks every archiver's
+Postgres backup systems need to be able Point in Time Recovery, which
+requires an archiving implemnentation when using Postgres. Also, Disaster
+Recovery is built on-top of PITR. As a consequence, most systems are
+implementing Disaster Recovery with their backup software solution, not
+their High Availability solution.
+
+Running both solutions together means trusting two different failure
+domains, and, very often, discovering only during a real incident that they
+were never actually exercised together.
+
+pg_auto_failover starts from a different question: how to make things so
+simple to setup and test that they just work once shipped in production?
+
+High Availability of the Postgres service and Disaster Recovery of its data
+set are two sides of the same problem, best solved by one system designed
+around it rather than by gluing together two tools each designed in
+isolation.
+
+The same monitor that orchestrates failover also tracks every archiver's
 captured WAL and base backups; the same WAL stream and base backups a
 failover election already depends on to guarantee no data loss are what
-disaster recovery, including point-in-time recovery, is built on. High
-Availability and Disaster Recovery come from a single package, with a
+disaster recovery, including point-in-time recovery, is built on.
+
+High Availability and Disaster Recovery come from a single package, with a
 single control plane, rather than from two independently-operated systems
-an incident is the first time anyone actually tested together. Backups —
-in the narrower sense of long-term retention, cataloguing, and cloud
-storage tiers — remain their own concern, typically still handled by a
+that are only put to the test when a production incident happens.
+
+Backups — in the narrower sense of long-term retention, cataloguing, and
+cloud storage tiers — remain their own concern, typically still handled by a
 dedicated tool like pgBackRest or pgBarman.
 
 Single Standby Architecture
@@ -93,7 +109,7 @@ setting on the *primary* node. Until the *secondary* is back to being
 monitored healthy, failover and switchover operations are not allowed,
 preventing data loss.
 
-.. _archiving_architecture:
+.. _archiving_and_disaster_recovery:
 
 Archiving & Disaster Recovery Architecture
 -------------------------------------------
@@ -103,40 +119,27 @@ Archiving & Disaster Recovery Architecture
 
    pg_auto_failover architecture with a primary, a standby, and an archiver
 
-An **archiver** is a separate physical entity, added on top of any of the
-architectures on this page — it applies just as well to the single-standby
-setup above as it does to a multi-standby fleet, since it addresses a
-different concern: disaster recovery, independent of how many nodes
-currently participate in the failover quorum.
+An **archiver** is a separate node, added on top of any of the architectures
+on this page — it applies just as well to the single-standby setup above as
+it does to a multi-standby fleet, since it addresses a different concern:
+disaster recovery, independent of how many nodes currently participate in
+the failover quorum.
 
-Unlike a standby, an archiver holds no copy of the primary's data directory
-and never takes writes or reads for the application. It runs its own
-`pg_receivewal`__ continuously against the group's current primary,
-capturing every WAL segment into a local cache the moment it's generated,
-and periodically produces full base backups from that cache. Both are
-reported back to the pg_auto_failover Monitor, the same way a standby
-reports its own replication state — so the Monitor can tell an operator,
-or a client library, when a given segment has landed durably on enough
-archivers to be considered safe (``archiver_quorum``), and where the most
-recent base backup lives.
+An archiver then register archiving nodes to groups on formations managed by
+the monitor it reports to. An archiving node is running ``pg_receivewal`` to
+maintain the Postgres PITR archive storage, and schedules regular base
+backup activity using ``pg_basebackup``. The *archiving node* reports to the
+pg_auto_failover Monitor and participates in a group Finite State Machine:
+it reports its WAL position and can be used in the replication quorum, and
+other nodes in the same group can fetch WAL from an *archiving node* (see
+REPORT_LSN and FORWARD_LSN states in the :ref:`failover_state_machine`:.
 
-__ https://www.postgresql.org/docs/current/app-pgreceivewal.html
-
-The pg_auto_failover Monitor tracks an archiver's participation in a group
-as its own node, in the ``archiving`` **archiving node** state — reported
-and monitored the same way ``primary``/``secondary`` are, but never a
-candidate for promotion or failover: an archiving node holds no
-`PGDATA`__ of its own, so there is nothing to promote it *to*.
-
-__ https://www.postgresql.org/docs/current/app-initdb.html
-
-Because the archiver keeps a complete, continuously updated copy of the
-group's WAL stream and periodic base backups independent of any single
-standby, it serves two purposes beyond ordinary high availability: a new
-node can be provisioned straight from an archiver's cache instead of
-placing extra load on a live primary or secondary, and a group that has
-lost every other node still has everything needed to rebuild from scratch,
-as long as the archiver itself survived.
+For that, pg_auto_failover implements its own server-side implementation of
+the PostgreSQL replication protocol, a ``pg_walsender`` process that knows
+how to serve the data from the archive local on-disk location (or remote
+Cloud Object Storage) to the PostgreSQL client replication tools already
+listed: ``pg_basebackup`` and `pg_receivewal``, as described in more details
+in :ref:`archiving_architecture`.
 
 Multiple Standby Architecture
 -----------------------------
