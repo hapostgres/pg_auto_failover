@@ -1,0 +1,89 @@
+# Archiving & Disaster Recovery: the "budget architecture" (see
+# docs/architecture.rst's own "Service Availability" section) -- an
+# ordinary two-node primary/secondary group plus an archiver added on top
+# for Disaster Recovery, rather than a third live standby. This spec's own
+# focus is the --region label pg_autoctl create postgres/create archiver
+# both accept: node1 in "dc1", node2 in "dc2", archiver1 (which the
+# monitor logically sits alongside, for this topology) in "dc3" -- a
+# realistic geo-distributed budget deployment, and the first pgaftest spec
+# to actually exercise region end to end for either node kind.
+#
+# region is purely informational (pg_autoctl watch's own display, get_
+# archivers()'s own output column for an archiver) -- it never affects
+# placement, quorum, or failover decisions on its own. This spec proves
+# the label round-trips correctly (set at create time, readable back from
+# the monitor afterwards) and that the archiver itself still does real
+# work regardless of which region it's labelled with.
+#
+# archiver1 uses pgaftest's top-level "archiver { }" syntax (see
+# TestArchiverNode's own comment in test_spec.h), folded into "default"'s
+# own node list and launched immediately (the normal default for this
+# syntax) via the ordinary ini-driven "pg_autoctl node run" path -- no
+# deferred launch needed: group 0 of "default" already exists as soon as
+# node1 (which archiver1 depends on being healthy) has registered,
+# regardless of whether promotion has completed yet.
+#
+# Predecessor: basic_operation.pgaf (the same two-node group, without the
+# archiver or region labels); archiver_wal_capture.pgaf (the WAL-capture
+# proof this borrows its pattern from).
+
+cluster {
+    monitor
+    formation {
+        node1 region dc1
+        node2 region dc2
+    }
+    archiver archiver1 {
+        formation default
+        region dc3
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+    wait until archiver1 state is archiving  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: region labels round-trip correctly for both ordinary nodes and
+#           the archiver -- set via --region at create time, readable back
+#           from the monitor afterwards. pgautofailover.node is covered by
+#           the blanket "GRANT SELECT ON ALL TABLES" near the top of
+#           pgautofailover.sql, so a direct SELECT works for node1/node2;
+#           pgautofailover.archiver itself is not (granted much later in
+#           the same file), so archiver1's region goes through get_
+#           archivers('default'), the same function pg_autoctl watch uses.
+#
+
+step test_001_region_labels_round_trip {
+    sql monitor { SELECT region FROM pgautofailover.node WHERE nodename = 'node1'; }
+    expect { dc1 }
+    sql monitor { SELECT region FROM pgautofailover.node WHERE nodename = 'node2'; }
+    expect { dc2 }
+    sql monitor { SELECT region FROM pgautofailover.get_archivers('default') WHERE archiver_name = 'archiver1'; }
+    expect { dc3 }
+}
+
+#
+# test_002: the archiver itself still does real work regardless of its own
+#           region label -- same idiom as archiver_wal_capture.pgaf's own
+#           test_001 (segment 3 is this image's own observed slot-creation
+#           floor; see that spec's header comment for the full reasoning).
+#
+
+step test_002_archiver_captures_wal {
+    sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
+    sql node1 { SELECT pg_switch_wal(); }
+    sql node1 { INSERT INTO t1 VALUES (3); }
+    sql node1 { SELECT pg_switch_wal(); }
+    sleep 15s
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
+    expect { t }
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000004'); }
+    expect { t }
+}

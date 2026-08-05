@@ -1,0 +1,197 @@
+# Archiving & Disaster Recovery, Milestone 5: dynamic multi-formation
+# membership for a single archiver identity.
+#
+# Covers service_archiver_reconciler.c: one archiver process (archiver1)
+# is brought up ARCHIVING only "default" (a plain two-node formation), then
+# -- while it is already running and capturing that formation's WAL -- is
+# attached to a *second*, independent formation ("formation2") purely
+# through a monitor-side RPC (pgautofailover.archiver_add_formation()),
+# with no restart of the archiver process and no CLI/config change on its
+# side at all. archiver_reconciler_tick() only re-lists this archiver's
+# memberships (pgautofailover.list_archiver_memberships()) once every
+# ARCHIVER_RECONCILER_INTERVAL_SECONDS (30s, service_archiver_reconciler.c)
+# -- so the second membership's WAL capture can only start once that
+# periodic tick actually notices it, not immediately. That discovery path
+# is the thing this spec exists to prove; everything else here (bringing
+# up two independent 2-node formations, forcing WAL switches, checking
+# wal_archived()) is the same idiom as archiver_wal_capture.pgaf.
+#
+# Two independent formations coming up concurrently is why this spec uses
+# the explicit per-node "wait until <node> state is <s>" forms throughout
+# rather than the aggregate "wait until primary, secondary" form: the
+# aggregate form is not formation-scoped (test_runner.c's
+# wait_for_states()/monitor pg_autoctl inspect monitor formation-states
+# path just checks "does *any* node report primary and *any* node report
+# secondary" cluster-wide), which is ambiguous once two formations are
+# each independently electing their own primary/secondary at once.
+#
+# archiver1 ends up with two rows in pgautofailover.node once attached to
+# both formations (one per (formation, group) membership, both nodename =
+# 'archiver1', both groupid = 0 since each formation here has a single,
+# plain-Postgres group) -- so the generic "wait until archiver1 state is
+# archiving" form (SELECT reportedstate, goalstate FROM pgautofailover.node
+# WHERE nodename = $1 LIMIT 1, no ORDER BY -- see test_runner.c's
+# monitor_get_node_state()) becomes ambiguous the moment the second
+# membership exists: it may observe either row. Every check on archiver1's
+# per-membership state after test_003 attaches the second membership goes
+# through an explicit `sql monitor` query naming both nodename *and*
+# formationid instead.
+#
+# The autoctl_node role has no direct SELECT on pgautofailover.archiver
+# (granted much later in pgautofailover.sql than the blanket "GRANT SELECT
+# ON ALL TABLES IN SCHEMA pgautofailover" near its own top) -- archiver1's
+# archiverid is resolved via pgautofailover.get_archivers('default'), which
+# *is* granted and returns archiver_id as its first output column.
+#
+# archiver1 is declared with pgaftest's top-level "archiver { }" syntax
+# (sibling to monitor/formation, not nested inside either formation block)
+# -- an archiver attaches to formations by name, it isn't a member of any
+# one of them (pgautofailover.archiver has no formationid column at all;
+# see TestArchiverNode's own comment in test_spec.h). Internally it's
+# folded into "default"'s own node list (the one formation it declares),
+# so it launches immediately -- the normal default for this syntax, same
+# as any ordinary node -- via the ordinary ini-driven "pg_autoctl node
+# run" path: no exec, no deferred launch needed here, since group 0 of
+# "default" already exists as soon as node1 (which archiver1 depends on
+# being healthy, same as node2 does) has registered, regardless of
+# whether promotion has completed yet.
+#
+# Predecessor: none -- first pgaftest spec covering dynamic multi-formation
+# archiver membership; see archiver_wal_capture.pgaf for the base single-
+# formation WAL-capture mechanism this builds on.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+    formation formation2 {
+        node3
+        node4
+    }
+    archiver archiver1 {
+        formation default
+    }
+}
+
+setup {
+    wait until node1 state is primary    timeout 90s
+    wait until node2 state is secondary  timeout 90s
+    promote node1
+    wait until archiver1 state is archiving  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: baseline -- confirm formation "default"'s WAL is captured
+#           before formation2 even exists, exactly as in
+#           archiver_wal_capture.pgaf. Segment numbering here follows that
+#           spec's own observed floor (segment 3 is the archiver's slot
+#           restart_lsn floor on this image -- see archiver_wal_capture.
+#           pgaf's header comment for the full reasoning); each switch
+#           below has a real INSERT immediately before it.
+#
+
+step test_001_capture_formation1_wal {
+    sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
+    sql node1 { SELECT pg_switch_wal(); }
+    sql node1 { INSERT INTO t1 VALUES (3); }
+    sql node1 { SELECT pg_switch_wal(); }
+    sleep 15s
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
+    expect { t }
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000004'); }
+    expect { t }
+}
+
+#
+# test_002: bring up formation2 independently -- registration against a
+#           non-default formation can lag behind the default formation's
+#           own (compose_gen.c: data nodes retry registration until their
+#           formation exists), so this is generous on timeout.
+#
+
+step test_002_bring_up_formation2 {
+    wait until node3 state is primary    timeout 120s
+    wait until node4 state is secondary  timeout 120s
+    promote node3
+}
+
+#
+# test_003: the actual behavior under test. Attach the already-running
+#           archiver1 to formation2 purely via the monitor RPC (not the
+#           CLI's --formation flag, which only matters at `create archiver`
+#           time) and wait for the reconciler's own periodic tick (30s,
+#           ARCHIVER_RECONCILER_INTERVAL_SECONDS) to notice the new
+#           membership and start a second WAL-capture child for it.
+#           archiver_add_formation() is idempotent and, since formation2
+#           has exactly one group (group 0, plain nodes, no Citus), attaches
+#           exactly one new ARCHIVING node row.
+#
+
+step test_003_dynamic_attach_to_formation2 {
+    sql monitor {
+        SELECT pgautofailover.archiver_add_formation(
+            (SELECT archiver_id FROM pgautofailover.get_archivers('default') LIMIT 1),
+            'formation2');
+    }
+    # one reconciler tick (30s) plus margin for it to notice, fork the new
+    # capture child, and for that child to register/report far enough to
+    # reach ARCHIVING_STATE.
+    sleep 50s
+    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'formation2'; }
+    expect { archiving }
+}
+
+#
+# test_004: confirm formation2's WAL is actually being captured by the
+#           newly-started capture child, not just that the FSM state looks
+#           right. formation2 is a fresh formation/group -- its own
+#           archiver slot restart_lsn floor is expected to be an early,
+#           low-numbered segment (no unrelated bootstrap traffic beyond its
+#           own two nodes joining), so this switches enough times to be
+#           independent of the exact floor rather than hardcoding a segment
+#           number the way test_001 does for the already-characterized
+#           "default" formation.
+#
+
+step test_004_capture_formation2_wal {
+    sql node3 { CREATE TABLE t2(a int); INSERT INTO t2 VALUES (1), (2); }
+    sql node3 { SELECT pg_switch_wal(); }
+    sql node3 { INSERT INTO t2 VALUES (3); }
+    sql node3 { SELECT pg_switch_wal(); }
+    sleep 15s
+    sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '000000010000000000000001'); }
+    expect { t }
+    sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '000000010000000000000002'); }
+    expect { t }
+}
+
+#
+# test_005: formation "default"'s own capture must still be uninterrupted
+#           -- proves the reconciler's dynamic add of formation2 did not
+#           restart the archiver process or disrupt the pre-existing
+#           membership's already-running pg_receivewal. One more switch on
+#           top of test_001's own two.
+#
+
+step test_005_formation1_still_healthy {
+    sql node1 { INSERT INTO t1 VALUES (4); }
+    sql node1 { SELECT pg_switch_wal(); }
+    sleep 15s
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000005'); }
+    expect { t }
+    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'default'; }
+    expect { archiving }
+}
+
+sequence
+    test_001_capture_formation1_wal
+    test_002_bring_up_formation2
+    test_003_dynamic_attach_to_formation2
+    test_004_capture_formation2_wal
+    test_005_formation1_still_healthy
