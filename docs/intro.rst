@@ -20,36 +20,47 @@ reality to match it.
 
 .. _ha_dr_backups:
 
-High Availability, Disaster Recovery, and Backups: One System
----------------------------------------------------------------
+High Availability and Disaster Recovery: One System
+------------------------------------------------------
 
-.. figure:: ./tikz/arch-ha-dr-unified.svg
-   :alt: Two disconnected tools for HA and backups, versus one integrated pg_auto_failover system for both
+.. figure:: ./tikz/arch-ha-dr-typical.svg
+   :alt: Typical setup, High Availability from Patroni or repmgr, Disaster Recovery and Backups from pgBackRest or pgBarman, two entirely separate boxes
 
-   Most setups solve HA and DR with two separate tools; pg_auto_failover solves both with one
+   A typical setup reaches for a product per box: Patroni or repmgr for
+   High Availability, pgBackRest or pgBarman for Disaster Recovery and
+   Backups
+
+.. figure:: ./tikz/arch-ha-dr-pgautofailover.svg
+   :alt: With pg_auto_failover, High Availability and Disaster Recovery collapse into a single box, with Backups (pgBackRest or pgBarman) as the one remaining separate concern
+
+   With pg_auto_failover, High Availability and Disaster Recovery collapse
+   into one system; Backups remains its own concern
 
 Most PostgreSQL setups treat these as two separate problems, solved by two
-separate tools: an *HA tool* watches the live cluster and promotes a
-standby when the primary goes away, and a *backup tool* — usually
-entirely disconnected from the first — periodically archives WAL and base
-backups somewhere safe, reached for only once disaster strikes and
-someone needs to restore to a point in time. Running both means learning
-two tools, trusting two different failure domains, and, very often,
-discovering only during a real incident that they were never actually
-exercised together.
+separate products: an *HA tool* — Patroni, repmgr — watches the live
+cluster and promotes a standby when the primary goes away, and a *backup
+tool* — pgBackRest, pgBarman — usually entirely disconnected from the
+first, periodically archives WAL and base backups somewhere safe, reached
+for only once disaster strikes and someone needs to restore to a point in
+time. Running both means learning two tools, trusting two different
+failure domains, and, very often, discovering only during a real incident
+that they were never actually exercised together.
 
 pg_auto_failover starts from a different question. The goal was never
-"have an HA tool" or "have a backup tool" — it was always "don't lose the
-business's data, and keep serving it." That's one problem, and it's best
-solved by one system designed around it, not by gluing together two tools
-that were each designed in isolation. The same monitor that orchestrates
-failover also tracks every archiver's captured WAL and base backups; the
-same WAL stream and base backups a failover election already depends on
-to guarantee no data loss are what disaster recovery, including
-point-in-time recovery, is built on. High Availability and Disaster
-Recovery come from a single package, with a single control plane, rather
-than from two independently-operated systems an incident is the first
-time anyone actually tested together.
+"have an HA tool" — it was always "don't lose the business's data, and
+keep serving it," and high availability and disaster recovery are two
+sides of that same problem, best solved by one system designed around it
+rather than by gluing together two tools each designed in isolation. The
+same monitor that orchestrates failover also tracks every archiver's
+captured WAL and base backups; the same WAL stream and base backups a
+failover election already depends on to guarantee no data loss are what
+disaster recovery, including point-in-time recovery, is built on. High
+Availability and Disaster Recovery come from a single package, with a
+single control plane, rather than from two independently-operated systems
+an incident is the first time anyone actually tested together. Backups —
+in the narrower sense of long-term retention, cataloguing, and cloud
+storage tiers — remain their own concern, typically still handled by a
+dedicated tool like pgBackRest or pgBarman.
 
 Single Standby Architecture
 ---------------------------
