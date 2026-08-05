@@ -391,6 +391,12 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			break;
 		}
 
+		case NODE_KIND_ARCHIVER:
+		{
+			kindStr = "archiver";
+			break;
+		}
+
 		default:
 		{
 			kindStr = "postgres";
@@ -449,14 +455,21 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 	fformat(out,
 			"[settings]\n"
 			"candidate_priority = %d\n"
-			"replication_quorum = %s\n"
+			"replication_quorum = %s\n",
+			spec->candidate_priority,
+			spec->replication_quorum ? "true" : "false");
+
+	if (!IS_EMPTY_STRING_BUFFER(spec->region))
+	{
+		fformat(out, "region = %s\n", spec->region);
+	}
+
+	fformat(out,
 			"\n"
 			"[options]\n"
 			"ssl        = %s\n"
 			"auth       = %s\n"
 			"pg_hba_lan = %s\n",
-			spec->candidate_priority,
-			spec->replication_quorum ? "true" : "false",
 			spec->ssl,
 			spec->auth,
 			spec->pg_hba_lan ? "true" : "false");

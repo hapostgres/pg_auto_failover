@@ -326,6 +326,19 @@ build_membership_keeper(Keeper *templateKeeper, ArchiverMembership *membership,
 		return false;
 	}
 
+	/*
+	 * The shallow copy above inherited the template keeper's own
+	 * already-computed pathnames (config/state/nodes/pid, derived from
+	 * the archiver-level pgdata). keeper_config_set_pathnames_from_pgdata()'s
+	 * setters each skip an already-nonempty field, so without this reset
+	 * every membership beyond the first would silently keep pointing at
+	 * the template's (or an earlier membership's) files instead of its
+	 * own -- clear them so they're recomputed from this membership's own
+	 * pgdata below.
+	 */
+	memset(&(membershipKeeper->config.pathnames), 0,
+		   sizeof(membershipKeeper->config.pathnames));
+
 	if (!keeper_config_set_pathnames_from_pgdata(
 			&(membershipKeeper->config.pathnames),
 			membershipKeeper->config.pgSetup.pgdata))
