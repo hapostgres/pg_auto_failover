@@ -76,6 +76,7 @@ __ https://github.com/hapostgres/pg_auto_failover
    :caption: Operations
 
    operations
+   archiving
    testing
    reporting-bugs
    faq

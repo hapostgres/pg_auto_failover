@@ -326,6 +326,40 @@ Missing WAL bytes are fetched from one of the most advanced standby nodes by
 using Postgres cascading replication features: it is possible to use any
 standby node in the ``primary_conninfo``.
 
+Archiving
+^^^^^^^^^
+
+The archiving state is assigned to an **archiving node** — a physically
+distinct kind of cluster member added with ``pg_autoctl create archiver``,
+never a candidate for promotion or failover, since it holds no ``PGDATA``
+of its own to promote (see :ref:`archiving_architecture`). An archiving
+node's own state machine only ever visits three states, mirroring just
+enough of the ordinary standby lifecycle to participate safely in an
+election without ever competing to win one:
+
+- ``wait_standby`` → ``archiving``, once the group's primary has
+  authorized the archiver's connection — the same bootstrap step an
+  ordinary standby goes through, up to this point.
+- ``archiving`` → ``report_lsn``, when the group's primary becomes
+  unreachable and a failover starts: the archiver stops
+  ``pg_receivewal`` against the now-untrustworthy primary, the same way
+  an ordinary standby's own `Report_LSN`_ transition detaches it from a
+  dying upstream.
+- ``report_lsn`` → ``archiving``, once a new primary is confirmed: the
+  archiver re-points ``pg_receivewal`` at it and resumes capturing WAL.
+
+An archiving node reaching ``report_lsn`` is never itself considered as a
+promotion candidate — its own ``haspgdata`` flag (there is no real
+Postgres instance to promote) excludes it from candidacy, and since it
+never competes for the primary role, it also never counts toward
+``number_sync_standbys`` or the quorum a failover election needs to
+proceed. What it does contribute during an election is exactly what its
+name promises: its own already-captured WAL becomes a real,
+`Fast_forward`_-eligible source for whichever candidate did win, if that
+candidate turns out to be behind the most advanced standby — including
+when every ordinary standby has been lost and the archiver is the only
+node left with the data.
+
 Dropped
 ^^^^^^^
 
@@ -341,12 +375,12 @@ command, and then the node entry is removed from the monitor.
 pg_auto_failover keeper's State Machine
 ---------------------------------------
 
-The full keeper FSM is 20 states and 77 transitions -- legible as a reference
+The full keeper FSM is 21 states and 80 transitions -- legible as a reference
 table, but too dense to read at a glance as a single diagram. ``pg_autoctl
 inspect fsm mermaid`` renders it instead as five smaller diagrams, one per
 phase of a node's life, generated directly from ``KeeperFSM[]``
 (``src/bin/pg_autoctl/fsm.c``) so they can never drift out of sync with the
-actual state machine the way a hand-maintained image can. The 68 edges shown
+actual state machine the way a hand-maintained image can. The edges shown
 below exclude ``join_primary``, a deprecated state (see `Join_primary`_
 above) no longer assigned to any node -- ``KeeperFSM[]`` still carries its 9
 transitions for backward compatibility with on-disk state from old
@@ -395,6 +429,7 @@ restarted.
        init --> wait_standby : Start following a primary
        dropped --> wait_standby : Start following a primary
        init --> report_lsn : Creating a new node from a standby node that is not a candidate.
+       wait_standby --> archiving : An archiving node's primary is now ready to accept it
 
        note right of single : also appears in Node removal / drop
        note right of dropped : also appears in Node removal / drop
@@ -402,11 +437,13 @@ restarted.
        note right of wait_primary : also appears in Steady-state / config changes, Failover / promotion, Node removal / drop
        note right of wait_standby : also appears in Steady-state / config changes
        note right of catchingup : also appears in Steady-state / config changes, Failover / promotion, Maintenance, Node removal / drop
+       note right of archiving : also appears in Failover / promotion
 
        classDef metaState fill:#e0e0e0,stroke:#888888,color:#333333
        classDef primaryState fill:#cfe2ff,stroke:#3b6fb6,color:#1a1a1a
        classDef secondaryState fill:#d4edda,stroke:#4c9a5b,color:#1a1a1a
        classDef electionState fill:#fff3cd,stroke:#c99a1e,color:#1a1a1a
+       classDef archiverState fill:#d1ecf1,stroke:#17a2b8,color:#1a1a1a
        class init metaState
        class single metaState
        class dropped metaState
@@ -414,6 +451,7 @@ restarted.
        class wait_primary primaryState
        class wait_standby secondaryState
        class catchingup secondaryState
+       class archiving archiverState
 
 Steady-state / config changes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -492,6 +530,8 @@ be identical in shape to this one.
        join_secondary --> secondary : Failover is done, we have a new primary to follow
        draining --> report_lsn : Reporting the last write-ahead log location after draining
        demoted --> report_lsn : Reporting the last write-ahead log location after being demoted
+       archiving --> report_lsn : The group's primary is unreachable, stop pg_receivewal against it
+       report_lsn --> archiving : A new primary is confirmed, re-point pg_receivewal at it
 
        note right of primary : also appears in Steady-state / config changes, Maintenance, Node removal / drop
        note right of draining : also appears in Node removal / drop
@@ -504,17 +544,20 @@ be identical in shape to this one.
        note right of prepare_promotion : also appears in Node removal / drop
        note right of stop_replication : also appears in Node removal / drop
        note right of report_lsn : also appears in Node init / join, Maintenance, Node removal / drop
+       note right of archiving : also appears in Node init / join
 
        classDef primaryState fill:#cfe2ff,stroke:#3b6fb6,color:#1a1a1a
        classDef secondaryState fill:#d4edda,stroke:#4c9a5b,color:#1a1a1a
        classDef demotingState fill:#f8d7da,stroke:#c0392b,color:#1a1a1a
        classDef electionState fill:#fff3cd,stroke:#c99a1e,color:#1a1a1a
+       classDef archiverState fill:#d1ecf1,stroke:#17a2b8,color:#1a1a1a
        class primary primaryState
        class draining demotingState
        class demoted demotingState
        class demote_timeout demotingState
        class apply_settings primaryState
        class wait_primary primaryState
+       class archiving archiverState
        class catchingup secondaryState
        class secondary secondaryState
        class prepare_promotion electionState

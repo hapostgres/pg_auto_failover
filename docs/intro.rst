@@ -1,9 +1,55 @@
 Introduction to pg_auto_failover
 ================================
 
-pg_auto_failover is an extension for PostgreSQL that monitors and manages
-failover for postgres clusters. It is optimised for simplicity and
-correctness.
+pg_auto_failover is a complete system for operating PostgreSQL in
+production, not just an extension. Its ``pg_autoctl`` process runs as its
+own pid 1, supervising the Postgres ``postmaster`` underneath it the way
+an init system supervises everything else running on a machine; a
+dedicated monitor node coordinates state across every node in the
+cluster. Together they provide full cluster management with a dynamic
+topology: nodes can be added, removed, and reconfigured while the cluster
+keeps serving production traffic, whether driven by an operator's own
+commands or automatically by the monitor's own health checks. Automated
+failover and full high availability are one deliberate configuration
+choice this system supports, not the only thing it does. Two modes of
+operation are available side by side: the traditional command-driven CLI
+(``pg_autoctl create ...``, ``pg_autoctl set ...``), and a specification-
+file-driven mode, where a single ``node.ini`` file describes a node's own
+desired configuration and ``pg_autoctl node run`` continuously reconciles
+reality to match it.
+
+.. _ha_dr_backups:
+
+High Availability, Disaster Recovery, and Backups: One System
+---------------------------------------------------------------
+
+.. figure:: ./tikz/arch-ha-dr-unified.svg
+   :alt: Two disconnected tools for HA and backups, versus one integrated pg_auto_failover system for both
+
+   Most setups solve HA and DR with two separate tools; pg_auto_failover solves both with one
+
+Most PostgreSQL setups treat these as two separate problems, solved by two
+separate tools: an *HA tool* watches the live cluster and promotes a
+standby when the primary goes away, and a *backup tool* — usually
+entirely disconnected from the first — periodically archives WAL and base
+backups somewhere safe, reached for only once disaster strikes and
+someone needs to restore to a point in time. Running both means learning
+two tools, trusting two different failure domains, and, very often,
+discovering only during a real incident that they were never actually
+exercised together.
+
+pg_auto_failover starts from a different question. The goal was never
+"have an HA tool" or "have a backup tool" — it was always "don't lose the
+business's data, and keep serving it." That's one problem, and it's best
+solved by one system designed around it, not by gluing together two tools
+that were each designed in isolation. The same monitor that orchestrates
+failover also tracks every archiver's captured WAL and base backups; the
+same WAL stream and base backups a failover election already depends on
+to guarantee no data loss are what disaster recovery, including
+point-in-time recovery, is built on. High Availability and Disaster
+Recovery come from a single package, with a single control plane, rather
+than from two independently-operated systems an incident is the first
+time anyone actually tested together.
 
 Single Standby Architecture
 ---------------------------

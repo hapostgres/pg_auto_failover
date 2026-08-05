@@ -255,6 +255,87 @@ walkthrough.
    A standby forks out-of-band; once the mismatch is visible to the
    monitor, it is pushed to catchingup and rewound within about a second
 
+.. _archiving_fault_tolerance:
+
+Archiving Nodes and Disaster Recovery
+--------------------------------------
+
+Everything above concerns keeping the PostgreSQL *service* available: a
+healthy primary always answering reads and writes, promoted from a healthy
+secondary within seconds of a failure. An **archiver**, introduced in
+:ref:`archiving_architecture`, addresses a different failure mode entirely
+-- not "the primary went away for a moment," but "the data needs to survive
+even if every node that was ever a primary or a standby is gone."
+
+WAL capture independent of any standby
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A standby's replication connection exists to keep a second copy of the data
+directory caught up for a possible promotion; it stops mattering to fault
+tolerance the moment that standby is unhealthy, dropped, or was never
+configured at all. An archiver's `pg_receivewal`__ connection has no such
+dependency: it streams continuously from whichever node is currently the
+group's primary, following it across promotions, and it does this whether
+the formation has zero standbys or five. A single-node formation with one
+archiver already has WAL protection a standby-less formation alone never
+would.
+
+__ https://www.postgresql.org/docs/current/app-pgreceivewal.html
+
+Because archiving nodes hold no `PGDATA`__ of their own, they are outside
+the replication quorum entirely: an unhealthy archiver never triggers
+DRAINING on the primary, never disables synchronous replication, and never
+factors into ``number_sync_standbys``. Losing an archiver is a
+disaster-recovery-posture event the monitor reports, not a service-affecting
+one.
+
+__ https://www.postgresql.org/docs/current/app-initdb.html
+
+Base backups, on a policy
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+On top of continuous WAL capture, an archiver periodically produces full
+base backups from its own local WAL cache, on a schedule and retention
+policy attached to the formation or overridden per group (see
+:ref:`archiving_operations` for the operational details: creating a
+policy, attaching it, and how scheduling and pruning behave). Each
+completed backup, and each one pruned by retention, is reported to the
+monitor the same way WAL segments are, so an operator or a client library
+can always ask the monitor where the most recent recoverable base backup
+lives without needing to reach the archiver's storage directly.
+
+Rebuilding after every other node is lost
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This is the scenario the rest of this page doesn't cover: not one node
+failing while others compensate, but the primary and every standby gone at
+once -- the kind of event no amount of failover automation can route
+around, because there is nothing healthy left to fail over *to*. As long as
+one archiver survived, the formation is not actually gone: its WAL cache
+and latest base backup are enough to rebuild a new primary from scratch,
+and from there re-grow standbys the ordinary way. This is the specific
+failure mode the split HA-tool/backup-tool approach described in
+:ref:`ha_dr_backups` tends to leave untested until the day it's needed --
+here it is the same monitor, the same node-registration path, and the same
+archiver that was already running throughout normal operation.
+
+How archiving nodes participate in failover
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Archiving nodes are health-checked and report state through the node-active
+protocol exactly like a primary or secondary, and the monitor tracks their
+``archiving`` state the same way it tracks ``primary``/``secondary`` --
+but they are never assigned a ``candidate-priority``-driven role and never
+considered for promotion, since there is no data directory to promote.
+When the group's primary changes -- whether through an ordinary failover or
+an operator-driven switchover -- an archiver notices its `pg_receivewal`
+connection has gone stale, stops it, and re-points at the new primary
+automatically; see the ``Archiving`` state's transitions in
+:ref:`failover_state_machine` for the exact FSM edges involved. From the
+perspective of the rest of this page's failover sequences, an archiver is
+simply along for the ride: it never blocks a promotion, and it never needs
+one of its own.
+
 Failure handling and network partition detection
 ------------------------------------------------
 
