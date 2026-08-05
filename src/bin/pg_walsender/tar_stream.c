@@ -17,6 +17,7 @@
 #include "pgtar.h"
 
 #include "tar_stream.h"
+#include "file_utils.h"
 #include "log.h"
 
 /* matches basebackup.c's own TAR_NUM_TERMINATION_BLOCKS */
@@ -75,7 +76,7 @@ emit_header(TarWalkState *state, const char *memberName,
 static bool
 emit_file_contents(TarWalkState *state, const char *path, off_t size)
 {
-	FILE *file = fopen(path, "rb");
+	FILE *file = fopen(path, "rb"); /* IGNORE-BANNED */
 
 	if (file == NULL)
 	{
@@ -137,7 +138,7 @@ walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 	}
 	else
 	{
-		snprintf(fullDir, sizeof(fullDir), "%s/%s", rootDir, relDir);
+		sformat(fullDir, sizeof(fullDir), "%s/%s", rootDir, relDir);
 	}
 
 	DIR *dir = opendir(fullDir);
@@ -160,7 +161,7 @@ walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 		char fullPath[MAXPGPATH];
 		char relPath[MAXPGPATH];
 
-		snprintf(fullPath, sizeof(fullPath), "%s/%s", fullDir, entry->d_name);
+		sformat(fullPath, sizeof(fullPath), "%s/%s", fullDir, entry->d_name);
 
 		if (relDir[0] == '\0')
 		{
@@ -168,7 +169,7 @@ walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 		}
 		else
 		{
-			snprintf(relPath, sizeof(relPath), "%s/%s", relDir, entry->d_name);
+			sformat(relPath, sizeof(relPath), "%s/%s", relDir, entry->d_name);
 		}
 
 		struct stat st;

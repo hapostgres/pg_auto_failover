@@ -37,6 +37,7 @@
 #include "fetch_client.h"
 #include "file_utils.h"
 #include "log.h"
+#include "string_utils.h"
 
 /*
  * Globals required by shared common/ sources (file_utils.c's
@@ -56,7 +57,7 @@ Semaphore log_semaphore = { 0 };
 static void
 usage(const char *argv0)
 {
-	fprintf(stderr,
+	fprintf(stderr, /* IGNORE-BANNED */
 			"Usage: %s --port <port> [--routes <path>]\n"
 			"       %s fetch-file --host <h> --port <p> --route <fmtn>/<grp> "
 			"--filename <name> --output <path>\n\n"
@@ -105,7 +106,11 @@ main_fetch_file(int argc, char **argv)
 
 			case 'p':
 			{
-				port = atoi(optarg);
+				if (!stringToInt(optarg, &port))
+				{
+					log_fatal("Invalid --port value \"%s\"", optarg);
+					return 1;
+				}
 				break;
 			}
 
@@ -138,8 +143,9 @@ main_fetch_file(int argc, char **argv)
 	if (host[0] == '\0' || route[0] == '\0' || filename[0] == '\0' ||
 		output[0] == '\0')
 	{
-		fprintf(stderr, "fetch-file: --host, --route, --filename, and "
-						"--output are all required\n");
+		fprintf(stderr, /* IGNORE-BANNED */
+				"fetch-file: --host, --route, --filename, and "
+				"--output are all required\n");
 		usage(argv[0]);
 		return 1;
 	}
@@ -181,7 +187,11 @@ main(int argc, char **argv)
 		{
 			case 'p':
 			{
-				config.port = atoi(optarg);
+				if (!stringToInt(optarg, &(config.port)))
+				{
+					log_fatal("Invalid --port value \"%s\"", optarg);
+					return 1;
+				}
 				break;
 			}
 

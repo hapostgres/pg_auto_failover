@@ -13,6 +13,8 @@
 
 #include "postgres_fe.h"
 
+#include "string_utils.h"
+
 #include "repl_command.h"
 #include "cmd_base_backup.h"
 #include "cmd_identify_system.h"
@@ -83,7 +85,12 @@ repl_command_parse(const char *query, WsCommand *cmd)
 	if (strncasecmp(p, "TIMELINE_HISTORY", strlen("TIMELINE_HISTORY")) == 0)
 	{
 		p = skip_whitespace(p + strlen("TIMELINE_HISTORY"));
-		cmd->timeline = atoi(p);
+
+		if (!stringToInt(p, &(cmd->timeline)))
+		{
+			return false;
+		}
+
 		cmd->type = WS_CMD_TIMELINE_HISTORY;
 		return true;
 	}

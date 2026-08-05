@@ -42,6 +42,7 @@
 #include "file_utils.h"
 #include "framing.h"
 #include "log.h"
+#include "string_utils.h"
 #include "tar_stream.h"
 
 typedef struct BaseBackupOptions
@@ -93,7 +94,7 @@ scan_options(const char *raw, BaseBackupOptions *opts)
 		char key[64];
 		size_t keyLen = Min((size_t) (p - keyStart), sizeof(key) - 1);
 
-		memcpy(key, keyStart, keyLen);
+		memcpy(key, keyStart, keyLen); /* IGNORE-BANNED */
 		key[keyLen] = '\0';
 
 		while (isspace((unsigned char) *p))
@@ -148,7 +149,7 @@ scan_options(const char *raw, BaseBackupOptions *opts)
 
 			size_t valLen = Min((size_t) (p - valStart), sizeof(value) - 1);
 
-			memcpy(value, valStart, valLen);
+			memcpy(value, valStart, valLen); /* IGNORE-BANNED */
 			value[valLen] = '\0';
 		}
 
@@ -199,7 +200,7 @@ read_backup_label(const char *basebackupDir, char *lsnOut, size_t lsnOutSize,
 {
 	char path[MAXPGPATH];
 
-	snprintf(path, sizeof(path), "%s/backup_label", basebackupDir);
+	sformat(path, sizeof(path), "%s/backup_label", basebackupDir);
 
 	char *contents = NULL;
 	long fileSize = 0;
@@ -237,14 +238,13 @@ read_backup_label(const char *basebackupDir, char *lsnOut, size_t lsnOutSize,
 
 			size_t len = Min((size_t) (end - value), lsnOutSize - 1);
 
-			memcpy(lsnOut, value, len);
+			memcpy(lsnOut, value, len); /* IGNORE-BANNED */
 			lsnOut[len] = '\0';
 			foundLsn = true;
 		}
 		else if (strncmp(line, tliPrefix, strlen(tliPrefix)) == 0)
 		{
-			*timelineOut = atoi(line + strlen(tliPrefix));
-			foundTimeline = true;
+			foundTimeline = stringToInt(line + strlen(tliPrefix), timelineOut);
 		}
 
 		line = (nl != NULL) ? nl + 1 : NULL;
@@ -359,7 +359,7 @@ is_wal_segment_filename(const char *name)
 static bool
 partial_segment_real_length(const char *path, uint64_t *length)
 {
-	FILE *file = fopen(path, "rb");
+	FILE *file = fopen(path, "rb"); /* IGNORE-BANNED */
 
 	if (file == NULL)
 	{
@@ -427,7 +427,7 @@ find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
 		{
 			char segPart[CBB_WAL_FNAME_LEN + 1] = { 0 };
 
-			memcpy(segPart, entry->d_name, CBB_WAL_FNAME_LEN);
+			memcpy(segPart, entry->d_name, CBB_WAL_FNAME_LEN); /* IGNORE-BANNED */
 
 			if (is_wal_segment_filename(segPart) &&
 				(bestPartial[0] == '\0' || strcmp(segPart, bestPartial) > 0))
@@ -459,9 +459,9 @@ find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
 	char logIdHex[9] = { 0 };
 	char segHex[9] = { 0 };
 
-	memcpy(tliHex, chosen, 8);
-	memcpy(logIdHex, chosen + 8, 8);
-	memcpy(segHex, chosen + 16, 8);
+	memcpy(tliHex, chosen, 8); /* IGNORE-BANNED */
+	memcpy(logIdHex, chosen + 8, 8); /* IGNORE-BANNED */
+	memcpy(segHex, chosen + 16, 8); /* IGNORE-BANNED */
 
 	uint32_t tli = (uint32_t) strtoul(tliHex, NULL, 16);
 	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
@@ -476,7 +476,7 @@ find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
 		char path[MAXPGPATH];
 		uint64_t realLength = 0;
 
-		snprintf(path, sizeof(path), "%s/%s.partial", walcacheDir, bestPartial);
+		sformat(path, sizeof(path), "%s/%s.partial", walcacheDir, bestPartial);
 
 		if (!partial_segment_real_length(path, &realLength))
 		{
@@ -491,8 +491,8 @@ find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
 	}
 
 	*timeline = tli;
-	snprintf(endLsn, endLsnSize, "%X/%08X",
-			 (uint32_t) (position >> 32), (uint32_t) (position & 0xFFFFFFFF));
+	sformat(endLsn, endLsnSize, "%X/%08X",
+			(uint32_t) (position >> 32), (uint32_t) (position & 0xFFFFFFFF));
 
 	return true;
 }
@@ -556,7 +556,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 
 	char tliStr[16];
 
-	snprintf(tliStr, sizeof(tliStr), "%d", timeline);
+	sformat(tliStr, sizeof(tliStr), "%d", timeline);
 
 	if (!send_position_row(sock, lsn, tliStr))
 	{
@@ -652,7 +652,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 	else if (find_reachable_end_position(route->walcacheDir, &endTimeline, endLsn,
 										 sizeof(endLsn)))
 	{
-		snprintf(endTliBuf, sizeof(endTliBuf), "%u", endTimeline);
+		sformat(endTliBuf, sizeof(endTliBuf), "%u", endTimeline);
 		endLsnPtr = endLsn;
 		endTliStr = endTliBuf;
 	}

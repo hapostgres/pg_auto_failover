@@ -15,6 +15,7 @@
 #include "postgres_fe.h"
 
 #include "wal_dir_scan.h"
+#include "file_utils.h"
 
 /* default WAL segment size (16MB), matching cmd_show.c's own
  * "SHOW wal_segment_size" -> "16MB" answer */
@@ -52,7 +53,7 @@ wal_segment_filename(uint32_t timeline, uint64_t segno, char *dest, size_t destS
 	uint32_t logId = (uint32_t) (segno / WS_XLOG_SEGMENTS_PER_XLOGID);
 	uint32_t seg = (uint32_t) (segno % WS_XLOG_SEGMENTS_PER_XLOGID);
 
-	snprintf(dest, destSize, "%08X%08X%08X", timeline, logId, seg);
+	sformat(dest, destSize, "%08X%08X%08X", timeline, logId, seg);
 }
 
 
@@ -94,9 +95,9 @@ wal_dir_find_latest(const char *walcacheDir, uint32_t *timeline,
 	char logIdHex[9] = { 0 };
 	char segHex[9] = { 0 };
 
-	memcpy(tliHex, best, 8);
-	memcpy(logIdHex, best + 8, 8);
-	memcpy(segHex, best + 16, 8);
+	memcpy(tliHex, best, 8); /* IGNORE-BANNED */
+	memcpy(logIdHex, best + 8, 8); /* IGNORE-BANNED */
+	memcpy(segHex, best + 16, 8); /* IGNORE-BANNED */
 
 	uint32_t tli = (uint32_t) strtoul(tliHex, NULL, 16);
 	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
@@ -106,8 +107,8 @@ wal_dir_find_latest(const char *walcacheDir, uint32_t *timeline,
 	uint64_t endOfSegment = (segno + 1) * WS_WAL_SEGMENT_SIZE;
 
 	*timeline = tli;
-	snprintf(endLsn, endLsnSize, "%X/%08X",
-			 (uint32_t) (endOfSegment >> 32), (uint32_t) (endOfSegment & 0xFFFFFFFF));
+	sformat(endLsn, endLsnSize, "%X/%08X",
+			(uint32_t) (endOfSegment >> 32), (uint32_t) (endOfSegment & 0xFFFFFFFF));
 
 	return true;
 }

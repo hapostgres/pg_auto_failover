@@ -263,11 +263,11 @@ find_oldest_segno(const char *walcacheDir, uint32_t timeline, uint64_t *oldestSe
 
 		if (len == 24)
 		{
-			memcpy(segPart, entry->d_name, 24);
+			memcpy(segPart, entry->d_name, 24); /* IGNORE-BANNED */
 		}
 		else if (len == 24 + 8 && strcmp(entry->d_name + 24, ".partial") == 0)
 		{
-			memcpy(segPart, entry->d_name, 24);
+			memcpy(segPart, entry->d_name, 24); /* IGNORE-BANNED */
 		}
 		else
 		{
@@ -288,7 +288,7 @@ find_oldest_segno(const char *walcacheDir, uint32_t timeline, uint64_t *oldestSe
 
 		char tliHex[9] = { 0 };
 
-		memcpy(tliHex, segPart, 8);
+		memcpy(tliHex, segPart, 8); /* IGNORE-BANNED */
 
 		if ((uint32_t) strtoul(tliHex, NULL, 16) != timeline)
 		{
@@ -298,8 +298,8 @@ find_oldest_segno(const char *walcacheDir, uint32_t timeline, uint64_t *oldestSe
 		char logIdHex[9] = { 0 };
 		char segHex[9] = { 0 };
 
-		memcpy(logIdHex, segPart + 8, 8);
-		memcpy(segHex, segPart + 16, 8);
+		memcpy(logIdHex, segPart + 8, 8); /* IGNORE-BANNED */
+		memcpy(segHex, segPart + 16, 8); /* IGNORE-BANNED */
 
 		uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
 		uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
@@ -419,14 +419,14 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 
 		char completePath[MAXPGPATH];
 
-		snprintf(completePath, sizeof(completePath), "%s/%s",
-				 route->walcacheDir, filename);
+		sformat(completePath, sizeof(completePath), "%s/%s",
+				route->walcacheDir, filename);
 
 		bool isComplete = file_exists(completePath);
 
 		char partialPath[MAXPGPATH];
 
-		snprintf(partialPath, sizeof(partialPath), "%s.partial", completePath);
+		sformat(partialPath, sizeof(partialPath), "%s.partial", completePath);
 
 		const char *readPath = isComplete ? completePath : partialPath;
 
@@ -465,7 +465,7 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 			continue;
 		}
 
-		FILE *file = fopen(readPath, "rb");
+		FILE *file = fopen(readPath, "rb"); /* IGNORE-BANNED */
 
 		if (file == NULL)
 		{

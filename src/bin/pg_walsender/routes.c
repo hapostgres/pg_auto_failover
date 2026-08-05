@@ -26,6 +26,7 @@
 #include "routes.h"
 #include "file_utils.h"
 #include "log.h"
+#include "string_utils.h"
 
 
 bool
@@ -130,7 +131,7 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 			}
 			else if (strcmp(propName, "timeline") == 0)
 			{
-				route->timeline = atoi(propValue);
+				(void) stringToInt(propValue, &(route->timeline));
 			}
 			else if (strcmp(propName, "position") == 0)
 			{

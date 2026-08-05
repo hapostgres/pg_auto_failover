@@ -230,7 +230,7 @@ ws_send_message(int sock, char type, const char *data, int32_t dataLen)
 	int32_t netLen = htonl(dataLen + 4);
 
 	header[0] = type;
-	memcpy(header + 1, &netLen, 4);
+	memcpy(header + 1, &netLen, 4); /* IGNORE-BANNED */
 
 	if (!ws_write_bytes(sock, header, 5))
 	{
@@ -279,8 +279,8 @@ ws_send_backend_key_data(int sock, int32_t pid, int32_t secret)
 	int32_t netPid = htonl(pid);
 	int32_t netSecret = htonl(secret);
 
-	memcpy(data, &netPid, 4);
-	memcpy(data + 4, &netSecret, 4);
+	memcpy(data, &netPid, 4); /* IGNORE-BANNED */
+	memcpy(data + 4, &netSecret, 4); /* IGNORE-BANNED */
 
 	return ws_send_message(sock, 'K', data, 8);
 }

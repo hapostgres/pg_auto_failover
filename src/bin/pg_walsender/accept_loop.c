@@ -155,8 +155,8 @@ handle_connection(int clientSock, const WsServerConfig *config)
 
 	char title[256];
 
-	snprintf(title, sizeof(title), "pg_autoctl: walsender %s%s",
-			 isFetchMode ? "fetch " : "", route != NULL ? route->key : routeKey);
+	sformat(title, sizeof(title), "pg_autoctl: walsender %s%s",
+			isFetchMode ? "fetch " : "", route != NULL ? route->key : routeKey);
 	set_ps_title(title);
 
 	if (isFetchMode)

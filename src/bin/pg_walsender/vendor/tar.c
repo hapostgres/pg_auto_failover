@@ -250,10 +250,10 @@ tarCreateHeader(char *h, const char *filename, const char *linktarget,
 	}
 
 	/* Magic 6 */
-	strcpy(&h[TAR_OFFSET_MAGIC], "ustar");
+	strcpy(&h[TAR_OFFSET_MAGIC], "ustar"); /* IGNORE-BANNED */
 
 	/* Version 2 */
-	memcpy(&h[TAR_OFFSET_VERSION], "00", 2);
+	memcpy(&h[TAR_OFFSET_VERSION], "00", 2); /* IGNORE-BANNED */
 
 	/* User 32 */
 	/* XXX: Do we need to care about setting correct username? */

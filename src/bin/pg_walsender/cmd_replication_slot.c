@@ -72,7 +72,7 @@ parse_slot_name(const char **p, char *nameOut, size_t nameOutSize)
 
 		size_t len = Min((size_t) (s - start), nameOutSize - 1);
 
-		memcpy(nameOut, start, len);
+		memcpy(nameOut, start, len); /* IGNORE-BANNED */
 		nameOut[len] = '\0';
 	}
 
@@ -105,7 +105,7 @@ slot_name_is_safe(const char *name)
 static void
 slot_marker_path(const WsRoute *route, const char *slotName, char *dest, size_t destSize)
 {
-	snprintf(dest, destSize, "%s/.slot_%s", route->walcacheDir, slotName);
+	sformat(dest, destSize, "%s/.slot_%s", route->walcacheDir, slotName);
 }
 
 
@@ -154,7 +154,7 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 
 		size_t len = Min((size_t) (p - start), sizeof(word) - 1);
 
-		memcpy(word, start, len);
+		memcpy(word, start, len); /* IGNORE-BANNED */
 		word[len] = '\0';
 
 		if (strcasecmp(word, "PHYSICAL") == 0)
@@ -189,7 +189,7 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 
 	char contents[128];
 
-	snprintf(contents, sizeof(contents), "restart_lsn=%s\n", consistentPoint);
+	sformat(contents, sizeof(contents), "restart_lsn=%s\n", consistentPoint);
 
 	if (!write_file(contents, strlen(contents), path))
 	{
@@ -285,7 +285,7 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 	uint32_t timeline = (route->timeline > 0) ? (uint32_t) route->timeline : 1;
 	char timelineStr[16];
 
-	snprintf(timelineStr, sizeof(timelineStr), "%u", timeline);
+	sformat(timelineStr, sizeof(timelineStr), "%u", timeline);
 
 	const char *values[] = { "physical", restartLsn, timelineStr };
 

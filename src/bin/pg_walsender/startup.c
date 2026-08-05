@@ -46,7 +46,7 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 
 		int32_t code;
 
-		memcpy(&code, payload, 4);
+		memcpy(&code, payload, 4); /* IGNORE-BANNED */
 		code = ntohl(code);
 
 		if (code == SSL_REQUEST_CODE || code == GSS_REQUEST_CODE)

@@ -29,7 +29,7 @@ connect_to(const char *host, int port)
 {
 	char portStr[16];
 
-	snprintf(portStr, sizeof(portStr), "%d", port);
+	sformat(portStr, sizeof(portStr), "%d", port);
 
 	struct addrinfo hints;
 
@@ -128,7 +128,7 @@ extract_error_message(const char *payload, int32_t payloadLen,
 		{
 			size_t len = Min((size_t) (p - value), outSize - 1);
 
-			memcpy(out, value, len);
+			memcpy(out, value, len); /* IGNORE-BANNED */
 			out[len] = '\0';
 		}
 
@@ -153,7 +153,7 @@ ws_fetch_file_client(const char *host, int port, const char *routeKey,
 
 	char database[512];
 
-	snprintf(database, sizeof(database), "fetch/%s", routeKey);
+	sformat(database, sizeof(database), "fetch/%s", routeKey);
 
 	if (!send_startup_message(sock, database))
 	{
@@ -198,7 +198,7 @@ ws_fetch_file_client(const char *host, int port, const char *routeKey,
 
 	char line[300];
 
-	snprintf(line, sizeof(line), "%s\n", filename);
+	sformat(line, sizeof(line), "%s\n", filename);
 
 	if (!ws_write_bytes(sock, line, strlen(line)))
 	{
@@ -239,7 +239,7 @@ ws_fetch_file_client(const char *host, int port, const char *routeKey,
 
 	char tmpPath[MAXPGPATH];
 
-	snprintf(tmpPath, sizeof(tmpPath), "%s.pg_walsender_fetch_tmp", outputPath);
+	sformat(tmpPath, sizeof(tmpPath), "%s.pg_walsender_fetch_tmp", outputPath);
 
 	if (!write_file(payload, payloadLen, tmpPath))
 	{

@@ -79,7 +79,7 @@ cmd_fetch_file(int sock, const WsRoute *route)
 
 	char path[MAXPGPATH];
 
-	snprintf(path, sizeof(path), "%s/%s", route->walcacheDir, filename);
+	sformat(path, sizeof(path), "%s/%s", route->walcacheDir, filename);
 
 	char *contents = NULL;
 	long fileSize = 0;

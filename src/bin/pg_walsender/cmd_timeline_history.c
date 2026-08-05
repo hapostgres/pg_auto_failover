@@ -34,11 +34,11 @@ cmd_timeline_history(int sock, const WsRoute *route, int timeline)
 	/* matches real Postgres's TLHistoryFileName() macro exactly */
 	char filename[WS_MAXFNAMELEN];
 
-	snprintf(filename, sizeof(filename), "%08X.history", timeline);
+	sformat(filename, sizeof(filename), "%08X.history", timeline);
 
 	char path[MAXPGPATH];
 
-	snprintf(path, sizeof(path), "%s/%s", route->walcacheDir, filename);
+	sformat(path, sizeof(path), "%s/%s", route->walcacheDir, filename);
 
 	char *contents = NULL;
 	long fileSize = 0;

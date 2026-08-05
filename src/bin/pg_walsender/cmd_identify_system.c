@@ -20,6 +20,7 @@
 #include "postgres_fe.h"
 
 #include "cmd_identify_system.h"
+#include "file_utils.h"
 #include "framing.h"
 #include "wal_dir_scan.h"
 
@@ -52,7 +53,7 @@ cmd_identify_system(int sock, const WsRoute *route, const char *dbname)
 		}
 	}
 
-	snprintf(timelineStr, sizeof(timelineStr), "%d", timeline);
+	sformat(timelineStr, sizeof(timelineStr), "%d", timeline);
 
 	const char *values[] = {
 		systemId,
