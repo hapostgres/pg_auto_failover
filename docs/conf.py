@@ -112,11 +112,18 @@ html_theme = "sphinx_rtd_theme"
 # html_theme_options = {}
 
 
-# Add our custom CSS
+# Add our custom CSS and JS
 def setup(app):
     if hasattr(app, "add_css_file"):
         app.add_css_file("css/citus.css")
         app.add_css_file("css/pygments.css")
+        app.add_css_file("css/zoom.css")
+    if hasattr(app, "add_js_file"):
+        # Click-to-zoom for our own figures (tikz-rendered diagrams),
+        # generalizing the pan/scroll-to-zoom already available on
+        # Mermaid diagrams (mermaid_d3_zoom, above) to every other
+        # image the docs embed via `.. figure::`.
+        app.add_js_file("js/zoom.js")
 
 
 # Add any paths that contain custom static files (such as style sheets) here,
