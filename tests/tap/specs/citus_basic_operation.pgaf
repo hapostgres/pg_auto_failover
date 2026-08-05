@@ -163,22 +163,25 @@ step test_010_perform_failover_coordinator {
 #           just whichever happened to exist first.
 #
 #           archiver1 ends up with three rows in pgautofailover.node (one
-#           per group), all sharing nodename = 'archiver1' -- the generic
-#           "wait until archiver1 state is archiving" form is ambiguous
-#           once more than one such row exists (test_runner.c's
+#           per group), each named by archiver_add_formation() itself as
+#           'archiver-<archiverid>-<groupid>' (never the plain --name) --
+#           the generic "wait until archiver1 state is archiving" form is
+#           ambiguous once more than one such row exists (test_runner.c's
 #           monitor_get_node_state() does "... WHERE nodename = $1 LIMIT 1",
-#           no ORDER BY), so every check below names formationid and
+#           no ORDER BY) and wouldn't match this synthesized name anyway,
+#           so every check below matches nodename LIKE 'archiver-%' (safe:
+#           this spec has exactly one archiver) and names formationid and
 #           groupid explicitly instead.
 #
 
 step test_011_bring_up_archiver {
     exec archiver1  pg_autoctl node start
     sleep 40s
-    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'default' AND groupid = 0; }
+    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 0; }
     expect { archiving }
-    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'default' AND groupid = 1; }
+    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 1; }
     expect { archiving }
-    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'default' AND groupid = 2; }
+    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 2; }
     expect { archiving }
 }
 
@@ -202,10 +205,10 @@ step test_012_archiver_captures_every_group {
     sql worker1a { CREATE TABLE archiver_probe_w1(a int); INSERT INTO archiver_probe_w1 SELECT generate_series(1, 100); SELECT pg_switch_wal(); }
     sql worker2b { CREATE TABLE archiver_probe_w2(a int); INSERT INTO archiver_probe_w2 SELECT generate_series(1, 100); SELECT pg_switch_wal(); }
     sleep 15s
-    sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'default' AND groupid = 0; }
+    sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 0; }
     expect { t }
-    sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'default' AND groupid = 1; }
+    sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 1; }
     expect { t }
-    sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'default' AND groupid = 2; }
+    sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 2; }
     expect { t }
 }

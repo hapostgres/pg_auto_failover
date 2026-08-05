@@ -26,16 +26,18 @@
 # each independently electing their own primary/secondary at once.
 #
 # archiver1 ends up with two rows in pgautofailover.node once attached to
-# both formations (one per (formation, group) membership, both nodename =
-# 'archiver1', both groupid = 0 since each formation here has a single,
-# plain-Postgres group) -- so the generic "wait until archiver1 state is
-# archiving" form (SELECT reportedstate, goalstate FROM pgautofailover.node
-# WHERE nodename = $1 LIMIT 1, no ORDER BY -- see test_runner.c's
-# monitor_get_node_state()) becomes ambiguous the moment the second
-# membership exists: it may observe either row. Every check on archiver1's
-# per-membership state after test_003 attaches the second membership goes
-# through an explicit `sql monitor` query naming both nodename *and*
-# formationid instead.
+# both formations (one per (formation, group) membership, both groupid = 0
+# since each formation here has a single, plain-Postgres group). Each row
+# is named by archiver_add_formation() itself as 'archiver-<archiverid>-
+# <groupid>' -- never the plain --name -- so the generic "wait until
+# archiver1 state is archiving" form (SELECT reportedstate, goalstate FROM
+# pgautofailover.node WHERE nodename = $1 LIMIT 1, no ORDER BY -- see
+# test_runner.c's monitor_get_node_state()) wouldn't match either row to
+# begin with, and would be ambiguous between the two even if it did. Every
+# check on archiver1's per-membership state after test_003 attaches the
+# second membership goes through an explicit `sql monitor` query matching
+# nodename LIKE 'archiver-%' (safe: this spec has exactly one archiver)
+# *and* formationid instead.
 #
 # The autoctl_node role has no direct SELECT on pgautofailover.archiver
 # (granted much later in pgautofailover.sql than the blanket "GRANT SELECT
@@ -143,7 +145,7 @@ step test_003_dynamic_attach_to_formation2 {
     # capture child, and for that child to register/report far enough to
     # reach ARCHIVING_STATE.
     sleep 50s
-    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'formation2'; }
+    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'formation2'; }
     expect { archiving }
 }
 
@@ -185,7 +187,7 @@ step test_005_formation1_still_healthy {
     sleep 15s
     sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000005'); }
     expect { t }
-    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename = 'archiver1' AND formationid = 'default'; }
+    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default'; }
     expect { archiving }
 }
 
