@@ -31,6 +31,54 @@ PostgreSQL service to accept writes when there's a single server available,
 and opens the service for potential data loss if the primary server were
 also to fail.
 
+High Availability
+------------------
+
+pg_auto_failover treats "High Availability" as two related but distinct
+guarantees, rather than one. Most of what follows on this page --
+the Monitor, the keeper, synchronous replication, node recovery -- is
+in service of the first of the two; :ref:`archiving_internals` and the
+pages it links to are in service of the second:
+
+- **Service Availability**: the Postgres *service* itself stays reachable
+  and able to accept reads and writes, with as little downtime as
+  possible when a node is lost.
+- **Disaster Recovery**: the *data* survives even in scenarios Service
+  Availability alone can't help with -- an operator mistake, a bad
+  deployment, or every node that ever held the data being lost at once.
+
+Most Postgres setups reach for two separate, independently-operated
+products for these -- an HA tool for the first, a backup tool for the
+second. pg_auto_failover treats them as one system instead; see
+:ref:`ha_dr_backups` for the full comparison.
+
+Service Availability (failover)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This is what the rest of this page, and :ref:`failover_state_machine` /
+:ref:`fault_tolerance` in detail, describe: a primary and one or more
+secondary nodes, a Monitor orchestrating automated failover when the
+primary is lost, and synchronous replication (`Synchronous vs.
+asynchronous replication`_ below) guaranteeing no committed write is lost
+in the process. This is the guarantee that answers "the primary just
+died -- who serves the next query?".
+
+Disaster Recovery
+^^^^^^^^^^^^^^^^^^
+
+Service Availability alone can't answer "we lost every node that ever had
+this data" or "an operator dropped the wrong table an hour ago" -- a
+healthy failover just moves the same problem to a different node just as
+fast. Disaster Recovery is handled by a physically distinct kind of node,
+the **archiver**, added on top of any of the architectures on this page:
+it continuously captures WAL from the group's current primary and
+periodically produces base backups, independent of whether any standby is
+even healthy or present. See :ref:`archiving_architecture` for where an
+archiver fits alongside the architectures below, :ref:`archiving_internals`
+for exactly how WAL capture and base-backup generation work, and
+:ref:`archiving_fault_tolerance` for how this changes what a total loss of
+the rest of the formation actually means.
+
 The pg_auto_failover Monitor
 ----------------------------
 
