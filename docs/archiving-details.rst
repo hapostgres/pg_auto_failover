@@ -49,7 +49,15 @@ Everything an archiver holds lives under one local directory -- the path
 given as ``--pgdata`` when the archiver was created. Despite the flag's
 name, this is never a real Postgres data directory (there is no
 ``initdb``, nothing ever starts Postgres against it directly); it's a
-cache root::
+cache root.
+
+One archiver directory belongs to exactly one source -- one primary's
+WAL, one base-backup lineage -- so nothing inside it is namespaced by
+formation, group, or node: there's nothing else that could ever write
+there to collide with. An archiver covering more than one source (several
+formations, each its own archiver -- see `Several formations`_ below)
+does so as several entirely separate archivers, each with its own
+directory, not as one archiver internally partitioning a shared one::
 
   /var/lib/pgaf/archiver1/
   ├── 000000010000000000000041
