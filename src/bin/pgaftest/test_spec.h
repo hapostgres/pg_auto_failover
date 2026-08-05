@@ -18,11 +18,16 @@
 #define PGAF_MAX_STEPS 256
 #define PGAF_MAX_SEQ 256
 #define PGAF_TIMEOUT_DEFAULT 90
+#define PGAF_MAX_ARCHIVERS 8
+#define PGAF_MAX_ARCHIVER_FORMATIONS 8
 
 /* -----------------------------------------------------------------------
  * Cluster topology (from the cluster { } block)
  *
  * Hierarchy:  cluster → monitor + formations → nodes
+ *                    ↘ archivers (attach to one or more formations by name,
+ *                      not nested inside any one of them -- see
+ *                      TestArchiverNode's own comment below)
  *
  * Syntax:
  *
@@ -44,6 +49,16 @@
  *       formation workers num-sync 1 {
  *           w1 worker group 1
  *           w2 worker group 1
+ *       }
+ *
+ *       # Top-level archiver, sibling to monitor/formation -- see
+ *       # TestArchiverNode's own comment for why this isn't nested inside
+ *       # a formation_block the way ordinary nodes are. Braces are
+ *       # mandatory here (unlike monitor's own bare form) -- see
+ *       # archiver_block's own comment in test_spec_parse.y for why.
+ *       archiver archiver1 {
+ *           formation default
+ *           region    dc1
  *       }
  *   }
  *
@@ -98,10 +113,77 @@ typedef struct TestFormation
 	int nodeCount;
 } TestFormation;
 
+/* -----------------------------------------------------------------------
+ * Top-level archiver nodes (from a cluster-level "archiver <name> { ... }"
+ * declaration, sibling to "monitor" and "formation" -- NOT nested inside a
+ * formation_block's node_list the way ordinary/coordinator/worker nodes
+ * are). This matches the real data model: pgautofailover.archiver has no
+ * formationid column at all, and attaches to one or more formations
+ * through the separate archiver_formation join table -- an archiver is a
+ * process identity that formations attach to, not a member of any one of
+ * them.
+ *
+ * Syntax:
+ *
+ *   archiver archiver1 {
+ *       formation default
+ *       region    eu-west         # optional; defaults to "default"
+ *       create and launch deferred # optional; see below
+ *   }
+ *
+ * Despite being declared at the top level, an archiver ends up represented
+ * internally as an ordinary TestNode (kind = NODE_KIND_ARCHIVER), appended
+ * to its own declared formation's own node list -- see parse_test_spec()'s
+ * own fold_archivers_into_formations() call, run once right after
+ * yyparse() returns. This means compose_gen.c's existing, fully-featured
+ * per-node machinery (writing a real pg_autoctl_node.ini, "pg_autoctl node
+ * run <ini>" as the container's own command, healthcheck/depends_on
+ * ordering, create/launch-deferred handling) already used for an archiver
+ * nested directly inside a formation_block -- the older, still-supported
+ * spelling -- just works for these too, completely unmodified. Only the
+ * *declaration* needs to be top-level, to match the real data model
+ * (pgautofailover.archiver has no formationid column at all, it attaches
+ * to formations through the separate archiver_formation join table, so an
+ * archiver isn't a member of any one formation the way an ordinary node
+ * genuinely is) -- once parsed, there is no other difference left.
+ *
+ * Only ever attaches to the FIRST formation listed: pg_autoctl create
+ * archiver's own ini-driven bootstrap (nodespec.c) has no notion of more
+ * than one --formation at create time. An archiver that needs to cover
+ * more than one formation from the very start should still declare just
+ * that first one here, then attach the rest once it's running (see
+ * archiver_multi_formation.pgaf for the pattern: a direct `sql monitor {
+ * SELECT pgautofailover.archiver_add_formation(...) }` step) --
+ * fold_archivers_into_formations() exits with a clear error rather than
+ * silently dropping any formation past the first.
+ *
+ * "create and launch deferred" (or either half alone) behaves exactly as
+ * it does for an ordinary node: the container still runs "pg_autoctl node
+ * run <ini>", but the ini's own [launch] section makes that command poll
+ * and wait rather than actually registering -- `exec <name> pg_autoctl
+ * node start` un-defers it explicitly, same as any other deferred node
+ * (see citus_basic_operation.pgaf's own test_011 for why a Citus
+ * formation's archiver needs this: it must not attempt to register before
+ * every worker group already exists, and nothing here waits for that on
+ * its own).
+ * ----------------------------------------------------------------------- */
+typedef struct TestArchiverNode
+{
+	char name[128];
+	char region[64];             /* --region NAME; "" = omit (defaults to "default") */
+	char formations[PGAF_MAX_ARCHIVER_FORMATIONS][128];
+	int formationCount;
+	bool createDeferred;         /* node waits before pg_autoctl create */
+	bool launchDeferred;         /* node waits for pg_autoctl node start */
+} TestArchiverNode;
+
 typedef struct TestCluster
 {
 	TestFormation formations[PGAF_MAX_FORMATIONS];
 	int formationCount;
+
+	TestArchiverNode archivers[PGAF_MAX_ARCHIVERS];
+	int archiverCount;
 
 	bool withMonitor;            /* true when "monitor" keyword appears in cluster{} */
 	bool withCitus;

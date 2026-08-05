@@ -139,6 +139,7 @@ static TestCmd       *current_promote_cmd = NULL;
 static TestCmd       *current_pass_cmd    = NULL;  /* for opt_passing_through */
 static TestFormation *current_formation   = NULL;
 static TestNode      *current_node        = NULL;
+static TestArchiverNode *current_archiver = NULL;
 
 %}
 
@@ -256,8 +257,93 @@ cluster_item:
 	| auth_line
 	| extension_version_line
 	| formation_block
+	| archiver_block
 	| T_BIND_SOURCE { current_spec->cluster.bindSource = true; }
 	| T_LEGACY_STARTUP { current_spec->cluster.legacyStartup = true; }
+	;
+
+/*
+ * archiver <name> { formation <name> [formation <name> ...] [region <name>] }
+ *
+ * Top-level, sibling to "monitor" and "formation" -- NOT nested inside a
+ * formation_block's node_list the way ordinary/coordinator/worker nodes
+ * are (see TestArchiverNode's own comment in test_spec.h for why: an
+ * archiver attaches to one or more formations by name, it isn't a member
+ * of any one of them). May appear more than once, for a cluster with
+ * several archivers.
+ *
+ * Braces are mandatory here (unlike monitor_line's own bare/flat form):
+ * archiver_opt's own "T_FORMATION T_IDENT" would otherwise be
+ * indistinguishable, at one token of lookahead, from a brand new
+ * top-level formation_block starting right after this one (formation_
+ * block's own opening is also "T_FORMATION bare_name ...", bare_name
+ * itself accepting a plain T_IDENT) -- a real shift/reduce ambiguity
+ * caught while writing this grammar, not a stylistic choice.
+ */
+archiver_block:
+	T_ARCHIVER T_IDENT
+	{
+		TestCluster *cl = &current_spec->cluster;
+
+		if (cl->archiverCount >= PGAF_MAX_ARCHIVERS)
+		{
+			fprintf(stderr, "pgaftest: too many archivers (max %d)\n",
+			        PGAF_MAX_ARCHIVERS);
+			exit(1);
+		}
+
+		current_archiver = &cl->archivers[cl->archiverCount++];
+		strlcpy(current_archiver->name, $2, sizeof(current_archiver->name));
+		free($2);
+	}
+	T_LBRACE archiver_opt_list T_RBRACE
+	;
+
+archiver_opt_list:
+	  /* empty */
+	| archiver_opt_list archiver_opt
+	;
+
+archiver_opt:
+	  T_FORMATION T_IDENT
+	{
+		if (current_archiver->formationCount >= PGAF_MAX_ARCHIVER_FORMATIONS)
+		{
+			fprintf(stderr,
+			        "pgaftest: too many --formation entries for archiver "
+			        "\"%s\" (max %d)\n",
+			        current_archiver->name, PGAF_MAX_ARCHIVER_FORMATIONS);
+			exit(1);
+		}
+		strlcpy(current_archiver->formations[current_archiver->formationCount++],
+		        $2, sizeof(current_archiver->formations[0]));
+		free($2);
+	}
+	| T_REGION T_IDENT
+	{
+		strlcpy(current_archiver->region, $2, sizeof(current_archiver->region));
+		free($2);
+	}
+	| T_REGION T_STRING
+	{
+		strlcpy(current_archiver->region, $2, sizeof(current_archiver->region));
+		free($2);
+	}
+	| T_CREATE T_AND T_LAUNCH T_DEFERRED
+	{
+		/* bare "create and launch deferred" = both gates, matching
+		 * node_opt's own identical form */
+		current_archiver->createDeferred = true;
+		current_archiver->launchDeferred = true;
+	}
+	| T_LAUNCH T_DEFERRED
+	{
+		current_archiver->launchDeferred = true;
+	}
+	| T_CREATE T_DEFERRED
+	{
+		current_archiver->createDeferred = true;
+	}
 	;
 
 /*
@@ -1596,6 +1682,97 @@ ident_or_string:
 
 %%
 
+/*
+ * fold_archivers_into_formations turns each top-level "archiver { }"
+ * declaration (TestArchiverNode, cluster->archivers[]) into an ordinary
+ * TestNode of kind NODE_KIND_ARCHIVER, appended to its own declared
+ * formation's own node list -- see TestArchiverNode's own comment
+ * (test_spec.h) for why the *declaration* still needs to be top-level even
+ * though it ends up represented identically to the older, still-supported
+ * "archiver nested inside a formation_block" spelling once parsed. Called
+ * once, right after yyparse() returns, so every caller downstream of
+ * parse_test_spec() (compose_gen.c included) only ever sees ordinary
+ * TestNode entries and needs no awareness of TestArchiverNode at all.
+ *
+ * cluster->archiverCount is reset to 0 once every entry has been folded,
+ * so cluster->archivers[] is never a second, stale source of truth for
+ * the very same nodes now living in cluster->formations[].nodes[].
+ */
+static void
+fold_archivers_into_formations(TestCluster *cluster)
+{
+	for (int ai = 0; ai < cluster->archiverCount; ai++)
+	{
+		TestArchiverNode *a = &cluster->archivers[ai];
+
+		if (a->formationCount == 0)
+		{
+			fprintf(stderr,
+			        "pgaftest: archiver \"%s\" needs at least one "
+			        "\"formation <name>\" entry\n", a->name);
+			exit(1);
+		}
+
+		if (a->formationCount > 1)
+		{
+			fprintf(stderr,
+			        "pgaftest: archiver \"%s\" lists %d formations, but "
+			        "pg_autoctl create archiver's own ini-driven bring-up "
+			        "only attaches to one at create time -- declare just "
+			        "\"formation %s\" here and attach the rest (e.g. "
+			        "\"%s\") dynamically once it's running instead, via a "
+			        "direct \"sql monitor { SELECT pgautofailover."
+			        "archiver_add_formation(...) }\" step -- see "
+			        "archiver_multi_formation.pgaf for the pattern\n",
+			        a->name, a->formationCount, a->formations[0],
+			        a->formations[1]);
+			exit(1);
+		}
+
+		TestFormation *form = NULL;
+
+		for (int fi = 0; fi < cluster->formationCount; fi++)
+		{
+			if (strcmp(cluster->formations[fi].name, a->formations[0]) == 0)
+			{
+				form = &cluster->formations[fi];
+				break;
+			}
+		}
+
+		if (form == NULL)
+		{
+			fprintf(stderr,
+			        "pgaftest: archiver \"%s\" attaches to formation "
+			        "\"%s\", which is not declared in this cluster{} "
+			        "block\n", a->name, a->formations[0]);
+			exit(1);
+		}
+
+		if (form->nodeCount >= PGAF_MAX_NODES)
+		{
+			fprintf(stderr,
+			        "pgaftest: too many nodes in formation \"%s\" (max %d)\n",
+			        form->name, PGAF_MAX_NODES);
+			exit(1);
+		}
+
+		TestNode *node = &form->nodes[form->nodeCount++];
+
+		memset(node, 0, sizeof(*node));
+		strlcpy(node->name, a->name, sizeof(node->name));
+		node->kind = NODE_KIND_ARCHIVER;
+		node->candidatePriority = 50;
+		node->replicationQuorum = true;
+		strlcpy(node->region, a->region, sizeof(node->region));
+		node->createDeferred = a->createDeferred;
+		node->launchDeferred = a->launchDeferred;
+	}
+
+	cluster->archiverCount = 0;
+}
+
+
 /* -----------------------------------------------------------------------
  * Public entry point
  * ----------------------------------------------------------------------- */
@@ -1621,6 +1798,8 @@ parse_test_spec(const char *filename)
 	yyin = f;
 	yyparse();
 	fclose(f);
+
+	fold_archivers_into_formations(&spec->cluster);
 
 	/*
 	 * If the file has no explicit sequence{} block, default to running
