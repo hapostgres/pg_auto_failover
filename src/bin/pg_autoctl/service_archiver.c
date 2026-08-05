@@ -313,7 +313,7 @@ is_wal_segment_filename(const char *name)
 
 
 /*
- * wal_filename_compare is a qsort() comparator over an array of char*,
+ * wal_filename_compare is a pg_qsort() comparator over an array of char*,
  * ordering WAL segment filenames the same way their fixed-width hex names
  * already sort lexicographically (== numerically, oldest to newest).
  */
@@ -340,8 +340,8 @@ wal_segment_position_lsn(const char *walFileName, uint64_t offsetInSegment,
 	char logIdHex[9] = { 0 };
 	char segHex[9] = { 0 };
 
-	memcpy(logIdHex, walFileName + 8, 8);
-	memcpy(segHex, walFileName + 16, 8);
+	memcpy(logIdHex, walFileName + 8, 8); /* IGNORE-BANNED */
+	memcpy(segHex, walFileName + 16, 8); /* IGNORE-BANNED */
 
 	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
 	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
@@ -349,9 +349,9 @@ wal_segment_position_lsn(const char *walFileName, uint64_t offsetInSegment,
 	uint64_t segno = (uint64_t) logId * ARCHIVER_XLOG_SEGMENTS_PER_XLOGID + seg;
 	uint64_t position = segno * ARCHIVER_WAL_SEGMENT_SIZE + offsetInSegment;
 
-	snprintf(lsn, lsnSize, "%X/%08X",
-			 (uint32_t) (position >> 32),
-			 (uint32_t) (position & 0xFFFFFFFF));
+	sformat(lsn, lsnSize, "%X/%08X",
+			(uint32_t) (position >> 32),
+			(uint32_t) (position & 0xFFFFFFFF));
 }
 
 
@@ -381,7 +381,7 @@ wal_segment_end_lsn(const char *walFileName, char *lsn, size_t lsnSize)
 static bool
 partial_segment_real_length(const char *path, uint64_t *length)
 {
-	FILE *file = fopen(path, "rb");
+	FILE *file = fopen(path, "rb"); /* IGNORE-BANNED */
 
 	if (file == NULL)
 	{
@@ -472,7 +472,7 @@ service_archiver_report_captured_wal(Keeper *keeper)
 		return true;
 	}
 
-	qsort(names, count, sizeof(char *), wal_filename_compare);
+	pg_qsort(names, count, sizeof(char *), wal_filename_compare);
 
 	bool success = true;
 
@@ -677,7 +677,7 @@ service_archiver_update_current_lsn(Keeper *keeper)
 		{
 			char segPart[ARCHIVER_WAL_FNAME_LEN + 1] = { 0 };
 
-			memcpy(segPart, entry->d_name, ARCHIVER_WAL_FNAME_LEN);
+			memcpy(segPart, entry->d_name, ARCHIVER_WAL_FNAME_LEN); /* IGNORE-BANNED */
 
 			if (is_wal_segment_filename(segPart) &&
 				(bestPartial[0] == '\0' || strcmp(segPart, bestPartial) > 0))
@@ -700,7 +700,7 @@ service_archiver_update_current_lsn(Keeper *keeper)
 		char path[MAXPGPATH];
 		uint64_t realLength = 0;
 
-		snprintf(path, sizeof(path), "%s/%s.partial", walcacheDir, bestPartial);
+		sformat(path, sizeof(path), "%s/%s.partial", walcacheDir, bestPartial);
 
 		if (partial_segment_real_length(path, &realLength))
 		{

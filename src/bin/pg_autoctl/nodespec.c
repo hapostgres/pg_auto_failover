@@ -610,6 +610,13 @@ nodespec_create_argv(const NodeSpec *spec,
 			PUSH(spec->formation);
 		}
 
+		if (!IS_EMPTY_STRING_BUFFER(spec->region) &&
+			strcmp(spec->region, "default") != 0)
+		{
+			PUSH("--region");
+			PUSH(spec->region);
+		}
+
 		PUSH("--run");
 
 		args[i] = NULL;

@@ -51,6 +51,7 @@ typedef struct ArchiverInfo
 	int64_t archiverId;
 	char archiverName[_POSIX_HOST_NAME_MAX];
 	char hostname[_POSIX_HOST_NAME_MAX];
+	char region[NAMEDATALEN];
 
 	bool hasStorageStats;
 	uint64_t usedBytes;
@@ -67,6 +68,30 @@ typedef struct ArchiverInfoArray
 	int count;
 	ArchiverInfo archivers[ARCHIVER_ARRAY_MAX_COUNT];
 } ArchiverInfoArray;
+
+#define ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT 256
+
+/*
+ * One row per (formation, group) membership an archiver currently holds a
+ * 'wal-receiver' row in, from pgautofailover.list_archiver_memberships()
+ * -- what an archiver process itself calls, at startup and periodically
+ * thereafter, to discover the full set of WAL streams and base-backup
+ * schedules it is responsible for running (service_archiver_reconciler.c).
+ */
+typedef struct ArchiverMembership
+{
+	char formation[NAMEDATALEN];
+	int groupId;
+	int64_t nodeId;
+	NodeState reportedState;
+	NodeState goalState;
+} ArchiverMembership;
+
+typedef struct ArchiverMembershipArray
+{
+	int count;
+	ArchiverMembership memberships[ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT];
+} ArchiverMembershipArray;
 
 /*
  * A base-backup production/retention policy (pgautofailover.basebackup_
@@ -236,13 +261,15 @@ bool monitor_print_other_nodes_as_json(Monitor *monitor,
 bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);
 bool monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
-							   int64_t *archiverId);
+							   char *region, int64_t *archiverId);
 bool monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
 									char *formation, int64_t *archiverNodeId);
 bool monitor_report_archiver_storage(Monitor *monitor, int64_t archiverId,
 									 uint64_t usedBytes, uint64_t freeBytes);
 bool monitor_get_archivers(Monitor *monitor, const char *formation,
 						   ArchiverInfoArray *archiversArray);
+bool monitor_list_archiver_memberships(Monitor *monitor, int64_t archiverId,
+									   ArchiverMembershipArray *membershipsArray);
 bool monitor_get_latest_basebackup_info(Monitor *monitor,
 										const char *formationId, int groupId,
 										const char *preferredSource,

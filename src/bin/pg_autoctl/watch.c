@@ -816,15 +816,16 @@ print_nodes_array(WatchContext *context, int r, int c)
 
 /*
  * print_archivers_array prints one row per archiver attached to the current
- * formation: name, host, its ARCHIVING membership's FSM state, and its most
- * recently reported storage usage/free space. Unlike print_nodes_array,
- * this doesn't go through the ColPolicy width-matching machinery
- * (watch_colspecs.h) -- five fixed-width columns is simple enough not to
+ * formation: name, host, region, its ARCHIVING membership's FSM state, and
+ * its most recently reported storage usage/free space. Unlike print_nodes_
+ * array, this doesn't go through the ColPolicy width-matching machinery
+ * (watch_colspecs.h) -- six fixed-width columns is simple enough not to
  * need it, and this section only ever appears at all when there's at least
  * one archiver to show.
  */
 #define ARCHIVER_NAME_COL_LEN 20
 #define ARCHIVER_HOST_COL_LEN 20
+#define ARCHIVER_REGION_COL_LEN 12
 #define ARCHIVER_STATE_COL_LEN 12
 #define ARCHIVER_SIZE_COL_LEN 10
 
@@ -839,9 +840,10 @@ print_archivers_array(WatchContext *context, int r, int c)
 	clear_line_at(currentRow);
 
 	attron(A_STANDOUT);
-	mvprintw(currentRow, c, "%-*s %-*s %-*s %*s %*s ",
+	mvprintw(currentRow, c, "%-*s %-*s %-*s %-*s %*s %*s ",
 			 ARCHIVER_NAME_COL_LEN, "Archiver Name",
 			 ARCHIVER_HOST_COL_LEN, "Host",
+			 ARCHIVER_REGION_COL_LEN, "Region",
 			 ARCHIVER_STATE_COL_LEN, "State",
 			 ARCHIVER_SIZE_COL_LEN, "Used",
 			 ARCHIVER_SIZE_COL_LEN, "Free");
@@ -876,9 +878,10 @@ print_archivers_array(WatchContext *context, int r, int c)
 			attron(A_REVERSE);
 		}
 
-		mvprintw(currentRow, c, "%-*s %-*s %-*s %*s %*s ",
+		mvprintw(currentRow, c, "%-*s %-*s %-*s %-*s %*s %*s ",
 				 ARCHIVER_NAME_COL_LEN, archiver->archiverName,
 				 ARCHIVER_HOST_COL_LEN, archiver->hostname,
+				 ARCHIVER_REGION_COL_LEN, archiver->region,
 				 ARCHIVER_STATE_COL_LEN, stateStr,
 				 ARCHIVER_SIZE_COL_LEN, usedStr,
 				 ARCHIVER_SIZE_COL_LEN, freeStr);

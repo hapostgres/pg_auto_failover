@@ -955,16 +955,26 @@ monitor_get_archiver_node(Monitor *monitor,
  */
 bool
 monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
-						  int64_t *archiverId)
+						  char *region, int64_t *archiverId)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
 
+	/*
+	 * region is passed by name ("region => $3") to skip over register_
+	 * archiver()'s own storagepath/basebackuppolicyid/autoregister/
+	 * maxresidentreplay/rcloneconfigname parameters, which stay at their
+	 * own SQL-level defaults here -- Postgres allows mixing positional and
+	 * named arguments as long as every positional one comes first.
+	 */
 	const char *sql =
-		"SELECT * FROM pgautofailover.register_archiver($1, $2)";
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, TEXTOID };
-	const char *paramValues[2] = { name, hostname };
+		"SELECT * FROM pgautofailover.register_archiver($1, $2, region => $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[3] = {
+		name, hostname,
+		IS_EMPTY_STRING_BUFFER(region) ? "default" : region
+	};
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -992,10 +1002,13 @@ monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
 /*
  * monitor_archiver_add_formation calls pgautofailover.archiver_add_formation()
  * on the monitor, attaching an already-registered archiver to every group of
- * the given formation. Returns the nodeid of the ARCHIVING membership row
- * created for group 0 -- the only group this milestone's own single-group
- * scope (the "budget setup") ever attaches to; a Citus formation with more
- * than one group would need every returned nodeid, not just the first.
+ * the given formation -- a multi-group formation gets one ARCHIVING
+ * membership row per group, all created in this one call. Only the first
+ * returned nodeid is kept, for a log message at attach time; it is not
+ * how an archiver process itself discovers its full membership list at
+ * runtime (that's monitor_list_archiver_memberships(), which returns
+ * every membership across every attached formation, called by the
+ * archiver's own reconciler instead of relying on this one-shot result).
  */
 bool
 monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
@@ -1083,23 +1096,24 @@ typedef struct ArchiverInfoArrayParseContext
 
 /*
  * parseArchiverInfo parses one row of pgautofailover.get_archivers()'s
- * result: archiver_id, archiver_name, hostname, used_bytes, free_bytes,
- * last_report_time, node_id, reported_state, goal_state. usedbytes/
- * freebytes (NULL until the archiver's first storage report) and the
- * node_id/reportedState/goalState side of the LEFT JOIN (NULL if this
+ * result: archiver_id, archiver_name, hostname, region, used_bytes,
+ * free_bytes, last_report_time, node_id, reported_state, goal_state.
+ * usedbytes/freebytes (NULL until the archiver's first storage report) and
+ * the node_id/reportedState/goalState side of the LEFT JOIN (NULL if this
  * milestone's one-'wal-receiver'-row-per-group assumption isn't met yet,
- * see get_archivers()'s own comment) are both optional -- everything else
- * is not.
+ * see get_archivers()'s own comment) are both optional -- everything else,
+ * including region (NOT NULL, defaults to "default"), is not.
  */
 static bool
 parseArchiverInfo(PGresult *result, int rowNumber, ArchiverInfo *archiver)
 {
 	if (PQgetisnull(result, rowNumber, 0) ||
 		PQgetisnull(result, rowNumber, 1) ||
-		PQgetisnull(result, rowNumber, 2))
+		PQgetisnull(result, rowNumber, 2) ||
+		PQgetisnull(result, rowNumber, 3))
 	{
-		log_error("archiver_id, archiver_name or hostname returned by "
-				  "the monitor is NULL");
+		log_error("archiver_id, archiver_name, hostname or region returned "
+				  "by the monitor is NULL");
 		return false;
 	}
 
@@ -1113,29 +1127,32 @@ parseArchiverInfo(PGresult *result, int rowNumber, ArchiverInfo *archiver)
 	value = PQgetvalue(result, rowNumber, 2);
 	strlcpy(archiver->hostname, value, _POSIX_HOST_NAME_MAX);
 
+	value = PQgetvalue(result, rowNumber, 3);
+	strlcpy(archiver->region, value, sizeof(archiver->region));
+
 	archiver->hasStorageStats =
-		!PQgetisnull(result, rowNumber, 3) && !PQgetisnull(result, rowNumber, 4);
+		!PQgetisnull(result, rowNumber, 4) && !PQgetisnull(result, rowNumber, 5);
 
 	if (archiver->hasStorageStats)
 	{
-		value = PQgetvalue(result, rowNumber, 3);
+		value = PQgetvalue(result, rowNumber, 4);
 		archiver->usedBytes = strtoull(value, NULL, 0);
 
-		value = PQgetvalue(result, rowNumber, 4);
+		value = PQgetvalue(result, rowNumber, 5);
 		archiver->freeBytes = strtoull(value, NULL, 0);
 	}
 
-	archiver->hasNode = !PQgetisnull(result, rowNumber, 6);
+	archiver->hasNode = !PQgetisnull(result, rowNumber, 7);
 
 	if (archiver->hasNode)
 	{
-		value = PQgetvalue(result, rowNumber, 6);
+		value = PQgetvalue(result, rowNumber, 7);
 		archiver->nodeId = strtol(value, NULL, 0);
 
-		value = PQgetvalue(result, rowNumber, 7);
+		value = PQgetvalue(result, rowNumber, 8);
 		archiver->reportedState = NodeStateFromString(value);
 
-		value = PQgetvalue(result, rowNumber, 8);
+		value = PQgetvalue(result, rowNumber, 9);
 		archiver->goalState = NodeStateFromString(value);
 	}
 
@@ -1204,6 +1221,133 @@ monitor_get_archivers(Monitor *monitor, const char *formation,
 		log_error("Failed to parse the list of archivers returned by the "
 				  "monitor for formation \"%s\", see previous lines for "
 				  "details", formation);
+		return false;
+	}
+
+	return true;
+}
+
+
+typedef struct ArchiverMembershipArrayParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	ArchiverMembershipArray *membershipsArray;
+	bool parsedOK;
+} ArchiverMembershipArrayParseContext;
+
+
+/*
+ * parseArchiverMembership parses one row of pgautofailover.
+ * list_archiver_memberships()'s result: formation_id, group_id, node_id,
+ * reported_state, goal_state. The underlying query is an inner join (see
+ * that function's own comment), so none of these are ever NULL in
+ * practice -- checked anyway, matching this file's own defensive
+ * convention for every other row parser.
+ */
+static bool
+parseArchiverMembership(PGresult *result, int rowNumber,
+						ArchiverMembership *membership)
+{
+	if (PQgetisnull(result, rowNumber, 0) ||
+		PQgetisnull(result, rowNumber, 1) ||
+		PQgetisnull(result, rowNumber, 2) ||
+		PQgetisnull(result, rowNumber, 3) ||
+		PQgetisnull(result, rowNumber, 4))
+	{
+		log_error("formation_id, group_id, node_id, reported_state, or "
+				  "goal_state returned by the monitor is NULL");
+		return false;
+	}
+
+	char *value = PQgetvalue(result, rowNumber, 0);
+
+	strlcpy(membership->formation, value, NAMEDATALEN);
+
+	value = PQgetvalue(result, rowNumber, 1);
+	membership->groupId = strtol(value, NULL, 0);
+
+	value = PQgetvalue(result, rowNumber, 2);
+	membership->nodeId = strtoll(value, NULL, 0);
+
+	value = PQgetvalue(result, rowNumber, 3);
+	membership->reportedState = NodeStateFromString(value);
+
+	value = PQgetvalue(result, rowNumber, 4);
+	membership->goalState = NodeStateFromString(value);
+
+	return true;
+}
+
+
+static void
+parseArchiverMembershipArray(void *ctx, PGresult *result)
+{
+	ArchiverMembershipArrayParseContext *context =
+		(ArchiverMembershipArrayParseContext *) ctx;
+	bool parsedOk = true;
+
+	if (PQntuples(result) > ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only "
+				  "up to %d memberships per archiver at the moment",
+				  PQntuples(result), ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT);
+		context->parsedOK = false;
+		return;
+	}
+
+	context->membershipsArray->count = PQntuples(result);
+
+	for (int rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		ArchiverMembership *membership =
+			&(context->membershipsArray->memberships[rowNumber]);
+
+		parsedOk = parsedOk && parseArchiverMembership(result, rowNumber, membership);
+	}
+
+	context->parsedOK = parsedOk;
+}
+
+
+/*
+ * monitor_list_archiver_memberships calls pgautofailover.
+ * list_archiver_memberships(archiverid) and returns every (formation,
+ * group) membership this archiver currently holds a 'wal-receiver' row
+ * in, across every formation it is attached to -- what the archiver's
+ * own reconciler calls, at startup and periodically thereafter, to
+ * discover the full set of WAL streams and base-backup schedules it is
+ * responsible for running (service_archiver_reconciler.c).
+ */
+bool
+monitor_list_archiver_memberships(Monitor *monitor, int64_t archiverId,
+								  ArchiverMembershipArray *membershipsArray)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.list_archiver_memberships($1)";
+	int paramCount = 1;
+	Oid paramTypes[1] = { INT8OID };
+	IntString archiverIdString = intToString(archiverId);
+	const char *paramValues[1] = { archiverIdString.strValue };
+	ArchiverMembershipArrayParseContext parseContext =
+	{ { 0 }, membershipsArray, false };
+
+	membershipsArray->count = 0;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, &parseArchiverMembershipArray))
+	{
+		log_error("Failed to list memberships for archiver %" PRId64
+				  " from the monitor", archiverId);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to parse the list of memberships returned by "
+				  "the monitor for archiver %" PRId64 ", see previous "
+													  "lines for details", archiverId);
 		return false;
 	}
 

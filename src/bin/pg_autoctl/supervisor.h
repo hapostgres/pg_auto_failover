@@ -26,10 +26,14 @@
 #define SERVICE_NAME_KEEPER "node-active"
 #define SERVICE_NAME_MONITOR "listener"
 
-/* an archiver's two halves, supervised together by start_archiver()
- * (service_archiver_run.c) -- see that file's own header comment */
-#define SERVICE_NAME_ARCHIVER_CAPTURE "archiver-capture"
+/* an archiver's two top-level halves, supervised together by
+ * start_archiver() (service_archiver_run.c) -- see that file's own header
+ * comment. "reconciler" in turn supervises one WAL-capture child per
+ * (formation, group) membership this archiver holds -- named
+ * "archiver-capture-<formation>-<group>" each, not a single fixed name,
+ * since there can be any number of them (service_archiver_reconciler.c). */
 #define SERVICE_NAME_ARCHIVER_SERVE "archiver-serve"
+#define SERVICE_NAME_ARCHIVER_RECONCILER "archiver-reconciler"
 
 /*
  * At pg_autoctl create time we use a transient service to initialize our local
@@ -78,6 +82,12 @@ typedef enum
  */
 #define SUPERVISOR_SERVICE_MAX_RETRY 5
 #define SUPERVISOR_SERVICE_MAX_TIME 300 /* in seconds */
+
+/*
+ * How long supervisor_remove_service() waits for a signalled service to
+ * actually exit before giving up and removing it from supervision anyway.
+ */
+#define SUPERVISOR_REMOVE_SERVICE_MAX_WAIT_MS 5000
 
 /*
  * We use a "ring buffer" of the MaxR most recent retries.
@@ -149,16 +159,63 @@ typedef struct Supervisor
 	 */
 	NodeSpecWatcher watcher;
 	NodeSpec watchedSpec;          /* last-applied spec — baseline for diff */
+
+	/*
+	 * Optional periodic callback, invoked once per supervisor_loop()
+	 * iteration -- the same cadence as the node spec watcher above (as
+	 * often as every 100ms when otherwise idle, more often during child
+	 * churn). NULL (the default, set via supervisor_start()) is a no-op.
+	 * A caller that wants periodic work done at a coarser cadence than
+	 * that -- the archiver reconciler's own membership-list polling, for
+	 * instance, see service_archiver_reconciler.c -- is expected to
+	 * track elapsed wall-clock time itself and mostly return
+	 * immediately, the same way service_archiver_serve.c's own
+	 * tick-counted routes refresh does at a different layer. Set via
+	 * supervisor_start_with_callback() rather than supervisor_start(),
+	 * so every existing caller is unaffected.
+	 *
+	 * This periodic callback is also the intended, and only supported,
+	 * way to call supervisor_add_service()/supervisor_remove_service()
+	 * below: both realloc `services`, which requires it to already be a
+	 * heap-allocated array -- true only for a caller that built its own
+	 * initial array that way before calling
+	 * supervisor_start_with_callback(), never for the plain stack/static
+	 * arrays every ordinary supervisor_start() caller passes in.
+	 */
+	void (*periodicCallback)(struct Supervisor *supervisor, void *context);
+	void *periodicCallbackContext;
+
+	/*
+	 * How many currently-tracked services are still expected to
+	 * eventually report exiting before supervisor_loop() may return --
+	 * decremented as each one permanently exits, incremented when one is
+	 * restarted instead. Used to be a plain local variable inside
+	 * supervisor_loop() itself; promoted onto the struct so that
+	 * supervisor_add_service()/supervisor_remove_service(), called from
+	 * outside that function (via the periodic callback above), can keep
+	 * it consistent too.
+	 */
+	int pendingSubprocessCount;
 } Supervisor;
 
 
 bool supervisor_start(Service services[], int serviceCount, const char *pidfile);
+
+bool supervisor_start_with_callback(Service services[], int serviceCount,
+									const char *pidfile,
+									void (*periodicCallback)(Supervisor *supervisor,
+															 void *context),
+									void *periodicCallbackContext);
 
 bool supervisor_stop(Supervisor *supervisor);
 
 bool supervisor_find_service_pid(const char *pidfile,
 								 const char *serviceName,
 								 pid_t *pid);
+
+bool supervisor_add_service(Supervisor *supervisor, Service service);
+
+bool supervisor_remove_service(Supervisor *supervisor, pid_t pid, int signal);
 
 
 #endif /* SUPERVISOR_H */

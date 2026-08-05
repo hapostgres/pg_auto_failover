@@ -37,6 +37,7 @@
 #include "pidfile.h"
 #include "primary_standby.h"
 #include "service_archiver.h"
+#include "service_archiver_run.h"
 #include "service_keeper.h"
 #include "service_keeper_init.h"
 #include "service_monitor.h"
@@ -72,6 +73,23 @@ static void cli_create_archiver(int argc, char **argv);
  * -- it's applied once at creation time, never persisted to the archiver's
  * own config file (see cli_create_archiver()'s own use of this). */
 static char archiverBasebackupPolicyName[NAMEDATALEN] = { 0 };
+
+/*
+ * --formation is repeatable on `create archiver`: a single archiver can
+ * hold a membership in more than one formation at once (service_archiver_
+ * reconciler.c runs one WAL-capture child per (formation, group), and
+ * service_archiver_serve.c serves all of them through one shared
+ * pg_walsender). Collected here rather than into KeeperConfig/keeperOptions
+ * (whose own .formation field is a single NAMEDATALEN buffer): archiverFormations[0]
+ * is still mirrored into options.formation, so the legacy single-membership
+ * fallback paths (this archiver's own persisted config file,
+ * service_archiver_serve.c's own no-memberships-yet fallback, and the still-
+ * single-membership `create archiver --run` path) keep behaving exactly as
+ * before for the common single-formation case.
+ */
+#define CLI_CREATE_ARCHIVER_MAX_FORMATIONS 64
+static char archiverFormations[CLI_CREATE_ARCHIVER_MAX_FORMATIONS][NAMEDATALEN];
+static int archiverFormationsCount = 0;
 
 static void check_hostname(const char *hostname);
 
@@ -1331,6 +1349,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 		{ "name", required_argument, NULL, 'a' },
 		{ "formation", required_argument, NULL, 'f' },
 		{ "basebackup-policy", required_argument, NULL, 'P' },
+		{ "region", required_argument, NULL, 'G' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -1341,7 +1360,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:C:m:n:a:f:P:xVvqh",
+	while ((c = getopt_long(argc, argv, "D:C:m:n:a:f:P:G:xVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -1389,8 +1408,19 @@ cli_create_archiver_getopts(int argc, char **argv)
 
 			case 'f':
 			{
-				strlcpy(options.formation, optarg, NAMEDATALEN);
-				log_trace("--formation %s", options.formation);
+				/* --formation <name>  (may be repeated) */
+				if (archiverFormationsCount >= CLI_CREATE_ARCHIVER_MAX_FORMATIONS)
+				{
+					log_fatal("pg_autoctl create archiver only supports up "
+							  "to %d --formation options",
+							  CLI_CREATE_ARCHIVER_MAX_FORMATIONS);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+
+				strlcpy(archiverFormations[archiverFormationsCount], optarg,
+						NAMEDATALEN);
+				++archiverFormationsCount;
+				log_trace("--formation %s", optarg);
 				break;
 			}
 
@@ -1398,6 +1428,19 @@ cli_create_archiver_getopts(int argc, char **argv)
 			{
 				strlcpy(archiverBasebackupPolicyName, optarg, NAMEDATALEN);
 				log_trace("--basebackup-policy %s", archiverBasebackupPolicyName);
+				break;
+			}
+
+			case 'G':
+			{
+				/* same field ordinary nodes' own --region uses
+				 * (cli_common.c's cli_common_keeper_getopts), not reused
+				 * here since an archiver has its own, much smaller getopts
+				 * -- but the underlying PostgresSetup.settings.region
+				 * field is still there on every KeeperConfig regardless of
+				 * node kind. */
+				strlcpy(options.pgSetup.settings.region, optarg, NAMEDATALEN);
+				log_trace("--region %s", options.pgSetup.settings.region);
 				break;
 			}
 
@@ -1458,10 +1501,18 @@ cli_create_archiver_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
-	if (IS_EMPTY_STRING_BUFFER(options.formation))
+	if (archiverFormationsCount == 0)
 	{
-		strlcpy(options.formation, "default", NAMEDATALEN);
+		strlcpy(archiverFormations[0], "default", NAMEDATALEN);
+		archiverFormationsCount = 1;
 	}
+
+	/*
+	 * options.formation (persisted to the archiver's own config file) keeps
+	 * mirroring the first --formation given -- see this file's own comment
+	 * on archiverFormations above for why.
+	 */
+	strlcpy(options.formation, archiverFormations[0], NAMEDATALEN);
 
 	options.pgSetup.pgKind = NODE_KIND_ARCHIVER;
 	strlcpy(options.nodeKind, "archiver", NAMEDATALEN);
@@ -1546,6 +1597,7 @@ cli_create_archiver(int argc, char **argv)
 		IS_EMPTY_STRING_BUFFER(config->name) ? config->hostname : config->name;
 
 	if (!monitor_register_archiver(&monitor, archiverName, config->hostname,
+								   config->pgSetup.settings.region,
 								   &archiverId))
 	{
 		log_fatal("Failed to register archiver \"%s\" on the monitor, "
@@ -1553,34 +1605,24 @@ cli_create_archiver(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!monitor_archiver_add_formation(&monitor, archiverId,
-										config->formation, &archiverNodeId))
-	{
-		log_fatal("Failed to attach archiver \"%s\" to formation \"%s\", "
-				  "see above for details", archiverName, config->formation);
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	log_info("Registered archiver \"%s\" (id %" PRId64 ") for formation "
-													   "\"%s\", ARCHIVING node id %"
-			 PRId64,
-			 archiverName, archiverId, config->formation, archiverNodeId);
-
 	/*
-	 * --basebackup-policy resolves a name to its basebackuppolicyid and
-	 * attaches it to this (formation, group) via set_archiver_policy() --
-	 * a formation/group-level setting (archiver_policy), not per-archiver,
-	 * matching get_archiver_policy()'s own resolution scope: any other
-	 * archiver later added to the same (formation, group) inherits it too.
-	 * archiverQuorum=1, replicationQuorumEligible=false are this schema's
-	 * own hardcoded defaults (get_archiver_policy()'s final fallback tier)
-	 * -- passed through explicitly here since set_archiver_policy() only
-	 * coaleses NULL to "keep existing" for a row that already exists, and
-	 * this may be the first policy ever set for this (formation, group).
+	 * --basebackup-policy resolves a name to its basebackuppolicyid once,
+	 * then gets attached to every --formation given below via set_archiver_
+	 * policy() -- a formation/group-level setting (archiver_policy), not
+	 * per-archiver, matching get_archiver_policy()'s own resolution scope:
+	 * any other archiver later added to the same (formation, group)
+	 * inherits it too. archiverQuorum=1, replicationQuorumEligible=false
+	 * are this schema's own hardcoded defaults (get_archiver_policy()'s
+	 * final fallback tier) -- passed through explicitly here since set_
+	 * archiver_policy() only coaleses NULL to "keep existing" for a row
+	 * that already exists, and this may be the first policy ever set for
+	 * this (formation, group).
 	 */
-	if (!IS_EMPTY_STRING_BUFFER(archiverBasebackupPolicyName))
+	bool hasBasebackupPolicy = !IS_EMPTY_STRING_BUFFER(archiverBasebackupPolicyName);
+	BasebackupPolicy basebackupPolicy = { 0 };
+
+	if (hasBasebackupPolicy)
 	{
-		BasebackupPolicy basebackupPolicy = { 0 };
 		bool foundPolicy = false;
 
 		if (!monitor_get_basebackup_policy(&monitor, archiverBasebackupPolicyName,
@@ -1597,21 +1639,65 @@ cli_create_archiver(int argc, char **argv)
 					  archiverBasebackupPolicyName);
 			exit(EXIT_CODE_BAD_ARGS);
 		}
+	}
 
-		if (!monitor_set_archiver_policy(&monitor, config->formation,
-										 -1, /* formation-wide, not one group */
-										 1,     /* archiverQuorum */
-										 basebackupPolicy.basebackupPolicyId,
-										 false /* replicationQuorumEligible */))
+	/*
+	 * Attach this archiver to every --formation given (at least one: either
+	 * what was passed on the command line, or "default" -- see cli_create_
+	 * archiver_getopts()). archiver_add_formation() itself attaches one
+	 * ARCHIVING node per group already in that formation, so a Citus
+	 * formation with several worker groups is fully covered by a single
+	 * call here.
+	 */
+	for (int i = 0; i < archiverFormationsCount; i++)
+	{
+		char *formation = archiverFormations[i];
+		int64_t thisArchiverNodeId = 0;
+
+		if (!monitor_archiver_add_formation(&monitor, archiverId,
+											formation, &thisArchiverNodeId))
 		{
-			log_fatal("Failed to attach base-backup policy \"%s\" to "
-					  "formation \"%s\", see above for details",
-					  archiverBasebackupPolicyName, config->formation);
+			log_fatal("Failed to attach archiver \"%s\" to formation \"%s\", "
+					  "see above for details", archiverName, formation);
 			exit(EXIT_CODE_MONITOR);
 		}
 
-		log_info("Attached base-backup policy \"%s\" to formation \"%s\"",
-				 archiverBasebackupPolicyName, config->formation);
+		log_info("Registered archiver \"%s\" (id %" PRId64 ") for formation "
+														   "\"%s\", ARCHIVING node id %"
+				 PRId64,
+				 archiverName, archiverId, formation, thisArchiverNodeId);
+
+		/*
+		 * archiverNodeId (used below for this process's own local state
+		 * file) tracks only the first --formation's own returned node id --
+		 * that local state is only ever consulted by the legacy single-
+		 * membership `create archiver --run` path (service_archiver_loop()
+		 * called directly, see below); the reconciler-based path discovers
+		 * every membership fresh from the monitor instead and never reads
+		 * it.
+		 */
+		if (i == 0)
+		{
+			archiverNodeId = thisArchiverNodeId;
+		}
+
+		if (hasBasebackupPolicy)
+		{
+			if (!monitor_set_archiver_policy(&monitor, formation,
+											 -1, /* formation-wide, not one group */
+											 1,     /* archiverQuorum */
+											 basebackupPolicy.basebackupPolicyId,
+											 false /* replicationQuorumEligible */))
+			{
+				log_fatal("Failed to attach base-backup policy \"%s\" to "
+						  "formation \"%s\", see above for details",
+						  archiverBasebackupPolicyName, formation);
+				exit(EXIT_CODE_MONITOR);
+			}
+
+			log_info("Attached base-backup policy \"%s\" to formation \"%s\"",
+					 archiverBasebackupPolicyName, formation);
+		}
 	}
 
 	strlcpy(config->role, KEEPER_ROLE, sizeof(config->role));
@@ -1658,17 +1744,27 @@ cli_create_archiver(int argc, char **argv)
 
 	if (createAndRun)
 	{
-		if (!create_pidfile(config->pathnames.pid, getpid()))
-		{
-			log_fatal("Failed to write archiver pid file \"%s\"",
-					  config->pathnames.pid);
-			exit(EXIT_CODE_BAD_STATE);
-		}
+		/*
+		 * Go through start_archiver() (service_archiver_run.c), exactly
+		 * like `pg_autoctl node run` does for an archiver node
+		 * (cli_service.c) -- not service_archiver_loop() directly, which
+		 * only ever ran the WAL-capture half and skipped "serve" (pg_
+		 * walsender) entirely. start_archiver() owns the pidfile itself
+		 * (via its own supervisor_start_with_callback() call), so this
+		 * process must not create one first -- doing so would make its
+		 * own startup check see a pidfile already populated with this
+		 * same pid and fail as "already running".
+		 *
+		 * We don't keep this connection open in the long-lived supervisor
+		 * process either, matching cli_service.c's own cli_keeper_run():
+		 * every service re-connects independently once started.
+		 */
+		pgsql_finish(&(keeper.monitor.pgsql));
 
-		(void) set_signal_handlers(false);
-
-		if (!service_archiver_loop(&keeper))
+		if (!start_archiver(&keeper))
 		{
+			log_fatal("Failed to start pg_autoctl archiver service, "
+					  "see above for details");
 			exit(EXIT_CODE_INTERNAL_ERROR);
 		}
 	}
@@ -1679,13 +1775,15 @@ CommandLine create_archiver_command =
 	make_command(
 		"archiver",
 		"Initialize a pg_auto_failover archiver node",
-		" [ --pgdata --pgctl --monitor --hostname --name --formation --basebackup-policy ] ",
+		" [ --pgdata --pgctl --monitor --hostname --name --formation --region --basebackup-policy ] ",
 		"  --pgdata            path to the archiver's local data/cache directory\n"
 		"  --pgctl             path to pg_ctl (used to locate pg_receivewal)\n"
 		"  --monitor           pg_auto_failover Monitor Postgres URL\n"
 		"  --hostname          hostname by which the archiver is reachable\n"
 		"  --name              archiver name (default: derived from hostname)\n"
-		"  --formation         formation to attach to (default: \"default\")\n"
+		"  --formation         formation to attach to, may be repeated (default: \"default\")\n"
+		"  --region            data-centre or availability-zone label for this "
+		"archiver (default: \"default\")\n"
 		"  --basebackup-policy base-backup production/retention policy to attach "
 		"(default: \"default\")\n"
 		"  --run               create node then run pg_autoctl service\n",

@@ -2,23 +2,28 @@
  * src/bin/pg_autoctl/service_archiver_serve.c
  *   See service_archiver_serve.h.
  *
- * Milestone 2's own scope, per the Build order in
- * ~/dev/temp/archiving-disaster-recovery.md: pg_walsender is exec'd exactly
- * once per archiver process, matching service_archiver.c's own single-
- * membership scope for pg_receivewal -- a future milestone generalizing to
- * several (formation, group) memberships per archiver needs this file and
- * service_archiver.c to grow the same "one child per membership" model
- * together, not independently.
+ * pg_walsender is exec'd exactly once per archiver process, but serves
+ * every (formation, group) membership that archiver holds through the one
+ * shared routes file -- one "[formation/group]" section per membership,
+ * refreshed from the monitor's own membership list
+ * (monitor_list_archiver_memberships) each time, mirroring the fan-out
+ * service_archiver_reconciler.c does on the capture side (one process per
+ * membership there, since pg_receivewal can only ever follow one primary
+ * at a time; a single pg_walsender can multiplex any number of client
+ * connections instead, so no such fan-out is needed here).
  *
- * The routes file this writes is deliberately built from *local* config
- * (config->formation/groupId/pgSetup.pgdata), not a monitor round-trip:
- * archiver_add_formation()'s own SQL (pgautofailover.sql) inserts the new
- * archiver_node row's pgdata as an empty string -- the monitor has no way
- * to know an archiver's local WAL cache path, that's inherently
- * archiver-host-local information never sent to it. The one thing genuinely
+ * Each route's walcache/position paths are deliberately *derived* rather
+ * than looked up on the monitor: archiver_add_formation()'s own SQL
+ * (pgautofailover.sql) inserts the new archiver_node row's pgdata as an
+ * empty string -- the monitor has no way to know an archiver's local WAL
+ * cache path, that's inherently archiver-host-local information never sent
+ * to it. Instead each route's paths are computed the same way service_
+ * archiver_reconciler.c's own build_membership_keeper() computes them for
+ * the capture side, from the same <root>/<formation>/<group>/ convention,
+ * so both independently arrive at identical paths. The one thing genuinely
  * worth asking the monitor is the latest base backup's storage location
  * (monitor_get_latest_basebackup_info), which is real, monitor-tracked
- * state once the "Base backup generation" milestone lands.
+ * state.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -257,18 +262,55 @@ walcache_current_timeline(const char *walcacheDir, int *timeline)
 
 	char tliHex[9] = { 0 };
 
-	memcpy(tliHex, best, 8);
+	memcpy(tliHex, best, 8); /* IGNORE-BANNED */
 	*timeline = (int) strtol(tliHex, NULL, 16);
 
 	return true;
 }
 
 
-bool
-service_archiver_serve_refresh_routes(Keeper *keeper)
+/*
+ * service_archiver_serve_membership_config derives a membership's own
+ * KeeperConfig from the archiver-level template config, exactly the way
+ * service_archiver_reconciler.c's own build_membership_keeper() derives a
+ * membership's Keeper: same <root>/<formation>/<group>/ walcache
+ * subdirectory (templateConfig->pgSetup.pgdata is the archiver's root, not
+ * any one membership's own cache), and pathnames re-derived from it, so
+ * this process independently computes the identical paths the capture
+ * side is writing into without any IPC between the two.
+ */
+static bool
+service_archiver_serve_membership_config(KeeperConfig *templateConfig,
+										 const char *formation,
+										 int groupId,
+										 KeeperConfig *outConfig)
 {
-	KeeperConfig *config = &(keeper->config);
+	*outConfig = *templateConfig;
 
+	strlcpy(outConfig->formation, formation, sizeof(outConfig->formation));
+	outConfig->groupId = groupId;
+
+	sformat(outConfig->pgSetup.pgdata, sizeof(outConfig->pgSetup.pgdata),
+			"%s/%s/%d", templateConfig->pgSetup.pgdata, formation, groupId);
+
+	return keeper_config_set_pathnames_from_pgdata(&(outConfig->pathnames),
+												   outConfig->pgSetup.pgdata);
+}
+
+
+/*
+ * service_archiver_serve_write_route writes one "[formation/group]" section
+ * to an already-open routes file, for a single membership. Split out of
+ * service_archiver_serve_refresh_routes() so that function can call this
+ * once per membership this archiver holds -- an archiver serves every
+ * membership it is attached to through the one shared pg_walsender/routes
+ * file, unlike the capture side, which runs one process per membership
+ * (service_archiver_reconciler.c).
+ */
+static bool
+service_archiver_serve_write_route(Monitor *monitor, KeeperConfig *config,
+								   FILE *fileStream)
+{
 	char basebackupLocation[MAXPGPATH] = { 0 };
 	char basebackupSource[NAMEDATALEN] = { 0 };
 	int basebackupTimeline = 0;
@@ -292,7 +334,7 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 	 * newer 'replay' backup exists (get_latest_basebackup's own comment,
 	 * pgautofailover.sql).
 	 */
-	if (!monitor_get_latest_basebackup_info(&(keeper->monitor),
+	if (!monitor_get_latest_basebackup_info(monitor,
 											config->formation,
 											config->groupId,
 											"live",
@@ -304,7 +346,8 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 											&found))
 	{
 		log_warn("Failed to fetch the latest base backup location from the "
-				 "monitor; the routes file will omit it for now");
+				 "monitor for \"%s/%d\"; the routes file will omit it for now",
+				 config->formation, config->groupId);
 		found = false;
 	}
 
@@ -322,9 +365,11 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 		if (walcache_current_timeline(config->pgSetup.pgdata, &walcacheTimeline) &&
 			walcacheTimeline != basebackupTimeline)
 		{
-			log_warn("The latest base backup is on timeline %d, but the "
-					 "walcache is capturing timeline %d; omitting the base "
-					 "backup from the routes file until they match",
+			log_warn("The latest base backup for \"%s/%d\" is on timeline "
+					 "%d, but the walcache is capturing timeline %d; "
+					 "omitting the base backup from the routes file until "
+					 "they match",
+					 config->formation, config->groupId,
 					 basebackupTimeline, walcacheTimeline);
 			found = false;
 		}
@@ -333,31 +378,16 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 	uint64_t systemIdentifier = 0;
 	bool foundSystemIdentifier = false;
 
-	if (!monitor_get_group_system_identifier(&(keeper->monitor),
+	if (!monitor_get_group_system_identifier(monitor,
 											 config->formation,
 											 config->groupId,
 											 &systemIdentifier,
 											 &foundSystemIdentifier))
 	{
-		log_warn("Failed to fetch the group's system identifier from the "
-				 "monitor; the routes file will omit it for now");
+		log_warn("Failed to fetch the system identifier for \"%s/%d\" from "
+				 "the monitor; the routes file will omit it for now",
+				 config->formation, config->groupId);
 		foundSystemIdentifier = false;
-	}
-
-	char routesPath[MAXPGPATH] = { 0 };
-
-	service_archiver_serve_routes_path(config, routesPath);
-
-	char tmpPath[MAXPGPATH] = { 0 };
-
-	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", routesPath);
-
-	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
-
-	if (fileStream == NULL)
-	{
-		/* errors have already been logged */
-		return false;
 	}
 
 	fformat(fileStream, "[%s/%d]\n", config->formation, config->groupId);
@@ -374,16 +404,18 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 	 * when it's missing -- an older archiver-serve binary talking to a
 	 * newer routes file, or vice versa, during a rolling upgrade.
 	 *
-	 * Read via service_archiver_read_current_lsn() rather than keeper->
-	 * postgres.currentLSN directly: this process (archiver-serve) and the
-	 * one that actually maintains that value (archiver-capture,
-	 * service_archiver.c) are separate fork()ed processes (service_
-	 * archiver_run.c) with independent copies of the Keeper struct after
-	 * the fork -- keeper->postgres.currentLSN in *this* process's memory
-	 * is permanently frozen at whatever it was at fork time (typically
-	 * empty/"0/0"), never updated by the sibling process's own writes.
-	 * The position file is the real, re-read-every-refresh channel that
-	 * actually crosses that boundary.
+	 * Read via service_archiver_read_current_lsn() rather than a Keeper's
+	 * own postgres.currentLSN directly: this process (archiver-serve) and
+	 * the one that actually maintains that value (archiver-capture,
+	 * service_archiver.c, one per membership since service_archiver_
+	 * reconciler.c) are separate fork()ed processes (service_archiver_
+	 * run.c) with independent copies of their own Keeper struct after the
+	 * fork -- no in-memory value in *this* process is ever updated by a
+	 * sibling process's own writes. The position file is the real,
+	 * re-read-every-refresh channel that actually crosses that boundary,
+	 * and config here already carries this membership's own pathnames
+	 * (service_archiver_serve_membership_config above), so it resolves to
+	 * the right file regardless of how many memberships this archiver has.
 	 */
 	char currentLSN[PG_LSN_MAXLENGTH] = "0/0";
 
@@ -402,6 +434,85 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 		fformat(fileStream, "systemid = %" PRIu64 "\n", systemIdentifier);
 	}
 
+	return true;
+}
+
+
+/*
+ * service_archiver_serve_refresh_routes writes one "[formation/group]"
+ * section per (formation, group) membership this archiver currently holds
+ * -- discovered fresh from the monitor every refresh, the same source of
+ * truth service_archiver_reconciler.c's own capture-side fan-out uses, so
+ * pg_walsender always has a route for every membership regardless of how
+ * many there are. Falls back to this archiver's own local config (the
+ * formation/group it was first created against) only when the monitor
+ * can't be reached or genuinely reports no memberships yet -- e.g. between
+ * `pg_autoctl create archiver` and its own first archiver_add_formation()
+ * completing.
+ */
+bool
+service_archiver_serve_refresh_routes(Keeper *keeper)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	ArchiverMembershipArray membershipsArray = { 0 };
+
+	if (!monitor_list_archiver_memberships(&(keeper->monitor),
+										   config->archiverId,
+										   &membershipsArray))
+	{
+		log_warn("Failed to list this archiver's memberships from the "
+				 "monitor; the routes file will only cover \"%s/%d\" for now",
+				 config->formation, config->groupId);
+		membershipsArray.count = 0;
+	}
+
+	if (membershipsArray.count == 0)
+	{
+		strlcpy(membershipsArray.memberships[0].formation, config->formation,
+				sizeof(membershipsArray.memberships[0].formation));
+		membershipsArray.memberships[0].groupId = config->groupId;
+		membershipsArray.count = 1;
+	}
+
+	char routesPath[MAXPGPATH] = { 0 };
+
+	service_archiver_serve_routes_path(config, routesPath);
+
+	char tmpPath[MAXPGPATH] = { 0 };
+
+	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", routesPath);
+
+	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
+
+	if (fileStream == NULL)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	bool success = true;
+
+	for (int i = 0; i < membershipsArray.count; i++)
+	{
+		ArchiverMembership *membership = &(membershipsArray.memberships[i]);
+
+		KeeperConfig membershipConfig = { 0 };
+
+		if (!service_archiver_serve_membership_config(config,
+													  membership->formation,
+													  membership->groupId,
+													  &membershipConfig) ||
+			!service_archiver_serve_write_route(&(keeper->monitor),
+												&membershipConfig,
+												fileStream))
+		{
+			log_warn("Failed to write the route for \"%s/%d\"",
+					 membership->formation, membership->groupId);
+			success = false;
+		}
+	}
+
 	if (fclose(fileStream) == EOF)
 	{
 		log_error("Failed to write file \"%s\": %m", tmpPath);
@@ -414,9 +525,10 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 		return false;
 	}
 
-	log_debug("Refreshed archiver routes file \"%s\"", routesPath);
+	log_debug("Refreshed archiver routes file \"%s\" (%d membership(s))",
+			  routesPath, membershipsArray.count);
 
-	return true;
+	return success;
 }
 
 

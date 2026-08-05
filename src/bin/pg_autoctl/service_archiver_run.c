@@ -16,6 +16,7 @@
 #include "log.h"
 #include "monitor.h"
 #include "service_archiver.h"
+#include "service_archiver_reconciler.h"
 #include "service_archiver_serve.h"
 #include "signals.h"
 #include "supervisor.h"
@@ -24,14 +25,19 @@
 /*
  * service_archiver_capture_start forks a child that runs
  * service_archiver_loop() (service_archiver.c) -- the outbound WAL-capture
- * half, supervising pg_receivewal against the group's primary. No exec():
- * this project's own binary already implements the loop, matching
- * service_keeper_start()'s sibling shape for an ordinary node minus the
- * execv() re-exec (that one replaces the process image to get a fresh
- * "node-active"-titled process; forking straight into the loop function is
- * simpler and just as correct here).
+ * half, supervising pg_receivewal against one (formation, group)
+ * membership's own primary. No exec(): this project's own binary already
+ * implements the loop, matching service_keeper_start()'s sibling shape for
+ * an ordinary node minus the execv() re-exec (that one replaces the
+ * process image to get a fresh "node-active"-titled process; forking
+ * straight into the loop function is simpler and just as correct here).
+ *
+ * Exported (not static): start_archiver() below no longer calls this
+ * directly -- it's service_archiver_reconciler.c that does, once per
+ * membership this archiver holds, since an archiver can hold more than
+ * one at once. See that file's own header comment for the full design.
  */
-static bool
+bool
 service_archiver_capture_start(void *context, pid_t *pid)
 {
 	Keeper *keeper = (Keeper *) context;
@@ -146,6 +152,17 @@ service_archiver_serve_start_service(void *context, pid_t *pid)
 }
 
 
+/*
+ * start_archiver supervises exactly two top-level children: "serve" (one
+ * pg_walsender for every membership this archiver holds, unchanged) and
+ * "reconciler" (service_archiver_reconciler.c), which in turn keeps one
+ * WAL-capture child per membership running, added and removed as this
+ * archiver's own attachments change. Both use the plain, unmodified
+ * supervisor_start() -- a fixed two-element array like every other node
+ * kind's own top-level supervisor -- so a bug in the reconciler's own,
+ * genuinely new dynamic-membership logic can only crash and restart the
+ * reconciler itself; "serve" is never affected.
+ */
 bool
 start_archiver(Keeper *keeper)
 {
@@ -153,17 +170,17 @@ start_archiver(Keeper *keeper)
 
 	Service subprocesses[] = {
 		{
-			SERVICE_NAME_ARCHIVER_CAPTURE,
-			RP_PERMANENT,
-			-1,
-			&service_archiver_capture_start,
-			(void *) keeper
-		},
-		{
 			SERVICE_NAME_ARCHIVER_SERVE,
 			RP_PERMANENT,
 			-1,
 			&service_archiver_serve_start_service,
+			(void *) keeper
+		},
+		{
+			SERVICE_NAME_ARCHIVER_RECONCILER,
+			RP_PERMANENT,
+			-1,
+			&service_archiver_reconciler_start,
 			(void *) keeper
 		}
 	};

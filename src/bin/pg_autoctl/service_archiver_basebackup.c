@@ -81,6 +81,7 @@
 #include "pgsql.h"
 #include "runprogram.h"
 #include "signals.h"
+#include "string_utils.h"
 
 /*
  * One base backup generation child at a time, mirroring
@@ -237,14 +238,13 @@ read_basebackup_label(const char *backupDir, char *lsnOut, size_t lsnOutSize,
 
 			size_t len = Min((size_t) (end - value), lsnOutSize - 1);
 
-			memcpy(lsnOut, value, len);
+			memcpy(lsnOut, value, len); /* IGNORE-BANNED */
 			lsnOut[len] = '\0';
 			foundLsn = true;
 		}
 		else if (strncmp(line, tliPrefix, strlen(tliPrefix)) == 0)
 		{
-			*timelineOut = atoi(line + strlen(tliPrefix));
-			foundTimeline = true;
+			foundTimeline = stringToInt(line + strlen(tliPrefix), timelineOut);
 		}
 
 		line = (nl != NULL) ? nl + 1 : NULL;

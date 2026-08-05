@@ -25,4 +25,11 @@
 
 bool start_archiver(Keeper *keeper);
 
+/*
+ * Exported for service_archiver_reconciler.c, which starts one of these
+ * per (formation, group) membership this archiver holds -- see that
+ * file's own header comment.
+ */
+bool service_archiver_capture_start(void *context, pid_t *pid);
+
 #endif /* SERVICE_ARCHIVER_RUN_H */
