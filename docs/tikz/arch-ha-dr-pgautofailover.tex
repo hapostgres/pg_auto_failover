@@ -48,32 +48,33 @@
          at (#1,#2) {\normalsize #5};
   }
 
-  %% three boxes on one horizontal line, the exact same layout as
-  %% arch-ha-dr-typical.tex -- only which pair is wrapped changes: here
-  %% High Availability and Disaster Recovery are the pair nested in one
-  %% outer box (pg_auto_failover, one product covering both), while
-  %% Backups stands alone on the right, in the slot Disaster Recovery
-  %% and Backups shared together on the other diagram.
+  %% three boxes on one horizontal line, same left-to-right order as
+  %% arch-ha-dr-typical.tex -- High Availability, Disaster Recovery,
+  %% Backups -- only which pair is wrapped changes: here High
+  %% Availability and Disaster Recovery are the pair nested in one
+  %% outer box (pg_auto_failover, one product covering both), on the
+  %% left; Backups stands alone on the right, same as it does on the
+  %% other diagram.
 
-  \boundarybox{-4.4}{0.4}{13.0}{6.6}{pgafBorder}
-  \boundaryheader{-3.9}{6.2}{pgafTxt}{pg\_auto\_failover}
-  \draw[draw=pgafBorder,line width=0.6pt] (-3.9,5.5) -- (12.5,5.5);
+  \boundarybox{-13.0}{0.4}{4.4}{6.6}{pgafBorder}
+  \boundaryheader{-12.5}{6.2}{pgafTxt}{pg\_auto\_failover}
+  \draw[draw=pgafBorder,line width=0.6pt] (-12.5,5.5) -- (3.9,5.5);
 
-  \boundarybox{-3.9}{0.9}{3.55}{5.1}{haBorder}
-  \boundaryheader{-3.4}{4.7}{haTxt}{High Availability}
-  \draw[draw=haBorder,line width=0.6pt] (-3.4,4.0) -- (3.05,4.0);
-  \servicebox{-0.175}{1.95}{haBorder}{6.2cm}{pg\_auto\_failover}
+  \boundarybox{-12.5}{0.9}{-4.55}{5.1}{haBorder}
+  \boundaryheader{-12.0}{4.7}{haTxt}{High Availability}
+  \draw[draw=haBorder,line width=0.6pt] (-12.0,4.0) -- (-5.05,4.0);
+  \servicebox{-8.525}{1.95}{haBorder}{6.2cm}{pg\_auto\_failover}
 
-  \boundarybox{4.05}{0.9}{12.5}{5.1}{bkBorder}
-  \boundaryheader{4.55}{4.7}{bkTxt}{Disaster Recovery}
-  \draw[draw=bkBorder,line width=0.6pt] (4.55,4.0) -- (12.0,4.0);
-  \servicebox{8.275}{1.95}{bkBorder}{6.2cm}{pg\_auto\_failover}
+  \boundarybox{-4.05}{0.9}{3.9}{5.1}{bkBorder}
+  \boundaryheader{-3.55}{4.7}{bkTxt}{Disaster Recovery}
+  \draw[draw=bkBorder,line width=0.6pt] (-3.55,4.0) -- (3.4,4.0);
+  \servicebox{-0.075}{1.95}{bkBorder}{6.2cm}{pg\_auto\_failover}
 
-  \boundarybox{-13.0}{0.4}{-5.3}{6.6}{bkBorder}
-  \boundaryheader{-12.5}{6.2}{bkTxt}{Backups}
-  \draw[draw=bkBorder,line width=0.6pt] (-12.5,5.5) -- (-5.8,5.5);
-  \servicebox{-9.15}{4.3}{bkBorder}{6.2cm}{pgBackRest}
-  \servicebox{-9.15}{1.7}{bkBorder}{6.2cm}{pgBarman}
+  \boundarybox{5.3}{0.4}{13.0}{6.6}{bkBorder}
+  \boundaryheader{5.8}{6.2}{bkTxt}{Backups}
+  \draw[draw=bkBorder,line width=0.6pt] (5.8,5.5) -- (12.5,5.5);
+  \servicebox{9.15}{4.3}{bkBorder}{6.2cm}{pgBackRest}
+  \servicebox{9.15}{1.7}{bkBorder}{6.2cm}{pgBarman}
 
 \end{tikzpicture}
 
