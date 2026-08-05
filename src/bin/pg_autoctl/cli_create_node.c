@@ -67,6 +67,12 @@ static void cli_create_monitor(int argc, char **argv);
 static int cli_create_archiver_getopts(int argc, char **argv);
 static void cli_create_archiver(int argc, char **argv);
 
+/* --basebackup-policy on `create archiver`: a policy name to resolve and
+ * attach via set_archiver_policy(), not part of KeeperConfig/keeperOptions
+ * -- it's applied once at creation time, never persisted to the archiver's
+ * own config file (see cli_create_archiver()'s own use of this). */
+static char archiverBasebackupPolicyName[NAMEDATALEN] = { 0 };
+
 static void check_hostname(const char *hostname);
 
 CommandLine create_monitor_command =
@@ -1324,6 +1330,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 		{ "hostname", required_argument, NULL, 'n' },
 		{ "name", required_argument, NULL, 'a' },
 		{ "formation", required_argument, NULL, 'f' },
+		{ "basebackup-policy", required_argument, NULL, 'P' },
 		{ "run", no_argument, NULL, 'x' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -1334,7 +1341,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:C:m:n:a:f:xVvqh",
+	while ((c = getopt_long(argc, argv, "D:C:m:n:a:f:P:xVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -1384,6 +1391,13 @@ cli_create_archiver_getopts(int argc, char **argv)
 			{
 				strlcpy(options.formation, optarg, NAMEDATALEN);
 				log_trace("--formation %s", options.formation);
+				break;
+			}
+
+			case 'P':
+			{
+				strlcpy(archiverBasebackupPolicyName, optarg, NAMEDATALEN);
+				log_trace("--basebackup-policy %s", archiverBasebackupPolicyName);
 				break;
 			}
 
@@ -1552,6 +1566,54 @@ cli_create_archiver(int argc, char **argv)
 			 PRId64,
 			 archiverName, archiverId, config->formation, archiverNodeId);
 
+	/*
+	 * --basebackup-policy resolves a name to its basebackuppolicyid and
+	 * attaches it to this (formation, group) via set_archiver_policy() --
+	 * a formation/group-level setting (archiver_policy), not per-archiver,
+	 * matching get_archiver_policy()'s own resolution scope: any other
+	 * archiver later added to the same (formation, group) inherits it too.
+	 * archiverQuorum=1, replicationQuorumEligible=false are this schema's
+	 * own hardcoded defaults (get_archiver_policy()'s final fallback tier)
+	 * -- passed through explicitly here since set_archiver_policy() only
+	 * coaleses NULL to "keep existing" for a row that already exists, and
+	 * this may be the first policy ever set for this (formation, group).
+	 */
+	if (!IS_EMPTY_STRING_BUFFER(archiverBasebackupPolicyName))
+	{
+		BasebackupPolicy basebackupPolicy = { 0 };
+		bool foundPolicy = false;
+
+		if (!monitor_get_basebackup_policy(&monitor, archiverBasebackupPolicyName,
+										   &basebackupPolicy, &foundPolicy))
+		{
+			log_fatal("Failed to resolve base-backup policy \"%s\", see "
+					  "above for details", archiverBasebackupPolicyName);
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		if (!foundPolicy)
+		{
+			log_fatal("Base-backup policy \"%s\" does not exist",
+					  archiverBasebackupPolicyName);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		if (!monitor_set_archiver_policy(&monitor, config->formation,
+										 -1, /* formation-wide, not one group */
+										 1,     /* archiverQuorum */
+										 basebackupPolicy.basebackupPolicyId,
+										 false /* replicationQuorumEligible */))
+		{
+			log_fatal("Failed to attach base-backup policy \"%s\" to "
+					  "formation \"%s\", see above for details",
+					  archiverBasebackupPolicyName, config->formation);
+			exit(EXIT_CODE_MONITOR);
+		}
+
+		log_info("Attached base-backup policy \"%s\" to formation \"%s\"",
+				 archiverBasebackupPolicyName, config->formation);
+	}
+
 	strlcpy(config->role, KEEPER_ROLE, sizeof(config->role));
 	config->groupId = 0;
 	config->network_partition_timeout = NETWORK_PARTITION_TIMEOUT;
@@ -1617,14 +1679,16 @@ CommandLine create_archiver_command =
 	make_command(
 		"archiver",
 		"Initialize a pg_auto_failover archiver node",
-		" [ --pgdata --pgctl --monitor --hostname --name --formation ] ",
-		"  --pgdata          path to the archiver's local data/cache directory\n"
-		"  --pgctl           path to pg_ctl (used to locate pg_receivewal)\n"
-		"  --monitor         pg_auto_failover Monitor Postgres URL\n"
-		"  --hostname        hostname by which the archiver is reachable\n"
-		"  --name            archiver name (default: derived from hostname)\n"
-		"  --formation       formation to attach to (default: \"default\")\n"
-		"  --run             create node then run pg_autoctl service\n",
+		" [ --pgdata --pgctl --monitor --hostname --name --formation --basebackup-policy ] ",
+		"  --pgdata            path to the archiver's local data/cache directory\n"
+		"  --pgctl             path to pg_ctl (used to locate pg_receivewal)\n"
+		"  --monitor           pg_auto_failover Monitor Postgres URL\n"
+		"  --hostname          hostname by which the archiver is reachable\n"
+		"  --name              archiver name (default: derived from hostname)\n"
+		"  --formation         formation to attach to (default: \"default\")\n"
+		"  --basebackup-policy base-backup production/retention policy to attach "
+		"(default: \"default\")\n"
+		"  --run               create node then run pg_autoctl service\n",
 		cli_create_archiver_getopts,
 		cli_create_archiver);
 

@@ -3,25 +3,34 @@
  *   Archiving & Disaster Recovery: base backup generation, both `live` and
  *   `replay`/`volatile` sources (Milestone 5, per the Build order in
  *   ~/dev/temp/archiving-disaster-recovery.md: "live first, then
- *   replay/volatile"). `replay`/`persistent` is a later milestone --
- *   that mode keeps its staging instance resident as a `warm-standby`
- *   `archiver_node` row, which doesn't exist until Milestone 6.
+ *   replay/volatile"), plus policy-driven scheduling and retention --
+ *   appended to M5 rather than left as a follow-up, so the archiver's own
+ *   base-backup production is a real, bounded resource (frequency-gated,
+ *   count/age-pruned) before Milestones 6/7/8 (warm standby, PITR, cloud
+ *   push) start building on top of it. `replay`/`persistent` is still a
+ *   later milestone -- that mode keeps its staging instance resident as a
+ *   `warm-standby` `archiver_node` row, which doesn't exist until
+ *   Milestone 6.
  *
- * Trigger scope for this pass: bootstrap, then exactly one replay-sourced
- * backup to exercise that pipeline once -- both hardcoded here, not read
- * from basebackup_policy. A group with zero existing base backups gets one
- * immediately, sourced live (matching the design doc's own bootstrap rule:
- * nothing to replay from yet on the first run). Once that lands, the very
- * next tick takes exactly one more, this time sourced replay/volatile, and
- * after that this file goes quiet for the group. Real frequency-driven
- * scheduling (basebackup_policy's own `source`/`replaymode`/`frequency`/
- * `onpromotion`/retention fields, resolved through `get_archiver_policy()`/
- * `get_basebackup_policy()`) needs that policy wired through the CLI
- * first -- out of scope here. This is a deliberate scope cut, not an
- * oversight: the milestone-defining new capability is the replay mechanism
- * itself (extract, replay, promote, snapshot, discard), not a general
- * scheduler -- see the design doc's own build order, which lists "warm
- * standby" and its `advance`/scheduling machinery as later milestones.
+ * Trigger scope: bootstrap is always `live` (nothing to replay from yet on
+ * the first run, matching the design doc's own bootstrap rule), every
+ * backup after that follows basebackup_policy's own `source`/`replaymode`
+ * (resolved via monitor_get_basebackup_policy_for_group(), which chains
+ * get_archiver_policy()'s group-override / formation-default / schema-
+ * default fallback the same way wal_archived()'s own archiver_quorum
+ * lookup does), gated on `frequency` seconds having elapsed since the
+ * newest existing backup -- or fired immediately regardless of frequency
+ * when `onpromotion` is set and the group's primary has changed since the
+ * last tick that checked (see get_current_primary_node_id()'s own
+ * comment). After each successful completion, retention prunes anything
+ * beyond `maxcount` or older than `maxage` (apply_basebackup_retention()):
+ * removes the directory, then report_basebackup_deleted() on the monitor,
+ * which cascades to prune_archiver_wal() on its own. `concurrency` is
+ * read but not enforced: this milestone's own single-membership scope
+ * (one archiver, one group) already limits this file to one base backup
+ * production job in flight at a time (basebackup_child_is_running()) --
+ * running several concurrently only has meaning once an archiver can serve
+ * more than one (formation, group) at once, a later milestone's concern.
  *
  * Target selection ('live') follows the design doc's own precedence,
  * minus its warm-standby tier (a later milestone, nothing to select from
@@ -307,9 +316,11 @@ accumulate_file_size(const char *path, const struct stat *sb,
  * dirPath. Best effort: sizebytes is informational only (nothing in the
  * monitor schema's own logic -- prune_archiver_wal() included -- reads it
  * back), so a failure here is not worth failing an otherwise-successful
- * base backup over.
+ * base backup over. Exposed (service_archiver_basebackup.h) for service_
+ * archiver.c's own periodic storage-usage report, over the archiver's
+ * whole pgdata rather than just one backup directory.
  */
-static uint64_t
+uint64_t
 directory_size(const char *dirPath)
 {
 	directorySizeAccumulator = 0;
@@ -489,22 +500,109 @@ report_basebackup(Keeper *keeper, NodeAddress *endLsnSource,
 
 
 /*
+ * apply_basebackup_retention lists every complete base backup for this
+ * group (newest first, list_basebackups()'s own ordering) and prunes
+ * whatever policy says shouldn't survive: anything beyond the newest
+ * maxcount, or older than maxage, whichever fires first for a given
+ * backup -- a backup can be pruned for either reason independently, not
+ * only once maxcount is already exceeded. maxcount <= 0 or maxage_seconds
+ * <= 0 disables that particular rule (there is no real-world policy where
+ * "keep zero backups" or "expire instantly" is the intended behavior; the
+ * schema's own CHECK constraints don't allow either as a stored value,
+ * but this stays defensive against a hand-edited row or a future relaxed
+ * constraint).
+ *
+ * Best effort past the first failure: one backup's directory failing to
+ * remove (e.g. a permissions issue) does not stop the rest of the list
+ * from being evaluated -- each one is independent, and the failed one
+ * simply gets retried on the next cycle since it's still 'complete' and
+ * still over its own retention rule.
+ */
+static bool
+apply_basebackup_retention(Keeper *keeper, BasebackupPolicy *policy)
+{
+	KeeperConfig *config = &(keeper->config);
+	BasebackupInfoArray backups = { 0 };
+
+	if (!monitor_list_basebackups(&(keeper->monitor),
+								  config->formation, config->groupId,
+								  &backups))
+	{
+		log_warn("Failed to list base backups for retention, will retry "
+				 "on the next cycle");
+		return false;
+	}
+
+	time_t now = time(NULL);
+	bool success = true;
+
+	for (int i = 0; i < backups.count; i++)
+	{
+		BasebackupInfo *backup = &(backups.backups[i]);
+
+		bool beyondMaxCount = policy->maxCount > 0 && i >= policy->maxCount;
+		bool beyondMaxAge = policy->maxAgeSeconds > 0 &&
+							(now - (time_t) backup->startedAtEpoch) >
+							policy->maxAgeSeconds;
+
+		if (!beyondMaxCount && !beyondMaxAge)
+		{
+			continue;
+		}
+
+		log_info("Pruning base backup \"%s\" (%s)",
+				 backup->label,
+				 beyondMaxCount ? "beyond maxcount" : "past maxage");
+
+		if (directory_exists(backup->storageLocation) &&
+			!rmtree(backup->storageLocation, true))
+		{
+			log_warn("Failed to remove base backup directory \"%s\", will "
+					 "retry on the next cycle", backup->storageLocation);
+			success = false;
+			continue;
+		}
+
+		if (!monitor_report_basebackup_deleted(&(keeper->monitor),
+											   backup->basebackupId))
+		{
+			log_warn("Failed to report base backup %" PRId64 " as deleted "
+															 "to the monitor, will retry on the next cycle",
+					 backup->basebackupId);
+			success = false;
+		}
+	}
+
+	return success;
+}
+
+
+/*
  * generate_live_basebackup is the forked child's own body for a `live`
- * backup: run pg_basebackup against source to completion, then report it.
- * Runs in its own process, with its own monitor connection (the parent's
- * keeper->monitor is not fork-safe to share, exactly as
- * service_archiver_run.c's own supervised children already document).
+ * backup: run pg_basebackup against source to completion, report it, then
+ * apply retention. Runs in its own process, with its own monitor
+ * connection (the parent's keeper->monitor is not fork-safe to share,
+ * exactly as service_archiver_run.c's own supervised children already
+ * document).
  */
 static bool
 generate_live_basebackup(Keeper *keeper, NodeAddress *source,
-						 const char *backupDir, const char *label)
+						 const char *backupDir, const char *label,
+						 BasebackupPolicy *policy)
 {
 	if (!run_pg_basebackup(&(keeper->config), source, backupDir, label))
 	{
 		return false;
 	}
 
-	return report_basebackup(keeper, source, backupDir, label, "live", NULL);
+	if (!report_basebackup(keeper, source, backupDir, label, "live", NULL))
+	{
+		return false;
+	}
+
+	(void) apply_basebackup_retention(keeper, policy);
+
+	return true;
 }
 
 
@@ -598,10 +696,23 @@ write_replay_recovery_config(const char *stagingDir, const char *walcacheDir)
 
 	char conf[BUFSIZE] = { 0 };
 
+	/*
+	 * ssl = off: the copied postgresql.conf/postgresql.auto.conf still
+	 * carries the source node's own ssl_cert_file/ssl_key_file settings
+	 * (typically absolute paths into *that node's* PGDATA, e.g. from
+	 * --ssl-self-signed) -- meaningless here, since this archiver has no
+	 * Postgres SSL certs of its own to begin with. Left enabled, the
+	 * staging instance fails outright at startup ("could not load server
+	 * certificate file ...: No such file or directory"). Safe to disable
+	 * unconditionally: this instance only ever accepts the loopback
+	 * pg_basebackup connection below, for the lifetime of one throwaway
+	 * cycle.
+	 */
 	sformat(conf, sizeof(conf),
 			"\n"
 			"# added by pg_autoctl's archiver replay/volatile base backup generation\n"
-			"restore_command = 'cp \"%s/%%f\" \"%%p\"'\n",
+			"restore_command = 'cp \"%s/%%f\" \"%%p\"'\n"
+			"ssl = off\n",
 			walcacheDir);
 
 	return append_to_file(conf, strlen(conf), confPath);
@@ -766,7 +877,8 @@ wait_for_replay_promotion(const char *connInfo, int timeoutSeconds)
  */
 static bool
 generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
-						   const char *backupDir, const char *label)
+						   const char *backupDir, const char *label,
+						   BasebackupPolicy *policy)
 {
 	KeeperConfig *config = &(keeper->config);
 
@@ -833,7 +945,12 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 
 		ok = run_pg_basebackup(config, &stagingNode, backupDir, label) &&
 			 report_basebackup(keeper, &stagingNode, backupDir, label,
-							   "replay", "volatile");
+							   "replay", policy->replayMode);
+
+		if (ok)
+		{
+			(void) apply_basebackup_retention(keeper, policy);
+		}
 	}
 
 	stop_staging_postgres();
@@ -850,12 +967,60 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 
 
 /*
+ * lastKnownPrimaryNodeId tracks the group's primary across ticks, purely
+ * in-memory (reset on archiver restart, same lifetime as basebackupPid/
+ * stagingPostgresPid above) -- -1 means "not observed yet", which the
+ * onpromotion check below treats as "nothing to compare against", not "a
+ * promotion just happened" (that would misfire a forced backup on this
+ * process's very first tick).
+ */
+static int64_t lastKnownPrimaryNodeId = -1;
+
+
+/*
+ * get_current_primary_node_id finds the group's current primary via the
+ * same monitor_get_nodes() call select_basebackup_source() already makes
+ * for its own, different purpose (picking a live source) -- kept as a
+ * separate round trip rather than sharing state across the two call
+ * sites, since either can run without the other on a given tick
+ * (onpromotion is checked unconditionally; select_basebackup_source() only
+ * runs once a backup already turns out to be due). Returns false (not an
+ * error) when the group currently has no primary at all (mid-election) --
+ * callers should skip the comparison for this tick rather than treat that
+ * as "no promotion".
+ */
+static bool
+get_current_primary_node_id(Keeper *keeper, int64_t *primaryNodeId)
+{
+	NodeAddressArray nodeArray = { 0 };
+
+	if (!monitor_get_nodes(&(keeper->monitor),
+						   keeper->config.formation,
+						   keeper->config.groupId,
+						   &nodeArray))
+	{
+		return false;
+	}
+
+	for (int i = 0; i < nodeArray.count; i++)
+	{
+		if (nodeArray.nodes[i].isPrimary)
+		{
+			*primaryNodeId = nodeArray.nodes[i].nodeId;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
  * service_archiver_maybe_generate_basebackup checks, once per
  * service_archiver_loop() tick, whether a base backup generation is due
  * for this group and -- if so, and no generation is already in flight --
  * forks a child to produce one. See this file's own header comment for
- * the full trigger scope of this pass (bootstrap live, then exactly one
- * replay/volatile backup to exercise that pipeline).
+ * the full policy-driven trigger scope this implements.
  */
 bool
 service_archiver_maybe_generate_basebackup(Keeper *keeper)
@@ -866,31 +1031,82 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	}
 
 	KeeperConfig *config = &(keeper->config);
-	bool found = false;
-	char storageLocation[MAXPGPATH] = { 0 };
-	char latestSource[NAMEDATALEN] = { 0 };
-	int latestTimeline = 0;
 
-	if (!monitor_get_latest_basebackup_info(&(keeper->monitor),
-											config->formation,
-											config->groupId,
-											NULL, /* any source */
-											storageLocation,
-											sizeof(storageLocation),
-											latestSource,
-											sizeof(latestSource),
-											&latestTimeline,
-											&found))
+	BasebackupPolicy policy = { 0 };
+	bool foundPolicy = false;
+
+	if (!monitor_get_basebackup_policy_for_group(&(keeper->monitor),
+												 config->formation,
+												 config->groupId,
+												 &policy, &foundPolicy))
 	{
 		/* errors already logged */
 		return false;
 	}
 
-	if (found && strcmp(latestSource, "replay") == 0)
+	if (!foundPolicy)
 	{
-		/* both the bootstrap live backup and this pass's own one-time
-		 * replay exercise are done; real scheduling is a follow-up, see
-		 * this file's own header comment */
+		/* shouldn't happen: the schema's own 'default' policy always
+		 * exists, and get_archiver_policy()'s own three-way fallback
+		 * always resolves to at least that row */
+		log_warn("Failed to resolve a base-backup policy for \"%s\"/%d, "
+				 "skipping this cycle", config->formation, config->groupId);
+		return true;
+	}
+
+	BasebackupInfoArray backups = { 0 };
+
+	if (!monitor_list_basebackups(&(keeper->monitor),
+								  config->formation, config->groupId,
+								  &backups))
+	{
+		/* errors already logged */
+		return false;
+	}
+
+	bool bootstrap = (backups.count == 0);
+
+	/*
+	 * Runs every tick regardless of whether a backup is otherwise due, so
+	 * lastKnownPrimaryNodeId always reflects the most recently observed
+	 * primary -- skipping this update on a due-anyway tick would compare
+	 * a future promotion against a stale value from several ticks back
+	 * and misfire.
+	 */
+	bool forcedByPromotion = false;
+
+	if (policy.onPromotion)
+	{
+		int64_t currentPrimaryNodeId = 0;
+
+		if (get_current_primary_node_id(keeper, &currentPrimaryNodeId))
+		{
+			if (lastKnownPrimaryNodeId >= 0 &&
+				lastKnownPrimaryNodeId != currentPrimaryNodeId)
+			{
+				forcedByPromotion = true;
+
+				log_info("Forcing a new base backup: the group's primary "
+						 "changed (node %" PRId64 " -> node %" PRId64 ")",
+						 lastKnownPrimaryNodeId, currentPrimaryNodeId);
+			}
+
+			lastKnownPrimaryNodeId = currentPrimaryNodeId;
+		}
+	}
+
+	bool due = bootstrap || forcedByPromotion;
+
+	if (!due)
+	{
+		time_t now = time(NULL);
+		time_t elapsed = now - (time_t) backups.backups[0].startedAtEpoch;
+
+		due = elapsed >= (time_t) policy.frequencySeconds;
+	}
+
+	if (!due)
+	{
 		return true;
 	}
 
@@ -905,6 +1121,11 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 		return false;
 	}
 
+	/* bootstrap is always 'live' -- nothing to replay from yet, matching
+	 * the design doc's own bootstrap rule -- every backup after that
+	 * follows the resolved policy's own source */
+	bool useReplay = !bootstrap && strcmp(policy.source, "replay") == 0;
+
 	time_t now = time(NULL);
 	struct tm nowUTC = { 0 };
 
@@ -913,7 +1134,7 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	char label[NAMEDATALEN] = { 0 };
 
 	strftime(label, sizeof(label),
-			 found ? "basebackup-replay-%Y%m%dT%H%M%SZ"
+			 useReplay ? "basebackup-replay-%Y%m%dT%H%M%SZ"
 			 : "basebackup-%Y%m%dT%H%M%SZ",
 			 &nowUTC);
 
@@ -922,20 +1143,23 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	sformat(backupDir, sizeof(backupDir), "%s/%s", backupsDir, label);
 
 	/*
-	 * sourceBackupDir must be captured now, in the parent, into a
-	 * fixed-size buffer the forked child can safely read after fork():
-	 * storageLocation itself is a local, stack-allocated array, still
-	 * valid across fork() (the child gets its own copy of the whole
-	 * address space), so this is really just documenting that fact.
+	 * sourceBackupDir/policy must be captured now, in the parent, into
+	 * buffers the forked child can safely read after fork(): both are
+	 * local, stack-allocated, still valid across fork() (the child gets
+	 * its own copy of the whole address space).
 	 */
 	char sourceBackupDir[MAXPGPATH] = { 0 };
 
-	strlcpy(sourceBackupDir, storageLocation, sizeof(sourceBackupDir));
+	if (useReplay)
+	{
+		strlcpy(sourceBackupDir, backups.backups[0].storageLocation,
+				sizeof(sourceBackupDir));
+	}
 
 	NodeAddress liveSource = { 0 };
 	bool haveLiveSource = false;
 
-	if (!found)
+	if (!useReplay)
 	{
 		if (!select_basebackup_source(keeper, &liveSource))
 		{
@@ -964,9 +1188,10 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 		(void) set_ps_title("pg_autoctl: archiver basebackup");
 
 		bool ok = haveLiveSource
-				  ? generate_live_basebackup(keeper, &liveSource, backupDir, label)
+				  ? generate_live_basebackup(keeper, &liveSource, backupDir,
+											 label, &policy)
 				  : generate_replay_basebackup(keeper, sourceBackupDir,
-											   backupDir, label);
+											   backupDir, label, &policy);
 
 		exit(ok ? EXIT_CODE_QUIT : EXIT_CODE_INTERNAL_ERROR);
 	}

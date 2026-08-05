@@ -40,6 +40,7 @@
 #include "pidfile.h"
 #include "state.h"
 #include "string_utils.h"
+#include "system_utils.h"
 #include "watch.h"
 #include "watch_colspecs.h"
 
@@ -51,6 +52,7 @@ static bool cli_watch_process_keys(WatchContext *context);
 static int print_watch_header(WatchContext *context, int r);
 static int print_watch_footer(WatchContext *context);
 static int print_nodes_array(WatchContext *context, int r, int c);
+static int print_archivers_array(WatchContext *context, int r, int c);
 static int print_events_array(WatchContext *context, int r, int c);
 
 static void print_current_time(WatchContext *context, int r);
@@ -249,6 +251,7 @@ cli_watch_update_from_monitor(WatchContext *context)
 {
 	Monitor *monitor = &(context->monitor);
 	CurrentNodeStateArray *nodesArray = &(context->nodesArray);
+	ArchiverInfoArray *archiversArray = &(context->archiversArray);
 	MonitorEventsArray *eventsArray = &(context->eventsArray);
 
 	/*
@@ -263,6 +266,12 @@ cli_watch_update_from_monitor(WatchContext *context)
 								   context->formation,
 								   context->groupId,
 								   nodesArray))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (!monitor_get_archivers(monitor, context->formation, archiversArray))
 	{
 		/* errors have already been logged */
 		return false;
@@ -493,7 +502,20 @@ cli_watch_render(WatchContext *context, WatchContext *previous)
 	int firstNodeRow = nodeHeaderRow + 1;
 	int lastNodeRow = firstNodeRow + context->nodesArray.count - 1;
 
-	int eventHeaderRow = lastNodeRow + 2; /* blank line, evenzt headers */
+	/*
+	 * The archivers area only takes up screen space when there's at least
+	 * one archiver attached to the formation -- an ordinary cluster with no
+	 * archivers should look exactly like it did before this section existed
+	 * (firstArchiverRow > lastArchiverRow makes it an empty range, which the
+	 * area-selection cascade below naturally skips over).
+	 */
+	int archiverHeaderRow = lastNodeRow + 2; /* blank line, archiver headers */
+	int firstArchiverRow = archiverHeaderRow + 1;
+	int lastArchiverRow = firstArchiverRow + context->archiversArray.count - 1;
+
+	int eventHeaderRow = (context->archiversArray.count > 0)
+						 ? lastArchiverRow + 2
+						 : lastNodeRow + 2; /* blank line, event headers */
 	int firstEventRow = eventHeaderRow + 1;
 	int lastEventRow = firstEventRow + context->eventsArray.count - 1;
 
@@ -513,9 +535,11 @@ cli_watch_render(WatchContext *context, WatchContext *previous)
 	 * that's part of the data: avoid empty separation lines, avoid header
 	 * lines.
 	 *
-	 * We conceptually divide the screen in two areas: first, the nodes array
-	 * area, and then the events area. When scrolling away from an area we may
-	 * jump to the other area directly.
+	 * We conceptually divide the screen in three areas: the nodes array
+	 * area, the archivers area, and the events area. When scrolling away
+	 * from an area we may jump to the other area directly -- area 2
+	 * (archivers) is skipped over entirely when there are no archivers to
+	 * show (firstArchiverRow > lastArchiverRow).
 	 */
 	if (context->selectedArea == 1)
 	{
@@ -525,16 +549,45 @@ cli_watch_render(WatchContext *context, WatchContext *previous)
 		}
 		else if (context->selectedRow > lastNodeRow)
 		{
-			context->selectedArea = 2;
-			context->selectedRow = firstEventRow;
+			if (context->archiversArray.count > 0)
+			{
+				context->selectedArea = 2;
+				context->selectedRow = firstArchiverRow;
+			}
+			else
+			{
+				context->selectedArea = 3;
+				context->selectedRow = firstEventRow;
+			}
 		}
 	}
 	else if (context->selectedArea == 2)
 	{
-		if (context->selectedRow < firstEventRow)
+		if (context->selectedRow < firstArchiverRow)
 		{
 			context->selectedArea = 1;
 			context->selectedRow = lastNodeRow;
+		}
+		else if (context->selectedRow > lastArchiverRow)
+		{
+			context->selectedArea = 3;
+			context->selectedRow = firstEventRow;
+		}
+	}
+	else if (context->selectedArea == 3)
+	{
+		if (context->selectedRow < firstEventRow)
+		{
+			if (context->archiversArray.count > 0)
+			{
+				context->selectedArea = 2;
+				context->selectedRow = lastArchiverRow;
+			}
+			else
+			{
+				context->selectedArea = 1;
+				context->selectedRow = lastNodeRow;
+			}
 		}
 		else if (context->selectedRow > lastEventRow)
 		{
@@ -555,6 +608,16 @@ cli_watch_render(WatchContext *context, WatchContext *previous)
 	printedRows += nodeRows;
 
 	(void) clear_line_at(printedRows);
+
+	if (context->archiversArray.count > 0)
+	{
+		(void) clear_line_at(++printedRows);
+
+		int archiverRows = print_archivers_array(context, archiverHeaderRow, 0);
+		printedRows += archiverRows;
+
+		(void) clear_line_at(printedRows);
+	}
 
 	/*
 	 * Now print the events array. Because that operation is more expensive,
@@ -739,6 +802,93 @@ print_nodes_array(WatchContext *context, int r, int c)
 			attroff(A_REVERSE);
 		}
 
+		++lines;
+
+		if (context->rows <= currentRow)
+		{
+			break;
+		}
+	}
+
+	return lines;
+}
+
+
+/*
+ * print_archivers_array prints one row per archiver attached to the current
+ * formation: name, host, its ARCHIVING membership's FSM state, and its most
+ * recently reported storage usage/free space. Unlike print_nodes_array,
+ * this doesn't go through the ColPolicy width-matching machinery
+ * (watch_colspecs.h) -- five fixed-width columns is simple enough not to
+ * need it, and this section only ever appears at all when there's at least
+ * one archiver to show.
+ */
+#define ARCHIVER_NAME_COL_LEN 20
+#define ARCHIVER_HOST_COL_LEN 20
+#define ARCHIVER_STATE_COL_LEN 12
+#define ARCHIVER_SIZE_COL_LEN 10
+
+static int
+print_archivers_array(WatchContext *context, int r, int c)
+{
+	ArchiverInfoArray *archiversArray = &(context->archiversArray);
+
+	int lines = 0;
+	int currentRow = r;
+
+	clear_line_at(currentRow);
+
+	attron(A_STANDOUT);
+	mvprintw(currentRow, c, "%-*s %-*s %-*s %*s %*s ",
+			 ARCHIVER_NAME_COL_LEN, "Archiver Name",
+			 ARCHIVER_HOST_COL_LEN, "Host",
+			 ARCHIVER_STATE_COL_LEN, "State",
+			 ARCHIVER_SIZE_COL_LEN, "Used",
+			 ARCHIVER_SIZE_COL_LEN, "Free");
+	attroff(A_STANDOUT);
+
+	++currentRow;
+	++lines;
+
+	for (int index = 0; index < archiversArray->count; index++)
+	{
+		ArchiverInfo *archiver = &(archiversArray->archivers[index]);
+		bool selected = currentRow == context->selectedRow;
+
+		char usedStr[NAMEDATALEN] = "?";
+		char freeStr[NAMEDATALEN] = "?";
+
+		if (archiver->hasStorageStats)
+		{
+			pretty_print_bytes(usedStr, sizeof(usedStr), archiver->usedBytes);
+			pretty_print_bytes(freeStr, sizeof(freeStr), archiver->freeBytes);
+		}
+
+		const char *stateStr =
+			archiver->hasNode
+			? NodeStateToString(archiver->reportedState)
+			: "?";
+
+		clear_line_at(currentRow);
+
+		if (selected)
+		{
+			attron(A_REVERSE);
+		}
+
+		mvprintw(currentRow, c, "%-*s %-*s %-*s %*s %*s ",
+				 ARCHIVER_NAME_COL_LEN, archiver->archiverName,
+				 ARCHIVER_HOST_COL_LEN, archiver->hostname,
+				 ARCHIVER_STATE_COL_LEN, stateStr,
+				 ARCHIVER_SIZE_COL_LEN, usedStr,
+				 ARCHIVER_SIZE_COL_LEN, freeStr);
+
+		if (selected)
+		{
+			attroff(A_REVERSE);
+		}
+
+		++currentRow;
 		++lines;
 
 		if (context->rows <= currentRow)

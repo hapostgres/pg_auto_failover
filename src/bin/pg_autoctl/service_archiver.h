@@ -22,6 +22,9 @@ bool service_archiver_pgreceivewal_is_running(void);
 
 bool service_archiver_report_captured_wal(Keeper *keeper);
 
+bool service_archiver_read_current_lsn(KeeperConfig *config,
+									   char *lsnOut, size_t lsnOutSize);
+
 bool service_archiver_loop(Keeper *keeper);
 
 #endif /* SERVICE_ARCHIVER_H */

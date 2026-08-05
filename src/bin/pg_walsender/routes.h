@@ -30,6 +30,12 @@ typedef struct WsRoute
 	char allowedHosts[1024];            /* comma-separated, empty = unrestricted */
 	char systemId[32];                  /* decimal uint64, as text; "" = unknown */
 	int timeline;                       /* 0 = unknown */
+	char position[32];                  /* "%X/%08X" pg_lsn text; "" = unknown --
+	                                     * see service_archiver_update_current_lsn()'s
+	                                     * own comment (service_archiver.c) for what
+	                                     * this is and why it lives here rather than
+	                                     * being re-derived from WAL file content by
+	                                     * each reader */
 } WsRoute;
 
 /*

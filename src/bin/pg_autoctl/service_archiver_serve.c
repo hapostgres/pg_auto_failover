@@ -40,6 +40,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "monitor.h"
+#include "service_archiver.h"
 #include "signals.h"
 
 /* how often service_archiver_serve_loop() re-checks pg_walsender's
@@ -361,6 +362,34 @@ service_archiver_serve_refresh_routes(Keeper *keeper)
 
 	fformat(fileStream, "[%s/%d]\n", config->formation, config->groupId);
 	fformat(fileStream, "walcache = %s\n", config->pgSetup.pgdata);
+
+	/*
+	 * The single, out-of-band-maintained "how far have I actually
+	 * captured" value -- see service_archiver_update_current_lsn()'s own
+	 * comment (service_archiver.c) for why pg_walsender should read this
+	 * rather than re-derive it by scanning WAL file content itself:
+	 * cmd_base_backup.c's own end-of-backup position, and cmd_identify_
+	 * system.c's own xlogpos, both prefer this route-file value when
+	 * present, falling back to their own (WAL-cache-scanning) logic only
+	 * when it's missing -- an older archiver-serve binary talking to a
+	 * newer routes file, or vice versa, during a rolling upgrade.
+	 *
+	 * Read via service_archiver_read_current_lsn() rather than keeper->
+	 * postgres.currentLSN directly: this process (archiver-serve) and the
+	 * one that actually maintains that value (archiver-capture,
+	 * service_archiver.c) are separate fork()ed processes (service_
+	 * archiver_run.c) with independent copies of the Keeper struct after
+	 * the fork -- keeper->postgres.currentLSN in *this* process's memory
+	 * is permanently frozen at whatever it was at fork time (typically
+	 * empty/"0/0"), never updated by the sibling process's own writes.
+	 * The position file is the real, re-read-every-refresh channel that
+	 * actually crosses that boundary.
+	 */
+	char currentLSN[PG_LSN_MAXLENGTH] = "0/0";
+
+	(void) service_archiver_read_current_lsn(config, currentLSN, sizeof(currentLSN));
+
+	fformat(fileStream, "position = %s\n", currentLSN);
 
 	if (found)
 	{

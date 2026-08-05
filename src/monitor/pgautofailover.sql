@@ -1401,10 +1401,24 @@ CREATE TABLE pgautofailover.archiver
     -- this host is allowed to keep running at once
     maxresidentreplay int NOT NULL DEFAULT 1,
 
+    -- storage stats for the archiver's own PGDATA (walcache + basebackups,
+    -- same root -- see service_archiver_serve.c's own header comment on
+    -- why an archiver has no other pgdata to speak of), reported
+    -- periodically by service_archiver_loop(); NULL until the first report.
+    -- usedbytes is this archiver's own footprint (directory_size() over its
+    -- whole pgdata); freebytes is the containing filesystem's available
+    -- space (statvfs's f_bavail, "available to a non-privileged process" --
+    -- the number that actually predicts whether the next base backup or
+    -- WAL segment fits, not f_bfree's superuser-reserved total).
+    usedbytes        bigint,
+    freebytes        bigint,
+
     lastreporttime   timestamptz,
 
     UNIQUE (archivername),
-    CHECK (maxresidentreplay >= 0)
+    CHECK (maxresidentreplay >= 0),
+    CHECK (usedbytes IS NULL OR usedbytes >= 0),
+    CHECK (freebytes IS NULL OR freebytes >= 0)
  );
 
 -- a named, shareable rclone remote configuration -- the literal contents
@@ -1758,7 +1772,7 @@ grant execute on function
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.get_basebackup_policy(policyname text)
- RETURNS pgautofailover.basebackup_policy LANGUAGE sql STRICT
+ RETURNS pgautofailover.basebackup_policy LANGUAGE sql STRICT SECURITY DEFINER
 AS $$
     SELECT * FROM pgautofailover.basebackup_policy
      WHERE basebackup_policy.policyname = get_basebackup_policy.policyname;
@@ -1822,6 +1836,69 @@ comment on function pgautofailover.register_archiver(text,text,text,bigint,bool,
 
 grant execute on function
       pgautofailover.register_archiver(text,text,text,bigint,bool,int,text)
+   to autoctl_node;
+
+-- periodic storage heartbeat: usedbytes/freebytes/lastreporttime all move
+-- together, from the same service_archiver_loop() tick (service_archiver.c)
+-- that already reports this archiver's captured-WAL LSN.
+CREATE FUNCTION pgautofailover.report_archiver_storage
+    (archiverid bigint, usedbytes bigint, freebytes bigint)
+ RETURNS void LANGUAGE sql SECURITY DEFINER
+AS $$
+    UPDATE pgautofailover.archiver
+       SET usedbytes = report_archiver_storage.usedbytes,
+           freebytes = report_archiver_storage.freebytes,
+           lastreporttime = now()
+     WHERE archiver.archiverid = report_archiver_storage.archiverid;
+$$;
+
+comment on function pgautofailover.report_archiver_storage(bigint,bigint,bigint)
+        is 'record an archiver''s own reported disk usage and free space';
+
+grant execute on function
+      pgautofailover.report_archiver_storage(bigint,bigint,bigint)
+   to autoctl_node;
+
+-- one row per archiver attached to formationid, with its FSM state (the
+-- 'wal-receiver' archiver_node row created by archiver_add_formation, one
+-- per group -- this milestone's own single-membership scope means a
+-- single-group formation gets exactly one row per archiver here; a
+-- multi-group formation would get one row per (archiver, group), a
+-- follow-up concern once an archiver can serve more than one group at
+-- once). Used by `pg_autoctl watch`'s own archivers section.
+CREATE FUNCTION pgautofailover.get_archivers
+ (
+   IN formationid       text default 'default',
+   OUT archiver_id       bigint,
+   OUT archiver_name     text,
+   OUT hostname          text,
+   OUT used_bytes        bigint,
+   OUT free_bytes        bigint,
+   OUT last_report_time  timestamptz,
+   OUT node_id           bigint,
+   OUT reported_state    pgautofailover.replication_state,
+   OUT goal_state        pgautofailover.replication_state
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT SECURITY DEFINER
+AS $$
+   SELECT a.archiverid, a.archivername, a.hostname,
+          a.usedbytes, a.freebytes, a.lastreporttime,
+          n.nodeid, n.reportedstate, n.goalstate
+     FROM pgautofailover.archiver a
+     JOIN pgautofailover.archiver_formation af
+       ON af.archiverid = a.archiverid
+      AND af.formationid = get_archivers.formationid
+     LEFT JOIN pgautofailover.archiver_node an
+            ON an.archiverid = a.archiverid AND an.kind = 'wal-receiver'
+     LEFT JOIN pgautofailover.node n
+            ON n.nodeid = an.nodeid AND n.formationid = get_archivers.formationid
+ ORDER BY a.archiverid;
+$$;
+
+comment on function pgautofailover.get_archivers(text)
+        is 'list the archivers attached to a formation, with storage stats and FSM state';
+
+grant execute on function pgautofailover.get_archivers(text)
    to autoctl_node;
 
 -- named, shareable rclone config objects -- see rclone_config above for
@@ -2115,6 +2192,58 @@ comment on function pgautofailover.get_archiver_policy(text,int)
 grant execute on function pgautofailover.get_archiver_policy(text,int)
    to autoctl_node;
 
+-- one round trip from the archiver-basebackup side: resolves the
+-- basebackup_policy row that applies to (formation, group) via get_
+-- archiver_policy() above, then flattens its interval columns to plain
+-- integer seconds -- easy time_t arithmetic on the C side, no interval-
+-- text parsing needed. SECURITY DEFINER: reads archiver_policy/
+-- basebackup_policy directly, both created (like every table in this
+-- milestone's own schema) after the blanket "GRANT SELECT ON ALL TABLES"
+-- near the top of this file, so autoctl_node has no direct grant on
+-- either -- same class of gap already hit (and fixed) twice for wal_
+-- archived()/get_latest_basebackup().
+CREATE FUNCTION pgautofailover.get_basebackup_policy_for_group
+ (
+    formationid           text,
+    groupid               int,
+    OUT policyname         text,
+    OUT source             pgautofailover.basebackup_source,
+    OUT replaymode         pgautofailover.basebackup_replay_mode,
+    OUT cache              pgautofailover.basebackup_cache,
+    OUT frequency_seconds  int,
+    OUT maxcount           int,
+    OUT maxage_seconds     int,
+    OUT onpromotion        bool,
+    OUT concurrency        int
+ )
+ RETURNS record LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+DECLARE
+    ap record;
+BEGIN
+    SELECT * INTO ap
+      FROM pgautofailover.get_archiver_policy(
+               get_basebackup_policy_for_group.formationid,
+               get_basebackup_policy_for_group.groupid);
+
+    SELECT p.policyname, p.source, p.replaymode, p.cache,
+           extract(epoch FROM p.frequency)::int,
+           p.maxcount,
+           extract(epoch FROM p.maxage)::int,
+           p.onpromotion, p.concurrency
+      INTO policyname, source, replaymode, cache, frequency_seconds,
+           maxcount, maxage_seconds, onpromotion, concurrency
+      FROM pgautofailover.basebackup_policy p
+     WHERE p.basebackuppolicyid = ap.basebackuppolicyid;
+END;
+$$;
+
+comment on function pgautofailover.get_basebackup_policy_for_group(text,int)
+        is 'resolve the full base-backup production/retention policy for (formation, group), intervals flattened to seconds';
+
+grant execute on function pgautofailover.get_basebackup_policy_for_group(text,int)
+   to autoctl_node;
+
 -- the archive_command confirmation check: true iff at least
 -- archiver_quorum distinct archivers have durably reported %f
 CREATE FUNCTION pgautofailover.wal_archived
@@ -2381,6 +2510,41 @@ comment on function pgautofailover.get_latest_basebackup
 
 grant execute on function pgautofailover.get_latest_basebackup
                           (text,int,pgautofailover.basebackup_source)
+   to autoctl_node;
+
+-- every 'complete' base backup for (formation, group), newest first --
+-- what service_archiver_basebackup.c's own retention pass (maxcount/
+-- maxage) walks to decide what to keep vs. prune, and what a future `pg_
+-- autoctl show basebackup` would list. basebackupid/storagelocation are
+-- what report_basebackup_deleted()/an actual directory removal need;
+-- startedat_epoch (extract(epoch from lower(period))) is plain integer
+-- seconds for the same reason get_basebackup_policy_for_group() flattens
+-- its own interval columns -- easy time_t arithmetic, no timestamptz-text
+-- parsing on the C side.
+CREATE FUNCTION pgautofailover.list_basebackups
+ (
+    formationid          text,
+    groupid              int,
+    OUT basebackupid      bigint,
+    OUT label             text,
+    OUT storagelocation   text,
+    OUT startedat_epoch   bigint
+ )
+ RETURNS SETOF record LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+    SELECT b.basebackupid, b.label, b.storagelocation,
+           extract(epoch FROM lower(b.period))::bigint
+      FROM pgautofailover.basebackup b
+     WHERE b.formationid = list_basebackups.formationid
+       AND b.groupid = list_basebackups.groupid
+       AND b.status = 'complete'
+  ORDER BY lower(b.period) DESC;
+$$;
+
+comment on function pgautofailover.list_basebackups(text,int)
+        is 'list complete base backups for (formation, group), newest first -- retention/inventory';
+
+grant execute on function pgautofailover.list_basebackups(text,int)
    to autoctl_node;
 
 -- an archiving node has no sysidentifier of its own (haspgdata = false,

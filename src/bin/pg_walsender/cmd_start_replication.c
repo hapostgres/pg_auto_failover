@@ -8,6 +8,7 @@
  */
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/select.h>
@@ -218,6 +219,111 @@ skip_ws(const char *p)
 }
 
 
+/*
+ * find_oldest_segno scans walcacheDir for the lowest-numbered WAL segment
+ * present on the given timeline (complete or still ".partial" -- either
+ * counts as "this archiver has it"). Returns false (*oldestSegno untouched)
+ * if nothing has been captured on that timeline at all yet.
+ *
+ * This is what lets the main streaming loop below tell "the requested
+ * segment hasn't been captured *yet*" (segno >= oldest present -- normal,
+ * just wait) apart from "the requested segment predates everything this
+ * archiver has ever captured" (segno < oldest present -- a real, permanent
+ * gap, not a timing issue): pg_receivewal has no replication slot before
+ * this project's own recent fix (service_archiver_start_pgreceivewal(),
+ * pg_autoctl's service_archiver.c), so a pg_receivewal whose very first
+ * connection attempt loses the startup HBA-propagation race restarts
+ * streaming from the server's then-current position instead of resuming,
+ * silently skipping every segment in between -- observed in practice
+ * during this milestone's own end-to-end testing. Without this check, a
+ * client asking to stream from inside that permanent gap (e.g. a real pg_
+ * basebackup's own --wal-method=stream background receiver, replaying from
+ * the position a BASE_BACKUP response advertised) would sit in this file's
+ * own wait_for_more_data_or_client() loop forever, waiting for a segment
+ * that can never arrive.
+ */
+static bool
+find_oldest_segno(const char *walcacheDir, uint32_t timeline, uint64_t *oldestSegno)
+{
+	DIR *dir = opendir(walcacheDir);
+
+	if (dir == NULL)
+	{
+		return false;
+	}
+
+	bool found = false;
+	uint64_t best = 0;
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		size_t len = strlen(entry->d_name);
+		char segPart[25] = { 0 };
+
+		if (len == 24)
+		{
+			memcpy(segPart, entry->d_name, 24);
+		}
+		else if (len == 24 + 8 && strcmp(entry->d_name + 24, ".partial") == 0)
+		{
+			memcpy(segPart, entry->d_name, 24);
+		}
+		else
+		{
+			continue;
+		}
+
+		bool isHex = true;
+
+		for (size_t i = 0; i < 24 && isHex; i++)
+		{
+			isHex = isxdigit((unsigned char) segPart[i]);
+		}
+
+		if (!isHex)
+		{
+			continue;
+		}
+
+		char tliHex[9] = { 0 };
+
+		memcpy(tliHex, segPart, 8);
+
+		if ((uint32_t) strtoul(tliHex, NULL, 16) != timeline)
+		{
+			continue;
+		}
+
+		char logIdHex[9] = { 0 };
+		char segHex[9] = { 0 };
+
+		memcpy(logIdHex, segPart + 8, 8);
+		memcpy(segHex, segPart + 16, 8);
+
+		uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
+		uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
+		uint64_t segno = (uint64_t) logId *
+						 (UINT64CONST(0x100000000) / WS_WAL_SEGMENT_SIZE) + seg;
+
+		if (!found || segno < best)
+		{
+			best = segno;
+			found = true;
+		}
+	}
+
+	closedir(dir);
+
+	if (found)
+	{
+		*oldestSegno = best;
+	}
+
+	return found;
+}
+
+
 void
 cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 {
@@ -326,6 +432,30 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 
 		if (!isComplete && !file_exists(partialPath))
 		{
+			uint64_t oldestSegno;
+
+			if (find_oldest_segno(route->walcacheDir, timeline, &oldestSegno) &&
+				segno < oldestSegno)
+			{
+				char oldestName[32];
+
+				wal_segment_filename(timeline, oldestSegno,
+									 oldestName, sizeof(oldestName));
+
+				log_error("START_REPLICATION: requested segment \"%s\" "
+						  "predates the oldest segment this archiver has "
+						  "captured (\"%s\") -- it was never captured and "
+						  "can never become available, refusing to wait "
+						  "forever for it",
+						  filename, oldestName);
+
+				ws_send_error_response(sock, "58P01",
+									   "requested WAL segment predates this "
+									   "archiver's captured history and will "
+									   "never become available");
+				return;
+			}
+
 			/* nothing captured for this segment yet -- wait for it */
 			if (!wait_for_more_data_or_client(sock, currentLsn, &lastKeepalive))
 			{

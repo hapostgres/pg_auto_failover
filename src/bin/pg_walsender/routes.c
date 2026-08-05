@@ -132,6 +132,10 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 			{
 				route->timeline = atoi(propValue);
 			}
+			else if (strcmp(propName, "position") == 0)
+			{
+				strlcpy(route->position, propValue, sizeof(route->position));
+			}
 			else
 			{
 				log_warn("Ignoring unknown routes file key \"%s\" in section [%s]",

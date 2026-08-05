@@ -15,5 +15,6 @@
 #include "keeper.h"
 
 bool service_archiver_maybe_generate_basebackup(Keeper *keeper);
+uint64_t directory_size(const char *dirPath);
 
 #endif /* SERVICE_ARCHIVER_BASEBACKUP_H */

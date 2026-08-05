@@ -31,6 +31,7 @@
  */
 
 #include <ctype.h>
+#include <dirent.h>
 #include <string.h>
 
 #include "postgres_fe.h"
@@ -301,6 +302,202 @@ send_position_row(int sock, const char *lsn, const char *tli)
 }
 
 
+/*
+ * find_reachable_end_position and its helpers below compute a base
+ * backup's "end of backup" position -- see this file's own header comment
+ * for where that fits in the wire sequence, and cmd_base_backup()'s own
+ * call site for why it must be a real, currently-reachable target rather
+ * than a stale re-send of the start position.
+ *
+ * Deliberately not pg_walsender/wal_dir_scan.c's own wal_dir_find_latest()
+ * (this project doesn't share code across its own binaries, see this
+ * file's own precedent of small, self-contained helpers): that function
+ * only ever considers a *complete* (non-".partial") segment, which is the
+ * right, conservative choice for IDENTIFY_SYSTEM/CREATE_REPLICATION_SLOT's
+ * own "confirmed durable" needs, but wrong here -- an archiver whose only
+ * WAL activity so far is still sitting in the current ".partial" segment
+ * (a real, common case: nothing has forced a segment switch yet) would
+ * make wal_dir_find_latest() report "nothing captured", sending BASE_
+ * BACKUP straight back to the same stale start-of-backup fallback this
+ * whole mechanism exists to avoid. The archiver's walcache always has
+ * *something* real captured by the time a base backup exists at all
+ * (pg_receivewal streams from the moment archiving starts); the position
+ * within the current in-progress segment is exactly as reachable via
+ * START_REPLICATION as a completed one, once its zero-padded unwritten
+ * tail (pg_receivewal's own pre-allocation, matching real Postgres's
+ * XLogFileInitInternal) is trimmed off -- the same trim_trailing_zeros()
+ * logic cmd_start_replication.c already applies when actually serving it,
+ * applied here once, up front, to find where its real content ends.
+ */
+#define CBB_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
+#define CBB_XLOG_SEGMENTS_PER_XLOGID (UINT64CONST(0x100000000) / CBB_WAL_SEGMENT_SIZE)
+#define CBB_WAL_FNAME_LEN 24
+
+
+static bool
+is_wal_segment_filename(const char *name)
+{
+	size_t len = strlen(name);
+
+	if (len != CBB_WAL_FNAME_LEN)
+	{
+		return false;
+	}
+
+	for (size_t i = 0; i < len; i++)
+	{
+		if (!isxdigit((unsigned char) name[i]))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+static bool
+partial_segment_real_length(const char *path, uint64_t *length)
+{
+	FILE *file = fopen(path, "rb");
+
+	if (file == NULL)
+	{
+		return false;
+	}
+
+	char *buffer = malloc(CBB_WAL_SEGMENT_SIZE);
+
+	if (buffer == NULL)
+	{
+		fclose(file);
+		return false;
+	}
+
+	size_t got = fread(buffer, 1, CBB_WAL_SEGMENT_SIZE, file);
+
+	fclose(file);
+
+	while (got > 0 && buffer[got - 1] == 0)
+	{
+		got--;
+	}
+
+	free(buffer);
+
+	*length = (uint64_t) got;
+
+	return true;
+}
+
+
+static bool
+find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
+							char *endLsn, size_t endLsnSize)
+{
+	DIR *dir = opendir(walcacheDir);
+
+	if (dir == NULL)
+	{
+		return false;
+	}
+
+	char bestComplete[CBB_WAL_FNAME_LEN + 1] = { 0 };
+	char bestPartial[CBB_WAL_FNAME_LEN + 1] = { 0 };
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		if (is_wal_segment_filename(entry->d_name))
+		{
+			if (bestComplete[0] == '\0' || strcmp(entry->d_name, bestComplete) > 0)
+			{
+				strlcpy(bestComplete, entry->d_name, sizeof(bestComplete));
+			}
+
+			continue;
+		}
+
+		const char *partialSuffix = ".partial";
+		size_t nameLen = strlen(entry->d_name);
+		size_t suffixLen = strlen(partialSuffix);
+
+		if (nameLen == CBB_WAL_FNAME_LEN + suffixLen &&
+			strcmp(entry->d_name + CBB_WAL_FNAME_LEN, partialSuffix) == 0)
+		{
+			char segPart[CBB_WAL_FNAME_LEN + 1] = { 0 };
+
+			memcpy(segPart, entry->d_name, CBB_WAL_FNAME_LEN);
+
+			if (is_wal_segment_filename(segPart) &&
+				(bestPartial[0] == '\0' || strcmp(segPart, bestPartial) > 0))
+			{
+				strlcpy(bestPartial, segPart, sizeof(bestPartial));
+			}
+		}
+	}
+
+	closedir(dir);
+
+	/*
+	 * The current frontier is whichever of the two is numerically later --
+	 * a ".partial" file only ever exists for the segment actively being
+	 * written, always the same as or newer than the newest complete one.
+	 */
+	bool usePartial = bestPartial[0] != '\0' &&
+					  (bestComplete[0] == '\0' ||
+					   strcmp(bestPartial, bestComplete) >= 0);
+
+	const char *chosen = usePartial ? bestPartial : bestComplete;
+
+	if (chosen[0] == '\0')
+	{
+		return false;
+	}
+
+	char tliHex[9] = { 0 };
+	char logIdHex[9] = { 0 };
+	char segHex[9] = { 0 };
+
+	memcpy(tliHex, chosen, 8);
+	memcpy(logIdHex, chosen + 8, 8);
+	memcpy(segHex, chosen + 16, 8);
+
+	uint32_t tli = (uint32_t) strtoul(tliHex, NULL, 16);
+	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
+	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
+
+	uint64_t segno = (uint64_t) logId * CBB_XLOG_SEGMENTS_PER_XLOGID + seg;
+	uint64_t segStart = segno * CBB_WAL_SEGMENT_SIZE;
+	uint64_t position;
+
+	if (usePartial)
+	{
+		char path[MAXPGPATH];
+		uint64_t realLength = 0;
+
+		snprintf(path, sizeof(path), "%s/%s.partial", walcacheDir, bestPartial);
+
+		if (!partial_segment_real_length(path, &realLength))
+		{
+			return false;
+		}
+
+		position = segStart + realLength;
+	}
+	else
+	{
+		position = segStart + CBB_WAL_SEGMENT_SIZE;
+	}
+
+	*timeline = tli;
+	snprintf(endLsn, endLsnSize, "%X/%08X",
+			 (uint32_t) (position >> 32), (uint32_t) (position & 0xFFFFFFFF));
+
+	return true;
+}
+
+
 void
 cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 {
@@ -418,7 +615,49 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		return;
 	}
 
-	if (!send_position_row(sock, lsn, tliStr))
+	/*
+	 * The end-of-backup position must be a real, currently-reachable target
+	 * -- re-sending the same (potentially long-stale) start position here
+	 * would tell a real pg_basebackup's own background WAL streamer
+	 * (--wal-method=stream) to wait for a target it may have already
+	 * passed hours ago, or, worse, one from a since-pruned segment it can
+	 * never reach; either way its background thread hangs the whole
+	 * command forever waiting on a position that will never legitimately
+	 * arrive as "new" data.
+	 *
+	 * route->position is the canonical, out-of-band-maintained value --
+	 * see service_archiver_update_current_lsn()'s own comment (pg_autoctl's
+	 * service_archiver.c) for why the archiver-serve supervisor computes
+	 * this once, itself, and writes it into the routes file, rather than
+	 * every reader (this one included) independently re-deriving it by
+	 * scanning WAL file content on its own. find_reachable_end_position()
+	 * (this file's own comment) is the fallback for a route that doesn't
+	 * carry one yet (an older archiver-serve binary against a newer pg_
+	 * walsender, during a rolling upgrade) -- still a real, reachable
+	 * position, just independently re-derived. Falls back further still to
+	 * the start position only if the walcache is completely empty (no base
+	 * backup should exist at all in that case).
+	 */
+	char endLsn[32];
+	uint32_t endTimeline;
+	const char *endLsnPtr = lsn;
+	const char *endTliStr = tliStr;
+	char endTliBuf[16];
+
+	if (route->position[0] != '\0')
+	{
+		endLsnPtr = route->position;
+		endTliStr = tliStr;
+	}
+	else if (find_reachable_end_position(route->walcacheDir, &endTimeline, endLsn,
+										 sizeof(endLsn)))
+	{
+		snprintf(endTliBuf, sizeof(endTliBuf), "%u", endTimeline);
+		endLsnPtr = endLsn;
+		endTliStr = endTliBuf;
+	}
+
+	if (!send_position_row(sock, endLsnPtr, endTliStr))
 	{
 		return;
 	}
