@@ -20,3 +20,5 @@ timeline_fork_report_lsn_deadlock
 timeline_fork_3node_auto_detect
 archiver_wal_capture
 archiver_basebackup_generation
+archiver_basebackup_policy
+archiver_bootstrap_and_fast_forward

@@ -10,10 +10,38 @@
 # codebase ever called that SQL function, so archiver_wal stayed permanently
 # empty no matter how much WAL an archiver captured.
 #
-# Segment filenames are deterministic: a freshly initialized primary starts
-# WAL at timeline 1, segment 000000010000000000000001, and each
-# pg_switch_wal() call on an otherwise idle test database advances exactly
-# one segment (confirmed against a real cluster while developing this spec).
+# Segment filenames are deterministic within a single run of this spec: each
+# pg_switch_wal() call that has real content to flush advances exactly one
+# segment (a bare pg_switch_wal() with nothing written since the previous
+# one is *not* reliably a no-op in practice -- it still writes the SWITCH
+# record itself -- but forcing a long run of them back-to-back with no
+# other activity in between measurably slows down how fast pg_receivewal
+# can stream and flush all of it under host load, which is exactly the
+# wrong kind of margin to add: it turns a segment-numbering assumption into
+# a throughput race instead, observed firsthand while developing this
+# fix). What is NOT segment 000000010000000000000001, despite an earlier
+# version of this spec assuming so: by the time archiver1 finishes
+# registering and gets its own replication slot (keeper_create_and_drop_
+# replication_slots(), the same eager per-tick mechanism used for an
+# ordinary standby -- see pg_autoctl's service_archiver.c and keeper.c),
+# node1 + node2's own cluster/extension bootstrap has typically already
+# consumed a few WAL segments -- observed at exactly segment 3 (the
+# archiver's slot restart_lsn landing on 0/3000000) across repeated runs of
+# this exact Docker image, and segment 3 itself *is* fully retained and
+# capturable (it's the archiver's own slot floor, not one before it). A
+# replication slot only protects WAL *from its own creation time onward*;
+# it can't retroactively un-recycle segments the primary already dropped
+# before the slot existed -- confirmed by node2's own real-secondary slot
+# *also* not reaching back to segment 1 in the same runs. pgaftest's DSL
+# has no way to capture a query result for use in a later query, so there's
+# no way to compute "whatever segment we're actually on" dynamically; every
+# check below instead uses the fixed, repeatedly-observed floor of segment
+# 3 directly, with the minimum number of pg_switch_wal() calls needed
+# (each with real content immediately before it) rather than any extra
+# margin -- if a future Postgres/build change shifts the real floor, this
+# spec will fail fast and clearly (wrong segment name -> wal_archived()
+# returns false), not hang or silently pass.
+#
 # The autoctl_node role has no direct SELECT on archiver_wal (see
 # report_wal_received()'s own SECURITY DEFINER indirection in
 # pgautofailover.sql) -- wal_archived() is the one function it can call to
@@ -46,18 +74,24 @@ teardown {
 #           land durably in archiver_wal (archiver_quorum defaults to 1, and
 #           there is exactly one archiver here, so wal_archived() flips to
 #           true as soon as service_archiver_report_captured_wal()'s next
-#           tick reports the segment).
+#           tick reports the segment). Segment 3 is the observed floor (see
+#           this spec's own header comment) and is itself fully capturable,
+#           so no throwaway switches are needed before it -- each switch
+#           below has a real INSERT immediately before it, so it reliably
+#           produces a genuinely new segment rather than racing pg_
+#           receivewal's own throughput under host load.
 #
 
 step test_001_capture_wal {
     sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
     sql node1 { SELECT pg_switch_wal(); }
+    sql node1 { INSERT INTO t1 VALUES (3); }
     sql node1 { SELECT pg_switch_wal(); }
     # PG_AUTOCTL_KEEPER_SLEEP_TIME is 1s; this margin covers a slow CI runner.
     sleep 15s
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000001'); }
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
     expect { t }
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000002'); }
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000004'); }
     expect { t }
 }
 
@@ -77,9 +111,13 @@ step test_002_archiver_restart_liveness {
     wait until archiver1 stopped  timeout 60s
     compose start archiver1
     wait until archiver1 state is archiving  timeout 60s
+    # one more switch on top of test_001's own two -- completes segment
+    # 000000010000000000000005 (see this spec's own header comment on why
+    # these are fixed numbers rather than derived from segment 1).
+    sql node1 { INSERT INTO t1 VALUES (4); }
     sql node1 { SELECT pg_switch_wal(); }
     sleep 15s
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000005'); }
     expect { t }
 }
 
@@ -98,14 +136,30 @@ step test_002_archiver_restart_liveness {
 step test_003_failover_continuity {
     compose stop node1
     wait until node1 stopped  timeout 60s
-    wait until node2 state is primary
-        passing through wait_primary
-        timeout 120s
-    wait until archiver1 state is archiving
-        passing through report_lsn
-        timeout 120s
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000001'); }
-    expect { t }
+    # wait_primary, not primary, is the correct terminal state here: node1
+    # is only stopped (still a registered group member, never rejoining
+    # within this spec) and archiver1 is a different node kind entirely
+    # (reports "archiving", never "secondary") -- group_state_machine.c's
+    # PRIMARY_NODE section only ever promotes WAIT_PRIMARY -> PRIMARY once
+    # some other node reaches *reported* SECONDARY state, which neither
+    # ever will. Same real, correct pg_auto_failover semantics as a plain
+    # two-node cluster whose original primary never rejoins (see this
+    # project's own archiver_bootstrap_and_fast_forward.pgaf, test_004,
+    # for the identical reasoning).
+    wait until node2 state is wait_primary  timeout 120s
+    # plain terminal-state check, no "passing through report_lsn": that
+    # clause tracks ASSIGNED-state transitions via LISTEN/NOTIFY, and can
+    # miss one that already happened before this wait started listening --
+    # now that node2 reaches wait_primary much faster (no longer stuck
+    # waiting on a secondary-quorum condition that could never be
+    # satisfied), archiver1's own report_lsn -> archiving cycle can
+    # complete before this wait even starts observing it.
+    wait until archiver1 state is archiving  timeout 120s
+    # re-check the earliest and latest segments already confirmed by test_001
+    # and test_002 -- proves they survived the failover, not that they were
+    # ever really "segment 1" (see this spec's own header comment).
     sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
+    expect { t }
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000005'); }
     expect { t }
 }
