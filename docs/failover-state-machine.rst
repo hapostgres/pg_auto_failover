@@ -326,6 +326,8 @@ Missing WAL bytes are fetched from one of the most advanced standby nodes by
 using Postgres cascading replication features: it is possible to use any
 standby node in the ``primary_conninfo``.
 
+.. _archiving_state:
+
 Archiving
 ^^^^^^^^^
 
@@ -375,7 +377,7 @@ command, and then the node entry is removed from the monitor.
 pg_auto_failover keeper's State Machine
 ---------------------------------------
 
-The full keeper FSM is 21 states and 80 transitions -- legible as a reference
+The full keeper FSM is 21 states and 102 transitions -- legible as a reference
 table, but too dense to read at a glance as a single diagram. ``pg_autoctl
 inspect fsm mermaid`` renders it instead as five smaller diagrams, one per
 phase of a node's life, generated directly from ``KeeperFSM[]``
@@ -426,12 +428,13 @@ restarted.
        dropped --> report_lsn : This node is being reinitialized after having been dropped
        single --> wait_primary : A new secondary was added
        wait_standby --> catchingup : The primary is now ready to accept a standby
+       wait_standby --> archiving : wait_standby to archiving
        init --> wait_standby : Start following a primary
        dropped --> wait_standby : Start following a primary
        init --> report_lsn : Creating a new node from a standby node that is not a candidate.
-       wait_standby --> archiving : An archiving node's primary is now ready to accept it
 
-       note right of single : also appears in Node removal / drop
+       note right of init : also appears in Failover / promotion
+       note right of single : also appears in Failover / promotion, Node removal / drop
        note right of dropped : also appears in Node removal / drop
        note right of report_lsn : also appears in Failover / promotion, Maintenance, Node removal / drop
        note right of wait_primary : also appears in Steady-state / config changes, Failover / promotion, Node removal / drop
@@ -443,7 +446,6 @@ restarted.
        classDef primaryState fill:#cfe2ff,stroke:#3b6fb6,color:#1a1a1a
        classDef secondaryState fill:#d4edda,stroke:#4c9a5b,color:#1a1a1a
        classDef electionState fill:#fff3cd,stroke:#c99a1e,color:#1a1a1a
-       classDef archiverState fill:#d1ecf1,stroke:#17a2b8,color:#1a1a1a
        class init metaState
        class single metaState
        class dropped metaState
@@ -451,7 +453,7 @@ restarted.
        class wait_primary primaryState
        class wait_standby secondaryState
        class catchingup secondaryState
-       class archiving archiverState
+       class archiving electionState
 
 Steady-state / config changes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -493,8 +495,11 @@ Failover / promotion
 
 The primary going away and a candidate taking over, including the
 multi-standby candidate-election machinery (``report_lsn``,
-``fast_forward``, ``join_secondary``) -- this is the largest of the five,
-still less than half the size of the full graph. Citus coordinator/worker
+``fast_forward``, ``join_secondary``) -- this is by far the largest of the
+five, over half the size of the full graph on its own, since it is also
+where every other phase's states end up if a failover interrupts them:
+most of its edges are the "wherever you were, you're being demoted now"
+fan-out into ``demoted``/``demote_timeout``. Citus coordinator/worker
 transitions are not shown separately: every Citus-specific transition in
 ``KeeperFSM[]`` reuses an edge that already exists here, just with a
 different underlying implementation, so a separate "Citus diagram" would
@@ -510,10 +515,35 @@ be identical in shape to this one.
        apply_settings --> draining : A failover occurred, stopping writes
        apply_settings --> demoted : A failover occurred, no longer primary
        apply_settings --> demote_timeout : A failover occurred, no longer primary
-       draining --> demote_timeout : Secondary confirms it is receiving no more writes
+       draining --> demote_timeout : Secondary confirms it's receiving no more writes
        demote_timeout --> demoted : Demote timeout expired
        wait_primary --> demoted : A failover occurred, no longer primary
+       init --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       single --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       catchingup --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       secondary --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       prepare_promotion --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       stop_replication --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       maintenance --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       prepare_maintenance --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       wait_maintenance --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       report_lsn --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       fast_forward --> demoted : A different node is taking over as primary, stopping Postgres in case it's still running
+       init --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       single --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       demoted --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       catchingup --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       secondary --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       prepare_promotion --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       stop_replication --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       maintenance --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       prepare_maintenance --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       wait_maintenance --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       report_lsn --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
+       fast_forward --> demote_timeout : A different node is taking over as primary, stopping Postgres in case it's still running
        demote_timeout --> primary : Detected a network partition, but monitor didn't do failover
+       archiving --> report_lsn : archiving to report_lsn
+       report_lsn --> archiving : report_lsn to archiving
        demoted --> catchingup : A new primary is available. First, try to rewind. If that fails, do a pg_basebackup.
        secondary --> prepare_promotion : Stop traffic to primary, wait for it to finish draining.
        catchingup --> prepare_promotion : Stop traffic to primary, wait for it to finish draining.
@@ -522,6 +552,11 @@ be identical in shape to this one.
        prepare_promotion --> wait_primary : Promoting a Citus Worker standby after having blocked writes from the coordinator.
        secondary --> report_lsn : Reporting the last write-ahead log location received
        catchingup --> report_lsn : Reporting the last write-ahead log location received
+       fast_forward --> report_lsn : Reporting the last write-ahead log location received
+       prepare_promotion --> report_lsn : Reporting the last write-ahead log location received
+       stop_replication --> report_lsn : Reporting the last write-ahead log location received
+       demote_timeout --> report_lsn : Reporting the last write-ahead log location received
+       join_secondary --> report_lsn : Reporting the last write-ahead log location received
        report_lsn --> prepare_promotion : Stop traffic to primary, wait for it to finish draining.
        report_lsn --> fast_forward : Fetching missing WAL bits from another standby before promotion
        fast_forward --> prepare_promotion : Got the missing WAL bytes, promoted
@@ -530,8 +565,6 @@ be identical in shape to this one.
        join_secondary --> secondary : Failover is done, we have a new primary to follow
        draining --> report_lsn : Reporting the last write-ahead log location after draining
        demoted --> report_lsn : Reporting the last write-ahead log location after being demoted
-       archiving --> report_lsn : The group's primary is unreachable, stop pg_receivewal against it
-       report_lsn --> archiving : A new primary is confirmed, re-point pg_receivewal at it
 
        note right of primary : also appears in Steady-state / config changes, Maintenance, Node removal / drop
        note right of draining : also appears in Node removal / drop
@@ -539,31 +572,43 @@ be identical in shape to this one.
        note right of demote_timeout : also appears in Node removal / drop
        note right of apply_settings : also appears in Steady-state / config changes, Node removal / drop
        note right of wait_primary : also appears in Node init / join, Steady-state / config changes, Node removal / drop
+       note right of init : also appears in Node init / join
+       note right of single : also appears in Node init / join, Node removal / drop
        note right of catchingup : also appears in Node init / join, Steady-state / config changes, Maintenance, Node removal / drop
        note right of secondary : also appears in Steady-state / config changes, Maintenance, Node removal / drop
        note right of prepare_promotion : also appears in Node removal / drop
        note right of stop_replication : also appears in Node removal / drop
+       note right of maintenance : also appears in Maintenance
+       note right of prepare_maintenance : also appears in Maintenance
+       note right of wait_maintenance : also appears in Maintenance, Node removal / drop
        note right of report_lsn : also appears in Node init / join, Maintenance, Node removal / drop
+       note right of fast_forward : also appears in Node removal / drop
        note right of archiving : also appears in Node init / join
 
+       classDef metaState fill:#e0e0e0,stroke:#888888,color:#333333
        classDef primaryState fill:#cfe2ff,stroke:#3b6fb6,color:#1a1a1a
        classDef secondaryState fill:#d4edda,stroke:#4c9a5b,color:#1a1a1a
        classDef demotingState fill:#f8d7da,stroke:#c0392b,color:#1a1a1a
+       classDef maintenanceState fill:#e8dff5,stroke:#8e6bb0,color:#1a1a1a
        classDef electionState fill:#fff3cd,stroke:#c99a1e,color:#1a1a1a
-       classDef archiverState fill:#d1ecf1,stroke:#17a2b8,color:#1a1a1a
        class primary primaryState
        class draining demotingState
        class demoted demotingState
        class demote_timeout demotingState
        class apply_settings primaryState
        class wait_primary primaryState
-       class archiving archiverState
+       class init metaState
+       class single metaState
        class catchingup secondaryState
        class secondary secondaryState
        class prepare_promotion electionState
        class stop_replication electionState
+       class maintenance maintenanceState
+       class prepare_maintenance maintenanceState
+       class wait_maintenance maintenanceState
        class report_lsn electionState
        class fast_forward electionState
+       class archiving electionState
        class join_secondary electionState
 
 Maintenance
@@ -586,9 +631,13 @@ Planned maintenance on either a secondary or the primary.
        prepare_maintenance --> catchingup : Restarting standby after manual maintenance is done.
        maintenance --> report_lsn : Reporting the last write-ahead log location received
        prepare_maintenance --> report_lsn : Reporting the last write-ahead log location received
+       wait_maintenance --> report_lsn : Reporting the last write-ahead log location received
 
        note right of primary : also appears in Steady-state / config changes, Failover / promotion, Node removal / drop
+       note right of prepare_maintenance : also appears in Failover / promotion
+       note right of maintenance : also appears in Failover / promotion
        note right of secondary : also appears in Steady-state / config changes, Failover / promotion, Node removal / drop
+       note right of wait_maintenance : also appears in Failover / promotion, Node removal / drop
        note right of catchingup : also appears in Node init / join, Steady-state / config changes, Failover / promotion, Node removal / drop
        note right of report_lsn : also appears in Node init / join, Failover / promotion, Node removal / drop
 
@@ -623,11 +672,13 @@ node reacting to the other side of that removal.
        prepare_promotion --> single : Primary was forcibly removed
        stop_replication --> single : Went down to force the primary to time out, but then it was removed
        report_lsn --> single : There is no other node anymore, promote this node
+       wait_maintenance --> single : Was waiting to be sent to maintenance, but the primary vanished, promote this node
+       fast_forward --> single : Was fetching missing WAL from another standby, but every other node vanished, promote this node with whatever it has
        apply_settings --> single : Other node was forcibly removed, now single
        any_state --> dropped : This node is being dropped from the monitor
 
        note right of primary : also appears in Steady-state / config changes, Failover / promotion, Maintenance
-       note right of single : also appears in Node init / join
+       note right of single : also appears in Node init / join, Failover / promotion
        note right of wait_primary : also appears in Node init / join, Steady-state / config changes, Failover / promotion
        note right of demoted : also appears in Failover / promotion
        note right of demote_timeout : also appears in Failover / promotion
@@ -637,6 +688,8 @@ node reacting to the other side of that removal.
        note right of prepare_promotion : also appears in Failover / promotion
        note right of stop_replication : also appears in Failover / promotion
        note right of report_lsn : also appears in Node init / join, Failover / promotion, Maintenance
+       note right of wait_maintenance : also appears in Failover / promotion, Maintenance
+       note right of fast_forward : also appears in Failover / promotion
        note right of apply_settings : also appears in Steady-state / config changes, Failover / promotion
        note right of dropped : also appears in Node init / join
 
@@ -644,6 +697,7 @@ node reacting to the other side of that removal.
        classDef primaryState fill:#cfe2ff,stroke:#3b6fb6,color:#1a1a1a
        classDef secondaryState fill:#d4edda,stroke:#4c9a5b,color:#1a1a1a
        classDef demotingState fill:#f8d7da,stroke:#c0392b,color:#1a1a1a
+       classDef maintenanceState fill:#e8dff5,stroke:#8e6bb0,color:#1a1a1a
        classDef electionState fill:#fff3cd,stroke:#c99a1e,color:#1a1a1a
        class primary primaryState
        class single metaState
@@ -656,6 +710,8 @@ node reacting to the other side of that removal.
        class prepare_promotion electionState
        class stop_replication electionState
        class report_lsn electionState
+       class wait_maintenance maintenanceState
+       class fast_forward electionState
        class apply_settings primaryState
        class any_state metaState
        class dropped metaState
@@ -665,7 +721,7 @@ node reacting to the other side of that removal.
    This replaces the previous single Graphviz diagram (``pg_autoctl inspect
    fsm gv | dot -Tsvg``, rendered from a checked-in ``fsm.png`` last
    regenerated by hand in 2021). The five diagrams above cover every
-   currently-reachable transition the old single diagram did -- 68 edges,
+   currently-reachable transition the old single diagram did -- 102 edges,
    split by phase rather than shown at once -- deliberately excluding only
    the 9 transitions involving the deprecated ``join_primary`` state, so
    ``fsm.png`` is no longer needed as documentation. The ``pg_autoctl
