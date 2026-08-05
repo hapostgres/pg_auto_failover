@@ -55,6 +55,7 @@ __ https://github.com/hapostgres/pg_auto_failover
    architecture-multi-standby
    failover-state-machine
    fault-tolerance
+   archiving-internals
    security
 
 .. toctree::
