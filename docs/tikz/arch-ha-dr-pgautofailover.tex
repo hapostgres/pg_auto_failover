@@ -20,53 +20,60 @@
 
   \input{common.tex}
 
-  %% same pastel, readable palette as arch-ha-dr-typical.tex, plus a
-  %% muted green for the pg_auto_failover box.
-  \definecolor{pgafTxt}{HTML}{2E6B4F}
-  \definecolor{pgafBorder}{HTML}{7FBF9C}
-  \definecolor{pgafFill}{HTML}{E9F6EF}
+  %% High Availability and Disaster Recovery keep the exact same colors
+  %% they have on arch-ha-dr-typical.tex, so the two diagrams read as
+  %% the same three boxes, just regrouped.
+  \definecolor{haTxt}{HTML}{2F5C9B}
+  \definecolor{haBorder}{HTML}{7FA0CC}
 
   \definecolor{bkTxt}{HTML}{8A5A12}
   \definecolor{bkBorder}{HTML}{D3A257}
-  \definecolor{bkFill}{HTML}{FBF3E6}
 
-  %% \draw [help lines] (-13,0) grid (13,8);
+  \definecolor{pgafTxt}{HTML}{2E6B4F}
+  \definecolor{pgafBorder}{HTML}{7FBF9C}
+
+  %% \draw [help lines] (-13,0) grid (13,7);
 
   \newcommand{\boundarybox}[5]{
-    %% #1 x1  #2 y1  #3 x2  #4 y2  #5 border/fill color
     \draw[rounded corners=9pt,draw=#5,very thick,dashed,fill=#5!12]
          (#1,#2) rectangle (#3,#4);
   }
-
   \newcommand{\boundaryheader}[4]{
-    %% #1 x (left)  #2 y (top)  #3 text color  #4 text
     \node[anchor=north west,text=#3,font=\bfseries\Large,inner sep=0pt]
          at (#1,#2) {#4};
   }
-
   \newcommand{\servicebox}[5]{
-    %% #1 x  #2 y  #3 border color  #4 width  #5 text
     \node[rectangle,rounded corners=5pt,draw=#3,thick,fill=white,
           text=stxt,minimum width=#4,minimum height=1.35cm,align=center]
          at (#1,#2) {\normalsize #5};
   }
 
-  %% -- left boundary: High Availability + Disaster Recovery --
-  \boundarybox{-12.5}{0.5}{-0.7}{6.7}{pgafBorder}
-  \boundaryheader{-12}{6.3}{pgafTxt}{High Availability + Disaster Recovery}
-  \draw[draw=pgafBorder,line width=0.6pt] (-12,5.6) -- (-1.2,5.6);
+  %% three boxes on one horizontal line, the exact same layout as
+  %% arch-ha-dr-typical.tex -- only which pair is wrapped changes: here
+  %% High Availability and Disaster Recovery are the pair nested in one
+  %% outer box (pg_auto_failover, one product covering both), while
+  %% Backups stands alone on the right, in the slot Disaster Recovery
+  %% and Backups shared together on the other diagram.
 
-  \node[rectangle,rounded corners=5pt,draw=pgafBorder,thick,fill=pgafFill,
-        text=stxt,minimum width=9.6cm,minimum height=2.2cm,align=center]
-       at (-6.6,3.25) {\normalsize pg\_auto\_failover};
+  \boundarybox{-4.4}{0.4}{13.0}{6.6}{pgafBorder}
+  \boundaryheader{-3.9}{6.2}{pgafTxt}{pg\_auto\_failover}
+  \draw[draw=pgafBorder,line width=0.6pt] (-3.9,5.5) -- (12.5,5.5);
 
-  %% -- right boundary: Backups, alone --
-  \boundarybox{0.7}{0.5}{12.5}{6.7}{bkBorder}
-  \boundaryheader{1.2}{6.3}{bkTxt}{Backups}
-  \draw[draw=bkBorder,line width=0.6pt] (1.2,5.6) -- (12,5.6);
+  \boundarybox{-3.9}{0.9}{3.55}{5.1}{haBorder}
+  \boundaryheader{-3.4}{4.7}{haTxt}{High Availability}
+  \draw[draw=haBorder,line width=0.6pt] (-3.4,4.0) -- (3.05,4.0);
+  \servicebox{-0.175}{1.95}{haBorder}{6.2cm}{pg\_auto\_failover}
 
-  \servicebox{6.6}{4.5}{bkBorder}{7.4cm}{pgBackRest}
-  \servicebox{6.6}{1.6}{bkBorder}{7.4cm}{pgBarman}
+  \boundarybox{4.05}{0.9}{12.5}{5.1}{bkBorder}
+  \boundaryheader{4.55}{4.7}{bkTxt}{Disaster Recovery}
+  \draw[draw=bkBorder,line width=0.6pt] (4.55,4.0) -- (12.0,4.0);
+  \servicebox{8.275}{1.95}{bkBorder}{6.2cm}{pg\_auto\_failover}
+
+  \boundarybox{-13.0}{0.4}{-5.3}{6.6}{bkBorder}
+  \boundaryheader{-12.5}{6.2}{bkTxt}{Backups}
+  \draw[draw=bkBorder,line width=0.6pt] (-12.5,5.5) -- (-5.8,5.5);
+  \servicebox{-9.15}{4.3}{bkBorder}{6.2cm}{pgBackRest}
+  \servicebox{-9.15}{1.7}{bkBorder}{6.2cm}{pgBarman}
 
 \end{tikzpicture}
 

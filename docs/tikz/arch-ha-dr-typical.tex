@@ -20,60 +20,54 @@
 
   \input{common.tex}
 
-  %% pastel, readable palette local to the pair of "typical setup" /
-  %% "with pg_auto_failover" diagrams -- a dark muted tone for header
-  %% text (never a raw saturated brand color as body text), a mid
-  %% pastel tone for borders, a pale tint for the boundary fill.
   \definecolor{haTxt}{HTML}{2F5C9B}
   \definecolor{haBorder}{HTML}{7FA0CC}
-  \definecolor{haFill}{HTML}{EAF1FA}
 
   \definecolor{bkTxt}{HTML}{8A5A12}
   \definecolor{bkBorder}{HTML}{D3A257}
-  \definecolor{bkFill}{HTML}{FBF3E6}
 
-  %% \draw [help lines] (-13,0) grid (13,8);
+  \definecolor{neutralBorder}{HTML}{ABABAB}
 
-  %% -----------------------------------------------------------------
-  %% "service boundary" box: dashed pastel border, pale tint fill,
-  %% bold header label + rule -- compact height, no more than the
-  %% content actually needs.
-  %% -----------------------------------------------------------------
+  %% \draw [help lines] (-13,0) grid (13,7);
 
   \newcommand{\boundarybox}[5]{
-    %% #1 x1  #2 y1  #3 x2  #4 y2  #5 border/fill color
     \draw[rounded corners=9pt,draw=#5,very thick,dashed,fill=#5!12]
          (#1,#2) rectangle (#3,#4);
   }
-
   \newcommand{\boundaryheader}[4]{
-    %% #1 x (left)  #2 y (top)  #3 text color  #4 text
     \node[anchor=north west,text=#3,font=\bfseries\Large,inner sep=0pt]
          at (#1,#2) {#4};
   }
-
   \newcommand{\servicebox}[5]{
-    %% #1 x  #2 y  #3 border color  #4 width  #5 text
     \node[rectangle,rounded corners=5pt,draw=#3,thick,fill=white,
           text=stxt,minimum width=#4,minimum height=1.35cm,align=center]
          at (#1,#2) {\normalsize #5};
   }
 
-  %% -- left boundary: High Availability --
-  \boundarybox{-12.5}{0.5}{-0.7}{6.7}{haBorder}
-  \boundaryheader{-12}{6.3}{haTxt}{High Availability}
-  \draw[draw=haBorder,line width=0.6pt] (-12,5.6) -- (-1.2,5.6);
+  %% three boxes on one horizontal line: High Availability, Disaster
+  %% Recovery, Backups -- Disaster Recovery and Backups wrapped in one
+  %% outer box (same two products cover both, in a typical setup),
+  %% High Availability standing alone outside it.
 
-  \servicebox{-6.6}{4.5}{haBorder}{7.4cm}{Patroni}
-  \servicebox{-6.6}{1.6}{haBorder}{7.4cm}{repmgr}
+  \boundarybox{-13.0}{0.4}{-5.3}{6.6}{haBorder}
+  \boundaryheader{-12.5}{6.2}{haTxt}{High Availability}
+  \draw[draw=haBorder,line width=0.6pt] (-12.5,5.5) -- (-5.8,5.5);
+  \servicebox{-9.15}{4.3}{haBorder}{6.2cm}{Patroni}
+  \servicebox{-9.15}{1.7}{haBorder}{6.2cm}{repmgr}
 
-  %% -- right boundary: Disaster Recovery + Backups --
-  \boundarybox{0.7}{0.5}{12.5}{6.7}{bkBorder}
-  \boundaryheader{1.2}{6.3}{bkTxt}{Disaster Recovery + Backups}
-  \draw[draw=bkBorder,line width=0.6pt] (1.2,5.6) -- (12,5.6);
+  \boundarybox{-4.4}{0.4}{13.0}{6.6}{neutralBorder}
 
-  \servicebox{6.6}{4.5}{bkBorder}{7.4cm}{pgBackRest}
-  \servicebox{6.6}{1.6}{bkBorder}{7.4cm}{pgBarman}
+  \boundarybox{-3.9}{0.9}{4.05}{6.1}{bkBorder}
+  \boundaryheader{-3.4}{5.7}{bkTxt}{Disaster Recovery}
+  \draw[draw=bkBorder,line width=0.6pt] (-3.4,5.0) -- (3.55,5.0);
+  \servicebox{0.075}{3.7}{bkBorder}{6.2cm}{pgBackRest}
+  \servicebox{0.075}{1.4}{bkBorder}{6.2cm}{pgBarman}
+
+  \boundarybox{4.55}{0.9}{12.5}{6.1}{bkBorder}
+  \boundaryheader{5.05}{5.7}{bkTxt}{Backups}
+  \draw[draw=bkBorder,line width=0.6pt] (5.05,5.0) -- (12.0,5.0);
+  \servicebox{8.525}{3.7}{bkBorder}{6.2cm}{pgBackRest}
+  \servicebox{8.525}{1.4}{bkBorder}{6.2cm}{pgBarman}
 
 \end{tikzpicture}
 
