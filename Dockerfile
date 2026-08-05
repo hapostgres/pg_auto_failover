@@ -120,7 +120,12 @@ COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so \
 COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* \
                   /usr/share/postgresql/${PGVERSION}/extension/
 COPY --from=build /usr/local/bin/pg_autoctl /usr/local/bin/
-COPY --from=build /usr/local/bin/pg_walsender /usr/local/bin/
+# Bracket-glob makes this an optional copy: BuildKit treats [r] as a glob,
+# and an empty glob match is not an error for COPY (unlike a literal missing
+# path). This lets tests/upgrade build the "current" Dockerfile against an
+# old release's source tree, which predates pg_walsender and has no binary
+# to copy. Stopgap only -- revisit after the release with a cleaner fix.
+COPY --from=build /usr/local/bin/pg_walsende[r] /usr/local/bin/
 
 RUN mkdir -p /var/lib/postgres \
  && chown -R docker /var/lib/postgres
