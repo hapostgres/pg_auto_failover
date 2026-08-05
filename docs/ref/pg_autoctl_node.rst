@@ -35,8 +35,8 @@ Description
 and Kubernetes deployments.  The complete node description lives in one ini
 file that can be version-controlled, templated, and bind-mounted into a
 container.  The same image and the same entry-point work for every node type
-(monitor, primary, standby, Citus coordinator, Citus worker); per-node
-differences live entirely in the mounted ini file.
+(monitor, primary, standby, Citus coordinator, Citus worker, archiver);
+per-node differences live entirely in the mounted ini file.
 
 The ``pg_autoctl_node.ini`` File
 --------------------------------
@@ -94,8 +94,9 @@ node is created or started from scratch.
 
 ``kind``
 
-  Node role.  One of ``postgres``, ``monitor``, ``coordinator``, or
-  ``worker``.  Required; immutable.
+  Node role.  One of ``postgres``, ``monitor``, ``coordinator``,
+  ``worker``, or ``archiver`` (see :ref:`archiving_architecture`).
+  Required; immutable.
 
 ``name``
 
@@ -147,7 +148,19 @@ node is created or started from scratch.
 ``group``
 
   Citus group identifier.  ``0`` means coordinator.  Defaults to ``0``.
-  Immutable.
+  Immutable.  Not meaningful for ``kind = archiver`` -- see below.
+
+For ``kind = archiver``, this section works the same way but with one
+real difference in behavior worth knowing: an ordinary node's own
+registration retries until its target formation exists (and, once it
+does, applies immediately), while ``pg_autoctl create archiver`` (which
+this section's ``name`` ultimately drives, once through ``[launch]``
+below) has no such retry -- it attaches to whichever groups already exist
+in that formation at the exact moment it runs, and never re-attaches to
+groups added afterwards on its own. If the target formation (or, for a
+Citus formation, all of its groups) might not exist yet when this node's
+own container would otherwise start, use ``[launch]`` below to hold it
+back until an operator or orchestrator confirms the formation is ready.
 
 ``[settings]``
 ^^^^^^^^^^^^^^
@@ -215,11 +228,30 @@ SSL live via ``pg_autoctl enable ssl``.
 ``[launch]``
 ^^^^^^^^^^^^
 
-``mode``
+Two independent gates, both defaulting to ``immediate``.  ``pg_autoctl node
+run`` checks ``create`` first (holding back node creation entirely), then
+-- once the node exists, whether this run just created it or it already
+existed -- checks ``run`` (holding back actually starting Postgres and the
+supervisor).  Setting only one of the two is meaningful: ``create =
+immediate`` with ``run = deferred`` creates the node right away but leaves
+it stopped; ``create = deferred`` with ``run = immediate`` (the common
+case, usually set together as ``create = deferred`` / ``run = deferred``)
+waits before doing anything at all.
 
-  When set to ``deferred``, the node starts a polling loop and waits instead
-  of creating or starting Postgres immediately.  Call ``pg_autoctl node
-  start`` to release it.  Defaults to ``immediate``.  See
+``create``
+
+  When set to ``deferred``, ``pg_autoctl node run`` polls this file every
+  0.5s and waits instead of running ``pg_autoctl create <kind> --run``
+  immediately.  Call ``pg_autoctl node start`` to release it (clears both
+  ``create`` and ``run`` together).  Defaults to ``immediate``.  See
+  :ref:`pg_autoctl_node_start`.
+
+``run``
+
+  When set to ``deferred``, ``pg_autoctl node run`` polls this file every
+  0.5s and waits (after any pending ``create`` has already resolved)
+  instead of exec'ing into ``pg_autoctl run`` immediately.  Call
+  ``pg_autoctl node start`` to release it.  Defaults to ``immediate``.  See
   :ref:`pg_autoctl_node_start`.
 
 ``[formation <name>]``
@@ -275,25 +307,31 @@ Changing an **immutable** field (``kind``, ``pgdata``, ``hostname``, ``port``,
 ``auth``, ``pg_hba_lan``) while the node is running is logged as a warning;
 the value takes effect the next time the node is started.
 
-The ``launch = deferred`` Pattern
-----------------------------------
+The Deferred-Launch Pattern
+----------------------------
 
 ::
 
     [launch]
-    mode = deferred
+    create = deferred
+    run    = deferred
 
-A node configured with ``mode = deferred`` starts a polling loop and waits.
-A sidecar container or init script then calls::
+A node configured this way still runs the ordinary ``pg_autoctl node run``
+command, but it starts a polling loop and waits rather than creating or
+starting Postgres.  A sidecar container or init script then calls::
 
-    pg_autoctl node start /etc/pgaf/node.ini
+    pg_autoctl node start
 
-which rewrites the ini file with ``mode = immediate``.  The waiting node
-detects the change within the poll interval and proceeds to create or run.
-This enables ordered startup without an external orchestrator: the monitor
-container can be given ``mode = immediate`` while all data nodes start with
-``mode = deferred``, and each data node is released with ``node start`` only
-after the monitor is confirmed ready.
+which clears both flags (rewriting the ini file with ``create = immediate``
+/ ``run = immediate``).  The waiting node detects the change within the
+poll interval and proceeds.  This enables ordered startup without an
+external orchestrator: the monitor container can be given the defaults
+(``immediate``) while all data nodes start deferred, and each data node is
+released with ``node start`` only after the monitor is confirmed ready --
+or, for an :ref:`archiving_architecture` archiver that needs every group of
+its target formation to already exist (a Citus formation's several worker
+groups, in particular), only after every one of those groups is confirmed
+registered.
 
 See Also
 --------

@@ -28,10 +28,44 @@ dedicated verb::
 Unlike ``pg_autoctl create postgres``, this does not initialize a
 PostgreSQL data directory: ``--pgdata`` here names the archiver's local
 cache directory for captured WAL segments and base backups. Once
-registered, the archiver starts its own ``pg_receivewal`` against the
-formation's current primary, following it across any later promotion, and
-reports its progress to the monitor the same way a standby reports
-replication state.
+registered, the archiver starts one ``pg_receivewal`` per group of the
+formation it's attached to (every worker of a Citus formation included,
+not just the coordinator) against each group's current primary, following
+it across any later promotion, and reports its progress to the monitor
+the same way a standby reports replication state -- see
+:ref:`archiving_architecture` for the full process model.
+
+``--formation`` may be given more than once, to attach the same archiver
+to several formations right from the start::
+
+  $ pg_autoctl create archiver \
+      --pgdata /var/lib/pgaf/archiver1 \
+      --monitor postgresql://autoctl_node@monitor/pg_auto_failover \
+      --hostname archiver1.example.com \
+      --formation default \
+      --formation billing \
+      --run
+
+There is currently no command to attach an already-running archiver to a
+further formation later on -- covering an additional formation, or a
+worker group added to an already-attached Citus formation, requires
+specifying every formation up front with a repeated ``--formation``.
+
+``--region`` labels which data-centre or availability zone this archiver
+runs in -- purely informational, shown by ``pg_autoctl watch``. More than
+one archiver can be attached to the very same formation at once (each
+gets its own independent capture and its own replication slot against
+that formation's primary), so registering a second archiver in a
+different region against the same formation is how geographically
+redundant disaster-recovery coverage is set up::
+
+  $ pg_autoctl create archiver \
+      --pgdata /var/lib/pgaf/archiver-eu \
+      --monitor postgresql://autoctl_node@monitor/pg_auto_failover \
+      --hostname archiver-eu.example.com \
+      --formation default \
+      --region eu-west \
+      --run
 
 The full set of options::
 
@@ -39,7 +73,10 @@ The full set of options::
   --pgctl             path to pg_ctl (used to locate pg_receivewal)
   --monitor           pg_auto_failover Monitor Postgres URL
   --hostname           hostname to advertise for this archiver
-  --formation          formation this archiver captures WAL and backups for
+  --formation          formation to attach to, may be repeated
+                       (default: "default")
+  --region             data-centre or availability-zone label for this
+                       archiver (default: "default")
   --basebackup-policy   base-backup production/retention policy to attach
                         (default: "default")
   --run                create node then run pg_autoctl service

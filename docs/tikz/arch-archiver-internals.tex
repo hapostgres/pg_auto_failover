@@ -34,19 +34,22 @@
 
   \node (super) at (0,18.6) [proc] {\normalsize \texttt{pg\_autoctl archiver run}\\[2pt]\small two supervised services};
 
-  \node (cap) at (-6.4,14.6) [proc] {\normalsize capture\\[2pt]\small \texttt{service\_archiver\_loop()}};
+  \node (recon) at (-6.4,14.6) [proc] {\normalsize reconciler\\[2pt]\small \texttt{service\_archiver\_reconciler\_loop()}};
   \node (serve) at (6.4,14.6) [proc] {\normalsize serve\\[2pt]\small \texttt{service\_archiver\_serve\_loop()}};
 
-  \path (super.west) edge[->,thick,out=200,in=90]  node[left,pos=0.5] {\small fork} (cap.north)
+  \path (super.west) edge[->,thick,out=200,in=90]  node[left,pos=0.5] {\small fork} (recon.north)
         (super.east) edge[->,thick,out=-20,in=90]   node[right,pos=0.5] {\small fork} (serve.north);
 
-  \node (recv) at (-9.4,10.4) [child] {\ttfamily\small pg\_receivewal};
+  \node (cap) at (-6.4,11.0) [child] {\ttfamily\small capture};
+  \path (recon.south) edge[->,thick] node[left,pos=0.5,align=left] {\small fork,\\[-2pt]\small one per\\[-2pt]\small membership} (cap.north);
+
+  \node (recv) at (-9.4,7.4) [child] {\ttfamily\small pg\_receivewal};
   \path (cap.south) edge[->,thick,out=230,in=90] node[left,pos=0.55,align=left] {\small fork + exec\\[-2pt]\scriptsize \texttt{-S <slot>}} (recv.north);
 
-  \node (walcache) at (-9.4,6.9) [file] {WAL cache / basebackups};
+  \node (walcache) at (-9.4,3.9) [file] {WAL cache / basebackups};
   \path (recv.south) edge[->,thick] node[right] {\small writes} (walcache.north);
 
-  \node (pos) at (-3.1,10.4) [file] {archiver-position};
+  \node (pos) at (-3.1,7.4) [file] {archiver-position};
   \path (cap.south) edge[->,dashed,color=abox,out=-70,in=110] node[below,sloped] {\small writes} (pos.north);
 
   \node (routes) at (3.1,10.4) [file] {archiver-routes.ini};

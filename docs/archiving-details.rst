@@ -9,9 +9,9 @@ registering one and attaching a base-backup policy. This page goes one
 level deeper: what actually moves over the network and onto disk while an
 archiver is running, and what processes are involved -- the level of
 detail worth having before sizing storage, deciding where an archiver
-should sit on your network, or reasoning about how much of a given
-topology (a Citus formation, several independent formations) is actually
-covered.
+should sit on your network, or reasoning about how a single archiver
+covers a whole topology (every group of a Citus formation, or several
+independent formations at once).
 
 Data flow
 ---------
@@ -23,12 +23,15 @@ small status reports (what's been captured, what's been backed up, how
 much disk is left), never the data itself:
 
 1. **It streams WAL continuously** from whichever node is currently the
-   group's primary, over an ordinary PostgreSQL physical replication
-   connection -- the same kind of connection a standby uses, protected by
-   its own dedicated replication slot so that nothing already captured is
-   ever lost, even across a connection that drops and stays down for a
-   while. If the primary changes, the archiver notices and reconnects to
-   the new one on its own; no operator action is needed.
+   primary, over an ordinary PostgreSQL physical replication connection --
+   the same kind of connection a standby uses, protected by its own
+   dedicated replication slot so that nothing already captured is ever
+   lost, even across a connection that drops and stays down for a while.
+   If the primary changes, the archiver notices and reconnects to the new
+   one on its own; no operator action is needed. An archiver attached to
+   several groups (see `Process model`_ below) runs one of these streams
+   per group, entirely independently -- one group's primary changing, or
+   its stream stalling, has no effect on any other group's.
 2. **It produces base backups on a schedule**, either as a real
    ``pg_basebackup`` taken directly from a live node, or entirely on its
    own: replaying already-captured WAL against a local copy of the last
@@ -51,42 +54,58 @@ name, this is never a real Postgres data directory (there is no
 ``initdb``, nothing ever starts Postgres against it directly); it's a
 cache root.
 
-One archiver directory belongs to exactly one source -- one primary's
-WAL, one base-backup lineage -- so nothing inside it is namespaced by
-formation, group, or node: there's nothing else that could ever write
-there to collide with. An archiver covering more than one source (several
-formations, each its own archiver -- see `Several formations`_ below)
-does so as several entirely separate archivers, each with its own
-directory, not as one archiver internally partitioning a shared one::
+A single archiver can be attached to more than one (formation, group) at
+once -- every group of a Citus formation, or several independent
+formations altogether (see `Process model`_ below). Each such membership
+gets its own subdirectory, one level under the archiver's own root, named
+after the formation and group it belongs to, so that two memberships'
+WAL and base backups never collide even though they share one archiver
+identity and one root directory::
 
   /var/lib/pgaf/archiver1/
-  ├── 000000010000000000000041
-  ├── 000000010000000000000042
-  ├── 000000010000000000000043.partial
-  ├── archiver-position
   ├── archiver-routes.ini
-  └── basebackups/
-      ├── basebackup-20260803T020000Z/
-      ├── basebackup-20260804T020000Z/
-      └── basebackup-20260805T020000Z/
+  ├── default/
+  │   └── 0/
+  │       ├── 000000010000000000000041
+  │       ├── 000000010000000000000042
+  │       ├── 000000010000000000000043.partial
+  │       ├── archiver-position
+  │       └── basebackups/
+  │           ├── basebackup-20260803T020000Z/
+  │           ├── basebackup-20260804T020000Z/
+  │           └── basebackup-20260805T020000Z/
+  └── billing/
+      └── 0/
+          ├── 000000010000000000000012
+          ├── archiver-position
+          └── basebackups/
+              └── basebackup-20260805T030000Z/
 
-- WAL segments sit directly in this directory, named exactly the way
-  Postgres itself names them. The most recently-started one carries a
-  ``.partial`` suffix until it's complete -- archiving doesn't wait for a
-  segment to fill up before it counts: whatever has already been flushed
-  into that ``.partial`` file is captured too.
-- Each retained base backup is its own subdirectory under
-  ``basebackups/``, in the same layout an ordinary ``pg_basebackup`` run
-  by hand would produce. You could point ``postgres -D`` straight at one
-  of them and it would start -- that's exactly what disaster recovery
-  relies on.
-- ``archiver-position`` and ``archiver-routes.ini`` are small internal
-  bookkeeping files: coordinates and status, never a copy of any actual
-  data. Safe to ignore day to day, and not something that needs backing
-  up itself -- both are regenerated automatically on the archiver's own
-  next tick.
+- WAL segments sit directly under their own ``<formation>/<group>/``
+  subdirectory, named exactly the way Postgres itself names them. The
+  most recently-started one carries a ``.partial`` suffix until it's
+  complete -- archiving doesn't wait for a segment to fill up before it
+  counts: whatever has already been flushed into that ``.partial`` file
+  is captured too.
+- Each retained base backup is its own subdirectory under that
+  membership's own ``basebackups/``, in the same layout an ordinary
+  ``pg_basebackup`` run by hand would produce. You could point
+  ``postgres -D`` straight at one of them and it would start -- that's
+  exactly what disaster recovery relies on.
+- Each membership has its own ``archiver-position`` file, tracking that
+  group's own captured LSN. ``archiver-routes.ini`` sits at the archiver's
+  own root instead, one section per membership. All of these are small
+  internal bookkeeping files -- coordinates and status, never a copy of
+  any actual data. Safe to ignore day to day, and not something that
+  needs backing up itself -- all of them are regenerated automatically on
+  the archiver's own next tick.
 
-Sizing disk for an archiver comes down to two mostly-independent numbers:
+A single-membership archiver (the common case: one formation, one group)
+looks the same, just with only one ``<formation>/<group>/`` subdirectory
+under its root.
+
+Sizing disk for one membership comes down to two mostly-independent
+numbers:
 
 - **Base backups**: roughly the policy's ``maxcount`` times the size of
   one backup, since retention prunes anything beyond that count (or
@@ -97,6 +116,10 @@ Sizing disk for an archiver comes down to two mostly-independent numbers:
   segments only it still needed are pruned right along with it. A longer
   retention window keeps more history recoverable, at the cost of more
   WAL kept around to cover it.
+
+An archiver attached to several groups needs the sum of this across every
+membership -- each has its own base-backup policy and its own WAL
+retention, sized independently.
 
 Network exposure
 -----------------
@@ -115,75 +138,98 @@ Process model
 
 Once started (``pg_autoctl archiver run``, or ``pg_autoctl node run``
 against a ``kind = archiver`` node specification), an archiver supervises
-exactly two long-running processes, which in turn each run one more of
-their own -- four processes total, all on the one host, none of them
-sharing memory. They hand off exactly two small files (`Storage`_ above)
-and nothing else:
+exactly two long-running processes: ``serve``, and a ``reconciler`` that
+in turn keeps one WAL-capture child running per (formation, group)
+membership this archiver currently holds -- added and removed on its own
+as the archiver is attached to or detached from a formation, no restart
+of the archiver itself required. They hand off small files (`Storage`_
+above) and nothing else:
 
 .. figure:: ./tikz/arch-archiver-internals.svg
-   :alt: pg_autoctl archiver run supervises two processes, capture and serve; capture runs pg_receivewal and writes archiver-position, serve reads archiver-position and writes archiver-routes.ini, then runs pg_walsender, which reads the WAL cache and routes file and serves pg_basebackup, streaming standbys, and restore_command fetches
+   :alt: pg_autoctl archiver run supervises two processes, reconciler and serve; reconciler forks one capture child per membership, each running pg_receivewal and writing its own archiver-position; serve writes archiver-routes.ini (one section per membership) and runs pg_walsender, which reads the WAL cache and routes file and serves pg_basebackup, streaming standbys, and restore_command fetches
 
-   Two supervised processes per archiver, talking to each other only
-   through two small files on disk
+   Two supervised top-level processes per archiver; the reconciler forks
+   one WAL-capture child per membership underneath it
 
 ::
 
   pg_autoctl archiver run
-  ├── capture   -- keeps WAL streaming alive, reports progress to the monitor
-  │   └── pg_receivewal
-  └── serve     -- keeps the archiver reachable over the network
+  ├── reconciler  -- keeps the set of running captures in sync with the
+  │   │              monitor's own membership list for this archiver
+  │   ├── capture (default/0)   -- one per membership, reports its own
+  │   │   └── pg_receivewal        progress to the monitor independently
+  │   └── capture (billing/0)
+  │       └── pg_receivewal
+  └── serve       -- keeps the archiver reachable over the network,
       └── pg_walsender --port 6543 --routes archiver-routes.ini
+                       (serves every membership through the one process)
 
-If either child stops unexpectedly, the parent notices on its next tick
+If any child stops unexpectedly, its supervisor notices on its next tick
 and restarts it -- an archiver recovering from a crashed
 ``pg_receivewal`` or ``pg_walsender`` needs no operator action, the same
-way a keeper recovers a crashed Postgres.
+way a keeper recovers a crashed Postgres. A crash of the reconciler
+itself is likewise just restarted by the top-level supervisor; on
+restart it re-discovers its current memberships from the monitor and
+resumes capturing all of them -- a replication slot keeps the WAL a
+capture needs regardless of how many times its own consumer reconnects,
+so this costs nothing.
 
 More or fewer standby nodes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-This process tree doesn't change shape based on how many standby nodes
-are in the group. WAL capture always talks to whichever node is currently
-primary, never to a standby directly, so a two-node group and a
-five-node group look identical from the archiver's side. The only place
-standby count matters at all is when a base backup is sourced live: with
-more healthy standbys available, there are more candidates to pick from
-before falling back to the primary -- everything else about the archiver
-is unaffected.
+A membership's own capture process doesn't change shape based on how many
+standby nodes are in its group. WAL capture always talks to whichever
+node is currently primary, never to a standby directly, so a two-node
+group and a five-node group look identical from the archiver's side. The
+only place standby count matters at all is when a base backup is sourced
+live: with more healthy standbys available, there are more candidates to
+pick from before falling back to the primary -- everything else about
+the archiver is unaffected.
 
 Several formations
 ^^^^^^^^^^^^^^^^^^^
 
-An archiver is attached to one formation at a time. Covering several
-formations -- each, say, with its own group of two or three standby
-nodes -- means registering one archiver per formation, each with its own
-``--pgdata`` directory and its own identity, whether that's several
-archiver processes on one host or spread across several hosts:
+One archiver can be attached to several formations at once -- each with
+its own group of two or three standby nodes, say -- with no need to run a
+separate archiver process per formation (see :ref:`archiving_operations`
+for the repeated ``--formation`` this takes at creation time). Each
+formation attached this way is one more membership, which shows up as one
+more ``capture`` child under the reconciler and one more section in
+``archiver-routes.ini``; nothing about the archiver's own identity, port,
+or ``--pgdata`` root changes:
 
 ::
 
-  host archiver-a                      host archiver-b
-  (attached to formation "default")    (attached to formation "billing")
+  pg_autoctl archiver run
+  ├── reconciler
+  │   ├── capture (default/0) -> pg_receivewal
+  │   └── capture (billing/0) -> pg_receivewal
+  └── serve -> pg_walsender          (serves both memberships)
 
-  pg_autoctl archiver run              pg_autoctl archiver run
-  ├── capture -> pg_receivewal         ├── capture -> pg_receivewal
-  └── serve   -> pg_walsender          └── serve   -> pg_walsender
-
-Each of these process trees is entirely independent -- separate storage
-directory, separate WAL stream, separate base-backup schedule, no shared
-state of any kind. Losing one has no effect on the others.
+Each membership's own capture is entirely independent -- separate storage
+subdirectory, separate WAL stream, separate base-backup schedule, no
+shared state with any other membership. Losing one (its capture process
+crashing, say) has no effect on the others; the reconciler restarts just
+that one. Running one archiver per formation instead, on separate hosts,
+is still a perfectly reasonable choice -- for isolating blast radius, or
+spreading load across machines -- just no longer a requirement.
 
 A Citus formation
 ^^^^^^^^^^^^^^^^^^
 
 A Citus formation is really several node groups under one name: the
-coordinator's own group, plus one group per worker. Today, registering an
-archiver against a Citus formation covers the coordinator's group only --
-worker groups don't yet get their own WAL capture or base backups from
-that same archiver. If disaster recovery coverage for worker data matters
-to you today, plan around this limitation; formation-wide coverage across
-every worker group from a single archiver is on the roadmap but not yet
-available.
+coordinator's own group, plus one group per worker. Attaching an archiver
+to a Citus formation attaches it to every group that already exists in
+that formation at the time -- the coordinator's and every worker's --
+each becoming its own membership with its own capture process, exactly
+like several independent formations would. A worker group added to the
+formation *afterwards* is not picked up on its own: the reconciler only
+ever starts capture for memberships the monitor already knows about, and
+nothing today re-attaches an archiver to a formation automatically when
+that formation grows a new group. Re-running the attach for that
+formation covers the new group too (existing memberships are left alone),
+and the reconciler picks it up on its own next periodic check, no
+archiver restart required.
 
 What you can point at an archiver
 ------------------------------------
