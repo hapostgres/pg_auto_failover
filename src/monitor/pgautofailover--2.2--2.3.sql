@@ -806,9 +806,18 @@ CREATE TABLE pgautofailover.archiver
     hostname         text NOT NULL,
     createdat        timestamptz NOT NULL DEFAULT now(),
 
-    -- NULL by default, same convention as pgautofailover.node.region;
-    -- unused until the cascading-replication design ships
-    region           text,
+    -- same convention as pgautofailover.node.region: a free-form label for
+    -- the data-centre or availability zone this archiver runs in, purely
+    -- informational (get_archivers()'s own consumers, e.g. pg_autoctl
+    -- watch, may display it) -- set at registration time via
+    -- register_archiver()'s own region parameter, never inferred. Multiple
+    -- archivers can attach to the very same formation (archiver_add_
+    -- formation() names each ARCHIVING node row after its own archiverid,
+    -- so two different archivers never collide there) -- distinct regions
+    -- is the expected shape for geographically-redundant DR coverage of
+    -- one formation, and archiver_policy's own archiverquorum column
+    -- already anticipates requiring more than one archiver's confirmation.
+    region           text not null default 'default',
 
     basebackuppolicyid bigint NOT NULL
                        REFERENCES pgautofailover.basebackup_policy (basebackuppolicyid),
@@ -1216,7 +1225,8 @@ CREATE FUNCTION pgautofailover.register_archiver
     basebackuppolicyid bigint DEFAULT NULL,
     autoregister bool DEFAULT true,
     maxresidentreplay int DEFAULT 1,
-    rcloneconfigname text DEFAULT NULL
+    rcloneconfigname text DEFAULT NULL,
+    region text DEFAULT 'default'
  )
  RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER
 AS $$
@@ -1232,9 +1242,10 @@ BEGIN
 
     INSERT INTO pgautofailover.archiver
            (archivername, hostname, basebackuppolicyid,
-            autoregister, maxresidentreplay)
+            autoregister, maxresidentreplay, region)
     VALUES (archivername, hostname, resolved_policyid,
-            autoregister, maxresidentreplay)
+            autoregister, maxresidentreplay,
+            coalesce(register_archiver.region, 'default'))
       RETURNING archiverid INTO new_archiverid;
 
     INSERT INTO pgautofailover.archiver_storage
@@ -1249,11 +1260,11 @@ BEGIN
 END;
 $$;
 
-comment on function pgautofailover.register_archiver(text,text,text,bigint,bool,int,text)
+comment on function pgautofailover.register_archiver(text,text,text,bigint,bool,int,text,text)
         is 'register a new Archiver process identity, with its mandatory local storage target';
 
 grant execute on function
-      pgautofailover.register_archiver(text,text,text,bigint,bool,int,text)
+      pgautofailover.register_archiver(text,text,text,bigint,bool,int,text,text)
    to autoctl_node;
 
 -- periodic storage heartbeat: usedbytes/freebytes/lastreporttime all move
@@ -1279,17 +1290,15 @@ grant execute on function
 
 -- one row per archiver attached to formationid, with its FSM state (the
 -- 'wal-receiver' archiver_node row created by archiver_add_formation, one
--- per group -- this milestone's own single-membership scope means a
--- single-group formation gets exactly one row per archiver here; a
--- multi-group formation would get one row per (archiver, group), a
--- follow-up concern once an archiver can serve more than one group at
--- once). Used by `pg_autoctl watch`'s own archivers section.
+-- per group -- a multi-group formation returns one row per (archiver,
+-- group)). Used by `pg_autoctl watch`'s own archivers section.
 CREATE FUNCTION pgautofailover.get_archivers
  (
    IN formationid       text default 'default',
    OUT archiver_id       bigint,
    OUT archiver_name     text,
    OUT hostname          text,
+   OUT region            text,
    OUT used_bytes        bigint,
    OUT free_bytes        bigint,
    OUT last_report_time  timestamptz,
@@ -1299,7 +1308,7 @@ CREATE FUNCTION pgautofailover.get_archivers
  )
 RETURNS SETOF record LANGUAGE SQL STRICT SECURITY DEFINER
 AS $$
-   SELECT a.archiverid, a.archivername, a.hostname,
+   SELECT a.archiverid, a.archivername, a.hostname, a.region,
           a.usedbytes, a.freebytes, a.lastreporttime,
           n.nodeid, n.reportedstate, n.goalstate
      FROM pgautofailover.archiver a
@@ -1459,6 +1468,8 @@ BEGIN
           FROM pgautofailover.node n
          WHERE n.formationid = in_formationid
     LOOP
+        new_nodeid := NULL;
+
         -- nodeport = 0 is a permanent sentinel, not an M1 stopgap: an
         -- ARCHIVING row has no postmaster of its own to be reachable on,
         -- so nodehost:nodeport isn't a connectable address here the way
@@ -1467,8 +1478,15 @@ BEGIN
         -- index is scoped to haspgdata rows only. reportedstate starts at
         -- 'wait_standby', same as any freshly-registered node -- it only
         -- reaches 'archiving' once a real keeper's pg_receivewal is
-        -- actually running (no service_archiver process exists yet at
-        -- this milestone).
+        -- actually running.
+        --
+        -- ON CONFLICT DO NOTHING on (formationid, nodename): this
+        -- function must be safe to call again for a formation some of
+        -- whose groups are already attached -- an operator re-running it
+        -- on purpose, or the archiver's own reconciler picking up a
+        -- newly-added Citus worker group -- without failing on every
+        -- group that was already covered by an earlier call. A skipped
+        -- insert leaves new_nodeid NULL (no row returned), handled below.
         INSERT INTO pgautofailover.node
                (formationid, groupid, nodename, nodehost, nodeport,
                 goalstate, reportedstate, haspgdata, candidatepriority,
@@ -1479,7 +1497,15 @@ BEGIN
                   WHERE a.archiverid = in_archiverid),
                 0,
                 'wait_standby', 'wait_standby', false, 0, false)
+        ON CONFLICT (formationid, nodename) DO NOTHING
           RETURNING nodeid INTO new_nodeid;
+
+        IF new_nodeid IS NULL THEN
+            -- this group was already attached by an earlier call --
+            -- nothing new to report for it, and archiver_node already
+            -- has its row from that earlier call too.
+            CONTINUE;
+        END IF;
 
         INSERT INTO pgautofailover.archiver_node
                (archiverid, kind, pgdata, nodeid)
@@ -1494,9 +1520,42 @@ END;
 $$;
 
 comment on function pgautofailover.archiver_add_formation(bigint,text)
-        is 'attach an archiver to every group of a formation, creating one lightweight ARCHIVING node row per group';
+        is 'attach an archiver to every group of a formation, creating one lightweight ARCHIVING node row per group not already attached';
 
 grant execute on function pgautofailover.archiver_add_formation(bigint,text)
+   to autoctl_node;
+
+-- one row per (formation, group) an archiver currently holds a
+-- 'wal-receiver' membership in, across every formation it is attached
+-- to -- what an archiver process itself calls, at startup and
+-- periodically thereafter, to discover the full set of WAL streams and
+-- base-backup schedules it is responsible for running (see
+-- service_archiver_reconciler.c). Unlike get_archivers() above (scoped
+-- to one formation, for `pg_autoctl watch`'s own display), this is
+-- scoped to one archiver, across all its formations.
+CREATE FUNCTION pgautofailover.list_archiver_memberships
+ (
+   IN archiverid         bigint,
+   OUT formation_id       text,
+   OUT group_id           int,
+   OUT node_id            bigint,
+   OUT reported_state     pgautofailover.replication_state,
+   OUT goal_state         pgautofailover.replication_state
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT SECURITY DEFINER
+AS $$
+    SELECT n.formationid, n.groupid, n.nodeid, n.reportedstate, n.goalstate
+      FROM pgautofailover.archiver_node an
+      JOIN pgautofailover.node n ON n.nodeid = an.nodeid
+     WHERE an.archiverid = list_archiver_memberships.archiverid
+       AND an.kind = 'wal-receiver'
+  ORDER BY n.formationid, n.groupid;
+$$;
+
+comment on function pgautofailover.list_archiver_memberships(bigint)
+        is 'list every (formation, group) membership an archiver currently belongs to, across every formation it is attached to';
+
+grant execute on function pgautofailover.list_archiver_memberships(bigint)
    to autoctl_node;
 
 -- Deleting the node row is enough: archiver_node.nodeid's own

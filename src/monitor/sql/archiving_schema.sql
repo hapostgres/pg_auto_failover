@@ -35,8 +35,8 @@ VALUES ('archiving_test', 0, 'node1', 'node1.local', 5432, 111,
 SELECT pgautofailover.register_archiver('archiver1', 'archiver1.local')
        AS archiverid \gset
 
-SELECT archiverid, archivername, hostname, basebackuppolicyid, autoregister,
-       maxresidentreplay
+SELECT archiverid, archivername, hostname, region, basebackuppolicyid,
+       autoregister, maxresidentreplay
   FROM pgautofailover.archiver;
 
 -- the mandatory 'local' storage target is created in the same call
@@ -59,13 +59,53 @@ SELECT archivernodeid, archiverid, kind, nodeid
 SELECT nodeid FROM pgautofailover.node
  WHERE formationid = 'archiving_test' AND groupid = 0 AND haspgdata = false \gset
 
+-- calling archiver_add_formation() again for the same (archiver, formation)
+-- must be a safe no-op -- no error, no duplicate node/archiver_node rows --
+-- since a real archiver's own reconciler calls this periodically to pick up
+-- newly-added groups (e.g. a Citus formation growing a worker), not just
+-- once at creation time
+SELECT * FROM pgautofailover.archiver_add_formation(:archiverid, 'archiving_test');
+
+SELECT count(*) AS should_still_be_one FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND groupid = 0 AND haspgdata = false;
+
+-- ── list_archiver_memberships: what an archiver process discovers ──────────
+
+SELECT * FROM pgautofailover.list_archiver_memberships(:archiverid);
+
+-- a second formation attached to the same archiver shows up alongside the
+-- first -- this is the multi-membership case: one archiver, several
+-- (formation, group) rows, each its own WAL stream and base-backup schedule
+SELECT pgautofailover.create_formation('archiving_test_2', 'pgsql', 'postgres',
+                                        true, 1);
+INSERT INTO pgautofailover.node
+       (formationid, groupid, nodename, nodehost, nodeport, sysidentifier,
+        goalstate, reportedstate)
+VALUES ('archiving_test_2', 0, 'node3', 'node3.local', 5432, 222,
+        'primary', 'primary');
+SELECT * FROM pgautofailover.archiver_add_formation(:archiverid, 'archiving_test_2');
+SELECT formation_id, group_id
+  FROM pgautofailover.list_archiver_memberships(:archiverid)
+ ORDER BY formation_id;
+
+SELECT pgautofailover.archiver_remove_formation(:archiverid, 'archiving_test_2');
+
 -- a second archiver serving the same formation/group shares the same
 -- (nodehost, nodeport) = (its own hostname, 0) with the first -- the
 -- node_nodehost_nodeport_haspgdata_idx partial unique index (scoped to
--- haspgdata rows only) must not reject this
-SELECT pgautofailover.register_archiver('archiver2', 'archiver1.local')
+-- haspgdata rows only) must not reject this. Registered with an explicit,
+-- distinct region from archiver1's own default -- this is the intended
+-- shape for geographically-redundant DR coverage of the same formation
+-- (see archiver.region's own comment); get_archivers() below must surface
+-- both regions distinctly.
+SELECT pgautofailover.register_archiver('archiver2', 'archiver1.local',
+                                         region => 'eu-west')
        AS archiverid2 \gset
 SELECT * FROM pgautofailover.archiver_add_formation(:archiverid2, 'archiving_test');
+
+SELECT archiver_id, archiver_name, region
+  FROM pgautofailover.get_archivers('archiving_test')
+ ORDER BY archiver_id;
 
 -- ── WAL capture confirmation: wal_archived() / report_wal_received() ───────
 
