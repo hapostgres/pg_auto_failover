@@ -35,9 +35,9 @@
 # test_runner.c's monitor_get_node_state()) wouldn't match either row to
 # begin with, and would be ambiguous between the two even if it did. Every
 # check on archiver1's per-membership state after test_003 attaches the
-# second membership goes through an explicit `sql monitor` query matching
-# nodename LIKE 'archiver-%' (safe: this spec has exactly one archiver)
-# *and* formationid instead.
+# second membership uses "wait until archiver state is ... in <formation>"
+# instead, which matches nodename LIKE 'archiver-%' AND formationid under
+# the hood (safe: this spec has exactly one archiver).
 #
 # The autoctl_node role has no direct SELECT on pgautofailover.archiver
 # (granted much later in pgautofailover.sql than the blanket "GRANT SELECT
@@ -103,11 +103,8 @@ step test_001_capture_formation1_wal {
     sql node1 { SELECT pg_switch_wal(); }
     sql node1 { INSERT INTO t1 VALUES (3); }
     sql node1 { SELECT pg_switch_wal(); }
-    sleep 15s
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
-    expect { t }
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000004'); }
-    expect { t }
+    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
+    wait until wal segment "000000010000000000000004" archived in default/0  timeout 30s
 }
 
 #
@@ -141,12 +138,11 @@ step test_003_dynamic_attach_to_formation2 {
             (SELECT archiver_id FROM pgautofailover.get_archivers('default') LIMIT 1),
             'formation2');
     }
-    # one reconciler tick (30s) plus margin for it to notice, fork the new
-    # capture child, and for that child to register/report far enough to
-    # reach ARCHIVING_STATE.
-    sleep 50s
-    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'formation2'; }
-    expect { archiving }
+    # polls through the reconciler's own periodic tick (30s,
+    # ARCHIVER_RECONCILER_INTERVAL_SECONDS) noticing the new membership,
+    # forking the new capture child, and that child registering/reporting
+    # far enough to reach ARCHIVING_STATE.
+    wait until archiver state is archiving in formation2  timeout 90s
 }
 
 #
@@ -167,11 +163,8 @@ step test_004_capture_formation2_wal {
     sql node3 { SELECT pg_switch_wal(); }
     sql node3 { INSERT INTO t2 VALUES (3); }
     sql node3 { SELECT pg_switch_wal(); }
-    sleep 15s
-    sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '000000010000000000000003'); }
-    expect { t }
-    sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '000000010000000000000004'); }
-    expect { t }
+    wait until wal segment "000000010000000000000003" archived in formation2/0  timeout 30s
+    wait until wal segment "000000010000000000000004" archived in formation2/0  timeout 30s
 }
 
 #
@@ -185,11 +178,8 @@ step test_004_capture_formation2_wal {
 step test_005_formation1_still_healthy {
     sql node1 { INSERT INTO t1 VALUES (4); }
     sql node1 { SELECT pg_switch_wal(); }
-    sleep 15s
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000005'); }
-    expect { t }
-    sql monitor { SELECT reportedstate FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default'; }
-    expect { archiving }
+    wait until wal segment "000000010000000000000005" archived in default/0  timeout 30s
+    wait until archiver state is archiving in default  timeout 30s
 }
 
 sequence

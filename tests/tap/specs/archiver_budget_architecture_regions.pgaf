@@ -81,9 +81,6 @@ step test_002_archiver_captures_wal {
     sql node1 { SELECT pg_switch_wal(); }
     sql node1 { INSERT INTO t1 VALUES (3); }
     sql node1 { SELECT pg_switch_wal(); }
-    sleep 15s
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
-    expect { t }
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000004'); }
-    expect { t }
+    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
+    wait until wal segment "000000010000000000000004" archived in default/0  timeout 30s
 }

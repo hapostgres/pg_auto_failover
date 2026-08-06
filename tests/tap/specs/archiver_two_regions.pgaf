@@ -104,10 +104,7 @@ step test_002_both_archivers_capture_independently {
     sql node1 { SELECT pg_switch_wal(); }
     sql node1 { INSERT INTO t1 VALUES (3); }
     sql node1 { SELECT pg_switch_wal(); }
-    sleep 15s
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
-    expect { t }
+    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
     sql monitor { SELECT pgautofailover.set_archiver_policy('default', NULL, 2, NULL, NULL); }
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
-    expect { t }
+    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
 }
