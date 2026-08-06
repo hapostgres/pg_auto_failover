@@ -323,6 +323,16 @@ jobs:
           - { PGVERSION: 17, schedule: node }
           - { PGVERSION: 18, schedule: node }
           - { PGVERSION: 19, schedule: node }
+          # archiver: WAL capture, base backups, rebuild-from-archiver — all
+          #           PG versions, since pg_walsender's wire-protocol
+          #           correctness is version-sensitive (see
+          #           tests/tap/schedules/archiver.sch's own header comment)
+          - { PGVERSION: 14, schedule: archiver }
+          - { PGVERSION: 15, schedule: archiver }
+          - { PGVERSION: 16, schedule: archiver }
+          - { PGVERSION: 17, schedule: archiver }
+          - { PGVERSION: 18, schedule: archiver }
+          - { PGVERSION: 19, schedule: archiver }
           # ssl: enable_ssl, ssl_self_signed, ssl_cert
           - { PGVERSION: 14, schedule: ssl }
           - { PGVERSION: 15, schedule: ssl }
