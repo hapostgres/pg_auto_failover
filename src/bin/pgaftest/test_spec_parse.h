@@ -153,11 +153,16 @@
      T_NOT = 369,
      T_CONTAINS = 370,
      T_MATCHES = 371,
-     T_INTEGER = 372,
-     T_IDENT = 373,
-     T_STRING = 374,
-     T_BLOCK = 375,
-     T_SHELL_ARGS = 376
+     T_WAL = 372,
+     T_SEGMENT = 373,
+     T_ARCHIVED = 374,
+     T_BASEBACKUP = 375,
+     T_SLASH = 376,
+     T_INTEGER = 377,
+     T_IDENT = 378,
+     T_STRING = 379,
+     T_BLOCK = 380,
+     T_SHELL_ARGS = 381
    };
 #endif
 /* Tokens.  */
@@ -275,11 +280,16 @@
 #define T_NOT 369
 #define T_CONTAINS 370
 #define T_MATCHES 371
-#define T_INTEGER 372
-#define T_IDENT 373
-#define T_STRING 374
-#define T_BLOCK 375
-#define T_SHELL_ARGS 376
+#define T_WAL 372
+#define T_SEGMENT 373
+#define T_ARCHIVED 374
+#define T_BASEBACKUP 375
+#define T_SLASH 376
+#define T_INTEGER 377
+#define T_IDENT 378
+#define T_STRING 379
+#define T_BLOCK 380
+#define T_SHELL_ARGS 381
 
 
 
@@ -294,7 +304,7 @@ typedef union YYSTYPE
 	TestCmd    *cmd;
 }
 /* Line 1529 of yacc.c.  */
-#line 298 "test_spec_parse.h"
+#line 308 "test_spec_parse.h"
 	YYSTYPE;
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1

@@ -191,6 +191,7 @@ static TestArchiverNode *current_archiver = NULL;
 %token T_POSTGRES T_STAYS T_WHILE T_THROUGH T_SET T_GET
 %token T_FSM
 %token T_LOGS T_NOT T_CONTAINS T_MATCHES
+%token T_WAL T_SEGMENT T_ARCHIVED T_BASEBACKUP T_SLASH
 
 /* ---- Tokens with values ---- */
 %token <ival> T_INTEGER
@@ -200,6 +201,7 @@ static TestArchiverNode *current_archiver = NULL;
 %type <str>   ident_or_string
 %type <str>   bare_name
 %type <str>   fsm_state
+%type <str>   wait_state_name
 %type <str>   node_name
 %type <step>  cmd_block cmd_list
 %type <cmd>   step_cmd
@@ -209,6 +211,7 @@ static TestArchiverNode *current_archiver = NULL;
 %type <cmd>   fsm_step_cmd
 %type <cmd>   nodeini_cmd
 %type <ival>  opt_timeout
+%type <ival>  opt_wait_group
 %type <step>  while_body
 
 %%
@@ -1110,6 +1113,106 @@ wait_cmd:
 		$$->timeoutSeconds = $6;
 		current_wait_cmd = NULL;
 	}
+	/*
+	 * Generic form: wait until sql <svc> { SQL } is { value } [timeout Ns]
+	 *
+	 * Polls an arbitrary scalar SQL expression until its (substring-
+	 * matched, same semantics as `expect { }`) result contains <value>.
+	 * The "wal segment ... archived", "archiver state is ...", and
+	 * "basebackup ... is ..." forms below are all sugar for this at parse
+	 * time -- reach for this directly only when none of those fit.
+	 */
+	| T_WAIT T_UNTIL T_SQL T_IDENT T_BLOCK T_IS T_BLOCK opt_timeout
+	{
+		$$ = make_cmd(CMD_WAIT_SQL);
+		strlcpy($$->service,  $4, sizeof($$->service));
+		strlcpy($$->args,     $5, sizeof($$->args));
+		strlcpy($$->expected, $7, sizeof($$->expected));
+		$$->timeoutSeconds = $8;
+		free($4); free($5); free($7);
+	}
+	/*
+	 * wait until wal segment "<segment>" archived in <formation>/<group>  [timeout Ns]
+	 *
+	 * Sugar for polling pgautofailover.wal_archived(). The segment name is
+	 * quoted (T_STRING) rather than bare: a real segment name is all
+	 * digits, which the lexer's own T_INTEGER rule would otherwise
+	 * swallow (and overflow -- a segment name is 24 digits, an int isn't).
+	 */
+	| T_WAIT T_UNTIL T_WAL T_SEGMENT T_STRING T_ARCHIVED T_IN T_IDENT T_SLASH T_INTEGER opt_timeout
+	{
+		$$ = make_cmd(CMD_WAIT_SQL);
+		strlcpy($$->service, "monitor", sizeof($$->service));
+		sformat($$->args, sizeof($$->args),
+		        "SELECT pgautofailover.wal_archived('%s', %d, '%s')",
+		        $8, $10, $5);
+		strlcpy($$->expected, "t", sizeof($$->expected));
+		$$->timeoutSeconds = $11;
+		free($5); free($8);
+	}
+	/*
+	 * wait until archiver state is <state> in <formation>[/<group>]  [timeout Ns]
+	 *
+	 * Sugar for the nodename LIKE 'archiver-%' idiom every multi-
+	 * membership archiver spec needs: archiver_add_formation() (pgautofailover.sql)
+	 * never uses the plain --name given at create-archiver time as an
+	 * ARCHIVING row's own nodename, so the ordinary "wait until <node>
+	 * state is <s>" form (which matches on nodename = $1) can't see these
+	 * rows at all, let alone disambiguate more than one. Group is
+	 * optional: omit it when the formation has exactly one archiver
+	 * membership (the common case, and formationid alone is unambiguous),
+	 * give it to disambiguate a multi-group Citus formation.
+	 */
+	| T_WAIT T_UNTIL T_ARCHIVER T_STATE state_op wait_state_name T_IN T_IDENT opt_wait_group opt_timeout
+	{
+		$$ = make_cmd(CMD_WAIT_SQL);
+		strlcpy($$->service, "monitor", sizeof($$->service));
+		if ($9 >= 0)
+		{
+			sformat($$->args, sizeof($$->args),
+			        "SELECT reportedstate::text FROM pgautofailover.node"
+			        " WHERE nodename LIKE 'archiver-%%' AND formationid = '%s'"
+			        " AND groupid = %d", $8, $9);
+		}
+		else
+		{
+			sformat($$->args, sizeof($$->args),
+			        "SELECT reportedstate::text FROM pgautofailover.node"
+			        " WHERE nodename LIKE 'archiver-%%' AND formationid = '%s'", $8);
+		}
+		strlcpy($$->expected, $6, sizeof($$->expected));
+		$$->timeoutSeconds = $10;
+		free($6); free($8);
+	}
+	/*
+	 * wait until basebackup <source|status|replaymode> is <value> in <formation>/<group>  [timeout Ns]
+	 *
+	 * Sugar for polling pgautofailover.get_latest_basebackup(). <property>
+	 * is validated here rather than tokenized: it's the one piece of this
+	 * command that's genuinely open content (a column name), not fixed
+	 * syntax, so a clear parse-time error beats a cryptic runtime SQL one.
+	 */
+	| T_WAIT T_UNTIL T_BASEBACKUP T_IDENT T_IS T_IDENT T_IN T_IDENT T_SLASH T_INTEGER opt_timeout
+	{
+		if (strcmp($4, "source") != 0 &&
+		    strcmp($4, "status") != 0 &&
+		    strcmp($4, "replaymode") != 0)
+		{
+			fprintf(stderr,
+			        "pgaftest: line %d: \"wait until basebackup %s ...\" -- "
+			        "unknown property (expected source, status, or replaymode)\n",
+			        pgaf_line_number, $4);
+			exit(1);
+		}
+		$$ = make_cmd(CMD_WAIT_SQL);
+		strlcpy($$->service, "monitor", sizeof($$->service));
+		sformat($$->args, sizeof($$->args),
+		        "SELECT %s::text FROM pgautofailover.get_latest_basebackup('%s', %d)",
+		        $4, $8, $10);
+		strlcpy($$->expected, $6, sizeof($$->expected));
+		$$->timeoutSeconds = $11;
+		free($4); free($6); free($8);
+	}
 	;
 
 /*
@@ -1678,6 +1781,27 @@ fsm_state:
 ident_or_string:
 	  T_IDENT  { $$ = $1; }
 	| T_STRING { $$ = $1; }
+	;
+
+/*
+ * wait_state_name — a state name for "wait until archiver state is X",
+ * accepting both known FSM state tokens and bare idents (e.g. "archiving",
+ * which has no T_FS_* token of its own -- see fsm_state's own list). Always
+ * returns a heap-owned string so the caller can unconditionally free() it,
+ * unlike fsm_state itself (whose branches return static literals).
+ */
+wait_state_name:
+	  fsm_state  { $$ = strdup($1); }
+	| T_IDENT    { $$ = $1; }
+	;
+
+/*
+ * opt_wait_group — optional "/<group>" suffix for "wait until archiver
+ * state is X in <formation>[/<group>]". -1 means "no group filter".
+ */
+opt_wait_group:
+	  /* empty */          { $$ = -1; }
+	| T_SLASH T_INTEGER    { $$ = $2; }
 	;
 
 %%

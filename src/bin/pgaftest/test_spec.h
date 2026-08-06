@@ -278,6 +278,17 @@ typedef enum TestCmdKind
 	                      * last-replayed LSN has caught up to that captured
 	                      * value. service = node to poll, state = source
 	                      * node to capture the LSN from. */
+	CMD_WAIT_SQL,        /* wait until sql <svc> { SQL } is { value } [timeout Ns]
+	                      * — polls an arbitrary scalar SQL expression until
+	                      * its (substring-matched, same semantics as
+	                      * CMD_EXPECT) result contains <value>, or times
+	                      * out. The building block "wait until wal segment
+	                      * ... archived", "wait until archiver state is
+	                      * ...", and "wait until basebackup ... is ..." are
+	                      * all sugar for at parse time -- reach for this
+	                      * directly only when none of those fit.
+	                      * service = target service (e.g. "monitor"),
+	                      * args = SQL text, expected = value to match. */
 } TestCmdKind;
 
 typedef struct TestCmd

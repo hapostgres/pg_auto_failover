@@ -900,6 +900,26 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_WAIT_SQL:
+		{
+			/*
+			 * Always the canonical generic form: "wal segment ... archived",
+			 * "archiver state is ...", and "basebackup ... is ..." are all
+			 * sugar folded into a plain SQL/expected pair at parse time, so
+			 * there's no surface syntax left to distinguish and round-trip
+			 * -- this always re-renders as the generic form, same as
+			 * CMD_SQL normalises embedded newlines rather than preserving
+			 * original formatting.
+			 */
+			char norm[8192];
+			normalize_sql(cmd->args, norm, sizeof(norm));
+
+			fformat(out, "%*swait until sql %s { %s } is { %s }  timeout %ds\n",
+					indent, "", cmd->service, norm, cmd->expected,
+					cmd->timeoutSeconds);
+			break;
+		}
+
 		case CMD_PROMOTE:
 		{
 			fformat(out, "%*spromote", indent, "");

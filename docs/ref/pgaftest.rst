@@ -630,6 +630,49 @@ propagated.
    expect { <expected output> }
    expect error [<SQLSTATE>]
 
+**SQL-condition waits**
+
+.. code-block:: text
+
+   wait until sql <service> { SELECT ... } is { <value> }  [timeout <N>s]
+
+   wait until wal segment "<segment>" archived in <formation>/<group>       [timeout <N>s]
+   wait until archiver state is <state> in <formation>[/<group>]           [timeout <N>s]
+   wait until basebackup <source|status|replaymode> is <value> in <formation>/<group>  [timeout <N>s]
+
+The generic form polls an arbitrary scalar SQL expression every second
+until its (substring-matched, same semantics as ``expect``) result contains
+``<value>``, or the timeout elapses — the primitive to reach for when a
+condition can't be expressed as a node-state wait and none of the sugar
+forms below fit. It exists specifically to replace ``sleep <N>s`` followed
+by a single ``sql``/``expect`` pair: a fixed sleep either wastes time
+waiting past a condition that was already true, or — under CI load — isn't
+long enough and produces a flaky failure; polling adapts to how long the
+condition actually takes.
+
+The three sugar forms below are just this primitive with a pre-built SQL
+query, covering the checks archiver specs need most:
+
+- ``wait until wal segment "<segment>" archived in <formation>/<group>``
+  polls ``pgautofailover.wal_archived()``. The segment name must be quoted
+  (it's all digits, which would otherwise be lexed as an integer and
+  overflow).
+- ``wait until archiver state is <state> in <formation>[/<group>]`` polls
+  an archiver's own ``reportedstate``, matching on
+  ``nodename LIKE 'archiver-%'`` and ``formationid`` (and ``groupid`` when
+  given) rather than a plain node name: an ``ARCHIVING`` row's ``nodename``
+  is always synthesized by ``archiver_add_formation()`` as
+  ``archiver-<archiverid>-<groupid>``, never the plain ``--name`` given at
+  ``create archiver`` time, so the ordinary ``wait until <node> state is
+  <state>`` form can't see these rows at all, let alone disambiguate more
+  than one membership sharing the same archiver. Omit the group when the
+  formation has exactly one archiver membership; give it to disambiguate a
+  multi-group Citus formation.
+- ``wait until basebackup <source|status|replaymode> is <value> in
+  <formation>/<group>`` polls ``pgautofailover.get_latest_basebackup()``'s
+  2-argument form. For the 3-argument ``preferred_source`` overload, or any
+  other ``pgautofailover.*`` function, use the generic form directly.
+
 **Network**
 
 .. code-block:: text
