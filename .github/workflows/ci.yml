@@ -345,6 +345,7 @@ jobs:
           - { PGVERSION: 17, schedule: multi-misc }
           - { PGVERSION: 17, schedule: multi-async }
           - { PGVERSION: 17, schedule: node-fsm-gaps }
+          - { PGVERSION: 17, schedule: archiver-multi }
           - { PGVERSION: 17, schedule: citus-1 }
           - { PGVERSION: 17, schedule: citus-2 }
           # citus on PG18 (supported); allow failure until officially validated

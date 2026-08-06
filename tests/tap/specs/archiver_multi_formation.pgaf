@@ -152,13 +152,14 @@ step test_003_dynamic_attach_to_formation2 {
 #
 # test_004: confirm formation2's WAL is actually being captured by the
 #           newly-started capture child, not just that the FSM state looks
-#           right. formation2 is a fresh formation/group -- its own
-#           archiver slot restart_lsn floor is expected to be an early,
-#           low-numbered segment (no unrelated bootstrap traffic beyond its
-#           own two nodes joining), so this switches enough times to be
-#           independent of the exact floor rather than hardcoding a segment
-#           number the way test_001 does for the already-characterized
-#           "default" formation.
+#           right. formation2 is a fresh formation/group, but its archiver
+#           slot's restart_lsn floor still lands on segment 3 -- the same
+#           bootstrap-consumption behavior archiver_wal_capture.pgaf's own
+#           header comment documents for "default": a freshly-created
+#           replication slot's restart_lsn already reflects whatever WAL
+#           bootstrap/registration itself generated before the slot existed,
+#           independent of which formation it belongs to. Confirmed live
+#           (segment 1/2 never actually get archived -- only 3 onward do).
 #
 
 step test_004_capture_formation2_wal {
@@ -167,9 +168,9 @@ step test_004_capture_formation2_wal {
     sql node3 { INSERT INTO t2 VALUES (3); }
     sql node3 { SELECT pg_switch_wal(); }
     sleep 15s
-    sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '000000010000000000000001'); }
+    sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '000000010000000000000003'); }
     expect { t }
-    sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '000000010000000000000002'); }
+    sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '000000010000000000000004'); }
     expect { t }
 }
 
