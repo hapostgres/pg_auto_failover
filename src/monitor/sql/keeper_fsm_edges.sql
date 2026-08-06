@@ -67,7 +67,12 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- summary row right before its own detail rows, as a header.
 --
 -- Expected result: empty. Every MonitorFSM[] rule currently has a matching
--- KeeperFSM[] row for every current_state it can assign a transition from.
+-- KeeperFSM[] row for every current_state it can assign a transition from
+-- -- including the pos 367/396/397/398 archiver-related edges (Archiving &
+-- Disaster Recovery design, milestone 2): KeeperFSM[]'s own
+-- WAIT_STANDBY_STATE/ARCHIVING_STATE/REPORT_LSN_STATE rows
+-- (fsm_init_archiver/fsm_archiver_report_lsn/fsm_archiver_follow_new_primary,
+-- fsm.c/fsm_transition.c) close this milestone's own gap.
 SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.comment
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos

@@ -17,6 +17,7 @@
 #include "defaults.h"
 #include "pgctl.h"
 #include "pgsql.h"
+#include "string_utils.h"
 
 /*
  * We support "primary" and "secondary" roles in Citus, when Citus support is
@@ -47,6 +48,40 @@ typedef struct KeeperConfig
 	char hostname[_POSIX_HOST_NAME_MAX];
 	char nodeKind[NAMEDATALEN];
 
+	/*
+	 * The archiver's own archiverid (distinct from keeper.state.
+	 * current_node_id, which holds the ARCHIVING membership row's nodeid --
+	 * see cli_create_archiver's own comment). Only meaningful when nodeKind
+	 * is "archiver"; 0 otherwise. archiverIdStr is the ini-persisted form
+	 * (ini_file.c's INI_INT_T only supports a plain int, too narrow for a
+	 * bigserial id -- same string-plus-parsed-value pattern citusRoleStr/
+	 * citusRole already use in this struct), archiverId is parsed from it
+	 * once at config-read time.
+	 */
+	char archiverIdStr[INTSTRING_MAX_DIGITS];
+	int64_t archiverId;
+
+	/*
+	 * The archiver-level (not per-membership) supervisor's own pidfile
+	 * path, stashed by service_archiver_reconciler.c's build_membership_
+	 * keeper() from the template keeper's pathnames.pid before they get
+	 * overwritten with this membership's own per-(formation, group)
+	 * paths. This is the *shared* pidfile every one of this archiver's
+	 * supervised services (archiver-serve, archiver-reconciler, each
+	 * archiver-capture-<formation>-<group>) has one line in -- not a
+	 * dedicated pidfile of its own -- so a reader must look up a specific
+	 * service's own pid by name (supervisor_find_service_pid(),
+	 * SERVICE_NAME_ARCHIVER_SERVE), not just read the first line.
+	 *
+	 * A capture child that just finished generating a base backup
+	 * (service_archiver_basebackup.c) uses this to find archiver-serve's
+	 * pid and signal it (SIGUSR1) to prompt an immediate routes refresh,
+	 * rather than leaving pg_walsender to serve a stale route for up to
+	 * ARCHIVER_SERVE_ROUTES_REFRESH_TICKS more ticks. Only meaningful for
+	 * a per-membership keeper built that way; empty otherwise.
+	 */
+	char archiverPidFilePath[MAXPGPATH];
+
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;
 
@@ -75,6 +110,17 @@ typedef struct KeeperConfig
 
 	/* allow data loss during a perform failover operation */
 	bool allowDataLoss;
+
+	/*
+	 * `pg_autoctl create postgres --from-archiver`: bootstrap this standby
+	 * from a registered archiver's base backup + WAL cache instead of from
+	 * the group's live primary -- the disaster-recovery case where no live
+	 * standby (or even primary) is left to clone from. Runtime-only, same
+	 * as createAndRun (cli_common.c): only meaningful for the single
+	 * in-process reach_initial_state() call `create postgres` itself makes,
+	 * never persisted to the ini file.
+	 */
+	bool fromArchiver;
 } KeeperConfig;
 
 #define PG_AUTOCTL_MONITOR_IS_DISABLED(config) \

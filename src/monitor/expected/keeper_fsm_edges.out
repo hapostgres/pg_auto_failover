@@ -54,6 +54,7 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
  apply_settings      | demote_timeout
  apply_settings      | demoted
  apply_settings      | join_primary
+ archiving           | report_lsn
  catchingup          | single
  catchingup          | demote_timeout
  catchingup          | demoted
@@ -126,6 +127,7 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
  report_lsn          | prepare_promotion
  report_lsn          | fast_forward
  report_lsn          | join_secondary
+ report_lsn          | archiving
  secondary           | single
  secondary           | demote_timeout
  secondary           | demoted
@@ -154,7 +156,8 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
  wait_primary        | join_primary
  wait_primary        | apply_settings
  wait_standby        | catchingup
-(108 rows)
+ wait_standby        | archiving
+(111 rows)
 
 -- Step 2a: monitor -> keeper direction -- every pgautofailover.dump_fsm_edges()
 -- edge the keeper_fsm_edges table above has no matching row for. A
@@ -176,7 +179,12 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 -- summary row right before its own detail rows, as a header.
 --
 -- Expected result: empty. Every MonitorFSM[] rule currently has a matching
--- KeeperFSM[] row for every current_state it can assign a transition from.
+-- KeeperFSM[] row for every current_state it can assign a transition from
+-- -- including the pos 367/396/397/398 archiver-related edges (Archiving &
+-- Disaster Recovery design, milestone 2): KeeperFSM[]'s own
+-- WAIT_STANDBY_STATE/ARCHIVING_STATE/REPORT_LSN_STATE rows
+-- (fsm_init_archiver/fsm_archiver_report_lsn/fsm_archiver_follow_new_primary,
+-- fsm.c/fsm_transition.c) close this milestone's own gap.
 SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.comment
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos
@@ -244,11 +252,12 @@ SELECT k.current_state, k.assigned_state
  report_lsn          | prepare_promotion
  report_lsn          | fast_forward
  report_lsn          | join_secondary
+ report_lsn          | archiving
  secondary           | wait_standby
  secondary           | maintenance
  secondary           | wait_maintenance
  wait_primary        | join_primary
  wait_primary        | apply_settings
-(23 rows)
+(24 rows)
 
 DROP TABLE keeper_fsm_edges;

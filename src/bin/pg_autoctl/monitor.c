@@ -849,6 +849,80 @@ monitor_get_most_advanced_standby(Monitor *monitor,
 
 
 /*
+ * monitor_get_archiver_node finds the ARCHIVING node for (formation, group),
+ * for a client-side bootstrap (create postgres --from-archiver) rather than
+ * an election: unlike monitor_get_most_advanced_standby, this doesn't filter
+ * on reportedstate = 'report_lsn' (a transient election-only state), since
+ * an archiver sits in its normal 'archiving' state outside of elections.
+ */
+bool
+monitor_get_archiver_node(Monitor *monitor,
+						  char *formation, int groupId,
+						  NodeAddress *node, bool *found)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.get_archiver_node($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2];
+
+	/* we expect zero or one entry */
+	NodeAddressArray nodeArray = { 0 };
+	NodeAddressArrayParseContext parseContext = { { 0 }, &nodeArray, false };
+
+	IntString groupIdString = intToString(groupId);
+
+	paramValues[0] = formation;
+	paramValues[1] = groupIdString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseNodeArray))
+	{
+		log_error(
+			"Failed to get the archiver node in the HA group "
+			"from the monitor while running \"%s\" with "
+			"formation \"%s\" and group ID %d",
+			sql, formation, groupId);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error(
+			"Failed to get the archiver node from the monitor "
+			"while running \"%s\" with formation \"%s\" and group ID %d "
+			"because it returned an unexpected result. "
+			"See previous line for details.",
+			sql, formation, groupId);
+		return false;
+	}
+
+	if (nodeArray.count == 0)
+	{
+		*found = false;
+		return true;
+	}
+
+	/* copy the node we retrieved in the expected place */
+	node->nodeId = nodeArray.nodes[0].nodeId;
+	strlcpy(node->name, nodeArray.nodes[0].name, _POSIX_HOST_NAME_MAX);
+	strlcpy(node->host, nodeArray.nodes[0].host, _POSIX_HOST_NAME_MAX);
+	node->port = nodeArray.nodes[0].port;
+	strlcpy(node->lsn, nodeArray.nodes[0].lsn, PG_LSN_MAXLENGTH);
+	node->isPrimary = nodeArray.nodes[0].isPrimary;
+
+	log_debug("The archiver node for %s/%d is node " NODE_FORMAT,
+			  formation, groupId, node->nodeId, node->name,
+			  node->host, node->port);
+
+	*found = true;
+	return true;
+}
+
+
+/*
  * monitor_register_node performs the initial registration of a node with the
  * monitor in the given formation.
  *
@@ -868,6 +942,1177 @@ monitor_get_most_advanced_standby(Monitor *monitor,
  * The node ID and group ID selected by the monitor, as well as the goal
  * state, are set in assignedState, which must not be NULL.
  */
+
+
+/*
+ * monitor_register_archiver calls pgautofailover.register_archiver() on the
+ * monitor -- the Archiving & Disaster Recovery schema's own registration
+ * entry point (see ~/dev/temp/archiving-disaster-recovery.md), a plain
+ * plpgsql function rather than the C register_node() RPC every ordinary
+ * node kind goes through: an Archiver is a process identity, not a
+ * (formation, group) membership by itself (see that function's own comment,
+ * pgautofailover.sql).
+ */
+bool
+monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
+						  char *region, int64_t *archiverId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	/*
+	 * region is passed by name ("region => $3") to skip over register_
+	 * archiver()'s own storagepath/basebackuppolicyid/autoregister/
+	 * maxresidentreplay/rcloneconfigname parameters, which stay at their
+	 * own SQL-level defaults here -- Postgres allows mixing positional and
+	 * named arguments as long as every positional one comes first.
+	 */
+	const char *sql =
+		"SELECT * FROM pgautofailover.register_archiver($1, $2, region => $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, TEXTOID, TEXTOID };
+	const char *paramValues[3] = {
+		name, hostname,
+		IS_EMPTY_STRING_BUFFER(region) ? "default" : region
+	};
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to register archiver \"%s\" on the monitor",
+				  name);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to register archiver \"%s\" on the monitor "
+				  "because it returned an unexpected result, "
+				  "see previous lines for details", name);
+		return false;
+	}
+
+	*archiverId = context.bigint;
+
+	return true;
+}
+
+
+/*
+ * monitor_archiver_add_formation calls pgautofailover.archiver_add_formation()
+ * on the monitor, attaching an already-registered archiver to every group of
+ * the given formation -- a multi-group formation gets one ARCHIVING
+ * membership row per group, all created in this one call. Only the first
+ * returned nodeid is kept, for a log message at attach time; it is not
+ * how an archiver process itself discovers its full membership list at
+ * runtime (that's monitor_list_archiver_memberships(), which returns
+ * every membership across every attached formation, called by the
+ * archiver's own reconciler instead of relying on this one-shot result).
+ */
+bool
+monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
+							   char *formation, int64_t *archiverNodeId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	const char *sql =
+		"SELECT * FROM pgautofailover.archiver_add_formation($1, $2) LIMIT 1";
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, TEXTOID };
+	IntString archiverIdString = intToString(archiverId);
+	const char *paramValues[2] = { archiverIdString.strValue, formation };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to attach archiver %" PRId64 " to formation \"%s\" "
+													   "on the monitor", archiverId,
+				  formation);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to attach archiver %" PRId64 " to formation \"%s\" "
+													   "on the monitor because it returned an unexpected result, "
+													   "see previous lines for details",
+				  archiverId, formation);
+		return false;
+	}
+
+	*archiverNodeId = context.bigint;
+
+	return true;
+}
+
+
+/*
+ * monitor_report_archiver_storage calls pgautofailover.report_archiver_
+ * storage() to record this archiver's own disk usage and free space,
+ * alongside a fresh lastreporttime -- the same periodic heartbeat
+ * service_archiver_loop() already uses to report captured-WAL LSN.
+ */
+bool
+monitor_report_archiver_storage(Monitor *monitor, int64_t archiverId,
+								uint64_t usedBytes, uint64_t freeBytes)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_archiver_storage($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { INT8OID, INT8OID, INT8OID };
+	IntString archiverIdString = intToString(archiverId);
+	IntString usedBytesString = intToString((int64_t) usedBytes);
+	IntString freeBytesString = intToString((int64_t) freeBytes);
+	const char *paramValues[3] = {
+		archiverIdString.strValue,
+		usedBytesString.strValue,
+		freeBytesString.strValue
+	};
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to report storage usage for archiver %" PRId64,
+				  archiverId);
+		return false;
+	}
+
+	return true;
+}
+
+
+typedef struct ArchiverInfoArrayParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	ArchiverInfoArray *archiversArray;
+	bool parsedOK;
+} ArchiverInfoArrayParseContext;
+
+
+/*
+ * parseArchiverInfo parses one row of pgautofailover.get_archivers()'s
+ * result: archiver_id, archiver_name, hostname, region, used_bytes,
+ * free_bytes, last_report_time, node_id, reported_state, goal_state.
+ * usedbytes/freebytes (NULL until the archiver's first storage report) and
+ * the node_id/reportedState/goalState side of the LEFT JOIN (NULL if this
+ * milestone's one-'wal-receiver'-row-per-group assumption isn't met yet,
+ * see get_archivers()'s own comment) are both optional -- everything else,
+ * including region (NOT NULL, defaults to "default"), is not.
+ */
+static bool
+parseArchiverInfo(PGresult *result, int rowNumber, ArchiverInfo *archiver)
+{
+	if (PQgetisnull(result, rowNumber, 0) ||
+		PQgetisnull(result, rowNumber, 1) ||
+		PQgetisnull(result, rowNumber, 2) ||
+		PQgetisnull(result, rowNumber, 3))
+	{
+		log_error("archiver_id, archiver_name, hostname or region returned "
+				  "by the monitor is NULL");
+		return false;
+	}
+
+	char *value = PQgetvalue(result, rowNumber, 0);
+
+	archiver->archiverId = strtol(value, NULL, 0);
+
+	value = PQgetvalue(result, rowNumber, 1);
+	strlcpy(archiver->archiverName, value, _POSIX_HOST_NAME_MAX);
+
+	value = PQgetvalue(result, rowNumber, 2);
+	strlcpy(archiver->hostname, value, _POSIX_HOST_NAME_MAX);
+
+	value = PQgetvalue(result, rowNumber, 3);
+	strlcpy(archiver->region, value, sizeof(archiver->region));
+
+	archiver->hasStorageStats =
+		!PQgetisnull(result, rowNumber, 4) && !PQgetisnull(result, rowNumber, 5);
+
+	if (archiver->hasStorageStats)
+	{
+		value = PQgetvalue(result, rowNumber, 4);
+		archiver->usedBytes = strtoull(value, NULL, 0);
+
+		value = PQgetvalue(result, rowNumber, 5);
+		archiver->freeBytes = strtoull(value, NULL, 0);
+	}
+
+	archiver->hasNode = !PQgetisnull(result, rowNumber, 7);
+
+	if (archiver->hasNode)
+	{
+		value = PQgetvalue(result, rowNumber, 7);
+		archiver->nodeId = strtol(value, NULL, 0);
+
+		value = PQgetvalue(result, rowNumber, 8);
+		archiver->reportedState = NodeStateFromString(value);
+
+		value = PQgetvalue(result, rowNumber, 9);
+		archiver->goalState = NodeStateFromString(value);
+	}
+
+	return true;
+}
+
+
+static void
+parseArchiverInfoArray(void *ctx, PGresult *result)
+{
+	ArchiverInfoArrayParseContext *context = (ArchiverInfoArrayParseContext *) ctx;
+	bool parsedOk = true;
+
+	if (PQntuples(result) > ARCHIVER_ARRAY_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only "
+				  "up to %d archivers at the moment",
+				  PQntuples(result), ARCHIVER_ARRAY_MAX_COUNT);
+		context->parsedOK = false;
+		return;
+	}
+
+	context->archiversArray->count = PQntuples(result);
+
+	for (int rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		ArchiverInfo *archiver = &(context->archiversArray->archivers[rowNumber]);
+
+		parsedOk = parsedOk && parseArchiverInfo(result, rowNumber, archiver);
+	}
+
+	context->parsedOK = parsedOk;
+}
+
+
+/*
+ * monitor_get_archivers calls pgautofailover.get_archivers(formation) and
+ * returns every archiver attached to that formation, with its storage
+ * stats and FSM state -- used by `pg_autoctl watch`'s own archivers
+ * section.
+ */
+bool
+monitor_get_archivers(Monitor *monitor, const char *formation,
+					  ArchiverInfoArray *archiversArray)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT * FROM pgautofailover.get_archivers($1)";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1] = { formation };
+	ArchiverInfoArrayParseContext parseContext = { { 0 }, archiversArray, false };
+
+	archiversArray->count = 0;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, &parseArchiverInfoArray))
+	{
+		log_error("Failed to get the list of archivers from the monitor "
+				  "for formation \"%s\"", formation);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to parse the list of archivers returned by the "
+				  "monitor for formation \"%s\", see previous lines for "
+				  "details", formation);
+		return false;
+	}
+
+	return true;
+}
+
+
+typedef struct ArchiverMembershipArrayParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	ArchiverMembershipArray *membershipsArray;
+	bool parsedOK;
+} ArchiverMembershipArrayParseContext;
+
+
+/*
+ * parseArchiverMembership parses one row of pgautofailover.
+ * list_archiver_memberships()'s result: formation_id, group_id, node_id,
+ * reported_state, goal_state. The underlying query is an inner join (see
+ * that function's own comment), so none of these are ever NULL in
+ * practice -- checked anyway, matching this file's own defensive
+ * convention for every other row parser.
+ */
+static bool
+parseArchiverMembership(PGresult *result, int rowNumber,
+						ArchiverMembership *membership)
+{
+	if (PQgetisnull(result, rowNumber, 0) ||
+		PQgetisnull(result, rowNumber, 1) ||
+		PQgetisnull(result, rowNumber, 2) ||
+		PQgetisnull(result, rowNumber, 3) ||
+		PQgetisnull(result, rowNumber, 4))
+	{
+		log_error("formation_id, group_id, node_id, reported_state, or "
+				  "goal_state returned by the monitor is NULL");
+		return false;
+	}
+
+	char *value = PQgetvalue(result, rowNumber, 0);
+
+	strlcpy(membership->formation, value, NAMEDATALEN);
+
+	value = PQgetvalue(result, rowNumber, 1);
+	membership->groupId = strtol(value, NULL, 0);
+
+	value = PQgetvalue(result, rowNumber, 2);
+	membership->nodeId = strtoll(value, NULL, 0);
+
+	value = PQgetvalue(result, rowNumber, 3);
+	membership->reportedState = NodeStateFromString(value);
+
+	value = PQgetvalue(result, rowNumber, 4);
+	membership->goalState = NodeStateFromString(value);
+
+	return true;
+}
+
+
+static void
+parseArchiverMembershipArray(void *ctx, PGresult *result)
+{
+	ArchiverMembershipArrayParseContext *context =
+		(ArchiverMembershipArrayParseContext *) ctx;
+	bool parsedOk = true;
+
+	if (PQntuples(result) > ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only "
+				  "up to %d memberships per archiver at the moment",
+				  PQntuples(result), ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT);
+		context->parsedOK = false;
+		return;
+	}
+
+	context->membershipsArray->count = PQntuples(result);
+
+	for (int rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		ArchiverMembership *membership =
+			&(context->membershipsArray->memberships[rowNumber]);
+
+		parsedOk = parsedOk && parseArchiverMembership(result, rowNumber, membership);
+	}
+
+	context->parsedOK = parsedOk;
+}
+
+
+/*
+ * monitor_list_archiver_memberships calls pgautofailover.
+ * list_archiver_memberships(archiverid) and returns every (formation,
+ * group) membership this archiver currently holds a 'wal-receiver' row
+ * in, across every formation it is attached to -- what the archiver's
+ * own reconciler calls, at startup and periodically thereafter, to
+ * discover the full set of WAL streams and base-backup schedules it is
+ * responsible for running (service_archiver_reconciler.c).
+ */
+bool
+monitor_list_archiver_memberships(Monitor *monitor, int64_t archiverId,
+								  ArchiverMembershipArray *membershipsArray)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.list_archiver_memberships($1)";
+	int paramCount = 1;
+	Oid paramTypes[1] = { INT8OID };
+	IntString archiverIdString = intToString(archiverId);
+	const char *paramValues[1] = { archiverIdString.strValue };
+	ArchiverMembershipArrayParseContext parseContext =
+	{ { 0 }, membershipsArray, false };
+
+	membershipsArray->count = 0;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, &parseArchiverMembershipArray))
+	{
+		log_error("Failed to list memberships for archiver %" PRId64
+				  " from the monitor", archiverId);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to parse the list of memberships returned by "
+				  "the monitor for archiver %" PRId64 ", see previous "
+													  "lines for details", archiverId);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * BasebackupInfoParseContext/parseBasebackupInfo parse the two columns
+ * monitor_get_latest_basebackup_info() needs out of a single-row result --
+ * SingleValueResultContext only carries one column, not enough here.
+ */
+typedef struct BasebackupInfoParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	bool parsedOk;
+	int ntuples;
+	char *storageLocation;
+	char *source;
+	int timeline;
+} BasebackupInfoParseContext;
+
+
+static void
+parseBasebackupInfo(void *ctx, PGresult *result)
+{
+	BasebackupInfoParseContext *context = (BasebackupInfoParseContext *) ctx;
+
+	context->ntuples = PQntuples(result);
+
+	if (context->ntuples != 1)
+	{
+		/* zero rows is a valid "no backup yet" signal, not a parse error */
+		context->parsedOk = (context->ntuples == 0);
+		return;
+	}
+
+	char *storageLocation = PQgetvalue(result, 0, 0);
+	char *source = PQgetvalue(result, 0, 1);
+	char *timeline = PQgetvalue(result, 0, 2);
+
+	context->storageLocation = strdup(storageLocation);
+	context->source = strdup(source);
+	context->timeline = strtol(timeline, NULL, 10);
+
+	context->parsedOk =
+		context->storageLocation != NULL && context->source != NULL;
+
+	if (!context->parsedOk)
+	{
+		log_error(ALLOCATION_FAILED_ERROR);
+	}
+}
+
+
+/*
+ * monitor_get_latest_basebackup_info calls
+ * pgautofailover.get_latest_basebackup(formationId, groupId) and returns
+ * its storagelocation, source, and timeline columns. *found is set to false
+ * (not an error) when the archiver hasn't taken a base backup for this
+ * group yet -- every caller must already tolerate that.
+ *
+ * timeline matters beyond metadata: pg_walsender's BASE_BACKUP response
+ * reads it straight out of the served backup_label (cmd_base_backup.c's
+ * own read_backup_label), and a real pg_basebackup's own background WAL
+ * streaming then requests exactly that timeline back via START_REPLICATION
+ * -- for a "replay" base backup (basebackup_replay_mode), which promotes a
+ * throwaway extracted copy to make it self-consistent, that's genuinely a
+ * *later* timeline than what the archiver's own captured WAL cache holds
+ * (which only ever advances on the real primary's timeline). Passing it
+ * through into the routes file's own "timeline" key (already parsed by
+ * routes.c, previously never written by anyone) is what lets pg_walsender
+ * serve a START_REPLICATION request consistent with whichever backup it
+ * just described, instead of always defaulting to timeline 1.
+ */
+bool
+monitor_get_latest_basebackup_info(Monitor *monitor,
+								   const char *formationId, int groupId,
+								   const char *preferredSource,
+								   char *storageLocation, size_t storageLocationSize,
+								   char *source, size_t sourceSize,
+								   int *timeline,
+								   bool *found)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+
+		/*
+		 * get_latest_basebackup() is not SETOF: called with no matching
+		 * backup, it still produces one row, with every output column
+		 * (including storagelocation) NULL -- not zero rows. Filtering on
+		 * "IS NOT NULL" here, rather than trying to detect that NULL
+		 * composite downstream, is what makes context.ntuples == 0 below
+		 * an accurate "no backup yet" signal.
+		 *
+		 * preferredSource is passed as text plus an explicit cast (matching
+		 * this file's own established pattern for enum parameters, e.g.
+		 * monitor_register_node's use of ::pgautofailover.replication_
+		 * state below) rather than a raw enum OID -- NULL means "any", the
+		 * function's own default.
+		 */
+		"SELECT storagelocation, source::text, timeline "
+		"  FROM pgautofailover.get_latest_basebackup("
+		"         $1, $2, $3::pgautofailover.basebackup_source) "
+		" WHERE storagelocation IS NOT NULL";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[3] = { formationId, groupIdString.strValue, preferredSource };
+	BasebackupInfoParseContext context = { { 0 }, false, 0, NULL, NULL, 0 };
+
+	*found = false;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseBasebackupInfo))
+	{
+		log_error("Failed to get the latest base backup info from the "
+				  "monitor for \"%s\"/%d", formationId, groupId);
+		return false;
+	}
+
+	if (context.ntuples == 0)
+	{
+		/* no base backup taken yet for this group -- not an error */
+		return true;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse the latest base backup info returned "
+				  "by the monitor for \"%s\"/%d, see above for details",
+				  formationId, groupId);
+		return false;
+	}
+
+	strlcpy(storageLocation, context.storageLocation, storageLocationSize);
+	strlcpy(source, context.source, sourceSize);
+	*timeline = context.timeline;
+	free(context.storageLocation);
+	free(context.source);
+	*found = true;
+
+	return true;
+}
+
+
+/*
+ * monitor_get_group_system_identifier calls
+ * pgautofailover.get_group_system_identifier(formationId, groupId) --
+ * needed by an archiving node (which has no real Postgres instance of its
+ * own to report one) to serve a correct IDENTIFY_SYSTEM response, so a real
+ * standby streaming from it doesn't reject the connection with "database
+ * system identifier differs". *found is false (not an error) when no other
+ * node in the group has reported one yet.
+ */
+bool
+monitor_get_group_system_identifier(Monitor *monitor,
+									const char *formationId, int groupId,
+									uint64_t *systemIdentifier, bool *found)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+
+	/*
+	 * COALESCE to 0, the same "unset" sentinel this column already uses
+	 * elsewhere (node_metadata.c/pgautofailover.sql): the SQL function
+	 * itself is a plain scalar, not SETOF, so a no-match query still
+	 * produces one row with a NULL value rather than zero rows --
+	 * PGSQL_RESULT_BIGINT's own parser treats a NULL value as a parse
+	 * failure, which "not reported yet" is not.
+	 */
+	const char *sql =
+		"SELECT coalesce("
+		"pgautofailover.get_group_system_identifier($1, $2), 0)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[2] = { formationId, groupIdString.strValue };
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	*found = false;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get the system identifier for \"%s\"/%d "
+				  "from the monitor", formationId, groupId);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse the system identifier returned by the "
+				  "monitor for \"%s\"/%d, see above for details",
+				  formationId, groupId);
+		return false;
+	}
+
+	if (context.bigint == 0)
+	{
+		/* no node in the group has reported one yet -- not an error */
+		return true;
+	}
+
+	*systemIdentifier = context.bigint;
+	*found = true;
+
+	return true;
+}
+
+
+/*
+ * monitor_report_wal_received calls pgautofailover.report_wal_received()
+ * to record that nodeId (the ARCHIVING membership's own nodeid, not the
+ * archiver's archiverid) has durably captured walFileName up to lsn.
+ * Idempotent on the monitor side (ON CONFLICT DO NOTHING), so callers are
+ * free to re-report an already-known segment without checking first --
+ * see service_archiver.c's own use of this.
+ */
+bool
+monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
+							const char *walFileName, const char *lsn)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_wal_received($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { INT8OID, TEXTOID, LSNOID };
+	IntString nodeIdString = intToString(nodeId);
+	const char *paramValues[3] = { nodeIdString.strValue, walFileName, lsn };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to report WAL file \"%s\" received for node %"
+				  PRId64, walFileName, nodeId);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_report_basebackup_started calls
+ * pgautofailover.report_basebackup_started() to record the start of a new
+ * base-backup production job and returns its basebackupid, needed by the
+ * matching monitor_report_basebackup_completed() call once the backup
+ * finishes. source is one of "live"/"replay" (basebackup_source's own
+ * labels); replaymode is required when source is "replay" ("volatile"/
+ * "persistent"), NULL otherwise -- pass NULL for a "live" backup.
+ */
+bool
+monitor_report_basebackup_started(Monitor *monitor, int64_t archiverId,
+								  const char *formationId, int groupId,
+								  const char *label, int timeline,
+								  const char *startLsn,
+								  const char *source, const char *replaymode,
+								  int64_t *basebackupId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+	const char *sql =
+		"SELECT pgautofailover.report_basebackup_started("
+		"$1, $2, $3, $4, $5, $6, "
+		"$7::pgautofailover.basebackup_source, "
+		"$8::pgautofailover.basebackup_replay_mode)";
+	int paramCount = 8;
+	Oid paramTypes[8] = {
+		INT8OID, TEXTOID, INT4OID, TEXTOID, INT4OID, LSNOID, TEXTOID, TEXTOID
+	};
+	IntString archiverIdString = intToString(archiverId);
+	IntString groupIdString = intToString(groupId);
+	IntString timelineString = intToString(timeline);
+	const char *paramValues[8] = {
+		archiverIdString.strValue, formationId, groupIdString.strValue,
+		label, timelineString.strValue, startLsn, source, replaymode
+	};
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to report the start of base backup \"%s\" to "
+				  "the monitor", label);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to report the start of base backup \"%s\" to "
+				  "the monitor because it returned an unexpected result, "
+				  "see previous lines for details", label);
+		return false;
+	}
+
+	*basebackupId = context.bigint;
+
+	return true;
+}
+
+
+/*
+ * monitor_report_basebackup_completed calls
+ * pgautofailover.report_basebackup_completed() to record the successful
+ * completion of a base-backup production job previously created with
+ * monitor_report_basebackup_started().
+ */
+bool
+monitor_report_basebackup_completed(Monitor *monitor, int64_t basebackupId,
+									const char *endLsn, int64_t sizeBytes,
+									const char *storageLocation)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_basebackup_completed($1, $2, $3, $4)";
+	int paramCount = 4;
+	Oid paramTypes[4] = { INT8OID, LSNOID, INT8OID, TEXTOID };
+	IntString basebackupIdString = intToString(basebackupId);
+	IntString sizeBytesString = intToString(sizeBytes);
+	const char *paramValues[4] = {
+		basebackupIdString.strValue, endLsn, sizeBytesString.strValue,
+		storageLocation
+	};
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to report base backup %" PRId64 " as completed "
+														  "to the monitor", basebackupId);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_report_basebackup_deleted calls
+ * pgautofailover.report_basebackup_deleted() to mark a base backup deleted
+ * (retaining its history row) once service_archiver_basebackup.c's own
+ * retention pass has actually removed the directory on disk. Cascades on
+ * the monitor side to prune any archiver_wal rows no remaining backup
+ * needs anymore (prune_archiver_wal(), that function's own comment).
+ */
+bool
+monitor_report_basebackup_deleted(Monitor *monitor, int64_t basebackupId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT pgautofailover.report_basebackup_deleted($1)";
+	int paramCount = 1;
+	Oid paramTypes[1] = { INT8OID };
+	IntString basebackupIdString = intToString(basebackupId);
+	const char *paramValues[1] = { basebackupIdString.strValue };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to report base backup %" PRId64 " as deleted "
+														  "to the monitor", basebackupId);
+		return false;
+	}
+
+	return true;
+}
+
+
+typedef struct BasebackupInfoArrayParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	BasebackupInfoArray *backupsArray;
+	bool parsedOK;
+} BasebackupInfoArrayParseContext;
+
+
+static bool
+parseBasebackupInfoRow(PGresult *result, int rowNumber, BasebackupInfo *backup)
+{
+	if (PQgetisnull(result, rowNumber, 0) ||
+		PQgetisnull(result, rowNumber, 2) ||
+		PQgetisnull(result, rowNumber, 3))
+	{
+		log_error("basebackupid, storagelocation, or startedat_epoch "
+				  "returned by the monitor is NULL");
+		return false;
+	}
+
+	char *value = PQgetvalue(result, rowNumber, 0);
+
+	backup->basebackupId = strtoll(value, NULL, 0);
+
+	value = PQgetvalue(result, rowNumber, 1);
+	strlcpy(backup->label, value, NAMEDATALEN);
+
+	value = PQgetvalue(result, rowNumber, 2);
+	strlcpy(backup->storageLocation, value, MAXPGPATH);
+
+	value = PQgetvalue(result, rowNumber, 3);
+	backup->startedAtEpoch = strtoll(value, NULL, 0);
+
+	return true;
+}
+
+
+static void
+parseBasebackupInfoArray(void *ctx, PGresult *result)
+{
+	BasebackupInfoArrayParseContext *context =
+		(BasebackupInfoArrayParseContext *) ctx;
+	bool parsedOk = true;
+
+	if (PQntuples(result) > BASEBACKUP_ARRAY_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only "
+				  "up to %d base backups per group at the moment",
+				  PQntuples(result), BASEBACKUP_ARRAY_MAX_COUNT);
+		context->parsedOK = false;
+		return;
+	}
+
+	context->backupsArray->count = PQntuples(result);
+
+	for (int rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		BasebackupInfo *backup = &(context->backupsArray->backups[rowNumber]);
+
+		parsedOk = parsedOk && parseBasebackupInfoRow(result, rowNumber, backup);
+	}
+
+	context->parsedOK = parsedOk;
+}
+
+
+/*
+ * monitor_list_basebackups calls pgautofailover.list_basebackups(formation,
+ * group) and returns every complete base backup for that group, newest
+ * first -- what service_archiver_basebackup.c's own retention pass walks
+ * to decide what survives maxcount/maxage.
+ */
+bool
+monitor_list_basebackups(Monitor *monitor,
+						 const char *formationId, int groupId,
+						 BasebackupInfoArray *backupsArray)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.list_basebackups($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[2] = { formationId, groupIdString.strValue };
+	BasebackupInfoArrayParseContext parseContext = { { 0 }, backupsArray, false };
+
+	backupsArray->count = 0;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, &parseBasebackupInfoArray))
+	{
+		log_error("Failed to list base backups from the monitor for "
+				  "\"%s\"/%d", formationId, groupId);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to parse the list of base backups returned by "
+				  "the monitor for \"%s\"/%d, see previous lines for "
+				  "details", formationId, groupId);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * BasebackupPolicyParseContext/parseBasebackupPolicy parse the 9-column
+ * row shape both monitor_get_basebackup_policy_for_group() and monitor_
+ * get_basebackup_policy() use -- one via get_basebackup_policy_for_group()
+ * (resolved for a formation/group), the other via get_basebackup_policy()
+ * (looked up by name for `pg_autoctl show basebackup-policy`) -- both
+ * wrapped in the same SELECT column list on the C side so a single parser
+ * serves either.
+ */
+typedef struct BasebackupPolicyParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	BasebackupPolicy *policy;
+	bool found;
+	bool parsedOk;
+} BasebackupPolicyParseContext;
+
+
+static void
+parseBasebackupPolicy(void *ctx, PGresult *result)
+{
+	BasebackupPolicyParseContext *context =
+		(BasebackupPolicyParseContext *) ctx;
+
+	int ntuples = PQntuples(result);
+
+	if (ntuples != 1)
+	{
+		/* zero rows is a valid "no such policy" signal, not a parse error */
+		context->parsedOk = (ntuples == 0);
+		context->found = false;
+		return;
+	}
+
+	if (PQgetisnull(result, 0, 0))
+	{
+		/* get_basebackup_policy_for_group() found no policy to resolve --
+		* shouldn't happen given the schema's own 'default' row always
+		* exists, but treat it as "not found" rather than a parse error */
+		context->parsedOk = true;
+		context->found = false;
+		return;
+	}
+
+	BasebackupPolicy *policy = context->policy;
+
+	strlcpy(policy->policyName, PQgetvalue(result, 0, 0), NAMEDATALEN);
+	strlcpy(policy->source, PQgetvalue(result, 0, 1), NAMEDATALEN);
+
+	strlcpy(policy->replayMode,
+			PQgetisnull(result, 0, 2) ? "" : PQgetvalue(result, 0, 2),
+			NAMEDATALEN);
+
+	strlcpy(policy->cache, PQgetvalue(result, 0, 3), NAMEDATALEN);
+
+	policy->frequencySeconds = strtol(PQgetvalue(result, 0, 4), NULL, 0);
+	policy->maxCount = strtol(PQgetvalue(result, 0, 5), NULL, 0);
+	policy->maxAgeSeconds = strtol(PQgetvalue(result, 0, 6), NULL, 0);
+	policy->onPromotion = strcmp(PQgetvalue(result, 0, 7), "t") == 0;
+	policy->concurrency = strtol(PQgetvalue(result, 0, 8), NULL, 0);
+
+	context->found = true;
+	context->parsedOk = true;
+}
+
+
+/*
+ * monitor_get_basebackup_policy_for_group calls pgautofailover.get_
+ * basebackup_policy_for_group(formation, group) -- the policy service_
+ * archiver_basebackup.c's own scheduling/retention pass actually applies,
+ * already resolved through archiver_policy's group-override / formation-
+ * default / schema-default fallback chain (get_archiver_policy()'s own
+ * comment).
+ */
+bool
+monitor_get_basebackup_policy_for_group(Monitor *monitor,
+										const char *formationId, int groupId,
+										BasebackupPolicy *policy, bool *found)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT policyname, source::text, replaymode::text, cache::text, "
+		"       frequency_seconds, maxcount, maxage_seconds, "
+		"       onpromotion, concurrency "
+		"  FROM pgautofailover.get_basebackup_policy_for_group($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[2] = { formationId, groupIdString.strValue };
+	BasebackupPolicyParseContext context = { { 0 }, policy, false, false };
+
+	*found = false;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseBasebackupPolicy))
+	{
+		log_error("Failed to get the base-backup policy from the monitor "
+				  "for \"%s\"/%d", formationId, groupId);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse the base-backup policy returned by the "
+				  "monitor for \"%s\"/%d, see above for details",
+				  formationId, groupId);
+		return false;
+	}
+
+	*found = context.found;
+
+	return true;
+}
+
+
+/*
+ * monitor_get_basebackup_policy calls pgautofailover.get_basebackup_policy
+ * (policyname) -- a named policy looked up directly, for `pg_autoctl show
+ * basebackup-policy`. Wrapped in the same 9-column SELECT list as monitor_
+ * get_basebackup_policy_for_group() above so parseBasebackupPolicy() can
+ * serve both. *found is false (not an error) when no policy has that name.
+ */
+bool
+monitor_get_basebackup_policy(Monitor *monitor, const char *policyName,
+							  BasebackupPolicy *policy, bool *found)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT policyname, source::text, replaymode::text, cache::text, "
+		"       extract(epoch FROM frequency)::int, maxcount, "
+		"       extract(epoch FROM maxage)::int, onpromotion, concurrency "
+		"  FROM pgautofailover.get_basebackup_policy($1)";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1] = { policyName };
+	BasebackupPolicyParseContext context = { { 0 }, policy, false, false };
+
+	*found = false;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseBasebackupPolicy))
+	{
+		log_error("Failed to get base-backup policy \"%s\" from the "
+				  "monitor", policyName);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse base-backup policy \"%s\" returned by "
+				  "the monitor, see above for details", policyName);
+		return false;
+	}
+
+	*found = context.found;
+
+	return true;
+}
+
+
+/*
+ * monitor_create_basebackup_policy calls pgautofailover.create_
+ * basebackup_policy(policyname, policyspec) -- policyspec is a raw JSON
+ * document text, passed straight through to the monitor's own jsonb
+ * parsing and per-field coalesce-to-default logic (create_basebackup_
+ * policy()'s own body, pgautofailover.sql) rather than parsed twice.
+ */
+bool
+monitor_create_basebackup_policy(Monitor *monitor,
+								 const char *policyName,
+								 const char *jsonSpec,
+								 int64_t *basebackupPolicyId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.create_basebackup_policy($1, $2::jsonb)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2] = { policyName, jsonSpec };
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to create base-backup policy \"%s\" on the "
+				  "monitor", policyName);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to create base-backup policy \"%s\" on the "
+				  "monitor because it returned an unexpected result, see "
+				  "previous lines for details", policyName);
+		return false;
+	}
+
+	*basebackupPolicyId = context.bigint;
+
+	return true;
+}
+
+
+/*
+ * monitor_set_basebackup_policy calls pgautofailover.set_basebackup_policy
+ * (policyname, policyspec) to update an existing named policy -- only the
+ * fields present in the JSON document change (set_basebackup_policy()'s
+ * own per-field coalesce, pgautofailover.sql), everything else keeps its
+ * current value.
+ */
+bool
+monitor_set_basebackup_policy(Monitor *monitor, const char *policyName,
+							  const char *jsonSpec)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.set_basebackup_policy($1, $2::jsonb)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2] = { policyName, jsonSpec };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to set base-backup policy \"%s\" on the monitor",
+				  policyName);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_set_archiver_policy calls pgautofailover.set_archiver_policy()
+ * to attach basebackupPolicyId to (formationId, groupId) -- groupId < 0
+ * sets the formation-wide default (archiver_policy's own groupid IS NULL
+ * row, matching set_archiver_policy()'s own in_groupid DEFAULT NULL).
+ * archiverQuorum <= 0 and replicationQuorumEligible are passed through
+ * as-is; callers that only want to change the backup policy pass whatever
+ * this formation/group's own current values already are, since set_
+ * archiver_policy() UPSERTs and coalesces NULL to "keep existing" only
+ * when the row already exists -- a brand new row still needs real values,
+ * hence no NULL-means-unchanged shortcut is exposed at this C layer.
+ */
+bool
+monitor_set_archiver_policy(Monitor *monitor,
+							const char *formationId, int groupId,
+							int archiverQuorum,
+							int64_t basebackupPolicyId,
+							bool replicationQuorumEligible)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.set_archiver_policy($1, $2, $3, $4, $5)";
+	int paramCount = 5;
+	Oid paramTypes[5] = { TEXTOID, INT4OID, INT4OID, INT8OID, BOOLOID };
+	IntString groupIdString = intToString(groupId);
+	IntString archiverQuorumString = intToString(archiverQuorum);
+	IntString basebackupPolicyIdString = intToString(basebackupPolicyId);
+	const char *paramValues[5] = {
+		formationId,
+		groupId < 0 ? NULL : groupIdString.strValue,
+		archiverQuorumString.strValue,
+		basebackupPolicyIdString.strValue,
+		replicationQuorumEligible ? "true" : "false"
+	};
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to set archiver policy for \"%s\"/%d on the "
+				  "monitor", formationId, groupId);
+		return false;
+	}
+
+	return true;
+}
+
+
 bool
 monitor_register_node(Monitor *monitor, char *formation,
 					  char *name, char *host, int port,
@@ -2215,7 +3460,15 @@ parseNode(PGresult *result, int rowNumber, NodeAddress *node)
 
 	value = PQgetvalue(result, rowNumber, 3);
 
-	if (!stringToInt(value, &node->port) || node->port == 0)
+	/*
+	 * nodeport = 0 is a real, intentional value for an ARCHIVING row (see
+	 * pgautofailover.sql's own comment on archiver_add_formation()'s
+	 * INSERT): it has no postmaster of its own to be reachable on. This
+	 * function parses whole-formation node listings (get_nodes/
+	 * get_other_nodes) that legitimately include those rows now, so a
+	 * parsed zero is not an error -- only a genuine parse failure is.
+	 */
+	if (!stringToInt(value, &node->port))
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);
 		return false;
@@ -2605,8 +3858,9 @@ parseCurrentNodeState(PGresult *result, int rowNumber,
 
 	value = PQgetvalue(result, rowNumber, 3);
 
-	if (!stringToInt(value, &(nodeState->node.port)) ||
-		nodeState->node.port == 0)
+	/* nodeport = 0 is a real, intentional value for an ARCHIVING row -- see
+	 * the sibling comment on this same check in parseNode() above */
+	if (!stringToInt(value, &(nodeState->node.port)))
 	{
 		log_error("Invalid port number \"%s\" returned by monitor", value);
 		++errors;

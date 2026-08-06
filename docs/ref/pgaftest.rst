@@ -438,19 +438,88 @@ Node modifiers:
 ``candidate-priority <N>``                    Failover priority 0–100 (default: 50)
 ``region <name>``                             Data-centre / availability-zone label
                                               (``--region``; default: ``default``)
-``launch deferred``                           Container starts with ``sleep infinity``;
-                                              use ``exec node  pg_autoctl node start``
+``create deferred``                           Container still runs the ordinary
+                                              ``pg_autoctl node run <ini>`` command, but
+                                              the ini's own ``[launch] create = deferred``
+                                              makes it poll and wait rather than actually
+                                              registering; release with
+                                              ``exec node  pg_autoctl node start``
+``launch deferred``                           Same mechanism, gating only the final
+                                              "start Postgres and the supervisor" step
+                                              (``[launch] run = deferred``) -- the node is
+                                              still created, just not started yet
+``create and launch deferred``                Both gates at once -- the common case,
+                                              matching how ``pg_autoctl create <kind>
+                                              --run`` bundles create+run for an
+                                              immediate node
 ``suspended``                                 The node-active service never transitions
                                               on its own; drive it explicitly with the
                                               ``fsm step <node>`` DSL command (see
                                               `Suspended nodes`_ below)
 ``coordinator`` / ``worker group <N>``        Citus role
+``archiver``                                  Archiving & Disaster Recovery node
+                                              (see `Top-level archiver nodes`_ below for
+                                              the more common declaration form)
 ``no-monitor``                                Standalone node (no monitor)
 ``listen``                                    Bind all interfaces (``--listen 0.0.0.0``)
 ``auth <method>``                             Per-node auth override
 ``ssl <mode>``                                Per-node SSL override
 ``volume <name> <path>``                      Mount a named Docker volume at ``<path>``
 ============================================  =============================================
+
+Top-level archiver nodes
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An archiver may also be declared directly inside ``cluster { }``, as its own
+``archiver <name> { }`` block -- a sibling of ``monitor``/``formation``, not
+nested inside either. This matches the real data model
+(``pgautofailover.archiver`` has no formation column at all; it attaches to
+one or more formations by name, it isn't a member of any one of them), and
+is the recommended form over declaring an ``archiver`` node inline inside a
+``formation { }`` block:
+
+.. code-block:: text
+
+   cluster {
+       monitor
+       formation {
+           node1
+           node2
+       }
+       archiver archiver1 {
+           formation default   # required; exactly one
+           region    eu-west   # optional; default "default"
+           create and launch deferred  # optional -- see below
+       }
+   }
+
+Internally this is folded into an ordinary node entry in the named
+formation's own node list right after parsing, so it launches immediately
+by default and supports every modifier above (``region``, the deferred
+forms, ...) exactly the same way an ordinary node does -- there is nothing
+archiver-specific about the mechanism, only about where it's declared.
+
+Only one ``formation <name>`` is accepted: ``pg_autoctl create archiver``'s
+own ini-driven bootstrap has no notion of attaching to more than one
+formation at create time (unlike the CLI's own repeatable ``--formation``
+flag). To cover a second formation, attach it dynamically once the
+archiver is already running -- a direct ``sql monitor { SELECT
+pgautofailover.archiver_add_formation(...) }`` step is the idiom used by
+the ``archiver_multi_formation.pgaf`` spec in this test suite.
+
+Immediate (the default) launch is only safe when the target formation's
+group already exists by the time the archiver's own container starts --
+guaranteed for a formation whose other nodes it already ``depends_on``
+(the ordinary node-ordering rules apply the same way here), but *not*
+guaranteed across independent formations or a Citus formation's several
+groups, since ``pg_autoctl create archiver`` has no retry-until-ready loop
+the way ordinary nodes' registration does. Use ``create and launch
+deferred`` plus an explicit ``exec <name> pg_autoctl node start`` step
+once every target group is confirmed to exist whenever that ordering
+isn't otherwise guaranteed -- see the ``citus_basic_operation.pgaf``
+spec's own archiver step for a worked example (a Citus formation's worker
+groups must all be registered before the archiver attaches, so it can
+cover every one of them in a single call).
 
 Node registration order
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -560,6 +629,49 @@ propagated.
    sql <service> { SELECT ... }
    expect { <expected output> }
    expect error [<SQLSTATE>]
+
+**SQL-condition waits**
+
+.. code-block:: text
+
+   wait until sql <service> { SELECT ... } is { <value> }  [timeout <N>s]
+
+   wait until wal segment "<segment>" archived in <formation>/<group>       [timeout <N>s]
+   wait until archiver state is <state> in <formation>[/<group>]           [timeout <N>s]
+   wait until basebackup <source|status|replaymode> is <value> in <formation>/<group>  [timeout <N>s]
+
+The generic form polls an arbitrary scalar SQL expression every second
+until its (substring-matched, same semantics as ``expect``) result contains
+``<value>``, or the timeout elapses — the primitive to reach for when a
+condition can't be expressed as a node-state wait and none of the sugar
+forms below fit. It exists specifically to replace ``sleep <N>s`` followed
+by a single ``sql``/``expect`` pair: a fixed sleep either wastes time
+waiting past a condition that was already true, or — under CI load — isn't
+long enough and produces a flaky failure; polling adapts to how long the
+condition actually takes.
+
+The three sugar forms below are just this primitive with a pre-built SQL
+query, covering the checks archiver specs need most:
+
+- ``wait until wal segment "<segment>" archived in <formation>/<group>``
+  polls ``pgautofailover.wal_archived()``. The segment name must be quoted
+  (it's all digits, which would otherwise be lexed as an integer and
+  overflow).
+- ``wait until archiver state is <state> in <formation>[/<group>]`` polls
+  an archiver's own ``reportedstate``, matching on
+  ``nodename LIKE 'archiver-%'`` and ``formationid`` (and ``groupid`` when
+  given) rather than a plain node name: an ``ARCHIVING`` row's ``nodename``
+  is always synthesized by ``archiver_add_formation()`` as
+  ``archiver-<archiverid>-<groupid>``, never the plain ``--name`` given at
+  ``create archiver`` time, so the ordinary ``wait until <node> state is
+  <state>`` form can't see these rows at all, let alone disambiguate more
+  than one membership sharing the same archiver. Omit the group when the
+  formation has exactly one archiver membership; give it to disambiguate a
+  multi-group Citus formation.
+- ``wait until basebackup <source|status|replaymode> is <value> in
+  <formation>/<group>`` polls ``pgautofailover.get_latest_basebackup()``'s
+  2-argument form. For the 3-argument ``preferred_source`` overload, or any
+  other ``pgautofailover.*`` function, use the generic form directly.
 
 **Network**
 

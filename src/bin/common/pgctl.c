@@ -1264,7 +1264,8 @@ pg_basebackup(const char *pgdata,
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
-	char *args[18];  /* enough for all pg_basebackup flags incl. --checkpoint=fast */
+	char *args[20];  /* enough for all pg_basebackup flags incl. --checkpoint=fast
+	                  * and --no-manifest */
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
@@ -1337,6 +1338,12 @@ pg_basebackup(const char *pgdata,
 	{
 		args[argsIndex++] = "--slot";
 		args[argsIndex++] = replicationSource->slotName;
+	}
+
+	/* see ReplicationSource.noManifest's own comment, pgsql.h */
+	if (replicationSource->noManifest)
+	{
+		args[argsIndex++] = "--no-manifest";
 	}
 
 	args[argsIndex] = NULL;
@@ -2743,12 +2750,28 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 	char primaryConnInfoReplication[MAXCONNINFO] = { 0 };
 	PGSQL replicationClient = { 0 };
 
+	/*
+	 * Real Postgres ignores dbname for a replication=true connection (see
+	 * libpqrcv_connect's own comment, libpqwalreceiver.c: "The database
+	 * name is ignored by the server in replication mode, but specify
+	 * 'replication' for .pgpass lookup"), so this is a no-op against a real
+	 * primary. It is NOT a no-op against pg_walsender: unlike real
+	 * walreceiver/pg_basebackup, which both default an unset dbname to the
+	 * literal "replication" themselves (walreceiver hardcodes it;
+	 * pg_basebackup's own GetConnection() does too), this is our own raw
+	 * libpq connection with no such default applied for us -- leaving
+	 * dbname unset here falls through to plain libpq's *own* default
+	 * instead (dbname = the connection's user name, fe-connect.c), which
+	 * pg_walsender's routes file was never going to have an entry for.
+	 * Passing it explicitly matches what every other replication client
+	 * already sends on the wire.
+	 */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
-								  NULL, /* no database */
+								  "replication",
 								  replicationSource->password,
 								  replicationSource->applicationName,
 								  replicationSource->sslOptions,

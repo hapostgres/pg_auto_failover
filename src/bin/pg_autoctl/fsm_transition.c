@@ -39,6 +39,7 @@
 #include "parson.h"
 #include "pghba.h"
 #include "primary_standby.h"
+#include "service_archiver.h"
 #include "state.h"
 #include "timeline_history.h"
 
@@ -924,20 +925,64 @@ fsm_init_standby(Keeper *keeper)
 
 	NodeAddress *primaryNode = NULL;
 
+	/*
+	 * `pg_autoctl create postgres --from-archiver`: bootstrap from a
+	 * registered archiver's base backup + WAL cache instead of the group's
+	 * live primary -- the disaster-recovery case this flag exists for. The
+	 * archiver serves the same real replication protocol a live primary
+	 * does (pg_walsender), so standby_init_replication_source/
+	 * standby_init_database below don't need to know the difference, except
+	 * for one: pg_walsender has no slot-based retention in this milestone
+	 * (see cmd_start_replication.c's own header comment), so we mustn't ask
+	 * standby_init_database to first verify a replication slot exists on
+	 * the archiver -- it never will. Passing an empty slot name here
+	 * matches standby_init_database's own existing "initialising from
+	 * another standby, no primary yet" precedent (see that function's
+	 * comment on needsReplicationSlot).
+	 */
+	const char *slotName = config->replication_slot_name;
 
-	/* get the primary node to follow */
-	if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
+	if (config->fromArchiver)
 	{
-		log_error("Failed to initialize standby for lack of a primary node, "
-				  "see above for details");
-		return false;
+		NodeAddress archiverNode = { 0 };
+		bool found = false;
+
+		if (!keeper_get_archiver_node(keeper, &archiverNode, &found))
+		{
+			log_error("Failed to initialize standby from an archiver, "
+					  "see above for details");
+			return false;
+		}
+
+		if (!found)
+		{
+			log_error("Failed to initialize standby from an archiver: "
+					  "no archiver is registered for formation \"%s\" "
+					  "group %d", config->formation,
+					  keeper->state.current_group);
+			return false;
+		}
+
+		postgres->replicationSource.primaryNode = archiverNode;
+		postgres->replicationSource.noManifest = true;
+		slotName = "";
+	}
+	else
+	{
+		/* get the primary node to follow */
+		if (!keeper_get_primary(keeper, &(postgres->replicationSource.primaryNode)))
+		{
+			log_error("Failed to initialize standby for lack of a primary node, "
+					  "see above for details");
+			return false;
+		}
 	}
 
 	if (!standby_init_replication_source(postgres,
 										 primaryNode,
 										 PG_AUTOCTL_REPLICA_USERNAME,
 										 config->replication_password,
-										 config->replication_slot_name,
+										 slotName,
 										 config->maximum_backup_rate,
 										 config->backupDirectory,
 										 NULL, /* no targetLSN */
@@ -1695,4 +1740,74 @@ fsm_drop_node(Keeper *keeper)
 	}
 
 	return unlink_file(config->pathnames.init);
+}
+
+
+/*
+ * fsm_init_archiver starts pg_receivewal against the group's current
+ * primary. Reached from WAIT_STANDBY_STATE once the monitor has assigned
+ * ARCHIVING as the goal state instead of fsm_init_standby's own
+ * CATCHINGUP target -- the monitor makes that choice based on this node's
+ * own haspgdata = false row, see MonitorFSM[] pos 396-398
+ * (group_state_machine.c). Unlike fsm_init_standby, there is no local
+ * Postgres instance to configure as a standby: pg_receivewal is a real,
+ * unmodified Postgres client that streams straight from the primary's own
+ * walsender, so no new wire protocol is involved on this node's side
+ * either (see archiving-disaster-recovery.md's own milestone 2(a) scope).
+ */
+bool
+fsm_init_archiver(Keeper *keeper)
+{
+	NodeAddress primaryNode = { 0 };
+
+	/* get the primary node to stream WAL from */
+	if (!keeper_get_primary(keeper, &primaryNode))
+	{
+		log_error("Failed to initialize archiver for lack of a primary node, "
+				  "see above for details");
+		return false;
+	}
+
+	return service_archiver_start_pgreceivewal(keeper, &primaryNode);
+}
+
+
+/*
+ * fsm_archiver_report_lsn stops pg_receivewal: the group's primary is
+ * presumed gone (an election is starting), so the upstream this archiver
+ * was streaming from is no longer trustworthy to keep querying. Mirrors
+ * fsm_report_lsn's own "disconnect from current source" half without any
+ * of its real-Postgres recovery-config/restart machinery, which doesn't
+ * apply here -- an ARCHIVING row has no PGDATA to reconfigure (see
+ * haspgdata's own design comment, pgautofailover.sql).
+ */
+bool
+fsm_archiver_report_lsn(Keeper *keeper)
+{
+	return service_archiver_stop_pgreceivewal();
+}
+
+
+/*
+ * fsm_archiver_follow_new_primary re-points pg_receivewal at the group's
+ * newly elected primary -- the archiver's own mirror of
+ * fsm_follow_new_primary, without that function's live-Postgres-standby
+ * machinery: pg_receivewal has no "replaying, not caught up yet"
+ * continuum to wait out (see haspgdata's own design comment), just a
+ * fresh connection to make.
+ */
+bool
+fsm_archiver_follow_new_primary(Keeper *keeper)
+{
+	NodeAddress primaryNode = { 0 };
+
+	/* get the newly elected primary node to stream WAL from */
+	if (!keeper_get_primary(keeper, &primaryNode))
+	{
+		log_error("Failed to follow new primary for lack of a primary node, "
+				  "see above for details");
+		return false;
+	}
+
+	return service_archiver_start_pgreceivewal(keeper, &primaryNode);
 }

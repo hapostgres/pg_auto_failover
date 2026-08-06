@@ -824,6 +824,36 @@ KeeperFSMTransition KeeperFSM[] = {
 		FSM_PHASE_INIT
 	},
 
+	/*
+	 * Archiving & Disaster Recovery (milestone 2): the ARCHIVING mirror of
+	 * the ordinary standby-init/failover-participation/rejoin rows just
+	 * above and further below (SECONDARY/CATCHINGUP <-> REPORT_LSN) -- an
+	 * ARCHIVING node is only ever assigned these three transitions by the
+	 * monitor (MonitorFSM[] pos 367/396-398, group_state_machine.c), so
+	 * NODE_KIND_ANY carries no ambiguity here despite being the same
+	 * bitmask every ordinary row uses.
+	 */
+	{
+		WAIT_STANDBY_STATE, ARCHIVING_STATE, NODE_KIND_ANY,
+		"wait_standby to archiving",
+		&fsm_init_archiver,
+		FSM_PHASE_INIT
+	},
+
+	{
+		ARCHIVING_STATE, REPORT_LSN_STATE, NODE_KIND_ANY,
+		"archiving to report_lsn",
+		&fsm_archiver_report_lsn,
+		FSM_PHASE_FAILOVER
+	},
+
+	{
+		REPORT_LSN_STATE, ARCHIVING_STATE, NODE_KIND_ANY,
+		"report_lsn to archiving",
+		&fsm_archiver_follow_new_primary,
+		FSM_PHASE_FAILOVER
+	},
+
 	{
 		DEMOTED_STATE, CATCHINGUP_STATE, NODE_KIND_ANY,
 		COMMENT_DEMOTED_TO_CATCHINGUP,

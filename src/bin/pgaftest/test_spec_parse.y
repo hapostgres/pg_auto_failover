@@ -139,6 +139,7 @@ static TestCmd       *current_promote_cmd = NULL;
 static TestCmd       *current_pass_cmd    = NULL;  /* for opt_passing_through */
 static TestFormation *current_formation   = NULL;
 static TestNode      *current_node        = NULL;
+static TestArchiverNode *current_archiver = NULL;
 
 %}
 
@@ -156,7 +157,7 @@ static TestNode      *current_node        = NULL;
 
 /* ---- Cluster-body tokens ---- */
 %token T_IMAGE T_IMAGE_TARGET T_SSL T_AUTH T_AUTH_METHOD T_FORMATION T_NUM_SYNC
-%token T_COORDINATOR T_WORKER T_ASYNC T_NO_MONITOR T_SUSPENDED
+%token T_COORDINATOR T_WORKER T_ARCHIVER T_ASYNC T_NO_MONITOR T_SUSPENDED
 %token T_LAUNCH T_CREATE T_DEFERRED T_IMMEDIATE T_FALSE T_TRUE T_INITIALLY T_VOLUME
 %token T_LISTEN T_CITUS_SECONDARY T_CANDIDATE_PRIORITY T_PORT T_PASSWORD T_MONITOR_PASSWORD
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
@@ -190,6 +191,7 @@ static TestNode      *current_node        = NULL;
 %token T_POSTGRES T_STAYS T_WHILE T_THROUGH T_SET T_GET
 %token T_FSM
 %token T_LOGS T_NOT T_CONTAINS T_MATCHES
+%token T_WAL T_SEGMENT T_ARCHIVED T_BASEBACKUP T_SLASH
 
 /* ---- Tokens with values ---- */
 %token <ival> T_INTEGER
@@ -199,6 +201,7 @@ static TestNode      *current_node        = NULL;
 %type <str>   ident_or_string
 %type <str>   bare_name
 %type <str>   fsm_state
+%type <str>   wait_state_name
 %type <str>   node_name
 %type <step>  cmd_block cmd_list
 %type <cmd>   step_cmd
@@ -208,6 +211,7 @@ static TestNode      *current_node        = NULL;
 %type <cmd>   fsm_step_cmd
 %type <cmd>   nodeini_cmd
 %type <ival>  opt_timeout
+%type <ival>  opt_wait_group
 %type <step>  while_body
 
 %%
@@ -256,8 +260,93 @@ cluster_item:
 	| auth_line
 	| extension_version_line
 	| formation_block
+	| archiver_block
 	| T_BIND_SOURCE { current_spec->cluster.bindSource = true; }
 	| T_LEGACY_STARTUP { current_spec->cluster.legacyStartup = true; }
+	;
+
+/*
+ * archiver <name> { formation <name> [formation <name> ...] [region <name>] }
+ *
+ * Top-level, sibling to "monitor" and "formation" -- NOT nested inside a
+ * formation_block's node_list the way ordinary/coordinator/worker nodes
+ * are (see TestArchiverNode's own comment in test_spec.h for why: an
+ * archiver attaches to one or more formations by name, it isn't a member
+ * of any one of them). May appear more than once, for a cluster with
+ * several archivers.
+ *
+ * Braces are mandatory here (unlike monitor_line's own bare/flat form):
+ * archiver_opt's own "T_FORMATION T_IDENT" would otherwise be
+ * indistinguishable, at one token of lookahead, from a brand new
+ * top-level formation_block starting right after this one (formation_
+ * block's own opening is also "T_FORMATION bare_name ...", bare_name
+ * itself accepting a plain T_IDENT) -- a real shift/reduce ambiguity
+ * caught while writing this grammar, not a stylistic choice.
+ */
+archiver_block:
+	T_ARCHIVER T_IDENT
+	{
+		TestCluster *cl = &current_spec->cluster;
+
+		if (cl->archiverCount >= PGAF_MAX_ARCHIVERS)
+		{
+			fprintf(stderr, "pgaftest: too many archivers (max %d)\n",
+			        PGAF_MAX_ARCHIVERS);
+			exit(1);
+		}
+
+		current_archiver = &cl->archivers[cl->archiverCount++];
+		strlcpy(current_archiver->name, $2, sizeof(current_archiver->name));
+		free($2);
+	}
+	T_LBRACE archiver_opt_list T_RBRACE
+	;
+
+archiver_opt_list:
+	  /* empty */
+	| archiver_opt_list archiver_opt
+	;
+
+archiver_opt:
+	  T_FORMATION T_IDENT
+	{
+		if (current_archiver->formationCount >= PGAF_MAX_ARCHIVER_FORMATIONS)
+		{
+			fprintf(stderr,
+			        "pgaftest: too many --formation entries for archiver "
+			        "\"%s\" (max %d)\n",
+			        current_archiver->name, PGAF_MAX_ARCHIVER_FORMATIONS);
+			exit(1);
+		}
+		strlcpy(current_archiver->formations[current_archiver->formationCount++],
+		        $2, sizeof(current_archiver->formations[0]));
+		free($2);
+	}
+	| T_REGION T_IDENT
+	{
+		strlcpy(current_archiver->region, $2, sizeof(current_archiver->region));
+		free($2);
+	}
+	| T_REGION T_STRING
+	{
+		strlcpy(current_archiver->region, $2, sizeof(current_archiver->region));
+		free($2);
+	}
+	| T_CREATE T_AND T_LAUNCH T_DEFERRED
+	{
+		/* bare "create and launch deferred" = both gates, matching
+		 * node_opt's own identical form */
+		current_archiver->createDeferred = true;
+		current_archiver->launchDeferred = true;
+	}
+	| T_LAUNCH T_DEFERRED
+	{
+		current_archiver->launchDeferred = true;
+	}
+	| T_CREATE T_DEFERRED
+	{
+		current_archiver->createDeferred = true;
+	}
 	;
 
 /*
@@ -514,6 +603,10 @@ node_opt:
 	{
 		current_node->kind = NODE_KIND_CITUS_WORKER;
 		current_spec->cluster.withCitus = true;
+	}
+	| T_ARCHIVER
+	{
+		current_node->kind = NODE_KIND_ARCHIVER;
 	}
 	| T_ASYNC
 	{
@@ -1019,6 +1112,106 @@ wait_cmd:
 		$$ = current_wait_cmd;
 		$$->timeoutSeconds = $6;
 		current_wait_cmd = NULL;
+	}
+	/*
+	 * Generic form: wait until sql <svc> { SQL } is { value } [timeout Ns]
+	 *
+	 * Polls an arbitrary scalar SQL expression until its (substring-
+	 * matched, same semantics as `expect { }`) result contains <value>.
+	 * The "wal segment ... archived", "archiver state is ...", and
+	 * "basebackup ... is ..." forms below are all sugar for this at parse
+	 * time -- reach for this directly only when none of those fit.
+	 */
+	| T_WAIT T_UNTIL T_SQL T_IDENT T_BLOCK T_IS T_BLOCK opt_timeout
+	{
+		$$ = make_cmd(CMD_WAIT_SQL);
+		strlcpy($$->service,  $4, sizeof($$->service));
+		strlcpy($$->args,     $5, sizeof($$->args));
+		strlcpy($$->expected, $7, sizeof($$->expected));
+		$$->timeoutSeconds = $8;
+		free($4); free($5); free($7);
+	}
+	/*
+	 * wait until wal segment "<segment>" archived in <formation>/<group>  [timeout Ns]
+	 *
+	 * Sugar for polling pgautofailover.wal_archived(). The segment name is
+	 * quoted (T_STRING) rather than bare: a real segment name is all
+	 * digits, which the lexer's own T_INTEGER rule would otherwise
+	 * swallow (and overflow -- a segment name is 24 digits, an int isn't).
+	 */
+	| T_WAIT T_UNTIL T_WAL T_SEGMENT T_STRING T_ARCHIVED T_IN T_IDENT T_SLASH T_INTEGER opt_timeout
+	{
+		$$ = make_cmd(CMD_WAIT_SQL);
+		strlcpy($$->service, "monitor", sizeof($$->service));
+		sformat($$->args, sizeof($$->args),
+		        "SELECT pgautofailover.wal_archived('%s', %d, '%s')",
+		        $8, $10, $5);
+		strlcpy($$->expected, "t", sizeof($$->expected));
+		$$->timeoutSeconds = $11;
+		free($5); free($8);
+	}
+	/*
+	 * wait until archiver state is <state> in <formation>[/<group>]  [timeout Ns]
+	 *
+	 * Sugar for the nodename LIKE 'archiver-%' idiom every multi-
+	 * membership archiver spec needs: archiver_add_formation() (pgautofailover.sql)
+	 * never uses the plain --name given at create-archiver time as an
+	 * ARCHIVING row's own nodename, so the ordinary "wait until <node>
+	 * state is <s>" form (which matches on nodename = $1) can't see these
+	 * rows at all, let alone disambiguate more than one. Group is
+	 * optional: omit it when the formation has exactly one archiver
+	 * membership (the common case, and formationid alone is unambiguous),
+	 * give it to disambiguate a multi-group Citus formation.
+	 */
+	| T_WAIT T_UNTIL T_ARCHIVER T_STATE state_op wait_state_name T_IN T_IDENT opt_wait_group opt_timeout
+	{
+		$$ = make_cmd(CMD_WAIT_SQL);
+		strlcpy($$->service, "monitor", sizeof($$->service));
+		if ($9 >= 0)
+		{
+			sformat($$->args, sizeof($$->args),
+			        "SELECT reportedstate::text FROM pgautofailover.node"
+			        " WHERE nodename LIKE 'archiver-%%' AND formationid = '%s'"
+			        " AND groupid = %d", $8, $9);
+		}
+		else
+		{
+			sformat($$->args, sizeof($$->args),
+			        "SELECT reportedstate::text FROM pgautofailover.node"
+			        " WHERE nodename LIKE 'archiver-%%' AND formationid = '%s'", $8);
+		}
+		strlcpy($$->expected, $6, sizeof($$->expected));
+		$$->timeoutSeconds = $10;
+		free($6); free($8);
+	}
+	/*
+	 * wait until basebackup <source|status|replaymode> is <value> in <formation>/<group>  [timeout Ns]
+	 *
+	 * Sugar for polling pgautofailover.get_latest_basebackup(). <property>
+	 * is validated here rather than tokenized: it's the one piece of this
+	 * command that's genuinely open content (a column name), not fixed
+	 * syntax, so a clear parse-time error beats a cryptic runtime SQL one.
+	 */
+	| T_WAIT T_UNTIL T_BASEBACKUP T_IDENT T_IS T_IDENT T_IN T_IDENT T_SLASH T_INTEGER opt_timeout
+	{
+		if (strcmp($4, "source") != 0 &&
+		    strcmp($4, "status") != 0 &&
+		    strcmp($4, "replaymode") != 0)
+		{
+			fprintf(stderr,
+			        "pgaftest: line %d: \"wait until basebackup %s ...\" -- "
+			        "unknown property (expected source, status, or replaymode)\n",
+			        pgaf_line_number, $4);
+			exit(1);
+		}
+		$$ = make_cmd(CMD_WAIT_SQL);
+		strlcpy($$->service, "monitor", sizeof($$->service));
+		sformat($$->args, sizeof($$->args),
+		        "SELECT %s::text FROM pgautofailover.get_latest_basebackup('%s', %d)",
+		        $4, $8, $10);
+		strlcpy($$->expected, $6, sizeof($$->expected));
+		$$->timeoutSeconds = $11;
+		free($4); free($6); free($8);
 	}
 	;
 
@@ -1590,7 +1783,119 @@ ident_or_string:
 	| T_STRING { $$ = $1; }
 	;
 
+/*
+ * wait_state_name — a state name for "wait until archiver state is X",
+ * accepting both known FSM state tokens and bare idents (e.g. "archiving",
+ * which has no T_FS_* token of its own -- see fsm_state's own list). Always
+ * returns a heap-owned string so the caller can unconditionally free() it,
+ * unlike fsm_state itself (whose branches return static literals).
+ */
+wait_state_name:
+	  fsm_state  { $$ = strdup($1); }
+	| T_IDENT    { $$ = $1; }
+	;
+
+/*
+ * opt_wait_group — optional "/<group>" suffix for "wait until archiver
+ * state is X in <formation>[/<group>]". -1 means "no group filter".
+ */
+opt_wait_group:
+	  /* empty */          { $$ = -1; }
+	| T_SLASH T_INTEGER    { $$ = $2; }
+	;
+
 %%
+
+/*
+ * fold_archivers_into_formations turns each top-level "archiver { }"
+ * declaration (TestArchiverNode, cluster->archivers[]) into an ordinary
+ * TestNode of kind NODE_KIND_ARCHIVER, appended to its own declared
+ * formation's own node list -- see TestArchiverNode's own comment
+ * (test_spec.h) for why the *declaration* still needs to be top-level even
+ * though it ends up represented identically to the older, still-supported
+ * "archiver nested inside a formation_block" spelling once parsed. Called
+ * once, right after yyparse() returns, so every caller downstream of
+ * parse_test_spec() (compose_gen.c included) only ever sees ordinary
+ * TestNode entries and needs no awareness of TestArchiverNode at all.
+ *
+ * cluster->archiverCount is reset to 0 once every entry has been folded,
+ * so cluster->archivers[] is never a second, stale source of truth for
+ * the very same nodes now living in cluster->formations[].nodes[].
+ */
+static void
+fold_archivers_into_formations(TestCluster *cluster)
+{
+	for (int ai = 0; ai < cluster->archiverCount; ai++)
+	{
+		TestArchiverNode *a = &cluster->archivers[ai];
+
+		if (a->formationCount == 0)
+		{
+			fprintf(stderr,
+			        "pgaftest: archiver \"%s\" needs at least one "
+			        "\"formation <name>\" entry\n", a->name);
+			exit(1);
+		}
+
+		if (a->formationCount > 1)
+		{
+			fprintf(stderr,
+			        "pgaftest: archiver \"%s\" lists %d formations, but "
+			        "pg_autoctl create archiver's own ini-driven bring-up "
+			        "only attaches to one at create time -- declare just "
+			        "\"formation %s\" here and attach the rest (e.g. "
+			        "\"%s\") dynamically once it's running instead, via a "
+			        "direct \"sql monitor { SELECT pgautofailover."
+			        "archiver_add_formation(...) }\" step -- see "
+			        "archiver_multi_formation.pgaf for the pattern\n",
+			        a->name, a->formationCount, a->formations[0],
+			        a->formations[1]);
+			exit(1);
+		}
+
+		TestFormation *form = NULL;
+
+		for (int fi = 0; fi < cluster->formationCount; fi++)
+		{
+			if (strcmp(cluster->formations[fi].name, a->formations[0]) == 0)
+			{
+				form = &cluster->formations[fi];
+				break;
+			}
+		}
+
+		if (form == NULL)
+		{
+			fprintf(stderr,
+			        "pgaftest: archiver \"%s\" attaches to formation "
+			        "\"%s\", which is not declared in this cluster{} "
+			        "block\n", a->name, a->formations[0]);
+			exit(1);
+		}
+
+		if (form->nodeCount >= PGAF_MAX_NODES)
+		{
+			fprintf(stderr,
+			        "pgaftest: too many nodes in formation \"%s\" (max %d)\n",
+			        form->name, PGAF_MAX_NODES);
+			exit(1);
+		}
+
+		TestNode *node = &form->nodes[form->nodeCount++];
+
+		memset(node, 0, sizeof(*node));
+		strlcpy(node->name, a->name, sizeof(node->name));
+		node->kind = NODE_KIND_ARCHIVER;
+		node->candidatePriority = 50;
+		node->replicationQuorum = true;
+		strlcpy(node->region, a->region, sizeof(node->region));
+		node->createDeferred = a->createDeferred;
+		node->launchDeferred = a->launchDeferred;
+	}
+
+	cluster->archiverCount = 0;
+}
+
 
 /* -----------------------------------------------------------------------
  * Public entry point
@@ -1617,6 +1922,8 @@ parse_test_spec(const char *filename)
 	yyin = f;
 	yyparse();
 	fclose(f);
+
+	fold_archivers_into_formations(&spec->cluster);
 
 	/*
 	 * If the file has no explicit sequence{} block, default to running

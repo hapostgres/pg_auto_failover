@@ -1496,10 +1496,11 @@ nodeKindFromString(const char *nodeKind)
 		NODE_KIND_UNKNOWN,
 		NODE_KIND_STANDALONE,
 		NODE_KIND_CITUS_COORDINATOR,
-		NODE_KIND_CITUS_WORKER
+		NODE_KIND_CITUS_WORKER,
+		NODE_KIND_ARCHIVER
 	};
 	char *kindList[] = {
-		"", "unknown", "standalone", "coordinator", "worker", NULL
+		"", "unknown", "standalone", "coordinator", "worker", "archiver", NULL
 	};
 
 	for (int listIndex = 0; kindList[listIndex] != NULL; listIndex++)
@@ -1544,6 +1545,11 @@ nodeKindToString(PgInstanceKind kind)
 		case NODE_KIND_CITUS_WORKER:
 		{
 			return "worker";
+		}
+
+		case NODE_KIND_ARCHIVER:
+		{
+			return "archiver";
 		}
 
 		default:

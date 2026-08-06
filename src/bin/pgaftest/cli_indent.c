@@ -415,6 +415,10 @@ print_node(FILE *out, const TestNode *n, int baseIndent)
 			strlcpy(kindbuf, "worker", sizeof(kindbuf));
 		}
 	}
+	else if (n->kind == NODE_KIND_ARCHIVER)
+	{
+		strlcpy(kindbuf, "archiver", sizeof(kindbuf));
+	}
 	const char *kind = kindbuf;
 
 #define ADD(k, v) do { props[pc].kw = (k); strlcpy(props[pc].val, (v), \
@@ -893,6 +897,26 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 		{
 			fformat(out, "%*swait until %s replays %s  timeout %ds\n",
 					indent, "", cmd->service, cmd->state, cmd->timeoutSeconds);
+			break;
+		}
+
+		case CMD_WAIT_SQL:
+		{
+			/*
+			 * Always the canonical generic form: "wal segment ... archived",
+			 * "archiver state is ...", and "basebackup ... is ..." are all
+			 * sugar folded into a plain SQL/expected pair at parse time, so
+			 * there's no surface syntax left to distinguish and round-trip
+			 * -- this always re-renders as the generic form, same as
+			 * CMD_SQL normalises embedded newlines rather than preserving
+			 * original formatting.
+			 */
+			char norm[8192];
+			normalize_sql(cmd->args, norm, sizeof(norm));
+
+			fformat(out, "%*swait until sql %s { %s } is { %s }  timeout %ds\n",
+					indent, "", cmd->service, norm, cmd->expected,
+					cmd->timeoutSeconds);
 			break;
 		}
 

@@ -1,5 +1,10 @@
 # Test basic Citus cluster operations: coordinator HA, worker HA with two
 # worker groups, distributed table writes/reads, and failover at each level.
+# test_011/test_012 additionally cover Archiving & Disaster Recovery for a
+# Citus formation: a single archiver attached once ends up with one
+# membership per group -- the coordinator's own group 0, plus worker1's
+# group 1 and worker2's group 2 -- each independently WAL-capturing, proving
+# a Citus formation's archiver coverage isn't limited to the coordinator.
 #
 # Ported from tests/test_basic_citus_operation.py
 # Predecessor: tests/test_basic_citus_operation.py
@@ -13,6 +18,10 @@ cluster {
         worker1b worker group 1
         worker2a worker group 2
         worker2b worker group 2
+    }
+    archiver archiver1 {
+        formation default
+        create and launch deferred
     }
 }
 
@@ -131,4 +140,66 @@ step test_010_perform_failover_coordinator {
     wait until coordinator1a state is secondary
         and coordinator1b state is primary
         timeout 90s
+}
+
+#
+# test_011: bring up an archiver attached to this Citus formation.
+#           Declared with pgaftest's top-level "archiver { }" syntax (see
+#           the cluster{} block above) with "create and launch deferred":
+#           its container still runs the ordinary "pg_autoctl node run
+#           <ini>" command, but the ini's own [launch] section makes that
+#           poll and wait rather than actually registering, until this
+#           step's `pg_autoctl node start` un-defers it -- exactly the
+#           same idiom as any other deferred node in this DSL (see
+#           basic_operation.pgaf's own node3/test_017). Triggered only
+#           here, well after test_002_init_workers confirms every group
+#           (0, 1, 2) already exists on the monitor:
+#           pgautofailover.archiver_add_formation() attaches one ARCHIVING
+#           row per group already present in the formation at the moment
+#           it's called, so creating the archiver this late (rather than
+#           at cluster boot, concurrently with the worker groups still
+#           registering) guarantees a single `pg_autoctl create archiver
+#           --formation default` call here covers all three groups, not
+#           just whichever happened to exist first.
+#
+#           archiver1 ends up with three rows in pgautofailover.node (one
+#           per group), each named by archiver_add_formation() itself as
+#           'archiver-<archiverid>-<groupid>' (never the plain --name) --
+#           the generic "wait until archiver1 state is archiving" form is
+#           ambiguous once more than one such row exists (it matches on
+#           nodename = $1, no ORDER BY) and wouldn't match this synthesized
+#           name anyway, so every check below uses "wait until archiver
+#           state is ... in default/<group>" instead (matches nodename
+#           LIKE 'archiver-%' AND formationid/groupid under the hood).
+#
+
+step test_011_bring_up_archiver {
+    exec archiver1  pg_autoctl node start
+    wait until archiver state is archiving in default/0  timeout 60s
+    wait until archiver state is archiving in default/1  timeout 60s
+    wait until archiver state is archiving in default/2  timeout 60s
+}
+
+#
+# test_012: prove the archiver is actually capturing real WAL for every
+#           group, not just reporting a state label. Writes go to each
+#           group's *current* primary -- coordinator1b (failed over in
+#           test_010), worker1a (never failed over in this spec), worker2b
+#           (failed over in test_009) -- and each membership's own
+#           reportedlsn is checked against '0/0': service_archiver_update_
+#           current_lsn() (service_archiver.c) never reports anything until
+#           a real segment has actually been captured, so a value beyond
+#           '0/0' can only mean WAL genuinely landed for that group. This
+#           avoids hardcoding an exact segment name/number, which this
+#           spec's own substantial prior WAL traffic (distributed table
+#           creation, several failovers) would make fragile to predict.
+#
+
+step test_012_archiver_captures_every_group {
+    sql coordinator1b { CREATE TABLE archiver_probe_coord(a int); INSERT INTO archiver_probe_coord SELECT generate_series(1, 100); SELECT pg_switch_wal(); }
+    sql worker1a { CREATE TABLE archiver_probe_w1(a int); INSERT INTO archiver_probe_w1 SELECT generate_series(1, 100); SELECT pg_switch_wal(); }
+    sql worker2b { CREATE TABLE archiver_probe_w2(a int); INSERT INTO archiver_probe_w2 SELECT generate_series(1, 100); SELECT pg_switch_wal(); }
+    wait until sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 0 } is { t }  timeout 30s
+    wait until sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 1 } is { t }  timeout 30s
+    wait until sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 2 } is { t }  timeout 30s
 }

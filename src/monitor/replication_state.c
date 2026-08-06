@@ -256,6 +256,11 @@ ReplicationStateGetName(ReplicationState replicationState)
 			return "dropped";
 		}
 
+		case REPLICATION_STATE_ARCHIVING:
+		{
+			return "archiving";
+		}
+
 		default:
 		{
 			ereport(ERROR,

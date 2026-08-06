@@ -308,6 +308,18 @@
     "assigned": "catchingup"
   },
   {
+    "current": "wait_standby",
+    "assigned": "archiving"
+  },
+  {
+    "current": "archiving",
+    "assigned": "report_lsn"
+  },
+  {
+    "current": "report_lsn",
+    "assigned": "archiving"
+  },
+  {
     "current": "demoted",
     "assigned": "catchingup"
   },

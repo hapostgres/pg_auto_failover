@@ -26,6 +26,7 @@
 #include "monitor.h"
 #include "monitor_config.h"
 #include "pidfile.h"
+#include "service_archiver_run.h"
 #include "service_keeper.h"
 #include "service_monitor.h"
 #include "signals.h"
@@ -201,6 +202,25 @@ cli_keeper_run(int argc, char **argv)
 
 		/* we don't keep a connection to the monitor in this process */
 		pgsql_finish(&(monitor->pgsql));
+	}
+
+	/*
+	 * An archiver has no real Postgres instance of its own (see
+	 * service_archiver.c's own comment on config->pgSetup.pgdata's reused
+	 * meaning for an ARCHIVING node) -- local_postgres_init()/start_keeper()
+	 * both assume one, so branch to start_archiver() instead, milestone 3's
+	 * own `pg_autoctl run` support (service_archiver_run.c).
+	 */
+	if (strcmp(config->nodeKind, "archiver") == 0)
+	{
+		if (!start_archiver(&keeper))
+		{
+			log_fatal("Failed to start pg_autoctl archiver service, "
+					  "see above for details");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
+
+		return;
 	}
 
 	/* initialize our local Postgres instance representation */

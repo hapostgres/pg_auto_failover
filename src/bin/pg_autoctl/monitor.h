@@ -36,6 +36,112 @@ typedef struct MonitorAssignedState
 	bool replicationQuorum;
 } MonitorAssignedState;
 
+#define ARCHIVER_ARRAY_MAX_COUNT 128
+
+/*
+ * One row per archiver attached to a formation, from pgautofailover.
+ * get_archivers() -- storage stats and FSM state are both nullable on the
+ * SQL side (usedbytes/freebytes: NULL until the first report; the node_id/
+ * reportedState/goalState side of the LEFT JOIN: NULL if this milestone's
+ * one-'wal-receiver'-row-per-group assumption isn't met yet), hence the
+ * separate hasStorageStats/hasNode flags rather than a sentinel value.
+ */
+typedef struct ArchiverInfo
+{
+	int64_t archiverId;
+	char archiverName[_POSIX_HOST_NAME_MAX];
+	char hostname[_POSIX_HOST_NAME_MAX];
+	char region[NAMEDATALEN];
+
+	bool hasStorageStats;
+	uint64_t usedBytes;
+	uint64_t freeBytes;
+
+	bool hasNode;
+	int64_t nodeId;
+	NodeState reportedState;
+	NodeState goalState;
+} ArchiverInfo;
+
+typedef struct ArchiverInfoArray
+{
+	int count;
+	ArchiverInfo archivers[ARCHIVER_ARRAY_MAX_COUNT];
+} ArchiverInfoArray;
+
+#define ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT 256
+
+/*
+ * One row per (formation, group) membership an archiver currently holds a
+ * 'wal-receiver' row in, from pgautofailover.list_archiver_memberships()
+ * -- what an archiver process itself calls, at startup and periodically
+ * thereafter, to discover the full set of WAL streams and base-backup
+ * schedules it is responsible for running (service_archiver_reconciler.c).
+ */
+typedef struct ArchiverMembership
+{
+	char formation[NAMEDATALEN];
+	int groupId;
+	int64_t nodeId;
+	NodeState reportedState;
+	NodeState goalState;
+} ArchiverMembership;
+
+typedef struct ArchiverMembershipArray
+{
+	int count;
+	ArchiverMembership memberships[ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT];
+} ArchiverMembershipArray;
+
+/*
+ * A base-backup production/retention policy (pgautofailover.basebackup_
+ * policy), resolved either by name (monitor_get_basebackup_policy(), `pg_
+ * autoctl show basebackup-policy`) or for a (formation, group) pair
+ * (monitor_get_basebackup_policy_for_group(), what service_archiver_
+ * basebackup.c's own scheduling/retention pass actually consumes) --
+ * both go through the same SQL-side flattening of the policy's interval
+ * columns to plain integer seconds (get_basebackup_policy_for_group()'s
+ * own comment, pgautofailover.sql), so both share this one struct.
+ * replayMode is empty when source is "live" (basebackup_policy's own
+ * CHECK constraint: replaymode is NULL unless source = 'replay').
+ */
+typedef struct BasebackupPolicy
+{
+	int64_t basebackupPolicyId;
+	char policyName[NAMEDATALEN];
+	char source[NAMEDATALEN];
+	char replayMode[NAMEDATALEN];
+	char cache[NAMEDATALEN];
+	int frequencySeconds;
+	int maxCount;
+	int maxAgeSeconds;
+	bool onPromotion;
+	int concurrency;
+} BasebackupPolicy;
+
+#define BASEBACKUP_ARRAY_MAX_COUNT 256
+
+/*
+ * One row per complete base backup for a (formation, group), from
+ * pgautofailover.list_basebackups() -- just enough for a retention
+ * decision (age via startedAtEpoch, which of maxcount survives) and to
+ * act on one once pruned (storageLocation to remove the directory,
+ * basebackupId to report the deletion).
+ */
+typedef struct BasebackupInfo
+{
+	int64_t basebackupId;
+	char label[NAMEDATALEN];
+	char storageLocation[MAXPGPATH];
+	int64_t startedAtEpoch;
+} BasebackupInfo;
+
+typedef struct BasebackupInfoArray
+{
+	int count;
+	BasebackupInfo backups[BASEBACKUP_ARRAY_MAX_COUNT];
+} BasebackupInfoArray;
+
 typedef struct StateNotification
 {
 	char message[BUFSIZE];
@@ -154,12 +260,72 @@ bool monitor_print_other_nodes_as_json(Monitor *monitor,
 
 bool monitor_get_primary(Monitor *monitor, char *formation, int groupId,
 						 NodeAddress *node);
+bool monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
+							   char *region, int64_t *archiverId);
+bool monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
+									char *formation, int64_t *archiverNodeId);
+bool monitor_report_archiver_storage(Monitor *monitor, int64_t archiverId,
+									 uint64_t usedBytes, uint64_t freeBytes);
+bool monitor_get_archivers(Monitor *monitor, const char *formation,
+						   ArchiverInfoArray *archiversArray);
+bool monitor_list_archiver_memberships(Monitor *monitor, int64_t archiverId,
+									   ArchiverMembershipArray *membershipsArray);
+bool monitor_get_latest_basebackup_info(Monitor *monitor,
+										const char *formationId, int groupId,
+										const char *preferredSource,
+										char *storageLocation, size_t storageLocationSize,
+										char *source, size_t sourceSize,
+										int *timeline,
+										bool *found);
+bool monitor_get_group_system_identifier(Monitor *monitor,
+										 const char *formationId, int groupId,
+										 uint64_t *systemIdentifier,
+										 bool *found);
+bool monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
+								 const char *walFileName, const char *lsn);
+bool monitor_report_basebackup_started(Monitor *monitor, int64_t archiverId,
+									   const char *formationId, int groupId,
+									   const char *label, int timeline,
+									   const char *startLsn,
+									   const char *source,
+									   const char *replaymode,
+									   int64_t *basebackupId);
+bool monitor_report_basebackup_completed(Monitor *monitor,
+										 int64_t basebackupId,
+										 const char *endLsn,
+										 int64_t sizeBytes,
+										 const char *storageLocation);
+bool monitor_report_basebackup_deleted(Monitor *monitor, int64_t basebackupId);
+bool monitor_list_basebackups(Monitor *monitor,
+							  const char *formationId, int groupId,
+							  BasebackupInfoArray *backupsArray);
+bool monitor_get_basebackup_policy_for_group(Monitor *monitor,
+											 const char *formationId,
+											 int groupId,
+											 BasebackupPolicy *policy,
+											 bool *found);
+bool monitor_get_basebackup_policy(Monitor *monitor, const char *policyName,
+								   BasebackupPolicy *policy, bool *found);
+bool monitor_create_basebackup_policy(Monitor *monitor,
+									  const char *policyName,
+									  const char *jsonSpec,
+									  int64_t *basebackupPolicyId);
+bool monitor_set_basebackup_policy(Monitor *monitor, const char *policyName,
+								   const char *jsonSpec);
+bool monitor_set_archiver_policy(Monitor *monitor,
+								 const char *formationId, int groupId,
+								 int archiverQuorum,
+								 int64_t basebackupPolicyId,
+								 bool replicationQuorumEligible);
 bool monitor_get_coordinator(Monitor *monitor, char *formation,
 							 CoordinatorNodeAddress *coordinatorNodeAddress);
 bool monitor_get_most_advanced_standby(Monitor *monitor,
 									   char *formation, int groupId,
 									   int64_t callerNodeId,
 									   NodeAddress *node, bool *found);
+bool monitor_get_archiver_node(Monitor *monitor,
+							   char *formation, int groupId,
+							   NodeAddress *node, bool *found);
 bool monitor_register_node(Monitor *monitor,
 						   char *formation,
 						   char *name,

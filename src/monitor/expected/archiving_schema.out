@@ -1,0 +1,360 @@
+-- Copyright (c) Microsoft Corporation. All rights reserved.
+-- Licensed under the PostgreSQL License.
+--
+-- Regression tests for the Archiving & Disaster Recovery schema and its
+-- monitor API (milestone 1: schema + monitor API only -- no
+-- service_archiver process involved, everything here is exercised via
+-- direct SQL calls against the schema alone). See
+-- ~/dev/temp/archiving-disaster-recovery.md for the full design.
+\x on
+-- A dedicated formation, like every other test in this schedule: 'default'
+-- is the seed formation CREATE EXTENSION itself creates, and by this point
+-- in regress_schedule it may already have real nodes registered into it by
+-- earlier tests, so it's the one name this file must NOT reuse. The
+-- 'default' basebackup_policy row (also a CREATE EXTENSION seed) is shared
+-- on purpose: this file's own focus is exercising it, not creating another.
+-- Two ordinary nodes stand in for a group's primary+secondary, inserted
+-- directly rather than through register_node()/node_active(): the ordinary
+-- node FSM has its own dedicated coverage elsewhere, this file's own focus
+-- is the archiver schema layered on top of it.
+SELECT pgautofailover.create_formation('archiving_test', 'pgsql', 'postgres',
+                                        true, 1);
+-[ RECORD 1 ]----+------------------------------------
+create_formation | (archiving_test,pgsql,postgres,t,1)
+
+INSERT INTO pgautofailover.node
+       (formationid, groupid, nodename, nodehost, nodeport, sysidentifier,
+        goalstate, reportedstate)
+VALUES ('archiving_test', 0, 'node1', 'node1.local', 5432, 111,
+        'primary', 'primary'),
+       ('archiving_test', 0, 'node2', 'node2.local', 5432, 111,
+        'secondary', 'secondary');
+-- ── register_archiver ────────────────────────────────────────────────────
+SELECT pgautofailover.register_archiver('archiver1', 'archiver1.local')
+       AS archiverid \gset
+SELECT archiverid, archivername, hostname, region, basebackuppolicyid,
+       autoregister, maxresidentreplay
+  FROM pgautofailover.archiver;
+-[ RECORD 1 ]------+----------------
+archiverid         | 1
+archivername       | archiver1
+hostname           | archiver1.local
+region             | default
+basebackuppolicyid | 1
+autoregister       | t
+maxresidentreplay  | 1
+
+-- the mandatory 'local' storage target is created in the same call
+SELECT archiverstorageid, archiverid, storagemethod, storagepath, rcloneconfigid
+  FROM pgautofailover.archiver_storage;
+-[ RECORD 1 ]-----+------
+archiverstorageid | 1
+archiverid        | 1
+storagemethod     | local
+storagepath       | 
+rcloneconfigid    | 
+
+-- ── archiver_add_formation: the budget setup's own fan-out ─────────────────
+SELECT * FROM pgautofailover.archiver_add_formation(:archiverid, 'archiving_test');
+-[ RECORD 1 ]----------+---
+archiver_add_formation | 40
+
+SELECT nodeid, formationid, groupid, nodename, nodehost, nodeport,
+       goalstate, reportedstate, haspgdata
+  FROM pgautofailover.node
+ WHERE haspgdata = false;
+-[ RECORD 1 ]-+----------------
+nodeid        | 40
+formationid   | archiving_test
+groupid       | 0
+nodename      | archiver-1-0
+nodehost      | archiver1.local
+nodeport      | 0
+goalstate     | wait_standby
+reportedstate | wait_standby
+haspgdata     | f
+
+SELECT archivernodeid, archiverid, kind, nodeid
+  FROM pgautofailover.archiver_node
+ WHERE kind = 'wal-receiver';
+-[ RECORD 1 ]--+-------------
+archivernodeid | 1
+archiverid     | 1
+kind           | wal-receiver
+nodeid         | 40
+
+SELECT nodeid FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND groupid = 0 AND haspgdata = false \gset
+-- calling archiver_add_formation() again for the same (archiver, formation)
+-- must be a safe no-op -- no error, no duplicate node/archiver_node rows --
+-- since a real archiver's own reconciler calls this periodically to pick up
+-- newly-added groups (e.g. a Citus formation growing a worker), not just
+-- once at creation time
+SELECT * FROM pgautofailover.archiver_add_formation(:archiverid, 'archiving_test');
+(0 rows)
+
+SELECT count(*) AS should_still_be_one FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND groupid = 0 AND haspgdata = false;
+-[ RECORD 1 ]-------+--
+should_still_be_one | 1
+
+-- ── list_archiver_memberships: what an archiver process discovers ──────────
+SELECT * FROM pgautofailover.list_archiver_memberships(:archiverid);
+-[ RECORD 1 ]--+---------------
+formation_id   | archiving_test
+group_id       | 0
+node_id        | 40
+reported_state | wait_standby
+goal_state     | wait_standby
+
+-- a second formation attached to the same archiver shows up alongside the
+-- first -- this is the multi-membership case: one archiver, several
+-- (formation, group) rows, each its own WAL stream and base-backup schedule
+SELECT pgautofailover.create_formation('archiving_test_2', 'pgsql', 'postgres',
+                                        true, 1);
+-[ RECORD 1 ]----+--------------------------------------
+create_formation | (archiving_test_2,pgsql,postgres,t,1)
+
+INSERT INTO pgautofailover.node
+       (formationid, groupid, nodename, nodehost, nodeport, sysidentifier,
+        goalstate, reportedstate)
+VALUES ('archiving_test_2', 0, 'node3', 'node3.local', 5432, 222,
+        'primary', 'primary');
+SELECT * FROM pgautofailover.archiver_add_formation(:archiverid, 'archiving_test_2');
+-[ RECORD 1 ]----------+---
+archiver_add_formation | 43
+
+SELECT formation_id, group_id
+  FROM pgautofailover.list_archiver_memberships(:archiverid)
+ ORDER BY formation_id;
+-[ RECORD 1 ]+-----------------
+formation_id | archiving_test
+group_id     | 0
+-[ RECORD 2 ]+-----------------
+formation_id | archiving_test_2
+group_id     | 0
+
+SELECT pgautofailover.archiver_remove_formation(:archiverid, 'archiving_test_2');
+-[ RECORD 1 ]-------------+-
+archiver_remove_formation | 
+
+-- a second archiver serving the same formation/group shares the same
+-- (nodehost, nodeport) = (its own hostname, 0) with the first -- the
+-- node_nodehost_nodeport_haspgdata_idx partial unique index (scoped to
+-- haspgdata rows only) must not reject this. Registered with an explicit,
+-- distinct region from archiver1's own default -- this is the intended
+-- shape for geographically-redundant DR coverage of the same formation
+-- (see archiver.region's own comment); get_archivers() below must surface
+-- both regions distinctly.
+SELECT pgautofailover.register_archiver('archiver2', 'archiver1.local',
+                                         region => 'eu-west')
+       AS archiverid2 \gset
+SELECT * FROM pgautofailover.archiver_add_formation(:archiverid2, 'archiving_test');
+-[ RECORD 1 ]----------+---
+archiver_add_formation | 44
+
+SELECT archiver_id, archiver_name, region
+  FROM pgautofailover.get_archivers('archiving_test')
+ ORDER BY archiver_id;
+-[ RECORD 1 ]-+----------
+archiver_id   | 1
+archiver_name | archiver1
+region        | default
+-[ RECORD 2 ]-+----------
+archiver_id   | 2
+archiver_name | archiver2
+region        | eu-west
+
+-- ── WAL capture confirmation: wal_archived() / report_wal_received() ───────
+SELECT pgautofailover.report_wal_received(
+           :nodeid, '000000010000000000000001', '0/1000000');
+-[ RECORD 1 ]-------+-
+report_wal_received | 
+
+-- default archiver_quorum is 1: a single archiver's report already satisfies it
+SELECT pgautofailover.wal_archived('archiving_test', 0, '000000010000000000000001');
+-[ RECORD 1 ]+--
+wal_archived | t
+
+-- bump the formation-wide default to 2: the same segment, reported by only
+-- one archiver, no longer satisfies quorum
+SELECT pgautofailover.set_archiver_policy('archiving_test', NULL, 2, NULL, NULL);
+-[ RECORD 1 ]-------+-
+set_archiver_policy | 
+
+SELECT pgautofailover.wal_archived('archiving_test', 0, '000000010000000000000001');
+-[ RECORD 1 ]+--
+wal_archived | f
+
+-- a group-specific override takes precedence over the formation-wide default
+SELECT pgautofailover.set_archiver_policy('archiving_test', 0, 1, NULL, NULL);
+-[ RECORD 1 ]-------+-
+set_archiver_policy | 
+
+SELECT * FROM pgautofailover.get_archiver_policy('archiving_test', 0);
+-[ RECORD 1 ]-------------+--
+archiverquorum            | 1
+basebackuppolicyid        | 
+replicationquorumeligible | f
+
+-- group 1 has no override of its own: falls back to the formation default (2)
+SELECT * FROM pgautofailover.get_archiver_policy('archiving_test', 1);
+-[ RECORD 1 ]-------------+--
+archiverquorum            | 2
+basebackuppolicyid        | 
+replicationquorumeligible | f
+
+-- ── base backup lifecycle ───────────────────────────────────────────────────
+SELECT pgautofailover.report_basebackup_started(
+           :archiverid, 'archiving_test', 0, 'base_20260804', 1, '0/500000', 'live')
+       AS basebackupid \gset
+SELECT pgautofailover.report_basebackup_completed(
+           :basebackupid, '0/1000000', 123456789,
+           '/var/lib/pgaf-archiver/backups/base_20260804');
+-[ RECORD 1 ]---------------+-
+report_basebackup_completed | 
+
+SELECT basebackupid, status, startlsn, endlsn, sizebytes
+  FROM pgautofailover.basebackup;
+-[ RECORD 1 ]+----------
+basebackupid | 1
+status       | complete
+startlsn     | 0/500000
+endlsn       | 0/1000000
+sizebytes    | 123456789
+
+SELECT basebackupid, formationid, groupid, status
+  FROM pgautofailover.get_latest_basebackup('archiving_test', 0);
+-[ RECORD 1 ]+---------------
+basebackupid | 1
+formationid  | archiving_test
+groupid      | 0
+status       | complete
+
+-- nothing to prune yet: the captured segment's LSN isn't older than this
+-- backup's own startlsn
+SELECT pgautofailover.prune_archiver_wal('archiving_test', 0);
+-[ RECORD 1 ]------+--
+prune_archiver_wal | 0
+
+-- report_basebackup_deleted() marks status='deleted' (never a real DELETE)
+-- and prunes -- with no 'complete' backup left for this group, there's no
+-- anchor point to replay forward from, so nothing prunes either
+SELECT pgautofailover.report_basebackup_deleted(:basebackupid);
+-[ RECORD 1 ]-------------+-
+report_basebackup_deleted | 
+
+SELECT basebackupid, status, deletedat IS NOT NULL AS was_deleted
+  FROM pgautofailover.basebackup;
+-[ RECORD 1 ]+--------
+basebackupid | 1
+status       | deleted
+was_deleted  | t
+
+-- ── rclone_config + archiver_storage ─────────────────────────────────────
+SELECT pgautofailover.create_rclone_config(
+           'minio-test', '[minio]' || chr(10) || 'type = s3')
+       AS rcloneconfigid \gset
+SELECT pgautofailover.archiver_add_storage(:archiverid, 'minio-test')
+       AS archiverstorageid \gset
+SELECT archiverstorageid, storagemethod, rcloneconfigid
+  FROM pgautofailover.archiver_storage
+ WHERE archiverid = :archiverid
+ ORDER BY archiverstorageid;
+-[ RECORD 1 ]-----+-------
+archiverstorageid | 1
+storagemethod     | local
+rcloneconfigid    | 
+-[ RECORD 2 ]-----+-------
+archiverstorageid | 3
+storagemethod     | rclone
+rcloneconfigid    | 1
+
+-- the mandatory local target cannot be removed
+SELECT archiverstorageid AS local_storageid FROM pgautofailover.archiver_storage
+ WHERE archiverid = :archiverid AND storagemethod = 'local' \gset
+SELECT pgautofailover.archiver_remove_storage(:local_storageid);
+ERROR:  archiver_storage 1 does not exist, or is the mandatory local target
+CONTEXT:  PL/pgSQL function pgautofailover.archiver_remove_storage(bigint) line 8 at RAISE
+-- the non-local target can be
+SELECT pgautofailover.archiver_remove_storage(:archiverstorageid);
+-[ RECORD 1 ]-----------+-
+archiver_remove_storage | 
+
+SELECT count(*) AS remaining_storage_targets FROM pgautofailover.archiver_storage
+ WHERE archiverid = :archiverid;
+-[ RECORD 1 ]-------------+--
+remaining_storage_targets | 1
+
+-- ── warm-standby archiver_node + maxresidentreplay cap ──────────────────────
+SELECT pgautofailover.create_archiver_node(
+           :archiverid, 'warm-standby', '/var/lib/pgaf-archiver/standby',
+           NULL, NULL, 'archiving_test', 0, 'continuous')
+       AS archivernodeid1 \gset
+-- default maxresidentreplay is 1: a second resident warm-standby on the
+-- same archiver must be refused
+SELECT pgautofailover.create_archiver_node(
+           :archiverid, 'warm-standby', '/var/lib/pgaf-archiver/standby2',
+           NULL, NULL, 'archiving_test', 0, 'continuous');
+ERROR:  archiver 1 is already at its maxresidentreplay cap (1)
+CONTEXT:  PL/pgSQL function pgautofailover.create_archiver_node(bigint,pgautofailover.archiver_node_kind,text,text,bigint,text,integer,pgautofailover.archiver_node_cadence,text,pgautofailover.pitr_status) line 18 at RAISE
+-- ── PITR lifecycle ───────────────────────────────────────────────────────
+SELECT pgautofailover.create_archiver_node(
+           :archiverid, 'pitr', '/var/lib/pgaf-archiver/pitr-recovery',
+           NULL, NULL, NULL, NULL, NULL, NULL, 'restoring')
+       AS pitrnodeid \gset
+SELECT pgautofailover.report_pitr_status(
+           :pitrnodeid, 'create',
+           '{"restore_target_time": "2026-08-04 00:00:00+00"}'::jsonb,
+           NULL, NULL, 'not paused');
+-[ RECORD 1 ]------+-
+report_pitr_status | 
+
+SELECT pgautofailover.set_archiver_node_pitr_status(:pitrnodeid, 'paused');
+-[ RECORD 1 ]-----------------+-
+set_archiver_node_pitr_status | 
+
+SELECT pgautofailover.report_pitr_status(
+           :pitrnodeid, 'status', NULL, '0/900000'::pg_lsn, '2026-08-04 00:00:05+00', 'paused');
+-[ RECORD 1 ]------+-
+report_pitr_status | 
+
+SELECT archivernodeid, archiverid, pitrstatus, lastoperation,
+       observedlsn, observedpausestate
+  FROM pgautofailover.pitr_node_status;
+-[ RECORD 1 ]------+---------
+archivernodeid     | 5
+archiverid         | 1
+pitrstatus         | paused
+lastoperation      | status
+observedlsn        | 0/900000
+observedpausestate | paused
+
+-- ── PITR command queue: pops and clears exactly once ────────────────────────
+SELECT pgautofailover.pitr_queue_command(:pitrnodeid, 'promote', NULL);
+-[ RECORD 1 ]------+-
+pitr_queue_command | 
+
+SELECT pgautofailover.pitr_next_command(:pitrnodeid);
+-[ RECORD 1 ]-----+--------
+pitr_next_command | promote
+
+SELECT pgautofailover.pitr_next_command(:pitrnodeid);
+-[ RECORD 1 ]-----+-----
+pitr_next_command | none
+
+-- ── archiver_remove_formation cleans up the ARCHIVING node row ──────────────
+SELECT pgautofailover.archiver_remove_formation(:archiverid, 'archiving_test');
+-[ RECORD 1 ]-------------+-
+archiver_remove_formation | 
+
+SELECT count(*) AS should_be_zero FROM pgautofailover.node
+ WHERE haspgdata = false AND nodeid = :nodeid;
+-[ RECORD 1 ]--+--
+should_be_zero | 0
+
+SELECT count(*) AS should_also_be_zero FROM pgautofailover.archiver_node
+ WHERE archiverid = :archiverid AND kind = 'wal-receiver';
+-[ RECORD 1 ]-------+--
+should_also_be_zero | 0
+

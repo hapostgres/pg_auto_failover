@@ -161,6 +161,7 @@ static void pgaf_read_raw_block(void);
 
 <CLUSTER_BODY>"coordinator"        { return T_COORDINATOR; }
 <CLUSTER_BODY>"worker"             { return T_WORKER; }
+<CLUSTER_BODY>"archiver"           { return T_ARCHIVER; }
 <CLUSTER_BODY>"async"              { return T_ASYNC; }
 <CLUSTER_BODY>"no-monitor"         { return T_NO_MONITOR; }
 <CLUSTER_BODY>"suspended"         { return T_SUSPENDED; }
@@ -269,6 +270,12 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"timeout"       { return T_TIMEOUT; }
 <STEP_BODY>"assert"        { return T_ASSERT; }
 <STEP_BODY>"sql"           { return T_SQL; }
+<STEP_BODY>"wal"           { return T_WAL; }
+<STEP_BODY>"segment"       { return T_SEGMENT; }
+<STEP_BODY>"archived"      { return T_ARCHIVED; }
+<STEP_BODY>"basebackup"    { return T_BASEBACKUP; }
+<STEP_BODY>"archiver"      { return T_ARCHIVER; }
+<STEP_BODY>"/"             { return T_SLASH; }
 <STEP_BODY>"expect"        { return T_EXPECT; }
 <STEP_BODY>"error"         { return T_ERROR; }
 <STEP_BODY>"promote"       { return T_PROMOTE; }

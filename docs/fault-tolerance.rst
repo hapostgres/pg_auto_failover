@@ -1,3 +1,5 @@
+.. _fault_tolerance:
+
 Failover and Fault Tolerance
 ============================
 
@@ -254,6 +256,84 @@ walkthrough.
 
    A standby forks out-of-band; once the mismatch is visible to the
    monitor, it is pushed to catchingup and rewound within about a second
+
+.. _archiving_fault_tolerance:
+
+Archiving Nodes and Disaster Recovery
+--------------------------------------
+
+On-top of the Service Availability a database system needs Data
+Availability, and it is expected to survive some data loss scenarios that
+are not covered with the previous sections about fault tolerance.
+
+Typically, an erroneous ``DELETE`` without a ``WHERE`` clause, or a ``DROP
+TABLE`` that happened on the wrong server, by mistake or because of a
+security exploit of some sorts.
+
+.. note::
+
+   Always make sure to have a separate role for the normal application
+   activities that is separate from the database owner, and use yet another
+   specific role for database schema upgrade, or migrations.
+
+   This alone avoids most of the security risk surface.
+
+While the previous sections concerns keeping the PostgreSQL *service*
+available thanks to being able to failover from a primary node to its
+secondary within seconds of a failure, an **archiver** addresses a different
+failure mode entirely: either the loss of multiple (all) nodes at the same
+time, or a data loss that happens while the service is running fine.
+
+See also :ref:`archiving_architecture` for more details about the archiving
+support in pg_auto_failover.
+
+When an archiver is enabled on a pg_auto_failover architecture in
+production, the following operations are covered:
+
+  - Point in Time Recovery can be driven on transient nodes created from the
+    archives.
+
+  - Disaster Recovery can be implemented by copying the data recovered in a
+    transient PITR node up to the current primary, a manual operation, or by
+    reifying the transient PITR node into its own new group in the
+    formation, allowing to redeploy a new cluster from a selected position
+    in the WAL history.
+
+  - Archiving nodes may paritipate in the replication quorum, and as they
+    only implement ``pg_receivewal`` without maintaining a full PGDATA
+    directory, there is no crash recovery happening on the WAL stream -- it
+    is often the case that an archiving node would be the first to report
+    LSN progress.
+
+  - Taking base backup happens on the primary node by default (a live source
+    setting) and can also be setup as a replay source, meaning that a new
+    node is created from the latest base backup and instructed to replay all
+    the WAL that have been archived since this base backup, up to the
+    current moment in time. The replay source can in turn be setup as a
+    volatile or a persistent node.
+
+  - It is possible to maintain standby servers that only connect to the
+    archive, because we have added a way to serve the archives using the
+    Postgres protocol replication. Such a standby would be named a WARM
+    standby, even though it can be using WAL streaming, with a cascading hop
+    in the archives.
+
+How archiving nodes participate in failover
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Archiving nodes are health-checked and report state through the node-active
+protocol exactly like a primary or secondary, and the monitor tracks their
+``archiving`` state the same way it tracks ``primary``/``secondary`` --
+but they are never assigned a ``candidate-priority``-driven role and never
+considered for promotion, since there is no data directory to promote.
+When the group's primary changes -- whether through an ordinary failover or
+an operator-driven switchover -- an archiver notices its `pg_receivewal`
+connection has gone stale, stops it, and re-points at the new primary
+automatically; see the ``Archiving`` state's transitions in
+:ref:`failover_state_machine` for the exact FSM edges involved. From the
+perspective of the rest of this page's failover sequences, an archiver is
+simply along for the ride: it never blocks a promotion, and it never needs
+one of its own.
 
 Failure handling and network partition detection
 ------------------------------------------------

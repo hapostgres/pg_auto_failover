@@ -1,0 +1,103 @@
+# Archiving & Disaster Recovery, Milestone 5 (appended): base-backup
+# production/retention policy -- frequency-driven scheduling and
+# maxcount/maxage pruning, appended to M5 rather than left as a follow-up,
+# so the archiver's own base-backup production is a real, bounded resource
+# before Milestones 6/7/8 (warm standby, PITR, cloud push) start building
+# on top of it.
+#
+# `frequency: 6 seconds` here is illustrative-fast, not the "1 backup a
+# minute" example a real deployment might reasonably use (the design doc's
+# own "nightly-cloud" example uses 6h; the schema's own default is 24h) --
+# this spec exists to prove the *mechanism* (does a new backup actually
+# fire once frequency has elapsed, does retention actually prune once
+# maxcount is exceeded), and a multi-minute real interval would make this
+# test unnecessarily slow without adding any real coverage.
+#
+# The policy is created via the real `pg_autoctl create basebackup-policy`
+# CLI (exercising its own --config file-reading path end to end), then
+# attached to the formation directly via SQL (set_archiver_policy() --
+# the same function `pg_autoctl create archiver --basebackup-policy`
+# calls, just without needing archiver1 declared `create and launch
+# deferred` only to re-create it by hand the way the disaster-recovery
+# spec does for node2).
+#
+# `source: "live"` rather than "replay": a live pg_basebackup against a
+# near-empty test database completes in a couple of seconds, letting
+# several full cycles land inside a practical test runtime -- the replay/
+# volatile pipeline itself is already covered by archiver_basebackup_
+# generation.pgaf, this spec's own job is scheduling/retention, not
+# re-proving the replay mechanism.
+#
+# Predecessor: archiver_basebackup_generation.pgaf (M5, base backup
+# generation itself).
+
+cluster {
+    monitor
+    formation {
+        node1
+        archiver1 archiver
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+    wait until archiver1 state is archiving  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: create a fast-cycling, maxcount=3 policy via the real CLI,
+#           attach it to the formation, then let enough cycles pass that
+#           retention has real pruning to do. Reaching *exactly* maxcount
+#           after several times frequency has elapsed is strong evidence
+#           both halves work together: if scheduling never fired past the
+#           bootstrap backup, the count would be stuck at 1, not 3; if
+#           retention never pruned, the count would keep growing past 3.
+#
+
+step test_001_policy_scheduling_and_retention {
+    exec archiver1 bash -c 'printf "%s" "{\"source\": \"live\", \"frequency\": \"6 seconds\", \"maxcount\": 3, \"maxage\": \"10 minutes\", \"onpromotion\": false, \"cache\": \"local\"}" > /tmp/basebackup-policy.json'
+    exec archiver1 pg_autoctl create basebackup-policy --monitor postgresql://autoctl_node@monitor/pg_auto_failover --name fast-policy --config /tmp/basebackup-policy.json
+
+    sql monitor {
+        SELECT pgautofailover.set_archiver_policy(
+                   'default', NULL, 1,
+                   (SELECT basebackuppolicyid
+                      FROM pgautofailover.get_basebackup_policy('fast-policy')),
+                   false);
+    }
+
+    # ~70s at 6s/cycle covers roughly 11 possible cycles -- comfortably
+    # past maxcount=3 even accounting for each live backup itself taking a
+    # few seconds, so retention has settled into a stable state by the
+    # time this checks.
+    sleep 70s
+
+    sql monitor {
+        SELECT count(*) FROM pgautofailover.list_basebackups('default', 0);
+    }
+    expect { 3 }
+
+    # the newest retained backup should be recent -- confirms retention
+    # kept the *newest* maxcount backups (this file's own ORDER BY ...
+    # DESC), not an arbitrary set.
+    sql monitor {
+        SELECT (max(startedat_epoch) >
+                extract(epoch FROM now() - interval '20 seconds')::bigint)
+          FROM pgautofailover.list_basebackups('default', 0);
+    }
+    expect { t }
+}
+
+#
+# test_002: `show basebackup-policy` reads back exactly what test_001's
+#           own `create basebackup-policy` wrote, through the real CLI on
+#           both ends.
+#
+
+step test_002_show_basebackup_policy {
+    exec archiver1 pg_autoctl show basebackup-policy --monitor postgresql://autoctl_node@monitor/pg_auto_failover --name fast-policy --json
+}

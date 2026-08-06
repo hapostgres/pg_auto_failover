@@ -1,0 +1,161 @@
+# Archiving & Disaster Recovery: `pg_autoctl create postgres --from-archiver`
+# (bootstrap a brand new standby from the archiver's own base backup + WAL
+# cache instead of the group's live primary), followed by a FAST_FORWARD
+# election where the archiver is the only node with the WAL the winning
+# candidate is missing.
+#
+# node2 is declared `create and launch deferred` (compose_gen.c's normal
+# per-node command is `pg_autoctl node run <ini>`, which just spin-polls
+# the ini forever while deferred) so its container starts but never runs
+# the normal, ini-driven `create postgres` -- that path has no hook for
+# custom flags like --from-archiver (see nodespec.c: NodeSpec has no
+# fromArchiver field, only KeeperConfig does, populated exclusively by
+# cli_create_node.c's own direct CLI parsing). test_001 instead `exec`s
+# into node2's own container and runs `pg_autoctl create postgres
+# --from-archiver` by hand, then backgrounds `pg_autoctl run` the same way
+# debug_citus_worker_switchover.pgaf backgrounds a long-lived command
+# (`bash -c "nohup ... &"` -- `docker compose exec -T` blocks until its
+# argv exits, so a foreground `pg_autoctl run` would hang the test step
+# forever without this).
+#
+# test_002/003/004 engineer an actual WAL gap rather than relying on race
+# timing: node2 is stopped (so it can't stream anything further from
+# node1), more WAL is generated and given time to land in the archiver's
+# walcache, *then* node1 is killed and node2 brought back -- at that
+# point node2 is the only live standby-kind candidate, the archiver is
+# strictly ahead of it, and get_most_advanced_standby() (already proven
+# in this milestone's own manual testing to resolve an ARCHIVING row's
+# port == 0 sentinel to the archiver's real serve port, keeper.c) selects
+# the archiver as fast_forward's WAL source. test_004's final row-count
+# check on node2 (post-promotion) confirms real WAL bytes were actually
+# fetched and applied, not just that the FSM passed through the right
+# state label.
+#
+# Predecessor: archiver_basebackup_generation.pgaf (M5, base backup
+# generation this spec's test_001 depends on already being ready).
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1
+        archiver1 archiver
+        node2 create and launch deferred
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+    wait until archiver1 state is archiving  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: wait for the archiver's live base backup (get_latest_basebackup's
+#           preferred_source = 'live' overload -- see pgautofailover.sql --
+#           is what service_archiver_serve.c's own routes refresh asks for;
+#           a plain 'live' check here is the same thing this spec can
+#           observe from the monitor side), then bootstrap node2 from it.
+#
+#           The monitor's own "complete" status and pg_walsender's actual
+#           ability to serve that backup used to be two different things:
+#           the archiver only re-read its routes file (what cmd_base_
+#           backup.c actually checks -- route->basebackupDir) once every
+#           ARCHIVER_SERVE_ROUTES_REFRESH_TICKS ticks (service_archiver_
+#           serve.c, 30 x the 1s tick). service_archiver_basebackup.c now
+#           signals archiver-serve (SIGUSR1) the moment a backup finishes
+#           generating and gets reported complete, prompting an immediate
+#           refresh instead of waiting for the next tick -- no bridging
+#           sleep needed here anymore.
+#
+
+step test_001_bootstrap_secondary_from_archiver {
+    # get_latest_basebackup's 3-arg preferred_source overload -- not the
+    # plain 2-arg form the "wait until basebackup ..." verb generates --
+    # so this stays the generic sql-polling form.
+    wait until sql monitor {
+        SELECT source::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
+    } is { live }  timeout 30s
+    wait until sql monitor {
+        SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
+    } is { complete }  timeout 10s
+    exec node2  pg_autoctl create postgres --pgdata /var/lib/postgres/pgaf --monitor postgresql://autoctl_node@monitor/pg_auto_failover --auth trust --no-ssl --name node2 --hostname node2 --from-archiver
+    exec node2  bash -c "nohup pg_autoctl run --pgdata /var/lib/postgres/pgaf > /tmp/node2-run.log 2>&1 & echo backgrounded pid $!"
+    wait until node2 state is secondary  timeout 90s
+}
+
+#
+# test_002: stop node2 so it can no longer stream from node1, then generate
+#           more WAL on the primary and give the archiver (still capturing
+#           independently via pg_receivewal) time to land it. node2 now
+#           knows nothing about this WAL; the archiver does.
+#
+
+step test_002_stop_secondary_and_advance_primary {
+    compose stop node2
+    wait until node2 stopped  timeout 60s
+    sql node1 { CREATE TABLE archiver_ff_probe(a int); }
+    sql node1 {
+        INSERT INTO archiver_ff_probe SELECT generate_series(1, 1000);
+    }
+    sql node1 { SELECT pg_switch_wal(); }
+    sql node1 { SELECT pg_switch_wal(); }
+    sleep 15s
+}
+
+#
+# test_003: kill the primary. node2 is still stopped, so at this instant the
+#           archiver is the only node in the group with any of test_002's
+#           WAL -- node1 is gone, node2 never received it. node1 has
+#           already self-demoted from "primary" back to "wait_primary" by
+#           this point (test_002's own compose stop node2 took away its
+#           only sync-quorum-satisfying standby), so there's no single
+#           fixed intermediate assigned-state to assert on here -- just
+#           kill it and let the monitor's own health check notice.
+#
+
+step test_003_kill_primary_leaving_archiver_only {
+    compose kill node1
+    sleep 45s
+}
+
+#
+# test_004: bring node2 back. compose stop/start recreates its container
+#           from scratch, so test_001's own manually-backgrounded
+#           `pg_autoctl run` (started via exec, not through the container's
+#           normal deferred-polling entrypoint) doesn't survive it and
+#           needs restarting by hand again, the same way test_001 started
+#           it the first time. Once it does, node2 reports in behind the
+#           archiver, the monitor assigns fast_forward with the archiver as
+#           WAL source, node2 fetches the missing WAL from it (standby_
+#           fetch_missing_wal, already proven against a real archiver
+#           during this milestone's own development), and promotes. The
+#           row count on the other side confirms the fetched WAL was real
+#           and got applied, not just that the FSM label passed through
+#           fast_forward.
+#
+#           The terminal assigned state is wait_primary, not primary: this
+#           is real, correct pg_auto_failover semantics (group_state_
+#           machine.c's pos 401-421 PRIMARY_NODE section), not an archiver-
+#           specific gap -- WAIT_PRIMARY -> PRIMARY requires some other node
+#           to reach *reported* SECONDARY state first, and neither ever will
+#           here: node1 is dead (stuck reporting "demoted") and archiver1 is
+#           a different node kind entirely (reports "archiving", never
+#           "secondary"). A plain two-node cluster whose original primary
+#           never rejoins behaves identically -- the surviving node stays in
+#           wait_primary indefinitely. wait_primary is still a fully active,
+#           write-serving primary (it's only the synchronous-replication
+#           guarantee that's unmet), which is exactly what the row-count
+#           query right below exercises.
+#
+
+step test_004_bring_back_secondary_and_fast_forward {
+    compose start node2
+    exec node2  bash -c "nohup pg_autoctl run --pgdata /var/lib/postgres/pgaf > /tmp/node2-run.log 2>&1 & echo backgrounded pid $!"
+    wait until node2 state is wait_primary  timeout 180s
+    sql node2 { SELECT count(*) FROM archiver_ff_probe; }
+    expect { 1000 }
+}

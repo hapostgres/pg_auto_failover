@@ -12,6 +12,9 @@
 
 \definecolor{async}{HTML}{EBEFF5} % very light grey
 
+\definecolor{abox}{HTML}{FFB900} % MS amber -- cold storage, distinct from primary/standby
+\definecolor{atxt}{HTML}{2F2F2F} % off-black
+
 \tikzstyle{app}=[circle,thick,
 	text=aptxt,draw=apbox,fill=white,
 	line width=0.25em,minimum size=4cm]
@@ -29,6 +32,9 @@
 \tikzstyle{standby}=[mpnode,text=stxt,draw=white,
 	rectangle split part fill={sbox,sbox,white}]
 
+\tikzstyle{archiver}=[mpnode,text=atxt,draw=white,
+	rectangle split part fill={abox,abox,white}]
+
 \tikzstyle{monitor}=[node,text=mtxt,draw=mbox,fill=mbox]
 
 \tikzstyle{citusnode}=[rectangle split,rectangle split parts=2,
@@ -45,6 +51,7 @@
 \tikzstyle{sql}=[->,color=pbox,text=stxt,line width=0.15em]
 \tikzstyle{sqlf}=[->,color=sbox,text=stxt,line width=0.15em,loosely dashed]
 \tikzstyle{sr}=[>->,color=stxt,text=stxt,line width=0.15em]
+\tikzstyle{wal}=[>->,color=abox,text=atxt,line width=0.15em,densely dashed]
 \tikzstyle{hc}=[<->,color=mbox,text=mtxt,line width=0.15em,dotted]
 \tikzstyle{hcmid}=[color=mbox,text=mtxt,line width=0.15em,dotted]
 \tikzstyle{cw}=[<->,color=stxt,text=stxt,line width=0.1em]

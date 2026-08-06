@@ -1,0 +1,76 @@
+% Fix for: https://tex.stackexchange.com/a/315027/43228
+\RequirePackage{luatex85}
+\documentclass[border=10pt,17pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows,shapes,snakes,automata,backgrounds,petri}
+\usetikzlibrary{shapes.multipart}
+
+\begin{document}
+
+%% sans-serif fonts, large by default, and bold too
+\sffamily
+\sbweight
+\bfseries
+\large
+
+\begin{tikzpicture}[>=stealth',bend angle=45,auto,rounded corners]
+
+  \input{common.tex}
+
+  %% \draw [help lines] (-13,0) grid (13,20);
+
+  \tikzstyle{proc}=[rectangle,rounded corners=5pt,very thick,draw=stxt,
+    fill=async,text=stxt,minimum width=6.4cm,minimum height=1.6cm,align=center]
+  \tikzstyle{child}=[rectangle,rounded corners=5pt,thick,draw=abox,
+    fill=abox!10,text=stxt,minimum width=4.6cm,minimum height=1.3cm,align=center]
+  \tikzstyle{file}=[rectangle,rounded corners=3pt,thick,draw=pbox,dashed,
+    fill=pbox!6,text=stxt,minimum width=5cm,minimum height=1.3cm,align=center,
+    font=\ttfamily\small]
+  \tikzstyle{consumers}=[rectangle,rounded corners=5pt,very thick,draw=mbox,
+    fill=mbox!15,text=stxt,minimum width=6.6cm,minimum height=2.4cm,align=center]
+
+  \node (super) at (0,18.6) [proc] {\normalsize \texttt{pg\_autoctl archiver run}\\[2pt]\small two supervised services};
+
+  \node (recon) at (-6.4,14.6) [proc] {\normalsize reconciler\\[2pt]\small \texttt{service\_archiver\_reconciler\_loop()}};
+  \node (serve) at (6.4,14.6) [proc] {\normalsize serve\\[2pt]\small \texttt{service\_archiver\_serve\_loop()}};
+
+  \path (super.west) edge[->,thick,out=200,in=90]  node[left,pos=0.5] {\small fork} (recon.north)
+        (super.east) edge[->,thick,out=-20,in=90]   node[right,pos=0.5] {\small fork} (serve.north);
+
+  \node (cap) at (-6.4,11.0) [child] {\ttfamily\small capture};
+  \path (recon.south) edge[->,thick] node[left,pos=0.5,align=left] {\small fork,\\[-2pt]\small one per\\[-2pt]\small membership} (cap.north);
+
+  \node (recv) at (-9.4,7.4) [child] {\ttfamily\small pg\_receivewal};
+  \path (cap.south) edge[->,thick,out=230,in=90] node[left,pos=0.55,align=left] {\small fork + exec\\[-2pt]\scriptsize \texttt{-S <slot>}} (recv.north);
+
+  \node (walcache) at (-9.4,3.9) [file] {WAL cache / basebackups};
+  \path (recv.south) edge[->,thick] node[right] {\small writes} (walcache.north);
+
+  \node (pos) at (-3.1,7.4) [file] {archiver-position};
+  \path (cap.south) edge[->,dashed,color=abox,out=-70,in=110] node[below,sloped] {\small writes} (pos.north);
+
+  \node (routes) at (3.1,10.4) [file] {archiver-routes.ini};
+  \path (serve.south) edge[->,dashed,color=abox,out=250,in=70] node[below,sloped] {\small writes} (routes.north);
+
+  \path (pos.east) edge[->,dashed,color=pbox,out=-20,in=200] node[below,pos=0.5] {\small reads} (routes.west);
+
+  \node (wsend) at (9.4,10.4) [child] {\ttfamily\small pg\_walsender};
+  \path (serve.south) edge[->,thick,out=-50,in=90] node[right,pos=0.55,align=left] {\small fork + exec\\[-2pt]\scriptsize \texttt{--routes ...}} (wsend.north);
+  \path (routes.east) edge[->,thick,out=0,in=160] node[above,pos=0.5] {\small reads} (wsend.west);
+
+  \node (consumers) at (9.4,3.6) [consumers]
+        {\normalsize Consumers\\[4pt]
+         \small \texttt{pg\_basebackup}\\
+         \small streaming standby (\texttt{primary\_conninfo})\\
+         \small \texttt{restore\_command} fetch};
+
+  \path (wsend.south) edge[->,very thick,color=mbox] node[right,align=left]
+        {\small \texttt{BASE\_BACKUP}\\[-2pt] \texttt{START\_REPLICATION}\\[-2pt] \texttt{FETCH\_FILE}, ...}
+        (consumers.north);
+
+\end{tikzpicture}
+
+\end{document}

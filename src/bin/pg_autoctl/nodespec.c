@@ -203,10 +203,14 @@ nodespec_read(const char *path, NodeSpec *spec)
 	{
 		spec->kind = NODE_KIND_CITUS_WORKER;
 	}
+	else if (strcmp(kindStr, "archiver") == 0)
+	{
+		spec->kind = NODE_KIND_ARCHIVER;
+	}
 	else
 	{
 		log_error("Unknown node kind \"%s\" in \"%s\"; "
-				  "expected: monitor, postgres, coordinator, worker",
+				  "expected: monitor, postgres, coordinator, worker, archiver",
 				  kindStr, path);
 		return false;
 	}
@@ -387,6 +391,12 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			break;
 		}
 
+		case NODE_KIND_ARCHIVER:
+		{
+			kindStr = "archiver";
+			break;
+		}
+
 		default:
 		{
 			kindStr = "postgres";
@@ -445,14 +455,21 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 	fformat(out,
 			"[settings]\n"
 			"candidate_priority = %d\n"
-			"replication_quorum = %s\n"
+			"replication_quorum = %s\n",
+			spec->candidate_priority,
+			spec->replication_quorum ? "true" : "false");
+
+	if (!IS_EMPTY_STRING_BUFFER(spec->region))
+	{
+		fformat(out, "region = %s\n", spec->region);
+	}
+
+	fformat(out,
 			"\n"
 			"[options]\n"
 			"ssl        = %s\n"
 			"auth       = %s\n"
 			"pg_hba_lan = %s\n",
-			spec->candidate_priority,
-			spec->replication_quorum ? "true" : "false",
 			spec->ssl,
 			spec->auth,
 			spec->pg_hba_lan ? "true" : "false");
@@ -556,11 +573,68 @@ nodespec_create_argv(const NodeSpec *spec,
 			break;
 		}
 
+		case NODE_KIND_ARCHIVER:
+		{
+			PUSH("archiver");
+			break;
+		}
+
 		default:
 		{
 			PUSH("postgres");
 			break;
 		}
+	}
+
+	/*
+	 * An archiver's own getopts (cli_create_archiver_getopts,
+	 * cli_create_node.c) is deliberately minimal -- no --pgport, --ssl-*,
+	 * --auth, --pg-hba-lan, --candidate-priority, ... -- none of which
+	 * apply to a node with no real PostgresSetup (see haspgdata's own
+	 * design comment, pgautofailover.sql). Building its own argv here
+	 * rather than falling through into the rest of this function (which
+	 * assumes every kind accepts the full postgres flag set) avoids
+	 * "unrecognized option" failures on every one of those.
+	 */
+	if (spec->kind == NODE_KIND_ARCHIVER)
+	{
+		PUSH("--pgdata");
+		PUSH(spec->pgdata);
+
+		if (!IS_EMPTY_STRING_BUFFER(spec->name))
+		{
+			PUSH("--name");
+			PUSH(spec->name);
+		}
+
+		if (!IS_EMPTY_STRING_BUFFER(spec->hostname))
+		{
+			PUSH("--hostname");
+			PUSH(spec->hostname);
+		}
+
+		PUSH("--monitor");
+		PUSH(spec->monitor_pguri);
+
+		if (!IS_EMPTY_STRING_BUFFER(spec->formation) &&
+			strcmp(spec->formation, "default") != 0)
+		{
+			PUSH("--formation");
+			PUSH(spec->formation);
+		}
+
+		if (!IS_EMPTY_STRING_BUFFER(spec->region) &&
+			strcmp(spec->region, "default") != 0)
+		{
+			PUSH("--region");
+			PUSH(spec->region);
+		}
+
+		PUSH("--run");
+
+		args[i] = NULL;
+
+		return i;
 	}
 
 	PUSH("--pgdata");

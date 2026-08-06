@@ -9,6 +9,7 @@
  */
 #include "parson.h"
 
+#include "cli_basebackup_policy.h"
 #include "cli_common.h"
 #include "parsing.h"
 #include "string_utils.h"
@@ -212,6 +213,7 @@ static CommandLine set_formation_command =
 static CommandLine *set_subcommands[] = {
 	&set_node_command,
 	&set_formation_command,
+	&set_basebackup_policy_command,
 	NULL
 };
 

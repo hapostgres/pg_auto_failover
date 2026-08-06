@@ -32,6 +32,7 @@ SHARED_SRCS = cli_common.c config.c coordinator.c fsm.c fsm_transition.c \
               fsm_transition_citus.c keeper.c keeper_config.c keeper_pg_init.c \
               monitor.c monitor_config.c monitor_pg_init.c \
               nodespec.c nodestate_utils.c pghba.c primary_standby.c \
+              service_archiver.c service_archiver_basebackup.c \
               service_keeper.c service_keeper_init.c service_monitor.c \
               service_monitor_init.c service_postgres.c service_postgres_ctl.c \
               state.c step_socket.c supervisor.c systemd_config.c timeline_history.c

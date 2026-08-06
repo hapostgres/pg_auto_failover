@@ -65,6 +65,8 @@ static bool supervisor_may_restart(Service *service);
 
 static bool supervisor_update_pidfile(Supervisor *supervisor);
 
+static bool supervisor_wait_for_exit(pid_t pid, int maxWaitMs);
+
 
 /*
  * supervisor_start starts given services as sub-processes and then supervise
@@ -73,10 +75,34 @@ static bool supervisor_update_pidfile(Supervisor *supervisor);
 bool
 supervisor_start(Service services[], int serviceCount, const char *pidfile)
 {
+	return supervisor_start_with_callback(services, serviceCount, pidfile,
+										  NULL, NULL);
+}
+
+
+/*
+ * supervisor_start_with_callback is supervisor_start()'s full
+ * implementation, with an optional periodic callback -- see
+ * Supervisor.periodicCallback's own comment (supervisor.h) for what it's
+ * for and the constraints it comes with. supervisor_start() itself is a
+ * thin wrapper passing NULL/NULL, so every existing caller is unaffected
+ * by this function's existence.
+ */
+bool
+supervisor_start_with_callback(Service services[], int serviceCount,
+							   const char *pidfile,
+							   void (*periodicCallback)(Supervisor *supervisor,
+														void *context),
+							   void *periodicCallbackContext)
+{
 	int serviceIndex = 0;
 	bool success = true;
 
 	Supervisor supervisor = { services, serviceCount, { 0 }, -1 };
+
+	supervisor.periodicCallback = periodicCallback;
+	supervisor.periodicCallbackContext = periodicCallbackContext;
+	supervisor.pendingSubprocessCount = serviceCount;
 
 	/* copy the pidfile over to our supervisor structure */
 	strlcpy(supervisor.pidfile, pidfile, MAXPGPATH);
@@ -222,11 +248,10 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 static SupervisorExitMode
 supervisor_loop(Supervisor *supervisor)
 {
-	int subprocessCount = supervisor->serviceCount;
 	bool firstLoop = true;
 
 	/* wait until all subprocesses are done */
-	while (subprocessCount > 0)
+	while (supervisor->pendingSubprocessCount > 0)
 	{
 		pid_t pid;
 		int status;
@@ -258,6 +283,18 @@ supervisor_loop(Supervisor *supervisor)
 			 */
 			(void) nodespec_watcher_check(&supervisor->watcher,
 										  &supervisor->watchedSpec);
+
+			/*
+			 * Optional caller-supplied periodic callback -- see
+			 * Supervisor.periodicCallback's own comment (supervisor.h).
+			 * A no-op for every caller except supervisor_start_with_
+			 * callback()'s own explicit users.
+			 */
+			if (supervisor->periodicCallback != NULL)
+			{
+				(void) supervisor->periodicCallback(
+					supervisor, supervisor->periodicCallbackContext);
+			}
 		}
 
 		/* ignore errors */
@@ -336,12 +373,12 @@ supervisor_loop(Supervisor *supervisor)
 				}
 
 				/* one child process is no more */
-				--subprocessCount;
+				--supervisor->pendingSubprocessCount;
 
 				/* apply the service restart policy */
 				if (supervisor_restart_service(supervisor, dead, status))
 				{
-					++subprocessCount;
+					++supervisor->pendingSubprocessCount;
 				}
 
 				break;
@@ -1121,6 +1158,202 @@ supervisor_update_pidfile(Supervisor *supervisor)
 	}
 
 	return success;
+}
+
+
+/*
+ * supervisor_wait_for_exit waits, up to maxWaitMs, for pid to actually be
+ * reaped (waitpid(WNOHANG) returning that exact pid, or ECHILD meaning it
+ * was already reaped elsewhere). Polls every 10ms; returns true as soon
+ * as the child is gone, false if it's still around once the deadline is
+ * reached.
+ */
+static bool
+supervisor_wait_for_exit(pid_t pid, int maxWaitMs)
+{
+	int elapsedMs = 0;
+
+	while (elapsedMs < maxWaitMs)
+	{
+		int status = 0;
+		pid_t reaped = waitpid(pid, &status, WNOHANG);
+
+		if (reaped == pid)
+		{
+			return true;
+		}
+
+		if (reaped == -1 && errno == ECHILD)
+		{
+			/* already reaped elsewhere -- fine, treat as done */
+			return true;
+		}
+
+		pg_usleep(10 * 1000);
+		elapsedMs += 10;
+	}
+
+	return false;
+}
+
+
+/*
+ * supervisor_add_service adds a new service to an already-running
+ * supervisor, starts it, and updates the pidfile to include it.
+ *
+ * Requires supervisor->services to be a heap-allocated array -- see
+ * Supervisor.periodicCallback's own comment (supervisor.h) for why: this
+ * function reallocs it to grow by one slot. Only ever safe to call from
+ * a supervisor started via supervisor_start_with_callback() with its own
+ * heap-allocated initial array, never from a plain supervisor_start()
+ * caller's stack/static one.
+ */
+bool
+supervisor_add_service(Supervisor *supervisor, Service service)
+{
+	int newCount = supervisor->serviceCount + 1;
+	Service *grown = realloc(supervisor->services, newCount * sizeof(Service));
+
+	if (grown == NULL)
+	{
+		log_error("Failed to allocate memory to add service \"%s\"",
+				  service.name);
+		return false;
+	}
+
+	supervisor->services = grown;
+	supervisor->services[supervisor->serviceCount] = service;
+
+	Service *added = &(supervisor->services[supervisor->serviceCount]);
+
+	log_debug("Starting pg_autoctl %s service", added->name);
+
+	if (!(*added->startFunction)(added->context, &(added->pid)))
+	{
+		log_error("Failed to start service \"%s\"", added->name);
+
+		/* undo the growth -- this slot never became real */
+		Service *shrunk = realloc(supervisor->services,
+								  supervisor->serviceCount * sizeof(Service));
+
+		if (shrunk != NULL)
+		{
+			supervisor->services = shrunk;
+		}
+
+		return false;
+	}
+
+	uint64_t now = time(NULL);
+	RestartCounters *counters = &(added->restartCounters);
+
+	counters->count = 1;
+	counters->position = 0;
+	counters->startTime[counters->position] = now;
+
+	log_info("Started pg_autoctl %s service with pid %d",
+			 added->name, added->pid);
+
+	supervisor->serviceCount = newCount;
+	supervisor->pendingSubprocessCount++;
+
+	if (!supervisor_update_pidfile(supervisor))
+	{
+		log_error("Failed to update pidfile \"%s\" after adding service \"%s\"",
+				  supervisor->pidfile, added->name);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * supervisor_remove_service stops a currently-supervised service (found
+ * by pid) and removes it from the supervisor's own array, so it is no
+ * longer restarted on exit and no longer written to the pidfile.
+ *
+ * Sends `signal` (typically SIGTERM) and waits, briefly and boundedly,
+ * for the child to actually exit -- reaping it synchronously here rather
+ * than via supervisor_loop()'s own waitpid(WNOHANG) path, so the caller
+ * knows the removal is complete (and the slot genuinely reusable) by the
+ * time this returns, instead of racing the main loop's next iteration.
+ * A child still stuck after the wait is removed from supervision anyway
+ * (logged as a warning): whatever asked for this removal -- typically a
+ * membership that no longer exists -- has already decided this process
+ * shouldn't be tracked, stuck or not.
+ *
+ * Requires supervisor->services to be heap-allocated, same as
+ * supervisor_add_service() above.
+ */
+bool
+supervisor_remove_service(Supervisor *supervisor, pid_t pid, int signal)
+{
+	Service *found = NULL;
+
+	if (!supervisor_find_service(supervisor, pid, &found))
+	{
+		log_error("Failed to remove service with pid %d: not found", pid);
+		return false;
+	}
+
+	char name[NAMEDATALEN] = { 0 };
+
+	strlcpy(name, found->name, NAMEDATALEN);
+	int foundIndex = found - supervisor->services;
+
+	if (kill(pid, signal) != 0 && errno != ESRCH)
+	{
+		log_error("Failed to send signal %s to service \"%s\" with pid %d: %m",
+				  strsignal(signal), name, pid);
+		return false;
+	}
+
+	if (!supervisor_wait_for_exit(pid, SUPERVISOR_REMOVE_SERVICE_MAX_WAIT_MS))
+	{
+		log_warn("Service \"%s\" (pid %d) did not exit within %d ms of "
+				 "signal %s; removing it from supervision anyway",
+				 name, pid, SUPERVISOR_REMOVE_SERVICE_MAX_WAIT_MS,
+				 strsignal(signal));
+	}
+
+	/* close the gap in the array, keeping it packed */
+	for (int i = foundIndex; i < supervisor->serviceCount - 1; i++)
+	{
+		supervisor->services[i] = supervisor->services[i + 1];
+	}
+
+	supervisor->serviceCount--;
+	supervisor->pendingSubprocessCount--;
+
+	if (supervisor->serviceCount > 0)
+	{
+		Service *shrunk = realloc(supervisor->services,
+								  supervisor->serviceCount * sizeof(Service));
+
+		if (shrunk != NULL)
+		{
+			supervisor->services = shrunk;
+		}
+
+		/*
+		 * A failed shrink-realloc is harmless: the buffer is still valid
+		 * and still holds every remaining service correctly, just larger
+		 * than strictly needed -- keep using it as-is rather than fail
+		 * the whole removal over it.
+		 */
+	}
+
+	log_info("Removed service \"%s\" (was pid %d) from supervision", name, pid);
+
+	if (!supervisor_update_pidfile(supervisor))
+	{
+		log_error("Failed to update pidfile \"%s\" after removing service \"%s\"",
+				  supervisor->pidfile, name);
+		return false;
+	}
+
+	return true;
 }
 
 
