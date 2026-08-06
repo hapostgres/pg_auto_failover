@@ -61,6 +61,27 @@ typedef struct KeeperConfig
 	char archiverIdStr[INTSTRING_MAX_DIGITS];
 	int64_t archiverId;
 
+	/*
+	 * The archiver-level (not per-membership) supervisor's own pidfile
+	 * path, stashed by service_archiver_reconciler.c's build_membership_
+	 * keeper() from the template keeper's pathnames.pid before they get
+	 * overwritten with this membership's own per-(formation, group)
+	 * paths. This is the *shared* pidfile every one of this archiver's
+	 * supervised services (archiver-serve, archiver-reconciler, each
+	 * archiver-capture-<formation>-<group>) has one line in -- not a
+	 * dedicated pidfile of its own -- so a reader must look up a specific
+	 * service's own pid by name (supervisor_find_service_pid(),
+	 * SERVICE_NAME_ARCHIVER_SERVE), not just read the first line.
+	 *
+	 * A capture child that just finished generating a base backup
+	 * (service_archiver_basebackup.c) uses this to find archiver-serve's
+	 * pid and signal it (SIGUSR1) to prompt an immediate routes refresh,
+	 * rather than leaving pg_walsender to serve a stale route for up to
+	 * ARCHIVER_SERVE_ROUTES_REFRESH_TICKS more ticks. Only meaningful for
+	 * a per-membership keeper built that way; empty otherwise.
+	 */
+	char archiverPidFilePath[MAXPGPATH];
+
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;
 

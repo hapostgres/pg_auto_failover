@@ -567,6 +567,19 @@ service_archiver_serve_loop(Keeper *keeper)
 			(void) service_archiver_serve_refresh_routes(keeper);
 		}
 
+		/*
+		 * SIGUSR1: a capture child just finished generating and reporting
+		 * a base backup (service_archiver_maybe_generate_basebackup(),
+		 * service_archiver_basebackup.c) and is prompting an immediate
+		 * refresh rather than leaving pg_walsender to serve a stale route
+		 * for up to ARCHIVER_SERVE_ROUTES_REFRESH_TICKS more ticks.
+		 */
+		if (asked_to_refresh_routes)
+		{
+			asked_to_refresh_routes = 0;
+			(void) service_archiver_serve_refresh_routes(keeper);
+		}
+
 		if (!service_archiver_serve_walsender_is_running())
 		{
 			log_warn("pg_walsender is not running anymore, restarting it");

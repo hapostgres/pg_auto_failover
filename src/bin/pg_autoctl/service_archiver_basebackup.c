@@ -82,6 +82,7 @@
 #include "runprogram.h"
 #include "signals.h"
 #include "string_utils.h"
+#include "supervisor.h"
 
 /*
  * One base backup generation child at a time, mirroring
@@ -1016,6 +1017,56 @@ get_current_primary_node_id(Keeper *keeper, int64_t *primaryNodeId)
 
 
 /*
+ * notify_archiver_serve_of_new_basebackup signals the archiver-serve
+ * process (SIGUSR1) to refresh its routes file immediately, rather than
+ * leaving pg_walsender to serve a stale route for up to ARCHIVER_SERVE_
+ * ROUTES_REFRESH_TICKS more ticks after the monitor already knows this
+ * backup is complete. Best-effort: archiver-serve's own periodic refresh
+ * is still there as a fallback, so any failure here (pidfile missing or
+ * stale, process already gone) is logged and otherwise ignored -- it must
+ * never turn an already-successful base backup into a failure.
+ *
+ * config->archiverPidFilePath is the archiver-level *supervisor's* own
+ * shared pidfile, with one "<pid> <service name>" line per supervised
+ * service (archiver-serve, archiver-reconciler, each archiver-capture-*)
+ * -- not a dedicated pidfile of archiver-serve's own. Reading its first
+ * line (as a plain read_pidfile() would) gives the supervisor's own pid,
+ * not archiver-serve's; supervisor_find_service_pid() is what actually
+ * looks a specific service up by name.
+ */
+static void
+notify_archiver_serve_of_new_basebackup(KeeperConfig *config)
+{
+	if (IS_EMPTY_STRING_BUFFER(config->archiverPidFilePath))
+	{
+		return;
+	}
+
+	pid_t archiverServePid = 0;
+
+	if (!supervisor_find_service_pid(config->archiverPidFilePath,
+									 SERVICE_NAME_ARCHIVER_SERVE,
+									 &archiverServePid) ||
+		archiverServePid <= 0)
+	{
+		log_debug("Could not find archiver-serve's pid in \"%s\" to "
+				  "prompt an immediate routes refresh; it will pick up "
+				  "this base backup on its own next periodic tick",
+				  config->archiverPidFilePath);
+		return;
+	}
+
+	if (kill(archiverServePid, SIGUSR1) != 0)
+	{
+		log_debug("Could not signal archiver-serve (pid %d) to prompt an "
+				  "immediate routes refresh: %m; it will pick up this "
+				  "base backup on its own next periodic tick",
+				  archiverServePid);
+	}
+}
+
+
+/*
  * service_archiver_maybe_generate_basebackup checks, once per
  * service_archiver_loop() tick, whether a base backup generation is due
  * for this group and -- if so, and no generation is already in flight --
@@ -1192,6 +1243,11 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 											 label, &policy)
 				  : generate_replay_basebackup(keeper, sourceBackupDir,
 											   backupDir, label, &policy);
+
+		if (ok)
+		{
+			notify_archiver_serve_of_new_basebackup(config);
+		}
 
 		exit(ok ? EXIT_CODE_QUIT : EXIT_CODE_INTERNAL_ERROR);
 	}

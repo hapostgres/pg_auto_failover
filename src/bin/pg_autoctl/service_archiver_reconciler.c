@@ -307,6 +307,18 @@ build_membership_keeper(Keeper *templateKeeper, ArchiverMembership *membership,
 	 * process doesn't already own, so a shallow copy is a real copy */
 	*membershipKeeper = *templateKeeper;
 
+	/*
+	 * Stash the archiver-level supervisor's own shared pidfile path (still
+	 * correct at this exact point, inherited from templateKeeper) into its
+	 * own dedicated field before the pathnames recompute below overwrites
+	 * config.pathnames.pid with this membership's own value -- see
+	 * KeeperConfig's own comment on archiverPidFilePath for why a capture
+	 * child needs this.
+	 */
+	strlcpy(membershipKeeper->config.archiverPidFilePath,
+			templateKeeper->config.pathnames.pid,
+			sizeof(membershipKeeper->config.archiverPidFilePath));
+
 	strlcpy(membershipKeeper->config.formation, membership->formation,
 			sizeof(membershipKeeper->config.formation));
 	membershipKeeper->config.groupId = membership->groupId;

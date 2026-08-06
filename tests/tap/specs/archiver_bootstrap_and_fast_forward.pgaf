@@ -61,17 +61,15 @@ teardown {
 #           observe from the monitor side), then bootstrap node2 from it.
 #
 #           The monitor's own "complete" status and pg_walsender's actual
-#           ability to serve that backup are two different things: the
-#           archiver only re-reads its routes file (which is what
-#           cmd_base_backup.c actually checks -- route->basebackupDir)
-#           once every ARCHIVER_SERVE_ROUTES_REFRESH_TICKS ticks
-#           (service_archiver_serve.c, currently 30 x the 1s tick), so a
-#           real gap exists between "the monitor says complete" and "the
-#           archiver's own pg_walsender will actually serve it" -- there's
-#           no SQL-observable signal for the second half, so this bridges
-#           the known refresh window with a plain sleep rather than
-#           guessing at (or inventing new machinery for) something that
-#           isn't visible from the monitor side.
+#           ability to serve that backup used to be two different things:
+#           the archiver only re-read its routes file (what cmd_base_
+#           backup.c actually checks -- route->basebackupDir) once every
+#           ARCHIVER_SERVE_ROUTES_REFRESH_TICKS ticks (service_archiver_
+#           serve.c, 30 x the 1s tick). service_archiver_basebackup.c now
+#           signals archiver-serve (SIGUSR1) the moment a backup finishes
+#           generating and gets reported complete, prompting an immediate
+#           refresh instead of waiting for the next tick -- no bridging
+#           sleep needed here anymore.
 #
 
 step test_001_bootstrap_secondary_from_archiver {
@@ -84,7 +82,6 @@ step test_001_bootstrap_secondary_from_archiver {
     wait until sql monitor {
         SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
     } is { complete }  timeout 10s
-    sleep 30s
     exec node2  pg_autoctl create postgres --pgdata /var/lib/postgres/pgaf --monitor postgresql://autoctl_node@monitor/pg_auto_failover --auth trust --no-ssl --name node2 --hostname node2 --from-archiver
     exec node2  bash -c "nohup pg_autoctl run --pgdata /var/lib/postgres/pgaf > /tmp/node2-run.log 2>&1 & echo backgrounded pid $!"
     wait until node2 state is secondary  timeout 90s
