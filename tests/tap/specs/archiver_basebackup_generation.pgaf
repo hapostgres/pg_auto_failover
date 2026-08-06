@@ -70,9 +70,27 @@ teardown {
 #           first frequency interval has elapsed) a real replay/volatile
 #           backup both land on their own; check the final state.
 #
+#           service_archiver_maybe_generate_basebackup() is checked once
+#           per service_archiver_loop() tick (PG_AUTOCTL_KEEPER_SLEEP_TIME,
+#           1s), so scheduling itself notices the 10s frequency promptly --
+#           the real variable cost is generating the replay/volatile backup
+#           itself once it's due: extract the live backup into a staging
+#           instance, replay this archiver's own captured WAL forward,
+#           poll for promotion (wait_for_replay_promotion(), 1s steps),
+#           pg_basebackup it over loopback, then discard the staging
+#           instance -- several real Postgres-instance lifecycles, not a
+#           single fast pg_basebackup call like archiver_basebackup_
+#           policy.pgaf's own live-backup cycles. CI run 84233594160 hit
+#           this exact margin: 60s wasn't enough under load (bootstrap +
+#           10s policy interval + a slow replay cycle), so this follows
+#           that spec's own precedent of a generous fixed sleep (there is
+#           no SQL-condition polling primitive in pgaftest's DSL --
+#           test_spec_parse.y's `wait until` forms are all node-state-
+#           specific) rather than a tight one.
+#
 
 step test_001_replay_backup_lands {
-    sleep 60s
+    sleep 120s
     sql monitor { SELECT source::text FROM pgautofailover.get_latest_basebackup('default', 0); }
     expect { replay }
     sql monitor { SELECT replaymode::text FROM pgautofailover.get_latest_basebackup('default', 0); }
