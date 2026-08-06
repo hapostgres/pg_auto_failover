@@ -229,7 +229,7 @@ extern int AddAutoFailoverNode(char *formationId,
 extern void SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
 							 ReplicationState goalState,
 							 const char *message);
-extern void ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
+extern void ReportAutoFailoverNodeState(int64 nodeId,
 										ReplicationState reportedState,
 										bool pgIsRunning,
 										SyncState pgSyncState,

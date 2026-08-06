@@ -1592,9 +1592,18 @@ SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
  * a node.
  *
  * We use SPI to automatically handle triggers, function calls, etc.
+ *
+ * Scoped by nodeid, not (nodehost, nodeport): an ARCHIVING row's nodeport
+ * is a permanent 0 sentinel and its nodehost is the owning archiver's own
+ * hostname, both identical across every (formation, group) membership of
+ * the same archiver identity (see archiver_add_formation()'s own comment
+ * on this, pgautofailover.sql). Scoping on that pair used to make any one
+ * membership's routine report blindly overwrite reportedstate on every
+ * other membership sharing the same archiver -- nodeid is the one column
+ * that's actually unique per row.
  */
 void
-ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
+ReportAutoFailoverNodeState(int64 nodeId,
 							ReplicationState reportedState,
 							bool pgIsRunning, SyncState pgSyncState,
 							int reportedTLI,
@@ -1609,8 +1618,7 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		TEXTOID,                 /* pg_stat_replication.sync_state */
 		INT4OID,                 /* reportedtli */
 		LSNOID,                  /* reportedlsn */
-		TEXTOID,                 /* nodehost */
-		INT4OID                  /* nodeport */
+		INT8OID                  /* nodeid */
 	};
 
 	Datum argValues[] = {
@@ -1619,8 +1627,7 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		CStringGetTextDatum(SyncStateToString(pgSyncState)), /* sync_state */
 		Int32GetDatum(reportedTLI),                          /* reportedtli */
 		LSNGetDatum(reportedLSN),             /* reportedlsn */
-		CStringGetTextDatum(nodeHost),        /* nodehost */
-		Int32GetDatum(nodePort)               /* nodeport */
+		Int64GetDatum(nodeId)                 /* nodeid */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
@@ -1645,7 +1652,7 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		"  THEN COALESCE(replication_stall_since, now()) "
 		"  ELSE NULL "
 		"END "
-		"WHERE nodehost = $6 AND nodeport = $7";
+		"WHERE nodeid = $6";
 
 	SPI_connect();
 
