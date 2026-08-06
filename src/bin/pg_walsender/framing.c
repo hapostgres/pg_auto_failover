@@ -286,6 +286,51 @@ ws_send_backend_key_data(int sock, int32_t pid, int32_t secret)
 }
 
 
+/*
+ * ws_send_negotiate_protocol_version sends the 'v' NegotiateProtocolVersion
+ * message. Per the wire protocol, the first Int32 is *not* a bare minor
+ * version -- it's the full negotiated protocol version (major<<16|minor),
+ * exactly like the version code in a StartupMessage; real libpq's
+ * pqGetNegotiateProtocolVersion3() compares it against PG_PROTOCOL(3, 0)
+ * and rejects anything smaller as "downgrade to pre-3.0 protocol version".
+ * newestMinor is the highest minor protocol version we actually support
+ * (always 0 -- only protocol 3.0 is implemented), combined here with major
+ * version 3. unsupportedOptions/nUnsupportedOptions lists any "_pq_.*"
+ * startup options the client asked for that we don't recognize (we don't
+ * parse any, so this is every "_pq_.*" key seen) -- real libpq's own
+ * protocol-GREASE self-test requires the server to echo back
+ * "_pq_.test_protocol_negotiation" here, or it fails the connection with
+ * "server did not report the unsupported ... parameter". See startup.c's
+ * own caller for why this exists.
+ */
+bool
+ws_send_negotiate_protocol_version(int sock, int32_t newestMinor,
+								   const char **unsupportedOptions,
+								   int nUnsupportedOptions)
+{
+	PQExpBuffer buf = createPQExpBuffer();
+
+	int32_t netVersion = htonl((3 << 16) | (newestMinor & 0xFFFF));
+	int32_t netOptionCount = htonl(nUnsupportedOptions);
+
+	appendBinaryPQExpBuffer(buf, (const char *) &netVersion, 4);
+	appendBinaryPQExpBuffer(buf, (const char *) &netOptionCount, 4);
+
+	for (int i = 0; i < nUnsupportedOptions; i++)
+	{
+		appendBinaryPQExpBuffer(buf, unsupportedOptions[i],
+								strlen(unsupportedOptions[i]) + 1);
+	}
+
+	bool ok = !PQExpBufferBroken(buf) &&
+			  ws_send_message(sock, 'v', buf->data, buf->len);
+
+	destroyPQExpBuffer(buf);
+
+	return ok;
+}
+
+
 bool
 ws_send_ready_for_query(int sock)
 {

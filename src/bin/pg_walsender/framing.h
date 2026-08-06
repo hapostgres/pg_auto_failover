@@ -64,6 +64,9 @@ bool ws_send_message(int sock, char type, const char *data, int32_t dataLen);
 bool ws_send_authentication_ok(int sock);
 bool ws_send_parameter_status(int sock, const char *name, const char *value);
 bool ws_send_backend_key_data(int sock, int32_t pid, int32_t secret);
+bool ws_send_negotiate_protocol_version(int sock, int32_t newestMinor,
+										const char **unsupportedOptions,
+										int nUnsupportedOptions);
 bool ws_send_ready_for_query(int sock);
 bool ws_send_error_response(int sock, const char *sqlstate, const char *message);
 bool ws_send_command_complete(int sock, const char *tag);

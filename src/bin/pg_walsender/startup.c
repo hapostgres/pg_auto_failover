@@ -80,9 +80,24 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 			return false;
 		}
 
-		/* parse the NUL-separated key/value pairs following the version code */
+		/*
+		 * Parse the NUL-separated key/value pairs following the version
+		 * code first -- we need to know which "_pq_.*" options (if any) the
+		 * client sent *before* we can answer NegotiateProtocolVersion below:
+		 * real libpq's protocol-GREASE self-test sends
+		 * "_pq_.test_protocol_negotiation" and requires the server to echo
+		 * it back as unsupported (we don't parse any "_pq_.*" options, so
+		 * every one seen here is unsupported by definition).
+		 */
 		const char *ptr = payload + 4;
 		const char *end = payload + payloadLen;
+
+		enum
+		{
+			WS_MAX_UNSUPPORTED_OPTIONS = 16
+		};
+		const char *unsupportedOptions[WS_MAX_UNSUPPORTED_OPTIONS];
+		int nUnsupportedOptions = 0;
 
 		while (ptr < end && *ptr != '\0')
 		{
@@ -117,6 +132,33 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 				params->replication = (strcmp(value, "1") == 0 ||
 									   strcasecmp(value, "true") == 0 ||
 									   params->replicationDatabase);
+			}
+			else if (strncmp(key, "_pq_.", 5) == 0 &&
+					 nUnsupportedOptions < WS_MAX_UNSUPPORTED_OPTIONS)
+			{
+				unsupportedOptions[nUnsupportedOptions++] = key;
+			}
+		}
+
+		/*
+		 * Only protocol 3.0 is implemented. A client is free to ask for a
+		 * newer minor version than we understand -- real libpq deliberately
+		 * probes with a bogus one (protocol "GREASE", e.g. 3.9999) to
+		 * verify a server properly negotiates rather than silently
+		 * accepting whatever was asked for, and refuses to proceed against
+		 * a server that gets this wrong. Tell it the newest minor version
+		 * we actually speak (0) via NegotiateProtocolVersion, matching real
+		 * Postgres's own backend behaviour, then continue the connection at
+		 * that version rather than closing it.
+		 */
+		if ((code & 0xFFFF) != 0)
+		{
+			if (!ws_send_negotiate_protocol_version(sock, 0,
+													unsupportedOptions,
+													nUnsupportedOptions))
+			{
+				free(payload);
+				return false;
 			}
 		}
 
