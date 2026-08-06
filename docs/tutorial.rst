@@ -255,7 +255,7 @@ that is never promoted there are two ways to proceed.
 
 **Direct command** — takes effect immediately on the running cluster::
 
-   $ docker compose exec node3 pg_autoctl set candidate-priority 0 --name node3
+   $ docker compose exec node3 pg_autoctl set node candidate-priority 0 --name node3
 
 This reaches into the running supervisor and updates the setting on the
 monitor in one step.  It is the fastest option when you need an immediate
