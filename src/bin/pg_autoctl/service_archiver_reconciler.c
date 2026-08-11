@@ -111,9 +111,9 @@ static void archiver_reconciler_tick(Supervisor *supervisor, void *context);
  * archiver_reconciler_tracking_path computes the path of the small
  * "pid formation group" tracking file this reconciler persists across
  * its own restarts, one line per currently-managed capture child --
- * sibling of the archiver's own pg_autoctl.cfg, matching every other
- * archiver-root-level bookkeeping file (archiver-routes.ini) this
- * project already writes there.
+ * sibling of the archiver's own pg_autoctl.cfg, matching the archiver's
+ * other config-adjacent bookkeeping files (archiver-position,
+ * archiver-systemid) this project already writes there.
  */
 static char *
 archiver_reconciler_tracking_path(Keeper *templateKeeper, char *dest)
@@ -145,14 +145,11 @@ archiver_reconciler_pidfile_path(Keeper *templateKeeper, char *dest)
 /*
  * archiver_reconciler_routes_path computes the path of the small mapping
  * file pg_walsender reads per connection (routes.h, "[formation/group]"
- * sections each carrying just a "path" key) -- must compute to the exact
- * same path as service_archiver_serve.c's own service_archiver_serve_
- * routes_path(), since that's the value archiver-serve passes on pg_
- * walsender's own --routes flag when it execs it. Both processes derive it
- * independently from their own (identically loaded) config, the same
- * pattern already established for archiver-position (service_archiver.c)
- * and archiver-routes.ini's own path before this file took over writing
- * it -- no IPC needed to agree on where it lives.
+ * sections each carrying just a "path" key) -- lives directly inside the
+ * archiver's own top-level pgdata, so pg_walsender can derive this same
+ * path on its own from nothing more than --pgdata/PGDATA (see main.c's own
+ * header comment), unlike the archiver's XDG-derived config-file path,
+ * which pg_walsender has no way to recompute.
  *
  * This reconciler, not archiver-serve, is the natural owner of *writing*
  * this file: it's already the process that discovers a membership's
@@ -162,8 +159,8 @@ archiver_reconciler_pidfile_path(Keeper *templateKeeper, char *dest)
 static char *
 archiver_reconciler_routes_path(Keeper *templateKeeper, char *dest)
 {
-	path_in_same_directory(templateKeeper->config.pathnames.config,
-						   "archiver-routes.ini", dest);
+	sformat(dest, MAXPGPATH, "%s/archiver-routes.ini",
+			templateKeeper->config.pgSetup.pgdata);
 	return dest;
 }
 

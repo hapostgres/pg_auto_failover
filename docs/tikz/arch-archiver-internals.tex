@@ -56,7 +56,7 @@
   \path (recon.east) edge[->,dashed,color=abox,out=-30,in=140] node[above,sloped,pos=0.5] {\small writes} (routes.north);
 
   \node (wsend) at (9.4,10.4) [child] {\ttfamily\small pg\_walsender};
-  \path (serve.south) edge[->,thick,out=-50,in=90] node[right,pos=0.55,align=left] {\small fork + exec\\[-2pt]\scriptsize \texttt{--routes ...}} (wsend.north);
+  \path (serve.south) edge[->,thick,out=-50,in=90] node[right,pos=0.55,align=left] {\small fork + exec\\[-2pt]\scriptsize \texttt{--pgdata ...}} (wsend.north);
   \path (routes.east) edge[->,thick,out=0,in=160] node[above,pos=0.5] {\small reads} (wsend.west);
   \path (sysid.south) edge[->,dashed,color=pbox,out=-60,in=180] node[below,sloped,pos=0.4] {\small reads} (wsend.west);
   \path (walcache.east) edge[->,dashed,color=pbox,out=20,in=220] node[below,sloped,pos=0.3] {\small reads (\texttt{.latest}, WAL)} (wsend.south);

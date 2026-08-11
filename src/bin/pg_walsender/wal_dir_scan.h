@@ -42,4 +42,19 @@ bool wal_dir_find_latest(const char *walcacheDir, uint32_t *timeline,
 void wal_segment_filename(uint32_t timeline, uint64_t segno,
 						  char *dest, size_t destSize);
 
+/*
+ * wal_position_cache_read reads "<path>/archiver-position" -- the current
+ * captured LSN and timeline, written roughly once a second by pg_autoctl's
+ * own archiver-capture process (service_archiver_update_current_lsn(),
+ * service_archiver.c) for its own monitor-reporting needs, and reused here
+ * as a cache to avoid a full directory scan on every connection. On
+ * success, returns true with *timeline and lsn filled in. Returns false
+ * (untouched) when the file doesn't exist yet (archiver-capture hasn't
+ * completed its first tick) or fails to parse -- callers should fall back
+ * to wal_dir_find_latest() (or their own equivalent scan) in that case,
+ * not treat it as fatal.
+ */
+bool wal_position_cache_read(const char *path, uint32_t *timeline,
+							 char *lsn, size_t lsnSize);
+
 #endif /* WS_WAL_DIR_SCAN_H */

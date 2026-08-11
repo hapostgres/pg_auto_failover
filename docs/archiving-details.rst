@@ -42,8 +42,8 @@ much disk is left), never the data itself:
 3. **It hands both back out** on request: a real ``pg_basebackup``
    command, a real standby's own ``primary_conninfo``, or this project's
    own restore tooling can all connect to an archiver directly and get
-   what they ask for, with no special client needed -- see `What you can
-   point at an archiver`_ below.
+   what they ask for, with no special client needed -- see `Archiving:
+   client & server`_ below.
 
 Storage
 -------
@@ -146,8 +146,8 @@ restore from, and firewalled off from everywhere else.
 Process model
 --------------
 
-Once started (``pg_autoctl archiver run``, or ``pg_autoctl node run``
-against a ``kind = archiver`` node specification), an archiver supervises
+Once started (``pg_autoctl run``, or ``pg_autoctl node run`` against a
+``kind = archiver`` node specification), an archiver supervises
 exactly two long-running processes: ``serve``, and a ``reconciler`` that
 in turn keeps one WAL-capture child running per (formation, group)
 membership this archiver currently holds -- added and removed on its own
@@ -156,24 +156,29 @@ of the archiver itself required. They hand off small files (`Storage`_
 above) and nothing else:
 
 .. figure:: ./tikz/arch-archiver-internals.svg
-   :alt: pg_autoctl archiver run supervises two processes, reconciler and serve; reconciler forks one capture child per membership (each running pg_receivewal, writing its own archiver-position and archiver-systemid) and also writes archiver-routes.ini, one section per membership; serve runs pg_walsender, which reads the routes file, the WAL cache/basebackups, and archiver-systemid directly, and serves pg_basebackup, streaming standbys, and restore_command fetches
+   :alt: pg_autoctl run supervises two processes, reconciler and serve; reconciler forks one capture child per membership (each running pg_receivewal, writing its own archiver-position and archiver-systemid, and periodically forking a short-lived basebackup child that execs the real pg_basebackup) and also writes archiver-routes.ini, one section per membership; serve runs pg_walsender, which reads the routes file, the WAL cache/basebackups, and archiver-systemid directly, and serves pg_basebackup, streaming standbys, and restore_command fetches
 
    Two supervised top-level processes per archiver; the reconciler forks
    one WAL-capture child per membership underneath it
 
 ::
 
-  pg_autoctl archiver run
+  pg_autoctl run
   ├── reconciler  -- keeps the set of running captures in sync with the
   │   │              monitor's own membership list for this archiver,
   │   │              and writes archiver-routes.ini to match
   │   ├── capture (default/0)   -- one per membership, reports its own
-  │   │   └── pg_receivewal        progress to the monitor independently
+  │   │   ├── pg_receivewal        progress to the monitor independently
+  │   │   └── basebackup        -- forked periodically per policy; execs
+  │   │       └── pg_basebackup    the real binary, then exits
   │   └── capture (billing/0)
-  │       └── pg_receivewal
+  │       ├── pg_receivewal
+  │       └── basebackup
+  │           └── pg_basebackup
   └── serve       -- keeps the archiver reachable over the network,
-      └── pg_walsender --port 6543 --routes archiver-routes.ini
-                       (serves every membership through the one process)
+      └── pg_walsender --port 6543 --pgdata /var/lib/pgaf/archiver1
+                       (derives archiver-routes.ini's path from --pgdata;
+                       serves every membership through the one process)
 
 If any child stops unexpectedly, its supervisor notices on its next tick
 and restarts it -- an archiver recovering from a crashed
@@ -234,12 +239,16 @@ one path, at connection time:
   ``initdb`` and never changes for a cluster's lifetime, so write-once is
   the actually-correct behavior here, not a simplification that trades
   away correctness.
-- **Current WAL position**: derived fresh by scanning the WAL cache
-  directory itself (the newest complete or in-progress segment's own
-  filename and content), the same technique already used to compute
-  ``archiver-position`` -- no separate file needed for this one, since a
-  directory scan is already cheap enough to do directly, and doing so
-  removes any risk of it disagreeing with what's actually on disk.
+- **Current WAL position and timeline**: read from ``archiver-position``,
+  written roughly once a second by the capture process for its own
+  monitor-reporting needs (the same value it reports as this node's own
+  ``reportedLSN``) and reused here as a cache -- a full scan of the WAL
+  cache directory on every connection would cost more the longer an
+  archiver has been running and the more segments its retention policy
+  keeps, so ``pg_walsender`` reads this file instead of repeating that
+  scan itself. Only falls back to scanning the directory directly when
+  the cache file isn't there yet (a connection arriving before the
+  capture process's first tick).
 
 Every write above uses the same write-to-temp-file-then-``rename()``
 pattern this project uses everywhere it needs atomicity -- a connection
@@ -278,10 +287,10 @@ or ``--pgdata`` root changes:
 
 ::
 
-  pg_autoctl archiver run
+  pg_autoctl run
   ├── reconciler
-  │   ├── capture (default/0) -> pg_receivewal
-  │   └── capture (billing/0) -> pg_receivewal
+  │   ├── capture (default/0) -> pg_receivewal, basebackup -> pg_basebackup
+  │   └── capture (billing/0) -> pg_receivewal, basebackup -> pg_basebackup
   └── serve -> pg_walsender          (serves both memberships)
 
 Each membership's own capture is entirely independent -- separate storage
@@ -309,7 +318,7 @@ formation covers the new group too (existing memberships are left alone),
 and the reconciler picks it up on its own next periodic check, no
 archiver restart required.
 
-What you can point at an archiver
+Archiving: client & server
 ------------------------------------
 
 An archiver's serving side understands enough of the real PostgreSQL

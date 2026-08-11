@@ -16,6 +16,7 @@
 
 #include "wal_dir_scan.h"
 #include "file_utils.h"
+#include "string_utils.h"
 
 /* default WAL segment size (16MB), matching cmd_show.c's own
  * "SHOW wal_segment_size" -> "16MB" answer */
@@ -111,4 +112,57 @@ wal_dir_find_latest(const char *walcacheDir, uint32_t *timeline,
 			(uint32_t) (endOfSegment >> 32), (uint32_t) (endOfSegment & 0xFFFFFFFF));
 
 	return true;
+}
+
+
+bool
+wal_position_cache_read(const char *path, uint32_t *timeline,
+						char *lsn, size_t lsnSize)
+{
+	char cachePath[MAXPGPATH] = { 0 };
+
+	sformat(cachePath, sizeof(cachePath), "%s/archiver-position", path);
+
+	char *contents = NULL;
+	long fileSize = 0;
+
+	if (!read_file_if_exists(cachePath, &contents, &fileSize) || contents == NULL)
+	{
+		return false;
+	}
+
+	bool foundLsn = false;
+	bool foundTimeline = false;
+	char *line = contents;
+
+	while (line != NULL && *line != '\0')
+	{
+		char *nl = strchr(line, '\n');
+
+		if (nl != NULL)
+		{
+			*nl = '\0';
+		}
+
+		const char *lsnPrefix = "lsn = ";
+		const char *tliPrefix = "timeline = ";
+
+		if (strncmp(line, lsnPrefix, strlen(lsnPrefix)) == 0)
+		{
+			strlcpy(lsn, line + strlen(lsnPrefix), lsnSize);
+			foundLsn = lsn[0] != '\0';
+		}
+		else if (strncmp(line, tliPrefix, strlen(tliPrefix)) == 0)
+		{
+			foundTimeline =
+				stringToUInt32(line + strlen(tliPrefix), timeline) &&
+				*timeline > 0;
+		}
+
+		line = (nl != NULL) ? nl + 1 : NULL;
+	}
+
+	free(contents);
+
+	return foundLsn && foundTimeline;
 }

@@ -2,11 +2,19 @@
  * src/bin/pg_walsender/main.c
  *   Entry point for pg_walsender. Two modes, dispatched on argv[1]:
  *
- *     pg_walsender --port <port> [--routes <path>]
+ *     pg_walsender --port <port> [--pgdata <path>]
  *       Runs the accept loop (see accept_loop.h). Exec'd by pg_autoctl's
  *       `archiver serve` supervisor (service_archiver_serve.c), but fully
  *       runnable and testable on its own against real psql/pg_basebackup/
- *       pg_receivewal.
+ *       pg_receivewal. --pgdata (or the PGDATA environment variable) names
+ *       the archiver's own top-level storage root -- the same value given
+ *       as --pgdata to `pg_autoctl create archiver` -- from which the
+ *       routes file's own path is derived directly (<pgdata>/archiver-
+ *       routes.ini, written by service_archiver_reconciler.c): a single,
+ *       trivially-derivable value, unlike pg_autoctl's own XDG-based
+ *       config-file path, which lives outside PGDATA entirely and
+ *       pg_walsender has no way to recompute on its own (see routes.h's
+ *       own header comment for the full rationale).
  *
  *     pg_walsender fetch-file --host <h> --port <p> --route <formation>/
  *                  <group> --filename <name> --output <path>
@@ -58,16 +66,21 @@ static void
 usage(const char *argv0)
 {
 	fprintf(stderr, /* IGNORE-BANNED */
-			"Usage: %s --port <port> [--routes <path>]\n"
+			"Usage: %s --port <port> [--pgdata <path>]\n"
 			"       %s fetch-file --host <h> --port <p> --route <fmtn>/<grp> "
 			"--filename <name> --output <path>\n\n"
 			"  --port      port to listen on (server mode default: %d)\n"
-			"  --routes    path to the routes INI file mapping "
-			"\"<formation>/<group>\" to\n"
-			"              { walcache, basebackup, allowed_hosts } -- "
-			"omit only for manual\n"
-			"              standalone testing (accepts any dbname, no "
-			"host restriction)\n"
+			"  --pgdata    the archiver's own top-level storage root "
+			"(defaults to\n"
+			"              the PGDATA environment variable); the routes "
+			"file mapping\n"
+			"              \"<formation>/<group>\" to { path, "
+			"allowed_hosts } is read\n"
+			"              from <pgdata>/archiver-routes.ini -- omit both "
+			"only for\n"
+			"              manual standalone testing (accepts any dbname, "
+			"no host\n"
+			"              restriction)\n"
 			"  fetch-file  one-shot FETCH_FILE client, for use as a "
 			"restore_command\n",
 			argv0, argv0, WS_DEFAULT_PORT);
@@ -172,16 +185,24 @@ main(int argc, char **argv)
 
 	config.port = WS_DEFAULT_PORT;
 
+	char pgdata[MAXPGPATH] = { 0 };
+	const char *pgdataEnv = getenv("PGDATA");
+
+	if (pgdataEnv != NULL)
+	{
+		strlcpy(pgdata, pgdataEnv, sizeof(pgdata));
+	}
+
 	static struct option longOptions[] = {
 		{ "port", required_argument, NULL, 'p' },
-		{ "routes", required_argument, NULL, 'r' },
+		{ "pgdata", required_argument, NULL, 'D' },
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "p:r:h", longOptions, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "p:D:h", longOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -195,9 +216,9 @@ main(int argc, char **argv)
 				break;
 			}
 
-			case 'r':
+			case 'D':
 			{
-				strlcpy(config.routesPath, optarg, sizeof(config.routesPath));
+				strlcpy(pgdata, optarg, sizeof(pgdata));
 				break;
 			}
 
@@ -219,6 +240,18 @@ main(int argc, char **argv)
 	{
 		log_fatal("Invalid --port value");
 		return 1;
+	}
+
+	/*
+	 * pgdata left empty (neither --pgdata nor PGDATA given) is not an
+	 * error: it's the manual/standalone-testing mode routes.h's own header
+	 * comment describes -- config.routesPath stays empty, accept_loop.c
+	 * treats that as "no routing, accept any dbname, no host restriction".
+	 */
+	if (pgdata[0] != '\0')
+	{
+		sformat(config.routesPath, sizeof(config.routesPath),
+				"%s/archiver-routes.ini", pgdata);
 	}
 
 	if (!ws_accept_loop(&config))

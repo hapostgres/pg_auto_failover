@@ -180,8 +180,12 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 	char consistentPoint[32] = "0/0";
 	uint32_t timeline;
 
-	(void) wal_dir_find_latest(route->path, &timeline, consistentPoint,
-							   sizeof(consistentPoint));
+	if (!wal_position_cache_read(route->path, &timeline, consistentPoint,
+								 sizeof(consistentPoint)))
+	{
+		(void) wal_dir_find_latest(route->path, &timeline, consistentPoint,
+								   sizeof(consistentPoint));
+	}
 
 	char path[MAXPGPATH];
 
@@ -285,8 +289,12 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 	uint32_t timeline = 1;
 	char discardLsn[32] = { 0 };
 
-	(void) wal_dir_find_latest(route->path, &timeline, discardLsn,
-							   sizeof(discardLsn));
+	if (!wal_position_cache_read(route->path, &timeline, discardLsn,
+								 sizeof(discardLsn)))
+	{
+		(void) wal_dir_find_latest(route->path, &timeline, discardLsn,
+								   sizeof(discardLsn));
+	}
 
 	char timelineStr[16];
 

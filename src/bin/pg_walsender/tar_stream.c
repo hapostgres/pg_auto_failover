@@ -20,9 +20,6 @@
 #include "file_utils.h"
 #include "log.h"
 
-/* matches basebackup.c's own TAR_NUM_TERMINATION_BLOCKS */
-#define TAR_NUM_TERMINATION_BLOCKS 2
-
 #define TAR_READ_CHUNK_SIZE (64 * 1024)
 
 typedef struct TarWalkState
@@ -260,12 +257,5 @@ tar_stream_directory(const char *rootDir, TarChunkCallback callback, void *conte
 {
 	TarWalkState state = { callback, context, true };
 
-	if (!walk_directory(&state, rootDir, ""))
-	{
-		return false;
-	}
-
-	char zeros[TAR_BLOCK_SIZE * TAR_NUM_TERMINATION_BLOCKS] = { 0 };
-
-	return emit(&state, zeros, sizeof(zeros));
+	return walk_directory(&state, rootDir, "");
 }

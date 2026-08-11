@@ -13,6 +13,7 @@ pg_autoctl provides the following commands::
   pg_autoctl
   + create    Create a pg_auto_failover node, or formation
   + drop      Drop a pg_auto_failover node, or formation
+  + archiver  Manage a pg_auto_failover archiver node
   + config    Manages the pg_autoctl configuration
   + show      Show pg_auto_failover information
   + enable    Enable a feature on a formation
@@ -40,6 +41,9 @@ pg_autoctl provides the following commands::
     monitor    Drop the pg_auto_failover monitor
     node       Drop a node from the pg_auto_failover monitor
     formation  Drop a formation on the pg_auto_failover monitor
+
+  pg_autoctl archiver
+    serve  Start serving this archiver's captured WAL and base backups
 
   pg_autoctl config
     check  Check pg_autoctl configuration

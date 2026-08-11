@@ -32,7 +32,7 @@
  * stripped off the connection's actual dbname -- the caller (accept_loop.c)
  * decides what routeKey means, this function only ever looks it up. On
  * success returns true and sets *foundRoute (NULL when routes were not
- * supplied at all -- a manual-testing convenience, see main.c's --routes
+ * supplied at all -- a manual-testing convenience, see main.c's --pgdata
  * option). On failure, an ErrorResponse has already been sent to sock; the
  * caller only needs to close the connection.
  */

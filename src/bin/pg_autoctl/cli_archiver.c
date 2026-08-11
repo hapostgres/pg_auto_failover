@@ -19,7 +19,6 @@
 #include "keeper.h"
 #include "keeper_config.h"
 #include "log.h"
-#include "monitor.h"
 #include "pidfile.h"
 #include "service_archiver_serve.h"
 #include "signals.h"
@@ -140,9 +139,12 @@ cli_archiver_serve_getopts(int argc, char **argv)
 /*
  * cli_archiver_serve implements `pg_autoctl archiver serve`: loads the
  * archiver's own config/state (already written by `pg_autoctl create
- * archiver`), connects to the monitor, and runs
- * service_archiver_serve_loop() -- exec'ing pg_walsender and keeping its
- * routes file current. See service_archiver_serve.h.
+ * archiver`) and runs service_archiver_serve_loop() -- exec'ing pg_
+ * walsender and supervising its liveness. Deliberately no monitor
+ * connection here: service_archiver_serve_loop() itself never talks to
+ * the monitor (see service_archiver_serve.c's own header comment), so
+ * this command can start and keep pg_walsender serving already-captured
+ * data even while the monitor is unreachable.
  */
 static void
 cli_archiver_serve(int argc, char **argv)
@@ -193,12 +195,6 @@ cli_archiver_serve(int argc, char **argv)
 		log_fatal("Failed to read the archiver state file \"%s\", "
 				  "see above for details", keeper.config.pathnames.state);
 		exit(EXIT_CODE_BAD_STATE);
-	}
-
-	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
-	{
-		log_fatal("Failed to contact the monitor, see above for details");
-		exit(EXIT_CODE_MONITOR);
 	}
 
 	if (archiverServePortOption > 0)

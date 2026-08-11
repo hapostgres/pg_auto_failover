@@ -62,7 +62,7 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 		/*
 		 * No routes file was supplied at all: manual/standalone testing
 		 * mode, accept unconditionally now that the role matched. A real
-		 * deployment always passes --routes (see main.c), so this branch
+		 * deployment always passes --pgdata (see main.c), so this branch
 		 * never applies to a pg_autoctl-supervised pg_walsender.
 		 */
 		return true;

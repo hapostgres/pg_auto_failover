@@ -62,6 +62,7 @@
  */
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <ftw.h>
 #include <signal.h>
@@ -131,6 +132,65 @@ basebackup_child_is_running(void)
 
 	basebackupPid = -1;
 	return false;
+}
+
+
+/*
+ * walcache_has_any_wal_data reports whether this membership's capture
+ * child (service_archiver.c's own pg_receivewal, a separate process this
+ * file never synchronizes with directly) has written anything into the
+ * walcache yet -- a real WAL segment, complete or still ".partial".
+ *
+ * Used to hold back the very first ('bootstrap') live base backup until
+ * the capture child has a head start: a live base backup's own reported
+ * start LSN comes from a completely independent pg_basebackup connection
+ * to the source node, so with no ordering dependency between the two, a
+ * bootstrap backup taken before the capture child's own replication
+ * connection is even established can report a start LSN older than
+ * anything this archiver will ever actually capture -- exactly the
+ * "requested WAL segment predates this archiver's captured history"
+ * failure pg_walsender's own START_REPLICATION guards against
+ * (cmd_start_replication.c), surfacing much later as a base-backup
+ * consumer's background WAL streamer erroring out. Every backup after the
+ * first is naturally safe already: by the time this frequency-gated
+ * scheduler's own next cycle fires, the WAL cache always has something in
+ * it well before then.
+ *
+ * Deliberately loose matching (anything at all under walcacheDir that
+ * isn't one of the known non-WAL bookkeeping entries) rather than
+ * re-parsing exact segment-filename syntax here too: this only needs to
+ * answer "has the capture child started yet", not identify which segment.
+ */
+static bool
+walcache_has_any_wal_data(const char *walcacheDir)
+{
+	DIR *dir = opendir(walcacheDir);
+
+	if (dir == NULL)
+	{
+		return false;
+	}
+
+	struct dirent *entry;
+	bool found = false;
+
+	while (!found && (entry = readdir(dir)) != NULL)
+	{
+		if (strcmp(entry->d_name, ".") == 0 ||
+			strcmp(entry->d_name, "..") == 0 ||
+			strcmp(entry->d_name, "basebackups") == 0 ||
+			strcmp(entry->d_name, "archiver-position") == 0 ||
+			strcmp(entry->d_name, "archiver-systemid") == 0)
+		{
+			continue;
+		}
+
+		found = true;
+	}
+
+	closedir(dir);
+
+	return found;
 }
 
 
@@ -1212,6 +1272,19 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 
 			lastKnownPrimaryNodeId = currentPrimaryNodeId;
 		}
+	}
+
+	if (bootstrap && !walcache_has_any_wal_data(config->pgSetup.pgdata))
+	{
+		/*
+		 * The capture child hasn't captured anything yet -- wait for it
+		 * before generating the very first backup (see walcache_has_any_
+		 * wal_data()'s own comment). Returns here rather than falling
+		 * through to the elapsed-time check below, which indexes
+		 * backups.backups[0] -- not valid yet when bootstrap is true
+		 * (backups.count == 0).
+		 */
+		return true;
 	}
 
 	bool due = bootstrap || forcedByPromotion;

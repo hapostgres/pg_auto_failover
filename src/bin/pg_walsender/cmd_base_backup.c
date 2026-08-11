@@ -25,6 +25,12 @@
  *   1, 2, [3-6 consumed internally by ReceiveArchiveStream], 7, 8), and
  *   explicitly checks step 8's PQresultStatus() == PGRES_COMMAND_OK.
  *
+ *   Steps 4-5's typed, tagged framing ('n'/'d') is PG15+ only -- a pre-15
+ *   pg_basebackup client's receiving code predates it entirely and only
+ *   ever understood step 5 as plain, untagged "CopyData[<raw tar bytes>]"
+ *   with no step 4 at all. See CBB_USE_ARCHIVE_FRAMING below for how this
+ *   file picks between the two at compile time.
+ *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
@@ -44,6 +50,7 @@
 #include "log.h"
 #include "string_utils.h"
 #include "tar_stream.h"
+#include "wal_dir_scan.h"
 
 typedef struct BaseBackupOptions
 {
@@ -263,10 +270,33 @@ typedef struct TarStreamCbContext
 } TarStreamCbContext;
 
 
+/*
+ * Whether to use the typed, multiplexed archive-streaming framing this
+ * file's own header comment traces from PG15+'s basebackup_copy.c (the
+ * "CopyData['n', ...]"/"CopyData['d', ...]" tagged messages) versus the
+ * older, untagged "CopyData[<raw tar bytes>]" framing every pre-15
+ * pg_basebackup client's receiving code was built against. pg_walsender is
+ * built once per PGVERSION, against that version's own server headers (see
+ * defaults.h's own WS_SERVER_VERSION comment) -- so PG_VERSION_NUM here is
+ * already the archived group's real Postgres major version, and this
+ * connection's client is always that same version's own pg_basebackup
+ * (this project's Docker images are single-PG-version; there is no
+ * cross-version client/server mixing to account for). A pre-15 pg_
+ * basebackup binary has no code path for the tagged framing at all -- it
+ * was added to the client in the same release as the server -- so sending
+ * it unconditionally broke every PG14 base backup ("invalid tar block
+ * header size: 11", the tag byte plus archive-name payload misparsed as
+ * tar content) even though the reported server_version correctly said 14.
+ */
+#define CBB_USE_ARCHIVE_FRAMING (PG_VERSION_NUM >= 150000)
+
+
 static bool
 tar_chunk_cb(void *context, const char *data, size_t len)
 {
 	TarStreamCbContext *ctx = (TarStreamCbContext *) context;
+
+#if CBB_USE_ARCHIVE_FRAMING
 	PQExpBuffer buf = createPQExpBuffer();
 
 	appendPQExpBufferChar(buf, 'd');   /* PqMsg_CopyData content tag */
@@ -276,6 +306,9 @@ tar_chunk_cb(void *context, const char *data, size_t len)
 			  ws_send_copy_data(ctx->sock, buf->data, buf->len);
 
 	destroyPQExpBuffer(buf);
+#else
+	bool ok = ws_send_copy_data(ctx->sock, data, len);
+#endif
 
 	if (!ok)
 	{
@@ -328,6 +361,17 @@ send_position_row(int sock, const char *lsn, const char *tli)
  * XLogFileInitInternal) is trimmed off -- the same trim_trailing_zeros()
  * logic cmd_start_replication.c already applies when actually serving it,
  * applied here once, up front, to find where its real content ends.
+ *
+ * Tries wal_position_cache_read() first (wal_dir_scan.h) -- unlike wal_
+ * dir_find_latest(), that cache is fed by pg_autoctl's own archiver-
+ * capture loop (service_archiver_update_current_lsn(), service_archiver.
+ * c), which already accounts for a live ".partial" segment the same way
+ * this function's own scan below does, so it carries none of wal_dir_
+ * find_latest()'s "complete segments only" limitation -- reading it
+ * avoids a full directory scan on every BASE_BACKUP connection, which
+ * matters once an archiver retains thousands of segments. The scan below
+ * remains the fallback for a connection arriving before that cache's
+ * first tick has landed.
  */
 #define CBB_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
 #define CBB_XLOG_SEGMENTS_PER_XLOGID (UINT64CONST(0x100000000) / CBB_WAL_SEGMENT_SIZE)
@@ -395,6 +439,11 @@ static bool
 find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
 							char *endLsn, size_t endLsnSize)
 {
+	if (wal_position_cache_read(walcacheDir, timeline, endLsn, endLsnSize))
+	{
+		return true;
+	}
+
 	DIR *dir = opendir(walcacheDir);
 
 	if (dir == NULL)
@@ -670,6 +719,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		return;
 	}
 
+#if CBB_USE_ARCHIVE_FRAMING
 	{
 		PQExpBuffer buf = createPQExpBuffer();
 
@@ -687,6 +737,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 			return;
 		}
 	}
+#endif
 
 	TarStreamCbContext ctx = { sock, true };
 

@@ -7,11 +7,13 @@
  *   immutable for a cluster's lifetime) by pg_autoctl's archiver-capture
  *   loop the first time it learns the group's real primary has one (see
  *   service_archiver_maybe_persist_systemid(), service_archiver.c).
- *   timeline/xlogpos prefer the newest fully-captured WAL segment's own
- *   boundary (wal_dir_scan.h, filename-derived, not a parsed WAL record
- *   position) when the WAL cache has one, falling back to timeline 1 and
- *   "0/0" when it doesn't (a brand new archiver with nothing captured
- *   yet).
+ *   timeline/xlogpos prefer wal_position_cache_read()'s own cached value
+ *   (updated roughly once a second by that same capture loop -- avoids a
+ *   full WAL-cache directory scan on every connection, which matters once
+ *   thousands of segments are retained), falling back to a live
+ *   wal_dir_find_latest() scan only when that cache isn't there yet, and
+ *   to timeline 1 / "0/0" when neither is (a brand new archiver with
+ *   nothing captured yet).
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -84,7 +86,9 @@ cmd_identify_system(int sock, const WsRoute *route, const char *dbname)
 
 		uint32_t foundTimeline;
 
-		if (wal_dir_find_latest(route->path, &foundTimeline,
+		if (wal_position_cache_read(route->path, &foundTimeline,
+									xlogpos, sizeof(xlogpos)) ||
+			wal_dir_find_latest(route->path, &foundTimeline,
 								xlogpos, sizeof(xlogpos)))
 		{
 			timeline = (int) foundTimeline;

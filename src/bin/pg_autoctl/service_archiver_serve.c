@@ -61,14 +61,6 @@ service_archiver_serve_set_port(int port)
 }
 
 
-static void
-service_archiver_serve_routes_path(KeeperConfig *config, char *dest)
-{
-	path_in_same_directory(config->pathnames.config,
-						   "archiver-routes.ini", dest);
-}
-
-
 bool
 service_archiver_serve_walsender_is_running(void)
 {
@@ -153,16 +145,13 @@ service_archiver_serve_start_walsender(Keeper *keeper)
 		return false;
 	}
 
-	char routesPath[MAXPGPATH] = { 0 };
-
-	service_archiver_serve_routes_path(config, routesPath);
-
 	int port = archiverServePort > 0 ? archiverServePort : PG_AUTOCTL_ARCHIVER_SERVE_PORT;
 	char portStr[16] = { 0 };
 
 	sformat(portStr, sizeof(portStr), "%d", port);
 
-	log_info("Starting pg_walsender on port %d, routes \"%s\"", port, routesPath);
+	log_info("Starting pg_walsender on port %d, pgdata \"%s\"",
+			 port, config->pgSetup.pgdata);
 
 	pid_t pid = fork();
 
@@ -181,8 +170,8 @@ service_archiver_serve_start_walsender(Keeper *keeper)
 		args[argsIndex++] = pgWalsenderPath;
 		args[argsIndex++] = "--port";
 		args[argsIndex++] = portStr;
-		args[argsIndex++] = "--routes";
-		args[argsIndex++] = routesPath;
+		args[argsIndex++] = "--pgdata";
+		args[argsIndex++] = config->pgSetup.pgdata;
 		args[argsIndex] = NULL;
 
 		execv(pgWalsenderPath, args);

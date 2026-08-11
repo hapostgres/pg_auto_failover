@@ -386,8 +386,12 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 	uint32_t timeline = 1;
 	char discardLsn[32] = { 0 };
 
-	(void) wal_dir_find_latest(route->path, &timeline, discardLsn,
-							   sizeof(discardLsn));
+	if (!wal_position_cache_read(route->path, &timeline, discardLsn,
+								 sizeof(discardLsn)))
+	{
+		(void) wal_dir_find_latest(route->path, &timeline, discardLsn,
+								   sizeof(discardLsn));
+	}
 
 	if (strncasecmp(p, "TIMELINE", 8) == 0)
 	{

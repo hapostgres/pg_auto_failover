@@ -78,6 +78,16 @@ static char lastReportedWalFileName[ARCHIVER_WAL_FNAME_LEN + 1] = { 0 };
  */
 static pid_t pgReceivewalPid = -1;
 
+/*
+ * The timeline of the WAL segment service_archiver_update_current_lsn()
+ * most recently found to be the current capture frontier -- computed
+ * alongside keeper->postgres.currentLSN there (same scan, same tick), and
+ * persisted next to it by service_archiver_persist_current_lsn() so pg_
+ * walsender can read both without re-scanning the WAL cache itself. 0
+ * means "nothing captured yet", matching currentLSN's own "0/0" default.
+ */
+static int currentTimeline = 0;
+
 
 /*
  * service_archiver_pgreceivewal_is_running returns true iff the tracked
@@ -363,57 +373,6 @@ wal_segment_end_lsn(const char *walFileName, char *lsn, size_t lsnSize)
 
 
 /*
- * partial_segment_real_length reads a ".partial" WAL segment file (pre-
- * allocated to its full ARCHIVER_WAL_SEGMENT_SIZE by pg_receivewal the
- * moment it's created, matching real Postgres's own WAL file pre-
- * allocation, XLogFileInitInternal) and returns the length of its real
- * content, trimming the zero-padded unwritten tail -- same technique
- * pg_walsender/cmd_start_replication.c's own trim_trailing_zeros() already
- * applies when actually serving one of these files.
- *
- * Trusting a trailing zero run to mean "unwritten" isn't safe in the
- * general case -- a real primary's own WAL segments get recycled (renamed
- * and reused rather than freshly zero-filled, so old content can linger
- * past the real write position) -- but pg_receivewal itself never
- * recycles; every ".partial" file it ever creates is fresh, so this holds
- * here specifically.
- */
-static bool
-partial_segment_real_length(const char *path, uint64_t *length)
-{
-	FILE *file = fopen(path, "rb"); /* IGNORE-BANNED */
-
-	if (file == NULL)
-	{
-		return false;
-	}
-
-	char *buffer = malloc(ARCHIVER_WAL_SEGMENT_SIZE);
-
-	if (buffer == NULL)
-	{
-		fclose(file);
-		return false;
-	}
-
-	size_t got = fread(buffer, 1, ARCHIVER_WAL_SEGMENT_SIZE, file);
-
-	fclose(file);
-
-	while (got > 0 && buffer[got - 1] == 0)
-	{
-		got--;
-	}
-
-	free(buffer);
-
-	*length = (uint64_t) got;
-
-	return true;
-}
-
-
-/*
  * service_archiver_report_captured_wal scans the archiver's local WAL cache
  * directory for segments pg_receivewal has completed (i.e. no longer
  * ".partial") since the last-reported filename, and reports each one to the
@@ -509,34 +468,33 @@ service_archiver_report_captured_wal(Keeper *keeper)
 
 
 /*
- * service_archiver_position_path computes the local, host-only file both
- * the archiver-capture and archiver-serve processes use to exchange the
- * current captured LSN. The two are separate fork()ed processes (see
- * service_archiver_run.c's own comment on why each gets an independent
- * connection) -- each has its own private copy of the Keeper struct after
- * the fork, so keeper->postgres.currentLSN as updated by this file's own
- * service_archiver_update_current_lsn() is invisible to the archiver-serve
- * process no matter how it's written; only a real, external, re-read-each-
- * time channel like this file makes the value cross that boundary. Built
- * from config->pathnames.config exactly like service_archiver_serve.c's own
- * service_archiver_serve_routes_path(), so both independently-started
- * processes compute the identical path from their own (identically loaded)
- * config, without needing shared memory or IPC.
+ * service_archiver_position_path computes the local file this membership's
+ * capture process persists its own currently-captured LSN and timeline
+ * to, once a tick. Inside config->pgSetup.pgdata itself (this membership's
+ * own walcache root), not sibling of config->pathnames.config the way it
+ * used to be -- pg_walsender only ever learns one path per membership
+ * (routes.h's own "path" field, written by service_archiver_reconciler.c),
+ * and that path is pgdata, so anything pg_walsender needs to read on its
+ * own (wal_position_cache_read(), wal_dir_scan.c) has to live under it,
+ * matching service_archiver_systemid_path()'s own placement below.
  */
 static void
 service_archiver_position_path(KeeperConfig *config, char *dest)
 {
-	path_in_same_directory(config->pathnames.config,
-						   "archiver-position", dest);
+	sformat(dest, MAXPGPATH, "%s/archiver-position", config->pgSetup.pgdata);
 }
 
 
 /*
- * service_archiver_persist_current_lsn writes keeper->postgres.currentLSN to
- * the local position file (see service_archiver_position_path's own
- * comment), atomically (write-to-tmp then rename, matching service_archiver_
- * serve_refresh_routes()'s own pattern) so a concurrent reader never
- * observes a partial write.
+ * service_archiver_persist_current_lsn writes keeper->postgres.currentLSN
+ * and currentTimeline (both computed together by service_archiver_update_
+ * current_lsn() just before this is called) to the local position file
+ * (see service_archiver_position_path's own comment), atomically (write-
+ * to-tmp then rename, matching every other file this project writes this
+ * way) so a concurrent reader never observes a partial write. pg_
+ * walsender reads this directly (wal_position_cache_read(), wal_dir_scan.
+ * c) instead of scanning the WAL cache directory itself on every
+ * connection.
  */
 static bool
 service_archiver_persist_current_lsn(Keeper *keeper)
@@ -557,7 +515,8 @@ service_archiver_persist_current_lsn(Keeper *keeper)
 		return false;
 	}
 
-	fformat(fileStream, "%s\n", keeper->postgres.currentLSN);
+	fformat(fileStream, "lsn = %s\n", keeper->postgres.currentLSN);
+	fformat(fileStream, "timeline = %d\n", currentTimeline);
 
 	if (fclose(fileStream) == EOF)
 	{
@@ -576,51 +535,13 @@ service_archiver_persist_current_lsn(Keeper *keeper)
 
 
 /*
- * service_archiver_read_current_lsn reads back the position file written by
- * service_archiver_persist_current_lsn(), for use by the (separate process)
- * archiver-serve side. Returns false (lsnOut left untouched) when the file
- * doesn't exist yet -- the archiver-capture process hasn't completed its
- * first tick -- callers should fall back to "0/0" themselves.
- */
-bool
-service_archiver_read_current_lsn(KeeperConfig *config,
-								  char *lsnOut, size_t lsnOutSize)
-{
-	char path[MAXPGPATH] = { 0 };
-
-	service_archiver_position_path(config, path);
-
-	char *contents = NULL;
-	long fileSize = 0;
-
-	if (!read_file_if_exists(path, &contents, &fileSize) || contents == NULL)
-	{
-		return false;
-	}
-
-	char *nl = strchr(contents, '\n');
-
-	if (nl != NULL)
-	{
-		*nl = '\0';
-	}
-
-	strlcpy(lsnOut, contents, lsnOutSize);
-	free(contents);
-
-	return lsnOut[0] != '\0';
-}
-
-
-/*
  * service_archiver_systemid_path computes the local file holding this
  * membership's group's Postgres system identifier -- inside config->
- * pgSetup.pgdata itself (this membership's own walcache root), not sibling
- * of config->pathnames.config the way archiver-position is (service_
- * archiver_position_path above): pg_walsender only ever learns one path
- * per membership (routes.h's own "path" field, written by service_
- * archiver_reconciler.c), and that path is pgdata, so anything pg_
- * walsender needs to find on its own has to live under it.
+ * pgSetup.pgdata itself (this membership's own walcache root), matching
+ * service_archiver_position_path()'s own placement above: pg_walsender
+ * only ever learns one path per membership (routes.h's own "path" field,
+ * written by service_archiver_reconciler.c), and that path is pgdata, so
+ * anything pg_walsender needs to find on its own has to live under it.
  */
 static void
 service_archiver_systemid_path(KeeperConfig *config, char *dest)
@@ -700,20 +621,37 @@ service_archiver_maybe_persist_systemid(Keeper *keeper)
 
 
 /*
- * service_archiver_update_current_lsn scans walcacheDir for the newest WAL
- * segment -- complete, or still ".partial" -- and updates keeper->postgres.
- * currentLSN to the real, currently-captured position: the full segment
- * boundary for a complete one, or the real (zero-tail-trimmed) content
- * length within the current ".partial" one when that's the frontier. This
- * is the single, out-of-band-maintained source of truth for "how far has
- * this archiver actually captured" -- computed here, once, per tick, and
- * from here alone: both keeper_node_active()'s own per-tick report to the
- * monitor (the same way every other node kind reports its own currentLSN)
- * and service_archiver_serve_refresh_routes()'s own routes-file "position"
- * key (service_archiver_serve.c) read via service_archiver_read_current_lsn()
- * above, rather than each independently re-deriving it by scanning WAL file
+ * service_archiver_update_current_lsn scans walcacheDir for the newest
+ * *complete* WAL segment and updates keeper->postgres.currentLSN to that
+ * segment's own end boundary. This is the single, out-of-band-maintained
+ * source of truth for "how far has this archiver actually captured" --
+ * computed here, once, per tick, and from here alone: both keeper_node_
+ * active()'s own per-tick report to the monitor (the same way every other
+ * node kind reports its own currentLSN) and the archiver-position cache
+ * file pg_walsender reads (service_archiver_persist_current_lsn() below,
+ * wal_position_cache_read() on the pg_walsender side) come from this one
+ * scan, rather than each independently re-deriving it by scanning WAL file
  * content on their own -- one canonical value, not several that could
  * disagree.
+ *
+ * Deliberately ignores a still-in-progress ".partial" segment even when
+ * it's the real frontier: a complete segment's own end boundary is
+ * guaranteed to have been fully, durably received, while an in-progress
+ * ".partial" file's raw (zero-tail-trimmed) byte count is not guaranteed
+ * to land on a genuine WAL record boundary -- it can be caught mid-record.
+ * That distinction matters because this value doubles as a FAST_FORWARD
+ * convergence target for another node rebuilding from this archiver
+ * (standby_fetch_missing_wal(), primary_standby.c): Postgres's own replay
+ * can only ever advance to real record boundaries, so a target that isn't
+ * one can leave that poll waiting forever once the original source primary
+ * is gone and nothing more will ever arrive to complete the cut-off
+ * record. Reporting the last complete segment's boundary instead costs
+ * this value a little freshness (up to just under one segment's worth of
+ * already-captured-but-not-yet-reported WAL), never correctness: pg_
+ * walsender's own streaming loop (cmd_start_replication.c) still serves
+ * everything genuinely available, including ".partial" content, past
+ * whatever target callers converge on, so replay always has real data to
+ * advance through and beyond it.
  *
  * This is also what makes an archiving node a real, rankable candidate for
  * pgautofailover.get_most_advanced_standby() during a failover election:
@@ -725,6 +663,22 @@ service_archiver_maybe_persist_systemid(Keeper *keeper)
  * been captured yet, matching keeper_update_pg_state()'s own default
  * before it has a real reading.
  */
+
+/*
+ * wal_segment_timeline extracts the timeline (the filename's first 8 hex
+ * digits) from a real WAL segment filename.
+ */
+static int
+wal_segment_timeline(const char *walFileName)
+{
+	char tliHex[9] = { 0 };
+
+	memcpy(tliHex, walFileName, 8); /* IGNORE-BANNED */
+
+	return (int) strtoul(tliHex, NULL, 16);
+}
+
+
 static void
 service_archiver_update_current_lsn(Keeper *keeper)
 {
@@ -736,79 +690,35 @@ service_archiver_update_current_lsn(Keeper *keeper)
 	{
 		strlcpy(keeper->postgres.currentLSN, "0/0",
 				sizeof(keeper->postgres.currentLSN));
+		currentTimeline = 0;
 		return;
 	}
 
 	char bestComplete[ARCHIVER_WAL_FNAME_LEN + 1] = { 0 };
-	char bestPartial[ARCHIVER_WAL_FNAME_LEN + 1] = { 0 };
 	struct dirent *entry;
 
 	while ((entry = readdir(dir)) != NULL)
 	{
-		if (is_wal_segment_filename(entry->d_name))
+		if (is_wal_segment_filename(entry->d_name) &&
+			(bestComplete[0] == '\0' || strcmp(entry->d_name, bestComplete) > 0))
 		{
-			if (bestComplete[0] == '\0' || strcmp(entry->d_name, bestComplete) > 0)
-			{
-				strlcpy(bestComplete, entry->d_name, sizeof(bestComplete));
-			}
-
-			continue;
-		}
-
-		const char *partialSuffix = ".partial";
-		size_t nameLen = strlen(entry->d_name);
-		size_t suffixLen = strlen(partialSuffix);
-
-		if (nameLen == ARCHIVER_WAL_FNAME_LEN + suffixLen &&
-			strcmp(entry->d_name + ARCHIVER_WAL_FNAME_LEN, partialSuffix) == 0)
-		{
-			char segPart[ARCHIVER_WAL_FNAME_LEN + 1] = { 0 };
-
-			memcpy(segPart, entry->d_name, ARCHIVER_WAL_FNAME_LEN); /* IGNORE-BANNED */
-
-			if (is_wal_segment_filename(segPart) &&
-				(bestPartial[0] == '\0' || strcmp(segPart, bestPartial) > 0))
-			{
-				strlcpy(bestPartial, segPart, sizeof(bestPartial));
-			}
+			strlcpy(bestComplete, entry->d_name, sizeof(bestComplete));
 		}
 	}
 
 	closedir(dir);
 
-	/*
-	 * A ".partial" file only ever exists for the segment actively being
-	 * written, always the same as or newer than the newest complete one --
-	 * whenever it exists at all, it's the real frontier.
-	 */
-	if (bestPartial[0] != '\0' &&
-		(bestComplete[0] == '\0' || strcmp(bestPartial, bestComplete) >= 0))
-	{
-		char path[MAXPGPATH];
-		uint64_t realLength = 0;
-
-		sformat(path, sizeof(path), "%s/%s.partial", walcacheDir, bestPartial);
-
-		if (partial_segment_real_length(path, &realLength))
-		{
-			wal_segment_position_lsn(bestPartial, realLength,
-									 keeper->postgres.currentLSN,
-									 sizeof(keeper->postgres.currentLSN));
-			return;
-		}
-
-		/* fall through to the complete segment below on read failure */
-	}
-
 	if (bestComplete[0] == '\0')
 	{
 		strlcpy(keeper->postgres.currentLSN, "0/0",
 				sizeof(keeper->postgres.currentLSN));
+		currentTimeline = 0;
 		return;
 	}
 
 	wal_segment_end_lsn(bestComplete, keeper->postgres.currentLSN,
 						sizeof(keeper->postgres.currentLSN));
+	currentTimeline = wal_segment_timeline(bestComplete);
 }
 
 

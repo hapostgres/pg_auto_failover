@@ -29,19 +29,32 @@
 #include <stddef.h>
 
 /*
- * Called with successive chunks of the tar byte stream (header blocks,
- * file content, padding, and the final end-of-archive zero blocks all flow
- * through this same callback) -- return false to abort the walk early
- * (e.g. the client disconnected mid-stream).
+ * Called with successive chunks of the tar byte stream (header blocks, file
+ * content, and padding all flow through this same callback) -- return
+ * false to abort the walk early (e.g. the client disconnected mid-stream).
  */
 typedef bool (*TarChunkCallback) (void *context, const char *data, size_t len);
 
 /*
  * tar_stream_directory walks rootDir recursively and invokes callback with
- * the resulting ustar byte stream, including the standard two-zero-block
- * end-of-archive marker. Tar member names are rootDir-relative, with no
- * leading "./" (matching real Postgres's own convention -- see
+ * the resulting ustar byte stream. Tar member names are rootDir-relative,
+ * with no leading "./" (matching real Postgres's own convention -- see
  * basebackup.c's sendDir()).
+ *
+ * Deliberately omits the standalone-tar-file convention's trailing two-
+ * zero-block end-of-archive marker: real Postgres's own perform_base_
+ * backup() (basebackup.c) never puts one on the wire for a client-
+ * streamed, WAL-not-included backup either (the only mode this project
+ * serves, see cmd_base_backup.c's own "WAL-inclusive BASE_BACKUP is not
+ * supported yet" check) -- it sends CopyDone right after the last file's
+ * content/padding, relying on that alone to signal "no more files". A pre-
+ * 15 pg_basebackup client's own receiving state machine (ReceiveAndUnpack
+ * TarFile(), pg_basebackup.c) takes this literally: once it's between
+ * files, it treats the *next* CopyData chunk as a new tar header and
+ * requires it to be exactly TAR_BLOCK_SIZE bytes, erroring out ("invalid
+ * tar block header size") on anything else -- including this marker, which
+ * this project used to send as one extra 2*TAR_BLOCK_SIZE-byte chunk after
+ * the real content. Never needed, and actively broke pre-15 clients.
  */
 bool tar_stream_directory(const char *rootDir, TarChunkCallback callback, void *context);
 
