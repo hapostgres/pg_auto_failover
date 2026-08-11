@@ -82,7 +82,6 @@
 #include "runprogram.h"
 #include "signals.h"
 #include "string_utils.h"
-#include "supervisor.h"
 
 /*
  * One base backup generation child at a time, mirroring
@@ -501,6 +500,108 @@ report_basebackup(Keeper *keeper, NodeAddress *endLsnSource,
 
 
 /*
+ * basebackup_latest_pointer_path computes the small local file pg_
+ * walsender reads to resolve "the current base backup to serve" for this
+ * membership -- a single line naming the label of the latest complete,
+ * live-sourced backup, living alongside the backup directories themselves
+ * (basebackups/) so pg_walsender needs nothing beyond the one "path" its
+ * own routes file already gives it (routes.h) to find both.
+ */
+static void
+basebackup_latest_pointer_path(KeeperConfig *config, char *dest)
+{
+	sformat(dest, MAXPGPATH, "%s/basebackups/.latest", config->pgSetup.pgdata);
+}
+
+
+/*
+ * basebackup_write_latest_pointer atomically (write-tmp + rename, matching
+ * every other file this project writes this way) points the "current base
+ * backup" file at label. The generator writes this the instant it knows a
+ * live backup is complete -- it's the sole owner of that fact, so there is
+ * nothing to push or refresh elsewhere afterwards: pg_walsender reads
+ * whatever this points to, fresh, on every connection.
+ */
+static bool
+basebackup_write_latest_pointer(KeeperConfig *config, const char *label)
+{
+	char path[MAXPGPATH] = { 0 };
+
+	basebackup_latest_pointer_path(config, path);
+
+	char tmpPath[MAXPGPATH] = { 0 };
+
+	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", path);
+
+	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
+
+	if (fileStream == NULL)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	fformat(fileStream, "%s\n", label);
+
+	if (fclose(fileStream) == EOF)
+	{
+		log_warn("Failed to write file \"%s\": %m", tmpPath);
+		return false;
+	}
+
+	if (rename(tmpPath, path) != 0)
+	{
+		log_warn("Failed to rename \"%s\" to \"%s\": %m", tmpPath, path);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * basebackup_clear_latest_pointer_if_matches removes the "current base
+ * backup" pointer when the backup it names (prunedLabel) is the one
+ * retention just deleted -- called from apply_basebackup_retention() below
+ * so pg_walsender never finds itself pointed at an already-removed
+ * directory. A no-op (not an error) when the pointer doesn't exist or
+ * names a different backup.
+ */
+static void
+basebackup_clear_latest_pointer_if_matches(KeeperConfig *config,
+										   const char *prunedLabel)
+{
+	char path[MAXPGPATH] = { 0 };
+
+	basebackup_latest_pointer_path(config, path);
+
+	char *contents = NULL;
+	long fileSize = 0;
+
+	if (!read_file_if_exists(path, &contents, &fileSize) || contents == NULL)
+	{
+		return;
+	}
+
+	char *nl = strchr(contents, '\n');
+
+	if (nl != NULL)
+	{
+		*nl = '\0';
+	}
+
+	bool matches = streq(contents, prunedLabel);
+
+	free(contents);
+
+	if (matches)
+	{
+		(void) unlink(path);
+	}
+}
+
+
+/*
  * apply_basebackup_retention lists every complete base backup for this
  * group (newest first, list_basebackups()'s own ordering) and prunes
  * whatever policy says shouldn't survive: anything beyond the newest
@@ -564,6 +665,8 @@ apply_basebackup_retention(Keeper *keeper, BasebackupPolicy *policy)
 			continue;
 		}
 
+		(void) basebackup_clear_latest_pointer_if_matches(config, backup->label);
+
 		if (!monitor_report_basebackup_deleted(&(keeper->monitor),
 											   backup->basebackupId))
 		{
@@ -599,6 +702,21 @@ generate_live_basebackup(Keeper *keeper, NodeAddress *source,
 	if (!report_basebackup(keeper, source, backupDir, label, "live", NULL))
 	{
 		return false;
+	}
+
+	/*
+	 * Only ever for a 'live' backup, never 'replay': a replay-sourced
+	 * backup's own promoted, self-consistent copy can end up on a *later*
+	 * timeline than the walcache's own real captured timeline (see cmd_
+	 * base_backup.c's own read-time compatibility check, pg_walsender),
+	 * so it must never become what BASE_BACKUP serves.
+	 */
+	if (!basebackup_write_latest_pointer(&(keeper->config), label))
+	{
+		log_warn("Failed to update the latest base backup pointer for "
+				 "\"%s\"/%d; pg_walsender may keep serving an older backup "
+				 "until the next one completes",
+				 keeper->config.formation, keeper->config.groupId);
 	}
 
 	(void) apply_basebackup_retention(keeper, policy);
@@ -1017,56 +1135,6 @@ get_current_primary_node_id(Keeper *keeper, int64_t *primaryNodeId)
 
 
 /*
- * notify_archiver_serve_of_new_basebackup signals the archiver-serve
- * process (SIGUSR1) to refresh its routes file immediately, rather than
- * leaving pg_walsender to serve a stale route for up to ARCHIVER_SERVE_
- * ROUTES_REFRESH_TICKS more ticks after the monitor already knows this
- * backup is complete. Best-effort: archiver-serve's own periodic refresh
- * is still there as a fallback, so any failure here (pidfile missing or
- * stale, process already gone) is logged and otherwise ignored -- it must
- * never turn an already-successful base backup into a failure.
- *
- * config->archiverPidFilePath is the archiver-level *supervisor's* own
- * shared pidfile, with one "<pid> <service name>" line per supervised
- * service (archiver-serve, archiver-reconciler, each archiver-capture-*)
- * -- not a dedicated pidfile of archiver-serve's own. Reading its first
- * line (as a plain read_pidfile() would) gives the supervisor's own pid,
- * not archiver-serve's; supervisor_find_service_pid() is what actually
- * looks a specific service up by name.
- */
-static void
-notify_archiver_serve_of_new_basebackup(KeeperConfig *config)
-{
-	if (IS_EMPTY_STRING_BUFFER(config->archiverPidFilePath))
-	{
-		return;
-	}
-
-	pid_t archiverServePid = 0;
-
-	if (!supervisor_find_service_pid(config->archiverPidFilePath,
-									 SERVICE_NAME_ARCHIVER_SERVE,
-									 &archiverServePid) ||
-		archiverServePid <= 0)
-	{
-		log_debug("Could not find archiver-serve's pid in \"%s\" to "
-				  "prompt an immediate routes refresh; it will pick up "
-				  "this base backup on its own next periodic tick",
-				  config->archiverPidFilePath);
-		return;
-	}
-
-	if (kill(archiverServePid, SIGUSR1) != 0)
-	{
-		log_debug("Could not signal archiver-serve (pid %d) to prompt an "
-				  "immediate routes refresh: %m; it will pick up this "
-				  "base backup on its own next periodic tick",
-				  archiverServePid);
-	}
-}
-
-
-/*
  * service_archiver_maybe_generate_basebackup checks, once per
  * service_archiver_loop() tick, whether a base backup generation is due
  * for this group and -- if so, and no generation is already in flight --
@@ -1243,11 +1311,6 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 											 label, &policy)
 				  : generate_replay_basebackup(keeper, sourceBackupDir,
 											   backupDir, label, &policy);
-
-		if (ok)
-		{
-			notify_archiver_serve_of_new_basebackup(config);
-		}
 
 		exit(ok ? EXIT_CODE_QUIT : EXIT_CODE_INTERNAL_ERROR);
 	}

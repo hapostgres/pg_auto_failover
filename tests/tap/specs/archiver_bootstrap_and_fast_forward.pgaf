@@ -56,20 +56,20 @@ teardown {
 #
 # test_001: wait for the archiver's live base backup (get_latest_basebackup's
 #           preferred_source = 'live' overload -- see pgautofailover.sql --
-#           is what service_archiver_serve.c's own routes refresh asks for;
-#           a plain 'live' check here is the same thing this spec can
-#           observe from the monitor side), then bootstrap node2 from it.
+#           is what the monitor itself would report), then bootstrap node2
+#           from it.
 #
 #           The monitor's own "complete" status and pg_walsender's actual
 #           ability to serve that backup used to be two different things:
-#           the archiver only re-read its routes file (what cmd_base_
-#           backup.c actually checks -- route->basebackupDir) once every
-#           ARCHIVER_SERVE_ROUTES_REFRESH_TICKS ticks (service_archiver_
-#           serve.c, 30 x the 1s tick). service_archiver_basebackup.c now
-#           signals archiver-serve (SIGUSR1) the moment a backup finishes
-#           generating and gets reported complete, prompting an immediate
-#           refresh instead of waiting for the next tick -- no bridging
-#           sleep needed here anymore.
+#           the archiver only re-read a monitor-derived routes file (what
+#           cmd_base_backup.c actually checked -- route->basebackupDir)
+#           once every ARCHIVER_SERVE_ROUTES_REFRESH_TICKS ticks. pg_
+#           walsender now resolves the current backup itself, straight off
+#           disk, from basebackups/.latest -- a pointer file service_
+#           archiver_basebackup.c writes atomically the instant a live
+#           backup is known complete, the same process and the same
+#           moment the monitor is told -- so there's no second place left
+#           to lag behind it, and no bridging sleep needed here.
 #
 
 step test_001_bootstrap_secondary_from_archiver {

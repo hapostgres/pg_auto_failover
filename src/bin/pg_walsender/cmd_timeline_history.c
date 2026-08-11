@@ -24,7 +24,7 @@
 void
 cmd_timeline_history(int sock, const WsRoute *route, int timeline)
 {
-	if (route == NULL || route->walcacheDir[0] == '\0')
+	if (route == NULL || route->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
 							   "no WAL cache directory configured for this route");
@@ -38,7 +38,7 @@ cmd_timeline_history(int sock, const WsRoute *route, int timeline)
 
 	char path[MAXPGPATH];
 
-	sformat(path, sizeof(path), "%s/%s", route->walcacheDir, filename);
+	sformat(path, sizeof(path), "%s/%s", route->path, filename);
 
 	char *contents = NULL;
 	long fileSize = 0;
@@ -48,7 +48,7 @@ cmd_timeline_history(int sock, const WsRoute *route, int timeline)
 		/* matches real walsender.c: no history file for this timeline is
 		 * an ERROR there too, not a soft "empty" fallback */
 		log_info("TIMELINE_HISTORY: \"%s\" not found under \"%s\"",
-				 filename, route->walcacheDir);
+				 filename, route->path);
 		ws_send_error_response(sock, "58P01",
 							   "requested timeline history file not found");
 		return;

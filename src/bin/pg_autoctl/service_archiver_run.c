@@ -125,14 +125,14 @@ service_archiver_serve_start_service(void *context, pid_t *pid)
 			(void) set_signal_handlers(false);
 			(void) set_ps_title("pg_autoctl: archiver serve");
 
-			/* see service_archiver_capture_start()'s own comment on why
-			 * each supervised child re-connects independently */
-			if (!monitor_init(&(keeper->monitor), keeper->config.monitor_pguri))
-			{
-				log_fatal("Failed to contact the monitor, see above for details");
-				exit(EXIT_CODE_MONITOR);
-			}
-
+			/*
+			 * Unlike its sibling supervised children, archiver-serve never
+			 * talks to the monitor at all (service_archiver_serve.c's own
+			 * header comment) -- no monitor_init() here, so pg_walsender
+			 * keeps being supervised and keeps serving already-captured
+			 * data through a monitor outage with nothing in this process
+			 * depending on it being reachable.
+			 */
 			if (!service_archiver_serve_loop(keeper))
 			{
 				exit(EXIT_CODE_INTERNAL_ERROR);

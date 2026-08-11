@@ -613,6 +613,93 @@ service_archiver_read_current_lsn(KeeperConfig *config,
 
 
 /*
+ * service_archiver_systemid_path computes the local file holding this
+ * membership's group's Postgres system identifier -- inside config->
+ * pgSetup.pgdata itself (this membership's own walcache root), not sibling
+ * of config->pathnames.config the way archiver-position is (service_
+ * archiver_position_path above): pg_walsender only ever learns one path
+ * per membership (routes.h's own "path" field, written by service_
+ * archiver_reconciler.c), and that path is pgdata, so anything pg_
+ * walsender needs to find on its own has to live under it.
+ */
+static void
+service_archiver_systemid_path(KeeperConfig *config, char *dest)
+{
+	sformat(dest, MAXPGPATH, "%s/archiver-systemid", config->pgSetup.pgdata);
+}
+
+
+/*
+ * service_archiver_maybe_persist_systemid writes this group's system
+ * identifier to the local file above, once. Unlike the position file, this
+ * never needs refreshing once written: a Postgres cluster's system
+ * identifier is set at initdb and never changes for its lifetime, so
+ * write-once is not a simplification that trades away correctness, it's
+ * the actually-correct behavior -- there is no "stale" system identifier to
+ * worry about invalidating.
+ *
+ * A no-op once the file already exists. Before that, asks the monitor once
+ * per tick (see monitor_get_group_system_identifier()'s own comment,
+ * monitor.c, for why: an archiving node has no real pg_control of its own
+ * to read this from directly, it can only learn what the group's real
+ * primary already self-reported at ordinary node registration) until the
+ * value becomes available -- harmless and cheap to keep asking meanwhile,
+ * this is best-effort and never blocks the rest of the loop.
+ */
+static void
+service_archiver_maybe_persist_systemid(Keeper *keeper)
+{
+	char path[MAXPGPATH] = { 0 };
+
+	service_archiver_systemid_path(&(keeper->config), path);
+
+	if (file_exists(path))
+	{
+		return;
+	}
+
+	uint64_t systemIdentifier = 0;
+	bool found = false;
+
+	if (!monitor_get_group_system_identifier(&(keeper->monitor),
+											 keeper->config.formation,
+											 keeper->config.groupId,
+											 &systemIdentifier, &found) ||
+		!found || systemIdentifier == 0)
+	{
+		/* not known yet, or the monitor couldn't be reached -- retry next
+		 * tick, errors (if any) have already been logged */
+		return;
+	}
+
+	char tmpPath[MAXPGPATH] = { 0 };
+
+	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", path);
+
+	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
+
+	if (fileStream == NULL)
+	{
+		/* errors have already been logged */
+		return;
+	}
+
+	fformat(fileStream, "%" PRIu64 "\n", systemIdentifier);
+
+	if (fclose(fileStream) == EOF)
+	{
+		log_warn("Failed to write file \"%s\": %m", tmpPath);
+		return;
+	}
+
+	if (rename(tmpPath, path) != 0)
+	{
+		log_warn("Failed to rename \"%s\" to \"%s\": %m", tmpPath, path);
+	}
+}
+
+
+/*
  * service_archiver_update_current_lsn scans walcacheDir for the newest WAL
  * segment -- complete, or still ".partial" -- and updates keeper->postgres.
  * currentLSN to the real, currently-captured position: the full segment
@@ -815,6 +902,7 @@ service_archiver_loop(Keeper *keeper)
 
 		(void) service_archiver_update_current_lsn(keeper);
 		(void) service_archiver_persist_current_lsn(keeper);
+		(void) service_archiver_maybe_persist_systemid(keeper);
 
 		/*
 		 * An archiver never sets postgres.pgIsRunning through the usual

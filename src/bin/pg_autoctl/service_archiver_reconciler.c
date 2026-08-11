@@ -90,9 +90,12 @@
 
 static char * archiver_reconciler_tracking_path(Keeper *templateKeeper, char *dest);
 static char * archiver_reconciler_pidfile_path(Keeper *templateKeeper, char *dest);
+static char * archiver_reconciler_routes_path(Keeper *templateKeeper, char *dest);
 static void archiver_reconciler_cleanup_stale_children(Keeper *templateKeeper);
 static bool archiver_reconciler_write_tracking_file(Keeper *templateKeeper,
 													Supervisor *supervisor);
+static bool archiver_reconciler_write_routes_file(Keeper *templateKeeper,
+												  Supervisor *supervisor);
 static bool build_membership_keeper(Keeper *templateKeeper,
 									ArchiverMembership *membership,
 									Keeper **outKeeper);
@@ -135,6 +138,32 @@ archiver_reconciler_pidfile_path(Keeper *templateKeeper, char *dest)
 {
 	path_in_same_directory(templateKeeper->config.pathnames.pid,
 						   "archiver-reconciler.pid", dest);
+	return dest;
+}
+
+
+/*
+ * archiver_reconciler_routes_path computes the path of the small mapping
+ * file pg_walsender reads per connection (routes.h, "[formation/group]"
+ * sections each carrying just a "path" key) -- must compute to the exact
+ * same path as service_archiver_serve.c's own service_archiver_serve_
+ * routes_path(), since that's the value archiver-serve passes on pg_
+ * walsender's own --routes flag when it execs it. Both processes derive it
+ * independently from their own (identically loaded) config, the same
+ * pattern already established for archiver-position (service_archiver.c)
+ * and archiver-routes.ini's own path before this file took over writing
+ * it -- no IPC needed to agree on where it lives.
+ *
+ * This reconciler, not archiver-serve, is the natural owner of *writing*
+ * this file: it's already the process that discovers a membership's
+ * addition or removal (this file's own header comment), the only two
+ * moments the (formation, group) -> local path mapping actually changes.
+ */
+static char *
+archiver_reconciler_routes_path(Keeper *templateKeeper, char *dest)
+{
+	path_in_same_directory(templateKeeper->config.pathnames.config,
+						   "archiver-routes.ini", dest);
 	return dest;
 }
 
@@ -267,6 +296,77 @@ archiver_reconciler_write_tracking_file(Keeper *templateKeeper,
 
 
 /*
+ * archiver_reconciler_write_routes_file writes the routes file pg_walsender
+ * reads per connection: one "[formation/group]" section, "path = <local
+ * storage root>", for every membership this archiver currently holds
+ * capture for. Atomic (write-tmp + rename, matching every other file this
+ * project writes this way) so pg_walsender's own per-connection reader
+ * (routes_load(), routes.c) never observes a partial write.
+ *
+ * Deliberately just a path, nothing else: which base backup is current,
+ * this group's system identifier, and the current WAL position are all
+ * either immutable per-membership facts or things pg_walsender can read
+ * fresher, more cheaply, and more simply straight from that path's own
+ * on-disk content at connection time than a periodically-refreshed cache
+ * ever could -- see archiving-details.rst's own "Keeping local files
+ * current" section for the full rationale.
+ */
+static bool
+archiver_reconciler_write_routes_file(Keeper *templateKeeper,
+									  Supervisor *supervisor)
+{
+	char path[MAXPGPATH] = { 0 };
+
+	(void) archiver_reconciler_routes_path(templateKeeper, path);
+
+	char tmpPath[MAXPGPATH] = { 0 };
+
+	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", path);
+
+	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
+
+	if (fileStream == NULL)
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	for (int i = 0; i < supervisor->serviceCount; i++)
+	{
+		Service *service = &(supervisor->services[i]);
+
+		if (strncmp(service->name, ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX,
+					strlen(ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX)) != 0)
+		{
+			continue;
+		}
+
+		Keeper *membershipKeeper = (Keeper *) service->context;
+
+		fformat(fileStream, "[%s/%d]\n",
+				membershipKeeper->config.formation,
+				membershipKeeper->config.groupId);
+		fformat(fileStream, "path = %s\n",
+				membershipKeeper->config.pgSetup.pgdata);
+	}
+
+	if (fclose(fileStream) == EOF)
+	{
+		log_warn("Failed to write file \"%s\": %m", tmpPath);
+		return false;
+	}
+
+	if (rename(tmpPath, path) != 0)
+	{
+		log_warn("Failed to rename \"%s\" to \"%s\": %m", tmpPath, path);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * build_membership_keeper builds a full, independent Keeper for one
  * membership out of the shared archiver-level template Keeper: the
  * archiver identity (archiverId, monitor_pguri, pg_ctl, hostname, name,
@@ -306,18 +406,6 @@ build_membership_keeper(Keeper *templateKeeper, ArchiverMembership *membership,
 	 * field is a plain value (char arrays, ints), never a pointer this
 	 * process doesn't already own, so a shallow copy is a real copy */
 	*membershipKeeper = *templateKeeper;
-
-	/*
-	 * Stash the archiver-level supervisor's own shared pidfile path (still
-	 * correct at this exact point, inherited from templateKeeper) into its
-	 * own dedicated field before the pathnames recompute below overwrites
-	 * config.pathnames.pid with this membership's own value -- see
-	 * KeeperConfig's own comment on archiverPidFilePath for why a capture
-	 * child needs this.
-	 */
-	strlcpy(membershipKeeper->config.archiverPidFilePath,
-			templateKeeper->config.pathnames.pid,
-			sizeof(membershipKeeper->config.archiverPidFilePath));
 
 	strlcpy(membershipKeeper->config.formation, membership->formation,
 			sizeof(membershipKeeper->config.formation));
@@ -582,6 +670,7 @@ archiver_reconciler_tick(Supervisor *supervisor, void *context)
 	if (toRemoveCount > 0 || memberships.count != supervisor->serviceCount)
 	{
 		(void) archiver_reconciler_write_tracking_file(templateKeeper, supervisor);
+		(void) archiver_reconciler_write_routes_file(templateKeeper, supervisor);
 	}
 }
 
@@ -646,6 +735,24 @@ service_archiver_reconciler_loop(Keeper *templateKeeper)
 
 	log_info("Archiver reconciler: starting capture for %d membership(s)",
 			 memberships.count);
+
+	/*
+	 * Write the routes file now, before pg_walsender ever gets a chance to
+	 * be exec'd against it (service_archiver_serve.c, a sibling top-level
+	 * service start_archiver() forks independently and concurrently with
+	 * this one) -- a plain stack Supervisor wrapping the services[] array
+	 * built above is enough, archiver_reconciler_write_routes_file() only
+	 * ever reads ->services/->serviceCount. Without this, a freshly
+	 * started archiver would have no routes file at all until this
+	 * process's own first periodic tick, up to ARCHIVER_RECONCILER_
+	 * INTERVAL_SECONDS later.
+	 */
+	Supervisor initialSupervisor = {
+		.services = services,
+		.serviceCount = serviceCount
+	};
+
+	(void) archiver_reconciler_write_routes_file(templateKeeper, &initialSupervisor);
 
 	char pidfile[MAXPGPATH] = { 0 };
 

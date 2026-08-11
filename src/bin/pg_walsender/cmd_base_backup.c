@@ -498,15 +498,70 @@ find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
 }
 
 
+/*
+ * read_latest_basebackup_label reads the small pointer file pg_autoctl's
+ * own service_archiver_basebackup.c writes the instant a live base backup
+ * completes (basebackup_write_latest_pointer()) -- a single line naming
+ * that backup's own label/subdirectory under "<path>/basebackups/". This
+ * is the *only* place BASE_BACKUP learns which backup is current: no
+ * caching, no monitor round trip, just whatever this file says right now
+ * -- see routes.h's own header comment for the full rationale. Returns
+ * false (labelOut untouched) when the file doesn't exist yet: no live base
+ * backup has ever completed for this membership.
+ */
+static bool
+read_latest_basebackup_label(const char *path, char *labelOut, size_t labelOutSize)
+{
+	char pointerPath[MAXPGPATH] = { 0 };
+
+	sformat(pointerPath, sizeof(pointerPath), "%s/basebackups/.latest", path);
+
+	char *contents = NULL;
+	long fileSize = 0;
+
+	if (!read_file_if_exists(pointerPath, &contents, &fileSize) || contents == NULL)
+	{
+		return false;
+	}
+
+	char *nl = strchr(contents, '\n');
+
+	if (nl != NULL)
+	{
+		*nl = '\0';
+	}
+
+	strlcpy(labelOut, contents, labelOutSize);
+	free(contents);
+
+	return labelOut[0] != '\0';
+}
+
+
 void
 cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 {
-	if (route == NULL || route->basebackupDir[0] == '\0')
+	char label[NAMEDATALEN] = { 0 };
+	char basebackupDir[MAXPGPATH] = { 0 };
+
+	if (route == NULL || route->path[0] == '\0' ||
+		!read_latest_basebackup_label(route->path, label, sizeof(label)))
 	{
 		ws_send_error_response(sock, "58P01",
 							   "no base backup configured for this route "
 							   "(the archiver hasn't taken one yet, or this "
-							   "route wasn't given a basebackup directory)");
+							   "route wasn't given a storage path)");
+		return;
+	}
+
+	sformat(basebackupDir, sizeof(basebackupDir), "%s/basebackups/%s",
+			route->path, label);
+
+	if (!directory_exists(basebackupDir))
+	{
+		ws_send_error_response(sock, "58P01",
+							   "the latest base backup directory is missing "
+							   "on disk");
 		return;
 	}
 
@@ -546,12 +601,44 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 	}
 
 	char lsn[32] = "0/0";
-	int timeline = (route->timeline > 0) ? route->timeline : 1;
+	int timeline = 1;
 
-	if (!read_backup_label(route->basebackupDir, lsn, sizeof(lsn), &timeline))
+	if (!read_backup_label(basebackupDir, lsn, sizeof(lsn), &timeline))
 	{
 		log_warn("No parseable backup_label under \"%s\"; reporting a "
-				 "placeholder start position", route->basebackupDir);
+				 "placeholder start position", basebackupDir);
+	}
+
+	/*
+	 * Read-time compatibility guard: a 'replay'-sourced backup could in
+	 * principle end up on a *later* timeline than the walcache's own real
+	 * captured timeline (a real pg_basebackup rejects that combination
+	 * outright once it reaches its own background WAL streaming step --
+	 * see this file's own find_reachable_end_position() comment). service_
+	 * archiver_basebackup.c's own basebackup_write_latest_pointer() is only
+	 * ever called for a 'live' backup precisely to make this unreachable at
+	 * the source, but checking again here, fresh, against whatever the
+	 * walcache actually says *right now* costs one cheap directory scan and
+	 * catches it even if that guarantee is ever weakened later -- the same
+	 * defense in depth this project's own archiver-serve used to apply at
+	 * write time, moved to read time since that's the only place a change
+	 * to either side (a new backup, or the walcache advancing past a
+	 * failover) is guaranteed to be visible.
+	 */
+	uint32_t walcacheTimeline = 0;
+	char walcacheEndLsn[32] = { 0 };
+	bool haveWalcacheInfo = find_reachable_end_position(route->path,
+														&walcacheTimeline,
+														walcacheEndLsn,
+														sizeof(walcacheEndLsn));
+
+	if (haveWalcacheInfo && (int) walcacheTimeline != timeline)
+	{
+		ws_send_error_response(sock, "58P01",
+							   "the latest base backup is on a different "
+							   "timeline than the WAL cache; refusing to "
+							   "serve a mismatched pairing");
+		return;
 	}
 
 	char tliStr[16];
@@ -603,10 +690,10 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 
 	TarStreamCbContext ctx = { sock, true };
 
-	if (!tar_stream_directory(route->basebackupDir, tar_chunk_cb, &ctx) || !ctx.ok)
+	if (!tar_stream_directory(basebackupDir, tar_chunk_cb, &ctx) || !ctx.ok)
 	{
 		log_error("Failed to stream base backup tar contents from \"%s\"",
-				  route->basebackupDir);
+				  basebackupDir);
 		return;
 	}
 
@@ -623,41 +710,17 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 	 * passed hours ago, or, worse, one from a since-pruned segment it can
 	 * never reach; either way its background thread hangs the whole
 	 * command forever waiting on a position that will never legitimately
-	 * arrive as "new" data.
-	 *
-	 * route->position is the canonical, out-of-band-maintained value --
-	 * see service_archiver_update_current_lsn()'s own comment (pg_autoctl's
-	 * service_archiver.c) for why the archiver-serve supervisor computes
-	 * this once, itself, and writes it into the routes file, rather than
-	 * every reader (this one included) independently re-deriving it by
-	 * scanning WAL file content on its own. find_reachable_end_position()
-	 * (this file's own comment) is the fallback for a route that doesn't
-	 * carry one yet (an older archiver-serve binary against a newer pg_
-	 * walsender, during a rolling upgrade) -- still a real, reachable
-	 * position, just independently re-derived. Falls back further still to
-	 * the start position only if the walcache is completely empty (no base
-	 * backup should exist at all in that case).
+	 * arrive as "new" data. haveWalcacheInfo/walcacheEndLsn were already
+	 * computed above, for the timeline-compatibility check -- reused here
+	 * rather than scanning the walcache directory twice. Falls back to the
+	 * start position only when the walcache is completely empty (no base
+	 * backup should exist at all in that case), and reuses tliStr as-is:
+	 * the check above already proved walcacheTimeline == timeline whenever
+	 * haveWalcacheInfo is true.
 	 */
-	char endLsn[32];
-	uint32_t endTimeline;
-	const char *endLsnPtr = lsn;
-	const char *endTliStr = tliStr;
-	char endTliBuf[16];
+	const char *endLsnPtr = haveWalcacheInfo ? walcacheEndLsn : lsn;
 
-	if (route->position[0] != '\0')
-	{
-		endLsnPtr = route->position;
-		endTliStr = tliStr;
-	}
-	else if (find_reachable_end_position(route->walcacheDir, &endTimeline, endLsn,
-										 sizeof(endLsn)))
-	{
-		sformat(endTliBuf, sizeof(endTliBuf), "%u", endTimeline);
-		endLsnPtr = endLsn;
-		endTliStr = endTliBuf;
-	}
-
-	if (!send_position_row(sock, endLsnPtr, endTliStr))
+	if (!send_position_row(sock, endLsnPtr, tliStr))
 	{
 		return;
 	}

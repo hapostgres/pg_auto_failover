@@ -25,7 +25,6 @@ volatile sig_atomic_t asked_to_stop = 0;      /* SIGTERM */
 volatile sig_atomic_t asked_to_stop_fast = 0; /* SIGINT */
 volatile sig_atomic_t asked_to_reload = 0;    /* SIGHUP */
 volatile sig_atomic_t asked_to_quit = 0;      /* SIGQUIT */
-volatile sig_atomic_t asked_to_refresh_routes = 0; /* SIGUSR1 */
 
 /*
  * set_signal_handlers sets our signal handlers for the 4 signals that we
@@ -40,7 +39,6 @@ set_signal_handlers(bool exitOnQuit)
 	pqsignal(SIGHUP, catch_reload);
 	pqsignal(SIGINT, catch_int);
 	pqsignal(SIGTERM, catch_term);
-	pqsignal(SIGUSR1, catch_refresh_routes);
 
 	if (exitOnQuit)
 	{
@@ -61,7 +59,7 @@ set_signal_handlers(bool exitOnQuit)
 bool
 block_signals(sigset_t *mask, sigset_t *orig_mask)
 {
-	int signals[] = { SIGHUP, SIGINT, SIGTERM, SIGQUIT, SIGUSR1, -1 };
+	int signals[] = { SIGHUP, SIGINT, SIGTERM, SIGQUIT, -1 };
 
 	if (sigemptyset(mask) == -1)
 	{
@@ -127,19 +125,6 @@ catch_reload(SIGNAL_ARGS)
 
 	asked_to_reload = 1;
 	pqsignal(sig, catch_reload);
-}
-
-
-/*
- * catch_refresh_routes receives the SIGUSR1 signal.
- */
-void
-catch_refresh_routes(SIGNAL_ARGS)
-{
-	int sig = postgres_signal_arg;
-
-	asked_to_refresh_routes = 1;
-	pqsignal(sig, catch_refresh_routes);
 }
 
 

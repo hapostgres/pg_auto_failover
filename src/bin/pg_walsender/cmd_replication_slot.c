@@ -105,14 +105,14 @@ slot_name_is_safe(const char *name)
 static void
 slot_marker_path(const WsRoute *route, const char *slotName, char *dest, size_t destSize)
 {
-	sformat(dest, destSize, "%s/.slot_%s", route->walcacheDir, slotName);
+	sformat(dest, destSize, "%s/.slot_%s", route->path, slotName);
 }
 
 
 void
 cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 {
-	if (route == NULL || route->walcacheDir[0] == '\0')
+	if (route == NULL || route->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
 							   "no WAL cache directory configured for this route");
@@ -180,7 +180,7 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 	char consistentPoint[32] = "0/0";
 	uint32_t timeline;
 
-	(void) wal_dir_find_latest(route->walcacheDir, &timeline, consistentPoint,
+	(void) wal_dir_find_latest(route->path, &timeline, consistentPoint,
 							   sizeof(consistentPoint));
 
 	char path[MAXPGPATH];
@@ -218,7 +218,7 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 void
 cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 {
-	if (route == NULL || route->walcacheDir[0] == '\0')
+	if (route == NULL || route->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
 							   "no WAL cache directory configured for this route");
@@ -282,7 +282,12 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 
 	free(contents);
 
-	uint32_t timeline = (route->timeline > 0) ? (uint32_t) route->timeline : 1;
+	uint32_t timeline = 1;
+	char discardLsn[32] = { 0 };
+
+	(void) wal_dir_find_latest(route->path, &timeline, discardLsn,
+							   sizeof(discardLsn));
+
 	char timelineStr[16];
 
 	sformat(timelineStr, sizeof(timelineStr), "%u", timeline);

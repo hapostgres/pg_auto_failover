@@ -327,7 +327,7 @@ find_oldest_segno(const char *walcacheDir, uint32_t timeline, uint64_t *oldestSe
 void
 cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 {
-	if (route == NULL || route->walcacheDir[0] == '\0')
+	if (route == NULL || route->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
 							   "no WAL cache directory configured for this route");
@@ -383,7 +383,11 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 
 	p = skip_ws(after);
 
-	uint32_t timeline = (route->timeline > 0) ? (uint32_t) route->timeline : 1;
+	uint32_t timeline = 1;
+	char discardLsn[32] = { 0 };
+
+	(void) wal_dir_find_latest(route->path, &timeline, discardLsn,
+							   sizeof(discardLsn));
 
 	if (strncasecmp(p, "TIMELINE", 8) == 0)
 	{
@@ -399,7 +403,7 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 	log_info("START_REPLICATION: streaming from %X/%08X on timeline %u "
 			 "from \"%s\"",
 			 (uint32_t) (startLsn >> 32), (uint32_t) startLsn, timeline,
-			 route->walcacheDir);
+			 route->path);
 
 	uint64_t segno = startLsn / WS_WAL_SEGMENT_SIZE;
 	uint64_t offset = startLsn % WS_WAL_SEGMENT_SIZE;
@@ -420,7 +424,7 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 		char completePath[MAXPGPATH];
 
 		sformat(completePath, sizeof(completePath), "%s/%s",
-				route->walcacheDir, filename);
+				route->path, filename);
 
 		bool isComplete = file_exists(completePath);
 
@@ -434,7 +438,7 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 		{
 			uint64_t oldestSegno;
 
-			if (find_oldest_segno(route->walcacheDir, timeline, &oldestSegno) &&
+			if (find_oldest_segno(route->path, timeline, &oldestSegno) &&
 				segno < oldestSegno)
 			{
 				char oldestName[32];

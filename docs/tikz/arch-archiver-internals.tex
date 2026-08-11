@@ -49,17 +49,17 @@
   \node (walcache) at (-9.4,3.9) [file] {WAL cache / basebackups};
   \path (recv.south) edge[->,thick] node[right] {\small writes} (walcache.north);
 
-  \node (pos) at (-3.1,7.4) [file] {archiver-position};
-  \path (cap.south) edge[->,dashed,color=abox,out=-70,in=110] node[below,sloped] {\small writes} (pos.north);
+  \node (sysid) at (-3.1,7.4) [file] {archiver-systemid};
+  \path (cap.south) edge[->,dashed,color=abox,out=-70,in=110] node[below,sloped] {\small writes} (sysid.north);
 
   \node (routes) at (3.1,10.4) [file] {archiver-routes.ini};
-  \path (serve.south) edge[->,dashed,color=abox,out=250,in=70] node[below,sloped] {\small writes} (routes.north);
-
-  \path (pos.east) edge[->,dashed,color=pbox,out=-20,in=200] node[below,pos=0.5] {\small reads} (routes.west);
+  \path (recon.east) edge[->,dashed,color=abox,out=-30,in=140] node[above,sloped,pos=0.5] {\small writes} (routes.north);
 
   \node (wsend) at (9.4,10.4) [child] {\ttfamily\small pg\_walsender};
   \path (serve.south) edge[->,thick,out=-50,in=90] node[right,pos=0.55,align=left] {\small fork + exec\\[-2pt]\scriptsize \texttt{--routes ...}} (wsend.north);
   \path (routes.east) edge[->,thick,out=0,in=160] node[above,pos=0.5] {\small reads} (wsend.west);
+  \path (sysid.south) edge[->,dashed,color=pbox,out=-60,in=180] node[below,sloped,pos=0.4] {\small reads} (wsend.west);
+  \path (walcache.east) edge[->,dashed,color=pbox,out=20,in=220] node[below,sloped,pos=0.3] {\small reads (\texttt{.latest}, WAL)} (wsend.south);
 
   \node (consumers) at (9.4,3.6) [consumers]
         {\normalsize Consumers\\[4pt]

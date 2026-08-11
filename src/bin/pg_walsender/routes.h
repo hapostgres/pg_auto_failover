@@ -2,13 +2,22 @@
  * src/bin/pg_walsender/routes.h
  *   The archiver's own "pg_hba.conf" equivalent: a small INI file, one
  *   section per "<formation>/<group>" this archiver serves, mapping the
- *   incoming connection's dbname to a WAL-cache directory, a base-backup
- *   directory, and an optional allowed-hosts list. Written and periodically
- *   refreshed by pg_autoctl's archiver-serve supervisor
- *   (service_archiver_serve.c) from the monitor's archiver_node/basebackup
- *   rows; pg_walsender itself never talks to the monitor (see the
- *   "Routing" section of ~/dev/temp/archiving-disaster-recovery.md's
- *   implementation plan).
+ *   incoming connection's dbname to that membership's own local storage
+ *   root and an optional allowed-hosts list. Written by pg_autoctl's
+ *   archiver reconciler (service_archiver_reconciler.c) whenever a
+ *   membership is added or removed -- the only two moments this mapping
+ *   actually changes.
+ *
+ *   Deliberately just a path: which base backup is current, this group's
+ *   system identifier, and the current WAL position are NOT carried here.
+ *   Each command that needs one of those reads it fresh, straight from a
+ *   small purpose-built file under that same path, at connection time --
+ *   see cmd_base_backup.c's own basebackups/.latest and cmd_identify_
+ *   system.c's own archiver-systemid for the two current examples. pg_
+ *   walsender itself never talks to the monitor (see the "Routing" section
+ *   of ~/dev/temp/archiving-disaster-recovery.md's implementation plan,
+ *   and archiving-details.rst's "Keeping local files current" section
+ *   for the full rationale behind this split).
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -25,17 +34,11 @@
 typedef struct WsRoute
 {
 	char key[NAMEDATALEN + 16];         /* "<formation>/<group>", matches dbname */
-	char walcacheDir[MAXPGPATH];
-	char basebackupDir[MAXPGPATH];
+	char path[MAXPGPATH];               /* this membership's own local storage
+	                                     * root -- WAL cache, basebackups/,
+	                                     * and archiver-systemid all live
+	                                     * directly under it */
 	char allowedHosts[1024];            /* comma-separated, empty = unrestricted */
-	char systemId[32];                  /* decimal uint64, as text; "" = unknown */
-	int timeline;                       /* 0 = unknown */
-	char position[32];                  /* "%X/%08X" pg_lsn text; "" = unknown --
-	                                     * see service_archiver_update_current_lsn()'s
-	                                     * own comment (service_archiver.c) for what
-	                                     * this is and why it lives here rather than
-	                                     * being re-derived from WAL file content by
-	                                     * each reader */
 } WsRoute;
 
 /*

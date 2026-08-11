@@ -25,7 +25,7 @@
  * empty. WAL segment names and ".history" files are both plain
  * [0-9A-F.history]-shaped basenames, never nested paths, so this is not a
  * meaningful restriction for real callers -- only for a hostile one trying
- * to walk out of walcacheDir.
+ * to walk out of route->path.
  */
 static bool
 filename_is_safe(const char *filename)
@@ -70,7 +70,7 @@ cmd_fetch_file(int sock, const WsRoute *route)
 		return;
 	}
 
-	if (route == NULL || route->walcacheDir[0] == '\0')
+	if (route == NULL || route->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
 							   "no WAL cache directory configured for this route");
@@ -79,7 +79,7 @@ cmd_fetch_file(int sock, const WsRoute *route)
 
 	char path[MAXPGPATH];
 
-	sformat(path, sizeof(path), "%s/%s", route->walcacheDir, filename);
+	sformat(path, sizeof(path), "%s/%s", route->path, filename);
 
 	char *contents = NULL;
 	long fileSize = 0;
@@ -87,7 +87,7 @@ cmd_fetch_file(int sock, const WsRoute *route)
 	if (!read_file_if_exists(path, &contents, &fileSize) || contents == NULL)
 	{
 		log_info("FETCH_FILE: \"%s\" not found under \"%s\"",
-				 filename, route->walcacheDir);
+				 filename, route->path);
 		ws_send_error_response(sock, "58P01", "requested file not found");
 		return;
 	}
@@ -100,7 +100,7 @@ cmd_fetch_file(int sock, const WsRoute *route)
 	else
 	{
 		log_info("FETCH_FILE: served \"%s\" (%ld bytes) from \"%s\"",
-				 filename, fileSize, route->walcacheDir);
+				 filename, fileSize, route->path);
 	}
 
 	free(contents);

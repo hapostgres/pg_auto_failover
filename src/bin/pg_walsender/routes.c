@@ -26,7 +26,6 @@
 #include "routes.h"
 #include "file_utils.h"
 #include "log.h"
-#include "string_utils.h"
 
 
 bool
@@ -113,29 +112,13 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 				propName[--nameLen] = '\0';
 			}
 
-			if (strcmp(propName, "walcache") == 0)
+			if (strcmp(propName, "path") == 0)
 			{
-				strlcpy(route->walcacheDir, propValue, sizeof(route->walcacheDir));
-			}
-			else if (strcmp(propName, "basebackup") == 0)
-			{
-				strlcpy(route->basebackupDir, propValue, sizeof(route->basebackupDir));
+				strlcpy(route->path, propValue, sizeof(route->path));
 			}
 			else if (strcmp(propName, "allowed_hosts") == 0)
 			{
 				strlcpy(route->allowedHosts, propValue, sizeof(route->allowedHosts));
-			}
-			else if (strcmp(propName, "systemid") == 0)
-			{
-				strlcpy(route->systemId, propValue, sizeof(route->systemId));
-			}
-			else if (strcmp(propName, "timeline") == 0)
-			{
-				(void) stringToInt(propValue, &(route->timeline));
-			}
-			else if (strcmp(propName, "position") == 0)
-			{
-				strlcpy(route->position, propValue, sizeof(route->position));
 			}
 			else
 			{

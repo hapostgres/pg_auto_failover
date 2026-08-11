@@ -70,7 +70,9 @@ identity and one root directory::
   │       ├── 000000010000000000000042
   │       ├── 000000010000000000000043.partial
   │       ├── archiver-position
+  │       ├── archiver-systemid
   │       └── basebackups/
+  │           ├── .latest
   │           ├── basebackup-20260803T020000Z/
   │           ├── basebackup-20260804T020000Z/
   │           └── basebackup-20260805T020000Z/
@@ -78,7 +80,9 @@ identity and one root directory::
       └── 0/
           ├── 000000010000000000000012
           ├── archiver-position
+          ├── archiver-systemid
           └── basebackups/
+              ├── .latest
               └── basebackup-20260805T030000Z/
 
 - WAL segments sit directly under their own ``<formation>/<group>/``
@@ -91,15 +95,20 @@ identity and one root directory::
   membership's own ``basebackups/``, in the same layout an ordinary
   ``pg_basebackup`` run by hand would produce. You could point
   ``postgres -D`` straight at one of them and it would start -- that's
-  exactly what disaster recovery relies on.
-- Each membership has its own ``archiver-position`` file, tracking that
-  group's own captured LSN. ``archiver-routes.ini`` sits at the archiver's
-  own root instead, one section per membership -- see `Keeping the
-  routes file current`_ below for exactly when and why it gets rewritten.
-  All of these are small internal bookkeeping files -- coordinates and
-  status, never a copy of any actual data. Safe to ignore day to day, and
-  not something that needs backing up itself -- all of them are
-  regenerated automatically.
+  exactly what disaster recovery relies on. ``basebackups/.latest`` is a
+  one-line pointer at the current one, written the instant it's known
+  complete.
+- Each membership has its own ``archiver-position`` file (its own
+  captured LSN, used for this archiver's own reporting to the monitor)
+  and ``archiver-systemid`` file (this group's Postgres system
+  identifier, written once). ``archiver-routes.ini`` sits at the
+  archiver's own root instead, one section per membership -- see
+  `Keeping local files current`_ below for exactly when and why each of
+  these gets written. All of these are small internal bookkeeping files
+  -- coordinates and status, never a copy of any actual data. Safe to
+  ignore day to day, and not something that needs backing up itself --
+  each one is regenerated the next time its own triggering event happens
+  (a new membership, a captured segment, a completed backup).
 
 A single-membership archiver (the common case: one formation, one group)
 looks the same, just with only one ``<formation>/<group>/`` subdirectory
@@ -147,7 +156,7 @@ of the archiver itself required. They hand off small files (`Storage`_
 above) and nothing else:
 
 .. figure:: ./tikz/arch-archiver-internals.svg
-   :alt: pg_autoctl archiver run supervises two processes, reconciler and serve; reconciler forks one capture child per membership, each running pg_receivewal and writing its own archiver-position; serve writes archiver-routes.ini (one section per membership) and runs pg_walsender, which reads the WAL cache and routes file and serves pg_basebackup, streaming standbys, and restore_command fetches
+   :alt: pg_autoctl archiver run supervises two processes, reconciler and serve; reconciler forks one capture child per membership (each running pg_receivewal, writing its own archiver-position and archiver-systemid) and also writes archiver-routes.ini, one section per membership; serve runs pg_walsender, which reads the routes file, the WAL cache/basebackups, and archiver-systemid directly, and serves pg_basebackup, streaming standbys, and restore_command fetches
 
    Two supervised top-level processes per archiver; the reconciler forks
    one WAL-capture child per membership underneath it
@@ -156,7 +165,8 @@ above) and nothing else:
 
   pg_autoctl archiver run
   ├── reconciler  -- keeps the set of running captures in sync with the
-  │   │              monitor's own membership list for this archiver
+  │   │              monitor's own membership list for this archiver,
+  │   │              and writes archiver-routes.ini to match
   │   ├── capture (default/0)   -- one per membership, reports its own
   │   │   └── pg_receivewal        progress to the monitor independently
   │   └── capture (billing/0)
@@ -175,49 +185,72 @@ resumes capturing all of them -- a replication slot keeps the WAL a
 capture needs regardless of how many times its own consumer reconnects,
 so this costs nothing.
 
-Keeping the routes file current
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Keeping local files current
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ``pg_walsender`` never queries the monitor itself, on purpose: an
 archiver exists to keep serving already-captured data even when the
 monitor it would otherwise depend on is unreachable, and staying free of
 that dependency also keeps ``pg_walsender`` a small, standalone binary
-with nothing to mock or stand up just to test it. ``archiver-routes.ini``
-is the decoupling point -- ``serve`` is the one process that actually
-talks to the monitor, resolving each membership's current WAL-cache
-directory and latest complete base backup and writing them here; every
-``pg_walsender`` connection just reads this one local file straight off
-disk, fresh, with no monitor round trip on its own hot path. One section
-per membership::
+with nothing to mock or stand up just to test it. Rather than one file
+periodically refreshed from the monitor, every fact ``pg_walsender``
+needs lives in its own small local file, written exactly once by
+whichever process is the sole owner of that fact, at the moment the fact
+becomes true -- there is nothing to periodically re-check or push an
+update about, because nothing here is ever a stale copy of something
+else: it's read straight off disk, fresh, on every connection.
+
+``archiver-routes.ini`` maps each connection's dbname to the local
+storage root of the membership it names -- nothing more. It's the one
+piece of this that's genuinely dynamic, and the ``reconciler`` writes it
+(one section per membership) exactly when this archiver's own set of
+memberships changes -- a formation attached or detached -- the same
+moment it starts or stops that membership's own capture child::
 
   [default/0]
-  walcache = /var/lib/pgaf/archiver1/default/0
-  position = 0/0
-  basebackup = /var/lib/pgaf/archiver1/default/0/basebackups/basebackup-20260806T132954Z
-  timeline = 1
-  systemid = 7670908901798703128
+  path = /var/lib/pgaf/archiver1/default/0
 
-The file is always rewritten as a whole -- one full pass over every
-membership this archiver currently holds, written to a temporary file
-and atomically renamed into place -- never patched in place. A
-connection arriving mid-refresh always sees either the complete previous
-version or the complete new one, never a torn write; nothing here needs
-a lock. ``serve`` triggers a rewrite:
+Everything else ``pg_walsender`` needs, it reads directly from under that
+one path, at connection time:
 
-- once at startup, before ``pg_walsender`` is even started;
-- every 30 seconds, as a periodic catch-all -- covers anything not
-  otherwise signaled, such as a membership having just been attached;
-- immediately, the moment a base backup finishes and is reported
-  complete -- the process that just produced it signals ``serve``
-  directly, rather than leaving a freshly-completed backup unservable
-  for up to that 30-second window; and
-- on ``SIGHUP``, the same reload signal every other pg_autoctl process
-  already understands.
+- **Which base backup is current** (``BASE_BACKUP``): ``basebackups/
+  .latest``, a one-line pointer to a backup's own label/subdirectory,
+  written by the base-backup generation child the instant it knows a
+  *live*-sourced backup is complete -- it's the sole process that ever
+  knows this fact, so there's nothing to notify afterwards. Retention
+  pruning clears the pointer if the backup it names is the one being
+  removed. A *replay*-sourced backup never updates it (see
+  :ref:`archiving_operations` for the ``live``/``replay`` policy
+  distinction) -- ``pg_walsender`` also re-checks, fresh, that the
+  backup's own recorded timeline still matches the WAL cache's current
+  one before ever streaming it, rather than trusting that guarantee
+  blindly.
+- **This group's system identifier** (``IDENTIFY_SYSTEM``):
+  ``archiver-systemid``, written once by the capture process the first
+  time the monitor reports it (relayed from whatever the group's real
+  primary already self-reported at ordinary node registration -- an
+  archiving node has no real ``pg_control`` of its own to read this
+  from). Never rewritten after that: a system identifier is set at
+  ``initdb`` and never changes for a cluster's lifetime, so write-once is
+  the actually-correct behavior here, not a simplification that trades
+  away correctness.
+- **Current WAL position**: derived fresh by scanning the WAL cache
+  directory itself (the newest complete or in-progress segment's own
+  filename and content), the same technique already used to compute
+  ``archiver-position`` -- no separate file needed for this one, since a
+  directory scan is already cheap enough to do directly, and doing so
+  removes any risk of it disagreeing with what's actually on disk.
+
+Every write above uses the same write-to-temp-file-then-``rename()``
+pattern this project uses everywhere it needs atomicity -- a connection
+arriving mid-write always sees either the complete previous version or
+the complete new one, never a torn one, and needs no lock to do so.
 
 Each membership generates its own base backups independently (its own
 schedule, its own retention), so more than one can genuinely be in
 progress at once on a multi-membership archiver -- there's no archiver-
-wide lock serializing them.
+wide lock serializing them, and no shared file either: each writes only
+into its own membership's own subdirectory.
 
 More or fewer standby nodes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
