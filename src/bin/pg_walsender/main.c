@@ -42,6 +42,7 @@
 
 #include "accept_loop.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "fetch_client.h"
 #include "file_utils.h"
 #include "log.h"
@@ -186,12 +187,8 @@ main(int argc, char **argv)
 	config.port = WS_DEFAULT_PORT;
 
 	char pgdata[MAXPGPATH] = { 0 };
-	const char *pgdataEnv = getenv("PGDATA");
 
-	if (pgdataEnv != NULL)
-	{
-		strlcpy(pgdata, pgdataEnv, sizeof(pgdata));
-	}
+	(void) get_env_pgdata(pgdata);
 
 	static struct option longOptions[] = {
 		{ "port", required_argument, NULL, 'p' },
