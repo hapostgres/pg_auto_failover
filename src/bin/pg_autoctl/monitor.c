@@ -2968,6 +2968,53 @@ monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formation,
 
 
 /*
+ * monitor_get_formation_dbname retrieves formation's own dbname property
+ * from the monitor -- every node in a formation shares this one database
+ * name (pgautofailover.formation's own schema, defaulting to "postgres"
+ * but overridable at `pg_autoctl create formation --dbname` time), unlike
+ * DEFAULT_DATABASE_NAME, which is only ever a guess. The function returns
+ * true upon success.
+ */
+bool
+monitor_get_formation_dbname(Monitor *monitor, char *formation,
+							 char *dbname, size_t dbnameSize)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT dbname FROM pgautofailover.formation "
+		"WHERE formationid = $1";
+	int paramCount = 1;
+	Oid paramTypes[1] = { TEXTOID };
+	const char *paramValues[1];
+	SingleValueResultContext parseContext = { { 0 }, PGSQL_RESULT_STRING, false };
+
+	paramValues[0] = formation;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, parseSingleValueResult))
+	{
+		log_error("Failed to retrieve dbname for formation \"%s\".", formation);
+
+		return false;
+	}
+
+	/* disconnect from monitor */
+	pgsql_finish(&monitor->pgsql);
+
+	if (!parseContext.parsedOk || parseContext.strVal == NULL)
+	{
+		return false;
+	}
+
+	strlcpy(dbname, parseContext.strVal, dbnameSize);
+	free(parseContext.strVal);
+
+	return true;
+}
+
+
+/*
  * monitor_set_formation_number_sync_standbys sets number-sync-standbys
  * property for formation at the monitor. The function returns true upon
  * success.

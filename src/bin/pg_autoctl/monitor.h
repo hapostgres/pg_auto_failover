@@ -377,6 +377,8 @@ bool monitor_get_formation_number_sync_standbys(Monitor *monitor, char *formatio
 												int *numberSyncStandbys);
 bool monitor_set_formation_number_sync_standbys(Monitor *monitor, char *formation,
 												int numberSyncStandbys);
+bool monitor_get_formation_dbname(Monitor *monitor, char *formation,
+								  char *dbname, size_t dbnameSize);
 
 bool monitor_remove_by_hostname(Monitor *monitor,
 								char *host, int port, bool force,

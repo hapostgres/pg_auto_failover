@@ -317,6 +317,39 @@ read_basebackup_label(const char *backupDir, char *lsnOut, size_t lsnOutSize,
 
 
 /*
+ * fetch_formation_dbname retrieves this membership's own formation dbname
+ * from the monitor -- every node in a formation shares one database name
+ * (pgautofailover.formation's own schema, defaulting to "postgres" but
+ * overridable at `pg_autoctl create formation --dbname` time), unlike
+ * DEFAULT_DATABASE_NAME, which only happens to be right when a formation
+ * never overrides it. Falls back to DEFAULT_DATABASE_NAME itself on any
+ * monitor-lookup failure, so a transient monitor outage degrades this back
+ * to the previous (already-shipped) guess rather than failing the base
+ * backup outright over a piece of connection-string metadata.
+ */
+static void
+fetch_formation_dbname(Keeper *keeper, char *dbname, size_t dbnameSize)
+{
+	strlcpy(dbname, DEFAULT_DATABASE_NAME, dbnameSize);
+
+	if (!monitor_init(&(keeper->monitor), keeper->config.monitor_pguri))
+	{
+		return;
+	}
+
+	if (!monitor_get_formation_dbname(&(keeper->monitor),
+									  keeper->config.formation,
+									  dbname, dbnameSize))
+	{
+		log_warn("Failed to retrieve dbname for formation \"%s\" from the "
+				 "monitor, defaulting to \"%s\"",
+				 keeper->config.formation, DEFAULT_DATABASE_NAME);
+		strlcpy(dbname, DEFAULT_DATABASE_NAME, dbnameSize);
+	}
+}
+
+
+/*
  * query_wal_position runs a single ad hoc query against connInfo, used
  * right after a base backup finishes to capture the source's current WAL
  * write position (primary) or replay position (standby/staging instance)
@@ -526,18 +559,25 @@ report_basebackup(Keeper *keeper, NodeAddress *endLsnSource,
 	/*
 	 * dbname is otherwise unknown here -- an ARCHIVING node has no real
 	 * PostgresSetup of its own to read one from (haspgdata's own design
-	 * comment). DEFAULT_DATABASE_NAME ("postgres") is what every ordinary
-	 * node defaults its own --dbname to (cli_create_node.c), and is always
-	 * present regardless of that default, so it is a safe target for a
-	 * plain read-only SQL query -- true of the replay staging instance too,
-	 * copied verbatim from a `live` backup of an ordinary node.
+	 * comment). Fetched from the monitor's own formation row (every node
+	 * in a formation shares one dbname) rather than assumed to be
+	 * DEFAULT_DATABASE_NAME ("postgres"): pg_auto_failover's own pg_hba.
+	 * conf rules for a node are always scoped to exactly that formation's
+	 * real dbname (and "replication"), never "postgres" unless a formation
+	 * genuinely was created with that dbname -- true of the replay staging
+	 * instance too, copied verbatim from a `live` backup of an ordinary
+	 * node.
 	 */
+	char formationDbname[NAMEDATALEN] = { 0 };
+
+	fetch_formation_dbname(keeper, formationDbname, sizeof(formationDbname));
+
 	char connInfo[MAXCONNINFO] = { 0 };
 
 	sformat(connInfo, sizeof(connInfo),
 			"host=%s port=%d user=%s dbname=%s application_name=%s",
 			endLsnSource->host, endLsnSource->port,
-			PG_AUTOCTL_REPLICA_USERNAME, DEFAULT_DATABASE_NAME, config->name);
+			PG_AUTOCTL_REPLICA_USERNAME, formationDbname, config->name);
 
 	char endLsn[PG_LSN_MAXLENGTH] = { 0 };
 
@@ -1093,12 +1133,16 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 		return false;
 	}
 
+	char formationDbname[NAMEDATALEN] = { 0 };
+
+	fetch_formation_dbname(keeper, formationDbname, sizeof(formationDbname));
+
 	char stagingConnInfo[MAXCONNINFO] = { 0 };
 
 	sformat(stagingConnInfo, sizeof(stagingConnInfo),
 			"host=127.0.0.1 port=%d user=%s dbname=%s application_name=%s",
 			PG_AUTOCTL_ARCHIVER_REPLAY_PORT,
-			PG_AUTOCTL_REPLICA_USERNAME, DEFAULT_DATABASE_NAME, config->name);
+			PG_AUTOCTL_REPLICA_USERNAME, formationDbname, config->name);
 
 	bool ok = wait_for_replay_promotion(stagingConnInfo,
 										ARCHIVER_REPLAY_PROMOTE_TIMEOUT_SECONDS);
