@@ -225,6 +225,14 @@ SSL live via ``pg_autoctl enable ssl``.
 
   Path to the server private key file (``ssl_key_file``).
 
+For ``kind = archiver``, ``[options] ssl``/``[ssl]``/``[replication]
+replication_password`` mean something different: an archiver has no
+Postgres of its own to reconfigure, so these instead configure its
+outbound ``pg_receivewal`` connection to the primary (see
+:ref:`archiving_architecture`'s own "Network exposure" section) --
+**immutable**, create-time only, unlike the live-reloadable ordinary-node
+meaning above (there is no ``pg_autoctl enable ssl`` for an archiver).
+
 ``[launch]``
 ^^^^^^^^^^^^
 

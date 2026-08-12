@@ -134,14 +134,29 @@ retention, sized independently.
 Network exposure
 -----------------
 
-An archiver listens on a TCP port (``6543`` by default) speaking a subset
-of the PostgreSQL replication protocol, authenticated the same trust-based
-way every node's own replication connections already are in a
-pg_auto_failover cluster (there is no password or TLS on this connection
-in the current release). Treat it the same way you'd treat any other
-node's own replication port: reachable from wherever you expect to run
-``pg_basebackup``, point a standby's ``primary_conninfo`` at it, or run a
-restore from, and firewalled off from everywhere else.
+Two distinct connections, two distinct authentication stories:
+
+- **Outbound, archiver → primary** (the ``pg_receivewal`` connection
+  `Data flow`_ above describes): goes through the exact same conninfo
+  builder as any other node's own ``primary_conninfo``
+  (``prepare_primary_conninfo()``), so it supports everything a real
+  standby's connection to the primary does -- ``md5``/``password`` auth
+  via ``pg_autoctl create archiver --replication-password``, and
+  ``sslmode``/certificate-based auth via that same command's
+  ``--ssl-self-signed``/``--ssl-mode``/``--ssl-ca-file``/``--server-cert``/
+  ``--server-key`` flags (see :ref:`pg_autoctl_create_archiver`). An
+  archiver created with none of those flags keeps a plain trust
+  connection, same as before.
+- **Inbound, client → archiver's own listener**: an archiver listens on a
+  TCP port (``6543`` by default) speaking a subset of the PostgreSQL
+  replication protocol, authenticated the same trust-based way every
+  node's own replication connections already are in a pg_auto_failover
+  cluster (there is no password or TLS on *this* connection in the
+  current release -- unlike the outbound one above). Treat it the same
+  way you'd treat any other node's own replication port: reachable from
+  wherever you expect to run ``pg_basebackup``, point a standby's
+  ``primary_conninfo`` at it, or run a restore from, and firewalled off
+  from everywhere else.
 
 Process model
 --------------
