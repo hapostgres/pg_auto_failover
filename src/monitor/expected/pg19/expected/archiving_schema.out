@@ -297,7 +297,7 @@ SELECT pgautofailover.create_archiver_node(
            :archiverid, 'warm-standby', '/var/lib/pgaf-archiver/standby2',
            NULL, NULL, 'archiving_test', 0, 'continuous');
 ERROR:  archiver 1 is already at its maxresidentreplay cap (1)
-CONTEXT:  PL/pgSQL function pgautofailover.create_archiver_node(bigint,pgautofailover.archiver_node_kind,text,text,bigint,text,integer,pgautofailover.archiver_node_cadence,text,pgautofailover.pitr_status) line 18 at RAISE
+CONTEXT:  PL/pgSQL function pgautofailover.create_archiver_node(bigint,pgautofailover.archiver_node_kind,text,text,bigint,text,integer,pgautofailover.archiver_node_cadence,text,pgautofailover.pitr_status) line 26 at RAISE
 -- ── PITR lifecycle ───────────────────────────────────────────────────────
 SELECT pgautofailover.create_archiver_node(
            :archiverid, 'pitr', '/var/lib/pgaf-archiver/pitr-recovery',

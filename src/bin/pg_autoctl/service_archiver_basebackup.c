@@ -25,12 +25,15 @@
  * comment). After each successful completion, retention prunes anything
  * beyond `maxcount` or older than `maxage` (apply_basebackup_retention()):
  * removes the directory, then report_basebackup_deleted() on the monitor,
- * which cascades to prune_archiver_wal() on its own. `concurrency` is
- * read but not enforced: this milestone's own single-membership scope
- * (one archiver, one group) already limits this file to one base backup
- * production job in flight at a time (basebackup_child_is_running()) --
- * running several concurrently only has meaning once an archiver can serve
- * more than one (formation, group) at once, a later milestone's concern.
+ * which cascades to prune_archiver_wal() on its own. `concurrency` is now
+ * enforced two ways: locally, this file still only ever has one base
+ * backup production job in flight at a time
+ * (basebackup_child_is_running()); across memberships/processes sharing
+ * one archiver and policy, monitor_basebackup_concurrency_available()
+ * gates each cycle before starting the (expensive) work, backstopped by
+ * pgautofailover.report_basebackup_started()'s own row-locked, atomic
+ * recheck on the monitor -- the cap that matters once an archiver serves
+ * more than one (formation, group) at once.
  *
  * Target selection ('live') follows the design doc's own precedence,
  * minus its warm-standby tier (a later milestone, nothing to select from
@@ -1343,6 +1346,38 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 
 	if (!due)
 	{
+		return true;
+	}
+
+	/*
+	 * Pre-flight concurrency check: skip this tick (never error out the
+	 * whole cycle) when the policy's own concurrency cap has no room left
+	 * -- the next tick tries again, matching the design's "a queued job
+	 * waits; it never skips" semantics. Checked here, before the
+	 * potentially minutes-long pg_basebackup work below, so an already-at-
+	 * cap archiver never does work it would have to discard;
+	 * monitor_report_basebackup_started()'s own row-locked check remains
+	 * the authoritative guard against the race this unlocked read can't
+	 * fully close.
+	 */
+	bool concurrencyAvailable = false;
+
+	if (!monitor_basebackup_concurrency_available(&(keeper->monitor),
+												  config->archiverId,
+												  config->formation,
+												  config->groupId,
+												  &concurrencyAvailable))
+	{
+		/* errors already logged */
+		return false;
+	}
+
+	if (!concurrencyAvailable)
+	{
+		log_info("Base backup for \"%s\"/%d is due, but the archiver's "
+				 "basebackup_policy concurrency cap is currently full; "
+				 "waiting for the next cycle", config->formation,
+				 config->groupId);
 		return true;
 	}
 

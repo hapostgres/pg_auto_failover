@@ -1594,6 +1594,57 @@ monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
 
 
 /*
+ * monitor_basebackup_concurrency_available calls
+ * pgautofailover.basebackup_concurrency_available() to check, before
+ * starting the (potentially minutes-long) pg_basebackup work, whether this
+ * archiver's basebackup_policy concurrency cap for (formationId, groupId)
+ * still has room. This is a pre-flight, unlocked read -- it can race
+ * against another job starting concurrently -- so it only ever saves
+ * wasted work on the common path; monitor_report_basebackup_started()'s
+ * own row-locked check on the monitor remains the authoritative guard.
+ */
+bool
+monitor_basebackup_concurrency_available(Monitor *monitor, int64_t archiverId,
+										 const char *formationId, int groupId,
+										 bool *available)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+	const char *sql =
+		"SELECT pgautofailover.basebackup_concurrency_available($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { INT8OID, TEXTOID, INT4OID };
+	IntString archiverIdString = intToString(archiverId);
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[3] = {
+		archiverIdString.strValue, formationId, groupIdString.strValue
+	};
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to check base-backup concurrency availability "
+				  "for \"%s\"/%d on the monitor", formationId, groupId);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to check base-backup concurrency availability "
+				  "for \"%s\"/%d on the monitor because it returned an "
+				  "unexpected result, see previous lines for details",
+				  formationId, groupId);
+		return false;
+	}
+
+	*available = context.boolVal;
+
+	return true;
+}
+
+
+/*
  * monitor_report_basebackup_started calls
  * pgautofailover.report_basebackup_started() to record the start of a new
  * base-backup production job and returns its basebackupid, needed by the

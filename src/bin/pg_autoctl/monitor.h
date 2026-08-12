@@ -283,6 +283,11 @@ bool monitor_get_group_system_identifier(Monitor *monitor,
 										 bool *found);
 bool monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
 								 const char *walFileName, const char *lsn);
+bool monitor_basebackup_concurrency_available(Monitor *monitor,
+											  int64_t archiverId,
+											  const char *formationId,
+											  int groupId,
+											  bool *available);
 bool monitor_report_basebackup_started(Monitor *monitor, int64_t archiverId,
 									   const char *formationId, int groupId,
 									   const char *label, int timeline,

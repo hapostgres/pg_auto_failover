@@ -2303,6 +2303,55 @@ comment on function pgautofailover.get_basebackup_policy_for_group(text,int)
 grant execute on function pgautofailover.get_basebackup_policy_for_group(text,int)
    to autoctl_node;
 
+-- pre-flight check: true iff starting a base-backup job for (archiverid,
+-- formationid, groupid) right now would still fit under the resolved
+-- policy's own concurrency cap. Meant to be called by service_archiver
+-- *before* running the (expensive, minutes-long) pg_basebackup/pg_basebackup-
+-- over-replay work, so an already-at-cap archiver never starts work it
+-- would have to discard -- report_basebackup_started() re-checks the same
+-- condition atomically (FOR UPDATE) at insert time as the authoritative
+-- backstop, since this pre-flight read has no lock and can race against
+-- another job starting concurrently. Read-only (STABLE): never blocks
+-- waiting for report_basebackup_started()'s row lock, so a busy archiver
+-- doesn't stall this check either.
+CREATE FUNCTION pgautofailover.basebackup_concurrency_available
+    (archiverid bigint, formationid text, groupid int)
+ RETURNS bool
+ LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+DECLARE
+    target_policy_id bigint;
+    max_concurrency int;
+    in_progress_count int;
+BEGIN
+    SELECT ap.basebackuppolicyid INTO target_policy_id
+      FROM pgautofailover.get_archiver_policy(
+               basebackup_concurrency_available.formationid,
+               basebackup_concurrency_available.groupid) ap;
+
+    SELECT p.concurrency INTO max_concurrency
+      FROM pgautofailover.basebackup_policy p
+     WHERE p.basebackuppolicyid = target_policy_id;
+
+    SELECT count(*) INTO in_progress_count
+      FROM pgautofailover.basebackup bb
+     WHERE bb.archiverid = basebackup_concurrency_available.archiverid
+       AND bb.status = 'in_progress'
+       AND target_policy_id = (
+             SELECT gap.basebackuppolicyid
+               FROM pgautofailover.get_archiver_policy(bb.formationid, bb.groupid) gap
+           );
+
+    RETURN in_progress_count < max_concurrency;
+END;
+$$;
+
+comment on function pgautofailover.basebackup_concurrency_available(bigint,text,int)
+        is 'pre-flight check: would starting a base-backup job for (archiver, formation, group) now still fit under its policy''s concurrency cap';
+
+grant execute on function pgautofailover.basebackup_concurrency_available(bigint,text,int)
+   to autoctl_node;
+
 -- the archive_command confirmation check: true iff at least
 -- archiver_quorum distinct archivers have durably reported %f
 CREATE FUNCTION pgautofailover.wal_archived
@@ -2371,7 +2420,49 @@ CREATE FUNCTION pgautofailover.report_basebackup_started
 AS $$
 DECLARE
     new_id bigint;
+    target_policy_id bigint;
+    max_concurrency int;
+    in_progress_count int;
 BEGIN
+    -- FOR UPDATE: same rationale as create_archiver_node's maxresidentreplay
+    -- check above -- locks the archiver row so two concurrent base-backup
+    -- starts for the same archiver can't both pass the in-progress count
+    -- check below before either one inserts.
+    PERFORM 1 FROM pgautofailover.archiver a
+     WHERE a.archiverid = report_basebackup_started.archiverid
+       FOR UPDATE;
+
+    SELECT ap.basebackuppolicyid INTO target_policy_id
+      FROM pgautofailover.get_archiver_policy(
+               report_basebackup_started.formationid,
+               report_basebackup_started.groupid) ap;
+
+    SELECT p.concurrency INTO max_concurrency
+      FROM pgautofailover.basebackup_policy p
+     WHERE p.basebackuppolicyid = target_policy_id;
+
+    -- basebackup_policy.concurrency is a cap per archiver, per referencing
+    -- policy (see that column's own comment): an in-progress job counts
+    -- against the cap iff the (formation, group) it's running for still
+    -- resolves, right now, to the same policy this new job is about to run
+    -- under -- not iff it happened to be started under that policy, since
+    -- set_archiver_policy/set_basebackup_policy can repoint a group's
+    -- effective policy at any time.
+    SELECT count(*) INTO in_progress_count
+      FROM pgautofailover.basebackup bb
+     WHERE bb.archiverid = report_basebackup_started.archiverid
+       AND bb.status = 'in_progress'
+       AND target_policy_id = (
+             SELECT gap.basebackuppolicyid
+               FROM pgautofailover.get_archiver_policy(bb.formationid, bb.groupid) gap
+           );
+
+    IF in_progress_count >= max_concurrency THEN
+        RAISE EXCEPTION
+              'archiver % has reached basebackup_policy %''s concurrency limit (%)',
+              archiverid, target_policy_id, max_concurrency;
+    END IF;
+
     INSERT INTO pgautofailover.basebackup
            (archiverid, formationid, groupid, label, timeline, startlsn,
             source, replaymode, storagelocation, status)
@@ -2693,9 +2784,17 @@ DECLARE
     new_id bigint;
 BEGIN
     IF kind = 'warm-standby' THEN
+        -- FOR UPDATE: locks the archiver row for the rest of this
+        -- transaction, serializing concurrent create_archiver_node calls
+        -- for the same archiver so the count-then-insert below can't race
+        -- past maxresidentreplay. No SQL-callable advisory lock exists for
+        -- production plpgsql use (LockFormation/LockNodeGroup, metadata.c,
+        -- are C-only outside of testing_lock_formation), so a row lock on
+        -- the parent archiver row is this layer's equivalent.
         SELECT a.maxresidentreplay INTO maxresident
           FROM pgautofailover.archiver a
-         WHERE a.archiverid = create_archiver_node.archiverid;
+         WHERE a.archiverid = create_archiver_node.archiverid
+           FOR UPDATE;
 
         SELECT count(*) INTO residentcount
           FROM pgautofailover.archiver_node an
