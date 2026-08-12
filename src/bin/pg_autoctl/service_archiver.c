@@ -38,6 +38,7 @@
 #include "fsm.h"
 #include "log.h"
 #include "monitor.h"
+#include "pgctl.h"
 #include "service_archiver_basebackup.h"
 #include "signals.h"
 
@@ -233,18 +234,35 @@ service_archiver_start_pgreceivewal(Keeper *keeper, NodeAddress *primaryNode)
 	}
 
 	/*
-	 * A plain key/value conninfo string: trust/no-password authentication,
-	 * matching every other pgaftest docker environment this milestone is
-	 * validated against. A real deployment's --ssl/password handling is a
-	 * follow-up, mirroring pg_basebackup()'s own PGPASSWORD-env dance
-	 * (pgctl.c) once an archiver config carries a replication password.
+	 * Same helper every standby's own primary_conninfo goes through
+	 * (pgctl.c): sslmode/sslrootcert/sslcrl from config->pgSetup.ssl (so
+	 * cert auth works exactly as it does for any other node -- libpq picks
+	 * up the client certificate from ~/.postgresql/ once sslmode requests
+	 * SSL, no extra flag needed here), plus password= when config->
+	 * replication_password is set (md5/password auth) -- prepare_primary_
+	 * conninfo() itself skips that clause when the password is empty, so
+	 * this is still a plain trust/no-password conninfo by default,
+	 * unchanged from before this now goes through the shared builder.
+	 * escape = false: this string is a pg_receivewal `-d` argument, not a
+	 * quoted primary_conninfo GUC value.
 	 */
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
-	sformat(primaryConnInfo, sizeof(primaryConnInfo),
-			"host=%s port=%d user=%s application_name=%s",
-			primaryNode->host, primaryNode->port,
-			PG_AUTOCTL_REPLICA_USERNAME, config->name);
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  sizeof(primaryConnInfo),
+								  primaryNode->host,
+								  primaryNode->port,
+								  PG_AUTOCTL_REPLICA_USERNAME,
+								  NULL,
+								  config->replication_password,
+								  config->name,
+								  config->pgSetup.ssl,
+								  false))
+	{
+		log_error("Failed to prepare the archiver's connection string to "
+				  "the primary, see above for details");
+		return false;
+	}
 
 	char slotName[MAXCONNINFO] = { 0 };
 

@@ -630,6 +630,43 @@ nodespec_create_argv(const NodeSpec *spec,
 			PUSH(spec->region);
 		}
 
+		/*
+		 * SSL/replication-password: same flags and mapping as the ordinary
+		 * node path below, now that cli_create_archiver_getopts accepts
+		 * them (service_archiver.c's own pg_receivewal conninfo). Unlike
+		 * the ordinary path, an archiver spec with no ssl set at all
+		 * (spec->ssl empty) simply omits every SSL flag rather than
+		 * defaulting to --no-ssl explicitly -- cli_create_archiver_getopts
+		 * itself treats "no SSL flag given" as the trust/no-password
+		 * default, so there is nothing to pass in that case.
+		 */
+		if (strcmp(spec->ssl, "self-signed") == 0)
+		{
+			PUSH("--ssl-self-signed");
+		}
+		else if (strcmp(spec->ssl, "off") == 0)
+		{
+			PUSH("--no-ssl");
+		}
+		else if (!IS_EMPTY_STRING_BUFFER(spec->ssl_ca_file))
+		{
+			/* verify-ca / verify-full: pass the cert paths explicitly */
+			PUSH("--ssl-ca-file");
+			PUSH(spec->ssl_ca_file);
+			PUSH("--server-cert");
+			PUSH(spec->ssl_cert_file);
+			PUSH("--server-key");
+			PUSH(spec->ssl_key_file);
+			PUSH("--ssl-mode");
+			PUSH(spec->ssl);
+		}
+
+		if (!IS_EMPTY_STRING_BUFFER(spec->replication_password))
+		{
+			PUSH("--replication-password");
+			PUSH(spec->replication_password);
+		}
+
 		PUSH("--run");
 
 		args[i] = NULL;

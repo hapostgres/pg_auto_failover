@@ -29,6 +29,17 @@ for the operational side of this command.
                          archiver (default: "default")
     --basebackup-policy   base-backup production/retention policy to attach
                          (default: "default")
+    --replication-password  password used by pg_receivewal to connect to
+                         the primary (default: none, trust/no-password auth)
+    --ssl-self-signed setup network encryption using self signed certificates
+                      (does NOT protect against MITM)
+    --ssl-mode        use that sslmode in connection strings
+    --ssl-ca-file     set the Postgres ssl_ca_file to that file path
+    --ssl-crl-file    set the Postgres ssl_crl_file to that file path
+    --no-ssl          don't enable network encryption (NOT recommended,
+                      prefer --ssl-self-signed)
+    --server-key      set the Postgres ssl_key_file to that file path
+    --server-cert     set the Postgres ssl_cert_file to that file path
     --run                create node then run pg_autoctl service
 
 Description
@@ -121,6 +132,29 @@ The following options are available to ``pg_autoctl create archiver``:
   Name of an existing base-backup policy (see
   :ref:`pg_autoctl_create_basebackup_policy`) to attach to every
   ``--formation`` given, formation-wide.
+
+--replication-password
+
+  Password ``pg_receivewal`` uses to authenticate to the primary, for
+  ``md5``/``password`` authentication. Unset by default: the archiver's
+  connection string to the primary carries no ``password=`` clause,
+  matching every other node kind's own default (trust, or whatever
+  ``--auth`` policy the primary's ``pg_hba.conf`` otherwise enforces).
+
+--ssl-self-signed, --ssl-mode, --ssl-ca-file, --ssl-crl-file,
+--server-cert, --server-key, --no-ssl
+
+  Same options and defaults as :ref:`pg_autoctl_create_postgres`'s own SSL
+  flags, applied to the archiver's connection to the primary (``pg_
+  receivewal``'s ``-d`` conninfo): ``sslmode``/``sslrootcert``/``sslcrl``
+  are derived from these the same way they are for any other node's
+  ``primary_conninfo``. Unlike ``create postgres``, none of these are
+  required -- an archiver created with no SSL flag at all keeps the
+  trust/no-password conninfo this command has always used; cert
+  authentication against a cluster running with ``auth cert`` needs no
+  extra flag beyond ``--ssl-mode verify-ca`` (or ``--ssl-ca-file``) either,
+  since libpq discovers the client certificate from ``~/.postgresql/``
+  the same way every other node in the cluster already does.
 
 --run
 

@@ -68,15 +68,6 @@ static bool prepare_recovery_settings(const char *pgdata,
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
 										const char *recoveryConfString);
-static bool prepare_primary_conninfo(char *primaryConnInfo,
-									 int primaryConnInfoSize,
-									 const char *primaryHost, int primaryPort,
-									 const char *replicationUsername,
-									 const char *dbname,
-									 const char *replicationPassword,
-									 const char *applicationName,
-									 SSLOptions sslOptions,
-									 bool escape);
 static bool prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions);
 
 static bool pg_write_recovery_conf(const char *pgdata,
@@ -2600,7 +2591,7 @@ escape_recovery_conf_string(char *destination, int destinationSize,
  *
  * Also, pg_rewind needs a database to connect to.
  */
-static bool
+bool
 prepare_primary_conninfo(char *primaryConnInfo,
 						 int primaryConnInfoSize,
 						 const char *primaryHost,

@@ -1340,6 +1340,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 {
 	KeeperConfig options = { 0 };
 	int c, option_index = 0, errors = 0;
+	SSLCommandLineOptions sslCommandLineOptions = SSL_CLI_UNKNOWN;
 
 	static struct option long_options[] = {
 		{ "pgdata", required_argument, NULL, 'D' },
@@ -1350,6 +1351,14 @@ cli_create_archiver_getopts(int argc, char **argv)
 		{ "formation", required_argument, NULL, 'f' },
 		{ "basebackup-policy", required_argument, NULL, 'P' },
 		{ "region", required_argument, NULL, 'G' },
+		{ "replication-password", required_argument, NULL, 'w' },
+		{ "no-ssl", no_argument, NULL, 'N' },
+		{ "ssl-self-signed", no_argument, NULL, 's' },
+		{ "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG },
+		{ "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG },
+		{ "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG },
+		{ "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG },
+		{ "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG },
 		{ "run", no_argument, NULL, 'x' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
@@ -1360,7 +1369,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:C:m:n:a:f:P:G:xVvqh",
+	while ((c = getopt_long(argc, argv, "D:C:m:n:a:f:P:G:w:NsxVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -1444,6 +1453,78 @@ cli_create_archiver_getopts(int argc, char **argv)
 				break;
 			}
 
+			case 'w':
+			{
+				/* { "replication-password", required_argument, NULL, 'w' } */
+				strlcpy(options.replication_password, optarg,
+						sizeof(options.replication_password));
+				log_trace("--replication-password ****");
+				break;
+			}
+
+			case 's':
+			{
+				/* { "ssl-self-signed", no_argument, NULL, 's' } */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_SELF_SIGNED,
+												   sslCommandLineOptions))
+				{
+					++errors;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_SELF_SIGNED;
+
+				options.pgSetup.ssl.active = 1;
+				options.pgSetup.ssl.createSelfSignedCert = true;
+				log_trace("--ssl-self-signed");
+				break;
+			}
+
+			case 'N':
+			{
+				/* { "no-ssl", no_argument, NULL, 'N' } */
+				if (!cli_getopt_accept_ssl_options(SSL_CLI_NO_SSL,
+												   sslCommandLineOptions))
+				{
+					++errors;
+					break;
+				}
+				sslCommandLineOptions = SSL_CLI_NO_SSL;
+
+				options.pgSetup.ssl.active = 0;
+				options.pgSetup.ssl.createSelfSignedCert = false;
+				log_trace("--no-ssl");
+				break;
+			}
+
+			/*
+			 * { "ssl-ca-file", required_argument, &ssl_flag, SSL_CA_FILE_FLAG }
+			 * { "ssl-crl-file", required_argument, &ssl_flag, SSL_CRL_FILE_FLAG }
+			 * { "server-cert", required_argument, &ssl_flag, SSL_SERVER_CRT_FLAG }
+			 * { "server-key", required_argument, &ssl_flag, SSL_SERVER_KEY_FLAG }
+			 * { "ssl-mode", required_argument, &ssl_flag, SSL_MODE_FLAG }
+			 */
+			case 0:
+			{
+				if (ssl_flag != SSL_MODE_FLAG)
+				{
+					if (!cli_getopt_accept_ssl_options(SSL_CLI_USER_PROVIDED,
+													   sslCommandLineOptions))
+					{
+						++errors;
+						break;
+					}
+
+					sslCommandLineOptions = SSL_CLI_USER_PROVIDED;
+					options.pgSetup.ssl.active = 1;
+				}
+
+				if (!cli_getopt_ssl_flags(ssl_flag, optarg, &(options.pgSetup)))
+				{
+					++errors;
+				}
+				break;
+			}
+
 			case 'x':
 			{
 				createAndRun = true;
@@ -1498,6 +1579,21 @@ cli_create_archiver_getopts(int argc, char **argv)
 	if (IS_EMPTY_STRING_BUFFER(options.monitor_pguri))
 	{
 		log_fatal("Failed to get value for --monitor");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	/*
+	 * Unlike cli_create_node_getopts's ordinary node kinds, an explicit SSL
+	 * choice is not required here: an archiver with no SSL-related flag at
+	 * all keeps the trust/no-password conninfo this milestone originally
+	 * shipped with (options.pgSetup.ssl is zero-initialized above, same as
+	 * an explicit --no-ssl). Only validate the SSL settings when the
+	 * operator actually asked for something.
+	 */
+	if (sslCommandLineOptions != SSL_CLI_UNKNOWN &&
+		!pgsetup_validate_ssl_settings(&(options.pgSetup)))
+	{
+		/* errors have already been logged */
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
@@ -1775,7 +1871,7 @@ CommandLine create_archiver_command =
 	make_command(
 		"archiver",
 		"Initialize a pg_auto_failover archiver node",
-		" [ --pgdata --pgctl --monitor --hostname --name --formation --region --basebackup-policy ] ",
+		" [ --pgdata --pgctl --monitor --hostname --name --formation --region --basebackup-policy --replication-password --ssl-self-signed --ssl-mode --ssl-ca-file --ssl-crl-file --server-cert --server-key --no-ssl ] ",
 		"  --pgdata            path to the archiver's local data/cache directory\n"
 		"  --pgctl             path to pg_ctl (used to locate pg_receivewal)\n"
 		"  --monitor           pg_auto_failover Monitor Postgres URL\n"
@@ -1786,6 +1882,9 @@ CommandLine create_archiver_command =
 		"archiver (default: \"default\")\n"
 		"  --basebackup-policy base-backup production/retention policy to attach "
 		"(default: \"default\")\n"
+		"  --replication-password  password used by pg_receivewal to connect to "
+		"the primary (default: none, trust/no-password auth)\n"
+		KEEPER_CLI_SSL_OPTIONS
 		"  --run               create node then run pg_autoctl service\n",
 		cli_create_archiver_getopts,
 		cli_create_archiver);
