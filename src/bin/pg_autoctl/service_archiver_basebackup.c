@@ -82,6 +82,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "monitor.h"
+#include "pgctl.h"
 #include "pgsql.h"
 #include "runprogram.h"
 #include "signals.h"
@@ -428,17 +429,46 @@ directory_size(const char *dirPath)
 
 
 /*
- * run_pg_basebackup execs the real, unmodified pg_basebackup client
- * against source, writing into backupDir. --wal-method=none: this backup
- * is deliberately not self-consistent on its own -- for a `live` backup,
- * the archiver's already-running WAL capture (service_archiver.c) is what
+ * run_pg_basebackup runs the real, unmodified pg_basebackup client against
+ * source, writing into backupDir. --wal-method=none: this backup is
+ * deliberately not self-consistent on its own -- for a `live` backup, the
+ * archiver's already-running WAL capture (service_archiver.c) is what
  * supplies the WAL needed to reach consistency on replay; for a `replay`
  * backup, the source is itself already paused at a known-consistent LSN,
  * so there is nothing further to bundle either way.
+ *
+ * Deliberately not pgctl.c's own pg_basebackup(): that function's whole
+ * point is standby init -- it rmtree()s the destination pgdata and moves
+ * the finished backup in its place, becoming the caller's new PGDATA. That
+ * would be actively wrong here: this archiver's own config->pgSetup.pgdata
+ * is its WAL-cache root, not something a base backup should ever replace,
+ * and the artifact needs to land in backupDir as an independent, separately
+ * retained copy while the archiver keeps running unaffected. What IS
+ * reused: run_program() (runprogram.h), matching copy_directory_tree()
+ * right below and "every other external-program call in this codebase"
+ * (that function's own comment) -- and prepare_primary_conninfo() (pgctl.c),
+ * so this connection gets the same sslmode/sslrootcert/password support
+ * service_archiver_start_pgreceivewal() already has, instead of the
+ * previous hardcoded --no-password/no-SSL conninfo.
+ *
+ * sslOptions is passed in explicitly rather than read from config-
+ * >pgSetup.ssl unconditionally: that field is this archiver's own policy
+ * for connecting to real, externally-managed cluster nodes (the primary,
+ * a live standby) -- correct for generate_live_basebackup()'s own caller,
+ * wrong for generate_replay_basebackup()'s loopback connection to its own
+ * throwaway staging instance (start_staging_postgres(), a bare extracted
+ * copy with no server certificate of its own, regardless of what the rest
+ * of the cluster runs). Passing a zero-value SSLOptions for that second
+ * case keeps its conninfo sslmode-less, exactly like this connection
+ * behaved before this function went through prepare_primary_conninfo() at
+ * all (libpq's own unspecified-sslmode default, "prefer", degrades to
+ * plaintext against a server that can't do SSL -- unlike "require",
+ * self-signed's own resolved mode, which fails outright instead).
  */
 static bool
 run_pg_basebackup(KeeperConfig *config, NodeAddress *source,
-				  const char *backupDir, const char *label)
+				  const char *backupDir, const char *label,
+				  SSLOptions sslOptions)
 {
 	char pgBasebackupPath[MAXPGPATH] = { 0 };
 
@@ -451,66 +481,47 @@ run_pg_basebackup(KeeperConfig *config, NodeAddress *source,
 		return false;
 	}
 
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
+
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  sizeof(primaryConnInfo),
+								  source->host,
+								  source->port,
+								  PG_AUTOCTL_REPLICA_USERNAME,
+								  NULL,
+								  config->replication_password,
+								  config->name,
+								  sslOptions,
+								  false))
+	{
+		log_error("Failed to prepare the archiver's connection string for "
+				  "pg_basebackup, see above for details");
+		return false;
+	}
+
 	log_info("Generating base backup \"%s\" from %s:%d into \"%s\"",
 			 label, source->host, source->port, backupDir);
 
-	pid_t pid = fork();
+	Program program = run_program(pgBasebackupPath,
+								  "-w",
+								  "-d", primaryConnInfo,
+								  "-D", backupDir,
+								  "--format=plain",
+								  "--wal-method=none",
+								  "--checkpoint=fast",
+								  "--label", label,
+								  NULL);
+	bool success = program.returnCode == 0;
 
-	if (pid == -1)
+	if (!success)
 	{
-		log_error("Failed to fork pg_basebackup: %m");
-		return false;
+		log_error("pg_basebackup failed while generating base backup \"%s\": %s",
+				  label, program.stdErr != NULL ? program.stdErr : "");
 	}
 
-	if (pid == 0)
-	{
-		char portStr[NAMEDATALEN];
+	free_program(&program);
 
-		sformat(portStr, sizeof(portStr), "%d", source->port);
-
-		char *args[16];
-		int argsIndex = 0;
-
-		args[argsIndex++] = pgBasebackupPath;
-		args[argsIndex++] = "-h";
-		args[argsIndex++] = source->host;
-		args[argsIndex++] = "-p";
-		args[argsIndex++] = portStr;
-		args[argsIndex++] = "-U";
-		args[argsIndex++] = PG_AUTOCTL_REPLICA_USERNAME;
-		args[argsIndex++] = "-D";
-		args[argsIndex++] = (char *) backupDir;
-		args[argsIndex++] = "--format=plain";
-		args[argsIndex++] = "--wal-method=none";
-		args[argsIndex++] = "--checkpoint=fast";
-		args[argsIndex++] = "--label";
-		args[argsIndex++] = (char *) label;
-		args[argsIndex++] = "--no-password";
-		args[argsIndex] = NULL;
-
-		execv(pgBasebackupPath, args);
-
-		/* execv only returns on failure */
-		log_fatal("execv(\"%s\"): %m", pgBasebackupPath);
-		_exit(127);
-	}
-
-	int status = 0;
-
-	if (waitpid(pid, &status, 0) == -1)
-	{
-		log_error("Failed to wait for pg_basebackup (pid %d): %m", pid);
-		return false;
-	}
-
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-	{
-		log_error("pg_basebackup failed while generating base backup \"%s\"",
-				  label);
-		return false;
-	}
-
-	return true;
+	return success;
 }
 
 
@@ -797,7 +808,8 @@ generate_live_basebackup(Keeper *keeper, NodeAddress *source,
 						 const char *backupDir, const char *label,
 						 BasebackupPolicy *policy)
 {
-	if (!run_pg_basebackup(&(keeper->config), source, backupDir, label))
+	if (!run_pg_basebackup(&(keeper->config), source, backupDir, label,
+						   keeper->config.pgSetup.ssl))
 	{
 		return false;
 	}
@@ -1169,7 +1181,19 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 		 * recovery) */
 		stagingNode.isPrimary = true;
 
-		ok = run_pg_basebackup(config, &stagingNode, backupDir, label) &&
+		/*
+		 * Zero-value SSLOptions, not config->pgSetup.ssl: this staging
+		 * instance is a bare extracted copy this archiver just created and
+		 * started on loopback (start_staging_postgres()), not one of the
+		 * cluster's own SSL-configured nodes -- see run_pg_basebackup()'s
+		 * own comment on sslOptions for why reusing the archiver's live-
+		 * connection SSL policy here fails outright instead of degrading
+		 * gracefully.
+		 */
+		SSLOptions stagingSslOptions = { 0 };
+
+		ok = run_pg_basebackup(config, &stagingNode, backupDir, label,
+							   stagingSslOptions) &&
 			 report_basebackup(keeper, &stagingNode, backupDir, label,
 							   "replay", policy->replayMode);
 

@@ -94,74 +94,20 @@ service_archiver_capture_start(void *context, pid_t *pid)
 
 
 /*
- * service_archiver_serve_start_service forks a child that runs
- * service_archiver_serve_loop() (service_archiver_serve.c) -- the inbound
- * serving half, exec'ing and supervising pg_walsender. Named with a
- * "_service" suffix to avoid colliding with service_archiver_serve.c's own
- * service_archiver_serve_start_walsender(), a different function one level
- * down (that one starts pg_walsender itself; this one starts the loop that
- * in turn starts and monitors pg_walsender).
- */
-static bool
-service_archiver_serve_start_service(void *context, pid_t *pid)
-{
-	Keeper *keeper = (Keeper *) context;
-
-	fflush(stdout);
-	fflush(stderr);
-
-	pid_t fpid = fork();
-
-	switch (fpid)
-	{
-		case -1:
-		{
-			log_error("Failed to fork the archiver serve process");
-			return false;
-		}
-
-		case 0:
-		{
-			(void) set_signal_handlers(false);
-			(void) set_ps_title("pg_autoctl: archiver serve");
-
-			/*
-			 * Unlike its sibling supervised children, archiver-serve never
-			 * talks to the monitor at all (service_archiver_serve.c's own
-			 * header comment) -- no monitor_init() here, so pg_walsender
-			 * keeps being supervised and keeps serving already-captured
-			 * data through a monitor outage with nothing in this process
-			 * depending on it being reachable.
-			 */
-			if (!service_archiver_serve_loop(keeper))
-			{
-				exit(EXIT_CODE_INTERNAL_ERROR);
-			}
-
-			exit(EXIT_CODE_QUIT);
-		}
-
-		default:
-		{
-			log_debug("pg_autoctl archiver serve process started in "
-					  "subprocess %d", fpid);
-			*pid = fpid;
-			return true;
-		}
-	}
-}
-
-
-/*
- * start_archiver supervises exactly two top-level children: "serve" (one
- * pg_walsender for every membership this archiver holds, unchanged) and
- * "reconciler" (service_archiver_reconciler.c), which in turn keeps one
- * WAL-capture child per membership running, added and removed as this
- * archiver's own attachments change. Both use the plain, unmodified
- * supervisor_start() -- a fixed two-element array like every other node
- * kind's own top-level supervisor -- so a bug in the reconciler's own,
- * genuinely new dynamic-membership logic can only crash and restart the
- * reconciler itself; "serve" is never affected.
+ * start_archiver supervises exactly two top-level children: "archiver-
+ * serve" (pg_walsender itself, exec'd directly by service_archiver_
+ * walsender_start() -- service_archiver_serve.c) and "archiver-reconciler"
+ * (service_archiver_reconciler.c), which in turn keeps one WAL-capture
+ * child per membership running, added and removed as this archiver's own
+ * attachments change. Both use the plain, unmodified supervisor_start() --
+ * a fixed two-element array like every other node kind's own top-level
+ * supervisor -- so a bug in the reconciler's own, genuinely new dynamic-
+ * membership logic can only crash and restart the reconciler itself;
+ * "archiver-serve" is never affected. No intermediate wrapper process or
+ * hand-rolled liveness loop sits between this registration and pg_
+ * walsender itself anymore -- supervisor.c's own generic tick loop notices
+ * pg_walsender's death and restarts it (RP_PERMANENT) the same way it
+ * already does for every other permanent service in this project.
  */
 bool
 start_archiver(Keeper *keeper)
@@ -173,7 +119,7 @@ start_archiver(Keeper *keeper)
 			SERVICE_NAME_ARCHIVER_SERVE,
 			RP_PERMANENT,
 			-1,
-			&service_archiver_serve_start_service,
+			&service_archiver_walsender_start,
 			(void *) keeper
 		},
 		{

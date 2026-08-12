@@ -20,10 +20,6 @@
 
 void service_archiver_serve_set_port(int port);
 
-bool service_archiver_serve_start_walsender(Keeper *keeper);
-bool service_archiver_serve_stop_walsender(void);
-bool service_archiver_serve_walsender_is_running(void);
-
-bool service_archiver_serve_loop(Keeper *keeper);
+bool service_archiver_walsender_start(void *context, pid_t *pid);
 
 #endif /* SERVICE_ARCHIVER_SERVE_H */

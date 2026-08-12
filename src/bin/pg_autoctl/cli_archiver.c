@@ -19,10 +19,10 @@
 #include "keeper.h"
 #include "keeper_config.h"
 #include "log.h"
-#include "pidfile.h"
 #include "service_archiver_serve.h"
 #include "signals.h"
 #include "string_utils.h"
+#include "supervisor.h"
 
 static int cli_archiver_serve_getopts(int argc, char **argv);
 static void cli_archiver_serve(int argc, char **argv);
@@ -139,10 +139,13 @@ cli_archiver_serve_getopts(int argc, char **argv)
 /*
  * cli_archiver_serve implements `pg_autoctl archiver serve`: loads the
  * archiver's own config/state (already written by `pg_autoctl create
- * archiver`) and runs service_archiver_serve_loop() -- exec'ing pg_
- * walsender and supervising its liveness. Deliberately no monitor
- * connection here: service_archiver_serve_loop() itself never talks to
- * the monitor (see service_archiver_serve.c's own header comment), so
+ * archiver`) and calls supervisor_start() with a single Service entry
+ * (service_archiver_walsender_start(), service_archiver_serve.c) -- the
+ * exact same generic supervision `pg_autoctl run` uses for pg_walsender,
+ * reused here rather than a bespoke loop, so this standalone command gets
+ * identical restart-on-death behavior for free. Deliberately no monitor
+ * connection here: service_archiver_walsender_start() itself never talks
+ * to the monitor (see service_archiver_serve.c's own header comment), so
  * this command can start and keep pg_walsender serving already-captured
  * data even while the monitor is unreachable.
  */
@@ -202,17 +205,22 @@ cli_archiver_serve(int argc, char **argv)
 		service_archiver_serve_set_port(archiverServePortOption);
 	}
 
-	(void) set_signal_handlers(false);
 	(void) set_ps_title("pg_autoctl: archiver serve");
 
-	if (!create_pidfile(keeper.config.pathnames.pid, getpid()))
-	{
-		log_fatal("Failed to write archiver pid file \"%s\"",
-				  keeper.config.pathnames.pid);
-		exit(EXIT_CODE_BAD_STATE);
-	}
+	Service subprocesses[] = {
+		{
+			SERVICE_NAME_ARCHIVER_SERVE,
+			RP_PERMANENT,
+			-1,
+			&service_archiver_walsender_start,
+			(void *) &keeper
+		}
+	};
 
-	if (!service_archiver_serve_loop(&keeper))
+	int subprocessesCount = sizeof(subprocesses) / sizeof(subprocesses[0]);
+
+	if (!supervisor_start(subprocesses, subprocessesCount,
+						  keeper.config.pathnames.pid))
 	{
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}

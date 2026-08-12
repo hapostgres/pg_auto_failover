@@ -2,10 +2,12 @@
  * src/bin/pg_autoctl/service_archiver_run.h
  *   Archiving & Disaster Recovery: `pg_autoctl run` support for
  *   kind = archiver (milestone 3's own build-order line). Supervises the
- *   archiver's two halves -- WAL capture (service_archiver.c's
- *   service_archiver_loop, outbound pg_receivewal against the primary)
- *   and serving (service_archiver_serve.c's service_archiver_serve_loop,
- *   inbound pg_walsender) -- as two real supervisor.c Service[] entries
+ *   archiver's two halves -- WAL capture (service_archiver_reconciler.c,
+ *   supervising one service_archiver.c service_archiver_loop per
+ *   membership, outbound pg_receivewal against the primary) and serving
+ *   (service_archiver_serve.c's service_archiver_walsender_start,
+ *   inbound pg_walsender, exec'd directly) -- as two real supervisor.c
+ *   Service[] entries
  *   under one supervised process tree, restart-on-crash, the same way
  *   start_keeper() already supervises postgres + node-active together for
  *   an ordinary node. Replaces needing two separately-managed processes
