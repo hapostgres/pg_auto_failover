@@ -403,24 +403,14 @@ is_wal_segment_filename(const char *name)
 static bool
 partial_segment_real_length(const char *path, uint64_t *length)
 {
-	FILE *file = fopen(path, "rb"); /* IGNORE-BANNED */
+	char *buffer = NULL;
+	long got = 0;
 
-	if (file == NULL)
+	if (!read_file(path, &buffer, &got))
 	{
+		/* errors have already been logged */
 		return false;
 	}
-
-	char *buffer = malloc(CBB_WAL_SEGMENT_SIZE);
-
-	if (buffer == NULL)
-	{
-		fclose(file);
-		return false;
-	}
-
-	size_t got = fread(buffer, 1, CBB_WAL_SEGMENT_SIZE, file);
-
-	fclose(file);
 
 	while (got > 0 && buffer[got - 1] == 0)
 	{

@@ -1359,6 +1359,10 @@ monitor_list_archiver_memberships(Monitor *monitor, int64_t archiverId,
  * BasebackupInfoParseContext/parseBasebackupInfo parse the two columns
  * monitor_get_latest_basebackup_info() needs out of a single-row result --
  * SingleValueResultContext only carries one column, not enough here.
+ * storageLocation/source point directly at the caller's own output
+ * buffers (matching this file's established pattern for multi-column
+ * single-row parsers, e.g. parseNodeRegion/FsmReachabilityParseContext
+ * above): no strdup/free needed, the callback writes into them in place.
  */
 typedef struct BasebackupInfoParseContext
 {
@@ -1366,7 +1370,9 @@ typedef struct BasebackupInfoParseContext
 	bool parsedOk;
 	int ntuples;
 	char *storageLocation;
+	size_t storageLocationSize;
 	char *source;
+	size_t sourceSize;
 	int timeline;
 } BasebackupInfoParseContext;
 
@@ -1385,21 +1391,12 @@ parseBasebackupInfo(void *ctx, PGresult *result)
 		return;
 	}
 
-	char *storageLocation = PQgetvalue(result, 0, 0);
-	char *source = PQgetvalue(result, 0, 1);
-	char *timeline = PQgetvalue(result, 0, 2);
+	strlcpy(context->storageLocation, PQgetvalue(result, 0, 0),
+			context->storageLocationSize);
+	strlcpy(context->source, PQgetvalue(result, 0, 1), context->sourceSize);
+	context->timeline = strtol(PQgetvalue(result, 0, 2), NULL, 10);
 
-	context->storageLocation = strdup(storageLocation);
-	context->source = strdup(source);
-	context->timeline = strtol(timeline, NULL, 10);
-
-	context->parsedOk =
-		context->storageLocation != NULL && context->source != NULL;
-
-	if (!context->parsedOk)
-	{
-		log_error(ALLOCATION_FAILED_ERROR);
-	}
+	context->parsedOk = true;
 }
 
 
@@ -1457,7 +1454,12 @@ monitor_get_latest_basebackup_info(Monitor *monitor,
 	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
 	IntString groupIdString = intToString(groupId);
 	const char *paramValues[3] = { formationId, groupIdString.strValue, preferredSource };
-	BasebackupInfoParseContext context = { { 0 }, false, 0, NULL, NULL, 0 };
+	BasebackupInfoParseContext context = {
+		{ 0 }, false, 0,
+		storageLocation, storageLocationSize,
+		source, sourceSize,
+		0
+	};
 
 	*found = false;
 
@@ -1484,11 +1486,7 @@ monitor_get_latest_basebackup_info(Monitor *monitor,
 		return false;
 	}
 
-	strlcpy(storageLocation, context.storageLocation, storageLocationSize);
-	strlcpy(source, context.source, sourceSize);
 	*timeline = context.timeline;
-	free(context.storageLocation);
-	free(context.source);
 	*found = true;
 
 	return true;

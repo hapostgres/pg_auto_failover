@@ -55,6 +55,7 @@
 #include <unistd.h>
 
 #include "postgres_fe.h"
+#include "pqexpbuffer.h"
 
 #include "service_archiver_reconciler.h"
 
@@ -246,15 +247,11 @@ archiver_reconciler_write_tracking_file(Keeper *templateKeeper,
 
 	(void) archiver_reconciler_tracking_path(templateKeeper, path);
 
-	char tmpPath[MAXPGPATH] = { 0 };
+	PQExpBuffer buffer = createPQExpBuffer();
 
-	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", path);
-
-	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
-
-	if (fileStream == NULL)
+	if (buffer == NULL)
 	{
-		/* errors have already been logged */
+		log_error("Failed to allocate memory");
 		return false;
 	}
 
@@ -270,25 +267,23 @@ archiver_reconciler_write_tracking_file(Keeper *templateKeeper,
 
 		Keeper *membershipKeeper = (Keeper *) service->context;
 
-		fformat(fileStream, "%d %s %d\n",
-				service->pid,
-				membershipKeeper->config.formation,
-				membershipKeeper->config.groupId);
+		appendPQExpBuffer(buffer, "%d %s %d\n",
+						  service->pid,
+						  membershipKeeper->config.formation,
+						  membershipKeeper->config.groupId);
 	}
 
-	if (fclose(fileStream) == EOF)
+	bool success = !PQExpBufferBroken(buffer) &&
+				   write_file_atomic(buffer->data, buffer->len, path);
+
+	if (PQExpBufferBroken(buffer))
 	{
-		log_warn("Failed to write file \"%s\": %m", tmpPath);
-		return false;
+		log_error("Failed to allocate memory");
 	}
 
-	if (rename(tmpPath, path) != 0)
-	{
-		log_warn("Failed to rename \"%s\" to \"%s\": %m", tmpPath, path);
-		return false;
-	}
+	destroyPQExpBuffer(buffer);
 
-	return true;
+	return success;
 }
 
 
@@ -316,15 +311,11 @@ archiver_reconciler_write_routes_file(Keeper *templateKeeper,
 
 	(void) archiver_reconciler_routes_path(templateKeeper, path);
 
-	char tmpPath[MAXPGPATH] = { 0 };
+	PQExpBuffer buffer = createPQExpBuffer();
 
-	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", path);
-
-	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
-
-	if (fileStream == NULL)
+	if (buffer == NULL)
 	{
-		/* errors have already been logged */
+		log_error("Failed to allocate memory");
 		return false;
 	}
 
@@ -340,26 +331,24 @@ archiver_reconciler_write_routes_file(Keeper *templateKeeper,
 
 		Keeper *membershipKeeper = (Keeper *) service->context;
 
-		fformat(fileStream, "[%s/%d]\n",
-				membershipKeeper->config.formation,
-				membershipKeeper->config.groupId);
-		fformat(fileStream, "path = %s\n",
-				membershipKeeper->config.pgSetup.pgdata);
+		appendPQExpBuffer(buffer, "[%s/%d]\n",
+						  membershipKeeper->config.formation,
+						  membershipKeeper->config.groupId);
+		appendPQExpBuffer(buffer, "path = %s\n",
+						  membershipKeeper->config.pgSetup.pgdata);
 	}
 
-	if (fclose(fileStream) == EOF)
+	bool success = !PQExpBufferBroken(buffer) &&
+				   write_file_atomic(buffer->data, buffer->len, path);
+
+	if (PQExpBufferBroken(buffer))
 	{
-		log_warn("Failed to write file \"%s\": %m", tmpPath);
-		return false;
+		log_error("Failed to allocate memory");
 	}
 
-	if (rename(tmpPath, path) != 0)
-	{
-		log_warn("Failed to rename \"%s\" to \"%s\": %m", tmpPath, path);
-		return false;
-	}
+	destroyPQExpBuffer(buffer);
 
-	return true;
+	return success;
 }
 
 

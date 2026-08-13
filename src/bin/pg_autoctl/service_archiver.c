@@ -521,34 +521,13 @@ service_archiver_persist_current_lsn(Keeper *keeper)
 
 	service_archiver_position_path(&(keeper->config), path);
 
-	char tmpPath[MAXPGPATH] = { 0 };
+	char contents[128] = { 0 };
 
-	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", path);
+	int size = sformat(contents, sizeof(contents),
+					   "lsn = %s\ntimeline = %d\n",
+					   keeper->postgres.currentLSN, currentTimeline);
 
-	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
-
-	if (fileStream == NULL)
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	fformat(fileStream, "lsn = %s\n", keeper->postgres.currentLSN);
-	fformat(fileStream, "timeline = %d\n", currentTimeline);
-
-	if (fclose(fileStream) == EOF)
-	{
-		log_warn("Failed to write file \"%s\": %m", tmpPath);
-		return false;
-	}
-
-	if (rename(tmpPath, path) != 0)
-	{
-		log_warn("Failed to rename \"%s\" to \"%s\": %m", tmpPath, path);
-		return false;
-	}
-
-	return true;
+	return write_file_atomic(contents, size, path);
 }
 
 
@@ -611,30 +590,10 @@ service_archiver_maybe_persist_systemid(Keeper *keeper)
 		return;
 	}
 
-	char tmpPath[MAXPGPATH] = { 0 };
+	char contents[32] = { 0 };
+	int size = sformat(contents, sizeof(contents), "%" PRIu64 "\n", systemIdentifier);
 
-	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", path);
-
-	FILE *fileStream = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
-
-	if (fileStream == NULL)
-	{
-		/* errors have already been logged */
-		return;
-	}
-
-	fformat(fileStream, "%" PRIu64 "\n", systemIdentifier);
-
-	if (fclose(fileStream) == EOF)
-	{
-		log_warn("Failed to write file \"%s\": %m", tmpPath);
-		return;
-	}
-
-	if (rename(tmpPath, path) != 0)
-	{
-		log_warn("Failed to rename \"%s\" to \"%s\": %m", tmpPath, path);
-	}
+	(void) write_file_atomic(contents, size, path);
 }
 
 
