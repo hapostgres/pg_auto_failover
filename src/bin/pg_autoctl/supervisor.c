@@ -250,8 +250,46 @@ supervisor_loop(Supervisor *supervisor)
 {
 	bool firstLoop = true;
 
-	/* wait until all subprocesses are done */
-	while (supervisor->pendingSubprocessCount > 0)
+	/*
+	 * Every existing caller passes a fixed-size, pre-populated services[]
+	 * (supervisor_start()'s own plain static/stack arrays): pending
+	 * SubprocessCount > 0 from the very first check, and this loop's
+	 * only job for them is exactly what it says -- wait until all
+	 * subprocesses are done, then return. That case is untouched below:
+	 * periodicCallback is NULL for all of them, so the "|| (...)" disjunct
+	 * is always false and the loop's behavior reduces to the original
+	 * condition exactly.
+	 *
+	 * A caller using supervisor_start_with_callback() to manage a
+	 * services[] array dynamically (supervisor_add_service()/
+	 * supervisor_remove_service(), see Supervisor.periodicCallback's own
+	 * comment, supervisor.h) may legitimately have nothing registered yet
+	 * -- or, having had services before, may legitimately drop to zero
+	 * again without that meaning "permanently done" (e.g. this archiver's
+	 * own reconciler dropping its last membership, expected to pick up a
+	 * newly (re)attached one later). For that caller, "keep looping" needs
+	 * to depend on shutdown having been requested, not on the incidental
+	 * current count of live children -- pendingSubprocessCount == 0 here
+	 * must not, on its own, end the loop.
+	 *
+	 * Gated on supervisor->shutdownSequenceInProgress, not directly on
+	 * asked_to_stop/asked_to_stop_fast/asked_to_quit: those globals are
+	 * deliberately self-clearing (supervisor_handle_signals() resets
+	 * whichever one fired back to 0 right after processing it -- see its
+	 * own "allow for processing signals again" comment -- precisely so a
+	 * second, later signal can be told apart from the first). Checking
+	 * the raw flags here would see them go back to 0 on the very next
+	 * iteration after the one that first noticed them, causing this
+	 * disjunct to flip back to true and the loop to keep running past the
+	 * point it should have exited -- exactly the hang this comment is
+	 * warning against. shutdownSequenceInProgress is the field that
+	 * actually stays true for the rest of the shutdown, same source
+	 * supervisor_restart_service() already trusts for the identical
+	 * "are we shutting down" question.
+	 */
+	while (supervisor->pendingSubprocessCount > 0 ||
+		   (supervisor->periodicCallback != NULL &&
+			!supervisor->shutdownSequenceInProgress))
 	{
 		pid_t pid;
 		int status;
@@ -306,6 +344,34 @@ supervisor_loop(Supervisor *supervisor)
 			{
 				if (errno == ECHILD)
 				{
+					/*
+					 * A dynamic, callback-driven supervisor (see this
+					 * function's own header comment) currently has no
+					 * real children at all -- the expected steady state
+					 * before its first supervisor_add_service() call, or
+					 * between one service set being fully torn down and
+					 * a later one being added. Same handling as "no dead
+					 * child to reap this tick" (case 0 below): check
+					 * signals, keep going. Distinguished from the
+					 * unexpected-ECHILD case right below by
+					 * pendingSubprocessCount == 0 -- if we still believe
+					 * we have live children and waitpid() disagrees,
+					 * that's the real inconsistency the fatal branch
+					 * exists to catch.
+					 */
+					if (supervisor->pendingSubprocessCount == 0 &&
+						supervisor->periodicCallback != NULL)
+					{
+						(void) supervisor_handle_signals(supervisor);
+
+						if (supervisor->shutdownSequenceInProgress)
+						{
+							(void) supervisor_shutdown_sequence(supervisor);
+						}
+
+						break;
+					}
+
 					/* no more childrens */
 					if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
 					{
