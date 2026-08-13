@@ -1081,9 +1081,8 @@ CREATE FUNCTION pgautofailover.report_timeline_history
     IN node_id bigint,
     IN history jsonb
  )
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+RETURNS void LANGUAGE sql SECURITY DEFINER
 AS $$
-BEGIN
     INSERT INTO pgautofailover.node_timeline_history
            (nodeid, tli, parenttli, switchpoint_lsn)
     SELECT node_id,
@@ -1092,7 +1091,6 @@ BEGIN
            (entry->>'switchpoint')::pg_lsn
       FROM jsonb_array_elements(history) AS entry
      ON CONFLICT (nodeid, tli) DO NOTHING;
-END;
 $$;
 
 comment on function pgautofailover.report_timeline_history(bigint,jsonb)
@@ -1715,11 +1713,8 @@ CREATE FUNCTION pgautofailover.create_basebackup_policy
     IN policyname text,
     IN policyspec jsonb
  )
-RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER
+RETURNS bigint LANGUAGE sql SECURITY DEFINER
 AS $$
-DECLARE
-    new_id bigint;
-BEGIN
     INSERT INTO pgautofailover.basebackup_policy
            (policyname, source, replaymode, cache,
             frequency, maxcount, maxage, onpromotion, concurrency)
@@ -1735,10 +1730,7 @@ BEGIN
            coalesce((policyspec->>'maxage')::interval, '3 days'),
            coalesce((policyspec->>'onpromotion')::bool, true),
            coalesce((policyspec->>'concurrency')::int, 1)
-      RETURNING basebackuppolicyid INTO new_id;
-
-    RETURN new_id;
-END;
+      RETURNING basebackuppolicyid;
 $$;
 
 comment on function pgautofailover.create_basebackup_policy(text,jsonb)
@@ -1914,17 +1906,11 @@ grant execute on function pgautofailover.get_archivers(text)
 -- what belongs in `config` (architecture only, never credentials)
 CREATE FUNCTION pgautofailover.create_rclone_config(name text, config text)
  RETURNS bigint  -- rcloneconfigid
- LANGUAGE plpgsql SECURITY DEFINER
+ LANGUAGE sql SECURITY DEFINER
 AS $$
-DECLARE
-    new_id bigint;
-BEGIN
     INSERT INTO pgautofailover.rclone_config (name, config)
     VALUES (name, config)
-      RETURNING rcloneconfigid INTO new_id;
-
-    RETURN new_id;
-END;
+      RETURNING rcloneconfigid;
 $$;
 
 comment on function pgautofailover.create_rclone_config(text,text)
@@ -2145,9 +2131,8 @@ grant execute on function pgautofailover.list_archiver_memberships(bigint)
 -- automatically (see that column's own comment).
 CREATE FUNCTION pgautofailover.archiver_remove_formation
     (archiverid bigint, formationid text)
- RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+ RETURNS void LANGUAGE sql SECURITY DEFINER
 AS $$
-BEGIN
     DELETE FROM pgautofailover.node n
      WHERE n.formationid = archiver_remove_formation.formationid
        AND n.nodeid IN (SELECT an.nodeid
@@ -2158,7 +2143,6 @@ BEGIN
     DELETE FROM pgautofailover.archiver_formation af
      WHERE af.archiverid = archiver_remove_formation.archiverid
        AND af.formationid = archiver_remove_formation.formationid;
-END;
 $$;
 
 comment on function pgautofailover.archiver_remove_formation(bigint,text)
@@ -2177,9 +2161,8 @@ CREATE FUNCTION pgautofailover.set_archiver_policy
     in_basebackuppolicyid bigint DEFAULT NULL,
     in_replicationquorumeligible bool DEFAULT NULL
  )
- RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+ RETURNS void LANGUAGE sql SECURITY DEFINER
 AS $$
-BEGIN
     INSERT INTO pgautofailover.archiver_policy
            (formationid, groupid, archiverquorum,
             basebackuppolicyid, replicationquorumeligible)
@@ -2194,7 +2177,6 @@ BEGIN
                                          pgautofailover.archiver_policy.basebackuppolicyid),
            replicationquorumeligible = coalesce(EXCLUDED.replicationquorumeligible,
                                                pgautofailover.archiver_policy.replicationquorumeligible);
-END;
 $$;
 
 comment on function pgautofailover.set_archiver_policy(text,int,int,bigint,bool)
@@ -2317,33 +2299,26 @@ grant execute on function pgautofailover.get_basebackup_policy_for_group(text,in
 CREATE FUNCTION pgautofailover.basebackup_concurrency_available
     (archiverid bigint, formationid text, groupid int)
  RETURNS bool
- LANGUAGE plpgsql STABLE SECURITY DEFINER
+ LANGUAGE sql STABLE SECURITY DEFINER
 AS $$
-DECLARE
-    target_policy_id bigint;
-    max_concurrency int;
-    in_progress_count int;
-BEGIN
-    SELECT ap.basebackuppolicyid INTO target_policy_id
-      FROM pgautofailover.get_archiver_policy(
-               basebackup_concurrency_available.formationid,
-               basebackup_concurrency_available.groupid) ap;
-
-    SELECT p.concurrency INTO max_concurrency
-      FROM pgautofailover.basebackup_policy p
-     WHERE p.basebackuppolicyid = target_policy_id;
-
-    SELECT count(*) INTO in_progress_count
-      FROM pgautofailover.basebackup bb
-     WHERE bb.archiverid = basebackup_concurrency_available.archiverid
-       AND bb.status = 'in_progress'
-       AND target_policy_id = (
-             SELECT gap.basebackuppolicyid
-               FROM pgautofailover.get_archiver_policy(bb.formationid, bb.groupid) gap
-           );
-
-    RETURN in_progress_count < max_concurrency;
-END;
+    WITH policy AS (
+        SELECT ap.basebackuppolicyid AS target_policy_id, p.concurrency AS max_concurrency
+          FROM pgautofailover.get_archiver_policy(
+                   basebackup_concurrency_available.formationid,
+                   basebackup_concurrency_available.groupid) ap
+          JOIN pgautofailover.basebackup_policy p
+            ON p.basebackuppolicyid = ap.basebackuppolicyid
+    )
+    SELECT (
+        SELECT count(*)
+          FROM pgautofailover.basebackup bb, policy
+         WHERE bb.archiverid = basebackup_concurrency_available.archiverid
+           AND bb.status = 'in_progress'
+           AND policy.target_policy_id = (
+                 SELECT gap.basebackuppolicyid
+                   FROM pgautofailover.get_archiver_policy(bb.formationid, bb.groupid) gap
+               )
+    ) < (SELECT max_concurrency FROM policy);
 $$;
 
 comment on function pgautofailover.basebackup_concurrency_available(bigint,text,int)
@@ -2541,34 +2516,28 @@ grant execute on function pgautofailover.report_basebackup_deleted(bigint)
 -- archiver holding a copy. When no 'complete' backup remains for this
 -- group, nothing is pruned -- there is no anchor point to replay forward
 -- from, so every captured segment is still needed.
+-- No IF oldest_startlsn IS NULL THEN RETURN 0 branch needed: "lsn <
+-- NULL" is NULL (falsy) for every row when no 'complete' backup exists
+-- yet, so the DELETE below already deletes nothing in that case --
+-- same result as the early return, without needing one.
 CREATE FUNCTION pgautofailover.prune_archiver_wal(formationid text, groupid int)
- RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER
+ RETURNS bigint LANGUAGE sql SECURITY DEFINER
 AS $$
-DECLARE
-    oldest_startlsn pg_lsn;
-    deleted_count bigint;
-BEGIN
-    SELECT min(b.startlsn) INTO oldest_startlsn
-      FROM pgautofailover.basebackup b
-     WHERE b.formationid = prune_archiver_wal.formationid
-       AND b.groupid = prune_archiver_wal.groupid
-       AND b.status = 'complete';
-
-    IF oldest_startlsn IS NULL THEN
-        RETURN 0;
-    END IF;
-
-    WITH deleted AS (
+    WITH oldest AS (
+        SELECT min(b.startlsn) AS lsn
+          FROM pgautofailover.basebackup b
+         WHERE b.formationid = prune_archiver_wal.formationid
+           AND b.groupid = prune_archiver_wal.groupid
+           AND b.status = 'complete'
+    ),
+    deleted AS (
         DELETE FROM pgautofailover.archiver_wal aw
          WHERE aw.formationid = prune_archiver_wal.formationid
            AND aw.groupid = prune_archiver_wal.groupid
-           AND aw.lsn < oldest_startlsn
+           AND aw.lsn < (SELECT lsn FROM oldest)
         RETURNING 1
     )
-    SELECT count(*) INTO deleted_count FROM deleted;
-
-    RETURN deleted_count;
-END;
+    SELECT count(*) FROM deleted;
 $$;
 
 comment on function pgautofailover.prune_archiver_wal(text,int)
@@ -2581,16 +2550,14 @@ grant execute on function pgautofailover.prune_archiver_wal(text,int)
 -- CONFLICT target list (which can't be qualified) forces this naming here.
 CREATE FUNCTION pgautofailover.report_basebackup_synced
     (in_basebackupid bigint, in_archiverstorageid bigint, in_remotelocation text)
- RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+ RETURNS void LANGUAGE sql SECURITY DEFINER
 AS $$
-BEGIN
     INSERT INTO pgautofailover.basebackup_storage
            (basebackupid, archiverstorageid, syncedat, remotelocation)
     VALUES (in_basebackupid, in_archiverstorageid, now(), in_remotelocation)
        ON CONFLICT (basebackupid, archiverstorageid) DO UPDATE
        SET syncedat = now(),
            remotelocation = EXCLUDED.remotelocation;
-END;
 $$;
 
 comment on function pgautofailover.report_basebackup_synced(bigint,bigint,text)
@@ -2602,14 +2569,12 @@ grant execute on function
 
 CREATE FUNCTION pgautofailover.report_basebackup_remote_deleted
     (basebackupid bigint, archiverstorageid bigint)
- RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+ RETURNS void LANGUAGE sql SECURITY DEFINER
 AS $$
-BEGIN
     UPDATE pgautofailover.basebackup_storage AS bs
        SET deletedat = now()
      WHERE bs.basebackupid = report_basebackup_remote_deleted.basebackupid
        AND bs.archiverstorageid = report_basebackup_remote_deleted.archiverstorageid;
-END;
 $$;
 
 comment on function pgautofailover.report_basebackup_remote_deleted(bigint,bigint)
@@ -2882,15 +2847,13 @@ CREATE FUNCTION pgautofailover.report_pitr_status
     observedlsn pg_lsn, observedtimestamp timestamptz,
     observedpausestate text, note text DEFAULT NULL
  )
- RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+ RETURNS void LANGUAGE sql SECURITY DEFINER
 AS $$
-BEGIN
     INSERT INTO pgautofailover.pitr_history
            (archivernodeid, operation, requestedspec,
             observedlsn, observedtimestamp, observedpausestate, note)
     VALUES (archivernodeid, operation, requestedspec,
             observedlsn, observedtimestamp, observedpausestate, note);
-END;
 $$;
 
 comment on function pgautofailover.report_pitr_status
@@ -2907,9 +2870,8 @@ grant execute on function
 CREATE FUNCTION pgautofailover.pitr_queue_command
     (in_archivernodeid bigint, in_command pgautofailover.pitr_command,
      in_commandspec jsonb DEFAULT NULL)
- RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+ RETURNS void LANGUAGE sql SECURITY DEFINER
 AS $$
-BEGIN
     INSERT INTO pgautofailover.pitr_pending_command
            (archivernodeid, command, commandspec)
     VALUES (in_archivernodeid, in_command, in_commandspec)
@@ -2917,7 +2879,6 @@ BEGIN
        SET command = EXCLUDED.command,
            commandspec = EXCLUDED.commandspec,
            queuedat = now();
-END;
 $$;
 
 comment on function pgautofailover.pitr_queue_command(bigint,pgautofailover.pitr_command,jsonb)
@@ -2936,27 +2897,30 @@ grant execute on function
 -- set, never the command that was actually queued. FOR UPDATE locks the
 -- row across both statements, so a concurrent caller for the same
 -- archivernodeid still can't observe or consume the same command twice.
+-- current's FOR UPDATE locks the row for the rest of this statement, so
+-- a concurrent caller for the same archivernodeid still can't observe or
+-- consume the same command twice; cleared's own WHERE clause references
+-- current's already-frozen value (every CTE in one WITH clause sees the
+-- same query-start snapshot, unaffected by cleared's own write), and is
+-- itself always executed once included in the WITH clause regardless of
+-- whether the final SELECT reads its output -- Postgres's own documented
+-- guarantee for data-modifying CTEs.
 CREATE FUNCTION pgautofailover.pitr_next_command(in_archivernodeid bigint)
- RETURNS pgautofailover.pitr_command LANGUAGE plpgsql SECURITY DEFINER
+ RETURNS pgautofailover.pitr_command LANGUAGE sql SECURITY DEFINER
 AS $$
-DECLARE
-    next_command pgautofailover.pitr_command;
-BEGIN
-    SELECT pc.command INTO next_command
-      FROM pgautofailover.pitr_pending_command pc
-     WHERE pc.archivernodeid = in_archivernodeid
-       FOR UPDATE;
-
-    IF next_command IS NULL OR next_command = 'none' THEN
-        RETURN 'none';
-    END IF;
-
-    UPDATE pgautofailover.pitr_pending_command AS pc
-       SET command = 'none', commandspec = NULL
-     WHERE pc.archivernodeid = in_archivernodeid;
-
-    RETURN next_command;
-END;
+    WITH current AS (
+        SELECT command
+          FROM pgautofailover.pitr_pending_command
+         WHERE archivernodeid = in_archivernodeid
+           FOR UPDATE
+    ),
+    cleared AS (
+        UPDATE pgautofailover.pitr_pending_command
+           SET command = 'none', commandspec = NULL
+         WHERE archivernodeid = in_archivernodeid
+           AND (SELECT command FROM current) NOT IN ('none')
+    )
+    SELECT coalesce((SELECT command FROM current), 'none');
 $$;
 
 comment on function pgautofailover.pitr_next_command(bigint)
