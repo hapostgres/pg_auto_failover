@@ -444,12 +444,12 @@ directory_size(const char *dirPath)
  * is its WAL-cache root, not something a base backup should ever replace,
  * and the artifact needs to land in backupDir as an independent, separately
  * retained copy while the archiver keeps running unaffected. What IS
- * reused: run_program() (runprogram.h), matching copy_directory_tree()
- * right below and "every other external-program call in this codebase"
- * (that function's own comment) -- and prepare_primary_conninfo() (pgctl.c),
- * so this connection gets the same sslmode/sslrootcert/password support
- * service_archiver_start_pgreceivewal() already has, instead of the
- * previous hardcoded --no-password/no-SSL conninfo.
+ * reused, now that pg_basebackup() has been split: pg_basebackup_fetch()
+ * (pgctl.c) -- the actual "run pg_basebackup, capture its output, report
+ * failure" mechanics, shared with standby init's own pg_basebackup()
+ * (which now just calls pg_basebackup_fetch() then does its own separate
+ * rmtree-and-move), rather than a second hand-rolled copy of that same
+ * conninfo-building-and-subprocess-running logic.
  *
  * sslOptions is passed in explicitly rather than read from config-
  * >pgSetup.ssl unconditionally: that field is this archiver's own policy
@@ -470,58 +470,26 @@ run_pg_basebackup(KeeperConfig *config, NodeAddress *source,
 				  const char *backupDir, const char *label,
 				  SSLOptions sslOptions)
 {
-	char pgBasebackupPath[MAXPGPATH] = { 0 };
-
-	path_in_same_directory(config->pgSetup.pg_ctl, "pg_basebackup",
-						   pgBasebackupPath);
-
-	if (!file_exists(pgBasebackupPath))
-	{
-		log_error("Failed to find pg_basebackup at \"%s\"", pgBasebackupPath);
-		return false;
-	}
-
-	char primaryConnInfo[MAXCONNINFO] = { 0 };
-
-	if (!prepare_primary_conninfo(primaryConnInfo,
-								  sizeof(primaryConnInfo),
-								  source->host,
-								  source->port,
-								  PG_AUTOCTL_REPLICA_USERNAME,
-								  NULL,
-								  config->replication_password,
-								  config->name,
-								  sslOptions,
-								  false))
-	{
-		log_error("Failed to prepare the archiver's connection string for "
-				  "pg_basebackup, see above for details");
-		return false;
-	}
-
 	log_info("Generating base backup \"%s\" from %s:%d into \"%s\"",
 			 label, source->host, source->port, backupDir);
 
-	Program program = run_program(pgBasebackupPath,
-								  "-w",
-								  "-d", primaryConnInfo,
-								  "-D", backupDir,
-								  "--format=plain",
-								  "--wal-method=none",
-								  "--checkpoint=fast",
-								  "--label", label,
-								  NULL);
-	bool success = program.returnCode == 0;
+	ReplicationSource replicationSource = { 0 };
 
-	if (!success)
-	{
-		log_error("pg_basebackup failed while generating base backup \"%s\": %s",
-				  label, program.stdErr != NULL ? program.stdErr : "");
-	}
+	replicationSource.primaryNode = *source;
+	strlcpy(replicationSource.userName, PG_AUTOCTL_REPLICA_USERNAME,
+			sizeof(replicationSource.userName));
+	strlcpy(replicationSource.password, config->replication_password,
+			sizeof(replicationSource.password));
+	strlcpy(replicationSource.applicationName, config->name,
+			sizeof(replicationSource.applicationName));
+	strlcpy(replicationSource.backupDir, backupDir,
+			sizeof(replicationSource.backupDir));
+	strlcpy(replicationSource.walMethod, "none",
+			sizeof(replicationSource.walMethod));
+	strlcpy(replicationSource.label, label, sizeof(replicationSource.label));
+	replicationSource.sslOptions = sslOptions;
 
-	free_program(&program);
-
-	return success;
+	return pg_basebackup_fetch(config->pgSetup.pg_ctl, &replicationSource);
 }
 
 

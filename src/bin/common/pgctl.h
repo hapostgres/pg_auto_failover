@@ -47,6 +47,7 @@ bool pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup);
 bool pg_basebackup(const char *pgdata,
 				   const char *pg_ctl,
 				   ReplicationSource *replicationSource);
+bool pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource);
 bool pg_rewind(const char *pgdata,
 			   const char *pg_ctl,
 			   ReplicationSource *replicationSource);
