@@ -470,13 +470,8 @@ Node modifiers:
 Top-level archiver nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-An archiver may also be declared directly inside ``cluster { }``, as its own
-``archiver <name> { }`` block -- a sibling of ``monitor``/``formation``, not
-nested inside either. This matches the real data model
-(``pgautofailover.archiver`` has no formation column at all; it attaches to
-one or more formations by name, it isn't a member of any one of them), and
-is the recommended form over declaring an ``archiver`` node inline inside a
-``formation { }`` block:
+An archiver is declared as a top-level ``archiver <name> { }`` block inside
+``cluster { }``, alongside ``monitor`` and ``formation``:
 
 .. code-block:: text
 
@@ -493,33 +488,25 @@ is the recommended form over declaring an ``archiver`` node inline inside a
        }
    }
 
-Internally this is folded into an ordinary node entry in the named
-formation's own node list right after parsing, so it launches immediately
-by default and supports every modifier above (``region``, the deferred
-forms, ...) exactly the same way an ordinary node does -- there is nothing
-archiver-specific about the mechanism, only about where it's declared.
+The block accepts every node modifier documented above (``region``, the
+deferred forms, ``ssl``, ``auth``, ``volume``, ...).
 
-Only one ``formation <name>`` is accepted: ``pg_autoctl create archiver``'s
-own ini-driven bootstrap has no notion of attaching to more than one
-formation at create time (unlike the CLI's own repeatable ``--formation``
-flag). To cover a second formation, attach it dynamically once the
-archiver is already running -- a direct ``sql monitor { SELECT
-pgautofailover.archiver_add_formation(...) }`` step is the idiom used by
-the ``archiver_multi_formation.pgaf`` spec in this test suite.
+``formation <name>`` names the formation this archiver attaches to at
+create time; exactly one is required. To attach the same archiver to
+additional formations afterwards, run ``pg_autoctl archiver formation add
+--monitor <uri> --name <archiver-name> --formation <formation>`` (``pg_
+autoctl archiver formation list --monitor <uri> --formation <formation>``
+shows every archiver currently attached, and ``... formation remove``
+detaches one) -- see the ``archiver_multi_formation.pgaf`` spec for a
+worked example.
 
-Immediate (the default) launch is only safe when the target formation's
-group already exists by the time the archiver's own container starts --
-guaranteed for a formation whose other nodes it already ``depends_on``
-(the ordinary node-ordering rules apply the same way here), but *not*
-guaranteed across independent formations or a Citus formation's several
-groups, since ``pg_autoctl create archiver`` has no retry-until-ready loop
-the way ordinary nodes' registration does. Use ``create and launch
-deferred`` plus an explicit ``exec <name> pg_autoctl node start`` step
-once every target group is confirmed to exist whenever that ordering
-isn't otherwise guaranteed -- see the ``citus_basic_operation.pgaf``
-spec's own archiver step for a worked example (a Citus formation's worker
-groups must all be registered before the archiver attaches, so it can
-cover every one of them in a single call).
+The archiver container can start in any order relative to the nodes of
+its target formation: `create archiver` waits for the formation's own
+group(s) to be registered before completing, retrying every few seconds
+for up to 15 minutes rather than failing immediately. This makes
+``depends_on`` ordering, and the deferred-launch modifiers, unnecessary
+for this specifically -- they're still useful for the other timing
+scenarios documented above.
 
 Node registration order
 ~~~~~~~~~~~~~~~~~~~~~~~~

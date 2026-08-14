@@ -1050,6 +1050,88 @@ monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
 
 
 /*
+ * monitor_archiver_add_formation_by_name is monitor_archiver_add_formation's
+ * own name-based counterpart, for callers (`pg_autoctl archiver
+ * add-formation`) that only have the archiver's operator-facing --name, not
+ * its internal archiverid -- calls the SQL overload that resolves it via
+ * archivername's own UNIQUE constraint instead of requiring a separate
+ * lookup round-trip here.
+ */
+bool
+monitor_archiver_add_formation_by_name(Monitor *monitor, char *archiverName,
+									   char *formation, int64_t *archiverNodeId)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	const char *sql =
+		"SELECT * FROM pgautofailover.archiver_add_formation($1, $2) LIMIT 1";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2] = { archiverName, formation };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to attach archiver \"%s\" to formation \"%s\" "
+				  "on the monitor", archiverName, formation);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		/*
+		 * Zero rows here means the formation has no group yet (a race
+		 * with formation setup, not an error -- see cli_create_archiver's
+		 * own retry loop, which relies on this exact return value to know
+		 * when to retry): the archiver-name lookup itself, unlike the
+		 * bigint overload, would have raised a real SQL exception (caught
+		 * above as a pgsql_execute_with_params failure) rather than
+		 * silently returning zero rows, so reaching here with parsedOk
+		 * false is unambiguous.
+		 */
+		*archiverNodeId = 0;
+		return true;
+	}
+
+	*archiverNodeId = context.bigint;
+
+	return true;
+}
+
+
+/*
+ * monitor_archiver_remove_formation_by_name calls the name-based
+ * archiver_remove_formation() overload, detaching the named archiver from
+ * formation -- see monitor_archiver_add_formation_by_name's own comment on
+ * why every caller here only ever has the archiver's --name, not its
+ * internal archiverid.
+ */
+bool
+monitor_archiver_remove_formation_by_name(Monitor *monitor, char *archiverName,
+										  char *formation)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql = "SELECT pgautofailover.archiver_remove_formation($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, TEXTOID };
+	const char *paramValues[2] = { archiverName, formation };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to detach archiver \"%s\" from formation \"%s\" "
+				  "on the monitor", archiverName, formation);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_report_archiver_storage calls pgautofailover.report_archiver_
  * storage() to record this archiver's own disk usage and free space,
  * alongside a fresh lastreporttime -- the same periodic heartbeat
@@ -1868,6 +1950,118 @@ monitor_list_basebackups(Monitor *monitor,
 	if (!parseContext.parsedOK)
 	{
 		log_error("Failed to parse the list of base backups returned by "
+				  "the monitor for \"%s\"/%d, see previous lines for "
+				  "details", formationId, groupId);
+		return false;
+	}
+
+	return true;
+}
+
+
+typedef struct ArchiverWalInfoArrayParseContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	ArchiverWalInfoArray *walArray;
+	bool parsedOK;
+} ArchiverWalInfoArrayParseContext;
+
+
+static bool
+parseArchiverWalInfoRow(PGresult *result, int rowNumber, ArchiverWalInfo *wal)
+{
+	if (PQgetisnull(result, rowNumber, 0) ||
+		PQgetisnull(result, rowNumber, 2) ||
+		PQgetisnull(result, rowNumber, 4))
+	{
+		log_error("walfilename, archiver_count, or receivedat_epoch "
+				  "returned by the monitor is NULL");
+		return false;
+	}
+
+	char *value = PQgetvalue(result, rowNumber, 0);
+
+	strlcpy(wal->walFileName, value, MAXPGPATH);
+
+	value = PQgetvalue(result, rowNumber, 1);
+	strlcpy(wal->lsn, value, PG_LSN_MAXLENGTH);
+
+	value = PQgetvalue(result, rowNumber, 2);
+	wal->archiverCount = strtoll(value, NULL, 0);
+
+	value = PQgetvalue(result, rowNumber, 3);
+	strlcpy(wal->archivers, value, BUFSIZE);
+
+	value = PQgetvalue(result, rowNumber, 4);
+	wal->receivedAtEpoch = strtoll(value, NULL, 0);
+
+	return true;
+}
+
+
+static void
+parseArchiverWalInfoArray(void *ctx, PGresult *result)
+{
+	ArchiverWalInfoArrayParseContext *context =
+		(ArchiverWalInfoArrayParseContext *) ctx;
+	bool parsedOk = true;
+
+	if (PQntuples(result) > ARCHIVER_WAL_ARRAY_MAX_COUNT)
+	{
+		log_error("Query returned %d rows, pg_auto_failover supports only "
+				  "up to %d WAL segments per group in this listing",
+				  PQntuples(result), ARCHIVER_WAL_ARRAY_MAX_COUNT);
+		context->parsedOK = false;
+		return;
+	}
+
+	context->walArray->count = PQntuples(result);
+
+	for (int rowNumber = 0; rowNumber < PQntuples(result); rowNumber++)
+	{
+		ArchiverWalInfo *wal = &(context->walArray->wal[rowNumber]);
+
+		parsedOk = parsedOk && parseArchiverWalInfoRow(result, rowNumber, wal);
+	}
+
+	context->parsedOK = parsedOk;
+}
+
+
+/*
+ * monitor_list_archiver_wal calls pgautofailover.list_archiver_wal(
+ * formation, group) and returns every captured WAL segment for that group,
+ * newest first, already grouped across every archiver holding each one --
+ * see that SQL function's own comment (pgautofailover.sql).
+ */
+bool
+monitor_list_archiver_wal(Monitor *monitor,
+						  const char *formationId, int groupId,
+						  ArchiverWalInfoArray *walArray)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT * FROM pgautofailover.list_archiver_wal($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[2] = { formationId, groupIdString.strValue };
+	ArchiverWalInfoArrayParseContext parseContext = { { 0 }, walArray, false };
+
+	walArray->count = 0;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &parseContext, &parseArchiverWalInfoArray))
+	{
+		log_error("Failed to list captured WAL from the monitor for "
+				  "\"%s\"/%d", formationId, groupId);
+		return false;
+	}
+
+	if (!parseContext.parsedOK)
+	{
+		log_error("Failed to parse the list of captured WAL returned by "
 				  "the monitor for \"%s\"/%d, see previous lines for "
 				  "details", formationId, groupId);
 		return false;

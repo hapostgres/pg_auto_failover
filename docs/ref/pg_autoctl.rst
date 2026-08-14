@@ -43,7 +43,19 @@ pg_autoctl provides the following commands::
     formation  Drop a formation on the pg_auto_failover monitor
 
   pg_autoctl archiver
-    serve  Start serving this archiver's captured WAL and base backups
+    serve      Start serving this archiver's captured WAL and base backups
+  + formation  Manage the formations an archiver is attached to
+  + show       Show base backups, captured WAL, and state for an archiver
+
+  pg_autoctl archiver formation
+    add     Attach an existing archiver to one more formation
+    remove  Detach an archiver from a formation
+    list    List the archivers attached to a formation
+
+  pg_autoctl archiver show
+    basebackup  List base backups for a formation/group
+    wal         List captured WAL segments for a formation/group
+    state       Show this archiver's own identity and formation memberships
 
   pg_autoctl config
     check  Check pg_autoctl configuration

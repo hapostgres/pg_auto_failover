@@ -1744,18 +1744,48 @@ cli_create_archiver(int argc, char **argv)
 	 * ARCHIVING node per group already in that formation, so a Citus
 	 * formation with several worker groups is fully covered by a single
 	 * call here.
+	 *
+	 * A formation with no group yet (its own nodes haven't registered)
+	 * makes archiver_add_formation() return zero rows, which the bigint
+	 * overload's own caller (monitor_archiver_add_formation) can only
+	 * report back as a plain failure -- indistinguishable, at this level,
+	 * from a real error. That ambiguity is harmless here specifically
+	 * because archiverId was just resolved by our own monitor_register_
+	 * archiver() call above and is therefore always valid, so every
+	 * failure from this point on can only be "no group yet": retry with
+	 * the same bounded, unbounded-attempts policy this CLI already uses
+	 * to wait out a not-yet-reachable monitor (discover_hostname, this
+	 * file), rather than requiring every target formation's own nodes to
+	 * have registered before `create archiver` is even started.
 	 */
 	for (int i = 0; i < archiverFormationsCount; i++)
 	{
 		char *formation = archiverFormations[i];
 		int64_t thisArchiverNodeId = 0;
 
-		if (!monitor_archiver_add_formation(&monitor, archiverId,
-											formation, &thisArchiverNodeId))
+		ConnectionRetryPolicy retryPolicy = { 0 };
+
+		(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
+
+		while (!monitor_archiver_add_formation(&monitor, archiverId,
+											   formation, &thisArchiverNodeId))
 		{
-			log_fatal("Failed to attach archiver \"%s\" to formation \"%s\", "
-					  "see above for details", archiverName, formation);
-			exit(EXIT_CODE_MONITOR);
+			if (pgsql_retry_policy_expired(&retryPolicy))
+			{
+				log_fatal("Failed to attach archiver \"%s\" to formation "
+						  "\"%s\": formation still has no group registered "
+						  "after %d attempts, see above for details",
+						  archiverName, formation, retryPolicy.attempts);
+				exit(EXIT_CODE_MONITOR);
+			}
+
+			int sleepTimeMs =
+				pgsql_compute_connection_retry_sleep_time(&retryPolicy);
+
+			log_warn("Formation \"%s\" has no group registered yet, "
+					 "retrying in %d ms.", formation, sleepTimeMs);
+
+			(void) pg_usleep(sleepTimeMs * 1000);
 		}
 
 		log_info("Registered archiver \"%s\" (id %" PRId64 ") for formation "

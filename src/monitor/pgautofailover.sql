@@ -2093,6 +2093,38 @@ comment on function pgautofailover.archiver_add_formation(bigint,text)
 grant execute on function pgautofailover.archiver_add_formation(bigint,text)
    to autoctl_node;
 
+-- name-based overload for `pg_autoctl archiver add-formation`: that
+-- command only ever has the archiver's own --name (an operator-facing
+-- identifier), never its internal archiverid, and archivername already
+-- carries a UNIQUE constraint (see the archiver table definition above)
+-- to resolve it from -- reusing the bigint-based function above rather
+-- than duplicating its per-group loop.
+CREATE FUNCTION pgautofailover.archiver_add_formation
+    (archivername text, in_formationid text)
+ RETURNS SETOF bigint LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+    the_archiverid bigint;
+BEGIN
+    SELECT a.archiverid INTO the_archiverid
+      FROM pgautofailover.archiver a
+     WHERE a.archivername = archiver_add_formation.archivername;
+
+    IF the_archiverid IS NULL THEN
+        RAISE EXCEPTION 'archiver "%" does not exist', archivername;
+    END IF;
+
+    RETURN QUERY
+        SELECT * FROM pgautofailover.archiver_add_formation(the_archiverid, in_formationid);
+END;
+$$;
+
+comment on function pgautofailover.archiver_add_formation(text,text)
+        is 'attach an archiver (looked up by name) to every group of a formation -- see the archiverid-based overload for the actual mechanism';
+
+grant execute on function pgautofailover.archiver_add_formation(text,text)
+   to autoctl_node;
+
 -- one row per (formation, group) an archiver currently holds a
 -- 'wal-receiver' membership in, across every formation it is attached
 -- to -- what an archiver process itself calls, at startup and
@@ -2149,6 +2181,33 @@ comment on function pgautofailover.archiver_remove_formation(bigint,text)
         is 'detach an archiver from a formation, removing its ARCHIVING node row in every group';
 
 grant execute on function pgautofailover.archiver_remove_formation(bigint,text)
+   to autoctl_node;
+
+-- name-based overload for `pg_autoctl archiver formation remove`, mirroring
+-- archiver_add_formation(text,text)'s own reasoning above.
+CREATE FUNCTION pgautofailover.archiver_remove_formation
+    (archivername text, formationid text)
+ RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+    the_archiverid bigint;
+BEGIN
+    SELECT a.archiverid INTO the_archiverid
+      FROM pgautofailover.archiver a
+     WHERE a.archivername = archiver_remove_formation.archivername;
+
+    IF the_archiverid IS NULL THEN
+        RAISE EXCEPTION 'archiver "%" does not exist', archivername;
+    END IF;
+
+    PERFORM pgautofailover.archiver_remove_formation(the_archiverid, formationid);
+END;
+$$;
+
+comment on function pgautofailover.archiver_remove_formation(text,text)
+        is 'detach an archiver (looked up by name) from a formation -- see the archiverid-based overload for the actual mechanism';
+
+grant execute on function pgautofailover.archiver_remove_formation(text,text)
    to autoctl_node;
 
 -- in_* parameters: see archiver_add_formation's own comment on why an ON
@@ -2348,6 +2407,45 @@ comment on function pgautofailover.wal_archived(text,int,text)
         is 'archive_command confirmation check: has segment %f already landed durably on archiver_quorum archiver(s)?';
 
 grant execute on function pgautofailover.wal_archived(text,int,text)
+   to autoctl_node;
+
+-- `pg_autoctl archiver show wal`'s own backing query -- archiver_wal has no
+-- direct SELECT grant for autoctl_node (see report_wal_received's own
+-- comment above on why), so this is the one SECURITY DEFINER entry point
+-- for listing it, mirroring list_basebackups' shape. One row per segment
+-- (not per archiver): the same segment can land on more than one archiver
+-- under quorum > 1, and a caller asking "is this segment safe" wants to
+-- see that as one row with how many/which archivers hold it, not a
+-- duplicate row per holder.
+CREATE FUNCTION pgautofailover.list_archiver_wal
+ (
+    formationid          text,
+    groupid              int,
+    OUT walfilename       text,
+    OUT lsn               pg_lsn,
+    OUT archiver_count    bigint,
+    OUT archivers         text,
+    OUT receivedat_epoch  bigint
+ )
+ RETURNS SETOF record LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+    SELECT aw.walfilename,
+           min(aw.lsn) AS lsn,
+           count(DISTINCT aw.archiverid) AS archiver_count,
+           string_agg(DISTINCT a.archivername, ', ' ORDER BY a.archivername) AS archivers,
+           extract(epoch FROM max(aw.receivedat))::bigint AS receivedat_epoch
+      FROM pgautofailover.archiver_wal aw
+      JOIN pgautofailover.archiver a ON a.archiverid = aw.archiverid
+     WHERE aw.formationid = list_archiver_wal.formationid
+       AND aw.groupid = list_archiver_wal.groupid
+  GROUP BY aw.walfilename
+  ORDER BY aw.walfilename DESC;
+$$;
+
+comment on function pgautofailover.list_archiver_wal(text,int)
+        is 'list captured WAL segments for (formation, group), newest first, with which/how many archivers hold each -- inventory';
+
+grant execute on function pgautofailover.list_archiver_wal(text,int)
    to autoctl_node;
 
 -- inserts into archiver_wal (idempotent on conflict)

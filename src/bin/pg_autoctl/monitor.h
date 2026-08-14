@@ -142,6 +142,30 @@ typedef struct BasebackupInfoArray
 	BasebackupInfo backups[BASEBACKUP_ARRAY_MAX_COUNT];
 } BasebackupInfoArray;
 
+#define ARCHIVER_WAL_ARRAY_MAX_COUNT 4096
+
+/*
+ * One row per captured WAL segment for a (formation, group), from
+ * pgautofailover.list_archiver_wal() -- already grouped server-side across
+ * every archiver holding that segment (see that function's own comment),
+ * so archivers here is a display string ("archiver1, archiver2"), not a
+ * single archiver identity.
+ */
+typedef struct ArchiverWalInfo
+{
+	char walFileName[MAXPGPATH];
+	char lsn[PG_LSN_MAXLENGTH];
+	int64_t archiverCount;
+	char archivers[BUFSIZE];
+	int64_t receivedAtEpoch;
+} ArchiverWalInfo;
+
+typedef struct ArchiverWalInfoArray
+{
+	int count;
+	ArchiverWalInfo wal[ARCHIVER_WAL_ARRAY_MAX_COUNT];
+} ArchiverWalInfoArray;
+
 typedef struct StateNotification
 {
 	char message[BUFSIZE];
@@ -264,6 +288,10 @@ bool monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
 							   char *region, int64_t *archiverId);
 bool monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
 									char *formation, int64_t *archiverNodeId);
+bool monitor_archiver_add_formation_by_name(Monitor *monitor, char *archiverName,
+											char *formation, int64_t *archiverNodeId);
+bool monitor_archiver_remove_formation_by_name(Monitor *monitor, char *archiverName,
+											   char *formation);
 bool monitor_report_archiver_storage(Monitor *monitor, int64_t archiverId,
 									 uint64_t usedBytes, uint64_t freeBytes);
 bool monitor_get_archivers(Monitor *monitor, const char *formation,
@@ -304,6 +332,9 @@ bool monitor_report_basebackup_deleted(Monitor *monitor, int64_t basebackupId);
 bool monitor_list_basebackups(Monitor *monitor,
 							  const char *formationId, int groupId,
 							  BasebackupInfoArray *backupsArray);
+bool monitor_list_archiver_wal(Monitor *monitor,
+							   const char *formationId, int groupId,
+							   ArchiverWalInfoArray *walArray);
 bool monitor_get_basebackup_policy_for_group(Monitor *monitor,
 											 const char *formationId,
 											 int groupId,
