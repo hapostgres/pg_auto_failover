@@ -2458,6 +2458,27 @@ NodeIsHealthy(const AutoFailoverNode *node, const struct GroupStateContext *ctx)
 		return false;
 	}
 
+	/*
+	 * An ARCHIVING row (haspgdata false) has neither a real postmaster for
+	 * the health-check worker to probe (it connects to nodeport, which is
+	 * 0 here -- see haspgdata's own design comment, pgautofailover.sql)
+	 * nor does pgIsRunning mean the same thing for one: pg_autoctl now
+	 * reports it as pg_receivewal's own real liveness (service_archiver.c),
+	 * which is legitimately false exactly when a FAST_FORWARD candidate
+	 * needs this archiver most (the group's primary just died, pg_
+	 * receivewal has nothing left to stream from) -- but what actually
+	 * serves WAL to that candidate is pg_walsender, a separate process
+	 * neither of those two facts has any bearing on. Neither node->health
+	 * nor node->pgIsRunning is evidence of anything for this row kind, so
+	 * skip both and fall through to whatever the caller's own staleness
+	 * check (NodeIsUnhealthy's reportTime/unhealthyTimeoutMs, unaffected
+	 * by this function) already provides instead.
+	 */
+	if (!node->hasPgData)
+	{
+		return true;
+	}
+
 	if (node->health == NODE_HEALTH_BAD &&
 		TimestampDifferenceExceeds(node->healthCheckTime, node->reportTime, 0) &&
 		!TimestampDifferenceExceeds(node->reportTime, ctx->now,
@@ -2493,7 +2514,8 @@ NodeIsUnhealthy(const AutoFailoverNode *node, const struct GroupStateContext *ct
 	if (TimestampDifferenceExceeds(node->reportTime, ctx->now,
 								   ctx->unhealthyTimeoutMs))
 	{
-		if (node->health == NODE_HEALTH_BAD &&
+		if (node->hasPgData &&
+			node->health == NODE_HEALTH_BAD &&
 			TimestampDifferenceExceeds(PgStartTime, node->healthCheckTime, 0))
 		{
 			if (TimestampDifferenceExceeds(PgStartTime, ctx->now,
@@ -2502,9 +2524,27 @@ NodeIsUnhealthy(const AutoFailoverNode *node, const struct GroupStateContext *ct
 				return true;
 			}
 		}
+
+		/*
+		 * An ARCHIVING row has no health-check-worker evidence to fall
+		 * back on above (see NodeIsHealthy()'s own comment on why), so a
+		 * stale report is this function's only real signal for one --
+		 * still correctly caught here regardless of hasPgData.
+		 */
+		if (!node->hasPgData)
+		{
+			return true;
+		}
 	}
 
-	if (!node->pgIsRunning)
+	/*
+	 * pgIsRunning means "pg_receivewal is currently running" for an
+	 * ARCHIVING row (service_archiver.c), not "the postmaster is up" --
+	 * legitimately false exactly when this archiver is most needed as a
+	 * FAST_FORWARD WAL source (see NodeIsHealthy()'s own comment), so it
+	 * must not mark the row unhealthy here either.
+	 */
+	if (node->hasPgData && !node->pgIsRunning)
 	{
 		return true;
 	}
