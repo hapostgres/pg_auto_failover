@@ -367,9 +367,9 @@ report_wal_progress_notify_callback(void *context, const char *lsn,
 	Keeper *keeper = ((WalDrainContext *) context)->keeper;
 
 	(void) systemIdentifier;   /* archiver_node has no per-row system
-								 * identifier column to carry this on --
-								 * unlike archiver_wal, there's only ever
-								 * one "most recent" row per wal-receiver */
+	                            * identifier column to carry this on --
+	                            * unlike archiver_wal, there's only ever
+	                            * one "most recent" row per wal-receiver */
 
 	if (!monitor_report_wal_progress(&(keeper->monitor),
 									 keeper->state.current_node_id, lsn))

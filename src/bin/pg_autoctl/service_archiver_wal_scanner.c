@@ -194,7 +194,7 @@ archiver_wal_scan_once(const char *walcacheDir, const char *socketPath,
 		wal_segment_end_lsn(names[i], lsn, sizeof(lsn));
 
 		if (archiver_wal_notify_send_segment(socketPath, names[i], lsn,
-									 systemIdentifier))
+											 systemIdentifier))
 		{
 			strlcpy(highWaterMark, names[i], highWaterMarkSize);
 		}

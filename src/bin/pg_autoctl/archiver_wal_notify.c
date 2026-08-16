@@ -303,7 +303,7 @@ archiver_wal_notify_listener_drain(ArchiverWalNotifyListener *listener,
 			uint64_t systemIdentifier = 0;
 
 			if (sscanf(line, "%*s %1023s %17s %" SCNu64, /* IGNORE-BANNED */
-					  walFileName, lsn, &systemIdentifier) != 3)
+					   walFileName, lsn, &systemIdentifier) != 3)
 			{
 				log_warn("Failed to parse WAL-notify SEGMENT message: \"%s\"", line);
 				continue;
@@ -320,7 +320,7 @@ archiver_wal_notify_listener_drain(ArchiverWalNotifyListener *listener,
 			uint64_t systemIdentifier = 0;
 
 			if (sscanf(line, "%*s %17s %" SCNu64, /* IGNORE-BANNED */
-					  lsn, &systemIdentifier) != 2)
+					   lsn, &systemIdentifier) != 2)
 			{
 				log_warn("Failed to parse WAL-notify PROGRESS message: \"%s\"", line);
 				continue;
