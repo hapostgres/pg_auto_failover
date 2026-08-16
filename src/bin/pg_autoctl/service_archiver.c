@@ -80,15 +80,6 @@ static ArchiverWalNotifyListener archiverWalNotifyListener = {
 #define ARCHIVER_STORAGE_REPORT_TICKS 30
 
 /*
- * Last WAL filename already reported to the monitor, so each tick only
- * reports newly-appeared segments instead of re-scanning and re-reporting
- * the whole cache directory every time (the monitor-side insert is
- * idempotent, ON CONFLICT DO NOTHING, but that's a fallback for restarts,
- * not meant to be relied on every tick).
- */
-static char lastReportedWalFileName[ARCHIVER_WAL_FNAME_LEN + 1] = { 0 };
-
-/*
  * The timeline of the WAL segment service_archiver_update_current_lsn()
  * most recently found to be the current capture frontier -- computed
  * alongside keeper->postgres.currentLSN there (same scan, same tick), and
@@ -199,21 +190,6 @@ is_wal_segment_filename(const char *name)
 
 
 /*
- * wal_filename_compare is a pg_qsort() comparator over an array of char*,
- * ordering WAL segment filenames the same way their fixed-width hex names
- * already sort lexicographically (== numerically, oldest to newest).
- */
-static int
-wal_filename_compare(const void *a, const void *b)
-{
-	const char *nameA = *(const char *const *) a;
-	const char *nameB = *(const char *const *) b;
-
-	return strcmp(nameA, nameB);
-}
-
-
-/*
  * wal_segment_end_lsn computes the LSN just past the end of the WAL segment
  * named walFileName -- what report_wal_received() records as "captured up
  * to", matching pg_walsender/wal_dir_scan.c's own wal_dir_find_latest()
@@ -270,23 +246,33 @@ typedef struct WalReportBatch
 /*
  * batch_wal_notify_callback adapts WalReportBatch to ArchiverWalNotify
  * Callback's own signature (archiver_wal_notify.h) -- context is the
- * WalReportBatch* the drain call below was made with. Skips anything
- * already known to be reported (lastReportedWalFileName) so a message
- * re-sent after a restart of either producer (pg_receivewal's own hook,
- * or service_archiver_wal_scanner.c) doesn't pad out the batch for no
- * reason -- the monitor side is idempotent regardless (ON CONFLICT DO
- * NOTHING), this is purely to keep the batch itself small.
+ * WalReportBatch* the drain call below was made with. Adds every message
+ * drained, unconditionally: an earlier version of this function skipped
+ * anything <= a remembered in-process high-water mark as a pure
+ * optimization (avoid padding the batch with already-known segments) --
+ * but that's only safe if notifications are guaranteed to arrive in
+ * strictly increasing filename order, which they are not. pg_receivewal's
+ * own live hook (archiver_wal_notify_send() is best-effort: a segment
+ * closing while nothing is listening yet is silently dropped, see that
+ * function's own header comment) and service_archiver_wal_scanner.c's
+ * periodic re-scan are two independent producers feeding the same socket
+ * -- a live notification for an OLDER segment can arrive after a NEWER
+ * one already advanced the high-water mark (e.g. the older one's own live
+ * notification was dropped because the listener wasn't open yet right
+ * after a restart, while the newer one's succeeded moments later), and a
+ * high-water-mark gate then permanently, silently drops that older
+ * segment the very first time the scanner's own later re-discovery tries
+ * to report it too -- a real, observed data-loss bug this fixes, not a
+ * hypothetical one. The monitor side is already idempotent (ON CONFLICT
+ * DO NOTHING), so unconditionally batching -- occasionally re-sending an
+ * already-recorded segment -- costs a few redundant rows compared against
+ * on every insert, genuinely cheap next to permanently losing one.
  */
 static bool
 batch_wal_notify_callback(void *context, const char *walFileName,
 						  const char *lsn, uint64_t systemIdentifier)
 {
 	WalReportBatch *batch = (WalReportBatch *) context;
-
-	if (strcmp(walFileName, lastReportedWalFileName) <= 0)
-	{
-		return true;
-	}
 
 	if (batch->count == batch->capacity)
 	{
@@ -308,12 +294,11 @@ batch_wal_notify_callback(void *context, const char *walFileName,
 
 /*
  * flush_wal_report_batch reports everything batch_wal_notify_callback()
- * accumulated in one monitor_report_wal_received_bulk() call, then
- * advances lastReportedWalFileName to the newest segment in the batch --
- * only once that report has actually succeeded (a monitor hiccup retries
- * the whole batch, and anything after it, on the next tick instead of
- * silently skipping it). Frees the batch's own storage regardless of
- * outcome.
+ * accumulated in one monitor_report_wal_received_bulk() call -- a monitor
+ * hiccup fails the whole batch, retried (along with whatever else has
+ * accumulated by then) on the next tick, since nothing here is marked
+ * "done" until the report actually succeeds. Frees the batch's own
+ * storage regardless of outcome.
  */
 static bool
 flush_wal_report_batch(Keeper *keeper, WalReportBatch *batch)
@@ -331,15 +316,6 @@ flush_wal_report_batch(Keeper *keeper, WalReportBatch *batch)
 		{
 			log_error("Failed to report %d captured WAL file(s) to the "
 					  "monitor", batch->count);
-		}
-		else
-		{
-			pg_qsort(batch->walFileNames, batch->count, sizeof(char *),
-					 wal_filename_compare);
-
-			strlcpy(lastReportedWalFileName,
-					batch->walFileNames[batch->count - 1],
-					sizeof(lastReportedWalFileName));
 		}
 
 		for (int i = 0; i < batch->count; i++)
@@ -731,33 +707,30 @@ service_archiver_loop(Keeper *keeper)
 		 * An archiver never sets postgres.pgIsRunning through the usual
 		 * keeper_update_pg_state() path (there's no real Postgres to
 		 * query, see haspgdata's own design comment) -- it stays at its
-		 * zero-initialized false forever otherwise. That's not just
-		 * cosmetic: the monitor's own NodeIsHealthy() (node_metadata.c)
-		 * unconditionally requires pgIsRunning to be true before ever
-		 * considering a node healthy, in every one of its branches --
-		 * including group_state_machine.c's own FAST_FORWARD candidate
-		 * selection, which refuses to assign fast_forward against an
-		 * unhealthy WAL source. Without this, an archiver could never
-		 * legitimately serve as a FAST_FORWARD WAL source no matter how
-		 * caught up it was: the monitor would always see it as unhealthy
-		 * and never select it.
+		 * zero-initialized false forever otherwise. Reported here as
+		 * pg_receivewal's own real liveness (service_archiver_
+		 * pgreceivewal_is_running()), the same "is it running" check
+		 * service_archiver_pgreceivewal_is_running(Keeper*) already makes
+		 * for local use -- giving operators and tests a SQL-visible way to
+		 * see it (pgautofailover.node.pgisrunning) instead of only ever
+		 * being able to infer it from log lines.
 		 *
-		 * Deliberately NOT tied to service_archiver_pgreceivewal_is_
-		 * running(): that reflects a narrower "is WAL actively being
-		 * captured from a live primary right now" fact, which is
-		 * legitimately false exactly during the window a FAST_FORWARD
-		 * candidate needs the archiver most -- pg_receivewal has nothing
-		 * to stream from once the primary it was following is dead, but
-		 * the WAL this archiver already captured is still there and still
-		 * servable via pg_walsender regardless. pgIsRunning here means
-		 * "this archiver's own keeper service is alive and reporting",
-		 * the same thing a real node's pgIsRunning=true ultimately proves
-		 * about itself -- a crashed or partitioned archiver is still
-		 * caught by the monitor's own separate report-staleness check
-		 * (NodeIsUnhealthy's reportTime/unhealthyTimeoutMs), which
-		 * doesn't depend on this flag at all.
+		 * This is safe for FAST_FORWARD candidate selection (group_state_
+		 * machine.c's WalSourceNodesAreAllUnhealthy(), via NodeIsHealthy())
+		 * despite pg_receivewal legitimately being stopped exactly when a
+		 * FAST_FORWARD candidate needs a WAL source most (the group's
+		 * primary just died, fsm_archiver_report_lsn() stops pg_receivewal
+		 * against the now-untrustworthy old primary): what actually serves
+		 * WAL to a FAST_FORWARD candidate is pg_walsender ("archiver-
+		 * serve"), a separate, independently-supervised top-level process
+		 * this loop has no bearing on at all -- pg_receivewal only ever
+		 * affects how *fresh* the already-captured WAL is, never whether
+		 * it can be served. NodeIsHealthy()/NodeIsUnhealthy() (node_
+		 * metadata.c) are themselves updated to stop requiring pgIsRunning
+		 * for a !hasPgData (archiver) row, for exactly this reason.
 		 */
-		keeper->postgres.pgIsRunning = true;
+		keeper->postgres.pgIsRunning =
+			service_archiver_pgreceivewal_is_running(keeper);
 
 		if (!keeper_load_state(keeper))
 		{

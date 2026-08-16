@@ -109,9 +109,21 @@ step test_002_archiver_restart_liveness {
     # one more switch on top of test_001's own two -- completes segment
     # 000000010000000000000005 (see this spec's own header comment on why
     # these are fixed numbers rather than derived from segment 1).
+    #
+    # 60s, not test_001's own 30s for the same kind of wait: unlike
+    # test_001, pg_receivewal isn't already streaming here -- it has to
+    # restart from scratch after the archiver1 restart above, and its own
+    # controller (service_archiver_pgreceivewal_ctl.c) runs a primary/
+    # replication-slot readiness preflight before ever forking it, with a
+    # worst-case bound of ARCHIVER_PGRECEIVEWAL_SLOT_WAIT_SECONDS (20s) on
+    # top of the real connect-and-stream-and-report cycle that follows.
+    # 30s left too little margin for that on a loaded host; 60s actually
+    # covers the documented worst case rather than guessing at a bigger
+    # number, matching the 60s this same step already uses just above for
+    # "archiver1 state is archiving".
     sql node1 { INSERT INTO t1 VALUES (4); }
     sql node1 { SELECT pg_switch_wal(); }
-    wait until wal segment "000000010000000000000005" archived in default/0  timeout 30s
+    wait until wal segment "000000010000000000000005" archived in default/0  timeout 60s
 }
 
 #

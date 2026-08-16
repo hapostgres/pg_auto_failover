@@ -162,6 +162,20 @@ static bool wait_for_primary_and_slot_ready(const char *primaryConnInfo,
  */
 #define ARCHIVER_PGRECEIVEWAL_SLOT_WAIT_SECONDS 20
 
+/*
+ * How often wait_for_primary_and_slot_ready() actually re-checks, in
+ * milliseconds -- deliberately much finer than the 20s wall-clock bound
+ * above: each check is one lightweight query (pgsql_replication_slot_
+ * exists()), and the common case this function exists for (a plain
+ * archiver restart, where the slot has already existed for a while) only
+ * ever needs its first attempt to succeed. A coarse 1s-per-attempt
+ * interval cost this preflight check up to a full extra second of pure
+ * waiting even when readiness was already true, directly eating into
+ * callers' own downstream timeouts (e.g. archiver_wal_capture.pgaf's own
+ * restart-liveness test) for no benefit.
+ */
+#define ARCHIVER_PGRECEIVEWAL_SLOT_POLL_MS 250
+
 
 /*
  * wait_for_primary_and_slot_ready polls the primary at primaryConnInfo,
@@ -188,7 +202,9 @@ static bool wait_for_primary_and_slot_ready(const char *primaryConnInfo,
 static bool
 wait_for_primary_and_slot_ready(const char *primaryConnInfo, const char *slotName)
 {
-	int maxAttempts = ARCHIVER_PGRECEIVEWAL_SLOT_WAIT_SECONDS;
+	int maxAttempts =
+		(ARCHIVER_PGRECEIVEWAL_SLOT_WAIT_SECONDS * 1000) /
+		ARCHIVER_PGRECEIVEWAL_SLOT_POLL_MS;
 
 	for (int attempt = 0; attempt < maxAttempts; attempt++)
 	{
@@ -213,7 +229,7 @@ wait_for_primary_and_slot_ready(const char *primaryConnInfo, const char *slotNam
 			pgsql_finish(&pgsql);
 		}
 
-		pg_usleep(1 * 1000 * 1000);   /* 1s */
+		pg_usleep(ARCHIVER_PGRECEIVEWAL_SLOT_POLL_MS * 1000);
 	}
 
 	log_warn("Timed out after %ds waiting for the primary and replication "
