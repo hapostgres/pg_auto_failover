@@ -55,6 +55,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -136,8 +137,60 @@ pgaf_hook_wal_segment_closed(XLogRecPtr xlogpos, uint32 timeline)
 	XLByteToSeg(xlogpos, segno, (1024 * 1024 * 16));
 	XLogFileName(walFileName, timeline, segno, (1024 * 1024 * 16));
 
-	(void) archiver_wal_notify_send(archiverWalNotifySocketPath,
-									walFileName, lsn, systemIdentifier);
+	(void) archiver_wal_notify_send_segment(archiverWalNotifySocketPath,
+											walFileName, lsn, systemIdentifier);
+}
+
+
+/*
+ * How often pgaf_hook_wal_progress() actually sends a PROGRESS message, in
+ * seconds -- stop_streaming() (pg_receivewal.c) can invoke this hook far
+ * more often than that under a busy primary (once per received message
+ * chunk, not just once per --status-interval), so this throttle is what
+ * keeps PROGRESS traffic a low-volume, best-effort observability signal
+ * rather than flooding the socket at line rate.
+ */
+#define ARCHIVER_WAL_PROGRESS_MIN_INTERVAL_SECONDS 5
+
+
+/*
+ * pgaf_hook_wal_progress is pg_receivewal's own WalProgressHook (vendor/
+ * pg_receivewal/pg_receivewal_entry.h) -- same LSN formatting and system-
+ * identifier lookup as pgaf_hook_wal_segment_closed() above, throttled to
+ * ARCHIVER_WAL_PROGRESS_MIN_INTERVAL_SECONDS and, unlike that hook, with no
+ * segment filename at all (see archiver_wal_notify_send_progress()'s own
+ * header comment for why).
+ */
+static void
+pgaf_hook_wal_progress(XLogRecPtr xlogpos, uint32 timeline)
+{
+	static time_t lastSentAt = 0;
+	time_t now = time(NULL);
+
+	if (lastSentAt != 0 &&
+		(now - lastSentAt) < ARCHIVER_WAL_PROGRESS_MIN_INTERVAL_SECONDS)
+	{
+		return;
+	}
+
+	uint64_t systemIdentifier = 0;
+
+	if (!archiver_systemid_read_from_path(archiverSystemIdPath,
+										  &systemIdentifier))
+	{
+		return;
+	}
+
+	char lsn[PG_LSN_MAXLENGTH] = { 0 };
+
+	sformat(lsn, sizeof(lsn), "%X/%X",
+			(uint32) (xlogpos >> 32), (uint32) xlogpos);
+
+	if (archiver_wal_notify_send_progress(archiverWalNotifySocketPath,
+										  lsn, systemIdentifier))
+	{
+		lastSentAt = now;
+	}
 }
 
 
@@ -322,6 +375,7 @@ start_pgreceivewal_child(KeeperConfig *config,
 		args[argsIndex] = NULL;
 
 		pgaf_wal_segment_closed_hook = &pgaf_hook_wal_segment_closed;
+		pgaf_wal_progress_hook = &pgaf_hook_wal_progress;
 
 		/*
 		 * pg_receivewal_main() is called in-process rather than exec'd, so

@@ -25,11 +25,11 @@
  * ...). As its own process, the scan cadence is now fully decoupled from
  * the FSM tick's own cadence.
  *
- * Own high-water mark, not shared with service_archiver.c's in-process
- * lastReportedWalFileName: this is a separate process, with no shared
- * memory. Restarting this process re-sends already-known segments once --
- * harmless, both the monitor side (ON CONFLICT DO NOTHING) and service_
- * archiver.c's own drain-side gate treat that as a no-op.
+ * Own high-water mark, local to this process only. Restarting this process
+ * re-sends already-known segments once -- harmless, the monitor side (ON
+ * CONFLICT DO NOTHING) treats that as a no-op regardless of arrival order
+ * (service_archiver.c's own drain no longer keeps a high-water mark of its
+ * own either, for exactly that reason -- see its own comment).
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -137,7 +137,7 @@ wal_segment_end_lsn(const char *walFileName, char *lsn, size_t lsnSize)
  * sends every completed segment newer than *highWaterMark to socketPath,
  * advancing *highWaterMark as it goes -- best-effort throughout (a send
  * failure just means that one segment is skipped this round, picked up
- * again next round, matching archiver_wal_notify_send()'s own best-effort
+ * again next round, matching archiver_wal_notify_send_segment()'s own best-effort
  * contract).
  */
 static void
@@ -193,7 +193,7 @@ archiver_wal_scan_once(const char *walcacheDir, const char *socketPath,
 
 		wal_segment_end_lsn(names[i], lsn, sizeof(lsn));
 
-		if (archiver_wal_notify_send(socketPath, names[i], lsn,
+		if (archiver_wal_notify_send_segment(socketPath, names[i], lsn,
 									 systemIdentifier))
 		{
 			strlcpy(highWaterMark, names[i], highWaterMarkSize);

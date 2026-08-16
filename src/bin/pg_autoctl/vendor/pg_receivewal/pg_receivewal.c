@@ -32,13 +32,17 @@
  *      (still a real, separate process -- just running this project's own
  *      binary instead of exec'ing a system pg_receivewal path).
  *   2. stop_streaming() (this file's own StreamCtl.stream_stop callback,
- *      already invoked by receivelog.c's ReceiveXlogStream() whenever
- *      segment_finished is true -- see receivelog.h's own comment on
- *      stream_stop_callback) now also calls pgaf_wal_segment_closed_hook()
- *      when set, exactly the "archive_command, but a function call" hook
- *      this was vendored for. receivelog.c/streamutil.c/walmethods.c
- *      needed no changes at all: this one existing extension point was
- *      already exactly the right shape.
+ *      already invoked by receivelog.c's ReceiveXlogStream() on every
+ *      check-in, segment-closing or not -- see receivelog.h's own comment
+ *      on stream_stop_callback) now also calls pgaf_wal_segment_closed_
+ *      hook() when segment_finished, or pgaf_wal_progress_hook() otherwise,
+ *      exactly the "archive_command, but a function call" hook this was
+ *      vendored for (plus a lower-stakes observability sibling for
+ *      sub-segment progress -- see pg_receivewal_entry.h's own comment on
+ *      why that one is never a safe replay target on its own).
+ *      receivelog.c/streamutil.c/walmethods.c needed no changes at all:
+ *      this one existing extension point was already exactly the right
+ *      shape for both.
  * -------------------------------------------------------------------------
  */
 
@@ -148,6 +152,9 @@ usage(void)
  */
 WalSegmentClosedHook pgaf_wal_segment_closed_hook = NULL;
 
+/* PGAF: see pg_receivewal_entry.h's own comment */
+WalProgressHook pgaf_wal_progress_hook = NULL;
+
 static bool
 stop_streaming(XLogRecPtr xlogpos, uint32 timeline, bool segment_finished)
 {
@@ -164,6 +171,10 @@ stop_streaming(XLogRecPtr xlogpos, uint32 timeline, bool segment_finished)
 	if (segment_finished && pgaf_wal_segment_closed_hook != NULL)
 	{
 		pgaf_wal_segment_closed_hook(xlogpos, timeline);
+	}
+	else if (!segment_finished && pgaf_wal_progress_hook != NULL)
+	{
+		pgaf_wal_progress_hook(xlogpos, timeline);
 	}
 
 	/* we assume that we get called once at the end of each segment */
