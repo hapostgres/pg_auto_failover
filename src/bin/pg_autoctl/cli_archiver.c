@@ -222,7 +222,7 @@ cli_archiver_serve(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (strcmp(keeper.config.nodeKind, "archiver") != 0)
+	if (!streq(keeper.config.nodeKind, "archiver"))
 	{
 		log_fatal("\"%s\" is not an archiver's configuration file "
 				  "(pg_autoctl.nodekind is \"%s\", expected \"archiver\")",
@@ -1136,7 +1136,7 @@ cli_archiver_show_state(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (strcmp(config.nodeKind, "archiver") != 0)
+	if (!streq(config.nodeKind, "archiver"))
 	{
 		log_fatal("\"%s\" is not an archiver's configuration file "
 				  "(pg_autoctl.nodekind is \"%s\", expected \"archiver\")",

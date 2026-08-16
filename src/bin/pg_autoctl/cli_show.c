@@ -520,7 +520,7 @@ cli_show_state(int argc, char **argv)
 		 * own comment (cli_archiver.c) for why this is the exact same
 		 * code path as that dedicated command, not a separate one.
 		 */
-		if (strcmp(config.nodeKind, "archiver") == 0)
+		if (streq(config.nodeKind, "archiver"))
 		{
 			Monitor archiverMonitor = { 0 };
 

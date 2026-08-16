@@ -1267,8 +1267,8 @@ pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource)
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
-	char *args[22];  /* enough for all pg_basebackup flags incl. --checkpoint=fast,
-	                  * --no-manifest, and --label */
+	char *args[22];  /* enough for all pg_basebackup flags incl. --checkpoint=fast
+	                  * and --label */
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
@@ -1356,12 +1356,6 @@ pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource)
 	{
 		args[argsIndex++] = "--slot";
 		args[argsIndex++] = replicationSource->slotName;
-	}
-
-	/* see ReplicationSource.noManifest's own comment, pgsql.h */
-	if (replicationSource->noManifest)
-	{
-		args[argsIndex++] = "--no-manifest";
 	}
 
 	args[argsIndex] = NULL;

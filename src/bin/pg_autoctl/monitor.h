@@ -310,7 +310,12 @@ bool monitor_get_group_system_identifier(Monitor *monitor,
 										 uint64_t *systemIdentifier,
 										 bool *found);
 bool monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
+								 uint64_t systemIdentifier,
 								 const char *walFileName, const char *lsn);
+bool monitor_report_wal_received_bulk(Monitor *monitor, int64_t nodeId,
+									  uint64_t systemIdentifier,
+									  char **walFileNames, char **lsns,
+									  int count);
 bool monitor_basebackup_concurrency_available(Monitor *monitor,
 											  int64_t archiverId,
 											  const char *formationId,

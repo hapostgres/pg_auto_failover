@@ -1324,12 +1324,11 @@ comment on function pgautofailover.formation_settings(text)
 --
 -- Archiving & Disaster Recovery: schema for the Archiver process identity,
 -- ARCHIVING node memberships, base-backup policy/history, and PITR.
--- See ~/dev/temp/archiving-disaster-recovery.md for the full design.
 --
--- Milestone 1 (schema + monitor API only): every function here is plain
+-- Schema + monitor API only at this point: every function here is plain
 -- plpgsql/SQL, callable directly with no service_archiver process running
--- -- the pgaftest coverage for this milestone exercises these functions
--- via direct SQL calls against a plain cluster.
+-- -- the pgaftest coverage exercises these functions via direct SQL calls
+-- against a plain cluster.
 --
 
 CREATE TYPE pgautofailover.storage_method
@@ -1572,6 +1571,15 @@ CREATE TABLE pgautofailover.archiver_wal
     walfilename   text NOT NULL,
     archiverid    bigint NOT NULL REFERENCES pgautofailover.archiver (archiverid)
                          ON DELETE CASCADE,
+
+    -- the reporting node's own Postgres system identifier, self-reported
+    -- the same way pgautofailover.node.sysidentifier already is: a group
+    -- can be re-bootstrapped (a fresh initdb after a disaster) without its
+    -- (formationid, groupid) ever changing, so this is what actually
+    -- distinguishes WAL from the current cluster incarnation from WAL left
+    -- behind by a prior one -- neither the primary key nor formationid/
+    -- groupid alone can tell those apart.
+    systemidentifier bigint NOT NULL,
 
     lsn           pg_lsn NOT NULL,
     receivedat    timestamptz NOT NULL DEFAULT now(),
@@ -2452,7 +2460,7 @@ grant execute on function pgautofailover.list_archiver_wal(text,int)
 -- in_* parameters: see archiver_add_formation's own comment on why an ON
 -- CONFLICT target list (which can't be qualified) forces this naming here.
 CREATE FUNCTION pgautofailover.report_wal_received
-    (in_nodeid bigint, in_walfilename text, in_lsn pg_lsn)
+    (in_nodeid bigint, in_walfilename text, in_lsn pg_lsn, in_systemidentifier bigint)
  RETURNS void LANGUAGE plpgsql SECURITY DEFINER
 AS $$
 DECLARE
@@ -2470,16 +2478,63 @@ BEGIN
     END IF;
 
     INSERT INTO pgautofailover.archiver_wal
-           (formationid, groupid, walfilename, archiverid, lsn)
-    VALUES (target.formationid, target.groupid, in_walfilename, target.archiverid, in_lsn)
+           (formationid, groupid, walfilename, archiverid, systemidentifier, lsn)
+    VALUES (target.formationid, target.groupid, in_walfilename, target.archiverid,
+            in_systemidentifier, in_lsn)
        ON CONFLICT (formationid, groupid, walfilename, archiverid) DO NOTHING;
 END;
 $$;
 
-comment on function pgautofailover.report_wal_received(bigint,text,pg_lsn)
+comment on function pgautofailover.report_wal_received(bigint,text,pg_lsn,bigint)
         is 'reports a WAL segment durably captured by an ARCHIVING node';
 
-grant execute on function pgautofailover.report_wal_received(bigint,text,pg_lsn)
+-- bulk variant of report_wal_received: one round trip, one set-based INSERT,
+-- for however many segments in_walfilenames/in_lsns carry (parallel arrays,
+-- same length) -- what service_archiver.c's per-tick WAL-notify drain and
+-- its sibling scanner process (service_archiver_wal_scanner.c) both call
+-- instead of report_wal_received() in a loop. unnest() over two arrays
+-- rather than a client-built literal VALUES(...) list: this is a SECURITY
+-- DEFINER RPC boundary (autoctl_node has no direct grant on archiver_wal/
+-- archiver_node, same as report_wal_received above), so the row data has
+-- to arrive as ordinary parameters, not as unparameterized SQL text -- but
+-- the resulting INSERT ... SELECT ... FROM unnest(...) is planned and
+-- executed as the exact same single set-based operation a literal VALUES
+-- list would be, with the same one-round-trip, one-INSERT win.
+CREATE FUNCTION pgautofailover.report_wal_received_bulk
+    (in_nodeid bigint, in_systemidentifier bigint,
+     in_walfilenames text[], in_lsns pg_lsn[])
+ RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+    target record;
+BEGIN
+    SELECT n.formationid, n.groupid, an.archiverid
+      INTO target
+      FROM pgautofailover.archiver_node an
+      JOIN pgautofailover.node n ON n.nodeid = an.nodeid
+     WHERE an.nodeid = in_nodeid
+       AND an.kind = 'wal-receiver';
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'node % is not an ARCHIVING wal-receiver node', in_nodeid;
+    END IF;
+
+    INSERT INTO pgautofailover.archiver_wal
+           (formationid, groupid, walfilename, archiverid, systemidentifier, lsn)
+    SELECT target.formationid, target.groupid, v.walfilename, target.archiverid,
+           in_systemidentifier, v.lsn
+      FROM unnest(in_walfilenames, in_lsns) AS v (walfilename, lsn)
+       ON CONFLICT (formationid, groupid, walfilename, archiverid) DO NOTHING;
+END;
+$$;
+
+comment on function pgautofailover.report_wal_received_bulk(bigint,bigint,text[],pg_lsn[])
+        is 'reports many WAL segments durably captured by an ARCHIVING node in one round trip';
+
+grant execute on function pgautofailover.report_wal_received(bigint,text,pg_lsn,bigint)
+   to autoctl_node;
+
+grant execute on function pgautofailover.report_wal_received_bulk(bigint,bigint,text[],pg_lsn[])
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.report_basebackup_started

@@ -437,7 +437,7 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 
 
 /*
- * From /Users/dim/dev/PostgreSQL/postgresql/src/backend/libpq/hba.c
+ * From PostgreSQL's src/backend/libpq/hba.c
  */
 static bool
 ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b)
@@ -447,7 +447,7 @@ ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b)
 
 
 /*
- * From /Users/dim/dev/PostgreSQL/postgresql/src/backend/libpq/hba.c
+ * From PostgreSQL's src/backend/libpq/hba.c
  */
 static bool
 ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b)

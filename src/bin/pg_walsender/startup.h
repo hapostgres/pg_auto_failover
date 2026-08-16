@@ -3,9 +3,8 @@
  *   Startup-packet negotiation: SSL/GSS decline, protocol version check,
  *   and StartupMessage key/value parsing. Structurally mirrors real
  *   Postgres's ProcessStartupPacket() (backend_startup.c), reimplemented
- *   frontend-only -- that function is backend-locked (palloc/List/ereport,
- *   see the design research in ~/dev/temp/archiving-disaster-recovery.md's
- *   companion investigation), not something we can call into directly.
+ *   frontend-only -- that function is backend-locked (palloc/List/ereport),
+ *   not something we can call into directly.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.

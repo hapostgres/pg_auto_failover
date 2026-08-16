@@ -3,15 +3,20 @@
  *   BASE_BACKUP: streams the backup directory named by route->path's own
  *   basebackups/.latest pointer as a ustar archive over the real
  *   multiplexed-COPY-stream wire format modern (>= 15) pg_basebackup
- *   clients expect (traced from
- *   /Users/dim/dev/PostgreSQL/postgresql's src/backend/backup/
+ *   clients expect (traced from PostgreSQL's src/backend/backup/
  *   basebackup_copy.c and src/bin/pg_basebackup/pg_basebackup.c -- see
  *   this file's own .c for the exact message sequence, with citations).
  *
  *   MVP scope: a single archive (the base directory itself, no separate
- *   tablespaces), no server-side compression, no backup manifest, no
- *   WAL-inclusive backup (`-X none` on the client side) -- each rejected
- *   up front with a clean ErrorResponse rather than silently ignored.
+ *   tablespaces), no server-side compression, no WAL-inclusive backup
+ *   (`-X none` on the client side) -- each rejected up front with a clean
+ *   ErrorResponse rather than silently ignored. A backup manifest IS
+ *   served, but only when one already exists on disk alongside this
+ *   backup (written there by the real pg_basebackup run that originally
+ *   produced it -- see stream_manifest_as_copy_data()'s own comment in
+ *   the .c file); a manifest request against a backup that predates this
+ *   or was otherwise taken with --no-manifest gets the same clean
+ *   ErrorResponse treatment.
  *   do_pg_backup_start()/do_pg_backup_stop() (live-instance, backend-only)
  *   are never called: the resolved backup directory is already a
  *   complete, at-rest backup (produced by a real pg_basebackup run

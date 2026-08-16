@@ -57,6 +57,8 @@
 char pg_autoctl_argv0[MAXPGPATH] = "pg_walsender";
 char pg_autoctl_program[MAXPGPATH] = "pg_walsender";
 int pgconnect_timeout = 2;
+
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 char *ps_buffer;
 size_t ps_buffer_size;
 size_t last_status_len;
@@ -176,7 +178,7 @@ main(int argc, char **argv)
 
 	log_set_level(LOG_INFO);
 
-	if (argc >= 2 && strcmp(argv[1], "fetch-file") == 0)
+	if (argc >= 2 && streq(argv[1], "fetch-file"))
 	{
 		/* shift argv so getopt_long in main_fetch_file() skips "fetch-file" */
 		return main_fetch_file(argc - 1, argv + 1);

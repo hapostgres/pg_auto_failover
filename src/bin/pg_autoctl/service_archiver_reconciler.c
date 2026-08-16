@@ -63,7 +63,9 @@
 #include "file_utils.h"
 #include "log.h"
 #include "monitor.h"
+#include "service_archiver_pgreceivewal_ctl.h"
 #include "service_archiver_run.h"
+#include "service_archiver_wal_scanner.h"
 #include "signals.h"
 #include "state.h"
 #include "string_utils.h"
@@ -87,6 +89,24 @@
  * assuming makes that an explicit invariant instead of an accident).
  */
 #define ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX "archiver-capture-"
+
+/*
+ * pg_receivewal's own dedicated controller process (service_archiver_
+ * pgreceivewal_ctl.c), one per membership, added and removed alongside
+ * that membership's own capture service -- a sibling, not its child, so a
+ * capture-process crash/restart never takes pg_receivewal down with it.
+ * See that file's own header comment for the full rationale.
+ */
+#define ARCHIVER_PGRECEIVEWAL_CTL_SERVICE_NAME_PREFIX "archiver-pgreceivewal-ctl-"
+
+/*
+ * The periodic WAL-cache directory scanner (service_archiver_wal_scanner.c),
+ * one per membership, added and removed alongside the capture and pg_
+ * receivewal-controller services above -- a third sibling, replacing what
+ * used to be an inline directory scan on the FSM tick loop itself. See
+ * that file's own header comment for the full rationale.
+ */
+#define ARCHIVER_WAL_SCANNER_SERVICE_NAME_PREFIX "archiver-wal-scanner-"
 
 
 static char * archiver_reconciler_tracking_path(Keeper *templateKeeper, char *dest);
@@ -235,9 +255,13 @@ archiver_reconciler_cleanup_stale_children(Keeper *templateKeeper)
 
 /*
  * archiver_reconciler_write_tracking_file persists the current set of
- * reconciler-managed capture services, atomically (write to a .tmp path,
- * then rename) so a concurrent reader (this same process, on its own
- * next restart) never observes a partial write.
+ * reconciler-managed capture and pg_receivewal-controller services,
+ * atomically (write to a .tmp path, then rename) so a concurrent reader
+ * (this same process, on its own next restart) never observes a partial
+ * write. All three service types are tracked here, not just capture: a
+ * pgreceivewal-ctl orphan left running by a crashed reconciler is exactly
+ * as capable of fighting a freshly-started one over the same replication
+ * slot as a leftover capture process would be over the same FSM state.
  */
 static bool
 archiver_reconciler_write_tracking_file(Keeper *templateKeeper,
@@ -259,8 +283,17 @@ archiver_reconciler_write_tracking_file(Keeper *templateKeeper,
 	{
 		Service *service = &(supervisor->services[i]);
 
-		if (strncmp(service->name, ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX,
-					strlen(ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX)) != 0)
+		bool isCapture = strncmp(service->name,
+								 ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX,
+								 strlen(ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX)) == 0;
+		bool isPgReceivewalCtl = strncmp(
+			service->name, ARCHIVER_PGRECEIVEWAL_CTL_SERVICE_NAME_PREFIX,
+			strlen(ARCHIVER_PGRECEIVEWAL_CTL_SERVICE_NAME_PREFIX)) == 0;
+		bool isWalScanner = strncmp(
+			service->name, ARCHIVER_WAL_SCANNER_SERVICE_NAME_PREFIX,
+			strlen(ARCHIVER_WAL_SCANNER_SERVICE_NAME_PREFIX)) == 0;
+
+		if (!isCapture && !isPgReceivewalCtl && !isWalScanner)
 		{
 			continue;
 		}
@@ -482,6 +515,40 @@ membership_service_name(ArchiverMembership *membership, char *dest, size_t destS
 
 
 /*
+ * membership_pgreceivewal_ctl_service_name computes the supervised-service
+ * name for one membership's pg_receivewal controller process -- same
+ * "<formation>-<group>" suffix as membership_service_name() above, under
+ * ARCHIVER_PGRECEIVEWAL_CTL_SERVICE_NAME_PREFIX instead.
+ */
+static bool
+membership_pgreceivewal_ctl_service_name(ArchiverMembership *membership,
+										 char *dest, size_t destSize)
+{
+	sformat(dest, destSize, "%s%s-%d",
+			ARCHIVER_PGRECEIVEWAL_CTL_SERVICE_NAME_PREFIX,
+			membership->formation, membership->groupId);
+	return true;
+}
+
+
+/*
+ * membership_wal_scanner_service_name computes the supervised-service name
+ * for one membership's WAL-cache directory scanner -- same "<formation>-
+ * <group>" suffix as the other two membership_*_service_name() functions
+ * above, under ARCHIVER_WAL_SCANNER_SERVICE_NAME_PREFIX instead.
+ */
+static bool
+membership_wal_scanner_service_name(ArchiverMembership *membership,
+									char *dest, size_t destSize)
+{
+	sformat(dest, destSize, "%s%s-%d",
+			ARCHIVER_WAL_SCANNER_SERVICE_NAME_PREFIX,
+			membership->formation, membership->groupId);
+	return true;
+}
+
+
+/*
  * find_membership_service looks for an already-supervised capture
  * service for (formation, groupId) among supervisor->services, matching
  * on each service's own Keeper context rather than re-parsing its name.
@@ -587,24 +654,106 @@ archiver_reconciler_tick(Supervisor *supervisor, void *context)
 			log_warn("Failed to start capture for membership \"%s\"/%d, "
 					 "will retry", membership->formation, membership->groupId);
 			free(membershipKeeper);
+			continue;
+		}
+
+		/*
+		 * pg_receivewal's own controller, a sibling of the capture service
+		 * just added above, not its child (service_archiver_pgreceivewal_
+		 * ctl.c's own header comment has the full rationale). A separate
+		 * Keeper allocation, not a shared pointer with newService.context:
+		 * the removal pass below frees each removed service's own context
+		 * independently, and sharing one pointer between two services
+		 * would double-free it the moment both are ever removed together.
+		 */
+		Keeper *pgreceivewalKeeper = NULL;
+
+		if (!build_membership_keeper(templateKeeper, membership,
+									 &pgreceivewalKeeper))
+		{
+			log_warn("Failed to prepare the pg_receivewal controller for "
+					 "membership \"%s\"/%d, will retry",
+					 membership->formation, membership->groupId);
+			continue;
+		}
+
+		Service pgreceivewalService = {
+			{ 0 }, RP_PERMANENT, -1,
+			&service_archiver_pgreceivewal_ctl_start,
+			(void *) pgreceivewalKeeper, { 0 }
+		};
+
+		(void) membership_pgreceivewal_ctl_service_name(
+			membership, pgreceivewalService.name, sizeof(pgreceivewalService.name));
+
+		if (!supervisor_add_service(supervisor, pgreceivewalService))
+		{
+			log_warn("Failed to start the pg_receivewal controller for "
+					 "membership \"%s\"/%d, will retry",
+					 membership->formation, membership->groupId);
+			free(pgreceivewalKeeper);
+		}
+
+		/*
+		 * The WAL-cache directory scanner, a third sibling (service_
+		 * archiver_wal_scanner.c) -- same separate-Keeper-allocation
+		 * reasoning as pg_receivewalKeeper above.
+		 */
+		Keeper *walScannerKeeper = NULL;
+
+		if (!build_membership_keeper(templateKeeper, membership,
+									 &walScannerKeeper))
+		{
+			log_warn("Failed to prepare the WAL scanner for membership "
+					 "\"%s\"/%d, will retry",
+					 membership->formation, membership->groupId);
+			continue;
+		}
+
+		Service walScannerService = {
+			{ 0 }, RP_PERMANENT, -1,
+			&service_archiver_wal_scanner_start,
+			(void *) walScannerKeeper, { 0 }
+		};
+
+		(void) membership_wal_scanner_service_name(
+			membership, walScannerService.name, sizeof(walScannerService.name));
+
+		if (!supervisor_add_service(supervisor, walScannerService))
+		{
+			log_warn("Failed to start the WAL scanner for membership "
+					 "\"%s\"/%d, will retry",
+					 membership->formation, membership->groupId);
+			free(walScannerKeeper);
 		}
 	}
 
 	/*
-	 * removals: a supervised capture service whose membership is no
-	 * longer in the fresh discovery list -- collected first, then
-	 * removed in a second pass, since supervisor_remove_service() packs
-	 * the array and would otherwise invalidate this loop's own indices.
+	 * removals: a supervised service (capture, pg_receivewal controller, or
+	 * WAL scanner) whose membership is no longer in the fresh discovery list --
+	 * collected first, then removed in a second pass, since supervisor_
+	 * remove_service() packs the array and would otherwise invalidate this
+	 * loop's own indices. All three service types share this one pass: any
+	 * name prefix identifies a per-membership Keeper the same way.
 	 */
-	Service *toRemove[ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT] = { 0 };
+	Service *toRemove[3 * ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT] = { 0 };
 	int toRemoveCount = 0;
 
 	for (int i = 0; i < supervisor->serviceCount; i++)
 	{
 		Service *service = &(supervisor->services[i]);
 
-		if (strncmp(service->name, ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX,
-					strlen(ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX)) != 0)
+		bool isCapture = strncmp(service->name,
+								 ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX,
+								 strlen(ARCHIVER_CAPTURE_SERVICE_NAME_PREFIX)) == 0;
+		bool isPgReceivewalCtl = strncmp(
+			service->name, ARCHIVER_PGRECEIVEWAL_CTL_SERVICE_NAME_PREFIX,
+			strlen(ARCHIVER_PGRECEIVEWAL_CTL_SERVICE_NAME_PREFIX)) == 0;
+		bool isWalScanner = strncmp(
+			service->name, ARCHIVER_WAL_SCANNER_SERVICE_NAME_PREFIX,
+			strlen(ARCHIVER_WAL_SCANNER_SERVICE_NAME_PREFIX)) == 0;
+
+		if (!isCapture && !isPgReceivewalCtl && !isWalScanner)
 		{
 			continue;
 		}
@@ -624,7 +773,7 @@ archiver_reconciler_tick(Supervisor *supervisor, void *context)
 			}
 		}
 
-		if (!stillMember && toRemoveCount < ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT)
+		if (!stillMember && toRemoveCount < 3 * ARCHIVER_MEMBERSHIP_ARRAY_MAX_COUNT)
 		{
 			toRemove[toRemoveCount++] = service;
 		}
@@ -653,7 +802,7 @@ archiver_reconciler_tick(Supervisor *supervisor, void *context)
 		}
 	}
 
-	if (toRemoveCount > 0 || memberships.count != supervisor->serviceCount)
+	if (toRemoveCount > 0 || 3 * memberships.count != supervisor->serviceCount)
 	{
 		(void) archiver_reconciler_write_tracking_file(templateKeeper, supervisor);
 		(void) archiver_reconciler_write_routes_file(templateKeeper, supervisor);
@@ -685,14 +834,22 @@ service_archiver_reconciler_loop(Keeper *templateKeeper)
 		return false;
 	}
 
-	int serviceCount = memberships.count;
+	/*
+	 * Three services per membership: capture (service_archiver_loop, the
+	 * FSM tick), pg_receivewal's own controller (service_archiver_
+	 * pgreceivewal_ctl.c), and the WAL-cache directory scanner (service_
+	 * archiver_wal_scanner.c) -- siblings, each with their own independent
+	 * Keeper allocation (see archiver_reconciler_tick()'s own comment on
+	 * why sharing one would double-free).
+	 */
+	int serviceCount = memberships.count * 3;
 	Service *services = (Service *) calloc(serviceCount > 0 ? serviceCount : 1,
 										   sizeof(Service));
 
 	if (services == NULL)
 	{
 		log_fatal("Failed to allocate memory for %d archiver memberships",
-				  serviceCount);
+				  memberships.count);
 		return false;
 	}
 
@@ -700,8 +857,12 @@ service_archiver_reconciler_loop(Keeper *templateKeeper)
 	{
 		ArchiverMembership *membership = &(memberships.memberships[i]);
 		Keeper *membershipKeeper = NULL;
+		Keeper *pgreceivewalKeeper = NULL;
+		Keeper *walScannerKeeper = NULL;
 
-		if (!build_membership_keeper(templateKeeper, membership, &membershipKeeper))
+		if (!build_membership_keeper(templateKeeper, membership, &membershipKeeper) ||
+			!build_membership_keeper(templateKeeper, membership, &pgreceivewalKeeper) ||
+			!build_membership_keeper(templateKeeper, membership, &walScannerKeeper))
 		{
 			log_fatal("Failed to prepare archiver membership \"%s\"/%d, "
 					  "see above for details",
@@ -710,13 +871,31 @@ service_archiver_reconciler_loop(Keeper *templateKeeper)
 			return false;
 		}
 
-		services[i].policy = RP_PERMANENT;
-		services[i].pid = -1;
-		services[i].startFunction = &service_archiver_capture_start;
-		services[i].context = (void *) membershipKeeper;
+		services[3 * i].policy = RP_PERMANENT;
+		services[3 * i].pid = -1;
+		services[3 * i].startFunction = &service_archiver_capture_start;
+		services[3 * i].context = (void *) membershipKeeper;
 
-		(void) membership_service_name(membership, services[i].name,
-									   sizeof(services[i].name));
+		(void) membership_service_name(membership, services[3 * i].name,
+									   sizeof(services[3 * i].name));
+
+		services[3 * i + 1].policy = RP_PERMANENT;
+		services[3 * i + 1].pid = -1;
+		services[3 * i + 1].startFunction = &service_archiver_pgreceivewal_ctl_start;
+		services[3 * i + 1].context = (void *) pgreceivewalKeeper;
+
+		(void) membership_pgreceivewal_ctl_service_name(
+			membership, services[3 * i + 1].name,
+			sizeof(services[3 * i + 1].name));
+
+		services[3 * i + 2].policy = RP_PERMANENT;
+		services[3 * i + 2].pid = -1;
+		services[3 * i + 2].startFunction = &service_archiver_wal_scanner_start;
+		services[3 * i + 2].context = (void *) walScannerKeeper;
+
+		(void) membership_wal_scanner_service_name(
+			membership, services[3 * i + 2].name,
+			sizeof(services[3 * i + 2].name));
 	}
 
 	log_info("Archiver reconciler: starting capture for %d membership(s)",

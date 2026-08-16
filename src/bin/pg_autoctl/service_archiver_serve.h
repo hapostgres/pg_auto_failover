@@ -5,7 +5,6 @@
  *   downstream consumers (warm standbies, PITR nodes, `create postgres
  *   --from-archiver` rebuilds) -- the inbound counterpart to
  *   service_archiver.c's outbound pg_receivewal supervision. See
- *   ~/dev/temp/archiving-disaster-recovery.md and
  *   src/bin/pg_walsender/walsender.h for the protocol this serves.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.

@@ -1,17 +1,16 @@
 /*
  * src/bin/pg_walsender/walsender.h
  *   Shared types for pg_walsender, the archiver's own replication-protocol
- *   server (see ~/dev/temp/archiving-disaster-recovery.md, "Process model"
- *   and "Build order" milestone 2). Reimplements the wire-level surface of
- *   the real Postgres walsender well enough to serve IDENTIFY_SYSTEM, SHOW,
- *   and (later milestones) BASE_BACKUP/START_REPLICATION/TIMELINE_HISTORY
- *   to unmodified pg_basebackup/pg_receivewal clients, backed by an
+ *   server. Reimplements the wire-level surface of the real Postgres
+ *   walsender well enough to serve IDENTIFY_SYSTEM, SHOW, and (not yet
+ *   implemented) BASE_BACKUP/START_REPLICATION/TIMELINE_HISTORY to
+ *   unmodified pg_basebackup/pg_receivewal clients, backed by an
  *   archiver's local WAL cache and base backups instead of a live
  *   postmaster. No frontend-linkable server-side protocol library exists
- *   anywhere in Postgres (confirmed against
- *   /Users/dim/dev/PostgreSQL/postgresql's pqcomm.c/backend_startup.c/
- *   repl_gram.y/walsender.c, all backend-only) -- this is a genuine
- *   reimplementation guided by that source, not a linking exercise.
+ *   anywhere in Postgres (confirmed against upstream PostgreSQL's
+ *   pqcomm.c/backend_startup.c/repl_gram.y/walsender.c, all
+ *   backend-only) -- this is a genuine reimplementation guided by that
+ *   source, not a linking exercise.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.

@@ -20,6 +20,7 @@
 #include "nodestate_utils.h"
 #include "parsing.h"
 #include "pgsql.h"
+#include "pqexpbuffer.h"
 #include "primary_standby.h"
 #include "signals.h"
 #include "string_utils.h"
@@ -862,7 +863,8 @@ monitor_get_archiver_node(Monitor *monitor,
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT * FROM pgautofailover.get_archiver_node($1, $2)";
+		"SELECT node_id, node_name, node_host, node_port, node_lsn, "
+		"node_is_primary FROM pgautofailover.get_archiver_node($1, $2)";
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
@@ -947,8 +949,7 @@ monitor_get_archiver_node(Monitor *monitor,
 /*
  * monitor_register_archiver calls pgautofailover.register_archiver() on the
  * monitor -- the Archiving & Disaster Recovery schema's own registration
- * entry point (see ~/dev/temp/archiving-disaster-recovery.md), a plain
- * plpgsql function rather than the C register_node() RPC every ordinary
+ * entry point, a plain plpgsql function rather than the C register_node() RPC every ordinary
  * node kind goes through: an Archiver is a process identity, not a
  * (formation, group) membership by itself (see that function's own comment,
  * pgautofailover.sql).
@@ -968,7 +969,7 @@ monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
 	 * named arguments as long as every positional one comes first.
 	 */
 	const char *sql =
-		"SELECT * FROM pgautofailover.register_archiver($1, $2, region => $3)";
+		"SELECT pgautofailover.register_archiver($1, $2, region => $3)";
 	int paramCount = 3;
 	Oid paramTypes[3] = { TEXTOID, TEXTOID, TEXTOID };
 	const char *paramValues[3] = {
@@ -1018,7 +1019,7 @@ monitor_archiver_add_formation(Monitor *monitor, int64_t archiverId,
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
 
 	const char *sql =
-		"SELECT * FROM pgautofailover.archiver_add_formation($1, $2) LIMIT 1";
+		"SELECT pgautofailover.archiver_add_formation($1, $2) LIMIT 1";
 	int paramCount = 2;
 	Oid paramTypes[2] = { INT8OID, TEXTOID };
 	IntString archiverIdString = intToString(archiverId);
@@ -1065,7 +1066,7 @@ monitor_archiver_add_formation_by_name(Monitor *monitor, char *archiverName,
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
 
 	const char *sql =
-		"SELECT * FROM pgautofailover.archiver_add_formation($1, $2) LIMIT 1";
+		"SELECT pgautofailover.archiver_add_formation($1, $2) LIMIT 1";
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, TEXTOID };
 	const char *paramValues[2] = { archiverName, formation };
@@ -1281,7 +1282,10 @@ monitor_get_archivers(Monitor *monitor, const char *formation,
 					  ArchiverInfoArray *archiversArray)
 {
 	PGSQL *pgsql = &monitor->pgsql;
-	const char *sql = "SELECT * FROM pgautofailover.get_archivers($1)";
+	const char *sql =
+		"SELECT archiver_id, archiver_name, hostname, region, used_bytes, "
+		"free_bytes, last_report_time, node_id, reported_state, goal_state "
+		"FROM pgautofailover.get_archivers($1)";
 	int paramCount = 1;
 	Oid paramTypes[1] = { TEXTOID };
 	const char *paramValues[1] = { formation };
@@ -1406,7 +1410,8 @@ monitor_list_archiver_memberships(Monitor *monitor, int64_t archiverId,
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT * FROM pgautofailover.list_archiver_memberships($1)";
+		"SELECT formation_id, group_id, node_id, reported_state, goal_state "
+		"FROM pgautofailover.list_archiver_memberships($1)";
 	int paramCount = 1;
 	Oid paramTypes[1] = { INT8OID };
 	IntString archiverIdString = intToString(archiverId);
@@ -1643,22 +1648,27 @@ monitor_get_group_system_identifier(Monitor *monitor,
 /*
  * monitor_report_wal_received calls pgautofailover.report_wal_received()
  * to record that nodeId (the ARCHIVING membership's own nodeid, not the
- * archiver's archiverid) has durably captured walFileName up to lsn.
- * Idempotent on the monitor side (ON CONFLICT DO NOTHING), so callers are
- * free to re-report an already-known segment without checking first --
- * see service_archiver.c's own use of this.
+ * archiver's archiverid) has durably captured walFileName up to lsn, from
+ * the Postgres cluster identified by systemIdentifier (see archiver_wal.
+ * systemidentifier's own comment, pgautofailover--2.2--2.3.sql, for why
+ * that matters). Idempotent on the monitor side (ON CONFLICT DO NOTHING),
+ * so callers are free to re-report an already-known segment without
+ * checking first -- see service_archiver.c's own use of this.
  */
 bool
 monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
+							uint64_t systemIdentifier,
 							const char *walFileName, const char *lsn)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT pgautofailover.report_wal_received($1, $2, $3)";
-	int paramCount = 3;
-	Oid paramTypes[3] = { INT8OID, TEXTOID, LSNOID };
+		"SELECT pgautofailover.report_wal_received($1, $2, $3, $4)";
+	int paramCount = 4;
+	Oid paramTypes[4] = { INT8OID, TEXTOID, LSNOID, INT8OID };
 	IntString nodeIdString = intToString(nodeId);
-	const char *paramValues[3] = { nodeIdString.strValue, walFileName, lsn };
+	IntString sysIdString = intToString((int64_t) systemIdentifier);
+	const char *paramValues[4] =
+		{ nodeIdString.strValue, walFileName, lsn, sysIdString.strValue };
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
@@ -1670,6 +1680,100 @@ monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
 	}
 
 	return true;
+}
+
+
+/*
+ * monitor_report_wal_received_bulk calls pgautofailover.
+ * report_wal_received_bulk() to record, in one round trip, that nodeId has
+ * durably captured every one of the count segments named in walFileNames
+ * (parallel array with lsns, each entry i is walFileNames[i] captured up
+ * to lsns[i]). See that SQL function's own comment (pgautofailover--2.2--
+ * 2.3.sql) for why this sends two array literals rather than either a
+ * client-built multi-row VALUES(...) list (this is a SECURITY DEFINER RPC
+ * boundary -- the row data has to arrive as parameters, not raw SQL text)
+ * or count separate report_wal_received() calls (the round-trip cost this
+ * exists to avoid in the first place -- see service_archiver.c's and
+ * service_archiver_wal_scanner.c's own callers).
+ */
+bool
+monitor_report_wal_received_bulk(Monitor *monitor, int64_t nodeId,
+								 uint64_t systemIdentifier,
+								 char **walFileNames, char **lsns,
+								 int count)
+{
+	if (count <= 0)
+	{
+		return true;
+	}
+
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_wal_received_bulk("
+		"$1, $2, $3::text[], $4::pg_lsn[])";
+	int paramCount = 4;
+	Oid paramTypes[4] = { INT8OID, INT8OID, TEXTARRAYOID, PG_LSNARRAYOID };
+	IntString nodeIdString = intToString(nodeId);
+	IntString sysIdString = intToString((int64_t) systemIdentifier);
+
+	PQExpBuffer walFileNamesArray = createPQExpBuffer();
+	PQExpBuffer lsnsArray = createPQExpBuffer();
+
+	if (walFileNamesArray == NULL || lsnsArray == NULL)
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(walFileNamesArray);
+		destroyPQExpBuffer(lsnsArray);
+		return false;
+	}
+
+	appendPQExpBufferChar(walFileNamesArray, '{');
+	appendPQExpBufferChar(lsnsArray, '{');
+
+	for (int i = 0; i < count; i++)
+	{
+		if (i > 0)
+		{
+			appendPQExpBufferChar(walFileNamesArray, ',');
+			appendPQExpBufferChar(lsnsArray, ',');
+		}
+
+		appendPQExpBuffer(walFileNamesArray, "\"%s\"", walFileNames[i]);
+		appendPQExpBuffer(lsnsArray, "\"%s\"", lsns[i]);
+	}
+
+	appendPQExpBufferChar(walFileNamesArray, '}');
+	appendPQExpBufferChar(lsnsArray, '}');
+
+	bool broken = PQExpBufferBroken(walFileNamesArray) ||
+				  PQExpBufferBroken(lsnsArray);
+
+	const char *paramValues[4] =
+	{
+		nodeIdString.strValue, sysIdString.strValue,
+		broken ? NULL : walFileNamesArray->data,
+		broken ? NULL : lsnsArray->data
+	};
+
+	bool success = !broken &&
+				   pgsql_execute_with_params(pgsql, sql,
+											 paramCount, paramTypes,
+											 paramValues, NULL, NULL);
+
+	if (broken)
+	{
+		log_error("Failed to allocate memory");
+	}
+	else if (!success)
+	{
+		log_error("Failed to report %d captured WAL file(s) for node %"
+				  PRId64, count, nodeId);
+	}
+
+	destroyPQExpBuffer(walFileNamesArray);
+	destroyPQExpBuffer(lsnsArray);
+
+	return success;
 }
 
 
@@ -1929,7 +2033,8 @@ monitor_list_basebackups(Monitor *monitor,
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT * FROM pgautofailover.list_basebackups($1, $2)";
+		"SELECT basebackupid, label, storagelocation, startedat_epoch "
+		"FROM pgautofailover.list_basebackups($1, $2)";
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	IntString groupIdString = intToString(groupId);
@@ -2041,7 +2146,8 @@ monitor_list_archiver_wal(Monitor *monitor,
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
-		"SELECT * FROM pgautofailover.list_archiver_wal($1, $2)";
+		"SELECT walfilename, lsn, archiver_count, archivers, receivedat_epoch "
+		"FROM pgautofailover.list_archiver_wal($1, $2)";
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	IntString groupIdString = intToString(groupId);
@@ -2089,6 +2195,8 @@ typedef struct BasebackupPolicyParseContext
 } BasebackupPolicyParseContext;
 
 
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 static void
 parseBasebackupPolicy(void *ctx, PGresult *result)
 {
@@ -2129,7 +2237,7 @@ parseBasebackupPolicy(void *ctx, PGresult *result)
 	policy->frequencySeconds = strtol(PQgetvalue(result, 0, 4), NULL, 0);
 	policy->maxCount = strtol(PQgetvalue(result, 0, 5), NULL, 0);
 	policy->maxAgeSeconds = strtol(PQgetvalue(result, 0, 6), NULL, 0);
-	policy->onPromotion = strcmp(PQgetvalue(result, 0, 7), "t") == 0;
+	policy->onPromotion = streq(PQgetvalue(result, 0, 7), "t");
 	policy->concurrency = strtol(PQgetvalue(result, 0, 8), NULL, 0);
 
 	context->found = true;

@@ -1331,9 +1331,8 @@ cli_create_monitor(int argc, char **argv)
  * every ordinary node kind): that shared parser and the KeeperConfig
  * defaults it applies assume a real PostgresSetup (pgport, pghost, a real
  * PGDATA to validate), none of which apply to an archiver (see haspgdata's
- * own design comment, pgautofailover.sql). Milestone 2's own minimal flag
- * set, matching the design doc's own Quickstart: --pgdata --monitor
- * --hostname --name --formation --run.
+ * own design comment, pgautofailover.sql). Minimal flag
+ * set for now: --pgdata --monitor --hostname --name --formation --run.
  */
 static int
 cli_create_archiver_getopts(int argc, char **argv)

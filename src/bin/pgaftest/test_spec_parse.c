@@ -351,6 +351,8 @@
 #include "pgsetup.h"
 #include "file_utils.h"
 
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 /* provided by test_spec_scan.l */
 extern int  yylex(void);
 extern int  pgaf_line_number;
@@ -3230,9 +3232,9 @@ yyreduce:
   case 156:
 #line 1196 "test_spec_parse.y"
     {
-		if (strcmp((yyvsp[(4) - (11)].str), "source") != 0 &&
-		    strcmp((yyvsp[(4) - (11)].str), "status") != 0 &&
-		    strcmp((yyvsp[(4) - (11)].str), "replaymode") != 0)
+		if (!streq((yyvsp[(4) - (11)].str), "source") &&
+		    !streq((yyvsp[(4) - (11)].str), "status") &&
+		    !streq((yyvsp[(4) - (11)].str), "replaymode"))
 		{
 			fprintf(stderr,
 			        "pgaftest: line %d: \"wait until basebackup %s ...\" -- "
@@ -4120,7 +4122,7 @@ fold_archivers_into_formations(TestCluster *cluster)
 
 		for (int fi = 0; fi < cluster->formationCount; fi++)
 		{
-			if (strcmp(cluster->formations[fi].name, a->formations[0]) == 0)
+			if (streq(cluster->formations[fi].name, a->formations[0]))
 			{
 				form = &cluster->formations[fi];
 				break;

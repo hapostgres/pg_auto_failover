@@ -32,6 +32,8 @@
 #define WS_KEEPALIVE_INTERVAL_SEC 5
 #define WS_POLL_INTERVAL_USEC (200 * 1000)
 
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 
 static void
 append_int64(PQExpBuffer buf, int64_t v)
@@ -265,7 +267,7 @@ find_oldest_segno(const char *walcacheDir, uint32_t timeline, uint64_t *oldestSe
 		{
 			memcpy(segPart, entry->d_name, 24); /* IGNORE-BANNED */
 		}
-		else if (len == 24 + 8 && strcmp(entry->d_name + 24, ".partial") == 0)
+		else if (len == 24 + 8 && streq(entry->d_name + 24, ".partial"))
 		{
 			memcpy(segPart, entry->d_name, 24); /* IGNORE-BANNED */
 		}

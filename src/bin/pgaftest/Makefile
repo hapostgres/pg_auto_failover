@@ -27,12 +27,22 @@ LOCAL_OBJS = $(patsubst %.c,%.o,$(LOCAL_SRC))
 # -----------------------------------------------------------------------
 # pg_autoctl-specific shared sources (business logic; not in common/).
 # Compiled as shared-%.o to distinguish from local objects.
+#
+# service_archiver_pgreceivewal_state.c, not _ctl.c: the state.c/.h split
+# (see that header's own comment) keeps pgaftest on the thin, control-
+# plane-only side of pg_receivewal's own supervision -- _ctl.c is what
+# actually forks and runs the vendored pg_receivewal binary
+# (pg_autoctl/vendor/pg_receivewal/, ~3300 lines plus three extra static
+# libraries), and pgaftest never does that itself, only service_archiver_
+# reconciler.c does (not shared here either).
 # -----------------------------------------------------------------------
-SHARED_SRCS = cli_common.c config.c coordinator.c fsm.c fsm_transition.c \
+SHARED_SRCS = archiver_systemid.c archiver_wal_notify.c cli_common.c config.c coordinator.c fsm.c \
+              fsm_transition.c \
               fsm_transition_citus.c keeper.c keeper_config.c keeper_pg_init.c \
               monitor.c monitor_config.c monitor_pg_init.c \
               nodespec.c nodestate_utils.c pghba.c primary_standby.c \
               service_archiver.c service_archiver_basebackup.c \
+              service_archiver_pgreceivewal_state.c \
               service_keeper.c service_keeper_init.c service_monitor.c \
               service_monitor_init.c service_postgres.c service_postgres_ctl.c \
               state.c step_socket.c supervisor.c systemd_config.c timeline_history.c

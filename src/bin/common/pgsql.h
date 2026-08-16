@@ -36,6 +36,8 @@
 #define INT8OID 20
 #define TEXTOID 25
 #define LSNOID 3220
+#define TEXTARRAYOID 1009
+#define PG_LSNARRAYOID 3221
 
 /*
  * Maximum connection info length as used in walreceiver.h
@@ -268,16 +270,6 @@ typedef struct ReplicationSource
 	 */
 	bool pauseAtRecoveryTarget;
 
-	/*
-	 * pg_walsender's BASE_BACKUP doesn't implement backup manifests yet
-	 * (~/dev/temp/archiving-disaster-recovery.md's own documented scope for
-	 * this milestone), which a real pg_basebackup requests by default from
-	 * PG13+ -- set for an archiver-sourced base backup (create postgres
-	 * --from-archiver) so pg_basebackup() knows to pass --no-manifest;
-	 * false (the default) for a real primary/standby upstream, which does
-	 * support manifests and should keep getting one.
-	 */
-	bool noManifest;
 	SSLOptions sslOptions;
 	IdentifySystem system;
 

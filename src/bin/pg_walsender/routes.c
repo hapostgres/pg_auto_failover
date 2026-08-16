@@ -27,6 +27,8 @@
 #include "file_utils.h"
 #include "log.h"
 
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 
 bool
 routes_load(const char *path, WsRoute **routesOut, int *countOut)
@@ -112,11 +114,11 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 				propName[--nameLen] = '\0';
 			}
 
-			if (strcmp(propName, "path") == 0)
+			if (streq(propName, "path"))
 			{
 				strlcpy(route->path, propValue, sizeof(route->path));
 			}
-			else if (strcmp(propName, "allowed_hosts") == 0)
+			else if (streq(propName, "allowed_hosts"))
 			{
 				strlcpy(route->allowedHosts, propValue, sizeof(route->allowedHosts));
 			}
@@ -151,7 +153,7 @@ routes_find(const WsRoute *routes, int count, const char *key)
 {
 	for (int i = 0; i < count; i++)
 	{
-		if (strcmp(routes[i].key, key) == 0)
+		if (streq(routes[i].key, key))
 		{
 			return &routes[i];
 		}
@@ -184,7 +186,7 @@ routes_host_allowed(const WsRoute *route, const char *peerIP)
 			tok++;
 		}
 
-		if (strcmp(tok, peerIP) == 0)
+		if (streq(tok, peerIP))
 		{
 			return true;
 		}
@@ -206,7 +208,7 @@ routes_host_allowed(const WsRoute *route, const char *peerIP)
 				if (getnameinfo(rp->ai_addr, rp->ai_addrlen,
 								resolved, sizeof(resolved),
 								NULL, 0, NI_NUMERICHOST) == 0 &&
-					strcmp(resolved, peerIP) == 0)
+					streq(resolved, peerIP))
 				{
 					freeaddrinfo(res);
 					return true;

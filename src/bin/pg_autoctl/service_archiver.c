@@ -1,20 +1,21 @@
 /*
  * src/bin/pg_autoctl/service_archiver.c
- *   Archiving & Disaster Recovery: supervision of the pg_receivewal child
- *   process an ARCHIVING node keeps running against its group's current
- *   primary.
+ *   Archiving & Disaster Recovery: the FSM tick loop for an ARCHIVING node's
+ *   membership, plus WAL-capture bookkeeping (reporting captured segments,
+ *   tracking the current LSN frontier).
  *
- * Milestone 2's own scope, per the Build order in
- * ~/dev/temp/archiving-disaster-recovery.md: the colocated fast path only.
- * pg_receivewal is a real, unmodified Postgres client talking straight to
- * the real primary's own walsender -- no new wire protocol needed here at
- * all. This file only launches and tracks that one child process; it does
- * not yet integrate with supervisor.c's Service/RestartPolicy machinery
- * (a liveness check happens on each FSM tick instead, via
- * service_archiver_pgreceivewal_is_running(), the same "is it alive"
- * check the design doc's own ARCHIVING FSM section describes for
- * keeper_ensure_current_state) -- and does not yet use a replication slot
- * (WAL retention across a pg_receivewal restart is a follow-up).
+ * Current scope: the colocated fast path only. pg_receivewal is a real,
+ * unmodified Postgres client talking straight to the real primary's own
+ * walsender -- no new wire protocol needed here at all. This file no
+ * longer forks or tracks that child process directly: service_archiver_
+ * start_pgreceivewal()/service_archiver_stop_pgreceivewal() below just
+ * write a small desired-state file that a dedicated, permanently-
+ * supervised controller process reconciles on its own (service_archiver_
+ * pgreceivewal_ctl.c -- see that file's own header comment for why pg_
+ * receivewal needed its own sibling process rather than staying a direct
+ * child of this FSM tick loop). Uses a replication slot, named after this
+ * archiver's own node id (see service_archiver_pgreceivewal_set_desired_
+ * state()'s own comment).
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -33,6 +34,8 @@
 
 #include "service_archiver.h"
 
+#include "archiver_systemid.h"
+#include "archiver_wal_notify.h"
 #include "defaults.h"
 #include "file_utils.h"
 #include "fsm.h"
@@ -40,7 +43,21 @@
 #include "monitor.h"
 #include "pgctl.h"
 #include "service_archiver_basebackup.h"
+#include "service_archiver_pgreceivewal_state.h"
 #include "signals.h"
+
+/*
+ * The bounded correctness backstop for whatever the WAL-notify socket
+ * missed (nothing listening yet, a dropped connection, ...) is no longer a
+ * scan inline in this loop -- it's service_archiver_wal_scanner.c, a
+ * separate sibling process (like pg_receivewal's own controller) that
+ * feeds the exact same socket at its own cadence, independent of the FSM
+ * tick. See that file's own header comment.
+ */
+
+static ArchiverWalNotifyListener archiverWalNotifyListener = {
+	-1, { 0 }
+};
 
 /*
  * WAL segment filename layout, duplicated from pg_walsender/wal_dir_scan.c:
@@ -72,14 +89,6 @@
 static char lastReportedWalFileName[ARCHIVER_WAL_FNAME_LEN + 1] = { 0 };
 
 /*
- * One pg_receivewal child per archiver process, matching milestone 2's own
- * single-membership scope (see this file's own comment) -- a future
- * milestone generalizing to several (formation, group) memberships per
- * archiver will need one pid per membership instead of this one global.
- */
-static pid_t pgReceivewalPid = -1;
-
-/*
  * The timeline of the WAL segment service_archiver_update_current_lsn()
  * most recently found to be the current capture frontier -- computed
  * alongside keeper->postgres.currentLSN there (same scan, same tick), and
@@ -91,92 +100,49 @@ static int currentTimeline = 0;
 
 
 /*
- * service_archiver_pgreceivewal_is_running returns true iff the tracked
- * pg_receivewal child is still alive. waitpid(WNOHANG) both checks and
- * reaps: called on every FSM tick, so a child that exited between ticks is
- * reaped promptly rather than lingering as a zombie.
+ * service_archiver_pgreceivewal_is_running returns true iff pg_receivewal
+ * is currently running, as last observed by its own dedicated controller
+ * process (service_archiver_pgreceivewal_ctl.c) -- a plain pidfile read
+ * plus a kill(pid, 0) probe, not a waitpid() this process has no business
+ * calling anymore: pg_receivewal isn't this process's own child, the
+ * controller's is (see that file's own header comment for why splitting
+ * them apart this way fixes a real reaping race, not just tidies the code).
  */
 bool
-service_archiver_pgreceivewal_is_running(void)
+service_archiver_pgreceivewal_is_running(Keeper *keeper)
 {
-	if (pgReceivewalPid <= 0)
-	{
-		return false;
-	}
+	bool isRunning = false;
 
-	int status = 0;
-	pid_t ret = waitpid(pgReceivewalPid, &status, WNOHANG);
+	(void) service_archiver_pgreceivewal_ctl_is_running(&(keeper->config),
+														&isRunning);
 
-	if (ret == 0)
-	{
-		/* still running */
-		return true;
-	}
-
-	if (ret == pgReceivewalPid)
-	{
-		log_warn("pg_receivewal (pid %d) exited with status %d",
-				 pgReceivewalPid, status);
-	}
-	else
-	{
-		log_warn("Failed to check on pg_receivewal (pid %d): %m",
-				 pgReceivewalPid);
-	}
-
-	pgReceivewalPid = -1;
-	return false;
+	return isRunning;
 }
 
 
 /*
- * service_archiver_stop_pgreceivewal stops the tracked pg_receivewal child,
- * if any. Idempotent: a no-op when nothing is tracked or the child has
- * already exited on its own.
+ * service_archiver_stop_pgreceivewal asks pg_receivewal's own controller
+ * process to stop it, by writing "running = false" to the desired-state
+ * file that controller polls -- see service_archiver_pgreceivewal_ctl.c's
+ * own header comment for the full design. Idempotent: writing the same
+ * desired state twice is harmless.
  */
 bool
-service_archiver_stop_pgreceivewal(void)
+service_archiver_stop_pgreceivewal(Keeper *keeper)
 {
-	if (!service_archiver_pgreceivewal_is_running())
-	{
-		return true;
-	}
-
-	log_info("Stopping pg_receivewal (pid %d)", pgReceivewalPid);
-
-	if (kill(pgReceivewalPid, SIGTERM) != 0 && errno != ESRCH)
-	{
-		log_error("Failed to send SIGTERM to pg_receivewal (pid %d): %m",
-				  pgReceivewalPid);
-		return false;
-	}
-
-	int status = 0;
-
-	if (waitpid(pgReceivewalPid, &status, 0) == -1 && errno != ECHILD)
-	{
-		log_error("Failed to wait for pg_receivewal (pid %d) to stop: %m",
-				  pgReceivewalPid);
-		pgReceivewalPid = -1;
-		return false;
-	}
-
-	pgReceivewalPid = -1;
-	return true;
+	return service_archiver_pgreceivewal_set_desired_state(keeper, false, NULL);
 }
 
 
 /*
- * service_archiver_start_pgreceivewal starts pg_receivewal against the
- * given primary node, writing captured WAL into the archiver's own local
- * storage directory (config->pgSetup.pgdata -- an ARCHIVING node's config
- * reuses the same field an ordinary node uses for its real PGDATA, see
- * this project's own cli_create_archiver, since it plays the same "this
- * node's local root directory" role here without ever holding a real
- * Postgres cluster). Idempotent: stops any previously-tracked child first,
- * exactly like fsm_init_standby's own upstream reuse pattern.
+ * service_archiver_start_pgreceivewal asks pg_receivewal's own controller
+ * process (service_archiver_pgreceivewal_ctl.c) to run it against the
+ * given primary node, by writing that target to the desired-state file the
+ * controller polls -- this function itself no longer forks anything.
+ * Idempotent: writing an unchanged target is a harmless no-op for the
+ * controller (see ensure_pgreceivewal_matches()'s own comment there).
  *
- * Passes -S/--slot, naming the slot exactly the way keeper_create_and_drop_
+ * Uses a replication slot, named exactly the way keeper_create_and_drop_
  * replication_slots()/pgsql_replication_slot_create_and_drop() (keeper.c,
  * primary_standby.c, pgsql.c) already name it for an ordinary standby --
  * REPLICATION_SLOT_NAME_DEFAULT + "_" + this archiver's own node id. That
@@ -200,116 +166,8 @@ service_archiver_stop_pgreceivewal(void)
 bool
 service_archiver_start_pgreceivewal(Keeper *keeper, NodeAddress *primaryNode)
 {
-	KeeperConfig *config = &(keeper->config);
-
-	if (!service_archiver_stop_pgreceivewal())
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	char pgReceivewalPath[MAXPGPATH] = { 0 };
-
-	path_in_same_directory(config->pgSetup.pg_ctl,
-						   "pg_receivewal",
-						   pgReceivewalPath);
-
-	if (!file_exists(pgReceivewalPath))
-	{
-		log_error("Failed to find pg_receivewal at \"%s\"", pgReceivewalPath);
-		return false;
-	}
-
-	/*
-	 * Create-if-missing only -- never ensure_empty_dir(), which rmtree()s
-	 * first: this directory holds already-captured WAL across restarts,
-	 * the whole point of running an archiver.
-	 */
-	if (!directory_exists(config->pgSetup.pgdata) &&
-		mkdir(config->pgSetup.pgdata, 0700) != 0)
-	{
-		log_error("Failed to create archiver WAL directory \"%s\": %m",
-				  config->pgSetup.pgdata);
-		return false;
-	}
-
-	/*
-	 * Same helper every standby's own primary_conninfo goes through
-	 * (pgctl.c): sslmode/sslrootcert/sslcrl from config->pgSetup.ssl (so
-	 * cert auth works exactly as it does for any other node -- libpq picks
-	 * up the client certificate from ~/.postgresql/ once sslmode requests
-	 * SSL, no extra flag needed here), plus password= when config->
-	 * replication_password is set (md5/password auth) -- prepare_primary_
-	 * conninfo() itself skips that clause when the password is empty, so
-	 * this is still a plain trust/no-password conninfo by default,
-	 * unchanged from before this now goes through the shared builder.
-	 * escape = false: this string is a pg_receivewal `-d` argument, not a
-	 * quoted primary_conninfo GUC value.
-	 */
-	char primaryConnInfo[MAXCONNINFO] = { 0 };
-
-	if (!prepare_primary_conninfo(primaryConnInfo,
-								  sizeof(primaryConnInfo),
-								  primaryNode->host,
-								  primaryNode->port,
-								  PG_AUTOCTL_REPLICA_USERNAME,
-								  NULL,
-								  config->replication_password,
-								  config->name,
-								  config->pgSetup.ssl,
-								  false))
-	{
-		log_error("Failed to prepare the archiver's connection string to "
-				  "the primary, see above for details");
-		return false;
-	}
-
-	char slotName[MAXCONNINFO] = { 0 };
-
-	sformat(slotName, sizeof(slotName), "%s_%d",
-			REPLICATION_SLOT_NAME_DEFAULT, keeper->state.current_node_id);
-
-	log_info("Starting pg_receivewal against %s:%d, writing to \"%s\", "
-			 "using replication slot \"%s\"",
-			 primaryNode->host, primaryNode->port, config->pgSetup.pgdata,
-			 slotName);
-
-	pid_t pid = fork();
-
-	if (pid == -1)
-	{
-		log_error("Failed to fork pg_receivewal: %m");
-		return false;
-	}
-
-	if (pid == 0)
-	{
-		/* child process: replace ourselves with pg_receivewal */
-		char *args[10];
-		int argsIndex = 0;
-
-		args[argsIndex++] = pgReceivewalPath;
-		args[argsIndex++] = "-w";
-		args[argsIndex++] = "-d";
-		args[argsIndex++] = primaryConnInfo;
-		args[argsIndex++] = "-D";
-		args[argsIndex++] = config->pgSetup.pgdata;
-		args[argsIndex++] = "--no-sync";
-		args[argsIndex++] = "-S";
-		args[argsIndex++] = slotName;
-		args[argsIndex] = NULL;
-
-		execv(pgReceivewalPath, args);
-
-		/* execv only returns on failure */
-		log_fatal("execv(\"%s\"): %m", pgReceivewalPath);
-		_exit(127);
-	}
-
-	/* parent process: track the child, keep running our own loop */
-	pgReceivewalPid = pid;
-
-	return true;
+	return service_archiver_pgreceivewal_set_desired_state(keeper, true,
+														   primaryNode);
 }
 
 
@@ -391,97 +249,142 @@ wal_segment_end_lsn(const char *walFileName, char *lsn, size_t lsnSize)
 
 
 /*
- * service_archiver_report_captured_wal scans the archiver's local WAL cache
- * directory for segments pg_receivewal has completed (i.e. no longer
- * ".partial") since the last-reported filename, and reports each one to the
- * monitor via monitor_report_wal_received() -- the mechanism backing
- * archiver_wal/wal_archived(), so archive_command callers elsewhere in the
- * cluster can learn when a segment has landed durably on quorum archivers.
- *
- * Reports oldest-to-newest and only advances lastReportedWalFileName past a
- * segment once its report has actually succeeded, so a monitor hiccup
- * retries that segment (and anything after it) on the next tick instead of
- * silently skipping it.
+ * WalReportBatch accumulates every message drained from the WAL-notify
+ * socket in a single call to service_archiver_report_captured_wal(), so
+ * they can all be reported to the monitor in one bulk round trip
+ * (monitor_report_wal_received_bulk()) instead of one round trip per
+ * message -- the whole point of batching the drain in the first place.
+ * Grown with realloc() the same way the old directory-scan code used to,
+ * since a tick's own drain count has no fixed bound.
+ */
+typedef struct WalReportBatch
+{
+	char **walFileNames;
+	char **lsns;
+	int count;
+	int capacity;
+	uint64_t systemIdentifier;
+} WalReportBatch;
+
+
+/*
+ * batch_wal_notify_callback adapts WalReportBatch to ArchiverWalNotify
+ * Callback's own signature (archiver_wal_notify.h) -- context is the
+ * WalReportBatch* the drain call below was made with. Skips anything
+ * already known to be reported (lastReportedWalFileName) so a message
+ * re-sent after a restart of either producer (pg_receivewal's own hook,
+ * or service_archiver_wal_scanner.c) doesn't pad out the batch for no
+ * reason -- the monitor side is idempotent regardless (ON CONFLICT DO
+ * NOTHING), this is purely to keep the batch itself small.
+ */
+static bool
+batch_wal_notify_callback(void *context, const char *walFileName,
+						  const char *lsn, uint64_t systemIdentifier)
+{
+	WalReportBatch *batch = (WalReportBatch *) context;
+
+	if (strcmp(walFileName, lastReportedWalFileName) <= 0)
+	{
+		return true;
+	}
+
+	if (batch->count == batch->capacity)
+	{
+		batch->capacity = batch->capacity == 0 ? 16 : batch->capacity * 2;
+		batch->walFileNames =
+			realloc(batch->walFileNames, batch->capacity * sizeof(char *));
+		batch->lsns =
+			realloc(batch->lsns, batch->capacity * sizeof(char *));
+	}
+
+	batch->walFileNames[batch->count] = strdup(walFileName);
+	batch->lsns[batch->count] = strdup(lsn);
+	batch->systemIdentifier = systemIdentifier;
+	batch->count++;
+
+	return true;
+}
+
+
+/*
+ * flush_wal_report_batch reports everything batch_wal_notify_callback()
+ * accumulated in one monitor_report_wal_received_bulk() call, then
+ * advances lastReportedWalFileName to the newest segment in the batch --
+ * only once that report has actually succeeded (a monitor hiccup retries
+ * the whole batch, and anything after it, on the next tick instead of
+ * silently skipping it). Frees the batch's own storage regardless of
+ * outcome.
+ */
+static bool
+flush_wal_report_batch(Keeper *keeper, WalReportBatch *batch)
+{
+	bool success = true;
+
+	if (batch->count > 0)
+	{
+		success = monitor_report_wal_received_bulk(
+			&(keeper->monitor), keeper->state.current_node_id,
+			batch->systemIdentifier, batch->walFileNames, batch->lsns,
+			batch->count);
+
+		if (!success)
+		{
+			log_error("Failed to report %d captured WAL file(s) to the "
+					  "monitor", batch->count);
+		}
+		else
+		{
+			pg_qsort(batch->walFileNames, batch->count, sizeof(char *),
+					 wal_filename_compare);
+
+			strlcpy(lastReportedWalFileName,
+					batch->walFileNames[batch->count - 1],
+					sizeof(lastReportedWalFileName));
+		}
+
+		for (int i = 0; i < batch->count; i++)
+		{
+			free(batch->walFileNames[i]);
+			free(batch->lsns[i]);
+		}
+	}
+
+	free(batch->walFileNames);
+	free(batch->lsns);
+
+	return success;
+}
+
+
+/*
+ * service_archiver_report_captured_wal is the FSM tick's own entry point:
+ * drains whatever the WAL-notify socket currently has queued -- fed both
+ * by pg_receivewal's own live hook and by this membership's own periodic
+ * scanner process (service_archiver_wal_scanner.c, the bounded
+ * correctness backstop for whatever the socket alone might miss) -- and
+ * reports the whole batch to the monitor in one round trip.
  */
 bool
 service_archiver_report_captured_wal(Keeper *keeper)
 {
-	const char *walcacheDir = keeper->config.pgSetup.pgdata;
-
-	DIR *dir = opendir(walcacheDir);
-
-	if (dir == NULL)
+	if (archiverWalNotifyListener.listenFd < 0)
 	{
-		/* nothing captured yet -- not an error */
+		/* nothing to drain without a working listener -- the periodic
+		 * scanner process is still feeding the monitor independently, this
+		 * tick just has nothing of its own to report */
 		return true;
 	}
 
-	char **names = NULL;
-	int count = 0;
-	int capacity = 0;
-	struct dirent *entry;
+	WalReportBatch batch = { 0 };
 
-	while ((entry = readdir(dir)) != NULL)
-	{
-		if (!is_wal_segment_filename(entry->d_name))
-		{
-			continue;
-		}
+	bool drained = archiver_wal_notify_listener_drain(
+		&archiverWalNotifyListener,
+		&batch_wal_notify_callback,
+		(void *) &batch);
 
-		if (strcmp(entry->d_name, lastReportedWalFileName) <= 0)
-		{
-			continue;
-		}
+	bool reported = flush_wal_report_batch(keeper, &batch);
 
-		if (count == capacity)
-		{
-			capacity = capacity == 0 ? 16 : capacity * 2;
-			names = realloc(names, capacity * sizeof(char *));
-		}
-
-		names[count++] = strdup(entry->d_name);
-	}
-
-	closedir(dir);
-
-	if (count == 0)
-	{
-		return true;
-	}
-
-	pg_qsort(names, count, sizeof(char *), wal_filename_compare);
-
-	bool success = true;
-
-	for (int i = 0; i < count; i++)
-	{
-		if (success)
-		{
-			char lsn[PG_LSN_MAXLENGTH] = { 0 };
-
-			wal_segment_end_lsn(names[i], lsn, sizeof(lsn));
-
-			if (monitor_report_wal_received(&(keeper->monitor),
-											keeper->state.current_node_id,
-											names[i], lsn))
-			{
-				strlcpy(lastReportedWalFileName, names[i],
-						sizeof(lastReportedWalFileName));
-			}
-			else
-			{
-				log_error("Failed to report WAL file \"%s\" to the monitor",
-						  names[i]);
-				success = false;
-			}
-		}
-
-		free(names[i]);
-	}
-
-	free(names);
-
-	return success;
+	return drained && reported;
 }
 
 
@@ -494,7 +397,7 @@ service_archiver_report_captured_wal(Keeper *keeper)
  * (routes.h's own "path" field, written by service_archiver_reconciler.c),
  * and that path is pgdata, so anything pg_walsender needs to read on its
  * own (wal_position_cache_read(), wal_dir_scan.c) has to live under it,
- * matching service_archiver_systemid_path()'s own placement below.
+ * matching archiver_systemid_path()'s own placement (archiver_systemid.c).
  */
 static void
 service_archiver_position_path(KeeperConfig *config, char *dest)
@@ -532,29 +435,17 @@ service_archiver_persist_current_lsn(Keeper *keeper)
 
 
 /*
- * service_archiver_systemid_path computes the local file holding this
- * membership's group's Postgres system identifier -- inside config->
- * pgSetup.pgdata itself (this membership's own walcache root), matching
- * service_archiver_position_path()'s own placement above: pg_walsender
- * only ever learns one path per membership (routes.h's own "path" field,
- * written by service_archiver_reconciler.c), and that path is pgdata, so
- * anything pg_walsender needs to find on its own has to live under it.
- */
-static void
-service_archiver_systemid_path(KeeperConfig *config, char *dest)
-{
-	sformat(dest, MAXPGPATH, "%s/archiver-systemid", config->pgSetup.pgdata);
-}
-
-
-/*
  * service_archiver_maybe_persist_systemid writes this group's system
- * identifier to the local file above, once. Unlike the position file, this
- * never needs refreshing once written: a Postgres cluster's system
- * identifier is set at initdb and never changes for its lifetime, so
- * write-once is not a simplification that trades away correctness, it's
- * the actually-correct behavior -- there is no "stale" system identifier to
- * worry about invalidating.
+ * identifier to the local file archiver_systemid.c's own path computes
+ * (archiver_systemid_path()), once. Unlike the position file, this never
+ * needs refreshing once written: a Postgres cluster's system identifier is
+ * set at initdb and never changes for its lifetime, so write-once is not a
+ * simplification that trades away correctness, it's the actually-correct
+ * behavior -- there is no "stale" system identifier to worry about
+ * invalidating. Both pg_receivewal's own WalSegmentClosedHook (service_
+ * archiver_pgreceivewal_ctl.c) and the periodic scanner (service_archiver_
+ * wal_scanner.c) read this same file (archiver_systemid_read()) to tag
+ * every WAL-notify message with it.
  *
  * A no-op once the file already exists. Before that, asks the monitor once
  * per tick (see monitor_get_group_system_identifier()'s own comment,
@@ -569,7 +460,7 @@ service_archiver_maybe_persist_systemid(Keeper *keeper)
 {
 	char path[MAXPGPATH] = { 0 };
 
-	service_archiver_systemid_path(&(keeper->config), path);
+	archiver_systemid_path(&(keeper->config), path, sizeof(path));
 
 	if (file_exists(path))
 	{
@@ -755,11 +646,11 @@ service_archiver_report_storage(Keeper *keeper)
  * never touches real Postgres), and keeper_fsm_reach_assigned_state()
  * dispatching through the very same KeeperFSM[] table -- while replacing
  * the two Postgres-specific calls with nothing at all: an ARCHIVING row's
- * only "is it running" check is service_archiver_pgreceivewal_is_running(),
- * consulted by the FSM transition functions themselves
- * (fsm_init_archiver et al., fsm_transition.c), not by this loop.
+ * pg_receivewal liveness is its own dedicated controller process's
+ * responsibility now (service_archiver_pgreceivewal_ctl.c), not this
+ * loop's -- see that file's own header comment for why.
  *
- * Milestone 2's own single-membership scope (see this file's own header
+ * Single-membership scope (see this file's own header
  * comment): one archiver, one (formation, group) row, reported here
  * directly rather than iterating a list the monitor refreshes.
  */
@@ -780,6 +671,19 @@ service_archiver_loop(Keeper *keeper)
 	 * hold a valid value even before the first tick's own scan runs.
 	 */
 	strlcpy(keeper->postgres.currentLSN, "0/0", sizeof(keeper->postgres.currentLSN));
+
+	/*
+	 * Best-effort: a failure here just means every tick falls back to the
+	 * full scan until the next process restart tries again -- logged, not
+	 * fatal, matching this loop's own tolerance for every other per-tick
+	 * failure below.
+	 */
+	if (!archiver_wal_notify_listener_open(&(keeper->config),
+										   &archiverWalNotifyListener))
+	{
+		log_warn("Failed to open the WAL-notify listener, falling back to "
+				 "scanning the WAL cache directory every tick");
+	}
 
 	int tickCount = 0;
 
@@ -845,30 +749,6 @@ service_archiver_loop(Keeper *keeper)
 				}
 			}
 
-			/*
-			 * Liveness check: a state transition only (re)starts
-			 * pg_receivewal at the moment current_role becomes
-			 * ARCHIVING_STATE (fsm_init_archiver/fsm_archiver_follow_new_
-			 * primary, fsm_transition.c) -- it does not run again on later
-			 * ticks where current_role and assigned_role already agree.
-			 * Without this check, a pg_receivewal that dies (or an archiver
-			 * process that gets restarted while already ARCHIVING) would
-			 * stay down forever instead of being noticed and restarted here,
-			 * exactly the "is it running" check this loop's own header
-			 * comment describes.
-			 */
-			if (keeperState->current_role == ARCHIVING_STATE &&
-				!service_archiver_pgreceivewal_is_running())
-			{
-				NodeAddress primaryNode = { 0 };
-
-				if (!keeper_get_primary(keeper, &primaryNode) ||
-					!service_archiver_start_pgreceivewal(keeper, &primaryNode))
-				{
-					log_error("Failed to restart pg_receivewal, retrying...");
-				}
-			}
-
 			if (!service_archiver_report_captured_wal(keeper))
 			{
 				log_warn("Failed to report newly captured WAL segments to "
@@ -899,7 +779,8 @@ service_archiver_loop(Keeper *keeper)
 		++tickCount;
 	}
 
-	(void) service_archiver_stop_pgreceivewal();
+	(void) service_archiver_stop_pgreceivewal(keeper);
+	(void) archiver_wal_notify_listener_close(&archiverWalNotifyListener);
 
 	log_info("pg_autoctl archiver service is stopping");
 

@@ -62,6 +62,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 	char kindStr[NAMEDATALEN] = { 0 };
 	char replicationQuorumStr[8] = { 0 };
 	char pgHbaLanStr[8] = { 0 };
+	char fromArchiverStr[8] = { 0 };
 	char launchModeStr[16] = { 0 };
 	char createDeferredStr[16] = { 0 };
 	char noMonitorStr[8] = { 0 };
@@ -128,6 +129,9 @@ nodespec_read(const char *path, NodeSpec *spec)
 		make_strbuf_option_default("options", "pg_hba_lan", NULL, false,
 								   sizeof(pgHbaLanStr), pgHbaLanStr,
 								   "true"),
+		make_strbuf_option_default("options", "from_archiver", NULL, false,
+								   sizeof(fromArchiverStr), fromArchiverStr,
+								   "false"),
 
 		/* [options] — debian_cluster: run pg_createcluster before create */
 		make_strbuf_option_default("options", "debian_cluster", NULL, false,
@@ -203,7 +207,7 @@ nodespec_read(const char *path, NodeSpec *spec)
 	{
 		spec->kind = NODE_KIND_CITUS_WORKER;
 	}
-	else if (strcmp(kindStr, "archiver") == 0)
+	else if (streq(kindStr, "archiver"))
 	{
 		spec->kind = NODE_KIND_ARCHIVER;
 	}
@@ -229,6 +233,11 @@ nodespec_read(const char *path, NodeSpec *spec)
 		(strcmp(pgHbaLanStr, "true") == 0 ||
 		 strcmp(pgHbaLanStr, "yes") == 0 ||
 		 strcmp(pgHbaLanStr, "1") == 0);
+
+	spec->fromArchiver =
+		(strcmp(fromArchiverStr, "true") == 0 ||
+		 strcmp(fromArchiverStr, "yes") == 0 ||
+		 strcmp(fromArchiverStr, "1") == 0);
 
 	spec->launchDeferred = (strcmp(launchModeStr, "deferred") == 0);
 	spec->createDeferred = (strcmp(createDeferredStr, "deferred") == 0);
@@ -467,12 +476,14 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 	fformat(out,
 			"\n"
 			"[options]\n"
-			"ssl        = %s\n"
-			"auth       = %s\n"
-			"pg_hba_lan = %s\n",
+			"ssl           = %s\n"
+			"auth          = %s\n"
+			"pg_hba_lan    = %s\n"
+			"from_archiver = %s\n",
 			spec->ssl,
 			spec->auth,
-			spec->pg_hba_lan ? "true" : "false");
+			spec->pg_hba_lan ? "true" : "false",
+			spec->fromArchiver ? "true" : "false");
 
 	if (spec->debianCluster[0])
 	{
@@ -617,14 +628,14 @@ nodespec_create_argv(const NodeSpec *spec,
 		PUSH(spec->monitor_pguri);
 
 		if (!IS_EMPTY_STRING_BUFFER(spec->formation) &&
-			strcmp(spec->formation, "default") != 0)
+			!streq(spec->formation, "default"))
 		{
 			PUSH("--formation");
 			PUSH(spec->formation);
 		}
 
 		if (!IS_EMPTY_STRING_BUFFER(spec->region) &&
-			strcmp(spec->region, "default") != 0)
+			!streq(spec->region, "default"))
 		{
 			PUSH("--region");
 			PUSH(spec->region);
@@ -640,11 +651,11 @@ nodespec_create_argv(const NodeSpec *spec,
 		 * itself treats "no SSL flag given" as the trust/no-password
 		 * default, so there is nothing to pass in that case.
 		 */
-		if (strcmp(spec->ssl, "self-signed") == 0)
+		if (streq(spec->ssl, "self-signed"))
 		{
 			PUSH("--ssl-self-signed");
 		}
-		else if (strcmp(spec->ssl, "off") == 0)
+		else if (streq(spec->ssl, "off"))
 		{
 			PUSH("--no-ssl");
 		}
@@ -765,6 +776,18 @@ nodespec_create_argv(const NodeSpec *spec,
 	if (spec->pg_hba_lan && spec->kind != NODE_KIND_UNKNOWN)
 	{
 		PUSH("--pg-hba-lan");
+	}
+
+	/*
+	 * from_archiver: forces `create postgres`'s own automatic archiver-
+	 * bootstrap detection (keeper_should_bootstrap_from_archiver, fsm_
+	 * transition.c) rather than relying on it -- meaningful only for a
+	 * plain standalone postgres node, the only kind that ever calls
+	 * fsm_init_standby.
+	 */
+	if (spec->fromArchiver && spec->kind == NODE_KIND_STANDALONE)
+	{
+		PUSH("--from-archiver");
 	}
 
 	/* passwords */

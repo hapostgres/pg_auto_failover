@@ -1,7 +1,7 @@
 /*
  * vendor/tar.c
- *   Vendored from PostgreSQL's src/port/tar.c (checked against
- *   /Users/dim/dev/PostgreSQL/postgresql; logic unchanged, reformatted to
+ *   Vendored from PostgreSQL's src/port/tar.c (checked against an
+ *   upstream PostgreSQL checkout; logic unchanged, reformatted to
  *   this project's own brace style via citus_indent) -- ustar header
  *   construction/checksum logic, pure C with no backend dependency (only
  *   c.h/pgtar.h), already proven frontend-safe since it's what

@@ -3,8 +3,8 @@
  * pgtar.h
  *	  Functions for manipulating tarfile datastructures (vendor/tar.c)
  *
- * Vendored from PostgreSQL's src/include/pgtar.h (checked against
- * /Users/dim/dev/PostgreSQL/postgresql; logic unchanged, reformatted to
+ * Vendored from PostgreSQL's src/include/pgtar.h (checked against an
+ * upstream PostgreSQL checkout; logic unchanged, reformatted to
  * this project's own brace style via citus_indent) -- pure ustar-format
  * constants and one inline helper, no backend dependency, genuinely
  * reusable as-is (same PostgreSQL License). pg_walsender's own

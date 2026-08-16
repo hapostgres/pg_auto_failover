@@ -2,10 +2,9 @@
 -- Licensed under the PostgreSQL License.
 --
 -- Regression tests for the Archiving & Disaster Recovery schema and its
--- monitor API (milestone 1: schema + monitor API only -- no
--- service_archiver process involved, everything here is exercised via
--- direct SQL calls against the schema alone). See
--- ~/dev/temp/archiving-disaster-recovery.md for the full design.
+-- monitor API (schema + monitor API only -- no service_archiver process
+-- involved, everything here is exercised via direct SQL calls against
+-- the schema alone).
 
 \x on
 
@@ -110,7 +109,17 @@ SELECT archiver_id, archiver_name, region
 -- ── WAL capture confirmation: wal_archived() / report_wal_received() ───────
 
 SELECT pgautofailover.report_wal_received(
-           :nodeid, '000000010000000000000001', '0/1000000');
+           :nodeid, '000000010000000000000001', '0/1000000', 111);
+
+-- bulk variant: two more segments in one call
+SELECT pgautofailover.report_wal_received_bulk(
+           :nodeid, 111,
+           ARRAY['000000010000000000000002', '000000010000000000000003'],
+           ARRAY['0/2000000', '0/3000000']::pg_lsn[]);
+
+SELECT walfilename, lsn, systemidentifier
+  FROM pgautofailover.archiver_wal
+ ORDER BY walfilename;
 
 -- default archiver_quorum is 1: a single archiver's report already satisfies it
 SELECT pgautofailover.wal_archived('archiving_test', 0, '000000010000000000000001');

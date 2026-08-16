@@ -597,7 +597,7 @@ NodeStateFromString(const char *str)
 	{
 		return DROPPED_STATE;
 	}
-	else if (strcmp(str, "archiving") == 0)
+	else if (streq(str, "archiving"))
 	{
 		return ARCHIVING_STATE;
 	}

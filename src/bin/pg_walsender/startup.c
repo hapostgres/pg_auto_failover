@@ -20,6 +20,8 @@
 #define GSS_REQUEST_CODE 80877104
 #define CANCEL_REQUEST_CODE 80877102
 
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 
 bool
 ws_startup_negotiate(int sock, WsStartupParams *params)
@@ -114,22 +116,22 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 
 			ptr += strlen(ptr) + 1;
 
-			if (strcmp(key, "user") == 0)
+			if (streq(key, "user"))
 			{
 				strlcpy(params->user, value, sizeof(params->user));
 			}
-			else if (strcmp(key, "database") == 0)
+			else if (streq(key, "database"))
 			{
 				strlcpy(params->database, value, sizeof(params->database));
 			}
-			else if (strcmp(key, "application_name") == 0)
+			else if (streq(key, "application_name"))
 			{
 				strlcpy(params->applicationName, value, sizeof(params->applicationName));
 			}
-			else if (strcmp(key, "replication") == 0)
+			else if (streq(key, "replication"))
 			{
 				params->replicationDatabase = (strcasecmp(value, "database") == 0);
-				params->replication = (strcmp(value, "1") == 0 ||
+				params->replication = (streq(value, "1") ||
 									   strcasecmp(value, "true") == 0 ||
 									   params->replicationDatabase);
 			}

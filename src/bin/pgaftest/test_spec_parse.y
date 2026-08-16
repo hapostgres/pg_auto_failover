@@ -26,6 +26,8 @@
 #include "pgsetup.h"
 #include "file_utils.h"
 
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 /* provided by test_spec_scan.l */
 extern int  yylex(void);
 extern int  pgaf_line_number;
@@ -1194,9 +1196,9 @@ wait_cmd:
 	 */
 	| T_WAIT T_UNTIL T_BASEBACKUP T_IDENT T_IS T_IDENT T_IN T_IDENT T_SLASH T_INTEGER opt_timeout
 	{
-		if (strcmp($4, "source") != 0 &&
-		    strcmp($4, "status") != 0 &&
-		    strcmp($4, "replaymode") != 0)
+		if (!streq($4, "source") &&
+		    !streq($4, "status") &&
+		    !streq($4, "replaymode"))
 		{
 			fprintf(stderr,
 			        "pgaftest: line %d: \"wait until basebackup %s ...\" -- "
@@ -1857,7 +1859,7 @@ fold_archivers_into_formations(TestCluster *cluster)
 
 		for (int fi = 0; fi < cluster->formationCount; fi++)
 		{
-			if (strcmp(cluster->formations[fi].name, a->formations[0]) == 0)
+			if (streq(cluster->formations[fi].name, a->formations[0]))
 			{
 				form = &cluster->formations[fi];
 				break;
