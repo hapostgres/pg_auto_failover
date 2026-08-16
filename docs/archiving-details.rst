@@ -225,20 +225,21 @@ Process model
 Once started (``pg_autoctl run``, or ``pg_autoctl node run`` against a
 ``kind = archiver`` node specification), an archiver supervises
 exactly two long-running processes: ``serve``, and a ``reconciler`` that
-in turn keeps two children running per (formation, group) membership this
-archiver currently holds -- a ``capture`` process (the FSM tick reporting
-this membership's progress to the monitor) and pg_receivewal's own
-dedicated controller process, added and removed together as the archiver
-is attached to or detached from a formation, no restart of the archiver
-itself required. They hand off small files (`Storage`_ above) and nothing
-else:
+in turn keeps three children running per (formation, group) membership
+this archiver currently holds -- a ``capture`` process (the FSM tick
+reporting this membership's progress to the monitor), pg_receivewal's own
+dedicated controller process, and a periodic WAL-cache scanner -- added
+and removed together as the archiver is attached to or detached from a
+formation, no restart of the archiver itself required. They hand off
+small files and a local socket (`Storage`_ above) and nothing else:
 
 .. figure:: ./tikz/arch-archiver-internals.svg
-   :alt: pg_autoctl run supervises two processes, reconciler and serve; reconciler forks one capture process and one pgreceivewal-ctl process per membership (capture writes a small desired-state file naming the current primary; pgreceivewal-ctl polls it and runs an in-process pg_receivewal against that target, notifying capture of each closed segment over a local socket; capture also periodically forks a short-lived basebackup child that execs the real pg_basebackup) and also writes archiver-routes.ini, one section per membership; serve runs pg_walsender, which reads the routes file, the WAL cache/basebackups, and archiver-systemid directly, and serves pg_basebackup, streaming standbys, and restore_command fetches
+   :alt: pg_autoctl run supervises two processes, reconciler and serve; reconciler forks one capture process, one pgreceivewal-ctl process, and one wal-scanner process per membership (capture writes a small desired-state file naming the current primary; pgreceivewal-ctl polls it and runs an in-process pg_receivewal against that target, notifying capture of each closed segment over a local socket; wal-scanner periodically walks the WAL cache directory and feeds the same socket as a correctness backstop; capture drains that socket every tick and reports the whole batch to the monitor in one round trip; capture also periodically forks a short-lived basebackup child that execs the real pg_basebackup) and also writes archiver-routes.ini, one section per membership; serve runs pg_walsender, which reads the routes file, the WAL cache/basebackups, and archiver-systemid directly, and serves pg_basebackup, streaming standbys, and restore_command fetches
 
    Two supervised top-level processes per archiver; the reconciler forks
-   one capture process and one pg_receivewal controller per membership
-   underneath it -- siblings, not parent/child (see below for why)
+   one capture process, one pg_receivewal controller, and one WAL-cache
+   scanner per membership underneath it -- siblings, not parent/child
+   (see below for why)
 
 ::
 
@@ -250,34 +251,65 @@ else:
   │   ├── capture (default/0)        -- the FSM tick: reports this
   │   │   │                             membership's progress to the
   │   │   │                             monitor, writes pgreceivewal.state
-  │   │   │                             naming the current primary, and
-  │   │   │                             periodically forks a short-lived
-  │   │   └── basebackup                basebackup child that execs the
-  │   │       └── pg_basebackup          real binary, then exits
+  │   │   │                             naming the current primary, drains
+  │   │   │                             wal-notify.sock every tick and
+  │   │   │                             bulk-reports whatever it collected,
+  │   │   │                             and periodically forks a
+  │   │   └── basebackup                short-lived basebackup child that
+  │   │       └── pg_basebackup          execs the real binary, then exits
   │   ├── pgreceivewal-ctl (default/0)  -- polls pgreceivewal.state and
   │   │   └── pg_receivewal                runs an in-process pg_receivewal
   │   │                                    against it, notifying capture
-  │   │                                    of each closed segment over a
-  │   │                                    local socket
+  │   │                                    of each closed segment over
+  │   │                                    wal-notify.sock
+  │   ├── wal-scanner (default/0)  -- every ~30s, walks the WAL cache
+  │   │                                directory and feeds any segment
+  │   │                                the live path may have missed
+  │   │                                through that same socket
   │   ├── capture (billing/0)
   │   │   └── basebackup
   │   │       └── pg_basebackup
-  │   └── pgreceivewal-ctl (billing/0)
-  │       └── pg_receivewal
+  │   ├── pgreceivewal-ctl (billing/0)
+  │   │   └── pg_receivewal
+  │   └── wal-scanner (billing/0)
   └── serve            -- keeps the archiver reachable over the network,
       └── pg_walsender --port 6543 --pgdata /var/lib/pgaf/archiver1
                        (derives archiver-routes.ini's path from --pgdata;
                        serves every membership through the one process)
 
-``capture`` and pg_receivewal's own controller are deliberately
-siblings, not parent/child: the top-level supervisor's own central reap
-loop watches for *any* child of the process it started exiting, and a
-pg_receivewal forked directly from inside ``capture`` used to race that
-wildcard reap against ``capture``'s own targeted one. Giving pg_receivewal
-its own dedicated controller process removes the race structurally --
-each side's ``waitpid()`` can only ever observe its own one child -- the
-same reason ordinary Postgres runs under its own dedicated ``postgres``
-controller process rather than as a direct child of ``node-active``.
+``capture``, pg_receivewal's own controller, and the WAL-cache scanner are
+deliberately siblings, not parent/child: the top-level supervisor's own
+central reap loop watches for *any* child of the process it started
+exiting, and a pg_receivewal forked directly from inside ``capture`` used
+to race that wildcard reap against ``capture``'s own targeted one. Giving
+pg_receivewal its own dedicated controller process removes the race
+structurally -- each side's ``waitpid()`` can only ever observe its own
+one child -- the same reason ordinary Postgres runs under its own
+dedicated ``postgres`` controller process rather than as a direct child of
+``node-active``. The WAL-cache scanner is a sibling for a related but
+distinct reason: it used to be an inline directory scan on ``capture``'s
+own FSM tick, run every 60 ticks -- a full directory listing over a WAL
+cache retaining thousands of segments is real wall-clock work, and paying
+it inline meant every 60th tick was delayed behind it. As its own
+process, the scan cadence is fully decoupled from the tick loop's own.
+
+Reporting captured WAL to the monitor is a two-producer, one-consumer
+design built around a single Unix domain socket per membership
+(``wal-notify.sock``): pg_receivewal's own hook writes a line to it the
+instant a segment closes (the fast, common-case path), and the WAL-cache
+scanner writes the same shape of line for anything it finds on its own
+periodic walk (the bounded correctness backstop for whatever the live
+path might have missed -- nothing listening yet, a dropped connection).
+From the listener's side the two are indistinguishable. ``capture``
+drains whatever is queued once per tick and reports the whole batch to
+the monitor in a single ``report_wal_received_bulk()`` call -- one round
+trip regardless of how many segments were captured since the last tick --
+rather than one round trip per segment. Each reported row also carries
+this membership's own Postgres system identifier (``archiver-systemid``,
+read locally rather than re-fetched per report), so WAL from a stale
+cluster incarnation (a group re-bootstrapped from scratch after a
+disaster, without its ``(formation, group)`` ever changing) can be told
+apart from WAL captured under the current one.
 
 If any child stops unexpectedly, its supervisor notices on its next tick
 and restarts it -- an archiver recovering from a crashed

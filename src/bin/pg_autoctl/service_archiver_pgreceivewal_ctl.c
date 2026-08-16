@@ -70,6 +70,7 @@
 #include "log.h"
 #include "pg_receivewal_entry.h"
 #include "pgctl.h"
+#include "pgsql.h"
 #include "service_archiver_pgreceivewal_state.h"
 #include "signals.h"
 #include "string_utils.h"
@@ -148,6 +149,79 @@ static bool start_pgreceivewal_child(KeeperConfig *config,
 									 ArchiverPgReceivewalDesiredState *desired,
 									 pid_t *childPid);
 static bool stop_pgreceivewal_child(pid_t *childPid);
+static bool wait_for_primary_and_slot_ready(const char *primaryConnInfo,
+											const char *slotName);
+
+/*
+ * How long wait_for_primary_and_slot_ready() polls for before giving up and
+ * forking pg_receivewal anyway -- a bound, not a guarantee: it exists so a
+ * primary that genuinely never creates the slot (a real misconfiguration,
+ * not just a startup race) doesn't wedge this controller's own poll loop
+ * forever. pg_receivewal's own retry behavior remains the backstop past
+ * this point, same as before this function existed.
+ */
+#define ARCHIVER_PGRECEIVEWAL_SLOT_WAIT_SECONDS 20
+
+
+/*
+ * wait_for_primary_and_slot_ready polls the primary at primaryConnInfo,
+ * connecting fresh each attempt, until it accepts a connection AND its
+ * replication slot slotName exists -- or ARCHIVER_PGRECEIVEWAL_SLOT_WAIT_
+ * SECONDS elapses, or a stop is requested. Best-effort: a timeout here
+ * doesn't stop start_pgreceivewal_child() from starting pg_receivewal
+ * anyway, it just means this preflight check didn't get to close the
+ * startup race for it.
+ *
+ * The race this closes: the slot is created by the primary's own keeper,
+ * asynchronously, once it discovers this archiver as another node to
+ * maintain a slot for (keeper_create_and_drop_replication_slots(),
+ * primary_standby.c) -- there is no synchronous handshake guaranteeing it
+ * exists by the time this controller is ready to start streaming.
+ * pg_receivewal itself is not a reliable way to wait this out: it treats
+ * "replication slot does not exist" as a retryable disconnect, but that
+ * internal retry has been observed to occasionally never recover once the
+ * slot subsequently appears (a genuine bug in the vendored client's own
+ * reconnect path, still being tracked down) -- polling for readiness
+ * before ever starting pg_receivewal avoids relying on that retry path
+ * for this specific, common, entirely expected race at all.
+ */
+static bool
+wait_for_primary_and_slot_ready(const char *primaryConnInfo, const char *slotName)
+{
+	int maxAttempts = ARCHIVER_PGRECEIVEWAL_SLOT_WAIT_SECONDS;
+
+	for (int attempt = 0; attempt < maxAttempts; attempt++)
+	{
+		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
+		{
+			return false;
+		}
+
+		PGSQL pgsql = { 0 };
+
+		if (pgsql_init(&pgsql, (char *) primaryConnInfo, PGSQL_CONN_UPSTREAM))
+		{
+			bool slotExists = false;
+
+			if (pgsql_replication_slot_exists(&pgsql, slotName, &slotExists) &&
+				slotExists)
+			{
+				pgsql_finish(&pgsql);
+				return true;
+			}
+
+			pgsql_finish(&pgsql);
+		}
+
+		pg_usleep(1 * 1000 * 1000);   /* 1s */
+	}
+
+	log_warn("Timed out after %ds waiting for the primary and replication "
+			 "slot \"%s\" to be ready; starting pg_receivewal anyway",
+			 ARCHIVER_PGRECEIVEWAL_SLOT_WAIT_SECONDS, slotName);
+
+	return false;
+}
 
 
 /*
@@ -191,6 +265,8 @@ start_pgreceivewal_child(KeeperConfig *config,
 				  "the primary, see above for details");
 		return false;
 	}
+
+	(void) wait_for_primary_and_slot_ready(primaryConnInfo, desired->slot);
 
 	log_info("Starting pg_receivewal against %s:%d, writing to \"%s\", "
 			 "using replication slot \"%s\"",
@@ -383,6 +459,7 @@ service_archiver_pgreceivewal_ctl_loop(KeeperConfig *config)
 {
 	ArchiverPgReceivewalDesiredState running = { 0 };
 	pid_t childPid = -1;
+	bool loggedFirstRead = false;
 
 	for (;;)
 	{
@@ -394,7 +471,18 @@ service_archiver_pgreceivewal_ctl_loop(KeeperConfig *config)
 
 		ArchiverPgReceivewalDesiredState desired = { 0 };
 
-		if (archiver_pgreceivewal_read_desired_state(config, &desired))
+		bool readOk = archiver_pgreceivewal_read_desired_state(config, &desired);
+
+		if (!loggedFirstRead)
+		{
+			loggedFirstRead = true;
+			log_info("pgreceivewal-ctl: first desired-state read: ok=%d "
+					 "running=%d host=\"%s\" port=%d slot=\"%s\"",
+					 readOk, desired.running, desired.host, desired.port,
+					 desired.slot);
+		}
+
+		if (readOk)
 		{
 			if (!ensure_pgreceivewal_matches(config, &desired, &running,
 											 &childPid))
