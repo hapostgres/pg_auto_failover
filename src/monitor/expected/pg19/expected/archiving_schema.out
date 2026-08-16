@@ -183,15 +183,15 @@ SELECT walfilename, lsn, systemidentifier
  ORDER BY walfilename;
 -[ RECORD 1 ]----+-------------------------
 walfilename      | 000000010000000000000001
-lsn              | 0/1000000
+lsn              | 0/01000000
 systemidentifier | 111
 -[ RECORD 2 ]----+-------------------------
 walfilename      | 000000010000000000000002
-lsn              | 0/2000000
+lsn              | 0/02000000
 systemidentifier | 111
 -[ RECORD 3 ]----+-------------------------
 walfilename      | 000000010000000000000003
-lsn              | 0/3000000
+lsn              | 0/03000000
 systemidentifier | 111
 
 -- default archiver_quorum is 1: a single archiver's report already satisfies it
