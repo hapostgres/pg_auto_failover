@@ -1778,6 +1778,36 @@ monitor_report_wal_received_bulk(Monitor *monitor, int64_t nodeId,
 
 
 /*
+ * monitor_report_wal_progress calls pgautofailover.report_wal_progress()
+ * to record pg_receivewal's own current raw stream position for nodeId --
+ * observability only, see that SQL function's own comment (pgautofailover.
+ * sql) and archiver_node.lastprogresslsn's for why this is never a safe
+ * FAST_FORWARD or PITR replay target on its own.
+ */
+bool
+monitor_report_wal_progress(Monitor *monitor, int64_t nodeId, const char *lsn)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.report_wal_progress($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, LSNOID };
+	IntString nodeIdString = intToString(nodeId);
+	const char *paramValues[2] = { nodeIdString.strValue, lsn };
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   NULL, NULL))
+	{
+		log_error("Failed to report WAL progress for node %" PRId64, nodeId);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * monitor_basebackup_concurrency_available calls
  * pgautofailover.basebackup_concurrency_available() to check, before
  * starting the (potentially minutes-long) pg_basebackup work, whether this

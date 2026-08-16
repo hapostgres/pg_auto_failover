@@ -1644,6 +1644,15 @@ CREATE TABLE pgautofailover.archiver_node
     -- 'pitr' only: lifecycle (restoring -> paused -> registered/discarded)
     pitrstatus       pgautofailover.pitr_status,
 
+    -- 'wal-receiver' only: pg_receivewal's own most recent raw stream
+    -- position, reported purely for observability (a lag/progress
+    -- metric) -- NEVER a safe FAST_FORWARD or PITR replay target on its
+    -- own, since pg_receivewal never parses WAL record content and this
+    -- LSN is not guaranteed to land on a genuine record boundary. See
+    -- report_wal_progress()'s own comment.
+    lastprogresslsn  pg_lsn,
+    lastprogressat   timestamptz,
+
     createdat        timestamptz NOT NULL DEFAULT now(),
 
     CHECK (kind <> 'wal-receiver' OR nodeid IS NOT NULL),
@@ -2531,10 +2540,40 @@ $$;
 comment on function pgautofailover.report_wal_received_bulk(bigint,bigint,text[],pg_lsn[])
         is 'reports many WAL segments durably captured by an ARCHIVING node in one round trip';
 
+-- sub-segment stream-position observability -- see archiver_node.
+-- lastprogresslsn's own comment for why this is never a safe replay
+-- target on its own, unlike report_wal_received()/report_wal_received_
+-- bulk() above (real, segment-boundary facts). A plain UPDATE, not an
+-- INSERT: unlike archiver_wal (append-only history, one row per segment
+-- ever captured), this is a single, overwritten-in-place "most recent"
+-- fact per wal-receiver row -- there is nothing to retain history of.
+CREATE FUNCTION pgautofailover.report_wal_progress
+    (in_nodeid bigint, in_lsn pg_lsn)
+ RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+BEGIN
+    UPDATE pgautofailover.archiver_node
+       SET lastprogresslsn = in_lsn,
+           lastprogressat = now()
+     WHERE nodeid = in_nodeid
+       AND kind = 'wal-receiver';
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'node % is not an ARCHIVING wal-receiver node', in_nodeid;
+    END IF;
+END;
+$$;
+
+comment on function pgautofailover.report_wal_progress(bigint,pg_lsn)
+        is 'reports pg_receivewal''s own current raw stream position, for observability only';
+
 grant execute on function pgautofailover.report_wal_received(bigint,text,pg_lsn,bigint)
    to autoctl_node;
 
 grant execute on function pgautofailover.report_wal_received_bulk(bigint,bigint,text[],pg_lsn[])
+   to autoctl_node;
+
+grant execute on function pgautofailover.report_wal_progress(bigint,pg_lsn)
    to autoctl_node;
 
 CREATE FUNCTION pgautofailover.report_basebackup_started

@@ -31,6 +31,21 @@ typedef void (*WalSegmentClosedHook) (XLogRecPtr xlogpos, uint32 timeline);
 extern WalSegmentClosedHook pgaf_wal_segment_closed_hook;
 
 /*
+ * Called from the same place, for every OTHER stop_streaming() check-in --
+ * i.e. whenever segment_finished is false, which happens far more often
+ * than a segment actually closing (roughly once per server status-update
+ * round, driven by --status-interval). xlogpos here is raw stream
+ * position, NOT guaranteed to land on a genuine WAL record boundary
+ * (pg_receivewal never parses record content) -- observability only, a
+ * lag/progress metric, never a safe FAST_FORWARD or PITR replay target on
+ * its own (that's what pgaf_wal_segment_closed_hook's own end-of-segment
+ * boundaries are for). Same synchronous, keep-it-fast rule as that hook.
+ */
+typedef void (*WalProgressHook) (XLogRecPtr xlogpos, uint32 timeline);
+
+extern WalProgressHook pgaf_wal_progress_hook;
+
+/*
  * pg_receivewal_main is upstream's own main(), renamed and no longer the
  * process entry point -- called directly by service_archiver_pgreceivewal_
  * ctl.c's own forked child, argc/argv shaped exactly like the real

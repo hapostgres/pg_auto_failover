@@ -3,16 +3,27 @@
  *   See archiver_wal_notify.h.
  *
  * A Unix domain socket, one per membership, at "<pgdata>/wal-notify.sock":
- * pg_receivewal's own WalSegmentClosedHook (vendor/pg_receivewal/pg_
- * receivewal.c, called from service_archiver_pgreceivewal_ctl.c's forked
- * child) connects, writes one line "<segment> <end-lsn> <sysid>\n", and
- * closes -- no persistent connection to manage across pg_receivewal's own
- * restarts or the listener's. The FSM tick (service_archiver_report_
- * captured_wal(), service_archiver.c) drains whatever's queued each tick
- * instead of scanning the WAL cache directory for it, and reports every
- * message drained in one tick to the monitor as a single bulk call
- * (monitor_report_wal_received_bulk()) rather than one round trip per
- * segment.
+ * pg_receivewal's own hooks (vendor/pg_receivewal/pg_receivewal.c, called
+ * from service_archiver_pgreceivewal_ctl.c's forked child) connect, write
+ * one line, and close -- no persistent connection to manage across pg_
+ * receivewal's own restarts or the listener's. Two message shapes, tagged
+ * by their own first word so one socket and one drain loop serve both:
+ *
+ *   SEGMENT <segment> <end-lsn> <sysid>\n   -- a WAL segment fully closed
+ *   PROGRESS <lsn> <sysid>\n                -- sub-segment stream position,
+ *                                               observability only (see
+ *                                               pg_receivewal_entry.h's
+ *                                               own comment on why this
+ *                                               one is never a safe replay
+ *                                               target)
+ *
+ * The FSM tick (service_archiver_report_captured_wal(), service_archiver.c)
+ * drains whatever's queued each tick instead of scanning the WAL cache
+ * directory for it, batching every SEGMENT message drained in one tick
+ * into a single bulk monitor call (monitor_report_wal_received_bulk())
+ * rather than one round trip per segment; PROGRESS messages are far
+ * lower-volume by design (throttled at the source, pg_receivewal.c's own
+ * stop_streaming()) and reported one at a time as they arrive.
  *
  * Two producers share this exact same protocol and socket: pg_receivewal's
  * own hook above (live, per-segment, as WAL streams in) and this
@@ -62,6 +73,10 @@
  */
 #define ARCHIVER_WAL_NOTIFY_RECV_TIMEOUT_MS 200
 
+/* not otherwise reachable in this file, matching monitor.c's own local
+ * definition for the same reason */
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 
 void
 archiver_wal_notify_socket_path(KeeperConfig *config, char *dest, size_t destSize)
@@ -71,16 +86,16 @@ archiver_wal_notify_socket_path(KeeperConfig *config, char *dest, size_t destSiz
 
 
 /*
- * archiver_wal_notify_send is called from inside pg_receivewal's own
- * process (the WalSegmentClosedHook) -- best-effort, never fatal: a
- * connect() failure (nobody listening yet, or the listener is mid-
- * restart) just means this one notification is skipped, silently, in
- * favor of the fallback scan noticing it later (see this file's own
- * header comment).
+ * archiver_wal_notify_send_line is the shared connect+write+close mechanics
+ * both message shapes use -- best-effort, never fatal: a connect() failure
+ * (nobody listening yet, or the listener is mid-restart) just means this
+ * one notification is skipped, silently, in favor of the fallback scan
+ * noticing a missed SEGMENT later (see this file's own header comment; a
+ * missed PROGRESS message just means the observability signal is a little
+ * stale until the next one, nothing recovers it specially).
  */
-bool
-archiver_wal_notify_send(const char *socketPath, const char *walFileName,
-						 const char *lsn, uint64_t systemIdentifier)
+static bool
+archiver_wal_notify_send_line(const char *socketPath, const char *line, int len)
 {
 	int sock = socket(AF_UNIX, SOCK_STREAM, 0);
 
@@ -96,20 +111,49 @@ archiver_wal_notify_send(const char *socketPath, const char *walFileName,
 
 	if (connect(sock, (struct sockaddr *) &addr, sizeof(addr)) != 0)
 	{
-		/* nothing listening yet -- expected, not an error, see header */
 		close(sock);
 		return false;
 	}
-
-	char line[BUFSIZE] = { 0 };
-	int len = sformat(line, sizeof(line), "%s %s %" PRIu64 "\n",
-					  walFileName, lsn, systemIdentifier);
 
 	ssize_t written = write(sock, line, len);
 
 	close(sock);
 
 	return written == len;
+}
+
+
+/*
+ * archiver_wal_notify_send_segment is called from inside pg_receivewal's
+ * own process (WalSegmentClosedHook) -- see archiver_wal_notify_send_
+ * line()'s own comment for the best-effort contract.
+ */
+bool
+archiver_wal_notify_send_segment(const char *socketPath, const char *walFileName,
+								 const char *lsn, uint64_t systemIdentifier)
+{
+	char line[BUFSIZE] = { 0 };
+	int len = sformat(line, sizeof(line), "SEGMENT %s %s %" PRIu64 "\n",
+					  walFileName, lsn, systemIdentifier);
+
+	return archiver_wal_notify_send_line(socketPath, line, len);
+}
+
+
+/*
+ * archiver_wal_notify_send_progress is called from inside pg_receivewal's
+ * own process (WalProgressHook) -- see archiver_wal_notify_send_line()'s
+ * own comment for the best-effort contract.
+ */
+bool
+archiver_wal_notify_send_progress(const char *socketPath, const char *lsn,
+								  uint64_t systemIdentifier)
+{
+	char line[BUFSIZE] = { 0 };
+	int len = sformat(line, sizeof(line), "PROGRESS %s %" PRIu64 "\n",
+					  lsn, systemIdentifier);
+
+	return archiver_wal_notify_send_line(socketPath, line, len);
 }
 
 
@@ -199,7 +243,8 @@ archiver_wal_notify_listener_close(ArchiverWalNotifyListener *listener)
  */
 bool
 archiver_wal_notify_listener_drain(ArchiverWalNotifyListener *listener,
-								   ArchiverWalNotifyCallback callback,
+								   ArchiverWalNotifySegmentCallback segmentCallback,
+								   ArchiverWalNotifyProgressCallback progressCallback,
 								   void *context)
 {
 	for (;;)
@@ -243,20 +288,53 @@ archiver_wal_notify_listener_drain(ArchiverWalNotifyListener *listener,
 
 		line[got] = '\0';
 
-		char walFileName[MAXPGPATH] = { 0 };
-		char lsn[PG_LSN_MAXLENGTH] = { 0 };
-		uint64_t systemIdentifier = 0;
+		char msgType[16] = { 0 };
 
-		if (sscanf(line, "%1023s %17s %" SCNu64, /* IGNORE-BANNED */
-				  walFileName, lsn, &systemIdentifier) != 3)
+		if (sscanf(line, "%15s", msgType) != 1) /* IGNORE-BANNED */
 		{
 			log_warn("Failed to parse WAL-notify message: \"%s\"", line);
 			continue;
 		}
 
-		if (!callback(context, walFileName, lsn, systemIdentifier))
+		if (streq(msgType, "SEGMENT"))
 		{
-			return false;
+			char walFileName[MAXPGPATH] = { 0 };
+			char lsn[PG_LSN_MAXLENGTH] = { 0 };
+			uint64_t systemIdentifier = 0;
+
+			if (sscanf(line, "%*s %1023s %17s %" SCNu64, /* IGNORE-BANNED */
+					  walFileName, lsn, &systemIdentifier) != 3)
+			{
+				log_warn("Failed to parse WAL-notify SEGMENT message: \"%s\"", line);
+				continue;
+			}
+
+			if (!segmentCallback(context, walFileName, lsn, systemIdentifier))
+			{
+				return false;
+			}
+		}
+		else if (streq(msgType, "PROGRESS"))
+		{
+			char lsn[PG_LSN_MAXLENGTH] = { 0 };
+			uint64_t systemIdentifier = 0;
+
+			if (sscanf(line, "%*s %17s %" SCNu64, /* IGNORE-BANNED */
+					  lsn, &systemIdentifier) != 2)
+			{
+				log_warn("Failed to parse WAL-notify PROGRESS message: \"%s\"", line);
+				continue;
+			}
+
+			if (!progressCallback(context, lsn, systemIdentifier))
+			{
+				return false;
+			}
+		}
+		else
+		{
+			log_warn("Failed to parse WAL-notify message: unknown type "
+					 "\"%s\" in \"%s\"", msgType, line);
 		}
 	}
 }

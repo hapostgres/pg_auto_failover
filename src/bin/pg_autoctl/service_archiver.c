@@ -244,9 +244,24 @@ typedef struct WalReportBatch
 
 
 /*
+ * WalDrainContext is what one call to archiver_wal_notify_listener_drain()
+ * passes as context to both callbacks below: the SEGMENT side needs
+ * somewhere to accumulate its batch, the PROGRESS side needs keeper itself
+ * (to report immediately, see report_wal_progress_notify_callback()'s own
+ * comment) -- one struct, so both share the exact same drain call.
+ */
+typedef struct WalDrainContext
+{
+	WalReportBatch batch;
+	Keeper *keeper;
+} WalDrainContext;
+
+
+/*
  * batch_wal_notify_callback adapts WalReportBatch to ArchiverWalNotify
- * Callback's own signature (archiver_wal_notify.h) -- context is the
- * WalReportBatch* the drain call below was made with. Adds every message
+ * SegmentCallback's own signature (archiver_wal_notify.h) -- context is
+ * the WalDrainContext* the drain call below was made with. Adds every
+ * message
  * drained, unconditionally: an earlier version of this function skipped
  * anything <= a remembered in-process high-water mark as a pure
  * optimization (avoid padding the batch with already-known segments) --
@@ -272,7 +287,7 @@ static bool
 batch_wal_notify_callback(void *context, const char *walFileName,
 						  const char *lsn, uint64_t systemIdentifier)
 {
-	WalReportBatch *batch = (WalReportBatch *) context;
+	WalReportBatch *batch = &(((WalDrainContext *) context)->batch);
 
 	if (batch->count == batch->capacity)
 	{
@@ -333,12 +348,48 @@ flush_wal_report_batch(Keeper *keeper, WalReportBatch *batch)
 
 
 /*
+ * report_wal_progress_notify_callback adapts WalDrainContext to
+ * ArchiverWalNotifyProgressCallback's own signature -- reported to the
+ * monitor immediately, one round trip per message, rather than batched
+ * like SEGMENT messages: PROGRESS traffic is already throttled at the
+ * source (pgaf_hook_wal_progress(), service_archiver_pgreceivewal_ctl.c),
+ * so it's low-volume enough that batching it wouldn't meaningfully save
+ * round trips, and immediate reporting keeps this observability signal as
+ * fresh as it can be. Best-effort: a failed report is logged and moves on
+ * (never fails the whole drain, matching this callback's own "return
+ * true to keep going" contract) -- a stale PROGRESS reading is a much
+ * smaller problem than the SEGMENT batch it shares a tick with.
+ */
+static bool
+report_wal_progress_notify_callback(void *context, const char *lsn,
+									uint64_t systemIdentifier)
+{
+	Keeper *keeper = ((WalDrainContext *) context)->keeper;
+
+	(void) systemIdentifier;   /* archiver_node has no per-row system
+								 * identifier column to carry this on --
+								 * unlike archiver_wal, there's only ever
+								 * one "most recent" row per wal-receiver */
+
+	if (!monitor_report_wal_progress(&(keeper->monitor),
+									 keeper->state.current_node_id, lsn))
+	{
+		log_warn("Failed to report WAL progress to the monitor, will retry");
+	}
+
+	return true;
+}
+
+
+/*
  * service_archiver_report_captured_wal is the FSM tick's own entry point:
  * drains whatever the WAL-notify socket currently has queued -- fed both
  * by pg_receivewal's own live hook and by this membership's own periodic
  * scanner process (service_archiver_wal_scanner.c, the bounded
  * correctness backstop for whatever the socket alone might miss) -- and
- * reports the whole batch to the monitor in one round trip.
+ * reports the whole SEGMENT batch to the monitor in one round trip, while
+ * PROGRESS messages are reported immediately as they're drained (see
+ * report_wal_progress_notify_callback()'s own comment).
  */
 bool
 service_archiver_report_captured_wal(Keeper *keeper)
@@ -351,14 +402,15 @@ service_archiver_report_captured_wal(Keeper *keeper)
 		return true;
 	}
 
-	WalReportBatch batch = { 0 };
+	WalDrainContext drainContext = { { 0 }, keeper };
 
 	bool drained = archiver_wal_notify_listener_drain(
 		&archiverWalNotifyListener,
 		&batch_wal_notify_callback,
-		(void *) &batch);
+		&report_wal_progress_notify_callback,
+		(void *) &drainContext);
 
-	bool reported = flush_wal_report_batch(keeper, &batch);
+	bool reported = flush_wal_report_batch(keeper, &(drainContext.batch));
 
 	return drained && reported;
 }
