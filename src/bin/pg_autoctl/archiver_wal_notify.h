@@ -49,9 +49,9 @@ void archiver_wal_notify_listener_close(ArchiverWalNotifyListener *listener);
  * and will be seen again on the next drain.
  */
 typedef bool (*ArchiverWalNotifySegmentCallback) (void *context,
-												   const char *walFileName,
-												   const char *lsn,
-												   uint64_t systemIdentifier);
+												  const char *walFileName,
+												  const char *lsn,
+												  uint64_t systemIdentifier);
 
 /*
  * Called once per newly-drained PROGRESS message, same arrival-order and
@@ -60,8 +60,8 @@ typedef bool (*ArchiverWalNotifySegmentCallback) (void *context,
  * entry.h's own comment on why this LSN is never a segment-boundary fact).
  */
 typedef bool (*ArchiverWalNotifyProgressCallback) (void *context,
-												    const char *lsn,
-												    uint64_t systemIdentifier);
+												   const char *lsn,
+												   uint64_t systemIdentifier);
 
 bool archiver_wal_notify_listener_drain(ArchiverWalNotifyListener *listener,
 										ArchiverWalNotifySegmentCallback segmentCallback,

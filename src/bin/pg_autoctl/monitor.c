@@ -1668,7 +1668,7 @@ monitor_report_wal_received(Monitor *monitor, int64_t nodeId,
 	IntString nodeIdString = intToString(nodeId);
 	IntString sysIdString = intToString((int64_t) systemIdentifier);
 	const char *paramValues[4] =
-		{ nodeIdString.strValue, walFileName, lsn, sysIdString.strValue };
+	{ nodeIdString.strValue, walFileName, lsn, sysIdString.strValue };
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
