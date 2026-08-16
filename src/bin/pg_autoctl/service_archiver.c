@@ -685,6 +685,38 @@ service_archiver_loop(Keeper *keeper)
 				 "scanning the WAL cache directory every tick");
 	}
 
+	/*
+	 * service_archiver_start_pgreceivewal() (and the desired-state file it
+	 * writes for pg_receivewal's own controller, service_archiver_
+	 * pgreceivewal_ctl.c) is otherwise only ever called from an FSM
+	 * transition *into* ARCHIVING_STATE (fsm_init_archiver()/fsm_archiver_
+	 * follow_new_primary(), fsm.c's own MonitorFSM[] rows) -- never on a
+	 * plain restart of this process where current_role is already
+	 * "archiving" and the monitor keeps assigning the very same state, so
+	 * no transition ever fires. Left alone, that's a real bug, not a
+	 * theoretical one: this process's own graceful-shutdown path below
+	 * (service_archiver_stop_pgreceivewal()) unconditionally tells the
+	 * controller to stop pg_receivewal on every exit, so a restart with no
+	 * transition would otherwise leave it stopped forever -- confirmed via
+	 * a real hang (pg_receivewal never restarting after a container
+	 * restart, archiver_wal_capture.pgaf's own test_002). Re-asserting the
+	 * desired state here, once, before the first tick, whenever this
+	 * membership is already assigned ARCHIVING_STATE closes that gap: fsm_
+	 * init_archiver() is idempotent (service_archiver_pgreceivewal_set_
+	 * desired_state()'s own comment), so calling it again here is a
+	 * harmless no-op on every ordinary cold start, where the WAIT_STANDBY
+	 * -> ARCHIVING transition already asserted it moments earlier.
+	 */
+	if (keeper_load_state(keeper) &&
+		keeperState->current_role == ARCHIVING_STATE)
+	{
+		if (!fsm_init_archiver(keeper))
+		{
+			log_warn("Failed to restart pg_receivewal after a restart, "
+					 "will retry once the FSM tick reaches the monitor");
+		}
+	}
+
 	int tickCount = 0;
 
 	while (!asked_to_stop && !asked_to_stop_fast && !asked_to_quit)

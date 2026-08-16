@@ -12,30 +12,51 @@
  *     2. RowDescription(spcoid oid, spclocation text, size int8) +
  *        DataRow(NULL, NULL, NULL) + CommandComplete "SELECT" -- one row,
  *        the base directory itself (path NULL means "not a tablespace")
- *     3. CopyOutResponse(format 0, natts 0)
+ *     3. CopyOutResponse(format 0, natts 0)           -- exactly one, covers
+ *                                                         every archive AND
+ *                                                         the manifest below
  *     4. CopyData['n', "base.tar\0", "\0"]           -- PqBackupMsg_NewArchive
  *     5. CopyData['d', <tar bytes>] x N               -- PqMsg_CopyData
- *     6. CopyDone
- *     6a. CopyOutResponse(format 0, natts 0)          -- manifest requested
- *     6b. CopyData[<raw manifest bytes>] x N          -- only when the
- *     6c. CopyDone                                       backup on disk has
- *                                                         a backup_manifest
- *                                                         (see stream_
- *                                                         manifest_as_copy_
- *                                                         data()'s comment)
+ *     5a. CopyData['m']                               -- PqBackupMsg_Manifest,
+ *                                                         no payload -- only
+ *                                                         when the backup on
+ *                                                         disk has a backup_
+ *                                                         manifest (see
+ *                                                         stream_manifest_as_
+ *                                                         copy_data()'s
+ *                                                         comment)
+ *     5b. CopyData['d', <manifest bytes>] x N         -- same 'd' content
+ *                                                         tag as step 5, the
+ *                                                         'm' marker above is
+ *                                                         what tells the
+ *                                                         client these bytes
+ *                                                         are manifest, not
+ *                                                         more tar
+ *     6. CopyDone                                     -- ends the ONE CopyOut
+ *                                                         from step 3, after
+ *                                                         every archive and
+ *                                                         the manifest
  *     7. RowDescription(recptr text, tli int8) + DataRow + CommandComplete
  *        "SELECT"                                     -- the end position
  *     8. CommandComplete "BASE_BACKUP"                 -- EndReplicationCommand
  *
  *   pg_basebackup.c calls PQgetResult() exactly four times for this (steps
- *   1, 2, [3-6/6a-6c consumed internally by ReceiveArchiveStream], 7, 8),
- *   and explicitly checks step 8's PQresultStatus() == PGRES_COMMAND_OK.
+ *   1, 2, [3-6 consumed internally by ReceiveArchiveStream], 7, 8), and
+ *   explicitly checks step 8's PQresultStatus() == PGRES_COMMAND_OK. An
+ *   earlier version of this file sent the manifest as its own second
+ *   CopyOutResponse/CopyDone pair after step 6 instead of steps 5a-5b within
+ *   the same stream -- structurally wrong relative to real Postgres's own
+ *   bbsink_copystream_* callbacks (basebackup_copy.c), and the cause of a
+ *   real "pg_basebackup: error: backup failed:" (empty message) bug fixed
+ *   alongside this comment.
  *
- *   Steps 4-5's typed, tagged framing ('n'/'d') is PG15+ only -- a pre-15
- *   pg_basebackup client's receiving code predates it entirely and only
- *   ever understood step 5 as plain, untagged "CopyData[<raw tar bytes>]"
- *   with no step 4 at all. See CBB_USE_ARCHIVE_FRAMING below for how this
- *   file picks between the two at compile time.
+ *   Steps 4-5's typed, tagged framing ('n'/'d'/'m') is PG15+ only -- a
+ *   pre-15 pg_basebackup client's receiving code predates it entirely and
+ *   only ever understood step 5 as plain, untagged "CopyData[<raw tar
+ *   bytes>]" with no step 4 (and no manifest-within-the-same-stream support
+ *   at all -- a pre-15 client always uses --no-manifest or gets one via a
+ *   route this project doesn't need to support). See CBB_USE_ARCHIVE_
+ *   FRAMING below for how this file picks between the two at compile time.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -586,18 +607,39 @@ read_latest_basebackup_label(const char *path, char *labelOut, size_t labelOutSi
 
 
 /*
- * stream_manifest_as_copy_data sends manifestPath's raw bytes as a series
- * of CopyData messages -- no tar framing, matching real Postgres's own
- * SendBackupManifest() (basebackup_copy.c), which streams the manifest as
- * its own CopyOut phase after the tar stream's CopyDone rather than as a
- * tar member. The manifest already exists as a complete, valid file on
- * disk (written by the real pg_basebackup run that produced this on-disk
- * backup in the first place -- see pg_basebackup_fetch()'s own comment,
- * pgctl.c), so this is a plain chunked read, not manifest generation.
+ * stream_manifest_as_copy_data sends manifestPath's raw bytes as part of
+ * the *same* CopyOut stream the tar archive was just sent on -- matching
+ * real Postgres's own bbsink_copystream_* callbacks (basebackup_copy.c):
+ * there is exactly one CopyOutResponse/CopyDone pair for the whole
+ * BASE_BACKUP, covering every archive and the manifest together, not a
+ * second one for the manifest alone (an earlier version of this function
+ * got this wrong -- see this file's own header comment for the corrected
+ * wire sequence). The manifest is announced with its own leading CopyData
+ * message tagged PqBackupMsg_Manifest ('m', no payload), then its content
+ * follows in ordinary 'd'-tagged CopyData chunks, exactly like tar_chunk_
+ * cb()'s own tar content chunks -- both share PG_VERSION_NUM >= 150000 as
+ * the same "does this client speak the typed CopyData framing" gate,
+ * since a client too old for one is too old for the other.
+ *
+ * The manifest already exists as a complete, valid file on disk (written
+ * by the real pg_basebackup run that produced this on-disk backup in the
+ * first place -- see pg_basebackup_fetch()'s own comment, pgctl.c), so
+ * this is a plain chunked read, not manifest generation.
  */
 static bool
 stream_manifest_as_copy_data(int sock, const char *manifestPath)
 {
+#if CBB_USE_ARCHIVE_FRAMING
+	{
+		char tag = 'm';   /* PqBackupMsg_Manifest, no payload */
+
+		if (!ws_send_copy_data(sock, &tag, 1))
+		{
+			return false;
+		}
+	}
+#endif
+
 	FILE *file = fopen(manifestPath, "rb"); /* IGNORE-BANNED */
 
 	if (file == NULL)
@@ -612,7 +654,19 @@ stream_manifest_as_copy_data(int sock, const char *manifestPath)
 
 	while (ok && (got = fread(buffer, 1, sizeof(buffer), file)) > 0)
 	{
+#if CBB_USE_ARCHIVE_FRAMING
+		PQExpBuffer buf = createPQExpBuffer();
+
+		appendPQExpBufferChar(buf, 'd');   /* PqMsg_CopyData content tag */
+		appendBinaryPQExpBuffer(buf, buffer, got);
+
+		ok = !PQExpBufferBroken(buf) &&
+			 ws_send_copy_data(sock, buf->data, buf->len);
+
+		destroyPQExpBuffer(buf);
+#else
 		ok = ws_send_copy_data(sock, buffer, (int32_t) got);
+#endif
 	}
 
 	if (ok && ferror(file))
@@ -746,6 +800,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 
 	if (!send_position_row(sock, lsn, tliStr))
 	{
+		log_error("cmd_base_backup: failed sending the start position row");
 		return;
 	}
 
@@ -761,11 +816,13 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		!ws_send_data_row(sock, tsValues, 3) ||
 		!ws_send_command_complete(sock, "SELECT"))
 	{
+		log_error("cmd_base_backup: failed sending the tablespace result set");
 		return;
 	}
 
 	if (!ws_send_copy_out_response(sock, 0))
 	{
+		log_error("cmd_base_backup: failed sending the tar CopyOutResponse");
 		return;
 	}
 
@@ -784,6 +841,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 
 		if (!ok)
 		{
+			log_error("cmd_base_backup: failed sending the NewArchive framing message");
 			return;
 		}
 	}
@@ -798,28 +856,28 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		return;
 	}
 
-	if (!ws_send_copy_done(sock))
+	/*
+	 * Manifest, within this *same* CopyOut stream -- see stream_manifest_
+	 * as_copy_data()'s own comment for why (real Postgres sends every
+	 * archive and the manifest under one CopyOutResponse/CopyDone pair,
+	 * not a separate one per phase -- an earlier version of this function
+	 * got that wrong). manifestPath was already resolved and existence-
+	 * checked above, before any bytes went out, so a request for a
+	 * manifest that turns out not to exist fails cleanly with an
+	 * ErrorResponse rather than partway through an already-started
+	 * BASE_BACKUP.
+	 */
+	if (opts.manifestRequested &&
+		!stream_manifest_as_copy_data(sock, manifestPath))
 	{
+		log_error("cmd_base_backup: failed streaming the manifest CopyData");
 		return;
 	}
 
-	/*
-	 * Manifest, as its own CopyOut phase -- see stream_manifest_as_copy_
-	 * data()'s own comment for why this isn't tar-framed, and this file's
-	 * header comment for where this fits in the overall wire sequence.
-	 * manifestPath was already resolved and existence-checked above,
-	 * before any bytes went out, so a request for a manifest that turns
-	 * out not to exist fails cleanly with an ErrorResponse rather than
-	 * partway through an already-started BASE_BACKUP.
-	 */
-	if (opts.manifestRequested)
+	if (!ws_send_copy_done(sock))
 	{
-		if (!ws_send_copy_out_response(sock, 0) ||
-			!stream_manifest_as_copy_data(sock, manifestPath) ||
-			!ws_send_copy_done(sock))
-		{
-			return;
-		}
+		log_error("cmd_base_backup: failed sending the CopyDone");
+		return;
 	}
 
 	/*
@@ -842,6 +900,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 
 	if (!send_position_row(sock, endLsnPtr, tliStr))
 	{
+		log_error("cmd_base_backup: failed sending the end position row");
 		return;
 	}
 

@@ -427,12 +427,23 @@ directory_size(const char *dirPath)
 
 /*
  * run_pg_basebackup runs the real, unmodified pg_basebackup client against
- * source, writing into backupDir. --wal-method=none: this backup is
- * deliberately not self-consistent on its own -- for a `live` backup, the
- * archiver's already-running WAL capture (service_archiver.c) is what
- * supplies the WAL needed to reach consistency on replay; for a `replay`
- * backup, the source is itself already paused at a known-consistent LSN,
- * so there is nothing further to bundle either way.
+ * source, writing into backupDir. --wal-method=stream: pg_basebackup opens
+ * a second connection to background-stream the WAL this backup's own start
+ * position needs concurrently with the main tar transfer, making the
+ * on-disk result self-consistent and replayable on its own, independent of
+ * whatever this archiver's own separate WAL capture (service_archiver.c,
+ * pg_receivewal against the same source) has or hasn't covered by the time
+ * this backup is later served to a bootstrapping node. An earlier version
+ * of this function used --wal-method=none and relied on that separate
+ * capture already covering the backup's start LSN by the time it was
+ * served -- not guaranteed (pg_receivewal's own first captured segment can
+ * start later than a given backup's own start LSN), and the direct cause
+ * of a real "requested segment ... predates the oldest segment this
+ * archiver has captured" bootstrap hang. Both source is a real Postgres
+ * (a real primary, or generate_replay_basebackup()'s own loopback staging
+ * instance) either way, so the concurrent-WAL-streaming connection is
+ * always against real Postgres's own walsender, never this project's own
+ * narrower pg_walsender.
  *
  * Deliberately not pgctl.c's own pg_basebackup(): that function's whole
  * point is standby init -- it rmtree()s the destination pgdata and moves
@@ -481,7 +492,7 @@ run_pg_basebackup(KeeperConfig *config, NodeAddress *source,
 			sizeof(replicationSource.applicationName));
 	strlcpy(replicationSource.backupDir, backupDir,
 			sizeof(replicationSource.backupDir));
-	strlcpy(replicationSource.walMethod, "none",
+	strlcpy(replicationSource.walMethod, "stream",
 			sizeof(replicationSource.walMethod));
 	strlcpy(replicationSource.label, label, sizeof(replicationSource.label));
 	replicationSource.sslOptions = sslOptions;

@@ -989,23 +989,26 @@ fsm_init_standby(Keeper *keeper)
 		slotName = "";
 
 		/*
-		 * pg_walsender's BASE_BACKUP only serves the tar stream itself
-		 * (cmd_base_backup.c's own client-streaming MVP scope, see its
-		 * header comment) -- pg_basebackup's *default* --wal-method=stream
-		 * opens a second connection to background-stream WAL concurrently
-		 * with the main backup, which pg_walsender's own already-narrow
-		 * scope doesn't support serving reliably. --wal-method=none matches
-		 * what service_archiver_basebackup.c's own pg_basebackup_fetch()
-		 * call already uses when the archiver pulls a live backup from a
-		 * real primary (for a different reason there -- avoiding the extra
-		 * connection is simply cheaper -- but the same flag), and needs no
-		 * WAL of its own here regardless: standby_init_database's normal
-		 * catch-up streaming (this same function, just below) is what
-		 * brings the new standby the rest of the way once it can reach a
-		 * real primary, exactly the same as any other standby whose base
-		 * backup predates its own streaming start position.
+		 * pg_walsender now serves real START_REPLICATION (cmd_start_
+		 * replication.c) as well as BASE_BACKUP, so pg_basebackup's own
+		 * --wal-method=stream -- a second connection background-streaming
+		 * the WAL this backup's own start position needs, concurrently
+		 * with the main tar transfer -- works the same way it would
+		 * against a real primary. This closes a real gap the earlier
+		 * --wal-method=none choice here had: this node's own base backup
+		 * (from the archiver) could carry a start LSN earlier than
+		 * whatever the archiver's own separate WAL capture (service_
+		 * archiver.c, pg_receivewal against the real primary) had reached
+		 * by the time it was served, leaving this standby's own catch-up
+		 * streaming (below) permanently unable to reach a starting point
+		 * that both existed once and can now never be recovered -- exactly
+		 * the "requested segment ... predates the oldest segment this
+		 * archiver has captured" bootstrap hang this fixes. service_
+		 * archiver_basebackup.c's own pg_basebackup_fetch() call (the
+		 * archiver's own pull from the real primary) was switched to
+		 * --wal-method=stream for the same reason, at the same time.
 		 */
-		strlcpy(postgres->replicationSource.walMethod, "none",
+		strlcpy(postgres->replicationSource.walMethod, "stream",
 				sizeof(postgres->replicationSource.walMethod));
 	}
 	else
