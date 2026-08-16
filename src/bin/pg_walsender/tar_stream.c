@@ -22,6 +22,8 @@
 
 #define TAR_READ_CHUNK_SIZE (64 * 1024)
 
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 typedef struct TarWalkState
 {
 	TarChunkCallback callback;
@@ -150,7 +152,7 @@ walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 
 	while (state->ok && (entry = readdir(dir)) != NULL)
 	{
-		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+		if (streq(entry->d_name, ".") || streq(entry->d_name, ".."))
 		{
 			continue;
 		}
@@ -167,6 +169,23 @@ walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 		else
 		{
 			sformat(relPath, sizeof(relPath), "%s/%s", relDir, entry->d_name);
+		}
+
+		/*
+		 * backup_manifest sits at basebackupDir's own root (written there
+		 * by the real pg_basebackup run that originally produced this
+		 * on-disk backup -- see pg_basebackup_fetch()'s own comment,
+		 * pgctl.c) and describes *that* pull, not the bytes being
+		 * retransmitted here. Real Postgres never puts it in the main tar
+		 * either: cmd_base_backup.c serves it as its own second CopyOut
+		 * stream when the client asks for one (see that file's BASE_BACKUP
+		 * wire sequence comment), so skip it here unconditionally rather
+		 * than let a stale copy of it land at the receiving node's
+		 * $PGDATA/backup_manifest.
+		 */
+		if (relDir[0] == '\0' && streq(entry->d_name, "backup_manifest"))
+		{
+			continue;
 		}
 
 		struct stat st;

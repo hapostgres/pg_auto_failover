@@ -1,10 +1,9 @@
 /*
  * src/bin/pg_autoctl/cli_archiver.h
  *   pg_autoctl archiver -- the archiver's own command group. Only `serve`
- *   is implemented this milestone; the other CLI-reference subverbs
- *   (add-storage, remove-storage, backup, prefetch, ...) belong to later
- *   milestones and stay unregistered until then, per
- *   ~/dev/temp/archiving-disaster-recovery.md's Build order.
+ *   is implemented so far; the other CLI-reference subverbs
+ *   (add-storage, remove-storage, backup, prefetch, ...) are not
+ *   implemented yet and stay unregistered until they are.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.

@@ -5,8 +5,7 @@
  *   Wire sequence for a successful, synchronous BASE_BACKUP (traced from
  *   basebackup_copy.c's bbsink_copystream_* callbacks and cross-checked
  *   against the exact PQgetResult() loop in pg_basebackup.c around its own
- *   "BASE_BACKUP" psprintf call -- both in
- *   /Users/dim/dev/PostgreSQL/postgresql):
+ *   "BASE_BACKUP" psprintf call):
  *
  *     1. RowDescription(recptr text, tli int8) + DataRow + CommandComplete
  *        "SELECT"                                   -- the start position
@@ -17,13 +16,20 @@
  *     4. CopyData['n', "base.tar\0", "\0"]           -- PqBackupMsg_NewArchive
  *     5. CopyData['d', <tar bytes>] x N               -- PqMsg_CopyData
  *     6. CopyDone
+ *     6a. CopyOutResponse(format 0, natts 0)          -- manifest requested
+ *     6b. CopyData[<raw manifest bytes>] x N          -- only when the
+ *     6c. CopyDone                                       backup on disk has
+ *                                                         a backup_manifest
+ *                                                         (see stream_
+ *                                                         manifest_as_copy_
+ *                                                         data()'s comment)
  *     7. RowDescription(recptr text, tli int8) + DataRow + CommandComplete
  *        "SELECT"                                     -- the end position
  *     8. CommandComplete "BASE_BACKUP"                 -- EndReplicationCommand
  *
  *   pg_basebackup.c calls PQgetResult() exactly four times for this (steps
- *   1, 2, [3-6 consumed internally by ReceiveArchiveStream], 7, 8), and
- *   explicitly checks step 8's PQresultStatus() == PGRES_COMMAND_OK.
+ *   1, 2, [3-6/6a-6c consumed internally by ReceiveArchiveStream], 7, 8),
+ *   and explicitly checks step 8's PQresultStatus() == PGRES_COMMAND_OK.
  *
  *   Steps 4-5's typed, tagged framing ('n'/'d') is PG15+ only -- a pre-15
  *   pg_basebackup client's receiving code predates it entirely and only
@@ -51,6 +57,8 @@
 #include "string_utils.h"
 #include "tar_stream.h"
 #include "wal_dir_scan.h"
+
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
 typedef struct BaseBackupOptions
 {
@@ -462,7 +470,7 @@ find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
 		size_t suffixLen = strlen(partialSuffix);
 
 		if (nameLen == CBB_WAL_FNAME_LEN + suffixLen &&
-			strcmp(entry->d_name + CBB_WAL_FNAME_LEN, partialSuffix) == 0)
+			streq(entry->d_name + CBB_WAL_FNAME_LEN, partialSuffix))
 		{
 			char segPart[CBB_WAL_FNAME_LEN + 1] = { 0 };
 
@@ -577,6 +585,49 @@ read_latest_basebackup_label(const char *path, char *labelOut, size_t labelOutSi
 }
 
 
+/*
+ * stream_manifest_as_copy_data sends manifestPath's raw bytes as a series
+ * of CopyData messages -- no tar framing, matching real Postgres's own
+ * SendBackupManifest() (basebackup_copy.c), which streams the manifest as
+ * its own CopyOut phase after the tar stream's CopyDone rather than as a
+ * tar member. The manifest already exists as a complete, valid file on
+ * disk (written by the real pg_basebackup run that produced this on-disk
+ * backup in the first place -- see pg_basebackup_fetch()'s own comment,
+ * pgctl.c), so this is a plain chunked read, not manifest generation.
+ */
+static bool
+stream_manifest_as_copy_data(int sock, const char *manifestPath)
+{
+	FILE *file = fopen(manifestPath, "rb"); /* IGNORE-BANNED */
+
+	if (file == NULL)
+	{
+		log_error("Failed to open \"%s\": %m", manifestPath);
+		return false;
+	}
+
+	char buffer[64 * 1024];
+	size_t got;
+	bool ok = true;
+
+	while (ok && (got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+	{
+		ok = ws_send_copy_data(sock, buffer, (int32_t) got);
+	}
+
+	if (ok && ferror(file))
+	{
+		log_error("Short read on \"%s\" while streaming the backup "
+				  "manifest (file changed size mid-read?)", manifestPath);
+		ok = false;
+	}
+
+	fclose(file);
+
+	return ok;
+}
+
+
 void
 cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 {
@@ -616,12 +667,21 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		return;
 	}
 
+	char manifestPath[MAXPGPATH] = { 0 };
+
 	if (opts.manifestRequested)
 	{
-		ws_send_error_response(sock, "0A000",
-							   "backup manifests are not supported yet -- "
-							   "retry with pg_basebackup's --no-manifest");
-		return;
+		sformat(manifestPath, sizeof(manifestPath), "%s/backup_manifest",
+				basebackupDir);
+
+		if (!file_exists(manifestPath))
+		{
+			ws_send_error_response(sock, "58P01",
+								   "this base backup was taken without a "
+								   "manifest -- retry with pg_basebackup's "
+								   "--no-manifest");
+			return;
+		}
 	}
 
 	if (opts.compressionRequested)
@@ -741,6 +801,25 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 	if (!ws_send_copy_done(sock))
 	{
 		return;
+	}
+
+	/*
+	 * Manifest, as its own CopyOut phase -- see stream_manifest_as_copy_
+	 * data()'s own comment for why this isn't tar-framed, and this file's
+	 * header comment for where this fits in the overall wire sequence.
+	 * manifestPath was already resolved and existence-checked above,
+	 * before any bytes went out, so a request for a manifest that turns
+	 * out not to exist fails cleanly with an ErrorResponse rather than
+	 * partway through an already-started BASE_BACKUP.
+	 */
+	if (opts.manifestRequested)
+	{
+		if (!ws_send_copy_out_response(sock, 0) ||
+			!stream_manifest_as_copy_data(sock, manifestPath) ||
+			!ws_send_copy_done(sock))
+		{
+			return;
+		}
 	}
 
 	/*

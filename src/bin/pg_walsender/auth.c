@@ -18,6 +18,8 @@
 #include "framing.h"
 #include "log.h"
 
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 
 static bool
 ws_get_peer_ip(int sock, char *ipBuf, size_t ipBufSize)
@@ -49,7 +51,7 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 {
 	*foundRoute = NULL;
 
-	if (strcmp(params->user, PG_AUTOCTL_REPLICA_USERNAME) != 0)
+	if (!streq(params->user, PG_AUTOCTL_REPLICA_USERNAME))
 	{
 		log_warn("Rejecting connection for unknown user \"%s\"", params->user);
 		ws_send_error_response(sock, "28000",

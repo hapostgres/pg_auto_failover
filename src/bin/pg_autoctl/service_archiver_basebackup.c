@@ -1,19 +1,16 @@
 /*
  * src/bin/pg_autoctl/service_archiver_basebackup.c
  *   Archiving & Disaster Recovery: base backup generation, both `live` and
- *   `replay`/`volatile` sources (Milestone 5, per the Build order in
- *   ~/dev/temp/archiving-disaster-recovery.md: "live first, then
- *   replay/volatile"), plus policy-driven scheduling and retention --
- *   appended to M5 rather than left as a follow-up, so the archiver's own
+ *   `replay`/`volatile` sources ("live first, then replay/volatile"),
+ *   plus policy-driven scheduling and retention, so the archiver's own
  *   base-backup production is a real, bounded resource (frequency-gated,
- *   count/age-pruned) before Milestones 6/7/8 (warm standby, PITR, cloud
- *   push) start building on top of it. `replay`/`persistent` is still a
- *   later milestone -- that mode keeps its staging instance resident as a
- *   `warm-standby` `archiver_node` row, which doesn't exist until
- *   Milestone 6.
+ *   count/age-pruned) before warm standby, PITR, and cloud push get built
+ *   on top of it. `replay`/`persistent` is not implemented yet -- that
+ *   mode would keep its staging instance resident as a `warm-standby`
+ *   `archiver_node` row, which does not exist yet either.
  *
  * Trigger scope: bootstrap is always `live` (nothing to replay from yet on
- * the first run, matching the design doc's own bootstrap rule), every
+ * the first run), every
  * backup after that follows basebackup_policy's own `source`/`replaymode`
  * (resolved via monitor_get_basebackup_policy_for_group(), which chains
  * get_archiver_policy()'s group-override / formation-default / schema-
@@ -180,11 +177,11 @@ walcache_has_any_wal_data(const char *walcacheDir)
 
 	while (!found && (entry = readdir(dir)) != NULL)
 	{
-		if (strcmp(entry->d_name, ".") == 0 ||
-			strcmp(entry->d_name, "..") == 0 ||
-			strcmp(entry->d_name, "basebackups") == 0 ||
-			strcmp(entry->d_name, "archiver-position") == 0 ||
-			strcmp(entry->d_name, "archiver-systemid") == 0)
+		if (streq(entry->d_name, ".") ||
+			streq(entry->d_name, "..") ||
+			streq(entry->d_name, "basebackups") ||
+			streq(entry->d_name, "archiver-position") ||
+			streq(entry->d_name, "archiver-systemid"))
 		{
 			continue;
 		}
@@ -1387,7 +1384,7 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	/* bootstrap is always 'live' -- nothing to replay from yet, matching
 	 * the design doc's own bootstrap rule -- every backup after that
 	 * follows the resolved policy's own source */
-	bool useReplay = !bootstrap && strcmp(policy.source, "replay") == 0;
+	bool useReplay = !bootstrap && streq(policy.source, "replay");
 
 	time_t now = time(NULL);
 	struct tm nowUTC = { 0 };

@@ -29,3 +29,17 @@ src/monitor/version_compat.c -citus-style
 src/bin/pgaftest/test_spec_parse.c -citus-style
 src/bin/pgaftest/test_spec_parse.h -citus-style
 src/bin/pgaftest/test_spec_scan.c  -citus-style
+# vendored PostgreSQL source (pg_receivewal.c/receivelog.c/streamutil.c/
+# walmethods.c, REL_17_STABLE, byte-for-byte except two marked "PGAF:"
+# edits in pg_receivewal.c itself -- see that file's own header comment)
+# -- kept as upstream formats it, not this project's own citus-style, so
+# a future re-sync against a newer upstream diffs cleanly instead of
+# fighting a wall of reindentation noise. pg_receivewal_entry.h is this
+# project's own new file, not vendored, and stays citus-style checked.
+src/bin/pg_autoctl/vendor/pg_receivewal/pg_receivewal.c -citus-style
+src/bin/pg_autoctl/vendor/pg_receivewal/receivelog.c -citus-style
+src/bin/pg_autoctl/vendor/pg_receivewal/receivelog.h -citus-style
+src/bin/pg_autoctl/vendor/pg_receivewal/streamutil.c -citus-style
+src/bin/pg_autoctl/vendor/pg_receivewal/streamutil.h -citus-style
+src/bin/pg_autoctl/vendor/pg_receivewal/walmethods.c -citus-style
+src/bin/pg_autoctl/vendor/pg_receivewal/walmethods.h -citus-style

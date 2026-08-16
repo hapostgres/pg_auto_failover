@@ -942,7 +942,29 @@ fsm_init_standby(Keeper *keeper)
 	 */
 	const char *slotName = config->replication_slot_name;
 
-	if (config->fromArchiver)
+	/*
+	 * Automatic archiver bootstrap: even without an explicit
+	 * --from-archiver, prefer a registered archiver that already has a
+	 * base backup over the live primary -- see keeper_should_bootstrap_
+	 * from_archiver's own comment. --from-archiver itself still forces the
+	 * archiver path unconditionally (and still errors if none is
+	 * registered, rather than silently falling back), for an operator who
+	 * wants that guarantee rather than this function's own best-effort
+	 * default.
+	 */
+	bool useArchiver = config->fromArchiver;
+
+	if (!useArchiver)
+	{
+		if (!keeper_should_bootstrap_from_archiver(keeper, &useArchiver))
+		{
+			log_error("Failed to determine whether to bootstrap from an "
+					  "archiver, see above for details");
+			return false;
+		}
+	}
+
+	if (useArchiver)
 	{
 		NodeAddress archiverNode = { 0 };
 		bool found = false;
@@ -964,8 +986,27 @@ fsm_init_standby(Keeper *keeper)
 		}
 
 		postgres->replicationSource.primaryNode = archiverNode;
-		postgres->replicationSource.noManifest = true;
 		slotName = "";
+
+		/*
+		 * pg_walsender's BASE_BACKUP only serves the tar stream itself
+		 * (cmd_base_backup.c's own client-streaming MVP scope, see its
+		 * header comment) -- pg_basebackup's *default* --wal-method=stream
+		 * opens a second connection to background-stream WAL concurrently
+		 * with the main backup, which pg_walsender's own already-narrow
+		 * scope doesn't support serving reliably. --wal-method=none matches
+		 * what service_archiver_basebackup.c's own pg_basebackup_fetch()
+		 * call already uses when the archiver pulls a live backup from a
+		 * real primary (for a different reason there -- avoiding the extra
+		 * connection is simply cheaper -- but the same flag), and needs no
+		 * WAL of its own here regardless: standby_init_database's normal
+		 * catch-up streaming (this same function, just below) is what
+		 * brings the new standby the rest of the way once it can reach a
+		 * real primary, exactly the same as any other standby whose base
+		 * backup predates its own streaming start position.
+		 */
+		strlcpy(postgres->replicationSource.walMethod, "none",
+				sizeof(postgres->replicationSource.walMethod));
 	}
 	else
 	{
@@ -1753,7 +1794,7 @@ fsm_drop_node(Keeper *keeper)
  * Postgres instance to configure as a standby: pg_receivewal is a real,
  * unmodified Postgres client that streams straight from the primary's own
  * walsender, so no new wire protocol is involved on this node's side
- * either (see archiving-disaster-recovery.md's own milestone 2(a) scope).
+ * either.
  */
 bool
 fsm_init_archiver(Keeper *keeper)
@@ -1784,7 +1825,7 @@ fsm_init_archiver(Keeper *keeper)
 bool
 fsm_archiver_report_lsn(Keeper *keeper)
 {
-	return service_archiver_stop_pgreceivewal();
+	return service_archiver_stop_pgreceivewal(keeper);
 }
 
 

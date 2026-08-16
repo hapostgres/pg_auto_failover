@@ -35,6 +35,8 @@
  * instead of the normal replication command loop -- see cmd_fetch_file.h */
 #define WS_FETCH_DBNAME_PREFIX "fetch/"
 
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
 /*
  * A real, unmodified Postgres standby's own internal walreceiver process
  * (primary_conninfo-driven physical replication) always sends this literal
@@ -138,7 +140,7 @@ handle_connection(int clientSock, const WsServerConfig *config)
 	 * dbname) -- a later milestone's problem, not this one's.
 	 */
 	if (!isFetchMode &&
-		strcmp(routeKey, WS_REAL_WALRECEIVER_DBNAME) == 0 &&
+		streq(routeKey, WS_REAL_WALRECEIVER_DBNAME) &&
 		routeCount == 1)
 	{
 		routeKey = routes[0].key;

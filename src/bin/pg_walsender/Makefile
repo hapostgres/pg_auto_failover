@@ -4,8 +4,8 @@
 # pg_walsender -- the archiver's own replication-protocol server. Standalone
 # binary: does NOT link any pg_autoctl/*.c, only src/bin/common/ and
 # src/bin/lib/log/, so it can be exec'd and tested independently of
-# pg_autoctl (see ~/dev/temp/archiving-disaster-recovery.md and
-# src/bin/pg_autoctl/service_archiver.c's own "colocated fast path" note).
+# pg_autoctl (see src/bin/pg_autoctl/service_archiver.c's own "colocated
+# fast path" note).
 
 PG_WALSENDER = ./pg_walsender
 

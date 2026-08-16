@@ -2,10 +2,9 @@
 -- Licensed under the PostgreSQL License.
 --
 -- Regression tests for the Archiving & Disaster Recovery schema and its
--- monitor API (milestone 1: schema + monitor API only -- no
--- service_archiver process involved, everything here is exercised via
--- direct SQL calls against the schema alone). See
--- ~/dev/temp/archiving-disaster-recovery.md for the full design.
+-- monitor API (schema + monitor API only -- no service_archiver process
+-- involved, everything here is exercised via direct SQL calls against
+-- the schema alone).
 \x on
 -- A dedicated formation, like every other test in this schedule: 'default'
 -- is the seed formation CREATE EXTENSION itself creates, and by this point
@@ -167,9 +166,33 @@ region        | eu-west
 
 -- ── WAL capture confirmation: wal_archived() / report_wal_received() ───────
 SELECT pgautofailover.report_wal_received(
-           :nodeid, '000000010000000000000001', '0/1000000');
+           :nodeid, '000000010000000000000001', '0/1000000', 111);
 -[ RECORD 1 ]-------+-
 report_wal_received | 
+
+-- bulk variant: two more segments in one call
+SELECT pgautofailover.report_wal_received_bulk(
+           :nodeid, 111,
+           ARRAY['000000010000000000000002', '000000010000000000000003'],
+           ARRAY['0/2000000', '0/3000000']::pg_lsn[]);
+-[ RECORD 1 ]------------+-
+report_wal_received_bulk | 
+
+SELECT walfilename, lsn, systemidentifier
+  FROM pgautofailover.archiver_wal
+ ORDER BY walfilename;
+-[ RECORD 1 ]----+-------------------------
+walfilename      | 000000010000000000000001
+lsn              | 0/1000000
+systemidentifier | 111
+-[ RECORD 2 ]----+-------------------------
+walfilename      | 000000010000000000000002
+lsn              | 0/2000000
+systemidentifier | 111
+-[ RECORD 3 ]----+-------------------------
+walfilename      | 000000010000000000000003
+lsn              | 0/3000000
+systemidentifier | 111
 
 -- default archiver_quorum is 1: a single archiver's report already satisfies it
 SELECT pgautofailover.wal_archived('archiving_test', 0, '000000010000000000000001');

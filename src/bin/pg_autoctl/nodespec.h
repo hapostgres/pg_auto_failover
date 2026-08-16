@@ -83,6 +83,7 @@ typedef struct NodeSpec
 	char ssl[32];                /* self-signed | verify-ca | verify-full | off */
 	char auth[32];               /* trust | md5 | scram | cert */
 	bool pg_hba_lan;             /* add --pg-hba-lan flag */
+	bool fromArchiver;           /* add --from-archiver flag (postgres kind only) */
 
 	/* [ssl]  — certificate paths for verify-ca / verify-full mode */
 	char ssl_ca_file[MAXPGPATH];

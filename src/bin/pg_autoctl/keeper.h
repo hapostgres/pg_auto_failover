@@ -127,6 +127,8 @@ bool keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *primaryNode,
 									  bool *found);
 bool keeper_get_archiver_node(Keeper *keeper, NodeAddress *archiverNode,
 							  bool *found);
+bool keeper_should_bootstrap_from_archiver(Keeper *keeper,
+										   bool *shouldUseArchiver);
 
 
 bool keeper_pg_autoctl_get_version_from_disk(Keeper *keeper,

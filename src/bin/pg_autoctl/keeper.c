@@ -3442,6 +3442,82 @@ keeper_get_archiver_node(Keeper *keeper, NodeAddress *archiverNode, bool *found)
 
 
 /*
+ * keeper_should_bootstrap_from_archiver decides, for a plain `create
+ * postgres` with neither --from-archiver nor a disabled monitor, whether
+ * this standby should bootstrap from a registered archiver instead of the
+ * group's live primary: true only when an ARCHIVING node is registered for
+ * our (formation, group) *and* it has already produced at least one
+ * complete base backup (monitor_get_latest_basebackup_info, preferredSource
+ * NULL for "any"). An archiver with no backup yet can't serve BASE_BACKUP
+ * (cmd_base_backup.c's own "no base backup configured for this route"), so
+ * checking existence here rather than letting that connection fail is what
+ * makes this a transparent, always-safe default instead of a new failure
+ * mode for the common "archiver just registered, hasn't cycled yet" case.
+ *
+ * Only ever consulted when the operator didn't already force one way or
+ * the other -- see fsm_init_standby's own call site.
+ */
+bool
+keeper_should_bootstrap_from_archiver(Keeper *keeper, bool *shouldUseArchiver)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	*shouldUseArchiver = false;
+
+	if (config->monitorDisabled)
+	{
+		/* nothing to consult -- same restriction as the forced path */
+		return true;
+	}
+
+	NodeAddress archiverNode = { 0 };
+	bool foundArchiver = false;
+
+	if (!keeper_get_archiver_node(keeper, &archiverNode, &foundArchiver))
+	{
+		/* errors already logged */
+		return false;
+	}
+
+	if (!foundArchiver)
+	{
+		return true;
+	}
+
+	char storageLocation[MAXPGPATH] = { 0 };
+	char source[NAMEDATALEN] = { 0 };
+	int timeline = 0;
+	bool foundBackup = false;
+
+	if (!monitor_get_latest_basebackup_info(&(keeper->monitor),
+											config->formation,
+											keeper->state.current_group,
+											NULL,
+											storageLocation, sizeof(storageLocation),
+											source, sizeof(source),
+											&timeline,
+											&foundBackup))
+	{
+		/* errors already logged */
+		return false;
+	}
+
+	if (foundBackup)
+	{
+		log_info("An archiver is registered for \"%s\"/%d with an existing "
+				 "base backup; bootstrapping from it automatically "
+				 "(use --from-archiver to force this, or bootstrap from "
+				 "the primary by removing/pausing the archiver)",
+				 config->formation, keeper->state.current_group);
+	}
+
+	*shouldUseArchiver = foundBackup;
+
+	return true;
+}
+
+
+/*
  * keeper_pg_autoctl_get_version_from_disk calls pg_autoctl version --json and
  * parses the output to fill-in the keeper version.
  */

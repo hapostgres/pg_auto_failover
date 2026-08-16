@@ -211,7 +211,7 @@ cli_keeper_run(int argc, char **argv)
 	 * both assume one, so branch to start_archiver() instead, milestone 3's
 	 * own `pg_autoctl run` support (service_archiver_run.c).
 	 */
-	if (strcmp(config->nodeKind, "archiver") == 0)
+	if (streq(config->nodeKind, "archiver"))
 	{
 		if (!start_archiver(&keeper))
 		{

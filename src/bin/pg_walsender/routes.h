@@ -14,10 +14,9 @@
  *   small purpose-built file under that same path, at connection time --
  *   see cmd_base_backup.c's own basebackups/.latest and cmd_identify_
  *   system.c's own archiver-systemid for the two current examples. pg_
- *   walsender itself never talks to the monitor (see the "Routing" section
- *   of ~/dev/temp/archiving-disaster-recovery.md's implementation plan,
- *   and archiving-details.rst's "Keeping local files current" section
- *   for the full rationale behind this split).
+ *   walsender itself never talks to the monitor -- see
+ *   archiving-details.rst's "Keeping local files current" section
+ *   for the full rationale behind this split.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
