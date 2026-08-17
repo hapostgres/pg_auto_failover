@@ -12,6 +12,10 @@
  *     2. RowDescription(spcoid oid, spclocation text, size int8) +
  *        DataRow(NULL, NULL, NULL) + CommandComplete "SELECT" -- one row,
  *        the base directory itself (path NULL means "not a tablespace")
+ *   PG15+ (CBB_USE_ARCHIVE_FRAMING true -- see that macro below for how this
+ *   file picks a branch at compile time, driven by which real Postgres this
+ *   project's own pg_walsender itself was built against):
+ *
  *     3. CopyOutResponse(format 0, natts 0)           -- exactly one, covers
  *                                                         every archive AND
  *                                                         the manifest below
@@ -36,27 +40,52 @@
  *                                                         from step 3, after
  *                                                         every archive and
  *                                                         the manifest
+ *
+ *   Pre-PG15 (CBB_USE_ARCHIVE_FRAMING false): the client's own receiving
+ *   code predates the typed/tagged single-stream framing above entirely --
+ *   it reads step 3's CopyOut as nothing but plain, untagged tar bytes
+ *   until CopyDone, with no notion that a manifest could share that same
+ *   stream. So instead of steps 4-6 above, this branch sends step 3's
+ *   CopyOut as bare tar bytes only (no 'n'/'d' tags at all), a CopyDone to
+ *   end it, and then -- only if a manifest was requested -- a completely
+ *   independent second CopyOutResponse/CopyData(raw, untagged manifest
+ *   bytes)/CopyDone trio, matching this same client's own two-phase
+ *   BASE_BACKUP handling for that case:
+ *
+ *     3. CopyOutResponse(format 0, natts 0)             -- tar only
+ *     4. CopyData[<raw tar bytes>] x N                   -- no 'n'/'d' tags
+ *     5. CopyDone                                        -- ends the tar's
+ *                                                            own CopyOut
+ *     5a. CopyOutResponse(format 0, natts 0)              -- only if a
+ *     5b. CopyData[<raw manifest bytes>] x N                 manifest was
+ *     5c. CopyDone                                           requested
+ *
+ *   Both branches converge again after this point:
+ *
  *     7. RowDescription(recptr text, tli int8) + DataRow + CommandComplete
  *        "SELECT"                                     -- the end position
  *     8. CommandComplete "BASE_BACKUP"                 -- EndReplicationCommand
  *
  *   pg_basebackup.c calls PQgetResult() exactly four times for this (steps
- *   1, 2, [3-6 consumed internally by ReceiveArchiveStream], 7, 8), and
- *   explicitly checks step 8's PQresultStatus() == PGRES_COMMAND_OK. An
- *   earlier version of this file sent the manifest as its own second
- *   CopyOutResponse/CopyDone pair after step 6 instead of steps 5a-5b within
- *   the same stream -- structurally wrong relative to real Postgres's own
- *   bbsink_copystream_* callbacks (basebackup_copy.c), and the cause of a
- *   real "pg_basebackup: error: backup failed:" (empty message) bug fixed
- *   alongside this comment.
+ *   1, 2, [everything from step 3 up to but not including step 7, consumed
+ *   internally by ReceiveArchiveStream regardless of which branch was
+ *   actually sent], 7, 8), and explicitly checks step 8's PQresultStatus()
+ *   == PGRES_COMMAND_OK.
  *
- *   Steps 4-5's typed, tagged framing ('n'/'d'/'m') is PG15+ only -- a
- *   pre-15 pg_basebackup client's receiving code predates it entirely and
- *   only ever understood step 5 as plain, untagged "CopyData[<raw tar
- *   bytes>]" with no step 4 (and no manifest-within-the-same-stream support
- *   at all -- a pre-15 client always uses --no-manifest or gets one via a
- *   route this project doesn't need to support). See CBB_USE_ARCHIVE_
- *   FRAMING below for how this file picks between the two at compile time.
+ *   History: an earlier version of this file sent the manifest as its own
+ *   second CopyOutResponse/CopyDone pair *unconditionally*, including
+ *   against PG15+ clients -- structurally wrong there relative to real
+ *   Postgres's own bbsink_copystream_* callbacks (basebackup_copy.c), and
+ *   the cause of a real "pg_basebackup: error: backup failed:" (empty
+ *   message) bug. Fixing that by switching unconditionally to the single-
+ *   combined-stream design then broke the pre-PG15 branch the exact
+ *   opposite way -- folding manifest bytes into a stream a pre-PG15 client
+ *   reads as tar-only corrupts its tar parse ("invalid tar block header
+ *   size"), a second real bug. Both branches above are independently
+ *   correct for the client they're built for; getting this file's own
+ *   CBB_USE_ARCHIVE_FRAMING gate to consistently apply to *every* step that
+ *   differs between them (not just the tag bytes within the shared code
+ *   path) is what both fixes actually needed.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -856,15 +885,16 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		return;
 	}
 
+#if CBB_USE_ARCHIVE_FRAMING
+
 	/*
-	 * Manifest, within this *same* CopyOut stream -- see stream_manifest_
-	 * as_copy_data()'s own comment for why (real Postgres sends every
-	 * archive and the manifest under one CopyOutResponse/CopyDone pair,
-	 * not a separate one per phase -- an earlier version of this function
-	 * got that wrong). manifestPath was already resolved and existence-
-	 * checked above, before any bytes went out, so a request for a
-	 * manifest that turns out not to exist fails cleanly with an
-	 * ErrorResponse rather than partway through an already-started
+	 * PG15+: manifest within this *same* CopyOut stream -- see stream_
+	 * manifest_as_copy_data()'s own comment for why (real Postgres sends
+	 * every archive and the manifest under one CopyOutResponse/CopyDone
+	 * pair, not a separate one per phase). manifestPath was already
+	 * resolved and existence-checked above, before any bytes went out, so
+	 * a request for a manifest that turns out not to exist fails cleanly
+	 * with an ErrorResponse rather than partway through an already-started
 	 * BASE_BACKUP.
 	 */
 	if (opts.manifestRequested &&
@@ -879,6 +909,49 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		log_error("cmd_base_backup: failed sending the CopyDone");
 		return;
 	}
+#else
+
+	/*
+	 * Pre-PG15: the client has no concept of a manifest sharing the tar's
+	 * own CopyOut stream at all -- it reads the stream as nothing but raw
+	 * tar bytes until CopyDone, so folding the manifest in here (as the
+	 * PG15+ branch above correctly does for a client that expects it) gets
+	 * misread as corrupt tar content ("invalid tar block header size"), a
+	 * real bug this branch exists to fix. End the tar's own CopyOut first,
+	 * then -- if a manifest was requested -- open a second, independent
+	 * CopyOutResponse/CopyDone pair for it, still with raw, untagged bytes
+	 * (stream_manifest_as_copy_data()'s own #else branch already omits the
+	 * 'm'/'d' tags for this same CBB_USE_ARCHIVE_FRAMING gate), matching
+	 * what a pre-PG15 client's own two-COPY-phase BASE_BACKUP handling
+	 * expects.
+	 */
+	if (!ws_send_copy_done(sock))
+	{
+		log_error("cmd_base_backup: failed sending the tar CopyDone");
+		return;
+	}
+
+	if (opts.manifestRequested)
+	{
+		if (!ws_send_copy_out_response(sock, 0))
+		{
+			log_error("cmd_base_backup: failed sending the manifest CopyOutResponse");
+			return;
+		}
+
+		if (!stream_manifest_as_copy_data(sock, manifestPath))
+		{
+			log_error("cmd_base_backup: failed streaming the manifest CopyData");
+			return;
+		}
+
+		if (!ws_send_copy_done(sock))
+		{
+			log_error("cmd_base_backup: failed sending the manifest CopyDone");
+			return;
+		}
+	}
+#endif
 
 	/*
 	 * The end-of-backup position must be a real, currently-reachable target
