@@ -1258,6 +1258,17 @@ ensure_empty_tablespace_dirs(const char *pgdata)
  * empty means the exact same "--wal-method=stream", no --label behavior
  * this function always had before the split.
  */
+
+/*
+ * How many times the HBA-readiness preflight below retries
+ * pgctl_identify_system() before giving up and launching pg_basebackup
+ * anyway -- each attempt's own connection already carries up to ~2s of
+ * internal retry (pgsql_set_interactive_retry_policy()'s own comment),
+ * so this bounds the preflight's own total wait to roughly that times
+ * this count, without an extra outer sleep compounding it further.
+ */
+#define PG_BASEBACKUP_HBA_MAX_ATTEMPTS 10
+
 bool
 pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource)
 {
@@ -1359,6 +1370,40 @@ pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource)
 	}
 
 	args[argsIndex] = NULL;
+
+	/*
+	 * Preflight: retry pgctl_identify_system() (a plain replication-mode
+	 * IDENTIFY_SYSTEM, "check that HBA is ready" per its own comment)
+	 * against this same source, up to PG_BASEBACKUP_HBA_MAX_ATTEMPTS
+	 * times, before ever launching the real pg_basebackup subprocess
+	 * below. Closes a real, observed startup race: a freshly-registered
+	 * node's own pg_hba.conf entry on the source can take a moment to
+	 * propagate (HBA rules are written and the config reloaded
+	 * asynchronously, service_keeper.c's own node-list refresh), and
+	 * unlike pg_receivewal (which retries a failed connection internally,
+	 * see wait_for_primary_and_slot_ready()'s own comment, service_
+	 * archiver_pgreceivewal_ctl.c, for the same race on that path) plain
+	 * pg_basebackup has no such retry of its own -- a single race hit
+	 * here was fatal, no second chance. No extra sleep between attempts:
+	 * pgctl_identify_system()'s own connection already carries pgsql_
+	 * init()'s "interactive" retry policy (up to ~2s of internal backoff
+	 * per call, pgsql_set_interactive_retry_policy()'s own comment), so
+	 * an added outer sleep would only compound that delay rather than
+	 * add useful coverage. Best-effort, not a hard gate: exhausting every
+	 * attempt just means this preflight didn't get to close the race, and
+	 * pg_basebackup runs anyway with its own real error if the HBA rule
+	 * genuinely still isn't there.
+	 */
+	for (int attempt = 0;
+		 attempt < PG_BASEBACKUP_HBA_MAX_ATTEMPTS &&
+		 !(asked_to_stop || asked_to_stop_fast || asked_to_quit);
+		 attempt++)
+	{
+		if (pgctl_identify_system(replicationSource))
+		{
+			break;
+		}
+	}
 
 	/*
 	 * We do not want to call setsid() when running this program, as the
