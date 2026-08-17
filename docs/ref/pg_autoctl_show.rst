@@ -16,3 +16,4 @@ pg_autoctl show - Show pg_auto_failover information
    pg_autoctl_show_timeline
    pg_autoctl_show_file
    pg_autoctl_show_systemd
+   pg_autoctl_show_basebackup_policy

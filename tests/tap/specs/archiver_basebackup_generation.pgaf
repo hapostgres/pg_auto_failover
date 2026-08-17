@@ -1,0 +1,88 @@
+# Archiving & Disaster Recovery, Milestone 5: base backup generation,
+# `live` source then `replay`/`volatile`.
+#
+# Covers service_archiver_maybe_generate_basebackup() (service_archiver_
+# basebackup.c): a group with no base backups yet gets one immediately,
+# sourced live (pg_basebackup run directly against a real node); once that
+# lands, the very next tick exercises replay/volatile once -- extract that
+# live backup into a throwaway staging instance, replay this archiver's own
+# already-captured WAL forward until it promotes, pg_basebackup it over
+# loopback, then discard the staging instance. Both are real,
+# monitor-tracked pgautofailover.basebackup rows by the end.
+#
+# The bootstrap backup (a group's very first one) is always sourced live,
+# regardless of policy -- a replay needs an existing backup to replay from
+# (service_archiver_maybe_generate_basebackup()'s own "bootstrap is always
+# live" rule, service_archiver_basebackup.c). Everything *after* bootstrap
+# is scheduled and sourced by whichever base-backup policy applies to the
+# group -- the schema's own built-in 'default' policy (frequency 24h,
+# source 'replay') would make the second backup real, but not within any
+# sane test window, so this spec attaches its own short-frequency,
+# source=replay policy as soon as archiver1 is up, via the real
+# `pg_autoctl create basebackup-policy` CLI + set_archiver_policy() -- the
+# same path archiver_basebackup_policy.pgaf (scheduling/retention coverage,
+# source=live there) exercises, just with source=replay here so this
+# spec's own remaining job -- proving the replay/volatile generation
+# pipeline itself actually works (extract the live backup into a staging
+# instance, replay this archiver's own captured WAL forward until it
+# promotes, pg_basebackup it over loopback, discard the staging instance)
+# -- still gets exercised for real. Attached during setup, before test_001's
+# own sleep starts, so the fast frequency is already in effect for whichever
+# tick first notices the bootstrap backup has landed and a new one is due.
+#
+# Predecessor: archiver_wal_capture.pgaf (M4).
+
+cluster {
+    monitor
+    formation {
+        node1
+        archiver1 archiver
+    }
+}
+
+setup {
+    # A lone node plus an archiver is a genuine single-node formation --
+    # the archiver never counts as a real Postgres secondary (see group_
+    # state_machine.c's BuildForPrimaryNodeNodeActiveContext, hasPgData-
+    # gated), so node1's own correct, stable terminal state here is
+    # "single", not "primary" (there is no other node to ever promote it
+    # past that).
+    wait until node1 state is single  timeout 60s
+    wait until archiver1 state is archiving  timeout 60s
+
+    exec archiver1 bash -c 'printf "%s" "{\"source\": \"replay\", \"replaymode\": \"volatile\", \"frequency\": \"10 seconds\", \"maxcount\": 3, \"maxage\": \"10 minutes\", \"onpromotion\": false}" > /tmp/replay-policy.json'
+    exec archiver1 pg_autoctl create basebackup-policy --monitor postgresql://autoctl_node@monitor/pg_auto_failover --name replay-fast --config /tmp/replay-policy.json
+    sql monitor {
+        SELECT pgautofailover.set_archiver_policy(
+                   'default', NULL, 1,
+                   (SELECT basebackuppolicyid
+                      FROM pgautofailover.get_basebackup_policy('replay-fast')),
+                   false);
+    }
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: the bootstrap live backup and (once the attached fast policy's
+#           first frequency interval has elapsed) a real replay/volatile
+#           backup both land on their own; check the final state.
+#
+#           Polls rather than sleeping a fixed guess: generating the
+#           replay/volatile backup is several real Postgres-instance
+#           lifecycles (extract the live backup into a staging instance,
+#           replay this archiver's own captured WAL forward, poll for
+#           promotion, pg_basebackup it over loopback, discard the staging
+#           instance), not a single fast pg_basebackup call like archiver_
+#           basebackup_policy.pgaf's own live-backup cycles, so its wall-
+#           clock cost varies with host load (CI run 84233594160 hit this
+#           directly: a fixed 60s sleep wasn't always enough).
+#
+
+step test_001_replay_backup_lands {
+    wait until basebackup source is replay in default/0  timeout 150s
+    wait until basebackup replaymode is volatile in default/0  timeout 5s
+    wait until basebackup status is complete in default/0  timeout 30s
+}

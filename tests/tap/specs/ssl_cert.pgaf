@@ -5,6 +5,20 @@
 # Authentication uses the "cert" method: pg_autoctl writes hostssl + cert
 # rules to pg_hba.conf and the ident map to pg_ident.conf automatically.
 #
+# archiver1 proves the same cert-auth conninfo path service_archiver.c's
+# pg_receivewal now goes through (prepare_primary_conninfo(), pgctl.c --
+# the same helper every standby's own primary_conninfo already used):
+# before this, cli_create_archiver_getopts had no --ssl-*/--replication-
+# password flags at all, so an archiver in a verify-ca + cert cluster like
+# this one would have tried a plain trust conninfo against a primary whose
+# pg_hba.conf has no trust rule -- authentication failure, no WAL captured,
+# ever. No node-level `ssl`/`auth` override here: archiver1 inherits the
+# cluster-level `ssl verify-ca` / `auth cert` the same way node1/node2 do
+# (compose_gen.c's eff_ssl/eff_auth fallback), and gets the same
+# ~/.postgresql/ client certificate bind-mounted into its container --
+# libpq picks it up automatically once sslmode requests SSL, no extra flag
+# needed on the archiver side either.
+#
 # Ported from tests/test_ssl_cert.py
 # Predecessor: tests/test_ssl_cert.py
 
@@ -15,6 +29,7 @@ cluster {
     formation {
         node1
         node2
+        archiver1 archiver
     }
 }
 
@@ -25,6 +40,7 @@ setup {
         and node2 state is secondary
         timeout 300s
     promote node1
+    wait until archiver1 state is archiving  timeout 60s
 }
 
 teardown {
@@ -84,4 +100,26 @@ step test_003_init_secondary {
 
 step test_004_failover {
     perform failover
+}
+
+#
+# test_005: verify the archiver authenticated with a client certificate
+#           (not trust) and is actually capturing WAL over that connection
+#           -- reportedlsn advancing past '0/0' only happens once pg_
+#           receivewal has a live, authenticated replication connection to
+#           the (post-failover) primary; same check citus_basic_operation.
+#           pgaf's own archiver coverage uses, avoiding this spec's own
+#           segment-numbering assumptions (see archiver_wal_capture.pgaf's
+#           header comment on why an exact segment name is fragile here).
+#
+
+step test_005_archiver_cert_auth_wal_capture {
+    exec archiver1  pg_autoctl config get ssl.sslmode
+    expect { verify-ca }
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+    wait until archiver1 state is archiving  timeout 60s
+    sql node2 { CREATE TABLE archiver_cert_probe(a int); INSERT INTO archiver_cert_probe SELECT generate_series(1, 100); SELECT pg_switch_wal(); }
+    wait until sql monitor { SELECT reportedlsn > '0/0' FROM pgautofailover.node WHERE nodename LIKE 'archiver-%' AND formationid = 'default' AND groupid = 0 } is { t }  timeout 30s
 }

@@ -417,7 +417,7 @@ section_path                 | reporting_node.from_context
 active_node_current_state    | report_lsn
 other_node_current_state     | wait_primary, join_primary
 candidate_node_current_state | 
-active_node_conditions       | 
+active_node_conditions       | hasPgData=true
 other_node_conditions        | isHealthy=true
 candidate_node_conditions    | 
 group_conditions             | 
@@ -432,7 +432,7 @@ section_path                 | reporting_node.from_context
 active_node_current_state    | report_lsn
 other_node_current_state     | primary
 candidate_node_current_state | 
-active_node_conditions       | 
+active_node_conditions       | hasPgData=true
 other_node_conditions        | isHealthy=true
 candidate_node_conditions    | 
 group_conditions             | 
@@ -477,7 +477,7 @@ section_path                 | reporting_node.from_context
 active_node_current_state    | wait_standby
 other_node_current_state     | wait_primary, join_primary
 candidate_node_current_state | 
-active_node_conditions       | 
+active_node_conditions       | hasPgData=true
 other_node_conditions        | 
 candidate_node_conditions    | 
 group_conditions             | 
@@ -492,7 +492,7 @@ section_path                 | reporting_node.from_context
 active_node_current_state    | wait_standby
 other_node_current_state     | primary
 candidate_node_current_state | 
-active_node_conditions       | replicationQuorum=true
+active_node_conditions       | replicationQuorum=true, hasPgData=true
 other_node_conditions        | 
 candidate_node_conditions    | 
 group_conditions             | 
@@ -507,7 +507,7 @@ section_path                 | reporting_node.from_context
 active_node_current_state    | wait_standby
 other_node_current_state     | primary
 candidate_node_current_state | 
-active_node_conditions       | replicationQuorum=false
+active_node_conditions       | replicationQuorum=false, hasPgData=true
 other_node_conditions        | 
 candidate_node_conditions    | 
 group_conditions             | 
@@ -852,7 +852,7 @@ section_path                 | reporting_node.ms_failover.candidate_join
 active_node_current_state    | report_lsn
 other_node_current_state     | 
 candidate_node_current_state | 
-active_node_conditions       | 
+active_node_conditions       | hasPgData=true
 other_node_conditions        | 
 candidate_node_conditions    | isReadyToStreamWAL=true
 group_conditions             | candidatePromotionInProgress=true
@@ -864,7 +864,7 @@ comment                      | MS-failover: activeNode in report_lsn, failover c
 pos                          | 367
 section                      | reporting_node
 section_path                 | reporting_node.ms_failover.candidate_fanout
-active_node_current_state    | secondary, catchingup
+active_node_current_state    | secondary, catchingup, archiving
 other_node_current_state     | 
 candidate_node_current_state | 
 active_node_conditions       | 
@@ -874,7 +874,7 @@ group_conditions             | inMSFailoverCluster=true
 active_node_assigned_state   | report_lsn
 other_node_assigned_state    | 
 has_extra_action             | f
-comment                      | MS-failover fan-out: secondary/catchingup, not yet converged -> report_lsn (1 of 4)
+comment                      | MS-failover fan-out: secondary/catchingup/archiving, not yet converged -> report_lsn (1 of 4)
 -[ RECORD 58 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 369
 section                      | reporting_node
@@ -1071,6 +1071,96 @@ other_node_assigned_state    | maintenance
 has_extra_action             | f
 comment                      | nodesCount>2, primary unhealthy, converged prepare_maintenance -> primary maintenance
 -[ RECORD 71 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 394
+section                      | reporting_node
+section_path                 | reporting_node.from_context
+active_node_current_state    | report_lsn
+other_node_current_state     | single, wait_primary, join_primary
+candidate_node_current_state | 
+active_node_conditions       | hasPgData=false
+other_node_conditions        | isHealthy=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | archiving
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | archiver mirror of pos 307: report_lsn, primary converged single/wait/join_primary, healthy -> archiving
+-[ RECORD 72 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 395
+section                      | reporting_node
+section_path                 | reporting_node.from_context
+active_node_current_state    | report_lsn
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | hasPgData=false
+other_node_conditions        | isHealthy=true
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | archiving
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | archiver mirror of pos 309: report_lsn, primary converged primary, healthy -> archiving
+-[ RECORD 73 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 396
+section                      | reporting_node
+section_path                 | reporting_node.from_context
+active_node_current_state    | wait_standby
+other_node_current_state     | single, wait_primary, join_primary
+candidate_node_current_state | 
+active_node_conditions       | hasPgData=false
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | archiving
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | archiver mirror of pos 315: wait_standby, primary converged single/wait/join_primary -> archiving
+-[ RECORD 74 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 397
+section                      | reporting_node
+section_path                 | reporting_node.from_context
+active_node_current_state    | wait_standby
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | replicationQuorum=true, hasPgData=false
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | archiving
+other_node_assigned_state    | apply_settings
+has_extra_action             | f
+comment                      | archiver mirror of pos 317: wait_standby (quorum member), primary converged primary -> archiving + apply_settings
+-[ RECORD 75 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 398
+section                      | reporting_node
+section_path                 | reporting_node.from_context
+active_node_current_state    | wait_standby
+other_node_current_state     | primary
+candidate_node_current_state | 
+active_node_conditions       | replicationQuorum=false, hasPgData=false
+other_node_conditions        | 
+candidate_node_conditions    | 
+group_conditions             | 
+active_node_assigned_state   | archiving
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | archiver mirror of pos 319: wait_standby (not a quorum member), primary converged primary -> archiving
+-[ RECORD 76 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+pos                          | 399
+section                      | reporting_node
+section_path                 | reporting_node.ms_failover.candidate_join
+active_node_current_state    | report_lsn
+other_node_current_state     | 
+candidate_node_current_state | 
+active_node_conditions       | hasPgData=false
+other_node_conditions        | 
+candidate_node_conditions    | isReadyToStreamWAL=true
+group_conditions             | candidatePromotionInProgress=true
+active_node_assigned_state   | archiving
+other_node_assigned_state    | 
+has_extra_action             | f
+comment                      | archiver mirror of pos 365: MS-failover, activeNode in report_lsn, failover candidate ready to stream WAL -> archiving (no join_secondary detour -- see pos 365's own comment)
+-[ RECORD 77 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 401
 section                      | primary_node
 section_path                 | primary_node
@@ -1085,7 +1175,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | 
 has_extra_action             | f
 comment                      | primary alone, another node reached wait_standby -> wait_primary
--[ RECORD 72 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 78 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 403
 section                      | primary_node
 section_path                 | primary_node
@@ -1100,7 +1190,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | all nodes async, zero secondaries -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 73 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 79 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 405
 section                      | primary_node
 section_path                 | primary_node
@@ -1115,7 +1205,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | all nodes async, >=1 secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 74 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 80 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 407
 section                      | primary_node
 section_path                 | primary_node
@@ -1130,7 +1220,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys=0 -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 75 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 81 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 409
 section                      | primary_node
 section_path                 | primary_node
@@ -1145,7 +1235,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | converged primary/apply_settings, no quorum secondaries, no failover in progress, number_sync_standbys>0 -> primary (block writes) (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 76 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 82 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 411
 section                      | primary_node
 section_path                 | primary_node
@@ -1160,7 +1250,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | wait_primary, >=1 quorum secondary -> primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 77 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 83 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 413
 section                      | primary_node
 section_path                 | primary_node
@@ -1175,7 +1265,7 @@ active_node_assigned_state   | wait_primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | apply_settings, both zero -> wait_primary (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 78 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 84 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 415
 section                      | primary_node
 section_path                 | primary_node
@@ -1190,7 +1280,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | apply_settings, number_sync_standbys != 0 -> primary (1 of 2 disjuncts) (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 79 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 85 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 417
 section                      | primary_node
 section_path                 | primary_node
@@ -1205,7 +1295,7 @@ active_node_assigned_state   | primary
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | apply_settings, sync_standbys=0 but >=1 quorum secondary -> primary (2 of 2) (+ unhealthy-secondary fan-out to catchingup)
--[ RECORD 80 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 86 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 419
 section                      | primary_node
 section_path                 | primary_node
@@ -1220,7 +1310,7 @@ active_node_assigned_state   |
 other_node_assigned_state    | catchingup
 has_extra_action             | f
 comment                      | converged primary/wait_primary/apply_settings, no other condition applies -> no-op besides the unhealthy-secondary fan-out to catchingup
--[ RECORD 81 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-[ RECORD 87 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 421
 section                      | primary_node
 section_path                 | primary_node

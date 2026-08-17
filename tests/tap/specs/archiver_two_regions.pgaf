@@ -1,0 +1,110 @@
+# Archiving & Disaster Recovery: two independent archivers, in two
+# different regions, both attached to the very same formation -- the
+# geographically-redundant DR coverage pattern archiver.region exists for
+# (see that column's own comment, pgautofailover.sql, and
+# pg_autoctl_create_archiver.rst's own --region section).
+#
+# archiver_add_formation() names each ARCHIVING node row
+# 'archiver-<archiverid>-<groupid>', so two different archivers attaching
+# to the same (formation, group) get distinct rows and fully independent
+# WAL streams/replication slots against the same primary -- confirmed
+# already at the SQL-regression level (src/monitor/sql/archiving_schema.
+# sql's own "a second archiver serving the same formation/group" case);
+# this spec is the first to prove it end to end, with two real archiver
+# processes.
+#
+# Rather than trying to peek at which specific archiver reported a given
+# WAL segment (pgautofailover.wal_archived() aggregates across every
+# archiver attached to the group, it doesn't expose a per-archiver
+# breakdown to autoctl_node), test_002 proves both are independently
+# capturing by raising archiverQuorum from its default of 1 to 2 *after*
+# a segment is already confirmed archived at quorum 1, then re-checking
+# the very same segment: if only one of the two archivers had actually
+# captured and reported it, raising the quorum would make wal_archived()
+# flip back to false for that segment. It doesn't -- proving both
+# archivers, not just one, independently streamed and reported it.
+#
+# Both archivers use pgaftest's top-level "archiver { }" syntax (see
+# TestArchiverNode's own comment in test_spec.h), each folded into
+# "default"'s own node list and launched immediately (the normal default
+# for this syntax) via the ordinary ini-driven "pg_autoctl node run" path
+# -- no deferred launch needed: group 0 of "default" already exists as
+# soon as node1 has registered, regardless of promotion.
+#
+# Predecessor: archiver_wal_capture.pgaf (single-archiver WAL-capture
+# proof this borrows its segment-numbering reasoning from);
+# archiver_budget_architecture_regions.pgaf (the first spec to exercise
+# --region at all, for a single archiver).
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+    archiver archiver-eu {
+        formation default
+        region eu-west
+    }
+    archiver archiver-us {
+        formation default
+        region us-east
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+    wait until archiver-eu state is archiving  timeout 60s
+    wait until archiver-us state is archiving  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: both archivers attached to the same formation, each correctly
+#           reporting its own region -- get_archivers('default') returns
+#           one row per archiver here (both groupid 0, the only group in
+#           this plain-Postgres formation), distinguished by archiver_name.
+#
+
+step test_001_both_archivers_attached_and_labelled {
+    sql monitor { SELECT reported_state::text FROM pgautofailover.get_archivers('default') WHERE archiver_name = 'archiver-eu'; }
+    expect { archiving }
+    sql monitor { SELECT region FROM pgautofailover.get_archivers('default') WHERE archiver_name = 'archiver-eu'; }
+    expect { eu-west }
+    sql monitor { SELECT reported_state::text FROM pgautofailover.get_archivers('default') WHERE archiver_name = 'archiver-us'; }
+    expect { archiving }
+    sql monitor { SELECT region FROM pgautofailover.get_archivers('default') WHERE archiver_name = 'archiver-us'; }
+    expect { us-east }
+}
+
+#
+# test_002: both archivers are independently, actually capturing WAL --
+#           not just one of them with the other silently idle -- proven by
+#           raising archiverQuorum after the fact, see this file's own
+#           header comment for the full reasoning. Segment 3 is archiver_
+#           wal_capture.pgaf's own observed floor for a single archiver on
+#           this image (see that spec's header comment for the general
+#           reasoning: a few segments get consumed by node1+node2's own
+#           bootstrap before any archiver's replication slot exists,
+#           observed at exactly segment 3, repeatably). Two archivers here
+#           instead of one shouldn't move that floor -- both slots get
+#           created around the same bootstrap point and segment 3 hasn't
+#           been recycled yet by either -- but this hasn't been separately
+#           confirmed against a real two-archiver run the way the single-
+#           archiver floor has; if this segment number turns out wrong
+#           against the real image, this is the line to adjust.
+#
+
+step test_002_both_archivers_capture_independently {
+    sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
+    sql node1 { SELECT pg_switch_wal(); }
+    sql node1 { INSERT INTO t1 VALUES (3); }
+    sql node1 { SELECT pg_switch_wal(); }
+    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
+    sql monitor { SELECT pgautofailover.set_archiver_policy('default', NULL, 2, NULL, NULL); }
+    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
+}

@@ -8,6 +8,8 @@
  *
  */
 
+#include "cli_archiver.h"
+#include "cli_basebackup_policy.h"
 #include "cli_common.h"
 #include "cli_do_root.h"
 #include "cli_inspect.h"
@@ -31,6 +33,8 @@ CommandLine *create_subcommands[] = {
 	&create_postgres_command,
 	&create_coordinator_command,
 	&create_worker_command,
+	&create_archiver_command,
+	&create_basebackup_policy_command,
 	&create_formation_command,
 	NULL
 };
@@ -48,6 +52,7 @@ CommandLine *show_subcommands_with_debug[] = {
 	&show_standby_names_command,
 	&show_timeline_command,
 	&show_file_command,
+	&show_basebackup_policy_command,
 	&systemd_cat_service_file_command,
 	NULL
 };
@@ -65,6 +70,7 @@ CommandLine *show_subcommands[] = {
 	&show_standby_names_command,
 	&show_timeline_command,
 	&show_file_command,
+	&show_basebackup_policy_command,
 	&systemd_cat_service_file_command,
 	NULL
 };
@@ -108,6 +114,7 @@ CommandLine *root_subcommands[] = {
 	&internal_commands,
 	&do_compat_commands,
 	&node_commands,
+	&archiver_commands,
 	&service_run_command,
 	&watch_command,
 	&service_stop_command,

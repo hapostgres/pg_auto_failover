@@ -116,6 +116,15 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_WAIT_SQL:
+		{
+			fprintf(f, /* IGNORE-BANNED */
+					"%swait until sql %s { %s } is { %s }  timeout %ds\n",
+					pad, cmd->service, cmd->args, cmd->expected,
+					cmd->timeoutSeconds);
+			break;
+		}
+
 		case CMD_EXPECT:
 		{
 			fprintf(f, "%sexpect { %s }\n", pad, cmd->expected); /* IGNORE-BANNED */
@@ -3329,6 +3338,50 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 			return true;
 		}
 
+		case CMD_WAIT_SQL:
+		{
+			/*
+			 * Generic SQL-condition poll: re-run cmd->args on cmd->service
+			 * every second until its output contains cmd->expected (same
+			 * substring semantics as CMD_EXPECT) or the timeout elapses.
+			 * Reuses exec_sql_on_service() rather than the LISTEN/NOTIFY
+			 * machinery wait_for_state()/wait_for_states() use: those key
+			 * off specific goalstate/reportedstate convergence events,
+			 * which an arbitrary scalar SQL expression has none of.
+			 */
+			time_t deadline = time(NULL) + cmd->timeoutSeconds;
+			char output[4096] = "";
+			bool matched = false;
+
+			for (;;)
+			{
+				if (exec_sql_on_service(r, cmd->service, cmd->args,
+										output, sizeof(output)) &&
+					strstr(output, cmd->expected) != NULL)
+				{
+					matched = true;
+					break;
+				}
+
+				if (time(NULL) >= deadline)
+				{
+					break;
+				}
+
+				sleep(1);
+			}
+
+			if (!matched)
+			{
+				sformat(errBuf, errLen,
+						"timeout: sql on %s never matched \"%s\" "
+						"(last output: \"%s\")",
+						cmd->service, cmd->expected, output);
+				return false;
+			}
+			return true;
+		}
+
 		case CMD_EXPECT_ERROR:
 		{
 			if (!r->lastSqlFailed)
@@ -4335,6 +4388,14 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 		{
 			inline_text(cmd->args, tmp, sizeof(tmp));
 			sformat(buf, len, "sql %s { %s }", cmd->service, tmp);
+			break;
+		}
+
+		case CMD_WAIT_SQL:
+		{
+			inline_text(cmd->args, tmp, sizeof(tmp));
+			sformat(buf, len, "wait until sql %s { %s } is { %s }  timeout %ds",
+					cmd->service, tmp, cmd->expected, cmd->timeoutSeconds);
 			break;
 		}
 

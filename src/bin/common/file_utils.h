@@ -43,6 +43,7 @@ bool ensure_empty_dir(const char *dirname, int mode);
 FILE * fopen_with_umask(const char *filePath, const char *modes, int flags, mode_t umask);
 FILE * fopen_read_only(const char *filePath);
 bool write_file(char *data, long fileSize, const char *filePath);
+bool write_file_atomic(char *data, long fileSize, const char *filePath);
 bool append_to_file(char *data, long fileSize, const char *filePath);
 bool read_file(const char *filePath, char **contents, long *fileSize);
 bool read_file_if_exists(const char *filePath, char **contents, long *fileSize);

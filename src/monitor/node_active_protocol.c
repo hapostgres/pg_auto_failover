@@ -524,8 +524,7 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 		 * Report the current state. The state might not have changed, but in
 		 * that case we still update the last report time.
 		 */
-		ReportAutoFailoverNodeState(pgAutoFailoverNode->nodeHost,
-									pgAutoFailoverNode->nodePort,
+		ReportAutoFailoverNodeState(pgAutoFailoverNode->nodeId,
 									currentNodeState->replicationState,
 									currentNodeState->pgIsRunning,
 									currentNodeState->pgsrSyncState,

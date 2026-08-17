@@ -583,19 +583,23 @@ A single command then creates the node if absent and starts the supervisor::
 
 This makes ``pg_autoctl node run`` a natural ``CMD`` (Docker) or
 ``command:`` (Kubernetes) entry-point for every node type.  The same image
-works for monitor, primary, standby, coordinator, and worker nodes — per-node
-differences live entirely in the bind-mounted ini file.
+works for monitor, primary, standby, coordinator, worker, and
+:ref:`archiving_architecture` archiver nodes — per-node differences live
+entirely in the bind-mounted ini file.
 
 **Live reconfiguration** — the supervisor watches the ini file.  Editing
 ``candidate_priority``, ``replication_quorum``, ``ssl`` settings, or
 ``monitor.pguri`` and saving the file is sufficient to converge the running
 node; no restart is required.
 
-**Ordered startup** — add ``[launch] mode = deferred`` to any node that
-should wait for an external signal before initialising.  Call
-``pg_autoctl node start <file>`` from a sidecar or init container to release
-it.  This replaces external orchestration for the common case where data
-nodes must wait until the monitor is ready.
+**Ordered startup** — add ``[launch] create = deferred`` and/or ``run =
+deferred`` to any node that should wait for an external signal before
+initialising.  Call ``pg_autoctl node start <file>`` from a sidecar or
+init container to release it (clears both flags).  This replaces external
+orchestration for the common case where data nodes must wait until the
+monitor is ready — or, for an archiver, until its target formation (every
+group of it, for a Citus formation) is already registered, since
+``pg_autoctl create archiver`` has no retry-until-ready loop of its own.
 
 For the full property reference and mutability table see
 :ref:`pg_autoctl_node`.

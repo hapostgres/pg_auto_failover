@@ -3327,6 +3327,23 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode,
 			return false;
 		}
 
+		/*
+		 * port == 0 is the ARCHIVING row sentinel documented in
+		 * pgautofailover.sql ("an ARCHIVING row has no postmaster of its
+		 * own") -- get_most_advanced_standby() returns it verbatim from
+		 * pgautofailover.node, which has no column for an archiver's real
+		 * pg_walsender serve port (archiver-host-local information the
+		 * monitor is never told, matching service_archiver_serve.c's own
+		 * routes-file rationale). This milestone's own scope is one
+		 * archiver on the well-known default serve port, so resolving it
+		 * here is enough; a configurable-port archiver is a follow-up that
+		 * would need the monitor to actually track it.
+		 */
+		if (*found && upstreamNode->port == 0)
+		{
+			upstreamNode->port = PG_AUTOCTL_ARCHIVER_SERVE_PORT;
+		}
+
 		return true;
 	}
 	else
@@ -3375,6 +3392,128 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode,
 	}
 
 	return false;
+}
+
+
+/*
+ * keeper_get_archiver_node fetches the ARCHIVING node registered for our
+ * (formation, group), for `create postgres --from-archiver` to bootstrap
+ * from -- deliberately not keeper_get_most_advanced_standby's election
+ * machinery (see monitor_get_archiver_node's own comment for why that
+ * function can't find an archiver outside of an election). Monitor-only:
+ * a brand new node discovering an archiver to rebuild from is exactly the
+ * disaster-recovery case --disable-monitor's manually-populated otherNodes
+ * list isn't meant to serve.
+ */
+bool
+keeper_get_archiver_node(Keeper *keeper, NodeAddress *archiverNode, bool *found)
+{
+	KeeperConfig *config = &(keeper->config);
+	int groupId = keeper->state.current_group;
+
+	if (config->monitorDisabled)
+	{
+		log_error("Failed to find an archiver to bootstrap from: "
+				  "--from-archiver requires a monitor");
+		return false;
+	}
+
+	Monitor *monitor = &(keeper->monitor);
+
+	if (!monitor_get_archiver_node(monitor,
+								   config->formation,
+								   groupId,
+								   archiverNode,
+								   found))
+	{
+		log_error("Failed to get the archiver node from the monitor, "
+				  "see above for details");
+		return false;
+	}
+
+	/* see keeper_get_most_advanced_standby's own comment on this sentinel */
+	if (*found && archiverNode->port == 0)
+	{
+		archiverNode->port = PG_AUTOCTL_ARCHIVER_SERVE_PORT;
+	}
+
+	return true;
+}
+
+
+/*
+ * keeper_should_bootstrap_from_archiver decides, for a plain `create
+ * postgres` with neither --from-archiver nor a disabled monitor, whether
+ * this standby should bootstrap from a registered archiver instead of the
+ * group's live primary: true only when an ARCHIVING node is registered for
+ * our (formation, group) *and* it has already produced at least one
+ * complete base backup (monitor_get_latest_basebackup_info, preferredSource
+ * NULL for "any"). An archiver with no backup yet can't serve BASE_BACKUP
+ * (cmd_base_backup.c's own "no base backup configured for this route"), so
+ * checking existence here rather than letting that connection fail is what
+ * makes this a transparent, always-safe default instead of a new failure
+ * mode for the common "archiver just registered, hasn't cycled yet" case.
+ *
+ * Only ever consulted when the operator didn't already force one way or
+ * the other -- see fsm_init_standby's own call site.
+ */
+bool
+keeper_should_bootstrap_from_archiver(Keeper *keeper, bool *shouldUseArchiver)
+{
+	KeeperConfig *config = &(keeper->config);
+
+	*shouldUseArchiver = false;
+
+	if (config->monitorDisabled)
+	{
+		/* nothing to consult -- same restriction as the forced path */
+		return true;
+	}
+
+	NodeAddress archiverNode = { 0 };
+	bool foundArchiver = false;
+
+	if (!keeper_get_archiver_node(keeper, &archiverNode, &foundArchiver))
+	{
+		/* errors already logged */
+		return false;
+	}
+
+	if (!foundArchiver)
+	{
+		return true;
+	}
+
+	char storageLocation[MAXPGPATH] = { 0 };
+	char source[NAMEDATALEN] = { 0 };
+	int timeline = 0;
+	bool foundBackup = false;
+
+	if (!monitor_get_latest_basebackup_info(&(keeper->monitor),
+											config->formation,
+											keeper->state.current_group,
+											NULL,
+											storageLocation, sizeof(storageLocation),
+											source, sizeof(source),
+											&timeline,
+											&foundBackup))
+	{
+		/* errors already logged */
+		return false;
+	}
+
+	if (foundBackup)
+	{
+		log_info("An archiver is registered for \"%s\"/%d with an existing "
+				 "base backup; bootstrapping from it automatically "
+				 "(use --from-archiver to force this, or bootstrap from "
+				 "the primary by removing/pausing the archiver)",
+				 config->formation, keeper->state.current_group);
+	}
+
+	*shouldUseArchiver = foundBackup;
+
+	return true;
 }
 
 

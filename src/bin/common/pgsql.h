@@ -36,6 +36,8 @@
 #define INT8OID 20
 #define TEXTOID 25
 #define LSNOID 3220
+#define TEXTARRAYOID 1009
+#define PG_LSNARRAYOID 3221
 
 /*
  * Maximum connection info length as used in walreceiver.h
@@ -267,8 +269,21 @@ typedef struct ReplicationSource
 	 * for themselves when to promote, should leave this false.
 	 */
 	bool pauseAtRecoveryTarget;
+
 	SSLOptions sslOptions;
 	IdentifySystem system;
+
+	/*
+	 * pg_basebackup_fetch()'s own --wal-method and --label overrides, both
+	 * optional: empty (the zero value, every existing caller's default)
+	 * means pg_basebackup()'s own long-standing "stream" behavior and no
+	 * --label at all. Set by a caller that wants the backup left non-self-
+	 * consistent on purpose (service_archiver_basebackup.c's own live/
+	 * replay base-backup production, which supplies WAL some other way)
+	 * and/or a specific label instead of pg_basebackup's own default.
+	 */
+	char walMethod[NAMEDATALEN];
+	char label[NAMEDATALEN];
 } ReplicationSource;
 
 
