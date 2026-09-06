@@ -53,5 +53,21 @@ main(int argc, char **argv)
 		return 1;
 	}
 
-	return commandline_run(&pgaftest_root, argc, argv);
+	/*
+	 * commandline_run() returns a BOOL: false when parsing failed (unknown
+	 * command, missing subcommand), true otherwise. Returning it directly as
+	 * the exit status inverted the meaning -- an unknown command produced
+	 * "unknown command" on stderr and then exited 0, so
+	 *
+	 *     pgaftest down --work-dir ... && echo ok
+	 *
+	 * printed the error AND "ok". Scripts and CI could not tell a typo from
+	 * a successful run. Same shape as pg_autoctl's own main().
+	 */
+	if (!commandline_run(&pgaftest_root, argc, argv))
+	{
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	return 0;
 }

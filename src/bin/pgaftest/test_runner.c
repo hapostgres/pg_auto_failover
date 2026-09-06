@@ -5046,7 +5046,7 @@ runner_setup(TestSpec *spec, const char *workDir, bool withTmux)
 			fformat(stdout, " %s", s->name);
 		}
 		fformat(stdout, "\n\nRun a step: pgaftest step <name> --work-dir %s\n", workDir);
-		fformat(stdout, "Tear down:  pgaftest down --work-dir %s\n\n", workDir);
+		fformat(stdout, "Tear down:  pgaftest cluster down --work-dir %s\n\n", workDir);
 	}
 
 	return true;
