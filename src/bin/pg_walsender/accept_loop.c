@@ -9,12 +9,15 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -49,6 +52,51 @@
 #define WS_REAL_WALRECEIVER_DBNAME "replication"
 
 
+/*
+ * Hardening limits: a peer that connects and then says nothing must not
+ * hold a forked child forever, and a flood of connections must not fork
+ * without bound.
+ */
+#define WS_STARTUP_TIMEOUT_SECONDS 30
+#define WS_MAX_CONNECTIONS 64
+
+static volatile sig_atomic_t activeChildren = 0;
+
+
+/*
+ * reap_children is the SIGCHLD handler: collect every exited child and
+ * keep activeChildren accurate so the accept loop can enforce
+ * WS_MAX_CONNECTIONS.
+ */
+static void
+reap_children(int signo)
+{
+	int savedErrno = errno;
+
+	while (waitpid(-1, NULL, WNOHANG) > 0)
+	{
+		if (activeChildren > 0)
+		{
+			activeChildren--;
+		}
+	}
+
+	errno = savedErrno;
+}
+
+
+static void
+set_receive_timeout(int sock, int seconds)
+{
+	struct timeval tv = { seconds, 0 };
+
+	if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0)
+	{
+		log_warn("Failed to set SO_RCVTIMEO on the client socket: %m");
+	}
+}
+
+
 static int
 create_listen_socket(int port)
 {
@@ -62,7 +110,10 @@ create_listen_socket(int port)
 
 	int reuse = 1;
 
-	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0)
+	{
+		log_warn("Failed to set SO_REUSEADDR on the listening socket: %m");
+	}
 
 	struct sockaddr_in addr;
 
@@ -103,6 +154,9 @@ handle_connection(int clientSock, const WsServerConfig *config)
 {
 	WsStartupParams params;
 
+	/* startup and auth must complete promptly; cleared once authenticated */
+	set_receive_timeout(clientSock, WS_STARTUP_TIMEOUT_SECONDS);
+
 	if (!ws_startup_negotiate(clientSock, &params))
 	{
 		close(clientSock);
@@ -130,14 +184,14 @@ handle_connection(int clientSock, const WsServerConfig *config)
 	/*
 	 * dbname-based routing cannot work for a real walreceiver connection
 	 * (see WS_REAL_WALRECEIVER_DBNAME's own comment) -- fall back to the
-	 * single configured route unambiguously, matching this milestone's own
+	 * single configured route unambiguously, matching the
 	 * one-membership-per-archiver scope. Multiple routes with a real
 	 * walreceiver connecting is left as a clean auth rejection (routeKey
 	 * stays "replication", which never matches a real route.key) rather
 	 * than guessing; a multi-route archiver needs a different mechanism
 	 * for a real standby to identify its route (e.g. application_name,
 	 * which real walreceiver does forward from primary_conninfo, unlike
-	 * dbname) -- a later milestone's problem, not this one's.
+	 * dbname) -- not supported yet.
 	 */
 	if (!isFetchMode &&
 		streq(routeKey, WS_REAL_WALRECEIVER_DBNAME) &&
@@ -154,6 +208,8 @@ handle_connection(int clientSock, const WsServerConfig *config)
 		close(clientSock);
 		return;
 	}
+
+	set_receive_timeout(clientSock, 0);
 
 	char title[256];
 
@@ -247,14 +303,16 @@ ws_accept_loop(const WsServerConfig *config)
 		return false;
 	}
 
-	/*
-	 * Auto-reap forked children: SIGCHLD/SIG_IGN is enough here since we
-	 * never need a child's exit status, only that it not linger as a
-	 * zombie -- simpler than an explicit waitpid(WNOHANG) loop.
-	 */
-	signal(SIGCHLD, SIG_IGN);
-
 	set_signal_handlers(false);
+
+	/* reap children and track how many are alive, see reap_children() */
+	struct sigaction reapAction;
+
+	memset(&reapAction, 0, sizeof(reapAction));
+	reapAction.sa_handler = reap_children;
+	sigemptyset(&reapAction.sa_mask);
+	reapAction.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+	sigaction(SIGCHLD, &reapAction, NULL);
 
 	log_info("pg_walsender listening on port %d%s%s",
 			 config->port,
@@ -287,6 +345,7 @@ ws_accept_loop(const WsServerConfig *config)
 			}
 
 			log_error("select() failed: %m");
+			sleep(1);       /* never spin on a persistent error */
 			continue;
 		}
 
@@ -312,14 +371,28 @@ ws_accept_loop(const WsServerConfig *config)
 			}
 
 			log_error("accept() failed: %m");
+			sleep(1);       /* never spin on a persistent error */
 			continue;
 		}
+
+		if (activeChildren >= WS_MAX_CONNECTIONS)
+		{
+			log_warn("Rejecting a connection: %d connections already open",
+					 (int) activeChildren);
+			close(clientSock);
+			continue;
+		}
+
+		(void) fcntl(clientSock, F_SETFD, FD_CLOEXEC);
+
+		activeChildren++;
 
 		pid_t pid = fork();
 
 		if (pid == -1)
 		{
 			log_error("fork() failed: %m");
+			activeChildren--;
 			close(clientSock);
 			continue;
 		}
@@ -328,15 +401,15 @@ ws_accept_loop(const WsServerConfig *config)
 		{
 			/*
 			 * Child: no exec(), just call straight into the connection
-			 * handler -- matches real Postgres's BackendMain() model (see
-			 * the design doc's "Process model" section).
+			 * handler -- matches real Postgres's BackendMain() model.
 			 */
 			close(listenSock);
+			signal(SIGCHLD, SIG_DFL);
 			handle_connection(clientSock, config);
 			_exit(0);
 		}
 
-		/* parent: keep accepting; SIGCHLD/SIG_IGN reaps the child for us */
+		/* parent: keep accepting; reap_children() collects the child */
 		close(clientSock);
 	}
 

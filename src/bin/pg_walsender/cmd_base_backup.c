@@ -256,7 +256,7 @@ scan_options(const char *raw, BaseBackupOptions *opts)
  * own header comment: do_pg_backup_start() is never called here, this file
  * already exists on disk). Returns false (caller falls back to the
  * route's own systemid/timeline, "0/0" for the LSN) if the file is
- * missing or doesn't parse -- a base backup taken by a later milestone's
+ * missing or doesn't parse -- a base backup taken by the archiver's
  * own machinery is expected to always have one.
  */
 static bool

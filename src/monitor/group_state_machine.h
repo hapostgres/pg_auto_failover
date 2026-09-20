@@ -27,9 +27,9 @@
  * MONITOR_FSM_SECTION_MS_FAILOVER, MONITOR_FSM_SECTION_MS_FAILOVER_RETRY_RESET },
  * matched via prefix/ancestor containment (SectionPathIsUnderPrefix) instead
  * of the hand-maintained array-index-range constants this replaces -- see
- * that mechanism's own comment for why (the design doc's own "Open items"
- * flagged the old index constants as needing "to stay in sync with the
- * table by hand as rows are added, removed, or reordered").
+ * that mechanism's own comment for why (the old index constants had to
+ * be kept in sync with the table by hand as rows were added, removed, or
+ * reordered).
  *
  * Only the first four values below (API_TRIGGERED/EARLY_CHECKS/
  * REPORTING_NODE/PRIMARY_NODE, unchanged in name and meaning from before this

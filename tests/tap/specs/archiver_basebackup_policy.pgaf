@@ -1,13 +1,12 @@
-# Archiving & Disaster Recovery, Milestone 5 (appended): base-backup
+# Archiving & Disaster Recovery: base-backup
 # production/retention policy -- frequency-driven scheduling and
-# maxcount/maxage pruning, appended to M5 rather than left as a follow-up,
-# so the archiver's own base-backup production is a real, bounded resource
-# before Milestones 6/7/8 (warm standby, PITR, cloud push) start building
-# on top of it.
+# maxcount/maxage pruning, so the archiver's own base-backup production is
+# a real, bounded resource before anything else (warm standby, PITR, cloud
+# push) builds on top of it.
 #
 # `frequency: 6 seconds` here is illustrative-fast, not the "1 backup a
-# minute" example a real deployment might reasonably use (the design doc's
-# own "nightly-cloud" example uses 6h; the schema's own default is 24h) --
+# minute" example a real deployment might reasonably use (the schema's
+# own default is 24h) --
 # this spec exists to prove the *mechanism* (does a new backup actually
 # fire once frequency has elapsed, does retention actually prune once
 # maxcount is exceeded), and a multi-minute real interval would make this
@@ -28,7 +27,7 @@
 # generation.pgaf, this spec's own job is scheduling/retention, not
 # re-proving the replay mechanism.
 #
-# Predecessor: archiver_basebackup_generation.pgaf (M5, base backup
+# Predecessor: archiver_basebackup_generation.pgaf (base backup
 # generation itself).
 
 cluster {
@@ -70,11 +69,14 @@ step test_001_policy_scheduling_and_retention {
                    false);
     }
 
-    # ~70s at 6s/cycle covers roughly 11 possible cycles -- comfortably
-    # past maxcount=3 even accounting for each live backup itself taking a
-    # few seconds, so retention has settled into a stable state by the
-    # time this checks.
-    sleep 70s
+    # Poll instead of sleeping: basebackupid only ever grows, so exactly
+    # three retained backups with the newest id at 5 or more (well past
+    # maxcount, counting the bootstrap backup) proves retention has actually pruned, not just that three
+    # backups exist yet.
+    wait until sql monitor {
+        SELECT count(*) = 3 AND max(basebackupid) >= 5
+          FROM pgautofailover.list_basebackups('default', 0);
+    } is { t }  timeout 180s
 
     sql monitor {
         SELECT count(*) FROM pgautofailover.list_basebackups('default', 0);

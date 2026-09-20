@@ -1,8 +1,7 @@
 /*
  * src/bin/pg_walsender/cmd_fetch_file.h
  *   FETCH_FILE: a non-standard side-channel, not a replication-protocol
- *   command, for restore_command-style single-WAL-file fetch (see the
- *   design doc's own reasoning: restore_command spawns a fresh subprocess
+ *   command, for restore_command-style single-WAL-file fetch (restore_command spawns a fresh subprocess
  *   once per segment, with no persistent session to reuse -- riding the
  *   replication grammar would add protocol surface no real client ever
  *   exercises). Reuses the same connection's startup-packet + auth

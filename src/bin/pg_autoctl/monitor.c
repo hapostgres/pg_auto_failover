@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "archiver_escape.h"
 #include "defaults.h"
 #include "env_utils.h"
 #include "log.h"
@@ -1738,8 +1739,8 @@ monitor_report_wal_received_bulk(Monitor *monitor, int64_t nodeId,
 			appendPQExpBufferChar(lsnsArray, ',');
 		}
 
-		appendPQExpBuffer(walFileNamesArray, "\"%s\"", walFileNames[i]);
-		appendPQExpBuffer(lsnsArray, "\"%s\"", lsns[i]);
+		archiver_append_array_element(walFileNamesArray, walFileNames[i]);
+		archiver_append_array_element(lsnsArray, lsns[i]);
 	}
 
 	appendPQExpBufferChar(walFileNamesArray, '}');

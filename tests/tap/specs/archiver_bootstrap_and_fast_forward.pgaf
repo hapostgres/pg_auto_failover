@@ -24,14 +24,14 @@
 # walcache, *then* node1 is killed and node2 brought back -- at that
 # point node2 is the only live standby-kind candidate, the archiver is
 # strictly ahead of it, and get_most_advanced_standby() (already proven
-# in this milestone's own manual testing to resolve an ARCHIVING row's
+# in manual testing to resolve an ARCHIVING row's
 # port == 0 sentinel to the archiver's real serve port, keeper.c) selects
 # the archiver as fast_forward's WAL source. test_004's final row-count
 # check on node2 (post-promotion) confirms real WAL bytes were actually
 # fetched and applied, not just that the FSM passed through the right
 # state label.
 #
-# Predecessor: archiver_basebackup_generation.pgaf (M5, base backup
+# Predecessor: archiver_basebackup_generation.pgaf (base backup
 # generation this spec's test_001 depends on already being ready).
 
 cluster {
@@ -119,7 +119,10 @@ step test_002_stop_secondary_and_advance_primary {
 
 step test_003_kill_primary_leaving_archiver_only {
     compose kill node1
-    sleep 45s
+    wait until sql monitor {
+        SELECT health FROM pgautofailover.node
+         WHERE nodename = 'node1' AND formationid = 'default'
+    } is { 0 }  timeout 90s
 }
 
 #
@@ -131,8 +134,7 @@ step test_003_kill_primary_leaving_archiver_only {
 #           it the first time. Once it does, node2 reports in behind the
 #           archiver, the monitor assigns fast_forward with the archiver as
 #           WAL source, node2 fetches the missing WAL from it (standby_
-#           fetch_missing_wal, already proven against a real archiver
-#           during this milestone's own development), and promotes. The
+#           fetch_missing_wal, already proven against a real archiver), and promotes. The
 #           row count on the other side confirms the fetched WAL was real
 #           and got applied, not just that the FSM label passed through
 #           fast_forward.

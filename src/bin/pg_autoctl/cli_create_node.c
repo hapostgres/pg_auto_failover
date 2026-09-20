@@ -1584,7 +1584,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 	/*
 	 * Unlike cli_create_node_getopts's ordinary node kinds, an explicit SSL
 	 * choice is not required here: an archiver with no SSL-related flag at
-	 * all keeps the trust/no-password conninfo this milestone originally
+	 * all keeps the trust/no-password conninfo the archiver originally
 	 * shipped with (options.pgSetup.ssl is zero-initialized above, same as
 	 * an explicit --no-ssl). Only validate the SSL settings when the
 	 * operator actually asked for something.
@@ -1620,7 +1620,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 
 /*
  * cli_create_archiver implements `pg_autoctl create archiver`: registers a
- * new Archiver identity and attaches it to a formation via M1's own
+ * new Archiver identity and attaches it to a formation via the
  * register_archiver()/archiver_add_formation() plpgsql functions (not the
  * ordinary C register_node() RPC every other node kind goes through -- an
  * Archiver is a process identity, not a (formation, group) membership by

@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_walsender/cmd_replication_slot.h
  *   CREATE_REPLICATION_SLOT / READ_REPLICATION_SLOT, physical slots only
- *   (matching the design doc's own scope). A slot here is a bookkeeping
+ *   (that is all that is supported). A slot here is a bookkeeping
  *   marker file under the route's WAL cache directory -- not a real
  *   Postgres slot on a live server (there's no live server), and not yet
  *   wired into any WAL-retention enforcement (that's the prune/retention

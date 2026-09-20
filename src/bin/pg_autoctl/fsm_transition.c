@@ -932,7 +932,7 @@ fsm_init_standby(Keeper *keeper)
 	 * archiver serves the same real replication protocol a live primary
 	 * does (pg_walsender), so standby_init_replication_source/
 	 * standby_init_database below don't need to know the difference, except
-	 * for one: pg_walsender has no slot-based retention in this milestone
+	 * for one: pg_walsender has no slot-based retention
 	 * (see cmd_start_replication.c's own header comment), so we mustn't ask
 	 * standby_init_database to first verify a replication slot exists on
 	 * the archiver -- it never will. Passing an empty slot name here

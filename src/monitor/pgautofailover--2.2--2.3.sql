@@ -2152,7 +2152,7 @@ grant execute on function pgautofailover.get_group_system_identifier(text,int)
 -- steady-state operation (reportedstate = 'archiving'). node_port is the
 -- port == 0 sentinel documented on get_most_advanced_standby's own C
 -- caller (keeper_get_most_advanced_standby, keeper.c) -- resolving it to
--- the archiver's real pg_walsender serve port is this milestone's C
+-- the archiver's real pg_walsender serve port is the C
 -- caller's job too, same pattern.
 CREATE FUNCTION pgautofailover.get_archiver_node
  (
@@ -2380,7 +2380,7 @@ grant execute on function pgautofailover.pitr_next_command(bigint)
 
 
 --
--- Archiving & Disaster Recovery, milestone 2: monitor-side FSM support for
+-- Archiving & Disaster Recovery: monitor-side FSM support for
 -- the ARCHIVING state (group_state_machine.c). Loosen
 -- system_identifier_is_null_at_init_only to also allow a NULL sysidentifier
 -- in 'archiving' and 'report_lsn': an ARCHIVING row (haspgdata = false) has

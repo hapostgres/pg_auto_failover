@@ -32,8 +32,8 @@
  * recheck on the monitor -- the cap that matters once an archiver serves
  * more than one (formation, group) at once.
  *
- * Target selection ('live') follows the design doc's own precedence,
- * minus its warm-standby tier (a later milestone, nothing to select from
+ * Target selection ('live') follows a fixed precedence,
+ * minus a warm-standby tier (not yet supported, nothing to select from
  * yet): the first healthy secondary in the group, falling back to the
  * primary when none exists. "Healthy" here just means "reachable via
  * pgautofailover.get_nodes()", not "least-loaded" -- picking between
@@ -75,6 +75,7 @@
 
 #include "service_archiver_basebackup.h"
 
+#include "archiver_escape.h"
 #include "defaults.h"
 #include "file_utils.h"
 #include "log.h"
@@ -564,10 +565,13 @@ report_basebackup(Keeper *keeper, NodeAddress *endLsnSource,
 
 	char connInfo[MAXCONNINFO] = { 0 };
 
-	sformat(connInfo, sizeof(connInfo),
-			"host=%s port=%d user=%s dbname=%s application_name=%s",
-			endLsnSource->host, endLsnSource->port,
-			PG_AUTOCTL_REPLICA_USERNAME, formationDbname, config->name);
+	if (!archiver_format_conninfo(connInfo, sizeof(connInfo),
+								 endLsnSource->host, endLsnSource->port,
+								 PG_AUTOCTL_REPLICA_USERNAME,
+								 formationDbname, config->name))
+	{
+		return false;
+	}
 
 	char endLsn[PG_LSN_MAXLENGTH] = { 0 };
 
@@ -872,8 +876,8 @@ copy_directory_tree(const char *sourceDir, const char *destDir)
  * gets pg_basebackup'd and discarded immediately after (this is
  * `volatile`: nothing persists between cycles), a promoted instance is
  * exactly as usable a source as a paused one; only a `persistent` replica
- * kept resident between cycles (a later milestone) would need the more
- * precise pause-at-target-LSN behavior the design doc describes for
+ * kept resident between cycles (not yet supported) would need the more
+ * precise pause-at-target-LSN behavior of
  * `pg_autoctl warm-standby advance`.
  *
  * recovery.signal, not standby.signal: this is a one-shot archive recovery
@@ -918,6 +922,14 @@ write_replay_recovery_config(const char *stagingDir, const char *walcacheDir)
 	 * pg_basebackup connection below, for the lifetime of one throwaway
 	 * cycle.
 	 */
+	if (!archiver_path_is_shell_safe(walcacheDir))
+	{
+		log_error("Refusing to write restore_command: WAL cache directory "
+				  "\"%s\" contains a character that is unsafe inside a "
+				  "shell-run restore_command", walcacheDir);
+		return false;
+	}
+
 	sformat(conf, sizeof(conf),
 			"\n"
 			"# added by pg_autoctl's archiver replay/volatile base backup generation\n"
@@ -1130,10 +1142,13 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 
 	char stagingConnInfo[MAXCONNINFO] = { 0 };
 
-	sformat(stagingConnInfo, sizeof(stagingConnInfo),
-			"host=127.0.0.1 port=%d user=%s dbname=%s application_name=%s",
-			PG_AUTOCTL_ARCHIVER_REPLAY_PORT,
-			PG_AUTOCTL_REPLICA_USERNAME, formationDbname, config->name);
+	if (!archiver_format_conninfo(stagingConnInfo, sizeof(stagingConnInfo),
+								 "127.0.0.1", PG_AUTOCTL_ARCHIVER_REPLAY_PORT,
+								 PG_AUTOCTL_REPLICA_USERNAME,
+								 formationDbname, config->name))
+	{
+		return false;
+	}
 
 	bool ok = wait_for_replay_promotion(stagingConnInfo,
 										ARCHIVER_REPLAY_PROMOTE_TIMEOUT_SECONDS);
@@ -1393,7 +1408,7 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	}
 
 	/* bootstrap is always 'live' -- nothing to replay from yet, matching
-	 * the design doc's own bootstrap rule -- every backup after that
+	 * the bootstrap rule -- every backup after that
 	 * follows the resolved policy's own source */
 	bool useReplay = !bootstrap && streq(policy.source, "replay");
 

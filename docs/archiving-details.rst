@@ -219,6 +219,18 @@ Two distinct connections, two distinct authentication stories:
   ``primary_conninfo`` at it, or run a restore from, and firewalled off
   from everywhere else.
 
+  Beyond a firewall, set the environment variable
+  ``PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS`` for ``pg_autoctl run`` to a
+  comma-separated list of the hostnames or IP addresses of your nodes
+  (and of any host you restore from): the reconciler writes it as
+  ``allowed_hosts`` into every route of ``archiver-routes.ini``, and
+  ``pg_walsender`` then refuses connections from any other peer address.
+  When it is not set, ``pg_autoctl`` logs a warning at startup, because
+  ``pg_walsender`` will then serve base backups and WAL to any host that
+  can reach its port. The listener also caps concurrent connections
+  (64) and drops a client that does not complete startup within 30
+  seconds.
+
 Process model
 --------------
 
@@ -345,6 +357,7 @@ moment it starts or stops that membership's own capture child::
 
   [default/0]
   path = /var/lib/pgaf/archiver1/default/0
+  allowed_hosts = node1,node2       # only when PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS is set
 
 Everything else ``pg_walsender`` needs, it reads directly from under that
 one path, at connection time:

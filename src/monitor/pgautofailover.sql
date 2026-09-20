@@ -2888,7 +2888,7 @@ grant execute on function pgautofailover.get_group_system_identifier(text,int)
 -- steady-state operation (reportedstate = 'archiving'). node_port is the
 -- port == 0 sentinel documented on get_most_advanced_standby's own C
 -- caller (keeper_get_most_advanced_standby, keeper.c) -- resolving it to
--- the archiver's real pg_walsender serve port is this milestone's C
+-- the archiver's real pg_walsender serve port is the C
 -- caller's job too, same pattern.
 CREATE FUNCTION pgautofailover.get_archiver_node
  (

@@ -208,8 +208,8 @@ cli_keeper_run(int argc, char **argv)
 	 * An archiver has no real Postgres instance of its own (see
 	 * service_archiver.c's own comment on config->pgSetup.pgdata's reused
 	 * meaning for an ARCHIVING node) -- local_postgres_init()/start_keeper()
-	 * both assume one, so branch to start_archiver() instead, milestone 3's
-	 * own `pg_autoctl run` support (service_archiver_run.c).
+	 * both assume one, so branch to start_archiver() instead, the
+	 * archiver's `pg_autoctl run` support (service_archiver_run.c).
 	 */
 	if (streq(config->nodeKind, "archiver"))
 	{

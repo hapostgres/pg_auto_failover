@@ -2,8 +2,8 @@
  * src/bin/pg_walsender/accept_loop.h
  *   The bare accept loop: socket()/bind()/listen()/accept(), fork()
  *   per connection with no exec() (matching real Postgres's
- *   BackendStartup()/BackendMain() model for cheap concurrency -- see
- *   the design doc's "Process model" section), each forked child running
+ *   BackendStartup()/BackendMain() model for cheap concurrency -- one
+ *   process per connection), each forked child running
  *   the full startup/auth/command-loop for exactly one connection.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.

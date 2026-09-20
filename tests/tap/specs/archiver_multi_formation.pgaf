@@ -1,4 +1,4 @@
-# Archiving & Disaster Recovery, Milestone 5: dynamic multi-formation
+# Archiving & Disaster Recovery: dynamic multi-formation
 # membership for a single archiver identity.
 #
 # Covers service_archiver_reconciler.c: one archiver process (archiver1)

@@ -825,7 +825,7 @@ KeeperFSMTransition KeeperFSM[] = {
 	},
 
 	/*
-	 * Archiving & Disaster Recovery (milestone 2): the ARCHIVING mirror of
+	 * Archiving & Disaster Recovery: the ARCHIVING mirror of
 	 * the ordinary standby-init/failover-participation/rejoin rows just
 	 * above and further below (SECONDARY/CATCHINGUP <-> REPORT_LSN) -- an
 	 * ARCHIVING node is only ever assigned these three transitions by the

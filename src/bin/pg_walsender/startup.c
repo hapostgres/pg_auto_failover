@@ -56,9 +56,8 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 			free(payload);
 
 			/*
-			 * MVP: no SSL/GSS support yet (see the design doc's Auth
-			 * section) -- decline, real libpq's default sslmode=prefer
-			 * falls back to plaintext automatically on 'N'.
+			 * MVP: no SSL/GSS support yet -- decline, real libpq's default
+			 * sslmode=prefer falls back to plaintext automatically on 'N'.
 			 */
 			if (!ws_write_raw_byte(sock, 'N'))
 			{

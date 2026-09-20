@@ -36,7 +36,7 @@ LOCAL_OBJS = $(patsubst %.c,%.o,$(LOCAL_SRC))
 # libraries), and pgaftest never does that itself, only service_archiver_
 # reconciler.c does (not shared here either).
 # -----------------------------------------------------------------------
-SHARED_SRCS = archiver_systemid.c archiver_wal_notify.c cli_common.c config.c coordinator.c fsm.c \
+SHARED_SRCS = archiver_escape.c archiver_systemid.c archiver_wal_notify.c cli_common.c config.c coordinator.c fsm.c \
               fsm_transition.c \
               fsm_transition_citus.c keeper.c keeper_config.c keeper_pg_init.c \
               monitor.c monitor_config.c monitor_pg_init.c \

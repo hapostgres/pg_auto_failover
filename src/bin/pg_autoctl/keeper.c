@@ -3334,7 +3334,7 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode,
 		 * pgautofailover.node, which has no column for an archiver's real
 		 * pg_walsender serve port (archiver-host-local information the
 		 * monitor is never told, matching service_archiver_serve.c's own
-		 * routes-file rationale). This milestone's own scope is one
+		 * routes-file rationale). The supported scope is one
 		 * archiver on the well-known default serve port, so resolving it
 		 * here is enough; a configurable-port archiver is a follow-up that
 		 * would need the monitor to actually track it.

@@ -1,4 +1,4 @@
-# Archiving & Disaster Recovery, Milestone 4: WAL-capture correctness and
+# Archiving & Disaster Recovery: WAL-capture correctness and
 # failover continuity for an ARCHIVING node.
 #
 # Covers the mechanism added in service_archiver.c's
@@ -6,7 +6,7 @@
 # segment (no longer ".partial"), the archiver reports it to the monitor via
 # pgautofailover.report_wal_received(), which is what actually populates
 # pgautofailover.archiver_wal and makes wal_archived() -- the archive_command
-# confirmation check -- return true. Before this milestone nothing in the
+# confirmation check -- return true. Before that fix nothing in the
 # codebase ever called that SQL function, so archiver_wal stayed permanently
 # empty no matter how much WAL an archiver captured.
 #

@@ -42,7 +42,7 @@ typedef struct MonitorAssignedState
  * One row per archiver attached to a formation, from pgautofailover.
  * get_archivers() -- storage stats and FSM state are both nullable on the
  * SQL side (usedbytes/freebytes: NULL until the first report; the node_id/
- * reportedState/goalState side of the LEFT JOIN: NULL if this milestone's
+ * reportedState/goalState side of the LEFT JOIN: NULL if the
  * one-'wal-receiver'-row-per-group assumption isn't met yet), hence the
  * separate hasStorageStats/hasNode flags rather than a sentinel value.
  */

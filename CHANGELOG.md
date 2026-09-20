@@ -1,3 +1,26 @@
+### pg_auto_failover v2.3 (unreleased) ###
+
+This release adds Archiving & Disaster Recovery: a new kind of node, the
+archiver, that continuously captures WAL and produces base backups for a
+formation's groups, and a new standalone `pg_walsender` server that lets
+stock `pg_basebackup`, streaming standbys and `restore_command` read from it.
+
+### Added
+* New `ARCHIVING` node state and archiver nodes: `pg_autoctl create archiver`,
+  `pg_autoctl archiver serve|formation|show`, one archiver serving several
+  (formation, group) memberships, with optional `--region` labels. (#1186)
+* `pg_walsender`, a replication-protocol server for captured WAL and base
+  backups, with an optional per-route host allow-list set with
+  `PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS`. (#1186)
+* Base backup generation (`live` and `replay` sources) driven by
+  `pg_autoctl create|set|show basebackup-policy`, with frequency, count and
+  age retention. (#1186)
+* `pg_autoctl create postgres --from-archiver` to bootstrap a node from an
+  archiver, and fast-forward of a lagging standby from an archiver. (#1186)
+* Monitor extension version 2.3, with an upgrade script from 2.2. (#1186)
+* `pgaftest` `archiver { }` cluster blocks and a `wait until sql` polling
+  primitive. (#1186)
+
 ### pg_auto_failover v2.2 (April 3, 2025) ###
 
 This release includes support for Postgres major version 17 as well as dependency and documentation updates. It also drops support for outdated Postgres major versions 11 and 12.

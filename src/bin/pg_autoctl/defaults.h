@@ -228,6 +228,12 @@
 
 /* default port pg_walsender listens on, started via `pg_autoctl archiver
  * serve` -- matches src/bin/pg_walsender/defaults.h's own WS_DEFAULT_PORT */
+/*
+ * Optional comma-separated list of hostnames/addresses allowed to connect to
+ * pg_walsender; written as allowed_hosts into every route of the routes file.
+ */
+#define PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS_ENV "PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS"
+
 #define PG_AUTOCTL_ARCHIVER_SERVE_PORT 6543
 
 /* port the archiver's own throwaway replay-mode staging Postgres instance

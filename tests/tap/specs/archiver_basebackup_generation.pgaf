@@ -1,4 +1,4 @@
-# Archiving & Disaster Recovery, Milestone 5: base backup generation,
+# Archiving & Disaster Recovery: base backup generation,
 # `live` source then `replay`/`volatile`.
 #
 # Covers service_archiver_maybe_generate_basebackup() (service_archiver_
@@ -30,7 +30,7 @@
 # own sleep starts, so the fast frequency is already in effect for whichever
 # tick first notices the bootstrap backup has landed and a new one is due.
 #
-# Predecessor: archiver_wal_capture.pgaf (M4).
+# Predecessor: archiver_wal_capture.pgaf .
 
 cluster {
     monitor

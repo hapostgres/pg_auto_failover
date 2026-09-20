@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_autoctl/service_archiver_run.h
  *   Archiving & Disaster Recovery: `pg_autoctl run` support for
- *   kind = archiver (milestone 3's own build-order line). Supervises the
+ *   kind = archiver. Supervises the
  *   archiver's two halves -- WAL capture (service_archiver_reconciler.c,
  *   supervising one service_archiver.c service_archiver_loop per
  *   membership, outbound pg_receivewal against the primary) and serving

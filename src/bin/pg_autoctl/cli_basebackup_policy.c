@@ -17,8 +17,7 @@
  * there is nothing to duplicate client-side. The document is the flat
  * policy body itself (source/replaymode/cache/frequency/maxcount/maxage/
  * onpromotion/concurrency, whichever subset is being set) -- not wrapped
- * in the design doc's own illustrative "pgaf-archiver"/"basebackup-policy"
- * namespace, since the monitor-side functions this calls don't unwrap one.
+ * in any enclosing namespace object, since the monitor-side functions this calls don't unwrap one.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -70,7 +69,7 @@ static void print_basebackup_policy(BasebackupPolicy *policy);
  * commands (--monitor --name --json, plus --config for create/set). Kept
  * as one function with a requireConfig switch rather than three near-
  * duplicates, matching cli_create_archiver_getopts's own minimal, hand-
- * rolled style for this milestone's own archiver-adjacent commands
+ * rolled style for the archiver-adjacent commands
  * (rather than the ordinary-node cli_create_node_getopts, which assumes a
  * real PostgresSetup none of these commands have any use for).
  */

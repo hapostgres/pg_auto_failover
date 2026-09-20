@@ -29,8 +29,8 @@ typedef struct WsRoute WsRoute;
 
 /*
  * Parsed StartupMessage contents we care about. "database" doubles as our
- * routing key ("<formation>/<group>", see the design doc's own worked
- * process-title example, "pg_autoctl: walsender default/0").
+ * routing key ("<formation>/<group>", as in the process title
+ * "pg_autoctl: walsender default/0").
  */
 typedef struct WsStartupParams
 {

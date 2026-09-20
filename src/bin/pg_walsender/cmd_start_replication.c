@@ -237,7 +237,7 @@ skip_ws(const char *p)
  * connection attempt loses the startup HBA-propagation race restarts
  * streaming from the server's then-current position instead of resuming,
  * silently skipping every segment in between -- observed in practice
- * during this milestone's own end-to-end testing. Without this check, a
+ * during end-to-end testing. Without this check, a
  * client asking to stream from inside that permanent gap (e.g. a real pg_
  * basebackup's own --wal-method=stream background receiver, replaying from
  * the position a BASE_BACKUP response advertised) would sit in this file's
