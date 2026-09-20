@@ -2055,7 +2055,7 @@ BEGIN
     LOOP
         new_nodeid := NULL;
 
-        -- nodeport = 0 is a permanent sentinel, not an M1 stopgap: an
+        -- nodeport = 0 is a permanent sentinel: an
         -- ARCHIVING row has no postmaster of its own to be reachable on,
         -- so nodehost:nodeport isn't a connectable address here the way
         -- it is for every haspgdata row -- see node_nodehost_nodeport_
