@@ -40,6 +40,14 @@ typedef struct TestRunner
 	char lastSqlState[8];          /* SQLSTATE from last failed sql       */
 	char lastSqlService[64];       /* service name of last sql command    */
 
+	/* spec-scoped variables set by "let NAME = sql ..." ("${NAME}") */
+	struct
+	{
+		char name[64];
+		char value[256];
+	} vars[32];
+	int varCount;
+
 	bool composeUp;                /* compose stack is running        */
 	bool interactive;              /* --tmux: pgaftest service sleeps instead of running */
 

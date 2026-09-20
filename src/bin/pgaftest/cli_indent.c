@@ -900,6 +900,15 @@ print_cmd(FILE *out, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_LET:
+		{
+			char norm[8192];
+			normalize_sql(cmd->args, norm, sizeof(norm));
+			fformat(out, "%*slet %s = sql %s { %s }\n",
+					indent, "", cmd->state, cmd->service, norm);
+			break;
+		}
+
 		case CMD_WAIT_SQL:
 		{
 			/*

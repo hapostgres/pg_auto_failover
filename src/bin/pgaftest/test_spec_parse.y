@@ -181,7 +181,7 @@ static TestArchiverNode *current_archiver = NULL;
 %token T_EXEC T_EXEC_FAILS T_RUN T_PG_AUTOCTL
 %token T_WAIT T_UNTIL T_TIMEOUT T_AND T_IS T_WITH T_REPLAYS
 %token T_ASSERT
-%token T_SQL T_EXPECT T_ERROR
+%token T_SQL T_EXPECT T_ERROR T_LET
 %token T_PROMOTE
 %token T_PERFORM T_FAILOVER
 %token T_NETWORK T_DISCONNECT T_CONNECT
@@ -207,7 +207,7 @@ static TestArchiverNode *current_archiver = NULL;
 %type <str>   node_name
 %type <step>  cmd_block cmd_list
 %type <cmd>   step_cmd
-%type <cmd>   exec_cmd wait_cmd assert_cmd sql_cmd expect_cmd
+%type <cmd>   exec_cmd wait_cmd assert_cmd sql_cmd let_cmd expect_cmd
 %type <cmd>   promote_cmd network_cmd sleep_cmd compose_cmd
 %type <cmd>   postgres_ctl_cmd stays_while_cmd set_monitor_cmd logs_cmd perform_cmd
 %type <cmd>   fsm_step_cmd
@@ -828,6 +828,7 @@ step_cmd:
 	| wait_cmd          { $$ = $1; }
 	| assert_cmd        { $$ = $1; }
 	| sql_cmd           { $$ = $1; }
+	| let_cmd           { $$ = $1; }
 	| expect_cmd        { $$ = $1; }
 	| promote_cmd       { $$ = $1; }
 	| perform_cmd       { $$ = $1; }
@@ -1336,6 +1337,25 @@ sql_cmd:
 		strlcpy($$->service, $2, sizeof($$->service));
 		strlcpy($$->args,    $3, sizeof($$->args));
 		free($2); free($3);
+	}
+	;
+
+/* -----------------------------------------------------------------------
+ * let NAME = sql <svc> { SQL }
+ *
+ * Runs the SQL (exactly one row, one column required) and stores the
+ * trimmed result in variable NAME, usable later as ${NAME} in sql,
+ * wait until sql, expect and exec text.  Name is kept in ->state.
+ * ----------------------------------------------------------------------- */
+
+let_cmd:
+	T_LET T_IDENT T_EQUALS T_SQL T_IDENT T_BLOCK
+	{
+		$$ = make_cmd(CMD_LET);
+		strlcpy($$->state,   $2, sizeof($$->state));
+		strlcpy($$->service, $5, sizeof($$->service));
+		strlcpy($$->args,    $6, sizeof($$->args));
+		free($2); free($5); free($6);
 	}
 	;
 

@@ -136,48 +136,49 @@ extern int yydebug;
     T_SQL = 337,                   /* T_SQL  */
     T_EXPECT = 338,                /* T_EXPECT  */
     T_ERROR = 339,                 /* T_ERROR  */
-    T_PROMOTE = 340,               /* T_PROMOTE  */
-    T_PERFORM = 341,               /* T_PERFORM  */
-    T_FAILOVER = 342,              /* T_FAILOVER  */
-    T_NETWORK = 343,               /* T_NETWORK  */
-    T_DISCONNECT = 344,            /* T_DISCONNECT  */
-    T_CONNECT = 345,               /* T_CONNECT  */
-    T_SLEEP = 346,                 /* T_SLEEP  */
-    T_COMPOSE = 347,               /* T_COMPOSE  */
-    T_DOWN = 348,                  /* T_DOWN  */
-    T_START = 349,                 /* T_START  */
-    T_STOP = 350,                  /* T_STOP  */
-    T_STOPPED = 351,               /* T_STOPPED  */
-    T_KILL = 352,                  /* T_KILL  */
-    T_INJECT = 353,                /* T_INJECT  */
-    T_STATE = 354,                 /* T_STATE  */
-    T_ASSIGNED_STATE = 355,        /* T_ASSIGNED_STATE  */
-    T_IN = 356,                    /* T_IN  */
-    T_GROUP = 357,                 /* T_GROUP  */
-    T_LBRACE = 358,                /* T_LBRACE  */
-    T_RBRACE = 359,                /* T_RBRACE  */
-    T_COMMA = 360,                 /* T_COMMA  */
-    T_POSTGRES = 361,              /* T_POSTGRES  */
-    T_STAYS = 362,                 /* T_STAYS  */
-    T_WHILE = 363,                 /* T_WHILE  */
-    T_THROUGH = 364,               /* T_THROUGH  */
-    T_SET = 365,                   /* T_SET  */
-    T_GET = 366,                   /* T_GET  */
-    T_FSM = 367,                   /* T_FSM  */
-    T_LOGS = 368,                  /* T_LOGS  */
-    T_NOT = 369,                   /* T_NOT  */
-    T_CONTAINS = 370,              /* T_CONTAINS  */
-    T_MATCHES = 371,               /* T_MATCHES  */
-    T_WAL = 372,                   /* T_WAL  */
-    T_SEGMENT = 373,               /* T_SEGMENT  */
-    T_ARCHIVED = 374,              /* T_ARCHIVED  */
-    T_BASEBACKUP = 375,            /* T_BASEBACKUP  */
-    T_SLASH = 376,                 /* T_SLASH  */
-    T_INTEGER = 377,               /* T_INTEGER  */
-    T_IDENT = 378,                 /* T_IDENT  */
-    T_STRING = 379,                /* T_STRING  */
-    T_BLOCK = 380,                 /* T_BLOCK  */
-    T_SHELL_ARGS = 381             /* T_SHELL_ARGS  */
+    T_LET = 340,                   /* T_LET  */
+    T_PROMOTE = 341,               /* T_PROMOTE  */
+    T_PERFORM = 342,               /* T_PERFORM  */
+    T_FAILOVER = 343,              /* T_FAILOVER  */
+    T_NETWORK = 344,               /* T_NETWORK  */
+    T_DISCONNECT = 345,            /* T_DISCONNECT  */
+    T_CONNECT = 346,               /* T_CONNECT  */
+    T_SLEEP = 347,                 /* T_SLEEP  */
+    T_COMPOSE = 348,               /* T_COMPOSE  */
+    T_DOWN = 349,                  /* T_DOWN  */
+    T_START = 350,                 /* T_START  */
+    T_STOP = 351,                  /* T_STOP  */
+    T_STOPPED = 352,               /* T_STOPPED  */
+    T_KILL = 353,                  /* T_KILL  */
+    T_INJECT = 354,                /* T_INJECT  */
+    T_STATE = 355,                 /* T_STATE  */
+    T_ASSIGNED_STATE = 356,        /* T_ASSIGNED_STATE  */
+    T_IN = 357,                    /* T_IN  */
+    T_GROUP = 358,                 /* T_GROUP  */
+    T_LBRACE = 359,                /* T_LBRACE  */
+    T_RBRACE = 360,                /* T_RBRACE  */
+    T_COMMA = 361,                 /* T_COMMA  */
+    T_POSTGRES = 362,              /* T_POSTGRES  */
+    T_STAYS = 363,                 /* T_STAYS  */
+    T_WHILE = 364,                 /* T_WHILE  */
+    T_THROUGH = 365,               /* T_THROUGH  */
+    T_SET = 366,                   /* T_SET  */
+    T_GET = 367,                   /* T_GET  */
+    T_FSM = 368,                   /* T_FSM  */
+    T_LOGS = 369,                  /* T_LOGS  */
+    T_NOT = 370,                   /* T_NOT  */
+    T_CONTAINS = 371,              /* T_CONTAINS  */
+    T_MATCHES = 372,               /* T_MATCHES  */
+    T_WAL = 373,                   /* T_WAL  */
+    T_SEGMENT = 374,               /* T_SEGMENT  */
+    T_ARCHIVED = 375,              /* T_ARCHIVED  */
+    T_BASEBACKUP = 376,            /* T_BASEBACKUP  */
+    T_SLASH = 377,                 /* T_SLASH  */
+    T_INTEGER = 378,               /* T_INTEGER  */
+    T_IDENT = 379,                 /* T_IDENT  */
+    T_STRING = 380,                /* T_STRING  */
+    T_BLOCK = 381,                 /* T_BLOCK  */
+    T_SHELL_ARGS = 382             /* T_SHELL_ARGS  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -193,7 +194,7 @@ union YYSTYPE
 	TestStep   *step;
 	TestCmd    *cmd;
 
-#line 197 "test_spec_parse.h"
+#line 198 "test_spec_parse.h"
 
 };
 typedef union YYSTYPE YYSTYPE;

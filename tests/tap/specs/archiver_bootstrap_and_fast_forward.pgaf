@@ -101,9 +101,13 @@ step test_002_stop_secondary_and_advance_primary {
     sql node1 {
         INSERT INTO archiver_ff_probe SELECT generate_series(1, 1000);
     }
-    sql node1 { SELECT pg_switch_wal(); }
-    sql node1 { SELECT pg_switch_wal(); }
-    sleep 15s
+    # pg_switch_wal() returns an LSN inside the segment it just closed, so
+    # its walfile name is exactly the segment holding the INSERT above. Wait
+    # for the archiver to report that segment captured rather than sleeping.
+    let closed_seg = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor {
+        SELECT pgautofailover.wal_archived('default', 0, '${closed_seg}')
+    } is { t }  timeout 60s
 }
 
 #

@@ -270,6 +270,7 @@ static void pgaf_read_raw_block(void);
 <STEP_BODY>"timeout"       { return T_TIMEOUT; }
 <STEP_BODY>"assert"        { return T_ASSERT; }
 <STEP_BODY>"sql"           { return T_SQL; }
+<STEP_BODY>"let"           { return T_LET; }
 <STEP_BODY>"wal"           { return T_WAL; }
 <STEP_BODY>"segment"       { return T_SEGMENT; }
 <STEP_BODY>"archived"      { return T_ARCHIVED; }

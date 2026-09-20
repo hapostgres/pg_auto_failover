@@ -236,6 +236,7 @@ typedef enum TestCmdKind
 	CMD_ASSERT_ASSIGNED,           /* assert <node> assigned-state = <s>          */
 	CMD_PROMOTE,         /* promote node1 [, node2, ...]                */
 	CMD_SQL,             /* sql <svc> { SQL }                           */
+	CMD_LET,             /* let NAME = sql <svc> { SQL }: state=NAME    */
 	CMD_EXPECT,          /* expect { text }                             */
 	CMD_EXPECT_ERROR,    /* expect error [SQLSTATE]                     */
 	CMD_NETWORK_OFF,     /* network disconnect <node>                   */
