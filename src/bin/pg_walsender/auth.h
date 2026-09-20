@@ -1,14 +1,20 @@
 /*
  * src/bin/pg_walsender/auth.h
- *   Trust-equivalent authentication, matching this project's existing
- *   convention: no password/SCRAM infrastructure exists anywhere in
- *   pg_auto_failover today (pghba.c installs plain "trust" entries for the
- *   replicator role, defaults.h's REPLICATION_PASSWORD_DEFAULT is NULL).
- *   pg_walsender mirrors that: accept iff the startup packet's user is the
- *   replicator role and, when the resolved route carries an allowed_hosts
- *   list, the peer address matches -- routes.c's allowed_hosts is
- *   effectively pg_walsender's own pg_hba.conf, since it has no PGDATA of
- *   its own to carry a real one.
+ *   Connection authentication for pg_walsender. The route the client asked
+ *   for must exist in the routes file; then the first matching rule of the
+ *   HBA file (hba.h) decides the method:
+ *
+ *     trust          accept
+ *     scram-sha-256  real SCRAM-SHA-256 exchange (RFC 5802, as spoken by
+ *                    libpq, so pg_basebackup, pg_receivewal and a
+ *                    standby's walreceiver work unmodified) against the
+ *                    stored verifier for the user in the passwd file, one
+ *                    "<user>:SCRAM-SHA-256$<iter>:<salt>$<stored>:<server>"
+ *                    per line (create one with `pg_walsender scram-secret`)
+ *     reject         refuse
+ *
+ *   Without any HBA file configured (no --pgdata: manual/standalone
+ *   testing), everything is accepted as before.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -20,25 +26,31 @@
 
 #include <stdbool.h>
 
+#include "postgres_fe.h"
+
 #include "walsender.h"
 #include "routes.h"
 
+typedef struct WsAuthConfig
+{
+	char hbaPath[MAXPGPATH];       /* empty: no authentication at all */
+	char passwdPath[MAXPGPATH];    /* scram-sha-256 verifiers */
+} WsAuthConfig;
+
 /*
- * ws_authenticate checks params against the replicator username and, if
- * routes/routeCount is non-empty, against the route matching routeKey and
- * its allowed_hosts. routeKey is passed explicitly rather than read from
- * params->database because the FETCH_FILE side-channel (see
- * cmd_fetch_file.h) reuses this same auth path with a "fetch/" prefix
- * stripped off the connection's actual dbname -- the caller (accept_loop.c)
- * decides what routeKey means, this function only ever looks it up. On
- * success returns true and sets *foundRoute (NULL when routes were not
- * supplied at all -- a manual-testing convenience, see main.c's --pgdata
- * option). On failure, an ErrorResponse has already been sent to sock; the
- * caller only needs to close the connection.
+ * ws_authenticate resolves routeKey to a route and authenticates the
+ * connection per the HBA file. routeKey is passed explicitly because the
+ * FETCH_FILE side-channel (see cmd_fetch_file.h) reuses this path with a
+ * "fetch/" prefix stripped off the connection's dbname. On success returns
+ * true and sets *foundRoute (NULL when routes were not supplied at all).
+ * On failure an ErrorResponse has already been sent; the caller only needs
+ * to close the connection. AuthenticationOk is NOT sent here: the caller
+ * sends it, as before.
  */
 bool ws_authenticate(int sock, const WsStartupParams *params,
 					 const char *routeKey,
 					 const WsRoute *routes, int routeCount,
+					 const WsAuthConfig *authConfig,
 					 const WsRoute **foundRoute);
 
 #endif /* WS_AUTH_H */

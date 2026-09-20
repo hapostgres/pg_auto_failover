@@ -61,7 +61,6 @@
 
 #include "archiver_escape.h"
 #include "defaults.h"
-#include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
 #include "monitor.h"
@@ -354,31 +353,6 @@ archiver_reconciler_write_routes_file(Keeper *templateKeeper,
 		return false;
 	}
 
-	/*
-	 * pg_walsender has no password or TLS of its own: the only access
-	 * control it has is this optional per-route host allow-list.
-	 */
-	char allowedHosts[BUFSIZE] = { 0 };
-
-	if (get_env_copy(PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS_ENV,
-					 allowedHosts, sizeof(allowedHosts)) &&
-		!archiver_value_is_single_line(allowedHosts))
-	{
-		log_error("Ignoring %s: it contains a control character",
-				  PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS_ENV);
-		allowedHosts[0] = '\0';
-	}
-
-	if (allowedHosts[0] == '\0')
-	{
-		log_warn("%s is not set: pg_walsender will serve base backups and "
-				 "WAL to any host that can reach its port; restrict access "
-				 "with a firewall or set %s to a comma-separated list of "
-				 "the nodes' hostnames or addresses",
-				 PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS_ENV,
-				 PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS_ENV);
-	}
-
 	for (int i = 0; i < supervisor->serviceCount; i++)
 	{
 		Service *service = &(supervisor->services[i]);
@@ -406,11 +380,6 @@ archiver_reconciler_write_routes_file(Keeper *templateKeeper,
 						  membershipKeeper->config.groupId);
 		appendPQExpBuffer(buffer, "path = %s\n",
 						  membershipKeeper->config.pgSetup.pgdata);
-
-		if (allowedHosts[0] != '\0')
-		{
-			appendPQExpBuffer(buffer, "allowed_hosts = %s\n", allowedHosts);
-		}
 	}
 
 	bool success = !PQExpBufferBroken(buffer) &&

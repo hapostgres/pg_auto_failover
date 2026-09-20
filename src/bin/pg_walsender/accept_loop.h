@@ -18,10 +18,13 @@
 
 #include "postgres_fe.h"
 
+#include "auth.h"
+
 typedef struct WsServerConfig
 {
 	int port;
 	char routesPath[MAXPGPATH];   /* empty: no routing, manual-testing mode */
+	WsAuthConfig auth;
 } WsServerConfig;
 
 bool ws_accept_loop(const WsServerConfig *config);

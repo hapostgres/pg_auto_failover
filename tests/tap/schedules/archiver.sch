@@ -16,3 +16,4 @@ archiver_wal_capture
 archiver_basebackup_generation
 archiver_basebackup_policy
 archiver_bootstrap_and_fast_forward
+archiver_walsender_auth

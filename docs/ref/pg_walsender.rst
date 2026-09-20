@@ -16,6 +16,8 @@ Two modes of operation are supported:
 
 - **Server mode** (the default): runs the accept loop, one connection per
   forked child, until stopped.
+- **``scram-secret`` mode**: prints one ``archiver-passwd`` line
+  (``<user>:SCRAM-SHA-256$...``) for the password in ``PGPASSWORD``.
 - **``fetch-file`` mode**: a one-shot client that fetches a single named
   file over the ``FETCH_FILE`` side-channel and exits -- what a node's own
   ``restore_command`` shells out to, the same way this project already
@@ -27,6 +29,7 @@ Synopsis
 ::
 
   pg_walsender --port <port> [--pgdata <path>]
+  PGPASSWORD=... pg_walsender scram-secret [--user <name>]
 
   pg_walsender fetch-file --host <host> --port <port> \
                --route <formation>/<group> \
@@ -66,10 +69,14 @@ Options
   ``PGDATA`` environment variable. Used to derive
   ``<pgdata>/archiver-routes.ini``, the routes file mapping
   ``"<formation>/<group>"`` (matched against the incoming connection's
-  dbname) to ``{ path, allowed_hosts }``. Written by
+  dbname) to its storage path -- written by
   :ref:`pg_autoctl_archiver`'s own reconciler process, not meant to be
-  hand-edited. Omit both ``--pgdata`` and ``PGDATA`` only for manual,
-  standalone testing (accepts any dbname, no host restriction).
+  hand-edited -- and ``<pgdata>/archiver-hba.conf`` and ``archiver-passwd`` (plus
+  ``archiver-nodes.list`` in each route's directory), which decide who may connect (see
+  :ref:`archiving_architecture`; the HBA file is created with a default
+  trusting the monitor's node list when missing). Omit both ``--pgdata``
+  and ``PGDATA`` only for manual, standalone testing (accepts any dbname,
+  no authentication).
 
 ``fetch-file`` mode options:
 

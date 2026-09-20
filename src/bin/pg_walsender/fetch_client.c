@@ -20,8 +20,10 @@
 #include "fetch_client.h"
 #include "defaults.h"
 #include "file_utils.h"
+#include "env_utils.h"
 #include "framing.h"
 #include "log.h"
+#include "scram.h"
 
 
 static int
@@ -140,6 +142,138 @@ extract_error_message(const char *payload, int32_t payloadLen,
 }
 
 
+/*
+ * client_scram_authenticate answers an AuthenticationSASL request with a
+ * SCRAM-SHA-256 exchange, the password coming from PGPASSWORD (as libpq
+ * would), and consumes everything up to and including AuthenticationOk.
+ */
+static bool
+client_scram_authenticate(int sock)
+{
+	char password[512] = { 0 };
+
+	if (!get_env_copy("PGPASSWORD", password, sizeof(password)) ||
+		password[0] == '\0')
+	{
+		log_error("The server requires a password: set PGPASSWORD");
+		return false;
+	}
+
+	ScramClientState state;
+	char clientFirst[SCRAM_MAX_MESSAGE_LEN];
+
+	if (!scram_client_first(&state, clientFirst, sizeof(clientFirst)))
+	{
+		return false;
+	}
+
+	/* SASLInitialResponse: mechanism\0 int32 length message */
+	PQExpBuffer buf = createPQExpBuffer();
+	int32_t netLen = htonl((int32_t) strlen(clientFirst));
+
+	appendBinaryPQExpBuffer(buf, "SCRAM-SHA-256", strlen("SCRAM-SHA-256") + 1);
+	appendBinaryPQExpBuffer(buf, (const char *) &netLen, 4);
+	appendBinaryPQExpBuffer(buf, clientFirst, strlen(clientFirst));
+
+	bool ok = !PQExpBufferBroken(buf) &&
+			  ws_send_message(sock, 'p', buf->data, buf->len);
+
+	destroyPQExpBuffer(buf);
+
+	if (!ok)
+	{
+		return false;
+	}
+
+	char type;
+	char *payload = NULL;
+	int32_t payloadLen = 0;
+
+	if (!ws_read_message(sock, &type, &payload, &payloadLen))
+	{
+		free(payload);
+		return false;
+	}
+
+	if (type == 'E')
+	{
+		char message[512];
+
+		extract_error_message(payload, payloadLen, message, sizeof(message));
+		log_error("Authentication failed: %s", message);
+		free(payload);
+		return false;
+	}
+
+	if (type != 'R' || payloadLen < 4 || payloadLen >= SCRAM_MAX_MESSAGE_LEN)
+	{
+		free(payload);
+		return false;
+	}
+
+	char serverFirst[SCRAM_MAX_MESSAGE_LEN];
+
+	memcpy(serverFirst, payload + 4, payloadLen - 4); /* IGNORE-BANNED */
+	serverFirst[payloadLen - 4] = '\0';
+	free(payload);
+
+	char clientFinal[SCRAM_MAX_MESSAGE_LEN];
+
+	if (!scram_client_final(&state, password, serverFirst,
+							clientFinal, sizeof(clientFinal)) ||
+		!ws_send_message(sock, 'p', clientFinal, (int32_t) strlen(clientFinal)))
+	{
+		return false;
+	}
+
+	payload = NULL;
+
+	if (!ws_read_message(sock, &type, &payload, &payloadLen))
+	{
+		free(payload);
+		return false;
+	}
+
+	if (type == 'E')
+	{
+		char message[512];
+
+		extract_error_message(payload, payloadLen, message, sizeof(message));
+		log_error("Authentication failed: %s", message);
+		free(payload);
+		return false;
+	}
+
+	if (type != 'R' || payloadLen < 4 || payloadLen >= SCRAM_MAX_MESSAGE_LEN)
+	{
+		free(payload);
+		return false;
+	}
+
+	char serverFinal[SCRAM_MAX_MESSAGE_LEN];
+
+	memcpy(serverFinal, payload + 4, payloadLen - 4); /* IGNORE-BANNED */
+	serverFinal[payloadLen - 4] = '\0';
+	free(payload);
+
+	if (!scram_client_verify_server_final(&state, serverFinal))
+	{
+		log_error("The server's SCRAM signature did not verify");
+		return false;
+	}
+
+	/* AuthenticationOk */
+	payload = NULL;
+
+	bool gotOk = ws_read_message(sock, &type, &payload, &payloadLen) &&
+				 type == 'R';
+
+	free(payload);
+
+	return gotOk;
+}
+
+
 int
 ws_fetch_file_client(const char *host, int port, const char *routeKey,
 					 const char *filename, const char *outputPath)
@@ -186,14 +320,36 @@ ws_fetch_file_client(const char *host, int port, const char *routeKey,
 		return 1;
 	}
 
-	free(payload);
+	int32_t authCode = -1;
 
-	if (type != 'R')
+	if (type == 'R' && payloadLen >= 4)
 	{
-		log_error("Unexpected message type '%c' from %s:%d (expected "
-				  "AuthenticationOk)", type, host, port);
-		close(sock);
-		return 1;
+		memcpy(&authCode, payload, 4); /* IGNORE-BANNED */
+		authCode = ntohl(authCode);
+	}
+
+	if (type == 'R' && authCode == 10)
+	{
+		free(payload);
+
+		if (!client_scram_authenticate(sock))
+		{
+			close(sock);
+			return 1;
+		}
+	}
+	else
+	{
+		free(payload);
+
+		if (type != 'R' || authCode != 0)
+		{
+			log_error("Unexpected authentication response '%c'/%d from "
+					  "%s:%d (expected AuthenticationOk)",
+					  type, authCode, host, port);
+			close(sock);
+			return 1;
+		}
 	}
 
 	char line[300];

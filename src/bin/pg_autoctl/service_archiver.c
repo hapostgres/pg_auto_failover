@@ -34,6 +34,7 @@
 
 #include "service_archiver.h"
 
+#include "archiver_escape.h"
 #include "archiver_systemid.h"
 #include "archiver_wal_notify.h"
 #include "defaults.h"
@@ -682,6 +683,74 @@ service_archiver_report_storage(Keeper *keeper)
  * comment): one archiver, one (formation, group) row, reported here
  * directly rather than iterating a list the monitor refreshes.
  */
+
+/*
+ * service_archiver_write_nodes_file keeps <membership dir>/archiver-nodes.list
+ * current: one hostname per line for every node the monitor lists for this
+ * membership's (formation, group), archiver rows (port 0) excluded. It is
+ * what the "monitor" address of pg_walsender's HBA file means (hba.h), read
+ * fresh on every connection, so a node that just registered is let in one
+ * tick later. Written only when the content changed; when the monitor
+ * cannot be queried the previous file is left alone (failing static, not
+ * open).
+ */
+static void
+service_archiver_write_nodes_file(Keeper *keeper)
+{
+	static char lastContents[BUFSIZE * 4] = { 0 };
+	NodeAddressArray nodeArray = { 0 };
+
+	if (!monitor_get_nodes(&(keeper->monitor),
+						   keeper->config.formation,
+						   keeper->config.groupId,
+						   &nodeArray))
+	{
+		return;
+	}
+
+	PQExpBuffer buffer = createPQExpBuffer();
+
+	if (buffer == NULL)
+	{
+		return;
+	}
+
+	for (int i = 0; i < nodeArray.count; i++)
+	{
+		NodeAddress *node = &(nodeArray.nodes[i]);
+
+		if (node->port == 0 || !archiver_value_is_single_line(node->host) ||
+			strpbrk(node->host, " \t") != NULL)
+		{
+			continue;
+		}
+
+		appendPQExpBuffer(buffer, "%s\n", node->host);
+	}
+
+	if (!PQExpBufferBroken(buffer) &&
+		buffer->len < sizeof(lastContents) &&
+		strcmp(buffer->data, lastContents) != 0)
+	{
+		char path[MAXPGPATH] = { 0 };
+
+		sformat(path, sizeof(path), "%s/%s",
+				keeper->config.pgSetup.pgdata, PG_AUTOCTL_ARCHIVER_NODES_FILE);
+
+		if (write_file_atomic(buffer->data, buffer->len, path))
+		{
+			strlcpy(lastContents, buffer->data, sizeof(lastContents));
+		}
+		else
+		{
+			log_warn("Failed to write \"%s\"", path);
+		}
+	}
+
+	destroyPQExpBuffer(buffer);
+}
+
+
 bool
 service_archiver_loop(Keeper *keeper)
 {
@@ -805,6 +874,8 @@ service_archiver_loop(Keeper *keeper)
 							  NodeStateToString(keeperState->assigned_role));
 				}
 			}
+
+			(void) service_archiver_write_nodes_file(keeper);
 
 			if (!service_archiver_report_captured_wal(keeper))
 			{

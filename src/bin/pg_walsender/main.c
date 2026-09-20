@@ -46,6 +46,8 @@
 #include "fetch_client.h"
 #include "file_utils.h"
 #include "log.h"
+#include "hba.h"
+#include "scram.h"
 #include "string_utils.h"
 
 /*
@@ -70,6 +72,7 @@ usage(const char *argv0)
 {
 	fprintf(stderr, /* IGNORE-BANNED */
 			"Usage: %s --port <port> [--pgdata <path>]\n"
+			"       %s scram-secret [ --user <name> ]  (password in PGPASSWORD)\n"
 			"       %s fetch-file --host <h> --port <p> --route <fmtn>/<grp> "
 			"--filename <name> --output <path>\n\n"
 			"  --port      port to listen on (server mode default: %d)\n"
@@ -79,14 +82,15 @@ usage(const char *argv0)
 			"file mapping\n"
 			"              \"<formation>/<group>\" to { path, "
 			"allowed_hosts } is read\n"
-			"              from <pgdata>/archiver-routes.ini -- omit both "
-			"only for\n"
-			"              manual standalone testing (accepts any dbname, "
-			"no host\n"
-			"              restriction)\n"
+			"              from <pgdata>/archiver-routes.ini, and access is "
+			"decided by\n"
+			"              <pgdata>/archiver-hba.conf -- omit both only for "
+			"manual\n"
+			"              standalone testing (accepts any dbname, no "
+			"authentication)\n"
 			"  fetch-file  one-shot FETCH_FILE client, for use as a "
 			"restore_command\n",
-			argv0, argv0, WS_DEFAULT_PORT);
+			argv0, argv0, argv0, WS_DEFAULT_PORT);
 }
 
 
@@ -170,6 +174,52 @@ main_fetch_file(int argc, char **argv)
 }
 
 
+/*
+ * main_scram_secret prints one archiver-passwd line for a user, reading the
+ * password from the PGPASSWORD environment variable (never from the command
+ * line, where it would show up in the process list).
+ */
+static int
+main_scram_secret(int argc, char **argv)
+{
+	char user[NAMEDATALEN] = PG_AUTOCTL_REPLICA_USERNAME;
+	char password[512] = { 0 };
+
+	if (argc >= 3 && streq(argv[1], "--user"))
+	{
+		strlcpy(user, argv[2], sizeof(user));
+	}
+	else if (argc != 1)
+	{
+		fprintf(stderr, /* IGNORE-BANNED */
+				"Usage: PGPASSWORD=... %s scram-secret [ --user <name> ]\n",
+				argv[0]);
+		return 1;
+	}
+
+	if (!get_env_copy("PGPASSWORD", password, sizeof(password)) ||
+		password[0] == '\0')
+	{
+		fprintf(stderr, /* IGNORE-BANNED */
+				"scram-secret: set the password in PGPASSWORD\n");
+		return 1;
+	}
+
+	char secret[512];
+
+	if (!scram_build_verifier(password, SCRAM_DEFAULT_ITERATIONS,
+							  secret, sizeof(secret)))
+	{
+		fprintf(stderr, "scram-secret: failed to build the secret\n"); /* IGNORE-BANNED */
+		return 1;
+	}
+
+	printf("%s:%s\n", user, secret); /* IGNORE-BANNED */
+
+	return 0;
+}
+
+
 int
 main(int argc, char **argv)
 {
@@ -177,6 +227,11 @@ main(int argc, char **argv)
 	init_ps_buffer(argc, argv);
 
 	log_set_level(LOG_INFO);
+
+	if (argc >= 2 && streq(argv[1], "scram-secret"))
+	{
+		return main_scram_secret(argc - 1, argv + 1);
+	}
 
 	if (argc >= 2 && streq(argv[1], "fetch-file"))
 	{
@@ -251,6 +306,16 @@ main(int argc, char **argv)
 	{
 		sformat(config.routesPath, sizeof(config.routesPath),
 				"%s/archiver-routes.ini", pgdata);
+		sformat(config.auth.hbaPath, sizeof(config.auth.hbaPath),
+				"%s/archiver-hba.conf", pgdata);
+		sformat(config.auth.passwdPath, sizeof(config.auth.passwdPath),
+				"%s/archiver-passwd", pgdata);
+
+		if (!hba_write_default_if_missing(config.auth.hbaPath))
+		{
+			log_fatal("Failed to create \"%s\"", config.auth.hbaPath);
+			return 1;
+		}
 	}
 
 	if (!ws_accept_loop(&config))

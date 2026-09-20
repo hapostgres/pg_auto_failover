@@ -210,26 +210,46 @@ Two distinct connections, two distinct authentication stories:
   connection, same as before.
 - **Inbound, client → archiver's own listener**: an archiver listens on a
   TCP port (``6543`` by default) speaking a subset of the PostgreSQL
-  replication protocol, authenticated the same trust-based way every
-  node's own replication connections already are in a pg_auto_failover
-  cluster (there is no password or TLS on *this* connection in the
-  current release -- unlike the outbound one above). Treat it the same
-  way you'd treat any other node's own replication port: reachable from
-  wherever you expect to run ``pg_basebackup``, point a standby's
-  ``primary_conninfo`` at it, or run a restore from, and firewalled off
-  from everywhere else.
+  replication protocol, and every connection is authenticated against
+  ``archiver-hba.conf`` in the archiver's data directory -- a small,
+  ``pg_hba.conf``-style file, read on every connection, where the first
+  matching line wins and no match rejects (as does a missing or
+  unreadable file)::
 
-  Beyond a firewall, set the environment variable
-  ``PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS`` for ``pg_autoctl run`` to a
-  comma-separated list of the hostnames or IP addresses of your nodes
-  (and of any host you restore from): the reconciler writes it as
-  ``allowed_hosts`` into every route of ``archiver-routes.ini``, and
-  ``pg_walsender`` then refuses connections from any other peer address.
-  When it is not set, ``pg_autoctl`` logs a warning at startup, because
-  ``pg_walsender`` will then serve base backups and WAL to any host that
-  can reach its port. The listener also caps concurrent connections
-  (64) and drops a client that does not complete startup within 30
-  seconds.
+    # TYPE  ROUTE      USER                       ADDRESS       METHOD
+    host    all        pgautofailover_replicator  monitor       trust
+    host    default/0  pitr_restore               192.0.2.0/24  scram-sha-256
+
+  ``ROUTE`` is ``all`` or ``<formation>/<group>``; ``USER`` is ``all`` or a
+  role name; ``ADDRESS`` is ``all``, ``monitor``, an IP address, an
+  ``IP/prefix`` or a hostname; ``METHOD`` is ``trust``, ``scram-sha-256``
+  or ``reject``. ``monitor`` stands for every node the monitor lists for
+  the route: each membership's capture service refreshes
+  ``archiver-nodes.list`` in that membership's directory from the monitor
+  every second, so a node
+  that registers is let in with no file edit. That is the default file
+  ``pg_walsender`` creates on first start (and never overwrites): nodes
+  of the cluster are trusted, the way their own replication connections
+  already are, and nobody else gets in.
+
+  A host the monitor does not know about -- a Point-In-Time-Recovery
+  restore target that never registers, for instance -- needs a line of
+  its own. With ``scram-sha-256`` the client must prove knowledge of a
+  password through a real SCRAM-SHA-256 exchange (so stock
+  ``pg_basebackup``, ``pg_receivewal`` and a standby's ``primary_conninfo``
+  work unmodified, the password given the usual way, e.g. ``PGPASSWORD``),
+  checked against the stored verifiers in ``archiver-passwd``, one
+  ``<user>:SCRAM-SHA-256$...`` line per role, which you create with::
+
+    $ PGPASSWORD=... pg_walsender scram-secret --user pitr_restore >> archiver-passwd
+
+  To require a password from the cluster's own nodes too, change the
+  ``monitor`` line's method to ``scram-sha-256`` (and give the nodes the
+  password). There is no TLS on this connection in the current release:
+  SCRAM keeps the password itself off the wire, but the data stream is
+  not encrypted, so keep the listener on a trusted network or behind a
+  firewall. The listener also caps concurrent connections (64) and drops a
+  client that does not complete startup within 30 seconds.
 
 Process model
 --------------
@@ -357,7 +377,6 @@ moment it starts or stops that membership's own capture child::
 
   [default/0]
   path = /var/lib/pgaf/archiver1/default/0
-  allowed_hosts = node1,node2       # only when PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS is set
 
 Everything else ``pg_walsender`` needs, it reads directly from under that
 one path, at connection time:

@@ -118,10 +118,6 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 			{
 				strlcpy(route->path, propValue, sizeof(route->path));
 			}
-			else if (streq(propName, "allowed_hosts"))
-			{
-				strlcpy(route->allowedHosts, propValue, sizeof(route->allowedHosts));
-			}
 			else
 			{
 				log_warn("Ignoring unknown routes file key \"%s\" in section [%s]",
@@ -160,64 +156,4 @@ routes_find(const WsRoute *routes, int count, const char *key)
 	}
 
 	return NULL;
-}
-
-
-bool
-routes_host_allowed(const WsRoute *route, const char *peerIP)
-{
-	if (route->allowedHosts[0] == '\0')
-	{
-		return true;   /* no restriction configured for this route */
-	}
-
-	char list[sizeof(route->allowedHosts)];
-
-	strlcpy(list, route->allowedHosts, sizeof(list));
-
-	char *saveptr = NULL;
-
-	for (char *tok = strtok_r(list, ",", &saveptr);
-		 tok != NULL;
-		 tok = strtok_r(NULL, ",", &saveptr))
-	{
-		while (*tok == ' ' || *tok == '\t')
-		{
-			tok++;
-		}
-
-		if (streq(tok, peerIP))
-		{
-			return true;
-		}
-
-		/* also resolve hostnames in the allow-list and compare addresses */
-		struct addrinfo hints;
-
-		memset(&hints, 0, sizeof(hints));
-		hints.ai_family = AF_UNSPEC;
-
-		struct addrinfo *res = NULL;
-
-		if (getaddrinfo(tok, NULL, &hints, &res) == 0)
-		{
-			for (struct addrinfo *rp = res; rp != NULL; rp = rp->ai_next)
-			{
-				char resolved[NI_MAXHOST];
-
-				if (getnameinfo(rp->ai_addr, rp->ai_addrlen,
-								resolved, sizeof(resolved),
-								NULL, 0, NI_NUMERICHOST) == 0 &&
-					streq(resolved, peerIP))
-				{
-					freeaddrinfo(res);
-					return true;
-				}
-			}
-
-			freeaddrinfo(res);
-		}
-	}
-
-	return false;
 }

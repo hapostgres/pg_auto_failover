@@ -1,9 +1,9 @@
 /*
  * src/bin/pg_walsender/routes.h
- *   The archiver's own "pg_hba.conf" equivalent: a small INI file, one
- *   section per "<formation>/<group>" this archiver serves, mapping the
- *   incoming connection's dbname to that membership's own local storage
- *   root and an optional allowed-hosts list. Written by pg_autoctl's
+ *   The archiver's routing table: a small INI file, one section per
+ *   "<formation>/<group>" this archiver serves, mapping the incoming
+ *   connection's dbname to that membership's own local storage root (who
+ *   may connect is decided by hba.h, not here). Written by pg_autoctl's
  *   archiver reconciler (service_archiver_reconciler.c) whenever a
  *   membership is added or removed -- the only two moments this mapping
  *   actually changes.
@@ -37,7 +37,6 @@ typedef struct WsRoute
 	                                     * root -- WAL cache, basebackups/,
 	                                     * and archiver-systemid all live
 	                                     * directly under it */
-	char allowedHosts[1024];            /* comma-separated, empty = unrestricted */
 } WsRoute;
 
 /*
@@ -49,13 +48,5 @@ bool routes_load(const char *path, WsRoute **routesOut, int *countOut);
 void routes_free(WsRoute *routes);
 
 const WsRoute * routes_find(const WsRoute *routes, int count, const char *key);
-
-/*
- * routes_host_allowed checks peerIP (a numeric address string, as returned
- * by getnameinfo(..., NI_NUMERICHOST)) against route->allowedHosts, which
- * may contain either numeric addresses or hostnames (resolved via DNS at
- * check time). An empty allowedHosts list means "no restriction."
- */
-bool routes_host_allowed(const WsRoute *route, const char *peerIP);
 
 #endif /* WS_ROUTES_H */

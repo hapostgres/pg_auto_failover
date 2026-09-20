@@ -566,9 +566,9 @@ report_basebackup(Keeper *keeper, NodeAddress *endLsnSource,
 	char connInfo[MAXCONNINFO] = { 0 };
 
 	if (!archiver_format_conninfo(connInfo, sizeof(connInfo),
-								 endLsnSource->host, endLsnSource->port,
-								 PG_AUTOCTL_REPLICA_USERNAME,
-								 formationDbname, config->name))
+								  endLsnSource->host, endLsnSource->port,
+								  PG_AUTOCTL_REPLICA_USERNAME,
+								  formationDbname, config->name))
 	{
 		return false;
 	}
@@ -1143,9 +1143,9 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 	char stagingConnInfo[MAXCONNINFO] = { 0 };
 
 	if (!archiver_format_conninfo(stagingConnInfo, sizeof(stagingConnInfo),
-								 "127.0.0.1", PG_AUTOCTL_ARCHIVER_REPLAY_PORT,
-								 PG_AUTOCTL_REPLICA_USERNAME,
-								 formationDbname, config->name))
+								  "127.0.0.1", PG_AUTOCTL_ARCHIVER_REPLAY_PORT,
+								  PG_AUTOCTL_REPLICA_USERNAME,
+								  formationDbname, config->name))
 	{
 		return false;
 	}

@@ -202,7 +202,8 @@ handle_connection(int clientSock, const WsServerConfig *config)
 
 	const WsRoute *route = NULL;
 
-	if (!ws_authenticate(clientSock, &params, routeKey, routes, routeCount, &route))
+	if (!ws_authenticate(clientSock, &params, routeKey, routes, routeCount,
+						 &(config->auth), &route))
 	{
 		routes_free(routes);
 		close(clientSock);

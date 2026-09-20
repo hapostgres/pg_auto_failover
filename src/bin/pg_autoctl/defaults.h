@@ -228,11 +228,13 @@
 
 /* default port pg_walsender listens on, started via `pg_autoctl archiver
  * serve` -- matches src/bin/pg_walsender/defaults.h's own WS_DEFAULT_PORT */
+
 /*
- * Optional comma-separated list of hostnames/addresses allowed to connect to
- * pg_walsender; written as allowed_hosts into every route of the routes file.
+ * Written by each membership's capture service into its own storage
+ * directory, read by pg_walsender's "monitor" HBA address: one hostname per
+ * line, the nodes the monitor lists for that (formation, group).
  */
-#define PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS_ENV "PG_AUTOCTL_ARCHIVER_ALLOWED_HOSTS"
+#define PG_AUTOCTL_ARCHIVER_NODES_FILE "archiver-nodes.list"
 
 #define PG_AUTOCTL_ARCHIVER_SERVE_PORT 6543
 

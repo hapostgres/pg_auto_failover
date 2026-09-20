@@ -18,6 +18,9 @@
 
 #define PG_AUTOCTL_REPLICA_USERNAME "pgautofailover_replicator"
 
+/* same value as pg_autoctl/defaults.h: written by pg_autoctl, read here */
+#define PG_AUTOCTL_ARCHIVER_NODES_FILE "archiver-nodes.list"
+
 #define WS_DEFAULT_PORT 6543
 
 /*
