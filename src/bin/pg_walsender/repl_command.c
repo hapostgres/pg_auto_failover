@@ -17,6 +17,7 @@
 
 #include "repl_command.h"
 #include "cmd_base_backup.h"
+#include "cmd_fetch_file.h"
 #include "cmd_identify_system.h"
 #include "cmd_replication_slot.h"
 #include "cmd_show.h"
@@ -115,6 +116,28 @@ repl_command_parse(const char *query, WsCommand *cmd)
 		return true;
 	}
 
+	/*
+	 * FETCH_FILE '<name>': not part of PostgreSQL's replication grammar, ours
+	 * (see cmd_fetch_file.h). The name is a single-quoted literal, or bare.
+	 */
+	if (strncasecmp(p, "FETCH_FILE", strlen("FETCH_FILE")) == 0)
+	{
+		p = skip_whitespace(p + strlen("FETCH_FILE"));
+		strlcpy(cmd->filename, p, sizeof(cmd->filename));
+		rtrim(cmd->filename);
+
+		size_t n = strlen(cmd->filename);
+
+		if (n >= 2 && cmd->filename[0] == '\'' && cmd->filename[n - 1] == '\'')
+		{
+			memmove(cmd->filename, cmd->filename + 1, n - 2); /* IGNORE-BANNED */
+			cmd->filename[n - 2] = '\0';
+		}
+
+		cmd->type = WS_CMD_FETCH_FILE;
+		return true;
+	}
+
 	if (strncasecmp(p, "START_REPLICATION", strlen("START_REPLICATION")) == 0)
 	{
 		p = skip_whitespace(p + strlen("START_REPLICATION"));
@@ -174,6 +197,12 @@ ws_dispatch_command(int sock, const WsCommand *cmd,
 		case WS_CMD_START_REPLICATION:
 		{
 			cmd_start_replication(sock, route, cmd->rawArgs);
+			break;
+		}
+
+		case WS_CMD_FETCH_FILE:
+		{
+			cmd_fetch_file(sock, route, cmd->filename);
 			break;
 		}
 

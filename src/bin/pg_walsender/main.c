@@ -217,7 +217,7 @@ main_scram_secret(int argc, char **argv)
 
 	char secret[512];
 
-	if (!scram_build_verifier(password, SCRAM_DEFAULT_ITERATIONS,
+	if (!scram_build_verifier(password, WS_SCRAM_ITERATIONS,
 							  secret, sizeof(secret)))
 	{
 		fprintf(stderr, "scram-secret: failed to build the secret\n"); /* IGNORE-BANNED */
@@ -371,6 +371,9 @@ main(int argc, char **argv)
 			return 1;
 		}
 	}
+
+	/* before any fork: every connection must see the same mock secret */
+	(void) scram_mock_init();
 
 	if (!ws_accept_loop(&config))
 	{

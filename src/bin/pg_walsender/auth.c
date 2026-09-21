@@ -30,8 +30,6 @@
 #define AUTH_REQ_SASL_CONTINUE 11
 #define AUTH_REQ_SASL_FINAL 12
 
-#define SCRAM_MECHANISM "SCRAM-SHA-256"
-
 
 static bool
 ws_get_peer_ip(int sock, char *ipBuf, size_t ipBufSize)
@@ -124,26 +122,58 @@ send_auth_request(int sock, int32_t code, const char *data, size_t dataLen)
 
 
 /*
- * scram_authenticate runs the SCRAM-SHA-256 exchange over the connection.
+ * scram_authenticate runs the SCRAM-SHA-256 exchange over the connection:
+ * SCRAM-SHA-256-PLUS (tls-server-end-point channel binding) is offered first
+ * when the connection is encrypted, plain SCRAM-SHA-256 always. A user
+ * without a usable verifier goes through the whole exchange with a mock one
+ * and fails like a wrong password does, so that it cannot be told apart.
  */
 static bool
 scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 {
 	ScramVerifier verifier;
+	bool doomed = false;
 
 	if (!find_verifier(authConfig->passwdPath, user, &verifier))
 	{
 		log_warn("No SCRAM verifier for user \"%s\" in \"%s\"", user,
 				 authConfig->passwdPath);
-		ws_send_error_response(sock, "28P01",
-							   "password authentication failed");
-		return false;
+
+		if (!scram_mock_verifier(user, &verifier))
+		{
+			ws_send_error_response(sock, "28P01",
+								   "password authentication failed");
+			return false;
+		}
+
+		doomed = true;
 	}
 
-	/* AuthenticationSASL: the list of mechanisms, NUL-terminated list */
-	char mechanisms[] = SCRAM_MECHANISM "\0";
+	unsigned char cbindData[SCRAM_MAX_CBIND_LEN];
+	int cbindDataLen = 0;
 
-	if (!send_auth_request(sock, AUTH_REQ_SASL, mechanisms, sizeof(mechanisms)))
+	if (ws_tls_active() &&
+		!ws_tls_certificate_hash(cbindData, sizeof(cbindData), &cbindDataLen))
+	{
+		cbindDataLen = 0;
+	}
+
+	/* AuthenticationSASL: the NUL-separated mechanisms, then an empty one */
+	char mechanisms[128];
+	size_t mechanismsLen = 0;
+
+	if (cbindDataLen > 0)
+	{
+		mechanismsLen += (size_t) sformat(mechanisms, sizeof(mechanisms), "%s",
+										  SCRAM_MECHANISM_PLUS) + 1;
+	}
+
+	mechanismsLen += (size_t) sformat(mechanisms + mechanismsLen,
+									  sizeof(mechanisms) - mechanismsLen, "%s",
+									  SCRAM_MECHANISM) + 1;
+	mechanisms[mechanismsLen++] = '\0';
+
+	if (!send_auth_request(sock, AUTH_REQ_SASL, mechanisms, mechanismsLen))
 	{
 		return false;
 	}
@@ -160,8 +190,10 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 	}
 
 	size_t mechLen = strnlen(payload, payloadLen);
+	bool plus = streq(payload, SCRAM_MECHANISM_PLUS) && cbindDataLen > 0;
 
-	if (!streq(payload, SCRAM_MECHANISM) || (int32_t) mechLen + 1 + 4 > payloadLen)
+	if ((!plus && !streq(payload, SCRAM_MECHANISM)) ||
+		(int32_t) mechLen + 1 + 4 > payloadLen)
 	{
 		free(payload);
 		ws_send_error_response(sock, "28000", "unsupported SASL mechanism");
@@ -193,7 +225,9 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 	ScramServerState state;
 	char serverFirst[SCRAM_MAX_MESSAGE_LEN];
 
-	if (!scram_server_first(&state, &verifier, clientFirst,
+	if (!scram_server_first(&state, &verifier,
+							plus ? SCRAM_MECHANISM_PLUS : SCRAM_MECHANISM,
+							clientFirst, cbindData, cbindDataLen,
 							serverFirst, sizeof(serverFirst)))
 	{
 		ws_send_error_response(sock, "08P01", "malformed SCRAM message");
@@ -225,7 +259,7 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 	char serverFinal[SCRAM_MAX_MESSAGE_LEN];
 
 	if (!scram_server_final(&state, &verifier, clientFinal,
-							serverFinal, sizeof(serverFinal)))
+							serverFinal, sizeof(serverFinal)) || doomed)
 	{
 		log_warn("SCRAM authentication failed for user \"%s\"", user);
 		ws_send_error_response(sock, "28P01",

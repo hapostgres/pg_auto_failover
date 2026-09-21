@@ -1,6 +1,8 @@
 /*
  * src/bin/common/scram.c
- *   SCRAM-SHA-256 building blocks, see scram.h.
+ *   The server side of SCRAM-SHA-256, see scram.h. The exchange follows
+ *   PostgreSQL's src/backend/libpq/auth-scram.c; the primitives are
+ *   libpgcommon's through scram_compat.h.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -10,125 +12,34 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <openssl/crypto.h>
-#include <openssl/evp.h>
-#include <openssl/hmac.h>
-#include <openssl/rand.h>
-#include <openssl/sha.h>
-
 #include "postgres_fe.h"
 
 #include "scram.h"
+#include "scram_compat.h"
 
 #include "file_utils.h"
 #include "log.h"
 #include "string_utils.h"
 
+/* the tls-server-end-point channel binding of RFC 5929, as PostgreSQL names it */
+#define CBIND_TYPE "tls-server-end-point"
 
+static uint8 mockNonce[32];
+static bool mockNonceReady = false;
+
+
+/* comparison whose time does not depend on where the inputs differ */
 static bool
-hmac_sha256(const unsigned char *key, size_t keyLen,
-			const unsigned char *data, size_t dataLen,
-			unsigned char out[SCRAM_KEY_LEN])
+constant_time_equal(const uint8 *a, const uint8 *b, size_t len)
 {
-	unsigned int outLen = 0;
+	uint8 diff = 0;
 
-	return HMAC(EVP_sha256(), key, (int) keyLen, data, dataLen,
-				out, &outLen) != NULL && outLen == SCRAM_KEY_LEN;
-}
-
-
-static void
-sha256(const unsigned char *data, size_t dataLen,
-	   unsigned char out[SCRAM_KEY_LEN])
-{
-	SHA256(data, dataLen, out);
-}
-
-
-static bool
-salted_password(const char *password, const unsigned char *salt, int saltLen,
-				int iterations, unsigned char out[SCRAM_KEY_LEN])
-{
-	return PKCS5_PBKDF2_HMAC(password, (int) strlen(password), salt, saltLen,
-							 iterations, EVP_sha256(),
-							 SCRAM_KEY_LEN, out) == 1;
-}
-
-
-static bool
-base64_encode(const unsigned char *src, size_t srcLen,
-			  char *dest, size_t destSize)
-{
-	size_t needed = 4 * ((srcLen + 2) / 3) + 1;
-
-	if (needed > destSize)
+	for (size_t i = 0; i < len; i++)
 	{
-		return false;
+		diff |= a[i] ^ b[i];
 	}
 
-	EVP_EncodeBlock((unsigned char *) dest, src, (int) srcLen);
-
-	return true;
-}
-
-
-/* returns the decoded length, or -1 on malformed input / overflow */
-static int
-base64_decode(const char *src, unsigned char *dest, size_t destSize)
-{
-	size_t srcLen = strlen(src);
-
-	if (srcLen == 0 || srcLen % 4 != 0 || srcLen / 4 * 3 > destSize + 2)
-	{
-		return -1;
-	}
-
-	unsigned char tmp[SCRAM_MAX_MESSAGE_LEN];
-
-	if (srcLen / 4 * 3 > sizeof(tmp))
-	{
-		return -1;
-	}
-
-	int len = EVP_DecodeBlock(tmp, (const unsigned char *) src, (int) srcLen);
-
-	if (len < 0)
-	{
-		return -1;
-	}
-
-	/* EVP_DecodeBlock counts the padding bytes: trim them */
-	if (srcLen >= 1 && src[srcLen - 1] == '=')
-	{
-		len--;
-	}
-	if (srcLen >= 2 && src[srcLen - 2] == '=')
-	{
-		len--;
-	}
-
-	if (len < 0 || (size_t) len > destSize)
-	{
-		return -1;
-	}
-
-	memcpy(dest, tmp, len); /* IGNORE-BANNED */
-
-	return len;
-}
-
-
-static bool
-random_nonce(char *dest, size_t destSize)
-{
-	unsigned char raw[SCRAM_NONCE_LEN];
-
-	if (RAND_bytes(raw, sizeof(raw)) != 1)
-	{
-		return false;
-	}
-
-	return base64_encode(raw, sizeof(raw), dest, destSize);
+	return diff == 0;
 }
 
 
@@ -171,44 +82,58 @@ bool
 scram_build_verifier(const char *password, int iterations,
 					 char *dest, size_t destSize)
 {
-	unsigned char salt[16];
-	unsigned char salted[SCRAM_KEY_LEN];
-	unsigned char clientKey[SCRAM_KEY_LEN];
-	unsigned char storedKey[SCRAM_KEY_LEN];
-	unsigned char serverKey[SCRAM_KEY_LEN];
+	uint8 salt[PGAF_SCRAM_SALT_LEN];
+	char *prepared = NULL;
+	const char *effective = password;
 
-	if (RAND_bytes(salt, sizeof(salt)) != 1 ||
-		!salted_password(password, salt, sizeof(salt), iterations, salted) ||
-		!hmac_sha256(salted, sizeof(salted),
-					 (const unsigned char *) "Client Key", 10, clientKey) ||
-		!hmac_sha256(salted, sizeof(salted),
-					 (const unsigned char *) "Server Key", 10, serverKey))
+	/*
+	 * Like PostgreSQL (pg_be_scram_build_secret), normalize the password
+	 * with SASLprep; a password SASLprep rejects is used as it is.
+	 */
+	pg_saslprep_rc rc = pg_saslprep(password, &prepared);
+
+	if (rc == SASLPREP_SUCCESS)
+	{
+		effective = prepared;
+	}
+	else if (rc == SASLPREP_OOM)
 	{
 		return false;
 	}
 
-	sha256(clientKey, sizeof(clientKey), storedKey);
+	if (!pg_strong_random(salt, sizeof(salt)))
+	{
+		free(prepared);
+		return false;
+	}
 
-	char saltB64[64], storedB64[64], serverB64[64];
+	char *secret = pgaf_scram_build_secret(salt, sizeof(salt), iterations,
+										   effective);
 
-	if (!base64_encode(salt, sizeof(salt), saltB64, sizeof(saltB64)) ||
-		!base64_encode(storedKey, sizeof(storedKey), storedB64, sizeof(storedB64)) ||
-		!base64_encode(serverKey, sizeof(serverKey), serverB64, sizeof(serverB64)))
+	free(prepared);
+
+	if (secret == NULL)
 	{
 		return false;
 	}
 
-	int n = sformat(dest, destSize, "SCRAM-SHA-256$%d:%s$%s:%s",
-					iterations, saltB64, storedB64, serverB64);
+	bool ok = strlen(secret) < destSize;
 
-	return n > 0 && (size_t) n < destSize;
+	if (ok)
+	{
+		strlcpy(dest, secret, destSize);
+	}
+
+	free(secret);
+
+	return ok;
 }
 
 
 bool
 scram_parse_verifier(const char *secret, ScramVerifier *verifier)
 {
-	const char *prefix = "SCRAM-SHA-256$";
+	const char *prefix = SCRAM_MECHANISM "$";
 
 	if (strncmp(secret, prefix, strlen(prefix)) != 0)
 	{
@@ -240,21 +165,59 @@ scram_parse_verifier(const char *secret, ScramVerifier *verifier)
 		return false;
 	}
 
-	unsigned char stored[SCRAM_KEY_LEN + 2], server[SCRAM_KEY_LEN + 2];
+	uint8 stored[WS_SCRAM_KEY_LEN + 2], server[WS_SCRAM_KEY_LEN + 2];
 
-	int saltLen = base64_decode(colon + 1, verifier->salt, SCRAM_MAX_SALT_LEN);
-	int storedLen = base64_decode(dollar + 1, stored, sizeof(stored));
-	int serverLen = base64_decode(colon2 + 1, server, sizeof(server));
+	int saltLen = pgaf_b64_decode(colon + 1, verifier->salt, SCRAM_MAX_SALT_LEN);
+	int storedLen = pgaf_b64_decode(dollar + 1, stored, sizeof(stored));
+	int serverLen = pgaf_b64_decode(colon2 + 1, server, sizeof(server));
 
-	if (saltLen <= 0 || storedLen != SCRAM_KEY_LEN || serverLen != SCRAM_KEY_LEN)
+	if (saltLen <= 0 || storedLen != WS_SCRAM_KEY_LEN || serverLen != WS_SCRAM_KEY_LEN)
 	{
 		return false;
 	}
 
 	verifier->iterations = iterations;
 	verifier->saltLen = saltLen;
-	memcpy(verifier->storedKey, stored, SCRAM_KEY_LEN); /* IGNORE-BANNED */
-	memcpy(verifier->serverKey, server, SCRAM_KEY_LEN); /* IGNORE-BANNED */
+	memcpy(verifier->storedKey, stored, WS_SCRAM_KEY_LEN); /* IGNORE-BANNED */
+	memcpy(verifier->serverKey, server, WS_SCRAM_KEY_LEN); /* IGNORE-BANNED */
+
+	return true;
+}
+
+
+bool
+scram_mock_init(void)
+{
+	mockNonceReady = pg_strong_random(mockNonce, sizeof(mockNonce));
+
+	return mockNonceReady;
+}
+
+
+/*
+ * A deterministic salt per user name (an attacker asking twice must get the
+ * same one, as for a real role) and keys that no client proof can match.
+ */
+bool
+scram_mock_verifier(const char *user, ScramVerifier *verifier)
+{
+	uint8 digest[WS_SCRAM_KEY_LEN];
+
+	if (!mockNonceReady && !scram_mock_init())
+	{
+		return false;
+	}
+
+	if (!pgaf_hmac_sha256(mockNonce, sizeof(mockNonce),
+						  (const uint8 *) user, strlen(user), digest))
+	{
+		return false;
+	}
+
+	memset(verifier, 0, sizeof(*verifier)); /* IGNORE-BANNED */
+	verifier->iterations = WS_SCRAM_ITERATIONS;
+	verifier->saltLen = PGAF_SCRAM_SALT_LEN;
+	memcpy(verifier->salt, digest, PGAF_SCRAM_SALT_LEN); /* IGNORE-BANNED */
 
 	return true;
 }
@@ -262,18 +225,88 @@ scram_parse_verifier(const char *secret, ScramVerifier *verifier)
 
 bool
 scram_server_first(ScramServerState *state, const ScramVerifier *verifier,
-				   const char *clientFirst, char *serverFirst,
-				   size_t serverFirstSize)
+				   const char *mechanism, const char *clientFirst,
+				   const unsigned char *cbindData, int cbindDataLen,
+				   char *serverFirst, size_t serverFirstSize)
 {
-	/* gs2 header: no channel binding ("n,," or "y,,"), no authzid */
-	if (strncmp(clientFirst, "n,,", 3) != 0 &&
-		strncmp(clientFirst, "y,,", 3) != 0)
+	state->plus = strcmp(mechanism, SCRAM_MECHANISM_PLUS) == 0;
+	state->cbindDataLen = 0;
+
+	if (cbindData != NULL && cbindDataLen > 0 && cbindDataLen <= SCRAM_MAX_CBIND_LEN)
 	{
-		log_warn("SCRAM: unsupported gs2 header in the client-first message");
+		memcpy(state->cbindData, cbindData, cbindDataLen); /* IGNORE-BANNED */
+		state->cbindDataLen = cbindDataLen;
+	}
+
+	/*
+	 * gs2-header = gs2-cbind-flag "," [ authzid ] ",": n = the client does
+	 * not support channel binding, y = it does but thinks we do not, p= =
+	 * it uses the named one. Same rules as auth-scram.c.
+	 */
+	const char *rest = NULL;
+
+	switch (clientFirst[0])
+	{
+		case 'n':
+		{
+			if (state->plus)
+			{
+				log_warn("SCRAM: PLUS mechanism without channel binding");
+				return false;
+			}
+			rest = clientFirst + 1;
+			break;
+		}
+
+		case 'y':
+		{
+			/* we offered channel binding: the client is being downgraded */
+			if (state->plus || state->cbindDataLen > 0)
+			{
+				log_warn("SCRAM: channel binding negotiation error");
+				return false;
+			}
+			rest = clientFirst + 1;
+			break;
+		}
+
+		case 'p':
+		{
+			if (!state->plus || state->cbindDataLen == 0 ||
+				strncmp(clientFirst, "p=" CBIND_TYPE, strlen("p=" CBIND_TYPE)) != 0)
+			{
+				log_warn("SCRAM: unsupported channel binding");
+				return false;
+			}
+			rest = clientFirst + strlen("p=" CBIND_TYPE);
+			break;
+		}
+
+		default:
+		{
+			log_warn("SCRAM: malformed gs2 header");
+			return false;
+		}
+	}
+
+	/* no authzid: the header ends with ",," */
+	if (rest[0] != ',' || rest[1] != ',')
+	{
+		log_warn("SCRAM: unsupported authorization identity");
 		return false;
 	}
 
-	strlcpy(state->clientFirstBare, clientFirst + 3,
+	size_t headerLen = (size_t) (rest + 2 - clientFirst);
+
+	if (headerLen >= sizeof(state->gs2Header))
+	{
+		return false;
+	}
+
+	memcpy(state->gs2Header, clientFirst, headerLen); /* IGNORE-BANNED */
+	state->gs2Header[headerLen] = '\0';
+
+	strlcpy(state->clientFirstBare, clientFirst + headerLen,
 			sizeof(state->clientFirstBare));
 
 	size_t nonceLen = 0;
@@ -286,9 +319,12 @@ scram_server_first(ScramServerState *state, const ScramVerifier *verifier,
 		return false;
 	}
 
+	uint8 rawNonce[18];
 	char serverNonce[64];
 
-	if (!random_nonce(serverNonce, sizeof(serverNonce)))
+	if (!pg_strong_random(rawNonce, sizeof(rawNonce)) ||
+		pgaf_b64_encode(rawNonce, sizeof(rawNonce), serverNonce,
+						sizeof(serverNonce)) < 0)
 	{
 		return false;
 	}
@@ -301,7 +337,8 @@ scram_server_first(ScramServerState *state, const ScramVerifier *verifier,
 
 	char saltB64[128];
 
-	if (!base64_encode(verifier->salt, verifier->saltLen, saltB64, sizeof(saltB64)))
+	if (pgaf_b64_encode(verifier->salt, verifier->saltLen, saltB64,
+						sizeof(saltB64)) < 0)
 	{
 		return false;
 	}
@@ -326,11 +363,44 @@ scram_server_final(ScramServerState *state, const ScramVerifier *verifier,
 				   const char *clientFinal, char *serverFinal,
 				   size_t serverFinalSize)
 {
+	/* c= must be base64(gs2 header [ || certificate hash ]) */
+	size_t cbindLen = 0;
+	const char *cbind = find_attribute(clientFinal, 'c', &cbindLen);
+	uint8 expected[128];
+	char expectedB64[256];
+	size_t headerLen = strlen(state->gs2Header);
+
+	if (cbind == NULL || headerLen + (size_t) state->cbindDataLen > sizeof(expected))
+	{
+		return false;
+	}
+
+	memcpy(expected, state->gs2Header, headerLen); /* IGNORE-BANNED */
+
+	size_t expectedLen = headerLen;
+
+	if (state->plus)
+	{
+		memcpy(expected + headerLen, state->cbindData, /* IGNORE-BANNED */
+			   state->cbindDataLen);
+		expectedLen += state->cbindDataLen;
+	}
+
+	if (pgaf_b64_encode(expected, (int) expectedLen, expectedB64,
+						sizeof(expectedB64)) < 0 ||
+		strlen(expectedB64) != cbindLen ||
+		strncmp(expectedB64, cbind, cbindLen) != 0)
+	{
+		log_warn("SCRAM: unexpected channel binding in the client-final message");
+		return false;
+	}
+
 	size_t len = 0;
 	const char *nonce = find_attribute(clientFinal, 'r', &len);
 
 	if (nonce == NULL || len != strlen(state->nonce) ||
-		CRYPTO_memcmp(nonce, state->nonce, len) != 0)
+		!constant_time_equal((const uint8 *) nonce, (const uint8 *) state->nonce,
+							 len))
 	{
 		log_warn("SCRAM: nonce mismatch in the client-final message");
 		return false;
@@ -354,9 +424,9 @@ scram_server_final(ScramServerState *state, const ScramVerifier *verifier,
 	memcpy(withoutProof, clientFinal, noProofLen); /* IGNORE-BANNED */
 	withoutProof[noProofLen] = '\0';
 
-	unsigned char proof[SCRAM_KEY_LEN + 2];
+	uint8 proof[WS_SCRAM_KEY_LEN + 2];
 
-	if (base64_decode(proofMarker + 3, proof, sizeof(proof)) != SCRAM_KEY_LEN)
+	if (pgaf_b64_decode(proofMarker + 3, proof, sizeof(proof)) != WS_SCRAM_KEY_LEN)
 	{
 		return false;
 	}
@@ -366,37 +436,37 @@ scram_server_final(ScramServerState *state, const ScramVerifier *verifier,
 	sformat(authMessage, sizeof(authMessage), "%s,%s,%s",
 			state->clientFirstBare, state->serverFirst, withoutProof);
 
-	unsigned char clientSignature[SCRAM_KEY_LEN];
-	unsigned char clientKey[SCRAM_KEY_LEN];
-	unsigned char recomputedStored[SCRAM_KEY_LEN];
+	uint8 clientSignature[WS_SCRAM_KEY_LEN];
+	uint8 clientKey[WS_SCRAM_KEY_LEN];
+	uint8 recomputedStored[WS_SCRAM_KEY_LEN];
 
-	if (!hmac_sha256(verifier->storedKey, SCRAM_KEY_LEN,
-					 (const unsigned char *) authMessage, strlen(authMessage),
-					 clientSignature))
+	if (!pgaf_hmac_sha256(verifier->storedKey, WS_SCRAM_KEY_LEN,
+						  (const uint8 *) authMessage, strlen(authMessage),
+						  clientSignature))
 	{
 		return false;
 	}
 
-	for (int i = 0; i < SCRAM_KEY_LEN; i++)
+	for (int i = 0; i < WS_SCRAM_KEY_LEN; i++)
 	{
 		clientKey[i] = proof[i] ^ clientSignature[i];
 	}
 
-	sha256(clientKey, sizeof(clientKey), recomputedStored);
-
-	if (CRYPTO_memcmp(recomputedStored, verifier->storedKey, SCRAM_KEY_LEN) != 0)
+	if (!pgaf_scram_h(clientKey, recomputedStored) ||
+		!constant_time_equal(recomputedStored, verifier->storedKey,
+							 WS_SCRAM_KEY_LEN))
 	{
 		return false;
 	}
 
-	unsigned char serverSignature[SCRAM_KEY_LEN];
+	uint8 serverSignature[WS_SCRAM_KEY_LEN];
 	char sigB64[64];
 
-	if (!hmac_sha256(verifier->serverKey, SCRAM_KEY_LEN,
-					 (const unsigned char *) authMessage, strlen(authMessage),
-					 serverSignature) ||
-		!base64_encode(serverSignature, sizeof(serverSignature),
-					   sigB64, sizeof(sigB64)))
+	if (!pgaf_hmac_sha256(verifier->serverKey, WS_SCRAM_KEY_LEN,
+						  (const uint8 *) authMessage, strlen(authMessage),
+						  serverSignature) ||
+		pgaf_b64_encode(serverSignature, sizeof(serverSignature), sigB64,
+						sizeof(sigB64)) < 0)
 	{
 		return false;
 	}
@@ -404,150 +474,4 @@ scram_server_final(ScramServerState *state, const ScramVerifier *verifier,
 	int n = sformat(serverFinal, serverFinalSize, "v=%s", sigB64);
 
 	return n > 0 && (size_t) n < serverFinalSize;
-}
-
-
-bool
-scram_client_first(ScramClientState *state, char *dest, size_t destSize)
-{
-	char nonce[64];
-
-	if (!random_nonce(nonce, sizeof(nonce)))
-	{
-		return false;
-	}
-
-	sformat(state->clientFirstBare, sizeof(state->clientFirstBare),
-			"n=,r=%s", nonce);
-
-	int n = sformat(dest, destSize, "n,,%s", state->clientFirstBare);
-
-	return n > 0 && (size_t) n < destSize;
-}
-
-
-bool
-scram_client_final(ScramClientState *state, const char *password,
-				   const char *serverFirst, char *dest, size_t destSize)
-{
-	strlcpy(state->serverFirst, serverFirst, sizeof(state->serverFirst));
-
-	size_t nonceLen = 0, saltLen = 0, iterLen = 0;
-	const char *nonce = find_attribute(serverFirst, 'r', &nonceLen);
-	const char *salt = find_attribute(serverFirst, 's', &saltLen);
-	const char *iter = find_attribute(serverFirst, 'i', &iterLen);
-
-	if (nonce == NULL || salt == NULL || iter == NULL ||
-		nonceLen == 0 || saltLen == 0 || iterLen == 0 ||
-		saltLen >= 128 || iterLen >= 16)
-	{
-		return false;
-	}
-
-	/* the server nonce must extend ours */
-	size_t ourNonceLen = 0;
-	const char *ourNonce = find_attribute(state->clientFirstBare, 'r',
-										  &ourNonceLen);
-
-	if (ourNonce == NULL || nonceLen < ourNonceLen ||
-		strncmp(nonce, ourNonce, ourNonceLen) != 0)
-	{
-		return false;
-	}
-
-	char saltStr[128], iterStr[16], nonceStr[512];
-
-	strlcpy(saltStr, salt, Min(saltLen + 1, sizeof(saltStr)));
-	strlcpy(iterStr, iter, Min(iterLen + 1, sizeof(iterStr)));
-	strlcpy(nonceStr, nonce, Min(nonceLen + 1, sizeof(nonceStr)));
-
-	int iterations = 0;
-	unsigned char saltRaw[SCRAM_MAX_SALT_LEN];
-
-	if (!stringToInt(iterStr, &iterations) || iterations <= 0)
-	{
-		return false;
-	}
-
-	int saltRawLen = base64_decode(saltStr, saltRaw, sizeof(saltRaw));
-
-	if (saltRawLen <= 0)
-	{
-		return false;
-	}
-
-	unsigned char salted[SCRAM_KEY_LEN], clientKey[SCRAM_KEY_LEN];
-	unsigned char storedKey[SCRAM_KEY_LEN], clientSignature[SCRAM_KEY_LEN];
-
-	if (!salted_password(password, saltRaw, saltRawLen, iterations, salted) ||
-		!hmac_sha256(salted, sizeof(salted),
-					 (const unsigned char *) "Client Key", 10, clientKey) ||
-		!hmac_sha256(salted, sizeof(salted),
-					 (const unsigned char *) "Server Key", 10,
-					 state->serverKeyForVerify))
-	{
-		return false;
-	}
-
-	sha256(clientKey, sizeof(clientKey), storedKey);
-
-	sformat(state->clientFinalNoProof, sizeof(state->clientFinalNoProof),
-			"c=biws,r=%s", nonceStr);
-	sformat(state->authMessage, sizeof(state->authMessage), "%s,%s,%s",
-			state->clientFirstBare, state->serverFirst,
-			state->clientFinalNoProof);
-
-	if (!hmac_sha256(storedKey, sizeof(storedKey),
-					 (const unsigned char *) state->authMessage,
-					 strlen(state->authMessage), clientSignature))
-	{
-		return false;
-	}
-
-	unsigned char proof[SCRAM_KEY_LEN];
-	char proofB64[64];
-
-	for (int i = 0; i < SCRAM_KEY_LEN; i++)
-	{
-		proof[i] = clientKey[i] ^ clientSignature[i];
-	}
-
-	if (!base64_encode(proof, sizeof(proof), proofB64, sizeof(proofB64)))
-	{
-		return false;
-	}
-
-	int n = sformat(dest, destSize, "%s,p=%s", state->clientFinalNoProof,
-					proofB64);
-
-	return n > 0 && (size_t) n < destSize;
-}
-
-
-bool
-scram_client_verify_server_final(ScramClientState *state,
-								 const char *serverFinal)
-{
-	size_t len = 0;
-	const char *v = find_attribute(serverFinal, 'v', &len);
-
-	if (v == NULL || len == 0 || len >= 64)
-	{
-		return false;
-	}
-
-	unsigned char expected[SCRAM_KEY_LEN];
-	char expectedB64[64];
-
-	if (!hmac_sha256(state->serverKeyForVerify, SCRAM_KEY_LEN,
-					 (const unsigned char *) state->authMessage,
-					 strlen(state->authMessage), expected) ||
-		!base64_encode(expected, sizeof(expected), expectedB64,
-					   sizeof(expectedB64)))
-	{
-		return false;
-	}
-
-	return strlen(expectedB64) == len &&
-		   CRYPTO_memcmp(expectedB64, v, len) == 0;
 }

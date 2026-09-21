@@ -1,24 +1,13 @@
 /*
  * src/bin/pg_walsender/cmd_fetch_file.h
- *   FETCH_FILE: a non-standard side-channel, not a replication-protocol
- *   command, for restore_command-style single-WAL-file fetch (restore_command spawns a fresh subprocess
- *   once per segment, with no persistent session to reuse -- riding the
- *   replication grammar would add protocol surface no real client ever
- *   exercises). Reuses the same connection's startup-packet + auth
- *   machinery (accept_loop.c routes a dbname of the form
- *   "fetch/<formation>/<group>" here instead of into the normal
- *   replication command loop), so it's gated by the same trust/
- *   allowed_hosts check, no new auth surface.
- *
- *   Wire shape, deliberately minimal since the only caller is
- *   fetch_client.c (this project's own code, not a real Postgres tool):
- *   after AuthenticationOk, the client sends the bare filename as a single
- *   '\n'-terminated line (ws_read_line, not a real protocol message), and
- *   the server replies with exactly one message: CopyData carrying the
- *   raw file bytes on success, or ErrorResponse on failure. Then the
- *   connection closes -- no CopyOutResponse/CopyDone, this isn't a real
- *   COPY sub-protocol, just reusing CopyData as a convenient length-
- *   prefixed binary envelope.
+ *   FETCH_FILE '<name>': our own replication-connection command (not in
+ *   PostgreSQL's grammar) to fetch one file of the route's WAL cache, one
+ *   at a time, for a restore_command -- which spawns a fresh process per
+ *   segment, with no session to reuse. It is served like any other command
+ *   on an ordinary connection: the client (a plain libpq connection, see
+ *   fetch_client.c) gets TLS, SCRAM and every libpq connection option for
+ *   free, the same HBA rules apply, and the reply is a regular COPY OUT
+ *   (CopyOutResponse, CopyData ..., CopyDone, CommandComplete).
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -30,6 +19,6 @@
 
 #include "routes.h"
 
-void cmd_fetch_file(int sock, const WsRoute *route);
+void cmd_fetch_file(int sock, const WsRoute *route, const char *filename);
 
 #endif /* WS_CMD_FETCH_FILE_H */

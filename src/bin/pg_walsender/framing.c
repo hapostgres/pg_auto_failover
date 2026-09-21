@@ -100,33 +100,6 @@ ws_write_raw_byte(int sock, char c)
 
 
 bool
-ws_read_line(int sock, char *line, size_t maxLen)
-{
-	size_t n = 0;
-
-	while (n < maxLen - 1)
-	{
-		char c;
-
-		if (!ws_read_bytes(sock, &c, 1))
-		{
-			return false;
-		}
-
-		if (c == '\n')
-		{
-			line[n] = '\0';
-			return true;
-		}
-
-		line[n++] = c;
-	}
-
-	return false;   /* line too long */
-}
-
-
-bool
 ws_read_startup_payload(int sock, char **payload, int32_t *payloadLen)
 {
 	unsigned char lenBuf[4];

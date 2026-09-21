@@ -24,7 +24,6 @@
 
 #include "accept_loop.h"
 #include "auth.h"
-#include "cmd_fetch_file.h"
 #include "defaults.h"
 #include "file_utils.h"
 #include "framing.h"
@@ -34,9 +33,6 @@
 #include "signals.h"
 #include "startup.h"
 
-/* dbname prefix that routes a connection to the FETCH_FILE side-channel
- * instead of the normal replication command loop -- see cmd_fetch_file.h */
-#define WS_FETCH_DBNAME_PREFIX "fetch/"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
@@ -175,11 +171,7 @@ handle_connection(int clientSock, const WsServerConfig *config)
 		}
 	}
 
-	bool isFetchMode = (strncmp(params.database, WS_FETCH_DBNAME_PREFIX,
-								strlen(WS_FETCH_DBNAME_PREFIX)) == 0);
-	const char *routeKey = isFetchMode
-						   ? params.database + strlen(WS_FETCH_DBNAME_PREFIX)
-						   : params.database;
+	const char *routeKey = params.database;
 
 	/*
 	 * dbname-based routing cannot work for a real walreceiver connection
@@ -193,9 +185,7 @@ handle_connection(int clientSock, const WsServerConfig *config)
 	 * which real walreceiver does forward from primary_conninfo, unlike
 	 * dbname) -- not supported yet.
 	 */
-	if (!isFetchMode &&
-		streq(routeKey, WS_REAL_WALRECEIVER_DBNAME) &&
-		routeCount == 1)
+	if (streq(routeKey, WS_REAL_WALRECEIVER_DBNAME) && routeCount == 1)
 	{
 		routeKey = routes[0].key;
 	}
@@ -214,17 +204,9 @@ handle_connection(int clientSock, const WsServerConfig *config)
 
 	char title[256];
 
-	sformat(title, sizeof(title), "pg_autoctl: walsender %s%s",
-			isFetchMode ? "fetch " : "", route != NULL ? route->key : routeKey);
+	sformat(title, sizeof(title), "pg_autoctl: walsender %s",
+			route != NULL ? route->key : routeKey);
 	set_ps_title(title);
-
-	if (isFetchMode)
-	{
-		cmd_fetch_file(clientSock, route);
-		routes_free(routes);
-		close(clientSock);
-		return;
-	}
 
 	if (!ws_send_authentication_ok(clientSock) ||
 		!ws_send_parameter_status(clientSock, "server_version", WS_SERVER_VERSION) ||

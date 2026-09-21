@@ -634,7 +634,7 @@ archiver_reconciler_write_serve_secrets(Keeper *templateKeeper)
 	char verifier[512] = { 0 };
 
 	if (!scram_build_verifier(config->replication_password,
-							  SCRAM_DEFAULT_ITERATIONS,
+							  WS_SCRAM_ITERATIONS,
 							  verifier, sizeof(verifier)))
 	{
 		log_warn("Failed to build the SCRAM verifier for the replication "

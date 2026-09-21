@@ -35,8 +35,8 @@ bool ws_tls_server_enabled(void);
 /* run the server handshake on sock after the 'S' answer was sent */
 bool ws_tls_server_accept(int sock);
 
-/* client side: run the handshake after the server answered 'S' */
-bool ws_tls_client_connect(int sock);
+/* tls-server-end-point channel binding data of our certificate (RFC 5929) */
+bool ws_tls_certificate_hash(unsigned char *out, int outSize, int *outLen);
 
 /* is the current connection encrypted? */
 bool ws_tls_active(void);

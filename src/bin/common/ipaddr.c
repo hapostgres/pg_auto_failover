@@ -31,6 +31,7 @@
 #include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
+#include "ifaddr.h"
 #include "ipaddr.h"
 #include "log.h"
 #include "pgsetup.h"
@@ -779,9 +780,45 @@ ipaddrHostMatchesAddress(const char *hostOrIp, const char *ipaddr)
 
 
 /*
+ * ipaddr_to_sockaddr parses a numeric address into a sockaddr_storage. An
+ * IPv4-mapped IPv6 address ("::ffff:a.b.c.d", what a dual-stack socket
+ * reports for an IPv4 client) is turned into the IPv4 address it carries.
+ */
+static bool
+ipaddr_to_sockaddr(const char *ipaddr, struct sockaddr_storage *addr)
+{
+	struct sockaddr_in *in4 = (struct sockaddr_in *) addr;
+	struct sockaddr_in6 *in6 = (struct sockaddr_in6 *) addr;
+
+	memset(addr, 0, sizeof(*addr));
+
+	if (strncmp(ipaddr, "::ffff:", 7) == 0 &&
+		inet_pton(AF_INET, ipaddr + 7, &(in4->sin_addr)) == 1)
+	{
+		addr->ss_family = AF_INET;
+		return true;
+	}
+
+	if (inet_pton(AF_INET, ipaddr, &(in4->sin_addr)) == 1)
+	{
+		addr->ss_family = AF_INET;
+		return true;
+	}
+
+	if (inet_pton(AF_INET6, ipaddr, &(in6->sin6_addr)) == 1)
+	{
+		addr->ss_family = AF_INET6;
+		return true;
+	}
+
+	return false;
+}
+
+
+/*
  * ipaddrInCIDR returns true when ipaddr falls in the "address/prefix"
- * network, IPv4 or IPv6; an IPv4-mapped IPv6 address is compared as the IPv4
- * address it carries.
+ * network, IPv4 or IPv6, with the netmask arithmetic of PostgreSQL's own
+ * HBA matching (ifaddr.c, vendored).
  */
 bool
 ipaddrInCIDR(const char *cidr, const char *ipaddr)
@@ -799,49 +836,80 @@ ipaddrInCIDR(const char *cidr, const char *ipaddr)
 
 	*slash = '\0';
 
-	int prefix = 0;
+	struct sockaddr_storage netaddr, mask, peer;
 
-	if (!stringToInt(slash + 1, &prefix) || prefix < 0)
+	if (!ipaddr_to_sockaddr(network, &netaddr) ||
+		!ipaddr_to_sockaddr(ipaddr, &peer) ||
+		netaddr.ss_family != peer.ss_family ||
+		pg_sockaddr_cidr_mask(&mask, slash + 1, netaddr.ss_family) != 0)
 	{
 		return false;
 	}
 
-	unsigned char net[16], peer[16];
-	int family = ip_address_type(network) == IPTYPE_V6 ? AF_INET6 : AF_INET;
-	int addrLen = family == AF_INET6 ? 16 : 4;
+	return pg_range_sockaddr(&peer, &netaddr, &mask) == 1;
+}
 
-	if (prefix > addrLen * 8 || inet_pton(family, network, net) != 1)
+
+/* what the pg_foreach_ifaddr() callback below compares the client with */
+typedef struct CheckNetworkData
+{
+	bool sameNet;               /* samenet: use the interface netmask */
+	const struct sockaddr_storage *peer;
+	bool result;
+} CheckNetworkData;
+
+
+/*
+ * From PostgreSQL's hba.c check_network_callback(): does the client address
+ * match this machine interface (samehost) or its network (samenet)?
+ */
+static void
+check_network_callback(struct sockaddr *addr, struct sockaddr *netmask,
+					   void *cb_data)
+{
+	CheckNetworkData *cn = (CheckNetworkData *) cb_data;
+	struct sockaddr_storage fullMask;
+
+	if (cn->result || cn->peer->ss_family != addr->sa_family)
+	{
+		return;
+	}
+
+	if (!cn->sameNet)
+	{
+		/* an all-ones netmask of the right family: the address itself */
+		pg_sockaddr_cidr_mask(&fullMask, NULL, addr->sa_family);
+		netmask = (struct sockaddr *) &fullMask;
+	}
+
+	cn->result = pg_range_sockaddr(cn->peer, (struct sockaddr_storage *) addr,
+								   (struct sockaddr_storage *) netmask) == 1;
+}
+
+
+/*
+ * ipaddrIsSameHostOrNet implements the HBA keywords "samehost" (the client
+ * is one of this machine's addresses) and "samenet" (it is on a network this
+ * machine is directly connected to), as PostgreSQL does.
+ */
+bool
+ipaddrIsSameHostOrNet(const char *ipaddr, bool sameNet)
+{
+	struct sockaddr_storage peer;
+	CheckNetworkData cn = { sameNet, &peer, false };
+
+	if (!ipaddr_to_sockaddr(ipaddr, &peer))
 	{
 		return false;
 	}
 
-	if (inet_pton(family, ipaddr, peer) != 1)
+	if (pg_foreach_ifaddr(check_network_callback, &cn) < 0)
 	{
-		const char *mapped = strncmp(ipaddr, "::ffff:", 7) == 0 ? ipaddr + 7 : NULL;
-
-		if (family != AF_INET || mapped == NULL ||
-			inet_pton(AF_INET, mapped, peer) != 1)
-		{
-			return false;
-		}
-	}
-
-	int fullBytes = prefix / 8;
-	int restBits = prefix % 8;
-
-	if (memcmp(net, peer, fullBytes) != 0)
-	{
+		log_warn("Failed to enumerate the network interfaces: %m");
 		return false;
 	}
 
-	if (restBits == 0)
-	{
-		return true;
-	}
-
-	unsigned char mask = (unsigned char) (0xFF << (8 - restBits));
-
-	return (net[fullBytes] & mask) == (peer[fullBytes] & mask);
+	return cn.result;
 }
 
 

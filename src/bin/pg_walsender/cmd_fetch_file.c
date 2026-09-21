@@ -7,6 +7,7 @@
  *
  */
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "postgres_fe.h"
@@ -44,24 +45,13 @@ filename_is_safe(const char *filename)
 }
 
 
+/* CopyData messages of at most this many bytes, like a real walsender's */
+#define WS_FETCH_CHUNK_SIZE (128 * 1024)
+
+
 void
-cmd_fetch_file(int sock, const WsRoute *route)
+cmd_fetch_file(int sock, const WsRoute *route, const char *filename)
 {
-	if (!ws_send_authentication_ok(sock))
-	{
-		return;
-	}
-
-	char filename[WS_FETCH_FILENAME_MAX];
-
-	if (!ws_read_line(sock, filename, sizeof(filename)))
-	{
-		ws_send_error_response(sock, "08P01",
-							   "expected a single filename line after "
-							   "authentication");
-		return;
-	}
-
 	if (!filename_is_safe(filename))
 	{
 		log_warn("Rejecting FETCH_FILE request for unsafe filename \"%s\"",
@@ -92,7 +82,18 @@ cmd_fetch_file(int sock, const WsRoute *route)
 		return;
 	}
 
-	if (!ws_send_copy_data(sock, contents, (int32_t) fileSize))
+	bool ok = ws_send_copy_out_response(sock, 0);
+
+	for (long offset = 0; ok && offset < fileSize; offset += WS_FETCH_CHUNK_SIZE)
+	{
+		long chunk = Min(WS_FETCH_CHUNK_SIZE, fileSize - offset);
+
+		ok = ws_send_copy_data(sock, contents + offset, (int32_t) chunk);
+	}
+
+	ok = ok && ws_send_copy_done(sock) && ws_send_command_complete(sock, "FETCH_FILE");
+
+	if (!ok)
 	{
 		log_error("Failed to send \"%s\" (%ld bytes) to a FETCH_FILE client",
 				  filename, fileSize);

@@ -1,10 +1,13 @@
 /*
  * src/bin/common/scram.h
- *   SCRAM-SHA-256 (RFC 5802 / RFC 7677, as spoken by PostgreSQL) building
- *   blocks shared by pg_walsender (server side of the exchange, and its
- *   fetch-file client) and pg_autoctl. Built directly on OpenSSL's
- *   libcrypto rather than PostgreSQL's libpgcommon, whose scram_* function
- *   signatures differ between PostgreSQL major versions.
+ *   The server side of SCRAM-SHA-256 (RFC 5802 / RFC 7677, as PostgreSQL
+ *   speaks it) for pg_walsender, and the stored-secret helpers pg_autoctl
+ *   shares with it. The cryptographic primitives are libpgcommon's
+ *   (scram_compat.h), password normalization is its SASLprep, and the
+ *   exchange follows src/backend/libpq/auth-scram.c: channel binding
+ *   (SCRAM-SHA-256-PLUS with tls-server-end-point) when the connection is
+ *   encrypted, and "mock" authentication for a user without a usable
+ *   secret, so that an unknown role cannot be told from a wrong password.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -17,11 +20,14 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define SCRAM_KEY_LEN 32
+#define WS_SCRAM_KEY_LEN 32
 #define SCRAM_MAX_SALT_LEN 64
-#define SCRAM_DEFAULT_ITERATIONS 4096
-#define SCRAM_NONCE_LEN 18
+#define WS_SCRAM_ITERATIONS 4096
 #define SCRAM_MAX_MESSAGE_LEN 1024
+#define SCRAM_MAX_CBIND_LEN 64
+
+#define SCRAM_MECHANISM "SCRAM-SHA-256"
+#define SCRAM_MECHANISM_PLUS "SCRAM-SHA-256-PLUS"
 
 /* what a stored "SCRAM-SHA-256$<iter>:<salt>$<StoredKey>:<ServerKey>" holds */
 typedef struct ScramVerifier
@@ -29,52 +35,47 @@ typedef struct ScramVerifier
 	int iterations;
 	unsigned char salt[SCRAM_MAX_SALT_LEN];
 	int saltLen;
-	unsigned char storedKey[SCRAM_KEY_LEN];
-	unsigned char serverKey[SCRAM_KEY_LEN];
+	unsigned char storedKey[WS_SCRAM_KEY_LEN];
+	unsigned char serverKey[WS_SCRAM_KEY_LEN];
 } ScramVerifier;
 
-/* build the stored secret for a password, as PostgreSQL stores it */
+/* build the stored secret of a password (SASLprep'ed first, as PostgreSQL does) */
 bool scram_build_verifier(const char *password, int iterations,
 						  char *dest, size_t destSize);
 bool scram_parse_verifier(const char *secret, ScramVerifier *verifier);
 
 /*
- * Server side. Two calls: scram_server_first() consumes the client-first
- * message and produces the server-first message; scram_server_final()
- * consumes the client-final message, verifies the proof, and produces the
- * server-final ("v=...") message. The state carries what is needed in
- * between.
+ * A verifier that can never be proven, derived from the user name and a
+ * per-process secret: the exchange runs to the end and fails like a wrong
+ * password does. Call scram_mock_init() once, before forking.
  */
+bool scram_mock_init(void);
+bool scram_mock_verifier(const char *user, ScramVerifier *verifier);
+
 typedef struct ScramServerState
 {
 	char clientFirstBare[SCRAM_MAX_MESSAGE_LEN];
 	char serverFirst[SCRAM_MAX_MESSAGE_LEN];
 	char nonce[SCRAM_MAX_MESSAGE_LEN];
+	char gs2Header[64];         /* "n,," or "p=tls-server-end-point,," ... */
+	bool plus;                  /* SCRAM-SHA-256-PLUS was selected */
+	unsigned char cbindData[SCRAM_MAX_CBIND_LEN];
+	int cbindDataLen;           /* our certificate hash, 0: not offered */
 } ScramServerState;
 
+/*
+ * scram_server_first consumes the client-first message received for
+ * mechanism (SCRAM_MECHANISM or SCRAM_MECHANISM_PLUS); cbindData is the
+ * hash of our TLS certificate (RFC 5929 tls-server-end-point), NULL/0 when
+ * the connection is not encrypted (channel binding not offered).
+ */
 bool scram_server_first(ScramServerState *state, const ScramVerifier *verifier,
-						const char *clientFirst, char *serverFirst,
-						size_t serverFirstSize);
+						const char *mechanism, const char *clientFirst,
+						const unsigned char *cbindData, int cbindDataLen,
+						char *serverFirst, size_t serverFirstSize);
+
 bool scram_server_final(ScramServerState *state, const ScramVerifier *verifier,
 						const char *clientFinal, char *serverFinal,
 						size_t serverFinalSize);
-
-/*
- * Client side (used by pg_walsender's fetch-file client).
- */
-typedef struct ScramClientState
-{
-	char clientFirstBare[SCRAM_MAX_MESSAGE_LEN];
-	char clientFinalNoProof[SCRAM_MAX_MESSAGE_LEN];
-	char serverFirst[SCRAM_MAX_MESSAGE_LEN];
-	unsigned char serverKeyForVerify[SCRAM_KEY_LEN];
-	char authMessage[3 * SCRAM_MAX_MESSAGE_LEN];
-} ScramClientState;
-
-bool scram_client_first(ScramClientState *state, char *dest, size_t destSize);
-bool scram_client_final(ScramClientState *state, const char *password,
-						const char *serverFirst, char *dest, size_t destSize);
-bool scram_client_verify_server_final(ScramClientState *state,
-									  const char *serverFinal);
 
 #endif /* SCRAM_H */

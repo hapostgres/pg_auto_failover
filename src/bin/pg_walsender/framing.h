@@ -36,15 +36,6 @@ bool ws_read_bytes(int sock, void *buf, size_t len);
 bool ws_write_bytes(int sock, const void *buf, size_t len);
 
 /*
- * ws_read_line reads a single '\n'-terminated line (the '\n' consumed but
- * not included in *line), up to maxLen-1 bytes, NUL-terminated. Used only
- * by the FETCH_FILE side-channel (cmd_fetch_file.c) for its one-shot
- * "filename\n" request -- not part of the real Postgres wire protocol,
- * deliberately as simple as the exchange it serves.
- */
-bool ws_read_line(int sock, char *line, size_t maxLen);
-
-/*
  * Startup-phase framing: before authentication, messages have no leading
  * type byte (StartupMessage, SSLRequest, GSSENCRequest, CancelRequest are
  * all just a length-prefixed body).

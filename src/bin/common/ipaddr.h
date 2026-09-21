@@ -42,6 +42,7 @@ bool ipaddrGetLocalHostname(char *hostname, size_t size);
  */
 bool ipaddrHostMatchesAddress(const char *hostOrIp, const char *ipaddr);
 bool ipaddrInCIDR(const char *cidr, const char *ipaddr);
+bool ipaddrIsSameHostOrNet(const char *ipaddr, bool sameNet);
 
 #define IPADDR_MAX_HOSTNAMES 16
 #define IPADDR_MAX_HOSTNAME_SIZE 256

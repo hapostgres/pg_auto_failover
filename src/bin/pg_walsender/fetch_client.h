@@ -1,12 +1,9 @@
 /*
  * src/bin/pg_walsender/fetch_client.h
- *   The client side of the FETCH_FILE side-channel (cmd_fetch_file.h) --
- *   the only caller of that protocol, matching its header comment ("the
- *   only caller here is pg_autoctl's own restore_command wrapper, which
- *   this project fully controls end to end"). Exposed as `pg_walsender
- *   fetch-file ...` (see main.c) so pg_autoctl's restore_command can shell
- *   out to it directly, the same way it already shells out to real
- *   pg_receivewal/pg_basebackup elsewhere in this project.
+ *   `pg_walsender fetch-file ...` (see main.c): the FETCH_FILE client
+ *   (cmd_fetch_file.h) for a restore_command. A plain libpq connection, so
+ *   the password (PGPASSWORD, .pgpass), TLS (PGSSLMODE, PGSSLROOTCERT, ...)
+ *   and every other connection option work as they do for pg_basebackup.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -17,8 +14,8 @@
 #define WS_FETCH_CLIENT_H
 
 /*
- * Connects to host:port, requests filename for routeKey ("<formation>/
- * <group>"), and writes the result to outputPath (via a same-directory
+ * Connects to host:port as user, requests filename for routeKey ("<formation>/
+ * <group>", the dbname), and writes the result to outputPath (via a same-directory
  * temp file + rename, so a killed/interrupted fetch never leaves a
  * partial file at outputPath). Returns 0 on success, 1 on any failure
  * (connection, auth, missing file, short write) -- always with a

@@ -38,7 +38,8 @@ static const char *hbaHeader =
 	"# TYPE     host (TLS or not), hostssl (TLS only), hostnossl (no TLS)\n"
 	"# ROUTE    all, or <formation>/<group>\n"
 	"# USER     all, or a role name\n"
-	"# ADDRESS  all, monitor, an IP address, IP/prefix, a hostname, or a\n"
+	"# ADDRESS  all, samehost, samenet, monitor, an IP address, IP/prefix, a\n"
+	"#          hostname, or a\n"
 	"#          .domain.suffix (matched through every reverse DNS name of\n"
 	"#          the client, each confirmed by a forward lookup);\n"
 	"#          \"monitor\" is every node the monitor lists for the route\n"
@@ -109,9 +110,22 @@ hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable)
 static bool
 suffix_matches(const char *suffix, const char *peerIP)
 {
-	char names[IPADDR_MAX_HOSTNAMES][IPADDR_MAX_HOSTNAME_SIZE];
-	int count = ipaddrFindHostnamesFromAddress(peerIP, names,
+	/*
+	 * Like PostgreSQL's check_hostname(), which keeps the client's reverse
+	 * name in the Port, resolve it once per connection (this process serves
+	 * exactly one) however many suffix rules are tried.
+	 */
+	static char names[IPADDR_MAX_HOSTNAMES][IPADDR_MAX_HOSTNAME_SIZE];
+	static char resolvedFor[64] = "";
+	static int count = 0;
+
+	if (strcmp(resolvedFor, peerIP) != 0)
+	{
+		count = ipaddrFindHostnamesFromAddress(peerIP, names,
 											   IPADDR_MAX_HOSTNAMES);
+		strlcpy(resolvedFor, peerIP, sizeof(resolvedFor));
+	}
+
 	size_t suffixLen = strlen(suffix);
 
 	log_debug("HBA suffix %s peer %s: %d reverse names", suffix, peerIP, count);
@@ -150,6 +164,11 @@ rule_address_matches(const char *address, const char *routeKey,
 	if (strchr(address, '/') != NULL)
 	{
 		return ipaddrInCIDR(address, peerIP);
+	}
+
+	if (streq(address, "samehost") || streq(address, "samenet"))
+	{
+		return ipaddrIsSameHostOrNet(peerIP, streq(address, "samenet"));
 	}
 
 	if (address[0] == '.')

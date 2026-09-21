@@ -40,9 +40,9 @@ typedef struct WsAuthConfig
 
 /*
  * ws_authenticate resolves routeKey to a route and authenticates the
- * connection per the HBA file. routeKey is passed explicitly because the
- * FETCH_FILE side-channel (see cmd_fetch_file.h) reuses this path with a
- * "fetch/" prefix stripped off the connection's dbname. On success returns
+ * connection per the HBA file. routeKey is passed explicitly because it is
+ * not always the connection's dbname (a real walreceiver sends the literal
+ * "replication", see accept_loop.c). On success returns
  * true and sets *foundRoute (NULL when routes were not supplied at all).
  * On failure an ErrorResponse has already been sent; the caller only needs
  * to close the connection. AuthenticationOk is NOT sent here: the caller

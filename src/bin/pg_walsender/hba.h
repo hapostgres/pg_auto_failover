@@ -11,7 +11,8 @@
  *
  *   TYPE is "host" (any connection), "hostssl" (TLS only) or "hostnossl".
  *   ROUTE is "all" or "<formation>/<group>". USER is "all" or a role name.
- *   ADDRESS is "all", "monitor", an IP address, an IP/prefix, a hostname
+ *   ADDRESS is "all", "samehost", "samenet" (as in PostgreSQL), "monitor", an
+ *   IP address, an IP/prefix, a hostname
  *   (resolved forward, every A/AAAA answer compared), or ".domain.suffix"
  *   (every reverse-DNS name of the client is tried, each confirmed by a
  *   forward lookup -- PostgreSQL only looks at the first answer, which is
