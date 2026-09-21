@@ -104,7 +104,7 @@ service_archiver_walsender_start(void *context, pid_t *pid)
 
 		case 0:
 		{
-			char *args[6];
+			char *args[10];
 			int argsIndex = 0;
 
 			args[argsIndex++] = pgWalsenderPath;
@@ -112,6 +112,17 @@ service_archiver_walsender_start(void *context, pid_t *pid)
 			args[argsIndex++] = portStr;
 			args[argsIndex++] = "--pgdata";
 			args[argsIndex++] = config->pgSetup.pgdata;
+
+			/* the certificate and key given at create time, when any */
+			if (config->pgSetup.ssl.serverCert[0] != '\0' &&
+				config->pgSetup.ssl.serverKey[0] != '\0')
+			{
+				args[argsIndex++] = "--ssl-cert-file";
+				args[argsIndex++] = config->pgSetup.ssl.serverCert;
+				args[argsIndex++] = "--ssl-key-file";
+				args[argsIndex++] = config->pgSetup.ssl.serverKey;
+			}
+
 			args[argsIndex] = NULL;
 
 			execv(pgWalsenderPath, args);

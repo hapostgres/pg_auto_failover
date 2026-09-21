@@ -23,7 +23,7 @@ override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor
 # Sources that live in this directory
 # -----------------------------------------------------------------------
 LOCAL_SRC = main.c accept_loop.c startup.c auth.c framing.c repl_command.c \
-            routes.c hba.c cmd_identify_system.c cmd_show.c cmd_base_backup.c \
+            routes.c hba.c tls.c monitor_hosts.c cmd_identify_system.c cmd_show.c cmd_base_backup.c \
             tar_stream.c cmd_fetch_file.c fetch_client.c \
             cmd_timeline_history.c cmd_replication_slot.c \
             cmd_start_replication.c wal_dir_scan.c

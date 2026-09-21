@@ -210,46 +210,62 @@ Two distinct connections, two distinct authentication stories:
   connection, same as before.
 - **Inbound, client → archiver's own listener**: an archiver listens on a
   TCP port (``6543`` by default) speaking a subset of the PostgreSQL
-  replication protocol, and every connection is authenticated against
-  ``archiver-hba.conf`` in the archiver's data directory -- a small,
-  ``pg_hba.conf``-style file, read on every connection, where the first
-  matching line wins and no match rejects (as does a missing or
-  unreadable file)::
+  replication protocol. It serves TLS the way PostgreSQL does (an
+  ``SSLRequest`` answered ``S``, then the handshake) with the certificate
+  ``pg_autoctl create archiver --ssl-self-signed`` (or ``--server-cert`` /
+  ``--server-key``) provides, TLS 1.2 or newer, and it authenticates every
+  connection against ``archiver-hba.conf`` in the archiver's data directory
+  -- a small ``pg_hba.conf``-style file, read on every connection, where
+  the first matching line wins and no match rejects (as does a missing or
+  unreadable file). The default file, created on first start and never
+  overwritten, admits the nodes of the cluster with the replication
+  password, over TLS::
 
-    # TYPE  ROUTE      USER                       ADDRESS       METHOD
-    host    all        pgautofailover_replicator  monitor       trust
-    host    default/0  pitr_restore               192.0.2.0/24  scram-sha-256
+    # TYPE   ROUTE      USER                       ADDRESS       METHOD
+    hostssl  all        pgautofailover_replicator  monitor       scram-sha-256
+    hostssl  default/0  pitr_restore                192.0.2.0/24  scram-sha-256
 
-  ``ROUTE`` is ``all`` or ``<formation>/<group>``; ``USER`` is ``all`` or a
-  role name; ``ADDRESS`` is ``all``, ``monitor``, an IP address, an
-  ``IP/prefix`` or a hostname; ``METHOD`` is ``trust``, ``scram-sha-256``
-  or ``reject``. ``monitor`` stands for every node the monitor lists for
-  the route: each membership's capture service refreshes
-  ``archiver-nodes.list`` in that membership's directory from the monitor
-  every second, so a node
-  that registers is let in with no file edit. That is the default file
-  ``pg_walsender`` creates on first start (and never overwrites): nodes
-  of the cluster are trusted, the way their own replication connections
-  already are, and nobody else gets in.
+  ``TYPE`` is ``host``, ``hostssl`` or ``hostnossl``; ``ROUTE`` is ``all``
+  or ``<formation>/<group>``; ``USER`` is ``all`` or a role name;
+  ``ADDRESS`` is ``all``, ``monitor``, an IP address, an ``IP/prefix``, a
+  hostname, or a ``.domain.suffix``; ``METHOD`` is ``scram-sha-256``,
+  ``trust`` or ``reject``.
 
-  A host the monitor does not know about -- a Point-In-Time-Recovery
-  restore target that never registers, for instance -- needs a line of
-  its own. With ``scram-sha-256`` the client must prove knowledge of a
-  password through a real SCRAM-SHA-256 exchange (so stock
-  ``pg_basebackup``, ``pg_receivewal`` and a standby's ``primary_conninfo``
-  work unmodified, the password given the usual way, e.g. ``PGPASSWORD``),
-  checked against the stored verifiers in ``archiver-passwd``, one
-  ``<user>:SCRAM-SHA-256$...`` line per role, which you create with::
+  ``monitor`` stands for every node the monitor lists for the route.
+  ``pg_walsender`` keeps a local copy of that list in the route's
+  directory, stamped with a fingerprint the monitor computes in SQL
+  (``pgautofailover.get_group_hosts_hash()``: md5 over the node count and
+  sorted names). A copy older than a few seconds is validated at connect
+  time -- one cheap query, and the list is only fetched again when the
+  fingerprints differ -- and a peer missing from it forces one more
+  validation (at most once a second). So a node that registers is admitted
+  at its first connection, a node that is dropped is refused within
+  seconds, and when the monitor is unreachable the local copy is used as
+  it is.
+
+  Hostnames in ``ADDRESS`` are resolved forward and every address of the
+  answer is compared with the client's. A ``.domain.suffix`` rule matches
+  when *any* of the client's reverse DNS names ends with the suffix and
+  that name resolves back to the client -- PostgreSQL's forward-confirmed
+  reverse DNS, but over every ``PTR`` answer instead of only the first one,
+  which matters for hosts with several names and for Docker networks.
+
+  With ``scram-sha-256`` the client proves knowledge of a password through
+  a real SCRAM-SHA-256 exchange (so stock ``pg_basebackup``,
+  ``pg_receivewal`` and a standby's ``primary_conninfo`` work unmodified,
+  the password given the usual way, e.g. ``PGPASSWORD``), checked against
+  the stored verifiers in ``archiver-passwd``. The archiver derives the
+  verifier of the replication role from the ``--replication-password`` it
+  was created with (without one, the default rule admits nobody and a
+  warning says so). Verifiers for other roles, such as a Point-In-Time
+  Recovery restore target that never registers with the monitor, are made
+  with::
 
     $ PGPASSWORD=... pg_walsender scram-secret --user pitr_restore >> archiver-passwd
 
-  To require a password from the cluster's own nodes too, change the
-  ``monitor`` line's method to ``scram-sha-256`` (and give the nodes the
-  password). There is no TLS on this connection in the current release:
-  SCRAM keeps the password itself off the wire, but the data stream is
-  not encrypted, so keep the listener on a trusted network or behind a
-  firewall. The listener also caps concurrent connections (64) and drops a
-  client that does not complete startup within 30 seconds.
+  and admitted by a line of their own in ``archiver-hba.conf``. The
+  listener also caps concurrent connections (64) and drops a client that
+  does not complete startup within 30 seconds.
 
 Process model
 --------------

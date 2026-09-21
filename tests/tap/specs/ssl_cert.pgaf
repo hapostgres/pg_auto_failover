@@ -27,9 +27,9 @@ cluster {
     ssl verify-ca
     auth cert
     formation {
-        node1
-        node2
-        archiver1 archiver
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
     }
 }
 

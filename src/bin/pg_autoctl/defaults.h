@@ -229,13 +229,6 @@
 /* default port pg_walsender listens on, started via `pg_autoctl archiver
  * serve` -- matches src/bin/pg_walsender/defaults.h's own WS_DEFAULT_PORT */
 
-/*
- * Written by each membership's capture service into its own storage
- * directory, read by pg_walsender's "monitor" HBA address: one hostname per
- * line, the nodes the monitor lists for that (formation, group).
- */
-#define PG_AUTOCTL_ARCHIVER_NODES_FILE "archiver-nodes.list"
-
 #define PG_AUTOCTL_ARCHIVER_SERVE_PORT 6543
 
 /* port the archiver's own throwaway replay-mode staging Postgres instance

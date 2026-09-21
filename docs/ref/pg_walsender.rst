@@ -29,6 +29,7 @@ Synopsis
 ::
 
   pg_walsender --port <port> [--pgdata <path>]
+               [--ssl-cert-file <path> --ssl-key-file <path>]
   PGPASSWORD=... pg_walsender scram-secret [--user <name>]
 
   pg_walsender fetch-file --host <host> --port <port> \
@@ -62,6 +63,14 @@ Options
 
   Port to listen on, in server mode. Defaults to ``6543``.
 
+--ssl-cert-file, --ssl-key-file
+
+  The TLS certificate and private key to serve. Default to
+  ``<pgdata>/server.crt`` and ``<pgdata>/server.key``; without a usable
+  pair the server answers ``N`` to ``SSLRequest`` and ``hostssl`` HBA lines
+  never match. The key must not be accessible to group or others (PostgreSQL's
+  rule).
+
 --pgdata
 
   The archiver's own top-level storage root -- the same value given as
@@ -72,7 +81,7 @@ Options
   dbname) to its storage path -- written by
   :ref:`pg_autoctl_archiver`'s own reconciler process, not meant to be
   hand-edited -- and ``<pgdata>/archiver-hba.conf`` and ``archiver-passwd`` (plus
-  ``archiver-nodes.list`` in each route's directory), which decide who may connect (see
+  ``archiver-monitor.uri`` and a local ``archiver-nodes.list`` per route), which decide who may connect (see
   :ref:`archiving_architecture`; the HBA file is created with a default
   trusting the monitor's node list when missing). Omit both ``--pgdata``
   and ``PGDATA`` only for manual, standalone testing (accepts any dbname,
@@ -92,6 +101,18 @@ Options
 
   ``<formation>/<group>`` identifying which membership to fetch the file
   from, when that archiver serves more than one.
+
+--user
+
+  The role to connect as (default ``pgautofailover_replicator``). The
+  password comes from ``PGPASSWORD`` and TLS from ``PGSSLMODE`` (default
+  ``prefer``), as with libpq.
+
+--user
+
+  The role to connect as (default ``pgautofailover_replicator``). The
+  password comes from ``PGPASSWORD`` and TLS from ``PGSSLMODE``
+  (default ``prefer``), as with libpq.
 
 --filename
 

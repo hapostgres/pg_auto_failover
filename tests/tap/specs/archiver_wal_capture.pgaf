@@ -10,37 +10,14 @@
 # codebase ever called that SQL function, so archiver_wal stayed permanently
 # empty no matter how much WAL an archiver captured.
 #
-# Segment filenames are deterministic within a single run of this spec: each
-# pg_switch_wal() call that has real content to flush advances exactly one
-# segment (a bare pg_switch_wal() with nothing written since the previous
-# one is *not* reliably a no-op in practice -- it still writes the SWITCH
-# record itself -- but forcing a long run of them back-to-back with no
-# other activity in between measurably slows down how fast pg_receivewal
-# can stream and flush all of it under host load, which is exactly the
-# wrong kind of margin to add: it turns a segment-numbering assumption into
-# a throughput race instead, observed firsthand while developing this
-# fix). What is NOT segment 000000010000000000000001, despite an earlier
-# version of this spec assuming so: by the time archiver1 finishes
-# registering and gets its own replication slot (keeper_create_and_drop_
-# replication_slots(), the same eager per-tick mechanism used for an
-# ordinary standby -- see pg_autoctl's service_archiver.c and keeper.c),
-# node1 + node2's own cluster/extension bootstrap has typically already
-# consumed a few WAL segments -- observed at exactly segment 3 (the
-# archiver's slot restart_lsn landing on 0/3000000) across repeated runs of
-# this exact Docker image, and segment 3 itself *is* fully retained and
-# capturable (it's the archiver's own slot floor, not one before it). A
-# replication slot only protects WAL *from its own creation time onward*;
-# it can't retroactively un-recycle segments the primary already dropped
-# before the slot existed -- confirmed by node2's own real-secondary slot
-# *also* not reaching back to segment 1 in the same runs. pgaftest's DSL
-# has no way to capture a query result for use in a later query, so there's
-# no way to compute "whatever segment we're actually on" dynamically; every
-# check below instead uses the fixed, repeatedly-observed floor of segment
-# 3 directly, with the minimum number of pg_switch_wal() calls needed
-# (each with real content immediately before it) rather than any extra
-# margin -- if a future Postgres/build change shifts the real floor, this
-# spec will fail fast and clearly (wrong segment name -> wal_archived()
-# returns false), not hang or silently pass.
+# Segment names are not hard-coded: node1 + node2's own bootstrap consumes a
+# varying number of WAL segments before the archiver's replication slot
+# exists (a slot only protects WAL from its creation onward), so each step
+# captures the segment it just closed with
+#   let seg = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+# (pg_switch_wal() returns an LSN inside the segment it closed) and waits
+# for exactly that name. Each switch has a real INSERT immediately before
+# it, so it reliably produces a new segment.
 #
 # The autoctl_node role has no direct SELECT on archiver_wal (see
 # report_wal_received()'s own SECURITY DEFINER indirection in
@@ -53,9 +30,9 @@
 cluster {
     monitor
     formation {
-        node1
-        node2 create and launch deferred
-        archiver1 archiver
+        node1 replication-password "pgaf-repl-pw"
+        node2 create and launch deferred replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
     }
 }
 
@@ -73,21 +50,17 @@ teardown {
 #           land durably in archiver_wal (archiver_quorum defaults to 1, and
 #           there is exactly one archiver here, so wal_archived() flips to
 #           true as soon as service_archiver_report_captured_wal()'s next
-#           tick reports the segment). Segment 3 is the observed floor (see
-#           this spec's own header comment) and is itself fully capturable,
-#           so no throwaway switches are needed before it -- each switch
-#           below has a real INSERT immediately before it, so it reliably
-#           produces a genuinely new segment rather than racing pg_
-#           receivewal's own throughput under host load.
+#           tick reports the segment). Each closed segment is captured
+#           dynamically with `let` (see this spec's own header comment).
 #
 
 step test_001_capture_wal {
     sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
-    sql node1 { SELECT pg_switch_wal(); }
+    let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
     sql node1 { INSERT INTO t1 VALUES (3); }
-    sql node1 { SELECT pg_switch_wal(); }
-    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
-    wait until wal segment "000000010000000000000004" archived in default/0  timeout 30s
+    let seg2 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg1}') } is { t }  timeout 30s
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg2}') } is { t }  timeout 30s
 }
 
 #
@@ -106,9 +79,7 @@ step test_002_archiver_restart_liveness {
     wait until archiver1 stopped  timeout 60s
     compose start archiver1
     wait until archiver1 state is archiving  timeout 60s
-    # one more switch on top of test_001's own two -- completes segment
-    # 000000010000000000000005 (see this spec's own header comment on why
-    # these are fixed numbers rather than derived from segment 1).
+    # one more switch on top of test_001's own two, captured as seg3.
     #
     # 60s, not test_001's own 30s for the same kind of wait: unlike
     # test_001, pg_receivewal isn't already streaming here -- it has to
@@ -122,8 +93,8 @@ step test_002_archiver_restart_liveness {
     # number, matching the 60s this same step already uses just above for
     # "archiver1 state is archiving".
     sql node1 { INSERT INTO t1 VALUES (4); }
-    sql node1 { SELECT pg_switch_wal(); }
-    wait until wal segment "000000010000000000000005" archived in default/0  timeout 60s
+    let seg3 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg3}') } is { t }  timeout 60s
 }
 
 #
@@ -147,7 +118,7 @@ step test_003_bootstrap_node2_from_archiver {
     # instead. Redirecting create postgres's own stdout/stderr to a file
     # here, then grep-ing that file directly below, is what actually lets
     # this step confirm the automatic archiver-bootstrap log line fired.
-    exec node2  bash -c "pg_autoctl create postgres --pgdata /var/lib/postgres/pgaf --monitor postgresql://autoctl_node@monitor/pg_auto_failover --auth trust --no-ssl --name node2 --hostname node2 > /tmp/node2-create.log 2>&1"
+    exec node2  bash -c "pg_autoctl create postgres --pgdata /var/lib/postgres/pgaf --monitor postgresql://autoctl_node@monitor/pg_auto_failover --auth trust --no-ssl --name node2 --hostname node2 --replication-password pgaf-repl-pw > /tmp/node2-create.log 2>&1"
     exec node2  bash -c "grep -qF 'bootstrapping from it automatically' /tmp/node2-create.log"
     exec node2  bash -c "nohup pg_autoctl run --pgdata /var/lib/postgres/pgaf > /tmp/node2-run.log 2>&1 & echo backgrounded pid $!"
     wait until node2 state is secondary  timeout 90s
@@ -188,10 +159,9 @@ step test_004_failover_continuity {
     # complete before this wait even starts observing it.
     wait until archiver1 state is archiving  timeout 120s
     # re-check the earliest and latest segments already confirmed by test_001
-    # and test_002 -- proves they survived the failover, not that they were
-    # ever really "segment 1" (see this spec's own header comment).
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000003'); }
+    # and test_002 -- proves they survived the failover.
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg1}'); }
     expect { t }
-    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '000000010000000000000005'); }
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg3}'); }
     expect { t }
 }

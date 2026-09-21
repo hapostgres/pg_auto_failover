@@ -50,6 +50,7 @@
  */
 
 #include <signal.h>
+#include <sys/stat.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
@@ -64,6 +65,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "monitor.h"
+#include "scram.h"
 #include "service_archiver_pgreceivewal_ctl.h"
 #include "service_archiver_run.h"
 #include "service_archiver_wal_scanner.h"
@@ -127,6 +129,7 @@ static bool find_membership_service(Supervisor *supervisor,
 									const char *formation, int groupId,
 									Service **result);
 static void archiver_reconciler_tick(Supervisor *supervisor, void *context);
+static void archiver_reconciler_write_serve_secrets(Keeper *templateKeeper);
 
 
 /*
@@ -593,6 +596,94 @@ find_membership_service(Supervisor *supervisor, const char *formation,
 
 
 /*
+ * archiver_reconciler_write_serve_secrets writes the two files pg_walsender
+ * needs that only pg_autoctl knows: archiver-monitor.uri (how it reaches
+ * the monitor to validate the "monitor" HBA address, see monitor_hosts.h)
+ * and, when the archiver was given a replication password, the SCRAM
+ * verifier for the replication role in archiver-passwd. Both are mode 0600.
+ * Verifiers of other roles an operator added to archiver-passwd are kept.
+ */
+static void
+archiver_reconciler_write_serve_secrets(Keeper *templateKeeper)
+{
+	KeeperConfig *config = &(templateKeeper->config);
+	char path[MAXPGPATH] = { 0 };
+
+	sformat(path, sizeof(path), "%s/archiver-monitor.uri",
+			config->pgSetup.pgdata);
+
+	if (write_file_atomic(config->monitor_pguri,
+						  (long) strlen(config->monitor_pguri), path))
+	{
+		(void) chmod(path, 0600);
+	}
+	else
+	{
+		log_warn("Failed to write \"%s\"", path);
+	}
+
+	if (config->replication_password[0] == '\0')
+	{
+		log_warn("No replication password: without one pg_walsender's default "
+				 "HBA rule (scram-sha-256) admits nobody; give "
+				 "--replication-password to pg_autoctl create archiver, or "
+				 "edit archiver-hba.conf");
+		return;
+	}
+
+	char verifier[512] = { 0 };
+
+	if (!scram_build_verifier(config->replication_password,
+							  SCRAM_DEFAULT_ITERATIONS,
+							  verifier, sizeof(verifier)))
+	{
+		log_warn("Failed to build the SCRAM verifier for the replication "
+				 "role");
+		return;
+	}
+
+	sformat(path, sizeof(path), "%s/archiver-passwd", config->pgSetup.pgdata);
+
+	PQExpBuffer buffer = createPQExpBuffer();
+	char *existing = NULL;
+	long size = 0;
+
+	if (read_file_if_exists(path, &existing, &size) && existing != NULL)
+	{
+		char *save = NULL;
+
+		for (char *line = strtok_r(existing, "\n", &save);
+			 line != NULL;
+			 line = strtok_r(NULL, "\n", &save))
+		{
+			const char *prefix = PG_AUTOCTL_REPLICA_USERNAME ":";
+
+			if (strncmp(line, prefix, strlen(prefix)) != 0)
+			{
+				appendPQExpBuffer(buffer, "%s\n", line);
+			}
+		}
+
+		free(existing);
+	}
+
+	appendPQExpBuffer(buffer, PG_AUTOCTL_REPLICA_USERNAME ":%s\n", verifier);
+
+	if (!PQExpBufferBroken(buffer) &&
+		write_file_atomic(buffer->data, buffer->len, path))
+	{
+		(void) chmod(path, 0600);
+	}
+	else
+	{
+		log_warn("Failed to write \"%s\"", path);
+	}
+
+	destroyPQExpBuffer(buffer);
+}
+
+
+/*
  * archiver_reconciler_tick is this file's own Supervisor.periodicCallback
  * (see supervisor.h): rate-limited to ARCHIVER_RECONCILER_INTERVAL_SECONDS
  * by wall-clock time regardless of how often supervisor_loop() actually
@@ -928,6 +1019,7 @@ service_archiver_reconciler_loop(Keeper *templateKeeper)
 		.serviceCount = serviceCount
 	};
 
+	(void) archiver_reconciler_write_serve_secrets(templateKeeper);
 	(void) archiver_reconciler_write_routes_file(templateKeeper, &initialSupervisor);
 
 	char pidfile[MAXPGPATH] = { 0 };

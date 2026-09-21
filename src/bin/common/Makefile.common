@@ -67,7 +67,7 @@ LIBS  = -L $(shell $(PG_CONFIG) --pkglibdir)
 LIBS += -L $(shell $(PG_CONFIG) --libdir)
 LIBS += $(PG_LDFLAGS)
 LIBS += $(shell $(PG_CONFIG) --libs)
-LIBS += -lpq -lcrypto
+LIBS += -lpq -lssl -lcrypto -lresolv
 
 DEPDIR = .deps
 

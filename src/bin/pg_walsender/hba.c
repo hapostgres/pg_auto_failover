@@ -8,18 +8,24 @@
  */
 
 #include <arpa/inet.h>
+#include <arpa/nameser.h>
 #include <netdb.h>
+#include <resolv.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <string.h>
 #include <sys/socket.h>
 
 #include "postgres_fe.h"
+
+#include "pqexpbuffer.h"
 
 #include "hba.h"
 
 #include "defaults.h"
 #include "file_utils.h"
 #include "log.h"
+#include "monitor_hosts.h"
 #include "string_utils.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
@@ -27,29 +33,30 @@
 #define HBA_MAX_FIELDS 5
 
 
-static const char *defaultHbaContents =
+static const char *hbaHeader =
 	"# pg_walsender host-based authentication, read on every connection.\n"
 	"# The first matching line wins; no match (or an unreadable file) rejects.\n"
 	"#\n"
 	"# TYPE  ROUTE  USER  ADDRESS  METHOD\n"
 	"#\n"
+	"# TYPE     host (TLS or not), hostssl (TLS only), hostnossl (no TLS)\n"
 	"# ROUTE    all, or <formation>/<group>\n"
 	"# USER     all, or a role name\n"
-	"# ADDRESS  all, monitor, an IP address, IP/prefix, or a hostname;\n"
+	"# ADDRESS  all, monitor, an IP address, IP/prefix, a hostname, or a\n"
+	"#          .domain.suffix (matched through every reverse DNS name of\n"
+	"#          the client, each confirmed by a forward lookup);\n"
 	"#          \"monitor\" is every node the monitor lists for the route\n"
-	"# METHOD   trust, scram-sha-256 (see archiver-passwd), or reject\n"
-	"#\n"
-	"# Nodes registered with the monitor (standbys and their pg_basebackup,\n"
-	"# streaming and restore_command connections):\n"
-	"host  all  " PG_AUTOCTL_REPLICA_USERNAME "  monitor  trust\n"
-	"#\n"
-	"# A host the monitor does not know about, such as a PITR restore target,\n"
-	"# needs a line of its own, for instance:\n"
-	"# host  default/0  " PG_AUTOCTL_REPLICA_USERNAME "  192.0.2.0/24  scram-sha-256\n";
+	"# METHOD   scram-sha-256 (checked against archiver-passwd), trust, reject\n"
+	"#\n";
 
 
+/*
+ * The default admits the nodes the monitor lists for a route, with a
+ * password (SCRAM-SHA-256) and over TLS. Without a server certificate TLS
+ * is not available, and the rule is a plain "host" one.
+ */
 bool
-hba_write_default_if_missing(const char *hbaPath)
+hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable)
 {
 	if (file_exists(hbaPath))
 	{
@@ -58,8 +65,42 @@ hba_write_default_if_missing(const char *hbaPath)
 
 	log_info("Creating the default pg_walsender HBA file \"%s\"", hbaPath);
 
-	return write_file_atomic((char *) defaultHbaContents,
-							 (long) strlen(defaultHbaContents), hbaPath);
+	PQExpBuffer buffer = createPQExpBuffer();
+
+	appendPQExpBufferStr(buffer, hbaHeader);
+	appendPQExpBufferStr(
+		buffer,
+		"# Nodes registered with the monitor (standbys and their pg_basebackup,\n"
+		"# streaming and restore_command connections), with the replication\n"
+		"# password given to pg_autoctl create archiver --replication-password:\n");
+
+	if (tlsAvailable)
+	{
+		appendPQExpBuffer(buffer,
+						  "hostssl  all  " PG_AUTOCTL_REPLICA_USERNAME
+						  "  monitor  scram-sha-256\n");
+	}
+	else
+	{
+		appendPQExpBuffer(buffer,
+						  "# no server.crt/server.key in this directory: TLS is off\n"
+						  "host     all  " PG_AUTOCTL_REPLICA_USERNAME
+						  "  monitor  scram-sha-256\n");
+	}
+
+	appendPQExpBufferStr(
+		buffer,
+		"#\n"
+		"# A host the monitor does not know about, such as a PITR restore target,\n"
+		"# needs a line of its own, for instance:\n"
+		"# hostssl  default/0  pitr_restore  192.0.2.0/24  scram-sha-256\n");
+
+	bool ok = !PQExpBufferBroken(buffer) &&
+			  write_file_atomic(buffer->data, buffer->len, (char *) hbaPath);
+
+	destroyPQExpBuffer(buffer);
+
+	return ok;
 }
 
 
@@ -172,43 +213,121 @@ cidr_matches(const char *cidr, const char *peerIP)
 
 
 /*
- * is peerIP one of the hosts in the route's own nodes file (one hostname
- * per line, maintained by the membership's capture service)?
+ * reverse_names collects every PTR name of peerIP (not only the first one
+ * getnameinfo() returns: a Docker network, or a host with several names,
+ * answers with a list, and any of them may be the one an HBA rule names).
+ * Returns the number of names stored.
+ */
+#define HBA_MAX_PTR_NAMES 16
+
+static int
+reverse_names(const char *peerIP, char names[][NS_MAXDNAME])
+{
+	unsigned char addr[16];
+	char query[NS_MAXDNAME];
+	int count = 0;
+
+	if (inet_pton(AF_INET, peerIP, addr) == 1)
+	{
+		sformat(query, sizeof(query), "%u.%u.%u.%u.in-addr.arpa",
+				addr[3], addr[2], addr[1], addr[0]);
+	}
+	else if (inet_pton(AF_INET6, peerIP, addr) == 1)
+	{
+		size_t len = 0;
+
+		query[0] = '\0';
+
+		for (int i = 15; i >= 0; i--)
+		{
+			len += (size_t) sformat(query + len, sizeof(query) - len, "%x.%x.",
+									addr[i] & 0x0F, addr[i] >> 4);
+		}
+
+		strlcpy(query + len, "ip6.arpa", sizeof(query) - len);
+	}
+	else
+	{
+		return 0;
+	}
+
+	unsigned char answer[4096];
+	int answerLen = res_query(query, ns_c_in, ns_t_ptr, answer, sizeof(answer));
+
+	if (answerLen <= 0)
+	{
+		return 0;
+	}
+
+	ns_msg msg;
+
+	if (ns_initparse(answer, answerLen, &msg) != 0)
+	{
+		return 0;
+	}
+
+	for (int i = 0; i < ns_msg_count(msg, ns_s_an) && count < HBA_MAX_PTR_NAMES; i++)
+	{
+		ns_rr rr;
+
+		if (ns_parserr(&msg, ns_s_an, i, &rr) != 0 || ns_rr_type(rr) != ns_t_ptr)
+		{
+			continue;
+		}
+
+		if (ns_name_uncompress(ns_msg_base(msg), ns_msg_end(msg),
+							   ns_rr_rdata(rr), names[count],
+							   NS_MAXDNAME) >= 0)
+		{
+			count++;
+		}
+	}
+
+	return count;
+}
+
+
+/*
+ * suffix_matches implements ".example.com": true when any reverse name of
+ * the peer ends with the suffix AND that name resolves (forward) back to
+ * the peer -- PostgreSQL's forward-confirmed reverse DNS, but over every
+ * PTR answer rather than the first one only.
  */
 static bool
-nodes_file_contains(const char *routePath, const char *peerIP)
+suffix_matches(const char *suffix, const char *peerIP)
 {
-	char nodesPath[MAXPGPATH];
+	char names[HBA_MAX_PTR_NAMES][NS_MAXDNAME];
+	int count = reverse_names(peerIP, names);
+	size_t suffixLen = strlen(suffix);
 
-	sformat(nodesPath, sizeof(nodesPath), "%s/" PG_AUTOCTL_ARCHIVER_NODES_FILE,
-			routePath);
+	log_debug("HBA suffix %s peer %s: %d reverse names, first \"%s\"", suffix, peerIP,
+			  count, count > 0 ? names[0] : "");
 
-	char *contents = NULL;
-	long size = 0;
-
-	if (!read_file_if_exists(nodesPath, &contents, &size) || contents == NULL)
+	for (int i = 0; i < count; i++)
 	{
-		return false;
+		size_t len = strlen(names[i]);
+
+		/* PTR names may carry a trailing dot in some resolvers */
+		if (len > 0 && names[i][len - 1] == '.')
+		{
+			names[i][--len] = '\0';
+		}
+
+		if (len > suffixLen &&
+			strcasecmp(names[i] + len - suffixLen, suffix) == 0 &&
+			hba_host_matches_peer(names[i], peerIP))
+		{
+			return true;
+		}
 	}
 
-	bool found = false;
-	char *lineSave = NULL;
-
-	for (char *host = strtok_r(contents, "\n", &lineSave);
-		 host != NULL && !found;
-		 host = strtok_r(NULL, "\n", &lineSave))
-	{
-		found = hba_host_matches_peer(host, peerIP);
-	}
-
-	free(contents);
-
-	return found;
+	return false;
 }
 
 
 static bool
-rule_address_matches(const char *address, const char *routePath,
+rule_address_matches(const char *address, const char *routeKey,
+					 const char *routePath, const char *monitorUriPath,
 					 const char *peerIP)
 {
 	if (streq(address, "all"))
@@ -218,12 +337,17 @@ rule_address_matches(const char *address, const char *routePath,
 
 	if (streq(address, "monitor"))
 	{
-		return nodes_file_contains(routePath, peerIP);
+		return monitor_hosts_contain(routeKey, routePath, monitorUriPath, peerIP);
 	}
 
 	if (strchr(address, '/') != NULL)
 	{
 		return cidr_matches(address, peerIP);
+	}
+
+	if (address[0] == '.')
+	{
+		return suffix_matches(address, peerIP);
 	}
 
 	return hba_host_matches_peer(address, peerIP);
@@ -255,8 +379,9 @@ parse_method(const char *token, WsAuthMethod *method)
 
 
 bool
-hba_lookup(const char *hbaPath, const char *routePath, const char *routeKey,
-		   const char *user, const char *peerIP, WsAuthMethod *method)
+hba_lookup(const char *hbaPath, const char *routePath,
+		   const char *monitorUriPath, const char *routeKey, const char *user,
+		   const char *peerIP, bool isTLS, WsAuthMethod *method)
 {
 	char *contents = NULL;
 	long size = 0;
@@ -303,7 +428,11 @@ hba_lookup(const char *hbaPath, const char *routePath, const char *routeKey,
 
 		WsAuthMethod ruleMethod = WS_AUTH_REJECT;
 
-		if (count != HBA_MAX_FIELDS || !streq(fields[0], "host") ||
+		bool typeOk = count > 0 && (streq(fields[0], "host") ||
+									streq(fields[0], "hostssl") ||
+									streq(fields[0], "hostnossl"));
+
+		if (count != HBA_MAX_FIELDS || !typeOk ||
 			!parse_method(fields[4], &ruleMethod))
 		{
 			log_warn("Ignoring malformed HBA line %d in \"%s\"",
@@ -311,9 +440,15 @@ hba_lookup(const char *hbaPath, const char *routePath, const char *routeKey,
 			continue;
 		}
 
-		if ((streq(fields[1], "all") || streq(fields[1], routeKey)) &&
+		bool typeMatches = streq(fields[0], "host") ||
+						   (streq(fields[0], "hostssl") && isTLS) ||
+						   (streq(fields[0], "hostnossl") && !isTLS);
+
+		if (typeMatches &&
+			(streq(fields[1], "all") || streq(fields[1], routeKey)) &&
 			(streq(fields[2], "all") || streq(fields[2], user)) &&
-			rule_address_matches(fields[3], routePath, peerIP))
+			rule_address_matches(fields[3], routeKey, routePath,
+								 monitorUriPath, peerIP))
 		{
 			*method = ruleMethod;
 			free(contents);

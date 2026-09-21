@@ -1675,6 +1675,22 @@ cli_create_archiver(int argc, char **argv)
 		}
 	}
 
+	/*
+	 * pg_walsender serves TLS with the certificate this directory holds
+	 * (server.crt/server.key), the same files a Postgres node uses.
+	 */
+	if (config->pgSetup.ssl.createSelfSignedCert &&
+		(!file_exists(config->pgSetup.ssl.serverKey) ||
+		 !file_exists(config->pgSetup.ssl.serverCert)))
+	{
+		if (!pg_create_self_signed_cert(&(config->pgSetup), config->hostname))
+		{
+			log_fatal("Failed to create the self-signed certificate for "
+					  "pg_walsender, see above for details");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+
 	Monitor monitor = { 0 };
 
 	if (!monitor_init(&monitor, config->monitor_pguri))

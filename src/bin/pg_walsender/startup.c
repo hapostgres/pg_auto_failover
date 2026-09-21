@@ -13,6 +13,7 @@
 #include "postgres_fe.h"
 
 #include "startup.h"
+#include "tls.h"
 #include "framing.h"
 #include "log.h"
 
@@ -51,14 +52,45 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 		memcpy(&code, payload, 4); /* IGNORE-BANNED */
 		code = ntohl(code);
 
-		if (code == SSL_REQUEST_CODE || code == GSS_REQUEST_CODE)
+		if (code == SSL_REQUEST_CODE)
 		{
 			free(payload);
 
 			/*
-			 * MVP: no SSL/GSS support yet -- decline, real libpq's default
-			 * sslmode=prefer falls back to plaintext automatically on 'N'.
+			 * Like PostgreSQL: answer 'S' and run the TLS handshake on this
+			 * socket when the server has a certificate, 'N' otherwise (a
+			 * client's sslmode=prefer then falls back to plaintext). A second
+			 * SSLRequest on an already encrypted connection is a protocol
+			 * violation.
 			 */
+			if (ws_tls_active())
+			{
+				return false;
+			}
+
+			if (!ws_tls_server_enabled())
+			{
+				if (!ws_write_raw_byte(sock, 'N'))
+				{
+					return false;
+				}
+
+				continue;
+			}
+
+			if (!ws_write_raw_byte(sock, 'S') || !ws_tls_server_accept(sock))
+			{
+				return false;
+			}
+
+			continue;
+		}
+
+		if (code == GSS_REQUEST_CODE)
+		{
+			free(payload);
+
+			/* no GSSAPI encryption support: decline */
 			if (!ws_write_raw_byte(sock, 'N'))
 			{
 				return false;

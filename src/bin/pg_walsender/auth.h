@@ -35,6 +35,7 @@ typedef struct WsAuthConfig
 {
 	char hbaPath[MAXPGPATH];       /* empty: no authentication at all */
 	char passwdPath[MAXPGPATH];    /* scram-sha-256 verifiers */
+	char monitorUriPath[MAXPGPATH]; /* how "monitor" addresses reach the monitor */
 } WsAuthConfig;
 
 /*

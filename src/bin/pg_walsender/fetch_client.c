@@ -24,6 +24,9 @@
 #include "framing.h"
 #include "log.h"
 #include "scram.h"
+#include "tls.h"
+
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
 
 static int
@@ -80,7 +83,7 @@ connect_to(const char *host, int port)
 
 
 static bool
-send_startup_message(int sock, const char *database)
+send_startup_message(int sock, const char *user, const char *database)
 {
 	PQExpBuffer buf = createPQExpBuffer();
 	int32_t version = htonl(196608);   /* protocol 3.0 */
@@ -88,8 +91,7 @@ send_startup_message(int sock, const char *database)
 	appendBinaryPQExpBuffer(buf, (const char *) &version, 4);
 
 	appendBinaryPQExpBuffer(buf, "user", strlen("user") + 1);
-	appendBinaryPQExpBuffer(buf, PG_AUTOCTL_REPLICA_USERNAME,
-							strlen(PG_AUTOCTL_REPLICA_USERNAME) + 1);
+	appendBinaryPQExpBuffer(buf, user, strlen(user) + 1);
 
 	appendBinaryPQExpBuffer(buf, "database", strlen("database") + 1);
 	appendBinaryPQExpBuffer(buf, database, strlen(database) + 1);
@@ -275,7 +277,8 @@ client_scram_authenticate(int sock)
 
 
 int
-ws_fetch_file_client(const char *host, int port, const char *routeKey,
+ws_fetch_file_client(const char *host, int port, const char *user,
+					 const char *routeKey,
 					 const char *filename, const char *outputPath)
 {
 	int sock = connect_to(host, port);
@@ -285,11 +288,51 @@ ws_fetch_file_client(const char *host, int port, const char *routeKey,
 		return 1;
 	}
 
+	/*
+	 * TLS the way libpq does with PGSSLMODE (default "prefer"): ask with an
+	 * SSLRequest, and go on encrypted when the server says 'S'.
+	 */
+	char sslmode[32] = "prefer";
+
+	(void) get_env_copy("PGSSLMODE", sslmode, sizeof(sslmode));
+
+	if (!streq(sslmode, "disable"))
+	{
+		int32_t requestLen = htonl(8);
+		int32_t requestCode = htonl(80877103);
+		char answer = 'N';
+
+		if (!ws_write_bytes(sock, &requestLen, 4) ||
+			!ws_write_bytes(sock, &requestCode, 4) ||
+			!ws_read_bytes(sock, &answer, 1))
+		{
+			log_error("Failed to negotiate TLS with %s:%d", host, port);
+			close(sock);
+			return 1;
+		}
+
+		if (answer == 'S')
+		{
+			if (!ws_tls_client_connect(sock))
+			{
+				close(sock);
+				return 1;
+			}
+		}
+		else if (streq(sslmode, "require") || streq(sslmode, "verify-ca") ||
+				 streq(sslmode, "verify-full"))
+		{
+			log_error("The server does not support TLS, PGSSLMODE=%s", sslmode);
+			close(sock);
+			return 1;
+		}
+	}
+
 	char database[512];
 
 	sformat(database, sizeof(database), "fetch/%s", routeKey);
 
-	if (!send_startup_message(sock, database))
+	if (!send_startup_message(sock, user, database))
 	{
 		log_error("Failed to send the startup packet to %s:%d: %m", host, port);
 		close(sock);

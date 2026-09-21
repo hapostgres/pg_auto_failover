@@ -65,14 +65,15 @@
 cluster {
     monitor
     formation {
-        node1
-        node2
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
     }
     formation formation2 {
-        node3
-        node4
+        node3 replication-password "pgaf-repl-pw"
+        node4 replication-password "pgaf-repl-pw"
     }
     archiver archiver1 {
+        replication-password "pgaf-repl-pw"
         formation default
     }
 }
@@ -91,20 +92,18 @@ teardown {
 #
 # test_001: baseline -- confirm formation "default"'s WAL is captured
 #           before formation2 even exists, exactly as in
-#           archiver_wal_capture.pgaf. Segment numbering here follows that
-#           spec's own observed floor (segment 3 is the archiver's slot
-#           restart_lsn floor on this image -- see archiver_wal_capture.
-#           pgaf's header comment for the full reasoning); each switch
-#           below has a real INSERT immediately before it.
+#           archiver_wal_capture.pgaf. Segments are captured dynamically with
+#           `let` (see that spec's header comment); each switch below has a
+#           real INSERT immediately before it.
 #
 
 step test_001_capture_formation1_wal {
     sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
-    sql node1 { SELECT pg_switch_wal(); }
+    let f1seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
     sql node1 { INSERT INTO t1 VALUES (3); }
-    sql node1 { SELECT pg_switch_wal(); }
-    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
-    wait until wal segment "000000010000000000000004" archived in default/0  timeout 30s
+    let f1seg2 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${f1seg1}') } is { t }  timeout 30s
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${f1seg2}') } is { t }  timeout 30s
 }
 
 #
@@ -149,22 +148,17 @@ step test_003_dynamic_attach_to_formation2 {
 # test_004: confirm formation2's WAL is actually being captured by the
 #           newly-started capture child, not just that the FSM state looks
 #           right. formation2 is a fresh formation/group, but its archiver
-#           slot's restart_lsn floor still lands on segment 3 -- the same
-#           bootstrap-consumption behavior archiver_wal_capture.pgaf's own
-#           header comment documents for "default": a freshly-created
-#           replication slot's restart_lsn already reflects whatever WAL
-#           bootstrap/registration itself generated before the slot existed,
-#           independent of which formation it belongs to. Confirmed live
-#           (segment 1/2 never actually get archived -- only 3 onward do).
+#           segments are captured dynamically with `let`, since a freshly-created
+#           replication slot only protects WAL from its own creation onward.
 #
 
 step test_004_capture_formation2_wal {
     sql node3 { CREATE TABLE t2(a int); INSERT INTO t2 VALUES (1), (2); }
-    sql node3 { SELECT pg_switch_wal(); }
+    let f2seg1 = sql node3 { SELECT pg_walfile_name(pg_switch_wal()) }
     sql node3 { INSERT INTO t2 VALUES (3); }
-    sql node3 { SELECT pg_switch_wal(); }
-    wait until wal segment "000000010000000000000003" archived in formation2/0  timeout 30s
-    wait until wal segment "000000010000000000000004" archived in formation2/0  timeout 30s
+    let f2seg2 = sql node3 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '${f2seg1}') } is { t }  timeout 30s
+    wait until sql monitor { SELECT pgautofailover.wal_archived('formation2', 0, '${f2seg2}') } is { t }  timeout 30s
 }
 
 #
@@ -177,8 +171,8 @@ step test_004_capture_formation2_wal {
 
 step test_005_formation1_still_healthy {
     sql node1 { INSERT INTO t1 VALUES (4); }
-    sql node1 { SELECT pg_switch_wal(); }
-    wait until wal segment "000000010000000000000005" archived in default/0  timeout 30s
+    let f1seg3 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${f1seg3}') } is { t }  timeout 30s
     wait until archiver state is archiving in default  timeout 30s
 }
 

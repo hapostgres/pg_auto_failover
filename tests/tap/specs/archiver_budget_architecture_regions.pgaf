@@ -30,10 +30,11 @@
 cluster {
     monitor
     formation {
-        node1 region dc1
-        node2 region dc2
+        node1 region dc1 replication-password "pgaf-repl-pw"
+        node2 region dc2 replication-password "pgaf-repl-pw"
     }
     archiver archiver1 {
+        replication-password "pgaf-repl-pw"
         formation default
         region dc3
     }
@@ -72,15 +73,15 @@ step test_001_region_labels_round_trip {
 #
 # test_002: the archiver itself still does real work regardless of its own
 #           region label -- same idiom as archiver_wal_capture.pgaf's own
-#           test_001 (segment 3 is this image's own observed slot-creation
-#           floor; see that spec's header comment for the full reasoning).
+#           test_001, with the closed
+#           segment captured dynamically via `let`.
 #
 
 step test_002_archiver_captures_wal {
     sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
-    sql node1 { SELECT pg_switch_wal(); }
+    let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
     sql node1 { INSERT INTO t1 VALUES (3); }
-    sql node1 { SELECT pg_switch_wal(); }
-    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
-    wait until wal segment "000000010000000000000004" archived in default/0  timeout 30s
+    let seg2 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg1}') } is { t }  timeout 30s
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg2}') } is { t }  timeout 30s
 }

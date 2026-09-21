@@ -49,6 +49,7 @@
 #include "hba.h"
 #include "scram.h"
 #include "string_utils.h"
+#include "tls.h"
 
 /*
  * Globals required by shared common/ sources (file_utils.c's
@@ -72,9 +73,10 @@ usage(const char *argv0)
 {
 	fprintf(stderr, /* IGNORE-BANNED */
 			"Usage: %s --port <port> [--pgdata <path>]\n"
+			"          [--ssl-cert-file <path> --ssl-key-file <path>]\n"
 			"       %s scram-secret [ --user <name> ]  (password in PGPASSWORD)\n"
 			"       %s fetch-file --host <h> --port <p> --route <fmtn>/<grp> "
-			"--filename <name> --output <path>\n\n"
+			"--filename <name> --output <path> [--user <role>]\n\n"
 			"  --port      port to listen on (server mode default: %d)\n"
 			"  --pgdata    the archiver's own top-level storage root "
 			"(defaults to\n"
@@ -100,6 +102,7 @@ main_fetch_file(int argc, char **argv)
 	char host[256] = { 0 };
 	int port = WS_DEFAULT_PORT;
 	char route[256] = { 0 };
+	char user[NAMEDATALEN] = PG_AUTOCTL_REPLICA_USERNAME;
 	char filename[256] = { 0 };
 	char output[MAXPGPATH] = { 0 };
 
@@ -107,6 +110,7 @@ main_fetch_file(int argc, char **argv)
 		{ "host", required_argument, NULL, 'H' },
 		{ "port", required_argument, NULL, 'p' },
 		{ "route", required_argument, NULL, 'r' },
+		{ "user", required_argument, NULL, 'U' },
 		{ "filename", required_argument, NULL, 'f' },
 		{ "output", required_argument, NULL, 'o' },
 		{ NULL, 0, NULL, 0 }
@@ -114,7 +118,7 @@ main_fetch_file(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "H:p:r:f:o:", longOptions, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "H:p:r:U:f:o:", longOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -137,6 +141,12 @@ main_fetch_file(int argc, char **argv)
 			case 'r':
 			{
 				strlcpy(route, optarg, sizeof(route));
+				break;
+			}
+
+			case 'U':
+			{
+				strlcpy(user, optarg, sizeof(user));
 				break;
 			}
 
@@ -170,7 +180,7 @@ main_fetch_file(int argc, char **argv)
 		return 1;
 	}
 
-	return ws_fetch_file_client(host, port, route, filename, output);
+	return ws_fetch_file_client(host, port, user, route, filename, output);
 }
 
 
@@ -244,12 +254,16 @@ main(int argc, char **argv)
 	config.port = WS_DEFAULT_PORT;
 
 	char pgdata[MAXPGPATH] = { 0 };
+	char sslCertFile[MAXPGPATH] = { 0 };
+	char sslKeyFile[MAXPGPATH] = { 0 };
 
 	(void) get_env_pgdata(pgdata);
 
 	static struct option longOptions[] = {
 		{ "port", required_argument, NULL, 'p' },
 		{ "pgdata", required_argument, NULL, 'D' },
+		{ "ssl-cert-file", required_argument, NULL, 'C' },
+		{ "ssl-key-file", required_argument, NULL, 'K' },
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -273,6 +287,18 @@ main(int argc, char **argv)
 			case 'D':
 			{
 				strlcpy(pgdata, optarg, sizeof(pgdata));
+				break;
+			}
+
+			case 'C':
+			{
+				strlcpy(sslCertFile, optarg, sizeof(sslCertFile));
+				break;
+			}
+
+			case 'K':
+			{
+				strlcpy(sslKeyFile, optarg, sizeof(sslKeyFile));
 				break;
 			}
 
@@ -311,7 +337,35 @@ main(int argc, char **argv)
 		sformat(config.auth.passwdPath, sizeof(config.auth.passwdPath),
 				"%s/archiver-passwd", pgdata);
 
-		if (!hba_write_default_if_missing(config.auth.hbaPath))
+		sformat(config.auth.monitorUriPath, sizeof(config.auth.monitorUriPath),
+				"%s/archiver-monitor.uri", pgdata);
+
+		/* the certificate given with --ssl-*-file, else <pgdata>/server.* */
+		char certPath[MAXPGPATH], keyPath[MAXPGPATH];
+
+		if (sslCertFile[0] != '\0' && sslKeyFile[0] != '\0')
+		{
+			strlcpy(certPath, sslCertFile, sizeof(certPath));
+			strlcpy(keyPath, sslKeyFile, sizeof(keyPath));
+		}
+		else
+		{
+			sformat(certPath, sizeof(certPath), "%s/server.crt", pgdata);
+			sformat(keyPath, sizeof(keyPath), "%s/server.key", pgdata);
+		}
+
+		if (ws_tls_server_init(certPath, keyPath))
+		{
+			log_info("TLS is enabled (\"%s\")", certPath);
+		}
+		else
+		{
+			log_warn("TLS is not enabled: no usable server.crt/server.key in "
+					 "\"%s\"; \"hostssl\" HBA lines will not match", pgdata);
+		}
+
+		if (!hba_write_default_if_missing(config.auth.hbaPath,
+										  ws_tls_server_enabled()))
 		{
 			log_fatal("Failed to create \"%s\"", config.auth.hbaPath);
 			return 1;

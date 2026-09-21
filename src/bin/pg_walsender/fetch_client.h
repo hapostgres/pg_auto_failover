@@ -25,7 +25,8 @@
  * human-readable message already logged, matching restore_command's own
  * "non-zero means retry me" contract.
  */
-int ws_fetch_file_client(const char *host, int port, const char *routeKey,
+int ws_fetch_file_client(const char *host, int port, const char *user,
+						 const char *routeKey,
 						 const char *filename, const char *outputPath);
 
 #endif /* WS_FETCH_CLIENT_H */

@@ -10,9 +10,10 @@ stock `pg_basebackup`, streaming standbys and `restore_command` read from it.
   `pg_autoctl archiver serve|formation|show`, one archiver serving several
   (formation, group) memberships, with optional `--region` labels. (#1186)
 * `pg_walsender`, a replication-protocol server for captured WAL and base
-  backups, authenticating every connection against an `archiver-hba.conf`
-  (trust, SCRAM-SHA-256 or reject per host/user/route; by default the
-  monitor's node list is trusted). (#1186)
+  backups, with TLS and an `archiver-hba.conf` (hostssl/host/hostnossl,
+  trust, SCRAM-SHA-256 or reject per host/user/route; by default the
+  monitor's node list is admitted with the replication password over TLS,
+  the list validated by a SQL fingerprint at connect time). (#1186)
 * Base backup generation (`live` and `replay` sources) driven by
   `pg_autoctl create|set|show basebackup-policy`, with frequency, count and
   age retention. (#1186)

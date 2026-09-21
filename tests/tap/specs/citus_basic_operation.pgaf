@@ -20,6 +20,7 @@ cluster {
         worker2b worker group 2
     }
     archiver archiver1 {
+        replication-password "pgaf-repl-pw"
         formation default
         create and launch deferred
     }

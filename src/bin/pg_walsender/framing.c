@@ -18,6 +18,7 @@
 #include "pqexpbuffer.h"
 
 #include "framing.h"
+#include "tls.h"
 #include "log.h"
 
 /* startup-packet body larger than this is rejected outright as malformed */
@@ -39,7 +40,7 @@ ws_read_bytes(int sock, void *buf, size_t len)
 
 	while (remaining > 0)
 	{
-		ssize_t n = read(sock, ptr, remaining);
+		ssize_t n = ws_io_read(sock, ptr, remaining);
 
 		if (n < 0)
 		{
@@ -72,7 +73,7 @@ ws_write_bytes(int sock, const void *buf, size_t len)
 
 	while (remaining > 0)
 	{
-		ssize_t n = write(sock, ptr, remaining);
+		ssize_t n = ws_io_write(sock, ptr, remaining);
 
 		if (n < 0)
 		{

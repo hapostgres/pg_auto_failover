@@ -39,14 +39,16 @@
 cluster {
     monitor
     formation {
-        node1
-        node2
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
     }
     archiver archiver-eu {
+        replication-password "pgaf-repl-pw"
         formation default
         region eu-west
     }
     archiver archiver-us {
+        replication-password "pgaf-repl-pw"
         formation default
         region us-east
     }
@@ -85,26 +87,16 @@ step test_001_both_archivers_attached_and_labelled {
 # test_002: both archivers are independently, actually capturing WAL --
 #           not just one of them with the other silently idle -- proven by
 #           raising archiverQuorum after the fact, see this file's own
-#           header comment for the full reasoning. Segment 3 is archiver_
-#           wal_capture.pgaf's own observed floor for a single archiver on
-#           this image (see that spec's header comment for the general
-#           reasoning: a few segments get consumed by node1+node2's own
-#           bootstrap before any archiver's replication slot exists,
-#           observed at exactly segment 3, repeatably). Two archivers here
-#           instead of one shouldn't move that floor -- both slots get
-#           created around the same bootstrap point and segment 3 hasn't
-#           been recycled yet by either -- but this hasn't been separately
-#           confirmed against a real two-archiver run the way the single-
-#           archiver floor has; if this segment number turns out wrong
-#           against the real image, this is the line to adjust.
+#           header comment for the full reasoning. The closed segment is
+#           captured dynamically with `let` (see archiver_wal_capture.pgaf).
 #
 
 step test_002_both_archivers_capture_independently {
     sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
-    sql node1 { SELECT pg_switch_wal(); }
+    let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
     sql node1 { INSERT INTO t1 VALUES (3); }
-    sql node1 { SELECT pg_switch_wal(); }
-    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
+    let seg2 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg1}') } is { t }  timeout 30s
     sql monitor { SELECT pgautofailover.set_archiver_policy('default', NULL, 2, NULL, NULL); }
-    wait until wal segment "000000010000000000000003" archived in default/0  timeout 30s
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg1}') } is { t }  timeout 30s
 }

@@ -33,8 +33,8 @@
 cluster {
     monitor
     formation {
-        node1
-        archiver1 archiver
+        node1 replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
     }
 }
 
