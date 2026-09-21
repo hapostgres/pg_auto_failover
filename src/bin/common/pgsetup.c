@@ -96,6 +96,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 	/* Also make sure we keep the citus specific clusterName option */
 	strlcpy(pgSetup->citusClusterName, options->citusClusterName, NAMEDATALEN);
 
+	/* keep the archive_command confirmation switch too */
+	strlcpy(pgSetup->archiveConfirm, options->archiveConfirm, NAMEDATALEN);
+
 	/* check or find pg_ctl, unless we already have it */
 	if (IS_EMPTY_STRING_BUFFER(pgSetup->pg_ctl) ||
 		IS_EMPTY_STRING_BUFFER(pgSetup->pg_version))

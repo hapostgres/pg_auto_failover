@@ -170,6 +170,23 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'J':
+			{
+				/* { "archive-confirm", required_argument, NULL, 'J' } */
+				if (strcmp(optarg, "on") != 0 && strcmp(optarg, "off") != 0)
+				{
+					log_error("Failed to parse --archive-confirm \"%s\": "
+							  "expected on or off", optarg);
+					errors++;
+					break;
+				}
+				strlcpy(LocalOptionConfig.pgSetup.archiveConfirm, optarg,
+						NAMEDATALEN);
+				log_trace("--archive-confirm %s",
+						  LocalOptionConfig.pgSetup.archiveConfirm);
+				break;
+			}
+
 			case 'l':
 			{
 				/* { "listen", required_argument, NULL, 'l' } */

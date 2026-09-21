@@ -9,6 +9,7 @@
  */
 
 #include <dirent.h>
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
@@ -937,6 +938,100 @@ ensure_default_settings_file_exists(const char *configFilePath,
 }
 
 
+extern char pg_autoctl_program[];
+
+/*
+ * append_shell_single_quoted appends value as a single-quoted shell word,
+ * doubling any percent sign (archive_command's own %% escape).
+ */
+static void
+append_shell_single_quoted(PQExpBuffer buffer, const char *value)
+{
+	appendPQExpBufferChar(buffer, '\'');
+
+	for (const char *p = value; *p != '\0'; p++)
+	{
+		if (*p == '\'')
+		{
+			appendPQExpBufferStr(buffer, "'\\''");
+		}
+		else if (*p == '%')
+		{
+			appendPQExpBufferStr(buffer, "%%");
+		}
+		else
+		{
+			appendPQExpBufferChar(buffer, *p);
+		}
+	}
+	appendPQExpBufferChar(buffer, '\'');
+}
+
+
+/*
+ * prepare_archive_confirm_settings writes archive_mode and archive_command
+ * when the node is managed by a keeper (pgSetup->archiveConfirm is "on" or
+ * "off"). archive_command never moves data: it only asks the monitor
+ * whether the archiver already holds the segment.
+ */
+static bool
+prepare_archive_confirm_settings(PQExpBuffer config, PostgresSetup *pgSetup)
+{
+	/* the standby settings file is written with a NULL pgSetup: not for us */
+	if (pgSetup == NULL)
+	{
+		return true;
+	}
+
+	if (strcmp(pgSetup->archiveConfirm, "off") == 0)
+	{
+		appendPQExpBufferStr(config, "archive_mode = off\n");
+		return true;
+	}
+
+	if (strcmp(pgSetup->archiveConfirm, "on") != 0)
+	{
+		return true;
+	}
+
+	if (pg_autoctl_program[0] != '/' || IS_EMPTY_STRING_BUFFER(pgSetup->pgdata))
+	{
+		log_warn("Failed to set archive_command: no absolute path for "
+				 "pg_autoctl, leaving archive_mode alone");
+		return true;
+	}
+
+	PQExpBuffer command = createPQExpBuffer();
+
+	if (command == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
+	append_shell_single_quoted(command, pg_autoctl_program);
+	appendPQExpBufferStr(command, " archiver confirm --pgdata ");
+	append_shell_single_quoted(command, pgSetup->pgdata);
+	appendPQExpBufferStr(command, " %f");
+
+	/* now quote the command for postgresql.conf */
+	appendPQExpBufferStr(config, "archive_mode = on\narchive_command = '");
+
+	for (const char *p = command->data; *p != '\0'; p++)
+	{
+		if (*p == '\'' || *p == '\\')
+		{
+			appendPQExpBufferChar(config, *p);
+		}
+		appendPQExpBufferChar(config, *p);
+	}
+	appendPQExpBufferStr(config, "'\n");
+
+	destroyPQExpBuffer(command);
+	return true;
+}
+
+
 /*
  * prepare_guc_settings_from_pgsetup replaces some of the given GUC settings
  * with dynamic values found in the pgSetup argument, and prepare them in the
@@ -1136,6 +1231,13 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 					  setting->name);
 			return false;
 		}
+	}
+
+	/* archive_command confirmation, see pg_autoctl archiver confirm */
+	if (!prepare_archive_confirm_settings(config, pgSetup))
+	{
+		destroyPQExpBuffer(config);
+		return false;
 	}
 
 	if (includeTuning)
@@ -1673,16 +1775,53 @@ log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 bool
 pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 {
+	/*
+	 * PG_AUTOCTL_INITDB_OPTIONS adds initdb options (for instance
+	 * --wal-segsize=32, which can only be chosen at initdb time), the same
+	 * way PostgreSQL's own tooling takes them. The value ends up inside a
+	 * shell-quoted string, so anything that is not a plain option character
+	 * is refused rather than escaped.
+	 */
+	char extraOptions[BUFSIZE] = { 0 };
+	char optionString[BUFSIZE] = { 0 };
+
+	(void) get_env_copy("PG_AUTOCTL_INITDB_OPTIONS", extraOptions,
+						sizeof(extraOptions));
+
+	for (const char *c = extraOptions; *c != '\0'; c++)
+	{
+		if (!(isalnum((unsigned char) *c) || strchr("=_.,/ -", *c) != NULL))
+		{
+			log_fatal("Refusing PG_AUTOCTL_INITDB_OPTIONS: unexpected "
+					  "character '%c'", *c);
+			return false;
+		}
+	}
+
+	/* one shell-quoted word per option: initdb sees separate arguments */
+	sformat(optionString, sizeof(optionString), "'--auth=trust'");
+
+	char *saveptr = NULL;
+
+	for (char *tok = strtok_r(extraOptions, " ", &saveptr);
+		 tok != NULL;
+		 tok = strtok_r(NULL, " ", &saveptr))
+	{
+		size_t used = strlen(optionString);
+
+		sformat(optionString + used, sizeof(optionString) - used, " '%s'", tok);
+	}
+
 	/* initdb takes time, so log about the operation BEFORE doing it */
 	log_info("Initialising a PostgreSQL cluster at \"%s\"", pgdata);
-	log_info("%s initdb -s -D %s --option '--auth=trust'", pg_ctl, pgdata);
+	log_info("%s initdb -s -D %s --option %s", pg_ctl, pgdata, optionString);
 
 	Program program = run_program(pg_ctl,
 								  "--silent",
 								  "--pgdata", pgdata,
 
 	                              /* avoid warning message */
-								  "--option", "'--auth=trust'", "initdb",
+								  "--option", optionString, "initdb",
 								  NULL);
 
 	bool success = program.returnCode == 0;

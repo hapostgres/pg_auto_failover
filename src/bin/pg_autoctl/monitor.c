@@ -1832,6 +1832,46 @@ monitor_report_wal_progress(Monitor *monitor, int64_t nodeId, const char *lsn)
 
 
 /*
+ * monitor_archive_confirmed calls pgautofailover.archive_confirmed(), the
+ * archive_command confirmation check: true when the group has no archiver, or
+ * when the segment has landed on archiver_quorum archiver(s).
+ */
+bool
+monitor_archive_confirmed(Monitor *monitor, const char *formationId,
+						  int groupId, const char *walFileName,
+						  bool *confirmed)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BOOL, false };
+	const char *sql = "SELECT pgautofailover.archive_confirmed($1, $2, $3)";
+	int paramCount = 3;
+	Oid paramTypes[3] = { TEXTOID, INT4OID, TEXTOID };
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[3] = {
+		formationId, groupIdString.strValue, walFileName
+	};
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to call archive_confirmed() on the monitor");
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to parse archive_confirmed() result");
+		return false;
+	}
+
+	*confirmed = context.boolVal;
+
+	return true;
+}
+
+
+/*
  * monitor_basebackup_concurrency_available calls
  * pgautofailover.basebackup_concurrency_available() to check, before
  * starting the (potentially minutes-long) pg_basebackup work, whether this

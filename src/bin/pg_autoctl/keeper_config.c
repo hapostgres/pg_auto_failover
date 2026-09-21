@@ -113,6 +113,11 @@
 	make_strbuf_option("postgresql", "hba_level", NULL, \
 					   false, MAXPGPATH, config->pgSetup.hbaLevelStr)
 
+#define OPTION_POSTGRESQL_ARCHIVE_CONFIRM(config) \
+	make_strbuf_option_default("postgresql", "archive_confirm", NULL, \
+							   false, NAMEDATALEN, \
+							   config->pgSetup.archiveConfirm, "on")
+
 #define OPTION_SSL_ACTIVE(config) \
 	make_int_option_default("ssl", "active", NULL, \
 							false, &(config->pgSetup.ssl.active), 0)
@@ -249,6 +254,7 @@
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
 		OPTION_POSTGRESQL_HBA_LEVEL(config), \
+		OPTION_POSTGRESQL_ARCHIVE_CONFIRM(config), \
 		OPTION_SSL_ACTIVE(config), \
 		OPTION_SSL_MODE(config), \
 		OPTION_SSL_CA_FILE(config), \
@@ -486,6 +492,12 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	/* set the ENUM value for hbaLevel */
 	config->pgSetup.hbaLevel =
 		pgsetup_parse_hba_level(config->pgSetup.hbaLevelStr);
+
+	/* archive_command confirmation: default on, for keepers only */
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.archiveConfirm))
+	{
+		strlcpy(config->pgSetup.archiveConfirm, "on", NAMEDATALEN);
+	}
 
 	/*
 	 * Required for grandfathering old clusters that don't have sslmode

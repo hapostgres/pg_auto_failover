@@ -14,10 +14,12 @@
 
 #include "postgres_fe.h"
 
+#include "archiver_confirm.h"
 #include "cli_archiver.h"
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "keeper.h"
 #include "keeper_config.h"
@@ -33,6 +35,9 @@
 
 static int cli_archiver_serve_getopts(int argc, char **argv);
 static void cli_archiver_serve(int argc, char **argv);
+
+static int cli_archiver_confirm_getopts(int argc, char **argv);
+static void cli_archiver_confirm(int argc, char **argv);
 
 static int cli_archiver_formation_getopts(int argc, char **argv, bool requireName);
 static void cli_archiver_formation_add(int argc, char **argv);
@@ -273,6 +278,104 @@ cli_archiver_serve(int argc, char **argv)
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}
 }
+
+
+/* WAL file name given to `archiver confirm` */
+static char archiverConfirmWalFile[MAXPGPATH] = { 0 };
+
+
+/*
+ * cli_archiver_confirm_getopts parses `pg_autoctl archiver confirm --pgdata D
+ * <walfile>`. Quiet by default: Postgres captures our stderr in its log.
+ */
+static int
+cli_archiver_confirm_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:vh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				break;
+			}
+
+			case 'v':
+			{
+				log_set_level(LOG_DEBUG);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_BAD_ARGS);
+				break;
+			}
+		}
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.pgSetup.pgdata))
+	{
+		get_env_pgdata_or_exit(options.pgSetup.pgdata);
+	}
+
+	if (optind >= argc)
+	{
+		log_fatal("Missing WAL file name argument");
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	strlcpy(archiverConfirmWalFile, argv[argc - 1], MAXPGPATH);
+
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_archiver_confirm implements `pg_autoctl archiver confirm`: the
+ * archive_command. Exit 0 iff the segment is confirmed.
+ */
+static void
+cli_archiver_confirm(int argc, char **argv)
+{
+	exit(archiver_confirm_run(keeperOptions.pgSetup.pgdata,
+							  archiverConfirmWalFile));
+}
+
+
+CommandLine archiver_confirm_command =
+	make_command(
+		"confirm",
+		"archive_command: succeed once the archiver holds the given WAL file",
+		" --pgdata <walfile> ",
+		"  --pgdata          path to the node's PGDATA\n",
+		cli_archiver_confirm_getopts,
+		cli_archiver_confirm);
 
 
 CommandLine archiver_serve_command =
@@ -1453,6 +1556,7 @@ CommandLine archiver_backup_commands =
 
 CommandLine *archiver_subcommands[] = {
 	&archiver_serve_command,
+	&archiver_confirm_command,
 	&archiver_formation_commands,
 	&archiver_show_commands,
 	&archiver_backup_commands,

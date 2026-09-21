@@ -317,6 +317,9 @@ bool monitor_report_wal_received_bulk(Monitor *monitor, int64_t nodeId,
 									  uint64_t systemIdentifier,
 									  char **walFileNames, char **lsns,
 									  int count);
+bool monitor_archive_confirmed(Monitor *monitor, const char *formationId,
+							   int groupId, const char *walFileName,
+							   bool *confirmed);
 bool monitor_report_wal_progress(Monitor *monitor, int64_t nodeId,
 								 const char *lsn);
 bool monitor_basebackup_concurrency_available(Monitor *monitor,

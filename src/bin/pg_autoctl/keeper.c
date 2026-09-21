@@ -601,6 +601,29 @@ keeper_update_pg_state(Keeper *keeper, int logLevel)
 				log_level(logLevel,
 						  "Failed to fetch Postgres/Citus version info");
 			}
+
+			/*
+			 * archive_mode needs a restart: warn once per Postgres start
+			 * when our configuration wants WAL archive confirmation.
+			 */
+			if (strcmp(config->pgSetup.archiveConfirm, "on") == 0)
+			{
+				SingleValueResultContext archiveContext =
+				{ { 0 }, PGSQL_RESULT_BOOL, false };
+
+				if (pgsql_execute_with_params(
+						pgsql,
+						"SELECT current_setting('archive_mode') = 'off'",
+						0, NULL, NULL,
+						&archiveContext, &parseSingleValueResult) &&
+					archiveContext.parsedOk && archiveContext.boolVal)
+				{
+					log_warn("Postgres runs with archive_mode = off while "
+							 "the pg_autoctl configuration enables WAL "
+							 "archive confirmation: restart Postgres to "
+							 "enable WAL archive confirmation");
+				}
+			}
 		}
 	}
 	else

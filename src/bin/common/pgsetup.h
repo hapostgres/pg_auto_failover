@@ -234,6 +234,7 @@ typedef struct pg_setup
 	NodeReplicationSettings settings;       /* node replication settings */
 	SSLOptions ssl;                         /* ssl options */
 	char citusClusterName[NAMEDATALEN];     /* citus.cluster_name */
+	char archiveConfirm[NAMEDATALEN];       /* "on", "off" or "" (not managed) */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')
