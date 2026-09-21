@@ -13,19 +13,21 @@
 
 #include "cmd_show.h"
 #include "framing.h"
+#include "wal_dir_scan.h"
 
 
 void
-cmd_show(int sock, const char *name)
+cmd_show(int sock, const WsRoute *route, const char *name)
 {
 	const char *value = NULL;
+	char segSizeStr[16];
 
 	if (strcasecmp(name, "wal_segment_size") == 0)
 	{
-		/* matches the real default; a non-default segment size would need
-		 * to come from the archived group's own tracked configuration --
-		 * not wired in yet, see the identify_system placeholder note */
-		value = "16MB";
+		/* the route's own segment size, in the GUC's own format */
+		ws_wal_segment_size_string(ws_route_wal_segment_size(route),
+								   segSizeStr, sizeof(segSizeStr));
+		value = segSizeStr;
 	}
 	else if (strcasecmp(name, "data_directory_mode") == 0)
 	{

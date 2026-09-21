@@ -23,6 +23,7 @@
 #include "log.h"
 #include "monitor_hosts.h"
 #include "string_utils.h"
+#include "ws_util.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
@@ -31,7 +32,8 @@
 
 static const char *hbaHeader =
 	"# pg_walsender host-based authentication, read on every connection.\n"
-	"# The first matching line wins; no match (or an unreadable file) rejects.\n"
+	"# The first matching line wins; no match, an unreadable file or any\n"
+	"# malformed line rejects every connection.\n"
 	"#\n"
 	"# TYPE  ROUTE  USER  ADDRESS  METHOD\n"
 	"#\n"
@@ -149,7 +151,7 @@ suffix_matches(const char *suffix, const char *peerIP)
 static bool
 rule_address_matches(const char *address, const char *routeKey,
 					 const char *routePath, const char *monitorUriPath,
-					 const char *peerIP)
+					 const char *refreshSockPath, const char *peerIP)
 {
 	if (streq(address, "all"))
 	{
@@ -158,7 +160,10 @@ rule_address_matches(const char *address, const char *routeKey,
 
 	if (streq(address, "monitor"))
 	{
-		return monitor_hosts_contain(routeKey, routePath, monitorUriPath, peerIP);
+		/* no known route (routePath NULL): "monitor" matches nothing */
+		return routePath != NULL &&
+			   monitor_hosts_contain(routeKey, routePath, monitorUriPath,
+									 refreshSockPath, peerIP);
 	}
 
 	if (strchr(address, '/') != NULL)
@@ -204,29 +209,61 @@ parse_method(const char *token, WsAuthMethod *method)
 }
 
 
-bool
-hba_lookup(const char *hbaPath, const char *routePath,
-		   const char *monitorUriPath, const char *routeKey, const char *user,
-		   const char *peerIP, bool isTLS, WsAuthMethod *method)
+/*
+ * A parsed rule: the fields point into the file's own buffer, which
+ * hba_lookup keeps alive while the rules are used.
+ */
+typedef struct HbaRule
 {
-	char *contents = NULL;
-	long size = 0;
+	char *fields[HBA_MAX_FIELDS];
+	WsAuthMethod method;
+	int lineNumber;
+} HbaRule;
 
-	*method = WS_AUTH_REJECT;
 
-	if (!read_file(hbaPath, &contents, &size) || contents == NULL)
+/*
+ * hba_parse parses the whole file before anything is matched, the way
+ * PostgreSQL refuses to load a pg_hba.conf with a bad line: one malformed
+ * line makes the whole lookup fail (and so every connection be rejected),
+ * it is never skipped over -- skipping a line that was meant to be a
+ * "reject" rule would silently open the door.
+ */
+static bool
+hba_parse(const char *hbaPath, char *contents, HbaRule **rulesOut,
+		  int *countOut)
+{
+	int maxRules = 1;
+
+	for (const char *c = contents; *c != '\0'; c++)
 	{
-		log_error("Failed to read the HBA file \"%s\": rejecting", hbaPath);
+		if (*c == '\n')
+		{
+			maxRules++;
+		}
+	}
+
+	HbaRule *rules = (HbaRule *) calloc(maxRules, sizeof(HbaRule));
+
+	if (rules == NULL)
+	{
 		return false;
 	}
 
-	char *lineSave = NULL;
+	int count = 0;
 	int lineNumber = 0;
+	char *line = contents;
 
-	for (char *line = strtok_r(contents, "\n", &lineSave);
-		 line != NULL;
-		 line = strtok_r(NULL, "\n", &lineSave))
+	while (line != NULL && *line != '\0')
 	{
+		char *nl = strchr(line, '\n');
+		char *next = NULL;
+
+		if (nl != NULL)
+		{
+			*nl = '\0';
+			next = nl + 1;
+		}
+
 		lineNumber++;
 
 		char *hash = strchr(line, '#');
@@ -236,35 +273,88 @@ hba_lookup(const char *hbaPath, const char *routePath,
 			*hash = '\0';
 		}
 
-		char *fields[HBA_MAX_FIELDS] = { 0 };
-		int count = 0;
+		char *fields[HBA_MAX_FIELDS + 1] = { 0 };
+		int nfields = 0;
 		char *fieldSave = NULL;
 
 		for (char *tok = strtok_r(line, " \t\r", &fieldSave);
-			 tok != NULL && count < HBA_MAX_FIELDS;
+			 tok != NULL && nfields <= HBA_MAX_FIELDS;
 			 tok = strtok_r(NULL, " \t\r", &fieldSave))
 		{
-			fields[count++] = tok;
+			fields[nfields++] = tok;
 		}
 
-		if (count == 0)
+		line = next;
+
+		if (nfields == 0)
 		{
 			continue;
 		}
 
 		WsAuthMethod ruleMethod = WS_AUTH_REJECT;
 
-		bool typeOk = count > 0 && (streq(fields[0], "host") ||
-									streq(fields[0], "hostssl") ||
-									streq(fields[0], "hostnossl"));
+		bool typeOk = streq(fields[0], "host") ||
+					  streq(fields[0], "hostssl") ||
+					  streq(fields[0], "hostnossl");
 
-		if (count != HBA_MAX_FIELDS || !typeOk ||
+		if (nfields != HBA_MAX_FIELDS || !typeOk ||
 			!parse_method(fields[4], &ruleMethod))
 		{
-			log_warn("Ignoring malformed HBA line %d in \"%s\"",
-					 lineNumber, hbaPath);
-			continue;
+			log_error("Malformed HBA line %d in \"%s\": rejecting every "
+					  "connection until the file is fixed",
+					  lineNumber, hbaPath);
+			free(rules);
+			return false;
 		}
+
+		HbaRule *rule = &rules[count++];
+
+		for (int i = 0; i < HBA_MAX_FIELDS; i++)
+		{
+			rule->fields[i] = fields[i];
+		}
+
+		rule->method = ruleMethod;
+		rule->lineNumber = lineNumber;
+	}
+
+	*rulesOut = rules;
+	*countOut = count;
+
+	return true;
+}
+
+
+bool
+hba_lookup(const char *hbaPath, const char *routePath,
+		   const char *monitorUriPath, const char *refreshSockPath,
+		   const char *routeKey, const char *user,
+		   const char *peerIP, bool isTLS, WsAuthMethod *method)
+{
+	char *contents = NULL;
+	size_t size = 0;
+
+	*method = WS_AUTH_REJECT;
+
+	if (!ws_read_file_capped(hbaPath, WS_MAX_CONFIG_FILE_SIZE, false,
+							 &contents, &size, NULL))
+	{
+		log_error("Failed to read the HBA file \"%s\": rejecting", hbaPath);
+		return false;
+	}
+
+	HbaRule *rules = NULL;
+	int count = 0;
+
+	if (!hba_parse(hbaPath, contents, &rules, &count))
+	{
+		free(contents);
+		return false;
+	}
+
+	for (int i = 0; i < count; i++)
+	{
+		char **fields = rules[i].fields;
 
 		bool typeMatches = streq(fields[0], "host") ||
 						   (streq(fields[0], "hostssl") && isTLS) ||
@@ -274,14 +364,14 @@ hba_lookup(const char *hbaPath, const char *routePath,
 			(streq(fields[1], "all") || streq(fields[1], routeKey)) &&
 			(streq(fields[2], "all") || streq(fields[2], user)) &&
 			rule_address_matches(fields[3], routeKey, routePath,
-								 monitorUriPath, peerIP))
+								 monitorUriPath, refreshSockPath, peerIP))
 		{
-			*method = ruleMethod;
-			free(contents);
-			return true;
+			*method = rules[i].method;
+			break;
 		}
 	}
 
+	free(rules);
 	free(contents);
 
 	return true;

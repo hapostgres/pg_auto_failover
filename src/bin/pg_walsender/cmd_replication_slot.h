@@ -19,5 +19,13 @@
 
 void cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs);
 void cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs);
+void cmd_drop_replication_slot(int sock, const WsRoute *route, const char *rawArgs);
+
+/*
+ * Slot names are [a-z0-9_]{1,63}, as in PostgreSQL; a route holds at most 64
+ * slots (a clear error beyond); a slot file is written atomically (temp +
+ * rename). CREATE of an existing slot is an error (42710) and never resets
+ * it.
+ */
 
 #endif /* WS_CMD_REPLICATION_SLOT_H */

@@ -14,6 +14,13 @@
  *   not be accessible to group/other (or owned by root and not world
  *   accessible), as PostgreSQL requires. TLS 1.2 or newer.
  *
+ *   A passphrase protected key is a clean error, never a prompt (a
+ *   password callback that fails, like upstream's dummy_ssl_passwd_cb); the
+ *   key's permissions are checked on the very descriptor it is read from.
+ *   The handshake and every read/write run under the connection's absolute
+ *   authentication deadline (SIGALRM, see accept_loop.h): WANT_READ/
+ *   WANT_WRITE and timeouts are errors, never a loop.
+ *
  *   ws_io_read()/ws_io_write() are what framing.c reads and writes the
  *   socket through, so everything above it is unaware of TLS.
  *

@@ -49,7 +49,29 @@ bool ws_write_raw_byte(int sock, char c);
  * NUL-terminates the returned payload for convenience (Query message
  * bodies are C strings); callers that need the raw length still get it.
  */
-bool ws_read_message(int sock, char *type, char **payload, int32_t *payloadLen);
+bool ws_read_message(int sock, char *type, char **payload, int32_t *payloadLen,
+					 int32_t maxLen);
+
+/*
+ * Maximum message body sizes, as in PostgreSQL's pq_getmessage() callers:
+ * before authentication only small messages are ever legitimate (the SCRAM
+ * 'p' messages, PQ_SMALL_MESSAGE_LIMIT-like; SCRAM_MAX_MESSAGE_LEN is 1024),
+ * afterwards a simple query or CopyData from the client is at most 1 MiB
+ * (PQ_LARGE_MESSAGE_LIMIT is 1 GB in PostgreSQL, far more than a
+ * replication client ever sends). An oversize message gets a protocol
+ * error and the connection is closed, without allocating.
+ */
+#define WS_MAX_AUTH_MESSAGE_LEN 1024
+#define WS_MAX_COMMAND_MESSAGE_LEN (1024 * 1024)
+
+/*
+ * Set by a command that failed once it had started a COPY (or otherwise
+ * left the protocol in a state it cannot resynchronize): PostgreSQL's
+ * walsender ends the connection with a FATAL there rather than going back
+ * to ReadyForQuery, and the command loop (accept_loop.c) checks this flag
+ * after every dispatch.
+ */
+extern bool ws_connection_close_after_command;
 bool ws_send_message(int sock, char type, const char *data, int32_t dataLen);
 
 bool ws_send_authentication_ok(int sock);

@@ -17,7 +17,17 @@
 #ifndef WS_CMD_FETCH_FILE_H
 #define WS_CMD_FETCH_FILE_H
 
+#include <stdbool.h>
+
 #include "routes.h"
+
+/*
+ * Only WAL segments ("^[0-9A-F]{24}$") and timeline history files
+ * ("^[0-9A-F]{8}\.history$") are served -- never a .partial segment or any
+ * other file of the route's directory. The file is opened O_NOFOLLOW,
+ * checked to be a regular file (fstat) and streamed in chunks.
+ */
+bool ws_fetch_filename_is_servable(const char *filename);
 
 void cmd_fetch_file(int sock, const WsRoute *route, const char *filename);
 

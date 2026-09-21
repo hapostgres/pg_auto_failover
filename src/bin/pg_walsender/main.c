@@ -2,7 +2,8 @@
  * src/bin/pg_walsender/main.c
  *   Entry point for pg_walsender. Two modes, dispatched on argv[1]:
  *
- *     pg_walsender --port <port> [--pgdata <path>]
+ *     pg_walsender --port <port> [--pgdata <path> | --insecure]
+ *                  [--auth-timeout <seconds>]
  *       Runs the accept loop (see accept_loop.h). Exec'd by pg_autoctl's
  *       `archiver serve` supervisor (service_archiver_serve.c), but fully
  *       runnable and testable on its own against real psql/pg_basebackup/
@@ -14,7 +15,10 @@
  *       trivially-derivable value, unlike pg_autoctl's own XDG-based
  *       config-file path, which lives outside PGDATA entirely and
  *       pg_walsender has no way to recompute on its own (see routes.h's
- *       own header comment for the full rationale).
+ *       own header comment for the full rationale). Without either, the
+ *       server refuses to start unless --insecure is given (no
+ *       authentication at all, manual testing only). --auth-timeout is the
+ *       absolute per-connection authentication deadline (default 30s).
  *
  *     pg_walsender fetch-file --host <h> --port <p> --route <formation>/
  *                  <group> --filename <name> --output <path>
@@ -72,8 +76,9 @@ static void
 usage(const char *argv0)
 {
 	fprintf(stderr, /* IGNORE-BANNED */
-			"Usage: %s --port <port> [--pgdata <path>]\n"
+			"Usage: %s --port <port> [--pgdata <path> | --insecure]\n"
 			"          [--ssl-cert-file <path> --ssl-key-file <path>]\n"
+			"          [--auth-timeout <seconds>]\n"
 			"       %s scram-secret [ --user <name> ]  (password in PGPASSWORD)\n"
 			"       %s fetch-file --host <h> --port <p> --route <fmtn>/<grp> "
 			"--filename <name> --output <path> [--user <role>]\n\n"
@@ -86,13 +91,20 @@ usage(const char *argv0)
 			"allowed_hosts } is read\n"
 			"              from <pgdata>/archiver-routes.ini, and access is "
 			"decided by\n"
-			"              <pgdata>/archiver-hba.conf -- omit both only for "
-			"manual\n"
-			"              standalone testing (accepts any dbname, no "
-			"authentication)\n"
+			"              <pgdata>/archiver-hba.conf; the server refuses to "
+			"start\n"
+			"              without it unless --insecure is given\n"
+			"  --insecure  no --pgdata: accept any dbname WITHOUT ANY "
+			"authentication;\n"
+			"              for manual testing only, never on a reachable "
+			"network\n"
+			"  --auth-timeout  absolute deadline in seconds for a "
+			"connection to\n"
+			"              complete startup, TLS, HBA and authentication "
+			"(default %d)\n"
 			"  fetch-file  one-shot FETCH_FILE client, for use as a "
 			"restore_command\n",
-			argv0, argv0, argv0, WS_DEFAULT_PORT);
+			argv0, argv0, argv0, WS_DEFAULT_PORT, WS_DEFAULT_AUTH_TIMEOUT);
 }
 
 
@@ -264,9 +276,15 @@ main(int argc, char **argv)
 		{ "pgdata", required_argument, NULL, 'D' },
 		{ "ssl-cert-file", required_argument, NULL, 'C' },
 		{ "ssl-key-file", required_argument, NULL, 'K' },
+		{ "auth-timeout", required_argument, NULL, 'T' },
+		{ "insecure", no_argument, NULL, 'I' },
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
+
+	bool insecure = false;
+
+	config.authTimeout = WS_DEFAULT_AUTH_TIMEOUT;
 
 	int c;
 
@@ -302,6 +320,23 @@ main(int argc, char **argv)
 				break;
 			}
 
+			case 'T':
+			{
+				if (!stringToInt(optarg, &(config.authTimeout)) ||
+					config.authTimeout <= 0 || config.authTimeout > 3600)
+				{
+					log_fatal("Invalid --auth-timeout value \"%s\"", optarg);
+					return 1;
+				}
+				break;
+			}
+
+			case 'I':
+			{
+				insecure = true;
+				break;
+			}
+
 			case 'h':
 			{
 				usage(argv[0]);
@@ -323,11 +358,23 @@ main(int argc, char **argv)
 	}
 
 	/*
-	 * pgdata left empty (neither --pgdata nor PGDATA given) is not an
-	 * error: it's the manual/standalone-testing mode routes.h's own header
-	 * comment describes -- config.routesPath stays empty, accept_loop.c
-	 * treats that as "no routing, accept any dbname, no host restriction".
+	 * Without --pgdata (or PGDATA) there is no HBA file, no routes and no
+	 * authentication at all: refuse to start unless --insecure says that is
+	 * what is wanted (manual testing).
 	 */
+	if (pgdata[0] == '\0' && !insecure)
+	{
+		log_fatal("Neither --pgdata nor PGDATA is set: refusing to start "
+				  "without authentication; pass --insecure for manual "
+				  "testing only");
+		return 1;
+	}
+
+	if (pgdata[0] != '\0' && insecure)
+	{
+		log_warn("--insecure is ignored: --pgdata is set");
+	}
+
 	if (pgdata[0] != '\0')
 	{
 		sformat(config.routesPath, sizeof(config.routesPath),
@@ -339,6 +386,8 @@ main(int argc, char **argv)
 
 		sformat(config.auth.monitorUriPath, sizeof(config.auth.monitorUriPath),
 				"%s/archiver-monitor.uri", pgdata);
+		sformat(config.auth.refreshSockPath, sizeof(config.auth.refreshSockPath),
+				"%s/archiver-refresh.sock", pgdata);
 
 		/* the certificate given with --ssl-*-file, else <pgdata>/server.* */
 		char certPath[MAXPGPATH], keyPath[MAXPGPATH];

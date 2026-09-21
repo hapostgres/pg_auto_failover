@@ -9,6 +9,11 @@
  *   justify vendoring bison/flex infrastructure for it -- plain C
  *   tokenizing is enough.
  *
+ *   Keywords match as whole words (IDENTIFY_SYSTEMxyz is not
+ *   IDENTIFY_SYSTEM). A command that fails once its COPY has started sets
+ *   ws_connection_close_after_command (framing.h): the connection is then
+ *   closed instead of returning to ReadyForQuery.
+ *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
@@ -29,6 +34,7 @@ typedef enum WsCommandType
 	WS_CMD_TIMELINE_HISTORY,
 	WS_CMD_CREATE_REPLICATION_SLOT,
 	WS_CMD_READ_REPLICATION_SLOT,
+	WS_CMD_DROP_REPLICATION_SLOT,
 	WS_CMD_START_REPLICATION,
 	WS_CMD_FETCH_FILE,
 	WS_CMD_UNKNOWN
@@ -43,7 +49,7 @@ typedef struct WsCommand
 	                               * parsed by cmd_base_backup.c itself */
 	int timeline;                  /* WS_CMD_TIMELINE_HISTORY only */
 	char filename[256];            /* WS_CMD_FETCH_FILE only */
-	char rawArgs[512];              /* WS_CMD_{CREATE,READ}_REPLICATION_SLOT /
+	char rawArgs[512];              /* WS_CMD_{CREATE,READ,DROP}_REPLICATION_SLOT /
 	                                 * WS_CMD_START_REPLICATION: everything
 	                                 * after the keyword, verbatim, parsed by
 	                                 * each command's own cmd_*.c */

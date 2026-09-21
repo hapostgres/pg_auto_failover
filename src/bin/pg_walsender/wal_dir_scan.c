@@ -16,12 +16,14 @@
 
 #include "wal_dir_scan.h"
 #include "file_utils.h"
+#include "log.h"
 #include "string_utils.h"
+#include "ws_util.h"
 
-/* default WAL segment size (16MB), matching cmd_show.c's own
- * "SHOW wal_segment_size" -> "16MB" answer */
-#define WS_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
-#define WS_XLOG_SEGMENTS_PER_XLOGID (UINT64CONST(0x100000000) / WS_WAL_SEGMENT_SIZE)
+/* default WAL segment size (16MB) when the route has no archiver-walsegsize */
+#define WS_DEFAULT_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
+#define WS_MIN_WAL_SEGMENT_SIZE UINT64CONST(0x100000)
+#define WS_MAX_WAL_SEGMENT_SIZE UINT64CONST(0x40000000)
 
 #define WS_WAL_FNAME_LEN 24
 
@@ -48,21 +50,100 @@ is_wal_segment_filename(const char *name)
 }
 
 
-void
-wal_segment_filename(uint32_t timeline, uint64_t segno, char *dest, size_t destSize)
+uint64_t
+ws_route_wal_segment_size(const WsRoute *route)
 {
-	uint32_t logId = (uint32_t) (segno / WS_XLOG_SEGMENTS_PER_XLOGID);
-	uint32_t seg = (uint32_t) (segno % WS_XLOG_SEGMENTS_PER_XLOGID);
+	if (route == NULL || route->path[0] == '\0')
+	{
+		return WS_DEFAULT_WAL_SEGMENT_SIZE;
+	}
+
+	char path[MAXPGPATH];
+
+	sformat(path, sizeof(path), "%s/archiver-walsegsize", route->path);
+
+	char *contents = NULL;
+	size_t size = 0;
+
+	/* absent: the archiver has not recorded one, the default applies */
+	if (!ws_read_file_capped(path, 64, true, &contents, &size, NULL))
+	{
+		return WS_DEFAULT_WAL_SEGMENT_SIZE;
+	}
+
+	uint64_t value = 0;
+	bool ok = size > 0;
+
+	for (size_t i = 0; ok && i < size; i++)
+	{
+		if (contents[i] >= '0' && contents[i] <= '9')
+		{
+			value = value * 10 + (uint64_t) (contents[i] - '0');
+		}
+		else if (contents[i] == '\n' && i == size - 1)
+		{
+			break;
+		}
+		else
+		{
+			ok = false;
+		}
+
+		if (value > WS_MAX_WAL_SEGMENT_SIZE)
+		{
+			ok = false;
+		}
+	}
+
+	free(contents);
+
+	if (!ok || value < WS_MIN_WAL_SEGMENT_SIZE ||
+		value > WS_MAX_WAL_SEGMENT_SIZE || (value & (value - 1)) != 0)
+	{
+		log_error("Ignoring an invalid WAL segment size in \"%s\": using "
+				  "the default", path);
+		return WS_DEFAULT_WAL_SEGMENT_SIZE;
+	}
+
+	return value;
+}
+
+
+void
+ws_wal_segment_size_string(uint64_t segSize, char *dest, size_t destSize)
+{
+	/* the format of the wal_segment_size GUC, which pg_receivewal and
+	 * pg_basebackup parse (RetrieveWalSegSize): "16MB", "1GB" */
+	if (segSize >= UINT64CONST(0x40000000))
+	{
+		sformat(dest, destSize, "%" PRIu64 "GB", segSize >> 30);
+	}
+	else
+	{
+		sformat(dest, destSize, "%" PRIu64 "MB", segSize >> 20);
+	}
+}
+
+
+void
+wal_segment_filename(uint32_t timeline, uint64_t segno, uint64_t segSize,
+					 char *dest, size_t destSize)
+{
+	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
+	uint32_t logId = (uint32_t) (segno / perXLogId);
+	uint32_t seg = (uint32_t) (segno % perXLogId);
 
 	sformat(dest, destSize, "%08X%08X%08X", timeline, logId, seg);
 }
 
 
 bool
-wal_dir_find_latest(const char *walcacheDir, uint32_t *timeline,
+wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 					char *endLsn, size_t endLsnSize)
 {
-	DIR *dir = opendir(walcacheDir);
+	uint64_t segSize = ws_route_wal_segment_size(route);
+	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
+	DIR *dir = opendir(route->path);
 
 	if (dir == NULL)
 	{
@@ -104,8 +185,8 @@ wal_dir_find_latest(const char *walcacheDir, uint32_t *timeline,
 	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
 	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
 
-	uint64_t segno = (uint64_t) logId * WS_XLOG_SEGMENTS_PER_XLOGID + seg;
-	uint64_t endOfSegment = (segno + 1) * WS_WAL_SEGMENT_SIZE;
+	uint64_t segno = (uint64_t) logId * perXLogId + seg;
+	uint64_t endOfSegment = (segno + 1) * segSize;
 
 	*timeline = tli;
 	sformat(endLsn, endLsnSize, "%X/%08X",

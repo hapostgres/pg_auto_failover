@@ -8,6 +8,9 @@
  */
 
 #include <ctype.h>
+#include <errno.h>
+#include <dirent.h>
+#include <unistd.h>
 #include <string.h>
 
 #include "postgres_fe.h"
@@ -16,9 +19,17 @@
 #include "file_utils.h"
 #include "framing.h"
 #include "log.h"
+#include "ws_util.h"
 #include "wal_dir_scan.h"
 
-#define WS_SLOT_NAME_MAX 64
+/* the parse buffer; a valid name is at most WS_SLOT_NAME_LEN_MAX (NAMEDATALEN-1) */
+#define WS_SLOT_NAME_MAX 128
+#define WS_SLOT_NAME_LEN_MAX 63
+
+/* slots per route: each is a file in the route's directory */
+#define WS_MAX_SLOTS_PER_ROUTE 64
+
+#define WS_SLOT_PREFIX ".slot_"
 
 
 /*
@@ -82,23 +93,67 @@ parse_slot_name(const char **p, char *nameOut, size_t nameOutSize)
 }
 
 
+/*
+ * Slot names are restricted like PostgreSQL's ReplicationSlotValidateName():
+ * [a-z0-9_]{1,63}. The name ends up in a file name, so this is also what
+ * keeps a client from writing anywhere but its route's directory.
+ */
 static bool
 slot_name_is_safe(const char *name)
 {
-	if (name[0] == '\0')
+	size_t len = strlen(name);
+
+	if (len == 0 || len > WS_SLOT_NAME_LEN_MAX)
 	{
 		return false;
 	}
 
 	for (const char *p = name; *p; p++)
 	{
-		if (!(isalnum((unsigned char) *p) || *p == '_' || *p == '-'))
+		if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
+			  *p == '_'))
 		{
 			return false;
 		}
 	}
 
 	return true;
+}
+
+
+/* is this directory entry a slot file (".slot_" + a valid name)? */
+static bool
+entry_is_slot(const char *entryName)
+{
+	return strncmp(entryName, WS_SLOT_PREFIX, strlen(WS_SLOT_PREFIX)) == 0 &&
+		   slot_name_is_safe(entryName + strlen(WS_SLOT_PREFIX));
+}
+
+
+static int
+count_slots(const char *routePath)
+{
+	DIR *dir = opendir(routePath);
+	int count = 0;
+
+	if (dir == NULL)
+	{
+		return 0;
+	}
+
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		if (entry_is_slot(entry->d_name))
+		{
+			count++;
+		}
+	}
+
+	closedir(dir);
+
+	return count;
 }
 
 
@@ -124,7 +179,10 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 
 	if (!parse_slot_name(&p, slotName, sizeof(slotName)) || !slot_name_is_safe(slotName))
 	{
-		ws_send_error_response(sock, "22023", "invalid or missing slot name");
+		ws_send_error_response(sock, "42602",
+							   "invalid replication slot name: use only "
+							   "lower case letters, numbers, and the "
+							   "underscore character (63 at most)");
 		return;
 	}
 
@@ -177,25 +235,42 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 		return;
 	}
 
+	char path[MAXPGPATH];
+
+	slot_marker_path(route, slotName, path, sizeof(path));
+
+	/* an existing slot is left as it is, never reset by a second CREATE */
+	if (file_exists(path))
+	{
+		ws_send_error_response(sock, "42710",
+							   "replication slot already exists");
+		return;
+	}
+
+	if (count_slots(route->path) >= WS_MAX_SLOTS_PER_ROUTE)
+	{
+		ws_send_error_response(sock, "53400",
+							   "all replication slots of this route are in "
+							   "use");
+		return;
+	}
+
 	char consistentPoint[32] = "0/0";
 	uint32_t timeline;
 
 	if (!wal_position_cache_read(route->path, &timeline, consistentPoint,
 								 sizeof(consistentPoint)))
 	{
-		(void) wal_dir_find_latest(route->path, &timeline, consistentPoint,
+		(void) wal_dir_find_latest(route, &timeline, consistentPoint,
 								   sizeof(consistentPoint));
 	}
-
-	char path[MAXPGPATH];
-
-	slot_marker_path(route, slotName, path, sizeof(path));
 
 	char contents[128];
 
 	sformat(contents, sizeof(contents), "restart_lsn=%s\n", consistentPoint);
 
-	if (!write_file(contents, strlen(contents), path))
+	/* temp file + rename: a reader never sees a half written slot */
+	if (!ws_write_file_atomic(path, contents, strlen(contents)))
 	{
 		log_error("Failed to write replication slot marker \"%s\"", path);
 		ws_send_error_response(sock, "58030", "failed to persist the replication slot");
@@ -234,7 +309,7 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 
 	if (!parse_slot_name(&p, slotName, sizeof(slotName)) || !slot_name_is_safe(slotName))
 	{
-		ws_send_error_response(sock, "22023", "invalid or missing slot name");
+		ws_send_error_response(sock, "42602", "invalid replication slot name");
 		return;
 	}
 
@@ -292,7 +367,7 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 	if (!wal_position_cache_read(route->path, &timeline, discardLsn,
 								 sizeof(discardLsn)))
 	{
-		(void) wal_dir_find_latest(route->path, &timeline, discardLsn,
+		(void) wal_dir_find_latest(route, &timeline, discardLsn,
 								   sizeof(discardLsn));
 	}
 
@@ -307,4 +382,54 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 	{
 		ws_send_command_complete(sock, "READ_REPLICATION_SLOT");
 	}
+}
+
+
+/*
+ * DROP_REPLICATION_SLOT slot_name [ WAIT ]: pg_receivewal --drop-slot and
+ * friends send it. A slot that does not exist is an error, as in
+ * PostgreSQL.
+ */
+void
+cmd_drop_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
+{
+	if (route == NULL || route->path[0] == '\0')
+	{
+		ws_send_error_response(sock, "58P01",
+							   "no WAL cache directory configured for this route");
+		return;
+	}
+
+	const char *p = rawArgs;
+	char slotName[WS_SLOT_NAME_MAX];
+
+	if (!parse_slot_name(&p, slotName, sizeof(slotName)) ||
+		!slot_name_is_safe(slotName))
+	{
+		ws_send_error_response(sock, "42602", "invalid replication slot name");
+		return;
+	}
+
+	char path[MAXPGPATH];
+
+	slot_marker_path(route, slotName, path, sizeof(path));
+
+	if (unlink(path) != 0)
+	{
+		if (errno == ENOENT)
+		{
+			ws_send_error_response(sock, "42704",
+								   "replication slot does not exist");
+		}
+		else
+		{
+			log_error("Failed to remove replication slot file \"%s\": %m", path);
+			ws_send_error_response(sock, "58030",
+								   "failed to drop the replication slot");
+		}
+
+		return;
+	}
+
+	ws_send_command_complete(sock, "DROP_REPLICATION_SLOT");
 }

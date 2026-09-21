@@ -1,23 +1,24 @@
 /*
  * src/bin/pg_walsender/monitor_hosts.c
- *   See monitor_hosts.h.
+ *   See monitor_hosts.h. The connection-side half: a read-only reader of
+ *   the node list and a client of the refresher's datagram socket. No
+ *   libpq here, no file is ever written.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
 
+#include <poll.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/time.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
-
-#include "libpq-fe.h"
-#include "pqexpbuffer.h"
 
 #include "monitor_hosts.h"
 
@@ -26,19 +27,23 @@
 #include "ipaddr.h"
 #include "log.h"
 #include "string_utils.h"
-
-#define HASH_LINE_PREFIX "# hash "
-#define HASH_LEN 32
+#include "ws_util.h"
 
 
-/* the local copy: its recorded fingerprint and the raw file contents */
+/* the local copy: its raw contents and modification time */
 typedef struct LocalHosts
 {
 	bool exists;
-	char hash[HASH_LEN + 1];
 	char *contents;             /* whole file, malloc'ed */
-	time_t mtime;
+	struct timespec mtime;
 } LocalHosts;
+
+
+void
+monitor_hosts_list_path(const char *routePath, char *dest, size_t destSize)
+{
+	sformat(dest, destSize, "%s/" PG_AUTOCTL_ARCHIVER_NODES_FILE, routePath);
+}
 
 
 static void
@@ -47,24 +52,34 @@ local_hosts_read(const char *path, LocalHosts *local)
 	memset(local, 0, sizeof(*local)); /* IGNORE-BANNED */
 
 	struct stat st;
-	long size = 0;
+	size_t size = 0;
 
-	if (stat(path, &st) != 0 ||
-		!read_file_if_exists(path, &(local->contents), &size) ||
-		local->contents == NULL)
+	if (!ws_read_file_capped(path, WS_MAX_CONFIG_FILE_SIZE, true,
+							 &(local->contents), &size, &st))
 	{
 		return;
 	}
 
 	local->exists = true;
-	local->mtime = st.st_mtime;
+	local->mtime = st.st_mtim;
+}
 
-	if (strncmp(local->contents, HASH_LINE_PREFIX, strlen(HASH_LINE_PREFIX)) == 0 &&
-		strlen(local->contents) >= strlen(HASH_LINE_PREFIX) + HASH_LEN)
-	{
-		strlcpy(local->hash, local->contents + strlen(HASH_LINE_PREFIX),
-				HASH_LEN + 1);
-	}
+
+static void
+local_hosts_free(LocalHosts *local)
+{
+	free(local->contents);
+	local->contents = NULL;
+	local->exists = false;
+}
+
+
+static int
+local_hosts_age(const LocalHosts *local)
+{
+	time_t now = time(NULL);
+
+	return local->exists ? (int) (now - local->mtime.tv_sec) : 0;
 }
 
 
@@ -106,171 +121,185 @@ local_hosts_match(const LocalHosts *local, const char *peerIP)
 
 
 static bool
-split_route_key(const char *routeKey, char *formation, size_t formationSize,
-				int *groupId)
+timespec_equal(const struct timespec *a, const struct timespec *b)
 {
-	const char *slash = strrchr(routeKey, '/');
-
-	if (slash == NULL || slash == routeKey ||
-		(size_t) (slash - routeKey) >= formationSize)
-	{
-		return false;
-	}
-
-	strlcpy(formation, routeKey, (size_t) (slash - routeKey) + 1);
-
-	return stringToInt(slash + 1, groupId);
+	return a->tv_sec == b->tv_sec && a->tv_nsec == b->tv_nsec;
 }
 
 
-static PGconn *
-connect_to_monitor(const char *monitorUriPath)
+/* mtime of a file, or zeros when it does not exist */
+static void
+file_mtime(const char *path, struct timespec *mtime)
 {
-	char *uri = NULL;
-	long size = 0;
+	struct stat st;
 
-	if (monitorUriPath[0] == '\0' ||
-		!read_file_if_exists(monitorUriPath, &uri, &size) || uri == NULL)
+	if (stat(path, &st) == 0)
 	{
-		return NULL;
+		*mtime = st.st_mtim;
 	}
-
-	/* one line, no trailing newline */
-	uri[strcspn(uri, "\r\n")] = '\0';
-
-	const char *keys[] = { "dbname", "connect_timeout", NULL };
-	const char *values[] = { uri, "3", NULL };
-
-	PGconn *conn = PQconnectdbParams(keys, values, 1);
-
-	free(uri);
-
-	if (PQstatus(conn) != CONNECTION_OK)
+	else
 	{
-		log_warn("pg_walsender could not reach the monitor to validate its "
-				 "list of nodes: %s", PQerrorMessage(conn));
-		PQfinish(conn);
-		return NULL;
+		mtime->tv_sec = 0;
+		mtime->tv_nsec = 0;
 	}
-
-	return conn;
 }
 
 
 /*
- * refresh validates the local copy against the monitor: nothing to do when
- * the fingerprints agree (only the file's mtime is renewed, which is what
- * rate-limits the next validation), a full fetch when they differ.
+ * send_refresh_request sends the route key to the refresher's datagram
+ * socket. Fire and forget: the answer is the list file being renewed.
+ */
+static bool
+send_refresh_request(const char *refreshSockPath, const char *routeKey)
+{
+	struct sockaddr_un addr;
+
+	memset(&addr, 0, sizeof(addr)); /* IGNORE-BANNED */
+	addr.sun_family = AF_UNIX;
+
+	if (refreshSockPath[0] == '\0' ||
+		strlen(refreshSockPath) >= sizeof(addr.sun_path))
+	{
+		return false;
+	}
+
+	strlcpy(addr.sun_path, refreshSockPath, sizeof(addr.sun_path));
+
+	int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+
+	if (fd < 0)
+	{
+		return false;
+	}
+
+	ssize_t n = sendto(fd, routeKey, strlen(routeKey), MSG_DONTWAIT,
+					   (struct sockaddr *) &addr, sizeof(addr));
+
+	close(fd);
+
+	return n > 0;
+}
+
+
+/*
+ * request_refresh asks the refresher to validate the list against the
+ * monitor, then waits (bounded: WS_HOSTS_WAIT_MAX_MS and the connection's
+ * authentication deadline) for the answer -- the list file's mtime moving,
+ * or the failure marker appearing -- and re-reads the list.
  */
 static void
-refresh(const char *routeKey, const char *listPath, const char *monitorUriPath,
-		LocalHosts *local)
+request_refresh(const char *routeKey, const char *listPath,
+				const char *refreshSockPath, LocalHosts *local)
 {
-	char formation[NAMEDATALEN + 16];
-	int groupId = 0;
+	char errPath[MAXPGPATH];
 
-	if (!split_route_key(routeKey, formation, sizeof(formation), &groupId))
+	sformat(errPath, sizeof(errPath), "%s" WS_HOSTS_ERR_SUFFIX, listPath);
+
+	struct timespec listBefore, errBefore;
+
+	file_mtime(listPath, &listBefore);
+	file_mtime(errPath, &errBefore);
+
+	/*
+	 * The refresher recently failed to reach the monitor and negative-caches
+	 * that: do not wait for something that will not happen.
+	 */
+	if (errBefore.tv_sec != 0 &&
+		(time(NULL) - errBefore.tv_sec) < WS_HOSTS_NEGATIVE_SECONDS)
 	{
 		return;
 	}
 
-	PGconn *conn = connect_to_monitor(monitorUriPath);
-
-	if (conn == NULL)
+	if (!send_refresh_request(refreshSockPath, routeKey))
 	{
 		return;
 	}
 
-	char groupStr[16];
+	int64_t start = ws_monotonic_ms();
+	int64_t limit = Min(WS_HOSTS_WAIT_MAX_MS, ws_auth_deadline_remaining_ms());
 
-	sformat(groupStr, sizeof(groupStr), "%d", groupId);
-
-	const char *params[2] = { formation, groupStr };
-
-	PGresult *res = PQexecParams(
-		conn, "SELECT pgautofailover.get_group_hosts_hash($1, $2::int)",
-		2, NULL, params, NULL, NULL, 0);
-
-	bool unchanged = PQresultStatus(res) == PGRES_TUPLES_OK &&
-					 PQntuples(res) == 1 && !PQgetisnull(res, 0, 0) &&
-					 local->exists &&
-					 strcmp(PQgetvalue(res, 0, 0), local->hash) == 0;
-	bool queryOk = PQresultStatus(res) == PGRES_TUPLES_OK;
-
-	PQclear(res);
-
-	if (unchanged)
+	for (;;)
 	{
-		(void) utimes(listPath, NULL);
-	}
-	else if (queryOk)
-	{
-		res = PQexecParams(
-			conn,
-			"SELECT hash, array_to_string(hosts, E'\\n') "
-			"FROM pgautofailover.get_group_hosts($1, $2::int)",
-			2, NULL, params, NULL, NULL, 0);
+		struct timespec listNow, errNow;
 
-		if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1)
+		file_mtime(listPath, &listNow);
+		file_mtime(errPath, &errNow);
+
+		if (!timespec_equal(&listNow, &listBefore) ||
+			!timespec_equal(&errNow, &errBefore))
 		{
-			PQExpBuffer buffer = createPQExpBuffer();
-
-			appendPQExpBuffer(buffer, HASH_LINE_PREFIX "%s\n",
-							  PQgetvalue(res, 0, 0));
-
-			if (!PQgetisnull(res, 0, 1) && PQgetvalue(res, 0, 1)[0] != '\0')
-			{
-				appendPQExpBuffer(buffer, "%s\n", PQgetvalue(res, 0, 1));
-			}
-
-			if (!PQExpBufferBroken(buffer) &&
-				write_file_atomic(buffer->data, buffer->len, (char *) listPath))
-			{
-				free(local->contents);
-				local_hosts_read(listPath, local);
-			}
-
-			destroyPQExpBuffer(buffer);
+			break;
 		}
 
-		PQclear(res);
+		if (ws_monotonic_ms() - start >= limit)
+		{
+			log_debug("Timed out waiting for the nodes list of \"%s\" to be "
+					  "revalidated", listPath);
+			break;
+		}
+
+		(void) poll(NULL, 0, 20);
 	}
 
-	PQfinish(conn);
+	local_hosts_free(local);
+	local_hosts_read(listPath, local);
 }
 
 
 bool
 monitor_hosts_contain(const char *routeKey, const char *routePath,
-					  const char *monitorUriPath, const char *peerIP)
+					  const char *monitorUriPath, const char *refreshSockPath,
+					  const char *peerIP)
 {
+	static bool warnedTooOld = false;
+
 	char listPath[MAXPGPATH];
 
-	sformat(listPath, sizeof(listPath), "%s/" PG_AUTOCTL_ARCHIVER_NODES_FILE,
-			routePath);
+	monitor_hosts_list_path(routePath, listPath, sizeof(listPath));
 
 	LocalHosts local;
 
 	local_hosts_read(listPath, &local);
 
-	time_t now = time(NULL);
+	bool monitored = monitorUriPath != NULL && monitorUriPath[0] != '\0' &&
+					 file_exists(monitorUriPath);
 
 	/* validate an old (or missing) copy first, see monitor_hosts.h */
-	if (!local.exists || (now - local.mtime) >= WS_HOSTS_MAX_AGE_SECONDS)
+	if (monitored &&
+		(!local.exists || local_hosts_age(&local) >= WS_HOSTS_MAX_AGE_SECONDS))
 	{
-		refresh(routeKey, listPath, monitorUriPath, &local);
+		request_refresh(routeKey, listPath, refreshSockPath, &local);
+	}
+
+	/* fail closed: a list the monitor has not confirmed for too long */
+	if (monitored && local.exists &&
+		local_hosts_age(&local) >= WS_HOSTS_HARD_MAX_AGE_SECONDS)
+	{
+		if (!warnedTooOld)
+		{
+			warnedTooOld = true;
+			log_error("The nodes list \"%s\" is more than %d seconds old and "
+					  "the monitor is unreachable: the \"monitor\" HBA "
+					  "address matches nothing", listPath,
+					  WS_HOSTS_HARD_MAX_AGE_SECONDS);
+		}
+
+		local_hosts_free(&local);
+		return false;
 	}
 
 	bool found = local_hosts_match(&local, peerIP);
 
-	if (!found && local.exists &&
-		(time(NULL) - local.mtime) >= WS_HOSTS_MISS_MIN_AGE_SECONDS)
+	if (!found && monitored && local.exists &&
+		local_hosts_age(&local) >= WS_HOSTS_MISS_MIN_AGE_SECONDS)
 	{
-		refresh(routeKey, listPath, monitorUriPath, &local);
-		found = local_hosts_match(&local, peerIP);
+		request_refresh(routeKey, listPath, refreshSockPath, &local);
+
+		found = local_hosts_age(&local) < WS_HOSTS_HARD_MAX_AGE_SECONDS &&
+				local_hosts_match(&local, peerIP);
 	}
 
-	free(local.contents);
+	local_hosts_free(&local);
 
 	return found;
 }

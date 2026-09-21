@@ -7,6 +7,7 @@
  *
  */
 
+#include <fcntl.h>
 #include <string.h>
 
 #include "postgres_fe.h"
@@ -15,6 +16,7 @@
 #include "file_utils.h"
 #include "framing.h"
 #include "log.h"
+#include "ws_util.h"
 
 /* matches xlog_internal.h's own MAXFNAMELEN (backend-only header, not
  * pulled in here) -- "%08X.history" is always exactly 17 bytes + NUL */
@@ -40,10 +42,17 @@ cmd_timeline_history(int sock, const WsRoute *route, int timeline)
 
 	sformat(path, sizeof(path), "%s/%s", route->path, filename);
 
+	/*
+	 * The name is generated from a validated number (never client text) and
+	 * the file is opened O_NOFOLLOW, size-capped, regular files only.
+	 */
 	char *contents = NULL;
-	long fileSize = 0;
+	size_t fileSize = 0;
 
-	if (!read_file_if_exists(path, &contents, &fileSize) || contents == NULL)
+	if (timeline <= 0 ||
+		!ws_read_file_flags(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW,
+							WS_MAX_CONFIG_FILE_SIZE, true, &contents,
+							&fileSize, NULL))
 	{
 		/* matches real walsender.c: no history file for this timeline is
 		 * an ERROR there too, not a soft "empty" fallback */

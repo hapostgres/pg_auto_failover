@@ -27,7 +27,6 @@
 #include "signals.h"
 #include "wal_dir_scan.h"
 
-#define WS_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
 #define WS_STREAM_CHUNK_SIZE (32 * 1024)
 #define WS_KEEPALIVE_INTERVAL_SEC 5
 #define WS_POLL_INTERVAL_USEC (200 * 1000)
@@ -119,7 +118,8 @@ wait_for_more_data_or_client(int sock, uint64_t currentLsn, time_t *lastKeepaliv
 		char *payload = NULL;
 		int32_t payloadLen = 0;
 
-		if (!ws_read_message(sock, &type, &payload, &payloadLen))
+		if (!ws_read_message(sock, &type, &payload, &payloadLen,
+							 WS_MAX_COMMAND_MESSAGE_LEN))
 		{
 			free(payload);
 			return false;   /* client disconnected */
@@ -155,7 +155,7 @@ wait_for_more_data_or_client(int sock, uint64_t currentLsn, time_t *lastKeepaliv
 /*
  * trim_trailing_zeros returns the length of buffer with any trailing run of
  * zero bytes removed. A ".partial" segment is pre-allocated to its full
- * WS_WAL_SEGMENT_SIZE by pg_receivewal the moment it's created (matching
+ * the route's segment size by pg_receivewal the moment it's created (matching
  * real Postgres's own WAL file pre-allocation, XLogFileInitInternal) --
  * unlike a real primary's own walsender, which only ever knows about bytes
  * it has actually flushed, a plain fread() from a ".partial" file cannot
@@ -245,7 +245,8 @@ skip_ws(const char *p)
  * that can never arrive.
  */
 static bool
-find_oldest_segno(const char *walcacheDir, uint32_t timeline, uint64_t *oldestSegno)
+find_oldest_segno(const char *walcacheDir, uint32_t timeline,
+				  uint64_t segSize, uint64_t *oldestSegno)
 {
 	DIR *dir = opendir(walcacheDir);
 
@@ -306,7 +307,7 @@ find_oldest_segno(const char *walcacheDir, uint32_t timeline, uint64_t *oldestSe
 		uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
 		uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
 		uint64_t segno = (uint64_t) logId *
-						 (UINT64CONST(0x100000000) / WS_WAL_SEGMENT_SIZE) + seg;
+						 (UINT64CONST(0x100000000) / segSize) + seg;
 
 		if (!found || segno < best)
 		{
@@ -391,7 +392,7 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 	if (!wal_position_cache_read(route->path, &timeline, discardLsn,
 								 sizeof(discardLsn)))
 	{
-		(void) wal_dir_find_latest(route->path, &timeline, discardLsn,
+		(void) wal_dir_find_latest(route, &timeline, discardLsn,
 								   sizeof(discardLsn));
 	}
 
@@ -403,6 +404,7 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 
 	if (!ws_send_copy_both_response(sock, 0))
 	{
+		ws_connection_close_after_command = true;
 		return;
 	}
 
@@ -411,8 +413,9 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 			 (uint32_t) (startLsn >> 32), (uint32_t) startLsn, timeline,
 			 route->path);
 
-	uint64_t segno = startLsn / WS_WAL_SEGMENT_SIZE;
-	uint64_t offset = startLsn % WS_WAL_SEGMENT_SIZE;
+	uint64_t segSize = ws_route_wal_segment_size(route);
+	uint64_t segno = startLsn / segSize;
+	uint64_t offset = startLsn % segSize;
 	uint64_t currentLsn = startLsn;
 	time_t lastKeepalive = time(NULL);
 
@@ -425,7 +428,8 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 
 		char filename[32];
 
-		wal_segment_filename(timeline, segno, filename, sizeof(filename));
+		wal_segment_filename(timeline, segno, segSize, filename,
+							 sizeof(filename));
 
 		char completePath[MAXPGPATH];
 
@@ -444,12 +448,13 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 		{
 			uint64_t oldestSegno;
 
-			if (find_oldest_segno(route->path, timeline, &oldestSegno) &&
+			if (find_oldest_segno(route->path, timeline, segSize,
+								  &oldestSegno) &&
 				segno < oldestSegno)
 			{
 				char oldestName[32];
 
-				wal_segment_filename(timeline, oldestSegno,
+				wal_segment_filename(timeline, oldestSegno, segSize,
 									 oldestName, sizeof(oldestName));
 
 				log_error("START_REPLICATION: requested segment \"%s\" "
@@ -463,6 +468,9 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 									   "requested WAL segment predates this "
 									   "archiver's captured history and will "
 									   "never become available");
+
+				/* an error inside CopyBoth ends the connection */
+				ws_connection_close_after_command = true;
 				return;
 			}
 
@@ -494,7 +502,10 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 			log_error("Failed to seek to offset %" PRIu64 " in \"%s\": %m",
 					  offset, readPath);
 			fclose(file);
-			break;
+			ws_send_error_response(sock, "58030",
+								   "failed to read the requested WAL segment");
+			ws_connection_close_after_command = true;
+			return;
 		}
 
 		char buffer[WS_STREAM_CHUNK_SIZE];
@@ -533,7 +544,7 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 		currentLsn += got;
 		offset += got;
 
-		if (offset >= WS_WAL_SEGMENT_SIZE)
+		if (offset >= segSize)
 		{
 			segno++;
 			offset = 0;

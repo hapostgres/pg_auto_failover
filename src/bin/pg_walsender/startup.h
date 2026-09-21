@@ -6,6 +6,12 @@
  *   frontend-only -- that function is backend-locked (palloc/List/ereport),
  *   not something we can call into directly.
  *
+ *   The startup packet is at most 10000 bytes (as in PostgreSQL) and the
+ *   whole negotiation runs under the connection's absolute authentication
+ *   deadline (accept_loop.c). A startup packet without a user name is
+ *   refused, as PostgreSQL does. The client supplied strings kept in
+ *   WsStartupParams are raw: log them through ws_sanitize_for_log().
+ *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *

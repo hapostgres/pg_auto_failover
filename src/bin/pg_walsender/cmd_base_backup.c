@@ -93,6 +93,9 @@
  */
 
 #include <ctype.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <dirent.h>
 #include <string.h>
 
@@ -431,8 +434,6 @@ send_position_row(int sock, const char *lsn, const char *tli)
  * remains the fallback for a connection arriving before that cache's
  * first tick has landed.
  */
-#define CBB_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
-#define CBB_XLOG_SEGMENTS_PER_XLOGID (UINT64CONST(0x100000000) / CBB_WAL_SEGMENT_SIZE)
 #define CBB_WAL_FNAME_LEN 24
 
 
@@ -458,35 +459,76 @@ is_wal_segment_filename(const char *name)
 }
 
 
+/*
+ * partial_segment_real_length finds where the real content of a ".partial"
+ * segment ends: everything after the last non-zero byte is pg_receivewal's
+ * pre-allocated tail. The file is scanned backwards in chunks, never read
+ * whole (a segment can be up to 1 GiB).
+ */
 static bool
 partial_segment_real_length(const char *path, uint64_t *length)
 {
-	char *buffer = NULL;
-	long got = 0;
+	int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+	struct stat st;
 
-	if (!read_file(path, &buffer, &got))
+	if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
 	{
-		/* errors have already been logged */
+		log_error("Failed to open \"%s\": %m", path);
+
+		if (fd >= 0)
+		{
+			close(fd);
+		}
+
 		return false;
 	}
 
-	while (got > 0 && buffer[got - 1] == 0)
+	char buffer[64 * 1024];
+	off_t end = st.st_size;
+
+	while (end > 0)
 	{
-		got--;
+		off_t start = end > (off_t) sizeof(buffer) ?
+					  end - (off_t) sizeof(buffer) : 0;
+		ssize_t got = pread(fd, buffer, (size_t) (end - start), start);
+
+		if (got != (ssize_t) (end - start))
+		{
+			log_error("Failed to read \"%s\": %m", path);
+			close(fd);
+			return false;
+		}
+
+		while (got > 0 && buffer[got - 1] == 0)
+		{
+			got--;
+		}
+
+		if (got > 0)
+		{
+			end = start + got;
+			break;
+		}
+
+		end = start;
 	}
 
-	free(buffer);
+	close(fd);
 
-	*length = (uint64_t) got;
+	*length = (uint64_t) end;
 
 	return true;
 }
 
 
 static bool
-find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
+find_reachable_end_position(const WsRoute *route, uint32_t *timeline,
 							char *endLsn, size_t endLsnSize)
 {
+	const char *walcacheDir = route->path;
+	uint64_t segSize = ws_route_wal_segment_size(route);
+	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
+
 	if (wal_position_cache_read(walcacheDir, timeline, endLsn, endLsnSize))
 	{
 		return true;
@@ -564,8 +606,8 @@ find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
 	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
 	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
 
-	uint64_t segno = (uint64_t) logId * CBB_XLOG_SEGMENTS_PER_XLOGID + seg;
-	uint64_t segStart = segno * CBB_WAL_SEGMENT_SIZE;
+	uint64_t segno = (uint64_t) logId * perXLogId + seg;
+	uint64_t segStart = segno * segSize;
 	uint64_t position;
 
 	if (usePartial)
@@ -584,7 +626,7 @@ find_reachable_end_position(const char *walcacheDir, uint32_t *timeline,
 	}
 	else
 	{
-		position = segStart + CBB_WAL_SEGMENT_SIZE;
+		position = segStart + segSize;
 	}
 
 	*timeline = tli;
@@ -631,7 +673,29 @@ read_latest_basebackup_label(const char *path, char *labelOut, size_t labelOutSi
 	strlcpy(labelOut, contents, labelOutSize);
 	free(contents);
 
-	return labelOut[0] != '\0';
+	/*
+	 * The label becomes a path component below basebackups/: only a plain
+	 * [A-Za-z0-9_.-]+ name that does not start with a dot (no ".", "..",
+	 * hidden files, separators) is ever used.
+	 */
+	if (labelOut[0] == '\0' || labelOut[0] == '.')
+	{
+		return false;
+	}
+
+	for (const char *c = labelOut; *c != '\0'; c++)
+	{
+		if (!(isalnum((unsigned char) *c) || *c == '_' || *c == '.' ||
+			  *c == '-'))
+		{
+			log_error("Ignoring the invalid base backup label in \"%s\"",
+					  pointerPath);
+			labelOut[0] = '\0';
+			return false;
+		}
+	}
+
+	return true;
 }
 
 
@@ -708,6 +772,21 @@ stream_manifest_as_copy_data(int sock, const char *manifestPath)
 	fclose(file);
 
 	return ok;
+}
+
+
+/*
+ * fail_stream: a failure once BASE_BACKUP has started sending cannot be
+ * recovered from -- the client is in the middle of a COPY. Like
+ * PostgreSQL's walsender (FATAL), report it (best effort: an ErrorResponse
+ * ends a COPY OUT on the client side) and end the connection rather than
+ * going back to ReadyForQuery.
+ */
+static void
+fail_stream(int sock)
+{
+	(void) ws_send_error_response(sock, "58030", "base backup failed");
+	ws_connection_close_after_command = true;
 }
 
 
@@ -809,7 +888,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 	 */
 	uint32_t walcacheTimeline = 0;
 	char walcacheEndLsn[32] = { 0 };
-	bool haveWalcacheInfo = find_reachable_end_position(route->path,
+	bool haveWalcacheInfo = find_reachable_end_position(route,
 														&walcacheTimeline,
 														walcacheEndLsn,
 														sizeof(walcacheEndLsn));
@@ -830,6 +909,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 	if (!send_position_row(sock, lsn, tliStr))
 	{
 		log_error("cmd_base_backup: failed sending the start position row");
+		fail_stream(sock);
 		return;
 	}
 
@@ -846,12 +926,14 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		!ws_send_command_complete(sock, "SELECT"))
 	{
 		log_error("cmd_base_backup: failed sending the tablespace result set");
+		fail_stream(sock);
 		return;
 	}
 
 	if (!ws_send_copy_out_response(sock, 0))
 	{
 		log_error("cmd_base_backup: failed sending the tar CopyOutResponse");
+		fail_stream(sock);
 		return;
 	}
 
@@ -871,6 +953,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		if (!ok)
 		{
 			log_error("cmd_base_backup: failed sending the NewArchive framing message");
+			fail_stream(sock);
 			return;
 		}
 	}
@@ -882,6 +965,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 	{
 		log_error("Failed to stream base backup tar contents from \"%s\"",
 				  basebackupDir);
+		fail_stream(sock);
 		return;
 	}
 
@@ -901,12 +985,14 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		!stream_manifest_as_copy_data(sock, manifestPath))
 	{
 		log_error("cmd_base_backup: failed streaming the manifest CopyData");
+		fail_stream(sock);
 		return;
 	}
 
 	if (!ws_send_copy_done(sock))
 	{
 		log_error("cmd_base_backup: failed sending the CopyDone");
+		fail_stream(sock);
 		return;
 	}
 #else
@@ -928,6 +1014,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 	if (!ws_send_copy_done(sock))
 	{
 		log_error("cmd_base_backup: failed sending the tar CopyDone");
+		fail_stream(sock);
 		return;
 	}
 
@@ -936,18 +1023,21 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 		if (!ws_send_copy_out_response(sock, 0))
 		{
 			log_error("cmd_base_backup: failed sending the manifest CopyOutResponse");
+			fail_stream(sock);
 			return;
 		}
 
 		if (!stream_manifest_as_copy_data(sock, manifestPath))
 		{
 			log_error("cmd_base_backup: failed streaming the manifest CopyData");
+			fail_stream(sock);
 			return;
 		}
 
 		if (!ws_send_copy_done(sock))
 		{
 			log_error("cmd_base_backup: failed sending the manifest CopyDone");
+			fail_stream(sock);
 			return;
 		}
 	}
@@ -974,6 +1064,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 	if (!send_position_row(sock, endLsnPtr, tliStr))
 	{
 		log_error("cmd_base_backup: failed sending the end position row");
+		fail_stream(sock);
 		return;
 	}
 

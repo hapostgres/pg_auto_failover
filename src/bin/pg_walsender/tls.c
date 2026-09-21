@@ -8,11 +8,13 @@
  */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <openssl/err.h>
+#include <openssl/pem.h>
 #include <openssl/x509.h>
 #include <openssl/ssl.h>
 
@@ -50,14 +52,16 @@ log_openssl_errors(const char *what)
  * (src/backend/libpq/be-secure-common.c), with ereport() turned into
  * log_error(): a key owned by us must be 0600 (no group/other access at
  * all); one owned by root may also be group readable (0640), for a
- * certificate shared through a group; any other owner is refused.
+ * certificate shared through a group; any other owner is refused. The
+ * checks run on the already opened descriptor (fstat), which is then the
+ * very file the key is read from: no stat()/open() race in between.
  */
 static bool
-key_permissions_are_safe(const char *keyPath)
+key_permissions_are_safe(int fd, const char *keyPath)
 {
 	struct stat st;
 
-	if (stat(keyPath, &st) != 0)
+	if (fstat(fd, &st) != 0)
 	{
 		log_error("Failed to stat the TLS key file \"%s\": %m", keyPath);
 		return false;
@@ -99,15 +103,76 @@ key_permissions_are_safe(const char *keyPath)
 }
 
 
+/*
+ * Like upstream's dummy_ssl_passwd_cb(): a passphrase protected key is an
+ * error, never a prompt on whatever terminal the server happens to have.
+ */
+static int
+dummy_passwd_cb(char *buf, int size, int rwflag, void *userdata)
+{
+	return 0;
+}
+
+
+/*
+ * load_private_key opens the key once, checks its permissions on that
+ * descriptor and parses the PEM from the same descriptor.
+ */
+static bool
+load_private_key(SSL_CTX *ctx, const char *keyPath)
+{
+	int fd = open(keyPath, O_RDONLY | O_CLOEXEC);
+
+	if (fd < 0)
+	{
+		log_error("Failed to open the TLS key file \"%s\": %m", keyPath);
+		return false;
+	}
+
+	if (!key_permissions_are_safe(fd, keyPath))
+	{
+		close(fd);
+		return false;
+	}
+
+	BIO *bio = BIO_new_fd(fd, BIO_NOCLOSE);
+
+	if (bio == NULL)
+	{
+		close(fd);
+		log_openssl_errors("BIO_new_fd");
+		return false;
+	}
+
+	EVP_PKEY *pkey = PEM_read_bio_PrivateKey(bio, NULL, dummy_passwd_cb, NULL);
+
+	BIO_free(bio);
+	close(fd);
+
+	if (pkey == NULL)
+	{
+		log_openssl_errors("Loading the TLS private key (a passphrase "
+						   "protected key is not supported)");
+		return false;
+	}
+
+	bool ok = SSL_CTX_use_PrivateKey(ctx, pkey) == 1;
+
+	EVP_PKEY_free(pkey);
+
+	if (!ok)
+	{
+		log_openssl_errors("Using the TLS private key");
+	}
+
+	return ok;
+}
+
+
 bool
 ws_tls_server_init(const char *certPath, const char *keyPath)
 {
 	if (!file_exists(certPath) || !file_exists(keyPath))
-	{
-		return false;
-	}
-
-	if (!key_permissions_are_safe(keyPath))
 	{
 		return false;
 	}
@@ -128,6 +193,7 @@ ws_tls_server_init(const char *certPath, const char *keyPath)
 	 * no renegotiation, moving write buffers, the server's cipher order,
 	 * and PostgreSQL's default cipher list and curves.
 	 */
+	SSL_CTX_set_default_passwd_cb(ctx, dummy_passwd_cb);
 	SSL_CTX_set_mode(ctx, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 	SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
 	SSL_CTX_set_num_tickets(ctx, 0);
@@ -156,11 +222,16 @@ ws_tls_server_init(const char *certPath, const char *keyPath)
 		return false;
 	}
 
-	if (SSL_CTX_use_certificate_chain_file(ctx, certPath) != 1 ||
-		SSL_CTX_use_PrivateKey_file(ctx, keyPath, SSL_FILETYPE_PEM) != 1 ||
-		SSL_CTX_check_private_key(ctx) != 1)
+	if (SSL_CTX_use_certificate_chain_file(ctx, certPath) != 1)
 	{
-		log_openssl_errors("Loading the TLS certificate and key");
+		log_openssl_errors("Loading the TLS certificate");
+		SSL_CTX_free(ctx);
+		return false;
+	}
+
+	if (!load_private_key(ctx, keyPath) || SSL_CTX_check_private_key(ctx) != 1)
+	{
+		log_openssl_errors("Checking the TLS certificate and key");
 		SSL_CTX_free(ctx);
 		return false;
 	}
@@ -186,6 +257,12 @@ ws_tls_server_accept(int sock)
 	if (ssl == NULL || SSL_set_fd(ssl, sock) != 1)
 	{
 		log_openssl_errors("SSL_new");
+
+		if (ssl != NULL)
+		{
+			SSL_free(ssl);
+		}
+
 		return false;
 	}
 
@@ -278,6 +355,12 @@ ws_io_read(int fd, void *buf, size_t len)
 		return read(fd, buf, len);
 	}
 
+	/*
+	 * The socket is blocking, and the authentication deadline is enforced
+	 * by SIGALRM (accept_loop.c), so SSL_read() only reports WANT_READ/
+	 * WANT_WRITE when there is nothing more to wait for here: treat it as
+	 * an error, never as a reason to spin.
+	 */
 	for (;;)
 	{
 		int n = SSL_read(activeSsl, buf, (int) len);
@@ -295,6 +378,12 @@ ws_io_read(int fd, void *buf, size_t len)
 		}
 
 		if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+		{
+			errno = ETIMEDOUT;
+			return -1;
+		}
+
+		if (err == SSL_ERROR_SYSCALL && errno == EINTR)
 		{
 			continue;
 		}
@@ -329,6 +418,12 @@ ws_io_write(int fd, const void *buf, size_t len)
 		int err = SSL_get_error(activeSsl, n);
 
 		if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE)
+		{
+			errno = ETIMEDOUT;
+			return -1;
+		}
+
+		if (err == SSL_ERROR_SYSCALL && errno == EINTR)
 		{
 			continue;
 		}

@@ -23,6 +23,9 @@
 
 #define WS_DEFAULT_PORT 6543
 
+/* absolute authentication deadline of a connection, in seconds */
+#define WS_DEFAULT_AUTH_TIMEOUT 30
+
 /*
  * Reported as the "server_version" startup parameter so that real libpq
  * clients (pg_basebackup, pg_receivewal) compute a sane PQserverVersion().

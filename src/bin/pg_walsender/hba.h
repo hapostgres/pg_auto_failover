@@ -2,7 +2,9 @@
  * src/bin/pg_walsender/hba.h
  *   pg_walsender's host-based authentication file, a deliberately small
  *   subset of pg_hba.conf. One rule per line, first match wins, no match
- *   means reject (and so does a missing or unreadable file):
+ *   means reject (and so does a missing, oversize or unreadable file, and a
+ *   file with a malformed line: it is refused as a whole, never partly
+ *   applied):
  *
  *     # TYPE     ROUTE       USER                       ADDRESS       METHOD
  *     hostssl    all         pgautofailover_replicator  monitor       scram-sha-256
@@ -43,14 +45,22 @@ typedef enum WsAuthMethod
 
 /*
  * hba_lookup finds the first rule matching (routeKey, user, peerIP) in the
- * HBA file. Returns false when the file cannot be read (callers must then
- * reject the connection: fail closed); otherwise sets *method, which is
+ * HBA file. Returns false when the file cannot be read, is larger than
+ * 1 MiB, or has ANY malformed line (reported with its line number): callers
+ * must then reject the connection, failing closed like PostgreSQL, which
+ * refuses to load a bad pg_hba.conf. Otherwise sets *method, which is
  * WS_AUTH_REJECT when no rule matches or the matching rule says reject.
+ *
+ * routePath is NULL when the client asked for a route that does not exist:
+ * the "monitor" address then matches nothing (and no monitor list is read),
+ * and the unknown route is reported only once the client authenticated,
+ * see auth.h. refreshSockPath is where monitor_hosts.h sends its
+ * "please revalidate" datagrams.
  */
 bool hba_lookup(const char *hbaPath, const char *routePath,
-				const char *monitorUriPath, const char *routeKey,
-				const char *user, const char *peerIP, bool isTLS,
-				WsAuthMethod *method);
+				const char *monitorUriPath, const char *refreshSockPath,
+				const char *routeKey, const char *user, const char *peerIP,
+				bool isTLS, WsAuthMethod *method);
 
 /* create the default HBA file if there is none; never overwrite one */
 bool hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable);

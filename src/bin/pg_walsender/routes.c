@@ -26,6 +26,7 @@
 #include "routes.h"
 #include "file_utils.h"
 #include "log.h"
+#include "ws_util.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
@@ -37,9 +38,10 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 	*countOut = 0;
 
 	char *contents = NULL;
-	long fileSize = 0;
+	size_t fileSize = 0;
 
-	if (!read_file(path, &contents, &fileSize))
+	if (!ws_read_file_capped(path, WS_MAX_CONFIG_FILE_SIZE, false,
+							 &contents, &fileSize, NULL))
 	{
 		log_error("Failed to read routes file \"%s\"", path);
 		return false;

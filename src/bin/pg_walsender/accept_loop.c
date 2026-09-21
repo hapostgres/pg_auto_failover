@@ -16,6 +16,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -28,10 +29,12 @@
 #include "file_utils.h"
 #include "framing.h"
 #include "log.h"
+#include "refresher.h"
 #include "repl_command.h"
 #include "routes.h"
 #include "signals.h"
 #include "startup.h"
+#include "ws_util.h"
 
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
@@ -49,47 +52,28 @@
 
 
 /*
- * Hardening limits: a peer that connects and then says nothing must not
- * hold a forked child forever, and a flood of connections must not fork
- * without bound.
+ * Hardening limits: a flood of connections must not fork without bound.
+ * Like the postmaster's own child list, the live children are kept in an
+ * array of pids, reaped in the main loop (never from a signal handler) and
+ * counted from that array.
  */
-#define WS_STARTUP_TIMEOUT_SECONDS 30
 #define WS_MAX_CONNECTIONS 64
 
-static volatile sig_atomic_t activeChildren = 0;
+/* the refresher is restarted at most this often when it keeps dying */
+#define WS_REFRESHER_RESTART_MIN_MS 1000
 
 
 /*
- * reap_children is the SIGCHLD handler: collect every exited child and
- * keep activeChildren accurate so the accept loop can enforce
- * WS_MAX_CONNECTIONS.
+ * auth_timeout_handler is the connection's absolute authentication
+ * deadline: PostgreSQL arms authentication_timeout (STARTUP_PACKET_TIMEOUT
+ * before v14's rework) the same way, for the whole startup packet, TLS
+ * handshake, HBA and password exchange, and its handler simply exits the
+ * backend. Only async-signal-safe calls here: _exit().
  */
 static void
-reap_children(int signo)
+auth_timeout_handler(int signo)
 {
-	int savedErrno = errno;
-
-	while (waitpid(-1, NULL, WNOHANG) > 0)
-	{
-		if (activeChildren > 0)
-		{
-			activeChildren--;
-		}
-	}
-
-	errno = savedErrno;
-}
-
-
-static void
-set_receive_timeout(int sock, int seconds)
-{
-	struct timeval tv = { seconds, 0 };
-
-	if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0)
-	{
-		log_warn("Failed to set SO_RCVTIMEO on the client socket: %m");
-	}
+	_exit(1);
 }
 
 
@@ -150,8 +134,21 @@ handle_connection(int clientSock, const WsServerConfig *config)
 {
 	WsStartupParams params;
 
-	/* startup and auth must complete promptly; cleared once authenticated */
-	set_receive_timeout(clientSock, WS_STARTUP_TIMEOUT_SECONDS);
+	/*
+	 * ABSOLUTE deadline on everything up to authentication success:
+	 * startup packet, SSLRequest/TLS handshake, HBA (DNS included), SCRAM.
+	 * Not a per-read idle timeout, which a slow-loris client keeps
+	 * resetting. Cancelled right after authentication succeeded.
+	 */
+	struct sigaction alarmAction;
+
+	memset(&alarmAction, 0, sizeof(alarmAction));
+	alarmAction.sa_handler = auth_timeout_handler;
+	sigemptyset(&alarmAction.sa_mask);
+	sigaction(SIGALRM, &alarmAction, NULL);
+
+	ws_auth_deadline_set(config->authTimeout);
+	alarm((unsigned int) config->authTimeout);
 
 	if (!ws_startup_negotiate(clientSock, &params))
 	{
@@ -200,12 +197,15 @@ handle_connection(int clientSock, const WsServerConfig *config)
 		return;
 	}
 
-	set_receive_timeout(clientSock, 0);
+	alarm(0);
+	ws_auth_deadline_clear();
 
 	char title[256];
+	char safeKey[NAMEDATALEN + 24];
 
-	sformat(title, sizeof(title), "pg_autoctl: walsender %s",
-			route != NULL ? route->key : routeKey);
+	ws_sanitize_for_log(route != NULL ? route->key : routeKey,
+						safeKey, sizeof(safeKey));
+	sformat(title, sizeof(title), "pg_autoctl: walsender %s", safeKey);
 	set_ps_title(title);
 
 	if (!ws_send_authentication_ok(clientSock) ||
@@ -228,7 +228,8 @@ handle_connection(int clientSock, const WsServerConfig *config)
 		char *payload = NULL;
 		int32_t payloadLen = 0;
 
-		if (!ws_read_message(clientSock, &type, &payload, &payloadLen))
+		if (!ws_read_message(clientSock, &type, &payload, &payloadLen,
+							 WS_MAX_COMMAND_MESSAGE_LEN))
 		{
 			free(payload);
 			break;
@@ -265,7 +266,13 @@ handle_connection(int clientSock, const WsServerConfig *config)
 
 		free(payload);
 
-		if (!ws_send_ready_for_query(clientSock))
+		/*
+		 * A command that failed inside COPY/streaming cannot resynchronize
+		 * the protocol: like PostgreSQL's walsender (a FATAL there), end the
+		 * connection instead of announcing ReadyForQuery.
+		 */
+		if (ws_connection_close_after_command ||
+			!ws_send_ready_for_query(clientSock))
 		{
 			break;
 		}
@@ -273,6 +280,101 @@ handle_connection(int clientSock, const WsServerConfig *config)
 
 	routes_free(routes);
 	close(clientSock);
+}
+
+
+static void
+remove_child(pid_t *children, int *count, pid_t pid)
+{
+	for (int i = 0; i < *count; i++)
+	{
+		if (children[i] == pid)
+		{
+			children[i] = children[--(*count)];
+			return;
+		}
+	}
+}
+
+
+/*
+ * reap_children collects every exited child, in normal (main loop) context
+ * like the postmaster's own CleanupBackend(): connection children leave the
+ * array, and the refresher is noted as gone so it gets restarted.
+ */
+static void
+reap_children(pid_t *children, int *count, pid_t *refresherPid)
+{
+	int status;
+	pid_t pid;
+
+	while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
+	{
+		if (pid == *refresherPid)
+		{
+			log_warn("The nodes list refresher (pid %d) exited (status %d), "
+					 "restarting it", (int) pid, status);
+			*refresherPid = 0;
+		}
+		else
+		{
+			remove_child(children, count, pid);
+		}
+	}
+}
+
+
+/*
+ * start_refresher forks the single writer of the nodes lists, only once a
+ * monitor URI exists to talk to the monitor with.
+ */
+static pid_t
+start_refresher(const WsServerConfig *config, int refreshSock, int listenSock)
+{
+	fflush(stdout);
+	fflush(stderr);
+
+	pid_t pid = fork();
+
+	if (pid == -1)
+	{
+		log_error("fork() of the nodes list refresher failed: %m");
+		return 0;
+	}
+
+	if (pid == 0)
+	{
+		close(listenSock);
+		ws_refresher_main(refreshSock, config->routesPath,
+						  config->auth.monitorUriPath);
+	}
+
+	return pid;
+}
+
+
+static void
+stop_refresher(pid_t refresherPid)
+{
+	if (refresherPid <= 0)
+	{
+		return;
+	}
+
+	kill(refresherPid, SIGTERM);
+
+	for (int i = 0; i < 100; i++)
+	{
+		if (waitpid(refresherPid, NULL, WNOHANG) != 0)
+		{
+			return;
+		}
+
+		usleep(50 * 1000);
+	}
+
+	kill(refresherPid, SIGKILL);
+	(void) waitpid(refresherPid, NULL, 0);
 }
 
 
@@ -287,15 +389,30 @@ ws_accept_loop(const WsServerConfig *config)
 	}
 
 	set_signal_handlers(false);
+	signal(SIGPIPE, SIG_IGN);
 
-	/* reap children and track how many are alive, see reap_children() */
-	struct sigaction reapAction;
+	/*
+	 * The refresher's datagram socket is created by this parent BEFORE any
+	 * fork, so a restarted refresher gets the very same socket (requests
+	 * queue meanwhile) and the connection children only know its path.
+	 */
+	int refreshSock = -1;
 
-	memset(&reapAction, 0, sizeof(reapAction));
-	reapAction.sa_handler = reap_children;
-	sigemptyset(&reapAction.sa_mask);
-	reapAction.sa_flags = SA_RESTART | SA_NOCLDSTOP;
-	sigaction(SIGCHLD, &reapAction, NULL);
+	if (config->auth.refreshSockPath[0] != '\0')
+	{
+		refreshSock = ws_refresh_socket_create(config->auth.refreshSockPath);
+
+		if (refreshSock < 0)
+		{
+			log_warn("Running without a nodes list refresher: the \"monitor\" "
+					 "HBA address will rely on the list as it is");
+		}
+	}
+
+	pid_t children[WS_MAX_CONNECTIONS];
+	int childCount = 0;
+	pid_t refresherPid = 0;
+	int64_t nextRefresherStartMs = 0;
 
 	log_info("pg_walsender listening on port %d%s%s",
 			 config->port,
@@ -304,12 +421,24 @@ ws_accept_loop(const WsServerConfig *config)
 
 	while (!asked_to_stop && !asked_to_stop_fast)
 	{
+		reap_children(children, &childCount, &refresherPid);
+
+		if (refreshSock >= 0 && refresherPid == 0 &&
+			ws_monotonic_ms() >= nextRefresherStartMs &&
+			file_exists(config->auth.monitorUriPath))
+		{
+			refresherPid = start_refresher(config, refreshSock, listenSock);
+			nextRefresherStartMs = ws_monotonic_ms() +
+								   WS_REFRESHER_RESTART_MIN_MS;
+		}
+
 		/*
 		 * pqsignal() (signals.c, via postgres_fe.h) installs our handlers
 		 * with SA_RESTART, so a blocking accept() is never interrupted by
 		 * SIGTERM -- it would just keep sleeping through shutdown forever.
-		 * Poll with a short timeout instead, so the loop condition above
-		 * gets re-checked promptly after asked_to_stop is set.
+		 * Poll with a short timeout instead (which is also what bounds the
+		 * delay before an exited child is reaped and counted out), so the
+		 * loop condition above gets re-checked promptly.
 		 */
 		fd_set readSet;
 
@@ -334,8 +463,8 @@ ws_accept_loop(const WsServerConfig *config)
 
 		if (selectRet == 0)
 		{
-			/* timed out, no pending connection -- loop back to the
-			 * asked_to_stop check above */
+			/* timed out, no pending connection -- loop back to reap and to
+			 * the asked_to_stop check above */
 			continue;
 		}
 
@@ -358,24 +487,27 @@ ws_accept_loop(const WsServerConfig *config)
 			continue;
 		}
 
-		if (activeChildren >= WS_MAX_CONNECTIONS)
+		/* children that exited meanwhile must not count against the cap */
+		reap_children(children, &childCount, &refresherPid);
+
+		if (childCount >= WS_MAX_CONNECTIONS)
 		{
 			log_warn("Rejecting a connection: %d connections already open",
-					 (int) activeChildren);
+					 childCount);
 			close(clientSock);
 			continue;
 		}
 
 		(void) fcntl(clientSock, F_SETFD, FD_CLOEXEC);
 
-		activeChildren++;
+		fflush(stdout);
+		fflush(stderr);
 
 		pid_t pid = fork();
 
 		if (pid == -1)
 		{
 			log_error("fork() failed: %m");
-			activeChildren--;
 			close(clientSock);
 			continue;
 		}
@@ -384,19 +516,37 @@ ws_accept_loop(const WsServerConfig *config)
 		{
 			/*
 			 * Child: no exec(), just call straight into the connection
-			 * handler -- matches real Postgres's BackendMain() model.
+			 * handler -- matches real Postgres's BackendMain() model. It
+			 * inherits nothing but the client socket: the listening and
+			 * refresher sockets are closed.
 			 */
 			close(listenSock);
+
+			if (refreshSock >= 0)
+			{
+				close(refreshSock);
+			}
+
 			signal(SIGCHLD, SIG_DFL);
 			handle_connection(clientSock, config);
 			_exit(0);
 		}
+
+		children[childCount++] = pid;
 
 		/* parent: keep accepting; reap_children() collects the child */
 		close(clientSock);
 	}
 
 	close(listenSock);
+	stop_refresher(refresherPid);
+
+	if (refreshSock >= 0)
+	{
+		close(refreshSock);
+		(void) unlink(config->auth.refreshSockPath);
+	}
+
 	log_info("pg_walsender shutting down");
 
 	return true;

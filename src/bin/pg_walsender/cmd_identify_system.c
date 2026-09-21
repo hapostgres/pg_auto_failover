@@ -88,7 +88,7 @@ cmd_identify_system(int sock, const WsRoute *route, const char *dbname)
 
 		if (wal_position_cache_read(route->path, &foundTimeline,
 									xlogpos, sizeof(xlogpos)) ||
-			wal_dir_find_latest(route->path, &foundTimeline,
+			wal_dir_find_latest(route, &foundTimeline,
 								xlogpos, sizeof(xlogpos)))
 		{
 			timeline = (int) foundTimeline;

@@ -24,8 +24,7 @@
 /* startup-packet body larger than this is rejected outright as malformed */
 #define WS_MAX_STARTUP_PACKET_SIZE 10000
 
-/* an ordinary post-startup message body larger than this is rejected */
-#define WS_MAX_MESSAGE_SIZE (64 * 1024 * 1024)
+bool ws_connection_close_after_command = false;
 
 #define SSL_REQUEST_CODE 80877103
 #define GSS_REQUEST_CODE 80877104
@@ -44,6 +43,7 @@ ws_read_bytes(int sock, void *buf, size_t len)
 
 		if (n < 0)
 		{
+			/* EAGAIN/ETIMEDOUT and every other error end the connection */
 			if (errno == EINTR)
 			{
 				continue;
@@ -146,7 +146,8 @@ ws_read_startup_payload(int sock, char **payload, int32_t *payloadLen)
 
 
 bool
-ws_read_message(int sock, char *type, char **payload, int32_t *payloadLen)
+ws_read_message(int sock, char *type, char **payload, int32_t *payloadLen,
+				int32_t maxLen)
 {
 	*payload = NULL;
 	*payloadLen = 0;
@@ -166,10 +167,16 @@ ws_read_message(int sock, char *type, char **payload, int32_t *payloadLen)
 	int32_t len = ((int32_t) lenBuf[0] << 24) | ((int32_t) lenBuf[1] << 16) |
 				  ((int32_t) lenBuf[2] << 8) | (int32_t) lenBuf[3];
 
-	if (len < 4 || len > WS_MAX_MESSAGE_SIZE)
+	/*
+	 * Like pq_getmessage(): the length is checked against the caller's
+	 * maximum BEFORE anything is allocated, and an oversize message is a
+	 * protocol violation that ends the connection.
+	 */
+	if (len < 4 || len - 4 > maxLen)
 	{
-		log_error("Received an invalid message length %d for message type '%c'",
-				  len, *type);
+		log_error("Received an invalid message length %d for a message of "
+				  "type 0x%02x", len, (unsigned char) *type);
+		(void) ws_send_error_response(sock, "08P01", "invalid message length");
 		return false;
 	}
 

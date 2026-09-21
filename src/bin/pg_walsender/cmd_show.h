@@ -12,6 +12,9 @@
 #ifndef WS_CMD_SHOW_H
 #define WS_CMD_SHOW_H
 
-void cmd_show(int sock, const char *name);
+#include "routes.h"
+
+/* SHOW wal_segment_size answers the route's own size ("16MB", "64MB", "1GB") */
+void cmd_show(int sock, const WsRoute *route, const char *name);
 
 #endif /* WS_CMD_SHOW_H */

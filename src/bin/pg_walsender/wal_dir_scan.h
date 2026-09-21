@@ -3,8 +3,8 @@
  *   Finds the newest fully-captured (non-.partial) WAL segment in an
  *   archiver's WAL cache directory and derives its boundary LSNs from the
  *   segment filename alone (standard 24-hex-digit XLogFileName format,
- *   assuming the fixed 16MB default segment size this project's own SHOW
- *   wal_segment_size already reports -- see cmd_show.c).
+ *   using the route's own WAL segment size, see
+ *   ws_route_wal_segment_size()).
  *
  *   This is a segment-boundary approximation, not a real-record-level
  *   position: it doesn't parse WAL contents, just the filename. Good
@@ -23,8 +23,27 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "routes.h"
+
 /*
- * wal_dir_find_latest scans walcacheDir for the highest-numbered complete
+ * ws_route_wal_segment_size: the WAL segment size of the route's cluster,
+ * in bytes, read from "<route path>/archiver-walsegsize" (decimal bytes,
+ * written by the archiver's pg_receivewal child). The file may be absent:
+ * the default, 16777216, applies (as it does for a file that is not a
+ * power of two between 1 MiB and 1 GiB, which is logged). Every segment
+ * number/name/LSN computation and "SHOW wal_segment_size" derive from it.
+ */
+uint64_t ws_route_wal_segment_size(const WsRoute *route);
+
+/*
+ * ws_wal_segment_size_string formats a segment size the way the
+ * wal_segment_size GUC shows it ("16MB", "64MB", "1GB"), which is what
+ * pg_receivewal and pg_basebackup parse (RetrieveWalSegSize).
+ */
+void ws_wal_segment_size_string(uint64_t segSize, char *dest, size_t destSize);
+
+/*
+ * wal_dir_find_latest scans the route's directory for the highest-numbered complete
  * WAL segment (24 hex chars, no ".partial" suffix). On success, returns
  * true with *timeline set and endLsn filled with that segment's end-of-
  * segment LSN (formatted "%X/%08X", matching pg_lsn's own text form) --
@@ -32,14 +51,15 @@
  * captured. Returns false (not an error, *timeline and *endLsn untouched)
  * if the directory has no WAL segments yet.
  */
-bool wal_dir_find_latest(const char *walcacheDir, uint32_t *timeline,
+bool wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 						 char *endLsn, size_t endLsnSize);
 
 /*
  * wal_segment_filename formats a filename the same way real Postgres does
- * (XLogFileName), for a given timeline and 0-based segment number.
+ * (XLogFileName), for a given timeline, 0-based segment number and segment
+ * size.
  */
-void wal_segment_filename(uint32_t timeline, uint64_t segno,
+void wal_segment_filename(uint32_t timeline, uint64_t segno, uint64_t segSize,
 						  char *dest, size_t destSize);
 
 /*

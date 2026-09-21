@@ -22,6 +22,7 @@
 #include "log.h"
 #include "scram.h"
 #include "tls.h"
+#include "ws_util.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
@@ -62,10 +63,11 @@ static bool
 find_verifier(const char *passwdPath, const char *user, ScramVerifier *verifier)
 {
 	char *contents = NULL;
-	long size = 0;
+	size_t size = 0;
 
 	if (passwdPath[0] == '\0' ||
-		!read_file_if_exists(passwdPath, &contents, &size) || contents == NULL)
+		!ws_read_file_capped(passwdPath, WS_MAX_CONFIG_FILE_SIZE, true,
+							 &contents, &size, NULL))
 	{
 		return false;
 	}
@@ -136,7 +138,10 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 
 	if (!find_verifier(authConfig->passwdPath, user, &verifier))
 	{
-		log_warn("No SCRAM verifier for user \"%s\" in \"%s\"", user,
+		char safeUser[NAMEDATALEN + 8];
+
+		ws_sanitize_for_log(user, safeUser, sizeof(safeUser));
+		log_warn("No SCRAM verifier for user \"%s\" in \"%s\"", safeUser,
 				 authConfig->passwdPath);
 
 		if (!scram_mock_verifier(user, &verifier))
@@ -183,7 +188,8 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 	int32_t payloadLen = 0;
 
 	/* SASLInitialResponse: mechanism\0 int32 length, client-first-message */
-	if (!ws_read_message(sock, &type, &payload, &payloadLen) || type != 'p')
+	if (!ws_read_message(sock, &type, &payload, &payloadLen,
+						 WS_MAX_AUTH_MESSAGE_LEN) || type != 'p')
 	{
 		free(payload);
 		return false;
@@ -243,7 +249,8 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 	/* SASLResponse: the client-final-message, raw */
 	payload = NULL;
 
-	if (!ws_read_message(sock, &type, &payload, &payloadLen) || type != 'p' ||
+	if (!ws_read_message(sock, &type, &payload, &payloadLen,
+						 WS_MAX_AUTH_MESSAGE_LEN) || type != 'p' ||
 		payloadLen <= 0 || payloadLen >= SCRAM_MAX_MESSAGE_LEN)
 	{
 		free(payload);
@@ -261,7 +268,10 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 	if (!scram_server_final(&state, &verifier, clientFinal,
 							serverFinal, sizeof(serverFinal)) || doomed)
 	{
-		log_warn("SCRAM authentication failed for user \"%s\"", user);
+		char safeUser[NAMEDATALEN + 8];
+
+		ws_sanitize_for_log(user, safeUser, sizeof(safeUser));
+		log_warn("SCRAM authentication failed for user \"%s\"", safeUser);
 		ws_send_error_response(sock, "28P01",
 							   "password authentication failed");
 		return false;
@@ -282,22 +292,21 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 	if (authConfig->hbaPath[0] == '\0')
 	{
 		/*
-		 * No HBA file configured: manual/standalone testing mode. A real deployment always passes --pgdata (see
-		 * main.c), so this never applies to a pg_autoctl-supervised
-		 * pg_walsender.
+		 * No HBA file configured: the explicit --insecure testing mode
+		 * (main.c refuses to start without --pgdata otherwise), where any
+		 * dbname is accepted without authentication.
 		 */
 		return true;
 	}
 
+	/*
+	 * Authenticate BEFORE revealing anything, as PostgreSQL does: which
+	 * routes exist is only told to a client that got through the HBA rules
+	 * and the password exchange. An unknown route is looked up as NULL, so
+	 * the "monitor" address matches nothing for it, and is reported (3D000,
+	 * "database does not exist") only after a successful authentication.
+	 */
 	const WsRoute *route = routes_find(routes, routeCount, routeKey);
-
-	if (route == NULL)
-	{
-		log_warn("Rejecting connection for unknown route \"%s\"", routeKey);
-		ws_send_error_response(sock, "3D000",
-							   "unknown formation/group requested as dbname");
-		return false;
-	}
 
 	char peerIP[NI_MAXHOST];
 
@@ -307,10 +316,17 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 		return false;
 	}
 
+	char safeUser[NAMEDATALEN + 8];
+	char safeRoute[NAMEDATALEN + 24];
+
+	ws_sanitize_for_log(params->user, safeUser, sizeof(safeUser));
+	ws_sanitize_for_log(routeKey, safeRoute, sizeof(safeRoute));
+
 	WsAuthMethod method = WS_AUTH_REJECT;
 
-	if (!hba_lookup(authConfig->hbaPath, route->path, authConfig->monitorUriPath,
-					route->key, params->user, peerIP, ws_tls_active(), &method))
+	if (!hba_lookup(authConfig->hbaPath, route != NULL ? route->path : NULL,
+					authConfig->monitorUriPath, authConfig->refreshSockPath,
+					routeKey, params->user, peerIP, ws_tls_active(), &method))
 	{
 		ws_send_error_response(sock, "28000", "authentication is unavailable");
 		return false;
@@ -320,8 +336,7 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 	{
 		case WS_AUTH_TRUST:
 		{
-			*foundRoute = route;
-			return true;
+			break;
 		}
 
 		case WS_AUTH_SCRAM:
@@ -331,24 +346,41 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 				return false;
 			}
 
-			*foundRoute = route;
-			return true;
+			break;
 		}
 
 		case WS_AUTH_REJECT:
 		default:
 		{
 			log_warn("Rejecting connection from %s as user \"%s\" for route "
-					 "\"%s\": no matching HBA entry", peerIP, params->user,
-					 route->key);
+					 "\"%s\": no matching HBA entry", peerIP, safeUser,
+					 safeRoute);
 
+			/* one generic message: it names the peer and the user, both
+			 * known to the client already, and never the route */
 			char message[256];
 
 			sformat(message, sizeof(message),
-					"no pg_walsender HBA entry for host \"%s\", user \"%s\", "
-					"route \"%s\"", peerIP, params->user, route->key);
+					"no pg_walsender HBA entry for host \"%s\", user \"%s\"",
+					peerIP, safeUser);
 			ws_send_error_response(sock, "28000", message);
 			return false;
 		}
 	}
+
+	if (route == NULL)
+	{
+		log_warn("Authenticated connection for unknown route \"%s\"",
+				 safeRoute);
+
+		char message[256];
+
+		sformat(message, sizeof(message), "database \"%s\" does not exist",
+				safeRoute);
+		ws_send_error_response(sock, "3D000", message);
+		return false;
+	}
+
+	*foundRoute = route;
+	return true;
 }

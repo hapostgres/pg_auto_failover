@@ -961,6 +961,12 @@ ipaddrFindHostnamesFromAddress(const char *ipaddr,
 		return 0;
 	}
 
+	/* res_query returns the full answer size, even when it was truncated */
+	if (answerLen > (int) sizeof(answer))
+	{
+		answerLen = (int) sizeof(answer);
+	}
+
 	ns_msg msg;
 
 	if (ns_initparse(answer, answerLen, &msg) != 0)

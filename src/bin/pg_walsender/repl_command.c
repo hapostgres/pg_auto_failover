@@ -52,42 +52,72 @@ rtrim(char *s)
 }
 
 
+/*
+ * match_keyword: does p start with the command keyword, as a whole word?
+ * "IDENTIFY_SYSTEMxyz" must not be taken for IDENTIFY_SYSTEM. On a match
+ * *rest points right after the keyword.
+ */
+static bool
+match_keyword(const char *p, const char *keyword, const char **rest)
+{
+	size_t len = strlen(keyword);
+
+	if (strncasecmp(p, keyword, len) != 0)
+	{
+		return false;
+	}
+
+	char next = p[len];
+
+	if (next != '\0' && !isspace((unsigned char) next) && next != ';' &&
+		next != '(')
+	{
+		return false;
+	}
+
+	*rest = p + len;
+
+	return true;
+}
+
+
 bool
 repl_command_parse(const char *query, WsCommand *cmd)
 {
 	memset(cmd, 0, sizeof(WsCommand));
 
 	const char *p = skip_whitespace(query);
+	const char *rest = NULL;
 
-	if (strncasecmp(p, "IDENTIFY_SYSTEM", strlen("IDENTIFY_SYSTEM")) == 0)
+	if (match_keyword(p, "IDENTIFY_SYSTEM", &rest))
 	{
 		cmd->type = WS_CMD_IDENTIFY_SYSTEM;
 		return true;
 	}
 
-	if (strncasecmp(p, "SHOW", strlen("SHOW")) == 0 && isspace((unsigned char) p[4]))
+	if (match_keyword(p, "SHOW", &rest))
 	{
-		p = skip_whitespace(p + 4);
+		p = skip_whitespace(rest);
 		strlcpy(cmd->showName, p, sizeof(cmd->showName));
 		rtrim(cmd->showName);
 		cmd->type = WS_CMD_SHOW;
 		return true;
 	}
 
-	if (strncasecmp(p, "BASE_BACKUP", strlen("BASE_BACKUP")) == 0)
+	if (match_keyword(p, "BASE_BACKUP", &rest))
 	{
-		p = skip_whitespace(p + strlen("BASE_BACKUP"));
+		p = skip_whitespace(rest);
 		strlcpy(cmd->rawOptions, p, sizeof(cmd->rawOptions));
 		rtrim(cmd->rawOptions);
 		cmd->type = WS_CMD_BASE_BACKUP;
 		return true;
 	}
 
-	if (strncasecmp(p, "TIMELINE_HISTORY", strlen("TIMELINE_HISTORY")) == 0)
+	if (match_keyword(p, "TIMELINE_HISTORY", &rest))
 	{
-		p = skip_whitespace(p + strlen("TIMELINE_HISTORY"));
+		p = skip_whitespace(rest);
 
-		if (!stringToInt(p, &(cmd->timeline)))
+		if (!stringToInt(p, &(cmd->timeline)) || cmd->timeline <= 0)
 		{
 			return false;
 		}
@@ -96,20 +126,27 @@ repl_command_parse(const char *query, WsCommand *cmd)
 		return true;
 	}
 
-	if (strncasecmp(p, "CREATE_REPLICATION_SLOT",
-					strlen("CREATE_REPLICATION_SLOT")) == 0)
+	if (match_keyword(p, "CREATE_REPLICATION_SLOT", &rest))
 	{
-		p = skip_whitespace(p + strlen("CREATE_REPLICATION_SLOT"));
+		p = skip_whitespace(rest);
 		strlcpy(cmd->rawArgs, p, sizeof(cmd->rawArgs));
 		rtrim(cmd->rawArgs);
 		cmd->type = WS_CMD_CREATE_REPLICATION_SLOT;
 		return true;
 	}
 
-	if (strncasecmp(p, "READ_REPLICATION_SLOT",
-					strlen("READ_REPLICATION_SLOT")) == 0)
+	if (match_keyword(p, "DROP_REPLICATION_SLOT", &rest))
 	{
-		p = skip_whitespace(p + strlen("READ_REPLICATION_SLOT"));
+		p = skip_whitespace(rest);
+		strlcpy(cmd->rawArgs, p, sizeof(cmd->rawArgs));
+		rtrim(cmd->rawArgs);
+		cmd->type = WS_CMD_DROP_REPLICATION_SLOT;
+		return true;
+	}
+
+	if (match_keyword(p, "READ_REPLICATION_SLOT", &rest))
+	{
+		p = skip_whitespace(rest);
 		strlcpy(cmd->rawArgs, p, sizeof(cmd->rawArgs));
 		rtrim(cmd->rawArgs);
 		cmd->type = WS_CMD_READ_REPLICATION_SLOT;
@@ -120,9 +157,9 @@ repl_command_parse(const char *query, WsCommand *cmd)
 	 * FETCH_FILE '<name>': not part of PostgreSQL's replication grammar, ours
 	 * (see cmd_fetch_file.h). The name is a single-quoted literal, or bare.
 	 */
-	if (strncasecmp(p, "FETCH_FILE", strlen("FETCH_FILE")) == 0)
+	if (match_keyword(p, "FETCH_FILE", &rest))
 	{
-		p = skip_whitespace(p + strlen("FETCH_FILE"));
+		p = skip_whitespace(rest);
 		strlcpy(cmd->filename, p, sizeof(cmd->filename));
 		rtrim(cmd->filename);
 
@@ -138,9 +175,9 @@ repl_command_parse(const char *query, WsCommand *cmd)
 		return true;
 	}
 
-	if (strncasecmp(p, "START_REPLICATION", strlen("START_REPLICATION")) == 0)
+	if (match_keyword(p, "START_REPLICATION", &rest))
 	{
-		p = skip_whitespace(p + strlen("START_REPLICATION"));
+		p = skip_whitespace(rest);
 		strlcpy(cmd->rawArgs, p, sizeof(cmd->rawArgs));
 		rtrim(cmd->rawArgs);
 		cmd->type = WS_CMD_START_REPLICATION;
@@ -166,7 +203,7 @@ ws_dispatch_command(int sock, const WsCommand *cmd,
 
 		case WS_CMD_SHOW:
 		{
-			cmd_show(sock, cmd->showName);
+			cmd_show(sock, route, cmd->showName);
 			break;
 		}
 
@@ -191,6 +228,12 @@ ws_dispatch_command(int sock, const WsCommand *cmd,
 		case WS_CMD_READ_REPLICATION_SLOT:
 		{
 			cmd_read_replication_slot(sock, route, cmd->rawArgs);
+			break;
+		}
+
+		case WS_CMD_DROP_REPLICATION_SLOT:
+		{
+			cmd_drop_replication_slot(sock, route, cmd->rawArgs);
 			break;
 		}
 

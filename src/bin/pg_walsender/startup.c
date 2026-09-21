@@ -109,6 +109,8 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 		if ((code >> 16) != 3)
 		{
 			log_error("Unsupported startup protocol version 0x%08x", code);
+			(void) ws_send_error_response(sock, "0A000",
+										  "unsupported frontend protocol");
 			free(payload);
 			return false;
 		}
@@ -206,6 +208,20 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 		 * key -- callers that require a real "<formation>/<group>" key
 		 * still get a clean "unknown route" ErrorResponse from auth.c.
 		 */
+
+		/*
+		 * Like PostgreSQL's ProcessStartupPacket(): a startup packet
+		 * without a user name is refused right here.
+		 */
+		if (params->user[0] == '\0')
+		{
+			log_error("Received a startup packet without a user name");
+			(void) ws_send_error_response(sock, "28000",
+										  "no PostgreSQL user name specified "
+										  "in startup packet");
+			return false;
+		}
+
 		if (params->database[0] == '\0')
 		{
 			strlcpy(params->database, params->user, sizeof(params->database));
