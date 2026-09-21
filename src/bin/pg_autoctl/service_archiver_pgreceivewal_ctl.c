@@ -93,6 +93,9 @@ static char archiverWalNotifySocketPath[MAXPGPATH] = { 0 };
  */
 static char archiverSystemIdPath[MAXPGPATH] = { 0 };
 
+/* the vendored pg_receivewal's own WAL segment size (streamutil.c) */
+extern uint32 WalSegSz;
+
 
 /*
  * pgaf_hook_wal_segment_closed is pg_receivewal's own WalSegmentClosedHook
@@ -125,17 +128,24 @@ pgaf_hook_wal_segment_closed(XLogRecPtr xlogpos, uint32 timeline)
 	 * The completed segment's own filename -- real Postgres's own
 	 * XLogFileName() (access/xlog_internal.h), the same helper pg_
 	 * receivewal.c itself uses internally, rather than hand-rolled segno
-	 * arithmetic duplicating it. 16MB is this project's own fixed WAL
-	 * segment size assumption, matching ARCHIVER_WAL_SEGMENT_SIZE
-	 * (service_archiver.c) and pg_receivewal's own lack of a
-	 * --wal-segsize flag here (only relevant for initdb-time sizing,
-	 * never varied per this project's own captures).
+	 * arithmetic duplicating it. The segment size is the one this very
+	 * pg_receivewal learned from the primary (RetrieveWalSegSize(), the
+	 * vendored streamutil.c global WalSegSz).
 	 */
 	char walFileName[MAXPGPATH] = { 0 };
 	XLogSegNo segno;
+	int walSegSize = (int) WalSegSz;
 
-	XLByteToSeg(xlogpos, segno, (1024 * 1024 * 16));
-	XLogFileName(walFileName, timeline, segno, (1024 * 1024 * 16));
+	/*
+	 * xlogpos is the just-completed segment's END boundary, that is the
+	 * first byte of the NEXT segment: the segment that was completed is the
+	 * one containing the byte before it (XLByteToPrevSeg, as upstream's own
+	 * close-of-segment code uses). Naming XLByteToSeg(xlogpos) instead would
+	 * report segment N+1 the moment N closes -- confirming to the primary's
+	 * archive_command a segment the archiver does not have yet.
+	 */
+	XLByteToPrevSeg(xlogpos, segno, walSegSize);
+	XLogFileName(walFileName, timeline, segno, walSegSize);
 
 	(void) archiver_wal_notify_send_segment(archiverWalNotifySocketPath,
 											walFileName, lsn, systemIdentifier);
@@ -201,7 +211,7 @@ static bool ensure_pgreceivewal_matches(KeeperConfig *config,
 static bool start_pgreceivewal_child(KeeperConfig *config,
 									 ArchiverPgReceivewalDesiredState *desired,
 									 pid_t *childPid);
-static bool stop_pgreceivewal_child(pid_t *childPid);
+static bool stop_pgreceivewal_child(pid_t *childPid, int timeoutMs);
 static bool wait_for_primary_and_slot_ready(const char *primaryConnInfo,
 											const char *slotName);
 
@@ -326,7 +336,7 @@ start_pgreceivewal_child(KeeperConfig *config,
 								  PG_AUTOCTL_REPLICA_USERNAME,
 								  NULL,
 								  config->replication_password,
-								  config->name,
+								  desired->slot,
 								  config->pgSetup.ssl,
 								  false))
 	{
@@ -360,7 +370,7 @@ start_pgreceivewal_child(KeeperConfig *config,
 
 	if (pid == 0)
 	{
-		char *args[10];
+		char *args[12];
 		int argsIndex = 0;
 
 		args[argsIndex++] = "pg_receivewal";
@@ -369,7 +379,14 @@ start_pgreceivewal_child(KeeperConfig *config,
 		args[argsIndex++] = primaryConnInfo;
 		args[argsIndex++] = "-D";
 		args[argsIndex++] = config->pgSetup.pgdata;
-		args[argsIndex++] = "--no-sync";
+
+		/*
+		 * Synchronous: fsync each write and send flush feedback at once, so
+		 * flush_lsn advances continuously and a synchronous_commit primary
+		 * with this archiver as a quorum member doesn't stall until the end
+		 * of a segment.
+		 */
+		args[argsIndex++] = "--synchronous";
 		args[argsIndex++] = "-S";
 		args[argsIndex++] = desired->slot;
 		args[argsIndex] = NULL;
@@ -388,6 +405,12 @@ start_pgreceivewal_child(KeeperConfig *config,
 		 * enough to reset all of getopt_long()'s internal state).
 		 */
 		optind = 0;
+
+		/*
+		 * Both SIGINT and SIGTERM must make pg_receivewal stop: this child
+		 * inherited pg_autoctl's own handlers, which merely set a flag.
+		 */
+		pgaf_install_stop_handlers();
 
 		int rc = pg_receivewal_main(argsIndex, args);
 
@@ -416,7 +439,7 @@ start_pgreceivewal_child(KeeperConfig *config,
  * a pid that is about to become invalid.
  */
 static bool
-stop_pgreceivewal_child(pid_t *childPid)
+stop_pgreceivewal_child(pid_t *childPid, int timeoutMs)
 {
 	if (*childPid <= 0)
 	{
@@ -425,19 +448,40 @@ stop_pgreceivewal_child(pid_t *childPid)
 
 	log_info("Stopping pg_receivewal (pid %d)", *childPid);
 
-	if (kill(*childPid, SIGTERM) != 0 && errno != ESRCH)
+	/* SIGINT: what upstream pg_receivewal documents as its clean stop */
+	if (kill(*childPid, SIGINT) != 0 && errno != ESRCH)
 	{
-		log_error("Failed to send SIGTERM to pg_receivewal (pid %d): %m",
+		log_error("Failed to send SIGINT to pg_receivewal (pid %d): %m",
 				  *childPid);
-		return false;
 	}
 
 	int status = 0;
+	bool reaped = false;
 
-	if (waitpid(*childPid, &status, 0) == -1 && errno != ECHILD)
+	for (int waited = 0; waited < timeoutMs; waited += 100)
 	{
-		log_error("Failed to wait for pg_receivewal (pid %d) to stop: %m",
-				  *childPid);
+		pid_t ret = waitpid(*childPid, &status, WNOHANG);
+
+		if (ret == *childPid || (ret == -1 && errno != EINTR))
+		{
+			reaped = true;
+			break;
+		}
+
+		pg_usleep(100 * 1000);
+	}
+
+	if (!reaped)
+	{
+		log_warn("pg_receivewal (pid %d) did not stop within %dms, "
+				 "sending SIGKILL", *childPid, timeoutMs);
+
+		(void) kill(*childPid, SIGKILL);
+
+		while (waitpid(*childPid, &status, 0) == -1 && errno == EINTR)
+		{
+			/* retry */
+		}
 	}
 
 	*childPid = -1;
@@ -489,7 +533,7 @@ ensure_pgreceivewal_matches(KeeperConfig *config,
 
 	if (childAlive && (!desired->running || targetChanged))
 	{
-		if (!stop_pgreceivewal_child(childPid))
+		if (!stop_pgreceivewal_child(childPid, 10000))
 		{
 			return false;
 		}
@@ -531,11 +575,14 @@ service_archiver_pgreceivewal_ctl_loop(KeeperConfig *config)
 	pid_t childPid = -1;
 	bool loggedFirstRead = false;
 
+	/* a previous controller may have died leaving its pg_receivewal behind */
+	(void) archiver_pgreceivewal_stop_stale_child(config);
+
 	for (;;)
 	{
 		if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
 		{
-			(void) stop_pgreceivewal_child(&childPid);
+			(void) stop_pgreceivewal_child(&childPid, 3000);
 			exit(EXIT_CODE_QUIT);
 		}
 

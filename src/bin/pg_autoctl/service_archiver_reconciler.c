@@ -67,6 +67,7 @@
 #include "monitor.h"
 #include "scram.h"
 #include "service_archiver_pgreceivewal_ctl.h"
+#include "service_archiver_pgreceivewal_state.h"
 #include "service_archiver_run.h"
 #include "service_archiver_wal_scanner.h"
 #include "signals.h"
@@ -240,17 +241,27 @@ archiver_reconciler_cleanup_stale_children(Keeper *templateKeeper)
 			continue;
 		}
 
-		if (kill((pid_t) pid, 0) == 0)
+		/*
+		 * Never signal on a bare pid: it may have been reused by an
+		 * unrelated process since the tracking file was written.
+		 */
+		if (!archiver_pid_is_ours((pid_t) pid, "pg_autoctl", path))
 		{
-			log_info("Stopping leftover archiver capture process %d for "
-					 "\"%s\"/%d from a previous reconciler instance",
-					 pid, formation, groupId);
-
-			if (kill((pid_t) pid, SIGTERM) != 0)
-			{
-				log_warn("Failed to signal leftover process %d: %m", pid);
-			}
+			log_debug("Ignoring stale tracking entry %d for \"%s\"/%d: "
+					  "not a pg_autoctl process of ours",
+					  pid, formation, groupId);
+			continue;
 		}
+
+		log_info("Stopping leftover archiver process %d for "
+				 "\"%s\"/%d from a previous reconciler instance",
+				 pid, formation, groupId);
+
+		/*
+		 * SIGTERM lets the process run its own shutdown (a controller stops
+		 * its pg_receivewal child); bounded wait, then SIGKILL.
+		 */
+		archiver_stop_stale_pid((pid_t) pid, SIGTERM, 10000);
 	}
 
 	free(contents);
@@ -490,7 +501,29 @@ build_membership_keeper(Keeper *templateKeeper, ArchiverMembership *membership,
 	 * archiver restart) must be left alone rather than clobbered back to
 	 * this tick's snapshot of reported/goal state.
 	 */
-	if (!file_exists(membershipKeeper->config.pathnames.state))
+	bool initState = !file_exists(membershipKeeper->config.pathnames.state);
+
+	/*
+	 * A state file left by an earlier attachment of this same (formation,
+	 * group) -- the archiver was detached ("archiver formation remove") and
+	 * attached again -- names a node row the monitor has since deleted: a
+	 * re-attachment is a brand new node id. Keep the file across an archiver
+	 * restart (same node id), start over when the membership's node changed,
+	 * otherwise the capture service would report for a node that no longer
+	 * exists ("couldn't find node with nodeid N") forever.
+	 */
+	if (!initState && keeper_load_state(membershipKeeper) &&
+		membershipKeeper->state.current_node_id != membership->nodeId)
+	{
+		log_info("Archiver membership \"%s\"/%d is now node %lld (was node "
+				 "%lld): starting from a fresh state",
+				 membership->formation, membership->groupId,
+				 (long long) membership->nodeId,
+				 (long long) membershipKeeper->state.current_node_id);
+		initState = true;
+	}
+
+	if (initState)
 	{
 		keeper_state_init(&(membershipKeeper->state));
 		membershipKeeper->state.current_node_id = membership->nodeId;
@@ -867,8 +900,16 @@ archiver_reconciler_tick(Supervisor *supervisor, void *context)
 		{
 			ArchiverMembership *membership = &(memberships.memberships[j]);
 
+			/*
+			 * Same (formation, group) but another node id: the archiver was
+			 * detached and attached again between two ticks. The running
+			 * service reports for a node row that no longer exists, so it is
+			 * not "still a member": stop it here, the next tick starts a
+			 * fresh one (build_membership_keeper() resets the stale state).
+			 */
 			if (streq(membershipKeeper->config.formation, membership->formation) &&
-				membershipKeeper->config.groupId == membership->groupId)
+				membershipKeeper->config.groupId == membership->groupId &&
+				membershipKeeper->state.current_node_id == membership->nodeId)
 			{
 				stillMember = true;
 				break;

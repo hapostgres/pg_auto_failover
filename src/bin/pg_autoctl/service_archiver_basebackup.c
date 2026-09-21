@@ -76,6 +76,7 @@
 #include "service_archiver_basebackup.h"
 
 #include "archiver_escape.h"
+#include "archiver_systemid.h"
 #include "defaults.h"
 #include "file_utils.h"
 #include "log.h"
@@ -83,6 +84,7 @@
 #include "pgctl.h"
 #include "pgsql.h"
 #include "runprogram.h"
+#include "service_archiver_pgreceivewal_state.h"
 #include "signals.h"
 #include "string_utils.h"
 
@@ -696,6 +698,149 @@ basebackup_clear_latest_pointer_if_matches(KeeperConfig *config,
 
 
 /*
+ * backup_start_segno derives the WAL segment number a retained base backup
+ * starts from (backup_label's START WAL LOCATION), the oldest segment a
+ * restore from it can need.
+ */
+static bool
+backup_start_segno(const char *backupDir, uint64_t segsize, uint64_t *segno)
+{
+	char lsn[64] = { 0 };
+	int timeline = 0;
+	unsigned int hi = 0;
+	unsigned int lo = 0;
+
+	if (!read_basebackup_label(backupDir, lsn, sizeof(lsn), &timeline) ||
+		sscanf(lsn, "%X/%X", &hi, &lo) != 2) /* IGNORE-BANNED */
+	{
+		return false;
+	}
+
+	*segno = ((((uint64_t) hi) << 32) | lo) / segsize;
+
+	return true;
+}
+
+
+/*
+ * prune_local_wal_cache removes, from this membership's own WAL cache
+ * directory, every completed segment file (and stale .partial) strictly
+ * older than the start segment of the oldest RETAINED complete base
+ * backup: nothing older can ever be needed to restore any retained backup.
+ * Timeline history files are kept. Never deletes anything when no backup
+ * is retained, or when a retained backup's start segment can't be
+ * determined. pruned (may be NULL) flags entries of backups that have just
+ * been deleted. Idempotent, safe to run at startup. The floor is persisted
+ * first so the WAL scanner never re-reports what is about to disappear.
+ */
+static void
+prune_local_wal_cache(KeeperConfig *config, BasebackupInfoArray *backups,
+					  const bool *pruned)
+{
+	const char *walcacheDir = config->pgSetup.pgdata;
+	uint64_t segsize = archiver_walsegsize_read(walcacheDir);
+	uint64_t floorSegno = 0;
+	bool haveRetained = false;
+
+	for (int i = 0; i < backups->count; i++)
+	{
+		if (pruned != NULL && pruned[i])
+		{
+			continue;
+		}
+
+		uint64_t segno = 0;
+
+		if (!backup_start_segno(backups->backups[i].storageLocation,
+								segsize, &segno))
+		{
+			log_debug("Cannot determine the start segment of base backup "
+					  "\"%s\", not pruning the local WAL cache",
+					  backups->backups[i].label);
+			return;
+		}
+
+		if (!haveRetained || segno < floorSegno)
+		{
+			floorSegno = segno;
+		}
+
+		haveRetained = true;
+	}
+
+	if (!haveRetained)
+	{
+		return;
+	}
+
+	(void) archiver_wal_floor_write(walcacheDir, floorSegno);
+
+	DIR *dir = opendir(walcacheDir);
+
+	if (dir == NULL)
+	{
+		return;
+	}
+
+	/* first pass: newest segno present, so a .partial for it is never removed */
+	uint64_t newestSegno = 0;
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		if (strlen(entry->d_name) >= 24 && archiver_wal_name_is_hex24(entry->d_name))
+		{
+			uint64_t segno = archiver_wal_name_segno(entry->d_name, segsize);
+
+			newestSegno = Max(newestSegno, segno);
+		}
+	}
+
+	rewinddir(dir);
+
+	int removed = 0;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		size_t len = strlen(entry->d_name);
+		bool isSegment = len == 24 && archiver_wal_name_is_hex24(entry->d_name);
+		bool isPartial = len == 32 && archiver_wal_name_is_hex24(entry->d_name) &&
+						 streq(entry->d_name + 24, ".partial");
+
+		if (!isSegment && !isPartial)
+		{
+			continue;
+		}
+
+		uint64_t segno = archiver_wal_name_segno(entry->d_name, segsize);
+
+		if (segno >= floorSegno || (isPartial && segno >= newestSegno))
+		{
+			continue;
+		}
+
+		char path[MAXPGPATH] = { 0 };
+
+		sformat(path, sizeof(path), "%s/%s", walcacheDir, entry->d_name);
+
+		if (unlink(path) == 0)
+		{
+			removed++;
+		}
+	}
+
+	closedir(dir);
+
+	if (removed > 0)
+	{
+		log_info("Removed %d WAL file(s) older than segment %" PRIu64
+				 " from the local WAL cache \"%s\"",
+				 removed, floorSegno, walcacheDir);
+	}
+}
+
+
+/*
  * apply_basebackup_retention lists every complete base backup for this
  * group (newest first, list_basebackups()'s own ordering) and prunes
  * whatever policy says shouldn't survive: anything beyond the newest
@@ -731,8 +876,9 @@ apply_basebackup_retention(Keeper *keeper, BasebackupPolicy *policy)
 
 	time_t now = time(NULL);
 	bool success = true;
+	bool pruned[BASEBACKUP_ARRAY_MAX_COUNT] = { 0 };
 
-	for (int i = 0; i < backups.count; i++)
+	for (int i = 0; i < backups.count && i < BASEBACKUP_ARRAY_MAX_COUNT; i++)
 	{
 		BasebackupInfo *backup = &(backups.backups[i]);
 
@@ -768,8 +914,13 @@ apply_basebackup_retention(Keeper *keeper, BasebackupPolicy *policy)
 															 "to the monitor, will retry on the next cycle",
 					 backup->basebackupId);
 			success = false;
+			continue;
 		}
+
+		pruned[i] = true;
 	}
+
+	(void) prune_local_wal_cache(config, &backups, pruned);
 
 	return success;
 }
@@ -949,6 +1100,52 @@ write_replay_recovery_config(const char *stagingDir, const char *walcacheDir)
 static pid_t stagingPostgresPid = -1;
 
 
+static void
+staging_pidfile_path(KeeperConfig *config, char *dest, size_t size)
+{
+	sformat(dest, size, "%s/replay-staging.pid", config->pgSetup.pgdata);
+}
+
+
+/*
+ * stop_stale_staging_postgres stops a replay staging postmaster left behind
+ * by an archiver that died mid-replay, recorded in replay-staging.pid --
+ * only after verifying the pid is a "postgres" process older than the
+ * pidfile (pid reuse safety), then fast shutdown (SIGINT).
+ */
+static void
+stop_stale_staging_postgres(KeeperConfig *config)
+{
+	char path[MAXPGPATH] = { 0 };
+
+	staging_pidfile_path(config, path, sizeof(path));
+
+	if (!file_exists(path))
+	{
+		return;
+	}
+
+	char *contents = NULL;
+	long fileSize = 0;
+
+	if (read_file(path, &contents, &fileSize) && contents != NULL)
+	{
+		int pid = 0;
+
+		if (stringToInt(contents, &pid) && pid > 0 &&
+			archiver_pid_is_ours((pid_t) pid, "postgres", path))
+		{
+			log_info("Stopping leftover replay staging instance (pid %d)", pid);
+			archiver_stop_stale_pid((pid_t) pid, SIGINT, 15000);
+		}
+
+		free(contents);
+	}
+
+	(void) unlink_file(path);
+}
+
+
 /*
  * start_staging_postgres execs the real "postgres" binary directly against
  * stagingDir, loopback-only, on PG_AUTOCTL_ARCHIVER_REPLAY_PORT -- the same
@@ -1007,6 +1204,14 @@ start_staging_postgres(KeeperConfig *config, const char *stagingDir)
 
 	stagingPostgresPid = pid;
 
+	char pidfilePath[MAXPGPATH] = { 0 };
+	char pidStr[16] = { 0 };
+
+	staging_pidfile_path(config, pidfilePath, sizeof(pidfilePath));
+	int pidStrLen = sformat(pidStr, sizeof(pidStr), "%d", pid);
+
+	(void) write_file_atomic(pidStr, pidStrLen, pidfilePath);
+
 	return true;
 }
 
@@ -1017,26 +1222,57 @@ start_staging_postgres(KeeperConfig *config, const char *stagingDir)
  * or may not have actually started.
  */
 static void
-stop_staging_postgres(void)
+stop_staging_postgres(KeeperConfig *config)
 {
 	if (stagingPostgresPid <= 0)
 	{
 		return;
 	}
 
-	if (kill(stagingPostgresPid, SIGTERM) != 0 && errno != ESRCH)
+	/*
+	 * Fast shutdown (SIGINT), never the smart shutdown SIGTERM means: it
+	 * would wait for clients forever. Escalate to immediate (SIGQUIT) and
+	 * finally SIGKILL, each with a bounded wait. The instance is a
+	 * throwaway, its data directory is discarded anyway.
+	 */
+	static const struct
 	{
-		log_warn("Failed to send SIGTERM to the replay staging instance "
-				 "(pid %d): %m", stagingPostgresPid);
+		int signo;
+		int timeoutMs;
+	}
+	steps[] = {
+		{ SIGINT, 15000 }, { SIGQUIT, 5000 }, { SIGKILL, 5000 }
+	};
+
+	bool reaped = false;
+
+	for (int step = 0; step < 3 && !reaped; step++)
+	{
+		if (kill(stagingPostgresPid, steps[step].signo) != 0 && errno != ESRCH)
+		{
+			log_warn("Failed to signal the replay staging instance "
+					 "(pid %d): %m", stagingPostgresPid);
+		}
+
+		for (int waited = 0; waited < steps[step].timeoutMs; waited += 100)
+		{
+			int status = 0;
+			pid_t ret = waitpid(stagingPostgresPid, &status, WNOHANG);
+
+			if (ret == stagingPostgresPid || (ret == -1 && errno != EINTR))
+			{
+				reaped = true;
+				break;
+			}
+
+			pg_usleep(100 * 1000);
+		}
 	}
 
-	int status = 0;
+	char pidfilePath[MAXPGPATH] = { 0 };
 
-	if (waitpid(stagingPostgresPid, &status, 0) == -1 && errno != ECHILD)
-	{
-		log_warn("Failed to wait for the replay staging instance "
-				 "(pid %d) to stop: %m", stagingPostgresPid);
-	}
+	staging_pidfile_path(config, pidfilePath, sizeof(pidfilePath));
+	(void) unlink_file(pidfilePath);
 
 	stagingPostgresPid = -1;
 }
@@ -1194,7 +1430,7 @@ generate_replay_basebackup(Keeper *keeper, const char *sourceBackupDir,
 		}
 	}
 
-	stop_staging_postgres();
+	stop_staging_postgres(config);
 
 	/* volatile: discard the staging instance unconditionally, success or not */
 	if (!rmtree(stagingDir, true))
@@ -1308,6 +1544,20 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	bool bootstrap = (backups.count == 0);
 
 	/*
+	 * Once per process start: stop a replay staging instance a previous
+	 * archiver instance may have left behind, and prune the local WAL
+	 * cache against the retained backups (idempotent).
+	 */
+	static bool startupCleanupDone = false;
+
+	if (!startupCleanupDone)
+	{
+		startupCleanupDone = true;
+		(void) stop_stale_staging_postgres(config);
+		(void) prune_local_wal_cache(config, &backups, NULL);
+	}
+
+	/*
 	 * Runs every tick regardless of whether a backup is otherwise due, so
 	 * lastKnownPrimaryNodeId always reflects the most recently observed
 	 * primary -- skipping this update on a due-anyway tick would compare
@@ -1349,7 +1599,25 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 		return true;
 	}
 
-	bool due = bootstrap || forcedByPromotion;
+	/*
+	 * `pg_autoctl archiver backup now` drops a trigger file: it bypasses
+	 * the frequency gate for this membership, and is consumed (deleted)
+	 * once the backup process is actually forked.
+	 */
+	char backupNowPath[MAXPGPATH] = { 0 };
+
+	sformat(backupNowPath, sizeof(backupNowPath), "%s/archiver-backup-now",
+			config->pgSetup.pgdata);
+
+	bool backupNow = file_exists(backupNowPath);
+
+	if (backupNow)
+	{
+		log_info("Base backup requested by \"pg_autoctl archiver backup "
+				 "now\" for \"%s\"/%d", config->formation, config->groupId);
+	}
+
+	bool due = bootstrap || forcedByPromotion || backupNow;
 
 	if (!due)
 	{
@@ -1485,6 +1753,11 @@ service_archiver_maybe_generate_basebackup(Keeper *keeper)
 	log_debug("pg_autoctl archiver basebackup process started in "
 			  "subprocess %d", pid);
 	basebackupPid = pid;
+
+	if (backupNow)
+	{
+		(void) unlink_file(backupNowPath);
+	}
 
 	return true;
 }

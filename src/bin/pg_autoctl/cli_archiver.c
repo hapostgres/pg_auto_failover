@@ -7,8 +7,10 @@
  *
  */
 
+#include <dirent.h>
 #include <getopt.h>
 #include <inttypes.h>
+#include <time.h>
 
 #include "postgres_fe.h"
 
@@ -1203,10 +1205,257 @@ CommandLine archiver_show_commands =
 					 NULL,
 					 NULL, archiver_show_subcommands);
 
+/*
+ * `pg_autoctl archiver backup now`: ask the running archiver to take a
+ * base backup at its next tick, bypassing the frequency gate. Works
+ * purely through the filesystem (a trigger file in each targeted
+ * membership directory, consumed by service_archiver_basebackup.c), so it
+ * MUST run on the archiver's own host and needs no monitor connection.
+ */
+static char archiverBackupFormation[NAMEDATALEN] = { 0 };
+static int archiverBackupGroup = -1;
+
+static int
+cli_archiver_backup_now_getopts(int argc, char **argv)
+{
+	KeeperConfig options = { 0 };
+	int c, option_index = 0, errors = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "formation", required_argument, NULL, 'f' },
+		{ "group", required_argument, NULL, 'g' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:f:g:Vvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgSetup.pgdata, optarg, MAXPGPATH);
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(archiverBackupFormation, optarg, NAMEDATALEN);
+				break;
+			}
+
+			case 'g':
+			{
+				if (!stringToInt(optarg, &archiverBackupGroup) ||
+					archiverBackupGroup < 0)
+				{
+					log_error("Failed to parse --group \"%s\"", optarg);
+					++errors;
+				}
+				break;
+			}
+
+			case 'V':
+			{
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				log_set_level(LOG_INFO);
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				++errors;
+				break;
+			}
+		}
+	}
+
+	if (archiverBackupGroup >= 0 && IS_EMPTY_STRING_BUFFER(archiverBackupFormation))
+	{
+		log_error("--group requires --formation");
+		++errors;
+	}
+
+	if (errors > 0)
+	{
+		commandline_help(stderr);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	(void) prepare_keeper_options(&options);
+
+	keeperOptions = options;
+
+	return optind;
+}
+
+
+/* writes <groupDir>/archiver-backup-now atomically; true on success */
+static bool
+archiver_backup_now_trigger(const char *groupDir)
+{
+	char path[MAXPGPATH] = { 0 };
+	char contents[32] = { 0 };
+
+	sformat(path, sizeof(path), "%s/archiver-backup-now", groupDir);
+
+	int size = sformat(contents, sizeof(contents), "%ld\n", (long) time(NULL));
+
+	return write_file_atomic(contents, size, path);
+}
+
+
+static void
+cli_archiver_backup_now(int argc, char **argv)
+{
+	const char *root = keeperOptions.pgSetup.pgdata;
+	int triggered = 0;
+	bool failed = false;
+
+	if (!directory_exists(root))
+	{
+		log_fatal("Archiver directory \"%s\" does not exist; this command "
+				  "must run on the archiver's host", root);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	DIR *rootDir = opendir(root);
+
+	if (rootDir == NULL)
+	{
+		log_fatal("Failed to open \"%s\": %m", root);
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+
+	struct dirent *fEntry;
+
+	while ((fEntry = readdir(rootDir)) != NULL)
+	{
+		if (fEntry->d_name[0] == '.' ||
+			(!IS_EMPTY_STRING_BUFFER(archiverBackupFormation) &&
+			 !streq(fEntry->d_name, archiverBackupFormation)))
+		{
+			continue;
+		}
+
+		char formationDir[MAXPGPATH] = { 0 };
+
+		sformat(formationDir, sizeof(formationDir), "%s/%s", root, fEntry->d_name);
+
+		DIR *fDir = opendir(formationDir);
+
+		if (fDir == NULL)
+		{
+			continue;
+		}
+
+		struct dirent *gEntry;
+
+		while ((gEntry = readdir(fDir)) != NULL)
+		{
+			int group = 0;
+
+			/* membership directories are <formation>/<numeric group id> */
+			if (!stringToInt(gEntry->d_name, &group) ||
+				(archiverBackupGroup >= 0 && group != archiverBackupGroup))
+			{
+				continue;
+			}
+
+			char groupDir[MAXPGPATH] = { 0 };
+
+			sformat(groupDir, sizeof(groupDir), "%s/%s", formationDir,
+					gEntry->d_name);
+
+			if (!directory_exists(groupDir))
+			{
+				continue;
+			}
+
+			if (archiver_backup_now_trigger(groupDir))
+			{
+				fformat(stdout, "Requested a base backup for \"%s\"/%d\n",
+						fEntry->d_name, group);
+				triggered++;
+			}
+			else
+			{
+				failed = true;
+			}
+		}
+
+		closedir(fDir);
+	}
+
+	closedir(rootDir);
+
+	if (triggered == 0 || failed)
+	{
+		log_fatal("%s", failed ? "Failed to write a backup trigger file"
+				  : "No matching formation/group directory found under the "
+					"archiver directory; this command must run on the "
+					"archiver's host");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+}
+
+
+CommandLine archiver_backup_now_command =
+	make_command(
+		"now",
+		"Request an immediate base backup from a local archiver",
+		" [ --pgdata ] [ --formation [ --group ] ] ",
+		"  --pgdata     path to the archiver's local data/cache directory\n"
+		"  --formation  only request for this formation (default: all)\n"
+		"  --group      only request for this group (needs --formation)\n"
+		"\n"
+		"Writes a trigger file the running archiver consumes on its next\n"
+		"tick, bypassing the policy frequency for that membership. It works\n"
+		"on local files only: run it on the archiver's own host.\n",
+		cli_archiver_backup_now_getopts,
+		cli_archiver_backup_now);
+
+CommandLine *archiver_backup_subcommands[] = {
+	&archiver_backup_now_command,
+	NULL
+};
+
+CommandLine archiver_backup_commands =
+	make_command_set("backup",
+					 "Control base backup generation of a local archiver", NULL,
+					 NULL,
+					 NULL, archiver_backup_subcommands);
+
 CommandLine *archiver_subcommands[] = {
 	&archiver_serve_command,
 	&archiver_formation_commands,
 	&archiver_show_commands,
+	&archiver_backup_commands,
 	NULL
 };
 

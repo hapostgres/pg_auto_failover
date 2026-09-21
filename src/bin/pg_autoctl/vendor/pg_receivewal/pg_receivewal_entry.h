@@ -52,6 +52,10 @@ extern WalProgressHook pgaf_wal_progress_hook;
  * pg_receivewal binary's command line (this project builds that same argv
  * today; only the call site changed from execv() to a direct call).
  */
+
+/* installs SIGINT and SIGTERM handlers that request a clean stop */
+extern void pgaf_install_stop_handlers(void);
+
 extern int pg_receivewal_main(int argc, char **argv);
 
 #endif                          /* PG_RECEIVEWAL_ENTRY_H */

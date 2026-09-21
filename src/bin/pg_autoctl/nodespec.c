@@ -133,6 +133,11 @@ nodespec_read(const char *path, NodeSpec *spec)
 								   sizeof(fromArchiverStr), fromArchiverStr,
 								   "false"),
 
+		/* [options] — serve_port: archiver's pg_walsender port */
+		make_strbuf_option_default("options", "serve_port", NULL, false,
+								   sizeof(spec->servePort), spec->servePort,
+								   ""),
+
 		/* [options] — debian_cluster: run pg_createcluster before create */
 		make_strbuf_option_default("options", "debian_cluster", NULL, false,
 								   sizeof(spec->debianCluster),
@@ -485,6 +490,11 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			spec->pg_hba_lan ? "true" : "false",
 			spec->fromArchiver ? "true" : "false");
 
+	if (spec->servePort[0])
+	{
+		fformat(out, "serve_port = %s\n", spec->servePort);
+	}
+
 	if (spec->debianCluster[0])
 	{
 		fformat(out, "debian_cluster = %s\n", spec->debianCluster);
@@ -676,6 +686,12 @@ nodespec_create_argv(const NodeSpec *spec,
 		{
 			PUSH("--replication-password");
 			PUSH(spec->replication_password);
+		}
+
+		if (!IS_EMPTY_STRING_BUFFER(spec->servePort))
+		{
+			PUSH("--serve-port");
+			PUSH(spec->servePort);
 		}
 
 		PUSH("--run");

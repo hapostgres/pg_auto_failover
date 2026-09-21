@@ -74,9 +74,6 @@
  * than shared, matching that file's own precedent for this exact bit of
  * arithmetic -- see its own header comment on why) */
 #define ARCHIVER_WAL_FNAME_LEN 24
-#define ARCHIVER_WAL_SEGMENT_SIZE ((uint64_t) 0x1000000)
-#define ARCHIVER_XLOG_SEGMENTS_PER_XLOGID \
-	(((uint64_t) 0x100000000) / ARCHIVER_WAL_SEGMENT_SIZE)
 
 
 static bool
@@ -112,7 +109,8 @@ wal_filename_compare(const void *a, const void *b)
 
 
 static void
-wal_segment_end_lsn(const char *walFileName, char *lsn, size_t lsnSize)
+wal_segment_end_lsn(const char *walFileName, uint64_t segsize,
+					char *lsn, size_t lsnSize)
 {
 	char logIdHex[9] = { 0 };
 	char segHex[9] = { 0 };
@@ -123,8 +121,8 @@ wal_segment_end_lsn(const char *walFileName, char *lsn, size_t lsnSize)
 	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
 	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
 
-	uint64_t segno = (uint64_t) logId * ARCHIVER_XLOG_SEGMENTS_PER_XLOGID + seg;
-	uint64_t position = segno * ARCHIVER_WAL_SEGMENT_SIZE + ARCHIVER_WAL_SEGMENT_SIZE;
+	uint64_t segno = (uint64_t) logId * (((uint64_t) 0x100000000) / segsize) + seg;
+	uint64_t position = segno * segsize + segsize;
 
 	sformat(lsn, lsnSize, "%X/%08X",
 			(uint32_t) (position >> 32),
@@ -152,6 +150,10 @@ archiver_wal_scan_once(const char *walcacheDir, const char *socketPath,
 		return;
 	}
 
+	uint64_t segsize = archiver_walsegsize_read(walcacheDir);
+	uint64_t floorSegno = 0;
+	bool haveFloor = archiver_wal_floor_read(walcacheDir, &floorSegno);
+
 	char **names = NULL;
 	int count = 0;
 	int capacity = 0;
@@ -165,6 +167,13 @@ archiver_wal_scan_once(const char *walcacheDir, const char *socketPath,
 		}
 
 		if (strcmp(entry->d_name, highWaterMark) <= 0)
+		{
+			continue;
+		}
+
+		/* never resurrect segments below the oldest retained base backup */
+		if (haveFloor &&
+			archiver_wal_name_segno(entry->d_name, segsize) < floorSegno)
 		{
 			continue;
 		}
@@ -191,7 +200,7 @@ archiver_wal_scan_once(const char *walcacheDir, const char *socketPath,
 	{
 		char lsn[PG_LSN_MAXLENGTH] = { 0 };
 
-		wal_segment_end_lsn(names[i], lsn, sizeof(lsn));
+		wal_segment_end_lsn(names[i], segsize, lsn, sizeof(lsn));
 
 		if (archiver_wal_notify_send_segment(socketPath, names[i], lsn,
 											 systemIdentifier))

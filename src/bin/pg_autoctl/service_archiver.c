@@ -66,9 +66,6 @@ static ArchiverWalNotifyListener archiverWalNotifyListener = {
  * repeat here rather than share.
  */
 #define ARCHIVER_WAL_FNAME_LEN 24
-#define ARCHIVER_WAL_SEGMENT_SIZE ((uint64_t) 0x1000000)
-#define ARCHIVER_XLOG_SEGMENTS_PER_XLOGID \
-	(((uint64_t) 0x100000000) / ARCHIVER_WAL_SEGMENT_SIZE)
 
 /*
  * How often service_archiver_loop() reports storage usage, in ticks
@@ -196,8 +193,8 @@ is_wal_segment_filename(const char *name)
  * arithmetic for the same filename layout.
  */
 static void
-wal_segment_position_lsn(const char *walFileName, uint64_t offsetInSegment,
-						 char *lsn, size_t lsnSize)
+wal_segment_position_lsn(const char *walFileName, uint64_t segsize,
+						 uint64_t offsetInSegment, char *lsn, size_t lsnSize)
 {
 	char logIdHex[9] = { 0 };
 	char segHex[9] = { 0 };
@@ -208,8 +205,8 @@ wal_segment_position_lsn(const char *walFileName, uint64_t offsetInSegment,
 	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
 	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
 
-	uint64_t segno = (uint64_t) logId * ARCHIVER_XLOG_SEGMENTS_PER_XLOGID + seg;
-	uint64_t position = segno * ARCHIVER_WAL_SEGMENT_SIZE + offsetInSegment;
+	uint64_t segno = (uint64_t) logId * (((uint64_t) 0x100000000) / segsize) + seg;
+	uint64_t position = segno * segsize + offsetInSegment;
 
 	sformat(lsn, lsnSize, "%X/%08X",
 			(uint32_t) (position >> 32),
@@ -218,9 +215,10 @@ wal_segment_position_lsn(const char *walFileName, uint64_t offsetInSegment,
 
 
 static void
-wal_segment_end_lsn(const char *walFileName, char *lsn, size_t lsnSize)
+wal_segment_end_lsn(const char *walFileName, uint64_t segsize,
+					char *lsn, size_t lsnSize)
 {
-	wal_segment_position_lsn(walFileName, ARCHIVER_WAL_SEGMENT_SIZE, lsn, lsnSize);
+	wal_segment_position_lsn(walFileName, segsize, segsize, lsn, lsnSize);
 }
 
 
@@ -612,7 +610,8 @@ service_archiver_update_current_lsn(Keeper *keeper)
 		return;
 	}
 
-	wal_segment_end_lsn(bestComplete, keeper->postgres.currentLSN,
+	wal_segment_end_lsn(bestComplete, archiver_walsegsize_read(walcacheDir),
+						keeper->postgres.currentLSN,
 						sizeof(keeper->postgres.currentLSN));
 	currentTimeline = wal_segment_timeline(bestComplete);
 }

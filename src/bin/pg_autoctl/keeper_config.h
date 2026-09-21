@@ -61,6 +61,15 @@ typedef struct KeeperConfig
 	char archiverIdStr[INTSTRING_MAX_DIGITS];
 	int64_t archiverId;
 
+	/*
+	 * Archiver only: the TCP port pg_walsender serves on (create archiver
+	 * --serve-port). Persisted as a string like archiverIdStr; empty/0
+	 * means "not set", callers then fall back to
+	 * PG_AUTOCTL_ARCHIVER_SERVE_PORT.
+	 */
+	char servePortStr[INTSTRING_MAX_DIGITS];
+	int serveport;
+
 	/* PostgreSQL setup */
 	PostgresSetup pgSetup;
 

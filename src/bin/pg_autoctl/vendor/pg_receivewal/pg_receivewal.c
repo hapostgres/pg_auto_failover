@@ -49,6 +49,7 @@
 #include "postgres_fe.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -546,6 +547,75 @@ sigint_handler_pg19(int signum, const pg_signal_info *si)
 
 #endif
 
+/*
+ * PGAF: pgaf_install_stop_handlers makes BOTH SIGINT and SIGTERM set
+ * time_to_stop. The forked child inherits pg_autoctl's own SIGTERM handler
+ * (which only sets a flag nobody here reads), so without this a SIGTERM
+ * from the controller was silently ignored and the controller's blocking
+ * waitpid() never returned. Exported so the controller's child can call it
+ * right after fork(), well before any connection attempt.
+ */
+void
+pgaf_install_stop_handlers(void)
+{
+#ifndef WIN32
+#if PG_VERSION_NUM >= 190000
+	pqsignal(SIGINT, sigint_handler_pg19);
+	pqsignal(SIGTERM, sigint_handler_pg19);
+#else
+	pqsignal(SIGINT, sigint_handler);
+	pqsignal(SIGTERM, sigint_handler);
+#endif
+#endif
+}
+
+
+/*
+ * PGAF: pgaf_write_walsegsize persists the primary's WAL segment size
+ * (bytes, decimal) to <dir>/archiver-walsegsize -- atomic temp+rename, and
+ * only when the value changed -- so the rest of pg_autoctl and pg_walsender
+ * can do LSN <-> segment math without hard-coding 16MB.
+ */
+static void
+pgaf_write_walsegsize(const char *dir, uint32 segsize)
+{
+	char		path[MAXPGPATH];
+	char		tmp[MAXPGPATH];
+	char		buf[32];
+	char		old[32] = {0};
+	int			fd;
+	int			len;
+
+	snprintf(path, sizeof(path), "%s/archiver-walsegsize", dir);	/* IGNORE-BANNED */
+	snprintf(tmp, sizeof(tmp), "%s/archiver-walsegsize.tmp.%d", dir,	/* IGNORE-BANNED */
+			 (int) getpid());
+	len = snprintf(buf, sizeof(buf), "%u\n", (unsigned int) segsize);	/* IGNORE-BANNED */
+
+	fd = open(path, O_RDONLY);
+	if (fd >= 0)
+	{
+		ssize_t		n = read(fd, old, sizeof(old) - 1);
+
+		close(fd);
+		if (n == len && memcmp(old, buf, len) == 0)
+			return;
+	}
+
+	fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0)
+		return;
+	if (write(fd, buf, len) != len || fsync(fd) != 0)
+	{
+		close(fd);
+		unlink(tmp);
+		return;
+	}
+	close(fd);
+	if (rename(tmp, path) != 0)
+		unlink(tmp);
+}
+
+
 /* PGAF: was main(), see this file's own header comment */
 int
 pg_receivewal_main(int argc, char **argv)
@@ -771,13 +841,7 @@ pg_receivewal_main(int argc, char **argv)
 	 * Trap signals.  (Don't do this until after the initial password prompt,
 	 * if one is needed, in GetConnection.)
 	 */
-#ifndef WIN32
-#if PG_VERSION_NUM >= 190000
-	pqsignal(SIGINT, sigint_handler_pg19);
-#else
-	pqsignal(SIGINT, sigint_handler);
-#endif
-#endif
+	pgaf_install_stop_handlers();	/* PGAF: SIGINT and SIGTERM */
 
 	/*
 	 * Run IDENTIFY_SYSTEM to make sure we've successfully have established a
@@ -800,6 +864,9 @@ pg_receivewal_main(int argc, char **argv)
 	/* determine remote server's xlog segment size */
 	if (!RetrieveWalSegSize(conn))
 		exit(1);
+
+	/* PGAF: publish the segment size for the rest of pg_autoctl */
+	pgaf_write_walsegsize(basedir, WalSegSz);
 
 	/*
 	 * Check that there is a database associated with connection, none should
@@ -863,7 +930,19 @@ pg_receivewal_main(int argc, char **argv)
 			/* translator: check source for value for %d */
 			pg_log_info("disconnected; waiting %d seconds to try again",
 						RECONNECT_SLEEP_TIME);
-			pg_usleep(RECONNECT_SLEEP_TIME * 1000000);
+
+			/*
+			 * PGAF: sleep in short slices so a stop request (SIGINT/SIGTERM,
+			 * e.g. the target primary changed) is honoured promptly instead
+			 * of after the full reconnect delay.
+			 */
+			for (int slept = 0;
+				 slept < RECONNECT_SLEEP_TIME * 10 && !time_to_stop;
+				 slept++)
+				pg_usleep(100 * 1000);
+
+			if (time_to_stop)
+				exit(0);
 		}
 	}
 }

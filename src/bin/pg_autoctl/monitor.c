@@ -117,6 +117,13 @@ typedef struct MonitorExtensionVersionParseContext
 	bool parsedOK;
 } MonitorExtensionVersionParseContext;
 
+/* base must stay the first member: parseNodeArray is called with it */
+typedef struct ArchiverNodeParseContext
+{
+	NodeAddressArrayParseContext base;
+	int serveport;
+} ArchiverNodeParseContext;
+
 typedef struct FsmReachabilityParseContext
 {
 	char sqlstate[SQLSTATE_LENGTH];
@@ -128,6 +135,7 @@ typedef struct FsmReachabilityParseContext
 static bool parseNode(PGresult *result, int rowNumber, NodeAddress *node);
 static void parseNodeResult(void *ctx, PGresult *result);
 static void parseNodeArray(void *ctx, PGresult *result);
+static void parseArchiverNodeArray(void *ctx, PGresult *result);
 static void parseNodeState(void *ctx, PGresult *result);
 static void parseNodeReplicationSettings(void *ctx, PGresult *result);
 static void parseNodeRegion(void *ctx, PGresult *result);
@@ -865,14 +873,19 @@ monitor_get_archiver_node(Monitor *monitor,
 	PGSQL *pgsql = &monitor->pgsql;
 	const char *sql =
 		"SELECT node_id, node_name, node_host, node_port, node_lsn, "
-		"node_is_primary FROM pgautofailover.get_archiver_node($1, $2)";
+		"node_is_primary, to_jsonb(r) ->> 'serveport' "
+		"FROM pgautofailover.get_archiver_node($1, $2) r";
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
 	const char *paramValues[2];
 
 	/* we expect zero or one entry */
 	NodeAddressArray nodeArray = { 0 };
-	NodeAddressArrayParseContext parseContext = { { 0 }, &nodeArray, false };
+	ArchiverNodeParseContext parseContext = {
+		{
+			{ 0 }, &nodeArray, false
+		}, PG_AUTOCTL_ARCHIVER_SERVE_PORT
+	};
 
 	IntString groupIdString = intToString(groupId);
 
@@ -881,7 +894,7 @@ monitor_get_archiver_node(Monitor *monitor,
 
 	if (!pgsql_execute_with_params(pgsql, sql,
 								   paramCount, paramTypes, paramValues,
-								   &parseContext, parseNodeArray))
+								   &parseContext, parseArchiverNodeArray))
 	{
 		log_error(
 			"Failed to get the archiver node in the HA group "
@@ -891,7 +904,7 @@ monitor_get_archiver_node(Monitor *monitor,
 		return false;
 	}
 
-	if (!parseContext.parsedOK)
+	if (!parseContext.base.parsedOK)
 	{
 		log_error(
 			"Failed to get the archiver node from the monitor "
@@ -915,6 +928,12 @@ monitor_get_archiver_node(Monitor *monitor,
 	node->port = nodeArray.nodes[0].port;
 	strlcpy(node->lsn, nodeArray.nodes[0].lsn, PG_LSN_MAXLENGTH);
 	node->isPrimary = nodeArray.nodes[0].isPrimary;
+
+	/* an ARCHIVING row has port 0: the real port is the serve port */
+	if (node->port == 0)
+	{
+		node->port = parseContext.serveport;
+	}
 
 	log_debug("The archiver node for %s/%d is node " NODE_FORMAT,
 			  formation, groupId, node->nodeId, node->name,
@@ -957,7 +976,7 @@ monitor_get_archiver_node(Monitor *monitor,
  */
 bool
 monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
-						  char *region, int64_t *archiverId)
+						  char *region, int servePort, int64_t *archiverId)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
@@ -970,12 +989,16 @@ monitor_register_archiver(Monitor *monitor, char *name, char *hostname,
 	 * named arguments as long as every positional one comes first.
 	 */
 	const char *sql =
-		"SELECT pgautofailover.register_archiver($1, $2, region => $3)";
-	int paramCount = 3;
-	Oid paramTypes[3] = { TEXTOID, TEXTOID, TEXTOID };
-	const char *paramValues[3] = {
+		"SELECT pgautofailover.register_archiver($1, $2, region => $3, "
+		"in_serveport => $4)";
+	int paramCount = 4;
+	Oid paramTypes[4] = { TEXTOID, TEXTOID, TEXTOID, INT4OID };
+	IntString servePortString =
+		intToString(servePort > 0 ? servePort : PG_AUTOCTL_ARCHIVER_SERVE_PORT);
+	const char *paramValues[4] = {
 		name, hostname,
-		IS_EMPTY_STRING_BUFFER(region) ? "default" : region
+		IS_EMPTY_STRING_BUFFER(region) ? "default" : region,
+		servePortString.strValue
 	};
 
 	if (!pgsql_execute_with_params(pgsql, sql,
@@ -3953,6 +3976,32 @@ parseNodeResult(void *ctx, PGresult *result)
  * it to the NodeAddressParseContext pointed to by ctx.
  */
 static void
+parseArchiverNodeArray(void *ctx, PGresult *result)
+{
+	ArchiverNodeParseContext *context = (ArchiverNodeParseContext *) ctx;
+
+	context->serveport = PG_AUTOCTL_ARCHIVER_SERVE_PORT;
+
+	parseNodeArray(&(context->base), result);
+
+	/* older monitors have no serveport column: keep the default */
+	if (context->base.parsedOK &&
+		PQnfields(result) >= 7 &&
+		PQntuples(result) > 0 &&
+		!PQgetisnull(result, 0, 6))
+	{
+		int port = 0;
+
+		if (stringToInt(PQgetvalue(result, 0, 6), &port) &&
+			port >= 1 && port <= 65535)
+		{
+			context->serveport = port;
+		}
+	}
+}
+
+
+static void
 parseNodeArray(void *ctx, PGresult *result)
 {
 	bool parsedOk = true;
@@ -3971,10 +4020,14 @@ parseNodeArray(void *ctx, PGresult *result)
 		return;
 	}
 
-	/* pgautofailover.get_other_nodes returns 6 columns */
-	if (PQnfields(result) != 6)
+	/*
+	 * pgautofailover.get_other_nodes returns 6 columns;
+	 * get_archiver_node adds a 7th one (serveport).
+	 */
+	if (PQnfields(result) != 6 && PQnfields(result) != 7)
 	{
-		log_error("Query returned %d columns, expected 6", PQnfields(result));
+		log_error("Query returned %d columns, expected 6 or 7",
+				  PQnfields(result));
 		context->parsedOK = false;
 		return;
 	}

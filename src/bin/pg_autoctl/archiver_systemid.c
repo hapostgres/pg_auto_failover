@@ -18,6 +18,7 @@
  *
  */
 
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdlib.h>
 
@@ -86,4 +87,107 @@ archiver_systemid_read_from_path(const char *path, uint64_t *systemIdentifier)
 
 	*systemIdentifier = value;
 	return true;
+}
+
+
+/*
+ * archiver_walsegsize_read returns the WAL segment size pg_receivewal
+ * recorded (RetrieveWalSegSize() against the primary) or the 16MiB default
+ * when the file is absent or not a power of two between 1MiB and 1GiB.
+ */
+uint64_t
+archiver_walsegsize_read(const char *membershipDir)
+{
+	char path[MAXPGPATH] = { 0 };
+	char *contents = NULL;
+	long fileSize = 0;
+	uint64_t value = 16 * 1024 * 1024;
+
+	sformat(path, sizeof(path), "%s/archiver-walsegsize", membershipDir);
+
+	if (!file_exists(path) || !read_file(path, &contents, &fileSize) ||
+		contents == NULL)
+	{
+		return value;
+	}
+
+	uint64_t parsed = strtoull(contents, NULL, 10); /* IGNORE-BANNED */
+
+	free(contents);
+
+	if (parsed >= (1024 * 1024) && parsed <= (1024 * 1024 * 1024) &&
+		(parsed & (parsed - 1)) == 0)
+	{
+		value = parsed;
+	}
+
+	return value;
+}
+
+
+/* true when the first 24 characters of name are all hex digits */
+bool
+archiver_wal_name_is_hex24(const char *name)
+{
+	for (int i = 0; i < 24; i++)
+	{
+		if (name[i] == '\0' || !isxdigit((unsigned char) name[i]))
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
+
+uint64_t
+archiver_wal_name_segno(const char *walFileName, uint64_t segsize)
+{
+	char logIdHex[9] = { 0 };
+	char segHex[9] = { 0 };
+
+	memcpy(logIdHex, walFileName + 8, 8); /* IGNORE-BANNED */
+	memcpy(segHex, walFileName + 16, 8); /* IGNORE-BANNED */
+
+	uint64_t logId = strtoull(logIdHex, NULL, 16); /* IGNORE-BANNED */
+	uint64_t seg = strtoull(segHex, NULL, 16); /* IGNORE-BANNED */
+
+	return logId * (((uint64_t) 0x100000000) / segsize) + seg;
+}
+
+
+bool
+archiver_wal_floor_read(const char *membershipDir, uint64_t *segno)
+{
+	char path[MAXPGPATH] = { 0 };
+	char *contents = NULL;
+	long fileSize = 0;
+
+	sformat(path, sizeof(path), "%s/archiver-wal-floor", membershipDir);
+
+	if (!file_exists(path) || !read_file(path, &contents, &fileSize) ||
+		contents == NULL)
+	{
+		return false;
+	}
+
+	*segno = strtoull(contents, NULL, 10); /* IGNORE-BANNED */
+	free(contents);
+
+	return true;
+}
+
+
+bool
+archiver_wal_floor_write(const char *membershipDir, uint64_t segno)
+{
+	char path[MAXPGPATH] = { 0 };
+	char contents[32] = { 0 };
+
+	sformat(path, sizeof(path), "%s/archiver-wal-floor", membershipDir);
+
+	int size = sformat(contents, sizeof(contents), "%" PRIu64 "\n", segno);
+
+	return write_file_atomic(contents, size, path);
 }

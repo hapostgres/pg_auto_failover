@@ -3334,14 +3334,22 @@ keeper_get_most_advanced_standby(Keeper *keeper, NodeAddress *upstreamNode,
 		 * pgautofailover.node, which has no column for an archiver's real
 		 * pg_walsender serve port (archiver-host-local information the
 		 * monitor is never told, matching service_archiver_serve.c's own
-		 * routes-file rationale). The supported scope is one
-		 * archiver on the well-known default serve port, so resolving it
-		 * here is enough; a configurable-port archiver is a follow-up that
-		 * would need the monitor to actually track it.
+		 * routes-file rationale). The real port comes from
+		 * get_archiver_node(), which knows the archiver's registered serve port.
 		 */
 		if (*found && upstreamNode->port == 0)
 		{
+			NodeAddress archiverNode = { 0 };
+			bool foundArchiver = false;
+
 			upstreamNode->port = PG_AUTOCTL_ARCHIVER_SERVE_PORT;
+
+			if (keeper_get_archiver_node(keeper, &archiverNode,
+										 &foundArchiver) &&
+				foundArchiver && archiverNode.port > 0)
+			{
+				upstreamNode->port = archiverNode.port;
+			}
 		}
 
 		return true;
@@ -3431,7 +3439,10 @@ keeper_get_archiver_node(Keeper *keeper, NodeAddress *archiverNode, bool *found)
 		return false;
 	}
 
-	/* see keeper_get_most_advanced_standby's own comment on this sentinel */
+	/*
+	 * monitor_get_archiver_node already resolved the sentinel to the
+	 * archiver's registered serve port; keep a defensive default.
+	 */
 	if (*found && archiverNode->port == 0)
 	{
 		archiverNode->port = PG_AUTOCTL_ARCHIVER_SERVE_PORT;

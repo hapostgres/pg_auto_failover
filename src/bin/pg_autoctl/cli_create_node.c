@@ -1350,6 +1350,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 		{ "formation", required_argument, NULL, 'f' },
 		{ "basebackup-policy", required_argument, NULL, 'P' },
 		{ "region", required_argument, NULL, 'G' },
+		{ "serve-port", required_argument, NULL, 'S' },
 		{ "replication-password", required_argument, NULL, 'w' },
 		{ "no-ssl", no_argument, NULL, 'N' },
 		{ "ssl-self-signed", no_argument, NULL, 's' },
@@ -1368,7 +1369,7 @@ cli_create_archiver_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:C:m:n:a:f:P:G:w:NsxVvqh",
+	while ((c = getopt_long(argc, argv, "D:C:m:n:a:f:P:G:S:w:NsxVvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -1449,6 +1450,22 @@ cli_create_archiver_getopts(int argc, char **argv)
 				 * node kind. */
 				strlcpy(options.pgSetup.settings.region, optarg, NAMEDATALEN);
 				log_trace("--region %s", options.pgSetup.settings.region);
+				break;
+			}
+
+			case 'S':
+			{
+				int port = 0;
+
+				if (!stringToInt(optarg, &port) || port < 1 || port > 65535)
+				{
+					log_fatal("Failed to parse --serve-port \"%s\": "
+							  "expected a port number in 1..65535", optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+
+				options.serveport = port;
+				log_trace("--serve-port %d", options.serveport);
 				break;
 			}
 
@@ -1596,6 +1613,14 @@ cli_create_archiver_getopts(int argc, char **argv)
 		exit(EXIT_CODE_BAD_ARGS);
 	}
 
+	if (options.serveport == 0)
+	{
+		options.serveport = PG_AUTOCTL_ARCHIVER_SERVE_PORT;
+	}
+
+	sformat(options.servePortStr, sizeof(options.servePortStr),
+			"%d", options.serveport);
+
 	if (archiverFormationsCount == 0)
 	{
 		strlcpy(archiverFormations[0], "default", NAMEDATALEN);
@@ -1709,6 +1734,7 @@ cli_create_archiver(int argc, char **argv)
 
 	if (!monitor_register_archiver(&monitor, archiverName, config->hostname,
 								   config->pgSetup.settings.region,
+								   config->serveport,
 								   &archiverId))
 	{
 		log_fatal("Failed to register archiver \"%s\" on the monitor, "
@@ -1916,7 +1942,7 @@ CommandLine create_archiver_command =
 	make_command(
 		"archiver",
 		"Initialize a pg_auto_failover archiver node",
-		" [ --pgdata --pgctl --monitor --hostname --name --formation --region --basebackup-policy --replication-password --ssl-self-signed --ssl-mode --ssl-ca-file --ssl-crl-file --server-cert --server-key --no-ssl ] ",
+		" [ --pgdata --pgctl --monitor --hostname --name --formation --region --serve-port --basebackup-policy --replication-password --ssl-self-signed --ssl-mode --ssl-ca-file --ssl-crl-file --server-cert --server-key --no-ssl ] ",
 		"  --pgdata            path to the archiver's local data/cache directory\n"
 		"  --pgctl             path to pg_ctl (used to locate pg_receivewal)\n"
 		"  --monitor           pg_auto_failover Monitor Postgres URL\n"
@@ -1925,6 +1951,7 @@ CommandLine create_archiver_command =
 		"  --formation         formation to attach to, may be repeated (default: \"default\")\n"
 		"  --region            data-centre or availability-zone label for this "
 		"archiver (default: \"default\")\n"
+		"  --serve-port        TCP port pg_walsender serves on (default: 6543)\n"
 		"  --basebackup-policy base-backup production/retention policy to attach "
 		"(default: \"default\")\n"
 		"  --replication-password  password used by pg_receivewal to connect to "

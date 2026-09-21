@@ -26,4 +26,25 @@ bool archiver_systemid_read(KeeperConfig *config, uint64_t *systemIdentifier);
 bool archiver_systemid_read_from_path(const char *path,
 									  uint64_t *systemIdentifier);
 
+/*
+ * The primary's WAL segment size in bytes, as recorded by pg_receivewal in
+ * <membershipDir>/archiver-walsegsize; 16MiB when absent or invalid.
+ */
+uint64_t archiver_walsegsize_read(const char *membershipDir);
+
+/*
+ * Absolute segment number (segno, as in XLByteToSeg) of a 24-hex WAL
+ * segment file name, for a WAL segment size of segsize bytes.
+ */
+bool archiver_wal_name_is_hex24(const char *name);
+uint64_t archiver_wal_name_segno(const char *walFileName, uint64_t segsize);
+
+/*
+ * The "WAL floor": segno of the oldest retained base backup's start
+ * segment, persisted in <membershipDir>/archiver-wal-floor. Segments below
+ * it are never needed and are neither kept nor re-reported.
+ */
+bool archiver_wal_floor_read(const char *membershipDir, uint64_t *segno);
+bool archiver_wal_floor_write(const char *membershipDir, uint64_t segno);
+
 #endif                          /* ARCHIVER_SYSTEMID_H */

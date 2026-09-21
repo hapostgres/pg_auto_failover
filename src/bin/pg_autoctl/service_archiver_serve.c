@@ -81,7 +81,12 @@ service_archiver_walsender_start(void *context, pid_t *pid)
 		return false;
 	}
 
-	int port = archiverServePort > 0 ? archiverServePort : PG_AUTOCTL_ARCHIVER_SERVE_PORT;
+	/* --port override, then the persisted archiver.serve_port, then default */
+	int port = archiverServePort > 0
+			   ? archiverServePort
+			   : (config->serveport > 0
+				  ? config->serveport
+				  : PG_AUTOCTL_ARCHIVER_SERVE_PORT);
 	char portStr[16] = { 0 };
 
 	sformat(portStr, sizeof(portStr), "%d", port);

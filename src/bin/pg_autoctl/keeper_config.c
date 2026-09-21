@@ -66,6 +66,11 @@
 							   INTSTRING_MAX_DIGITS, \
 							   config->archiverIdStr, "")
 
+#define OPTION_AUTOCTL_ARCHIVER_SERVE_PORT(config) \
+	make_strbuf_option_default("archiver", "serve_port", NULL, false, \
+							   INTSTRING_MAX_DIGITS, \
+							   config->servePortStr, "")
+
 #define OPTION_POSTGRESQL_PGDATA(config) \
 	make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
 					   config->pgSetup.pgdata)
@@ -233,6 +238,7 @@
 		OPTION_AUTOCTL_NODENAME(config), \
 		OPTION_AUTOCTL_NODEKIND(config), \
 		OPTION_AUTOCTL_ARCHIVER_ID(config), \
+		OPTION_AUTOCTL_ARCHIVER_SERVE_PORT(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
 		OPTION_POSTGRESQL_USERNAME(config), \
@@ -532,6 +538,18 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	{
 		log_error("Failed to parse pg_autoctl.archiver_id \"%s\" as a number",
 				  config->archiverIdStr);
+		return false;
+	}
+
+	/* parse servePortStr into serveport, 0 when not set */
+	config->serveport = 0;
+
+	if (!IS_EMPTY_STRING_BUFFER(config->servePortStr) &&
+		(!stringToInt(config->servePortStr, &(config->serveport)) ||
+		 config->serveport < 1 || config->serveport > 65535))
+	{
+		log_error("Failed to parse archiver.serve_port \"%s\" as a "
+				  "port number", config->servePortStr);
 		return false;
 	}
 

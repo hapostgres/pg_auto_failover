@@ -56,4 +56,9 @@ bool archiver_pgreceivewal_read_desired_state(KeeperConfig *config,
 bool service_archiver_pgreceivewal_ctl_is_running(KeeperConfig *config,
 												  bool *isRunning);
 
+bool archiver_pid_is_ours(pid_t pid, const char *expectedComm,
+						  const char *pidfilePath);
+void archiver_stop_stale_pid(pid_t pid, int firstSignal, int timeoutMs);
+void archiver_pgreceivewal_stop_stale_child(KeeperConfig *config);
+
 #endif                          /* SERVICE_ARCHIVER_PGRECEIVEWAL_STATE_H */
