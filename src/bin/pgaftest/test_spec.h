@@ -171,6 +171,7 @@ typedef struct TestArchiverNode
 {
 	char name[128];
 	char region[64];             /* --region NAME; "" = omit (defaults to "default") */
+	char replicationPassword[256]; /* replication.password written to the ini */
 	char formations[PGAF_MAX_ARCHIVER_FORMATIONS][128];
 	int formationCount;
 	bool createDeferred;         /* node waits before pg_autoctl create */

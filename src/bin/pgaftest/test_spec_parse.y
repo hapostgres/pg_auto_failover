@@ -334,6 +334,12 @@ archiver_opt:
 		strlcpy(current_archiver->region, $2, sizeof(current_archiver->region));
 		free($2);
 	}
+	| T_REPLICATION_PASSWORD T_STRING
+	{
+		strlcpy(current_archiver->replicationPassword, $2,
+		        sizeof(current_archiver->replicationPassword));
+		free($2);
+	}
 	| T_CREATE T_AND T_LAUNCH T_DEFERRED
 	{
 		/* bare "create and launch deferred" = both gates, matching
@@ -1911,6 +1917,8 @@ fold_archivers_into_formations(TestCluster *cluster)
 		node->candidatePriority = 50;
 		node->replicationQuorum = true;
 		strlcpy(node->region, a->region, sizeof(node->region));
+		strlcpy(node->replicationPassword, a->replicationPassword,
+		        sizeof(node->replicationPassword));
 		node->createDeferred = a->createDeferred;
 		node->launchDeferred = a->launchDeferred;
 	}

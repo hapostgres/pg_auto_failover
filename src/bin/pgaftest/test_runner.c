@@ -4805,7 +4805,7 @@ runner_exec_step(TestRunner *r, TestStep *step, char *errBuf, int errLen,
 			runner_drain_notify(r, NULL, NULL, NULL, 0, NULL); /* one last sweep */
 		}
 
-		char label[256];
+		char label[2048];
 		cmd_label(cmd, label, sizeof(label));
 		if (stepNum > 0)
 		{
