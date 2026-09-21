@@ -3013,7 +3013,8 @@ nodeini_read_value(TestRunner *r, const char *nodeName,
 /*
  * Expand ${NAME} references (exact form only: "${" identifier "}") using the
  * runner's variables.  Anything else, including SQL "$1" or "$$", is copied
- * verbatim.  Returns false with errBuf set for an unknown variable.
+ * verbatim, and so is a ${NAME} that no "let" defined (a shell variable in
+ * an exec string).  Returns false with errBuf set on buffer overflow.
  */
 static bool
 runner_interpolate(TestRunner *r, const char *in, char *out, int outLen,
@@ -3047,25 +3048,26 @@ runner_interpolate(TestRunner *r, const char *in, char *out, int outLen,
 					}
 				}
 
-				if (val == NULL)
+				/*
+				 * A name we were not given with "let" is not ours: it is a
+				 * shell variable in an exec string (${PGDATA}, ${f%.partial}
+				 * never even matches this form), or plain text. Leave it to
+				 * whoever it belongs to.
+				 */
+				if (val != NULL)
 				{
-					sformat(errBuf, errLen,
-							"unknown variable ${%.*s} (set it earlier with "
-							"\"let %.*s = sql ...\")", n, p + 2, n, p + 2);
-					return false;
+					int vl = (int) strlen(val);
+					if (o + vl >= outLen)
+					{
+						sformat(errBuf, errLen,
+								"expanding ${%.*s} overflows the buffer", n, p + 2);
+						return false;
+					}
+					memcpy(out + o, val, vl); /* IGNORE-BANNED */
+					o += vl;
+					p = q + 1;
+					continue;
 				}
-
-				int vl = (int) strlen(val);
-				if (o + vl >= outLen)
-				{
-					sformat(errBuf, errLen,
-							"expanding ${%.*s} overflows the buffer", n, p + 2);
-					return false;
-				}
-				memcpy(out + o, val, vl); /* IGNORE-BANNED */
-				o += vl;
-				p = q + 1;
-				continue;
 			}
 		}
 

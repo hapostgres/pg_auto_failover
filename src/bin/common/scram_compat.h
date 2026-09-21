@@ -187,4 +187,5 @@ pgaf_hmac_sha256(const uint8 *key, size_t keyLen, const uint8 *data,
 	return ok;
 }
 
+
 #endif /* SCRAM_COMPAT_H */

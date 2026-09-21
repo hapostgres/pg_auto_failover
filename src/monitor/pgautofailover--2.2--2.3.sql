@@ -557,6 +557,9 @@ CREATE VIEW pgautofailover.fsm AS
       FROM pgautofailover.dump_fsm()
      ORDER BY pos;
 
+-- the blanket "GRANT SELECT ON ALL TABLES" of a fresh install covers this view
+GRANT SELECT ON pgautofailover.fsm TO autoctl_node;
+
 -- Flat, fully-resolved (pos, current_state, assigned_state) edges derived
 -- from MonitorFSM[] -- see dump_fsm_edges()'s own C-side comment. Never
 -- queried directly by an operator; check_fsm_reachability() below is built
