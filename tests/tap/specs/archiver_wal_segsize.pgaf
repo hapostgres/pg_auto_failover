@@ -1,0 +1,83 @@
+# A cluster with 32 MB WAL segments (initdb --wal-segsize=32, the only time
+# it can be chosen), end to end through the archiver: nothing may assume 16 MB.
+#
+#   test_001  primary created with PG_AUTOCTL_INITDB_OPTIONS=--wal-segsize=32
+#   test_002  the archiver captures 32 MB segments: file size, the value it
+#             recorded (archiver-walsegsize), and the LSN it reports to the
+#             monitor for a closed segment (end of segment N is (N+1) * 32 MB)
+#   test_003  pg_walsender says `SHOW wal_segment_size` = 32MB and serves
+#             stock pg_basebackup and pg_receivewal (whose files are 32 MB)
+#   test_004  a standby joins (segment size inherited from the base backup),
+#             then a failover: capture continues on the new primary
+#
+# node1 and node2 are created by hand because the segment size is an initdb
+# option; the archiver is an ordinary compose node waiting for its primary.
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 create and launch deferred replication-password "pgaf-repl-pw"
+        node2 create and launch deferred replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
+    }
+}
+
+teardown {
+    compose down
+}
+
+step test_001_primary_with_32mb_segments {
+    exec node1 bash -c "PG_AUTOCTL_INITDB_OPTIONS=--wal-segsize=32 pg_autoctl create postgres --pgdata /var/lib/postgres/pgaf --monitor postgresql://autoctl_node@monitor/pg_auto_failover --auth trust --no-ssl --name node1 --hostname node1 --replication-password pgaf-repl-pw > /tmp/node1-create.log 2>&1 || (tail -20 /tmp/node1-create.log; false)"
+    exec node1 bash -c "nohup pg_autoctl run --pgdata /var/lib/postgres/pgaf > /tmp/node1-run.log 2>&1 & echo backgrounded pid $!"
+    wait until node1 state is single  timeout 120s
+    sql node1 { SHOW wal_segment_size }
+    expect { 32MB }
+    wait until archiver1 state is archiving  timeout 180s
+    # WAL older than the bootstrap backup is pruned by design: let it complete first
+    wait until sql monitor {
+        SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
+    } is { complete }  timeout 180s
+}
+
+step test_002_archiver_captures_32mb_segments {
+    sql node1 { CREATE TABLE seg32(a int); INSERT INTO seg32 SELECT generate_series(1, 1000); }
+    let seg = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg}') } is { t }  timeout 90s
+
+    exec archiver1 bash -c 'test "$(stat -c %s /var/lib/postgres/pgaf/default/0/${seg})" = 33554432'
+    exec archiver1 bash -c 'test "$(cat /var/lib/postgres/pgaf/default/0/archiver-walsegsize)" = 33554432'
+
+    # the LSN reported for a closed segment is the END of that segment:
+    # (segment number + 1) * 32 MB -- wrong (16 MB arithmetic) values fail here
+    exec monitor bash -c 'psql -d pg_auto_failover -Atc "SELECT lsn = \$\$0/0\$\$::pg_lsn + ((((\$\$x\$\$ || substr(\$\$${seg}\$\$, 17, 8))::bit(32)::bigint) + 1) * 33554432) FROM pgautofailover.archiver_wal WHERE walfilename = \$\$${seg}\$\$ ORDER BY receivedat LIMIT 1" | grep -qx t'
+}
+
+step test_003_walsender_speaks_32mb {
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw psql "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=disable replication=true" -Atc "SHOW wal_segment_size" | grep -qx 32MB'
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=disable" --pgdata /tmp/bb32 -X none --no-manifest && test -f /tmp/bb32/PG_VERSION'
+    exec node1 bash -c 'mkdir -p /tmp/rw32 && (PGPASSWORD=pgaf-repl-pw timeout 25 pg_receivewal -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=disable" --directory /tmp/rw32 --no-loop || true) && ls /tmp/rw32 | grep -q . && for f in /tmp/rw32/*; do test "$(stat -c %s $f)" = 33554432 || { echo "bad size $f"; exit 1; }; done'
+}
+
+step test_004_standby_and_failover_keep_32mb {
+    exec node2 bash -c "pg_autoctl create postgres --pgdata /var/lib/postgres/pgaf --monitor postgresql://autoctl_node@monitor/pg_auto_failover --auth trust --no-ssl --name node2 --hostname node2 --replication-password pgaf-repl-pw > /tmp/node2-create.log 2>&1 || (tail -20 /tmp/node2-create.log; false)"
+    exec node2 bash -c "nohup pg_autoctl run --pgdata /var/lib/postgres/pgaf > /tmp/node2-run.log 2>&1 & echo backgrounded pid $!"
+    wait until node2 state is secondary  timeout 180s
+    sql node2 { SHOW wal_segment_size }
+    expect { 32MB }
+
+    perform failover
+    wait until primary, secondary in group 0  timeout 180s
+    wait until archiver1 state is archiving  timeout 180s
+
+    sql node2 { INSERT INTO seg32 SELECT generate_series(1001, 2000); }
+    let seg2 = sql node2 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg2}') } is { t }  timeout 120s
+    exec archiver1 bash -c 'test "$(stat -c %s /var/lib/postgres/pgaf/default/0/${seg2})" = 33554432'
+}
+
+sequence
+    test_001_primary_with_32mb_segments
+    test_002_archiver_captures_32mb_segments
+    test_003_walsender_speaks_32mb
+    test_004_standby_and_failover_keep_32mb

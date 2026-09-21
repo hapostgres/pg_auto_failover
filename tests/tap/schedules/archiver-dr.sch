@@ -11,3 +11,7 @@
 archiver_quorum
 archiver_lifecycle
 archiver_serve_port
+archiver_fsm_quorum
+archiver_wal_segsize
+archiver_archive_command
+archiver_archive_command_none

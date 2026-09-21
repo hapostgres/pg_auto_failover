@@ -1,0 +1,70 @@
+# archive_command as a CONFIRMATION, nothing more: `pg_autoctl archiver
+# confirm %f` asks the monitor whether the archiver's pg_receivewal already
+# holds the segment; it never moves data. Postgres only recycles a segment
+# once the command succeeds.
+#
+#   test_001  archive_mode is on and archive_command is the confirm command
+#   test_002  archiver up: closed segments are archived (pg_stat_archiver),
+#             none fails
+#   test_003  archiver down: the segment is NOT archived (failed_count grows,
+#             last_archived_wal stays put, the file stays in pg_wal)
+#   test_004  archiver back: the pending segment is confirmed and archived
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+    wait until archiver1 state is archiving  timeout 120s
+    wait until sql monitor {
+        SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
+    } is { complete }  timeout 180s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_confirm_command_is_configured {
+    exec node1 bash -c 'psql -d demo -Atc "SHOW archive_mode" | grep -qx on'
+    exec node1 bash -c 'psql -d demo -Atc "SHOW archive_command" | grep -q "archiver confirm"'
+}
+
+step test_002_confirmed_segments_are_archived {
+    sql node1 { CREATE TABLE ac(a int); INSERT INTO ac VALUES (1); }
+    let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg1}') } is { t }  timeout 90s
+    exec node1 bash -c 'for i in $(seq 90); do l=$(psql -d demo -Atc "SELECT last_archived_wal FROM pg_stat_archiver"); test "$l" = "${seg1}" && exit 0; sleep 1; done; psql -d demo -Atc "SELECT archived_count, failed_count, last_archived_wal, last_failed_wal FROM pg_stat_archiver"; exit 1'
+}
+
+step test_003_archiver_down_segment_not_archived {
+    compose stop archiver1
+    wait until archiver1 stopped  timeout 60s
+    sql node1 { INSERT INTO ac VALUES (2); }
+    let seg2 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+
+    # Postgres keeps trying and failing, and keeps the segment
+    exec node1 bash -c 'for i in $(seq 90); do f=$(psql -d demo -Atc "SELECT last_failed_wal FROM pg_stat_archiver"); test "$f" = "${seg2}" && break; sleep 1; done; test "$f" = "${seg2}"'
+    exec node1 bash -c 'test "$(psql -d demo -Atc "SELECT last_archived_wal FROM pg_stat_archiver")" != "${seg2}"'
+    exec node1 bash -c 'test -e "$(psql -d demo -Atc "SHOW data_directory")/pg_wal/${seg2}"'
+}
+
+step test_004_archiver_back_pending_segment_archived {
+    compose start archiver1
+    wait until archiver1 state is archiving  timeout 180s
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg2}') } is { t }  timeout 180s
+    exec node1 bash -c 'for i in $(seq 120); do l=$(psql -d demo -Atc "SELECT last_archived_wal FROM pg_stat_archiver"); test "$l" = "${seg2}" && exit 0; sleep 1; done; psql -d demo -Atc "SELECT archived_count, failed_count, last_archived_wal, last_failed_wal FROM pg_stat_archiver"; exit 1'
+}
+
+sequence
+    test_001_confirm_command_is_configured
+    test_002_confirmed_segments_are_archived
+    test_003_archiver_down_segment_not_archived
+    test_004_archiver_back_pending_segment_archived

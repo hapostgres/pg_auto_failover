@@ -553,6 +553,38 @@ deciding what else could talk to one.
   own, without needing a full streaming connection just to recover one
   missing segment.
 
+archive_command confirmation
+----------------------------
+
+``archive_command`` never moves data here: the archiver's ``pg_receivewal``
+already streams the WAL. New nodes are configured with ``archive_mode = on``
+and ``archive_command = '<pg_autoctl> archiver confirm --pgdata <PGDATA> %f'``
+(``pg_autoctl create postgres --archive-confirm off`` writes
+``archive_mode = off`` instead). Postgres only recycles a WAL segment once the
+command succeeds, so a segment is never recycled before the archiver holds it.
+
+The command calls ``pgautofailover.archive_confirmed()`` on the monitor with a
+3 seconds connect timeout, without needing the ``pg_autoctl`` service to be
+running. A group with no archiver is always confirmed, so a cluster without an
+archiver never blocks WAL recycling. Timeline history, ``.backup`` and
+``.partial`` files are not confirmed: they are informational and the
+archiver's ``pg_receivewal`` captures timeline histories itself.
+
+When the monitor cannot be reached, the command relies on
+``$PGDATA/pg_autoctl.archive-confirm``, written after every successful
+monitor answer. If the last known answer is that the group has no archiver the
+command succeeds; if archivers exist, or nothing is cached, it fails and
+Postgres retries.
+
+This is a durability trade-off: when the archiver is down, ``archive_command``
+fails and ``pg_wal`` grows on the primary until the archiver catches up.
+
+``archive_mode`` requires a Postgres restart. Nodes created before an upgrade
+get the setting written in ``postgresql-auto-failover.conf`` at the next
+configuration rewrite, and ``pg_autoctl`` logs a warning when the running
+Postgres has ``archive_mode = off`` while archive confirmation is enabled:
+restart Postgres to enable WAL archive confirmation.
+
 Operating notes
 ---------------
 

@@ -9,6 +9,7 @@ pg_autoctl archiver - Manage a pg_auto_failover archiver node
    :maxdepth: 1
 
    pg_autoctl_archiver_serve
+   pg_autoctl_archiver_confirm
    pg_autoctl_archiver_formation
    pg_autoctl_archiver_show
    pg_autoctl_archiver_backup
