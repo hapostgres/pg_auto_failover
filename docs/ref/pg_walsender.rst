@@ -19,7 +19,7 @@ Two modes of operation are supported:
 - **``scram-secret`` mode**: prints one ``archiver-passwd`` line
   (``<user>:SCRAM-SHA-256$...``) for the password in ``PGPASSWORD``.
 - **``fetch-file`` mode**: a one-shot client that fetches a single named
-  file over the ``FETCH_FILE`` side-channel and exits -- what a node's own
+  file with the ``FETCH_FILE`` replication command and exits -- what a node's own
   ``restore_command`` shells out to, the same way this project already
   shells out to real ``pg_receivewal``/``pg_basebackup`` elsewhere.
 
@@ -28,7 +28,8 @@ Synopsis
 
 ::
 
-  pg_walsender --port <port> [--pgdata <path>]
+  pg_walsender --port <port> [--pgdata <path> | --insecure]
+               [--auth-timeout <seconds>]
                [--ssl-cert-file <path> --ssl-key-file <path>]
   PGPASSWORD=... pg_walsender scram-secret [--user <name>]
 
@@ -75,17 +76,43 @@ Options
 
   The archiver's own top-level storage root -- the same value given as
   ``--pgdata`` to ``pg_autoctl create archiver`` -- defaulting to the
-  ``PGDATA`` environment variable. Used to derive
-  ``<pgdata>/archiver-routes.ini``, the routes file mapping
-  ``"<formation>/<group>"`` (matched against the incoming connection's
-  dbname) to its storage path -- written by
-  :ref:`pg_autoctl_archiver`'s own reconciler process, not meant to be
-  hand-edited -- and ``<pgdata>/archiver-hba.conf`` and ``archiver-passwd`` (plus
-  ``archiver-monitor.uri`` and a local ``archiver-nodes.list`` per route), which decide who may connect (see
-  :ref:`archiving_architecture`; the HBA file is created with a default
-  trusting the monitor's node list when missing). Omit both ``--pgdata``
-  and ``PGDATA`` only for manual, standalone testing (accepts any dbname,
-  no authentication).
+  ``PGDATA`` environment variable. Everything the server needs is derived
+  from it:
+
+  - ``<pgdata>/archiver-routes.ini``: the routes file mapping
+    ``"<formation>/<group>"`` (matched against the incoming connection's
+    dbname) to its storage path. It is written by
+    :ref:`pg_autoctl_archiver`'s reconciler process and is not meant to be
+    hand-edited.
+  - ``<pgdata>/archiver-hba.conf`` and ``<pgdata>/archiver-passwd``, which
+    decide who may connect (see :ref:`archiving_architecture`). The HBA
+    file is created with a default line that trusts the monitor's node
+    list when it is missing.
+  - ``<pgdata>/archiver-monitor.uri``, and a local ``archiver-nodes.list``
+    per route: the copy of the monitor's node list that the ``monitor``
+    HBA address is checked against, so that connections never depend on
+    the monitor being up.
+  - ``<route dir>/archiver-walsegsize``: the WAL segment size of the
+    route's cluster, answered to ``SHOW wal_segment_size``.
+
+  Omitting both ``--pgdata`` and ``PGDATA`` is refused unless ``--insecure``
+  is given (see below).
+
+--insecure
+
+  Allow running without ``--pgdata``: no HBA file, no authentication, any
+  dbname accepted. Only meant for manual, standalone testing; without this
+  flag, ``pg_walsender`` exits with an error rather than silently serving
+  everybody.
+
+--auth-timeout
+
+  Number of seconds a connection gets to complete startup, TLS negotiation
+  and authentication (default ``30``). This is an absolute deadline from
+  accept(), not an idle timeout: a client that trickles bytes gets no more
+  time than a silent one. Pre-authentication messages larger than a small
+  fixed bound are rejected and the connection closed, so an unauthenticated
+  client cannot make the server buffer arbitrary amounts of data.
 
 ``fetch-file`` mode options:
 
@@ -130,3 +157,21 @@ running archiver.
 
 :ref:`archiving_architecture` covers the full process model, what this
 binary serves, and the local files it reads to do so.
+
+Access control behaviour
+------------------------
+
+- A malformed line in ``archiver-hba.conf`` makes the server fail closed:
+  every connection is rejected until the file is fixed. The file is
+  re-read for each new connection, no reload is needed.
+- An unknown route (dbname that is not a known ``<formation>/<group>``)
+  gets exactly the same generic rejection as a missing HBA entry, so an
+  unauthenticated client cannot probe which formations exist. Only after a
+  successful authentication is ``database does not exist`` (SQLSTATE
+  ``3D000``) reported.
+- ``FETCH_FILE`` is an ordinary replication-connection command, subject to
+  the same authentication. It only serves WAL segment names
+  (``[0-9A-F]{24}``) and timeline ``.history`` files; every other name,
+  including ``archiver-hba.conf``, ``..`` paths and dot-files, is refused.
+- ``CREATE_REPLICATION_SLOT`` is capped at 64 slots per route;
+  ``DROP_REPLICATION_SLOT`` releases them.

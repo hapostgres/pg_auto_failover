@@ -209,7 +209,7 @@ Two distinct connections, two distinct authentication stories:
   archiver created with none of those flags keeps a plain trust
   connection, same as before.
 - **Inbound, client → archiver's own listener**: an archiver listens on a
-  TCP port (``6543`` by default) speaking a subset of the PostgreSQL
+  TCP port (``6543`` by default, see ``pg_autoctl create archiver --serve-port``) speaking a subset of the PostgreSQL
   replication protocol. It serves TLS the way PostgreSQL does (an
   ``SSLRequest`` answered ``S``, then the handshake) with the certificate
   ``pg_autoctl create archiver --ssl-self-signed`` (or ``--server-cert`` /
@@ -541,13 +541,59 @@ deciding what else could talk to one.
   Basic physical replication slot support, for tools that expect to
   manage their own slot against whatever they're streaming from.
 
-Fetching a single WAL file
+``FETCH_FILE``
 
-  A small side channel used by this project's own ``restore_command``
-  tooling: ask for one file by name, get its exact bytes back. This is
+  A command of this project's own, sent like any other replication command
+  on a normal, authenticated replication connection (it is not a separate
+  channel): ask for one WAL segment or ``.history`` file by name, get its
+  exact bytes back. Any other file name (the archiver's own configuration,
+  paths with ``..``, dot-files) is refused. This is used by this project's
+  own ``restore_command`` tooling (``pg_walsender fetch-file``). This is
   what makes an archiver usable as a ``restore_command`` target on its
   own, without needing a full streaming connection just to recover one
   missing segment.
+
+Operating notes
+---------------
+
+Serving. ``pg_autoctl create archiver --serve-port PORT`` chooses the TCP
+port ``pg_walsender`` listens on (default ``6543``); the monitor stores it
+and hands it to nodes (``get_archiver_node``). ``pg_walsender`` gives each
+connection ``--auth-timeout`` seconds (default 30) to finish startup, TLS
+and authentication, rejects oversize pre-authentication messages, and fails
+closed on a malformed ``archiver-hba.conf``; ``--insecure`` is required to
+run without a ``--pgdata`` (no authentication at all). See
+:ref:`pg_walsender`.
+
+Nodes list. ``pg_walsender`` never talks to the monitor. The archiver's
+refresher process periodically copies the monitor's node list for each
+route into a local ``archiver-nodes.list``, and the default HBA address
+``monitor`` means "a host in that list", validated by a fingerprint at
+connect time. When the monitor is down the last list keeps being used, so
+already-registered nodes can keep taking base backups and fetching WAL.
+
+Per-route files. Besides the WAL and ``basebackups/``, each route
+directory holds ``archiver-walsegsize``, the WAL segment size of the group's
+cluster, so that ``SHOW wal_segment_size`` and segment arithmetic are right
+for clusters not using 16MB.
+
+Base backups on demand. ``pg_autoctl archiver backup now`` triggers a
+base backup immediately instead of waiting for the policy's ``frequency``.
+
+Local WAL retention. The archiver's local WAL cache is pruned to what the
+oldest retained base backup needs: segments older than the ``START WAL
+LOCATION`` file of the oldest kept backup are removed as backups are
+retired by the policy's ``maxcount`` / ``maxage``.
+
+Replication quorum. An archiver marked replication-quorum eligible
+(``pgautofailover.set_archiver_policy(formation, group, NULL, NULL, true)``)
+is a member of the primary's synchronous commit quorum: its
+``pg_receivewal`` connects with ``application_name``
+``pgautofailover_standby_<nodeid>`` and flushes synchronously, so
+``synchronous_standby_names`` can count it. It can then satisfy the quorum
+when a secondary is down. This is separate from ``archiver_quorum`` (the
+number of archivers that must have captured a segment before
+``wal_archived()`` reports it).
 
 See also
 --------

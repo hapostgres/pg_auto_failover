@@ -20,6 +20,22 @@ stock `pg_basebackup`, streaming standbys and `restore_command` read from it.
 * `pg_autoctl create postgres --from-archiver` to bootstrap a node from an
   archiver, and fast-forward of a lagging standby from an archiver. (#1186)
 * Monitor extension version 2.3, with an upgrade script from 2.2. (#1186)
+* `pg_autoctl create archiver --serve-port`, `pg_autoctl archiver backup now`,
+  and pruning of the archiver's local WAL cache to the oldest retained base
+  backup; a per-route `archiver-walsegsize` file.
+* An archiver marked replication-quorum eligible takes part in synchronous
+  commit: its `pg_receivewal` uses application_name
+  `pgautofailover_standby_<nodeid>` and flushes synchronously.
+* `pg_walsender` hardening: `--auth-timeout` (absolute deadline for startup,
+  TLS and authentication), `--insecure` required without `--pgdata`,
+  oversize pre-authentication messages rejected, HBA parse errors fail
+  closed, unknown routes indistinguishable from a missing HBA entry until
+  authenticated, `FETCH_FILE` limited to WAL segments and `.history` files,
+  at most 64 replication slots per route, `DROP_REPLICATION_SLOT`.
+* Documentation: "Adding an archiver to an existing cluster" (rolling
+  upgrade order: monitor, then every keeper, then the archiver).
+* CI: extension upgrade catalog check (2.2 to 2.3 versus a fresh 2.3) and new
+  archiver protocol, quorum, lifecycle and serve-port specs.
 * `pgaftest` `archiver { }` cluster blocks and a `wait until sql` polling
   primitive. (#1186)
 

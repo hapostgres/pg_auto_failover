@@ -46,10 +46,23 @@ to several formations right from the start::
       --formation billing \
       --run
 
-There is currently no command to attach an already-running archiver to a
-further formation later on -- covering an additional formation, or a
-worker group added to an already-attached Citus formation, requires
-specifying every formation up front with a repeated ``--formation``.
+An already-running archiver can be attached to a further formation, or
+detached from one, later on::
+
+  $ pg_autoctl archiver formation add \
+      --monitor postgresql://autoctl_node@monitor/pg_auto_failover \
+      --name archiver1 --formation billing
+  $ pg_autoctl archiver formation remove \
+      --monitor postgresql://autoctl_node@monitor/pg_auto_failover \
+      --name archiver1 --formation billing
+
+``--serve-port`` chooses the port the archiver serves base backups and WAL
+on (default ``6543``). ``pg_autoctl archiver backup now`` produces a base
+backup immediately, outside the policy's schedule. See
+:ref:`archiving_architecture` for serving, access control and quorum details.
+
+To add an archiver to a cluster that already runs, follow
+:ref:`archiving_upgrade`: keepers must be upgraded first.
 
 ``--region`` labels which data-centre or availability zone this archiver
 runs in -- purely informational, shown by ``pg_autoctl watch``. More than
@@ -183,6 +196,7 @@ there.
 See also
 --------
 
+- :ref:`archiving_upgrade` -- adding an archiver to an existing cluster
 - :ref:`archiving_architecture` -- what an archiver is and where it fits
   among the other architectures
 - :ref:`archiving_fault_tolerance` -- WAL capture independent of any

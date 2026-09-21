@@ -78,6 +78,7 @@ __ https://github.com/hapostgres/pg_auto_failover
 
    operations
    archiving
+   archiving-upgrade
    testing
    reporting-bugs
    faq

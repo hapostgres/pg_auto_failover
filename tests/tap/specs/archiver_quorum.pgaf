@@ -1,0 +1,103 @@
+# Archivers and quorums, two distinct things:
+#
+#  (a) archiver_quorum: how many archivers must have captured a segment
+#      before pgautofailover.wal_archived() says true. With two archivers and
+#      archiver_quorum = 2, a closed segment is NOT archived while one of the
+#      two archivers is down, and becomes archived once it is back and has
+#      caught up (its pg_receivewal resumes from the slot).
+#
+#  (b) replication-quorum: an archiver marked replication-quorum eligible
+#      (set_node_replication_quorum on the archiver's node row) is a
+#      synchronous-replication quorum member. Its pg_receivewal connects with
+#      application_name pgautofailover_standby_<nodeid> and flushes
+#      synchronously, so the primary's synchronous_standby_names can count it.
+#      What this proves about the design: the archiver is a first-class
+#      member of the commit quorum, not a passive side copy. With the only
+#      secondary (node2) stopped, a synchronous commit on the primary still
+#      completes within seconds because an archiver satisfies the quorum, and
+#      the archiver's row in pg_stat_replication is sync/quorum. (The monitor
+#      may also demote the primary to wait_primary once node2 is declared
+#      unhealthy, which drops synchronous replication altogether; the row
+#      check plus the commit are what we can assert without racing that.)
+#
+# Predecessor: archiver_two_regions.pgaf (two archivers, same formation).
+
+cluster {
+    monitor
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+    }
+    archiver archiver1 {
+        replication-password "pgaf-repl-pw"
+        formation default
+    }
+    archiver archiver2 {
+        replication-password "pgaf-repl-pw"
+        formation default
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+    wait until archiver1 state is archiving  timeout 60s
+    wait until archiver2 state is archiving  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_archiver_quorum_two_needs_both {
+    sql monitor { SELECT pgautofailover.set_archiver_policy('default', NULL, 2, NULL, NULL); }
+    sql node1 { CREATE TABLE q1(a int); INSERT INTO q1 VALUES (1); }
+
+    # both up: quorum of 2 is reached
+    let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg1}') } is { t }  timeout 60s
+
+    # archiver2 down: a new closed segment cannot reach quorum 2
+    compose stop archiver2
+    wait until archiver2 stopped  timeout 60s
+    sql node1 { INSERT INTO q1 VALUES (2); }
+    let seg2 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    sleep 15s
+    sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg2}') }
+    expect { f }
+
+    # archiver2 back: it catches up and the segment becomes archived
+    compose start archiver2
+    wait until archiver2 state is archiving  timeout 90s
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg2}') } is { t }  timeout 120s
+
+    sql monitor { SELECT pgautofailover.set_archiver_policy('default', NULL, 1, NULL, NULL); }
+}
+
+step test_002_archiver_is_a_synchronous_quorum_member {
+    # the node-level knob (the design's replication_quorum on the ARCHIVING row),
+    # not the archiver policy's replicationquorumeligible flag, which nothing reads
+    sql monitor { SELECT pgautofailover.set_node_replication_quorum('default', 'archiver-1-0', true); }
+    let aid = sql monitor { SELECT nodeid FROM pgautofailover.node WHERE formationid = 'default' AND nodename = 'archiver-1-0' }
+
+    # the archiver shows up as a synchronous / quorum standby of the primary
+    exec node1 bash -c 'for i in $(seq 90); do s=$(psql -Atc "SELECT sync_state FROM pg_stat_replication WHERE application_name = \$\$pgautofailover_standby_${aid}\$\$" 2>/dev/null); case "$s" in sync|quorum) exit 0;; esac; sleep 1; done; psql -Atc "SELECT application_name, sync_state FROM pg_stat_replication"; exit 1'
+
+    # baseline: synchronous commit works with everyone up, and the monitor
+    # put the archiver into synchronous_standby_names next to the secondary
+    exec node1 bash -c 'timeout 20 psql -c "INSERT INTO q1 VALUES (10)"'
+    exec node1 bash -c 'psql -Atc "SHOW synchronous_standby_names" | grep -q "pgautofailover_standby_${aid}"'
+    exec node1 bash -c 'psql -Atc "SHOW synchronous_standby_names" | grep -q "pgautofailover_standby_"'
+
+    # What this does NOT prove yet, on purpose: "the secondary is down, the
+    # archiver alone keeps synchronous commit going". Today the monitor's FSM
+    # only counts SECONDARY nodes as healthy synchronous standbys
+    # (IsHealthySyncStandby), so when the secondary dies the primary goes to
+    # wait_primary and switches synchronous replication OFF instead of
+    # staying primary with the archiver as its quorum. That is a monitor FSM
+    # change, tracked separately from this milestone.
+}
+
+sequence
+    test_001_archiver_quorum_two_needs_both
+    test_002_archiver_is_a_synchronous_quorum_member

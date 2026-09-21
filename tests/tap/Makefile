@@ -35,7 +35,7 @@ RUN_LOGDIR  ?= $(REPO_ROOT)tests/tap/logs
 # schedule:PGVERSION pairs, mirroring test_pgaftest's matrix in ci.yml.
 FAST_SCHEDULES     = quick node archiver ssl
 FAST_PGVERSIONS    = 14 15 16 17 18 19
-SLOW_PG17_SCHEDULES = multi-alternate multi-misc multi-async node-fsm-gaps archiver-multi citus-1 citus-2
+SLOW_PG17_SCHEDULES = multi-alternate multi-misc multi-async node-fsm-gaps archiver-multi archiver-dr citus-1 citus-2
 
 MATRIX  = $(foreach s,$(FAST_SCHEDULES),$(foreach v,$(FAST_PGVERSIONS),$(s)-pg$(v)))
 MATRIX += $(foreach s,$(SLOW_PG17_SCHEDULES),$(s)-pg17)

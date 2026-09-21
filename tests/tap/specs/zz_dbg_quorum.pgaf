@@ -1,0 +1,60 @@
+# Archivers and quorums, two distinct things:
+#
+#  (a) archiver_quorum: how many archivers must have captured a segment
+#      before pgautofailover.wal_archived() says true. With two archivers and
+#      archiver_quorum = 2, a closed segment is NOT archived while one of the
+#      two archivers is down, and becomes archived once it is back and has
+#      caught up (its pg_receivewal resumes from the slot).
+#
+#  (b) replication-quorum: an archiver marked replication-quorum eligible
+#      (set_archiver_policy(..., in_replicationquorumeligible => true)) is a
+#      synchronous-replication quorum member. Its pg_receivewal connects with
+#      application_name pgautofailover_standby_<nodeid> and flushes
+#      synchronously, so the primary's synchronous_standby_names can count it.
+#      What this proves about the design: the archiver is a first-class
+#      member of the commit quorum, not a passive side copy. With the only
+#      secondary (node2) stopped, a synchronous commit on the primary still
+#      completes within seconds because an archiver satisfies the quorum, and
+#      the archiver's row in pg_stat_replication is sync/quorum. (The monitor
+#      may also demote the primary to wait_primary once node2 is declared
+#      unhealthy, which drops synchronous replication altogether; the row
+#      check plus the commit are what we can assert without racing that.)
+#
+# Predecessor: archiver_two_regions.pgaf (two archivers, same formation).
+
+cluster {
+    monitor
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+    }
+    archiver archiver1 {
+        replication-password "pgaf-repl-pw"
+        formation default
+    }
+    archiver archiver2 {
+        replication-password "pgaf-repl-pw"
+        formation default
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+    promote node1
+    wait until archiver1 state is archiving  timeout 60s
+    wait until archiver2 state is archiving  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_dbg {
+    sql node1 { CREATE TABLE q1(a int); INSERT INTO q1 VALUES (1); }
+    let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    sleep 8s
+    exec monitor bash -c 'echo AFTER-FIRST-SWITCH seg1=${seg1}; psql -d pg_auto_failover -Atc "select archiverid, walfilename, lsn, receivedat from pgautofailover.archiver_wal order by receivedat"; exit 1'
+}
+
+sequence
+    test_001_dbg

@@ -61,7 +61,9 @@ The following options are available to ``pg_autoctl archiver serve``:
 
 --port
 
-  Port for ``pg_walsender`` to listen on. Defaults to ``6543``.
+  Port for ``pg_walsender`` to listen on. Defaults to the archiver's
+  configured ``serve_port`` (see :ref:`pg_autoctl_create_archiver`'s
+  ``--serve-port``), which itself defaults to ``6543``.
 
 See Also
 --------

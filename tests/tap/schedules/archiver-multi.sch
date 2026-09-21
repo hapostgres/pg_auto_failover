@@ -6,9 +6,9 @@
 # protocol -- so PG17-only matches node-fsm-gaps.sch's own rationale
 # ("this is FSM/logic coverage, not version-specific code paths") rather
 # than archiver.sch's all-versions one. Also keeps this schedule light:
-# archiver_multi_formation.pgaf alone has a mandatory 50s sleep (one
-# reconciler tick, ARCHIVER_RECONCILER_INTERVAL_SECONDS) plus several
-# more, and archiver.sch already learned the hard way (this same PR,
+# archiver_multi_formation.pgaf alone waits on the reconciler's periodic
+# tick (ARCHIVER_RECONCILER_INTERVAL_SECONDS) in several places (polling
+# with a timeout, no fixed sleep), and archiver.sch already learned the hard way (this same PR,
 # CI run 84233594160) what happens when a schedule's own runtime creeps
 # past the 20-minute step timeout.
 archiver_multi_formation

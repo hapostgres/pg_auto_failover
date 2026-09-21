@@ -18,3 +18,4 @@ archiver_basebackup_policy
 archiver_bootstrap_and_fast_forward
 archiver_walsender_auth
 archiver_warm_standby
+archiver_walsender_protocol

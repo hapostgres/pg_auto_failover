@@ -27,6 +27,7 @@ for the operational side of this command.
                          (default: "default")
     --region             data-centre or availability-zone label for this
                          archiver (default: "default")
+    --serve-port         TCP port pg_walsender serves on (default: 6543)
     --basebackup-policy   base-backup production/retention policy to attach
                          (default: "default")
     --replication-password  password used by pg_receivewal to connect to
@@ -126,6 +127,17 @@ The following options are available to ``pg_autoctl create archiver``:
   to the very same formation at once -- distinct regions across them is
   the intended shape for geographically-redundant disaster-recovery
   coverage of one formation.
+
+--serve-port
+
+  TCP port ``pg_walsender`` listens on for this archiver, between 1 and
+  65535. Defaults to ``6543``. The port is registered on the monitor (so
+  standbys bootstrapping with ``--from-archiver`` and the failover
+  machinery find the archiver on it) and persisted in the archiver's
+  configuration file as ``serve_port`` in the ``[archiver]`` section.
+  In a ``node.ini`` / node spec the same setting is ``serve_port`` in the
+  ``[options]`` section. ``pg_autoctl archiver serve --port`` still
+  overrides it for that process.
 
 --basebackup-policy
 
