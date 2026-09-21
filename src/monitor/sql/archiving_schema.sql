@@ -129,6 +129,19 @@ SELECT pgautofailover.wal_archived('archiving_test', 0, '00000001000000000000000
 SELECT pgautofailover.set_archiver_policy('archiving_test', NULL, 2, NULL, NULL);
 SELECT pgautofailover.wal_archived('archiving_test', 0, '000000010000000000000001');
 
+-- with archiverquorum = 2, a segment reported by ONE archiver is not yet
+-- archived, and becomes so as soon as a SECOND archiver reports it too
+SELECT nodeid AS nodeid2 FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND groupid = 0
+   AND haspgdata = false AND nodename = 'archiver-2-0' \gset
+
+SELECT pgautofailover.report_wal_received(
+           :nodeid, '000000010000000000000009', '0/9000000', 111);
+SELECT pgautofailover.wal_archived('archiving_test', 0, '000000010000000000000009');
+SELECT pgautofailover.report_wal_received(
+           :nodeid2, '000000010000000000000009', '0/9000000', 111);
+SELECT pgautofailover.wal_archived('archiving_test', 0, '000000010000000000000009');
+
 -- a group-specific override takes precedence over the formation-wide default
 SELECT pgautofailover.set_archiver_policy('archiving_test', 0, 1, NULL, NULL);
 SELECT * FROM pgautofailover.get_archiver_policy('archiving_test', 0);
@@ -276,3 +289,170 @@ SELECT count(*) AS checked_functions,
    AND p.proname IN ('get_group_hosts', 'get_group_hosts_hash',
                      'report_wal_received', 'create_rclone_config',
                      'archiver_add_formation');
+
+-- ── serveport: stored per archiver, defaults to 6543, range-checked ─────────
+
+SELECT archiverid AS the_archiverid, serveport AS the_serveport
+  FROM pgautofailover.archiver ORDER BY archiverid;
+
+SELECT pgautofailover.register_archiver('archiver3', 'archiver3.local',
+                                         in_serveport => 7000)
+       AS archiverid3 \gset
+
+SELECT serveport AS the_serveport FROM pgautofailover.archiver
+ WHERE archiverid = :archiverid3;
+
+\set VERBOSITY terse
+SELECT pgautofailover.register_archiver('archiver4', 'archiver4.local',
+                                         in_serveport => 0);
+SELECT pgautofailover.register_archiver('archiver4', 'archiver4.local',
+                                         in_serveport => 65536);
+\set VERBOSITY default
+
+-- get_archiver_node() returns the serving archiver's own serveport
+UPDATE pgautofailover.node
+   SET reportedstate = 'archiving', goalstate = 'archiving'
+ WHERE nodeid = :nodeid2;
+
+SELECT node_name AS archiver_node_name, node_host AS archiver_node_host,
+       node_port AS archiver_node_port, serveport AS archiver_serveport
+  FROM pgautofailover.get_archiver_node('archiving_test', 0);
+
+UPDATE pgautofailover.archiver SET serveport = 6600 WHERE archiverid = :archiverid2;
+
+SELECT serveport AS archiver_serveport
+  FROM pgautofailover.get_archiver_node('archiving_test', 0);
+
+-- ── get_archivers: one row per (archiver, membership) in THAT formation ─────
+-- archiver2 is attached to two formations: each formation lists it once,
+-- with its own node columns, never a second row with NULL node columns.
+-- archiver3 is attached (autoregister-style, no node row yet) to
+-- archiving_test only: listed once, with no node.
+
+SELECT count(*) AS attached_count
+  FROM pgautofailover.archiver_add_formation(:archiverid2, 'archiving_test_2');
+
+INSERT INTO pgautofailover.archiver_formation (archiverid, formationid)
+VALUES (:archiverid3, 'archiving_test');
+
+SELECT archiver_name AS the_archivername, node_id IS NOT NULL AS has_node_row
+  FROM pgautofailover.get_archivers('archiving_test')
+ ORDER BY archiver_id;
+
+SELECT archiver_name AS the_archivername, node_id IS NOT NULL AS has_node_row
+  FROM pgautofailover.get_archivers('archiving_test_2')
+ ORDER BY archiver_id;
+
+-- ── basebackup policy resolution order ──────────────────────────────────────
+-- group row, then formation default, then the serving archiver's own
+-- default, then the seeded 'default' policy
+
+SELECT pgautofailover.create_basebackup_policy('pol_archiver_default', '{}'::jsonb)
+       AS pol_archiver \gset
+SELECT pgautofailover.create_basebackup_policy('pol_formation_default', '{}'::jsonb)
+       AS pol_formation \gset
+SELECT pgautofailover.create_basebackup_policy('pol_group_specific', '{}'::jsonb)
+       AS pol_group \gset
+
+SELECT pgautofailover.create_formation('archiving_test_3', 'pgsql', 'postgres',
+                                        true, 1);
+INSERT INTO pgautofailover.node
+       (formationid, groupid, nodename, nodehost, nodeport, sysidentifier,
+        goalstate, reportedstate)
+VALUES ('archiving_test_3', 0, 'node4', 'node4.local', 5432, 333,
+        'primary', 'primary');
+
+SELECT pgautofailover.register_archiver('archiver5', 'archiver5.local',
+                                         basebackuppolicyid => :pol_archiver)
+       AS archiverid5 \gset
+SELECT count(*) AS attached_count
+  FROM pgautofailover.archiver_add_formation(:archiverid5, 'archiving_test_3');
+
+-- no archiver_policy row at all: the serving archiver's own default wins
+SELECT policyname = 'pol_archiver_default' AS archiver_default_wins
+  FROM pgautofailover.get_basebackup_policy_for_group('archiving_test_3', 0);
+
+-- formation-wide default beats the archiver's own default
+SELECT pgautofailover.set_archiver_policy('archiving_test_3', NULL, 2,
+                                          NULL, NULL);
+SELECT pgautofailover.set_archiver_policy('archiving_test_3', NULL, NULL,
+                                          :pol_formation, NULL);
+SELECT policyname = 'pol_formation_default' AS formation_default_wins
+  FROM pgautofailover.get_basebackup_policy_for_group('archiving_test_3', 0);
+
+-- set_archiver_policy() with a NULL argument keeps the stored value
+SELECT archiverquorum AS quorum_retained
+  FROM pgautofailover.get_archiver_policy('archiving_test_3', 5);
+
+-- a group-specific row beats both
+SELECT pgautofailover.set_archiver_policy('archiving_test_3', 0, NULL,
+                                          :pol_group, NULL);
+SELECT policyname = 'pol_group_specific' AS group_specific_wins
+  FROM pgautofailover.get_basebackup_policy_for_group('archiving_test_3', 0);
+
+-- a group row that only sets the quorum (NULL policy) falls through
+SELECT pgautofailover.set_archiver_policy('archiving_test_3', 1, 3,
+                                          NULL, NULL);
+SELECT policyname = 'pol_formation_default' AS null_policy_falls_through
+  FROM pgautofailover.get_basebackup_policy_for_group('archiving_test_3', 1);
+
+-- the sibling function takes the archiver explicitly; an unknown formation
+-- has no policy rows, so the archiver's default applies, and with no known
+-- archiver either the seeded 'default' policy applies
+SELECT policyname = 'pol_archiver_default' AS sibling_archiver_wins
+  FROM pgautofailover.get_basebackup_policy_for_archiver_group(
+           :archiverid5, 'no_such_formation', 0);
+SELECT policyname = 'default' AS seeded_default_wins
+  FROM pgautofailover.get_basebackup_policy_for_archiver_group(
+           NULL, 'no_such_formation', 0);
+
+-- ── candidate priority is pinned to zero for archiver rows ──────────────────
+
+\set VERBOSITY terse
+SELECT pgautofailover.set_node_candidate_priority(
+           'archiving_test', 'archiver-2-0', 50);
+\set VERBOSITY default
+
+SELECT candidatepriority AS candidate_priority FROM pgautofailover.node
+ WHERE nodeid = :nodeid2;
+
+-- ── formation removal and node removal clean the archiver rows ──────────────
+
+SELECT pgautofailover.create_formation('archiving_test_4', 'pgsql', 'postgres',
+                                        true, 1);
+SELECT pgautofailover.create_archiver_node(
+           :archiverid2, 'warm-standby', '/var/lib/pgaf-archiver/standby4',
+           NULL, NULL, 'archiving_test_4', 0, 'continuous')
+       AS archivernodeid4 \gset
+
+SELECT pgautofailover.drop_formation('archiving_test_4');
+
+SELECT count(*) AS warm_standby_left FROM pgautofailover.archiver_node
+ WHERE formationid = 'archiving_test_4';
+
+-- deleting an ARCHIVING node row cascades to its wal-receiver row
+SELECT count(*) AS attached_count
+  FROM pgautofailover.archiver_add_formation(:archiverid3, 'archiving_test_2');
+
+DELETE FROM pgautofailover.node
+ WHERE formationid = 'archiving_test_2' AND nodename = 'archiver-' || :archiverid3 || '-0';
+
+SELECT count(*) AS wal_receiver_left FROM pgautofailover.archiver_node
+ WHERE archiverid = :archiverid3 AND kind = 'wal-receiver';
+
+-- ── hardening of the functions this milestone added or replaced ─────────────
+
+SELECT count(*) AS checked_functions,
+       count(*) FILTER (WHERE has_function_privilege('public', p.oid, 'EXECUTE'))
+         AS public_can_execute,
+       count(*) FILTER (WHERE NOT has_function_privilege('autoctl_node', p.oid, 'EXECUTE'))
+         AS node_cannot_execute,
+       count(*) FILTER (WHERE p.proconfig IS NULL
+                           OR p.proconfig::text NOT LIKE '%search_path=pg_catalog, pgautofailover, pg_temp%')
+         AS missing_search_path
+  FROM pg_proc p
+ WHERE p.pronamespace = 'pgautofailover'::regnamespace
+   AND p.prosecdef
+   AND p.proname IN ('get_archiver_node', 'get_archivers', 'register_archiver',
+                     'get_basebackup_policy_for_group',
+                     'get_basebackup_policy_for_archiver_group');

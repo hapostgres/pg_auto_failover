@@ -1361,12 +1361,31 @@ perform_failover(PG_FUNCTION_ARGS)
 	LockNodeGroup(formationId, groupId, ExclusiveLock);
 
 	List *groupNodeList = AutoFailoverNodeGroup(formationId, groupId);
-	if (list_length(groupNodeList) < 2)
+
+	/*
+	 * ARCHIVING rows (haspgdata false) are group members but never data
+	 * nodes: they can neither be failed over from nor to, so the node counts
+	 * below only consider nodes that hold a Postgres instance.
+	 */
+	int dataNodeCount = 0;
+	ListCell *dataNodeCell = NULL;
+
+	foreach(dataNodeCell, groupNodeList)
+	{
+		AutoFailoverNode *dataNode = (AutoFailoverNode *) lfirst(dataNodeCell);
+
+		if (dataNode->hasPgData)
+		{
+			++dataNodeCount;
+		}
+	}
+
+	if (dataNodeCount < 2)
 	{
 		ereport(ERROR,
 				(errmsg("cannot fail over: group %d in formation %s "
 						"currently has %d node registered",
-						groupId, formationId, list_length(groupNodeList)),
+						groupId, formationId, dataNodeCount),
 				 errdetail("At least 2 nodes are required "
 						   "to implement a failover")));
 	}
@@ -1415,6 +1434,14 @@ perform_failover(PG_FUNCTION_ARGS)
 	 * When we have more than two nodes, then we need to check that we have at
 	 * least one candidate for failover and initiate the REPORT_LSN dance to
 	 * make the failover happen.
+	 */
+	/*
+	 * The two-node shortcut is keyed on the group size the FSM itself uses
+	 * (groupHasExactlyTwoNodes counts every row of the group, archiver rows
+	 * included): a group of two data nodes and an archiver takes the
+	 * general path below, exactly as it did before archivers existed. With
+	 * the dataNodeCount check above, a group of exactly two rows here is
+	 * two data nodes.
 	 */
 	if (list_length(groupNodeList) == 2)
 	{
@@ -1512,6 +1539,19 @@ perform_failover(PG_FUNCTION_ARGS)
 		List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 		AutoFailoverNode *firstStandbyNode = linitial(standbyNodesGroupList);
 		char message[BUFSIZE] = { 0 };
+		ListCell *standbyCell = NULL;
+
+		/* prefer a data node to drive the election, not an ARCHIVING row */
+		foreach(standbyCell, standbyNodesGroupList)
+		{
+			AutoFailoverNode *standbyNode = (AutoFailoverNode *) lfirst(standbyCell);
+
+			if (standbyNode->hasPgData)
+			{
+				firstStandbyNode = standbyNode;
+				break;
+			}
+		}
 
 		/*
 		 * Dispatch through MonitorFSM[]'s API_TRIGGERED section: primary ->
@@ -2076,6 +2116,19 @@ set_node_candidate_priority(PG_FUNCTION_ARGS)
 							   MAX_USER_DEFINED_CANDIDATE_PRIORITY)));
 	}
 
+	/*
+	 * An ARCHIVING row (haspgdata false) has no Postgres instance that could
+	 * ever be promoted: its candidate priority is pinned to zero.
+	 */
+	if (!currentNode->hasPgData && candidatePriority != 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("invalid value for candidate_priority: "
+						"archiver nodes hold no Postgres data and must "
+						"always have candidate priority set to zero")));
+	}
+
 	if (strcmp(currentNode->nodeCluster, "default") != 0 &&
 		candidatePriority != 0)
 	{
@@ -2560,7 +2613,9 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 		if (secondaryNode != NULL &&
 			secondaryNode->replicationQuorum &&
-			secondaryNode->goalState == REPLICATION_STATE_SECONDARY)
+			(secondaryNode->goalState == REPLICATION_STATE_SECONDARY ||
+			 (!secondaryNode->hasPgData &&
+			  secondaryNode->goalState == REPLICATION_STATE_ARCHIVING)))
 		{
 			/* enable synchronous replication */
 			StringInfo sbnames = makeStringInfo();

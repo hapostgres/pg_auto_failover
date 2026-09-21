@@ -841,7 +841,18 @@ AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedtli, reportedlsn, health, nodecluster, region
+          reportedtli, reportedlsn,
+          -- an ARCHIVING row (haspgdata false) has no postmaster to probe
+          -- (the health-check worker skips it); derive its health from
+          -- its own recent reports instead: 1 while it keeps reporting
+          -- 'archiving', 0 once that goes quiet, -1 before it ever did.
+          case when haspgdata then health
+               when reportedstate = 'archiving'
+                then case when reporttime > now() - current_setting('pgautofailover.node_considered_unhealthy_timeout')::interval
+                          then 1 else 0 end
+               else -1
+           end,
+          nodecluster, region
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id
@@ -879,7 +890,18 @@ AS $$
    select kind, nodename, nodehost, nodeport, groupid, nodeid,
           reportedstate, goalstate,
    		  candidatepriority, replicationquorum,
-          reportedtli, reportedlsn, health, nodecluster, region
+          reportedtli, reportedlsn,
+          -- an ARCHIVING row (haspgdata false) has no postmaster to probe
+          -- (the health-check worker skips it); derive its health from
+          -- its own recent reports instead: 1 while it keeps reporting
+          -- 'archiving', 0 once that goes quiet, -1 before it ever did.
+          case when haspgdata then health
+               when reportedstate = 'archiving'
+                then case when reporttime > now() - current_setting('pgautofailover.node_considered_unhealthy_timeout')::interval
+                          then 1 else 0 end
+               else -1
+           end,
+          nodecluster, region
      from pgautofailover.node
      join pgautofailover.formation using(formationid)
     where formationid = formation_id
@@ -1403,6 +1425,13 @@ CREATE TABLE pgautofailover.archiver
 
     autoregister     bool NOT NULL DEFAULT true,
 
+    -- TCP port this archiver's own pg_walsender-compatible service listens
+    -- on (`pg_autoctl create postgres --from-archiver` and the keepers'
+    -- primary_conninfo connect to hostname:serveport: the ARCHIVING node
+    -- row itself carries the nodeport = 0 sentinel, see haspgdata).
+    -- Exposed to keepers by get_archiver_node()'s serveport column.
+    serveport        int NOT NULL DEFAULT 6543,
+
     -- cap on resident 'warm-standby' archiver_node rows (either cadence)
     -- this host is allowed to keep running at once
     maxresidentreplay int NOT NULL DEFAULT 1,
@@ -1423,6 +1452,7 @@ CREATE TABLE pgautofailover.archiver
 
     UNIQUE (archivername),
     CHECK (maxresidentreplay >= 0),
+    CHECK (serveport BETWEEN 1 AND 65535),
     CHECK (usedbytes IS NULL OR usedbytes >= 0),
     CHECK (freebytes IS NULL OR freebytes >= 0)
  );
@@ -1612,6 +1642,10 @@ CREATE TABLE pgautofailover.archiver_node
     -- placement, uniform across every kind: NULL = colocated (local file
     -- reads, zero network); non-NULL = a separate node (remote fetch)
     hostname         text,
+    -- the instance's own PGDATA directory on the archiver host. Always
+    -- NOT NULL: '' for a 'wal-receiver' row (its pg_receivewal target is
+    -- the archiver's own walcache, there is no Postgres data directory to
+    -- name), a real path for 'warm-standby' and 'pitr' rows.
     pgdata           text NOT NULL,
 
     -- 'wal-receiver' only: which ARCHIVING row this instance backs.
@@ -1625,7 +1659,10 @@ CREATE TABLE pgautofailover.archiver_node
                             ON DELETE CASCADE,
 
     -- 'warm-standby' only: which group's WAL cache this instance replays
-    formationid      text REFERENCES pgautofailover.formation (formationid),
+    -- ON DELETE CASCADE: dropping a formation must not fail (nor leave
+    -- orphans) because warm-standby instances still reference it.
+    formationid      text REFERENCES pgautofailover.formation (formationid)
+                            ON DELETE CASCADE,
     groupid          int,
 
     -- 'warm-standby' only: continuous (chases the primary continuously,
@@ -1817,7 +1854,8 @@ CREATE FUNCTION pgautofailover.register_archiver
     autoregister bool DEFAULT true,
     maxresidentreplay int DEFAULT 1,
     rcloneconfigname text DEFAULT NULL,
-    region text DEFAULT 'default'
+    region text DEFAULT 'default',
+    in_serveport int DEFAULT 6543
  )
  RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER
 AS $$
@@ -1833,10 +1871,11 @@ BEGIN
 
     INSERT INTO pgautofailover.archiver
            (archivername, hostname, basebackuppolicyid,
-            autoregister, maxresidentreplay, region)
+            autoregister, maxresidentreplay, region, serveport)
     VALUES (archivername, hostname, resolved_policyid,
             autoregister, maxresidentreplay,
-            coalesce(register_archiver.region, 'default'))
+            coalesce(register_archiver.region, 'default'),
+            coalesce(in_serveport, 6543))
       RETURNING archiverid INTO new_archiverid;
 
     INSERT INTO pgautofailover.archiver_storage
@@ -1851,11 +1890,11 @@ BEGIN
 END;
 $$;
 
-comment on function pgautofailover.register_archiver(text,text,text,bigint,bool,int,text,text)
+comment on function pgautofailover.register_archiver(text,text,text,bigint,bool,int,text,text,int)
         is 'register a new Archiver process identity, with its mandatory local storage target';
 
 grant execute on function
-      pgautofailover.register_archiver(text,text,text,bigint,bool,int,text,text)
+      pgautofailover.register_archiver(text,text,text,bigint,bool,int,text,text,int)
    to autoctl_node;
 
 -- periodic storage heartbeat: usedbytes/freebytes/lastreporttime all move
@@ -1906,11 +1945,18 @@ AS $$
      JOIN pgautofailover.archiver_formation af
        ON af.archiverid = a.archiverid
       AND af.formationid = get_archivers.formationid
-     LEFT JOIN pgautofailover.archiver_node an
+     -- the wal-receiver membership is joined as one unit, already
+     -- restricted to THIS formation: an archiver attached to several
+     -- formations must not return its other formations' memberships as
+     -- extra rows with NULL node columns. Result: one row per (archiver,
+     -- membership) in this formation, plus once an archiver that has no
+     -- membership here yet.
+     LEFT JOIN (pgautofailover.archiver_node an
+                JOIN pgautofailover.node n
+                  ON n.nodeid = an.nodeid
+                 AND n.formationid = get_archivers.formationid)
             ON an.archiverid = a.archiverid AND an.kind = 'wal-receiver'
-     LEFT JOIN pgautofailover.node n
-            ON n.nodeid = an.nodeid AND n.formationid = get_archivers.formationid
- ORDER BY a.archiverid;
+ ORDER BY a.archiverid, n.groupid;
 $$;
 
 comment on function pgautofailover.get_archivers(text)
@@ -2247,11 +2293,11 @@ AS $$
             in_basebackuppolicyid,
             coalesce(in_replicationquorumeligible, false))
        ON CONFLICT (formationid, (coalesce(groupid, -1))) DO UPDATE
-       SET archiverquorum = coalesce(EXCLUDED.archiverquorum,
+       SET archiverquorum = coalesce(in_archiverquorum,
                                      pgautofailover.archiver_policy.archiverquorum),
-           basebackuppolicyid = coalesce(EXCLUDED.basebackuppolicyid,
+           basebackuppolicyid = coalesce(in_basebackuppolicyid,
                                          pgautofailover.archiver_policy.basebackuppolicyid),
-           replicationquorumeligible = coalesce(EXCLUDED.replicationquorumeligible,
+           replicationquorumeligible = coalesce(in_replicationquorumeligible,
                                                pgautofailover.archiver_policy.replicationquorumeligible);
 $$;
 
@@ -2336,22 +2382,28 @@ CREATE FUNCTION pgautofailover.get_basebackup_policy_for_group
  RETURNS record LANGUAGE plpgsql STABLE SECURITY DEFINER
 AS $$
 DECLARE
-    ap record;
+    the_archiverid bigint;
 BEGIN
-    SELECT * INTO ap
-      FROM pgautofailover.get_archiver_policy(
-               get_basebackup_policy_for_group.formationid,
-               get_basebackup_policy_for_group.groupid);
+    -- the archiver serving this (formation, group), when known: the
+    -- lowest archiverid holding its 'wal-receiver' membership
+    SELECT an.archiverid INTO the_archiverid
+      FROM pgautofailover.archiver_node an
+      JOIN pgautofailover.node n ON n.nodeid = an.nodeid
+     WHERE an.kind = 'wal-receiver'
+       AND n.formationid = get_basebackup_policy_for_group.formationid
+       AND n.groupid = get_basebackup_policy_for_group.groupid
+  ORDER BY an.archiverid
+     LIMIT 1;
 
-    SELECT p.policyname, p.source, p.replaymode, p.cache,
-           extract(epoch FROM p.frequency)::int,
-           p.maxcount,
-           extract(epoch FROM p.maxage)::int,
-           p.onpromotion, p.concurrency
+    SELECT s.policyname, s.source, s.replaymode, s.cache,
+           s.frequency_seconds, s.maxcount, s.maxage_seconds,
+           s.onpromotion, s.concurrency
       INTO policyname, source, replaymode, cache, frequency_seconds,
            maxcount, maxage_seconds, onpromotion, concurrency
-      FROM pgautofailover.basebackup_policy p
-     WHERE p.basebackuppolicyid = ap.basebackuppolicyid;
+      FROM pgautofailover.get_basebackup_policy_for_archiver_group(
+               the_archiverid,
+               get_basebackup_policy_for_group.formationid,
+               get_basebackup_policy_for_group.groupid) s;
 END;
 $$;
 
@@ -2361,6 +2413,66 @@ comment on function pgautofailover.get_basebackup_policy_for_group(text,int)
 grant execute on function pgautofailover.get_basebackup_policy_for_group(text,int)
    to autoctl_node;
 
+-- same as get_basebackup_policy_for_group() above, for a known serving
+-- archiver. basebackuppolicyid resolution order: (1) the group-specific
+-- archiver_policy row, (2) the formation default row (groupid IS NULL),
+-- (3) the archiver's own default archiver.basebackuppolicyid, (4) the
+-- seeded 'default' policy. An archiver_policy row whose basebackuppolicyid
+-- is NULL (only archiverquorum set) does not stop the fall-through.
+-- archiverid may be NULL/unknown: steps (1), (2) and (4) still apply.
+CREATE FUNCTION pgautofailover.get_basebackup_policy_for_archiver_group
+ (
+    archiverid            bigint,
+    formationid           text,
+    groupid               int,
+    OUT policyname         text,
+    OUT source             pgautofailover.basebackup_source,
+    OUT replaymode         pgautofailover.basebackup_replay_mode,
+    OUT cache              pgautofailover.basebackup_cache,
+    OUT frequency_seconds  int,
+    OUT maxcount           int,
+    OUT maxage_seconds     int,
+    OUT onpromotion        bool,
+    OUT concurrency        int
+ )
+ RETURNS record LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+DECLARE
+    resolved_policyid bigint;
+BEGIN
+    resolved_policyid := coalesce(
+        (SELECT ap.basebackuppolicyid
+           FROM pgautofailover.archiver_policy ap
+          WHERE ap.formationid = get_basebackup_policy_for_archiver_group.formationid
+            AND ap.groupid = get_basebackup_policy_for_archiver_group.groupid),
+        (SELECT ap.basebackuppolicyid
+           FROM pgautofailover.archiver_policy ap
+          WHERE ap.formationid = get_basebackup_policy_for_archiver_group.formationid
+            AND ap.groupid IS NULL),
+        (SELECT a.basebackuppolicyid
+           FROM pgautofailover.archiver a
+          WHERE a.archiverid = get_basebackup_policy_for_archiver_group.archiverid),
+        (SELECT p.basebackuppolicyid
+           FROM pgautofailover.basebackup_policy p
+          WHERE p.policyname = 'default'));
+
+    SELECT p.policyname, p.source, p.replaymode, p.cache,
+           extract(epoch FROM p.frequency)::int,
+           p.maxcount,
+           extract(epoch FROM p.maxage)::int,
+           p.onpromotion, p.concurrency
+      INTO policyname, source, replaymode, cache, frequency_seconds,
+           maxcount, maxage_seconds, onpromotion, concurrency
+      FROM pgautofailover.basebackup_policy p
+     WHERE p.basebackuppolicyid = resolved_policyid;
+END;
+$$;
+
+comment on function pgautofailover.get_basebackup_policy_for_archiver_group(bigint,text,int)
+        is 'resolve the base-backup policy for (formation, group) as served by a given archiver: group row, formation default, archiver default, seeded default';
+
+grant execute on function pgautofailover.get_basebackup_policy_for_archiver_group(bigint,text,int)
+   to autoctl_node;
 -- pre-flight check: true iff starting a base-backup job for (archiverid,
 -- formationid, groupid) right now would still fit under the resolved
 -- policy's own concurrency cap. Meant to be called by service_archiver
@@ -2899,16 +3011,21 @@ CREATE FUNCTION pgautofailover.get_archiver_node
    OUT node_host        text,
    OUT node_port        int,
    OUT node_lsn         pg_lsn,
-   OUT node_is_primary  bool
+   OUT node_is_primary  bool,
+   OUT serveport        int
  )
-RETURNS SETOF record LANGUAGE SQL STRICT
+RETURNS SETOF record LANGUAGE SQL STRICT SECURITY DEFINER
 AS $$
-   select nodeid, nodename, nodehost, nodeport, reportedlsn, false
-     from pgautofailover.node
-    where formationid = $1
-      and groupid = $2
-      and reportedstate = 'archiving'
- order by nodeid
+   select n.nodeid, n.nodename, n.nodehost, n.nodeport, n.reportedlsn,
+          false, coalesce(a.serveport, 6543)
+     from pgautofailover.node n
+     left join pgautofailover.archiver_node an
+            on an.nodeid = n.nodeid and an.kind = 'wal-receiver'
+     left join pgautofailover.archiver a on a.archiverid = an.archiverid
+    where n.formationid = $1
+      and n.groupid = $2
+      and n.reportedstate = 'archiving'
+ order by n.nodeid
     limit 1;
 $$;
 
@@ -3232,10 +3349,10 @@ ALTER FUNCTION pgautofailover.get_basebackup_policy(text)
   SET search_path = pg_catalog, pgautofailover, pg_temp;
 REVOKE ALL ON FUNCTION pgautofailover.get_basebackup_policy(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION pgautofailover.get_basebackup_policy(text) TO autoctl_node;
-ALTER FUNCTION pgautofailover.register_archiver(text, text, text, bigint, bool, int, text, text)
+ALTER FUNCTION pgautofailover.register_archiver(text, text, text, bigint, bool, int, text, text, int)
   SET search_path = pg_catalog, pgautofailover, pg_temp;
-REVOKE ALL ON FUNCTION pgautofailover.register_archiver(text, text, text, bigint, bool, int, text, text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION pgautofailover.register_archiver(text, text, text, bigint, bool, int, text, text) TO autoctl_node;
+REVOKE ALL ON FUNCTION pgautofailover.register_archiver(text, text, text, bigint, bool, int, text, text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.register_archiver(text, text, text, bigint, bool, int, text, text, int) TO autoctl_node;
 ALTER FUNCTION pgautofailover.report_archiver_storage(bigint, bigint, bigint)
   SET search_path = pg_catalog, pgautofailover, pg_temp;
 REVOKE ALL ON FUNCTION pgautofailover.report_archiver_storage(bigint, bigint, bigint) FROM PUBLIC;
@@ -3288,6 +3405,14 @@ ALTER FUNCTION pgautofailover.get_basebackup_policy_for_group(text, int)
   SET search_path = pg_catalog, pgautofailover, pg_temp;
 REVOKE ALL ON FUNCTION pgautofailover.get_basebackup_policy_for_group(text, int) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION pgautofailover.get_basebackup_policy_for_group(text, int) TO autoctl_node;
+ALTER FUNCTION pgautofailover.get_basebackup_policy_for_archiver_group(bigint, text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.get_basebackup_policy_for_archiver_group(bigint, text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_basebackup_policy_for_archiver_group(bigint, text, int) TO autoctl_node;
+ALTER FUNCTION pgautofailover.get_archiver_node(text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.get_archiver_node(text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_archiver_node(text, int) TO autoctl_node;
 ALTER FUNCTION pgautofailover.basebackup_concurrency_available(bigint, text, int)
   SET search_path = pg_catalog, pgautofailover, pg_temp;
 REVOKE ALL ON FUNCTION pgautofailover.basebackup_concurrency_available(bigint, text, int) FROM PUBLIC;

@@ -73,7 +73,8 @@ LoadNodeHealthList(void)
 		initStringInfo(&query);
 		appendStringInfo(&query,
 						 "SELECT nodeid, nodename, nodehost, nodeport, health "
-						 "FROM " AUTO_FAILOVER_NODE_TABLE);
+						 "FROM " AUTO_FAILOVER_NODE_TABLE
+						 " WHERE haspgdata");
 
 		pgstat_report_activity(STATE_RUNNING, query.data);
 
