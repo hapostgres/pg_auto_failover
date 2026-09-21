@@ -236,3 +236,43 @@ SELECT count(*) AS should_be_zero FROM pgautofailover.node
 
 SELECT count(*) AS should_also_be_zero FROM pgautofailover.archiver_node
  WHERE archiverid = :archiverid AND kind = 'wal-receiver';
+
+-- ── get_group_hosts / get_group_hosts_hash: cache-invalidation fingerprint ──
+-- (run after archiver_remove_formation above, so re-attach the archiver to
+-- prove its ARCHIVING row -- haspgdata = false -- never shows up in hosts)
+
+SELECT node_count, hosts, hash = md5('2:node1.local,node2.local') AS hash_matches
+  FROM pgautofailover.get_group_hosts('archiving_test', 0);
+
+SELECT pgautofailover.get_group_hosts_hash('archiving_test', 0)
+       = (SELECT hash FROM pgautofailover.get_group_hosts('archiving_test', 0))
+       AS hashes_agree;
+
+SELECT count(*) AS attached_count
+  FROM pgautofailover.archiver_add_formation(:archiverid, 'archiving_test');
+
+SELECT node_count, hosts, hash = md5('2:node1.local,node2.local') AS hash_matches
+  FROM pgautofailover.get_group_hosts('archiving_test', 0);
+
+-- a group with no Postgres node: empty array, count 0, still a stable hash
+SELECT node_count, hosts, hash = md5('0:') AS hash_matches
+  FROM pgautofailover.get_group_hosts('archiving_test', 42);
+
+SELECT pgautofailover.archiver_remove_formation(:archiverid, 'archiving_test');
+
+-- ── hardening: SECURITY DEFINER functions are not executable by PUBLIC ──────
+
+SELECT count(*) AS checked_functions,
+       count(*) FILTER (WHERE has_function_privilege('public', p.oid, 'EXECUTE'))
+         AS public_can_execute,
+       count(*) FILTER (WHERE NOT has_function_privilege('autoctl_node', p.oid, 'EXECUTE'))
+         AS node_cannot_execute,
+       count(*) FILTER (WHERE p.proconfig IS NULL
+                           OR p.proconfig::text NOT LIKE '%search_path=pg_catalog, pgautofailover, pg_temp%')
+         AS missing_search_path
+  FROM pg_proc p
+ WHERE p.pronamespace = 'pgautofailover'::regnamespace
+   AND p.prosecdef
+   AND p.proname IN ('get_group_hosts', 'get_group_hosts_hash',
+                     'report_wal_received', 'create_rclone_config',
+                     'archiver_add_formation');

@@ -2423,3 +2423,362 @@ ALTER TABLE pgautofailover.node
                    )
                 OR sysidentifier IS NOT NULL
                );
+
+-- functions present in the fresh-install script that were missing here
+
+-- name-based overload for `pg_autoctl archiver add-formation`: that
+-- command only ever has the archiver's own --name (an operator-facing
+-- identifier), never its internal archiverid, and archivername already
+-- carries a UNIQUE constraint (see the archiver table definition above)
+-- to resolve it from -- reusing the bigint-based function above rather
+-- than duplicating its per-group loop.
+CREATE FUNCTION pgautofailover.archiver_add_formation
+    (archivername text, in_formationid text)
+ RETURNS SETOF bigint LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+    the_archiverid bigint;
+BEGIN
+    SELECT a.archiverid INTO the_archiverid
+      FROM pgautofailover.archiver a
+     WHERE a.archivername = archiver_add_formation.archivername;
+
+    IF the_archiverid IS NULL THEN
+        RAISE EXCEPTION 'archiver "%" does not exist', archivername;
+    END IF;
+
+    RETURN QUERY
+        SELECT * FROM pgautofailover.archiver_add_formation(the_archiverid, in_formationid);
+END;
+$$;
+
+comment on function pgautofailover.archiver_add_formation(text,text)
+        is 'attach an archiver (looked up by name) to every group of a formation -- see the archiverid-based overload for the actual mechanism';
+
+grant execute on function pgautofailover.archiver_add_formation(text,text)
+   to autoctl_node;
+
+-- name-based overload for `pg_autoctl archiver formation remove`, mirroring
+-- archiver_add_formation(text,text)'s own reasoning above.
+CREATE FUNCTION pgautofailover.archiver_remove_formation
+    (archivername text, formationid text)
+ RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+AS $$
+DECLARE
+    the_archiverid bigint;
+BEGIN
+    SELECT a.archiverid INTO the_archiverid
+      FROM pgautofailover.archiver a
+     WHERE a.archivername = archiver_remove_formation.archivername;
+
+    IF the_archiverid IS NULL THEN
+        RAISE EXCEPTION 'archiver "%" does not exist', archivername;
+    END IF;
+
+    PERFORM pgautofailover.archiver_remove_formation(the_archiverid, formationid);
+END;
+$$;
+
+comment on function pgautofailover.archiver_remove_formation(text,text)
+        is 'detach an archiver (looked up by name) from a formation -- see the archiverid-based overload for the actual mechanism';
+
+grant execute on function pgautofailover.archiver_remove_formation(text,text)
+   to autoctl_node;
+
+-- pre-flight check: true iff starting a base-backup job for (archiverid,
+-- formationid, groupid) right now would still fit under the resolved
+-- policy's own concurrency cap. Meant to be called by service_archiver
+-- *before* running the (expensive, minutes-long) pg_basebackup/pg_basebackup-
+-- over-replay work, so an already-at-cap archiver never starts work it
+-- would have to discard -- report_basebackup_started() re-checks the same
+-- condition atomically (FOR UPDATE) at insert time as the authoritative
+-- backstop, since this pre-flight read has no lock and can race against
+-- another job starting concurrently. Read-only (STABLE): never blocks
+-- waiting for report_basebackup_started()'s row lock, so a busy archiver
+-- doesn't stall this check either.
+CREATE FUNCTION pgautofailover.basebackup_concurrency_available
+    (archiverid bigint, formationid text, groupid int)
+ RETURNS bool
+ LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+    WITH policy AS (
+        SELECT ap.basebackuppolicyid AS target_policy_id, p.concurrency AS max_concurrency
+          FROM pgautofailover.get_archiver_policy(
+                   basebackup_concurrency_available.formationid,
+                   basebackup_concurrency_available.groupid) ap
+          JOIN pgautofailover.basebackup_policy p
+            ON p.basebackuppolicyid = ap.basebackuppolicyid
+    )
+    SELECT (
+        SELECT count(*)
+          FROM pgautofailover.basebackup bb, policy
+         WHERE bb.archiverid = basebackup_concurrency_available.archiverid
+           AND bb.status = 'in_progress'
+           AND policy.target_policy_id = (
+                 SELECT gap.basebackuppolicyid
+                   FROM pgautofailover.get_archiver_policy(bb.formationid, bb.groupid) gap
+               )
+    ) < (SELECT max_concurrency FROM policy);
+$$;
+
+comment on function pgautofailover.basebackup_concurrency_available(bigint,text,int)
+        is 'pre-flight check: would starting a base-backup job for (archiver, formation, group) now still fit under its policy''s concurrency cap';
+
+grant execute on function pgautofailover.basebackup_concurrency_available(bigint,text,int)
+   to autoctl_node;
+
+-- `pg_autoctl archiver show wal`'s own backing query -- archiver_wal has no
+-- direct SELECT grant for autoctl_node (see report_wal_received's own
+-- comment above on why), so this is the one SECURITY DEFINER entry point
+-- for listing it, mirroring list_basebackups' shape. One row per segment
+-- (not per archiver): the same segment can land on more than one archiver
+-- under quorum > 1, and a caller asking "is this segment safe" wants to
+-- see that as one row with how many/which archivers hold it, not a
+-- duplicate row per holder.
+CREATE FUNCTION pgautofailover.list_archiver_wal
+ (
+    formationid          text,
+    groupid              int,
+    OUT walfilename       text,
+    OUT lsn               pg_lsn,
+    OUT archiver_count    bigint,
+    OUT archivers         text,
+    OUT receivedat_epoch  bigint
+ )
+ RETURNS SETOF record LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+    SELECT aw.walfilename,
+           min(aw.lsn) AS lsn,
+           count(DISTINCT aw.archiverid) AS archiver_count,
+           string_agg(DISTINCT a.archivername, ', ' ORDER BY a.archivername) AS archivers,
+           extract(epoch FROM max(aw.receivedat))::bigint AS receivedat_epoch
+      FROM pgautofailover.archiver_wal aw
+      JOIN pgautofailover.archiver a ON a.archiverid = aw.archiverid
+     WHERE aw.formationid = list_archiver_wal.formationid
+       AND aw.groupid = list_archiver_wal.groupid
+  GROUP BY aw.walfilename
+  ORDER BY aw.walfilename DESC;
+$$;
+
+comment on function pgautofailover.list_archiver_wal(text,int)
+        is 'list captured WAL segments for (formation, group), newest first, with which/how many archivers hold each -- inventory';
+
+grant execute on function pgautofailover.list_archiver_wal(text,int)
+   to autoctl_node;
+
+-- Cache-invalidation fingerprint of a group's Postgres membership. hosts is
+-- the sorted array of nodehost for the group's nodes that carry PGDATA
+-- (haspgdata = true: ARCHIVING/archiver membership rows are excluded);
+-- hash = md5(node_count || ':' || hosts joined by ','), computed here so
+-- every client derives the exact same fingerprint. A client that cached the
+-- host list compares its cached hash with get_group_hosts_hash() -- a cheap
+-- call that doesn't ship the hosts -- to tell whether its copy is stale.
+CREATE FUNCTION pgautofailover.get_group_hosts
+ (
+    formation_id text, group_id int,
+    OUT node_count int, OUT hosts text[], OUT hash text
+ )
+ RETURNS record LANGUAGE sql STABLE SECURITY DEFINER
+ SET search_path = pg_catalog, pgautofailover, pg_temp
+AS $$
+    WITH h AS (
+        SELECT coalesce(array_agg(n.nodehost ORDER BY n.nodehost),
+                        '{}'::text[]) AS hostlist
+          FROM pgautofailover.node n
+         WHERE n.formationid = get_group_hosts.formation_id
+           AND n.groupid = get_group_hosts.group_id
+           AND n.haspgdata
+    )
+    SELECT cardinality(h.hostlist),
+           h.hostlist,
+           md5(cardinality(h.hostlist)::text || ':' ||
+               array_to_string(h.hostlist, ','))
+      FROM h;
+$$;
+
+comment on function pgautofailover.get_group_hosts(text,int)
+        is 'sorted hosts of the group''s Postgres nodes (archiver rows excluded), their count, and an md5 fingerprint for client cache invalidation';
+
+CREATE FUNCTION pgautofailover.get_group_hosts_hash
+    (formation_id text, group_id int)
+ RETURNS text LANGUAGE sql STABLE SECURITY DEFINER
+ SET search_path = pg_catalog, pgautofailover, pg_temp
+AS $$
+    SELECT g.hash
+      FROM pgautofailover.get_group_hosts(get_group_hosts_hash.formation_id,
+                                          get_group_hosts_hash.group_id) g;
+$$;
+
+comment on function pgautofailover.get_group_hosts_hash(text,int)
+        is 'same fingerprint as get_group_hosts().hash, without shipping the hosts';
+
+--
+-- Hardening of the SECURITY DEFINER functions added by the archiving work:
+-- pin search_path (so a caller-controlled search_path can't shadow
+-- pg_catalog/pgautofailover objects while running with the owner's
+-- privileges) and revoke the default PUBLIC EXECUTE, keeping it for
+-- autoctl_node only (the role keepers/archivers/the CLI connect as).
+-- Explicit, one statement per function: a wrong signature fails the
+-- script loudly instead of silently skipping a function.
+-- Functions that pre-date this release are deliberately left as they are.
+--
+ALTER FUNCTION pgautofailover.create_basebackup_policy(text, jsonb)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.create_basebackup_policy(text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.create_basebackup_policy(text, jsonb) TO autoctl_node;
+ALTER FUNCTION pgautofailover.set_basebackup_policy(text, jsonb)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.set_basebackup_policy(text, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.set_basebackup_policy(text, jsonb) TO autoctl_node;
+ALTER FUNCTION pgautofailover.get_basebackup_policy(text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.get_basebackup_policy(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_basebackup_policy(text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.register_archiver(text, text, text, bigint, bool, int, text, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.register_archiver(text, text, text, bigint, bool, int, text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.register_archiver(text, text, text, bigint, bool, int, text, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_archiver_storage(bigint, bigint, bigint)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_archiver_storage(bigint, bigint, bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_archiver_storage(bigint, bigint, bigint) TO autoctl_node;
+ALTER FUNCTION pgautofailover.get_archivers(text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.get_archivers(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_archivers(text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.create_rclone_config(text, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.create_rclone_config(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.create_rclone_config(text, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.set_rclone_config(text, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.set_rclone_config(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.set_rclone_config(text, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.archiver_add_storage(bigint, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.archiver_add_storage(bigint, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.archiver_add_storage(bigint, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.archiver_remove_storage(bigint)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.archiver_remove_storage(bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.archiver_remove_storage(bigint) TO autoctl_node;
+ALTER FUNCTION pgautofailover.archiver_add_formation(bigint, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.archiver_add_formation(bigint, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.archiver_add_formation(bigint, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.archiver_add_formation(text, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.archiver_add_formation(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.archiver_add_formation(text, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.list_archiver_memberships(bigint)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.list_archiver_memberships(bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.list_archiver_memberships(bigint) TO autoctl_node;
+ALTER FUNCTION pgautofailover.archiver_remove_formation(bigint, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.archiver_remove_formation(bigint, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.archiver_remove_formation(bigint, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.archiver_remove_formation(text, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.archiver_remove_formation(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.archiver_remove_formation(text, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.set_archiver_policy(text, int, int, bigint, bool)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.set_archiver_policy(text, int, int, bigint, bool) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.set_archiver_policy(text, int, int, bigint, bool) TO autoctl_node;
+ALTER FUNCTION pgautofailover.get_basebackup_policy_for_group(text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.get_basebackup_policy_for_group(text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_basebackup_policy_for_group(text, int) TO autoctl_node;
+ALTER FUNCTION pgautofailover.basebackup_concurrency_available(bigint, text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.basebackup_concurrency_available(bigint, text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.basebackup_concurrency_available(bigint, text, int) TO autoctl_node;
+ALTER FUNCTION pgautofailover.wal_archived(text, int, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.wal_archived(text, int, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.wal_archived(text, int, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.list_archiver_wal(text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.list_archiver_wal(text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.list_archiver_wal(text, int) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_wal_received(bigint, text, pg_lsn, bigint)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_wal_received(bigint, text, pg_lsn, bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_wal_received(bigint, text, pg_lsn, bigint) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_wal_received_bulk(bigint, bigint, text[], pg_lsn[])
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_wal_received_bulk(bigint, bigint, text[], pg_lsn[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_wal_received_bulk(bigint, bigint, text[], pg_lsn[]) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_wal_progress(bigint, pg_lsn)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_wal_progress(bigint, pg_lsn) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_wal_progress(bigint, pg_lsn) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_basebackup_started(bigint, text, int, text, int, pg_lsn, pgautofailover.basebackup_source, pgautofailover.basebackup_replay_mode)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_basebackup_started(bigint, text, int, text, int, pg_lsn, pgautofailover.basebackup_source, pgautofailover.basebackup_replay_mode) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_basebackup_started(bigint, text, int, text, int, pg_lsn, pgautofailover.basebackup_source, pgautofailover.basebackup_replay_mode) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_basebackup_completed(bigint, pg_lsn, bigint, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_basebackup_completed(bigint, pg_lsn, bigint, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_basebackup_completed(bigint, pg_lsn, bigint, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_basebackup_deleted(bigint)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_basebackup_deleted(bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_basebackup_deleted(bigint) TO autoctl_node;
+ALTER FUNCTION pgautofailover.prune_archiver_wal(text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.prune_archiver_wal(text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.prune_archiver_wal(text, int) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_basebackup_synced(bigint, bigint, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_basebackup_synced(bigint, bigint, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_basebackup_synced(bigint, bigint, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_basebackup_remote_deleted(bigint, bigint)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_basebackup_remote_deleted(bigint, bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_basebackup_remote_deleted(bigint, bigint) TO autoctl_node;
+ALTER FUNCTION pgautofailover.get_latest_basebackup(text, int, pgautofailover.basebackup_source)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.get_latest_basebackup(text, int, pgautofailover.basebackup_source) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_latest_basebackup(text, int, pgautofailover.basebackup_source) TO autoctl_node;
+ALTER FUNCTION pgautofailover.list_basebackups(text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.list_basebackups(text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.list_basebackups(text, int) TO autoctl_node;
+ALTER FUNCTION pgautofailover.get_group_system_identifier(text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.get_group_system_identifier(text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_group_system_identifier(text, int) TO autoctl_node;
+ALTER FUNCTION pgautofailover.create_archiver_node(bigint, pgautofailover.archiver_node_kind, text, text, bigint, text, int, pgautofailover.archiver_node_cadence, text, pgautofailover.pitr_status)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.create_archiver_node(bigint, pgautofailover.archiver_node_kind, text, text, bigint, text, int, pgautofailover.archiver_node_cadence, text, pgautofailover.pitr_status) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.create_archiver_node(bigint, pgautofailover.archiver_node_kind, text, text, bigint, text, int, pgautofailover.archiver_node_cadence, text, pgautofailover.pitr_status) TO autoctl_node;
+ALTER FUNCTION pgautofailover.remove_archiver_node(bigint)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.remove_archiver_node(bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.remove_archiver_node(bigint) TO autoctl_node;
+ALTER FUNCTION pgautofailover.set_archiver_node_pitr_status(bigint, pgautofailover.pitr_status)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.set_archiver_node_pitr_status(bigint, pgautofailover.pitr_status) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.set_archiver_node_pitr_status(bigint, pgautofailover.pitr_status) TO autoctl_node;
+ALTER FUNCTION pgautofailover.report_pitr_status(bigint, pgautofailover.pitr_operation, jsonb, pg_lsn, timestamptz, text, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.report_pitr_status(bigint, pgautofailover.pitr_operation, jsonb, pg_lsn, timestamptz, text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.report_pitr_status(bigint, pgautofailover.pitr_operation, jsonb, pg_lsn, timestamptz, text, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.pitr_queue_command(bigint, pgautofailover.pitr_command, jsonb)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.pitr_queue_command(bigint, pgautofailover.pitr_command, jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.pitr_queue_command(bigint, pgautofailover.pitr_command, jsonb) TO autoctl_node;
+ALTER FUNCTION pgautofailover.pitr_next_command(bigint)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.pitr_next_command(bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.pitr_next_command(bigint) TO autoctl_node;
+ALTER FUNCTION pgautofailover.get_group_hosts(text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.get_group_hosts(text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_group_hosts(text, int) TO autoctl_node;
+ALTER FUNCTION pgautofailover.get_group_hosts_hash(text, int)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.get_group_hosts_hash(text, int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_group_hosts_hash(text, int) TO autoctl_node;
