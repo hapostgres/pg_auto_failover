@@ -54,10 +54,25 @@
  * NodeSpec — one-to-one with the [sections] of pg_autoctl_node.ini
  * ----------------------------------------------------------------------- */
 
+/*
+ * NodeSpecRole is what a node.ini "kind" asks pg_autoctl to run. It is
+ * distinct from PgInstanceKind (the keeper FSM guard axis): warm-standby and
+ * pitr never take part in the FSM nor register with the monitor.
+ */
+typedef enum
+{
+	NODESPEC_ROLE_POSTGRES = 0,  /* standalone | coordinator | worker */
+	NODESPEC_ROLE_MONITOR,
+	NODESPEC_ROLE_ARCHIVER,
+	NODESPEC_ROLE_WARM_STANDBY,  /* RESERVED: not implemented */
+	NODESPEC_ROLE_PITR           /* RESERVED: not implemented */
+} NodeSpecRole;
+
 typedef struct NodeSpec
 {
 	/* [node] */
-	PgInstanceKind kind;         /* postgres | coordinator | worker | monitor */
+	NodeSpecRole role;           /* from kind = ... */
+	PgInstanceKind pgKind;       /* role postgres only, else NODE_KIND_UNKNOWN */
 	char name[_POSIX_HOST_NAME_MAX]; /* --name; defaults to hostname when empty */
 	char hostname[_POSIX_HOST_NAME_MAX];
 	int port;                    /* Postgres port, default 5432 */
@@ -136,6 +151,11 @@ typedef struct NodeSpecWatcher
 /* -----------------------------------------------------------------------
  * API
  * ----------------------------------------------------------------------- */
+
+bool nodespec_role_is_reserved(NodeSpecRole role);
+const char * nodespec_kind_string(const NodeSpec *spec);
+void nodespec_set_from_pgkind(NodeSpec *spec, PgInstanceKind pgKind);
+void nodespec_reject_reserved(const NodeSpec *spec);
 
 /* Parse a pg_autoctl_node.ini file into *spec.  Returns false on error. */
 bool nodespec_read(const char *path, NodeSpec *spec);

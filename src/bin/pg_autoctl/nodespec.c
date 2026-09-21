@@ -195,31 +195,45 @@ nodespec_read(const char *path, NodeSpec *spec)
 		return false;
 	}
 
-	/* resolve kind string → enum */
+	/* resolve kind string -> role (+ pgKind for role postgres) */
+	spec->pgKind = NODE_KIND_UNKNOWN;
+
 	if (strcmp(kindStr, "monitor") == 0)
 	{
-		spec->kind = NODE_KIND_UNKNOWN;   /* handled specially: no formation */
+		spec->role = NODESPEC_ROLE_MONITOR;
 	}
 	else if (strcmp(kindStr, "postgres") == 0)
 	{
-		spec->kind = NODE_KIND_STANDALONE;
+		spec->role = NODESPEC_ROLE_POSTGRES;
+		spec->pgKind = NODE_KIND_STANDALONE;
 	}
 	else if (strcmp(kindStr, "coordinator") == 0)
 	{
-		spec->kind = NODE_KIND_CITUS_COORDINATOR;
+		spec->role = NODESPEC_ROLE_POSTGRES;
+		spec->pgKind = NODE_KIND_CITUS_COORDINATOR;
 	}
 	else if (strcmp(kindStr, "worker") == 0)
 	{
-		spec->kind = NODE_KIND_CITUS_WORKER;
+		spec->role = NODESPEC_ROLE_POSTGRES;
+		spec->pgKind = NODE_KIND_CITUS_WORKER;
 	}
 	else if (streq(kindStr, "archiver"))
 	{
-		spec->kind = NODE_KIND_ARCHIVER;
+		spec->role = NODESPEC_ROLE_ARCHIVER;
+	}
+	else if (streq(kindStr, "warm-standby"))
+	{
+		spec->role = NODESPEC_ROLE_WARM_STANDBY;
+	}
+	else if (streq(kindStr, "pitr"))
+	{
+		spec->role = NODESPEC_ROLE_PITR;
 	}
 	else
 	{
 		log_error("Unknown node kind \"%s\" in \"%s\"; "
-				  "expected: monitor, postgres, coordinator, worker, archiver",
+				  "expected: monitor, postgres, coordinator, worker, archiver, "
+				  "warm-standby, pitr",
 				  kindStr, path);
 		return false;
 	}
@@ -358,7 +372,8 @@ nodespec_read(const char *path, NodeSpec *spec)
 	}
 
 	/* validate: non-monitor nodes need a monitor URI unless no_monitor=true */
-	if (spec->kind != NODE_KIND_UNKNOWN &&
+	if (spec->role != NODESPEC_ROLE_MONITOR &&
+		!nodespec_role_is_reserved(spec->role) &&
 		IS_EMPTY_STRING_BUFFER(spec->monitor_pguri) &&
 		!spec->noMonitor)
 	{
@@ -372,6 +387,114 @@ nodespec_read(const char *path, NodeSpec *spec)
 
 
 /*
+ * nodespec_role_is_reserved returns true for roles that the parser
+ * recognises but that no command implements yet.
+ */
+bool
+nodespec_role_is_reserved(NodeSpecRole role)
+{
+	return role == NODESPEC_ROLE_WARM_STANDBY || role == NODESPEC_ROLE_PITR;
+}
+
+
+/*
+ * nodespec_kind_string returns the node.ini "kind" spelling of a spec, which
+ * is also the "pg_autoctl create <kind>" subcommand name.
+ */
+const char *
+nodespec_kind_string(const NodeSpec *spec)
+{
+	switch (spec->role)
+	{
+		case NODESPEC_ROLE_MONITOR:
+		{
+			return "monitor";
+		}
+
+		case NODESPEC_ROLE_ARCHIVER:
+		{
+			return "archiver";
+		}
+
+		case NODESPEC_ROLE_WARM_STANDBY:
+		{
+			return "warm-standby";
+		}
+
+		case NODESPEC_ROLE_PITR:
+		{
+			return "pitr";
+		}
+
+		case NODESPEC_ROLE_POSTGRES:
+		default:
+		{
+			break;
+		}
+	}
+
+	switch (spec->pgKind)
+	{
+		case NODE_KIND_CITUS_COORDINATOR:
+		{
+			return "coordinator";
+		}
+
+		case NODE_KIND_CITUS_WORKER:
+		{
+			return "worker";
+		}
+
+		default:
+		{
+			return "postgres";
+		}
+	}
+}
+
+
+/*
+ * nodespec_set_from_pgkind fills role and pgKind from a keeper's
+ * PgInstanceKind (NODE_KIND_UNKNOWN meaning monitor).
+ */
+void
+nodespec_set_from_pgkind(NodeSpec *spec, PgInstanceKind pgKind)
+{
+	spec->pgKind = NODE_KIND_UNKNOWN;
+
+	if (pgKind == NODE_KIND_UNKNOWN)
+	{
+		spec->role = NODESPEC_ROLE_MONITOR;
+	}
+	else if (pgKind == NODE_KIND_ARCHIVER)
+	{
+		spec->role = NODESPEC_ROLE_ARCHIVER;
+	}
+	else
+	{
+		spec->role = NODESPEC_ROLE_POSTGRES;
+		spec->pgKind = pgKind;
+	}
+}
+
+
+/*
+ * nodespec_reject_reserved exits with a clear error when the spec names a
+ * reserved (planned, not implemented) role.
+ */
+void
+nodespec_reject_reserved(const NodeSpec *spec)
+{
+	if (nodespec_role_is_reserved(spec->role))
+	{
+		log_fatal("kind = %s is planned but not implemented yet",
+				  nodespec_kind_string(spec));
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+}
+
+
+/*
  * nodespec_write serialises a NodeSpec as a pg_autoctl_node.ini file.
  */
 bool
@@ -379,44 +502,7 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 {
 	const char *kindStr;
 
-	switch (spec->kind)
-	{
-		case NODE_KIND_UNKNOWN:
-		{
-			kindStr = "monitor";
-			break;
-		}
-
-		case NODE_KIND_STANDALONE:
-		{
-			kindStr = "postgres";
-			break;
-		}
-
-		case NODE_KIND_CITUS_COORDINATOR:
-		{
-			kindStr = "coordinator";
-			break;
-		}
-
-		case NODE_KIND_CITUS_WORKER:
-		{
-			kindStr = "worker";
-			break;
-		}
-
-		case NODE_KIND_ARCHIVER:
-		{
-			kindStr = "archiver";
-			break;
-		}
-
-		default:
-		{
-			kindStr = "postgres";
-			break;
-		}
-	}
+	kindStr = nodespec_kind_string(spec);
 
 	fformat(out,
 			"[node]\n"
@@ -439,7 +525,7 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			spec->port,
 			spec->pgdata);
 
-	if (spec->kind != NODE_KIND_UNKNOWN)
+	if (spec->role != NODESPEC_ROLE_MONITOR)
 	{
 		if (spec->noMonitor)
 		{
@@ -568,44 +654,14 @@ nodespec_create_argv(const NodeSpec *spec,
 	PUSH(pg_autoctl_path);
 	PUSH("create");
 
-	switch (spec->kind)
+	if (nodespec_role_is_reserved(spec->role))
 	{
-		case NODE_KIND_UNKNOWN:
-		{
-			PUSH("monitor");
-			break;
-		}
-
-		case NODE_KIND_STANDALONE:
-		{
-			PUSH("postgres");
-			break;
-		}
-
-		case NODE_KIND_CITUS_COORDINATOR:
-		{
-			PUSH("coordinator");
-			break;
-		}
-
-		case NODE_KIND_CITUS_WORKER:
-		{
-			PUSH("worker");
-			break;
-		}
-
-		case NODE_KIND_ARCHIVER:
-		{
-			PUSH("archiver");
-			break;
-		}
-
-		default:
-		{
-			PUSH("postgres");
-			break;
-		}
+		log_error("nodespec: kind = %s is planned but not implemented yet",
+				  nodespec_kind_string(spec));
+		return -1;
 	}
+
+	PUSH(nodespec_kind_string(spec));
 
 	/*
 	 * An archiver's own getopts (cli_create_archiver_getopts,
@@ -617,7 +673,7 @@ nodespec_create_argv(const NodeSpec *spec,
 	 * assumes every kind accepts the full postgres flag set) avoids
 	 * "unrecognized option" failures on every one of those.
 	 */
-	if (spec->kind == NODE_KIND_ARCHIVER)
+	if (spec->role == NODESPEC_ROLE_ARCHIVER)
 	{
 		PUSH("--pgdata");
 		PUSH(spec->pgdata);
@@ -725,7 +781,7 @@ nodespec_create_argv(const NodeSpec *spec,
 		PUSH(portbuf);
 	}
 
-	if (spec->kind != NODE_KIND_UNKNOWN)
+	if (spec->role != NODESPEC_ROLE_MONITOR)
 	{
 		if (spec->noMonitor)
 		{
@@ -751,7 +807,7 @@ nodespec_create_argv(const NodeSpec *spec,
 			PUSH(spec->formation);
 		}
 
-		if (spec->kind == NODE_KIND_CITUS_WORKER && spec->group > 0)
+		if (spec->pgKind == NODE_KIND_CITUS_WORKER && spec->group > 0)
 		{
 			static char groupbuf[16];
 			sformat(groupbuf, sizeof(groupbuf), "%d", spec->group);
@@ -789,7 +845,7 @@ nodespec_create_argv(const NodeSpec *spec,
 		PUSH(spec->auth);
 	}
 
-	if (spec->pg_hba_lan && spec->kind != NODE_KIND_UNKNOWN)
+	if (spec->pg_hba_lan && spec->role != NODESPEC_ROLE_MONITOR)
 	{
 		PUSH("--pg-hba-lan");
 	}
@@ -801,13 +857,13 @@ nodespec_create_argv(const NodeSpec *spec,
 	 * plain standalone postgres node, the only kind that ever calls
 	 * fsm_init_standby.
 	 */
-	if (spec->fromArchiver && spec->kind == NODE_KIND_STANDALONE)
+	if (spec->fromArchiver && spec->pgKind == NODE_KIND_STANDALONE)
 	{
 		PUSH("--from-archiver");
 	}
 
 	/* passwords */
-	if (spec->kind == NODE_KIND_UNKNOWN &&
+	if (spec->role == NODESPEC_ROLE_MONITOR &&
 		!IS_EMPTY_STRING_BUFFER(spec->autoctl_node_password))
 	{
 		PUSH("--autoctl-node-password");
@@ -820,7 +876,7 @@ nodespec_create_argv(const NodeSpec *spec,
 	 * secondary flag can be applied correctly.  Nothing to add to the argv here.
 	 */
 
-	if (spec->kind != NODE_KIND_UNKNOWN)
+	if (spec->role != NODESPEC_ROLE_MONITOR)
 	{
 		if (!IS_EMPTY_STRING_BUFFER(spec->monitor_password))
 		{
@@ -1005,7 +1061,7 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 	 * New [formation <name>] sections → pg_autoctl create formation.
 	 * Changed secondary setting     → pg_autoctl enable/disable secondary.
 	 */
-	if (new_spec->kind == NODE_KIND_UNKNOWN)
+	if (new_spec->role == NODESPEC_ROLE_MONITOR)
 	{
 		for (int fi = 0; fi < new_spec->formationCount; fi++)
 		{
@@ -1346,7 +1402,8 @@ nodespec_watcher_check(NodeSpecWatcher *w, const NodeSpec *current)
 	}
 
 	/* Warn about immutable field changes rather than silently ignoring them */
-	if (new_spec.kind != current->kind)
+	if (new_spec.role != current->role ||
+		new_spec.pgKind != current->pgKind)
 	{
 		log_warn("nodespec: 'kind' changed in \"%s\" but cannot be applied "
 				 "to a running node — restart required", w->path);

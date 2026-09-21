@@ -457,6 +457,8 @@ cli_node_run(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
+	nodespec_reject_reserved(&spec);
+
 	/*
 	 * Delete any leftover PID file from a previous run.  This is safe here
 	 * because we have not started a supervisor yet.  Stale PID files cause
@@ -700,6 +702,8 @@ cli_node_init(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
+	nodespec_reject_reserved(&spec);
+
 	char cfgPath[MAXPGPATH];
 
 	if (!IS_EMPTY_STRING_BUFFER(spec.pgdata))
@@ -772,6 +776,8 @@ cli_node_apply(int argc, char **argv)
 	{
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
+
+	nodespec_reject_reserved(&new_spec);
 
 	/* Read the current spec from the same path as a baseline */
 	(void) nodespec_read(nodeSpecPath, &cur_spec);
@@ -873,7 +879,7 @@ cli_node_show(int argc, char **argv)
 
 	NodeSpec spec = { 0 };
 
-	spec.kind = config.pgSetup.pgKind;
+	nodespec_set_from_pgkind(&spec, config.pgSetup.pgKind);
 	strlcpy(spec.pgdata, config.pgSetup.pgdata, sizeof(spec.pgdata));
 	strlcpy(spec.hostname, config.hostname, sizeof(spec.hostname));
 	spec.port = config.pgSetup.pgport;
@@ -925,39 +931,7 @@ cli_node_check(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	const char *kindStr;
-	switch (spec.kind)
-	{
-		case NODE_KIND_UNKNOWN:
-		{
-			kindStr = "monitor";
-			break;
-		}
-
-		case NODE_KIND_STANDALONE:
-		{
-			kindStr = "postgres";
-			break;
-		}
-
-		case NODE_KIND_CITUS_COORDINATOR:
-		{
-			kindStr = "coordinator";
-			break;
-		}
-
-		case NODE_KIND_CITUS_WORKER:
-		{
-			kindStr = "worker";
-			break;
-		}
-
-		default:
-		{
-			kindStr = "unknown";
-			break;
-		}
-	}
+	const char *kindStr = nodespec_kind_string(&spec);
 
 	fformat(stdout, "Node spec \"%s\" is valid.\n", nodeSpecPath);
 	fformat(stdout, "  kind               : %s\n", kindStr);
@@ -965,7 +939,7 @@ cli_node_check(int argc, char **argv)
 	fformat(stdout, "  hostname           : %s\n", spec.hostname);
 	fformat(stdout, "  port               : %d\n", spec.port);
 
-	if (spec.kind != NODE_KIND_UNKNOWN)
+	if (spec.role != NODESPEC_ROLE_MONITOR)
 	{
 		fformat(stdout, "  monitor_pguri      : %s\n", spec.monitor_pguri);
 		fformat(stdout, "  formation          : %s\n", spec.formation);
@@ -1032,10 +1006,11 @@ cli_node_post_init(int argc, char **argv)
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 
-	if (spec.kind != NODE_KIND_UNKNOWN)
+	if (spec.role != NODESPEC_ROLE_MONITOR)
 	{
 		log_error("pg_autoctl node post-init is only valid for monitor nodes "
-				  "(got kind %d from \"%s\")", spec.kind, specPath);
+				  "(got kind \"%s\" from \"%s\")",
+				  nodespec_kind_string(&spec), specPath);
 		exit(EXIT_CODE_BAD_CONFIG);
 	}
 

@@ -94,9 +94,41 @@ node is created or started from scratch.
 
 ``kind``
 
-  Node role.  One of ``postgres``, ``monitor``, ``coordinator``,
-  ``worker``, or ``archiver`` (see :ref:`archiving_architecture`).
-  Required; immutable.
+  What this node runs.  Required; immutable.  Internally each value maps to
+  a role: only the ``postgres`` role takes part in the keeper state machine
+  and registers with the monitor as a data node.
+
+  .. list-table::
+     :header-rows: 1
+     :widths: 16 16 68
+
+     * - ``kind``
+       - Role
+       - What it does and needs
+     * - ``postgres``
+       - postgres
+       - Standalone Postgres data node in a formation.  Needs ``[monitor]
+         pguri`` (or ``no_monitor = true``) and ``pgdata``.
+     * - ``coordinator``
+       - postgres
+       - Citus coordinator node.  Same requirements as ``postgres``.
+     * - ``worker``
+       - postgres
+       - Citus worker node; ``group`` selects the worker group.
+     * - ``monitor``
+       - monitor
+       - The pg_auto_failover monitor.  No ``[monitor]`` section.
+     * - ``archiver``
+       - archiver
+       - Archive server (see :ref:`archiving_architecture`).  Registers
+         with the monitor but has no real Postgres data directory.
+     * - ``warm-standby``
+       - warm-standby
+       - **Reserved.**  Recognised by the parser but planned, not
+         implemented: ``pg_autoctl node run`` exits with a bad-config error.
+     * - ``pitr``
+       - pitr
+       - **Reserved.**  Same as ``warm-standby``.
 
 ``name``
 
