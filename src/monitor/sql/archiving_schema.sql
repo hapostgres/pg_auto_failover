@@ -465,3 +465,29 @@ SELECT count(*) AS checked_functions,
                      'get_basebackup_policy_for_group',
                      'get_basebackup_policy_for_archiver_group',
                      'archive_confirmed');
+
+-- ── WAL segment size, registered along with the system identifier ─────────
+
+SELECT pgautofailover.get_group_wal_segment_size('archiving_test', 0)
+       AS before_report;
+
+SELECT pgautofailover.set_node_wal_segment_size(nodeid, 33554432)
+  FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND nodename = 'node1';
+
+SELECT pgautofailover.get_group_wal_segment_size('archiving_test', 0)
+       AS group_walsegsize;
+
+-- the same value from the other node is accepted
+SELECT pgautofailover.set_node_wal_segment_size(nodeid, 33554432)
+  FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND nodename = 'node2';
+
+-- a different value in the same group, or a bogus one, is refused
+SELECT pgautofailover.set_node_wal_segment_size(nodeid, 16777216)
+  FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND nodename = 'node2';
+
+SELECT pgautofailover.set_node_wal_segment_size(nodeid, 3000000)
+  FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND nodename = 'node1';

@@ -58,6 +58,7 @@ typedef struct pg_control_data
 	char latestCheckpointRedoLSN[PG_LSN_MAXLENGTH];
 	char minRecoveryEndLSN[PG_LSN_MAXLENGTH];
 	uint32_t timeline_id;
+	uint32_t wal_segment_size;          /* bytes per WAL segment */
 } PostgresControlData;
 
 /*

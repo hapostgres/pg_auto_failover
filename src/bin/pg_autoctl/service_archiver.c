@@ -485,6 +485,33 @@ static void
 service_archiver_maybe_persist_systemid(Keeper *keeper)
 {
 	char path[MAXPGPATH] = { 0 };
+	char segPath[MAXPGPATH] = { 0 };
+
+	/*
+	 * The WAL segment size comes from the monitor too, registered by the
+	 * group's nodes along with the system identifier; pg_receivewal's own
+	 * write of the same file remains as a fallback.
+	 */
+	sformat(segPath, sizeof(segPath), "%s/archiver-walsegsize",
+			keeper->config.pgSetup.pgdata);
+
+	if (!file_exists(segPath))
+	{
+		uint64_t walSegmentSize = 0;
+
+		if (monitor_get_group_wal_segment_size(&(keeper->monitor),
+											   keeper->config.formation,
+											   keeper->config.groupId,
+											   &walSegmentSize) &&
+			walSegmentSize > 0)
+		{
+			char segContents[32] = { 0 };
+			int segSize = sformat(segContents, sizeof(segContents),
+								  "%" PRIu64 "\n", walSegmentSize);
+
+			(void) write_file_atomic(segContents, segSize, segPath);
+		}
+	}
 
 	archiver_systemid_path(&(keeper->config), path, sizeof(path));
 

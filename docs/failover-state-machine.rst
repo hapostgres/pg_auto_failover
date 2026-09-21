@@ -109,6 +109,11 @@ becoming unhealthy (bad). In the latter case, during the transition from
 primary to wait_primary, the primary node's keeper disables synchronous
 replication on the node. It also cancels currently blocked queries.
 
+An ``archiving`` node that is a replication-quorum member, and is healthy,
+counts as a synchronous standby here: as long as one exists the primary is
+not moved to wait_primary when its last secondary becomes unhealthy or goes
+to maintenance (see :ref:`archiving_state`).
+
 Join_primary
 ^^^^^^^^^^^^
 

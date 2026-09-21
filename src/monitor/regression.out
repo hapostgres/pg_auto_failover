@@ -1,0 +1,25 @@
+# using postmaster on localhost, port 5432
+ok 1         - create_extension                          257 ms
+ok 2         - fsm                                        48 ms
+ok 3         - check_fsm_reachability                     63 ms
+ok 4         - keeper_fsm_edges                           62 ms
+ok 5         - monitor                                   127 ms
+ok 6         - workers                                    61 ms
+ok 7         - node_active_protocol                      262 ms
+ok 8         - guard_data_loss                           134 ms
+ok 9         - fast_forward                              132 ms
+ok 10        - drop_node                                 158 ms
+ok 11        - stale_primary_report                      150 ms
+ok 12        - candidate_count_gate                      131 ms
+ok 13        - lock_and_fetch_migration                  182 ms
+ok 14        - timeline_fork_detection                   171 ms
+ok 15        - failover_candidate_leaves_secondary       110 ms
+ok 16        - cluster_init_failover_rule_attribution      114 ms
+not ok 17    - archiving_schema                          159 ms
+ok 18        - dummy_update                               55 ms
+ok 19        - drop_extension                             91 ms
+ok 20        - upgrade                                   128 ms
+1..20
+# 1 of 20 tests failed.
+# The differences that caused some tests to fail can be viewed in the file "/usr/src/pg_auto_failover/src/monitor/regression.diffs".
+# A copy of the test summary that you see above is saved in the file "/usr/src/pg_auto_failover/src/monitor/regression.out".

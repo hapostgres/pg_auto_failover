@@ -7409,3 +7409,80 @@ monitor_find_node_by_nodeid(Monitor *monitor,
 
 	return true;
 }
+
+
+/*
+ * monitor_set_node_wal_segment_size publishes the node's WAL segment size
+ * (bytes) on the monitor, next to its system identifier.
+ */
+bool
+monitor_set_node_wal_segment_size(Monitor *monitor, int64_t nodeId,
+								  uint64_t walSegmentSize)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT pgautofailover.set_node_wal_segment_size($1, $2)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { INT8OID, INT8OID };
+	const char *paramValues[2];
+	IntString nodeIdString = intToString(nodeId);
+	IntString sizeString = intToString(walSegmentSize);
+
+	if (walSegmentSize == 0)
+	{
+		/* pg_controldata did not tell us, nothing to publish */
+		return true;
+	}
+
+	paramValues[0] = nodeIdString.strValue;
+	paramValues[1] = sizeString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, NULL, NULL))
+	{
+		log_error("Failed to set the WAL segment size of node %" PRId64
+				  " on the monitor", nodeId);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * monitor_get_group_wal_segment_size fetches the WAL segment size shared by
+ * the group's nodes; *walSegmentSize is 0 when none has reported one yet.
+ */
+bool
+monitor_get_group_wal_segment_size(Monitor *monitor,
+								   const char *formationId, int groupId,
+								   uint64_t *walSegmentSize)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	const char *sql =
+		"SELECT coalesce("
+		"pgautofailover.get_group_wal_segment_size($1, $2), 0)";
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	IntString groupIdString = intToString(groupId);
+	const char *paramValues[2] = { formationId, groupIdString.strValue };
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_BIGINT, false };
+
+	*walSegmentSize = 0;
+
+	if (!pgsql_execute_with_params(pgsql, sql, paramCount, paramTypes,
+								   paramValues, &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get the WAL segment size for \"%s\"/%d "
+				  "from the monitor", formationId, groupId);
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		return false;
+	}
+
+	*walSegmentSize = (uint64_t) context.bigint;
+	return true;
+}

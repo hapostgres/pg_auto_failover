@@ -335,6 +335,14 @@ perspective of the rest of this page's failover sequences, an archiver is
 simply along for the ride: it never blocks a promotion, and it never needs
 one of its own.
 
+An archiver that is a replication-quorum member and is healthy also counts
+as a synchronous standby for the primary: when the last secondary fails, or
+is in maintenance, the primary stays in the ``primary`` state with
+synchronous replication acknowledged by the archiver, instead of moving to
+``wait_primary``. The primary only moves to ``wait_primary`` when neither a
+secondary nor a quorum archiver is available. The archiver never becomes a
+promotion candidate. See :ref:`archiving_architecture`.
+
 Failure handling and network partition detection
 ------------------------------------------------
 

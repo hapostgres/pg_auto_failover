@@ -2304,6 +2304,70 @@ comment on function pgautofailover.get_group_system_identifier(text,int)
 grant execute on function pgautofailover.get_group_system_identifier(text,int)
    to autoctl_node;
 
+ALTER TABLE pgautofailover.node ADD COLUMN IF NOT EXISTS walsegsize bigint;
+
+-- WAL segment size, reported along with the system identifier.
+CREATE FUNCTION pgautofailover.set_node_wal_segment_size
+ (
+    IN node_id       bigint,
+    IN wal_segsize   bigint
+ )
+RETURNS void LANGUAGE plpgsql STRICT SECURITY DEFINER
+SET search_path = pg_catalog, pgautofailover, pg_temp
+AS $$
+DECLARE
+    other bigint;
+BEGIN
+    IF wal_segsize < 1048576 OR wal_segsize > 1073741824
+       OR (wal_segsize & (wal_segsize - 1)) <> 0
+    THEN
+        RAISE EXCEPTION 'invalid WAL segment size: %', wal_segsize
+              USING ERRCODE = 'invalid_parameter_value';
+    END IF;
+
+    SELECT o.walsegsize INTO other
+      FROM pgautofailover.node n
+      JOIN pgautofailover.node o
+        ON o.formationid = n.formationid AND o.groupid = n.groupid
+     WHERE n.nodeid = set_node_wal_segment_size.node_id
+       AND o.nodeid <> n.nodeid
+       AND o.walsegsize IS NOT NULL
+     LIMIT 1;
+
+    IF other IS NOT NULL AND other <> wal_segsize THEN
+        RAISE EXCEPTION 'WAL segment size % differs from the group''s %',
+              wal_segsize, other
+              USING ERRCODE = 'check_violation';
+    END IF;
+
+    UPDATE pgautofailover.node
+       SET walsegsize = wal_segsize
+     WHERE nodeid = set_node_wal_segment_size.node_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION pgautofailover.set_node_wal_segment_size(bigint,bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.set_node_wal_segment_size(bigint,bigint) TO autoctl_node;
+
+CREATE FUNCTION pgautofailover.get_group_wal_segment_size
+    (formationid text, groupid int)
+ RETURNS bigint LANGUAGE sql STABLE SECURITY DEFINER
+ SET search_path = pg_catalog, pgautofailover, pg_temp
+AS $$
+    SELECT walsegsize
+      FROM pgautofailover.node
+     WHERE node.formationid = get_group_wal_segment_size.formationid
+       AND node.groupid = get_group_wal_segment_size.groupid
+       AND walsegsize IS NOT NULL
+     LIMIT 1;
+$$;
+
+comment on function pgautofailover.get_group_wal_segment_size(text,int)
+        is 'the WAL segment size (bytes) shared by every node in a group, as reported by its nodes next to the system identifier';
+
+REVOKE ALL ON FUNCTION pgautofailover.get_group_wal_segment_size(text,int) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.get_group_wal_segment_size(text,int) TO autoctl_node;
+
 -- `create postgres --from-archiver` needs the ARCHIVING row itself, not
 -- get_most_advanced_standby()'s election-only pool: that function filters
 -- on reportedstate = 'report_lsn', a transient state a group's ARCHIVING

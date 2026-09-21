@@ -28,9 +28,16 @@ stock `pg_basebackup`, streaming standbys and `restore_command` read from it.
 * `pg_autoctl create archiver --serve-port`, `pg_autoctl archiver backup now`,
   and pruning of the archiver's local WAL cache to the oldest retained base
   backup; a per-route `archiver-walsegsize` file.
-* An archiver marked replication-quorum eligible takes part in synchronous
+* An archiver that is a replication-quorum member takes part in synchronous
   commit: its `pg_receivewal` uses application_name
-  `pgautofailover_standby_<nodeid>` and flushes synchronously.
+  `pgautofailover_standby_<nodeid>` and flushes synchronously. The monitor
+  counts a healthy (`archiving`, not stale) quorum-member archiver as a quorum
+  standby: the primary stays `primary` when its last secondary is lost or in
+  maintenance, and only falls back to `wait_primary` when no quorum standby
+  is left.
+* The WAL segment size is registered on the monitor along with the system
+  identifier (`node.walsegsize`, `set_node_wal_segment_size()`,
+  `get_group_wal_segment_size()`); an archiver learns it from there.
 * `pg_walsender` hardening: `--auth-timeout` (absolute deadline for startup,
   TLS and authentication), `--insecure` required without `--pgdata`,
   oversize pre-authentication messages rejected, HBA parse errors fail

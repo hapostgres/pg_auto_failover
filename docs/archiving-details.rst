@@ -623,7 +623,21 @@ is a member of the primary's synchronous commit quorum: its
 ``pg_receivewal`` connects with ``application_name``
 ``pgautofailover_standby_<nodeid>`` and flushes synchronously, so
 ``synchronous_standby_names`` can count it. It can then satisfy the quorum
-when a secondary is down. This is separate from ``archiver_quorum`` (the
+when a secondary is down. Making a node a quorum member is done with
+``pgautofailover.set_node_replication_quorum(formation, nodename, true)``
+(the archiver's node name is ``archiver-<archiverid>-<group>``).
+
+The monitor counts an archiver as a quorum standby of the group's primary
+only while it is a quorum member, in the ``archiving`` state and not stale
+(it keeps reporting to the monitor). While such an archiver exists the
+primary stays ``primary`` -- keeping synchronous replication and accepting
+writes -- when its last secondary is lost, or is put in maintenance. Only
+when no quorum standby is left at all, no secondary and no archiver, does
+the primary fall back to ``wait_primary``, as it does in a group without
+archivers. A graceful stop of a secondary's ``pg_autoctl`` starts its
+maintenance and behaves the same way. The archiver still has
+``candidate-priority`` 0: it keeps the primary writable, it can never be
+promoted. This is separate from ``archiver_quorum`` (the
 number of archivers that must have captured a segment before
 ``wal_archived()`` reports it).
 

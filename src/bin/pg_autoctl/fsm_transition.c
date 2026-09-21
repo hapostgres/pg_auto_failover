@@ -166,6 +166,14 @@ fsm_init_primary(Keeper *keeper)
 				log_error("Failed to update the new node system_identifier");
 				return false;
 			}
+
+			if (!monitor_set_node_wal_segment_size(
+					monitor,
+					keeper->state.current_node_id,
+					pgSetup->control.wal_segment_size))
+			{
+				return false;
+			}
 		}
 	}
 	else if (initState->pgInitState >= PRE_INIT_STATE_RUNNING)
@@ -897,6 +905,14 @@ fsm_init_standby_from_upstream(Keeper *keeper)
 				postgres->postgresSetup.control.system_identifier))
 		{
 			log_error("Failed to update the new node system_identifier");
+			return false;
+		}
+
+		if (!monitor_set_node_wal_segment_size(
+				monitor,
+				keeper->state.current_node_id,
+				postgres->postgresSetup.control.wal_segment_size))
+		{
 			return false;
 		}
 	}

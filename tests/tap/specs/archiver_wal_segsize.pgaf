@@ -5,6 +5,8 @@
 #   test_002  the archiver captures 32 MB segments: file size, the value it
 #             recorded (archiver-walsegsize), and the LSN it reports to the
 #             monitor for a closed segment (end of segment N is (N+1) * 32 MB)
+#             The monitor also holds it (node.walsegsize, registered next to the
+#             system identifier; get_group_wal_segment_size()).
 #   test_003  pg_walsender says `SHOW wal_segment_size` = 32MB and serves
 #             stock pg_basebackup and pg_receivewal (whose files are 32 MB)
 #   test_004  a standby joins (segment size inherited from the base backup),
@@ -34,6 +36,11 @@ step test_001_primary_with_32mb_segments {
     sql node1 { SHOW wal_segment_size }
     expect { 32MB }
     wait until archiver1 state is archiving  timeout 180s
+
+    # the monitor learned the segment size along with the system identifier
+    wait until sql monitor {
+        SELECT pgautofailover.get_group_wal_segment_size('default', 0)
+    } is { 33554432 }  timeout 60s
     # WAL older than the bootstrap backup is pruned by design: let it complete first
     wait until sql monitor {
         SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
@@ -65,6 +72,8 @@ step test_004_standby_and_failover_keep_32mb {
     wait until node2 state is secondary  timeout 180s
     sql node2 { SHOW wal_segment_size }
     expect { 32MB }
+    sql monitor { SELECT count(*) FROM pgautofailover.node WHERE walsegsize = 33554432 }
+    expect { 2 }
 
     perform failover
     wait until primary, secondary in group 0  timeout 180s

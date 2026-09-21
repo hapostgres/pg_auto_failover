@@ -499,6 +499,11 @@ bool monitor_update_node_metadata(Monitor *monitor,
 								  const char *name,
 								  const char *hostname,
 								  int port);
+bool monitor_set_node_wal_segment_size(Monitor *monitor, int64_t nodeId,
+									   uint64_t walSegmentSize);
+bool monitor_get_group_wal_segment_size(Monitor *monitor,
+										const char *formationId, int groupId,
+										uint64_t *walSegmentSize);
 bool monitor_set_node_system_identifier(Monitor *monitor,
 										int64_t nodeId,
 										uint64_t system_identifier);

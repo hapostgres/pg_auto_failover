@@ -2129,9 +2129,32 @@ BuildApiTriggerNodeActiveContext(GroupStateContext *ctx, MonitorApiFunction apiF
 			AutoFailoverOtherNodesListInState(primaryNode, REPLICATION_STATE_SECONDARY);
 		int secondaryNodesCount = CountHealthySyncStandbys(secondaryNodesList);
 
+		/*
+		 * A healthy replication-quorum archiver is also a synchronous
+		 * standby (see BuildForPrimaryNodeNodeActiveContext): with one
+		 * around, the primary keeps its quorum and must not be sent to
+		 * wait_primary, not even transiently.
+		 */
+		bool quorumArchiverLeft = false;
+		ListCell *nodeCell = NULL;
+
+		foreach(nodeCell, ctx->groupNodeList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			if (!node->hasPgData && node->replicationQuorum &&
+				IsCurrentState(node, REPLICATION_STATE_ARCHIVING) &&
+				!NodeIsUnhealthy(node, ctx))
+			{
+				quorumArchiverLeft = true;
+				break;
+			}
+		}
+
 		nac->lastHealthySyncStandbyGoingToMaintenance =
 			ctx->formation->number_sync_standbys == 0 &&
 			secondaryNodesCount == 1 &&
+			!quorumArchiverLeft &&
 			IsHealthySyncStandby(activeNode);
 	}
 }

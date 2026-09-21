@@ -715,3 +715,38 @@ public_can_execute  | 0
 node_cannot_execute | 0
 missing_search_path | 0
 
+-- ── WAL segment size, registered along with the system identifier ─────────
+SELECT pgautofailover.get_group_wal_segment_size('archiving_test', 0)
+       AS before_report;
+-[ RECORD 1 ]-+-
+before_report | 
+
+SELECT pgautofailover.set_node_wal_segment_size(nodeid, 33554432)
+  FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND nodename = 'node1';
+-[ RECORD 1 ]-------------+-
+set_node_wal_segment_size | 
+
+SELECT pgautofailover.get_group_wal_segment_size('archiving_test', 0)
+       AS group_walsegsize;
+-[ RECORD 1 ]----+---------
+group_walsegsize | 33554432
+
+-- the same value from the other node is accepted
+SELECT pgautofailover.set_node_wal_segment_size(nodeid, 33554432)
+  FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND nodename = 'node2';
+-[ RECORD 1 ]-------------+-
+set_node_wal_segment_size | 
+
+-- a different value in the same group, or a bogus one, is refused
+SELECT pgautofailover.set_node_wal_segment_size(nodeid, 16777216)
+  FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND nodename = 'node2';
+ERROR:  WAL segment size 16777216 differs from the group's 33554432
+CONTEXT:  PL/pgSQL function set_node_wal_segment_size(bigint,bigint) line 22 at RAISE
+SELECT pgautofailover.set_node_wal_segment_size(nodeid, 3000000)
+  FROM pgautofailover.node
+ WHERE formationid = 'archiving_test' AND nodename = 'node1';
+ERROR:  invalid WAL segment size: 3000000
+CONTEXT:  PL/pgSQL function set_node_wal_segment_size(bigint,bigint) line 8 at RAISE
