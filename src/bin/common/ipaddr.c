@@ -14,6 +14,8 @@
 #include <limits.h>
 #include <netdb.h>
 #include <net/if.h>
+#include <arpa/nameser.h>
+#include <resolv.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <stdbool.h>
@@ -740,6 +742,188 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size,
 	freeaddrinfo(lookup);
 
 	return true;
+}
+
+
+/*
+ * ipaddrHostMatchesAddress returns true when hostOrIp -- an IP address, or a
+ * hostname that we resolve forward with GetAddrInfo(), retry policy included
+ * -- designates the numeric address ipaddr: every address of the DNS answer
+ * is compared, not only the first one.
+ */
+bool
+ipaddrHostMatchesAddress(const char *hostOrIp, const char *ipaddr)
+{
+	struct addrinfo *lookup, *ai;
+
+	if (!GetAddrInfo(hostOrIp, NULL, 0, &lookup))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	bool found = false;
+
+	for (ai = lookup; ai != NULL && !found; ai = ai->ai_next)
+	{
+		char candidate[BUFSIZE] = { 0 };
+
+		found = ipaddr_sockaddr_to_string(ai, candidate, BUFSIZE) &&
+				strcmp(candidate, ipaddr) == 0;
+	}
+
+	freeaddrinfo(lookup);
+
+	return found;
+}
+
+
+/*
+ * ipaddrInCIDR returns true when ipaddr falls in the "address/prefix"
+ * network, IPv4 or IPv6; an IPv4-mapped IPv6 address is compared as the IPv4
+ * address it carries.
+ */
+bool
+ipaddrInCIDR(const char *cidr, const char *ipaddr)
+{
+	char network[INET6_ADDRSTRLEN + 8];
+
+	strlcpy(network, cidr, sizeof(network));
+
+	char *slash = strchr(network, '/');
+
+	if (slash == NULL)
+	{
+		return false;
+	}
+
+	*slash = '\0';
+
+	int prefix = 0;
+
+	if (!stringToInt(slash + 1, &prefix) || prefix < 0)
+	{
+		return false;
+	}
+
+	unsigned char net[16], peer[16];
+	int family = ip_address_type(network) == IPTYPE_V6 ? AF_INET6 : AF_INET;
+	int addrLen = family == AF_INET6 ? 16 : 4;
+
+	if (prefix > addrLen * 8 || inet_pton(family, network, net) != 1)
+	{
+		return false;
+	}
+
+	if (inet_pton(family, ipaddr, peer) != 1)
+	{
+		const char *mapped = strncmp(ipaddr, "::ffff:", 7) == 0 ? ipaddr + 7 : NULL;
+
+		if (family != AF_INET || mapped == NULL ||
+			inet_pton(AF_INET, mapped, peer) != 1)
+		{
+			return false;
+		}
+	}
+
+	int fullBytes = prefix / 8;
+	int restBits = prefix % 8;
+
+	if (memcmp(net, peer, fullBytes) != 0)
+	{
+		return false;
+	}
+
+	if (restBits == 0)
+	{
+		return true;
+	}
+
+	unsigned char mask = (unsigned char) (0xFF << (8 - restBits));
+
+	return (net[fullBytes] & mask) == (peer[fullBytes] & mask);
+}
+
+
+/*
+ * ipaddrFindHostnamesFromAddress is findHostnameFromLocalIpAddress() for all
+ * the names of an address: getnameinfo() only ever returns the first PTR
+ * record, but a host (or a Docker network) may have several, and an HBA rule
+ * may name any of them. Returns how many names were stored.
+ */
+int
+ipaddrFindHostnamesFromAddress(const char *ipaddr,
+							   char hostnames[][IPADDR_MAX_HOSTNAME_SIZE],
+							   int maxCount)
+{
+	unsigned char addr[16];
+	char query[NS_MAXDNAME];
+	int count = 0;
+
+	if (inet_pton(AF_INET, ipaddr, addr) == 1)
+	{
+		sformat(query, sizeof(query), "%u.%u.%u.%u.in-addr.arpa",
+				addr[3], addr[2], addr[1], addr[0]);
+	}
+	else if (inet_pton(AF_INET6, ipaddr, addr) == 1)
+	{
+		size_t len = 0;
+
+		query[0] = '\0';
+
+		for (int i = 15; i >= 0; i--)
+		{
+			len += (size_t) sformat(query + len, sizeof(query) - len, "%x.%x.",
+									addr[i] & 0x0F, addr[i] >> 4);
+		}
+
+		strlcpy(query + len, "ip6.arpa", sizeof(query) - len);
+	}
+	else
+	{
+		return 0;
+	}
+
+	unsigned char answer[4096];
+	int answerLen = res_query(query, ns_c_in, ns_t_ptr, answer, sizeof(answer));
+
+	if (answerLen <= 0)
+	{
+		log_debug("No PTR record for \"%s\"", ipaddr);
+		return 0;
+	}
+
+	ns_msg msg;
+
+	if (ns_initparse(answer, answerLen, &msg) != 0)
+	{
+		return 0;
+	}
+
+	for (int i = 0; i < ns_msg_count(msg, ns_s_an) && count < maxCount; i++)
+	{
+		ns_rr rr;
+		char name[NS_MAXDNAME];
+
+		if (ns_parserr(&msg, ns_s_an, i, &rr) != 0 || ns_rr_type(rr) != ns_t_ptr ||
+			ns_name_uncompress(ns_msg_base(msg), ns_msg_end(msg),
+							   ns_rr_rdata(rr), name, sizeof(name)) < 0)
+		{
+			continue;
+		}
+
+		/* resolvers give a trailing dot for a fully qualified name */
+		size_t len = strlen(name);
+
+		if (len > 0 && name[len - 1] == '.')
+		{
+			name[len - 1] = '\0';
+		}
+
+		strlcpy(hostnames[count++], name, IPADDR_MAX_HOSTNAME_SIZE);
+	}
+
+	return count;
 }
 
 

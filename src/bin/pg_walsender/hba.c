@@ -7,14 +7,9 @@
  *
  */
 
-#include <arpa/inet.h>
-#include <arpa/nameser.h>
-#include <netdb.h>
-#include <resolv.h>
 #include <stdlib.h>
 #include <strings.h>
 #include <string.h>
-#include <sys/socket.h>
 
 #include "postgres_fe.h"
 
@@ -24,6 +19,7 @@
 
 #include "defaults.h"
 #include "file_utils.h"
+#include "ipaddr.h"
 #include "log.h"
 #include "monitor_hosts.h"
 #include "string_utils.h"
@@ -105,189 +101,6 @@ hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable)
 
 
 /*
- * hba_host_matches_peer: literal numeric address match first, then resolve
- * the name and compare each resulting numeric address.
- */
-bool
-hba_host_matches_peer(const char *hostOrIp, const char *peerIP)
-{
-	if (streq(hostOrIp, peerIP))
-	{
-		return true;
-	}
-
-	struct addrinfo hints;
-
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-
-	struct addrinfo *res = NULL;
-
-	if (getaddrinfo(hostOrIp, NULL, &hints, &res) != 0)
-	{
-		return false;
-	}
-
-	bool found = false;
-
-	for (struct addrinfo *rp = res; rp != NULL && !found; rp = rp->ai_next)
-	{
-		char resolved[NI_MAXHOST];
-
-		found = getnameinfo(rp->ai_addr, rp->ai_addrlen, resolved,
-							sizeof(resolved), NULL, 0, NI_NUMERICHOST) == 0 &&
-				streq(resolved, peerIP);
-	}
-
-	freeaddrinfo(res);
-
-	return found;
-}
-
-
-/*
- * cidr_matches: does peerIP fall in "addr/prefix"? IPv4 and IPv6, and an
- * IPv4-mapped IPv6 peer is compared as the IPv4 address it carries.
- */
-static bool
-cidr_matches(const char *cidr, const char *peerIP)
-{
-	char network[INET6_ADDRSTRLEN + 8];
-
-	strlcpy(network, cidr, sizeof(network));
-
-	char *slash = strchr(network, '/');
-
-	if (slash == NULL)
-	{
-		return false;
-	}
-
-	*slash = '\0';
-
-	int prefix = 0;
-
-	if (!stringToInt(slash + 1, &prefix) || prefix < 0)
-	{
-		return false;
-	}
-
-	unsigned char net[16], peer[16];
-	int family = strchr(network, ':') != NULL ? AF_INET6 : AF_INET;
-	int addrLen = family == AF_INET6 ? 16 : 4;
-
-	if (prefix > addrLen * 8 || inet_pton(family, network, net) != 1)
-	{
-		return false;
-	}
-
-	if (inet_pton(family, peerIP, peer) != 1)
-	{
-		/* an IPv4-mapped IPv6 peer against an IPv4 network */
-		const char *mapped = strncmp(peerIP, "::ffff:", 7) == 0 ? peerIP + 7 : NULL;
-
-		if (family != AF_INET || mapped == NULL ||
-			inet_pton(AF_INET, mapped, peer) != 1)
-		{
-			return false;
-		}
-	}
-
-	int fullBytes = prefix / 8;
-	int restBits = prefix % 8;
-
-	if (memcmp(net, peer, fullBytes) != 0)
-	{
-		return false;
-	}
-
-	if (restBits == 0)
-	{
-		return true;
-	}
-
-	unsigned char mask = (unsigned char) (0xFF << (8 - restBits));
-
-	return (net[fullBytes] & mask) == (peer[fullBytes] & mask);
-}
-
-
-/*
- * reverse_names collects every PTR name of peerIP (not only the first one
- * getnameinfo() returns: a Docker network, or a host with several names,
- * answers with a list, and any of them may be the one an HBA rule names).
- * Returns the number of names stored.
- */
-#define HBA_MAX_PTR_NAMES 16
-
-static int
-reverse_names(const char *peerIP, char names[][NS_MAXDNAME])
-{
-	unsigned char addr[16];
-	char query[NS_MAXDNAME];
-	int count = 0;
-
-	if (inet_pton(AF_INET, peerIP, addr) == 1)
-	{
-		sformat(query, sizeof(query), "%u.%u.%u.%u.in-addr.arpa",
-				addr[3], addr[2], addr[1], addr[0]);
-	}
-	else if (inet_pton(AF_INET6, peerIP, addr) == 1)
-	{
-		size_t len = 0;
-
-		query[0] = '\0';
-
-		for (int i = 15; i >= 0; i--)
-		{
-			len += (size_t) sformat(query + len, sizeof(query) - len, "%x.%x.",
-									addr[i] & 0x0F, addr[i] >> 4);
-		}
-
-		strlcpy(query + len, "ip6.arpa", sizeof(query) - len);
-	}
-	else
-	{
-		return 0;
-	}
-
-	unsigned char answer[4096];
-	int answerLen = res_query(query, ns_c_in, ns_t_ptr, answer, sizeof(answer));
-
-	if (answerLen <= 0)
-	{
-		return 0;
-	}
-
-	ns_msg msg;
-
-	if (ns_initparse(answer, answerLen, &msg) != 0)
-	{
-		return 0;
-	}
-
-	for (int i = 0; i < ns_msg_count(msg, ns_s_an) && count < HBA_MAX_PTR_NAMES; i++)
-	{
-		ns_rr rr;
-
-		if (ns_parserr(&msg, ns_s_an, i, &rr) != 0 || ns_rr_type(rr) != ns_t_ptr)
-		{
-			continue;
-		}
-
-		if (ns_name_uncompress(ns_msg_base(msg), ns_msg_end(msg),
-							   ns_rr_rdata(rr), names[count],
-							   NS_MAXDNAME) >= 0)
-		{
-			count++;
-		}
-	}
-
-	return count;
-}
-
-
-/*
  * suffix_matches implements ".example.com": true when any reverse name of
  * the peer ends with the suffix AND that name resolves (forward) back to
  * the peer -- PostgreSQL's forward-confirmed reverse DNS, but over every
@@ -296,26 +109,20 @@ reverse_names(const char *peerIP, char names[][NS_MAXDNAME])
 static bool
 suffix_matches(const char *suffix, const char *peerIP)
 {
-	char names[HBA_MAX_PTR_NAMES][NS_MAXDNAME];
-	int count = reverse_names(peerIP, names);
+	char names[IPADDR_MAX_HOSTNAMES][IPADDR_MAX_HOSTNAME_SIZE];
+	int count = ipaddrFindHostnamesFromAddress(peerIP, names,
+											   IPADDR_MAX_HOSTNAMES);
 	size_t suffixLen = strlen(suffix);
 
-	log_debug("HBA suffix %s peer %s: %d reverse names, first \"%s\"", suffix, peerIP,
-			  count, count > 0 ? names[0] : "");
+	log_debug("HBA suffix %s peer %s: %d reverse names", suffix, peerIP, count);
 
 	for (int i = 0; i < count; i++)
 	{
 		size_t len = strlen(names[i]);
 
-		/* PTR names may carry a trailing dot in some resolvers */
-		if (len > 0 && names[i][len - 1] == '.')
-		{
-			names[i][--len] = '\0';
-		}
-
 		if (len > suffixLen &&
 			strcasecmp(names[i] + len - suffixLen, suffix) == 0 &&
-			hba_host_matches_peer(names[i], peerIP))
+			ipaddrHostMatchesAddress(names[i], peerIP))
 		{
 			return true;
 		}
@@ -342,7 +149,7 @@ rule_address_matches(const char *address, const char *routeKey,
 
 	if (strchr(address, '/') != NULL)
 	{
-		return cidr_matches(address, peerIP);
+		return ipaddrInCIDR(address, peerIP);
 	}
 
 	if (address[0] == '.')
@@ -350,7 +157,7 @@ rule_address_matches(const char *address, const char *routeKey,
 		return suffix_matches(address, peerIP);
 	}
 
-	return hba_host_matches_peer(address, peerIP);
+	return ipaddrHostMatchesAddress(address, peerIP);
 }
 
 

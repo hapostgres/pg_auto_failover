@@ -54,7 +54,4 @@ bool hba_lookup(const char *hbaPath, const char *routePath,
 /* create the default HBA file if there is none; never overwrite one */
 bool hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable);
 
-/* does hostOrIp name the same address as the numeric peerIP? */
-bool hba_host_matches_peer(const char *hostOrIp, const char *peerIP);
-
 #endif /* WS_HBA_H */

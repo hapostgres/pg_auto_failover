@@ -2,10 +2,10 @@
 # Licensed under the PostgreSQL License.
 #
 # pg_walsender -- the archiver's own replication-protocol server. Standalone
-# binary: does NOT link any pg_autoctl/*.c, only src/bin/common/ and
-# src/bin/lib/log/, so it can be exec'd and tested independently of
-# pg_autoctl (see src/bin/pg_autoctl/service_archiver.c's own "colocated
-# fast path" note).
+# binary: links none of pg_autoctl's service code, only src/bin/common/,
+# src/bin/lib/ and pg_autoctl/state.c (see OBJS below), so it can be exec'd
+# and tested independently of pg_autoctl (see
+# src/bin/pg_autoctl/service_archiver.c's own "colocated fast path" note).
 
 PG_WALSENDER = ./pg_walsender
 
@@ -42,8 +42,15 @@ vendor-%.o: $(SRC_DIR)vendor/%.c
 	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
 	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/vendor-$(*F).Po -o $@ $<
 
+shared-state.o: $(SRC_DIR)../pg_autoctl/state.c
+	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
+	$(CC) $(CFLAGS) -I$(SRC_DIR)../pg_autoctl -c -MMD -MP -MF$(DEPDIR)/shared-state.Po -o $@ $<
+
 OBJS  = $(LOCAL_OBJS) $(VENDOR_OBJS)
-OBJS += lib-log.o lib-snprintf.o lib-strerror.o
+# common/ipaddr.c (forward/reverse DNS with its retry policy, reused here for
+# HBA address matching) sits on common/pgsql.c, which needs parson and
+# pg_autoctl's state.c (NodeStateFromString): linked, not reimplemented.
+OBJS += lib-log.o lib-snprintf.o lib-strerror.o lib-parson.o shared-state.o
 OBJS += $(COMMON_LIB)
 
 INCLUDES = $(wildcard $(SRC_DIR)*.h)

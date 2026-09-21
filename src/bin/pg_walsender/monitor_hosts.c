@@ -23,7 +23,7 @@
 
 #include "defaults.h"
 #include "file_utils.h"
-#include "hba.h"
+#include "ipaddr.h"
 #include "log.h"
 #include "string_utils.h"
 
@@ -96,7 +96,7 @@ local_hosts_match(const LocalHosts *local, const char *peerIP)
 			continue;
 		}
 
-		found = hba_host_matches_peer(line, peerIP);
+		found = ipaddrHostMatchesAddress(line, peerIP);
 	}
 
 	free(copy);

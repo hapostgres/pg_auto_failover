@@ -36,5 +36,19 @@ bool resolveHostnameForwardAndReverse(const char *hostname,
 
 bool ipaddrGetLocalHostname(char *hostname, size_t size);
 
+/*
+ * Peer address matching, used to authenticate a client by its address (see
+ * pg_walsender's HBA file): all of them take the client's numeric address.
+ */
+bool ipaddrHostMatchesAddress(const char *hostOrIp, const char *ipaddr);
+bool ipaddrInCIDR(const char *cidr, const char *ipaddr);
+
+#define IPADDR_MAX_HOSTNAMES 16
+#define IPADDR_MAX_HOSTNAME_SIZE 256
+
+int ipaddrFindHostnamesFromAddress(const char *ipaddr,
+								   char hostnames[][IPADDR_MAX_HOSTNAME_SIZE],
+								   int maxCount);
+
 
 #endif /* __IPADDRH__ */
