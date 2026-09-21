@@ -1,6 +1,6 @@
 /*
  * src/bin/pg_autoctl/archiver_confirm.h
- *   archive_command confirmation: `pg_autoctl archiver confirm`. It never
+ *   archive_command confirmation: `pg_autoctl archive command`. It never
  *   moves data, it only asks the monitor whether the archiver's
  *   pg_receivewal already holds the WAL segment.
  *

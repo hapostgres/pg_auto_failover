@@ -20,7 +20,7 @@ stock `pg_basebackup`, streaming standbys and `restore_command` read from it.
 * `pg_autoctl create postgres --from-archiver` to bootstrap a node from an
   archiver, and fast-forward of a lagging standby from an archiver. (#1186)
 * Monitor extension version 2.3, with an upgrade script from 2.2. (#1186)
-* `archive_command` confirmation: `pg_autoctl archiver confirm` (set as
+* `archive_command` confirmation: `pg_autoctl archive command` (set as
   `archive_command` on new nodes, opt out with `pg_autoctl create postgres
   --archive-confirm off`) succeeds once the archiver holds a WAL segment, and
   `pgautofailover.archive_confirmed()` on the monitor. Existing nodes need a

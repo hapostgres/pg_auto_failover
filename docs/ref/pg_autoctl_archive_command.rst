@@ -1,9 +1,9 @@
-.. _pg_autoctl_archiver_confirm:
+.. _pg_autoctl_archive_command:
 
-pg_autoctl archiver confirm
-===========================
+pg_autoctl archive command
+==========================
 
-pg_autoctl archiver confirm - archive_command: succeed once the archiver holds the given WAL file
+pg_autoctl archive command - archive_command: succeed once the archiver holds the given WAL file
 
 Synopsis
 --------
@@ -14,7 +14,7 @@ already holds the WAL segment. See :ref:`archiving_architecture`.
 
 ::
 
-  usage: pg_autoctl archiver confirm  --pgdata <walfile>
+  usage: pg_autoctl archive command  --pgdata <walfile>
 
     --pgdata   path to the node's PGDATA
 
@@ -30,6 +30,6 @@ had no archiver.
 
 New nodes are set up with::
 
-  archive_command = '/path/to/pg_autoctl archiver confirm --pgdata PGDATA %f'
+  archive_command = '/path/to/pg_autoctl archive command --pgdata PGDATA %f'
 
 unless ``pg_autoctl create postgres --archive-confirm off`` is used.

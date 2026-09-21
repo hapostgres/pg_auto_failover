@@ -280,12 +280,12 @@ cli_archiver_serve(int argc, char **argv)
 }
 
 
-/* WAL file name given to `archiver confirm` */
+/* WAL file name given to `archive command` */
 static char archiverConfirmWalFile[MAXPGPATH] = { 0 };
 
 
 /*
- * cli_archiver_confirm_getopts parses `pg_autoctl archiver confirm --pgdata D
+ * cli_archiver_confirm_getopts parses `pg_autoctl archive command --pgdata D
  * <walfile>`. Quiet by default: Postgres captures our stderr in its log.
  */
 static int
@@ -357,7 +357,7 @@ cli_archiver_confirm_getopts(int argc, char **argv)
 
 
 /*
- * cli_archiver_confirm implements `pg_autoctl archiver confirm`: the
+ * cli_archiver_confirm implements `pg_autoctl archive command`: the
  * archive_command. Exit 0 iff the segment is confirmed.
  */
 static void
@@ -368,9 +368,9 @@ cli_archiver_confirm(int argc, char **argv)
 }
 
 
-CommandLine archiver_confirm_command =
+CommandLine archive_command_command =
 	make_command(
-		"confirm",
+		"command",
 		"archive_command: succeed once the archiver holds the given WAL file",
 		" --pgdata <walfile> ",
 		"  --pgdata          path to the node's PGDATA\n",
@@ -1556,7 +1556,6 @@ CommandLine archiver_backup_commands =
 
 CommandLine *archiver_subcommands[] = {
 	&archiver_serve_command,
-	&archiver_confirm_command,
 	&archiver_formation_commands,
 	&archiver_show_commands,
 	&archiver_backup_commands,
@@ -1567,3 +1566,14 @@ CommandLine archiver_commands =
 	make_command_set("archiver",
 					 "Manage a pg_auto_failover archiver node", NULL, NULL,
 					 NULL, archiver_subcommands);
+
+
+CommandLine *archive_subcommands[] = {
+	&archive_command_command,
+	NULL
+};
+
+CommandLine archive_commands =
+	make_command_set("archive",
+					 "Commands run by Postgres on behalf of archiving", NULL,
+					 NULL, NULL, archive_subcommands);

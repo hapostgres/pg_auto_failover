@@ -34,7 +34,7 @@ teardown {
 
 step test_001_confirm_command_is_configured {
     exec node1 bash -c 'psql -d demo -Atc "SHOW archive_mode" | grep -qx on'
-    exec node1 bash -c 'psql -d demo -Atc "SHOW archive_command" | grep -q "archiver confirm"'
+    exec node1 bash -c 'psql -d demo -Atc "SHOW archive_command" | grep -q "archive command"'
 }
 
 step test_002_confirmed_segments_are_archived {

@@ -115,6 +115,7 @@ CommandLine *root_subcommands[] = {
 	&do_compat_commands,
 	&node_commands,
 	&archiver_commands,
+	&archive_commands,
 	&service_run_command,
 	&watch_command,
 	&service_stop_command,

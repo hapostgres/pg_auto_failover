@@ -1010,7 +1010,7 @@ prepare_archive_confirm_settings(PQExpBuffer config, PostgresSetup *pgSetup)
 	}
 
 	append_shell_single_quoted(command, pg_autoctl_program);
-	appendPQExpBufferStr(command, " archiver confirm --pgdata ");
+	appendPQExpBufferStr(command, " archive command --pgdata ");
 	append_shell_single_quoted(command, pgSetup->pgdata);
 	appendPQExpBufferStr(command, " %f");
 
@@ -1233,7 +1233,7 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 		}
 	}
 
-	/* archive_command confirmation, see pg_autoctl archiver confirm */
+	/* archive_command confirmation, see pg_autoctl archive command */
 	if (!prepare_archive_confirm_settings(config, pgSetup))
 	{
 		destroyPQExpBuffer(config);

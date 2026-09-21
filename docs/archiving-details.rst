@@ -558,7 +558,7 @@ archive_command confirmation
 
 ``archive_command`` never moves data here: the archiver's ``pg_receivewal``
 already streams the WAL. New nodes are configured with ``archive_mode = on``
-and ``archive_command = '<pg_autoctl> archiver confirm --pgdata <PGDATA> %f'``
+and ``archive_command = '<pg_autoctl> archive command --pgdata <PGDATA> %f'``
 (``pg_autoctl create postgres --archive-confirm off`` writes
 ``archive_mode = off`` instead). Postgres only recycles a WAL segment once the
 command succeeds, so a segment is never recycled before the archiver holds it.

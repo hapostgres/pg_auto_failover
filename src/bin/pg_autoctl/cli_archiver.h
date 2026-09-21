@@ -18,7 +18,8 @@
 #include "monitor.h"
 
 extern CommandLine archiver_serve_command;
-extern CommandLine archiver_confirm_command;
+extern CommandLine archive_command_command;
+extern CommandLine archive_commands;
 extern CommandLine *archiver_subcommands[];
 extern CommandLine archiver_commands;
 
