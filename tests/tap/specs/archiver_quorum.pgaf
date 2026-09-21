@@ -89,13 +89,9 @@ step test_002_archiver_is_a_synchronous_quorum_member {
     exec node1 bash -c 'psql -Atc "SHOW synchronous_standby_names" | grep -q "pgautofailover_standby_${aid}"'
     exec node1 bash -c 'psql -Atc "SHOW synchronous_standby_names" | grep -q "pgautofailover_standby_"'
 
-    # What this does NOT prove yet, on purpose: "the secondary is down, the
-    # archiver alone keeps synchronous commit going". Today the monitor's FSM
-    # only counts SECONDARY nodes as healthy synchronous standbys
-    # (IsHealthySyncStandby), so when the secondary dies the primary goes to
-    # wait_primary and switches synchronous replication OFF instead of
-    # staying primary with the archiver as its quorum. That is a monitor FSM
-    # change, tracked separately from this milestone.
+    # The consequence that matters -- the secondary dies and the primary
+    # STAYS primary with the archiver as its only synchronous standby -- has
+    # its own spec: archiver_fsm_quorum.pgaf.
 }
 
 sequence

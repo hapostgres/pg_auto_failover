@@ -1785,8 +1785,11 @@ pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 	char extraOptions[BUFSIZE] = { 0 };
 	char optionString[BUFSIZE] = { 0 };
 
-	(void) get_env_copy("PG_AUTOCTL_INITDB_OPTIONS", extraOptions,
-						sizeof(extraOptions));
+	if (env_exists("PG_AUTOCTL_INITDB_OPTIONS"))
+	{
+		(void) get_env_copy("PG_AUTOCTL_INITDB_OPTIONS", extraOptions,
+							sizeof(extraOptions));
+	}
 
 	for (const char *c = extraOptions; *c != '\0'; c++)
 	{
