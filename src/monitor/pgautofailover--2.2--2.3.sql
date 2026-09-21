@@ -1894,6 +1894,32 @@ comment on function pgautofailover.wal_archived(text,int,text)
 grant execute on function pgautofailover.wal_archived(text,int,text)
    to autoctl_node;
 
+-- archive_command confirmation entry point: a group with no archiver
+-- membership (no haspgdata=false node) never blocks WAL recycling
+CREATE FUNCTION pgautofailover.archive_confirmed
+    (formationid text, groupid int, walfilename text)
+ RETURNS bool
+ LANGUAGE sql STABLE SECURITY DEFINER
+AS $$
+    SELECT CASE
+             WHEN NOT EXISTS (SELECT 1
+                                FROM pgautofailover.node n
+                               WHERE n.formationid = archive_confirmed.formationid
+                                 AND n.groupid = archive_confirmed.groupid
+                                 AND NOT n.haspgdata)
+             THEN true
+             ELSE pgautofailover.wal_archived(archive_confirmed.formationid,
+                                              archive_confirmed.groupid,
+                                              archive_confirmed.walfilename)
+           END;
+$$;
+
+comment on function pgautofailover.archive_confirmed(text,int,text)
+        is 'archive_command check: true when the group has no archiver, else wal_archived()';
+
+grant execute on function pgautofailover.archive_confirmed(text,int,text)
+   to autoctl_node;
+
 -- inserts into archiver_wal (idempotent on conflict)
 -- in_* parameters: see archiver_add_formation's own comment on why an ON
 -- CONFLICT target list (which can't be qualified) forces this naming here.
@@ -2844,6 +2870,10 @@ ALTER FUNCTION pgautofailover.wal_archived(text, int, text)
   SET search_path = pg_catalog, pgautofailover, pg_temp;
 REVOKE ALL ON FUNCTION pgautofailover.wal_archived(text, int, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION pgautofailover.wal_archived(text, int, text) TO autoctl_node;
+ALTER FUNCTION pgautofailover.archive_confirmed(text, int, text)
+  SET search_path = pg_catalog, pgautofailover, pg_temp;
+REVOKE ALL ON FUNCTION pgautofailover.archive_confirmed(text, int, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pgautofailover.archive_confirmed(text, int, text) TO autoctl_node;
 ALTER FUNCTION pgautofailover.list_archiver_wal(text, int)
   SET search_path = pg_catalog, pgautofailover, pg_temp;
 REVOKE ALL ON FUNCTION pgautofailover.list_archiver_wal(text, int) FROM PUBLIC;

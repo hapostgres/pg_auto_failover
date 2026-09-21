@@ -1435,6 +1435,7 @@ perform_failover(PG_FUNCTION_ARGS)
 	 * least one candidate for failover and initiate the REPORT_LSN dance to
 	 * make the failover happen.
 	 */
+
 	/*
 	 * The two-node shortcut is keyed on the group size the FSM itself uses
 	 * (groupHasExactlyTwoNodes counts every row of the group, archiver rows

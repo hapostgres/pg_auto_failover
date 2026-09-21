@@ -1932,19 +1932,18 @@ BuildFromContextNodeActiveContext(GroupStateContext *ctx, AutoFailoverNode *prim
  * secondaryNodesCount, secondaryQuorumNodesCount) and the anyOtherNode
  * WaitingStandby flag those rows match against.
  *
- * An ARCHIVING node is skipped entirely here (see the hasPgData check inside
- * the loop below): it is never a real Postgres secondary participating in
- * synchronous-replication quorum, and it can never reach reported SECONDARY
- * state. Counting it like an ordinary node would let it single-handedly
- * block this primary's own SINGLE -> WAIT_PRIMARY -> PRIMARY progression --
- * anyOtherNodeWaitingStandby would fire (pos 401) the moment the archiver's
- * own bootstrap briefly passes through WAIT_STANDBY, bumping the primary off
- * SINGLE, and it could then never reach PRIMARY since secondaryQuorumNodes
- * Count could never legitimately drop to zero via an archiver's own reported
- * state. Same hasPgData-based exclusion this file's own REPORTING_NODE
- * section already applies for a different purpose (pos 365/399's own
- * comment) -- an archiver simply isn't a quorum-eligible node kind, in
- * either section.
+ * An ARCHIVING node is skipped here (see the hasPgData check inside the
+ * loop below) unless it is a replication quorum member that is currently
+ * healthy in the ARCHIVING state: then it counts as a quorum standby, since
+ * its pg_receivewal connects as pgautofailover_standby_<nodeid> and flushes
+ * synchronously. Counting an archiver unconditionally would let it
+ * single-handedly block this primary's own SINGLE -> WAIT_PRIMARY -> PRIMARY
+ * progression (anyOtherNodeWaitingStandby would fire, pos 401, the moment the
+ * archiver's own bootstrap briefly passes through WAIT_STANDBY), so only the
+ * settled ARCHIVING state counts, and anyOtherNodeWaitingStandby still
+ * ignores archiver rows. Same hasPgData-based distinction this file's own
+ * REPORTING_NODE section applies for a different purpose (pos 365/399): an
+ * archiver is never a failover candidate, in either section.
  */
 static void
 BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx,
@@ -1975,7 +1974,28 @@ BuildForPrimaryNodeNodeActiveContext(GroupStateContext *ctx,
 
 		if (!otherNode->hasPgData)
 		{
-			/* an ARCHIVING row -- see this function's own header comment */
+			/*
+			 * An ARCHIVING row is not a candidate and holds no data, but
+			 * when it is a replication quorum member (its pg_receivewal
+			 * connects as pgautofailover_standby_<nodeid> and flushes
+			 * synchronously, so it is a real synchronous standby of this
+			 * primary) and it is currently healthy in the ARCHIVING state,
+			 * it counts as a quorum standby: a dead secondary must not
+			 * make the primary give up synchronous replication
+			 * (wait_primary) or block writes while the archiver alone still
+			 * satisfies the quorum -- the design's budget setup. An archiver
+			 * that is not a quorum member, or is down, counts as before:
+			 * not at all.
+			 */
+			if (otherNode->replicationQuorum &&
+				IsCurrentState(otherNode, REPLICATION_STATE_ARCHIVING) &&
+				!NodeIsUnhealthy(otherNode, ctx))
+			{
+				++replicationQuorumCount;
+				++secondaryNodesCount;
+				++secondaryQuorumNodesCount;
+			}
+
 			continue;
 		}
 

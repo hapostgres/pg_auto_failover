@@ -124,6 +124,14 @@ SELECT walfilename, lsn, systemidentifier
 -- default archiver_quorum is 1: a single archiver's report already satisfies it
 SELECT pgautofailover.wal_archived('archiving_test', 0, '000000010000000000000001');
 
+-- archive_confirmed(): a group with no archiver membership never blocks
+SELECT pgautofailover.archive_confirmed('archiving_test', 42, '000000010000000000000001');
+-- group 0 has an archiver: unreported segment is not confirmed, reported one is
+SELECT pgautofailover.archive_confirmed('archiving_test', 0, '00000001000000000000000A');
+SELECT pgautofailover.report_wal_received(
+           :nodeid, '00000001000000000000000A', '0/A000000', 111);
+SELECT pgautofailover.archive_confirmed('archiving_test', 0, '00000001000000000000000A');
+
 -- bump the formation-wide default to 2: the same segment, reported by only
 -- one archiver, no longer satisfies quorum
 SELECT pgautofailover.set_archiver_policy('archiving_test', NULL, 2, NULL, NULL);
@@ -455,4 +463,5 @@ SELECT count(*) AS checked_functions,
    AND p.prosecdef
    AND p.proname IN ('get_archiver_node', 'get_archivers', 'register_archiver',
                      'get_basebackup_policy_for_group',
-                     'get_basebackup_policy_for_archiver_group');
+                     'get_basebackup_policy_for_archiver_group',
+                     'archive_confirmed');
