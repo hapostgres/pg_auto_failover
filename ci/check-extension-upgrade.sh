@@ -66,7 +66,7 @@ cat > "$D/cat.sql" <<'S'
 \pset format unaligned
 \pset tuples_only on
 select '## functions';
-select p.proname||'('||pg_get_function_identity_arguments(p.oid)||') secdef='||p.prosecdef||' cfg='||coalesce(p.proconfig::text,'-')||' acl='||coalesce(p.proacl::text,'-')||' vol='||p.provolatile||' ret='||pg_get_function_result(p.oid)||' lang='||l.lanname
+select p.proname||'('||pg_get_function_identity_arguments(p.oid)||') secdef='||p.prosecdef||' cfg='||coalesce(p.proconfig::text,'-')||' acl='||coalesce(p.proacl::text,'-')||' vol='||p.provolatile::text||' ret='||pg_get_function_result(p.oid)||' lang='||l.lanname
   from pg_proc p join pg_language l on l.oid=p.prolang where pronamespace='pgautofailover'::regnamespace order by 1;
 select '## columns';
 select c.relname||'.'||a.attname||' '||format_type(a.atttypid,a.atttypmod)||' notnull='||a.attnotnull||' def='||coalesce(pg_get_expr(d.adbin,d.adrelid),'-')
