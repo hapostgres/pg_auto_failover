@@ -28,7 +28,7 @@ bool archiver_systemid_read_from_path(const char *path,
 
 /*
  * The primary's WAL segment size in bytes, as recorded by pg_receivewal in
- * <membershipDir>/archiver-walsegsize; 16MiB when absent or invalid.
+ * <membershipDir>/archiver-walsegsize; 0 (unknown) when absent or invalid.
  */
 uint64_t archiver_walsegsize_read(const char *membershipDir);
 

@@ -91,9 +91,10 @@ archiver_systemid_read_from_path(const char *path, uint64_t *systemIdentifier)
 
 
 /*
- * archiver_walsegsize_read returns the WAL segment size pg_receivewal
- * recorded (RetrieveWalSegSize() against the primary) or the 16MiB default
- * when the file is absent or not a power of two between 1MiB and 1GiB.
+ * archiver_walsegsize_read returns the WAL segment size recorded from the
+ * monitor's registration (service_archiver_maybe_persist_systemid), or 0
+ * when it is unknown: the file is absent or not a power of two between
+ * 1MiB and 1GiB. There is deliberately no default: callers wait.
  */
 uint64_t
 archiver_walsegsize_read(const char *membershipDir)
@@ -101,7 +102,7 @@ archiver_walsegsize_read(const char *membershipDir)
 	char path[MAXPGPATH] = { 0 };
 	char *contents = NULL;
 	long fileSize = 0;
-	uint64_t value = 16 * 1024 * 1024;
+	uint64_t value = 0;
 
 	sformat(path, sizeof(path), "%s/archiver-walsegsize", membershipDir);
 

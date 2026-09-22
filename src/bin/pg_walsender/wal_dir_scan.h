@@ -28,10 +28,11 @@
 /*
  * ws_route_wal_segment_size: the WAL segment size of the route's cluster,
  * in bytes, read from "<route path>/archiver-walsegsize" (decimal bytes,
- * written by the archiver's pg_receivewal child). The file may be absent:
- * the default, 16777216, applies (as it does for a file that is not a
- * power of two between 1 MiB and 1 GiB, which is logged). Every segment
- * number/name/LSN computation and "SHOW wal_segment_size" derive from it.
+ * written by the archiver from the value the monitor holds). Returns 0
+ * when unknown: the file is absent (the monitor has not reported one yet)
+ * or invalid (logged); there is deliberately no default, callers must
+ * refuse to work with a 0. Every segment number/name/LSN computation and
+ * "SHOW wal_segment_size" derive from it.
  */
 uint64_t ws_route_wal_segment_size(const WsRoute *route);
 

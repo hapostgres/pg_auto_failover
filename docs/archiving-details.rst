@@ -553,6 +553,19 @@ deciding what else could talk to one.
   own, without needing a full streaming connection just to recover one
   missing segment.
 
+  ``restore_command`` can be written by hand against ``pg_walsender fetch-
+  file`` directly::
+
+    restore_command = 'PGPASSWORD=... PGSSLMODE=... pg_walsender fetch-file --host <archiver> --port 6543 --user <role> --route <formation>/<group> --filename %f --output %p'
+
+  or, more simply, through :ref:`pg_autoctl_restore_command`, which wraps
+  the very same ``pg_walsender fetch-file`` call and resolves the host,
+  port, route and role on its own -- from this node's own pg_auto_failover
+  configuration when it has one, or from a small cache file written once by
+  ``pg_autoctl restore command --set-up`` otherwise::
+
+    restore_command = 'pg_autoctl restore command %f %p'
+
 archive_command confirmation
 ----------------------------
 

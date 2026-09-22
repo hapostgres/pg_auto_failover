@@ -26,6 +26,7 @@
 #include "log.h"
 #include "monitor.h"
 #include "parson.h"
+#include "restore_command.h"
 #include "service_archiver_serve.h"
 #include "signals.h"
 #include "state.h"
@@ -38,6 +39,9 @@ static void cli_archiver_serve(int argc, char **argv);
 
 static int cli_archiver_confirm_getopts(int argc, char **argv);
 static void cli_archiver_confirm(int argc, char **argv);
+
+static int cli_restore_command_getopts(int argc, char **argv);
+static void cli_restore_command(int argc, char **argv);
 
 static int cli_archiver_formation_getopts(int argc, char **argv, bool requireName);
 static void cli_archiver_formation_add(int argc, char **argv);
@@ -376,6 +380,177 @@ CommandLine archive_command_command =
 		"  --pgdata          path to the node's PGDATA\n",
 		cli_archiver_confirm_getopts,
 		cli_archiver_confirm);
+
+
+/* options for `pg_autoctl restore command`, see restore_command.h */
+static RestoreCommandInfo restoreCommandOptions = { 0 };
+static char restoreCommandPgdata[MAXPGPATH] = { 0 };
+static bool restoreCommandSetUp = false;
+static char restoreCommandSourceFile[MAXPGPATH] = { 0 };
+static char restoreCommandDestFile[MAXPGPATH] = { 0 };
+
+
+/*
+ * cli_restore_command_getopts parses `pg_autoctl restore command [--pgdata
+ * D] [--host H --port P --route <formation>/<group> --user U] %f %p`, or
+ * with --set-up and no positional arguments, `pg_autoctl restore command
+ * --set-up --host H --route <formation>/<group> --user U [--port P]
+ * [--pgdata D]` to write the cache file once (see restore_command.h's own
+ * comment on the three-step resolution order).
+ */
+static int
+cli_restore_command_getopts(int argc, char **argv)
+{
+	int c, option_index = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "host", required_argument, NULL, 'H' },
+		{ "port", required_argument, NULL, 'p' },
+		{ "route", required_argument, NULL, 'r' },
+		{ "user", required_argument, NULL, 'U' },
+		{ "set-up", no_argument, NULL, 's' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:H:p:r:U:svh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(restoreCommandPgdata, optarg, MAXPGPATH);
+				break;
+			}
+
+			case 'H':
+			{
+				strlcpy(restoreCommandOptions.host, optarg,
+					   sizeof(restoreCommandOptions.host));
+				break;
+			}
+
+			case 'p':
+			{
+				if (!stringToInt(optarg, &(restoreCommandOptions.port)) ||
+					restoreCommandOptions.port <= 0 ||
+					restoreCommandOptions.port > 65535)
+				{
+					log_fatal("Failed to parse --port value \"%s\"", optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				break;
+			}
+
+			case 'r':
+			{
+				strlcpy(restoreCommandOptions.route, optarg,
+					   sizeof(restoreCommandOptions.route));
+				break;
+			}
+
+			case 'U':
+			{
+				strlcpy(restoreCommandOptions.user, optarg,
+					   sizeof(restoreCommandOptions.user));
+				break;
+			}
+
+			case 's':
+			{
+				restoreCommandSetUp = true;
+				break;
+			}
+
+			case 'v':
+			{
+				log_set_level(LOG_DEBUG);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_BAD_ARGS);
+				break;
+			}
+		}
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(restoreCommandPgdata))
+	{
+		/* --pgdata is optional here: --set-up with only flags may have none */
+		(void) get_env_pgdata(restoreCommandPgdata);
+	}
+
+	if (!restoreCommandSetUp)
+	{
+		if ((argc - optind) != 2)
+		{
+			log_fatal("Missing WAL file name and destination path "
+					  "arguments (%%f and %%p)");
+			commandline_help(stderr);
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+
+		strlcpy(restoreCommandSourceFile, argv[optind], MAXPGPATH);
+		strlcpy(restoreCommandDestFile, argv[optind + 1], MAXPGPATH);
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_restore_command implements `pg_autoctl restore command`: either the
+ * restore_command itself (exec's `pg_walsender fetch-file`, see
+ * restore_command_run()), or, with --set-up, a one-time cache write for an
+ * ad hoc replica with no pg_auto_failover node of its own.
+ */
+static void
+cli_restore_command(int argc, char **argv)
+{
+	if (restoreCommandSetUp)
+	{
+		exit(restore_command_set_up(restoreCommandPgdata,
+									&restoreCommandOptions) ? 0 : 1);
+	}
+
+	exit(restore_command_run(restoreCommandPgdata, &restoreCommandOptions,
+							 restoreCommandSourceFile, restoreCommandDestFile));
+}
+
+
+CommandLine restore_command_command =
+	make_command(
+		"command",
+		"restore_command: fetch a WAL file from the archiver",
+		" [ --pgdata --host --port --route --user ] <%f> <%p> ",
+		"  --pgdata          path to this node's PGDATA, if any "
+		"(defaults to $PGDATA)\n"
+		"  --host            archiver hostname (default: this node's own "
+		"registered archiver)\n"
+		"  --port            archiver pg_walsender port (default: 6543)\n"
+		"  --route           \"<formation>/<group>\" to fetch from "
+		"(default: this node's own)\n"
+		"  --user            replication role name (default: "
+		PG_AUTOCTL_REPLICA_USERNAME ")\n"
+		"  --set-up          write --host/--port/--route/--user to a "
+		"cache file and exit\n",
+		cli_restore_command_getopts,
+		cli_restore_command);
 
 
 CommandLine archiver_serve_command =
@@ -1577,3 +1752,14 @@ CommandLine archive_commands =
 	make_command_set("archive",
 					 "Commands run by Postgres on behalf of archiving", NULL,
 					 NULL, NULL, archive_subcommands);
+
+
+CommandLine *restore_subcommands[] = {
+	&restore_command_command,
+	NULL
+};
+
+CommandLine restore_commands =
+	make_command_set("restore",
+					 "Commands run by Postgres to restore WAL files", NULL,
+					 NULL, NULL, restore_subcommands);

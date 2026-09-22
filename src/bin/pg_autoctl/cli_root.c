@@ -116,6 +116,7 @@ CommandLine *root_subcommands[] = {
 	&node_commands,
 	&archiver_commands,
 	&archive_commands,
+	&restore_commands,
 	&service_run_command,
 	&watch_command,
 	&service_stop_command,

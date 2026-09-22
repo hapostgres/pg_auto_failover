@@ -28,6 +28,13 @@ stock `pg_basebackup`, streaming standbys and `restore_command` read from it.
 * `pg_autoctl create archiver --serve-port`, `pg_autoctl archiver backup now`,
   and pruning of the archiver's local WAL cache to the oldest retained base
   backup; a per-route `archiver-walsegsize` file.
+* `pg_autoctl restore command`, a thin wrapper around `pg_walsender fetch-
+  file` so `restore_command = 'pg_autoctl restore command %f %p'` is the
+  whole line an operator needs to write: the archiver's host, port,
+  `<formation>/<group>` route and role are resolved from this node's own
+  pg_auto_failover configuration when it is a registered node, or from a
+  small cache file written once by `pg_autoctl restore command --set-up`
+  otherwise.
 * An archiver that is a replication-quorum member takes part in synchronous
   commit: its `pg_receivewal` uses application_name
   `pgautofailover_standby_<nodeid>` and flushes synchronously. The monitor

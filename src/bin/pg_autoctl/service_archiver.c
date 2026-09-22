@@ -637,7 +637,18 @@ service_archiver_update_current_lsn(Keeper *keeper)
 		return;
 	}
 
-	wal_segment_end_lsn(bestComplete, archiver_walsegsize_read(walcacheDir),
+	uint64_t walSegmentSize = archiver_walsegsize_read(walcacheDir);
+
+	if (walSegmentSize == 0)
+	{
+		/* not known yet: report nothing rather than guess 16MB */
+		strlcpy(keeper->postgres.currentLSN, "0/0",
+				sizeof(keeper->postgres.currentLSN));
+		currentTimeline = 0;
+		return;
+	}
+
+	wal_segment_end_lsn(bestComplete, walSegmentSize,
 						keeper->postgres.currentLSN,
 						sizeof(keeper->postgres.currentLSN));
 	currentTimeline = wal_segment_timeline(bestComplete);

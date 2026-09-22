@@ -742,6 +742,12 @@ prune_local_wal_cache(KeeperConfig *config, BasebackupInfoArray *backups,
 	uint64_t floorSegno = 0;
 	bool haveRetained = false;
 
+	if (segsize == 0)
+	{
+		/* WAL segment size not known yet: prune nothing */
+		return;
+	}
+
 	for (int i = 0; i < backups->count; i++)
 	{
 		if (pruned != NULL && pruned[i])

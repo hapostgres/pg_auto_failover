@@ -23,6 +23,7 @@
 #include "cmd_show.h"
 #include "cmd_start_replication.h"
 #include "cmd_timeline_history.h"
+#include "wal_dir_scan.h"
 #include "framing.h"
 
 
@@ -193,6 +194,22 @@ void
 ws_dispatch_command(int sock, const WsCommand *cmd,
 					const WsRoute *route, const char *dbname)
 {
+	/*
+	 * Everything that does segment arithmetic needs the WAL segment size,
+	 * which comes from the monitor: refuse rather than guess 16MB.
+	 */
+	if ((cmd->type == WS_CMD_START_REPLICATION ||
+		 cmd->type == WS_CMD_BASE_BACKUP ||
+		 (cmd->type == WS_CMD_SHOW &&
+		  strcasecmp(cmd->showName, "wal_segment_size") == 0)) &&
+		ws_route_wal_segment_size(route) == 0)
+	{
+		ws_send_error_response(sock, "55000",
+							   "the WAL segment size of this archive is not "
+							   "known yet, try again shortly");
+		return;
+	}
+
 	switch (cmd->type)
 	{
 		case WS_CMD_IDENTIFY_SYSTEM:

@@ -1,9 +1,12 @@
 # A warm standby built and fed from pg_walsender with nothing but Postgres
-# core commands (plus pg_walsender's own fetch-file as the restore_command):
+# core commands (plus pg_walsender's own fetch-file, wrapped by `pg_autoctl
+# restore command`, as the restore_command):
 #
 #   * pg_basebackup against the archiver creates the data directory;
-#   * restore_command fetches one WAL file at a time from the archiver
-#     (pg_walsender fetch-file), the classic warm standby;
+#   * restore_command fetches one WAL file at a time from the archiver via
+#     `pg_autoctl restore command` (itself a thin wrapper around `pg_
+#     walsender fetch-file`, see cli_archiver.c/restore_command.c), the
+#     classic warm standby;
 #   * primary_conninfo points a stock walreceiver at the archiver as well,
 #     which then streams from it (START_REPLICATION);
 #   * pg_ctl promote turns it into a primary.
@@ -43,9 +46,19 @@ step test_001_base_backup_from_the_archiver {
 }
 
 step test_002_replay_with_restore_command_only {
+    # node2 is a plain Postgres cluster with no pg_auto_failover node of its
+    # own (see this file's own header comment): `pg_autoctl restore command
+    # --set-up` writes the small cache file (host/port/route/user, never a
+    # password -- that stays PGPASSWORD/.pgpass's job) so the restore_
+    # command line itself carries none of them, matching `archive command`'s
+    # own archiver-confirm cache for the same class of problem.
+    exec node2 bash -c 'pg_autoctl restore command --set-up --pgdata /tmp/warm --host archiver1 --port 6543 --route default/0 --user pitr_restore'
+
     # a warm standby: recovery.signal-style standby, WAL only through the
-    # restore_command, one file at a time from the archiver
-    exec node2 bash -c 'mkdir -p /tmp/warm-sock && printf "%b\n" "port = 5433" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/warm-sock\x27" "hot_standby = on" "ssl = off" "synchronous_standby_names = \x27\x27" "wal_retrieve_retry_interval = 1s" "restore_command = \x27PGPASSWORD=pitr-pw PGSSLMODE=require pg_walsender fetch-file --host archiver1 --port 6543 --user pitr_restore --route default/0 --filename %f --output %p\x27" >> /tmp/warm/postgresql.auto.conf && touch /tmp/warm/standby.signal && (pg_ctl -D /tmp/warm -w -l /tmp/warm.log start || (cat /tmp/warm.log; false))'
+    # restore_command, one file at a time from the archiver -- via `pg_
+    # autoctl restore command`, not the raw `pg_walsender fetch-file` line
+    # (see archiver_walsender_auth.pgaf/test_001 above for that one)
+    exec node2 bash -c 'mkdir -p /tmp/warm-sock && printf "%b\n" "port = 5433" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/warm-sock\x27" "hot_standby = on" "ssl = off" "synchronous_standby_names = \x27\x27" "wal_retrieve_retry_interval = 1s" "restore_command = \x27PGPASSWORD=pitr-pw PGSSLMODE=require pg_autoctl restore command --pgdata /tmp/warm %f %p\x27" >> /tmp/warm/postgresql.auto.conf && touch /tmp/warm/standby.signal && (pg_ctl -D /tmp/warm -w -l /tmp/warm.log start || (cat /tmp/warm.log; false))'
 
     sql node1 { CREATE TABLE warm(a int); INSERT INTO warm SELECT generate_series(1, 1000); }
     let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }

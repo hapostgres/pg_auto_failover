@@ -570,52 +570,6 @@ pgaf_install_stop_handlers(void)
 }
 
 
-/*
- * PGAF: pgaf_write_walsegsize persists the primary's WAL segment size
- * (bytes, decimal) to <dir>/archiver-walsegsize -- atomic temp+rename, and
- * only when the value changed -- so the rest of pg_autoctl and pg_walsender
- * can do LSN <-> segment math without hard-coding 16MB.
- */
-static void
-pgaf_write_walsegsize(const char *dir, uint32 segsize)
-{
-	char		path[MAXPGPATH];
-	char		tmp[MAXPGPATH];
-	char		buf[32];
-	char		old[32] = {0};
-	int			fd;
-	int			len;
-
-	snprintf(path, sizeof(path), "%s/archiver-walsegsize", dir);	/* IGNORE-BANNED */
-	snprintf(tmp, sizeof(tmp), "%s/archiver-walsegsize.tmp.%d", dir,	/* IGNORE-BANNED */
-			 (int) getpid());
-	len = snprintf(buf, sizeof(buf), "%u\n", (unsigned int) segsize);	/* IGNORE-BANNED */
-
-	fd = open(path, O_RDONLY);
-	if (fd >= 0)
-	{
-		ssize_t		n = read(fd, old, sizeof(old) - 1);
-
-		close(fd);
-		if (n == len && memcmp(old, buf, len) == 0)
-			return;
-	}
-
-	fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-	if (fd < 0)
-		return;
-	if (write(fd, buf, len) != len || fsync(fd) != 0)
-	{
-		close(fd);
-		unlink(tmp);
-		return;
-	}
-	close(fd);
-	if (rename(tmp, path) != 0)
-		unlink(tmp);
-}
-
-
 /* PGAF: was main(), see this file's own header comment */
 int
 pg_receivewal_main(int argc, char **argv)
@@ -864,9 +818,6 @@ pg_receivewal_main(int argc, char **argv)
 	/* determine remote server's xlog segment size */
 	if (!RetrieveWalSegSize(conn))
 		exit(1);
-
-	/* PGAF: publish the segment size for the rest of pg_autoctl */
-	pgaf_write_walsegsize(basedir, WalSegSz);
 
 	/*
 	 * Check that there is a database associated with connection, none should

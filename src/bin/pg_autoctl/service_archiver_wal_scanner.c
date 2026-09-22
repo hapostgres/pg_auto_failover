@@ -151,6 +151,14 @@ archiver_wal_scan_once(const char *walcacheDir, const char *socketPath,
 	}
 
 	uint64_t segsize = archiver_walsegsize_read(walcacheDir);
+
+	if (segsize == 0)
+	{
+		/* WAL segment size not known yet (comes from the monitor) */
+		closedir(dir);
+		return;
+	}
+
 	uint64_t floorSegno = 0;
 	bool haveFloor = archiver_wal_floor_read(walcacheDir, &floorSegno);
 

@@ -23,6 +23,10 @@ extern CommandLine archive_commands;
 extern CommandLine *archiver_subcommands[];
 extern CommandLine archiver_commands;
 
+extern CommandLine restore_command_command;
+extern CommandLine restore_commands;
+extern CommandLine *restore_subcommands[];
+
 /*
  * Shared by `pg_autoctl archiver show state` and `pg_autoctl show state`
  * (cli_show.c), which delegates to this when the local configuration

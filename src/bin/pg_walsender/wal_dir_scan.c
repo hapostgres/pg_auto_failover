@@ -20,8 +20,6 @@
 #include "string_utils.h"
 #include "ws_util.h"
 
-/* default WAL segment size (16MB) when the route has no archiver-walsegsize */
-#define WS_DEFAULT_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
 #define WS_MIN_WAL_SEGMENT_SIZE UINT64CONST(0x100000)
 #define WS_MAX_WAL_SEGMENT_SIZE UINT64CONST(0x40000000)
 
@@ -55,7 +53,7 @@ ws_route_wal_segment_size(const WsRoute *route)
 {
 	if (route == NULL || route->path[0] == '\0')
 	{
-		return WS_DEFAULT_WAL_SEGMENT_SIZE;
+		return 0;
 	}
 
 	char path[MAXPGPATH];
@@ -65,10 +63,10 @@ ws_route_wal_segment_size(const WsRoute *route)
 	char *contents = NULL;
 	size_t size = 0;
 
-	/* absent: the archiver has not recorded one, the default applies */
+	/* absent: the monitor has not told the archiver yet, unknown */
 	if (!ws_read_file_capped(path, 64, true, &contents, &size, NULL))
 	{
-		return WS_DEFAULT_WAL_SEGMENT_SIZE;
+		return 0;
 	}
 
 	uint64_t value = 0;
@@ -100,9 +98,8 @@ ws_route_wal_segment_size(const WsRoute *route)
 	if (!ok || value < WS_MIN_WAL_SEGMENT_SIZE ||
 		value > WS_MAX_WAL_SEGMENT_SIZE || (value & (value - 1)) != 0)
 	{
-		log_error("Ignoring an invalid WAL segment size in \"%s\": using "
-				  "the default", path);
-		return WS_DEFAULT_WAL_SEGMENT_SIZE;
+		log_error("Ignoring an invalid WAL segment size in \"%s\"", path);
+		return 0;
 	}
 
 	return value;
