@@ -431,7 +431,7 @@ cli_restore_command_getopts(int argc, char **argv)
 			case 'H':
 			{
 				strlcpy(restoreCommandOptions.host, optarg,
-					   sizeof(restoreCommandOptions.host));
+						sizeof(restoreCommandOptions.host));
 				break;
 			}
 
@@ -450,14 +450,14 @@ cli_restore_command_getopts(int argc, char **argv)
 			case 'r':
 			{
 				strlcpy(restoreCommandOptions.route, optarg,
-					   sizeof(restoreCommandOptions.route));
+						sizeof(restoreCommandOptions.route));
 				break;
 			}
 
 			case 'U':
 			{
 				strlcpy(restoreCommandOptions.user, optarg,
-					   sizeof(restoreCommandOptions.user));
+						sizeof(restoreCommandOptions.user));
 				break;
 			}
 
@@ -547,8 +547,8 @@ CommandLine restore_command_command =
 		"(default: this node's own)\n"
 		"  --user            replication role name (default: "
 		PG_AUTOCTL_REPLICA_USERNAME ")\n"
-		"  --set-up          write --host/--port/--route/--user to a "
-		"cache file and exit\n",
+									"  --set-up          write --host/--port/--route/--user to a "
+									"cache file and exit\n",
 		cli_restore_command_getopts,
 		cli_restore_command);
 

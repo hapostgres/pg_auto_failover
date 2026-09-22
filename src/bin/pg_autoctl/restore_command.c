@@ -195,7 +195,7 @@ restore_command_resolve_from_node(const char *pgdata, RestoreCommandInfo *info)
 	strlcpy(info->host, archiverNode.host, sizeof(info->host));
 	info->port = archiverNode.port;
 	sformat(info->route, sizeof(info->route), "%s/%d",
-		   config.formation, config.groupId);
+			config.formation, config.groupId);
 	strlcpy(info->user, PG_AUTOCTL_REPLICA_USERNAME, sizeof(info->user));
 
 	/* refresh the cache: next time the monitor is unreachable, use this */
@@ -315,9 +315,9 @@ restore_command_run(const char *pgdata, const RestoreCommandInfo *cliInfo,
 	args[argsIndex] = NULL;
 
 	log_debug("restore command: %s fetch-file --host %s --port %s "
-			 "--route %s --user %s --filename %s --output %s",
-			 pgWalsenderPath, info.host, portStr, info.route, info.user,
-			 sourceFile, destFile);
+			  "--route %s --user %s --filename %s --output %s",
+			  pgWalsenderPath, info.host, portStr, info.route, info.user,
+			  sourceFile, destFile);
 
 	fflush(stdout);
 	fflush(stderr);
