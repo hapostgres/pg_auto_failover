@@ -201,6 +201,37 @@ write_file(char *data, long fileSize, const char *filePath)
 
 
 /*
+ * write_file_atomic writes data to filePath the same way write_file() does,
+ * except a reader can never observe a partial write: the content lands in
+ * "<filePath>.tmp" first, then gets rename()'d into place, an atomic
+ * operation on the same filesystem. Use this instead of write_file()
+ * whenever another process might be reading filePath concurrently (a
+ * config/state file another running service polls, for instance).
+ */
+bool
+write_file_atomic(char *data, long fileSize, const char *filePath)
+{
+	char tmpPath[MAXPGPATH] = { 0 };
+
+	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", filePath);
+
+	if (!write_file(data, fileSize, tmpPath))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	if (rename(tmpPath, filePath) != 0)
+	{
+		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpPath, filePath);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * append_to_file writes the given data to the end of the file given by
  * filePath using our logging library to report errors. If succesful, the
  * function returns true.
