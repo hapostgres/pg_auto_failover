@@ -716,8 +716,7 @@ $$;
 
 --
 -- Archiving & Disaster Recovery: schema + monitor API only, no
--- service_archiver process involved yet
--- (#TODO -- update with the actual PR number once opened). See
+-- service_archiver process involved yet (#1186). See
 -- pgautofailover.sql's own comments on each object below (this mirrors
 -- that file's DDL, applied incrementally to an existing 2.2 install
 -- instead of as part of a fresh CREATE EXTENSION).
