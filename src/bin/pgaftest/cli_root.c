@@ -691,7 +691,7 @@ cli_show_state(int argc, char **argv)
 
 
 /* -----------------------------------------------------------------------
- * pgaftest down
+ * pgaftest cluster sh
  * ----------------------------------------------------------------------- */
 static void
 cli_sh(int argc, char **argv)
@@ -839,7 +839,7 @@ cli_run_setup_only(int argc, char **argv)
 	fformat(stdout,
 			"Try: pgaftest step"
 			"  |  pgaftest network disconnect <node>"
-			"  |  pgaftest show state  |  pgaftest down\n\n");
+			"  |  pgaftest show state  |  pgaftest cluster down\n\n");
 
 	/*
 	 * Replace this process with bash so the tmux pane becomes an
@@ -1198,7 +1198,7 @@ static CommandLine run_command =
 				 "                     (default: $TMPDIR/pgaftest/<testname>)\n"
 				 "  --no-cleanup       Leave the compose stack running after the\n"
 				 "                     run (pass or fail) for post-mortem inspection.\n"
-				 "                     Use `pgaftest down <spec.pgaf>` to clean up.\n"
+				 "                     Use `pgaftest cluster down <spec.pgaf>` to clean up.\n"
 				 "  --verbose          Enable DEBUG log level\n"
 				 "  --debug            Enable TRACE log level\n",
 				 pgaftest_getopts, cli_run);
@@ -1391,7 +1391,7 @@ static CommandLine compose_kill_command =
 
 static CommandLine compose_down_command =
 	make_command("down",
-				 "Tear down the compose stack (no teardown{} block; see `pgaftest down`)",
+				 "Tear down the compose stack (no teardown{} block; see `pgaftest cluster down`)",
 				 "",
 				 "",
 				 pgaftest_getopts, cli_compose_down);

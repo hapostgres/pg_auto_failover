@@ -1,10 +1,14 @@
 # Citus cluster: one coordinator pair + three worker pairs, all with HA.
 #
 # Usage:
-#   pgaftest setup docs/tutorial/citus_tutorial.pgaf --tmux
+#   pgaftest tmux docs/tutorial/citus_tutorial.pgaf
 #
-# The setup block waits until every formation has a primary and a secondary.
-# With --tmux you immediately get:
+# or, without a tmux session:
+#
+#   pgaftest cluster setup docs/tutorial/citus_tutorial.pgaf
+#
+# The setup block waits until every group has a primary and a secondary.
+# With tmux you immediately get:
 #
 #   top    — docker compose logs -f  (live container output)
 #   middle — pg_autoctl watch        (all-node state dashboard)
@@ -16,11 +20,14 @@
 #   pg_autoctl show state \
 #       --monitor postgresql://autoctl_node@monitor/pg_auto_failover
 #
-#   # connect to the Citus coordinator
-#   psql -h coord0a -U postgres -d citus
+#   # connect to the Citus coordinator (database "demo", role "docker")
+#   psql -h coord0a -d demo
+#
+#   # the workers, as Citus itself sees them
+#   psql -h coord0a -d demo -c 'select * from pg_dist_node'
 #
 #   # trigger a coordinator failover
-#   pg_autoctl perform failover --formation coord \
+#   pg_autoctl perform failover --group 0 \
 #       --monitor postgresql://autoctl_node@monitor/pg_auto_failover
 #
 #   # trigger a worker failover in group 1
@@ -28,17 +35,31 @@
 #       --monitor postgresql://autoctl_node@monitor/pg_auto_failover
 #
 # When done:
-#   pgaftest down --work-dir /tmp/pgaftest/citus_tutorial
+#   pgaftest cluster down docs/tutorial/citus_tutorial.pgaf
+#
+# ONE FORMATION, NOT TWO. It is tempting to write this with a "coord"
+# formation and a "workers" formation, which reads better and does not
+# work: a Citus worker asks the monitor for the coordinator OF ITS OWN
+# FORMATION, so workers in a formation the coordinator is not in find
+# nothing, fail their init -> single transition, and pg_autoctl gives up
+# once its restart budget is spent. The symptom in the worker log is
+#
+#   ERROR Failed to get the coordinator node from the monitor: the monitor
+#   returned an empty result set, there's no known available coordinator
+#   node at this time in formation "workers"
+#
+# and the containers exit rather than retrying, so the cluster comes up
+# with a healthy coordinator pair and no workers at all. Coordinator and
+# workers belong in ONE formation, distinguished by group: group 0 is the
+# coordinator pair, groups 1..n are the worker pairs.
 
 cluster {
     monitor
 
-    formation coord {
-        coord0a  coordinator
-        coord0b  coordinator
-    }
+    formation num-sync 1 {
+        coord0a   coordinator
+        coord0b   coordinator
 
-    formation workers num-sync 1 {
         worker1a  worker  group 1
         worker1b  worker  group 1
         worker2a  worker  group 2
@@ -49,7 +70,10 @@ cluster {
 }
 
 setup {
-    wait until primary, secondary  timeout 180s
+    wait until primary, secondary in group 0  timeout 180s
+    wait until primary, secondary in group 1  timeout 180s
+    wait until primary, secondary in group 2  timeout 180s
+    wait until primary, secondary in group 3  timeout 180s
 }
 
 teardown {
