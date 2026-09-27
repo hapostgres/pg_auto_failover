@@ -13,17 +13,36 @@ serve ``pg_basebackup``, ``pg_receivewal`` and a real standby's own
 walreceiver directly out of a directory tree of WAL segments and base
 backups it owns, instead of out of a live ``postmaster``. Running the
 accept loop (``serve``) is the default action, so a bare invocation with
-server-mode options works with no sub-command name at all::
+server-mode options works with no sub-command name at all. This is
+``pg_walsender --help``'s own output, verbatim::
 
-  pg_walsender
-  + serve         Run the accept loop (the default command)
+  pg_walsender: The archiver's own replication-protocol server
+  usage: pg_walsender [serve options] | scram-secret ...
+
+    serve         Run the accept loop (default command, used when no
+                  sub-command name is given at all)
     scram-secret  Print one archiver-passwd line for a user
 
-  usage: pg_walsender [--port <port>] [--pgdata <path> | --insecure]
-                       [--ssl-cert-file <path> --ssl-key-file <path>]
-                       [--auth-timeout <seconds>]
 
-  usage: pg_walsender scram-secret [--user <name>]
+  Available commands:
+    pg_walsender
+      serve         Run the pg_walsender accept loop (the default command)
+      scram-secret  Print one archiver-passwd line for a user
+
+Neither line in "Available commands" gets a ``+`` marker (unlike
+:ref:`pg_autoctl`'s own tree, where ``create``, ``drop`` and friends do):
+that marker means "this sub-command has sub-commands of its own", and
+``serve``/``scram-secret`` are both leaves, not that one of them is the
+default. ``--help``/``-h`` are also the one case ``pg_walsender``'s "no
+sub-command name means serve" shim (``pg_walsender_default_argv()``,
+``cli_root.c``) deliberately leaves alone, so ``pg_walsender --help`` shows
+the *root* help above, never ``serve``'s own flags -- for those, ask
+``serve`` directly, which is also ``--help``'s own output, verbatim::
+
+  pg_walsender serve: Run the pg_walsender accept loop (the default command)
+  usage: pg_walsender serve [--port <port>] [--pgdata <path> | --insecure] [--ssl-cert-file <path> --ssl-key-file <path>] [--auth-timeout <seconds>]
+
+See `Options`_ below for what each flag does.
 
 Description
 -----------
