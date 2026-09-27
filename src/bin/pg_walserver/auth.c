@@ -355,12 +355,8 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 
 	WsAuthMethod method = WS_AUTH_REJECT;
 
-	if (!hba_lookup(authConfig->hbaPath, routeKey, params->user, peerIP,
-					ws_tls_active(), &method))
-	{
-		ws_send_error_response(sock, "28000", "authentication is unavailable");
-		return false;
-	}
+	hba_match(&authConfig->hbaRuleSet, routeKey, params->user, peerIP,
+			  ws_tls_active(), &method);
 
 	switch (method)
 	{

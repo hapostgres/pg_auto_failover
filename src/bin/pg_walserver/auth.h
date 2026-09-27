@@ -40,12 +40,25 @@
 #include "postgres_fe.h"
 
 #include "walserver.h"
+#include "hba.h"
 #include "routes.h"
 
 typedef struct WsAuthConfig
 {
-	char hbaPath[MAXPGPATH];       /* empty: no authentication at all */
-	char passwdPath[MAXPGPATH];    /* scram-sha-256 verifiers */
+	char hbaPath[MAXPGPATH];       /* empty: no authentication at all; the
+	                                * path itself is kept only for logging
+	                                * and reload -- matching against a
+	                                * connection always uses hbaRuleSet
+	                                * below, never re-reads this path */
+	char passwdPath[MAXPGPATH];    /* scram-sha-256 verifiers, still read
+	                                * fresh on every authentication attempt
+	                                * (not part of the routes/HBA reload
+	                                * this project's SIGHUP handling covers) */
+	WsHbaRuleSet hbaRuleSet;        /* the currently installed, validated HBA
+	                                 * ruleset -- parsed once at startup and
+	                                 * swapped in atomically by
+	                                 * accept_loop.c's ws_reload_config() on a
+	                                 * successful SIGHUP reload */
 } WsAuthConfig;
 
 /*

@@ -25,7 +25,7 @@
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
-#define HBA_MAX_FIELDS 5
+#define HBA_MAX_FIELDS WS_HBA_MAX_FIELDS
 
 
 static const char *hbaHeader =
@@ -207,16 +207,12 @@ parse_method(const char *token, WsAuthMethod *method)
 
 
 /*
- * A parsed rule: each field is its own strdup'd, dequoted copy (see
- * next_hba_token), independent of the file's own buffer, which hba_lookup
- * frees right after hba_parse returns.
+ * HbaRule is declared in hba.h now (WsHbaRuleSet, the cached, in-memory
+ * ruleset installed at startup and swapped on a successful SIGHUP reload,
+ * needs it visible outside this file). Each field is its own strdup'd,
+ * dequoted copy (see next_hba_token), independent of the file's own buffer,
+ * which hba_parse_file() frees right after hba_parse() returns.
  */
-typedef struct HbaRule
-{
-	char *fields[HBA_MAX_FIELDS];
-	WsAuthMethod method;
-	int lineNumber;
-} HbaRule;
 
 
 /*
@@ -505,13 +501,13 @@ hba_parse(const char *hbaPath, char *contents, HbaRule **rulesOut,
 
 
 bool
-hba_lookup(const char *hbaPath, const char *routeKey, const char *user,
-		   const char *peerIP, bool isTLS, WsAuthMethod *method)
+hba_parse_file(const char *hbaPath, WsHbaRuleSet *ruleSet)
 {
 	char *contents = NULL;
 	size_t size = 0;
 
-	*method = WS_AUTH_REJECT;
+	ruleSet->rules = NULL;
+	ruleSet->count = 0;
 
 	if (!ws_read_file_capped(hbaPath, WS_MAX_CONFIG_FILE_SIZE, false,
 							 &contents, &size, NULL))
@@ -520,18 +516,42 @@ hba_lookup(const char *hbaPath, const char *routeKey, const char *user,
 		return false;
 	}
 
-	HbaRule *rules = NULL;
-	int count = 0;
+	bool parsed = hba_parse(hbaPath, contents, &ruleSet->rules, &ruleSet->count);
 
-	if (!hba_parse(hbaPath, contents, &rules, &count))
+	free(contents);
+
+	return parsed;
+}
+
+
+void
+hba_ruleset_free(WsHbaRuleSet *ruleSet)
+{
+	if (ruleSet == NULL || ruleSet->rules == NULL)
 	{
-		free(contents);
-		return false;
+		return;
 	}
 
-	for (int i = 0; i < count; i++)
+	for (int i = 0; i < ruleSet->count; i++)
 	{
-		char **fields = rules[i].fields;
+		hba_rule_free_fields(&ruleSet->rules[i]);
+	}
+
+	free(ruleSet->rules);
+	ruleSet->rules = NULL;
+	ruleSet->count = 0;
+}
+
+
+void
+hba_match(const WsHbaRuleSet *ruleSet, const char *routeKey, const char *user,
+		  const char *peerIP, bool isTLS, WsAuthMethod *method)
+{
+	*method = WS_AUTH_REJECT;
+
+	for (int i = 0; i < ruleSet->count; i++)
+	{
+		char **fields = ruleSet->rules[i].fields;
 
 		bool typeMatches = streq(fields[0], "host") ||
 						   (streq(fields[0], "hostssl") && isTLS) ||
@@ -542,17 +562,8 @@ hba_lookup(const char *hbaPath, const char *routeKey, const char *user,
 			(streq(fields[2], "all") || streq(fields[2], user)) &&
 			rule_address_matches(fields[3], peerIP))
 		{
-			*method = rules[i].method;
-			break;
+			*method = ruleSet->rules[i].method;
+			return;
 		}
 	}
-
-	for (int i = 0; i < count; i++)
-	{
-		hba_rule_free_fields(&rules[i]);
-	}
-	free(rules);
-	free(contents);
-
-	return true;
 }

@@ -5,7 +5,7 @@
  *   the same way pgaftest's own cli_root.c does for a similarly-sized
  *   standalone binary.
  *
- *   Eight sub-commands:
+ *   Nine sub-commands:
  *
  *     serve           Run the accept loop (accept_loop.h). This is
  *                     pg_walserver's *default* command: when no sub-command
@@ -39,6 +39,11 @@
  *                     (src/bin/common/fetch_client.c's own
  *                     ws_fetch_file_client()), cli_restore_wal.c -- meant
  *                     to be used as (part of) a Postgres restore_command.
+ *     reload          Send SIGHUP to a running "serve" instance (its pid
+ *                     read from <pgdata>/pg_walserver.pid) to re-read
+ *                     pg_walserver.ini/archiver-hba.conf and reconcile the
+ *                     embedded pull capturer set -- see accept_loop.c's
+ *                     own ws_reload_config()/ws_capture_reload().
  *
  *   fetch-systemid/basebackup/create-cert are client-side, one-shot tools
  *   that connect *out*, to a route's own upstream, sharing cli_upstream.c's
@@ -68,7 +73,9 @@
  *
  */
 
+#include <errno.h>
 #include <getopt.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,6 +99,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "hba.h"
+#include "pidfile.h"
 #include "routes.h"
 #include "scram.h"
 #include "string_utils.h"
@@ -109,6 +117,30 @@ static char servePgdata[MAXPGPATH] = { 0 };
 static char serveSslCertFile[MAXPGPATH] = { 0 };
 static char serveSslKeyFile[MAXPGPATH] = { 0 };
 static bool serveInsecure = false;
+static char servePidfilePath[MAXPGPATH] = { 0 };
+
+/*
+ * ws_write_pidfile writes this process's own pid to pidfile, one line,
+ * "%d\n" -- exactly the shape src/bin/common/pidfile.h's own
+ * read_pidfile()/remove_pidfile() expect (read_pidfile() only ever parses
+ * the first line, then does a kill(pid, 0) staleness check). Deliberately
+ * NOT that same file's create_pidfile(): that one writes pg_autoctl's own
+ * multi-line supervisor pidfile format (data directory, pg_autoctl version,
+ * extension version, log semaphore id) and requires the PGDATA environment
+ * variable to be set, neither of which fits pg_walserver's own single
+ * --pgdata-driven, single-long-lived-process model. read_pidfile() and
+ * remove_pidfile() are reused as-is: they are already the generic,
+ * single-PID-focused half of that API.
+ */
+static bool
+ws_write_pidfile(const char *pidfile, pid_t pid)
+{
+	char content[32];
+	int len = sformat(content, sizeof(content), "%d\n", (int) pid);
+
+	return write_file(content, (size_t) len, pidfile);
+}
+
 
 static struct option serveLongOptions[] = {
 	{ "port", required_argument, NULL, 'p' },
@@ -295,58 +327,96 @@ cli_serve_run(int argc, char **argv)
 		 * built with it; it exists here too for a pg_walserver.ini
 		 * hand-edited or driven some other way.
 		 */
-		WsRoute *routes = NULL;
-		int routeCount = 0;
 
-		if (routes_load(serveConfig.routesPath, &routes, &routeCount))
+		/*
+		 * Parse pg_walserver.ini and archiver-hba.conf once, up front:
+		 * both are cached in serveConfig (WsServerConfig.routes/routeCount,
+		 * WsAuthConfig.hbaRuleSet) and installed only once they parse
+		 * cleanly -- every connection reads this same in-memory snapshot
+		 * from here on, never the files themselves (see accept_loop.c's
+		 * handle_connection()). A SIGHUP later re-parses both and swaps
+		 * them in atomically, the same way, only if both still parse
+		 * (ws_reload_config(), accept_loop.c) -- refusing to start on an
+		 * unparsable file here is the same "fail closed" policy applied at
+		 * startup instead of leaving every future connection to discover
+		 * it on its own.
+		 */
+		if (!routes_load(serveConfig.routesPath, &serveConfig.routes,
+						 &serveConfig.routeCount))
 		{
-			int namedRouteCount = 0;
+			log_fatal("Failed to parse \"%s\": refusing to start",
+					  serveConfig.routesPath);
+			exit(1);
+		}
 
-			for (int i = 0; i < routeCount; i++)
+		if (!hba_parse_file(serveConfig.auth.hbaPath, &serveConfig.auth.hbaRuleSet))
+		{
+			log_fatal("Failed to parse \"%s\": refusing to start",
+					  serveConfig.auth.hbaPath);
+			exit(1);
+		}
+
+		int namedRouteCount = 0;
+
+		for (int i = 0; i < serveConfig.routeCount; i++)
+		{
+			if (!streq(serveConfig.routes[i].key, WS_ROUTES_WILDCARD_KEY))
 			{
-				if (!streq(routes[i].key, WS_ROUTES_WILDCARD_KEY))
-				{
-					namedRouteCount++;
-				}
+				namedRouteCount++;
 			}
+		}
 
-			if (namedRouteCount > 1 && !ws_tls_server_enabled())
-			{
-				log_fatal("\"%s\" has %d named routes but TLS is not "
-						  "enabled: more than one route requires TLS (for "
-						  "SNI-based routing) to be reachable by name at "
-						  "all -- pass --ssl-cert-file/--ssl-key-file, or "
-						  "create <pgdata>/server.crt and server.key "
-						  "(\"pg_walserver setup\" already does this "
-						  "automatically)", serveConfig.routesPath,
-						  namedRouteCount);
-				routes_free(routes);
-				exit(1);
-			}
+		if (namedRouteCount > 1 && !ws_tls_server_enabled())
+		{
+			log_fatal("\"%s\" has %d named routes but TLS is not "
+					  "enabled: more than one route requires TLS (for "
+					  "SNI-based routing) to be reachable by name at "
+					  "all -- pass --ssl-cert-file/--ssl-key-file, or "
+					  "create <pgdata>/server.crt and server.key "
+					  "(\"pg_walserver setup\" already does this "
+					  "automatically)", serveConfig.routesPath,
+					  namedRouteCount);
+			exit(1);
+		}
 
-			/*
-			 * Every "capture = pull" route gets its own supervised
-			 * embedded pg_receivewal child (capture.c) -- started here,
-			 * once, now that pg_walserver.ini/HBA validation above has
-			 * already succeeded, and before ws_accept_loop() (and thus
-			 * before any connection child can be forked). See capture.h's
-			 * own comment for the full startup/shutdown contract.
-			 */
-			(void) ws_capture_start_all(routes, routeCount);
+		/*
+		 * Every "capture = pull" route gets its own supervised
+		 * embedded pg_receivewal child (capture.c) -- started here,
+		 * once, now that pg_walserver.ini/HBA validation above has
+		 * already succeeded, and before ws_accept_loop() (and thus
+		 * before any connection child can be forked). See capture.h's
+		 * own comment for the full startup/shutdown contract.
+		 */
+		(void) ws_capture_start_all(serveConfig.routes, serveConfig.routeCount);
 
-			routes_free(routes);
+		/*
+		 * The pidfile is what "pg_walserver reload"/"pg_ctl reload"-style
+		 * tooling signals -- written only now, after every other startup
+		 * validation above has already succeeded, so a pidfile only ever
+		 * exists for a pg_walserver that is genuinely about to serve.
+		 * Removed again on clean shutdown, below.
+		 */
+		sformat(servePidfilePath, sizeof(servePidfilePath), "%s/pg_walserver.pid",
+				servePgdata);
+
+		if (!ws_write_pidfile(servePidfilePath, getpid()))
+		{
+			log_fatal("Failed to write pidfile \"%s\"", servePidfilePath);
+			exit(1);
 		}
 	}
 
 	/* before any fork: every connection must see the same mock secret */
 	(void) scram_mock_init();
 
-	if (!ws_accept_loop(&serveConfig))
+	bool ok = ws_accept_loop(&serveConfig);
+
+	if (servePidfilePath[0] != '\0')
 	{
-		exit(1);
+		(void) remove_pidfile(servePidfilePath);
 	}
 
-	exit(0);
+	exit(ok ? 0 : 1);
 }
 
 
@@ -1338,6 +1408,124 @@ static CommandLine restore_command =
 
 
 /* -----------------------------------------------------------------------
+ * pg_walserver reload --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char reloadPgdata[MAXPGPATH] = { 0 };
+
+static struct option reloadLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_reload_getopt(int argc, char **argv)
+{
+	optind = 0;
+	reloadPgdata[0] = '\0';
+	(void) get_env_pgdata(reloadPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:", reloadLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(reloadPgdata, optarg, sizeof(reloadPgdata));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_reload_run sends SIGHUP to the "pg_walserver serve" instance whose
+ * pid is recorded in <pgdata>/pg_walserver.pid -- the exact same shape as
+ * "pg_ctl reload". Follows pg_autoctl's own reload precedent (cli_common.c's
+ * cli_pg_autoctl_reload(), cli_service.c's cli_service_reload()): SIGHUP is
+ * ignored in THIS process first, before sending it on, because a freshly
+ * exec'd one-shot command like this one installs no SIGHUP handler of its
+ * own, and can end up reusing the pid of a just-exited process -- the
+ * default disposition for an unhandled SIGHUP is to terminate, so without
+ * this a stray signal delivered to that reused pid in the narrow window
+ * before this command exits could kill it before it ever sends anything.
+ * read_pidfile() (src/bin/common/pidfile.h) already does the missing/
+ * stale-pidfile detection (a kill(pid, 0) check, removing a stale file);
+ * exits 0 once SIGHUP was actually delivered, nonzero with a clear error
+ * otherwise.
+ */
+static void
+cli_reload_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	if (reloadPgdata[0] == '\0')
+	{
+		log_fatal("reload requires --pgdata (or the PGDATA environment "
+				  "variable)");
+		exit(1);
+	}
+
+	char pidfilePath[MAXPGPATH];
+
+	sformat(pidfilePath, sizeof(pidfilePath), "%s/pg_walserver.pid", reloadPgdata);
+
+	signal(SIGHUP, SIG_IGN);
+
+	pid_t pid = 0;
+
+	if (!read_pidfile(pidfilePath, &pid))
+	{
+		log_fatal("Failed to reload pg_walserver: no running instance found "
+				  "at \"%s\" (missing, stale, or unreadable pidfile)",
+				  pidfilePath);
+		exit(1);
+	}
+
+	if (kill(pid, SIGHUP) != 0)
+	{
+		if (errno == ESRCH)
+		{
+			log_fatal("Failed to reload pg_walserver: pid %d (from \"%s\") "
+					  "is not running", pid, pidfilePath);
+		}
+		else
+		{
+			log_fatal("Failed to send SIGHUP to pg_walserver pid %d: %m", pid);
+		}
+		exit(1);
+	}
+
+	log_info("Sent SIGHUP to pg_walserver pid %d", pid);
+	exit(0);
+}
+
+
+static CommandLine reload_command =
+	make_command("reload",
+				 "Ask a running pg_walserver to reload its configuration",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA); sends SIGHUP to the pid recorded "
+				 "in\n"
+				 "              \"<pgdata>/pg_walserver.pid\"\n",
+				 cli_reload_getopt, cli_reload_run);
+
+
+/* -----------------------------------------------------------------------
  * Root command table
  * ----------------------------------------------------------------------- */
 
@@ -1350,6 +1538,7 @@ static CommandLine *root_subcommands[] = {
 	&create_cert_command,
 	&archive_command,
 	&restore_command,
+	&reload_command,
 	&internal_commands,
 	NULL
 };
@@ -1359,7 +1548,7 @@ CommandLine ws_root =
 					 "The archiver's own replication-protocol server",
 					 "[serve options] | scram-secret ... | setup ... | "
 					 "fetch-systemid ... | basebackup ... | create-cert ... | "
-					 "archive-wal ... | restore-wal ...",
+					 "archive-wal ... | restore-wal ... | reload ...",
 					 "  serve           Run the accept loop (default "
 					 "command, used when no\n"
 					 "                  sub-command name is given at all)\n"
@@ -1376,7 +1565,9 @@ CommandLine ws_root =
 					 "  archive-wal     Push one WAL/.backup file into a "
 					 "route (archive_command)\n"
 					 "  restore-wal     Fetch one WAL/.backup file from a "
-					 "route (restore_command)\n",
+					 "route (restore_command)\n"
+					 "  reload          Ask a running pg_walserver to "
+					 "reload its configuration\n",
 					 NULL, root_subcommands);
 
 
@@ -1405,6 +1596,7 @@ pg_walserver_default_argv(int argc, char **argv, int *newArgc)
 		 streq(argv[1], "create-cert") ||
 		 streq(argv[1], "archive-wal") ||
 		 streq(argv[1], "restore-wal") ||
+		 streq(argv[1], "reload") ||
 		 streq(argv[1], "internal") ||
 		 streq(argv[1], "--help") ||
 		 streq(argv[1], "-h")))

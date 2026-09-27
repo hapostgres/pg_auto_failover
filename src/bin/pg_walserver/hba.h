@@ -49,13 +49,49 @@ typedef enum WsAuthMethod
 	WS_AUTH_SCRAM
 } WsAuthMethod;
 
+/* one HBA logical line, already tokenized and validated by hba_parse_file() */
+#define WS_HBA_MAX_FIELDS 5
+
+typedef struct HbaRule
+{
+	char *fields[WS_HBA_MAX_FIELDS];
+	WsAuthMethod method;
+	int lineNumber;
+} HbaRule;
+
 /*
- * hba_lookup finds the first rule matching (routeKey, user, peerIP) in the
- * HBA file. Returns false when the file cannot be read, is larger than
- * 1 MiB, or has ANY malformed line (reported with its line number): callers
- * must then reject the connection, failing closed like PostgreSQL, which
- * refuses to load a bad pg_hba.conf. Otherwise sets *method, which is
- * WS_AUTH_REJECT when no rule matches or the matching rule says reject.
+ * WsHbaRuleSet is the whole, already-validated HBA file, kept in memory: the
+ * server parses it once at startup and again, tentatively, on SIGHUP (see
+ * accept_loop.c's own ws_reload_config()), swapping it in only when the new
+ * file parses cleanly -- connections in between keep matching against
+ * whichever WsHbaRuleSet is currently installed, never re-reading the file
+ * off disk themselves. This mirrors PostgreSQL's own ProcessConfigFile()
+ * semantics: a bad reload is refused, not partially applied.
+ */
+typedef struct WsHbaRuleSet
+{
+	HbaRule *rules;
+	int count;
+} WsHbaRuleSet;
+
+/*
+ * hba_parse_file reads and parses the whole HBA file at hbaPath into a
+ * freshly malloc'd WsHbaRuleSet (free with hba_ruleset_free()). Returns
+ * false, *ruleSet left empty, when the file cannot be read, is larger than
+ * 1 MiB, or has ANY malformed line (logged with its line number): callers
+ * must fail closed, exactly like PostgreSQL refusing to load a bad
+ * pg_hba.conf -- never install a partially-parsed ruleset.
+ */
+bool hba_parse_file(const char *hbaPath, WsHbaRuleSet *ruleSet);
+
+/* releases a WsHbaRuleSet returned by hba_parse_file() */
+void hba_ruleset_free(WsHbaRuleSet *ruleSet);
+
+/*
+ * hba_match finds the first rule of ruleSet matching (routeKey, user,
+ * peerIP), setting *method (WS_AUTH_REJECT when no rule matches or the
+ * matching rule says reject). Never fails: ruleSet is already known-valid,
+ * having come from a successful hba_parse_file().
  *
  * routeKey is matched against each rule's ROUTE field as a plain, opaque
  * string, exactly the same string routes.c matches against pg_walserver.ini's
@@ -65,8 +101,9 @@ typedef enum WsAuthMethod
  * routes.h) are two entirely independent decisions made from the same
  * key, neither one aware of the other.
  */
-bool hba_lookup(const char *hbaPath, const char *routeKey, const char *user,
-				const char *peerIP, bool isTLS, WsAuthMethod *method);
+void hba_match(const WsHbaRuleSet *ruleSet, const char *routeKey,
+			   const char *user, const char *peerIP, bool isTLS,
+			   WsAuthMethod *method);
 
 /* create the default HBA file if there is none; never overwrite one */
 bool hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable);

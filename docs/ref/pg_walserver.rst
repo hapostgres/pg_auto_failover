@@ -21,7 +21,8 @@ all::
 
   usage: pg_walserver [serve options] | scram-secret ... | setup ... |
                        fetch-systemid ... | basebackup ... |
-                       create-cert ... | archive-wal ... | restore-wal ...
+                       create-cert ... | archive-wal ... | restore-wal ... |
+                       reload ...
 
     serve           Run the accept loop (default command)
     scram-secret    Print one archiver-passwd line for a user
@@ -31,6 +32,7 @@ all::
     create-cert     Create a self-signed TLS certificate for --pgdata
     archive-wal     Push one WAL/.backup file into a route (archive_command)
     restore-wal     Fetch one WAL/.backup file from a route (restore_command)
+    reload          Ask a running pg_walserver to reload its configuration
 
 See `Options`_ below for what each sub-command's flags do.
 
@@ -140,6 +142,13 @@ reporting the connected route's own ``capture`` setting, ``pull`` or
 ``CHECK_FILE``/``ARCHIVE_FILE`` (the push-side counterpart, used by
 ``archive-wal``). See ``src/bin/pg_walserver/README.md`` for the wire
 protocol's full design.
+
+``serve`` writes its own pid to ``<pgdata>/pg_walserver.pid`` and parses
+``pg_walserver.ini``/``archiver-hba.conf`` once at startup. ``pg_walserver
+reload`` sends that pid ``SIGHUP``, which re-parses both files and
+installs them only if both still parse cleanly, reconciling the embedded
+pull capturer set against the new routes. The TLS certificate/key are not
+reloaded this way; a rotated certificate needs a restart.
 
 Options
 -------
@@ -373,6 +382,23 @@ as PostgreSQL's own ``restore_command``:
 
 Accepts the same ``--route``, ``--host``, ``--port``, ``--user``,
 ``--sslmode`` options as ``archive-wal``.
+
+``reload``
+~~~~~~~~~~
+
+Sends ``SIGHUP`` to the running ``pg_walserver serve`` instance whose pid
+is recorded in ``<pgdata>/pg_walserver.pid``, the same shape as
+``pg_ctl reload``::
+
+  $ pg_walserver reload --pgdata /var/lib/archiver
+
+Exits 0 once the signal was delivered. Exits nonzero, with a clear error,
+if the pidfile is missing, stale, or unreadable.
+
+--pgdata
+
+  This instance's own top-level storage root. Defaults to ``PGDATA``. The
+  pidfile read is ``<pgdata>/pg_walserver.pid``.
 
 Environment
 -----------

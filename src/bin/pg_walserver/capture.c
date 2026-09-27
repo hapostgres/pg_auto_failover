@@ -51,7 +51,9 @@
  */
 
 #include <signal.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -62,6 +64,8 @@
 #include "log.h"
 #include "process_supervisor.h"
 #include "string_utils.h"
+
+#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
 /*
  * A route's own INI file is operator-written (or, later, written by
@@ -215,6 +219,170 @@ start_one_capture_child(void *context, pid_t *pid)
 			 "capturing into \"%s\"", cr->routeKey, fpid, cr->path);
 
 	return true;
+}
+
+
+/*
+ * ws_capture_reload -- see capture.h.
+ */
+void
+ws_capture_reload(const WsRoute *newRoutes, int newRouteCount)
+{
+	bool *handled = (bool *) calloc(newRouteCount > 0 ? newRouteCount : 1,
+									sizeof(bool));
+
+	if (handled == NULL)
+	{
+		log_error("Reload: out of memory reconciling the embedded pull "
+				  "capturer set: leaving it as-is");
+		return;
+	}
+
+	int started = 0, stopped = 0, restarted = 0, unchanged = 0;
+
+	/* stop, or update-then-restart-in-place, every currently tracked
+	 * capturer whose route disappeared, lost "capture = pull", or changed
+	 * "upstream"/"path" */
+	for (int i = 0; i < captureSupervisor.serviceCount; i++)
+	{
+		ProcessService *service = &captureServices[i];
+		WsCaptureRoute *cr = &captureRoutes[i];
+
+		if (service->pid <= 0)
+		{
+			continue;   /* already stopped: a free slot for reuse below */
+		}
+
+		const WsRoute *want = NULL;
+		int wantIndex = -1;
+
+		for (int j = 0; j < newRouteCount; j++)
+		{
+			if (streq(newRoutes[j].key, cr->routeKey))
+			{
+				want = &newRoutes[j];
+				wantIndex = j;
+				break;
+			}
+		}
+
+		if (want == NULL || !want->capturePull || want->upstream[0] == '\0')
+		{
+			log_info("Reload: stopping the embedded pull capturer for "
+					 "route \"%s\" (pid %d): no longer \"capture = pull\"",
+					 cr->routeKey, service->pid);
+			service->policy = PROCESS_RP_TEMPORARY;
+			(void) kill(service->pid, SIGINT);
+			++stopped;
+			continue;
+		}
+
+		handled[wantIndex] = true;
+
+		if (!streq(cr->upstream, want->upstream) || !streq(cr->path, want->path))
+		{
+			log_info("Reload: restarting the embedded pull capturer for "
+					 "route \"%s\" (pid %d): \"upstream\"/\"path\" changed",
+					 cr->routeKey, service->pid);
+
+			/*
+			 * service->context already points at cr: updating it here means
+			 * the ordinary PERMANENT-policy restart-on-exit path in
+			 * ws_capture_tick() (process_supervisor_tick() underneath it)
+			 * starts the next incarnation with the new upstream/path once
+			 * this SIGINT is reaped -- it cannot retarget an already-forked/
+			 * exec'd pg_receivewal child in place, so this is always a
+			 * stop-then-start, never a live retarget.
+			 */
+			strlcpy(cr->upstream, want->upstream, sizeof(cr->upstream));
+			strlcpy(cr->path, want->path, sizeof(cr->path));
+
+			(void) kill(service->pid, SIGINT);
+			++restarted;
+		}
+		else
+		{
+			++unchanged;
+		}
+	}
+
+	/* start a capturer for every newly-added (or newly "capture = pull")
+	 * route not already handled above */
+	for (int j = 0; j < newRouteCount; j++)
+	{
+		if (handled[j] || !newRoutes[j].capturePull)
+		{
+			continue;
+		}
+
+		if (newRoutes[j].upstream[0] == '\0')
+		{
+			log_error("Reload: route \"%s\" has \"capture = pull\" but no "
+					  "\"upstream\" property: not starting an embedded "
+					  "capturer for it", newRoutes[j].key);
+			continue;
+		}
+
+		int slot = -1;
+
+		for (int i = 0; i < captureSupervisor.serviceCount; i++)
+		{
+			if (captureServices[i].pid <= 0)
+			{
+				slot = i;
+				break;
+			}
+		}
+
+		if (slot == -1)
+		{
+			if (captureSupervisor.serviceCount >= WS_CAPTURE_MAX_ROUTES)
+			{
+				log_error("Reload: too many \"capture = pull\" routes (max "
+						  "%d): not starting an embedded capturer for route "
+						  "\"%s\"", WS_CAPTURE_MAX_ROUTES, newRoutes[j].key);
+				continue;
+			}
+
+			slot = captureSupervisor.serviceCount++;
+		}
+
+		WsCaptureRoute *cr = &captureRoutes[slot];
+
+		memset(cr, 0, sizeof(WsCaptureRoute));
+		strlcpy(cr->routeKey, newRoutes[j].key, sizeof(cr->routeKey));
+		strlcpy(cr->path, newRoutes[j].path, sizeof(cr->path));
+		strlcpy(cr->upstream, newRoutes[j].upstream, sizeof(cr->upstream));
+
+		ProcessService *service = &captureServices[slot];
+
+		memset(service, 0, sizeof(ProcessService));
+		sformat(service->name, sizeof(service->name), "capture-%s", cr->routeKey);
+		service->policy = PROCESS_RP_PERMANENT;
+		service->startFunction = start_one_capture_child;
+		service->context = cr;
+
+		if (start_one_capture_child(cr, &service->pid))
+		{
+			process_restart_counters_start(&service->restartCounters,
+										   (uint64_t) time(NULL));
+			log_info("Reload: started a new embedded pull capturer for "
+					 "route \"%s\"", cr->routeKey);
+			++started;
+		}
+		else
+		{
+			log_error("Reload: failed to start an embedded pull capturer "
+					  "for route \"%s\"", cr->routeKey);
+			service->pid = -1;
+		}
+	}
+
+	free(handled);
+
+	log_info("Reload: capturer reconciliation: %d started, %d stopped, "
+			 "%d restarted, %d unchanged", started, stopped, restarted,
+			 unchanged);
 }
 
 

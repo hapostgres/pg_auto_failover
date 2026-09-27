@@ -55,6 +55,27 @@ void ws_capture_tick(bool (*otherChildExited)(void *ctx, pid_t pid,
 					 void *otherCtx);
 
 /*
+ * ws_capture_reload reconciles the running "capture = pull" capturer set
+ * against a freshly, successfully reloaded (SIGHUP) route list -- it never
+ * restarts a capturer whose route is unchanged:
+ *
+ *   - a route that newly has "capture = pull" (or is new outright) gets a
+ *     capturer started;
+ *   - a route whose "capture = pull" was removed, or whose route
+ *     disappeared entirely, gets its capturer stopped (SIGINT);
+ *   - a route whose "upstream" or "path" changed while "capture = pull"
+ *     stayed on gets stopped (SIGINT) and, once reaped, automatically
+ *     restarted with the new values by the ordinary PERMANENT-policy
+ *     restart path in ws_capture_tick() -- it cannot retarget an
+ *     already-forked/exec'd pg_receivewal child in place, so this is
+ *     always a stop-then-start, never a live retarget.
+ *
+ * Logs every start/stop/restart decision it makes. Must only be called
+ * after ws_capture_start_all() has already run once.
+ */
+void ws_capture_reload(const WsRoute *newRoutes, int newRouteCount);
+
+/*
  * ws_capture_stop_all signals every still-running capturer child to stop
  * cleanly (SIGINT, matching pg_receivewal's own documented clean-stop
  * signal -- see capture.c's own comment), waits up to a bounded timeout
