@@ -1122,7 +1122,27 @@ compose_gen_write(TestCluster *cluster,
 			 * case where the formation hasn't been created yet.
 			 */
 
-			if (cluster->legacyStartup)
+			if (n->commandOverride[0])
+			{
+				/*
+				 * "command <string>" (test_spec_parse.y) replaces this
+				 * node's own entrypoint command entirely -- run as a raw
+				 * shell command instead of pg_autoctl node run, without
+				 * building a second image: the override still runs inside
+				 * the exact same node image/volumes/network the rest of
+				 * this node's own stanza already set up above, it's only
+				 * PID 1 inside the container that changes. See
+				 * pg_walserver_pid1.pgaf's own header comment for why this
+				 * exists: proving pg_walserver's embedded pull capturer is
+				 * safe to run as a container's actual PID 1 needs a
+				 * container where it, not pg_autoctl, is that PID 1.
+				 */
+				fformat(f,
+						"    command: [\"/bin/sh\", \"-c\", \"%s\"]\n"
+						"    stop_grace_period: 60s\n",
+						n->commandOverride);
+			}
+			else if (cluster->legacyStartup)
 			{
 				char monitorUri[512];
 

@@ -160,7 +160,7 @@ static TestNode      *current_node        = NULL;
 %token T_LAUNCH T_CREATE T_DEFERRED T_IMMEDIATE T_FALSE T_TRUE T_INITIALLY T_VOLUME
 %token T_LISTEN T_CITUS_SECONDARY T_CANDIDATE_PRIORITY T_PORT T_PASSWORD T_MONITOR_PASSWORD
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
-%token T_EXTENSION_VERSION T_BIND_SOURCE T_LEGACY_STARTUP T_REGION
+%token T_EXTENSION_VERSION T_BIND_SOURCE T_LEGACY_STARTUP T_REGION T_COMMAND
 %token T_NODEINI
 
 /* ---- FSM state tokens (used in CLUSTER_BODY and STEP_BODY) ---- */
@@ -624,6 +624,14 @@ node_opt:
 	{
 		strlcpy(current_node->replicationPassword, $2,
 		        sizeof(current_node->replicationPassword));
+		free($2);
+	}
+	| T_COMMAND T_STRING
+	{
+		/* replaces this node's own container command entirely, see
+		 * test_spec.h's own commandOverride comment */
+		strlcpy(current_node->commandOverride, $2,
+		        sizeof(current_node->commandOverride));
 		free($2);
 	}
 	| T_MONITOR_PASSWORD T_STRING

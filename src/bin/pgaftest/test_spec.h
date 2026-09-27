@@ -79,6 +79,13 @@ typedef struct TestNode
 	char replicationPassword[256]; /* replication.password written to node ini */
 	char monitorPassword[256];   /* pg_auto_failover.monitor_password written to node ini */
 	char region[64];             /* --region NAME; "" = omit (defaults to "default" on monitor) */
+	char commandOverride[1024]; /* "command <string>": replaces this node's
+	                             * own container command entirely (raw
+	                             * "/bin/sh -c <string>"), so a spec can make
+	                             * something other than pg_autoctl PID 1
+	                             * inside this node's container -- see
+	                             * compose_gen.c's own write_node_command()
+	                             * call site comment */
 
 	/* Extra Docker named volumes: volume <name> <containerPath> */
 	struct
