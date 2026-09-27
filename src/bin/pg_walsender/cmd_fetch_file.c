@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/cmd_fetch_file.c
  *   See cmd_fetch_file.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -24,6 +23,11 @@
 #define WS_FETCH_CHUNK_SIZE (128 * 1024)
 
 
+/*
+ * is_upper_hex returns true when the first n bytes of s are all uppercase
+ * hexadecimal digits ('0'-'9', 'A'-'F') -- the alphabet WAL segment names and
+ * timeline history filenames both use.
+ */
 static bool
 is_upper_hex(const char *s, size_t n)
 {
@@ -67,6 +71,17 @@ ws_fetch_filename_is_servable(const char *filename)
 }
 
 
+/*
+ * cmd_fetch_file implements this project's own FETCH_FILE extension: it
+ * validates filename against the servable allow-list, opens it under
+ * route->path, and streams it back to the client as a CopyOut of
+ * WS_FETCH_CHUNK_SIZE-sized CopyData messages (never loading the whole file,
+ * which can be up to a 1 GiB WAL segment), followed by CopyDone and a
+ * CommandComplete. Any failure mid-stream sends an ErrorResponse (if nothing
+ * has been sent yet) or, once inside CopyOut, sets
+ * ws_connection_close_after_command since the protocol cannot be
+ * resynchronized from there.
+ */
 void
 cmd_fetch_file(int sock, const WsRoute *route, const char *filename)
 {

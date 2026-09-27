@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/cmd_show.c
  *   See cmd_show.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -16,6 +15,14 @@
 #include "wal_dir_scan.h"
 
 
+/*
+ * cmd_show implements the tiny subset of SHOW that real pg_basebackup/
+ * pg_receivewal actually query over a replication connection:
+ * "wal_segment_size" (the route's own configured segment size, in GUC
+ * format, e.g. "16MB") and "data_directory_mode" (a fixed "0700"). Any other
+ * parameter name is rejected with the same SQLSTATE (42704) real Postgres
+ * uses for an unknown GUC.
+ */
 void
 cmd_show(int sock, const WsRoute *route, const char *name)
 {

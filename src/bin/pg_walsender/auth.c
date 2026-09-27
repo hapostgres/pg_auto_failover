@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/auth.c
  *   See auth.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -32,6 +31,12 @@
 #define AUTH_REQ_SASL_FINAL 12
 
 
+/*
+ * ws_get_peer_ip writes the accepted connection's peer address, as a numeric
+ * string (getnameinfo() with NI_NUMERICHOST, so no DNS lookup happens here),
+ * into ipBuf. Returns false and logs on any getpeername()/getnameinfo()
+ * failure.
+ */
 static bool
 ws_get_peer_ip(int sock, char *ipBuf, size_t ipBufSize)
 {
@@ -100,6 +105,12 @@ find_verifier(const char *passwdPath, const char *user, ScramVerifier *verifier)
 }
 
 
+/*
+ * send_auth_request sends one 'R' Authentication* message: a 4-byte
+ * big-endian request code followed by dataLen bytes of mechanism-specific
+ * payload (empty for AuthenticationOk-style codes, a SCRAM message for the
+ * SASL codes). Returns false when dataLen would not fit the local buffer.
+ */
 static bool
 send_auth_request(int sock, int32_t code, const char *data, size_t dataLen)
 {
@@ -302,8 +313,7 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 	/*
 	 * Authenticate BEFORE revealing anything, as PostgreSQL does: which
 	 * routes exist is only told to a client that got through the HBA rules
-	 * and the password exchange. An unknown route is looked up as NULL, so
-	 * the "monitor" address matches nothing for it, and is reported (3D000,
+	 * and the password exchange. An unknown route is reported (3D000,
 	 * "database does not exist") only after a successful authentication.
 	 */
 	const WsRoute *route = routes_find(routes, routeCount, routeKey);
@@ -324,9 +334,8 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 
 	WsAuthMethod method = WS_AUTH_REJECT;
 
-	if (!hba_lookup(authConfig->hbaPath, route != NULL ? route->path : NULL,
-					authConfig->monitorUriPath, authConfig->refreshSockPath,
-					routeKey, params->user, peerIP, ws_tls_active(), &method))
+	if (!hba_lookup(authConfig->hbaPath, routeKey, params->user, peerIP,
+					ws_tls_active(), &method))
 	{
 		ws_send_error_response(sock, "28000", "authentication is unavailable");
 		return false;

@@ -87,7 +87,6 @@
  *   differs between them (not just the tag bytes within the shared code
  *   path) is what both fixes actually needed.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -124,129 +123,48 @@ typedef struct BaseBackupOptions
 
 
 /*
- * scan_options tolerantly parses the BASE_BACKUP option list real
- * pg_basebackup sends, e.g.:
+ * collect_options reads the BASE_BACKUP option list repl_gram.y's grammar
+ * already parsed (see repl_command.h's WsCommandOption array) into this
+ * file's own BaseBackupOptions, e.g. for:
  *   LABEL 'pg_basebackup base backup', CHECKPOINT 'fast', TARGET 'client'
  * Options this MVP doesn't act on (PROGRESS, CHECKPOINT, WAIT, MAX_RATE,
  * TABLESPACE_MAP, VERIFY_CHECKSUMS, MANIFEST_CHECKSUMS) are recognized and
  * ignored rather than rejected -- only WAL/MANIFEST/COMPRESSION/a non-
  * "client" TARGET actually change behavior (see cmd_base_backup()'s own
- * validation right after calling this).
+ * validation right after calling this). Replaces this file's own former
+ * ad hoc scan_options() text scanner, now that the option list arrives
+ * already tokenized by the real replication grammar.
  */
 static void
-scan_options(const char *raw, BaseBackupOptions *opts)
+collect_options(const WsCommandOption *options, int nOptions, BaseBackupOptions *opts)
 {
 	memset(opts, 0, sizeof(BaseBackupOptions));
 
-	const char *p = raw;
-
-	while (*p)
+	for (int i = 0; i < nOptions; i++)
 	{
-		while (isspace((unsigned char) *p) || *p == ',' || *p == '(' || *p == ')')
+		const WsCommandOption *opt = &options[i];
+
+		if (strcasecmp(opt->name, "label") == 0)
 		{
-			p++;
+			strlcpy(opts->label, opt->value, sizeof(opts->label));
 		}
-
-		if (*p == '\0')
-		{
-			break;
-		}
-
-		const char *keyStart = p;
-
-		while (*p && !isspace((unsigned char) *p) && *p != ',' && *p != ')')
-		{
-			p++;
-		}
-
-		char key[64];
-		size_t keyLen = Min((size_t) (p - keyStart), sizeof(key) - 1);
-
-		memcpy(key, keyStart, keyLen); /* IGNORE-BANNED */
-		key[keyLen] = '\0';
-
-		while (isspace((unsigned char) *p))
-		{
-			p++;
-		}
-
-		char value[512] = { 0 };
-
-		if (*p == '\'')
-		{
-			p++;
-
-			char *out = value;
-			char *outEnd = value + sizeof(value) - 1;
-
-			while (*p && !(*p == '\'' && p[1] != '\''))
-			{
-				if (*p == '\'' && p[1] == '\'')
-				{
-					if (out < outEnd)
-					{
-						*out++ = '\'';
-					}
-					p += 2;
-					continue;
-				}
-
-				if (out < outEnd)
-				{
-					*out++ = *p;
-				}
-
-				p++;
-			}
-
-			*out = '\0';
-
-			if (*p == '\'')
-			{
-				p++;
-			}
-		}
-		else if (*p && *p != ',' && *p != ')')
-		{
-			const char *valStart = p;
-
-			while (*p && *p != ',' && *p != ')' && !isspace((unsigned char) *p))
-			{
-				p++;
-			}
-
-			size_t valLen = Min((size_t) (p - valStart), sizeof(value) - 1);
-
-			memcpy(value, valStart, valLen); /* IGNORE-BANNED */
-			value[valLen] = '\0';
-		}
-
-		if (strcasecmp(key, "LABEL") == 0)
-		{
-			strlcpy(opts->label, value, sizeof(opts->label));
-		}
-		else if (strcasecmp(key, "WAL") == 0)
+		else if (strcasecmp(opt->name, "wal") == 0)
 		{
 			opts->sendWal = true;
 		}
-		else if (strcasecmp(key, "MANIFEST") == 0)
+		else if (strcasecmp(opt->name, "manifest") == 0)
 		{
 			/* pg_basebackup only ever sends this key when it wants one
 			 * ("yes"/"force-encode"); --no-manifest omits it entirely */
 			opts->manifestRequested = true;
 		}
-		else if (strcasecmp(key, "TARGET") == 0)
+		else if (strcasecmp(opt->name, "target") == 0)
 		{
-			strlcpy(opts->target, value, sizeof(opts->target));
+			strlcpy(opts->target, opt->value, sizeof(opts->target));
 		}
-		else if (strcasecmp(key, "COMPRESSION") == 0)
+		else if (strcasecmp(opt->name, "compression") == 0)
 		{
 			opts->compressionRequested = true;
-		}
-
-		while (isspace((unsigned char) *p) || *p == ',')
-		{
-			p++;
 		}
 	}
 }
@@ -257,10 +175,20 @@ scan_options(const char *raw, BaseBackupOptions *opts)
  * fields real pg_basebackup already wrote into basebackupDir/backup_label
  * when the archiver originally took this backup (see cmd_base_backup.h's
  * own header comment: do_pg_backup_start() is never called here, this file
- * already exists on disk). Returns false (caller falls back to the
- * route's own systemid/timeline, "0/0" for the LSN) if the file is
- * missing or doesn't parse -- a base backup taken by the archiver's
- * own machinery is expected to always have one.
+ * already exists on disk).
+ *
+ * Ported from PostgreSQL's own read_backup_label() in
+ * src/backend/access/transam/xlogrecovery.c: same fixed format-string
+ * scanning (via fscanf, IGNORE-BANNED below) of the two mandatory lines
+ * ("this code is pretty
+ * crude, but we are not expecting any variability in the file format", to
+ * quote the original). Unlike the backend version, a parse failure here is
+ * not FATAL: it's logged and the function returns false, and the caller
+ * falls back to the route's own systemid/timeline, "0/0" for the LSN --
+ * this project never expects a backup_label to fail to parse (the archiver
+ * itself wrote it), but a corrupt/missing file must not crash the server.
+ * Fields the backend also extracts but no caller here needs (BACKUP METHOD,
+ * BACKUP FROM, START TIME, LABEL, INCREMENTAL FROM LSN) are skipped.
  */
 static bool
 read_backup_label(const char *basebackupDir, char *lsnOut, size_t lsnOutSize,
@@ -270,57 +198,56 @@ read_backup_label(const char *basebackupDir, char *lsnOut, size_t lsnOutSize,
 
 	sformat(path, sizeof(path), "%s/backup_label", basebackupDir);
 
-	char *contents = NULL;
-	long fileSize = 0;
+	FILE *lfp = fopen(path, "r"); /* IGNORE-BANNED */
 
-	if (!read_file_if_exists(path, &contents, &fileSize) || contents == NULL)
+	if (lfp == NULL)
 	{
+		/* not there, or unreadable: not an error, caller has a fallback */
 		return false;
 	}
 
-	bool foundLsn = false;
-	bool foundTimeline = false;
-	char *line = contents;
+	uint32_t hi, lo;
+	uint32_t tliFromWalSeg;
+	char startXlogFileName[64]; /* matches xlog_internal.h's MAXFNAMELEN,
+	                             * see cmd_timeline_history.c's WS_MAXFNAMELEN */
+	char ch;
 
-	while (line != NULL && *line != '\0')
+	/* same fixed format string as PostgreSQL's own read_backup_label() */
+	if (fscanf(lfp, "START WAL LOCATION: %X/%08X (file %08X%16s)%c", /* IGNORE-BANNED */
+			   &hi, &lo, &tliFromWalSeg, startXlogFileName, &ch) != 5 ||
+		ch != '\n')
 	{
-		char *nl = strchr(line, '\n');
-
-		if (nl != NULL)
-		{
-			*nl = '\0';
-		}
-
-		const char *lsnPrefix = "START WAL LOCATION: ";
-		const char *tliPrefix = "START TIMELINE: ";
-
-		if (strncmp(line, lsnPrefix, strlen(lsnPrefix)) == 0)
-		{
-			const char *value = line + strlen(lsnPrefix);
-			const char *end = value;
-
-			while (*end && !isspace((unsigned char) *end))
-			{
-				end++;
-			}
-
-			size_t len = Min((size_t) (end - value), lsnOutSize - 1);
-
-			memcpy(lsnOut, value, len); /* IGNORE-BANNED */
-			lsnOut[len] = '\0';
-			foundLsn = true;
-		}
-		else if (strncmp(line, tliPrefix, strlen(tliPrefix)) == 0)
-		{
-			foundTimeline = stringToInt(line + strlen(tliPrefix), timelineOut);
-		}
-
-		line = (nl != NULL) ? nl + 1 : NULL;
+		log_error("Invalid data in file \"%s\": could not parse "
+				  "\"START WAL LOCATION\"", path);
+		fclose(lfp); /* IGNORE-BANNED */
+		return false;
 	}
 
-	free(contents);
+	sformat(lsnOut, lsnOutSize, "%X/%08X", hi, lo);
 
-	return foundLsn && foundTimeline;
+	uint32_t tliFromFile;
+
+	/*
+	 * "START TIMELINE" is new as of PG11; PostgreSQL itself only uses it as
+	 * a sanity check against the timeline embedded in the WAL segment file
+	 * name parsed above (tliFromWalSeg), which is what actually feeds
+	 * RedoStartTLI. Do the same here: prefer tliFromWalSeg, and only worry
+	 * about the newer field if a mismatch would matter.
+	 */
+	if (fscanf(lfp, "START TIMELINE: %u\n", &tliFromFile) == 1 && /* IGNORE-BANNED */
+		tliFromFile != tliFromWalSeg)
+	{
+		log_error("Invalid data in file \"%s\": timeline ID parsed is %u, "
+				  "but expected %u", path, tliFromFile, tliFromWalSeg);
+		fclose(lfp); /* IGNORE-BANNED */
+		return false;
+	}
+
+	fclose(lfp); /* IGNORE-BANNED */
+
+	*timelineOut = (int) tliFromWalSeg;
+
+	return true;
 }
 
 
@@ -791,7 +718,8 @@ fail_stream(int sock)
 
 
 void
-cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
+cmd_base_backup(int sock, const WsRoute *route,
+				const WsCommandOption *options, int nOptions)
 {
 	char label[NAMEDATALEN] = { 0 };
 	char basebackupDir[MAXPGPATH] = { 0 };
@@ -819,7 +747,7 @@ cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions)
 
 	BaseBackupOptions opts;
 
-	scan_options(rawOptions, &opts);
+	collect_options(options, nOptions, &opts);
 
 	if (opts.sendWal)
 	{

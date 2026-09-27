@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/tar_stream.c
  *   See tar_stream.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -32,6 +31,12 @@ typedef struct TarWalkState
 } TarWalkState;
 
 
+/*
+ * emit forwards len bytes of data to state's callback, short-circuiting once
+ * state->ok has gone false (a previous emit's callback failed) -- every
+ * later emit() in the same walk becomes a cheap no-op instead of a error
+ * needing to be checked individually at every call site.
+ */
 static bool
 emit(TarWalkState *state, const char *data, size_t len)
 {
@@ -49,6 +54,12 @@ emit(TarWalkState *state, const char *data, size_t len)
 }
 
 
+/*
+ * emit_header builds and emits one tar header block (via tarCreateHeader())
+ * for memberName, describing st (and, for a symlink, its linkTarget).
+ * Returns false, having logged, on a name/link target too long for the tar
+ * format or on the underlying emit() failing.
+ */
 static bool
 emit_header(TarWalkState *state, const char *memberName,
 			const char *linkTarget, struct stat *st)
@@ -72,6 +83,14 @@ emit_header(TarWalkState *state, const char *memberName,
 }
 
 
+/*
+ * emit_file_contents streams a regular file's data block (the file's bytes,
+ * in TAR_READ_CHUNK_SIZE pieces, plus the tar format's own zero padding up
+ * to the next 512-byte boundary) into state. size is the length recorded in
+ * the header emitted just before this call; a short read (the file shrank
+ * mid-stream) is treated as a fatal error rather than silently short-writing
+ * a tar entry whose header already promised a different length.
+ */
 static bool
 emit_file_contents(TarWalkState *state, const char *path, off_t size)
 {
@@ -126,6 +145,14 @@ emit_file_contents(TarWalkState *state, const char *path, off_t size)
 }
 
 
+/*
+ * walk_directory recursively emits rootDir/relDir's contents as tar entries:
+ * a directory header plus a recursive call for a subdirectory, a bare header
+ * (no recursion) for a symlink, a header plus streamed contents for a
+ * regular file, backup_manifest at the root skipped (see the comment at its
+ * own check below), and anything else (sockets, fifos, devices) silently
+ * skipped. Stops and returns false at the first error.
+ */
 static bool
 walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 {
@@ -271,6 +298,11 @@ walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 }
 
 
+/*
+ * tar_stream_directory walks rootDir recursively and calls callback with
+ * each successive chunk of the resulting tar stream (headers, file data,
+ * padding). Returns false as soon as either the walk or callback fails.
+ */
 bool
 tar_stream_directory(const char *rootDir, TarChunkCallback callback, void *context)
 {

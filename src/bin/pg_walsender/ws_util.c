@@ -2,14 +2,12 @@
  * src/bin/pg_walsender/ws_util.c
  *   See ws_util.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
 
 #include <errno.h>
 #include <fcntl.h>
-#include <libgen.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -33,6 +31,11 @@ ws_read_file_capped(const char *path, size_t maxSize, bool missingOk,
 }
 
 
+/*
+ * ws_open_served_file opens path read-only for FETCH_FILE, refusing to
+ * follow a symlink (O_NOFOLLOW) and refusing anything that isn't a regular
+ * file once opened (fstat()). Returns -1 (errno set) on any failure.
+ */
 int
 ws_open_served_file(const char *path)
 {
@@ -137,81 +140,13 @@ ws_read_file_flags(const char *path, int openFlags, size_t maxSize,
 }
 
 
-bool
-ws_write_file_atomic(const char *path, const char *data, size_t len)
-{
-	char tmpPath[MAXPGPATH];
-
-	sformat(tmpPath, sizeof(tmpPath), "%s.tmp.%d", path, (int) getpid());
-
-	int fd = open(tmpPath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
-
-	if (fd < 0 && errno == EEXIST)
-	{
-		/* a leftover of an earlier process that had the same pid */
-		(void) unlink(tmpPath);
-		fd = open(tmpPath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
-	}
-
-	if (fd < 0)
-	{
-		log_error("Failed to create \"%s\": %m", tmpPath);
-		return false;
-	}
-
-	size_t done = 0;
-
-	while (done < len)
-	{
-		ssize_t n = write(fd, data + done, len - done);
-
-		if (n < 0 && errno == EINTR)
-		{
-			continue;
-		}
-
-		if (n <= 0)
-		{
-			log_error("Failed to write \"%s\": %m", tmpPath);
-			close(fd);
-			(void) unlink(tmpPath);
-			return false;
-		}
-
-		done += (size_t) n;
-	}
-
-	if (fsync(fd) != 0 || close(fd) != 0)
-	{
-		log_error("Failed to sync \"%s\": %m", tmpPath);
-		(void) unlink(tmpPath);
-		return false;
-	}
-
-	if (rename(tmpPath, path) != 0)
-	{
-		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpPath, path);
-		(void) unlink(tmpPath);
-		return false;
-	}
-
-	/* make the rename itself durable, best effort */
-	char dirCopy[MAXPGPATH];
-
-	strlcpy(dirCopy, path, sizeof(dirCopy));
-
-	int dirFd = open(dirname(dirCopy), O_RDONLY | O_CLOEXEC);
-
-	if (dirFd >= 0)
-	{
-		(void) fsync(dirFd);
-		close(dirFd);
-	}
-
-	return true;
-}
-
-
+/*
+ * ws_sanitize_for_log copies in into out (bounded by outSize), replacing any
+ * control character (< 0x20 or 0x7f) with '?' -- so a value that came
+ * straight from an unauthenticated client (a user name, a route key) can be
+ * logged without letting it inject terminal escape sequences or fake log
+ * lines. Truncates with a trailing "..." when in doesn't fit.
+ */
 void
 ws_sanitize_for_log(const char *in, char *out, size_t outSize)
 {
@@ -243,6 +178,11 @@ ws_sanitize_for_log(const char *in, char *out, size_t outSize)
 }
 
 
+/*
+ * ws_monotonic_ms returns a CLOCK_MONOTONIC timestamp in milliseconds, for
+ * measuring elapsed time (deadlines, backoff) unaffected by wall-clock
+ * adjustments.
+ */
 int64_t
 ws_monotonic_ms(void)
 {
@@ -263,22 +203,13 @@ ws_auth_deadline_set(int seconds)
 }
 
 
+/*
+ * ws_auth_deadline_clear disarms the connection's authentication deadline
+ * (the countdown started by ws_auth_deadline_set()), called once
+ * authentication has succeeded.
+ */
 void
 ws_auth_deadline_clear(void)
 {
 	authDeadlineMs = 0;
-}
-
-
-int
-ws_auth_deadline_remaining_ms(void)
-{
-	if (authDeadlineMs == 0)
-	{
-		return 3600 * 1000;
-	}
-
-	int64_t remaining = authDeadlineMs - ws_monotonic_ms();
-
-	return remaining > 0 ? (int) remaining : 0;
 }

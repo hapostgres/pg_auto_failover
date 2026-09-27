@@ -11,7 +11,6 @@
  *   required for a client (a real pg_receivewal) that already does its own
  *   validation on the bytes it receives.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -19,8 +18,21 @@
 #ifndef WS_CMD_START_REPLICATION_H
 #define WS_CMD_START_REPLICATION_H
 
+#include <stdint.h>
+
 #include "routes.h"
 
-void cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs);
+/*
+ * slotName/startLsn/haveTimeline/timeline are already parsed out by
+ * repl_gram.y's grammar (see repl_command.h) -- this file no longer
+ * tokenizes the raw command text itself. slotName is "" when the client
+ * didn't send a SLOT clause (this file doesn't act on it either way, see
+ * this header's own comment on retention). haveTimeline is false when the
+ * client didn't send a TIMELINE clause, in which case the current
+ * timeline is looked up from the WAL cache, same as before.
+ */
+void cmd_start_replication(int sock, const WsRoute *route,
+						   const char *slotName, uint64_t startLsn,
+						   bool haveTimeline, uint32_t timeline);
 
 #endif /* WS_CMD_START_REPLICATION_H */

@@ -18,6 +18,12 @@
 #             pg_walsender itself: with the original capture process still
 #             running, a fresh segment forced on node1 is picked up by both
 #             at once, and both end up with byte-identical copies of it
+#   test_004  a couple of real-protocol edge cases the repl_scanner.l/
+#             repl_gram.y port (see repl_command.h) is specifically meant
+#             to get right that a hand-rolled parser easily wouldn't: a
+#             double-quoted slot name with an embedded escaped quote, and a
+#             garbage command producing a clean error rather than a crash
+#             (and the connection still usable afterwards)
 
 cluster {
     monitor
@@ -87,8 +93,27 @@ step test_003_start_replication_from_pg_walsender {
     exec node2 bash -c 'seg2=$(cat /tmp/seg2.txt); cmp -s /tmp/rw/$seg2 /tmp/ws/default/0/$seg2 || (ls -la /tmp/rw/$seg2 /tmp/ws/default/0/$seg2; false)'
 }
 
+step test_004_grammar_edge_cases {
+    # a double-quoted slot name with an embedded escaped quote ("foo""bar",
+    # i.e. the identifier foo"bar) must be lexed by the real grammar's <xd>
+    # state exactly as PostgreSQL's own IDENT quoting rule defines it, and
+    # reach cmd_replication_slot.c's semantic slot_name_is_safe() check --
+    # which then rejects it (a slot name may not contain '"') with a clean
+    # 42602 error, proving the parser (not the old, deleted
+    # parse_slot_name(), see repl_command.h) got the identifier right
+    # rather than choking on the embedded '""' with a syntax error.
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -c '"'"'CREATE_REPLICATION_SLOT "foo""bar" TEMPORARY PHYSICAL'"'"' 2>&1 | grep -qi "invalid replication slot name"'
+
+    # a garbage command must produce a clean ErrorResponse, not crash the
+    # server or hang the connection -- and the same connection must still
+    # answer a real command right afterwards
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -c "GARBAGE COMMAND ???" 2>&1 | grep -q ERROR'
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM" > /dev/null'
+}
+
 sequence
     test_000_sync_files_from_node1
     test_001_identify_system_and_show
     test_002_fetch_file
     test_003_start_replication_from_pg_walsender
+    test_004_grammar_edge_cases

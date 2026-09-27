@@ -4,7 +4,6 @@
  *   PostgreSQL's src/backend/libpq/auth-scram.c; the primitives are
  *   libpgcommon's through scram_compat.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -130,6 +129,14 @@ scram_build_verifier(const char *password, int iterations,
 }
 
 
+/*
+ * scram_parse_verifier parses one archiver-passwd secret field, the format
+ * scram_build_verifier() produces: "SCRAM-SHA-256$<iterations>:<salt>$
+ * <StoredKey>:<ServerKey>" with salt/StoredKey/ServerKey base64-encoded.
+ * Fills *verifier and returns true on success; returns false, *verifier
+ * untouched, on a wrong mechanism prefix, a malformed field structure, or a
+ * key that doesn't decode to exactly WS_SCRAM_KEY_LEN bytes.
+ */
 bool
 scram_parse_verifier(const char *secret, ScramVerifier *verifier)
 {
@@ -185,6 +192,17 @@ scram_parse_verifier(const char *secret, ScramVerifier *verifier)
 }
 
 
+/*
+ * scram_mock_init generates the one process-wide random nonce
+ * scram_mock_verifier() uses to fabricate a plausible-looking verifier for a
+ * user that has none, so a login attempt against an unknown user goes
+ * through the same SCRAM exchange (and fails the same way) as one against a
+ * real user with a wrong password -- an observer cannot tell the two apart.
+ * Must be called once before any fork (accept_loop.c does this before
+ * forking any connection child), so every connection sees the same mock
+ * nonce for a given user rather than a fresh, distinguishable one per
+ * connection. Returns false if the system's random source failed.
+ */
 bool
 scram_mock_init(void)
 {

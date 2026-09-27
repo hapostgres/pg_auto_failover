@@ -8,7 +8,6 @@
  *   log sanitizing of client supplied strings, and the connection's
  *   absolute authentication deadline.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -48,12 +47,6 @@ bool ws_read_file_flags(const char *path, int openFlags, size_t maxSize,
 int ws_open_served_file(const char *path);
 
 /*
- * ws_write_file_atomic writes path through "<path>.tmp.<pid>" in the same
- * directory: write, fsync, rename over the target, fsync the directory.
- */
-bool ws_write_file_atomic(const char *path, const char *data, size_t len);
-
-/*
  * ws_sanitize_for_log copies a client supplied string into out, replacing
  * control characters (< 0x20, 0x7f) with '?' and truncating it to fit
  * (marking the truncation with "..."), so it can be logged or shown in a
@@ -63,12 +56,10 @@ void ws_sanitize_for_log(const char *in, char *out, size_t outSize);
 
 /*
  * The absolute authentication deadline of the current connection, see
- * accept_loop.c. ws_auth_deadline_remaining_ms() is INT_MAX-ish (1 hour)
- * when no deadline is armed.
+ * accept_loop.c.
  */
 void ws_auth_deadline_set(int seconds);
 void ws_auth_deadline_clear(void);
-int ws_auth_deadline_remaining_ms(void);
 
 /* CLOCK_MONOTONIC in milliseconds */
 int64_t ws_monotonic_ms(void);

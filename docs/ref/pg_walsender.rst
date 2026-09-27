@@ -3,175 +3,143 @@
 pg_walsender
 ============
 
-``pg_walsender`` is the archiver's own server-side implementation of a
-subset of the PostgreSQL replication protocol -- it speaks enough of it
-that a real, unmodified ``pg_basebackup``, a real standby's own
-``primary_conninfo``, or a ``restore_command`` fetch can all connect to
-an archiver directly and get what they ask for, with no custom client
-needed. See :ref:`archiving_architecture` for the full picture of what it
-serves and why it exists as a standalone binary rather than living inside
-``pg_autoctl`` itself.
-
-Two modes of operation are supported:
-
-- **Server mode** (the default): runs the accept loop, one connection per
-  forked child, until stopped.
-- **``scram-secret`` mode**: prints one ``archiver-passwd`` line
-  (``<user>:SCRAM-SHA-256$...``) for the password in ``PGPASSWORD``.
-- **``fetch-file`` mode**: a one-shot client that fetches a single named
-  file with the ``FETCH_FILE`` replication command and exits -- what a node's own
-  ``restore_command`` shells out to, the same way this project already
-  shells out to real ``pg_receivewal``/``pg_basebackup`` elsewhere.
+pg_walsender - the archiver's own standalone replication-protocol server
 
 Synopsis
 --------
 
-::
+``pg_walsender`` speaks enough of the PostgreSQL replication protocol to
+serve ``pg_basebackup``, ``pg_receivewal`` and a real standby's own
+walreceiver directly out of a directory tree of WAL segments and base
+backups it owns, instead of out of a live ``postmaster``. Running the
+accept loop (``serve``) is the default action, so a bare invocation with
+server-mode options works with no sub-command name at all::
 
-  pg_walsender --port <port> [--pgdata <path> | --insecure]
-               [--auth-timeout <seconds>]
-               [--ssl-cert-file <path> --ssl-key-file <path>]
-  PGPASSWORD=... pg_walsender scram-secret [--user <name>]
+  pg_walsender
+  + serve         Run the accept loop (the default command)
+    scram-secret  Print one archiver-passwd line for a user
 
-  pg_walsender fetch-file --host <host> --port <port> \
-               --route <formation>/<group> \
-               --filename <name> --output <path>
+  usage: pg_walsender [--port <port>] [--pgdata <path> | --insecure]
+                       [--ssl-cert-file <path> --ssl-key-file <path>]
+                       [--auth-timeout <seconds>]
+
+  usage: pg_walsender scram-secret [--user <name>]
 
 Description
 -----------
 
-``pg_walsender`` is exec'd and supervised by :ref:`pg_autoctl_archiver_serve`
-(itself normally started as part of :ref:`pg_autoctl_run` against an
-archiver, not invoked directly) -- it is not meant to be typed by hand in
-production, but is fully runnable and testable on its own against a real
-``psql``, ``pg_basebackup``, or ``pg_receivewal``.
+``pg_walsender`` is not part of ``pg_autoctl``'s own process supervision:
+it is a standalone binary, started and stopped on its own, that reads a
+handful of files directly off disk to decide what it may serve and to
+whom:
 
-It never connects to the monitor, on purpose: an archiver exists to keep
-serving already-captured data even when the monitor it would otherwise
-depend on is unreachable, and staying free of that dependency also keeps
-this binary small, standalone, and independently testable -- no monitor
-or database needed to exercise it. Everything it needs to serve a
-connection -- which base backup is current, a group's system identifier,
-the current WAL position, and the formation/group-to-storage-path mapping
--- is read from small local files pg_autoctl's own archiver processes
-maintain; see :ref:`archiving_architecture`'s "Keeping local files
-current" section for exactly which file carries what.
+- ``<pgdata>/archiver-routes.ini`` maps each ``<formation>/<group>`` this
+  instance serves (the connection's ``dbname``) to that membership's own
+  local storage root: WAL cache, base backups, and a handful of small
+  bookkeeping files;
+
+- ``<pgdata>/archiver-hba.conf`` decides, one rule per line
+  (``TYPE ROUTE USER ADDRESS METHOD``, first match wins), which peers may
+  connect and how they must authenticate; a missing, oversize, or
+  malformed file rejects every connection;
+
+- ``<pgdata>/archiver-passwd`` holds one SCRAM-SHA-256 verifier per line,
+  produced with ``pg_walsender scram-secret``;
+
+- ``<pgdata>/server.crt`` / ``<pgdata>/server.key`` (or
+  ``--ssl-cert-file`` / ``--ssl-key-file``) enable TLS; without them
+  ``hostssl`` rules in the HBA file never match.
+
+Without ``--pgdata`` (and no ``PGDATA`` environment variable either),
+``pg_walsender`` refuses to start unless ``--insecure`` is given
+explicitly, in which case every ``dbname`` is accepted with no
+authentication at all -- intended for manual testing only, never on a
+reachable network.
+
+On the wire, a connected client may issue ``IDENTIFY_SYSTEM``, ``SHOW``,
+``BASE_BACKUP``, ``TIMELINE_HISTORY``,
+``CREATE_REPLICATION_SLOT``/``READ_REPLICATION_SLOT``/
+``DROP_REPLICATION_SLOT``, and ``START_REPLICATION``, exactly as against a
+real PostgreSQL primary, plus one project-specific extension,
+``FETCH_FILE '<name>'``, used to fetch a single WAL segment or timeline
+history file in one request/response round trip (as a ``restore_command``
+would). See ``src/bin/pg_walsender/README.md`` in the source tree for the
+full design.
 
 Options
 -------
 
+The ``serve`` sub-command (the default; its own flags may be given with no
+sub-command name at all) accepts:
+
 --port
 
-  Port to listen on, in server mode. Defaults to ``6543``.
-
---ssl-cert-file, --ssl-key-file
-
-  The TLS certificate and private key to serve. Default to
-  ``<pgdata>/server.crt`` and ``<pgdata>/server.key``; without a usable
-  pair the server answers ``N`` to ``SSLRequest`` and ``hostssl`` HBA lines
-  never match. The key must not be accessible to group or others (PostgreSQL's
-  rule).
+  Port to listen on. Defaults to ``6543``.
 
 --pgdata
 
-  The archiver's own top-level storage root -- the same value given as
-  ``--pgdata`` to ``pg_autoctl create archiver`` -- defaulting to the
-  ``PGDATA`` environment variable. Everything the server needs is derived
-  from it:
-
-  - ``<pgdata>/archiver-routes.ini``: the routes file mapping
-    ``"<formation>/<group>"`` (matched against the incoming connection's
-    dbname) to its storage path. It is written by
-    :ref:`pg_autoctl_archiver`'s reconciler process and is not meant to be
-    hand-edited.
-  - ``<pgdata>/archiver-hba.conf`` and ``<pgdata>/archiver-passwd``, which
-    decide who may connect (see :ref:`archiving_architecture`). The HBA
-    file is created with a default line that trusts the monitor's node
-    list when it is missing.
-  - ``<pgdata>/archiver-monitor.uri``, and a local ``archiver-nodes.list``
-    per route: the copy of the monitor's node list that the ``monitor``
-    HBA address is checked against, so that connections never depend on
-    the monitor being up.
-  - ``<route dir>/archiver-walsegsize``: the WAL segment size of the
-    route's cluster, answered to ``SHOW wal_segment_size``.
-
-  Omitting both ``--pgdata`` and ``PGDATA`` is refused unless ``--insecure``
-  is given (see below).
+  The archiver's own top-level storage root, defaulting to the ``PGDATA``
+  environment variable. ``<pgdata>/archiver-routes.ini`` and
+  ``<pgdata>/archiver-hba.conf`` are read from under it. The server
+  refuses to start without it unless ``--insecure`` is given.
 
 --insecure
 
-  Allow running without ``--pgdata``: no HBA file, no authentication, any
-  dbname accepted. Only meant for manual, standalone testing; without this
-  flag, ``pg_walsender`` exits with an error rather than silently serving
-  everybody.
+  No ``--pgdata``: accept any ``dbname`` with **no authentication
+  whatsoever**. For manual testing only, never on a reachable network.
+
+--ssl-cert-file
+
+  The server certificate to use for TLS. Defaults to
+  ``<pgdata>/server.crt``. Without a usable certificate and key, TLS is
+  disabled and ``hostssl`` HBA lines never match.
+
+--ssl-key-file
+
+  The server private key to use for TLS. Defaults to
+  ``<pgdata>/server.key``.
 
 --auth-timeout
 
-  Number of seconds a connection gets to complete startup, TLS negotiation
-  and authentication (default ``30``). This is an absolute deadline from
-  accept(), not an idle timeout: a client that trickles bytes gets no more
-  time than a silent one. Pre-authentication messages larger than a small
-  fixed bound are rejected and the connection closed, so an unauthenticated
-  client cannot make the server buffer arbitrary amounts of data.
+  Absolute deadline, in seconds, for a connection to complete its startup
+  packet, TLS handshake, HBA lookup and SCRAM exchange. Defaults to
+  ``30``.
 
-``fetch-file`` mode options:
-
---host
-
-  Hostname or IP address of the ``pg_walsender`` to fetch from.
-
---port
-
-  Port of the ``pg_walsender`` to fetch from.
-
---route
-
-  ``<formation>/<group>`` identifying which membership to fetch the file
-  from, when that archiver serves more than one.
+The ``scram-secret`` sub-command prints one ``archiver-passwd`` line
+(``<user>:<SCRAM-SHA-256 secret>``) to standard output, reading the
+password from the ``PGPASSWORD`` environment variable -- never from the
+command line, where it would be visible in the process list:
 
 --user
 
-  The role to connect as (default ``pgautofailover_replicator``). The
-  password comes from ``PGPASSWORD`` and TLS from ``PGSSLMODE`` (default
-  ``prefer``), as with libpq.
+  Role name the printed line authenticates. Defaults to
+  ``pgautofailover_replicator``.
 
---user
+Environment
+-----------
 
-  The role to connect as (default ``pgautofailover_replicator``). The
-  password comes from ``PGPASSWORD`` and TLS from ``PGSSLMODE``
-  (default ``prefer``), as with libpq.
+PGDATA
 
---filename
+  The archiver's own top-level storage root. Can be used instead of the
+  ``--pgdata`` option.
 
-  Name of the file to fetch (a WAL segment or timeline history file).
+PGPASSWORD
 
---output
+  The password ``pg_walsender scram-secret`` builds a verifier from.
 
-  Local path to write the fetched file to.
-
-See Also
+Examples
 --------
 
-:ref:`pg_autoctl_archiver_serve` supervises this binary as part of a
-running archiver.
+Create a SCRAM secret for the replication role, from a password given in
+the environment::
 
-:ref:`archiving_architecture` covers the full process model, what this
-binary serves, and the local files it reads to do so.
+  $ PGPASSWORD='s3kr3t' pg_walsender scram-secret --user pgautofailover_replicator
+  pgautofailover_replicator:SCRAM-SHA-256$4096:...
 
-Access control behaviour
-------------------------
+Run the server against an existing ``--pgdata`` directory::
 
-- A malformed line in ``archiver-hba.conf`` makes the server fail closed:
-  every connection is rejected until the file is fixed. The file is
-  re-read for each new connection, no reload is needed.
-- An unknown route (dbname that is not a known ``<formation>/<group>``)
-  gets exactly the same generic rejection as a missing HBA entry, so an
-  unauthenticated client cannot probe which formations exist. Only after a
-  successful authentication is ``database does not exist`` (SQLSTATE
-  ``3D000``) reported.
-- ``FETCH_FILE`` is an ordinary replication-connection command, subject to
-  the same authentication. It only serves WAL segment names
-  (``[0-9A-F]{24}``) and timeline ``.history`` files; every other name,
-  including ``archiver-hba.conf``, ``..`` paths and dot-files, is refused.
-- ``CREATE_REPLICATION_SLOT`` is capped at 64 slots per route;
-  ``DROP_REPLICATION_SLOT`` releases them.
+  $ pg_walsender --pgdata /var/lib/archiver --port 6543
+
+Run the server with no authentication, for manual testing only::
+
+  $ pg_walsender --insecure --port 6543
