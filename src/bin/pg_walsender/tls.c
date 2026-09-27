@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/tls.c
  *   See tls.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

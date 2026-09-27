@@ -24,7 +24,6 @@
  *   so the start/end LSN this command reports comes from that backup's
  *   own backup_label file, not a live checkpoint.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

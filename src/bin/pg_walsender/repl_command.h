@@ -14,7 +14,6 @@
  *   ws_connection_close_after_command (framing.h): the connection is then
  *   closed instead of returning to ReadyForQuery.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

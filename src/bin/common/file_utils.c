@@ -7,6 +7,9 @@
  *
  */
 
+#include <errno.h>
+#include <fcntl.h>
+#include <libgen.h>
 #include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -203,28 +206,84 @@ write_file(char *data, long fileSize, const char *filePath)
 /*
  * write_file_atomic writes data to filePath the same way write_file() does,
  * except a reader can never observe a partial write: the content lands in
- * "<filePath>.tmp" first, then gets rename()'d into place, an atomic
- * operation on the same filesystem. Use this instead of write_file()
- * whenever another process might be reading filePath concurrently (a
- * config/state file another running service polls, for instance).
+ * "<filePath>.tmp.<pid>" first (a name unique to this process, not just
+ * this file, so two processes writing the same filePath concurrently never
+ * corrupt each other's tmp file), gets fsync()'d, then rename()'d into
+ * place (atomic on the same filesystem), and finally the containing
+ * directory is fsync()'d too (best effort) so the rename itself survives a
+ * crash. Use this instead of write_file() whenever another process might
+ * be reading filePath concurrently (a config/state file another running
+ * service polls, for instance) or might itself be writing it.
  */
 bool
 write_file_atomic(char *data, long fileSize, const char *filePath)
 {
 	char tmpPath[MAXPGPATH] = { 0 };
 
-	sformat(tmpPath, sizeof(tmpPath), "%s.tmp", filePath);
+	sformat(tmpPath, sizeof(tmpPath), "%s.tmp.%d", filePath, (int) getpid());
 
-	if (!write_file(data, fileSize, tmpPath))
+	int fd = open(tmpPath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+
+	if (fd < 0 && errno == EEXIST)
 	{
-		/* errors have already been logged */
+		/* a leftover of an earlier process that had the same pid */
+		(void) unlink(tmpPath);
+		fd = open(tmpPath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+	}
+
+	if (fd < 0)
+	{
+		log_error("Failed to create \"%s\": %m", tmpPath);
+		return false;
+	}
+
+	long done = 0;
+
+	while (done < fileSize)
+	{
+		ssize_t n = write(fd, data + done, fileSize - done);
+
+		if (n < 0 && errno == EINTR)
+		{
+			continue;
+		}
+
+		if (n <= 0)
+		{
+			log_error("Failed to write \"%s\": %m", tmpPath);
+			close(fd);
+			(void) unlink(tmpPath);
+			return false;
+		}
+
+		done += n;
+	}
+
+	if (fsync(fd) != 0 || close(fd) != 0)
+	{
+		log_error("Failed to sync \"%s\": %m", tmpPath);
+		(void) unlink(tmpPath);
 		return false;
 	}
 
 	if (rename(tmpPath, filePath) != 0)
 	{
 		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpPath, filePath);
+		(void) unlink(tmpPath);
 		return false;
+	}
+
+	/* make the rename itself durable, best effort */
+	char dirCopy[MAXPGPATH] = { 0 };
+
+	strlcpy(dirCopy, filePath, sizeof(dirCopy));
+
+	int dirFd = open(dirname(dirCopy), O_RDONLY | O_CLOEXEC);
+
+	if (dirFd >= 0)
+	{
+		(void) fsync(dirFd);
+		close(dirFd);
 	}
 
 	return true;

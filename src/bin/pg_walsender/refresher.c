@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/refresher.c
  *   See refresher.h and monitor_hosts.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -227,8 +226,8 @@ mark_failure(const char *listPath)
 	negativeUntilMs = ws_monotonic_ms() +
 					  (int64_t) WS_HOSTS_NEGATIVE_SECONDS * 1000;
 
-	(void) ws_write_file_atomic(errPath, "monitor unreachable\n",
-								strlen("monitor unreachable\n"));
+	(void) write_file_atomic((char *) "monitor unreachable\n",
+							 strlen("monitor unreachable\n"), errPath);
 }
 
 
@@ -339,7 +338,7 @@ refresh_route(const char *routesPath, const char *monitorUriPath,
 			}
 
 			if (!PQExpBufferBroken(buffer) &&
-				ws_write_file_atomic(listPath, buffer->data, buffer->len))
+				write_file_atomic(buffer->data, buffer->len, listPath))
 			{
 				clear_failure(listPath);
 			}

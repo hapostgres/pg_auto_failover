@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/hba.c
  *   pg_walsender's host-based authentication file, see hba.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

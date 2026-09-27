@@ -7,7 +7,6 @@
  *   wired into any WAL-retention enforcement (that's the prune/retention
  *   milestone's job, see prune_archiver_wal() in the SQL schema).
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

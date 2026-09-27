@@ -18,7 +18,6 @@
  *   archiving-details.rst's "Keeping local files current" section
  *   for the full rationale behind this split.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
