@@ -30,6 +30,15 @@
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
 
+/*
+ * routes_load reads and parses the routes ini file at path into a freshly
+ * malloc'd array (*routesOut, *countOut entries; free with routes_free()),
+ * one WsRoute per non-global section, keyed by its section name
+ * ("<formation>/<group>") with its "path" property (the only key
+ * recognized; any other key logs a warning and is ignored). Returns false
+ * (with *routesOut and *countOut left untouched) when the file cannot be
+ * read or parsed.
+ */
 bool
 routes_load(const char *path, WsRoute **routesOut, int *countOut)
 {
@@ -138,6 +147,7 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 }
 
 
+/* routes_free releases an array returned by routes_load(). */
 void
 routes_free(WsRoute *routes)
 {
@@ -145,6 +155,10 @@ routes_free(WsRoute *routes)
 }
 
 
+/*
+ * routes_find returns the route whose key exactly matches (case-sensitive),
+ * or NULL when none does.
+ */
 const WsRoute *
 routes_find(const WsRoute *routes, int count, const char *key)
 {

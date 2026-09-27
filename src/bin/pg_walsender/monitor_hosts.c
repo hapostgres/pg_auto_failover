@@ -38,6 +38,12 @@ typedef struct LocalHosts
 } LocalHosts;
 
 
+/*
+ * monitor_hosts_list_path writes the path of the route's own local nodes
+ * list file (PG_AUTOCTL_ARCHIVER_NODES_FILE under routePath) into dest --
+ * the single path both the refresher (writer) and this file (reader) agree
+ * on.
+ */
 void
 monitor_hosts_list_path(const char *routePath, char *dest, size_t destSize)
 {
@@ -45,6 +51,11 @@ monitor_hosts_list_path(const char *routePath, char *dest, size_t destSize)
 }
 
 
+/*
+ * local_hosts_read (re)initializes *local from the nodes list file at path:
+ * its whole contents and mtime when it exists and is readable, or
+ * local->exists = false (contents left NULL) otherwise.
+ */
 static void
 local_hosts_read(const char *path, LocalHosts *local)
 {
@@ -64,6 +75,7 @@ local_hosts_read(const char *path, LocalHosts *local)
 }
 
 
+/* local_hosts_free releases *local's contents and resets it to "not loaded". */
 static void
 local_hosts_free(LocalHosts *local)
 {
@@ -73,6 +85,12 @@ local_hosts_free(LocalHosts *local)
 }
 
 
+/*
+ * local_hosts_age returns how many seconds old *local's copy is (based on
+ * its mtime), or 0 when it doesn't exist -- callers only ever compare this
+ * against a threshold guarded by local->exists, so 0 is never mistaken for
+ * "fresh".
+ */
 static int
 local_hosts_age(const LocalHosts *local)
 {
@@ -82,6 +100,12 @@ local_hosts_age(const LocalHosts *local)
 }
 
 
+/*
+ * local_hosts_match returns true when peerIP matches one non-comment line of
+ * *local's contents (via ipaddrHostMatchesAddress(), so a line may be a
+ * hostname or a literal address), or false when *local doesn't exist or
+ * nothing matches.
+ */
 static bool
 local_hosts_match(const LocalHosts *local, const char *peerIP)
 {
@@ -119,6 +143,7 @@ local_hosts_match(const LocalHosts *local, const char *peerIP)
 }
 
 
+/* timespec_equal compares two struct timespec values field by field. */
 static bool
 timespec_equal(const struct timespec *a, const struct timespec *b)
 {

@@ -22,6 +22,14 @@
 #define WS_MAXFNAMELEN 64
 
 
+/*
+ * cmd_timeline_history implements TIMELINE_HISTORY <timeline>: builds the
+ * "%08X.history" filename (TLHistoryFileName()'s own format), reads it
+ * (O_NOFOLLOW, size-capped, regular files only, under route->path), and
+ * replies with the one-row (filename, content) result real Postgres sends.
+ * A missing file is an ErrorResponse, matching real walsender.c, which never
+ * synthesizes an empty history for an unknown timeline.
+ */
 void
 cmd_timeline_history(int sock, const WsRoute *route, int timeline)
 {

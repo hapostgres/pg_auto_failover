@@ -32,6 +32,11 @@ static SSL_CTX *serverContext = NULL;
 static SSL *activeSsl = NULL;
 
 
+/*
+ * log_openssl_errors drains and logs every pending error on OpenSSL's
+ * thread-local error queue, each prefixed with what (a short description of
+ * the operation that failed).
+ */
 static void
 log_openssl_errors(const char *what)
 {
@@ -168,6 +173,15 @@ load_private_key(SSL_CTX *ctx, const char *keyPath)
 }
 
 
+/*
+ * ws_tls_server_init builds this process's server-side SSL_CTX from certPath
+ * and keyPath, applying PostgreSQL's own be_tls_init() settings (minimum
+ * TLS 1.2, no session tickets/cache/compression/renegotiation, its default
+ * cipher list and curves), and stores it as the single serverContext used by
+ * every later connection. Returns false (serverContext left NULL, i.e. TLS
+ * off) when either file is missing or anything about loading/checking the
+ * certificate and key fails; ws_tls_server_enabled() reports the result.
+ */
 bool
 ws_tls_server_init(const char *certPath, const char *keyPath)
 {
@@ -241,6 +255,7 @@ ws_tls_server_init(const char *certPath, const char *keyPath)
 }
 
 
+/* ws_tls_server_enabled reports whether ws_tls_server_init() succeeded. */
 bool
 ws_tls_server_enabled(void)
 {
@@ -248,6 +263,13 @@ ws_tls_server_enabled(void)
 }
 
 
+/*
+ * ws_tls_server_accept creates a per-connection SSL object bound to sock and
+ * runs the server-side TLS handshake (SSL_accept()) to completion. On
+ * success it becomes the process's activeSsl (this project forks one child
+ * per connection, so a single global is safe); on failure it is freed and
+ * false is returned, having logged the OpenSSL error.
+ */
 bool
 ws_tls_server_accept(int sock)
 {
@@ -339,6 +361,7 @@ ws_tls_certificate_hash(unsigned char *out, int outSize, int *outLen)
 }
 
 
+/* ws_tls_active reports whether this connection completed a TLS handshake. */
 bool
 ws_tls_active(void)
 {
@@ -346,6 +369,14 @@ ws_tls_active(void)
 }
 
 
+/*
+ * ws_io_read is framing.c's own read() substitute: a plain read(fd, ...)
+ * when no TLS handshake is active, or SSL_read() otherwise. Since the
+ * socket is always blocking and the connection's authentication deadline is
+ * enforced by SIGALRM, an SSL_ERROR_WANT_READ/WRITE is treated as a hard
+ * error (ETIMEDOUT) rather than retried, and any other TLS-layer error as
+ * ECONNRESET; only EINTR on the underlying syscall is retried.
+ */
 ssize_t
 ws_io_read(int fd, void *buf, size_t len)
 {
@@ -397,6 +428,12 @@ ws_io_read(int fd, void *buf, size_t len)
 }
 
 
+/*
+ * ws_io_write is framing.c's own write() substitute, the mirror of
+ * ws_io_read(): plain write() with no active TLS handshake, SSL_write()
+ * otherwise, with the same WANT_READ/WRITE-is-fatal and EINTR-is-retried
+ * handling.
+ */
 ssize_t
 ws_io_write(int fd, const void *buf, size_t len)
 {

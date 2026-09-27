@@ -30,6 +30,11 @@ bool ws_connection_close_after_command = false;
 #define CANCEL_REQUEST_CODE 80877102
 
 
+/*
+ * ws_read_bytes reads exactly len bytes from sock into buf, looping over
+ * short reads (retrying on EINTR) until the buffer is full. Returns false on
+ * any read error or on a clean peer close before len bytes were seen.
+ */
 bool
 ws_read_bytes(int sock, void *buf, size_t len)
 {
@@ -64,6 +69,11 @@ ws_read_bytes(int sock, void *buf, size_t len)
 }
 
 
+/*
+ * ws_write_bytes writes exactly len bytes from buf to sock, looping over
+ * short writes (retrying on EINTR) until everything has been sent. Returns
+ * false on any write error.
+ */
 bool
 ws_write_bytes(int sock, const void *buf, size_t len)
 {
@@ -91,6 +101,11 @@ ws_write_bytes(int sock, const void *buf, size_t len)
 }
 
 
+/*
+ * ws_write_raw_byte writes a single byte, unframed (no message type/length
+ * header) -- used for the pre-startup 'S'/'N' SSLRequest and 'N' GSSRequest
+ * replies, which are single raw bytes rather than framed protocol messages.
+ */
 bool
 ws_write_raw_byte(int sock, char c)
 {
@@ -98,6 +113,14 @@ ws_write_raw_byte(int sock, char c)
 }
 
 
+/*
+ * ws_read_startup_payload reads a pre-startup message body: a 4-byte
+ * big-endian length (which, unlike ws_read_message(), includes itself but
+ * has no leading type byte -- this is the StartupMessage/SSLRequest/
+ * CancelRequest wire shape), followed by that many bytes of payload.
+ * *payload is malloc'd and NUL-terminated; the caller frees it. Returns
+ * false on a read error or a length outside [4, WS_MAX_STARTUP_PACKET_SIZE].
+ */
 bool
 ws_read_startup_payload(int sock, char **payload, int32_t *payloadLen)
 {
@@ -144,6 +167,15 @@ ws_read_startup_payload(int sock, char **payload, int32_t *payloadLen)
 }
 
 
+/*
+ * ws_read_message reads one regular (post-startup) protocol message: a
+ * 1-byte type, a 4-byte big-endian length (including itself, per the wire
+ * protocol), and that many minus 4 bytes of body, malloc'd into *payload and
+ * NUL-terminated (the caller frees it). maxLen caps the body size, checked
+ * before any allocation happens, like real Postgres's pq_getmessage(); an
+ * oversize or truncated length sends an ErrorResponse and returns false, as
+ * does any read error.
+ */
 bool
 ws_read_message(int sock, char *type, char **payload, int32_t *payloadLen,
 				int32_t maxLen)
@@ -203,6 +235,12 @@ ws_read_message(int sock, char *type, char **payload, int32_t *payloadLen,
 }
 
 
+/*
+ * ws_send_message writes one framed protocol message: a 1-byte type, a
+ * 4-byte big-endian length (data plus the 4 length bytes themselves), and
+ * dataLen bytes of body. The building block every other ws_send_*() function
+ * in this file uses.
+ */
 bool
 ws_send_message(int sock, char type, const char *data, int32_t dataLen)
 {
@@ -226,6 +264,7 @@ ws_send_message(int sock, char type, const char *data, int32_t dataLen)
 }
 
 
+/* ws_send_authentication_ok sends the 'R' AuthenticationOk message. */
 bool
 ws_send_authentication_ok(int sock)
 {
@@ -235,6 +274,11 @@ ws_send_authentication_ok(int sock)
 }
 
 
+/*
+ * ws_send_parameter_status sends one 'S' ParameterStatus message
+ * (name/value, both NUL-terminated), the same message real Postgres uses to
+ * report things like server_version and TimeZone during startup.
+ */
 bool
 ws_send_parameter_status(int sock, const char *name, const char *value)
 {
@@ -252,6 +296,11 @@ ws_send_parameter_status(int sock, const char *name, const char *value)
 }
 
 
+/*
+ * ws_send_backend_key_data sends the 'K' BackendKeyData message (process id
+ * and cancellation secret key), needed so real clients can issue
+ * CancelRequest, even though this server never actually acts on one.
+ */
 bool
 ws_send_backend_key_data(int sock, int32_t pid, int32_t secret)
 {
@@ -311,6 +360,11 @@ ws_send_negotiate_protocol_version(int sock, int32_t newestMinor,
 }
 
 
+/*
+ * ws_send_ready_for_query sends the 'Z' ReadyForQuery message with
+ * transaction status 'I' (idle) -- this server has no transactions, so it is
+ * always idle between commands.
+ */
 bool
 ws_send_ready_for_query(int sock)
 {
@@ -320,6 +374,12 @@ ws_send_ready_for_query(int sock)
 }
 
 
+/*
+ * ws_send_error_response sends an 'E' ErrorResponse with just the three
+ * fields every real client actually looks at: Severity ('S' = ERROR),
+ * SQLSTATE Code ('C'), and Message ('M'), terminated by the required empty
+ * field.
+ */
 bool
 ws_send_error_response(int sock, const char *sqlstate, const char *message)
 {
@@ -347,6 +407,10 @@ ws_send_error_response(int sock, const char *sqlstate, const char *message)
 }
 
 
+/*
+ * ws_send_command_complete sends a 'C' CommandComplete message with the
+ * given command tag (e.g. "SELECT 1", or a replication command's own tag).
+ */
 bool
 ws_send_command_complete(int sock, const char *tag)
 {
@@ -354,6 +418,13 @@ ws_send_command_complete(int sock, const char *tag)
 }
 
 
+/*
+ * ws_send_row_description sends a 'T' RowDescription message for ncols
+ * columns. Every column always reports table Oid 0, attnum 0, type modifier
+ * -1 and text format (0): this server never sends anything a client
+ * decodes structurally, only display strings, so those fields are filler
+ * that no real client inspects.
+ */
 bool
 ws_send_row_description(int sock, const WsColumn *columns, int ncols)
 {
@@ -389,6 +460,11 @@ ws_send_row_description(int sock, const WsColumn *columns, int ncols)
 }
 
 
+/*
+ * ws_send_data_row sends a 'D' DataRow message for ncols text-format values;
+ * a NULL entry in values[] is encoded as the protocol's -1 length (SQL
+ * NULL), everything else as its own byte length followed by its raw bytes.
+ */
 bool
 ws_send_data_row(int sock, const char **values, int ncols)
 {
@@ -453,6 +529,8 @@ ws_send_copy_response(int sock, char type, int ncols)
 }
 
 
+/* ws_send_copy_out_response sends an 'H' CopyOutResponse (server-to-client
+ * only), via the shared ws_send_copy_response() builder. */
 bool
 ws_send_copy_out_response(int sock, int ncols)
 {
@@ -460,6 +538,8 @@ ws_send_copy_out_response(int sock, int ncols)
 }
 
 
+/* ws_send_copy_both_response sends a 'W' CopyBothResponse (bidirectional,
+ * used by START_REPLICATION's own streaming), via ws_send_copy_response(). */
 bool
 ws_send_copy_both_response(int sock, int ncols)
 {
@@ -467,6 +547,10 @@ ws_send_copy_both_response(int sock, int ncols)
 }
 
 
+/*
+ * ws_send_copy_data sends one 'd' CopyData message carrying dataLen raw
+ * bytes -- WAL bytes during streaming, tar bytes during a base backup.
+ */
 bool
 ws_send_copy_data(int sock, const char *data, int32_t dataLen)
 {
@@ -474,6 +558,7 @@ ws_send_copy_data(int sock, const char *data, int32_t dataLen)
 }
 
 
+/* ws_send_copy_done sends a 'c' CopyDone message, ending a copy sub-protocol. */
 bool
 ws_send_copy_done(int sock)
 {
