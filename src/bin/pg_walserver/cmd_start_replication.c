@@ -42,6 +42,13 @@ append_int64(PQExpBuffer buf, int64_t v)
 }
 
 
+/*
+ * send_xlogdata sends one CopyData-framed XLogData ('w') message: dataStart
+ * and walEnd (the WAL positions this chunk covers) followed by data itself
+ * -- the same wire shape a real walsender's own WALData message uses.
+ * sendTime is always sent as zero: no client this project serves acts on
+ * it.
+ */
 static bool
 send_xlogdata(int sock, uint64_t dataStart, uint64_t walEnd,
 			  const char *data, size_t len)
@@ -62,6 +69,11 @@ send_xlogdata(int sock, uint64_t dataStart, uint64_t walEnd,
 }
 
 
+/*
+ * send_keepalive sends one CopyData-framed Primary keepalive ('k') message:
+ * walEnd, sendTime (zero, unused), and replyRequested (always false --
+ * this project never blocks a stream waiting for a standby status update).
+ */
 static bool
 send_keepalive(int sock, uint64_t walEnd)
 {

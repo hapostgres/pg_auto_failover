@@ -26,6 +26,17 @@
 #include "framing.h"
 
 
+/*
+ * ws_dispatch_command routes an already-parsed WsCommand to its own
+ * per-command handler -- the parse-tree-to-handler step that stayed
+ * separate from parsing even after repl_command_parse() itself moved into
+ * repl_gram.y's own semantic actions (see this file's own header comment).
+ * cmd->type is one of the WsCommandType members repl_gram.y can actually
+ * build; anything else (a command this project never implemented, or
+ * deliberately dropped, see repl_command.h) falls through to a clean
+ * 42601 ErrorResponse rather than a crash, leaving the connection usable
+ * for the next command.
+ */
 void
 ws_dispatch_command(int sock, const WsCommand *cmd,
 					const WsRoute *route, const char *dbname)

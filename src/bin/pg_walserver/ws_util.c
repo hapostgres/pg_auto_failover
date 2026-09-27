@@ -201,6 +201,13 @@ ws_monotonic_ms(void)
 
 static int64_t authDeadlineMs = 0;   /* 0: none armed */
 
+/*
+ * ws_auth_deadline_set arms the current connection's absolute
+ * authentication deadline, seconds from now (CLOCK_MONOTONIC-based, see
+ * ws_monotonic_ms(), unaffected by wall-clock adjustments), read back by
+ * accept_loop.c's own SIGALRM arming -- see README.md's "Process model"
+ * section for the full startup/TLS handshake/HBA/SCRAM window it covers.
+ */
 void
 ws_auth_deadline_set(int seconds)
 {
@@ -220,6 +227,12 @@ ws_auth_deadline_clear(void)
 }
 
 
+/*
+ * ws_file_crc32c reads path sequentially, in chunks, and computes its size
+ * and CRC32C in one pass -- see ws_util.h for the full contract (why
+ * CRC32C specifically, and how cmd_check_file.c/cmd_archive_file.c/
+ * cli_archive.c each build on it).
+ */
 bool
 ws_file_crc32c(const char *path, uint64_t *sizeOut, uint32_t *crcOut)
 {

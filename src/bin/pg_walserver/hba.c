@@ -141,6 +141,15 @@ suffix_matches(const char *suffix, const char *peerIP)
 }
 
 
+/*
+ * rule_address_matches implements one HBA rule's own ADDRESS field against
+ * peerIP, trying each supported form in turn: "all" (always matches), an
+ * IP/prefix (CIDR match), "samehost"/"samenet" (as in PostgreSQL, matching
+ * the server's own address or subnet), ".domain.suffix" (forward-confirmed
+ * reverse DNS, checked against every PTR answer, not just the first), and,
+ * falling through, a bare hostname resolved forward. See README.md's "HBA"
+ * section for why each form behaves the way it does here.
+ */
 static bool
 rule_address_matches(const char *address, const char *peerIP)
 {
@@ -231,7 +240,14 @@ hba_rule_free_fields(HbaRule *rule)
  * never matter in practice) and advances *lineptr past it. Mirrors
  * PostgreSQL's own next_token() in src/backend/libpq/hba.c, minus the parts
  * this project's own HBA format does not use (comma-separated lists,
- * @-file-inclusion, regular expressions):
+ * @-file-inclusion, regular expressions). This is a deliberate
+ * simplification, not an oversight: PostgreSQL needs comma-separated lists
+ * and @file inclusion because its own pg_hba.conf's DATABASE/USER fields
+ * can each name several databases/roles, or include a whole external list
+ * file. This project's own HBA dialect has no such thing -- ROUTE and USER
+ * (see hba.h's own grammar) are each always a single value ("all" or one
+ * exact string), never a list -- so there is nothing for a comma or an
+ * @file reference to ever separate or expand here:
  *
  *   - a field may be wrapped in double quotes, so it can contain spaces or a
  *     literal '#'; a doubled "" inside a quoted field is a literal '"'
