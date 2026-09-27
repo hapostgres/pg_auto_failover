@@ -66,17 +66,22 @@ typedef struct WsRoute
 	                                     * and archiver-systemid all live
 	                                     * directly under it */
 	char upstream[MAXCONNINFO];         /* optional: a libpq connection string
-	                                    * to the instance this route archives
-	                                    * from -- read as a default by
-	                                    * fetch-systemid/basebackup/setup,
-	                                    * always overridable by an explicit
-	                                    * --upstream/--host/--port/--user
-	                                    * flag. Empty when the ini section
-	                                    * has no "upstream" property: those
-	                                    * sub-commands then require the flag
-	                                    * instead. See DESIGN-standalone-
-	                                    * archiving.md's own "upstream"
-	                                    * section for the naming rationale. */
+	                                     * to the instance this route archives
+	                                     * from -- read as a default by
+	                                     * fetch-systemid/basebackup/setup,
+	                                     * always overridable by an explicit
+	                                     * --upstream/--host/--port/--user
+	                                     * flag. Empty when the ini section
+	                                     * has no "upstream" property: those
+	                                     * sub-commands then require the flag
+	                                     * instead. Named "upstream", not
+	                                     * "primary_conninfo" (misleading --
+	                                     * the source may be a standby) or
+	                                     * "source"/"target" (ambiguous about
+	                                     * direction); "upstream" is also
+	                                     * already PostgreSQL's own vocabulary
+	                                     * for "the server this one replicates
+	                                     * from" in cascading replication. */
 	char hostname[_POSIX_HOST_NAME_MAX]; /* optional: the TLS SNI hostname a
 	                                      * client presents to reach this
 	                                      * route -- see routes_find_by_
@@ -86,6 +91,28 @@ typedef struct WsRoute
 	                                      * "replication", never a route
 	                                      * key). Empty when the route is
 	                                      * only ever reached by dbname. */
+	bool capturePull;                   /* "capture = pull" in this route's
+	                                     * own section: opts it into
+	                                     * pg_walserver's embedded WAL
+	                                     * capturer (capture.c) -- a
+	                                     * supervised child running the
+	                                     * vendored pg_receivewal against
+	                                     * "upstream", writing straight into
+	                                     * "path". Absent (false): the route
+	                                     * is archive_command-push-only, or
+	                                     * fed by something else entirely
+	                                     * (an external pg_receivewal, or
+	                                     * the pgaf-integrated pg_autoctl
+	                                     * capturer) -- pg_walserver does not
+	                                     * care which; ARCHIVE_FILE/
+	                                     * CHECK_FILE are always reachable
+	                                     * for any route regardless of this
+	                                     * flag, gated purely by archiver-
+	                                     * hba.conf like every other
+	                                     * command. See DESIGN-standalone-
+	                                     * archiving.md's "pg_walserver.ini:
+	                                     * a new upstream property" section
+	                                     * for the full rationale. */
 } WsRoute;
 
 /*

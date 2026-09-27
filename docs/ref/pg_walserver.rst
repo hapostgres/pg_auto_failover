@@ -204,22 +204,33 @@ a plain name, specifically to show that pg_auto_failover's own
       --pgdata /var/lib/archiver --route mycluster \
       --path /var/lib/archiver/mycluster \
       --upstream "host=primary user=archiver_repl sslmode=require" \
-      --with-basebackup
+      --capture pull --with-basebackup
 
-That one command replaces what used to be three separate steps by hand:
-writing ``pg_walserver.ini``'s section, fetching the system identifier with
-a plain ``psql``, and taking the initial base backup with ``pg_basebackup``
-directly. Either of the last two can still be run on their own, any time
+That one command replaces what used to be three (now four) separate steps
+by hand: writing ``pg_walserver.ini``'s section (now including
+``capture = pull``, see below), fetching the system identifier with a
+plain ``psql``, and taking the initial base backup with ``pg_basebackup``
+directly. Any of the last two can still be run on their own, any time
 after ``setup`` -- ``pg_walserver fetch-systemid`` and ``pg_walserver
 basebackup`` take the same ``--route``/``--pgdata`` (or ``--path``/
 ``--upstream``) flags and are what ``setup`` itself calls internally.
 
-**2. Start continuous WAL capture**, straight into the route's own
-directory (not a subdirectory -- ``START_REPLICATION``/``FETCH_FILE`` read
-WAL segments directly out of a route's own top-level directory), as a
-long-running service (a plain ``&`` here for the example; run it under a
-real process supervisor in production; an embedded, supervised capturer is
-planned, see ``DESIGN-standalone-archiving.md``)::
+**2. Continuous WAL capture is automatic**: ``--capture pull`` above wrote
+``capture = pull`` into the route's own ``pg_walserver.ini`` section, so
+the moment ``pg_walserver serve`` (step 3 below) starts, it forks its own
+supervised ``pg_receivewal`` child for this route -- straight into the
+route's own directory (not a subdirectory -- ``START_REPLICATION``/
+``FETCH_FILE`` read WAL segments directly out of a route's own top-level
+directory), restarted automatically if it ever dies, stopped cleanly when
+``pg_walserver`` itself stops. No separate process to start, supervise, or
+remember to restart after a reboot. See ``src/bin/pg_walserver/README.md``'s
+"The embedded pull capturer" section for the full supervision/restart
+design.
+
+Without ``--capture pull`` (a route that is push-only, or fed by
+something else entirely), WAL capture is still whatever it always was:
+run a real ``pg_receivewal`` by hand, under a real process supervisor, the
+same shape this document used before the embedded capturer existed::
 
   archive$ nohup env PGPASSWORD=s3kr3t pg_receivewal \
       -d "host=primary user=archiver_repl sslmode=require" \

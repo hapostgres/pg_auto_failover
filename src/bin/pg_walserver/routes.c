@@ -138,6 +138,19 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 			{
 				strlcpy(route->hostname, propValue, sizeof(route->hostname));
 			}
+			else if (streq(propName, "capture"))
+			{
+				if (streq(propValue, "pull"))
+				{
+					route->capturePull = true;
+				}
+				else
+				{
+					log_warn("Ignoring unknown \"capture\" value \"%s\" in "
+							 "section [%s]: the only recognized value is "
+							 "\"pull\"", propValue, name);
+				}
+			}
 			else
 			{
 				log_warn("Ignoring unknown routes file key \"%s\" in section [%s]",

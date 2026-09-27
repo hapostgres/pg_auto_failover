@@ -25,9 +25,9 @@
 #define WS_ARCHIVE_CONNECT_TIMEOUT_SECONDS "10"
 
 /*
- * The bounded intra-invocation recheck (DESIGN-standalone-archiving.md's
- * own "Open questions": "how long, how many rechecks" -- a judgment call,
- * not a spec). Two rechecks, one second apart: short enough that an
+ * The bounded intra-invocation recheck's own timing ("how long, how many
+ * rechecks") is a judgment call, not a spec. Two rechecks, one second
+ * apart: short enough that an
  * operator watching archive_command run never mistakes this for a hang
  * (worst case, ~2 extra seconds added to one archive_command invocation,
  * nowhere near PostgreSQL's own retry cadence between whole invocations),
@@ -37,16 +37,21 @@
  * each other.
  *
  * The design also describes skipping this wait entirely when the route is
- * known to be push-only (no "capture = pull" configured) -- but
- * pg_walserver.ini has no "capture" property yet in this codebase (that
- * lands with the embedded pull capturer itself, a later, separate piece of
- * work -- see DESIGN-standalone-archiving.md's "Phasing"). Until this
- * client can actually learn whether the route it's archiving into has a
- * pull side, the safe, simple choice is to always do the short bounded
- * recheck: on a push-only route it costs at most WS_ARCHIVE_RECHECK_COUNT
- * cheap CHECK_FILE round trips (no file transfer) before pushing for real,
- * which is negligible next to the push itself. Revisit this the moment
- * "capture" exists to consult.
+ * known to be push-only (no "capture = pull" configured). "capture" now
+ * exists (routes.h's WsRoute.capturePull, written by "pg_walserver setup
+ * --capture pull" and consulted by capture.c's embedded pull capturer),
+ * but this client still doesn't consult it here: doing so would mean this
+ * connect-to-pg_walserver-as-a-plain-libpq-client tool (see this file's
+ * own header comment on why it doesn't reuse cli_upstream.c/routes.c)
+ * either re-reading pg_walserver.ini itself (a second, potentially stale
+ * copy of the routes table this client has no other reason to load) or
+ * pg_walserver exposing "does this route have a pull side" as a new wire
+ * query -- a real design decision, not a one-line change, so it stays a
+ * deliberate follow-up rather than being bolted on here. Until then, the
+ * safe, simple choice is to always do the short bounded recheck: on a
+ * push-only route it costs at most WS_ARCHIVE_RECHECK_COUNT cheap
+ * CHECK_FILE round trips (no file transfer) before pushing for real,
+ * which is negligible next to the push itself.
  */
 #define WS_ARCHIVE_RECHECK_COUNT 2
 #define WS_ARCHIVE_RECHECK_SLEEP_SECONDS 1

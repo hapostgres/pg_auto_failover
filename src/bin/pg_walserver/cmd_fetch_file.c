@@ -49,7 +49,8 @@ is_upper_hex(const char *s, size_t n)
  * XLogFileNameP()-plus-".backup" shape, e.g.
  * "000000010000000000000003.00000028.backup", written by the backend the
  * moment any base backup completes -- BASE_BACKUP or the low-level API,
- * see DESIGN-standalone-archiving.md's "PostgreSQL's own contract"). The
+ * per PostgreSQL's own continuous-archiving contract: that file is
+ * archived too, exactly like a WAL segment). The
  * fixed ".backup" suffix and the 24-hex/8-hex shape on either side of the
  * middle '.' are exactly what real Postgres itself always produces, so this
  * checks that shape precisely rather than accepting any "*.backup".

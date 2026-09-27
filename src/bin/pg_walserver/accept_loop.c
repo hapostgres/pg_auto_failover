@@ -17,13 +17,13 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
 
 #include "accept_loop.h"
 #include "auth.h"
+#include "capture.h"
 #include "defaults.h"
 #include "file_utils.h"
 #include "framing.h"
@@ -284,6 +284,19 @@ handle_connection(int clientSock, const WsServerConfig *config)
 
 
 /*
+ * WsConnectionChildren is the "other" context ws_capture_tick() (capture.h)
+ * hands connection_child_exited() below -- see that function's own comment
+ * for why connection children are reaped through capture.c's own tick
+ * rather than a second, independent waitpid(-1, ...) call site here.
+ */
+typedef struct WsConnectionChildren
+{
+	pid_t *children;
+	int *count;
+} WsConnectionChildren;
+
+
+/*
  * remove_child drops pid from the children array (if present), replacing it
  * with the last live entry and shrinking *count -- order among children is
  * never meaningful, so this O(1) swap-and-shrink is fine.
@@ -303,19 +316,37 @@ remove_child(pid_t *children, int *count, pid_t pid)
 
 
 /*
- * reap_children collects every exited connection child, in normal (main
- * loop) context like the postmaster's own CleanupBackend().
+ * connection_child_exited is ws_capture_tick()'s otherChildExited callback
+ * (capture.h): pid/status just came from the *one* wildcard waitpid(-1,
+ * ...) call site this whole process makes (process_supervisor_tick(),
+ * inside capture.c's ws_capture_tick()) -- deliberately not a second,
+ * independent wildcard wait here, which would race that one for the same
+ * exited child's status (see process_supervisor.h's own comment: whichever
+ * reaper's waitpid() call happens to run first silently consumes the
+ * zombie, permanently hiding that child's death from the other). Returns
+ * true (and removes pid from the connection-children array) when pid is
+ * one of ours; false otherwise, so ws_capture_tick() can fall through to
+ * its own "unrecognized pid" handling (a supervised capturer's own exit,
+ * or -- only possible when running as PID 1 -- an orphaned, reparented
+ * grandchild).
  */
-static void
-reap_children(pid_t *children, int *count)
+static bool
+connection_child_exited(void *ctx, pid_t pid, int status)
 {
-	int status;
-	pid_t pid;
+	(void) status;
 
-	while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
+	WsConnectionChildren *conn = (WsConnectionChildren *) ctx;
+
+	for (int i = 0; i < *(conn->count); i++)
 	{
-		remove_child(children, count, pid);
+		if (conn->children[i] == pid)
+		{
+			remove_child(conn->children, conn->count, pid);
+			return true;
+		}
 	}
+
+	return false;
 }
 
 
@@ -342,6 +373,7 @@ ws_accept_loop(const WsServerConfig *config)
 
 	pid_t children[WS_MAX_CONNECTIONS];
 	int childCount = 0;
+	WsConnectionChildren connChildren = { children, &childCount };
 
 	log_info("pg_walserver listening on port %d%s%s",
 			 config->port,
@@ -350,7 +382,18 @@ ws_accept_loop(const WsServerConfig *config)
 
 	while (!asked_to_stop && !asked_to_stop_fast)
 	{
-		reap_children(children, &childCount);
+		/*
+		 * One tick, one wildcard waitpid(-1, ...) call site for this whole
+		 * process (capture.c's own ws_capture_tick(), process_supervisor.c
+		 * underneath it): reaps and restarts-on-death every "capture =
+		 * pull" route's own supervised pg_receivewal child (a completely
+		 * independent lifecycle from the connection children below -- one
+		 * long-lived child per active route, alive for the server's whole
+		 * lifetime, not per accepted connection, see capture.c's own
+		 * header comment), and hands any pid it doesn't recognize to
+		 * connection_child_exited() above.
+		 */
+		ws_capture_tick(connection_child_exited, &connChildren);
 
 		/*
 		 * pqsignal() (signals.c, via postgres_fe.h) installs our handlers
@@ -408,7 +451,7 @@ ws_accept_loop(const WsServerConfig *config)
 		}
 
 		/* children that exited meanwhile must not count against the cap */
-		reap_children(children, &childCount);
+		ws_capture_tick(connection_child_exited, &connChildren);
 
 		if (childCount >= WS_MAX_CONNECTIONS)
 		{
@@ -454,6 +497,15 @@ ws_accept_loop(const WsServerConfig *config)
 	}
 
 	close(listenSock);
+
+	/*
+	 * Stop every "capture = pull" route's own supervised pg_receivewal
+	 * child cleanly (SIGINT, a bounded wait, then SIGKILL if needed --
+	 * capture.c's own ws_capture_stop_all()) before this process itself
+	 * exits: the same shutdown path every other part of this server uses
+	 * (asked_to_stop/asked_to_stop_fast, above), not a second mechanism.
+	 */
+	ws_capture_stop_all();
 
 	log_info("pg_walserver shutting down");
 
