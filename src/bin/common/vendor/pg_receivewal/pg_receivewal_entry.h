@@ -1,9 +1,11 @@
 /*
- * src/bin/pg_autoctl/vendor/pg_receivewal/pg_receivewal_entry.h
+ * src/bin/common/vendor/pg_receivewal/pg_receivewal_entry.h
  *   Entry point and WAL-segment-closed hook for this project's own
  *   in-process copy of pg_receivewal -- see pg_receivewal.c's own header
  *   comment for the full vendoring rationale and the two changes made to
- *   otherwise-unmodified upstream source.
+ *   otherwise-unmodified upstream source. Lives under src/bin/common/ so
+ *   both pg_autoctl (service_archiver_pgreceivewal_ctl.c) and pg_walserver
+ *   (capture.c) can call pg_receivewal_main() directly, in-process.
  *
  * Portions Copyright (c) 1996-2024, PostgreSQL Global Development Group
  * Copyright (c) Microsoft Corporation. All rights reserved.
