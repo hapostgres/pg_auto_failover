@@ -216,6 +216,56 @@ wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 
 
 bool
+wal_dir_has_any_segment(const WsRoute *route)
+{
+	if (route == NULL || route->path[0] == '\0')
+	{
+		return false;
+	}
+
+	DIR *dir = opendir(route->path);
+
+	if (dir == NULL)
+	{
+		return false;
+	}
+
+	bool found = false;
+	struct dirent *entry;
+
+	while (!found && (entry = readdir(dir)) != NULL)
+	{
+		if (is_wal_segment_filename(entry->d_name))
+		{
+			found = true;
+			break;
+		}
+
+		const char *partialSuffix = ".partial";
+		size_t nameLen = strlen(entry->d_name);
+		size_t suffixLen = strlen(partialSuffix);
+
+		if (nameLen == WS_WAL_FNAME_LEN + suffixLen &&
+			strcmp(entry->d_name + WS_WAL_FNAME_LEN, partialSuffix) == 0)
+		{
+			char segPart[WS_WAL_FNAME_LEN + 1] = { 0 };
+
+			memcpy(segPart, entry->d_name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
+
+			if (is_wal_segment_filename(segPart))
+			{
+				found = true;
+			}
+		}
+	}
+
+	closedir(dir);
+
+	return found;
+}
+
+
+bool
 wal_position_cache_read(const char *path, uint32_t *timeline,
 						char *lsn, size_t lsnSize)
 {

@@ -54,6 +54,21 @@ bool wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 						 char *endLsn, size_t endLsnSize);
 
 /*
+ * wal_dir_has_any_segment returns true as soon as route->path holds at
+ * least one WAL segment file, complete OR still ".partial" -- unlike wal_
+ * dir_find_latest() above (complete segments only, the right conservative
+ * choice for a "resume from here" position), this is a plain "has a
+ * capturer connected and begun streaming into this route at all yet"
+ * check: a capturer whose only activity so far is its very first, still-
+ * growing ".partial" segment (the common case moments after it starts)
+ * must count as "yes" here, or a caller polling for readiness would spin
+ * until an entire segment happens to fill, which may never even happen
+ * during a short-lived caller's own bounded wait. See cli_setup.c's own
+ * "prime the embedded capturer before taking the first base backup" use.
+ */
+bool wal_dir_has_any_segment(const WsRoute *route);
+
+/*
  * wal_segment_filename formats a filename the same way real Postgres does
  * (XLogFileName), for a given timeline, 0-based segment number and segment
  * size.
