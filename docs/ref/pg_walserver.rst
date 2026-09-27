@@ -3,24 +3,27 @@
 pg_walserver
 ============
 
-pg_walserver - the archiver's own standalone replication-protocol server
+pg_walserver - standalone PostgreSQL replication-protocol server
 
 Synopsis
 --------
 
-``pg_walserver`` speaks enough of the PostgreSQL replication protocol to
-serve ``pg_basebackup``, ``pg_receivewal`` and a real standby's own
+``pg_walserver`` speaks the PostgreSQL replication wire protocol well
+enough to serve ``pg_basebackup``, ``pg_receivewal``, and a real standby's
 walreceiver directly out of a directory tree of WAL segments and base
-backups it owns, instead of out of a live ``postmaster``. Running the
-accept loop (``serve``) is the default action, so a bare invocation with
-server-mode options works with no sub-command name at all. This is
-``pg_walserver --help``'s own output, verbatim::
+backups, without a live ``postmaster`` behind it. It is not part of
+``pg_autoctl``'s own process supervision: it is started and stopped on its
+own.
 
-  pg_walserver: The archiver's own replication-protocol server
-  usage: pg_walserver [serve options] | scram-secret ... | setup ... | fetch-systemid ... | basebackup ... | create-cert ... | archive-wal ... | restore-wal ...
+Running the accept loop (``serve``) is the default action, so a bare
+invocation with server-mode options works with no sub-command name at
+all::
 
-    serve           Run the accept loop (default command, used when no
-                    sub-command name is given at all)
+  usage: pg_walserver [serve options] | scram-secret ... | setup ... |
+                       fetch-systemid ... | basebackup ... |
+                       create-cert ... | archive-wal ... | restore-wal ...
+
+    serve           Run the accept loop (default command)
     scram-secret    Print one archiver-passwd line for a user
     setup           Create or validate one pg_walserver.ini route
     fetch-systemid  Fetch a route's upstream system identifier
@@ -29,91 +32,62 @@ server-mode options works with no sub-command name at all. This is
     archive-wal     Push one WAL/.backup file into a route (archive_command)
     restore-wal     Fetch one WAL/.backup file from a route (restore_command)
 
-
-  Available commands:
-    pg_walserver
-      serve           Run the pg_walserver accept loop (the default command)
-      scram-secret    Print one archiver-passwd line for a user
-      fetch-systemid  Fetch a route's upstream system identifier
-      basebackup      Take a base backup of a route's upstream
-      setup           Create or validate one pg_walserver.ini route
-      create-cert     Create a self-signed TLS certificate for --pgdata
-      archive-wal     Push one WAL/.backup file into a pg_walserver route (archive_command)
-      restore-wal     Fetch one WAL/.backup file from a pg_walserver route (restore_command)
-
-None of the lines in "Available commands" gets a ``+`` marker (unlike
-:ref:`pg_autoctl`'s own tree, where ``create``, ``drop`` and friends do):
-that marker means "this sub-command has sub-commands of its own", and every
-one of ``pg_walserver``'s own sub-commands is a leaf -- ``serve`` being the
-first one listed is what makes it the default, not a marker. (A ninth,
-hidden ``internal`` sub-command also exists, used only by the embedded pull
-capturer to re-exec itself, see README.md's "The embedded pull capturer"
-section; it deliberately does not show up in ``--help`` at all.)
-``--help``/``-h`` are also the one case ``pg_walserver``'s "no sub-command
-name means serve" shim (``pg_walserver_default_argv()``, ``cli_root.c``)
-deliberately leaves alone, so ``pg_walserver --help`` shows the *root* help
-above, never ``serve``'s own flags -- for those, ask ``serve`` directly,
-which is also ``--help``'s own output, verbatim::
-
-  pg_walserver serve: Run the pg_walserver accept loop (the default command)
-  usage: pg_walserver serve [--port <port>] [--pgdata <path> | --insecure] [--ssl-cert-file <path> --ssl-key-file <path>] [--auth-timeout <seconds>]
-
-See `Options`_ below for what each flag does.
+See `Options`_ below for what each sub-command's flags do.
 
 Description
 -----------
 
-``pg_walserver`` is not part of ``pg_autoctl``'s own process supervision:
-it is a standalone binary, started and stopped on its own, that reads a
-handful of files directly off disk to decide what it may serve and to
-whom:
+``pg_walserver`` reads a handful of files directly off disk to decide what
+it may serve and to whom:
 
 - ``<pgdata>/pg_walserver.ini`` maps each route this instance serves (an
   opaque key, matched against the connection's ``dbname``) to that route's
   own local storage root: WAL cache, base backups, and a handful of small
-  bookkeeping files. A route key is never parsed or given any filesystem
-  meaning of its own by ``pg_walserver`` -- pg_auto_failover's own
-  convention is ``"<formation>/<group>"`` (e.g. ``default/0``), which reads
-  like a path but is not one; a bare cluster name works exactly as well.
-  One key, ``*``, is a PgBouncer-style catch-all matching any ``dbname``
-  with no route of its own -- see `Examples`_ below;
+  bookkeeping files. A route key carries no filesystem meaning of its own.
+  pg_auto_failover's own convention is ``"<formation>/<group>"`` (e.g.
+  ``default/0``); any string works identically. One key, ``*``, is a
+  PgBouncer-style catch-all matching any ``dbname`` with no route of its
+  own.
 
 - ``<pgdata>/archiver-hba.conf`` decides, one rule per line
   (``TYPE ROUTE USER ADDRESS METHOD``, first match wins), which peers may
-  connect and how they must authenticate; a missing, oversize, or
-  malformed file rejects every connection;
+  connect and how they must authenticate. A missing, oversize, or
+  malformed file rejects every connection.
 
 - ``<pgdata>/archiver-passwd`` holds one SCRAM-SHA-256 verifier per line,
-  produced with ``pg_walserver scram-secret``;
+  produced with ``pg_walserver scram-secret``.
 
 - ``<pgdata>/server.crt`` / ``<pgdata>/server.key`` (or
-  ``--ssl-cert-file`` / ``--ssl-key-file``) enable TLS; without them
-  ``hostssl`` rules in the HBA file never match.
+  ``--ssl-cert-file`` / ``--ssl-key-file``) enable TLS. Without them,
+  ``hostssl`` HBA rules never match.
 
-Without ``--pgdata`` (and no ``PGDATA`` environment variable either),
-``pg_walserver`` refuses to start unless ``--insecure`` is given
-explicitly, in which case every ``dbname`` is accepted with no
-authentication at all -- intended for manual testing only, never on a
-reachable network.
+Without ``--pgdata`` (and no ``PGDATA`` environment variable), the server
+refuses to start unless ``--insecure`` is given, which accepts any
+``dbname`` with no authentication at all.
 
 On the wire, a connected client may issue ``IDENTIFY_SYSTEM``, ``SHOW``,
 ``BASE_BACKUP``, ``TIMELINE_HISTORY``,
 ``CREATE_REPLICATION_SLOT``/``READ_REPLICATION_SLOT``/
-``DROP_REPLICATION_SLOT``, and ``START_REPLICATION``, exactly as against a
-real PostgreSQL primary, plus three project-specific extensions:
-``FETCH_FILE '<name>'``, used to fetch a single WAL segment or timeline
-history file in one request/response round trip (as a ``restore_command``
-would -- ``pg_walserver restore-wal`` is the recommended client for this,
-see `Examples`_ below), and ``CHECK_FILE``/``ARCHIVE_FILE``, the push-side
-counterpart used by ``pg_walserver archive-wal`` (as an ``archive_command``
-would). See ``src/bin/pg_walserver/README.md`` in the source tree for the
-full design.
+``DROP_REPLICATION_SLOT``, and ``START_REPLICATION``, as against a real
+PostgreSQL primary, plus three extensions: ``FETCH_FILE '<name>'`` (a
+one-shot file fetch used by ``restore-wal``), and ``CHECK_FILE``/
+``ARCHIVE_FILE`` (the push-side counterpart used by ``archive-wal``). See
+``src/bin/pg_walserver/README.md`` for the wire protocol's full design.
+
+A route with more than one named section (any key besides ``*``) requires
+TLS: connecting clients that cannot set ``dbname`` themselves (a real
+standby's walreceiver, see `Routing more than one cluster by name`_
+below) are then routed by TLS SNI hostname instead. ``pg_walserver``
+refuses to start with two or more named routes and no TLS configured.
 
 Options
 -------
 
-The ``serve`` sub-command (the default; its own flags may be given with no
-sub-command name at all) accepts:
+``serve``
+~~~~~~~~~
+
+The default sub-command; its own flags may also be given with no
+sub-command name at all.
 
 --port
 
@@ -121,15 +95,15 @@ sub-command name at all) accepts:
 
 --pgdata
 
-  The archiver's own top-level storage root, defaulting to the ``PGDATA``
+  This instance's own top-level storage root. Defaults to the ``PGDATA``
   environment variable. ``<pgdata>/pg_walserver.ini`` and
-  ``<pgdata>/archiver-hba.conf`` are read from under it. The server
-  refuses to start without it unless ``--insecure`` is given.
+  ``<pgdata>/archiver-hba.conf`` are read from under it. Refuses to start
+  without it unless ``--insecure`` is given.
 
 --insecure
 
-  No ``--pgdata``: accept any ``dbname`` with **no authentication
-  whatsoever**. For manual testing only, never on a reachable network.
+  Accept any ``dbname`` with no authentication whatsoever, without
+  ``--pgdata``. For manual testing only, never on a reachable network.
 
 --ssl-cert-file
 
@@ -145,30 +119,204 @@ sub-command name at all) accepts:
 --auth-timeout
 
   Absolute deadline, in seconds, for a connection to complete its startup
-  packet, TLS handshake, HBA lookup and SCRAM exchange. Defaults to
+  packet, TLS handshake, HBA lookup, and SCRAM exchange. Defaults to
   ``30``.
 
-The ``scram-secret`` sub-command prints one ``archiver-passwd`` line
-(``<user>:<SCRAM-SHA-256 secret>``) to standard output, reading the
-password from the ``PGPASSWORD`` environment variable -- never from the
-command line, where it would be visible in the process list:
+``scram-secret``
+~~~~~~~~~~~~~~~~
+
+Prints one ``archiver-passwd`` line (``<user>:<SCRAM-SHA-256 secret>``) to
+standard output. The password is read from the ``PGPASSWORD`` environment
+variable, never from the command line.
 
 --user
 
   Role name the printed line authenticates. Defaults to
   ``pgautofailover_replicator``.
 
+``fetch-systemid``
+~~~~~~~~~~~~~~~~~~
+
+Connects to a route's upstream, fetches its system identifier, and writes
+it to ``<path>/archiver-systemid``. Refuses to overwrite an
+already-recorded, different identifier unless ``--force``.
+
+--pgdata
+
+  Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
+
+--route
+
+  The route key to fetch for, looked up in ``pg_walserver.ini``.
+
+--path
+
+  The route's own directory. Overrides the route's own ``path`` property.
+
+--upstream
+
+  A libpq connection string to connect with. Overrides the route's own
+  ``upstream`` property.
+
+--host, --port, --user
+
+  Override individual connection parameters. Default port ``5432``,
+  default user ``pgautofailover_replicator``.
+
+--force
+
+  Overwrite an already-recorded, different system identifier.
+
+``basebackup``
+~~~~~~~~~~~~~~
+
+Takes a real base backup from a route's upstream into
+``<path>/basebackups/<label>/``, then updates
+``<path>/basebackups/.latest`` once the backup is verified complete.
+
+Accepts the same ``--pgdata``, ``--route``, ``--path``, ``--upstream``,
+``--host``/``--port``/``--user`` options as ``fetch-systemid``.
+
+``setup``
+~~~~~~~~~
+
+Writes or validates one ``pg_walserver.ini`` route, fetches its upstream
+system identifier, and, with ``--with-basebackup``, takes its first base
+backup synchronously.
+
+--pgdata
+
+  Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
+
+--route
+
+  The route key to create or validate.
+
+--path
+
+  The route's own directory, created if missing.
+
+--upstream
+
+  A libpq connection string, written into the route's own ``upstream``
+  property.
+
+--host, --port, --user
+
+  Override individual connection parameters. Default port ``5432``,
+  default user ``pgautofailover_replicator``.
+
+--hostname
+
+  The route's own TLS SNI hostname, written into its ``hostname``
+  property. Creates a self-signed certificate for ``--pgdata``
+  automatically the first time a second named route needs one.
+
+--capture
+
+  ``pull`` (the default) or ``none``. ``pull`` writes ``capture = pull``
+  into the route, starting an embedded, supervised ``pg_receivewal``
+  child against ``upstream`` once ``serve`` runs. ``none`` is equivalent
+  to ``--no-capture``.
+
+--no-capture
+
+  Equivalent to ``--capture none``.
+
+--force
+
+  Overwrite an existing route's ``path``/``upstream`` instead of refusing.
+
+--with-basebackup
+
+  Take the route's first base backup before returning.
+
+``create-cert``
+~~~~~~~~~~~~~~~
+
+Creates a self-signed TLS certificate for ``--pgdata``.
+
+--pgdata
+
+  This instance's own top-level storage root. Defaults to ``PGDATA``. The
+  certificate is written as ``<pgdata>/server.crt`` and
+  ``<pgdata>/server.key``.
+
+--hostname
+
+  The certificate's own CN/subject.
+
+--force
+
+  Overwrite an already-existing ``server.crt``/``server.key``.
+
+``archive-wal``
+~~~~~~~~~~~~~~~
+
+::
+
+  pg_walserver archive-wal <path-to-file> <filename> --route <key>
+      --host <host> [--port <port>] [--user <name>] [--sslmode <mode>]
+
+Pushes one WAL segment or ``.backup`` history file into a route, for use
+as PostgreSQL's own ``archive_command``:
+
+::
+
+  archive_command = 'pg_walserver archive-wal %p %f --route mycluster \
+                       --host archive.example.com --user archiver_repl'
+
+--route
+
+  The route to archive into, sent as ``dbname``.
+
+--host
+
+  The ``pg_walserver`` host to connect to.
+
+--port
+
+  The ``pg_walserver`` port to connect to. Defaults to ``6543``.
+
+--user
+
+  Role name. Defaults to ``pgautofailover_replicator``.
+
+--sslmode
+
+  libpq ``sslmode``. Defaults to libpq's own default, ``prefer``.
+
+``restore-wal``
+~~~~~~~~~~~~~~~
+
+::
+
+  pg_walserver restore-wal <filename> <destination-path> --route <key>
+      --host <host> [--port <port>] [--user <name>] [--sslmode <mode>]
+
+Fetches one WAL segment or ``.backup`` history file from a route, for use
+as PostgreSQL's own ``restore_command``:
+
+::
+
+  restore_command = 'pg_walserver restore-wal %f %p --route mycluster \
+                        --host archive.example.com --user archiver_repl'
+
+Accepts the same ``--route``, ``--host``, ``--port``, ``--user``,
+``--sslmode`` options as ``archive-wal``.
+
 Environment
 -----------
 
 PGDATA
 
-  The archiver's own top-level storage root. Can be used instead of the
-  ``--pgdata`` option.
+  This instance's own top-level storage root. Can be used instead of
+  ``--pgdata``.
 
 PGPASSWORD
 
-  The password ``pg_walserver scram-secret`` builds a verifier from.
+  The password ``pg_walserver scram-secret`` builds a verifier from, and
+  the password used by ``archive-wal``/``restore-wal`` when connecting.
 
 Examples
 --------
@@ -190,33 +338,20 @@ Run the server with no authentication, for manual testing only::
 A complete standalone example
 ------------------------------
 
-This walks through archiving one ordinary, standalone PostgreSQL instance
--- no pg_auto_failover anywhere in the picture -- and restoring it with
-point-in-time recovery, entirely by hand. It is the same shape
-pg_auto_failover's own archiver automates later, using exactly the files
-``pg_walserver`` itself reads: nothing here is specific to
-pg_auto_failover.
+This example archives one ordinary PostgreSQL instance and restores it
+with point-in-time recovery, without pg_auto_failover.
 
-**0. On the primary**: a replication role and enough WAL retained to catch
-up::
+**1. On the primary**, create a replication role and add a line to
+``pg_hba.conf`` admitting it over a replication connection from the
+archive host, then reload::
 
   primary$ psql -c "CREATE ROLE archiver_repl REPLICATION LOGIN PASSWORD 's3kr3t'"
 
-Add a line to the primary's own ``pg_hba.conf`` admitting that role over a
-replication connection from the archive host, then reload
-(``pg_ctl reload``). ``wal_level`` must already be ``replica`` or higher
-(the default since PostgreSQL 10).
+``wal_level`` must already be ``replica`` or higher (the default since
+PostgreSQL 10).
 
-**1. On the archive host, one command**: ``pg_walserver setup`` creates the
-route's own directory, writes its ``pg_walserver.ini`` section (``path``,
-``upstream``, and, by default, ``capture = pull``, see step 2 below),
-fetches the real system identifier (``IDENTIFY_SYSTEM`` checks every
-connection against it), and -- with ``--with-basebackup`` -- takes the
-route's first base backup, synchronously: ``setup`` does not return until
-it has actually succeeded. A route key is an opaque string of your
-choosing (see `Description`_ above); this example uses ``mycluster``, a
-plain name, specifically to show that pg_auto_failover's own
-``"<formation>/<group>"`` convention is not required::
+**2. On the archive host**, create the route, fetch the system
+identifier, and take the first base backup::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver setup \
       --pgdata /var/lib/archiver --route mycluster \
@@ -224,71 +359,14 @@ plain name, specifically to show that pg_auto_failover's own
       --upstream "host=primary user=archiver_repl sslmode=require" \
       --with-basebackup
 
-That one command replaces what used to be three (now four) separate steps
-by hand: writing ``pg_walserver.ini``'s section (including
-``capture = pull``, on by default now, see below), fetching the system
-identifier with a plain ``psql``, and taking the initial base backup with
-``pg_basebackup`` directly. Any of the last two can still be run on their
-own, any time after ``setup`` -- ``pg_walserver fetch-systemid`` and
-``pg_walserver basebackup`` take the same ``--route``/``--pgdata`` (or
-``--path``/``--upstream``) flags and are what ``setup`` itself calls
-internally.
+``capture = pull`` is written by default, so the route's own WAL segments
+are captured continuously once ``serve`` starts (below), without a
+separate ``pg_receivewal`` process. Pass ``--no-capture`` to skip this and
+feed the route another way (an externally-run ``pg_receivewal``, or
+``archive-wal`` alone).
 
-**2. Continuous WAL capture is automatic, on by default**: with no
-``--capture`` flag at all, the command above still wrote
-``capture = pull`` into the route's own ``pg_walserver.ini`` section (an
-operator has to pass ``--no-capture``, or ``--capture none``, to opt out),
-so the moment ``pg_walserver serve`` (step 3 below) starts, it forks its
-own supervised ``pg_receivewal`` child for this route -- straight into the
-route's own directory (not a subdirectory -- ``START_REPLICATION``/
-``FETCH_FILE`` read WAL segments directly out of a route's own top-level
-directory), restarted automatically if it ever dies, stopped cleanly when
-``pg_walserver`` itself stops. No separate process to start, supervise, or
-remember to restart after a reboot. See ``src/bin/pg_walserver/README.md``'s
-"The embedded pull capturer" section for the full supervision/restart
-design.
-
-With ``--no-capture`` (a route that is push-only, fed by something else
-entirely, or where an operator prefers a real ``pg_receivewal`` under its
-own process supervisor), WAL capture is still whatever it always was::
-
-  archive$ nohup env PGPASSWORD=s3kr3t pg_receivewal \
-      -d "host=primary user=archiver_repl sslmode=require" \
-      -D /var/lib/archiver/mycluster --synchronous \
-      > /var/lib/archiver/mycluster-receivewal.log 2>&1 &
-
-(A non-default ``wal_segment_size`` needs one more file,
-``<path>/archiver-walsegsize``, holding the byte count in decimal; the
-16MB default needs nothing extra.)
-
-**2b. Recommended: a defense-in-depth backstop via** ``archive_command``
-**alongside the embedded capturer.** Where step 2 above *pulls* WAL
-continuously, ``pg_walserver archive-wal`` *pushes* one completed segment
-(or ``.backup`` history file) per invocation, driven entirely by
-PostgreSQL's own ``archive_command`` mechanism. Running both together --
-the now-default embedded pull capturer *and* ``archive_command`` -- is the
-recommended production setup: whichever one delivers a segment first, the
-other's next ``CHECK_FILE`` round trip sees ``matches`` and skips the push
-entirely, so this costs almost nothing extra while making sure a segment
-is never lost even if the streaming capturer is down for a while. On the
-primary's own ``postgresql.conf``::
-
-  archive_mode = on
-  archive_command = 'pg_walserver archive-wal %p %f --route mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
-
-``%p``/``%f`` are PostgreSQL's own ``archive_command`` substitutions -- the
-segment's real path on the primary's own filesystem, and its bare
-filename, respectively (see the upstream ``archive_command`` docs). Each
-invocation computes the local file's size and CRC32C, asks ``pg_walserver``
-via ``CHECK_FILE`` whether it already has it (a cheap, transfer-free
-round trip), and only pushes the bytes via ``ARCHIVE_FILE`` when it
-doesn't -- exit code matches the ``archive_command`` contract exactly: 0
-on success (including "already there"), nonzero so PostgreSQL retries
-otherwise. See ``src/bin/pg_walserver/README.md``'s "The archive push
-side" section for the full design.
-
-**3. Configure access and start pg_walserver** -- ``setup`` never touches
-HBA or the passwd file, a deliberately separate concern::
+**3. Configure access and start the server**. ``setup`` does not touch
+HBA or the password file::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver scram-secret --user archiver_repl \
       >> /var/lib/archiver/archiver-passwd
@@ -297,24 +375,19 @@ HBA or the passwd file, a deliberately separate concern::
   EOF
   archive$ pg_walserver --pgdata /var/lib/archiver --port 6543
 
-Running more than one cluster behind the same ``pg_walserver``, and don't
-want to name each one individually? Skip the ``[mycluster]`` section and
-write a single wildcard route instead (see `Description`_ above and
-``src/bin/pg_walserver/README.md`` for the full precedence rules and why
-it is deliberately *not* PgBouncer's own per-request substitution)::
+**4. Optional: add** ``archive_command`` **as a backstop** alongside the
+embedded capturer, on the primary::
 
-  [*]
-  path = /var/lib/archiver/shared
+  archive_mode = on
+  archive_command = 'pg_walserver archive-wal %p %f --route mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
 
-**4. Point-in-time recovery**: build a fresh ``PGDATA`` from the base
-backup ``pg_walserver`` is serving (a real ``pg_basebackup`` against
-``pg_walserver`` itself, exercising the exact same wire protocol a real
-standby uses), then let ``restore_command`` fetch each WAL segment on
-demand. ``pg_walserver restore-wal`` (`FETCH_FILE`'s own current, real
-client, see ``src/bin/pg_walserver/README.md``'s "FETCH_FILE's client"
-section) is the recommended tool for this -- a thin wrapper that fetches
-one file and writes it atomically, with the same clean exit-code
-discipline ``archive-wal`` uses on the push side::
+Each invocation asks ``pg_walserver`` via ``CHECK_FILE`` whether it
+already has the segment, and only pushes it via ``ARCHIVE_FILE`` when it
+doesn't; exit code 0 on success (including "already there"), nonzero
+otherwise, matching the ``archive_command`` contract.
+
+**5. Point-in-time recovery**: take a real ``pg_basebackup`` against
+``pg_walserver``, then use ``restore-wal`` as ``restore_command``::
 
   restore$ PGPASSWORD=s3kr3t pg_basebackup \
       -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
@@ -327,26 +400,14 @@ discipline ``archive-wal`` uses on the push side::
   restore$ pg_ctl -D /var/lib/postgres/pitr start
 
 PostgreSQL replays WAL from the base backup's own start position, fetching
-each missing segment from ``pg_walserver`` one ``restore-wal`` invocation
-at a time, until it reaches ``recovery_target_time`` and promotes.
-
-A raw ``FETCH_FILE`` via ``psql``, or any other replication-protocol
-client, still works exactly as well -- it is a real command on the wire,
-not something ``restore-wal`` alone can issue -- and remains useful for a
-one-off manual fetch or when scripting something ``pg_walserver
-restore-wal`` doesn't cover::
+each missing segment via ``restore-wal``, until it reaches
+``recovery_target_time`` and promotes. A raw ``FETCH_FILE`` via ``psql``,
+or any other replication-protocol client, also works for a one-off fetch::
 
   restore$ PGPASSWORD=s3kr3t psql "host=archive port=6543 dbname=mycluster user=archiver_repl replication=true sslmode=require" -c "FETCH_FILE <segment>" > <destination>
 
-but ``pg_walserver restore-wal`` is the actual recommended
-``restore_command`` tool: it already handles quoting, atomic writes, and
-matches ``archive_command``'s own exit-code contract, none of which the
-raw ``psql`` one-liner above does on its own.
-
-**5. Or a real, continuously-streaming standby instead of PITR**: the same
-base backup, but with ``primary_conninfo`` and ``standby.signal`` -- no
-``restore_command``, no ``FETCH_FILE``, a genuine walreceiver talking
-``START_REPLICATION`` to ``pg_walserver``::
+**6. Or a real, continuously-streaming standby** instead of PITR: the same
+base backup, but with ``primary_conninfo`` and ``standby.signal``::
 
   standby$ PGPASSWORD=s3kr3t pg_basebackup \
       -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
@@ -357,57 +418,35 @@ base backup, but with ``primary_conninfo`` and ``standby.signal`` -- no
   standby$ touch /var/lib/postgres/standby/standby.signal
   standby$ pg_ctl -D /var/lib/postgres/standby start
 
-One real-protocol subtlety worth knowing: unlike ``pg_basebackup``/
-``pg_receivewal`` above, a real walreceiver's *physical* replication
-connection never actually sends ``dbname=mycluster`` on the wire, whatever
-``primary_conninfo`` says -- PostgreSQL's own ``libpqrcv_connect()``
-replaces it with the literal string ``"replication"`` unconditionally
-("the database name is ignored by the server in replication mode, but
-specify 'replication' for .pgpass lookup", ``libpqwalreceiver.c``'s own
-comment). So a route meant to be reachable by a real standby needs a
-second section literally keyed ``[replication]`` (pointing at the same
-``path``) alongside its named one -- or, for a single-route deployment,
-just use routes.ini's own ``"*"`` wildcard from the start, or, for more
-than one route, TLS SNI (below), and never worry about the key a client
-happens to send at all.
+A real walreceiver's physical replication connection always sends the
+literal ``dbname=replication``, regardless of what ``primary_conninfo``
+says (PostgreSQL's own ``libpqrcv_connect()`` overrides it
+unconditionally). A route reachable by a real standby by name therefore
+needs a second section literally keyed ``[replication]`` pointing at the
+same ``path``, a ``"*"`` wildcard route, or TLS SNI routing (below).
 
 Routing more than one cluster by name: TLS SNI
 -----------------------------------------------
 
-The ``[replication]`` alias above only works for a *single* cluster --
-every real standby collapses to the same literal ``dbname``, so a second
-one needs a different signal to tell them apart. ``pg_walserver`` reads
-that signal from TLS itself: the Server Name Indication (SNI) extension
-every TLS client sends during the handshake, before a single Postgres
-protocol byte is exchanged. ``libpq``'s own ``sslsni`` setting (on by
-default) sends the connection's ``host=`` value this way, so a real
-standby's ``primary_conninfo`` already carries what's needed, with no
-client-side change at all.
+The ``[replication]`` alias above only disambiguates a single cluster: a
+real standby's walreceiver always sends the same literal ``dbname``, so a
+second cluster needs a different signal. ``pg_walserver`` reads the TLS
+Server Name Indication (SNI) extension every TLS client sends during the
+handshake. libpq's own ``sslsni`` setting (on by default) sends the
+connection's ``host=`` value this way, so a real standby's
+``primary_conninfo`` already carries what is needed.
 
-**Prerequisite: DNS, before any of this works.** SNI only carries whatever
-name a client already has to look up -- ``pg_walserver`` and ``setup``
-manage none of it. Each route's ``--hostname`` needs its own DNS entry
-(an A record or a CNAME, either works identically here: SNI just needs a
-name that resolves, nothing checks it against the certificate the way
-``sslmode=verify-full`` would), and every one of them must resolve to
-this same ``pg_walserver`` instance. A CNAME is convenient when the
-archive host's own address might change later (repoint the one canonical
-target); a plain A record per route, all pointing at the same IP, works
-identically and is simpler when the address is stable. Either way, this
-is provisioned outside ``pg_walserver`` entirely, the same external step
-HTTPS virtual hosting always needs -- and it rules out routing a real
-standby that only ever has a bare IP for ``primary_conninfo``'s ``host=``:
-SNI is never sent for a literal IP at all (RFC 6066), so that connection
-falls through to ``"*"`` or fails, by design.
+Each route's ``--hostname`` needs its own DNS entry (an A record or a
+CNAME; either resolves identically for this purpose), and every one of
+them must resolve to this ``pg_walserver`` instance. This is provisioned
+outside ``pg_walserver`` entirely. A connection using a literal IP address
+never sends SNI (RFC 6066), and cannot be routed by hostname.
 
-One route needs none of this -- ``dbname`` alone is already unambiguous,
-and ``pg_walserver serve`` runs with no TLS configured at all if that's
-all there is. The moment a *second* named route (any section besides
-``*``) exists, TLS becomes mandatory: ``pg_walserver`` refuses to start
-otherwise, rather than silently leaving a route unreachable by any real
-standby. ``pg_walserver setup`` prepares for this on its own -- give each
-route its own ``--hostname``, and a self-signed certificate for
-``--pgdata`` is created automatically the moment it's needed::
+One route needs none of this: ``dbname`` alone is unambiguous, and
+``serve`` runs with no TLS configured at all. The moment a second named
+route exists, TLS is required; ``pg_walserver`` refuses to start
+otherwise. ``setup`` creates a self-signed certificate for ``--pgdata``
+automatically the first time a second named route needs one::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver setup \
       --pgdata /var/lib/archiver --route mycluster \
@@ -422,39 +461,30 @@ route its own ``--hostname``, and a self-signed certificate for
       --upstream "host=primary2 port=5432 user=archiver_repl sslmode=require" \
       --hostname another.archive.example.com \
       --with-basebackup
-  # this second route is the one that triggers "server.crt"/"server.key"
-  # creation under --pgdata, logged as it happens
 
   archive$ pg_walserver --pgdata /var/lib/archiver --port 6543 &
 
-Want TLS from the very first route instead of waiting for a second one to
-trigger it automatically (a single route served over a reachable network
-still benefits from encryption on its own), or need to replace an
-existing self-signed certificate? ``pg_walserver create-cert`` does
-exactly what ``setup`` does automatically above, by hand, any time::
+``create-cert`` creates or, with ``--force``, replaces the certificate by
+hand at any time::
 
   archive$ pg_walserver create-cert --pgdata /var/lib/archiver \
       --hostname mycluster.archive.example.com
 
-It refuses to overwrite an already-existing ``server.crt``/``server.key``
-unless ``--force`` is also given.
-
-Each standby then simply names its own route's hostname in
-``primary_conninfo``'s ``host=`` -- the connection's ``dbname`` stays the
-useless, PostgreSQL-imposed ``"replication"`` for every one of them, and
-routing happens entirely through the TLS handshake, exactly like HTTPS
-virtual hosting::
+Each standby then names its own route's hostname in ``primary_conninfo``'s
+``host=``::
 
   standby$ cat >> /var/lib/postgres/standby/postgresql.auto.conf <<EOF
   primary_conninfo = 'host=mycluster.archive.example.com port=6543 user=archiver_repl password=s3kr3t sslmode=require'
   EOF
 
-A connecting client with no resolvable hostname (a bare IP, or a name
-matching no route) and no ``*`` wildcard configured gets a clean "route
-does not exist" failure, never an accidental match against some other
-route. Exact-``dbname`` routing keeps working unchanged alongside SNI: a
-hand-written ``dbname=mycluster`` connection resolves to that route
-whether or not TLS is even in use, and is always tried first. See
-``src/bin/pg_walserver/README.md``'s own "Routing beyond dbname" section
-for the full mechanism, including why a client certificate's CN remains a
-documented-but-unimplemented alternative to SNI for the same problem.
+A connection with no resolvable hostname, and no ``*`` wildcard
+configured, fails cleanly rather than matching another route.
+Exact-``dbname`` routing keeps working unchanged alongside SNI, and is
+always tried first.
+
+See Also
+--------
+
+``src/bin/pg_walserver/README.md`` in the source tree documents the wire
+protocol, routing precedence, the embedded pull capturer, and the
+push-side ``CHECK_FILE``/``ARCHIVE_FILE`` design in full.
