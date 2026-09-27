@@ -81,9 +81,9 @@ is_wal_backup_label_name(const char *filename, size_t len)
  * "^[0-9A-F]{24}\.[0-9A-F]{8}\.backup$" can be fetched or archived -- what a
  * restore_command asks for on the read side (FETCH_FILE, cmd_fetch_file.c),
  * and what an archive_command may legitimately push on the write side
- * (ARCHIVE_FILE, cmd_archive_file.c) -- see DESIGN-standalone-archiving.md's
- * Gap #1: real Postgres archives ".backup" files exactly like WAL segments,
- * so both directions need to recognize them, which is why this one function
+ * (ARCHIVE_FILE, cmd_archive_file.c) -- real Postgres archives ".backup"
+ * files exactly like WAL segments, so both directions need to recognize
+ * them, which is why this one function
  * is shared by both cmd_fetch_file.c and cmd_archive_file.c rather than each
  * having its own allow-list. Everything else in the route's directory
  * (archiver-hba.conf, archiver-passwd's neighbours, .slot_* files, the

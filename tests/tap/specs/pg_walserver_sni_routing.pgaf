@@ -3,7 +3,7 @@
 # client presents during the TLS handshake rather than by `dbname` --
 # exactly the case a real physical standby forces (its own walreceiver
 # always sends the literal dbname "replication", see auth.c's own comment
-# and DESIGN-standalone-archiving.md's "Routing beyond dbname" section).
+# and README.md's "Routing beyond dbname: TLS SNI" section).
 #
 #   test_001  `setup --hostname` on a *second* route creates a self-signed
 #             certificate for --pgdata automatically (none existed after

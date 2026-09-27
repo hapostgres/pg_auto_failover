@@ -3,8 +3,8 @@
  *   ARCHIVE_FILE '<name>': this project's own extension (not in
  *   PostgreSQL's grammar), a CopyIn (client to server) push of one file --
  *   a WAL segment or a base backup's own ".backup" history file -- into a
- *   route's own directory. See DESIGN-standalone-archiving.md's "The push
- *   side" section for the full design this implements.
+ *   route's own directory. See README.md's "The archive push side" section
+ *   for the full design this implements.
  *
  *   The server never trusts a client's own CHECK_FILE checksum (a lying
  *   client could otherwise talk its way past the overwrite-safety check

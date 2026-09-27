@@ -5,8 +5,8 @@
  *   comment for the full design (fork()+execv() shape, the shared
  *   process_supervisor.h it's built on, restart/backoff policy, and the
  *   single-wildcard-reaper contract ws_capture_tick() has with its
- *   caller) and DESIGN-standalone-archiving.md's "The pull side" section
- *   for the design this implements.
+ *   caller) and README.md's "The embedded pull capturer" section for the
+ *   design this implements.
  *
  * Licensed under the PostgreSQL License.
  *

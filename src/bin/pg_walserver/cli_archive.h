@@ -6,8 +6,9 @@
  *     archive_command = 'pg_walserver archive %p %f --route mycluster \
  *                         --host archive.example.com --user archiver_repl'
  *
- *   Implements the exact 4-step sequence DESIGN-standalone-archiving.md's
- *   "The push side: CHECK_FILE + ARCHIVE_FILE" section lays out: compute
+ *   Implements the exact 4-step sequence README.md's "The archive push
+ *   side: CHECK_FILE + ARCHIVE_FILE + pg_walserver archive" section lays
+ *   out: compute
  *   the local file's own size and CRC32C, CHECK_FILE, a short bounded
  *   recheck when it isn't already there, then ARCHIVE_FILE only if it's
  *   still needed after that. Exits 0 on success (including "already

@@ -2,9 +2,8 @@
 # route configured with "capture = pull" (pg_walserver.ini) / --capture
 # pull (`pg_walserver setup`) gets a forked, supervised pg_receivewal child
 # at "serve" startup -- no external pg_receivewal process, no separate
-# supervisor unit. See DESIGN-standalone-archiving.md's "The pull side" and
-# README.md's "The embedded pull capturer" section for the design this
-# spec proves.
+# supervisor unit. See README.md's "The embedded pull capturer" section
+# for the design this spec proves.
 #
 # tests/tap/specs/pg_walserver_standalone.pgaf's own test_003 is this
 # spec's byte-identical-output bar: a real, unmodified, independently-run

@@ -2,8 +2,8 @@
  * src/bin/pg_walserver/cmd_check_file.h
  *   CHECK_FILE '<name>' <size> crc32c:<hex>: this project's own extension
  *   (not in PostgreSQL's grammar), a cheap query with no file transfer at
- *   all -- see DESIGN-standalone-archiving.md's "The push side" section for
- *   the full rationale. The client (`pg_walserver archive`, cli_archive.c,
+ *   all -- see README.md's "The archive push side" section for the full
+ *   rationale. The client (`pg_walserver archive`, cli_archive.c,
  *   running as an archive_command) computes the size and CRC32C of its own
  *   *local* file and sends both here; the reply is a single-column,
  *   single-row result (RowDescription/DataRow/CommandComplete, the same

@@ -140,8 +140,8 @@ const WsRoute * routes_find_exact(const WsRoute *routes, int count, const char *
  * routes_find_by_hostname resolves a TLS SNI hostname (case-insensitively,
  * as DNS names compare) to the one route whose own "hostname" property
  * matches it, or NULL when none does or hostname is NULL/empty. See
- * DESIGN-standalone-archiving.md's "Routing beyond dbname" section for why
- * this exists at all: a real physical standby's replication connection
+ * README.md's "Routing beyond dbname: TLS SNI" section for why this
+ * exists at all: a real physical standby's replication connection
  * always sends the literal dbname "replication", never a real route key,
  * so a route meant to be reachable *by name* by one needs a different
  * signal than dbname -- SNI, read before a single byte of the Postgres
