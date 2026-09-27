@@ -269,6 +269,18 @@ typedef struct ReplicationSource
 	bool pauseAtRecoveryTarget;
 	SSLOptions sslOptions;
 	IdentifySystem system;
+
+	/*
+	 * pg_basebackup_fetch()'s own --wal-method and --label overrides, both
+	 * optional: empty (the zero value, every existing caller's default)
+	 * means pg_basebackup()'s own long-standing "stream" behavior and no
+	 * --label at all. Set by a caller that wants the backup left non-self-
+	 * consistent on purpose (a --wal-method=none caller supplying WAL some
+	 * other way) and/or a specific label instead of pg_basebackup's own
+	 * default.
+	 */
+	char walMethod[NAMEDATALEN];
+	char label[NAMEDATALEN];
 } ReplicationSource;
 
 

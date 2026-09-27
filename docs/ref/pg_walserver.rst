@@ -52,7 +52,7 @@ it is a standalone binary, started and stopped on its own, that reads a
 handful of files directly off disk to decide what it may serve and to
 whom:
 
-- ``<pgdata>/archiver-routes.ini`` maps each route this instance serves (an
+- ``<pgdata>/pg_walserver.ini`` maps each route this instance serves (an
   opaque key, matched against the connection's ``dbname``) to that route's
   own local storage root: WAL cache, base backups, and a handful of small
   bookkeeping files. A route key is never parsed or given any filesystem
@@ -103,7 +103,7 @@ sub-command name at all) accepts:
 --pgdata
 
   The archiver's own top-level storage root, defaulting to the ``PGDATA``
-  environment variable. ``<pgdata>/archiver-routes.ini`` and
+  environment variable. ``<pgdata>/pg_walserver.ini`` and
   ``<pgdata>/archiver-hba.conf`` are read from under it. The server
   refuses to start without it unless ``--insecure`` is given.
 
@@ -188,56 +188,49 @@ replication connection from the archive host, then reload
 (``pg_ctl reload``). ``wal_level`` must already be ``replica`` or higher
 (the default since PostgreSQL 10).
 
-**1. On the archive host**: pick a storage root and a route key. A route
-key is an opaque string of your choosing (see `Description`_ above) --
-this example uses ``mycluster``, a plain name, specifically to show that
-pg_auto_failover's own ``"<formation>/<group>"`` convention is not
-required::
+**1. On the archive host, one command**: ``pg_walserver setup`` creates the
+route's own directory, writes its ``pg_walserver.ini`` section (``path``
+and ``upstream``), fetches the real system identifier (``IDENTIFY_SYSTEM``
+checks every connection against it), and -- with ``--with-basebackup`` --
+takes the route's first base backup, synchronously: ``setup`` does not
+return until it has actually succeeded. A route key is an opaque string of
+your choosing (see `Description`_ above); this example uses ``mycluster``,
+a plain name, specifically to show that pg_auto_failover's own
+``"<formation>/<group>"`` convention is not required::
 
-  archive$ export ROUTE=/var/lib/archiver/mycluster
-  archive$ mkdir -p $ROUTE/basebackups
+  archive$ PGPASSWORD=s3kr3t pg_walserver setup \
+      --pgdata /var/lib/archiver --route mycluster \
+      --path /var/lib/archiver/mycluster \
+      --upstream "host=primary user=archiver_repl sslmode=require" \
+      --with-basebackup
 
-Record the cluster's system identifier, checked on every connection
-(``IDENTIFY_SYSTEM``) so a client can tell it is talking to the right
-archive::
+That one command replaces what used to be three separate steps by hand:
+writing ``pg_walserver.ini``'s section, fetching the system identifier with
+a plain ``psql``, and taking the initial base backup with ``pg_basebackup``
+directly. Either of the last two can still be run on their own, any time
+after ``setup`` -- ``pg_walserver fetch-systemid`` and ``pg_walserver
+basebackup`` take the same ``--route``/``--pgdata`` (or ``--path``/
+``--upstream``) flags and are what ``setup`` itself calls internally.
 
-  archive$ PGPASSWORD=s3kr3t psql "host=primary user=archiver_repl dbname=postgres sslmode=require" \
-      -Atc "SELECT system_identifier FROM pg_control_system()" \
-      > $ROUTE/archiver-systemid
-
-**2. Take an initial base backup**, in plain format, directly under
-``$ROUTE/basebackups/`` -- ``BASE_BACKUP`` re-serves whatever is on disk
-there, it never takes one itself. ``-X none``: a live, continuous WAL
-capture is started next, so the base backup does not need to stream WAL of
-its own too::
-
-  archive$ label=$(date -u +%Y%m%dT%H%M%SZ)
-  archive$ PGPASSWORD=s3kr3t pg_basebackup \
-      -d "host=primary user=archiver_repl sslmode=require" \
-      -D $ROUTE/basebackups/$label -X none --no-manifest -c fast
-  archive$ echo "$label" > $ROUTE/basebackups/.latest
-
-**3. Start continuous WAL capture**, straight into ``$ROUTE`` itself (not a
-subdirectory -- ``START_REPLICATION``/``FETCH_FILE`` read WAL segments
-directly out of a route's own top-level directory), as a long-running
-service (a plain ``&`` here for the example; run it under a real process
-supervisor in production)::
+**2. Start continuous WAL capture**, straight into the route's own
+directory (not a subdirectory -- ``START_REPLICATION``/``FETCH_FILE`` read
+WAL segments directly out of a route's own top-level directory), as a
+long-running service (a plain ``&`` here for the example; run it under a
+real process supervisor in production; an embedded, supervised capturer is
+planned, see ``DESIGN-standalone-archiving.md``)::
 
   archive$ nohup env PGPASSWORD=s3kr3t pg_receivewal \
       -d "host=primary user=archiver_repl sslmode=require" \
-      -D $ROUTE --synchronous > $ROUTE/../mycluster-receivewal.log 2>&1 &
+      -D /var/lib/archiver/mycluster --synchronous \
+      > /var/lib/archiver/mycluster-receivewal.log 2>&1 &
 
 (A non-default ``wal_segment_size`` needs one more file,
-``$ROUTE/archiver-walsegsize``, holding the byte count in decimal; the
+``<path>/archiver-walsegsize``, holding the byte count in decimal; the
 16MB default needs nothing extra.)
 
-**4. Configure and start pg_walserver**::
+**3. Configure access and start pg_walserver** -- ``setup`` never touches
+HBA or the passwd file, a deliberately separate concern::
 
-  archive$ mkdir -p /var/lib/archiver
-  archive$ cat > /var/lib/archiver/archiver-routes.ini <<EOF
-  [mycluster]
-  path = $ROUTE
-  EOF
   archive$ PGPASSWORD=s3kr3t pg_walserver scram-secret --user archiver_repl \
       >> /var/lib/archiver/archiver-passwd
   archive$ cat > /var/lib/archiver/archiver-hba.conf <<EOF
@@ -254,7 +247,7 @@ it is deliberately *not* PgBouncer's own per-request substitution)::
   [*]
   path = /var/lib/archiver/shared
 
-**5. Point-in-time recovery**: build a fresh ``PGDATA`` from the base
+**4. Point-in-time recovery**: build a fresh ``PGDATA`` from the base
 backup ``pg_walserver`` is serving (a real ``pg_basebackup`` against
 ``pg_walserver`` itself, exercising the exact same wire protocol a real
 standby uses), then let ``restore_command`` fetch each WAL segment on
@@ -275,3 +268,30 @@ enough, no client tooling beyond what ships with PostgreSQL itself::
 PostgreSQL replays WAL from the base backup's own start position, fetching
 each missing segment from ``pg_walserver`` one ``FETCH_FILE`` request at a
 time, until it reaches ``recovery_target_time`` and promotes.
+
+**5. Or a real, continuously-streaming standby instead of PITR**: the same
+base backup, but with ``primary_conninfo`` and ``standby.signal`` -- no
+``restore_command``, no ``FETCH_FILE``, a genuine walreceiver talking
+``START_REPLICATION`` to ``pg_walserver``::
+
+  standby$ PGPASSWORD=s3kr3t pg_basebackup \
+      -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
+      -D /var/lib/postgres/standby -X none --no-manifest
+  standby$ cat >> /var/lib/postgres/standby/postgresql.auto.conf <<EOF
+  primary_conninfo = 'host=archive port=6543 user=archiver_repl password=s3kr3t sslmode=require'
+  EOF
+  standby$ touch /var/lib/postgres/standby/standby.signal
+  standby$ pg_ctl -D /var/lib/postgres/standby start
+
+One real-protocol subtlety worth knowing: unlike ``pg_basebackup``/
+``pg_receivewal`` above, a real walreceiver's *physical* replication
+connection never actually sends ``dbname=mycluster`` on the wire, whatever
+``primary_conninfo`` says -- PostgreSQL's own ``libpqrcv_connect()``
+replaces it with the literal string ``"replication"`` unconditionally
+("the database name is ignored by the server in replication mode, but
+specify 'replication' for .pgpass lookup", ``libpqwalreceiver.c``'s own
+comment). So a route meant to be reachable by a real standby needs a
+second section literally keyed ``[replication]`` (pointing at the same
+``path``) alongside its named one -- or, for a single-route deployment,
+just use routes.ini's own ``"*"`` wildcard from the start and never worry
+about the key a client happens to send at all.

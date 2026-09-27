@@ -51,6 +51,8 @@
 
 #include "postgres_fe.h"
 
+#include "pgsql.h"
+
 /* PgBouncer-style catch-all key, see routes_find()'s own comment */
 #define WS_ROUTES_WILDCARD_KEY "*"
 
@@ -63,6 +65,18 @@ typedef struct WsRoute
 	                                     * root -- WAL cache, basebackups/,
 	                                     * and archiver-systemid all live
 	                                     * directly under it */
+	char upstream[MAXCONNINFO];         /* optional: a libpq connection string
+	                                    * to the instance this route archives
+	                                    * from -- read as a default by
+	                                    * fetch-systemid/basebackup/setup,
+	                                    * always overridable by an explicit
+	                                    * --upstream/--host/--port/--user
+	                                    * flag. Empty when the ini section
+	                                    * has no "upstream" property: those
+	                                    * sub-commands then require the flag
+	                                    * instead. See DESIGN-standalone-
+	                                    * archiving.md's own "upstream"
+	                                    * section for the naming rationale. */
 } WsRoute;
 
 /*

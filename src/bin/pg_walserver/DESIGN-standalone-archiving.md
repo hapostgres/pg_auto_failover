@@ -97,7 +97,7 @@ The rename landed immediately, in this same PR (#1193) -- continuing to
 iterate on an already-open PR through review is the normal shape of
 review, not a reason to defer a one-word rename to a separate one.
 
-## routes.ini: a new `upstream` property
+## pg_walserver.ini: a new `upstream` property
 
 ```ini
 [mycluster]
@@ -148,7 +148,7 @@ until a new one actually completes.
 
 ### `pg_walserver setup --route <key> --path <dir> --upstream <conninfo> [--with-basebackup]`
 
-The wizard: writes/validates the `routes.ini` section (refuses a route key
+The wizard: writes/validates the `pg_walserver.ini` section (refuses a route key
 that already exists unless `--force`; refuses a `path` that is not
 creatable/writable), **checks the given role actually has `REPLICATION`**
 (a real gap today -- nothing currently verifies this before `pg_basebackup`/
@@ -261,7 +261,7 @@ expect, so nothing downstream changes.
 - Net result: `pg_walserver --pgdata ... serve` alone, with one route's
   `upstream`/`capture = pull` set, is a complete archiving daemon on its
   own -- no external `pg_receivewal` process, no separate supervisor unit,
-  nothing to wire up beyond `routes.ini` itself.
+  nothing to wire up beyond `pg_walserver.ini` itself.
 
 ## Fit as a pg_auto_failover building block
 
@@ -269,7 +269,7 @@ expect, so nothing downstream changes.
   **the** implementation, not a second one living alongside
   `archiver_systemid.c`/`service_archiver_basebackup.c`/
   `service_archiver_pgreceivewal_ctl.c` on the `pg_autoctl` side.
-  `service_archiver_reconciler.c` already writes `routes.ini`; it should
+  `service_archiver_reconciler.c` already writes `pg_walserver.ini`; it should
   grow to also write `upstream`/`capture` and call into this same logic
   in-process, the same way `restore_command.c` now calls
   `ws_fetch_file_client()` directly instead of the `execv()`-based design
@@ -317,7 +317,7 @@ by this one existing as a building block, not this PR's to make for it.
 
 ## Phasing
 
-1. `routes.ini`'s `upstream`, plus `fetch-systemid`/`basebackup`/`setup`:
+1. `pg_walserver.ini`'s `upstream`, plus `fetch-systemid`/`basebackup`/`setup`:
    no new wire protocol, lower risk, and everything else below depends on
    `upstream` existing.
 2. `CHECK_FILE` + `ARCHIVE_FILE` + `pg_walserver archive`: the new wire

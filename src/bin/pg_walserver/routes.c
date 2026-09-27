@@ -129,6 +129,10 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 			{
 				strlcpy(route->path, propValue, sizeof(route->path));
 			}
+			else if (streq(propName, "upstream"))
+			{
+				strlcpy(route->upstream, propValue, sizeof(route->upstream));
+			}
 			else
 			{
 				log_warn("Ignoring unknown routes file key \"%s\" in section [%s]",

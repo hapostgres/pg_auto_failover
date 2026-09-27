@@ -28,7 +28,7 @@ typedef struct WsRoute WsRoute;
 
 /*
  * Parsed StartupMessage contents we care about. "database" doubles as our
- * routing key: an opaque string matched against routes.ini/hba.conf, see
+ * routing key: an opaque string matched against pg_walserver.ini/hba.conf, see
  * routes.h. pg_auto_failover's own archiver uses "<formation>/<group>"
  * (e.g. "default/0", as in its process title "pg_autoctl: walsender
  * default/0") -- one convention among any an operator could choose.
