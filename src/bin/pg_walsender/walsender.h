@@ -23,18 +23,22 @@
 
 #include "postgres_fe.h"
 
-/* one entry per "<formation>/<group>" the archiver serves, see routes.h */
+/* one entry per route this instance serves, see routes.h */
 typedef struct WsRoute WsRoute;
 
 /*
  * Parsed StartupMessage contents we care about. "database" doubles as our
- * routing key ("<formation>/<group>", as in the process title
- * "pg_autoctl: walsender default/0").
+ * routing key: an opaque string matched against routes.ini/hba.conf, see
+ * routes.h. pg_auto_failover's own archiver uses "<formation>/<group>"
+ * (e.g. "default/0", as in its process title "pg_autoctl: walsender
+ * default/0") -- one convention among any an operator could choose.
  */
 typedef struct WsStartupParams
 {
 	char user[NAMEDATALEN];
-	char database[NAMEDATALEN + 16];  /* "<formation>/<group>", may exceed a bare NAMEDATALEN */
+	char database[NAMEDATALEN + 16];  /* the routing key, may exceed a bare
+	                                   * NAMEDATALEN ("<formation>/<group>"
+	                                   * can, see this struct's own comment) */
 	char applicationName[NAMEDATALEN];
 	bool replication;
 

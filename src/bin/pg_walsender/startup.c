@@ -217,8 +217,9 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 		 * a bare replication=1/true connection (pg_receivewal's style) may
 		 * not set "database" at all. Default it to the "user" so downstream
 		 * routing always has *something* to look up rather than an empty
-		 * key -- callers that require a real "<formation>/<group>" key
-		 * still get a clean "unknown route" ErrorResponse from auth.c.
+		 * key -- a connection whose defaulted key matches no real route (and
+		 * no "*" wildcard, see routes.h) still gets a clean "unknown route"
+		 * ErrorResponse from auth.c.
 		 */
 
 		/*

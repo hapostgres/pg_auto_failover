@@ -24,6 +24,12 @@
 #             double-quoted slot name with an embedded escaped quote, and a
 #             garbage command producing a clean error rather than a crash
 #             (and the connection still usable afterwards)
+#   test_005  the routes.ini "*" wildcard (routes.h/routes.c, PgBouncer-
+#             style): a dbname with no route of its own falls through to
+#             it, while "default/0" -- which still has its own explicit
+#             section -- keeps resolving to its own path, proving an exact
+#             match always wins over the wildcard, never the other way
+#             around
 
 cluster {
     monitor
@@ -118,9 +124,28 @@ step test_004_grammar_edge_cases {
     exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM" > /dev/null'
 }
 
+step test_005_wildcard_route {
+    # a second route, deliberately never named "default/0", with its own
+    # distinct (fake) systemid -- reachable only through the "*" wildcard,
+    # never directly
+    exec node2 bash -c 'mkdir -p /tmp/ws-wild && printf "6543216543216543216\n" > /tmp/ws-wild/archiver-systemid'
+    exec node2 bash -c 'printf "\n[*]\npath = /tmp/ws-wild\n" >> /tmp/ws/archiver-routes.ini'
+
+    # a dbname matching no explicit section falls through to the wildcard's
+    # own path -- routes.c's own "*" fallback, not a hardcoded default
+    exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6543 dbname=no-such-route replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "6543216543216543216" || { echo "got: $out"; false; }'
+
+    # "default/0" still has its own explicit section: it must keep
+    # resolving to ITS OWN path, never falling through to the wildcard now
+    # that one exists -- an exact match always wins, exactly as PgBouncer's
+    # own "*" [databases] entry precedence works
+    exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/archiver-systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
+}
+
 sequence
     test_000_sync_files_from_node1
     test_001_identify_system_and_show
     test_002_fetch_file
     test_003_start_replication_from_pg_walsender
     test_004_grammar_edge_cases
+    test_005_wildcard_route

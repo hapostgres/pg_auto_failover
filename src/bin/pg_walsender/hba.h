@@ -12,8 +12,15 @@
  *     hostnossl  all         all                        all           reject
  *
  *   TYPE is "host" (any connection), "hostssl" (TLS only) or "hostnossl".
- *   ROUTE is "all" or "<formation>/<group>". USER is "all" or a role name.
- *   ADDRESS is "all", "samehost", "samenet" (as in PostgreSQL), an IP
+ *   ROUTE is "all", or a route key exactly as it appears in routes.ini
+ *   (see routes.h) -- an opaque, operator-chosen string pg_walsender never
+ *   parses. "default/0" above is pg_auto_failover's own convention
+ *   ("<formation>/<group>"), used because it reads well and is already
+ *   guaranteed unique across a whole pg_auto_failover deployment -- it is
+ *   NOT a path, and the "/" carries no filesystem meaning here at all; a
+ *   route key of "archive1", "customer-42" or any other string an operator
+ *   finds convenient works exactly the same way. USER is "all" or a role
+ *   name. ADDRESS is "all", "samehost", "samenet" (as in PostgreSQL), an IP
  *   address, an IP/prefix, a hostname (resolved forward, every A/AAAA
  *   answer compared), or ".domain.suffix" (every reverse-DNS name of the
  *   client is tried, each confirmed by a forward lookup -- PostgreSQL only
@@ -50,9 +57,13 @@ typedef enum WsAuthMethod
  * refuses to load a bad pg_hba.conf. Otherwise sets *method, which is
  * WS_AUTH_REJECT when no rule matches or the matching rule says reject.
  *
- * routeKey is matched against each rule's ROUTE field as a plain string
- * (the route need not actually exist yet: an unknown route is reported
- * only once the client authenticated, see auth.h).
+ * routeKey is matched against each rule's ROUTE field as a plain, opaque
+ * string, exactly the same string routes.c matches against routes.ini's
+ * own section names (the route need not actually exist yet: an unknown
+ * route is reported only once the client authenticated, see auth.h) -- HBA
+ * admission and routes.ini's own lookup (including its "*" wildcard, see
+ * routes.h) are two entirely independent decisions made from the same
+ * key, neither one aware of the other.
  */
 bool hba_lookup(const char *hbaPath, const char *routeKey, const char *user,
 				const char *peerIP, bool isTLS, WsAuthMethod *method);
