@@ -40,7 +40,13 @@ setup {
     # node2 hosts pg_walsender for this test; it is otherwise an ordinary
     # registered secondary and that is irrelevant here.
     exec node2 bash -c 'mkdir -p /tmp/ws/default/0'
-    exec node2 bash -c 'printf "host all all 0.0.0.0/0 trust\n" > /tmp/ws/archiver-hba.conf'
+    # every connection below is node2 talking to its own pg_walsender over
+    # loopback (127.0.0.1): a manually written, properly scoped rule for
+    # that exact peer, not "0.0.0.0/0" -- there is no monitor here to learn
+    # a real client's address from, and none needed: pg_walsender's HBA is
+    # just a file, hand-edited exactly as an operator running it on its own
+    # (no archiver, no monitor) would.
+    exec node2 bash -c 'printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/archiver-hba.conf'
     exec node2 bash -c 'printf "[default/0]\npath = /tmp/ws/default/0\n" > /tmp/ws/archiver-routes.ini'
 
     # capture real WAL off node1 with the stock pg_receivewal (not this

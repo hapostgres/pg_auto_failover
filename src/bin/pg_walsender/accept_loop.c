@@ -28,6 +28,7 @@
 #include "file_utils.h"
 #include "framing.h"
 #include "log.h"
+#include "refresher.h"
 #include "repl_command.h"
 #include "routes.h"
 #include "signals.h"
@@ -56,6 +57,9 @@
  * counted from that array.
  */
 #define WS_MAX_CONNECTIONS 64
+
+/* the refresher is restarted at most this often when it keeps dying */
+#define WS_REFRESHER_RESTART_MIN_MS 1000
 
 
 /*
@@ -303,29 +307,100 @@ remove_child(pid_t *children, int *count, pid_t pid)
 
 
 /*
- * reap_children collects every exited connection child, in normal (main
- * loop) context like the postmaster's own CleanupBackend().
+ * reap_children collects every exited child, in normal (main loop) context
+ * like the postmaster's own CleanupBackend(): connection children leave the
+ * array, and the refresher is noted as gone so it gets restarted.
  */
 static void
-reap_children(pid_t *children, int *count)
+reap_children(pid_t *children, int *count, pid_t *refresherPid)
 {
 	int status;
 	pid_t pid;
 
 	while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
 	{
-		remove_child(children, count, pid);
+		if (pid == *refresherPid)
+		{
+			log_warn("The nodes list refresher (pid %d) exited (status %d), "
+					 "restarting it", (int) pid, status);
+			*refresherPid = 0;
+		}
+		else
+		{
+			remove_child(children, count, pid);
+		}
 	}
 }
 
 
 /*
- * ws_accept_loop is the whole server: it creates the listening socket, then
- * loops accepting connections, forking a child per connection (no exec(),
- * matching real Postgres's postmaster/BackendMain() split) and reaping
- * exited children, until asked to stop. Returns false only if the listening
- * socket itself could not be created; otherwise it runs until shutdown and
- * returns true.
+ * start_refresher forks the single writer of the nodes lists, only once a
+ * monitor URI exists to talk to the monitor with.
+ */
+static pid_t
+start_refresher(const WsServerConfig *config, int refreshSock, int listenSock)
+{
+	fflush(stdout);
+	fflush(stderr);
+
+	pid_t pid = fork();
+
+	if (pid == -1)
+	{
+		log_error("fork() of the nodes list refresher failed: %m");
+		return 0;
+	}
+
+	if (pid == 0)
+	{
+		close(listenSock);
+		ws_refresher_main(refreshSock, config->routesPath,
+						  config->auth.monitorUriPath);
+	}
+
+	return pid;
+}
+
+
+/*
+ * stop_refresher asks the refresher child to stop (SIGTERM), waits up to
+ * about 5 seconds (100 * 50ms) for it to exit, and SIGKILLs it if it hasn't
+ * -- called during shutdown, so this may block the parent briefly rather
+ * than leaving a zombie or an orphaned refresher behind.
+ */
+static void
+stop_refresher(pid_t refresherPid)
+{
+	if (refresherPid <= 0)
+	{
+		return;
+	}
+
+	kill(refresherPid, SIGTERM);
+
+	for (int i = 0; i < 100; i++)
+	{
+		if (waitpid(refresherPid, NULL, WNOHANG) != 0)
+		{
+			return;
+		}
+
+		usleep(50 * 1000);
+	}
+
+	kill(refresherPid, SIGKILL);
+	(void) waitpid(refresherPid, NULL, 0);
+}
+
+
+/*
+ * ws_accept_loop is the whole server: it creates the listening socket and
+ * (when a monitor URI is configured) the refresher's own datagram socket,
+ * then loops accepting connections, forking a child per connection (no
+ * exec(), matching real Postgres's postmaster/BackendMain() split), reaping
+ * exited children and restarting the refresher if it dies, until asked to
+ * stop. Returns false only if the listening socket itself could not be
+ * created; otherwise it runs until shutdown and returns true.
  */
 bool
 ws_accept_loop(const WsServerConfig *config)
@@ -340,8 +415,28 @@ ws_accept_loop(const WsServerConfig *config)
 	set_signal_handlers(false);
 	signal(SIGPIPE, SIG_IGN);
 
+	/*
+	 * The refresher's datagram socket is created by this parent BEFORE any
+	 * fork, so a restarted refresher gets the very same socket (requests
+	 * queue meanwhile) and the connection children only know its path.
+	 */
+	int refreshSock = -1;
+
+	if (config->auth.refreshSockPath[0] != '\0')
+	{
+		refreshSock = ws_refresh_socket_create(config->auth.refreshSockPath);
+
+		if (refreshSock < 0)
+		{
+			log_warn("Running without a nodes list refresher: the \"monitor\" "
+					 "HBA address will rely on the list as it is");
+		}
+	}
+
 	pid_t children[WS_MAX_CONNECTIONS];
 	int childCount = 0;
+	pid_t refresherPid = 0;
+	int64_t nextRefresherStartMs = 0;
 
 	log_info("pg_walsender listening on port %d%s%s",
 			 config->port,
@@ -350,7 +445,16 @@ ws_accept_loop(const WsServerConfig *config)
 
 	while (!asked_to_stop && !asked_to_stop_fast)
 	{
-		reap_children(children, &childCount);
+		reap_children(children, &childCount, &refresherPid);
+
+		if (refreshSock >= 0 && refresherPid == 0 &&
+			ws_monotonic_ms() >= nextRefresherStartMs &&
+			file_exists(config->auth.monitorUriPath))
+		{
+			refresherPid = start_refresher(config, refreshSock, listenSock);
+			nextRefresherStartMs = ws_monotonic_ms() +
+								   WS_REFRESHER_RESTART_MIN_MS;
+		}
 
 		/*
 		 * pqsignal() (signals.c, via postgres_fe.h) installs our handlers
@@ -408,7 +512,7 @@ ws_accept_loop(const WsServerConfig *config)
 		}
 
 		/* children that exited meanwhile must not count against the cap */
-		reap_children(children, &childCount);
+		reap_children(children, &childCount, &refresherPid);
 
 		if (childCount >= WS_MAX_CONNECTIONS)
 		{
@@ -437,10 +541,15 @@ ws_accept_loop(const WsServerConfig *config)
 			/*
 			 * Child: no exec(), just call straight into the connection
 			 * handler -- matches real Postgres's BackendMain() model. It
-			 * inherits nothing but the client socket: the listening socket
-			 * is closed.
+			 * inherits nothing but the client socket: the listening and
+			 * refresher sockets are closed.
 			 */
 			close(listenSock);
+
+			if (refreshSock >= 0)
+			{
+				close(refreshSock);
+			}
 
 			signal(SIGCHLD, SIG_DFL);
 			handle_connection(clientSock, config);
@@ -454,6 +563,13 @@ ws_accept_loop(const WsServerConfig *config)
 	}
 
 	close(listenSock);
+	stop_refresher(refresherPid);
+
+	if (refreshSock >= 0)
+	{
+		close(refreshSock);
+		(void) unlink(config->auth.refreshSockPath);
+	}
 
 	log_info("pg_walsender shutting down");
 

@@ -116,6 +116,22 @@ test_cmd_print(FILE *f, const TestCmd *cmd, int indent)
 			break;
 		}
 
+		case CMD_LET:
+		{
+			fprintf(f, "%slet %s = sql %s { %s }\n", /* IGNORE-BANNED */
+					pad, cmd->state, cmd->service, cmd->args);
+			break;
+		}
+
+		case CMD_WAIT_SQL:
+		{
+			fprintf(f, /* IGNORE-BANNED */
+					"%swait until sql %s { %s } is { %s }  timeout %ds\n",
+					pad, cmd->service, cmd->args, cmd->expected,
+					cmd->timeoutSeconds);
+			break;
+		}
+
 		case CMD_EXPECT:
 		{
 			fprintf(f, "%sexpect { %s }\n", pad, cmd->expected); /* IGNORE-BANNED */
@@ -2993,11 +3009,183 @@ nodeini_read_value(TestRunner *r, const char *nodeName,
 /* -----------------------------------------------------------------------
  * Execute a single command
  * ----------------------------------------------------------------------- */
+
+/*
+ * Expand ${NAME} references (exact form only: "${" identifier "}") using the
+ * runner's variables.  Anything else, including SQL "$1" or "$$", is copied
+ * verbatim, and so is a ${NAME} that no "let" defined (a shell variable in
+ * an exec string).  Returns false with errBuf set on buffer overflow.
+ */
+static bool
+runner_interpolate(TestRunner *r, const char *in, char *out, int outLen,
+				   char *errBuf, int errLen)
+{
+	int o = 0;
+
+	for (const char *p = in; *p;)
+	{
+		if (p[0] == '$' && p[1] == '{')
+		{
+			const char *q = p + 2;
+			while ((*q >= 'a' && *q <= 'z') || (*q >= 'A' && *q <= 'Z') ||
+				   *q == '_' || (q > p + 2 && *q >= '0' && *q <= '9'))
+			{
+				q++;
+			}
+
+			if (q > p + 2 && *q == '}')
+			{
+				int n = (int) (q - (p + 2));
+				const char *val = NULL;
+
+				for (int i = 0; i < r->varCount; i++)
+				{
+					if ((int) strlen(r->vars[i].name) == n &&
+						strncmp(r->vars[i].name, p + 2, n) == 0)
+					{
+						val = r->vars[i].value;
+						break;
+					}
+				}
+
+				/*
+				 * A name we were not given with "let" is not ours: it is a
+				 * shell variable in an exec string (${PGDATA}, ${f%.partial}
+				 * never even matches this form), or plain text. Leave it to
+				 * whoever it belongs to.
+				 */
+				if (val != NULL)
+				{
+					int vl = (int) strlen(val);
+					if (o + vl >= outLen)
+					{
+						sformat(errBuf, errLen,
+								"expanding ${%.*s} overflows the buffer", n, p + 2);
+						return false;
+					}
+					memcpy(out + o, val, vl); /* IGNORE-BANNED */
+					o += vl;
+					p = q + 1;
+					continue;
+				}
+			}
+		}
+
+		if (o + 1 >= outLen)
+		{
+			sformat(errBuf, errLen, "variable expansion overflows the buffer");
+			return false;
+		}
+		out[o++] = *p++;
+	}
+	out[o] = '\0';
+	return true;
+}
+
+
+static bool runner_exec_cmd_expanded(TestRunner *r, TestCmd *cmd,
+									 char *errBuf, int errLen);
+
 static bool
 runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 {
+	if (cmd->kind == CMD_SQL || cmd->kind == CMD_WAIT_SQL ||
+		cmd->kind == CMD_EXPECT || cmd->kind == CMD_EXEC ||
+		cmd->kind == CMD_EXEC_FAILS || cmd->kind == CMD_LET)
+	{
+		TestCmd *copy = malloc(sizeof(TestCmd));
+		bool ok = false;
+
+		if (copy == NULL)
+		{
+			sformat(errBuf, errLen, "out of memory");
+			return false;
+		}
+		*copy = *cmd;
+
+		if (runner_interpolate(r, cmd->args, copy->args, sizeof(copy->args),
+							   errBuf, errLen) &&
+			runner_interpolate(r, cmd->expected, copy->expected,
+							   sizeof(copy->expected), errBuf, errLen))
+		{
+			ok = runner_exec_cmd_expanded(r, copy, errBuf, errLen);
+		}
+		free(copy);
+		return ok;
+	}
+
+	return runner_exec_cmd_expanded(r, cmd, errBuf, errLen);
+}
+
+
+static bool
+runner_exec_cmd_expanded(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
+{
 	switch (cmd->kind)
 	{
+		case CMD_LET:
+		{
+			char out[4096] = "";
+			char *v = out;
+
+			if (!exec_sql_on_service(r, cmd->service, cmd->args,
+									 out, sizeof(out)))
+			{
+				sformat(errBuf, errLen, "let %s: sql on %s failed:\n%s",
+						cmd->state, cmd->service, out);
+				return false;
+			}
+
+			while (*v == ' ' || *v == '\t' || *v == '\n' || *v == '\r')
+			{
+				v++;
+			}
+			int vl = (int) strlen(v);
+			while (vl > 0 && (v[vl - 1] == ' ' || v[vl - 1] == '\t' ||
+							  v[vl - 1] == '\n' || v[vl - 1] == '\r'))
+			{
+				v[--vl] = '\0';
+			}
+
+			if (vl == 0 || strchr(v, '\n') != NULL || strchr(v, '|') != NULL)
+			{
+				sformat(errBuf, errLen,
+						"let %s: sql on %s must return exactly one row and "
+						"one column, got \"%s\"", cmd->state, cmd->service, v);
+				return false;
+			}
+			if (vl >= (int) sizeof(r->vars[0].value))
+			{
+				sformat(errBuf, errLen, "let %s: value too long", cmd->state);
+				return false;
+			}
+
+			int idx = -1;
+			for (int i = 0; i < r->varCount; i++)
+			{
+				if (strcmp(r->vars[i].name, cmd->state) == 0)
+				{
+					idx = i;
+					break;
+				}
+			}
+			if (idx < 0)
+			{
+				if (r->varCount >= (int) (sizeof(r->vars) / sizeof(r->vars[0])))
+				{
+					sformat(errBuf, errLen, "let %s: too many variables",
+							cmd->state);
+					return false;
+				}
+				idx = r->varCount++;
+				strlcpy(r->vars[idx].name, cmd->state,
+						sizeof(r->vars[idx].name));
+			}
+			strlcpy(r->vars[idx].value, v, sizeof(r->vars[idx].value));
+			log_debug("let %s = %s", cmd->state, v);
+			return true;
+		}
+
 		case CMD_EXEC:
 		{
 			char expandedArgs[4096] = "";
@@ -3324,6 +3512,50 @@ runner_exec_cmd(TestRunner *r, TestCmd *cmd, char *errBuf, int errLen)
 				sformat(errBuf, errLen,
 						"expected \"%s\", got \"%s\"",
 						cmd->expected, r->lastSqlOutput);
+				return false;
+			}
+			return true;
+		}
+
+		case CMD_WAIT_SQL:
+		{
+			/*
+			 * Generic SQL-condition poll: re-run cmd->args on cmd->service
+			 * every second until its output contains cmd->expected (same
+			 * substring semantics as CMD_EXPECT) or the timeout elapses.
+			 * Reuses exec_sql_on_service() rather than the LISTEN/NOTIFY
+			 * machinery wait_for_state()/wait_for_states() use: those key
+			 * off specific goalstate/reportedstate convergence events,
+			 * which an arbitrary scalar SQL expression has none of.
+			 */
+			time_t deadline = time(NULL) + cmd->timeoutSeconds;
+			char output[4096] = "";
+			bool matched = false;
+
+			for (;;)
+			{
+				if (exec_sql_on_service(r, cmd->service, cmd->args,
+										output, sizeof(output)) &&
+					strstr(output, cmd->expected) != NULL)
+				{
+					matched = true;
+					break;
+				}
+
+				if (time(NULL) >= deadline)
+				{
+					break;
+				}
+
+				sleep(1);
+			}
+
+			if (!matched)
+			{
+				sformat(errBuf, errLen,
+						"timeout: sql on %s never matched \"%s\" "
+						"(last output: \"%s\")",
+						cmd->service, cmd->expected, output);
 				return false;
 			}
 			return true;
@@ -4338,6 +4570,22 @@ cmd_label(const TestCmd *cmd, char *buf, int len)
 			break;
 		}
 
+		case CMD_LET:
+		{
+			inline_text(cmd->args, tmp, sizeof(tmp));
+			sformat(buf, len, "let %s = sql %s { %s }",
+					cmd->state, cmd->service, tmp);
+			break;
+		}
+
+		case CMD_WAIT_SQL:
+		{
+			inline_text(cmd->args, tmp, sizeof(tmp));
+			sformat(buf, len, "wait until sql %s { %s } is { %s }  timeout %ds",
+					cmd->service, tmp, cmd->expected, cmd->timeoutSeconds);
+			break;
+		}
+
 		case CMD_EXPECT:
 		{
 			if (strchr(cmd->expected, '\n'))
@@ -4559,7 +4807,7 @@ runner_exec_step(TestRunner *r, TestStep *step, char *errBuf, int errLen,
 			runner_drain_notify(r, NULL, NULL, NULL, 0, NULL); /* one last sweep */
 		}
 
-		char label[256];
+		char label[2048];
 		cmd_label(cmd, label, sizeof(label));
 		if (stepNum > 0)
 		{

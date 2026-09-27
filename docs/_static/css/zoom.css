@@ -1,0 +1,77 @@
+/* Click-to-zoom overlay for docs figures -- see js/zoom.js */
+
+figure img.pgaf-zoomable-img {
+  cursor: zoom-in;
+}
+
+html.pgaf-zoom-locked,
+html.pgaf-zoom-locked body {
+  overflow: hidden;
+}
+
+.pgaf-zoom-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(20, 20, 20, 0.92);
+}
+
+.pgaf-zoom-overlay.pgaf-zoom-open {
+  display: flex;
+  flex-direction: column;
+}
+
+.pgaf-zoom-viewport {
+  flex: 1 1 auto;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+}
+
+.pgaf-zoom-viewport.pgaf-zoom-dragging {
+  cursor: grabbing;
+}
+
+.pgaf-zoom-img {
+  max-width: 92vw;
+  max-height: 82vh;
+  will-change: transform;
+  transition: transform 0.05s linear;
+  user-select: none;
+  -webkit-user-drag: none;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.pgaf-zoom-close {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.5rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 1.75rem;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.pgaf-zoom-close:hover,
+.pgaf-zoom-close:focus {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.pgaf-zoom-hint {
+  flex: 0 0 auto;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem 1.25rem;
+}

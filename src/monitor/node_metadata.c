@@ -180,6 +180,23 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 					 Anum_pgautofailover_node_replication_stall_since,
 					 tupleDescriptor, &stallIsNull);
 
+	/*
+	 * haspgdata is looked up by name, not by the Anum_ constant every other
+	 * field here uses: this function is also called against a "RETURNING
+	 * node.*" tuple descriptor (health_check_metadata.c), which reflects
+	 * the table's true physical column order -- pg_versionnum/pg_version/
+	 * pg_versionstring/citus_version were appended between
+	 * replication_stall_since and haspgdata by an earlier migration but
+	 * were never added to AUTO_FAILOVER_NODE_TABLE_ALL_COLUMNS, so
+	 * haspgdata's physical position (28) and its position in that
+	 * explicit column list (24) genuinely differ. SPI_fnumber resolves the
+	 * real attnum against whichever tupdesc was actually passed in, so
+	 * this works correctly for both callers.
+	 */
+	int hasPgDataAttNum = SPI_fnumber(tupleDescriptor, "haspgdata");
+	Datum hasPgData = heap_getattr(heapTuple, hasPgDataAttNum,
+								   tupleDescriptor, &isNull);
+
 	Oid goalStateOid = DatumGetObjectId(goalState);
 	Oid reportedStateOid = DatumGetObjectId(reportedState);
 
@@ -214,6 +231,7 @@ TupleToAutoFailoverNode(TupleDesc tupleDescriptor, HeapTuple heapTuple)
 		regionIsNull ? "" : TextDatumGetCString(region);
 	pgAutoFailoverNode->replicationStallSince =
 		stallIsNull ? 0 : DatumGetTimestampTz(replicationStallSince);
+	pgAutoFailoverNode->hasPgData = DatumGetBool(hasPgData);
 
 	return pgAutoFailoverNode;
 }
@@ -1574,9 +1592,18 @@ SetNodeGoalState(AutoFailoverNode *pgAutoFailoverNode,
  * a node.
  *
  * We use SPI to automatically handle triggers, function calls, etc.
+ *
+ * Scoped by nodeid, not (nodehost, nodeport): an ARCHIVING row's nodeport
+ * is a permanent 0 sentinel and its nodehost is the owning archiver's own
+ * hostname, both identical across every (formation, group) membership of
+ * the same archiver identity (see archiver_add_formation()'s own comment
+ * on this, pgautofailover.sql). Scoping on that pair used to make any one
+ * membership's routine report blindly overwrite reportedstate on every
+ * other membership sharing the same archiver -- nodeid is the one column
+ * that's actually unique per row.
  */
 void
-ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
+ReportAutoFailoverNodeState(int64 nodeId,
 							ReplicationState reportedState,
 							bool pgIsRunning, SyncState pgSyncState,
 							int reportedTLI,
@@ -1591,8 +1618,7 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		TEXTOID,                 /* pg_stat_replication.sync_state */
 		INT4OID,                 /* reportedtli */
 		LSNOID,                  /* reportedlsn */
-		TEXTOID,                 /* nodehost */
-		INT4OID                  /* nodeport */
+		INT8OID                  /* nodeid */
 	};
 
 	Datum argValues[] = {
@@ -1601,8 +1627,7 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		CStringGetTextDatum(SyncStateToString(pgSyncState)), /* sync_state */
 		Int32GetDatum(reportedTLI),                          /* reportedtli */
 		LSNGetDatum(reportedLSN),             /* reportedlsn */
-		CStringGetTextDatum(nodeHost),        /* nodehost */
-		Int32GetDatum(nodePort)               /* nodeport */
+		Int64GetDatum(nodeId)                 /* nodeid */
 	};
 	const int argCount = sizeof(argValues) / sizeof(argValues[0]);
 
@@ -1627,7 +1652,7 @@ ReportAutoFailoverNodeState(char *nodeHost, int nodePort,
 		"  THEN COALESCE(replication_stall_since, now()) "
 		"  ELSE NULL "
 		"END "
-		"WHERE nodehost = $6 AND nodeport = $7";
+		"WHERE nodeid = $6";
 
 	SPI_connect();
 
@@ -2433,6 +2458,27 @@ NodeIsHealthy(const AutoFailoverNode *node, const struct GroupStateContext *ctx)
 		return false;
 	}
 
+	/*
+	 * An ARCHIVING row (haspgdata false) has neither a real postmaster for
+	 * the health-check worker to probe (it connects to nodeport, which is
+	 * 0 here -- see haspgdata's own design comment, pgautofailover.sql)
+	 * nor does pgIsRunning mean the same thing for one: pg_autoctl now
+	 * reports it as pg_receivewal's own real liveness (service_archiver.c),
+	 * which is legitimately false exactly when a FAST_FORWARD candidate
+	 * needs this archiver most (the group's primary just died, pg_
+	 * receivewal has nothing left to stream from) -- but what actually
+	 * serves WAL to that candidate is pg_walsender, a separate process
+	 * neither of those two facts has any bearing on. Neither node->health
+	 * nor node->pgIsRunning is evidence of anything for this row kind, so
+	 * skip both and fall through to whatever the caller's own staleness
+	 * check (NodeIsUnhealthy's reportTime/unhealthyTimeoutMs, unaffected
+	 * by this function) already provides instead.
+	 */
+	if (!node->hasPgData)
+	{
+		return true;
+	}
+
 	if (node->health == NODE_HEALTH_BAD &&
 		TimestampDifferenceExceeds(node->healthCheckTime, node->reportTime, 0) &&
 		!TimestampDifferenceExceeds(node->reportTime, ctx->now,
@@ -2468,7 +2514,8 @@ NodeIsUnhealthy(const AutoFailoverNode *node, const struct GroupStateContext *ct
 	if (TimestampDifferenceExceeds(node->reportTime, ctx->now,
 								   ctx->unhealthyTimeoutMs))
 	{
-		if (node->health == NODE_HEALTH_BAD &&
+		if (node->hasPgData &&
+			node->health == NODE_HEALTH_BAD &&
 			TimestampDifferenceExceeds(PgStartTime, node->healthCheckTime, 0))
 		{
 			if (TimestampDifferenceExceeds(PgStartTime, ctx->now,
@@ -2477,9 +2524,27 @@ NodeIsUnhealthy(const AutoFailoverNode *node, const struct GroupStateContext *ct
 				return true;
 			}
 		}
+
+		/*
+		 * An ARCHIVING row has no health-check-worker evidence to fall
+		 * back on above (see NodeIsHealthy()'s own comment on why), so a
+		 * stale report is this function's only real signal for one --
+		 * still correctly caught here regardless of hasPgData.
+		 */
+		if (!node->hasPgData)
+		{
+			return true;
+		}
 	}
 
-	if (!node->pgIsRunning)
+	/*
+	 * pgIsRunning means "pg_receivewal is currently running" for an
+	 * ARCHIVING row (service_archiver.c), not "the postmaster is up" --
+	 * legitimately false exactly when this archiver is most needed as a
+	 * FAST_FORWARD WAL source (see NodeIsHealthy()'s own comment), so it
+	 * must not mark the row unhealthy here either.
+	 */
+	if (node->hasPgData && !node->pgIsRunning)
 	{
 		return true;
 	}

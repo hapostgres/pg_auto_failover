@@ -12,3 +12,4 @@ pg_autoctl set - Set a pg_auto_failover node, or formation setting
    pg_autoctl_set_node_replication_quorum
    pg_autoctl_set_node_candidate_priority
    pg_autoctl_set_node_region
+   pg_autoctl_set_basebackup_policy

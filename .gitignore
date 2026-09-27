@@ -56,5 +56,6 @@ valgrind/
 src/bin/pgaftest/test_spec_parse.tab.*
 src/bin/pgaftest/test_spec_parse.output
 src/bin/pgaftest/pgaftest
+src/bin/pg_walsender/pg_walsender
 run-test.sh
 tests/tablespaces/__pycache__/

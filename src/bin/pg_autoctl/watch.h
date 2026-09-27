@@ -51,7 +51,8 @@ typedef struct WatchContext
 	int rows;
 	int cols;
 	int selectedRow;
-	int selectedArea;           /* area 1: node states, area 2: node events */
+	int selectedArea;           /* area 1: node states, area 2: archivers,
+	                             * area 3: node events */
 	int startCol;
 	WatchMoveFocus move;
 
@@ -69,6 +70,7 @@ typedef struct WatchContext
 
 	/* data to display */
 	CurrentNodeStateArray nodesArray;
+	ArchiverInfoArray archiversArray;
 	MonitorEventsArray eventsArray;
 	MonitorEventsHeaders eventsHeaders;
 } WatchContext;

@@ -13,6 +13,7 @@
 
 #include "postgres_fe.h"
 
+#include "cli_archiver.h"
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
@@ -505,6 +506,27 @@ cli_show_state(int argc, char **argv)
 		{
 			log_info("Monitor is disabled, showing --local state");
 			(void) cli_show_local_state();
+			exit(EXIT_CODE_QUIT);
+		}
+
+		/*
+		 * An archiver's config file also probes as PG_AUTOCTL_ROLE_KEEPER
+		 * (see cli_create_archiver's own config->role assignment,
+		 * cli_create_node.c) -- but it has no single (formation, group) of
+		 * its own the way an ordinary keeper does (it can be attached to
+		 * several), so monitor_print_state's formation/group-scoped view
+		 * doesn't apply here. `pg_autoctl archiver show state`'s own
+		 * per-archiver rendering does -- see cli_print_archiver_state's
+		 * own comment (cli_archiver.c) for why this is the exact same
+		 * code path as that dedicated command, not a separate one.
+		 */
+		if (streq(config.nodeKind, "archiver"))
+		{
+			Monitor archiverMonitor = { 0 };
+
+			(void) cli_monitor_init_from_option_or_config(&archiverMonitor, &config);
+			(void) cli_print_archiver_state(&archiverMonitor, &config);
+
 			exit(EXIT_CODE_QUIT);
 		}
 	}

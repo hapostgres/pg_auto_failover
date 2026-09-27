@@ -1,0 +1,148 @@
+# pg_walsender authentication and TLS, exercised with the stock Postgres
+# client tools only -- pg_basebackup and pg_receivewal, both speaking real
+# libpq -- plus `pg_autoctl restore command` (FETCH_FILE's client).
+#
+# Access is decided by the archiver's archiver-hba.conf (first matching line
+# wins, no match rejects). Its default line admits the nodes the monitor
+# lists for the route ("monitor" address), over TLS, with the replication
+# password given to the archiver (SCRAM-SHA-256):
+#
+#     hostssl  all  pgautofailover_replicator  monitor  scram-sha-256
+#
+# node2 starts out *unregistered* -- the situation of a PITR restore target
+# -- so the monitor list does not include it until test_007 registers it.
+#
+#   test_001  a registered node: password + TLS works for pg_basebackup and
+#             pg_receivewal; no password, a wrong one, or TLS disabled fail
+#   test_002  the unregistered host is rejected even with the right password
+#   test_003  an explicit line + a stored verifier for another role
+#             (pitr_restore) admits it: pg_basebackup, pg_receivewal and
+#             `pg_autoctl restore command`; wrong or missing password is
+#             refused
+#   test_004  a "reject" line ahead of it wins
+#   test_005  an IP/prefix line works
+#   test_006  a ".domain" line, matched through the client's reverse DNS
+#             names (Docker names a container several ways) and confirmed
+#             forward
+#   test_007  once node2 registers, the monitor line admits it with no file
+#             edit; once it is dropped, it is refused again within seconds
+#             (the local copy of the monitor's node list is validated by
+#             fingerprint at connect time)
+#
+# Predecessor: none.
+
+cluster {
+    monitor
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
+        node2 create and launch deferred replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+    wait until archiver1 state is archiving  timeout 60s
+    wait until sql monitor {
+        SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
+    } is { complete }  timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_registered_node_needs_password_and_tls {
+    sql node1 { CREATE TABLE t1(a int); INSERT INTO t1 VALUES (1), (2); }
+    let seg = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg}') } is { t }  timeout 60s
+
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb1 -X none --no-manifest && test -f /tmp/bb1/PG_VERSION'
+    exec node1 bash -c 'mkdir -p /tmp/rw1 && (PGPASSWORD=pgaf-repl-pw timeout 20 pg_receivewal -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --directory /tmp/rw1 --no-loop || true) && ls /tmp/rw1 | grep -q .'
+
+    # SCRAM-SHA-256-PLUS: libpq insists on channel binding (tls-server-end-point)
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require channel_binding=require" --pgdata /tmp/bb1p -X none --no-manifest && test -f /tmp/bb1p/PG_VERSION'
+
+    # no password, a wrong one, and no TLS: all refused
+    exec node1 bash -c 'if pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb1a -X none --no-manifest 2>/tmp/err1a; then exit 1; fi; grep -q "password" /tmp/err1a'
+    exec node1 bash -c 'if PGPASSWORD=wrong pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb1b -X none --no-manifest 2>/tmp/err1b; then exit 1; fi; grep -q "password authentication failed" /tmp/err1b'
+    exec node1 bash -c 'if PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=disable" --pgdata /tmp/bb1c -X none --no-manifest 2>/tmp/err1c; then exit 1; fi; grep -q "no pg_walsender HBA entry" /tmp/err1c'
+}
+
+step test_002_unregistered_host_is_rejected {
+    exec node2 bash -c 'if PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb2 -X none --no-manifest 2>/tmp/err2; then exit 1; fi; grep -q "no pg_walsender HBA entry" /tmp/err2'
+    exec node2 bash -c 'mkdir -p /tmp/rw2; if PGPASSWORD=pgaf-repl-pw pg_receivewal -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --directory /tmp/rw2 --no-loop 2>/tmp/err2b; then exit 1; fi; grep -q "no pg_walsender HBA entry" /tmp/err2b'
+}
+
+step test_003_explicit_line_and_scram_role {
+    exec archiver1 bash -c 'PGPASSWORD=pitr-pw pg_walsender scram-secret --user pitr_restore >> /var/lib/postgres/pgaf/archiver-passwd'
+    exec archiver1 bash -c 'echo "hostssl default/0 pitr_restore node2 scram-sha-256" >> /var/lib/postgres/pgaf/archiver-hba.conf'
+
+    # SASLprep: a non-ASCII password is normalized the same way on both sides
+    exec archiver1 bash -c 'PGPASSWORD="pässwörd" pg_walsender scram-secret --user utf_role >> /var/lib/postgres/pgaf/archiver-passwd'
+    exec archiver1 bash -c 'echo "hostssl default/0 utf_role node2 scram-sha-256" >> /var/lib/postgres/pgaf/archiver-hba.conf'
+    exec node2 bash -c 'PGPASSWORD="pässwörd" pg_basebackup -w -d "host=archiver1 port=6543 user=utf_role dbname=default/0 sslmode=require" --pgdata /tmp/bb3u -X none --no-manifest && test -f /tmp/bb3u/PG_VERSION'
+
+    # a role with no verifier at all (mock authentication): indistinguishable
+    # from a wrong password
+    exec archiver1 bash -c 'echo "hostssl default/0 ghost_role node2 scram-sha-256" >> /var/lib/postgres/pgaf/archiver-hba.conf'
+    exec node2 bash -c 'if PGPASSWORD=whatever pg_basebackup -w -d "host=archiver1 port=6543 user=ghost_role dbname=default/0 sslmode=require" --pgdata /tmp/bb3g -X none --no-manifest 2>/tmp/err3g; then exit 1; fi; grep -q "password authentication failed" /tmp/err3g'
+
+    exec node2 bash -c 'if PGPASSWORD=wrong pg_basebackup -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --pgdata /tmp/bb3a -X none --no-manifest 2>/tmp/err3a; then exit 1; fi; grep -q "password authentication failed" /tmp/err3a'
+    exec node2 bash -c 'if pg_basebackup -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --pgdata /tmp/bb3b -X none --no-manifest 2>/tmp/err3b; then exit 1; fi; grep -q "password" /tmp/err3b'
+
+    exec node2 bash -c 'PGPASSWORD=pitr-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --pgdata /tmp/bb3c -X none --no-manifest && test -f /tmp/bb3c/PG_VERSION'
+    exec node2 bash -c 'mkdir -p /tmp/rw3 && (PGPASSWORD=pitr-pw timeout 20 pg_receivewal -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --directory /tmp/rw3 --no-loop || true) && ls /tmp/rw3 | grep -q .'
+    exec node2 bash -c 'if PGPASSWORD=wrong pg_autoctl restore command --host archiver1 --port 6543 --user pitr_restore --route default/0 ${seg} /tmp/fetched-bad; then exit 1; fi'
+    exec node2 bash -c 'PGPASSWORD=pitr-pw pg_autoctl restore command --host archiver1 --port 6543 --user pitr_restore --route default/0 ${seg} /tmp/fetched-good && test -s /tmp/fetched-good'
+}
+
+step test_004_reject_line_wins {
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; { echo "host all all node2 reject"; cat $f; } > $f.new && mv $f.new $f'
+    exec node2 bash -c 'if PGPASSWORD=pitr-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --pgdata /tmp/bb4 -X none --no-manifest 2>/tmp/err4; then exit 1; fi; grep -q "no pg_walsender HBA entry" /tmp/err4'
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; grep -v "^host all all node2 reject" $f > $f.new && mv $f.new $f'
+}
+
+step test_005_cidr_line {
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; grep -v " node2 scram-sha-256" $f > $f.new && mv $f.new $f && echo "hostssl default/0 pitr_restore 172.16.0.0/12 scram-sha-256" >> $f'
+    exec node2 bash -c 'PGPASSWORD=pitr-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --pgdata /tmp/bb5 -X none --no-manifest && test -f /tmp/bb5/PG_VERSION'
+}
+
+step test_005b_samenet_keyword {
+    # PostgreSQL's samenet: the client is on a network the archiver is on
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; grep -v "172.16.0.0/12" $f > $f.new && mv $f.new $f && echo "hostssl default/0 pitr_restore samenet scram-sha-256" >> $f'
+    exec node2 bash -c 'PGPASSWORD=pitr-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --pgdata /tmp/bb5s -X none --no-manifest && test -f /tmp/bb5s/PG_VERSION'
+}
+
+step test_006_domain_suffix_line {
+    # take node2's reverse DNS name as Docker reports it, keep everything
+    # after its first label as the ".suffix" of the rule
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; grep -v "samenet" $f > $f.new && mv $f.new $f; ip=$(getent ahostsv4 node2 | awk "NR==1{print \$1}"); name=$(host $ip | awk "{print \$NF}"); name=${name%.}; sfx=.${name#*.}; echo "hostssl default/0 pitr_restore $sfx scram-sha-256" >> $f; grep -q "^hostssl default/0 pitr_restore \.[a-z0-9_-]" $f'
+    exec node2 bash -c 'PGPASSWORD=pitr-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --pgdata /tmp/bb6 -X none --no-manifest && test -f /tmp/bb6/PG_VERSION'
+}
+
+step test_007_monitor_list_follows_registration {
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; grep -v "pitr_restore" $f > $f.new && mv $f.new $f'
+    exec node2 bash -c 'if PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb7a -X none --no-manifest 2>/tmp/err7a; then exit 1; fi; grep -q "no pg_walsender HBA entry" /tmp/err7a'
+
+    exec node2  pg_autoctl create postgres --pgdata /var/lib/postgres/pgaf --monitor postgresql://autoctl_node@monitor/pg_auto_failover --auth trust --ssl-self-signed --name node2 --hostname node2 --replication-password pgaf-repl-pw
+    exec node2  bash -c "nohup pg_autoctl run --pgdata /var/lib/postgres/pgaf > /tmp/node2-run.log 2>&1 & echo backgrounded pid $!"
+    wait until node2 state is secondary  timeout 120s
+
+    # registered: admitted with the replication password, no file edit
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb7b -X none --no-manifest && test -f /tmp/bb7b/PG_VERSION'
+
+    # dropped: refused again once the local copy of the list is validated
+    exec node2 pg_autoctl drop node --pgdata /var/lib/postgres/pgaf
+    exec node2 bash -c 'for i in $(seq 30); do if ! PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb7c$i -X none --no-manifest 2>/tmp/err7c; then grep -q "no pg_walsender HBA entry" /tmp/err7c && exit 0; fi; sleep 1; done; exit 1'
+}
+
+sequence
+    test_001_registered_node_needs_password_and_tls
+    test_002_unregistered_host_is_rejected
+    test_003_explicit_line_and_scram_role
+    test_004_reject_line_wins
+    test_005_cidr_line
+    test_005b_samenet_keyword
+    test_006_domain_suffix_line
+    test_007_monitor_list_follows_registration

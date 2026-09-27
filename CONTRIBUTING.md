@@ -28,8 +28,9 @@ If you have Docker available, the simplest way to check or fix formatting
 locally, without installing anything, is:
 
 ```bash
-make docker-check    # check only -- matches CI's citus_indent --check exactly
-make docker-indent   # auto-fix
+make docker-check    # check only -- CI's two steps: citus_indent --check + ci/banned.h.sh
+                     # (alias: make ci-lint)
+make docker-indent   # auto-fix (files stay owned by you; works from git worktrees)
 ```
 
 Otherwise, install citus_indent locally:

@@ -1,0 +1,44 @@
+# A cluster with NO archiver must behave as before archivers existed: the
+# confirmation command succeeds (nothing to confirm), so WAL is recycled
+# normally -- even while the monitor is unreachable (the last answer, "no
+# archiver in this group", is cached on the node).
+#
+#   test_001  no archiver: closed segments are archived (= recyclable)
+#   test_002  monitor down: still archived, thanks to the cached answer
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_no_archiver_nothing_blocks {
+    sql node1 { CREATE TABLE acn(a int); INSERT INTO acn VALUES (1); }
+    let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    exec node1 bash -c 'for i in $(seq 90); do l=$(psql -d demo -Atc "SELECT last_archived_wal FROM pg_stat_archiver"); test "$l" = "${seg1}" && exit 0; sleep 1; done; psql -d demo -Atc "SELECT archived_count, failed_count, last_archived_wal, last_failed_wal FROM pg_stat_archiver"; exit 1'
+    exec node1 bash -c 'test "$(psql -d demo -Atc "SELECT failed_count FROM pg_stat_archiver")" = 0'
+}
+
+step test_002_monitor_down_uses_the_cached_answer {
+    compose stop monitor
+    sleep 5s
+    sql node1 { INSERT INTO acn VALUES (2); }
+    let seg2 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    exec node1 bash -c 'for i in $(seq 90); do l=$(psql -d demo -Atc "SELECT last_archived_wal FROM pg_stat_archiver"); test "$l" = "${seg2}" && exit 0; sleep 1; done; psql -d demo -Atc "SELECT archived_count, failed_count, last_archived_wal, last_failed_wal FROM pg_stat_archiver"; exit 1'
+    compose start monitor
+}
+
+sequence
+    test_001_no_archiver_nothing_blocks
+    test_002_monitor_down_uses_the_cached_answer

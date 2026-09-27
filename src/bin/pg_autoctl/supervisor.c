@@ -65,6 +65,8 @@ static bool supervisor_may_restart(Service *service);
 
 static bool supervisor_update_pidfile(Supervisor *supervisor);
 
+static bool supervisor_wait_for_exit(pid_t pid, int maxWaitMs);
+
 
 /*
  * supervisor_start starts given services as sub-processes and then supervise
@@ -73,10 +75,34 @@ static bool supervisor_update_pidfile(Supervisor *supervisor);
 bool
 supervisor_start(Service services[], int serviceCount, const char *pidfile)
 {
+	return supervisor_start_with_callback(services, serviceCount, pidfile,
+										  NULL, NULL);
+}
+
+
+/*
+ * supervisor_start_with_callback is supervisor_start()'s full
+ * implementation, with an optional periodic callback -- see
+ * Supervisor.periodicCallback's own comment (supervisor.h) for what it's
+ * for and the constraints it comes with. supervisor_start() itself is a
+ * thin wrapper passing NULL/NULL, so every existing caller is unaffected
+ * by this function's existence.
+ */
+bool
+supervisor_start_with_callback(Service services[], int serviceCount,
+							   const char *pidfile,
+							   void (*periodicCallback)(Supervisor *supervisor,
+														void *context),
+							   void *periodicCallbackContext)
+{
 	int serviceIndex = 0;
 	bool success = true;
 
 	Supervisor supervisor = { services, serviceCount, { 0 }, -1 };
+
+	supervisor.periodicCallback = periodicCallback;
+	supervisor.periodicCallbackContext = periodicCallbackContext;
+	supervisor.pendingSubprocessCount = serviceCount;
 
 	/* copy the pidfile over to our supervisor structure */
 	strlcpy(supervisor.pidfile, pidfile, MAXPGPATH);
@@ -222,11 +248,48 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 static SupervisorExitMode
 supervisor_loop(Supervisor *supervisor)
 {
-	int subprocessCount = supervisor->serviceCount;
 	bool firstLoop = true;
 
-	/* wait until all subprocesses are done */
-	while (subprocessCount > 0)
+	/*
+	 * Every existing caller passes a fixed-size, pre-populated services[]
+	 * (supervisor_start()'s own plain static/stack arrays): pending
+	 * SubprocessCount > 0 from the very first check, and this loop's
+	 * only job for them is exactly what it says -- wait until all
+	 * subprocesses are done, then return. That case is untouched below:
+	 * periodicCallback is NULL for all of them, so the "|| (...)" disjunct
+	 * is always false and the loop's behavior reduces to the original
+	 * condition exactly.
+	 *
+	 * A caller using supervisor_start_with_callback() to manage a
+	 * services[] array dynamically (supervisor_add_service()/
+	 * supervisor_remove_service(), see Supervisor.periodicCallback's own
+	 * comment, supervisor.h) may legitimately have nothing registered yet
+	 * -- or, having had services before, may legitimately drop to zero
+	 * again without that meaning "permanently done" (e.g. this archiver's
+	 * own reconciler dropping its last membership, expected to pick up a
+	 * newly (re)attached one later). For that caller, "keep looping" needs
+	 * to depend on shutdown having been requested, not on the incidental
+	 * current count of live children -- pendingSubprocessCount == 0 here
+	 * must not, on its own, end the loop.
+	 *
+	 * Gated on supervisor->shutdownSequenceInProgress, not directly on
+	 * asked_to_stop/asked_to_stop_fast/asked_to_quit: those globals are
+	 * deliberately self-clearing (supervisor_handle_signals() resets
+	 * whichever one fired back to 0 right after processing it -- see its
+	 * own "allow for processing signals again" comment -- precisely so a
+	 * second, later signal can be told apart from the first). Checking
+	 * the raw flags here would see them go back to 0 on the very next
+	 * iteration after the one that first noticed them, causing this
+	 * disjunct to flip back to true and the loop to keep running past the
+	 * point it should have exited -- exactly the hang this comment is
+	 * warning against. shutdownSequenceInProgress is the field that
+	 * actually stays true for the rest of the shutdown, same source
+	 * supervisor_restart_service() already trusts for the identical
+	 * "are we shutting down" question.
+	 */
+	while (supervisor->pendingSubprocessCount > 0 ||
+		   (supervisor->periodicCallback != NULL &&
+			!supervisor->shutdownSequenceInProgress))
 	{
 		pid_t pid;
 		int status;
@@ -258,6 +321,18 @@ supervisor_loop(Supervisor *supervisor)
 			 */
 			(void) nodespec_watcher_check(&supervisor->watcher,
 										  &supervisor->watchedSpec);
+
+			/*
+			 * Optional caller-supplied periodic callback -- see
+			 * Supervisor.periodicCallback's own comment (supervisor.h).
+			 * A no-op for every caller except supervisor_start_with_
+			 * callback()'s own explicit users.
+			 */
+			if (supervisor->periodicCallback != NULL)
+			{
+				(void) supervisor->periodicCallback(
+					supervisor, supervisor->periodicCallbackContext);
+			}
 		}
 
 		/* ignore errors */
@@ -269,6 +344,34 @@ supervisor_loop(Supervisor *supervisor)
 			{
 				if (errno == ECHILD)
 				{
+					/*
+					 * A dynamic, callback-driven supervisor (see this
+					 * function's own header comment) currently has no
+					 * real children at all -- the expected steady state
+					 * before its first supervisor_add_service() call, or
+					 * between one service set being fully torn down and
+					 * a later one being added. Same handling as "no dead
+					 * child to reap this tick" (case 0 below): check
+					 * signals, keep going. Distinguished from the
+					 * unexpected-ECHILD case right below by
+					 * pendingSubprocessCount == 0 -- if we still believe
+					 * we have live children and waitpid() disagrees,
+					 * that's the real inconsistency the fatal branch
+					 * exists to catch.
+					 */
+					if (supervisor->pendingSubprocessCount == 0 &&
+						supervisor->periodicCallback != NULL)
+					{
+						(void) supervisor_handle_signals(supervisor);
+
+						if (supervisor->shutdownSequenceInProgress)
+						{
+							(void) supervisor_shutdown_sequence(supervisor);
+						}
+
+						break;
+					}
+
 					/* no more childrens */
 					if (asked_to_stop || asked_to_stop_fast || asked_to_quit)
 					{
@@ -336,12 +439,12 @@ supervisor_loop(Supervisor *supervisor)
 				}
 
 				/* one child process is no more */
-				--subprocessCount;
+				--supervisor->pendingSubprocessCount;
 
 				/* apply the service restart policy */
 				if (supervisor_restart_service(supervisor, dead, status))
 				{
-					++subprocessCount;
+					++supervisor->pendingSubprocessCount;
 				}
 
 				break;
@@ -1121,6 +1224,202 @@ supervisor_update_pidfile(Supervisor *supervisor)
 	}
 
 	return success;
+}
+
+
+/*
+ * supervisor_wait_for_exit waits, up to maxWaitMs, for pid to actually be
+ * reaped (waitpid(WNOHANG) returning that exact pid, or ECHILD meaning it
+ * was already reaped elsewhere). Polls every 10ms; returns true as soon
+ * as the child is gone, false if it's still around once the deadline is
+ * reached.
+ */
+static bool
+supervisor_wait_for_exit(pid_t pid, int maxWaitMs)
+{
+	int elapsedMs = 0;
+
+	while (elapsedMs < maxWaitMs)
+	{
+		int status = 0;
+		pid_t reaped = waitpid(pid, &status, WNOHANG);
+
+		if (reaped == pid)
+		{
+			return true;
+		}
+
+		if (reaped == -1 && errno == ECHILD)
+		{
+			/* already reaped elsewhere -- fine, treat as done */
+			return true;
+		}
+
+		pg_usleep(10 * 1000);
+		elapsedMs += 10;
+	}
+
+	return false;
+}
+
+
+/*
+ * supervisor_add_service adds a new service to an already-running
+ * supervisor, starts it, and updates the pidfile to include it.
+ *
+ * Requires supervisor->services to be a heap-allocated array -- see
+ * Supervisor.periodicCallback's own comment (supervisor.h) for why: this
+ * function reallocs it to grow by one slot. Only ever safe to call from
+ * a supervisor started via supervisor_start_with_callback() with its own
+ * heap-allocated initial array, never from a plain supervisor_start()
+ * caller's stack/static one.
+ */
+bool
+supervisor_add_service(Supervisor *supervisor, Service service)
+{
+	int newCount = supervisor->serviceCount + 1;
+	Service *grown = realloc(supervisor->services, newCount * sizeof(Service));
+
+	if (grown == NULL)
+	{
+		log_error("Failed to allocate memory to add service \"%s\"",
+				  service.name);
+		return false;
+	}
+
+	supervisor->services = grown;
+	supervisor->services[supervisor->serviceCount] = service;
+
+	Service *added = &(supervisor->services[supervisor->serviceCount]);
+
+	log_debug("Starting pg_autoctl %s service", added->name);
+
+	if (!(*added->startFunction)(added->context, &(added->pid)))
+	{
+		log_error("Failed to start service \"%s\"", added->name);
+
+		/* undo the growth -- this slot never became real */
+		Service *shrunk = realloc(supervisor->services,
+								  supervisor->serviceCount * sizeof(Service));
+
+		if (shrunk != NULL)
+		{
+			supervisor->services = shrunk;
+		}
+
+		return false;
+	}
+
+	uint64_t now = time(NULL);
+	RestartCounters *counters = &(added->restartCounters);
+
+	counters->count = 1;
+	counters->position = 0;
+	counters->startTime[counters->position] = now;
+
+	log_info("Started pg_autoctl %s service with pid %d",
+			 added->name, added->pid);
+
+	supervisor->serviceCount = newCount;
+	supervisor->pendingSubprocessCount++;
+
+	if (!supervisor_update_pidfile(supervisor))
+	{
+		log_error("Failed to update pidfile \"%s\" after adding service \"%s\"",
+				  supervisor->pidfile, added->name);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * supervisor_remove_service stops a currently-supervised service (found
+ * by pid) and removes it from the supervisor's own array, so it is no
+ * longer restarted on exit and no longer written to the pidfile.
+ *
+ * Sends `signal` (typically SIGTERM) and waits, briefly and boundedly,
+ * for the child to actually exit -- reaping it synchronously here rather
+ * than via supervisor_loop()'s own waitpid(WNOHANG) path, so the caller
+ * knows the removal is complete (and the slot genuinely reusable) by the
+ * time this returns, instead of racing the main loop's next iteration.
+ * A child still stuck after the wait is removed from supervision anyway
+ * (logged as a warning): whatever asked for this removal -- typically a
+ * membership that no longer exists -- has already decided this process
+ * shouldn't be tracked, stuck or not.
+ *
+ * Requires supervisor->services to be heap-allocated, same as
+ * supervisor_add_service() above.
+ */
+bool
+supervisor_remove_service(Supervisor *supervisor, pid_t pid, int signal)
+{
+	Service *found = NULL;
+
+	if (!supervisor_find_service(supervisor, pid, &found))
+	{
+		log_error("Failed to remove service with pid %d: not found", pid);
+		return false;
+	}
+
+	char name[NAMEDATALEN] = { 0 };
+
+	strlcpy(name, found->name, NAMEDATALEN);
+	int foundIndex = found - supervisor->services;
+
+	if (kill(pid, signal) != 0 && errno != ESRCH)
+	{
+		log_error("Failed to send signal %s to service \"%s\" with pid %d: %m",
+				  strsignal(signal), name, pid);
+		return false;
+	}
+
+	if (!supervisor_wait_for_exit(pid, SUPERVISOR_REMOVE_SERVICE_MAX_WAIT_MS))
+	{
+		log_warn("Service \"%s\" (pid %d) did not exit within %d ms of "
+				 "signal %s; removing it from supervision anyway",
+				 name, pid, SUPERVISOR_REMOVE_SERVICE_MAX_WAIT_MS,
+				 strsignal(signal));
+	}
+
+	/* close the gap in the array, keeping it packed */
+	for (int i = foundIndex; i < supervisor->serviceCount - 1; i++)
+	{
+		supervisor->services[i] = supervisor->services[i + 1];
+	}
+
+	supervisor->serviceCount--;
+	supervisor->pendingSubprocessCount--;
+
+	if (supervisor->serviceCount > 0)
+	{
+		Service *shrunk = realloc(supervisor->services,
+								  supervisor->serviceCount * sizeof(Service));
+
+		if (shrunk != NULL)
+		{
+			supervisor->services = shrunk;
+		}
+
+		/*
+		 * A failed shrink-realloc is harmless: the buffer is still valid
+		 * and still holds every remaining service correctly, just larger
+		 * than strictly needed -- keep using it as-is rather than fail
+		 * the whole removal over it.
+		 */
+	}
+
+	log_info("Removed service \"%s\" (was pid %d) from supervision", name, pid);
+
+	if (!supervisor_update_pidfile(supervisor))
+	{
+		log_error("Failed to update pidfile \"%s\" after removing service \"%s\"",
+				  supervisor->pidfile, name);
+		return false;
+	}
+
+	return true;
 }
 
 

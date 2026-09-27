@@ -99,6 +99,7 @@ cli_common_keeper_getopts(int argc, char **argv,
 
 	/* force some non-zero default values */
 	LocalOptionConfig.monitorDisabled = false;
+	LocalOptionConfig.fromArchiver = false;
 	LocalOptionConfig.groupId = -1;
 	LocalOptionConfig.network_partition_timeout = -1;
 	LocalOptionConfig.prepare_promotion_catchup = -1;
@@ -166,6 +167,23 @@ cli_common_keeper_getopts(int argc, char **argv,
 					errors++;
 				}
 				log_trace("--pgport %d", LocalOptionConfig.pgSetup.pgport);
+				break;
+			}
+
+			case 'J':
+			{
+				/* { "archive-confirm", required_argument, NULL, 'J' } */
+				if (strcmp(optarg, "on") != 0 && strcmp(optarg, "off") != 0)
+				{
+					log_error("Failed to parse --archive-confirm \"%s\": "
+							  "expected on or off", optarg);
+					errors++;
+					break;
+				}
+				strlcpy(LocalOptionConfig.pgSetup.archiveConfirm, optarg,
+						NAMEDATALEN);
+				log_trace("--archive-confirm %s",
+						  LocalOptionConfig.pgSetup.archiveConfirm);
 				break;
 			}
 
@@ -468,6 +486,14 @@ cli_common_keeper_getopts(int argc, char **argv,
 				/* { "run", no_argument, NULL, 'x' }, */
 				createAndRun = true;
 				log_trace("--run");
+				break;
+			}
+
+			case 'K':
+			{
+				/* { "from-archiver", no_argument, NULL, 'K' }, */
+				LocalOptionConfig.fromArchiver = true;
+				log_trace("--from-archiver");
 				break;
 			}
 

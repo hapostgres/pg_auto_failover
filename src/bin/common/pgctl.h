@@ -47,6 +47,7 @@ bool pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup);
 bool pg_basebackup(const char *pgdata,
 				   const char *pg_ctl,
 				   ReplicationSource *replicationSource);
+bool pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource);
 bool pg_rewind(const char *pgdata,
 			   const char *pg_ctl,
 			   ReplicationSource *replicationSource);
@@ -75,5 +76,16 @@ bool pgctl_identify_system(ReplicationSource *replicationSource);
 
 bool pg_is_running(const char *pg_ctl, const char *pgdata);
 bool pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname);
+
+bool prepare_primary_conninfo(char *primaryConnInfo,
+							  int primaryConnInfoSize,
+							  const char *primaryHost,
+							  int primaryPort,
+							  const char *replicationUsername,
+							  const char *dbname,
+							  const char *replicationPassword,
+							  const char *applicationName,
+							  SSLOptions sslOptions,
+							  bool escape);
 
 #endif /* PGCTL_H */

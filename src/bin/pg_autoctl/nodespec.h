@@ -54,10 +54,25 @@
  * NodeSpec — one-to-one with the [sections] of pg_autoctl_node.ini
  * ----------------------------------------------------------------------- */
 
+/*
+ * NodeSpecRole is what a node.ini "kind" asks pg_autoctl to run. It is
+ * distinct from PgInstanceKind (the keeper FSM guard axis): warm-standby and
+ * pitr never take part in the FSM nor register with the monitor.
+ */
+typedef enum
+{
+	NODESPEC_ROLE_POSTGRES = 0,  /* standalone | coordinator | worker */
+	NODESPEC_ROLE_MONITOR,
+	NODESPEC_ROLE_ARCHIVER,
+	NODESPEC_ROLE_WARM_STANDBY,  /* RESERVED: not implemented */
+	NODESPEC_ROLE_PITR           /* RESERVED: not implemented */
+} NodeSpecRole;
+
 typedef struct NodeSpec
 {
 	/* [node] */
-	PgInstanceKind kind;         /* postgres | coordinator | worker | monitor */
+	NodeSpecRole role;           /* from kind = ... */
+	PgInstanceKind pgKind;       /* role postgres only, else NODE_KIND_UNKNOWN */
 	char name[_POSIX_HOST_NAME_MAX]; /* --name; defaults to hostname when empty */
 	char hostname[_POSIX_HOST_NAME_MAX];
 	int port;                    /* Postgres port, default 5432 */
@@ -83,6 +98,7 @@ typedef struct NodeSpec
 	char ssl[32];                /* self-signed | verify-ca | verify-full | off */
 	char auth[32];               /* trust | md5 | scram | cert */
 	bool pg_hba_lan;             /* add --pg-hba-lan flag */
+	bool fromArchiver;           /* add --from-archiver flag (postgres kind only) */
 
 	/* [ssl]  — certificate paths for verify-ca / verify-full mode */
 	char ssl_ca_file[MAXPGPATH];
@@ -90,6 +106,7 @@ typedef struct NodeSpec
 	char ssl_key_file[MAXPGPATH];
 	bool createDeferred;         /* [launch] create=deferred: wait before create */
 	bool launchDeferred;         /* [launch] run=deferred: wait for node start */
+	char servePort[8];           /* [options] serve_port: archiver pg_walsender port */
 	char debianCluster[64];      /* [options] debian_cluster: run pg_createcluster */
 
 	/* [formation <name>]  — monitor kind: non-default formations to create */
@@ -134,6 +151,11 @@ typedef struct NodeSpecWatcher
 /* -----------------------------------------------------------------------
  * API
  * ----------------------------------------------------------------------- */
+
+bool nodespec_role_is_reserved(NodeSpecRole role);
+const char * nodespec_kind_string(const NodeSpec *spec);
+void nodespec_set_from_pgkind(NodeSpec *spec, PgInstanceKind pgKind);
+void nodespec_reject_reserved(const NodeSpec *spec);
 
 /* Parse a pg_autoctl_node.ini file into *spec.  Returns false on error. */
 bool nodespec_read(const char *path, NodeSpec *spec);

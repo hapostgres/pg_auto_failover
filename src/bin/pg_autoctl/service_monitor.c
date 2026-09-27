@@ -122,7 +122,7 @@ start_monitor(Monitor *monitor)
 			get_env_copy("PG_AUTOCTL_NODESPEC", specPath, sizeof(specPath)) &&
 			!IS_EMPTY_STRING_BUFFER(specPath) &&
 			nodespec_read(specPath, &post_init_spec) &&
-			post_init_spec.kind == NODE_KIND_UNKNOWN &&
+			post_init_spec.role == NODESPEC_ROLE_MONITOR &&
 			post_init_spec.formationCount > 0)
 		{
 			hasPostInit = true;

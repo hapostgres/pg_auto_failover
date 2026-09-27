@@ -1,9 +1,82 @@
 Introduction to pg_auto_failover
 ================================
 
-pg_auto_failover is an extension for PostgreSQL that monitors and manages
-failover for postgres clusters. It is optimised for simplicity and
-correctness.
+pg_auto_failover is a complete system for operating PostgreSQL in
+production. Its ``pg_autoctl`` process may runs `pid 1` or init in a
+container based environment and supervises the Postgres ``postmaster``
+underneath it. A dedicated monitor node coordinates state across every node
+in the cluster: the monitor is a Postgres instance with the
+``pgautofailover`` extension installed to implement our inter-node
+communication protocol.
+
+Together they provide full cluster management with a dynamic topology: nodes
+can be added, removed, and reconfigured while the cluster keeps serving
+production traffic, whether driven by an operator's own commands or
+automatically by the monitor's own health checks.
+
+Automated failover and full high availability can both be implemented and a
+production cluster can evolve from simple failover capabilities to enhanced
+data protection settings.
+
+Two modes of operation are available side by side: the traditional
+command-driven CLI (``pg_autoctl create ...``, ``pg_autoctl set ...``), and
+a specification- file-driven mode, where a single ``node.ini`` file
+describes a node's own desired configuration and :ref:`pg_autoctl_node_run`
+continuously reconciles reality to match it.
+
+.. _ha_dr_backups:
+
+High Availability and Disaster Recovery: One System
+------------------------------------------------------
+
+.. figure:: ./tikz/arch-ha-dr-typical.svg
+   :alt: Typical setup, High Availability from Patroni or repmgr, Disaster Recovery and Backups from pgBackRest or pgBarman, two entirely separate boxes
+
+   A typical setup reaches for a product per box: Patroni or repmgr for
+   High Availability, pgBackRest or pgBarman for Disaster Recovery and
+   Backups
+
+.. figure:: ./tikz/arch-ha-dr-pgautofailover.svg
+   :alt: With pg_auto_failover, High Availability and Disaster Recovery collapse into a single box, with Backups (pgBackRest or pgBarman) as the one remaining separate concern
+
+   With pg_auto_failover, High Availability and Disaster Recovery collapse
+   into one system; Backups remains its own concern
+
+With RDBMS such as PostgreSQL the concept of High Availability applies to
+the service and also the data. Where most PostgreSQL setups treat these as
+two separate problems, solved by two separate products, pg_auto_failover
+addresses both HA aspects into a single deployment.
+
+Postgres backup systems need to be able Point in Time Recovery, which
+requires an archiving implemnentation when using Postgres. Also, Disaster
+Recovery is built on-top of PITR. As a consequence, most systems are
+implementing Disaster Recovery with their backup software solution, not
+their High Availability solution.
+
+Running both solutions together means trusting two different failure
+domains, and, very often, discovering only during a real incident that they
+were never actually exercised together.
+
+pg_auto_failover starts from a different question: how to make things so
+simple to setup and test that they just work once shipped in production?
+
+High Availability of the Postgres service and Disaster Recovery of its data
+set are two sides of the same problem, best solved by one system designed
+around it rather than by gluing together two tools each designed in
+isolation.
+
+The same monitor that orchestrates failover also tracks every archiver's
+captured WAL and base backups; the same WAL stream and base backups a
+failover election already depends on to guarantee no data loss are what
+disaster recovery, including point-in-time recovery, is built on.
+
+High Availability and Disaster Recovery come from a single package, with a
+single control plane, rather than from two independently-operated systems
+that are only put to the test when a production incident happens.
+
+Backups — in the narrower sense of long-term retention, cataloguing, and
+cloud storage tiers — remain their own concern, typically still handled by a
+dedicated tool like pgBackRest or pgBarman.
 
 Single Standby Architecture
 ---------------------------
@@ -35,6 +108,38 @@ monitor), then the Monitor removes it from the `synchronous_standby_names`
 setting on the *primary* node. Until the *secondary* is back to being
 monitored healthy, failover and switchover operations are not allowed,
 preventing data loss.
+
+.. _archiving_and_disaster_recovery:
+
+Archiving & Disaster Recovery Architecture
+-------------------------------------------
+
+.. figure:: ./tikz/arch-archiver.svg
+   :alt: pg_auto_failover Architecture with a primary, a standby, and an archiver
+
+   pg_auto_failover architecture with a primary, a standby, and an archiver
+
+An **archiver** is a separate node, added on top of any of the architectures
+on this page — it applies just as well to the single-standby setup above as
+it does to a multi-standby fleet, since it addresses a different concern:
+disaster recovery, independent of how many nodes currently participate in
+the failover quorum.
+
+An archiver then register archiving nodes to groups on formations managed by
+the monitor it reports to. An archiving node is running ``pg_receivewal`` to
+maintain the Postgres PITR archive storage, and schedules regular base
+backup activity using ``pg_basebackup``. The *archiving node* reports to the
+pg_auto_failover Monitor and participates in a group Finite State Machine:
+it reports its WAL position and can be used in the replication quorum, and
+other nodes in the same group can fetch WAL from an *archiving node* (see
+REPORT_LSN and FORWARD_LSN states in the :ref:`failover_state_machine`:.
+
+For that, pg_auto_failover implements its own server-side implementation of
+the PostgreSQL replication protocol, a ``pg_walsender`` process that knows
+how to serve the data from the archive local on-disk location (or remote
+Cloud Object Storage) to the PostgreSQL client replication tools already
+listed: ``pg_basebackup`` and `pg_receivewal``, as described in more details
+in :ref:`archiving_architecture`.
 
 Multiple Standby Architecture
 -----------------------------

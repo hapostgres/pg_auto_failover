@@ -9,6 +9,7 @@
  */
 
 #include <dirent.h>
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,15 +69,6 @@ static bool prepare_recovery_settings(const char *pgdata,
 static bool escape_recovery_conf_string(char *destination,
 										int destinationSize,
 										const char *recoveryConfString);
-static bool prepare_primary_conninfo(char *primaryConnInfo,
-									 int primaryConnInfoSize,
-									 const char *primaryHost, int primaryPort,
-									 const char *replicationUsername,
-									 const char *dbname,
-									 const char *replicationPassword,
-									 const char *applicationName,
-									 SSLOptions sslOptions,
-									 bool escape);
 static bool prepare_conninfo_sslmode(PQExpBuffer buffer, SSLOptions sslOptions);
 
 static bool pg_write_recovery_conf(const char *pgdata,
@@ -946,6 +938,100 @@ ensure_default_settings_file_exists(const char *configFilePath,
 }
 
 
+extern char pg_autoctl_program[];
+
+/*
+ * append_shell_single_quoted appends value as a single-quoted shell word,
+ * doubling any percent sign (archive_command's own %% escape).
+ */
+static void
+append_shell_single_quoted(PQExpBuffer buffer, const char *value)
+{
+	appendPQExpBufferChar(buffer, '\'');
+
+	for (const char *p = value; *p != '\0'; p++)
+	{
+		if (*p == '\'')
+		{
+			appendPQExpBufferStr(buffer, "'\\''");
+		}
+		else if (*p == '%')
+		{
+			appendPQExpBufferStr(buffer, "%%");
+		}
+		else
+		{
+			appendPQExpBufferChar(buffer, *p);
+		}
+	}
+	appendPQExpBufferChar(buffer, '\'');
+}
+
+
+/*
+ * prepare_archive_confirm_settings writes archive_mode and archive_command
+ * when the node is managed by a keeper (pgSetup->archiveConfirm is "on" or
+ * "off"). archive_command never moves data: it only asks the monitor
+ * whether the archiver already holds the segment.
+ */
+static bool
+prepare_archive_confirm_settings(PQExpBuffer config, PostgresSetup *pgSetup)
+{
+	/* the standby settings file is written with a NULL pgSetup: not for us */
+	if (pgSetup == NULL)
+	{
+		return true;
+	}
+
+	if (strcmp(pgSetup->archiveConfirm, "off") == 0)
+	{
+		appendPQExpBufferStr(config, "archive_mode = off\n");
+		return true;
+	}
+
+	if (strcmp(pgSetup->archiveConfirm, "on") != 0)
+	{
+		return true;
+	}
+
+	if (pg_autoctl_program[0] != '/' || IS_EMPTY_STRING_BUFFER(pgSetup->pgdata))
+	{
+		log_warn("Failed to set archive_command: no absolute path for "
+				 "pg_autoctl, leaving archive_mode alone");
+		return true;
+	}
+
+	PQExpBuffer command = createPQExpBuffer();
+
+	if (command == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
+	append_shell_single_quoted(command, pg_autoctl_program);
+	appendPQExpBufferStr(command, " archive command --pgdata ");
+	append_shell_single_quoted(command, pgSetup->pgdata);
+	appendPQExpBufferStr(command, " %f");
+
+	/* now quote the command for postgresql.conf */
+	appendPQExpBufferStr(config, "archive_mode = on\narchive_command = '");
+
+	for (const char *p = command->data; *p != '\0'; p++)
+	{
+		if (*p == '\'' || *p == '\\')
+		{
+			appendPQExpBufferChar(config, *p);
+		}
+		appendPQExpBufferChar(config, *p);
+	}
+	appendPQExpBufferStr(config, "'\n");
+
+	destroyPQExpBuffer(command);
+	return true;
+}
+
+
 /*
  * prepare_guc_settings_from_pgsetup replaces some of the given GUC settings
  * with dynamic values found in the pgSetup argument, and prepare them in the
@@ -1147,6 +1233,13 @@ prepare_guc_settings_from_pgsetup(const char *configFilePath,
 		}
 	}
 
+	/* archive_command confirmation, see pg_autoctl archive command */
+	if (!prepare_archive_confirm_settings(config, pgSetup))
+	{
+		destroyPQExpBuffer(config);
+		return false;
+	}
+
 	if (includeTuning)
 	{
 		if (!pgtuning_prepare_guc_settings(postgres_tuning,
@@ -1250,13 +1343,36 @@ ensure_empty_tablespace_dirs(const char *pgdata)
 
 
 /*
- * Call pg_basebackup, using a temporary directory for the duration of the data
- * transfer.
+ * pg_basebackup_fetch runs the real pg_basebackup client against
+ * replicationSource, writing the result into replicationSource->backupDir
+ * and nowhere else -- no assumption about what the caller does with that
+ * directory afterward, unlike pg_basebackup() below, whose whole point is
+ * to become the caller's new PGDATA. Split out so a caller that wants a
+ * base backup as an independent, standalone artifact (service_archiver_
+ * basebackup.c's own base-backup production, which must never touch the
+ * archiver's own pgdata/WAL-cache root) can fetch one without pg_
+ * basebackup()'s own rmtree-and-move ending -- see that function's own
+ * comment for why calling it unmodified for that use case would be wrong.
+ *
+ * replicationSource->walMethod/label (both optional, pgsql.h's own
+ * comment on the fields) are the two places this differs from the
+ * defaults every existing pg_basebackup()-only caller already relies on:
+ * empty means the exact same "--wal-method=stream", no --label behavior
+ * this function always had before the split.
  */
+
+/*
+ * How many times the HBA-readiness preflight below retries
+ * pgctl_identify_system() before giving up and launching pg_basebackup
+ * anyway -- each attempt's own connection already carries up to ~2s of
+ * internal retry (pgsql_set_interactive_retry_policy()'s own comment),
+ * so this bounds the preflight's own total wait to roughly that times
+ * this count, without an extra outer sleep compounding it further.
+ */
+#define PG_BASEBACKUP_HBA_MAX_ATTEMPTS 10
+
 bool
-pg_basebackup(const char *pgdata,
-			  const char *pg_ctl,
-			  ReplicationSource *replicationSource)
+pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource)
 {
 	int returnCode;
 	char pg_basebackup[MAXPGPATH];
@@ -1264,7 +1380,8 @@ pg_basebackup(const char *pgdata,
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
-	char *args[18];  /* enough for all pg_basebackup flags incl. --checkpoint=fast */
+	char *args[22];  /* enough for all pg_basebackup flags incl. --checkpoint=fast
+	                  * and --label */
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
@@ -1272,12 +1389,6 @@ pg_basebackup(const char *pgdata,
 
 	log_debug("mkdir -p \"%s\"", replicationSource->backupDir);
 	if (!ensure_empty_dir(replicationSource->backupDir, 0700))
-	{
-		/* errors have already been logged. */
-		return false;
-	}
-
-	if (!ensure_empty_tablespace_dirs(pgdata))
 	{
 		/* errors have already been logged. */
 		return false;
@@ -1327,10 +1438,31 @@ pg_basebackup(const char *pgdata,
 	args[argsIndex++] = replicationSource->userName;
 	args[argsIndex++] = "--verbose";
 	args[argsIndex++] = "--progress";
-	args[argsIndex++] = "--max-rate";
-	args[argsIndex++] = replicationSource->maximumBackupRate;
-	args[argsIndex++] = "--wal-method=stream";
+
+	char walMethodArg[NAMEDATALEN + 16] = { 0 };
+
+	sformat(walMethodArg, sizeof(walMethodArg), "--wal-method=%s",
+			IS_EMPTY_STRING_BUFFER(replicationSource->walMethod)
+			? "stream"
+			: replicationSource->walMethod);
+	args[argsIndex++] = walMethodArg;
 	args[argsIndex++] = "--checkpoint=fast";
+
+	/* --max-rate/--label only make sense together with a streamed,
+	 * self-consistent backup -- service_archiver_basebackup.c's own
+	 * --wal-method=none callers leave maximumBackupRate empty and set
+	 * label instead */
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->maximumBackupRate))
+	{
+		args[argsIndex++] = "--max-rate";
+		args[argsIndex++] = replicationSource->maximumBackupRate;
+	}
+
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->label))
+	{
+		args[argsIndex++] = "--label";
+		args[argsIndex++] = replicationSource->label;
+	}
 
 	/* we don't use a replication slot e.g. when upstream is a standby */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))
@@ -1340,6 +1472,40 @@ pg_basebackup(const char *pgdata,
 	}
 
 	args[argsIndex] = NULL;
+
+	/*
+	 * Preflight: retry pgctl_identify_system() (a plain replication-mode
+	 * IDENTIFY_SYSTEM, "check that HBA is ready" per its own comment)
+	 * against this same source, up to PG_BASEBACKUP_HBA_MAX_ATTEMPTS
+	 * times, before ever launching the real pg_basebackup subprocess
+	 * below. Closes a real, observed startup race: a freshly-registered
+	 * node's own pg_hba.conf entry on the source can take a moment to
+	 * propagate (HBA rules are written and the config reloaded
+	 * asynchronously, service_keeper.c's own node-list refresh), and
+	 * unlike pg_receivewal (which retries a failed connection internally,
+	 * see wait_for_primary_and_slot_ready()'s own comment, service_
+	 * archiver_pgreceivewal_ctl.c, for the same race on that path) plain
+	 * pg_basebackup has no such retry of its own -- a single race hit
+	 * here was fatal, no second chance. No extra sleep between attempts:
+	 * pgctl_identify_system()'s own connection already carries pgsql_
+	 * init()'s "interactive" retry policy (up to ~2s of internal backoff
+	 * per call, pgsql_set_interactive_retry_policy()'s own comment), so
+	 * an added outer sleep would only compound that delay rather than
+	 * add useful coverage. Best-effort, not a hard gate: exhausting every
+	 * attempt just means this preflight didn't get to close the race, and
+	 * pg_basebackup runs anyway with its own real error if the HBA rule
+	 * genuinely still isn't there.
+	 */
+	for (int attempt = 0;
+		 attempt < PG_BASEBACKUP_HBA_MAX_ATTEMPTS &&
+		 !(asked_to_stop || asked_to_stop_fast || asked_to_quit);
+		 attempt++)
+	{
+		if (pgctl_identify_system(replicationSource))
+		{
+			break;
+		}
+	}
 
 	/*
 	 * We do not want to call setsid() when running this program, as the
@@ -1385,6 +1551,35 @@ pg_basebackup(const char *pgdata,
 	if (returnCode != 0)
 	{
 		log_error("Failed to run pg_basebackup: exit code %d", returnCode);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * Call pg_basebackup, using a temporary directory for the duration of the
+ * data transfer, then replace pgdata with the result -- standby init's own
+ * use of a base backup: pgdata becomes the fetched backup. NOT what every
+ * caller wants a base backup for (see pg_basebackup_fetch()'s own comment,
+ * just above); ordinary standby creation is the only caller that should
+ * ever reach this rmtree-and-move ending.
+ */
+bool
+pg_basebackup(const char *pgdata,
+			  const char *pg_ctl,
+			  ReplicationSource *replicationSource)
+{
+	if (!ensure_empty_tablespace_dirs(pgdata))
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	if (!pg_basebackup_fetch(pg_ctl, replicationSource))
+	{
+		/* errors have already been logged. */
 		return false;
 	}
 
@@ -1580,16 +1775,56 @@ log_program_output(Program prog, int outLogLevel, int errorLogLevel)
 bool
 pg_ctl_initdb(const char *pg_ctl, const char *pgdata)
 {
+	/*
+	 * PG_AUTOCTL_INITDB_OPTIONS adds initdb options (for instance
+	 * --wal-segsize=32, which can only be chosen at initdb time), the same
+	 * way PostgreSQL's own tooling takes them. The value ends up inside a
+	 * shell-quoted string, so anything that is not a plain option character
+	 * is refused rather than escaped.
+	 */
+	char extraOptions[BUFSIZE] = { 0 };
+	char optionString[BUFSIZE] = { 0 };
+
+	if (env_exists("PG_AUTOCTL_INITDB_OPTIONS"))
+	{
+		(void) get_env_copy("PG_AUTOCTL_INITDB_OPTIONS", extraOptions,
+							sizeof(extraOptions));
+	}
+
+	for (const char *c = extraOptions; *c != '\0'; c++)
+	{
+		if (!(isalnum((unsigned char) *c) || strchr("=_.,/ -", *c) != NULL))
+		{
+			log_fatal("Refusing PG_AUTOCTL_INITDB_OPTIONS: unexpected "
+					  "character '%c'", *c);
+			return false;
+		}
+	}
+
+	/* one shell-quoted word per option: initdb sees separate arguments */
+	sformat(optionString, sizeof(optionString), "'--auth=trust'");
+
+	char *saveptr = NULL;
+
+	for (char *tok = strtok_r(extraOptions, " ", &saveptr);
+		 tok != NULL;
+		 tok = strtok_r(NULL, " ", &saveptr))
+	{
+		size_t used = strlen(optionString);
+
+		sformat(optionString + used, sizeof(optionString) - used, " '%s'", tok);
+	}
+
 	/* initdb takes time, so log about the operation BEFORE doing it */
 	log_info("Initialising a PostgreSQL cluster at \"%s\"", pgdata);
-	log_info("%s initdb -s -D %s --option '--auth=trust'", pg_ctl, pgdata);
+	log_info("%s initdb -s -D %s --option %s", pg_ctl, pgdata, optionString);
 
 	Program program = run_program(pg_ctl,
 								  "--silent",
 								  "--pgdata", pgdata,
 
 	                              /* avoid warning message */
-								  "--option", "'--auth=trust'", "initdb",
+								  "--option", optionString, "initdb",
 								  NULL);
 
 	bool success = program.returnCode == 0;
@@ -2593,7 +2828,7 @@ escape_recovery_conf_string(char *destination, int destinationSize,
  *
  * Also, pg_rewind needs a database to connect to.
  */
-static bool
+bool
 prepare_primary_conninfo(char *primaryConnInfo,
 						 int primaryConnInfoSize,
 						 const char *primaryHost,
@@ -2743,12 +2978,28 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 	char primaryConnInfoReplication[MAXCONNINFO] = { 0 };
 	PGSQL replicationClient = { 0 };
 
+	/*
+	 * Real Postgres ignores dbname for a replication=true connection (see
+	 * libpqrcv_connect's own comment, libpqwalreceiver.c: "The database
+	 * name is ignored by the server in replication mode, but specify
+	 * 'replication' for .pgpass lookup"), so this is a no-op against a real
+	 * primary. It is NOT a no-op against pg_walsender: unlike real
+	 * walreceiver/pg_basebackup, which both default an unset dbname to the
+	 * literal "replication" themselves (walreceiver hardcodes it;
+	 * pg_basebackup's own GetConnection() does too), this is our own raw
+	 * libpq connection with no such default applied for us -- leaving
+	 * dbname unset here falls through to plain libpq's *own* default
+	 * instead (dbname = the connection's user name, fe-connect.c), which
+	 * pg_walsender's routes file was never going to have an entry for.
+	 * Passing it explicitly matches what every other replication client
+	 * already sends on the wire.
+	 */
 	if (!prepare_primary_conninfo(primaryConnInfo,
 								  MAXCONNINFO,
 								  primaryNode->host,
 								  primaryNode->port,
 								  replicationSource->userName,
-								  NULL, /* no database */
+								  "replication",
 								  replicationSource->password,
 								  replicationSource->applicationName,
 								  replicationSource->sslOptions,

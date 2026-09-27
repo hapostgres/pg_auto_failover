@@ -58,6 +58,7 @@ typedef struct pg_control_data
 	char latestCheckpointRedoLSN[PG_LSN_MAXLENGTH];
 	char minRecoveryEndLSN[PG_LSN_MAXLENGTH];
 	uint32_t timeline_id;
+	uint32_t wal_segment_size;          /* bytes per WAL segment */
 } PostgresControlData;
 
 /*
@@ -131,6 +132,7 @@ typedef enum PgInstanceKind
 	NODE_KIND_STANDALONE = 1,
 	NODE_KIND_CITUS_COORDINATOR = 2,
 	NODE_KIND_CITUS_WORKER = 4,
+	NODE_KIND_ARCHIVER = 8,
 
 	NODE_KIND_ANY = 0xff
 } PgInstanceKind;
@@ -233,6 +235,7 @@ typedef struct pg_setup
 	NodeReplicationSettings settings;       /* node replication settings */
 	SSLOptions ssl;                         /* ssl options */
 	char citusClusterName[NAMEDATALEN];     /* citus.cluster_name */
+	char archiveConfirm[NAMEDATALEN];       /* "on", "off" or "" (not managed) */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')

@@ -95,6 +95,10 @@ bool fsm_prepare_cascade(Keeper *keeper);
 bool fsm_follow_new_primary(Keeper *keeper);
 bool fsm_cleanup_as_primary(Keeper *keeper);
 
+bool fsm_init_archiver(Keeper *keeper);
+bool fsm_archiver_report_lsn(Keeper *keeper);
+bool fsm_archiver_follow_new_primary(Keeper *keeper);
+
 bool fsm_init_from_standby(Keeper *keeper);
 
 bool fsm_drop_node(Keeper *keeper);

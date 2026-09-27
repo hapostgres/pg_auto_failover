@@ -20,6 +20,7 @@
 #include "file_utils.h"
 #include "ipaddr.h"
 #include "log.h"
+#include "monitor_hosts.h"
 #include "string_utils.h"
 #include "ws_util.h"
 
@@ -38,18 +39,19 @@ static const char *hbaHeader =
 	"# TYPE     host (TLS or not), hostssl (TLS only), hostnossl (no TLS)\n"
 	"# ROUTE    all, or <formation>/<group>\n"
 	"# USER     all, or a role name\n"
-	"# ADDRESS  all, samehost, samenet, an IP address, IP/prefix, a hostname,\n"
-	"#          or a .domain.suffix (matched through every reverse DNS name\n"
-	"#          of the client, each confirmed by a forward lookup)\n"
+	"# ADDRESS  all, samehost, samenet, monitor, an IP address, IP/prefix, a\n"
+	"#          hostname, or a\n"
+	"#          .domain.suffix (matched through every reverse DNS name of\n"
+	"#          the client, each confirmed by a forward lookup);\n"
+	"#          \"monitor\" is every node the monitor lists for the route\n"
 	"# METHOD   scram-sha-256 (checked against archiver-passwd), trust, reject\n"
 	"#\n";
 
 
 /*
- * There is no automatic node admission in this PR (no monitor integration
- * yet, see hba.h's own header comment): the default file only documents how
- * to add a rule, it never admits anything by itself, so every connection is
- * rejected until an operator adds a line.
+ * The default admits the nodes the monitor lists for a route, with a
+ * password (SCRAM-SHA-256) and over TLS. Without a server certificate TLS
+ * is not available, and the rule is a plain "host" one.
  */
 bool
 hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable)
@@ -66,24 +68,30 @@ hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable)
 	appendPQExpBufferStr(buffer, hbaHeader);
 	appendPQExpBufferStr(
 		buffer,
-		"# No rule matches anything yet: every connection is rejected until\n"
-		"# a line is added below, one per host allowed to connect, with the\n"
-		"# replication password given to pg_autoctl create archiver\n"
-		"# --replication-password, for instance:\n");
+		"# Nodes registered with the monitor (standbys and their pg_basebackup,\n"
+		"# streaming and restore_command connections), with the replication\n"
+		"# password given to pg_autoctl create archiver --replication-password:\n");
 
 	if (tlsAvailable)
 	{
 		appendPQExpBuffer(buffer,
-						  "# hostssl  all  " PG_AUTOCTL_REPLICA_USERNAME
-						  "  10.1.0.0/16  scram-sha-256\n");
+						  "hostssl  all  " PG_AUTOCTL_REPLICA_USERNAME
+						  "  monitor  scram-sha-256\n");
 	}
 	else
 	{
 		appendPQExpBuffer(buffer,
 						  "# no server.crt/server.key in this directory: TLS is off\n"
-						  "# host     all  " PG_AUTOCTL_REPLICA_USERNAME
-						  "  10.1.0.0/16  scram-sha-256\n");
+						  "host     all  " PG_AUTOCTL_REPLICA_USERNAME
+						  "  monitor  scram-sha-256\n");
 	}
+
+	appendPQExpBufferStr(
+		buffer,
+		"#\n"
+		"# A host the monitor does not know about, such as a PITR restore target,\n"
+		"# needs a line of its own, for instance:\n"
+		"# hostssl  default/0  pitr_restore  192.0.2.0/24  scram-sha-256\n");
 
 	bool ok = !PQExpBufferBroken(buffer) &&
 			  write_file_atomic(buffer->data, buffer->len, (char *) hbaPath);
@@ -140,11 +148,21 @@ suffix_matches(const char *suffix, const char *peerIP)
 
 
 static bool
-rule_address_matches(const char *address, const char *peerIP)
+rule_address_matches(const char *address, const char *routeKey,
+					 const char *routePath, const char *monitorUriPath,
+					 const char *refreshSockPath, const char *peerIP)
 {
 	if (streq(address, "all"))
 	{
 		return true;
+	}
+
+	if (streq(address, "monitor"))
+	{
+		/* no known route (routePath NULL): "monitor" matches nothing */
+		return routePath != NULL &&
+			   monitor_hosts_contain(routeKey, routePath, monitorUriPath,
+									 refreshSockPath, peerIP);
 	}
 
 	if (strchr(address, '/') != NULL)
@@ -487,7 +505,9 @@ hba_parse(const char *hbaPath, char *contents, HbaRule **rulesOut,
 
 
 bool
-hba_lookup(const char *hbaPath, const char *routeKey, const char *user,
+hba_lookup(const char *hbaPath, const char *routePath,
+		   const char *monitorUriPath, const char *refreshSockPath,
+		   const char *routeKey, const char *user,
 		   const char *peerIP, bool isTLS, WsAuthMethod *method)
 {
 	char *contents = NULL;
@@ -522,7 +542,8 @@ hba_lookup(const char *hbaPath, const char *routeKey, const char *user,
 		if (typeMatches &&
 			(streq(fields[1], "all") || streq(fields[1], routeKey)) &&
 			(streq(fields[2], "all") || streq(fields[2], user)) &&
-			rule_address_matches(fields[3], peerIP))
+			rule_address_matches(fields[3], routeKey, routePath,
+								 monitorUriPath, refreshSockPath, peerIP))
 		{
 			*method = rules[i].method;
 			break;

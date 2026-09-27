@@ -96,6 +96,9 @@ pg_setup_init(PostgresSetup *pgSetup,
 	/* Also make sure we keep the citus specific clusterName option */
 	strlcpy(pgSetup->citusClusterName, options->citusClusterName, NAMEDATALEN);
 
+	/* keep the archive_command confirmation switch too */
+	strlcpy(pgSetup->archiveConfirm, options->archiveConfirm, NAMEDATALEN);
+
 	/* check or find pg_ctl, unless we already have it */
 	if (IS_EMPTY_STRING_BUFFER(pgSetup->pg_ctl) ||
 		IS_EMPTY_STRING_BUFFER(pgSetup->pg_version))
@@ -1496,10 +1499,11 @@ nodeKindFromString(const char *nodeKind)
 		NODE_KIND_UNKNOWN,
 		NODE_KIND_STANDALONE,
 		NODE_KIND_CITUS_COORDINATOR,
-		NODE_KIND_CITUS_WORKER
+		NODE_KIND_CITUS_WORKER,
+		NODE_KIND_ARCHIVER
 	};
 	char *kindList[] = {
-		"", "unknown", "standalone", "coordinator", "worker", NULL
+		"", "unknown", "standalone", "coordinator", "worker", "archiver", NULL
 	};
 
 	for (int listIndex = 0; kindList[listIndex] != NULL; listIndex++)
@@ -1544,6 +1548,11 @@ nodeKindToString(PgInstanceKind kind)
 		case NODE_KIND_CITUS_WORKER:
 		{
 			return "worker";
+		}
+
+		case NODE_KIND_ARCHIVER:
+		{
+			return "archiver";
 		}
 
 		default:

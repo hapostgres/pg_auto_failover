@@ -1,0 +1,54 @@
+% Fix for: https://tex.stackexchange.com/a/315027/43228
+\RequirePackage{luatex85}
+\documentclass[border=10pt,17pt]{standalone}
+
+\usepackage{cfr-lm}
+\usepackage{pgf}
+\usepackage{tikz}
+\usetikzlibrary{arrows,shapes,snakes,automata,backgrounds,petri}
+\usetikzlibrary{shapes.multipart}
+
+\begin{document}
+
+%% sans-serif fonts, large by default, and bold too
+\sffamily
+\sbweight
+\bfseries
+\large
+
+\begin{tikzpicture}[>=stealth',bend angle=45,auto,rounded corners]
+
+  \input{common.tex}
+
+  %% \draw [help lines] (-11,0) grid (11,24);
+
+  \node  (p)   at (0,20)   [primary]
+         {\textbf{\Large Primary}};
+  \node  (s)   at (0,12)   [standby]
+         {\textbf{\Large Secondary}};
+  \node  (app) at (-8,16)  [app]           {\textbf{Application}};
+
+  \node  (a)   at (9,20)   [archiver]
+         {\textbf{\normalsize Archiver}
+           \nodepart{second}
+           \textbf{\large ARCHIVING}
+           \nodepart[align=left]{third}
+           \texttt{WAL cache} \\
+           \texttt{Base backups}
+         };
+
+  \node  (m)   at (9,12)   [monitor]       {\textbf{Monitor}};
+
+  \path (app.north east) edge [sql,out=90,in=180]   node {SQL} (p)
+        (app.south east) edge [sqlf,out=-90,in=180] node[below] {SQL (fallback)} (s)
+        (p)   edge [sr]
+                                     node[left]   {Streaming}
+                                     node [right] {Replication} (s)
+        (p.east) edge [wal]          node[above,pos=0.38] {WAL streaming}
+                                     node[below,pos=0.38] {(\texttt{pg\_receivewal})} (a.west)
+        (a.south) edge [hc]          node[right] {WAL reports}          (m.north)
+        (m.west)  edge [hc,out=180,in=-70]  node[below,sloped] {Health checks} (s.east)
+        (m.east)  edge [hc,out=20,in=-20,looseness=1.6]  node[right] {Health checks} (p.east);
+\end{tikzpicture}
+
+\end{document}

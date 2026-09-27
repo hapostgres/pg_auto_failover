@@ -1,0 +1,93 @@
+# A warm standby built and fed from pg_walsender with nothing but Postgres
+# core commands (plus `pg_autoctl restore command`, wrapping FETCH_FILE's
+# client, as the restore_command):
+#
+#   * pg_basebackup against the archiver creates the data directory;
+#   * restore_command fetches one WAL file at a time from the archiver via
+#     `pg_autoctl restore command` (calls ws_fetch_file_client() directly,
+#     in-process, see cli_archiver.c/restore_command.c), the classic warm
+#     standby;
+#   * primary_conninfo points a stock walreceiver at the archiver as well,
+#     which then streams from it (START_REPLICATION);
+#   * pg_ctl promote turns it into a primary.
+#
+# node2 is never registered with the monitor: it is a plain Postgres cluster
+# in /tmp, like a PITR restore target, so the archiver needs an explicit HBA
+# line and a role with a password for it (the default line only admits nodes
+# the monitor lists). Everything travels over TLS with SCRAM-SHA-256.
+#
+# Predecessor: archiver_walsender_auth.pgaf covers the authentication itself.
+
+cluster {
+    monitor
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
+        node2 create and launch deferred
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+    wait until archiver1 state is archiving  timeout 60s
+    wait until sql monitor {
+        SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
+    } is { complete }  timeout 120s
+    exec archiver1 bash -c 'PGPASSWORD=pitr-pw pg_walsender scram-secret --user pitr_restore >> /var/lib/postgres/pgaf/archiver-passwd'
+    exec archiver1 bash -c 'echo "hostssl default/0 pitr_restore node2 scram-sha-256" >> /var/lib/postgres/pgaf/archiver-hba.conf'
+}
+
+teardown {
+    compose down
+}
+
+step test_001_base_backup_from_the_archiver {
+    exec node2 bash -c 'PGPASSWORD=pitr-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --pgdata /tmp/warm -X none --no-manifest && test -f /tmp/warm/PG_VERSION'
+}
+
+step test_002_replay_with_restore_command_only {
+    # node2 is a plain Postgres cluster with no pg_auto_failover node of its
+    # own (see this file's own header comment): `pg_autoctl restore command
+    # --set-up` writes the small cache file (host/port/route/user, never a
+    # password -- that stays PGPASSWORD/.pgpass's job) so the restore_
+    # command line itself carries none of them, matching `archive command`'s
+    # own archiver-confirm cache for the same class of problem.
+    exec node2 bash -c 'pg_autoctl restore command --set-up --pgdata /tmp/warm --host archiver1 --port 6543 --route default/0 --user pitr_restore'
+
+    # a warm standby: recovery.signal-style standby, WAL only through the
+    # restore_command, one file at a time from the archiver via `pg_autoctl
+    # restore command` (see archiver_walsender_auth.pgaf/test_003 above,
+    # which drives the very same command directly)
+    exec node2 bash -c 'mkdir -p /tmp/warm-sock && printf "%b\n" "port = 5433" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/warm-sock\x27" "hot_standby = on" "ssl = off" "synchronous_standby_names = \x27\x27" "wal_retrieve_retry_interval = 1s" "restore_command = \x27PGPASSWORD=pitr-pw PGSSLMODE=require pg_autoctl restore command --pgdata /tmp/warm %f %p\x27" >> /tmp/warm/postgresql.auto.conf && touch /tmp/warm/standby.signal && (pg_ctl -D /tmp/warm -w -l /tmp/warm.log start || (cat /tmp/warm.log; false))'
+
+    sql node1 { CREATE TABLE warm(a int); INSERT INTO warm SELECT generate_series(1, 1000); }
+    let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg1}') } is { t }  timeout 60s
+
+    exec node2 bash -c 'for i in $(seq 90); do n=$(psql -h /tmp/warm-sock -p 5433 -d demo -Atc "SELECT count(*) FROM warm" 2>/dev/null); test "$n" = 1000 && exit 0; sleep 1; done; grep -h -v "Failed to fetch\|does not exist\|waiting for WAL" $(find /tmp/warm -maxdepth 3 -name "*.log") | grep -E "redo|restored|consistent|invalid|reached|end of|checkpoint record|entering|unexpected|could not|selected|standby" | tail -n 30; exit 1'
+    exec node2 bash -c 'psql -h /tmp/warm-sock -p 5433 -d demo -Atc "SELECT pg_is_in_recovery()" | grep -qx t'
+    exec node2 bash -c 'grep -q "restored log file" $(find /tmp/warm -maxdepth 3 -name "*.log")'
+}
+
+step test_003_stream_from_the_archiver {
+    # add a walreceiver pointed at the archiver; a real walreceiver sends
+    # "replication" as its database, the single route is picked from that
+    exec node2 bash -c 'printf "%b\n" "primary_conninfo = \x27host=archiver1 port=6543 user=pitr_restore password=pitr-pw sslmode=require\x27" >> /tmp/warm/postgresql.auto.conf && pg_ctl -D /tmp/warm reload'
+    exec node2 bash -c 'for i in $(seq 60); do s=$(psql -h /tmp/warm-sock -p 5433 -d demo -Atc "SELECT status FROM pg_stat_wal_receiver" 2>/dev/null); test "$s" = streaming && exit 0; sleep 1; done; exit 1'
+
+    sql node1 { INSERT INTO warm SELECT generate_series(1001, 2000); }
+    let seg2 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg2}') } is { t }  timeout 60s
+    exec node2 bash -c 'for i in $(seq 90); do n=$(psql -h /tmp/warm-sock -p 5433 -d demo -Atc "SELECT count(*) FROM warm" 2>/dev/null); test "$n" = 2000 && exit 0; sleep 1; done; grep -h -v "Failed to fetch\|does not exist\|waiting for WAL" $(find /tmp/warm -maxdepth 3 -name "*.log") | grep -E "redo|restored|consistent|invalid|reached|end of|checkpoint record|entering|unexpected|could not|selected|standby" | tail -n 30; exit 1'
+}
+
+step test_004_promote {
+    exec node2 bash -c 'pg_ctl -D /tmp/warm -w promote && psql -h /tmp/warm-sock -p 5433 -d demo -Atc "SELECT pg_is_in_recovery()" | grep -qx f'
+    exec node2 bash -c 'psql -h /tmp/warm-sock -p 5433 -d demo -Atc "INSERT INTO warm VALUES (0)"'
+}
+
+sequence
+    test_001_base_backup_from_the_archiver
+    test_002_replay_with_restore_command_only
+    test_003_stream_from_the_archiver
+    test_004_promote

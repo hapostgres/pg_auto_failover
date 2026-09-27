@@ -1,0 +1,100 @@
+# The primary stays PRIMARY, with synchronous replication, when its only live
+# synchronous standby is the archiver.
+#
+# The design's "budget failover setup": primary + secondary + archiver, the
+# archiver a replication-quorum member (ANY 1 of (secondary, archiver)). When
+# the secondary dies the archiver alone satisfies the quorum: the monitor must
+# NOT demote the primary to wait_primary (which switches synchronous
+# replication off) or block its writes. Only when NO quorum standby is left,
+# neither the secondary nor the archiver, does the primary fall back to
+# wait_primary, as it always did.
+#
+#   test_001  archiver made a quorum member: it appears in
+#             synchronous_standby_names and as a sync/quorum standby
+#   test_002  the secondary dies: node2 goes catchingup, node1 stays
+#             primary/primary (checked every second for 20s), synchronous
+#             commits keep working, the archiver is the sync standby
+#   test_003  the secondary returns: back to secondary, node1 still primary
+#   test_004  secondary AND archiver down: no quorum standby left, node1 goes
+#             wait_primary and writes continue; both back: primary again
+#
+# The archiver is a quorum member but never a failover candidate
+# (candidate_priority 0): with the secondary dead and the primary lost too
+# there is nothing to promote, and this spec does not pretend otherwise.
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+    wait until archiver1 state is archiving  timeout 120s
+    sql node1 { CREATE TABLE fsmq(a int); INSERT INTO fsmq VALUES (1); }
+}
+
+teardown {
+    compose down
+}
+
+step test_001_archiver_is_a_quorum_member {
+    sql monitor { SELECT pgautofailover.set_node_replication_quorum('default', 'archiver-1-0', true); }
+    let aid = sql monitor { SELECT nodeid FROM pgautofailover.node WHERE formationid = 'default' AND nodename = 'archiver-1-0' }
+
+    wait until sql monitor { SELECT reportedstate::text FROM pgautofailover.node WHERE nodename = 'node1' } is { primary }  timeout 90s
+    exec node1 bash -c 'for i in $(seq 90); do s=$(psql -d demo -Atc "SELECT sync_state FROM pg_stat_replication WHERE application_name = \$\$pgautofailover_standby_${aid}\$\$" 2>/dev/null); case "$s" in sync|quorum) exit 0;; esac; sleep 1; done; psql -d demo -Atc "SELECT application_name, sync_state FROM pg_stat_replication"; exit 1'
+    exec node1 bash -c 'psql -d demo -Atc "SHOW synchronous_standby_names" | grep -q "pgautofailover_standby_${aid}"'
+    exec node1 bash -c 'timeout 20 psql -d demo -c "INSERT INTO fsmq VALUES (2)"'
+}
+
+step test_002_secondary_dies_primary_stays_primary {
+    # SIGKILL: a crashed secondary. (A graceful stop makes pg_autoctl ask for
+    # maintenance instead, a different, planned, path.)
+    compose kill node2
+    wait until node2 stopped  timeout 60s
+    wait until sql monitor { SELECT goalstate::text FROM pgautofailover.node WHERE nodename = 'node2' } is { catchingup }  timeout 180s
+
+    # the monitor had every chance to demote node1 by now: it did not
+    exec monitor bash -c 'for i in $(seq 20); do s=$(psql -d pg_auto_failover -Atc "SELECT goalstate::text || \$\$/\$\$ || reportedstate::text FROM pgautofailover.node WHERE nodename = \$\$node1\$\$"); test "$s" = primary/primary || { echo "node1 is $s"; exit 1; }; sleep 1; done'
+
+    # synchronous commit still works, and the archiver is what acknowledges it
+    exec node1 bash -c 'start=$SECONDS; timeout 20 psql -d demo -c "INSERT INTO fsmq VALUES (3)" && echo "commit took $((SECONDS-start))s"'
+    exec node1 bash -c 'psql -d demo -Atc "SHOW synchronous_standby_names" | grep -q "pgautofailover_standby_${aid}"'
+    exec node1 bash -c 'psql -d demo -Atc "SELECT sync_state FROM pg_stat_replication WHERE application_name = \$\$pgautofailover_standby_${aid}\$\$" | grep -Eq "^(sync|quorum)$"'
+}
+
+step test_003_secondary_returns {
+    compose start node2
+    wait until node2 state is secondary  timeout 180s
+    wait until sql monitor { SELECT goalstate::text || '/' || reportedstate::text FROM pgautofailover.node WHERE nodename = 'node1' } is { primary/primary }  timeout 60s
+    exec node1 bash -c 'timeout 20 psql -d demo -c "INSERT INTO fsmq VALUES (4)"'
+}
+
+step test_004_no_quorum_standby_left {
+    compose kill node2
+    wait until node2 stopped  timeout 60s
+    compose stop archiver1
+    wait until archiver1 stopped  timeout 60s
+
+    # neither the secondary nor the archiver: as before archivers existed
+    wait until sql monitor { SELECT goalstate::text FROM pgautofailover.node WHERE nodename = 'node1' } is { wait_primary }  timeout 240s
+    exec node1 bash -c 'timeout 20 psql -d demo -c "INSERT INTO fsmq VALUES (5)"'
+
+    # everything back: primary again with both standbys
+    compose start node2
+    compose start archiver1
+    wait until node2 state is secondary  timeout 240s
+    wait until archiver1 state is archiving  timeout 240s
+    wait until sql monitor { SELECT goalstate::text || '/' || reportedstate::text FROM pgautofailover.node WHERE nodename = 'node1' } is { primary/primary }  timeout 120s
+}
+
+sequence
+    test_001_archiver_is_a_quorum_member
+    test_002_secondary_dies_primary_stays_primary
+    test_003_secondary_returns
+    test_004_no_quorum_standby_left

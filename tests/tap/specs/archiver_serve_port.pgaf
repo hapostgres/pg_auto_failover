@@ -1,0 +1,62 @@
+# `pg_autoctl create archiver --serve-port`: the archiver serves on a
+# non-default port, advertises it to the monitor, and nodes reach it there.
+#
+# The pgaftest DSL has no `serve-port` archiver option, so the archiver is
+# declared `create and launch deferred` (the container starts with nothing)
+# and created by hand in test_001 with --serve-port 6600.
+#
+#   test_001  --help documents the option; create with --serve-port 6600
+#   test_002  the monitor reports port 6600 (get_archiver_node), and a
+#             pg_basebackup from a node using exactly that host:port works
+#             while the default port 6543 is not listening
+#
+# Predecessor: archiver_walsender_auth.pgaf.
+
+cluster {
+    monitor
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+    }
+    archiver archiver1 {
+        replication-password "pgaf-repl-pw"
+        formation default
+        create and launch deferred
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_create_with_serve_port {
+    exec archiver1 bash -c 'pg_autoctl create archiver --help 2>&1 | grep -q -- "--serve-port"'
+    exec archiver1 pg_autoctl create archiver --pgdata /var/lib/postgres/pgaf --monitor postgresql://autoctl_node@monitor/pg_auto_failover --hostname archiver1 --name archiver1 --formation default --serve-port 6600 --replication-password pgaf-repl-pw --ssl-self-signed
+    exec archiver1 bash -c "nohup pg_autoctl run --pgdata /var/lib/postgres/pgaf > /tmp/archiver1-run.log 2>&1 & echo backgrounded pid $!"
+    wait until archiver state is archiving in default  timeout 120s
+    wait until sql monitor {
+        SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
+    } is { complete }  timeout 180s
+}
+
+step test_002_nodes_use_the_reported_port {
+    sql monitor { SELECT serveport FROM pgautofailover.get_archiver_node('default', 0); }
+    expect { 6600 }
+    let ahost = sql monitor { SELECT node_host FROM pgautofailover.get_archiver_node('default', 0) }
+    let aport = sql monitor { SELECT serveport FROM pgautofailover.get_archiver_node('default', 0) }
+
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=${ahost} port=${aport} user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb-port -X none --no-manifest && test -f /tmp/bb-port/PG_VERSION'
+    exec node1 bash -c 'if PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require connect_timeout=5" --pgdata /tmp/bb-default -X none --no-manifest 2>/dev/null; then exit 1; fi'
+
+    # WAL capture works too
+    sql node1 { CREATE TABLE sp(a int); INSERT INTO sp VALUES (1); }
+    let seg = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg}') } is { t }  timeout 90s
+}
+
+sequence
+    test_001_create_with_serve_port
+    test_002_nodes_use_the_reported_port

@@ -284,7 +284,11 @@ parse_controldata(PostgresControlData *pgControlData,
 
 		!parse_controldata_field_uint32(control_data_string,
 										"Latest checkpoint's TimeLineID",
-										&(pgControlData->timeline_id)))
+										&(pgControlData->timeline_id)) ||
+
+		!parse_controldata_field_uint32(control_data_string,
+										"Bytes per WAL segment",
+										&(pgControlData->wal_segment_size)))
 	{
 		log_error("Failed to parse pg_controldata output");
 		return false;

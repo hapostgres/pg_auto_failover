@@ -61,6 +61,16 @@
 	make_strbuf_option("pg_autoctl", "nodekind", NULL, false, NAMEDATALEN, \
 					   config->nodeKind)
 
+#define OPTION_AUTOCTL_ARCHIVER_ID(config) \
+	make_strbuf_option_default("pg_autoctl", "archiver_id", NULL, false, \
+							   INTSTRING_MAX_DIGITS, \
+							   config->archiverIdStr, "")
+
+#define OPTION_AUTOCTL_ARCHIVER_SERVE_PORT(config) \
+	make_strbuf_option_default("archiver", "serve_port", NULL, false, \
+							   INTSTRING_MAX_DIGITS, \
+							   config->servePortStr, "")
+
 #define OPTION_POSTGRESQL_PGDATA(config) \
 	make_strbuf_option("postgresql", "pgdata", "pgdata", true, MAXPGPATH, \
 					   config->pgSetup.pgdata)
@@ -102,6 +112,11 @@
 #define OPTION_POSTGRESQL_HBA_LEVEL(config) \
 	make_strbuf_option("postgresql", "hba_level", NULL, \
 					   false, MAXPGPATH, config->pgSetup.hbaLevelStr)
+
+#define OPTION_POSTGRESQL_ARCHIVE_CONFIRM(config) \
+	make_strbuf_option_default("postgresql", "archive_confirm", NULL, \
+							   false, NAMEDATALEN, \
+							   config->pgSetup.archiveConfirm, "on")
 
 #define OPTION_SSL_ACTIVE(config) \
 	make_int_option_default("ssl", "active", NULL, \
@@ -227,6 +242,8 @@
 		OPTION_AUTOCTL_HOSTNAME(config), \
 		OPTION_AUTOCTL_NODENAME(config), \
 		OPTION_AUTOCTL_NODEKIND(config), \
+		OPTION_AUTOCTL_ARCHIVER_ID(config), \
+		OPTION_AUTOCTL_ARCHIVER_SERVE_PORT(config), \
 		OPTION_POSTGRESQL_PGDATA(config), \
 		OPTION_POSTGRESQL_PG_CTL(config), \
 		OPTION_POSTGRESQL_USERNAME(config), \
@@ -237,6 +254,7 @@
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
 		OPTION_POSTGRESQL_HBA_LEVEL(config), \
+		OPTION_POSTGRESQL_ARCHIVE_CONFIRM(config), \
 		OPTION_SSL_ACTIVE(config), \
 		OPTION_SSL_MODE(config), \
 		OPTION_SSL_CA_FILE(config), \
@@ -475,6 +493,12 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	config->pgSetup.hbaLevel =
 		pgsetup_parse_hba_level(config->pgSetup.hbaLevelStr);
 
+	/* archive_command confirmation: default on, for keepers only */
+	if (IS_EMPTY_STRING_BUFFER(config->pgSetup.archiveConfirm))
+	{
+		strlcpy(config->pgSetup.archiveConfirm, "on", NAMEDATALEN);
+	}
+
 	/*
 	 * Required for grandfathering old clusters that don't have sslmode
 	 * explicitely set
@@ -514,6 +538,30 @@ keeper_config_read_file_skip_pgsetup(KeeperConfig *config,
 	if (!keeper_config_init_nodekind(config))
 	{
 		/* errors have already been logged. */
+		return false;
+	}
+
+	/* parse archiverIdStr (see keeper_config.h's own comment) into archiverId */
+	if (IS_EMPTY_STRING_BUFFER(config->archiverIdStr))
+	{
+		config->archiverId = 0;
+	}
+	else if (!stringToInt64(config->archiverIdStr, &(config->archiverId)))
+	{
+		log_error("Failed to parse pg_autoctl.archiver_id \"%s\" as a number",
+				  config->archiverIdStr);
+		return false;
+	}
+
+	/* parse servePortStr into serveport, 0 when not set */
+	config->serveport = 0;
+
+	if (!IS_EMPTY_STRING_BUFFER(config->servePortStr) &&
+		(!stringToInt(config->servePortStr, &(config->serveport)) ||
+		 config->serveport < 1 || config->serveport > 65535))
+	{
+		log_error("Failed to parse archiver.serve_port \"%s\" as a "
+				  "port number", config->servePortStr);
 		return false;
 	}
 

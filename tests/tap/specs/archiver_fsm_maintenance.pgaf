@@ -1,0 +1,95 @@
+# Planned maintenance of the secondary when the archiver is the primary's
+# other quorum standby (companion of archiver_fsm_quorum.pgaf, which covers a
+# crashed secondary).
+#
+# Before archivers counted as quorum standbys, maintenance on the last
+# secondary put the primary in wait_primary (no synchronous standby possible).
+# With a healthy quorum-member archiver the primary must stay primary, keep
+# synchronous replication, and keep accepting writes.
+#
+#   test_001  archiver made a quorum member
+#   test_002  `pg_autoctl enable maintenance` on node2: node2 -> maintenance,
+#             node1 never leaves primary/primary, commits keep working
+#   test_003  `pg_autoctl disable maintenance`: node2 back to secondary
+#   test_004  graceful stop (SIGTERM) of node2's pg_autoctl: same outcome
+#   test_005  maintenance with the archiver down too: no quorum standby left,
+#             the primary falls back to wait_primary (old behaviour), then
+#             recovers to primary when everything returns
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+    wait until archiver1 state is archiving  timeout 120s
+    sql node1 { CREATE TABLE fsmm(a int); INSERT INTO fsmm VALUES (1); }
+}
+
+teardown {
+    compose down
+}
+
+step test_001_archiver_is_a_quorum_member {
+    sql monitor { SELECT pgautofailover.set_node_replication_quorum('default', 'archiver-1-0', true); }
+    let aid = sql monitor { SELECT nodeid FROM pgautofailover.node WHERE formationid = 'default' AND nodename = 'archiver-1-0' }
+    exec node1 bash -c 'for i in $(seq 90); do s=$(psql -d demo -Atc "SELECT sync_state FROM pg_stat_replication WHERE application_name = \$\$pgautofailover_standby_${aid}\$\$" 2>/dev/null); case "$s" in sync|quorum) exit 0;; esac; sleep 1; done; exit 1'
+    # baseline: how many times node1 was ever assigned wait_primary so far
+    let wp0 = sql monitor { SELECT count(*) FROM pgautofailover.event WHERE nodename = 'node1' AND goalstate = 'wait_primary' }
+}
+
+step test_002_enable_maintenance_on_secondary {
+    exec node2 pg_autoctl enable maintenance
+    wait until node2 state is maintenance  timeout 120s
+
+    exec monitor bash -c 'for i in $(seq 15); do s=$(psql -d pg_auto_failover -Atc "SELECT goalstate::text || \$\$/\$\$ || reportedstate::text FROM pgautofailover.node WHERE nodename = \$\$node1\$\$"); test "$s" = primary/primary || { echo "node1 is $s"; exit 1; }; sleep 1; done'
+    exec node1 bash -c 'timeout 20 psql -d demo -c "INSERT INTO fsmm VALUES (2)"'
+}
+
+step test_003_disable_maintenance {
+    exec node2 pg_autoctl disable maintenance
+    wait until node2 state is secondary  timeout 180s
+    wait until sql monitor { SELECT goalstate::text || '/' || reportedstate::text FROM pgautofailover.node WHERE nodename = 'node1' } is { primary/primary }  timeout 60s
+}
+
+step test_004_graceful_stop_of_secondary {
+    compose stop node2
+    wait until node2 stopped  timeout 90s
+    wait until sql monitor { SELECT goalstate::text FROM pgautofailover.node WHERE nodename = 'node2' } is { maintenance }  timeout 120s
+    exec monitor bash -c 'for i in $(seq 15); do s=$(psql -d pg_auto_failover -Atc "SELECT goalstate::text || \$\$/\$\$ || reportedstate::text FROM pgautofailover.node WHERE nodename = \$\$node1\$\$"); test "$s" = primary/primary || { echo "node1 is $s"; exit 1; }; sleep 1; done'
+    exec node1 bash -c 'timeout 20 psql -d demo -c "INSERT INTO fsmm VALUES (3)"'
+    compose start node2
+    wait until node2 state is secondary  timeout 240s
+
+    # through both maintenance rounds node1 was never sent to wait_primary,
+    # not even transiently (that would switch synchronous replication off)
+    exec monitor bash -c 'n=$(psql -d pg_auto_failover -Atc "SELECT count(*) FROM pgautofailover.event WHERE nodename = \$\$node1\$\$ AND goalstate = \$\$wait_primary\$\$"); test "$n" = "${wp0}" || { echo "wait_primary events: $n, was ${wp0}"; exit 1; }'
+}
+
+step test_005_maintenance_without_archiver {
+    compose stop archiver1
+    wait until archiver1 stopped  timeout 60s
+    exec node2 pg_autoctl enable maintenance
+    wait until node2 state is maintenance  timeout 120s
+    wait until sql monitor { SELECT goalstate::text FROM pgautofailover.node WHERE nodename = 'node1' } is { wait_primary }  timeout 240s
+    exec node1 bash -c 'timeout 20 psql -d demo -c "INSERT INTO fsmm VALUES (4)"'
+
+    compose start archiver1
+    exec node2 pg_autoctl disable maintenance
+    wait until node2 state is secondary  timeout 240s
+    wait until archiver1 state is archiving  timeout 240s
+    wait until sql monitor { SELECT goalstate::text || '/' || reportedstate::text FROM pgautofailover.node WHERE nodename = 'node1' } is { primary/primary }  timeout 120s
+}
+
+sequence
+    test_001_archiver_is_a_quorum_member
+    test_002_enable_maintenance_on_secondary
+    test_003_disable_maintenance
+    test_004_graceful_stop_of_secondary
+    test_005_maintenance_without_archiver

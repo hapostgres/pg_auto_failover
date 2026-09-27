@@ -3,7 +3,7 @@
 pg_autoctl node start
 =====================
 
-pg_autoctl node start - Release a node waiting in launch=deferred mode
+pg_autoctl node start - Release a node waiting in a deferred launch
 
 Synopsis
 --------
@@ -18,30 +18,38 @@ Synopsis
 Description
 -----------
 
-``pg_autoctl node start`` releases a node that is waiting in
-``[launch] mode = deferred``.  It rewrites the ini file with
-``mode = immediate``; the waiting node detects the change within the poll
-interval and proceeds to create or run.
+``pg_autoctl node start`` releases a node that is waiting on either or
+both of ``[launch] create = deferred`` / ``run = deferred``.  It clears
+both flags in the ini file (rewriting them to ``immediate``); the waiting
+node detects the change within the poll interval and proceeds.
 
 This command is idempotent: calling it on a node that is already running
-(or has ``mode = immediate``) is a no-op.
+(both flags already ``immediate``) is a no-op.
 
-The ``launch = deferred`` Pattern
-----------------------------------
+The Deferred-Launch Pattern
+----------------------------
 
-A node configured with ``[launch] mode = deferred`` starts a polling loop
-and waits instead of immediately creating or starting Postgres.  This
-enables ordered startup without an external orchestrator::
+A node configured with ``[launch] create = deferred`` and/or ``run =
+deferred`` starts a polling loop and waits instead of immediately
+creating or starting Postgres.  This enables ordered startup without an
+external orchestrator::
 
     # In the ini file for each data node:
     [launch]
-    mode = deferred
+    create = deferred
+    run    = deferred
 
-The monitor can be given ``mode = immediate`` (the default), while data nodes
-start with ``mode = deferred``.  Once the monitor is confirmed ready, release
-each data node::
+The monitor can be left at the defaults (``immediate``), while data nodes
+start deferred.  Once the monitor is confirmed ready, release each data
+node::
 
-    pg_autoctl node start /etc/pgaf/node.ini
+    pg_autoctl node start
+
+An :ref:`archiving_architecture` archiver whose target formation (or, for
+a Citus formation, one or more of its groups) might not exist yet at
+container-start time follows the same pattern -- see
+:ref:`pg_autoctl_node_run`'s own note on why an archiver specifically
+needs this, unlike an ordinary node.
 
 See Also
 --------

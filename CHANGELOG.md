@@ -1,3 +1,63 @@
+### pg_auto_failover v2.3 (unreleased) ###
+
+This release adds Archiving & Disaster Recovery: a new kind of node, the
+archiver, that continuously captures WAL and produces base backups for a
+formation's groups, and a new standalone `pg_walsender` server that lets
+stock `pg_basebackup`, streaming standbys and `restore_command` read from it.
+
+### Added
+* New `ARCHIVING` node state and archiver nodes: `pg_autoctl create archiver`,
+  `pg_autoctl archiver serve|formation|show`, one archiver serving several
+  (formation, group) memberships, with optional `--region` labels. (#1186)
+* `pg_walsender`, a replication-protocol server for captured WAL and base
+  backups, with TLS and an `archiver-hba.conf` (hostssl/host/hostnossl,
+  trust, SCRAM-SHA-256 or reject per host/user/route; by default the
+  monitor's node list is admitted with the replication password over TLS,
+  the list validated by a SQL fingerprint at connect time). (#1186)
+* Base backup generation (`live` and `replay` sources) driven by
+  `pg_autoctl create|set|show basebackup-policy`, with frequency, count and
+  age retention. (#1186)
+* `pg_autoctl create postgres --from-archiver` to bootstrap a node from an
+  archiver, and fast-forward of a lagging standby from an archiver. (#1186)
+* Monitor extension version 2.3, with an upgrade script from 2.2. (#1186)
+* `archive_command` confirmation: `pg_autoctl archive command` (set as
+  `archive_command` on new nodes, opt out with `pg_autoctl create postgres
+  --archive-confirm off`) succeeds once the archiver holds a WAL segment, and
+  `pgautofailover.archive_confirmed()` on the monitor. Existing nodes need a
+  Postgres restart to enable `archive_mode`.
+* `pg_autoctl create archiver --serve-port`, `pg_autoctl archiver backup now`,
+  and pruning of the archiver's local WAL cache to the oldest retained base
+  backup; a per-route `archiver-walsegsize` file.
+* `pg_autoctl restore command`, a thin wrapper around `pg_walsender fetch-
+  file` so `restore_command = 'pg_autoctl restore command %f %p'` is the
+  whole line an operator needs to write: the archiver's host, port,
+  `<formation>/<group>` route and role are resolved from this node's own
+  pg_auto_failover configuration when it is a registered node, or from a
+  small cache file written once by `pg_autoctl restore command --set-up`
+  otherwise.
+* An archiver that is a replication-quorum member takes part in synchronous
+  commit: its `pg_receivewal` uses application_name
+  `pgautofailover_standby_<nodeid>` and flushes synchronously. The monitor
+  counts a healthy (`archiving`, not stale) quorum-member archiver as a quorum
+  standby: the primary stays `primary` when its last secondary is lost or in
+  maintenance, and only falls back to `wait_primary` when no quorum standby
+  is left.
+* The WAL segment size is registered on the monitor along with the system
+  identifier (`node.walsegsize`, `set_node_wal_segment_size()`,
+  `get_group_wal_segment_size()`); an archiver learns it from there.
+* `pg_walsender` hardening: `--auth-timeout` (absolute deadline for startup,
+  TLS and authentication), `--insecure` required without `--pgdata`,
+  oversize pre-authentication messages rejected, HBA parse errors fail
+  closed, unknown routes indistinguishable from a missing HBA entry until
+  authenticated, `FETCH_FILE` limited to WAL segments and `.history` files,
+  at most 64 replication slots per route, `DROP_REPLICATION_SLOT`.
+* Documentation: "Adding an archiver to an existing cluster" (rolling
+  upgrade order: monitor, then every keeper, then the archiver).
+* CI: extension upgrade catalog check (2.2 to 2.3 versus a fresh 2.3) and new
+  archiver protocol, quorum, lifecycle and serve-port specs.
+* `pgaftest` `archiver { }` cluster blocks and a `wait until sql` polling
+  primitive. (#1186)
+
 ### pg_auto_failover v2.2 (April 3, 2025) ###
 
 This release includes support for Postgres major version 17 as well as dependency and documentation updates. It also drops support for outdated Postgres major versions 11 and 12.

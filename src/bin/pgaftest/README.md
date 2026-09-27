@@ -234,3 +234,18 @@ avoid this.
 | `test_runner.c` | Executes step DSL commands against a live compose stack; manages the state file |
 | `test_spec_parse.y` | Bison grammar for `.pgaf` spec files |
 | `test_spec_scan.l` | Flex lexer for `.pgaf` spec files |
+
+## Capturing values with `let`
+
+`let NAME = sql <svc> { SELECT ... }` runs the query like `sql` does, requires
+exactly one row and one column, and stores the trimmed text in a variable that
+lives for the whole test run (a later `let` of the same name overwrites it).
+`${NAME}` is then expanded in `sql`, `wait until sql`, `expect` and
+`exec`/`exec-fails` text; an unknown name is an error at execution time. Only
+the exact `${identifier}` form is special (`$1`, `$$` are left alone). Use it
+instead of blind sleeps:
+
+    let seg = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor {
+        SELECT pgautofailover.wal_archived('default', 0, '${seg}')
+    } is { t }  timeout 60s

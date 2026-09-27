@@ -1,0 +1,155 @@
+# Archiver operational lifecycle: what keeps working when parts of the
+# deployment go away, and the day-2 commands.
+#
+#   test_001  monitor down: the archiver keeps capturing WAL (pg_receivewal
+#             targets the primary it already knows), keeps serving
+#             pg_basebackup / `pg_autoctl restore command` to an already-listed
+#             node (the `monitor` HBA rule is evaluated against the archiver's
+#             local copy of the node list, which needs no monitor), and
+#             reports again once the monitor is back
+#   test_002  archiver formation remove: the ARCHIVING membership vanishes
+#             from the monitor, capture stops (no standby left on the
+#             primary), the formation keeps working; formation add attaches
+#             it again and capture resumes
+#   test_003  archiver container stop/start: capture resumes
+#   test_004  HBA keywords: `samehost` and `trust` lines
+#   test_005  `pg_autoctl archiver backup now` produces a base backup out of
+#             schedule
+#   test_006  local WAL retention: with a short policy (maxcount 2, every 6s)
+#             no WAL segment older than the oldest retained base backup's
+#             start segment stays in the membership directory
+#
+# Predecessors: archiver_wal_capture.pgaf, archiver_basebackup_policy.pgaf,
+# archiver_walsender_auth.pgaf.
+
+cluster {
+    monitor
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+    wait until archiver1 state is archiving  timeout 60s
+    wait until sql monitor {
+        SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
+    } is { complete }  timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_monitor_down_archiver_keeps_working {
+    sql node1 { CREATE TABLE lc(a int); INSERT INTO lc VALUES (1); }
+
+    compose stop monitor
+    sleep 5s
+
+    # capture continues without the monitor
+    sql node1 { INSERT INTO lc VALUES (2); }
+    let seg1 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    exec archiver1 bash -c 'for i in $(seq 90); do test -s /var/lib/postgres/pgaf/default/0/${seg1} && exit 0; sleep 1; done; ls /var/lib/postgres/pgaf/default/0; exit 1'
+
+    # an already-listed node is still served
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb-nomon -X none --no-manifest && test -f /tmp/bb-nomon/PG_VERSION'
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw PGSSLMODE=require pg_autoctl restore command --host archiver1 --port 6543 --user pgautofailover_replicator --route default/0 ${seg1} /tmp/f-nomon && test -s /tmp/f-nomon'
+
+    compose start monitor
+    wait until sql monitor { SELECT 1 } is { 1 }  timeout 120s
+    wait until archiver1 state is archiving  timeout 120s
+    sql node1 { INSERT INTO lc VALUES (3); }
+    let seg2 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg2}') } is { t }  timeout 120s
+}
+
+step test_002_detach_and_reattach {
+    let aname = sql monitor { SELECT archiver_name FROM pgautofailover.get_archivers('default') LIMIT 1 }
+
+    exec archiver1 pg_autoctl archiver formation remove --monitor postgresql://autoctl_node@monitor/pg_auto_failover --name ${aname} --formation default
+
+    sql monitor { SELECT count(*) FROM pgautofailover.node WHERE formationid = 'default' AND nodename LIKE 'archiver-%'; }
+    expect { 0 }
+
+    # capture stops: the primary ends up with no standby connection (the
+    # archiver's reconciler notices within one tick)
+    exec node1 bash -c 'for i in $(seq 150); do n=$(psql -Atc "SELECT count(*) FROM pg_stat_replication"); test "$n" = 0 && exit 0; sleep 1; done; exit 1'
+
+    # the formation itself is unaffected
+    wait until node1 state is single  timeout 60s
+    sql node1 { INSERT INTO lc VALUES (4); }
+
+    exec archiver1 pg_autoctl archiver formation add --monitor postgresql://autoctl_node@monitor/pg_auto_failover --name ${aname} --formation default
+    wait until archiver state is archiving in default  timeout 150s
+    sql node1 { INSERT INTO lc VALUES (5); }
+    let seg3 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg3}') } is { t }  timeout 120s
+}
+
+step test_003_container_restart {
+    compose stop archiver1
+    wait until archiver1 stopped  timeout 60s
+    compose start archiver1
+    wait until archiver1 state is archiving  timeout 90s
+    sql node1 { INSERT INTO lc VALUES (6); }
+    let seg4 = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg4}') } is { t }  timeout 120s
+}
+
+step test_004_hba_samehost_and_trust {
+    exec archiver1 bash -c 'PGPASSWORD=sh-pw pg_walsender scram-secret --user sh_user >> /var/lib/postgres/pgaf/archiver-passwd'
+    exec archiver1 bash -c 'echo "hostssl default/0 sh_user samehost scram-sha-256" >> /var/lib/postgres/pgaf/archiver-hba.conf'
+    exec archiver1 bash -c 'echo "hostssl default/0 trust_user node1 trust" >> /var/lib/postgres/pgaf/archiver-hba.conf'
+
+    # samehost: from the archiver's own host it works, from node1 it does not
+    exec archiver1 bash -c 'PGPASSWORD=sh-pw pg_basebackup -w -d "host=archiver1 port=6543 user=sh_user dbname=default/0 sslmode=require" --pgdata /tmp/bb-sh -X none --no-manifest && test -f /tmp/bb-sh/PG_VERSION'
+    exec node1 bash -c 'if PGPASSWORD=sh-pw pg_basebackup -w -d "host=archiver1 port=6543 user=sh_user dbname=default/0 sslmode=require" --pgdata /tmp/bb-sh2 -X none --no-manifest 2>/tmp/err-sh; then exit 1; fi; grep -q "no pg_walsender HBA entry" /tmp/err-sh'
+
+    # trust: no password at all, from node1 only
+    exec node1 bash -c 'pg_basebackup -w -d "host=archiver1 port=6543 user=trust_user dbname=default/0 sslmode=require" --pgdata /tmp/bb-trust -X none --no-manifest && test -f /tmp/bb-trust/PG_VERSION'
+    exec archiver1 bash -c 'if pg_basebackup -w -d "host=archiver1 port=6543 user=trust_user dbname=default/0 sslmode=require" --pgdata /tmp/bb-trust2 -X none --no-manifest 2>/tmp/err-tr; then exit 1; fi'
+
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; grep -v "sh_user\|trust_user" $f > $f.new && mv $f.new $f'
+}
+
+step test_005_backup_now {
+    let before = sql monitor { SELECT max(basebackupid) FROM pgautofailover.list_basebackups('default', 0) }
+    exec archiver1 pg_autoctl archiver backup now --pgdata /var/lib/postgres/pgaf
+    wait until sql monitor { SELECT max(basebackupid) > ${before} FROM pgautofailover.list_basebackups('default', 0) } is { t }  timeout 180s
+}
+
+step test_006_local_wal_retention_follows_oldest_backup {
+    exec archiver1 bash -c 'printf "%s" "{\"source\": \"live\", \"frequency\": \"6 seconds\", \"maxcount\": 2, \"maxage\": \"10 minutes\", \"onpromotion\": false, \"cache\": \"local\"}" > /tmp/retention-policy.json'
+    exec archiver1 pg_autoctl create basebackup-policy --monitor postgresql://autoctl_node@monitor/pg_auto_failover --name retention-policy --config /tmp/retention-policy.json
+    sql monitor {
+        SELECT pgautofailover.set_archiver_policy(
+                   'default', NULL, 1,
+                   (SELECT basebackuppolicyid
+                      FROM pgautofailover.get_basebackup_policy('retention-policy')),
+                   false);
+    }
+
+    # produce WAL across several backups, so older segments exist to be pruned
+    let seg0 = sql node1 { SELECT pg_walfile_name(pg_current_wal_lsn()) }
+    exec node1 bash -c 'psql -qc "CREATE TABLE IF NOT EXISTS ret(a int)"; for i in $(seq 8); do psql -qAt -c "INSERT INTO ret SELECT generate_series(1,100)" -c "SELECT pg_switch_wal()" >/dev/null; sleep 7; done'
+
+    wait until sql monitor {
+        SELECT count(*) = 2 AND max(basebackupid) >= 5
+          FROM pgautofailover.list_basebackups('default', 0);
+    } is { t }  timeout 180s
+
+    # oldest retained backup: its backup_label names the first segment it
+    # needs; nothing older may remain in the membership directory (pruning
+    # is periodic, so retry for a little while)
+    exec archiver1 bash -c 'd=/var/lib/postgres/pgaf/default/0; for try in $(seq 60); do oldest=$(ls -d $d/basebackups/basebackup-* | sort | head -n 1); start=$(sed -n "s/.*(file \([0-9A-F]*\)).*/\1/p" $oldest/backup_label | head -n 1); test -n "$start" || { sleep 1; continue; }; bad=""; for f in $(ls $d | grep -E "^[0-9A-F]{24}"); do n=${f:0:24}; if [[ "$n" < "$start" ]]; then bad="$bad $f"; fi; done; if test -z "$bad"; then echo "oldest backup starts at $start, no older segment kept"; [[ "$start" > "${seg0}" ]] || { echo "vacuous: start $start not past initial segment ${seg0}"; exit 1; }; exit 0; fi; sleep 1; done; echo "segments older than $start still present:$bad"; exit 1'
+}
+
+sequence
+    test_001_monitor_down_archiver_keeps_working
+    test_002_detach_and_reattach
+    test_003_container_restart
+    test_004_hba_samehost_and_trust
+    test_005_backup_now
+    test_006_local_wal_retention_follows_oldest_backup

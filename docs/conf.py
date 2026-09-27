@@ -112,11 +112,18 @@ html_theme = "sphinx_rtd_theme"
 # html_theme_options = {}
 
 
-# Add our custom CSS
+# Add our custom CSS and JS
 def setup(app):
     if hasattr(app, "add_css_file"):
         app.add_css_file("css/citus.css")
         app.add_css_file("css/pygments.css")
+        app.add_css_file("css/zoom.css")
+    if hasattr(app, "add_js_file"):
+        # Click-to-zoom for our own figures (tikz-rendered diagrams),
+        # generalizing the pan/scroll-to-zoom already available on
+        # Mermaid diagrams (mermaid_d3_zoom, above) to every other
+        # image the docs embed via `.. figure::`.
+        app.add_js_file("js/zoom.js")
 
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -461,6 +468,34 @@ man_pages = [
         "ref/pg_autoctl_create_worker",
         "pg_autoctl create worker",
         "pg_autoctl create worker",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_create_archiver",
+        "pg_autoctl create archiver",
+        "pg_autoctl create archiver",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_create_basebackup_policy",
+        "pg_autoctl create basebackup-policy",
+        "pg_autoctl create basebackup-policy",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_show_basebackup_policy",
+        "pg_autoctl show basebackup-policy",
+        "pg_autoctl show basebackup-policy",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_autoctl_set_basebackup_policy",
+        "pg_autoctl set basebackup-policy",
+        "pg_autoctl set basebackup-policy",
         [author],
         1,
     ),

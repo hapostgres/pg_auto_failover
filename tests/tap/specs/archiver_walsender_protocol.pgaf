@@ -1,0 +1,135 @@
+# pg_walsender protocol hardening: negative and abuse tests, driven with psql
+# in replication mode, bash's /dev/tcp and (for the pre-auth packets) python3,
+# which the image ships.
+#
+# The archiver1 container runs the real pg_walsender on port 6543 against the
+# archiver's own root (/var/lib/postgres/pgaf). node1 is a registered node,
+# admitted by the default line `hostssl all ... monitor scram-sha-256` with
+# the replication password, so it is the "legitimate client" throughout.
+#
+#   test_001  IDENTIFY_SYSTEM works, SHOW wal_segment_size is 16MB, an unknown
+#             command is an error (and the session stays usable elsewhere)
+#   test_002  oversize pre-auth messages: a startup packet claiming 100000
+#             bytes, and a SASL 'p' message claiming 50 MB, get the
+#             connection closed promptly, not buffered
+#   test_003  slowloris: a second pg_walsender with --auth-timeout 3 closes a
+#             silent TCP connection within a few seconds (absolute deadline
+#             for startup + TLS + auth)
+#   test_004  an unknown route and a missing HBA entry look identical to an
+#             unauthenticated client; "database does not exist" only shows
+#             up after successful authentication
+#   test_005  FETCH_FILE refuses everything that is not a WAL segment name or
+#             a .history file (archiver-hba.conf, ../x, .slot_foo, ...)
+#   test_006  the per-route replication slot cap, and DROP_REPLICATION_SLOT
+#   test_007  a malformed HBA line fails closed (every connection rejected),
+#             restoring the file restores service
+#   test_008  without --pgdata (no HBA at all) pg_walsender refuses to start
+#             unless --insecure is given
+#
+# Predecessor: archiver_walsender_auth.pgaf (authentication happy paths).
+
+cluster {
+    monitor
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        archiver1 archiver replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+    wait until archiver1 state is archiving  timeout 60s
+    wait until sql monitor {
+        SELECT status::text FROM pgautofailover.get_latest_basebackup('default', 0, 'live')
+    } is { complete }  timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+step test_001_basic_commands {
+    exec node1 bash -c 'psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "IDENTIFY_SYSTEM" | grep -q "^[0-9]"'
+    exec node1 bash -c 'psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "SHOW wal_segment_size" | grep -qx 16MB'
+    exec node1 bash -c 'if psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "FROBNICATE_EVERYTHING" 2>/tmp/err1; then exit 1; fi; test -s /tmp/err1'
+    # ... and the server is still fine afterwards
+    exec node1 bash -c 'psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "IDENTIFY_SYSTEM" | grep -q "^[0-9]"'
+}
+
+step test_002_oversize_preauth_messages {
+    # a startup packet claiming 100000 bytes (0x000186a0), then silence
+    exec archiver1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6543; printf "\x00\x01\x86\xa0\x00\x03\x00\x00" >&3; timeout 8 cat <&3 >/dev/null; rc=$?; test $rc -ne 124'
+
+    # a SASL 'p' message claiming 50 MB, sent once authentication has begun:
+    # give pw_user a plain-TCP scram line so the exchange starts without TLS
+    exec archiver1 bash -c 'PGPASSWORD=proto-pw pg_walsender scram-secret --user pw_user >> /var/lib/postgres/pgaf/archiver-passwd'
+    exec archiver1 bash -c 'echo "host default/0 pw_user 127.0.0.1/32 scram-sha-256" >> /var/lib/postgres/pgaf/archiver-hba.conf'
+    exec archiver1 bash -c 'out=$(python3 -c "import socket,struct;s=socket.create_connection((\"127.0.0.1\",6543),5);p=b\"user\0pw_user\0database\0default/0\0replication\0true\0\0\";s.sendall(struct.pack(\">ii\",8+len(p),196608)+p);d=s.recv(4096);assert d[:1]==b\"R\",d;s.sendall(b\"p\"+struct.pack(\">i\",52428800));s.settimeout(8);print(s.recv(4096))" 2>&1); echo "$out"; if echo "$out" | grep -qi "timed out"; then exit 1; fi'
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; grep -v "pw_user" $f > $f.new && mv $f.new $f'
+}
+
+step test_003_slowloris_auth_timeout {
+    exec archiver1 bash -c 'nohup pg_walsender --pgdata /var/lib/postgres/pgaf --port 6544 --auth-timeout 3 > /tmp/ws2.log 2>&1 & echo $! > /tmp/ws2.pid; sleep 2; echo started'
+    exec archiver1 bash -c 'exec 3<>/dev/tcp/127.0.0.1/6544; start=$SECONDS; timeout 12 cat <&3 >/dev/null; rc=$?; el=$((SECONDS-start)); echo "rc=$rc elapsed=$el"; test $rc -ne 124 && test $el -le 7'
+    # a trickling client (one byte per second) gets no extra time either
+    exec archiver1 bash -c 'trap "" PIPE; exec 3<>/dev/tcp/127.0.0.1/6544; start=$SECONDS; for i in 1 2 3 4 5 6 7 8 9 10; do printf "\x00" >&3 2>/dev/null || break; sleep 1; done; el=$((SECONDS-start)); echo "elapsed=$el"; test $el -le 8'
+    exec archiver1 bash -c 'kill $(cat /tmp/ws2.pid) || true'
+}
+
+step test_004_unknown_route_indistinguishable {
+    # no TLS: no hostssl line matches, whatever the route says
+    exec node1 bash -c 'psql -w "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=disable replication=true" -Atc "IDENTIFY_SYSTEM" 2>/tmp/err4a; true'
+    exec node1 bash -c 'psql -w "host=archiver1 port=6543 user=pgautofailover_replicator dbname=nosuch/9 sslmode=disable replication=true" -Atc "IDENTIFY_SYSTEM" 2>/tmp/err4b; true'
+    exec node1 bash -c 'grep -q "no pg_walsender HBA entry" /tmp/err4a && grep -q "no pg_walsender HBA entry" /tmp/err4b'
+    exec node1 bash -c 'if grep -qi "does not exist" /tmp/err4a /tmp/err4b; then exit 1; fi'
+
+    # an unknown user cannot tell either: same generic refusal
+    exec node1 bash -c 'psql -w "host=archiver1 port=6543 user=nobody dbname=nosuch/9 sslmode=require replication=true" -Atc "IDENTIFY_SYSTEM" 2>/tmp/err4c; if grep -qi "does not exist" /tmp/err4c; then exit 1; fi; test -s /tmp/err4c'
+
+    # authenticated: the unknown route may now be named
+    # the default rule (monitor list of a route) can never match an unknown route; an explicit
+    # rule lets the client authenticate, and only THEN does it learn the route does not exist
+    exec archiver1 bash -c 'echo "hostssl all pgautofailover_replicator 172.16.0.0/12 scram-sha-256" >> /var/lib/postgres/pgaf/archiver-hba.conf'
+    exec node1 bash -c 'if psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=nosuch/9 sslmode=require replication=true" -Atc "IDENTIFY_SYSTEM" 2>/tmp/err4d; then exit 1; fi; grep -q "does not exist" /tmp/err4d'
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; grep -v "172.16.0.0/12" $f > $f.new && mv $f.new $f'
+}
+
+step test_005_fetch_file_restrictions {
+    sql node1 { CREATE TABLE t5(a int); INSERT INTO t5 VALUES (1); }
+    let seg = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
+    wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg}') } is { t }  timeout 60s
+
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw PGSSLMODE=require pg_autoctl restore command --host archiver1 --port 6543 --user pgautofailover_replicator --route default/0 ${seg} /tmp/f-ok && test -s /tmp/f-ok'
+    exec node1 bash -c 'for f in archiver-hba.conf archiver-passwd archiver-position archiver-systemid ../x ../../archiver-hba.conf .slot_foo basebackups/.latest 00000001000000000000000Z; do if PGPASSWORD=pgaf-repl-pw PGSSLMODE=require pg_autoctl restore command --host archiver1 --port 6543 --user pgautofailover_replicator --route default/0 $f /tmp/f-bad >/dev/null 2>&1; then echo "fetched forbidden $f"; exit 1; fi; done; test ! -s /tmp/f-bad'
+}
+
+step test_006_slot_cap_and_drop {
+    exec node1 bash -c 'ok=0; fail=0; for i in $(seq 1 70); do if psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "CREATE_REPLICATION_SLOT capslot$i PHYSICAL" >/dev/null 2>&1; then ok=$((ok+1)); else fail=$((fail+1)); fi; done; echo "created=$ok refused=$fail"; test $fail -ge 1 && test $ok -le 64'
+    # dropping one makes room again
+    exec node1 bash -c 'psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "DROP_REPLICATION_SLOT capslot1"'
+    exec node1 bash -c 'psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "CREATE_REPLICATION_SLOT capslot_again PHYSICAL" >/dev/null'
+    exec node1 bash -c 'for i in $(seq 2 70); do psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "DROP_REPLICATION_SLOT capslot$i" >/dev/null 2>&1 || true; done; psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "DROP_REPLICATION_SLOT capslot_again" >/dev/null 2>&1 || true'
+}
+
+step test_007_malformed_hba_fails_closed {
+    exec archiver1 bash -c 'f=/var/lib/postgres/pgaf/archiver-hba.conf; cp $f /tmp/hba.good; { echo "hostssl default/0 this is not a valid hba line"; cat /tmp/hba.good; } > $f'
+    exec node1 bash -c 'if psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "IDENTIFY_SYSTEM" 2>/tmp/err7; then exit 1; fi; test -s /tmp/err7'
+    exec node1 bash -c 'if PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb7 -X none --no-manifest 2>/dev/null; then exit 1; fi'
+    exec archiver1 bash -c 'cp /tmp/hba.good /var/lib/postgres/pgaf/archiver-hba.conf'
+    exec node1 bash -c 'psql "host=archiver1 port=6543 user=pgautofailover_replicator password=pgaf-repl-pw dbname=default/0 sslmode=require replication=true" -Atc "IDENTIFY_SYSTEM" | grep -q "^[0-9]"'
+}
+
+step test_008_insecure_needed_without_pgdata {
+    exec archiver1 bash -c 'rc=0; timeout 10 env -u PGDATA pg_walsender --port 6599 >/tmp/ws3.log 2>&1 || rc=$?; echo "rc=$rc"; test $rc -ne 0 && test $rc -ne 124'
+    exec archiver1 bash -c 'rc=0; timeout 4 env -u PGDATA pg_walsender --port 6599 --insecure >/tmp/ws4.log 2>&1 || rc=$?; echo "rc=$rc"; test $rc -eq 124'
+}
+
+sequence
+    test_001_basic_commands
+    test_002_oversize_preauth_messages
+    test_003_slowloris_auth_timeout
+    test_004_unknown_route_indistinguishable
+    test_005_fetch_file_restrictions
+    test_006_slot_cap_and_drop
+    test_007_malformed_hba_fails_closed
+    test_008_insecure_needed_without_pgdata

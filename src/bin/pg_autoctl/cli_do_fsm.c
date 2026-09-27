@@ -333,8 +333,8 @@ cli_do_fsm_state(int argc, char **argv)
 
 /*
  * cli_do_fsm_list lists reachable states from the current one, or (with
- * --json) dumps the full KeeperFSM[] edge set as JSON -- the design doc's
- * own proposed standalone use of KeeperFSMToJSON() ("a human or another
+ * --json) dumps the full KeeperFSM[] edge set as JSON -- a standalone
+ * use of KeeperFSMToJSON() ("a human or another
  * tool may want the raw edge list without a monitor round trip at all"),
  * and the source this project's own keeper_fsm_edges.json regress fixture
  * (src/monitor/) is regenerated from.

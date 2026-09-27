@@ -52,6 +52,7 @@ typedef enum
 	FAST_FORWARD_STATE,
 	JOIN_SECONDARY_STATE,
 	DROPPED_STATE,
+	ARCHIVING_STATE,
 
 	/* Allow some wildcard-matching transitions (from ANY state to) */
 	ANY_STATE = 128

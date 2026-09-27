@@ -4,6 +4,9 @@
 # edge-gap specs that used to live here were split out to node-fsm-gaps.sch
 # (PG17-only) once this schedule's own combined runtime started timing out
 # the CI step on every PG version -- see that file's own header comment.
+# The archiver specs that briefly lived here too were split out to
+# archiver.sch (all PG versions) for the same reason -- see that file's
+# own header comment.
 create_standby_with_pgdata
 launch_deferred_set_metadata
 fsm_step_report_advance
