@@ -313,8 +313,7 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 	/*
 	 * Authenticate BEFORE revealing anything, as PostgreSQL does: which
 	 * routes exist is only told to a client that got through the HBA rules
-	 * and the password exchange. An unknown route is looked up as NULL, so
-	 * the "monitor" address matches nothing for it, and is reported (3D000,
+	 * and the password exchange. An unknown route is reported (3D000,
 	 * "database does not exist") only after a successful authentication.
 	 */
 	const WsRoute *route = routes_find(routes, routeCount, routeKey);
@@ -335,9 +334,8 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 
 	WsAuthMethod method = WS_AUTH_REJECT;
 
-	if (!hba_lookup(authConfig->hbaPath, route != NULL ? route->path : NULL,
-					authConfig->monitorUriPath, authConfig->refreshSockPath,
-					routeKey, params->user, peerIP, ws_tls_active(), &method))
+	if (!hba_lookup(authConfig->hbaPath, routeKey, params->user, peerIP,
+					ws_tls_active(), &method))
 	{
 		ws_send_error_response(sock, "28000", "authentication is unavailable");
 		return false;

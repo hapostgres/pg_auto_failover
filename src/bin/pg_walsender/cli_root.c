@@ -5,7 +5,7 @@
  *   the same way pgaftest's own cli_root.c does for a similarly-sized
  *   standalone binary.
  *
- *   Three sub-commands:
+ *   Two sub-commands:
  *
  *     serve        Run the accept loop (accept_loop.h). This is pg_walsender's
  *                  *default* command: when no sub-command name is given at
@@ -15,8 +15,14 @@
  *                  did before this file existed -- the framework itself has
  *                  no notion of a default sub-command, only this project's
  *                  own thin shim provides one.
- *     fetch-file   One-shot FETCH_FILE client (fetch_client.h).
  *     scram-secret Print one archiver-passwd line for a user.
+ *
+ *   pg_walsender has no FETCH_FILE *client* sub-command: the one-shot
+ *   FETCH_FILE client now lives in src/bin/common/fetch_client.c, linked
+ *   in-process by whatever needs it (`pg_autoctl restore command`, in the
+ *   later archiving PR) rather than exec'd as a pg_walsender sub-command.
+ *   pg_walsender itself only ever answers FETCH_FILE as a server (see
+ *   cmd_fetch_file.h).
  *
  *   Every flag and behavior is unchanged from the previous hand-rolled
  *   argv[1] dispatch in main.c: only the dispatch mechanism moved.
@@ -37,7 +43,6 @@
 #include "accept_loop.h"
 #include "defaults.h"
 #include "env_utils.h"
-#include "fetch_client.h"
 #include "file_utils.h"
 #include "log.h"
 #include "hba.h"
@@ -152,11 +157,11 @@ cli_serve_getopt(int argc, char **argv)
 
 /*
  * cli_serve_run brings up the accept loop: it validates --pgdata/--insecure,
- * derives the routes/HBA/passwd/monitor-uri/refresh-socket paths under
- * --pgdata, initializes TLS and the default HBA file, seeds the SCRAM mock
- * secret (before any fork, so every connection sees the same one), and calls
- * ws_accept_loop(), which only returns once the server is asked to stop.
- * Never returns on success other than through exit() at process end.
+ * derives the routes/HBA/passwd paths under --pgdata, initializes TLS and
+ * the default HBA file, seeds the SCRAM mock secret (before any fork, so
+ * every connection sees the same one), and calls ws_accept_loop(), which
+ * only returns once the server is asked to stop. Never returns on success
+ * other than through exit() at process end.
  */
 static void
 cli_serve_run(int argc, char **argv)
@@ -196,13 +201,6 @@ cli_serve_run(int argc, char **argv)
 				"%s/archiver-hba.conf", servePgdata);
 		sformat(serveConfig.auth.passwdPath, sizeof(serveConfig.auth.passwdPath),
 				"%s/archiver-passwd", servePgdata);
-
-		sformat(serveConfig.auth.monitorUriPath,
-				sizeof(serveConfig.auth.monitorUriPath),
-				"%s/archiver-monitor.uri", servePgdata);
-		sformat(serveConfig.auth.refreshSockPath,
-				sizeof(serveConfig.auth.refreshSockPath),
-				"%s/archiver-refresh.sock", servePgdata);
 
 		/* the certificate given with --ssl-*-file, else <pgdata>/server.* */
 		char certPath[MAXPGPATH], keyPath[MAXPGPATH];
@@ -278,140 +276,6 @@ static CommandLine serve_command =
 				 "              complete startup, TLS, HBA and "
 				 "authentication (default: 30)\n",
 				 cli_serve_getopt, cli_serve_run);
-
-
-/* -----------------------------------------------------------------------
- * pg_walsender fetch-file --host <h> --port <p> --route <fmtn>/<grp>
- *                         --filename <name> --output <path> [--user <role>]
- * ----------------------------------------------------------------------- */
-
-static char fetchHost[256] = { 0 };
-static int fetchPort = WS_DEFAULT_PORT;
-static char fetchRoute[256] = { 0 };
-static char fetchUser[NAMEDATALEN] = PG_AUTOCTL_REPLICA_USERNAME;
-static char fetchFilename[256] = { 0 };
-static char fetchOutput[MAXPGPATH] = { 0 };
-
-static struct option fetchFileLongOptions[] = {
-	{ "host", required_argument, NULL, 'H' },
-	{ "port", required_argument, NULL, 'p' },
-	{ "route", required_argument, NULL, 'r' },
-	{ "user", required_argument, NULL, 'U' },
-	{ "filename", required_argument, NULL, 'f' },
-	{ "output", required_argument, NULL, 'o' },
-	{ NULL, 0, NULL, 0 }
-};
-
-/*
- * cli_fetch_file_getopt parses fetch-file's own flags (--host, --port,
- * --route, --user, --filename, --output) into the file-scope fetch*
- * variables. Returns optind, as commandline_run() expects.
- */
-static int
-cli_fetch_file_getopt(int argc, char **argv)
-{
-	optind = 0;
-	fetchPort = WS_DEFAULT_PORT;
-	strlcpy(fetchUser, PG_AUTOCTL_REPLICA_USERNAME, sizeof(fetchUser));
-
-	int c;
-
-	while ((c = getopt_long(argc, argv, "H:p:r:U:f:o:",
-							fetchFileLongOptions, NULL)) != -1)
-	{
-		switch (c)
-		{
-			case 'H':
-			{
-				strlcpy(fetchHost, optarg, sizeof(fetchHost));
-				break;
-			}
-
-			case 'p':
-			{
-				if (!stringToInt(optarg, &fetchPort))
-				{
-					log_fatal("Invalid --port value \"%s\"", optarg);
-					exit(1);
-				}
-				break;
-			}
-
-			case 'r':
-			{
-				strlcpy(fetchRoute, optarg, sizeof(fetchRoute));
-				break;
-			}
-
-			case 'U':
-			{
-				strlcpy(fetchUser, optarg, sizeof(fetchUser));
-				break;
-			}
-
-			case 'f':
-			{
-				strlcpy(fetchFilename, optarg, sizeof(fetchFilename));
-				break;
-			}
-
-			case 'o':
-			{
-				strlcpy(fetchOutput, optarg, sizeof(fetchOutput));
-				break;
-			}
-
-			default:
-			{
-				commandline_print_usage(&ws_root, stderr);
-				exit(1);
-			}
-		}
-	}
-
-	return optind;
-}
-
-
-/*
- * cli_fetch_file_run validates that --host/--route/--filename/--output were
- * all given, then runs the one-shot FETCH_FILE client and exits with its
- * result code.
- */
-static void
-cli_fetch_file_run(int argc, char **argv)
-{
-	(void) argc;
-	(void) argv;
-
-	if (fetchHost[0] == '\0' || fetchRoute[0] == '\0' ||
-		fetchFilename[0] == '\0' || fetchOutput[0] == '\0')
-	{
-		fprintf(stderr, /* IGNORE-BANNED */
-				"fetch-file: --host, --route, --filename, and "
-				"--output are all required\n");
-		commandline_print_usage(&ws_root, stderr);
-		exit(1);
-	}
-
-	exit(ws_fetch_file_client(fetchHost, fetchPort, fetchUser,
-							  fetchRoute, fetchFilename, fetchOutput));
-}
-
-
-static CommandLine fetch_file_command =
-	make_command("fetch-file",
-				 "One-shot FETCH_FILE client, for use as a restore_command",
-				 "--host <h> --port <p> --route <formation>/<group> "
-				 "--filename <name> --output <path> [--user <role>]",
-				 "  --host      pg_walsender host to connect to\n"
-				 "  --port      pg_walsender port (default: 6543)\n"
-				 "  --route     <formation>/<group> to fetch the file from\n"
-				 "  --filename  WAL segment (or other served file) name\n"
-				 "  --output    local path to write the fetched file to\n"
-				 "  --user      role to authenticate as (default: "
-				 PG_AUTOCTL_REPLICA_USERNAME ")\n",
-				 cli_fetch_file_getopt, cli_fetch_file_run);
 
 
 /* -----------------------------------------------------------------------
@@ -514,7 +378,6 @@ static CommandLine scram_secret_command =
 
 static CommandLine *root_subcommands[] = {
 	&serve_command,
-	&fetch_file_command,
 	&scram_secret_command,
 	NULL
 };
@@ -522,11 +385,10 @@ static CommandLine *root_subcommands[] = {
 CommandLine ws_root =
 	make_command_set("pg_walsender",
 					 "The archiver's own replication-protocol server",
-					 "[serve options] | fetch-file ... | scram-secret ...",
+					 "[serve options] | scram-secret ...",
 					 "  serve         Run the accept loop (default command, "
 					 "used when no\n"
 					 "                sub-command name is given at all)\n"
-					 "  fetch-file    One-shot FETCH_FILE client\n"
 					 "  scram-secret  Print one archiver-passwd line for a "
 					 "user\n",
 					 NULL, root_subcommands);
@@ -550,7 +412,6 @@ pg_walsender_default_argv(int argc, char **argv, int *newArgc)
 {
 	if (argc >= 2 &&
 		(streq(argv[1], "serve") ||
-		 streq(argv[1], "fetch-file") ||
 		 streq(argv[1], "scram-secret") ||
 		 streq(argv[1], "--help") ||
 		 streq(argv[1], "-h")))

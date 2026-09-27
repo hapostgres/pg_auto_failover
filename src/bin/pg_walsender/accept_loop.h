@@ -12,9 +12,7 @@
  *   startup packet, TLS handshake, HBA including DNS and SCRAM all count,
  *   and it is cancelled once authentication succeeded); live children are
  *   tracked in a pid array and reaped in the main loop (no SIGCHLD handler,
- *   no shared counter), capping the connections; and the parent supervises
- *   the single nodes-list refresher process (refresher.h), the only
- *   process that talks to the monitor.
+ *   no shared counter), capping the connections.
  *
  * Licensed under the PostgreSQL License.
  *

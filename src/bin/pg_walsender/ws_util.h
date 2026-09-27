@@ -56,12 +56,10 @@ void ws_sanitize_for_log(const char *in, char *out, size_t outSize);
 
 /*
  * The absolute authentication deadline of the current connection, see
- * accept_loop.c. ws_auth_deadline_remaining_ms() is INT_MAX-ish (1 hour)
- * when no deadline is armed.
+ * accept_loop.c.
  */
 void ws_auth_deadline_set(int seconds);
 void ws_auth_deadline_clear(void);
-int ws_auth_deadline_remaining_ms(void);
 
 /* CLOCK_MONOTONIC in milliseconds */
 int64_t ws_monotonic_ms(void);

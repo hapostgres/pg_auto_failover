@@ -14,12 +14,12 @@
  *     reject         refuse
  *
  *   Authentication comes FIRST, as in PostgreSQL: the HBA rules are looked
- *   up with the route the client asked for (NULL when it is not a known
- *   route, so "monitor" cannot match), then the method runs, and only after
- *   a successful authentication is an unknown route reported (3D000,
- *   "database does not exist"). A rejection is one generic message naming
- *   the peer address and user, never the route. Client supplied strings are
- *   sanitized (control characters, length) before being logged.
+ *   up with the route key the client asked for (whether or not it is a
+ *   known route), then the method runs, and only after a successful
+ *   authentication is an unknown route reported (3D000, "database does not
+ *   exist"). A rejection is one generic message naming the peer address and
+ *   user, never the route. Client supplied strings are sanitized (control
+ *   characters, length) before being logged.
  *
  *   The whole exchange runs under the connection's absolute authentication
  *   deadline (--auth-timeout, see accept_loop.h). Before authentication a
@@ -46,10 +46,6 @@ typedef struct WsAuthConfig
 {
 	char hbaPath[MAXPGPATH];       /* empty: no authentication at all */
 	char passwdPath[MAXPGPATH];    /* scram-sha-256 verifiers */
-	char monitorUriPath[MAXPGPATH]; /* how "monitor" addresses reach the monitor:
-	                                 * only the refresher (refresher.h) reads it,
-	                                 * and children just test that it exists */
-	char refreshSockPath[MAXPGPATH]; /* the refresher's datagram socket */
 } WsAuthConfig;
 
 /*
