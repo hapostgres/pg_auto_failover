@@ -1,5 +1,5 @@
 /*
- * src/bin/pg_walsender/fetch_client.c
+ * src/bin/common/fetch_client.c
  *   See fetch_client.h.
  *
  * Licensed under the PostgreSQL License.
@@ -37,7 +37,7 @@ ws_fetch_file_client(const char *host, int port, const char *user,
 	};
 	const char *values[] = {
 		host, portStr, user, routeKey, FETCH_CONNECT_TIMEOUT_SECONDS,
-		"pg_walsender fetch-file", NULL
+		"fetch_client (FETCH_FILE)", NULL
 	};
 
 	PGconn *conn = PQconnectdbParams(keys, values, 0);

@@ -1,8 +1,8 @@
 /*
  * src/bin/pg_walsender/main.c
  *   Entry point for pg_walsender, dispatching to the sub-commands defined
- *   in cli_root.c's CommandLine tree (serve, fetch-file, scram-secret) via
- *   this project's own command-line framework
+ *   in cli_root.c's CommandLine tree (serve, scram-secret) via this
+ *   project's own command-line framework
  *   (src/bin/lib/subcommands.c/commandline.h), the same way pgaftest's own
  *   main.c does for a similarly-sized standalone binary.
  *

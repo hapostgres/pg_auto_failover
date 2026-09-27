@@ -18,18 +18,15 @@
 #define PG_AUTOCTL_REPLICA_USERNAME "pgautofailover_replicator"
 
 /*
- * common/pgsql.h (linked in for its PGSQL struct / retry-policy mechanism,
- * used by refresher.c to talk to the monitor) declares a field of this size
- * in a struct it defines whether or not this project actually uses that
- * struct; this project's own -I search order puts this file ahead of
- * pg_autoctl/defaults.h (which is where pgsql.h normally finds it), so the
- * one constant it needs is duplicated here too. Keep in sync with
- * pg_autoctl/defaults.h.
+ * common/pgsql.h (pulled in transitively by common/ipaddr.c, reused here for
+ * HBA hostname/reverse-DNS matching, see hba.c's suffix_matches()) declares
+ * a field of this size in a struct it defines whether or not this project
+ * actually uses that struct; this project's own -I search order puts this
+ * file ahead of pg_autoctl/defaults.h (which is where pgsql.h normally
+ * finds it), so the one constant it needs is duplicated here too. Keep in
+ * sync with pg_autoctl/defaults.h.
  */
 #define MAXIMUM_BACKUP_RATE_LEN 32
-
-/* same value as pg_autoctl/defaults.h: written by pg_autoctl, read here */
-#define PG_AUTOCTL_ARCHIVER_NODES_FILE "archiver-nodes.list"
 
 #define WS_DEFAULT_PORT 6543
 
