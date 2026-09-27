@@ -235,8 +235,8 @@ ws_archive_run(const WsArchiveTarget *target, const char *localPath,
 	uint32_t crc = 0;
 
 	/* Step 1: compute the local file's own size and CRC32C -- one
-	 * sequential local read, no network cost (DESIGN-standalone-
-	 * archiving.md's own "push side" section). */
+	 * sequential local read, no network cost (see README.md's own "The
+	 * archive push side" section for the full 4-step design). */
 	if (!ws_file_crc32c(localPath, &size, &crc))
 	{
 		log_error("Failed to read \"%s\": %m", localPath);
