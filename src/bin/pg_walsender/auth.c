@@ -31,6 +31,12 @@
 #define AUTH_REQ_SASL_FINAL 12
 
 
+/*
+ * ws_get_peer_ip writes the accepted connection's peer address, as a numeric
+ * string (getnameinfo() with NI_NUMERICHOST, so no DNS lookup happens here),
+ * into ipBuf. Returns false and logs on any getpeername()/getnameinfo()
+ * failure.
+ */
 static bool
 ws_get_peer_ip(int sock, char *ipBuf, size_t ipBufSize)
 {
@@ -99,6 +105,12 @@ find_verifier(const char *passwdPath, const char *user, ScramVerifier *verifier)
 }
 
 
+/*
+ * send_auth_request sends one 'R' Authentication* message: a 4-byte
+ * big-endian request code followed by dataLen bytes of mechanism-specific
+ * payload (empty for AuthenticationOk-style codes, a SCRAM message for the
+ * SASL codes). Returns false when dataLen would not fit the local buffer.
+ */
 static bool
 send_auth_request(int sock, int32_t code, const char *data, size_t dataLen)
 {

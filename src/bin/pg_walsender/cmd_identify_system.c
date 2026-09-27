@@ -64,6 +64,14 @@ read_systemid(const char *path, char *idOut, size_t idOutSize)
 }
 
 
+/*
+ * cmd_identify_system implements IDENTIFY_SYSTEM: one row of (systemid,
+ * timeline, xlogpos, dbname), matching real Postgres's own reply shape
+ * closely enough for pg_basebackup/pg_receivewal to accept it. See this
+ * file's own header comment for where each value comes from; a route with
+ * nothing captured yet falls back to systemid "0", timeline 1, xlogpos
+ * "0/0". dbname is echoed back verbatim from the client's startup packet.
+ */
 void
 cmd_identify_system(int sock, const WsRoute *route, const char *dbname)
 {

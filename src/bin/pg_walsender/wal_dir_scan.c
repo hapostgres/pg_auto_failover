@@ -27,6 +27,11 @@
 #define WS_WAL_FNAME_LEN 24
 
 
+/*
+ * is_wal_segment_filename returns true when name looks like a complete WAL
+ * segment filename: exactly WS_WAL_FNAME_LEN (24) hexadecimal digits, no
+ * more, no less (so ".partial"/".gz"/etc suffixed names are excluded).
+ */
 static bool
 is_wal_segment_filename(const char *name)
 {
@@ -49,6 +54,15 @@ is_wal_segment_filename(const char *name)
 }
 
 
+/*
+ * ws_route_wal_segment_size returns the route's own configured WAL segment
+ * size, read from its "archiver-walsegsize" file (a bare decimal byte count,
+ * written once by pg_autoctl when the archiver first learns it from the
+ * group's real primary). Falls back to WS_DEFAULT_WAL_SEGMENT_SIZE (16MB)
+ * when route is NULL/has no path, the file is absent, or its content isn't a
+ * valid power-of-two size in [WS_MIN_WAL_SEGMENT_SIZE,
+ * WS_MAX_WAL_SEGMENT_SIZE] (logged as an error in that last case).
+ */
 uint64_t
 ws_route_wal_segment_size(const WsRoute *route)
 {
@@ -108,6 +122,12 @@ ws_route_wal_segment_size(const WsRoute *route)
 }
 
 
+/*
+ * ws_wal_segment_size_string formats segSize (a byte count) the way the
+ * wal_segment_size GUC prints it ("16MB", "1GB"), the format
+ * pg_receivewal/pg_basebackup's own RetrieveWalSegSize() expects to parse
+ * back out of a SHOW wal_segment_size reply.
+ */
 void
 ws_wal_segment_size_string(uint64_t segSize, char *dest, size_t destSize)
 {
