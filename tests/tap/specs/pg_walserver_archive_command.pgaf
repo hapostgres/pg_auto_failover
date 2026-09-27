@@ -1,8 +1,8 @@
 # CHECK_FILE/ARCHIVE_FILE (the push side, cmd_check_file.c/cmd_archive_file.c)
 # and the `pg_walserver archive`/`pg_walserver create-cert` client-side
 # sub-commands (cli_archive.c/cli_create_cert.c) -- entirely monitor-
-# independent, see DESIGN-standalone-archiving.md's "The push side: CHECK_
-# FILE + ARCHIVE_FILE" section for the full design this spec exercises.
+# independent, see README.md's "The archive push side" section for the
+# full design this spec exercises.
 #
 # Modeled closely on pg_walserver_standalone.pgaf/pg_walserver_sni_
 # routing.pgaf: node2 hosts pg_walserver, every connection below is node2

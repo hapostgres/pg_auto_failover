@@ -181,8 +181,9 @@ The commands a connected client can issue on a `Query` ('Q') message are:
   requires this), different -> a clean rejection, nothing there yet -> a
   same-directory temporary file plus atomic `rename()`. Same allow-list as
   `FETCH_FILE`'s read side (`ws_fetch_filename_is_servable()`, extended to
-  also accept a base backup's own `<24hex>.<8hex>.backup` history file --
-  DESIGN-standalone-archiving.md's Gap #1), hard size cap at the route's
+  also accept a base backup's own `<24hex>.<8hex>.backup` history file,
+  since real Postgres archives it exactly like a WAL segment), hard size
+  cap at the route's
   own `wal_segment_size` (`ws_route_wal_segment_size()`) plus
   `WS_ARCHIVE_FILE_SIZE_SLACK` (1 MiB), checked as bytes arrive so an
   oversized push never gets to write the whole thing to disk.
@@ -717,9 +718,8 @@ Alongside the pull-oriented tools above, `pg_walserver` also accepts a
 *push*: `CHECK_FILE`/`ARCHIVE_FILE` (see "The wire protocol" above for
 their wire shape and overwrite-safety rule) and the `pg_walserver archive`
 client sub-command that drives them, meant to run as (part of) a Postgres
-`archive_command`. See DESIGN-standalone-archiving.md's "The push side:
-CHECK_FILE + ARCHIVE_FILE" section for the design this implements in full,
-including the two judgment calls it left open: `CHECK_FILE`'s wire shape
+`archive_command`. This section documents that design as built, including
+the two judgment calls resolved along the way: `CHECK_FILE`'s wire shape
 (resolved as the lean `SHOW`-like row described above) and the bounded
 intra-invocation recheck's exact timing (resolved as `cli_archive.c`'s own
 `WS_ARCHIVE_RECHECK_COUNT`/`WS_ARCHIVE_RECHECK_SLEEP_SECONDS`: two
@@ -785,9 +785,7 @@ A route with `capture = pull` (`pg_walserver.ini`, written by hand or by
 `pg_receivewal` process, no separate supervisor unit, nothing else to
 wire up. `pg_walserver --pgdata ... serve` alone, with one route's
 `upstream`/`capture = pull` set, is a complete archiving daemon on its
-own. See DESIGN-standalone-archiving.md's "The pull side" section for the
-design this implements (now marked done there); this section documents
-the design *as built*.
+own. This section documents the design as built.
 
 **`fork()` + `execv()` of this same binary, mirroring `pg_autoctl`'s own
 long-lived-service pattern.** Each capturer child is started by forking,

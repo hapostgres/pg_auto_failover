@@ -264,8 +264,8 @@ safe and costs almost nothing extra: whichever one delivers a segment
 first, ``archive_command``'s own next ``CHECK_FILE`` round trip then sees
 ``matches`` and skips the push entirely -- a genuine defense-in-depth
 backstop, not a duplicated transfer. See
-``src/bin/pg_walserver/DESIGN-standalone-archiving.md``'s "The push side:
-CHECK_FILE + ARCHIVE_FILE" section for the full design.
+``src/bin/pg_walserver/README.md``'s "The archive push side" section for
+the full design.
 
 **3. Configure access and start pg_walserver** -- ``setup`` never touches
 HBA or the passwd file, a deliberately separate concern::

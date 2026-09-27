@@ -39,8 +39,8 @@
  *        works with or without it, dbname alone is unambiguous; with
  *        several routes, dbname-based routing stops being reliable at all
  *        for a real physical standby -- see auth.c's own comment and
- *        DESIGN-standalone-archiving.md's "Routing beyond dbname" section
- *        -- so TLS SNI becomes the only way to address more than one route
+ *        README.md's "Routing beyond dbname: TLS SNI" section -- so TLS
+ *        SNI becomes the only way to address more than one route
  *        by name). setup creates a self-signed certificate for <pgdata> if
  *        none exists yet (pg_create_self_signed_cert(), the exact function
  *        `pg_autoctl create archiver --ssl-self-signed` already uses), and
@@ -237,7 +237,7 @@ ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
 			 "route to be reachable by name (dbname-based routing alone "
 			 "cannot tell a real physical standby's connection apart from "
 			 "any other route once there is more than one, see this "
-			 "project's own DESIGN-standalone-archiving.md)",
+			 "project's own README.md)",
 			 routesPath, routeCount);
 
 	char certPath[MAXPGPATH] = { 0 };
