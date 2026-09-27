@@ -209,8 +209,9 @@ parse_method(const char *token, WsAuthMethod *method)
 
 
 /*
- * A parsed rule: the fields point into the file's own buffer, which
- * hba_lookup keeps alive while the rules are used.
+ * A parsed rule: each field is its own strdup'd, dequoted copy (see
+ * next_hba_token), independent of the file's own buffer, which hba_lookup
+ * frees right after hba_parse returns.
  */
 typedef struct HbaRule
 {
@@ -218,6 +219,164 @@ typedef struct HbaRule
 	WsAuthMethod method;
 	int lineNumber;
 } HbaRule;
+
+
+/*
+ * hba_rule_free_fields releases the strdup'd fields of one rule (but not the
+ * HbaRule itself, which lives in the caller's array).
+ */
+static void
+hba_rule_free_fields(HbaRule *rule)
+{
+	for (int i = 0; i < HBA_MAX_FIELDS; i++)
+	{
+		free(rule->fields[i]);
+		rule->fields[i] = NULL;
+	}
+}
+
+
+/*
+ * next_hba_token extracts the next whitespace-delimited field from *lineptr
+ * into buf (truncating to bufSize, like PostgreSQL's own tokens this should
+ * never matter in practice) and advances *lineptr past it. Mirrors
+ * PostgreSQL's own next_token() in src/backend/libpq/hba.c, minus the parts
+ * this project's own HBA format does not use (comma-separated lists,
+ * @-file-inclusion, regular expressions):
+ *
+ *   - a field may be wrapped in double quotes, so it can contain spaces or a
+ *     literal '#'; a doubled "" inside a quoted field is a literal '"'
+ *     (exactly the SQL-style escaping PostgreSQL uses here);
+ *   - an unquoted '#' begins a comment that runs to the end of the line
+ *     (already continuation-joined by hba_read_logical_line, so a comment
+ *     started before a trailing backslash also swallows the continued text,
+ *     the same as PostgreSQL's own behavior).
+ *
+ * Returns false when there is no more token on the line (buf is then empty).
+ */
+static bool
+next_hba_token(char **lineptr, char *buf, size_t bufSize)
+{
+	char *p = *lineptr;
+	char *out = buf;
+	char *end = buf + bufSize - 1;
+	bool inQuote = false;
+	bool sawQuote = false;
+
+	while (*p == ' ' || *p == '\t')
+	{
+		p++;
+	}
+
+	while (*p != '\0' && (inQuote || (*p != ' ' && *p != '\t')))
+	{
+		char c = *p;
+
+		if (c == '#' && !inQuote)
+		{
+			while (*p != '\0')
+			{
+				p++;
+			}
+			break;
+		}
+
+		if (c == '"')
+		{
+			if (inQuote && *(p + 1) == '"')
+			{
+				/* doubled quote inside a quoted field: literal '"' */
+				if (out < end)
+				{
+					*out++ = '"';
+				}
+				p += 2;
+				continue;
+			}
+
+			inQuote = !inQuote;
+			sawQuote = true;
+			p++;
+			continue;
+		}
+
+		if (out < end)
+		{
+			*out++ = c;
+		}
+
+		p++;
+	}
+
+	*out = '\0';
+	*lineptr = p;
+
+	return sawQuote || out > buf;
+}
+
+
+/*
+ * A cursor over the file's raw contents, tracking how many physical lines
+ * have already been consumed (for error messages).
+ */
+typedef struct HbaLineReader
+{
+	char *cursor;
+	int lineNumber;         /* physical lines already consumed */
+} HbaLineReader;
+
+
+/*
+ * hba_read_logical_line reads the next logical line from *reader into
+ * buffer, joining physical lines that end with a trailing backslash --
+ * PostgreSQL's own line-continuation rule in tokenize_auth_file(): the
+ * backslash and the newline it precedes are both dropped, and the next
+ * physical line is appended in their place, however many times that
+ * repeats. A trailing '\r' (CRLF file) is stripped from each physical line
+ * first. *firstLineNumber is set to the 1-based line number of the logical
+ * line's first physical line, which is what a malformed-line error reports.
+ *
+ * Returns false once the whole file has been consumed.
+ */
+static bool
+hba_read_logical_line(HbaLineReader *reader, PQExpBuffer buffer,
+					  int *firstLineNumber)
+{
+	if (*reader->cursor == '\0')
+	{
+		return false;
+	}
+
+	resetPQExpBuffer(buffer);
+	*firstLineNumber = reader->lineNumber + 1;
+
+	for (;;)
+	{
+		char *nl = strchr(reader->cursor, '\n');
+		char *lineEnd = nl != NULL ? nl : reader->cursor + strlen(reader->cursor);
+		size_t len = (size_t) (lineEnd - reader->cursor);
+
+		if (len > 0 && reader->cursor[len - 1] == '\r')
+		{
+			len--;
+		}
+
+		bool continues = len > 0 && reader->cursor[len - 1] == '\\';
+
+		appendBinaryPQExpBuffer(buffer, reader->cursor,
+								(int) (continues ? len - 1 : len));
+
+		reader->cursor = nl != NULL ? nl + 1 : lineEnd;
+		reader->lineNumber++;
+
+		if (!continues || nl == NULL)
+		{
+			break;
+		}
+	}
+
+	return true;
+}
 
 
 /*
@@ -249,44 +408,40 @@ hba_parse(const char *hbaPath, char *contents, HbaRule **rulesOut,
 	}
 
 	int count = 0;
+	HbaLineReader reader = { contents, 0 };
+	PQExpBuffer lineBuffer = createPQExpBuffer();
 	int lineNumber = 0;
-	char *line = contents;
 
-	while (line != NULL && *line != '\0')
+	while (lineBuffer != NULL && !PQExpBufferBroken(lineBuffer) &&
+		   hba_read_logical_line(&reader, lineBuffer, &lineNumber))
 	{
-		char *nl = strchr(line, '\n');
-		char *next = NULL;
-
-		if (nl != NULL)
-		{
-			*nl = '\0';
-			next = nl + 1;
-		}
-
-		lineNumber++;
-
-		char *hash = strchr(line, '#');
-
-		if (hash != NULL)
-		{
-			*hash = '\0';
-		}
-
+		char *lineptr = lineBuffer->data;
 		char *fields[HBA_MAX_FIELDS + 1] = { 0 };
 		int nfields = 0;
-		char *fieldSave = NULL;
+		char token[1024];
 
-		for (char *tok = strtok_r(line, " \t\r", &fieldSave);
-			 tok != NULL && nfields <= HBA_MAX_FIELDS;
-			 tok = strtok_r(NULL, " \t\r", &fieldSave))
+		while (nfields <= HBA_MAX_FIELDS && next_hba_token(&lineptr, token,
+														   sizeof(token)))
 		{
-			fields[nfields++] = tok;
-		}
+			fields[nfields] = strdup(token);
 
-		line = next;
+			if (fields[nfields] == NULL)
+			{
+				for (int i = 0; i < nfields; i++)
+				{
+					free(fields[i]);
+				}
+				destroyPQExpBuffer(lineBuffer);
+				free(rules);
+				return false;
+			}
+
+			nfields++;
+		}
 
 		if (nfields == 0)
 		{
+			/* blank line or comment-only line: nothing to record */
 			continue;
 		}
 
@@ -302,6 +457,12 @@ hba_parse(const char *hbaPath, char *contents, HbaRule **rulesOut,
 			log_error("Malformed HBA line %d in \"%s\": rejecting every "
 					  "connection until the file is fixed",
 					  lineNumber, hbaPath);
+
+			for (int i = 0; i < nfields; i++)
+			{
+				free(fields[i]);
+			}
+			destroyPQExpBuffer(lineBuffer);
 			free(rules);
 			return false;
 		}
@@ -315,6 +476,20 @@ hba_parse(const char *hbaPath, char *contents, HbaRule **rulesOut,
 
 		rule->method = ruleMethod;
 		rule->lineNumber = lineNumber;
+	}
+
+	bool bufferBroken = lineBuffer == NULL || PQExpBufferBroken(lineBuffer);
+
+	destroyPQExpBuffer(lineBuffer);
+
+	if (bufferBroken)
+	{
+		for (int i = 0; i < count; i++)
+		{
+			hba_rule_free_fields(&rules[i]);
+		}
+		free(rules);
+		return false;
 	}
 
 	*rulesOut = rules;
@@ -370,6 +545,10 @@ hba_lookup(const char *hbaPath, const char *routePath,
 		}
 	}
 
+	for (int i = 0; i < count; i++)
+	{
+		hba_rule_free_fields(&rules[i]);
+	}
 	free(rules);
 	free(contents);
 
