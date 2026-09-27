@@ -6,7 +6,6 @@
  *
  */
 
-#include <ctype.h>
 #include <errno.h>
 #include <dirent.h>
 #include <unistd.h>
@@ -21,75 +20,13 @@
 #include "ws_util.h"
 #include "wal_dir_scan.h"
 
-/* the parse buffer; a valid name is at most WS_SLOT_NAME_LEN_MAX (NAMEDATALEN-1) */
-#define WS_SLOT_NAME_MAX 128
+/* a valid slot name is at most WS_SLOT_NAME_LEN_MAX (NAMEDATALEN-1) */
 #define WS_SLOT_NAME_LEN_MAX 63
 
 /* slots per route: each is a file in the route's directory */
 #define WS_MAX_SLOTS_PER_ROUTE 64
 
 #define WS_SLOT_PREFIX ".slot_"
-
-
-/*
- * parse_slot_name reads a possibly-quoted identifier (matching real
- * Postgres's AppendQuotedIdentifier on the client side -- unquoted for a
- * simple lowercase name, double-quoted otherwise) from the front of *p,
- * advancing *p past it.
- */
-static bool
-parse_slot_name(const char **p, char *nameOut, size_t nameOutSize)
-{
-	const char *s = *p;
-
-	while (isspace((unsigned char) *s))
-	{
-		s++;
-	}
-
-	if (*s == '"')
-	{
-		s++;
-
-		char *out = nameOut;
-		char *outEnd = nameOut + nameOutSize - 1;
-
-		while (*s && *s != '"')
-		{
-			if (out < outEnd)
-			{
-				*out++ = *s;
-			}
-			s++;
-		}
-
-		if (*s != '"')
-		{
-			return false;
-		}
-
-		*out = '\0';
-		s++;
-	}
-	else
-	{
-		const char *start = s;
-
-		while (*s && !isspace((unsigned char) *s))
-		{
-			s++;
-		}
-
-		size_t len = Min((size_t) (s - start), nameOutSize - 1);
-
-		memcpy(nameOut, start, len); /* IGNORE-BANNED */
-		nameOut[len] = '\0';
-	}
-
-	*p = s;
-
-	return nameOut[0] != '\0';
-}
 
 
 /*
@@ -164,7 +101,8 @@ slot_marker_path(const WsRoute *route, const char *slotName, char *dest, size_t 
 
 
 void
-cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
+cmd_create_replication_slot(int sock, const WsRoute *route,
+							const char *slotName, bool temporary, bool isLogical)
 {
 	if (route == NULL || route->path[0] == '\0')
 	{
@@ -173,10 +111,12 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 		return;
 	}
 
-	const char *p = rawArgs;
-	char slotName[WS_SLOT_NAME_MAX];
+	/* TEMPORARY and RESERVE_WAL/legacy options are accepted by the grammar
+	 * but not enforced yet -- see this file's own header comment on
+	 * retention. Silence the unused-parameter warning until they are. */
+	(void) temporary;
 
-	if (!parse_slot_name(&p, slotName, sizeof(slotName)) || !slot_name_is_safe(slotName))
+	if (!slot_name_is_safe(slotName))
 	{
 		ws_send_error_response(sock, "42602",
 							   "invalid replication slot name: use only "
@@ -185,49 +125,7 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 		return;
 	}
 
-	bool sawPhysical = false;
-	bool sawLogical = false;
-	char word[64];
-
-	while (*p)
-	{
-		while (*p && (isspace((unsigned char) *p) || *p == ',' || *p == '(' || *p == ')'))
-		{
-			p++;
-		}
-
-		if (!*p)
-		{
-			break;
-		}
-
-		const char *start = p;
-
-		while (*p && !isspace((unsigned char) *p) && *p != ',' &&
-			   *p != '(' && *p != ')')
-		{
-			p++;
-		}
-
-		size_t len = Min((size_t) (p - start), sizeof(word) - 1);
-
-		memcpy(word, start, len); /* IGNORE-BANNED */
-		word[len] = '\0';
-
-		if (strcasecmp(word, "PHYSICAL") == 0)
-		{
-			sawPhysical = true;
-		}
-		else if (strcasecmp(word, "LOGICAL") == 0)
-		{
-			sawLogical = true;
-		}
-
-		/* TEMPORARY and RESERVE_WAL are accepted but not enforced yet --
-		 * see this file's own header comment on retention */
-	}
-
-	if (sawLogical || !sawPhysical)
+	if (isLogical)
 	{
 		ws_send_error_response(sock, "0A000",
 							   "only physical replication slots are supported");
@@ -294,7 +192,7 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 
 
 void
-cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
+cmd_read_replication_slot(int sock, const WsRoute *route, const char *slotName)
 {
 	if (route == NULL || route->path[0] == '\0')
 	{
@@ -303,10 +201,7 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 		return;
 	}
 
-	const char *p = rawArgs;
-	char slotName[WS_SLOT_NAME_MAX];
-
-	if (!parse_slot_name(&p, slotName, sizeof(slotName)) || !slot_name_is_safe(slotName))
+	if (!slot_name_is_safe(slotName))
 	{
 		ws_send_error_response(sock, "42602", "invalid replication slot name");
 		return;
@@ -390,7 +285,8 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
  * PostgreSQL.
  */
 void
-cmd_drop_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
+cmd_drop_replication_slot(int sock, const WsRoute *route,
+						  const char *slotName, bool wait)
 {
 	if (route == NULL || route->path[0] == '\0')
 	{
@@ -399,11 +295,11 @@ cmd_drop_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 		return;
 	}
 
-	const char *p = rawArgs;
-	char slotName[WS_SLOT_NAME_MAX];
+	/* WAIT is accepted by the grammar; a slot marker file drop is always
+	 * synchronous here, so there's nothing to actually wait for */
+	(void) wait;
 
-	if (!parse_slot_name(&p, slotName, sizeof(slotName)) ||
-		!slot_name_is_safe(slotName))
+	if (!slot_name_is_safe(slotName))
 	{
 		ws_send_error_response(sock, "42602", "invalid replication slot name");
 		return;

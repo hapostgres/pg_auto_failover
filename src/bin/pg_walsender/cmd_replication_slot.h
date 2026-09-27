@@ -16,9 +16,17 @@
 
 #include "routes.h"
 
-void cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs);
-void cmd_read_replication_slot(int sock, const WsRoute *route, const char *rawArgs);
-void cmd_drop_replication_slot(int sock, const WsRoute *route, const char *rawArgs);
+/*
+ * slotName/temporary/isLogical/wait are already parsed out by repl_gram.y's
+ * grammar (see repl_command.h) -- this file no longer tokenizes the raw
+ * command text itself, see its own removed parse_slot_name().
+ */
+void cmd_create_replication_slot(int sock, const WsRoute *route,
+								 const char *slotName, bool temporary,
+								 bool isLogical);
+void cmd_read_replication_slot(int sock, const WsRoute *route, const char *slotName);
+void cmd_drop_replication_slot(int sock, const WsRoute *route,
+							   const char *slotName, bool wait);
 
 /*
  * Slot names are [a-z0-9_]{1,63}, as in PostgreSQL; a route holds at most 64

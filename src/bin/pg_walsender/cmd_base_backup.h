@@ -32,7 +32,15 @@
 #define WS_CMD_BASE_BACKUP_H
 
 #include "routes.h"
+#include "repl_command.h"
 
-void cmd_base_backup(int sock, const WsRoute *route, const char *rawOptions);
+/*
+ * options/nOptions are the BASE_BACKUP option list as repl_gram.y's grammar
+ * already parsed it (see repl_command.h's WsCommandOption) -- this file no
+ * longer tokenizes "(...)" itself, see cmd_base_backup.c's own removed
+ * scan_options().
+ */
+void cmd_base_backup(int sock, const WsRoute *route,
+					 const WsCommandOption *options, int nOptions);
 
 #endif /* WS_CMD_BASE_BACKUP_H */
