@@ -1,18 +1,22 @@
-# pg_walserver, on its own, with no archiver/monitor integration at all: a
-# hand-crafted routes file and HBA rule, real WAL captured off node1 by the
-# stock OS pg_receivewal, and a hand-written archiver-systemid file. This is
-# the smallest possible harness that still exercises the real replication
-# wire protocol end to end, ahead of the archiver feature (a later PR) that
-# wires pg_walserver into pg_autoctl's own process supervision and gives it
-# its routes/HBA/systemid files automatically.
+# pg_walserver, on its own, with no archiver/monitor integration at all --
+# except for `pg_walserver setup` itself, its own one-shot onboarding
+# wizard (cli_setup.c): create/validate the pg_walserver.ini route, check
+# the upstream role's REPLICATION attribute, fetch the system identifier,
+# and take the route's first base backup, all in one command. Ongoing WAL
+# capture is still the stock OS pg_receivewal, run by hand here (pg_
+# walserver's own embedded capturer is a later addition, see DESIGN-
+# standalone-archiving.md) -- this is the smallest harness that still
+# exercises the real replication wire protocol end to end, ahead of the
+# archiver feature (a later PR) that wires pg_walserver into pg_autoctl's
+# own process supervision.
 #
 # This PR's own pgaftest predates `let`/`${var}` capture, so values that
-# cross steps (the system identifier, the captured segment's name) are
-# written to plain files on node2 instead, and re-read with $(cat ...).
+# cross steps (the captured segment's name) are written to plain files on
+# node2 instead, and re-read with $(cat ...).
 #
-#   test_001  IDENTIFY_SYSTEM reports node1's own system identifier, and
-#             SHOW wal_segment_size reports the 16MB default (nothing here
-#             has told it otherwise)
+#   test_001  IDENTIFY_SYSTEM reports node1's own system identifier (as
+#             `setup` fetched it), and SHOW wal_segment_size reports the
+#             16MB default (nothing here has told it otherwise)
 #   test_002  FETCH_FILE returns the exact bytes of a captured WAL segment
 #   test_003  a real client (pg_receivewal) can START_REPLICATION from
 #             pg_walserver itself: with the original capture process still
@@ -24,12 +28,21 @@
 #             double-quoted slot name with an embedded escaped quote, and a
 #             garbage command producing a clean error rather than a crash
 #             (and the connection still usable afterwards)
-#   test_005  the routes.ini "*" wildcard (routes.h/routes.c, PgBouncer-
+#   test_005  the pg_walserver.ini "*" wildcard (routes.h/routes.c, PgBouncer-
 #             style): a dbname with no route of its own falls through to
 #             it, while "default/0" -- which still has its own explicit
 #             section -- keeps resolving to its own path, proving an exact
 #             match always wins over the wildcard, never the other way
 #             around
+#   test_006  a real, unmodified `pg_basebackup` client takes a BASE_BACKUP
+#             from pg_walserver of the exact backup `setup --with-
+#             basebackup` produced, then a real standby -- primary_conninfo
+#             pointed at pg_walserver, standby.signal, nothing but stock
+#             PostgreSQL commands anywhere in this step -- streams live
+#             changes from it via a genuine walreceiver (not pg_receivewal)
+#             and is finally promoted, proving pg_walserver's own
+#             START_REPLICATION is wire-compatible with a real standby,
+#             not just the CLI tools exercised by every step above it
 
 cluster {
     monitor
@@ -45,16 +58,23 @@ setup {
 
     # node2 hosts pg_walserver for this test; it is otherwise an ordinary
     # registered secondary and that is irrelevant here.
-    exec node2 bash -c 'mkdir -p /tmp/ws/default/0'
 
     # every connection below is node2 talking to its own pg_walserver over
     # loopback (127.0.0.1): a manually written, properly scoped rule for
     # that exact peer, not "0.0.0.0/0" -- there is no monitor here to learn
     # a real client's address from, and none needed: pg_walserver's HBA is
     # just a file, hand-edited exactly as an operator running it on its own
-    # (no archiver, no monitor) would.
-    exec node2 bash -c 'printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/archiver-hba.conf'
-    exec node2 bash -c 'printf "[default/0]\npath = /tmp/ws/default/0\n" > /tmp/ws/archiver-routes.ini'
+    # (no archiver, no monitor) would. `setup` itself never touches HBA --
+    # a deliberately separate concern, see cli_setup.c's own header comment.
+    exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/archiver-hba.conf'
+
+    # the one-shot wizard: creates /tmp/ws/default/0, writes the
+    # pg_walserver.ini [default/0] section (path + upstream), checks
+    # pgautofailover_replicator's REPLICATION attribute on node1, fetches
+    # node1's real system identifier into archiver-systemid, and -- with
+    # --with-basebackup -- takes the route's first base backup
+    # synchronously, not returning until it has actually succeeded.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --with-basebackup'
 
     # capture real WAL off node1 with the stock pg_receivewal (not this
     # project's own vendored copy, which is not part of this PR's stack)
@@ -70,13 +90,14 @@ teardown {
 }
 
 step test_000_sync_files_from_node1 {
-    # pgaftest at this point in history has no cross-container file copy
-    # primitive either: rebuild the same two small values on node2 by
-    # asking node1 directly over its own already-open connection.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw psql "host=node1 port=5432 dbname=demo user=pgautofailover_replicator sslmode=disable" -Atc "SELECT system_identifier FROM pg_control_system()" > /tmp/ws/default/0/archiver-systemid'
+    # `setup`, in the setup{} block above, already wrote archiver-systemid
+    # and took the first base backup -- nothing to fetch by hand here
+    # beyond the one value pgaftest's own let/${var} (not available at this
+    # point in its history) can't carry across steps on its own.
     exec node2 bash -c 'ls /tmp/ws/default/0/*[0-9A-F] | grep -v "\.partial$" | xargs -n1 basename | sort | tail -1 > /tmp/seg.txt'
     exec node2 bash -c 'test -s /tmp/seg.txt'
     exec node2 bash -c 'test -s /tmp/ws/default/0/archiver-systemid'
+    exec node2 bash -c 'test -s /tmp/ws/default/0/basebackups/.latest'
     # the setup capturer keeps running: test_003 needs it live, to prove
     # pg_walserver can serve a segment while it is concurrently being written
     exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-walsender.log 2>&1 & echo started'
@@ -129,7 +150,7 @@ step test_005_wildcard_route {
     # distinct (fake) systemid -- reachable only through the "*" wildcard,
     # never directly
     exec node2 bash -c 'mkdir -p /tmp/ws-wild && printf "6543216543216543216\n" > /tmp/ws-wild/archiver-systemid'
-    exec node2 bash -c 'printf "\n[*]\npath = /tmp/ws-wild\n" >> /tmp/ws/archiver-routes.ini'
+    exec node2 bash -c 'printf "\n[*]\npath = /tmp/ws-wild\n" >> /tmp/ws/pg_walserver.ini'
 
     # a dbname matching no explicit section falls through to the wildcard's
     # own path -- routes.c's own "*" fallback, not a hardcoded default
@@ -142,6 +163,59 @@ step test_005_wildcard_route {
     exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/archiver-systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
 }
 
+step test_006_real_standby_with_core_tools {
+    # a real, unmodified pg_basebackup client BASE_BACKUP-ing from
+    # pg_walserver: proves cmd_base_backup.c actually serves the backup
+    # `setup --with-basebackup` took (test_000 above only checked that the
+    # file exists on disk, never that it's actually servable over the wire).
+    exec node2 bash -c 'pg_basebackup -w -d "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -D /tmp/standby -X none --no-manifest'
+    exec node2 bash -c 'test -f /tmp/standby/PG_VERSION'
+
+    # real Postgres's own walreceiver (libpqrcv_connect(), physical mode)
+    # always sends the literal dbname "replication" on the wire, silently
+    # discarding whatever dbname= a real primary_conninfo carries ("the
+    # database name is ignored by the server in replication mode, but
+    # specify 'replication' for .pgpass lookup" -- libpqwalreceiver.c's own
+    # comment). So a real physical standby can never select a route by
+    # name the way pg_basebackup/pg_receivewal above just did -- only
+    # routes.ini's own "*" wildcard, or a route whose key literally is
+    # "replication", are ever reachable by one. This route already has a
+    # name ("default/0"); give it a second, literal-"replication" alias
+    # pointing at the same path, purely so this one test step can reach it
+    # -- an operator who *only* serves real physical standbys, never
+    # pg_basebackup/pg_receivewal by name, would use "replication" as the
+    # route'"'"'s only key to begin with.
+    exec node2 bash -c 'printf "\n[replication]\npath = /tmp/ws/default/0\n" >> /tmp/ws/pg_walserver.ini'
+
+    # a real standby from here on: nothing but stock PostgreSQL
+    # configuration and commands -- primary_conninfo points straight at
+    # pg_walserver, exactly as it would point at a real primary.
+    # synchronous_standby_names comes along verbatim in the base backup's
+    # own copied config -- it was node1's real, pg_auto_failover-managed
+    # setting, naming a standby ("pgautofailover_standby_2") that will
+    # never exist here. Left as-is, any write on this standalone instance
+    # blocks forever after promotion waiting for a synchronous ack that
+    # can never arrive: a real, if slightly surprising, consequence of
+    # `pg_basebackup` faithfully copying the *entire* configuration, not
+    # pg_walserver's own doing, but this test needs to clear it to behave
+    # like the standalone PITR/DR target it actually is.
+    exec node2 bash -c 'mkdir -p /tmp/standby-sock && printf "%b\n" "port = 5433" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/standby-sock\x27" "hot_standby = on" "logging_collector = off" "synchronous_standby_names = \x27\x27" "primary_conninfo = \x27host=127.0.0.1 port=6543 dbname=default/0 sslmode=disable\x27" >> /tmp/standby/postgresql.auto.conf && touch /tmp/standby/standby.signal && (pg_ctl -D /tmp/standby -w -l /tmp/standby.log start || (cat /tmp/standby.log; false))'
+    exec node2 bash -c 'psql -h /tmp/standby-sock -p 5433 -d demo -Atc "SELECT pg_is_in_recovery()" | grep -qx t'
+
+    # a genuine walreceiver, not pg_receivewal, streaming from
+    # pg_walserver's own START_REPLICATION: new data on node1 must show up
+    # on the standby with nothing else driving it.
+    sql node1 { INSERT INTO ws SELECT generate_series(2000001, 2000010) }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'for i in $(seq 60); do n=$(psql -h /tmp/standby-sock -p 5433 -d demo -Atc "SELECT count(*) FROM ws" 2>/dev/null); test "$n" = "2000011" && exit 0; sleep 1; done; cat /tmp/standby.log; exit 1'
+
+    # promote it: closes the loop from "archive" to "usable primary", the
+    # same PITR/failover-target role a real archiver serves.
+    exec node2 bash -c 'pg_ctl -D /tmp/standby promote -w'
+    exec node2 bash -c 'for i in $(seq 30); do out=$(psql -h /tmp/standby-sock -p 5433 -d demo -Atc "SELECT pg_is_in_recovery()" 2>/dev/null); test "$out" = "f" && exit 0; sleep 1; done; exit 1'
+    exec node2 bash -c 'psql -h /tmp/standby-sock -p 5433 -d demo -c "INSERT INTO ws VALUES (999999)"'
+}
+
 sequence
     test_000_sync_files_from_node1
     test_001_identify_system_and_show
@@ -149,3 +223,4 @@ sequence
     test_003_start_replication_from_pg_walserver
     test_004_grammar_edge_cases
     test_005_wildcard_route
+    test_006_real_standby_with_core_tools

@@ -36,7 +36,7 @@ static const char *hbaHeader =
 	"# TYPE  ROUTE  USER  ADDRESS  METHOD\n"
 	"#\n"
 	"# TYPE     host (TLS or not), hostssl (TLS only), hostnossl (no TLS)\n"
-	"# ROUTE    all, or a route key exactly as it appears in routes.ini\n"
+	"# ROUTE    all, or a route key exactly as it appears in pg_walserver.ini\n"
 	"#          (an opaque string, never a path; pg_auto_failover's own\n"
 	"#          convention is \"<formation>/<group>\", e.g. \"default/0\")\n"
 	"# USER     all, or a role name\n"

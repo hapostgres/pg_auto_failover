@@ -12,7 +12,7 @@
  *     hostnossl  all         all                        all           reject
  *
  *   TYPE is "host" (any connection), "hostssl" (TLS only) or "hostnossl".
- *   ROUTE is "all", or a route key exactly as it appears in routes.ini
+ *   ROUTE is "all", or a route key exactly as it appears in pg_walserver.ini
  *   (see routes.h) -- an opaque, operator-chosen string pg_walserver never
  *   parses. "default/0" above is pg_auto_failover's own convention
  *   ("<formation>/<group>"), used because it reads well and is already
@@ -58,10 +58,10 @@ typedef enum WsAuthMethod
  * WS_AUTH_REJECT when no rule matches or the matching rule says reject.
  *
  * routeKey is matched against each rule's ROUTE field as a plain, opaque
- * string, exactly the same string routes.c matches against routes.ini's
+ * string, exactly the same string routes.c matches against pg_walserver.ini's
  * own section names (the route need not actually exist yet: an unknown
  * route is reported only once the client authenticated, see auth.h) -- HBA
- * admission and routes.ini's own lookup (including its "*" wildcard, see
+ * admission and pg_walserver.ini's own lookup (including its "*" wildcard, see
  * routes.h) are two entirely independent decisions made from the same
  * key, neither one aware of the other.
  */

@@ -1250,13 +1250,35 @@ ensure_empty_tablespace_dirs(const char *pgdata)
 
 
 /*
- * Call pg_basebackup, using a temporary directory for the duration of the data
- * transfer.
+ * How many times the HBA-readiness preflight below retries
+ * pgctl_identify_system() before giving up and launching pg_basebackup
+ * anyway -- each attempt's own connection already carries up to ~2s of
+ * internal retry (pgsql_set_interactive_retry_policy()'s own comment),
+ * so this bounds the preflight's own total wait to roughly that times
+ * this count, without an extra outer sleep compounding it further.
+ */
+#define PG_BASEBACKUP_HBA_MAX_ATTEMPTS 10
+
+/*
+ * pg_basebackup_fetch runs the real pg_basebackup client against
+ * replicationSource, writing the result into replicationSource->backupDir
+ * and nowhere else -- no assumption about what the caller does with that
+ * directory afterward, unlike pg_basebackup() below, whose whole point is
+ * to become the caller's new PGDATA. Split out so a caller that wants a
+ * base backup as an independent, standalone artifact (this project's own
+ * archiver, or pg_walserver's own `basebackup`/`setup` sub-commands) can
+ * fetch one without pg_basebackup()'s own rmtree-and-move ending -- see
+ * that function's own comment for why calling it unmodified for that use
+ * case would be wrong.
+ *
+ * replicationSource->walMethod/label (both optional, pgsql.h's own
+ * comment on the fields) are the two places this differs from the
+ * defaults every existing pg_basebackup()-only caller already relies on:
+ * empty means the exact same "--wal-method=stream", no --label behavior
+ * this function always had before the split.
  */
 bool
-pg_basebackup(const char *pgdata,
-			  const char *pg_ctl,
-			  ReplicationSource *replicationSource)
+pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource)
 {
 	int returnCode;
 	char pg_basebackup[MAXPGPATH];
@@ -1264,7 +1286,8 @@ pg_basebackup(const char *pgdata,
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
-	char *args[18];  /* enough for all pg_basebackup flags incl. --checkpoint=fast */
+	char *args[20];  /* enough for all pg_basebackup flags incl. --checkpoint=fast
+	                  * and --label */
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
@@ -1272,12 +1295,6 @@ pg_basebackup(const char *pgdata,
 
 	log_debug("mkdir -p \"%s\"", replicationSource->backupDir);
 	if (!ensure_empty_dir(replicationSource->backupDir, 0700))
-	{
-		/* errors have already been logged. */
-		return false;
-	}
-
-	if (!ensure_empty_tablespace_dirs(pgdata))
 	{
 		/* errors have already been logged. */
 		return false;
@@ -1327,10 +1344,30 @@ pg_basebackup(const char *pgdata,
 	args[argsIndex++] = replicationSource->userName;
 	args[argsIndex++] = "--verbose";
 	args[argsIndex++] = "--progress";
-	args[argsIndex++] = "--max-rate";
-	args[argsIndex++] = replicationSource->maximumBackupRate;
-	args[argsIndex++] = "--wal-method=stream";
+
+	char walMethodArg[NAMEDATALEN + 16] = { 0 };
+
+	sformat(walMethodArg, sizeof(walMethodArg), "--wal-method=%s",
+			IS_EMPTY_STRING_BUFFER(replicationSource->walMethod)
+			? "stream"
+			: replicationSource->walMethod);
+	args[argsIndex++] = walMethodArg;
 	args[argsIndex++] = "--checkpoint=fast";
+
+	/* --max-rate/--label only make sense together with a streamed,
+	 * self-consistent backup -- a --wal-method=none caller leaves
+	 * maximumBackupRate empty and sets label instead */
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->maximumBackupRate))
+	{
+		args[argsIndex++] = "--max-rate";
+		args[argsIndex++] = replicationSource->maximumBackupRate;
+	}
+
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->label))
+	{
+		args[argsIndex++] = "--label";
+		args[argsIndex++] = replicationSource->label;
+	}
 
 	/* we don't use a replication slot e.g. when upstream is a standby */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))
@@ -1340,6 +1377,37 @@ pg_basebackup(const char *pgdata,
 	}
 
 	args[argsIndex] = NULL;
+
+	/*
+	 * Preflight: retry pgctl_identify_system() (a plain replication-mode
+	 * IDENTIFY_SYSTEM, "check that HBA is ready" per its own comment)
+	 * against this same source, up to PG_BASEBACKUP_HBA_MAX_ATTEMPTS
+	 * times, before ever launching the real pg_basebackup subprocess
+	 * below. Closes a real, observed startup race: a freshly-registered
+	 * node's own pg_hba.conf entry on the source can take a moment to
+	 * propagate (HBA rules are written and the config reloaded
+	 * asynchronously), and unlike pg_receivewal (which retries a failed
+	 * connection internally) plain pg_basebackup has no such retry of its
+	 * own -- a single race hit here was fatal, no second chance. No extra
+	 * sleep between attempts: pgctl_identify_system()'s own connection
+	 * already carries pgsql_init()'s "interactive" retry policy (up to
+	 * ~2s of internal backoff per call), so an added outer sleep would
+	 * only compound that delay rather than add useful coverage.
+	 * Best-effort, not a hard gate: exhausting every attempt just means
+	 * this preflight didn't get to close the race, and pg_basebackup runs
+	 * anyway with its own real error if the HBA rule genuinely still
+	 * isn't there.
+	 */
+	for (int attempt = 0;
+		 attempt < PG_BASEBACKUP_HBA_MAX_ATTEMPTS &&
+		 !(asked_to_stop || asked_to_stop_fast || asked_to_quit);
+		 attempt++)
+	{
+		if (pgctl_identify_system(replicationSource))
+		{
+			break;
+		}
+	}
 
 	/*
 	 * We do not want to call setsid() when running this program, as the
@@ -1385,6 +1453,35 @@ pg_basebackup(const char *pgdata,
 	if (returnCode != 0)
 	{
 		log_error("Failed to run pg_basebackup: exit code %d", returnCode);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * Call pg_basebackup, using a temporary directory for the duration of the
+ * data transfer, then replace pgdata with the result -- standby init's own
+ * use of a base backup: pgdata becomes the fetched backup. NOT what every
+ * caller wants a base backup for (see pg_basebackup_fetch()'s own comment,
+ * just above); ordinary standby creation is the only caller that should
+ * ever reach this rmtree-and-move ending.
+ */
+bool
+pg_basebackup(const char *pgdata,
+			  const char *pg_ctl,
+			  ReplicationSource *replicationSource)
+{
+	if (!ensure_empty_tablespace_dirs(pgdata))
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	if (!pg_basebackup_fetch(pg_ctl, replicationSource))
+	{
+		/* errors have already been logged. */
 		return false;
 	}
 

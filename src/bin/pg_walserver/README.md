@@ -27,17 +27,19 @@ All of that lands in a later, separate PR (informally "the archiving PR"
 throughout this codebase's comments). This PR is the standalone piece:
 `pg_walserver` builds, runs, authenticates connections and serves the wire
 protocol entirely on its own, driven by a handful of files it reads
-directly off disk (`archiver-routes.ini`, `archiver-hba.conf`,
-`archiver-passwd`, and per-route bookkeeping files -- see below), all of
-which an operator (or, in the later PR, `pg_autoctl` itself) is expected to
-create and keep current -- today, entirely by hand or by shelling out to
-`pg_basebackup`/`pg_receivewal`/`psql` themselves (see
-`docs/ref/pg_walserver.rst`'s own worked example). `DESIGN-standalone-
-archiving.md` in this same directory designs `pg_walserver` growing
-sub-commands of its own for that (`setup`, `fetch-systemid`, `basebackup`,
-`archive`) plus an embedded WAL capturer, so it can be a complete,
-production-grade archiver on its own, not just this PR's minimal
-`serve`-only server -- not implemented yet, a design to review first.
+directly off disk (`pg_walserver.ini`, `archiver-hba.conf`,
+`archiver-passwd`, and per-route bookkeeping files -- see below). Three of
+its own sub-commands (`setup`, `fetch-systemid`, `basebackup`; see
+"New client-side sub-commands" below) can now create and keep those files
+current directly, driven from the command line -- `docs/ref/pg_walserver.
+rst`'s own worked example uses `setup` first, falling back to `pg_
+basebackup`/`pg_receivewal`/`psql` by hand only for what those three don't
+cover yet (ongoing WAL capture, HBA, the passwd file). `DESIGN-standalone-
+archiving.md` in this same directory designs the rest of that story: the
+`archive`/`CHECK_FILE`/`ARCHIVE_FILE` push side and an embedded, supervised
+WAL capturer, so `pg_walserver` can eventually be a complete,
+production-grade archiver entirely on its own -- not implemented yet, a
+design to review first.
 
 One concrete consequence of that scoping shows up in `hba.c`/`hba.h`: an
 earlier iteration of this PR had a `"monitor"` HBA `ADDRESS` keyword backed
@@ -297,7 +299,7 @@ logical line before tokenizing. What's intentionally left out, because
 this project's own HBA format doesn't use it: comma-separated lists,
 `@file` inclusion, and regular expressions.
 
-`ROUTE` is `all`, or a route key exactly as it appears in `routes.ini` (see
+`ROUTE` is `all`, or a route key exactly as it appears in `pg_walserver.ini` (see
 "The routes file" below) -- an opaque string `hba.c` never parses, splits,
 or gives any filesystem meaning to. pg_auto_failover's own convention is
 `"<formation>/<group>"` (e.g. `default/0`), because it reads well and is
@@ -406,9 +408,9 @@ Without any `--pgdata` at all, `pg_walserver` refuses to start unless
 reachable network): every dbname is then accepted with no authentication
 whatsoever, and there is no HBA file, no routes file, and no TLS.
 
-## The routes file (routes.ini)
+## The routes file (pg_walserver.ini)
 
-`archiver-routes.ini` (`routes.c`/`routes.h`) is this server's own routing
+`pg_walserver.ini` (`routes.c`/`routes.h`) is this server's own routing
 table: one INI section per route it serves, mapping a route key -- matched
 against the connection's `dbname`, i.e. what a real client puts in its
 connection string's `dbname=` -- to a `path`, that route's own local
@@ -447,7 +449,7 @@ pg_auto_failover's own convention, `"<formation>/<group>"` (e.g.
 `default/0`), *looks* like a path, but it is not one, and never becomes
 one: the only thing that ever determines an actual directory on disk is
 the route's own explicit `path` property, written by whoever maintains
-`routes.ini` (a human, or `service_archiver_reconciler.c` in the later
+`pg_walserver.ini` (a human, or `service_archiver_reconciler.c` in the later
 archiving PR). This is a deliberate design choice, not an oversight -- see
 the wildcard route below for why substituting a route key straight into a
 filesystem path would be actively dangerous, given that the key is
@@ -456,7 +458,7 @@ SCRAM have run.
 
 This project's whole design predates the archiver: `pg_walserver_
 standalone.pgaf` (see "Testing" below) never mentions a "formation" or a
-"group" anywhere, and its own `routes.ini` uses `default/0` as nothing
+"group" anywhere, and its own `pg_walserver.ini` uses `default/0` as nothing
 more than an arbitrary string a human chose to also type into `psql`'s
 `dbname=` parameter. Any string works exactly the same way -- a bare
 cluster name, a customer id, a UUID -- pg_auto_failover is one driver of
@@ -496,7 +498,7 @@ one configured `path` verbatim, never a per-key subdirectory synthesized
 on the fly. The wildcard is what makes `pg_walserver` usable with zero
 multiplexing ceremony outside pg_auto_failover: a single-cluster
 deployment can skip per-route sections entirely, keep just one `[*]`
-section in `routes.ini`, and never has to learn or type a special `dbname`
+section in `pg_walserver.ini`, and never has to learn or type a special `dbname`
 value at all.
 
 `archiver-hba.conf`'s own `ROUTE` matching is completely independent of
@@ -505,6 +507,51 @@ this: an HBA rule's `ROUTE` field is always compared against the literal
 happened to resolve it to. A `hostssl all ...` rule already admits any
 route, wildcard-resolved or not; a rule scoped to one specific route key
 still only matches that literal key, exactly as before.
+
+## New client-side sub-commands (setup / fetch-systemid / basebackup)
+
+Three sub-commands, alongside `serve`/`scram-secret`, all sharing
+`cli_upstream.c`'s own `--route`/`--path`/`--upstream`/`--host`/`--port`/
+`--user` resolution (an explicit flag always wins over a route's own
+`pg_walserver.ini` properties, the same layering `restore_command_
+resolve()`, `pg_autoctl/restore_command.c`, already uses):
+
+- **`fetch-systemid`** (`cli_fetch_systemid.c`) -- connects to the
+  upstream via `pgctl_identify_system()` (`src/bin/common/pgctl.c`, a real
+  replication-mode `IDENTIFY_SYSTEM`, reused unchanged) and writes
+  `archiver-systemid` atomically. Refuses to overwrite an already-recorded
+  *different* identifier unless `--force`: the same "never silently
+  replace what's already there" principle PostgreSQL's own
+  `archive_command` overwrite-safety rule applies elsewhere, here applied
+  to a route's own identity.
+- **`basebackup`** (`cli_basebackup.c`) -- takes a real base backup via
+  `pg_basebackup_fetch()` (`src/bin/common/pgctl.c`; ported forward from
+  where it already existed on a separate, more-advanced branch -- see that
+  commit's own history for the original split and its HBA-readiness retry
+  preflight, both reused as-is here), into
+  `<path>/basebackups/basebackup-<UTC timestamp>/`, validates the result
+  (`backup_label`/`PG_VERSION` both present -- `pg_basebackup` itself
+  already guarantees a well-formed `backup_label` on a zero exit, so this
+  is a defense against a partial result, not a re-parse of it), and only
+  then atomically swaps `basebackups/.latest`.
+- **`setup`** (`cli_setup.c`) -- the wizard: writes/validates the
+  `pg_walserver.ini` section for `--route` (refusing to silently change an
+  existing one's path unless `--force`), then calls `fetch-systemid`'s own
+  logic (whose `pgctl_identify_system()` connection doubles as this step's
+  role-permission check: PostgreSQL refuses a replication-mode connection
+  for a role lacking `REPLICATION` at the *backend* level, independent of
+  HBA -- an earlier version of this file ran a separate plain-SQL
+  `pg_roles.rolreplication` check first, removed because that connection
+  targets an ordinary database, which the replication role's own HBA rule
+  usually does not admit at all), and, with `--with-basebackup`, calls
+  `basebackup`'s own logic -- synchronously, not returning until the first
+  base backup has actually succeeded, so "setup finished" means the route
+  is genuinely ready to serve.
+
+None of the three touch `archiver-hba.conf` or `archiver-passwd` -- a
+deliberately separate concern an operator (or `pg_autoctl`, later) still
+configures on its own, see `docs/ref/pg_walserver.rst`'s own worked
+example for the full sequence including those.
 
 ## The vendored ustar writer (vendor/tar.c)
 
@@ -535,18 +582,20 @@ future updates re-reformat rather than fighting the style checker forever.
 There is no archiver integration in this PR's own stack for a test to
 drive `pg_walserver` through -- no `pg_autoctl create archiver`, no
 reconciler writing routes/HBA files, no monitor schema. So the tap spec
-builds the smallest possible harness by hand instead, ahead of the
-archiver feature that will eventually make all of this automatic:
+builds the smallest possible harness instead, ahead of the archiver
+feature that will eventually make all of this automatic:
 
-- a hand-crafted `archiver-routes.ini` and `archiver-hba.conf` (a single
-  `host all all 127.0.0.1/32 trust` rule, scoped to the loopback peer every
-  step in this spec actually connects from -- authentication itself is
-  exercised elsewhere at the unit level, this spec exercises the wire
-  protocol);
-- a hand-written `archiver-systemid` file, built by asking node1 directly
-  over its own already-open connection (`pg_control_system()`), since this
-  point in this project's own `pgaftest` history predates a cross-container
-  file-copy primitive;
+- `pg_walserver setup --with-basebackup` does most of the work in one
+  call: creates the route's own directory, writes the `pg_walserver.ini`
+  section (`path` + `upstream`), fetches node1's real system identifier
+  into `archiver-systemid`, and takes the route's first base backup --
+  exactly the sequence `docs/ref/pg_walserver.rst`'s own worked example
+  now leads with;
+- a hand-crafted `archiver-hba.conf` (a single `host all all
+  127.0.0.1/32 trust` rule, scoped to the loopback peer every step in this
+  spec actually connects from -- authentication itself is exercised
+  elsewhere at the unit level, this spec exercises the wire protocol;
+  `setup` deliberately never touches HBA, see its own header comment);
 - real WAL captured off a real `pg_auto_failover`-managed primary (node1)
   by the stock OS `pg_receivewal` (not this project's own vendored copy,
   which belongs to a different PR's stack) into the route's directory,
@@ -557,7 +606,9 @@ archiver feature that will eventually make all of this automatic:
 talks to it exclusively through real clients: `psql` issuing raw
 replication-protocol commands (`IDENTIFY_SYSTEM`, `SHOW`, `FETCH_FILE`,
 `CREATE_REPLICATION_SLOT`, deliberately malformed input) and a real
-`pg_receivewal` doing an actual `START_REPLICATION`. The six steps:
+`pg_receivewal` doing an actual `START_REPLICATION` (plus, in the last
+step, a real standby driven by nothing but stock PostgreSQL commands). The
+seven steps:
 
 1. `test_000_sync_files_from_node1` -- assembles the hand-crafted
    fixtures above and starts `pg_walserver`.
@@ -582,13 +633,30 @@ replication-protocol commands (`IDENTIFY_SYSTEM`, `SHOW`, `FETCH_FILE`,
    garbage command produces a clean `ErrorResponse` without crashing the
    server or leaving the connection unusable for the next, real command.
 6. `test_005_wildcard_route` -- adds a second route, reachable only
-   through routes.ini's `"*"` wildcard (see "The routes file" above), with
+   through pg_walserver.ini's `"*"` wildcard (see "The routes file" above), with
    its own distinct system identifier; a `dbname` matching no explicit
    section resolves to it, while `default/0` -- which still has its own
    explicit section -- keeps resolving to its own path, proving an exact
    match always wins over the wildcard.
+7. `test_006_real_standby_with_core_tools` -- a real, unmodified
+   `pg_basebackup` client takes a `BASE_BACKUP` from `pg_walserver` of the
+   exact backup `setup --with-basebackup` produced (proving
+   `cmd_base_backup.c` actually serves it over the wire, not just that the
+   file exists on disk, which `test_000` above only checks); a real standby
+   -- `primary_conninfo` pointed at `pg_walserver`, `standby.signal`,
+   nothing but stock PostgreSQL configuration and commands -- then streams
+   live changes from it via a genuine walreceiver, not `pg_receivewal`, and
+   is finally promoted. Needs one extra route: a real physical replication
+   connection's walreceiver always sends the literal `dbname=replication`
+   on the wire regardless of what `primary_conninfo` says (PostgreSQL's own
+   `libpqrcv_connect()` overrides it unconditionally, `libpqwalreceiver.c`'s
+   own comment: "the database name is ignored by the server in replication
+   mode, but specify 'replication' for .pgpass lookup") -- so this step
+   gives the route a second, literal-`"replication"` alias pointing at the
+   same path, exactly as a deployment serving real physical standbys by
+   name (rather than through the `"*"` wildcard) would need to.
 
-The suite runs 6/6 green; none of the first five steps needed to change
+The suite runs 7/7 green; none of the first five steps needed to change
 for the removal of the `"monitor"` HBA keyword or the `fetch-file` CLI
 sub-command (Tasks 1 and 2 of the PR review round that produced this
 README) -- they were already written to avoid exercising either path.

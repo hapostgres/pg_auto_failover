@@ -26,7 +26,8 @@ LOCAL_SRC = main.c cli_root.c accept_loop.c startup.c auth.c framing.c repl_comm
             routes.c hba.c tls.c cmd_identify_system.c cmd_show.c cmd_base_backup.c \
             tar_stream.c cmd_fetch_file.c \
             cmd_timeline_history.c cmd_replication_slot.c \
-            cmd_start_replication.c wal_dir_scan.c ws_util.c
+            cmd_start_replication.c wal_dir_scan.c ws_util.c \
+            cli_upstream.c cli_fetch_systemid.c cli_basebackup.c cli_setup.c
 
 LOCAL_OBJS = $(patsubst %.c,%.o,$(LOCAL_SRC))
 

@@ -5,24 +5,40 @@
  *   the same way pgaftest's own cli_root.c does for a similarly-sized
  *   standalone binary.
  *
- *   Two sub-commands:
+ *   Five sub-commands:
  *
- *     serve        Run the accept loop (accept_loop.h). This is pg_walserver's
- *                  *default* command: when no sub-command name is given at
- *                  all, main.c injects "serve" into argv before calling
- *                  commandline_run() (see pg_walserver_default_argv() below),
- *                  so `pg_walserver --port ...` keeps working exactly as it
- *                  did before this file existed -- the framework itself has
- *                  no notion of a default sub-command, only this project's
- *                  own thin shim provides one.
- *     scram-secret Print one archiver-passwd line for a user.
+ *     serve           Run the accept loop (accept_loop.h). This is
+ *                     pg_walserver's *default* command: when no sub-command
+ *                     name is given at all, main.c injects "serve" into
+ *                     argv before calling commandline_run() (see pg_
+ *                     walserver_default_argv() below), so `pg_walserver
+ *                     --port ...` keeps working exactly as it did before
+ *                     this file existed -- the framework itself has no
+ *                     notion of a default sub-command, only this project's
+ *                     own thin shim provides one.
+ *     scram-secret    Print one archiver-passwd line for a user.
+ *     setup           Create or validate one pg_walserver.ini route --
+ *                     the write/path/upstream/role-check/systemid/
+ *                     optional-basebackup wizard, cli_setup.c.
+ *     fetch-systemid  Fetch a route's upstream system identifier,
+ *                     cli_fetch_systemid.c.
+ *     basebackup      Take a base backup of a route's upstream,
+ *                     cli_basebackup.c.
+ *
+ *   The last three are client-side, one-shot tools (they connect *out*, to
+ *   a route's own upstream), sharing cli_upstream.c's own --route/--path/
+ *   --upstream/--host/--port/--user resolution. See DESIGN-standalone-
+ *   archiving.md for the full design and what's deliberately not built
+ *   yet (the ARCHIVE_FILE/CHECK_FILE push side, the embedded pull
+ *   capturer).
  *
  *   pg_walserver has no FETCH_FILE *client* sub-command: the one-shot
- *   FETCH_FILE client now lives in src/bin/common/fetch_client.c, linked
- *   in-process by whatever needs it (`pg_autoctl restore command`, in the
- *   later archiving PR) rather than exec'd as a pg_walserver sub-command.
- *   pg_walserver itself only ever answers FETCH_FILE as a server (see
- *   cmd_fetch_file.h).
+ *   FETCH_FILE client (fetching a WAL segment, not a system identifier --
+ *   a different thing from fetch-systemid above) lives in src/bin/common/
+ *   fetch_client.c, linked in-process by whatever needs it (`pg_autoctl
+ *   restore command`, in the later archiving PR) rather than exec'd as a
+ *   pg_walserver sub-command. pg_walserver itself only ever answers
+ *   FETCH_FILE as a server (see cmd_fetch_file.h).
  *
  *   Every flag and behavior is unchanged from the previous hand-rolled
  *   argv[1] dispatch in main.c: only the dispatch mechanism moved.
@@ -41,6 +57,10 @@
 #include "commandline.h"
 
 #include "accept_loop.h"
+#include "cli_basebackup.h"
+#include "cli_fetch_systemid.h"
+#include "cli_setup.h"
+#include "cli_upstream.h"
 #include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
@@ -196,7 +216,7 @@ cli_serve_run(int argc, char **argv)
 	if (servePgdata[0] != '\0')
 	{
 		sformat(serveConfig.routesPath, sizeof(serveConfig.routesPath),
-				"%s/archiver-routes.ini", servePgdata);
+				"%s/pg_walserver.ini", servePgdata);
 		sformat(serveConfig.auth.hbaPath, sizeof(serveConfig.auth.hbaPath),
 				"%s/archiver-hba.conf", servePgdata);
 		sformat(serveConfig.auth.passwdPath, sizeof(serveConfig.auth.passwdPath),
@@ -261,7 +281,7 @@ static CommandLine serve_command =
 				 "pg_auto_failover's own\n"
 				 "              convention is \"<formation>/<group>\") to "
 				 "its own storage path\n"
-				 "              is read from <pgdata>/archiver-routes.ini, "
+				 "              is read from <pgdata>/pg_walserver.ini, "
 				 "and access is\n"
 				 "              decided by <pgdata>/archiver-hba.conf; the "
 				 "server refuses to\n"
@@ -376,24 +396,448 @@ static CommandLine scram_secret_command =
 
 
 /* -----------------------------------------------------------------------
+ * pg_walserver fetch-systemid --route <key> --pgdata <path> [--upstream ...]
+ * ----------------------------------------------------------------------- */
+
+static char fetchSystemidPgdata[MAXPGPATH] = { 0 };
+static char fetchSystemidRoute[NAMEDATALEN + 16] = { 0 };
+static char fetchSystemidPath[MAXPGPATH] = { 0 };
+static char fetchSystemidUpstream[MAXCONNINFO] = { 0 };
+static char fetchSystemidHost[_POSIX_HOST_NAME_MAX] = { 0 };
+static char fetchSystemidPort[16] = { 0 };
+static char fetchSystemidUser[NAMEDATALEN] = { 0 };
+static bool fetchSystemidForce = false;
+
+static struct option fetchSystemidLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "route", required_argument, NULL, 'r' },
+	{ "path", required_argument, NULL, 'P' },
+	{ "upstream", required_argument, NULL, 'u' },
+	{ "host", required_argument, NULL, 'h' },
+	{ "port", required_argument, NULL, 'p' },
+	{ "user", required_argument, NULL, 'U' },
+	{ "force", no_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_fetch_systemid_getopt(int argc, char **argv)
+{
+	optind = 0;
+	(void) get_env_pgdata(fetchSystemidPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:f",
+							fetchSystemidLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(fetchSystemidPgdata, optarg, sizeof(fetchSystemidPgdata));
+				break;
+			}
+
+			case 'r':
+			{
+				strlcpy(fetchSystemidRoute, optarg, sizeof(fetchSystemidRoute));
+				break;
+			}
+
+			case 'P':
+			{
+				strlcpy(fetchSystemidPath, optarg, sizeof(fetchSystemidPath));
+				break;
+			}
+
+			case 'u':
+			{
+				strlcpy(fetchSystemidUpstream, optarg, sizeof(fetchSystemidUpstream));
+				break;
+			}
+
+			case 'h':
+			{
+				strlcpy(fetchSystemidHost, optarg, sizeof(fetchSystemidHost));
+				break;
+			}
+
+			case 'p':
+			{
+				strlcpy(fetchSystemidPort, optarg, sizeof(fetchSystemidPort));
+				break;
+			}
+
+			case 'U':
+			{
+				strlcpy(fetchSystemidUser, optarg, sizeof(fetchSystemidUser));
+				break;
+			}
+
+			case 'f':
+			{
+				fetchSystemidForce = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_fetch_systemid_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	WsUpstreamTarget target = { 0 };
+
+	if (!cli_resolve_upstream(fetchSystemidPgdata, fetchSystemidRoute,
+							  fetchSystemidPath, fetchSystemidUpstream,
+							  fetchSystemidHost, fetchSystemidPort,
+							  fetchSystemidUser, &target))
+	{
+		exit(1);
+	}
+
+	exit(cli_fetch_systemid_run(&target, fetchSystemidForce, NULL) ? 0 : 1);
+}
+
+
+static CommandLine fetch_systemid_command =
+	make_command("fetch-systemid",
+				 "Fetch a route's upstream system identifier",
+				 "--route <key> --pgdata <path> | --path <dir> "
+				 "[--upstream <conninfo> | --host <host> [--port <port>] "
+				 "[--user <name>]] [--force]",
+				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
+				 "(defaults to PGDATA)\n"
+				 "  --route     the route key to fetch for (looked up in "
+				 "pg_walserver.ini)\n"
+				 "  --path      the route's own directory (overrides the "
+				 "route's own \"path\")\n"
+				 "  --upstream  a libpq connection string to connect with "
+				 "(overrides the\n"
+				 "              route's own \"upstream\")\n"
+				 "  --host / --port / --user  further override individual "
+				 "connection\n"
+				 "              parameters (default port: 5432, default "
+				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+													  "  --force     overwrite an already-recorded, different "
+													  "system identifier\n",
+				 cli_fetch_systemid_getopt, cli_fetch_systemid_command_run);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver basebackup --route <key> --pgdata <path> [--upstream ...]
+ * ----------------------------------------------------------------------- */
+
+static char basebackupPgdata[MAXPGPATH] = { 0 };
+static char basebackupRoute[NAMEDATALEN + 16] = { 0 };
+static char basebackupPath[MAXPGPATH] = { 0 };
+static char basebackupUpstream[MAXCONNINFO] = { 0 };
+static char basebackupHost[_POSIX_HOST_NAME_MAX] = { 0 };
+static char basebackupPort[16] = { 0 };
+static char basebackupUser[NAMEDATALEN] = { 0 };
+
+static struct option basebackupLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "route", required_argument, NULL, 'r' },
+	{ "path", required_argument, NULL, 'P' },
+	{ "upstream", required_argument, NULL, 'u' },
+	{ "host", required_argument, NULL, 'h' },
+	{ "port", required_argument, NULL, 'p' },
+	{ "user", required_argument, NULL, 'U' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_basebackup_getopt(int argc, char **argv)
+{
+	optind = 0;
+	(void) get_env_pgdata(basebackupPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:",
+							basebackupLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(basebackupPgdata, optarg, sizeof(basebackupPgdata));
+				break;
+			}
+
+			case 'r':
+			{
+				strlcpy(basebackupRoute, optarg, sizeof(basebackupRoute));
+				break;
+			}
+
+			case 'P':
+			{
+				strlcpy(basebackupPath, optarg, sizeof(basebackupPath));
+				break;
+			}
+
+			case 'u':
+			{
+				strlcpy(basebackupUpstream, optarg, sizeof(basebackupUpstream));
+				break;
+			}
+
+			case 'h':
+			{
+				strlcpy(basebackupHost, optarg, sizeof(basebackupHost));
+				break;
+			}
+
+			case 'p':
+			{
+				strlcpy(basebackupPort, optarg, sizeof(basebackupPort));
+				break;
+			}
+
+			case 'U':
+			{
+				strlcpy(basebackupUser, optarg, sizeof(basebackupUser));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_basebackup_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	WsUpstreamTarget target = { 0 };
+
+	if (!cli_resolve_upstream(basebackupPgdata, basebackupRoute,
+							  basebackupPath, basebackupUpstream,
+							  basebackupHost, basebackupPort,
+							  basebackupUser, &target))
+	{
+		exit(1);
+	}
+
+	exit(cli_basebackup_run(&target, NULL, 0) ? 0 : 1);
+}
+
+
+static CommandLine basebackup_command =
+	make_command("basebackup",
+				 "Take a base backup of a route's upstream",
+				 "--route <key> --pgdata <path> | --path <dir> "
+				 "[--upstream <conninfo> | --host <host> [--port <port>] "
+				 "[--user <name>]]",
+				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
+				 "(defaults to PGDATA)\n"
+				 "  --route     the route key to back up (looked up in "
+				 "pg_walserver.ini)\n"
+				 "  --path      the route's own directory (overrides the "
+				 "route's own \"path\")\n"
+				 "  --upstream  a libpq connection string to connect with "
+				 "(overrides the\n"
+				 "              route's own \"upstream\")\n"
+				 "  --host / --port / --user  further override individual "
+				 "connection\n"
+				 "              parameters (default port: 5432, default "
+				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n",
+				 cli_basebackup_getopt, cli_basebackup_command_run);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver setup --route <key> --path <dir> --pgdata <path>
+ *                     [--upstream ...] [--force] [--with-basebackup]
+ * ----------------------------------------------------------------------- */
+
+static WsSetupOptions setupOptions = { 0 };
+
+static struct option setupLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "route", required_argument, NULL, 'r' },
+	{ "path", required_argument, NULL, 'P' },
+	{ "upstream", required_argument, NULL, 'u' },
+	{ "host", required_argument, NULL, 'h' },
+	{ "port", required_argument, NULL, 'p' },
+	{ "user", required_argument, NULL, 'U' },
+	{ "force", no_argument, NULL, 'f' },
+	{ "with-basebackup", no_argument, NULL, 'b' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_setup_getopt(int argc, char **argv)
+{
+	optind = 0;
+	setupOptions = (WsSetupOptions) {
+		0
+	};
+	(void) get_env_pgdata(setupOptions.pgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:fb",
+							setupLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(setupOptions.pgdata, optarg, sizeof(setupOptions.pgdata));
+				break;
+			}
+
+			case 'r':
+			{
+				strlcpy(setupOptions.route, optarg, sizeof(setupOptions.route));
+				break;
+			}
+
+			case 'P':
+			{
+				strlcpy(setupOptions.path, optarg, sizeof(setupOptions.path));
+				break;
+			}
+
+			case 'u':
+			{
+				strlcpy(setupOptions.upstream, optarg,
+						sizeof(setupOptions.upstream));
+				break;
+			}
+
+			case 'h':
+			{
+				strlcpy(setupOptions.host, optarg, sizeof(setupOptions.host));
+				break;
+			}
+
+			case 'p':
+			{
+				strlcpy(setupOptions.port, optarg, sizeof(setupOptions.port));
+				break;
+			}
+
+			case 'U':
+			{
+				strlcpy(setupOptions.user, optarg, sizeof(setupOptions.user));
+				break;
+			}
+
+			case 'f':
+			{
+				setupOptions.force = true;
+				break;
+			}
+
+			case 'b':
+			{
+				setupOptions.withBasebackup = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_setup_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_setup_run(&setupOptions) ? 0 : 1);
+}
+
+
+static CommandLine setup_command =
+	make_command("setup",
+				 "Create or validate one pg_walserver.ini route",
+				 "--route <key> --path <dir> --pgdata <path> "
+				 "[--upstream <conninfo> | --host <host> [--port <port>] "
+				 "[--user <name>]] [--force] [--with-basebackup]",
+				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
+				 "(defaults to PGDATA)\n"
+				 "  --route     the route key to create or validate\n"
+				 "  --path      the route's own directory, created if "
+				 "missing\n"
+				 "  --upstream  a libpq connection string, written into the "
+				 "route's own\n"
+				 "              \"upstream\" property\n"
+				 "  --host / --port / --user  further override individual "
+				 "connection\n"
+				 "              parameters (default port: 5432, default "
+				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+													  "  --force     change an already-existing route's path, "
+													  "or overwrite an\n"
+													  "              already-recorded, different system "
+													  "identifier\n"
+													  "  --with-basebackup  take the route's first base backup "
+													  "before returning\n",
+				 cli_setup_getopt, cli_setup_command_run);
+
+
+/* -----------------------------------------------------------------------
  * Root command table
  * ----------------------------------------------------------------------- */
 
 static CommandLine *root_subcommands[] = {
 	&serve_command,
 	&scram_secret_command,
+	&fetch_systemid_command,
+	&basebackup_command,
+	&setup_command,
 	NULL
 };
 
 CommandLine ws_root =
 	make_command_set("pg_walserver",
 					 "The archiver's own replication-protocol server",
-					 "[serve options] | scram-secret ...",
-					 "  serve         Run the accept loop (default command, "
-					 "used when no\n"
-					 "                sub-command name is given at all)\n"
-					 "  scram-secret  Print one archiver-passwd line for a "
-					 "user\n",
+					 "[serve options] | scram-secret ... | setup ... | "
+					 "fetch-systemid ... | basebackup ...",
+					 "  serve           Run the accept loop (default "
+					 "command, used when no\n"
+					 "                  sub-command name is given at all)\n"
+					 "  scram-secret    Print one archiver-passwd line for "
+					 "a user\n"
+					 "  setup           Create or validate one "
+					 "pg_walserver.ini route\n"
+					 "  fetch-systemid  Fetch a route's upstream system "
+					 "identifier\n"
+					 "  basebackup      Take a base backup of a route's "
+					 "upstream\n",
 					 NULL, root_subcommands);
 
 
@@ -416,6 +860,9 @@ pg_walserver_default_argv(int argc, char **argv, int *newArgc)
 	if (argc >= 2 &&
 		(streq(argv[1], "serve") ||
 		 streq(argv[1], "scram-secret") ||
+		 streq(argv[1], "setup") ||
+		 streq(argv[1], "fetch-systemid") ||
+		 streq(argv[1], "basebackup") ||
 		 streq(argv[1], "--help") ||
 		 streq(argv[1], "-h")))
 	{
