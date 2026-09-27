@@ -133,9 +133,11 @@ A connected client may issue ``IDENTIFY_SYSTEM``, ``SHOW``,
 ``BASE_BACKUP``, ``TIMELINE_HISTORY``,
 ``CREATE_REPLICATION_SLOT``/``READ_REPLICATION_SLOT``/
 ``DROP_REPLICATION_SLOT``, and ``START_REPLICATION``, exactly as against a
-real PostgreSQL primary, plus two extensions of ``pg_walserver``'s own:
-``FETCH_FILE '<name>'`` (a one-shot file fetch, used by ``restore-wal``)
-and ``CHECK_FILE``/``ARCHIVE_FILE`` (the push-side counterpart, used by
+real PostgreSQL primary (``SHOW`` additionally answers ``capture``,
+reporting the connected route's own ``capture`` setting, ``pull`` or
+``none``), plus two extensions of ``pg_walserver``'s own: ``FETCH_FILE
+'<name>'`` (a one-shot file fetch, used by ``restore-wal``) and
+``CHECK_FILE``/``ARCHIVE_FILE`` (the push-side counterpart, used by
 ``archive-wal``). See ``src/bin/pg_walserver/README.md`` for the wire
 protocol's full design.
 
@@ -325,6 +327,14 @@ as PostgreSQL's own ``archive_command``:
   archive_command = 'pg_walserver archive-wal %p %f --route mycluster \
                        --host archive.example.com --user archiver_repl'
 
+The connected route's own ``capture`` setting decides what each invocation
+does. When the route has ``capture = pull`` configured, ``archive-wal``
+only ever runs ``CHECK_FILE``: it exits 0 when the segment already matches
+what the route has, exits 1 otherwise, and never pushes anything. When the
+route has no ``capture = pull``, ``archive-wal`` only ever runs
+``ARCHIVE_FILE``, unconditionally pushing the file, with no prior
+``CHECK_FILE`` round trip.
+
 --route
 
   The route to archive into, sent as ``dbname``.
@@ -440,10 +450,11 @@ embedded capturer, on the primary::
   archive_mode = on
   archive_command = 'pg_walserver archive-wal %p %f --route mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
 
-Each invocation asks ``pg_walserver`` via ``CHECK_FILE`` whether it
-already has the segment, and only pushes it via ``ARCHIVE_FILE`` when it
-doesn't; exit code 0 on success (including "already there"), nonzero
-otherwise, matching the ``archive_command`` contract.
+``mycluster`` has ``capture = pull`` configured (step 2 above), so each
+invocation only ever runs ``CHECK_FILE``: exit 0 once the embedded
+capturer has already delivered the segment, exit 1 otherwise. It never
+pushes anything itself; PostgreSQL's own retry of ``archive_command``
+covers the case where the capturer has not yet caught up.
 
 **5. Point-in-time recovery**: take a real ``pg_basebackup`` against
 ``pg_walserver``, then use ``restore-wal`` as ``restore_command``::
