@@ -1,9 +1,11 @@
 # pg_walserver's own embedded, supervised pull capturer (capture.c): a
-# route configured with "capture = pull" (pg_walserver.ini) / --capture
-# pull (`pg_walserver setup`) gets a forked, supervised pg_receivewal child
-# at "serve" startup -- no external pg_receivewal process, no separate
-# supervisor unit. See README.md's "The embedded pull capturer" section
-# for the design this spec proves.
+# route configured with "capture = pull" (pg_walserver.ini) -- written by
+# `pg_walserver setup` *by default* now, with no --capture flag at all
+# needed (an operator has to pass --no-capture / --capture none to opt
+# out) -- gets a forked, supervised pg_receivewal child at "serve" startup:
+# no external pg_receivewal process, no separate supervisor unit. This
+# spec's own setup{} below relies on exactly that default. See README.md's
+# "The embedded pull capturer" section for the design this spec proves.
 #
 # tests/tap/specs/pg_walserver_standalone.pgaf's own test_003 is this
 # spec's byte-identical-output bar: a real, unmodified, independently-run
@@ -67,13 +69,18 @@ setup {
     # monitor here to learn a real client's address from, and none needed.
     exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/archiver-hba.conf'
 
-    # the wizard, with --capture pull this time: writes path + upstream +
-    # "capture = pull" into pg_walserver.ini's [default/0] section, checks
-    # pgautofailover_replicator's REPLICATION attribute on node1, and
+    # the wizard, with NO --capture flag at all this time: the embedded
+    # pull capturer is on by default now (an operator has to pass
+    # --no-capture, or --capture none, to opt out), so this one call is
+    # itself the regression test proving "setup" with no capture-related
+    # flag still writes "capture = pull" into pg_walserver.ini's [default/0]
+    # section on its own -- exactly what the rest of this spec then proves
+    # actually starts and runs a real embedded pg_receivewal child. Also
+    # checks pgautofailover_replicator's REPLICATION attribute on node1 and
     # fetches node1's real system identifier -- no --with-basebackup, this
     # spec only needs the capturer, not BASE_BACKUP.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --capture pull'
-    exec node2 bash -c 'grep -qx "capture = pull" /tmp/ws/pg_walserver.ini'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+    exec node2 bash -c 'grep -qx "capture = pull" /tmp/ws/pg_walserver.ini || { echo "capture = pull should have been written by default, with no --capture flag at all"; cat /tmp/ws/pg_walserver.ini; false; }'
 
     # the independent "reference" capture: a real, unmodified, externally
     # run pg_receivewal (the stock OS one, not this project's vendored

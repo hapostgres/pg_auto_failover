@@ -74,7 +74,12 @@ setup {
     # node1's real system identifier into archiver-systemid, and -- with
     # --with-basebackup -- takes the route's first base backup
     # synchronously, not returning until it has actually succeeded.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --with-basebackup'
+    # --no-capture: this spec drives its own external pg_receivewal (below)
+    # into this exact route directory -- the embedded pull capturer, on by
+    # default now, would otherwise fork a second process racing it for the
+    # same segment files.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --with-basebackup --no-capture'
+    exec node2 bash -c 'if grep -qx "capture = pull" /tmp/ws/pg_walserver.ini; then echo "capture = pull should not have been written with --no-capture"; false; fi'
 
     # capture real WAL off node1 with the stock pg_receivewal (not this
     # project's own vendored copy, which is not part of this PR's stack)
