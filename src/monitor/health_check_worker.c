@@ -532,6 +532,20 @@ HealthCheckWorkerMain(Datum arg)
 	/* Connect to our database */
 	BackgroundWorkerInitializeConnectionByOid(dboid, InvalidOid, 0);
 
+	/*
+	 * Check for termination request immediately after connecting.
+	 * This handles the case where DROP DATABASE sent SIGTERM while we
+	 * were establishing the connection. We need to exit promptly to
+	 * allow DROP DATABASE to proceed.
+	 */
+	if (got_sigterm)
+	{
+		elog(LOG,
+			 "pg_auto_failover monitor received SIGTERM during startup for database %d",
+			 dboid);
+		proc_exit(0);
+	}
+
 	/* Make background worker recognisable in pg_stat_activity */
 	pgstat_report_appname("pg_auto_failover health check worker");
 
@@ -554,6 +568,8 @@ HealthCheckWorkerMain(Datum arg)
 	{
 		struct timeval currentTime = { 0, 0 };
 		struct timeval roundEndTime = { 0, 0 };
+
+		CHECK_FOR_INTERRUPTS();
 
 		gettimeofday(&currentTime, NULL);
 		roundEndTime = AddTimeMillis(currentTime, HealthCheckPeriod);
@@ -589,6 +605,16 @@ HealthCheckWorkerMain(Datum arg)
 		if (timeout >= 0)
 		{
 			LatchWait(timeout);
+		}
+
+		/*
+		 * Check for termination immediately after waking from latch.
+		 * This is critical for responding quickly to DROP DATABASE, which
+		 * sends SIGTERM and waits for the worker to disconnect.
+		 */
+		if (got_sigterm)
+		{
+			break;
 		}
 
 		if (got_sighup)
@@ -679,6 +705,8 @@ DoHealthChecks(List *healthCheckList)
 		int pendingCheckCount = 0;
 		struct timeval currentTime = { 0, 0 };
 		ListCell *healthCheckCell = NULL;
+
+		CHECK_FOR_INTERRUPTS();
 
 		gettimeofday(&currentTime, NULL);
 
