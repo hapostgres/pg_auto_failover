@@ -471,6 +471,13 @@ man_pages = [
         [author],
         1,
     ),
+    (
+        "ref/pg_walsender",
+        "pg_walsender",
+        "the archiver's own standalone replication-protocol server",
+        [author],
+        1,
+    ),
     # ("ref/reference", "pg_autoctl", "pg_auto_failover agent", [author], 1),
     (
         "ref/configuration",
