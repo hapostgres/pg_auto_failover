@@ -120,7 +120,7 @@ ws_fetch_file_client(const char *host, int port, const char *user,
 
 	char tmpPath[MAXPGPATH];
 
-	sformat(tmpPath, sizeof(tmpPath), "%s.pg_walsender_fetch_tmp", outputPath);
+	sformat(tmpPath, sizeof(tmpPath), "%s.pg_walserver_fetch_tmp", outputPath);
 
 	if (!write_file(contents->data, contents->len, tmpPath))
 	{

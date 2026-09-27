@@ -29,9 +29,9 @@ src/monitor/version_compat.c -citus-style
 src/bin/pgaftest/test_spec_parse.c -citus-style
 src/bin/pgaftest/test_spec_parse.h -citus-style
 src/bin/pgaftest/test_spec_scan.c  -citus-style
-src/bin/pg_walsender/repl_gram.c -citus-style
-src/bin/pg_walsender/repl_gram.h -citus-style
-src/bin/pg_walsender/repl_scanner.c -citus-style
+src/bin/pg_walserver/repl_gram.c -citus-style
+src/bin/pg_walserver/repl_gram.h -citus-style
+src/bin/pg_walserver/repl_scanner.c -citus-style
 # vendored PostgreSQL source (pg_receivewal.c/receivelog.c/streamutil.c/
 # walmethods.c, REL_14_STABLE, byte-for-byte except two marked "PGAF:"
 # edits in pg_receivewal.c itself -- see that file's own header comment)

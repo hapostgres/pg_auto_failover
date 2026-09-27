@@ -1,0 +1,328 @@
+# Design: making pg_walserver a complete standalone archiving story
+
+This is a **design document, not a description of shipped code** (contrast
+with `README.md`, which documents this PR as it exists). Nothing described
+past this point is implemented yet. It exists to record the design before
+any of it lands, and to be reviewed/amended before implementation starts,
+in the order given in "Phasing" at the end.
+
+This binary was renamed from `pg_walsender` to `pg_walserver` as part of
+writing this document -- see "Naming" below for why, before the rest of
+this document needed to keep saying "sender" while describing the exact
+thing that makes that name inaccurate.
+
+## Why
+
+`pg_walserver` today (as `pg_walsender`, before the rename) is a pure
+*server*: it answers `BASE_BACKUP`, `FETCH_FILE`, `START_REPLICATION` and
+the replication-slot commands out of files that already exist under a
+route's directory. Nothing about *producing* those files is its job -- an
+operator (see this PR's own `docs/ref/pg_walserver.rst` "A complete
+standalone example") has to hand-run `pg_basebackup`, hand-write
+`archiver-systemid`, and hand-run `pg_receivewal` themselves, supervised by
+nothing but a bare `nohup ... &`.
+
+That is not a production-grade story on its own, compared to what real
+PostgreSQL continuous archiving actually needs (see "PostgreSQL's own
+contract" below) or to what a real product (pgBackRest, WAL-G, Barman)
+offers as a single daemon. This document designs `pg_walserver` into one.
+
+## PostgreSQL's own contract (what any complete archiver must honor)
+
+From `https://www.postgresql.org/docs/current/continuous-archiving.html`,
+the parts that constrain this design:
+
+- **`archive_command`**: exit 0 iff success; PostgreSQL retries forever on
+  nonzero. It **must refuse to overwrite a differing file**, but **must
+  return success if the file already exists and is byte-identical**
+  (idempotent retry after a crash mid-archive is expected and normal).
+  Only fires on **completed** segments -- the worst-case data-loss window
+  with archive_command alone is one segment (16MB default) plus
+  `archive_timeout`.
+- **Base backups**: `pg_basebackup` is the recommended tool. The backend
+  itself writes a `.backup` *history file* into the archive the moment any
+  base backup completes (`pg_basebackup` or the low-level API, it does not
+  matter which) -- that file is archived too, same as a WAL segment.
+- **`restore_command`**: a "not found" response (nonzero exit) is normal,
+  not an error, during recovery's final segment. Also asked for `.history`
+  files, and -- per the above -- an archive can legitimately contain
+  `.backup` files too.
+- **Timelines**: every promotion creates one; its `.history` file must be
+  in the archive for any later recovery across it to work.
+
+## Gaps this exposes in the current design
+
+1. `ws_fetch_filename_is_servable()` (`cmd_fetch_file.c`) only allows a
+   24-hex WAL segment or `<tli>.history` -- **no `.backup` files**. Both
+   sides of a real archive-push path need this closed.
+2. Nothing implements the overwrite-safety/idempotency rule at all: there
+   is no path today where an untrusted client writes into a route's
+   directory.
+3. WAL *capture* (the pull side) is entirely external and unsupervised by
+   `pg_walserver` itself, both in the standalone story and in the
+   pgaf-integrated one (`service_archiver_pgreceivewal_ctl.c`, a
+   completely separate implementation on the `pg_autoctl` side).
+
+## Naming: why pg_walsender became pg_walserver
+
+Everything this document adds means the binary both *sends* (`BASE_BACKUP`/
+`FETCH_FILE`/`START_REPLICATION`, this PR's own pre-existing scope) and
+*receives* (`ARCHIVE_FILE` push, the embedded pull capturer) --
+`pg_walsender`'s own "sender" undersold half its job the moment any of this
+was going to land. Checked before picking a replacement:
+
+- PostgreSQL's own glossary already has precise, specific meanings for
+  "WAL sender process", "WAL receiver process", and "the archiver process"
+  (the backend that invokes `archive_command`) -- that last one also
+  happens to be what this project's own planned pg_auto_failover feature
+  informally calls itself throughout the codebase's comments ("the
+  archiving PR", a future "archiver" node kind). Any `pg_archiver`/
+  `pg_walarchive`-shaped name would collide with both.
+- External tools in this space (pgBackRest, Barman, WAL-G) don't speak
+  PostgreSQL's native replication wire protocol at all -- they're CLI hooks
+  from `archive_command`/`restore_command` managing storage over their own
+  protocols (SSH, S3, custom binary). That's the actual differentiator
+  here: `pg_basebackup`, `pg_receivewal`, and a real standby's walreceiver
+  can already talk to this binary with zero custom client. pgBackRest's
+  own vocabulary for its storage side, "repository"/"repo", was considered
+  and is genuinely well-precedented, but a `pg_walrepo`-style coinage adds
+  a new name over a borrowed one; **`pg_walserver` -- "sender" replaced by
+  the more general "server" -- was chosen instead**: a minimal, one-word
+  rename that still says exactly what it is (a server for WAL and base
+  backups, in both directions), without inventing new vocabulary or
+  colliding with either PostgreSQL's own terms or this project's planned
+  archiver feature.
+
+The rename landed immediately, in this same PR (#1193) -- continuing to
+iterate on an already-open PR through review is the normal shape of
+review, not a reason to defer a one-word rename to a separate one.
+
+## routes.ini: a new `upstream` property
+
+```ini
+[mycluster]
+path     = /var/lib/archiver/mycluster
+upstream = host=primary user=archiver_repl sslmode=require
+capture  = pull
+```
+
+- `upstream`: a libpq connection string to the instance this route
+  archives from. Read as a *default* by every sub-command below, always
+  overridable by an explicit `--upstream`/`--host`/`--port`/`--user` flag
+  on the command line -- the same precedence `restore_command_resolve()`
+  already uses (explicit flag > config > nothing).
+- `capture`: `pull` opts this route into `pg_walserver`'s own embedded WAL
+  capturer (below); absent, the route is archive_command-push-only, or fed
+  by something else entirely (an external `pg_receivewal`, or the
+  pgaf-integrated `pg_autoctl` capturer) -- `pg_walserver` does not care
+  which, `ARCHIVE_FILE`/`CHECK_FILE` (below) are always reachable for
+  any route regardless of `capture`, gated purely by `archiver-hba.conf`
+  like every other command.
+
+Naming: `upstream` was chosen over `primary_conninfo` (misleading -- the
+source may be a standby) or `source`/`target` (ambiguous about direction);
+it also happens to already be PostgreSQL's own vocabulary for "the server
+this one replicates from" in cascading replication.
+
+## New client-side sub-commands
+
+### `pg_walserver fetch-systemid --route <key> [--upstream ...]`
+
+One-shot: connects, runs `SELECT system_identifier FROM pg_control_system()`,
+writes `<path>/archiver-systemid` atomically (`write_file_atomic()`).
+New safety check nothing does today: if a systemid file **already exists
+with a different value**, refuse rather than silently overwrite -- a
+route's identity changing underneath it is exactly the class of
+administrator error PostgreSQL's own archive_command overwrite rule
+guards against elsewhere; this is the same principle applied here.
+
+### `pg_walserver basebackup --route <key> [--upstream ...]`
+
+Wraps a real `pg_basebackup -D <path>/basebackups/<label>` (label =
+UTC timestamp, matching `service_archiver_basebackup.c`'s own scheme so
+both paths stay compatible), validates the result (`read_backup_label()`
+already exists and already does this parsing), and only *then* swaps
+`<path>/basebackups/.latest` atomically. Never touches `.latest` on
+failure -- a route always keeps serving its previous, known-good backup
+until a new one actually completes.
+
+### `pg_walserver setup --route <key> --path <dir> --upstream <conninfo> [--with-basebackup]`
+
+The wizard: writes/validates the `routes.ini` section (refuses a route key
+that already exists unless `--force`; refuses a `path` that is not
+creatable/writable), **checks the given role actually has `REPLICATION`**
+(a real gap today -- nothing currently verifies this before `pg_basebackup`/
+`pg_receivewal` fail on it later, cryptically), calls `fetch-systemid`'s
+logic, and with `--with-basebackup` forks `basebackup` into the background
+so `setup` itself returns promptly rather than blocking on a
+multi-gigabyte copy.
+
+## The push side: `CHECK_FILE` + `ARCHIVE_FILE`, entirely monitor-independent
+
+**Scope note, because it matters more than the wire details below:** this
+is a `pg_walserver`-only, standalone primitive. It does not touch, replace,
+or need to know about the pgaf-integrated design's own existing,
+monitor-backed "has this segment already landed?" check -- `pg_autoctl
+archive command %f` (`archiver_confirm.c`) already asks
+`pgautofailover.wal_archived(formation, group, walfilename)`, a
+quorum-aware check (`archiverquorum` distinct archivers, not just one)
+backed by `pgautofailover.archiver_wal`, itself populated by the pull
+side's own reporting pipeline (`archiver_wal_notify.c`'s socket +
+`service_archiver_wal_scanner.c`'s backstop scan). That mechanism is
+untouched by this design, stays exactly as it is, and is *better* than
+anything `pg_walserver` computes on its own the moment a monitor exists
+(it already knows about every archiver in the group, not just one it's
+directly talking to). Whether the future pgaf-integration PR ever calls
+into what's built here -- as a fallback when `wal_archived()` says "not
+yet", say -- is a decision for that PR, not this one. This PR's job is
+just to make `pg_walserver` a complete, self-contained tool on its own,
+with no monitor and no Postgres catalog of WAL files anywhere in the
+picture: connect directly to `pg_walserver`, check what it actually has
+on disk, push what it doesn't.
+
+Two new commands, alongside `FETCH_FILE`:
+
+- **`CHECK_FILE '<name>' <size> crc32c:<hex>`** -- a cheap query, no file
+  transfer at all: `RowDescription(status text)` +
+  `DataRow('missing'|'matches'|'differs')` + `CommandComplete`, the same
+  shape `SHOW`/`IDENTIFY_SYSTEM` already use. The client (`pg_walserver
+  archive`, running as `archive_command` on the source instance) computes
+  the size and a CRC32C of the *local* file (the `%p` path, still sitting
+  in the source's own `pg_wal/`) and sends that -- CRC32C because it's
+  what `pg_basebackup`'s own backup manifest already defaults to, and is
+  already implemented, hardware-accelerated, in every PostgreSQL build:
+  computing it over a single sequential local read costs nothing next to
+  a network round trip.
+- **`ARCHIVE_FILE '<name>'`** -- `CopyIn`: the actual push, used only when
+  `CHECK_FILE` said `missing` or `differs`. The server never trusts the
+  client's own `CHECK_FILE` checksum as proof of anything -- that would
+  let a client lie its way past the safety check -- it re-derives its own
+  overwrite-safety decision from the real bytes it receives: identical to
+  what's already on disk → success (idempotent retry, matching
+  PostgreSQL's own `archive_command` contract exactly); different →
+  reject. Same allow-list as `FETCH_FILE`'s read side, extended to also
+  accept `.backup` files (closing the gap noted above, since
+  `ws_fetch_filename_is_servable()`'s shape is what both directions should
+  share), hard size cap at the route's `wal_segment_size` + slack.
+
+`pg_walserver archive %p %f`'s own logic per invocation:
+
+1. Compute the local file's size + CRC32C (one sequential local read, no
+   network cost).
+2. `CHECK_FILE`. `matches` → exit 0 immediately, zero bytes sent -- this is
+   what makes `pg_walserver archive` safe to run *alongside* something
+   else already feeding the same route (an embedded or external
+   `pg_receivewal`, see below) without ever duplicating a transfer once
+   that something else has actually delivered the segment.
+3. `missing`/`differs`: rather than persisting a new cross-invocation
+   retry-count file (a state-tracking mechanism this codebase doesn't use
+   for this class of problem -- `archiver_confirm.c`'s own comment is
+   explicit that "the caller (Postgres) is our retry loop", one attempt
+   per invocation, no local counters), do a short, *bounded,
+   intra-invocation* recheck when the route has `capture = pull`
+   configured (there's a real race: `archive_command` and the pull side
+   both react to "this segment just closed" at roughly the same moment, so
+   a fixed small wait -- capped in the low seconds, never approaching
+   PostgreSQL's own retry cadence -- resolves most of the ties without
+   adding any persistent state): sleep briefly, re-issue `CHECK_FILE` once
+   or twice, then push for real if it still isn't there. A push-only route
+   (no `capture = pull`) skips the wait entirely and pushes immediately.
+4. Push (`ARCHIVE_FILE`) only once that resolves to "still missing".
+
+This means a route can have `capture = pull` and be an `archive_command`
+target at the same time with no coordination between the two beyond
+`CHECK_FILE` -- each path is independently sufficient on its own
+(`ARCHIVE_FILE` alone already satisfies PostgreSQL's full `archive_command`
+contract for a route with no pull capture at all), and running both costs
+one cheap checksum-only round trip per segment instead of a full transfer,
+in the common case where the pull side is healthy.
+
+## The pull side: an embedded, supervised WAL capturer
+
+A route with `capture = pull` gets its own forked, supervised child
+running the **already-vendored** `pg_receivewal` (PR #1191's
+`src/bin/pg_autoctl/vendor/pg_receivewal/`, `pg_receivewal_main()`) against
+`upstream`, capturing straight into the route's own directory -- the
+exact flat layout `wal_dir_scan.c`/`cmd_start_replication.c` already
+expect, so nothing downstream changes.
+
+- Supervision follows the precedent already in this codebase for exactly
+  this shape of problem: `accept_loop.c`'s own `hba.c` "monitor" feature
+  runs a single supervised `refresher.c` child (start/reap/restart on
+  death, one extra `AF_UNIX`-free case here since there's no IPC needed
+  back to the parent). This is the same pattern, one capturer child per
+  *active* `capture = pull` route instead of a singleton.
+- **Vendor relocation**: `vendor/pg_receivewal/` currently lives under
+  `src/bin/pg_autoctl/`, linked only by `pg_autoctl`. Once `pg_walserver`
+  also needs it, it moves to `src/bin/common/vendor/pg_receivewal/` so
+  both binaries build the identical sources rather than duplicating them
+  -- the same move `fetch_client.c` already went through in this PR when
+  `pg_autoctl` needed something `pg_walserver` used to own.
+- Net result: `pg_walserver --pgdata ... serve` alone, with one route's
+  `upstream`/`capture = pull` set, is a complete archiving daemon on its
+  own -- no external `pg_receivewal` process, no separate supervisor unit,
+  nothing to wire up beyond `routes.ini` itself.
+
+## Fit as a pg_auto_failover building block
+
+- `fetch-systemid`, `basebackup`, and the embedded capturer should become
+  **the** implementation, not a second one living alongside
+  `archiver_systemid.c`/`service_archiver_basebackup.c`/
+  `service_archiver_pgreceivewal_ctl.c` on the `pg_autoctl` side.
+  `service_archiver_reconciler.c` already writes `routes.ini`; it should
+  grow to also write `upstream`/`capture` and call into this same logic
+  in-process, the same way `restore_command.c` now calls
+  `ws_fetch_file_client()` directly instead of the `execv()`-based design
+  it started with.
+- A natural future integration point exists at `archiver_confirm.c`
+  (`archiver_confirm_run()` currently just `return 1`s, retry-forever, when
+  `wal_archived()` says "not yet") -- but whether, when, and how the
+  pgaf-integration PR ever calls into `CHECK_FILE`/`ARCHIVE_FILE` from
+  there is explicitly *not* decided by this document or built in this PR;
+  see "Scope note" above. This PR's job is only to make sure that
+  primitive exists, is monitor-independent, and is worth reusing when that
+  decision gets made.
+- Push (either path) only ever fires on **completed** segments (coarser
+  RPO than continuous streaming replication) and is asynchronous relative
+  to commit, so it cannot participate in `synchronous_standby_names`
+  quorum the way a live streaming connection with flush-position feedback
+  can. For the archiver's role as a failover-aware quorum member, the
+  pull/streaming path stays load-bearing; push is a strong
+  *defense-in-depth backstop* there (never lose a segment even if the
+  streaming capturer is down for a while), and a perfectly sufficient
+  *sole* mechanism for the simpler, non-HA standalone case this document
+  is otherwise about.
+
+## Open questions to resolve before implementation
+
+- Exact `CHECK_FILE` wire shape (SQL-looking row vs. a plain single-value
+  reply) -- lean towards matching `SHOW`'s existing shape for consistency
+  with the rest of the grammar.
+- The bounded intra-invocation recheck's exact timing (how long, how many
+  rechecks) -- needs to be short enough to never look like a hang to an
+  operator watching `archive_command` run, long enough to actually catch
+  the common near-simultaneous-completion race with a healthy pull side.
+- Whether `pg_walserver setup`'s role-permission check should also try an
+  actual `replication=true` connection (closer to what `pg_basebackup`
+  itself will do) in addition to `pg_roles.rolreplication`, to catch HBA
+  misconfiguration on the *upstream* side too, not just the role's own
+  attribute.
+
+Explicitly out of scope for this document/PR, left for whoever designs the
+pgaf-integration side's use of this: whether/how `archiver_confirm.c`
+ever calls into `CHECK_FILE`/`ARCHIVE_FILE`, and what `archiver_confirm_
+is_wal_segment()`'s current blanket skip of `.backup`/`.history`/`.partial`
+files should become there. Both are that PR's decisions to make, informed
+by this one existing as a building block, not this PR's to make for it.
+
+## Phasing
+
+1. `routes.ini`'s `upstream`, plus `fetch-systemid`/`basebackup`/`setup`:
+   no new wire protocol, lower risk, and everything else below depends on
+   `upstream` existing.
+2. `CHECK_FILE` + `ARCHIVE_FILE` + `pg_walserver archive`: the new wire
+   surface, with its real security/idempotency requirements
+   (overwrite-safety, size caps, allow-list extension) -- entirely
+   monitor-independent, see "Scope note" above.
+3. The embedded pull capturer: the largest single piece (vendor
+   relocation, per-route supervision).
