@@ -36,10 +36,13 @@ src/bin/pgaftest/test_spec_scan.c  -citus-style
 # a future re-sync against a newer upstream diffs cleanly instead of
 # fighting a wall of reindentation noise. pg_receivewal_entry.h is this
 # project's own new file, not vendored, and stays citus-style checked.
-src/bin/pg_autoctl/vendor/pg_receivewal/pg_receivewal.c -citus-style
-src/bin/pg_autoctl/vendor/pg_receivewal/receivelog.c -citus-style
-src/bin/pg_autoctl/vendor/pg_receivewal/receivelog.h -citus-style
-src/bin/pg_autoctl/vendor/pg_receivewal/streamutil.c -citus-style
-src/bin/pg_autoctl/vendor/pg_receivewal/streamutil.h -citus-style
-src/bin/pg_autoctl/vendor/pg_receivewal/walmethods.c -citus-style
-src/bin/pg_autoctl/vendor/pg_receivewal/walmethods.h -citus-style
+# Lives in src/bin/common/ (not src/bin/pg_autoctl/) so both pg_autoctl and
+# pg_walserver build the identical sources -- see src/bin/common/Makefile.
+# common's own comment on PG_RECEIVEWAL_VENDOR_DIR.
+src/bin/common/vendor/pg_receivewal/pg_receivewal.c -citus-style
+src/bin/common/vendor/pg_receivewal/receivelog.c -citus-style
+src/bin/common/vendor/pg_receivewal/receivelog.h -citus-style
+src/bin/common/vendor/pg_receivewal/streamutil.c -citus-style
+src/bin/common/vendor/pg_receivewal/streamutil.h -citus-style
+src/bin/common/vendor/pg_receivewal/walmethods.c -citus-style
+src/bin/common/vendor/pg_receivewal/walmethods.h -citus-style

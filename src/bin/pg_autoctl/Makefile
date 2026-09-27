@@ -12,7 +12,7 @@ SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 include $(SRC_DIR)../common/Makefile.common
 
 # pg_autoctl includes its own source directory too
-override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor/pg_receivewal
+override CFLAGS += -I$(SRC_DIR)
 
 INCLUDES = $(patsubst $(SRC_DIR)%.h,%.h,$(wildcard $(SRC_DIR)*.h))
 
@@ -21,20 +21,15 @@ OBJS = $(patsubst %.c,%.o,$(SRC))
 OBJS += lib-log.o lib-commandline.o lib-parson.o lib-snprintf.o lib-strerror.o
 OBJS += $(COMMON_LIB)
 
-# -----------------------------------------------------------------------
-# Vendored PostgreSQL source: an in-process pg_receivewal (see vendor/
-# pg_receivewal/pg_receivewal.c's own header comment) -- compiled as
-# vendor-%.o to keep it visually distinct from this project's own code,
-# matching pg_walsender's own vendor/tar.c precedent.
-# -----------------------------------------------------------------------
-VENDOR_SRC = pg_receivewal.c receivelog.c streamutil.c walmethods.c
-VENDOR_OBJS = $(patsubst %.c,vendor-%.o,$(VENDOR_SRC))
-
-vendor-%.o: $(SRC_DIR)vendor/pg_receivewal/%.c
-	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
-	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/vendor-$(*F).Po -o $@ $<
-
-OBJS += $(VENDOR_OBJS)
+# vendor/pg_receivewal/ (src/bin/common/vendor/pg_receivewal/, see that
+# directory's own pg_receivewal.c header comment) -- an in-process
+# pg_receivewal, used by the pgaf-integrated archiver's own WAL-capture
+# controller (service_archiver_pgreceivewal_ctl.c). Its build rule
+# (PG_RECEIVEWAL_VENDOR_OBJS) is shared with pg_walserver's own embedded
+# pull capturer (capture.c, later in this same PR) via Makefile.common, so
+# both binaries build the identical vendored sources rather than
+# duplicating them.
+OBJS += $(PG_RECEIVEWAL_VENDOR_OBJS)
 
 # ncurses needed for pg_autoctl watch
 LIBS += -lncurses
@@ -43,8 +38,9 @@ LIBS += -lncurses
 # libs any real frontend client of the replication protocol links against
 # -- libpgfeutils for option_parse_int()/option_utils.h, libpgcommon/
 # libpgport for everything receivelog.c/streamutil.c/walmethods.c build on
-# top of. Scoped to pg_autoctl's own Makefile, not Makefile.common: pg_
-# walsender and pgaftest don't need any of this.
+# top of. pg_walserver's own Makefile adds the same libs for the same
+# reason (capture.c); pgaftest links Makefile.common too but never links
+# the vendored pg_receivewal itself, so it doesn't need them.
 LIBS += -lpgfeutils -lpgcommon -lpgport
 
 all: $(COMMON_LIB) $(PG_AUTOCTL) ;
