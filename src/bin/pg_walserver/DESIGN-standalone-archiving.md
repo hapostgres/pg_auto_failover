@@ -247,6 +247,23 @@ multi-gigabyte copy.
 
 ## The push side: `CHECK_FILE` + `ARCHIVE_FILE`, entirely monitor-independent
 
+**Update: this section is implemented** (`cmd_check_file.c`, `cmd_archive_
+file.c`, `cli_archive.c`'s `pg_walserver archive`, `cli_create_cert.c`'s
+`pg_walserver create-cert`) -- see the README's "The wire protocol",
+"`create-cert`: a self-signed TLS certificate on demand" and "The archive
+push side" sections for the design as built, and `tests/tap/specs/
+pg_walserver_archive_command.pgaf` for its own test coverage. Both open
+questions below are resolved as built: `CHECK_FILE`'s wire shape is the
+lean `SHOW`-like `RowDescription`/`DataRow`/`CommandComplete` row this
+section already leaned towards, and the bounded intra-invocation recheck
+is two rechecks, one second apart (`cli_archive.c`'s own
+`WS_ARCHIVE_RECHECK_COUNT`/`WS_ARCHIVE_RECHECK_SLEEP_SECONDS`), always run
+today rather than skipped on a known push-only route -- `pg_walserver.ini`
+has no `capture` property yet in this codebase (that lands with the
+embedded pull capturer, still not built, see "Phasing" below), so
+`capture`-aware skipping of the recheck is left as a future refinement
+once the pull capturer exists to consult.
+
 **Scope note, because it matters more than the wire details below:** this
 is a `pg_walserver`-only, standalone primitive. It does not touch, replace,
 or need to know about the pgaf-integrated design's own existing,
@@ -387,13 +404,15 @@ expect, so nothing downstream changes.
   dbname" above) get designed and scheduled into a phase, given they're
   the only way for more than one route to be reachable by name by a real
   physical standby specifically.
-- Exact `CHECK_FILE` wire shape (SQL-looking row vs. a plain single-value
+- **Resolved, see the "push side" section's own "Update" note above:**
+  exact `CHECK_FILE` wire shape (SQL-looking row vs. a plain single-value
   reply) -- lean towards matching `SHOW`'s existing shape for consistency
   with the rest of the grammar.
-- The bounded intra-invocation recheck's exact timing (how long, how many
-  rechecks) -- needs to be short enough to never look like a hang to an
-  operator watching `archive_command` run, long enough to actually catch
-  the common near-simultaneous-completion race with a healthy pull side.
+- **Resolved, see the same "Update" note:** the bounded intra-invocation
+  recheck's exact timing (how long, how many rechecks) -- needs to be
+  short enough to never look like a hang to an operator watching
+  `archive_command` run, long enough to actually catch the common
+  near-simultaneous-completion race with a healthy pull side.
 - Whether `pg_walserver setup`'s role-permission check should also try an
   actual `replication=true` connection (closer to what `pg_basebackup`
   itself will do) in addition to `pg_roles.rolreplication`, to catch HBA
@@ -412,9 +431,11 @@ by this one existing as a building block, not this PR's to make for it.
 1. `pg_walserver.ini`'s `upstream`, plus `fetch-systemid`/`basebackup`/`setup`:
    no new wire protocol, lower risk, and everything else below depends on
    `upstream` existing.
-2. `CHECK_FILE` + `ARCHIVE_FILE` + `pg_walserver archive`: the new wire
-   surface, with its real security/idempotency requirements
+2. **Done.** `CHECK_FILE` + `ARCHIVE_FILE` + `pg_walserver archive`: the new
+   wire surface, with its real security/idempotency requirements
    (overwrite-safety, size caps, allow-list extension) -- entirely
-   monitor-independent, see "Scope note" above.
+   monitor-independent, see "Scope note" above. `pg_walserver create-cert`
+   also landed in this phase (a thin CLI wrapper around the same
+   `pg_create_self_signed_cert()` call `setup` already made automatically).
 3. The embedded pull capturer: the largest single piece (vendor
    relocation, per-route supervision).

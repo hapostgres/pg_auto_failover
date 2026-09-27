@@ -84,11 +84,13 @@ On the wire, a connected client may issue ``IDENTIFY_SYSTEM``, ``SHOW``,
 ``BASE_BACKUP``, ``TIMELINE_HISTORY``,
 ``CREATE_REPLICATION_SLOT``/``READ_REPLICATION_SLOT``/
 ``DROP_REPLICATION_SLOT``, and ``START_REPLICATION``, exactly as against a
-real PostgreSQL primary, plus one project-specific extension,
+real PostgreSQL primary, plus three project-specific extensions:
 ``FETCH_FILE '<name>'``, used to fetch a single WAL segment or timeline
 history file in one request/response round trip (as a ``restore_command``
-would). See ``src/bin/pg_walserver/README.md`` in the source tree for the
-full design.
+would), and ``CHECK_FILE``/``ARCHIVE_FILE``, the push-side counterpart used
+by ``pg_walserver archive`` (as an ``archive_command`` would, see
+`Examples`_ below). See ``src/bin/pg_walserver/README.md`` in the source
+tree for the full design.
 
 Options
 -------
@@ -228,6 +230,32 @@ planned, see ``DESIGN-standalone-archiving.md``)::
 ``<path>/archiver-walsegsize``, holding the byte count in decimal; the
 16MB default needs nothing extra.)
 
+**2b. Alternative, or complement: push via** ``archive_command`` **instead
+of (or alongside)** ``pg_receivewal``. Where step 2 above *pulls* WAL
+continuously, ``pg_walserver archive`` *pushes* one completed segment (or
+``.backup`` history file) per invocation, driven entirely by PostgreSQL's
+own ``archive_command`` mechanism -- no long-running capture process of
+its own at all. On the primary's own ``postgresql.conf``::
+
+  archive_mode = on
+  archive_command = 'pg_walserver archive %p %f --route mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
+
+``%p``/``%f`` are PostgreSQL's own ``archive_command`` substitutions -- the
+segment's real path on the primary's own filesystem, and its bare
+filename, respectively (see the upstream ``archive_command`` docs). Each
+invocation computes the local file's size and CRC32C, asks ``pg_walserver``
+via ``CHECK_FILE`` whether it already has it (a cheap, transfer-free
+round trip), and only pushes the bytes via ``ARCHIVE_FILE`` when it
+doesn't -- exit code matches the ``archive_command`` contract exactly: 0
+on success (including "already there"), nonzero so PostgreSQL retries
+otherwise. Running this *alongside* step 2's own ``pg_receivewal`` is
+safe and costs almost nothing extra: whichever one delivers a segment
+first, ``archive_command``'s own next ``CHECK_FILE`` round trip then sees
+``matches`` and skips the push entirely -- a genuine defense-in-depth
+backstop, not a duplicated transfer. See
+``src/bin/pg_walserver/DESIGN-standalone-archiving.md``'s "The push side:
+CHECK_FILE + ARCHIVE_FILE" section for the full design.
+
 **3. Configure access and start pg_walserver** -- ``setup`` never touches
 HBA or the passwd file, a deliberately separate concern::
 
@@ -336,6 +364,18 @@ route its own ``--hostname``, and a self-signed certificate for
   # creation under --pgdata, logged as it happens
 
   archive$ pg_walserver --pgdata /var/lib/archiver --port 6543 &
+
+Want TLS from the very first route instead of waiting for a second one to
+trigger it automatically (a single route served over a reachable network
+still benefits from encryption on its own), or need to replace an
+existing self-signed certificate? ``pg_walserver create-cert`` does
+exactly what ``setup`` does automatically above, by hand, any time::
+
+  archive$ pg_walserver create-cert --pgdata /var/lib/archiver \
+      --hostname mycluster.archive.example.com
+
+It refuses to overwrite an already-existing ``server.crt``/``server.key``
+unless ``--force`` is also given.
 
 Each standby then simply names its own route's hostname in
 ``primary_conninfo``'s ``host=`` -- the connection's ``dbname`` stays the

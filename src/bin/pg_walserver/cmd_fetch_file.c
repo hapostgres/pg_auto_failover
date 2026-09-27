@@ -44,12 +44,50 @@ is_upper_hex(const char *s, size_t n)
 
 
 /*
+ * is_upper_hex_wal_backup_label recognizes a base backup's own
+ * "<24-hex>.<8-hex>.backup" history file name (real Postgres's own
+ * XLogFileNameP()-plus-".backup" shape, e.g.
+ * "000000010000000000000003.00000028.backup", written by the backend the
+ * moment any base backup completes -- BASE_BACKUP or the low-level API,
+ * see DESIGN-standalone-archiving.md's "PostgreSQL's own contract"). The
+ * fixed ".backup" suffix and the 24-hex/8-hex shape on either side of the
+ * middle '.' are exactly what real Postgres itself always produces, so this
+ * checks that shape precisely rather than accepting any "*.backup".
+ */
+static bool
+is_wal_backup_label_name(const char *filename, size_t len)
+{
+	const char *suffix = ".backup";
+	size_t suffixLen = strlen(suffix);
+
+	/* "<24 hex>.<8 hex>" + ".backup" = 24 + 1 + 8 + 7 = 40 */
+	if (len != 24 + 1 + 8 + suffixLen)
+	{
+		return false;
+	}
+
+	return is_upper_hex(filename, 24) &&
+		   filename[24] == '.' &&
+		   is_upper_hex(filename + 25, 8) &&
+		   strcmp(filename + 25 + 8, suffix) == 0;
+}
+
+
+/*
  * filename_is_servable is an allow-list, not a filter: only a complete WAL
- * segment "^[0-9A-F]{24}$" or a timeline history file
- * "^[0-9A-F]{8}\.history$" can be fetched -- what a restore_command asks
- * for. Everything else in the route's directory (archiver-hba.conf,
- * archiver-passwd's neighbours, .slot_* files, backup labels, ".partial"
- * segments still being written...) is never served.
+ * segment "^[0-9A-F]{24}$", a timeline history file
+ * "^[0-9A-F]{8}\.history$", or a base backup's own history file
+ * "^[0-9A-F]{24}\.[0-9A-F]{8}\.backup$" can be fetched or archived -- what a
+ * restore_command asks for on the read side (FETCH_FILE, cmd_fetch_file.c),
+ * and what an archive_command may legitimately push on the write side
+ * (ARCHIVE_FILE, cmd_archive_file.c) -- see DESIGN-standalone-archiving.md's
+ * Gap #1: real Postgres archives ".backup" files exactly like WAL segments,
+ * so both directions need to recognize them, which is why this one function
+ * is shared by both cmd_fetch_file.c and cmd_archive_file.c rather than each
+ * having its own allow-list. Everything else in the route's directory
+ * (archiver-hba.conf, archiver-passwd's neighbours, .slot_* files, the
+ * basebackups/ tree, ".partial" segments still being written...) is never
+ * served or accepted.
  */
 bool
 ws_fetch_filename_is_servable(const char *filename)
@@ -65,6 +103,11 @@ ws_fetch_filename_is_servable(const char *filename)
 	{
 		return is_upper_hex(filename, 8) &&
 			   strcmp(filename + 8, ".history") == 0;
+	}
+
+	if (is_wal_backup_label_name(filename, len))
+	{
+		return true;
 	}
 
 	return false;

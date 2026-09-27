@@ -152,57 +152,62 @@ enum yysymbol_kind_t
   YYSYMBOL_YYUNDEF = 2,                    /* "invalid token"  */
   YYSYMBOL_SCONST = 3,                     /* SCONST  */
   YYSYMBOL_IDENT = 4,                      /* IDENT  */
-  YYSYMBOL_UCONST = 5,                     /* UCONST  */
-  YYSYMBOL_RECPTR = 6,                     /* RECPTR  */
-  YYSYMBOL_K_BASE_BACKUP = 7,              /* K_BASE_BACKUP  */
-  YYSYMBOL_K_IDENTIFY_SYSTEM = 8,          /* K_IDENTIFY_SYSTEM  */
-  YYSYMBOL_K_READ_REPLICATION_SLOT = 9,    /* K_READ_REPLICATION_SLOT  */
-  YYSYMBOL_K_SHOW = 10,                    /* K_SHOW  */
-  YYSYMBOL_K_START_REPLICATION = 11,       /* K_START_REPLICATION  */
-  YYSYMBOL_K_CREATE_REPLICATION_SLOT = 12, /* K_CREATE_REPLICATION_SLOT  */
-  YYSYMBOL_K_DROP_REPLICATION_SLOT = 13,   /* K_DROP_REPLICATION_SLOT  */
-  YYSYMBOL_K_TIMELINE_HISTORY = 14,        /* K_TIMELINE_HISTORY  */
-  YYSYMBOL_K_WAIT = 15,                    /* K_WAIT  */
-  YYSYMBOL_K_TIMELINE = 16,                /* K_TIMELINE  */
-  YYSYMBOL_K_PHYSICAL = 17,                /* K_PHYSICAL  */
-  YYSYMBOL_K_LOGICAL = 18,                 /* K_LOGICAL  */
-  YYSYMBOL_K_SLOT = 19,                    /* K_SLOT  */
-  YYSYMBOL_K_RESERVE_WAL = 20,             /* K_RESERVE_WAL  */
-  YYSYMBOL_K_TEMPORARY = 21,               /* K_TEMPORARY  */
-  YYSYMBOL_K_TWO_PHASE = 22,               /* K_TWO_PHASE  */
-  YYSYMBOL_K_EXPORT_SNAPSHOT = 23,         /* K_EXPORT_SNAPSHOT  */
-  YYSYMBOL_K_NOEXPORT_SNAPSHOT = 24,       /* K_NOEXPORT_SNAPSHOT  */
-  YYSYMBOL_K_USE_SNAPSHOT = 25,            /* K_USE_SNAPSHOT  */
-  YYSYMBOL_K_FETCH_FILE = 26,              /* K_FETCH_FILE  */
-  YYSYMBOL_27_ = 27,                       /* ';'  */
-  YYSYMBOL_28_ = 28,                       /* '.'  */
-  YYSYMBOL_29_ = 29,                       /* '('  */
-  YYSYMBOL_30_ = 30,                       /* ')'  */
-  YYSYMBOL_31_ = 31,                       /* ','  */
-  YYSYMBOL_YYACCEPT = 32,                  /* $accept  */
-  YYSYMBOL_firstcmd = 33,                  /* firstcmd  */
-  YYSYMBOL_opt_semicolon = 34,             /* opt_semicolon  */
-  YYSYMBOL_command = 35,                   /* command  */
-  YYSYMBOL_identify_system = 36,           /* identify_system  */
-  YYSYMBOL_fetch_file = 37,                /* fetch_file  */
-  YYSYMBOL_read_replication_slot = 38,     /* read_replication_slot  */
-  YYSYMBOL_show = 39,                      /* show  */
-  YYSYMBOL_var_name = 40,                  /* var_name  */
-  YYSYMBOL_base_backup = 41,               /* base_backup  */
-  YYSYMBOL_create_replication_slot = 42,   /* create_replication_slot  */
-  YYSYMBOL_create_slot_options = 43,       /* create_slot_options  */
-  YYSYMBOL_create_slot_legacy_opt_list = 44, /* create_slot_legacy_opt_list  */
-  YYSYMBOL_create_slot_legacy_opt = 45,    /* create_slot_legacy_opt  */
-  YYSYMBOL_drop_replication_slot = 46,     /* drop_replication_slot  */
-  YYSYMBOL_start_replication = 47,         /* start_replication  */
-  YYSYMBOL_timeline_history = 48,          /* timeline_history  */
-  YYSYMBOL_opt_physical = 49,              /* opt_physical  */
-  YYSYMBOL_opt_temporary = 50,             /* opt_temporary  */
-  YYSYMBOL_opt_slot = 51,                  /* opt_slot  */
-  YYSYMBOL_opt_timeline = 52,              /* opt_timeline  */
-  YYSYMBOL_generic_option_list = 53,       /* generic_option_list  */
-  YYSYMBOL_generic_option = 54,            /* generic_option  */
-  YYSYMBOL_ident_or_keyword = 55           /* ident_or_keyword  */
+  YYSYMBOL_CRC32C_HEX = 5,                 /* CRC32C_HEX  */
+  YYSYMBOL_UCONST = 6,                     /* UCONST  */
+  YYSYMBOL_RECPTR = 7,                     /* RECPTR  */
+  YYSYMBOL_K_BASE_BACKUP = 8,              /* K_BASE_BACKUP  */
+  YYSYMBOL_K_IDENTIFY_SYSTEM = 9,          /* K_IDENTIFY_SYSTEM  */
+  YYSYMBOL_K_READ_REPLICATION_SLOT = 10,   /* K_READ_REPLICATION_SLOT  */
+  YYSYMBOL_K_SHOW = 11,                    /* K_SHOW  */
+  YYSYMBOL_K_START_REPLICATION = 12,       /* K_START_REPLICATION  */
+  YYSYMBOL_K_CREATE_REPLICATION_SLOT = 13, /* K_CREATE_REPLICATION_SLOT  */
+  YYSYMBOL_K_DROP_REPLICATION_SLOT = 14,   /* K_DROP_REPLICATION_SLOT  */
+  YYSYMBOL_K_TIMELINE_HISTORY = 15,        /* K_TIMELINE_HISTORY  */
+  YYSYMBOL_K_WAIT = 16,                    /* K_WAIT  */
+  YYSYMBOL_K_TIMELINE = 17,                /* K_TIMELINE  */
+  YYSYMBOL_K_PHYSICAL = 18,                /* K_PHYSICAL  */
+  YYSYMBOL_K_LOGICAL = 19,                 /* K_LOGICAL  */
+  YYSYMBOL_K_SLOT = 20,                    /* K_SLOT  */
+  YYSYMBOL_K_RESERVE_WAL = 21,             /* K_RESERVE_WAL  */
+  YYSYMBOL_K_TEMPORARY = 22,               /* K_TEMPORARY  */
+  YYSYMBOL_K_TWO_PHASE = 23,               /* K_TWO_PHASE  */
+  YYSYMBOL_K_EXPORT_SNAPSHOT = 24,         /* K_EXPORT_SNAPSHOT  */
+  YYSYMBOL_K_NOEXPORT_SNAPSHOT = 25,       /* K_NOEXPORT_SNAPSHOT  */
+  YYSYMBOL_K_USE_SNAPSHOT = 26,            /* K_USE_SNAPSHOT  */
+  YYSYMBOL_K_FETCH_FILE = 27,              /* K_FETCH_FILE  */
+  YYSYMBOL_K_CHECK_FILE = 28,              /* K_CHECK_FILE  */
+  YYSYMBOL_K_ARCHIVE_FILE = 29,            /* K_ARCHIVE_FILE  */
+  YYSYMBOL_30_ = 30,                       /* ';'  */
+  YYSYMBOL_31_ = 31,                       /* '.'  */
+  YYSYMBOL_32_ = 32,                       /* '('  */
+  YYSYMBOL_33_ = 33,                       /* ')'  */
+  YYSYMBOL_34_ = 34,                       /* ','  */
+  YYSYMBOL_YYACCEPT = 35,                  /* $accept  */
+  YYSYMBOL_firstcmd = 36,                  /* firstcmd  */
+  YYSYMBOL_opt_semicolon = 37,             /* opt_semicolon  */
+  YYSYMBOL_command = 38,                   /* command  */
+  YYSYMBOL_identify_system = 39,           /* identify_system  */
+  YYSYMBOL_fetch_file = 40,                /* fetch_file  */
+  YYSYMBOL_check_file = 41,                /* check_file  */
+  YYSYMBOL_archive_file = 42,              /* archive_file  */
+  YYSYMBOL_read_replication_slot = 43,     /* read_replication_slot  */
+  YYSYMBOL_show = 44,                      /* show  */
+  YYSYMBOL_var_name = 45,                  /* var_name  */
+  YYSYMBOL_base_backup = 46,               /* base_backup  */
+  YYSYMBOL_create_replication_slot = 47,   /* create_replication_slot  */
+  YYSYMBOL_create_slot_options = 48,       /* create_slot_options  */
+  YYSYMBOL_create_slot_legacy_opt_list = 49, /* create_slot_legacy_opt_list  */
+  YYSYMBOL_create_slot_legacy_opt = 50,    /* create_slot_legacy_opt  */
+  YYSYMBOL_drop_replication_slot = 51,     /* drop_replication_slot  */
+  YYSYMBOL_start_replication = 52,         /* start_replication  */
+  YYSYMBOL_timeline_history = 53,          /* timeline_history  */
+  YYSYMBOL_opt_physical = 54,              /* opt_physical  */
+  YYSYMBOL_opt_temporary = 55,             /* opt_temporary  */
+  YYSYMBOL_opt_slot = 56,                  /* opt_slot  */
+  YYSYMBOL_opt_timeline = 57,              /* opt_timeline  */
+  YYSYMBOL_generic_option_list = 58,       /* generic_option_list  */
+  YYSYMBOL_generic_option = 59,            /* generic_option  */
+  YYSYMBOL_ident_or_keyword = 60           /* ident_or_keyword  */
 };
 typedef enum yysymbol_kind_t yysymbol_kind_t;
 
@@ -528,21 +533,21 @@ union yyalloc
 #endif /* !YYCOPY_NEEDED */
 
 /* YYFINAL -- State number of the termination state.  */
-#define YYFINAL  31
+#define YYFINAL  37
 /* YYLAST -- Last index in YYTABLE.  */
-#define YYLAST   65
+#define YYLAST   71
 
 /* YYNTOKENS -- Number of terminals.  */
-#define YYNTOKENS  32
+#define YYNTOKENS  35
 /* YYNNTS -- Number of nonterminals.  */
-#define YYNNTS  24
+#define YYNNTS  26
 /* YYNRULES -- Number of rules.  */
-#define YYNRULES  69
+#define YYNRULES  73
 /* YYNSTATES -- Number of states.  */
-#define YYNSTATES  89
+#define YYNSTATES  97
 
 /* YYMAXUTOK -- Last valid token kind.  */
-#define YYMAXUTOK   281
+#define YYMAXUTOK   284
 
 
 /* YYTRANSLATE(TOKEN-NUM) -- Symbol number corresponding to TOKEN-NUM
@@ -560,8 +565,8 @@ static const yytype_int8 yytranslate[] =
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
-      29,    30,     2,     2,    31,     2,    28,     2,     2,     2,
-       2,     2,     2,     2,     2,     2,     2,     2,     2,    27,
+      32,    33,     2,     2,    34,     2,    31,     2,     2,     2,
+       2,     2,     2,     2,     2,     2,     2,     2,     2,    30,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
        2,     2,     2,     2,     2,     2,     2,     2,     2,     2,
@@ -584,20 +589,21 @@ static const yytype_int8 yytranslate[] =
        2,     2,     2,     2,     2,     2,     1,     2,     3,     4,
        5,     6,     7,     8,     9,    10,    11,    12,    13,    14,
       15,    16,    17,    18,    19,    20,    21,    22,    23,    24,
-      25,    26
+      25,    26,    27,    28,    29
 };
 
 #if YYDEBUG
 /* YYRLINE[YYN] -- Source line where rule number YYN was defined.  */
 static const yytype_int16 yyrline[] =
 {
-       0,    94,    94,   100,   101,   105,   106,   107,   108,   109,
-     110,   111,   112,   113,   120,   134,   145,   156,   163,   164,
-     172,   176,   191,   198,   208,   209,   213,   214,   223,   224,
-     225,   226,   227,   232,   238,   254,   273,   287,   288,   292,
-     293,   297,   300,   304,   314,   318,   319,   323,   325,   327,
-     329,   339,   340,   341,   342,   343,   344,   345,   346,   347,
-     348,   349,   350,   351,   352,   353,   354,   355,   356,   357
+       0,    97,    97,   103,   104,   108,   109,   110,   111,   112,
+     113,   114,   115,   116,   117,   118,   125,   139,   157,   174,
+     185,   196,   203,   204,   212,   216,   231,   238,   248,   249,
+     253,   254,   263,   264,   265,   266,   267,   272,   278,   294,
+     313,   327,   328,   332,   333,   337,   340,   344,   354,   358,
+     359,   363,   365,   367,   369,   379,   380,   381,   382,   383,
+     384,   385,   386,   387,   388,   389,   390,   391,   392,   393,
+     394,   395,   396,   397
 };
 #endif
 
@@ -614,14 +620,15 @@ static const char *yysymbol_name (yysymbol_kind_t yysymbol) YY_ATTRIBUTE_UNUSED;
 static const char *const yytname[] =
 {
   "\"end of file\"", "error", "\"invalid token\"", "SCONST", "IDENT",
-  "UCONST", "RECPTR", "K_BASE_BACKUP", "K_IDENTIFY_SYSTEM",
+  "CRC32C_HEX", "UCONST", "RECPTR", "K_BASE_BACKUP", "K_IDENTIFY_SYSTEM",
   "K_READ_REPLICATION_SLOT", "K_SHOW", "K_START_REPLICATION",
   "K_CREATE_REPLICATION_SLOT", "K_DROP_REPLICATION_SLOT",
   "K_TIMELINE_HISTORY", "K_WAIT", "K_TIMELINE", "K_PHYSICAL", "K_LOGICAL",
   "K_SLOT", "K_RESERVE_WAL", "K_TEMPORARY", "K_TWO_PHASE",
   "K_EXPORT_SNAPSHOT", "K_NOEXPORT_SNAPSHOT", "K_USE_SNAPSHOT",
-  "K_FETCH_FILE", "';'", "'.'", "'('", "')'", "','", "$accept", "firstcmd",
-  "opt_semicolon", "command", "identify_system", "fetch_file",
+  "K_FETCH_FILE", "K_CHECK_FILE", "K_ARCHIVE_FILE", "';'", "'.'", "'('",
+  "')'", "','", "$accept", "firstcmd", "opt_semicolon", "command",
+  "identify_system", "fetch_file", "check_file", "archive_file",
   "read_replication_slot", "show", "var_name", "base_backup",
   "create_replication_slot", "create_slot_options",
   "create_slot_legacy_opt_list", "create_slot_legacy_opt",
@@ -637,7 +644,7 @@ yysymbol_name (yysymbol_kind_t yysymbol)
 }
 #endif
 
-#define YYPACT_NINF (-30)
+#define YYPACT_NINF (-33)
 
 #define yypact_value_is_default(Yyn) \
   ((Yyn) == YYPACT_NINF)
@@ -651,15 +658,16 @@ yysymbol_name (yysymbol_kind_t yysymbol)
    STATE-NUM.  */
 static const yytype_int8 yypact[] =
 {
-      15,   -24,   -30,    27,    40,    26,    42,    43,    44,    45,
-      50,    24,   -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,
-     -30,    -4,   -30,   -30,    25,    48,    37,    34,    41,   -30,
-     -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,
-     -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,
-     -30,   -30,   -30,   -29,   -30,    33,    53,   -30,   -30,    52,
-     -30,    22,   -30,   -30,    -4,   -30,   -30,   -30,   -30,    46,
-      30,    56,   -30,    58,   -30,    -4,   -30,    10,    30,   -30,
-      12,   -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30
+      15,   -29,   -33,     2,    28,    19,    37,    45,    44,    48,
+      49,    50,    54,    25,   -33,   -33,   -33,   -33,   -33,   -33,
+     -33,   -33,   -33,   -33,   -33,    -4,   -33,   -33,    26,    52,
+      40,    38,    43,   -33,   -33,    55,   -33,   -33,   -33,   -33,
+     -33,   -33,   -33,   -33,   -33,   -33,   -33,   -33,   -33,   -33,
+     -33,   -33,   -33,   -33,   -33,   -33,   -33,   -33,   -33,   -32,
+     -33,    34,    58,   -33,   -33,    56,   -33,    27,   -33,    59,
+     -33,    -4,   -33,   -33,   -33,   -33,    51,    33,    62,   -33,
+     -33,    61,   -33,    -4,   -33,    10,    33,   -33,    14,   -33,
+     -33,   -33,   -33,   -33,   -33,   -33,   -33
 };
 
 /* YYDEFACT[STATE-NUM] -- Default reduction number in state STATE-NUM.
@@ -667,31 +675,32 @@ static const yytype_int8 yypact[] =
    means the default is an error.  */
 static const yytype_int8 yydefact[] =
 {
-       0,    21,    14,     0,     0,    42,     0,     0,     0,     0,
-       0,     4,     5,    13,    10,    12,     6,     8,     9,     7,
-      11,     0,    16,    18,    17,     0,    38,    40,    33,    36,
-      15,     1,     3,     2,    51,    52,    53,    54,    55,    56,
-      57,    58,    59,    60,    61,    62,    63,    64,    65,    66,
-      67,    68,    69,     0,    46,    47,     0,    41,    37,     0,
-      39,     0,    34,    20,     0,    49,    48,    50,    19,    44,
-      27,     0,    45,     0,    35,     0,    22,    25,    27,    43,
-       0,    31,    32,    28,    29,    30,    26,    23,    24
+       0,    25,    16,     0,     0,    46,     0,     0,     0,     0,
+       0,     0,     0,     4,     5,    13,    14,    15,    10,    12,
+       6,     8,     9,     7,    11,     0,    20,    22,    21,     0,
+      42,    44,    37,    40,    17,     0,    19,     1,     3,     2,
+      55,    56,    57,    58,    59,    60,    61,    62,    63,    64,
+      65,    66,    67,    68,    69,    70,    71,    72,    73,     0,
+      50,    51,     0,    45,    41,     0,    43,     0,    38,     0,
+      24,     0,    53,    52,    54,    23,    48,    31,     0,    18,
+      49,     0,    39,     0,    26,    29,    31,    47,     0,    35,
+      36,    32,    33,    34,    30,    27,    28
 };
 
 /* YYPGOTO[NTERM-NUM].  */
 static const yytype_int8 yypgoto[] =
 {
-     -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,
-     -30,   -17,   -30,   -30,   -30,   -30,   -30,   -30,   -30,   -30,
-     -30,   -11,     1,   -30
+     -33,   -33,   -33,   -33,   -33,   -33,   -33,   -33,   -33,   -33,
+     -33,   -33,   -33,   -17,   -33,   -33,   -33,   -33,   -33,   -33,
+     -33,   -33,   -33,   -13,     0,   -33
 };
 
 /* YYDEFGOTO[NTERM-NUM].  */
 static const yytype_int8 yydefgoto[] =
 {
-       0,    10,    33,    11,    12,    13,    14,    15,    24,    16,
-      17,    76,    77,    86,    18,    19,    20,    59,    61,    26,
-      74,    53,    54,    55
+       0,    12,    39,    13,    14,    15,    16,    17,    18,    19,
+      28,    20,    21,    84,    85,    94,    22,    23,    24,    65,
+      67,    30,    82,    59,    60,    61
 };
 
 /* YYTABLE[YYPACT[STATE-NUM]] -- What to do in state STATE-NUM.  If
@@ -699,63 +708,68 @@ static const yytype_int8 yydefgoto[] =
    number is the opposite.  If YYTABLE_NINF, syntax error.  */
 static const yytype_int8 yytable[] =
 {
-      34,    63,    64,    35,    36,    21,    37,    38,    39,    40,
-      41,    42,    43,    44,    45,    46,    47,    48,    49,    50,
-      51,    52,     1,     2,     3,     4,     5,     6,     7,     8,
-      81,    22,    82,    83,    84,    85,    65,    66,    67,    70,
-      71,     9,    88,    64,    23,    25,    27,    28,    30,    29,
-      31,    32,    57,    56,    58,    60,    62,    68,    69,    75,
-      78,    87,    73,    79,    80,    72
+      40,    70,    71,    25,    41,    42,    26,    43,    44,    45,
+      46,    47,    48,    49,    50,    51,    52,    53,    54,    55,
+      56,    57,    58,     1,     2,     3,     4,     5,     6,     7,
+       8,    89,    27,    90,    91,    92,    93,    72,    73,    29,
+      74,    31,     9,    10,    11,    77,    78,    96,    71,    32,
+      33,    34,    35,    36,    37,    38,    63,    62,    64,    68,
+      66,    69,    75,    76,    79,    83,    86,    87,    81,    95,
+      88,    80
 };
 
 static const yytype_int8 yycheck[] =
 {
-       4,    30,    31,     7,     8,    29,    10,    11,    12,    13,
+       4,    33,    34,    32,     8,     9,     4,    11,    12,    13,
       14,    15,    16,    17,    18,    19,    20,    21,    22,    23,
-      24,    25,     7,     8,     9,    10,    11,    12,    13,    14,
-      20,     4,    22,    23,    24,    25,     3,     4,     5,    17,
-      18,    26,    30,    31,     4,    19,     4,     4,     3,     5,
-       0,    27,     4,    28,    17,    21,    15,     4,     6,    29,
-       4,    78,    16,     5,    75,    64
+      24,    25,    26,     8,     9,    10,    11,    12,    13,    14,
+      15,    21,     4,    23,    24,    25,    26,     3,     4,    20,
+       6,     4,    27,    28,    29,    18,    19,    33,    34,     4,
+       6,     3,     3,     3,     0,    30,     4,    31,    18,    16,
+      22,     6,     4,     7,     5,    32,     4,     6,    17,    86,
+      83,    71
 };
 
 /* YYSTOS[STATE-NUM] -- The symbol kind of the accessing symbol of
    state STATE-NUM.  */
 static const yytype_int8 yystos[] =
 {
-       0,     7,     8,     9,    10,    11,    12,    13,    14,    26,
-      33,    35,    36,    37,    38,    39,    41,    42,    46,    47,
-      48,    29,     4,     4,    40,    19,    51,     4,     4,     5,
-       3,     0,    27,    34,     4,     7,     8,    10,    11,    12,
-      13,    14,    15,    16,    17,    18,    19,    20,    21,    22,
-      23,    24,    25,    53,    54,    55,    28,     4,    17,    49,
-      21,    50,    15,    30,    31,     3,     4,     5,     4,     6,
-      17,    18,    54,    16,    52,    29,    43,    44,     4,     5,
-      53,    20,    22,    23,    24,    25,    45,    43,    30
+       0,     8,     9,    10,    11,    12,    13,    14,    15,    27,
+      28,    29,    36,    38,    39,    40,    41,    42,    43,    44,
+      46,    47,    51,    52,    53,    32,     4,     4,    45,    20,
+      56,     4,     4,     6,     3,     3,     3,     0,    30,    37,
+       4,     8,     9,    11,    12,    13,    14,    15,    16,    17,
+      18,    19,    20,    21,    22,    23,    24,    25,    26,    58,
+      59,    60,    31,     4,    18,    54,    22,    55,    16,     6,
+      33,    34,     3,     4,     6,     4,     7,    18,    19,     5,
+      59,    17,    57,    32,    48,    49,     4,     6,    58,    21,
+      23,    24,    25,    26,    50,    48,    33
 };
 
 /* YYR1[RULE-NUM] -- Symbol kind of the left-hand side of rule RULE-NUM.  */
 static const yytype_int8 yyr1[] =
 {
-       0,    32,    33,    34,    34,    35,    35,    35,    35,    35,
-      35,    35,    35,    35,    36,    37,    38,    39,    40,    40,
-      41,    41,    42,    42,    43,    43,    44,    44,    45,    45,
-      45,    45,    45,    46,    46,    47,    48,    49,    49,    50,
-      50,    51,    51,    52,    52,    53,    53,    54,    54,    54,
-      54,    55,    55,    55,    55,    55,    55,    55,    55,    55,
-      55,    55,    55,    55,    55,    55,    55,    55,    55,    55
+       0,    35,    36,    37,    37,    38,    38,    38,    38,    38,
+      38,    38,    38,    38,    38,    38,    39,    40,    41,    42,
+      43,    44,    45,    45,    46,    46,    47,    47,    48,    48,
+      49,    49,    50,    50,    50,    50,    50,    51,    51,    52,
+      53,    54,    54,    55,    55,    56,    56,    57,    57,    58,
+      58,    59,    59,    59,    59,    60,    60,    60,    60,    60,
+      60,    60,    60,    60,    60,    60,    60,    60,    60,    60,
+      60,    60,    60,    60
 };
 
 /* YYR2[RULE-NUM] -- Number of symbols on the right-hand side of rule RULE-NUM.  */
 static const yytype_int8 yyr2[] =
 {
        0,     2,     2,     1,     0,     1,     1,     1,     1,     1,
-       1,     1,     1,     1,     1,     2,     2,     2,     1,     3,
-       4,     1,     5,     6,     3,     1,     2,     0,     1,     1,
-       1,     1,     1,     2,     3,     5,     2,     1,     0,     1,
-       0,     2,     0,     2,     0,     3,     1,     1,     2,     2,
-       2,     1,     1,     1,     1,     1,     1,     1,     1,     1,
-       1,     1,     1,     1,     1,     1,     1,     1,     1,     1
+       1,     1,     1,     1,     1,     1,     1,     2,     4,     2,
+       2,     2,     1,     3,     4,     1,     5,     6,     3,     1,
+       2,     0,     1,     1,     1,     1,     1,     2,     3,     5,
+       2,     1,     0,     1,     0,     2,     0,     2,     0,     3,
+       1,     1,     2,     2,     2,     1,     1,     1,     1,     1,
+       1,     1,     1,     1,     1,     1,     1,     1,     1,     1,
+       1,     1,     1,     1
 };
 
 
@@ -1219,150 +1233,171 @@ yyreduce:
   switch (yyn)
     {
   case 2: /* firstcmd: command opt_semicolon  */
-#line 95 "repl_gram.y"
+#line 98 "repl_gram.y"
                                 {
 					(void) yynerrs; /* suppress compiler warning */
 				}
-#line 1227 "repl_gram.c"
+#line 1241 "repl_gram.c"
     break;
 
-  case 14: /* identify_system: K_IDENTIFY_SYSTEM  */
-#line 121 "repl_gram.y"
+  case 16: /* identify_system: K_IDENTIFY_SYSTEM  */
+#line 126 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_IDENTIFY_SYSTEM;
 				}
-#line 1235 "repl_gram.c"
+#line 1249 "repl_gram.c"
     break;
 
-  case 15: /* fetch_file: K_FETCH_FILE SCONST  */
-#line 135 "repl_gram.y"
+  case 17: /* fetch_file: K_FETCH_FILE SCONST  */
+#line 140 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_FETCH_FILE;
 					strlcpy(ws_parse_cmd->filename, (yyvsp[0].str), sizeof(ws_parse_cmd->filename));
 				}
-#line 1244 "repl_gram.c"
+#line 1258 "repl_gram.c"
     break;
 
-  case 16: /* read_replication_slot: K_READ_REPLICATION_SLOT IDENT  */
-#line 146 "repl_gram.y"
+  case 18: /* check_file: K_CHECK_FILE SCONST UCONST CRC32C_HEX  */
+#line 158 "repl_gram.y"
+                                {
+					ws_parse_cmd->type = WS_CMD_CHECK_FILE;
+					strlcpy(ws_parse_cmd->filename, (yyvsp[-2].str), sizeof(ws_parse_cmd->filename));
+					ws_parse_cmd->checkFileSize = (yyvsp[-1].uintval);
+					strlcpy(ws_parse_cmd->checkFileCrc32c, (yyvsp[0].str),
+							sizeof(ws_parse_cmd->checkFileCrc32c));
+				}
+#line 1270 "repl_gram.c"
+    break;
+
+  case 19: /* archive_file: K_ARCHIVE_FILE SCONST  */
+#line 175 "repl_gram.y"
+                                {
+					ws_parse_cmd->type = WS_CMD_ARCHIVE_FILE;
+					strlcpy(ws_parse_cmd->filename, (yyvsp[0].str), sizeof(ws_parse_cmd->filename));
+				}
+#line 1279 "repl_gram.c"
+    break;
+
+  case 20: /* read_replication_slot: K_READ_REPLICATION_SLOT IDENT  */
+#line 186 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_READ_REPLICATION_SLOT;
 					strlcpy(ws_parse_cmd->slotName, (yyvsp[0].str), sizeof(ws_parse_cmd->slotName));
 				}
-#line 1253 "repl_gram.c"
+#line 1288 "repl_gram.c"
     break;
 
-  case 17: /* show: K_SHOW var_name  */
-#line 157 "repl_gram.y"
+  case 21: /* show: K_SHOW var_name  */
+#line 197 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_SHOW;
 					strlcpy(ws_parse_cmd->showName, (yyvsp[0].str), sizeof(ws_parse_cmd->showName));
 				}
-#line 1262 "repl_gram.c"
+#line 1297 "repl_gram.c"
     break;
 
-  case 18: /* var_name: IDENT  */
-#line 163 "repl_gram.y"
+  case 22: /* var_name: IDENT  */
+#line 203 "repl_gram.y"
                         { (yyval.str) = (yyvsp[0].str); }
-#line 1268 "repl_gram.c"
+#line 1303 "repl_gram.c"
     break;
 
-  case 19: /* var_name: var_name '.' IDENT  */
-#line 165 "repl_gram.y"
+  case 23: /* var_name: var_name '.' IDENT  */
+#line 205 "repl_gram.y"
                                 { (yyval.str) = dotted_name((yyvsp[-2].str), (yyvsp[0].str)); }
-#line 1274 "repl_gram.c"
+#line 1309 "repl_gram.c"
     break;
 
-  case 20: /* base_backup: K_BASE_BACKUP '(' generic_option_list ')'  */
-#line 173 "repl_gram.y"
+  case 24: /* base_backup: K_BASE_BACKUP '(' generic_option_list ')'  */
+#line 213 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_BASE_BACKUP;
 				}
-#line 1282 "repl_gram.c"
+#line 1317 "repl_gram.c"
     break;
 
-  case 21: /* base_backup: K_BASE_BACKUP  */
-#line 177 "repl_gram.y"
+  case 25: /* base_backup: K_BASE_BACKUP  */
+#line 217 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_BASE_BACKUP;
 				}
-#line 1290 "repl_gram.c"
+#line 1325 "repl_gram.c"
     break;
 
-  case 22: /* create_replication_slot: K_CREATE_REPLICATION_SLOT IDENT opt_temporary K_PHYSICAL create_slot_options  */
-#line 192 "repl_gram.y"
+  case 26: /* create_replication_slot: K_CREATE_REPLICATION_SLOT IDENT opt_temporary K_PHYSICAL create_slot_options  */
+#line 232 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_CREATE_REPLICATION_SLOT;
 					strlcpy(ws_parse_cmd->slotName, (yyvsp[-3].str), sizeof(ws_parse_cmd->slotName));
 					ws_parse_cmd->temporary = (yyvsp[-2].boolval);
 					ws_parse_cmd->isLogical = false;
 				}
-#line 1301 "repl_gram.c"
+#line 1336 "repl_gram.c"
     break;
 
-  case 23: /* create_replication_slot: K_CREATE_REPLICATION_SLOT IDENT opt_temporary K_LOGICAL IDENT create_slot_options  */
-#line 199 "repl_gram.y"
+  case 27: /* create_replication_slot: K_CREATE_REPLICATION_SLOT IDENT opt_temporary K_LOGICAL IDENT create_slot_options  */
+#line 239 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_CREATE_REPLICATION_SLOT;
 					strlcpy(ws_parse_cmd->slotName, (yyvsp[-4].str), sizeof(ws_parse_cmd->slotName));
 					ws_parse_cmd->temporary = (yyvsp[-3].boolval);
 					ws_parse_cmd->isLogical = true;
 				}
-#line 1312 "repl_gram.c"
+#line 1347 "repl_gram.c"
     break;
 
-  case 28: /* create_slot_legacy_opt: K_EXPORT_SNAPSHOT  */
-#line 223 "repl_gram.y"
+  case 32: /* create_slot_legacy_opt: K_EXPORT_SNAPSHOT  */
+#line 263 "repl_gram.y"
                                                         { add_option("snapshot", "export", true); }
-#line 1318 "repl_gram.c"
+#line 1353 "repl_gram.c"
     break;
 
-  case 29: /* create_slot_legacy_opt: K_NOEXPORT_SNAPSHOT  */
-#line 224 "repl_gram.y"
+  case 33: /* create_slot_legacy_opt: K_NOEXPORT_SNAPSHOT  */
+#line 264 "repl_gram.y"
                                                 { add_option("snapshot", "nothing", true); }
-#line 1324 "repl_gram.c"
+#line 1359 "repl_gram.c"
     break;
 
-  case 30: /* create_slot_legacy_opt: K_USE_SNAPSHOT  */
-#line 225 "repl_gram.y"
+  case 34: /* create_slot_legacy_opt: K_USE_SNAPSHOT  */
+#line 265 "repl_gram.y"
                                                         { add_option("snapshot", "use", true); }
-#line 1330 "repl_gram.c"
+#line 1365 "repl_gram.c"
     break;
 
-  case 31: /* create_slot_legacy_opt: K_RESERVE_WAL  */
-#line 226 "repl_gram.y"
+  case 35: /* create_slot_legacy_opt: K_RESERVE_WAL  */
+#line 266 "repl_gram.y"
                                                         { add_option("reserve_wal", "true", true); }
-#line 1336 "repl_gram.c"
+#line 1371 "repl_gram.c"
     break;
 
-  case 32: /* create_slot_legacy_opt: K_TWO_PHASE  */
-#line 227 "repl_gram.y"
+  case 36: /* create_slot_legacy_opt: K_TWO_PHASE  */
+#line 267 "repl_gram.y"
                                                         { add_option("two_phase", "true", true); }
-#line 1342 "repl_gram.c"
+#line 1377 "repl_gram.c"
     break;
 
-  case 33: /* drop_replication_slot: K_DROP_REPLICATION_SLOT IDENT  */
-#line 233 "repl_gram.y"
+  case 37: /* drop_replication_slot: K_DROP_REPLICATION_SLOT IDENT  */
+#line 273 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_DROP_REPLICATION_SLOT;
 					strlcpy(ws_parse_cmd->slotName, (yyvsp[0].str), sizeof(ws_parse_cmd->slotName));
 					ws_parse_cmd->dropWait = false;
 				}
-#line 1352 "repl_gram.c"
+#line 1387 "repl_gram.c"
     break;
 
-  case 34: /* drop_replication_slot: K_DROP_REPLICATION_SLOT IDENT K_WAIT  */
-#line 239 "repl_gram.y"
+  case 38: /* drop_replication_slot: K_DROP_REPLICATION_SLOT IDENT K_WAIT  */
+#line 279 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_DROP_REPLICATION_SLOT;
 					strlcpy(ws_parse_cmd->slotName, (yyvsp[-1].str), sizeof(ws_parse_cmd->slotName));
 					ws_parse_cmd->dropWait = true;
 				}
-#line 1362 "repl_gram.c"
+#line 1397 "repl_gram.c"
     break;
 
-  case 35: /* start_replication: K_START_REPLICATION opt_slot opt_physical RECPTR opt_timeline  */
-#line 255 "repl_gram.y"
+  case 39: /* start_replication: K_START_REPLICATION opt_slot opt_physical RECPTR opt_timeline  */
+#line 295 "repl_gram.y"
                                 {
 					ws_parse_cmd->type = WS_CMD_START_REPLICATION;
 
@@ -1375,11 +1410,11 @@ yyreduce:
 					ws_parse_cmd->timeline = (int) (yyvsp[0].uintval);
 					ws_parse_cmd->haveTimeline = ((yyvsp[0].uintval) != 0);
 				}
-#line 1379 "repl_gram.c"
+#line 1414 "repl_gram.c"
     break;
 
-  case 36: /* timeline_history: K_TIMELINE_HISTORY UCONST  */
-#line 274 "repl_gram.y"
+  case 40: /* timeline_history: K_TIMELINE_HISTORY UCONST  */
+#line 314 "repl_gram.y"
                                 {
 					if ((yyvsp[0].uintval) == 0)
 					{
@@ -1390,35 +1425,35 @@ yyreduce:
 					ws_parse_cmd->type = WS_CMD_TIMELINE_HISTORY;
 					ws_parse_cmd->timeline = (int) (yyvsp[0].uintval);
 				}
-#line 1394 "repl_gram.c"
+#line 1429 "repl_gram.c"
     break;
 
-  case 39: /* opt_temporary: K_TEMPORARY  */
-#line 292 "repl_gram.y"
+  case 43: /* opt_temporary: K_TEMPORARY  */
+#line 332 "repl_gram.y"
                                                         { (yyval.boolval) = true; }
-#line 1400 "repl_gram.c"
+#line 1435 "repl_gram.c"
     break;
 
-  case 40: /* opt_temporary: %empty  */
-#line 293 "repl_gram.y"
+  case 44: /* opt_temporary: %empty  */
+#line 333 "repl_gram.y"
                                                 { (yyval.boolval) = false; }
-#line 1406 "repl_gram.c"
+#line 1441 "repl_gram.c"
     break;
 
-  case 41: /* opt_slot: K_SLOT IDENT  */
-#line 298 "repl_gram.y"
+  case 45: /* opt_slot: K_SLOT IDENT  */
+#line 338 "repl_gram.y"
                                 { (yyval.str) = (yyvsp[0].str); }
-#line 1412 "repl_gram.c"
+#line 1447 "repl_gram.c"
     break;
 
-  case 42: /* opt_slot: %empty  */
-#line 300 "repl_gram.y"
+  case 46: /* opt_slot: %empty  */
+#line 340 "repl_gram.y"
                                 { (yyval.str) = NULL; }
-#line 1418 "repl_gram.c"
+#line 1453 "repl_gram.c"
     break;
 
-  case 43: /* opt_timeline: K_TIMELINE UCONST  */
-#line 305 "repl_gram.y"
+  case 47: /* opt_timeline: K_TIMELINE UCONST  */
+#line 345 "repl_gram.y"
                                 {
 					if ((yyvsp[0].uintval) == 0)
 					{
@@ -1428,160 +1463,160 @@ yyreduce:
 
 					(yyval.uintval) = (yyvsp[0].uintval);
 				}
-#line 1432 "repl_gram.c"
+#line 1467 "repl_gram.c"
     break;
 
-  case 44: /* opt_timeline: %empty  */
-#line 314 "repl_gram.y"
+  case 48: /* opt_timeline: %empty  */
+#line 354 "repl_gram.y"
                                                 { (yyval.uintval) = 0; }
-#line 1438 "repl_gram.c"
+#line 1473 "repl_gram.c"
     break;
 
-  case 47: /* generic_option: ident_or_keyword  */
-#line 324 "repl_gram.y"
+  case 51: /* generic_option: ident_or_keyword  */
+#line 364 "repl_gram.y"
                                 { add_option((yyvsp[0].str), NULL, false); }
-#line 1444 "repl_gram.c"
+#line 1479 "repl_gram.c"
     break;
 
-  case 48: /* generic_option: ident_or_keyword IDENT  */
-#line 326 "repl_gram.y"
+  case 52: /* generic_option: ident_or_keyword IDENT  */
+#line 366 "repl_gram.y"
                                 { add_option((yyvsp[-1].str), (yyvsp[0].str), true); }
-#line 1450 "repl_gram.c"
+#line 1485 "repl_gram.c"
     break;
 
-  case 49: /* generic_option: ident_or_keyword SCONST  */
-#line 328 "repl_gram.y"
+  case 53: /* generic_option: ident_or_keyword SCONST  */
+#line 368 "repl_gram.y"
                                 { add_option((yyvsp[-1].str), (yyvsp[0].str), true); }
-#line 1456 "repl_gram.c"
+#line 1491 "repl_gram.c"
     break;
 
-  case 50: /* generic_option: ident_or_keyword UCONST  */
-#line 330 "repl_gram.y"
+  case 54: /* generic_option: ident_or_keyword UCONST  */
+#line 370 "repl_gram.y"
                                 {
 					char numbuf[32];
 
 					snprintf(numbuf, sizeof(numbuf), "%u", (yyvsp[0].uintval));
 					add_option((yyvsp[-1].str), numbuf, true);
 				}
-#line 1467 "repl_gram.c"
+#line 1502 "repl_gram.c"
     break;
 
-  case 51: /* ident_or_keyword: IDENT  */
-#line 339 "repl_gram.y"
+  case 55: /* ident_or_keyword: IDENT  */
+#line 379 "repl_gram.y"
                                                                         { (yyval.str) = (yyvsp[0].str); }
-#line 1473 "repl_gram.c"
+#line 1508 "repl_gram.c"
     break;
 
-  case 52: /* ident_or_keyword: K_BASE_BACKUP  */
-#line 340 "repl_gram.y"
+  case 56: /* ident_or_keyword: K_BASE_BACKUP  */
+#line 380 "repl_gram.y"
                                                                 { (yyval.str) = "base_backup"; }
-#line 1479 "repl_gram.c"
+#line 1514 "repl_gram.c"
     break;
 
-  case 53: /* ident_or_keyword: K_IDENTIFY_SYSTEM  */
-#line 341 "repl_gram.y"
+  case 57: /* ident_or_keyword: K_IDENTIFY_SYSTEM  */
+#line 381 "repl_gram.y"
                                                                 { (yyval.str) = "identify_system"; }
-#line 1485 "repl_gram.c"
+#line 1520 "repl_gram.c"
     break;
 
-  case 54: /* ident_or_keyword: K_SHOW  */
-#line 342 "repl_gram.y"
+  case 58: /* ident_or_keyword: K_SHOW  */
+#line 382 "repl_gram.y"
                                                                         { (yyval.str) = "show"; }
-#line 1491 "repl_gram.c"
+#line 1526 "repl_gram.c"
     break;
 
-  case 55: /* ident_or_keyword: K_START_REPLICATION  */
-#line 343 "repl_gram.y"
+  case 59: /* ident_or_keyword: K_START_REPLICATION  */
+#line 383 "repl_gram.y"
                                                         { (yyval.str) = "start_replication"; }
-#line 1497 "repl_gram.c"
+#line 1532 "repl_gram.c"
     break;
 
-  case 56: /* ident_or_keyword: K_CREATE_REPLICATION_SLOT  */
-#line 344 "repl_gram.y"
+  case 60: /* ident_or_keyword: K_CREATE_REPLICATION_SLOT  */
+#line 384 "repl_gram.y"
                                                         { (yyval.str) = "create_replication_slot"; }
-#line 1503 "repl_gram.c"
+#line 1538 "repl_gram.c"
     break;
 
-  case 57: /* ident_or_keyword: K_DROP_REPLICATION_SLOT  */
-#line 345 "repl_gram.y"
+  case 61: /* ident_or_keyword: K_DROP_REPLICATION_SLOT  */
+#line 385 "repl_gram.y"
                                                         { (yyval.str) = "drop_replication_slot"; }
-#line 1509 "repl_gram.c"
+#line 1544 "repl_gram.c"
     break;
 
-  case 58: /* ident_or_keyword: K_TIMELINE_HISTORY  */
-#line 346 "repl_gram.y"
+  case 62: /* ident_or_keyword: K_TIMELINE_HISTORY  */
+#line 386 "repl_gram.y"
                                                         { (yyval.str) = "timeline_history"; }
-#line 1515 "repl_gram.c"
+#line 1550 "repl_gram.c"
     break;
 
-  case 59: /* ident_or_keyword: K_WAIT  */
-#line 347 "repl_gram.y"
+  case 63: /* ident_or_keyword: K_WAIT  */
+#line 387 "repl_gram.y"
                                                                         { (yyval.str) = "wait"; }
-#line 1521 "repl_gram.c"
+#line 1556 "repl_gram.c"
     break;
 
-  case 60: /* ident_or_keyword: K_TIMELINE  */
-#line 348 "repl_gram.y"
+  case 64: /* ident_or_keyword: K_TIMELINE  */
+#line 388 "repl_gram.y"
                                                                 { (yyval.str) = "timeline"; }
-#line 1527 "repl_gram.c"
+#line 1562 "repl_gram.c"
     break;
 
-  case 61: /* ident_or_keyword: K_PHYSICAL  */
-#line 349 "repl_gram.y"
+  case 65: /* ident_or_keyword: K_PHYSICAL  */
+#line 389 "repl_gram.y"
                                                                 { (yyval.str) = "physical"; }
-#line 1533 "repl_gram.c"
+#line 1568 "repl_gram.c"
     break;
 
-  case 62: /* ident_or_keyword: K_LOGICAL  */
-#line 350 "repl_gram.y"
+  case 66: /* ident_or_keyword: K_LOGICAL  */
+#line 390 "repl_gram.y"
                                                                         { (yyval.str) = "logical"; }
-#line 1539 "repl_gram.c"
+#line 1574 "repl_gram.c"
     break;
 
-  case 63: /* ident_or_keyword: K_SLOT  */
-#line 351 "repl_gram.y"
+  case 67: /* ident_or_keyword: K_SLOT  */
+#line 391 "repl_gram.y"
                                                                         { (yyval.str) = "slot"; }
-#line 1545 "repl_gram.c"
+#line 1580 "repl_gram.c"
     break;
 
-  case 64: /* ident_or_keyword: K_RESERVE_WAL  */
-#line 352 "repl_gram.y"
+  case 68: /* ident_or_keyword: K_RESERVE_WAL  */
+#line 392 "repl_gram.y"
                                                                 { (yyval.str) = "reserve_wal"; }
-#line 1551 "repl_gram.c"
+#line 1586 "repl_gram.c"
     break;
 
-  case 65: /* ident_or_keyword: K_TEMPORARY  */
-#line 353 "repl_gram.y"
+  case 69: /* ident_or_keyword: K_TEMPORARY  */
+#line 393 "repl_gram.y"
                                                                 { (yyval.str) = "temporary"; }
-#line 1557 "repl_gram.c"
+#line 1592 "repl_gram.c"
     break;
 
-  case 66: /* ident_or_keyword: K_TWO_PHASE  */
-#line 354 "repl_gram.y"
+  case 70: /* ident_or_keyword: K_TWO_PHASE  */
+#line 394 "repl_gram.y"
                                                                 { (yyval.str) = "two_phase"; }
-#line 1563 "repl_gram.c"
+#line 1598 "repl_gram.c"
     break;
 
-  case 67: /* ident_or_keyword: K_EXPORT_SNAPSHOT  */
-#line 355 "repl_gram.y"
+  case 71: /* ident_or_keyword: K_EXPORT_SNAPSHOT  */
+#line 395 "repl_gram.y"
                                                                 { (yyval.str) = "export_snapshot"; }
-#line 1569 "repl_gram.c"
+#line 1604 "repl_gram.c"
     break;
 
-  case 68: /* ident_or_keyword: K_NOEXPORT_SNAPSHOT  */
-#line 356 "repl_gram.y"
+  case 72: /* ident_or_keyword: K_NOEXPORT_SNAPSHOT  */
+#line 396 "repl_gram.y"
                                                         { (yyval.str) = "noexport_snapshot"; }
-#line 1575 "repl_gram.c"
+#line 1610 "repl_gram.c"
     break;
 
-  case 69: /* ident_or_keyword: K_USE_SNAPSHOT  */
-#line 357 "repl_gram.y"
+  case 73: /* ident_or_keyword: K_USE_SNAPSHOT  */
+#line 397 "repl_gram.y"
                                                                 { (yyval.str) = "use_snapshot"; }
-#line 1581 "repl_gram.c"
+#line 1616 "repl_gram.c"
     break;
 
 
-#line 1585 "repl_gram.c"
+#line 1620 "repl_gram.c"
 
       default: break;
     }
@@ -1774,7 +1809,7 @@ yyreturnlab:
   return yyresult;
 }
 
-#line 360 "repl_gram.y"
+#line 400 "repl_gram.y"
 
 
 /*

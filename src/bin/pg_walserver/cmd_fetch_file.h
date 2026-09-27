@@ -21,9 +21,13 @@
 #include "routes.h"
 
 /*
- * Only WAL segments ("^[0-9A-F]{24}$") and timeline history files
- * ("^[0-9A-F]{8}\.history$") are served -- never a .partial segment or any
- * other file of the route's directory. The file is opened O_NOFOLLOW,
+ * Only WAL segments ("^[0-9A-F]{24}$"), timeline history files
+ * ("^[0-9A-F]{8}\.history$"), and base backup history files
+ * ("^[0-9A-F]{24}\.[0-9A-F]{8}\.backup$") are served or accepted -- never a
+ * .partial segment or any other file of the route's directory. Shared by
+ * both the read side (cmd_fetch_file.c's own FETCH_FILE) and the write side
+ * (cmd_archive_file.c's own ARCHIVE_FILE), see this function's own comment
+ * in cmd_fetch_file.c. On the read side, the file is opened O_NOFOLLOW,
  * checked to be a regular file (fstat) and streamed in chunks.
  */
 bool ws_fetch_filename_is_servable(const char *filename);

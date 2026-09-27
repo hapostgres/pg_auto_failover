@@ -64,4 +64,19 @@ void ws_auth_deadline_clear(void);
 /* CLOCK_MONOTONIC in milliseconds */
 int64_t ws_monotonic_ms(void);
 
+/*
+ * ws_file_crc32c reads the whole regular file at path (a plain sequential
+ * read, in chunks -- never loading a whole WAL segment into memory) and
+ * computes its size and CRC32C, using the same INIT_CRC32C/COMP_CRC32C/
+ * FIN_CRC32C facility (port/pg_crc32c.h) real Postgres uses for its own
+ * backup manifests and pg_autoctl's own nodespec.c file-change detection --
+ * see CHECK_FILE/ARCHIVE_FILE's own design (DESIGN-standalone-archiving.md)
+ * for why CRC32C specifically. Returns false, with errno left exactly as
+ * open()/read() set it (ENOENT for "does not exist" is the case both
+ * cmd_check_file.c and cmd_archive_file.c actually branch on), on any
+ * failure to open or read the file; sizeOut/crcOut are left untouched in
+ * that case.
+ */
+bool ws_file_crc32c(const char *path, uint64_t *sizeOut, uint32_t *crcOut);
+
 #endif /* WS_UTIL_H */

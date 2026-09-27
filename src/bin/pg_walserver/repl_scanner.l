@@ -122,6 +122,15 @@ WAIT					{ return K_WAIT; }
 	 */
 FETCH_FILE				{ BEGIN(fname); return K_FETCH_FILE; }
 
+	/*
+	 * CHECK_FILE / ARCHIVE_FILE: not part of PostgreSQL's replication
+	 * grammar either, this project's own extensions (see cmd_check_file.h,
+	 * cmd_archive_file.h). Same reasoning as FETCH_FILE above: the filename
+	 * argument that follows is scanned as an opaque <fname> token.
+	 */
+CHECK_FILE				{ BEGIN(fname); return K_CHECK_FILE; }
+ARCHIVE_FILE			{ BEGIN(fname); return K_ARCHIVE_FILE; }
+
 {space}+		{ /* ignore */ }
 
 <fname>{space}+	{ /* ignore */ }
@@ -147,6 +156,22 @@ FETCH_FILE				{ BEGIN(fname); return K_FETCH_FILE; }
 {digit}+		{
 					yylval.uintval = strtoul(yytext, NULL, 10);
 					return UCONST;
+				}
+
+	/*
+	 * CHECK_FILE's own "crc32c:<hex>" argument (see cmd_check_file.h):
+	 * scanned as a single token, not "crc32c" IDENT + ':' + a hex number,
+	 * because a hex CRC32C can start with a digit ("89abcdef..."), which
+	 * the ordinary {identifier} rule below cannot match at all (it requires
+	 * a letter/underscore first character) -- the same problem FETCH_FILE's
+	 * own <fname> state exists to solve for WAL segment names, solved here
+	 * instead with one combined pattern since the "crc32c:" prefix is fixed
+	 * and unambiguous. Case is preserved (crc32c hex digits compare
+	 * case-insensitively at the C level, see cmd_check_file.c).
+	 */
+crc32c:{hexdigit}+	{
+					yylval.str = strdup(yytext + strlen("crc32c:")); /* IGNORE-BANNED */
+					return CRC32C_HEX;
 				}
 
 {hexdigit}+\/{hexdigit}+		{

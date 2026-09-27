@@ -56,28 +56,31 @@ extern int yydebug;
     YYUNDEF = 257,                 /* "invalid token"  */
     SCONST = 258,                  /* SCONST  */
     IDENT = 259,                   /* IDENT  */
-    UCONST = 260,                  /* UCONST  */
-    RECPTR = 261,                  /* RECPTR  */
-    K_BASE_BACKUP = 262,           /* K_BASE_BACKUP  */
-    K_IDENTIFY_SYSTEM = 263,       /* K_IDENTIFY_SYSTEM  */
-    K_READ_REPLICATION_SLOT = 264, /* K_READ_REPLICATION_SLOT  */
-    K_SHOW = 265,                  /* K_SHOW  */
-    K_START_REPLICATION = 266,     /* K_START_REPLICATION  */
-    K_CREATE_REPLICATION_SLOT = 267, /* K_CREATE_REPLICATION_SLOT  */
-    K_DROP_REPLICATION_SLOT = 268, /* K_DROP_REPLICATION_SLOT  */
-    K_TIMELINE_HISTORY = 269,      /* K_TIMELINE_HISTORY  */
-    K_WAIT = 270,                  /* K_WAIT  */
-    K_TIMELINE = 271,              /* K_TIMELINE  */
-    K_PHYSICAL = 272,              /* K_PHYSICAL  */
-    K_LOGICAL = 273,               /* K_LOGICAL  */
-    K_SLOT = 274,                  /* K_SLOT  */
-    K_RESERVE_WAL = 275,           /* K_RESERVE_WAL  */
-    K_TEMPORARY = 276,             /* K_TEMPORARY  */
-    K_TWO_PHASE = 277,             /* K_TWO_PHASE  */
-    K_EXPORT_SNAPSHOT = 278,       /* K_EXPORT_SNAPSHOT  */
-    K_NOEXPORT_SNAPSHOT = 279,     /* K_NOEXPORT_SNAPSHOT  */
-    K_USE_SNAPSHOT = 280,          /* K_USE_SNAPSHOT  */
-    K_FETCH_FILE = 281             /* K_FETCH_FILE  */
+    CRC32C_HEX = 260,              /* CRC32C_HEX  */
+    UCONST = 261,                  /* UCONST  */
+    RECPTR = 262,                  /* RECPTR  */
+    K_BASE_BACKUP = 263,           /* K_BASE_BACKUP  */
+    K_IDENTIFY_SYSTEM = 264,       /* K_IDENTIFY_SYSTEM  */
+    K_READ_REPLICATION_SLOT = 265, /* K_READ_REPLICATION_SLOT  */
+    K_SHOW = 266,                  /* K_SHOW  */
+    K_START_REPLICATION = 267,     /* K_START_REPLICATION  */
+    K_CREATE_REPLICATION_SLOT = 268, /* K_CREATE_REPLICATION_SLOT  */
+    K_DROP_REPLICATION_SLOT = 269, /* K_DROP_REPLICATION_SLOT  */
+    K_TIMELINE_HISTORY = 270,      /* K_TIMELINE_HISTORY  */
+    K_WAIT = 271,                  /* K_WAIT  */
+    K_TIMELINE = 272,              /* K_TIMELINE  */
+    K_PHYSICAL = 273,              /* K_PHYSICAL  */
+    K_LOGICAL = 274,               /* K_LOGICAL  */
+    K_SLOT = 275,                  /* K_SLOT  */
+    K_RESERVE_WAL = 276,           /* K_RESERVE_WAL  */
+    K_TEMPORARY = 277,             /* K_TEMPORARY  */
+    K_TWO_PHASE = 278,             /* K_TWO_PHASE  */
+    K_EXPORT_SNAPSHOT = 279,       /* K_EXPORT_SNAPSHOT  */
+    K_NOEXPORT_SNAPSHOT = 280,     /* K_NOEXPORT_SNAPSHOT  */
+    K_USE_SNAPSHOT = 281,          /* K_USE_SNAPSHOT  */
+    K_FETCH_FILE = 282,            /* K_FETCH_FILE  */
+    K_CHECK_FILE = 283,            /* K_CHECK_FILE  */
+    K_ARCHIVE_FILE = 284           /* K_ARCHIVE_FILE  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -93,7 +96,7 @@ union YYSTYPE
 	uint32_t	uintval;
 	uint64_t	recptr;
 
-#line 97 "repl_gram.h"
+#line 100 "repl_gram.h"
 
 };
 typedef union YYSTYPE YYSTYPE;

@@ -14,7 +14,9 @@
 #include "postgres_fe.h"
 
 #include "repl_command.h"
+#include "cmd_archive_file.h"
 #include "cmd_base_backup.h"
+#include "cmd_check_file.h"
 #include "cmd_fetch_file.h"
 #include "cmd_identify_system.h"
 #include "cmd_replication_slot.h"
@@ -83,6 +85,19 @@ ws_dispatch_command(int sock, const WsCommand *cmd,
 		case WS_CMD_FETCH_FILE:
 		{
 			cmd_fetch_file(sock, route, cmd->filename);
+			break;
+		}
+
+		case WS_CMD_CHECK_FILE:
+		{
+			cmd_check_file(sock, route, cmd->filename,
+						   cmd->checkFileSize, cmd->checkFileCrc32c);
+			break;
+		}
+
+		case WS_CMD_ARCHIVE_FILE:
+		{
+			cmd_archive_file(sock, route, cmd->filename);
 			break;
 		}
 
