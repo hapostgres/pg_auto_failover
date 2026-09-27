@@ -23,6 +23,19 @@
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
 
+/*
+ * ws_startup_negotiate drives the pre-startup handshake to completion: it
+ * loops reading startup packets, handling SSLRequest (TLS handshake or a
+ * plain 'N' decline), GSSRequest (always declined) and CancelRequest
+ * (ignored, connection closed) transparently, until a real StartupMessage
+ * (protocol major version 3) arrives. That message's key/value pairs are
+ * parsed into *params (user, database, application_name, replication/
+ * replicationDatabase, and any "_pq_.*" options, echoed back as unsupported
+ * via NegotiateProtocolVersion when the client asked for a newer minor
+ * version than 3.0). Returns false on any protocol violation, unsupported
+ * version, or missing user name -- having sent an appropriate ErrorResponse
+ * first when the wire protocol allows one at that point.
+ */
 bool
 ws_startup_negotiate(int sock, WsStartupParams *params)
 {

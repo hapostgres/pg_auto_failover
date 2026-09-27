@@ -550,6 +550,12 @@ refresh_route(const char *routesPath, const char *monitorUriPath,
 }
 
 
+/*
+ * key_is_plausible is a cheap sanity check on a route key read off the
+ * refresher's own datagram socket: non-empty, short enough to fit a
+ * RouteState, and free of control characters -- a malformed or truncated
+ * datagram is dropped rather than stored or logged verbatim.
+ */
 static bool
 key_is_plausible(const char *key)
 {

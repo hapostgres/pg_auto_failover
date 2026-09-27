@@ -31,6 +31,11 @@ ws_read_file_capped(const char *path, size_t maxSize, bool missingOk,
 }
 
 
+/*
+ * ws_open_served_file opens path read-only for FETCH_FILE, refusing to
+ * follow a symlink (O_NOFOLLOW) and refusing anything that isn't a regular
+ * file once opened (fstat()). Returns -1 (errno set) on any failure.
+ */
 int
 ws_open_served_file(const char *path)
 {
@@ -135,6 +140,13 @@ ws_read_file_flags(const char *path, int openFlags, size_t maxSize,
 }
 
 
+/*
+ * ws_sanitize_for_log copies in into out (bounded by outSize), replacing any
+ * control character (< 0x20 or 0x7f) with '?' -- so a value that came
+ * straight from an unauthenticated client (a user name, a route key) can be
+ * logged without letting it inject terminal escape sequences or fake log
+ * lines. Truncates with a trailing "..." when in doesn't fit.
+ */
 void
 ws_sanitize_for_log(const char *in, char *out, size_t outSize)
 {
@@ -166,6 +178,11 @@ ws_sanitize_for_log(const char *in, char *out, size_t outSize)
 }
 
 
+/*
+ * ws_monotonic_ms returns a CLOCK_MONOTONIC timestamp in milliseconds, for
+ * measuring elapsed time (deadlines, backoff) unaffected by wall-clock
+ * adjustments.
+ */
 int64_t
 ws_monotonic_ms(void)
 {
@@ -186,6 +203,11 @@ ws_auth_deadline_set(int seconds)
 }
 
 
+/*
+ * ws_auth_deadline_clear disarms the connection's authentication deadline
+ * (the countdown started by ws_auth_deadline_set()), called once
+ * authentication has succeeded.
+ */
 void
 ws_auth_deadline_clear(void)
 {
@@ -193,6 +215,14 @@ ws_auth_deadline_clear(void)
 }
 
 
+/*
+ * ws_auth_deadline_remaining_ms returns the milliseconds left until the
+ * connection's own authentication deadline (0 if it has already passed), or
+ * a generous 1-hour placeholder when no deadline is currently armed (e.g.
+ * --insecure mode, or authentication already completed) -- callers use this
+ * to cap how long they may block waiting on something (like
+ * monitor_hosts.c's request_refresh()) without ever exceeding the deadline.
+ */
 int
 ws_auth_deadline_remaining_ms(void)
 {

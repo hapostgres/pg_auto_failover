@@ -184,6 +184,11 @@ rule_address_matches(const char *address, const char *routeKey,
 }
 
 
+/*
+ * parse_method maps an HBA METHOD field ("trust", "scram-sha-256",
+ * "reject") to its WsAuthMethod value. Returns false, *method untouched, on
+ * anything else -- this project's own HBA format has no other method.
+ */
 static bool
 parse_method(const char *token, WsAuthMethod *method)
 {

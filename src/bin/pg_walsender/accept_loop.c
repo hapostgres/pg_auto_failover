@@ -76,6 +76,11 @@ auth_timeout_handler(int signo)
 }
 
 
+/*
+ * create_listen_socket creates, binds (SO_REUSEADDR, INADDR_ANY) and
+ * listen()s on a TCP socket for the given port. Returns -1 on any failure,
+ * having logged it and cleaned up the socket.
+ */
 static int
 create_listen_socket(int port)
 {
@@ -282,6 +287,11 @@ handle_connection(int clientSock, const WsServerConfig *config)
 }
 
 
+/*
+ * remove_child drops pid from the children array (if present), replacing it
+ * with the last live entry and shrinking *count -- order among children is
+ * never meaningful, so this O(1) swap-and-shrink is fine.
+ */
 static void
 remove_child(pid_t *children, int *count, pid_t pid)
 {
@@ -352,6 +362,12 @@ start_refresher(const WsServerConfig *config, int refreshSock, int listenSock)
 }
 
 
+/*
+ * stop_refresher asks the refresher child to stop (SIGTERM), waits up to
+ * about 5 seconds (100 * 50ms) for it to exit, and SIGKILLs it if it hasn't
+ * -- called during shutdown, so this may block the parent briefly rather
+ * than leaving a zombie or an orphaned refresher behind.
+ */
 static void
 stop_refresher(pid_t refresherPid)
 {
@@ -377,6 +393,15 @@ stop_refresher(pid_t refresherPid)
 }
 
 
+/*
+ * ws_accept_loop is the whole server: it creates the listening socket and
+ * (when a monitor URI is configured) the refresher's own datagram socket,
+ * then loops accepting connections, forking a child per connection (no
+ * exec(), matching real Postgres's postmaster/BackendMain() split), reaping
+ * exited children and restarting the refresher if it dies, until asked to
+ * stop. Returns false only if the listening socket itself could not be
+ * created; otherwise it runs until shutdown and returns true.
+ */
 bool
 ws_accept_loop(const WsServerConfig *config)
 {
