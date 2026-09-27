@@ -1,5 +1,5 @@
 /*
- * src/bin/pg_walserver/walsender.h
+ * src/bin/pg_walserver/walserver.h
  *   Shared types for pg_walserver, the archiver's own replication-protocol
  *   server. Reimplements the wire-level surface of the real Postgres
  *   walsender well enough to serve IDENTIFY_SYSTEM, SHOW, and (not yet

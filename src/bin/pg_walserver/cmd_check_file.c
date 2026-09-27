@@ -20,6 +20,16 @@
 #include "ws_util.h"
 
 
+/*
+ * cmd_check_file implements CHECK_FILE: validate filename against the same
+ * allow-list FETCH_FILE/ARCHIVE_FILE use, then answer whether a file of
+ * exactly clientSize/clientCrc32cHex is already on disk under that name --
+ * "missing" (ENOENT), "matches" (identical), or "differs" (present but not
+ * identical) -- as a single-row RowDescription/DataRow/CommandComplete
+ * reply, the same shape SHOW already uses. No file content is ever read or
+ * sent either way: this is a cheap, transfer-free round trip, meant to be
+ * called before ARCHIVE_FILE actually pushes anything (see cli_archive.c).
+ */
 void
 cmd_check_file(int sock, const WsRoute *route, const char *filename,
 			   uint64_t clientSize, const char *clientCrc32cHex)
