@@ -19,20 +19,30 @@
  *   Archiving," so "-wal" matches this project's own vocabulary, not an
  *   invented one. See cli_restore_wal.h for the read-side counterpart.
  *
- *   Implements the exact 4-step sequence README.md's "The archive push
+ *   Implements the two disjoint behaviors README.md's "The archive push
  *   side: CHECK_FILE + ARCHIVE_FILE + pg_walserver archive-wal" section
- *   lays out: compute the local file's own size and CRC32C, CHECK_FILE, a
- *   short bounded recheck when it isn't already there, then ARCHIVE_FILE
- *   only if it's still needed after that. Exits 0 on success (including
- *   "already matches", the case that makes this safe to run *alongside*
- *   something else already feeding the same route -- an embedded or
- *   external pg_receivewal -- without ever duplicating a transfer),
- *   nonzero with a clean stderr message on any failure: exactly
- *   PostgreSQL's own archive_command contract (retry forever on nonzero;
- *   see this project's own precedent for "the caller -- Postgres -- is our
- *   retry loop, one attempt per invocation, no local retry-count state"
- *   wherever the pgaf-integration side's own archive_command driver
- *   documents it).
+ *   describes, chosen automatically per invocation from the connected
+ *   route's own "capture" setting (SHOW capture, cmd_show.c), never a
+ *   manually-set client flag:
+ *
+ *     - the route has "capture = pull" configured (its own embedded,
+ *       supervised pg_receivewal writes into this same directory): only
+ *       ever CHECK_FILE, never ARCHIVE_FILE. Exit 0 on "matches", exit 1
+ *       on "missing"/"differs" with a clean stderr message -- no sleep, no
+ *       retry loop inside this client, PostgreSQL's own archive_command
+ *       retry loop is the entire retry mechanism;
+ *     - the route has no "capture = pull" (absent or "none"): only ever
+ *       ARCHIVE_FILE, unconditionally pushing the full file every
+ *       invocation, no CHECK_FILE round trip first -- the server's own
+ *       overwrite-safety (cmd_archive_file.c) already makes this
+ *       idempotent on a retry.
+ *
+ *   Exit 0 on success, nonzero with a clean stderr message on any failure:
+ *   exactly PostgreSQL's own archive_command contract (retry forever on
+ *   nonzero; see this project's own precedent for "the caller -- Postgres
+ *   -- is our retry loop, one attempt per invocation, no local retry-count
+ *   state" wherever the pgaf-integration side's own archive_command driver
+ *   documents it, e.g. archiver_confirm.c).
  *
  *   Deliberately does NOT reuse cli_upstream.c's cli_resolve_upstream() as
  *   it stands: that helper resolves a WsUpstreamTarget (a NodeAddress +
