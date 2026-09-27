@@ -21,7 +21,7 @@ override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor
 # -----------------------------------------------------------------------
 # Sources that live in this directory
 # -----------------------------------------------------------------------
-LOCAL_SRC = main.c accept_loop.c startup.c auth.c framing.c repl_command.c \
+LOCAL_SRC = main.c cli_root.c accept_loop.c startup.c auth.c framing.c repl_command.c \
             repl_gram.c repl_scanner.c \
             routes.c hba.c tls.c monitor_hosts.c cmd_identify_system.c cmd_show.c cmd_base_backup.c \
             tar_stream.c cmd_fetch_file.c fetch_client.c \
@@ -95,7 +95,7 @@ OBJS  = $(LOCAL_OBJS) $(VENDOR_OBJS)
 # common/ipaddr.c (forward/reverse DNS with its retry policy, reused here for
 # HBA address matching) sits on common/pgsql.c, which needs parson and
 # pg_autoctl's state.c (NodeStateFromString): linked, not reimplemented.
-OBJS += lib-log.o lib-snprintf.o lib-strerror.o lib-parson.o shared-state.o
+OBJS += lib-log.o lib-commandline.o lib-snprintf.o lib-strerror.o lib-parson.o shared-state.o
 OBJS += $(COMMON_LIB)
 
 INCLUDES = $(wildcard $(SRC_DIR)*.h)
