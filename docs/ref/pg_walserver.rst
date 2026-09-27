@@ -37,48 +37,97 @@ See `Options`_ below for what each sub-command's flags do.
 Description
 -----------
 
-``pg_walserver`` reads a handful of files directly off disk to decide what
-it may serve and to whom:
+Operating a PostgreSQL service in production requires a fully compliant
+archiving story in place: it is the foundation of disaster recovery and
+data durability in the event of a crash. PostgreSQL itself does not
+provide an archiving implementation, only a well-specified contract for
+one (``archive_command``/``restore_command``, base backups, timelines).
+External solutions exist to fill that gap, but none of them speak the
+PostgreSQL replication protocol, which means that when the worst happens,
+none of PostgreSQL's own tools -- ``pg_basebackup``, ``pg_receivewal``, a
+real standby's ``primary_conninfo`` -- can talk to the archive to rebuild
+a node.
 
-- ``<pgdata>/pg_walserver.ini`` maps each route this instance serves (an
-  opaque key, matched against the connection's ``dbname``) to that route's
-  own local storage root: WAL cache, base backups, and a handful of small
-  bookkeeping files. A route key carries no filesystem meaning of its own.
-  pg_auto_failover's own convention is ``"<formation>/<group>"`` (e.g.
-  ``default/0``); any string works identically. One key, ``*``, is a
-  PgBouncer-style catch-all matching any ``dbname`` with no route of its
-  own.
+``pg_walserver`` fills that gap: a replication-protocol-compatible
+archiving server that implements PostgreSQL's own archiving contract in
+full. It combines streaming (the embedded pull capturer, for efficiency)
+with ``archive_command`` (for robustness) rather than requiring one or
+the other.
 
-- ``<pgdata>/archiver-hba.conf`` decides, one rule per line
-  (``TYPE ROUTE USER ADDRESS METHOD``, first match wins), which peers may
-  connect and how they must authenticate. A missing, oversize, or
-  malformed file rejects every connection.
+Archiving one cluster
+~~~~~~~~~~~~~~~~~~~~~
 
-- ``<pgdata>/archiver-passwd`` holds one SCRAM-SHA-256 verifier per line,
-  produced with ``pg_walserver scram-secret``.
+``pg_walserver setup`` connects to an upstream PostgreSQL instance,
+records its system identifier, and takes a base backup. From that point
+on, the route it created captures WAL continuously (an embedded,
+supervised ``pg_receivewal``, on by default) directly into its own
+storage. Adding ``archive_command = 'pg_walserver archive-wal ...'`` on
+the primary is a defense-in-depth backstop on top of this, not a
+replacement for it: every real production deployment should configure
+both. See `Routing`_ below for what determines which files each
+connecting client can reach, and `A complete standalone example`_ for the
+full sequence.
 
-- ``<pgdata>/server.crt`` / ``<pgdata>/server.key`` (or
-  ``--ssl-cert-file`` / ``--ssl-key-file``) enable TLS. Without them,
-  ``hostssl`` HBA rules never match.
+Restoring, or building a standby, from the archive
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Because ``pg_walserver`` speaks the real protocol, restoring from it uses
+PostgreSQL's own tools directly: ``pg_basebackup`` takes the base backup,
+``restore_command = 'pg_walserver restore-wal ...'`` fetches WAL segments
+during recovery, and a real standby can set ``primary_conninfo`` to
+``pg_walserver`` itself and stream live changes with no intermediate
+tooling at all.
+
+Routing
+~~~~~~~
+
+One ``pg_walserver`` instance can archive more than one cluster.
+``<pgdata>/pg_walserver.ini`` maps each route (an operator-chosen key,
+carrying no filesystem meaning of its own) to its own storage root, and a
+connection is matched to a route by its ``dbname``. One key, ``*``, is a
+PgBouncer-style catch-all matching any ``dbname`` with no route of its
+own.
+
+A real standby's walreceiver cannot set its own ``dbname`` -- it always
+sends the literal ``replication``, regardless of ``primary_conninfo`` --
+so ``dbname``-based routing alone cannot direct it to one of several
+named routes. ``pg_walserver`` resolves this with TLS SNI instead: each
+route's ``--hostname`` becomes a second, independent way to select it,
+matching whatever hostname the connecting client used. A deployment with
+only one route needs none of this. The moment a second named route
+exists, TLS becomes mandatory, and ``pg_walserver`` refuses to start
+without it; see `Routing more than one cluster by name: TLS SNI`_ below
+for the full mechanism and its DNS prerequisite.
+
+Access control
+~~~~~~~~~~~~~~
+
+``<pgdata>/archiver-hba.conf`` decides, one rule per line
+(``TYPE ROUTE USER ADDRESS METHOD``, first match wins), which peers may
+connect and how they must authenticate; a missing, oversize, or malformed
+file rejects every connection. ``<pgdata>/archiver-passwd`` holds one
+SCRAM-SHA-256 verifier per line, produced with ``pg_walserver
+scram-secret``. ``<pgdata>/server.crt``/``<pgdata>/server.key`` (or
+``--ssl-cert-file``/``--ssl-key-file``) enable TLS; without them,
+``hostssl`` HBA rules never match.
 
 Without ``--pgdata`` (and no ``PGDATA`` environment variable), the server
 refuses to start unless ``--insecure`` is given, which accepts any
-``dbname`` with no authentication at all.
+``dbname`` with no authentication at all. This mode exists for trying
+``pg_walserver`` out; it must never be used on a reachable network.
 
-On the wire, a connected client may issue ``IDENTIFY_SYSTEM``, ``SHOW``,
+The wire protocol
+~~~~~~~~~~~~~~~~~~
+
+A connected client may issue ``IDENTIFY_SYSTEM``, ``SHOW``,
 ``BASE_BACKUP``, ``TIMELINE_HISTORY``,
 ``CREATE_REPLICATION_SLOT``/``READ_REPLICATION_SLOT``/
-``DROP_REPLICATION_SLOT``, and ``START_REPLICATION``, as against a real
-PostgreSQL primary, plus three extensions: ``FETCH_FILE '<name>'`` (a
-one-shot file fetch used by ``restore-wal``), and ``CHECK_FILE``/
-``ARCHIVE_FILE`` (the push-side counterpart used by ``archive-wal``). See
-``src/bin/pg_walserver/README.md`` for the wire protocol's full design.
-
-A route with more than one named section (any key besides ``*``) requires
-TLS: connecting clients that cannot set ``dbname`` themselves (a real
-standby's walreceiver, see `Routing more than one cluster by name`_
-below) are then routed by TLS SNI hostname instead. ``pg_walserver``
-refuses to start with two or more named routes and no TLS configured.
+``DROP_REPLICATION_SLOT``, and ``START_REPLICATION``, exactly as against a
+real PostgreSQL primary, plus two extensions of ``pg_walserver``'s own:
+``FETCH_FILE '<name>'`` (a one-shot file fetch, used by ``restore-wal``)
+and ``CHECK_FILE``/``ARCHIVE_FILE`` (the push-side counterpart, used by
+``archive-wal``). See ``src/bin/pg_walserver/README.md`` for the wire
+protocol's full design.
 
 Options
 -------
