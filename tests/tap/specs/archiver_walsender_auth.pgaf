@@ -1,6 +1,6 @@
 # pg_walsender authentication and TLS, exercised with the stock Postgres
 # client tools only -- pg_basebackup and pg_receivewal, both speaking real
-# libpq -- plus pg_walsender's own fetch-file client (a restore_command).
+# libpq -- plus `pg_autoctl restore command` (FETCH_FILE's client).
 #
 # Access is decided by the archiver's archiver-hba.conf (first matching line
 # wins, no match rejects). Its default line admits the nodes the monitor
@@ -17,7 +17,8 @@
 #   test_002  the unregistered host is rejected even with the right password
 #   test_003  an explicit line + a stored verifier for another role
 #             (pitr_restore) admits it: pg_basebackup, pg_receivewal and
-#             fetch-file; wrong or missing password is refused
+#             `pg_autoctl restore command`; wrong or missing password is
+#             refused
 #   test_004  a "reject" line ahead of it wins
 #   test_005  an IP/prefix line works
 #   test_006  a ".domain" line, matched through the client's reverse DNS
@@ -92,8 +93,8 @@ step test_003_explicit_line_and_scram_role {
 
     exec node2 bash -c 'PGPASSWORD=pitr-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --pgdata /tmp/bb3c -X none --no-manifest && test -f /tmp/bb3c/PG_VERSION'
     exec node2 bash -c 'mkdir -p /tmp/rw3 && (PGPASSWORD=pitr-pw timeout 20 pg_receivewal -w -d "host=archiver1 port=6543 user=pitr_restore dbname=default/0 sslmode=require" --directory /tmp/rw3 --no-loop || true) && ls /tmp/rw3 | grep -q .'
-    exec node2 bash -c 'if PGPASSWORD=wrong pg_walsender fetch-file --host archiver1 --port 6543 --user pitr_restore --route default/0 --filename ${seg} --output /tmp/fetched-bad; then exit 1; fi'
-    exec node2 bash -c 'PGPASSWORD=pitr-pw pg_walsender fetch-file --host archiver1 --port 6543 --user pitr_restore --route default/0 --filename ${seg} --output /tmp/fetched-good && test -s /tmp/fetched-good'
+    exec node2 bash -c 'if PGPASSWORD=wrong pg_autoctl restore command --host archiver1 --port 6543 --user pitr_restore --route default/0 ${seg} /tmp/fetched-bad; then exit 1; fi'
+    exec node2 bash -c 'PGPASSWORD=pitr-pw pg_autoctl restore command --host archiver1 --port 6543 --user pitr_restore --route default/0 ${seg} /tmp/fetched-good && test -s /tmp/fetched-good'
 }
 
 step test_004_reject_line_wins {

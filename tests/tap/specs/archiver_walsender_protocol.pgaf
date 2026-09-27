@@ -99,8 +99,8 @@ step test_005_fetch_file_restrictions {
     let seg = sql node1 { SELECT pg_walfile_name(pg_switch_wal()) }
     wait until sql monitor { SELECT pgautofailover.wal_archived('default', 0, '${seg}') } is { t }  timeout 60s
 
-    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw PGSSLMODE=require pg_walsender fetch-file --host archiver1 --port 6543 --user pgautofailover_replicator --route default/0 --filename ${seg} --output /tmp/f-ok && test -s /tmp/f-ok'
-    exec node1 bash -c 'for f in archiver-hba.conf archiver-passwd archiver-position archiver-systemid ../x ../../archiver-hba.conf .slot_foo basebackups/.latest 00000001000000000000000Z; do if PGPASSWORD=pgaf-repl-pw PGSSLMODE=require pg_walsender fetch-file --host archiver1 --port 6543 --user pgautofailover_replicator --route default/0 --filename $f --output /tmp/f-bad >/dev/null 2>&1; then echo "fetched forbidden $f"; exit 1; fi; done; test ! -s /tmp/f-bad'
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw PGSSLMODE=require pg_autoctl restore command --host archiver1 --port 6543 --user pgautofailover_replicator --route default/0 ${seg} /tmp/f-ok && test -s /tmp/f-ok'
+    exec node1 bash -c 'for f in archiver-hba.conf archiver-passwd archiver-position archiver-systemid ../x ../../archiver-hba.conf .slot_foo basebackups/.latest 00000001000000000000000Z; do if PGPASSWORD=pgaf-repl-pw PGSSLMODE=require pg_autoctl restore command --host archiver1 --port 6543 --user pgautofailover_replicator --route default/0 $f /tmp/f-bad >/dev/null 2>&1; then echo "fetched forbidden $f"; exit 1; fi; done; test ! -s /tmp/f-bad'
 }
 
 step test_006_slot_cap_and_drop {

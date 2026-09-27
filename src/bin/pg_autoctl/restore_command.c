@@ -6,11 +6,10 @@
  * Licensed under the PostgreSQL License.
  */
 
-#include <unistd.h>
-
 #include "cli_root.h"
 #include "config.h"
 #include "defaults.h"
+#include "fetch_client.h"
 #include "file_utils.h"
 #include "keeper_config.h"
 #include "log.h"
@@ -259,9 +258,15 @@ restore_command_resolve(const char *pgdata, RestoreCommandInfo *info)
 
 
 /*
- * restore_command_run resolves the connection info then execv()s
- * `pg_walsender fetch-file`, found next to the running pg_autoctl binary
- * exactly as service_archiver_serve.c already does for `archiver serve`.
+ * restore_command_run resolves the connection info then calls
+ * ws_fetch_file_client() (src/bin/common/fetch_client.c) directly,
+ * in-process: a plain libpq connection issuing "FETCH_FILE '<name>'" to the
+ * archiver's pg_walsender and saving the COPY OUT reply to destFile. This
+ * used to execv() into a `pg_walsender fetch-file` sub-command found next
+ * to the running pg_autoctl binary; that sub-command is gone (pg_walsender
+ * is a server binary, plus its scram-secret utility, nothing else), and the
+ * client side of FETCH_FILE lives in common/ precisely so both binaries can
+ * share it without either depending on the other.
  */
 int
 restore_command_run(const char *pgdata, const RestoreCommandInfo *cliInfo,
@@ -281,50 +286,11 @@ restore_command_run(const char *pgdata, const RestoreCommandInfo *cliInfo,
 		return 1;
 	}
 
-	char pgWalsenderPath[MAXPGPATH] = { 0 };
+	log_debug("restore command: fetching \"%s\" from %s:%d route \"%s\" "
+			  "user \"%s\" into \"%s\"",
+			  sourceFile, info.host, info.port, info.route, info.user,
+			  destFile);
 
-	path_in_same_directory(pg_autoctl_program, "pg_walsender", pgWalsenderPath);
-
-	if (!file_exists(pgWalsenderPath))
-	{
-		log_error("Failed to find pg_walsender at \"%s\"", pgWalsenderPath);
-		return 1;
-	}
-
-	char portStr[16] = { 0 };
-
-	sformat(portStr, sizeof(portStr), "%d", info.port);
-
-	char *args[16];
-	int argsIndex = 0;
-
-	args[argsIndex++] = pgWalsenderPath;
-	args[argsIndex++] = "fetch-file";
-	args[argsIndex++] = "--host";
-	args[argsIndex++] = info.host;
-	args[argsIndex++] = "--port";
-	args[argsIndex++] = portStr;
-	args[argsIndex++] = "--route";
-	args[argsIndex++] = info.route;
-	args[argsIndex++] = "--user";
-	args[argsIndex++] = info.user;
-	args[argsIndex++] = "--filename";
-	args[argsIndex++] = (char *) sourceFile;
-	args[argsIndex++] = "--output";
-	args[argsIndex++] = (char *) destFile;
-	args[argsIndex] = NULL;
-
-	log_debug("restore command: %s fetch-file --host %s --port %s "
-			  "--route %s --user %s --filename %s --output %s",
-			  pgWalsenderPath, info.host, portStr, info.route, info.user,
-			  sourceFile, destFile);
-
-	fflush(stdout);
-	fflush(stderr);
-
-	execv(pgWalsenderPath, args);
-
-	/* execv only returns on failure */
-	log_error("execv(\"%s\"): %m", pgWalsenderPath);
-	return 1;
+	return ws_fetch_file_client(info.host, info.port, info.user,
+								info.route, sourceFile, destFile);
 }

@@ -46,6 +46,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "hba.h"
+#include "refresher.h"
 #include "scram.h"
 #include "string_utils.h"
 #include "tls.h"
@@ -201,6 +202,13 @@ cli_serve_run(int argc, char **argv)
 				"%s/archiver-hba.conf", servePgdata);
 		sformat(serveConfig.auth.passwdPath, sizeof(serveConfig.auth.passwdPath),
 				"%s/archiver-passwd", servePgdata);
+
+		sformat(serveConfig.auth.monitorUriPath,
+				sizeof(serveConfig.auth.monitorUriPath),
+				"%s/archiver-monitor.uri", servePgdata);
+		sformat(serveConfig.auth.refreshSockPath,
+				sizeof(serveConfig.auth.refreshSockPath),
+				"%s/" WS_REFRESH_SOCKET_FILE, servePgdata);
 
 		/* the certificate given with --ssl-*-file, else <pgdata>/server.* */
 		char certPath[MAXPGPATH], keyPath[MAXPGPATH];

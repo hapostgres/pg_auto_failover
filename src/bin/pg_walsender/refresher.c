@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/refresher.c
  *   See refresher.h and monitor_hosts.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -29,6 +28,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "monitor_hosts.h"
+#include "pgsql.h"
 #include "routes.h"
 #include "signals.h"
 #include "string_utils.h"
@@ -152,8 +152,44 @@ split_route_key(const char *routeKey, char *formation, size_t formationSize,
 }
 
 
-static PGconn *
-connect_to_monitor(const char *monitorUriPath)
+/*
+ * The refresher's own connection to the monitor: opened once and kept alive
+ * across ticks of ws_refresher_main's own loop (and across every route it
+ * validates on a given tick), rather than reconnected on every single query
+ * -- the refresher already runs its own periodic loop with a coalescing
+ * timer per route and a negative cache on failure (mark_failure() below), so
+ * a short-lived request/response connection buys nothing here, only extra
+ * TCP and SCRAM round-trips on every tick. monitor_ensure_connection() is
+ * the only place that (re)connects, and only does so when there is no
+ * connection yet or the existing one is found dead.
+ */
+static PGSQL monitorPgsql = { 0 };
+static bool monitorPgsqlReady = false;
+
+
+/*
+ * monitor_ensure_connection makes sure monitorPgsql is usable: initializes
+ * it (from the URI on disk at monitorUriPath) the first time it is called,
+ * or again whenever that URI changes or the previous connection is found
+ * dead (PQstatus() != CONNECTION_OK); otherwise the existing, still-open
+ * connection is left untouched and reused.
+ *
+ * The connection uses this project's own standard retry-policy mechanism
+ * (pgsql_set_interactive_retry_policy: a bounded, backed-off handful of
+ * attempts within pgconnect_timeout seconds) rather than a single bare
+ * PQconnectdbParams() attempt, so one transient hiccup -- a dropped packet,
+ * the monitor mid-restart -- does not by itself mark every route on this
+ * tick as failed. The refresher's own outer loop, together with
+ * mark_failure()'s negative cache, still provides the longer-horizon retry
+ * for a real, sustained outage.
+ *
+ * Returns false when the URI file cannot be read or pgsql_init() rejects
+ * the URI; the actual connection attempt (and its retries) only happens
+ * lazily, inside pgsql_execute_with_params(), the first time a query is run
+ * on this connection.
+ */
+static bool
+monitor_ensure_connection(const char *monitorUriPath)
 {
 	char *uri = NULL;
 	size_t size = 0;
@@ -161,28 +197,198 @@ connect_to_monitor(const char *monitorUriPath)
 	if (!ws_read_file_capped(monitorUriPath, WS_MAX_CONFIG_FILE_SIZE, true,
 							 &uri, &size, NULL))
 	{
-		return NULL;
+		return false;
 	}
 
 	/* one line, no trailing newline */
 	uri[strcspn(uri, "\r\n")] = '\0';
 
-	const char *keys[] = { "dbname", "connect_timeout", NULL };
-	const char *values[] = { uri, "3", NULL };
+	bool needsInit = !monitorPgsqlReady ||
+					 strcmp(monitorPgsql.connectionString, uri) != 0;
 
-	PGconn *conn = PQconnectdbParams(keys, values, 1);
+	if (!needsInit && monitorPgsql.connection != NULL &&
+		PQstatus(monitorPgsql.connection) != CONNECTION_OK)
+	{
+		/* the long-lived connection died since the previous tick */
+		pgsql_finish(&monitorPgsql);
+		needsInit = true;
+	}
+
+	if (needsInit)
+	{
+		pgsql_finish(&monitorPgsql);
+
+		if (!pgsql_init(&monitorPgsql, uri, PGSQL_CONN_MONITOR))
+		{
+			free(uri);
+			return false;
+		}
+
+		/* pgsql_finish() (just above, and internally on a single-statement
+		 * failure) always resets this to SINGLE_STATEMENT, so it must be set
+		 * again on every (re)init to keep the connection open across calls */
+		monitorPgsql.connectionStatementType = PGSQL_CONNECTION_MULTI_STATEMENT;
+
+		pgsql_set_interactive_retry_policy(&monitorPgsql.retryPolicy);
+
+		monitorPgsqlReady = true;
+	}
 
 	free(uri);
 
-	if (PQstatus(conn) != CONNECTION_OK)
+	return true;
+}
+
+
+/* the single-column result of get_group_hosts_hash(), or the first column
+ * of get_group_hosts() */
+typedef struct WsHostsHashContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	bool parsedOk;
+	char hash[WS_HOSTS_HASH_LEN + 1];
+} WsHostsHashContext;
+
+
+/*
+ * parse_hosts_hash_result is a pgsql_execute_with_params() parse callback:
+ * it expects exactly one row with a non-NULL text hash in column 0, the
+ * shape of both SELECT pgautofailover.get_group_hosts_hash(...) and the
+ * "hash" column of SELECT ... FROM pgautofailover.get_group_hosts(...).
+ */
+static void
+parse_hosts_hash_result(void *ctx, PGresult *result)
+{
+	WsHostsHashContext *context = (WsHostsHashContext *) ctx;
+
+	context->parsedOk = false;
+
+	if (PQntuples(result) != 1 || PQgetisnull(result, 0, 0))
 	{
-		log_warn("pg_walsender could not reach the monitor to validate its "
-				 "list of nodes: %s", PQerrorMessage(conn));
-		PQfinish(conn);
-		return NULL;
+		return;
 	}
 
-	return conn;
+	strlcpy(context->hash, PQgetvalue(result, 0, 0), sizeof(context->hash));
+	context->parsedOk = true;
+}
+
+
+/*
+ * monitor_get_group_hosts_hash runs
+ * "SELECT pgautofailover.get_group_hosts_hash($1, $2::int)" for (formation,
+ * groupId) on the refresher's own monitor connection and copies the result
+ * into hashOut (a buffer of at least WS_HOSTS_HASH_LEN + 1 bytes). Returns
+ * false on any connection or query failure, or when the monitor returned no
+ * row or a NULL hash.
+ */
+static bool
+monitor_get_group_hosts_hash(const char *formation, int groupId, char *hashOut)
+{
+	char groupStr[16];
+
+	sformat(groupStr, sizeof(groupStr), "%d", groupId);
+
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2] = { formation, groupStr };
+	WsHostsHashContext context = {
+		{ 0 }, false, { 0 }
+	};
+
+	if (!pgsql_execute_with_params(
+			&monitorPgsql,
+			"SELECT pgautofailover.get_group_hosts_hash($1, $2::int)",
+			2, paramTypes, paramValues,
+			&context, &parse_hosts_hash_result) ||
+		!context.parsedOk)
+	{
+		return false;
+	}
+
+	strlcpy(hashOut, context.hash, WS_HOSTS_HASH_LEN + 1);
+
+	return true;
+}
+
+
+/* the two-column result of get_group_hosts(): the hash, and the hosts text
+ * blob (one host per line), which may legitimately be empty */
+typedef struct WsHostsListContext
+{
+	char sqlstate[SQLSTATE_LENGTH];
+	bool parsedOk;
+	char hash[WS_HOSTS_HASH_LEN + 1];
+	char *hosts;             /* strdup'd; NULL when empty; caller frees */
+} WsHostsListContext;
+
+
+/*
+ * parse_hosts_list_result is a pgsql_execute_with_params() parse callback
+ * for "SELECT hash, array_to_string(hosts, E'\n') FROM
+ * pgautofailover.get_group_hosts($1, $2::int)": one row, hash in column 0
+ * (must be non-NULL), the newline-joined hosts list in column 1 (NULL or
+ * empty is a legitimate "no hosts yet").
+ */
+static void
+parse_hosts_list_result(void *ctx, PGresult *result)
+{
+	WsHostsListContext *context = (WsHostsListContext *) ctx;
+
+	context->parsedOk = false;
+	context->hosts = NULL;
+
+	if (PQntuples(result) != 1 || PQgetisnull(result, 0, 0))
+	{
+		return;
+	}
+
+	strlcpy(context->hash, PQgetvalue(result, 0, 0), sizeof(context->hash));
+
+	if (!PQgetisnull(result, 0, 1) && PQgetvalue(result, 0, 1)[0] != '\0')
+	{
+		context->hosts = strdup(PQgetvalue(result, 0, 1));
+	}
+
+	context->parsedOk = true;
+}
+
+
+/*
+ * monitor_get_group_hosts runs "SELECT hash, array_to_string(hosts, E'\n')
+ * FROM pgautofailover.get_group_hosts($1, $2::int)" for (formation, groupId)
+ * on the refresher's own monitor connection, copies the hash into hashOut (a
+ * buffer of at least WS_HOSTS_HASH_LEN + 1 bytes) and sets *hostsOut to a
+ * malloc'd copy of the hosts text (NULL when there are none yet; the caller
+ * must free() a non-NULL result). Returns false on any connection or query
+ * failure, or when the monitor returned no row or a NULL hash.
+ */
+static bool
+monitor_get_group_hosts(const char *formation, int groupId,
+						char *hashOut, char **hostsOut)
+{
+	char groupStr[16];
+
+	sformat(groupStr, sizeof(groupStr), "%d", groupId);
+
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2] = { formation, groupStr };
+	WsHostsListContext context = { { 0 }, false, { 0 }, NULL };
+
+	if (!pgsql_execute_with_params(
+			&monitorPgsql,
+			"SELECT hash, array_to_string(hosts, E'\\n') "
+			"FROM pgautofailover.get_group_hosts($1, $2::int)",
+			2, paramTypes, paramValues,
+			&context, &parse_hosts_list_result) ||
+		!context.parsedOk)
+	{
+		free(context.hosts);
+		return false;
+	}
+
+	strlcpy(hashOut, context.hash, WS_HOSTS_HASH_LEN + 1);
+	*hostsOut = context.hosts;
+
+	return true;
 }
 
 
@@ -227,8 +433,8 @@ mark_failure(const char *listPath)
 	negativeUntilMs = ws_monotonic_ms() +
 					  (int64_t) WS_HOSTS_NEGATIVE_SECONDS * 1000;
 
-	(void) ws_write_file_atomic(errPath, "monitor unreachable\n",
-								strlen("monitor unreachable\n"));
+	(void) write_file_atomic((char *) "monitor unreachable\n",
+							 strlen("monitor unreachable\n"), errPath);
 }
 
 
@@ -247,7 +453,10 @@ clear_failure(const char *listPath)
  * refresh_route validates the list of one route against the monitor:
  * nothing to do when the fingerprints agree (only the file's mtime is
  * renewed, which is what the children wait for), a full fetch and an
- * atomic rewrite when they differ.
+ * atomic rewrite when they differ. Connection setup (monitor_ensure_
+ * connection), running one query, and parsing its one result are each
+ * split into their own function above, the same way monitor.c's own
+ * monitor_get_*() functions are structured around pgsql_execute_with_params.
  */
 static void
 refresh_route(const char *routesPath, const char *monitorUriPath,
@@ -283,85 +492,70 @@ refresh_route(const char *routesPath, const char *monitorUriPath,
 		return;
 	}
 
-	PGconn *conn = connect_to_monitor(monitorUriPath);
-
-	if (conn == NULL)
+	if (!monitor_ensure_connection(monitorUriPath))
 	{
 		mark_failure(listPath);
 		return;
 	}
 
-	char groupStr[16];
+	char monitorHash[WS_HOSTS_HASH_LEN + 1];
 
-	sformat(groupStr, sizeof(groupStr), "%d", groupId);
-
-	const char *params[2] = { formation, groupStr };
-
-	PGresult *res = PQexecParams(
-		conn, "SELECT pgautofailover.get_group_hosts_hash($1, $2::int)",
-		2, NULL, params, NULL, NULL, 0);
-
-	bool queryOk = PQresultStatus(res) == PGRES_TUPLES_OK &&
-				   PQntuples(res) == 1 && !PQgetisnull(res, 0, 0);
-	char localHash[WS_HOSTS_HASH_LEN + 1] = { 0 };
-	bool unchanged = queryOk && current_list_hash(listPath, localHash) &&
-					 strcmp(PQgetvalue(res, 0, 0), localHash) == 0;
-
-	PQclear(res);
-
-	if (!queryOk)
+	if (!monitor_get_group_hosts_hash(formation, groupId, monitorHash))
 	{
 		mark_failure(listPath);
+		return;
 	}
-	else if (unchanged)
+
+	char localHash[WS_HOSTS_HASH_LEN + 1] = { 0 };
+	bool unchanged = current_list_hash(listPath, localHash) &&
+					 strcmp(monitorHash, localHash) == 0;
+
+	if (unchanged)
 	{
 		(void) utimes(listPath, NULL);
+		clear_failure(listPath);
+		return;
+	}
+
+	char hash[WS_HOSTS_HASH_LEN + 1];
+	char *hosts = NULL;
+
+	if (!monitor_get_group_hosts(formation, groupId, hash, &hosts))
+	{
+		mark_failure(listPath);
+		return;
+	}
+
+	PQExpBuffer buffer = createPQExpBuffer();
+
+	appendPQExpBuffer(buffer, WS_HOSTS_HASH_LINE_PREFIX "%s\n", hash);
+
+	if (hosts != NULL)
+	{
+		appendPQExpBuffer(buffer, "%s\n", hosts);
+	}
+
+	if (!PQExpBufferBroken(buffer) &&
+		write_file_atomic(buffer->data, buffer->len, listPath))
+	{
 		clear_failure(listPath);
 	}
 	else
 	{
-		res = PQexecParams(
-			conn,
-			"SELECT hash, array_to_string(hosts, E'\\n') "
-			"FROM pgautofailover.get_group_hosts($1, $2::int)",
-			2, NULL, params, NULL, NULL, 0);
-
-		if (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) == 1)
-		{
-			PQExpBuffer buffer = createPQExpBuffer();
-
-			appendPQExpBuffer(buffer, WS_HOSTS_HASH_LINE_PREFIX "%s\n",
-							  PQgetvalue(res, 0, 0));
-
-			if (!PQgetisnull(res, 0, 1) && PQgetvalue(res, 0, 1)[0] != '\0')
-			{
-				appendPQExpBuffer(buffer, "%s\n", PQgetvalue(res, 0, 1));
-			}
-
-			if (!PQExpBufferBroken(buffer) &&
-				ws_write_file_atomic(listPath, buffer->data, buffer->len))
-			{
-				clear_failure(listPath);
-			}
-			else
-			{
-				mark_failure(listPath);
-			}
-
-			destroyPQExpBuffer(buffer);
-		}
-		else
-		{
-			mark_failure(listPath);
-		}
-
-		PQclear(res);
+		mark_failure(listPath);
 	}
 
-	PQfinish(conn);
+	destroyPQExpBuffer(buffer);
+	free(hosts);
 }
 
 
+/*
+ * key_is_plausible is a cheap sanity check on a route key read off the
+ * refresher's own datagram socket: non-empty, short enough to fit a
+ * RouteState, and free of control characters -- a malformed or truncated
+ * datagram is dropped rather than stored or logged verbatim.
+ */
 static bool
 key_is_plausible(const char *key)
 {

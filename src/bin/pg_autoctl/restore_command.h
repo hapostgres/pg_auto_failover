@@ -1,10 +1,11 @@
 /*
  * src/bin/pg_autoctl/restore_command.h
  *   restore_command: `pg_autoctl restore command`. A thin CLI shim around
- *   `pg_walsender fetch-file` (see fetch_client.h) that resolves the
- *   archiver's host/port/route/user on the caller's behalf, the same way
- *   archiver_confirm.h resolves the monitor connection on behalf of
- *   `pg_autoctl archive command` -- see that header's own comment.
+ *   ws_fetch_file_client() (see src/bin/common/fetch_client.h, called
+ *   directly, in-process) that resolves the archiver's host/port/route/user
+ *   on the caller's behalf, the same way archiver_confirm.h resolves the
+ *   monitor connection on behalf of `pg_autoctl archive command` -- see
+ *   that header's own comment.
  *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
@@ -19,9 +20,9 @@
 
 /*
  * Connection info needed to reach an archiver's pg_walsender: everything
- * `pg_walsender fetch-file` itself takes on its command line, minus the
- * password (left to libpq's normal PGPASSWORD/.pgpass resolution, exactly
- * as `pg_walsender fetch-file` already does today).
+ * ws_fetch_file_client() itself takes, minus the password (left to libpq's
+ * normal PGPASSWORD/.pgpass resolution, exactly as any other libpq client
+ * in this project already does).
  */
 typedef struct RestoreCommandInfo
 {
@@ -59,14 +60,12 @@ bool restore_command_resolve(const char *pgdata, RestoreCommandInfo *info);
 bool restore_command_set_up(const char *pgdata, const RestoreCommandInfo *info);
 
 /*
- * restore_command_run resolves the connection info and then execv()s
- * `pg_walsender fetch-file` (found next to the running pg_autoctl binary,
- * as service_archiver_serve.c already does for `archiver serve`) to fetch
- * sourceFile into destFile. Never returns on success (execv replaces this
- * process, and pg_walsender fetch-file's own exit code becomes ours,
- * already matching the restore_command contract -- see fetch_client.h);
- * returns a nonzero exit code only when it could not even get as far as
- * exec'ing pg_walsender.
+ * restore_command_run resolves the connection info and then calls
+ * ws_fetch_file_client() directly, in-process, to fetch sourceFile into
+ * destFile. Returns 0 on success, a nonzero exit code otherwise (connection
+ * failure, missing file, short write, or a connection info that could not
+ * be resolved at all) -- already matching the restore_command contract
+ * ("non-zero means retry me"), see fetch_client.h.
  */
 int restore_command_run(const char *pgdata, const RestoreCommandInfo *cliInfo,
 						const char *sourceFile, const char *destFile);

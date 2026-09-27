@@ -547,19 +547,15 @@ deciding what else could talk to one.
   on a normal, authenticated replication connection (it is not a separate
   channel): ask for one WAL segment or ``.history`` file by name, get its
   exact bytes back. Any other file name (the archiver's own configuration,
-  paths with ``..``, dot-files) is refused. This is used by this project's
-  own ``restore_command`` tooling (``pg_walsender fetch-file``). This is
-  what makes an archiver usable as a ``restore_command`` target on its
-  own, without needing a full streaming connection just to recover one
-  missing segment.
+  paths with ``..``, dot-files) is refused. This is what makes an archiver
+  usable as a ``restore_command`` target on its own, without needing a full
+  streaming connection just to recover one missing segment.
 
-  ``restore_command`` can be written by hand against ``pg_walsender fetch-
-  file`` directly::
-
-    restore_command = 'PGPASSWORD=... PGSSLMODE=... pg_walsender fetch-file --host <archiver> --port 6543 --user <role> --route <formation>/<group> --filename %f --output %p'
-
-  or, more simply, through :ref:`pg_autoctl_restore_command`, which wraps
-  the very same ``pg_walsender fetch-file`` call and resolves the host,
+  The client side of ``FETCH_FILE`` is not a separate ``pg_walsender``
+  sub-command (``pg_walsender`` is a server binary, plus its
+  ``scram-secret`` utility, nothing else): it is a small shared function,
+  ``ws_fetch_file_client()`` (``src/bin/common/fetch_client.c``), called
+  in-process by :ref:`pg_autoctl_restore_command`, which resolves the host,
   port, route and role on its own -- from this node's own pg_auto_failover
   configuration when it has one, or from a small cache file written once by
   ``pg_autoctl restore command --set-up`` otherwise::

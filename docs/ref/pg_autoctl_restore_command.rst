@@ -8,10 +8,10 @@ pg_autoctl restore command - restore_command: fetch a WAL file from the archiver
 Synopsis
 --------
 
-This command is meant to be used as Postgres ``restore_command``. It is a
-thin wrapper around ``pg_walsender fetch-file`` (see :ref:`archiving_architecture`):
-the real FETCH_FILE client code is not reimplemented here, only the
-connection info an operator would otherwise have to write into
+This command is meant to be used as Postgres ``restore_command``. It calls
+``ws_fetch_file_client()`` (see :ref:`archiving_architecture`) directly,
+in-process: the real FETCH_FILE client code is not reimplemented here, only
+the connection info an operator would otherwise have to write into
 ``restore_command`` by hand (host, port, ``<formation>/<group>`` route,
 role name) is resolved on the caller's behalf.
 
@@ -50,9 +50,9 @@ The connection info is resolved in this order:
 
 The password is never read from any of the above: like a hand-written
 ``restore_command``, it comes from ``PGPASSWORD`` or ``.pgpass``, resolved
-by libpq itself when ``pg_walsender fetch-file`` connects.
+by libpq itself when ``ws_fetch_file_client()`` connects.
 
-The exit code is whatever ``pg_walsender fetch-file`` itself returns: 0 once
+The exit code is whatever ``ws_fetch_file_client()`` itself returns: 0 once
 the file is placed at ``%p``, 1 otherwise so that Postgres retries.
 
 New nodes are set up with::

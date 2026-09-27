@@ -515,7 +515,7 @@ cli_restore_command_getopts(int argc, char **argv)
 
 /*
  * cli_restore_command implements `pg_autoctl restore command`: either the
- * restore_command itself (exec's `pg_walsender fetch-file`, see
+ * restore_command itself (calls ws_fetch_file_client() in-process, see
  * restore_command_run()), or, with --set-up, a one-time cache write for an
  * ad hoc replica with no pg_auto_failover node of its own.
  */

@@ -44,7 +44,6 @@
  *   Without a monitor URI file (archiver-monitor.uri) there is no refresher
  *   and the list, if any, is used as it is.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

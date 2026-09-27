@@ -213,3 +213,25 @@ ws_auth_deadline_clear(void)
 {
 	authDeadlineMs = 0;
 }
+
+
+/*
+ * ws_auth_deadline_remaining_ms returns the milliseconds left until the
+ * connection's own authentication deadline (0 if it has already passed), or
+ * a generous 1-hour placeholder when no deadline is currently armed (e.g.
+ * --insecure mode, or authentication already completed) -- callers use this
+ * to cap how long they may block waiting on something (like
+ * monitor_hosts.c's request_refresh()) without ever exceeding the deadline.
+ */
+int
+ws_auth_deadline_remaining_ms(void)
+{
+	if (authDeadlineMs == 0)
+	{
+		return 3600 * 1000;
+	}
+
+	int64_t remaining = authDeadlineMs - ws_monotonic_ms();
+
+	return remaining > 0 ? (int) remaining : 0;
+}

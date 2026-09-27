@@ -3,10 +3,10 @@
 #
 #   test_001  monitor down: the archiver keeps capturing WAL (pg_receivewal
 #             targets the primary it already knows), keeps serving
-#             pg_basebackup / fetch-file to an already-listed node (the
-#             `monitor` HBA rule is evaluated against the archiver's local
-#             copy of the node list, which needs no monitor), and reports
-#             again once the monitor is back
+#             pg_basebackup / `pg_autoctl restore command` to an already-listed
+#             node (the `monitor` HBA rule is evaluated against the archiver's
+#             local copy of the node list, which needs no monitor), and
+#             reports again once the monitor is back
 #   test_002  archiver formation remove: the ARCHIVING membership vanishes
 #             from the monitor, capture stops (no standby left on the
 #             primary), the formation keeps working; formation add attaches
@@ -55,7 +55,7 @@ step test_001_monitor_down_archiver_keeps_working {
 
     # an already-listed node is still served
     exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw pg_basebackup -w -d "host=archiver1 port=6543 user=pgautofailover_replicator dbname=default/0 sslmode=require" --pgdata /tmp/bb-nomon -X none --no-manifest && test -f /tmp/bb-nomon/PG_VERSION'
-    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw PGSSLMODE=require pg_walsender fetch-file --host archiver1 --port 6543 --user pgautofailover_replicator --route default/0 --filename ${seg1} --output /tmp/f-nomon && test -s /tmp/f-nomon'
+    exec node1 bash -c 'PGPASSWORD=pgaf-repl-pw PGSSLMODE=require pg_autoctl restore command --host archiver1 --port 6543 --user pgautofailover_replicator --route default/0 ${seg1} /tmp/f-nomon && test -s /tmp/f-nomon'
 
     compose start monitor
     wait until sql monitor { SELECT 1 } is { 1 }  timeout 120s
