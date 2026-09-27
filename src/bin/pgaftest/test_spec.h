@@ -15,6 +15,7 @@
 #define PGAF_MAX_NODES 32
 #define PGAF_MAX_FORMATIONS 16
 #define PGAF_MAX_NODE_VOLUMES 8
+#define PGAF_MAX_NODE_ALIASES 8
 #define PGAF_MAX_STEPS 256
 #define PGAF_MAX_SEQ 256
 #define PGAF_TIMEOUT_DEFAULT 90
@@ -45,6 +46,16 @@
  *           w1 worker group 1
  *           w2 worker group 1
  *       }
+ *
+ *       # Bare, unmanaged single-node sugar -- see postgres_line/
+ *       # pg_walserver_line's own comment in test_spec_parse.y.  Each is
+ *       # pure syntactic sugar for a one-node, no-monitor formation; no new
+ *       # container-generation code exists for either.  NOT pg_auto_
+ *       # failover's own "archiver" node kind (pgautofailover.archiver /
+ *       # NODE_KIND_ARCHIVER / `pg_autoctl create archiver`, this DSL's own
+ *       # separate, braced `archiver <name> { formation ... }` block).
+ *       postgres     plain1
+ *       pg_walserver walserver1  alias "routeA.internal", "routeB.internal"
  *   }
  *
  * When "formation" has no name it defaults to "default".
@@ -86,6 +97,30 @@ typedef struct TestNode
 	                             * inside this node's container -- see
 	                             * compose_gen.c's own write_node_command()
 	                             * call site comment */
+	bool dockerInit;            /* "docker-init": adds Docker Compose's own
+	                             * `init: true` to this node's service --
+	                             * runs a tiny init (tini) as the real PID 1,
+	                             * with commandOverride's command as its
+	                             * child, so orphaned/backgrounded processes
+	                             * get reaped instead of turning into
+	                             * permanent zombies. Only meaningful
+	                             * together with a "command" override that
+	                             * itself does no reaping (e.g. "tail -f
+	                             * /dev/null"); a node whose own command IS
+	                             * the thing being tested as a real PID 1
+	                             * (see pg_walserver_pid1.pgaf) must leave
+	                             * this unset. */
+
+	/*
+	 * "alias "h1", "h2", ...": extra vanity hostnames that resolve to this
+	 * same node's static IP in every other service's extra_hosts, alongside
+	 * its own real name -- e.g. for TLS-SNI-routing tests that need more
+	 * than one hostname pointed at one container. Available on any node,
+	 * not just the postgres/pg_walserver sugar kinds. See compose_gen.c's
+	 * extra_hosts helpers.
+	 */
+	char aliases[PGAF_MAX_NODE_ALIASES][128];
+	int aliasCount;
 
 	/* Extra Docker named volumes: volume <name> <containerPath> */
 	struct
