@@ -472,8 +472,8 @@ man_pages = [
         1,
     ),
     (
-        "ref/pg_walsender",
-        "pg_walsender",
+        "ref/pg_walserver",
+        "pg_walserver",
         "the archiver's own standalone replication-protocol server",
         [author],
         1,

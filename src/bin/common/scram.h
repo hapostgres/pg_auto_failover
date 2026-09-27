@@ -1,7 +1,7 @@
 /*
  * src/bin/common/scram.h
  *   The server side of SCRAM-SHA-256 (RFC 5802 / RFC 7677, as PostgreSQL
- *   speaks it) for pg_walsender, and the stored-secret helpers pg_autoctl
+ *   speaks it) for pg_walserver, and the stored-secret helpers pg_autoctl
  *   shares with it. The cryptographic primitives are libpgcommon's
  *   (scram_compat.h), password normalization is its SASLprep, and the
  *   exchange follows src/backend/libpq/auth-scram.c: channel binding

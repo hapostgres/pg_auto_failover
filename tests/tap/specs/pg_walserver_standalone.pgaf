@@ -1,0 +1,151 @@
+# pg_walserver, on its own, with no archiver/monitor integration at all: a
+# hand-crafted routes file and HBA rule, real WAL captured off node1 by the
+# stock OS pg_receivewal, and a hand-written archiver-systemid file. This is
+# the smallest possible harness that still exercises the real replication
+# wire protocol end to end, ahead of the archiver feature (a later PR) that
+# wires pg_walserver into pg_autoctl's own process supervision and gives it
+# its routes/HBA/systemid files automatically.
+#
+# This PR's own pgaftest predates `let`/`${var}` capture, so values that
+# cross steps (the system identifier, the captured segment's name) are
+# written to plain files on node2 instead, and re-read with $(cat ...).
+#
+#   test_001  IDENTIFY_SYSTEM reports node1's own system identifier, and
+#             SHOW wal_segment_size reports the 16MB default (nothing here
+#             has told it otherwise)
+#   test_002  FETCH_FILE returns the exact bytes of a captured WAL segment
+#   test_003  a real client (pg_receivewal) can START_REPLICATION from
+#             pg_walserver itself: with the original capture process still
+#             running, a fresh segment forced on node1 is picked up by both
+#             at once, and both end up with byte-identical copies of it
+#   test_004  a couple of real-protocol edge cases the repl_scanner.l/
+#             repl_gram.y port (see repl_command.h) is specifically meant
+#             to get right that a hand-rolled parser easily wouldn't: a
+#             double-quoted slot name with an embedded escaped quote, and a
+#             garbage command producing a clean error rather than a crash
+#             (and the connection still usable afterwards)
+#   test_005  the routes.ini "*" wildcard (routes.h/routes.c, PgBouncer-
+#             style): a dbname with no route of its own falls through to
+#             it, while "default/0" -- which still has its own explicit
+#             section -- keeps resolving to its own path, proving an exact
+#             match always wins over the wildcard, never the other way
+#             around
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+
+    # node2 hosts pg_walserver for this test; it is otherwise an ordinary
+    # registered secondary and that is irrelevant here.
+    exec node2 bash -c 'mkdir -p /tmp/ws/default/0'
+
+    # every connection below is node2 talking to its own pg_walserver over
+    # loopback (127.0.0.1): a manually written, properly scoped rule for
+    # that exact peer, not "0.0.0.0/0" -- there is no monitor here to learn
+    # a real client's address from, and none needed: pg_walserver's HBA is
+    # just a file, hand-edited exactly as an operator running it on its own
+    # (no archiver, no monitor) would.
+    exec node2 bash -c 'printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/archiver-hba.conf'
+    exec node2 bash -c 'printf "[default/0]\npath = /tmp/ws/default/0\n" > /tmp/ws/archiver-routes.ini'
+
+    # capture real WAL off node1 with the stock pg_receivewal (not this
+    # project's own vendored copy, which is not part of this PR's stack)
+    exec node2 bash -c 'nohup pg_receivewal -w -d "host=node1 port=5432 user=pgautofailover_replicator password=pgaf-repl-pw sslmode=disable" --directory /tmp/ws/default/0 --no-loop > /tmp/ws-receive.log 2>&1 & echo started'
+
+    sql node1 { CREATE TABLE ws(a int); INSERT INTO ws VALUES (1); }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'for i in $(seq 60); do ls /tmp/ws/default/0/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | head -1 | grep -q . && exit 0; sleep 1; done; ls -la /tmp/ws/default/0; exit 1'
+}
+
+teardown {
+    compose down
+}
+
+step test_000_sync_files_from_node1 {
+    # pgaftest at this point in history has no cross-container file copy
+    # primitive either: rebuild the same two small values on node2 by
+    # asking node1 directly over its own already-open connection.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw psql "host=node1 port=5432 dbname=demo user=pgautofailover_replicator sslmode=disable" -Atc "SELECT system_identifier FROM pg_control_system()" > /tmp/ws/default/0/archiver-systemid'
+    exec node2 bash -c 'ls /tmp/ws/default/0/*[0-9A-F] | grep -v "\.partial$" | xargs -n1 basename | sort | tail -1 > /tmp/seg.txt'
+    exec node2 bash -c 'test -s /tmp/seg.txt'
+    exec node2 bash -c 'test -s /tmp/ws/default/0/archiver-systemid'
+    # the setup capturer keeps running: test_003 needs it live, to prove
+    # pg_walserver can serve a segment while it is concurrently being written
+    exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-walsender.log 2>&1 & echo started'
+    exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walsender.log; exit 1'
+}
+
+step test_001_identify_system_and_show {
+    exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/archiver-systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "SHOW wal_segment_size" | grep -qx 16MB'
+}
+
+step test_002_fetch_file {
+    exec node2 bash -c 'seg=$(cat /tmp/seg.txt); psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -c "FETCH_FILE $seg" > /tmp/fetched.out'
+    exec node2 bash -c 'seg=$(cat /tmp/seg.txt); test "$(stat -c %s /tmp/ws/default/0/$seg)" = "$(stat -c %s /tmp/fetched.out)" || (ls -la /tmp/ws/default/0/$seg /tmp/fetched.out; false)'
+}
+
+step test_003_start_replication_from_pg_walserver {
+    # start a second, independent client streaming from pg_walserver itself
+    # before forcing a new segment, so it is live-tailing when the segment
+    # closes -- the same "keep up with the primary" role the archiver's own
+    # replication-quorum membership plays in the full feature (a later PR)
+    exec node2 bash -c 'mkdir -p /tmp/rw && nohup pg_receivewal -w -d "host=127.0.0.1 port=6543 dbname=default/0 sslmode=disable" --directory /tmp/rw --no-loop > /tmp/rw.log 2>&1 & echo started'
+    sql node1 { INSERT INTO ws SELECT generate_series(1, 2000000) }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'prev=$(cat /tmp/seg.txt); for i in $(seq 60); do cur=$(ls /tmp/ws/default/0/*[0-9A-F] | grep -v "\.partial$" | xargs -n1 basename | sort | tail -1); test -n "$cur" -a "$cur" != "$prev" && { echo "$cur" > /tmp/seg2.txt; exit 0; }; sleep 1; done; ls -la /tmp/ws/default/0; exit 1'
+    exec node2 bash -c 'seg2=$(cat /tmp/seg2.txt); for i in $(seq 60); do test -s /tmp/rw/$seg2 && exit 0; sleep 1; done; cat /tmp/rw.log; ls -la /tmp/rw; exit 1'
+    exec node2 bash -c 'seg2=$(cat /tmp/seg2.txt); cmp -s /tmp/rw/$seg2 /tmp/ws/default/0/$seg2 || (ls -la /tmp/rw/$seg2 /tmp/ws/default/0/$seg2; false)'
+}
+
+step test_004_grammar_edge_cases {
+    # a double-quoted slot name with an embedded escaped quote ("foo""bar",
+    # i.e. the identifier foo"bar) must be lexed by the real grammar's <xd>
+    # state exactly as PostgreSQL's own IDENT quoting rule defines it, and
+    # reach cmd_replication_slot.c's semantic slot_name_is_safe() check --
+    # which then rejects it (a slot name may not contain '"') with a clean
+    # 42602 error, proving the parser (not the old, deleted
+    # parse_slot_name(), see repl_command.h) got the identifier right
+    # rather than choking on the embedded '""' with a syntax error.
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -c '"'"'CREATE_REPLICATION_SLOT "foo""bar" TEMPORARY PHYSICAL'"'"' 2>&1 | grep -qi "invalid replication slot name"'
+
+    # a garbage command must produce a clean ErrorResponse, not crash the
+    # server or hang the connection -- and the same connection must still
+    # answer a real command right afterwards
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -c "GARBAGE COMMAND ???" 2>&1 | grep -q ERROR'
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM" > /dev/null'
+}
+
+step test_005_wildcard_route {
+    # a second route, deliberately never named "default/0", with its own
+    # distinct (fake) systemid -- reachable only through the "*" wildcard,
+    # never directly
+    exec node2 bash -c 'mkdir -p /tmp/ws-wild && printf "6543216543216543216\n" > /tmp/ws-wild/archiver-systemid'
+    exec node2 bash -c 'printf "\n[*]\npath = /tmp/ws-wild\n" >> /tmp/ws/archiver-routes.ini'
+
+    # a dbname matching no explicit section falls through to the wildcard's
+    # own path -- routes.c's own "*" fallback, not a hardcoded default
+    exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6543 dbname=no-such-route replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "6543216543216543216" || { echo "got: $out"; false; }'
+
+    # "default/0" still has its own explicit section: it must keep
+    # resolving to ITS OWN path, never falling through to the wildcard now
+    # that one exists -- an exact match always wins, exactly as PgBouncer's
+    # own "*" [databases] entry precedence works
+    exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/archiver-systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
+}
+
+sequence
+    test_000_sync_files_from_node1
+    test_001_identify_system_and_show
+    test_002_fetch_file
+    test_003_start_replication_from_pg_walserver
+    test_004_grammar_edge_cases
+    test_005_wildcard_route

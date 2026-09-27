@@ -38,7 +38,7 @@ bool ipaddrGetLocalHostname(char *hostname, size_t size);
 
 /*
  * Peer address matching, used to authenticate a client by its address (see
- * pg_walsender's HBA file): all of them take the client's numeric address.
+ * pg_walserver's HBA file): all of them take the client's numeric address.
  */
 bool ipaddrHostMatchesAddress(const char *hostOrIp, const char *ipaddr);
 bool ipaddrInCIDR(const char *cidr, const char *ipaddr);
