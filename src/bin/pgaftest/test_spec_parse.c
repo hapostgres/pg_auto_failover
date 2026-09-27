@@ -875,27 +875,27 @@ static const yytype_int16 yyrline[] =
        0,   256,   256,   257,   261,   262,   263,   264,   265,   278,
      277,   287,   289,   293,   294,   295,   296,   297,   298,   299,
      300,   301,   302,   315,   319,   326,   333,   339,   346,   353,
-     360,   419,   418,   428,   427,   448,   450,   454,   460,   461,
-     469,   475,   485,   491,   501,   511,   517,   528,   527,   544,
-     546,   555,   556,   557,   558,   559,   563,   568,   572,   578,
-     580,   599,   600,   609,   626,   625,   633,   632,   640,   642,
-     646,   651,   656,   660,   664,   668,   674,   679,   683,   688,
-     692,   696,   700,   704,   708,   713,   718,   722,   726,   732,
-     738,   743,   748,   753,   757,   761,   767,   775,   781,   795,
-     809,   810,   823,   832,   848,   855,   866,   884,   899,   902,
-     910,   911,   912,   913,   914,   915,   916,   917,   918,   919,
-     920,   921,   922,   923,   924,   925,   939,   946,   952,   959,
-     965,   972,   978,   986,   992,  1019,  1019,  1030,  1045,  1063,
-    1064,  1079,  1081,  1085,  1093,  1101,  1108,  1120,  1119,  1131,
-    1130,  1141,  1150,  1159,  1173,  1181,  1195,  1210,  1216,  1223,
-    1229,  1242,  1244,  1248,  1253,  1261,  1262,  1263,  1274,  1282,
-    1290,  1298,  1316,  1331,  1338,  1342,  1348,  1361,  1369,  1377,
-    1398,  1405,  1412,  1420,  1436,  1442,  1463,  1471,  1486,  1500,
-    1504,  1510,  1516,  1542,  1576,  1582,  1603,  1620,  1620,  1625,
-    1644,  1669,  1678,  1687,  1696,  1712,  1715,  1717,  1739,  1740,
-    1741,  1742,  1743,  1744,  1745,  1746,  1747,  1748,  1749,  1750,
-    1751,  1752,  1753,  1754,  1755,  1756,  1757,  1758,  1759,  1767,
-    1768
+     360,   427,   426,   436,   435,   482,   484,   488,   494,   495,
+     503,   509,   519,   525,   535,   545,   551,   562,   561,   578,
+     580,   589,   590,   591,   592,   593,   597,   602,   606,   612,
+     614,   633,   634,   643,   660,   659,   667,   666,   674,   676,
+     680,   685,   690,   694,   698,   702,   708,   713,   717,   722,
+     726,   730,   734,   738,   742,   747,   752,   756,   760,   766,
+     772,   777,   782,   787,   791,   795,   801,   809,   815,   829,
+     843,   844,   857,   866,   882,   889,   900,   918,   933,   936,
+     944,   945,   946,   947,   948,   949,   950,   951,   952,   953,
+     954,   955,   956,   957,   958,   959,   973,   980,   986,   993,
+     999,  1006,  1012,  1020,  1026,  1053,  1053,  1064,  1079,  1097,
+    1098,  1113,  1115,  1119,  1127,  1135,  1142,  1154,  1153,  1165,
+    1164,  1175,  1184,  1193,  1207,  1215,  1229,  1244,  1250,  1257,
+    1263,  1276,  1278,  1282,  1287,  1295,  1296,  1297,  1308,  1316,
+    1324,  1332,  1350,  1365,  1372,  1376,  1382,  1395,  1403,  1411,
+    1432,  1439,  1446,  1454,  1470,  1476,  1497,  1505,  1520,  1534,
+    1538,  1544,  1550,  1576,  1610,  1616,  1637,  1654,  1654,  1659,
+    1678,  1703,  1712,  1721,  1730,  1746,  1749,  1751,  1773,  1774,
+    1775,  1776,  1777,  1778,  1779,  1780,  1781,  1782,  1783,  1784,
+    1785,  1786,  1787,  1788,  1789,  1790,  1791,  1792,  1793,  1801,
+    1802
 };
 #endif
 
@@ -1904,7 +1904,7 @@ yyreduce:
     break;
 
   case 31: /* $@2: %empty  */
-#line 419 "test_spec_parse.y"
+#line 427 "test_spec_parse.y"
         {
 		current_node = create_standalone_node(&current_spec->cluster, (yyvsp[0].str));
 		free((yyvsp[0].str));
@@ -1913,10 +1913,21 @@ yyreduce:
     break;
 
   case 33: /* $@3: %empty  */
-#line 428 "test_spec_parse.y"
+#line 436 "test_spec_parse.y"
         {
 		current_node = create_standalone_node(&current_spec->cluster, (yyvsp[0].str));
 		free((yyvsp[0].str));
+
+		/*
+		 * Marks this node as the `pg_walserver <name>` DSL kind (as opposed
+		 * to plain `postgres <name>` sugar or an ordinary formation node) --
+		 * compose_gen.c's write_pg_walserver_default_hba() uses this to
+		 * decide whether to bind-mount a generated, usable default
+		 * archiver-hba.conf into this node's container before its own
+		 * command (below, or a "command \"...\"" override) ever runs. See
+		 * that function's own header comment for the full design.
+		 */
+		current_node->isPgWalserver = true;
 
 		/*
 		 * Default: run pg_walserver's own "serve" mode directly as this
@@ -1925,105 +1936,120 @@ yyreduce:
 		 * Zero named routes at startup is a supported, harmless state (see
 		 * cli_serve_run in pg_walserver/cli_root.c); a spec that wants
 		 * routes configured first overrides this via "command \"...\"".
+		 *
+		 * Also copies in a real, usable default archiver-hba.conf --
+		 * compose_gen.c's write_pg_walserver_default_hba() bind-mounts it
+		 * read-only at /etc/pgaf/<name>-archiver-hba.conf; this cp (after
+		 * "mkdir -p" has created /var/lib/postgres/ws as this container's
+		 * own user, not Docker's auto-created root:root parent directory a
+		 * direct bind-mount into it would leave behind) is what actually
+		 * puts it where pg_walserver reads it from. See that function's own
+		 * header comment for the full design and why a direct bind-mount
+		 * into /var/lib/postgres/ws isn't used instead. "|| true": the
+		 * source file may not exist for a node whose name collides with
+		 * nothing generated (never happens via this grammar rule, but keeps
+		 * this command robust rather than failing PID 1 outright over HBA).
 		 */
 		strlcpy(current_node->commandOverride,
 		        "mkdir -p /var/lib/postgres/ws && "
+		        "(cp /etc/pgaf/$(hostname)-archiver-hba.conf "
+		        "/var/lib/postgres/ws/archiver-hba.conf || true) && "
 		        "exec pg_walserver --pgdata /var/lib/postgres/ws --port 5432",
 		        sizeof(current_node->commandOverride));
 	}
-#line 1935 "test_spec_parse.c"
+#line 1961 "test_spec_parse.c"
     break;
 
   case 37: /* aux_opt: T_COMMAND T_STRING  */
-#line 455 "test_spec_parse.y"
+#line 489 "test_spec_parse.y"
         {
 		strlcpy(current_node->commandOverride, (yyvsp[0].str),
 		        sizeof(current_node->commandOverride));
 		free((yyvsp[0].str));
 	}
-#line 1945 "test_spec_parse.c"
+#line 1971 "test_spec_parse.c"
     break;
 
   case 39: /* aux_opt: T_DOCKER_INIT  */
-#line 462 "test_spec_parse.y"
+#line 496 "test_spec_parse.y"
         {
 		current_node->dockerInit = true;
 	}
-#line 1953 "test_spec_parse.c"
+#line 1979 "test_spec_parse.c"
     break;
 
   case 40: /* image_line: T_IMAGE T_STRING  */
-#line 470 "test_spec_parse.y"
+#line 504 "test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.image, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.image));
 		free((yyvsp[0].str));
 	}
-#line 1963 "test_spec_parse.c"
+#line 1989 "test_spec_parse.c"
     break;
 
   case 41: /* image_line: T_IMAGE T_IDENT  */
-#line 476 "test_spec_parse.y"
+#line 510 "test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.image, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.image));
 		free((yyvsp[0].str));
 	}
-#line 1973 "test_spec_parse.c"
+#line 1999 "test_spec_parse.c"
     break;
 
   case 42: /* extension_version_line: T_EXTENSION_VERSION T_IDENT  */
-#line 486 "test_spec_parse.y"
+#line 520 "test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.extensionVersion, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.extensionVersion));
 		free((yyvsp[0].str));
 	}
-#line 1983 "test_spec_parse.c"
+#line 2009 "test_spec_parse.c"
     break;
 
   case 43: /* extension_version_line: T_EXTENSION_VERSION T_STRING  */
-#line 492 "test_spec_parse.y"
+#line 526 "test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.extensionVersion, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.extensionVersion));
 		free((yyvsp[0].str));
 	}
-#line 1993 "test_spec_parse.c"
+#line 2019 "test_spec_parse.c"
     break;
 
   case 44: /* ssl_line: T_SSL T_IDENT  */
-#line 502 "test_spec_parse.y"
+#line 536 "test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.ssl, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.ssl));
 		free((yyvsp[0].str));
 	}
-#line 2003 "test_spec_parse.c"
+#line 2029 "test_spec_parse.c"
     break;
 
   case 45: /* auth_line: T_AUTH T_IDENT  */
-#line 512 "test_spec_parse.y"
+#line 546 "test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.auth, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.auth));
 		free((yyvsp[0].str));
 	}
-#line 2013 "test_spec_parse.c"
+#line 2039 "test_spec_parse.c"
     break;
 
   case 46: /* auth_line: T_AUTH_METHOD T_IDENT  */
-#line 518 "test_spec_parse.y"
+#line 552 "test_spec_parse.y"
         {
 		strlcpy(current_spec->cluster.auth, (yyvsp[0].str),
 		        sizeof(current_spec->cluster.auth));
 		free((yyvsp[0].str));
 	}
-#line 2023 "test_spec_parse.c"
+#line 2049 "test_spec_parse.c"
     break;
 
   case 47: /* $@4: %empty  */
-#line 528 "test_spec_parse.y"
+#line 562 "test_spec_parse.y"
         {
 		TestCluster *cl = &current_spec->cluster;
 		if (cl->formationCount >= PGAF_MAX_FORMATIONS)
@@ -2037,78 +2063,78 @@ yyreduce:
 		        sizeof(current_formation->name));
 		current_formation->numSync = -1;
 	}
-#line 2041 "test_spec_parse.c"
+#line 2067 "test_spec_parse.c"
     break;
 
   case 51: /* bare_name: T_IDENT  */
-#line 555 "test_spec_parse.y"
+#line 589 "test_spec_parse.y"
                     { (yyval.str) = (yyvsp[0].str); }
-#line 2047 "test_spec_parse.c"
+#line 2073 "test_spec_parse.c"
     break;
 
   case 52: /* bare_name: T_STRING  */
-#line 556 "test_spec_parse.y"
+#line 590 "test_spec_parse.y"
                     { (yyval.str) = (yyvsp[0].str); }
-#line 2053 "test_spec_parse.c"
+#line 2079 "test_spec_parse.c"
     break;
 
   case 53: /* bare_name: T_AUTH  */
-#line 557 "test_spec_parse.y"
+#line 591 "test_spec_parse.y"
                     { (yyval.str) = strdup("auth"); }
-#line 2059 "test_spec_parse.c"
+#line 2085 "test_spec_parse.c"
     break;
 
   case 54: /* bare_name: T_MONITOR  */
-#line 558 "test_spec_parse.y"
+#line 592 "test_spec_parse.y"
                     { (yyval.str) = strdup("monitor"); }
-#line 2065 "test_spec_parse.c"
+#line 2091 "test_spec_parse.c"
     break;
 
   case 55: /* bare_name: T_NODE  */
-#line 559 "test_spec_parse.y"
+#line 593 "test_spec_parse.y"
                     { (yyval.str) = strdup("node"); }
-#line 2071 "test_spec_parse.c"
+#line 2097 "test_spec_parse.c"
     break;
 
   case 56: /* formation_opt: bare_name  */
-#line 564 "test_spec_parse.y"
+#line 598 "test_spec_parse.y"
         {
 		strlcpy(current_formation->name, (yyvsp[0].str), sizeof(current_formation->name));
 		free((yyvsp[0].str));
 	}
-#line 2080 "test_spec_parse.c"
+#line 2106 "test_spec_parse.c"
     break;
 
   case 57: /* formation_opt: T_NUM_SYNC T_INTEGER  */
-#line 569 "test_spec_parse.y"
+#line 603 "test_spec_parse.y"
         {
 		current_formation->numSync = (yyvsp[0].ival);
 	}
-#line 2088 "test_spec_parse.c"
+#line 2114 "test_spec_parse.c"
     break;
 
   case 58: /* formation_opt: T_FS_SECONDARY T_FALSE  */
-#line 573 "test_spec_parse.y"
+#line 607 "test_spec_parse.y"
         {
 		current_formation->disableSecondary = true;
 	}
-#line 2096 "test_spec_parse.c"
+#line 2122 "test_spec_parse.c"
     break;
 
   case 61: /* node_name: T_IDENT  */
-#line 599 "test_spec_parse.y"
+#line 633 "test_spec_parse.y"
                      { (yyval.str) = (yyvsp[0].str); }
-#line 2102 "test_spec_parse.c"
+#line 2128 "test_spec_parse.c"
     break;
 
   case 62: /* node_name: T_MONITOR  */
-#line 600 "test_spec_parse.y"
+#line 634 "test_spec_parse.y"
                      { (yyval.str) = strdup("monitor"); }
-#line 2108 "test_spec_parse.c"
+#line 2134 "test_spec_parse.c"
     break;
 
   case 63: /* init_node_slot: %empty  */
-#line 609 "test_spec_parse.y"
+#line 643 "test_spec_parse.y"
         {
 		if (current_formation->nodeCount >= PGAF_MAX_NODES)
 		{
@@ -2121,254 +2147,254 @@ yyreduce:
 		current_node->candidatePriority = 50;
 		current_node->replicationQuorum = true;
 	}
-#line 2125 "test_spec_parse.c"
+#line 2151 "test_spec_parse.c"
     break;
 
   case 64: /* $@5: %empty  */
-#line 626 "test_spec_parse.y"
+#line 660 "test_spec_parse.y"
         {
 		strlcpy(current_node->name, (yyvsp[-1].str), sizeof(current_node->name));
 		free((yyvsp[-1].str));
 	}
-#line 2134 "test_spec_parse.c"
+#line 2160 "test_spec_parse.c"
     break;
 
   case 66: /* $@6: %empty  */
-#line 633 "test_spec_parse.y"
+#line 667 "test_spec_parse.y"
         {
 		strlcpy(current_node->name, (yyvsp[-1].str), sizeof(current_node->name));
 		free((yyvsp[-1].str));
-	}
-#line 2143 "test_spec_parse.c"
-    break;
-
-  case 70: /* node_opt: T_COORDINATOR  */
-#line 647 "test_spec_parse.y"
-        {
-		current_node->kind = NODE_KIND_CITUS_COORDINATOR;
-		current_spec->cluster.withCitus = true;
-	}
-#line 2152 "test_spec_parse.c"
-    break;
-
-  case 71: /* node_opt: T_WORKER  */
-#line 652 "test_spec_parse.y"
-        {
-		current_node->kind = NODE_KIND_CITUS_WORKER;
-		current_spec->cluster.withCitus = true;
-	}
-#line 2161 "test_spec_parse.c"
-    break;
-
-  case 72: /* node_opt: T_ASYNC  */
-#line 657 "test_spec_parse.y"
-        {
-		current_node->replicationQuorum = false;
 	}
 #line 2169 "test_spec_parse.c"
     break;
 
-  case 73: /* node_opt: T_NO_MONITOR  */
-#line 661 "test_spec_parse.y"
+  case 70: /* node_opt: T_COORDINATOR  */
+#line 681 "test_spec_parse.y"
         {
-		current_node->noMonitor = true;
+		current_node->kind = NODE_KIND_CITUS_COORDINATOR;
+		current_spec->cluster.withCitus = true;
 	}
-#line 2177 "test_spec_parse.c"
+#line 2178 "test_spec_parse.c"
     break;
 
-  case 74: /* node_opt: T_SUSPENDED  */
-#line 665 "test_spec_parse.y"
+  case 71: /* node_opt: T_WORKER  */
+#line 686 "test_spec_parse.y"
         {
-		current_node->suspended = true;
+		current_node->kind = NODE_KIND_CITUS_WORKER;
+		current_spec->cluster.withCitus = true;
 	}
-#line 2185 "test_spec_parse.c"
+#line 2187 "test_spec_parse.c"
     break;
 
-  case 75: /* node_opt: T_DEFERRED  */
-#line 669 "test_spec_parse.y"
+  case 72: /* node_opt: T_ASYNC  */
+#line 691 "test_spec_parse.y"
         {
-		/* bare "deferred" = create and launch deferred (both gates) */
-		current_node->createDeferred = true;
-		current_node->launchDeferred = true;
+		current_node->replicationQuorum = false;
 	}
 #line 2195 "test_spec_parse.c"
     break;
 
-  case 76: /* node_opt: T_LAUNCH T_DEFERRED  */
-#line 675 "test_spec_parse.y"
+  case 73: /* node_opt: T_NO_MONITOR  */
+#line 695 "test_spec_parse.y"
         {
-		/* "launch deferred" alone = run-deferred only, create immediate */
-		current_node->launchDeferred = true;
+		current_node->noMonitor = true;
 	}
-#line 2204 "test_spec_parse.c"
+#line 2203 "test_spec_parse.c"
     break;
 
-  case 77: /* node_opt: T_CREATE T_DEFERRED  */
-#line 680 "test_spec_parse.y"
+  case 74: /* node_opt: T_SUSPENDED  */
+#line 699 "test_spec_parse.y"
         {
-		current_node->createDeferred = true;
+		current_node->suspended = true;
 	}
-#line 2212 "test_spec_parse.c"
+#line 2211 "test_spec_parse.c"
     break;
 
-  case 78: /* node_opt: T_CREATE T_AND T_LAUNCH T_DEFERRED  */
-#line 684 "test_spec_parse.y"
+  case 75: /* node_opt: T_DEFERRED  */
+#line 703 "test_spec_parse.y"
         {
+		/* bare "deferred" = create and launch deferred (both gates) */
 		current_node->createDeferred = true;
 		current_node->launchDeferred = true;
 	}
 #line 2221 "test_spec_parse.c"
     break;
 
+  case 76: /* node_opt: T_LAUNCH T_DEFERRED  */
+#line 709 "test_spec_parse.y"
+        {
+		/* "launch deferred" alone = run-deferred only, create immediate */
+		current_node->launchDeferred = true;
+	}
+#line 2230 "test_spec_parse.c"
+    break;
+
+  case 77: /* node_opt: T_CREATE T_DEFERRED  */
+#line 714 "test_spec_parse.y"
+        {
+		current_node->createDeferred = true;
+	}
+#line 2238 "test_spec_parse.c"
+    break;
+
+  case 78: /* node_opt: T_CREATE T_AND T_LAUNCH T_DEFERRED  */
+#line 718 "test_spec_parse.y"
+        {
+		current_node->createDeferred = true;
+		current_node->launchDeferred = true;
+	}
+#line 2247 "test_spec_parse.c"
+    break;
+
   case 79: /* node_opt: T_LAUNCH T_IMMEDIATE  */
-#line 689 "test_spec_parse.y"
+#line 723 "test_spec_parse.y"
         {
 		current_node->launchDeferred = false;
 	}
-#line 2229 "test_spec_parse.c"
+#line 2255 "test_spec_parse.c"
     break;
 
   case 80: /* node_opt: T_IMMEDIATE  */
-#line 693 "test_spec_parse.y"
+#line 727 "test_spec_parse.y"
         {
 		current_node->launchDeferred = false;
 	}
-#line 2237 "test_spec_parse.c"
+#line 2263 "test_spec_parse.c"
     break;
 
   case 81: /* node_opt: T_LISTEN  */
-#line 697 "test_spec_parse.y"
+#line 731 "test_spec_parse.y"
         {
 		current_node->listen = true;
 	}
-#line 2245 "test_spec_parse.c"
+#line 2271 "test_spec_parse.c"
     break;
 
   case 82: /* node_opt: T_CITUS_SECONDARY  */
-#line 701 "test_spec_parse.y"
+#line 735 "test_spec_parse.y"
         {
 		current_node->citusSecondary = true;
-	}
-#line 2253 "test_spec_parse.c"
-    break;
-
-  case 83: /* node_opt: T_CANDIDATE_PRIORITY T_INTEGER  */
-#line 705 "test_spec_parse.y"
-        {
-		current_node->candidatePriority = (yyvsp[0].ival);
-	}
-#line 2261 "test_spec_parse.c"
-    break;
-
-  case 84: /* node_opt: T_REGION T_IDENT  */
-#line 709 "test_spec_parse.y"
-        {
-		strlcpy(current_node->region, (yyvsp[0].str), sizeof(current_node->region));
-		free((yyvsp[0].str));
-	}
-#line 2270 "test_spec_parse.c"
-    break;
-
-  case 85: /* node_opt: T_REGION T_STRING  */
-#line 714 "test_spec_parse.y"
-        {
-		strlcpy(current_node->region, (yyvsp[0].str), sizeof(current_node->region));
-		free((yyvsp[0].str));
 	}
 #line 2279 "test_spec_parse.c"
     break;
 
-  case 86: /* node_opt: T_GROUP T_INTEGER  */
-#line 719 "test_spec_parse.y"
+  case 83: /* node_opt: T_CANDIDATE_PRIORITY T_INTEGER  */
+#line 739 "test_spec_parse.y"
         {
-		current_node->group = (yyvsp[0].ival);
+		current_node->candidatePriority = (yyvsp[0].ival);
 	}
 #line 2287 "test_spec_parse.c"
     break;
 
-  case 87: /* node_opt: T_PORT T_INTEGER  */
-#line 723 "test_spec_parse.y"
+  case 84: /* node_opt: T_REGION T_IDENT  */
+#line 743 "test_spec_parse.y"
         {
-		current_node->pgPort = (yyvsp[0].ival);
+		strlcpy(current_node->region, (yyvsp[0].str), sizeof(current_node->region));
+		free((yyvsp[0].str));
 	}
-#line 2295 "test_spec_parse.c"
+#line 2296 "test_spec_parse.c"
     break;
 
-  case 88: /* node_opt: T_CITUS_CLUSTER_NAME T_IDENT  */
-#line 727 "test_spec_parse.y"
+  case 85: /* node_opt: T_REGION T_STRING  */
+#line 748 "test_spec_parse.y"
         {
-		strlcpy(current_node->citusClusterName, (yyvsp[0].str),
-		        sizeof(current_node->citusClusterName));
+		strlcpy(current_node->region, (yyvsp[0].str), sizeof(current_node->region));
 		free((yyvsp[0].str));
 	}
 #line 2305 "test_spec_parse.c"
     break;
 
+  case 86: /* node_opt: T_GROUP T_INTEGER  */
+#line 753 "test_spec_parse.y"
+        {
+		current_node->group = (yyvsp[0].ival);
+	}
+#line 2313 "test_spec_parse.c"
+    break;
+
+  case 87: /* node_opt: T_PORT T_INTEGER  */
+#line 757 "test_spec_parse.y"
+        {
+		current_node->pgPort = (yyvsp[0].ival);
+	}
+#line 2321 "test_spec_parse.c"
+    break;
+
+  case 88: /* node_opt: T_CITUS_CLUSTER_NAME T_IDENT  */
+#line 761 "test_spec_parse.y"
+        {
+		strlcpy(current_node->citusClusterName, (yyvsp[0].str),
+		        sizeof(current_node->citusClusterName));
+		free((yyvsp[0].str));
+	}
+#line 2331 "test_spec_parse.c"
+    break;
+
   case 89: /* node_opt: T_DEBIAN_CLUSTER T_IDENT  */
-#line 733 "test_spec_parse.y"
+#line 767 "test_spec_parse.y"
         {
 		strlcpy(current_node->debianCluster, (yyvsp[0].str),
 		        sizeof(current_node->debianCluster));
 		free((yyvsp[0].str));
 	}
-#line 2315 "test_spec_parse.c"
+#line 2341 "test_spec_parse.c"
     break;
 
   case 90: /* node_opt: T_SSL T_IDENT  */
-#line 739 "test_spec_parse.y"
+#line 773 "test_spec_parse.y"
         {
 		strlcpy(current_node->ssl, (yyvsp[0].str), sizeof(current_node->ssl));
 		free((yyvsp[0].str));
 	}
-#line 2324 "test_spec_parse.c"
-    break;
-
-  case 91: /* node_opt: T_AUTH T_IDENT  */
-#line 744 "test_spec_parse.y"
-        {
-		strlcpy(current_node->auth, (yyvsp[0].str), sizeof(current_node->auth));
-		free((yyvsp[0].str));
-	}
-#line 2333 "test_spec_parse.c"
-    break;
-
-  case 92: /* node_opt: T_AUTH_METHOD T_IDENT  */
-#line 749 "test_spec_parse.y"
-        {
-		strlcpy(current_node->auth, (yyvsp[0].str), sizeof(current_node->auth));
-		free((yyvsp[0].str));
-	}
-#line 2342 "test_spec_parse.c"
-    break;
-
-  case 93: /* node_opt: T_REPLICATION_QUORUM T_TRUE  */
-#line 754 "test_spec_parse.y"
-        {
-		current_node->replicationQuorum = true;
-	}
 #line 2350 "test_spec_parse.c"
     break;
 
-  case 94: /* node_opt: T_REPLICATION_QUORUM T_FALSE  */
-#line 758 "test_spec_parse.y"
+  case 91: /* node_opt: T_AUTH T_IDENT  */
+#line 778 "test_spec_parse.y"
         {
-		current_node->replicationQuorum = false;
+		strlcpy(current_node->auth, (yyvsp[0].str), sizeof(current_node->auth));
+		free((yyvsp[0].str));
 	}
-#line 2358 "test_spec_parse.c"
+#line 2359 "test_spec_parse.c"
     break;
 
-  case 95: /* node_opt: T_REPLICATION_PASSWORD T_STRING  */
-#line 762 "test_spec_parse.y"
+  case 92: /* node_opt: T_AUTH_METHOD T_IDENT  */
+#line 783 "test_spec_parse.y"
         {
-		strlcpy(current_node->replicationPassword, (yyvsp[0].str),
-		        sizeof(current_node->replicationPassword));
+		strlcpy(current_node->auth, (yyvsp[0].str), sizeof(current_node->auth));
 		free((yyvsp[0].str));
 	}
 #line 2368 "test_spec_parse.c"
     break;
 
+  case 93: /* node_opt: T_REPLICATION_QUORUM T_TRUE  */
+#line 788 "test_spec_parse.y"
+        {
+		current_node->replicationQuorum = true;
+	}
+#line 2376 "test_spec_parse.c"
+    break;
+
+  case 94: /* node_opt: T_REPLICATION_QUORUM T_FALSE  */
+#line 792 "test_spec_parse.y"
+        {
+		current_node->replicationQuorum = false;
+	}
+#line 2384 "test_spec_parse.c"
+    break;
+
+  case 95: /* node_opt: T_REPLICATION_PASSWORD T_STRING  */
+#line 796 "test_spec_parse.y"
+        {
+		strlcpy(current_node->replicationPassword, (yyvsp[0].str),
+		        sizeof(current_node->replicationPassword));
+		free((yyvsp[0].str));
+	}
+#line 2394 "test_spec_parse.c"
+    break;
+
   case 96: /* node_opt: T_COMMAND T_STRING  */
-#line 768 "test_spec_parse.y"
+#line 802 "test_spec_parse.y"
         {
 		/* replaces this node's own container command entirely, see
 		 * test_spec.h's own commandOverride comment */
@@ -2376,21 +2402,21 @@ yyreduce:
 		        sizeof(current_node->commandOverride));
 		free((yyvsp[0].str));
 	}
-#line 2380 "test_spec_parse.c"
+#line 2406 "test_spec_parse.c"
     break;
 
   case 97: /* node_opt: T_MONITOR_PASSWORD T_STRING  */
-#line 776 "test_spec_parse.y"
+#line 810 "test_spec_parse.y"
         {
 		strlcpy(current_node->monitorPassword, (yyvsp[0].str),
 		        sizeof(current_node->monitorPassword));
 		free((yyvsp[0].str));
 	}
-#line 2390 "test_spec_parse.c"
+#line 2416 "test_spec_parse.c"
     break;
 
   case 98: /* node_opt: T_VOLUME T_IDENT T_IDENT  */
-#line 782 "test_spec_parse.y"
+#line 816 "test_spec_parse.y"
         {
 		/* volume <name> <containerPath> — adds a named Docker volume */
 		int vi = current_node->volumeCount;
@@ -2404,11 +2430,11 @@ yyreduce:
 		}
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2408 "test_spec_parse.c"
+#line 2434 "test_spec_parse.c"
     break;
 
   case 99: /* node_opt: T_VOLUME T_IDENT T_STRING  */
-#line 796 "test_spec_parse.y"
+#line 830 "test_spec_parse.y"
         {
 		/* volume <name> "/path/with spaces" */
 		int vi = current_node->volumeCount;
@@ -2422,72 +2448,72 @@ yyreduce:
 		}
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2426 "test_spec_parse.c"
+#line 2452 "test_spec_parse.c"
     break;
 
   case 101: /* node_opt: T_DOCKER_INIT  */
-#line 811 "test_spec_parse.y"
+#line 845 "test_spec_parse.y"
         {
 		current_node->dockerInit = true;
-	}
-#line 2434 "test_spec_parse.c"
-    break;
-
-  case 102: /* alias_list: T_STRING  */
-#line 824 "test_spec_parse.y"
-        {
-		if (current_node->aliasCount < PGAF_MAX_NODE_ALIASES)
-		{
-			strlcpy(current_node->aliases[current_node->aliasCount++], (yyvsp[0].str),
-			        sizeof(current_node->aliases[0]));
-		}
-		free((yyvsp[0].str));
-	}
-#line 2447 "test_spec_parse.c"
-    break;
-
-  case 103: /* alias_list: alias_list T_COMMA T_STRING  */
-#line 833 "test_spec_parse.y"
-        {
-		if (current_node->aliasCount < PGAF_MAX_NODE_ALIASES)
-		{
-			strlcpy(current_node->aliases[current_node->aliasCount++], (yyvsp[0].str),
-			        sizeof(current_node->aliases[0]));
-		}
-		free((yyvsp[0].str));
 	}
 #line 2460 "test_spec_parse.c"
     break;
 
+  case 102: /* alias_list: T_STRING  */
+#line 858 "test_spec_parse.y"
+        {
+		if (current_node->aliasCount < PGAF_MAX_NODE_ALIASES)
+		{
+			strlcpy(current_node->aliases[current_node->aliasCount++], (yyvsp[0].str),
+			        sizeof(current_node->aliases[0]));
+		}
+		free((yyvsp[0].str));
+	}
+#line 2473 "test_spec_parse.c"
+    break;
+
+  case 103: /* alias_list: alias_list T_COMMA T_STRING  */
+#line 867 "test_spec_parse.y"
+        {
+		if (current_node->aliasCount < PGAF_MAX_NODE_ALIASES)
+		{
+			strlcpy(current_node->aliases[current_node->aliasCount++], (yyvsp[0].str),
+			        sizeof(current_node->aliases[0]));
+		}
+		free((yyvsp[0].str));
+	}
+#line 2486 "test_spec_parse.c"
+    break;
+
   case 104: /* setup_block: T_SETUP cmd_block  */
-#line 849 "test_spec_parse.y"
+#line 883 "test_spec_parse.y"
         {
 		current_spec->setup = (yyvsp[0].step);
 	}
-#line 2468 "test_spec_parse.c"
+#line 2494 "test_spec_parse.c"
     break;
 
   case 105: /* teardown_block: T_TEARDOWN cmd_block  */
-#line 856 "test_spec_parse.y"
+#line 890 "test_spec_parse.y"
         {
 		current_spec->teardown = (yyvsp[0].step);
 	}
-#line 2476 "test_spec_parse.c"
+#line 2502 "test_spec_parse.c"
     break;
 
   case 106: /* named_step: T_STEP ident_or_string cmd_block  */
-#line 867 "test_spec_parse.y"
+#line 901 "test_spec_parse.y"
         {
 		TestStep *s = (yyvsp[0].step);
 		strncpy(s->name, (yyvsp[-1].str), sizeof(s->name) - 1);
 		free((yyvsp[-1].str));
 		register_step(current_spec, s);
 	}
-#line 2487 "test_spec_parse.c"
+#line 2513 "test_spec_parse.c"
     break;
 
   case 107: /* cmd_block: T_LBRACE cmd_list T_RBRACE  */
-#line 885 "test_spec_parse.y"
+#line 919 "test_spec_parse.y"
         {
 		/* post-process: CMD_SQL immediately before CMD_EXPECT_ERROR */
 		for (TestCmd *c = (yyvsp[-1].step)->commands; c; c = c->next)
@@ -2498,187 +2524,187 @@ yyreduce:
 		}
 		(yyval.step) = (yyvsp[-1].step);
 	}
-#line 2502 "test_spec_parse.c"
+#line 2528 "test_spec_parse.c"
     break;
 
   case 108: /* cmd_list: %empty  */
-#line 899 "test_spec_parse.y"
+#line 933 "test_spec_parse.y"
         {
 		(yyval.step) = make_step("");
 	}
-#line 2510 "test_spec_parse.c"
+#line 2536 "test_spec_parse.c"
     break;
 
   case 109: /* cmd_list: cmd_list step_cmd  */
-#line 903 "test_spec_parse.y"
+#line 937 "test_spec_parse.y"
         {
 		if ((yyvsp[0].cmd)) append_cmd((yyvsp[-1].step), (yyvsp[0].cmd));
 		(yyval.step) = (yyvsp[-1].step);
 	}
-#line 2519 "test_spec_parse.c"
+#line 2545 "test_spec_parse.c"
     break;
 
   case 110: /* step_cmd: exec_cmd  */
-#line 910 "test_spec_parse.y"
+#line 944 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2525 "test_spec_parse.c"
+#line 2551 "test_spec_parse.c"
     break;
 
   case 111: /* step_cmd: wait_cmd  */
-#line 911 "test_spec_parse.y"
+#line 945 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2531 "test_spec_parse.c"
+#line 2557 "test_spec_parse.c"
     break;
 
   case 112: /* step_cmd: assert_cmd  */
-#line 912 "test_spec_parse.y"
+#line 946 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2537 "test_spec_parse.c"
+#line 2563 "test_spec_parse.c"
     break;
 
   case 113: /* step_cmd: sql_cmd  */
-#line 913 "test_spec_parse.y"
+#line 947 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2543 "test_spec_parse.c"
+#line 2569 "test_spec_parse.c"
     break;
 
   case 114: /* step_cmd: expect_cmd  */
-#line 914 "test_spec_parse.y"
+#line 948 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2549 "test_spec_parse.c"
+#line 2575 "test_spec_parse.c"
     break;
 
   case 115: /* step_cmd: promote_cmd  */
-#line 915 "test_spec_parse.y"
+#line 949 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2555 "test_spec_parse.c"
+#line 2581 "test_spec_parse.c"
     break;
 
   case 116: /* step_cmd: perform_cmd  */
-#line 916 "test_spec_parse.y"
+#line 950 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2561 "test_spec_parse.c"
+#line 2587 "test_spec_parse.c"
     break;
 
   case 117: /* step_cmd: network_cmd  */
-#line 917 "test_spec_parse.y"
+#line 951 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2567 "test_spec_parse.c"
+#line 2593 "test_spec_parse.c"
     break;
 
   case 118: /* step_cmd: sleep_cmd  */
-#line 918 "test_spec_parse.y"
+#line 952 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2573 "test_spec_parse.c"
+#line 2599 "test_spec_parse.c"
     break;
 
   case 119: /* step_cmd: compose_cmd  */
-#line 919 "test_spec_parse.y"
+#line 953 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2579 "test_spec_parse.c"
+#line 2605 "test_spec_parse.c"
     break;
 
   case 120: /* step_cmd: postgres_ctl_cmd  */
-#line 920 "test_spec_parse.y"
+#line 954 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2585 "test_spec_parse.c"
+#line 2611 "test_spec_parse.c"
     break;
 
   case 121: /* step_cmd: fsm_step_cmd  */
-#line 921 "test_spec_parse.y"
+#line 955 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2591 "test_spec_parse.c"
+#line 2617 "test_spec_parse.c"
     break;
 
   case 122: /* step_cmd: stays_while_cmd  */
-#line 922 "test_spec_parse.y"
+#line 956 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2597 "test_spec_parse.c"
+#line 2623 "test_spec_parse.c"
     break;
 
   case 123: /* step_cmd: set_monitor_cmd  */
-#line 923 "test_spec_parse.y"
+#line 957 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2603 "test_spec_parse.c"
+#line 2629 "test_spec_parse.c"
     break;
 
   case 124: /* step_cmd: logs_cmd  */
-#line 924 "test_spec_parse.y"
+#line 958 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2609 "test_spec_parse.c"
+#line 2635 "test_spec_parse.c"
     break;
 
   case 125: /* step_cmd: nodeini_cmd  */
-#line 925 "test_spec_parse.y"
+#line 959 "test_spec_parse.y"
                             { (yyval.cmd) = (yyvsp[0].cmd); }
-#line 2615 "test_spec_parse.c"
+#line 2641 "test_spec_parse.c"
     break;
 
   case 126: /* exec_cmd: T_EXEC T_IDENT T_SHELL_ARGS  */
-#line 940 "test_spec_parse.y"
+#line 974 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXEC);
 		strlcpy((yyval.cmd)->service, (yyvsp[-1].str), sizeof((yyval.cmd)->service));
 		strlcpy((yyval.cmd)->args,    (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2626 "test_spec_parse.c"
+#line 2652 "test_spec_parse.c"
     break;
 
   case 127: /* exec_cmd: T_EXEC T_IDENT  */
-#line 947 "test_spec_parse.y"
+#line 981 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXEC);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2636 "test_spec_parse.c"
+#line 2662 "test_spec_parse.c"
     break;
 
   case 128: /* exec_cmd: T_EXEC_FAILS T_IDENT T_SHELL_ARGS  */
-#line 953 "test_spec_parse.y"
+#line 987 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXEC_FAILS);
 		strlcpy((yyval.cmd)->service, (yyvsp[-1].str), sizeof((yyval.cmd)->service));
 		strlcpy((yyval.cmd)->args,    (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2647 "test_spec_parse.c"
+#line 2673 "test_spec_parse.c"
     break;
 
   case 129: /* exec_cmd: T_EXEC_FAILS T_IDENT  */
-#line 960 "test_spec_parse.y"
+#line 994 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXEC_FAILS);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2657 "test_spec_parse.c"
+#line 2683 "test_spec_parse.c"
     break;
 
   case 130: /* exec_cmd: T_RUN T_IDENT T_SHELL_ARGS  */
-#line 966 "test_spec_parse.y"
+#line 1000 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_RUN);
 		strlcpy((yyval.cmd)->service, (yyvsp[-1].str), sizeof((yyval.cmd)->service));
 		strlcpy((yyval.cmd)->args,    (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2668 "test_spec_parse.c"
+#line 2694 "test_spec_parse.c"
     break;
 
   case 131: /* exec_cmd: T_RUN T_IDENT  */
-#line 973 "test_spec_parse.y"
+#line 1007 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_RUN);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 2678 "test_spec_parse.c"
+#line 2704 "test_spec_parse.c"
     break;
 
   case 132: /* exec_cmd: T_PG_AUTOCTL T_IDENT T_SHELL_ARGS  */
-#line 979 "test_spec_parse.y"
+#line 1013 "test_spec_parse.y"
         {
 		/* "pg_autoctl perform failover --formation auth"
 		 * EXEC_ARGS returns T_IDENT for first word, T_SHELL_ARGS for rest */
@@ -2686,29 +2712,29 @@ yyreduce:
 		sformat((yyval.cmd)->args, sizeof((yyval.cmd)->args), "%s %s", (yyvsp[-1].str), (yyvsp[0].str));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 2690 "test_spec_parse.c"
+#line 2716 "test_spec_parse.c"
     break;
 
   case 133: /* exec_cmd: T_PG_AUTOCTL T_IDENT  */
-#line 987 "test_spec_parse.y"
+#line 1021 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
 		strlcpy((yyval.cmd)->args, (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[0].str));
 	}
-#line 2700 "test_spec_parse.c"
+#line 2726 "test_spec_parse.c"
     break;
 
   case 134: /* exec_cmd: T_PG_AUTOCTL  */
-#line 993 "test_spec_parse.y"
+#line 1027 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_PG_AUTOCTL);
 	}
-#line 2708 "test_spec_parse.c"
+#line 2734 "test_spec_parse.c"
     break;
 
   case 137: /* wait_multi_condition: T_IDENT T_STATE state_op fsm_state  */
-#line 1031 "test_spec_parse.y"
+#line 1065 "test_spec_parse.y"
         {
 		if (!current_wait_cmd)
 			current_wait_cmd = make_cmd(CMD_WAIT_MULTI);
@@ -2723,11 +2749,11 @@ yyreduce:
 		}
 		free((yyvsp[-3].str));
 	}
-#line 2727 "test_spec_parse.c"
+#line 2753 "test_spec_parse.c"
     break;
 
   case 138: /* wait_multi_condition: T_IDENT T_STATE state_op T_IDENT  */
-#line 1046 "test_spec_parse.y"
+#line 1080 "test_spec_parse.y"
         {
 		if (!current_wait_cmd)
 			current_wait_cmd = make_cmd(CMD_WAIT_MULTI);
@@ -2742,11 +2768,11 @@ yyreduce:
 		}
 		free((yyvsp[-3].str)); free((yyvsp[0].str));
 	}
-#line 2746 "test_spec_parse.c"
+#line 2772 "test_spec_parse.c"
     break;
 
   case 143: /* pass_state_list: fsm_state  */
-#line 1086 "test_spec_parse.y"
+#line 1120 "test_spec_parse.y"
         {
 		/* current_pass_cmd set by the enclosing wait_cmd rule */
 		if (current_pass_cmd &&
@@ -2754,11 +2780,11 @@ yyreduce:
 			strlcpy(current_pass_cmd->passThroughStates[current_pass_cmd->passThroughCount++],
 			        (yyvsp[0].str), sizeof(current_pass_cmd->passThroughStates[0]));
 	}
-#line 2758 "test_spec_parse.c"
+#line 2784 "test_spec_parse.c"
     break;
 
   case 144: /* pass_state_list: T_IDENT  */
-#line 1094 "test_spec_parse.y"
+#line 1128 "test_spec_parse.y"
         {
 		if (current_pass_cmd &&
 		    current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
@@ -2766,22 +2792,22 @@ yyreduce:
 			        (yyvsp[0].str), sizeof(current_pass_cmd->passThroughStates[0]));
 		free((yyvsp[0].str));
 	}
-#line 2770 "test_spec_parse.c"
+#line 2796 "test_spec_parse.c"
     break;
 
   case 145: /* pass_state_list: pass_state_list T_COMMA fsm_state  */
-#line 1102 "test_spec_parse.y"
+#line 1136 "test_spec_parse.y"
         {
 		if (current_pass_cmd &&
 		    current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
 			strlcpy(current_pass_cmd->passThroughStates[current_pass_cmd->passThroughCount++],
 			        (yyvsp[0].str), sizeof(current_pass_cmd->passThroughStates[0]));
 	}
-#line 2781 "test_spec_parse.c"
+#line 2807 "test_spec_parse.c"
     break;
 
   case 146: /* pass_state_list: pass_state_list T_COMMA T_IDENT  */
-#line 1109 "test_spec_parse.y"
+#line 1143 "test_spec_parse.y"
         {
 		if (current_pass_cmd &&
 		    current_pass_cmd->passThroughCount < PGAF_MAX_WAIT_STATES)
@@ -2789,49 +2815,49 @@ yyreduce:
 			        (yyvsp[0].str), sizeof(current_pass_cmd->passThroughStates[0]));
 		free((yyvsp[0].str));
 	}
-#line 2793 "test_spec_parse.c"
+#line 2819 "test_spec_parse.c"
     break;
 
   case 147: /* $@7: %empty  */
-#line 1120 "test_spec_parse.y"
+#line 1154 "test_spec_parse.y"
             { current_pass_cmd = make_cmd(CMD_WAIT_STATE);
 	      strlcpy(current_pass_cmd->service, (yyvsp[-3].str), sizeof(current_pass_cmd->service));
 	      strlcpy(current_pass_cmd->state,   (yyvsp[0].str), sizeof(current_pass_cmd->state));
 	      free((yyvsp[-3].str)); }
-#line 2802 "test_spec_parse.c"
+#line 2828 "test_spec_parse.c"
     break;
 
   case 148: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_STATE state_op fsm_state $@7 opt_passing_through opt_timeout  */
-#line 1125 "test_spec_parse.y"
+#line 1159 "test_spec_parse.y"
         {
 		current_pass_cmd->timeoutSeconds = (yyvsp[0].ival);
 		(yyval.cmd) = current_pass_cmd;
 		current_pass_cmd = NULL;
 	}
-#line 2812 "test_spec_parse.c"
+#line 2838 "test_spec_parse.c"
     break;
 
   case 149: /* $@8: %empty  */
-#line 1131 "test_spec_parse.y"
+#line 1165 "test_spec_parse.y"
             { current_pass_cmd = make_cmd(CMD_WAIT_STATE);
 	      strlcpy(current_pass_cmd->service, (yyvsp[-3].str), sizeof(current_pass_cmd->service));
 	      strlcpy(current_pass_cmd->state,   (yyvsp[0].str), sizeof(current_pass_cmd->state));
 	      free((yyvsp[-3].str)); free((yyvsp[0].str)); }
-#line 2821 "test_spec_parse.c"
+#line 2847 "test_spec_parse.c"
     break;
 
   case 150: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_STATE state_op T_IDENT $@8 opt_passing_through opt_timeout  */
-#line 1136 "test_spec_parse.y"
+#line 1170 "test_spec_parse.y"
         {
 		current_pass_cmd->timeoutSeconds = (yyvsp[0].ival);
 		(yyval.cmd) = current_pass_cmd;
 		current_pass_cmd = NULL;
 	}
-#line 2831 "test_spec_parse.c"
+#line 2857 "test_spec_parse.c"
     break;
 
   case 151: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_ASSIGNED_STATE state_op fsm_state opt_timeout  */
-#line 1142 "test_spec_parse.y"
+#line 1176 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_WAIT_STATE);
 		(yyval.cmd)->kind = CMD_ASSERT_ASSIGNED;
@@ -2840,11 +2866,11 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str));
 	}
-#line 2844 "test_spec_parse.c"
+#line 2870 "test_spec_parse.c"
     break;
 
   case 152: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_ASSIGNED_STATE state_op T_IDENT opt_timeout  */
-#line 1151 "test_spec_parse.y"
+#line 1185 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_WAIT_STATE);
 		(yyval.cmd)->kind = CMD_ASSERT_ASSIGNED;
@@ -2853,22 +2879,22 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str)); free((yyvsp[-1].str));
 	}
-#line 2857 "test_spec_parse.c"
+#line 2883 "test_spec_parse.c"
     break;
 
   case 153: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_STOPPED opt_timeout  */
-#line 1160 "test_spec_parse.y"
+#line 1194 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_WAIT_STOPPED);
 		strlcpy((yyval.cmd)->service, (yyvsp[-2].str), sizeof((yyval.cmd)->service));
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-2].str));
 	}
-#line 2868 "test_spec_parse.c"
+#line 2894 "test_spec_parse.c"
     break;
 
   case 154: /* wait_cmd: T_WAIT T_UNTIL T_IDENT T_REPLAYS T_IDENT opt_timeout  */
-#line 1174 "test_spec_parse.y"
+#line 1208 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_WAIT_LSN);
 		strlcpy((yyval.cmd)->service, (yyvsp[-3].str), sizeof((yyval.cmd)->service));
@@ -2876,109 +2902,109 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-3].str)); free((yyvsp[-1].str));
 	}
-#line 2880 "test_spec_parse.c"
+#line 2906 "test_spec_parse.c"
     break;
 
   case 155: /* wait_cmd: T_WAIT T_UNTIL state_name_list opt_in_group opt_timeout  */
-#line 1182 "test_spec_parse.y"
+#line 1216 "test_spec_parse.y"
         {
 		(yyval.cmd) = current_wait_cmd;
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		current_wait_cmd = NULL;
 	}
-#line 2890 "test_spec_parse.c"
+#line 2916 "test_spec_parse.c"
     break;
 
   case 156: /* wait_cmd: T_WAIT T_UNTIL wait_multi_condition T_AND wait_multi_condition_list opt_timeout  */
-#line 1196 "test_spec_parse.y"
+#line 1230 "test_spec_parse.y"
         {
 		(yyval.cmd) = current_wait_cmd;
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		current_wait_cmd = NULL;
 	}
-#line 2900 "test_spec_parse.c"
+#line 2926 "test_spec_parse.c"
     break;
 
   case 157: /* state_name_list: fsm_state  */
-#line 1211 "test_spec_parse.y"
+#line 1245 "test_spec_parse.y"
         {
 		current_wait_cmd = make_cmd(CMD_WAIT_STATES);
 		strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
 		        (yyvsp[0].str), sizeof(current_wait_cmd->waitStates[0]));
 	}
-#line 2910 "test_spec_parse.c"
+#line 2936 "test_spec_parse.c"
     break;
 
   case 158: /* state_name_list: T_IDENT  */
-#line 1217 "test_spec_parse.y"
+#line 1251 "test_spec_parse.y"
         {
 		current_wait_cmd = make_cmd(CMD_WAIT_STATES);
 		strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
 		        (yyvsp[0].str), sizeof(current_wait_cmd->waitStates[0]));
 		free((yyvsp[0].str));
 	}
-#line 2921 "test_spec_parse.c"
+#line 2947 "test_spec_parse.c"
     break;
 
   case 159: /* state_name_list: state_name_list T_COMMA fsm_state  */
-#line 1224 "test_spec_parse.y"
+#line 1258 "test_spec_parse.y"
         {
 		if (current_wait_cmd->waitStateCount < PGAF_MAX_WAIT_STATES)
 			strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
 			        (yyvsp[0].str), sizeof(current_wait_cmd->waitStates[0]));
 	}
-#line 2931 "test_spec_parse.c"
+#line 2957 "test_spec_parse.c"
     break;
 
   case 160: /* state_name_list: state_name_list T_COMMA T_IDENT  */
-#line 1230 "test_spec_parse.y"
+#line 1264 "test_spec_parse.y"
         {
 		if (current_wait_cmd->waitStateCount < PGAF_MAX_WAIT_STATES)
 			strlcpy(current_wait_cmd->waitStates[current_wait_cmd->waitStateCount++],
 			        (yyvsp[0].str), sizeof(current_wait_cmd->waitStates[0]));
 		free((yyvsp[0].str));
 	}
-#line 2942 "test_spec_parse.c"
+#line 2968 "test_spec_parse.c"
     break;
 
   case 163: /* group_items: T_GROUP T_INTEGER  */
-#line 1249 "test_spec_parse.y"
+#line 1283 "test_spec_parse.y"
         {
 		if (current_wait_cmd->waitGroupCount < PGAF_MAX_WAIT_GROUPS)
 			current_wait_cmd->waitGroups[current_wait_cmd->waitGroupCount++] = (yyvsp[0].ival);
 	}
-#line 2951 "test_spec_parse.c"
+#line 2977 "test_spec_parse.c"
     break;
 
   case 164: /* group_items: group_items T_COMMA T_GROUP T_INTEGER  */
-#line 1254 "test_spec_parse.y"
+#line 1288 "test_spec_parse.y"
         {
 		if (current_wait_cmd->waitGroupCount < PGAF_MAX_WAIT_GROUPS)
 			current_wait_cmd->waitGroups[current_wait_cmd->waitGroupCount++] = (yyvsp[0].ival);
 	}
-#line 2960 "test_spec_parse.c"
+#line 2986 "test_spec_parse.c"
     break;
 
   case 165: /* opt_timeout: %empty  */
-#line 1261 "test_spec_parse.y"
+#line 1295 "test_spec_parse.y"
                                        { (yyval.ival) = PGAF_TIMEOUT_DEFAULT; }
-#line 2966 "test_spec_parse.c"
+#line 2992 "test_spec_parse.c"
     break;
 
   case 166: /* opt_timeout: T_TIMEOUT T_INTEGER  */
-#line 1262 "test_spec_parse.y"
+#line 1296 "test_spec_parse.y"
                                        { (yyval.ival) = (yyvsp[0].ival); }
-#line 2972 "test_spec_parse.c"
+#line 2998 "test_spec_parse.c"
     break;
 
   case 167: /* opt_timeout: T_WITH T_TIMEOUT T_INTEGER  */
-#line 1263 "test_spec_parse.y"
+#line 1297 "test_spec_parse.y"
                                        { (yyval.ival) = (yyvsp[0].ival); }
-#line 2978 "test_spec_parse.c"
+#line 3004 "test_spec_parse.c"
     break;
 
   case 168: /* assert_cmd: T_ASSERT T_IDENT T_STATE state_op fsm_state opt_timeout  */
-#line 1275 "test_spec_parse.y"
+#line 1309 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd((yyvsp[0].ival) > 0 ? CMD_WAIT_STATE : CMD_ASSERT_STATE);
 		strlcpy((yyval.cmd)->service, (yyvsp[-4].str), sizeof((yyval.cmd)->service));
@@ -2986,11 +3012,11 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str));
 	}
-#line 2990 "test_spec_parse.c"
+#line 3016 "test_spec_parse.c"
     break;
 
   case 169: /* assert_cmd: T_ASSERT T_IDENT T_STATE state_op T_IDENT opt_timeout  */
-#line 1283 "test_spec_parse.y"
+#line 1317 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd((yyvsp[0].ival) > 0 ? CMD_WAIT_STATE : CMD_ASSERT_STATE);
 		strlcpy((yyval.cmd)->service, (yyvsp[-4].str), sizeof((yyval.cmd)->service));
@@ -2998,11 +3024,11 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str)); free((yyvsp[-1].str));
 	}
-#line 3002 "test_spec_parse.c"
+#line 3028 "test_spec_parse.c"
     break;
 
   case 170: /* assert_cmd: T_ASSERT T_IDENT T_ASSIGNED_STATE state_op fsm_state opt_timeout  */
-#line 1291 "test_spec_parse.y"
+#line 1325 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_ASSERT_ASSIGNED);
 		strlcpy((yyval.cmd)->service, (yyvsp[-4].str), sizeof((yyval.cmd)->service));
@@ -3010,11 +3036,11 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str));
 	}
-#line 3014 "test_spec_parse.c"
+#line 3040 "test_spec_parse.c"
     break;
 
   case 171: /* assert_cmd: T_ASSERT T_IDENT T_ASSIGNED_STATE state_op T_IDENT opt_timeout  */
-#line 1299 "test_spec_parse.y"
+#line 1333 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_ASSERT_ASSIGNED);
 		strlcpy((yyval.cmd)->service, (yyvsp[-4].str), sizeof((yyval.cmd)->service));
@@ -3022,70 +3048,70 @@ yyreduce:
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 		free((yyvsp[-4].str)); free((yyvsp[-1].str));
 	}
-#line 3026 "test_spec_parse.c"
+#line 3052 "test_spec_parse.c"
     break;
 
   case 172: /* sql_cmd: T_SQL T_IDENT T_BLOCK  */
-#line 1317 "test_spec_parse.y"
+#line 1351 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_SQL);
 		strlcpy((yyval.cmd)->service, (yyvsp[-1].str), sizeof((yyval.cmd)->service));
 		strlcpy((yyval.cmd)->args,    (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 3037 "test_spec_parse.c"
+#line 3063 "test_spec_parse.c"
     break;
 
   case 173: /* expect_cmd: T_EXPECT T_BLOCK  */
-#line 1332 "test_spec_parse.y"
+#line 1366 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXPECT);
 		strlcpy((yyval.cmd)->expected, (yyvsp[0].str), sizeof((yyval.cmd)->expected));
 		expand_tuple_expect((yyval.cmd)->expected, sizeof((yyval.cmd)->expected));
 		free((yyvsp[0].str));
 	}
-#line 3048 "test_spec_parse.c"
+#line 3074 "test_spec_parse.c"
     break;
 
   case 174: /* expect_cmd: T_EXPECT T_ERROR  */
-#line 1339 "test_spec_parse.y"
+#line 1373 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
 	}
-#line 3056 "test_spec_parse.c"
+#line 3082 "test_spec_parse.c"
     break;
 
   case 175: /* expect_cmd: T_EXPECT T_ERROR T_IDENT  */
-#line 1343 "test_spec_parse.y"
+#line 1377 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
 		strlcpy((yyval.cmd)->state, (yyvsp[0].str), sizeof((yyval.cmd)->state));
 		free((yyvsp[0].str));
 	}
-#line 3066 "test_spec_parse.c"
+#line 3092 "test_spec_parse.c"
     break;
 
   case 176: /* expect_cmd: T_EXPECT T_ERROR T_INTEGER  */
-#line 1349 "test_spec_parse.y"
+#line 1383 "test_spec_parse.y"
         {
 		/* SQLSTATE codes like 25006 are all digits, lexed as T_INTEGER */
 		(yyval.cmd) = make_cmd(CMD_EXPECT_ERROR);
 		snprintf((yyval.cmd)->state, sizeof((yyval.cmd)->state), "%d", (yyvsp[0].ival));
 	}
-#line 3076 "test_spec_parse.c"
+#line 3102 "test_spec_parse.c"
     break;
 
   case 177: /* promote_cmd: T_PROMOTE promote_list  */
-#line 1362 "test_spec_parse.y"
+#line 1396 "test_spec_parse.y"
         {
 		(yyval.cmd) = current_promote_cmd;
 		current_promote_cmd = NULL;
 	}
-#line 3085 "test_spec_parse.c"
+#line 3111 "test_spec_parse.c"
     break;
 
   case 178: /* promote_list: T_IDENT  */
-#line 1370 "test_spec_parse.y"
+#line 1404 "test_spec_parse.y"
         {
 		current_promote_cmd = make_cmd(CMD_PROMOTE);
 		current_promote_cmd->timeoutSeconds = PGAF_TIMEOUT_DEFAULT;
@@ -3093,44 +3119,44 @@ yyreduce:
 		        (yyvsp[0].str), sizeof(current_promote_cmd->promoteNodes[0]));
 		free((yyvsp[0].str));
 	}
-#line 3097 "test_spec_parse.c"
+#line 3123 "test_spec_parse.c"
     break;
 
   case 179: /* promote_list: promote_list T_COMMA T_IDENT  */
-#line 1378 "test_spec_parse.y"
+#line 1412 "test_spec_parse.y"
         {
 		if (current_promote_cmd->promoteCount < PGAF_MAX_PROMOTE_NODES)
 			strlcpy(current_promote_cmd->promoteNodes[current_promote_cmd->promoteCount++],
 			        (yyvsp[0].str), sizeof(current_promote_cmd->promoteNodes[0]));
 		free((yyvsp[0].str));
 	}
-#line 3108 "test_spec_parse.c"
+#line 3134 "test_spec_parse.c"
     break;
 
   case 180: /* perform_cmd: T_PERFORM T_FAILOVER  */
-#line 1399 "test_spec_parse.y"
+#line 1433 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_FAILOVER);
 		strlcpy((yyval.cmd)->service, "default", sizeof((yyval.cmd)->service));
 		(yyval.cmd)->waitGroups[0] = 0;
 		(yyval.cmd)->waitGroupCount = 1;
 	}
-#line 3119 "test_spec_parse.c"
+#line 3145 "test_spec_parse.c"
     break;
 
   case 181: /* perform_cmd: T_PERFORM T_FAILOVER T_GROUP T_INTEGER  */
-#line 1406 "test_spec_parse.y"
+#line 1440 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_FAILOVER);
 		strlcpy((yyval.cmd)->service, "default", sizeof((yyval.cmd)->service));
 		(yyval.cmd)->waitGroups[0] = (yyvsp[0].ival);
 		(yyval.cmd)->waitGroupCount = 1;
 	}
-#line 3130 "test_spec_parse.c"
+#line 3156 "test_spec_parse.c"
     break;
 
   case 182: /* perform_cmd: T_PERFORM T_FAILOVER T_IN T_FORMATION T_IDENT  */
-#line 1413 "test_spec_parse.y"
+#line 1447 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_FAILOVER);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
@@ -3138,11 +3164,11 @@ yyreduce:
 		(yyval.cmd)->waitGroupCount = 1;
 		free((yyvsp[0].str));
 	}
-#line 3142 "test_spec_parse.c"
+#line 3168 "test_spec_parse.c"
     break;
 
   case 183: /* perform_cmd: T_PERFORM T_FAILOVER T_IN T_FORMATION T_IDENT T_GROUP T_INTEGER  */
-#line 1421 "test_spec_parse.y"
+#line 1455 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_FAILOVER);
 		strlcpy((yyval.cmd)->service, (yyvsp[-2].str), sizeof((yyval.cmd)->service));
@@ -3150,31 +3176,31 @@ yyreduce:
 		(yyval.cmd)->waitGroupCount = 1;
 		free((yyvsp[-2].str));
 	}
-#line 3154 "test_spec_parse.c"
+#line 3180 "test_spec_parse.c"
     break;
 
   case 184: /* network_cmd: T_NETWORK T_DISCONNECT T_IDENT  */
-#line 1437 "test_spec_parse.y"
+#line 1471 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_NETWORK_OFF);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 3164 "test_spec_parse.c"
+#line 3190 "test_spec_parse.c"
     break;
 
   case 185: /* network_cmd: T_NETWORK T_CONNECT T_IDENT  */
-#line 1443 "test_spec_parse.y"
+#line 1477 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_NETWORK_ON);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 3174 "test_spec_parse.c"
+#line 3200 "test_spec_parse.c"
     break;
 
   case 186: /* nodeini_cmd: T_NODEINI T_SET T_IDENT T_IDENT T_IDENT  */
-#line 1464 "test_spec_parse.y"
+#line 1498 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_NODEINI_SET);
 		strlcpy((yyval.cmd)->service, (yyvsp[-2].str), sizeof((yyval.cmd)->service));
@@ -3182,11 +3208,11 @@ yyreduce:
 		strlcpy((yyval.cmd)->args, (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[-2].str)); free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 3186 "test_spec_parse.c"
+#line 3212 "test_spec_parse.c"
     break;
 
   case 187: /* nodeini_cmd: T_NODEINI T_GET T_IDENT T_IDENT T_IDENT  */
-#line 1472 "test_spec_parse.y"
+#line 1506 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_NODEINI_GET);
 		strlcpy((yyval.cmd)->service, (yyvsp[-2].str), sizeof((yyval.cmd)->service));
@@ -3194,58 +3220,58 @@ yyreduce:
 		strlcpy((yyval.cmd)->args, (yyvsp[0].str), sizeof((yyval.cmd)->args));
 		free((yyvsp[-2].str)); free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 3198 "test_spec_parse.c"
+#line 3224 "test_spec_parse.c"
     break;
 
   case 188: /* sleep_cmd: T_SLEEP T_INTEGER  */
-#line 1487 "test_spec_parse.y"
+#line 1521 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_SLEEP);
 		(yyval.cmd)->timeoutSeconds = (yyvsp[0].ival);
 	}
-#line 3207 "test_spec_parse.c"
+#line 3233 "test_spec_parse.c"
     break;
 
   case 189: /* compose_cmd: T_COMPOSE T_DOWN  */
-#line 1501 "test_spec_parse.y"
+#line 1535 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_DOWN);
 	}
-#line 3215 "test_spec_parse.c"
+#line 3241 "test_spec_parse.c"
     break;
 
   case 190: /* compose_cmd: T_COMPOSE T_START T_IDENT  */
-#line 1505 "test_spec_parse.y"
+#line 1539 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_START);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 3225 "test_spec_parse.c"
+#line 3251 "test_spec_parse.c"
     break;
 
   case 191: /* compose_cmd: T_COMPOSE T_STOP T_IDENT  */
-#line 1511 "test_spec_parse.y"
+#line 1545 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_STOP);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 3235 "test_spec_parse.c"
+#line 3261 "test_spec_parse.c"
     break;
 
   case 192: /* compose_cmd: T_COMPOSE T_KILL T_IDENT  */
-#line 1517 "test_spec_parse.y"
+#line 1551 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_KILL);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 3245 "test_spec_parse.c"
+#line 3271 "test_spec_parse.c"
     break;
 
   case 193: /* compose_cmd: T_COMPOSE T_INJECT T_IDENT T_SHELL_ARGS  */
-#line 1543 "test_spec_parse.y"
+#line 1577 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_COMPOSE_INJECT);
 		strlcpy((yyval.cmd)->expected, (yyvsp[-1].str), sizeof((yyval.cmd)->expected));  /* image */
@@ -3268,53 +3294,53 @@ yyreduce:
 		}
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 3272 "test_spec_parse.c"
+#line 3298 "test_spec_parse.c"
     break;
 
   case 194: /* postgres_ctl_cmd: T_STOP T_POSTGRES node_name  */
-#line 1577 "test_spec_parse.y"
+#line 1611 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_STOP_POSTGRES);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 3282 "test_spec_parse.c"
+#line 3308 "test_spec_parse.c"
     break;
 
   case 195: /* postgres_ctl_cmd: T_START T_POSTGRES node_name  */
-#line 1583 "test_spec_parse.y"
+#line 1617 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_START_POSTGRES);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 3292 "test_spec_parse.c"
+#line 3318 "test_spec_parse.c"
     break;
 
   case 196: /* fsm_step_cmd: T_FSM T_STEP node_name  */
-#line 1604 "test_spec_parse.y"
+#line 1638 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_FSM_STEP);
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[0].str));
 	}
-#line 3302 "test_spec_parse.c"
+#line 3328 "test_spec_parse.c"
     break;
 
   case 197: /* $@9: %empty  */
-#line 1620 "test_spec_parse.y"
+#line 1654 "test_spec_parse.y"
                 { pgaf_next_brace_is_while = 1; }
-#line 3308 "test_spec_parse.c"
+#line 3334 "test_spec_parse.c"
     break;
 
   case 198: /* while_body: T_WHILE $@9 T_LBRACE cmd_list T_RBRACE  */
-#line 1621 "test_spec_parse.y"
+#line 1655 "test_spec_parse.y"
         { (yyval.step) = (yyvsp[-1].step); }
-#line 3314 "test_spec_parse.c"
+#line 3340 "test_spec_parse.c"
     break;
 
   case 199: /* stays_while_cmd: T_ASSERT node_name T_STAYS fsm_state while_body  */
-#line 1626 "test_spec_parse.y"
+#line 1660 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_STAYS_WHILE);
 		strlcpy((yyval.cmd)->service, (yyvsp[-3].str), sizeof((yyval.cmd)->service));
@@ -3322,11 +3348,11 @@ yyreduce:
 		(yyval.cmd)->body = ((yyvsp[0].step)) ? (yyvsp[0].step)->commands : NULL;
 		free((yyvsp[-3].str));
 	}
-#line 3326 "test_spec_parse.c"
+#line 3352 "test_spec_parse.c"
     break;
 
   case 200: /* set_monitor_cmd: T_SET T_IDENT T_IDENT  */
-#line 1645 "test_spec_parse.y"
+#line 1679 "test_spec_parse.y"
         {
 		/* only "set monitor <svc>" is supported; $2 must be "monitor" */
 		if (strcmp((yyvsp[-1].str), "monitor") != 0)
@@ -3339,11 +3365,11 @@ yyreduce:
 		strlcpy((yyval.cmd)->service, (yyvsp[0].str), sizeof((yyval.cmd)->service));
 		free((yyvsp[-1].str)); free((yyvsp[0].str));
 	}
-#line 3343 "test_spec_parse.c"
+#line 3369 "test_spec_parse.c"
     break;
 
   case 201: /* logs_cmd: T_LOGS T_IDENT T_CONTAINS T_STRING  */
-#line 1670 "test_spec_parse.y"
+#line 1704 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[-2].str), sizeof((yyval.cmd)->service));
@@ -3352,11 +3378,11 @@ yyreduce:
 		(yyval.cmd)->allowError = false;  /* false = fixed string, true = PCRE */
 		free((yyvsp[-2].str)); free((yyvsp[0].str));
 	}
-#line 3356 "test_spec_parse.c"
+#line 3382 "test_spec_parse.c"
     break;
 
   case 202: /* logs_cmd: T_LOGS T_IDENT T_NOT T_CONTAINS T_STRING  */
-#line 1679 "test_spec_parse.y"
+#line 1713 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[-3].str), sizeof((yyval.cmd)->service));
@@ -3365,11 +3391,11 @@ yyreduce:
 		(yyval.cmd)->allowError = false;
 		free((yyvsp[-3].str)); free((yyvsp[0].str));
 	}
-#line 3369 "test_spec_parse.c"
+#line 3395 "test_spec_parse.c"
     break;
 
   case 203: /* logs_cmd: T_LOGS T_IDENT T_MATCHES T_STRING  */
-#line 1688 "test_spec_parse.y"
+#line 1722 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[-2].str), sizeof((yyval.cmd)->service));
@@ -3378,11 +3404,11 @@ yyreduce:
 		(yyval.cmd)->allowError = true;   /* true = PCRE (-P) */
 		free((yyvsp[-2].str)); free((yyvsp[0].str));
 	}
-#line 3382 "test_spec_parse.c"
+#line 3408 "test_spec_parse.c"
     break;
 
   case 204: /* logs_cmd: T_LOGS T_IDENT T_NOT T_MATCHES T_STRING  */
-#line 1697 "test_spec_parse.y"
+#line 1731 "test_spec_parse.y"
         {
 		(yyval.cmd) = make_cmd(CMD_LOGS_CHECK);
 		strlcpy((yyval.cmd)->service, (yyvsp[-3].str), sizeof((yyval.cmd)->service));
@@ -3391,11 +3417,11 @@ yyreduce:
 		(yyval.cmd)->allowError = true;
 		free((yyvsp[-3].str)); free((yyvsp[0].str));
 	}
-#line 3395 "test_spec_parse.c"
+#line 3421 "test_spec_parse.c"
     break;
 
   case 207: /* sequence_names: sequence_names ident_or_string  */
-#line 1718 "test_spec_parse.y"
+#line 1752 "test_spec_parse.y"
         {
 		int i = current_spec->sequenceLength;
 		if (i < PGAF_MAX_SEQ)
@@ -3407,149 +3433,149 @@ yyreduce:
 			exit(1);
 		}
 	}
-#line 3411 "test_spec_parse.c"
+#line 3437 "test_spec_parse.c"
     break;
 
   case 208: /* fsm_state: T_FS_INIT  */
-#line 1739 "test_spec_parse.y"
+#line 1773 "test_spec_parse.y"
                                    { (yyval.str) = "init"; }
-#line 3417 "test_spec_parse.c"
+#line 3443 "test_spec_parse.c"
     break;
 
   case 209: /* fsm_state: T_FS_SINGLE  */
-#line 1740 "test_spec_parse.y"
+#line 1774 "test_spec_parse.y"
                                    { (yyval.str) = "single"; }
-#line 3423 "test_spec_parse.c"
+#line 3449 "test_spec_parse.c"
     break;
 
   case 210: /* fsm_state: T_FS_PRIMARY  */
-#line 1741 "test_spec_parse.y"
+#line 1775 "test_spec_parse.y"
                                    { (yyval.str) = "primary"; }
-#line 3429 "test_spec_parse.c"
+#line 3455 "test_spec_parse.c"
     break;
 
   case 211: /* fsm_state: T_FS_WAIT_PRIMARY  */
-#line 1742 "test_spec_parse.y"
+#line 1776 "test_spec_parse.y"
                                    { (yyval.str) = "wait_primary"; }
-#line 3435 "test_spec_parse.c"
+#line 3461 "test_spec_parse.c"
     break;
 
   case 212: /* fsm_state: T_FS_WAIT_STANDBY  */
-#line 1743 "test_spec_parse.y"
+#line 1777 "test_spec_parse.y"
                                    { (yyval.str) = "wait_standby"; }
-#line 3441 "test_spec_parse.c"
+#line 3467 "test_spec_parse.c"
     break;
 
   case 213: /* fsm_state: T_FS_DEMOTED  */
-#line 1744 "test_spec_parse.y"
+#line 1778 "test_spec_parse.y"
                                    { (yyval.str) = "demoted"; }
-#line 3447 "test_spec_parse.c"
+#line 3473 "test_spec_parse.c"
     break;
 
   case 214: /* fsm_state: T_FS_DEMOTE_TIMEOUT  */
-#line 1745 "test_spec_parse.y"
+#line 1779 "test_spec_parse.y"
                                    { (yyval.str) = "demote_timeout"; }
-#line 3453 "test_spec_parse.c"
+#line 3479 "test_spec_parse.c"
     break;
 
   case 215: /* fsm_state: T_FS_DRAINING  */
-#line 1746 "test_spec_parse.y"
+#line 1780 "test_spec_parse.y"
                                    { (yyval.str) = "draining"; }
-#line 3459 "test_spec_parse.c"
+#line 3485 "test_spec_parse.c"
     break;
 
   case 216: /* fsm_state: T_FS_SECONDARY  */
-#line 1747 "test_spec_parse.y"
+#line 1781 "test_spec_parse.y"
                                    { (yyval.str) = "secondary"; }
-#line 3465 "test_spec_parse.c"
+#line 3491 "test_spec_parse.c"
     break;
 
   case 217: /* fsm_state: T_FS_CATCHINGUP  */
-#line 1748 "test_spec_parse.y"
+#line 1782 "test_spec_parse.y"
                                    { (yyval.str) = "catchingup"; }
-#line 3471 "test_spec_parse.c"
+#line 3497 "test_spec_parse.c"
     break;
 
   case 218: /* fsm_state: T_FS_PREP_PROMOTION  */
-#line 1749 "test_spec_parse.y"
+#line 1783 "test_spec_parse.y"
                                    { (yyval.str) = "prepare_promotion"; }
-#line 3477 "test_spec_parse.c"
+#line 3503 "test_spec_parse.c"
     break;
 
   case 219: /* fsm_state: T_FS_STOP_REPLICATION  */
-#line 1750 "test_spec_parse.y"
+#line 1784 "test_spec_parse.y"
                                    { (yyval.str) = "stop_replication"; }
-#line 3483 "test_spec_parse.c"
+#line 3509 "test_spec_parse.c"
     break;
 
   case 220: /* fsm_state: T_FS_MAINTENANCE  */
-#line 1751 "test_spec_parse.y"
+#line 1785 "test_spec_parse.y"
                                    { (yyval.str) = "maintenance"; }
-#line 3489 "test_spec_parse.c"
+#line 3515 "test_spec_parse.c"
     break;
 
   case 221: /* fsm_state: T_FS_JOIN_PRIMARY  */
-#line 1752 "test_spec_parse.y"
+#line 1786 "test_spec_parse.y"
                                    { (yyval.str) = "join_primary"; }
-#line 3495 "test_spec_parse.c"
+#line 3521 "test_spec_parse.c"
     break;
 
   case 222: /* fsm_state: T_FS_APPLY_SETTINGS  */
-#line 1753 "test_spec_parse.y"
+#line 1787 "test_spec_parse.y"
                                    { (yyval.str) = "apply_settings"; }
-#line 3501 "test_spec_parse.c"
+#line 3527 "test_spec_parse.c"
     break;
 
   case 223: /* fsm_state: T_FS_PREPARE_MAINTENANCE  */
-#line 1754 "test_spec_parse.y"
+#line 1788 "test_spec_parse.y"
                                    { (yyval.str) = "prepare_maintenance"; }
-#line 3507 "test_spec_parse.c"
+#line 3533 "test_spec_parse.c"
     break;
 
   case 224: /* fsm_state: T_FS_WAIT_MAINTENANCE  */
-#line 1755 "test_spec_parse.y"
+#line 1789 "test_spec_parse.y"
                                    { (yyval.str) = "wait_maintenance"; }
-#line 3513 "test_spec_parse.c"
+#line 3539 "test_spec_parse.c"
     break;
 
   case 225: /* fsm_state: T_FS_REPORT_LSN  */
-#line 1756 "test_spec_parse.y"
+#line 1790 "test_spec_parse.y"
                                    { (yyval.str) = "report_lsn"; }
-#line 3519 "test_spec_parse.c"
+#line 3545 "test_spec_parse.c"
     break;
 
   case 226: /* fsm_state: T_FS_FAST_FORWARD  */
-#line 1757 "test_spec_parse.y"
+#line 1791 "test_spec_parse.y"
                                    { (yyval.str) = "fast_forward"; }
-#line 3525 "test_spec_parse.c"
+#line 3551 "test_spec_parse.c"
     break;
 
   case 227: /* fsm_state: T_FS_JOIN_SECONDARY  */
-#line 1758 "test_spec_parse.y"
+#line 1792 "test_spec_parse.y"
                                    { (yyval.str) = "join_secondary"; }
-#line 3531 "test_spec_parse.c"
+#line 3557 "test_spec_parse.c"
     break;
 
   case 228: /* fsm_state: T_FS_DROPPED  */
-#line 1759 "test_spec_parse.y"
+#line 1793 "test_spec_parse.y"
                                    { (yyval.str) = "dropped"; }
-#line 3537 "test_spec_parse.c"
+#line 3563 "test_spec_parse.c"
     break;
 
   case 229: /* ident_or_string: T_IDENT  */
-#line 1767 "test_spec_parse.y"
+#line 1801 "test_spec_parse.y"
                    { (yyval.str) = (yyvsp[0].str); }
-#line 3543 "test_spec_parse.c"
+#line 3569 "test_spec_parse.c"
     break;
 
   case 230: /* ident_or_string: T_STRING  */
-#line 1768 "test_spec_parse.y"
+#line 1802 "test_spec_parse.y"
                    { (yyval.str) = (yyvsp[0].str); }
-#line 3549 "test_spec_parse.c"
+#line 3575 "test_spec_parse.c"
     break;
 
 
-#line 3553 "test_spec_parse.c"
+#line 3579 "test_spec_parse.c"
 
       default: break;
     }
@@ -3742,7 +3768,7 @@ yyreturnlab:
   return yyresult;
 }
 
-#line 1771 "test_spec_parse.y"
+#line 1805 "test_spec_parse.y"
 
 
 /* -----------------------------------------------------------------------
