@@ -109,9 +109,12 @@ typedef struct WsRoute
 	                                     * for any route regardless of this
 	                                     * flag, gated purely by archiver-
 	                                     * hba.conf like every other
-	                                     * command. See DESIGN-standalone-
-	                                     * archiving.md's "pg_walserver.ini:
-	                                     * a new upstream property" section
+	                                     * command. Written explicitly by
+	                                     * "pg_walserver setup" by default
+	                                     * now (opt out with --no-capture);
+	                                     * see README.md's "The routes file
+	                                     * (pg_walserver.ini)" and "The
+	                                     * embedded pull capturer" sections
 	                                     * for the full rationale. */
 } WsRoute;
 
