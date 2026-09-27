@@ -46,7 +46,7 @@
 #include "tls.h"
 
 extern CommandLine ws_root;
-extern char **pg_walsender_default_argv(int argc, char **argv, int *newArgc);
+extern char ** pg_walsender_default_argv(int argc, char **argv, int *newArgc);
 
 /* -----------------------------------------------------------------------
  * pg_walsender serve [options]  (the default command)
@@ -501,10 +501,10 @@ static CommandLine scram_secret_command =
 				 "Print one archiver-passwd line for a user",
 				 "[--user <name>]  (password read from PGPASSWORD)",
 				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
-				 "\n"
-				 "  The password is read from the PGPASSWORD environment "
-				 "variable, never\n"
-				 "  from the command line.\n",
+																				  "\n"
+																				  "  The password is read from the PGPASSWORD environment "
+																				  "variable, never\n"
+																				  "  from the command line.\n",
 				 cli_scram_secret_getopt, cli_scram_secret_run);
 
 
