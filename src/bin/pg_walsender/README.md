@@ -30,7 +30,14 @@ protocol entirely on its own, driven by a handful of files it reads
 directly off disk (`archiver-routes.ini`, `archiver-hba.conf`,
 `archiver-passwd`, and per-route bookkeeping files -- see below), all of
 which an operator (or, in the later PR, `pg_autoctl` itself) is expected to
-create and keep current.
+create and keep current -- today, entirely by hand or by shelling out to
+`pg_basebackup`/`pg_receivewal`/`psql` themselves (see
+`docs/ref/pg_walsender.rst`'s own worked example). `DESIGN-standalone-
+archiving.md` in this same directory designs `pg_walsender` growing
+sub-commands of its own for that (`setup`, `fetch-systemid`, `basebackup`,
+`archive`) plus an embedded WAL capturer, so it can be a complete,
+production-grade archiver on its own, not just this PR's minimal
+`serve`-only server -- not implemented yet, a design to review first.
 
 One concrete consequence of that scoping shows up in `hba.c`/`hba.h`: an
 earlier iteration of this PR had a `"monitor"` HBA `ADDRESS` keyword backed
