@@ -24,38 +24,6 @@
 
 #define WS_ARCHIVE_CONNECT_TIMEOUT_SECONDS "10"
 
-/*
- * The bounded intra-invocation recheck's own timing ("how long, how many
- * rechecks") is a judgment call, not a spec. Two rechecks, one second
- * apart: short enough that an
- * operator watching archive_command run never mistakes this for a hang
- * (worst case, ~2 extra seconds added to one archive_command invocation,
- * nowhere near PostgreSQL's own retry cadence between whole invocations),
- * long enough to catch the common case of archive_command and a healthy
- * pull-side capturer (an embedded or external pg_receivewal) reacting to
- * the same "this segment just closed" moment within a second or two of
- * each other.
- *
- * The design also describes skipping this wait entirely when the route is
- * known to be push-only (no "capture = pull" configured). "capture" now
- * exists (routes.h's WsRoute.capturePull, written by "pg_walserver setup
- * --capture pull" and consulted by capture.c's embedded pull capturer),
- * but this client still doesn't consult it here: doing so would mean this
- * connect-to-pg_walserver-as-a-plain-libpq-client tool (see this file's
- * own header comment on why it doesn't reuse cli_upstream.c/routes.c)
- * either re-reading pg_walserver.ini itself (a second, potentially stale
- * copy of the routes table this client has no other reason to load) or
- * pg_walserver exposing "does this route have a pull side" as a new wire
- * query -- a real design decision, not a one-line change, so it stays a
- * deliberate follow-up rather than being bolted on here. Until then, the
- * safe, simple choice is to always do the short bounded recheck: on a
- * push-only route it costs at most WS_ARCHIVE_RECHECK_COUNT cheap
- * CHECK_FILE round trips (no file transfer) before pushing for real,
- * which is negligible next to the push itself.
- */
-#define WS_ARCHIVE_RECHECK_COUNT 2
-#define WS_ARCHIVE_RECHECK_SLEEP_SECONDS 1
-
 /* CopyData chunks of this size when pushing, matching cmd_fetch_file.c's
  * own WS_FETCH_CHUNK_SIZE for the read side */
 #define WS_ARCHIVE_CHUNK_SIZE (128 * 1024)
@@ -106,6 +74,31 @@ check_file_status(PGconn *conn, const char *filename, uint64_t size,
 	}
 
 	strlcpy(statusOut, PQgetvalue(res, 0, 0), statusOutSize);
+	PQclear(res);
+
+	return true;
+}
+
+
+/*
+ * show_capture runs "SHOW capture" against conn and fills pullOut with
+ * whether the connected route has "capture = pull" configured. Returns
+ * false (pullOut untouched) on any connection/protocol failure, with an
+ * error already logged -- the same failure shape check_file_status() uses.
+ */
+static bool
+show_capture(PGconn *conn, bool *pullOut)
+{
+	PGresult *res = PQexec(conn, "SHOW capture");
+
+	if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1)
+	{
+		log_error("SHOW capture failed: %s", PQresultErrorMessage(res));
+		PQclear(res);
+		return false;
+	}
+
+	*pullOut = strcmp(PQgetvalue(res, 0, 0), "pull") == 0;
 	PQclear(res);
 
 	return true;
@@ -231,18 +224,6 @@ bool
 ws_archive_run(const WsArchiveTarget *target, const char *localPath,
 			   const char *filename)
 {
-	uint64_t size = 0;
-	uint32_t crc = 0;
-
-	/* Step 1: compute the local file's own size and CRC32C -- one
-	 * sequential local read, no network cost (see README.md's own "The
-	 * archive push side" section for the full 4-step design). */
-	if (!ws_file_crc32c(localPath, &size, &crc))
-	{
-		log_error("Failed to read \"%s\": %m", localPath);
-		return false;
-	}
-
 	char portStr[16];
 
 	sformat(portStr, sizeof(portStr), "%d", target->port);
@@ -267,59 +248,85 @@ ws_archive_run(const WsArchiveTarget *target, const char *localPath,
 		return false;
 	}
 
-	/* Step 2: CHECK_FILE. */
-	char status[16] = { 0 };
+	/*
+	 * Learn the connected route's own "capture" setting: it decides which
+	 * of the two disjoint behaviors below this invocation runs, never a
+	 * manually-set client flag (which would silently go stale the moment
+	 * an operator changes the route's own "capture" setting without also
+	 * updating every archive_command line referencing it). See this file's
+	 * own header comment and README.md's "The archive push side" section
+	 * for the full design.
+	 */
+	bool capturePull = false;
 
-	if (!check_file_status(conn, filename, size, crc, status, sizeof(status)))
+	if (!show_capture(conn, &capturePull))
 	{
 		PQfinish(conn);
 		return false;
 	}
 
-	if (strcmp(status, "matches") == 0)
-	{
-		log_info("\"%s\" already matches what \"%s\" has for \"%s\": "
-				 "nothing to push", filename, target->host, target->route);
-		PQfinish(conn);
-		return true;
-	}
+	bool ok;
 
-	/*
-	 * Step 3: missing/differs -- a short, bounded, intra-invocation
-	 * recheck before pushing for real, see WS_ARCHIVE_RECHECK_COUNT's own
-	 * comment above for why this is unconditional today.
-	 */
-	for (int attempt = 0;
-		 attempt < WS_ARCHIVE_RECHECK_COUNT && strcmp(status, "matches") != 0;
-		 attempt++)
+	if (capturePull)
 	{
-		sleep(WS_ARCHIVE_RECHECK_SLEEP_SECONDS);
+		/*
+		 * The route has an embedded pull capturer writing into the same
+		 * directory this push would target: never push here, only ever
+		 * check. PostgreSQL's own archive_command retry loop is the entire
+		 * retry mechanism -- it calls this client again later, cheaply,
+		 * until the capturer catches up and CHECK_FILE reports "matches".
+		 */
+		uint64_t size = 0;
+		uint32_t crc = 0;
+
+		if (!ws_file_crc32c(localPath, &size, &crc))
+		{
+			log_error("Failed to read \"%s\": %m", localPath);
+			PQfinish(conn);
+			return false;
+		}
+
+		char status[16] = { 0 };
 
 		if (!check_file_status(conn, filename, size, crc, status, sizeof(status)))
 		{
 			PQfinish(conn);
 			return false;
 		}
-	}
 
-	if (strcmp(status, "matches") == 0)
+		if (strcmp(status, "matches") == 0)
+		{
+			log_info("\"%s\" already matches what \"%s\" has for \"%s\": "
+					 "nothing to push", filename, target->host, target->route);
+			ok = true;
+		}
+		else
+		{
+			log_error("\"%s\" is not yet on \"%s\" route \"%s\" (%s): "
+					  "waiting for its own pull capturer to catch up",
+					  filename, target->host, target->route, status);
+			ok = false;
+		}
+	}
+	else
 	{
-		log_info("\"%s\" appeared on \"%s\" while waiting (pull side likely "
-				 "delivered it): nothing to push", filename, target->host);
-		PQfinish(conn);
-		return true;
+		/*
+		 * No embedded pull capturer on this route: this client is the only
+		 * writer, so an unconditional push every invocation is safe. The
+		 * server's own overwrite-safety (cmd_archive_file.c: compare real
+		 * bytes on disk vs. real bytes received) already makes this
+		 * idempotent on PostgreSQL's own retries, with no CHECK_FILE round
+		 * trip needed first.
+		 */
+		log_info("Pushing \"%s\" to \"%s\" route \"%s\" via ARCHIVE_FILE",
+				 filename, target->host, target->route);
+
+		ok = push_file(conn, localPath, filename);
 	}
-
-	/* Step 4: still missing/differs after the recheck -- push for real. */
-	log_info("Pushing \"%s\" (%" PRIu64 " bytes, CRC32C %08X, currently "
-										"\"%s\" on \"%s\") via ARCHIVE_FILE",
-			 filename, size, crc, status, target->host);
-
-	bool ok = push_file(conn, localPath, filename);
 
 	PQfinish(conn);
 
-	if (ok)
+	if (ok && !capturePull)
 	{
 		log_info("Archived \"%s\" to \"%s\" route \"%s\"",
 				 filename, target->host, target->route);
