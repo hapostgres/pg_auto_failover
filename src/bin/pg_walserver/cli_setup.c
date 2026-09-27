@@ -58,13 +58,12 @@
 #include "pqexpbuffer.h"
 
 #include "cli_basebackup.h"
+#include "cli_create_cert.h"
 #include "cli_fetch_systemid.h"
 #include "cli_setup.h"
 #include "cli_upstream.h"
 #include "file_utils.h"
 #include "log.h"
-#include "pgctl.h"
-#include "pgsetup.h"
 #include "routes.h"
 #include "string_utils.h"
 
@@ -184,18 +183,19 @@ write_route_section(const char *pgdata, const char *routeKey,
 /*
  * ensure_tls_for_multiple_routes re-reads pg_walserver.ini after
  * write_route_section() and, when it now holds more than one route,
- * makes sure a certificate exists for <pgdata> (creating a self-signed
- * one with pg_create_self_signed_cert() -- the exact function `pg_autoctl
- * create archiver --ssl-self-signed` already uses -- when neither
- * server.crt/server.key nor an already-loaded certificate is there), and
- * warns when routeKey itself has no "hostname" property: without one, it
- * can only ever be reached by dbname (fine for pg_basebackup/pg_
- * receivewal/archive_command, never for a real physical standby, see
- * auth.c's own comment) or the "*" wildcard. Never a hard failure -- a
- * single-route deployment (the common case) never reaches any of this at
- * all, and even a multi-route one that only ever serves pg_basebackup/
- * pg_receivewal/archive_command by dbname genuinely doesn't need TLS/SNI,
- * so this only warns, it does not refuse to proceed.
+ * makes sure a certificate exists for <pgdata> (creating a self-signed one
+ * via ws_create_cert_run() -- cli_create_cert.c, the same helper
+ * `pg_walserver create-cert` itself calls, wrapping
+ * pg_create_self_signed_cert() -- when neither server.crt/server.key nor
+ * an already-loaded certificate is there), and warns when routeKey itself
+ * has no "hostname" property: without one, it can only ever be reached by
+ * dbname (fine for pg_basebackup/pg_receivewal/archive_command, never for
+ * a real physical standby, see auth.c's own comment) or the "*" wildcard.
+ * Never a hard failure -- a single-route deployment (the common case)
+ * never reaches any of this at all, and even a multi-route one that only
+ * ever serves pg_basebackup/pg_receivewal/archive_command by dbname
+ * genuinely doesn't need TLS/SNI, so this only warns, it does not refuse
+ * to proceed.
  */
 static void
 ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
@@ -230,25 +230,17 @@ ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
 
 	if (!file_exists(certPath) || !file_exists(keyPath))
 	{
-		PostgresSetup pgSetup = { 0 };
 		char localHostname[_POSIX_HOST_NAME_MAX] = "pg_walserver";
 
 		(void) gethostname(localHostname, sizeof(localHostname));
-		strlcpy(pgSetup.pgdata, pgdata, sizeof(pgSetup.pgdata));
 
-		if (pg_create_self_signed_cert(&pgSetup, localHostname))
-		{
-			log_info("Created a self-signed certificate for \"%s\" "
-					 "(\"%s\"/\"%s\") -- replace it with a real one before "
-					 "running on a reachable network", pgdata, certPath,
-					 keyPath);
-		}
-		else
+		if (!ws_create_cert_run(pgdata, localHostname, false))
 		{
 			log_warn("Failed to create a self-signed certificate for "
 					 "\"%s\" -- pass --ssl-cert-file/--ssl-key-file to "
-					 "\"serve\", or create \"%s\"/\"%s\" yourself, before "
-					 "starting it", pgdata, certPath, keyPath);
+					 "\"serve\", or create \"%s\"/\"%s\" yourself (\"pg_"
+					 "walserver create-cert\"), before starting it",
+					 pgdata, certPath, keyPath);
 		}
 	}
 

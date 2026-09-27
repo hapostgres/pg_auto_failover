@@ -136,6 +136,31 @@ The commands a connected client can issue on a `Query` ('Q') message are:
   `FETCH_FILE`, `cmd_fetch_file.c`. Its client used to be a
   `pg_walserver fetch-file` CLI sub-command in this same binary; it has
   been moved out, see "FETCH_FILE's client" below.
+- `CHECK_FILE '<name>' <size> crc32c:<hex>` (`cmd_check_file.c`) -- another
+  of this project's own extensions, a cheap query with no file transfer at
+  all: `RowDescription(status text)` + `DataRow('missing'|'matches'|
+  'differs')` + `CommandComplete`, the same shape `SHOW` already uses. The
+  client (`pg_walserver archive`, see "The archive push side" below)
+  computes the size and CRC32C of its own *local* file and sends both
+  here; the reply says whether that's already what's on disk under this
+  name, without moving a single byte of file content. See DESIGN-
+  standalone-archiving.md's "The push side" section for the full design.
+- `ARCHIVE_FILE '<name>'` (`cmd_archive_file.c`) -- a `CopyIn` (client to
+  server): the actual push, used only when `CHECK_FILE` said `missing` or
+  `differs`. The server never trusts a client's own `CHECK_FILE` checksum
+  as proof of anything -- once the whole `CopyIn` has been received, it
+  re-derives the overwrite-safety decision from the real bytes just
+  received vs. whatever is already on disk under that name (`ws_file_
+  crc32c()`, `ws_util.c`): identical -> success (an idempotent retry,
+  matching PostgreSQL's own `archive_command` contract, which explicitly
+  requires this), different -> a clean rejection, nothing there yet -> a
+  same-directory temporary file plus atomic `rename()`. Same allow-list as
+  `FETCH_FILE`'s read side (`ws_fetch_filename_is_servable()`, extended to
+  also accept a base backup's own `<24hex>.<8hex>.backup` history file --
+  DESIGN-standalone-archiving.md's Gap #1), hard size cap at the route's
+  own `wal_segment_size` (`ws_route_wal_segment_size()`) plus
+  `WS_ARCHIVE_FILE_SIZE_SLACK` (1 MiB), checked as bytes arrive so an
+  oversized push never gets to write the whole thing to disk.
 
 Anything else parses to `WS_CMD_UNKNOWN` and gets a clean `ErrorResponse`
 (SQLSTATE `42601`) rather than a crash or a hung connection -- the
@@ -612,6 +637,87 @@ deliberately separate concern an operator (or `pg_autoctl`, later) still
 configures on its own, see `docs/ref/pg_walserver.rst`'s own worked
 example for the full sequence including those.
 
+## `create-cert`: a self-signed TLS certificate on demand
+
+`pg_walserver create-cert --pgdata <path> --hostname <name> [--force]`
+(`cli_create_cert.c`) writes `<pgdata>/server.crt`/`server.key` via
+`pg_create_self_signed_cert()` (`src/bin/common/pgctl.c`) -- the exact
+function `setup`'s own `ensure_tls_for_multiple_routes()` calls
+automatically the moment a second named route needs a certificate (see
+above); `ws_create_cert_run()` (`cli_create_cert.c`) is the one shared
+helper both now call, so the call-and-log sequence isn't duplicated
+between the automatic and the by-hand path. Useful whenever an operator
+wants TLS in place from the very first route (a single route served over
+a reachable network still benefits from encryption, even though SNI
+routing itself doesn't need it yet), or wants to replace an existing
+self-signed certificate. Refuses to overwrite an already-existing
+`server.crt`/`server.key` unless `--force` -- the same "never silently
+replace what's already there" principle as `cli_fetch_systemid.c`'s own
+systemid overwrite check, applied here to the certificate files instead.
+
+## The archive push side: `CHECK_FILE` + `ARCHIVE_FILE` + `pg_walserver archive`
+
+Alongside the pull-oriented tools above, `pg_walserver` also accepts a
+*push*: `CHECK_FILE`/`ARCHIVE_FILE` (see "The wire protocol" above for
+their wire shape and overwrite-safety rule) and the `pg_walserver archive`
+client sub-command that drives them, meant to run as (part of) a Postgres
+`archive_command`. See DESIGN-standalone-archiving.md's "The push side:
+CHECK_FILE + ARCHIVE_FILE" section for the design this implements in full,
+including the two judgment calls it left open: `CHECK_FILE`'s wire shape
+(resolved as the lean `SHOW`-like row described above) and the bounded
+intra-invocation recheck's exact timing (resolved as `cli_archive.c`'s own
+`WS_ARCHIVE_RECHECK_COUNT`/`WS_ARCHIVE_RECHECK_SLEEP_SECONDS`: two
+rechecks, one second apart).
+
+`pg_walserver archive <path-to-file> <filename> --route <key> --host
+<host> [--port <port>] [--user <name>] [--sslmode <mode>]`
+(`cli_archive.c`) implements the design's own 4-step sequence per
+invocation:
+
+1. Compute the local file's own size and CRC32C (`ws_file_crc32c()`,
+   `ws_util.c`, backed by the same `INIT_CRC32C`/`COMP_CRC32C`/
+   `FIN_CRC32C` facility (`port/pg_crc32c.h`) real Postgres and
+   `pg_autoctl`'s own `nodespec.c` already use) -- one sequential local
+   read, no network cost.
+2. `CHECK_FILE`. `matches` -> exit 0 immediately, zero bytes sent -- what
+   makes this safe to run *alongside* something else already feeding the
+   same route (an external `pg_receivewal`, or, once it lands, the
+   embedded pull capturer) without ever duplicating a transfer once that
+   something else has actually delivered the segment.
+3. `missing`/`differs`: a short, bounded, intra-invocation recheck (sleep,
+   re-`CHECK_FILE`, up to `WS_ARCHIVE_RECHECK_COUNT` times) before pushing
+   for real. The design describes skipping this wait on a route known to
+   be push-only (no `capture = pull` configured) -- `pg_walserver.ini` has
+   no `capture` property yet in this codebase (that lands with the
+   embedded pull capturer itself, a separate, later piece of work), so
+   this client always does the short recheck for now; revisit this the
+   moment `capture` exists to consult, per `cli_archive.c`'s own comment.
+4. Push via `ARCHIVE_FILE` only once that still resolves to "missing" or
+   "differs".
+
+Exit code matches PostgreSQL's own `archive_command` contract exactly: `0`
+on success (including "already matches", step 2's early exit), nonzero
+with a clean stderr message on any failure, so PostgreSQL retries forever
+-- this project's own precedent for "the caller (Postgres) is our retry
+loop, one attempt per invocation, no local retry-count state" applies here
+exactly as it does wherever else in this codebase an `archive_command`-
+shaped contract is honored.
+
+Deliberately does **not** reuse `cli_upstream.c`'s `cli_resolve_upstream()`
+as-is: that helper resolves a `WsUpstreamTarget` (a `NodeAddress` +
+`SSLOptions` shaped for `prepare_primary_conninfo()`, i.e. a real
+*Postgres* connection) the way `fetch-systemid`/`basebackup` connect *out*
+from `pg_walserver` to an upstream Postgres instance. `archive` connects
+the other way, to a different kind of server entirely: it runs *on* the
+Postgres primary itself, as `archive_command`, connecting *to*
+`pg_walserver`'s own replication-protocol server -- a plain libpq
+connection issuing `CHECK_FILE`/`ARCHIVE_FILE` as simple queries, exactly
+like `src/bin/common/fetch_client.c`'s own `FETCH_FILE` client, with no
+`ReplicationSource`/`pgctl.c` involved at all. `cli_archive.h`'s own
+`WsArchiveTarget` mirrors `cli_upstream.h`'s flag *names*
+(`--route`/`--host`/`--port`/`--user`) for consistency, but is resolved
+directly in `cli_archive.c` rather than through `cli_resolve_upstream()`.
+
 ## The vendored ustar writer (vendor/tar.c)
 
 `vendor/tar.c` is vendored from PostgreSQL's own `src/port/tar.c` --
@@ -736,3 +842,21 @@ fails cleanly instead of falling through to either real route
 (`test_003`); and removing the certificate makes `pg_walserver serve`
 refuse to start at all with two named routes configured (`test_004`).
 Runs 4/4 green.
+
+### Testing the archive push side (tests/tap/specs/pg_walserver_archive_command.pgaf)
+
+A third, separate spec covers `CHECK_FILE`/`ARCHIVE_FILE` and the
+`pg_walserver archive`/`create-cert` sub-commands above, entirely
+monitor-independent as the design requires (see "The archive push side"
+above). Four steps: `CHECK_FILE` reports `missing` for a filename nothing
+has ever archived (`test_001`); `pg_walserver archive` pushes a brand new
+file via `ARCHIVE_FILE` (byte-identical to the source on disk afterwards),
+then run again against the exact same source file it reports `matches`
+and skips the push entirely -- exit 0 both times, the idempotency property
+PostgreSQL's own `archive_command` contract requires (`test_002`); pushing
+a *different* file under the same already-archived name is cleanly
+rejected (nonzero exit, the original bytes on disk untouched --
+overwrite-safety proven end to end, not just at the `CHECK_FILE` layer)
+(`test_003`); and `create-cert` creates a fresh certificate, refuses a
+second call without `--force`, and overwrites cleanly with it
+(`test_004`). Runs 4/4 green.

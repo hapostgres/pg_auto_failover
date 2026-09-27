@@ -547,6 +547,15 @@ ws_send_copy_both_response(int sock, int ncols)
 }
 
 
+/* ws_send_copy_in_response sends a 'G' CopyInResponse (client-to-server
+ * only, used by ARCHIVE_FILE's own push), via ws_send_copy_response(). */
+bool
+ws_send_copy_in_response(int sock, int ncols)
+{
+	return ws_send_copy_response(sock, 'G', ncols);
+}
+
+
 /*
  * ws_send_copy_data sends one 'd' CopyData message carrying dataLen raw
  * bytes -- WAL bytes during streaming, tar bytes during a base backup.

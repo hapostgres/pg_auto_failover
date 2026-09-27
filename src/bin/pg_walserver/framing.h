@@ -88,6 +88,7 @@ bool ws_send_data_row(int sock, const char **values, int ncols);
 
 bool ws_send_copy_out_response(int sock, int ncols);
 bool ws_send_copy_both_response(int sock, int ncols);
+bool ws_send_copy_in_response(int sock, int ncols);
 bool ws_send_copy_data(int sock, const char *data, int32_t dataLen);
 bool ws_send_copy_done(int sock);
 

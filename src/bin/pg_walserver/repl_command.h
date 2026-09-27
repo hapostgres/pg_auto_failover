@@ -42,6 +42,8 @@ typedef enum WsCommandType
 	WS_CMD_DROP_REPLICATION_SLOT,
 	WS_CMD_START_REPLICATION,
 	WS_CMD_FETCH_FILE,
+	WS_CMD_CHECK_FILE,
+	WS_CMD_ARCHIVE_FILE,
 	WS_CMD_UNKNOWN
 } WsCommandType;
 
@@ -76,7 +78,16 @@ typedef struct WsCommand
 	                                * see haveTimeline) */
 	bool haveTimeline;
 
-	char filename[256];            /* WS_CMD_FETCH_FILE */
+	char filename[256];            /* WS_CMD_FETCH_FILE, WS_CMD_CHECK_FILE,
+	                                * WS_CMD_ARCHIVE_FILE */
+
+	uint64_t checkFileSize;         /* WS_CMD_CHECK_FILE: the client's local
+	                                 * file size, to compare against what is
+	                                 * on disk here -- see cmd_check_file.h */
+	char checkFileCrc32c[16];       /* WS_CMD_CHECK_FILE: the client's local
+	                                 * file CRC32C, as an uppercase hex
+	                                 * string (no "crc32c:" prefix, already
+	                                 * stripped by the scanner) */
 
 	char slotName[NAMEDATALEN];    /* WS_CMD_{CREATE,READ,DROP}_REPLICATION_SLOT,
 	                                * WS_CMD_START_REPLICATION (SLOT clause,

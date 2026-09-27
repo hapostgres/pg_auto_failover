@@ -24,10 +24,11 @@ override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor -I$(SRC_DIR)../pg_autoctl
 LOCAL_SRC = main.c cli_root.c accept_loop.c startup.c auth.c framing.c repl_command.c \
             repl_gram.c repl_scanner.c \
             routes.c hba.c tls.c cmd_identify_system.c cmd_show.c cmd_base_backup.c \
-            tar_stream.c cmd_fetch_file.c \
+            tar_stream.c cmd_fetch_file.c cmd_check_file.c cmd_archive_file.c \
             cmd_timeline_history.c cmd_replication_slot.c \
             cmd_start_replication.c wal_dir_scan.c ws_util.c \
-            cli_upstream.c cli_fetch_systemid.c cli_basebackup.c cli_setup.c
+            cli_upstream.c cli_fetch_systemid.c cli_basebackup.c cli_setup.c \
+            cli_create_cert.c cli_archive.c
 
 LOCAL_OBJS = $(patsubst %.c,%.o,$(LOCAL_SRC))
 

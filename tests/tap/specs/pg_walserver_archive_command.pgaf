@@ -1,0 +1,140 @@
+# CHECK_FILE/ARCHIVE_FILE (the push side, cmd_check_file.c/cmd_archive_file.c)
+# and the `pg_walserver archive`/`pg_walserver create-cert` client-side
+# sub-commands (cli_archive.c/cli_create_cert.c) -- entirely monitor-
+# independent, see DESIGN-standalone-archiving.md's "The push side: CHECK_
+# FILE + ARCHIVE_FILE" section for the full design this spec exercises.
+#
+# Modeled closely on pg_walserver_standalone.pgaf/pg_walserver_sni_
+# routing.pgaf: node2 hosts pg_walserver, every connection below is node2
+# talking to its own pg_walserver over loopback, a manually written,
+# properly scoped archiver-hba.conf (there is no monitor here to learn a
+# real client's address from), and `pg_walserver setup` handles onboarding
+# the route (path + upstream + systemid) exactly as an operator would.
+#
+#   test_001  CHECK_FILE reports "missing" for a filename nothing has ever
+#             pushed -- a raw wire-level check, no file transfer at all
+#   test_002  `pg_walserver archive <path> <name> ...` pushes a brand new
+#             file via ARCHIVE_FILE (exit 0, real bytes land on disk,
+#             byte-identical to the source); run a second time against the
+#             exact same source file, CHECK_FILE now reports "matches" and
+#             the push is skipped entirely (still exit 0, nothing sent) --
+#             the "safe to run archive_command repeatedly" idempotency
+#             property PostgreSQL's own contract requires
+#   test_003  pushing a *different* local file under the same already-
+#             archived name: CHECK_FILE reports "differs", the bounded
+#             intra-invocation recheck doesn't change that, and the actual
+#             ARCHIVE_FILE push is cleanly rejected (nonzero exit, clean
+#             stderr message) -- the file already on disk is untouched,
+#             never overwritten with the differing content
+#   test_004  `pg_walserver create-cert`: a fresh certificate is created
+#             for --pgdata; running it again without --force refuses
+#             (never silently overwriting an existing certificate); with
+#             --force it overwrites cleanly
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+
+    # node2 hosts pg_walserver for this test; it is otherwise an ordinary
+    # registered secondary and that is irrelevant here. Every connection
+    # below is node2 talking to its own pg_walserver over loopback.
+    exec node2 bash -c 'mkdir -p /tmp/wsarch && printf "host all all 127.0.0.1/32 trust\n" > /tmp/wsarch/archiver-hba.conf'
+
+    # the one-shot wizard: creates /tmp/wsarch/arch/0, writes the
+    # pg_walserver.ini [arch/0] section (path + upstream), checks
+    # pgautofailover_replicator's REPLICATION attribute on node1, and
+    # fetches node1's real system identifier into archiver-systemid. No
+    # --with-basebackup needed: this spec never serves BASE_BACKUP.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/wsarch --route arch/0 --path /tmp/wsarch/arch/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+
+    exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/wsarch --port 6547 > /tmp/wsarch-walserver.log 2>&1 & echo started'
+    exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6547) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/wsarch-walserver.log; exit 1'
+}
+
+teardown {
+    compose down
+}
+
+step test_001_check_file_missing {
+    # a WAL-segment-shaped filename ("^[0-9A-F]{24}$", ws_fetch_filename_is_
+    # servable()'s own allow-list) that nothing has ever archived -- the
+    # size/crc32c given don't matter at all for "missing": cmd_check_file.c
+    # checks existence (ENOENT) before ever comparing anything.
+    exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6547 dbname=arch/0 replication=true sslmode=disable" -Atc "CHECK_FILE 000000010000000000000099 100 crc32c:00000000"); test "$out" = "missing" || { echo "got: $out"; false; }'
+}
+
+step test_002_archive_pushes_then_matches {
+    # a small, deterministic "WAL segment" (this spec never needs a real
+    # 16MB one -- ARCHIVE_FILE's own size cap only bounds the maximum, it
+    # never requires a minimum)
+    exec node2 bash -c 'head -c 65536 /dev/urandom > /tmp/seg1.bin'
+
+    # step 1: nothing on disk yet under this name -- CHECK_FILE says
+    # "missing", pg_walserver archive pushes it via ARCHIVE_FILE, exit 0
+    exec node2 bash -c 'pg_walserver archive /tmp/seg1.bin 000000010000000000000001 --route arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive1.log 2>&1 || (cat /tmp/archive1.log; false)'
+    exec node2 bash -c 'grep -qi "ARCHIVE_FILE\|Archived" /tmp/archive1.log'
+    exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001 || (ls -la /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001; false)'
+
+    # step 2: the exact same source file, archived again (PostgreSQL's own
+    # archive_command contract: an idempotent retry after a crash mid-
+    # archive is expected and normal) -- CHECK_FILE now reports "matches",
+    # so nothing is pushed at all, still exit 0
+    exec node2 bash -c 'pg_walserver archive /tmp/seg1.bin 000000010000000000000001 --route arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive2.log 2>&1 || (cat /tmp/archive2.log; false)'
+    exec node2 bash -c 'grep -qi "already matches" /tmp/archive2.log'
+    exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001'
+}
+
+step test_003_check_file_differs_is_rejected {
+    # a different file pushed under the SAME already-archived name: the
+    # server must never trust ARCHIVE_FILE's own CHECK_FILE preamble --
+    # cmd_archive_file.c re-derives the overwrite-safety decision from the
+    # real bytes on disk vs. the real bytes just received, independent of
+    # whatever CHECK_FILE reported earlier in the same invocation
+    exec node2 bash -c 'head -c 65536 /dev/urandom > /tmp/seg1-different.bin'
+    exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/seg1-different.bin && (echo "the two random files collided, extremely unlikely -- rerun"; false); true'
+
+    exec node2 bash -c 'out=$(cat /tmp/seg1-different.bin | wc -c); test "$out" = "65536"'
+    exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6547 dbname=arch/0 replication=true sslmode=disable" -Atc "CHECK_FILE 000000010000000000000001 65536 crc32c:00000000"); test "$out" = "differs" || { echo "got: $out"; false; }'
+
+    # pg_walserver archive itself: CHECK_FILE says "differs", the bounded
+    # recheck doesn't change that (nothing is going to make the file on
+    # disk start matching a size/crc32c that was never pushed), so it
+    # pushes for real -- and the server rejects it outright: nonzero exit,
+    # a clean stderr message, and the file already on disk is untouched.
+    exec node2 bash -c 'if pg_walserver archive /tmp/seg1-different.bin 000000010000000000000001 --route arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive3.log 2>&1; then cat /tmp/archive3.log; false; fi'
+    exec node2 bash -c 'grep -qi "already exists\|differ" /tmp/archive3.log'
+    exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001 || (echo "the original file was overwritten -- overwrite-safety failed"; false)'
+}
+
+step test_004_create_cert_fresh_and_refuse {
+    exec node2 bash -c 'test ! -f /tmp/wsarch/server.crt'
+    exec node2 bash -c 'pg_walserver create-cert --pgdata /tmp/wsarch --hostname archtest.internal'
+    exec node2 bash -c 'test -f /tmp/wsarch/server.crt && test -f /tmp/wsarch/server.key'
+    exec node2 bash -c 'openssl x509 -noout -subject -in /tmp/wsarch/server.crt | grep -q archtest.internal'
+
+    # a second call, no --force: refuses rather than silently replacing
+    # what's already there (matches cli_fetch_systemid.c's own overwrite-
+    # safety principle applied here to server.crt/server.key)
+    exec node2 bash -c 'md5sum /tmp/wsarch/server.crt > /tmp/cert1.md5'
+    exec node2 bash -c 'if pg_walserver create-cert --pgdata /tmp/wsarch --hostname other.internal 2>/tmp/create-cert-refuse.log; then cat /tmp/create-cert-refuse.log; false; fi'
+    exec node2 bash -c 'grep -qi -- "--force" /tmp/create-cert-refuse.log'
+    exec node2 bash -c 'md5sum -c /tmp/cert1.md5'
+
+    # --force: overwrites cleanly, CN now reflects the new --hostname
+    exec node2 bash -c 'pg_walserver create-cert --pgdata /tmp/wsarch --hostname other.internal --force'
+    exec node2 bash -c 'openssl x509 -noout -subject -in /tmp/wsarch/server.crt | grep -q other.internal'
+}
+
+sequence
+    test_001_check_file_missing
+    test_002_archive_pushes_then_matches
+    test_003_check_file_differs_is_rejected
+    test_004_create_cert_fresh_and_refuse

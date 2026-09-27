@@ -60,6 +60,7 @@ static void add_option(const char *name, const char *value, bool hasValue);
 
 /* Non-keyword tokens */
 %token <str> SCONST IDENT
+%token <str> CRC32C_HEX
 %token <uintval> UCONST
 %token <recptr> RECPTR
 
@@ -84,6 +85,8 @@ static void add_option(const char *name, const char *value, bool hasValue);
 %token K_NOEXPORT_SNAPSHOT
 %token K_USE_SNAPSHOT
 %token K_FETCH_FILE
+%token K_CHECK_FILE
+%token K_ARCHIVE_FILE
 
 %type <str>		var_name ident_or_keyword opt_slot
 %type <boolval>	opt_temporary
@@ -111,6 +114,8 @@ command:
 			| timeline_history
 			| show
 			| fetch_file
+			| check_file
+			| archive_file
 			;
 
 /*
@@ -134,6 +139,41 @@ fetch_file:
 			K_FETCH_FILE SCONST
 				{
 					ws_parse_cmd->type = WS_CMD_FETCH_FILE;
+					strlcpy(ws_parse_cmd->filename, $2, sizeof(ws_parse_cmd->filename));
+				}
+			;
+
+/*
+ * CHECK_FILE '<name>' <size> crc32c:<hex> -- this project's own extension,
+ * no Postgres equivalent (see cmd_check_file.h). The wire shape mirrors
+ * FETCH_FILE's own filename argument (same <fname> lexer state, entered
+ * right after the keyword), followed by a plain UCONST size and a single
+ * CRC32C_HEX token the scanner produces from the literal "crc32c:<hex>"
+ * text -- see repl_scanner.l's own comment on why that is one token rather
+ * than three (a hex CRC can start with a digit, which the ordinary
+ * {identifier} rule cannot match at all).
+ */
+check_file:
+			K_CHECK_FILE SCONST UCONST CRC32C_HEX
+				{
+					ws_parse_cmd->type = WS_CMD_CHECK_FILE;
+					strlcpy(ws_parse_cmd->filename, $2, sizeof(ws_parse_cmd->filename));
+					ws_parse_cmd->checkFileSize = $3;
+					strlcpy(ws_parse_cmd->checkFileCrc32c, $4,
+							sizeof(ws_parse_cmd->checkFileCrc32c));
+				}
+			;
+
+/*
+ * ARCHIVE_FILE '<name>' -- this project's own extension, no Postgres
+ * equivalent (see cmd_archive_file.h). Same filename shape as FETCH_FILE;
+ * unlike FETCH_FILE, this one initiates a CopyIn (client to server) rather
+ * than a CopyOut once dispatched.
+ */
+archive_file:
+			K_ARCHIVE_FILE SCONST
+				{
+					ws_parse_cmd->type = WS_CMD_ARCHIVE_FILE;
 					strlcpy(ws_parse_cmd->filename, $2, sizeof(ws_parse_cmd->filename));
 				}
 			;

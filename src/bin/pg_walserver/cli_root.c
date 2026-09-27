@@ -24,13 +24,20 @@
  *                     cli_fetch_systemid.c.
  *     basebackup      Take a base backup of a route's upstream,
  *                     cli_basebackup.c.
+ *     create-cert     Create a self-signed TLS certificate for --pgdata,
+ *                     cli_create_cert.c.
+ *     archive         `pg_walserver archive %p %f`: push one WAL/.backup
+ *                     file into a route via CHECK_FILE/ARCHIVE_FILE,
+ *                     cli_archive.c -- meant to be used as (part of) a
+ *                     Postgres archive_command.
  *
- *   The last three are client-side, one-shot tools (they connect *out*, to
- *   a route's own upstream), sharing cli_upstream.c's own --route/--path/
- *   --upstream/--host/--port/--user resolution. See DESIGN-standalone-
- *   archiving.md for the full design and what's deliberately not built
- *   yet (the ARCHIVE_FILE/CHECK_FILE push side, the embedded pull
- *   capturer).
+ *   fetch-systemid/basebackup/create-cert are client-side, one-shot tools
+ *   that connect *out*, to a route's own upstream, sharing cli_upstream.c's
+ *   own --route/--path/--upstream/--host/--port/--user resolution; archive
+ *   connects to pg_walserver itself instead (see cli_archive.c's own header
+ *   comment for why it does not reuse cli_upstream.c as-is). See DESIGN-
+ *   standalone-archiving.md for the full design and what's deliberately
+ *   not built yet (the embedded pull capturer).
  *
  *   pg_walserver has no FETCH_FILE *client* sub-command: the one-shot
  *   FETCH_FILE client (fetching a WAL segment, not a system identifier --
@@ -57,7 +64,9 @@
 #include "commandline.h"
 
 #include "accept_loop.h"
+#include "cli_archive.h"
 #include "cli_basebackup.h"
+#include "cli_create_cert.h"
 #include "cli_fetch_systemid.h"
 #include "cli_setup.h"
 #include "cli_upstream.h"
@@ -879,6 +888,232 @@ static CommandLine setup_command =
 
 
 /* -----------------------------------------------------------------------
+ * pg_walserver create-cert --pgdata <path> --hostname <name> [--force]
+ * ----------------------------------------------------------------------- */
+
+static char createCertPgdata[MAXPGPATH] = { 0 };
+static char createCertHostname[_POSIX_HOST_NAME_MAX] = { 0 };
+static bool createCertForce = false;
+
+static struct option createCertLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "hostname", required_argument, NULL, 'n' },
+	{ "force", no_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_create_cert_getopt(int argc, char **argv)
+{
+	optind = 0;
+	createCertForce = false;
+	(void) get_env_pgdata(createCertPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:n:f",
+							createCertLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(createCertPgdata, optarg, sizeof(createCertPgdata));
+				break;
+			}
+
+			case 'n':
+			{
+				strlcpy(createCertHostname, optarg, sizeof(createCertHostname));
+				break;
+			}
+
+			case 'f':
+			{
+				createCertForce = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_create_cert_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(ws_create_cert_run(createCertPgdata, createCertHostname,
+							createCertForce) ? 0 : 1);
+}
+
+
+static CommandLine create_cert_command =
+	make_command("create-cert",
+				 "Create a self-signed TLS certificate for --pgdata",
+				 "--pgdata <path> --hostname <name> [--force]",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA); the certificate is written as "
+				 "\"<pgdata>/server.crt\"\n"
+				 "              and \"<pgdata>/server.key\"\n"
+				 "  --hostname  the certificate's own CN/subject (the name "
+				 "a client's\n"
+				 "              TLS SNI, or a human, is expected to use to "
+				 "reach this\n"
+				 "              server)\n"
+				 "  --force     overwrite an already-existing server.crt/"
+				 "server.key\n",
+				 cli_create_cert_getopt, cli_create_cert_command_run);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver archive <path-to-file> <filename>
+ *                       --route <key> --host <host> [--port <port>]
+ *                       [--user <name>] [--sslmode <mode>]
+ * ----------------------------------------------------------------------- */
+
+static WsArchiveTarget archiveTarget = { 0 };
+
+static struct option archiveLongOptions[] = {
+	{ "route", required_argument, NULL, 'r' },
+	{ "host", required_argument, NULL, 'h' },
+	{ "port", required_argument, NULL, 'p' },
+	{ "user", required_argument, NULL, 'U' },
+	{ "sslmode", required_argument, NULL, 's' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_archive_getopt(int argc, char **argv)
+{
+	optind = 0;
+	archiveTarget = (WsArchiveTarget) {
+		0
+	};
+	archiveTarget.port = WS_DEFAULT_PORT;
+	strlcpy(archiveTarget.user, PG_AUTOCTL_REPLICA_USERNAME,
+			sizeof(archiveTarget.user));
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "r:h:p:U:s:",
+							archiveLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'r':
+			{
+				strlcpy(archiveTarget.route, optarg, sizeof(archiveTarget.route));
+				break;
+			}
+
+			case 'h':
+			{
+				strlcpy(archiveTarget.host, optarg, sizeof(archiveTarget.host));
+				break;
+			}
+
+			case 'p':
+			{
+				if (!stringToInt(optarg, &(archiveTarget.port)))
+				{
+					log_fatal("Invalid --port value \"%s\"", optarg);
+					exit(1);
+				}
+				break;
+			}
+
+			case 'U':
+			{
+				strlcpy(archiveTarget.user, optarg, sizeof(archiveTarget.user));
+				break;
+			}
+
+			case 's':
+			{
+				strlcpy(archiveTarget.sslmode, optarg, sizeof(archiveTarget.sslmode));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_archive_command_run reads the two positional arguments a Postgres
+ * archive_command always passes -- %p (the file's real path) and %f (the
+ * bare name to archive it under) -- left in argv by the framework once
+ * cli_archive_getopt() has consumed every flag (commandline_run(),
+ * src/bin/lib/subcommands.c/commandline.c), then runs ws_archive_run()'s
+ * whole sequence. Exit code matches PostgreSQL's own archive_command
+ * contract exactly: 0 on success (including "already there"), 1 on any
+ * failure, so PostgreSQL retries.
+ */
+static void
+cli_archive_command_run(int argc, char **argv)
+{
+	if (argc != 2)
+	{
+		log_fatal("archive requires exactly two arguments: <path-to-file> "
+				  "<filename> (the \"%%p\" and \"%%f\" a Postgres "
+				  "archive_command is invoked with)");
+		commandline_print_usage(&ws_root, stderr);
+		exit(1);
+	}
+
+	if (archiveTarget.route[0] == '\0' || archiveTarget.host[0] == '\0')
+	{
+		log_fatal("archive requires --route and --host");
+		exit(1);
+	}
+
+	exit(ws_archive_run(&archiveTarget, argv[0], argv[1]) ? 0 : 1);
+}
+
+
+static CommandLine archive_command =
+	make_command("archive",
+				 "Push one WAL/.backup file into a pg_walserver route "
+				 "(archive_command)",
+				 "<path-to-file> <filename> --route <key> --host <host> "
+				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
+				 "  --route     the pg_walserver route to archive into "
+				 "(sent as dbname)\n"
+				 "  --host      the pg_walserver host to connect to\n"
+				 "  --port      the pg_walserver port to connect to "
+				 "(default: 6543)\n"
+				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+																				  "  --sslmode   libpq sslmode (default: libpq's own "
+																				  "default, \"prefer\")\n"
+																				  "\n"
+																				  "  Meant to be used as (part of) a Postgres "
+																				  "archive_command, e.g.:\n"
+																				  "    archive_command = 'pg_walserver archive %%p %%f "
+																				  "--route mycluster \\\n"
+																				  "                       --host archive.example.com "
+																				  "--user archiver_repl'\n",
+				 cli_archive_getopt, cli_archive_command_run);
+
+
+/* -----------------------------------------------------------------------
  * Root command table
  * ----------------------------------------------------------------------- */
 
@@ -888,6 +1123,8 @@ static CommandLine *root_subcommands[] = {
 	&fetch_systemid_command,
 	&basebackup_command,
 	&setup_command,
+	&create_cert_command,
+	&archive_command,
 	NULL
 };
 
@@ -895,7 +1132,8 @@ CommandLine ws_root =
 	make_command_set("pg_walserver",
 					 "The archiver's own replication-protocol server",
 					 "[serve options] | scram-secret ... | setup ... | "
-					 "fetch-systemid ... | basebackup ...",
+					 "fetch-systemid ... | basebackup ... | create-cert ... | "
+					 "archive ...",
 					 "  serve           Run the accept loop (default "
 					 "command, used when no\n"
 					 "                  sub-command name is given at all)\n"
@@ -906,7 +1144,11 @@ CommandLine ws_root =
 					 "  fetch-systemid  Fetch a route's upstream system "
 					 "identifier\n"
 					 "  basebackup      Take a base backup of a route's "
-					 "upstream\n",
+					 "upstream\n"
+					 "  create-cert     Create a self-signed TLS "
+					 "certificate for --pgdata\n"
+					 "  archive         Push one WAL/.backup file into a "
+					 "route (archive_command)\n",
 					 NULL, root_subcommands);
 
 
@@ -932,6 +1174,8 @@ pg_walserver_default_argv(int argc, char **argv, int *newArgc)
 		 streq(argv[1], "setup") ||
 		 streq(argv[1], "fetch-systemid") ||
 		 streq(argv[1], "basebackup") ||
+		 streq(argv[1], "create-cert") ||
+		 streq(argv[1], "archive") ||
 		 streq(argv[1], "--help") ||
 		 streq(argv[1], "-h")))
 	{
