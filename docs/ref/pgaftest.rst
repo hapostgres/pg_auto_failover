@@ -450,7 +450,57 @@ Node modifiers:
 ``auth <method>``                             Per-node auth override
 ``ssl <mode>``                                Per-node SSL override
 ``volume <name> <path>``                      Mount a named Docker volume at ``<path>``
+``command "<string>"``                        Replace this node's own container command
+                                              entirely (raw shell command, no ``pg_autoctl``)
+``alias "h1", "h2", ...``                     Extra vanity hostnames resolving to this same
+                                              node's static IP in every other service's
+                                              ``extra_hosts`` (e.g. for TLS-SNI-routing tests)
+``docker-init``                               Add Compose's own ``init: true``: runs a tiny
+                                              init (tini) as the real PID 1 so a backgrounded
+                                              process a ``command`` override starts gets
+                                              reaped instead of becoming a zombie. Only use
+                                              alongside a ``command`` that does no reaping of
+                                              its own; never alongside a node whose own
+                                              command IS the thing under test as PID 1.
 ============================================  =============================================
+
+Bare, unmanaged single-node sugar
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``postgres <name>`` and ``pg_walserver <name>`` are top-level declarations,
+siblings of ``monitor`` (NOT nested inside ``formation {}``, and NOT
+pg_auto_failover's own ``archiver`` node kind — the real
+``pgautofailover.archiver`` / ``pg_autoctl create archiver``, attached to
+one or more formations, is this DSL's own separate, braced
+``archiver <name> { formation ... }`` block). Both are pure syntactic sugar
+for a one-node, no-monitor formation, so no new container-generation code
+exists for either:
+
+.. code-block:: text
+
+   cluster {
+       monitor
+       formation {
+           node1
+           node2
+       }
+
+       postgres     plain1                     # stock, unmanaged Postgres
+       pg_walserver walserver                   # pg_walserver, as PID 1 by default
+           command "tail -f /dev/null"          # override: stay up, driven by hand
+           docker-init                          # reap what "command" backgrounds
+           alias "routeA.internal", "routeB.internal"
+   }
+
+``postgres <name>`` runs the exact same container command as any other
+no-monitor node (``pg_autoctl node run``, which does its own initdb-on-
+first-run and supervises Postgres as PID 1). ``pg_walserver <name>``
+defaults to running the standalone ``pg_walserver`` tool's own ``serve``
+mode directly as PID 1; a spec that needs to run ``pg_walserver setup``
+by hand first (e.g. to configure named routes across several test steps
+before serving ever starts) overrides that default with an explicit
+``command "..."``, exactly as shown above. Both accept the same
+``alias``/``docker-init``/``command`` modifiers listed in the table above.
 
 Node registration order
 ~~~~~~~~~~~~~~~~~~~~~~~~

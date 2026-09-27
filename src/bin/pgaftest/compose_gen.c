@@ -630,6 +630,13 @@ compose_gen_write_hosts(const TestCluster *cluster,
 			char ip[32];
 			compose_service_ip(projectName, nodeOffset++, ip, sizeof(ip));
 			fformat(f, "%s  %s\n", ip, n->name);
+
+			/* extra vanity hostnames for this same node's IP (see TestNode's
+			 * own aliases comment in test_spec.h) */
+			for (int ai = 0; ai < n->aliasCount; ai++)
+			{
+				fformat(f, "%s  %s\n", ip, n->aliases[ai]);
+			}
 		}
 	}
 
@@ -643,8 +650,10 @@ compose_gen_write_hosts(const TestCluster *cluster,
  * compose_write_extra_hosts writes an `extra_hosts:` block (the same
  * IP-to-name mapping as compose_gen_write_hosts, in Compose YAML form) to
  * the docker-compose.yml service currently being written. Every service
- * gets the full mapping — monitor, second monitor, and every data node —
- * regardless of whether it needs all of those peers, matching what every
+ * gets the full mapping — monitor, second monitor, and every data node,
+ * plus one extra entry per node alias ("alias ..." in the node's own
+ * declaration, mapping additional vanity hostnames to that same node's IP)
+ * — regardless of whether it needs all of those peers, matching what every
  * service could previously resolve via the shared dnsmasq server.
  */
 static void
@@ -679,6 +688,13 @@ compose_write_extra_hosts(FILE *f, const TestCluster *cluster,
 			char ip[32];
 			compose_service_ip(projectName, nodeOffset++, ip, sizeof(ip));
 			fformat(f, "      - \"%s:%s\"\n", n->name, ip);
+
+			/* extra vanity hostnames for this same node's IP (see TestNode's
+			 * own aliases comment in test_spec.h) */
+			for (int ai = 0; ai < n->aliasCount; ai++)
+			{
+				fformat(f, "      - \"%s:%s\"\n", n->aliases[ai], ip);
+			}
 		}
 	}
 }
@@ -1164,6 +1180,22 @@ compose_gen_write(TestCluster *cluster,
 			else
 			{
 				write_node_command(f, cluster, NODE_INI_PATH);
+			}
+
+			if (n->dockerInit)
+			{
+				/*
+				 * "docker-init" (test_spec_parse.y): adds Compose's own
+				 * `init: true`, running a tiny init (tini) as this
+				 * container's real PID 1 with the command above as its
+				 * child, so anything the command backgrounds gets reaped
+				 * instead of turning into a permanent zombie. Only sensible
+				 * alongside a "command" override that does no reaping of
+				 * its own (see test_spec.h's own dockerInit comment) --
+				 * never set together with a node whose own command IS the
+				 * thing under test as a real PID 1.
+				 */
+				fformat(f, "    init: true\n");
 			}
 
 			/*

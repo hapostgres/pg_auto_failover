@@ -140,6 +140,45 @@ static TestCmd       *current_pass_cmd    = NULL;  /* for opt_passing_through */
 static TestFormation *current_formation   = NULL;
 static TestNode      *current_node        = NULL;
 
+/*
+ * create_standalone_node — shared helper behind postgres_line and
+ * pg_walserver_line (see their own comment below): allocates a brand new,
+ * single-node formation named after the node itself (guaranteed unique,
+ * so it can't collide with a real formation{} block elsewhere in the same
+ * spec) and returns its one no-monitor TestNode, ready for node_opt_list to
+ * apply any further modifiers (including "command <string>" and the new
+ * "alias ..." clause) exactly as it already does for an ordinary node_line.
+ *
+ * This is pure syntactic sugar: it produces the exact same TestFormation/
+ * TestNode shape a hand-written "formation { <name> no-monitor }" block
+ * already produces, so every existing container-generation code path in
+ * compose_gen.c (ini writer, compose service writer, IP allocation,
+ * extra_hosts) picks it up completely unchanged.
+ */
+static TestNode *
+create_standalone_node(TestCluster *cl, const char *name)
+{
+	if (cl->formationCount >= PGAF_MAX_FORMATIONS)
+	{
+		fprintf(stderr, "pgaftest: too many formations (max %d)\n",
+		        PGAF_MAX_FORMATIONS);
+		exit(1);
+	}
+
+	TestFormation *form = &cl->formations[cl->formationCount++];
+	strlcpy(form->name, name, sizeof(form->name));
+	form->numSync = -1;
+
+	TestNode *node = &form->nodes[form->nodeCount++];
+	node->kind = NODE_KIND_STANDALONE;
+	node->candidatePriority = 50;
+	node->replicationQuorum = true;
+	node->noMonitor = true;
+	strlcpy(node->name, name, sizeof(node->name));
+
+	return node;
+}
+
 %}
 
 %union {
@@ -162,6 +201,7 @@ static TestNode      *current_node        = NULL;
 %token T_CITUS_CLUSTER_NAME T_DEBIAN_CLUSTER T_REPLICATION_QUORUM T_REPLICATION_PASSWORD
 %token T_EXTENSION_VERSION T_BIND_SOURCE T_LEGACY_STARTUP T_REGION T_COMMAND
 %token T_NODEINI
+%token T_PG_WALSERVER T_ALIAS T_DOCKER_INIT
 
 /* ---- FSM state tokens (used in CLUSTER_BODY and STEP_BODY) ---- */
 %token T_FS_INIT T_FS_SINGLE T_FS_PRIMARY
@@ -256,6 +296,8 @@ cluster_item:
 	| auth_line
 	| extension_version_line
 	| formation_block
+	| postgres_line
+	| pg_walserver_line
 	| T_BIND_SOURCE { current_spec->cluster.bindSource = true; }
 	| T_LEGACY_STARTUP { current_spec->cluster.legacyStartup = true; }
 	;
@@ -323,6 +365,102 @@ monitor_line:
 		free($2);
 		/* password for second monitor not yet stored */
 		free($6);
+	}
+	;
+
+/*
+ * postgres <name> [<node_opt>...]
+ * pg_walserver <name> [<node_opt>...]
+ *
+ * Bare, top-level, entirely unmanaged single-node sugar -- siblings of
+ * "monitor" at the cluster{} level, NOT nested inside a formation{} block.
+ * NOT pg_auto_failover's own "archiver" node kind either (the real
+ * pgautofailover.archiver / NODE_KIND_ARCHIVER / `pg_autoctl create
+ * archiver`, which this DSL separately exposes as its own braced
+ * `archiver <name> { formation ... }` block) -- these two get zero
+ * pg_autoctl involvement of any kind, ever: no formation membership, no
+ * monitor registration, nothing.
+ *
+ *   postgres <name>
+ *     Sugar for a single no-monitor node (create_standalone_node() above):
+ *     same container command as any other no-monitor node
+ *     (`pg_autoctl node run`, which does its own initdb-on-first-run and
+ *     supervises Postgres as PID 1 -- see write_node_command() in
+ *     compose_gen.c), nothing new to generate. A stock, unmanaged
+ *     PostgreSQL instance, useful any time a spec wants "a plain Postgres
+ *     to test against" without pg_auto_failover in the picture at all.
+ *
+ *   pg_walserver <name>
+ *     Same sugar, but defaults commandOverride to running the standalone
+ *     pg_walserver tool's own "serve" mode directly as the container's
+ *     PID 1 (see pg_walserver_pid1.pgaf, which already proves this is
+ *     safe: process_supervisor.c gives it the same orphan-reaping/clean-
+ *     shutdown behaviour pg_autoctl's own supervisor.c gives a managed
+ *     node). A spec that needs to run `pg_walserver setup` by hand before
+ *     `serve` ever starts (e.g. to configure named routes across several
+ *     test steps) overrides this default the same way any node already
+ *     can, with an explicit trailing "command "..."" -- no second
+ *     override mechanism invented for this.
+ *
+ * Both accept a small, closed set of modifiers afterwards (aux_opt_list
+ * below) -- deliberately NOT the full node_opt_list an ordinary formation
+ * node_line accepts: several of those tokens (T_SSL, T_AUTH, ...) are
+ * ALSO valid top-level cluster_item starts (ssl_line, auth_line, ...), so
+ * reusing node_opt_list here at the cluster_item level would make the
+ * grammar ambiguous about whether e.g. a bare "ssl off" line after
+ * "postgres foo" is a per-node override or the next cluster-wide
+ * directive (bison would still resolve it, silently, by always shifting
+ * -- exactly the kind of divergence-under-ambiguity worth avoiding).
+ * "command" and "alias" don't have that problem: neither ever starts a
+ * cluster_item, so keeping just those two here is unambiguous.
+ */
+postgres_line:
+	T_POSTGRES T_IDENT
+	{
+		current_node = create_standalone_node(&current_spec->cluster, $2);
+		free($2);
+	}
+	aux_opt_list
+	;
+
+pg_walserver_line:
+	T_PG_WALSERVER T_IDENT
+	{
+		current_node = create_standalone_node(&current_spec->cluster, $2);
+		free($2);
+
+		/*
+		 * Default: run pg_walserver's own "serve" mode directly as this
+		 * container's PID 1, pointed at a writable directory of its own
+		 * under the node's already-provisioned /var/lib/postgres volume.
+		 * Zero named routes at startup is a supported, harmless state (see
+		 * cli_serve_run in pg_walserver/cli_root.c); a spec that wants
+		 * routes configured first overrides this via "command \"...\"".
+		 */
+		strlcpy(current_node->commandOverride,
+		        "mkdir -p /var/lib/postgres/ws && "
+		        "exec pg_walserver --pgdata /var/lib/postgres/ws --port 5432",
+		        sizeof(current_node->commandOverride));
+	}
+	aux_opt_list
+	;
+
+aux_opt_list:
+	  /* empty */
+	| aux_opt_list aux_opt
+	;
+
+aux_opt:
+	  T_COMMAND T_STRING
+	{
+		strlcpy(current_node->commandOverride, $2,
+		        sizeof(current_node->commandOverride));
+		free($2);
+	}
+	| T_ALIAS alias_list
+	| T_DOCKER_INIT
+	{
+		current_node->dockerInit = true;
 	}
 	;
 
@@ -667,6 +805,38 @@ node_opt:
 			current_node->volumeCount++;
 		}
 		free($2); free($3);
+	}
+	| T_ALIAS alias_list
+	| T_DOCKER_INIT
+	{
+		current_node->dockerInit = true;
+	}
+	;
+
+/*
+ * alias_list — one or more quoted vanity hostnames after "alias", each one
+ * appended to current_node->aliases as it is parsed.  Quoted strings only
+ * (not a bare T_IDENT): CLUSTER_BODY's identifier pattern doesn't allow
+ * ".", and a hostname like "routeA.internal" needs one.
+ */
+alias_list:
+	  T_STRING
+	{
+		if (current_node->aliasCount < PGAF_MAX_NODE_ALIASES)
+		{
+			strlcpy(current_node->aliases[current_node->aliasCount++], $1,
+			        sizeof(current_node->aliases[0]));
+		}
+		free($1);
+	}
+	| alias_list T_COMMA T_STRING
+	{
+		if (current_node->aliasCount < PGAF_MAX_NODE_ALIASES)
+		{
+			strlcpy(current_node->aliases[current_node->aliasCount++], $3,
+			        sizeof(current_node->aliases[0]));
+		}
+		free($3);
 	}
 	;
 

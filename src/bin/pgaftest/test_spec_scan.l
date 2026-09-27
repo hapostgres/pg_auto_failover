@@ -191,7 +191,20 @@ static void pgaf_read_raw_block(void);
 <CLUSTER_BODY>"legacy-startup"      { return T_LEGACY_STARTUP; }
 <CLUSTER_BODY>"command"             { return T_COMMAND; }
 
+	/*
+	 * Bare, unmanaged single-node sugar -- see postgres_line/
+	 * pg_walserver_line's own comment in test_spec_parse.y.  The postgres
+	 * keyword reuses the very same T_POSTGRES token STEP_BODY already
+	 * returns for stop postgres/start postgres commands: the two never
+	 * appear in the same grammar context, so there's no ambiguity.
+	 */
+<CLUSTER_BODY>"postgres"            { return T_POSTGRES; }
+<CLUSTER_BODY>"pg_walserver"        { return T_PG_WALSERVER; }
+<CLUSTER_BODY>"alias"               { return T_ALIAS; }
+<CLUSTER_BODY>"docker-init"         { return T_DOCKER_INIT; }
+
 <CLUSTER_BODY>"="  { return T_EQUALS; }
+<CLUSTER_BODY>","  { return T_COMMA; }
 
 <CLUSTER_BODY>[0-9]+[sS]?  {
 	yylval.ival = atoi(yytext);
