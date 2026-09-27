@@ -11,7 +11,10 @@
  *        refusing a route key that already exists with a *different*
  *        path/upstream unless --force -- the same overwrite-safety
  *        principle as cli_fetch_systemid.c's own systemid check, applied
- *        one layer up;
+ *        one layer up; --capture pull writes the route's own "capture"
+ *        property (routes.h), opting it into the embedded pull capturer
+ *        (capture.c) the next time "serve" starts -- setup itself never
+ *        starts or touches that capturer, it only records the intent;
  *     3. fetch the system identifier (cli_fetch_systemid.c) -- this
  *        connection (pgctl_identify_system(), a real replication-mode
  *        IDENTIFY_SYSTEM) is also this step's own role-permission check:
@@ -82,7 +85,7 @@
 static bool
 write_route_section(const char *pgdata, const char *routeKey,
 					const WsUpstreamTarget *target, const char *upstreamRaw,
-					const char *hostname, bool force)
+					const char *hostname, bool capturePull, bool force)
 {
 	char routesPath[MAXPGPATH] = { 0 };
 
@@ -117,6 +120,16 @@ write_route_section(const char *pgdata, const char *routeKey,
 	{
 		log_info("Route \"%s\" already configured in \"%s\"",
 				 routeKey, routesPath);
+
+		if (capturePull && !existing->capturePull)
+		{
+			log_warn("--capture pull was given, but route \"%s\" already "
+					 "exists in \"%s\" without \"capture = pull\" -- edit "
+					 "\"%s\" by hand to add it, setup never changes an "
+					 "already-existing route's properties beyond path",
+					 routeKey, routesPath, routesPath);
+		}
+
 		return true;
 	}
 
@@ -132,6 +145,11 @@ write_route_section(const char *pgdata, const char *routeKey,
 	if (hostname != NULL && hostname[0] != '\0')
 	{
 		appendPQExpBuffer(section, "hostname = %s\n", hostname);
+	}
+
+	if (capturePull)
+	{
+		appendPQExpBufferStr(section, "capture = pull\n");
 	}
 
 	if (PQExpBufferBroken(section))
@@ -297,9 +315,15 @@ cli_setup_run(const WsSetupOptions *options)
 		return false;
 	}
 
+	/*
+	 * cli_resolve_upstream() above already refused to succeed without a
+	 * resolved host (--upstream, --host, or an existing route's own
+	 * "upstream"), so --capture pull always has somewhere to pull from by
+	 * the time it's written below -- no separate check needed here.
+	 */
 	if (!write_route_section(options->pgdata, options->route, &target,
 							 options->upstream, options->hostname,
-							 options->force))
+							 options->capturePull, options->force))
 	{
 		/* errors have already been logged */
 		return false;

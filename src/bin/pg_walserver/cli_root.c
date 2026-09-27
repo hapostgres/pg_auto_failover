@@ -64,10 +64,12 @@
 #include "commandline.h"
 
 #include "accept_loop.h"
+#include "capture.h"
 #include "cli_archive.h"
 #include "cli_basebackup.h"
 #include "cli_create_cert.h"
 #include "cli_fetch_systemid.h"
+#include "cli_internal.h"
 #include "cli_setup.h"
 #include "cli_upstream.h"
 #include "defaults.h"
@@ -293,8 +295,6 @@ cli_serve_run(int argc, char **argv)
 				}
 			}
 
-			routes_free(routes);
-
 			if (namedRouteCount > 1 && !ws_tls_server_enabled())
 			{
 				log_fatal("\"%s\" has %d named routes but TLS is not "
@@ -305,8 +305,21 @@ cli_serve_run(int argc, char **argv)
 						  "(\"pg_walserver setup\" already does this "
 						  "automatically)", serveConfig.routesPath,
 						  namedRouteCount);
+				routes_free(routes);
 				exit(1);
 			}
+
+			/*
+			 * Every "capture = pull" route gets its own supervised
+			 * embedded pg_receivewal child (capture.c) -- started here,
+			 * once, now that pg_walserver.ini/HBA validation above has
+			 * already succeeded, and before ws_accept_loop() (and thus
+			 * before any connection child can be forked). See capture.h's
+			 * own comment for the full startup/shutdown contract.
+			 */
+			(void) ws_capture_start_all(routes, routeCount);
+
+			routes_free(routes);
 		}
 	}
 
@@ -741,6 +754,7 @@ static struct option setupLongOptions[] = {
 	{ "port", required_argument, NULL, 'p' },
 	{ "user", required_argument, NULL, 'U' },
 	{ "hostname", required_argument, NULL, 'n' },
+	{ "capture", required_argument, NULL, 'c' },
 	{ "force", no_argument, NULL, 'f' },
 	{ "with-basebackup", no_argument, NULL, 'b' },
 	{ NULL, 0, NULL, 0 }
@@ -757,7 +771,7 @@ cli_setup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:n:fb",
+	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:n:c:fb",
 							setupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -812,6 +826,18 @@ cli_setup_getopt(int argc, char **argv)
 				break;
 			}
 
+			case 'c':
+			{
+				if (!streq(optarg, "pull"))
+				{
+					log_fatal("Invalid --capture value \"%s\": the only "
+							  "recognized value is \"pull\"", optarg);
+					exit(1);
+				}
+				setupOptions.capturePull = true;
+				break;
+			}
+
 			case 'f':
 			{
 				setupOptions.force = true;
@@ -851,8 +877,8 @@ static CommandLine setup_command =
 				 "Create or validate one pg_walserver.ini route",
 				 "--route <key> --path <dir> --pgdata <path> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
-				 "[--user <name>]] [--hostname <fqdn>] [--force] "
-				 "[--with-basebackup]",
+				 "[--user <name>]] [--hostname <fqdn>] [--capture pull] "
+				 "[--force] [--with-basebackup]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
 				 "  --route     the route key to create or validate\n"
@@ -878,6 +904,15 @@ static CommandLine setup_command =
 													  "              --pgdata automatically, the moment a "
 													  "second route is\n"
 													  "              added, if none exists yet\n"
+													  "  --capture pull  write \"capture = pull\" into the "
+													  "route's own section:\n"
+													  "              the next \"pg_walserver serve\" forks a "
+													  "supervised child\n"
+													  "              running the embedded pg_receivewal "
+													  "capturer against\n"
+													  "              this route's own \"upstream\" (capture.c)"
+													  " -- see README.md's\n"
+													  "              \"The embedded pull capturer\" section\n"
 													  "  --force     change an already-existing route's path, "
 													  "or overwrite an\n"
 													  "              already-recorded, different system "
@@ -1125,6 +1160,7 @@ static CommandLine *root_subcommands[] = {
 	&setup_command,
 	&create_cert_command,
 	&archive_command,
+	&internal_commands,
 	NULL
 };
 
@@ -1176,6 +1212,7 @@ pg_walserver_default_argv(int argc, char **argv, int *newArgc)
 		 streq(argv[1], "basebackup") ||
 		 streq(argv[1], "create-cert") ||
 		 streq(argv[1], "archive") ||
+		 streq(argv[1], "internal") ||
 		 streq(argv[1], "--help") ||
 		 streq(argv[1], "-h")))
 	{

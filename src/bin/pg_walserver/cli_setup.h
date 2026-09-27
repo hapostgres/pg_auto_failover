@@ -32,6 +32,11 @@ typedef struct WsSetupOptions
 	                                      * cli_setup.c's own comment on why
 	                                      * this matters the moment a second
 	                                      * route is added */
+	bool capturePull;                   /* --capture pull: written into the
+	                                     * route's own "capture" property
+	                                     * (routes.h), opting it into the
+	                                     * embedded pull capturer
+	                                     * (capture.c) once "serve" starts */
 	bool force;
 	bool withBasebackup;
 } WsSetupOptions;

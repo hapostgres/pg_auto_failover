@@ -344,6 +344,25 @@ in the common case where the pull side is healthy.
 
 ## The pull side: an embedded, supervised WAL capturer
 
+**Update: this section is implemented** (`capture.c`'s `ws_capture_
+start_all()`/`ws_capture_tick()`/`ws_capture_stop_all()`, `routes.h`'s
+`WsRoute.capturePull`, `pg_walserver setup --capture pull`) -- see the
+README's "The embedded pull capturer" section for the design as built,
+and `tests/tap/specs/pg_walserver_capture.pgaf` for its own test coverage.
+This section's original wording below ("forked, supervised child") was
+ambiguous about `fork()`-only vs. `fork()`+`exec()`; built as `fork()` +
+`execv()` of `pg_walserver` itself, re-entered as a new hidden
+`pg_walserver internal service pg-receivewal` sub-command (`cli_internal.
+c`) that calls `pg_receivewal_main()` in-process -- mirroring
+`pg_autoctl`'s own long-lived-service pattern (`service_postgres_ctl_
+start()`) rather than a bare fork with no exec, so a restarted capturer
+is safe as part of a container's PID 1. Supervision itself is built on a
+new, shared, generic child-process supervisor (`src/bin/common/process_
+supervisor.h`, a decoupled extraction of `pg_autoctl`'s own `supervisor.c`
+core), not a bespoke loop. The vendor relocation below landed as its own,
+isolated commit, ahead of the capturer itself, exactly as "Phasing" asked
+for.
+
 A route with `capture = pull` gets its own forked, supervised child
 running the **already-vendored** `pg_receivewal` (PR #1191's
 `src/bin/pg_autoctl/vendor/pg_receivewal/`, `pg_receivewal_main()`) against
@@ -437,5 +456,12 @@ by this one existing as a building block, not this PR's to make for it.
    monitor-independent, see "Scope note" above. `pg_walserver create-cert`
    also landed in this phase (a thin CLI wrapper around the same
    `pg_create_self_signed_cert()` call `setup` already made automatically).
-3. The embedded pull capturer: the largest single piece (vendor
-   relocation, per-route supervision).
+3. **Done.** The embedded pull capturer: the largest single piece (vendor
+   relocation, per-route supervision). Landed as several isolated commits:
+   the `vendor/pg_receivewal/` relocation (`src/bin/pg_autoctl/` to
+   `src/bin/common/`) on its own first; a generic, shared child-process
+   supervisor (`src/bin/common/process_supervisor.c/h`, extracted from
+   `pg_autoctl`'s own `supervisor.c`) next; then the capturer feature
+   itself (`capture.c`, the hidden `pg_walserver internal service
+   pg-receivewal` sub-command, the `capture` routes.ini property,
+   `pg_walserver setup --capture pull`) built on top of both.
