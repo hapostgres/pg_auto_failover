@@ -5,7 +5,7 @@
  *   the same way pgaftest's own cli_root.c does for a similarly-sized
  *   standalone binary.
  *
- *   Five sub-commands:
+ *   Eight sub-commands:
  *
  *     serve           Run the accept loop (accept_loop.h). This is
  *                     pg_walserver's *default* command: when no sub-command
@@ -26,26 +26,40 @@
  *                     cli_basebackup.c.
  *     create-cert     Create a self-signed TLS certificate for --pgdata,
  *                     cli_create_cert.c.
- *     archive         `pg_walserver archive %p %f`: push one WAL/.backup
- *                     file into a route via CHECK_FILE/ARCHIVE_FILE,
- *                     cli_archive.c -- meant to be used as (part of) a
- *                     Postgres archive_command.
+ *     archive-wal     `pg_walserver archive-wal %p %f`: push one WAL/
+ *                     .backup file into a route via CHECK_FILE/
+ *                     ARCHIVE_FILE, cli_archive.c -- meant to be used as
+ *                     (part of) a Postgres archive_command. Named
+ *                     "archive-wal", not the bare "archive", so it can't be
+ *                     mistaken for something that might also cover base
+ *                     backups (see cli_archive.h's own header comment for
+ *                     the naming rationale, shared with restore-wal below).
+ *     restore-wal     `pg_walserver restore-wal %f %p`: fetch one WAL/
+ *                     .backup file from a route via FETCH_FILE
+ *                     (src/bin/common/fetch_client.c's own
+ *                     ws_fetch_file_client()), cli_restore_wal.c -- meant
+ *                     to be used as (part of) a Postgres restore_command.
  *
  *   fetch-systemid/basebackup/create-cert are client-side, one-shot tools
  *   that connect *out*, to a route's own upstream, sharing cli_upstream.c's
- *   own --route/--path/--upstream/--host/--port/--user resolution; archive
- *   connects to pg_walserver itself instead (see cli_archive.c's own header
- *   comment for why it does not reuse cli_upstream.c as-is). See DESIGN-
- *   standalone-archiving.md for the full design and what's deliberately
- *   not built yet (the embedded pull capturer).
+ *   own --route/--path/--upstream/--host/--port/--user resolution;
+ *   archive-wal and restore-wal instead connect to pg_walserver itself
+ *   (see cli_archive.c's own header comment for why they do not reuse
+ *   cli_upstream.c as-is). See README.md for the full design, including
+ *   what plugs into pg_autoctl only in a later, separate PR (no "archiver"
+ *   node kind, no monitor schema, no pg_autoctl archive/restore command
+ *   with quorum participation).
  *
- *   pg_walserver has no FETCH_FILE *client* sub-command: the one-shot
- *   FETCH_FILE client (fetching a WAL segment, not a system identifier --
- *   a different thing from fetch-systemid above) lives in src/bin/common/
- *   fetch_client.c, linked in-process by whatever needs it (`pg_autoctl
- *   restore command`, in the later archiving PR) rather than exec'd as a
- *   pg_walserver sub-command. pg_walserver itself only ever answers
- *   FETCH_FILE as a server (see cmd_fetch_file.h).
+ *   The one-shot FETCH_FILE client (fetching a WAL segment, not a system
+ *   identifier -- a different thing from fetch-systemid above) itself
+ *   lives in src/bin/common/fetch_client.c as ws_fetch_file_client(),
+ *   linked in-process by whatever needs it -- `restore-wal` above is its
+ *   current, real caller; a later, separate "archiving" PR is expected to
+ *   also call it directly from `pg_autoctl restore command` once that PR's
+ *   own monitor-backed quorum/archiver-node bookkeeping exists on top of
+ *   it. Either way, it is linked in-process, never exec'd as a
+ *   pg_walserver sub-command of its own. pg_walserver itself only ever
+ *   answers FETCH_FILE as a server (see cmd_fetch_file.h).
  *
  *   Every flag and behavior is unchanged from the previous hand-rolled
  *   argv[1] dispatch in main.c: only the dispatch mechanism moved.
@@ -70,6 +84,7 @@
 #include "cli_create_cert.h"
 #include "cli_fetch_systemid.h"
 #include "cli_internal.h"
+#include "cli_restore_wal.h"
 #include "cli_setup.h"
 #include "cli_upstream.h"
 #include "defaults.h"
@@ -755,6 +770,7 @@ static struct option setupLongOptions[] = {
 	{ "user", required_argument, NULL, 'U' },
 	{ "hostname", required_argument, NULL, 'n' },
 	{ "capture", required_argument, NULL, 'c' },
+	{ "no-capture", no_argument, NULL, 'N' },
 	{ "force", no_argument, NULL, 'f' },
 	{ "with-basebackup", no_argument, NULL, 'b' },
 	{ NULL, 0, NULL, 0 }
@@ -769,9 +785,18 @@ cli_setup_getopt(int argc, char **argv)
 	};
 	(void) get_env_pgdata(setupOptions.pgdata);
 
+	/*
+	 * The embedded pull capturer is on by default now: running "setup"
+	 * with no capture-related flag at all writes "capture = pull" (see
+	 * write_route_section(), cli_setup.c). --capture none / --no-capture
+	 * are the explicit opt-out for a push-only (archive_command-only)
+	 * route; --capture pull still works too, a no-op given this default.
+	 */
+	setupOptions.capturePull = true;
+
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:n:c:fb",
+	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:n:c:fbN",
 							setupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -828,13 +853,27 @@ cli_setup_getopt(int argc, char **argv)
 
 			case 'c':
 			{
-				if (!streq(optarg, "pull"))
+				if (streq(optarg, "pull"))
 				{
-					log_fatal("Invalid --capture value \"%s\": the only "
-							  "recognized value is \"pull\"", optarg);
+					setupOptions.capturePull = true;
+				}
+				else if (streq(optarg, "none"))
+				{
+					setupOptions.capturePull = false;
+				}
+				else
+				{
+					log_fatal("Invalid --capture value \"%s\": recognized "
+							  "values are \"pull\" (the default) and "
+							  "\"none\"", optarg);
 					exit(1);
 				}
-				setupOptions.capturePull = true;
+				break;
+			}
+
+			case 'N':
+			{
+				setupOptions.capturePull = false;
 				break;
 			}
 
@@ -877,7 +916,8 @@ static CommandLine setup_command =
 				 "Create or validate one pg_walserver.ini route",
 				 "--route <key> --path <dir> --pgdata <path> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
-				 "[--user <name>]] [--hostname <fqdn>] [--capture pull] "
+				 "[--user <name>]] [--hostname <fqdn>] "
+				 "[--capture pull|none | --no-capture] "
 				 "[--force] [--with-basebackup]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
@@ -898,14 +938,17 @@ static CommandLine setup_command =
 													  "              standby can address this route by name "
 													  "once more than\n"
 													  "              one exists (dbname alone cannot, see "
-													  "DESIGN-standalone-\n"
-													  "              archiving.md); creates a self-signed "
-													  "certificate for\n"
+													  "README.md's\n"
+													  "              \"Routing beyond dbname: TLS SNI\" "
+													  "section); creates a\n"
+													  "              self-signed certificate for\n"
 													  "              --pgdata automatically, the moment a "
 													  "second route is\n"
 													  "              added, if none exists yet\n"
 													  "  --capture pull  write \"capture = pull\" into the "
-													  "route's own section:\n"
+													  "route's own section\n"
+													  "              (the default now, even with no --capture "
+													  "flag at all):\n"
 													  "              the next \"pg_walserver serve\" forks a "
 													  "supervised child\n"
 													  "              running the embedded pg_receivewal "
@@ -913,6 +956,10 @@ static CommandLine setup_command =
 													  "              this route's own \"upstream\" (capture.c)"
 													  " -- see README.md's\n"
 													  "              \"The embedded pull capturer\" section\n"
+													  "  --capture none / --no-capture  opt this route out of "
+													  "the embedded pull\n"
+													  "              capturer (push-only, archive_command-only)"
+													  "\n"
 													  "  --force     change an already-existing route's path, "
 													  "or overwrite an\n"
 													  "              already-recorded, different system "
@@ -1116,7 +1163,7 @@ cli_archive_command_run(int argc, char **argv)
 
 	if (archiveTarget.route[0] == '\0' || archiveTarget.host[0] == '\0')
 	{
-		log_fatal("archive requires --route and --host");
+		log_fatal("archive-wal requires --route and --host");
 		exit(1);
 	}
 
@@ -1125,7 +1172,7 @@ cli_archive_command_run(int argc, char **argv)
 
 
 static CommandLine archive_command =
-	make_command("archive",
+	make_command("archive-wal",
 				 "Push one WAL/.backup file into a pg_walserver route "
 				 "(archive_command)",
 				 "<path-to-file> <filename> --route <key> --host <host> "
@@ -1141,11 +1188,153 @@ static CommandLine archive_command =
 																				  "\n"
 																				  "  Meant to be used as (part of) a Postgres "
 																				  "archive_command, e.g.:\n"
-																				  "    archive_command = 'pg_walserver archive %%p %%f "
-																				  "--route mycluster \\\n"
+																				  "    archive_command = 'pg_walserver archive-wal %%p "
+																				  "%%f --route mycluster \\\n"
 																				  "                       --host archive.example.com "
 																				  "--user archiver_repl'\n",
 				 cli_archive_getopt, cli_archive_command_run);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver restore <filename> <destination-path>
+ *                       --route <key> --host <host> [--port <port>]
+ *                       [--user <name>] [--sslmode <mode>]
+ * ----------------------------------------------------------------------- */
+
+static WsRestoreTarget restoreTarget = { 0 };
+
+static struct option restoreLongOptions[] = {
+	{ "route", required_argument, NULL, 'r' },
+	{ "host", required_argument, NULL, 'h' },
+	{ "port", required_argument, NULL, 'p' },
+	{ "user", required_argument, NULL, 'U' },
+	{ "sslmode", required_argument, NULL, 's' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_restore_getopt parses restore's flags (--route/--host/--port/--user/
+ * --sslmode), the same shape and defaults as cli_archive_getopt() above.
+ */
+static int
+cli_restore_getopt(int argc, char **argv)
+{
+	optind = 0;
+	restoreTarget = (WsRestoreTarget) {
+		0
+	};
+	restoreTarget.port = WS_DEFAULT_PORT;
+	strlcpy(restoreTarget.user, PG_AUTOCTL_REPLICA_USERNAME,
+			sizeof(restoreTarget.user));
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "r:h:p:U:s:",
+							restoreLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'r':
+			{
+				strlcpy(restoreTarget.route, optarg, sizeof(restoreTarget.route));
+				break;
+			}
+
+			case 'h':
+			{
+				strlcpy(restoreTarget.host, optarg, sizeof(restoreTarget.host));
+				break;
+			}
+
+			case 'p':
+			{
+				if (!stringToInt(optarg, &(restoreTarget.port)))
+				{
+					log_fatal("Invalid --port value \"%s\"", optarg);
+					exit(1);
+				}
+				break;
+			}
+
+			case 'U':
+			{
+				strlcpy(restoreTarget.user, optarg, sizeof(restoreTarget.user));
+				break;
+			}
+
+			case 's':
+			{
+				strlcpy(restoreTarget.sslmode, optarg, sizeof(restoreTarget.sslmode));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_restore_command_run reads the two positional arguments a Postgres
+ * restore_command is invoked with -- %f (the bare filename recovery wants
+ * next) then %p (the local path it must be written to), the reverse order
+ * of archive_command's own %p/%f (see cli_archive_command_run() above) --
+ * left in argv once cli_restore_getopt() has consumed every flag, then
+ * runs ws_restore_run(). Exit code matches PostgreSQL's own restore_command
+ * contract exactly: 0 with the file written on success, 1 on any failure
+ * (including the ordinary "not found" case at the end of recovery), so
+ * PostgreSQL decides what to do next the same way it always does.
+ */
+static void
+cli_restore_command_run(int argc, char **argv)
+{
+	if (argc != 2)
+	{
+		log_fatal("restore-wal requires exactly two arguments: <filename> "
+				  "<destination-path> (the \"%%f\" and \"%%p\" a Postgres "
+				  "restore_command is invoked with)");
+		commandline_print_usage(&ws_root, stderr);
+		exit(1);
+	}
+
+	if (restoreTarget.route[0] == '\0' || restoreTarget.host[0] == '\0')
+	{
+		log_fatal("restore-wal requires --route and --host");
+		exit(1);
+	}
+
+	exit(ws_restore_run(&restoreTarget, argv[0], argv[1]) ? 0 : 1);
+}
+
+
+static CommandLine restore_command =
+	make_command("restore-wal",
+				 "Fetch one WAL/.backup file from a pg_walserver route "
+				 "(restore_command)",
+				 "<filename> <destination-path> --route <key> --host <host> "
+				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
+				 "  --route     the pg_walserver route to restore from "
+				 "(sent as dbname)\n"
+				 "  --host      the pg_walserver host to connect to\n"
+				 "  --port      the pg_walserver port to connect to "
+				 "(default: 6543)\n"
+				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+																				  "  --sslmode   libpq sslmode (default: libpq's own "
+																				  "default, \"prefer\")\n"
+																				  "\n"
+																				  "  Meant to be used as (part of) a Postgres "
+																				  "restore_command, e.g.:\n"
+																				  "    restore_command = 'pg_walserver restore-wal %%f "
+																				  "%%p --route mycluster \\\n"
+																				  "                        --host archive.example.com "
+																				  "--user archiver_repl'\n",
+				 cli_restore_getopt, cli_restore_command_run);
 
 
 /* -----------------------------------------------------------------------
@@ -1160,6 +1349,7 @@ static CommandLine *root_subcommands[] = {
 	&setup_command,
 	&create_cert_command,
 	&archive_command,
+	&restore_command,
 	&internal_commands,
 	NULL
 };
@@ -1169,7 +1359,7 @@ CommandLine ws_root =
 					 "The archiver's own replication-protocol server",
 					 "[serve options] | scram-secret ... | setup ... | "
 					 "fetch-systemid ... | basebackup ... | create-cert ... | "
-					 "archive ...",
+					 "archive-wal ... | restore-wal ...",
 					 "  serve           Run the accept loop (default "
 					 "command, used when no\n"
 					 "                  sub-command name is given at all)\n"
@@ -1183,8 +1373,10 @@ CommandLine ws_root =
 					 "upstream\n"
 					 "  create-cert     Create a self-signed TLS "
 					 "certificate for --pgdata\n"
-					 "  archive         Push one WAL/.backup file into a "
-					 "route (archive_command)\n",
+					 "  archive-wal     Push one WAL/.backup file into a "
+					 "route (archive_command)\n"
+					 "  restore-wal     Fetch one WAL/.backup file from a "
+					 "route (restore_command)\n",
 					 NULL, root_subcommands);
 
 
@@ -1211,7 +1403,8 @@ pg_walserver_default_argv(int argc, char **argv, int *newArgc)
 		 streq(argv[1], "fetch-systemid") ||
 		 streq(argv[1], "basebackup") ||
 		 streq(argv[1], "create-cert") ||
-		 streq(argv[1], "archive") ||
+		 streq(argv[1], "archive-wal") ||
+		 streq(argv[1], "restore-wal") ||
 		 streq(argv[1], "internal") ||
 		 streq(argv[1], "--help") ||
 		 streq(argv[1], "-h")))

@@ -34,9 +34,9 @@
  * is here, so a self-contained, direct PQconninfoParse() call is simpler
  * and doesn't risk rejecting a perfectly valid keyword=value string.
  * Password is deliberately never read from here, even if literally present
- * in the string: like restore_command.h's own RestoreCommandInfo, this
- * project's convention is PGPASSWORD/.pgpass only, never a password
- * sitting in a config file on disk.
+ * in the string: this project's convention, everywhere a connection string
+ * is read from a config file, is PGPASSWORD/.pgpass only, never a password
+ * sitting in the file itself.
  */
 static bool
 parse_upstream_conninfo(const char *conninfo, WsUpstreamTarget *target)

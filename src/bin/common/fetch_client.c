@@ -24,20 +24,21 @@
 
 int
 ws_fetch_file_client(const char *host, int port, const char *user,
-					 const char *routeKey, const char *filename,
-					 const char *outputPath)
+					 const char *routeKey, const char *sslmode,
+					 const char *filename, const char *outputPath)
 {
 	char portStr[16];
 
 	sformat(portStr, sizeof(portStr), "%d", port);
 
 	const char *keys[] = {
-		"host", "port", "user", "dbname", "connect_timeout",
+		"host", "port", "user", "dbname", "sslmode", "connect_timeout",
 		"fallback_application_name", NULL
 	};
 	const char *values[] = {
-		host, portStr, user, routeKey, FETCH_CONNECT_TIMEOUT_SECONDS,
-		"fetch_client (FETCH_FILE)", NULL
+		host, portStr, user, routeKey,
+		sslmode != NULL && sslmode[0] != '\0' ? sslmode : NULL,
+		FETCH_CONNECT_TIMEOUT_SECONDS, "fetch_client (FETCH_FILE)", NULL
 	};
 
 	PGconn *conn = PQconnectdbParams(keys, values, 0);

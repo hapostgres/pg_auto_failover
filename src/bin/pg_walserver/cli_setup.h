@@ -32,11 +32,26 @@ typedef struct WsSetupOptions
 	                                      * cli_setup.c's own comment on why
 	                                      * this matters the moment a second
 	                                      * route is added */
-	bool capturePull;                   /* --capture pull: written into the
-	                                     * route's own "capture" property
-	                                     * (routes.h), opting it into the
-	                                     * embedded pull capturer
-	                                     * (capture.c) once "serve" starts */
+	bool capturePull;                   /* on by default (an operator has to
+	                                     * pass --no-capture, or --capture
+	                                     * none, to opt out): written as an
+	                                     * explicit "capture = pull" into
+	                                     * the route's own section
+	                                     * (routes.h) unless opted out,
+	                                     * opting it into the embedded pull
+	                                     * capturer (capture.c) once "serve"
+	                                     * starts. Explicit --capture pull
+	                                     * still works too, a no-op given
+	                                     * the new default -- see
+	                                     * cli_setup.c's own header comment
+	                                     * for why setup writes the property
+	                                     * explicitly rather than relying on
+	                                     * a changed on-disk default (a
+	                                     * route's own "capture" property is
+	                                     * still simply absent == off for
+	                                     * anyone hand-editing
+	                                     * pg_walserver.ini directly;
+	                                     * routes.c/routes.h are unchanged). */
 	bool force;
 	bool withBasebackup;
 } WsSetupOptions;

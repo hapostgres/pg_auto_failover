@@ -11,10 +11,18 @@
  *        refusing a route key that already exists with a *different*
  *        path/upstream unless --force -- the same overwrite-safety
  *        principle as cli_fetch_systemid.c's own systemid check, applied
- *        one layer up; --capture pull writes the route's own "capture"
- *        property (routes.h), opting it into the embedded pull capturer
- *        (capture.c) the next time "serve" starts -- setup itself never
- *        starts or touches that capturer, it only records the intent;
+ *        one layer up; the embedded pull capturer is opted into by
+ *        *default* now (an explicit "capture = pull" is written into the
+ *        route's own section, routes.h, unless --no-capture / --capture
+ *        none says otherwise -- see cli_root.c's own cli_setup_getopt() for
+ *        where that default lives), opting the route into it the next time
+ *        "serve" starts -- setup itself never starts or touches that
+ *        capturer, it only records the intent. Writing the property
+ *        explicitly (rather than changing what an *absent* "capture"
+ *        property under a hand-edited pg_walserver.ini means, which stays
+ *        "off", unchanged in routes.c/routes.h) is a deliberate choice:
+ *        anyone reading pg_walserver.ini by hand sees exactly what "setup"
+ *        decided, with no implicit-default surprise to remember;
  *     3. fetch the system identifier (cli_fetch_systemid.c) -- this
  *        connection (pgctl_identify_system(), a real replication-mode
  *        IDENTIFY_SYSTEM) is also this step's own role-permission check:
@@ -123,11 +131,13 @@ write_route_section(const char *pgdata, const char *routeKey,
 
 		if (capturePull && !existing->capturePull)
 		{
-			log_warn("--capture pull was given, but route \"%s\" already "
-					 "exists in \"%s\" without \"capture = pull\" -- edit "
-					 "\"%s\" by hand to add it, setup never changes an "
-					 "already-existing route's properties beyond path",
-					 routeKey, routesPath, routesPath);
+			log_warn("Route \"%s\" already exists in \"%s\" without "
+					 "\"capture = pull\" (the embedded pull capturer is on "
+					 "by default now, but was not the last time \"setup\" "
+					 "wrote this route, or --no-capture/--capture none was "
+					 "passed then) -- edit \"%s\" by hand to add it, setup "
+					 "never changes an already-existing route's properties "
+					 "beyond path", routeKey, routesPath, routesPath);
 		}
 
 		return true;
@@ -273,6 +283,17 @@ ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
 }
 
 
+/*
+ * cli_setup_run runs the whole "pg_walserver setup" sequence documented in
+ * this file's own header comment above: resolve path/upstream, write (or
+ * validate) the pg_walserver.ini route section, make sure TLS is in place
+ * once the file now holds more than one route, fetch the system identifier
+ * (also this step's own role-permission check), and, with
+ * options->withBasebackup, take the route's first base backup
+ * synchronously. Stops at the first failure, which has already been
+ * logged; returns true only once every requested step has actually
+ * succeeded.
+ */
 bool
 cli_setup_run(const WsSetupOptions *options)
 {
