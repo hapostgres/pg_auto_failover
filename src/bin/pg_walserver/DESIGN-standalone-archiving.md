@@ -124,6 +124,85 @@ source may be a standby) or `source`/`target` (ambiguous about direction);
 it also happens to already be PostgreSQL's own vocabulary for "the server
 this one replicates from" in cascading replication.
 
+## Routing beyond `dbname`: a real protocol limitation, and two ways around it
+
+Testing `test_006_real_standby_with_core_tools` (this PR's own tap spec)
+surfaced a genuine PostgreSQL wire-protocol fact, not a bug: a real
+*physical* replication connection's walreceiver never sends whatever
+`dbname` a `primary_conninfo` carries. `libpqrcv_connect()`
+(`src/backend/replication/libpqwalreceiver/libpqwalreceiver.c`) builds its
+own connection parameters by expanding the given conninfo as a `dbname`
+parameter, then -- for physical (non-logical) replication -- appending a
+*second*, literal `dbname=replication`, which libpq's own last-value-wins
+parameter handling makes the one actually sent, unconditionally:
+
+> The database name is ignored by the server in replication mode, but
+> specify "replication" for .pgpass lookup.
+
+(`pg_basebackup`/`pg_receivewal`, by contrast, build their *own* startup
+packet directly from whatever `-d`/`--dbname` was given, with no such
+override -- which is exactly why every other command/example in this
+document routes by `dbname` successfully. Only a real standby's own
+internal walreceiver connection is affected.)
+
+Consequence: `dbname`-based routing (the `pg_walserver.ini` mechanism this
+whole document is otherwise about) **cannot** select a route by name for a
+real physical standby, ever -- only the `"*"` wildcard, or a route whose
+key literally is `"replication"`, is reachable by one (`test_006` gives its
+own route exactly this second alias, see its own comment). Fine for a
+single-route deployment; a real limitation the moment more than one route
+needs to be reachable by real standbys specifically, not just
+`pg_basebackup`/`pg_receivewal`/`archive_command` clients that can set an
+arbitrary `dbname` themselves.
+
+Two protocol-native mechanisms, both already used by real PostgreSQL
+today, route on data the `dbname=replication` override never touches --
+because both happen at or before the TLS handshake, layers below where
+that override lives:
+
+- **TLS SNI (Server Name Indication)**: libpq already sends it by default.
+  `fe-secure-openssl.c`'s `PQconnectPoll()` calls `SSL_set_tlsext_host_
+  name(conn->ssl, host)` whenever `sslsni` (a real, documented libpq
+  parameter, default **on**) is enabled and `host` isn't a literal IP --
+  the exact `host` from the connection string, sent in the TLS
+  `ClientHello`, before a single byte of the Postgres protocol itself is
+  exchanged. PostgreSQL's own backend already has a matching, documented,
+  currently-`off`-by-default *server*-side feature for exactly this:
+  `ssl_sni`/`hosts_file` (customarily `pg_hosts.conf`,
+  `postgresql.conf`'s own docs), backed by `sni_clienthello_cb()`
+  (`src/backend/libpq/be-secure-openssl.c`) parsing the SNI extension out
+  of the raw `ClientHello` bytes (via `SSL_client_hello_get0_ext()`, not
+  the simpler `SSL_get_servername()`, deliberately -- OpenSSL's own advice
+  against the latter's callback-ordering fragility) to pick a per-hostname
+  TLS configuration. `pg_walserver`'s own `tls.c` already links raw
+  OpenSSL directly (`SSL_CTX_new()`/`SSL_accept()`, no backend code, no
+  libpq-fe code) -- reading the SNI hostname the same way and using it as
+  an *additional* route-selection input (a per-route hostname, resolved by
+  DNS or `/etc/hosts` to the same `pg_walserver` IP, exactly like
+  SNI-based HTTPS virtual hosting already works) is architecturally
+  straightforward, no new dependency.
+- **TLS client certificate CN**: `sslcert`/`sslkey` in a conninfo are
+  *not* touched by `libpqrcv_connect()`'s dbname override -- they flow
+  through from the original, expanded conninfo untouched, for a real
+  physical standby exactly as for any other client. A route could be
+  assigned its own client certificate (a distinct CN per route), and
+  `pg_walserver` could read it during the TLS handshake
+  (`SSL_get_peer_certificate()` + `X509_NAME_get_text_by_NID(subject,
+  NID_commonName, ...)`, both plain OpenSSL, already reachable from
+  `tls.c`) as a route-selection input independent of `dbname` entirely.
+  This is the same *mechanism* PostgreSQL's own `clientcert=verify-full`
+  HBA option already uses to map a certificate to a role -- applying it to
+  route selection instead of authentication is a natural extension, not a
+  new idea.
+
+Both are additive to `dbname`-based routing, not a replacement for it:
+`pg_basebackup`/`pg_receivewal`/`archive_command` clients keep working
+exactly as they do today, and either mechanism only needs to be consulted
+when `dbname` resolves to nothing better than the wildcard. Not designed
+in detail or scheduled into a phase yet -- flagged here because it directly
+answers the limitation `test_006` surfaced, and because both are grounded
+in mechanisms real PostgreSQL already ships, not speculative additions.
+
 ## New client-side sub-commands
 
 ### `pg_walserver fetch-systemid --route <key> [--upstream ...]`
@@ -295,6 +374,10 @@ expect, so nothing downstream changes.
 
 ## Open questions to resolve before implementation
 
+- Whether SNI-hostname and/or client-cert-CN routing (see "Routing beyond
+  dbname" above) get designed and scheduled into a phase, given they're
+  the only way for more than one route to be reachable by name by a real
+  physical standby specifically.
 - Exact `CHECK_FILE` wire shape (SQL-looking row vs. a plain single-value
   reply) -- lean towards matching `SHOW`'s existing shape for consistency
   with the rest of the grammar.
