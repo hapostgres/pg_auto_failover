@@ -400,7 +400,15 @@ monitor_line:
  *     `serve` ever starts (e.g. to configure named routes across several
  *     test steps) overrides this default the same way any node already
  *     can, with an explicit trailing "command "..."" -- no second
- *     override mechanism invented for this.
+ *     override mechanism invented for this. This default command also
+ *     comes with a real, usable default archiver-hba.conf already in
+ *     place (compose_gen.c's write_pg_walserver_default_hba(), admitting
+ *     every node on this test's own compose subnet), so a bare
+ *     "pg_walserver <name>" with no further overrides is immediately
+ *     reachable by every other node in the same spec -- pg_walserver's own
+ *     hba_write_default_if_missing() otherwise leaves every rule commented
+ *     out (see hba.c), which would reject every connection until an
+ *     operator (or spec) added one by hand.
  *
  * Both accept a small, closed set of modifiers afterwards (aux_opt_list
  * below) -- deliberately NOT the full node_opt_list an ordinary formation
@@ -430,15 +438,41 @@ pg_walserver_line:
 		free($2);
 
 		/*
+		 * Marks this node as the `pg_walserver <name>` DSL kind (as opposed
+		 * to plain `postgres <name>` sugar or an ordinary formation node) --
+		 * compose_gen.c's write_pg_walserver_default_hba() uses this to
+		 * decide whether to bind-mount a generated, usable default
+		 * archiver-hba.conf into this node's container before its own
+		 * command (below, or a "command \"...\"" override) ever runs. See
+		 * that function's own header comment for the full design.
+		 */
+		current_node->isPgWalserver = true;
+
+		/*
 		 * Default: run pg_walserver's own "serve" mode directly as this
 		 * container's PID 1, pointed at a writable directory of its own
 		 * under the node's already-provisioned /var/lib/postgres volume.
 		 * Zero named routes at startup is a supported, harmless state (see
 		 * cli_serve_run in pg_walserver/cli_root.c); a spec that wants
 		 * routes configured first overrides this via "command \"...\"".
+		 *
+		 * Also copies in a real, usable default archiver-hba.conf --
+		 * compose_gen.c's write_pg_walserver_default_hba() bind-mounts it
+		 * read-only at /etc/pgaf/<name>-archiver-hba.conf; this cp (after
+		 * "mkdir -p" has created /var/lib/postgres/ws as this container's
+		 * own user, not Docker's auto-created root:root parent directory a
+		 * direct bind-mount into it would leave behind) is what actually
+		 * puts it where pg_walserver reads it from. See that function's own
+		 * header comment for the full design and why a direct bind-mount
+		 * into /var/lib/postgres/ws isn't used instead. "|| true": the
+		 * source file may not exist for a node whose name collides with
+		 * nothing generated (never happens via this grammar rule, but keeps
+		 * this command robust rather than failing PID 1 outright over HBA).
 		 */
 		strlcpy(current_node->commandOverride,
 		        "mkdir -p /var/lib/postgres/ws && "
+		        "(cp /etc/pgaf/$(hostname)-archiver-hba.conf "
+		        "/var/lib/postgres/ws/archiver-hba.conf || true) && "
 		        "exec pg_walserver --pgdata /var/lib/postgres/ws --port 5432",
 		        sizeof(current_node->commandOverride));
 	}

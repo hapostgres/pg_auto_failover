@@ -97,6 +97,15 @@ typedef struct TestNode
 	                             * inside this node's container -- see
 	                             * compose_gen.c's own write_node_command()
 	                             * call site comment */
+	bool isPgWalserver;         /* set by pg_walserver_line (test_spec_parse.y):
+	                             * this node is the `pg_walserver <name>` DSL
+	                             * sugar kind, not a plain `postgres <name>` /
+	                             * ordinary formation node -- used by
+	                             * compose_gen.c to decide whether to
+	                             * bind-mount a generated default
+	                             * archiver-hba.conf into this node's
+	                             * container (see write_pg_walserver_default_
+	                             * hba() there). Never set for anything else. */
 	bool dockerInit;            /* "docker-init": adds Docker Compose's own
 	                             * `init: true` to this node's service --
 	                             * runs a tiny init (tini) as the real PID 1,
