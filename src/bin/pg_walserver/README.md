@@ -720,20 +720,24 @@ systemid overwrite check, applied here to the certificate files instead.
 
 ## The archive push side: `CHECK_FILE` + `ARCHIVE_FILE` + `pg_walserver archive-wal`
 
-**Why `archive_command`, not an `archive_library` module.** PostgreSQL 15
+**`archive_command`, not (yet) an `archive_library` module.** PostgreSQL 15
 added the archive modules API (`archive_library`, see `contrib/basic_archive`
 for the reference implementation): a loadable C module the archiver process
 calls directly, in-process, per segment, instead of forking a shell command.
-Its actual advantage over `archive_command` is avoiding that fork/exec cost
--- which only matters when the per-invocation work is itself cheap enough
-for fork/exec to dominate. `archive-wal`'s own work isn't: the common case
-(`capture = pull` already running) is a single `CHECK_FILE` round trip with
-zero data transfer, and the other case is an inherently transfer-bound full
-push -- fork/exec overhead is negligible next to either. An `archive_library`
-module also has to be compiled against the exact server version and
-installed (with a restart) on every Postgres instance being archived,
-exactly the kind of server-side coupling `archive-wal` as a plain external
-command avoids. Not implemented, and not planned, for these reasons.
+Its classic advantage over `archive_command` is holding a connection open
+*across* invocations -- the same way an `archive_command` script commonly
+keeps an SSH connection alive between calls rather than reconnecting every
+time -- so a system generating a lot of WAL at peak activity doesn't pay a
+fresh connection/handshake cost (here, a fresh connection to `pg_walserver`
+itself) for every single segment. `archive-wal` today reconnects each
+invocation, exactly like a plain `archive_command` script would; a
+persistent-connection mode of operation, closer to what an `archive_library`
+module would give us, is planned as later work rather than built now. An
+`archive_library` module would also need to be compiled against the exact
+server version and installed (with a restart) on every Postgres instance
+being archived -- server-side coupling `archive-wal` as a plain external
+command avoids, and a reason to prefer solving the reconnection cost with a
+persistent-connection mode over adopting the module API outright.
 
 Alongside the pull-oriented tools above, `pg_walserver` also accepts a
 *push*: `CHECK_FILE`/`ARCHIVE_FILE` (see "The wire protocol" above for
