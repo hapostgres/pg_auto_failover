@@ -515,7 +515,7 @@ unknown in advance, and changing over the life of the server.
 A route key is never parsed, split on `/`, or given any filesystem meaning
 of its own anywhere in this codebase -- it is matched by a plain string
 `==` against `dbname` (`routes_find()`) and, independently, against
-`archiver-hba.conf`'s own `ROUTE` field (`hba_lookup()`), and nowhere else.
+`archiver-hba.conf`'s own `ROUTE` field (`hba_match()`), and nowhere else.
 pg_auto_failover's own convention, `"<formation>/<group>"` (e.g.
 `default/0`), *looks* like a path, but it is not one, and never becomes
 one: the only thing that ever determines an actual directory on disk is
@@ -963,6 +963,71 @@ above); each of `pg_autoctl`'s and `pg_walserver`'s own Makefiles links
 `$(PG_RECEIVEWAL_VENDOR_OBJS)` plus the same static libs any frontend
 replication-protocol client needs (`-lpgfeutils -lpgcommon -lpgport`).
 
+## Config reload (pidfile, SIGHUP, `pg_walserver reload`)
+
+`serve` writes its own pid to `<pgdata>/pg_walserver.pid` (a plain one-line
+pidfile, written directly rather than through `src/bin/common/pidfile.h`'s
+own `create_pidfile()` -- that function writes pg_autoctl's own multi-line
+supervisor pidfile format and requires the `PGDATA` environment variable,
+neither of which fits pg_walserver's single-process, `--pgdata`-driven
+model; `read_pidfile()`/`remove_pidfile()`, the generic single-PID half of
+that same API, are reused as-is), removed again on clean shutdown. `pg_
+walserver reload --pgdata <path>` (`cli_root.c`) reads that pidfile and
+sends `SIGHUP`, the same shape as `pg_ctl reload` -- exit 0 once the signal
+was delivered, nonzero with a clear error for a missing, stale, or
+unreadable pidfile. It ignores `SIGHUP` in its own, one-shot process first,
+before sending it on, for the same reason `pg_autoctl`'s own
+`cli_pg_autoctl_reload()`/`cli_service_reload()` do (`cli_common.c`): a
+freshly exec'd one-shot command installs no `SIGHUP` handler of its own,
+and could in principle reuse the pid of a just-exited process, in which
+case an unhandled `SIGHUP` would terminate it before it ever sends
+anything.
+
+`pg_walserver.ini` and `archiver-hba.conf` are parsed once, at `serve`
+startup, into an in-memory `WsServerConfig.routes`/`WsAuthConfig.
+hbaRuleSet` (`accept_loop.h`) -- every connection reads that same snapshot,
+none of them re-parses either file off disk itself. `SIGHUP` (`ws_accept_
+loop()`'s own main loop, alongside `capture.c`'s `ws_capture_tick()`) calls
+`ws_reload_config()`, which re-reads both files (`routes_load()`, `hba_
+parse_file()`) and swaps them in **only when both parse successfully**,
+exactly like real PostgreSQL's own `SIGHUP`-triggered `ProcessConfigFile()`:
+a bad reload is refused, logged clearly, and the previous, still-valid
+configuration keeps serving every connection -- never a half-applied one.
+Every forked connection child is unaffected either way, since it only ever
+reads whatever snapshot was already installed the moment it was forked.
+
+What is live-reloadable this way:
+
+- **routes** (`pg_walserver.ini`): added, removed, and changed routes
+  (`path`/`upstream`/`hostname`/`capture`) are logged by key, one line per
+  change, plus a one-line summary;
+- **the HBA ruleset** (`archiver-hba.conf`): logged as a rule-count-plus-
+  content comparison (a full rule-by-rule diff was judged not worth the
+  extra complexity) -- "unchanged (N rules)" or "changed (N rules before,
+  M after)";
+- **the embedded pull capturer set** (`capture.c`'s `ws_capture_reload()`):
+  reconciled against the newly reloaded routes, without ever restarting a
+  capturer whose own route did not change -- a route that newly has
+  `capture = pull` gets a capturer started; one that lost it, or whose
+  route disappeared entirely, gets its capturer stopped (`SIGINT`); one
+  whose `upstream`/`path` changed while `capture = pull` stayed on is
+  stopped and, once reaped, automatically restarted with the new values by
+  the same `PROCESS_RP_PERMANENT` restart-on-exit path `ws_capture_tick()`
+  already runs for a crashed capturer -- it cannot retarget an
+  already-forked/exec'd `pg_receivewal` child in place, so this is always a
+  stop-then-start, never a live retarget. Every start/stop/restart decision
+  is logged.
+
+What is **not** reloaded by `SIGHUP`: the TLS certificate/key. `tls.c`
+builds a single, process-wide `SSL_CTX` once at startup; hot-swapping it
+safely (in the middle of connections that may already be mid-handshake)
+was judged a bigger, riskier lift than the rest of this feature justifies.
+A rotated `server.crt`/`server.key` needs a real restart of `pg_walserver`
+for now -- a one-line note to this effect is logged the first time `SIGHUP`
+is ever handled. `archiver-passwd` (SCRAM verifiers) is unaffected by any
+of this either way: it was already read fresh on every authentication
+attempt, before this feature existed, and still is.
+
 ## The vendored ustar writer (vendor/tar.c)
 
 `vendor/tar.c` is vendored from PostgreSQL's own `src/port/tar.c` --
@@ -1258,3 +1323,21 @@ path as its named `"pitr"` route) specifically so that default, and a real
 standby's own always-`"replication"` `dbname`, both resolve without any
 further configuration. See the spec file's own header comment for the full
 design and the reasoning behind each of these four roles. Runs 4/4 green.
+
+### Testing the pidfile and SIGHUP reload (tests/tap/specs/pg_walserver_reload.pgaf)
+
+A seventh, separate spec covers the pidfile and SIGHUP-driven config reload
+described in "Config reload" above. Five steps: the pidfile
+(`<pgdata>/pg_walserver.pid`) holds the real, running pid (`test_001`);
+editing `pg_walserver.ini` to add a `"*"` wildcard route and running
+`pg_walserver reload` makes that route immediately reachable, with no
+server restart, while the original route keeps working too (`test_002`);
+corrupting `archiver-hba.conf` with a malformed line makes `reload` log a
+clear parse error while the server keeps serving its prior, still-valid
+HBA ruleset -- a request against the route that already worked before the
+bad edit still succeeds (`test_003`); `pg_walserver reload` against a
+stale pidfile (an already-exited pid) fails cleanly with a nonzero exit,
+and `read_pidfile()` removes the stale file as a side effect (`test_004`);
+and giving the route `capture = pull` via reload starts its embedded pull
+capturer with no server restart, and removing it again stops that same
+capturer child (`test_005`). Runs 5/5 green.

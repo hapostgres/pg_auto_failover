@@ -33,8 +33,26 @@ typedef struct WsServerConfig
 	int authTimeout;              /* absolute authentication deadline, seconds */
 	char routesPath[MAXPGPATH];   /* empty: no routing, manual-testing mode */
 	WsAuthConfig auth;
+	WsRoute *routes;               /* the currently installed, parsed
+	                                * pg_walserver.ini -- loaded once at
+	                                * startup (cli_serve_run()) and swapped
+	                                * in atomically, together with auth.
+	                                * hbaRuleSet above, by a successful
+	                                * SIGHUP reload (ws_reload_config(),
+	                                * accept_loop.c). Every connection reads
+	                                * this same, already-validated snapshot;
+	                                * none of them re-parses the file off
+	                                * disk itself. Owned here: routes_free()
+	                                * it, never a per-connection concern. */
+	int routeCount;
 } WsServerConfig;
 
-bool ws_accept_loop(const WsServerConfig *config);
+/*
+ * ws_accept_loop takes a mutable config: a successful SIGHUP reload updates
+ * config->routes/routeCount and config->auth.hbaRuleSet in place (see
+ * ws_reload_config() in accept_loop.c). Every forked connection child still
+ * only ever reads it.
+ */
+bool ws_accept_loop(WsServerConfig *config);
 
 #endif /* WS_ACCEPT_LOOP_H */

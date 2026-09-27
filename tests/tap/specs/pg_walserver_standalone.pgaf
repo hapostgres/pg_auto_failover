@@ -157,6 +157,12 @@ step test_005_wildcard_route {
     exec node2 bash -c 'mkdir -p /tmp/ws-wild && printf "6543216543216543216\n" > /tmp/ws-wild/archiver-systemid'
     exec node2 bash -c 'printf "\n[*]\npath = /tmp/ws-wild\n" >> /tmp/ws/pg_walserver.ini'
 
+    # pg_walserver.ini is cached in memory (accept_loop.c's own
+    # ws_reload_config()) rather than re-read on every connection now, so
+    # a route added by hand needs an explicit reload before it is reachable
+    # -- see README.md's "Config reload" section.
+    exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
+
     # a dbname matching no explicit section falls through to the wildcard's
     # own path -- routes.c's own "*" fallback, not a hardcoded default
     exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6543 dbname=no-such-route replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "6543216543216543216" || { echo "got: $out"; false; }'
@@ -191,6 +197,10 @@ step test_006_real_standby_with_core_tools {
     # pg_basebackup/pg_receivewal by name, would use "replication" as the
     # route'"'"'s only key to begin with.
     exec node2 bash -c 'printf "\n[replication]\npath = /tmp/ws/default/0\n" >> /tmp/ws/pg_walserver.ini'
+
+    # pg_walserver.ini is cached in memory now (see test_005 above): reload
+    # before this new route is reachable.
+    exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
 
     # a real standby from here on: nothing but stock PostgreSQL
     # configuration and commands -- primary_conninfo points straight at

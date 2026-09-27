@@ -21,12 +21,15 @@
 
 #include "postgres_fe.h"
 
+#include "pqexpbuffer.h"
+
 #include "accept_loop.h"
 #include "auth.h"
 #include "capture.h"
 #include "defaults.h"
 #include "file_utils.h"
 #include "framing.h"
+#include "hba.h"
 #include "log.h"
 #include "repl_command.h"
 #include "routes.h"
@@ -156,17 +159,15 @@ handle_connection(int clientSock, const WsServerConfig *config)
 		return;
 	}
 
-	WsRoute *routes = NULL;
-	int routeCount = 0;
-
-	if (config->routesPath[0] != '\0')
-	{
-		if (!routes_load(config->routesPath, &routes, &routeCount))
-		{
-			close(clientSock);
-			return;
-		}
-	}
+	/*
+	 * routes/routeCount are the currently installed, already-validated
+	 * snapshot of pg_walserver.ini (config->routes, loaded once at startup
+	 * and swapped in atomically by a successful SIGHUP reload, see
+	 * ws_reload_config() below) -- this child, forked after that swap (or
+	 * before the next one), never re-reads the file off disk itself.
+	 */
+	const WsRoute *routes = config->routes;
+	int routeCount = config->routeCount;
 
 	const char *routeKey = params.database;
 
@@ -192,7 +193,6 @@ handle_connection(int clientSock, const WsServerConfig *config)
 	if (!ws_authenticate(clientSock, &params, routeKey, routes, routeCount,
 						 &(config->auth), &route))
 	{
-		routes_free(routes);
 		close(clientSock);
 		return;
 	}
@@ -217,7 +217,6 @@ handle_connection(int clientSock, const WsServerConfig *config)
 		!ws_send_backend_key_data(clientSock, getpid(), 0) ||
 		!ws_send_ready_for_query(clientSock))
 	{
-		routes_free(routes);
 		close(clientSock);
 		return;
 	}
@@ -278,7 +277,6 @@ handle_connection(int clientSock, const WsServerConfig *config)
 		}
 	}
 
-	routes_free(routes);
 	close(clientSock);
 }
 
@@ -351,6 +349,208 @@ connection_child_exited(void *ctx, pid_t pid, int status)
 
 
 /*
+ * log_route_diff logs a summary of what changed between the previously
+ * installed route set and a freshly, successfully reloaded one: routes
+ * added, removed, or changed (path/upstream/hostname/capture), compared by
+ * key. Called only once both pg_walserver.ini and archiver-hba.conf have
+ * re-parsed cleanly, right before the new routes are installed.
+ */
+static void
+log_route_diff(const WsRoute *oldRoutes, int oldCount,
+			   const WsRoute *newRoutes, int newCount)
+{
+	int added = 0, removed = 0, changed = 0;
+
+	for (int i = 0; i < newCount; i++)
+	{
+		const WsRoute *old = routes_find_exact(oldRoutes, oldCount,
+											   newRoutes[i].key);
+
+		if (old == NULL)
+		{
+			++added;
+			log_info("reload: route \"%s\" added (path \"%s\")",
+					 newRoutes[i].key, newRoutes[i].path);
+			continue;
+		}
+
+		if (strcmp(old->path, newRoutes[i].path) != 0 ||
+			strcmp(old->upstream, newRoutes[i].upstream) != 0 ||
+			strcmp(old->hostname, newRoutes[i].hostname) != 0 ||
+			old->capturePull != newRoutes[i].capturePull)
+		{
+			++changed;
+			log_info("reload: route \"%s\" changed (path \"%s\" -> \"%s\", "
+					 "upstream \"%s\" -> \"%s\", hostname \"%s\" -> \"%s\", "
+					 "capture %s -> %s)",
+					 newRoutes[i].key, old->path, newRoutes[i].path,
+					 old->upstream, newRoutes[i].upstream,
+					 old->hostname, newRoutes[i].hostname,
+					 old->capturePull ? "pull" : "none",
+					 newRoutes[i].capturePull ? "pull" : "none");
+		}
+	}
+
+	for (int i = 0; i < oldCount; i++)
+	{
+		if (routes_find_exact(newRoutes, newCount, oldRoutes[i].key) == NULL)
+		{
+			++removed;
+			log_info("reload: route \"%s\" removed", oldRoutes[i].key);
+		}
+	}
+
+	if (added == 0 && removed == 0 && changed == 0)
+	{
+		log_info("reload: routes unchanged (%d route%s)",
+				 newCount, newCount == 1 ? "" : "s");
+	}
+	else
+	{
+		log_info("reload: routes: %d added, %d removed, %d changed "
+				 "(%d total now)", added, removed, changed, newCount);
+	}
+}
+
+
+/*
+ * hba_ruleset_signature appends a stable, one-line-per-rule text rendering
+ * of ruleSet to buf, used only to tell whether two rulesets are byte-for-
+ * byte the same even when they happen to have the same rule count.
+ */
+static void
+hba_ruleset_signature(const WsHbaRuleSet *ruleSet, PQExpBuffer buf)
+{
+	for (int i = 0; i < ruleSet->count; i++)
+	{
+		HbaRule *rule = &ruleSet->rules[i];
+
+		appendPQExpBuffer(buf, "%s|%s|%s|%s|%d\n",
+						  rule->fields[0], rule->fields[1],
+						  rule->fields[2], rule->fields[3],
+						  (int) rule->method);
+	}
+}
+
+
+/*
+ * log_hba_diff logs whether the HBA ruleset changed at all between the
+ * previously installed one and a freshly, successfully reloaded one: a
+ * simple rule-count-plus-content comparison (not a rule-by-rule diff --
+ * see README.md's "Config reload" section for why this level of detail was
+ * judged enough).
+ */
+static void
+log_hba_diff(const WsHbaRuleSet *oldSet, const WsHbaRuleSet *newSet)
+{
+	PQExpBuffer oldSig = createPQExpBuffer();
+	PQExpBuffer newSig = createPQExpBuffer();
+
+	hba_ruleset_signature(oldSet, oldSig);
+	hba_ruleset_signature(newSet, newSig);
+
+	bool unchanged = !PQExpBufferBroken(oldSig) && !PQExpBufferBroken(newSig) &&
+					 oldSig->len == newSig->len &&
+					 memcmp(oldSig->data, newSig->data, oldSig->len) == 0;
+
+	if (unchanged)
+	{
+		log_info("reload: HBA ruleset unchanged (%d rule%s)",
+				 newSet->count, newSet->count == 1 ? "" : "s");
+	}
+	else
+	{
+		log_info("reload: HBA ruleset changed (%d rule%s before, %d after)",
+				 oldSet->count, oldSet->count == 1 ? "" : "s", newSet->count);
+	}
+
+	destroyPQExpBuffer(oldSig);
+	destroyPQExpBuffer(newSig);
+}
+
+
+/*
+ * ws_reload_config is what a SIGHUP tick in ws_accept_loop()'s own main loop
+ * calls: it re-reads and re-validates pg_walserver.ini (routes_load()) and
+ * archiver-hba.conf (hba_parse_file()) from disk, and atomically swaps in
+ * the new versions ONLY when both parse successfully -- exactly like
+ * PostgreSQL's own SIGHUP-triggered ProcessConfigFile(), a bad reload is
+ * refused, never partially applied, and the previous, already-validated
+ * configuration keeps serving every connection. Reconciles the embedded
+ * pull capturer set against the new routes (capture.c's ws_capture_reload())
+ * once both files are known-good. The TLS certificate/key are never
+ * touched here -- see the one-line note logged below.
+ */
+static void
+ws_reload_config(WsServerConfig *config)
+{
+	static bool loggedTlsReloadNote = false;
+
+	if (config->routesPath[0] == '\0')
+	{
+		log_info("Received SIGHUP: running with --insecure and no --pgdata, "
+				 "nothing to reload");
+		return;
+	}
+
+	log_info("Received SIGHUP: reloading \"%s\" and \"%s\"",
+			 config->routesPath, config->auth.hbaPath);
+
+	if (!loggedTlsReloadNote)
+	{
+		log_info("Note: the TLS certificate/key are not reloaded by SIGHUP "
+				 "(a fresh SSL_CTX is only ever built at startup); restart "
+				 "pg_walserver to pick up a rotated \"server.crt\"/"
+				 "\"server.key\"");
+		loggedTlsReloadNote = true;
+	}
+
+	WsRoute *newRoutes = NULL;
+	int newRouteCount = 0;
+	bool routesOk = routes_load(config->routesPath, &newRoutes, &newRouteCount);
+
+	if (!routesOk)
+	{
+		log_error("Reload failed: could not parse \"%s\": keeping the "
+				  "current configuration", config->routesPath);
+	}
+
+	WsHbaRuleSet newHbaRuleSet = { 0 };
+	bool hbaOk = hba_parse_file(config->auth.hbaPath, &newHbaRuleSet);
+
+	if (!hbaOk)
+	{
+		log_error("Reload failed: could not parse \"%s\": keeping the "
+				  "current configuration", config->auth.hbaPath);
+	}
+
+	if (!routesOk || !hbaOk)
+	{
+		routes_free(newRoutes);
+		hba_ruleset_free(&newHbaRuleSet);
+		return;
+	}
+
+	log_route_diff(config->routes, config->routeCount, newRoutes, newRouteCount);
+	log_hba_diff(&config->auth.hbaRuleSet, &newHbaRuleSet);
+
+	/* never restart an already-running capturer just because SIGHUP fired;
+	 * only reconcile against what actually changed */
+	ws_capture_reload(newRoutes, newRouteCount);
+
+	routes_free(config->routes);
+	hba_ruleset_free(&config->auth.hbaRuleSet);
+
+	config->routes = newRoutes;
+	config->routeCount = newRouteCount;
+	config->auth.hbaRuleSet = newHbaRuleSet;
+
+	log_info("Reload complete: now serving %d route%s",
+			 newRouteCount, newRouteCount == 1 ? "" : "s");
+}
+
+
+/*
  * ws_accept_loop is the whole server: it creates the listening socket, then
  * loops accepting connections, forking a child per connection (no exec(),
  * matching real Postgres's postmaster/BackendMain() split) and reaping
@@ -359,7 +559,7 @@ connection_child_exited(void *ctx, pid_t pid, int status)
  * returns true.
  */
 bool
-ws_accept_loop(const WsServerConfig *config)
+ws_accept_loop(WsServerConfig *config)
 {
 	int listenSock = create_listen_socket(config->port);
 
@@ -382,6 +582,19 @@ ws_accept_loop(const WsServerConfig *config)
 
 	while (!asked_to_stop && !asked_to_stop_fast)
 	{
+		/*
+		 * set_signal_handlers() (common/signals.c) already installs SIGHUP
+		 * -> catch_reload(), which only sets this flag -- never do real work
+		 * inside a signal handler. Checked once per loop iteration,
+		 * alongside ws_capture_tick() below, exactly like real PostgreSQL
+		 * checks its own ConfigReloadPending flag in its main loops.
+		 */
+		if (asked_to_reload)
+		{
+			asked_to_reload = 0;
+			ws_reload_config(config);
+		}
+
 		/*
 		 * One tick, one wildcard waitpid(-1, ...) call site for this whole
 		 * process (capture.c's own ws_capture_tick(), process_supervisor.c
