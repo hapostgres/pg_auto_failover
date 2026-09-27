@@ -53,18 +53,20 @@ throughout this codebase's comments). This PR is the standalone piece:
 `pg_walserver` builds, runs, authenticates connections and serves the wire
 protocol entirely on its own, driven by a handful of files it reads
 directly off disk (`pg_walserver.ini`, `archiver-hba.conf`,
-`archiver-passwd`, and per-route bookkeeping files -- see below). Three of
-its own sub-commands (`setup`, `fetch-systemid`, `basebackup`; see
-"New client-side sub-commands" below) can now create and keep those files
-current directly, driven from the command line -- `docs/ref/pg_walserver.
-rst`'s own worked example uses `setup` first, falling back to `pg_
-basebackup`/`pg_receivewal`/`psql` by hand only for what those three don't
-cover yet (ongoing WAL capture, HBA, the passwd file). `DESIGN-standalone-
-archiving.md` in this same directory designs the rest of that story: the
-`archive`/`CHECK_FILE`/`ARCHIVE_FILE` push side and an embedded, supervised
-WAL capturer, so `pg_walserver` can eventually be a complete,
-production-grade archiver entirely on its own -- not implemented yet, a
-design to review first.
+`archiver-passwd`, and per-route bookkeeping files -- see below). Several of
+its own sub-commands (`setup`, `fetch-systemid`, `basebackup`, `archive-wal`,
+`restore-wal`, `create-cert`; see "New client-side sub-commands" below) can
+now create and keep those files current, and push/pull WAL, directly from
+the command line -- `docs/ref/pg_walserver.rst`'s own worked example uses
+`setup` (embedded pull capture on by default), `archive-wal`, and `restore-wal`,
+falling back to `pg_basebackup`/`pg_receivewal`/`psql` by hand only for
+what those don't cover (HBA, the passwd file, a real continuously-streaming
+standby). `pg_walserver` can already be a complete, standalone archiver
+entirely on its own this way; what's left for the later "archiving PR" is
+wiring all of this into `pg_autoctl`'s own process supervision and monitor
+schema, so `pg_autoctl archive command`/`pg_autoctl restore command` can
+participate in the monitor's own quorum/archiver-node bookkeeping instead
+of running by hand.
 
 One concrete consequence of that scoping shows up in `hba.c`/`hba.h`: an
 earlier iteration of this PR had a `"monitor"` HBA `ADDRESS` keyword backed
@@ -165,11 +167,11 @@ The commands a connected client can issue on a `Query` ('Q') message are:
   of this project's own extensions, a cheap query with no file transfer at
   all: `RowDescription(status text)` + `DataRow('missing'|'matches'|
   'differs')` + `CommandComplete`, the same shape `SHOW` already uses. The
-  client (`pg_walserver archive`, see "The archive push side" below)
+  client (`pg_walserver archive-wal`, see "The archive push side" below)
   computes the size and CRC32C of its own *local* file and sends both
   here; the reply says whether that's already what's on disk under this
-  name, without moving a single byte of file content. See DESIGN-
-  standalone-archiving.md's "The push side" section for the full design.
+  name, without moving a single byte of file content. See "The archive
+  push side" below for the full design.
 - `ARCHIVE_FILE '<name>'` (`cmd_archive_file.c`) -- a `CopyIn` (client to
   server): the actual push, used only when `CHECK_FILE` said `missing` or
   `differs`. The server never trusts a client's own `CHECK_FILE` checksum
@@ -193,18 +195,17 @@ Anything else parses to `WS_CMD_UNKNOWN` and gets a clean `ErrorResponse`
 connection remains usable for the next command afterwards
 (`test_004_grammar_edge_cases` in the tap spec exercises exactly this).
 
-### FETCH_FILE's client
+### FETCH_FILE's client: `src/bin/common/fetch_client.c` and `pg_walserver restore-wal`
 
 Earlier in this PR's own history, `pg_walserver` shipped both sides of
 `FETCH_FILE`: the server handler above, and a `pg_walserver fetch-file`
-CLI sub-command (a one-shot libpq client) meant to be `execv()`'d by
-`pg_autoctl restore command` in the later archiving PR. Review concluded
-that design was backwards: `pg_walserver` should be a server binary, full
-stop, and a client used only by `pg_autoctl` belongs where `pg_autoctl` can
-call it directly, in-process, with no subprocess/`execv()` indirection at
-all.
+CLI sub-command (a one-shot libpq client) meant to be `execv()`'d by a
+future `pg_autoctl restore command`. Review concluded that design was
+backwards: `pg_walserver` should be a server binary, full stop, and any
+client belongs where its caller can call it directly, in-process, with no
+subprocess/`execv()` indirection at all.
 
-The client's logic has been moved, unchanged in substance, to
+The client's logic moved, unchanged in substance, to
 `src/bin/common/fetch_client.c`/`fetch_client.h` as `ws_fetch_file_client()`.
 It was a clean move rather than a rewrite because the client never actually
 depended on any `pg_walserver`-internal header: it opens a plain
@@ -218,19 +219,25 @@ another libpq application). `src/bin/common/` is already linked by both
 wildcard), so the move required no new build wiring beyond removing the
 file from `pg_walserver`'s own `LOCAL_SRC` list.
 
-`pg_walserver` itself has **no** `fetch-file` sub-command any more: its
-`CommandLine` tree (`cli_root.c`) is down to `serve` (the default) and
-`scram-secret`. The only caller `ws_fetch_file_client()` was ever going to
-have -- `pg_autoctl restore command` -- lives in the later archiving PR and
-is not part of this one; that PR calls it directly as a C function. This
-PR's own test suite (see "Testing" below) does not exercise
-`ws_fetch_file_client()` at all: `test_002_fetch_file` drives the
-*server-side* `FETCH_FILE` command with a plain `psql -c "FETCH_FILE ..."`,
-which never touches this client code. There is no throwaway test binary
-added for it either -- a manual harness for a function with its one real
-caller in a different PR did not seem worth inventing; the archiving PR's
-own tests are expected to exercise it through `pg_autoctl restore command`
-end to end.
+`ws_fetch_file_client()` now has a real, current caller: `pg_walserver
+restore` (`cli_restore.c`, see "New client-side sub-commands" below), a
+thin wrapper meant to be used directly as a standalone deployment's own
+`restore_command`, mirroring `pg_walserver archive-wal`'s own role as
+`archive_command` on the push side. `pg_walserver` itself still has **no**
+`fetch-file` sub-command -- that one-shot design was rejected, not merely
+renamed -- but it does have `restore-wal`. A later, separate "archiving" PR is
+expected to also grow `pg_autoctl restore command`, calling
+`ws_fetch_file_client()` directly as a C function the same way, once that
+PR's own monitor-backed quorum/archiver-node participation exists on top
+of it; until then, `pg_walserver restore-wal`, or any other libpq client
+issuing a raw `FETCH_FILE` (`psql` included, since it is a real,
+if project-specific, replication-protocol command), is the actual, current
+way to drive this. This PR's own test suite (see "Testing" below)
+exercises `ws_fetch_file_client()` two ways: `pg_walserver_standalone.
+pgaf`'s `test_002_fetch_file` drives the *server-side* `FETCH_FILE`
+command directly with a plain `psql -c "FETCH_FILE ..."`, never touching
+this client code, while `pg_walserver_archive_command.pgaf` exercises
+`pg_walserver restore-wal` itself end to end.
 
 ## Replication slots
 
@@ -641,8 +648,7 @@ for every deployment this PR's own test suites exercise.
 Three sub-commands, alongside `serve`/`scram-secret`, all sharing
 `cli_upstream.c`'s own `--route`/`--path`/`--upstream`/`--host`/`--port`/
 `--user` resolution (an explicit flag always wins over a route's own
-`pg_walserver.ini` properties, the same layering `restore_command_
-resolve()`, `pg_autoctl/restore_command.c`, already uses):
+`pg_walserver.ini` properties):
 
 - **`fetch-systemid`** (`cli_fetch_systemid.c`) -- connects to the
   upstream via `pgctl_identify_system()` (`src/bin/common/pgctl.c`, a real
@@ -712,11 +718,11 @@ self-signed certificate. Refuses to overwrite an already-existing
 replace what's already there" principle as `cli_fetch_systemid.c`'s own
 systemid overwrite check, applied here to the certificate files instead.
 
-## The archive push side: `CHECK_FILE` + `ARCHIVE_FILE` + `pg_walserver archive`
+## The archive push side: `CHECK_FILE` + `ARCHIVE_FILE` + `pg_walserver archive-wal`
 
 Alongside the pull-oriented tools above, `pg_walserver` also accepts a
 *push*: `CHECK_FILE`/`ARCHIVE_FILE` (see "The wire protocol" above for
-their wire shape and overwrite-safety rule) and the `pg_walserver archive`
+their wire shape and overwrite-safety rule) and the `pg_walserver archive-wal`
 client sub-command that drives them, meant to run as (part of) a Postgres
 `archive_command`. This section documents that design as built, including
 the two judgment calls resolved along the way: `CHECK_FILE`'s wire shape
@@ -725,7 +731,7 @@ intra-invocation recheck's exact timing (resolved as `cli_archive.c`'s own
 `WS_ARCHIVE_RECHECK_COUNT`/`WS_ARCHIVE_RECHECK_SLEEP_SECONDS`: two
 rechecks, one second apart).
 
-`pg_walserver archive <path-to-file> <filename> --route <key> --host
+`pg_walserver archive-wal <path-to-file> <filename> --route <key> --host
 <host> [--port <port>] [--user <name>] [--sslmode <mode>]`
 (`cli_archive.c`) implements the design's own 4-step sequence per
 invocation:
@@ -766,7 +772,7 @@ Deliberately does **not** reuse `cli_upstream.c`'s `cli_resolve_upstream()`
 as-is: that helper resolves a `WsUpstreamTarget` (a `NodeAddress` +
 `SSLOptions` shaped for `prepare_primary_conninfo()`, i.e. a real
 *Postgres* connection) the way `fetch-systemid`/`basebackup` connect *out*
-from `pg_walserver` to an upstream Postgres instance. `archive` connects
+from `pg_walserver` to an upstream Postgres instance. `archive-wal` connects
 the other way, to a different kind of server entirely: it runs *on* the
 Postgres primary itself, as `archive_command`, connecting *to*
 `pg_walserver`'s own replication-protocol server -- a plain libpq
@@ -776,6 +782,39 @@ like `src/bin/common/fetch_client.c`'s own `FETCH_FILE` client, with no
 `WsArchiveTarget` mirrors `cli_upstream.h`'s flag *names*
 (`--route`/`--host`/`--port`/`--user`) for consistency, but is resolved
 directly in `cli_archive.c` rather than through `cli_resolve_upstream()`.
+
+### The restore side: `pg_walserver restore-wal`
+
+The read-side counterpart, `pg_walserver restore-wal <filename>
+<destination-path> --route <key> --host <host> [--port <port>] [--user
+<name>] [--sslmode <mode>]` (`cli_restore_wal.c`), is meant to be used
+directly as (part of) a Postgres `restore_command`. Both `archive-wal` and
+`restore-wal` are named with an explicit "-wal" suffix, not the bare
+"archive"/"restore", precisely because `pg_walserver` already has a
+separate `basebackup` sub-command -- see `cli_archive.h`'s own header
+comment for the full naming rationale (shared by both).
+
+Unlike `archive-wal`, `restore-wal` implements no protocol of its own: it
+is a thin CLI wrapper around `src/bin/common/fetch_client.c`'s own
+`ws_fetch_file_client()` (see "FETCH_FILE's client" above), which does the
+actual `FETCH_FILE '<name>'` round trip and the same-directory-temp-file-
+plus-`rename()` dance that keeps a killed/interrupted restore from leaving
+a partial file where Postgres expects a complete one. It mirrors
+PostgreSQL's own `restore_command` substitution order, `%f` (the bare
+filename recovery wants next) then `%p` (the local path to write it to) --
+the reverse of `archive_command`'s own `%p %f` order `archive-wal` takes.
+Exit code matches PostgreSQL's own `restore_command` contract exactly: `0`
+with the file written on success, nonzero with a clean stderr message
+otherwise -- including the ordinary "not found" case recovery hits at the
+end of the available WAL, which this client does not try to distinguish
+from any other failure (see `cli_restore_wal.h`'s own header comment).
+
+`restore-wal` connects to `pg_walserver` itself, exactly like `archive-wal`
+and for the exact same reason (see "Deliberately does **not** reuse
+`cli_upstream.c`'s `cli_resolve_upstream()`" just above) -- it therefore
+does not reuse `cli_upstream.c` either, and `cli_restore_wal.h`'s own
+`WsRestoreTarget` mirrors the same `--route`/`--host`/`--port`/`--user`/
+`--sslmode` flag names for consistency.
 
 ## The embedded pull capturer (capture.c)
 
@@ -936,9 +975,11 @@ later "archiving PR" that actually wires it into `pg_autoctl`:
   `service_archiver_reconciler.c` (already responsible for writing
   `pg_walserver.ini` in that later PR's own design) should grow to also
   write `upstream`/`capture` and call into this same logic in-process, the
-  same way `restore_command.c` now calls `ws_fetch_file_client()` directly
-  instead of the `execv()`-based design it started with (see "FETCH_FILE's
-  client" above).
+  same way a future `pg_autoctl restore command` is expected to call
+  `ws_fetch_file_client()` directly, in-process, once that PR's own
+  monitor-backed quorum/archiver-node participation exists on top of it --
+  `pg_walserver restore-wal` (see "FETCH_FILE's client" above) already
+  proves the in-process, no-`execv()` shape works today, standalone.
 - A natural future integration point exists at `pg_autoctl`'s own
   `archiver_confirm.c` (`archiver_confirm_run()`, which currently just
   `return 1`s -- retry forever -- when its monitor-backed
@@ -972,12 +1013,17 @@ reconciler writing routes/HBA files, no monitor schema. So the tap spec
 builds the smallest possible harness instead, ahead of the archiver
 feature that will eventually make all of this automatic:
 
-- `pg_walserver setup --with-basebackup` does most of the work in one
-  call: creates the route's own directory, writes the `pg_walserver.ini`
-  section (`path` + `upstream`), fetches node1's real system identifier
-  into `archiver-systemid`, and takes the route's first base backup --
-  exactly the sequence `docs/ref/pg_walserver.rst`'s own worked example
-  now leads with;
+- `pg_walserver setup --with-basebackup --no-capture` does most of the
+  work in one call: creates the route's own directory, writes the
+  `pg_walserver.ini` section (`path` + `upstream`), fetches node1's real
+  system identifier into `archiver-systemid`, and takes the route's first
+  base backup -- exactly the sequence `docs/ref/pg_walserver.rst`'s own
+  worked example now leads with. `--no-capture` opts out of the embedded
+  pull capturer, on by `setup`'s own default now (see "The embedded pull
+  capturer" below): this spec drives its own external, stock
+  `pg_receivewal` into this exact route directory a few lines below, and
+  the embedded capturer would otherwise fork a second process racing it
+  for the same segment files;
 - a hand-crafted `archiver-hba.conf` (a single `host all all
   127.0.0.1/32 trust` rule, scoped to the loopback peer every step in this
   spec actually connects from -- authentication itself is exercised
@@ -1068,20 +1114,31 @@ Runs 4/4 green.
 ### Testing the archive push side (tests/tap/specs/pg_walserver_archive_command.pgaf)
 
 A third, separate spec covers `CHECK_FILE`/`ARCHIVE_FILE` and the
-`pg_walserver archive`/`create-cert` sub-commands above, entirely
-monitor-independent as the design requires (see "The archive push side"
-above). Four steps: `CHECK_FILE` reports `missing` for a filename nothing
-has ever archived (`test_001`); `pg_walserver archive` pushes a brand new
-file via `ARCHIVE_FILE` (byte-identical to the source on disk afterwards),
-then run again against the exact same source file it reports `matches`
-and skips the push entirely -- exit 0 both times, the idempotency property
-PostgreSQL's own `archive_command` contract requires (`test_002`); pushing
-a *different* file under the same already-archived name is cleanly
-rejected (nonzero exit, the original bytes on disk untouched --
-overwrite-safety proven end to end, not just at the `CHECK_FILE` layer)
-(`test_003`); and `create-cert` creates a fresh certificate, refuses a
-second call without `--force`, and overwrites cleanly with it
-(`test_004`). Runs 4/4 green.
+`pg_walserver archive-wal`/`restore-wal`/`create-cert` sub-commands above,
+entirely monitor-independent as the design requires (see "The archive push
+side" above). Its own `setup{}` block passes `--no-capture` (see "The
+embedded pull capturer" below for why that's needed here now that
+`capture = pull` is `setup`'s own default), since this spec pushes its own
+small, deterministic fake "WAL segments" by hand under real WAL-segment-
+shaped names -- the embedded capturer would otherwise fork and pull real
+WAL from node1 into the same directory, under the same names, racing what
+the spec itself writes. Five steps: `CHECK_FILE` reports `missing` for a
+filename nothing has ever archived (`test_001`); `pg_walserver archive-wal`
+pushes a brand new file via `ARCHIVE_FILE` (byte-identical to the source on
+disk afterwards), then run again against the exact same source file it
+reports `matches` and skips the push entirely -- exit 0 both times, the
+idempotency property PostgreSQL's own `archive_command` contract requires
+(`test_002`); pushing a *different* file under the same already-archived
+name is cleanly rejected (nonzero exit, the original bytes on disk
+untouched -- overwrite-safety proven end to end, not just at the
+`CHECK_FILE` layer) (`test_003`); `create-cert` creates a fresh
+certificate, refuses a second call without `--force`, and overwrites
+cleanly with it (`test_004`); and `pg_walserver restore-wal` fetches the
+file `test_002` pushed back out, via a real `FETCH_FILE` round trip
+(byte-identical to the original), finally giving `ws_fetch_file_client()`
+(`src/bin/common/fetch_client.c`) a real, exercised caller -- restoring a
+name nothing ever archived fails cleanly, with no partial file left behind
+(`test_005`). Runs 5/5 green.
 
 ### Testing the embedded pull capturer (tests/tap/specs/pg_walserver_capture.pgaf)
 
@@ -1104,3 +1161,33 @@ parented by `pg_walserver` itself, with capture continuing byte-identical
 across the restart (`test_002`); and stopping `pg_walserver` itself
 (`SIGTERM`) cleanly stops the capturer child too -- no orphaned process
 left running (`test_003`). Runs 3/3 green.
+
+### Testing pg_walserver as a container's real PID 1 (tests/tap/specs/pg_walserver_pid1.pgaf)
+
+A fifth, separate spec covers the one thing none of the specs above can:
+`pg_walserver` genuinely running as PID 1 inside a container, not merely
+supervised by something else that happens to be PID 1 (every other
+pg_walserver spec runs it as an ordinary background process under node2's
+own pg_autoctl-managed container). This exercises `process_supervisor.c`'s
+own PID-1 orphan-reaping path (see "The single wildcard reaper" above) for
+real: node2's own container `command` is overridden to `exec pg_walserver`
+directly, with no `pg_autoctl`, shell wrapper, or init system above it at
+all, so a reparented grandchild really does land on `pg_walserver`'s own
+`waitpid(-1, ...)` call, not on some other init. Three steps: the embedded
+capturer's own parent pid really is `1` (`/proc/<pid>/stat`), proving
+`pg_walserver` itself is genuinely this container's PID 1, not a process
+merely running inside one (`test_001`); `kill -9`-ing the capturer gets it
+restarted automatically, still parented by pid 1 (`test_002`); and
+`docker compose stop` (a plain `SIGTERM` to the container, exactly what
+`docker stop` sends) cleanly stops both `pg_walserver` and its capturer
+child -- proven from the container's own log lines (`capture.c`'s own
+`ws_capture_stop_all()` and `ws_accept_loop()`'s own shutdown message),
+never from process absence alone: once PID 1 exits, the kernel tears down
+the whole PID namespace regardless of how orderly the shutdown was, so "no
+orphan left" can't by itself distinguish an orderly stop from a forced one
+the way the log lines -- and the explicit absence of a "sending SIGKILL"
+escalation line -- can (`test_003`). WAL-capture byte-for-byte correctness
+itself is already proven by `pg_walserver_capture.pgaf` above; this spec's
+only job is the process-supervision/signal-handling contract that changes
+specifically when `pg_walserver` is PID 1 instead of an ordinary child.
+Runs 3/3 green.
