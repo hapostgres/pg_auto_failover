@@ -9,7 +9,6 @@
  *   encrypted, and "mock" authentication for a user without a usable
  *   secret, so that an unknown role cannot be told from a wrong password.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

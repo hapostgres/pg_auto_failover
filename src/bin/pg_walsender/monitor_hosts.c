@@ -4,7 +4,6 @@
  *   the node list and a client of the refresher's datagram socket. No
  *   libpq here, no file is ever written.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

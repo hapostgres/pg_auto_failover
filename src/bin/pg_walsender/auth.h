@@ -28,7 +28,6 @@
  *   Without any HBA file configured (no --pgdata: only with the explicit
  *   --insecure flag, for manual testing), everything is accepted.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

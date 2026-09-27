@@ -12,7 +12,6 @@
  *   IDENTIFY_SYSTEM's xlogpos; START_REPLICATION's actual segment
  *   streaming (wal_segment_source.c) reads the real bytes.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

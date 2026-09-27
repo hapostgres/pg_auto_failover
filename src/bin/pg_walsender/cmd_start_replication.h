@@ -11,7 +11,6 @@
  *   required for a client (a real pg_receivewal) that already does its own
  *   validation on the bytes it receives.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

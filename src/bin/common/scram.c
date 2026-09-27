@@ -4,7 +4,6 @@
  *   PostgreSQL's src/backend/libpq/auth-scram.c; the primitives are
  *   libpgcommon's through scram_compat.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

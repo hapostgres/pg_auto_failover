@@ -7,7 +7,6 @@
  *   shutdown) by the accept loop parent, which reaps it in its main loop
  *   like the postmaster does with its auxiliary processes.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

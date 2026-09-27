@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/startup.c
  *   See startup.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

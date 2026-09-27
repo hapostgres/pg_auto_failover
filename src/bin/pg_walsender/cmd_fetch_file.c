@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/cmd_fetch_file.c
  *   See cmd_fetch_file.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

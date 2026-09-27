@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/cmd_start_replication.c
  *   See cmd_start_replication.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
