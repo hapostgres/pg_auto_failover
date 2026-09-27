@@ -290,6 +290,15 @@ logical line before tokenizing. What's intentionally left out, because
 this project's own HBA format doesn't use it: comma-separated lists,
 `@file` inclusion, and regular expressions.
 
+`ROUTE` is `all`, or a route key exactly as it appears in `routes.ini` (see
+"The routes file" below) -- an opaque string `hba.c` never parses, splits,
+or gives any filesystem meaning to. pg_auto_failover's own convention is
+`"<formation>/<group>"` (e.g. `default/0`), because it reads well and is
+already guaranteed unique across a whole deployment, but the `/` in it
+carries no special meaning here at all: `hba.c` compares it against a
+rule's `ROUTE` field with a plain string `==`, the exact same way it would
+compare `"archive1"` or any other key an operator picked by hand.
+
 Supported `ADDRESS` forms, tried in `rule_address_matches()`:
 
 - `all` -- matches any peer;
@@ -392,21 +401,20 @@ whatsoever, and there is no HBA file, no routes file, and no TLS.
 
 ## The routes file (routes.ini)
 
-`archiver-routes.ini` (`routes.c`/`routes.h`) is the archiver's own routing
-table: one INI section per `<formation>/<group>` this instance serves,
-mapping that key -- matched against the connection's `dbname`, i.e. what a
-real client puts in its connection string's `dbname=` -- to a `path`, that
-membership's own local storage root. That's the *only* thing a route
-carries: which base backup is current, a route's own system identifier,
-and the current WAL position are deliberately **not** stored in the routes
-file. Every command that needs one of those instead reads it fresh,
-straight off a small purpose-built file directly under that same path, at
-connection time -- for instance `cmd_base_backup.c`'s own
-`basebackups/.latest` and `cmd_identify_system.c`'s own
-`archiver-systemid`. `pg_walsender` itself never talks to the monitor (see
-the "monitor" HBA removal above); this per-route-directory split is what
-lets it stay that way while still always answering with whatever is
-current.
+`archiver-routes.ini` (`routes.c`/`routes.h`) is this server's own routing
+table: one INI section per route it serves, mapping a route key -- matched
+against the connection's `dbname`, i.e. what a real client puts in its
+connection string's `dbname=` -- to a `path`, that route's own local
+storage root. That's the *only* thing a route carries: which base backup
+is current, a route's own system identifier, and the current WAL position
+are deliberately **not** stored in the routes file. Every command that
+needs one of those instead reads it fresh, straight off a small
+purpose-built file directly under that same path, at connection time --
+for instance `cmd_base_backup.c`'s own `basebackups/.latest` and
+`cmd_identify_system.c`'s own `archiver-systemid`. `pg_walsender` itself
+never talks to the monitor (see the "monitor" HBA removal above); this
+per-route-directory split is what lets it stay that way while still always
+answering with whatever is current.
 
 `BASE_BACKUP`, `FETCH_FILE`, `START_REPLICATION`, and the replication-slot
 commands all resolve the connection's route once (`routes_find()`, in
@@ -418,9 +426,78 @@ The parser is deliberately built directly on the vendored `ini.h`'s
 low-level, dynamic-section API (`ini_load()`/`ini_section_count()`/...)
 rather than this project's own `ini_file.c` wrapper: that wrapper's
 `IniOption` model assumes a fixed, compile-time-known set of section/key
-names, which does not fit a file whose sections are one per archived
-`(formation, group)` pair -- unknown in advance, and changing over the
-life of the server.
+names, which does not fit a file whose sections are one per route, under
+whatever key an operator (or a driver such as pg_auto_failover) picked --
+unknown in advance, and changing over the life of the server.
+
+### Route keys are opaque strings, not paths
+
+A route key is never parsed, split on `/`, or given any filesystem meaning
+of its own anywhere in this codebase -- it is matched by a plain string
+`==` against `dbname` (`routes_find()`) and, independently, against
+`archiver-hba.conf`'s own `ROUTE` field (`hba_lookup()`), and nowhere else.
+pg_auto_failover's own convention, `"<formation>/<group>"` (e.g.
+`default/0`), *looks* like a path, but it is not one, and never becomes
+one: the only thing that ever determines an actual directory on disk is
+the route's own explicit `path` property, written by whoever maintains
+`routes.ini` (a human, or `service_archiver_reconciler.c` in the later
+archiving PR). This is a deliberate design choice, not an oversight -- see
+the wildcard route below for why substituting a route key straight into a
+filesystem path would be actively dangerous, given that the key is
+whatever an unauthenticated client's `dbname` says it is until HBA and
+SCRAM have run.
+
+This project's whole design predates the archiver: `pg_walsender_
+standalone.pgaf` (see "Testing" below) never mentions a "formation" or a
+"group" anywhere, and its own `routes.ini` uses `default/0` as nothing
+more than an arbitrary string a human chose to also type into `psql`'s
+`dbname=` parameter. Any string works exactly the same way -- a bare
+cluster name, a customer id, a UUID -- pg_auto_failover is one driver of
+this file, not a requirement it imposes on it.
+
+### The wildcard route (`*`)
+
+One route key is special: `WS_ROUTES_WILDCARD_KEY` (`"*"`, `routes.h`) is a
+catch-all fallback, used when a connection's `dbname` matches no route of
+its own. The syntax and precedence are deliberately the same as
+PgBouncer's own `[databases]` `"*"` entry
+(<https://www.pgbouncer.org/config.html>), on the theory that anyone who
+has already run a PgBouncer knows exactly what to expect here:
+
+```ini
+# an explicit route always wins over the wildcard, exactly like PgBouncer
+[default/0]
+path = /var/lib/postgres/pgaf/default/0
+
+# any dbname that isn't "default/0" above falls through to here
+[*]
+path = /var/lib/archiver/shared
+```
+
+One deliberate difference from PgBouncer: PgBouncer's own wildcard
+*substitutes* the requested name into its fallback connection string
+(`"bar"` behaves as `"bar = host=foo dbname=bar"`) -- safe there, because
+the result is just another `dbname` handed to a real PostgreSQL server,
+which validates it on its own. Doing the same thing here would mean
+building a *filesystem path* out of a string an unauthenticated client
+supplied before HBA or SCRAM ever ran, and a route key is explicitly
+allowed to contain `/` (see above) -- so a naive `%r`-style substitution
+would turn pg_auto_failover's own key convention into a path-traversal
+primitive the moment a client sent a crafted `dbname`. `routes_find()`
+does not do this: every `dbname` that falls through to `"*"` shares that
+one configured `path` verbatim, never a per-key subdirectory synthesized
+on the fly. The wildcard is what makes `pg_walsender` usable with zero
+multiplexing ceremony outside pg_auto_failover: a single-cluster
+deployment can skip per-route sections entirely, keep just one `[*]`
+section in `routes.ini`, and never has to learn or type a special `dbname`
+value at all.
+
+`archiver-hba.conf`'s own `ROUTE` matching is completely independent of
+this: an HBA rule's `ROUTE` field is always compared against the literal
+`dbname` the client sent, never against whichever `WsRoute` `routes_find()`
+happened to resolve it to. A `hostssl all ...` rule already admits any
+route, wildcard-resolved or not; a rule scoped to one specific route key
+still only matches that literal key, exactly as before.
 
 ## The vendored ustar writer (vendor/tar.c)
 
@@ -455,7 +532,8 @@ builds the smallest possible harness by hand instead, ahead of the
 archiver feature that will eventually make all of this automatic:
 
 - a hand-crafted `archiver-routes.ini` and `archiver-hba.conf` (a single
-  `host all all 0.0.0.0/0 trust` rule -- authentication itself is
+  `host all all 127.0.0.1/32 trust` rule, scoped to the loopback peer every
+  step in this spec actually connects from -- authentication itself is
   exercised elsewhere at the unit level, this spec exercises the wire
   protocol);
 - a hand-written `archiver-systemid` file, built by asking node1 directly
@@ -472,7 +550,7 @@ archiver feature that will eventually make all of this automatic:
 talks to it exclusively through real clients: `psql` issuing raw
 replication-protocol commands (`IDENTIFY_SYSTEM`, `SHOW`, `FETCH_FILE`,
 `CREATE_REPLICATION_SLOT`, deliberately malformed input) and a real
-`pg_receivewal` doing an actual `START_REPLICATION`. The five steps:
+`pg_receivewal` doing an actual `START_REPLICATION`. The six steps:
 
 1. `test_000_sync_files_from_node1` -- assembles the hand-crafted
    fixtures above and starts `pg_walsender`.
@@ -496,8 +574,14 @@ replication-protocol commands (`IDENTIFY_SYSTEM`, `SHOW`, `FETCH_FILE`,
    (not a hand-rolled parser) lexed the identifier correctly; and a
    garbage command produces a clean `ErrorResponse` without crashing the
    server or leaving the connection unusable for the next, real command.
+6. `test_005_wildcard_route` -- adds a second route, reachable only
+   through routes.ini's `"*"` wildcard (see "The routes file" above), with
+   its own distinct system identifier; a `dbname` matching no explicit
+   section resolves to it, while `default/0` -- which still has its own
+   explicit section -- keeps resolving to its own path, proving an exact
+   match always wins over the wildcard.
 
-The suite runs 5/5 green; none of it needed to change for the removal of
-the `"monitor"` HBA keyword or the `fetch-file` CLI sub-command (Tasks 1
-and 2 of the PR review round that produced this README) -- it was already
-written to avoid exercising either path.
+The suite runs 6/6 green; none of the first five steps needed to change
+for the removal of the `"monitor"` HBA keyword or the `fetch-file` CLI
+sub-command (Tasks 1 and 2 of the PR review round that produced this
+README) -- they were already written to avoid exercising either path.

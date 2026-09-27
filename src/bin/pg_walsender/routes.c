@@ -4,7 +4,8 @@
  *   ini.h API (ini_load/ini_section_count/...) rather than this project's
  *   own ini_file.c wrapper: ini_file.c's IniOption model assumes a fixed,
  *   compile-time-known set of section/key names, which doesn't fit a file
- *   whose sections are one per archived (formation, group) -- unknown in
+ *   whose sections are one per route, under whatever key names the
+ *   operator (or a driver such as pg_auto_failover) chose -- unknown in
  *   advance. ini.h's lower-level, enumerable API is exactly the right
  *   shape and is already vendored into this project (src/bin/lib/libs/
  *   ini.h, compiled into libpgaf_common.a via common/ini_implementation.c).
@@ -33,8 +34,8 @@
 /*
  * routes_load reads and parses the routes ini file at path into a freshly
  * malloc'd array (*routesOut, *countOut entries; free with routes_free()),
- * one WsRoute per non-global section, keyed by its section name
- * ("<formation>/<group>") with its "path" property (the only key
+ * one WsRoute per non-global section, keyed by its section name (an opaque
+ * string -- see routes.h) with its "path" property (the only key
  * recognized; any other key logs a warning and is ignored). Returns false
  * (with *routesOut and *countOut left untouched) when the file cannot be
  * read or parsed.
@@ -156,19 +157,48 @@ routes_free(WsRoute *routes)
 
 
 /*
- * routes_find returns the route whose key exactly matches (case-sensitive),
- * or NULL when none does.
+ * routes_find returns the route whose key exactly matches (case-sensitive)
+ * key, or, failing that, the route whose key is the wildcard
+ * WS_ROUTES_WILDCARD_KEY ("*"), if the file has one. NULL when neither
+ * exists.
+ *
+ * The precedence -- an exact match always wins, the wildcard is only ever
+ * a fallback -- and the wildcard's own syntax are deliberately the same as
+ * PgBouncer's [databases] "*" entry: "if there is an entry (and no other
+ * overriding entries) '* = host=foo', then a connection ... specifying a
+ * database 'bar' will effectively behave as if an entry 'bar = host=foo
+ * dbname=bar' exists" (pgbouncer.org/config.html). The one deliberate
+ * difference: PgBouncer's substitution is safe because its destination is
+ * another dbname handed to a real Postgres server, which validates it on
+ * its own; ours would be a directory on this server's own filesystem, so
+ * this project does NOT substitute the requested key into the wildcard
+ * route's path the way PgBouncer substitutes dbname into its connection
+ * string -- every dbname that falls through to the wildcard shares that
+ * one configured path verbatim, never a per-key subdirectory synthesized
+ * from a string an unauthenticated client provided (which would turn an
+ * operator-chosen key -- like pg_auto_failover's own "<formation>/<group>"
+ * -- into a path-traversal surface the moment it contained a "/" or "..").
+ * A route key is, and stays, just an opaque label matched by this function;
+ * only a route's own explicit, operator-written "path" property ever
+ * touches the filesystem, see routes.h's own comment.
  */
 const WsRoute *
 routes_find(const WsRoute *routes, int count, const char *key)
 {
+	const WsRoute *wildcard = NULL;
+
 	for (int i = 0; i < count; i++)
 	{
 		if (streq(routes[i].key, key))
 		{
 			return &routes[i];
 		}
+
+		if (streq(routes[i].key, WS_ROUTES_WILDCARD_KEY))
+		{
+			wildcard = &routes[i];
+		}
 	}
 
-	return NULL;
+	return wildcard;
 }
