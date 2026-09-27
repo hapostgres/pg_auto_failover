@@ -17,27 +17,43 @@ server-mode options works with no sub-command name at all. This is
 ``pg_walserver --help``'s own output, verbatim::
 
   pg_walserver: The archiver's own replication-protocol server
-  usage: pg_walserver [serve options] | scram-secret ...
+  usage: pg_walserver [serve options] | scram-secret ... | setup ... | fetch-systemid ... | basebackup ... | create-cert ... | archive-wal ... | restore-wal ...
 
-    serve         Run the accept loop (default command, used when no
-                  sub-command name is given at all)
-    scram-secret  Print one archiver-passwd line for a user
+    serve           Run the accept loop (default command, used when no
+                    sub-command name is given at all)
+    scram-secret    Print one archiver-passwd line for a user
+    setup           Create or validate one pg_walserver.ini route
+    fetch-systemid  Fetch a route's upstream system identifier
+    basebackup      Take a base backup of a route's upstream
+    create-cert     Create a self-signed TLS certificate for --pgdata
+    archive-wal     Push one WAL/.backup file into a route (archive_command)
+    restore-wal     Fetch one WAL/.backup file from a route (restore_command)
 
 
   Available commands:
     pg_walserver
-      serve         Run the pg_walserver accept loop (the default command)
-      scram-secret  Print one archiver-passwd line for a user
+      serve           Run the pg_walserver accept loop (the default command)
+      scram-secret    Print one archiver-passwd line for a user
+      fetch-systemid  Fetch a route's upstream system identifier
+      basebackup      Take a base backup of a route's upstream
+      setup           Create or validate one pg_walserver.ini route
+      create-cert     Create a self-signed TLS certificate for --pgdata
+      archive-wal     Push one WAL/.backup file into a pg_walserver route (archive_command)
+      restore-wal     Fetch one WAL/.backup file from a pg_walserver route (restore_command)
 
-Neither line in "Available commands" gets a ``+`` marker (unlike
+None of the lines in "Available commands" gets a ``+`` marker (unlike
 :ref:`pg_autoctl`'s own tree, where ``create``, ``drop`` and friends do):
-that marker means "this sub-command has sub-commands of its own", and
-``serve``/``scram-secret`` are both leaves, not that one of them is the
-default. ``--help``/``-h`` are also the one case ``pg_walserver``'s "no
-sub-command name means serve" shim (``pg_walserver_default_argv()``,
-``cli_root.c``) deliberately leaves alone, so ``pg_walserver --help`` shows
-the *root* help above, never ``serve``'s own flags -- for those, ask
-``serve`` directly, which is also ``--help``'s own output, verbatim::
+that marker means "this sub-command has sub-commands of its own", and every
+one of ``pg_walserver``'s own sub-commands is a leaf -- ``serve`` being the
+first one listed is what makes it the default, not a marker. (A ninth,
+hidden ``internal`` sub-command also exists, used only by the embedded pull
+capturer to re-exec itself, see README.md's "The embedded pull capturer"
+section; it deliberately does not show up in ``--help`` at all.)
+``--help``/``-h`` are also the one case ``pg_walserver``'s "no sub-command
+name means serve" shim (``pg_walserver_default_argv()``, ``cli_root.c``)
+deliberately leaves alone, so ``pg_walserver --help`` shows the *root* help
+above, never ``serve``'s own flags -- for those, ask ``serve`` directly,
+which is also ``--help``'s own output, verbatim::
 
   pg_walserver serve: Run the pg_walserver accept loop (the default command)
   usage: pg_walserver serve [--port <port>] [--pgdata <path> | --insecure] [--ssl-cert-file <path> --ssl-key-file <path>] [--auth-timeout <seconds>]
@@ -87,10 +103,11 @@ On the wire, a connected client may issue ``IDENTIFY_SYSTEM``, ``SHOW``,
 real PostgreSQL primary, plus three project-specific extensions:
 ``FETCH_FILE '<name>'``, used to fetch a single WAL segment or timeline
 history file in one request/response round trip (as a ``restore_command``
-would), and ``CHECK_FILE``/``ARCHIVE_FILE``, the push-side counterpart used
-by ``pg_walserver archive`` (as an ``archive_command`` would, see
-`Examples`_ below). See ``src/bin/pg_walserver/README.md`` in the source
-tree for the full design.
+would -- ``pg_walserver restore-wal`` is the recommended client for this,
+see `Examples`_ below), and ``CHECK_FILE``/``ARCHIVE_FILE``, the push-side
+counterpart used by ``pg_walserver archive-wal`` (as an ``archive_command``
+would). See ``src/bin/pg_walserver/README.md`` in the source tree for the
+full design.
 
 Options
 -------
@@ -191,34 +208,38 @@ replication connection from the archive host, then reload
 (the default since PostgreSQL 10).
 
 **1. On the archive host, one command**: ``pg_walserver setup`` creates the
-route's own directory, writes its ``pg_walserver.ini`` section (``path``
-and ``upstream``), fetches the real system identifier (``IDENTIFY_SYSTEM``
-checks every connection against it), and -- with ``--with-basebackup`` --
-takes the route's first base backup, synchronously: ``setup`` does not
-return until it has actually succeeded. A route key is an opaque string of
-your choosing (see `Description`_ above); this example uses ``mycluster``,
-a plain name, specifically to show that pg_auto_failover's own
+route's own directory, writes its ``pg_walserver.ini`` section (``path``,
+``upstream``, and, by default, ``capture = pull``, see step 2 below),
+fetches the real system identifier (``IDENTIFY_SYSTEM`` checks every
+connection against it), and -- with ``--with-basebackup`` -- takes the
+route's first base backup, synchronously: ``setup`` does not return until
+it has actually succeeded. A route key is an opaque string of your
+choosing (see `Description`_ above); this example uses ``mycluster``, a
+plain name, specifically to show that pg_auto_failover's own
 ``"<formation>/<group>"`` convention is not required::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver setup \
       --pgdata /var/lib/archiver --route mycluster \
       --path /var/lib/archiver/mycluster \
       --upstream "host=primary user=archiver_repl sslmode=require" \
-      --capture pull --with-basebackup
+      --with-basebackup
 
 That one command replaces what used to be three (now four) separate steps
-by hand: writing ``pg_walserver.ini``'s section (now including
-``capture = pull``, see below), fetching the system identifier with a
-plain ``psql``, and taking the initial base backup with ``pg_basebackup``
-directly. Any of the last two can still be run on their own, any time
-after ``setup`` -- ``pg_walserver fetch-systemid`` and ``pg_walserver
-basebackup`` take the same ``--route``/``--pgdata`` (or ``--path``/
-``--upstream``) flags and are what ``setup`` itself calls internally.
+by hand: writing ``pg_walserver.ini``'s section (including
+``capture = pull``, on by default now, see below), fetching the system
+identifier with a plain ``psql``, and taking the initial base backup with
+``pg_basebackup`` directly. Any of the last two can still be run on their
+own, any time after ``setup`` -- ``pg_walserver fetch-systemid`` and
+``pg_walserver basebackup`` take the same ``--route``/``--pgdata`` (or
+``--path``/``--upstream``) flags and are what ``setup`` itself calls
+internally.
 
-**2. Continuous WAL capture is automatic**: ``--capture pull`` above wrote
-``capture = pull`` into the route's own ``pg_walserver.ini`` section, so
-the moment ``pg_walserver serve`` (step 3 below) starts, it forks its own
-supervised ``pg_receivewal`` child for this route -- straight into the
+**2. Continuous WAL capture is automatic, on by default**: with no
+``--capture`` flag at all, the command above still wrote
+``capture = pull`` into the route's own ``pg_walserver.ini`` section (an
+operator has to pass ``--no-capture``, or ``--capture none``, to opt out),
+so the moment ``pg_walserver serve`` (step 3 below) starts, it forks its
+own supervised ``pg_receivewal`` child for this route -- straight into the
 route's own directory (not a subdirectory -- ``START_REPLICATION``/
 ``FETCH_FILE`` read WAL segments directly out of a route's own top-level
 directory), restarted automatically if it ever dies, stopped cleanly when
@@ -227,10 +248,9 @@ remember to restart after a reboot. See ``src/bin/pg_walserver/README.md``'s
 "The embedded pull capturer" section for the full supervision/restart
 design.
 
-Without ``--capture pull`` (a route that is push-only, or fed by
-something else entirely), WAL capture is still whatever it always was:
-run a real ``pg_receivewal`` by hand, under a real process supervisor, the
-same shape this document used before the embedded capturer existed::
+With ``--no-capture`` (a route that is push-only, fed by something else
+entirely, or where an operator prefers a real ``pg_receivewal`` under its
+own process supervisor), WAL capture is still whatever it always was::
 
   archive$ nohup env PGPASSWORD=s3kr3t pg_receivewal \
       -d "host=primary user=archiver_repl sslmode=require" \
@@ -241,15 +261,20 @@ same shape this document used before the embedded capturer existed::
 ``<path>/archiver-walsegsize``, holding the byte count in decimal; the
 16MB default needs nothing extra.)
 
-**2b. Alternative, or complement: push via** ``archive_command`` **instead
-of (or alongside)** ``pg_receivewal``. Where step 2 above *pulls* WAL
-continuously, ``pg_walserver archive`` *pushes* one completed segment (or
-``.backup`` history file) per invocation, driven entirely by PostgreSQL's
-own ``archive_command`` mechanism -- no long-running capture process of
-its own at all. On the primary's own ``postgresql.conf``::
+**2b. Recommended: a defense-in-depth backstop via** ``archive_command``
+**alongside the embedded capturer.** Where step 2 above *pulls* WAL
+continuously, ``pg_walserver archive-wal`` *pushes* one completed segment
+(or ``.backup`` history file) per invocation, driven entirely by
+PostgreSQL's own ``archive_command`` mechanism. Running both together --
+the now-default embedded pull capturer *and* ``archive_command`` -- is the
+recommended production setup: whichever one delivers a segment first, the
+other's next ``CHECK_FILE`` round trip sees ``matches`` and skips the push
+entirely, so this costs almost nothing extra while making sure a segment
+is never lost even if the streaming capturer is down for a while. On the
+primary's own ``postgresql.conf``::
 
   archive_mode = on
-  archive_command = 'pg_walserver archive %p %f --route mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
+  archive_command = 'pg_walserver archive-wal %p %f --route mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
 
 ``%p``/``%f`` are PostgreSQL's own ``archive_command`` substitutions -- the
 segment's real path on the primary's own filesystem, and its bare
@@ -259,13 +284,8 @@ via ``CHECK_FILE`` whether it already has it (a cheap, transfer-free
 round trip), and only pushes the bytes via ``ARCHIVE_FILE`` when it
 doesn't -- exit code matches the ``archive_command`` contract exactly: 0
 on success (including "already there"), nonzero so PostgreSQL retries
-otherwise. Running this *alongside* step 2's own ``pg_receivewal`` is
-safe and costs almost nothing extra: whichever one delivers a segment
-first, ``archive_command``'s own next ``CHECK_FILE`` round trip then sees
-``matches`` and skips the push entirely -- a genuine defense-in-depth
-backstop, not a duplicated transfer. See
-``src/bin/pg_walserver/README.md``'s "The archive push side" section for
-the full design.
+otherwise. See ``src/bin/pg_walserver/README.md``'s "The archive push
+side" section for the full design.
 
 **3. Configure access and start pg_walserver** -- ``setup`` never touches
 HBA or the passwd file, a deliberately separate concern::
@@ -290,23 +310,38 @@ it is deliberately *not* PgBouncer's own per-request substitution)::
 backup ``pg_walserver`` is serving (a real ``pg_basebackup`` against
 ``pg_walserver`` itself, exercising the exact same wire protocol a real
 standby uses), then let ``restore_command`` fetch each WAL segment on
-demand via ``FETCH_FILE``, this project's own single-request/response
-extension (see `Description`_ above) -- a plain ``psql`` one-liner is
-enough, no client tooling beyond what ships with PostgreSQL itself::
+demand. ``pg_walserver restore-wal`` (`FETCH_FILE`'s own current, real
+client, see ``src/bin/pg_walserver/README.md``'s "FETCH_FILE's client"
+section) is the recommended tool for this -- a thin wrapper that fetches
+one file and writes it atomically, with the same clean exit-code
+discipline ``archive-wal`` uses on the push side::
 
   restore$ PGPASSWORD=s3kr3t pg_basebackup \
       -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
       -D /var/lib/postgres/pitr -X none --no-manifest
   restore$ cat >> /var/lib/postgres/pitr/postgresql.auto.conf <<EOF
-  restore_command = 'PGPASSWORD=s3kr3t psql "host=archive port=6543 dbname=mycluster user=archiver_repl replication=true sslmode=require" -c "FETCH_FILE %f" > %p'
+  restore_command = 'PGPASSWORD=s3kr3t pg_walserver restore-wal %f %p --route mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
   recovery_target_time = '2026-09-27 11:30:00+00'
   EOF
   restore$ touch /var/lib/postgres/pitr/recovery.signal
   restore$ pg_ctl -D /var/lib/postgres/pitr start
 
 PostgreSQL replays WAL from the base backup's own start position, fetching
-each missing segment from ``pg_walserver`` one ``FETCH_FILE`` request at a
-time, until it reaches ``recovery_target_time`` and promotes.
+each missing segment from ``pg_walserver`` one ``restore-wal`` invocation
+at a time, until it reaches ``recovery_target_time`` and promotes.
+
+A raw ``FETCH_FILE`` via ``psql``, or any other replication-protocol
+client, still works exactly as well -- it is a real command on the wire,
+not something ``restore-wal`` alone can issue -- and remains useful for a
+one-off manual fetch or when scripting something ``pg_walserver
+restore-wal`` doesn't cover::
+
+  restore$ PGPASSWORD=s3kr3t psql "host=archive port=6543 dbname=mycluster user=archiver_repl replication=true sslmode=require" -c "FETCH_FILE <segment>" > <destination>
+
+but ``pg_walserver restore-wal`` is the actual recommended
+``restore_command`` tool: it already handles quoting, atomic writes, and
+matches ``archive_command``'s own exit-code contract, none of which the
+raw ``psql`` one-liner above does on its own.
 
 **5. Or a real, continuously-streaming standby instead of PITR**: the same
 base backup, but with ``primary_conninfo`` and ``standby.signal`` -- no
