@@ -17,7 +17,6 @@
  *   mid-walk) applies -- the directory is tarred up exactly as it sits on
  *   disk.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

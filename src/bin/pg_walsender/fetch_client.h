@@ -5,7 +5,6 @@
  *   the password (PGPASSWORD, .pgpass), TLS (PGSSLMODE, PGSSLROOTCERT, ...)
  *   and every other connection option work as they do for pg_basebackup.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

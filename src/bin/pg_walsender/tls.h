@@ -24,7 +24,6 @@
  *   ws_io_read()/ws_io_write() are what framing.c reads and writes the
  *   socket through, so everything above it is unaware of TLS.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

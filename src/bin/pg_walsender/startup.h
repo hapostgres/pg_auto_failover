@@ -12,7 +12,6 @@
  *   refused, as PostgreSQL does. The client supplied strings kept in
  *   WsStartupParams are raw: log them through ws_sanitize_for_log().
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

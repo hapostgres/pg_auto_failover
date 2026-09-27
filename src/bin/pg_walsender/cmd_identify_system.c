@@ -15,7 +15,6 @@
  *   to timeline 1 / "0/0" when neither is (a brand new archiver with
  *   nothing captured yet).
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

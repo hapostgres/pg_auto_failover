@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/fetch_client.c
  *   See fetch_client.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

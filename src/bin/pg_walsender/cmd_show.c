@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/cmd_show.c
  *   See cmd_show.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

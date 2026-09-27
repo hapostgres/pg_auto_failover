@@ -30,7 +30,6 @@
  * Standalone binary (see the Makefile's own header comment) -- links
  * neither of these modes against pg_autoctl's own sources.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

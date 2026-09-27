@@ -16,7 +16,6 @@
  *   the single nodes-list refresher process (refresher.h), the only
  *   process that talks to the monitor.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

@@ -15,7 +15,6 @@
  *   selected by PG_VERSION_NUM, so a package build against any of them
  *   picks the right one and nothing else in this tree knows.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

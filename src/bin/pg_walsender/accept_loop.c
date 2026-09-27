@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/accept_loop.c
  *   See accept_loop.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

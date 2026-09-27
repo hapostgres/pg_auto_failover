@@ -87,7 +87,6 @@
  *   differs between them (not just the tag bytes within the shared code
  *   path) is what both fixes actually needed.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

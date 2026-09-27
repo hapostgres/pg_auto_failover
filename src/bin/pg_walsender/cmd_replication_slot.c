@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/cmd_replication_slot.c
  *   See cmd_replication_slot.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
@@ -270,7 +269,7 @@ cmd_create_replication_slot(int sock, const WsRoute *route, const char *rawArgs)
 	sformat(contents, sizeof(contents), "restart_lsn=%s\n", consistentPoint);
 
 	/* temp file + rename: a reader never sees a half written slot */
-	if (!ws_write_file_atomic(path, contents, strlen(contents)))
+	if (!write_file_atomic(contents, strlen(contents), path))
 	{
 		log_error("Failed to write replication slot marker \"%s\"", path);
 		ws_send_error_response(sock, "58030", "failed to persist the replication slot");

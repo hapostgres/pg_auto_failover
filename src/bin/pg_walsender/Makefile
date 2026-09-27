@@ -1,4 +1,3 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
 # Licensed under the PostgreSQL License.
 #
 # pg_walsender -- the archiver's own replication-protocol server. Standalone

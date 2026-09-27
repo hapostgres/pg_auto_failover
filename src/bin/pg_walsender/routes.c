@@ -9,7 +9,6 @@
  *   shape and is already vendored into this project (src/bin/lib/libs/
  *   ini.h, compiled into libpgaf_common.a via common/ini_implementation.c).
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

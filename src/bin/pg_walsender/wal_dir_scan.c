@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/wal_dir_scan.c
  *   See wal_dir_scan.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

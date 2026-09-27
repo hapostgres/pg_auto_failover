@@ -9,7 +9,6 @@
  *   free, the same HBA rules apply, and the reply is a regular COPY OUT
  *   (CopyOutResponse, CopyData ..., CopyDone, CommandComplete).
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

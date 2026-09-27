@@ -8,7 +8,6 @@
  *   flat-file read; the only real-instance-shaped input is which timeline
  *   was asked for.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

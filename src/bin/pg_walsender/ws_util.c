@@ -2,14 +2,12 @@
  * src/bin/pg_walsender/ws_util.c
  *   See ws_util.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
 
 #include <errno.h>
 #include <fcntl.h>
-#include <libgen.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -131,81 +129,6 @@ ws_read_file_flags(const char *path, int openFlags, size_t maxSize,
 	if (stOut != NULL)
 	{
 		*stOut = st;
-	}
-
-	return true;
-}
-
-
-bool
-ws_write_file_atomic(const char *path, const char *data, size_t len)
-{
-	char tmpPath[MAXPGPATH];
-
-	sformat(tmpPath, sizeof(tmpPath), "%s.tmp.%d", path, (int) getpid());
-
-	int fd = open(tmpPath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
-
-	if (fd < 0 && errno == EEXIST)
-	{
-		/* a leftover of an earlier process that had the same pid */
-		(void) unlink(tmpPath);
-		fd = open(tmpPath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
-	}
-
-	if (fd < 0)
-	{
-		log_error("Failed to create \"%s\": %m", tmpPath);
-		return false;
-	}
-
-	size_t done = 0;
-
-	while (done < len)
-	{
-		ssize_t n = write(fd, data + done, len - done);
-
-		if (n < 0 && errno == EINTR)
-		{
-			continue;
-		}
-
-		if (n <= 0)
-		{
-			log_error("Failed to write \"%s\": %m", tmpPath);
-			close(fd);
-			(void) unlink(tmpPath);
-			return false;
-		}
-
-		done += (size_t) n;
-	}
-
-	if (fsync(fd) != 0 || close(fd) != 0)
-	{
-		log_error("Failed to sync \"%s\": %m", tmpPath);
-		(void) unlink(tmpPath);
-		return false;
-	}
-
-	if (rename(tmpPath, path) != 0)
-	{
-		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpPath, path);
-		(void) unlink(tmpPath);
-		return false;
-	}
-
-	/* make the rename itself durable, best effort */
-	char dirCopy[MAXPGPATH];
-
-	strlcpy(dirCopy, path, sizeof(dirCopy));
-
-	int dirFd = open(dirname(dirCopy), O_RDONLY | O_CLOEXEC);
-
-	if (dirFd >= 0)
-	{
-		(void) fsync(dirFd);
-		close(dirFd);
 	}
 
 	return true;

@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/repl_command.c
  *   See repl_command.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

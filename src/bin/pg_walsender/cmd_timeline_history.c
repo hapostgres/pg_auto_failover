@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/cmd_timeline_history.c
  *   See cmd_timeline_history.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

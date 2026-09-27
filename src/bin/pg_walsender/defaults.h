@@ -6,7 +6,6 @@
  *   any of pg_autoctl's own sources. Keep PG_AUTOCTL_REPLICA_USERNAME
  *   in sync with pg_autoctl/defaults.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

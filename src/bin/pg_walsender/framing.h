@@ -7,7 +7,6 @@
  *   this anywhere in Postgres (see walsender.h's own header comment), so
  *   it's hand-rolled directly from the documented wire format.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

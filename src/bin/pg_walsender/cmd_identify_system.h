@@ -4,7 +4,6 @@
  *   resolved route. See cmd_identify_system.c for what's a placeholder in
  *   the current implementation vs. wired to real data.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

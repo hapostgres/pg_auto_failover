@@ -2,7 +2,6 @@
  * src/bin/pg_walsender/tar_stream.c
  *   See tar_stream.h.
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */

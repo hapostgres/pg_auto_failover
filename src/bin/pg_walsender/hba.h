@@ -26,7 +26,6 @@
  *   (password checked against the stored verifiers in the passwd file, see
  *   auth.h), "trust" or "reject".
  *
- * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
  */
