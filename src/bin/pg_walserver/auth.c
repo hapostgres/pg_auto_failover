@@ -315,8 +315,29 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 	 * routes exist is only told to a client that got through the HBA rules
 	 * and the password exchange. An unknown route is reported (3D000,
 	 * "database does not exist") only after a successful authentication.
+	 *
+	 * Three tiers, in order: an exact dbname match (what every command
+	 * except a real physical standby's own walreceiver can set directly);
+	 * failing that, over TLS, the client's own SNI hostname (a real
+	 * standby's walreceiver always sends the literal dbname "replication",
+	 * never a real route key -- see routes_find_by_hostname()'s own
+	 * comment); failing that too, the "*" wildcard, if the file has one.
+	 * HBA's own ROUTE matching, just below, stays independent of all of
+	 * this and always sees the literal dbname the client sent -- see
+	 * hba.h's own comment.
 	 */
-	const WsRoute *route = routes_find(routes, routeCount, routeKey);
+	const WsRoute *route = routes_find_exact(routes, routeCount, routeKey);
+
+	if (route == NULL && ws_tls_active())
+	{
+		route = routes_find_by_hostname(routes, routeCount,
+										ws_tls_get_sni_hostname());
+	}
+
+	if (route == NULL)
+	{
+		route = routes_find_exact(routes, routeCount, WS_ROUTES_WILDCARD_KEY);
+	}
 
 	char peerIP[NI_MAXHOST];
 

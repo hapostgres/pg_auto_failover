@@ -77,6 +77,15 @@ typedef struct WsRoute
 	                                    * instead. See DESIGN-standalone-
 	                                    * archiving.md's own "upstream"
 	                                    * section for the naming rationale. */
+	char hostname[_POSIX_HOST_NAME_MAX]; /* optional: the TLS SNI hostname a
+	                                      * client presents to reach this
+	                                      * route -- see routes_find_by_
+	                                      * hostname()'s own comment for why
+	                                      * this exists (a real physical
+	                                      * standby's dbname is always
+	                                      * "replication", never a route
+	                                      * key). Empty when the route is
+	                                      * only ever reached by dbname. */
 } WsRoute;
 
 /*
@@ -87,6 +96,31 @@ typedef struct WsRoute
 bool routes_load(const char *path, WsRoute **routesOut, int *countOut);
 void routes_free(WsRoute *routes);
 
+/*
+ * routes_find resolves key (a dbname) to a route: an exact match if one
+ * exists, else the "*" wildcard if the file has one, else NULL. The
+ * ordinary, dbname-only lookup every command except auth.c's own
+ * connection-routing decision wants -- see routes_find_exact() and
+ * routes_find_by_hostname() for the two lower-level pieces auth.c
+ * combines with a TLS SNI hostname in between these two tiers.
+ */
 const WsRoute * routes_find(const WsRoute *routes, int count, const char *key);
+
+/* routes_find() without the wildcard fallback: an exact key match, or NULL */
+const WsRoute * routes_find_exact(const WsRoute *routes, int count, const char *key);
+
+/*
+ * routes_find_by_hostname resolves a TLS SNI hostname (case-insensitively,
+ * as DNS names compare) to the one route whose own "hostname" property
+ * matches it, or NULL when none does or hostname is NULL/empty. See
+ * DESIGN-standalone-archiving.md's "Routing beyond dbname" section for why
+ * this exists at all: a real physical standby's replication connection
+ * always sends the literal dbname "replication", never a real route key,
+ * so a route meant to be reachable *by name* by one needs a different
+ * signal than dbname -- SNI, read before a single byte of the Postgres
+ * protocol itself is exchanged, is unaffected by that override.
+ */
+const WsRoute * routes_find_by_hostname(const WsRoute *routes, int count,
+										const char *hostname);
 
 #endif /* WS_ROUTES_H */

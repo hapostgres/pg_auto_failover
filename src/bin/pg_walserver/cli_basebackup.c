@@ -70,7 +70,7 @@ cli_basebackup_run(const WsUpstreamTarget *target,
 	if (env_exists("PGPASSWORD"))
 	{
 		(void) get_env_copy("PGPASSWORD", replicationSource.password,
-						   sizeof(replicationSource.password));
+							sizeof(replicationSource.password));
 	}
 
 	/* pg_basebackup_fetch() only needs pg_ctl's own path to find

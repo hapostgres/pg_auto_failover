@@ -17,6 +17,7 @@
 #include <ctype.h>
 #include <netdb.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 
 #include "postgres_fe.h"
@@ -133,6 +134,10 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 			{
 				strlcpy(route->upstream, propValue, sizeof(route->upstream));
 			}
+			else if (streq(propName, "hostname"))
+			{
+				strlcpy(route->hostname, propValue, sizeof(route->hostname));
+			}
 			else
 			{
 				log_warn("Ignoring unknown routes file key \"%s\" in section [%s]",
@@ -189,20 +194,56 @@ routes_free(WsRoute *routes)
 const WsRoute *
 routes_find(const WsRoute *routes, int count, const char *key)
 {
-	const WsRoute *wildcard = NULL;
+	const WsRoute *exact = routes_find_exact(routes, count, key);
 
+	if (exact != NULL)
+	{
+		return exact;
+	}
+
+	return routes_find_exact(routes, count, WS_ROUTES_WILDCARD_KEY);
+}
+
+
+/* routes_find() without the wildcard fallback, see routes.h's own comment */
+const WsRoute *
+routes_find_exact(const WsRoute *routes, int count, const char *key)
+{
 	for (int i = 0; i < count; i++)
 	{
 		if (streq(routes[i].key, key))
 		{
 			return &routes[i];
 		}
+	}
 
-		if (streq(routes[i].key, WS_ROUTES_WILDCARD_KEY))
+	return NULL;
+}
+
+
+/*
+ * routes_find_by_hostname matches hostname (case-insensitively, DNS names
+ * are not case sensitive: RFC 952/RFC 921, the same rule real PostgreSQL's
+ * own sni_clienthello_cb() applies to its pg_hosts.conf lookup) against
+ * every route's own "hostname" property. See routes.h's own comment on
+ * why this exists at all.
+ */
+const WsRoute *
+routes_find_by_hostname(const WsRoute *routes, int count, const char *hostname)
+{
+	if (hostname == NULL || hostname[0] == '\0')
+	{
+		return NULL;
+	}
+
+	for (int i = 0; i < count; i++)
+	{
+		if (routes[i].hostname[0] != '\0' &&
+			strcasecmp(routes[i].hostname, hostname) == 0)
 		{
-			wildcard = &routes[i];
+			return &routes[i];
 		}
 	}
 
-	return wildcard;
+	return NULL;
 }

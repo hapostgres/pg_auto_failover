@@ -66,6 +66,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "hba.h"
+#include "routes.h"
 #include "scram.h"
 #include "string_utils.h"
 #include "tls.h"
@@ -251,6 +252,52 @@ cli_serve_run(int argc, char **argv)
 		{
 			log_fatal("Failed to create \"%s\"", serveConfig.auth.hbaPath);
 			exit(1);
+		}
+
+		/*
+		 * More than one *named* route (the "*" wildcard doesn't count: a
+		 * single named route plus a wildcard fallback is still fully
+		 * disambiguated by dbname alone) and no TLS: refuse to start.
+		 * dbname-based routing cannot tell a real physical standby's
+		 * connection apart from any other route once there is more than
+		 * one -- every such standby's own walreceiver always sends the
+		 * literal dbname "replication", never a real route key (see
+		 * auth.c's own comment) -- so TLS SNI is the only way left to
+		 * address more than one route by name. `pg_walserver setup` already
+		 * creates a self-signed certificate the moment it writes a second
+		 * route, precisely so this check never fires for a deployment
+		 * built with it; it exists here too for a pg_walserver.ini
+		 * hand-edited or driven some other way.
+		 */
+		WsRoute *routes = NULL;
+		int routeCount = 0;
+
+		if (routes_load(serveConfig.routesPath, &routes, &routeCount))
+		{
+			int namedRouteCount = 0;
+
+			for (int i = 0; i < routeCount; i++)
+			{
+				if (!streq(routes[i].key, WS_ROUTES_WILDCARD_KEY))
+				{
+					namedRouteCount++;
+				}
+			}
+
+			routes_free(routes);
+
+			if (namedRouteCount > 1 && !ws_tls_server_enabled())
+			{
+				log_fatal("\"%s\" has %d named routes but TLS is not "
+						  "enabled: more than one route requires TLS (for "
+						  "SNI-based routing) to be reachable by name at "
+						  "all -- pass --ssl-cert-file/--ssl-key-file, or "
+						  "create <pgdata>/server.crt and server.key "
+						  "(\"pg_walserver setup\" already does this "
+						  "automatically)", serveConfig.routesPath,
+						  namedRouteCount);
+				exit(1);
+			}
 		}
 	}
 
@@ -684,6 +731,7 @@ static struct option setupLongOptions[] = {
 	{ "host", required_argument, NULL, 'h' },
 	{ "port", required_argument, NULL, 'p' },
 	{ "user", required_argument, NULL, 'U' },
+	{ "hostname", required_argument, NULL, 'n' },
 	{ "force", no_argument, NULL, 'f' },
 	{ "with-basebackup", no_argument, NULL, 'b' },
 	{ NULL, 0, NULL, 0 }
@@ -700,7 +748,7 @@ cli_setup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:fb",
+	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:n:fb",
 							setupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -748,6 +796,13 @@ cli_setup_getopt(int argc, char **argv)
 				break;
 			}
 
+			case 'n':
+			{
+				strlcpy(setupOptions.hostname, optarg,
+						sizeof(setupOptions.hostname));
+				break;
+			}
+
 			case 'f':
 			{
 				setupOptions.force = true;
@@ -787,7 +842,8 @@ static CommandLine setup_command =
 				 "Create or validate one pg_walserver.ini route",
 				 "--route <key> --path <dir> --pgdata <path> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
-				 "[--user <name>]] [--force] [--with-basebackup]",
+				 "[--user <name>]] [--hostname <fqdn>] [--force] "
+				 "[--with-basebackup]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
 				 "  --route     the route key to create or validate\n"
@@ -800,6 +856,19 @@ static CommandLine setup_command =
 				 "connection\n"
 				 "              parameters (default port: 5432, default "
 				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+													  "  --hostname  the route's own TLS SNI hostname, written "
+													  "into its\n"
+													  "              \"hostname\" property -- the only way a "
+													  "real physical\n"
+													  "              standby can address this route by name "
+													  "once more than\n"
+													  "              one exists (dbname alone cannot, see "
+													  "DESIGN-standalone-\n"
+													  "              archiving.md); creates a self-signed "
+													  "certificate for\n"
+													  "              --pgdata automatically, the moment a "
+													  "second route is\n"
+													  "              added, if none exists yet\n"
 													  "  --force     change an already-existing route's path, "
 													  "or overwrite an\n"
 													  "              already-recorded, different system "
