@@ -293,5 +293,66 @@ specify 'replication' for .pgpass lookup", ``libpqwalreceiver.c``'s own
 comment). So a route meant to be reachable by a real standby needs a
 second section literally keyed ``[replication]`` (pointing at the same
 ``path``) alongside its named one -- or, for a single-route deployment,
-just use routes.ini's own ``"*"`` wildcard from the start and never worry
-about the key a client happens to send at all.
+just use routes.ini's own ``"*"`` wildcard from the start, or, for more
+than one route, TLS SNI (below), and never worry about the key a client
+happens to send at all.
+
+Routing more than one cluster by name: TLS SNI
+-----------------------------------------------
+
+The ``[replication]`` alias above only works for a *single* cluster --
+every real standby collapses to the same literal ``dbname``, so a second
+one needs a different signal to tell them apart. ``pg_walserver`` reads
+that signal from TLS itself: the Server Name Indication (SNI) extension
+every TLS client sends during the handshake, before a single Postgres
+protocol byte is exchanged. ``libpq``'s own ``sslsni`` setting (on by
+default) sends the connection's ``host=`` value this way, so a real
+standby's ``primary_conninfo`` already carries what's needed, with no
+client-side change at all.
+
+One route needs none of this -- ``dbname`` alone is already unambiguous,
+and ``pg_walserver serve`` runs with no TLS configured at all if that's
+all there is. The moment a *second* named route (any section besides
+``*``) exists, TLS becomes mandatory: ``pg_walserver`` refuses to start
+otherwise, rather than silently leaving a route unreachable by any real
+standby. ``pg_walserver setup`` prepares for this on its own -- give each
+route its own ``--hostname``, and a self-signed certificate for
+``--pgdata`` is created automatically the moment it's needed::
+
+  archive$ PGPASSWORD=s3kr3t pg_walserver setup \
+      --pgdata /var/lib/archiver --route mycluster \
+      --path /var/lib/archiver/mycluster \
+      --upstream "host=primary port=5432 user=archiver_repl sslmode=require" \
+      --hostname mycluster.archive.example.com \
+      --with-basebackup
+
+  archive$ PGPASSWORD=s3kr3t pg_walserver setup \
+      --pgdata /var/lib/archiver --route another \
+      --path /var/lib/archiver/another \
+      --upstream "host=primary2 port=5432 user=archiver_repl sslmode=require" \
+      --hostname another.archive.example.com \
+      --with-basebackup
+  # this second route is the one that triggers "server.crt"/"server.key"
+  # creation under --pgdata, logged as it happens
+
+  archive$ pg_walserver --pgdata /var/lib/archiver --port 6543 &
+
+Each standby then simply names its own route's hostname in
+``primary_conninfo``'s ``host=`` -- the connection's ``dbname`` stays the
+useless, PostgreSQL-imposed ``"replication"`` for every one of them, and
+routing happens entirely through the TLS handshake, exactly like HTTPS
+virtual hosting::
+
+  standby$ cat >> /var/lib/postgres/standby/postgresql.auto.conf <<EOF
+  primary_conninfo = 'host=mycluster.archive.example.com port=6543 user=archiver_repl password=s3kr3t sslmode=require'
+  EOF
+
+A connecting client with no resolvable hostname (a bare IP, or a name
+matching no route) and no ``*`` wildcard configured gets a clean "route
+does not exist" failure, never an accidental match against some other
+route. Exact-``dbname`` routing keeps working unchanged alongside SNI: a
+hand-written ``dbname=mycluster`` connection resolves to that route
+whether or not TLS is even in use, and is always tried first. See
+``src/bin/pg_walserver/README.md``'s own "Routing beyond dbname" section
+for the full mechanism, including why a client certificate's CN remains a
+documented-but-unimplemented alternative to SNI for the same problem.

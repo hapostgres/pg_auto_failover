@@ -26,6 +26,12 @@ typedef struct WsSetupOptions
 	char host[_POSIX_HOST_NAME_MAX];
 	char port[16];
 	char user[NAMEDATALEN];
+	char hostname[_POSIX_HOST_NAME_MAX]; /* the route's own TLS SNI hostname,
+	                                      * written into pg_walserver.ini's
+	                                      * "hostname" property -- see
+	                                      * cli_setup.c's own comment on why
+	                                      * this matters the moment a second
+	                                      * route is added */
 	bool force;
 	bool withBasebackup;
 } WsSetupOptions;

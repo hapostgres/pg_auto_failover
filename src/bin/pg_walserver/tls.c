@@ -301,6 +301,29 @@ ws_tls_server_accept(int sock)
 
 
 /*
+ * ws_tls_get_sni_hostname returns the client's SNI hostname via
+ * SSL_get_servername(), valid to call any time after ws_tls_server_accept()
+ * succeeds -- unlike registering a servername callback (real PostgreSQL's
+ * own sni_clienthello_cb(), be-secure-openssl.c, uses the lower-level
+ * SSL_client_hello_get0_ext() instead, on OpenSSL's own advice, because it
+ * needs to pick a certificate *during* the handshake), a plain post-
+ * handshake read has no such ordering concern: nothing here depends on the
+ * result to decide anything about the handshake itself, only about routing
+ * a request afterward.
+ */
+const char *
+ws_tls_get_sni_hostname(void)
+{
+	if (activeSsl == NULL)
+	{
+		return NULL;
+	}
+
+	return SSL_get_servername(activeSsl, TLSEXT_NAMETYPE_host_name);
+}
+
+
+/*
  * ws_tls_certificate_hash computes the tls-server-end-point channel binding
  * data (RFC 5929) of our own certificate: its hash, with the digest of its
  * signature algorithm, or SHA-256 when that is MD5 or SHA-1. The same

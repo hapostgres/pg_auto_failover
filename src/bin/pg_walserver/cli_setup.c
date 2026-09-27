@@ -30,13 +30,28 @@
  *        (cli_basebackup.c) -- synchronously: setup does not return until
  *        it has actually succeeded or failed, on the theory that "setup
  *        finished" should mean the route is genuinely ready to serve, not
- *        "a background job was started that might still be running".
+ *        "a background job was started that might still be running";
+ *     5. once every route in pg_walserver.ini is accounted for, if there is
+ *        now more than one: TLS becomes mandatory (a single-route server
+ *        works with or without it, dbname alone is unambiguous; with
+ *        several routes, dbname-based routing stops being reliable at all
+ *        for a real physical standby -- see auth.c's own comment and
+ *        DESIGN-standalone-archiving.md's "Routing beyond dbname" section
+ *        -- so TLS SNI becomes the only way to address more than one route
+ *        by name). setup creates a self-signed certificate for <pgdata> if
+ *        none exists yet (pg_create_self_signed_cert(), the exact function
+ *        `pg_autoctl create archiver --ssl-self-signed` already uses), and
+ *        warns if --hostname was never given for a route now sharing the
+ *        file with others -- that route can then only ever be reached by
+ *        dbname (fine for pg_basebackup/pg_receivewal/archive_command,
+ *        never for a real physical standby) or the "*" wildcard.
  *
  * Licensed under the PostgreSQL License.
  *
  */
 
 #include <string.h>
+#include <unistd.h>
 
 #include "postgres_fe.h"
 
@@ -48,6 +63,8 @@
 #include "cli_upstream.h"
 #include "file_utils.h"
 #include "log.h"
+#include "pgctl.h"
+#include "pgsetup.h"
 #include "routes.h"
 #include "string_utils.h"
 
@@ -66,7 +83,7 @@
 static bool
 write_route_section(const char *pgdata, const char *routeKey,
 					const WsUpstreamTarget *target, const char *upstreamRaw,
-					bool force)
+					const char *hostname, bool force)
 {
 	char routesPath[MAXPGPATH] = { 0 };
 
@@ -76,13 +93,13 @@ write_route_section(const char *pgdata, const char *routeKey,
 	int routeCount = 0;
 	bool haveExisting = routes_load(routesPath, &routes, &routeCount);
 	const WsRoute *existing = haveExisting
-		? routes_find(routes, routeCount, routeKey)
-		: NULL;
+							  ? routes_find(routes, routeCount, routeKey)
+							  : NULL;
 
 	if (existing != NULL && !streq(existing->key, routeKey))
 	{
 		/* the "*" wildcard can be found for a key that isn't literally
-		 * "*" -- never treat that as "the route already exists" here */
+		* "*" -- never treat that as "the route already exists" here */
 		existing = NULL;
 	}
 
@@ -111,6 +128,11 @@ write_route_section(const char *pgdata, const char *routeKey,
 	if (upstreamRaw != NULL && upstreamRaw[0] != '\0')
 	{
 		appendPQExpBuffer(section, "upstream = %s\n", upstreamRaw);
+	}
+
+	if (hostname != NULL && hostname[0] != '\0')
+	{
+		appendPQExpBuffer(section, "hostname = %s\n", hostname);
 	}
 
 	if (PQExpBufferBroken(section))
@@ -159,6 +181,88 @@ write_route_section(const char *pgdata, const char *routeKey,
 }
 
 
+/*
+ * ensure_tls_for_multiple_routes re-reads pg_walserver.ini after
+ * write_route_section() and, when it now holds more than one route,
+ * makes sure a certificate exists for <pgdata> (creating a self-signed
+ * one with pg_create_self_signed_cert() -- the exact function `pg_autoctl
+ * create archiver --ssl-self-signed` already uses -- when neither
+ * server.crt/server.key nor an already-loaded certificate is there), and
+ * warns when routeKey itself has no "hostname" property: without one, it
+ * can only ever be reached by dbname (fine for pg_basebackup/pg_
+ * receivewal/archive_command, never for a real physical standby, see
+ * auth.c's own comment) or the "*" wildcard. Never a hard failure -- a
+ * single-route deployment (the common case) never reaches any of this at
+ * all, and even a multi-route one that only ever serves pg_basebackup/
+ * pg_receivewal/archive_command by dbname genuinely doesn't need TLS/SNI,
+ * so this only warns, it does not refuse to proceed.
+ */
+static void
+ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
+							   bool haveHostname)
+{
+	char routesPath[MAXPGPATH] = { 0 };
+	WsRoute *routes = NULL;
+	int routeCount = 0;
+
+	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
+
+	if (!routes_load(routesPath, &routes, &routeCount) || routeCount <= 1)
+	{
+		routes_free(routes);
+		return;
+	}
+
+	routes_free(routes);
+
+	log_info("\"%s\" now has %d routes: TLS is required for more than one "
+			 "route to be reachable by name (dbname-based routing alone "
+			 "cannot tell a real physical standby's connection apart from "
+			 "any other route once there is more than one, see this "
+			 "project's own DESIGN-standalone-archiving.md)",
+			 routesPath, routeCount);
+
+	char certPath[MAXPGPATH] = { 0 };
+	char keyPath[MAXPGPATH] = { 0 };
+
+	sformat(certPath, sizeof(certPath), "%s/server.crt", pgdata);
+	sformat(keyPath, sizeof(keyPath), "%s/server.key", pgdata);
+
+	if (!file_exists(certPath) || !file_exists(keyPath))
+	{
+		PostgresSetup pgSetup = { 0 };
+		char localHostname[_POSIX_HOST_NAME_MAX] = "pg_walserver";
+
+		(void) gethostname(localHostname, sizeof(localHostname));
+		strlcpy(pgSetup.pgdata, pgdata, sizeof(pgSetup.pgdata));
+
+		if (pg_create_self_signed_cert(&pgSetup, localHostname))
+		{
+			log_info("Created a self-signed certificate for \"%s\" "
+					 "(\"%s\"/\"%s\") -- replace it with a real one before "
+					 "running on a reachable network", pgdata, certPath,
+					 keyPath);
+		}
+		else
+		{
+			log_warn("Failed to create a self-signed certificate for "
+					 "\"%s\" -- pass --ssl-cert-file/--ssl-key-file to "
+					 "\"serve\", or create \"%s\"/\"%s\" yourself, before "
+					 "starting it", pgdata, certPath, keyPath);
+		}
+	}
+
+	if (!haveHostname)
+	{
+		log_warn("Route \"%s\" has no --hostname: it can only be reached "
+				 "by dbname (pg_basebackup/pg_receivewal/archive_command) "
+				 "or the \"*\" wildcard, never by name by a real physical "
+				 "standby -- pass --hostname next time, or edit \"%s\" by "
+				 "hand, to add one", routeKey, routesPath);
+	}
+}
+
+
 bool
 cli_setup_run(const WsSetupOptions *options)
 {
@@ -202,11 +306,15 @@ cli_setup_run(const WsSetupOptions *options)
 	}
 
 	if (!write_route_section(options->pgdata, options->route, &target,
-							 options->upstream, options->force))
+							 options->upstream, options->hostname,
+							 options->force))
 	{
 		/* errors have already been logged */
 		return false;
 	}
+
+	ensure_tls_for_multiple_routes(options->pgdata, options->route,
+								   options->hostname[0] != '\0');
 
 	uint64_t systemIdentifier = 0;
 

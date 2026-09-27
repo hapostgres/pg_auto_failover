@@ -508,6 +508,62 @@ happened to resolve it to. A `hostssl all ...` rule already admits any
 route, wildcard-resolved or not; a rule scoped to one specific route key
 still only matches that literal key, exactly as before.
 
+### Routing beyond `dbname`: TLS SNI, for a real physical standby
+
+`routes_find()`'s `dbname`-based matching above assumes the client gets to
+choose its `dbname`. A real Postgres physical standby doesn't: its own
+`libpqwalreceiver.c` (`libpqrcv_connect()`) always sends the literal
+`dbname=replication` for a physical replication connection, discarding
+whatever `primary_conninfo`'s own `dbname=` says. One route, this is no
+problem -- there is nothing to disambiguate. More than one, `dbname` alone
+can no longer tell them apart for a real standby, only for a hand-written
+`psql`/`pg_basebackup` invocation that sets `dbname` itself.
+
+`pg_walserver` closes this gap the same way HTTPS virtual hosting does:
+TLS's own Server Name Indication (SNI) extension, sent by any TLS client
+during the handshake, before a single Postgres protocol byte is
+exchanged -- `libpq`'s `sslsni` (on by default) sends the connection's
+`host` value this way (`fe-secure-openssl.c`), so a real standby's
+`primary_conninfo` already carries exactly the signal needed, in its
+`host=` setting, with no client-side change at all.
+
+- `pg_walserver.ini` gains a `hostname` route property (`routes.h`'s
+  `WsRoute.hostname`, `routes.c`'s parsing), set via `pg_walserver setup
+  --hostname <name>`.
+- `tls.c`'s `ws_tls_get_sni_hostname()` reads it back with the simple,
+  post-handshake `SSL_get_servername(activeSsl, TLSEXT_NAMETYPE_host_name)`.
+  Real PostgreSQL's own matching backend feature (`ssl_sni` GUC,
+  `be-secure-openssl.c`'s `sni_clienthello_cb()`) instead reads it from
+  inside the raw ClientHello callback, via the lower-level
+  `SSL_client_hello_get0_ext()` -- OpenSSL's own documented advice, needed
+  there because that feature *switches the served certificate* based on
+  the name, which is ordering-sensitive during the handshake. `pg_walserver`
+  never switches certificates by SNI (one certificate serves every route),
+  so the simpler, safe-after-the-fact read is enough here.
+- `auth.c`'s `ws_authenticate()` resolves a route in three steps: an exact
+  `dbname` match first (unchanged, and always tried first: a hand-written
+  `dbname=<route key>` connection keeps working exactly as before, with or
+  without TLS), then, only for a TLS connection, the SNI hostname, then the
+  `"*"` wildcard. `archiver-hba.conf`'s own `ROUTE` matching stays exactly
+  as described above -- always against the literal `dbname`, never against
+  whichever route SNI resolved to.
+- More than one *named* route (i.e. more than one section besides `"*"`)
+  with no TLS configured is a hard error: `cli_root.c`'s `cli_serve_run()`
+  refuses to start (`log_fatal`/`exit(1)`) rather than silently leaving a
+  second route unreachable by any real standby. A single named route keeps
+  working with no TLS at all -- `dbname` alone is already unambiguous.
+- `pg_walserver setup` prepares for this automatically: adding a *second*
+  named route creates a self-signed certificate for `--pgdata`  (reusing
+  `pg_create_self_signed_cert()`, `src/bin/common/pgctl.c`, unchanged) the
+  moment it's needed, and warns if that second route was set up without
+  `--hostname` (it would then only ever be reachable via its `dbname`, or
+  the `"*"` wildcard, never by a real standby).
+
+A client TLS certificate's CN is a second, unimplemented alternative to
+SNI for the same problem (`sslcert`/`sslkey` also flow through unmodified
+for a physical replication connection) -- see
+`DESIGN-standalone-archiving.md`'s "Routing beyond `dbname`" section.
+
 ## New client-side sub-commands (setup / fetch-systemid / basebackup)
 
 Three sub-commands, alongside `serve`/`scram-secret`, all sharing
@@ -536,8 +592,11 @@ resolve()`, `pg_autoctl/restore_command.c`, already uses):
   then atomically swaps `basebackups/.latest`.
 - **`setup`** (`cli_setup.c`) -- the wizard: writes/validates the
   `pg_walserver.ini` section for `--route` (refusing to silently change an
-  existing one's path unless `--force`), then calls `fetch-systemid`'s own
-  logic (whose `pgctl_identify_system()` connection doubles as this step's
+  existing one's path unless `--force`), optionally records a `--hostname`
+  for SNI-based routing (see above -- and auto-creates a self-signed
+  certificate the moment a *second* named route needs one to stay
+  reachable), then calls `fetch-systemid`'s own logic (whose
+  `pgctl_identify_system()` connection doubles as this step's
   role-permission check: PostgreSQL refuses a replication-mode connection
   for a role lacking `REPLICATION` at the *backend* level, independent of
   HBA -- an earlier version of this file ran a separate plain-SQL
@@ -660,3 +719,20 @@ The suite runs 7/7 green; none of the first five steps needed to change
 for the removal of the `"monitor"` HBA keyword or the `fetch-file` CLI
 sub-command (Tasks 1 and 2 of the PR review round that produced this
 README) -- they were already written to avoid exercising either path.
+
+### Testing SNI-based routing (tests/tap/specs/pg_walserver_sni_routing.pgaf)
+
+A second, separate spec covers the "Routing beyond `dbname`: TLS SNI"
+feature above with two real, independent routes on two `/etc/hosts`
+aliases (`routeA.internal`/`routeB.internal`) resolving to the same
+`pg_walserver`, both addressed with the exact same, useless
+`dbname=replication` a real physical standby always sends -- proving the
+disambiguation is genuinely happening by hostname, not by coincidence.
+Four steps: adding a second named route via `setup --hostname` creates a
+self-signed certificate automatically (`test_001`); a client presenting
+each hostname over TLS is routed to that route and no other, both ways
+(`test_002`); a connection with no resolvable hostname and no wildcard
+fails cleanly instead of falling through to either real route
+(`test_003`); and removing the certificate makes `pg_walserver serve`
+refuse to start at all with two named routes configured (`test_004`).
+Runs 4/4 green.

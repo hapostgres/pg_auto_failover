@@ -66,7 +66,7 @@ cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 	if (env_exists("PGPASSWORD"))
 	{
 		(void) get_env_copy("PGPASSWORD", replicationSource.password,
-						   sizeof(replicationSource.password));
+							sizeof(replicationSource.password));
 	}
 
 	log_info("Connecting to %s:%d as \"%s\" to fetch the system identifier",
@@ -100,7 +100,8 @@ cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 		{
 			log_error("Refusing to overwrite the system identifier already "
 					  "recorded for this route: %" PRIu64 " on disk, "
-					  "%" PRIu64 " from %s:%d -- this route's identity would "
+														  "%" PRIu64
+					  " from %s:%d -- this route's identity would "
 					  "be changing under it, which usually means the wrong "
 					  "upstream was given, or this route needs a fresh path "
 					  "instead of reusing an old one",

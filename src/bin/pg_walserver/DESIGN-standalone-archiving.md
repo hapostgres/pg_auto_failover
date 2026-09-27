@@ -126,6 +126,15 @@ this one replicates from" in cascading replication.
 
 ## Routing beyond `dbname`: a real protocol limitation, and two ways around it
 
+**Update: the TLS SNI option below is implemented** (`routes.c`'s
+`routes_find_by_hostname()`, `tls.c`'s `ws_tls_get_sni_hostname()`,
+`auth.c`'s three-tier resolution, `pg_walserver setup --hostname`, and
+`serve`'s own refusal to start with more than one named route and no TLS)
+-- see the README's "New client-side sub-commands" and "Routing" sections
+and `tests/tap/specs/pg_walserver_sni_routing.pgaf` for the design as
+built. The client certificate CN option remains just a design note below,
+not built.
+
 Testing `test_006_real_standby_with_core_tools` (this PR's own tap spec)
 surfaced a genuine PostgreSQL wire-protocol fact, not a bug: a real
 *physical* replication connection's walreceiver never sends whatever

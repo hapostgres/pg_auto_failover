@@ -41,6 +41,17 @@ bool ws_tls_server_enabled(void);
 /* run the server handshake on sock after the 'S' answer was sent */
 bool ws_tls_server_accept(int sock);
 
+/*
+ * ws_tls_get_sni_hostname returns the TLS Server Name Indication hostname
+ * the client presented during the handshake (SSL_get_servername(),
+ * unmodified), or NULL when there is no active TLS connection or the
+ * client sent no SNI extension at all. Read-only: this project does not
+ * switch certificates based on it (unlike real PostgreSQL's own ssl_sni/
+ * hosts_file feature, be-secure-openssl.c) -- see routes_find_by_
+ * hostname()'s own comment for what it *is* used for (route selection).
+ */
+const char * ws_tls_get_sni_hostname(void);
+
 /* tls-server-end-point channel binding data of our certificate (RFC 5929) */
 bool ws_tls_certificate_hash(unsigned char *out, int outSize, int *outLen);
 
