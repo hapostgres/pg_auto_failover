@@ -182,44 +182,6 @@ trim_trailing_zeros(const char *buffer, size_t len)
 }
 
 
-static bool
-parse_lsn(const char *s, uint64_t *lsn, const char **endptr)
-{
-	char *afterHi;
-	unsigned long hi = strtoul(s, &afterHi, 16);
-
-	if (afterHi == s || *afterHi != '/')
-	{
-		return false;
-	}
-
-	char *afterLo;
-	unsigned long lo = strtoul(afterHi + 1, &afterLo, 16);
-
-	if (afterLo == afterHi + 1)
-	{
-		return false;
-	}
-
-	*lsn = ((uint64_t) hi << 32) | (uint32_t) lo;
-	*endptr = afterLo;
-
-	return true;
-}
-
-
-static const char *
-skip_ws(const char *p)
-{
-	while (isspace((unsigned char) *p))
-	{
-		p++;
-	}
-
-	return p;
-}
-
-
 /*
  * find_oldest_segno scans walcacheDir for the lowest-numbered WAL segment
  * present on the given timeline (complete or still ".partial" -- either
@@ -327,7 +289,9 @@ find_oldest_segno(const char *walcacheDir, uint32_t timeline,
 
 
 void
-cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
+cmd_start_replication(int sock, const WsRoute *route,
+					  const char *slotName, uint64_t startLsn,
+					  bool haveTimeline, uint32_t timeline)
 {
 	if (route == NULL || route->path[0] == '\0')
 	{
@@ -336,69 +300,21 @@ cmd_start_replication(int sock, const WsRoute *route, const char *rawArgs)
 		return;
 	}
 
-	const char *p = skip_ws(rawArgs);
+	/* the SLOT clause is accepted by the grammar but not acted on here --
+	 * see this file's own header comment on why no real slot-based
+	 * retention exists yet */
+	(void) slotName;
 
-	if (strncasecmp(p, "SLOT", 4) == 0 && isspace((unsigned char) p[4]))
+	if (!haveTimeline)
 	{
-		p = skip_ws(p + 4);
+		char discardLsn[32] = { 0 };
 
-		/* consume a possibly-quoted slot name, positioning is unaffected
-		 * by which slot (if any) was named -- see this file's own header
-		 * comment on why no real slot-based retention exists yet */
-		if (*p == '"')
+		if (!wal_position_cache_read(route->path, &timeline, discardLsn,
+									 sizeof(discardLsn)))
 		{
-			p++;
-			while (*p && *p != '"')
-			{
-				p++;
-			}
-			if (*p == '"')
-			{
-				p++;
-			}
+			(void) wal_dir_find_latest(route, &timeline, discardLsn,
+									   sizeof(discardLsn));
 		}
-		else
-		{
-			while (*p && !isspace((unsigned char) *p))
-			{
-				p++;
-			}
-		}
-
-		p = skip_ws(p);
-	}
-
-	if (strncasecmp(p, "PHYSICAL", 8) == 0 &&
-		(isspace((unsigned char) p[8]) || p[8] == '\0'))
-	{
-		p = skip_ws(p + 8);
-	}
-
-	uint64_t startLsn;
-	const char *after;
-
-	if (!parse_lsn(p, &startLsn, &after))
-	{
-		ws_send_error_response(sock, "22023", "invalid or missing start LSN");
-		return;
-	}
-
-	p = skip_ws(after);
-
-	uint32_t timeline = 1;
-	char discardLsn[32] = { 0 };
-
-	if (!wal_position_cache_read(route->path, &timeline, discardLsn,
-								 sizeof(discardLsn)))
-	{
-		(void) wal_dir_find_latest(route, &timeline, discardLsn,
-								   sizeof(discardLsn));
-	}
-
-	if (strncasecmp(p, "TIMELINE", 8) == 0)
-	{
-		p = skip_ws(p + 8);
-		timeline = (uint32_t) strtoul(p, NULL, 10);
 	}
 
 	if (!ws_send_copy_both_response(sock, 0))

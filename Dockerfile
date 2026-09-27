@@ -40,6 +40,11 @@ RUN if [ -d src/bin/pgaftest ]; then \
             src/bin/pgaftest/test_spec_parse.h \
             src/bin/pgaftest/test_spec_scan.c; \
     fi
+RUN if [ -d src/bin/pg_walsender ]; then \
+      touch src/bin/pg_walsender/repl_gram.c \
+            src/bin/pg_walsender/repl_gram.h \
+            src/bin/pg_walsender/repl_scanner.c; \
+    fi
 
 RUN make -s clean && make -s install -j$(nproc) BINDIR=/usr/local/bin
 RUN pg_virtualenv -v ${PGVERSION} \
