@@ -21,7 +21,6 @@
 
 static bool process_supervisor_find_service(ProcessSupervisor *supervisor,
 											pid_t pid, ProcessService **result);
-static bool process_supervisor_may_restart(ProcessService *service);
 
 
 void
@@ -54,8 +53,8 @@ process_supervisor_start_all(ProcessSupervisor *supervisor)
 			return false;
 		}
 
-		service->restartCounters.count = 1;
-		service->restartCounters.startTime[0] = time(NULL);
+		process_restart_counters_start(&(service->restartCounters),
+									   (uint64_t) time(NULL));
 	}
 
 	return true;
@@ -80,16 +79,36 @@ process_supervisor_find_service(ProcessSupervisor *supervisor, pid_t pid,
 
 
 /*
- * process_supervisor_may_restart applies the MaxR/MaxT ring-buffer policy
- * exactly as pg_autoctl's own supervisor.c's supervisor_may_restart() does
- * -- see process_supervisor.h's own comment on why the constants are
- * reused, not re-picked.
+ * process_restart_counters_start, process_restart_counters_record and
+ * process_restart_counters_may_restart are the shared MaxR/MaxT
+ * restart-backoff ring buffer -- see process_supervisor.h's own comment.
+ * pg_autoctl/supervisor.c calls these same three functions directly for
+ * its own Service/RestartCounters.
  */
-static bool
-process_supervisor_may_restart(ProcessService *service)
+void
+process_restart_counters_start(ProcessRestartCounters *counters, uint64_t now)
+{
+	counters->count = 1;
+	counters->position = 0;
+	counters->startTime[0] = now;
+}
+
+
+void
+process_restart_counters_record(ProcessRestartCounters *counters, uint64_t now)
+{
+	int position = (counters->position + 1) % PROCESS_SUPERVISOR_MAX_RETRY;
+
+	counters->count += 1;
+	counters->position = position;
+	counters->startTime[position] = now;
+}
+
+
+bool
+process_restart_counters_may_restart(ProcessRestartCounters *counters)
 {
 	uint64_t now = (uint64_t) time(NULL);
-	ProcessRestartCounters *counters = &(service->restartCounters);
 	int position = counters->position;
 
 	if (counters->count <= PROCESS_SUPERVISOR_MAX_RETRY)
@@ -101,17 +120,25 @@ process_supervisor_may_restart(ProcessService *service)
 
 	uint64_t oldestRestartTime = counters->startTime[position];
 
-	if ((now - oldestRestartTime) <= PROCESS_SUPERVISOR_MAX_TIME)
-	{
-		log_error("Service \"%s\" has already been restarted %d times in "
-				  "the last %d seconds, giving up on restarting it "
-				  "(other services are unaffected)",
-				  service->name, PROCESS_SUPERVISOR_MAX_RETRY,
-				  (int) (now - oldestRestartTime));
-		return false;
-	}
+	return (now - oldestRestartTime) > PROCESS_SUPERVISOR_MAX_TIME;
+}
 
-	return true;
+
+/*
+ * process_supervisor_log_unknown_pid -- see process_supervisor.h.
+ */
+void
+process_supervisor_log_unknown_pid(pid_t pid)
+{
+	if (getpid() == 1)
+	{
+		log_info("Reaped orphaned subprocess with pid %d "
+				 "(reparented to PID 1)", pid);
+	}
+	else
+	{
+		log_error("Unknown subprocess died with pid %d", pid);
+	}
 }
 
 
@@ -147,18 +174,24 @@ process_supervisor_restart_service(ProcessService *service, int status)
 		return;
 	}
 
-	if (!process_supervisor_may_restart(service))
+	if (!process_restart_counters_may_restart(&(service->restartCounters)))
 	{
+		uint64_t now = (uint64_t) time(NULL);
+		ProcessRestartCounters *counters = &(service->restartCounters);
+		int oldestPosition = (counters->position + 1) % PROCESS_SUPERVISOR_MAX_RETRY;
+
+		log_error("Service \"%s\" has already been restarted %d times in "
+				  "the last %d seconds, giving up on restarting it "
+				  "(other services are unaffected)",
+				  service->name, PROCESS_SUPERVISOR_MAX_RETRY,
+				  (int) (now - counters->startTime[oldestPosition]));
+
 		service->gaveUp = true;
 		return;
 	}
 
-	ProcessRestartCounters *counters = &(service->restartCounters);
-	int position = (counters->position + 1) % PROCESS_SUPERVISOR_MAX_RETRY;
-
-	counters->count += 1;
-	counters->position = position;
-	counters->startTime[position] = (uint64_t) time(NULL);
+	process_restart_counters_record(&(service->restartCounters),
+									(uint64_t) time(NULL));
 
 	log_info("Restarting service \"%s\"", service->name);
 
@@ -205,15 +238,7 @@ process_supervisor_tick(ProcessSupervisor *supervisor,
 		 * when running as PID 1 inside a container, where the kernel
 		 * reparents orphaned grandchildren to us. Expected, not a bug.
 		 */
-		if (getpid() == 1)
-		{
-			log_info("Reaped orphaned subprocess with pid %d "
-					 "(reparented to PID 1)", pid);
-		}
-		else
-		{
-			log_error("Unknown subprocess died with pid %d", pid);
-		}
+		process_supervisor_log_unknown_pid(pid);
 	}
 }
 
