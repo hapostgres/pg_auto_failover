@@ -59,7 +59,7 @@ cmd_check_file(int sock, const WsRoute *route, const char *filename,
 		{
 			log_error("CHECK_FILE: failed to read \"%s\": %m", path);
 			ws_send_error_response(sock, "58030", "failed to read the file "
-												   "already on disk");
+												  "already on disk");
 			return;
 		}
 	}

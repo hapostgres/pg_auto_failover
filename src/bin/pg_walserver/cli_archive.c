@@ -307,7 +307,7 @@ ws_archive_run(const WsArchiveTarget *target, const char *localPath,
 
 	/* Step 4: still missing/differs after the recheck -- push for real. */
 	log_info("Pushing \"%s\" (%" PRIu64 " bytes, CRC32C %08X, currently "
-			 "\"%s\" on \"%s\") via ARCHIVE_FILE",
+										"\"%s\" on \"%s\") via ARCHIVE_FILE",
 			 filename, size, crc, status, target->host);
 
 	bool ok = push_file(conn, localPath, filename);

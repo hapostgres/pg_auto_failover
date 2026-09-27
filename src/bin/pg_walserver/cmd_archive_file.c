@@ -123,7 +123,7 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 						oversized = true;
 					}
 					else if (payloadLen > 0 &&
-							!ws_write_bytes(fd, payload, (size_t) payloadLen))
+							 !ws_write_bytes(fd, payload, (size_t) payloadLen))
 					{
 						log_error("ARCHIVE_FILE: failed to write \"%s\": %m",
 								  tmpPath);
@@ -225,8 +225,9 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 		unlink(tmpPath);
 		log_warn("ARCHIVE_FILE: refusing to overwrite \"%s\": it already "
 				 "exists with different content (%" PRIu64 " bytes, CRC32C "
-				 "%08X) than what was just received (%" PRIu64 " bytes, "
-				 "CRC32C %08X)",
+														   "%08X) than what was just received (%"
+				 PRIu64 " bytes, "
+						"CRC32C %08X)",
 				 finalPath, existingSize, existingCrc, receivedSize, receivedCrc);
 		ws_send_error_response(sock, "23505",
 							   "a different file already exists under this name");
@@ -243,7 +244,8 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 	}
 
 	log_info("ARCHIVE_FILE: stored \"%s\" (%" PRIu64 " bytes, CRC32C %08X) "
-			 "under \"%s\"", filename, receivedSize, receivedCrc, route->path);
+													 "under \"%s\"", filename,
+			 receivedSize, receivedCrc, route->path);
 
 	(void) ws_send_command_complete(sock, "ARCHIVE_FILE");
 }
