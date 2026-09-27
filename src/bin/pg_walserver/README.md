@@ -1210,3 +1210,32 @@ itself is already proven by `pg_walserver_capture.pgaf` above; this spec's
 only job is the process-supervision/signal-handling contract that changes
 specifically when `pg_walserver` is PID 1 instead of an ordinary child.
 Runs 3/3 green.
+
+### Testing the full standalone story end to end (tests/tap/specs/pg_walserver_pitr_and_secondary.pgaf)
+
+A sixth spec exercises the `postgres <name>`/`pg_walserver <name>` DSL sugar
+kinds themselves (`test_spec_parse.y`'s `postgres_line`/`pg_walserver_line`)
+for the first time in this suite -- every spec above builds an equivalent
+node by hand inside an ordinary pg_auto_failover-managed formation instead.
+Four roles: a plain, unmanaged `postgres primary` (no monitor, no formation
+anywhere in this spec), archived by `archive_command` and continuously
+pulled by `pg_walserver server`'s own embedded capturer (capture on by
+default, proven running the whole time via its own process title, the same
+check `pg_walserver_capture.pgaf` already uses); a point-in-time-recovery
+target built with a real, unmodified `pg_basebackup` against `server` plus
+`restore_command = pg_walserver restore-wal`, recovered to a named restore
+point (`recovery_target_name`, not a timestamp -- this DSL has no
+cross-container value capture, and a restore point's name is the only value
+that needs to cross from the primary's own step to the recovery target's
+own configuration); and a real, continuously-streaming secondary built with
+`pg_walserver basebackup` (the CLI sub-command) pointed at `server` itself
+rather than at a real primary, proving that tool is generically usable
+against anything speaking the wire protocol -- which surfaces one real
+wrinkle worth knowing: `pg_walserver basebackup`'s own internal
+`pg_basebackup_fetch()` (`src/bin/common/pgctl.c`) never sends an explicit
+`dbname`, so libpq defaults it to whatever `--user` resolves to; `server`'s
+own `pg_walserver.ini` carries a `"*"` wildcard route (mapped at the same
+path as its named `"pitr"` route) specifically so that default, and a real
+standby's own always-`"replication"` `dbname`, both resolve without any
+further configuration. See the spec file's own header comment for the full
+design and the reasoning behind each of these four roles. Runs 4/4 green.
