@@ -83,10 +83,20 @@ Routing
 
 One ``pg_walserver`` instance can archive more than one cluster.
 ``<pgdata>/pg_walserver.ini`` maps each route (an operator-chosen key,
-carrying no filesystem meaning of its own) to its own storage root, and a
-connection is matched to a route by its ``dbname``. One key, ``*``, is a
-PgBouncer-style catch-all matching any ``dbname`` with no route of its
-own.
+carrying no filesystem meaning of its own) to its own storage root: the
+WAL and base backups of one entire PostgreSQL cluster (its whole
+``PGDATA``), never a single database within it -- WAL archiving is
+inherently a whole-cluster concept, PostgreSQL has no notion of archiving
+one database on its own.
+
+A connection is matched to a route by the ``dbname`` field of its
+connection string. This is a naming coincidence, not a database
+selection: PostgreSQL's own replication protocol has no field meant for
+"which cluster is this," so ``pg_walserver`` reuses ``dbname``, the field
+every replication client already sends, as an arbitrary routing key. It
+never corresponds to an actual database inside the archived cluster, and
+is never validated against one. One key, ``*``, is a PgBouncer-style
+catch-all matching any ``dbname`` with no route of its own.
 
 A real standby's walreceiver cannot set its own ``dbname`` -- it always
 sends the literal ``replication``, regardless of ``primary_conninfo`` --
