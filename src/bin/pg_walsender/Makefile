@@ -16,7 +16,7 @@ SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 include $(SRC_DIR)../common/Makefile.common
 
-override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor
+override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor -I$(SRC_DIR)../pg_autoctl
 
 # -----------------------------------------------------------------------
 # Sources that live in this directory
