@@ -2,27 +2,40 @@
  * src/bin/common/process_supervisor.h
  *   A small, generic Service/RestartPolicy child-process supervisor,
  *   shared by any binary in this project that needs to start and
- *   restart-on-death a fixed set of long-lived child processes -- the
- *   same class of problem `pg_autoctl`'s own `supervisor.c` already
- *   solves for its own services (postgres, listener, node-active).
+ *   restart-on-death a fixed set of long-lived child processes.
  *
- *   This is a deliberately *decoupled* extraction of that file's own
- *   generic core (the `Service` struct, `RestartPolicy`, the Erlang-
- *   inspired MaxR/MaxT restart-backoff ring buffer, and PID-1-safe
- *   orphan-reaping via a single wildcard `waitpid(-1, ...)`), not a
- *   literal relocation of `pg_autoctl/supervisor.c` itself: that file is
- *   deeply entangled with `pg_autoctl`'s own keeper/monitor/node-spec
- *   machinery (it includes `keeper.h`, `keeper_config.h`, `monitor.h`,
- *   `nodespec.h`, and implements keeper-specific graceful-shutdown
- *   sequencing on top of the generic loop) -- moving it wholesale to
- *   `src/bin/common/` would mean dragging that entire subsystem along
- *   with it, which is not what "shared, decoupled utility" means.
- *   `pg_autoctl` keeps its own `supervisor.c` untouched; this file is
- *   what `pg_walserver`'s embedded pull capturer (`capture.c`) uses
- *   instead, and a future caller with the same generic need (start N
- *   long-lived children, restart them on death, don't crash-loop
- *   forever, be safe as a container's PID 1) can use it too, without
- *   linking any of `pg_autoctl`'s own keeper code.
+ *   This file is genuinely shared, and genuinely consumed, by both
+ *   `pg_walserver` (its embedded pull capturer, `capture.c`, uses the
+ *   whole `ProcessSupervisor`/`process_supervisor_*()` API directly) and
+ *   `pg_autoctl` (`pg_autoctl/supervisor.c` delegates the two pieces of
+ *   its own service supervision that are genuinely generic -- rather
+ *   than pg_autoctl-specific business logic -- to the functions declared
+ *   here):
+ *
+ *     - the Erlang-inspired MaxR/MaxT restart-backoff ring buffer
+ *       (`ProcessRestartCounters` and the `process_restart_counters_*()`
+ *       functions), and
+ *
+ *     - PID-1-safe orphan-reaping classification, i.e. deciding whether
+ *       an unrecognised dead child's pid is an orphaned grandchild
+ *       reparented to us by the kernel (expected, log at INFO) or a
+ *       genuine bug (log at ERROR) -- see
+ *       `process_supervisor_log_unknown_pid()`.
+ *
+ *   `pg_autoctl/supervisor.c` keeps its own `Supervisor`/`Service`
+ *   structs and its own main accept/reap/restart loop: that loop is
+ *   deeply entangled with pg_autoctl-specific business rules that do not
+ *   belong in a generic, shared facility -- the node-spec file watcher
+ *   for `pg_autoctl node run <file>`'s mutable-settings-reload feature,
+ *   the keeper-only SIGTERM graceful-shutdown handoff, pg_autoctl's own
+ *   three-way `RestartPolicy` (including the TRANSIENT-service-quit-
+ *   means-shut-everything-down rule) and its `EXIT_CODE_DROPPED`/
+ *   `EXIT_CODE_FATAL` sentinel exit codes. Forcing that business logic
+ *   through this file would not make it more "shared" -- there is only
+ *   ever one caller for any of it -- it would just make this generic
+ *   utility depend on pg_autoctl's own concepts. What genuinely is
+ *   shared (the restart-backoff bookkeeping and the orphan-reaping
+ *   classification) lives here instead, in one place, used by both.
  *
  *   Every type and function here is prefixed `Process`/`process_` (not
  *   `Service`/`Supervisor`/`supervisor_*`) specifically so this file can
@@ -61,14 +74,17 @@ typedef enum
 
 /*
  * Erlang-inspired restart-intensity tracking (see
- * http://erlang.org/doc/man/supervisor.html, the same reference pg_
- * autoctl's own supervisor.h cites): if more than PROCESS_SUPERVISOR_
- * MAX_RETRY restarts happen within the last PROCESS_SUPERVISOR_MAX_TIME
- * seconds, this service stops being restarted -- the same MaxR/MaxT
- * values pg_autoctl's own SUPERVISOR_SERVICE_MAX_RETRY/_MAX_TIME already
- * use, reused here rather than picked arbitrarily, per this project's own
- * existing, battle-tested policy for exactly this problem ("a service
- * that keeps dying immediately must not hot-loop the supervisor forever").
+ * http://erlang.org/doc/man/supervisor.html): if more than
+ * PROCESS_SUPERVISOR_MAX_RETRY restarts happen within the last
+ * PROCESS_SUPERVISOR_MAX_TIME seconds, this service stops being
+ * restarted. This is the actual shared implementation of that ring
+ * buffer: `pg_autoctl/supervisor.c`'s own `RestartCounters` is a typedef
+ * of `ProcessRestartCounters` and its `supervisor_may_restart()` calls
+ * `process_restart_counters_may_restart()` directly (its
+ * SUPERVISOR_SERVICE_MAX_RETRY/_MAX_TIME are, in turn, defined from
+ * these same two constants) -- there is exactly one MaxR/MaxT
+ * implementation in this project, not two independently-maintained
+ * copies of the same algorithm.
  *
  * Deliberately different from pg_autoctl's own supervisor.c in one way:
  * giving up on restarting one service here does NOT bring down every
@@ -76,7 +92,10 @@ typedef enum
  * the single node it manages) -- pg_walserver may be serving several
  * independent routes at once, and one route's capturer permanently
  * failing (a truly broken upstream, not a transient blip) should not stop
- * every other route pg_walserver is otherwise serving correctly.
+ * every other route pg_walserver is otherwise serving correctly. That
+ * "what to do once MaxR/MaxT is exceeded" policy decision is made by each
+ * caller on top of process_restart_counters_may_restart()'s answer, it is
+ * not part of the shared ring-buffer mechanism itself.
  */
 #define PROCESS_SUPERVISOR_MAX_RETRY 5
 #define PROCESS_SUPERVISOR_MAX_TIME 300 /* seconds */
@@ -87,6 +106,46 @@ typedef struct ProcessRestartCounters
 	int position;               /* ring buffer index */
 	uint64_t startTime[PROCESS_SUPERVISOR_MAX_RETRY];
 } ProcessRestartCounters;
+
+/*
+ * process_restart_counters_start records a service's very first start
+ * (count = 1, position = 0, startTime[0] = now). Both this file's own
+ * process_supervisor_start_all() and pg_autoctl's supervisor_start() call
+ * this for every service they start.
+ */
+void process_restart_counters_start(ProcessRestartCounters *counters,
+									uint64_t now);
+
+/*
+ * process_restart_counters_record advances the ring buffer to record one
+ * more restart at time now. Call this only after
+ * process_restart_counters_may_restart() has returned true for the same
+ * counters.
+ */
+void process_restart_counters_record(ProcessRestartCounters *counters,
+									 uint64_t now);
+
+/*
+ * process_restart_counters_may_restart applies the MaxR/MaxT policy:
+ * returns true when another restart is allowed, false when this service
+ * has already been restarted PROCESS_SUPERVISOR_MAX_RETRY times within
+ * the last PROCESS_SUPERVISOR_MAX_TIME seconds. Purely a computation on
+ * counters: it does not log anything itself, so that each caller can keep
+ * its own wording (and log level) for "giving up" -- pg_autoctl's own
+ * supervisor.c and this file's own process_supervisor_restart_service()
+ * each log a different message on a false result.
+ */
+bool process_restart_counters_may_restart(ProcessRestartCounters *counters);
+
+/*
+ * process_supervisor_log_unknown_pid classifies and logs a dead child
+ * pid that matches none of a supervisor's own known services: when
+ * running as PID 1 inside a container, the kernel reparents orphaned
+ * grandchildren to us and this is expected behaviour (logged at INFO);
+ * otherwise it is logged at ERROR, since some subprocess-tracking
+ * bookkeeping is missing a case.
+ */
+void process_supervisor_log_unknown_pid(pid_t pid);
 
 /*
  * One supervised child: a name (for logging), a restart policy, its
