@@ -349,6 +349,22 @@ default) sends the connection's ``host=`` value this way, so a real
 standby's ``primary_conninfo`` already carries what's needed, with no
 client-side change at all.
 
+**Prerequisite: DNS, before any of this works.** SNI only carries whatever
+name a client already has to look up -- ``pg_walserver`` and ``setup``
+manage none of it. Each route's ``--hostname`` needs its own DNS entry
+(an A record or a CNAME, either works identically here: SNI just needs a
+name that resolves, nothing checks it against the certificate the way
+``sslmode=verify-full`` would), and every one of them must resolve to
+this same ``pg_walserver`` instance. A CNAME is convenient when the
+archive host's own address might change later (repoint the one canonical
+target); a plain A record per route, all pointing at the same IP, works
+identically and is simpler when the address is stable. Either way, this
+is provisioned outside ``pg_walserver`` entirely, the same external step
+HTTPS virtual hosting always needs -- and it rules out routing a real
+standby that only ever has a bare IP for ``primary_conninfo``'s ``host=``:
+SNI is never sent for a literal IP at all (RFC 6066), so that connection
+falls through to ``"*"`` or fails, by design.
+
 One route needs none of this -- ``dbname`` alone is already unambiguous,
 and ``pg_walserver serve`` runs with no TLS configured at all if that's
 all there is. The moment a *second* named route (any section besides
