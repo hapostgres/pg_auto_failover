@@ -1549,26 +1549,7 @@ CommandLine ws_root =
 					 "[serve options] | scram-secret ... | setup ... | "
 					 "fetch-systemid ... | basebackup ... | create-cert ... | "
 					 "archive-wal ... | restore-wal ... | reload ...",
-					 "  serve           Run the accept loop (default "
-					 "command, used when no\n"
-					 "                  sub-command name is given at all)\n"
-					 "  scram-secret    Print one archiver-passwd line for "
-					 "a user\n"
-					 "  setup           Create or validate one "
-					 "pg_walserver.ini route\n"
-					 "  fetch-systemid  Fetch a route's upstream system "
-					 "identifier\n"
-					 "  basebackup      Take a base backup of a route's "
-					 "upstream\n"
-					 "  create-cert     Create a self-signed TLS "
-					 "certificate for --pgdata\n"
-					 "  archive-wal     Push one WAL/.backup file into a "
-					 "route (archive_command)\n"
-					 "  restore-wal     Fetch one WAL/.backup file from a "
-					 "route (restore_command)\n"
-					 "  reload          Ask a running pg_walserver to "
-					 "reload its configuration\n",
-					 NULL, root_subcommands);
+					 NULL, NULL, root_subcommands);
 
 
 /*

@@ -17,22 +17,24 @@ own.
 
 Running the accept loop (``serve``) is the default action, so a bare
 invocation with server-mode options works with no sub-command name at
-all::
+all. This is ``pg_walserver --help``'s own output, verbatim::
 
   usage: pg_walserver [serve options] | scram-secret ... | setup ... |
                        fetch-systemid ... | basebackup ... |
                        create-cert ... | archive-wal ... | restore-wal ... |
                        reload ...
 
-    serve           Run the accept loop (default command)
-    scram-secret    Print one archiver-passwd line for a user
-    setup           Create or validate one pg_walserver.ini route
-    fetch-systemid  Fetch a route's upstream system identifier
-    basebackup      Take a base backup of a route's upstream
-    create-cert     Create a self-signed TLS certificate for --pgdata
-    archive-wal     Push one WAL/.backup file into a route (archive_command)
-    restore-wal     Fetch one WAL/.backup file from a route (restore_command)
-    reload          Ask a running pg_walserver to reload its configuration
+  Available commands:
+    pg_walserver
+      serve           Run the pg_walserver accept loop (the default command)
+      scram-secret    Print one archiver-passwd line for a user
+      fetch-systemid  Fetch a route's upstream system identifier
+      basebackup      Take a base backup of a route's upstream
+      setup           Create or validate one pg_walserver.ini route
+      create-cert     Create a self-signed TLS certificate for --pgdata
+      archive-wal     Push one WAL/.backup file into a pg_walserver route (archive_command)
+      restore-wal     Fetch one WAL/.backup file from a pg_walserver route (restore_command)
+      reload          Ask a running pg_walserver to reload its configuration
 
 See `Options`_ below for what each sub-command's flags do.
 
