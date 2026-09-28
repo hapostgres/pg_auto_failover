@@ -60,6 +60,19 @@
 #             forced WAL switch on node1), a subsequent `archive-wal`
 #             invocation against the identical bytes reports "matches" and
 #             exits 0, still without ever calling ARCHIVE_FILE
+#   test_007  the exact same ARCHIVE_FILE push as test_002, but with
+#             --sslmode require over the real TLS connection test_004's
+#             own certificate now enables (arch/1 being a second named
+#             route already made "setup" create one automatically): a real
+#             regression test for a bug this project once had, where
+#             cmd_archive_file.c wrote the received bytes to its local
+#             temporary file through framing.c's own connection-write
+#             helper (TLS-aware, global-activeSsl-driven) instead of a
+#             plain local write() -- silently SSL_write()ing the WAL bytes
+#             back out to the client instead of ever reaching disk, only
+#             whenever TLS was actually active on the connection, which
+#             the rest of this spec's own sslmode=disable coverage could
+#             never have caught
 
 cluster {
     monitor
@@ -250,6 +263,23 @@ step test_006_receivewal_pull_route_is_check_file_only {
     exec node2 bash -c '! grep -qi "ARCHIVE_FILE\|Archived " /tmp/archive7.log'
 }
 
+step test_007_archive_pushes_over_real_tls {
+    # test_004 (create-cert --force) already left a real, current
+    # server.crt/server.key for --pgdata in place; --sslmode require forces
+    # a genuine TLS handshake for this one push, unlike every other step in
+    # this spec (sslmode=disable throughout, since routing is by dbname
+    # alone and never needed TLS to pass).
+    exec node2 bash -c 'head -c 65536 /dev/urandom > /tmp/seg-tls.bin'
+    exec node2 bash -c 'pg_walserver archive-wal /tmp/seg-tls.bin 000000010000000000000002 --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode require > /tmp/archive-tls.log 2>&1 || (cat /tmp/archive-tls.log; false)'
+    exec node2 bash -c 'grep -qi "ARCHIVE_FILE\|Archived" /tmp/archive-tls.log'
+
+    # the real, load-bearing assertion: the bytes actually landed on disk
+    # byte-identical to the source, over the real TLS connection -- not
+    # silently written back to the client instead (see this step's own
+    # header comment for the exact bug this guards against).
+    exec node2 bash -c 'cmp -s /tmp/seg-tls.bin /tmp/wsarch/arch/0/000000010000000000000002 || (ls -la /tmp/seg-tls.bin /tmp/wsarch/arch/0/000000010000000000000002; false)'
+}
+
 sequence
     test_001_check_file_missing
     test_002_archive_pushes_then_matches
@@ -257,3 +287,4 @@ sequence
     test_004_create_cert_fresh_and_refuse
     test_005_restore_wal_fetches_a_real_file
     test_006_receivewal_pull_route_is_check_file_only
+    test_007_archive_pushes_over_real_tls

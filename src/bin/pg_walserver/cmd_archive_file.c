@@ -25,6 +25,47 @@
 
 
 /*
+ * archive_file_write_local writes exactly len bytes from buf to the local
+ * temporary file fd, looping over short writes (retrying on EINTR).
+ * Deliberately NOT framing.c's own ws_write_bytes(): that function writes
+ * to *the client connection* (plain write() with no active TLS handshake,
+ * SSL_write() otherwise, via ws_io_write()'s global activeSsl -- see
+ * tls.c), which is exactly wrong here -- fd below is this route's own
+ * on-disk temporary file, never the socket, and calling ws_write_bytes()
+ * on it would (with TLS active) silently SSL_write() the received bytes
+ * back out to the client instead of ever reaching disk, desyncing the
+ * CopyIn stream instead of storing the file. See cmd_fetch_file.c's own
+ * read side for the mirror image of this same local-file-vs-connection
+ * distinction.
+ */
+static bool
+archive_file_write_local(int fd, const void *buf, size_t len)
+{
+	const char *ptr = (const char *) buf;
+	size_t remaining = len;
+
+	while (remaining > 0)
+	{
+		ssize_t n = write(fd, ptr, remaining);
+
+		if (n < 0)
+		{
+			if (errno == EINTR)
+			{
+				continue;
+			}
+			return false;
+		}
+
+		ptr += n;
+		remaining -= (size_t) n;
+	}
+
+	return true;
+}
+
+
+/*
  * cmd_archive_file implements ARCHIVE_FILE: validate the filename against
  * the same allow-list FETCH_FILE's read side uses, receive the whole CopyIn
  * into a same-directory temporary file (capped at the route's own
@@ -123,7 +164,7 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 						oversized = true;
 					}
 					else if (payloadLen > 0 &&
-							 !ws_write_bytes(fd, payload, (size_t) payloadLen))
+							 !archive_file_write_local(fd, payload, (size_t) payloadLen))
 					{
 						log_error("ARCHIVE_FILE: failed to write \"%s\": %m",
 								  tmpPath);
