@@ -1,8 +1,20 @@
 /*
  * src/bin/pg_walserver/cli_setup.h
- *   `pg_walserver setup`: the wizard that creates or validates one
- *   pg_walserver.ini route from the command line -- see cli_setup.c for
- *   the full sequence.
+ *   `pg_walserver setup --pgdata <path> [--port <port>]
+ *   [--ssl-cert-file <path>] [--ssl-key-file <path>] [--ssl-ca-file <path>]
+ *   [--auth-timeout <seconds>]`: configures pg_walserver *itself* --
+ *   writes whichever of these were given as plain "key = value" lines at
+ *   the top of pg_walserver.ini (routes_set_global_property(), routes.c),
+ *   so "pg_walserver serve --pgdata <path>" alone, with none of these
+ *   flags repeated, already picks them up as its own defaults (an
+ *   explicit flag given directly to "serve" still always wins over
+ *   whatever this persisted, the same "explicit flag beats a persisted
+ *   default" precedent this project already follows everywhere else).
+ *
+ *   Deliberately nothing about any one archived cluster -- that's
+ *   `pg_walserver cluster register|drop|list|set-upstream`'s own job
+ *   (cli_cluster.h) now, split out of what used to be this same command.
+ *   "setup" configures the server; "cluster" configures what it serves.
  *
  * Licensed under the PostgreSQL License.
  *
@@ -15,62 +27,25 @@
 
 #include "postgres_fe.h"
 
-#include "pgsql.h"
-
 typedef struct WsSetupOptions
 {
 	char pgdata[MAXPGPATH];
-	char route[NAMEDATALEN + 16];
-	char path[MAXPGPATH];
-	char upstream[MAXCONNINFO];
-	char host[_POSIX_HOST_NAME_MAX];
-	char port[16];
-	char user[NAMEDATALEN];
-	char hostname[_POSIX_HOST_NAME_MAX]; /* the route's own TLS SNI hostname,
-	                                      * written into pg_walserver.ini's
-	                                      * "hostname" property -- see
-	                                      * cli_setup.c's own comment on why
-	                                      * this matters the moment a second
-	                                      * route is added */
-	bool receivewalPull;                /* on by default (an operator has to
-	                                     * pass --no-receivewal, or --receivewal
-	                                     * none, to opt out): written as an
-	                                     * explicit "receivewal = pull" into
-	                                     * the route's own section
-	                                     * (routes.h) unless opted out,
-	                                     * opting it into the embedded
-	                                     * receivewal worker (receivewal.c) once "serve"
-	                                     * starts. Explicit --receivewal pull
-	                                     * still works too, a no-op given
-	                                     * the new default -- see
-	                                     * cli_setup.c's own header comment
-	                                     * for why setup writes the property
-	                                     * explicitly rather than relying on
-	                                     * a changed on-disk default (a
-	                                     * route's own "receivewal" property is
-	                                     * still simply absent == off for
-	                                     * anyone hand-editing
-	                                     * pg_walserver.ini directly;
-	                                     * routes.c/routes.h are unchanged). */
-	bool force;
-	bool sslSelfSigned;                 /* --ssl-self-signed: create a
-	                                    * self-signed certificate for
-	                                    * --pgdata right away, the same
-	                                    * "skip create-cert entirely"
-	                                    * convenience pg_autoctl's own
-	                                    * --ssl-self-signed already gives
-	                                    * -- see cli_setup.c's own
-	                                    * ensure_tls_certificate(). */
+	bool havePort;
+	int port;
+	char sslCertFile[MAXPGPATH];
+	char sslKeyFile[MAXPGPATH];
+	char sslCaFile[MAXPGPATH];
+	bool haveAuthTimeout;
+	int authTimeout;
 } WsSetupOptions;
 
 /*
- * cli_setup_run runs the whole sequence documented in cli_setup.c's own
- * header comment: validate/write the pg_walserver.ini section, check the
- * role's REPLICATION attribute, and fetch the system identifier. It never
- * takes a base backup itself: "pg_walserver serve" bootstraps the route's
- * first base backup automatically, once, the next time it starts or
- * reloads (see accept_loop.c's own ws_bootstrap_missing_backups()).
- * Returns true on success, false with an error already logged otherwise.
+ * cli_setup_run writes whichever of options's own fields were actually
+ * given into pg_walserver.ini's own global section (routes_set_global_
+ * property(), routes.c) -- see this file's own header comment. Creates
+ * --pgdata if it doesn't exist yet. Returns true on success, false with
+ * an error already logged otherwise. Never touches any route's own
+ * section.
  */
 bool cli_setup_run(const WsSetupOptions *options);
 

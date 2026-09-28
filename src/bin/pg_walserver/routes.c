@@ -676,3 +676,222 @@ routes_drop_section(const char *routesPath, const char *routeKey)
 
 	return true;
 }
+
+
+/*
+ * routes_load_global -- see routes.h's own comment on WsGlobalConfig.
+ */
+bool
+routes_load_global(const char *routesPath, WsGlobalConfig *out)
+{
+	memset(out, 0, sizeof(WsGlobalConfig));
+
+	if (!file_exists(routesPath))
+	{
+		return true;
+	}
+
+	char *contents = NULL;
+	size_t fileSize = 0;
+
+	if (!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+							 &contents, &fileSize, NULL))
+	{
+		log_error("Failed to read routes file \"%s\"", routesPath);
+		return false;
+	}
+
+	ini_t *ini = ini_load(contents, NULL);
+
+	free(contents);
+
+	if (ini == NULL)
+	{
+		log_error("Failed to parse routes file \"%s\"", routesPath);
+		return false;
+	}
+
+	int propCount = ini_property_count(ini, INI_GLOBAL_SECTION);
+
+	for (int p = 0; p < propCount; p++)
+	{
+		const char *rawPropName = ini_property_name(ini, INI_GLOBAL_SECTION, p);
+		const char *propValue = ini_property_value(ini, INI_GLOBAL_SECTION, p);
+
+		if (rawPropName == NULL || propValue == NULL)
+		{
+			continue;
+		}
+
+		char propName[128];
+
+		strlcpy(propName, rawPropName, sizeof(propName));
+
+		size_t nameLen = strlen(propName);
+
+		while (nameLen > 0 && isspace((unsigned char) propName[nameLen - 1]))
+		{
+			propName[--nameLen] = '\0';
+		}
+
+		if (streq(propName, "port"))
+		{
+			out->havePort = stringToInt(propValue, &out->port);
+		}
+		else if (streq(propName, "ssl-cert-file"))
+		{
+			strlcpy(out->sslCertFile, propValue, sizeof(out->sslCertFile));
+		}
+		else if (streq(propName, "ssl-key-file"))
+		{
+			strlcpy(out->sslKeyFile, propValue, sizeof(out->sslKeyFile));
+		}
+		else if (streq(propName, "ssl-ca-file"))
+		{
+			strlcpy(out->sslCaFile, propValue, sizeof(out->sslCaFile));
+		}
+		else if (streq(propName, "auth-timeout"))
+		{
+			out->haveAuthTimeout = stringToInt(propValue, &out->authTimeout);
+		}
+		else
+		{
+			log_warn("Ignoring unknown global routes file key \"%s\"",
+					 propName);
+		}
+	}
+
+	ini_destroy(ini);
+
+	return true;
+}
+
+
+/*
+ * routes_set_global_property -- see routes.h's own comment.
+ */
+bool
+routes_set_global_property(const char *routesPath, const char *propName,
+						   const char *propValue)
+{
+	char *contents = NULL;
+	size_t fileSize = 0;
+
+	if (file_exists(routesPath) &&
+		!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+							 &contents, &fileSize, NULL))
+	{
+		log_error("Failed to read routes file \"%s\"", routesPath);
+		return false;
+	}
+
+	/* the end of the anonymous/global region: the first line starting
+	 * with '[', or the whole file if there is none yet */
+	char *globalEnd = contents;
+
+	if (contents != NULL)
+	{
+		char *cursor = contents;
+
+		while (*cursor != '\0')
+		{
+			if (*cursor == '[' && (cursor == contents || cursor[-1] == '\n'))
+			{
+				break;
+			}
+
+			char *nextLine = strchr(cursor, '\n');
+
+			if (nextLine == NULL)
+			{
+				cursor += strlen(cursor);
+				break;
+			}
+
+			cursor = nextLine + 1;
+		}
+
+		globalEnd = cursor;
+	}
+
+	size_t propNameLen = strlen(propName);
+	char *propLineStart = NULL;
+	char *propLineEnd = NULL;
+
+	if (contents != NULL)
+	{
+		char *cursor = contents;
+
+		while (cursor < globalEnd)
+		{
+			char *key = cursor;
+
+			while (*key == ' ' || *key == '\t')
+			{
+				key++;
+			}
+
+			char *nextLine = strchr(cursor, '\n');
+			char *thisLineEnd = (nextLine != NULL) ? nextLine + 1 : globalEnd;
+
+			if (strncmp(key, propName, propNameLen) == 0)
+			{
+				char *afterKey = key + propNameLen;
+
+				while (*afterKey == ' ' || *afterKey == '\t')
+				{
+					afterKey++;
+				}
+
+				if (*afterKey == '=')
+				{
+					propLineStart = cursor;
+					propLineEnd = thisLineEnd;
+					break;
+				}
+			}
+
+			if (nextLine == NULL)
+			{
+				break;
+			}
+
+			cursor = nextLine + 1;
+		}
+	}
+
+	PQExpBuffer whole = createPQExpBuffer();
+
+	if (propLineStart != NULL)
+	{
+		appendBinaryPQExpBuffer(whole, contents, propLineStart - contents);
+		appendPQExpBuffer(whole, "%s = %s\n", propName, propValue);
+		appendPQExpBufferStr(whole, propLineEnd);
+	}
+	else if (contents != NULL)
+	{
+		appendBinaryPQExpBuffer(whole, contents, globalEnd - contents);
+		appendPQExpBuffer(whole, "%s = %s\n", propName, propValue);
+		appendPQExpBufferStr(whole, globalEnd);
+	}
+	else
+	{
+		appendPQExpBuffer(whole, "%s = %s\n", propName, propValue);
+	}
+
+	bool ok = !PQExpBufferBroken(whole) &&
+			  write_file_atomic(whole->data, whole->len, routesPath);
+
+	destroyPQExpBuffer(whole);
+	free(contents);
+
+	if (!ok)
+	{
+		log_error("Failed to write \"%s\"", routesPath);
+		return false;
+	}
+
+	log_info("Set \"%s = %s\" in \"%s\"", propName, propValue, routesPath);
+
+	return true;
+}

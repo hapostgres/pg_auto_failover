@@ -64,7 +64,7 @@ What starts this service
 
 Today, only :ref:`pg_walserver`'s embedded receivewal worker does: each
 route configured with ``receivewal = pull`` (the default; see
-:ref:`pg_walserver_setup`'s ``--receivewal`` option) gets a supervised
+:ref:`pg_walserver_cluster`'s ``--receivewal`` option) gets a supervised
 child running ``pg_walserver internal service pg-receivewal --route
 <key> --upstream <conninfo> --path <dir>`` -- a real, separate,
 supervised process (restarted on failure the same way any other

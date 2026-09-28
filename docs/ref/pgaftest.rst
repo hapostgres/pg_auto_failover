@@ -493,8 +493,8 @@ container-generation code every other node already goes through:
 no-monitor node (``pg_autoctl node run``, which does its own initdb-on-
 first-run and supervises Postgres as PID 1). ``pg_walserver <name>``
 defaults to running the standalone ``pg_walserver`` tool's own ``serve``
-mode directly as PID 1; a spec that needs to run ``pg_walserver setup``
-by hand first (e.g. to configure named routes across several test steps
+mode directly as PID 1; a spec that needs to run ``pg_walserver cluster
+register`` by hand first (e.g. to configure named routes across several test steps
 before serving ever starts) overrides that default with an explicit
 ``command "..."``, exactly as shown above. Both accept the same
 ``alias``/``docker-init``/``command`` modifiers listed in the table above.

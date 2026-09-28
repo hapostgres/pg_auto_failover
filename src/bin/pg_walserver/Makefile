@@ -29,6 +29,7 @@ LOCAL_SRC = main.c cli_root.c accept_loop.c startup.c auth.c framing.c repl_comm
             cmd_start_replication.c wal_dir_scan.c ws_util.c receivewal.c \
             backup_bootstrap.c \
             cli_upstream.c cli_wal_target.c cli_fetch_systemid.c cli_basebackup.c cli_setup.c \
+            cli_cluster.c \
             cli_create_cert.c cli_archive.c cli_restore_wal.c cli_archive_cleanup.c cli_internal.c \
             ps_state.c cli_ps.c cli_ls.c cli_status.c cli_list.c
 

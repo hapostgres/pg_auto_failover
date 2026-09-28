@@ -205,4 +205,49 @@ bool routes_set_property(const char *routesPath, const char *routeKey,
  */
 bool routes_drop_section(const char *routesPath, const char *routeKey);
 
+/*
+ * WsGlobalConfig is pg_walserver's own instance-level settings -- written
+ * by "pg_walserver setup" as plain "key = value" lines at the very top of
+ * pg_walserver.ini, before any route's own [section] header (the ini
+ * library's own true anonymous/global section, INI_GLOBAL_SECTION;
+ * routes_load() already skips it when enumerating routes, see its own
+ * comment). "serve" reads this once at startup (and again on reload) to
+ * fill in --port/--ssl-cert-file/--ssl-key-file/--ssl-ca-file/--auth-
+ * timeout whenever the equivalent command-line flag wasn't given --
+ * matches every other "explicit flag always wins over a persisted
+ * default" precedent in this project. Never routes/clusters -- those are
+ * "pg_walserver cluster register"'s own job.
+ */
+typedef struct WsGlobalConfig
+{
+	bool havePort;
+	int port;
+	char sslCertFile[MAXPGPATH];
+	char sslKeyFile[MAXPGPATH];
+	char sslCaFile[MAXPGPATH];
+	bool haveAuthTimeout;
+	int authTimeout;
+} WsGlobalConfig;
+
+/*
+ * routes_load_global reads pg_walserver.ini's own anonymous/global section
+ * (see WsGlobalConfig's own comment) into *out. Always succeeds (true),
+ * leaving *out zeroed, when the file doesn't exist yet or has no global
+ * section -- a normal, expected state, not an error (the same "missing
+ * config is not a failure" convention routes_load() itself already
+ * follows).
+ */
+bool routes_load_global(const char *routesPath, WsGlobalConfig *out);
+
+/*
+ * routes_set_global_property sets "propName = propValue" as a plain
+ * top-of-file line, before any route's own [section] header -- creating
+ * the file (with just that one line) if it doesn't exist yet, replacing
+ * an already-present line with the same propName otherwise. "pg_walserver
+ * setup"'s own way to persist one instance-level setting; never touches
+ * any route's own section.
+ */
+bool routes_set_global_property(const char *routesPath, const char *propName,
+								const char *propValue);
+
 #endif /* WS_ROUTES_H */
