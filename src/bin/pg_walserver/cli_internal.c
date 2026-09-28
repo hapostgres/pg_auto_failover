@@ -33,6 +33,7 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "postgres_fe.h"
 
@@ -44,6 +45,7 @@
 #include "pg_receivewal_entry.h"
 #include "pgsql.h"
 #include "string_utils.h"
+#include "wal_dir_scan.h"
 
 static char internalPgReceivewalRoute[NAMEDATALEN + 16] = { 0 };
 static char internalPgReceivewalUpstream[MAXCONNINFO] = { 0 };
@@ -98,6 +100,63 @@ cli_internal_pg_receivewal_getopt(int argc, char **argv)
 	}
 
 	return optind;
+}
+
+
+/*
+ * cli_internal_pg_receivewal_progress_hook is installed below as BOTH pgaf_
+ * wal_progress_hook and pgaf_wal_segment_closed_hook (pg_receivewal_entry.
+ * h), the only place in this whole subprocess that gets to see its own
+ * receiving position -- this process is a separate fork()+execv() of "pg_
+ * walserver internal service pg-receivewal ...", sharing no memory at all
+ * with the "serve" process that started it (see receivewal.c's own header
+ * comment, and ps_state.h's own comment for why "serve" already solves the
+ * identical cross-process problem for pid/restart bookkeeping via a state
+ * file). Hands its (lsn, timeline) off the same way: a tiny, throttled,
+ * per-route file (wal_dir_scan.h's ws_receivewal_progress_write(), written
+ * into the route's own directory), which accept_loop.c's own refresh_ps_
+ * state() tick later reads back and folds into the ps state file "pg_
+ * walserver ps"/"status"/"list clusters" read.
+ *
+ * Throttled to roughly once a second, matching refresh_ps_state()'s own
+ * cadence: pgaf_wal_progress_hook fires far more often than that (once per
+ * --status-interval check-in), and neither hook should write() on every
+ * single call -- this is observability, not a correctness-critical write.
+ * pgaf_wal_segment_closed_hook fires far less often (once per completed
+ * segment) and is throttled by the same clock for simplicity: a fresh
+ * write on segment close is never more than a second "late" as a result,
+ * which is immaterial for a display-only value.
+ */
+static void
+cli_internal_pg_receivewal_progress_hook(XLogRecPtr xlogpos, uint32 timeline)
+{
+	static time_t lastWrite = 0;
+	time_t now = time(NULL);
+
+	if (lastWrite != 0 && now <= lastWrite)
+	{
+		return;
+	}
+
+	lastWrite = now;
+
+	if (internalPgReceivewalPath[0] == '\0')
+	{
+		return;
+	}
+
+	char lsn[32] = { 0 };
+
+	sformat(lsn, sizeof(lsn), "%X/%08X",
+			(uint32) (xlogpos >> 32), (uint32) xlogpos);
+
+	if (!ws_receivewal_progress_write(internalPgReceivewalPath, lsn, timeline))
+	{
+		/* best-effort only: never fail/crash the receivewal worker over a
+		 * display-only file */
+		log_debug("Failed to update the receivewal progress file under \"%s\"",
+				  internalPgReceivewalPath);
+	}
 }
 
 
@@ -165,6 +224,14 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 	 * both.
 	 */
 	pgaf_install_stop_handlers();
+
+	/*
+	 * Wire up both hooks to this same callback before pg_receivewal_main()
+	 * ever gets a chance to call either -- see cli_internal_pg_receivewal_
+	 * progress_hook()'s own comment above for the full rationale.
+	 */
+	pgaf_wal_progress_hook = cli_internal_pg_receivewal_progress_hook;
+	pgaf_wal_segment_closed_hook = cli_internal_pg_receivewal_progress_hook;
 
 	int rc = pg_receivewal_main(argsIndex, args);
 

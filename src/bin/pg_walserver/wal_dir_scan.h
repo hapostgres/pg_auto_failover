@@ -21,6 +21,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "routes.h"
 
@@ -90,6 +91,47 @@ void wal_segment_filename(uint32_t timeline, uint64_t segno, uint64_t segSize,
  */
 bool wal_position_cache_read(const char *path, uint32_t *timeline,
 							 char *lsn, size_t lsnSize);
+
+/*
+ * WS_RECEIVEWAL_PROGRESS_FILENAME is "<route path>/receivewal-progress" --
+ * a separate, purely observational LSN cache from "archiver-position"
+ * above, written by the embedded receivewal worker's own pgaf_wal_progress_
+ * hook/pgaf_wal_segment_closed_hook callbacks (pg_receivewal_entry.h,
+ * wired up in cli_internal.c). Deliberately NOT the same file as
+ * "archiver-position": pgaf_wal_progress_hook's own xlogpos is raw stream
+ * position, not guaranteed to land on a genuine WAL record boundary (see
+ * that hook's own comment), so it must never be mistaken for the safe,
+ * record-boundary "resume from here" position wal_position_cache_read()
+ * hands out to START_REPLICATION/CREATE_REPLICATION_SLOT/base backup code
+ * elsewhere in this codebase. This file's "lsn" is for "pg_walserver ps"/
+ * "status"/"list clusters" to *display*, nothing else.
+ */
+#define WS_RECEIVEWAL_PROGRESS_FILENAME "receivewal-progress"
+
+/*
+ * ws_receivewal_progress_write overwrites "<path>/receivewal-progress" with
+ * lsn/timeline (the receivewal worker's own last-observed position, already
+ * formatted "%X/%08X" by the caller -- this file has no reason to depend on
+ * <access/xlogdefs.h>/XLogRecPtr) plus the current wall-clock time. Called
+ * from the embedded receivewal worker child's own hook callbacks
+ * (cli_internal.c), which throttle how often they call this to roughly
+ * once a second; this function itself performs no throttling of its own,
+ * just one atomic overwrite (write_file_atomic()) per call. Returns false
+ * (and logs nothing -- best-effort, must never crash or stall the
+ * receivewal worker over a display-only file) on failure.
+ */
+bool ws_receivewal_progress_write(const char *path, const char *lsn,
+								  uint32_t timeline);
+
+/*
+ * ws_receivewal_progress_read reads it back: lsn/timeline/observedAt are
+ * only set on success. Returns false (untouched) when the route has no such
+ * file yet (its receivewal worker has never ticked, isn't running, or the
+ * route isn't "receivewal = pull" at all) or it fails to parse -- callers
+ * must treat that as "no live reading available", never as an error.
+ */
+bool ws_receivewal_progress_read(const char *path, char *lsn, size_t lsnSize,
+								 uint32_t *timeline, time_t *observedAt);
 
 /*
  * WsWalFileKind classifies one directory entry's filename shape -- exported

@@ -1405,6 +1405,43 @@ running at all is never an error for `ps`/`status`/`list clusters`: each
 one checks the pidfile first and prints a clean "not running" (or "n/a")
 answer instead.
 
+### Live receiving LSN: relaying the vendored `pg_receivewal`'s own hooks through to `ps`/`status`/`list clusters`
+
+The vendored `pg_receivewal` (`src/bin/common/vendor/pg_receivewal/`) calls
+two hooks from its own `stop_streaming()` check-in on every server
+status-update round: `pgaf_wal_segment_closed_hook(xlogpos, timeline)` the
+moment a WAL segment finishes, and `pgaf_wal_progress_hook(xlogpos,
+timeline)` on every other check-in (far more often, and NOT guaranteed to
+land on a genuine WAL record boundary -- observability only). Both are wired
+up in `cli_internal.c`'s `cli_internal_pg_receivewal_run()` to the same
+callback, throttled to roughly once a second (matching `refresh_ps_state()`'s
+own cadence).
+
+That callback runs inside the receivewal worker's own subprocess (a separate
+`fork()`+`execv()` of this same binary, see "The embedded receivewal worker"
+below) -- it shares no memory with `serve`, so it cannot write straight into
+`accept_loop.c`'s own in-process bookkeeping the way `ws_receivewal_get_status()`
+does for pid/restart-count. It relays its (lsn, timeline) the same way `serve`
+itself relays pid/restart bookkeeping to `ps`/`status`: a small, throttled,
+per-route file, `<route path>/receivewal-progress` (`wal_dir_scan.h`'s
+`ws_receivewal_progress_write()`/`ws_receivewal_progress_read()`), which
+`accept_loop.c`'s own `refresh_ps_state()` tick reads back and folds into the
+`WsPsReceivewalEntry` it publishes (new `lsn`/`lsnTimeline`/`lsnObservedAt`
+fields, `ps_state.h`) -- the *existing* cross-process mechanism this section
+already describes above, just carrying one more small fact.
+
+Deliberately a *separate* file from `wal_dir_scan.c`'s own
+`archiver-position` cache (`wal_position_cache_read()`): that file's
+contract, relied on by `cmd_start_replication.c`/`cmd_replication_slot.c`/
+`cmd_base_backup.c`/`cmd_identify_system.c` elsewhere in this codebase, is a
+safe, record-boundary "resume from here" position -- `pgaf_wal_progress_hook`'s
+own raw stream position must never be mistaken for that. `receivewal-progress`
+is display-only: it feeds `ps`'s per-worker line, `status`'s per-route
+summary, and `list clusters`' own "WAL END" column (in preference to that
+column's existing `wal_dir_find_latest()` segment-boundary scan, when a
+route's receivewal worker is running and has reported a reading -- falling
+back to the scan otherwise).
+
 ### `list clusters`: computing the covered WAL range
 
 The start LSN of a route's currently covered WAL range comes straight
