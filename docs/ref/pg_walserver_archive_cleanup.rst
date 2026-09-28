@@ -44,6 +44,22 @@ retention math itself) for an operator who has independently confirmed
 proceeding is safe -- a default unattended cron job should never pass
 it blindly.
 
+:ref:`pg_walserver_basebackup` takes the exact same ``--keep-count``/
+``--keep-age``/``--dry-run``/``--force`` flags, and runs this same
+retention pass immediately after taking a fresh backup -- reusing this
+command's own logic directly, not a reimplementation of it. A single
+cron line calling ``basebackup`` with retention flags both takes the
+new backup and prunes what the policy no longer needs in one step,
+which is the preferred way to wire retention into cron for the common
+case: it never leaves a window where a fresh backup was scheduled but
+the previous cleanup pass silently never ran, and it can never prune a
+still-useful backup out from under a ``basebackup`` that was supposed
+to replace it first. Call ``archive-cleanup`` directly instead when
+retention needs to run on its own schedule, independent of when a new
+backup gets taken (a tighter cleanup cadence than the backup cadence,
+for instance), or from a script that already takes backups its own
+way and only wants this command's own pruning.
+
 Options
 -------
 
