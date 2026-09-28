@@ -76,6 +76,32 @@ void ws_capture_tick(bool (*otherChildExited)(void *ctx, pid_t pid,
 void ws_capture_reload(const WsRoute *newRoutes, int newRouteCount);
 
 /*
+ * WsCaptureStatus is one supervised "capture = pull" capturer's current
+ * status, as seen from inside "serve" itself -- see ws_capture_get_status()
+ * below, and ps_state.h for why a *different* process (pg_walserver ps/
+ * status) cannot just read captureServices/captureRoutes directly and
+ * instead goes through a state file "serve" writes from this same data.
+ */
+typedef struct WsCaptureStatus
+{
+	char routeKey[NAMEDATALEN + 16];
+	char path[MAXPGPATH];
+	char upstream[MAXCONNINFO];
+	pid_t pid;          /* <= 0: not currently running */
+	time_t startedAt;   /* this incarnation's own start time */
+	int restarts;        /* how many times it has been restarted */
+} WsCaptureStatus;
+
+/*
+ * ws_capture_get_status fills out[0..min(serviceCount,maxOut)) with the
+ * current status of every route ws_capture_start_all()/ws_capture_reload()
+ * is tracking (whether or not each one is currently running), and returns
+ * how many entries it filled. Used by accept_loop.c's own refresh_ps_
+ * state() to keep the on-disk ps state file (ps_state.h) current.
+ */
+int ws_capture_get_status(WsCaptureStatus *out, int maxOut);
+
+/*
  * ws_capture_stop_all signals every still-running capturer child to stop
  * cleanly (SIGINT, matching pg_receivewal's own documented clean-stop
  * signal -- see capture.c's own comment), waits up to a bounded timeout

@@ -96,8 +96,12 @@
 #include "cli_create_cert.h"
 #include "cli_fetch_systemid.h"
 #include "cli_internal.h"
+#include "cli_list.h"
+#include "cli_ls.h"
+#include "cli_ps.h"
 #include "cli_restore_wal.h"
 #include "cli_setup.h"
+#include "cli_status.h"
 #include "cli_upstream.h"
 #include "cli_wal_target.h"
 #include "defaults.h"
@@ -289,6 +293,8 @@ cli_serve_run(int argc, char **argv)
 
 	if (servePgdata[0] != '\0')
 	{
+		strlcpy(serveConfig.pgdata, servePgdata, sizeof(serveConfig.pgdata));
+
 		sformat(serveConfig.routesPath, sizeof(serveConfig.routesPath),
 				"%s/pg_walserver.ini", servePgdata);
 		sformat(serveConfig.auth.hbaPath, sizeof(serveConfig.auth.hbaPath),
@@ -1735,6 +1741,373 @@ static CommandLine reload_command =
 
 
 /* -----------------------------------------------------------------------
+ * pg_walserver ps --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char psPgdata[MAXPGPATH] = { 0 };
+
+static struct option psLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_ps_getopt(int argc, char **argv)
+{
+	optind = 0;
+	(void) get_env_pgdata(psPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:", psLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(psPgdata, optarg, sizeof(psPgdata));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_ps_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_ps_run(psPgdata) ? 0 : 1);
+}
+
+
+static CommandLine ps_command =
+	make_command("ps",
+				 "Show pg_walserver serve's own process-level status "
+				 "(pid, capturers, bootstrap jobs)",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n",
+				 cli_ps_getopt, cli_ps_command_run);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver ls --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char lsPgdata[MAXPGPATH] = { 0 };
+
+static struct option lsLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_ls_getopt(int argc, char **argv)
+{
+	optind = 0;
+	(void) get_env_pgdata(lsPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:", lsLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(lsPgdata, optarg, sizeof(lsPgdata));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_ls_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_ls_run(lsPgdata) ? 0 : 1);
+}
+
+
+static CommandLine ls_command =
+	make_command("ls",
+				 "List pg_walserver's own on-disk footprint under --pgdata",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n",
+				 cli_ls_getopt, cli_ls_command_run);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver status --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char statusPgdata[MAXPGPATH] = { 0 };
+
+static struct option statusLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_status_getopt(int argc, char **argv)
+{
+	optind = 0;
+	(void) get_env_pgdata(statusPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:", statusLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(statusPgdata, optarg, sizeof(statusPgdata));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_status_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_status_run(statusPgdata) ? 0 : 1);
+}
+
+
+static CommandLine status_command =
+	make_command("status",
+				 "Show a short pg_walserver status dashboard",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n",
+				 cli_status_getopt, cli_status_command_run);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver list clusters|backups|wal [--cluster <name>] [--segments]
+ * ----------------------------------------------------------------------- */
+
+static char listPgdata[MAXPGPATH] = { 0 };
+static char listCluster[NAMEDATALEN + 16] = { 0 };
+static bool listWalSegments = false;
+
+static struct option listClustersLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_list_clusters_getopt(int argc, char **argv)
+{
+	optind = 0;
+	(void) get_env_pgdata(listPgdata);
+	listCluster[0] = '\0';
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:c:", listClustersLongOptions,
+							NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(listPgdata, optarg, sizeof(listPgdata));
+				break;
+			}
+
+			case 'c':
+			{
+				strlcpy(listCluster, optarg, sizeof(listCluster));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_list_clusters_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_list_clusters_run(listPgdata, listCluster) ? 0 : 1);
+}
+
+
+static CommandLine list_clusters_command =
+	make_command("clusters",
+				 "List every route, its backup/capture status, and the "
+				 "WAL range it covers",
+				 "--pgdata <path> [--cluster <name>]",
+				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
+				 "(defaults to PGDATA)\n"
+				 "  --cluster   limit output to a single route\n",
+				 cli_list_clusters_getopt, cli_list_clusters_command_run);
+
+
+static void
+cli_list_backups_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_list_backups_run(listPgdata, listCluster) ? 0 : 1);
+}
+
+
+static CommandLine list_backups_command =
+	make_command("backups",
+				 "List base backups per cluster (label, size, which is "
+				 ".latest)",
+				 "--pgdata <path> [--cluster <name>]",
+				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
+				 "(defaults to PGDATA)\n"
+				 "  --cluster   limit output to a single route\n",
+				 cli_list_clusters_getopt, cli_list_backups_command_run);
+
+
+static struct option listWalLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ "segments", no_argument, NULL, 's' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_list_wal_getopt(int argc, char **argv)
+{
+	optind = 0;
+	(void) get_env_pgdata(listPgdata);
+	listCluster[0] = '\0';
+	listWalSegments = false;
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:c:s", listWalLongOptions,
+							NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(listPgdata, optarg, sizeof(listPgdata));
+				break;
+			}
+
+			case 'c':
+			{
+				strlcpy(listCluster, optarg, sizeof(listCluster));
+				break;
+			}
+
+			case 's':
+			{
+				listWalSegments = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_list_wal_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_list_wal_run(listPgdata, listCluster, listWalSegments) ? 0 : 1);
+}
+
+
+static CommandLine list_wal_command =
+	make_command("wal",
+				 "List WAL cache aggregate stats per cluster, or every "
+				 "file with --segments",
+				 "--pgdata <path> [--cluster <name>] [--segments]",
+				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
+				 "(defaults to PGDATA)\n"
+				 "  --cluster   limit output to a single route\n"
+				 "  --segments  list every individual WAL/.history/.backup "
+				 "file instead\n"
+				 "              of the default aggregate stats\n",
+				 cli_list_wal_getopt, cli_list_wal_command_run);
+
+
+static CommandLine *list_subcommands[] = {
+	&list_clusters_command,
+	&list_backups_command,
+	&list_wal_command,
+	NULL
+};
+
+static CommandLine list_commands =
+	make_command_set("list",
+					 "List clusters, base backups, or WAL cache contents",
+					 NULL, NULL, NULL, list_subcommands);
+
+
+/* -----------------------------------------------------------------------
  * Root command table
  * ----------------------------------------------------------------------- */
 
@@ -1749,6 +2122,10 @@ static CommandLine *root_subcommands[] = {
 	&restore_command,
 	&archive_cleanup_command,
 	&reload_command,
+	&ps_command,
+	&ls_command,
+	&status_command,
+	&list_commands,
 	&internal_commands,
 	NULL
 };
@@ -1759,7 +2136,7 @@ CommandLine ws_root =
 					 "[serve options] | scram-secret ... | setup ... | "
 					 "fetch-systemid ... | basebackup ... | create-cert ... | "
 					 "archive-wal ... | restore-wal ... | archive-cleanup ... | "
-					 "reload ...",
+					 "reload ... | ps ... | ls ... | status ... | list ...",
 					 NULL, NULL, root_subcommands);
 
 
@@ -1790,6 +2167,10 @@ pg_walserver_default_argv(int argc, char **argv, int *newArgc)
 		 streq(argv[1], "restore-wal") ||
 		 streq(argv[1], "archive-cleanup") ||
 		 streq(argv[1], "reload") ||
+		 streq(argv[1], "ps") ||
+		 streq(argv[1], "ls") ||
+		 streq(argv[1], "status") ||
+		 streq(argv[1], "list") ||
 		 streq(argv[1], "internal") ||
 		 streq(argv[1], "--help") ||
 		 streq(argv[1], "-h")))

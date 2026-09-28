@@ -31,6 +31,11 @@ typedef struct WsServerConfig
 {
 	int port;
 	int authTimeout;              /* absolute authentication deadline, seconds */
+	char pgdata[MAXPGPATH];       /* empty in --insecure mode; set by
+	                               * cli_serve_run() -- read by
+	                               * refresh_ps_state() (accept_loop.c) to
+	                               * know where to write the ps state file
+	                               * (ps_state.h) */
 	char routesPath[MAXPGPATH];   /* empty: no routing, manual-testing mode */
 	WsAuthConfig auth;
 	WsRoute *routes;               /* the currently installed, parsed
@@ -82,5 +87,24 @@ bool ws_accept_loop(WsServerConfig *config);
  * backup current after its first, automatic one.
  */
 void ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount);
+
+/*
+ * WsBootstrapStatus is one still-running automatic bootstrap base backup
+ * job's status -- see ws_bootstrap_get_status() below.
+ */
+typedef struct WsBootstrapStatus
+{
+	char routeKey[NAMEDATALEN + 16];
+	pid_t pid;
+	time_t startedAt;
+} WsBootstrapStatus;
+
+/*
+ * ws_bootstrap_get_status fills out[0..min(bootstrapChildCount,maxOut))
+ * with every currently in-flight automatic bootstrap backup job, and
+ * returns how many entries it filled. Used by refresh_ps_state()
+ * (accept_loop.c) to keep the on-disk ps state file (ps_state.h) current.
+ */
+int ws_bootstrap_get_status(WsBootstrapStatus *out, int maxOut);
 
 #endif /* WS_ACCEPT_LOOP_H */

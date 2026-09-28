@@ -85,6 +85,11 @@ typedef struct WsCaptureRoute
 	char routeKey[NAMEDATALEN + 16];
 	char path[MAXPGPATH];
 	char upstream[MAXCONNINFO];
+	time_t startedAt;    /* set by start_one_capture_child(): the single
+	                      * choke point every (re)start of this route's
+	                      * capturer goes through, initial start, reload-
+	                      * driven restart, and tick-driven restart-on-
+	                      * crash alike */
 } WsCaptureRoute;
 
 static WsCaptureRoute captureRoutes[WS_CAPTURE_MAX_ROUTES];
@@ -214,11 +219,42 @@ start_one_capture_child(void *context, pid_t *pid)
 	}
 
 	*pid = fpid;
+	cr->startedAt = time(NULL);
 
 	log_info("Started the embedded pull capturer for route \"%s\" (pid %d), "
 			 "capturing into \"%s\"", cr->routeKey, fpid, cr->path);
 
 	return true;
+}
+
+
+/*
+ * ws_capture_get_status -- see capture.h.
+ */
+int
+ws_capture_get_status(WsCaptureStatus *out, int maxOut)
+{
+	int n = 0;
+
+	for (int i = 0; i < captureSupervisor.serviceCount && n < maxOut; i++)
+	{
+		WsCaptureRoute *cr = &captureRoutes[i];
+		ProcessService *service = &captureServices[i];
+		WsCaptureStatus *status = &out[n];
+
+		memset(status, 0, sizeof(WsCaptureStatus));
+		strlcpy(status->routeKey, cr->routeKey, sizeof(status->routeKey));
+		strlcpy(status->path, cr->path, sizeof(status->path));
+		strlcpy(status->upstream, cr->upstream, sizeof(status->upstream));
+		status->pid = service->pid;
+		status->startedAt = cr->startedAt;
+		status->restarts = service->restartCounters.count > 0 ?
+						   service->restartCounters.count - 1 : 0;
+
+		n++;
+	}
+
+	return n;
 }
 
 

@@ -91,4 +91,28 @@ void wal_segment_filename(uint32_t timeline, uint64_t segno, uint64_t segSize,
 bool wal_position_cache_read(const char *path, uint32_t *timeline,
 							 char *lsn, size_t lsnSize);
 
+/*
+ * WsWalFileKind classifies one directory entry's filename shape -- exported
+ * for "pg_walserver list wal" (cli_list.c) to reuse this file's own
+ * filename-parsing rather than re-deriving it a second time (cli_archive_
+ * cleanup.c's own wal_prefix_from_name() recognizes almost the same shapes,
+ * for a different purpose -- retention cutoff comparison, not inventory --
+ * and stays private to that file).
+ */
+typedef enum
+{
+	WS_WAL_FILE_OTHER = 0,     /* not one of the shapes below */
+	WS_WAL_FILE_SEGMENT,       /* 24 hex digits, complete */
+	WS_WAL_FILE_PARTIAL,       /* 24 hex digits + ".partial" */
+	WS_WAL_FILE_BACKUP,        /* "<24hex>.<8hex>.backup" */
+	WS_WAL_FILE_HISTORY        /* "<8hex>.history" */
+} WsWalFileKind;
+
+/*
+ * ws_wal_dir_classify_filename classifies name into one of WsWalFileKind's
+ * five shapes. For WS_WAL_FILE_SEGMENT/PARTIAL/BACKUP, segmentOut (when not
+ * NULL, at least 25 bytes) receives the 24-hex WAL segment prefix.
+ */
+WsWalFileKind ws_wal_dir_classify_filename(const char *name, char *segmentOut);
+
 #endif /* WS_WAL_DIR_SCAN_H */

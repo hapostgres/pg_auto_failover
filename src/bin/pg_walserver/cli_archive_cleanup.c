@@ -26,16 +26,9 @@
 #define WS_BACKUPS_SUBDIR "basebackups"
 #define WS_LATEST_FILENAME "basebackups/.latest"
 
-/* one enumerated base backup directory under <path>/basebackups/ */
-typedef struct WsCleanupBackup
-{
-	char label[NAMEDATALEN];        /* "basebackup-20260101T000000Z" */
-	char dirPath[MAXPGPATH];
-	time_t takenAt;                 /* parsed out of the label itself */
-	bool haveStart;                 /* backup_label parsed successfully */
-	char startSegment[WS_WAL_FNAME_LEN + 1]; /* this backup's own required
-	                                          * starting WAL segment */
-} WsCleanupBackup;
+/* WsBackupInfo (formerly a private WsCleanupBackup) is now declared in
+ * cli_archive_cleanup.h, exported for "pg_walserver list backups"
+ * (cli_list.c) to reuse -- see that header's own comment. */
 
 
 /* ---------------------------------------------------------------------
@@ -231,8 +224,8 @@ wal_prefix_from_name(const char *name, char *prefixOut)
 static int
 backup_cmp(const void *a, const void *b)
 {
-	const WsCleanupBackup *ba = (const WsCleanupBackup *) a;
-	const WsCleanupBackup *bb = (const WsCleanupBackup *) b;
+	const WsBackupInfo *ba = (const WsBackupInfo *) a;
+	const WsBackupInfo *bb = (const WsBackupInfo *) b;
 
 	return strcmp(ba->label, bb->label);
 }
@@ -315,9 +308,9 @@ lsn_to_segment(const char *lsn, uint32_t timeline, uint64_t segSize,
  * true even when there are zero backups (an empty, not-yet-used route);
  * false only on a directory that cannot be opened at all.
  */
-static bool
-load_backups(const char *routePath, uint64_t segSize,
-			 WsCleanupBackup **backupsOut, int *countOut)
+bool
+ws_backup_list_load(const char *routePath, uint64_t segSize,
+					WsBackupInfo **backupsOut, int *countOut)
 {
 	char backupsDir[MAXPGPATH] = { 0 };
 
@@ -335,8 +328,8 @@ load_backups(const char *routePath, uint64_t segSize,
 	}
 
 	int capacity = 16;
-	WsCleanupBackup *backups = (WsCleanupBackup *)
-							   malloc(capacity * sizeof(WsCleanupBackup));
+	WsBackupInfo *backups = (WsBackupInfo *)
+							malloc(capacity * sizeof(WsBackupInfo));
 	int count = 0;
 	struct dirent *entry;
 
@@ -360,13 +353,13 @@ load_backups(const char *routePath, uint64_t segSize,
 		if (count == capacity)
 		{
 			capacity *= 2;
-			backups = (WsCleanupBackup *)
-					  realloc(backups, capacity * sizeof(WsCleanupBackup));
+			backups = (WsBackupInfo *)
+					  realloc(backups, capacity * sizeof(WsBackupInfo));
 		}
 
-		WsCleanupBackup *backup = &(backups[count]);
+		WsBackupInfo *backup = &(backups[count]);
 
-		memset(backup, 0, sizeof(WsCleanupBackup));
+		memset(backup, 0, sizeof(WsBackupInfo));
 		strlcpy(backup->label, entry->d_name, sizeof(backup->label));
 		strlcpy(backup->dirPath, entryPath, sizeof(backup->dirPath));
 
@@ -401,7 +394,7 @@ load_backups(const char *routePath, uint64_t segSize,
 
 	closedir(dir);
 
-	qsort(backups, count, sizeof(WsCleanupBackup), backup_cmp); /* IGNORE-BANNED */
+	qsort(backups, count, sizeof(WsBackupInfo), backup_cmp); /* IGNORE-BANNED */
 
 	*backupsOut = backups;
 	*countOut = count;
@@ -440,10 +433,10 @@ ws_archive_cleanup_run(const char *routePath,
 
 	uint64_t segSize = ws_route_wal_segment_size(&route);
 
-	WsCleanupBackup *backups = NULL;
+	WsBackupInfo *backups = NULL;
 	int backupCount = 0;
 
-	if (!load_backups(routePath, segSize, &backups, &backupCount))
+	if (!ws_backup_list_load(routePath, segSize, &backups, &backupCount))
 	{
 		log_error("archive-cleanup: could not read \"%s/%s\"",
 				  routePath, WS_BACKUPS_SUBDIR);
@@ -599,7 +592,7 @@ ws_archive_cleanup_run(const char *routePath,
 			continue;
 		}
 
-		WsCleanupBackup *backup = &(backups[i]);
+		WsBackupInfo *backup = &(backups[i]);
 		bool supersededByMissingWal = false;
 
 		if (backup->haveStart)
