@@ -76,8 +76,14 @@ PGPASSWORD
 A complete standalone example
 ------------------------------
 
-This example archives one ordinary PostgreSQL instance and restores it
-with point-in-time recovery, without pg_auto_failover.
+Archiving one ordinary PostgreSQL instance, without pg_auto_failover,
+takes three steps: create a role on the primary, register the route,
+and start the server. Everything after that -- an ``archive_command``
+backstop, restoring with PITR, building a real standby, retention --
+is optional, and covered in its own section below.
+
+Creating the route and starting the server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **1. On the primary**, create a replication role and add a line to
 ``pg_hba.conf`` admitting it over a replication connection from the
@@ -150,8 +156,11 @@ route, while ``serve`` is already running, reloads it immediately (a
 ``SIGHUP``, the same as ``pg_walserver reload``) instead of waiting for a
 restart.
 
-**4. Optional: add** ``archive_command`` **as a backstop** alongside the
-embedded capturer, on the primary::
+Optional: adding archive_command as a backstop
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Add ``archive_command`` alongside the embedded capturer, on the
+primary::
 
   archive_mode = on
   archive_command = 'pg_walserver archive-wal %p %f --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
@@ -162,8 +171,11 @@ capturer has already delivered the segment, exit 1 otherwise. It never
 pushes anything itself; PostgreSQL's own retry of ``archive_command``
 covers the case where the capturer has not yet caught up.
 
-**5. Point-in-time recovery**: take a real ``pg_basebackup`` against
-``pg_walserver``, then use ``restore-wal`` as ``restore_command``::
+Restoring with point-in-time recovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Take a real ``pg_basebackup`` against ``pg_walserver``, then use
+``restore-wal`` as ``restore_command``::
 
   restore$ PGPASSWORD=s3kr3t pg_basebackup \
       -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
@@ -182,8 +194,11 @@ or any other replication-protocol client, also works for a one-off fetch::
 
   restore$ PGPASSWORD=s3kr3t psql "host=archive port=6543 dbname=mycluster user=archiver_repl replication=true sslmode=require" -c "FETCH_FILE <segment>" > <destination>
 
-**6. Or a real, continuously-streaming standby** instead of PITR: the same
-base backup, but with ``primary_conninfo`` and ``standby.signal``.
+Building a real, continuously-streaming standby
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Instead of PITR, the same base backup can feed a real standby, with
+``primary_conninfo`` and ``standby.signal``.
 
 A real standby's own ``primary_conninfo`` never actually controls what
 ``dbname`` gets sent: PostgreSQL always substitutes the literal
@@ -215,9 +230,12 @@ when more than one cluster needs to be reachable this way::
   standby$ touch /var/lib/postgres/standby/standby.signal
   standby$ pg_ctl -D /var/lib/postgres/standby start
 
-**7. Keep the archive from growing forever**: nothing above removes
-anything on its own -- wire ``archive-cleanup`` into cron, keeping at
-least a week of history and at least 3 base backups::
+Retention: keeping the archive from growing forever
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Nothing above removes anything on its own -- wire ``archive-cleanup``
+into cron, keeping at least a week of history and at least 3 base
+backups::
 
   archive$ crontab -l
   0 3 * * * PGPASSWORD=s3kr3t pg_walserver archive-cleanup \

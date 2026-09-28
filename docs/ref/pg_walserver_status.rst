@@ -15,8 +15,8 @@ Synopsis
 Prints a short, scannable dashboard: running or not (a real liveness
 check, not just "the pidfile exists"), pid, how many clusters are
 configured and how many already have a base backup, how many embedded
-pull capturers are running versus configured, and how many bootstrap
-backups are still pending.
+receivewal workers are running versus configured, and how many
+bootstrap backups are still pending.
 
 Options
 -------

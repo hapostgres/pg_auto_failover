@@ -30,15 +30,12 @@ Synopsis
 Serving ``pg_basebackup``, ``pg_receivewal``, and a real standby set up
 with a ``primary_conninfo`` directly out of a directory tree of WAL
 segments and base backups, with no live ``postmaster`` behind it, needs
-something that
-speaks the PostgreSQL replication wire protocol well enough for that:
-this is what ``pg_walserver`` does. It is not part of
+something that speaks the PostgreSQL replication wire protocol well
+enough for that: this is what ``pg_walserver`` does. It is not part of
 ``pg_autoctl``'s own process supervision: it is started and stopped on
 its own.
 
-Running the accept loop (``serve``) is the default action, so a bare
-invocation with server-mode options works with no sub-command name at
-all. This is ``pg_walserver --help``'s own output, verbatim::
+This is ``pg_walserver --help``'s own output, verbatim::
 
   usage: pg_walserver [serve options] | scram-secret ... | setup ... |
                        fetch-systemid ... | basebackup ... |
@@ -58,21 +55,19 @@ all. This is ``pg_walserver --help``'s own output, verbatim::
       restore-wal     Fetch one WAL/.backup file from a pg_walserver route (restore_command)
       archive-cleanup Remove WAL/base backups this route no longer needs to keep
       reload          Ask a running pg_walserver to reload its configuration
-      ps              Show serve's own process-level status (pid, capturers, bootstrap jobs)
+      ps              Show serve's own process-level status (pid, receivewal workers, bootstrap jobs)
       ls              List pg_walserver's own on-disk footprint under --pgdata
       status          Show a short pg_walserver status dashboard
-      list clusters   List every route, its backup/capture status, and its WAL range
+      list clusters   List every route, its backup/receivewal status, and its WAL range
       list backups    List base backups per cluster
       list wal        List WAL cache stats per cluster, or every file with --segments
-
-Each of these has its own manual page, in the sidebar.
 
 Description
 -----------
 
 Operating a PostgreSQL service in production requires a fully compliant
-archiving story in place: it is the foundation of disaster recovery and
-data durability in the event of a crash. PostgreSQL itself does not
+`archiving`__ story in place: it is the foundation of disaster recovery
+and data durability in the event of a crash. PostgreSQL itself does not
 provide an archiving implementation, only a well-specified contract for
 one (``archive_command``/``restore_command``, base backups, timelines).
 External solutions exist to fill that gap, but none of them speak the
@@ -81,11 +76,13 @@ none of PostgreSQL's own tools -- ``pg_basebackup``, ``pg_receivewal``, a
 real standby's ``primary_conninfo`` -- can talk to the archive to rebuild
 a node.
 
+__ https://www.postgresql.org/docs/current/continuous-archiving.html
+
 That gap needs an archiving server that speaks the replication protocol
 and implements PostgreSQL's own archiving contract in full:
-``pg_walserver``. It combines streaming (the embedded pull capturer,
-for efficiency) with ``archive_command`` (for robustness) rather than
-requiring one or the other.
+``pg_walserver``. It combines streaming (the embedded receivewal
+worker, for efficiency) with ``archive_command`` (for robustness)
+rather than requiring one or the other.
 
 Archiving one cluster
 ~~~~~~~~~~~~~~~~~~~~~
@@ -258,7 +255,7 @@ startup, at the same time it parses
 ``pg_walserver.ini``/``pg_walserver_hba.conf``, once.
 :ref:`pg_walserver_reload` sends that pid ``SIGHUP``, which re-parses
 both files and installs them only if both still parse cleanly,
-reconciling the embedded pull capturer set against the new routes. The
+reconciling the embedded receivewal worker set against the new routes. The
 TLS certificate and key are not reloaded this way; a rotated
 certificate needs a restart.
 
@@ -276,8 +273,8 @@ real PostgreSQL primary except where noted:
 ``SHOW``
 
   Reports server and route parameters. A ``pg_walserver`` extension:
-  also answers ``capture``, the connected route's own setting, ``pull``
-  or ``none``.
+  also answers ``receivewal``, the connected route's own setting,
+  ``pull`` or ``none``.
 
 ``BASE_BACKUP``
 

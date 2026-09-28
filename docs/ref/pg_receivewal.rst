@@ -15,24 +15,28 @@ What this project ships instead, under
 vendored in and built directly into ``pg_walserver`` itself, called
 in-process rather than exec'd as a separate program.
 
-Giving pg_receivewal an archive_command
------------------------------------------
+Two tracking hooks, for a future layer
+----------------------------------------
 
-A real ``archive_command`` fires on the primary the instant one WAL
-segment is ready, so an archiver can act on it right away.
-``pg_receivewal`` has no equivalent: it streams and writes segments to
-a local directory with no hook of its own, so the only way to react to
-a segment closing is to poll the directory afterward and notice a new
-file appeared. That gap is exactly what this project needed to close
-to bootstrap a base backup at the right moment.
+``pg_receivewal`` streams and writes segments to a local directory
+with no hook of its own: nothing else in the same process gets told
+when a segment closes, or how far the stream has progressed since.
+Today, nothing in this codebase needs that -- ``pg_walserver`` decides
+whether a segment is available by looking at the directory itself
+(``wal_dir_scan.c``), not by reacting to a notification. The two hooks
+below exist for a later layer, not yet built, that will want to track
+or register WAL segment completions as they happen instead of
+rescanning a directory to find out: a small, deliberate extension
+point added while the vendored copy was already being touched for
+other reasons, rather than a gap this project urgently needed closed.
 
-The fix is two hooks added to the vendored copy's ``stop_streaming()``
-callback (already invoked on every check-in, segment-closing or not):
+The hooks are two callbacks added to the vendored copy's
+``stop_streaming()`` callback (already invoked on every check-in,
+segment-closing or not):
 
 ``pgaf_wal_segment_closed_hook(xlogpos, timeline)``
   Called the moment a WAL segment finishes. ``xlogpos`` is that
-  segment's own end boundary -- the ``archive_command`` equivalent
-  this was added for.
+  segment's own end boundary.
 
 ``pgaf_wal_progress_hook(xlogpos, timeline)``
   Called on every other check-in (far more often than a segment
@@ -45,9 +49,9 @@ Both run synchronously, on the streaming loop's own thread of control,
 so a hook must stay fast and non-blocking, the same rule a real
 ``archive_command`` script has to follow. Neither hook is set by
 anything in this codebase today: both default to ``NULL`` (a no-op),
-and calling the vendored copy without setting one runs exactly like
-real ``pg_receivewal`` with no ``archive_command`` equivalent at all.
-They exist as an extension point, wired and ready, not yet consumed.
+and the vendored copy runs exactly like real, unmodified
+``pg_receivewal`` until something sets one. They exist as an extension
+point, wired and ready, not yet consumed.
 
 The only other change from upstream is mechanical: ``main()`` is
 renamed to ``pg_receivewal_main()`` and is no longer ``static``/the
@@ -58,9 +62,9 @@ else is byte-for-byte unchanged from PostgreSQL's own source.
 What starts this service
 --------------------------
 
-Today, only :ref:`pg_walserver`'s embedded pull capturer does: each
-route configured with ``capture = pull`` (the default; see
-:ref:`pg_walserver_setup`'s ``--capture`` option) gets a supervised
+Today, only :ref:`pg_walserver`'s embedded receivewal worker does: each
+route configured with ``receivewal = pull`` (the default; see
+:ref:`pg_walserver_setup`'s ``--receivewal`` option) gets a supervised
 child running ``pg_walserver internal service pg-receivewal --route
 <key> --upstream <conninfo> --path <dir>`` -- a real, separate,
 supervised process (restarted on failure the same way any other
