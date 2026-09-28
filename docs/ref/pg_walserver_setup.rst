@@ -12,7 +12,8 @@ Synopsis
 
   pg_walserver setup --pgdata <path> --cluster <name> [--path <dir>]
       --upstream <conninfo> | --host <host> [--port <port>] [--user <name>]
-      [--hostname <name>] [--receivewal pull|none] [--force]
+      [--hostname <name>] [--receivewal pull|none] [--ssl-self-signed]
+      [--force]
 
 Writes or validates one ``pg_walserver.ini`` route and fetches its
 upstream system identifier. It never takes a base backup itself:
@@ -42,8 +43,8 @@ Options
 
 --upstream
 
-  A libpq connection string, written into the route's own ``upstream``
-  property.
+  A libpq connection string, keyword/value or ``postgres://`` URI,
+  written into the route's own ``upstream`` property.
 
 --host, --port, --user
 
@@ -54,7 +55,9 @@ Options
 
   The route's own TLS SNI hostname, written into its ``hostname``
   property. Creates a self-signed certificate for ``--pgdata``
-  automatically the first time a second named route needs one.
+  automatically the first time a second named route needs one (or
+  right away, with ``--ssl-self-signed`` below); also that
+  certificate's own CN, when one is created.
 
 --receivewal
 
@@ -67,6 +70,15 @@ Options
 
   Equivalent to ``--receivewal none``.
 
+--ssl-self-signed
+
+  Create a self-signed certificate for ``--pgdata`` right away, whether
+  or not this is the only route -- skips a separate
+  :ref:`pg_walserver_create_cert` call entirely. An already-existing
+  certificate is left untouched. Without this flag, a certificate is
+  still created automatically, but only once a second route makes TLS
+  mandatory (see :ref:`pg_walserver`'s "Routing" section).
+
 --force
 
   Overwrite an existing route's ``path``/``upstream`` instead of
@@ -76,19 +88,24 @@ Examples
 --------
 
 Create a route for a new cluster, no ``--path`` given (it defaults to
-``<pgdata>/<cluster>``), no server running yet::
+``<pgdata>/<cluster>``), ``--upstream`` as a ``postgres://`` URI,
+``--ssl-self-signed`` creating a certificate right away, no server
+running yet::
 
   archive$ export PGDATA=/var/lib/archiver
   archive$ PGPASSWORD=s3kr3t pg_walserver setup --cluster mycluster \
-      --upstream "host=primary port=5534 user=archiver_repl sslmode=require"
-  20:42:19 2445614 ERROR Failed to open "/var/lib/archiver/pg_walserver.ini": No such file or directory
-  20:42:19 2445614 ERROR Failed to read routes file "/var/lib/archiver/pg_walserver.ini"
-  20:42:19 2445614 INFO  Added route "mycluster" (path "/var/lib/archiver/mycluster") to "/var/lib/archiver/pg_walserver.ini"
-  20:42:19 2445614 INFO  Connecting to primary:5534 as "archiver_repl" to fetch the system identifier
-  20:42:19 2445614 INFO  Wrote system identifier 7690676421909321516 to "/var/lib/archiver/mycluster/pg_walserver_systemid"
-  20:42:19 2445614 INFO  Wrote upstream Postgres version 170011 to "/var/lib/archiver/mycluster/pg_walserver_pgversion"
-  20:42:19 2445614 INFO  setup complete: route "mycluster" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
-  20:42:19 2445614 INFO  No running "pg_walserver serve" found at "/var/lib/archiver/pg_walserver.pid": the route just written will take effect the next time "serve" starts
+      --upstream "postgres://archiver_repl@primary:5535/?sslmode=require" \
+      --ssl-self-signed --hostname archive
+  21:38:22 2660205 ERROR Failed to open "/var/lib/archiver/pg_walserver.ini": No such file or directory
+  21:38:22 2660205 ERROR Failed to read routes file "/var/lib/archiver/pg_walserver.ini"
+  21:38:22 2660205 INFO  Added route "mycluster" (path "/var/lib/archiver/mycluster") to "/var/lib/archiver/pg_walserver.ini"
+  21:38:22 2660205 INFO   /usr/bin/openssl req -new -x509 -days 365 -nodes -text -out /var/lib/archiver/server.crt -keyout /var/lib/archiver/server.key -subj "/CN=archive"
+  21:38:22 2660205 INFO  Created a self-signed certificate for "/var/lib/archiver" ("/var/lib/archiver/server.crt"/"/var/lib/archiver/server.key", CN=archive) -- replace it with a real one before running on a reachable network
+  21:38:22 2660205 INFO  Connecting to primary:5535 as "archiver_repl" to fetch the system identifier
+  21:38:22 2660205 INFO  Wrote system identifier 7690701918151237972 to "/var/lib/archiver/mycluster/pg_walserver_systemid"
+  21:38:22 2660205 INFO  Wrote upstream Postgres version 170011 to "/var/lib/archiver/mycluster/pg_walserver_pgversion"
+  21:38:22 2660205 INFO  setup complete: route "mycluster" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
+  21:38:22 2660205 INFO  No running "pg_walserver serve" found at "/var/lib/archiver/pg_walserver.pid": the route just written will take effect the next time "serve" starts
 
 The two ``ERROR`` lines are harmless and expected on a first run:
 ``pg_walserver.ini`` does not exist yet the moment ``setup`` tries to

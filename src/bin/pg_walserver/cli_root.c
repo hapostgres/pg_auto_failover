@@ -1111,6 +1111,7 @@ static struct option setupLongOptions[] = {
 	{ "receivewal", required_argument, NULL, 'c' },
 	{ "no-receivewal", no_argument, NULL, 'N' },
 	{ "force", no_argument, NULL, 'f' },
+	{ "ssl-self-signed", no_argument, NULL, 's' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -1134,7 +1135,7 @@ cli_setup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:C:P:u:h:p:U:n:c:fN",
+	while ((c = getopt_long(argc, argv, "D:C:P:u:h:p:U:n:c:fNs",
 							setupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -1218,6 +1219,12 @@ cli_setup_getopt(int argc, char **argv)
 			case 'f':
 			{
 				setupOptions.force = true;
+				break;
+			}
+
+			case 's':
+			{
+				setupOptions.sslSelfSigned = true;
 				break;
 			}
 
@@ -1316,7 +1323,7 @@ static CommandLine setup_command =
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--hostname <fqdn>] "
 				 "[--receivewal pull|none | --no-receivewal] "
-				 "[--force]",
+				 "[--ssl-self-signed] [--force]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
 				 "  --cluster   the cluster name to create or validate\n"
@@ -1343,7 +1350,9 @@ static CommandLine setup_command =
 													  "              self-signed certificate for\n"
 													  "              --pgdata automatically, the moment a "
 													  "second route is\n"
-													  "              added, if none exists yet\n"
+													  "              added, if none exists yet (or right away "
+													  "with\n"
+													  "              --ssl-self-signed, below)\n"
 													  "  --receivewal pull  write \"receivewal = pull\" into the "
 													  "route's own section\n"
 													  "              (the default now, even with no --receivewal "
@@ -1359,6 +1368,14 @@ static CommandLine setup_command =
 													  "the embedded\n"
 													  "              receivewal worker (push-only, archive_command-only)"
 													  "\n"
+													  "  --ssl-self-signed  create a self-signed certificate "
+													  "for --pgdata right\n"
+													  "              away, whether or not this is the only "
+													  "route -- skips a\n"
+													  "              separate \"pg_walserver create-cert\" call "
+													  "entirely; an\n"
+													  "              already-existing certificate is left "
+													  "untouched\n"
 													  "  --force     change an already-existing route's path, "
 													  "or overwrite an\n"
 													  "              already-recorded, different system "
