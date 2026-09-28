@@ -365,6 +365,7 @@ typedef struct SingleValueResultContext
 	") as t(ok) "
 
 bool pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType);
+PGconn * pgsql_open_connection(PGSQL *pgsql);
 
 void pgsql_set_retry_policy(ConnectionRetryPolicy *retryPolicy,
 							int maxT,

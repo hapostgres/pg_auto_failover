@@ -42,6 +42,11 @@ static const char *configFiles[] = {
 };
 
 
+/*
+ * format_bytes renders bytes as a human-scaled "<N.N><unit>" string
+ * (B/KB/MB/GB), one decimal digit, the same shape cli_list.c's own
+ * format_bytes() renders for the identical purpose.
+ */
 static void
 format_bytes(uint64_t bytes, char *dest, size_t destSize)
 {
@@ -68,6 +73,10 @@ format_bytes(uint64_t bytes, char *dest, size_t destSize)
 }
 
 
+/*
+ * format_utc renders t as an ISO-8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ"),
+ * or "-" when t is unset (<= 0, e.g. a route with no base backup yet).
+ */
 static void
 format_utc(time_t t, char *dest, size_t destSize)
 {
@@ -237,6 +246,11 @@ scan_route_footprint(const WsRoute *route, WsRouteFootprint *out)
 }
 
 
+/*
+ * print_config_files prints the --config tier's own table: one row per
+ * well-known config/credential/certificate file under pgdata, whether it
+ * exists, its size, and its last-modified time.
+ */
 static void
 print_config_files(const char *pgdata)
 {
@@ -268,6 +282,9 @@ print_config_files(const char *pgdata)
 }
 
 
+/*
+ * cli_ls_run -- see cli_ls.h's own comment.
+ */
 bool
 cli_ls_run(const char *pgdata, bool includeConfigFiles)
 {

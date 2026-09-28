@@ -73,6 +73,13 @@ pg_range_sockaddr(const struct sockaddr_storage *addr,
 }
 
 
+/*
+ * range_sockaddr_AF_INET is pg_range_sockaddr()'s own IPv4 case: addr is
+ * in the netaddr/netmask subnet exactly when every bit netmask marks as
+ * significant (a 1 bit) is identical between addr and netaddr -- XOR the
+ * two addresses (zero wherever they already agree) and AND that against
+ * netmask; a nonzero result means at least one significant bit differs.
+ */
 static int
 range_sockaddr_AF_INET(const struct sockaddr_in *addr,
 					   const struct sockaddr_in *netaddr,
@@ -90,6 +97,12 @@ range_sockaddr_AF_INET(const struct sockaddr_in *addr,
 }
 
 
+/*
+ * range_sockaddr_AF_INET6 is range_sockaddr_AF_INET()'s own comment,
+ * applied one byte of the 16-byte IPv6 address at a time instead of one
+ * 32-bit word: addr is in the netaddr/netmask subnet exactly when every
+ * byte's own XOR-then-AND-with-netmask comes back zero.
+ */
 static int
 range_sockaddr_AF_INET6(const struct sockaddr_in6 *addr,
 						const struct sockaddr_in6 *netaddr,

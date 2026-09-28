@@ -119,6 +119,10 @@ format_bytes(uint64_t bytes, char *dest, size_t destSize)
 }
 
 
+/*
+ * format_utc renders t as an ISO-8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ"),
+ * or "-" when t is unset (<= 0).
+ */
 static void
 format_utc(time_t t, char *dest, size_t destSize)
 {
@@ -190,6 +194,14 @@ directory_size(const char *path)
 /* ---------------------------------------------------------------------
  * shared route loading/filtering
  * --------------------------------------------------------------------- */
+
+/*
+ * load_pgdata_routes reads <pgdata>/pg_walserver.ini into a freshly
+ * malloc'ed array (routes_load()), the shared first step every "list"
+ * sub-command needs; when clusterFilter is given, also refuses (false,
+ * an error already logged) if no route matches it, rather than every
+ * caller having to check that on its own.
+ */
 static bool
 load_pgdata_routes(const char *pgdata, const char *clusterFilter,
 				   WsRoute **routesOut, int *countOut)
@@ -227,6 +239,10 @@ load_pgdata_routes(const char *pgdata, const char *clusterFilter,
 }
 
 
+/*
+ * route_matches_filter is true when clusterFilter is empty (no --cluster
+ * given, every route matches) or equals route's own key exactly.
+ */
 static bool
 route_matches_filter(const WsRoute *route, const char *clusterFilter)
 {
@@ -500,6 +516,15 @@ typedef struct WsWalStats
 } WsWalStats;
 
 
+/*
+ * scan_wal_dir classifies and tallies every WAL/.partial/.backup/.history
+ * file under route's own directory into *stats (segment/partial/backup/
+ * history counts, total bytes, oldest/newest complete segment); when
+ * printSegments, also prints one row per file as it goes (the
+ * "--segments" detail view), so this only ever scans the directory once
+ * regardless of which "list wal" mode was asked for. False (stats
+ * left zeroed) if the directory itself cannot be opened.
+ */
 static bool
 scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
 			 const char *routeKey)
@@ -606,6 +631,11 @@ scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
 }
 
 
+/*
+ * cli_list_wal_run prints, per route, WsWalStats's own aggregate counts
+ * (the default), or every individual file via scan_wal_dir()'s own
+ * printSegments mode when segments is true.
+ */
 bool
 cli_list_wal_run(const char *pgdata, const char *clusterFilter, bool segments)
 {

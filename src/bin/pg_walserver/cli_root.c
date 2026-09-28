@@ -723,6 +723,10 @@ static struct option fetchSystemidLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_fetch_systemid_getopt parses "pg_walserver fetch-systemid"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_fetch_systemid_getopt(int argc, char **argv)
 {
@@ -796,6 +800,11 @@ cli_fetch_systemid_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_fetch_systemid_command_run runs "pg_walserver fetch-systemid" against
+ * the options cli_fetch_systemid_getopt parsed above, then exit()s with its
+ * own result.
+ */
 static void
 cli_fetch_systemid_command_run(int argc, char **argv)
 {
@@ -873,6 +882,10 @@ static struct option basebackupLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_basebackup_getopt parses "pg_walserver basebackup"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_basebackup_getopt(int argc, char **argv)
 {
@@ -984,6 +997,11 @@ cli_basebackup_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_basebackup_command_run runs "pg_walserver basebackup" against the
+ * options cli_basebackup_getopt parsed above, then exit()s with its own
+ * result.
+ */
 static void
 cli_basebackup_command_run(int argc, char **argv)
 {
@@ -1114,6 +1132,10 @@ static struct option setupLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_setup_getopt parses "pg_walserver setup"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_setup_getopt(int argc, char **argv)
 {
@@ -1297,6 +1319,10 @@ cli_setup_reload_running_server(const char *pgdata)
 }
 
 
+/*
+ * cli_setup_command_run runs "pg_walserver setup" against the options
+ * cli_setup_getopt parsed above, then exit()s with its own result.
+ */
 static void
 cli_setup_command_run(int argc, char **argv)
 {
@@ -1408,6 +1434,10 @@ static struct option createCertLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_create_cert_getopt parses "pg_walserver create-cert"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_create_cert_getopt(int argc, char **argv)
 {
@@ -1452,6 +1482,11 @@ cli_create_cert_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_create_cert_command_run runs "pg_walserver create-cert" against the
+ * options cli_create_cert_getopt parsed above, then exit()s with its own
+ * result.
+ */
 static void
 cli_create_cert_command_run(int argc, char **argv)
 {
@@ -1490,6 +1525,10 @@ static CommandLine create_cert_command =
 
 static WsWalServerTarget archiveTarget = { 0 };
 
+/*
+ * cli_archive_getopt parses "pg_walserver archive-wal"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_archive_getopt(int argc, char **argv)
 {
@@ -1641,6 +1680,10 @@ static struct option reloadLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_reload_getopt parses "pg_walserver reload"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_reload_getopt(int argc, char **argv)
 {
@@ -1763,6 +1806,10 @@ static struct option archiveCleanupLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_archive_cleanup_getopt parses "pg_walserver archive-cleanup"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_archive_cleanup_getopt(int argc, char **argv)
 {
@@ -1852,6 +1899,11 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_archive_cleanup_command_run runs "pg_walserver archive-cleanup" against
+ * the options cli_archive_cleanup_getopt parsed above, then exit()s with its
+ * own result.
+ */
 static void
 cli_archive_cleanup_command_run(int argc, char **argv)
 {
@@ -1973,6 +2025,10 @@ static struct option stopLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_stop_getopt parses "pg_walserver stop"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_stop_getopt(int argc, char **argv)
 {
@@ -2085,6 +2141,10 @@ static struct option psLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_ps_getopt parses "pg_walserver ps"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_ps_getopt(int argc, char **argv)
 {
@@ -2115,6 +2175,10 @@ cli_ps_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_ps_command_run runs "pg_walserver ps" against the options cli_ps_getopt
+ * parsed above, then exit()s with its own result.
+ */
 static void
 cli_ps_command_run(int argc, char **argv)
 {
@@ -2149,6 +2213,10 @@ static struct option lsLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_ls_getopt parses "pg_walserver ls"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_ls_getopt(int argc, char **argv)
 {
@@ -2186,6 +2254,10 @@ cli_ls_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_ls_command_run runs "pg_walserver ls" against the options cli_ls_getopt
+ * parsed above, then exit()s with its own result.
+ */
 static void
 cli_ls_command_run(int argc, char **argv)
 {
@@ -2221,6 +2293,10 @@ static struct option statusLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_status_getopt parses "pg_walserver status"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_status_getopt(int argc, char **argv)
 {
@@ -2251,6 +2327,10 @@ cli_status_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_status_command_run runs "pg_walserver status" against the options
+ * cli_status_getopt parsed above, then exit()s with its own result.
+ */
 static void
 cli_status_command_run(int argc, char **argv)
 {
@@ -2285,6 +2365,10 @@ static struct option listClustersLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_list_clusters_getopt parses "pg_walserver list clusters"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_list_clusters_getopt(int argc, char **argv)
 {
@@ -2323,6 +2407,11 @@ cli_list_clusters_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_list_clusters_command_run runs "pg_walserver list clusters" against the
+ * options cli_list_clusters_getopt parsed above, then exit()s with its own
+ * result.
+ */
 static void
 cli_list_clusters_command_run(int argc, char **argv)
 {
@@ -2344,6 +2433,11 @@ static CommandLine list_clusters_command =
 				 cli_list_clusters_getopt, cli_list_clusters_command_run);
 
 
+/*
+ * cli_list_backups_command_run runs "pg_walserver list backups" against the
+ * options cli_list_backups_getopt parsed above, then exit()s with its own
+ * result.
+ */
 static void
 cli_list_backups_command_run(int argc, char **argv)
 {
@@ -2372,6 +2466,10 @@ static struct option listWalLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+/*
+ * cli_list_wal_getopt parses "pg_walserver list wal"'s own flags into the
+ * file-scope statics above.
+ */
 static int
 cli_list_wal_getopt(int argc, char **argv)
 {
@@ -2417,6 +2515,10 @@ cli_list_wal_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_list_wal_command_run runs "pg_walserver list wal" against the options
+ * cli_list_wal_getopt parsed above, then exit()s with its own result.
+ */
 static void
 cli_list_wal_command_run(int argc, char **argv)
 {
