@@ -73,10 +73,10 @@ Examples
   INFO  Base backup "basebackup-20260928T134237Z" is now the latest for
         "/var/lib/archiver/mycluster"
 
-``pg_basebackup`` is always invoked with ``--wal-method=stream``: the
-backup carries its own WAL, concurrently, rather than depending on
+Carrying its own WAL, concurrently, rather than depending on
 ``restore_command`` to fetch any segment written during the backup
-itself.
+itself, is why ``pg_basebackup`` is always invoked with
+``--wal-method=stream``.
 
 See Also
 --------
