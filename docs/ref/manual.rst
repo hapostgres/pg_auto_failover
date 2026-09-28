@@ -32,4 +32,12 @@ have their own manual page.
    pg_autoctl_status
    pg_autoctl_activate
    pg_walserver
+   pg_walserver_setup
+   pg_walserver_scram_secret
+   pg_walserver_fetch_systemid
+   pg_walserver_basebackup
+   pg_walserver_create_cert
+   pg_walserver_archive_wal
+   pg_walserver_restore_wal
+   pg_walserver_archive_cleanup
    pgaftest
