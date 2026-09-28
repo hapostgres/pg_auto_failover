@@ -155,6 +155,32 @@
 extern CommandLine ws_root;
 extern char ** pg_walserver_default_argv(int argc, char **argv, int *newArgc);
 
+
+/*
+ * ws_prefill_pgdata_from_env fills pgdata from the PGDATA environment
+ * variable, before this sub-command's own getopt loop parses --pgdata
+ * (which then overrides whatever this wrote, if given). PGDATA being
+ * unset here is entirely normal -- every caller below only ever uses this
+ * as an optional default, never a requirement -- so this deliberately
+ * does NOT call env_utils.c's own get_env_pgdata(): that function
+ * unconditionally log_error()s when the variable is unset (right, for
+ * its own other callers in this codebase, e.g. pidfile.c's own
+ * create_pidfile(), which genuinely cannot proceed without it), which
+ * would otherwise print a scary, misleading ERROR on every single
+ * pg_walserver invocation that passes --pgdata explicitly and simply
+ * never has PGDATA set in its environment at all -- the common case for
+ * a cron job or a one-off command.
+ */
+static void
+ws_prefill_pgdata_from_env(char *pgdata)
+{
+	if (env_exists("PGDATA"))
+	{
+		(void) get_env_copy("PGDATA", pgdata, MAXPGPATH);
+	}
+}
+
+
 /* -----------------------------------------------------------------------
  * pg_walserver serve [options]  (the default command)
  * ----------------------------------------------------------------------- */
@@ -218,7 +244,7 @@ cli_serve_getopt(int argc, char **argv)
 	serveConfig.authTimeout = WS_DEFAULT_AUTH_TIMEOUT;
 
 	/* --pgdata, parsed below, takes precedence over this default */
-	(void) get_env_pgdata(servePgdata);
+	ws_prefill_pgdata_from_env(servePgdata);
 
 	int c;
 
@@ -702,7 +728,7 @@ static int
 cli_fetch_systemid_getopt(int argc, char **argv)
 {
 	optind = 0;
-	(void) get_env_pgdata(fetchSystemidPgdata);
+	ws_prefill_pgdata_from_env(fetchSystemidPgdata);
 
 	int c;
 
@@ -852,7 +878,7 @@ static int
 cli_basebackup_getopt(int argc, char **argv)
 {
 	optind = 0;
-	(void) get_env_pgdata(basebackupPgdata);
+	ws_prefill_pgdata_from_env(basebackupPgdata);
 	basebackupHaveKeepCount = false;
 	basebackupKeepCount = 0;
 	basebackupHaveKeepAge = false;
@@ -1095,7 +1121,7 @@ cli_setup_getopt(int argc, char **argv)
 	setupOptions = (WsSetupOptions) {
 		0
 	};
-	(void) get_env_pgdata(setupOptions.pgdata);
+	ws_prefill_pgdata_from_env(setupOptions.pgdata);
 
 	/*
 	 * The embedded receivewal worker is on by default now: running "setup"
@@ -1285,7 +1311,8 @@ cli_setup_command_run(int argc, char **argv)
 static CommandLine setup_command =
 	make_command("setup",
 				 "Create or validate one pg_walserver.ini route",
-				 "--cluster <name> --path <dir> --pgdata <path> "
+				 "--cluster <name> --pgdata <path> "
+				 "[--path <dir>] "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--hostname <fqdn>] "
 				 "[--receivewal pull|none | --no-receivewal] "
@@ -1294,7 +1321,8 @@ static CommandLine setup_command =
 				 "(defaults to PGDATA)\n"
 				 "  --cluster   the cluster name to create or validate\n"
 				 "  --path      the route's own directory, created if "
-				 "missing\n"
+				 "missing; defaults\n"
+				 "              to <pgdata>/<cluster>\n"
 				 "  --upstream  a libpq connection string, written into the "
 				 "route's own\n"
 				 "              \"upstream\" property\n"
@@ -1369,7 +1397,7 @@ cli_create_cert_getopt(int argc, char **argv)
 {
 	optind = 0;
 	createCertForce = false;
-	(void) get_env_pgdata(createCertPgdata);
+	ws_prefill_pgdata_from_env(createCertPgdata);
 
 	int c;
 
@@ -1602,7 +1630,7 @@ cli_reload_getopt(int argc, char **argv)
 {
 	optind = 0;
 	reloadPgdata[0] = '\0';
-	(void) get_env_pgdata(reloadPgdata);
+	ws_prefill_pgdata_from_env(reloadPgdata);
 
 	int c;
 
@@ -1723,7 +1751,7 @@ static int
 cli_archive_cleanup_getopt(int argc, char **argv)
 {
 	optind = 0;
-	(void) get_env_pgdata(archiveCleanupPgdata);
+	ws_prefill_pgdata_from_env(archiveCleanupPgdata);
 	archiveCleanupRoute[0] = '\0';
 	archiveCleanupPath[0] = '\0';
 	archiveCleanupHaveKeepCount = false;
@@ -1933,7 +1961,7 @@ static int
 cli_ps_getopt(int argc, char **argv)
 {
 	optind = 0;
-	(void) get_env_pgdata(psPgdata);
+	ws_prefill_pgdata_from_env(psPgdata);
 
 	int c;
 
@@ -1997,7 +2025,7 @@ static int
 cli_ls_getopt(int argc, char **argv)
 {
 	optind = 0;
-	(void) get_env_pgdata(lsPgdata);
+	ws_prefill_pgdata_from_env(lsPgdata);
 	lsIncludeConfigFiles = false;
 
 	int c;
@@ -2042,15 +2070,15 @@ cli_ls_command_run(int argc, char **argv)
 
 static CommandLine ls_command =
 	make_command("ls",
-				 "List pg_walserver's own on-disk footprint under --pgdata",
+				 "Per-cluster storage summary: base backups, WAL, disk usage",
 				 "--pgdata <path> [--config]",
 				 "  --pgdata    this instance's own top-level storage root "
 				 "(defaults to\n"
 				 "              PGDATA)\n"
-				 "  --config    also list the config/credential/"
-				 "certificate files\n"
-				 "              (omitted by default: rarely change, "
-				 "rarely interesting)\n",
+				 "  --config    list the config/credential/certificate "
+				 "files instead\n"
+				 "              (rarely change, rarely interesting day "
+				 "to day)\n",
 				 cli_ls_getopt, cli_ls_command_run);
 
 
@@ -2069,7 +2097,7 @@ static int
 cli_status_getopt(int argc, char **argv)
 {
 	optind = 0;
-	(void) get_env_pgdata(statusPgdata);
+	ws_prefill_pgdata_from_env(statusPgdata);
 
 	int c;
 
@@ -2133,7 +2161,7 @@ static int
 cli_list_clusters_getopt(int argc, char **argv)
 {
 	optind = 0;
-	(void) get_env_pgdata(listPgdata);
+	ws_prefill_pgdata_from_env(listPgdata);
 	listCluster[0] = '\0';
 
 	int c;
@@ -2220,7 +2248,7 @@ static int
 cli_list_wal_getopt(int argc, char **argv)
 {
 	optind = 0;
-	(void) get_env_pgdata(listPgdata);
+	ws_prefill_pgdata_from_env(listPgdata);
 	listCluster[0] = '\0';
 	listWalSegments = false;
 

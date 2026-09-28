@@ -1,20 +1,33 @@
 /*
  * src/bin/pg_walserver/cli_ls.h
- *   `pg_walserver ls --pgdata <path> [--config]`: pg_walserver's own
- *   on-disk footprint under --pgdata, one inventory listing. A different
- *   axis from every "list" sub-command (cli_list.h): this is never about
- *   the archived WAL/base backup data itself, only pg_walserver's own
- *   small configuration/bookkeeping footprint.
+ *   `pg_walserver ls --pgdata <path> [--config]`: a per-cluster storage
+ *   summary -- how many base backups a route holds and their combined
+ *   real size, how many WAL segments it has captured/archived and their
+ *   combined size, and when its most recent base backup was taken.
  *
- *   Two tiers, because most of that footprint is not actually
- *   interesting to look at day to day: the config/credential/certificate
- *   files (pg_walserver.ini, pg_walserver_hba.conf, pg_walserver_passwd,
- *   server.crt/server.key, ca.crt) are written once, by the operator or
- *   by "setup"/"create-cert", and rarely change -- confirming they still
- *   exist tells an operator little. The runtime files (pg_walserver.pid,
- *   the ps state file) are the ones "serve" itself keeps current while
- *   running, and are what's actually worth a glance. Default output is
- *   the runtime tier only; --config adds the other one.
+ *   Real PostgreSQL archiving practice (the "Continuous Archiving and
+ *   Point-in-Time Recovery" chapter's own guidance on archive_cleanup_
+ *   command and base backup frequency) treats an archive's disk footprint
+ *   as something that needs active watching: the WAL archive grows
+ *   without bound until something prunes it, and how far behind the most
+ *   recent base backup is directly bounds how long a restore's WAL replay
+ *   takes. Those are exactly the two questions an operator glancing at
+ *   this command wants answered -- not "does pg_walserver_hba.conf still
+ *   exist", which is what an earlier version of this command showed by
+ *   default (see this file's own git history): a file written once by
+ *   "setup" that essentially never needs checking again. That
+ *   config/credential/certificate tier (pg_walserver.ini,
+ *   pg_walserver_hba.conf, pg_walserver_passwd, server.crt/server.key,
+ *   ca.crt) still has its place -- confirming a fresh deployment actually
+ *   wrote what it should -- so it's still available, just behind
+ *   --config, never the default anymore.
+ *
+ *   A different axis from every "list" sub-command (cli_list.h): "list
+ *   backups"/"list wal" enumerate every individual backup/WAL file across
+ *   every route, one row each; this command aggregates that same real
+ *   data (reusing the exact same scan/enumeration code -- see cli_ls.c's
+ *   own comment) into one row per route, the "how much, and how current"
+ *   summary a human actually wants at a glance, not the full inventory.
  *
  * Licensed under the PostgreSQL License.
  *
@@ -26,14 +39,15 @@
 #include <stdbool.h>
 
 /*
- * cli_ls_run prints one row per well-known pg_walserver bookkeeping file
- * under pgdata: whether it exists, its size, and its last-modified time.
- * The runtime tier (pg_walserver.pid, the ps state file) always prints;
- * the config/credential/certificate tier only prints when
- * includeConfigFiles is true (--config). Always returns true (a missing
- * file is an ordinary row, "exists: no", never an error -- an operator
- * running this against a freshly created, not-yet-configured --pgdata is
- * the common case, not a failure).
+ * cli_ls_run prints, by default, one row per configured route: its own
+ * base backup count/combined size, WAL segment count/combined size, and
+ * most recent base backup timestamp. With includeConfigFiles (--config),
+ * prints the config/credential/certificate file tier instead (whether
+ * each well-known file exists, its size, its last-modified time) -- see
+ * this file's own header comment for why these are two separate views,
+ * not combined into one. Always returns true: no routes configured yet,
+ * or a route with nothing on disk yet, are ordinary states to report,
+ * never a failure.
  */
 bool cli_ls_run(const char *pgdata, bool includeConfigFiles);
 
