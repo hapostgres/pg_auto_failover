@@ -381,7 +381,7 @@ cli_list_clusters_run(const char *pgdata, const char *clusterFilter)
 		bool known = false;
 		bool running = capturer_running_for_route(pgdata, route->key, &known);
 		const char *capturerStr = !route->capturePull ? "n/a" :
-								   !known ? "n/a" : running ? "yes" : "no";
+								  !known ? "n/a" : running ? "yes" : "no";
 
 		printf("%-20s %-8s %-9s %-9s %-22s %-22s\n", /* IGNORE-BANNED */
 			   route->key, haveBackup ? "yes" : "no",
@@ -476,7 +476,7 @@ typedef struct WsWalStats
 
 static bool
 scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
-			const char *routeKey)
+			 const char *routeKey)
 {
 	memset(stats, 0, sizeof(WsWalStats));
 

@@ -180,7 +180,7 @@ ws_ps_state_read(const char *pgdata, WsPsState *state)
 
 			memset(c, 0, sizeof(WsPsCapturerEntry));
 			parse_kv(rest, c->routeKey, c->path, &c->pid, &c->startedAt,
-					&c->restarts);
+					 &c->restarts);
 			state->capturerCount++;
 		}
 		else if (strcmp(kind, "bootstrap") == 0 &&

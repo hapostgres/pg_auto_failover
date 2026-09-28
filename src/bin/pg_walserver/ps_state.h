@@ -61,7 +61,7 @@ typedef struct WsPsCapturerEntry
 	char routeKey[NAMEDATALEN + 16];
 	char path[MAXPGPATH];
 	pid_t pid;              /* <= 0: not currently running (gave up, or
-	                          * never started) */
+	                         * never started) */
 	time_t startedAt;       /* this incarnation's own start time */
 	int restarts;           /* how many times it has been restarted */
 } WsPsCapturerEntry;

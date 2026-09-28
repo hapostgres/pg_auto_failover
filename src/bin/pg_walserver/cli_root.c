@@ -5,7 +5,7 @@
  *   the same way pgaftest's own cli_root.c does for a similarly-sized
  *   standalone binary.
  *
- *   Nine sub-commands:
+ *   Fourteen sub-commands:
  *
  *     serve           Run the accept loop (accept_loop.h). This is
  *                     pg_walserver's *default* command: when no sub-command
@@ -48,6 +48,33 @@
  *                     pg_walserver.ini/pg_walserver_hba.conf and reconcile the
  *                     embedded pull capturer set -- see accept_loop.c's
  *                     own ws_reload_config()/ws_capture_reload().
+ *     archive-cleanup Retention: remove WAL/.history/.backup files, and any
+ *                     base backup no longer restorable once they are gone,
+ *                     older than --keep-age or beyond --keep-count (never
+ *                     both -- the more conservative of the two always
+ *                     wins), cli_archive_cleanup.c. Never run automatically;
+ *                     an operator's own cron job, exactly like real
+ *                     pg_archivecleanup.
+ *     ps              Process-level view: "serve"'s own pid, each
+ *                     supervised embedded capturer child, any in-flight
+ *                     bootstrap backup -- cli_ps.c, reading the small state
+ *                     file "serve" itself keeps current (a separate
+ *                     process cannot see another process's own in-memory
+ *                     structs), cross-checked with a real kill(pid, 0)
+ *                     liveness probe.
+ *     ls              pg_walserver's own on-disk footprint under --pgdata
+ *                     (pg_walserver.ini, pg_walserver_hba.conf,
+ *                     pg_walserver_passwd, server.crt/key, pg_walserver.pid,
+ *                     ...) -- cli_ls.c. Not the archived data itself, see
+ *                     "list" below for that.
+ *     status          One-screen dashboard: running or not, pid, cluster/
+ *                     backup/capturer counts, pending bootstrap backups --
+ *                     cli_status.c.
+ *     list            clusters/backups/wal sub-targets over the archived
+ *                     data itself (not pg_walserver's own bookkeeping
+ *                     files, see "ls" above) -- cli_list.c. "list wal"
+ *                     defaults to aggregate stats, "--segments" lists
+ *                     every individual file.
  *
  *   fetch-systemid/basebackup/create-cert are client-side, one-shot tools
  *   that connect *out*, to a route's own upstream, sharing cli_upstream.c's
