@@ -120,6 +120,7 @@ static WsServerConfig serveConfig = { 0 };
 static char servePgdata[MAXPGPATH] = { 0 };
 static char serveSslCertFile[MAXPGPATH] = { 0 };
 static char serveSslKeyFile[MAXPGPATH] = { 0 };
+static char serveSslCaFile[MAXPGPATH] = { 0 };
 static bool serveInsecure = false;
 static char servePidfilePath[MAXPGPATH] = { 0 };
 
@@ -151,6 +152,7 @@ static struct option serveLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
 	{ "ssl-cert-file", required_argument, NULL, 'C' },
 	{ "ssl-key-file", required_argument, NULL, 'K' },
+	{ "ssl-ca-file", required_argument, NULL, 'A' },
 	{ "auth-timeout", required_argument, NULL, 'T' },
 	{ "insecure", no_argument, NULL, 'I' },
 	{ NULL, 0, NULL, 0 }
@@ -158,10 +160,11 @@ static struct option serveLongOptions[] = {
 
 /*
  * cli_serve_getopt parses every server-mode flag (--port, --pgdata,
- * --ssl-cert-file, --ssl-key-file, --auth-timeout, --insecure) into the
- * file-scope serveConfig/servePgdata/... variables that cli_serve_run() then
- * acts on. Returns optind, the number of argv slots consumed, exactly as
- * commandline_run() expects from a command_getopt callback.
+ * --ssl-cert-file, --ssl-key-file, --ssl-ca-file, --auth-timeout,
+ * --insecure) into the file-scope serveConfig/servePgdata/... variables
+ * that cli_serve_run() then acts on. Returns optind, the number of argv
+ * slots consumed, exactly as commandline_run() expects from a
+ * command_getopt callback.
  */
 static int
 cli_serve_getopt(int argc, char **argv)
@@ -205,6 +208,12 @@ cli_serve_getopt(int argc, char **argv)
 			case 'K':
 			{
 				strlcpy(serveSslKeyFile, optarg, sizeof(serveSslKeyFile));
+				break;
+			}
+
+			case 'A':
+			{
+				strlcpy(serveSslCaFile, optarg, sizeof(serveSslCaFile));
 				break;
 			}
 
@@ -302,6 +311,46 @@ cli_serve_run(int argc, char **argv)
 		if (ws_tls_server_init(certPath, keyPath))
 		{
 			log_info("TLS is enabled (\"%s\")", certPath);
+
+			/*
+			 * The CA file, if any, given with --ssl-ca-file, else
+			 * <pgdata>/ca.crt (the same --ssl-cert-file/--ssl-key-file
+			 * default-path convention above, applied to the CA). Optional:
+			 * with no usable CA file, TLS still works exactly as before,
+			 * only "clientcert=verify-full" HBA lines cannot be satisfied
+			 * (checked below, once the HBA file itself is parsed).
+			 */
+			char caPath[MAXPGPATH];
+
+			if (serveSslCaFile[0] != '\0')
+			{
+				strlcpy(caPath, serveSslCaFile, sizeof(caPath));
+			}
+			else
+			{
+				sformat(caPath, sizeof(caPath), "%s/ca.crt", servePgdata);
+			}
+
+			if (file_exists(caPath))
+			{
+				if (ws_tls_server_load_ca(caPath))
+				{
+					log_info("TLS client certificate verification is enabled "
+							 "(\"%s\")", caPath);
+				}
+				else
+				{
+					log_fatal("Failed to load the TLS CA file \"%s\"", caPath);
+					exit(1);
+				}
+			}
+			else if (serveSslCaFile[0] != '\0')
+			{
+				/* an explicit --ssl-ca-file that does not exist is a
+				 * startup error, unlike the default path silently absent */
+				log_fatal("The TLS CA file \"%s\" does not exist", caPath);
+				exit(1);
+			}
 		}
 		else
 		{
@@ -357,6 +406,15 @@ cli_serve_run(int argc, char **argv)
 		{
 			log_fatal("Failed to parse \"%s\": refusing to start",
 					  serveConfig.auth.hbaPath);
+			exit(1);
+		}
+
+		if (hba_ruleset_requires_client_cert(&serveConfig.auth.hbaRuleSet) &&
+			!ws_tls_client_verification_enabled())
+		{
+			log_fatal("\"%s\" has a \"clientcert=verify-full\" rule but no "
+					  "usable TLS CA file: pass --ssl-ca-file, or create "
+					  "<pgdata>/ca.crt", serveConfig.auth.hbaPath);
 			exit(1);
 		}
 
@@ -439,6 +497,7 @@ static CommandLine serve_command =
 				 "Run the pg_walserver accept loop (the default command)",
 				 "[--port <port>] [--pgdata <path> | --insecure] "
 				 "[--ssl-cert-file <path> --ssl-key-file <path>] "
+				 "[--ssl-ca-file <path>] "
 				 "[--auth-timeout <seconds>]",
 				 "  --port      port to listen on (default: 6543)\n"
 				 "  --pgdata    this instance's own top-level storage root "
@@ -462,6 +521,12 @@ static CommandLine serve_command =
 				 "  --ssl-cert-file / --ssl-key-file  server certificate "
 				 "(default:\n"
 				 "              <pgdata>/server.crt / <pgdata>/server.key)\n"
+				 "  --ssl-ca-file  trusted CA bundle for TLS client "
+				 "certificate verification\n"
+				 "              (default: <pgdata>/ca.crt); required for a "
+				 "\"clientcert=\n"
+				 "              verify-full\" HBA line to have anything to "
+				 "validate against\n"
 				 "  --auth-timeout  absolute deadline in seconds for a "
 				 "connection to\n"
 				 "              complete startup, TLS, HBA and "

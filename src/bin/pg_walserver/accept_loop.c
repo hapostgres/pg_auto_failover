@@ -32,6 +32,7 @@
 #include "file_utils.h"
 #include "framing.h"
 #include "hba.h"
+#include "tls.h"
 #include "log.h"
 #include "repl_command.h"
 #include "routes.h"
@@ -633,6 +634,15 @@ ws_reload_config(WsServerConfig *config)
 	{
 		log_error("Reload failed: could not parse \"%s\": keeping the "
 				  "current configuration", config->auth.hbaPath);
+	}
+
+	if (hbaOk && hba_ruleset_requires_client_cert(&newHbaRuleSet) &&
+		!ws_tls_client_verification_enabled())
+	{
+		log_error("Reload failed: \"%s\" has a \"clientcert=verify-full\" "
+				  "rule but no usable TLS CA file was loaded at startup: "
+				  "keeping the current configuration", config->auth.hbaPath);
+		hbaOk = false;
 	}
 
 	if (!routesOk || !hbaOk)

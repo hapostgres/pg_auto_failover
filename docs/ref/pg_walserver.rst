@@ -134,6 +134,18 @@ scram-secret``. ``<pgdata>/server.crt``/``<pgdata>/server.key`` (or
 ``--ssl-cert-file``/``--ssl-key-file``) enable TLS; without them,
 ``hostssl`` HBA rules never match.
 
+``METHOD`` may be followed by one more field, ``clientcert=verify-full``:
+the TLS peer certificate's CN must equal the connecting role name exactly.
+With ``METHOD`` ``trust`` the certificate check is the whole
+authentication; with ``scram-sha-256`` both the certificate and the
+password are required::
+
+  hostssl  all  archiver_repl  10.0.0.0/8  scram-sha-256  clientcert=verify-full
+
+This requires ``--ssl-ca-file`` (see `Options`_) to validate the client
+certificate against; a rule using it with no usable CA file configured is
+refused at startup.
+
 Without ``--pgdata`` (and no ``PGDATA`` environment variable), the server
 refuses to start unless ``--insecure`` is given, which accepts any
 ``dbname`` with no authentication at all. This mode exists for trying
@@ -196,6 +208,14 @@ sub-command name at all.
 
   The server private key to use for TLS. Defaults to
   ``<pgdata>/server.key``.
+
+--ssl-ca-file
+
+  A PEM bundle of trusted CA certificates, used to validate a client
+  certificate presented during the TLS handshake. Defaults to
+  ``<pgdata>/ca.crt``. Required for a ``clientcert=verify-full`` HBA line
+  (see `Access control`_) to have anything to validate against; starting
+  with such a line configured and no usable CA file is refused.
 
 --auth-timeout
 

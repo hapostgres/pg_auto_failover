@@ -471,6 +471,114 @@ Without any `--pgdata` at all, `pg_walserver` refuses to start unless
 reachable network): every dbname is then accepted with no authentication
 whatsoever, and there is no HBA file, no routes file, and no TLS.
 
+## Client certificate authentication (`clientcert=verify-full`)
+
+An HBA rule's `METHOD` field may be followed by one more, optional field:
+`clientcert=verify-full`, mirroring real PostgreSQL's own `pg_hba.conf`
+"clientcert" option (`src/backend/libpq/hba.c` upstream, `ClientCertMode`/
+`clientCertFull`):
+
+```
+# TYPE     ROUTE       USER              ADDRESS       METHOD         [clientcert]
+hostssl    all         archiver_repl     10.0.0.0/8    scram-sha-256  clientcert=verify-full
+hostssl    default/0   pitr_restore      192.0.2.0/24  trust          clientcert=verify-full
+```
+
+The TLS peer certificate's Subject CN must equal `USER` exactly -- no user
+name mapping, this project has none, matching the rest of this file's own
+"keep it simple" HBA philosophy (see hba.h's own header comment on comma
+lists and `@file` inclusion). How it composes with `METHOD` follows real
+PostgreSQL's own documented behavior for the combination:
+
+- `trust` + `clientcert=verify-full`: the certificate check *is* the whole
+  authentication (there is no `cert` `METHOD` value in this project's own
+  small HBA dialect -- `trust` plus the qualifier is how the same case is
+  spelled here);
+- `scram-sha-256` + `clientcert=verify-full`: **both** must succeed --
+  genuine two-factor, the certificate checked first (cheap, no SCRAM
+  round-trip wasted on a connection that was never going to pass anyway),
+  the SCRAM exchange run only once it has. A connection presenting no
+  certificate, or one whose CN does not match, is rejected outright with a
+  clean `ErrorResponse` (SQLSTATE `08000`) -- it never silently falls
+  through to the SCRAM exchange as if the qualifier had not been there.
+
+### `verify-ca` is not implemented, on purpose
+
+Real PostgreSQL also has `clientcert=verify-ca`: the certificate must chain
+to a trusted CA, with no CN check. Checked against upstream's own
+`CheckCertAuth()` (`src/backend/libpq/auth.c`) and `hba.c`'s
+`ClientCertMode`/`clientCertName` handling: the *CA trust* check
+`verify-ca` performs is already done by the TLS layer itself, unconditionally,
+for any connection that presents a certificate at all, the moment
+`ssl_ca_file` (here, `--ssl-ca-file`, see below) is configured -- `verify-ca`
+on an HBA line restates a check that already ran during the handshake, for
+every connection, regardless of which line ends up matching. It is real
+PostgreSQL's own way of saying "yes, require what TLS already requires
+here", not a distinct check of its own. `pg_walserver` has the same
+property (`tls.c`'s `ws_tls_server_load_ca()`, below): once a CA is loaded,
+every handshake already validates any client certificate presented against
+it, rejecting a bad one outright, `clientcert=` or no. Implementing
+`verify-ca` as a separate HBA keyword here would therefore either do
+nothing a bare `hostssl` line without `clientcert` doesn't already imply
+once a CA is loaded, or (worse) be misread as "no client certificate is
+required at all without it" -- which is false: this project's `--ssl-ca-file`
+already governs that, independent of any HBA line. `verify-full` is the one
+case that adds an actual, line-specific check (the CN comparison), so it is
+the only one implemented.
+
+### TLS setup: `--ssl-ca-file`, and requesting a client certificate
+
+`clientcert=verify-full` needs the server to have actually asked for, and
+been able to validate, a client certificate in the first place -- otherwise
+there is nothing for it to check. This reuses `tls.c`'s existing OpenSSL
+`SSL_CTX` plumbing (the same one SNI routing, above, already reads
+handshake metadata from) rather than adding a second TLS code path:
+
+- `--ssl-ca-file` (default `<pgdata>/ca.crt`, the same
+  `--ssl-cert-file`/`--ssl-key-file` default-path convention) names a PEM
+  bundle of trusted CA certificates, mirroring real PostgreSQL's own
+  `ssl_ca_file` GUC. `ws_tls_server_load_ca()` (`tls.c`) loads it with
+  `SSL_CTX_load_verify_locations()` and switches `SSL_CTX_set_verify()`
+  from the default (no client certificate requested at all) to
+  `SSL_VERIFY_PEER` -- *requesting* a client certificate on every future
+  handshake, but not `SSL_VERIFY_FAIL_IF_NO_PEER_CERT`: a client presenting
+  none still completes the handshake, exactly like real PostgreSQL's own
+  `be_tls_open_server()` the moment `ssl_ca_file` is set. Whether a
+  certificate was actually *required* is decided per-connection, afterward,
+  by which HBA rule matches -- the TLS layer only ever offers to check one,
+  never mandates one on its own. A client that does present a certificate
+  not signed by a CA in the bundle fails the handshake outright (OpenSSL's
+  own chain validation, via the `verify_cb` callback returning whatever
+  OpenSSL's own `preverify_ok` already decided).
+- `--ssl-ca-file` is optional, like TLS itself: with no usable CA file, TLS
+  still works exactly as before (SNI, `scram-sha-256`, everything else),
+  only `clientcert=verify-full` cannot be satisfied. `cli_serve_run()`
+  (`cli_root.c`) checks this at startup (and `ws_reload_config()`,
+  `accept_loop.c`, again on every `SIGHUP`): a ruleset containing any
+  `clientcert=verify-full` line with no CA loaded is refused outright
+  (`hba_ruleset_requires_client_cert()`, `hba.c`) -- the same fail-closed
+  principle this project applies to a malformed HBA line, or to more than
+  one named route with no TLS at all, applied here to a rule that could
+  never actually be satisfied.
+- `ws_tls_get_peer_cert_cn()` (`tls.c`) reads the connecting client's own
+  certificate CN, once the handshake (which validated it against the CA
+  above, if one was presented) has already completed:
+  `SSL_get_peer_certificate()` + `X509_NAME_get_text_by_NID(subject,
+  NID_commonName, ...)`, the exact same plain-OpenSSL, post-handshake-read
+  pattern `ws_tls_get_sni_hostname()` already established for reading
+  TLS-handshake metadata in this codebase -- no new pattern introduced.
+  `auth.c`'s `ws_client_cert_matches()` calls it and compares the result
+  against the connecting role name, the same name SCRAM/`trust` already
+  use, with a plain, case-sensitive string equality.
+
+This is manual client certificate provisioning (an operator, or a script,
+generates the CA and each per-role client certificate/key with `openssl`
+directly), exactly like this project's own `create-cert` is a *server*
+certificate convenience with no CA/client-cert equivalent yet -- `pg_walserver`
+does not (yet) ship a `create-client-cert`-style helper; see
+`tests/tap/specs/pg_walserver_clientcert.pgaf`'s own `setup{}` block for the
+`openssl` invocations a real deployment would run by hand.
+
 ## The routes file (pg_walserver.ini)
 
 `pg_walserver.ini` (`routes.c`/`routes.h`) is this server's own routing

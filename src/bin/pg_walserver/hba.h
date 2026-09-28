@@ -33,6 +33,17 @@
  *   against the stored verifiers in the passwd file, see auth.h), "trust"
  *   or "reject".
  *
+ *   A sixth, optional field, "clientcert=verify-full", may follow METHOD --
+ *   mirroring real PostgreSQL's own pg_hba.conf "clientcert" option (see
+ *   src/backend/libpq/hba.c upstream): the TLS peer certificate's CN must
+ *   equal USER exactly (no user name mapping, this project has none). With
+ *   METHOD "trust" the certificate check IS the whole authentication; with
+ *   "scram-sha-256" both the certificate AND the SCRAM exchange must
+ *   succeed (two-factor). This project does not implement
+ *   "clientcert=verify-ca" -- see auth.c's own header comment for why.
+ *   Requires --ssl-ca-file (tls.h) to be loaded at startup; a ruleset with
+ *   any such line and no CA loaded fails closed at startup.
+ *
  * Licensed under the PostgreSQL License.
  *
  */
@@ -56,6 +67,7 @@ typedef struct HbaRule
 {
 	char *fields[WS_HBA_MAX_FIELDS];
 	WsAuthMethod method;
+	bool requireClientCert;    /* "clientcert=verify-full" 6th field */
 	int lineNumber;
 } HbaRule;
 
@@ -103,9 +115,18 @@ void hba_ruleset_free(WsHbaRuleSet *ruleSet);
  */
 void hba_match(const WsHbaRuleSet *ruleSet, const char *routeKey,
 			   const char *user, const char *peerIP, bool isTLS,
-			   WsAuthMethod *method);
+			   WsAuthMethod *method, bool *requireClientCert);
 
 /* create the default HBA file if there is none; never overwrite one */
 bool hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable);
+
+/*
+ * hba_ruleset_requires_client_cert reports whether any rule in ruleSet has
+ * "clientcert=verify-full" -- checked once at startup (and again on a
+ * SIGHUP reload) so a ruleset needing client certificate verification with
+ * no CA loaded (tls.h's ws_tls_client_verification_enabled()) can fail
+ * closed instead of silently never matching a real client certificate.
+ */
+bool hba_ruleset_requires_client_cert(const WsHbaRuleSet *ruleSet);
 
 #endif /* WS_HBA_H */

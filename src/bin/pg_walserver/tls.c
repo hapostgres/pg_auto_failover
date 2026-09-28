@@ -30,6 +30,7 @@
 
 static SSL_CTX *serverContext = NULL;
 static SSL *activeSsl = NULL;
+static bool clientVerificationEnabled = false;
 
 
 /*
@@ -264,6 +265,84 @@ ws_tls_server_enabled(void)
 
 
 /*
+ * verify_cb is OpenSSL's per-certificate verification callback: preverifyOk
+ * is OpenSSL's own chain-validation result (signature, trust anchor,
+ * validity dates, ...) for the certificate currently being checked. This
+ * project adds no extra check of its own here (unlike real PostgreSQL's
+ * verify_cb in be-secure-openssl.c, which also enforces a CRL and a
+ * certificate name length cap) -- it exists only so the intent (accept
+ * OpenSSL's own verdict, do not override it) is explicit rather than
+ * relying on OpenSSL's built-in default callback.
+ */
+static int
+verify_cb(int preverifyOk, X509_STORE_CTX *ctx)
+{
+	(void) ctx;
+
+	return preverifyOk;
+}
+
+
+/*
+ * ws_tls_server_load_ca loads a trusted CA bundle and switches the server
+ * to request (never require, at the TLS layer) a client certificate on
+ * every future handshake -- see tls.h's own comment for the full contract.
+ */
+bool
+ws_tls_server_load_ca(const char *caPath)
+{
+	if (serverContext == NULL)
+	{
+		log_error("ws_tls_server_load_ca() called before ws_tls_server_init()");
+		return false;
+	}
+
+	if (!file_exists(caPath))
+	{
+		log_error("The TLS CA file \"%s\" does not exist", caPath);
+		return false;
+	}
+
+	if (SSL_CTX_load_verify_locations(serverContext, caPath, NULL) != 1)
+	{
+		log_openssl_errors("Loading the TLS CA file");
+		return false;
+	}
+
+	/*
+	 * SSL_VERIFY_PEER alone requests a client certificate without requiring
+	 * one: a client that sends none still completes the handshake (whether
+	 * one was actually required is an HBA-time decision, see hba.h's own
+	 * "clientcert=verify-full"); a client that sends one that does not
+	 * chain to a CA in caPath fails the handshake, exactly like real
+	 * PostgreSQL's own be_tls_open_server() the moment ssl_ca_file is set.
+	 */
+	SSL_CTX_set_verify(serverContext, SSL_VERIFY_PEER, verify_cb);
+
+	/* also advertise caPath's own subjects in the CertificateRequest,
+	 * the same server_ca_names real PostgreSQL sends */
+	STACK_OF(X509_NAME) * caNames = SSL_load_client_CA_file(caPath);
+
+	if (caNames != NULL)
+	{
+		SSL_CTX_set_client_CA_list(serverContext, caNames);
+	}
+
+	clientVerificationEnabled = true;
+
+	return true;
+}
+
+
+/* ws_tls_client_verification_enabled reports whether a CA is loaded. */
+bool
+ws_tls_client_verification_enabled(void)
+{
+	return clientVerificationEnabled;
+}
+
+
+/*
  * ws_tls_server_accept creates a per-connection SSL object bound to sock and
  * runs the server-side TLS handshake (SSL_accept()) to completion. On
  * success it becomes the process's activeSsl (this project forks one child
@@ -320,6 +399,51 @@ ws_tls_get_sni_hostname(void)
 	}
 
 	return SSL_get_servername(activeSsl, TLSEXT_NAMETYPE_host_name);
+}
+
+
+/*
+ * ws_tls_get_peer_cert_cn reads the connecting client's own certificate
+ * Subject CN, when it sent one -- see tls.h's own comment.
+ */
+bool
+ws_tls_get_peer_cert_cn(char *cnBuf, size_t cnBufSize)
+{
+	cnBuf[0] = '\0';
+
+	if (activeSsl == NULL)
+	{
+		return false;
+	}
+
+	X509 *peerCert = SSL_get_peer_certificate(activeSsl);
+
+	if (peerCert == NULL)
+	{
+		/* the client sent no certificate at all: not an error here, the
+		 * caller (auth.c) decides whether one was required */
+		return false;
+	}
+
+	X509_NAME *subject = X509_get_subject_name(peerCert);
+	bool found = false;
+
+	if (subject != NULL)
+	{
+		int len = X509_NAME_get_text_by_NID(subject, NID_commonName,
+											cnBuf, (int) cnBufSize);
+
+		found = len > 0;
+	}
+
+	X509_free(peerCert);
+
+	if (!found)
+	{
+		cnBuf[0] = '\0';
+	}
+
+	return found;
 }
 
 

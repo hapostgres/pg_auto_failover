@@ -1,0 +1,122 @@
+# "clientcert=verify-full", the optional sixth HBA field (hba.h/hba.c):
+# the TLS peer certificate's CN must equal the connecting role name
+# exactly. A dedicated CA and three client certificates (a good one for
+# each of two roles, and one with a CN that matches neither) are generated
+# by hand with plain openssl, the same way a real deployment would -- this
+# project ships no client-certificate-generation helper of its own (see
+# README.md's own "Client certificate authentication" section).
+#
+#   test_000  starting with a "clientcert=verify-full" HBA line and no
+#             usable --ssl-ca-file/<pgdata>/ca.crt fails closed at startup
+#   test_001  METHOD trust + clientcert=verify-full: a matching client
+#             certificate alone is a complete, successful authentication
+#   test_002  ... a client certificate whose CN does not match the
+#             connecting role is a clean rejection, not a silent fall-
+#             through to anything else
+#   test_003  ... no client certificate at all is a clean rejection
+#   test_004  METHOD scram-sha-256 + clientcert=verify-full: a matching
+#             certificate AND the correct password both succeeding is
+#             required for the connection to succeed
+#   test_005  ... a matching certificate with the WRONG password still
+#             fails -- genuine two-factor, not "the certificate is enough"
+#   test_006  ... a mismatched certificate fails even with the correct
+#             password, and before any SCRAM exchange happens at all
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+    }
+
+    # No upstream Postgres is ever actually archived from in this spec:
+    # every test below only needs an authenticated connection and "SHOW
+    # wal_segment_size" (cmd_show.c), which touches nothing route-specific
+    # on disk -- so the route below has no "upstream" property at all
+    # (optional, see routes.h) and this container needs no relationship to
+    # node1 beyond existing in the same compose network.
+    pg_walserver walserver
+        command "tail -f /dev/null"
+}
+
+setup {
+    wait until node1 state is single  timeout 120s
+
+    # The CA, and three client certificates it signs: "good-trust" (CN
+    # "cert_trust_user"), "good-repl" (CN "archiver_repl"), and "bad" (CN
+    # "nobody", matching neither role) -- plain openssl, mirroring how an
+    # operator would provision these by hand (README.md's own "Client
+    # certificate authentication" section documents this project ships no
+    # helper of its own for it).
+    exec walserver bash -c 'mkdir -p /tmp/cc && cd /tmp/cc && openssl genrsa -out ca.key 2048 && openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 -subj "/CN=pgaf-test-ca" -out ca.crt'
+    exec walserver bash -c 'cd /tmp/cc && for pair in "good-trust cert_trust_user" "good-repl archiver_repl" "bad nobody"; do set -- $pair; name=$1; cn=$2; openssl genrsa -out $name.key 2048 && chmod 0600 $name.key && openssl req -new -key $name.key -subj "/CN=$cn" -out $name.csr && openssl x509 -req -in $name.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 365 -sha256 -out $name.crt || exit 1; done'
+
+    # The server's own certificate (this project's existing self-signed
+    # convenience, unrelated to the client-certificate CA above); its
+    # default path, <pgdata>/ca.crt, is exactly where the CA above was just
+    # written, so no --ssl-ca-file flag is needed below.
+    exec walserver bash -c 'pg_walserver create-cert --pgdata /tmp/cc --hostname walserver.internal'
+
+    # one route, path only -- no upstream, see the cluster{} comment above
+    exec walserver bash -c 'mkdir -p /tmp/cc/mycluster && printf "[mycluster]\npath = /tmp/cc/mycluster\n" > /tmp/cc/pg_walserver.ini'
+
+    # archiver_repl also needs a real SCRAM verifier for the two-factor
+    # (scram-sha-256 + clientcert=verify-full) tests below
+    exec walserver bash -c 'PGPASSWORD=s3kr3t pg_walserver scram-secret --user archiver_repl > /tmp/cc/pg_walserver_passwd'
+
+    exec walserver bash -c 'printf "hostssl all cert_trust_user 0.0.0.0/0 trust clientcert=verify-full\nhostssl all archiver_repl 0.0.0.0/0 scram-sha-256 clientcert=verify-full\n" > /tmp/cc/pg_walserver_hba.conf'
+}
+
+teardown {
+    compose down
+}
+
+step test_000_no_ca_file_refuses_to_start {
+    # a separate --pgdata with a "clientcert=verify-full" line and no CA
+    # file at all (no --ssl-ca-file, no <pgdata>/ca.crt): must fail closed,
+    # the same "never partially applied" principle a malformed HBA line or
+    # more than one named route with no TLS already gets (README.md's own
+    # "HBA" and "Routing beyond dbname" sections).
+    exec walserver bash -c 'mkdir -p /tmp/ccnoca && cp /tmp/cc/server.crt /tmp/cc/server.key /tmp/ccnoca/'
+    exec walserver bash -c 'printf "hostssl all cert_trust_user 0.0.0.0/0 trust clientcert=verify-full\n" > /tmp/ccnoca/pg_walserver_hba.conf'
+    exec walserver bash -c 'printf "[mycluster]\npath = /tmp/ccnoca/mycluster\n" > /tmp/ccnoca/pg_walserver.ini && mkdir -p /tmp/ccnoca/mycluster'
+    exec walserver bash -c 'if pg_walserver --pgdata /tmp/ccnoca --port 6599 2>/tmp/ccnoca-refuse.log; then cat /tmp/ccnoca-refuse.log; false; fi'
+    exec walserver bash -c 'grep -qi "clientcert=verify-full.*no usable TLS CA" /tmp/ccnoca-refuse.log'
+
+    # the real server for every other step below, with a usable CA
+    exec walserver bash -c 'nohup pg_walserver --pgdata /tmp/cc --port 6546 > /tmp/cc-walserver.log 2>&1 & echo started'
+    exec walserver bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6546) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/cc-walserver.log; exit 1'
+}
+
+step test_001_trust_plus_matching_cert_succeeds {
+    exec walserver bash -c 'out=$(psql "host=127.0.0.1 port=6546 dbname=mycluster user=cert_trust_user replication=true sslmode=require sslcert=/tmp/cc/good-trust.crt sslkey=/tmp/cc/good-trust.key" -Atc "SHOW wal_segment_size"); echo "$out" | grep -qx "16MB" || { echo "got: $out"; false; }'
+}
+
+step test_002_trust_plus_mismatched_cert_rejected {
+    exec walserver bash -c 'out=$(psql "host=127.0.0.1 port=6546 dbname=mycluster user=cert_trust_user replication=true sslmode=require sslcert=/tmp/cc/bad.crt sslkey=/tmp/cc/bad.key" -Atc "SHOW wal_segment_size" 2>&1); echo "$out" | grep -qi "does not match" || { echo "got: $out"; false; }'
+}
+
+step test_003_trust_plus_no_cert_rejected {
+    exec walserver bash -c 'out=$(psql "host=127.0.0.1 port=6546 dbname=mycluster user=cert_trust_user replication=true sslmode=require" -Atc "SHOW wal_segment_size" 2>&1); echo "$out" | grep -qi "certificate is required" || { echo "got: $out"; false; }'
+}
+
+step test_004_scram_plus_matching_cert_and_password_succeeds {
+    exec walserver bash -c 'out=$(PGPASSWORD=s3kr3t psql "host=127.0.0.1 port=6546 dbname=mycluster user=archiver_repl replication=true sslmode=require sslcert=/tmp/cc/good-repl.crt sslkey=/tmp/cc/good-repl.key" -Atc "SHOW wal_segment_size"); echo "$out" | grep -qx "16MB" || { echo "got: $out"; false; }'
+}
+
+step test_005_scram_plus_matching_cert_and_wrong_password_fails {
+    exec walserver bash -c 'out=$(PGPASSWORD=wrong-password psql "host=127.0.0.1 port=6546 dbname=mycluster user=archiver_repl replication=true sslmode=require sslcert=/tmp/cc/good-repl.crt sslkey=/tmp/cc/good-repl.key" -Atc "SHOW wal_segment_size" 2>&1); echo "$out" | grep -qi "password authentication failed" || { echo "got: $out"; false; }'
+}
+
+step test_006_scram_plus_mismatched_cert_fails_before_password {
+    exec walserver bash -c 'out=$(PGPASSWORD=s3kr3t psql "host=127.0.0.1 port=6546 dbname=mycluster user=archiver_repl replication=true sslmode=require sslcert=/tmp/cc/bad.crt sslkey=/tmp/cc/bad.key" -Atc "SHOW wal_segment_size" 2>&1); echo "$out" | grep -qi "does not match" || { echo "got: $out"; false; }'
+}
+
+sequence
+    test_000_no_ca_file_refuses_to_start
+    test_001_trust_plus_matching_cert_succeeds
+    test_002_trust_plus_mismatched_cert_rejected
+    test_003_trust_plus_no_cert_rejected
+    test_004_scram_plus_matching_cert_and_password_succeeds
+    test_005_scram_plus_matching_cert_and_wrong_password_fails
+    test_006_scram_plus_mismatched_cert_fails_before_password
