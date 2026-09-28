@@ -68,8 +68,12 @@ step test_001_not_running_is_clean_not_an_error {
     exec walserver bash -c 'grep -q "not running" /tmp/status0.out || { cat /tmp/status0.out; false; }'
 
     exec walserver bash -c 'pg_walserver ls --pgdata /tmp/lps > /tmp/ls0.out 2>&1; test $? -eq 0'
-    exec walserver bash -c 'grep -E "^pg_walserver\.ini +yes" /tmp/ls0.out || { cat /tmp/ls0.out; false; }'
+    # config/credential/certificate files are rarely-changing clutter -- omitted
+    # by default, only the runtime-managed pidfile/ps-status tier shows
+    exec walserver bash -c 'grep -qE "^pg_walserver\.ini " /tmp/ls0.out && { cat /tmp/ls0.out; false; }; true'
     exec walserver bash -c 'grep -E "^pg_walserver\.pid +no" /tmp/ls0.out || { cat /tmp/ls0.out; false; }'
+    exec walserver bash -c 'pg_walserver ls --pgdata /tmp/lps --config > /tmp/ls0c.out 2>&1; test $? -eq 0'
+    exec walserver bash -c 'grep -E "^pg_walserver\.ini +yes" /tmp/ls0c.out || { cat /tmp/ls0c.out; false; }'
 
     exec walserver bash -c 'pg_walserver list clusters --pgdata /tmp/lps > /tmp/lc0.out 2>&1; test $? -eq 0'
     exec walserver bash -c 'grep -E "^pullc +no +pull +n/a" /tmp/lc0.out || { cat /tmp/lc0.out; false; }'
