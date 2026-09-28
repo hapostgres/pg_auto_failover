@@ -352,16 +352,17 @@ Every command's own real output, and the reasoning behind each step,
 are in :ref:`pg_walserver_serve`'s own "A complete standalone example"
 walkthrough; this is only the shape of it::
 
-  # on the archive host: register the node, start serving
+  # on the archive host: register the node (creating a certificate right
+  # away, --ssl-self-signed), then serve on the default port, 6543
   archive$ export PGDATA=/var/lib/archiver
   archive$ PGPASSWORD='s3kr3t' pg_walserver setup --cluster mycluster \
-      --upstream "host=primary user=archiver_repl sslmode=require"
-  archive$ pg_walserver create-cert --hostname archive
-  archive$ pg_walserver --port 6543 &
+      --upstream "postgres://archiver_repl@primary:5432/?sslmode=require" \
+      --ssl-self-signed --hostname archive
+  archive$ pg_walserver serve &
 
   # elsewhere, once a base backup exists: restore to a point in time
   restore$ PGPASSWORD='s3kr3t' pg_basebackup \
-      -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
+      -d postgres://archiver_repl@archive:6543/mycluster?sslmode=require \
       -D /var/lib/postgres/pitr -X none --no-manifest
   restore$ cat >> /var/lib/postgres/pitr/postgresql.auto.conf <<EOF
   restore_command = 'PGPASSWORD=s3kr3t pg_walserver restore-wal %f %p --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require'

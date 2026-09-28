@@ -95,25 +95,36 @@ This needs ``wal_level`` already set to ``replica`` or higher (the
 default since PostgreSQL 10).
 
 **2. On the archive host**, set ``PGDATA`` once for every command below,
-then create the route and fetch the system identifier -- ``--path``
-only ever needs to be given to override its own default,
-``<pgdata>/<cluster>``::
+then create the route and fetch the system identifier --
+``--upstream`` takes a plain libpq connection string, keyword/value or
+``postgres://`` URI, either works; ``--path`` only ever needs to be
+given to override its own default, ``<pgdata>/<cluster>``;
+``--ssl-self-signed`` creates a certificate for this route's own
+``--hostname`` right away, skipping a separate ``create-cert`` call
+entirely::
 
   archive$ export PGDATA=/var/lib/archiver
   archive$ PGPASSWORD=s3kr3t pg_walserver setup --cluster mycluster \
-      --upstream "host=primary port=5534 user=archiver_repl sslmode=require"
-  20:42:19 2445614 ERROR Failed to open "/var/lib/archiver/pg_walserver.ini": No such file or directory
-  20:42:19 2445614 ERROR Failed to read routes file "/var/lib/archiver/pg_walserver.ini"
-  20:42:19 2445614 INFO  Added route "mycluster" (path "/var/lib/archiver/mycluster") to "/var/lib/archiver/pg_walserver.ini"
-  20:42:19 2445614 INFO  Connecting to primary:5534 as "archiver_repl" to fetch the system identifier
-  20:42:19 2445614 INFO  Wrote system identifier 7690676421909321516 to "/var/lib/archiver/mycluster/pg_walserver_systemid"
-  20:42:19 2445614 INFO  Wrote upstream Postgres version 170011 to "/var/lib/archiver/mycluster/pg_walserver_pgversion"
-  20:42:19 2445614 INFO  setup complete: route "mycluster" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
-  20:42:19 2445614 INFO  No running "pg_walserver serve" found at "/var/lib/archiver/pg_walserver.pid": the route just written will take effect the next time "serve" starts
+      --upstream "postgres://archiver_repl@primary:5535/?sslmode=require" \
+      --ssl-self-signed --hostname archive
+  21:38:22 2660205 ERROR Failed to open "/var/lib/archiver/pg_walserver.ini": No such file or directory
+  21:38:22 2660205 ERROR Failed to read routes file "/var/lib/archiver/pg_walserver.ini"
+  21:38:22 2660205 INFO  Added route "mycluster" (path "/var/lib/archiver/mycluster") to "/var/lib/archiver/pg_walserver.ini"
+  21:38:22 2660205 INFO   /usr/bin/openssl req -new -x509 -days 365 -nodes -text -out /var/lib/archiver/server.crt -keyout /var/lib/archiver/server.key -subj "/CN=archive"
+  21:38:22 2660205 INFO  Created a self-signed certificate for "/var/lib/archiver" ("/var/lib/archiver/server.crt"/"/var/lib/archiver/server.key", CN=archive) -- replace it with a real one before running on a reachable network
+  21:38:22 2660205 INFO  Connecting to primary:5535 as "archiver_repl" to fetch the system identifier
+  21:38:22 2660205 INFO  Wrote system identifier 7690701918151237972 to "/var/lib/archiver/mycluster/pg_walserver_systemid"
+  21:38:22 2660205 INFO  Wrote upstream Postgres version 170011 to "/var/lib/archiver/mycluster/pg_walserver_pgversion"
+  21:38:22 2660205 INFO  setup complete: route "mycluster" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
+  21:38:22 2660205 INFO  No running "pg_walserver serve" found at "/var/lib/archiver/pg_walserver.pid": the route just written will take effect the next time "serve" starts
 
 The two ``ERROR`` lines above are harmless and expected on a first run:
 ``pg_walserver.ini`` does not exist yet the moment ``setup`` tries to
-read it, before writing its very first route into it.
+read it, before writing its very first route into it. Without
+``--ssl-self-signed``, ``setup`` still creates a certificate
+automatically the moment a *second* route makes TLS mandatory (see
+:ref:`pg_walserver`'s "Routing" section) -- the explicit flag is only
+ever needed to get one sooner, for the very first route.
 
 Receiving the route's own WAL continuously once ``serve`` starts
 (below), with no separate ``pg_receivewal`` process, is the default
@@ -127,40 +138,39 @@ what later picks the right ``pg_basebackup`` client for this route --
 see :ref:`pg_walserver_basebackup`.
 
 **3. Configure access and start the server**. ``setup`` does not touch
-HBA or the password file::
+HBA or the password file, and ``serve`` needs neither ``--pgdata``
+(``PGDATA`` is already exported above) nor ``--port`` (``6543`` is
+already the default)::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver scram-secret --user archiver_repl \
       >> /var/lib/archiver/pg_walserver_passwd
   archive$ cat > /var/lib/archiver/pg_walserver_hba.conf <<EOF
   hostssl  mycluster  archiver_repl  10.0.0.0/8  scram-sha-256
   EOF
-  archive$ pg_walserver create-cert --hostname archive
-  20:42:28 2446120 INFO   /usr/bin/openssl req -new -x509 -days 365 -nodes -text -out /var/lib/archiver/server.crt -keyout /var/lib/archiver/server.key -subj "/CN=archive"
-  20:42:28 2446120 INFO  Created a self-signed certificate for "/var/lib/archiver" ("/var/lib/archiver/server.crt"/"/var/lib/archiver/server.key", CN=archive) -- replace it with a real one before running on a reachable network
-  archive$ pg_walserver --port 6543
-  20:42:33 2446330 INFO  TLS is enabled ("/var/lib/archiver/server.crt")
-  20:42:33 2446330 INFO  Started the embedded receivewal worker for route "mycluster" (pid 2446333), receiving into "/var/lib/archiver/mycluster"
-  20:42:33 2446330 INFO  Route "mycluster" has no base backup yet: starting an automatic bootstrap base backup in the background (pid 2446334)
-  20:42:33 2446334 INFO  Route "mycluster": waiting for its embedded receivewal worker to start streaming before taking the bootstrap base backup
-  20:42:33 2446330 INFO  pg_walserver listening on port 6543, routes /var/lib/archiver/pg_walserver.ini
-  20:42:33 2446334 INFO  Route "mycluster": taking its automatic bootstrap base backup (attempt 1/3)
-  20:42:33 2446334 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
-  20:42:33 2446334 INFO  Taking a base backup of primary:5534 into "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T204233Z"
-  20:42:33 2446334 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver-basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/mycluster/basebackups/basebackup-20260928T204233Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T204233Z
-  20:42:33 2446334 INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
-  20:42:33 2446334 INFO  pg_basebackup: checkpoint completed
-  20:42:33 2446334 INFO  pg_basebackup: write-ahead log start point: 0/15000028 on timeline 1
-  20:42:33 2446334 INFO  pg_basebackup: starting background WAL receiver
-  20:42:33 2446334 INFO  pg_basebackup: created temporary replication slot "pg_basebackup_2446341"
-  20:42:34 2446334 INFO  37913/37913 kB (100%), 0/1 tablespace (...260928T204233Z/global/pg_control)
-  20:42:34 2446334 INFO  37913/37913 kB (100%), 1/1 tablespace
-  20:42:34 2446334 INFO  write-ahead log end point: 0/15000120
-  20:42:34 2446334 INFO  pg_basebackup: waiting for background process to finish streaming ...
-  20:42:34 2446334 INFO  pg_basebackup: syncing data to disk ...
-  20:42:34 2446334 INFO  pg_basebackup: renaming backup_manifest.tmp to backup_manifest
-  20:42:34 2446334 INFO  pg_basebackup: base backup completed
-  20:42:34 2446334 INFO  Base backup "basebackup-20260928T204233Z" is now the latest for "/var/lib/archiver/mycluster"
-  20:42:34 2446334 INFO  Route "mycluster": automatic bootstrap base backup complete
+  archive$ pg_walserver serve
+  21:38:36 2661054 INFO  TLS is enabled ("/var/lib/archiver/server.crt")
+  21:38:36 2661054 INFO  Started the embedded receivewal worker for route "mycluster" (pid 2661057), receiving into "/var/lib/archiver/mycluster"
+  21:38:36 2661054 INFO  Route "mycluster" has no base backup yet: starting an automatic bootstrap base backup in the background (pid 2661058)
+  21:38:36 2661058 INFO  Route "mycluster": waiting for its embedded receivewal worker to start streaming before taking the bootstrap base backup
+  21:38:36 2661054 INFO  pg_walserver listening on port 6543, routes /var/lib/archiver/pg_walserver.ini
+  21:38:36 2661058 INFO  Route "mycluster": taking its automatic bootstrap base backup (attempt 1/3)
+  21:38:36 2661058 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
+  21:38:36 2661058 INFO  Taking a base backup of primary:5535 into "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T213836Z"
+  21:38:36 2661058 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver-basebackup host=primary port=5535 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/mycluster/basebackups/basebackup-20260928T213836Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T213836Z
+  21:38:36 2661058 INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
+  21:38:36 2661058 INFO  pg_basebackup: checkpoint completed
+  21:38:36 2661058 INFO  pg_basebackup: write-ahead log start point: 0/4000028 on timeline 1
+  21:38:36 2661058 INFO  pg_basebackup: starting background WAL receiver
+  21:38:36 2661058 INFO  pg_basebackup: created temporary replication slot "pg_basebackup_2661063"
+  21:38:36 2661058 INFO  23720/23720 kB (100%), 0/1 tablespace (...260928T213836Z/global/pg_control)
+  21:38:36 2661058 INFO  23720/23720 kB (100%), 1/1 tablespace
+  21:38:36 2661058 INFO  pg_basebackup: write-ahead log end point: 0/4000120
+  21:38:36 2661058 INFO  pg_basebackup: waiting for background process to finish streaming ...
+  21:38:36 2661058 INFO  pg_basebackup: syncing data to disk ...
+  21:38:37 2661058 INFO  pg_basebackup: renaming backup_manifest.tmp to backup_manifest
+  21:38:37 2661058 INFO  pg_basebackup: base backup completed
+  21:38:37 2661058 INFO  Base backup "basebackup-20260928T213836Z" is now the latest for "/var/lib/archiver/mycluster"
+  21:38:37 2661058 INFO  Route "mycluster": automatic bootstrap base backup complete
 
 Taking the route's first base backup automatically at this point, in
 the background, once its embedded receivewal worker (if any) shows
@@ -319,28 +329,27 @@ never sends SNI (RFC 6066), and cannot be routed by hostname.
 One route needs none of this: ``dbname`` alone is unambiguous, and
 ``serve`` runs with no TLS configured at all. The moment a second named
 route exists, TLS is required; ``pg_walserver`` refuses to start
-otherwise. ``setup`` creates a self-signed certificate for ``--pgdata``
-automatically the first time a second named route needs one::
+otherwise. ``--ssl-self-signed`` on the very first ``setup`` call
+already creates that certificate ahead of time, so nothing further is
+needed once the second route is added::
 
-  archive$ PGPASSWORD=s3kr3t pg_walserver setup \
-      --pgdata /var/lib/archiver --cluster mycluster \
-      --path /var/lib/archiver/mycluster \
-      --upstream "host=primary port=5432 user=archiver_repl sslmode=require" \
-      --hostname mycluster.archive.example.com
+  archive$ PGPASSWORD=s3kr3t pg_walserver setup --cluster mycluster \
+      --upstream "postgres://archiver_repl@primary/?sslmode=require" \
+      --hostname mycluster.archive.example.com --ssl-self-signed
 
-  archive$ PGPASSWORD=s3kr3t pg_walserver setup \
-      --pgdata /var/lib/archiver --cluster another \
-      --path /var/lib/archiver/another \
-      --upstream "host=primary2 port=5432 user=archiver_repl sslmode=require" \
+  archive$ PGPASSWORD=s3kr3t pg_walserver setup --cluster another \
+      --upstream "postgres://archiver_repl@primary2/?sslmode=require" \
       --hostname another.archive.example.com
 
-  archive$ pg_walserver --pgdata /var/lib/archiver --port 6543 &
+  archive$ pg_walserver serve &
 
-The certificate can also be created, or with ``--force`` replaced, by
-hand at any time, with ``create-cert``::
+Without ``--ssl-self-signed`` on that first call, this second ``setup``
+would have created the certificate itself, automatically, the moment
+the file it just wrote to reached two routes -- either way works, this
+only gets it sooner. The certificate can also be created, or with
+``--force`` replaced, by hand at any time, with ``create-cert``::
 
-  archive$ pg_walserver create-cert --pgdata /var/lib/archiver \
-      --hostname mycluster.archive.example.com
+  archive$ pg_walserver create-cert --hostname mycluster.archive.example.com
 
 Each standby then names its own route's hostname in ``primary_conninfo``'s
 ``host=``::

@@ -53,6 +53,14 @@ typedef struct WsSetupOptions
 	                                     * pg_walserver.ini directly;
 	                                     * routes.c/routes.h are unchanged). */
 	bool force;
+	bool sslSelfSigned;                 /* --ssl-self-signed: create a
+	                                    * self-signed certificate for
+	                                    * --pgdata right away, the same
+	                                    * "skip create-cert entirely"
+	                                    * convenience pg_autoctl's own
+	                                    * --ssl-self-signed already gives
+	                                    * -- see cli_setup.c's own
+	                                    * ensure_tls_certificate(). */
 } WsSetupOptions;
 
 /*

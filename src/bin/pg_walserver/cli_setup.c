@@ -37,19 +37,20 @@
  *        (pg_auto_failover's own bootstrap scopes it to replication-only
  *        connections), so the "extra" check failed even when the role was
  *        perfectly fine, on a false premise;
- *     4. once every route in pg_walserver.ini is accounted for, if there is
- *        now more than one: TLS becomes mandatory (a single-route server
- *        works with or without it, dbname alone is unambiguous; with
- *        several routes, dbname-based routing stops being reliable at all
- *        for a real physical standby -- see auth.c's own comment and
- *        README.md's "Routing beyond dbname: TLS SNI" section -- so TLS
- *        SNI becomes the only way to address more than one route
- *        by name). setup creates a self-signed certificate for <pgdata> if
- *        none exists yet (pg_create_self_signed_cert(), the exact function
- *        `pg_autoctl create archiver --ssl-self-signed` already uses), and
- *        warns if --hostname was never given for a route now sharing the
- *        file with others -- that route can then only ever be reached by
- *        dbname (fine for pg_basebackup/pg_receivewal/archive_command,
+ *     4. once every route in pg_walserver.ini is accounted for, create a
+ *        self-signed certificate for <pgdata> if none exists yet
+ *        (pg_create_self_signed_cert(), the exact function `pg_autoctl
+ *        create ... --ssl-self-signed` already uses), in either of two
+ *        cases: there is now more than one route (TLS becomes mandatory
+ *        the moment dbname-based routing stops being reliable for a real
+ *        physical standby -- see auth.c's own comment and README.md's
+ *        "Routing beyond dbname: TLS SNI" section), or --ssl-self-signed
+ *        was given explicitly, whether or not this is the only route --
+ *        the same one-flag convenience as pg_autoctl's own, skipping a
+ *        separate `pg_walserver create-cert` call entirely. Warns (never
+ *        refuses) if --hostname was never given for a route now sharing
+ *        the file with others -- that route can then only ever be reached
+ *        by dbname (fine for pg_basebackup/pg_receivewal/archive_command,
  *        never for a real physical standby) or the "*" wildcard;
  *     5. reload an already-running "pg_walserver serve" for this same
  *        --pgdata, if one is running (its pid read from <pgdata>/pg_
@@ -215,25 +216,33 @@ write_route_section(const char *pgdata, const char *routeKey,
 
 
 /*
- * ensure_tls_for_multiple_routes re-reads pg_walserver.ini after
- * write_route_section() and, when it now holds more than one route,
- * makes sure a certificate exists for <pgdata> (creating a self-signed one
- * via ws_create_cert_run() -- cli_create_cert.c, the same helper
- * `pg_walserver create-cert` itself calls, wrapping
- * pg_create_self_signed_cert() -- when neither server.crt/server.key nor
- * an already-loaded certificate is there), and warns when routeKey itself
- * has no "hostname" property: without one, it can only ever be reached by
- * dbname (fine for pg_basebackup/pg_receivewal/archive_command, never for
- * a real physical standby, see auth.c's own comment) or the "*" wildcard.
- * Never a hard failure -- a single-route deployment (the common case)
- * never reaches any of this at all, and even a multi-route one that only
- * ever serves pg_basebackup/pg_receivewal/archive_command by dbname
- * genuinely doesn't need TLS/SNI, so this only warns, it does not refuse
- * to proceed.
+ * ensure_tls_certificate re-reads pg_walserver.ini after write_route_
+ * section() and creates a self-signed certificate for <pgdata> (via ws_
+ * create_cert_run() -- cli_create_cert.c, the same helper `pg_walserver
+ * create-cert` itself calls, wrapping pg_create_self_signed_cert()) in
+ * either of two cases: the file now holds more than one route (TLS is no
+ * longer optional the moment dbname-based routing stops being unambiguous
+ * -- see auth.c's own comment and README.md's "Routing beyond dbname:
+ * TLS SNI" section), or sslSelfSigned (--ssl-self-signed) was given
+ * explicitly, whether or not this is the file's only route -- the same
+ * "skip a separate create-cert call" convenience `pg_autoctl create ...
+ * --ssl-self-signed` already gives its own callers. Either way, an
+ * already-existing certificate is left untouched (setup never silently
+ * replaces one, the same overwrite-safety principle as everywhere else
+ * in this file); the certificate's own CN is routeKey's own --hostname
+ * when one was given, else this machine's own hostname, the same
+ * fallback ws_create_cert_run()'s own default already uses. Also warns
+ * when routeKey itself has no "hostname" property in the multi-route
+ * case: without one, it can only ever be reached by dbname (fine for
+ * pg_basebackup/pg_receivewal/archive_command, never for a real physical
+ * standby) or the "*" wildcard. Never a hard failure in either case --
+ * TLS/a certificate is this route's own choice, not a requirement setup
+ * enforces, so any failure here only warns, it does not refuse to
+ * proceed.
  */
 static void
-ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
-							   bool haveHostname)
+ensure_tls_certificate(const char *pgdata, const char *routeKey,
+					   const char *hostname, bool sslSelfSigned)
 {
 	char routesPath[MAXPGPATH] = { 0 };
 	WsRoute *routes = NULL;
@@ -241,7 +250,7 @@ ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
 
 	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
 
-	if (!routes_load(routesPath, &routes, &routeCount) || routeCount <= 1)
+	if (!routes_load(routesPath, &routes, &routeCount))
 	{
 		routes_free(routes);
 		return;
@@ -249,12 +258,23 @@ ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
 
 	routes_free(routes);
 
-	log_info("\"%s\" now has %d routes: TLS is required for more than one "
-			 "route to be reachable by name (dbname-based routing alone "
-			 "cannot tell a real physical standby's connection apart from "
-			 "any other route once there is more than one, see this "
-			 "project's own README.md)",
-			 routesPath, routeCount);
+	bool haveHostname = hostname != NULL && hostname[0] != '\0';
+	bool multipleRoutes = routeCount > 1;
+
+	if (multipleRoutes)
+	{
+		log_info("\"%s\" now has %d routes: TLS is required for more than "
+				 "one route to be reachable by name (dbname-based routing "
+				 "alone cannot tell a real physical standby's connection "
+				 "apart from any other route once there is more than one, "
+				 "see this project's own README.md)",
+				 routesPath, routeCount);
+	}
+
+	if (!multipleRoutes && !sslSelfSigned)
+	{
+		return;
+	}
 
 	char certPath[MAXPGPATH] = { 0 };
 	char keyPath[MAXPGPATH] = { 0 };
@@ -266,9 +286,13 @@ ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
 	{
 		char localHostname[_POSIX_HOST_NAME_MAX] = "pg_walserver";
 
-		(void) gethostname(localHostname, sizeof(localHostname));
+		if (!haveHostname)
+		{
+			(void) gethostname(localHostname, sizeof(localHostname));
+		}
 
-		if (!ws_create_cert_run(pgdata, localHostname, false))
+		if (!ws_create_cert_run(pgdata, haveHostname ? hostname : localHostname,
+								false))
 		{
 			log_warn("Failed to create a self-signed certificate for "
 					 "\"%s\" -- pass --ssl-cert-file/--ssl-key-file to "
@@ -278,7 +302,7 @@ ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
 		}
 	}
 
-	if (!haveHostname)
+	if (multipleRoutes && !haveHostname)
 	{
 		log_warn("Route \"%s\" has no --hostname: it can only be reached "
 				 "by dbname (pg_basebackup/pg_receivewal/archive_command) "
@@ -372,8 +396,8 @@ cli_setup_run(const WsSetupOptions *options)
 		return false;
 	}
 
-	ensure_tls_for_multiple_routes(options->pgdata, options->route,
-								   options->hostname[0] != '\0');
+	ensure_tls_certificate(options->pgdata, options->route,
+						   options->hostname, options->sslSelfSigned);
 
 	uint64_t systemIdentifier = 0;
 

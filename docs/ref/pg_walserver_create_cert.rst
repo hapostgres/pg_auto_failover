@@ -15,8 +15,11 @@ Synopsis
 Creates a self-signed TLS certificate for ``--pgdata``, written as
 ``<pgdata>/server.crt`` and ``<pgdata>/server.key``. ``pg_walserver
 setup`` already creates one automatically the first time a second
-named route needs one; run this by hand to create the first
-certificate ahead of time, or to replace one with ``--force``.
+named route needs one, or right away for the very first route with
+its own ``--ssl-self-signed`` flag -- the common case, and the one
+that needs no separate call to this command at all. Run this by hand
+instead only to create a certificate ahead of either of those, or to
+replace one with ``--force``.
 
 Options
 -------
