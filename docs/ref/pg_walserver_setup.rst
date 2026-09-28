@@ -12,7 +12,7 @@ Synopsis
 
   pg_walserver setup --pgdata <path> --cluster <name> --path <dir>
       --upstream <conninfo> | --host <host> [--port <port>] [--user <name>]
-      [--hostname <name>] [--capture pull|none] [--force]
+      [--hostname <name>] [--receivewal pull|none] [--force]
 
 Writes or validates one ``pg_walserver.ini`` route and fetches its
 upstream system identifier. It never takes a base backup itself:
@@ -55,16 +55,16 @@ Options
   property. Creates a self-signed certificate for ``--pgdata``
   automatically the first time a second named route needs one.
 
---capture
+--receivewal
 
-  ``pull`` (the default) or ``none``. ``pull`` writes ``capture = pull``
+  ``pull`` (the default) or ``none``. ``pull`` writes ``receivewal = pull``
   into the route, starting an embedded, supervised ``pg_receivewal``
   child against ``upstream`` once ``serve`` runs. ``none`` is equivalent
-  to ``--no-capture``.
+  to ``--no-receivewal``.
 
---no-capture
+--no-receivewal
 
-  Equivalent to ``--capture none``.
+  Equivalent to ``--receivewal none``.
 
 --force
 

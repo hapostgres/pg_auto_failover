@@ -55,8 +55,42 @@ automatically: it establishes TLS/SNI routing, but a real deployment
 should replace it with one issued by a trusted CA before running on a
 reachable network.
 
+How the certificate is created
+-------------------------------
+
+The same facility ``pg_autoctl --ssl-self-signed`` itself uses creates
+this certificate: a plain ``openssl req -new -x509`` call, one self-signed
+certificate/key pair valid 365 days, with the certificate's subject CN
+set to ``--hostname``, exactly as PostgreSQL's own `Creating
+Certificates`__ page describes. Self-signed certificates protect
+against eavesdropping; they do not protect against a Man-In-The-Middle
+or impersonation attack -- see PostgreSQL's own `SSL Support`__ page
+for what that distinction means in practice.
+
+__ https://www.postgresql.org/docs/current/ssl-tcp.html#SSL-CERTIFICATE-CREATION
+__ https://www.postgresql.org/docs/current/libpq-ssl.html
+
+Using your own certificate
+----------------------------
+
+For a certificate issued by a trusted CA, ``create-cert`` is not
+involved at all: just place ``server.crt`` and ``server.key`` directly
+at ``<pgdata>/server.crt``/``<pgdata>/server.key`` (or point
+``--ssl-cert-file``/``--ssl-key-file`` at wherever they already live --
+see :ref:`pg_walserver_serve`), then start or reload ``serve``.
+``pg_walserver`` reads whatever files are there; it has no notion of
+"which kind" of certificate is installed.
+
+Verifying a *client* certificate (``clientcert=verify-full`` HBA rule,
+see :ref:`pg_walserver`'s "Access control") is a separate, optional
+step on top of this: it needs the CA's own root certificate at
+``--ssl-ca-file`` to validate client certificates against, which is
+unrelated to whichever certificate ``serve`` itself presents to
+connecting clients.
+
 See Also
 --------
 
 * :ref:`pg_walserver`
 * :ref:`pg_walserver_setup`
+* :ref:`pg_walserver_serve`

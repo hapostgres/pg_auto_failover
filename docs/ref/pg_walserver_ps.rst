@@ -3,7 +3,7 @@
 pg_walserver ps
 ================
 
-pg_walserver ps - Show serve's own process-level status (pid, capturers, bootstrap jobs)
+pg_walserver ps - Show serve's own process-level status (pid, receivewal workers, bootstrap jobs)
 
 Synopsis
 --------
@@ -13,8 +13,9 @@ Synopsis
   pg_walserver ps --pgdata <path>
 
 Shows ``serve``'s own process-level status: its pid, every supervised
-embedded pull capturer child (pid, cluster, running or stopped, uptime,
-restart count), and any in-flight one-time bootstrap base backup job.
+embedded receivewal worker child (pid, cluster, running or stopped,
+uptime, restart count), and any in-flight one-time bootstrap base
+backup job.
 Reads the same pidfile :ref:`pg_walserver_reload` does to decide
 whether ``serve`` is running at all; with none running, prints a clean
 message and exits 0, never an error.

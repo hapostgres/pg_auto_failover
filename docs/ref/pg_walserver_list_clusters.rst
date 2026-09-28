@@ -3,7 +3,7 @@
 pg_walserver list clusters
 ============================
 
-pg_walserver list clusters - List every route, its backup/capture status, and its WAL range
+pg_walserver list clusters - List every route, its backup/receivewal status, and its WAL range
 
 Synopsis
 --------
@@ -13,10 +13,11 @@ Synopsis
   pg_walserver list clusters --pgdata <path> [--cluster <name>]
 
 Lists every route configured in ``<pgdata>/pg_walserver.ini``: whether it
-has a base backup, its ``capture`` setting, whether its embedded pull
-capturer is currently running, and the WAL range it currently covers (the
-start LSN from its latest base backup's own ``backup_label``, the end LSN
-from the newest WAL segment actually present).
+has a base backup, its ``receivewal`` setting, whether its embedded
+receivewal worker is currently running, and the WAL range it currently
+covers (the start LSN from its latest base backup's own
+``backup_label``, the end LSN from the newest WAL segment actually
+present).
 
 Options
 -------
