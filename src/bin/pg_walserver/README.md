@@ -1306,6 +1306,136 @@ is ever handled. `pg_walserver_passwd` (SCRAM verifiers) is unaffected by any
 of this either way: it was already read fresh on every authentication
 attempt, before this feature existed, and still is.
 
+## Inventory and process visibility: `ps`, `ls`, `status`, `list clusters/backups/wal`
+
+Six read-only sub-commands, none of which mutate anything on disk: `ps`
+and `status` report on a running `serve`'s own process state; `ls`
+inventories pg_walserver's own configuration footprint; `list
+clusters`/`list backups`/`list wal` inventory the archived data itself.
+
+### Cross-process visibility: how `ps`/`status` see inside a running `serve`
+
+`pg_walserver ps`/`pg_walserver status` run as brand-new, one-shot
+processes, entirely separate from whatever `pg_walserver serve` process
+may be running for the same `--pgdata` -- they cannot read `capture.c`'s
+own in-process `captureRoutes`/`captureServices` arrays, or
+`accept_loop.c`'s own `bootstrapChildren` array, because those simply do
+not exist in a different process's address space.
+
+Two mechanisms were available. `/proc` scraping would work for *half* of
+the picture: every embedded pull capturer child is `exec()`'d as
+`pg_walserver internal service pg-receivewal --route <key> ...`
+(`capture.c`), so its route key is recoverable from `/proc/<pid>/cmdline`
+by any process willing to walk `/proc`. It does not work for the other
+half: the one-shot bootstrap-backup job (`backup_bootstrap.c`) is a
+*plain* `fork()`, with no `exec()` and therefore no distinguishable
+`/proc/<pid>/cmdline` at all -- only `serve`'s own in-process
+`bootstrapChildren[]` bookkeeping (`accept_loop.c`) knows its pid-to-route
+mapping. Restart counts and precise start times have no `/proc`
+equivalent either way: they live in `process_supervisor.h`'s own
+in-memory `ProcessRestartCounters` ring buffer.
+
+This PR uses the second mechanism instead: a small, plain-text state file,
+`<pgdata>/pg_walserver_ps.status` (`ps_state.h`/`ps_state.c`), that
+`serve` itself keeps current -- written once at startup (before the first
+connection is even accepted, so `ps` has something accurate to read
+immediately), once per main accept-loop tick (at least once a second,
+alongside the existing `ws_capture_tick()` call, see `accept_loop.c`'s own
+`refresh_ps_state()`), and once more right after a successful `SIGHUP`
+reload. It records `serve`'s own pid and start time, one line per tracked
+embedded pull capturer (route, pid, path, start time, restart count -- all
+of it already available inside `capture.c`, via the small
+`ws_capture_get_status()` accessor this PR adds), and one line per
+in-flight bootstrap backup job (`accept_loop.c`'s own
+`ws_bootstrap_get_status()`). Deliberately plain "key = value" lines, the
+same shape `wal_dir_scan.c`'s own `archiver-position` cache file already
+uses, rather than introducing a JSON writer into `pg_walserver` for this
+alone. `ps`/`status` read it back with `ws_ps_state_read()`, then apply
+their own `kill(pid, 0)` check against every pid it names -- the state
+file is refreshed at most once a second, so a pid it remembers could, in
+the narrow window since the last refresh, have already exited; a stale
+entry is never trusted at face value.
+
+Liveness of `serve` itself -- both for `ps`/`status` and for `list
+clusters`' own "is this route's capturer running" column -- reuses
+`src/bin/common/pidfile.c`'s existing `read_pidfile()` unchanged: a real
+`kill(pid, 0)` check, with a stale pidfile removed automatically, the
+exact same function `pg_walserver reload` already relies on. `serve` not
+running at all is never an error for `ps`/`status`/`list clusters`: each
+one checks the pidfile first and prints a clean "not running" (or "n/a")
+answer instead.
+
+### `list clusters`: computing the covered WAL range
+
+The start LSN of a route's currently covered WAL range comes straight
+from its latest base backup's own `backup_label` ("START WAL LOCATION"),
+read with `cmd_base_backup.c`'s own `read_backup_label()` -- already
+parsed, already tested elsewhere in this codebase (`archive-cleanup`
+reuses it too), no reason to duplicate it a third time.
+
+The end LSN reuses `wal_dir_scan.c`'s own `wal_dir_find_latest()` as-is:
+a single `opendir()`/`readdir()` pass over the route's directory, picking
+out the highest-numbered *complete* WAL segment filename -- this
+project's one existing "what is the newest WAL we have" answer, already
+used by `IDENTIFY_SYSTEM`/`CREATE_REPLICATION_SLOT`. It is a directory
+scan, not a probe that `stat()`s a handful of candidate filenames forward
+from a last-known position. A forward-probing implementation was
+considered (and is what the original design sketch for this feature
+called for), but was not built as a second, parallel implementation next
+to `wal_dir_find_latest()`: a WAL cache directory holds nothing but
+WAL/`.partial`/`.backup`/`.history` files, so one linear `readdir()` over
+it costs one syscall loop no matter how the answer is derived, and `list
+clusters` is an interactive, occasional operator command, not a
+per-connection hot path where avoiding a full scan would actually matter.
+Reusing the existing, tested function directly was judged the better
+trade than maintaining two independent "find the latest WAL" code paths.
+
+### `list backups`/`list wal`: no incremental cache, by design decision made under time pressure
+
+`list backups` reuses `archive-cleanup`'s own backup enumeration
+directly: `cli_archive_cleanup.c`'s previously-private `WsCleanupBackup`
+struct and `load_backups()` function are now `WsBackupInfo` and
+`ws_backup_list_load()`, exported via `cli_archive_cleanup.h`, unchanged
+in behavior. `list wal` reuses `wal_dir_scan.c`'s own filename shapes via
+a small new exported classifier, `ws_wal_dir_classify_filename()` (WAL
+segment / `.partial` / `.backup` / `.history` / other), rather than
+re-deriving `cli_archive_cleanup.c`'s own private, differently-purposed
+`wal_prefix_from_name()`.
+
+Neither of these two sub-commands' own aggregate answers (segment counts,
+total bytes, the full backup/`.history` inventory) is cheaply derivable
+from a targeted probe the way `wal_dir_find_latest()`'s single "newest
+segment" answer is above -- they need to read every relevant directory
+entry at least once. The design this feature started from called for a
+small, per-cluster, *incrementally* maintained metadata cache file,
+updated by each of the existing code paths that already write into a
+route's own directory: the embedded pull capturer on each completed
+segment (`capture.c`'s vendored `pg_receivewal`), `archive-wal`/
+`ARCHIVE_FILE` on each push (`cmd_archive_file.c`), the bootstrap-backup
+code on completion (`backup_bootstrap.c`), and `archive-cleanup` on
+removal (`cli_archive_cleanup.c`).
+
+That incremental cache was **not** implemented in this pass, and this is
+a deliberate, flagged scope cut, not a silent omission: wiring a cache
+update into four independent, already-shipped write paths, correctly,
+and without risking a stale or inconsistent cache surviving a crash
+mid-update, is real, nontrivial plumbing (each of those four call sites
+would need its own "update the cache, and do so safely if the process
+dies between the write and the cache update" story) that did not fit
+safely in the time available for this change. What is implemented instead
+is the documented fallback explicitly allowed for this case: `list
+backups`/`list wal` compute their answer fresh, by scanning the matching
+route's own directory, on every invocation -- always correct, cached only
+for the lifetime of that one invocation (one directory scan feeds every
+row printed for that route, never re-scanned per row within the same
+run). This is fast enough for the realistic case (a WAL cache holding a
+retention window's worth of segments, thousands at most at the default
+16MB segment size) that an operator running this by hand would not notice
+the difference; if `list wal`/`list backups` against a very large,
+long-retention archive ever becomes an actual bottleneck, the incremental
+cache file sketched above is the natural next step, reusing this same
+`WsWalStats`/`WsBackupInfo` shape as its own on-disk schema.
+
 ## The vendored ustar writer (vendor/tar.c)
 
 `vendor/tar.c` is vendored from PostgreSQL's own `src/port/tar.c` --

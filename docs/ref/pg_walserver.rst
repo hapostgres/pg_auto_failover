@@ -22,7 +22,8 @@ all. This is ``pg_walserver --help``'s own output, verbatim::
   usage: pg_walserver [serve options] | scram-secret ... | setup ... |
                        fetch-systemid ... | basebackup ... |
                        create-cert ... | archive-wal ... | restore-wal ... |
-                       archive-cleanup ... | reload ...
+                       archive-cleanup ... | reload ... | ps ... | ls ... |
+                       status ... | list clusters|backups|wal ...
 
   Available commands:
     pg_walserver
@@ -36,6 +37,12 @@ all. This is ``pg_walserver --help``'s own output, verbatim::
       restore-wal     Fetch one WAL/.backup file from a pg_walserver route (restore_command)
       archive-cleanup Remove WAL/base backups this route no longer needs to keep (operator/cron-driven, never automatic)
       reload          Ask a running pg_walserver to reload its configuration
+      ps              Show serve's own process-level status (pid, capturers, bootstrap jobs)
+      ls              List pg_walserver's own on-disk footprint under --pgdata
+      status          Show a short pg_walserver status dashboard
+      list clusters   List every route, its backup/capture status, and its WAL range
+      list backups    List base backups per cluster
+      list wal        List WAL cache stats per cluster, or every file with --segments
 
 See `Options`_ below for what each sub-command's flags do.
 
@@ -502,6 +509,112 @@ if the pidfile is missing, stale, or unreadable.
   This instance's own top-level storage root. Defaults to ``PGDATA``. The
   pidfile read is ``<pgdata>/pg_walserver.pid``.
 
+``ps``
+~~~~~~
+
+Shows ``serve``'s own process-level status: its pid, every supervised
+embedded pull capturer child (pid, cluster, running or stopped, uptime,
+restart count), and any in-flight one-time bootstrap base backup job.
+Reads the same pidfile ``reload`` does to decide whether ``serve`` is
+running at all; with none running, prints a clean message and exits 0,
+never an error.
+
+--pgdata
+
+  This instance's own top-level storage root. Defaults to ``PGDATA``.
+
+``ls``
+~~~~~~
+
+Lists pg_walserver's own on-disk footprint under ``--pgdata``: one row per
+well-known bookkeeping file (``pg_walserver.ini``,
+``pg_walserver_hba.conf``, ``pg_walserver_passwd``, ``server.crt``,
+``server.key``, ``ca.crt``, ``pg_walserver.pid``), whether it exists, its
+size, and its last-modified time. This is pg_walserver's own
+configuration footprint, never the archived WAL or base backup data
+itself -- see ``list`` below for that.
+
+--pgdata
+
+  This instance's own top-level storage root. Defaults to ``PGDATA``.
+
+``status``
+~~~~~~~~~~
+
+Prints a short, scannable dashboard: running or not (a real liveness
+check, not just "the pidfile exists"), pid, how many clusters are
+configured and how many already have a base backup, how many embedded
+pull capturers are running versus configured, and how many bootstrap
+backups are still pending.
+
+--pgdata
+
+  This instance's own top-level storage root. Defaults to ``PGDATA``.
+
+``list clusters``
+~~~~~~~~~~~~~~~~~
+
+::
+
+  pg_walserver list clusters --pgdata <path> [--cluster <name>]
+
+Lists every route configured in ``<pgdata>/pg_walserver.ini``: whether it
+has a base backup, its ``capture`` setting, whether its embedded pull
+capturer is currently running, and the WAL range it currently covers (the
+start LSN from its latest base backup's own ``backup_label``, the end LSN
+from the newest WAL segment actually present).
+
+--pgdata
+
+  Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
+
+--cluster
+
+  Limit output to a single route.
+
+``list backups``
+~~~~~~~~~~~~~~~~
+
+::
+
+  pg_walserver list backups --pgdata <path> [--cluster <name>]
+
+Lists every base backup found under each matching route's own
+``basebackups/`` directory: its label, when it was taken, its size on
+disk, and whether it is the route's ``.latest``.
+
+--pgdata
+
+  Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
+
+--cluster
+
+  Limit output to a single route.
+
+``list wal``
+~~~~~~~~~~~~
+
+::
+
+  pg_walserver list wal --pgdata <path> [--cluster <name>] [--segments]
+
+Prints aggregate WAL cache stats per route by default (segment count,
+total bytes, oldest and newest segment, ``.history`` file count); with
+``--segments``, lists every individual WAL/``.partial``/``.backup``/
+``.history`` file instead.
+
+--pgdata
+
+  Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
+
+--cluster
+
+  Limit output to a single route.
+
+--segments
+
+  List every individual file instead of the default aggregate stats.
+
 Environment
 -----------
 
@@ -639,6 +752,37 @@ least a week of history and at least 3 base backups::
   archive$ crontab -l
   0 3 * * * PGPASSWORD=s3kr3t pg_walserver archive-cleanup \
       --path /var/lib/archiver/mycluster --keep-count 3 --keep-age 7d
+
+Checking on a running archive
+------------------------------
+
+Continuing the example above, with ``serve`` running and both routes
+captured or backed up at least once::
+
+  archive$ pg_walserver status --pgdata /var/lib/archiver
+  pg_walserver: running (pid 25671, uptime 2h14m03s)
+    clusters:  2 configured, 2 with a base backup
+    capturers: 1/1 running
+    bootstrap backups pending: 0
+
+  archive$ pg_walserver list clusters --pgdata /var/lib/archiver
+  CLUSTER              BACKUP   CAPTURE   CAPTURER  WAL START              WAL END
+  --------------------------------------------------------------------------------------------
+  mycluster            yes      pull      yes       0/02000028             0/04000000
+  another               yes      none      n/a       0/02000060             -
+
+  archive$ pg_walserver ps --pgdata /var/lib/archiver
+  pg_walserver serve: pid 25671, running, uptime 2h14m03s
+
+  KIND     CLUSTER              PID      STATUS    UPTIME       RESTARTS
+  ----------------------------------------------------------------------
+  capture  mycluster            25673    running   2h14m01s     0
+
+``another`` shows ``CAPTURER n/a``: it was set up with ``--no-capture``,
+so there is no embedded capturer to report on, running or otherwise --
+its WAL arrives only through ``archive-wal``/``ARCHIVE_FILE`` pushes, so
+``list wal --cluster another`` may legitimately show zero segments until
+the primary's own ``archive_command`` has pushed at least one.
 
 Routing more than one cluster by name: TLS SNI
 -----------------------------------------------
