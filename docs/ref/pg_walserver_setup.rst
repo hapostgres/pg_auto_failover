@@ -110,22 +110,11 @@ Run it again, for a second route, with ``serve`` already running::
   INFO  setup complete: route "another" is ready ...
   INFO  Sent SIGHUP to pg_walserver pid 25671
 
-Related commands
-----------------
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-
-   pg_walserver_scram_secret
-   pg_walserver_create_cert
-
-* :ref:`pg_walserver_scram_secret`
-* :ref:`pg_walserver_create_cert`
-
 See Also
 --------
 
 * :ref:`pg_walserver`
+* :ref:`pg_walserver_scram_secret`
+* :ref:`pg_walserver_create_cert`
 * :ref:`pg_walserver_basebackup`
 * :ref:`pg_walserver_fetch_systemid`

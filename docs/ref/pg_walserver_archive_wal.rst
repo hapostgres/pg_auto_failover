@@ -75,23 +75,10 @@ caught up to yet -- ``CHECK_FILE`` fails, exit 1, and PostgreSQL retries
   ERROR "0000000100000000000000FF" is not yet on "archive" route
         "mycluster" (missing): waiting for its own pull capturer to catch up
 
-Related commands
-----------------
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-
-   pg_walserver_restore_wal
-   pg_walserver_archive_cleanup
-   pg_walserver_basebackup
-
-* :ref:`pg_walserver_restore_wal`
-* :ref:`pg_walserver_archive_cleanup`
-* :ref:`pg_walserver_basebackup`
-
 See Also
 --------
 
 * :ref:`pg_walserver`
 * :ref:`pg_walserver_restore_wal`
+* :ref:`pg_walserver_archive_cleanup`
+* :ref:`pg_walserver_basebackup`
