@@ -128,9 +128,33 @@ Access control
 ``<pgdata>/pg_walserver_hba.conf`` decides, one rule per line
 (``TYPE ROUTE USER ADDRESS METHOD``, first match wins), which peers may
 connect and how they must authenticate; a missing, oversize, or malformed
-file rejects every connection. ``<pgdata>/pg_walserver_passwd`` holds one
-SCRAM-SHA-256 verifier per line, produced with ``pg_walserver
-scram-secret``. ``<pgdata>/server.crt``/``<pgdata>/server.key`` (or
+file rejects every connection. Three ``METHOD`` values are supported:
+
+``trust``
+
+  Accept the connection outright, with no password check. Only appropriate
+  behind another access control already trusted, such as a firewalled
+  private network.
+
+``scram-sha-256``
+
+  Run a real SCRAM-SHA-256 exchange (RFC 5802) against a verifier stored in
+  ``pg_walserver_passwd``. The method to use for any connection reachable
+  from outside a fully trusted network.
+
+``reject``
+
+  Refuse the connection outright. Also the default when no rule matches at
+  all, so a rule is required to admit anything.
+
+``<pgdata>/pg_walserver_passwd`` holds the credential store ``scram-sha-256``
+checks against: one SCRAM-SHA-256 verifier per line, produced with
+``pg_walserver scram-secret``. ``pg_walserver`` is not PostgreSQL: there is
+no ``pg_authid`` or role system underneath it to check a password against,
+so this file is its own, separate store, populated by hand or by whatever
+provisions a route.
+
+``<pgdata>/server.crt``/``<pgdata>/server.key`` (or
 ``--ssl-cert-file``/``--ssl-key-file``) enable TLS; without them,
 ``hostssl`` HBA rules never match.
 
