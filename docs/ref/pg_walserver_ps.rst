@@ -29,7 +29,7 @@ Options
 Examples
 --------
 
-``serve`` running, one route with an embedded pull capturer::
+With ``serve`` running, one route with an embedded pull capturer::
 
   archive$ pg_walserver ps --pgdata /var/lib/archiver
   pg_walserver serve: pid 25671, running, uptime 0h04m31s

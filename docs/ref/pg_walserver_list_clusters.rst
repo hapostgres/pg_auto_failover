@@ -40,9 +40,9 @@ Examples
   mycluster            yes      pull      yes       0/04000028             0/05000000
   another               yes      none      n/a       0/09000028             -
 
+Having no embedded capturer to report on, running or otherwise, is why
 ``another`` shows ``CAPTURER n/a``: it was set up with ``--no-capture``,
-so there is no embedded capturer to report on, running or otherwise --
-its WAL arrives only through ``archive-wal``/``ARCHIVE_FILE`` pushes.
+and its WAL arrives only through ``archive-wal``/``ARCHIVE_FILE`` pushes.
 
 See Also
 --------

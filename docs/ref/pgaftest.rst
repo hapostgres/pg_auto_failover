@@ -467,11 +467,11 @@ Node modifiers:
 Bare, unmanaged single-node sugar
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``postgres <name>`` and ``pg_walserver <name>`` are top-level declarations,
-siblings of ``monitor``, for a spec that wants one plain node with no
-formation and no monitor supervision at all. Each is pure syntactic sugar
-for a one-node, no-monitor formation, reusing the same container-generation
-code every other node already goes through:
+Declaring one plain node with no formation and no monitor supervision
+at all needs a top-level declaration, a sibling of ``monitor``:
+``postgres <name>`` or ``pg_walserver <name>``. Each is pure syntactic
+sugar for a one-node, no-monitor formation, reusing the same
+container-generation code every other node already goes through:
 
 .. code-block:: text
 

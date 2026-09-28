@@ -85,8 +85,8 @@ archive host, then reload::
 
   primary$ psql -c "CREATE ROLE archiver_repl REPLICATION LOGIN PASSWORD 's3kr3t'"
 
-``wal_level`` must already be ``replica`` or higher (the default since
-PostgreSQL 10).
+This needs ``wal_level`` already set to ``replica`` or higher (the
+default since PostgreSQL 10).
 
 **2. On the archive host**, create the route and fetch the system
 identifier::
@@ -110,9 +110,10 @@ identifier::
         "/var/lib/archiver/pg_walserver.pid": the route just written
         will take effect the next time "serve" starts
 
-``capture = pull`` is written by default, so the route's own WAL segments
-are captured continuously once ``serve`` starts (below), without a
-separate ``pg_receivewal`` process. Pass ``--no-capture`` to skip this and
+Capturing the route's own WAL segments continuously once ``serve``
+starts (below), with no separate ``pg_receivewal`` process, is the
+default behavior: ``capture = pull`` is written into the route unless
+told otherwise. Pass ``--no-capture`` to skip this and
 feed the route another way (an externally-run ``pg_receivewal``, or
 ``archive-wal`` alone). No server is running yet at this point, so
 ``setup`` only logs that this config will take effect the next time
@@ -140,10 +141,11 @@ HBA or the password file::
         "/var/lib/archiver/mycluster"
   INFO  Route "mycluster": automatic bootstrap base backup complete
 
-``serve`` takes the route's first base backup automatically at this point,
-in the background, once its embedded capturer (if any) shows real
-streaming evidence: no separate ``pg_walserver basebackup`` call is
-needed. Running ``pg_walserver setup`` again later, for the same or a new
+Taking the route's first base backup automatically at this point, in
+the background, once its embedded capturer (if any) shows real
+streaming evidence, is ``serve``'s own job: no separate
+``pg_walserver basebackup`` call is needed. Running ``pg_walserver
+setup`` again later, for the same or a new
 route, while ``serve`` is already running, reloads it immediately (a
 ``SIGHUP``, the same as ``pg_walserver reload``) instead of waiting for a
 restart.
@@ -154,8 +156,8 @@ embedded capturer, on the primary::
   archive_mode = on
   archive_command = 'pg_walserver archive-wal %p %f --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
 
-``mycluster`` has ``capture = pull`` configured (step 2 above), so each
-invocation only ever runs ``CHECK_FILE``: exit 0 once the embedded
+Because ``mycluster`` has ``capture = pull`` configured (step 2 above),
+each invocation only ever runs ``CHECK_FILE``: exit 0 once the embedded
 capturer has already delivered the segment, exit 1 otherwise. It never
 pushes anything itself; PostgreSQL's own retry of ``archive_command``
 covers the case where the capturer has not yet caught up.
@@ -232,9 +234,9 @@ captured or backed up at least once::
   ----------------------------------------------------------------------
   capture  mycluster            25673    running   0h04m31s     0
 
+Having no embedded capturer to report on, running or otherwise, is why
 ``another`` shows ``CAPTURER n/a``: it was set up with ``--no-capture``,
-so there is no embedded capturer to report on, running or otherwise --
-its WAL arrives only through ``archive-wal``/``ARCHIVE_FILE`` pushes, so
+and its WAL arrives only through ``archive-wal``/``ARCHIVE_FILE`` pushes, so
 ``list wal --cluster another`` may legitimately show zero segments until
 the primary's own ``archive_command`` has pushed at least one. See
 :ref:`pg_walserver_status`, :ref:`pg_walserver_ps`, and
@@ -277,8 +279,8 @@ automatically the first time a second named route needs one::
 
   archive$ pg_walserver --pgdata /var/lib/archiver --port 6543 &
 
-``create-cert`` creates or, with ``--force``, replaces the certificate by
-hand at any time::
+Creating, or with ``--force`` replacing, the certificate by hand at
+any time is what ``create-cert`` is for::
 
   archive$ pg_walserver create-cert --pgdata /var/lib/archiver \
       --hostname mycluster.archive.example.com
@@ -298,6 +300,6 @@ always tried first.
 See Also
 --------
 
-``src/bin/pg_walserver/README.md`` in the source tree documents the wire
-protocol, routing precedence, the embedded pull capturer, and the
-push-side ``CHECK_FILE``/``ARCHIVE_FILE`` design in full.
+The wire protocol, routing precedence, the embedded pull capturer, and
+the push-side ``CHECK_FILE``/``ARCHIVE_FILE`` design are documented in
+full in ``src/bin/pg_walserver/README.md``, in the source tree.
