@@ -84,7 +84,7 @@ step test_001_not_running_is_clean_not_an_error {
 }
 
 step test_002_serve_running_ps_status_ls_and_backups {
-    exec walserver bash -c 'nohup pg_walserver --pgdata /tmp/lps --port 6543 > /tmp/lps-serve.log 2>&1 & echo started'
+    exec walserver bash -c 'nohup pg_walserver serve --pgdata /tmp/lps --port 6543 > /tmp/lps-serve.log 2>&1 & echo started'
     exec walserver bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/lps-serve.log; exit 1'
 
     # both routes get their automatic bootstrap backup.
@@ -98,9 +98,11 @@ step test_002_serve_running_ps_status_ls_and_backups {
 
     exec walserver bash -c 'pg_walserver status --pgdata /tmp/lps > /tmp/status1.out 2>&1'
     exec walserver bash -c 'grep -q "pg_walserver: running" /tmp/status1.out || { cat /tmp/status1.out; false; }'
-    exec walserver bash -c 'grep -q "clusters:  2 configured, 2 with a base backup" /tmp/status1.out || { cat /tmp/status1.out; false; }'
     exec walserver bash -c 'grep -q "receivewal workers: 1/1 running" /tmp/status1.out || { cat /tmp/status1.out; false; }'
     exec walserver bash -c 'grep -q "bootstrap backups pending: 0" /tmp/status1.out || { cat /tmp/status1.out; false; }'
+    # status is deliberately process-only now: no cluster/backup counts,
+    # those are pg_walserver ls's/list's own job
+    exec walserver bash -c 'grep -q "clusters:" /tmp/status1.out && { echo "status must not show cluster/backup counts anymore"; cat /tmp/status1.out; false; } || true'
 
     # both routes now have exactly one real base backup on disk, so both
     # show a nonzero BACKUPS count and a real (non "-") LAST BACKUP.
@@ -156,11 +158,11 @@ step test_004_receivewal_progress_lsn_visible_and_advances {
     # pullc's embedded receivewal worker relays its own live (lsn, timeline)
     # to "serve" via a small, throttled per-route file (wal_dir_scan.h's
     # ws_receivewal_progress_write()/_read()), folded into the ps state file
-    # and surfaced on "ps"/"status" -- a real, plausible LSN, not a
-    # placeholder/zero, and one that genuinely advances as more real WAL is
-    # generated on node1.
+    # and surfaced on "ps" (status is process-only now, no per-worker LSN
+    # of its own -- see cli_status.h's own comment) -- a real, plausible
+    # LSN, not a placeholder/zero, and one that genuinely advances as more
+    # real WAL is generated on node1.
     exec walserver bash -c 'pg_walserver ps --pgdata /tmp/lps > /tmp/ps2.out 2>&1; grep -E "receivewal\([0-9]+\) pullc, running.*lsn [0-9A-F]+/[0-9A-F]+ \(timeline [1-9][0-9]*, [0-9]+s ago\)" /tmp/ps2.out || { cat /tmp/ps2.out; false; }'
-    exec walserver bash -c 'pg_walserver status --pgdata /tmp/lps > /tmp/status2.out 2>&1; grep -E "pullc +lsn [0-9A-F]+/[0-9A-F]+ \(timeline [1-9][0-9]*, [0-9]+s ago\)" /tmp/status2.out || { cat /tmp/status2.out; false; }'
     exec walserver bash -c 'grep -oE "lsn [0-9A-F]+/[0-9A-F]+" /tmp/ps2.out | head -1 | awk "{print \$2}" > /tmp/lsn1.txt; test -s /tmp/lsn1.txt'
 
     # generate real, substantial WAL on the real upstream between the two

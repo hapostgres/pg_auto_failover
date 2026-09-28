@@ -50,6 +50,19 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 	*routesOut = NULL;
 	*countOut = 0;
 
+	/*
+	 * No routes file yet is a normal, expected state -- the first "setup"/
+	 * "cluster register" call for a fresh --pgdata, most notably -- never
+	 * an error to log; the same file_exists()-before-read convention
+	 * pg_autoctl's own config-file callers already use throughout (see
+	 * e.g. cli_create_node.c), rather than attempting the read and
+	 * demoting whatever error comes back.
+	 */
+	if (!file_exists(path))
+	{
+		return true;
+	}
+
 	char *contents = NULL;
 	size_t fileSize = 0;
 
@@ -434,6 +447,232 @@ routes_persist_path(const char *routesPath, const char *routeKey,
 
 	log_info("Added \"path = %s\" to route \"%s\" in \"%s\"",
 			 path, routeKey, routesPath);
+
+	return true;
+}
+
+
+/*
+ * routes_set_property sets propName = propValue in an existing [routeKey]
+ * section: replacing that property's own line in place if the section
+ * already has one, appending a new line right after the header
+ * otherwise. Unlike routes_persist_path() above, this always writes the
+ * given value -- the whole point of "pg_walserver cluster set-upstream"
+ * (cli_root.c) is to *change* an already-set "upstream", not merely fill
+ * in a gap. Never creates a new section (that's "pg_walserver cluster
+ * register"'s own job); false, with an error already logged, if
+ * routeKey has no section to set anything in.
+ */
+bool
+routes_set_property(const char *routesPath, const char *routeKey,
+					const char *propName, const char *propValue)
+{
+	char *contents = NULL;
+	size_t fileSize = 0;
+
+	if (!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+							 &contents, &fileSize, NULL))
+	{
+		log_error("Failed to read routes file \"%s\"", routesPath);
+		return false;
+	}
+
+	char header[NAMEDATALEN + 16 + 2] = { 0 };
+
+	sformat(header, sizeof(header), "[%s]", routeKey);
+
+	char *sectionStart = strstr(contents, header);
+
+	if (sectionStart == NULL ||
+		(sectionStart != contents && sectionStart[-1] != '\n'))
+	{
+		log_error("No section \"%s\" found in \"%s\" to set \"%s\" in",
+				  header, routesPath, propName);
+		free(contents);
+		return false;
+	}
+
+	char *lineEnd = strchr(sectionStart, '\n');
+	char *afterHeader = (lineEnd != NULL)
+						? lineEnd + 1
+						: sectionStart + strlen(sectionStart);
+
+	size_t propNameLen = strlen(propName);
+	char *propLineStart = NULL;
+	char *propLineEnd = NULL;
+	char *cursor = afterHeader;
+
+	while (*cursor != '\0' && *cursor != '[')
+	{
+		char *key = cursor;
+
+		while (*key == ' ' || *key == '\t')
+		{
+			key++;
+		}
+
+		char *nextLine = strchr(cursor, '\n');
+		char *thisLineEnd = (nextLine != NULL) ? nextLine : cursor + strlen(cursor);
+
+		if (strncmp(key, propName, propNameLen) == 0)
+		{
+			char *afterKey = key + propNameLen;
+
+			while (*afterKey == ' ' || *afterKey == '\t')
+			{
+				afterKey++;
+			}
+
+			if (*afterKey == '=')
+			{
+				propLineStart = cursor;
+				propLineEnd = (nextLine != NULL) ? nextLine + 1 : thisLineEnd;
+				break;
+			}
+		}
+
+		if (nextLine == NULL)
+		{
+			break;
+		}
+
+		cursor = nextLine + 1;
+	}
+
+	PQExpBuffer whole = createPQExpBuffer();
+
+	if (propLineStart != NULL)
+	{
+		/* replace the existing property line with the new value */
+		appendBinaryPQExpBuffer(whole, contents, propLineStart - contents);
+		appendPQExpBuffer(whole, "%s = %s\n", propName, propValue);
+		appendPQExpBufferStr(whole, propLineEnd);
+	}
+	else
+	{
+		/* no existing property line: append one right after the header */
+		appendBinaryPQExpBuffer(whole, contents, afterHeader - contents);
+		appendPQExpBuffer(whole, "%s = %s\n", propName, propValue);
+		appendPQExpBufferStr(whole, afterHeader);
+	}
+
+	bool ok = !PQExpBufferBroken(whole) &&
+			  write_file_atomic(whole->data, whole->len, routesPath);
+
+	destroyPQExpBuffer(whole);
+	free(contents);
+
+	if (!ok)
+	{
+		log_error("Failed to write \"%s\"", routesPath);
+		return false;
+	}
+
+	log_info("Set \"%s = %s\" for route \"%s\" in \"%s\"",
+			 propName, propValue, routeKey, routesPath);
+
+	return true;
+}
+
+
+/*
+ * routes_drop_section removes the whole [routeKey] section (header and
+ * every property line under it, up to the next section or end of file)
+ * from the routes file at routesPath -- "pg_walserver cluster drop"'s own
+ * job. Never touches anything on disk under the route's own "path": that
+ * is a deliberate, separate decision (--purge, cli_root.c's own cluster-
+ * drop command), not an automatic side effect of removing the
+ * registration alone. false, with an error already logged, if routeKey
+ * has no section to remove.
+ */
+bool
+routes_drop_section(const char *routesPath, const char *routeKey)
+{
+	char *contents = NULL;
+	size_t fileSize = 0;
+
+	if (!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+							 &contents, &fileSize, NULL))
+	{
+		log_error("Failed to read routes file \"%s\"", routesPath);
+		return false;
+	}
+
+	char header[NAMEDATALEN + 16 + 2] = { 0 };
+
+	sformat(header, sizeof(header), "[%s]", routeKey);
+
+	char *sectionStart = strstr(contents, header);
+
+	if (sectionStart == NULL ||
+		(sectionStart != contents && sectionStart[-1] != '\n'))
+	{
+		log_error("No section \"%s\" found in \"%s\" to drop",
+				  header, routesPath);
+		free(contents);
+		return false;
+	}
+
+	/* the blank line write_route_section() always writes right before a
+	 * new section's own header belongs to the *previous* section as far
+	 * as a human editing this file is concerned; drop it along with the
+	 * section itself so removing a route never leaves a stray blank line
+	 * behind */
+	char *removeFrom = sectionStart;
+
+	if (removeFrom > contents && removeFrom[-1] == '\n' &&
+		removeFrom - 1 > contents && removeFrom[-2] == '\n')
+	{
+		removeFrom--;
+	}
+
+	char *cursor = sectionStart;
+	char *sectionEnd = NULL;
+
+	while (*cursor != '\0')
+	{
+		char *nextLine = strchr(cursor, '\n');
+
+		if (nextLine == NULL)
+		{
+			sectionEnd = cursor + strlen(cursor);
+			break;
+		}
+
+		char *lineStart = nextLine + 1;
+
+		if (*lineStart == '[')
+		{
+			sectionEnd = lineStart;
+			break;
+		}
+
+		cursor = lineStart;
+	}
+
+	if (sectionEnd == NULL)
+	{
+		sectionEnd = contents + strlen(contents);
+	}
+
+	PQExpBuffer whole = createPQExpBuffer();
+
+	appendBinaryPQExpBuffer(whole, contents, removeFrom - contents);
+	appendPQExpBufferStr(whole, sectionEnd);
+
+	bool ok = !PQExpBufferBroken(whole) &&
+			  write_file_atomic(whole->data, whole->len, routesPath);
+
+	destroyPQExpBuffer(whole);
+	free(contents);
+
+	if (!ok)
+	{
+		log_error("Failed to write \"%s\"", routesPath);
+		return false;
+	}
+
+	log_info("Dropped route \"%s\" from \"%s\"", routeKey, routesPath);
 
 	return true;
 }

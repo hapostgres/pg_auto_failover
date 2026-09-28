@@ -38,7 +38,7 @@ cluster {
     formation {
         node1 replication-password "pgaf-repl-pw"
         node2 replication-password "pgaf-repl-pw"
-            command "mkdir -p /tmp/ws/default/0 && echo [default/0] > /tmp/ws/pg_walserver.ini && echo path = /tmp/ws/default/0 >> /tmp/ws/pg_walserver.ini && echo upstream = host=node1 port=5432 user=pgautofailover_replicator password=pgaf-repl-pw sslmode=disable >> /tmp/ws/pg_walserver.ini && echo receivewal = pull >> /tmp/ws/pg_walserver.ini && exec pg_walserver --pgdata /tmp/ws --port 6543"
+            command "mkdir -p /tmp/ws/default/0 && echo [default/0] > /tmp/ws/pg_walserver.ini && echo path = /tmp/ws/default/0 >> /tmp/ws/pg_walserver.ini && echo upstream = host=node1 port=5432 user=pgautofailover_replicator password=pgaf-repl-pw sslmode=disable >> /tmp/ws/pg_walserver.ini && echo receivewal = pull >> /tmp/ws/pg_walserver.ini && exec pg_walserver serve --pgdata /tmp/ws --port 6543"
     }
 }
 

@@ -335,13 +335,14 @@ the environment::
   $ PGPASSWORD='s3kr3t' pg_walserver scram-secret --user pgautofailover_replicator
   pgautofailover_replicator:SCRAM-SHA-256$4096:...
 
-Run the server against an existing ``--pgdata`` directory::
+Run the server against an existing ``--pgdata`` directory. No
+sub-command is ever implicit -- ``serve`` is always given explicitly::
 
-  $ pg_walserver --pgdata /var/lib/archiver --port 6543
+  $ pg_walserver serve --pgdata /var/lib/archiver
 
 Run the server with no authentication, for manual testing only::
 
-  $ pg_walserver --insecure --port 6543
+  $ pg_walserver serve --insecure --port 6543
 
 Registering a node and starting a PITR session, in shape
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

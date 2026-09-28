@@ -118,7 +118,7 @@ setup {
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/wsarch --cluster arch/1 --path /tmp/wsarch/arch/1 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
     exec node2 bash -c 'grep -qx "receivewal = pull" /tmp/wsarch/pg_walserver.ini || { echo "receivewal = pull should have been written for arch/1 by default"; cat /tmp/wsarch/pg_walserver.ini; false; }'
 
-    exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/wsarch --port 6547 > /tmp/wsarch-walserver.log 2>&1 & echo started'
+    exec node2 bash -c 'nohup pg_walserver serve --pgdata /tmp/wsarch --port 6547 > /tmp/wsarch-walserver.log 2>&1 & echo started'
     exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6547) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/wsarch-walserver.log; exit 1'
     exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal arch/1$" > /tmp/wsarch_cap_pid.txt && test -s /tmp/wsarch_cap_pid.txt && exit 0; sleep 1; done; cat /tmp/wsarch-walserver.log; ps aux; exit 1'
 }

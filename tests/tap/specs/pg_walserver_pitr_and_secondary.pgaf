@@ -207,7 +207,7 @@ setup {
     # file's own header comment (role 2) for why role 4 below needs this.
     exec server bash -c 'printf "\n[*]\npath = /tmp/ws/pitr\n" >> /tmp/ws/pg_walserver.ini'
 
-    exec server bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-server.log 2>&1 & echo started'
+    exec server bash -c 'nohup pg_walserver serve --pgdata /tmp/ws --port 6543 > /tmp/ws-server.log 2>&1 & echo started'
     exec server bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; exit 1'
 
     # the embedded receivewal worker really is running, the whole time, in the

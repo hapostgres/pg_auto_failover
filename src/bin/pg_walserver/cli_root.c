@@ -153,7 +153,6 @@
 #include "tls.h"
 
 extern CommandLine ws_root;
-extern char ** pg_walserver_default_argv(int argc, char **argv, int *newArgc);
 
 
 /*
@@ -565,7 +564,7 @@ cli_serve_run(int argc, char **argv)
 
 static CommandLine serve_command =
 	make_command("serve",
-				 "Run the pg_walserver accept loop (the default command)",
+				 "Run the pg_walserver accept loop",
 				 "[--port <port>] [--pgdata <path> | --insecure] "
 				 "[--ssl-cert-file <path> --ssl-key-file <path>] "
 				 "[--ssl-ca-file <path>] "
@@ -1964,6 +1963,118 @@ static CommandLine reload_command =
 
 
 /* -----------------------------------------------------------------------
+ * pg_walserver stop --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char stopPgdata[MAXPGPATH] = { 0 };
+
+static struct option stopLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_stop_getopt(int argc, char **argv)
+{
+	optind = 0;
+	stopPgdata[0] = '\0';
+	ws_prefill_pgdata_from_env(stopPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:", stopLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(stopPgdata, optarg, sizeof(stopPgdata));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_stop_run sends SIGTERM to the "pg_walserver serve" instance whose
+ * pid is recorded in <pgdata>/pg_walserver.pid -- the exact same shape as
+ * "pg_ctl stop" (or, in this project's own vocabulary, "reload"'s own
+ * cli_reload_run() just above, SIGTERM instead of SIGHUP): accept_loop.c's
+ * own signal handler treats SIGTERM as a clean shutdown request (stop
+ * accepting new connections, let in-flight ones finish, then exit), the
+ * same disposition every other supervised process in this project already
+ * gives it. Does not wait for the process to actually exit -- the signal
+ * was delivered, that is this command's whole job, the same as "pg_ctl
+ * stop -m fast" without "--wait" would be.
+ */
+static void
+cli_stop_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	if (stopPgdata[0] == '\0')
+	{
+		log_fatal("stop requires --pgdata (or the PGDATA environment "
+				  "variable)");
+		exit(1);
+	}
+
+	char pidfilePath[MAXPGPATH];
+
+	sformat(pidfilePath, sizeof(pidfilePath), "%s/pg_walserver.pid", stopPgdata);
+
+	pid_t pid = 0;
+
+	if (!read_pidfile(pidfilePath, &pid))
+	{
+		log_fatal("Failed to stop pg_walserver: no running instance found "
+				  "at \"%s\" (missing, stale, or unreadable pidfile)",
+				  pidfilePath);
+		exit(1);
+	}
+
+	if (kill(pid, SIGTERM) != 0)
+	{
+		if (errno == ESRCH)
+		{
+			log_fatal("Failed to stop pg_walserver: pid %d (from \"%s\") "
+					  "is not running", pid, pidfilePath);
+		}
+		else
+		{
+			log_fatal("Failed to send SIGTERM to pg_walserver pid %d: %m", pid);
+		}
+		exit(1);
+	}
+
+	log_info("Sent SIGTERM to pg_walserver pid %d", pid);
+	exit(0);
+}
+
+
+static CommandLine stop_command =
+	make_command("stop",
+				 "Stop a running pg_walserver cleanly",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA); sends SIGTERM to the pid recorded "
+				 "in\n"
+				 "              \"<pgdata>/pg_walserver.pid\"\n",
+				 cli_stop_getopt, cli_stop_run);
+
+
+/* -----------------------------------------------------------------------
  * pg_walserver ps --pgdata <path>
  * ----------------------------------------------------------------------- */
 
@@ -2344,6 +2455,30 @@ static CommandLine list_commands =
 
 
 /* -----------------------------------------------------------------------
+ * pg_walserver help
+ * ----------------------------------------------------------------------- */
+
+/*
+ * cli_help_run prints the whole sub-command tree at once, the exact same
+ * "pg_autoctl help" facility (commandline_print_command_tree(),
+ * src/bin/lib/subcommands.c/commandline.h) already provides.
+ */
+static void
+cli_help_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	commandline_print_command_tree(&ws_root, stdout);
+}
+
+
+static CommandLine help_command =
+	make_command("help", "Print this whole sub-command tree at once", "",
+				 "", NULL, cli_help_run);
+
+
+/* -----------------------------------------------------------------------
  * Root command table
  * ----------------------------------------------------------------------- */
 
@@ -2358,10 +2493,12 @@ static CommandLine *root_subcommands[] = {
 	&restore_command,
 	&archive_cleanup_command,
 	&reload_command,
+	&stop_command,
 	&ps_command,
 	&ls_command,
 	&status_command,
 	&list_commands,
+	&help_command,
 	&internal_commands,
 	NULL
 };
@@ -2369,70 +2506,9 @@ static CommandLine *root_subcommands[] = {
 CommandLine ws_root =
 	make_command_set("pg_walserver",
 					 "The archiver's own replication-protocol server",
-					 "[serve options] | scram-secret ... | setup ... | "
+					 "serve ... | scram-secret ... | setup ... | "
 					 "fetch-systemid ... | basebackup ... | create-cert ... | "
 					 "archive-wal ... | restore-wal ... | archive-cleanup ... | "
-					 "reload ... | ps ... | ls ... | status ... | list ...",
+					 "reload ... | stop ... | ps ... | ls ... | status ... | "
+					 "list ... | help",
 					 NULL, NULL, root_subcommands);
-
-
-/*
- * pg_walserver_default_argv implements pg_walserver's "no sub-command means
- * serve" default: the command-line framework itself (commandline.h) has no
- * notion of an optional sub-command name, so main() calls this first and
- * uses whatever it returns instead of the original argv. When argv[1] is
- * already a known sub-command name, or --help/-h (which commandline_run()
- * itself intercepts before ever looking at sub-commands), argv is returned
- * unchanged; otherwise a new argv with "serve" spliced in right after
- * argv[0] is returned, e.g. { "pg_walserver", "--port", "5432" } becomes
- * { "pg_walserver", "serve", "--port", "5432" }. The returned array is
- * malloc'd and, other than the injected "serve", points back into the
- * original argv; it is never freed, living for the rest of the process.
- */
-char **
-pg_walserver_default_argv(int argc, char **argv, int *newArgc)
-{
-	if (argc >= 2 &&
-		(streq(argv[1], "serve") ||
-		 streq(argv[1], "scram-secret") ||
-		 streq(argv[1], "setup") ||
-		 streq(argv[1], "fetch-systemid") ||
-		 streq(argv[1], "basebackup") ||
-		 streq(argv[1], "create-cert") ||
-		 streq(argv[1], "archive-wal") ||
-		 streq(argv[1], "restore-wal") ||
-		 streq(argv[1], "archive-cleanup") ||
-		 streq(argv[1], "reload") ||
-		 streq(argv[1], "ps") ||
-		 streq(argv[1], "ls") ||
-		 streq(argv[1], "status") ||
-		 streq(argv[1], "list") ||
-		 streq(argv[1], "internal") ||
-		 streq(argv[1], "--help") ||
-		 streq(argv[1], "-h")))
-	{
-		*newArgc = argc;
-		return argv;
-	}
-
-	char **newArgv = (char **) malloc((size_t) (argc + 2) * sizeof(char *));
-
-	if (newArgv == NULL)
-	{
-		log_fatal("Failed to allocate memory");
-		exit(1);
-	}
-
-	newArgv[0] = argv[0];
-	newArgv[1] = (char *) "serve";
-
-	for (int i = 1; i < argc; i++)
-	{
-		newArgv[i + 1] = argv[i];
-	}
-
-	newArgv[argc + 1] = NULL;
-	*newArgc = argc + 1;
-
-	return newArgv;
-}
