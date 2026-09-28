@@ -91,30 +91,24 @@ Examples
 
 ::
 
-  archive$ pg_walserver basebackup --pgdata /var/lib/archiver --cluster mycluster \
-      --upstream "host=primary user=archiver_repl sslmode=require"
-  INFO  Taking a base backup of primary:5432 into
-        "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T134237Z"
-  INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known
-        Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
-  INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d
-         'application_name=pg_walserver-basebackup host=primary port=5432
-         user=archiver_repl sslmode=require' --pgdata
-         /var/lib/archiver/mycluster/basebackups/basebackup-20260928T134237Z
-         -U archiver_repl --verbose --progress --wal-method=stream
-         --checkpoint=fast --label basebackup-20260928T134237Z
-  INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
-  INFO  pg_basebackup: checkpoint completed
-  INFO  pg_basebackup: write-ahead log start point: 0/4000028 on timeline 1
-  INFO  pg_basebackup: starting background WAL receiver
-  INFO  pg_basebackup: created temporary replication slot "pg_basebackup_745442"
-  INFO  23712/23712 kB (100%), 1/1 tablespace
-  INFO  pg_basebackup: write-ahead log end point: 0/4000120
-  INFO  pg_basebackup: waiting for background process to finish streaming ...
-  INFO  pg_basebackup: syncing data to disk ...
-  INFO  pg_basebackup: base backup completed
-  INFO  Base backup "basebackup-20260928T134237Z" is now the latest for
-        "/var/lib/archiver/mycluster"
+  archive$ PGPASSWORD=s3kr3t pg_walserver basebackup --cluster bbdemo \
+      --upstream "host=primary port=5534 user=archiver_repl sslmode=require"
+  21:15:04 2592271 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
+  21:15:04 2592271 INFO  Taking a base backup of primary:5534 into "/var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211504Z"
+  21:15:04 2592271 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver-basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211504Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T211504Z
+  21:15:04 2592271 INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
+  21:15:04 2592271 INFO  pg_basebackup: checkpoint completed
+  21:15:04 2592271 INFO  pg_basebackup: write-ahead log start point: 0/29000028 on timeline 1
+  21:15:04 2592271 INFO  pg_basebackup: starting background WAL receiver
+  21:15:04 2592271 INFO  pg_basebackup: created temporary replication slot "pg_basebackup_2592275"
+  21:15:04 2592271 INFO  41457/41457 kB (100%), 0/1 tablespace (...260928T211504Z/global/pg_control)
+  21:15:04 2592271 INFO  41457/41457 kB (100%), 1/1 tablespace
+  21:15:04 2592271 INFO  pg_basebackup: write-ahead log end point: 0/29000120
+  21:15:04 2592271 INFO  pg_basebackup: waiting for background process to finish streaming ...
+  21:15:04 2592271 INFO  pg_basebackup: syncing data to disk ...
+  21:15:05 2592271 INFO  pg_basebackup: renaming backup_manifest.tmp to backup_manifest
+  21:15:05 2592271 INFO  pg_basebackup: base backup completed
+  21:15:05 2592271 INFO  Base backup "basebackup-20260928T211504Z" is now the latest for "/var/lib/archiver/bbdemo"
 
 Carrying its own WAL, concurrently, rather than depending on
 ``restore_command`` to fetch any segment written during the backup
@@ -122,36 +116,83 @@ itself, is why ``pg_basebackup`` is always invoked with
 ``--wal-method=stream``.
 
 With ``--keep-count``/``--keep-age``, the same command also prunes
-right after::
+right after -- a route with real captured WAL (``mycluster``, its
+embedded receivewal worker running throughout this session's own
+testing) genuinely has plenty to prune::
 
-  archive$ pg_walserver basebackup --pgdata /var/lib/archiver --cluster mycluster \
-      --upstream "host=primary user=archiver_repl sslmode=require" --keep-count 1
-  INFO  Base backup "basebackup-20260928T192713Z" is now the latest for
-        "/var/lib/archiver/mycluster"
-  INFO  archive-cleanup: --keep-count 1 -- retaining WAL from
-        "000000010000000000000006" onward
-  INFO  archive-cleanup: removing backup
-        "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T192643Z":
-        past the --keep-count cutoff
-  INFO  archive-cleanup: removing
-        "/var/lib/archiver/mycluster/000000010000000000000001": older than
-        the retention cutoff ("000000010000000000000006")
+  archive$ PGPASSWORD=s3kr3t pg_walserver basebackup --cluster mycluster \
+      --upstream "host=primary port=5534 user=archiver_repl sslmode=require" --keep-count 1
+  21:15:26 2592866 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
+  21:15:26 2592866 INFO  Taking a base backup of primary:5534 into "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T211526Z"
+  21:15:26 2592866 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver-basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/mycluster/basebackups/basebackup-20260928T211526Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T211526Z
+  21:15:26 2592866 INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
+  21:15:26 2592866 INFO  pg_basebackup: checkpoint completed
+  21:15:26 2592866 INFO  pg_basebackup: write-ahead log start point: 0/2C000028 on timeline 1
+  21:15:26 2592866 INFO  pg_basebackup: starting background WAL receiver
+  21:15:26 2592866 INFO  pg_basebackup: created temporary replication slot "pg_basebackup_2592870"
+  21:15:26 2592866 INFO  41457/41457 kB (100%), 0/1 tablespace (...260928T211526Z/global/pg_control)
+  21:15:26 2592866 INFO  41457/41457 kB (100%), 1/1 tablespace
+  21:15:26 2592866 INFO  pg_basebackup: write-ahead log end point: 0/2C000120
+  21:15:26 2592866 INFO  pg_basebackup: waiting for background process to finish streaming ...
+  21:15:26 2592866 INFO  pg_basebackup: syncing data to disk ...
+  21:15:27 2592866 INFO  pg_basebackup: renaming backup_manifest.tmp to backup_manifest
+  21:15:27 2592866 INFO  pg_basebackup: base backup completed
+  21:15:27 2592866 INFO  Base backup "basebackup-20260928T211526Z" is now the latest for "/var/lib/archiver/mycluster"
+  21:15:27 2592866 INFO  archive-cleanup: --keep-count 1 -- retaining WAL from "00000001000000000000002C" onward
+  21:15:27 2592866 INFO  archive-cleanup: removing backup "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T204233Z": past the --keep-count cutoff
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000017": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/00000001000000000000001B": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000020": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/00000001000000000000001A": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/00000001000000000000001D": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/00000001000000000000001F": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000029": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000014": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000022": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000016": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000019": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000015": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/00000001000000000000001E": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/00000001000000000000001C": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000025": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000028": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000024": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000027": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000023": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000021": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/00000001000000000000002A": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000026": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/000000010000000000000018": older than the retention cutoff ("00000001000000000000002C")
+  21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/00000001000000000000002B": older than the retention cutoff ("00000001000000000000002C")
 
-A cleanup refusal (its WAL-continuity pre-flight found a real gap, and
-``--force`` wasn't given) never costs the backup that was just taken::
+A cleanup refusal never costs the backup that was just taken --
+``bbdemo`` was set up with ``--no-receivewal`` and nothing has ever
+pushed WAL into it via ``archive-wal``, so it has no WAL at all: the
+continuity check can never be satisfied for it, the whole cleanup pass
+refuses, and the fresh backup stays::
 
-  archive$ pg_walserver basebackup --pgdata /var/lib/archiver --cluster mycluster \
-      --upstream "host=primary user=archiver_repl sslmode=require" --keep-count 3
-  INFO  Base backup "basebackup-20260928T192800Z" is now the latest for
-        "/var/lib/archiver/mycluster"
-  ERROR archive-cleanup: WAL continuity check failed for kept backup
-        "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T192713Z"
-        (requires WAL from "000000010000000000000006" onward): missing
-        WAL segment "000000010000000000000007" (needed between
-        "000000010000000000000006" and "000000010000000000000008")
-  ERROR basebackup: the new base backup succeeded and has been kept, but
-        the retention cleanup pass that followed it did not complete --
-        see the error(s) logged above
+  archive$ PGPASSWORD=s3kr3t pg_walserver basebackup --cluster bbdemo \
+      --upstream "host=primary port=5534 user=archiver_repl sslmode=require" --keep-count 1
+  21:15:13 2592535 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
+  21:15:13 2592535 INFO  Taking a base backup of primary:5534 into "/var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211513Z"
+  21:15:13 2592535 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver-basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211513Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T211513Z
+  21:15:13 2592535 INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
+  21:15:13 2592535 INFO  pg_basebackup: checkpoint completed
+  21:15:13 2592535 INFO  pg_basebackup: write-ahead log start point: 0/2A000028 on timeline 1
+  21:15:13 2592535 INFO  pg_basebackup: starting background WAL receiver
+  21:15:13 2592535 INFO  pg_basebackup: created temporary replication slot "pg_basebackup_2592542"
+  21:15:13 2592535 INFO  41457/41457 kB (100%), 0/1 tablespace (...260928T211513Z/global/pg_control)
+  21:15:13 2592535 INFO  41457/41457 kB (100%), 1/1 tablespace
+  21:15:13 2592535 INFO  pg_basebackup: write-ahead log end point: 0/2A000120
+  21:15:13 2592535 INFO  pg_basebackup: waiting for background process to finish streaming ...
+  21:15:14 2592535 INFO  pg_basebackup: syncing data to disk ...
+  21:15:14 2592535 INFO  pg_basebackup: renaming backup_manifest.tmp to backup_manifest
+  21:15:14 2592535 INFO  pg_basebackup: base backup completed
+  21:15:14 2592535 INFO  Base backup "basebackup-20260928T211513Z" is now the latest for "/var/lib/archiver/bbdemo"
+  21:15:14 2592535 INFO  archive-cleanup: --keep-count 1 -- retaining WAL from "00000001000000000000002A" onward
+  21:15:14 2592535 ERROR archive-cleanup: WAL continuity check failed for kept backup "/var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211513Z": its own required starting WAL segment "00000001000000000000002A" is missing, and no WAL segment at all is present under "/var/lib/archiver/bbdemo" to compare against
+  21:15:14 2592535 FATAL archive-cleanup: refusing to remove anything: one or more kept backups would be left without a complete, gap-free WAL sequence -- see the specific problem(s) logged above. This is a whole-operation refusal, nothing has been deleted. Pass --force only once you have independently verified it is safe to proceed (e.g. an independent backup, or an accepted/expected gap) -- a default, unattended cron job should never blindly pass --force
+  21:15:14 2592535 ERROR basebackup: the new base backup succeeded and has been kept, but the retention cleanup pass that followed it did not complete -- see the error(s) logged above
 
 See Also
 --------

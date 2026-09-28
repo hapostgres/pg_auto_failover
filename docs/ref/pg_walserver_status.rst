@@ -32,17 +32,17 @@ Examples
 
 ::
 
-  archive$ pg_walserver status --pgdata /var/lib/archiver
-  pg_walserver: running (pid 25671, uptime 0h04m31s)
+  archive$ pg_walserver status
+  pg_walserver: running (pid 2584314, uptime 0h00m14s)
     clusters:  2 configured, 2 with a base backup
     receivewal workers: 1/1 running
-      mycluster            lsn 0/04000060 (timeline 1, 1s ago)
+      mycluster            lsn 0/19000168 (timeline 1, 3s ago)
     bootstrap backups pending: 0
 
 Nothing running::
 
-  archive$ pg_walserver status --pgdata /var/lib/archiver
-  pg_walserver: not running (--pgdata "/var/lib/archiver")
+  archive$ pg_walserver status --pgdata /nonexistent
+  pg_walserver: not running (--pgdata "/nonexistent")
 
 See Also
 --------

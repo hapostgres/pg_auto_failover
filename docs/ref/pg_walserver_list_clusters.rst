@@ -35,11 +35,13 @@ Examples
 
 ::
 
-  archive$ pg_walserver list clusters --pgdata /var/lib/archiver
-  CLUSTER              BACKUP   RECEIVEWAL   WORKER   WAL START              WAL END
+  archive$ pg_walserver list clusters
+  CLUSTER              BACKUP   RECEIVEWAL WORKER   WAL START              WAL END
   --------------------------------------------------------------------------------------------
-  mycluster            yes      pull         yes      0/02000028             0/04000060
-  another               yes      none         n/a      0/09000028             -
+  mycluster            yes      pull       yes      0/2C000028             0/2D000060
+  another               yes      none       n/a      0/18000028             -
+  third                yes      pull       yes      0/1C000028             0/2D000060
+  bbdemo               yes      none       n/a      0/2A000028             -
 
 Having no embedded receivewal worker to report on, running or
 otherwise, is why ``another`` shows ``WORKER n/a``: it was set up with

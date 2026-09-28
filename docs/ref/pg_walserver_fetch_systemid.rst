@@ -14,12 +14,15 @@ Synopsis
       [--path <dir>] [--upstream <conninfo> | --host <host> [--port <port>] [--user <name>]]
       [--force]
 
-Connects to a route's upstream, fetches its system identifier, and
-writes it to ``<path>/pg_walserver_systemid``. Refuses to overwrite an
-already-recorded, different identifier unless ``--force``. ``setup``
-calls this itself; running it directly is for checking or repairing a
-route's own recorded identifier without touching anything else about
-it.
+Connects to a route's upstream, fetches its system identifier and its
+current major version, and writes them to
+``<path>/pg_walserver_systemid``/``<path>/pg_walserver_pgversion`` --
+the latter is what later picks the right ``pg_basebackup`` client for
+this route, see :ref:`pg_walserver_basebackup`. Refuses to overwrite
+an already-recorded, different identifier unless ``--force``.
+``setup`` calls this itself; running it directly is for checking or
+repairing a route's own recorded identifier without touching anything
+else about it.
 
 Options
 -------
@@ -55,14 +58,13 @@ Examples
 --------
 
 Running it again for a route that already has the correct identifier
-on record is a no-op::
+and version on record is a no-op::
 
-  archive$ pg_walserver fetch-systemid --pgdata /var/lib/archiver --cluster mycluster \
-      --upstream "host=primary user=archiver_repl sslmode=require"
-  INFO  Connecting to primary:5432 as "archiver_repl" to fetch the
-        system identifier
-  INFO  "/var/lib/archiver/mycluster" already has the correct system
-        identifier (7690580638048137639)
+  archive$ PGPASSWORD=s3kr3t pg_walserver fetch-systemid --cluster mycluster \
+      --upstream "host=primary port=5534 user=archiver_repl sslmode=require"
+  21:12:33 2587439 INFO  Connecting to primary:5534 as "archiver_repl" to fetch the system identifier
+  21:12:33 2587439 INFO  "/var/lib/archiver/mycluster" already has the correct system identifier (7690676421909321516)
+  21:12:33 2587439 INFO  "/var/lib/archiver/mycluster" already has the correct upstream Postgres version (170011)
 
 See Also
 --------

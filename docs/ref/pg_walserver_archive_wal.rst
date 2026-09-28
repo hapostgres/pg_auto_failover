@@ -60,10 +60,9 @@ the embedded receivewal worker has already delivered -- ``CHECK_FILE``
 only, nothing pushed::
 
   primary$ PGPASSWORD=s3kr3t pg_walserver archive-wal \
-      pg_wal/000000010000000000000002 000000010000000000000002 \
+      pg_wal/000000010000000000000018 000000010000000000000018 \
       --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require
-  INFO  "000000010000000000000002" already matches what "archive" has
-        for "mycluster": nothing to push
+  21:13:25 2589209 INFO  "000000010000000000000018" already matches what "archive" has for "mycluster": nothing to push
 
 The same route, run against a segment the embedded receivewal worker
 has not caught up to yet -- ``CHECK_FILE`` fails, exit 1, and PostgreSQL retries
@@ -72,9 +71,7 @@ has not caught up to yet -- ``CHECK_FILE`` fails, exit 1, and PostgreSQL retries
   primary$ PGPASSWORD=s3kr3t pg_walserver archive-wal \
       pg_wal/0000000100000000000000FF 0000000100000000000000FF \
       --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require
-  ERROR "0000000100000000000000FF" is not yet on "archive" route
-        "mycluster" (missing): waiting for its own receivewal worker to
-        catch up
+  21:13:25 2589232 ERROR "0000000100000000000000FF" is not yet on "archive" route "mycluster" (missing): waiting for its own receivewal worker to catch up
 
 See Also
 --------

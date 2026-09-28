@@ -32,10 +32,10 @@ Examples
 
 ::
 
-  archive$ pg_walserver list backups --pgdata /var/lib/archiver
+  archive$ pg_walserver list backups --cluster mycluster
   CLUSTER              LABEL                        TAKEN AT               SIZE       LATEST
   --------------------------------------------------------------------------------------------
-  mycluster            basebackup-20260928T134117Z  2026-09-28T13:41:17Z   38.7MB     yes
+  mycluster            basebackup-20260928T211526Z  2026-09-28T21:15:26Z   56.1MB     yes
 
 See Also
 --------

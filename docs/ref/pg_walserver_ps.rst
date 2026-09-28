@@ -31,23 +31,27 @@ Options
 Examples
 --------
 
-With ``serve`` running, one route with an embedded receivewal worker::
+With ``serve`` running, more than one route each with an embedded
+receivewal worker -- ``|--`` for every branch but the last, ``\`--``
+for the last::
 
-  archive$ pg_walserver ps --pgdata /var/lib/archiver
-  pg_walserver(25671) running, uptime 0h04m31s
-  `-- receivewal(25673) mycluster, running, uptime 0h04m31s, restarts 0, lsn 0/04000060 (timeline 1, 1s ago)
+  archive$ pg_walserver ps
+  pg_walserver(2584314) running, uptime 0h00m37s
+  |-- receivewal(2584317) mycluster, running, uptime 0h00m37s, restarts 0, lsn 0/1C0000F8 (timeline 1, 3s ago)
+  `-- receivewal(2585330) third, running, uptime 0h00m04s, restarts 0, lsn 0/1C0000F8 (timeline 1, 3s ago)
 
-With more than one route, each gets its own branch, ``|--`` for every
-one but the last, ``\`--`` for the last -- an in-flight bootstrap base
-backup job (see :ref:`pg_walserver_serve`'s "Archiving one cluster")
-appears the same way, as ``bootstrap(<pid>) <cluster>, running, uptime
-...``. A route with no receivewal worker (``--receivewal none``) never
-gets a branch at all: it has nothing running to show.
+An in-flight bootstrap base backup job (see :ref:`pg_walserver_serve`'s
+"Archiving one cluster") appears the same way, as ``bootstrap(<pid>)
+<cluster>, running, uptime ...``. A route with no receivewal worker
+(``--receivewal none``) never gets a branch at all: it has nothing
+running to show -- ``another`` (``--no-receivewal``, see
+:ref:`pg_walserver_ls`) is absent from the tree above for exactly that
+reason.
 
 Nothing running::
 
-  archive$ pg_walserver ps --pgdata /var/lib/archiver
-  pg_walserver: not running (--pgdata "/var/lib/archiver")
+  archive$ pg_walserver ps --pgdata /nonexistent
+  pg_walserver: not running (--pgdata "/nonexistent")
 
 See Also
 --------

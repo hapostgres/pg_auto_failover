@@ -37,10 +37,10 @@ Examples
 
 Aggregate stats::
 
-  archive$ pg_walserver list wal --pgdata /var/lib/archiver
+  archive$ pg_walserver list wal --cluster mycluster
   CLUSTER              SEGMENTS  SIZE       OLDEST                   NEWEST                   HISTORY
   --------------------------------------------------------------------------------------------
-  mycluster            2         48.0MB     000000010000000000000001 000000010000000000000002 0
+  mycluster            1         32.0MB     00000001000000000000002C 00000001000000000000002C 0
 
 See Also
 --------

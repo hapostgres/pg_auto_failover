@@ -32,8 +32,8 @@ Examples
 
 ::
 
-  archive$ pg_walserver reload --pgdata /var/lib/archiver
-  INFO  Sent SIGHUP to pg_walserver pid 25671
+  archive$ pg_walserver reload
+  21:11:36 2585328 INFO  Sent SIGHUP to pg_walserver pid 2584314
 
 See Also
 --------
