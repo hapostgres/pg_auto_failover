@@ -27,7 +27,12 @@
  *     fetch-systemid  Fetch a route's upstream system identifier,
  *                     cli_fetch_systemid.c.
  *     basebackup      Take a base backup of a route's upstream,
- *                     cli_basebackup.c.
+ *                     cli_basebackup.c. With --keep-count/--keep-age, also
+ *                     runs archive-cleanup's own retention pass (ws_
+ *                     archive_cleanup_run(), cli_archive_cleanup.c) against
+ *                     the route right after -- one cron line that both
+ *                     backs up and prunes; a cleanup refusal never takes
+ *                     back the backup that was just taken.
  *     create-cert     Create a self-signed TLS certificate for --pgdata,
  *                     cli_create_cert.c.
  *     archive-wal     `pg_walserver archive-wal %p %f`: push one WAL/
@@ -821,6 +826,12 @@ static char basebackupUpstream[MAXCONNINFO] = { 0 };
 static char basebackupHost[_POSIX_HOST_NAME_MAX] = { 0 };
 static char basebackupPort[16] = { 0 };
 static char basebackupUser[NAMEDATALEN] = { 0 };
+static bool basebackupHaveKeepCount = false;
+static int basebackupKeepCount = 0;
+static bool basebackupHaveKeepAge = false;
+static WsRetentionAge basebackupKeepAge = { 0 };
+static bool basebackupDryRun = false;
+static bool basebackupForce = false;
 
 static struct option basebackupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
@@ -830,6 +841,10 @@ static struct option basebackupLongOptions[] = {
 	{ "host", required_argument, NULL, 'h' },
 	{ "port", required_argument, NULL, 'p' },
 	{ "user", required_argument, NULL, 'U' },
+	{ "keep-count", required_argument, NULL, 'k' },
+	{ "keep-age", required_argument, NULL, 'a' },
+	{ "dry-run", no_argument, NULL, 'n' },
+	{ "force", no_argument, NULL, 'f' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -838,10 +853,18 @@ cli_basebackup_getopt(int argc, char **argv)
 {
 	optind = 0;
 	(void) get_env_pgdata(basebackupPgdata);
+	basebackupHaveKeepCount = false;
+	basebackupKeepCount = 0;
+	basebackupHaveKeepAge = false;
+	basebackupKeepAge = (WsRetentionAge) {
+		0
+	};
+	basebackupDryRun = false;
+	basebackupForce = false;
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c:P:u:h:p:U:",
+	while ((c = getopt_long(argc, argv, "D:c:P:u:h:p:U:k:a:nf",
 							basebackupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -888,6 +911,42 @@ cli_basebackup_getopt(int argc, char **argv)
 				break;
 			}
 
+			case 'k':
+			{
+				if (!stringToInt(optarg, &basebackupKeepCount) ||
+					basebackupKeepCount <= 0)
+				{
+					log_fatal("Invalid --keep-count value \"%s\": expected "
+							  "a positive whole number", optarg);
+					exit(1);
+				}
+				basebackupHaveKeepCount = true;
+				break;
+			}
+
+			case 'a':
+			{
+				if (!ws_parse_retention_age(optarg, &basebackupKeepAge))
+				{
+					/* error already logged */
+					exit(1);
+				}
+				basebackupHaveKeepAge = true;
+				break;
+			}
+
+			case 'n':
+			{
+				basebackupDryRun = true;
+				break;
+			}
+
+			case 'f':
+			{
+				basebackupForce = true;
+				break;
+			}
+
 			default:
 			{
 				commandline_print_usage(&ws_root, stderr);
@@ -916,7 +975,39 @@ cli_basebackup_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	exit(cli_basebackup_run(&target, NULL, 0) ? 0 : 1);
+	if (!cli_basebackup_run(&target, NULL, 0))
+	{
+		/* errors have already been logged; never attempt retention against
+		 * a failed/partial backup attempt */
+		exit(1);
+	}
+
+	/* --keep-count/--keep-age are optional: with neither given, basebackup
+	 * behaves exactly as it always has (just takes the backup). When
+	 * either is given, run the exact same retention-and-cleanup logic
+	 * "pg_walserver archive-cleanup" itself uses (count/age union math,
+	 * the always-protect-".latest" rule, and its WAL-continuity pre-flight
+	 * safety check) against the route we just backed up. A cleanup refusal
+	 * (e.g. the continuity check finds a problem and --force wasn't given)
+	 * only logs an error here -- it must never undo or unreport the base
+	 * backup that was just taken and kept: a cron job wired to this command
+	 * should always end up with one more good backup on disk, even on a
+	 * run where its own retention pass couldn't safely prune anything. */
+	if (basebackupHaveKeepCount || basebackupHaveKeepAge)
+	{
+		if (!ws_archive_cleanup_run(target.path,
+									basebackupHaveKeepCount, basebackupKeepCount,
+									basebackupHaveKeepAge, basebackupKeepAge,
+									basebackupDryRun, basebackupForce))
+		{
+			log_error("basebackup: the new base backup succeeded and has "
+					  "been kept, but the retention cleanup pass that "
+					  "followed it did not complete -- see the error(s) "
+					  "logged above");
+		}
+	}
+
+	exit(0);
 }
 
 
@@ -925,20 +1016,47 @@ static CommandLine basebackup_command =
 				 "Take a base backup of a route's upstream",
 				 "--cluster <name> --pgdata <path> | --path <dir> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
-				 "[--user <name>]]",
-				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
+				 "[--user <name>]] [--keep-count <N>] [--keep-age <interval>] "
+				 "[--dry-run] [--force]",
+				 "  --pgdata      where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
-				 "  --cluster   the cluster name to back up (looked up in "
+				 "  --cluster     the cluster name to back up (looked up in "
 				 "pg_walserver.ini)\n"
-				 "  --path      the route's own directory (overrides the "
+				 "  --path        the route's own directory (overrides the "
 				 "route's own \"path\")\n"
-				 "  --upstream  a libpq connection string to connect with "
+				 "  --upstream    a libpq connection string to connect with "
 				 "(overrides the\n"
-				 "              route's own \"upstream\")\n"
+				 "                route's own \"upstream\")\n"
 				 "  --host / --port / --user  further override individual "
 				 "connection\n"
-				 "              parameters (default port: 5432, default "
-				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n",
+				 "                parameters (default port: 5432, default "
+				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+													  "  --keep-count  after taking the backup, also run "
+													  "archive-cleanup's own\n"
+													  "                retention pass, keeping at least this "
+													  "many of the most\n"
+													  "                recent base backups (optional; with "
+													  "neither --keep-count\n"
+													  "                nor --keep-age, no cleanup is attempted)\n"
+													  "  --keep-age    ... keeping every base backup taken "
+													  "within this long\n"
+													  "                (\"72h\"/\"30d\"/\"4w\"/\"3m\"); the more "
+													  "conservative of\n"
+													  "                --keep-count/--keep-age wins when both "
+													  "are given\n"
+													  "  --dry-run     with --keep-count/--keep-age, report what "
+													  "the cleanup\n"
+													  "                pass would remove without removing "
+													  "anything (the backup\n"
+													  "                itself is always taken for real)\n"
+													  "  --force       with --keep-count/--keep-age, bypass the "
+													  "cleanup pass's\n"
+													  "                WAL-continuity refusal (same meaning as "
+													  "archive-cleanup's\n"
+													  "                own --force); never bypasses the backup "
+													  "itself, and never\n"
+													  "                turns a cleanup refusal into a lost "
+													  "backup\n",
 				 cli_basebackup_getopt, cli_basebackup_command_run);
 
 
