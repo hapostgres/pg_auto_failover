@@ -61,16 +61,25 @@ the other.
 Archiving one cluster
 ~~~~~~~~~~~~~~~~~~~~~
 
-``pg_walserver setup`` connects to an upstream PostgreSQL instance,
-records its system identifier, and takes a base backup. From that point
-on, the route it created captures WAL continuously (an embedded,
-supervised ``pg_receivewal``, on by default) directly into its own
-storage. Adding ``archive_command = 'pg_walserver archive-wal ...'`` on
-the primary is a defense-in-depth backstop on top of this, not a
+``pg_walserver setup`` connects to an upstream PostgreSQL instance and
+records its system identifier; it does not take a base backup itself.
+``pg_walserver serve`` does that instead, automatically, once, for any
+route that doesn't have one yet -- at startup, and again after every
+``pg_walserver reload`` -- so a route is always fully self-bootstrapping:
+run ``setup``, then start (or reload) ``serve``, and the route ends up
+with both a base backup and continuous WAL capture with no further manual
+step. From that point on, the route captures WAL continuously (an
+embedded, supervised ``pg_receivewal``, on by default) directly into its
+own storage. Adding ``archive_command = 'pg_walserver archive-wal ...'``
+on the primary is a defense-in-depth backstop on top of this, not a
 replacement for it: every real production deployment should configure
-both. See `Routing`_ below for what determines which files each
-connecting client can reach, and `A complete standalone example`_ for the
-full sequence.
+both. Keeping a route's backup current *after* that first, automatic one
+is the operator's own job (recurring backups are out of scope for
+``pg_walserver``, the same as WAL retention is for ``archive-cleanup``):
+run ``pg_walserver basebackup`` by hand, or from a cron job, whenever a
+fresh one is wanted. See `Routing`_ below for what determines which files
+each connecting client can reach, and `A complete standalone example`_ for
+the full sequence.
 
 Restoring, or building a standby, from the archive
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -252,9 +261,13 @@ Accepts the same ``--pgdata``, ``--route``, ``--path``, ``--upstream``,
 ``setup``
 ~~~~~~~~~
 
-Writes or validates one ``pg_walserver.ini`` route, fetches its upstream
-system identifier, and, with ``--with-basebackup``, takes its first base
-backup synchronously.
+Writes or validates one ``pg_walserver.ini`` route and fetches its
+upstream system identifier. Never takes a base backup itself: it reloads
+an already-running ``serve`` for the same ``--pgdata``, if there is one,
+so it picks up the route immediately (with no server running, the config
+just written takes effect the next time ``serve`` starts). Either way,
+``serve`` itself takes the route's first base backup automatically, once,
+the next time it starts or reloads.
 
 --pgdata
 
@@ -298,10 +311,6 @@ backup synchronously.
 --force
 
   Overwrite an existing route's ``path``/``upstream`` instead of refusing.
-
---with-basebackup
-
-  Take the route's first base backup before returning.
 
 ``create-cert``
 ~~~~~~~~~~~~~~~
@@ -447,20 +456,21 @@ archive host, then reload::
 ``wal_level`` must already be ``replica`` or higher (the default since
 PostgreSQL 10).
 
-**2. On the archive host**, create the route, fetch the system
-identifier, and take the first base backup::
+**2. On the archive host**, create the route and fetch the system
+identifier::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver setup \
       --pgdata /var/lib/archiver --route mycluster \
       --path /var/lib/archiver/mycluster \
-      --upstream "host=primary user=archiver_repl sslmode=require" \
-      --with-basebackup
+      --upstream "host=primary user=archiver_repl sslmode=require"
 
 ``capture = pull`` is written by default, so the route's own WAL segments
 are captured continuously once ``serve`` starts (below), without a
 separate ``pg_receivewal`` process. Pass ``--no-capture`` to skip this and
 feed the route another way (an externally-run ``pg_receivewal``, or
-``archive-wal`` alone).
+``archive-wal`` alone). No server is running yet at this point, so
+``setup`` only logs that this config will take effect the next time
+``serve`` starts -- which is the next step.
 
 **3. Configure access and start the server**. ``setup`` does not touch
 HBA or the password file::
@@ -471,6 +481,14 @@ HBA or the password file::
   hostssl  mycluster  archiver_repl  10.0.0.0/8  scram-sha-256
   EOF
   archive$ pg_walserver --pgdata /var/lib/archiver --port 6543
+
+``serve`` takes the route's first base backup automatically at this point,
+in the background, once its embedded capturer (if any) shows real
+streaming evidence: no separate ``pg_walserver basebackup`` call is
+needed. Running ``pg_walserver setup`` again later, for the same or a new
+route, while ``serve`` is already running, reloads it immediately (a
+``SIGHUP``, the same as ``pg_walserver reload``) instead of waiting for a
+restart.
 
 **4. Optional: add** ``archive_command`` **as a backstop** alongside the
 embedded capturer, on the primary::
@@ -550,15 +568,13 @@ automatically the first time a second named route needs one::
       --pgdata /var/lib/archiver --route mycluster \
       --path /var/lib/archiver/mycluster \
       --upstream "host=primary port=5432 user=archiver_repl sslmode=require" \
-      --hostname mycluster.archive.example.com \
-      --with-basebackup
+      --hostname mycluster.archive.example.com
 
   archive$ PGPASSWORD=s3kr3t pg_walserver setup \
       --pgdata /var/lib/archiver --route another \
       --path /var/lib/archiver/another \
       --upstream "host=primary2 port=5432 user=archiver_repl sslmode=require" \
-      --hostname another.archive.example.com \
-      --with-basebackup
+      --hostname another.archive.example.com
 
   archive$ pg_walserver --pgdata /var/lib/archiver --port 6543 &
 

@@ -36,4 +36,16 @@
 bool cli_basebackup_run(const WsUpstreamTarget *target,
 						char *labelOut, size_t labelOutSize);
 
+/*
+ * cli_basebackup_route_has_backup returns true when
+ * "<path>/basebackups/.latest" exists and is non-empty -- the same "does
+ * this route already have a usable base backup" check cmd_base_backup.c's
+ * own read_latest_basebackup_label() effectively makes (it additionally
+ * validates the label's own character set, not needed for this plain
+ * existence check). Used by accept_loop.c's own ws_bootstrap_missing_
+ * backups() to decide which routes "pg_walserver serve" needs to take an
+ * automatic bootstrap backup for.
+ */
+bool cli_basebackup_route_has_backup(const char *path);
+
 #endif /* WS_CLI_BASEBACKUP_H */

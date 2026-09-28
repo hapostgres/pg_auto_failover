@@ -398,56 +398,6 @@ ws_capture_tick(bool (*otherChildExited)(void *ctx, pid_t pid, int status),
 
 
 /*
- * ws_capture_prime_route -- see capture.h.
- */
-bool
-ws_capture_prime_route(const char *routeKey, const char *path,
-					   const char *upstream, pid_t *pidOut)
-{
-	if (upstream == NULL || upstream[0] == '\0')
-	{
-		log_error("Cannot prime the embedded pull capturer for route "
-				  "\"%s\": no upstream to connect to", routeKey);
-		return false;
-	}
-
-	WsCaptureRoute cr;
-
-	memset(&cr, 0, sizeof(WsCaptureRoute));
-	strlcpy(cr.routeKey, routeKey, sizeof(cr.routeKey));
-	strlcpy(cr.path, path, sizeof(cr.path));
-	strlcpy(cr.upstream, upstream, sizeof(cr.upstream));
-
-	return start_one_capture_child(&cr, pidOut);
-}
-
-
-/*
- * ws_capture_stop_primed -- see capture.h.
- */
-void
-ws_capture_stop_primed(pid_t pid)
-{
-	if (pid <= 0)
-	{
-		return;
-	}
-
-	ProcessService service;
-
-	memset(&service, 0, sizeof(ProcessService));
-	strlcpy(service.name, "capture-priming", sizeof(service.name));
-	service.pid = pid;
-	service.policy = PROCESS_RP_TEMPORARY;
-
-	ProcessSupervisor supervisor;
-
-	process_supervisor_init(&supervisor, &service, 1);
-	process_supervisor_stop_all(&supervisor, SIGINT, WS_CAPTURE_STOP_TIMEOUT_MS);
-}
-
-
-/*
  * ws_capture_stop_all -- see capture.h.
  */
 void

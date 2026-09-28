@@ -73,7 +73,7 @@ setup {
 
     # route A: the first route in a brand new pg_walserver.ini -- one named
     # route needs no TLS at all yet, dbname alone is unambiguous
-    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/sni --route routeA --path /tmp/sni/routeA --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --hostname routeA.internal --with-basebackup'
+    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/sni --route routeA --path /tmp/sni/routeA --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --hostname routeA.internal'
     exec walserver bash -c 'test ! -f /tmp/sni/server.crt'
 }
 
@@ -85,7 +85,7 @@ step test_001_second_named_route_creates_certificate {
     # route B: a *second* named route -- this is the moment dbname alone
     # stops being enough, and setup creates a self-signed certificate for
     # --pgdata on its own, with no separate step asked for
-    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/sni --route routeB --path /tmp/sni/routeB --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --hostname routeB.internal --with-basebackup'
+    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/sni --route routeB --path /tmp/sni/routeB --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --hostname routeB.internal'
     exec walserver bash -c 'test -f /tmp/sni/server.crt && test -f /tmp/sni/server.key'
 
     # both routes archive from the same upstream (node1), so their real

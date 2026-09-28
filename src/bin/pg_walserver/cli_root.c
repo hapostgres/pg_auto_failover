@@ -18,8 +18,12 @@
  *                     own thin shim provides one.
  *     scram-secret    Print one archiver-passwd line for a user.
  *     setup           Create or validate one pg_walserver.ini route --
- *                     the write/path/upstream/role-check/systemid/
- *                     optional-basebackup wizard, cli_setup.c.
+ *                     the write/path/upstream/role-check/systemid wizard,
+ *                     cli_setup.c, then reloads an already-running "serve"
+ *                     for this --pgdata if there is one (never takes a
+ *                     base backup itself: "serve" bootstraps one
+ *                     automatically, see accept_loop.c's own
+ *                     ws_bootstrap_missing_backups()).
  *     fetch-systemid  Fetch a route's upstream system identifier,
  *                     cli_fetch_systemid.c.
  *     basebackup      Take a base backup of a route's upstream,
@@ -388,6 +392,16 @@ cli_serve_run(int argc, char **argv)
 		 * own comment for the full startup/shutdown contract.
 		 */
 		(void) ws_capture_start_all(serveConfig.routes, serveConfig.routeCount);
+
+		/*
+		 * Now that every "capture = pull" route's own real capturer above
+		 * has been started, check every route for a missing base backup
+		 * and kick off an automatic bootstrap for it in the background --
+		 * the first of the two trigger points documented in accept_loop.h's
+		 * own ws_bootstrap_missing_backups() comment (the second being a
+		 * successful SIGHUP reload, ws_reload_config(), accept_loop.c).
+		 */
+		ws_bootstrap_missing_backups(serveConfig.routes, serveConfig.routeCount);
 
 		/*
 		 * The pidfile is what "pg_walserver reload"/"pg_ctl reload"-style
@@ -825,7 +839,7 @@ static CommandLine basebackup_command =
 
 /* -----------------------------------------------------------------------
  * pg_walserver setup --route <key> --path <dir> --pgdata <path>
- *                     [--upstream ...] [--force] [--with-basebackup]
+ *                     [--upstream ...] [--force]
  * ----------------------------------------------------------------------- */
 
 static WsSetupOptions setupOptions = { 0 };
@@ -842,7 +856,6 @@ static struct option setupLongOptions[] = {
 	{ "capture", required_argument, NULL, 'c' },
 	{ "no-capture", no_argument, NULL, 'N' },
 	{ "force", no_argument, NULL, 'f' },
-	{ "with-basebackup", no_argument, NULL, 'b' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -866,7 +879,7 @@ cli_setup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:n:c:fbN",
+	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:n:c:fN",
 							setupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -953,12 +966,6 @@ cli_setup_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'b':
-			{
-				setupOptions.withBasebackup = true;
-				break;
-			}
-
 			default:
 			{
 				commandline_print_usage(&ws_root, stderr);
@@ -971,13 +978,78 @@ cli_setup_getopt(int argc, char **argv)
 }
 
 
+/*
+ * cli_setup_reload_running_server reloads an already-running "pg_walserver
+ * serve" for the same --pgdata, if one is running, so it immediately picks
+ * up the route "setup" just wrote/validated -- exactly "pg_walserver
+ * reload"'s own read_pidfile()/SIGHUP shape (cli_reload_run() above), with
+ * one difference: no running server at all is not an error here, only a
+ * normal, expected case (e.g. setting up a route before "serve" has ever
+ * been started for this --pgdata) -- logged, not fatal, and setup itself
+ * still exits 0.
+ */
+static void
+cli_setup_reload_running_server(const char *pgdata)
+{
+	if (pgdata == NULL || pgdata[0] == '\0')
+	{
+		return;
+	}
+
+	char pidfilePath[MAXPGPATH] = { 0 };
+
+	sformat(pidfilePath, sizeof(pidfilePath), "%s/pg_walserver.pid", pgdata);
+
+	/*
+	 * Ignore SIGHUP in THIS one-shot process first, before ever sending it
+	 * on -- see cli_reload_run()'s own comment just above for why.
+	 */
+	signal(SIGHUP, SIG_IGN);
+
+	pid_t pid = 0;
+
+	if (!read_pidfile(pidfilePath, &pid))
+	{
+		log_info("No running \"pg_walserver serve\" found at \"%s\": the "
+				 "route just written will take effect the next time "
+				 "\"serve\" starts", pidfilePath);
+		return;
+	}
+
+	if (kill(pid, SIGHUP) != 0)
+	{
+		if (errno == ESRCH)
+		{
+			log_info("Pidfile \"%s\" names pid %d, which is not running: "
+					 "the route just written will take effect the next "
+					 "time \"serve\" starts", pidfilePath, pid);
+		}
+		else
+		{
+			log_warn("Failed to send SIGHUP to pg_walserver pid %d: %m", pid);
+		}
+		return;
+	}
+
+	log_info("Reloaded the running pg_walserver (pid %d): it will pick up "
+			 "this route immediately", pid);
+}
+
+
 static void
 cli_setup_command_run(int argc, char **argv)
 {
 	(void) argc;
 	(void) argv;
 
-	exit(cli_setup_run(&setupOptions) ? 0 : 1);
+	if (!cli_setup_run(&setupOptions))
+	{
+		exit(1);
+	}
+
+	cli_setup_reload_running_server(setupOptions.pgdata);
+
+	exit(0);
 }
 
 
@@ -988,7 +1060,7 @@ static CommandLine setup_command =
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--hostname <fqdn>] "
 				 "[--capture pull|none | --no-capture] "
-				 "[--force] [--with-basebackup]",
+				 "[--force]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
 				 "  --route     the route key to create or validate\n"
@@ -1034,8 +1106,17 @@ static CommandLine setup_command =
 													  "or overwrite an\n"
 													  "              already-recorded, different system "
 													  "identifier\n"
-													  "  --with-basebackup  take the route's first base backup "
-													  "before returning\n",
+													  "\n"
+													  "Reloads an already-running \"pg_walserver serve\" for this "
+													  "--pgdata, if one is\n"
+													  "running, so it picks up this route immediately; with none "
+													  "running, the\n"
+													  "config just written takes effect the next time \"serve\" "
+													  "starts. Either\n"
+													  "way, \"serve\" itself takes this route's first base backup "
+													  "automatically\n"
+													  "if it doesn't have one yet -- \"setup\" never takes one "
+													  "itself.\n",
 				 cli_setup_getopt, cli_setup_command_run);
 
 

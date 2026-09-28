@@ -1,11 +1,13 @@
 # pg_walserver, on its own, with no archiver/monitor integration at all --
 # except for `pg_walserver setup` itself, its own one-shot onboarding
 # wizard (cli_setup.c): create/validate the pg_walserver.ini route, check
-# the upstream role's REPLICATION attribute, fetch the system identifier,
-# and take the route's first base backup, all in one command. Ongoing WAL
-# capture is still the stock OS pg_receivewal, run by hand here (pg_
-# walserver's own embedded capturer is a later addition, see DESIGN-
-# standalone-archiving.md) -- this is the smallest harness that still
+# the upstream role's REPLICATION attribute, and fetch the system
+# identifier. "pg_walserver serve" itself then bootstraps the route's
+# first base backup automatically the moment it starts (accept_loop.c's
+# own ws_bootstrap_missing_backups()) -- setup no longer takes one itself.
+# Ongoing WAL capture is still the stock OS pg_receivewal, run by hand
+# here (pg_walserver's own embedded capturer is a later addition, see
+# DESIGN-standalone-archiving.md) -- this is the smallest harness that still
 # exercises the real replication wire protocol end to end, ahead of the
 # archiver feature (a later PR) that wires pg_walserver into pg_autoctl's
 # own process supervision.
@@ -35,8 +37,8 @@
 #             match always wins over the wildcard, never the other way
 #             around
 #   test_006  a real, unmodified `pg_basebackup` client takes a BASE_BACKUP
-#             from pg_walserver of the exact backup `setup --with-
-#             basebackup` produced, then a real standby -- primary_conninfo
+#             from pg_walserver of the exact backup "serve" bootstrapped
+#             automatically at startup, then a real standby -- primary_conninfo
 #             pointed at pg_walserver, standby.signal, nothing but stock
 #             PostgreSQL commands anywhere in this step -- streams live
 #             changes from it via a genuine walreceiver (not pg_receivewal)
@@ -70,15 +72,16 @@ setup {
 
     # the one-shot wizard: creates /tmp/ws/default/0, writes the
     # pg_walserver.ini [default/0] section (path + upstream), checks
-    # pgautofailover_replicator's REPLICATION attribute on node1, fetches
-    # node1's real system identifier into archiver-systemid, and -- with
-    # --with-basebackup -- takes the route's first base backup
-    # synchronously, not returning until it has actually succeeded.
-    # --no-capture: this spec drives its own external pg_receivewal (below)
-    # into this exact route directory -- the embedded pull capturer, on by
-    # default now, would otherwise fork a second process racing it for the
-    # same segment files.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --with-basebackup --no-capture'
+    # pgautofailover_replicator's REPLICATION attribute on node1, and
+    # fetches node1's real system identifier into archiver-systemid. No
+    # "serve" is running yet at this point, so setup only logs that this
+    # config will take effect the next time it starts -- test_000 below
+    # starts it, which is what actually bootstraps this route's first base
+    # backup automatically. --no-capture: this spec drives its own external
+    # pg_receivewal (below) into this exact route directory -- the embedded
+    # pull capturer, on by default now, would otherwise fork a second
+    # process racing it for the same segment files.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
     exec node2 bash -c 'if grep -qx "capture = pull" /tmp/ws/pg_walserver.ini; then echo "capture = pull should not have been written with --no-capture"; false; fi'
 
     # capture real WAL off node1 with the stock pg_receivewal (not this
@@ -96,17 +99,21 @@ teardown {
 
 step test_000_sync_files_from_node1 {
     # `setup`, in the setup{} block above, already wrote archiver-systemid
-    # and took the first base backup -- nothing to fetch by hand here
-    # beyond the one value pgaftest's own let/${var} (not available at this
-    # point in its history) can't carry across steps on its own.
+    # -- nothing to fetch by hand here beyond the one value pgaftest's own
+    # let/${var} (not available at this point in its history) can't carry
+    # across steps on its own.
     exec node2 bash -c 'ls /tmp/ws/default/0/*[0-9A-F] | grep -v "\.partial$" | xargs -n1 basename | sort | tail -1 > /tmp/seg.txt'
     exec node2 bash -c 'test -s /tmp/seg.txt'
     exec node2 bash -c 'test -s /tmp/ws/default/0/archiver-systemid'
-    exec node2 bash -c 'test -s /tmp/ws/default/0/basebackups/.latest'
     # the setup capturer keeps running: test_003 needs it live, to prove
     # pg_walserver can serve a segment while it is concurrently being written
     exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-walsender.log 2>&1 & echo started'
     exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walsender.log; exit 1'
+    # "serve" bootstraps this route's first base backup automatically at
+    # startup now (no more "setup --with-basebackup", see accept_loop.c's
+    # own ws_bootstrap_missing_backups()) -- wait for it to actually
+    # complete before the rest of this spec relies on it.
+    exec node2 bash -c 'for i in $(seq 30); do test -s /tmp/ws/default/0/basebackups/.latest && exit 0; sleep 1; done; cat /tmp/ws-walsender.log; exit 1'
 }
 
 step test_001_identify_system_and_show {
@@ -177,8 +184,9 @@ step test_005_wildcard_route {
 step test_006_real_standby_with_core_tools {
     # a real, unmodified pg_basebackup client BASE_BACKUP-ing from
     # pg_walserver: proves cmd_base_backup.c actually serves the backup
-    # `setup --with-basebackup` took (test_000 above only checked that the
-    # file exists on disk, never that it's actually servable over the wire).
+    # "serve" bootstrapped automatically at startup (test_000 above only
+    # checked that the file exists on disk, never that it's actually
+    # servable over the wire).
     exec node2 bash -c 'pg_basebackup -w -d "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -D /tmp/standby -X none --no-manifest'
     exec node2 bash -c 'test -f /tmp/standby/PG_VERSION'
 

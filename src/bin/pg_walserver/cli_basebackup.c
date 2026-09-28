@@ -122,3 +122,30 @@ cli_basebackup_run(const WsUpstreamTarget *target,
 
 	return true;
 }
+
+
+/*
+ * cli_basebackup_route_has_backup -- see cli_basebackup.h.
+ */
+bool
+cli_basebackup_route_has_backup(const char *path)
+{
+	char latestPath[MAXPGPATH] = { 0 };
+
+	sformat(latestPath, sizeof(latestPath), "%s/" WS_BASEBACKUP_LATEST_FILENAME,
+			path);
+
+	char *contents = NULL;
+	long fileSize = 0;
+
+	if (!read_file_if_exists(latestPath, &contents, &fileSize) || contents == NULL)
+	{
+		return false;
+	}
+
+	bool nonEmpty = fileSize > 0 && contents[0] != '\0';
+
+	free(contents);
+
+	return nonEmpty;
+}
