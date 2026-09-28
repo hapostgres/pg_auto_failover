@@ -265,6 +265,92 @@ wal_dir_has_any_segment(const WsRoute *route)
 }
 
 
+/*
+ * ws_wal_dir_classify_filename -- see wal_dir_scan.h.
+ */
+WsWalFileKind
+ws_wal_dir_classify_filename(const char *name, char *segmentOut)
+{
+	size_t len = strlen(name);
+
+	if (is_wal_segment_filename(name))
+	{
+		if (segmentOut != NULL)
+		{
+			memcpy(segmentOut, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
+			segmentOut[WS_WAL_FNAME_LEN] = '\0';
+		}
+		return WS_WAL_FILE_SEGMENT;
+	}
+
+	const char *partialSuffix = ".partial";
+	size_t partialLen = strlen(partialSuffix);
+
+	if (len == WS_WAL_FNAME_LEN + partialLen &&
+		strcmp(name + WS_WAL_FNAME_LEN, partialSuffix) == 0)
+	{
+		char prefix[WS_WAL_FNAME_LEN + 1] = { 0 };
+
+		memcpy(prefix, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
+
+		if (is_wal_segment_filename(prefix))
+		{
+			if (segmentOut != NULL)
+			{
+				strlcpy(segmentOut, prefix, WS_WAL_FNAME_LEN + 1);
+			}
+			return WS_WAL_FILE_PARTIAL;
+		}
+	}
+
+	/* "<24hex>.<8hex>.backup" */
+	const char *backupSuffix = ".backup";
+
+	if (len == WS_WAL_FNAME_LEN + 1 + 8 + strlen(backupSuffix) &&
+		name[WS_WAL_FNAME_LEN] == '.' &&
+		strcmp(name + WS_WAL_FNAME_LEN + 1 + 8, backupSuffix) == 0)
+	{
+		char prefix[WS_WAL_FNAME_LEN + 1] = { 0 };
+
+		memcpy(prefix, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
+
+		if (is_wal_segment_filename(prefix))
+		{
+			if (segmentOut != NULL)
+			{
+				strlcpy(segmentOut, prefix, WS_WAL_FNAME_LEN + 1);
+			}
+			return WS_WAL_FILE_BACKUP;
+		}
+	}
+
+	/* "<8hex>.history" */
+	const char *historySuffix = ".history";
+
+	if (len == 8 + strlen(historySuffix) &&
+		strcmp(name + 8, historySuffix) == 0)
+	{
+		bool hexOk = true;
+
+		for (int i = 0; i < 8; i++)
+		{
+			if (!isxdigit((unsigned char) name[i]))
+			{
+				hexOk = false;
+				break;
+			}
+		}
+
+		if (hexOk)
+		{
+			return WS_WAL_FILE_HISTORY;
+		}
+	}
+
+	return WS_WAL_FILE_OTHER;
+}
+
+
 bool
 wal_position_cache_read(const char *path, uint32_t *timeline,
 						char *lsn, size_t lsnSize)

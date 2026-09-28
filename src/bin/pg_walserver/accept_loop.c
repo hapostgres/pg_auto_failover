@@ -17,6 +17,7 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
@@ -34,6 +35,7 @@
 #include "hba.h"
 #include "tls.h"
 #include "log.h"
+#include "ps_state.h"
 #include "repl_command.h"
 #include "routes.h"
 #include "signals.h"
@@ -53,6 +55,17 @@
  * below.
  */
 #define WS_REAL_WALRECEIVER_DBNAME "replication"
+
+/* forward declaration: ws_reload_config() below calls this, but it is
+ * defined further down, right before ws_accept_loop() -- see its own
+ * header comment */
+static void refresh_ps_state(const WsServerConfig *config, pid_t servePid,
+							 time_t serveStartedAt);
+
+/* this process's own pid/start time, set once at the top of ws_accept_loop()
+ * and read by both refresh_ps_state() and ws_reload_config() */
+static pid_t gServePid = 0;
+static time_t gServeStartedAt = 0;
 
 
 /*
@@ -365,13 +378,16 @@ connection_child_exited(void *ctx, pid_t pid, int status)
  * successfully-reaped child of our own.
  */
 static pid_t bootstrapChildren[WS_MAX_CONNECTIONS];
+static char bootstrapChildRoutes[WS_MAX_CONNECTIONS][NAMEDATALEN + 16];
+static time_t bootstrapChildStartedAt[WS_MAX_CONNECTIONS];
 static int bootstrapChildCount = 0;
 
 
 /*
  * bootstrap_child_exited is bootstrap_or_connection_child_exited()'s own
  * half of the otherChildExited chain -- see bootstrapChildren's own comment
- * just above.
+ * just above. Keeps the three parallel arrays (pid/route/startedAt) in
+ * sync: the same swap-with-last removal, applied to all three at once.
  */
 static bool
 bootstrap_child_exited(pid_t pid)
@@ -380,12 +396,38 @@ bootstrap_child_exited(pid_t pid)
 	{
 		if (bootstrapChildren[i] == pid)
 		{
-			bootstrapChildren[i] = bootstrapChildren[--bootstrapChildCount];
+			int last = --bootstrapChildCount;
+
+			bootstrapChildren[i] = bootstrapChildren[last];
+			strlcpy(bootstrapChildRoutes[i], bootstrapChildRoutes[last],
+					sizeof(bootstrapChildRoutes[i]));
+			bootstrapChildStartedAt[i] = bootstrapChildStartedAt[last];
 			return true;
 		}
 	}
 
 	return false;
+}
+
+
+/*
+ * ws_bootstrap_get_status -- see accept_loop.h.
+ */
+int
+ws_bootstrap_get_status(WsBootstrapStatus *out, int maxOut)
+{
+	int n = 0;
+
+	for (int i = 0; i < bootstrapChildCount && n < maxOut; i++)
+	{
+		strlcpy(out[n].routeKey, bootstrapChildRoutes[i],
+				sizeof(out[n].routeKey));
+		out[n].pid = bootstrapChildren[i];
+		out[n].startedAt = bootstrapChildStartedAt[i];
+		n++;
+	}
+
+	return n;
 }
 
 
@@ -447,6 +489,9 @@ ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount)
 
 		if (ws_backup_bootstrap_start(route, &pid))
 		{
+			strlcpy(bootstrapChildRoutes[bootstrapChildCount], route->key,
+					sizeof(bootstrapChildRoutes[bootstrapChildCount]));
+			bootstrapChildStartedAt[bootstrapChildCount] = time(NULL);
 			bootstrapChildren[bootstrapChildCount++] = pid;
 			log_info("Route \"%s\" has no base backup yet: starting an "
 					 "automatic bootstrap base backup in the background "
@@ -682,6 +727,68 @@ ws_reload_config(WsServerConfig *config)
 	 * invocation needed at all.
 	 */
 	ws_bootstrap_missing_backups(config->routes, config->routeCount);
+
+	refresh_ps_state(config, gServePid, gServeStartedAt);
+}
+
+
+/*
+ * refresh_ps_state gathers a fresh snapshot of every capturer (capture.c)
+ * and in-flight bootstrap backup job (backup_bootstrap.c) this process is
+ * currently tracking, and writes it to the on-disk ps state file
+ * (ps_state.h) that "pg_walserver ps"/"pg_walserver status", run later as
+ * a brand-new process, read back. Called once before the main loop starts
+ * (so "ps" has something accurate to read even before the first tick),
+ * once per loop iteration alongside ws_capture_tick(), and once more at
+ * the end of a successful reload -- see ws_accept_loop()'s own call sites.
+ * Cheap: a handful of small structs and one small atomic file write, not
+ * worth gating behind a "did anything actually change" check.
+ */
+static void
+refresh_ps_state(const WsServerConfig *config, pid_t servePid,
+				 time_t serveStartedAt)
+{
+	if (config->pgdata[0] == '\0')
+	{
+		return;
+	}
+
+	WsPsState state = { 0 };
+
+	state.servePid = servePid;
+	state.serveStartedAt = serveStartedAt;
+
+	WsCaptureStatus captureStatus[WS_PS_MAX_ENTRIES];
+	int captureCount = ws_capture_get_status(captureStatus, WS_PS_MAX_ENTRIES);
+
+	for (int i = 0; i < captureCount; i++)
+	{
+		WsPsCapturerEntry *dst = &state.capturers[state.capturerCount++];
+
+		strlcpy(dst->routeKey, captureStatus[i].routeKey, sizeof(dst->routeKey));
+		strlcpy(dst->path, captureStatus[i].path, sizeof(dst->path));
+		dst->pid = captureStatus[i].pid;
+		dst->startedAt = captureStatus[i].startedAt;
+		dst->restarts = captureStatus[i].restarts;
+	}
+
+	WsBootstrapStatus bootstrapStatus[WS_PS_MAX_ENTRIES];
+	int bootstrapCount = ws_bootstrap_get_status(bootstrapStatus, WS_PS_MAX_ENTRIES);
+
+	for (int i = 0; i < bootstrapCount; i++)
+	{
+		WsPsBootstrapEntry *dst = &state.bootstraps[state.bootstrapCount++];
+
+		strlcpy(dst->routeKey, bootstrapStatus[i].routeKey, sizeof(dst->routeKey));
+		dst->pid = bootstrapStatus[i].pid;
+		dst->startedAt = bootstrapStatus[i].startedAt;
+	}
+
+	if (!ws_ps_state_write(config->pgdata, &state))
+	{
+		log_warn("Failed to update the ps state file under \"%s\"",
+				 config->pgdata);
+	}
 }
 
 
@@ -715,6 +822,10 @@ ws_accept_loop(WsServerConfig *config)
 			 config->routesPath[0] != '\0' ? ", routes " : " (no routes file)",
 			 config->routesPath[0] != '\0' ? config->routesPath : "");
 
+	gServePid = getpid();
+	gServeStartedAt = time(NULL);
+	refresh_ps_state(config, gServePid, gServeStartedAt);
+
 	while (!asked_to_stop && !asked_to_stop_fast)
 	{
 		/*
@@ -742,6 +853,7 @@ ws_accept_loop(WsServerConfig *config)
 		 * connection_child_exited() above.
 		 */
 		ws_capture_tick(bootstrap_or_connection_child_exited, &connChildren);
+		refresh_ps_state(config, gServePid, gServeStartedAt);
 
 		/*
 		 * pqsignal() (signals.c, via postgres_fe.h) installs our handlers

@@ -44,7 +44,39 @@
 #define WS_CLI_ARCHIVE_CLEANUP_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <time.h>
+
+#include "postgres_fe.h"
+
+/*
+ * WsBackupInfo is one enumerated base backup directory under
+ * "<route path>/basebackups/" -- exported so "pg_walserver list backups"
+ * (cli_list.c) can reuse this file's own enumeration (ws_backup_list_load(),
+ * below) rather than re-deriving the same backup_label parsing/label-
+ * timestamp-parsing logic a second time.
+ */
+typedef struct WsBackupInfo
+{
+	char label[NAMEDATALEN];        /* "basebackup-20260101T000000Z" */
+	char dirPath[MAXPGPATH];
+	time_t takenAt;                 /* parsed out of the label itself */
+	bool haveStart;                 /* backup_label parsed successfully */
+	char startSegment[25];          /* this backup's own required starting
+	                                * WAL segment (24 hex digits + NUL) */
+} WsBackupInfo;
+
+/*
+ * ws_backup_list_load scans "<routePath>/basebackups/" for backup
+ * directories, parses each one's own label timestamp and (via
+ * read_backup_label(), cmd_base_backup.c) its own required starting WAL
+ * segment, and returns them sorted oldest-first (label strings sort
+ * chronologically) in a freshly malloc'd array (free() it yourself).
+ * Returns true even when there are zero backups (an empty, not-yet-used
+ * route); false only on a directory that cannot be opened at all.
+ */
+bool ws_backup_list_load(const char *routePath, uint64_t segSize,
+						 WsBackupInfo **backupsOut, int *countOut);
 
 /*
  * A parsed --keep-age value: a bare count and one of the four required
