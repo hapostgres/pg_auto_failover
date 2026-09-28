@@ -6,13 +6,13 @@
  *   (src/bin/lib/subcommands.c/commandline.h), the same way pgaftest's own
  *   main.c does for a similarly-sized standalone binary.
  *
- *   "serve" (the accept loop, see accept_loop.h) is the *default* command:
- *   when no sub-command name is given at all, pg_walserver_default_argv()
- *   (cli_root.c) splices "serve" into argv before commandline_run() ever
- *   sees it, so `pg_walserver --port <port> [--pgdata <path> | --insecure]
- *   ...` keeps working exactly as it did before this file existed. See
- *   cli_root.c's own header comment for the full sub-command list and every
- *   flag each one takes.
+ *   No sub-command is ever implicit: `pg_walserver` with no arguments, or
+ *   an unrecognized first argument, prints usage and exits non-zero, the
+ *   same as any other sub-command-dispatching command in this project
+ *   (`pg_autoctl` itself, `pgaftest`). Run the accept loop with
+ *   `pg_walserver serve [options]` explicitly -- see cli_root.c's own
+ *   header comment for the full sub-command list and every flag each one
+ *   takes.
  *
  * Standalone binary (see the Makefile's own header comment) -- links
  * neither pg_autoctl's own sources nor pgaftest's.
@@ -34,7 +34,6 @@
 #include "log.h"
 
 extern CommandLine ws_root;
-extern char ** pg_walserver_default_argv(int argc, char **argv, int *newArgc);
 
 /*
  * Globals required by shared common/ sources (file_utils.c's
@@ -74,10 +73,7 @@ main(int argc, char **argv)
 	}
 	init_ps_buffer(argc, argv);
 
-	int dispatchArgc = argc;
-	char **dispatchArgv = pg_walserver_default_argv(argc, argv, &dispatchArgc);
-
-	if (!commandline_run(&ws_root, dispatchArgc, dispatchArgv))
+	if (!commandline_run(&ws_root, argc, argv))
 	{
 		return 1;
 	}

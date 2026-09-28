@@ -98,7 +98,7 @@ setup {
 
     sql node1 { CREATE TABLE ws(a int); INSERT INTO ws VALUES (1); }
 
-    exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-walserver.log 2>&1 & echo started'
+    exec node2 bash -c 'nohup pg_walserver serve --pgdata /tmp/ws --port 6543 > /tmp/ws-walserver.log 2>&1 & echo started'
     exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
 
     # "serve" bootstraps this route's first base backup automatically,

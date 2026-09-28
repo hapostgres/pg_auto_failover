@@ -114,7 +114,7 @@ step test_000_sync_files_from_node1 {
     exec node2 bash -c 'grep -Eqx "[0-9]{5,6}" /tmp/ws/default/0/pg_walserver_pgversion || { echo "got: $(cat /tmp/ws/default/0/pg_walserver_pgversion)"; false; }'
     # the setup capturer keeps running: test_003 needs it live, to prove
     # pg_walserver can serve a segment while it is concurrently being written
-    exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-walsender.log 2>&1 & echo started'
+    exec node2 bash -c 'nohup pg_walserver serve --pgdata /tmp/ws --port 6543 > /tmp/ws-walsender.log 2>&1 & echo started'
     exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walsender.log; exit 1'
     # "serve" bootstraps this route's first base backup automatically at
     # startup now (no more "setup --with-basebackup", see accept_loop.c's

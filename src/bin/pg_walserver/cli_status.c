@@ -14,7 +14,6 @@
 #include "postgres_fe.h"
 
 #include "cli_status.h"
-#include "file_utils.h"
 #include "log.h"
 #include "pidfile.h"
 #include "ps_state.h"
@@ -66,7 +65,16 @@ cli_status_run(const char *pgdata)
 		return true;
 	}
 
-	/* how many routes are configured, and how many have "receivewal = pull" */
+	/*
+	 * How many routes are configured with "receivewal = pull", the
+	 * denominator for the "N/M running" line below -- a process-workforce
+	 * fact (how many supervised children are *supposed* to be running),
+	 * not the data-layer facts (backup/WAL presence, which cluster is
+	 * which) that :ref:`pg_walserver_ls`/:ref:`pg_walserver_list` already
+	 * own; status is deliberately only ever about this process and its
+	 * own child processes, never the archive data those processes
+	 * maintain.
+	 */
 	char routesPath[MAXPGPATH] = { 0 };
 
 	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
@@ -74,7 +82,6 @@ cli_status_run(const char *pgdata)
 	WsRoute *routes = NULL;
 	int routeCount = 0;
 	int receivewalPullCount = 0;
-	int backupCount = 0;
 
 	if (routes_load(routesPath, &routes, &routeCount))
 	{
@@ -83,16 +90,6 @@ cli_status_run(const char *pgdata)
 			if (routes[i].receivewalPull)
 			{
 				receivewalPullCount++;
-			}
-
-			char latestPath[MAXPGPATH] = { 0 };
-
-			sformat(latestPath, sizeof(latestPath), "%s/basebackups/.latest",
-					routes[i].path);
-
-			if (file_exists(latestPath))
-			{
-				backupCount++;
 			}
 		}
 	}
@@ -121,34 +118,8 @@ cli_status_run(const char *pgdata)
 	format_uptime(haveState ? state.serveStartedAt : 0, uptime, sizeof(uptime));
 
 	printf("pg_walserver: running (pid %d, uptime %s)\n", (int) servePid, uptime); /* IGNORE-BANNED */
-	printf("  clusters:  %d configured, %d with a base backup\n", /* IGNORE-BANNED */
-		   routeCount, backupCount);
 	printf("  receivewal workers: %d/%d running\n", /* IGNORE-BANNED */
 		   receivewalWorkersRunning, receivewalPullCount);
-
-	if (haveState)
-	{
-		for (int i = 0; i < state.receivewalWorkerCount; i++)
-		{
-			const WsPsReceivewalEntry *c = &state.receivewalWorkers[i];
-
-			if (c->lsn[0] == '\0')
-			{
-				continue;
-			}
-
-			long age = (long) (time(NULL) - c->lsnObservedAt);
-
-			if (age < 0)
-			{
-				age = 0;
-			}
-
-			printf("    %-20s lsn %s (timeline %u, %lds ago)\n", /* IGNORE-BANNED */
-				   c->routeKey, c->lsn, c->lsnTimeline, age);
-		}
-	}
-
 	printf("  bootstrap backups pending: %d\n", bootstrapsPending); /* IGNORE-BANNED */
 
 	routes_free(routes);

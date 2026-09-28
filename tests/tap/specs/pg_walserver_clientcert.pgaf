@@ -80,11 +80,11 @@ step test_000_no_ca_file_refuses_to_start {
     exec walserver bash -c 'mkdir -p /tmp/ccnoca && cp /tmp/cc/server.crt /tmp/cc/server.key /tmp/ccnoca/'
     exec walserver bash -c 'printf "hostssl all cert_trust_user 0.0.0.0/0 trust clientcert=verify-full\n" > /tmp/ccnoca/pg_walserver_hba.conf'
     exec walserver bash -c 'printf "[mycluster]\npath = /tmp/ccnoca/mycluster\n" > /tmp/ccnoca/pg_walserver.ini && mkdir -p /tmp/ccnoca/mycluster'
-    exec walserver bash -c 'if pg_walserver --pgdata /tmp/ccnoca --port 6599 2>/tmp/ccnoca-refuse.log; then cat /tmp/ccnoca-refuse.log; false; fi'
+    exec walserver bash -c 'if pg_walserver serve --pgdata /tmp/ccnoca --port 6599 2>/tmp/ccnoca-refuse.log; then cat /tmp/ccnoca-refuse.log; false; fi'
     exec walserver bash -c 'grep -qi "clientcert=verify-full.*no usable TLS CA" /tmp/ccnoca-refuse.log'
 
     # the real server for every other step below, with a usable CA
-    exec walserver bash -c 'nohup pg_walserver --pgdata /tmp/cc --port 6546 > /tmp/cc-walserver.log 2>&1 & echo started'
+    exec walserver bash -c 'nohup pg_walserver serve --pgdata /tmp/cc --port 6546 > /tmp/cc-walserver.log 2>&1 & echo started'
     exec walserver bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6546) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/cc-walserver.log; exit 1'
 }
 

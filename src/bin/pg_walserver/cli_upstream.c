@@ -128,7 +128,15 @@ cli_resolve_upstream(const char *pgdata, const char *routeKey,
 			{
 				route = routes_find(routes, routeCount, routeKey);
 
-				if (route == NULL)
+				/*
+				 * routes_load() itself returns true with zero routes both
+				 * for a routes file that doesn't exist yet at all (a
+				 * normal, expected state -- nothing to warn about) and for
+				 * one that exists but is simply empty or lacks this route
+				 * (worth a warning); file_exists() is what tells those two
+				 * apart here.
+				 */
+				if (route == NULL && file_exists(routesPath))
 				{
 					log_warn("No route \"%s\" in \"%s\"", routeKey, routesPath);
 				}

@@ -121,7 +121,9 @@ typedef struct WsRoute
 /*
  * routes_load parses the routes file at path into a freshly malloc'ed
  * array. Returns true with *routesOut and *countOut set (possibly count
- * == 0 for an empty file) on success, false on a missing/malformed file.
+ * == 0, for an empty file or one that does not exist yet -- a normal,
+ * expected state, never an error) on success, false on a malformed file
+ * that does exist.
  */
 bool routes_load(const char *path, WsRoute **routesOut, int *countOut);
 void routes_free(WsRoute *routes);
@@ -180,5 +182,27 @@ void routes_slot_name(const char *routeKey, char *out, size_t outSize);
  */
 bool routes_persist_path(const char *routesPath, const char *routeKey,
 						 const char *path);
+
+/*
+ * routes_set_property sets "propName = propValue" in an existing
+ * [routeKey] section, replacing that property's own line if the section
+ * already has one, appending it otherwise -- always writes the given
+ * value, unlike routes_persist_path() above; "pg_walserver cluster
+ * set-upstream"'s own way to change an already-registered route's
+ * "upstream". Never creates a new section. false, with an error already
+ * logged, if routeKey has no section.
+ */
+bool routes_set_property(const char *routesPath, const char *routeKey,
+						 const char *propName, const char *propValue);
+
+/*
+ * routes_drop_section removes the whole [routeKey] section from the
+ * routes file at routesPath -- "pg_walserver cluster drop"'s own job.
+ * Never touches anything under the route's own "path" on disk (a
+ * separate, explicit --purge decision, cli_root.c's own cluster-drop
+ * command). false, with an error already logged, if routeKey has no
+ * section.
+ */
+bool routes_drop_section(const char *routesPath, const char *routeKey);
 
 #endif /* WS_ROUTES_H */

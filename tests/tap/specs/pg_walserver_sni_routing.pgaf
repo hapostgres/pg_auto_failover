@@ -99,7 +99,7 @@ step test_001_second_named_route_creates_certificate {
     # the same route
     exec walserver bash -c 'echo "9999999999999999999" > /tmp/sni/routeB/pg_walserver_systemid'
 
-    exec walserver bash -c 'nohup pg_walserver --pgdata /tmp/sni --port 6544 > /tmp/sni-walserver.log 2>&1 & echo started'
+    exec walserver bash -c 'nohup pg_walserver serve --pgdata /tmp/sni --port 6544 > /tmp/sni-walserver.log 2>&1 & echo started'
     exec walserver bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6544) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/sni-walserver.log; exit 1'
 }
 
@@ -126,7 +126,7 @@ step test_003_unresolved_route_fails_cleanly {
 step test_004_no_tls_refuses_to_start_with_two_routes {
     exec walserver bash -c 'pkill -x pg_walserver; for i in $(seq 30); do pgrep -x pg_walserver > /dev/null || exit 0; sleep 1; done; exit 1'
     exec walserver bash -c 'mv /tmp/sni/server.crt /tmp/sni/server.crt.bak && mv /tmp/sni/server.key /tmp/sni/server.key.bak'
-    exec walserver bash -c 'if pg_walserver --pgdata /tmp/sni --port 6545 2>/tmp/sni-refuse.log; then cat /tmp/sni-refuse.log; false; fi'
+    exec walserver bash -c 'if pg_walserver serve --pgdata /tmp/sni --port 6545 2>/tmp/sni-refuse.log; then cat /tmp/sni-refuse.log; false; fi'
     exec walserver bash -c 'grep -qi "named routes but TLS is not" /tmp/sni-refuse.log'
     exec walserver bash -c 'mv /tmp/sni/server.crt.bak /tmp/sni/server.crt && mv /tmp/sni/server.key.bak /tmp/sni/server.key'
 }
