@@ -171,18 +171,17 @@ automatically the moment a second named route needs one, and
 SNI" for the full mechanism, its DNS prerequisite, and why a real
 standby's walreceiver needs it.
 
-A connection's ``dbname`` is a routing key, not a database selection:
-real PostgreSQL's own physical replication connections repurpose the
-same field for an unrelated reason. ``libpqrcv_connect()`` sends the
-literal ``dbname=replication`` on every walreceiver connection,
-overriding whatever ``primary_conninfo`` says, purely so a ``.pgpass``
-lookup has something to match -- the server itself ignores ``dbname``
-once ``replication=true`` is set, because the replication protocol has
-no field of its own for "which cluster is this." ``pg_walserver``
-reuses that same ignored field as its own routing key instead: it never
+``dbname`` here is a routing key, not a database selection: it never
 corresponds to an actual database inside the archived cluster, and is
-never validated against one. One key, ``*``, is a PgBouncer-style
-catch-all matching any ``dbname`` with no route of its own.
+never validated against one. This is not a ``pg_walserver`` invention --
+in a real PostgreSQL `physical replication connection`__, ``dbname`` is
+already a formality rather than a real database name, since a physical
+replication connection isn't attached to any one database in the first
+place. ``pg_walserver`` simply puts that otherwise-unused field to work
+as its own routing key. One key, ``*``, is a PgBouncer-style catch-all
+matching any ``dbname`` with no route of its own.
+
+__ https://www.postgresql.org/docs/current/protocol-replication.html
 
 Access control
 ~~~~~~~~~~~~~~
