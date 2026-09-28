@@ -36,14 +36,18 @@ Examples
 ::
 
   archive$ pg_walserver list clusters --pgdata /var/lib/archiver
-  CLUSTER              BACKUP   CAPTURE   CAPTURER  WAL START              WAL END
+  CLUSTER              BACKUP   RECEIVEWAL   WORKER   WAL START              WAL END
   --------------------------------------------------------------------------------------------
-  mycluster            yes      pull      yes       0/04000028             0/05000000
-  another               yes      none      n/a       0/09000028             -
+  mycluster            yes      pull         yes      0/02000028             0/04000060
+  another               yes      none         n/a      0/09000028             -
 
-Having no embedded capturer to report on, running or otherwise, is why
-``another`` shows ``CAPTURER n/a``: it was set up with ``--no-capture``,
-and its WAL arrives only through ``archive-wal``/``ARCHIVE_FILE`` pushes.
+Having no embedded receivewal worker to report on, running or
+otherwise, is why ``another`` shows ``WORKER n/a``: it was set up with
+``--no-receivewal``, and its WAL arrives only through
+``archive-wal``/``ARCHIVE_FILE`` pushes. For a route with a running
+worker, ``WAL END`` is that worker's own live, currently-observed LSN
+(see :ref:`pg_walserver_ps`) when one is available, falling back to a
+directory scan's coarser segment-boundary approximation otherwise.
 
 See Also
 --------

@@ -107,6 +107,8 @@ identifier::
         system identifier
   INFO  Wrote system identifier 7690580638048137639 to
         "/var/lib/archiver/mycluster/pg_walserver_systemid"
+  INFO  Wrote upstream Postgres version 170011 to
+        "/var/lib/archiver/mycluster/pg_walserver_pgversion"
   INFO  setup complete: route "mycluster" is ready (no base backup taken
         here -- "pg_walserver serve" bootstraps the route's first base
         backup automatically, once, the next time it starts or reloads
@@ -116,14 +118,16 @@ identifier::
         "/var/lib/archiver/pg_walserver.pid": the route just written
         will take effect the next time "serve" starts
 
-Capturing the route's own WAL segments continuously once ``serve``
-starts (below), with no separate ``pg_receivewal`` process, is the
-default behavior: ``capture = pull`` is written into the route unless
-told otherwise. Pass ``--no-capture`` to skip this and
-feed the route another way (an externally-run ``pg_receivewal``, or
-``archive-wal`` alone). No server is running yet at this point, so
-``setup`` only logs that this config will take effect the next time
-``serve`` starts -- which is the next step.
+Receiving the route's own WAL continuously once ``serve`` starts
+(below), with no separate ``pg_receivewal`` process, is the default
+behavior: ``receivewal = pull`` is written into the route unless told
+otherwise. Pass ``--no-receivewal`` to skip this and feed the route
+another way (an externally-run ``pg_receivewal``, or ``archive-wal``
+alone). No server is running yet at this point, so ``setup`` only logs
+that this config will take effect the next time ``serve`` starts --
+which is the next step. The recorded upstream Postgres version is also
+what later picks the right ``pg_basebackup`` client for this route --
+see :ref:`pg_walserver_basebackup`.
 
 **3. Configure access and start the server**. ``setup`` does not touch
 HBA or the password file::
@@ -135,41 +139,46 @@ HBA or the password file::
   EOF
   archive$ pg_walserver create-cert --pgdata /var/lib/archiver --hostname archive
   archive$ pg_walserver --pgdata /var/lib/archiver --port 6543
-  INFO  Started the embedded pull capturer for route "mycluster" (pid
-        25673), capturing into "/var/lib/archiver/mycluster"
+  INFO  TLS is enabled ("/var/lib/archiver/server.crt")
+  INFO  Started the embedded receivewal worker for route "mycluster"
+        (pid 25673), receiving into "/var/lib/archiver/mycluster"
   INFO  Route "mycluster" has no base backup yet: starting an automatic
         bootstrap base backup in the background (pid 25674)
   INFO  pg_walserver listening on port 6543, routes
         /var/lib/archiver/pg_walserver.ini
   INFO  Route "mycluster": taking its automatic bootstrap base backup
         (attempt 1/3)
+  INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known
+        Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
   INFO  Base backup "basebackup-20260928T134117Z" is now the latest for
         "/var/lib/archiver/mycluster"
   INFO  Route "mycluster": automatic bootstrap base backup complete
 
 Taking the route's first base backup automatically at this point, in
-the background, once its embedded capturer (if any) shows real
-streaming evidence, is ``serve``'s own job: no separate
-``pg_walserver basebackup`` call is needed. Running ``pg_walserver
-setup`` again later, for the same or a new
-route, while ``serve`` is already running, reloads it immediately (a
-``SIGHUP``, the same as ``pg_walserver reload``) instead of waiting for a
-restart.
+the background, once its embedded receivewal worker (if any) shows
+real streaming evidence, is ``serve``'s own job: no separate
+``pg_walserver basebackup`` call is needed, and the ``pg_basebackup``
+client it uses is picked to match the upstream's own recorded Postgres
+version, not just whatever happens to be first on ``$PATH``. Running
+``pg_walserver setup`` again later, for the same or a new route, while
+``serve`` is already running, reloads it immediately (a ``SIGHUP``, the
+same as ``pg_walserver reload``) instead of waiting for a restart.
 
 Optional: adding archive_command as a backstop
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Add ``archive_command`` alongside the embedded capturer, on the
-primary::
+Add ``archive_command`` alongside the embedded receivewal worker, on
+the primary::
 
   archive_mode = on
   archive_command = 'pg_walserver archive-wal %p %f --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
 
-Because ``mycluster`` has ``capture = pull`` configured (step 2 above),
-each invocation only ever runs ``CHECK_FILE``: exit 0 once the embedded
-capturer has already delivered the segment, exit 1 otherwise. It never
-pushes anything itself; PostgreSQL's own retry of ``archive_command``
-covers the case where the capturer has not yet caught up.
+Because ``mycluster`` has ``receivewal = pull`` configured (step 2
+above), each invocation only ever runs ``CHECK_FILE``: exit 0 once the
+embedded worker has already delivered the segment, exit 1 otherwise.
+It never pushes anything itself; PostgreSQL's own retry of
+``archive_command`` covers the case where the worker has not yet
+caught up.
 
 Restoring with point-in-time recovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -233,42 +242,49 @@ when more than one cluster needs to be reachable this way::
 Retention: keeping the archive from growing forever
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Nothing above removes anything on its own -- wire ``archive-cleanup``
-into cron, keeping at least a week of history and at least 3 base
-backups::
+Nothing above removes anything on its own. Wire ``archive-cleanup``
+into cron on its own schedule, keeping at least a week of history and
+at least 3 base backups::
 
   archive$ crontab -l
   0 3 * * * PGPASSWORD=s3kr3t pg_walserver archive-cleanup \
+      --path /var/lib/archiver/mycluster --keep-count 3 --keep-age 7d
+
+Or, for the common case of "take a fresh backup, then prune to the
+same policy" as one cron line, pass the same flags to ``basebackup``
+directly instead -- see :ref:`pg_walserver_basebackup`::
+
+  archive$ crontab -l
+  0 3 * * * PGPASSWORD=s3kr3t pg_walserver basebackup \
       --path /var/lib/archiver/mycluster --keep-count 3 --keep-age 7d
 
 Checking on a running archive
 ------------------------------
 
 Continuing the example above, with ``serve`` running and both routes
-captured or backed up at least once::
+receiving or backed up at least once::
 
   archive$ pg_walserver status --pgdata /var/lib/archiver
   pg_walserver: running (pid 25671, uptime 0h04m31s)
     clusters:  2 configured, 2 with a base backup
-    capturers: 1/1 running
+    receivewal workers: 1/1 running
+      mycluster            lsn 0/04000060 (timeline 1, 1s ago)
     bootstrap backups pending: 0
 
   archive$ pg_walserver list clusters --pgdata /var/lib/archiver
-  CLUSTER              BACKUP   CAPTURE   CAPTURER  WAL START              WAL END
+  CLUSTER              BACKUP   RECEIVEWAL   WORKER   WAL START              WAL END
   --------------------------------------------------------------------------------------------
-  mycluster            yes      pull      yes       0/04000028             0/05000000
-  another              yes      none      n/a       0/09000028             -
+  mycluster            yes      pull         yes      0/02000028             0/04000060
+  another               yes      none         n/a      0/09000028             -
 
   archive$ pg_walserver ps --pgdata /var/lib/archiver
-  pg_walserver serve: pid 25671, running, uptime 0h04m31s
+  pg_walserver(25671) running, uptime 0h04m31s
+  `-- receivewal(25673) mycluster, running, uptime 0h04m31s, restarts 0, lsn 0/04000060 (timeline 1, 1s ago)
 
-  KIND     CLUSTER              PID      STATUS    UPTIME       RESTARTS
-  ----------------------------------------------------------------------
-  capture  mycluster            25673    running   0h04m31s     0
-
-Having no embedded capturer to report on, running or otherwise, is why
-``another`` shows ``CAPTURER n/a``: it was set up with ``--no-capture``,
-and its WAL arrives only through ``archive-wal``/``ARCHIVE_FILE`` pushes, so
+Having no embedded receivewal worker to report on, running or
+otherwise, is why ``another`` shows ``WORKER n/a``: it was set up with
+``--no-receivewal``, and its WAL arrives only through
+``archive-wal``/``ARCHIVE_FILE`` pushes, so
 ``list wal --cluster another`` may legitimately show zero segments until
 the primary's own ``archive_command`` has pushed at least one. See
 :ref:`pg_walserver_status`, :ref:`pg_walserver_ps`, and
@@ -333,6 +349,6 @@ always tried first.
 See Also
 --------
 
-The wire protocol, routing precedence, the embedded pull capturer, and
+The wire protocol, routing precedence, the embedded receivewal worker, and
 the push-side ``CHECK_FILE``/``ARCHIVE_FILE`` design are documented in
 full in ``src/bin/pg_walserver/README.md``, in the source tree.
