@@ -221,7 +221,7 @@ push_file(PGconn *conn, const char *localPath, const char *filename)
 
 
 bool
-ws_archive_run(const WsArchiveTarget *target, const char *localPath,
+ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 			   const char *filename)
 {
 	char portStr[16];

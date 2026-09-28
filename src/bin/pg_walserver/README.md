@@ -1006,10 +1006,15 @@ Postgres primary itself, as `archive_command`, connecting *to*
 `pg_walserver`'s own replication-protocol server -- a plain libpq
 connection issuing `CHECK_FILE`/`ARCHIVE_FILE` as simple queries, exactly
 like `src/bin/common/fetch_client.c`'s own `FETCH_FILE` client, with no
-`ReplicationSource`/`pgctl.c` involved at all. `cli_archive.h`'s own
-`WsArchiveTarget` mirrors `cli_upstream.h`'s flag *names*
+`ReplicationSource`/`pgctl.c` involved at all. The shared `WsWalServerTarget`
+(`cli_wal_target.h`) mirrors `cli_upstream.h`'s flag *names*
 (`--cluster`/`--host`/`--port`/`--user`) for consistency, but is resolved
-directly in `cli_archive.c` rather than through `cli_resolve_upstream()`.
+directly by `cli_wal_target_getopt()` (`cli_wal_target.c`) rather than
+through `cli_resolve_upstream()`. `restore-wal` (below) and
+`archive-cleanup` (see "`archive-cleanup`" below) share this exact same
+struct and parser -- `WsArchiveTarget`/`WsRestoreTarget` used to be two
+byte-for-byte-identical structs, one per command, before being folded into
+this one.
 
 ### The restore side: `pg_walserver restore-wal`
 
@@ -1040,9 +1045,10 @@ from any other failure (see `cli_restore_wal.h`'s own header comment).
 `restore-wal` connects to `pg_walserver` itself, exactly like `archive-wal`
 and for the exact same reason (see "Deliberately does **not** reuse
 `cli_upstream.c`'s `cli_resolve_upstream()`" just above) -- it therefore
-does not reuse `cli_upstream.c` either, and `cli_restore_wal.h`'s own
-`WsRestoreTarget` mirrors the same `--cluster`/`--host`/`--port`/`--user`/
-`--sslmode` flag names for consistency.
+does not reuse `cli_upstream.c` either, and shares `cli_archive.h`'s own
+`WsWalServerTarget`/`cli_wal_target_getopt()` (`cli_wal_target.h`/`.c`) for
+the same `--cluster`/`--host`/`--port`/`--user`/`--sslmode` flags, rather
+than duplicating them.
 
 ## The embedded pull capturer (capture.c)
 

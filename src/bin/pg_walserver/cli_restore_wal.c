@@ -30,7 +30,7 @@
  * contract of "nonzero means try the next thing" either way.
  */
 bool
-ws_restore_run(const WsRestoreTarget *target,
+ws_restore_run(const WsWalServerTarget *target,
 			   const char *filename, const char *outputPath)
 {
 	return ws_fetch_file_client(target->host, target->port, target->user,

@@ -98,6 +98,7 @@
 #include "cli_restore_wal.h"
 #include "cli_setup.h"
 #include "cli_upstream.h"
+#include "cli_wal_target.h"
 #include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
@@ -1286,78 +1287,12 @@ static CommandLine create_cert_command =
  *                       [--user <name>] [--sslmode <mode>]
  * ----------------------------------------------------------------------- */
 
-static WsArchiveTarget archiveTarget = { 0 };
-
-static struct option archiveLongOptions[] = {
-	{ "cluster", required_argument, NULL, 'c' },
-	{ "host", required_argument, NULL, 'h' },
-	{ "port", required_argument, NULL, 'p' },
-	{ "user", required_argument, NULL, 'U' },
-	{ "sslmode", required_argument, NULL, 's' },
-	{ NULL, 0, NULL, 0 }
-};
+static WsWalServerTarget archiveTarget = { 0 };
 
 static int
 cli_archive_getopt(int argc, char **argv)
 {
-	optind = 0;
-	archiveTarget = (WsArchiveTarget) {
-		0
-	};
-	archiveTarget.port = WS_DEFAULT_PORT;
-	strlcpy(archiveTarget.user, PG_AUTOCTL_REPLICA_USERNAME,
-			sizeof(archiveTarget.user));
-
-	int c;
-
-	while ((c = getopt_long(argc, argv, "c:h:p:U:s:",
-							archiveLongOptions, NULL)) != -1)
-	{
-		switch (c)
-		{
-			case 'c':
-			{
-				strlcpy(archiveTarget.route, optarg, sizeof(archiveTarget.route));
-				break;
-			}
-
-			case 'h':
-			{
-				strlcpy(archiveTarget.host, optarg, sizeof(archiveTarget.host));
-				break;
-			}
-
-			case 'p':
-			{
-				if (!stringToInt(optarg, &(archiveTarget.port)))
-				{
-					log_fatal("Invalid --port value \"%s\"", optarg);
-					exit(1);
-				}
-				break;
-			}
-
-			case 'U':
-			{
-				strlcpy(archiveTarget.user, optarg, sizeof(archiveTarget.user));
-				break;
-			}
-
-			case 's':
-			{
-				strlcpy(archiveTarget.sslmode, optarg, sizeof(archiveTarget.sslmode));
-				break;
-			}
-
-			default:
-			{
-				commandline_print_usage(&ws_root, stderr);
-				exit(1);
-			}
-		}
-	}
-
-	return optind;
+	return cli_wal_target_getopt(argc, argv, &archiveTarget);
 }
 
 
@@ -1423,82 +1358,17 @@ static CommandLine archive_command =
  *                       [--user <name>] [--sslmode <mode>]
  * ----------------------------------------------------------------------- */
 
-static WsRestoreTarget restoreTarget = { 0 };
-
-static struct option restoreLongOptions[] = {
-	{ "cluster", required_argument, NULL, 'c' },
-	{ "host", required_argument, NULL, 'h' },
-	{ "port", required_argument, NULL, 'p' },
-	{ "user", required_argument, NULL, 'U' },
-	{ "sslmode", required_argument, NULL, 's' },
-	{ NULL, 0, NULL, 0 }
-};
+static WsWalServerTarget restoreTarget = { 0 };
 
 /*
- * cli_restore_getopt parses restore's flags (--cluster/--host/--port/--user/
- * --sslmode), the same shape and defaults as cli_archive_getopt() above.
+ * cli_restore_getopt parses restore-wal's flags (--cluster/--host/--port/
+ * --user/--sslmode), the same shape and defaults cli_archive_getopt() above
+ * uses -- both call the one shared cli_wal_target_getopt() (cli_wal_target.c).
  */
 static int
 cli_restore_getopt(int argc, char **argv)
 {
-	optind = 0;
-	restoreTarget = (WsRestoreTarget) {
-		0
-	};
-	restoreTarget.port = WS_DEFAULT_PORT;
-	strlcpy(restoreTarget.user, PG_AUTOCTL_REPLICA_USERNAME,
-			sizeof(restoreTarget.user));
-
-	int c;
-
-	while ((c = getopt_long(argc, argv, "c:h:p:U:s:",
-							restoreLongOptions, NULL)) != -1)
-	{
-		switch (c)
-		{
-			case 'c':
-			{
-				strlcpy(restoreTarget.route, optarg, sizeof(restoreTarget.route));
-				break;
-			}
-
-			case 'h':
-			{
-				strlcpy(restoreTarget.host, optarg, sizeof(restoreTarget.host));
-				break;
-			}
-
-			case 'p':
-			{
-				if (!stringToInt(optarg, &(restoreTarget.port)))
-				{
-					log_fatal("Invalid --port value \"%s\"", optarg);
-					exit(1);
-				}
-				break;
-			}
-
-			case 'U':
-			{
-				strlcpy(restoreTarget.user, optarg, sizeof(restoreTarget.user));
-				break;
-			}
-
-			case 's':
-			{
-				strlcpy(restoreTarget.sslmode, optarg, sizeof(restoreTarget.sslmode));
-				break;
-			}
-
-			default:
-			{
-				commandline_print_usage(&ws_root, stderr);
-				exit(1);
-			}
-		}
-	}
-
-	return optind;
+	return cli_wal_target_getopt(argc, argv, &restoreTarget);
 }
 
 

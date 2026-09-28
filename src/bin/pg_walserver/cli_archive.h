@@ -55,11 +55,12 @@
  *   pg_walserver's own replication-protocol server -- a plain libpq
  *   connection issuing CHECK_FILE/ARCHIVE_FILE as simple queries, exactly
  *   like src/bin/common/fetch_client.c's own FETCH_FILE client, with no
- *   ReplicationSource/pgctl.c involved at all. WsArchiveTarget below
- *   mirrors cli_upstream.h's own flag *names* (--cluster/--host/--port/
- *   --user) for consistency, but is resolved directly in cli_archive.c
- *   rather than through cli_resolve_upstream(). `cli_restore_wal.c`'s own
- *   `restore-wal` follows the exact same reasoning/shape for the read side.
+ *   ReplicationSource/pgctl.c involved at all. The shared WsWalServerTarget
+ *   (cli_wal_target.h) mirrors cli_upstream.h's own flag *names*
+ *   (--cluster/--host/--port/--user) for consistency, but is resolved
+ *   directly by cli_wal_target_getopt() rather than through
+ *   cli_resolve_upstream(). `cli_restore_wal.c`'s own `restore-wal` follows
+ *   the exact same reasoning/shape for the read side.
  *
  * Licensed under the PostgreSQL License.
  *
@@ -68,19 +69,11 @@
 #ifndef WS_CLI_ARCHIVE_H
 #define WS_CLI_ARCHIVE_H
 
-#include <limits.h>
 #include <stdbool.h>
 
 #include "postgres_fe.h"
 
-typedef struct WsArchiveTarget
-{
-	char host[_POSIX_HOST_NAME_MAX];
-	int port;
-	char user[NAMEDATALEN];
-	char route[NAMEDATALEN + 16];   /* sent as the connection's dbname */
-	char sslmode[32];                /* libpq sslmode, e.g. "prefer"/"require" */
-} WsArchiveTarget;
+#include "cli_wal_target.h"
 
 /*
  * ws_archive_run implements the 4-step archive_command sequence described
@@ -90,7 +83,7 @@ typedef struct WsArchiveTarget
  * success (the caller exits 0), false with an error already logged to
  * stderr otherwise (the caller exits nonzero, so PostgreSQL retries).
  */
-bool ws_archive_run(const WsArchiveTarget *target,
+bool ws_archive_run(const WsWalServerTarget *target,
 					const char *localPath, const char *filename);
 
 #endif /* WS_CLI_ARCHIVE_H */
