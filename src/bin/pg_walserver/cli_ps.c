@@ -112,30 +112,30 @@ cli_ps_run(const char *pgdata)
 	format_uptime(haveState ? state.serveStartedAt : 0, serveUptime,
 				  sizeof(serveUptime));
 
-	printf("pg_walserver serve: pid %d, running, uptime %s\n\n", /* IGNORE-BANNED */
+	int childCount = haveState ? (state.receivewalWorkerCount + state.bootstrapCount) : 0;
+
+	printf("pg_walserver(%d) running, uptime %s\n", /* IGNORE-BANNED */
 		   (int) servePid, serveUptime);
 
-	if (!haveState || (state.receivewalWorkerCount == 0 && state.bootstrapCount == 0))
+	if (childCount == 0)
 	{
-		printf("No embedded receivewal workers or bootstrap backup jobs.\n"); /* IGNORE-BANNED */
 		return true;
 	}
 
-	printf("%-11s %-20s %-8s %-9s %-12s %s\n", /* IGNORE-BANNED */
-		   "KIND", "CLUSTER", "PID", "STATUS", "UPTIME", "RESTARTS");
-	printf("----------------------------------------------------" /* IGNORE-BANNED */
-		   "---------------------\n");
+	int printed = 0;
 
 	for (int i = 0; i < state.receivewalWorkerCount; i++)
 	{
 		const WsPsReceivewalEntry *c = &state.receivewalWorkers[i];
 		bool running = c->pid > 0 && kill(c->pid, 0) == 0;
 		char uptime[32] = { 0 };
+		bool isLast = (++printed == childCount);
 
 		format_uptime(running ? c->startedAt : 0, uptime, sizeof(uptime));
 
-		printf("%-11s %-20s %-8d %-9s %-12s %d\n", /* IGNORE-BANNED */
-			   "receivewal", c->routeKey, (int) c->pid,
+		printf("%s receivewal(%d) %s, %s, uptime %s, restarts %d\n", /* IGNORE-BANNED */
+			   isLast ? "`--" : "|--",
+			   (int) c->pid, c->routeKey,
 			   running ? "running" : "stopped", uptime, c->restarts);
 	}
 
@@ -144,12 +144,14 @@ cli_ps_run(const char *pgdata)
 		const WsPsBootstrapEntry *b = &state.bootstraps[i];
 		bool running = b->pid > 0 && kill(b->pid, 0) == 0;
 		char uptime[32] = { 0 };
+		bool isLast = (++printed == childCount);
 
 		format_uptime(running ? b->startedAt : 0, uptime, sizeof(uptime));
 
-		printf("%-11s %-20s %-8d %-9s %-12s %s\n", /* IGNORE-BANNED */
-			   "bootstr", b->routeKey, (int) b->pid,
-			   running ? "running" : "done", uptime, "-");
+		printf("%s bootstrap(%d) %s, %s, uptime %s\n", /* IGNORE-BANNED */
+			   isLast ? "`--" : "|--",
+			   (int) b->pid, b->routeKey,
+			   running ? "running" : "done", uptime);
 	}
 
 	return true;

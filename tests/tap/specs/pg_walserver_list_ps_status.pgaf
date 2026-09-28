@@ -83,8 +83,10 @@ step test_002_serve_running_ps_status_ls_and_backups {
     # both routes get their automatic bootstrap backup.
     exec walserver bash -c 'for i in $(seq 60); do grep -q "is now the latest for \"/tmp/lps/pullc\"" /tmp/lps-serve.log && grep -q "is now the latest for \"/tmp/lps/pushc\"" /tmp/lps-serve.log && exit 0; sleep 1; done; cat /tmp/lps-serve.log; exit 1'
 
-    exec walserver bash -c 'SERVE_PID=$(cat /tmp/lps/pg_walserver.pid); pg_walserver ps --pgdata /tmp/lps > /tmp/ps1.out 2>&1; grep -q "pid $SERVE_PID, running" /tmp/ps1.out || { cat /tmp/ps1.out; false; }'
-    exec walserver bash -c 'grep -E "^receivewal +pullc +[0-9]+ +running" /tmp/ps1.out || { cat /tmp/ps1.out; false; }'
+    # pstree-style output: "pg_walserver(<pid>) running, ..." as the root,
+    # one "`--"/"|--" branch per receivewal worker or bootstrap job below it
+    exec walserver bash -c 'SERVE_PID=$(cat /tmp/lps/pg_walserver.pid); pg_walserver ps --pgdata /tmp/lps > /tmp/ps1.out 2>&1; grep -q "pg_walserver($SERVE_PID) running" /tmp/ps1.out || { cat /tmp/ps1.out; false; }'
+    exec walserver bash -c 'grep -E "receivewal\([0-9]+\) pullc, running" /tmp/ps1.out || { cat /tmp/ps1.out; false; }'
     exec walserver bash -c 'grep -q "pushc" /tmp/ps1.out && { echo "pushc has no receivewal worker, must not appear in ps"; cat /tmp/ps1.out; false; } || true'
 
     exec walserver bash -c 'pg_walserver status --pgdata /tmp/lps > /tmp/status1.out 2>&1'
