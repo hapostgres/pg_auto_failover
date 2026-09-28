@@ -463,7 +463,7 @@ ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount)
  * log_route_diff logs a summary of what changed between the previously
  * installed route set and a freshly, successfully reloaded one: routes
  * added, removed, or changed (path/upstream/hostname/capture), compared by
- * key. Called only once both pg_walserver.ini and archiver-hba.conf have
+ * key. Called only once both pg_walserver.ini and pg_walserver_hba.conf have
  * re-parsed cleanly, right before the new routes are installed.
  */
 static void
@@ -583,7 +583,7 @@ log_hba_diff(const WsHbaRuleSet *oldSet, const WsHbaRuleSet *newSet)
 /*
  * ws_reload_config is what a SIGHUP tick in ws_accept_loop()'s own main loop
  * calls: it re-reads and re-validates pg_walserver.ini (routes_load()) and
- * archiver-hba.conf (hba_parse_file()) from disk, and atomically swaps in
+ * pg_walserver_hba.conf (hba_parse_file()) from disk, and atomically swaps in
  * the new versions ONLY when both parse successfully -- exactly like
  * PostgreSQL's own SIGHUP-triggered ProcessConfigFile(), a bad reload is
  * refused, never partially applied, and the previous, already-validated

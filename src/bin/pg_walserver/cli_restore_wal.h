@@ -3,7 +3,7 @@
  *   `pg_walserver restore-wal <filename> <destination-path>`: meant to be
  *   run as (part of) a Postgres restore_command, e.g.:
  *
- *     restore_command = 'pg_walserver restore-wal %f %p --route mycluster \
+ *     restore_command = 'pg_walserver restore-wal %f %p --cluster mycluster \
  *                         --host archive.example.com --user archiver_repl'
  *
  *   Named "restore-wal", not the bare "restore", for the same reason the
@@ -45,7 +45,7 @@
  *   comment): `restore-wal`, like `archive-wal`, connects to pg_walserver's
  *   own replication-protocol server, not out to a Postgres primary the way
  *   fetch-systemid/basebackup/setup do, so it has no "route's own upstream"
- *   to resolve at all -- only where pg_walserver itself is (--route/--host/
+ *   to resolve at all -- only where pg_walserver itself is (--cluster/--host/
  *   --port/--user/--sslmode, mirroring cli_archive.h's own WsArchiveTarget
  *   flag names for consistency).
  *

@@ -86,7 +86,7 @@ is_wal_backup_label_name(const char *filename, size_t len)
  * them, which is why this one function
  * is shared by both cmd_fetch_file.c and cmd_archive_file.c rather than each
  * having its own allow-list. Everything else in the route's directory
- * (archiver-hba.conf, archiver-passwd's neighbours, .slot_* files, the
+ * (pg_walserver_hba.conf, pg_walserver_passwd's neighbours, .slot_* files, the
  * basebackups/ tree, ".partial" segments still being written...) is never
  * served or accepted.
  */

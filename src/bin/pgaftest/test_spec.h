@@ -103,7 +103,7 @@ typedef struct TestNode
 	                             * ordinary formation node -- used by
 	                             * compose_gen.c to decide whether to
 	                             * bind-mount a generated default
-	                             * archiver-hba.conf into this node's
+	                             * pg_walserver_hba.conf into this node's
 	                             * container (see write_pg_walserver_default_
 	                             * hba() there). Never set for anything else. */
 	bool dockerInit;            /* "docker-init": adds Docker Compose's own

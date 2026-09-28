@@ -43,7 +43,7 @@ static const char *hbaHeader =
 	"# ADDRESS  all, samehost, samenet, an IP address, IP/prefix, a hostname,\n"
 	"#          or a .domain.suffix (matched through every reverse DNS name\n"
 	"#          of the client, each confirmed by a forward lookup)\n"
-	"# METHOD   scram-sha-256 (checked against archiver-passwd), trust, reject\n"
+	"# METHOD   scram-sha-256 (checked against pg_walserver_passwd), trust, reject\n"
 	"#\n";
 
 

@@ -27,7 +27,7 @@ all. This is ``pg_walserver --help``'s own output, verbatim::
   Available commands:
     pg_walserver
       serve           Run the pg_walserver accept loop (the default command)
-      scram-secret    Print one archiver-passwd line for a user
+      scram-secret    Print one pg_walserver_passwd line for a user
       fetch-systemid  Fetch a route's upstream system identifier
       basebackup      Take a base backup of a route's upstream
       setup           Create or validate one pg_walserver.ini route
@@ -125,10 +125,10 @@ for the full mechanism and its DNS prerequisite.
 Access control
 ~~~~~~~~~~~~~~
 
-``<pgdata>/archiver-hba.conf`` decides, one rule per line
+``<pgdata>/pg_walserver_hba.conf`` decides, one rule per line
 (``TYPE ROUTE USER ADDRESS METHOD``, first match wins), which peers may
 connect and how they must authenticate; a missing, oversize, or malformed
-file rejects every connection. ``<pgdata>/archiver-passwd`` holds one
+file rejects every connection. ``<pgdata>/pg_walserver_passwd`` holds one
 SCRAM-SHA-256 verifier per line, produced with ``pg_walserver
 scram-secret``. ``<pgdata>/server.crt``/``<pgdata>/server.key`` (or
 ``--ssl-cert-file``/``--ssl-key-file``) enable TLS; without them,
@@ -155,7 +155,7 @@ reporting the connected route's own ``capture`` setting, ``pull`` or
 protocol's full design.
 
 ``serve`` writes its own pid to ``<pgdata>/pg_walserver.pid`` and parses
-``pg_walserver.ini``/``archiver-hba.conf`` once at startup. ``pg_walserver
+``pg_walserver.ini``/``pg_walserver_hba.conf`` once at startup. ``pg_walserver
 reload`` sends that pid ``SIGHUP``, which re-parses both files and
 installs them only if both still parse cleanly, reconciling the embedded
 pull capturer set against the new routes. The TLS certificate/key are not
@@ -178,7 +178,7 @@ sub-command name at all.
 
   This instance's own top-level storage root. Defaults to the ``PGDATA``
   environment variable. ``<pgdata>/pg_walserver.ini`` and
-  ``<pgdata>/archiver-hba.conf`` are read from under it. Refuses to start
+  ``<pgdata>/pg_walserver_hba.conf`` are read from under it. Refuses to start
   without it unless ``--insecure`` is given.
 
 --insecure
@@ -206,7 +206,7 @@ sub-command name at all.
 ``scram-secret``
 ~~~~~~~~~~~~~~~~
 
-Prints one ``archiver-passwd`` line (``<user>:<SCRAM-SHA-256 secret>``) to
+Prints one ``pg_walserver_passwd`` line (``<user>:<SCRAM-SHA-256 secret>``) to
 standard output. The password is read from the ``PGPASSWORD`` environment
 variable, never from the command line.
 
@@ -219,16 +219,16 @@ variable, never from the command line.
 ~~~~~~~~~~~~~~~~~~
 
 Connects to a route's upstream, fetches its system identifier, and writes
-it to ``<path>/archiver-systemid``. Refuses to overwrite an
+it to ``<path>/pg_walserver_systemid``. Refuses to overwrite an
 already-recorded, different identifier unless ``--force``.
 
 --pgdata
 
   Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
 
---route
+--cluster
 
-  The route key to fetch for, looked up in ``pg_walserver.ini``.
+  The cluster name to fetch for, looked up in ``pg_walserver.ini``.
 
 --path
 
@@ -255,7 +255,7 @@ Takes a real base backup from a route's upstream into
 ``<path>/basebackups/<label>/``, then updates
 ``<path>/basebackups/.latest`` once the backup is verified complete.
 
-Accepts the same ``--pgdata``, ``--route``, ``--path``, ``--upstream``,
+Accepts the same ``--pgdata``, ``--cluster``, ``--path``, ``--upstream``,
 ``--host``/``--port``/``--user`` options as ``fetch-systemid``.
 
 ``setup``
@@ -273,9 +273,9 @@ the next time it starts or reloads.
 
   Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
 
---route
+--cluster
 
-  The route key to create or validate.
+  The cluster name to create or validate.
 
 --path
 
@@ -336,7 +336,7 @@ Creates a self-signed TLS certificate for ``--pgdata``.
 
 ::
 
-  pg_walserver archive-wal <path-to-file> <filename> --route <key>
+  pg_walserver archive-wal <path-to-file> <filename> --cluster <name>
       --host <host> [--port <port>] [--user <name>] [--sslmode <mode>]
 
 Pushes one WAL segment or ``.backup`` history file into a route, for use
@@ -344,7 +344,7 @@ as PostgreSQL's own ``archive_command``:
 
 ::
 
-  archive_command = 'pg_walserver archive-wal %p %f --route mycluster \
+  archive_command = 'pg_walserver archive-wal %p %f --cluster mycluster \
                        --host archive.example.com --user archiver_repl'
 
 The connected route's own ``capture`` setting decides what each invocation
@@ -355,9 +355,9 @@ route has no ``capture = pull``, ``archive-wal`` only ever runs
 ``ARCHIVE_FILE``, unconditionally pushing the file, with no prior
 ``CHECK_FILE`` round trip.
 
---route
+--cluster
 
-  The route to archive into, sent as ``dbname``.
+  The cluster to archive into, sent as ``dbname``.
 
 --host
 
@@ -380,7 +380,7 @@ route has no ``capture = pull``, ``archive-wal`` only ever runs
 
 ::
 
-  pg_walserver restore-wal <filename> <destination-path> --route <key>
+  pg_walserver restore-wal <filename> <destination-path> --cluster <name>
       --host <host> [--port <port>] [--user <name>] [--sslmode <mode>]
 
 Fetches one WAL segment or ``.backup`` history file from a route, for use
@@ -388,10 +388,10 @@ as PostgreSQL's own ``restore_command``:
 
 ::
 
-  restore_command = 'pg_walserver restore-wal %f %p --route mycluster \
+  restore_command = 'pg_walserver restore-wal %f %p --cluster mycluster \
                         --host archive.example.com --user archiver_repl'
 
-Accepts the same ``--route``, ``--host``, ``--port``, ``--user``,
+Accepts the same ``--cluster``, ``--host``, ``--port``, ``--user``,
 ``--sslmode`` options as ``archive-wal``.
 
 ``reload``
@@ -460,7 +460,7 @@ PostgreSQL 10).
 identifier::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver setup \
-      --pgdata /var/lib/archiver --route mycluster \
+      --pgdata /var/lib/archiver --cluster mycluster \
       --path /var/lib/archiver/mycluster \
       --upstream "host=primary user=archiver_repl sslmode=require"
 
@@ -476,8 +476,8 @@ feed the route another way (an externally-run ``pg_receivewal``, or
 HBA or the password file::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver scram-secret --user archiver_repl \
-      >> /var/lib/archiver/archiver-passwd
-  archive$ cat > /var/lib/archiver/archiver-hba.conf <<EOF
+      >> /var/lib/archiver/pg_walserver_passwd
+  archive$ cat > /var/lib/archiver/pg_walserver_hba.conf <<EOF
   hostssl  mycluster  archiver_repl  10.0.0.0/8  scram-sha-256
   EOF
   archive$ pg_walserver --pgdata /var/lib/archiver --port 6543
@@ -494,7 +494,7 @@ restart.
 embedded capturer, on the primary::
 
   archive_mode = on
-  archive_command = 'pg_walserver archive-wal %p %f --route mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
+  archive_command = 'pg_walserver archive-wal %p %f --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
 
 ``mycluster`` has ``capture = pull`` configured (step 2 above), so each
 invocation only ever runs ``CHECK_FILE``: exit 0 once the embedded
@@ -509,7 +509,7 @@ covers the case where the capturer has not yet caught up.
       -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
       -D /var/lib/postgres/pitr -X none --no-manifest
   restore$ cat >> /var/lib/postgres/pitr/postgresql.auto.conf <<EOF
-  restore_command = 'PGPASSWORD=s3kr3t pg_walserver restore-wal %f %p --route mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
+  restore_command = 'PGPASSWORD=s3kr3t pg_walserver restore-wal %f %p --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
   recovery_target_time = '2026-09-27 11:30:00+00'
   EOF
   restore$ touch /var/lib/postgres/pitr/recovery.signal
@@ -565,13 +565,13 @@ otherwise. ``setup`` creates a self-signed certificate for ``--pgdata``
 automatically the first time a second named route needs one::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver setup \
-      --pgdata /var/lib/archiver --route mycluster \
+      --pgdata /var/lib/archiver --cluster mycluster \
       --path /var/lib/archiver/mycluster \
       --upstream "host=primary port=5432 user=archiver_repl sslmode=require" \
       --hostname mycluster.archive.example.com
 
   archive$ PGPASSWORD=s3kr3t pg_walserver setup \
-      --pgdata /var/lib/archiver --route another \
+      --pgdata /var/lib/archiver --cluster another \
       --path /var/lib/archiver/another \
       --upstream "host=primary2 port=5432 user=archiver_repl sslmode=require" \
       --hostname another.archive.example.com

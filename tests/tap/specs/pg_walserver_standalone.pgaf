@@ -68,12 +68,12 @@ setup {
     # just a file, hand-edited exactly as an operator running it on its own
     # (no archiver, no monitor) would. `setup` itself never touches HBA --
     # a deliberately separate concern, see cli_setup.c's own header comment.
-    exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/archiver-hba.conf'
+    exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
     # the one-shot wizard: creates /tmp/ws/default/0, writes the
     # pg_walserver.ini [default/0] section (path + upstream), checks
     # pgautofailover_replicator's REPLICATION attribute on node1, and
-    # fetches node1's real system identifier into archiver-systemid. No
+    # fetches node1's real system identifier into pg_walserver_systemid. No
     # "serve" is running yet at this point, so setup only logs that this
     # config will take effect the next time it starts -- test_000 below
     # starts it, which is what actually bootstraps this route's first base
@@ -81,7 +81,7 @@ setup {
     # pg_receivewal (below) into this exact route directory -- the embedded
     # pull capturer, on by default now, would otherwise fork a second
     # process racing it for the same segment files.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
     exec node2 bash -c 'if grep -qx "capture = pull" /tmp/ws/pg_walserver.ini; then echo "capture = pull should not have been written with --no-capture"; false; fi'
 
     # capture real WAL off node1 with the stock pg_receivewal (not this
@@ -98,13 +98,13 @@ teardown {
 }
 
 step test_000_sync_files_from_node1 {
-    # `setup`, in the setup{} block above, already wrote archiver-systemid
-    # -- nothing to fetch by hand here beyond the one value pgaftest's own
-    # let/${var} (not available at this point in its history) can't carry
-    # across steps on its own.
+    # `setup`, in the setup{} block above, already wrote
+    # pg_walserver_systemid -- nothing to fetch by hand here beyond the one
+    # value pgaftest's own let/${var} (not available at this point in its
+    # history) can't carry across steps on its own.
     exec node2 bash -c 'ls /tmp/ws/default/0/*[0-9A-F] | grep -v "\.partial$" | xargs -n1 basename | sort | tail -1 > /tmp/seg.txt'
     exec node2 bash -c 'test -s /tmp/seg.txt'
-    exec node2 bash -c 'test -s /tmp/ws/default/0/archiver-systemid'
+    exec node2 bash -c 'test -s /tmp/ws/default/0/pg_walserver_systemid'
     # the setup capturer keeps running: test_003 needs it live, to prove
     # pg_walserver can serve a segment while it is concurrently being written
     exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-walsender.log 2>&1 & echo started'
@@ -117,7 +117,7 @@ step test_000_sync_files_from_node1 {
 }
 
 step test_001_identify_system_and_show {
-    exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/archiver-systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
+    exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/pg_walserver_systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
     exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "SHOW wal_segment_size" | grep -qx 16MB'
 }
 
@@ -161,7 +161,7 @@ step test_005_wildcard_route {
     # a second route, deliberately never named "default/0", with its own
     # distinct (fake) systemid -- reachable only through the "*" wildcard,
     # never directly
-    exec node2 bash -c 'mkdir -p /tmp/ws-wild && printf "6543216543216543216\n" > /tmp/ws-wild/archiver-systemid'
+    exec node2 bash -c 'mkdir -p /tmp/ws-wild && printf "6543216543216543216\n" > /tmp/ws-wild/pg_walserver_systemid'
     exec node2 bash -c 'printf "\n[*]\npath = /tmp/ws-wild\n" >> /tmp/ws/pg_walserver.ini'
 
     # pg_walserver.ini is cached in memory (accept_loop.c's own
@@ -178,7 +178,7 @@ step test_005_wildcard_route {
     # resolving to ITS OWN path, never falling through to the wildcard now
     # that one exists -- an exact match always wins, exactly as PgBouncer's
     # own "*" [databases] entry precedence works
-    exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/archiver-systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
+    exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/pg_walserver_systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
 }
 
 step test_006_real_standby_with_core_tools {

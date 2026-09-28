@@ -1,9 +1,9 @@
 # pg_walserver's pidfile + SIGHUP-driven config reload (accept_loop.c's own
 # ws_reload_config()/ws_capture_reload(), cli_root.c's "pg_walserver
 # reload" sub-command). See README.md's "Config reload" section for the
-# full design: routes (pg_walserver.ini) and the HBA ruleset (archiver-
-# hba.conf) are cached in memory, re-parsed on SIGHUP, and swapped in only
-# when both parse cleanly -- a bad reload is refused and the previous,
+# full design: routes (pg_walserver.ini) and the HBA ruleset
+# (pg_walserver_hba.conf) are cached in memory, re-parsed on SIGHUP, and
+# swapped in only when both parse cleanly -- a bad reload is refused and the previous,
 # still-valid configuration keeps serving every connection. The embedded
 # pull capturer set is reconciled against the new routes, without
 # restarting a capturer whose route did not change.
@@ -18,7 +18,7 @@
 #             running "pg_walserver reload" makes that route immediately
 #             reachable (IDENTIFY_SYSTEM against a fresh dbname), with no
 #             server restart -- the original route keeps working too
-#   test_003  a corrupted archiver-hba.conf (a malformed line) makes
+#   test_003  a corrupted pg_walserver_hba.conf (a malformed line) makes
 #             reload log a clear parse error and exit 0 (the signal itself
 #             was delivered) while the server keeps serving its prior,
 #             still-valid HBA ruleset -- a request against the original
@@ -44,12 +44,12 @@ setup {
     # same loopback-only HBA precedent as pg_walserver_standalone.pgaf's
     # own setup{}: there is no monitor here to learn a real client's
     # address from, and none needed.
-    exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/archiver-hba.conf'
+    exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
     # a single named route, no upstream/capture yet -- test_005 below adds
     # "upstream"/"capture = pull" via reload, once the server is already
     # running, to prove the embedded capturer reconciliation path.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
 
     exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-walserver.log 2>&1 & echo started'
     exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
@@ -94,12 +94,12 @@ step test_002_reload_picks_up_a_new_route_with_no_restart {
 }
 
 step test_003_bad_reload_is_refused_and_old_hba_keeps_serving {
-    exec node2 bash -c 'cp /tmp/ws/archiver-hba.conf /tmp/ws/archiver-hba.conf.bak'
-    exec node2 bash -c 'printf "host all all 127.0.0.1/32 trust\nbadtype all all 127.0.0.1/32 trust\n" > /tmp/ws/archiver-hba.conf'
+    exec node2 bash -c 'cp /tmp/ws/pg_walserver_hba.conf /tmp/ws/pg_walserver_hba.conf.bak'
+    exec node2 bash -c 'printf "host all all 127.0.0.1/32 trust\nbadtype all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
     exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws; test $? -eq 0'
 
-    exec node2 bash -c 'for i in $(seq 30); do grep -q "Reload failed: could not parse .*archiver-hba.conf" /tmp/ws-walserver.log && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
+    exec node2 bash -c 'for i in $(seq 30); do grep -q "Reload failed: could not parse .*pg_walserver_hba.conf" /tmp/ws-walserver.log && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
     exec node2 bash -c 'grep -q "Malformed HBA line 2" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
 
     # the server is still alive (never restarted) and still serving the
@@ -111,7 +111,7 @@ step test_003_bad_reload_is_refused_and_old_hba_keeps_serving {
 
     # clean up for the next steps: restoring the exact original file makes
     # this next reload succeed (a byte-for-byte-unchanged ruleset).
-    exec node2 bash -c 'lines_before=$(wc -l < /tmp/ws-walserver.log); cp /tmp/ws/archiver-hba.conf.bak /tmp/ws/archiver-hba.conf && pg_walserver reload --pgdata /tmp/ws; for i in $(seq 30); do tail -n +$((lines_before + 1)) /tmp/ws-walserver.log | grep -q "Reload complete" && exit 0; sleep 1; done; tail -n +$((lines_before + 1)) /tmp/ws-walserver.log; exit 1'
+    exec node2 bash -c 'lines_before=$(wc -l < /tmp/ws-walserver.log); cp /tmp/ws/pg_walserver_hba.conf.bak /tmp/ws/pg_walserver_hba.conf && pg_walserver reload --pgdata /tmp/ws; for i in $(seq 30); do tail -n +$((lines_before + 1)) /tmp/ws-walserver.log | grep -q "Reload complete" && exit 0; sleep 1; done; tail -n +$((lines_before + 1)) /tmp/ws-walserver.log; exit 1'
 }
 
 step test_004_reload_against_a_stale_pidfile_fails_cleanly {

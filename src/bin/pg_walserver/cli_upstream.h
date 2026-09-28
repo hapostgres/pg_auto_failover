@@ -7,7 +7,7 @@
  *   command-line-flag resolution elsewhere in this codebase); this
  *   project's own `pg_walserver archive`/`pg_walserver restore` client
  *   sub-commands (cli_archive.c/cli_restore.c) use the same layering for
- *   their own, simpler --route/--host/--port/--user set, without needing
+ *   their own, simpler --cluster/--host/--port/--user set, without needing
  *   this file at all (they connect to pg_walserver itself, not to an
  *   upstream Postgres primary, see cli_archive.c's own header comment). A
  *   later, separate "archiving" PR is expected to add an analogous
@@ -41,7 +41,7 @@ typedef struct WsUpstreamTarget
 } WsUpstreamTarget;
 
 /*
- * cli_resolve_upstream fills *target for --route/--pgdata (looked up in
+ * cli_resolve_upstream fills *target for --cluster/--pgdata (looked up in
  * <pgdata>/pg_walserver.ini) and/or --path/--upstream/--host/--port/--user
  * given directly on the command line -- an explicit flag always wins over
  * whatever the route's own "upstream"/"path" ini properties say. Returns

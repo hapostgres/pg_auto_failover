@@ -16,7 +16,7 @@
 # Modeled closely on pg_walserver_standalone.pgaf/pg_walserver_sni_
 # routing.pgaf: node2 hosts pg_walserver, every connection below is node2
 # talking to its own pg_walserver over loopback, a manually written,
-# properly scoped archiver-hba.conf (there is no monitor here to learn a
+# properly scoped pg_walserver_hba.conf (there is no monitor here to learn a
 # real client's address from), and `pg_walserver setup` handles onboarding
 # each route (path + upstream + systemid) exactly as an operator would.
 # Two named routes with no TLS is otherwise a hard startup error (see
@@ -76,21 +76,22 @@ setup {
     # node2 hosts pg_walserver for this test; it is otherwise an ordinary
     # registered secondary and that is irrelevant here. Every connection
     # below is node2 talking to its own pg_walserver over loopback.
-    exec node2 bash -c 'mkdir -p /tmp/wsarch && printf "host all all 127.0.0.1/32 trust\n" > /tmp/wsarch/archiver-hba.conf'
+    exec node2 bash -c 'mkdir -p /tmp/wsarch && printf "host all all 127.0.0.1/32 trust\n" > /tmp/wsarch/pg_walserver_hba.conf'
 
     # the one-shot wizard: creates /tmp/wsarch/arch/0, writes the
     # pg_walserver.ini [arch/0] section (path + upstream), checks
     # pgautofailover_replicator's REPLICATION attribute on node1, and
-    # fetches node1's real system identifier into archiver-systemid. This
-    # spec never serves BASE_BACKUP, so it never needs the base backup
-    # "serve" would otherwise bootstrap automatically for this route.
+    # fetches node1's real system identifier into pg_walserver_systemid.
+    # This spec never serves BASE_BACKUP, so it never needs the base
+    # backup "serve" would otherwise bootstrap automatically for this
+    # route.
     # --no-capture: this spec pushes its own small, deterministic fake "WAL
     # segments" by hand (test_002/test_003 below) under real WAL-segment-
     # shaped names -- the embedded pull capturer, on by default now, would
     # otherwise fork and pull real WAL from node1 into this same directory,
     # under the same segment names, racing (and likely colliding with) what
     # this spec writes itself.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/wsarch --route arch/0 --path /tmp/wsarch/arch/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/wsarch --cluster arch/0 --path /tmp/wsarch/arch/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
     exec node2 bash -c 'if grep -qx "capture = pull" /tmp/wsarch/pg_walserver.ini; then echo "capture = pull should not have been written with --no-capture"; false; fi'
 
     # a second route, capture = pull by setup's own default now (no
@@ -101,7 +102,7 @@ setup {
     # automatically (see README.md's "Routing beyond dbname" section) --
     # every connection in this spec still only ever uses dbname, so that
     # certificate never has to be presented or even referenced below.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/wsarch --route arch/1 --path /tmp/wsarch/arch/1 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/wsarch --cluster arch/1 --path /tmp/wsarch/arch/1 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
     exec node2 bash -c 'grep -qx "capture = pull" /tmp/wsarch/pg_walserver.ini || { echo "capture = pull should have been written for arch/1 by default"; cat /tmp/wsarch/pg_walserver.ini; false; }'
 
     exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/wsarch --port 6547 > /tmp/wsarch-walserver.log 2>&1 & echo started'
@@ -129,7 +130,7 @@ step test_002_archive_pushes_then_matches {
 
     # step 1: nothing on disk yet under this name -- CHECK_FILE says
     # "missing", pg_walserver archive-wal pushes it via ARCHIVE_FILE, exit 0
-    exec node2 bash -c 'pg_walserver archive-wal /tmp/seg1.bin 000000010000000000000001 --route arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive1.log 2>&1 || (cat /tmp/archive1.log; false)'
+    exec node2 bash -c 'pg_walserver archive-wal /tmp/seg1.bin 000000010000000000000001 --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive1.log 2>&1 || (cat /tmp/archive1.log; false)'
     exec node2 bash -c 'grep -qi "ARCHIVE_FILE\|Archived" /tmp/archive1.log'
     exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001 || (ls -la /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001; false)'
 
@@ -139,7 +140,7 @@ step test_002_archive_pushes_then_matches {
     # archive-wal pushes unconditionally again, with no CHECK_FILE round
     # trip first; cmd_archive_file.c's own overwrite-safety (identical
     # bytes already on disk) is what makes this idempotent, still exit 0
-    exec node2 bash -c 'pg_walserver archive-wal /tmp/seg1.bin 000000010000000000000001 --route arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive2.log 2>&1 || (cat /tmp/archive2.log; false)'
+    exec node2 bash -c 'pg_walserver archive-wal /tmp/seg1.bin 000000010000000000000001 --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive2.log 2>&1 || (cat /tmp/archive2.log; false)'
     exec node2 bash -c 'grep -qi "ARCHIVE_FILE\|Archived" /tmp/archive2.log'
     exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001'
 }
@@ -161,7 +162,7 @@ step test_003_check_file_differs_is_rejected {
     # ARCHIVE_FILE -- and the server rejects it outright, from the real
     # bytes just received vs. the real bytes already on disk: nonzero exit,
     # a clean stderr message, and the file already on disk is untouched.
-    exec node2 bash -c 'if pg_walserver archive-wal /tmp/seg1-different.bin 000000010000000000000001 --route arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive3.log 2>&1; then cat /tmp/archive3.log; false; fi'
+    exec node2 bash -c 'if pg_walserver archive-wal /tmp/seg1-different.bin 000000010000000000000001 --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive3.log 2>&1; then cat /tmp/archive3.log; false; fi'
     exec node2 bash -c 'grep -qi "already exists\|differ" /tmp/archive3.log'
     exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001 || (echo "the original file was overwritten -- overwrite-safety failed"; false)'
 }
@@ -199,14 +200,14 @@ step test_005_restore_wal_fetches_a_real_file {
     # ws_fetch_file_client() finally getting exercised through its own
     # sub-command wrapper, not just through a raw "psql -c FETCH_FILE".
     exec node2 bash -c 'rm -f /tmp/restored.bin'
-    exec node2 bash -c 'pg_walserver restore-wal 000000010000000000000001 /tmp/restored.bin --route arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/restore1.log 2>&1 || (cat /tmp/restore1.log; false)'
+    exec node2 bash -c 'pg_walserver restore-wal 000000010000000000000001 /tmp/restored.bin --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/restore1.log 2>&1 || (cat /tmp/restore1.log; false)'
     exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/restored.bin || (ls -la /tmp/seg1.bin /tmp/restored.bin; false)'
 
     # a name nothing has ever archived: a clean nonzero exit, the same
     # "not found" outcome a real restore_command hits at the end of
     # recovery -- no partial file left at the destination either.
     exec node2 bash -c 'rm -f /tmp/restored-missing.bin'
-    exec node2 bash -c 'if pg_walserver restore-wal 000000010000000000000098 /tmp/restored-missing.bin --route arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/restore2.log 2>&1; then cat /tmp/restore2.log; false; fi'
+    exec node2 bash -c 'if pg_walserver restore-wal 000000010000000000000098 /tmp/restored-missing.bin --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/restore2.log 2>&1; then cat /tmp/restore2.log; false; fi'
     exec node2 bash -c 'test ! -e /tmp/restored-missing.bin'
 }
 
@@ -229,7 +230,7 @@ step test_006_capture_pull_route_is_check_file_only {
     # branch never calls push_file() at all), so the final file never
     # appears as a side effect of this failed attempt either.
     exec node2 bash -c 'head -c 4096 /dev/urandom > /tmp/notyet.bin'
-    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); if pg_walserver archive-wal /tmp/notyet.bin $seg --route arch/1 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive6.log 2>&1; then cat /tmp/archive6.log; false; fi'
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); if pg_walserver archive-wal /tmp/notyet.bin $seg --cluster arch/1 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive6.log 2>&1; then cat /tmp/archive6.log; false; fi'
     exec node2 bash -c 'grep -qi "waiting for its own pull capturer\|missing\|differs" /tmp/archive6.log'
     exec node2 bash -c '! grep -qi "ARCHIVE_FILE\|Archived " /tmp/archive6.log'
     exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); test ! -e /tmp/wsarch/arch/1/$seg'
@@ -244,7 +245,7 @@ step test_006_capture_pull_route_is_check_file_only {
     # identical bytes reports "matches" and exits 0 -- still CHECK_FILE
     # only, ARCHIVE_FILE is still never called.
     exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); cp /tmp/wsarch/arch/1/$seg /tmp/now_captured.bin'
-    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); pg_walserver archive-wal /tmp/now_captured.bin $seg --route arch/1 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive7.log 2>&1 || (cat /tmp/archive7.log; false)'
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); pg_walserver archive-wal /tmp/now_captured.bin $seg --cluster arch/1 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive7.log 2>&1 || (cat /tmp/archive7.log; false)'
     exec node2 bash -c 'grep -qi "already matches\|nothing to push" /tmp/archive7.log'
     exec node2 bash -c '! grep -qi "ARCHIVE_FILE\|Archived " /tmp/archive7.log'
 }

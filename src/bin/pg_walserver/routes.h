@@ -35,7 +35,7 @@
  *   Each command that needs one of those reads it fresh, straight from a
  *   small purpose-built file under that same path, at connection time --
  *   see cmd_base_backup.c's own basebackups/.latest and cmd_identify_
- *   system.c's own archiver-systemid for the two current examples. pg_
+ *   system.c's own pg_walserver_systemid for the two current examples. pg_
  *   walsender itself never talks to the monitor -- see
  *   archiving-details.rst's "Keeping local files current" section
  *   for the full rationale behind this split.
@@ -63,7 +63,7 @@ typedef struct WsRoute
 	                                     * dbname), or WS_ROUTES_WILDCARD_KEY */
 	char path[MAXPGPATH];               /* this route's own local storage
 	                                     * root -- WAL cache, basebackups/,
-	                                     * and archiver-systemid all live
+	                                     * and pg_walserver_systemid all live
 	                                     * directly under it */
 	char upstream[MAXCONNINFO];         /* optional: a libpq connection string
 	                                     * to the instance this route archives

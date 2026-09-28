@@ -19,7 +19,7 @@
 #include "string_utils.h"
 #include "ws_util.h"
 
-/* default WAL segment size (16MB) when the route has no archiver-walsegsize */
+/* default WAL segment size (16MB) when the route has no pg_walserver_walsegsize */
 #define WS_DEFAULT_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
 #define WS_MIN_WAL_SEGMENT_SIZE UINT64CONST(0x100000)
 #define WS_MAX_WAL_SEGMENT_SIZE UINT64CONST(0x40000000)
@@ -56,7 +56,7 @@ is_wal_segment_filename(const char *name)
 
 /*
  * ws_route_wal_segment_size returns the route's own configured WAL segment
- * size, read from its "archiver-walsegsize" file (a bare decimal byte count,
+ * size, read from its "pg_walserver_walsegsize" file (a bare decimal byte count,
  * written once by pg_autoctl when the archiver first learns it from the
  * group's real primary). Falls back to WS_DEFAULT_WAL_SEGMENT_SIZE (16MB)
  * when route is NULL/has no path, the file is absent, or its content isn't a
@@ -73,7 +73,7 @@ ws_route_wal_segment_size(const WsRoute *route)
 
 	char path[MAXPGPATH];
 
-	sformat(path, sizeof(path), "%s/archiver-walsegsize", route->path);
+	sformat(path, sizeof(path), "%s/pg_walserver_walsegsize", route->path);
 
 	char *contents = NULL;
 	size_t size = 0;
