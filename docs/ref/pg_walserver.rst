@@ -5,6 +5,14 @@ pg_walserver
 
 pg_walserver - standalone PostgreSQL replication-protocol server
 
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   pg_walserver_setup
+   pg_walserver_fetch_systemid
+   pg_walserver_archive_wal
+
 Synopsis
 --------
 
@@ -331,20 +339,10 @@ sub-command name at all.
   packet, TLS handshake, HBA lookup, and SCRAM exchange. Defaults to
   ``30``.
 
-Provisioning, archiving, and restoring each have their own manual page,
-with worked, captured examples:
-
-.. toctree::
-   :maxdepth: 1
-
-   pg_walserver_setup
-   pg_walserver_scram_secret
-   pg_walserver_fetch_systemid
-   pg_walserver_basebackup
-   pg_walserver_create_cert
-   pg_walserver_archive_wal
-   pg_walserver_restore_wal
-   pg_walserver_archive_cleanup
+Provisioning (:ref:`pg_walserver_setup`), fetching a system identifier
+(:ref:`pg_walserver_fetch_systemid`), and archiving/restoring
+(:ref:`pg_walserver_archive_wal`) each have their own manual page, with
+worked, captured examples -- see the sidebar.
 
 ``reload``
 ~~~~~~~~~~
@@ -721,15 +719,6 @@ always tried first.
 
 See Also
 --------
-
-* :ref:`pg_walserver_setup`
-* :ref:`pg_walserver_scram_secret`
-* :ref:`pg_walserver_fetch_systemid`
-* :ref:`pg_walserver_basebackup`
-* :ref:`pg_walserver_create_cert`
-* :ref:`pg_walserver_archive_wal`
-* :ref:`pg_walserver_restore_wal`
-* :ref:`pg_walserver_archive_cleanup`
 
 ``src/bin/pg_walserver/README.md`` in the source tree documents the wire
 protocol, routing precedence, the embedded pull capturer, and the
