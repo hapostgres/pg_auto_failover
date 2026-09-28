@@ -31,17 +31,16 @@ Examples
 ::
 
   restore$ PGPASSWORD=s3kr3t pg_walserver restore-wal \
-      000000010000000000000002 /var/lib/postgres/pitr/pg_wal/RECOVERYXLOG \
+      000000010000000000000018 /var/lib/postgres/pitr/pg_wal/RECOVERYXLOG \
       --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require
-  INFO  Fetched "000000010000000000000002" (16777216 bytes) to
-        "/var/lib/postgres/pitr/pg_wal/RECOVERYXLOG"
+  21:13:41 2589801 INFO  Fetched "000000010000000000000018" (16777216 bytes) to "/var/lib/postgres/pitr/pg_wal/RECOVERYXLOG"
 
 A raw ``FETCH_FILE`` via ``psql``, or any other replication-protocol
 client, also works for a one-off fetch::
 
   restore$ PGPASSWORD=s3kr3t psql "host=archive port=6543 dbname=mycluster \
       user=archiver_repl replication=true sslmode=require" \
-      -c "FETCH_FILE '000000010000000000000002'" > /tmp/000000010000000000000002
+      -c "FETCH_FILE '000000010000000000000018'" > /tmp/000000010000000000000018
 
 See Also
 --------

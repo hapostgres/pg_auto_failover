@@ -40,15 +40,9 @@ Examples
 
 ::
 
-  archive$ pg_walserver create-cert --pgdata /var/lib/archiver \
-      --hostname mycluster.archive.example.com
-  INFO   /usr/bin/openssl req -new -x509 -days 365 -nodes -text \
-         -out /var/lib/archiver/server.crt -keyout /var/lib/archiver/server.key \
-         -subj "/CN=mycluster.archive.example.com"
-  INFO  Created a self-signed certificate for "/var/lib/archiver"
-        ("/var/lib/archiver/server.crt"/"/var/lib/archiver/server.key",
-        CN=mycluster.archive.example.com) -- replace it with a real one
-        before running on a reachable network
+  archive$ pg_walserver create-cert --hostname mycluster.archive.example.com --force
+  21:12:53 2588243 INFO   /usr/bin/openssl req -new -x509 -days 365 -nodes -text -out /var/lib/archiver/server.crt -keyout /var/lib/archiver/server.key -subj "/CN=mycluster.archive.example.com"
+  21:12:53 2588243 INFO  Created a self-signed certificate for "/var/lib/archiver" ("/var/lib/archiver/server.crt"/"/var/lib/archiver/server.key", CN=mycluster.archive.example.com) -- replace it with a real one before running on a reachable network
 
 This is self-signed, exactly like the certificate ``setup`` creates
 automatically: it establishes TLS/SNI routing, but a real deployment
