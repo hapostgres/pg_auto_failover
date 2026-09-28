@@ -3,15 +3,15 @@
  *   See cli_internal.h.
  *
  *   `pg_walserver internal service pg-receivewal --route <key> --upstream
- *   <conninfo> --path <dir>` is the subprocess entry point capture.c's own
- *   start_one_capture_child() forks and execv()s into, mirroring
+ *   <conninfo> --path <dir>` is the subprocess entry point receivewal.c's own
+ *   start_one_receivewal_child() forks and execv()s into, mirroring
  *   pg_autoctl's own "pg_autoctl internal service postgres|listener|
  *   node-active" pattern (cli_do_root.c) exactly: fork()+execv() of the
  *   *same binary*, not a bare fork() with no exec(), and not exec() of a
  *   separately-installed pg_receivewal binary. This is a deliberate choice
  *   for the same reason pg_autoctl's own header comment there gives: when
  *   a service needs restarting, execv()-ing this project's own binary
- *   from disk means a restarted capturer automatically picks up whatever
+ *   from disk means a restarted receivewal worker automatically picks up whatever
  *   binary is currently installed, without the supervising process
  *   (pg_walserver's own "serve" process) needing to be replaced or
  *   restarted itself -- the same property that makes pg_autoctl "safe to
@@ -24,7 +24,7 @@
  *
  *   Hidden from --help (make_hidden_command_set(), matching pg_autoctl's
  *   own internal_service_commands) so an operator does not accidentally
- *   invoke it directly; routable so capture.c's own execv() calls work.
+ *   invoke it directly; routable so receivewal.c's own execv() calls work.
  *
  * Licensed under the PostgreSQL License.
  *
@@ -104,9 +104,9 @@ cli_internal_pg_receivewal_getopt(int argc, char **argv)
 /*
  * cli_internal_pg_receivewal_run calls pg_receivewal_main() in-process
  * against --upstream/--path, exactly the argv shape "pg_receivewal -w -d
- * <upstream> -D <path>" would build (see capture.c's own comment on why
+ * <upstream> -D <path>" would build (see receivewal.c's own comment on why
  * no --slot/--synchronous: this is a plain, unsupervised-by-a-monitor
- * capturer, not the pgaf-integrated archiver's own quorum-aware one).
+ * receivewal worker, not the pgaf-integrated archiver's own quorum-aware one).
  * Never returns: pg_receivewal_main() always exit()s on its own.
  */
 static void
@@ -136,7 +136,7 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 
 	char title[256];
 
-	sformat(title, sizeof(title), "pg_walserver: capture %s",
+	sformat(title, sizeof(title), "pg_walserver: receivewal %s",
 			internalPgReceivewalRoute);
 	set_ps_title(title);
 
@@ -159,7 +159,7 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 
 	/*
 	 * Both SIGINT and SIGTERM must make pg_receivewal stop cleanly:
-	 * capture.c's own ws_capture_stop_all() sends SIGINT (matching
+	 * receivewal.c's own ws_receivewal_stop_all() sends SIGINT (matching
 	 * upstream pg_receivewal's own documented clean-stop signal), and
 	 * this fresh exec() otherwise starts with default dispositions for
 	 * both.
@@ -174,13 +174,13 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 
 static CommandLine service_pg_receivewal_command =
 	make_command("pg-receivewal",
-				 "Subprocess entry point for the embedded pull capturer",
+				 "Subprocess entry point for the embedded receivewal worker",
 				 "--route <key> --upstream <conninfo> --path <dir>",
-				 "  --route     the route this capturer belongs to "
+				 "  --route     the route this receivewal worker belongs to "
 				 "(process title only)\n"
-				 "  --upstream  a libpq connection string to capture WAL "
+				 "  --upstream  a libpq connection string to receive WAL "
 				 "from\n"
-				 "  --path      the route's own directory to capture "
+				 "  --path      the route's own directory to receive "
 				 "into\n",
 				 cli_internal_pg_receivewal_getopt,
 				 cli_internal_pg_receivewal_run);
@@ -193,7 +193,7 @@ static CommandLine *internal_service_subcommands[] = {
 
 static CommandLine internal_service_commands =
 	make_hidden_command_set("service",
-							"Subprocess entry points for capture.c's own "
+							"Subprocess entry points for receivewal.c's own "
 							"supervisor",
 							NULL, NULL, NULL, internal_service_subcommands);
 

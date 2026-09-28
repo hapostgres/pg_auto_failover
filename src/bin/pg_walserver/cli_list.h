@@ -21,8 +21,8 @@
 /*
  * cli_list_clusters_run prints one row per route configured in
  * "<pgdata>/pg_walserver.ini" (or just clusterFilter's own route, when not
- * NULL/empty): its path/upstream/hostname/capture setting, whether it has
- * a base backup, whether its embedded pull capturer is currently running
+ * NULL/empty): its path/upstream/hostname/receivewal setting, whether it has
+ * a base backup, whether its embedded receivewal worker is currently running
  * (cross-referenced against the ps state file, ps_state.h -- "n/a" when
  * "serve" is not running at all), and the WAL range it currently covers
  * (start LSN from its latest base backup's own backup_label, end LSN from

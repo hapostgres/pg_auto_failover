@@ -5,7 +5,7 @@
  *   restart-on-death a fixed set of long-lived child processes.
  *
  *   This file is genuinely shared, and genuinely consumed, by both
- *   `pg_walserver` (its embedded pull capturer, `capture.c`, uses the
+ *   `pg_walserver` (its embedded receivewal worker, `receivewal.c`, uses the
  *   whole `ProcessSupervisor`/`process_supervisor_*()` API directly) and
  *   `pg_autoctl` (`pg_autoctl/supervisor.c` delegates the two pieces of
  *   its own service supervision that are genuinely generic -- rather
@@ -90,7 +90,7 @@ typedef enum
  * giving up on restarting one service here does NOT bring down every
  * other service (unlike pg_autoctl, where each service is essential to
  * the single node it manages) -- pg_walserver may be serving several
- * independent routes at once, and one route's capturer permanently
+ * independent routes at once, and one route's receivewal worker permanently
  * failing (a truly broken upstream, not a transient blip) should not stop
  * every other route pg_walserver is otherwise serving correctly. That
  * "what to do once MaxR/MaxT is exceeded" policy decision is made by each
@@ -150,7 +150,7 @@ void process_supervisor_log_unknown_pid(pid_t pid);
 /*
  * One supervised child: a name (for logging), a restart policy, its
  * current pid (-1 when not running, "gave up" state included), a start
- * function (fork()+exec() is the expected shape, see capture.c's own
+ * function (fork()+exec() is the expected shape, see receivewal.c's own
  * comment on why: live-upgrade safety, matching pg_autoctl's own
  * service_postgres_ctl_start()-style services), an opaque context handed
  * back to it, and this service's own restart-backoff counters.
@@ -180,7 +180,7 @@ void process_supervisor_init(ProcessSupervisor *supervisor,
  * process_supervisor_start_all calls every service's own startFunction()
  * once, in order, stopping and returning false at the first failure (with
  * every service started so far left running -- the caller decides what to
- * do next, exactly like ws_capture_start_all()'s own per-route "log and
+ * do next, exactly like ws_receivewal_start_all()'s own per-route "log and
  * skip this one" callers already do for a single misconfigured route).
  */
 bool process_supervisor_start_all(ProcessSupervisor *supervisor);

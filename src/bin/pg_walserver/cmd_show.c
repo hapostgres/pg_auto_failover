@@ -20,9 +20,9 @@
  * pg_receivewal actually query over a replication connection:
  * "wal_segment_size" (the route's own configured segment size, in GUC
  * format, e.g. "16MB") and "data_directory_mode" (a fixed "0700"). It also
- * implements "capture", this project's own extension with no PostgreSQL
- * equivalent: the connected route's own "capture" setting, "pull" when
- * WsRoute.capturePull is set, "none" otherwise -- how cli_archive.c's
+ * implements "receivewal", this project's own extension with no PostgreSQL
+ * equivalent: the connected route's own "receivewal" setting, "pull" when
+ * WsRoute.receivewalPull is set, "none" otherwise -- how cli_archive.c's
  * "archive-wal" learns, per invocation, straight from the route it actually
  * connected to, whether to only ever CHECK_FILE or only ever ARCHIVE_FILE
  * (see that file's own header comment). Any other parameter name is
@@ -46,9 +46,9 @@ cmd_show(int sock, const WsRoute *route, const char *name)
 	{
 		value = "0700";
 	}
-	else if (strcasecmp(name, "capture") == 0)
+	else if (strcasecmp(name, "receivewal") == 0)
 	{
-		value = (route != NULL && route->capturePull) ? "pull" : "none";
+		value = (route != NULL && route->receivewalPull) ? "pull" : "none";
 	}
 
 	if (value == NULL)

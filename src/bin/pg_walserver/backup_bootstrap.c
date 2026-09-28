@@ -3,7 +3,7 @@
  *   See backup_bootstrap.h.
  *
  *   Design decision: a plain fork(), never execv(). Every other long-lived
- *   child this project forks (the embedded pull capturer, capture.c) execv()
+ *   child this project forks (the embedded receivewal worker, receivewal.c) execv()
  *   s itself back into a hidden "internal service ..." sub-command so a
  *   restarted child always picks up whatever binary is currently on disk --
  *   the live-upgrade-safety property that matters for a process that is
@@ -46,11 +46,11 @@
 #include "wal_dir_scan.h"
 
 /*
- * How long to wait for a route's own real, already-started capturer to show
+ * How long to wait for a route's own real, already-started receivewal worker to show
  * on-disk evidence of streaming before giving up on it -- the same bounded
  * timeout the removed "setup --with-basebackup" priming code used to poll
  * with (wal_dir_has_any_segment()), reused here against a real, supervised
- * capturer instead of a throwaway primer.
+ * receivewal worker instead of a throwaway primer.
  */
 #define WS_BOOTSTRAP_STREAM_WAIT_TIMEOUT_MS 30000
 #define WS_BOOTSTRAP_STREAM_WAIT_POLL_MS 100
@@ -63,7 +63,7 @@
 
 /*
  * bootstrap_child_main runs entirely inside the forked child: wait for real
- * streaming evidence (capture = pull routes only), then attempt the backup
+ * streaming evidence (receivewal = pull routes only), then attempt the backup
  * itself, bounded. Never returns -- always _exit()s.
  */
 static void
@@ -74,7 +74,7 @@ bootstrap_child_main(const WsRoute *route)
 	 * cmdline (and therefore anything matching on it, e.g. a test suite's
 	 * own "pgrep -f '^pg_walserver ... serve$'") stays byte-for-byte
 	 * identical to the parent's, which "serve" is not -- exactly the same
-	 * reason capture.c's own capturer children (via a fresh execv()) and
+	 * reason receivewal.c's own receivewal worker children (via a fresh execv()) and
 	 * cli_internal.c's own entry point end up with a distinct process
 	 * title. This one has no execv() to do that for free, so it sets its
 	 * own title explicitly, the instant it exists.
@@ -85,12 +85,12 @@ bootstrap_child_main(const WsRoute *route)
 			route->key);
 	set_ps_title(title);
 
-	if (route->capturePull)
+	if (route->receivewalPull)
 	{
 		bool streaming = false;
 		int elapsedMs = 0;
 
-		log_info("Route \"%s\": waiting for its embedded pull capturer to "
+		log_info("Route \"%s\": waiting for its embedded receivewal worker to "
 				 "start streaming before taking the bootstrap base backup",
 				 route->key);
 
@@ -109,10 +109,10 @@ bootstrap_child_main(const WsRoute *route)
 		if (!streaming)
 		{
 			log_error("Route \"%s\": timed out after %d ms waiting for its "
-					  "embedded pull capturer to start streaming any WAL at "
+					  "embedded receivewal worker to start streaming any WAL at "
 					  "all -- giving up on the automatic bootstrap base "
 					  "backup; run \"pg_walserver basebackup\" by hand once "
-					  "the capturer is healthy", route->key,
+					  "the receivewal worker is healthy", route->key,
 					  WS_BOOTSTRAP_STREAM_WAIT_TIMEOUT_MS);
 			_exit(1);
 		}

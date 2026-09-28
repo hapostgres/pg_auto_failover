@@ -44,12 +44,12 @@ ws_ps_state_write(const char *pgdata, const WsPsState *state)
 	appendPQExpBuffer(content, "serve pid=%d started=%lld\n",
 					  (int) state->servePid, (long long) state->serveStartedAt);
 
-	for (int i = 0; i < state->capturerCount; i++)
+	for (int i = 0; i < state->receivewalWorkerCount; i++)
 	{
-		const WsPsCapturerEntry *c = &state->capturers[i];
+		const WsPsReceivewalEntry *c = &state->receivewalWorkers[i];
 
 		appendPQExpBuffer(content,
-						  "capturer route=%s path=%s pid=%d started=%lld restarts=%d\n",
+						  "receivewal route=%s path=%s pid=%d started=%lld restarts=%d\n",
 						  c->routeKey, c->path, (int) c->pid,
 						  (long long) c->startedAt, c->restarts);
 	}
@@ -83,7 +83,7 @@ ws_ps_state_write(const char *pgdata, const WsPsState *state)
 
 /*
  * parse_one_line parses one "key=value key=value ..." line (the first
- * whitespace-separated token, "serve"/"capturer"/"bootstrap", has already
+ * whitespace-separated token, "serve"/"receivewal"/"bootstrap", has already
  * been consumed by the caller) into whatever the caller's own out-params
  * point at, recognizing only the field names it is given.
  */
@@ -173,15 +173,16 @@ ws_ps_state_read(const char *pgdata, WsPsState *state)
 		{
 			parse_kv(rest, NULL, NULL, &state->servePid, &state->serveStartedAt, NULL);
 		}
-		else if (strcmp(kind, "capturer") == 0 &&
-				 state->capturerCount < WS_PS_MAX_ENTRIES)
+		else if (strcmp(kind, "receivewal") == 0 &&
+				 state->receivewalWorkerCount < WS_PS_MAX_ENTRIES)
 		{
-			WsPsCapturerEntry *c = &state->capturers[state->capturerCount];
+			WsPsReceivewalEntry *c =
+				&state->receivewalWorkers[state->receivewalWorkerCount];
 
-			memset(c, 0, sizeof(WsPsCapturerEntry));
+			memset(c, 0, sizeof(WsPsReceivewalEntry));
 			parse_kv(rest, c->routeKey, c->path, &c->pid, &c->startedAt,
 					 &c->restarts);
-			state->capturerCount++;
+			state->receivewalWorkerCount++;
 		}
 		else if (strcmp(kind, "bootstrap") == 0 &&
 				 state->bootstrapCount < WS_PS_MAX_ENTRIES)

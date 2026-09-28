@@ -16,7 +16,7 @@ reading this directory does not have to reverse-engineer the "why" from the
 
 This binary was `pg_walsender` for most of this PR's own history, renamed
 once it grew a real write path (`ARCHIVE_FILE` push) and an embedded pull
-capturer alongside its original `BASE_BACKUP`/`FETCH_FILE`/
+receivewal worker alongside its original `BASE_BACKUP`/`FETCH_FILE`/
 `START_REPLICATION` read side -- "sender" undersold half its job the
 moment either landed. Alternatives checked and rejected before picking
 `pg_walserver` ("sender" replaced by the more general "server"):
@@ -58,7 +58,7 @@ its own sub-commands (`setup`, `fetch-systemid`, `basebackup`, `archive-wal`,
 `restore-wal`, `create-cert`; see "New client-side sub-commands" below) can
 now create and keep those files current, and push/pull WAL, directly from
 the command line -- `docs/ref/pg_walserver.rst`'s own worked example uses
-`setup` (embedded pull capture on by default), `archive-wal`, and `restore-wal`,
+`setup` (embedded receivewal on by default), `archive-wal`, and `restore-wal`,
 falling back to `pg_basebackup`/`pg_receivewal`/`psql` by hand only for
 what those don't cover (HBA, the passwd file, a real continuously-streaming
 standby). `pg_walserver` can already be a complete, standalone archiver
@@ -124,10 +124,10 @@ The commands a connected client can issue on a `Query` ('Q') message are:
 - `SHOW <name>` (`cmd_show.c`) -- `wal_segment_size`, needed by
   `pg_basebackup`/`pg_receivewal` to size their own reads (reports the real
   16MB PostgreSQL default; this project does not support a non-default WAL
-  segment size), and `data_directory_mode` (a fixed `"0700"`). Also `capture`,
+  segment size), and `data_directory_mode` (a fixed `"0700"`). Also `receivewal`,
   this project's own extension with no PostgreSQL equivalent: reports the
-  connected route's own `capture` setting, `"pull"` or `"none"`, straight
-  from `routes.h`'s `WsRoute.capturePull` -- how `pg_walserver archive-wal`
+  connected route's own `receivewal` setting, `"pull"` or `"none"`, straight
+  from `routes.h`'s `WsRoute.receivewalPull` -- how `pg_walserver archive-wal`
   (see "The archive push side" below) learns, per invocation, which of its
   two behaviors to run.
 - `BASE_BACKUP [options...]` (`cmd_base_backup.c`) -- streams the route's
@@ -599,10 +599,10 @@ answering with whatever is current.
 Three further properties are optional, each read as a default the way
 `path` never is: `upstream` (a libpq connection string to the instance
 this route archives from, read by `fetch-systemid`/`basebackup`/`setup`
-and by the embedded pull capturer below), `hostname` (TLS SNI routing,
-see "Routing beyond `dbname`" below), and `capture` (`capture = pull`
-opts this route into the embedded pull capturer -- see "The embedded pull
-capturer" below; absent, unaffected).
+and by the embedded receivewal worker below), `hostname` (TLS SNI routing,
+see "Routing beyond `dbname`" below), and `receivewal` (`receivewal = pull`
+opts this route into the embedded receivewal worker -- see "The embedded
+receivewal worker" below; absent, unaffected).
 
 `BASE_BACKUP`, `FETCH_FILE`, `START_REPLICATION`, and the replication-slot
 commands all resolve the connection's route once (`routes_find()`, in
@@ -786,10 +786,10 @@ Three sub-commands, alongside `serve`/`scram-secret`, all sharing
   existing one's path unless `--force`), optionally records a `--hostname`
   for SNI-based routing (see above -- and auto-creates a self-signed
   certificate the moment a *second* named route needs one to stay
-  reachable) and/or `--capture pull` (writes the route's own
-  `capture = pull` property, see "The embedded pull capturer" below --
+  reachable) and/or `--receivewal pull` (writes the route's own
+  `receivewal = pull` property, see "The embedded receivewal worker" below --
   `setup` only ever *records* the intent, it never itself starts or
-  touches the capturer; that happens the next time `serve` starts), then
+  touches the receivewal worker; that happens the next time `serve` starts), then
   calls `fetch-systemid`'s own logic (whose `pgctl_identify_system()`
   connection doubles as this step's role-permission check: PostgreSQL
   refuses a replication-mode connection for a role lacking `REPLICATION`
@@ -827,9 +827,9 @@ behind a `--with-basebackup` flag -- removed. `pg_walserver serve` takes it
 instead, automatically, once, for any currently-configured route that is
 still missing one (`cli_basebackup_route_has_backup()`, cli_basebackup.c:
 `<path>/basebackups/.latest` exists and is non-empty): right after startup
-(once `ws_capture_start_all()` has started every route's own real
-capturer), and right after a successful `SIGHUP` reload (once
-`ws_capture_reload()` has reconciled the capturer set against the newly
+(once `ws_receivewal_start_all()` has started every route's own real
+receivewal worker), and right after a successful `SIGHUP` reload (once
+`ws_receivewal_reload()` has reconciled the receivewal worker set against the newly
 reloaded routes) -- `accept_loop.c`'s own `ws_bootstrap_missing_backups()`
 is the single entry point both call. These are the *only* two moments this
 ever happens; there is no other trigger, and no recurring/scheduled
@@ -837,28 +837,28 @@ backup of any kind -- see this section's own "Recurring backups are not
 this project's job" paragraph below.
 
 This replaced an earlier design (this PR's own history, see `git log` on
-`capture.c`/`cli_setup.c`) where `setup --with-basebackup` primed a
-*throwaway* embedded capturer just long enough to prove the base backup's
+`receivewal.c`/`cli_setup.c`) where `setup --with-basebackup` primed a
+*throwaway* embedded receivewal worker just long enough to prove the base backup's
 own start LSN was covered, then tore it down before `serve` ever started
 its own real one for the same route. That design worked, but existed only
 to compensate for base backups being taken too early -- before `serve`,
-and therefore before any real capturer, had ever run for the route at all.
+and therefore before any real receivewal worker, had ever run for the route at all.
 Moving the base backup itself into `serve` removes the problem at its
 source: by the time `serve` ever decides a route needs a bootstrap backup,
-its own real, supervised capturer for that route (if `capture = pull`) has
+its own real, supervised receivewal worker for that route (if `receivewal = pull`) has
 already been started, so there is always a genuine one to wait on directly
 -- no throwaway primer, no teardown dance, no separate "priming" code path
 to keep in sync with the real one.
 
-For a `capture = pull` route, `ws_bootstrap_missing_backups()` first waits
+For a `receivewal = pull` route, `ws_bootstrap_missing_backups()` first waits
 (bounded, `backup_bootstrap.c`'s own `WS_BOOTSTRAP_STREAM_WAIT_*`
-constants) for that route's own real capturer to show genuine on-disk
+constants) for that route's own real receivewal worker to show genuine on-disk
 evidence of streaming (`wal_dir_has_any_segment()`, `wal_dir_scan.c` --
 true even for a still-growing `.partial` segment, so a caller doesn't spin
 until an entire segment happens to fill) before ever taking the backup --
 the same "the backup's own start LSN must already be covered by captured
 WAL" property the removed primer used to guarantee, now proven against the
-real capturer instead of a throwaway one. A route with no `capture = pull`
+real receivewal worker instead of a throwaway one. A route with no `receivewal = pull`
 has no such wait: its `archive-wal`-driven push has no equivalent gap to
 close (see "The archive push side" below), so the backup is taken right
 away.
@@ -868,7 +868,7 @@ public logic (`cli_basebackup_run()`, `cli_basebackup.c`) directly,
 in-process, after a plain `fork()` (`backup_bootstrap.c`'s own
 `ws_backup_bootstrap_start()`) -- deliberately **not** a new hidden
 `internal service basebackup` entry point mirroring the embedded
-capturer's own `fork()`+`execv()`-into-a-hidden-sub-command shape
+receivewal worker's own `fork()`+`execv()`-into-a-hidden-sub-command shape
 (`cli_internal.c`): that shape exists so a *restarted, long-lived* service
 picks up a replaced binary on disk without the supervising `serve` process
 itself needing to restart, a live-upgrade concern that simply does not
@@ -885,7 +885,7 @@ Retries are bounded, not indefinite: `backup_bootstrap.c`'s own
 `WS_BOOTSTRAP_BACKUP_MAX_ATTEMPTS` (3), a short fixed delay between
 attempts, all within that one forked child's own lifetime -- deliberately
 not the full `process_supervisor.h` `MaxR`/`MaxT` ring-buffer machinery
-`capture.c`'s own long-lived capturer services use (see "Restart backoff"
+`receivewal.c`'s own long-lived receivewal worker services use (see "Restart backoff"
 above): that machinery is built for a service restarted many times over a
 process's whole lifetime, tracking restarts against a sliding time window,
 which is more than a single one-shot child that runs once needs. On final
@@ -1022,32 +1022,32 @@ their wire shape and overwrite-safety rule) and the `pg_walserver archive-wal`
 client sub-command that drives them, meant to run as (part of) a Postgres
 `archive_command`. This section documents that design as built.
 
-A route with `capture = pull` configured has its own embedded, supervised
-`pg_receivewal` (see "The embedded pull capturer" below) writing straight
+A route with `receivewal = pull` configured has its own embedded, supervised
+`pg_receivewal` (see "The embedded receivewal worker" below) writing straight
 into that route's own directory. A push from `archive-wal` racing that
-capturer's own write for the same final filename, with no coordination
+receivewal worker's own write for the same final filename, with no coordination
 between the two, is unsafe. `archive-wal` avoids the race by never pushing
 at all on such a route: it runs `CHECK_FILE` only, ever, and leaves
-delivering the segment entirely to the capturer. A route with no
-`capture = pull` has no such writer to race, so `archive-wal` pushes via
+delivering the segment entirely to the receivewal worker. A route with no
+`receivewal = pull` has no such writer to race, so `archive-wal` pushes via
 `ARCHIVE_FILE` only, ever, with no `CHECK_FILE` round trip first.
 
 `pg_walserver archive-wal <path-to-file> <filename> --cluster <name> --host
 <host> [--port <port>] [--user <name>] [--sslmode <mode>]`
 (`cli_archive.c`) picks between these two disjoint behaviors automatically,
-every invocation, from the connected route's own actual `capture` setting
--- `SHOW capture` (`cmd_show.c`, an extension to the existing `SHOW` wire
+every invocation, from the connected route's own actual `receivewal` setting
+-- `SHOW receivewal` (`cmd_show.c`, an extension to the existing `SHOW` wire
 command alongside `wal_segment_size`), never a manually-set client flag,
 which would silently go stale the moment an operator changes the route's
-`capture` setting without also updating every `archive_command` line
+`receivewal` setting without also updating every `archive_command` line
 referencing it:
 
-- **`capture = pull`**: `CHECK_FILE` only. `matches` -> exit 0, nothing to
+- **`receivewal = pull`**: `CHECK_FILE` only. `matches` -> exit 0, nothing to
   push. `missing`/`differs` -> exit 1 with a clean stderr message, no
   sleep, no retry loop, no `ARCHIVE_FILE` call at all -- PostgreSQL's own
   `archive_command` retry loop is the entire retry mechanism, calling
-  `archive-wal` again later, cheaply, until the capturer catches up.
-- **no `capture = pull`** (absent or `capture = none`): `ARCHIVE_FILE`
+  `archive-wal` again later, cheaply, until the receivewal worker catches up.
+- **no `receivewal = pull`** (absent or `receivewal = none`): `ARCHIVE_FILE`
   only, unconditionally pushing the full file every invocation, computing
   its local size and CRC32C (`ws_file_crc32c()`, `ws_util.c`, backed by the
   same `INIT_CRC32C`/`COMP_CRC32C`/`FIN_CRC32C` facility
@@ -1120,18 +1120,18 @@ does not reuse `cli_upstream.c` either, and shares `cli_archive.h`'s own
 the same `--cluster`/`--host`/`--port`/`--user`/`--sslmode` flags, rather
 than duplicating them.
 
-## The embedded pull capturer (capture.c)
+## The embedded receivewal worker (receivewal.c)
 
-A route with `capture = pull` (`pg_walserver.ini`, written by hand or by
-`pg_walserver setup --capture pull`) gets its own forked, supervised
+A route with `receivewal = pull` (`pg_walserver.ini`, written by hand or by
+`pg_walserver setup --receivewal pull`) gets its own forked, supervised
 `pg_receivewal` child the moment `serve` starts -- no external
 `pg_receivewal` process, no separate supervisor unit, nothing else to
 wire up. `pg_walserver --pgdata ... serve` alone, with one route's
-`upstream`/`capture = pull` set, is a complete archiving daemon on its
+`upstream`/`receivewal = pull` set, is a complete archiving daemon on its
 own. This section documents the design as built.
 
 **`fork()` + `execv()` of this same binary, mirroring `pg_autoctl`'s own
-long-lived-service pattern.** Each capturer child is started by forking,
+long-lived-service pattern.** Each receivewal worker child is started by forking,
 then `execv()`-ing `pg_walserver` itself, re-entered as the hidden
 `pg_walserver internal service pg-receivewal --route <key> --upstream
 <conninfo> --path <dir>` sub-command (`cli_internal.c`), which calls
@@ -1144,12 +1144,12 @@ own `"pg_autoctl internal service postgres|listener|node-active"`), not
 `accept_loop.c`'s own per-*connection* fork-with-no-exec model: a
 deliberately different lifecycle (see "Supervision shape" below), and a
 deliberately different choice from a bare `fork()` too -- `execv()`-ing
-the binary from disk is what makes a restarted capturer safe to run as
+the binary from disk is what makes a restarted receivewal worker safe to run as
 part of a container's PID 1, the same property that already makes
 `pg_autoctl` "safe to use as PID 1 in Docker/Kubernetes containers where
 replacing the binary and sending SIGTERM would lose the container": if
 the `pg_walserver` binary on disk has been replaced in place, a restarted
-capturer automatically picks up the new version without the supervising
+receivewal worker automatically picks up the new version without the supervising
 `serve` process itself needing to be replaced or restarted. `main.c`
 resolves this binary's own absolute path once at startup
 (`set_program_absolute_path()`, `src/bin/common/file_utils.c`, already
@@ -1160,20 +1160,20 @@ startup.
 
 **Supervision shape: one long-lived child per active route, not
 per-connection, built on this project's own generic child-process
-supervisor.** A capturer child is alive for the server's *whole*
+supervisor.** A receivewal worker child is alive for the server's *whole*
 lifetime, independent of any client connection, and needs restart-on-
 crash -- unlike a connection child, simply reaped and forgotten the
 moment it exits. Rather than a bespoke `fork()`/`waitpid()`/backoff loop,
-`capture.c` builds one `ProcessService` (`src/bin/common/process_
-supervisor.h`) per `capture = pull` route and hands them to that file's
-own generic supervisor: `ws_capture_start_all()` forks every configured
-capturer once, at `serve` startup (`cli_root.c`'s `cli_serve_run()`,
+`receivewal.c` builds one `ProcessService` (`src/bin/common/process_
+supervisor.h`) per `receivewal = pull` route and hands them to that file's
+own generic supervisor: `ws_receivewal_start_all()` forks every configured
+receivewal worker once, at `serve` startup (`cli_root.c`'s `cli_serve_run()`,
 right after `pg_walserver.ini`/HBA validation succeeds -- the same place
 `ensure_tls_for_multiple_routes()`-adjacent logic already runs);
-`ws_capture_tick()` is called once per `ws_accept_loop()` iteration to
-detect a dead capturer and restart it (see "The single wildcard reaper"
+`ws_receivewal_tick()` is called once per `ws_accept_loop()` iteration to
+detect a dead receivewal worker and restart it (see "The single wildcard reaper"
 below for why this is also where connection children get reaped now);
-`ws_capture_stop_all()` signals every capturer to stop cleanly (`SIGINT`,
+`ws_receivewal_stop_all()` signals every receivewal worker to stop cleanly (`SIGINT`,
 matching what upstream `pg_receivewal` itself documents as its own
 clean-stop signal -- the same signal `pg_autoctl`'s own
 `service_archiver_pgreceivewal_ctl.c` sends its own pg_receivewal child,
@@ -1190,15 +1190,15 @@ not a literal relocation of that file (too deeply entangled with
 bookkeeping used to run its own, independent `waitpid()` loop -- exactly
 the shape that already caused a real bug during this feature's own
 development: two independent reapers (one in `accept_loop.c`, one for the
-capturer children) each calling `waitpid()` for children of the *same*
+receivewal worker children) each calling `waitpid()` for children of the *same*
 process can race for the same exited child's status, and whichever call
 happens to run first silently consumes it, permanently hiding that
 child's death from the other (`waitpid()` on an already-reaped pid
 returns `-1`/`ECHILD`, not the exit status the loser needed) -- the exact
 bug `pg_autoctl`'s own `service_archiver_pgreceivewal_ctl.c` header
 comment already describes hitting, for the analogous reason, on the
-pgaf-integrated side. Fixed structurally, not by coincidence: `ws_capture_
-tick()` (`capture.c`) is now the *only* place in the whole process allowed
+pgaf-integrated side. Fixed structurally, not by coincidence: `ws_receivewal_
+tick()` (`receivewal.c`) is now the *only* place in the whole process allowed
 to call `waitpid(-1, ...)` (via `process_supervisor_tick()`'s own wildcard
 loop underneath it); `accept_loop.c`'s own connection children are
 threaded through as that call's `otherChildExited` callback instead of
@@ -1208,7 +1208,7 @@ reparented to it by the kernel (only possible when running as PID 1
 inside a container) is logged at INFO and otherwise ignored, exactly like
 `pg_autoctl`'s own supervisor already does for itself.
 
-**Restart backoff.** A capturer that cannot reach a dead/unreachable
+**Restart backoff.** A receivewal worker that cannot reach a dead/unreachable
 upstream must not hot-loop forever re-forking (whose own `GetConnection()`
 failure `exit()`s immediately on the very first connection attempt, with
 no internal retry of its own). Rather than inventing new constants,
@@ -1218,9 +1218,9 @@ values -- 5 restarts per 300 seconds -- `pg_autoctl`'s own
 `SUPERVISOR_SERVICE_MAX_RETRY`/`_MAX_TIME` already use for the identical
 problem): a service restarted more than `MaxR` times within the last
 `MaxT` seconds stops being restarted. One deliberate policy difference
-from `pg_autoctl`'s own `supervisor.c`: giving up on one capturer here
+from `pg_autoctl`'s own `supervisor.c`: giving up on one receivewal worker here
 does **not** bring down `pg_walserver` itself or any other route's own
-capturer -- unlike `pg_autoctl`, where each service is essential to the
+receivewal worker -- unlike `pg_autoctl`, where each service is essential to the
 single node it manages, `pg_walserver` may be serving several independent
 routes at once, and one route's truly broken upstream should not stop
 every other route it is otherwise serving correctly.
@@ -1265,7 +1265,7 @@ anything.
 startup, into an in-memory `WsServerConfig.routes`/`WsAuthConfig.
 hbaRuleSet` (`accept_loop.h`) -- every connection reads that same snapshot,
 none of them re-parses either file off disk itself. `SIGHUP` (`ws_accept_
-loop()`'s own main loop, alongside `capture.c`'s `ws_capture_tick()`) calls
+loop()`'s own main loop, alongside `receivewal.c`'s `ws_receivewal_tick()`) calls
 `ws_reload_config()`, which re-reads both files (`routes_load()`, `hba_
 parse_file()`) and swaps them in **only when both parse successfully**,
 exactly like real PostgreSQL's own `SIGHUP`-triggered `ProcessConfigFile()`:
@@ -1277,21 +1277,21 @@ reads whatever snapshot was already installed the moment it was forked.
 What is live-reloadable this way:
 
 - **routes** (`pg_walserver.ini`): added, removed, and changed routes
-  (`path`/`upstream`/`hostname`/`capture`) are logged by key, one line per
+  (`path`/`upstream`/`hostname`/`receivewal`) are logged by key, one line per
   change, plus a one-line summary;
 - **the HBA ruleset** (`pg_walserver_hba.conf`): logged as a rule-count-plus-
   content comparison (a full rule-by-rule diff was judged not worth the
   extra complexity) -- "unchanged (N rules)" or "changed (N rules before,
   M after)";
-- **the embedded pull capturer set** (`capture.c`'s `ws_capture_reload()`):
+- **the embedded receivewal worker set** (`receivewal.c`'s `ws_receivewal_reload()`):
   reconciled against the newly reloaded routes, without ever restarting a
-  capturer whose own route did not change -- a route that newly has
-  `capture = pull` gets a capturer started; one that lost it, or whose
-  route disappeared entirely, gets its capturer stopped (`SIGINT`); one
-  whose `upstream`/`path` changed while `capture = pull` stayed on is
+  receivewal worker whose own route did not change -- a route that newly has
+  `receivewal = pull` gets a receivewal worker started; one that lost it, or whose
+  route disappeared entirely, gets its receivewal worker stopped (`SIGINT`); one
+  whose `upstream`/`path` changed while `receivewal = pull` stayed on is
   stopped and, once reaped, automatically restarted with the new values by
-  the same `PROCESS_RP_PERMANENT` restart-on-exit path `ws_capture_tick()`
-  already runs for a crashed capturer -- it cannot retarget an
+  the same `PROCESS_RP_PERMANENT` restart-on-exit path `ws_receivewal_tick()`
+  already runs for a crashed receivewal worker -- it cannot retarget an
   already-forked/exec'd `pg_receivewal` child in place, so this is always a
   stop-then-start, never a live retarget. Every start/stop/restart decision
   is logged.
@@ -1317,15 +1317,15 @@ clusters`/`list backups`/`list wal` inventory the archived data itself.
 
 `pg_walserver ps`/`pg_walserver status` run as brand-new, one-shot
 processes, entirely separate from whatever `pg_walserver serve` process
-may be running for the same `--pgdata` -- they cannot read `capture.c`'s
-own in-process `captureRoutes`/`captureServices` arrays, or
+may be running for the same `--pgdata` -- they cannot read `receivewal.c`'s
+own in-process `receivewalRoutes`/`receivewalServices` arrays, or
 `accept_loop.c`'s own `bootstrapChildren` array, because those simply do
 not exist in a different process's address space.
 
 Two mechanisms were available. `/proc` scraping would work for *half* of
-the picture: every embedded pull capturer child is `exec()`'d as
+the picture: every embedded receivewal worker child is `exec()`'d as
 `pg_walserver internal service pg-receivewal --route <key> ...`
-(`capture.c`), so its route key is recoverable from `/proc/<pid>/cmdline`
+(`receivewal.c`), so its route key is recoverable from `/proc/<pid>/cmdline`
 by any process willing to walk `/proc`. It does not work for the other
 half: the one-shot bootstrap-backup job (`backup_bootstrap.c`) is a
 *plain* `fork()`, with no `exec()` and therefore no distinguishable
@@ -1340,12 +1340,12 @@ This PR uses the second mechanism instead: a small, plain-text state file,
 `serve` itself keeps current -- written once at startup (before the first
 connection is even accepted, so `ps` has something accurate to read
 immediately), once per main accept-loop tick (at least once a second,
-alongside the existing `ws_capture_tick()` call, see `accept_loop.c`'s own
+alongside the existing `ws_receivewal_tick()` call, see `accept_loop.c`'s own
 `refresh_ps_state()`), and once more right after a successful `SIGHUP`
 reload. It records `serve`'s own pid and start time, one line per tracked
-embedded pull capturer (route, pid, path, start time, restart count -- all
-of it already available inside `capture.c`, via the small
-`ws_capture_get_status()` accessor this PR adds), and one line per
+embedded receivewal worker (route, pid, path, start time, restart count -- all
+of it already available inside `receivewal.c`, via the small
+`ws_receivewal_get_status()` accessor this PR adds), and one line per
 in-flight bootstrap backup job (`accept_loop.c`'s own
 `ws_bootstrap_get_status()`). Deliberately plain "key = value" lines, the
 same shape `wal_dir_scan.c`'s own `archiver-position` cache file already
@@ -1357,7 +1357,7 @@ the narrow window since the last refresh, have already exited; a stale
 entry is never trusted at face value.
 
 Liveness of `serve` itself -- both for `ps`/`status` and for `list
-clusters`' own "is this route's capturer running" column -- reuses
+clusters`' own "is this route's receivewal worker running" column -- reuses
 `src/bin/common/pidfile.c`'s existing `read_pidfile()` unchanged: a real
 `kill(pid, 0)` check, with a stale pidfile removed automatically, the
 exact same function `pg_walserver reload` already relies on. `serve` not
@@ -1409,8 +1409,8 @@ segment" answer is above -- they need to read every relevant directory
 entry at least once. The design this feature started from called for a
 small, per-cluster, *incrementally* maintained metadata cache file,
 updated by each of the existing code paths that already write into a
-route's own directory: the embedded pull capturer on each completed
-segment (`capture.c`'s vendored `pg_receivewal`), `archive-wal`/
+route's own directory: the embedded receivewal worker on each completed
+segment (`receivewal.c`'s vendored `pg_receivewal`), `archive-wal`/
 `ARCHIVE_FILE` on each push (`cmd_archive_file.c`), the bootstrap-backup
 code on completion (`backup_bootstrap.c`), and `archive-cleanup` on
 removal (`cli_archive_cleanup.c`).
@@ -1466,14 +1466,14 @@ This PR ships `pg_walserver` standalone (see "What this PR is, and isn't"
 above); the following is recorded here, not built, for whoever designs the
 later "archiving PR" that actually wires it into `pg_autoctl`:
 
-- `fetch-systemid`, `basebackup`, and the embedded pull capturer
-  (`capture.c`) should become **the** implementation, not a second one
+- `fetch-systemid`, `basebackup`, and the embedded receivewal worker
+  (`receivewal.c`) should become **the** implementation, not a second one
   living alongside `pg_autoctl`'s own, separately-maintained
   `archiver_systemid.c`/`service_archiver_basebackup.c`/
   `service_archiver_pgreceivewal_ctl.c`. `pg_autoctl`'s own future
   `service_archiver_reconciler.c` (already responsible for writing
   `pg_walserver.ini` in that later PR's own design) should grow to also
-  write `upstream`/`capture` and call into this same logic in-process, the
+  write `upstream`/`receivewal` and call into this same logic in-process, the
   same way a future `pg_autoctl restore command` is expected to call
   `ws_fetch_file_client()` directly, in-process, once that PR's own
   monitor-backed quorum/archiver-node participation exists on top of it --
@@ -1491,16 +1491,16 @@ later "archiving PR" that actually wires it into `pg_autoctl`:
   wal_segment()`'s current blanket skip of `.backup`/`.history`/
   `.partial` files should become once `ARCHIVE_FILE` can carry `.backup`
   files too (see "The wire protocol" above's own `ARCHIVE_FILE` entry).
-- Push (either `ARCHIVE_FILE` or the embedded pull capturer) only ever
+- Push (either `ARCHIVE_FILE` or the embedded receivewal worker) only ever
   fires on **completed** segments (coarser RPO than continuous streaming
   replication) and is asynchronous relative to commit, so it cannot
   participate in `synchronous_standby_names` quorum the way a live
   streaming connection with flush-position feedback can. For a future
   archiver's role as a failover-aware quorum member, the pull/streaming
-  path (the embedded capturer, or a real standby's own walreceiver via
+  path (the embedded receivewal worker, or a real standby's own walreceiver via
   `START_REPLICATION`) stays load-bearing; push is a strong
   *defense-in-depth backstop* there (never lose a segment even if the
-  streaming capturer is down for a while), and a perfectly sufficient
+  streaming receivewal worker is down for a while), and a perfectly sufficient
   *sole* mechanism for the simpler, non-HA standalone case this file is
   otherwise about.
 
@@ -1512,18 +1512,18 @@ reconciler writing routes/HBA files, no monitor schema. So the tap spec
 builds the smallest possible harness instead, ahead of the archiver
 feature that will eventually make all of this automatic:
 
-- `pg_walserver setup --no-capture` does most of the work in one call:
+- `pg_walserver setup --no-receivewal` does most of the work in one call:
   creates the route's own directory, writes the `pg_walserver.ini` section
   (`path` + `upstream`), and fetches node1's real system identifier into
   `pg_walserver_systemid` -- exactly the sequence
   `docs/ref/pg_walserver.rst`'s own worked example now leads with.
   `pg_walserver serve`, started a few steps later, takes the route's first
   base backup automatically at startup (see "Bootstrapping a route's
-  first base backup" above). `--no-capture` opts out of the embedded pull
-  capturer, on by `setup`'s own default now (see "The embedded pull
-  capturer" below): this spec drives its own external, stock
+  first base backup" above). `--no-receivewal` opts out of the embedded pull
+  receivewal worker, on by `setup`'s own default now (see "The embedded pull
+  receivewal worker" below): this spec drives its own external, stock
   `pg_receivewal` into this exact route directory a few lines below, and
-  the embedded capturer would otherwise fork a second process racing it
+  the embedded receivewal worker would otherwise fork a second process racing it
   for the same segment files;
 - a hand-crafted `pg_walserver_hba.conf` (a single `host all all
   127.0.0.1/32 trust` rule, scoped to the loopback peer every step in this
@@ -1556,7 +1556,7 @@ seven steps:
    above).
 4. `test_003_start_replication_from_pg_walserver` -- a real
    `pg_receivewal` runs `START_REPLICATION` against `pg_walserver` itself,
-   concurrently with the original capturer still running against node1;
+   concurrently with the original receivewal worker still running against node1;
    forcing a new segment on node1 proves both a segment still being
    written (a `.partial` file) is picked up correctly and the two captured
    copies end up byte-identical.
@@ -1618,11 +1618,11 @@ A third, separate spec covers `CHECK_FILE`/`ARCHIVE_FILE` and the
 `pg_walserver archive-wal`/`restore-wal`/`create-cert` sub-commands above,
 entirely monitor-independent as the design requires (see "The archive push
 side" above). It configures two routes: `arch/0`, set up with
-`--no-capture` (this spec pushes its own small, deterministic fake "WAL
+`--no-receivewal` (this spec pushes its own small, deterministic fake "WAL
 segments" by hand under real WAL-segment-shaped names -- the embedded
-capturer would otherwise fork and pull real WAL from node1 into the same
+receivewal worker would otherwise fork and pull real WAL from node1 into the same
 directory, under the same names, racing what the spec itself writes), and
-`arch/1`, left at `setup`'s own `capture = pull` default, with a real
+`arch/1`, left at `setup`'s own `receivewal = pull` default, with a real
 embedded `pg_receivewal` actually pulling WAL off node1 -- proving
 `archive-wal`'s two disjoint behaviors against a route genuinely
 configured each way. Six steps: `CHECK_FILE` reports `missing` for a
@@ -1645,34 +1645,34 @@ cleanly, twice, CN reflecting each `--hostname` (`test_004`);
 (`src/bin/common/fetch_client.c`) a real, exercised caller -- restoring a
 name nothing ever archived fails cleanly, with no partial file left behind
 (`test_005`); and, against `arch/1`, `archive-wal` run against the segment
-its embedded capturer is still writing (identified by its own `.partial`
+its embedded receivewal worker is still writing (identified by its own `.partial`
 file) exits 1 immediately via `CHECK_FILE` alone, `ARCHIVE_FILE` never
 called and the final file never appearing as a side effect -- then, once a
-forced WAL switch on node1 lets the capturer actually finish that exact
+forced WAL switch on node1 lets the receivewal worker actually finish that exact
 segment, a subsequent `archive-wal` invocation against the identical bytes
 reports `matches` and exits 0, still without ever calling `ARCHIVE_FILE`
 (`test_006`). Runs 6/6 green.
 
-### Testing the embedded pull capturer (tests/tap/specs/pg_walserver_capture.pgaf)
+### Testing the embedded receivewal worker (tests/tap/specs/pg_walserver_capture.pgaf)
 
-A fourth, separate spec covers `capture.c`'s embedded pull capturer above.
-Its own setup{} runs `pg_walserver setup --capture pull` (writing
-`capture = pull` into the route's own section) and starts an independent,
+A fourth, separate spec covers `receivewal.c`'s embedded receivewal worker above.
+Its own setup{} runs `pg_walserver setup --receivewal pull` (writing
+`receivewal = pull` into the route's own section) and starts an independent,
 externally-run "reference" `pg_receivewal` capturing the same primary into
-a separate directory -- every step below diffs the embedded capturer's own
+a separate directory -- every step below diffs the embedded receivewal worker's own
 output against that reference, the same byte-identical-output bar
 `pg_walserver_standalone.pgaf`'s own `test_003` already proves for
 `START_REPLICATION`. Three steps: a live `pg_receivewal` child is running
 under `pg_walserver`'s own pid (identified by its own process title,
-`"pg_walserver: capture <route>"`, set by `start_one_capture_child()`'s
+`"pg_walserver: receivewal <route>"`, set by `start_one_receivewal_child()`'s
 own `set_ps_title()` call -- not a pidfile, `pg_walserver` keeps none for
 it) with no external `pg_receivewal` ever invoked for this route, and a
 forced WAL switch lands a byte-identical segment in the route's own
 directory and in the reference capture (`test_001`); `kill -9`-ing the
-capturer child gets it restarted automatically, under a new pid, still
-parented by `pg_walserver` itself, with capture continuing byte-identical
+receivewal worker child gets it restarted automatically, under a new pid, still
+parented by `pg_walserver` itself, with receivewal continuing byte-identical
 across the restart (`test_002`); and stopping `pg_walserver` itself
-(`SIGTERM`) cleanly stops the capturer child too -- no orphaned process
+(`SIGTERM`) cleanly stops the receivewal worker child too -- no orphaned process
 left running (`test_003`). Runs 3/3 green.
 
 ### Testing pg_walserver as a container's real PID 1 (tests/tap/specs/pg_walserver_pid1.pgaf)
@@ -1687,19 +1687,19 @@ real: node2's own container `command` is overridden to `exec pg_walserver`
 directly, with no `pg_autoctl`, shell wrapper, or init system above it at
 all, so a reparented grandchild really does land on `pg_walserver`'s own
 `waitpid(-1, ...)` call, not on some other init. Three steps: the embedded
-capturer's own parent pid really is `1` (`/proc/<pid>/stat`), proving
+receivewal worker's own parent pid really is `1` (`/proc/<pid>/stat`), proving
 `pg_walserver` itself is genuinely this container's PID 1, not a process
-merely running inside one (`test_001`); `kill -9`-ing the capturer gets it
+merely running inside one (`test_001`); `kill -9`-ing the receivewal worker gets it
 restarted automatically, still parented by pid 1 (`test_002`); and
 `docker compose stop` (a plain `SIGTERM` to the container, exactly what
-`docker stop` sends) cleanly stops both `pg_walserver` and its capturer
-child -- proven from the container's own log lines (`capture.c`'s own
-`ws_capture_stop_all()` and `ws_accept_loop()`'s own shutdown message),
+`docker stop` sends) cleanly stops both `pg_walserver` and its receivewal worker
+child -- proven from the container's own log lines (`receivewal.c`'s own
+`ws_receivewal_stop_all()` and `ws_accept_loop()`'s own shutdown message),
 never from process absence alone: once PID 1 exits, the kernel tears down
 the whole PID namespace regardless of how orderly the shutdown was, so "no
 orphan left" can't by itself distinguish an orderly stop from a forced one
 the way the log lines -- and the explicit absence of a "sending SIGKILL"
-escalation line -- can (`test_003`). WAL-capture byte-for-byte correctness
+escalation line -- can (`test_003`). WAL-receivewal byte-for-byte correctness
 itself is already proven by `pg_walserver_capture.pgaf` above; this spec's
 only job is the process-supervision/signal-handling contract that changes
 specifically when `pg_walserver` is PID 1 instead of an ordinary child.
@@ -1713,7 +1713,7 @@ for the first time in this suite -- every spec above builds an equivalent
 node by hand inside an ordinary pg_auto_failover-managed formation instead.
 Four roles: a plain, unmanaged `postgres primary` (no monitor, no formation
 anywhere in this spec), archived by `archive_command` and continuously
-pulled by `pg_walserver server`'s own embedded capturer (capture on by
+pulled by `pg_walserver server`'s own embedded receivewal worker (receivewal on by
 default, proven running the whole time via its own process title, the same
 check `pg_walserver_capture.pgaf` already uses); a point-in-time-recovery
 target built with a real, unmodified `pg_basebackup` against `server` plus
@@ -1748,6 +1748,6 @@ HBA ruleset -- a request against the route that already worked before the
 bad edit still succeeds (`test_003`); `pg_walserver reload` against a
 stale pidfile (an already-exited pid) fails cleanly with a nonzero exit,
 and `read_pidfile()` removes the stale file as a side effect (`test_004`);
-and giving the route `capture = pull` via reload starts its embedded pull
-capturer with no server restart, and removing it again stops that same
-capturer child (`test_005`). Runs 5/5 green.
+and giving the route `receivewal = pull` via reload starts its embedded pull
+receivewal worker with no server restart, and removing it again stops that same
+receivewal worker child (`test_005`). Runs 5/5 green.

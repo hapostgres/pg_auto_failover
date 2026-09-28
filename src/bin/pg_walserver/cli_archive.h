@@ -22,16 +22,16 @@
  *   Implements the two disjoint behaviors README.md's "The archive push
  *   side: CHECK_FILE + ARCHIVE_FILE + pg_walserver archive-wal" section
  *   describes, chosen automatically per invocation from the connected
- *   route's own "capture" setting (SHOW capture, cmd_show.c), never a
+ *   route's own "receivewal" setting (SHOW receivewal, cmd_show.c), never a
  *   manually-set client flag:
  *
- *     - the route has "capture = pull" configured (its own embedded,
+ *     - the route has "receivewal = pull" configured (its own embedded,
  *       supervised pg_receivewal writes into this same directory): only
  *       ever CHECK_FILE, never ARCHIVE_FILE. Exit 0 on "matches", exit 1
  *       on "missing"/"differs" with a clean stderr message -- no sleep, no
  *       retry loop inside this client, PostgreSQL's own archive_command
  *       retry loop is the entire retry mechanism;
- *     - the route has no "capture = pull" (absent or "none"): only ever
+ *     - the route has no "receivewal = pull" (absent or "none"): only ever
  *       ARCHIVE_FILE, unconditionally pushing the full file every
  *       invocation, no CHECK_FILE round trip first -- the server's own
  *       overwrite-safety (cmd_archive_file.c) already makes this

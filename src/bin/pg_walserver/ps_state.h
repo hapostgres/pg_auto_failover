@@ -2,7 +2,7 @@
  * src/bin/pg_walserver/ps_state.h
  *   A tiny, plain-text cross-process status snapshot: "pg_walserver serve"
  *   writes "<pgdata>/pg_walserver_ps.status" every time its own supervised
- *   child set changes (an embedded pull capturer starting/restarting, an
+ *   child set changes (an embedded receivewal worker starting/restarting, an
  *   automatic bootstrap backup job starting) and at least once a second
  *   from its own main accept-loop tick -- see accept_loop.c's own
  *   refresh_ps_state(). "pg_walserver ps"/"pg_walserver status" (cli_ps.c/
@@ -10,8 +10,8 @@
  *   back rather than trying to inspect "serve"'s own in-process C structs,
  *   which obviously do not exist in a different process's address space.
  *
- *   Why a state file rather than /proc scraping: "serve"'s own capturer
- *   children (capture.c) are exec()'d as "pg_walserver internal service
+ *   Why a state file rather than /proc scraping: "serve"'s own receivewal worker
+ *   children (receivewal.c) are exec()'d as "pg_walserver internal service
  *   pg-receivewal --route <key> ..." -- their route key IS visible in
  *   /proc/<pid>/cmdline, so a determined "ps" could, in principle, walk
  *   /proc, find every pid whose cmdline matches, and reconstruct the
@@ -56,7 +56,7 @@
 #define WS_PS_STATE_FILENAME "pg_walserver_ps.status"
 #define WS_PS_MAX_ENTRIES 64
 
-typedef struct WsPsCapturerEntry
+typedef struct WsPsReceivewalEntry
 {
 	char routeKey[NAMEDATALEN + 16];
 	char path[MAXPGPATH];
@@ -64,7 +64,7 @@ typedef struct WsPsCapturerEntry
 	                         * never started) */
 	time_t startedAt;       /* this incarnation's own start time */
 	int restarts;           /* how many times it has been restarted */
-} WsPsCapturerEntry;
+} WsPsReceivewalEntry;
 
 typedef struct WsPsBootstrapEntry
 {
@@ -78,8 +78,8 @@ typedef struct WsPsState
 	pid_t servePid;
 	time_t serveStartedAt;
 
-	WsPsCapturerEntry capturers[WS_PS_MAX_ENTRIES];
-	int capturerCount;
+	WsPsReceivewalEntry receivewalWorkers[WS_PS_MAX_ENTRIES];
+	int receivewalWorkerCount;
 
 	WsPsBootstrapEntry bootstraps[WS_PS_MAX_ENTRIES];
 	int bootstrapCount;

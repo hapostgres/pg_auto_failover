@@ -58,14 +58,14 @@ main(int argc, char **argv)
 	log_set_level(LOG_INFO);
 
 	/*
-	 * capture.c's own supervised capturer children fork()+execv() this
+	 * receivewal.c's own supervised receivewal worker children fork()+execv() this
 	 * same binary (see cli_internal.c's own header comment for why) --
 	 * they need an absolute, exec()-able path, not whatever relative/bare
 	 * argv[0] the shell happened to invoke us with (e.g. a bare
 	 * "pg_walserver" found via $PATH). Falls back to argv[0] verbatim if
 	 * the absolute path can't be resolved (matches pg_autoctl's own
-	 * main.c); a route with "capture = pull" then fails to start its own
-	 * capturer with a clear "execv() failed" error rather than silently
+	 * main.c); a route with "receivewal = pull" then fails to start its own
+	 * receivewal worker with a clear "execv() failed" error rather than silently
 	 * misbehaving.
 	 */
 	if (!set_program_absolute_path(pg_autoctl_program, sizeof(pg_autoctl_program)))

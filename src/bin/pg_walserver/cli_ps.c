@@ -4,16 +4,16 @@
  *
  *   Cross-process visibility mechanism: "pg_walserver ps" runs as a brand
  *   new process, entirely separate from any running "pg_walserver serve" --
- *   it cannot read capture.c's own in-process captureRoutes/captureServices
+ *   it cannot read receivewal.c's own in-process receivewalRoutes/receivewalServices
  *   arrays, or accept_loop.c's own bootstrapChildren array, because those
  *   simply do not exist in this process's address space. Two mechanisms
  *   were considered:
  *
- *     - /proc scraping: every embedded pull capturer child is exec()'d as
+ *     - /proc scraping: every embedded receivewal worker child is exec()'d as
  *       "pg_walserver internal service pg-receivewal --route <key> ..."
- *       (capture.c), so its own route key IS recoverable from
+ *       (receivewal.c), so its own route key IS recoverable from
  *       /proc/<pid>/cmdline by any process willing to walk /proc looking
- *       for it. This would work for the capturer set alone.
+ *       for it. This would work for the receivewal worker set alone.
  *
  *     - a small state file "serve" itself keeps current (ps_state.h),
  *       written from the exact same in-process data "ps" would otherwise
@@ -35,7 +35,7 @@
  *   Liveness: read_pidfile() (src/bin/common/pidfile.c) already performs a
  *   real kill(pid, 0) check and removes a stale pidfile -- reused as-is,
  *   both to decide whether "serve" itself is running at all, and (this
- *   file's own extra kill(pid, 0) calls) whether a specific capturer/
+ *   file's own extra kill(pid, 0) calls) whether a specific receivewal worker/
  *   bootstrap pid the state file remembers is still actually alive: the
  *   state file is refreshed at most once a second (accept_loop.c's own
  *   refresh_ps_state()), so a pid it names could, in the narrow window
@@ -115,27 +115,27 @@ cli_ps_run(const char *pgdata)
 	printf("pg_walserver serve: pid %d, running, uptime %s\n\n", /* IGNORE-BANNED */
 		   (int) servePid, serveUptime);
 
-	if (!haveState || (state.capturerCount == 0 && state.bootstrapCount == 0))
+	if (!haveState || (state.receivewalWorkerCount == 0 && state.bootstrapCount == 0))
 	{
-		printf("No embedded pull capturers or bootstrap backup jobs.\n"); /* IGNORE-BANNED */
+		printf("No embedded receivewal workers or bootstrap backup jobs.\n"); /* IGNORE-BANNED */
 		return true;
 	}
 
-	printf("%-8s %-20s %-8s %-9s %-12s %s\n", /* IGNORE-BANNED */
+	printf("%-11s %-20s %-8s %-9s %-12s %s\n", /* IGNORE-BANNED */
 		   "KIND", "CLUSTER", "PID", "STATUS", "UPTIME", "RESTARTS");
 	printf("----------------------------------------------------" /* IGNORE-BANNED */
-		   "------------------\n");
+		   "---------------------\n");
 
-	for (int i = 0; i < state.capturerCount; i++)
+	for (int i = 0; i < state.receivewalWorkerCount; i++)
 	{
-		const WsPsCapturerEntry *c = &state.capturers[i];
+		const WsPsReceivewalEntry *c = &state.receivewalWorkers[i];
 		bool running = c->pid > 0 && kill(c->pid, 0) == 0;
 		char uptime[32] = { 0 };
 
 		format_uptime(running ? c->startedAt : 0, uptime, sizeof(uptime));
 
-		printf("%-8s %-20s %-8d %-9s %-12s %d\n", /* IGNORE-BANNED */
-			   "capture", c->routeKey, (int) c->pid,
+		printf("%-11s %-20s %-8d %-9s %-12s %d\n", /* IGNORE-BANNED */
+			   "receivewal", c->routeKey, (int) c->pid,
 			   running ? "running" : "stopped", uptime, c->restarts);
 	}
 
@@ -147,7 +147,7 @@ cli_ps_run(const char *pgdata)
 
 		format_uptime(running ? b->startedAt : 0, uptime, sizeof(uptime));
 
-		printf("%-8s %-20s %-8d %-9s %-12s %s\n", /* IGNORE-BANNED */
+		printf("%-11s %-20s %-8d %-9s %-12s %s\n", /* IGNORE-BANNED */
 			   "bootstr", b->routeKey, (int) b->pid,
 			   running ? "running" : "done", uptime, "-");
 	}

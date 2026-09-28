@@ -1,8 +1,8 @@
 /*
  * src/bin/pg_walserver/cli_internal.h
  *   `pg_walserver internal service pg-receivewal ...`: the subprocess
- *   entry point capture.c's own supervised capturer children fork()+
- *   exec() into -- see cli_internal.c's own header comment and capture.c's
+ *   entry point receivewal.c's own supervised receivewal worker children fork()+
+ *   exec() into -- see cli_internal.c's own header comment and receivewal.c's
  *   for why fork()+exec() of this hidden sub-command, not a bare fork().
  *
  * Licensed under the PostgreSQL License.

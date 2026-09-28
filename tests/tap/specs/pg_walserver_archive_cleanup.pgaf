@@ -1,7 +1,7 @@
 # pg_walserver archive-cleanup (cli_archive_cleanup.c): WAL/base-backup
 # retention. See README.md's own "archive-cleanup" section for the full
 # design; this spec exercises it end to end against a route fed by the
-# embedded pull capturer ("capture = pull", pg_walserver setup's own
+# embedded receivewal worker ("receivewal = pull", pg_walserver setup's own
 # default), so every WAL segment involved is real, captured off a real
 # pg_auto_failover-managed primary (node1).
 #
@@ -56,7 +56,7 @@ setup {
     # own setup{}.
     exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
-    # "capture = pull" (setup's own default: no --capture/--no-capture
+    # "receivewal = pull" (setup's own default: no --receivewal/--no-receivewal
     # flag at all) so this route accumulates real WAL continuously, off
     # node1, with no manual archive-wal pushing needed anywhere in this
     # spec.
@@ -68,7 +68,7 @@ setup {
     exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
 
     # "serve" bootstraps this route's first base backup automatically,
-    # once its embedded capturer has real streaming evidence (see
+    # once its embedded receivewal worker has real streaming evidence (see
     # README.md's "Bootstrapping a route's first base backup").
     exec node2 bash -c 'for i in $(seq 60); do grep -q "is now the latest for \"/tmp/ws/default/0\"" /tmp/ws-walserver.log && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
     exec node2 bash -c 'cat /tmp/ws/default/0/basebackups/.latest > /tmp/backup_A0.label'

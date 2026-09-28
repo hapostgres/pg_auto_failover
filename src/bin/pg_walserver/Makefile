@@ -26,7 +26,7 @@ LOCAL_SRC = main.c cli_root.c accept_loop.c startup.c auth.c framing.c repl_comm
             routes.c hba.c tls.c cmd_identify_system.c cmd_show.c cmd_base_backup.c \
             tar_stream.c cmd_fetch_file.c cmd_check_file.c cmd_archive_file.c \
             cmd_timeline_history.c cmd_replication_slot.c \
-            cmd_start_replication.c wal_dir_scan.c ws_util.c capture.c \
+            cmd_start_replication.c wal_dir_scan.c ws_util.c receivewal.c \
             backup_bootstrap.c \
             cli_upstream.c cli_wal_target.c cli_fetch_systemid.c cli_basebackup.c cli_setup.c \
             cli_create_cert.c cli_archive.c cli_restore_wal.c cli_archive_cleanup.c cli_internal.c \
@@ -104,8 +104,8 @@ OBJS += $(COMMON_LIB)
 
 # vendor/pg_receivewal/ (src/bin/common/vendor/pg_receivewal/, see that
 # directory's own pg_receivewal.c header comment) -- an in-process
-# pg_receivewal, forked and called directly by capture.c's own embedded
-# pull capturer. Its build rule (PG_RECEIVEWAL_VENDOR_OBJS) is shared with
+# pg_receivewal, forked and called directly by receivewal.c's own embedded
+# receivewal worker. Its build rule (PG_RECEIVEWAL_VENDOR_OBJS) is shared with
 # pg_autoctl's own vendor-linking (service_archiver_pgreceivewal_ctl.c) via
 # Makefile.common, so both binaries build the identical vendored sources.
 OBJS += $(PG_RECEIVEWAL_VENDOR_OBJS)

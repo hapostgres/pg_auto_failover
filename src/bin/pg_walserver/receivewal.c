@@ -1,6 +1,6 @@
 /*
- * src/bin/pg_walserver/capture.c
- *   See capture.h.
+ * src/bin/pg_walserver/receivewal.c
+ *   See receivewal.h.
  *
  *   Design decision: fork() + execv() of *this same pg_walserver binary*,
  *   re-entering it as "pg_walserver internal service pg-receivewal --route
@@ -12,7 +12,7 @@
  *   accept_loop.c's own per-*connection* fork/no-exec model -- a
  *   deliberately different lifecycle (see "Supervision shape" below).
  *   fork()+execv() of the running binary, rather than a plain fork(), is
- *   what makes a restarted capturer safe to run as part of a container's
+ *   what makes a restarted receivewal worker safe to run as part of a container's
  *   PID 1: cli_internal.c's own header comment has the full rationale
  *   (live-upgrade safety, the same property pg_autoctl's own comment there
  *   documents for itself). pg_receivewal_main() itself (the vendored entry
@@ -20,10 +20,10 @@
  *   inside that fresh exec -- no third process, no real "pg_receivewal"
  *   binary needs to be installed/on $PATH anywhere.
  *
- *   Supervision shape: one long-lived child per active "capture = pull"
+ *   Supervision shape: one long-lived child per active "receivewal = pull"
  *   route, not per-connection -- a different lifecycle from accept_loop.
  *   c's own per-connection children (reaped and forgotten the moment they
- *   exit): a capturer child is alive for the server's whole lifetime,
+ *   exit): a receivewal worker child is alive for the server's whole lifetime,
  *   independent of any client connection, and needs restart-on-crash.
  *   Rather than a bespoke fork()/waitpid()/backoff loop, this reuses this
  *   project's own generic child-process supervisor, src/bin/common/
@@ -35,7 +35,7 @@
  *   pg_autoctl/supervisor.c (which is too deeply entangled with the
  *   keeper/monitor/node-spec subsystem to move wholesale).
  *
- *   Reap-race hygiene: ws_capture_tick() below is the *only* place in this
+ *   Reap-race hygiene: ws_receivewal_tick() below is the *only* place in this
  *   whole process allowed to call waitpid(-1, ...) (via process_
  *   supervisor_tick()'s own wildcard loop) -- accept_loop.c's own
  *   connection-child bookkeeping is threaded through as this function's
@@ -58,7 +58,7 @@
 
 #include "postgres_fe.h"
 
-#include "capture.h"
+#include "receivewal.h"
 
 #include "file_utils.h"
 #include "log.h"
@@ -70,100 +70,100 @@
 /*
  * A route's own INI file is operator-written (or, later, written by
  * service_archiver_reconciler.c), not attacker input -- this bound exists
- * only to keep the capture-services array a fixed size, the same
+ * only to keep the receivewal-services array a fixed size, the same
  * WS_MAX_CONNECTIONS-style hardening accept_loop.c already applies to
  * connection children, for a completely different (but equally
  * operator-controlled) count.
  */
-#define WS_CAPTURE_MAX_ROUTES 64
+#define WS_RECEIVEWAL_MAX_ROUTES 64
 
-/* how long ws_capture_stop_all() waits before escalating to SIGKILL */
-#define WS_CAPTURE_STOP_TIMEOUT_MS 5000
+/* how long ws_receivewal_stop_all() waits before escalating to SIGKILL */
+#define WS_RECEIVEWAL_STOP_TIMEOUT_MS 5000
 
-typedef struct WsCaptureRoute
+typedef struct WsReceivewalRoute
 {
 	char routeKey[NAMEDATALEN + 16];
 	char path[MAXPGPATH];
 	char upstream[MAXCONNINFO];
-	time_t startedAt;    /* set by start_one_capture_child(): the single
+	time_t startedAt;    /* set by start_one_receivewal_child(): the single
 	                      * choke point every (re)start of this route's
-	                      * capturer goes through, initial start, reload-
+	                      * receivewal worker goes through, initial start, reload-
 	                      * driven restart, and tick-driven restart-on-
 	                      * crash alike */
-} WsCaptureRoute;
+} WsReceivewalRoute;
 
-static WsCaptureRoute captureRoutes[WS_CAPTURE_MAX_ROUTES];
-static ProcessService captureServices[WS_CAPTURE_MAX_ROUTES];
-static ProcessSupervisor captureSupervisor = { 0 };
+static WsReceivewalRoute receivewalRoutes[WS_RECEIVEWAL_MAX_ROUTES];
+static ProcessService receivewalServices[WS_RECEIVEWAL_MAX_ROUTES];
+static ProcessSupervisor receivewalSupervisor = { 0 };
 
 extern char pg_autoctl_program[MAXPGPATH];     /* main.c, this binary's own
                                                 * absolute path -- see
                                                 * main.c's own comment */
 
-static bool start_one_capture_child(void *context, pid_t *pid);
+static bool start_one_receivewal_child(void *context, pid_t *pid);
 
 
 /*
- * ws_capture_start_all -- see capture.h.
+ * ws_receivewal_start_all -- see receivewal.h.
  */
 bool
-ws_capture_start_all(const WsRoute *routes, int routeCount)
+ws_receivewal_start_all(const WsRoute *routes, int routeCount)
 {
 	int n = 0;
 
 	for (int i = 0; i < routeCount; i++)
 	{
-		if (!routes[i].capturePull)
+		if (!routes[i].receivewalPull)
 		{
 			continue;
 		}
 
 		if (routes[i].upstream[0] == '\0')
 		{
-			log_error("Route \"%s\" has \"capture = pull\" but no "
-					  "\"upstream\" property: the embedded capturer has "
+			log_error("Route \"%s\" has \"receivewal = pull\" but no "
+					  "\"upstream\" property: the embedded receivewal worker has "
 					  "nowhere to pull WAL from -- not starting it for "
 					  "this route", routes[i].key);
 			continue;
 		}
 
-		if (n >= WS_CAPTURE_MAX_ROUTES)
+		if (n >= WS_RECEIVEWAL_MAX_ROUTES)
 		{
-			log_error("Too many \"capture = pull\" routes (max %d): not "
-					  "starting an embedded capturer for route \"%s\"",
-					  WS_CAPTURE_MAX_ROUTES, routes[i].key);
+			log_error("Too many \"receivewal = pull\" routes (max %d): not "
+					  "starting an embedded receivewal worker for route \"%s\"",
+					  WS_RECEIVEWAL_MAX_ROUTES, routes[i].key);
 			continue;
 		}
 
-		WsCaptureRoute *cr = &captureRoutes[n];
+		WsReceivewalRoute *cr = &receivewalRoutes[n];
 
-		memset(cr, 0, sizeof(WsCaptureRoute));
+		memset(cr, 0, sizeof(WsReceivewalRoute));
 		strlcpy(cr->routeKey, routes[i].key, sizeof(cr->routeKey));
 		strlcpy(cr->path, routes[i].path, sizeof(cr->path));
 		strlcpy(cr->upstream, routes[i].upstream, sizeof(cr->upstream));
 
-		ProcessService *service = &captureServices[n];
+		ProcessService *service = &receivewalServices[n];
 
 		memset(service, 0, sizeof(ProcessService));
-		sformat(service->name, sizeof(service->name), "capture-%s",
+		sformat(service->name, sizeof(service->name), "receivewal-%s",
 				cr->routeKey);
 		service->policy = PROCESS_RP_PERMANENT;
-		service->startFunction = start_one_capture_child;
+		service->startFunction = start_one_receivewal_child;
 		service->context = cr;
 
 		n++;
 	}
 
-	process_supervisor_init(&captureSupervisor, captureServices, n);
+	process_supervisor_init(&receivewalSupervisor, receivewalServices, n);
 
 	if (n == 0)
 	{
 		return true;
 	}
 
-	if (!process_supervisor_start_all(&captureSupervisor))
+	if (!process_supervisor_start_all(&receivewalSupervisor))
 	{
-		log_warn("Failed to start every embedded pull capturer; the ones "
+		log_warn("Failed to start every embedded receivewal worker; the ones "
 				 "that did start will still be supervised normally");
 	}
 
@@ -172,15 +172,15 @@ ws_capture_start_all(const WsRoute *routes, int routeCount)
 
 
 /*
- * start_one_capture_child forks and execv()s this same pg_walserver
+ * start_one_receivewal_child forks and execv()s this same pg_walserver
  * binary as "internal service pg-receivewal --route ... --upstream ...
  * --path ..." -- see this file's own header comment for why fork()+
  * execv(), not a bare fork().
  */
 static bool
-start_one_capture_child(void *context, pid_t *pid)
+start_one_receivewal_child(void *context, pid_t *pid)
 {
-	WsCaptureRoute *cr = (WsCaptureRoute *) context;
+	WsReceivewalRoute *cr = (WsReceivewalRoute *) context;
 
 	fflush(stdout);
 	fflush(stderr);
@@ -189,7 +189,7 @@ start_one_capture_child(void *context, pid_t *pid)
 
 	if (fpid == -1)
 	{
-		log_error("Failed to fork the embedded pull capturer for route "
+		log_error("Failed to fork the embedded receivewal worker for route "
 				  "\"%s\": %m", cr->routeKey);
 		return false;
 	}
@@ -221,28 +221,28 @@ start_one_capture_child(void *context, pid_t *pid)
 	*pid = fpid;
 	cr->startedAt = time(NULL);
 
-	log_info("Started the embedded pull capturer for route \"%s\" (pid %d), "
-			 "capturing into \"%s\"", cr->routeKey, fpid, cr->path);
+	log_info("Started the embedded receivewal worker for route \"%s\" (pid %d), "
+			 "receiving into \"%s\"", cr->routeKey, fpid, cr->path);
 
 	return true;
 }
 
 
 /*
- * ws_capture_get_status -- see capture.h.
+ * ws_receivewal_get_status -- see receivewal.h.
  */
 int
-ws_capture_get_status(WsCaptureStatus *out, int maxOut)
+ws_receivewal_get_status(WsReceivewalStatus *out, int maxOut)
 {
 	int n = 0;
 
-	for (int i = 0; i < captureSupervisor.serviceCount && n < maxOut; i++)
+	for (int i = 0; i < receivewalSupervisor.serviceCount && n < maxOut; i++)
 	{
-		WsCaptureRoute *cr = &captureRoutes[i];
-		ProcessService *service = &captureServices[i];
-		WsCaptureStatus *status = &out[n];
+		WsReceivewalRoute *cr = &receivewalRoutes[i];
+		ProcessService *service = &receivewalServices[i];
+		WsReceivewalStatus *status = &out[n];
 
-		memset(status, 0, sizeof(WsCaptureStatus));
+		memset(status, 0, sizeof(WsReceivewalStatus));
 		strlcpy(status->routeKey, cr->routeKey, sizeof(status->routeKey));
 		strlcpy(status->path, cr->path, sizeof(status->path));
 		strlcpy(status->upstream, cr->upstream, sizeof(status->upstream));
@@ -259,30 +259,30 @@ ws_capture_get_status(WsCaptureStatus *out, int maxOut)
 
 
 /*
- * ws_capture_reload -- see capture.h.
+ * ws_receivewal_reload -- see receivewal.h.
  */
 void
-ws_capture_reload(const WsRoute *newRoutes, int newRouteCount)
+ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
 {
 	bool *handled = (bool *) calloc(newRouteCount > 0 ? newRouteCount : 1,
 									sizeof(bool));
 
 	if (handled == NULL)
 	{
-		log_error("Reload: out of memory reconciling the embedded pull "
-				  "capturer set: leaving it as-is");
+		log_error("Reload: out of memory reconciling the embedded "
+				  "receivewal worker set: leaving it as-is");
 		return;
 	}
 
 	int started = 0, stopped = 0, restarted = 0, unchanged = 0;
 
 	/* stop, or update-then-restart-in-place, every currently tracked
-	 * capturer whose route disappeared, lost "capture = pull", or changed
+	 * receivewal worker whose route disappeared, lost "receivewal = pull", or changed
 	 * "upstream"/"path" */
-	for (int i = 0; i < captureSupervisor.serviceCount; i++)
+	for (int i = 0; i < receivewalSupervisor.serviceCount; i++)
 	{
-		ProcessService *service = &captureServices[i];
-		WsCaptureRoute *cr = &captureRoutes[i];
+		ProcessService *service = &receivewalServices[i];
+		WsReceivewalRoute *cr = &receivewalRoutes[i];
 
 		if (service->pid <= 0)
 		{
@@ -302,10 +302,10 @@ ws_capture_reload(const WsRoute *newRoutes, int newRouteCount)
 			}
 		}
 
-		if (want == NULL || !want->capturePull || want->upstream[0] == '\0')
+		if (want == NULL || !want->receivewalPull || want->upstream[0] == '\0')
 		{
-			log_info("Reload: stopping the embedded pull capturer for "
-					 "route \"%s\" (pid %d): no longer \"capture = pull\"",
+			log_info("Reload: stopping the embedded receivewal worker for "
+					 "route \"%s\" (pid %d): no longer \"receivewal = pull\"",
 					 cr->routeKey, service->pid);
 			service->policy = PROCESS_RP_TEMPORARY;
 			(void) kill(service->pid, SIGINT);
@@ -317,14 +317,14 @@ ws_capture_reload(const WsRoute *newRoutes, int newRouteCount)
 
 		if (!streq(cr->upstream, want->upstream) || !streq(cr->path, want->path))
 		{
-			log_info("Reload: restarting the embedded pull capturer for "
+			log_info("Reload: restarting the embedded receivewal worker for "
 					 "route \"%s\" (pid %d): \"upstream\"/\"path\" changed",
 					 cr->routeKey, service->pid);
 
 			/*
 			 * service->context already points at cr: updating it here means
 			 * the ordinary PERMANENT-policy restart-on-exit path in
-			 * ws_capture_tick() (process_supervisor_tick() underneath it)
+			 * ws_receivewal_tick() (process_supervisor_tick() underneath it)
 			 * starts the next incarnation with the new upstream/path once
 			 * this SIGINT is reaped -- it cannot retarget an already-forked/
 			 * exec'd pg_receivewal child in place, so this is always a
@@ -342,28 +342,28 @@ ws_capture_reload(const WsRoute *newRoutes, int newRouteCount)
 		}
 	}
 
-	/* start a capturer for every newly-added (or newly "capture = pull")
+	/* start a receivewal worker for every newly-added (or newly "receivewal = pull")
 	 * route not already handled above */
 	for (int j = 0; j < newRouteCount; j++)
 	{
-		if (handled[j] || !newRoutes[j].capturePull)
+		if (handled[j] || !newRoutes[j].receivewalPull)
 		{
 			continue;
 		}
 
 		if (newRoutes[j].upstream[0] == '\0')
 		{
-			log_error("Reload: route \"%s\" has \"capture = pull\" but no "
+			log_error("Reload: route \"%s\" has \"receivewal = pull\" but no "
 					  "\"upstream\" property: not starting an embedded "
-					  "capturer for it", newRoutes[j].key);
+					  "receivewal worker for it", newRoutes[j].key);
 			continue;
 		}
 
 		int slot = -1;
 
-		for (int i = 0; i < captureSupervisor.serviceCount; i++)
+		for (int i = 0; i < receivewalSupervisor.serviceCount; i++)
 		{
-			if (captureServices[i].pid <= 0)
+			if (receivewalServices[i].pid <= 0)
 			{
 				slot = i;
 				break;
@@ -372,43 +372,43 @@ ws_capture_reload(const WsRoute *newRoutes, int newRouteCount)
 
 		if (slot == -1)
 		{
-			if (captureSupervisor.serviceCount >= WS_CAPTURE_MAX_ROUTES)
+			if (receivewalSupervisor.serviceCount >= WS_RECEIVEWAL_MAX_ROUTES)
 			{
-				log_error("Reload: too many \"capture = pull\" routes (max "
-						  "%d): not starting an embedded capturer for route "
-						  "\"%s\"", WS_CAPTURE_MAX_ROUTES, newRoutes[j].key);
+				log_error("Reload: too many \"receivewal = pull\" routes (max "
+						  "%d): not starting an embedded receivewal worker for route "
+						  "\"%s\"", WS_RECEIVEWAL_MAX_ROUTES, newRoutes[j].key);
 				continue;
 			}
 
-			slot = captureSupervisor.serviceCount++;
+			slot = receivewalSupervisor.serviceCount++;
 		}
 
-		WsCaptureRoute *cr = &captureRoutes[slot];
+		WsReceivewalRoute *cr = &receivewalRoutes[slot];
 
-		memset(cr, 0, sizeof(WsCaptureRoute));
+		memset(cr, 0, sizeof(WsReceivewalRoute));
 		strlcpy(cr->routeKey, newRoutes[j].key, sizeof(cr->routeKey));
 		strlcpy(cr->path, newRoutes[j].path, sizeof(cr->path));
 		strlcpy(cr->upstream, newRoutes[j].upstream, sizeof(cr->upstream));
 
-		ProcessService *service = &captureServices[slot];
+		ProcessService *service = &receivewalServices[slot];
 
 		memset(service, 0, sizeof(ProcessService));
-		sformat(service->name, sizeof(service->name), "capture-%s", cr->routeKey);
+		sformat(service->name, sizeof(service->name), "receivewal-%s", cr->routeKey);
 		service->policy = PROCESS_RP_PERMANENT;
-		service->startFunction = start_one_capture_child;
+		service->startFunction = start_one_receivewal_child;
 		service->context = cr;
 
-		if (start_one_capture_child(cr, &service->pid))
+		if (start_one_receivewal_child(cr, &service->pid))
 		{
 			process_restart_counters_start(&service->restartCounters,
 										   (uint64_t) time(NULL));
-			log_info("Reload: started a new embedded pull capturer for "
+			log_info("Reload: started a new embedded receivewal worker for "
 					 "route \"%s\"", cr->routeKey);
 			++started;
 		}
 		else
 		{
-			log_error("Reload: failed to start an embedded pull capturer "
+			log_error("Reload: failed to start an embedded receivewal worker "
 					  "for route \"%s\"", cr->routeKey);
 			service->pid = -1;
 		}
@@ -416,38 +416,38 @@ ws_capture_reload(const WsRoute *newRoutes, int newRouteCount)
 
 	free(handled);
 
-	log_info("Reload: capturer reconciliation: %d started, %d stopped, "
+	log_info("Reload: receivewal worker reconciliation: %d started, %d stopped, "
 			 "%d restarted, %d unchanged", started, stopped, restarted,
 			 unchanged);
 }
 
 
 /*
- * ws_capture_tick -- see capture.h.
+ * ws_receivewal_tick -- see receivewal.h.
  */
 void
-ws_capture_tick(bool (*otherChildExited)(void *ctx, pid_t pid, int status),
-				void *otherCtx)
+ws_receivewal_tick(bool (*otherChildExited)(void *ctx, pid_t pid, int status),
+				   void *otherCtx)
 {
-	process_supervisor_tick(&captureSupervisor, otherChildExited, otherCtx);
+	process_supervisor_tick(&receivewalSupervisor, otherChildExited, otherCtx);
 }
 
 
 /*
- * ws_capture_stop_all -- see capture.h.
+ * ws_receivewal_stop_all -- see receivewal.h.
  */
 void
-ws_capture_stop_all(void)
+ws_receivewal_stop_all(void)
 {
 	/*
 	 * SIGINT, not SIGTERM: cli_internal.c's own pgaf_install_stop_
-	 * handlers() call (made right after execv(), inside the capturer
+	 * handlers() call (made right after execv(), inside the receivewal worker
 	 * child itself) treats both identically as "stop cleanly", but SIGINT
 	 * is what upstream pg_receivewal itself documents as its own
 	 * clean-stop signal -- the same signal pg_autoctl's own
 	 * service_archiver_pgreceivewal_ctl.c sends its own pg_receivewal
 	 * child, for the same reason.
 	 */
-	process_supervisor_stop_all(&captureSupervisor, SIGINT,
-								WS_CAPTURE_STOP_TIMEOUT_MS);
+	process_supervisor_stop_all(&receivewalSupervisor, SIGINT,
+								WS_RECEIVEWAL_STOP_TIMEOUT_MS);
 }

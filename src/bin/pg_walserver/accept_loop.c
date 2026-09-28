@@ -27,7 +27,7 @@
 #include "accept_loop.h"
 #include "auth.h"
 #include "backup_bootstrap.h"
-#include "capture.h"
+#include "receivewal.h"
 #include "cli_basebackup.h"
 #include "defaults.h"
 #include "file_utils.h"
@@ -298,9 +298,9 @@ handle_connection(int clientSock, const WsServerConfig *config)
 
 
 /*
- * WsConnectionChildren is the "other" context ws_capture_tick() (capture.h)
+ * WsConnectionChildren is the "other" context ws_receivewal_tick() (receivewal.h)
  * hands connection_child_exited() below -- see that function's own comment
- * for why connection children are reaped through capture.c's own tick
+ * for why connection children are reaped through receivewal.c's own tick
  * rather than a second, independent waitpid(-1, ...) call site here.
  */
 typedef struct WsConnectionChildren
@@ -330,17 +330,17 @@ remove_child(pid_t *children, int *count, pid_t pid)
 
 
 /*
- * connection_child_exited is ws_capture_tick()'s otherChildExited callback
- * (capture.h): pid/status just came from the *one* wildcard waitpid(-1,
+ * connection_child_exited is ws_receivewal_tick()'s otherChildExited callback
+ * (receivewal.h): pid/status just came from the *one* wildcard waitpid(-1,
  * ...) call site this whole process makes (process_supervisor_tick(),
- * inside capture.c's ws_capture_tick()) -- deliberately not a second,
+ * inside receivewal.c's ws_receivewal_tick()) -- deliberately not a second,
  * independent wildcard wait here, which would race that one for the same
  * exited child's status (see process_supervisor.h's own comment: whichever
  * reaper's waitpid() call happens to run first silently consumes the
  * zombie, permanently hiding that child's death from the other). Returns
  * true (and removes pid from the connection-children array) when pid is
- * one of ours; false otherwise, so ws_capture_tick() can fall through to
- * its own "unrecognized pid" handling (a supervised capturer's own exit,
+ * one of ours; false otherwise, so ws_receivewal_tick() can fall through to
+ * its own "unrecognized pid" handling (a supervised receivewal worker's own exit,
  * or -- only possible when running as PID 1 -- an orphaned, reparented
  * grandchild).
  */
@@ -367,10 +367,10 @@ connection_child_exited(void *ctx, pid_t pid, int status)
 /*
  * bootstrapChildren tracks every still-running ws_backup_bootstrap_start()
  * child (backup_bootstrap.c) -- a third, independent kind of child this
- * process forks, alongside the embedded pull capturers (capture.c's own
- * captureSupervisor) and per-connection children (WsConnectionChildren
+ * process forks, alongside the embedded receivewal workers (receivewal.c's own
+ * receivewalSupervisor) and per-connection children (WsConnectionChildren
  * above). Reaped through the exact same single wildcard reaper as both of
- * those (see ws_capture_tick()'s own header comment on why there is only
+ * those (see ws_receivewal_tick()'s own header comment on why there is only
  * ever one waitpid(-1, ...) call site in this whole process): without
  * tracking these pids here too, process_supervisor_tick() would hand them
  * to process_supervisor_log_unknown_pid() as an "unknown subprocess",
@@ -433,7 +433,7 @@ ws_bootstrap_get_status(WsBootstrapStatus *out, int maxOut)
 
 /*
  * bootstrap_or_connection_child_exited is the single otherChildExited
- * callback ws_capture_tick() is actually given below: it chains connection_
+ * callback ws_receivewal_tick() is actually given below: it chains connection_
  * child_exited() (ctx: the WsConnectionChildren array) and bootstrap_child_
  * exited() (its own file-scope array), so a pid recognized by either one is
  * reaped quietly -- never handed further down to process_supervisor_tick()'s
@@ -508,7 +508,7 @@ ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount)
 /*
  * log_route_diff logs a summary of what changed between the previously
  * installed route set and a freshly, successfully reloaded one: routes
- * added, removed, or changed (path/upstream/hostname/capture), compared by
+ * added, removed, or changed (path/upstream/hostname/receivewal), compared by
  * key. Called only once both pg_walserver.ini and pg_walserver_hba.conf have
  * re-parsed cleanly, right before the new routes are installed.
  */
@@ -534,17 +534,17 @@ log_route_diff(const WsRoute *oldRoutes, int oldCount,
 		if (strcmp(old->path, newRoutes[i].path) != 0 ||
 			strcmp(old->upstream, newRoutes[i].upstream) != 0 ||
 			strcmp(old->hostname, newRoutes[i].hostname) != 0 ||
-			old->capturePull != newRoutes[i].capturePull)
+			old->receivewalPull != newRoutes[i].receivewalPull)
 		{
 			++changed;
 			log_info("reload: route \"%s\" changed (path \"%s\" -> \"%s\", "
 					 "upstream \"%s\" -> \"%s\", hostname \"%s\" -> \"%s\", "
-					 "capture %s -> %s)",
+					 "receivewal %s -> %s)",
 					 newRoutes[i].key, old->path, newRoutes[i].path,
 					 old->upstream, newRoutes[i].upstream,
 					 old->hostname, newRoutes[i].hostname,
-					 old->capturePull ? "pull" : "none",
-					 newRoutes[i].capturePull ? "pull" : "none");
+					 old->receivewalPull ? "pull" : "none",
+					 newRoutes[i].receivewalPull ? "pull" : "none");
 		}
 	}
 
@@ -634,7 +634,7 @@ log_hba_diff(const WsHbaRuleSet *oldSet, const WsHbaRuleSet *newSet)
  * PostgreSQL's own SIGHUP-triggered ProcessConfigFile(), a bad reload is
  * refused, never partially applied, and the previous, already-validated
  * configuration keeps serving every connection. Reconciles the embedded
- * pull capturer set against the new routes (capture.c's ws_capture_reload())
+ * receivewal worker set against the new routes (receivewal.c's ws_receivewal_reload())
  * once both files are known-good. The TLS certificate/key are never
  * touched here -- see the one-line note logged below.
  */
@@ -700,9 +700,9 @@ ws_reload_config(WsServerConfig *config)
 	log_route_diff(config->routes, config->routeCount, newRoutes, newRouteCount);
 	log_hba_diff(&config->auth.hbaRuleSet, &newHbaRuleSet);
 
-	/* never restart an already-running capturer just because SIGHUP fired;
+	/* never restart an already-running receivewal worker just because SIGHUP fired;
 	 * only reconcile against what actually changed */
-	ws_capture_reload(newRoutes, newRouteCount);
+	ws_receivewal_reload(newRoutes, newRouteCount);
 
 	routes_free(config->routes);
 	hba_ruleset_free(&config->auth.hbaRuleSet);
@@ -715,8 +715,8 @@ ws_reload_config(WsServerConfig *config)
 			 newRouteCount, newRouteCount == 1 ? "" : "s");
 
 	/*
-	 * Now that the reconciled capturer set above has had a chance to start
-	 * a real, supervised capturer for any newly-added "capture = pull"
+	 * Now that the reconciled receivewal worker set above has had a chance to start
+	 * a real, supervised receivewal worker for any newly-added "receivewal = pull"
 	 * route, check every currently-configured route for a missing base
 	 * backup and kick off an automatic bootstrap for it -- the second of
 	 * the two trigger points documented in accept_loop.h's own
@@ -733,13 +733,13 @@ ws_reload_config(WsServerConfig *config)
 
 
 /*
- * refresh_ps_state gathers a fresh snapshot of every capturer (capture.c)
+ * refresh_ps_state gathers a fresh snapshot of every receivewal worker (receivewal.c)
  * and in-flight bootstrap backup job (backup_bootstrap.c) this process is
  * currently tracking, and writes it to the on-disk ps state file
  * (ps_state.h) that "pg_walserver ps"/"pg_walserver status", run later as
  * a brand-new process, read back. Called once before the main loop starts
  * (so "ps" has something accurate to read even before the first tick),
- * once per loop iteration alongside ws_capture_tick(), and once more at
+ * once per loop iteration alongside ws_receivewal_tick(), and once more at
  * the end of a successful reload -- see ws_accept_loop()'s own call sites.
  * Cheap: a handful of small structs and one small atomic file write, not
  * worth gating behind a "did anything actually change" check.
@@ -758,18 +758,19 @@ refresh_ps_state(const WsServerConfig *config, pid_t servePid,
 	state.servePid = servePid;
 	state.serveStartedAt = serveStartedAt;
 
-	WsCaptureStatus captureStatus[WS_PS_MAX_ENTRIES];
-	int captureCount = ws_capture_get_status(captureStatus, WS_PS_MAX_ENTRIES);
+	WsReceivewalStatus receivewalStatus[WS_PS_MAX_ENTRIES];
+	int receivewalCount = ws_receivewal_get_status(receivewalStatus, WS_PS_MAX_ENTRIES);
 
-	for (int i = 0; i < captureCount; i++)
+	for (int i = 0; i < receivewalCount; i++)
 	{
-		WsPsCapturerEntry *dst = &state.capturers[state.capturerCount++];
+		WsPsReceivewalEntry *dst =
+			&state.receivewalWorkers[state.receivewalWorkerCount++];
 
-		strlcpy(dst->routeKey, captureStatus[i].routeKey, sizeof(dst->routeKey));
-		strlcpy(dst->path, captureStatus[i].path, sizeof(dst->path));
-		dst->pid = captureStatus[i].pid;
-		dst->startedAt = captureStatus[i].startedAt;
-		dst->restarts = captureStatus[i].restarts;
+		strlcpy(dst->routeKey, receivewalStatus[i].routeKey, sizeof(dst->routeKey));
+		strlcpy(dst->path, receivewalStatus[i].path, sizeof(dst->path));
+		dst->pid = receivewalStatus[i].pid;
+		dst->startedAt = receivewalStatus[i].startedAt;
+		dst->restarts = receivewalStatus[i].restarts;
 	}
 
 	WsBootstrapStatus bootstrapStatus[WS_PS_MAX_ENTRIES];
@@ -832,7 +833,7 @@ ws_accept_loop(WsServerConfig *config)
 		 * set_signal_handlers() (common/signals.c) already installs SIGHUP
 		 * -> catch_reload(), which only sets this flag -- never do real work
 		 * inside a signal handler. Checked once per loop iteration,
-		 * alongside ws_capture_tick() below, exactly like real PostgreSQL
+		 * alongside ws_receivewal_tick() below, exactly like real PostgreSQL
 		 * checks its own ConfigReloadPending flag in its main loops.
 		 */
 		if (asked_to_reload)
@@ -843,16 +844,16 @@ ws_accept_loop(WsServerConfig *config)
 
 		/*
 		 * One tick, one wildcard waitpid(-1, ...) call site for this whole
-		 * process (capture.c's own ws_capture_tick(), process_supervisor.c
-		 * underneath it): reaps and restarts-on-death every "capture =
+		 * process (receivewal.c's own ws_receivewal_tick(), process_supervisor.c
+		 * underneath it): reaps and restarts-on-death every "receivewal =
 		 * pull" route's own supervised pg_receivewal child (a completely
 		 * independent lifecycle from the connection children below -- one
 		 * long-lived child per active route, alive for the server's whole
-		 * lifetime, not per accepted connection, see capture.c's own
+		 * lifetime, not per accepted connection, see receivewal.c's own
 		 * header comment), and hands any pid it doesn't recognize to
 		 * connection_child_exited() above.
 		 */
-		ws_capture_tick(bootstrap_or_connection_child_exited, &connChildren);
+		ws_receivewal_tick(bootstrap_or_connection_child_exited, &connChildren);
 		refresh_ps_state(config, gServePid, gServeStartedAt);
 
 		/*
@@ -911,7 +912,7 @@ ws_accept_loop(WsServerConfig *config)
 		}
 
 		/* children that exited meanwhile must not count against the cap */
-		ws_capture_tick(bootstrap_or_connection_child_exited, &connChildren);
+		ws_receivewal_tick(bootstrap_or_connection_child_exited, &connChildren);
 
 		if (childCount >= WS_MAX_CONNECTIONS)
 		{
@@ -959,13 +960,13 @@ ws_accept_loop(WsServerConfig *config)
 	close(listenSock);
 
 	/*
-	 * Stop every "capture = pull" route's own supervised pg_receivewal
+	 * Stop every "receivewal = pull" route's own supervised pg_receivewal
 	 * child cleanly (SIGINT, a bounded wait, then SIGKILL if needed --
-	 * capture.c's own ws_capture_stop_all()) before this process itself
+	 * receivewal.c's own ws_receivewal_stop_all()) before this process itself
 	 * exits: the same shutdown path every other part of this server uses
 	 * (asked_to_stop/asked_to_stop_fast, above), not a second mechanism.
 	 */
-	ws_capture_stop_all();
+	ws_receivewal_stop_all();
 
 	log_info("pg_walserver shutting down");
 

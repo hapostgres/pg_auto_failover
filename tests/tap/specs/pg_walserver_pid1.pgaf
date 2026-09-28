@@ -1,4 +1,4 @@
-# Proves pg_walserver (and its own embedded pull capturer, capture.c) is
+# Proves pg_walserver (and its own embedded receivewal worker, receivewal.c) is
 # actually safe to run as a container's real PID 1 -- not merely "works
 # when supervised by something else" (every other pg_walserver spec in
 # this PR runs it as an ordinary background process under node2's own
@@ -13,23 +13,23 @@
 # stays an ordinary pg_autoctl-managed primary (nothing about it changes);
 # node2 never runs pg_autoctl at all in this spec.
 #
-# WAL-capture *correctness* is already proven byte-for-byte by
+# WAL-receivewal *correctness* is already proven byte-for-byte by
 # pg_walserver_capture.pgaf; this spec's only job is the process-
 # supervision/signal-handling contract that changes when pg_walserver is
 # pid 1 instead of an ordinary child process:
 #
-#   test_001  the embedded capturer runs under pg_walserver's own pid 1
+#   test_001  the embedded receivewal worker runs under pg_walserver's own pid 1
 #             (its parent, checked via /proc/<pid>/stat, really is pid 1)
-#   test_002  killing the capturer (SIGKILL, simulating a crash) gets it
+#   test_002  killing the receivewal worker (SIGKILL, simulating a crash) gets it
 #             restarted automatically, still parented by pid 1
 #   test_003  `docker compose stop` (a plain SIGTERM to the container,
 #             exactly what `docker stop` sends) cleanly stops both
-#             pg_walserver and its capturer child -- proven from the
+#             pg_walserver and its receivewal worker child -- proven from the
 #             container's own logs, since once pid 1 exits the whole PID
 #             namespace is torn down by the kernel regardless of how
 #             orderly the shutdown was, so "no orphan process" alone
 #             wouldn't distinguish a clean stop from a forced one; the
-#             log lines capture.c's own ws_capture_stop_all() and
+#             log lines receivewal.c's own ws_receivewal_stop_all() and
 #             ws_accept_loop()'s own shutdown path emit do
 
 cluster {
@@ -38,7 +38,7 @@ cluster {
     formation {
         node1 replication-password "pgaf-repl-pw"
         node2 replication-password "pgaf-repl-pw"
-            command "mkdir -p /tmp/ws/default/0 && echo [default/0] > /tmp/ws/pg_walserver.ini && echo path = /tmp/ws/default/0 >> /tmp/ws/pg_walserver.ini && echo upstream = host=node1 port=5432 user=pgautofailover_replicator password=pgaf-repl-pw sslmode=disable >> /tmp/ws/pg_walserver.ini && echo capture = pull >> /tmp/ws/pg_walserver.ini && exec pg_walserver --pgdata /tmp/ws --port 6543"
+            command "mkdir -p /tmp/ws/default/0 && echo [default/0] > /tmp/ws/pg_walserver.ini && echo path = /tmp/ws/default/0 >> /tmp/ws/pg_walserver.ini && echo upstream = host=node1 port=5432 user=pgautofailover_replicator password=pgaf-repl-pw sslmode=disable >> /tmp/ws/pg_walserver.ini && echo receivewal = pull >> /tmp/ws/pg_walserver.ini && exec pg_walserver --pgdata /tmp/ws --port 6543"
     }
 }
 
@@ -47,7 +47,7 @@ setup {
     # command never runs pg_autoctl at all, see the header comment above,
     # so pg_autoctl's own HBA management on node1 never learns about
     # node2's address the way it would for a real registered node. Add
-    # the one rule node2's embedded capturer needs by hand, the same
+    # the one rule node2's embedded receivewal worker needs by hand, the same
     # "pg_walserver's HBA is just a file, hand-edited exactly as an
     # operator running it standalone would" precedent pg_walserver_
     # standalone.pgaf's own setup{} already uses on pg_walserver's own
@@ -63,43 +63,43 @@ setup {
     # would say "sh" instead).
     exec node2 bash -c 'test "$(cat /proc/1/comm)" = "pg_walserver" || { cat /proc/1/cmdline; ps aux; false; }'
 
-    exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: capture default/0$" > /tmp/cap_pid.txt && test -s /tmp/cap_pid.txt && exit 0; sleep 1; done; ps aux; exit 1'
+    exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal default/0$" > /tmp/cap_pid.txt && test -s /tmp/cap_pid.txt && exit 0; sleep 1; done; ps aux; exit 1'
 }
 
 teardown {
     compose down
 }
 
-step test_001_capturer_runs_under_pid_1 {
+step test_001_receivewal_runs_under_pid_1 {
     exec node2 bash -c 'test "$(wc -l < /tmp/cap_pid.txt)" = "1"'
     exec node2 bash -c 'pid=$(cat /tmp/cap_pid.txt); test -d /proc/$pid'
-    exec node2 bash -c 'pid=$(cat /tmp/cap_pid.txt); ppid=$(awk "{print \$4}" /proc/$pid/stat); test "$ppid" = "1" || { echo "capturer pid $pid has ppid $ppid, expected 1 (the container'"'"'s own pid 1)"; ps aux; false; }'
+    exec node2 bash -c 'pid=$(cat /tmp/cap_pid.txt); ppid=$(awk "{print \$4}" /proc/$pid/stat); test "$ppid" = "1" || { echo "receivewal worker pid $pid has ppid $ppid, expected 1 (the container'"'"'s own pid 1)"; ps aux; false; }'
 }
 
-step test_002_capturer_restarts_on_kill_still_under_pid_1 {
+step test_002_receivewal_restarts_on_kill_still_under_pid_1 {
     exec node2 bash -c 'kill -9 $(cat /tmp/cap_pid.txt)'
-    exec node2 bash -c 'old=$(cat /tmp/cap_pid.txt); for i in $(seq 30); do new=$(pgrep -f "^pg_walserver: capture default/0$"); test -n "$new" -a "$new" != "$old" && { echo "$new" > /tmp/cap_pid2.txt; exit 0; }; sleep 1; done; ps aux; exit 1'
+    exec node2 bash -c 'old=$(cat /tmp/cap_pid.txt); for i in $(seq 30); do new=$(pgrep -f "^pg_walserver: receivewal default/0$"); test -n "$new" -a "$new" != "$old" && { echo "$new" > /tmp/cap_pid2.txt; exit 0; }; sleep 1; done; ps aux; exit 1'
     exec node2 bash -c 'test "$(wc -l < /tmp/cap_pid2.txt)" = "1" || { cat /tmp/cap_pid2.txt; false; }'
-    exec node2 bash -c 'pid=$(cat /tmp/cap_pid2.txt); ppid=$(awk "{print \$4}" /proc/$pid/stat); test "$ppid" = "1" || { echo "restarted capturer pid $pid has ppid $ppid, expected 1"; ps aux; false; }'
+    exec node2 bash -c 'pid=$(cat /tmp/cap_pid2.txt); ppid=$(awk "{print \$4}" /proc/$pid/stat); test "$ppid" = "1" || { echo "restarted receivewal worker pid $pid has ppid $ppid, expected 1"; ps aux; false; }'
 }
 
 step test_003_stopping_the_container_stops_everything_cleanly {
     compose stop node2
 
     # process_supervisor_stop_all()'s own "Stopping service ..." log line
-    # (capture.c's own ws_capture_stop_all() calls it; SIGINT, never
+    # (receivewal.c's own ws_receivewal_stop_all() calls it; SIGINT, never
     # SIGKILL as the first try) and accept_loop.c's own shutdown log line
     # must both show up: proof pg_walserver's own orderly shutdown
     # sequence actually ran to completion inside the container before it
     # exited, not that Docker's own stop timeout forcibly tore the whole
     # thing down.
     logs node2 contains "Stopping service"
-    logs node2 contains "capture-default/0"
+    logs node2 contains "receivewal-default/0"
     logs node2 contains "pg_walserver shutting down"
     logs node2 not contains "sending SIGKILL"
 }
 
 sequence
-    test_001_capturer_runs_under_pid_1
-    test_002_capturer_restarts_on_kill_still_under_pid_1
+    test_001_receivewal_runs_under_pid_1
+    test_002_receivewal_restarts_on_kill_still_under_pid_1
     test_003_stopping_the_container_stops_everything_cleanly
