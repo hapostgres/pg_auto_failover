@@ -6,7 +6,7 @@
 # first base backup automatically the moment it starts (accept_loop.c's
 # own ws_bootstrap_missing_backups()) -- setup no longer takes one itself.
 # Ongoing WAL capture is still the stock OS pg_receivewal, run by hand
-# here (pg_walserver's own embedded capturer is a later addition, see
+# here (pg_walserver's own embedded receivewal worker is a later addition, see
 # DESIGN-standalone-archiving.md) -- this is the smallest harness that still
 # exercises the real replication wire protocol end to end, ahead of the
 # archiver feature (a later PR) that wires pg_walserver into pg_autoctl's
@@ -77,12 +77,12 @@ setup {
     # "serve" is running yet at this point, so setup only logs that this
     # config will take effect the next time it starts -- test_000 below
     # starts it, which is what actually bootstraps this route's first base
-    # backup automatically. --no-capture: this spec drives its own external
+    # backup automatically. --no-receivewal: this spec drives its own external
     # pg_receivewal (below) into this exact route directory -- the embedded
-    # pull capturer, on by default now, would otherwise fork a second
+    # receivewal worker, on by default now, would otherwise fork a second
     # process racing it for the same segment files.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
-    exec node2 bash -c 'if grep -qx "capture = pull" /tmp/ws/pg_walserver.ini; then echo "capture = pull should not have been written with --no-capture"; false; fi'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
+    exec node2 bash -c 'if grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini; then echo "receivewal = pull should not have been written with --no-receivewal"; false; fi'
 
     # capture real WAL off node1 with the stock pg_receivewal (not this
     # project's own vendored copy, which is not part of this PR's stack)

@@ -22,7 +22,7 @@
 
 /*
  * ws_backup_bootstrap_start forks a plain child (no execv(): this is a
- * one-time transient operation, not a long-lived service needing capture.
+ * one-time transient operation, not a long-lived service needing receivewal.
  * c's own fork()+execv()-for-live-upgrade treatment) that takes route's
  * first base backup and exits -- never blocks the caller beyond the
  * fork() call itself. Returns true with *pidOut set once the child has
@@ -32,13 +32,13 @@
  *
  * The child, in order:
  *
- *   - for a "capture = pull" route, waits (bounded, see backup_bootstrap.c's
+ *   - for a "receivewal = pull" route, waits (bounded, see backup_bootstrap.c's
  *     own WS_BOOTSTRAP_STREAM_WAIT_* constants) for wal_dir_has_any_segment()
  *     to become true against route's own real, already-started, supervised
- *     capturer (capture.c) -- never a throwaway primer, unlike the removed
+ *     receivewal worker (receivewal.c) -- never a throwaway primer, unlike the removed
  *     "setup --with-basebackup" design this replaces: by the time this
  *     function is ever called, "serve" has already started (or already
- *     reconciled, on reload) route's own real capturer, so there is always
+ *     reconciled, on reload) route's own real receivewal worker, so there is always
  *     a genuine one to wait on directly;
  *   - takes the backup itself (cli_basebackup_run(), cli_basebackup.c),
  *     retried up to WS_BOOTSTRAP_BACKUP_MAX_ATTEMPTS times with a short

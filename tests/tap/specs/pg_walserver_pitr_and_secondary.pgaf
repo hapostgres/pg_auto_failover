@@ -38,9 +38,9 @@
 #      every peer on this test's own network" precedent every other
 #      pg_walserver_*.pgaf spec already uses), matching the DSL's
 #      isPgWalserver marking used purely to identify the node kind here.
-#      Capture defaults to on (setup is called with no --no-capture, and no
-#      --capture flag at all): this spec specifically wants to prove the
-#      embedded pg_receivewal capturer is running in the background the
+#      Receivewal defaults to on (setup is called with no --no-receivewal, and no
+#      --receivewal flag at all): this spec specifically wants to prove the
+#      embedded pg_receivewal worker is running in the background the
 #      whole time, the same process-title check pg_walserver_capture.pgaf
 #      already uses.
 #
@@ -118,7 +118,7 @@
 #
 #   test_001  seed a "before" row, a named restore point, and force a WAL
 #             switch; "server" picks the segment up (archive_command's own
-#             push, the embedded capturer's own pull, or both -- CHECK_FILE's
+#             push, the embedded receivewal worker's own pull, or both -- CHECK_FILE's
 #             own idempotency makes a second delivery of the same segment a
 #             no-op either way, see README.md's "archive push side")
 #   test_002  seed an "after" row and force another WAL switch
@@ -192,16 +192,16 @@ setup {
     exec server bash -c 'mkdir -p /tmp/ws && printf "host all all 0.0.0.0/0 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
     # the one-shot wizard: writes pg_walserver.ini's own [pitr] section
-    # (path + upstream + "capture = pull", on by default with no --capture
+    # (path + upstream + "receivewal = pull", on by default with no --receivewal
     # flag at all), checks archiver_repl's REPLICATION attribute against
     # the real primary, and fetches its system identifier. No "serve" is
     # running yet, so setup only logs that this config will take effect
     # the next time it starts, below -- that is what actually bootstraps
     # this route's first base backup automatically, once its own embedded
-    # pull capturer (started at the same startup) shows real streaming
+    # receivewal worker (started at the same startup) shows real streaming
     # evidence.
     exec server bash -c 'PGPASSWORD=wspw pg_walserver setup --pgdata /tmp/ws --cluster pitr --path /tmp/ws/pitr --upstream "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
-    exec server bash -c 'grep -qx "capture = pull" /tmp/ws/pg_walserver.ini || { echo "capture = pull should have been written by default"; cat /tmp/ws/pg_walserver.ini; false; }'
+    exec server bash -c 'grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini || { echo "receivewal = pull should have been written by default"; cat /tmp/ws/pg_walserver.ini; false; }'
 
     # the "*" wildcard, mapped at the exact same path as "pitr" -- see this
     # file's own header comment (role 2) for why role 4 below needs this.
@@ -210,9 +210,9 @@ setup {
     exec server bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-server.log 2>&1 & echo started'
     exec server bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; exit 1'
 
-    # the embedded pull capturer really is running, the whole time, in the
+    # the embedded receivewal worker really is running, the whole time, in the
     # background -- pg_walserver_capture.pgaf's own process-title check.
-    exec server bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: capture pitr$" > /dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; ps aux; exit 1'
+    exec server bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal pitr$" > /dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; ps aux; exit 1'
 
     # "serve" bootstraps this route's first base backup automatically at
     # startup now (no more "setup --with-basebackup", see accept_loop.c's
@@ -232,7 +232,7 @@ step test_001_seed_before_target_and_archive {
     sql pg1 { SELECT pg_switch_wal() }
 
     # "server" picks the segment up -- archive_command's own push, the
-    # embedded capturer's own pull, or (most likely) both racing, with
+    # embedded receivewal worker's own pull, or (most likely) both racing, with
     # CHECK_FILE's own idempotency making whichever loses a clean no-op.
     exec server bash -c 'for i in $(seq 60); do ls /tmp/ws/pitr/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | head -1 | grep -q . && exit 0; sleep 1; done; ls -la /tmp/ws/pitr; cat /tmp/ws-server.log; exit 1'
 }

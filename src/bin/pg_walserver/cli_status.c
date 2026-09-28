@@ -66,23 +66,23 @@ cli_status_run(const char *pgdata)
 		return true;
 	}
 
-	/* how many routes are configured, and how many have "capture = pull" */
+	/* how many routes are configured, and how many have "receivewal = pull" */
 	char routesPath[MAXPGPATH] = { 0 };
 
 	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
 
 	WsRoute *routes = NULL;
 	int routeCount = 0;
-	int capturePullCount = 0;
+	int receivewalPullCount = 0;
 	int backupCount = 0;
 
 	if (routes_load(routesPath, &routes, &routeCount))
 	{
 		for (int i = 0; i < routeCount; i++)
 		{
-			if (routes[i].capturePull)
+			if (routes[i].receivewalPull)
 			{
-				capturePullCount++;
+				receivewalPullCount++;
 			}
 
 			char latestPath[MAXPGPATH] = { 0 };
@@ -100,15 +100,16 @@ cli_status_run(const char *pgdata)
 	WsPsState state = { 0 };
 	bool haveState = ws_ps_state_read(pgdata, &state);
 
-	int capturersRunning = 0;
+	int receivewalWorkersRunning = 0;
 
 	if (haveState)
 	{
-		for (int i = 0; i < state.capturerCount; i++)
+		for (int i = 0; i < state.receivewalWorkerCount; i++)
 		{
-			if (state.capturers[i].pid > 0 && kill(state.capturers[i].pid, 0) == 0)
+			if (state.receivewalWorkers[i].pid > 0 && kill(state.receivewalWorkers[i].pid,
+														   0) == 0)
 			{
-				capturersRunning++;
+				receivewalWorkersRunning++;
 			}
 		}
 	}
@@ -122,7 +123,8 @@ cli_status_run(const char *pgdata)
 	printf("pg_walserver: running (pid %d, uptime %s)\n", (int) servePid, uptime); /* IGNORE-BANNED */
 	printf("  clusters:  %d configured, %d with a base backup\n", /* IGNORE-BANNED */
 		   routeCount, backupCount);
-	printf("  capturers: %d/%d running\n", capturersRunning, capturePullCount); /* IGNORE-BANNED */
+	printf("  receivewal workers: %d/%d running\n", /* IGNORE-BANNED */
+		   receivewalWorkersRunning, receivewalPullCount);
 	printf("  bootstrap backups pending: %d\n", bootstrapsPending); /* IGNORE-BANNED */
 
 	routes_free(routes);

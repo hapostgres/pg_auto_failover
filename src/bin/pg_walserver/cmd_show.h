@@ -3,9 +3,9 @@
  *   SHOW <name>: real pg_basebackup/pg_receivewal only ever query
  *   wal_segment_size and data_directory_mode (see streamutil.c in the
  *   Postgres source); this project's own archive_command client
- *   (cli_archive.c) additionally queries "capture", this project's own
+ *   (cli_archive.c) additionally queries "receivewal", this project's own
  *   extension with no PostgreSQL equivalent, to learn whether the
- *   connected route has an embedded pull capturer before deciding whether
+ *   connected route has an embedded receivewal worker before deciding whether
  *   to only ever CHECK_FILE or only ever ARCHIVE_FILE.
  *
  * Licensed under the PostgreSQL License.
@@ -19,8 +19,8 @@
 
 /*
  * SHOW wal_segment_size answers the route's own size ("16MB", "64MB", "1GB");
- * SHOW capture answers the route's own capture setting ("pull" or "none"),
- * read straight from WsRoute.capturePull.
+ * SHOW receivewal answers the route's own receivewal setting ("pull" or "none"),
+ * read straight from WsRoute.receivewalPull.
  */
 void cmd_show(int sock, const WsRoute *route, const char *name);
 

@@ -33,7 +33,7 @@
  *   entry in the directory at least once. The original design sketch for
  *   this feature called for a small, per-cluster, incrementally-maintained
  *   cache file, updated by each of the existing code paths that already
- *   write into a route's own directory (the embedded pull capturer on each
+ *   write into a route's own directory (the embedded receivewal worker on each
  *   completed segment, archive-wal/ARCHIVE_FILE on each push, the bootstrap-
  *   backup code on completion, archive-cleanup on removal). That was not
  *   implemented in this pass: wiring an incremental-cache update into four
@@ -271,15 +271,15 @@ read_latest_label(const char *routePath, char *labelOut, size_t labelOutSize)
 
 
 /*
- * capturer_running_for_route cross-references the ps state file (ps_state.h,
+ * receivewal_running_for_route cross-references the ps state file (ps_state.h,
  * written by a running "serve") against routeKey. *knownOut is set to false
  * when "serve" is not running at all (the caller should print "n/a", not
- * "no": there is no capturer status to report either way), true otherwise
+ * "no": there is no receivewal worker status to report either way), true otherwise
  * with the return value being the actual running/stopped answer.
  */
 static bool
-capturer_running_for_route(const char *pgdata, const char *routeKey,
-						   bool *knownOut)
+receivewal_running_for_route(const char *pgdata, const char *routeKey,
+							 bool *knownOut)
 {
 	*knownOut = false;
 
@@ -301,17 +301,18 @@ capturer_running_for_route(const char *pgdata, const char *routeKey,
 		return false;
 	}
 
-	for (int i = 0; i < state.capturerCount; i++)
+	for (int i = 0; i < state.receivewalWorkerCount; i++)
 	{
-		if (streq(state.capturers[i].routeKey, routeKey))
+		if (streq(state.receivewalWorkers[i].routeKey, routeKey))
 		{
 			*knownOut = true;
-			return state.capturers[i].pid > 0 && kill(state.capturers[i].pid, 0) == 0;
+			return state.receivewalWorkers[i].pid > 0 && kill(
+				state.receivewalWorkers[i].pid, 0) == 0;
 		}
 	}
 
-	/* the route has no capturer entry at all: known, and definitely not
-	 * running (either "capture = pull" isn't set, or it failed to start) */
+	/* the route has no receivewal worker entry at all: known, and definitely not
+	 * running (either "receivewal = pull" isn't set, or it failed to start) */
 	*knownOut = true;
 	return false;
 }
@@ -338,8 +339,8 @@ cli_list_clusters_run(const char *pgdata, const char *clusterFilter)
 		return true;
 	}
 
-	printf("%-20s %-8s %-9s %-9s %-22s %-22s\n", /* IGNORE-BANNED */
-		   "CLUSTER", "BACKUP", "CAPTURE", "CAPTURER", "WAL START", "WAL END");
+	printf("%-20s %-8s %-10s %-8s %-22s %-22s\n", /* IGNORE-BANNED */
+		   "CLUSTER", "BACKUP", "RECEIVEWAL", "WORKER", "WAL START", "WAL END");
 	printf("--------------------------------------------------------------" /* IGNORE-BANNED */
 		   "------------------------------\n");
 
@@ -379,13 +380,13 @@ cli_list_clusters_run(const char *pgdata, const char *clusterFilter)
 		(void) wal_dir_find_latest(route, &tli, endLsn, sizeof(endLsn));
 
 		bool known = false;
-		bool running = capturer_running_for_route(pgdata, route->key, &known);
-		const char *capturerStr = !route->capturePull ? "n/a" :
-								  !known ? "n/a" : running ? "yes" : "no";
+		bool running = receivewal_running_for_route(pgdata, route->key, &known);
+		const char *receivewalStr = !route->receivewalPull ? "n/a" :
+									!known ? "n/a" : running ? "yes" : "no";
 
-		printf("%-20s %-8s %-9s %-9s %-22s %-22s\n", /* IGNORE-BANNED */
+		printf("%-20s %-8s %-10s %-8s %-22s %-22s\n", /* IGNORE-BANNED */
 			   route->key, haveBackup ? "yes" : "no",
-			   route->capturePull ? "pull" : "none", capturerStr,
+			   route->receivewalPull ? "pull" : "none", receivewalStr,
 			   startLsn, endLsn);
 	}
 

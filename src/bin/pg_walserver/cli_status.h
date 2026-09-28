@@ -2,7 +2,7 @@
  * src/bin/pg_walserver/cli_status.h
  *   `pg_walserver status --pgdata <path>`: a short, scannable dashboard --
  *   running or not (a real liveness check, not just "the pidfile exists"),
- *   pid, cluster count, capturers running vs. configured, and any
+ *   pid, cluster count, receivewal workers running vs. configured, and any
  *   bootstrap backups still pending. Named "status", never "state":
  *   pg_auto_failover's own FSM states (SINGLE/PRIMARY/SECONDARY/...) are
  *   an already-heavily-used, completely different concept in this

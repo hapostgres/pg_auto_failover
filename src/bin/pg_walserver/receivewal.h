@@ -1,19 +1,19 @@
 /*
- * src/bin/pg_walserver/capture.h
- *   The embedded, supervised WAL capturer for every route with
- *   "capture = pull" configured (routes.h) -- see capture.c's own header
+ * src/bin/pg_walserver/receivewal.h
+ *   The embedded, supervised WAL receivewal worker for every route with
+ *   "receivewal = pull" configured (routes.h) -- see receivewal.c's own header
  *   comment for the full design (fork()+execv() shape, the shared
  *   process_supervisor.h it's built on, restart/backoff policy, and the
- *   single-wildcard-reaper contract ws_capture_tick() has with its
- *   caller) and README.md's "The embedded pull capturer" section for the
+ *   single-wildcard-reaper contract ws_receivewal_tick() has with its
+ *   caller) and README.md's "The embedded receivewal worker" section for the
  *   design this implements.
  *
  * Licensed under the PostgreSQL License.
  *
  */
 
-#ifndef WS_CAPTURE_H
-#define WS_CAPTURE_H
+#ifndef WS_RECEIVEWAL_H
+#define WS_RECEIVEWAL_H
 
 #include <stdbool.h>
 #include <sys/types.h>
@@ -23,24 +23,24 @@
 #include "routes.h"
 
 /*
- * ws_capture_start_all forks one supervised capturer child per route in
- * routes[0..routeCount) with capturePull set (routes.h), each running
+ * ws_receivewal_start_all forks one supervised receivewal worker child per route in
+ * routes[0..routeCount) with receivewalPull set (routes.h), each running
  * this same pg_walserver binary re-exec'd into "internal service
  * pg-receivewal" (cli_internal.c), which runs the vendored pg_receivewal
  * against that route's own "upstream", writing straight into that
- * route's own "path". A route with capturePull but no "upstream" is
+ * route's own "path". A route with receivewalPull but no "upstream" is
  * logged and skipped, not a startup failure. Called once, from
  * cli_serve_run(), after pg_walserver.ini/HBA validation succeeds and
  * before ws_accept_loop() starts. Must not be called more than once per
  * process.
  */
-bool ws_capture_start_all(const WsRoute *routes, int routeCount);
+bool ws_receivewal_start_all(const WsRoute *routes, int routeCount);
 
 /*
- * ws_capture_tick drains every exited capturer child via this process's
+ * ws_receivewal_tick drains every exited receivewal worker child via this process's
  * one and only wildcard waitpid(-1, WNOHANG) loop (process_supervisor.c),
  * restarting any that need it, and hands any pid it doesn't recognize
- * (as one of its own supervised capturers) to otherChildExited -- the
+ * (as one of its own supervised receivewalWorkers) to otherChildExited -- the
  * caller's own separately tracked children (accept_loop.c's per-
  * connection children). Called once per ws_accept_loop() iteration,
  * *instead of* that loop running its own, second wildcard wait: see
@@ -48,41 +48,41 @@ bool ws_capture_start_all(const WsRoute *routes, int routeCount);
  * reapers in the same process is a real, previously-hit bug, not a
  * theoretical concern. A no-op (beyond calling otherChildExited, if
  * given, for any of the caller's own exited children) when
- * ws_capture_start_all() was never called or started no children.
+ * ws_receivewal_start_all() was never called or started no children.
  */
-void ws_capture_tick(bool (*otherChildExited)(void *ctx, pid_t pid,
-											  int status),
-					 void *otherCtx);
+void ws_receivewal_tick(bool (*otherChildExited)(void *ctx, pid_t pid,
+												 int status),
+						void *otherCtx);
 
 /*
- * ws_capture_reload reconciles the running "capture = pull" capturer set
+ * ws_receivewal_reload reconciles the running "receivewal = pull" receivewal worker set
  * against a freshly, successfully reloaded (SIGHUP) route list -- it never
- * restarts a capturer whose route is unchanged:
+ * restarts a receivewal worker whose route is unchanged:
  *
- *   - a route that newly has "capture = pull" (or is new outright) gets a
- *     capturer started;
- *   - a route whose "capture = pull" was removed, or whose route
- *     disappeared entirely, gets its capturer stopped (SIGINT);
- *   - a route whose "upstream" or "path" changed while "capture = pull"
+ *   - a route that newly has "receivewal = pull" (or is new outright) gets a
+ *     receivewal worker started;
+ *   - a route whose "receivewal = pull" was removed, or whose route
+ *     disappeared entirely, gets its receivewal worker stopped (SIGINT);
+ *   - a route whose "upstream" or "path" changed while "receivewal = pull"
  *     stayed on gets stopped (SIGINT) and, once reaped, automatically
  *     restarted with the new values by the ordinary PERMANENT-policy
- *     restart path in ws_capture_tick() -- it cannot retarget an
+ *     restart path in ws_receivewal_tick() -- it cannot retarget an
  *     already-forked/exec'd pg_receivewal child in place, so this is
  *     always a stop-then-start, never a live retarget.
  *
  * Logs every start/stop/restart decision it makes. Must only be called
- * after ws_capture_start_all() has already run once.
+ * after ws_receivewal_start_all() has already run once.
  */
-void ws_capture_reload(const WsRoute *newRoutes, int newRouteCount);
+void ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount);
 
 /*
- * WsCaptureStatus is one supervised "capture = pull" capturer's current
- * status, as seen from inside "serve" itself -- see ws_capture_get_status()
+ * WsReceivewalStatus is one supervised "receivewal = pull" receivewal worker's current
+ * status, as seen from inside "serve" itself -- see ws_receivewal_get_status()
  * below, and ps_state.h for why a *different* process (pg_walserver ps/
- * status) cannot just read captureServices/captureRoutes directly and
+ * status) cannot just read receivewalServices/receivewalRoutes directly and
  * instead goes through a state file "serve" writes from this same data.
  */
-typedef struct WsCaptureStatus
+typedef struct WsReceivewalStatus
 {
 	char routeKey[NAMEDATALEN + 16];
 	char path[MAXPGPATH];
@@ -90,26 +90,26 @@ typedef struct WsCaptureStatus
 	pid_t pid;          /* <= 0: not currently running */
 	time_t startedAt;   /* this incarnation's own start time */
 	int restarts;        /* how many times it has been restarted */
-} WsCaptureStatus;
+} WsReceivewalStatus;
 
 /*
- * ws_capture_get_status fills out[0..min(serviceCount,maxOut)) with the
- * current status of every route ws_capture_start_all()/ws_capture_reload()
+ * ws_receivewal_get_status fills out[0..min(serviceCount,maxOut)) with the
+ * current status of every route ws_receivewal_start_all()/ws_receivewal_reload()
  * is tracking (whether or not each one is currently running), and returns
  * how many entries it filled. Used by accept_loop.c's own refresh_ps_
  * state() to keep the on-disk ps state file (ps_state.h) current.
  */
-int ws_capture_get_status(WsCaptureStatus *out, int maxOut);
+int ws_receivewal_get_status(WsReceivewalStatus *out, int maxOut);
 
 /*
- * ws_capture_stop_all signals every still-running capturer child to stop
+ * ws_receivewal_stop_all signals every still-running receivewal worker child to stop
  * cleanly (SIGINT, matching pg_receivewal's own documented clean-stop
- * signal -- see capture.c's own comment), waits up to a bounded timeout
+ * signal -- see receivewal.c's own comment), waits up to a bounded timeout
  * for all of them, and escalates to SIGKILL for anything still alive past
  * that. Called once, from ws_accept_loop(), right before the server
- * itself exits -- never leaves an orphaned capturer child running past
+ * itself exits -- never leaves an orphaned receivewal worker child running past
  * pg_walserver's own shutdown.
  */
-void ws_capture_stop_all(void);
+void ws_receivewal_stop_all(void);
 
-#endif /* WS_CAPTURE_H */
+#endif /* WS_RECEIVEWAL_H */

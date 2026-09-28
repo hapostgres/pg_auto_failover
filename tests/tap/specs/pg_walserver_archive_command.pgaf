@@ -6,9 +6,9 @@
 # spec exercises.
 #
 # `archive-wal` picks one of two disjoint behaviors per invocation from the
-# connected route's own "capture" setting (SHOW capture): a route with no
-# "capture = pull" (arch/0 below, set up with --no-capture) is push-only,
-# ARCHIVE_FILE every time, no CHECK_FILE first; a route with "capture =
+# connected route's own "receivewal" setting (SHOW receivewal): a route with no
+# "receivewal = pull" (arch/0 below, set up with --no-receivewal) is push-only,
+# ARCHIVE_FILE every time, no CHECK_FILE first; a route with "receivewal =
 # pull" (arch/1 below, its own embedded pg_receivewal actually running and
 # pulling real WAL off node1) is check-only, CHECK_FILE every time, never
 # ARCHIVE_FILE. Both get real coverage below.
@@ -28,7 +28,7 @@
 #   test_001  CHECK_FILE reports "missing" for a filename nothing has ever
 #             pushed -- a raw wire-level check, no file transfer at all
 #   test_002  `pg_walserver archive-wal <path> <name> ...` against arch/0
-#             (no capture = pull) pushes a brand new file via ARCHIVE_FILE
+#             (no receivewal = pull) pushes a brand new file via ARCHIVE_FILE
 #             unconditionally (exit 0, real bytes land on disk, byte-
 #             identical to the source, no CHECK_FILE round trip first);
 #             run a second time against the exact same source file, still
@@ -50,13 +50,13 @@
 #             test_002 pushed, via a real FETCH_FILE round trip, and writes
 #             it byte-identical to its destination (exit 0); restoring a
 #             name nothing ever archived fails cleanly (nonzero exit)
-#   test_006  `archive-wal` against arch/1 (capture = pull, a real embedded
+#   test_006  `archive-wal` against arch/1 (receivewal = pull, a real embedded
 #             pg_receivewal actually running against node1): run against
 #             the segment currently being captured (still a ".partial" file
 #             under this exact name) exits 1 immediately via a CHECK_FILE-
 #             only round trip, no ARCHIVE_FILE ever happening (the final
 #             file never appears as a side effect of the failed attempt);
-#             once the capturer actually finishes that exact segment (a
+#             once the receivewal worker actually finishes that exact segment (a
 #             forced WAL switch on node1), a subsequent `archive-wal`
 #             invocation against the identical bytes reports "matches" and
 #             exits 0, still without ever calling ARCHIVE_FILE
@@ -85,17 +85,17 @@ setup {
     # This spec never serves BASE_BACKUP, so it never needs the base
     # backup "serve" would otherwise bootstrap automatically for this
     # route.
-    # --no-capture: this spec pushes its own small, deterministic fake "WAL
+    # --no-receivewal: this spec pushes its own small, deterministic fake "WAL
     # segments" by hand (test_002/test_003 below) under real WAL-segment-
-    # shaped names -- the embedded pull capturer, on by default now, would
+    # shaped names -- the embedded receivewal worker, on by default now, would
     # otherwise fork and pull real WAL from node1 into this same directory,
     # under the same segment names, racing (and likely colliding with) what
     # this spec writes itself.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/wsarch --cluster arch/0 --path /tmp/wsarch/arch/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
-    exec node2 bash -c 'if grep -qx "capture = pull" /tmp/wsarch/pg_walserver.ini; then echo "capture = pull should not have been written with --no-capture"; false; fi'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/wsarch --cluster arch/0 --path /tmp/wsarch/arch/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
+    exec node2 bash -c 'if grep -qx "receivewal = pull" /tmp/wsarch/pg_walserver.ini; then echo "receivewal = pull should not have been written with --no-receivewal"; false; fi'
 
-    # a second route, capture = pull by setup's own default now (no
-    # --no-capture): a real, embedded pg_receivewal actually pulling WAL
+    # a second route, receivewal = pull by setup's own default now (no
+    # --no-receivewal): a real, embedded pg_receivewal actually pulling WAL
     # off node1 into arch/1's own directory, for test_006's own coverage of
     # the CHECK_FILE-only behavior. This is a second named route, so
     # "setup" itself now creates a self-signed certificate for --pgdata
@@ -103,11 +103,11 @@ setup {
     # every connection in this spec still only ever uses dbname, so that
     # certificate never has to be presented or even referenced below.
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/wsarch --cluster arch/1 --path /tmp/wsarch/arch/1 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
-    exec node2 bash -c 'grep -qx "capture = pull" /tmp/wsarch/pg_walserver.ini || { echo "capture = pull should have been written for arch/1 by default"; cat /tmp/wsarch/pg_walserver.ini; false; }'
+    exec node2 bash -c 'grep -qx "receivewal = pull" /tmp/wsarch/pg_walserver.ini || { echo "receivewal = pull should have been written for arch/1 by default"; cat /tmp/wsarch/pg_walserver.ini; false; }'
 
     exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/wsarch --port 6547 > /tmp/wsarch-walserver.log 2>&1 & echo started'
     exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6547) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/wsarch-walserver.log; exit 1'
-    exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: capture arch/1$" > /tmp/wsarch_cap_pid.txt && test -s /tmp/wsarch_cap_pid.txt && exit 0; sleep 1; done; cat /tmp/wsarch-walserver.log; ps aux; exit 1'
+    exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal arch/1$" > /tmp/wsarch_cap_pid.txt && test -s /tmp/wsarch_cap_pid.txt && exit 0; sleep 1; done; cat /tmp/wsarch-walserver.log; ps aux; exit 1'
 }
 
 teardown {
@@ -136,7 +136,7 @@ step test_002_archive_pushes_then_matches {
 
     # step 2: the exact same source file, archived again (PostgreSQL's own
     # archive_command contract: an idempotent retry after a crash mid-
-    # archive is expected and normal) -- arch/0 has no capture = pull, so
+    # archive is expected and normal) -- arch/0 has no receivewal = pull, so
     # archive-wal pushes unconditionally again, with no CHECK_FILE round
     # trip first; cmd_archive_file.c's own overwrite-safety (identical
     # bytes already on disk) is what makes this idempotent, still exit 0
@@ -157,7 +157,7 @@ step test_003_check_file_differs_is_rejected {
     exec node2 bash -c 'out=$(cat /tmp/seg1-different.bin | wc -c); test "$out" = "65536"'
     exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6547 dbname=arch/0 replication=true sslmode=disable" -Atc "CHECK_FILE 000000010000000000000001 65536 crc32c:00000000"); test "$out" = "differs" || { echo "got: $out"; false; }'
 
-    # pg_walserver archive-wal itself: arch/0 has no capture = pull, so it
+    # pg_walserver archive-wal itself: arch/0 has no receivewal = pull, so it
     # never calls CHECK_FILE at all here, it pushes unconditionally via
     # ARCHIVE_FILE -- and the server rejects it outright, from the real
     # bytes just received vs. the real bytes already on disk: nonzero exit,
@@ -211,8 +211,8 @@ step test_005_restore_wal_fetches_a_real_file {
     exec node2 bash -c 'test ! -e /tmp/restored-missing.bin'
 }
 
-step test_006_capture_pull_route_is_check_file_only {
-    # arch/1 has capture = pull configured and its own embedded pg_
+step test_006_receivewal_pull_route_is_check_file_only {
+    # arch/1 has receivewal = pull configured and its own embedded pg_
     # receivewal (setup{} above) actually pulling real WAL off node1 --
     # identify the segment it is currently writing by its own ".partial"
     # file, entirely from arch/1's local directory, no query against node1
@@ -226,26 +226,26 @@ step test_006_capture_pull_route_is_check_file_only {
     # a fake local file for that exact name: CHECK_FILE cannot possibly
     # report "matches" for it (only a ".partial" exists, never the final
     # name), so archive-wal exits 1 immediately, via CHECK_FILE alone --
-    # ARCHIVE_FILE is never called (cli_archive.c's own capture = pull
+    # ARCHIVE_FILE is never called (cli_archive.c's own receivewal = pull
     # branch never calls push_file() at all), so the final file never
     # appears as a side effect of this failed attempt either.
     exec node2 bash -c 'head -c 4096 /dev/urandom > /tmp/notyet.bin'
     exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); if pg_walserver archive-wal /tmp/notyet.bin $seg --cluster arch/1 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive6.log 2>&1; then cat /tmp/archive6.log; false; fi'
-    exec node2 bash -c 'grep -qi "waiting for its own pull capturer\|missing\|differs" /tmp/archive6.log'
+    exec node2 bash -c 'grep -qi "waiting for its own receivewal worker\|missing\|differs" /tmp/archive6.log'
     exec node2 bash -c '! grep -qi "ARCHIVE_FILE\|Archived " /tmp/archive6.log'
     exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); test ! -e /tmp/wsarch/arch/1/$seg'
 
     # force node1 to close that exact segment for good: the embedded
-    # capturer picks it up, same as pg_walserver_capture.pgaf's own
+    # receivewal worker picks it up, same as pg_walserver_capture.pgaf's own
     # test_001.
     sql node1 { SELECT pg_switch_wal() }
     exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); for i in $(seq 60); do test -f /tmp/wsarch/arch/1/$seg && exit 0; sleep 1; done; ls -la /tmp/wsarch/arch/1; exit 1'
 
-    # once the capturer has actually delivered it, archive-wal against the
+    # once the receivewal worker has actually delivered it, archive-wal against the
     # identical bytes reports "matches" and exits 0 -- still CHECK_FILE
     # only, ARCHIVE_FILE is still never called.
-    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); cp /tmp/wsarch/arch/1/$seg /tmp/now_captured.bin'
-    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); pg_walserver archive-wal /tmp/now_captured.bin $seg --cluster arch/1 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive7.log 2>&1 || (cat /tmp/archive7.log; false)'
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); cp /tmp/wsarch/arch/1/$seg /tmp/now_received.bin'
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); pg_walserver archive-wal /tmp/now_received.bin $seg --cluster arch/1 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive7.log 2>&1 || (cat /tmp/archive7.log; false)'
     exec node2 bash -c 'grep -qi "already matches\|nothing to push" /tmp/archive7.log'
     exec node2 bash -c '! grep -qi "ARCHIVE_FILE\|Archived " /tmp/archive7.log'
 }
@@ -256,4 +256,4 @@ sequence
     test_003_check_file_differs_is_rejected
     test_004_create_cert_fresh_and_refuse
     test_005_restore_wal_fetches_a_real_file
-    test_006_capture_pull_route_is_check_file_only
+    test_006_receivewal_pull_route_is_check_file_only

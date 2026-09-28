@@ -81,19 +81,19 @@ check_file_status(PGconn *conn, const char *filename, uint64_t size,
 
 
 /*
- * show_capture runs "SHOW capture" against conn and fills pullOut with
- * whether the connected route has "capture = pull" configured. Returns
+ * show_receivewal runs "SHOW receivewal" against conn and fills pullOut with
+ * whether the connected route has "receivewal = pull" configured. Returns
  * false (pullOut untouched) on any connection/protocol failure, with an
  * error already logged -- the same failure shape check_file_status() uses.
  */
 static bool
-show_capture(PGconn *conn, bool *pullOut)
+show_receivewal(PGconn *conn, bool *pullOut)
 {
-	PGresult *res = PQexec(conn, "SHOW capture");
+	PGresult *res = PQexec(conn, "SHOW receivewal");
 
 	if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) != 1)
 	{
-		log_error("SHOW capture failed: %s", PQresultErrorMessage(res));
+		log_error("SHOW receivewal failed: %s", PQresultErrorMessage(res));
 		PQclear(res);
 		return false;
 	}
@@ -249,17 +249,17 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 	}
 
 	/*
-	 * Learn the connected route's own "capture" setting: it decides which
+	 * Learn the connected route's own "receivewal" setting: it decides which
 	 * of the two disjoint behaviors below this invocation runs, never a
 	 * manually-set client flag (which would silently go stale the moment
-	 * an operator changes the route's own "capture" setting without also
+	 * an operator changes the route's own "receivewal" setting without also
 	 * updating every archive_command line referencing it). See this file's
 	 * own header comment and README.md's "The archive push side" section
 	 * for the full design.
 	 */
-	bool capturePull = false;
+	bool receivewalPull = false;
 
-	if (!show_capture(conn, &capturePull))
+	if (!show_receivewal(conn, &receivewalPull))
 	{
 		PQfinish(conn);
 		return false;
@@ -267,14 +267,14 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 
 	bool ok;
 
-	if (capturePull)
+	if (receivewalPull)
 	{
 		/*
-		 * The route has an embedded pull capturer writing into the same
+		 * The route has an embedded receivewal worker writing into the same
 		 * directory this push would target: never push here, only ever
 		 * check. PostgreSQL's own archive_command retry loop is the entire
 		 * retry mechanism -- it calls this client again later, cheaply,
-		 * until the capturer catches up and CHECK_FILE reports "matches".
+		 * until the receivewal worker catches up and CHECK_FILE reports "matches".
 		 */
 		uint64_t size = 0;
 		uint32_t crc = 0;
@@ -303,7 +303,7 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 		else
 		{
 			log_error("\"%s\" is not yet on \"%s\" route \"%s\" (%s): "
-					  "waiting for its own pull capturer to catch up",
+					  "waiting for its own receivewal worker to catch up",
 					  filename, target->host, target->route, status);
 			ok = false;
 		}
@@ -311,7 +311,7 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 	else
 	{
 		/*
-		 * No embedded pull capturer on this route: this client is the only
+		 * No embedded receivewal worker on this route: this client is the only
 		 * writer, so an unconditional push every invocation is safe. The
 		 * server's own overwrite-safety (cmd_archive_file.c: compare real
 		 * bytes on disk vs. real bytes received) already makes this
@@ -326,7 +326,7 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 
 	PQfinish(conn);
 
-	if (ok && !capturePull)
+	if (ok && !receivewalPull)
 	{
 		log_info("Archived \"%s\" to \"%s\" route \"%s\"",
 				 filename, target->host, target->route);

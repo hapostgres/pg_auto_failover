@@ -1,12 +1,12 @@
 # pg_walserver's pidfile + SIGHUP-driven config reload (accept_loop.c's own
-# ws_reload_config()/ws_capture_reload(), cli_root.c's "pg_walserver
+# ws_reload_config()/ws_receivewal_reload(), cli_root.c's "pg_walserver
 # reload" sub-command). See README.md's "Config reload" section for the
 # full design: routes (pg_walserver.ini) and the HBA ruleset
 # (pg_walserver_hba.conf) are cached in memory, re-parsed on SIGHUP, and
 # swapped in only when both parse cleanly -- a bad reload is refused and the previous,
 # still-valid configuration keeps serving every connection. The embedded
-# pull capturer set is reconciled against the new routes, without
-# restarting a capturer whose route did not change.
+# receivewal worker set is reconciled against the new routes, without
+# restarting a receivewal worker whose route did not change.
 #
 # This PR's own pgaftest predates `let`/`${var}` capture (see pg_walserver_
 # standalone.pgaf's own header comment), so values that cross steps are
@@ -25,9 +25,9 @@
 #             route still succeeds
 #   test_004  "pg_walserver reload" against a stale pidfile (pid of an
 #             already-exited process) fails cleanly, nonzero exit
-#   test_005  giving the route "capture = pull" via reload starts its
-#             embedded pull capturer with no server restart; removing it
-#             again stops that same capturer child
+#   test_005  giving the route "receivewal = pull" via reload starts its
+#             embedded receivewal worker with no server restart; removing it
+#             again stops that same receivewal worker child
 
 cluster {
     monitor
@@ -46,10 +46,10 @@ setup {
     # address from, and none needed.
     exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
-    # a single named route, no upstream/capture yet -- test_005 below adds
-    # "upstream"/"capture = pull" via reload, once the server is already
-    # running, to prove the embedded capturer reconciliation path.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-capture'
+    # a single named route, no upstream/receivewal yet -- test_005 below adds
+    # "upstream"/"receivewal = pull" via reload, once the server is already
+    # running, to prove the embedded receivewal worker reconciliation path.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
 
     exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-walserver.log 2>&1 & echo started'
     exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
@@ -120,24 +120,24 @@ step test_004_reload_against_a_stale_pidfile_fails_cleanly {
     exec node2 bash -c 'test ! -f /tmp/ws-stale/pg_walserver.pid || { echo "read_pidfile() should have removed the stale pidfile"; false; }'
 }
 
-step test_005_reload_reconciles_the_embedded_pull_capturer {
-    # no capturer running yet: setup{} used --no-capture.
-    exec node2 bash -c 'pgrep -f "^pg_walserver: capture default/0$" && { echo "a capturer is already running"; false; } || true'
+step test_005_reload_reconciles_the_embedded_receivewal_worker {
+    # no receivewal worker running yet: setup{} used --no-receivewal.
+    exec node2 bash -c 'pgrep -f "^pg_walserver: receivewal default/0$" && { echo "a receivewal worker is already running"; false; } || true'
 
-    # give the route "capture = pull" and reload: a capturer should start,
+    # give the route "receivewal = pull" and reload: a receivewal worker should start,
     # on its own, with no server restart.
-    exec node2 bash -c 'sed -i "/\[default\/0\]/a capture = pull" /tmp/ws/pg_walserver.ini && cat /tmp/ws/pg_walserver.ini'
+    exec node2 bash -c 'sed -i "/\[default\/0\]/a receivewal = pull" /tmp/ws/pg_walserver.ini && cat /tmp/ws/pg_walserver.ini'
     exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
-    exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: capture default/0$" > /tmp/cap_pid.txt && test -s /tmp/cap_pid.txt && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; ps aux; exit 1'
-    exec node2 bash -c 'grep -q "Reload: started a new embedded pull capturer for route \"default/0\"" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
-    exec node2 bash -c 'pid=$(cat /tmp/cap_pid.txt); parent=$(cat /tmp/ws_pid.txt); actual_ppid=$(awk "{print \$4}" /proc/$pid/stat); test "$actual_ppid" = "$parent" || { echo "capturer pid $pid has ppid $actual_ppid, expected pg_walserver pid $parent"; false; }'
+    exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal default/0$" > /tmp/cap_pid.txt && test -s /tmp/cap_pid.txt && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; ps aux; exit 1'
+    exec node2 bash -c 'grep -q "Reload: started a new embedded receivewal worker for route \"default/0\"" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
+    exec node2 bash -c 'pid=$(cat /tmp/cap_pid.txt); parent=$(cat /tmp/ws_pid.txt); actual_ppid=$(awk "{print \$4}" /proc/$pid/stat); test "$actual_ppid" = "$parent" || { echo "receivewal worker pid $pid has ppid $actual_ppid, expected pg_walserver pid $parent"; false; }'
 
-    # remove "capture = pull" again and reload: that same capturer child
+    # remove "receivewal = pull" again and reload: that same receivewal worker child
     # must be stopped, on its own.
-    exec node2 bash -c 'sed -i "/^capture = pull$/d" /tmp/ws/pg_walserver.ini && cat /tmp/ws/pg_walserver.ini'
+    exec node2 bash -c 'sed -i "/^receivewal = pull$/d" /tmp/ws/pg_walserver.ini && cat /tmp/ws/pg_walserver.ini'
     exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
     exec node2 bash -c 'cappid=$(cat /tmp/cap_pid.txt); for i in $(seq 30); do test -d /proc/$cappid || exit 0; sleep 1; done; ps aux; exit 1'
-    exec node2 bash -c 'grep -q "Reload: stopping the embedded pull capturer for route \"default/0\"" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
+    exec node2 bash -c 'grep -q "Reload: stopping the embedded receivewal worker for route \"default/0\"" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
 }
 
 sequence
@@ -145,4 +145,4 @@ sequence
     test_002_reload_picks_up_a_new_route_with_no_restart
     test_003_bad_reload_is_refused_and_old_hba_keeps_serving
     test_004_reload_against_a_stale_pidfile_fails_cleanly
-    test_005_reload_reconciles_the_embedded_pull_capturer
+    test_005_reload_reconciles_the_embedded_receivewal_worker

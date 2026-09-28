@@ -67,17 +67,17 @@ bool ws_accept_loop(WsServerConfig *config);
  * non-empty) and, for any that don't, starts a one-shot background job
  * (backup_bootstrap.c's own ws_backup_bootstrap_start()) that takes one --
  * see that file's own header comment for the full fork/retry-bound design.
- * A route with "capture = pull" is only ever bootstrapped once its own
- * real, already-started capturer (capture.c) shows genuine on-disk
+ * A route with "receivewal = pull" is only ever bootstrapped once its own
+ * real, already-started receivewal worker (receivewal.c) shows genuine on-disk
  * evidence of streaming; a route missing an "upstream" property to take a
  * backup from is logged and skipped, never an error.
  *
  * Called at exactly two points, both documented in the project's own
  * README.md: once from cli_serve_run() (cli_root.c), right after
- * ws_capture_start_all() has started every configured route's own real
- * capturer at "serve" startup; and once from ws_reload_config() (accept_
- * loop.c), right after a successful SIGHUP reload's own ws_capture_
- * reload() has reconciled the capturer set against the newly reloaded
+ * ws_receivewal_start_all() has started every configured route's own real
+ * receivewal worker at "serve" startup; and once from ws_reload_config() (accept_
+ * loop.c), right after a successful SIGHUP reload's own ws_receivewal_
+ * reload() has reconciled the receivewal worker set against the newly reloaded
  * routes. This one-time bootstrap attempt at either of those two moments
  * is the only "automatic" base backup behavior pg_walserver has: recurring
  * or scheduled backups are explicitly out of scope, the same

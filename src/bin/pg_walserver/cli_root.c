@@ -46,8 +46,8 @@
  *     reload          Send SIGHUP to a running "serve" instance (its pid
  *                     read from <pgdata>/pg_walserver.pid) to re-read
  *                     pg_walserver.ini/pg_walserver_hba.conf and reconcile the
- *                     embedded pull capturer set -- see accept_loop.c's
- *                     own ws_reload_config()/ws_capture_reload().
+ *                     embedded receivewal worker set -- see accept_loop.c's
+ *                     own ws_reload_config()/ws_receivewal_reload().
  *     archive-cleanup Retention: remove WAL/.history/.backup files, and any
  *                     base backup no longer restorable once they are gone,
  *                     older than --keep-age or beyond --keep-count (never
@@ -56,7 +56,7 @@
  *                     an operator's own cron job, exactly like real
  *                     pg_archivecleanup.
  *     ps              Process-level view: "serve"'s own pid, each
- *                     supervised embedded capturer child, any in-flight
+ *                     supervised embedded receivewal worker child, any in-flight
  *                     bootstrap backup -- cli_ps.c, reading the small state
  *                     file "serve" itself keeps current (a separate
  *                     process cannot see another process's own in-memory
@@ -68,7 +68,7 @@
  *                     ...) -- cli_ls.c. Not the archived data itself, see
  *                     "list" below for that.
  *     status          One-screen dashboard: running or not, pid, cluster/
- *                     backup/capturer counts, pending bootstrap backups --
+ *                     backup/receivewal worker counts, pending bootstrap backups --
  *                     cli_status.c.
  *     list            clusters/backups/wal sub-targets over the archived
  *                     data itself (not pg_walserver's own bookkeeping
@@ -116,7 +116,7 @@
 #include "commandline.h"
 
 #include "accept_loop.h"
-#include "capture.h"
+#include "receivewal.h"
 #include "cli_archive.h"
 #include "cli_archive_cleanup.h"
 #include "cli_basebackup.h"
@@ -477,17 +477,17 @@ cli_serve_run(int argc, char **argv)
 		}
 
 		/*
-		 * Every "capture = pull" route gets its own supervised
-		 * embedded pg_receivewal child (capture.c) -- started here,
+		 * Every "receivewal = pull" route gets its own supervised
+		 * embedded pg_receivewal child (receivewal.c) -- started here,
 		 * once, now that pg_walserver.ini/HBA validation above has
 		 * already succeeded, and before ws_accept_loop() (and thus
-		 * before any connection child can be forked). See capture.h's
+		 * before any connection child can be forked). See receivewal.h's
 		 * own comment for the full startup/shutdown contract.
 		 */
-		(void) ws_capture_start_all(serveConfig.routes, serveConfig.routeCount);
+		(void) ws_receivewal_start_all(serveConfig.routes, serveConfig.routeCount);
 
 		/*
-		 * Now that every "capture = pull" route's own real capturer above
+		 * Now that every "receivewal = pull" route's own real receivewal worker above
 		 * has been started, check every route for a missing base backup
 		 * and kick off an automatic bootstrap for it in the background --
 		 * the first of the two trigger points documented in accept_loop.h's
@@ -946,7 +946,7 @@ static WsSetupOptions setupOptions = { 0 };
 
 /*
  * setup's own --cluster short flag is 'C' (uppercase), not 'c': lowercase
- * 'c' is already taken by --capture in this sub-command's own optstring
+ * 'c' is already taken by --receivewal in this sub-command's own optstring
  * below, unlike fetch-systemid/basebackup/archive-wal/restore-wal, which
  * have no such conflict and use lowercase 'c'.
  */
@@ -959,8 +959,8 @@ static struct option setupLongOptions[] = {
 	{ "port", required_argument, NULL, 'p' },
 	{ "user", required_argument, NULL, 'U' },
 	{ "hostname", required_argument, NULL, 'n' },
-	{ "capture", required_argument, NULL, 'c' },
-	{ "no-capture", no_argument, NULL, 'N' },
+	{ "receivewal", required_argument, NULL, 'c' },
+	{ "no-receivewal", no_argument, NULL, 'N' },
 	{ "force", no_argument, NULL, 'f' },
 	{ NULL, 0, NULL, 0 }
 };
@@ -975,13 +975,13 @@ cli_setup_getopt(int argc, char **argv)
 	(void) get_env_pgdata(setupOptions.pgdata);
 
 	/*
-	 * The embedded pull capturer is on by default now: running "setup"
-	 * with no capture-related flag at all writes "capture = pull" (see
-	 * write_route_section(), cli_setup.c). --capture none / --no-capture
+	 * The embedded receivewal worker is on by default now: running "setup"
+	 * with no receivewal-related flag at all writes "receivewal = pull" (see
+	 * write_route_section(), cli_setup.c). --receivewal none / --no-receivewal
 	 * are the explicit opt-out for a push-only (archive_command-only)
-	 * route; --capture pull still works too, a no-op given this default.
+	 * route; --receivewal pull still works too, a no-op given this default.
 	 */
-	setupOptions.capturePull = true;
+	setupOptions.receivewalPull = true;
 
 	int c;
 
@@ -1044,15 +1044,15 @@ cli_setup_getopt(int argc, char **argv)
 			{
 				if (streq(optarg, "pull"))
 				{
-					setupOptions.capturePull = true;
+					setupOptions.receivewalPull = true;
 				}
 				else if (streq(optarg, "none"))
 				{
-					setupOptions.capturePull = false;
+					setupOptions.receivewalPull = false;
 				}
 				else
 				{
-					log_fatal("Invalid --capture value \"%s\": recognized "
+					log_fatal("Invalid --receivewal value \"%s\": recognized "
 							  "values are \"pull\" (the default) and "
 							  "\"none\"", optarg);
 					exit(1);
@@ -1062,7 +1062,7 @@ cli_setup_getopt(int argc, char **argv)
 
 			case 'N':
 			{
-				setupOptions.capturePull = false;
+				setupOptions.receivewalPull = false;
 				break;
 			}
 
@@ -1165,7 +1165,7 @@ static CommandLine setup_command =
 				 "--cluster <name> --path <dir> --pgdata <path> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--hostname <fqdn>] "
-				 "[--capture pull|none | --no-capture] "
+				 "[--receivewal pull|none | --no-receivewal] "
 				 "[--force]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
@@ -1193,20 +1193,20 @@ static CommandLine setup_command =
 													  "              --pgdata automatically, the moment a "
 													  "second route is\n"
 													  "              added, if none exists yet\n"
-													  "  --capture pull  write \"capture = pull\" into the "
+													  "  --receivewal pull  write \"receivewal = pull\" into the "
 													  "route's own section\n"
-													  "              (the default now, even with no --capture "
+													  "              (the default now, even with no --receivewal "
 													  "flag at all):\n"
 													  "              the next \"pg_walserver serve\" forks a "
 													  "supervised child\n"
 													  "              running the embedded pg_receivewal "
-													  "capturer against\n"
-													  "              this route's own \"upstream\" (capture.c)"
+													  "worker against\n"
+													  "              this route's own \"upstream\" (receivewal.c)"
 													  " -- see README.md's\n"
-													  "              \"The embedded pull capturer\" section\n"
-													  "  --capture none / --no-capture  opt this route out of "
-													  "the embedded pull\n"
-													  "              capturer (push-only, archive_command-only)"
+													  "              \"The embedded receivewal worker\" section\n"
+													  "  --receivewal none / --no-receivewal  opt this route out of "
+													  "the embedded\n"
+													  "              receivewal worker (push-only, archive_command-only)"
 													  "\n"
 													  "  --force     change an already-existing route's path, "
 													  "or overwrite an\n"
@@ -1821,7 +1821,7 @@ cli_ps_command_run(int argc, char **argv)
 static CommandLine ps_command =
 	make_command("ps",
 				 "Show pg_walserver serve's own process-level status "
-				 "(pid, capturers, bootstrap jobs)",
+				 "(pid, receivewal workers, bootstrap jobs)",
 				 "--pgdata <path>",
 				 "  --pgdata    this instance's own top-level storage root "
 				 "(defaults to\n"
@@ -2015,7 +2015,7 @@ cli_list_clusters_command_run(int argc, char **argv)
 
 static CommandLine list_clusters_command =
 	make_command("clusters",
-				 "List every route, its backup/capture status, and the "
+				 "List every route, its backup/receivewal status, and the "
 				 "WAL range it covers",
 				 "--pgdata <path> [--cluster <name>]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "

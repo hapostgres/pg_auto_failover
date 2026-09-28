@@ -11,14 +11,14 @@
  *        refusing a route key that already exists with a *different*
  *        path/upstream unless --force -- the same overwrite-safety
  *        principle as cli_fetch_systemid.c's own systemid check, applied
- *        one layer up; the embedded pull capturer is opted into by
- *        *default* now (an explicit "capture = pull" is written into the
- *        route's own section, routes.h, unless --no-capture / --capture
+ *        one layer up; the embedded receivewal worker is opted into by
+ *        *default* now (an explicit "receivewal = pull" is written into the
+ *        route's own section, routes.h, unless --no-receivewal / --receivewal
  *        none says otherwise -- see cli_root.c's own cli_setup_getopt() for
  *        where that default lives), opting the route into it the next time
  *        "serve" starts -- setup itself never starts or touches that
- *        capturer, it only records the intent. Writing the property
- *        explicitly (rather than changing what an *absent* "capture"
+ *        receivewal worker, it only records the intent. Writing the property
+ *        explicitly (rather than changing what an *absent* "receivewal"
  *        property under a hand-edited pg_walserver.ini means, which stays
  *        "off", unchanged in routes.c/routes.h) is a deliberate choice:
  *        anyone reading pg_walserver.ini by hand sees exactly what "setup"
@@ -99,7 +99,7 @@
 static bool
 write_route_section(const char *pgdata, const char *routeKey,
 					const WsUpstreamTarget *target, const char *upstreamRaw,
-					const char *hostname, bool capturePull, bool force)
+					const char *hostname, bool receivewalPull, bool force)
 {
 	char routesPath[MAXPGPATH] = { 0 };
 
@@ -135,12 +135,12 @@ write_route_section(const char *pgdata, const char *routeKey,
 		log_info("Route \"%s\" already configured in \"%s\"",
 				 routeKey, routesPath);
 
-		if (capturePull && !existing->capturePull)
+		if (receivewalPull && !existing->receivewalPull)
 		{
 			log_warn("Route \"%s\" already exists in \"%s\" without "
-					 "\"capture = pull\" (the embedded pull capturer is on "
+					 "\"receivewal = pull\" (the embedded receivewal worker is on "
 					 "by default now, but was not the last time \"setup\" "
-					 "wrote this route, or --no-capture/--capture none was "
+					 "wrote this route, or --no-receivewal/--receivewal none was "
 					 "passed then) -- edit \"%s\" by hand to add it, setup "
 					 "never changes an already-existing route's properties "
 					 "beyond path", routeKey, routesPath, routesPath);
@@ -163,9 +163,9 @@ write_route_section(const char *pgdata, const char *routeKey,
 		appendPQExpBuffer(section, "hostname = %s\n", hostname);
 	}
 
-	if (capturePull)
+	if (receivewalPull)
 	{
-		appendPQExpBufferStr(section, "capture = pull\n");
+		appendPQExpBufferStr(section, "receivewal = pull\n");
 	}
 
 	if (PQExpBufferBroken(section))
@@ -346,12 +346,12 @@ cli_setup_run(const WsSetupOptions *options)
 	/*
 	 * cli_resolve_upstream() above already refused to succeed without a
 	 * resolved host (--upstream, --host, or an existing route's own
-	 * "upstream"), so --capture pull always has somewhere to pull from by
+	 * "upstream"), so --receivewal pull always has somewhere to pull from by
 	 * the time it's written below -- no separate check needed here.
 	 */
 	if (!write_route_section(options->pgdata, options->route, &target,
 							 options->upstream, options->hostname,
-							 options->capturePull, options->force))
+							 options->receivewalPull, options->force))
 	{
 		/* errors have already been logged */
 		return false;

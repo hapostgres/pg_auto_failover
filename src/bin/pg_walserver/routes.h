@@ -91,10 +91,10 @@ typedef struct WsRoute
 	                                      * "replication", never a route
 	                                      * key). Empty when the route is
 	                                      * only ever reached by dbname. */
-	bool capturePull;                   /* "capture = pull" in this route's
+	bool receivewalPull;                /* "receivewal = pull" in this route's
 	                                     * own section: opts it into
 	                                     * pg_walserver's embedded WAL
-	                                     * capturer (capture.c) -- a
+	                                     * receivewal worker (receivewal.c) -- a
 	                                     * supervised child running the
 	                                     * vendored pg_receivewal against
 	                                     * "upstream", writing straight into
@@ -111,10 +111,10 @@ typedef struct WsRoute
 	                                     * hba.conf like every other
 	                                     * command. Written explicitly by
 	                                     * "pg_walserver setup" by default
-	                                     * now (opt out with --no-capture);
+	                                     * now (opt out with --no-receivewal);
 	                                     * see README.md's "The routes file
 	                                     * (pg_walserver.ini)" and "The
-	                                     * embedded pull capturer" sections
+	                                     * embedded receivewal worker" sections
 	                                     * for the full rationale. */
 } WsRoute;
 
