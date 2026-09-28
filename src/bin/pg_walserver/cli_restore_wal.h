@@ -45,9 +45,9 @@
  *   comment): `restore-wal`, like `archive-wal`, connects to pg_walserver's
  *   own replication-protocol server, not out to a Postgres primary the way
  *   fetch-systemid/basebackup/setup do, so it has no "route's own upstream"
- *   to resolve at all -- only where pg_walserver itself is (--cluster/--host/
- *   --port/--user/--sslmode, mirroring cli_archive.h's own WsArchiveTarget
- *   flag names for consistency).
+ *   to resolve at all -- only where pg_walserver itself is, the shared
+ *   WsWalServerTarget (cli_wal_target.h: --cluster/--host/--port/--user/
+ *   --sslmode) also used by cli_archive.h's own `archive-wal`.
  *
  * Licensed under the PostgreSQL License.
  *
@@ -56,19 +56,11 @@
 #ifndef WS_CLI_RESTORE_WAL_H
 #define WS_CLI_RESTORE_WAL_H
 
-#include <limits.h>
 #include <stdbool.h>
 
 #include "postgres_fe.h"
 
-typedef struct WsRestoreTarget
-{
-	char host[_POSIX_HOST_NAME_MAX];
-	int port;
-	char user[NAMEDATALEN];
-	char route[NAMEDATALEN + 16];   /* sent as the connection's dbname */
-	char sslmode[32];                /* libpq sslmode, e.g. "prefer"/"require" */
-} WsRestoreTarget;
+#include "cli_wal_target.h"
 
 /*
  * ws_restore_run fetches filename (the "%f" argument) from the pg_walserver
@@ -76,7 +68,7 @@ typedef struct WsRestoreTarget
  * Returns true on success (the caller exits 0), false with an error
  * already logged to stderr otherwise (the caller exits nonzero).
  */
-bool ws_restore_run(const WsRestoreTarget *target,
+bool ws_restore_run(const WsWalServerTarget *target,
 					const char *filename, const char *outputPath);
 
 #endif /* WS_CLI_RESTORE_WAL_H */
