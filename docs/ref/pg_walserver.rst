@@ -27,9 +27,10 @@ pg_walserver - standalone PostgreSQL replication-protocol server
 Synopsis
 --------
 
-Serving ``pg_basebackup``, ``pg_receivewal``, and a real standby's
-walreceiver directly out of a directory tree of WAL segments and base
-backups, with no live ``postmaster`` behind it, needs something that
+Serving ``pg_basebackup``, ``pg_receivewal``, and a real standby set up
+with a ``primary_conninfo`` directly out of a directory tree of WAL
+segments and base backups, with no live ``postmaster`` behind it, needs
+something that
 speaks the PostgreSQL replication wire protocol well enough for that:
 this is what ``pg_walserver`` does. It is not part of
 ``pg_autoctl``'s own process supervision: it is started and stopped on
@@ -80,11 +81,11 @@ none of PostgreSQL's own tools -- ``pg_basebackup``, ``pg_receivewal``, a
 real standby's ``primary_conninfo`` -- can talk to the archive to rebuild
 a node.
 
-Filling that gap needs an archiving server that speaks the replication
-protocol and implements PostgreSQL's own archiving contract in full;
-that is what ``pg_walserver`` is. It combines streaming (the embedded
-pull capturer, for efficiency) with ``archive_command`` (for
-robustness) rather than requiring one or the other.
+That gap needs an archiving server that speaks the replication protocol
+and implements PostgreSQL's own archiving contract in full:
+``pg_walserver``. It combines streaming (the embedded pull capturer,
+for efficiency) with ``archive_command`` (for robustness) rather than
+requiring one or the other.
 
 Archiving one cluster
 ~~~~~~~~~~~~~~~~~~~~~
@@ -94,9 +95,9 @@ identifier, a base backup to restore from, and continuous WAL capture
 from that point on. ``pg_walserver`` builds all three from a single
 ``setup`` call followed by a running ``serve``:
 
-Connecting to the upstream PostgreSQL instance, recording its system
-identifier, and writing the route into ``pg_walserver.ini`` is what
-``pg_walserver setup`` does. ``pg_walserver serve`` picks the route up -- at
+A single ``pg_walserver setup`` call handles connecting to the upstream
+PostgreSQL instance, recording its system identifier, and writing the
+route into ``pg_walserver.ini``. ``pg_walserver serve`` picks the route up -- at
 startup, and again after every ``pg_walserver reload`` -- takes its
 first base backup automatically, and starts capturing WAL continuously
 into the route's own storage (an embedded, supervised
@@ -151,10 +152,10 @@ wildcard database -- matching any ``dbname`` with no route of its own.
 __ https://www.postgresql.org/docs/current/protocol-replication.html
 
 A client that cannot set its own ``dbname`` -- a real standby's
-walreceiver, most notably -- is matched to its route a second way
-instead, by the TLS SNI hostname it connected with. Every connection
-tries ``dbname`` first, which is enough on its own for a single
-cluster.
+``primary_conninfo``, most notably, which only ever sends the literal
+``dbname=replication`` -- is matched to its route a second way instead,
+by the TLS SNI hostname it connected with. Every connection tries
+``dbname`` first, which is enough on its own for a single cluster.
 
 A single cluster needs only ``dbname``, set to the route's own key::
 
@@ -188,16 +189,15 @@ A self-signed certificate for ``--pgdata`` is created automatically by
 ``pg_walserver`` requires TLS from that point on. See
 :ref:`pg_walserver_serve`'s "Routing more than one cluster by name: TLS
 SNI" for the full mechanism, its DNS prerequisite, and why a real
-standby's walreceiver needs it.
+standby's ``primary_conninfo`` needs it.
 
 Access control
 ~~~~~~~~~~~~~~
 
-Deciding which peers may connect, and how they must authenticate, is
-the job of ``<pgdata>/pg_walserver_hba.conf``: one rule per line
-(``TYPE ROUTE USER ADDRESS METHOD``, first match wins), a missing,
-oversize, or malformed file rejecting every connection. Three
-``METHOD`` values are supported:
+Each connecting peer is checked against ``<pgdata>/pg_walserver_hba.conf``,
+one rule per line (``TYPE ROUTE USER ADDRESS METHOD``, first match
+wins); a missing, oversize, or malformed file rejects every connection
+outright. Three ``METHOD`` values are supported:
 
 ``trust``
 
@@ -216,40 +216,39 @@ oversize, or malformed file rejecting every connection. Three
   Refuse the connection outright. Also the default when no rule matches at
   all, so a rule is required to admit anything.
 
-Checking a ``scram-sha-256`` challenge needs a credential store to check
-it against. PostgreSQL itself uses its own catalog, ``pg_authid``, with
-one entry per role; ``pg_walserver`` is not PostgreSQL, and has no role
-system underneath it, so it keeps its own, separate store instead:
+A ``scram-sha-256`` verifier has to come from somewhere: PostgreSQL
+keeps its own, in the ``pg_authid`` catalog, one entry per role.
+``pg_walserver`` is not PostgreSQL, and has no role system underneath
+it, so it keeps a separate credential store instead,
 ``<pgdata>/pg_walserver_passwd``, one SCRAM-SHA-256 verifier per line,
 produced with ``pg_walserver scram-secret`` and populated by hand or by
 whatever provisions a route.
 
-TLS itself is enabled by the presence of
+TLS is enabled simply by the presence of
 ``<pgdata>/server.crt``/``<pgdata>/server.key`` (or
 ``--ssl-cert-file``/``--ssl-key-file``); without them, ``hostssl`` HBA
 rules never match.
 
-Requiring the TLS peer certificate's CN to equal the connecting role
-name exactly is one more, optional check, added by following
-``METHOD`` with one more field, ``clientcert=verify-full``. With
-``METHOD`` ``trust`` the certificate check is the whole authentication;
-with ``scram-sha-256`` both the certificate and the password are
-required::
+An optional sixth field after ``METHOD``, ``clientcert=verify-full``,
+adds one more check: the TLS peer certificate's CN must equal the
+connecting role name exactly. With ``METHOD`` ``trust`` the certificate
+check is the whole authentication; with ``scram-sha-256`` both the
+certificate and the password are required::
 
   hostssl  all  archiver_repl  10.0.0.0/8  scram-sha-256  clientcert=verify-full
 
-This requires ``--ssl-ca-file`` (see :ref:`pg_walserver_serve`) to
-validate the client certificate against; a rule using it with no usable
-CA file configured is refused at startup.
+Validating that client certificate needs ``--ssl-ca-file`` (see
+:ref:`pg_walserver_serve`); a rule using it with no usable CA file
+configured is refused at startup.
 
-Starting with no configuration at all -- to confirm the binary starts,
-listens, and answers the wire protocol correctly (network and TLS
-reachability, ``IDENTIFY_SYSTEM``, ...) before writing any real
-configuration -- is what ``--insecure`` is for: no ``--pgdata``, no
-``pg_walserver.ini``, no HBA file, no passwd file, no TLS, any
-``dbname`` accepted with no authentication. With no routes configured,
-there is nothing to reach for a real file behind it. Never appropriate
-on a reachable network.
+For manual testing, with no ``--pgdata`` at all -- no
+``pg_walserver.ini``, no HBA file, no passwd file, no TLS -- pass
+``--insecure`` to accept any ``dbname`` with no authentication, purely
+to confirm the binary starts, listens, and answers the wire protocol
+correctly (network and TLS reachability, ``IDENTIFY_SYSTEM``, ...)
+before writing any real configuration. With no routes configured, there
+is nothing to reach for a real file behind it. Never appropriate on a
+reachable network.
 
 Configuration reload
 ~~~~~~~~~~~~~~~~~~~~~
@@ -294,8 +293,8 @@ real PostgreSQL primary except where noted:
 
 ``START_REPLICATION``
 
-  Streams WAL from a given position, exactly as a real standby's
-  walreceiver expects.
+  Streams WAL from a given position, exactly as a real standby set up
+  with ``primary_conninfo`` expects.
 
 ``FETCH_FILE '<name>'``
 
