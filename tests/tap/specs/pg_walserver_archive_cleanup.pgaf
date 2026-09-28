@@ -52,6 +52,27 @@
 #             it is proceeding despite the continuity problem, and the
 #             count-cutoff backup that would otherwise have been kept
 #             back by the earlier refusal is now genuinely removed
+#
+# test_010/011/012 exercise `pg_walserver basebackup --keep-count`/
+# `--keep-age`, cli_basebackup.c's own composition with this same
+# archive-cleanup retention pass (ws_archive_cleanup_run(), called directly
+# from cli_basebackup_command_run() after a successful backup):
+#
+#   test_010  `basebackup --keep-count 1` both takes a real new backup and
+#             then really prunes the older ones down to it, via the exact
+#             same code path test_004 already exercised through the
+#             standalone `archive-cleanup` command
+#   test_011  a real WAL gap carved between two backups (same technique as
+#             test_007), then `basebackup --keep-count 2`: the new backup
+#             is still taken and kept and the command still exits zero, but
+#             its own retention pass logs the same "WAL continuity check
+#             failed" refusal `archive-cleanup` itself would, and removes
+#             nothing at all -- a cleanup refusal never costs the backup
+#             that was just taken
+#   test_012  `basebackup` with neither --keep-count nor --keep-age never
+#             even attempts a cleanup pass (no "archive-cleanup:" log line
+#             at all), leaving every existing backup -- including ones a
+#             cleanup pass would otherwise have pruned -- untouched
 
 cluster {
     monitor
@@ -291,6 +312,115 @@ step test_009_force_proceeds_despite_the_same_gap {
     exec node2 bash -c 'ls /tmp/ws/default/0/basebackups/ | grep -c "^basebackup-" | grep -qx 2 || { ls -la /tmp/ws/default/0/basebackups/; false; }'
 }
 
+step test_010_basebackup_keep_count_takes_a_backup_then_really_prunes {
+    # entering this step: exactly {A4, A5} on disk (test_009's own final
+    # state), .latest = A5.
+    sql node1 { INSERT INTO ws SELECT generate_series(61, 70) }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'sleep 3'
+
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver basebackup --pgdata /tmp/ws --cluster default/0 --keep-count 1 > /tmp/bb_keepcount.out 2>&1; echo "exit=$?" >> /tmp/bb_keepcount.out; cat /tmp/bb_keepcount.out'
+    exec node2 bash -c 'grep -q "^exit=0$" /tmp/bb_keepcount.out || { echo "basebackup --keep-count should have exited zero"; cat /tmp/bb_keepcount.out; false; }'
+    exec node2 bash -c 'cat /tmp/ws/default/0/basebackups/.latest > /tmp/backup_A6.label'
+    exec node2 bash -c 'test "$(cat /tmp/backup_A6.label)" != "$(cat /tmp/backup_A5.label)" || { echo "A6 and A5 collided"; false; }'
+
+    # the real effect: A4 and A5 are gone, only the freshly-taken A6
+    # remains -- the exact same pruning test_004 already exercised through
+    # the standalone "archive-cleanup" command, now driven by "basebackup"
+    # itself.
+    exec node2 bash -c 'test ! -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A4.label)" || { echo "A4 should have been pruned by basebackup --keep-count 1"; false; }'
+    exec node2 bash -c 'test ! -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A5.label)" || { echo "A5 should have been pruned by basebackup --keep-count 1"; false; }'
+    exec node2 bash -c 'test -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A6.label)" || { echo "A6 (the just-taken backup) should still be there"; false; }'
+    exec node2 bash -c 'ls /tmp/ws/default/0/basebackups/ | grep -c "^basebackup-" | grep -qx 1 || { ls -la /tmp/ws/default/0/basebackups/; false; }'
+}
+
+step test_011_basebackup_keep_count_keeps_the_backup_when_cleanup_refuses_over_a_gap {
+    # real WAL switches to make room for a genuine gap strictly between A6
+    # (already on disk) and a second real backup (A7) taken right after --
+    # exactly test_007's own technique (two real switches, a real segment
+    # deleted by hand strictly between the two backups' own required
+    # starting segments), applied to a pair of backups both already on disk
+    # *before* "basebackup --keep-count" itself runs -- so, unlike test_007,
+    # the command under test here never has to create either boundary of
+    # the gap itself, only take one more backup (A8) and then run into the
+    # already-carved gap during its own follow-on cleanup pass.
+    sql node1 { INSERT INTO ws SELECT generate_series(71, 80) }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'sleep 3'
+    sql node1 { INSERT INTO ws SELECT generate_series(81, 90) }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'sleep 3'
+
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver basebackup --pgdata /tmp/ws --cluster default/0'
+    exec node2 bash -c 'cat /tmp/ws/default/0/basebackups/.latest > /tmp/backup_A7.label'
+    exec node2 bash -c 'test "$(cat /tmp/backup_A7.label)" != "$(cat /tmp/backup_A6.label)" || { echo "A7 and A6 collided"; false; }'
+
+    exec node2 bash -c 'grep "START WAL LOCATION" "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A6.label)/backup_label" | sed -E "s/.*\(file ([0-9A-Fa-f]+)\).*/\1/" > /tmp/a6_start_segment.txt'
+    exec node2 bash -c 'grep "START WAL LOCATION" "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A7.label)/backup_label" | sed -E "s/.*\(file ([0-9A-Fa-f]+)\).*/\1/" > /tmp/a7_start_segment.txt'
+
+    # a real WAL segment strictly between the two -- deleting it by hand is
+    # the "unambiguous, real repro" this spec wants: a genuine hole in the
+    # archive, not a mocked one (identical to test_007's own reasoning).
+    exec node2 bash -c 'echo "DEBUG a6_start=$(cat /tmp/a6_start_segment.txt) a7_start=$(cat /tmp/a7_start_segment.txt)"; ls -la /tmp/ws/default/0'
+    exec node2 bash -c 'ls /tmp/ws/default/0 | grep -E "^[0-9A-F]{24}$" | sort | awk -v lo="$(cat /tmp/a6_start_segment.txt)" -v hi="$(cat /tmp/a7_start_segment.txt)" '"'"'$0 > lo && $0 < hi {print; exit}'"'"' > /tmp/gap_segment2.txt'
+    exec node2 bash -c 'test -s /tmp/gap_segment2.txt || { echo "no WAL segment found strictly between A6 and A7 -- spec assumption broken"; ls /tmp/ws/default/0; false; }'
+    exec node2 bash -c 'rm "/tmp/ws/default/0/$(cat /tmp/gap_segment2.txt)"'
+
+    # {A6, A7} on disk going in, both real; this backup (A8) becomes the
+    # new .latest, and --keep-count 3 keeps all three of {A6, A7, A8} that
+    # will then exist -- a kept window spanning right across the segment
+    # just deleted, even though nothing here is even past the count cutoff
+    # (this run's retention pass has nothing it would otherwise remove at
+    # all -- the WAL-continuity pre-flight is independent of that, exactly
+    # as ws_check_wal_continuity()'s own header comment says).
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver basebackup --pgdata /tmp/ws --cluster default/0 --keep-count 3 > /tmp/bb_gap.out 2>&1; echo "exit=$?" >> /tmp/bb_gap.out; cat /tmp/bb_gap.out'
+    exec node2 bash -c 'cat /tmp/ws/default/0/basebackups/.latest > /tmp/backup_A8.label'
+
+    # the command as a whole still reports success: the backup itself
+    # succeeded and was kept, even though its own follow-on cleanup pass
+    # could not safely proceed.
+    exec node2 bash -c 'grep -q "^exit=0$" /tmp/bb_gap.out || { echo "basebackup should still exit zero: the backup itself succeeded"; cat /tmp/bb_gap.out; false; }'
+
+    # the same refusal shape "archive-cleanup" itself produces (test_007),
+    # plus basebackup's own note that the backup was kept regardless.
+    exec node2 bash -c 'grep -q "WAL continuity check failed" /tmp/bb_gap.out || { cat /tmp/bb_gap.out; false; }'
+    exec node2 bash -c 'grep -q "$(cat /tmp/gap_segment2.txt)" /tmp/bb_gap.out || { echo "the missing segment itself should be named in the error"; cat /tmp/bb_gap.out; false; }'
+    exec node2 bash -c 'grep -q "the new base backup succeeded and has been kept" /tmp/bb_gap.out || { cat /tmp/bb_gap.out; false; }'
+
+    # real effect on disk: the just-taken backup (A8) is there, and so are
+    # A6 and A7 -- the whole-operation refusal touched nothing at all.
+    exec node2 bash -c 'test -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A8.label)" || { echo "A8 (the just-taken backup) must still be there"; false; }'
+    exec node2 bash -c 'test -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A7.label)" || { echo "A7 should still be there"; false; }'
+    exec node2 bash -c 'test -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A6.label)" || { echo "A6 should still be there -- the whole-operation refusal must not partially clean up"; false; }'
+    exec node2 bash -c 'ls /tmp/ws/default/0/basebackups/ | grep -c "^basebackup-" | grep -qx 3 || { ls -la /tmp/ws/default/0/basebackups/; false; }'
+}
+
+step test_012_basebackup_with_neither_flag_never_attempts_cleanup {
+    # the unresolved WAL gap from test_011 is still sitting there, and a
+    # naive --keep-count/--keep-age cleanup pass over the current {A6, A7,
+    # A8} set would still refuse over it -- this step's whole point is that
+    # plain "basebackup", with neither flag, never even tries.
+    sql node1 { INSERT INTO ws SELECT generate_series(101, 110) }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'sleep 3'
+
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver basebackup --pgdata /tmp/ws --cluster default/0 > /tmp/bb_plain.out 2>&1; echo "exit=$?" >> /tmp/bb_plain.out; cat /tmp/bb_plain.out'
+    exec node2 bash -c 'grep -q "^exit=0$" /tmp/bb_plain.out || { echo "plain basebackup should exit zero"; cat /tmp/bb_plain.out; false; }'
+    exec node2 bash -c 'cat /tmp/ws/default/0/basebackups/.latest > /tmp/backup_A9.label'
+
+    # no cleanup pass was attempted at all: none of its log lines (they all
+    # start with "archive-cleanup:") appear anywhere in the output.
+    exec node2 bash -c 'grep -q "archive-cleanup:" /tmp/bb_plain.out && { echo "plain basebackup must never run the cleanup pass"; cat /tmp/bb_plain.out; false; } || true'
+
+    # every backup that existed going in is still there, plus the new one
+    # -- behaving exactly as basebackup always has with no retention flags.
+    exec node2 bash -c 'test -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A6.label)" || { echo "A6 should still be there"; false; }'
+    exec node2 bash -c 'test -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A7.label)" || { echo "A7 should still be there"; false; }'
+    exec node2 bash -c 'test -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A8.label)" || { echo "A8 should still be there"; false; }'
+    exec node2 bash -c 'test -d "/tmp/ws/default/0/basebackups/$(cat /tmp/backup_A9.label)" || { echo "A9 (the just-taken backup) should be there"; false; }'
+    exec node2 bash -c 'ls /tmp/ws/default/0/basebackups/ | grep -c "^basebackup-" | grep -qx 4 || { ls -la /tmp/ws/default/0/basebackups/; false; }'
+}
+
 sequence
     test_001_three_backups_and_dry_run_reports_without_deleting
     test_002_refuses_to_run_with_neither_flag
@@ -301,3 +431,6 @@ sequence
     test_007_real_wal_gap_between_kept_backups_refuses_by_default
     test_008_dry_run_against_the_same_gap_reports_it_without_force
     test_009_force_proceeds_despite_the_same_gap
+    test_010_basebackup_keep_count_takes_a_backup_then_really_prunes
+    test_011_basebackup_keep_count_keeps_the_backup_when_cleanup_refuses_over_a_gap
+    test_012_basebackup_with_neither_flag_never_attempts_cleanup
