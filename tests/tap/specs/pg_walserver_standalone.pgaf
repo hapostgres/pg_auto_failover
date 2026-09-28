@@ -1,5 +1,5 @@
 # pg_walserver, on its own, with no archiver/monitor integration at all --
-# except for `pg_walserver setup` itself, its own one-shot onboarding
+# except for `pg_walserver cluster register` itself, its own one-shot onboarding
 # wizard (cli_setup.c): create/validate the pg_walserver.ini route, check
 # the upstream role's REPLICATION attribute, and fetch the system
 # identifier. "pg_walserver serve" itself then bootstraps the route's
@@ -17,7 +17,7 @@
 # node2 instead, and re-read with $(cat ...).
 #
 #   test_001  IDENTIFY_SYSTEM reports node1's own system identifier (as
-#             `setup` fetched it), and SHOW wal_segment_size reports the
+#             `cluster register` fetched it), and SHOW wal_segment_size reports the
 #             16MB default (nothing here has told it otherwise)
 #   test_002  FETCH_FILE returns the exact bytes of a captured WAL segment
 #   test_003  a real client (pg_receivewal) can START_REPLICATION from
@@ -66,8 +66,8 @@ setup {
     # that exact peer, not "0.0.0.0/0" -- there is no monitor here to learn
     # a real client's address from, and none needed: pg_walserver's HBA is
     # just a file, hand-edited exactly as an operator running it on its own
-    # (no archiver, no monitor) would. `setup` itself never touches HBA --
-    # a deliberately separate concern, see cli_setup.c's own header comment.
+    # (no archiver, no monitor) would. `cluster register` itself never touches HBA --
+    # a deliberately separate concern, see cli_cluster.c's own header comment.
     exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
     # the one-shot wizard: creates /tmp/ws/default/0, writes the
@@ -81,7 +81,7 @@ setup {
     # pg_receivewal (below) into this exact route directory -- the embedded
     # receivewal worker, on by default now, would otherwise fork a second
     # process racing it for the same segment files.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
     exec node2 bash -c 'if grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini; then echo "receivewal = pull should not have been written with --no-receivewal"; false; fi'
 
     # capture real WAL off node1 with the stock pg_receivewal (not this
@@ -98,14 +98,14 @@ teardown {
 }
 
 step test_000_sync_files_from_node1 {
-    # `setup`, in the setup{} block above, already wrote
+    # `cluster register`, in the setup{} block above, already wrote
     # pg_walserver_systemid -- nothing to fetch by hand here beyond the one
     # value pgaftest's own let/${var} (not available at this point in its
     # history) can't carry across steps on its own.
     exec node2 bash -c 'ls /tmp/ws/default/0/*[0-9A-F] | grep -v "\.partial$" | xargs -n1 basename | sort | tail -1 > /tmp/seg.txt'
     exec node2 bash -c 'test -s /tmp/seg.txt'
     exec node2 bash -c 'test -s /tmp/ws/default/0/pg_walserver_systemid'
-    # `setup` (via fetch-systemid) also records node1's real Postgres major
+    # `cluster register` (via fetch-systemid) also records node1's real Postgres major
     # version, alongside its system identifier, in its own sibling file --
     # cli_fetch_systemid.c's own header comment. It's PQserverVersion()'s raw
     # server_version_num form (e.g. 170011 for 17.11), so a real value here

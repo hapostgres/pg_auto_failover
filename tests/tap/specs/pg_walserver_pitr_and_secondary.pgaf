@@ -27,7 +27,7 @@
 #   2. "server" -- `pg_walserver server` (the DSL's pg_walserver sugar),
 #      with its own default startup command overridden to "tail -f
 #      /dev/null" -- exactly like pg_walserver_sni_routing.pgaf's own
-#      "walserver" node -- because this spec needs `pg_walserver setup` to
+#      "walserver" node -- because this spec needs `pg_walserver cluster register` to
 #      configure a route before "serve" ever starts. This means the DSL
 #      sugar's own *default* command (compose_gen.c's write_pg_walserver_
 #      default_hba()/pg_walserver_line's own commandOverride, the auto-
@@ -200,7 +200,7 @@ setup {
     # this route's first base backup automatically, once its own embedded
     # receivewal worker (started at the same startup) shows real streaming
     # evidence.
-    exec server bash -c 'PGPASSWORD=wspw pg_walserver setup --pgdata /tmp/ws --cluster pitr --path /tmp/ws/pitr --upstream "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
+    exec server bash -c 'PGPASSWORD=wspw pg_walserver cluster register --pgdata /tmp/ws --cluster pitr --path /tmp/ws/pitr --upstream "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
     exec server bash -c 'grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini || { echo "receivewal = pull should have been written by default"; cat /tmp/ws/pg_walserver.ini; false; }'
 
     # the "*" wildcard, mapped at the exact same path as "pitr" -- see this

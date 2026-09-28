@@ -1,6 +1,6 @@
 # pg_walserver's own embedded, supervised receivewal worker (receivewal.c): a
 # route configured with "receivewal = pull" (pg_walserver.ini) -- written by
-# `pg_walserver setup` *by default* now, with no --receivewal flag at all
+# `pg_walserver cluster register` *by default* now, with no --receivewal flag at all
 # needed (an operator has to pass --no-receivewal / --receivewal none to opt
 # out) -- gets a forked, supervised pg_receivewal child at "serve" startup:
 # no external pg_receivewal process, no separate supervisor unit. This
@@ -80,7 +80,7 @@ setup {
     # fetches node1's real system identifier -- this spec only needs the
     # receivewal worker, not BASE_BACKUP, so it never relies on the base backup
     # "serve" bootstraps automatically for this route in the background.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
     exec node2 bash -c 'grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini || { echo "receivewal = pull should have been written by default, with no --receivewal flag at all"; cat /tmp/ws/pg_walserver.ini; false; }'
 
     # the independent "reference" capture: a real, unmodified, externally

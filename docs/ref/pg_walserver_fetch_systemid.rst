@@ -70,4 +70,4 @@ See Also
 --------
 
 * :ref:`pg_walserver`
-* :ref:`pg_walserver_setup`
+* :ref:`pg_walserver_cluster`
