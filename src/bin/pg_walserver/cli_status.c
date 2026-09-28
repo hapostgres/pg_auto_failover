@@ -21,6 +21,11 @@
 #include "string_utils.h"
 
 
+/*
+ * format_uptime renders the time elapsed since startedAt as "<h>h<mm>m<ss>s"
+ * (e.g. "0h04m31s"), or "-" when startedAt is unset (<= 0, "serve" isn't
+ * running).
+ */
 static void
 format_uptime(time_t startedAt, char *dest, size_t destSize)
 {
@@ -42,6 +47,9 @@ format_uptime(time_t startedAt, char *dest, size_t destSize)
 }
 
 
+/*
+ * cli_status_run -- see cli_status.h's own comment.
+ */
 bool
 cli_status_run(const char *pgdata)
 {

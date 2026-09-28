@@ -102,6 +102,9 @@ cli_parse_upstream_conninfo(const char *conninfo, WsUpstreamTarget *target)
 }
 
 
+/*
+ * cli_resolve_upstream -- see cli_upstream.h's own comment.
+ */
 bool
 cli_resolve_upstream(const char *pgdata, const char *routeKey,
 					 const char *pathArg, const char *upstreamArg,

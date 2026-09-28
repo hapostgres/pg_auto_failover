@@ -51,6 +51,9 @@ size_t last_status_len;
 Semaphore log_semaphore = { 0 };
 
 
+/*
+ * Main entry point for the binary.
+ */
 int
 main(int argc, char **argv)
 {

@@ -60,6 +60,10 @@
 #include "string_utils.h"
 
 
+/*
+ * format_uptime renders the time elapsed since startedAt as "<h>h<mm>m<ss>s"
+ * (e.g. "0h04m31s"), or "-" when startedAt is unset (<= 0).
+ */
 static void
 format_uptime(time_t startedAt, char *dest, size_t destSize)
 {
@@ -81,6 +85,9 @@ format_uptime(time_t startedAt, char *dest, size_t destSize)
 }
 
 
+/*
+ * cli_ps_run -- see cli_ps.h's own comment.
+ */
 bool
 cli_ps_run(const char *pgdata)
 {

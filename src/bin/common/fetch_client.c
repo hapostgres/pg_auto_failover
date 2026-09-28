@@ -18,8 +18,8 @@
 
 #include "file_utils.h"
 #include "log.h"
-
-#define FETCH_CONNECT_TIMEOUT_SECONDS "10"
+#include "pgsql.h"
+#include "string_utils.h"
 
 
 int
@@ -27,27 +27,57 @@ ws_fetch_file_client(const char *host, int port, const char *user,
 					 const char *routeKey, const char *sslmode,
 					 const char *filename, const char *outputPath)
 {
-	char portStr[16];
+	/*
+	 * Reuse this project's own PGSQL connection facility (pgsql_init() +
+	 * pgsql_open_connection(), src/bin/common/pgsql.c) rather than a bare
+	 * PQconnectdbParams() call: the same retry policy (exponential
+	 * backoff with jitter, PQping()-based "wait for the server to become
+	 * ready" loop), PGCONNECT_TIMEOUT handling, and notice-processor
+	 * wiring every other connection in this codebase already gets, for
+	 * free, instead of a one-shot connect attempt with none of that.
+	 * FETCH_FILE (pg_walserver's own wire-protocol extension, cmd_fetch_
+	 * file.c) has no ready-made wrapper in pgsql.c the way IDENTIFY_
+	 * SYSTEM/TIMELINE_HISTORY do (pgsql_identify_system()), so this still
+	 * drives its own COPY OUT protocol directly on the raw PGconn
+	 * pgsql_open_connection() hands back -- exactly the same shape that
+	 * function's own header comment describes for a caller in this
+	 * situation.
+	 */
+	PQExpBuffer connInfo = createPQExpBuffer();
 
-	sformat(portStr, sizeof(portStr), "%d", port);
+	appendPQExpBuffer(connInfo, "host=%s port=%d user=%s dbname=%s "
+								"fallback_application_name=fetch_client",
+					  host, port, user, routeKey);
 
-	const char *keys[] = {
-		"host", "port", "user", "dbname", "sslmode", "connect_timeout",
-		"fallback_application_name", NULL
-	};
-	const char *values[] = {
-		host, portStr, user, routeKey,
-		sslmode != NULL && sslmode[0] != '\0' ? sslmode : NULL,
-		FETCH_CONNECT_TIMEOUT_SECONDS, "fetch_client (FETCH_FILE)", NULL
-	};
-
-	PGconn *conn = PQconnectdbParams(keys, values, 0);
-
-	if (PQstatus(conn) != CONNECTION_OK)
+	if (sslmode != NULL && sslmode[0] != '\0')
 	{
-		log_error("Failed to connect to %s:%d: %s", host, port,
-				  PQerrorMessage(conn));
-		PQfinish(conn);
+		appendPQExpBuffer(connInfo, " sslmode=%s", sslmode);
+	}
+
+	if (PQExpBufferBroken(connInfo))
+	{
+		log_error("Out of memory");
+		destroyPQExpBuffer(connInfo);
+		return 1;
+	}
+
+	PGSQL pgsql = { 0 };
+
+	if (!pgsql_init(&pgsql, connInfo->data, PGSQL_CONN_UPSTREAM))
+	{
+		/* errors have already been logged */
+		destroyPQExpBuffer(connInfo);
+		return 1;
+	}
+
+	destroyPQExpBuffer(connInfo);
+
+	PGconn *conn = pgsql_open_connection(&pgsql);
+
+	if (conn == NULL)
+	{
+		/* errors have already been logged (pgsql_open_connection() itself,
+		 * or its own retry loop) */
 		return 1;
 	}
 
@@ -59,7 +89,7 @@ ws_fetch_file_client(const char *host, int port, const char *user,
 	{
 		log_error("Failed to quote \"%s\": %s", filename, PQerrorMessage(conn));
 		destroyPQExpBuffer(command);
-		PQfinish(conn);
+		pgsql_finish(&pgsql);
 		return 1;
 	}
 
@@ -75,7 +105,7 @@ ws_fetch_file_client(const char *host, int port, const char *user,
 		log_error("Failed to fetch \"%s\": %s", filename,
 				  PQresultErrorMessage(res));
 		PQclear(res);
-		PQfinish(conn);
+		pgsql_finish(&pgsql);
 		return 1;
 	}
 
@@ -111,7 +141,7 @@ ws_fetch_file_client(const char *host, int port, const char *user,
 		PQclear(res);
 	}
 
-	PQfinish(conn);
+	pgsql_finish(&pgsql);
 
 	if (!ok)
 	{

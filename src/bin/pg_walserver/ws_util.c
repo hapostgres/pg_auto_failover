@@ -27,6 +27,9 @@
 #define WS_CRC32C_CHUNK_SIZE (128 * 1024)
 
 
+/*
+ * ws_read_file_capped -- see ws_util.h's own comment.
+ */
 bool
 ws_read_file_capped(const char *path, size_t maxSize, bool missingOk,
 					char **contents, size_t *size, struct stat *stOut)
@@ -64,6 +67,9 @@ ws_open_served_file(const char *path)
 }
 
 
+/*
+ * ws_read_file_flags -- see ws_util.h's own comment.
+ */
 bool
 ws_read_file_flags(const char *path, int openFlags, size_t maxSize,
 				   bool missingOk, char **contents, size_t *size,

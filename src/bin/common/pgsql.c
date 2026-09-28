@@ -41,7 +41,6 @@ static char * ConnectionTypeToString(ConnectionType connectionType);
 static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
-static PGconn * pgsql_open_connection(PGSQL *pgsql);
 static bool pgsql_retry_open_connection(PGSQL *pgsql);
 static bool is_response_ok(PGresult *result);
 static bool clear_results(PGSQL *pgsql);
@@ -512,8 +511,17 @@ log_connection_error(PGconn *connection, int logLevel)
  * pgsql_open_connection opens a PostgreSQL connection, given a PGSQL client
  * instance. If a connection is already open in the client (it's not NULL),
  * then this errors, unless we are inside a transaction opened by pgsql_begin.
+ *
+ * Exported (not static) so a caller outside this file that needs a raw
+ * PGconn for a command this file has no wrapper for yet -- a wire-protocol
+ * extension like pg_walserver's own FETCH_FILE, for instance
+ * (src/bin/common/fetch_client.c) -- still gets this same retry policy,
+ * connect-timeout handling, and notice-processor wiring, exactly like
+ * pgsql_identify_system() and every other command already implemented in
+ * this file. Call pgsql_init() first; pgsql_finish() releases the
+ * connection this returns.
  */
-static PGconn *
+PGconn *
 pgsql_open_connection(PGSQL *pgsql)
 {
 	/* we might be connected already */
