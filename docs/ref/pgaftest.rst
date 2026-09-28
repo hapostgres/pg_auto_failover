@@ -468,13 +468,10 @@ Bare, unmanaged single-node sugar
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``postgres <name>`` and ``pg_walserver <name>`` are top-level declarations,
-siblings of ``monitor`` (NOT nested inside ``formation {}``, and NOT
-pg_auto_failover's own ``archiver`` node kind — the real
-``pgautofailover.archiver`` / ``pg_autoctl create archiver``, attached to
-one or more formations, is this DSL's own separate, braced
-``archiver <name> { formation ... }`` block). Both are pure syntactic sugar
-for a one-node, no-monitor formation, so no new container-generation code
-exists for either:
+siblings of ``monitor``, for a spec that wants one plain node with no
+formation and no monitor supervision at all. Each is pure syntactic sugar
+for a one-node, no-monitor formation, reusing the same container-generation
+code every other node already goes through:
 
 .. code-block:: text
 
