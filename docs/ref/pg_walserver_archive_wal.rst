@@ -73,7 +73,8 @@ has not caught up to yet -- ``CHECK_FILE`` fails, exit 1, and PostgreSQL retries
       pg_wal/0000000100000000000000FF 0000000100000000000000FF \
       --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require
   ERROR "0000000100000000000000FF" is not yet on "archive" route
-        "mycluster" (missing): waiting for its own pull capturer to catch up
+        "mycluster" (missing): waiting for its own receivewal worker to
+        catch up
 
 See Also
 --------
