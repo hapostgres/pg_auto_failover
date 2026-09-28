@@ -547,7 +547,7 @@ base backup, but with ``primary_conninfo`` and ``standby.signal``::
 
   standby$ PGPASSWORD=s3kr3t pg_basebackup \
       -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
-      -D /var/lib/postgres/standby -X none --no-manifest
+      -D /var/lib/postgres/standby -X stream --no-manifest
   standby$ cat >> /var/lib/postgres/standby/postgresql.auto.conf <<EOF
   primary_conninfo = 'host=archive port=6543 user=archiver_repl password=s3kr3t sslmode=require'
   EOF
