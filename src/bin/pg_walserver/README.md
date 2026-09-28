@@ -688,22 +688,116 @@ Three sub-commands, alongside `serve`/`scram-secret`, all sharing
   at the *backend* level, independent of HBA -- an earlier version of this
   file ran a separate plain-SQL `pg_roles.rolreplication` check first,
   removed because that connection targets an ordinary database, which the
-  replication role's own HBA rule usually does not admit at all), and,
-  with `--with-basebackup`, calls `basebackup`'s own logic --
-  synchronously, not returning until the first base backup has actually
-  succeeded, so "setup finished" means the route is genuinely ready to
-  serve. This role-permission check is already the stricter of the two an
-  earlier design draft once weighed (a real `replication=true` connection
-  vs. a plain `pg_roles.rolreplication` read): `pgctl_identify_system()`
-  *is* a real replication-mode connection, so a role that passes it is
-  already proven to work end to end with `pg_basebackup`/`pg_receivewal`,
-  catching HBA misconfiguration on the *upstream* side too, not just the
-  role's own attribute.
+  replication role's own HBA rule usually does not admit at all). This
+  role-permission check is already the stricter of the two an earlier
+  design draft once weighed (a real `replication=true` connection vs. a
+  plain `pg_roles.rolreplication` read): `pgctl_identify_system()` *is* a
+  real replication-mode connection, so a role that passes it is already
+  proven to work end to end with `pg_basebackup`/`pg_receivewal`, catching
+  HBA misconfiguration on the *upstream* side too, not just the role's own
+  attribute. `setup` never takes a base backup itself any more (it used to,
+  behind a now-removed `--with-basebackup` flag -- see "Bootstrapping a
+  route's first base backup" below for why, and for what replaced it): its
+  very last step is to reload an already-running `serve` for the same
+  `--pgdata`, if there is one (`<pgdata>/pg_walserver.pid`, the same
+  `read_pidfile()`/`SIGHUP` shape `reload` itself uses, see "Config reload"
+  below), so it picks up the new/changed route immediately; with no server
+  running, the config just written simply takes effect the next time
+  `serve` starts -- logged, not an error, a normal and expected case (e.g.
+  setting a route up before `serve` has ever been started for this
+  `--pgdata`).
 
 None of the three touch `archiver-hba.conf` or `archiver-passwd` -- a
 deliberately separate concern an operator (or `pg_autoctl`, later) still
 configures on its own, see `docs/ref/pg_walserver.rst`'s own worked
 example for the full sequence including those.
+
+## Bootstrapping a route's first base backup
+
+`setup` used to take a route's first base backup itself, synchronously,
+behind a `--with-basebackup` flag -- removed. `pg_walserver serve` takes it
+instead, automatically, once, for any currently-configured route that is
+still missing one (`cli_basebackup_route_has_backup()`, cli_basebackup.c:
+`<path>/basebackups/.latest` exists and is non-empty): right after startup
+(once `ws_capture_start_all()` has started every route's own real
+capturer), and right after a successful `SIGHUP` reload (once
+`ws_capture_reload()` has reconciled the capturer set against the newly
+reloaded routes) -- `accept_loop.c`'s own `ws_bootstrap_missing_backups()`
+is the single entry point both call. These are the *only* two moments this
+ever happens; there is no other trigger, and no recurring/scheduled
+backup of any kind -- see this section's own "Recurring backups are not
+this project's job" paragraph below.
+
+This replaced an earlier design (this PR's own history, see `git log` on
+`capture.c`/`cli_setup.c`) where `setup --with-basebackup` primed a
+*throwaway* embedded capturer just long enough to prove the base backup's
+own start LSN was covered, then tore it down before `serve` ever started
+its own real one for the same route. That design worked, but existed only
+to compensate for base backups being taken too early -- before `serve`,
+and therefore before any real capturer, had ever run for the route at all.
+Moving the base backup itself into `serve` removes the problem at its
+source: by the time `serve` ever decides a route needs a bootstrap backup,
+its own real, supervised capturer for that route (if `capture = pull`) has
+already been started, so there is always a genuine one to wait on directly
+-- no throwaway primer, no teardown dance, no separate "priming" code path
+to keep in sync with the real one.
+
+For a `capture = pull` route, `ws_bootstrap_missing_backups()` first waits
+(bounded, `backup_bootstrap.c`'s own `WS_BOOTSTRAP_STREAM_WAIT_*`
+constants) for that route's own real capturer to show genuine on-disk
+evidence of streaming (`wal_dir_has_any_segment()`, `wal_dir_scan.c` --
+true even for a still-growing `.partial` segment, so a caller doesn't spin
+until an entire segment happens to fill) before ever taking the backup --
+the same "the backup's own start LSN must already be covered by captured
+WAL" property the removed primer used to guarantee, now proven against the
+real capturer instead of a throwaway one. A route with no `capture = pull`
+has no such wait: its `archive-wal`-driven push has no equivalent gap to
+close (see "The archive push side" below), so the backup is taken right
+away.
+
+Taking the backup itself reuses `pg_walserver basebackup`'s own already-
+public logic (`cli_basebackup_run()`, `cli_basebackup.c`) directly,
+in-process, after a plain `fork()` (`backup_bootstrap.c`'s own
+`ws_backup_bootstrap_start()`) -- deliberately **not** a new hidden
+`internal service basebackup` entry point mirroring the embedded
+capturer's own `fork()`+`execv()`-into-a-hidden-sub-command shape
+(`cli_internal.c`): that shape exists so a *restarted, long-lived* service
+picks up a replaced binary on disk without the supervising `serve` process
+itself needing to restart, a live-upgrade concern that simply does not
+apply to a one-time, transient job that runs once and exits. A plain
+`fork()` calling straight into existing, already-tested logic is the
+simplest correct fit, and keeps the reaping story simple too: the forked
+child is tracked in `accept_loop.c`'s own `bootstrapChildren` array,
+reaped through the exact same single wildcard reaper every other child in
+this process already goes through (see "The single wildcard reaper"
+above) -- without that tracking, an otherwise perfectly normal exit would
+be misreported as an "unknown subprocess" error.
+
+Retries are bounded, not indefinite: `backup_bootstrap.c`'s own
+`WS_BOOTSTRAP_BACKUP_MAX_ATTEMPTS` (3), a short fixed delay between
+attempts, all within that one forked child's own lifetime -- deliberately
+not the full `process_supervisor.h` `MaxR`/`MaxT` ring-buffer machinery
+`capture.c`'s own long-lived capturer services use (see "Restart backoff"
+above): that machinery is built for a service restarted many times over a
+process's whole lifetime, tracking restarts against a sliding time window,
+which is more than a single one-shot child that runs once needs. On final
+failure, a clear error is logged and the child exits; the route keeps
+serving whatever it already has (nothing about this ever brings the route,
+or `pg_walserver` itself, down), and it is retried again automatically the
+next time `serve` starts or reloads -- if the underlying problem (e.g. the
+upstream still being unreachable) hasn't cleared by then, the operator's
+own manual `pg_walserver basebackup` invocation is what closes the gap in
+the meantime.
+
+**Recurring backups are not this project's job.** This one-time bootstrap
+attempt, at either of its two trigger points, is the only "automatic" base
+backup behavior `pg_walserver` has or will have. Keeping a route's backup
+current after that first, automatic one -- on a schedule, after a certain
+amount of WAL, or on any other policy -- is deliberately left to the
+operator's own `pg_walserver basebackup` invocation (by hand, or from
+their own cron job around it): this project provides the facility, not the
+scheduling policy, the same philosophy `archive-cleanup` is expected to
+follow for WAL retention once that command exists.
 
 ## `create-cert`: a self-signed TLS certificate on demand
 
@@ -1104,17 +1198,18 @@ reconciler writing routes/HBA files, no monitor schema. So the tap spec
 builds the smallest possible harness instead, ahead of the archiver
 feature that will eventually make all of this automatic:
 
-- `pg_walserver setup --with-basebackup --no-capture` does most of the
-  work in one call: creates the route's own directory, writes the
-  `pg_walserver.ini` section (`path` + `upstream`), fetches node1's real
-  system identifier into `archiver-systemid`, and takes the route's first
-  base backup -- exactly the sequence `docs/ref/pg_walserver.rst`'s own
-  worked example now leads with. `--no-capture` opts out of the embedded
-  pull capturer, on by `setup`'s own default now (see "The embedded pull
-  capturer" below): this spec drives its own external, stock
-  `pg_receivewal` into this exact route directory a few lines below, and
-  the embedded capturer would otherwise fork a second process racing it
-  for the same segment files;
+- `pg_walserver setup --no-capture` does most of the work in one call:
+  creates the route's own directory, writes the `pg_walserver.ini` section
+  (`path` + `upstream`), and fetches node1's real system identifier into
+  `archiver-systemid` -- exactly the sequence `docs/ref/pg_walserver.rst`'s
+  own worked example now leads with. `pg_walserver serve`, started a few
+  steps later, takes the route's first base backup automatically at
+  startup (see "Bootstrapping a route's first base backup" above).
+  `--no-capture` opts out of the embedded pull capturer, on by `setup`'s
+  own default now (see "The embedded pull capturer" below): this spec
+  drives its own external, stock `pg_receivewal` into this exact route
+  directory a few lines below, and the embedded capturer would otherwise
+  fork a second process racing it for the same segment files;
 - a hand-crafted `archiver-hba.conf` (a single `host all all
   127.0.0.1/32 trust` rule, scoped to the loopback peer every step in this
   spec actually connects from -- authentication itself is exercised
@@ -1164,7 +1259,7 @@ seven steps:
    match always wins over the wildcard.
 7. `test_006_real_standby_with_core_tools` -- a real, unmodified
    `pg_basebackup` client takes a `BASE_BACKUP` from `pg_walserver` of the
-   exact backup `setup --with-basebackup` produced (proving
+   exact backup `serve` bootstrapped automatically at startup (proving
    `cmd_base_backup.c` actually serves it over the wire, not just that the
    file exists on disk, which `test_000` above only checks); a real standby
    -- `primary_conninfo` pointed at `pg_walserver`, `standby.signal`,

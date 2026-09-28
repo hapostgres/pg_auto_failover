@@ -194,9 +194,13 @@ setup {
     # the one-shot wizard: writes pg_walserver.ini's own [pitr] section
     # (path + upstream + "capture = pull", on by default with no --capture
     # flag at all), checks archiver_repl's REPLICATION attribute against
-    # the real primary, fetches its system identifier, and -- with
-    # --with-basebackup -- takes the very first base backup synchronously.
-    exec server bash -c 'PGPASSWORD=wspw pg_walserver setup --pgdata /tmp/ws --route pitr --path /tmp/ws/pitr --upstream "host=pg1 port=5432 user=archiver_repl sslmode=disable" --with-basebackup'
+    # the real primary, and fetches its system identifier. No "serve" is
+    # running yet, so setup only logs that this config will take effect
+    # the next time it starts, below -- that is what actually bootstraps
+    # this route's first base backup automatically, once its own embedded
+    # pull capturer (started at the same startup) shows real streaming
+    # evidence.
+    exec server bash -c 'PGPASSWORD=wspw pg_walserver setup --pgdata /tmp/ws --route pitr --path /tmp/ws/pitr --upstream "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
     exec server bash -c 'grep -qx "capture = pull" /tmp/ws/pg_walserver.ini || { echo "capture = pull should have been written by default"; cat /tmp/ws/pg_walserver.ini; false; }'
 
     # the "*" wildcard, mapped at the exact same path as "pitr" -- see this
@@ -209,6 +213,12 @@ setup {
     # the embedded pull capturer really is running, the whole time, in the
     # background -- pg_walserver_capture.pgaf's own process-title check.
     exec server bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: capture pitr$" > /dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; ps aux; exit 1'
+
+    # "serve" bootstraps this route's first base backup automatically at
+    # startup now (no more "setup --with-basebackup", see accept_loop.c's
+    # own ws_bootstrap_missing_backups()) -- test_003 below needs it
+    # already in place, so wait for it here.
+    exec server bash -c 'for i in $(seq 60); do test -s /tmp/ws/pitr/basebackups/.latest && exit 0; sleep 1; done; cat /tmp/ws-server.log; exit 1'
 }
 
 teardown {

@@ -77,8 +77,9 @@ setup {
     # section on its own -- exactly what the rest of this spec then proves
     # actually starts and runs a real embedded pg_receivewal child. Also
     # checks pgautofailover_replicator's REPLICATION attribute on node1 and
-    # fetches node1's real system identifier -- no --with-basebackup, this
-    # spec only needs the capturer, not BASE_BACKUP.
+    # fetches node1's real system identifier -- this spec only needs the
+    # capturer, not BASE_BACKUP, so it never relies on the base backup
+    # "serve" bootstraps automatically for this route in the background.
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
     exec node2 bash -c 'grep -qx "capture = pull" /tmp/ws/pg_walserver.ini || { echo "capture = pull should have been written by default, with no --capture flag at all"; cat /tmp/ws/pg_walserver.ini; false; }'
 

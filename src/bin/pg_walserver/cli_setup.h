@@ -53,17 +53,16 @@ typedef struct WsSetupOptions
 	                                     * pg_walserver.ini directly;
 	                                     * routes.c/routes.h are unchanged). */
 	bool force;
-	bool withBasebackup;
 } WsSetupOptions;
 
 /*
  * cli_setup_run runs the whole sequence documented in cli_setup.c's own
  * header comment: validate/write the pg_walserver.ini section, check the
- * role's REPLICATION attribute, fetch the system identifier, and -- only
- * with options->withBasebackup -- take the route's first base backup,
- * synchronously, returning only once it has actually succeeded (or
- * failed). Returns true on success, false with an error already logged
- * otherwise.
+ * role's REPLICATION attribute, and fetch the system identifier. It never
+ * takes a base backup itself: "pg_walserver serve" bootstraps the route's
+ * first base backup automatically, once, the next time it starts or
+ * reloads (see accept_loop.c's own ws_bootstrap_missing_backups()).
+ * Returns true on success, false with an error already logged otherwise.
  */
 bool cli_setup_run(const WsSetupOptions *options);
 

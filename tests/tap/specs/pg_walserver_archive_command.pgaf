@@ -81,8 +81,9 @@ setup {
     # the one-shot wizard: creates /tmp/wsarch/arch/0, writes the
     # pg_walserver.ini [arch/0] section (path + upstream), checks
     # pgautofailover_replicator's REPLICATION attribute on node1, and
-    # fetches node1's real system identifier into archiver-systemid. No
-    # --with-basebackup needed: this spec never serves BASE_BACKUP.
+    # fetches node1's real system identifier into archiver-systemid. This
+    # spec never serves BASE_BACKUP, so it never needs the base backup
+    # "serve" would otherwise bootstrap automatically for this route.
     # --no-capture: this spec pushes its own small, deterministic fake "WAL
     # segments" by hand (test_002/test_003 below) under real WAL-segment-
     # shaped names -- the embedded pull capturer, on by default now, would

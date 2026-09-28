@@ -25,7 +25,9 @@
 
 #include "accept_loop.h"
 #include "auth.h"
+#include "backup_bootstrap.h"
 #include "capture.h"
+#include "cli_basebackup.h"
 #include "defaults.h"
 #include "file_utils.h"
 #include "framing.h"
@@ -349,6 +351,115 @@ connection_child_exited(void *ctx, pid_t pid, int status)
 
 
 /*
+ * bootstrapChildren tracks every still-running ws_backup_bootstrap_start()
+ * child (backup_bootstrap.c) -- a third, independent kind of child this
+ * process forks, alongside the embedded pull capturers (capture.c's own
+ * captureSupervisor) and per-connection children (WsConnectionChildren
+ * above). Reaped through the exact same single wildcard reaper as both of
+ * those (see ws_capture_tick()'s own header comment on why there is only
+ * ever one waitpid(-1, ...) call site in this whole process): without
+ * tracking these pids here too, process_supervisor_tick() would hand them
+ * to process_supervisor_log_unknown_pid() as an "unknown subprocess",
+ * logged as an ERROR outside of PID 1 -- misleading for an expected,
+ * successfully-reaped child of our own.
+ */
+static pid_t bootstrapChildren[WS_MAX_CONNECTIONS];
+static int bootstrapChildCount = 0;
+
+
+/*
+ * bootstrap_child_exited is bootstrap_or_connection_child_exited()'s own
+ * half of the otherChildExited chain -- see bootstrapChildren's own comment
+ * just above.
+ */
+static bool
+bootstrap_child_exited(pid_t pid)
+{
+	for (int i = 0; i < bootstrapChildCount; i++)
+	{
+		if (bootstrapChildren[i] == pid)
+		{
+			bootstrapChildren[i] = bootstrapChildren[--bootstrapChildCount];
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
+/*
+ * bootstrap_or_connection_child_exited is the single otherChildExited
+ * callback ws_capture_tick() is actually given below: it chains connection_
+ * child_exited() (ctx: the WsConnectionChildren array) and bootstrap_child_
+ * exited() (its own file-scope array), so a pid recognized by either one is
+ * reaped quietly -- never handed further down to process_supervisor_tick()'s
+ * own "unknown subprocess" logging.
+ */
+static bool
+bootstrap_or_connection_child_exited(void *ctx, pid_t pid, int status)
+{
+	if (connection_child_exited(ctx, pid, status))
+	{
+		return true;
+	}
+
+	return bootstrap_child_exited(pid);
+}
+
+
+/*
+ * ws_bootstrap_missing_backups -- see accept_loop.h.
+ */
+void
+ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount)
+{
+	for (int i = 0; i < routeCount; i++)
+	{
+		const WsRoute *route = &routes[i];
+
+		if (route->path[0] == '\0' ||
+			cli_basebackup_route_has_backup(route->path))
+		{
+			continue;
+		}
+
+		if (route->upstream[0] == '\0')
+		{
+			log_warn("Route \"%s\" has no base backup yet, and no "
+					 "\"upstream\" property to take one from -- run "
+					 "\"pg_walserver basebackup\" by hand once it has one",
+					 route->key);
+			continue;
+		}
+
+		if (bootstrapChildCount >= WS_MAX_CONNECTIONS)
+		{
+			log_error("Too many pending automatic bootstrap base backups "
+					  "(max %d): not starting one for route \"%s\" this "
+					  "time -- it will be retried at the next start or "
+					  "reload", WS_MAX_CONNECTIONS, route->key);
+			continue;
+		}
+
+		pid_t pid = -1;
+
+		if (ws_backup_bootstrap_start(route, &pid))
+		{
+			bootstrapChildren[bootstrapChildCount++] = pid;
+			log_info("Route \"%s\" has no base backup yet: starting an "
+					 "automatic bootstrap base backup in the background "
+					 "(pid %d)", route->key, pid);
+		}
+		else
+		{
+			/* errors have already been logged */
+		}
+	}
+}
+
+
+/*
  * log_route_diff logs a summary of what changed between the previously
  * installed route set and a freshly, successfully reloaded one: routes
  * added, removed, or changed (path/upstream/hostname/capture), compared by
@@ -547,6 +658,20 @@ ws_reload_config(WsServerConfig *config)
 
 	log_info("Reload complete: now serving %d route%s",
 			 newRouteCount, newRouteCount == 1 ? "" : "s");
+
+	/*
+	 * Now that the reconciled capturer set above has had a chance to start
+	 * a real, supervised capturer for any newly-added "capture = pull"
+	 * route, check every currently-configured route for a missing base
+	 * backup and kick off an automatic bootstrap for it -- the second of
+	 * the two trigger points documented in accept_loop.h's own
+	 * ws_bootstrap_missing_backups() comment (the first being "serve"'s own
+	 * startup, cli_root.c's cli_serve_run()). This is exactly how "pg_
+	 * walserver setup" reloading an already-running "serve" (cli_setup.c)
+	 * ends up with a base backup with no manual "pg_walserver basebackup"
+	 * invocation needed at all.
+	 */
+	ws_bootstrap_missing_backups(config->routes, config->routeCount);
 }
 
 
@@ -606,7 +731,7 @@ ws_accept_loop(WsServerConfig *config)
 		 * header comment), and hands any pid it doesn't recognize to
 		 * connection_child_exited() above.
 		 */
-		ws_capture_tick(connection_child_exited, &connChildren);
+		ws_capture_tick(bootstrap_or_connection_child_exited, &connChildren);
 
 		/*
 		 * pqsignal() (signals.c, via postgres_fe.h) installs our handlers
@@ -664,7 +789,7 @@ ws_accept_loop(WsServerConfig *config)
 		}
 
 		/* children that exited meanwhile must not count against the cap */
-		ws_capture_tick(connection_child_exited, &connChildren);
+		ws_capture_tick(bootstrap_or_connection_child_exited, &connChildren);
 
 		if (childCount >= WS_MAX_CONNECTIONS)
 		{

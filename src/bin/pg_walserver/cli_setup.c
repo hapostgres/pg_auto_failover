@@ -37,12 +37,7 @@
  *        (pg_auto_failover's own bootstrap scopes it to replication-only
  *        connections), so the "extra" check failed even when the role was
  *        perfectly fine, on a false premise;
- *     4. with --with-basebackup, take the first base backup
- *        (cli_basebackup.c) -- synchronously: setup does not return until
- *        it has actually succeeded or failed, on the theory that "setup
- *        finished" should mean the route is genuinely ready to serve, not
- *        "a background job was started that might still be running";
- *     5. once every route in pg_walserver.ini is accounted for, if there is
+ *     4. once every route in pg_walserver.ini is accounted for, if there is
  *        now more than one: TLS becomes mandatory (a single-route server
  *        works with or without it, dbname alone is unambiguous; with
  *        several routes, dbname-based routing stops being reliable at all
@@ -55,7 +50,20 @@
  *        warns if --hostname was never given for a route now sharing the
  *        file with others -- that route can then only ever be reached by
  *        dbname (fine for pg_basebackup/pg_receivewal/archive_command,
- *        never for a real physical standby) or the "*" wildcard.
+ *        never for a real physical standby) or the "*" wildcard;
+ *     5. reload an already-running "pg_walserver serve" for this same
+ *        --pgdata, if one is running (its pid read from <pgdata>/pg_
+ *        walserver.pid, see cli_root.c's own cli_setup_command_run() --
+ *        the same read_pidfile()/SIGHUP shape "pg_walserver reload" itself
+ *        uses). setup never takes a base backup itself any more: a running
+ *        server picks up the new/changed route the moment it is
+ *        reloaded, and bootstraps a first base backup for it
+ *        automatically if it doesn't have one yet (accept_loop.c's own
+ *        ws_bootstrap_missing_backups(), see its header comment). With no
+ *        server running, the config is simply left in place to take effect
+ *        the next time "serve" starts -- not an error, a normal, expected
+ *        case (e.g. setting up a route before ever starting the server for
+ *        the first time).
  *
  * Licensed under the PostgreSQL License.
  *
@@ -68,8 +76,6 @@
 
 #include "pqexpbuffer.h"
 
-#include "capture.h"
-#include "cli_basebackup.h"
 #include "cli_create_cert.h"
 #include "cli_fetch_systemid.h"
 #include "cli_setup.h"
@@ -78,100 +84,14 @@
 #include "log.h"
 #include "routes.h"
 #include "string_utils.h"
-#include "wal_dir_scan.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
-
-/* how long to wait for a primed capturer to show any sign of life before
- * giving up on it -- see prime_capturer_before_basebackup()'s own comment */
-#define WS_SETUP_CAPTURE_PRIME_TIMEOUT_MS 30000
-#define WS_SETUP_CAPTURE_PRIME_POLL_MS 100
-
-
-/*
- * prime_capturer_before_basebackup starts a throwaway embedded pull
- * capturer for this route (capture.c's own ws_capture_prime_route()) and
- * waits for it to show real, on-disk evidence of having connected and
- * begun streaming (wal_dir_has_any_segment()) before returning -- see
- * capture.h's own ws_capture_prime_route() comment for the full "why" of
- * priming ahead of --with-basebackup at all. Returns true with *pidOut set
- * once primed (the caller must eventually call ws_capture_stop_primed() on
- * it); false, with *pidOut untouched and an error already logged, if the
- * capturer never starts or never shows any sign of life within this
- * function's own bounded timeout.
- */
-static bool
-prime_capturer_before_basebackup(const char *routeKey,
-								 const WsUpstreamTarget *target,
-								 pid_t *pidOut)
-{
-	char upstream[MAXCONNINFO] = { 0 };
-
-	sformat(upstream, sizeof(upstream), "host=%s port=%d user=%s",
-			target->node.host, target->node.port, target->userName);
-
-	if (target->sslOptions.sslModeStr[0] != '\0')
-	{
-		size_t len = strlen(upstream);
-
-		sformat(upstream + len, sizeof(upstream) - len, " sslmode=%s",
-				target->sslOptions.sslModeStr);
-	}
-
-	log_info("Priming the embedded pull capturer for route \"%s\" before "
-			 "taking its first base backup, so the backup's own start "
-			 "position is guaranteed to already be covered by WAL this "
-			 "route has actually captured", routeKey);
-
-	pid_t primerPid = -1;
-
-	if (!ws_capture_prime_route(routeKey, target->path, upstream, &primerPid))
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	WsRoute primeRoute = { 0 };
-
-	strlcpy(primeRoute.path, target->path, sizeof(primeRoute.path));
-
-	bool primed = false;
-	int elapsedMs = 0;
-
-	while (elapsedMs < WS_SETUP_CAPTURE_PRIME_TIMEOUT_MS)
-	{
-		if (wal_dir_has_any_segment(&primeRoute))
-		{
-			primed = true;
-			break;
-		}
-
-		pg_usleep(WS_SETUP_CAPTURE_PRIME_POLL_MS * 1000);
-		elapsedMs += WS_SETUP_CAPTURE_PRIME_POLL_MS;
-	}
-
-	if (!primed)
-	{
-		log_error("Timed out after %d ms waiting for the embedded pull "
-				  "capturer for route \"%s\" to start streaming any WAL "
-				  "at all -- refusing to take a base backup that could end "
-				  "up with an unreachable start position",
-				  WS_SETUP_CAPTURE_PRIME_TIMEOUT_MS, routeKey);
-		ws_capture_stop_primed(primerPid);
-		return false;
-	}
-
-	*pidOut = primerPid;
-
-	return true;
-}
 
 
 /*
  * write_route_section creates or validates the [routeKey] section of
  * pg_walserver.ini: a brand new key is appended; an existing one must
- * already have the same path (an operator re-running setup, or setup
- * --with-basebackup after an earlier setup without it, must be a safe
+ * already have the same path (an operator re-running setup must be a safe
  * no-op), or --force is required to change it -- the same "never silently
  * replace what's already there" principle as cli_fetch_systemid.c's own
  * systemid check.
@@ -370,15 +290,16 @@ ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
 
 
 /*
- * cli_setup_run runs the whole "pg_walserver setup" sequence documented in
- * this file's own header comment above: resolve path/upstream, write (or
+ * cli_setup_run runs the "pg_walserver setup" sequence documented in this
+ * file's own header comment above: resolve path/upstream, write (or
  * validate) the pg_walserver.ini route section, make sure TLS is in place
- * once the file now holds more than one route, fetch the system identifier
- * (also this step's own role-permission check), and, with
- * options->withBasebackup, take the route's first base backup
- * synchronously. Stops at the first failure, which has already been
- * logged; returns true only once every requested step has actually
- * succeeded.
+ * once the file now holds more than one route, and fetch the system
+ * identifier (also this step's own role-permission check). It never takes
+ * a base backup itself -- see cli_setup.h's own comment. Stops at the
+ * first failure, which has already been logged; returns true only once
+ * every requested step has actually succeeded. The caller (cli_root.c's
+ * cli_setup_command_run()) is responsible for reloading an already-running
+ * "serve", or logging that the config will take effect next start.
  */
 bool
 cli_setup_run(const WsSetupOptions *options)
@@ -449,67 +370,12 @@ cli_setup_run(const WsSetupOptions *options)
 		return false;
 	}
 
-	if (options->withBasebackup)
-	{
-		char label[NAMEDATALEN] = { 0 };
-		pid_t primerPid = -1;
-		bool havePrimer = false;
-
-		/*
-		 * See prime_capturer_before_basebackup()'s own comment: only a
-		 * "capture = pull" route needs this at all -- a push-only route's
-		 * archive-wal keeps unconditionally pushing every invocation
-		 * (cli_archive.c), so its own history has no equivalent gap to
-		 * close here.
-		 */
-		if (options->capturePull)
-		{
-			if (!prime_capturer_before_basebackup(options->route, &target,
-												  &primerPid))
-			{
-				/* errors have already been logged */
-				return false;
-			}
-
-			havePrimer = true;
-		}
-
-		log_info("Taking the route's first base backup (this may take a "
-				 "while; setup will not return until it completes)");
-
-		bool backupOk = cli_basebackup_run(&target, label, sizeof(label));
-
-		if (havePrimer)
-		{
-			/*
-			 * Stop the primer unconditionally, success or failure: it must
-			 * never still be running once "serve" starts its own
-			 * supervised capturer for this same route/path -- two
-			 * pg_receivewal processes writing the same directory at once
-			 * is not supported. "serve"'s own capturer resumes from
-			 * wherever this one leaves off (pg_receivewal's own directory-
-			 * scan-based resume), so nothing captured here is lost.
-			 */
-			ws_capture_stop_primed(primerPid);
-		}
-
-		if (!backupOk)
-		{
-			/* errors have already been logged */
-			return false;
-		}
-
-		log_info("setup complete: route \"%s\" is ready, base backup \"%s\"",
-				 options->route, label);
-	}
-	else
-	{
-		log_info("setup complete: route \"%s\" is ready (no base backup "
-				 "taken -- pass --with-basebackup, or run "
-				 "\"pg_walserver basebackup\" separately, before serving "
-				 "BASE_BACKUP requests for it)",
-				 options->route);
-	}
+	log_info("setup complete: route \"%s\" is ready (no base backup taken "
+			 "here -- \"pg_walserver serve\" bootstraps the route's first "
+			 "base backup automatically, once, the next time it starts or "
+			 "reloads this route; run \"pg_walserver basebackup\" by hand "
+			 "at any time to take another one)",
+			 options->route);
 
 	return true;
 }

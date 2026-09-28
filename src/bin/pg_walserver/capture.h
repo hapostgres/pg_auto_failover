@@ -86,49 +86,4 @@ void ws_capture_reload(const WsRoute *newRoutes, int newRouteCount);
  */
 void ws_capture_stop_all(void);
 
-/*
- * ws_capture_prime_route starts a single, unsupervised embedded pull
- * capturer for exactly one route (the same fork()+execv() into "internal
- * service pg-receivewal" ws_capture_start_all()'s own per-route children
- * use), handing back its pid in *pidOut. Unlike ws_capture_start_all(),
- * this pid is never registered with this process's own captureSupervisor:
- * the caller owns its whole lifecycle directly and must eventually call
- * ws_capture_stop_primed() on it. Safe to call from a process that never
- * calls ws_capture_start_all() at all (e.g. "pg_walserver setup", a
- * one-shot CLI invocation, never "serve").
- *
- * This exists to close a real historical-continuity gap: "pg_walserver
- * setup --with-basebackup" (cli_setup.c) takes its very first base backup
- * directly against the route's own upstream, before "serve" -- and
- * therefore this route's own real, supervised capturer -- has ever run for
- * it. A base backup taken with nothing yet capturing this route's WAL
- * reports a "start position" (its own backup_label) that this route's
- * walcache can never actually reach later: the first capturer "serve"
- * eventually starts for it begins from *its own* connection time, not
- * retroactively from the backup's already-past start LSN, and capture =
- * pull's archive-wal (cli_archive.c) never backstop-pushes to fill a gap
- * like that (a deliberate fix for a real two-writer race, not an oversight
- * to work around here). Priming a capturer first, and only taking the base
- * backup once it has genuinely started streaming (see wal_dir_scan.h's own
- * wal_dir_has_any_segment(), the readiness check cli_setup.c polls with),
- * guarantees the base backup's own start LSN -- always timestamped after
- * the primer already began -- falls inside WAL the primer is already
- * capturing: continuous history all the way back to that start LSN, with
- * no gap left for a later CHECK_FILE-only archive-wal invocation to have
- * silently needed a backstop push for.
- */
-bool ws_capture_prime_route(const char *routeKey, const char *path,
-							const char *upstream, pid_t *pidOut);
-
-/*
- * ws_capture_stop_primed cleanly stops (SIGINT, escalating to SIGKILL after
- * WS_CAPTURE_STOP_TIMEOUT_MS) and reaps the single capturer pid an earlier
- * ws_capture_prime_route() call started. A no-op for pid <= 0. Must be
- * called before the caller's own process exits, and before "serve" is
- * ever started for the same route/path -- two pg_receivewal processes
- * writing into the same directory at once is not a supported
- * configuration.
- */
-void ws_capture_stop_primed(pid_t pid);
-
 #endif /* WS_CAPTURE_H */
