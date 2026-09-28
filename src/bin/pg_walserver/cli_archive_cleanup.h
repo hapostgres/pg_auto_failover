@@ -109,10 +109,24 @@ bool ws_parse_retention_age(const char *str, WsRetentionAge *age);
  * error already logged, on a configuration problem (neither retention
  * flag given, an unreadable route directory, a ".latest" backup that
  * cannot be found or parsed) -- never partway through an unsafe removal.
+ *
+ * Before any deletion, a pre-flight WAL-continuity check (ws_check_wal_
+ * continuity(), cli_archive_cleanup.c) verifies every kept backup can
+ * still walk forward, with no missing segment, to wherever it needs to
+ * reach (accounting for legitimate timeline switches via "%08X.history"
+ * files). Always computed and logged, in both dry-run and a real run. On
+ * a real run, finding a problem refuses the *entire* operation (nothing
+ * deleted at all, not even otherwise-safe parts) unless force is true --
+ * force exists for an operator who has independently verified proceeding
+ * is safe (e.g. an independent backup, or an accepted/expected gap); a
+ * default, unattended cron job should never blindly pass it. dryRun never
+ * deletes anything regardless of force/continuity, but still returns
+ * false when a problem was found and force was not given, so its own
+ * exit status reflects what a real run would have refused to do.
  */
 bool ws_archive_cleanup_run(const char *routePath,
 							bool haveKeepCount, int keepCount,
 							bool haveKeepAge, WsRetentionAge keepAge,
-							bool dryRun);
+							bool dryRun, bool force);
 
 #endif /* WS_CLI_ARCHIVE_CLEANUP_H */
