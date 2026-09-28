@@ -2,7 +2,7 @@
  * src/bin/pg_walserver/cmd_identify_system.c
  *   See cmd_identify_system.h.
  *
- *   systemid is read straight from route->path's own "archiver-systemid"
+ *   systemid is read straight from route->path's own "pg_walserver_systemid"
  *   file, written once (never refreshed -- a system identifier is
  *   immutable for a cluster's lifetime) by pg_autoctl's archiver-capture
  *   loop the first time it learns the group's real primary has one (see
@@ -30,7 +30,7 @@
 
 
 /*
- * read_systemid reads route->path's own "archiver-systemid" file (see this
+ * read_systemid reads route->path's own "pg_walserver_systemid" file (see this
  * file's own header comment) into idOut, trimmed of its trailing newline.
  * Returns false (idOut untouched) when the file doesn't exist yet -- the
  * group's real primary hasn't been discovered to have one yet.
@@ -40,7 +40,7 @@ read_systemid(const char *path, char *idOut, size_t idOutSize)
 {
 	char sysidPath[MAXPGPATH] = { 0 };
 
-	sformat(sysidPath, sizeof(sysidPath), "%s/archiver-systemid", path);
+	sformat(sysidPath, sizeof(sysidPath), "%s/pg_walserver_systemid", path);
 
 	char *contents = NULL;
 	long fileSize = 0;

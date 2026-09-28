@@ -130,7 +130,7 @@ scram_build_verifier(const char *password, int iterations,
 
 
 /*
- * scram_parse_verifier parses one archiver-passwd secret field, the format
+ * scram_parse_verifier parses one pg_walserver_passwd secret field, the format
  * scram_build_verifier() produces: "SCRAM-SHA-256$<iterations>:<salt>$
  * <StoredKey>:<ServerKey>" with salt/StoredKey/ServerKey base64-encoded.
  * Fills *verifier and returns true on success; returns false, *verifier

@@ -67,7 +67,7 @@ setup {
     # registered secondary and that is irrelevant here. Same loopback-only
     # HBA rule as pg_walserver_standalone.pgaf's own setup{} -- there is no
     # monitor here to learn a real client's address from, and none needed.
-    exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/archiver-hba.conf'
+    exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
     # the wizard, with NO --capture flag at all this time: the embedded
     # pull capturer is on by default now (an operator has to pass
@@ -80,7 +80,7 @@ setup {
     # fetches node1's real system identifier -- this spec only needs the
     # capturer, not BASE_BACKUP, so it never relies on the base backup
     # "serve" bootstraps automatically for this route in the background.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --route default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver setup --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
     exec node2 bash -c 'grep -qx "capture = pull" /tmp/ws/pg_walserver.ini || { echo "capture = pull should have been written by default, with no --capture flag at all"; cat /tmp/ws/pg_walserver.ini; false; }'
 
     # the independent "reference" capture: a real, unmodified, externally

@@ -401,7 +401,7 @@ monitor_line:
  *     test steps) overrides this default the same way any node already
  *     can, with an explicit trailing "command "..."" -- no second
  *     override mechanism invented for this. This default command also
- *     comes with a real, usable default archiver-hba.conf already in
+ *     comes with a real, usable default pg_walserver_hba.conf already in
  *     place (compose_gen.c's write_pg_walserver_default_hba(), admitting
  *     every node on this test's own compose subnet), so a bare
  *     "pg_walserver <name>" with no further overrides is immediately
@@ -442,7 +442,7 @@ pg_walserver_line:
 		 * to plain `postgres <name>` sugar or an ordinary formation node) --
 		 * compose_gen.c's write_pg_walserver_default_hba() uses this to
 		 * decide whether to bind-mount a generated, usable default
-		 * archiver-hba.conf into this node's container before its own
+		 * pg_walserver_hba.conf into this node's container before its own
 		 * command (below, or a "command \"...\"" override) ever runs. See
 		 * that function's own header comment for the full design.
 		 */
@@ -456,9 +456,9 @@ pg_walserver_line:
 		 * cli_serve_run in pg_walserver/cli_root.c); a spec that wants
 		 * routes configured first overrides this via "command \"...\"".
 		 *
-		 * Also copies in a real, usable default archiver-hba.conf --
+		 * Also copies in a real, usable default pg_walserver_hba.conf --
 		 * compose_gen.c's write_pg_walserver_default_hba() bind-mounts it
-		 * read-only at /etc/pgaf/<name>-archiver-hba.conf; this cp (after
+		 * read-only at /etc/pgaf/<name>-pg_walserver_hba.conf; this cp (after
 		 * "mkdir -p" has created /var/lib/postgres/ws as this container's
 		 * own user, not Docker's auto-created root:root parent directory a
 		 * direct bind-mount into it would leave behind) is what actually
@@ -471,8 +471,8 @@ pg_walserver_line:
 		 */
 		strlcpy(current_node->commandOverride,
 		        "mkdir -p /var/lib/postgres/ws && "
-		        "(cp /etc/pgaf/$(hostname)-archiver-hba.conf "
-		        "/var/lib/postgres/ws/archiver-hba.conf || true) && "
+		        "(cp /etc/pgaf/$(hostname)-pg_walserver_hba.conf "
+		        "/var/lib/postgres/ws/pg_walserver_hba.conf || true) && "
 		        "exec pg_walserver --pgdata /var/lib/postgres/ws --port 5432",
 		        sizeof(current_node->commandOverride));
 	}

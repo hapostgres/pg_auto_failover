@@ -3,7 +3,7 @@
  *   `pg_walserver archive-wal <path-to-file> <filename>`: meant to be run
  *   as (part of) a Postgres archive_command, e.g.:
  *
- *     archive_command = 'pg_walserver archive-wal %p %f --route mycluster \
+ *     archive_command = 'pg_walserver archive-wal %p %f --cluster mycluster \
  *                         --host archive.example.com --user archiver_repl'
  *
  *   Named "archive-wal", not the bare "archive", because `pg_walserver`
@@ -56,7 +56,7 @@
  *   connection issuing CHECK_FILE/ARCHIVE_FILE as simple queries, exactly
  *   like src/bin/common/fetch_client.c's own FETCH_FILE client, with no
  *   ReplicationSource/pgctl.c involved at all. WsArchiveTarget below
- *   mirrors cli_upstream.h's own flag *names* (--route/--host/--port/
+ *   mirrors cli_upstream.h's own flag *names* (--cluster/--host/--port/
  *   --user) for consistency, but is resolved directly in cli_archive.c
  *   rather than through cli_resolve_upstream(). `cli_restore_wal.c`'s own
  *   `restore-wal` follows the exact same reasoning/shape for the read side.

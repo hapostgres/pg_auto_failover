@@ -187,7 +187,7 @@ cli_resolve_upstream(const char *pgdata, const char *routeKey,
 
 	if (target->path[0] == '\0')
 	{
-		log_error("No route path: pass --path, or --route with --pgdata "
+		log_error("No route path: pass --path, or --cluster with --pgdata "
 				  "pointing at a \"pg_walserver.ini\" that has one");
 		return false;
 	}
@@ -195,7 +195,7 @@ cli_resolve_upstream(const char *pgdata, const char *routeKey,
 	if (!haveUpstream || target->node.host[0] == '\0')
 	{
 		log_error("No upstream to connect to: pass --host (with --port/"
-				  "--user), or --upstream, or --route with --pgdata "
+				  "--user), or --upstream, or --cluster with --pgdata "
 				  "pointing at a \"pg_walserver.ini\" whose route has an "
 				  "\"upstream\" property");
 		return false;

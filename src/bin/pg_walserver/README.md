@@ -52,8 +52,8 @@ All of that lands in a later, separate PR (informally "the archiving PR"
 throughout this codebase's comments). This PR is the standalone piece:
 `pg_walserver` builds, runs, authenticates connections and serves the wire
 protocol entirely on its own, driven by a handful of files it reads
-directly off disk (`pg_walserver.ini`, `archiver-hba.conf`,
-`archiver-passwd`, and per-route bookkeeping files -- see below). Several of
+directly off disk (`pg_walserver.ini`, `pg_walserver_hba.conf`,
+`pg_walserver_passwd`, and per-route bookkeeping files -- see below). Several of
 its own sub-commands (`setup`, `fetch-systemid`, `basebackup`, `archive-wal`,
 `restore-wal`, `create-cert`; see "New client-side sub-commands" below) can
 now create and keep those files current, and push/pull WAL, directly from
@@ -78,7 +78,7 @@ this PR has no monitor extension at all -- so the feature was removed
 wholesale rather than kept as a half-wired dead end. It will be
 reintroduced, properly, once the archiving PR's monitor schema exists for
 it to query. Until then, every host allowed to connect needs an explicit
-line in `archiver-hba.conf`.
+line in `pg_walserver_hba.conf`.
 
 ## Process model
 
@@ -117,7 +117,7 @@ from-the-wire-format reimplementation, not a linking exercise. See
 The commands a connected client can issue on a `Query` ('Q') message are:
 
 - `IDENTIFY_SYSTEM` (`cmd_identify_system.c`) -- reports the route's system
-  identifier (read from a small `archiver-systemid` file under the route's
+  identifier (read from a small `pg_walserver_systemid` file under the route's
   directory), current timeline and `xlogpos`, and `dbname` (`NULL` unless
   the client's startup packet used `replication=database`, matching real
   `pg_receivewal`'s expectations exactly, see `walsender.h`).
@@ -343,7 +343,7 @@ project, so building never requires `bison`/`flex` to be installed.
 
 ## HBA (hba.c / hba.h)
 
-`archiver-hba.conf` is a deliberately small subset of `pg_hba.conf`: one
+`pg_walserver_hba.conf` is a deliberately small subset of `pg_hba.conf`: one
 rule per line, `TYPE ROUTE USER ADDRESS METHOD`, first match wins, and
 *anything* that isn't a clean match -- no match, a missing/oversize/
 unreadable file, or a single malformed line anywhere in the file -- fails
@@ -426,7 +426,7 @@ Two methods, chosen by the first matching HBA rule's `METHOD` field:
   sequence real libpq expects, including offering `SCRAM-SHA-256-PLUS`
   (`tls-server-end-point` channel binding, RFC 5929) first when the
   connection is encrypted. Verifiers are stored one per line in
-  `archiver-passwd` (`<user>:SCRAM-SHA-256$<iter>:<salt>$<stored>:<server>`),
+  `pg_walserver_passwd` (`<user>:SCRAM-SHA-256$<iter>:<salt>$<stored>:<server>`),
   produced by `pg_walserver scram-secret` (password read from
   `PGPASSWORD`, never the command line). A user with no stored verifier
   still runs the *entire* exchange against a mock verifier
@@ -483,7 +483,7 @@ are deliberately **not** stored in the routes file. Every command that
 needs one of those instead reads it fresh, straight off a small
 purpose-built file directly under that same path, at connection time --
 for instance `cmd_base_backup.c`'s own `basebackups/.latest` and
-`cmd_identify_system.c`'s own `archiver-systemid`. `pg_walserver` itself
+`cmd_identify_system.c`'s own `pg_walserver_systemid`. `pg_walserver` itself
 never talks to the monitor (see the "monitor" HBA removal above); this
 per-route-directory split is what lets it stay that way while still always
 answering with whatever is current.
@@ -515,7 +515,7 @@ unknown in advance, and changing over the life of the server.
 A route key is never parsed, split on `/`, or given any filesystem meaning
 of its own anywhere in this codebase -- it is matched by a plain string
 `==` against `dbname` (`routes_find()`) and, independently, against
-`archiver-hba.conf`'s own `ROUTE` field (`hba_match()`), and nowhere else.
+`pg_walserver_hba.conf`'s own `ROUTE` field (`hba_match()`), and nowhere else.
 pg_auto_failover's own convention, `"<formation>/<group>"` (e.g.
 `default/0`), *looks* like a path, but it is not one, and never becomes
 one: the only thing that ever determines an actual directory on disk is
@@ -572,7 +572,7 @@ deployment can skip per-route sections entirely, keep just one `[*]`
 section in `pg_walserver.ini`, and never has to learn or type a special `dbname`
 value at all.
 
-`archiver-hba.conf`'s own `ROUTE` matching is completely independent of
+`pg_walserver_hba.conf`'s own `ROUTE` matching is completely independent of
 this: an HBA rule's `ROUTE` field is always compared against the literal
 `dbname` the client sent, never against whichever `WsRoute` `routes_find()`
 happened to resolve it to. A `hostssl all ...` rule already admits any
@@ -615,7 +615,7 @@ exchanged -- `libpq`'s `sslsni` (on by default) sends the connection's
   `dbname` match first (unchanged, and always tried first: a hand-written
   `dbname=<route key>` connection keeps working exactly as before, with or
   without TLS), then, only for a TLS connection, the SNI hostname, then the
-  `"*"` wildcard. `archiver-hba.conf`'s own `ROUTE` matching stays exactly
+  `"*"` wildcard. `pg_walserver_hba.conf`'s own `ROUTE` matching stays exactly
   as described above -- always against the literal `dbname`, never against
   whichever route SNI resolved to.
 - More than one *named* route (i.e. more than one section besides `"*"`)
@@ -651,14 +651,14 @@ for every deployment this PR's own test suites exercise.
 ## New client-side sub-commands (setup / fetch-systemid / basebackup)
 
 Three sub-commands, alongside `serve`/`scram-secret`, all sharing
-`cli_upstream.c`'s own `--route`/`--path`/`--upstream`/`--host`/`--port`/
+`cli_upstream.c`'s own `--cluster`/`--path`/`--upstream`/`--host`/`--port`/
 `--user` resolution (an explicit flag always wins over a route's own
 `pg_walserver.ini` properties):
 
 - **`fetch-systemid`** (`cli_fetch_systemid.c`) -- connects to the
   upstream via `pgctl_identify_system()` (`src/bin/common/pgctl.c`, a real
   replication-mode `IDENTIFY_SYSTEM`, reused unchanged) and writes
-  `archiver-systemid` atomically. Refuses to overwrite an already-recorded
+  `pg_walserver_systemid` atomically. Refuses to overwrite an already-recorded
   *different* identifier unless `--force`: the same "never silently
   replace what's already there" principle PostgreSQL's own
   `archive_command` overwrite-safety rule applies elsewhere, here applied
@@ -674,7 +674,7 @@ Three sub-commands, alongside `serve`/`scram-secret`, all sharing
   is a defense against a partial result, not a re-parse of it), and only
   then atomically swaps `basebackups/.latest`.
 - **`setup`** (`cli_setup.c`) -- the wizard: writes/validates the
-  `pg_walserver.ini` section for `--route` (refusing to silently change an
+  `pg_walserver.ini` section for `--cluster` (refusing to silently change an
   existing one's path unless `--force`), optionally records a `--hostname`
   for SNI-based routing (see above -- and auto-creates a self-signed
   certificate the moment a *second* named route needs one to stay
@@ -707,7 +707,7 @@ Three sub-commands, alongside `serve`/`scram-secret`, all sharing
   setting a route up before `serve` has ever been started for this
   `--pgdata`).
 
-None of the three touch `archiver-hba.conf` or `archiver-passwd` -- a
+None of the three touch `pg_walserver_hba.conf` or `pg_walserver_passwd` -- a
 deliberately separate concern an operator (or `pg_autoctl`, later) still
 configures on its own, see `docs/ref/pg_walserver.rst`'s own worked
 example for the full sequence including those.
@@ -854,7 +854,7 @@ delivering the segment entirely to the capturer. A route with no
 `capture = pull` has no such writer to race, so `archive-wal` pushes via
 `ARCHIVE_FILE` only, ever, with no `CHECK_FILE` round trip first.
 
-`pg_walserver archive-wal <path-to-file> <filename> --route <key> --host
+`pg_walserver archive-wal <path-to-file> <filename> --cluster <name> --host
 <host> [--port <port>] [--user <name>] [--sslmode <mode>]`
 (`cli_archive.c`) picks between these two disjoint behaviors automatically,
 every invocation, from the connected route's own actual `capture` setting
@@ -900,13 +900,13 @@ connection issuing `CHECK_FILE`/`ARCHIVE_FILE` as simple queries, exactly
 like `src/bin/common/fetch_client.c`'s own `FETCH_FILE` client, with no
 `ReplicationSource`/`pgctl.c` involved at all. `cli_archive.h`'s own
 `WsArchiveTarget` mirrors `cli_upstream.h`'s flag *names*
-(`--route`/`--host`/`--port`/`--user`) for consistency, but is resolved
+(`--cluster`/`--host`/`--port`/`--user`) for consistency, but is resolved
 directly in `cli_archive.c` rather than through `cli_resolve_upstream()`.
 
 ### The restore side: `pg_walserver restore-wal`
 
 The read-side counterpart, `pg_walserver restore-wal <filename>
-<destination-path> --route <key> --host <host> [--port <port>] [--user
+<destination-path> --cluster <name> --host <host> [--port <port>] [--user
 <name>] [--sslmode <mode>]` (`cli_restore_wal.c`), is meant to be used
 directly as (part of) a Postgres `restore_command`. Both `archive-wal` and
 `restore-wal` are named with an explicit "-wal" suffix, not the bare
@@ -933,7 +933,7 @@ from any other failure (see `cli_restore_wal.h`'s own header comment).
 and for the exact same reason (see "Deliberately does **not** reuse
 `cli_upstream.c`'s `cli_resolve_upstream()`" just above) -- it therefore
 does not reuse `cli_upstream.c` either, and `cli_restore_wal.h`'s own
-`WsRestoreTarget` mirrors the same `--route`/`--host`/`--port`/`--user`/
+`WsRestoreTarget` mirrors the same `--cluster`/`--host`/`--port`/`--user`/
 `--sslmode` flag names for consistency.
 
 ## The embedded pull capturer (capture.c)
@@ -1077,7 +1077,7 @@ and could in principle reuse the pid of a just-exited process, in which
 case an unhandled `SIGHUP` would terminate it before it ever sends
 anything.
 
-`pg_walserver.ini` and `archiver-hba.conf` are parsed once, at `serve`
+`pg_walserver.ini` and `pg_walserver_hba.conf` are parsed once, at `serve`
 startup, into an in-memory `WsServerConfig.routes`/`WsAuthConfig.
 hbaRuleSet` (`accept_loop.h`) -- every connection reads that same snapshot,
 none of them re-parses either file off disk itself. `SIGHUP` (`ws_accept_
@@ -1095,7 +1095,7 @@ What is live-reloadable this way:
 - **routes** (`pg_walserver.ini`): added, removed, and changed routes
   (`path`/`upstream`/`hostname`/`capture`) are logged by key, one line per
   change, plus a one-line summary;
-- **the HBA ruleset** (`archiver-hba.conf`): logged as a rule-count-plus-
+- **the HBA ruleset** (`pg_walserver_hba.conf`): logged as a rule-count-plus-
   content comparison (a full rule-by-rule diff was judged not worth the
   extra complexity) -- "unchanged (N rules)" or "changed (N rules before,
   M after)";
@@ -1118,7 +1118,7 @@ safely (in the middle of connections that may already be mid-handshake)
 was judged a bigger, riskier lift than the rest of this feature justifies.
 A rotated `server.crt`/`server.key` needs a real restart of `pg_walserver`
 for now -- a one-line note to this effect is logged the first time `SIGHUP`
-is ever handled. `archiver-passwd` (SCRAM verifiers) is unaffected by any
+is ever handled. `pg_walserver_passwd` (SCRAM verifiers) is unaffected by any
 of this either way: it was already read fresh on every authentication
 attempt, before this feature existed, and still is.
 
@@ -1201,16 +1201,17 @@ feature that will eventually make all of this automatic:
 - `pg_walserver setup --no-capture` does most of the work in one call:
   creates the route's own directory, writes the `pg_walserver.ini` section
   (`path` + `upstream`), and fetches node1's real system identifier into
-  `archiver-systemid` -- exactly the sequence `docs/ref/pg_walserver.rst`'s
-  own worked example now leads with. `pg_walserver serve`, started a few
-  steps later, takes the route's first base backup automatically at
-  startup (see "Bootstrapping a route's first base backup" above).
-  `--no-capture` opts out of the embedded pull capturer, on by `setup`'s
-  own default now (see "The embedded pull capturer" below): this spec
-  drives its own external, stock `pg_receivewal` into this exact route
-  directory a few lines below, and the embedded capturer would otherwise
-  fork a second process racing it for the same segment files;
-- a hand-crafted `archiver-hba.conf` (a single `host all all
+  `pg_walserver_systemid` -- exactly the sequence
+  `docs/ref/pg_walserver.rst`'s own worked example now leads with.
+  `pg_walserver serve`, started a few steps later, takes the route's first
+  base backup automatically at startup (see "Bootstrapping a route's
+  first base backup" above). `--no-capture` opts out of the embedded pull
+  capturer, on by `setup`'s own default now (see "The embedded pull
+  capturer" below): this spec drives its own external, stock
+  `pg_receivewal` into this exact route directory a few lines below, and
+  the embedded capturer would otherwise fork a second process racing it
+  for the same segment files;
+- a hand-crafted `pg_walserver_hba.conf` (a single `host all all
   127.0.0.1/32 trust` rule, scoped to the loopback peer every step in this
   spec actually connects from -- authentication itself is exercised
   elsewhere at the unit level, this spec exercises the wire protocol;
@@ -1427,7 +1428,7 @@ described in "Config reload" above. Five steps: the pidfile
 editing `pg_walserver.ini` to add a `"*"` wildcard route and running
 `pg_walserver reload` makes that route immediately reachable, with no
 server restart, while the original route keeps working too (`test_002`);
-corrupting `archiver-hba.conf` with a malformed line makes `reload` log a
+corrupting `pg_walserver_hba.conf` with a malformed line makes `reload` log a
 clear parse error while the server keeps serving its prior, still-valid
 HBA ruleset -- a request against the route that already worked before the
 bad edit still succeeds (`test_003`); `pg_walserver reload` against a

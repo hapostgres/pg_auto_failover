@@ -18,11 +18,11 @@
 #include "pgctl.h"
 #include "string_utils.h"
 
-#define WS_SYSTEMID_FILENAME "archiver-systemid"
+#define WS_SYSTEMID_FILENAME "pg_walserver_systemid"
 
 
 /*
- * read_existing_systemid reads "<path>/archiver-systemid" if it exists,
+ * read_existing_systemid reads "<path>/pg_walserver_systemid" if it exists,
  * returning the parsed identifier in *out. Returns false when the file is
  * absent or unparseable (treated as "no prior identifier", never a hard
  * error: a brand new route has no systemid file yet).

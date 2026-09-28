@@ -31,10 +31,10 @@
 #      configure a route before "serve" ever starts. This means the DSL
 #      sugar's own *default* command (compose_gen.c's write_pg_walserver_
 #      default_hba()/pg_walserver_line's own commandOverride, the auto-
-#      generated archiver-hba.conf included) is never actually exercised by
+#      generated pg_walserver_hba.conf included) is never actually exercised by
 #      this spec either -- no existing spec's own use of the pg_walserver
 #      DSL kind can be, while also needing setup-before-serve. "server"
-#      writes its own archiver-hba.conf by hand instead (the same "trust
+#      writes its own pg_walserver_hba.conf by hand instead (the same "trust
 #      every peer on this test's own network" precedent every other
 #      pg_walserver_*.pgaf spec already uses), matching the DSL's
 #      isPgWalserver marking used purely to identify the node kind here.
@@ -178,18 +178,18 @@ setup {
     # by default (PostgreSQL 10+, see docs/ref/pg_walserver.rst), set here
     # explicitly anyway for clarity; synchronous_standby_names is cleared
     # defensively even though nothing in this no-monitor spec ever sets it.
-    exec pg1 bash -c 'printf "%b\n" "wal_level = replica" "archive_mode = on" "archive_command = \x27pg_walserver archive-wal %p %f --route pitr --host server --port 6543 --user archiver_repl --sslmode disable\x27" "synchronous_standby_names = \x27\x27" >> /var/lib/postgres/pgaf/postgresql.conf'
+    exec pg1 bash -c 'printf "%b\n" "wal_level = replica" "archive_mode = on" "archive_command = \x27pg_walserver archive-wal %p %f --cluster pitr --host server --port 6543 --user archiver_repl --sslmode disable\x27" "synchronous_standby_names = \x27\x27" >> /var/lib/postgres/pgaf/postgresql.conf'
     stop postgres pg1
     start postgres pg1
     exec pg1 bash -c 'for i in $(seq 30); do out=$(psql -Atc "show archive_mode" 2>/dev/null); test "$out" = "on" && exit 0; sleep 1; done; exit 1'
 
-    # "server": its own archiver-hba.conf, hand-written (see this file's own
+    # "server": its own pg_walserver_hba.conf, hand-written (see this file's own
     # header comment on why the DSL sugar's own auto-generated default,
     # compose_gen.c's write_pg_walserver_default_hba(), is never reached
     # here) -- every peer on this test's own network, no authentication,
     # the same "test infrastructure, trust is fine" precedent every
     # existing pg_walserver_*.pgaf spec already uses.
-    exec server bash -c 'mkdir -p /tmp/ws && printf "host all all 0.0.0.0/0 trust\n" > /tmp/ws/archiver-hba.conf'
+    exec server bash -c 'mkdir -p /tmp/ws && printf "host all all 0.0.0.0/0 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
     # the one-shot wizard: writes pg_walserver.ini's own [pitr] section
     # (path + upstream + "capture = pull", on by default with no --capture
@@ -200,7 +200,7 @@ setup {
     # this route's first base backup automatically, once its own embedded
     # pull capturer (started at the same startup) shows real streaming
     # evidence.
-    exec server bash -c 'PGPASSWORD=wspw pg_walserver setup --pgdata /tmp/ws --route pitr --path /tmp/ws/pitr --upstream "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
+    exec server bash -c 'PGPASSWORD=wspw pg_walserver setup --pgdata /tmp/ws --cluster pitr --path /tmp/ws/pitr --upstream "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
     exec server bash -c 'grep -qx "capture = pull" /tmp/ws/pg_walserver.ini || { echo "capture = pull should have been written by default"; cat /tmp/ws/pg_walserver.ini; false; }'
 
     # the "*" wildcard, mapped at the exact same path as "pitr" -- see this
@@ -265,7 +265,7 @@ step test_003_pitr_recovers_to_named_restore_point {
     # archive_mode is PGC_POSTMASTER, so turning it off here (before this
     # node's own first start from the base backup) is enough; no reload
     # needed.
-    exec pitr bash -c 'mkdir -p /tmp/pitr-sock && printf "%b\n" "port = 5433" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/pitr-sock\x27" "archive_mode = off" "restore_command = \x27pg_walserver restore-wal %f %p --route pitr --host server --port 6543 --user archiver_repl --sslmode disable\x27" "recovery_target_name = \x27pitr_target\x27" "recovery_target_action = \x27promote\x27" >> /tmp/pitr-data/postgresql.auto.conf && touch /tmp/pitr-data/recovery.signal && (pg_ctl -D /tmp/pitr-data -w -l /tmp/pitr.log start || (cat /tmp/pitr.log; false))'
+    exec pitr bash -c 'mkdir -p /tmp/pitr-sock && printf "%b\n" "port = 5433" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/pitr-sock\x27" "archive_mode = off" "restore_command = \x27pg_walserver restore-wal %f %p --cluster pitr --host server --port 6543 --user archiver_repl --sslmode disable\x27" "recovery_target_name = \x27pitr_target\x27" "recovery_target_action = \x27promote\x27" >> /tmp/pitr-data/postgresql.auto.conf && touch /tmp/pitr-data/recovery.signal && (pg_ctl -D /tmp/pitr-data -w -l /tmp/pitr.log start || (cat /tmp/pitr.log; false))'
 
     # recovery_target_action = promote: once the named restore point is
     # reached, this instance promotes on its own -- no separate manual
@@ -303,7 +303,7 @@ step test_004_secondary_via_pg_walserver_basebackup {
     # also a byte-for-byte copy of pg1's data directory): archive_mode is
     # turned off defensively, even though "sec" itself is never promoted
     # in this spec, so nothing here can ever repeat "pitr"'s own mistake.
-    exec sec bash -c 'mkdir -p /tmp/secondary-sock && printf "%b\n" "port = 5434" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/secondary-sock\x27" "hot_standby = on" "archive_mode = off" "restore_command = \x27pg_walserver restore-wal %f %p --route pitr --host server --port 6543 --user archiver_repl --sslmode disable\x27" "primary_conninfo = \x27host=server port=6543 user=archiver_repl password=wspw dbname=pitr sslmode=disable\x27" >> /tmp/secondary-data/postgresql.auto.conf && touch /tmp/secondary-data/standby.signal && (pg_ctl -D /tmp/secondary-data -w -l /tmp/secondary.log start || (cat /tmp/secondary.log; false))'
+    exec sec bash -c 'mkdir -p /tmp/secondary-sock && printf "%b\n" "port = 5434" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/secondary-sock\x27" "hot_standby = on" "archive_mode = off" "restore_command = \x27pg_walserver restore-wal %f %p --cluster pitr --host server --port 6543 --user archiver_repl --sslmode disable\x27" "primary_conninfo = \x27host=server port=6543 user=archiver_repl password=wspw dbname=pitr sslmode=disable\x27" >> /tmp/secondary-data/postgresql.auto.conf && touch /tmp/secondary-data/standby.signal && (pg_ctl -D /tmp/secondary-data -w -l /tmp/secondary.log start || (cat /tmp/secondary.log; false))'
 
     exec sec bash -c 'psql -h /tmp/secondary-sock -p 5434 -d demo -Atc "SELECT pg_is_in_recovery()" | grep -qx t'
 

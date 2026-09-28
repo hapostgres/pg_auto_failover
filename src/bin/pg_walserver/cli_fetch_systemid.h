@@ -2,7 +2,7 @@
  * src/bin/pg_walserver/cli_fetch_systemid.h
  *   `pg_walserver fetch-systemid`: a one-shot client that connects to a
  *   route's upstream and writes its real Postgres system identifier into
- *   that route's own "archiver-systemid" file -- the file cmd_identify_
+ *   that route's own "pg_walserver_systemid" file -- the file cmd_identify_
  *   system.c's server side reads back on every IDENTIFY_SYSTEM.
  *
  * Licensed under the PostgreSQL License.
@@ -20,7 +20,7 @@
 /*
  * cli_fetch_systemid_run connects to target's upstream (a plain
  * replication-mode IDENTIFY_SYSTEM, via pgctl_identify_system()) and writes
- * its system identifier into "<target->path>/archiver-systemid", atomically
+ * its system identifier into "<target->path>/pg_walserver_systemid", atomically
  * (write_file_atomic()). If that file already exists with a *different*
  * identifier, refuses rather than overwriting -- the same "never silently
  * replace what's already there" principle as PostgreSQL's own archive_

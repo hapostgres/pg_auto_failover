@@ -5,9 +5,9 @@
  *   The sequence, in order, stopping at the first failure:
  *
  *     1. resolve path/upstream (cli_upstream.c: --path/--upstream/--host/
- *        --port/--user, or --route looked up in <pgdata>/pg_walserver.ini
+ *        --port/--user, or --cluster looked up in <pgdata>/pg_walserver.ini
  *        when it already has a matching section);
- *     2. write (or validate) the pg_walserver.ini section for --route,
+ *     2. write (or validate) the pg_walserver.ini section for --cluster,
  *        refusing a route key that already exists with a *different*
  *        path/upstream unless --force -- the same overwrite-safety
  *        principle as cli_fetch_systemid.c's own systemid check, applied
@@ -306,7 +306,7 @@ cli_setup_run(const WsSetupOptions *options)
 {
 	if (options->route[0] == '\0' || options->path[0] == '\0')
 	{
-		log_error("setup requires --route and --path");
+		log_error("setup requires --cluster and --path");
 		return false;
 	}
 

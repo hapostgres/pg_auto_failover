@@ -26,7 +26,7 @@
 
 /*
  * ws_route_wal_segment_size: the WAL segment size of the route's cluster,
- * in bytes, read from "<route path>/archiver-walsegsize" (decimal bytes,
+ * in bytes, read from "<route path>/pg_walserver_walsegsize" (decimal bytes,
  * written by the archiver's pg_receivewal child). The file may be absent:
  * the default, 16777216, applies (as it does for a file that is not a
  * power of two between 1 MiB and 1 GiB, which is logged). Every segment

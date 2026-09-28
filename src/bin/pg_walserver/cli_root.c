@@ -16,7 +16,7 @@
  *                     this file existed -- the framework itself has no
  *                     notion of a default sub-command, only this project's
  *                     own thin shim provides one.
- *     scram-secret    Print one archiver-passwd line for a user.
+ *     scram-secret    Print one pg_walserver_passwd line for a user.
  *     setup           Create or validate one pg_walserver.ini route --
  *                     the write/path/upstream/role-check/systemid wizard,
  *                     cli_setup.c, then reloads an already-running "serve"
@@ -45,13 +45,13 @@
  *                     to be used as (part of) a Postgres restore_command.
  *     reload          Send SIGHUP to a running "serve" instance (its pid
  *                     read from <pgdata>/pg_walserver.pid) to re-read
- *                     pg_walserver.ini/archiver-hba.conf and reconcile the
+ *                     pg_walserver.ini/pg_walserver_hba.conf and reconcile the
  *                     embedded pull capturer set -- see accept_loop.c's
  *                     own ws_reload_config()/ws_capture_reload().
  *
  *   fetch-systemid/basebackup/create-cert are client-side, one-shot tools
  *   that connect *out*, to a route's own upstream, sharing cli_upstream.c's
- *   own --route/--path/--upstream/--host/--port/--user resolution;
+ *   own --cluster/--path/--upstream/--host/--port/--user resolution;
  *   archive-wal and restore-wal instead connect to pg_walserver itself
  *   (see cli_archive.c's own header comment for why they do not reuse
  *   cli_upstream.c as-is). See README.md for the full design, including
@@ -281,9 +281,9 @@ cli_serve_run(int argc, char **argv)
 		sformat(serveConfig.routesPath, sizeof(serveConfig.routesPath),
 				"%s/pg_walserver.ini", servePgdata);
 		sformat(serveConfig.auth.hbaPath, sizeof(serveConfig.auth.hbaPath),
-				"%s/archiver-hba.conf", servePgdata);
+				"%s/pg_walserver_hba.conf", servePgdata);
 		sformat(serveConfig.auth.passwdPath, sizeof(serveConfig.auth.passwdPath),
-				"%s/archiver-passwd", servePgdata);
+				"%s/pg_walserver_passwd", servePgdata);
 
 		/* the certificate given with --ssl-*-file, else <pgdata>/server.* */
 		char certPath[MAXPGPATH], keyPath[MAXPGPATH];
@@ -333,7 +333,7 @@ cli_serve_run(int argc, char **argv)
 		 */
 
 		/*
-		 * Parse pg_walserver.ini and archiver-hba.conf once, up front:
+		 * Parse pg_walserver.ini and pg_walserver_hba.conf once, up front:
 		 * both are cached in serveConfig (WsServerConfig.routes/routeCount,
 		 * WsAuthConfig.hbaRuleSet) and installed only once they parse
 		 * cleanly -- every connection reads this same in-memory snapshot
@@ -451,7 +451,7 @@ static CommandLine serve_command =
 				 "its own storage path\n"
 				 "              is read from <pgdata>/pg_walserver.ini, "
 				 "and access is\n"
-				 "              decided by <pgdata>/archiver-hba.conf; the "
+				 "              decided by <pgdata>/pg_walserver_hba.conf; the "
 				 "server refuses to\n"
 				 "              start without it unless --insecure is "
 				 "given\n"
@@ -518,7 +518,7 @@ cli_scram_secret_getopt(int argc, char **argv)
  * cli_scram_secret_run reads the password from the PGPASSWORD environment
  * variable (never from the command line, where it would show up in the
  * process list), builds its SCRAM-SHA-256 verifier, and prints one
- * "user:secret" archiver-passwd line to stdout.
+ * "user:secret" pg_walserver_passwd line to stdout.
  */
 static void
 cli_scram_secret_run(int argc, char **argv)
@@ -553,7 +553,7 @@ cli_scram_secret_run(int argc, char **argv)
 
 static CommandLine scram_secret_command =
 	make_command("scram-secret",
-				 "Print one archiver-passwd line for a user",
+				 "Print one pg_walserver_passwd line for a user",
 				 "[--user <name>]  (password read from PGPASSWORD)",
 				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
 																				  "\n"
@@ -564,7 +564,7 @@ static CommandLine scram_secret_command =
 
 
 /* -----------------------------------------------------------------------
- * pg_walserver fetch-systemid --route <key> --pgdata <path> [--upstream ...]
+ * pg_walserver fetch-systemid --cluster <name> --pgdata <path> [--upstream ...]
  * ----------------------------------------------------------------------- */
 
 static char fetchSystemidPgdata[MAXPGPATH] = { 0 };
@@ -578,7 +578,7 @@ static bool fetchSystemidForce = false;
 
 static struct option fetchSystemidLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "route", required_argument, NULL, 'r' },
+	{ "cluster", required_argument, NULL, 'c' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "upstream", required_argument, NULL, 'u' },
 	{ "host", required_argument, NULL, 'h' },
@@ -596,7 +596,7 @@ cli_fetch_systemid_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:f",
+	while ((c = getopt_long(argc, argv, "D:c:P:u:h:p:U:f",
 							fetchSystemidLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -607,7 +607,7 @@ cli_fetch_systemid_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'r':
+			case 'c':
 			{
 				strlcpy(fetchSystemidRoute, optarg, sizeof(fetchSystemidRoute));
 				break;
@@ -684,12 +684,12 @@ cli_fetch_systemid_command_run(int argc, char **argv)
 static CommandLine fetch_systemid_command =
 	make_command("fetch-systemid",
 				 "Fetch a route's upstream system identifier",
-				 "--route <key> --pgdata <path> | --path <dir> "
+				 "--cluster <name> --pgdata <path> | --path <dir> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--force]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
-				 "  --route     the route key to fetch for (looked up in "
+				 "  --cluster   the cluster name to fetch for (looked up in "
 				 "pg_walserver.ini)\n"
 				 "  --path      the route's own directory (overrides the "
 				 "route's own \"path\")\n"
@@ -706,7 +706,7 @@ static CommandLine fetch_systemid_command =
 
 
 /* -----------------------------------------------------------------------
- * pg_walserver basebackup --route <key> --pgdata <path> [--upstream ...]
+ * pg_walserver basebackup --cluster <name> --pgdata <path> [--upstream ...]
  * ----------------------------------------------------------------------- */
 
 static char basebackupPgdata[MAXPGPATH] = { 0 };
@@ -719,7 +719,7 @@ static char basebackupUser[NAMEDATALEN] = { 0 };
 
 static struct option basebackupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "route", required_argument, NULL, 'r' },
+	{ "cluster", required_argument, NULL, 'c' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "upstream", required_argument, NULL, 'u' },
 	{ "host", required_argument, NULL, 'h' },
@@ -736,7 +736,7 @@ cli_basebackup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:",
+	while ((c = getopt_long(argc, argv, "D:c:P:u:h:p:U:",
 							basebackupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -747,7 +747,7 @@ cli_basebackup_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'r':
+			case 'c':
 			{
 				strlcpy(basebackupRoute, optarg, sizeof(basebackupRoute));
 				break;
@@ -818,12 +818,12 @@ cli_basebackup_command_run(int argc, char **argv)
 static CommandLine basebackup_command =
 	make_command("basebackup",
 				 "Take a base backup of a route's upstream",
-				 "--route <key> --pgdata <path> | --path <dir> "
+				 "--cluster <name> --pgdata <path> | --path <dir> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
-				 "  --route     the route key to back up (looked up in "
+				 "  --cluster   the cluster name to back up (looked up in "
 				 "pg_walserver.ini)\n"
 				 "  --path      the route's own directory (overrides the "
 				 "route's own \"path\")\n"
@@ -838,15 +838,21 @@ static CommandLine basebackup_command =
 
 
 /* -----------------------------------------------------------------------
- * pg_walserver setup --route <key> --path <dir> --pgdata <path>
+ * pg_walserver setup --cluster <name> --path <dir> --pgdata <path>
  *                     [--upstream ...] [--force]
  * ----------------------------------------------------------------------- */
 
 static WsSetupOptions setupOptions = { 0 };
 
+/*
+ * setup's own --cluster short flag is 'C' (uppercase), not 'c': lowercase
+ * 'c' is already taken by --capture in this sub-command's own optstring
+ * below, unlike fetch-systemid/basebackup/archive-wal/restore-wal, which
+ * have no such conflict and use lowercase 'c'.
+ */
 static struct option setupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "route", required_argument, NULL, 'r' },
+	{ "cluster", required_argument, NULL, 'C' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "upstream", required_argument, NULL, 'u' },
 	{ "host", required_argument, NULL, 'h' },
@@ -879,7 +885,7 @@ cli_setup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:r:P:u:h:p:U:n:c:fN",
+	while ((c = getopt_long(argc, argv, "D:C:P:u:h:p:U:n:c:fN",
 							setupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -890,7 +896,7 @@ cli_setup_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'r':
+			case 'C':
 			{
 				strlcpy(setupOptions.route, optarg, sizeof(setupOptions.route));
 				break;
@@ -1056,14 +1062,14 @@ cli_setup_command_run(int argc, char **argv)
 static CommandLine setup_command =
 	make_command("setup",
 				 "Create or validate one pg_walserver.ini route",
-				 "--route <key> --path <dir> --pgdata <path> "
+				 "--cluster <name> --path <dir> --pgdata <path> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--hostname <fqdn>] "
 				 "[--capture pull|none | --no-capture] "
 				 "[--force]",
 				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
-				 "  --route     the route key to create or validate\n"
+				 "  --cluster   the cluster name to create or validate\n"
 				 "  --path      the route's own directory, created if "
 				 "missing\n"
 				 "  --upstream  a libpq connection string, written into the "
@@ -1211,14 +1217,14 @@ static CommandLine create_cert_command =
 
 /* -----------------------------------------------------------------------
  * pg_walserver archive <path-to-file> <filename>
- *                       --route <key> --host <host> [--port <port>]
+ *                       --cluster <name> --host <host> [--port <port>]
  *                       [--user <name>] [--sslmode <mode>]
  * ----------------------------------------------------------------------- */
 
 static WsArchiveTarget archiveTarget = { 0 };
 
 static struct option archiveLongOptions[] = {
-	{ "route", required_argument, NULL, 'r' },
+	{ "cluster", required_argument, NULL, 'c' },
 	{ "host", required_argument, NULL, 'h' },
 	{ "port", required_argument, NULL, 'p' },
 	{ "user", required_argument, NULL, 'U' },
@@ -1239,12 +1245,12 @@ cli_archive_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "r:h:p:U:s:",
+	while ((c = getopt_long(argc, argv, "c:h:p:U:s:",
 							archiveLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
-			case 'r':
+			case 'c':
 			{
 				strlcpy(archiveTarget.route, optarg, sizeof(archiveTarget.route));
 				break;
@@ -1314,7 +1320,7 @@ cli_archive_command_run(int argc, char **argv)
 
 	if (archiveTarget.route[0] == '\0' || archiveTarget.host[0] == '\0')
 	{
-		log_fatal("archive-wal requires --route and --host");
+		log_fatal("archive-wal requires --cluster and --host");
 		exit(1);
 	}
 
@@ -1326,10 +1332,10 @@ static CommandLine archive_command =
 	make_command("archive-wal",
 				 "Push one WAL/.backup file into a pg_walserver route "
 				 "(archive_command)",
-				 "<path-to-file> <filename> --route <key> --host <host> "
+				 "<path-to-file> <filename> --cluster <name> --host <host> "
 				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
-				 "  --route     the pg_walserver route to archive into "
-				 "(sent as dbname)\n"
+				 "  --cluster   the cluster to archive into (sent as "
+				 "dbname)\n"
 				 "  --host      the pg_walserver host to connect to\n"
 				 "  --port      the pg_walserver port to connect to "
 				 "(default: 6543)\n"
@@ -1340,7 +1346,7 @@ static CommandLine archive_command =
 																				  "  Meant to be used as (part of) a Postgres "
 																				  "archive_command, e.g.:\n"
 																				  "    archive_command = 'pg_walserver archive-wal %%p "
-																				  "%%f --route mycluster \\\n"
+																				  "%%f --cluster mycluster \\\n"
 																				  "                       --host archive.example.com "
 																				  "--user archiver_repl'\n",
 				 cli_archive_getopt, cli_archive_command_run);
@@ -1348,14 +1354,14 @@ static CommandLine archive_command =
 
 /* -----------------------------------------------------------------------
  * pg_walserver restore <filename> <destination-path>
- *                       --route <key> --host <host> [--port <port>]
+ *                       --cluster <name> --host <host> [--port <port>]
  *                       [--user <name>] [--sslmode <mode>]
  * ----------------------------------------------------------------------- */
 
 static WsRestoreTarget restoreTarget = { 0 };
 
 static struct option restoreLongOptions[] = {
-	{ "route", required_argument, NULL, 'r' },
+	{ "cluster", required_argument, NULL, 'c' },
 	{ "host", required_argument, NULL, 'h' },
 	{ "port", required_argument, NULL, 'p' },
 	{ "user", required_argument, NULL, 'U' },
@@ -1364,7 +1370,7 @@ static struct option restoreLongOptions[] = {
 };
 
 /*
- * cli_restore_getopt parses restore's flags (--route/--host/--port/--user/
+ * cli_restore_getopt parses restore's flags (--cluster/--host/--port/--user/
  * --sslmode), the same shape and defaults as cli_archive_getopt() above.
  */
 static int
@@ -1380,12 +1386,12 @@ cli_restore_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "r:h:p:U:s:",
+	while ((c = getopt_long(argc, argv, "c:h:p:U:s:",
 							restoreLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
-			case 'r':
+			case 'c':
 			{
 				strlcpy(restoreTarget.route, optarg, sizeof(restoreTarget.route));
 				break;
@@ -1456,7 +1462,7 @@ cli_restore_command_run(int argc, char **argv)
 
 	if (restoreTarget.route[0] == '\0' || restoreTarget.host[0] == '\0')
 	{
-		log_fatal("restore-wal requires --route and --host");
+		log_fatal("restore-wal requires --cluster and --host");
 		exit(1);
 	}
 
@@ -1468,10 +1474,10 @@ static CommandLine restore_command =
 	make_command("restore-wal",
 				 "Fetch one WAL/.backup file from a pg_walserver route "
 				 "(restore_command)",
-				 "<filename> <destination-path> --route <key> --host <host> "
+				 "<filename> <destination-path> --cluster <name> --host <host> "
 				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
-				 "  --route     the pg_walserver route to restore from "
-				 "(sent as dbname)\n"
+				 "  --cluster   the cluster to restore from (sent as "
+				 "dbname)\n"
 				 "  --host      the pg_walserver host to connect to\n"
 				 "  --port      the pg_walserver port to connect to "
 				 "(default: 6543)\n"
@@ -1482,7 +1488,7 @@ static CommandLine restore_command =
 																				  "  Meant to be used as (part of) a Postgres "
 																				  "restore_command, e.g.:\n"
 																				  "    restore_command = 'pg_walserver restore-wal %%f "
-																				  "%%p --route mycluster \\\n"
+																				  "%%p --cluster mycluster \\\n"
 																				  "                        --host archive.example.com "
 																				  "--user archiver_repl'\n",
 				 cli_restore_getopt, cli_restore_command_run);
