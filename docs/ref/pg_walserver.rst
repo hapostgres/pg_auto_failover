@@ -22,7 +22,7 @@ all. This is ``pg_walserver --help``'s own output, verbatim::
   usage: pg_walserver [serve options] | scram-secret ... | setup ... |
                        fetch-systemid ... | basebackup ... |
                        create-cert ... | archive-wal ... | restore-wal ... |
-                       reload ...
+                       archive-cleanup ... | reload ...
 
   Available commands:
     pg_walserver
@@ -34,6 +34,7 @@ all. This is ``pg_walserver --help``'s own output, verbatim::
       create-cert     Create a self-signed TLS certificate for --pgdata
       archive-wal     Push one WAL/.backup file into a pg_walserver route (archive_command)
       restore-wal     Fetch one WAL/.backup file from a pg_walserver route (restore_command)
+      archive-cleanup Remove WAL/base backups this route no longer needs to keep (operator/cron-driven, never automatic)
       reload          Ask a running pg_walserver to reload its configuration
 
 See `Options`_ below for what each sub-command's flags do.
@@ -438,6 +439,52 @@ as PostgreSQL's own ``restore_command``:
 Accepts the same ``--cluster``, ``--host``, ``--port``, ``--user``,
 ``--sslmode`` options as ``archive-wal``.
 
+``archive-cleanup``
+~~~~~~~~~~~~~~~~~~~
+
+::
+
+  pg_walserver archive-cleanup --cluster <name> --pgdata <path> | --path <dir>
+      [--keep-count <N>] [--keep-age <interval>] [--dry-run]
+
+Removes WAL segments (and ``.partial``/``.backup`` files) and base backups
+a route no longer needs to keep. Retention is infinite by default: at
+least one of ``--keep-count``/``--keep-age`` is required, and
+``archive-cleanup`` is never run automatically by ``pg_walserver`` itself
+-- an operator wires it into cron, the same way ``pg_archivecleanup``
+itself is normally wired into ``archive_cleanup_command`` or a cron job,
+never run on its own. When both flags are given, whichever keeps more
+wins: a backup or WAL segment is removed only once both constraints
+independently agree it may go. The backup ``basebackups/.latest`` points
+to, and every WAL segment it requires, are never removed.
+
+--pgdata
+
+  Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
+
+--cluster
+
+  The cluster name to clean up, looked up in ``pg_walserver.ini``.
+
+--path
+
+  The route's own directory. Overrides the route's own ``path`` property.
+
+--keep-count
+
+  Keep at least this many of the most recent base backups.
+
+--keep-age
+
+  Keep anything from the last ``<N><unit>``: ``h`` (hours), ``d`` (days),
+  ``w`` (weeks), or ``m`` (calendar months, real calendar arithmetic, not
+  a 30-day approximation). The suffix is required; a bare number is
+  rejected.
+
+--dry-run, -n
+
+  Print what would be removed without removing anything.
+
 ``reload``
 ~~~~~~~~~~
 
@@ -584,6 +631,14 @@ says (PostgreSQL's own ``libpqrcv_connect()`` overrides it
 unconditionally). A route reachable by a real standby by name therefore
 needs a second section literally keyed ``[replication]`` pointing at the
 same ``path``, a ``"*"`` wildcard route, or TLS SNI routing (below).
+
+**7. Keep the archive from growing forever**: nothing above removes
+anything on its own -- wire ``archive-cleanup`` into cron, keeping at
+least a week of history and at least 3 base backups::
+
+  archive$ crontab -l
+  0 3 * * * PGPASSWORD=s3kr3t pg_walserver archive-cleanup \
+      --path /var/lib/archiver/mycluster --keep-count 3 --keep-age 7d
 
 Routing more than one cluster by name: TLS SNI
 -----------------------------------------------

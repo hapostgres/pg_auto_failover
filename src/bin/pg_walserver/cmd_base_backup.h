@@ -43,4 +43,15 @@
 void cmd_base_backup(int sock, const WsRoute *route,
 					 const WsCommandOption *options, int nOptions);
 
+/*
+ * read_backup_label extracts "START WAL LOCATION"/"START TIMELINE" out of
+ * <basebackupDir>/backup_label -- the same file a real pg_basebackup run
+ * against a live server always writes. Returns true with lsnOut/timelineOut
+ * filled on success, false (logged, not fatal) on a missing/unparseable
+ * file. cli_archive_cleanup.c reuses this to learn a backup's own required
+ * starting WAL segment.
+ */
+bool read_backup_label(const char *basebackupDir, char *lsnOut,
+					   size_t lsnOutSize, int *timelineOut);
+
 #endif /* WS_CMD_BASE_BACKUP_H */

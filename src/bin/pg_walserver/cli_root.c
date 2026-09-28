@@ -91,6 +91,7 @@
 #include "accept_loop.h"
 #include "capture.h"
 #include "cli_archive.h"
+#include "cli_archive_cleanup.h"
 #include "cli_basebackup.h"
 #include "cli_create_cert.h"
 #include "cli_fetch_systemid.h"
@@ -1535,6 +1536,192 @@ cli_reload_run(int argc, char **argv)
 }
 
 
+/* -----------------------------------------------------------------------
+ * pg_walserver archive-cleanup --cluster <name> --pgdata <path> | --path <dir>
+ *                               [--keep-count <N>] [--keep-age <interval>]
+ *                               [--dry-run]
+ * ----------------------------------------------------------------------- */
+
+static char archiveCleanupPgdata[MAXPGPATH] = { 0 };
+static char archiveCleanupRoute[NAMEDATALEN + 16] = { 0 };
+static char archiveCleanupPath[MAXPGPATH] = { 0 };
+static bool archiveCleanupHaveKeepCount = false;
+static int archiveCleanupKeepCount = 0;
+static bool archiveCleanupHaveKeepAge = false;
+static WsRetentionAge archiveCleanupKeepAge = { 0 };
+static bool archiveCleanupDryRun = false;
+
+static struct option archiveCleanupLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ "path", required_argument, NULL, 'P' },
+	{ "keep-count", required_argument, NULL, 'k' },
+	{ "keep-age", required_argument, NULL, 'a' },
+	{ "dry-run", no_argument, NULL, 'n' },
+	{ NULL, 0, NULL, 0 }
+};
+
+static int
+cli_archive_cleanup_getopt(int argc, char **argv)
+{
+	optind = 0;
+	(void) get_env_pgdata(archiveCleanupPgdata);
+	archiveCleanupRoute[0] = '\0';
+	archiveCleanupPath[0] = '\0';
+	archiveCleanupHaveKeepCount = false;
+	archiveCleanupKeepCount = 0;
+	archiveCleanupHaveKeepAge = false;
+	archiveCleanupKeepAge = (WsRetentionAge) {
+		0
+	};
+	archiveCleanupDryRun = false;
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:c:P:k:a:n",
+							archiveCleanupLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(archiveCleanupPgdata, optarg, sizeof(archiveCleanupPgdata));
+				break;
+			}
+
+			case 'c':
+			{
+				strlcpy(archiveCleanupRoute, optarg, sizeof(archiveCleanupRoute));
+				break;
+			}
+
+			case 'P':
+			{
+				strlcpy(archiveCleanupPath, optarg, sizeof(archiveCleanupPath));
+				break;
+			}
+
+			case 'k':
+			{
+				if (!stringToInt(optarg, &archiveCleanupKeepCount) ||
+					archiveCleanupKeepCount <= 0)
+				{
+					log_fatal("Invalid --keep-count value \"%s\": expected "
+							  "a positive whole number", optarg);
+					exit(1);
+				}
+				archiveCleanupHaveKeepCount = true;
+				break;
+			}
+
+			case 'a':
+			{
+				if (!ws_parse_retention_age(optarg, &archiveCleanupKeepAge))
+				{
+					/* error already logged */
+					exit(1);
+				}
+				archiveCleanupHaveKeepAge = true;
+				break;
+			}
+
+			case 'n':
+			{
+				archiveCleanupDryRun = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+static void
+cli_archive_cleanup_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	char routePath[MAXPGPATH] = { 0 };
+
+	if (archiveCleanupPath[0] != '\0')
+	{
+		strlcpy(routePath, archiveCleanupPath, sizeof(routePath));
+	}
+	else if (archiveCleanupPgdata[0] != '\0' && archiveCleanupRoute[0] != '\0')
+	{
+		char routesPath[MAXPGPATH] = { 0 };
+		WsRoute *routes = NULL;
+		int routeCount = 0;
+
+		sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini",
+				archiveCleanupPgdata);
+
+		const WsRoute *route = NULL;
+
+		if (routes_load(routesPath, &routes, &routeCount))
+		{
+			route = routes_find(routes, routeCount, archiveCleanupRoute);
+		}
+
+		if (route == NULL)
+		{
+			log_fatal("No route \"%s\" in \"%s\"", archiveCleanupRoute,
+					  routesPath);
+			routes_free(routes);
+			exit(1);
+		}
+
+		strlcpy(routePath, route->path, sizeof(routePath));
+		routes_free(routes);
+	}
+	else
+	{
+		log_fatal("archive-cleanup requires --path, or --cluster with "
+				  "--pgdata pointing at a \"pg_walserver.ini\" that has "
+				  "that route");
+		exit(1);
+	}
+
+	exit(ws_archive_cleanup_run(routePath,
+								archiveCleanupHaveKeepCount, archiveCleanupKeepCount,
+								archiveCleanupHaveKeepAge, archiveCleanupKeepAge,
+								archiveCleanupDryRun) ? 0 : 1);
+}
+
+
+static CommandLine archive_cleanup_command =
+	make_command("archive-cleanup",
+				 "Remove WAL/base backups this route no longer needs to "
+				 "keep (operator/cron-driven, never automatic)",
+				 "--cluster <name> --pgdata <path> | --path <dir> "
+				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run]",
+				 "  --pgdata      where <pgdata>/pg_walserver.ini lives "
+				 "(defaults to PGDATA)\n"
+				 "  --cluster     the cluster name to clean up (looked up "
+				 "in pg_walserver.ini)\n"
+				 "  --path        the route's own directory (overrides "
+				 "the route's own \"path\")\n"
+				 "  --keep-count  keep at least this many of the most "
+				 "recent base backups\n"
+				 "  --keep-age    keep anything from the last <N><unit> "
+				 "(h/d/w/m -- hours,\n"
+				 "                days, weeks, calendar months); at "
+				 "least one of --keep-count/\n"
+				 "                --keep-age is required, retention is "
+				 "infinite otherwise\n"
+				 "  --dry-run, -n print what would be removed without "
+				 "removing anything\n",
+				 cli_archive_cleanup_getopt, cli_archive_cleanup_command_run);
+
+
 static CommandLine reload_command =
 	make_command("reload",
 				 "Ask a running pg_walserver to reload its configuration",
@@ -1560,6 +1747,7 @@ static CommandLine *root_subcommands[] = {
 	&create_cert_command,
 	&archive_command,
 	&restore_command,
+	&archive_cleanup_command,
 	&reload_command,
 	&internal_commands,
 	NULL
@@ -1570,7 +1758,8 @@ CommandLine ws_root =
 					 "The archiver's own replication-protocol server",
 					 "[serve options] | scram-secret ... | setup ... | "
 					 "fetch-systemid ... | basebackup ... | create-cert ... | "
-					 "archive-wal ... | restore-wal ... | reload ...",
+					 "archive-wal ... | restore-wal ... | archive-cleanup ... | "
+					 "reload ...",
 					 NULL, NULL, root_subcommands);
 
 
@@ -1599,6 +1788,7 @@ pg_walserver_default_argv(int argc, char **argv, int *newArgc)
 		 streq(argv[1], "create-cert") ||
 		 streq(argv[1], "archive-wal") ||
 		 streq(argv[1], "restore-wal") ||
+		 streq(argv[1], "archive-cleanup") ||
 		 streq(argv[1], "reload") ||
 		 streq(argv[1], "internal") ||
 		 streq(argv[1], "--help") ||

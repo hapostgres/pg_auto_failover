@@ -189,8 +189,12 @@ collect_options(const WsCommandOption *options, int nOptions, BaseBackupOptions 
  * itself wrote it), but a corrupt/missing file must not crash the server.
  * Fields the backend also extracts but no caller here needs (BACKUP METHOD,
  * BACKUP FROM, START TIME, LABEL, INCREMENTAL FROM LSN) are skipped.
+ *
+ * Not static: cli_archive_cleanup.c's own basebackups/ enumeration reuses
+ * this exact parser to learn each backup's own required starting WAL
+ * segment, rather than re-deriving backup_label parsing from scratch.
  */
-static bool
+bool
 read_backup_label(const char *basebackupDir, char *lsnOut, size_t lsnOutSize,
 				  int *timelineOut)
 {
