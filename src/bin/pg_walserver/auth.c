@@ -293,6 +293,59 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 }
 
 
+/*
+ * ws_client_cert_matches implements "clientcert=verify-full" (hba.h): the
+ * connection must be TLS, must have presented a client certificate, and
+ * that certificate's Subject CN must equal user exactly (no user name
+ * mapping, see hba.h's own comment). Sends a clean ErrorResponse and
+ * returns false on any failure -- never a silent fall-through to another
+ * auth method.
+ */
+static bool
+ws_client_cert_matches(int sock, const char *user)
+{
+	char safeUser[NAMEDATALEN + 8];
+
+	ws_sanitize_for_log(user, safeUser, sizeof(safeUser));
+
+	if (!ws_tls_active())
+	{
+		log_warn("Rejecting connection as user \"%s\": clientcert=verify-full "
+				 "requires a TLS connection", safeUser);
+		ws_send_error_response(sock, "08000",
+							   "a TLS connection with a client certificate "
+							   "is required");
+		return false;
+	}
+
+	char cn[NAMEDATALEN * 4];
+
+	if (!ws_tls_get_peer_cert_cn(cn, sizeof(cn)))
+	{
+		log_warn("Rejecting connection as user \"%s\": no client certificate "
+				 "was presented", safeUser);
+		ws_send_error_response(sock, "08000",
+							   "a client certificate is required");
+		return false;
+	}
+
+	if (strcmp(cn, user) != 0)
+	{
+		char safeCn[NAMEDATALEN * 4 + 8];
+
+		ws_sanitize_for_log(cn, safeCn, sizeof(safeCn));
+		log_warn("Rejecting connection as user \"%s\": client certificate "
+				 "CN \"%s\" does not match", safeUser, safeCn);
+		ws_send_error_response(sock, "08000",
+							   "client certificate CN does not match "
+							   "the requested user");
+		return false;
+	}
+
+	return true;
+}
+
+
 bool
 ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 				const WsRoute *routes, int routeCount,
@@ -354,9 +407,25 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 	ws_sanitize_for_log(routeKey, safeRoute, sizeof(safeRoute));
 
 	WsAuthMethod method = WS_AUTH_REJECT;
+	bool requireClientCert = false;
 
 	hba_match(&authConfig->hbaRuleSet, routeKey, params->user, peerIP,
-			  ws_tls_active(), &method);
+			  ws_tls_active(), &method, &requireClientCert);
+
+	/*
+	 * A "reject" line's own generic message (below) is deliberately never
+	 * shadowed by a certificate-specific one, even if such a line also
+	 * carries "clientcert=verify-full": that combination is pointless
+	 * (nothing after a reject is ever reached), but if written, "reject" is
+	 * what runs, not the certificate check.
+	 */
+	if (requireClientCert && method != WS_AUTH_REJECT &&
+		!ws_client_cert_matches(sock, params->user))
+	{
+		/* ws_client_cert_matches() already logged and sent the
+		 * ErrorResponse; never fall through to method below */
+		return false;
+	}
 
 	switch (method)
 	{

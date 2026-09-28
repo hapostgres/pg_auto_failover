@@ -44,6 +44,12 @@ static const char *hbaHeader =
 	"#          or a .domain.suffix (matched through every reverse DNS name\n"
 	"#          of the client, each confirmed by a forward lookup)\n"
 	"# METHOD   scram-sha-256 (checked against pg_walserver_passwd), trust, reject\n"
+	"#\n"
+	"# An optional sixth field, clientcert=verify-full, may follow METHOD:\n"
+	"# the TLS peer certificate's CN must equal USER exactly. Requires\n"
+	"# --ssl-ca-file to be configured. With METHOD trust the certificate\n"
+	"# check is the whole authentication; with scram-sha-256 both the\n"
+	"# certificate and the password are required (two-factor).\n"
 	"#\n";
 
 
@@ -203,6 +209,32 @@ parse_method(const char *token, WsAuthMethod *method)
 	}
 
 	return true;
+}
+
+
+/*
+ * parse_clientcert_option recognizes exactly one optional 6th HBA field,
+ * "clientcert=verify-full", mirroring real PostgreSQL's own pg_hba.conf
+ * "clientcert" option (src/backend/libpq/hba.c upstream). This project does
+ * not implement "clientcert=verify-ca": real PostgreSQL's TLS layer already
+ * validates any client certificate it is handed against ssl_ca_file the
+ * moment one is presented (SSL_VERIFY_PEER at the SSL_CTX level, set
+ * whenever --ssl-ca-file is configured, see tls.c), independent of any HBA
+ * line at all -- "verify-ca" on a line adds nothing beyond that already-
+ * enforced TLS-level check, so there is nothing distinct for it to mean
+ * here (see hba.h's own header comment). Anything else after METHOD is a
+ * malformed line, exactly like an unrecognized METHOD itself.
+ */
+static bool
+parse_clientcert_option(const char *token, bool *requireClientCert)
+{
+	if (streq(token, "clientcert=verify-full"))
+	{
+		*requireClientCert = true;
+		return true;
+	}
+
+	return false;
 }
 
 
@@ -417,12 +449,12 @@ hba_parse(const char *hbaPath, char *contents, HbaRule **rulesOut,
 		   hba_read_logical_line(&reader, lineBuffer, &lineNumber))
 	{
 		char *lineptr = lineBuffer->data;
-		char *fields[HBA_MAX_FIELDS + 1] = { 0 };
+		char *fields[HBA_MAX_FIELDS + 2] = { 0 };
 		int nfields = 0;
 		char token[1024];
 
-		while (nfields <= HBA_MAX_FIELDS && next_hba_token(&lineptr, token,
-														   sizeof(token)))
+		while (nfields <= HBA_MAX_FIELDS + 1 && next_hba_token(&lineptr, token,
+															   sizeof(token)))
 		{
 			fields[nfields] = strdup(token);
 
@@ -447,13 +479,18 @@ hba_parse(const char *hbaPath, char *contents, HbaRule **rulesOut,
 		}
 
 		WsAuthMethod ruleMethod = WS_AUTH_REJECT;
+		bool requireClientCert = false;
 
 		bool typeOk = streq(fields[0], "host") ||
 					  streq(fields[0], "hostssl") ||
 					  streq(fields[0], "hostnossl");
 
-		if (nfields != HBA_MAX_FIELDS || !typeOk ||
-			!parse_method(fields[4], &ruleMethod))
+		bool hasClientCertField = nfields == HBA_MAX_FIELDS + 1;
+
+		if ((nfields != HBA_MAX_FIELDS && !hasClientCertField) || !typeOk ||
+			!parse_method(fields[4], &ruleMethod) ||
+			(hasClientCertField &&
+			 !parse_clientcert_option(fields[HBA_MAX_FIELDS], &requireClientCert)))
 		{
 			log_error("Malformed HBA line %d in \"%s\": rejecting every "
 					  "connection until the file is fixed",
@@ -475,7 +512,13 @@ hba_parse(const char *hbaPath, char *contents, HbaRule **rulesOut,
 			rule->fields[i] = fields[i];
 		}
 
+		if (hasClientCertField)
+		{
+			free(fields[HBA_MAX_FIELDS]);
+		}
+
 		rule->method = ruleMethod;
+		rule->requireClientCert = requireClientCert;
 		rule->lineNumber = lineNumber;
 	}
 
@@ -545,9 +588,11 @@ hba_ruleset_free(WsHbaRuleSet *ruleSet)
 
 void
 hba_match(const WsHbaRuleSet *ruleSet, const char *routeKey, const char *user,
-		  const char *peerIP, bool isTLS, WsAuthMethod *method)
+		  const char *peerIP, bool isTLS, WsAuthMethod *method,
+		  bool *requireClientCert)
 {
 	*method = WS_AUTH_REJECT;
+	*requireClientCert = false;
 
 	for (int i = 0; i < ruleSet->count; i++)
 	{
@@ -563,7 +608,27 @@ hba_match(const WsHbaRuleSet *ruleSet, const char *routeKey, const char *user,
 			rule_address_matches(fields[3], peerIP))
 		{
 			*method = ruleSet->rules[i].method;
+			*requireClientCert = ruleSet->rules[i].requireClientCert;
 			return;
 		}
 	}
+}
+
+
+/*
+ * hba_ruleset_requires_client_cert reports whether any rule in ruleSet has
+ * "clientcert=verify-full" -- see hba.h's own comment.
+ */
+bool
+hba_ruleset_requires_client_cert(const WsHbaRuleSet *ruleSet)
+{
+	for (int i = 0; i < ruleSet->count; i++)
+	{
+		if (ruleSet->rules[i].requireClientCert)
+		{
+			return true;
+		}
+	}
+
+	return false;
 }

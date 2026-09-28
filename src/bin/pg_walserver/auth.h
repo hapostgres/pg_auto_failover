@@ -13,6 +13,14 @@
  *                    per line (create one with `pg_walserver scram-secret`)
  *     reject         refuse
  *
+ *   A matching rule may also carry "clientcert=verify-full" (hba.h): the
+ *   TLS peer certificate's CN must equal the connecting role name exactly.
+ *   Checked first, before the method above runs -- with "trust" the
+ *   certificate check is the whole authentication; with "scram-sha-256"
+ *   both it and the password are required (two-factor). No certificate, or
+ *   a CN that does not match, is a clean rejection; this project does not
+ *   implement "clientcert=verify-ca" (see hba.h's own comment for why).
+ *
  *   Authentication comes FIRST, as in PostgreSQL: the HBA rules are looked
  *   up with the route key the client asked for (whether or not it is a
  *   known route), then the method runs, and only after a successful
