@@ -9,7 +9,9 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "postgres_fe.h"
 
@@ -401,4 +403,90 @@ wal_position_cache_read(const char *path, uint32_t *timeline,
 	free(contents);
 
 	return foundLsn && foundTimeline;
+}
+
+
+bool
+ws_receivewal_progress_write(const char *path, const char *lsn, uint32_t timeline)
+{
+	if (path == NULL || path[0] == '\0' || lsn == NULL || lsn[0] == '\0')
+	{
+		return false;
+	}
+
+	char filePath[MAXPGPATH] = { 0 };
+
+	sformat(filePath, sizeof(filePath), "%s/" WS_RECEIVEWAL_PROGRESS_FILENAME, path);
+
+	char content[128] = { 0 };
+
+	sformat(content, sizeof(content), "lsn = %s\ntimeline = %u\nobserved = %lld\n",
+			lsn, timeline, (long long) time(NULL));
+
+	return write_file_atomic(content, strlen(content), filePath);
+}
+
+
+bool
+ws_receivewal_progress_read(const char *path, char *lsn, size_t lsnSize,
+							uint32_t *timeline, time_t *observedAt)
+{
+	if (path == NULL || path[0] == '\0')
+	{
+		return false;
+	}
+
+	char filePath[MAXPGPATH] = { 0 };
+
+	sformat(filePath, sizeof(filePath), "%s/" WS_RECEIVEWAL_PROGRESS_FILENAME, path);
+
+	char *contents = NULL;
+	long fileSize = 0;
+
+	if (!read_file_if_exists(filePath, &contents, &fileSize) || contents == NULL)
+	{
+		return false;
+	}
+
+	bool foundLsn = false;
+	bool foundTimeline = false;
+	bool foundObserved = false;
+	char *line = contents;
+
+	while (line != NULL && *line != '\0')
+	{
+		char *nl = strchr(line, '\n');
+
+		if (nl != NULL)
+		{
+			*nl = '\0';
+		}
+
+		const char *lsnPrefix = "lsn = ";
+		const char *tliPrefix = "timeline = ";
+		const char *obsPrefix = "observed = ";
+
+		if (strncmp(line, lsnPrefix, strlen(lsnPrefix)) == 0)
+		{
+			strlcpy(lsn, line + strlen(lsnPrefix), lsnSize);
+			foundLsn = lsn[0] != '\0';
+		}
+		else if (strncmp(line, tliPrefix, strlen(tliPrefix)) == 0)
+		{
+			foundTimeline =
+				stringToUInt32(line + strlen(tliPrefix), timeline) &&
+				*timeline > 0;
+		}
+		else if (strncmp(line, obsPrefix, strlen(obsPrefix)) == 0)
+		{
+			*observedAt = (time_t) atoll(line + strlen(obsPrefix)); /* IGNORE-BANNED */
+			foundObserved = *observedAt > 0;
+		}
+
+		line = (nl != NULL) ? nl + 1 : NULL;
+	}
+
+	free(contents);
+
+	return foundLsn && foundTimeline && foundObserved;
 }

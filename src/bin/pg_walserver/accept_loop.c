@@ -40,6 +40,7 @@
 #include "routes.h"
 #include "signals.h"
 #include "startup.h"
+#include "wal_dir_scan.h"
 #include "ws_util.h"
 
 
@@ -771,6 +772,20 @@ refresh_ps_state(const WsServerConfig *config, pid_t servePid,
 		dst->pid = receivewalStatus[i].pid;
 		dst->startedAt = receivewalStatus[i].startedAt;
 		dst->restarts = receivewalStatus[i].restarts;
+
+		/*
+		 * Fold in the receivewal worker's own last-observed (lsn, timeline),
+		 * relayed via its own "<path>/receivewal-progress" file (wal_dir_
+		 * scan.h, written by that worker's own hook callbacks, cli_
+		 * internal.c) -- that worker is a separate fork()+execv()'d
+		 * process, so this file is the only way this tick can see it. A
+		 * missing/unparseable file (worker never ticked yet, or isn't
+		 * running) just leaves dst->lsn empty -- not an error.
+		 */
+		(void) ws_receivewal_progress_read(receivewalStatus[i].path,
+										   dst->lsn, sizeof(dst->lsn),
+										   &dst->lsnTimeline,
+										   &dst->lsnObservedAt);
 	}
 
 	WsBootstrapStatus bootstrapStatus[WS_PS_MAX_ENTRIES];

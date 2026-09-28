@@ -146,7 +146,29 @@ step test_003_real_wal_range_and_aggregate_stats {
     exec walserver bash -c 'REAL_FILES=$(ls /tmp/lps/pullc | grep -cE "^[0-9A-F]{24}(\.partial)?$"); ROWS=$(grep -c "^pullc" /tmp/lw1seg.out); test "$REAL_FILES" = "$ROWS" || { echo "expected $REAL_FILES rows, got $ROWS"; cat /tmp/lw1seg.out; ls -la /tmp/lps/pullc; false; }'
 }
 
+step test_004_receivewal_progress_lsn_visible_and_advances {
+    # pullc's embedded receivewal worker relays its own live (lsn, timeline)
+    # to "serve" via a small, throttled per-route file (wal_dir_scan.h's
+    # ws_receivewal_progress_write()/_read()), folded into the ps state file
+    # and surfaced on "ps"/"status" -- a real, plausible LSN, not a
+    # placeholder/zero, and one that genuinely advances as more real WAL is
+    # generated on node1.
+    exec walserver bash -c 'pg_walserver ps --pgdata /tmp/lps > /tmp/ps2.out 2>&1; grep -E "receivewal\([0-9]+\) pullc, running.*lsn [0-9A-F]+/[0-9A-F]+ \(timeline [1-9][0-9]*, [0-9]+s ago\)" /tmp/ps2.out || { cat /tmp/ps2.out; false; }'
+    exec walserver bash -c 'pg_walserver status --pgdata /tmp/lps > /tmp/status2.out 2>&1; grep -E "pullc +lsn [0-9A-F]+/[0-9A-F]+ \(timeline [1-9][0-9]*, [0-9]+s ago\)" /tmp/status2.out || { cat /tmp/status2.out; false; }'
+    exec walserver bash -c 'grep -oE "lsn [0-9A-F]+/[0-9A-F]+" /tmp/ps2.out | head -1 | awk "{print \$2}" > /tmp/lsn1.txt; test -s /tmp/lsn1.txt'
+
+    # generate real, substantial WAL on the real upstream between the two
+    # "ps" calls below.
+    sql node1 { INSERT INTO lps SELECT generate_series(1, 400000) }
+    sql node1 { SELECT pg_switch_wal() }
+    sql node1 { INSERT INTO lps SELECT generate_series(1, 400000) }
+    sql node1 { SELECT pg_switch_wal() }
+
+    exec walserver bash -c 'lsn_dec() { IFS="/" read -r hi lo <<< "$1"; echo $(( (16#$hi) * 4294967296 + 16#$lo )); }; LSN1=$(cat /tmp/lsn1.txt); D1=$(lsn_dec "$LSN1"); for i in $(seq 30); do sleep 1; pg_walserver ps --pgdata /tmp/lps > /tmp/ps3.out 2>&1; LSN2=$(grep -oE "lsn [0-9A-F]+/[0-9A-F]+" /tmp/ps3.out | head -1 | awk "{print \$2}"); [ -z "$LSN2" ] && continue; D2=$(lsn_dec "$LSN2"); if [ "$D2" -gt "$D1" ]; then echo "LSN advanced from $LSN1 to $LSN2"; exit 0; fi; done; echo "LSN never advanced past $LSN1"; cat /tmp/ps3.out; false'
+}
+
 sequence
     test_001_not_running_is_clean_not_an_error
     test_002_serve_running_ps_status_ls_and_backups
     test_003_real_wal_range_and_aggregate_stats
+    test_004_receivewal_progress_lsn_visible_and_advances

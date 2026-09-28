@@ -133,10 +133,25 @@ cli_ps_run(const char *pgdata)
 
 		format_uptime(running ? c->startedAt : 0, uptime, sizeof(uptime));
 
-		printf("%s receivewal(%d) %s, %s, uptime %s, restarts %d\n", /* IGNORE-BANNED */
+		char lsnStr[64] = { 0 };
+
+		if (c->lsn[0] != '\0')
+		{
+			long age = (long) (time(NULL) - c->lsnObservedAt);
+
+			if (age < 0)
+			{
+				age = 0;
+			}
+
+			sformat(lsnStr, sizeof(lsnStr), ", lsn %s (timeline %u, %lds ago)",
+					c->lsn, c->lsnTimeline, age);
+		}
+
+		printf("%s receivewal(%d) %s, %s, uptime %s, restarts %d%s\n", /* IGNORE-BANNED */
 			   isLast ? "`--" : "|--",
 			   (int) c->pid, c->routeKey,
-			   running ? "running" : "stopped", uptime, c->restarts);
+			   running ? "running" : "stopped", uptime, c->restarts, lsnStr);
 	}
 
 	for (int i = 0; i < state.bootstrapCount; i++)

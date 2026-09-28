@@ -125,6 +125,30 @@ cli_status_run(const char *pgdata)
 		   routeCount, backupCount);
 	printf("  receivewal workers: %d/%d running\n", /* IGNORE-BANNED */
 		   receivewalWorkersRunning, receivewalPullCount);
+
+	if (haveState)
+	{
+		for (int i = 0; i < state.receivewalWorkerCount; i++)
+		{
+			const WsPsReceivewalEntry *c = &state.receivewalWorkers[i];
+
+			if (c->lsn[0] == '\0')
+			{
+				continue;
+			}
+
+			long age = (long) (time(NULL) - c->lsnObservedAt);
+
+			if (age < 0)
+			{
+				age = 0;
+			}
+
+			printf("    %-20s lsn %s (timeline %u, %lds ago)\n", /* IGNORE-BANNED */
+				   c->routeKey, c->lsn, c->lsnTimeline, age);
+		}
+	}
+
 	printf("  bootstrap backups pending: %d\n", bootstrapsPending); /* IGNORE-BANNED */
 
 	routes_free(routes);

@@ -49,9 +49,11 @@ ws_ps_state_write(const char *pgdata, const WsPsState *state)
 		const WsPsReceivewalEntry *c = &state->receivewalWorkers[i];
 
 		appendPQExpBuffer(content,
-						  "receivewal route=%s path=%s pid=%d started=%lld restarts=%d\n",
+						  "receivewal route=%s path=%s pid=%d started=%lld restarts=%d "
+						  "lsn=%s timeline=%u observed=%lld\n",
 						  c->routeKey, c->path, (int) c->pid,
-						  (long long) c->startedAt, c->restarts);
+						  (long long) c->startedAt, c->restarts,
+						  c->lsn, c->lsnTimeline, (long long) c->lsnObservedAt);
 	}
 
 	for (int i = 0; i < state->bootstrapCount; i++)
@@ -89,7 +91,8 @@ ws_ps_state_write(const char *pgdata, const WsPsState *state)
  */
 static void
 parse_kv(char *line, char *routeKeyOut, char *pathOut, pid_t *pidOut,
-		 time_t *startedAtOut, int *restartsOut)
+		 time_t *startedAtOut, int *restartsOut, char *lsnOut,
+		 uint32_t *lsnTimelineOut, time_t *lsnObservedAtOut)
 {
 	char *savePtr = NULL;
 	char *tok = strtok_r(line, " ", &savePtr);
@@ -124,6 +127,18 @@ parse_kv(char *line, char *routeKeyOut, char *pathOut, pid_t *pidOut,
 			else if (strcmp(key, "restarts") == 0 && restartsOut != NULL)
 			{
 				*restartsOut = (int) atoll(value); /* IGNORE-BANNED */
+			}
+			else if (strcmp(key, "lsn") == 0 && lsnOut != NULL)
+			{
+				strlcpy(lsnOut, value, 32);
+			}
+			else if (strcmp(key, "timeline") == 0 && lsnTimelineOut != NULL)
+			{
+				*lsnTimelineOut = (uint32_t) atoll(value); /* IGNORE-BANNED */
+			}
+			else if (strcmp(key, "observed") == 0 && lsnObservedAtOut != NULL)
+			{
+				*lsnObservedAtOut = (time_t) atoll(value); /* IGNORE-BANNED */
 			}
 		}
 
@@ -171,7 +186,8 @@ ws_ps_state_read(const char *pgdata, WsPsState *state)
 
 		if (strcmp(kind, "serve") == 0)
 		{
-			parse_kv(rest, NULL, NULL, &state->servePid, &state->serveStartedAt, NULL);
+			parse_kv(rest, NULL, NULL, &state->servePid, &state->serveStartedAt,
+					 NULL, NULL, NULL, NULL);
 		}
 		else if (strcmp(kind, "receivewal") == 0 &&
 				 state->receivewalWorkerCount < WS_PS_MAX_ENTRIES)
@@ -181,7 +197,7 @@ ws_ps_state_read(const char *pgdata, WsPsState *state)
 
 			memset(c, 0, sizeof(WsPsReceivewalEntry));
 			parse_kv(rest, c->routeKey, c->path, &c->pid, &c->startedAt,
-					 &c->restarts);
+					 &c->restarts, c->lsn, &c->lsnTimeline, &c->lsnObservedAt);
 			state->receivewalWorkerCount++;
 		}
 		else if (strcmp(kind, "bootstrap") == 0 &&
@@ -190,7 +206,8 @@ ws_ps_state_read(const char *pgdata, WsPsState *state)
 			WsPsBootstrapEntry *b = &state->bootstraps[state->bootstrapCount];
 
 			memset(b, 0, sizeof(WsPsBootstrapEntry));
-			parse_kv(rest, b->routeKey, NULL, &b->pid, &b->startedAt, NULL);
+			parse_kv(rest, b->routeKey, NULL, &b->pid, &b->startedAt, NULL,
+					 NULL, NULL, NULL);
 			state->bootstrapCount++;
 		}
 

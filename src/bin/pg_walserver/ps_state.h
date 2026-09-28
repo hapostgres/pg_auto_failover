@@ -48,6 +48,7 @@
 #define WS_PS_STATE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <sys/types.h>
 #include <time.h>
 
@@ -64,6 +65,19 @@ typedef struct WsPsReceivewalEntry
 	                         * never started) */
 	time_t startedAt;       /* this incarnation's own start time */
 	int restarts;           /* how many times it has been restarted */
+
+	/*
+	 * The receivewal worker's own last-observed (lsn, timeline), relayed
+	 * through wal_dir_scan.h's "<path>/receivewal-progress" file (written by
+	 * the worker's own pgaf_wal_progress_hook/pgaf_wal_segment_closed_hook
+	 * callbacks, cli_internal.c) and folded in here by accept_loop.c's own
+	 * refresh_ps_state() tick. lsn[0] == '\0' means "no reading yet" (the
+	 * worker has never ticked, or isn't running) -- display-only, NOT a
+	 * safe resume/replay position, see wal_dir_scan.h's own comment.
+	 */
+	char lsn[32];
+	uint32_t lsnTimeline;
+	time_t lsnObservedAt;   /* wall-clock time of that reading; 0 = none */
 } WsPsReceivewalEntry;
 
 typedef struct WsPsBootstrapEntry

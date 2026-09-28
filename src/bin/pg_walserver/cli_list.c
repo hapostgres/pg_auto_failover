@@ -275,11 +275,14 @@ read_latest_label(const char *routePath, char *labelOut, size_t labelOutSize)
  * written by a running "serve") against routeKey. *knownOut is set to false
  * when "serve" is not running at all (the caller should print "n/a", not
  * "no": there is no receivewal worker status to report either way), true otherwise
- * with the return value being the actual running/stopped answer.
+ * with the return value being the actual running/stopped answer. When
+ * entryOut is not NULL and a matching entry exists, it is copied there too --
+ * "list clusters" uses this to reuse that entry's own live LSN reading
+ * (ps_state.h's WsPsReceivewalEntry.lsn) rather than re-deriving one.
  */
 static bool
 receivewal_running_for_route(const char *pgdata, const char *routeKey,
-							 bool *knownOut)
+							 bool *knownOut, WsPsReceivewalEntry *entryOut)
 {
 	*knownOut = false;
 
@@ -306,6 +309,12 @@ receivewal_running_for_route(const char *pgdata, const char *routeKey,
 		if (streq(state.receivewalWorkers[i].routeKey, routeKey))
 		{
 			*knownOut = true;
+
+			if (entryOut != NULL)
+			{
+				*entryOut = state.receivewalWorkers[i];
+			}
+
 			return state.receivewalWorkers[i].pid > 0 && kill(
 				state.receivewalWorkers[i].pid, 0) == 0;
 		}
@@ -380,9 +389,25 @@ cli_list_clusters_run(const char *pgdata, const char *clusterFilter)
 		(void) wal_dir_find_latest(route, &tli, endLsn, sizeof(endLsn));
 
 		bool known = false;
-		bool running = receivewal_running_for_route(pgdata, route->key, &known);
+		WsPsReceivewalEntry entry = { 0 };
+		bool running = receivewal_running_for_route(pgdata, route->key, &known,
+													&entry);
 		const char *receivewalStr = !route->receivewalPull ? "n/a" :
 									!known ? "n/a" : running ? "yes" : "no";
+
+		/*
+		 * A running receivewal worker's own live reading (ps_state.h,
+		 * relayed from its hook callbacks -- see accept_loop.c's own
+		 * refresh_ps_state()) is a strictly more current "what's the latest
+		 * WAL we have" answer than wal_dir_find_latest()'s segment-boundary
+		 * scan above, for this exact route: use it in preference, falling
+		 * back to the scan-based value when the route has no receivewal
+		 * worker running, or it hasn't reported a reading yet.
+		 */
+		if (running && entry.lsn[0] != '\0')
+		{
+			strlcpy(endLsn, entry.lsn, sizeof(endLsn));
+		}
 
 		printf("%-20s %-8s %-10s %-8s %-22s %-22s\n", /* IGNORE-BANNED */
 			   route->key, haveBackup ? "yes" : "no",
