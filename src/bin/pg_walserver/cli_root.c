@@ -52,9 +52,14 @@
  *                     base backup no longer restorable once they are gone,
  *                     older than --keep-age or beyond --keep-count (never
  *                     both -- the more conservative of the two always
- *                     wins), cli_archive_cleanup.c. Never run automatically;
- *                     an operator's own cron job, exactly like real
- *                     pg_archivecleanup.
+ *                     wins), cli_archive_cleanup.c. Before deleting
+ *                     anything, a pre-flight check (accounting for
+ *                     legitimate timeline switches) refuses the whole
+ *                     operation if it would leave a kept backup with a
+ *                     WAL gap; --force bypasses that refusal only, never
+ *                     to be passed blindly by an unattended cron job.
+ *                     Never run automatically otherwise; an operator's
+ *                     own cron job, exactly like real pg_archivecleanup.
  *     ps              Process-level view: "serve"'s own pid, each
  *                     supervised embedded receivewal worker child, any in-flight
  *                     bootstrap backup -- cli_ps.c, reading the small state
@@ -1583,6 +1588,7 @@ static int archiveCleanupKeepCount = 0;
 static bool archiveCleanupHaveKeepAge = false;
 static WsRetentionAge archiveCleanupKeepAge = { 0 };
 static bool archiveCleanupDryRun = false;
+static bool archiveCleanupForce = false;
 
 static struct option archiveCleanupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
@@ -1591,6 +1597,7 @@ static struct option archiveCleanupLongOptions[] = {
 	{ "keep-count", required_argument, NULL, 'k' },
 	{ "keep-age", required_argument, NULL, 'a' },
 	{ "dry-run", no_argument, NULL, 'n' },
+	{ "force", no_argument, NULL, 'f' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -1608,10 +1615,11 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 		0
 	};
 	archiveCleanupDryRun = false;
+	archiveCleanupForce = false;
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c:P:k:a:n",
+	while ((c = getopt_long(argc, argv, "D:c:P:k:a:nf",
 							archiveCleanupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -1661,6 +1669,12 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 			case 'n':
 			{
 				archiveCleanupDryRun = true;
+				break;
+			}
+
+			case 'f':
+			{
+				archiveCleanupForce = true;
 				break;
 			}
 
@@ -1726,7 +1740,7 @@ cli_archive_cleanup_command_run(int argc, char **argv)
 	exit(ws_archive_cleanup_run(routePath,
 								archiveCleanupHaveKeepCount, archiveCleanupKeepCount,
 								archiveCleanupHaveKeepAge, archiveCleanupKeepAge,
-								archiveCleanupDryRun) ? 0 : 1);
+								archiveCleanupDryRun, archiveCleanupForce) ? 0 : 1);
 }
 
 
@@ -1735,7 +1749,8 @@ static CommandLine archive_cleanup_command =
 				 "Remove WAL/base backups this route no longer needs to "
 				 "keep (operator/cron-driven, never automatic)",
 				 "--cluster <name> --pgdata <path> | --path <dir> "
-				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run]",
+				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run] "
+				 "[--force]",
 				 "  --pgdata      where <pgdata>/pg_walserver.ini lives "
 				 "(defaults to PGDATA)\n"
 				 "  --cluster     the cluster name to clean up (looked up "
@@ -1751,7 +1766,25 @@ static CommandLine archive_cleanup_command =
 				 "                --keep-age is required, retention is "
 				 "infinite otherwise\n"
 				 "  --dry-run, -n print what would be removed without "
-				 "removing anything\n",
+				 "removing anything -- still runs\n"
+				 "                and reports the WAL-continuity check "
+				 "below, pass or fail\n"
+				 "  --force, -f   before deleting anything, a pre-flight "
+				 "check refuses the whole\n"
+				 "                operation if any kept backup would be "
+				 "left with a WAL gap, or\n"
+				 "                if removing a backup would leave a "
+				 "time range with no gap-free\n"
+				 "                newer backup to cover it; --force "
+				 "bypasses that refusal only (it\n"
+				 "                does not change what --keep-count/"
+				 "--keep-age decide to remove) --\n"
+				 "                a default, unattended cron job should "
+				 "NEVER blindly pass this;\n"
+				 "                only use it once you've independently "
+				 "verified proceeding is\n"
+				 "                safe (e.g. an independent backup, or "
+				 "an accepted/expected gap)\n",
 				 cli_archive_cleanup_getopt, cli_archive_cleanup_command_run);
 
 

@@ -910,7 +910,7 @@ for WAL retention.
 ## `archive-cleanup`: WAL and base-backup retention
 
 `pg_walserver archive-cleanup --cluster <name> --pgdata <path> | --path
-<dir> [--keep-count <N>] [--keep-age <interval>] [--dry-run]`
+<dir> [--keep-count <N>] [--keep-age <interval>] [--dry-run] [--force]`
 (`cli_archive_cleanup.c`) removes WAL segments/`.partial`/`.backup` files
 and base backups a route no longer needs, mirroring real PostgreSQL's own
 `pg_archivecleanup` contrib tool -- same filename-prefix-extraction
@@ -976,6 +976,46 @@ required starting WAL position -- the same file `BASE_BACKUP` itself
 already parses to answer a real client. `--dry-run`/`-n` (matching
 `pg_archivecleanup`'s own flag) logs exactly what would be removed, and
 why (age cutoff, count cutoff, or superseded), without removing anything.
+
+**A pre-flight WAL-continuity check runs before any deletion at all**
+(`ws_check_wal_continuity()`, `cli_archive_cleanup.c`), in both `--dry-run`
+and a real run. The count/age retention math above decides *which*
+backups and WAL are kept; this check separately verifies that every kept
+backup's own required starting WAL segment can actually still walk
+forward, with no missing segment, to wherever it needs to reach -- the
+next newer kept backup's own start segment, or, for the newest kept
+backup, the newest WAL segment actually present on disk. A gap can exist
+for reasons that have nothing to do with this run's own retention cutoff
+at all (an `archive_command` outage, a disk problem, manual tampering, or
+even a previous `archive-cleanup` run under different flags), and this
+tool must never silently go on to delete other files while leaving a
+backup it is supposedly protecting unusable for PITR.
+
+A timeline switch between two kept segments is not by itself a gap:
+`"%08X.history"` files (the same shape `cmd_timeline_history.c` already
+serves) record, for the timeline they belong to, the parent timeline and
+the exact LSN the switch happened at. The check walks that ancestry chain
+from the newer boundary's own timeline down to the older one, splits the
+segment-number range at each recorded switchpoint, and requires every
+segment number in range to be present under whichever timeline owned it
+at that point -- never flagging a false gap merely because two adjacent
+kept segments' timeline bytes differ.
+
+If a problem is found, `archive-cleanup` refuses the **entire** operation
+by default: a specific `log_error`/`log_fatal` names the backup and the
+missing segment/range, nothing is deleted at all (not even the otherwise-
+safe parts -- a cron job silently doing a partial cleanup that still
+degrades the DR posture is exactly the failure mode being guarded
+against), and the process exits non-zero. `--dry-run` still runs this
+check and reports exactly the same problem, without needing `--force` and
+without ever deleting anything (a dry run never deletes regardless).
+
+**`--force`** bypasses this specific refusal only -- it has no effect on
+what `--keep-count`/`--keep-age` themselves decide to remove. It exists
+for an operator who has independently verified some other way that
+proceeding is safe (e.g. an independent backup elsewhere, or a known/
+accepted gap) -- **a default, unattended cron job should never blindly
+pass `--force`**.
 
 ## `create-cert`: a self-signed TLS certificate on demand
 

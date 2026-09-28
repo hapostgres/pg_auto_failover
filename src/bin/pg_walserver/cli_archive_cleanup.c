@@ -275,14 +275,14 @@ parse_backup_label_time(const char *label, time_t *takenAt)
 
 
 /*
- * lsn_and_segsize_to_segment converts an "%X/%08X"-formatted LSN plus a
- * route's own WAL segment size into the 24-hex segment filename that LSN
- * falls in, using the exact same math wal_dir_scan.c's own wal_segment_
- * filename() and wal_dir_find_latest() already use.
+ * lsn_to_segno converts an "%X/%08X"-formatted LSN plus a route's own WAL
+ * segment size into the 0-based segment number it falls in, the same
+ * division wal_dir_scan.c's own wal_dir_find_latest() uses. Shared by
+ * lsn_to_segment() (below) and the WAL-continuity check's own timeline-
+ * switch-point arithmetic (ws_check_wal_continuity()).
  */
 static bool
-lsn_to_segment(const char *lsn, uint32_t timeline, uint64_t segSize,
-			   char *segmentOut, size_t segmentOutSize)
+lsn_to_segno(const char *lsn, uint64_t segSize, uint64_t *segnoOut)
 {
 	uint32_t hi, lo;
 
@@ -292,9 +292,69 @@ lsn_to_segment(const char *lsn, uint32_t timeline, uint64_t segSize,
 	}
 
 	uint64_t lsnValue = ((uint64_t) hi << 32) | lo;
-	uint64_t segno = lsnValue / segSize;
+
+	*segnoOut = lsnValue / segSize;
+
+	return true;
+}
+
+
+/*
+ * lsn_and_segsize_to_segment converts an "%X/%08X"-formatted LSN plus a
+ * route's own WAL segment size into the 24-hex segment filename that LSN
+ * falls in, using the exact same math wal_dir_scan.c's own wal_segment_
+ * filename() and wal_dir_find_latest() already use.
+ */
+static bool
+lsn_to_segment(const char *lsn, uint32_t timeline, uint64_t segSize,
+			   char *segmentOut, size_t segmentOutSize)
+{
+	uint64_t segno;
+
+	if (!lsn_to_segno(lsn, segSize, &segno))
+	{
+		return false;
+	}
 
 	wal_segment_filename(timeline, segno, segSize, segmentOut, segmentOutSize);
+
+	return true;
+}
+
+
+/*
+ * segment_name_to_tli_segno parses a 24-hex WAL segment filename prefix
+ * (such as WsBackupInfo's own startSegment) back into its timeline and
+ * 0-based segment number, the same %08X%08X%08X shape wal_segment_
+ * filename() produces and wal_dir_find_latest() (wal_dir_scan.c) already
+ * parses -- duplicated locally rather than exported, the same way this
+ * file's own is_wal_segment_name() already duplicates wal_dir_scan.c's
+ * private is_wal_segment_filename() for a different purpose.
+ */
+static bool
+segment_name_to_tli_segno(const char *name, uint64_t segSize,
+						  uint32_t *timelineOut, uint64_t *segnoOut)
+{
+	if (!is_wal_segment_name(name))
+	{
+		return false;
+	}
+
+	char tliHex[9] = { 0 };
+	char logHex[9] = { 0 };
+	char segHex[9] = { 0 };
+
+	memcpy(tliHex, name, 8); /* IGNORE-BANNED */
+	memcpy(logHex, name + 8, 8); /* IGNORE-BANNED */
+	memcpy(segHex, name + 16, 8); /* IGNORE-BANNED */
+
+	uint32_t tli = (uint32_t) strtoul(tliHex, NULL, 16);
+	uint32_t logId = (uint32_t) strtoul(logHex, NULL, 16);
+	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
+	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
+
+	*timelineOut = tli;
+	*segnoOut = (uint64_t) logId * perXLogId + seg;
 
 	return true;
 }
@@ -404,13 +464,380 @@ ws_backup_list_load(const char *routePath, uint64_t segSize,
 
 
 /* ---------------------------------------------------------------------
+ * WAL-continuity pre-flight check
+ *
+ * Before any deletion happens, verify that every *kept* backup's own
+ * required starting WAL segment can still walk forward, with no missing
+ * segment, to wherever it needs to reach: the next newer kept backup's own
+ * start segment, or (for the newest kept backup) the newest WAL segment
+ * actually present on disk. This is independent of, and additional to,
+ * the count/age retention math above -- it catches a WAL gap that has
+ * nothing to do with this run's own retention cutoff at all (an
+ * archive_command outage, a disk problem, manual tampering, or even a
+ * previous archive-cleanup run under different flags).
+ *
+ * A timeline switch between two kept segments is not by itself a gap: a
+ * "%08X.history" file (real PostgreSQL's own TLHistoryFileName() shape,
+ * see cmd_timeline_history.c) records, for the timeline it belongs to,
+ * the parent timeline and the exact LSN the switch happened at, and this
+ * project's server already writes/serves that same file. We walk that
+ * ancestry chain from the newer boundary's timeline down to the older
+ * one, split the segment-number range at each recorded switchpoint, and
+ * require every segment number to be present under whichever timeline
+ * owned it at that point in the chain -- never flagging a gap merely
+ * because two adjacent kept segments' timeline bytes differ.
+ * --------------------------------------------------------------------- */
+
+#define WS_MAX_TIMELINE_CHAIN 64
+
+typedef struct WsContinuityProblem
+{
+	bool hasProblem;
+	char detail[512];
+} WsContinuityProblem;
+
+
+/*
+ * read_last_history_line reads "<routePath>/%08X.history" (timeline) and
+ * returns, in *parentTliOut/lsnOut, the parent timeline and switchpoint LSN
+ * from its last non-blank, non-comment line -- the entry that records where
+ * *this* timeline itself branched off from *parentTliOut* (a history file
+ * may carry more than one line, one per ancestor further back, but the last
+ * line is always the immediate parent, exactly how real Postgres's own
+ * readTimeLineHistory()/tliOfPointInHistory() reasoning works). Returns
+ * false if the file is missing, empty, or has no parseable line.
+ */
+static bool
+read_last_history_line(const char *routePath, uint32_t timeline,
+					   uint32_t *parentTliOut, char *lsnOut, size_t lsnOutSize)
+{
+	char path[MAXPGPATH] = { 0 };
+
+	sformat(path, sizeof(path), "%s/%08X.history", routePath, timeline);
+
+	char *contents = NULL;
+	long size = 0;
+
+	if (!read_file_if_exists(path, &contents, &size) ||
+		contents == NULL || size == 0)
+	{
+		return false;
+	}
+
+	bool found = false;
+	char *line = contents;
+
+	while (line != NULL && *line != '\0')
+	{
+		char *nl = strchr(line, '\n');
+
+		if (nl != NULL)
+		{
+			*nl = '\0';
+		}
+
+		char *p = line;
+
+		while (*p == ' ' || *p == '\t')
+		{
+			p++;
+		}
+
+		if (*p != '\0' && *p != '#')
+		{
+			unsigned int tli;
+			char lsn[64] = { 0 };
+
+			if (sscanf(p, "%u\t%63s", &tli, lsn) == 2 || /* IGNORE-BANNED */
+				sscanf(p, "%u %63s", &tli, lsn) == 2) /* IGNORE-BANNED */
+			{
+				*parentTliOut = (uint32_t) tli;
+				strlcpy(lsnOut, lsn, lsnOutSize);
+				found = true;
+			}
+		}
+
+		line = (nl != NULL) ? nl + 1 : NULL;
+	}
+
+	free(contents);
+
+	return found;
+}
+
+
+/*
+ * check_wal_range verifies that every WAL segment number from startSegno
+ * (on startTli) through endSegno (on endTli, inclusive) is present on
+ * disk under routePath, resolving any intervening timeline switch(es) via
+ * "%08X.history" files. On the first missing segment, or the first
+ * ancestry fact that can't be established, fills *problem and returns --
+ * callers only need to check problem->hasProblem.
+ */
+static void
+check_wal_range(const char *routePath, uint64_t segSize,
+				uint32_t startTli, uint64_t startSegno,
+				uint32_t endTli, uint64_t endSegno,
+				WsContinuityProblem *problem)
+{
+	problem->hasProblem = false;
+	problem->detail[0] = '\0';
+
+	if (endTli < startTli)
+	{
+		sformat(problem->detail, sizeof(problem->detail),
+				"cannot verify WAL continuity: the newer boundary is on "
+				"timeline %u, older than the earlier boundary's timeline "
+				"%u -- this should never happen",
+				endTli, startTli);
+		problem->hasProblem = true;
+		return;
+	}
+
+	uint32_t chainTli[WS_MAX_TIMELINE_CHAIN];
+	uint64_t chainLower[WS_MAX_TIMELINE_CHAIN];
+	int chainLen = 1;
+
+	chainTli[0] = endTli;
+
+	uint32_t cur = endTli;
+
+	while (cur != startTli)
+	{
+		uint32_t parentTli = 0;
+		char lsn[64] = { 0 };
+
+		if (!read_last_history_line(routePath, cur, &parentTli, lsn, sizeof(lsn)))
+		{
+			sformat(problem->detail, sizeof(problem->detail),
+					"cannot verify WAL continuity across a timeline switch: "
+					"\"%08X.history\" is missing or unreadable under \"%s\", "
+					"needed to confirm timeline %u's own ancestry back to "
+					"timeline %u", cur, routePath, cur, startTli);
+			problem->hasProblem = true;
+			return;
+		}
+
+		uint64_t switchSegno;
+
+		if (!lsn_to_segno(lsn, segSize, &switchSegno))
+		{
+			sformat(problem->detail, sizeof(problem->detail),
+					"cannot verify WAL continuity: \"%08X.history\" under "
+					"\"%s\" has an unparseable switchpoint LSN (\"%s\")",
+					cur, routePath, lsn);
+			problem->hasProblem = true;
+			return;
+		}
+
+		chainLower[chainLen - 1] = switchSegno;
+
+		if (parentTli >= cur || parentTli < startTli)
+		{
+			sformat(problem->detail, sizeof(problem->detail),
+					"cannot verify WAL continuity: \"%08X.history\" under "
+					"\"%s\" names an implausible parent timeline %u",
+					cur, routePath, parentTli);
+			problem->hasProblem = true;
+			return;
+		}
+
+		cur = parentTli;
+
+		if (chainLen >= WS_MAX_TIMELINE_CHAIN)
+		{
+			sformat(problem->detail, sizeof(problem->detail),
+					"cannot verify WAL continuity: more than %d timeline "
+					"switches between timeline %u and timeline %u",
+					WS_MAX_TIMELINE_CHAIN, startTli, endTli);
+			problem->hasProblem = true;
+			return;
+		}
+
+		chainTli[chainLen] = cur;
+		chainLen++;
+	}
+
+	chainLower[chainLen - 1] = startSegno;
+
+	/* walk oldest (startTli) to newest (endTli), each timeline owning the
+	 * segment-number range [chainLower[k], next boundary) within the
+	 * overall [startSegno, endSegno] range being checked */
+	for (int k = chainLen - 1; k >= 0; k--)
+	{
+		uint64_t lower = chainLower[k];
+
+		/* an older timeline whose immediate successor switched away at
+		 * segno 0 owns nothing at all within this range -- guard the
+		 * subtraction below rather than underflow an unsigned bound */
+		if (k > 0 && chainLower[k - 1] == 0)
+		{
+			continue;
+		}
+
+		uint64_t upper = (k == 0) ? endSegno : (chainLower[k - 1] - 1);
+
+		if (lower > upper)
+		{
+			continue;
+		}
+
+		for (uint64_t segno = lower; segno <= upper; segno++)
+		{
+			char segName[WS_WAL_FNAME_LEN + 1] = { 0 };
+
+			wal_segment_filename(chainTli[k], segno, segSize,
+								 segName, sizeof(segName));
+
+			char segPath[MAXPGPATH] = { 0 };
+
+			sformat(segPath, sizeof(segPath), "%s/%s", routePath, segName);
+
+			if (!file_exists(segPath))
+			{
+				sformat(problem->detail, sizeof(problem->detail),
+						"missing WAL segment \"%s\" (needed between "
+						"\"%08X%08X%08X\" and \"%08X%08X%08X\")",
+						segName,
+						startTli, (uint32_t) (startSegno >> 32),
+						(uint32_t) startSegno,
+						endTli, (uint32_t) (endSegno >> 32),
+						(uint32_t) endSegno);
+				problem->hasProblem = true;
+				return;
+			}
+		}
+	}
+}
+
+
+/*
+ * ws_check_wal_continuity runs check_wal_range() (above) for every kept
+ * backup in the final kept set: from its own required starting segment
+ * through to the next newer kept backup's own start segment, or, for the
+ * newest kept backup, through to the newest WAL segment actually present
+ * on disk. Logs a specific log_error (naming the backup and the missing
+ * segment/range) for every problem found and returns false if any were --
+ * callers decide what to do about that (refuse outright, or proceed
+ * anyway under --force).
+ */
+static bool
+ws_check_wal_continuity(const char *routePath, const WsRoute *route,
+						uint64_t segSize, WsBackupInfo *backups,
+						int backupCount, const bool *kept)
+{
+	bool ok = true;
+
+	int *keptIdx = (int *) malloc(sizeof(int) * backupCount);
+	int keptLen = 0;
+
+	for (int i = 0; i < backupCount; i++)
+	{
+		if (kept[i] && backups[i].haveStart)
+		{
+			keptIdx[keptLen++] = i;
+		}
+	}
+
+	for (int k = 0; k < keptLen; k++)
+	{
+		WsBackupInfo *backup = &(backups[keptIdx[k]]);
+		uint32_t startTli;
+		uint64_t startSegno;
+
+		if (!segment_name_to_tli_segno(backup->startSegment, segSize,
+									   &startTli, &startSegno))
+		{
+			/* can't happen: startSegment was produced by our own
+			 * wal_segment_filename() when this backup was loaded */
+			continue;
+		}
+
+		uint32_t endTli = 0;
+		uint64_t endSegno = 0;
+		bool haveEnd = false;
+
+		if (k + 1 < keptLen)
+		{
+			WsBackupInfo *next = &(backups[keptIdx[k + 1]]);
+
+			haveEnd = segment_name_to_tli_segno(next->startSegment, segSize,
+												&endTli, &endSegno);
+		}
+		else
+		{
+			uint32_t latestTli = 0;
+			char latestEndLsn[64] = { 0 };
+
+			if (wal_dir_find_latest(route, &latestTli, latestEndLsn,
+									sizeof(latestEndLsn)))
+			{
+				uint64_t oneAfterSegno;
+
+				if (lsn_to_segno(latestEndLsn, segSize, &oneAfterSegno) &&
+					oneAfterSegno > 0)
+				{
+					endTli = latestTli;
+					endSegno = oneAfterSegno - 1;
+					haveEnd = true;
+				}
+			}
+		}
+
+		if (!haveEnd)
+		{
+			/* nothing on disk to compare against at all (a brand new
+			 * route, or every recognizable complete segment is gone) --
+			 * the least we can require is that this backup's own
+			 * required starting segment is itself still present */
+			char segPath[MAXPGPATH] = { 0 };
+
+			sformat(segPath, sizeof(segPath), "%s/%s", routePath,
+					backup->startSegment);
+
+			if (!file_exists(segPath))
+			{
+				log_error("archive-cleanup: WAL continuity check failed for "
+						  "kept backup \"%s\": its own required starting "
+						  "WAL segment \"%s\" is missing, and no WAL "
+						  "segment at all is present under \"%s\" to "
+						  "compare against", backup->dirPath,
+						  backup->startSegment, routePath);
+				ok = false;
+			}
+
+			continue;
+		}
+
+		WsContinuityProblem problem = { 0 };
+
+		check_wal_range(routePath, segSize, startTli, startSegno,
+						endTli, endSegno, &problem);
+
+		if (problem.hasProblem)
+		{
+			log_error("archive-cleanup: WAL continuity check failed for "
+					  "kept backup \"%s\" (requires WAL from \"%s\" "
+					  "onward): %s", backup->dirPath, backup->startSegment,
+					  problem.detail);
+			ok = false;
+		}
+	}
+
+	free(keptIdx);
+
+	return ok;
+}
+
+
+/* ---------------------------------------------------------------------
  * Main entry point
  * --------------------------------------------------------------------- */
 bool
 ws_archive_cleanup_run(const char *routePath,
 					   bool haveKeepCount, int keepCount,
 					   bool haveKeepAge, WsRetentionAge keepAge,
-					   bool dryRun)
+					   bool dryRun, bool force)
 {
 	if (!haveKeepCount && !haveKeepAge)
 	{
@@ -584,6 +1011,50 @@ ws_archive_cleanup_run(const char *routePath,
 				 "\"%s\" onward", keepAge.value, keepAge.unit, combinedCutoff);
 	}
 
+	/* --- pre-flight WAL-continuity check on the final kept set, always
+	 * computed and reported (dry-run or not) -- see ws_check_wal_
+	 * continuity()'s own header comment. Only a real run's actual
+	 * deletion is gated on the outcome (and only without --force): a
+	 * dry-run never deletes anything regardless, but must still surface
+	 * the same problem a real run would refuse over. */
+	bool continuityOk = ws_check_wal_continuity(routePath, &route, segSize,
+												backups, backupCount, kept);
+
+	if (!continuityOk)
+	{
+		if (force)
+		{
+			log_warn("archive-cleanup: proceeding despite the WAL "
+					 "continuity problem(s) above because --force was "
+					 "given");
+		}
+		else if (dryRun)
+		{
+			log_error("archive-cleanup: [dry run] the WAL continuity "
+					  "problem(s) above would refuse this operation "
+					  "outright on a real run (pass --force to proceed "
+					  "anyway once you've verified that is safe)");
+		}
+		else
+		{
+			log_fatal("archive-cleanup: refusing to remove anything: one "
+					  "or more kept backups would be left without a "
+					  "complete, gap-free WAL sequence -- see the "
+					  "specific problem(s) logged above. This is a whole-"
+					  "operation refusal, nothing has been deleted. Pass "
+					  "--force only once you have independently verified "
+					  "it is safe to proceed (e.g. an independent backup, "
+					  "or an accepted/expected gap) -- a default, "
+					  "unattended cron job should never blindly pass "
+					  "--force");
+			free(backups);
+			free(keptByCount);
+			free(keptByAge);
+			free(kept);
+			return false;
+		}
+	}
+
 	/* --- remove non-kept, non-superseded-anyway backups --- */
 	for (int i = 0; i < backupCount; i++)
 	{
@@ -722,5 +1193,9 @@ ws_archive_cleanup_run(const char *routePath,
 	free(keptByAge);
 	free(kept);
 
-	return true;
+	/* a dry run that found a continuity problem (and wasn't --force'd)
+	 * reports it above and deletes nothing either way, but still signals
+	 * the problem via its own exit status, matching what a real run
+	 * would have refused to do */
+	return continuityOk || force;
 }
