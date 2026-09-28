@@ -548,6 +548,192 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 
 
 /*
+ * find_pg_basebackup_for_major_version looks for a pg_basebackup binary
+ * whose major version is at least targetMajor, following the same
+ * compatibility rule pg_basebackup's own documentation states: "pg_basebackup
+ * works with servers of the same or older major version" -- a newer client
+ * against an older server is fine, the reverse is not guaranteed. Picking a
+ * pg_basebackup blindly (e.g. whatever happens to be first in PATH) can
+ * silently violate that rule, which is what this function is for.
+ *
+ * Lookup order, stopping at the first usable match:
+ *
+ *   1. $PG_CONFIG, when set (set_pg_ctl_from_PG_CONFIG()'s own bindir
+ *      lookup) -- an explicit developer override, honoured the same way
+ *      config_find_pg_ctl() already honours it elsewhere in this file, but
+ *      only when its own major version is new enough: an explicit override
+ *      pointing at something older than the target would silently defeat
+ *      the whole point of this function, so it's skipped (with a warning)
+ *      rather than trusted blindly.
+ *
+ *   2. the well-known Debian/Ubuntu postgresql-common per-major-version
+ *      layout, "/usr/lib/postgresql/<targetMajor>/bin/pg_basebackup" -- an
+ *      exact match when present, which is the common case in this
+ *      project's own Docker images.
+ *
+ *   3. every "pg_basebackup" found in PATH (config_find_pg_ctl()'s own
+ *      PATH-search branch, applied to pg_basebackup instead of pg_ctl),
+ *      keeping the newest one whose major version is >= targetMajor.
+ *
+ * Returns false with a log_fatal (not merely a log_error: the caller has no
+ * better fallback left to try once this function itself has exhausted
+ * every avenue) when only older-than-target candidates are found anywhere,
+ * or none at all.
+ */
+bool
+find_pg_basebackup_for_major_version(int targetMajor,
+									 char *pgBasebackupPathOut,
+									 size_t size)
+{
+	/* 1. PG_CONFIG, when set and new enough */
+	if (env_exists("PG_CONFIG"))
+	{
+		PostgresSetup pgConfigSetup = { 0 };
+
+		if (set_pg_ctl_from_PG_CONFIG(&pgConfigSetup))
+		{
+			int numericVersion = 0;
+
+			if (parse_pg_version_string(pgConfigSetup.pg_version,
+										&numericVersion))
+			{
+				int major = numericVersion / 100;
+
+				if (major >= targetMajor)
+				{
+					char candidate[MAXPGPATH] = { 0 };
+
+					path_in_same_directory(pgConfigSetup.pg_ctl,
+										   "pg_basebackup", candidate);
+
+					if (file_exists(candidate))
+					{
+						strlcpy(pgBasebackupPathOut, candidate, size);
+
+						log_info("Using pg_basebackup for PostgreSQL %s "
+								 "at \"%s\" (from PG_CONFIG)",
+								 pgConfigSetup.pg_version, candidate);
+
+						return true;
+					}
+
+					log_warn("PG_CONFIG points at PostgreSQL %s but no "
+							 "pg_basebackup was found next to its pg_ctl "
+							 "at \"%s\" -- ignoring PG_CONFIG for this "
+							 "lookup", pgConfigSetup.pg_version, candidate);
+				}
+				else
+				{
+					log_warn("PG_CONFIG points at PostgreSQL %s, older "
+							 "than the target major version %d -- ignoring "
+							 "PG_CONFIG for this lookup, an older "
+							 "pg_basebackup client is not guaranteed to "
+							 "work against a newer server",
+							 pgConfigSetup.pg_version, targetMajor);
+				}
+			}
+		}
+	}
+
+	/* 2. the well-known Debian/Ubuntu postgresql-common per-major layout */
+	{
+		char candidate[MAXPGPATH] = { 0 };
+
+		sformat(candidate, sizeof(candidate),
+				"/usr/lib/postgresql/%d/bin/pg_basebackup", targetMajor);
+
+		if (file_exists(candidate))
+		{
+			strlcpy(pgBasebackupPathOut, candidate, size);
+
+			log_info("Using pg_basebackup for PostgreSQL %d found at its "
+					 "well-known Debian/Ubuntu path \"%s\"",
+					 targetMajor, candidate);
+
+			return true;
+		}
+	}
+
+	/* 3. PATH search, keep the newest match that is >= targetMajor */
+	SearchPath allBasebackups = { 0 };
+	SearchPath basebackups = { 0 };
+
+	if (!search_path("pg_basebackup", &allBasebackups))
+	{
+		log_error("Failed to search PATH for pg_basebackup");
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&allBasebackups, &basebackups))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
+		return false;
+	}
+
+	char bestPath[MAXPGPATH] = { 0 };
+	int bestMajor = -1;
+
+	for (int i = 0; i < basebackups.found; i++)
+	{
+		char *candidate = basebackups.matches[i];
+
+		Program prog = run_program(candidate, "--version", NULL);
+
+		if (prog.returnCode != 0)
+		{
+			errno = prog.error;
+			log_warn("Failed to run \"%s --version\": %m", candidate);
+			free_program(&prog);
+			continue;
+		}
+
+		char versionString[PG_VERSION_STRING_MAX] = { 0 };
+		int numericVersion = 0;
+
+		if (!parse_version_number(prog.stdOut, versionString,
+								  sizeof(versionString), &numericVersion))
+		{
+			log_warn("Failed to parse version info from \"%s --version\"",
+					 candidate);
+			free_program(&prog);
+			continue;
+		}
+
+		free_program(&prog);
+
+		int major = numericVersion / 100;
+
+		if (major >= targetMajor && major > bestMajor)
+		{
+			bestMajor = major;
+			strlcpy(bestPath, candidate, MAXPGPATH);
+		}
+	}
+
+	if (bestMajor >= 0)
+	{
+		strlcpy(pgBasebackupPathOut, bestPath, size);
+
+		log_info("Using pg_basebackup for PostgreSQL %d found in PATH: "
+				 "\"%s\"", bestMajor, bestPath);
+
+		return true;
+	}
+
+	log_fatal("Failed to find a pg_basebackup for PostgreSQL %d or newer "
+			  "-- checked $PG_CONFIG, "
+			  "\"/usr/lib/postgresql/%d/bin/pg_basebackup\", and PATH; "
+			  "an older pg_basebackup client is not guaranteed to work "
+			  "against a newer server (pg_basebackup's own compatibility "
+			  "rule: same or older major version only)",
+			  targetMajor, targetMajor);
+
+	return false;
+}
+
+
+/*
  * find_pg_config_from_pg_ctl finds the path to pg_config from the known path
  * to pg_ctl. If that exists, we first use the pg_config binary found in the
  * same directory as the pg_ctl binary itself.

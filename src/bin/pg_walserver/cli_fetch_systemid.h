@@ -3,7 +3,11 @@
  *   `pg_walserver fetch-systemid`: a one-shot client that connects to a
  *   route's upstream and writes its real Postgres system identifier into
  *   that route's own "pg_walserver_systemid" file -- the file cmd_identify_
- *   system.c's server side reads back on every IDENTIFY_SYSTEM.
+ *   system.c's server side reads back on every IDENTIFY_SYSTEM. While it's
+ *   connected, it also records the upstream's Postgres major version (as
+ *   PQserverVersion()'s raw server_version_num, e.g. 170004) into a sibling
+ *   "pg_walserver_pgversion" file -- cli_basebackup.c's own use of this file
+ *   to pick a version-safe pg_basebackup binary.
  *
  * Licensed under the PostgreSQL License.
  *
