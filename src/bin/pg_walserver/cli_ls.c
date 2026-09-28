@@ -19,20 +19,32 @@
 #include "string_utils.h"
 
 /*
- * Every well-known file pg_walserver itself ever writes/reads directly
- * under --pgdata -- see cli_root.c's own cli_serve_run() (routes/HBA/
- * passwd/TLS/pidfile paths), tls.c (--ssl-ca-file's own default path,
- * "ca.crt"), and ps_state.h (the ps state file).
+ * The runtime tier: files "serve" itself keeps current while running,
+ * never hand-provisioned -- see cli_root.c's own cli_serve_run() (the
+ * pidfile path) and ps_state.h (the ps state file). Always shown: this
+ * is the tier actually worth a glance.
  */
-static const char *wellKnownFiles[] = {
+static const char *runtimeFiles[] = {
+	"pg_walserver.pid",
+	WS_PS_STATE_FILENAME,
+	NULL
+};
+
+/*
+ * The config/credential/certificate tier: written once, by the operator
+ * or by "setup"/"create-cert", and rarely changing thereafter -- see
+ * cli_root.c's own cli_serve_run() (routes/HBA/passwd/TLS paths) and
+ * tls.c (--ssl-ca-file's own default path, "ca.crt"). Only shown with
+ * --config: confirming these still exist tells an operator little day
+ * to day, so they don't clutter the default output.
+ */
+static const char *configFiles[] = {
 	"pg_walserver.ini",
 	"pg_walserver_hba.conf",
 	"pg_walserver_passwd",
 	"server.crt",
 	"server.key",
 	"ca.crt",
-	"pg_walserver.pid",
-	WS_PS_STATE_FILENAME,
 	NULL
 };
 
@@ -63,25 +75,14 @@ format_bytes(uint64_t bytes, char *dest, size_t destSize)
 }
 
 
-bool
-cli_ls_run(const char *pgdata)
+static void
+print_file_rows(const char *pgdata, const char *const *files)
 {
-	if (pgdata == NULL || pgdata[0] == '\0')
-	{
-		log_error("--pgdata is required (or set the PGDATA environment "
-				  "variable)");
-		return false;
-	}
-
-	printf("%-24s %-7s %-10s %s\n", "FILE", "EXISTS", "SIZE", "MODIFIED"); /* IGNORE-BANNED */
-	printf("------------------------------------------------------" /* IGNORE-BANNED */
-		   "----------\n");
-
-	for (int i = 0; wellKnownFiles[i] != NULL; i++)
+	for (int i = 0; files[i] != NULL; i++)
 	{
 		char path[MAXPGPATH] = { 0 };
 
-		sformat(path, sizeof(path), "%s/%s", pgdata, wellKnownFiles[i]);
+		sformat(path, sizeof(path), "%s/%s", pgdata, files[i]);
 
 		struct stat st;
 		bool exists = stat(path, &st) == 0;
@@ -100,7 +101,35 @@ cli_ls_run(const char *pgdata)
 		}
 
 		printf("%-24s %-7s %-10s %s\n", /* IGNORE-BANNED */
-			   wellKnownFiles[i], exists ? "yes" : "no", sizeStr, mtimeStr);
+			   files[i], exists ? "yes" : "no", sizeStr, mtimeStr);
+	}
+}
+
+
+bool
+cli_ls_run(const char *pgdata, bool includeConfigFiles)
+{
+	if (pgdata == NULL || pgdata[0] == '\0')
+	{
+		log_error("--pgdata is required (or set the PGDATA environment "
+				  "variable)");
+		return false;
+	}
+
+	printf("%-24s %-7s %-10s %s\n", "FILE", "EXISTS", "SIZE", "MODIFIED"); /* IGNORE-BANNED */
+	printf("------------------------------------------------------" /* IGNORE-BANNED */
+		   "----------\n");
+
+	print_file_rows(pgdata, runtimeFiles);
+
+	if (includeConfigFiles)
+	{
+		print_file_rows(pgdata, configFiles);
+	}
+	else
+	{
+		printf("\n(config/credential/certificate files omitted; " /* IGNORE-BANNED */
+			   "pass --config to include them)\n");
 	}
 
 	return true;

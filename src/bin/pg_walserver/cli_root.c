@@ -1834,9 +1834,11 @@ static CommandLine ps_command =
  * ----------------------------------------------------------------------- */
 
 static char lsPgdata[MAXPGPATH] = { 0 };
+static bool lsIncludeConfigFiles = false;
 
 static struct option lsLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", no_argument, NULL, 'c' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -1845,16 +1847,23 @@ cli_ls_getopt(int argc, char **argv)
 {
 	optind = 0;
 	(void) get_env_pgdata(lsPgdata);
+	lsIncludeConfigFiles = false;
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:", lsLongOptions, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "D:c", lsLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
 			case 'D':
 			{
 				strlcpy(lsPgdata, optarg, sizeof(lsPgdata));
+				break;
+			}
+
+			case 'c':
+			{
+				lsIncludeConfigFiles = true;
 				break;
 			}
 
@@ -1876,17 +1885,21 @@ cli_ls_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_ls_run(lsPgdata) ? 0 : 1);
+	exit(cli_ls_run(lsPgdata, lsIncludeConfigFiles) ? 0 : 1);
 }
 
 
 static CommandLine ls_command =
 	make_command("ls",
 				 "List pg_walserver's own on-disk footprint under --pgdata",
-				 "--pgdata <path>",
+				 "--pgdata <path> [--config]",
 				 "  --pgdata    this instance's own top-level storage root "
 				 "(defaults to\n"
-				 "              PGDATA)\n",
+				 "              PGDATA)\n"
+				 "  --config    also list the config/credential/"
+				 "certificate files\n"
+				 "              (omitted by default: rarely change, "
+				 "rarely interesting)\n",
 				 cli_ls_getopt, cli_ls_command_run);
 
 
