@@ -904,8 +904,78 @@ current after that first, automatic one -- on a schedule, after a certain
 amount of WAL, or on any other policy -- is deliberately left to the
 operator's own `pg_walserver basebackup` invocation (by hand, or from
 their own cron job around it): this project provides the facility, not the
-scheduling policy, the same philosophy `archive-cleanup` is expected to
-follow for WAL retention once that command exists.
+scheduling policy, the same philosophy `archive-cleanup` (below) follows
+for WAL retention.
+
+## `archive-cleanup`: WAL and base-backup retention
+
+`pg_walserver archive-cleanup --cluster <name> --pgdata <path> | --path
+<dir> [--keep-count <N>] [--keep-age <interval>] [--dry-run]`
+(`cli_archive_cleanup.c`) removes WAL segments/`.partial`/`.backup` files
+and base backups a route no longer needs, mirroring real PostgreSQL's own
+`pg_archivecleanup` contrib tool -- same filename-prefix-extraction
+algorithm for `.partial`/`.backup` files, same ignore-the-timeline
+string comparison (`SetWALFileNameForCleanup()`/`CleanupPriorWALFiles()`,
+`src/bin/pg_archivecleanup/pg_archivecleanup.c`) -- extended to also
+retire base backups, which stock `pg_archivecleanup` explicitly does not
+do (it has no notion of a base backup, and therefore no way to know
+whether deleting a given segment would leave one unrestorable).
+
+**Retention is infinite by default**, the same way vanilla PostgreSQL
+never runs `pg_archivecleanup` on its own -- it is always operator-wired,
+via `archive_cleanup_command` or a cron job. `archive-cleanup` follows the
+exact same philosophy `pg_walserver basebackup` itself already does for
+recurring backups (see "Bootstrapping a route's first base backup" above,
+its own "Recurring backups are not this project's job" paragraph):
+`pg_walserver` provides the facility, never the scheduling policy, and
+never deletes anything on its own initiative. At least one of
+`--keep-count`/`--keep-age` is therefore required; running with neither
+is refused outright rather than silently deleting everything, which is
+what "no constraint" would otherwise mean.
+
+**Whichever of `--keep-count`/`--keep-age` is more conservative (keeps
+more) wins** when both are given: a base backup, or a WAL segment, is
+only ever removed once *both* constraints independently agree it may
+go -- never when either flag alone would still want it kept. Concretely,
+each flag computes its own "keep" set (the N most recent backups for
+`--keep-count`, everything newer than the cutoff for `--keep-age`); the
+final kept set is their union, and the WAL retention cutoff is the
+starting segment of the oldest backup in that union. This is the same
+"intersection of what may be deleted, not union of it" logic pgBackRest
+and general-purpose retention tools use, applied here as a union of what
+must be kept.
+
+`basebackups/.latest` -- whichever backup it currently names -- and every
+WAL segment that backup's own `backup_label` requires (`read_backup_
+label()`, `cmd_base_backup.c`, the same parser `cmd_base_backup.c` itself
+uses to answer a real `BASE_BACKUP` request) are never removed by either
+rule, regardless of age or count: the currently-latest backup must always
+stay restorable. Independently of the count/age retention decision, a
+non-latest backup whose own required starting WAL segment is *already*
+missing on disk (e.g. from a previous, partial `archive-cleanup` run, or
+external interference) is also removed, logged as "superseded" rather
+than "past the retention cutoff" -- it is already unrestorable, so there
+is nothing left to protect by keeping its directory around.
+
+`--keep-age <interval>` requires an explicit suffix -- `h` (hours), `d`
+(days), `w` (weeks), or `m` (calendar months) -- there is no bare-number
+default, since a bare number's unit would be ambiguous. `m` is real
+calendar-month arithmetic (`struct tm` plus `timegm()`, entirely in
+`src/bin/common`-reachable frontend code -- this project links no backend
+date/time code at all), not a fixed 30-day approximation, since month
+lengths vary; going back one month from a day that doesn't exist in the
+target month (e.g. March 31st minus one month, since February 31st
+doesn't exist) normalizes forward the same way `mktime()`/`timegm()`
+always normalizes an out-of-range `struct tm`.
+
+Reuses `wal_dir_scan.h`'s own `ws_route_wal_segment_size()`/
+`wal_segment_filename()` for WAL segment math (no re-derivation of this
+project's own WAL filename parsing), and `cmd_base_backup.c`'s own
+`read_backup_label()` (exported for this purpose) to learn each backup's
+required starting WAL position -- the same file `BASE_BACKUP` itself
+already parses to answer a real client. `--dry-run`/`-n` (matching
+`pg_archivecleanup`'s own flag) logs exactly what would be removed, and
+why (age cutoff, count cutoff, or superseded), without removing anything.
 
 ## `create-cert`: a self-signed TLS certificate on demand
 
