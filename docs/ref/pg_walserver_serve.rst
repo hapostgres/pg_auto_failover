@@ -183,7 +183,28 @@ or any other replication-protocol client, also works for a one-off fetch::
   restore$ PGPASSWORD=s3kr3t psql "host=archive port=6543 dbname=mycluster user=archiver_repl replication=true sslmode=require" -c "FETCH_FILE <segment>" > <destination>
 
 **6. Or a real, continuously-streaming standby** instead of PITR: the same
-base backup, but with ``primary_conninfo`` and ``standby.signal``::
+base backup, but with ``primary_conninfo`` and ``standby.signal``.
+
+A real standby's own ``primary_conninfo`` never actually controls what
+``dbname`` gets sent: PostgreSQL always substitutes the literal
+``dbname=replication`` for any physical replication connection, no
+matter what ``primary_conninfo`` itself says. ``mycluster`` is not
+reachable by that name, so give it a second entry, keyed literally
+``replication``, pointing at the same ``path``, directly in
+``pg_walserver.ini``, then reload::
+
+  archive$ cat >> /var/lib/archiver/pg_walserver.ini <<EOF
+
+  [replication]
+  path = /var/lib/archiver/mycluster
+  EOF
+  archive$ pg_walserver reload --pgdata /var/lib/archiver
+
+An operator who only ever serves real physical standbys, never
+``pg_basebackup``/``pg_receivewal`` by name, would instead use
+``replication`` as the route's one and only key from the start. A
+``"*"`` wildcard route, or TLS SNI routing (below), work just as well
+when more than one cluster needs to be reachable this way::
 
   standby$ PGPASSWORD=s3kr3t pg_basebackup \
       -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
@@ -193,13 +214,6 @@ base backup, but with ``primary_conninfo`` and ``standby.signal``::
   EOF
   standby$ touch /var/lib/postgres/standby/standby.signal
   standby$ pg_ctl -D /var/lib/postgres/standby start
-
-A real walreceiver's physical replication connection always sends the
-literal ``dbname=replication``, regardless of what ``primary_conninfo``
-says (PostgreSQL's own ``libpqrcv_connect()`` overrides it
-unconditionally). A route reachable by a real standby by name therefore
-needs a second section literally keyed ``[replication]`` pointing at the
-same ``path``, a ``"*"`` wildcard route, or TLS SNI routing (below).
 
 **7. Keep the archive from growing forever**: nothing above removes
 anything on its own -- wire ``archive-cleanup`` into cron, keeping at
@@ -246,7 +260,8 @@ Routing more than one cluster by name: TLS SNI
 -----------------------------------------------
 
 The ``[replication]`` alias above only disambiguates a single cluster: a
-real standby's walreceiver always sends the same literal ``dbname``, so a
+real standby's ``primary_conninfo`` always produces the same literal
+``dbname``, so a
 second cluster needs a different signal. ``pg_walserver`` reads the TLS
 Server Name Indication (SNI) extension every TLS client sends during the
 handshake. libpq's own ``sslsni`` setting (on by default) sends the
@@ -279,8 +294,8 @@ automatically the first time a second named route needs one::
 
   archive$ pg_walserver --pgdata /var/lib/archiver --port 6543 &
 
-Creating, or with ``--force`` replacing, the certificate by hand at
-any time is what ``create-cert`` is for::
+The certificate can also be created, or with ``--force`` replaced, by
+hand at any time, with ``create-cert``::
 
   archive$ pg_walserver create-cert --pgdata /var/lib/archiver \
       --hostname mycluster.archive.example.com
