@@ -439,6 +439,9 @@ bool pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 bool pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
 								  char *currentLSN, bool *hasReachedLSN);
 bool pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system);
+bool pgsql_create_physical_replication_slot_over_replication_connection(PGSQL *pgsql,
+																		const char *
+																		slotName);
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 bool pgsql_prepare_to_wait(PGSQL *pgsql);
 

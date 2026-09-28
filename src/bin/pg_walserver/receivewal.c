@@ -60,9 +60,13 @@
 
 #include "receivewal.h"
 
+#include "cli_upstream.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
+#include "pgctl.h"
 #include "process_supervisor.h"
+#include "routes.h"
 #include "string_utils.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
@@ -172,6 +176,68 @@ ws_receivewal_start_all(const WsRoute *routes, int routeCount)
 
 
 /*
+ * ensure_receivewal_slot creates this route's own physical replication
+ * slot on its upstream (routes_slot_name() derives the name from the
+ * route key, idempotently -- see pgctl_create_replication_slot()'s own
+ * comment for why an already-existing slot is success, not an error). A
+ * real, permanent slot -- not pg_basebackup's own temporary one -- is
+ * what keeps the upstream from recycling a WAL segment this route's
+ * receivewal worker hasn't fetched yet out from under it; see cli_
+ * internal.c's own comment on cli_internal_pg_receivewal_run() for the
+ * full rationale (a fresh route's very first connection racing the
+ * upstream's own checkpoint can otherwise lose a segment permanently).
+ * Best-effort only here: a failure is logged and start_one_receivewal_
+ * child() still starts the worker regardless, the same "receivewal never
+ * blocks itself on write-ahead-log-retention setup" trade-off this
+ * project already makes for archive_command's own guarantee never being
+ * a hard prerequisite for starting to stream.
+ */
+static void
+ensure_receivewal_slot(const WsReceivewalRoute *cr)
+{
+	WsUpstreamTarget target = { 0 };
+
+	if (!cli_parse_upstream_conninfo(cr->upstream, &target))
+	{
+		log_warn("Route \"%s\": failed to parse its own \"upstream\" to "
+				 "create its replication slot -- starting the receivewal "
+				 "worker without one, so a reconnect could lose a WAL "
+				 "segment the upstream considers no longer needed",
+				 cr->routeKey);
+		return;
+	}
+
+	char slotName[NAMEDATALEN] = { 0 };
+
+	routes_slot_name(cr->routeKey, slotName, sizeof(slotName));
+
+	ReplicationSource replicationSource = { 0 };
+
+	replicationSource.primaryNode = target.node;
+	strlcpy(replicationSource.userName, target.userName,
+			sizeof(replicationSource.userName));
+	strlcpy(replicationSource.applicationName, "pg_walserver-receivewal",
+			sizeof(replicationSource.applicationName));
+	replicationSource.sslOptions = target.sslOptions;
+
+	if (env_exists("PGPASSWORD"))
+	{
+		(void) get_env_copy("PGPASSWORD", replicationSource.password,
+							sizeof(replicationSource.password));
+	}
+
+	if (!pgctl_create_replication_slot(&replicationSource, slotName))
+	{
+		log_warn("Route \"%s\": failed to create replication slot \"%s\" "
+				 "on its upstream -- starting the receivewal worker "
+				 "without one, so a reconnect could lose a WAL segment "
+				 "the upstream considers no longer needed",
+				 cr->routeKey, slotName);
+	}
+}
+
+
+/*
  * start_one_receivewal_child forks and execv()s this same pg_walserver
  * binary as "internal service pg-receivewal --route ... --upstream ...
  * --path ..." -- see this file's own header comment for why fork()+
@@ -181,6 +247,8 @@ static bool
 start_one_receivewal_child(void *context, pid_t *pid)
 {
 	WsReceivewalRoute *cr = (WsReceivewalRoute *) context;
+
+	ensure_receivewal_slot(cr);
 
 	fflush(stdout);
 	fflush(stderr);

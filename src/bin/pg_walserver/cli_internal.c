@@ -44,6 +44,7 @@
 #include "log.h"
 #include "pg_receivewal_entry.h"
 #include "pgsql.h"
+#include "routes.h"
 #include "string_utils.h"
 #include "wal_dir_scan.h"
 
@@ -162,11 +163,25 @@ cli_internal_pg_receivewal_progress_hook(XLogRecPtr xlogpos, uint32 timeline)
 
 /*
  * cli_internal_pg_receivewal_run calls pg_receivewal_main() in-process
- * against --upstream/--path, exactly the argv shape "pg_receivewal -w -d
- * <upstream> -D <path>" would build (see receivewal.c's own comment on why
- * no --slot/--synchronous: this is a plain, unsupervised-by-a-monitor
- * receivewal worker, not the pgaf-integrated archiver's own quorum-aware one).
- * Never returns: pg_receivewal_main() always exit()s on its own.
+ * against --upstream/--path/--slot, exactly the argv shape "pg_receivewal
+ * -w -d <upstream> -D <path> -S <slot>" would build. The slot itself --
+ * named deterministically from the route key by routes_slot_name(), the
+ * same name receivewal.c's own ensure_receivewal_slot() already created
+ * (or confirmed exists) in the parent before forking this child -- is
+ * what keeps the upstream from recycling a WAL segment this worker
+ * hasn't fetched yet out from under it, the same guarantee a real
+ * streaming standby's own slot gives it; without one, a connection drop
+ * right after this route's very first connection (before the slot would
+ * otherwise start holding segments back) can lose a segment the primary
+ * considers no longer needed by anyone, permanently stalling this
+ * worker on a segment that will never come back (see README.md's own
+ * "The embedded receivewal worker" section). Deliberately no
+ * --create-slot here: passing it turns this into a one-shot "create the
+ * slot, then exit(0)" invocation (see upstream pg_receivewal's own
+ * --create-slot semantics) rather than the long-running streaming
+ * worker this is meant to be -- creating the slot is exactly what the
+ * parent's own separate, ordinary-SQL-based call already did. Never
+ * returns: pg_receivewal_main() always exit()s on its own.
  */
 static void
 cli_internal_pg_receivewal_run(int argc, char **argv)
@@ -182,7 +197,11 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 		exit(1);
 	}
 
-	char *args[7];
+	char slotName[NAMEDATALEN] = { 0 };
+
+	routes_slot_name(internalPgReceivewalRoute, slotName, sizeof(slotName));
+
+	char *args[9];
 	int argsIndex = 0;
 
 	args[argsIndex++] = "pg_receivewal";
@@ -191,6 +210,8 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 	args[argsIndex++] = internalPgReceivewalUpstream;
 	args[argsIndex++] = "-D";
 	args[argsIndex++] = internalPgReceivewalPath;
+	args[argsIndex++] = "-S";
+	args[argsIndex++] = slotName;
 	args[argsIndex] = NULL;
 
 	char title[256];
