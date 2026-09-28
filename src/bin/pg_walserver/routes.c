@@ -23,10 +23,13 @@
 #include "postgres_fe.h"
 
 #include "ini.h"
+#include "pqexpbuffer.h"
+#include "port/pg_crc32c.h"
 
 #include "routes.h"
 #include "file_utils.h"
 #include "log.h"
+#include "string_utils.h"
 #include "ws_util.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
@@ -259,4 +262,178 @@ routes_find_by_hostname(const WsRoute *routes, int count, const char *hostname)
 	}
 
 	return NULL;
+}
+
+
+/*
+ * routes_slot_name -- see routes.h's own comment.
+ */
+void
+routes_slot_name(const char *routeKey, char *out, size_t outSize)
+{
+	pg_crc32c crc;
+
+	INIT_CRC32C(crc);
+	COMP_CRC32C(crc, routeKey, strlen(routeKey));
+	FIN_CRC32C(crc);
+
+	char sanitized[NAMEDATALEN] = { 0 };
+	size_t si = 0;
+
+	for (const char *p = routeKey; *p != '\0' && si < sizeof(sanitized) - 1; p++)
+	{
+		unsigned char c = (unsigned char) *p;
+
+		if (isalnum(c))
+		{
+			sanitized[si++] = (char) tolower(c);
+		}
+		else if (si > 0 && sanitized[si - 1] != '_')
+		{
+			sanitized[si++] = '_';
+		}
+	}
+
+	while (si > 0 && sanitized[si - 1] == '_')
+	{
+		si--;
+	}
+
+	sanitized[si] = '\0';
+
+	if (sanitized[0] == '\0')
+	{
+		strlcpy(sanitized, "route", sizeof(sanitized));
+	}
+
+	char suffix[16];
+
+	sformat(suffix, sizeof(suffix), "_%08x", crc);
+
+	/* PostgreSQL slot names are NAMEDATALEN-1 (63) bytes max; keep the
+	 * fixed prefix and CRC suffix intact, truncating only the sanitized
+	 * route key if the combination would overflow that */
+	size_t maxLen = NAMEDATALEN - 1;
+	size_t fixedLen = strlen("pgws_") + strlen(suffix);
+
+	if (fixedLen < maxLen && strlen(sanitized) > maxLen - fixedLen)
+	{
+		sanitized[maxLen - fixedLen] = '\0';
+	}
+
+	sformat(out, outSize, "pgws_%s%s", sanitized, suffix);
+}
+
+
+/*
+ * routes_persist_path writes "path = <path>" into an existing [routeKey]
+ * section that doesn't have one yet, right after its header line. See
+ * routes.h's own comment: never creates a new section, and a no-op (true)
+ * if the section already has a "path" property -- callers only reach this
+ * for a route cli_resolve_upstream() found in the file but had to default
+ * a path for, so both of those should already hold, but a plain text
+ * re-scan here is cheap insurance against acting on stale information.
+ */
+bool
+routes_persist_path(const char *routesPath, const char *routeKey,
+					const char *path)
+{
+	char *contents = NULL;
+	size_t fileSize = 0;
+
+	if (!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+							 &contents, &fileSize, NULL))
+	{
+		log_error("Failed to read routes file \"%s\"", routesPath);
+		return false;
+	}
+
+	char header[NAMEDATALEN + 16 + 2] = { 0 };
+
+	sformat(header, sizeof(header), "[%s]", routeKey);
+
+	char *sectionStart = strstr(contents, header);
+
+	if (sectionStart == NULL ||
+		(sectionStart != contents && sectionStart[-1] != '\n'))
+	{
+		log_error("No section \"%s\" found in \"%s\" to add \"path\" to",
+				  header, routesPath);
+		free(contents);
+		return false;
+	}
+
+	char *lineEnd = strchr(sectionStart, '\n');
+	char *afterHeader = (lineEnd != NULL)
+						? lineEnd + 1
+						: sectionStart + strlen(sectionStart);
+
+	/* scan this section's own lines (up to the next "[" at start of line,
+	 * or end of file) for an already-present "path" property */
+	bool hasPath = false;
+	char *cursor = afterHeader;
+
+	while (*cursor != '\0' && *cursor != '[')
+	{
+		char *key = cursor;
+
+		while (*key == ' ' || *key == '\t')
+		{
+			key++;
+		}
+
+		if (strncmp(key, "path", 4) == 0)
+		{
+			char *afterKey = key + 4;
+
+			while (*afterKey == ' ' || *afterKey == '\t')
+			{
+				afterKey++;
+			}
+
+			if (*afterKey == '=')
+			{
+				hasPath = true;
+				break;
+			}
+		}
+
+		char *nextLine = strchr(cursor, '\n');
+
+		if (nextLine == NULL)
+		{
+			break;
+		}
+
+		cursor = nextLine + 1;
+	}
+
+	if (hasPath)
+	{
+		free(contents);
+		return true;
+	}
+
+	PQExpBuffer whole = createPQExpBuffer();
+
+	appendBinaryPQExpBuffer(whole, contents, afterHeader - contents);
+	appendPQExpBuffer(whole, "path = %s\n", path);
+	appendPQExpBufferStr(whole, afterHeader);
+
+	bool ok = !PQExpBufferBroken(whole) &&
+			  write_file_atomic(whole->data, whole->len, routesPath);
+
+	destroyPQExpBuffer(whole);
+	free(contents);
+
+	if (!ok)
+	{
+		log_error("Failed to write \"%s\"", routesPath);
+		return false;
+	}
+
+	log_info("Added \"path = %s\" to route \"%s\" in \"%s\"",
+			 path, routeKey, routesPath);
+
+	return true;
 }

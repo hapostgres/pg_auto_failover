@@ -38,8 +38,8 @@
  * is read from a config file, is PGPASSWORD/.pgpass only, never a password
  * sitting in the file itself.
  */
-static bool
-parse_upstream_conninfo(const char *conninfo, WsUpstreamTarget *target)
+bool
+cli_parse_upstream_conninfo(const char *conninfo, WsUpstreamTarget *target)
 {
 	char *errmsg = NULL;
 	PQconninfoOption *options = PQconninfoParse(conninfo, &errmsg);
@@ -155,11 +155,11 @@ cli_resolve_upstream(const char *pgdata, const char *routeKey,
 
 	if (upstreamArg != NULL && upstreamArg[0] != '\0')
 	{
-		haveUpstream = parse_upstream_conninfo(upstreamArg, target);
+		haveUpstream = cli_parse_upstream_conninfo(upstreamArg, target);
 	}
 	else if (route != NULL && route->upstream[0] != '\0')
 	{
-		haveUpstream = parse_upstream_conninfo(route->upstream, target);
+		haveUpstream = cli_parse_upstream_conninfo(route->upstream, target);
 	}
 
 	routes_free(routes);
@@ -183,6 +183,38 @@ cli_resolve_upstream(const char *pgdata, const char *routeKey,
 	if (userArg != NULL && userArg[0] != '\0')
 	{
 		strlcpy(target->userName, userArg, sizeof(target->userName));
+	}
+
+	/*
+	 * Still nothing? Default to "<pgdata>/<cluster>", the same top-level
+	 * storage root every other pg_walserver file already lives under --
+	 * --path only ever needs to be passed to override that. When the route
+	 * itself already exists in pg_walserver.ini (just without its own
+	 * "path" property -- e.g. hand-written with only "upstream"), persist
+	 * the default back into the file, the same way "setup" always writes
+	 * one for a route it creates, so every other command reading this
+	 * route later (routes_load() has no defaulting logic of its own) sees
+	 * it too.
+	 */
+	if (target->path[0] == '\0' && pgdata != NULL && pgdata[0] != '\0' &&
+		routeKey != NULL && routeKey[0] != '\0')
+	{
+		sformat(target->path, sizeof(target->path), "%s/%s", pgdata, routeKey);
+
+		if (route != NULL)
+		{
+			/* routesPath was already filled in above, resolving the route */
+			if (!routes_persist_path(routesPath, routeKey, target->path))
+			{
+				/* not fatal: the resolved path above is still usable for
+				 * this one invocation, only the write-back failed */
+				log_warn("Route \"%s\"'s default path could not be saved "
+						 "to \"%s\"; pass --path explicitly, or add "
+						 "\"path = %s\" to its section by hand, to avoid "
+						 "recomputing it every time", routeKey, routesPath,
+						 target->path);
+			}
+		}
 	}
 
 	if (target->path[0] == '\0')
