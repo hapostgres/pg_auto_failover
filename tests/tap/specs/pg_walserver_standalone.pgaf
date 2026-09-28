@@ -187,7 +187,7 @@ step test_006_real_standby_with_core_tools {
     # "serve" bootstrapped automatically at startup (test_000 above only
     # checked that the file exists on disk, never that it's actually
     # servable over the wire).
-    exec node2 bash -c 'pg_basebackup -w -d "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -D /tmp/standby -X none --no-manifest'
+    exec node2 bash -c 'pg_basebackup -w -d "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -D /tmp/standby -X stream --no-manifest'
     exec node2 bash -c 'test -f /tmp/standby/PG_VERSION'
 
     # real Postgres's own walreceiver (libpqrcv_connect(), physical mode)
