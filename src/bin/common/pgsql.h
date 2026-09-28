@@ -230,6 +230,16 @@ typedef struct IdentifySystem
 	char xlogpos[PG_LSN_MAXLENGTH];
 	char dbname[NAMEDATALEN];
 	TimeLineHistory timelines;
+
+	/*
+	 * PQserverVersion() of the connection IDENTIFY_SYSTEM was run on, in
+	 * its raw server_version_num form (e.g. 170004 for 17.4): free to
+	 * capture here, the connection is already open for IDENTIFY_SYSTEM
+	 * itself, no extra round trip. pg_walserver's own fetch-systemid uses
+	 * this to record the upstream's major version alongside its system
+	 * identifier (see cli_fetch_systemid.c).
+	 */
+	int serverVersion;
 } IdentifySystem;
 
 

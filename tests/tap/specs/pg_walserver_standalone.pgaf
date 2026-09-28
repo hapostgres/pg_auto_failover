@@ -105,6 +105,13 @@ step test_000_sync_files_from_node1 {
     exec node2 bash -c 'ls /tmp/ws/default/0/*[0-9A-F] | grep -v "\.partial$" | xargs -n1 basename | sort | tail -1 > /tmp/seg.txt'
     exec node2 bash -c 'test -s /tmp/seg.txt'
     exec node2 bash -c 'test -s /tmp/ws/default/0/pg_walserver_systemid'
+    # `setup` (via fetch-systemid) also records node1's real Postgres major
+    # version, alongside its system identifier, in its own sibling file --
+    # cli_fetch_systemid.c's own header comment. It's PQserverVersion()'s raw
+    # server_version_num form (e.g. 170011 for 17.11), so a real value here
+    # is a 5-6 digit positive integer, never empty or garbage.
+    exec node2 bash -c 'test -s /tmp/ws/default/0/pg_walserver_pgversion'
+    exec node2 bash -c 'grep -Eqx "[0-9]{5,6}" /tmp/ws/default/0/pg_walserver_pgversion || { echo "got: $(cat /tmp/ws/default/0/pg_walserver_pgversion)"; false; }'
     # the setup capturer keeps running: test_003 needs it live, to prove
     # pg_walserver can serve a segment while it is concurrently being written
     exec node2 bash -c 'nohup pg_walserver --pgdata /tmp/ws --port 6543 > /tmp/ws-walsender.log 2>&1 & echo started'
@@ -114,6 +121,15 @@ step test_000_sync_files_from_node1 {
     # own ws_bootstrap_missing_backups()) -- wait for it to actually
     # complete before the rest of this spec relies on it.
     exec node2 bash -c 'for i in $(seq 30); do test -s /tmp/ws/default/0/basebackups/.latest && exit 0; sleep 1; done; cat /tmp/ws-walsender.log; exit 1'
+    # that automatic bootstrap backup went through cli_basebackup_run(),
+    # which -- since pg_walserver_pgversion above was already on disk by the
+    # time "serve" started -- picked its pg_basebackup binary the
+    # version-aware way (find_pg_basebackup_for_major_version(), pgctl.c)
+    # rather than falling back to a blind PATH lookup: its own log line says
+    # so, and the "no recorded upstream version" warning that fallback path
+    # logs must not appear anywhere in this run.
+    exec node2 bash -c 'grep -q "Using pg_basebackup for PostgreSQL" /tmp/ws-walsender.log || { cat /tmp/ws-walsender.log; false; }'
+    exec node2 bash -c '! grep -q "no recorded upstream Postgres version" /tmp/ws-walsender.log'
 }
 
 step test_001_identify_system_and_show {

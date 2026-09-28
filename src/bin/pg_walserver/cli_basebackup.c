@@ -19,6 +19,64 @@
 #include "string_utils.h"
 
 #define WS_BASEBACKUP_LATEST_FILENAME "basebackups/.latest"
+#define WS_PGVERSION_FILENAME "pg_walserver_pgversion"
+
+
+/*
+ * find_pg_basebackup_for_route picks the pg_basebackup binary to use for
+ * target: when target->path has a "pg_walserver_pgversion" file (written
+ * by `pg_walserver fetch-systemid`, see cli_fetch_systemid.c), uses
+ * find_pg_basebackup_for_major_version() to pick one that is at least that
+ * major version -- pg_basebackup's own compatibility rule is "same or
+ * older major version [as the server]" only, so an older client against a
+ * newer upstream is not safe to use.
+ *
+ * A route with no recorded version yet (created before this file existed,
+ * or fetch-systemid was never run against it) falls back to the old blind
+ * search_path_first() behaviour, with a clear warning: never a hard
+ * failure just for missing this file, backward compatibility with
+ * existing routes matters more here.
+ */
+static bool
+find_pg_basebackup_for_route(const WsUpstreamTarget *target,
+							 char *pgBasebackupPathOut, size_t size)
+{
+	char pgversionPath[MAXPGPATH] = { 0 };
+	char *contents = NULL;
+	long fileSize = 0L;
+
+	sformat(pgversionPath, sizeof(pgversionPath), "%s/" WS_PGVERSION_FILENAME,
+			target->path);
+
+	int version = 0;
+
+	if (read_file_if_exists(pgversionPath, &contents, &fileSize) &&
+		contents != NULL && fileSize > 0 && stringToInt(contents, &version))
+	{
+		free(contents);
+
+		int targetMajor = version / 10000;
+
+		return find_pg_basebackup_for_major_version(targetMajor,
+													pgBasebackupPathOut,
+													size);
+	}
+
+	if (contents != NULL)
+	{
+		free(contents);
+	}
+
+	log_warn("\"%s\" has no recorded upstream Postgres version "
+			 "(\"%s\" not found or unreadable) -- picking whatever "
+			 "pg_basebackup happens to be first in PATH, which may not be "
+			 "version-safe against this upstream; run \"pg_walserver "
+			 "fetch-systemid\" against this route to record its upstream "
+			 "version and fix this",
+			 target->path, pgversionPath);
+
+	return search_path_first("pg_basebackup", pgBasebackupPathOut, LOG_ERROR);
+}
 
 
 bool
@@ -27,7 +85,8 @@ cli_basebackup_run(const WsUpstreamTarget *target,
 {
 	char pgBasebackupPath[MAXPGPATH] = { 0 };
 
-	if (!search_path_first("pg_basebackup", pgBasebackupPath, LOG_ERROR))
+	if (!find_pg_basebackup_for_route(target, pgBasebackupPath,
+									  sizeof(pgBasebackupPath)))
 	{
 		/* errors have already been logged */
 		return false;

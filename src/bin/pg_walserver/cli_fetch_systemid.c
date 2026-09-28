@@ -19,6 +19,7 @@
 #include "string_utils.h"
 
 #define WS_SYSTEMID_FILENAME "pg_walserver_systemid"
+#define WS_PGVERSION_FILENAME "pg_walserver_pgversion"
 
 
 /*
@@ -43,6 +44,37 @@ read_existing_systemid(const char *path, uint64_t *out)
 	}
 
 	bool ok = stringToUInt64(contents, out);
+
+	free(contents);
+
+	return ok;
+}
+
+
+/*
+ * read_existing_pgversion reads "<path>/pg_walserver_pgversion" if it
+ * exists, returning the parsed server_version_num in *out. Returns false
+ * when the file is absent or unparseable (treated as "no prior recorded
+ * version", never a hard error: a brand new route, or one created before
+ * this file existed, has no pgversion file yet).
+ */
+static bool
+read_existing_pgversion(const char *path, int *out)
+{
+	char pgversionPath[MAXPGPATH] = { 0 };
+	char *contents = NULL;
+	long size = 0L;
+
+	sformat(pgversionPath, sizeof(pgversionPath), "%s/" WS_PGVERSION_FILENAME,
+			path);
+
+	if (!read_file_if_exists(pgversionPath, &contents, &size) ||
+		contents == NULL || size == 0)
+	{
+		return false;
+	}
+
+	bool ok = stringToInt(contents, out);
 
 	free(contents);
 
@@ -79,24 +111,19 @@ cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 	}
 
 	uint64_t identifier = replicationSource.system.identifier;
-	uint64_t existing = 0;
+	uint64_t existingIdentifier = 0;
+	bool needSystemIdWrite = true;
 
-	if (read_existing_systemid(target->path, &existing))
+	if (read_existing_systemid(target->path, &existingIdentifier))
 	{
-		if (existing == identifier)
+		if (existingIdentifier == identifier)
 		{
 			log_info("\"%s\" already has the correct system identifier "
 					 "(%" PRIu64 ")", target->path, identifier);
 
-			if (systemIdentifierOut != NULL)
-			{
-				*systemIdentifierOut = identifier;
-			}
-
-			return true;
+			needSystemIdWrite = false;
 		}
-
-		if (!force)
+		else if (!force)
 		{
 			log_error("Refusing to overwrite the system identifier already "
 					  "recorded for this route: %" PRIu64 " on disk, "
@@ -105,32 +132,93 @@ cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 					  "be changing under it, which usually means the wrong "
 					  "upstream was given, or this route needs a fresh path "
 					  "instead of reusing an old one",
-					  existing, identifier, target->node.host,
+					  existingIdentifier, identifier, target->node.host,
 					  target->node.port);
 			return false;
 		}
-
-		log_warn("Overwriting the system identifier recorded for \"%s\": "
-				 "%" PRIu64 " -> %" PRIu64 " (--force)",
-				 target->path, existing, identifier);
+		else
+		{
+			log_warn("Overwriting the system identifier recorded for \"%s\": "
+					 "%" PRIu64 " -> %" PRIu64 " (--force)",
+					 target->path, existingIdentifier, identifier);
+		}
 	}
 
-	char sysidPath[MAXPGPATH] = { 0 };
-	char contents[64] = { 0 };
-
-	sformat(sysidPath, sizeof(sysidPath), "%s/" WS_SYSTEMID_FILENAME,
-			target->path);
-
-	int len = sformat(contents, sizeof(contents), "%" PRIu64, identifier);
-
-	if (!write_file_atomic(contents, len, sysidPath))
+	if (needSystemIdWrite)
 	{
-		log_error("Failed to write \"%s\"", sysidPath);
-		return false;
+		char sysidPath[MAXPGPATH] = { 0 };
+		char contents[64] = { 0 };
+
+		sformat(sysidPath, sizeof(sysidPath), "%s/" WS_SYSTEMID_FILENAME,
+				target->path);
+
+		int len = sformat(contents, sizeof(contents), "%" PRIu64, identifier);
+
+		if (!write_file_atomic(contents, len, sysidPath))
+		{
+			log_error("Failed to write \"%s\"", sysidPath);
+			return false;
+		}
+
+		log_info("Wrote system identifier %" PRIu64 " to \"%s\"",
+				 identifier, sysidPath);
 	}
 
-	log_info("Wrote system identifier %" PRIu64 " to \"%s\"",
-			 identifier, sysidPath);
+	/*
+	 * Same overwrite-safety dance, its own file, for the upstream's major
+	 * Postgres version -- see cli_basebackup.c's own use of this file to
+	 * pick a version-safe pg_basebackup binary.
+	 */
+	int version = replicationSource.system.serverVersion;
+	int existingVersion = 0;
+	bool needVersionWrite = true;
+
+	if (read_existing_pgversion(target->path, &existingVersion))
+	{
+		if (existingVersion == version)
+		{
+			log_info("\"%s\" already has the correct upstream Postgres "
+					 "version (%d)", target->path, version);
+
+			needVersionWrite = false;
+		}
+		else if (!force)
+		{
+			log_error("Refusing to overwrite the upstream Postgres version "
+					  "already recorded for this route: %d on disk, %d "
+					  "from %s:%d -- pass --force to overwrite it "
+					  "deliberately",
+					  existingVersion, version, target->node.host,
+					  target->node.port);
+			return false;
+		}
+		else
+		{
+			log_warn("Overwriting the upstream Postgres version recorded "
+					 "for \"%s\": %d -> %d (--force)",
+					 target->path, existingVersion, version);
+		}
+	}
+
+	if (needVersionWrite)
+	{
+		char pgversionPath[MAXPGPATH] = { 0 };
+		char contents[64] = { 0 };
+
+		sformat(pgversionPath, sizeof(pgversionPath), "%s/" WS_PGVERSION_FILENAME,
+				target->path);
+
+		int len = sformat(contents, sizeof(contents), "%d", version);
+
+		if (!write_file_atomic(contents, len, pgversionPath))
+		{
+			log_error("Failed to write \"%s\"", pgversionPath);
+			return false;
+		}
+
+		log_info("Wrote upstream Postgres version %d to \"%s\"",
+				 version, pgversionPath);
+	}
 
 	if (systemIdentifierOut != NULL)
 	{

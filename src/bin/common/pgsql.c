@@ -3170,6 +3170,12 @@ pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system)
 		return false;
 	}
 
+	/*
+	 * Free for the taking now that the connection is open: no extra round
+	 * trip, unlike a "SHOW server_version_num" query would need.
+	 */
+	system->serverVersion = PQserverVersion(connection);
+
 	/* extended query protocol not supported in a replication connection */
 	PGresult *result = PQexec(connection, "IDENTIFY_SYSTEM");
 
