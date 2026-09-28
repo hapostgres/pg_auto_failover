@@ -56,4 +56,17 @@ bool cli_resolve_upstream(const char *pgdata, const char *routeKey,
 						  const char *userArg,
 						  WsUpstreamTarget *target);
 
+/*
+ * cli_parse_upstream_conninfo parses a plain libpq keyword/value connection
+ * string (routes.h's own "upstream" property shape) directly, filling in
+ * target's host/port/user/sslOptions -- the same parsing cli_resolve_
+ * upstream() uses internally for an explicit --upstream/a route's own
+ * "upstream" property, exposed here for receivewal.c's own need to turn a
+ * route's raw "upstream" string into connection fields (to create this
+ * route's own replication slot) without going through the rest of cli_
+ * resolve_upstream()'s --path/--cluster/--pgdata resolution, which doesn't
+ * apply there.
+ */
+bool cli_parse_upstream_conninfo(const char *conninfo, WsUpstreamTarget *target);
+
 #endif /* WS_CLI_UPSTREAM_H */

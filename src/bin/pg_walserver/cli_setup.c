@@ -304,9 +304,9 @@ ensure_tls_for_multiple_routes(const char *pgdata, const char *routeKey,
 bool
 cli_setup_run(const WsSetupOptions *options)
 {
-	if (options->route[0] == '\0' || options->path[0] == '\0')
+	if (options->route[0] == '\0')
 	{
-		log_error("setup requires --cluster and --path");
+		log_error("setup requires --cluster");
 		return false;
 	}
 
@@ -316,10 +316,25 @@ cli_setup_run(const WsSetupOptions *options)
 		return false;
 	}
 
+	/*
+	 * --path is only ever an override: a route's own directory defaults to
+	 * "<pgdata>/<cluster>", the same top-level storage root every other
+	 * pg_walserver file already lives under.
+	 */
+	char defaultPath[MAXPGPATH] = { 0 };
+	const char *pathArg = options->path;
+
+	if (pathArg[0] == '\0')
+	{
+		sformat(defaultPath, sizeof(defaultPath), "%s/%s",
+				options->pgdata, options->route);
+		pathArg = defaultPath;
+	}
+
 	WsUpstreamTarget target = { 0 };
 
 	if (!cli_resolve_upstream(NULL /* not looking one up yet */, NULL,
-							  options->path, options->upstream,
+							  pathArg, options->upstream,
 							  options->host,
 							  options->port[0] != '\0' ? options->port : NULL,
 							  options->user, &target))

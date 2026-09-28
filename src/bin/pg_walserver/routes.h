@@ -153,4 +153,32 @@ const WsRoute * routes_find_exact(const WsRoute *routes, int count, const char *
 const WsRoute * routes_find_by_hostname(const WsRoute *routes, int count,
 										const char *hostname);
 
+/*
+ * routes_slot_name derives a valid, deterministic PostgreSQL replication
+ * slot name (lowercase alnum/underscore only, NAMEDATALEN-1 bytes max) from
+ * an arbitrary route key -- which, unlike a slot name, is an entirely
+ * opaque string with no character restrictions (see this file's own header
+ * comment: pg_auto_failover's own archiver reconciler uses
+ * "<formation>/<group>" keys, for one). The sanitized key alone could
+ * collide (e.g. "a/b" and "a-b" both sanitize to "a_b"); a short CRC32C
+ * suffix of the *original*, unsanitized key makes every slot name unique
+ * per route regardless. Always writes a NUL-terminated name into out
+ * (truncating the sanitized part, never the suffix, if it would overflow
+ * outSize/NAMEDATALEN).
+ */
+void routes_slot_name(const char *routeKey, char *out, size_t outSize);
+
+/*
+ * routes_persist_path writes "path = <path>" into an *existing* [routeKey]
+ * section of the routes file at routesPath that doesn't have one yet (e.g.
+ * a section an operator hand-wrote with only "upstream", or one predating
+ * "path" defaulting to "<pgdata>/<routeKey>" -- see cli_resolve_upstream()'s
+ * own comment). Never creates a new section (that's "pg_walserver setup"'s
+ * job, with its own upstream/TLS/receivewal handling); a no-op, returning
+ * true, if the section already has a "path" property. false on any I/O or
+ * parse failure, already logged.
+ */
+bool routes_persist_path(const char *routesPath, const char *routeKey,
+						 const char *path);
+
 #endif /* WS_ROUTES_H */
