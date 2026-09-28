@@ -37,30 +37,37 @@ its own.
 
 This is ``pg_walserver --help``'s own output, verbatim::
 
-  usage: pg_walserver [serve options] | scram-secret ... | setup ... |
-                       fetch-systemid ... | basebackup ... |
-                       create-cert ... | archive-wal ... | restore-wal ... |
-                       archive-cleanup ... | reload ... | ps ... | ls ... |
-                       status ... | list clusters|backups|wal ...
+  pg_walserver: The archiver's own replication-protocol server
+  usage: pg_walserver [serve options] | scram-secret ... | setup ... | fetch-systemid ... | basebackup ... | create-cert ... | archive-wal ... | restore-wal ... | archive-cleanup ... | reload ... | ps ... | ls ... | status ... | list ...
+
 
   Available commands:
     pg_walserver
-      serve           Run the pg_walserver accept loop (the default command)
-      scram-secret    Print one pg_walserver_passwd line for a user
-      fetch-systemid  Fetch a route's upstream system identifier
-      basebackup      Take a base backup of a route's upstream
-      setup           Create or validate one pg_walserver.ini route
-      create-cert     Create a self-signed TLS certificate for --pgdata
-      archive-wal     Push one WAL/.backup file into a pg_walserver route (archive_command)
-      restore-wal     Fetch one WAL/.backup file from a pg_walserver route (restore_command)
-      archive-cleanup Remove WAL/base backups this route no longer needs to keep
-      reload          Ask a running pg_walserver to reload its configuration
-      ps              Show serve's own process-level status (pid, receivewal workers, bootstrap jobs)
-      ls              List pg_walserver's own on-disk footprint under --pgdata
-      status          Show a short pg_walserver status dashboard
-      list clusters   List every route, its backup/receivewal status, and its WAL range
-      list backups    List base backups per cluster
-      list wal        List WAL cache stats per cluster, or every file with --segments
+      serve            Run the pg_walserver accept loop (the default command)
+      scram-secret     Print one pg_walserver_passwd line for a user
+      fetch-systemid   Fetch a route's upstream system identifier
+      basebackup       Take a base backup of a route's upstream
+      setup            Create or validate one pg_walserver.ini route
+      create-cert      Create a self-signed TLS certificate for --pgdata
+      archive-wal      Push one WAL/.backup file into a pg_walserver route (archive_command)
+      restore-wal      Fetch one WAL/.backup file from a pg_walserver route (restore_command)
+      archive-cleanup  Remove WAL/base backups this route no longer needs to keep (operator/cron-driven, never automatic)
+      reload           Ask a running pg_walserver to reload its configuration
+      ps               Show pg_walserver serve's own process-level status (pid, receivewal workers, bootstrap jobs)
+      ls               Per-cluster storage summary: base backups, WAL, disk usage
+      status           Show a short pg_walserver status dashboard
+    + list             List clusters, base backups, or WAL cache contents
+
+``list`` is itself three further sub-commands (``pg_walserver list
+--help``, also verbatim)::
+
+  pg_walserver list: List clusters, base backups, or WAL cache contents
+
+  Available commands:
+    pg_walserver list
+      clusters  List every route, its backup/receivewal status, and the WAL range it covers
+      backups   List base backups per cluster (label, size, which is .latest)
+      wal       List WAL cache aggregate stats per cluster, or every file with --segments
 
 Description
 -----------
@@ -83,6 +90,17 @@ and implements PostgreSQL's own archiving contract in full:
 ``pg_walserver``. It combines streaming (the embedded receivewal
 worker, for efficiency) with ``archive_command`` (for robustness)
 rather than requiring one or the other.
+
+Every ``pg_walserver`` command reads its own bookkeeping -- ``pg_walserver.ini``,
+the HBA file, the SCRAM verifier file, the TLS certificate, the pid file --
+from a directory given by ``--pgdata``, or the ``PGDATA`` environment
+variable as a default, exactly like ``pg_autoctl``'s own ``--pgdata``/
+``PGDATA``. This is ``pg_walserver``'s own directory, not the
+PostgreSQL data directory of any cluster it archives: those are each a
+route's own, separate ``path`` (below), never confused with this one.
+A route's ``path`` itself defaults to ``<pgdata>/<cluster>`` and rarely
+needs to be set explicitly -- see :ref:`pg_walserver_setup`'s own
+``--path``.
 
 Archiving one cluster
 ~~~~~~~~~~~~~~~~~~~~~
@@ -130,9 +148,9 @@ installation is possible thanks to "virtual host" routing, with a
 routing setup managed in ``pg_walserver.ini``. That file registers each
 cluster by name, under a route (an operator-chosen key, carrying no
 filesystem meaning of its own) that maps to its own storage root: the
-WAL and base backups of one entire PostgreSQL cluster (its whole
-``PGDATA``), never a single database within it -- WAL archiving is
-inherently a whole-cluster concept.
+WAL and base backups of one entire PostgreSQL cluster -- everything
+under that cluster's own data directory, never a single database
+within it -- WAL archiving is inherently a whole-cluster concept.
 
 The way to select a route when connecting -- with ``pg_basebackup``,
 ``psql``, or any other replication client -- is the ``dbname`` key of
@@ -325,7 +343,35 @@ Run the server with no authentication, for manual testing only::
 
   $ pg_walserver --insecure --port 6543
 
+Registering a node and starting a PITR session, in shape
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The shortest possible path from nothing to a point-in-time restore --
+register one PostgreSQL node, start serving, then restore from it.
+Every command's own real output, and the reasoning behind each step,
+are in :ref:`pg_walserver_serve`'s own "A complete standalone example"
+walkthrough; this is only the shape of it::
+
+  # on the archive host: register the node, start serving
+  archive$ export PGDATA=/var/lib/archiver
+  archive$ PGPASSWORD='s3kr3t' pg_walserver setup --cluster mycluster \
+      --upstream "host=primary user=archiver_repl sslmode=require"
+  archive$ pg_walserver create-cert --hostname archive
+  archive$ pg_walserver --port 6543 &
+
+  # elsewhere, once a base backup exists: restore to a point in time
+  restore$ PGPASSWORD='s3kr3t' pg_basebackup \
+      -d "host=archive port=6543 user=archiver_repl dbname=mycluster sslmode=require" \
+      -D /var/lib/postgres/pitr -X none --no-manifest
+  restore$ cat >> /var/lib/postgres/pitr/postgresql.auto.conf <<EOF
+  restore_command = 'PGPASSWORD=s3kr3t pg_walserver restore-wal %f %p --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
+  recovery_target_time = '2026-09-27 11:30:00+00'
+  EOF
+  restore$ touch /var/lib/postgres/pitr/recovery.signal
+  restore$ pg_ctl -D /var/lib/postgres/pitr start
+
 See :ref:`pg_walserver_serve` for the full standalone walkthrough
 (create a route, configure access, start the server, add
 ``archive_command``, take a PITR restore or a live standby, and keep
-the archive from growing forever).
+the archive from growing forever) with every command's own real,
+unedited output.

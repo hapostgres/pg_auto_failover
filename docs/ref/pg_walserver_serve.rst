@@ -94,29 +94,26 @@ archive host, then reload::
 This needs ``wal_level`` already set to ``replica`` or higher (the
 default since PostgreSQL 10).
 
-**2. On the archive host**, create the route and fetch the system
-identifier::
+**2. On the archive host**, set ``PGDATA`` once for every command below,
+then create the route and fetch the system identifier -- ``--path``
+only ever needs to be given to override its own default,
+``<pgdata>/<cluster>``::
 
-  archive$ PGPASSWORD=s3kr3t pg_walserver setup \
-      --pgdata /var/lib/archiver --cluster mycluster \
-      --path /var/lib/archiver/mycluster \
-      --upstream "host=primary user=archiver_repl sslmode=require"
-  INFO  Added route "mycluster" (path "/var/lib/archiver/mycluster") to
-        "/var/lib/archiver/pg_walserver.ini"
-  INFO  Connecting to primary:5432 as "archiver_repl" to fetch the
-        system identifier
-  INFO  Wrote system identifier 7690580638048137639 to
-        "/var/lib/archiver/mycluster/pg_walserver_systemid"
-  INFO  Wrote upstream Postgres version 170011 to
-        "/var/lib/archiver/mycluster/pg_walserver_pgversion"
-  INFO  setup complete: route "mycluster" is ready (no base backup taken
-        here -- "pg_walserver serve" bootstraps the route's first base
-        backup automatically, once, the next time it starts or reloads
-        this route; run "pg_walserver basebackup" by hand at any time to
-        take another one)
-  INFO  No running "pg_walserver serve" found at
-        "/var/lib/archiver/pg_walserver.pid": the route just written
-        will take effect the next time "serve" starts
+  archive$ export PGDATA=/var/lib/archiver
+  archive$ PGPASSWORD=s3kr3t pg_walserver setup --cluster mycluster \
+      --upstream "host=primary port=5534 user=archiver_repl sslmode=require"
+  20:42:19 2445614 ERROR Failed to open "/var/lib/archiver/pg_walserver.ini": No such file or directory
+  20:42:19 2445614 ERROR Failed to read routes file "/var/lib/archiver/pg_walserver.ini"
+  20:42:19 2445614 INFO  Added route "mycluster" (path "/var/lib/archiver/mycluster") to "/var/lib/archiver/pg_walserver.ini"
+  20:42:19 2445614 INFO  Connecting to primary:5534 as "archiver_repl" to fetch the system identifier
+  20:42:19 2445614 INFO  Wrote system identifier 7690676421909321516 to "/var/lib/archiver/mycluster/pg_walserver_systemid"
+  20:42:19 2445614 INFO  Wrote upstream Postgres version 170011 to "/var/lib/archiver/mycluster/pg_walserver_pgversion"
+  20:42:19 2445614 INFO  setup complete: route "mycluster" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
+  20:42:19 2445614 INFO  No running "pg_walserver serve" found at "/var/lib/archiver/pg_walserver.pid": the route just written will take effect the next time "serve" starts
+
+The two ``ERROR`` lines above are harmless and expected on a first run:
+``pg_walserver.ini`` does not exist yet the moment ``setup`` tries to
+read it, before writing its very first route into it.
 
 Receiving the route's own WAL continuously once ``serve`` starts
 (below), with no separate ``pg_receivewal`` process, is the default
@@ -137,22 +134,33 @@ HBA or the password file::
   archive$ cat > /var/lib/archiver/pg_walserver_hba.conf <<EOF
   hostssl  mycluster  archiver_repl  10.0.0.0/8  scram-sha-256
   EOF
-  archive$ pg_walserver create-cert --pgdata /var/lib/archiver --hostname archive
-  archive$ pg_walserver --pgdata /var/lib/archiver --port 6543
-  INFO  TLS is enabled ("/var/lib/archiver/server.crt")
-  INFO  Started the embedded receivewal worker for route "mycluster"
-        (pid 25673), receiving into "/var/lib/archiver/mycluster"
-  INFO  Route "mycluster" has no base backup yet: starting an automatic
-        bootstrap base backup in the background (pid 25674)
-  INFO  pg_walserver listening on port 6543, routes
-        /var/lib/archiver/pg_walserver.ini
-  INFO  Route "mycluster": taking its automatic bootstrap base backup
-        (attempt 1/3)
-  INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known
-        Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
-  INFO  Base backup "basebackup-20260928T134117Z" is now the latest for
-        "/var/lib/archiver/mycluster"
-  INFO  Route "mycluster": automatic bootstrap base backup complete
+  archive$ pg_walserver create-cert --hostname archive
+  20:42:28 2446120 INFO   /usr/bin/openssl req -new -x509 -days 365 -nodes -text -out /var/lib/archiver/server.crt -keyout /var/lib/archiver/server.key -subj "/CN=archive"
+  20:42:28 2446120 INFO  Created a self-signed certificate for "/var/lib/archiver" ("/var/lib/archiver/server.crt"/"/var/lib/archiver/server.key", CN=archive) -- replace it with a real one before running on a reachable network
+  archive$ pg_walserver --port 6543
+  20:42:33 2446330 INFO  TLS is enabled ("/var/lib/archiver/server.crt")
+  20:42:33 2446330 INFO  Started the embedded receivewal worker for route "mycluster" (pid 2446333), receiving into "/var/lib/archiver/mycluster"
+  20:42:33 2446330 INFO  Route "mycluster" has no base backup yet: starting an automatic bootstrap base backup in the background (pid 2446334)
+  20:42:33 2446334 INFO  Route "mycluster": waiting for its embedded receivewal worker to start streaming before taking the bootstrap base backup
+  20:42:33 2446330 INFO  pg_walserver listening on port 6543, routes /var/lib/archiver/pg_walserver.ini
+  20:42:33 2446334 INFO  Route "mycluster": taking its automatic bootstrap base backup (attempt 1/3)
+  20:42:33 2446334 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
+  20:42:33 2446334 INFO  Taking a base backup of primary:5534 into "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T204233Z"
+  20:42:33 2446334 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver-basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/mycluster/basebackups/basebackup-20260928T204233Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T204233Z
+  20:42:33 2446334 INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
+  20:42:33 2446334 INFO  pg_basebackup: checkpoint completed
+  20:42:33 2446334 INFO  pg_basebackup: write-ahead log start point: 0/15000028 on timeline 1
+  20:42:33 2446334 INFO  pg_basebackup: starting background WAL receiver
+  20:42:33 2446334 INFO  pg_basebackup: created temporary replication slot "pg_basebackup_2446341"
+  20:42:34 2446334 INFO  37913/37913 kB (100%), 0/1 tablespace (...260928T204233Z/global/pg_control)
+  20:42:34 2446334 INFO  37913/37913 kB (100%), 1/1 tablespace
+  20:42:34 2446334 INFO  write-ahead log end point: 0/15000120
+  20:42:34 2446334 INFO  pg_basebackup: waiting for background process to finish streaming ...
+  20:42:34 2446334 INFO  pg_basebackup: syncing data to disk ...
+  20:42:34 2446334 INFO  pg_basebackup: renaming backup_manifest.tmp to backup_manifest
+  20:42:34 2446334 INFO  pg_basebackup: base backup completed
+  20:42:34 2446334 INFO  Base backup "basebackup-20260928T204233Z" is now the latest for "/var/lib/archiver/mycluster"
+  20:42:34 2446334 INFO  Route "mycluster": automatic bootstrap base backup complete
 
 Taking the route's first base backup automatically at this point, in
 the background, once its embedded receivewal worker (if any) shows
@@ -222,7 +230,7 @@ reachable by that name, so give it a second entry, keyed literally
   [replication]
   path = /var/lib/archiver/mycluster
   EOF
-  archive$ pg_walserver reload --pgdata /var/lib/archiver
+  archive$ pg_walserver reload
 
 An operator who only ever serves real physical standbys, never
 ``pg_basebackup``/``pg_receivewal`` by name, would instead use
@@ -264,22 +272,22 @@ Checking on a running archive
 Continuing the example above, with ``serve`` running and both routes
 receiving or backed up at least once::
 
-  archive$ pg_walserver status --pgdata /var/lib/archiver
-  pg_walserver: running (pid 25671, uptime 0h04m31s)
+  archive$ pg_walserver status
+  pg_walserver: running (pid 2446330, uptime 0h01m11s)
     clusters:  2 configured, 2 with a base backup
     receivewal workers: 1/1 running
-      mycluster            lsn 0/04000060 (timeline 1, 1s ago)
+      mycluster            lsn 0/180000F8 (timeline 1, 7s ago)
     bootstrap backups pending: 0
 
-  archive$ pg_walserver list clusters --pgdata /var/lib/archiver
-  CLUSTER              BACKUP   RECEIVEWAL   WORKER   WAL START              WAL END
+  archive$ pg_walserver list clusters
+  CLUSTER              BACKUP   RECEIVEWAL WORKER   WAL START              WAL END
   --------------------------------------------------------------------------------------------
-  mycluster            yes      pull         yes      0/02000028             0/04000060
-  another               yes      none         n/a      0/09000028             -
+  mycluster            yes      pull       yes      0/15000028             0/180000F8
+  another              yes      none       n/a      0/18000028             -
 
-  archive$ pg_walserver ps --pgdata /var/lib/archiver
-  pg_walserver(25671) running, uptime 0h04m31s
-  `-- receivewal(25673) mycluster, running, uptime 0h04m31s, restarts 0, lsn 0/04000060 (timeline 1, 1s ago)
+  archive$ pg_walserver ps
+  pg_walserver(2446330) running, uptime 0h01m11s
+  `-- receivewal(2446333) mycluster, running, uptime 0h01m11s, restarts 0, lsn 0/180000F8 (timeline 1, 7s ago)
 
 Having no embedded receivewal worker to report on, running or
 otherwise, is why ``another`` shows ``WORKER n/a``: it was set up with

@@ -15,24 +15,17 @@ What this project ships instead, under
 vendored in and built directly into ``pg_walserver`` itself, called
 in-process rather than exec'd as a separate program.
 
-Two tracking hooks, for a future layer
-----------------------------------------
+Two tracking hooks, feeding the live LSN shown in ``ps``/``status``
+-------------------------------------------------------------------
 
 ``pg_receivewal`` streams and writes segments to a local directory
 with no hook of its own: nothing else in the same process gets told
 when a segment closes, or how far the stream has progressed since.
-Today, nothing in this codebase needs that -- ``pg_walserver`` decides
-whether a segment is available by looking at the directory itself
-(``wal_dir_scan.c``), not by reacting to a notification. The two hooks
-below exist for a later layer, not yet built, that will want to track
-or register WAL segment completions as they happen instead of
-rescanning a directory to find out: a small, deliberate extension
-point added while the vendored copy was already being touched for
-other reasons, rather than a gap this project urgently needed closed.
-
-The hooks are two callbacks added to the vendored copy's
-``stop_streaming()`` callback (already invoked on every check-in,
-segment-closing or not):
+The vendored copy adds two callbacks to its own ``stop_streaming()``
+(already invoked on every check-in, segment-closing or not), and
+``pg_walserver`` wires both of them, in ``cli_internal.c``, into a
+single, throttled (roughly once a second) write of a small
+``<route path>/receivewal-progress`` file:
 
 ``pgaf_wal_segment_closed_hook(xlogpos, timeline)``
   Called the moment a WAL segment finishes. ``xlogpos`` is that
@@ -43,15 +36,22 @@ segment-closing or not):
   actually closes, roughly once per ``--status-interval`` round).
   ``xlogpos`` here is raw stream position, not guaranteed to land on a
   record boundary -- an observability/lag metric only, never a safe
-  replay target on its own.
+  replay target on its own. This is why ``receivewal-progress`` is a
+  file of its own, never folded into ``wal_dir_scan.c``'s own
+  directory-scan cache (``archiver-position``): every other reader of
+  that cache treats it as a safe resume point, which this hook's own
+  reading is not guaranteed to be.
 
-Both run synchronously, on the streaming loop's own thread of control,
-so a hook must stay fast and non-blocking, the same rule a real
-``archive_command`` script has to follow. Neither hook is set by
-anything in this codebase today: both default to ``NULL`` (a no-op),
-and the vendored copy runs exactly like real, unmodified
-``pg_receivewal`` until something sets one. They exist as an extension
-point, wired and ready, not yet consumed.
+That file is what ``pg_walserver ps``/``pg_walserver status`` read
+back (each running receivewal worker's own ``lsn <LSN> (timeline <N>,
+<secs>s ago)`` line) and what ``pg_walserver list clusters`` prefers
+for its own WAL END column when a route's receivewal worker is
+running, falling back to the directory-scan approximation otherwise.
+Both hooks run synchronously, on the streaming loop's own thread of
+control, so the write they trigger has to stay fast and non-blocking,
+the same rule a real ``archive_command`` script has to follow --
+best-effort only: a failed write is logged and never stops the worker
+itself from streaming.
 
 The only other change from upstream is mechanical: ``main()`` is
 renamed to ``pg_receivewal_main()`` and is no longer ``static``/the
@@ -72,3 +72,10 @@ supervised service in this project is), just one that calls
 ``pg_receivewal_main()`` in-process instead of exec'ing a system
 ``pg_receivewal``. This sub-command is hidden from ``--help``: it is
 not meant to be run by hand.
+
+Before starting that child, the parent creates (or confirms) a real,
+permanent physical replication slot on the upstream -- named
+deterministically from the route key -- and passes it along
+(``-S <slot>``): the same guarantee a real streaming standby's own
+slot gives it, keeping the upstream from recycling a WAL segment this
+worker has not fetched yet out from under it.
