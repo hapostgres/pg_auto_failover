@@ -76,6 +76,8 @@ bool pg_cleanup_standby_mode(uint32_t pg_control_version,
 							 PGSQL *pgsql);
 
 bool pgctl_identify_system(ReplicationSource *replicationSource);
+bool pgctl_create_replication_slot(ReplicationSource *replicationSource,
+								   const char *slotName);
 
 bool pg_is_running(const char *pg_ctl, const char *pgdata);
 bool pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname);

@@ -3080,6 +3080,63 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 
 
 /*
+ * pgctl_create_replication_slot connects with replication=1 to our target
+ * node (the same connection shape as pgctl_identify_system(), right above)
+ * and issues CREATE_REPLICATION_SLOT ... PHYSICAL RESERVE_WAL for slotName,
+ * idempotently: an already-existing slot with that name is success, not an
+ * error -- see pgsql_create_physical_replication_slot_over_replication_
+ * connection()'s own comment for why this needs no real "dbname" at all.
+ */
+bool
+pgctl_create_replication_slot(ReplicationSource *replicationSource,
+							  const char *slotName)
+{
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
+	char primaryConnInfoReplication[MAXCONNINFO] = { 0 };
+	PGSQL replicationClient = { 0 };
+
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  MAXCONNINFO,
+								  primaryNode->host,
+								  primaryNode->port,
+								  replicationSource->userName,
+								  NULL, /* no database */
+								  replicationSource->password,
+								  replicationSource->applicationName,
+								  replicationSource->sslOptions,
+								  false)) /* no need for escaping */
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	int len = sformat(primaryConnInfoReplication, MAXCONNINFO,
+					  "%s replication=1",
+					  primaryConnInfo);
+
+	if (len >= MAXCONNINFO)
+	{
+		log_warn("Failed to create a replication slot: primary_conninfo "
+				 "too large");
+		return false;
+	}
+
+	if (!pgsql_init(&replicationClient,
+					primaryConnInfoReplication,
+					PGSQL_CONN_UPSTREAM))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return pgsql_create_physical_replication_slot_over_replication_connection(
+		&replicationClient, slotName);
+}
+
+
+/*
  * pg_is_running returns true if PostgreSQL is running.
  */
 bool
