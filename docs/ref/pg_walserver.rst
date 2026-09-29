@@ -312,14 +312,59 @@ real PostgreSQL primary except where noted:
 
   Streams a timeline's ``.history`` file.
 
-``CREATE_REPLICATION_SLOT`` / ``READ_REPLICATION_SLOT`` / ``DROP_REPLICATION_SLOT``
+``CREATE_REPLICATION_SLOT slot_name [TEMPORARY] { PHYSICAL | LOGICAL plugin } [options]``
 
-  Manage a replication slot on the connected route.
+  Physical slots only -- ``LOGICAL`` parses, so a real client's own
+  grammar keeps working, but is rejected at this point with
+  ``0A000 only physical replication slots are supported``. A slot here
+  is bookkeeping only, not a real PostgreSQL slot (there is no live
+  server behind it): one small marker file, ``<route path>/.slot_
+  <name>``, recording a single ``restart_lsn`` -- the route's own WAL
+  position at the moment of creation (from its position cache, falling
+  back to a directory scan). It is not yet wired into any WAL-retention
+  decision -- creating or dropping a slot has no effect on what
+  :ref:`pg_walserver_archive_cleanup` will later remove.
 
-``START_REPLICATION``
+  Slot names follow the same rule real PostgreSQL enforces
+  (``ReplicationSlotValidateName``): lowercase letters, digits, and
+  underscore, 63 characters at most. A route holds at most 64 slots at
+  once (``53400`` beyond that). Creating a slot that already exists is
+  an error (``42710``) and never resets it -- ``restart_lsn`` only ever
+  moves by dropping and re-creating the slot.
+
+  Replies with the same four columns real PostgreSQL does:
+  ``slot_name``, ``consistent_point`` (the ``restart_lsn`` just
+  recorded), and ``snapshot_name``/``output_plugin``, always ``NULL``
+  here (both are logical-replication-only concepts).
+
+``READ_REPLICATION_SLOT slot_name``
+
+  Reports one physical slot's own state: ``slot_type`` (always
+  ``physical``), ``restart_lsn`` (as recorded in its own marker file),
+  and ``restart_tli`` (the route's *current* timeline, not necessarily
+  what it was when the slot was created). A slot that does not exist
+  replies with one row of all ``NULL`` s, never an ``ErrorResponse`` --
+  the same contract real PostgreSQL follows here, which is what lets
+  ``pg_basebackup``/``pg_receivewal``'s own "does this slot already
+  exist" check keep working unmodified.
+
+``DROP_REPLICATION_SLOT slot_name [WAIT]``
+
+  Removes a slot's own marker file. Dropping a slot that does not
+  exist is an error (``42704``), the same as real PostgreSQL. ``WAIT``
+  parses but has no effect: removing the marker file is always
+  immediate, so there is nothing to actually wait for.
+
+``START_REPLICATION [SLOT slot_name] [PHYSICAL] <lsn> [TIMELINE <tli>]``
 
   Streams WAL from a given position, exactly as a real standby set up
-  with ``primary_conninfo`` expects.
+  with ``primary_conninfo`` expects. The optional ``SLOT`` clause
+  parses (so a client that always sends one, like ``pg_receivewal``,
+  is never refused), but is not acted on: streaming neither reads nor
+  advances the named slot's own ``restart_lsn`` -- there is no real
+  slot-based retention or resume-position tracking yet, only what
+  ``CREATE_REPLICATION_SLOT``/``READ_REPLICATION_SLOT``/
+  ``DROP_REPLICATION_SLOT`` themselves manage directly.
 
 ``FETCH_FILE '<name>'``
 
