@@ -208,10 +208,11 @@ load_pgdata_routes(const char *pgdata, const char *configFile,
 				   const char *clusterFilter,
 				   WsRoute **routesOut, int *countOut)
 {
-	if (pgdata == NULL || pgdata[0] == '\0')
+	if ((pgdata == NULL || pgdata[0] == '\0') &&
+		(configFile == NULL || configFile[0] == '\0'))
 	{
-		log_error("--pgdata is required (or set the PGDATA environment "
-				  "variable)");
+		log_error("--pgdata or --config is required (or set the PGDATA "
+				  "environment variable)");
 		return false;
 	}
 
@@ -372,8 +373,9 @@ cli_list_clusters_run(const char *pgdata, const char *configFile,
 
 	printf("%-20s %-8s %-10s %-8s %-22s %-22s\n", /* IGNORE-BANNED */
 		   "CLUSTER", "BACKUP", "RECEIVEWAL", "WORKER", "WAL START", "WAL END");
-	printf("--------------------------------------------------------------" /* IGNORE-BANNED */
-		   "------------------------------\n");
+	printf("%-20s %-8s %-10s %-8s %-22s %-22s\n", /* IGNORE-BANNED */
+		   "--------------------", "--------", "----------", "--------",
+		   "----------------------", "----------------------");
 
 	for (int i = 0; i < routeCount; i++)
 	{
@@ -460,8 +462,9 @@ cli_list_backups_run(const char *pgdata, const char *configFile,
 
 	printf("%-20s %-28s %-22s %-10s %s\n", /* IGNORE-BANNED */
 		   "CLUSTER", "LABEL", "TAKEN AT", "SIZE", "LATEST");
-	printf("--------------------------------------------------------------" /* IGNORE-BANNED */
-		   "------------------------------\n");
+	printf("%-20s %-28s %-22s %-10s %s\n", /* IGNORE-BANNED */
+		   "--------------------", "----------------------------",
+		   "----------------------", "----------", "------");
 
 	for (int i = 0; i < routeCount; i++)
 	{
@@ -659,15 +662,19 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 	{
 		printf("%-20s %-28s %-9s %-10s %s\n", /* IGNORE-BANNED */
 			   "CLUSTER", "FILE", "KIND", "SIZE", "MODIFIED");
+		printf("%-20s %-28s %-9s %-10s %s\n", /* IGNORE-BANNED */
+			   "--------------------", "----------------------------",
+			   "---------", "----------", "--------");
 	}
 	else
 	{
 		printf("%-20s %-9s %-10s %-24s %-24s %s\n", /* IGNORE-BANNED */
 			   "CLUSTER", "SEGMENTS", "SIZE", "OLDEST", "NEWEST", "HISTORY");
+		printf("%-20s %-9s %-10s %-24s %-24s %s\n", /* IGNORE-BANNED */
+			   "--------------------", "---------", "----------",
+			   "------------------------", "------------------------",
+			   "-------");
 	}
-
-	printf("--------------------------------------------------------------" /* IGNORE-BANNED */
-		   "------------------------------\n");
 
 	for (int i = 0; i < routeCount; i++)
 	{

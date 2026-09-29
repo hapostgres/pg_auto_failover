@@ -227,7 +227,7 @@ ws_write_pidfile(const char *pidfile, pid_t pid)
 static struct option serveLongOptions[] = {
 	{ "port", required_argument, NULL, 'p' },
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
+	{ "config", required_argument, NULL, 'f' },
 	{ "ssl-cert-file", required_argument, NULL, 'C' },
 	{ "ssl-key-file", required_argument, NULL, 'K' },
 	{ "ssl-ca-file", required_argument, NULL, 'A' },
@@ -635,7 +635,7 @@ static CommandLine serve_command =
 	make_command("serve",
 				 "Run the pg_walserver accept loop",
 				 "[--port <port>] [--pgdata <path> | --insecure] "
-				 "[--config-file <path>] "
+				 "[--config <path>] "
 				 "[--ssl-cert-file <path> --ssl-key-file <path>] "
 				 "[--ssl-ca-file <path>] "
 				 "[--auth-timeout <seconds>]",
@@ -650,7 +650,7 @@ static CommandLine serve_command =
 				 "so does\n"
 				 "              <pgdata>/pg_walserver_hba.conf, unless "
 				 "--insecure is given\n"
-				 "  --config-file  where the config file mapping each "
+				 "  --config  where the config file mapping each "
 				 "route key (an opaque\n"
 				 "              string; pg_auto_failover's own convention "
 				 "is\n"
@@ -798,7 +798,7 @@ static bool fetchSystemidForce = false;
 
 static struct option fetchSystemidLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'F' },
+	{ "config", required_argument, NULL, 'F' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "upstream", required_argument, NULL, 'u' },
@@ -922,13 +922,13 @@ cli_fetch_systemid_command_run(int argc, char **argv)
 static CommandLine fetch_systemid_command =
 	make_command("fetch-systemid",
 				 "Fetch a route's upstream system identifier",
-				 "--cluster <name> --pgdata <path> [--config-file <path>] "
+				 "--cluster <name> --pgdata <path> [--config <path>] "
 				 "| --path <dir> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--force]",
 				 "  --pgdata    this instance's own data root (defaults to "
 				 "PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config  where the config file itself lives "
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
@@ -969,7 +969,7 @@ static bool basebackupForce = false;
 
 static struct option basebackupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'F' },
+	{ "config", required_argument, NULL, 'F' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "upstream", required_argument, NULL, 'u' },
@@ -1166,14 +1166,14 @@ cli_basebackup_command_run(int argc, char **argv)
 static CommandLine basebackup_command =
 	make_command("basebackup",
 				 "Take a base backup of a route's upstream",
-				 "--cluster <name> --pgdata <path> [--config-file <path>] "
+				 "--cluster <name> --pgdata <path> [--config <path>] "
 				 "| --path <dir> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--keep-count <N>] [--keep-age <interval>] "
 				 "[--dry-run] [--force]",
 				 "  --pgdata      this instance's own data root (defaults "
 				 "to PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config  where the config file itself lives "
 				 "(defaults to\n"
 				 "                <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
@@ -1227,12 +1227,14 @@ static WsSetupOptions setupOptions = { 0 };
 
 static struct option setupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
+	{ "config", required_argument, NULL, 'f' },
 	{ "port", required_argument, NULL, 'p' },
 	{ "ssl-cert-file", required_argument, NULL, 'C' },
 	{ "ssl-key-file", required_argument, NULL, 'K' },
 	{ "ssl-ca-file", required_argument, NULL, 'A' },
 	{ "auth-timeout", required_argument, NULL, 'T' },
+	{ "no-hba", no_argument, NULL, 'H' },
+	{ "no-cert", no_argument, NULL, 'N' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -1251,7 +1253,7 @@ cli_setup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:f:p:C:K:A:T:",
+	while ((c = getopt_long(argc, argv, "D:f:p:C:K:A:T:HN",
 							setupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -1315,6 +1317,18 @@ cli_setup_getopt(int argc, char **argv)
 				break;
 			}
 
+			case 'H':
+			{
+				setupOptions.noHba = true;
+				break;
+			}
+
+			case 'N':
+			{
+				setupOptions.noCert = true;
+				break;
+			}
+
 			default:
 			{
 				commandline_print_usage(&ws_root, stderr);
@@ -1343,17 +1357,18 @@ cli_setup_command_run(int argc, char **argv)
 
 static CommandLine setup_command =
 	make_command("setup",
-				 "Configure pg_walserver itself (port, TLS, auth-timeout)",
-				 "--pgdata <path> [--config-file <path>] [--port <port>] "
+				 "Configure pg_walserver itself (port, TLS, auth-timeout, HBA)",
+				 "--pgdata <path> [--config <path>] [--port <port>] "
 				 "[--ssl-cert-file <path>] [--ssl-key-file <path>] "
-				 "[--ssl-ca-file <path>] [--auth-timeout <seconds>]",
+				 "[--ssl-ca-file <path>] [--auth-timeout <seconds>] "
+				 "[--no-hba] [--no-cert]",
 				 "  --pgdata    this instance's own data root, created if "
 				 "missing\n"
 				 "              (defaults to PGDATA); the config file "
 				 "itself lives at\n"
 				 "              <pgdata>/pg_walserver.ini unless "
-				 "--config-file overrides it\n"
-				 "  --config-file  where the config file itself lives, "
+				 "--config overrides it\n"
+				 "  --config  where the config file itself lives, "
 				 "independent of\n"
 				 "              --pgdata (or the PG_WALSERVER_CONFIG_FILE "
 				 "environment\n"
@@ -1374,13 +1389,35 @@ static CommandLine setup_command =
 				 "  --auth-timeout  \"serve\"'s own default auth-timeout "
 				 "when its own\n"
 				 "              --auth-timeout isn't given\n"
+				 "  --no-hba    skip auto-creating <pgdata>/pg_walserver_"
+				 "hba.conf\n"
+				 "              (see below)\n"
+				 "  --no-cert   skip auto-creating a self-signed TLS "
+				 "certificate\n"
+				 "              (see below)\n"
 				 "\n"
-				 "Every flag here is optional and independent: only "
-				 "whichever ones are\n"
-				 "given get written; each is \"serve\"'s own default from "
-				 "then on,\n"
-				 "still overridden by the same flag given directly to "
-				 "\"serve\" itself.\n"
+				 "Every --port/--ssl-*/--auth-timeout flag here is "
+				 "optional and independent:\n"
+				 "only whichever ones are given get written; each is "
+				 "\"serve\"'s own default\n"
+				 "from then on, still overridden by the same flag given "
+				 "directly to \"serve\"\n"
+				 "itself. Unconditionally, unless skipped: a self-signed "
+				 "TLS certificate is\n"
+				 "created (the same facility \"cluster register\" itself "
+				 "uses, --no-cert skips\n"
+				 "it), and <pgdata>/pg_walserver_hba.conf is created with "
+				 "one real, active\n"
+				 "rule open to this machine's own local network, "
+				 "auto-discovered the same\n"
+				 "way pg_autoctl discovers its own LAN CIDR (--no-hba "
+				 "skips it, falling back\n"
+				 "to a commented-out placeholder, same as when discovery "
+				 "itself finds\n"
+				 "nothing to use) -- review and adjust either default "
+				 "before running on a\n"
+				 "reachable network. Neither step ever overwrites a file "
+				 "that already exists.\n"
 				 "Nothing about any one archived cluster -- see "
 				 "\"pg_walserver cluster\"\n"
 				 "for registering, dropping, listing, or re-pointing "
@@ -1454,7 +1491,7 @@ static WsClusterRegisterOptions clusterRegisterOptions = { 0 };
 
 static struct option clusterRegisterLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
+	{ "config", required_argument, NULL, 'f' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "pguri", required_argument, NULL, 'u' },
 	{ "host", required_argument, NULL, 'h' },
@@ -1643,7 +1680,7 @@ static CommandLine cluster_register_command =
 	make_command("register",
 				 "Register (or validate) one cluster this pg_walserver "
 				 "archives",
-				 "<name> --pgdata <path> [--config-file <path>] "
+				 "<name> --pgdata <path> [--config <path>] "
 				 "[--path <dir>] "
 				 "[--pguri <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--hostname <fqdn>] "
@@ -1653,7 +1690,7 @@ static CommandLine cluster_register_command =
 				 "(never a flag)\n"
 				 "  --pgdata    this instance's own data root (defaults to "
 				 "PGDATA)\n"
-				 "  --config-file  where the config file itself lives, "
+				 "  --config  where the config file itself lives, "
 				 "independent of\n"
 				 "              --pgdata (defaults to "
 				 "<pgdata>/pg_walserver.ini, or\n"
@@ -1732,7 +1769,7 @@ static bool clusterDropPurge = false;
 
 static struct option clusterDropLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
+	{ "config", required_argument, NULL, 'f' },
 	{ "purge", no_argument, NULL, 'P' },
 	{ NULL, 0, NULL, 0 }
 };
@@ -1827,12 +1864,12 @@ static CommandLine cluster_drop_command =
 	make_command("drop",
 				 "Drop one cluster's registration (never its own data, "
 				 "unless --purge)",
-				 "<name> --pgdata <path> [--config-file <path>] [--purge]",
+				 "<name> --pgdata <path> [--config <path>] [--purge]",
 				 "  <name>      the cluster's own name, given positionally "
 				 "(never a flag)\n"
 				 "  --pgdata    this instance's own data root (defaults to "
 				 "PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config  where the config file itself lives "
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
@@ -1847,10 +1884,12 @@ static CommandLine cluster_drop_command =
 
 static char clusterListPgdata[MAXPGPATH] = { 0 };
 static char clusterListConfigFile[MAXPGPATH] = { 0 };
+static bool clusterListShowUpstream = false;
 
 static struct option clusterListLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
+	{ "config", required_argument, NULL, 'f' },
+	{ "upstream", no_argument, NULL, 'u' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -1864,11 +1903,12 @@ cli_cluster_list_getopt(int argc, char **argv)
 	optind = 0;
 	clusterListPgdata[0] = '\0';
 	clusterListConfigFile[0] = '\0';
+	clusterListShowUpstream = false;
 	ws_prefill_pgdata_from_env(clusterListPgdata);
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:f:", clusterListLongOptions,
+	while ((c = getopt_long(argc, argv, "D:f:u", clusterListLongOptions,
 							NULL)) != -1)
 	{
 		switch (c)
@@ -1883,6 +1923,12 @@ cli_cluster_list_getopt(int argc, char **argv)
 			{
 				strlcpy(clusterListConfigFile, optarg,
 						sizeof(clusterListConfigFile));
+				break;
+			}
+
+			case 'u':
+			{
+				clusterListShowUpstream = true;
 				break;
 			}
 
@@ -1909,20 +1955,29 @@ cli_cluster_list_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(ws_cluster_list_run(clusterListPgdata, clusterListConfigFile) ? 0 : 1);
+	exit(ws_cluster_list_run(clusterListPgdata, clusterListConfigFile,
+							 clusterListShowUpstream) ? 0 : 1);
 }
 
 
 static CommandLine cluster_list_command =
 	make_command("list",
 				 "List every cluster this pg_walserver has registered",
-				 "--pgdata <path> [--config-file <path>]",
+				 "[--pgdata <path> | --config <path>] [--upstream]",
 				 "  --pgdata    this instance's own data root (defaults to "
 				 "PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n",
+				 "  --config  where the config file itself lives; either "
+				 "this or\n"
+				 "              --pgdata is enough (defaults to "
+				 "<pgdata>/pg_walserver.ini,\n"
+				 "              or PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --upstream  also print each cluster's own upstream "
+				 "connection\n"
+				 "              string, pivoted into one block per "
+				 "cluster instead of\n"
+				 "              a table column (skipped by default -- "
+				 "these are often\n"
+				 "              too wide for a readable row)\n",
 				 cli_cluster_list_getopt, cli_cluster_list_command_run);
 
 
@@ -1934,7 +1989,7 @@ static bool clusterSetUpstreamForceBasebackup = false;
 
 static struct option clusterSetUpstreamLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
+	{ "config", required_argument, NULL, 'f' },
 	{ "pguri", required_argument, NULL, 'u' },
 	{ "force-basebackup", no_argument, NULL, 'F' },
 	{ NULL, 0, NULL, 0 }
@@ -2042,13 +2097,13 @@ static CommandLine cluster_set_upstream_command =
 	make_command("set-upstream",
 				 "Point an already-registered cluster at a new upstream "
 				 "(e.g. after a failover)",
-				 "<name> --pgdata <path> [--config-file <path>] "
+				 "<name> --pgdata <path> [--config <path>] "
 				 "--pguri <conninfo> [--force-basebackup]",
 				 "  <name>      the cluster's own name, given positionally "
 				 "(never a flag)\n"
 				 "  --pgdata    this instance's own data root (defaults to "
 				 "PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config  where the config file itself lives "
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
@@ -2465,7 +2520,7 @@ static bool archiveCleanupForce = false;
 
 static struct option archiveCleanupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'F' },
+	{ "config", required_argument, NULL, 'F' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "keep-count", required_argument, NULL, 'k' },
@@ -2639,13 +2694,13 @@ static CommandLine archive_cleanup_command =
 	make_command("archive-cleanup",
 				 "Remove WAL/base backups this route no longer needs to "
 				 "keep (operator/cron-driven, never automatic)",
-				 "--cluster <name> --pgdata <path> [--config-file <path>] "
+				 "--cluster <name> --pgdata <path> [--config <path>] "
 				 "| --path <dir> "
 				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run] "
 				 "[--force]",
 				 "  --pgdata      this instance's own data root (defaults "
 				 "to PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config  where the config file itself lives "
 				 "(defaults to\n"
 				 "                <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
@@ -2986,7 +3041,7 @@ static char statusConfigFile[MAXPGPATH] = { 0 };
 
 static struct option statusLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
+	{ "config", required_argument, NULL, 'f' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -3048,11 +3103,11 @@ cli_status_command_run(int argc, char **argv)
 static CommandLine status_command =
 	make_command("status",
 				 "Show a short pg_walserver status dashboard",
-				 "--pgdata <path> [--config-file <path>]",
+				 "--pgdata <path> [--config <path>]",
 				 "  --pgdata    this instance's own top-level storage root "
 				 "(defaults to\n"
 				 "              PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config  where the config file itself lives "
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n",
@@ -3070,7 +3125,7 @@ static bool listWalSegments = false;
 
 static struct option listClustersLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
+	{ "config", required_argument, NULL, 'f' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ NULL, 0, NULL, 0 }
 };
@@ -3143,10 +3198,10 @@ static CommandLine list_clusters_command =
 	make_command("clusters",
 				 "List every route, its backup/receivewal status, and the "
 				 "WAL range it covers",
-				 "--pgdata <path> [--config-file <path>] [--cluster <name>]",
+				 "--pgdata <path> [--config <path>] [--cluster <name>]",
 				 "  --pgdata    this instance's own data root (defaults to "
 				 "PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config  where the config file itself lives "
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
@@ -3173,10 +3228,10 @@ static CommandLine list_backups_command =
 	make_command("backups",
 				 "List base backups per cluster (label, size, which is "
 				 ".latest)",
-				 "--pgdata <path> [--config-file <path>] [--cluster <name>]",
+				 "--pgdata <path> [--config <path>] [--cluster <name>]",
 				 "  --pgdata    this instance's own data root (defaults to "
 				 "PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config  where the config file itself lives "
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
@@ -3186,7 +3241,7 @@ static CommandLine list_backups_command =
 
 static struct option listWalLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
+	{ "config", required_argument, NULL, 'f' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ "segments", no_argument, NULL, 's' },
 	{ NULL, 0, NULL, 0 }
@@ -3267,11 +3322,11 @@ static CommandLine list_wal_command =
 	make_command("wal",
 				 "List WAL cache aggregate stats per cluster, or every "
 				 "file with --segments",
-				 "--pgdata <path> [--config-file <path>] [--cluster <name>] "
+				 "--pgdata <path> [--config <path>] [--cluster <name>] "
 				 "[--segments]",
 				 "  --pgdata    this instance's own data root (defaults to "
 				 "PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config  where the config file itself lives "
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"

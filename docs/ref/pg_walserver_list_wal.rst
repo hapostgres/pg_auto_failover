@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver list wal --pgdata <path> [--config-file <path>]
+  pg_walserver list wal --pgdata <path> [--config <path>]
       [--cluster <name>] [--segments]
 
 Prints aggregate WAL cache stats per route by default (segment count,
@@ -25,7 +25,7 @@ Options
 
   This instance's own data root. Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives (defaults to
   ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).
@@ -45,7 +45,7 @@ Aggregate stats::
 
   archive$ pg_walserver list wal --cluster mycluster
   CLUSTER              SEGMENTS  SIZE       OLDEST                   NEWEST                   HISTORY
-  --------------------------------------------------------------------------------------------
+  -------------------- --------- ---------- ------------------------ ------------------------ -------
   mycluster            1         32.0MB     00000001000000000000002C 00000001000000000000002C 0
 
 See Also

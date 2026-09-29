@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver list backups --pgdata <path> [--config-file <path>]
+  pg_walserver list backups --pgdata <path> [--config <path>]
       [--cluster <name>]
 
 Lists every base backup found under each matching route's own
@@ -24,7 +24,7 @@ Options
 
   This instance's own data root. Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives (defaults to
   ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).
@@ -40,7 +40,7 @@ Examples
 
   archive$ pg_walserver list backups --cluster mycluster
   CLUSTER              LABEL                        TAKEN AT               SIZE       LATEST
-  --------------------------------------------------------------------------------------------
+  -------------------- ---------------------------- ---------------------- ---------- ------
   mycluster            basebackup-20260928T211526Z  2026-09-28T21:15:26Z   56.1MB     yes
 
 See Also

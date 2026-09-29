@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver list clusters --pgdata <path> [--config-file <path>]
+  pg_walserver list clusters --pgdata <path> [--config <path>]
       [--cluster <name>]
 
 Lists every route configured in the config file: whether it
@@ -27,7 +27,7 @@ Options
 
   This instance's own data root. Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives (defaults to
   ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).
@@ -43,9 +43,9 @@ Examples
 
   archive$ pg_walserver list clusters
   CLUSTER              BACKUP   RECEIVEWAL WORKER   WAL START              WAL END
-  --------------------------------------------------------------------------------------------
+  -------------------- -------- ---------- -------- ---------------------- ----------------------
   mycluster            yes      pull       yes      0/2C000028             0/2D000060
-  another               yes      none       n/a      0/18000028             -
+  another              yes      none       n/a      0/18000028             -
   third                yes      pull       yes      0/1C000028             0/2D000060
   bbdemo               yes      none       n/a      0/2A000028             -
 

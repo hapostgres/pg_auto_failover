@@ -58,7 +58,7 @@ Default output, the per-cluster storage summary::
 
   archive$ pg_walserver ls
   CLUSTER              BACKUPS  BACKUP SIZE  WAL FILES  WAL SIZE   TOTAL SIZE  LAST BACKUP
-  ------------------------------------------------------------------------------------------------------
+  -------------------- -------- ------------ ---------- ---------- ----------- -----------
   mycluster            1        52.7MB       5+1        96.0MB     148.7MB     2026-09-28T20:42:33Z
   another              2        105.3MB      0          0.0B       105.3MB     2026-09-28T20:43:37Z
 
@@ -73,7 +73,7 @@ With ``--config``, the config/credential/certificate file tier::
 
   archive$ pg_walserver ls --config
   FILE                     EXISTS  SIZE       MODIFIED
-  ----------------------------------------------------------------
+  ------------------------ ------- ---------- --------
   pg_walserver.ini         yes     247.0B     2026-09-28T20:43:35Z
   pg_walserver_hba.conf    yes     117.0B     2026-09-28T20:43:35Z
   pg_walserver_passwd      yes     148.0B     2026-09-28T20:42:28Z

@@ -52,7 +52,7 @@ top-level list (the rows without a nested tree of their own below)::
     scram-secret     Print one pg_walserver_passwd line for a user
     fetch-systemid   Fetch a route's upstream system identifier
     basebackup       Take a base backup of a route's upstream
-    setup            Configure pg_walserver itself (port, TLS, auth-timeout)
+    setup            Configure pg_walserver itself (port, TLS, auth-timeout, HBA)
   + cluster          Register, drop, list, or re-point the clusters this pg_walserver archives
     create-cert      Create a self-signed TLS certificate for --pgdata
     archive-wal      Push one WAL/.backup file into a pg_walserver route (archive_command)

@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver basebackup --pgdata <path> [--config-file <path>] --cluster <name>
+  pg_walserver basebackup --pgdata <path> [--config <path>] --cluster <name>
       [--path <dir>] [--upstream <conninfo> | --host <host> [--port <port>] [--user <name>]]
       [--keep-count <N>] [--keep-age <interval>] [--dry-run] [--force]
 
@@ -40,7 +40,7 @@ Options
 
   This instance's own data root. Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives (defaults to
   ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).

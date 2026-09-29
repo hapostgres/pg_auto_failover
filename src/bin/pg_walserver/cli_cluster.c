@@ -491,12 +491,13 @@ ws_cluster_drop_run(const char *pgdata, const char *configFile,
  * are none.
  */
 bool
-ws_cluster_list_run(const char *pgdata, const char *configFile)
+ws_cluster_list_run(const char *pgdata, const char *configFile,
+					bool showUpstream)
 {
-	if (pgdata == NULL || pgdata[0] == '\0')
+	if ((pgdata == NULL || pgdata[0] == '\0') &&
+		(configFile == NULL || configFile[0] == '\0'))
 	{
-		log_error("register list requires --pgdata (or set the PGDATA "
-				  "environment variable)");
+		log_error("cluster list requires --pgdata or --config");
 		return false;
 	}
 
@@ -521,17 +522,48 @@ ws_cluster_list_run(const char *pgdata, const char *configFile)
 		return true;
 	}
 
-	printf("%-20s %-9s %-32s %-24s %s\n", /* IGNORE-BANNED */
-		   "CLUSTER", "RECEIVEWAL", "UPSTREAM", "HOSTNAME", "PATH");
-	printf("--------------------------------------------------------------" /* IGNORE-BANNED */
-		   "----------------------------------------------------\n");
+	if (showUpstream)
+	{
+		/*
+		 * UPSTREAM values are full connection strings/URIs, often far
+		 * wider than any other column -- a wide row layout is unreadable
+		 * once they're included, so pivot to one key: value block per
+		 * cluster instead (only reached with --upstream, an explicit
+		 * opt-in; the default table below never prints this column).
+		 */
+		for (int i = 0; i < routeCount; i++)
+		{
+			if (i > 0)
+			{
+				printf("\n"); /* IGNORE-BANNED */
+			}
+
+			printf("cluster:    %s\n", routes[i].key); /* IGNORE-BANNED */
+			printf("receivewal: %s\n", /* IGNORE-BANNED */
+				   routes[i].receivewalPull ? "pull" : "none");
+			printf("upstream:   %s\n", /* IGNORE-BANNED */
+				   routes[i].upstream[0] != '\0' ? routes[i].upstream : "-");
+			printf("hostname:   %s\n", /* IGNORE-BANNED */
+				   routes[i].hostname[0] != '\0' ? routes[i].hostname : "-");
+			printf("path:       %s\n", routes[i].path); /* IGNORE-BANNED */
+		}
+
+		routes_free(routes);
+
+		return true;
+	}
+
+	printf("%-20s %-10s %-24s %s\n", /* IGNORE-BANNED */
+		   "CLUSTER", "RECEIVEWAL", "HOSTNAME", "PATH");
+	printf("%-20s %-10s %-24s %s\n", /* IGNORE-BANNED */
+		   "--------------------", "----------",
+		   "------------------------", "----");
 
 	for (int i = 0; i < routeCount; i++)
 	{
-		printf("%-20s %-9s %-32s %-24s %s\n", /* IGNORE-BANNED */
+		printf("%-20s %-10s %-24s %s\n", /* IGNORE-BANNED */
 			   routes[i].key,
 			   routes[i].receivewalPull ? "pull" : "none",
-			   routes[i].upstream[0] != '\0' ? routes[i].upstream : "-",
 			   routes[i].hostname[0] != '\0' ? routes[i].hostname : "-",
 			   routes[i].path);
 	}

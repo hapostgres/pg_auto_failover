@@ -264,7 +264,8 @@ bool config_set_global_property(const char *configPath, const char *propName,
  * outSize bytes:
  *
  *   1. configFile itself, when given explicitly (a command's own
- *      --config-file flag) -- always wins;
+ *      --config flag, --config-file on "ls" specifically, see its own
+ *      header comment) -- always wins;
  *   2. else the PG_WALSERVER_CONFIG_FILE environment variable, when set;
  *   3. else "<pgdata>/pg_walserver.ini", the long-standing default.
  *

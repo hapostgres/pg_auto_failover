@@ -10,24 +10,24 @@ Synopsis
 
 ::
 
-  pg_walserver cluster register <name> --pgdata <path> [--config-file <path>]
+  pg_walserver cluster register <name> --pgdata <path> [--config <path>]
       [--path <dir>] --pguri <conninfo> | --host <host> [--port <port>]
       [--user <name>] [--hostname <name>] [--receivewal pull|none]
       [--ssl-self-signed] [--force]
 
-  pg_walserver cluster drop <name> --pgdata <path> [--config-file <path>]
+  pg_walserver cluster drop <name> --pgdata <path> [--config <path>]
       [--purge]
 
-  pg_walserver cluster list --pgdata <path> [--config-file <path>]
+  pg_walserver cluster list [--pgdata <path> | --config <path>] [--upstream]
 
   pg_walserver cluster set-upstream <name> --pgdata <path>
-      [--config-file <path>] --pguri <conninfo> [--force-basebackup]
+      [--config <path>] --pguri <conninfo> [--force-basebackup]
 
 ``pg_walserver cluster`` is the wizard that creates, removes, lists,
 and re-points the clusters (routes) one ``pg_walserver`` instance
 archives. It is split out of what used to be ``pg_walserver setup``:
 ``setup`` (:ref:`pg_walserver_setup`) now only configures the server
-itself (port, TLS, auth-timeout); ``cluster`` configures what it
+itself (port, TLS, auth-timeout, HBA); ``cluster`` configures what it
 serves. The cluster's own name is always given positionally --
 ``cluster register mycluster ...`` -- never a ``--cluster`` flag.
 
@@ -55,7 +55,7 @@ Options
 
   This instance's own data root. Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives, independent of ``--pgdata``.
   Defaults to ``<pgdata>/pg_walserver.ini``, or the
@@ -155,16 +155,36 @@ pg_walserver cluster list
 ---------------------------
 
 Lists every route this ``pg_walserver`` instance has registered:
-cluster name, receivewal mode, upstream, TLS SNI hostname (or ``-`` if
-none), and on-disk path. This is a *registration* view, not the
-operational, storage-level view :ref:`pg_walserver_list_clusters` gives
-over the archived data itself::
+cluster name, receivewal mode, TLS SNI hostname (or ``-`` if none), and
+on-disk path. This is a *registration* view, not the operational,
+storage-level view :ref:`pg_walserver_list_clusters` gives over the
+archived data itself. UPSTREAM (a full connection string/URI, often far
+wider than every other column combined) is deliberately never in this
+default table -- it would make every row unreadable -- pass ``--config``
+alone (no ``--pgdata`` needed, either is enough) to show it works too::
 
   archive$ pg_walserver cluster list --pgdata /var/lib/archiver
-  CLUSTER              RECEIVEWAL UPSTREAM                         HOSTNAME                 PATH
-  ------------------------------------------------------------------------------------------------------------------
-  mycluster            pull      postgres://archiver_repl@primary:5432/?sslmode=disable archive                  /var/lib/archiver/mycluster
-  third                pull      host=primary port=5432 user=archiver_repl sslmode=disable -                        /var/lib/archiver/third
+  CLUSTER              RECEIVEWAL HOSTNAME                 PATH
+  -------------------- ---------- ------------------------ ----
+  mycluster            pull       archive                  /var/lib/archiver/mycluster
+  third                pull       -                        /var/lib/archiver/third
+
+With ``--upstream``, each cluster's own connection string is printed
+too, pivoted into one ``key: value`` block per cluster instead of
+widening the row::
+
+  archive$ pg_walserver cluster list --pgdata /var/lib/archiver --upstream
+  cluster:    mycluster
+  receivewal: pull
+  upstream:   postgres://archiver_repl@primary:5432/?sslmode=disable
+  hostname:   archive
+  path:       /var/lib/archiver/mycluster
+
+  cluster:    third
+  receivewal: pull
+  upstream:   host=primary port=5432 user=archiver_repl sslmode=disable
+  hostname:   -
+  path:       /var/lib/archiver/third
 
 With no cluster registered yet, it says so instead of printing an empty
 table.
@@ -174,12 +194,20 @@ Options
 
 --pgdata
 
-  This instance's own data root. Defaults to ``PGDATA``.
+  This instance's own data root. Either this or ``--config`` is enough.
+  Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives (defaults to
   ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).
+  Either this or ``--pgdata`` is enough.
+
+--upstream
+
+  Also print each cluster's own upstream connection string, pivoted
+  into one block per cluster instead of a table column (see above).
+  Skipped by default.
 
 pg_walserver cluster set-upstream
 ------------------------------------
