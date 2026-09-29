@@ -1013,6 +1013,17 @@ init_ps_buffer(int argc, char **argv)
 
 /*
  * set_ps_title sets our process name visible in ps/top/pstree etc.
+ *
+ * Deliberately NOT sformat(): ps_buffer_size is whatever room happened to
+ * be left in the original argv+envp block at exec time (init_ps_buffer()
+ * above), which can genuinely be smaller than a descriptive title -- this
+ * function's own header comment already documents truncating in that
+ * case as normal, by-design behavior, not a caller bug. sformat() would
+ * treat that same truncation as a "BUG: ... needs N bytes" ERROR, which
+ * is exactly the false-positive this avoids; strlcpy() truncates safely
+ * and silently instead, and returns strlen(title) either way (whether or
+ * not it fit), the same "how many bytes would this have needed" contract
+ * the padding loop below already relies on.
  */
 void
 set_ps_title(const char *title)
@@ -1023,7 +1034,7 @@ set_ps_title(const char *title)
 		return;
 	}
 
-	int n = sformat(ps_buffer, ps_buffer_size, "%s", title);
+	size_t n = strlcpy(ps_buffer, title, ps_buffer_size);
 
 	/* pad our process title string */
 	for (size_t i = n; i < ps_buffer_size; i++)
