@@ -3,7 +3,7 @@
 pg_walserver cluster
 =====================
 
-pg_walserver cluster - Register, drop, list, re-point, or prune the clusters a pg_walserver archives
+pg_walserver cluster - Register, drop, enable, list, re-point, or prune the clusters a pg_walserver archives
 
 Synopsis
 --------
@@ -18,6 +18,8 @@ Synopsis
   pg_walserver cluster drop <name> --pgdata <path> [--config <path>]
       [--purge]
 
+  pg_walserver cluster enable <name> --pgdata <path> [--config <path>]
+
   pg_walserver cluster list [--pgdata <path> | --config <path>]
       [--upstream] [--disabled]
 
@@ -26,8 +28,8 @@ Synopsis
 
   pg_walserver cluster prune [--pgdata <path> | --config <path>]
 
-``pg_walserver cluster`` is the wizard that creates, removes, lists,
-re-points, and prunes the clusters (routes) one ``pg_walserver``
+``pg_walserver cluster`` is the wizard that creates, removes, re-enables,
+lists, re-points, and prunes the clusters (routes) one ``pg_walserver``
 instance archives. It is split out of what used to be ``pg_walserver
 setup``: ``setup`` (:ref:`pg_walserver_setup`) now only configures the
 server itself (port, TLS, auth-timeout, HBA); ``cluster`` configures
@@ -293,9 +295,9 @@ connection routed to it -- ``basebackup``, ``fetch-systemid``,
 START_REPLICATION/``archive-wal``/``restore-wal`` alike. Reloads an
 already-running ``pg_walserver serve`` for the same ``--pgdata``, if
 there is one, so this takes effect immediately. Running it again on an
-already-disabled route is a safe no-op. ``cluster register`` on the
-same name/path brings a dropped route back (see its own "Options"
-above); see ``cluster list --disabled`` to find dropped routes again.
+already-disabled route is a safe no-op. ``cluster enable``, below,
+brings a dropped route back without needing its connection URI given
+again; see ``cluster list --disabled`` to find dropped routes.
 
 With ``--purge``, the registration is removed outright and the route's
 own on-disk data is ``rmtree()``'d -- this works the same way whether
@@ -324,7 +326,7 @@ killed) but stays on record, its data untouched::
 
   archive$ pg_walserver cluster drop mycluster --pgdata /var/lib/archiver
   13:00:49 328874 INFO  Set "disabled = true" for route "mycluster" in "/var/lib/archiver/pg_walserver.ini"
-  13:00:49 328874 INFO  Route "mycluster" dropped (disabled) in "/var/lib/archiver/pg_walserver.ini"; its own data under "/var/lib/archiver/mycluster" was left in place -- pass --purge to remove it too, or run "pg_walserver cluster register mycluster ..." again to bring it back
+  13:00:49 328874 INFO  Route "mycluster" dropped (disabled) in "/var/lib/archiver/pg_walserver.ini"; its own data under "/var/lib/archiver/mycluster" was left in place -- pass --purge to remove it too, or run "pg_walserver cluster enable mycluster" to bring it back
   13:00:49 328874 INFO  Reloaded the running pg_walserver (pid 328718): it will pick up this route immediately
 
 The running server's own log confirms the worker actually stopped::
@@ -345,6 +347,50 @@ not it was already disabled)::
   13:01:23 329791 INFO  Dropped route "tmp" from "/var/lib/archiver/pg_walserver.ini"
   13:01:23 329791 INFO  Removed "/var/lib/archiver/tmp" (--purge)
   13:01:23 329791 INFO  Reloaded the running pg_walserver (pid 328718): it will pick up this route immediately
+
+pg_walserver cluster enable
+------------------------------
+
+The symmetric counterpart to ``cluster drop`` (without ``--purge``):
+clears the route's own ``disabled`` property, nothing else. Unlike
+re-running ``cluster register`` to the same end (which also clears it,
+as a side effect of an otherwise-complete register call), no connection
+URI needs to be given again -- the route's own ``path``/``upstream``/
+``hostname`` are already on file. Reloads an already-running
+``pg_walserver serve`` for the same ``--pgdata`` immediately afterward,
+so its embedded receivewal worker (if ``receivewal = pull``) starts
+again right away. Running it on an already-active route is a safe
+no-op.
+
+Options
+^^^^^^^
+
+<name>
+
+  The cluster's own name, given positionally (never a flag).
+
+Example
+^^^^^^^
+
+Bring a dropped route back -- its embedded receivewal worker starts
+again immediately, no ``--pguri`` needed::
+
+  archive$ pg_walserver cluster enable mycluster --pgdata /var/lib/archiver
+  13:09:54 352251 INFO  Set "disabled = false" for route "mycluster" in "/var/lib/archiver/pg_walserver.ini"
+  13:09:54 352251 INFO  Route "mycluster" enabled again in "/var/lib/archiver/pg_walserver.ini"
+  13:09:54 352251 INFO  Reloaded the running pg_walserver (pid 352002): it will pick up this route immediately
+
+The running server's own log confirms a fresh worker started::
+
+  13:09:54 352002 INFO  Started the embedded receivewal worker for route "mycluster", receiving into "/var/lib/archiver/mycluster"
+  13:09:54 352002 INFO  Reload: started a new embedded receivewal worker for route "mycluster"
+  13:09:54 352002 INFO  Reload: receivewal worker reconciliation: 1 started, 0 stopped, 0 restarted, 0 unchanged
+
+Running it again on the same (now active) route is a safe no-op::
+
+  archive$ pg_walserver cluster enable mycluster --pgdata /var/lib/archiver
+  13:09:55 352302 INFO  Route "mycluster" is already active in "/var/lib/archiver/pg_walserver.ini"
+  13:09:55 352302 INFO  Reloaded the running pg_walserver (pid 352002): it will pick up this route immediately
 
 pg_walserver cluster prune
 -----------------------------

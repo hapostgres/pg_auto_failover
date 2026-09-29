@@ -501,8 +501,8 @@ ws_cluster_drop_run(const char *pgdata, const char *configFile,
 
 		log_info("Route \"%s\" dropped (disabled) in \"%s\"; its own data "
 				 "under \"%s\" was left in place -- pass --purge to remove "
-				 "it too, or run \"pg_walserver cluster register %s ...\" "
-				 "again to bring it back",
+				 "it too, or run \"pg_walserver cluster enable %s\" to "
+				 "bring it back",
 				 routeKey, configPath, routePath, routeKey);
 
 		return true;
@@ -524,6 +524,82 @@ ws_cluster_drop_run(const char *pgdata, const char *configFile,
 	{
 		log_info("Removed \"%s\" (--purge)", routePath);
 	}
+
+	return true;
+}
+
+
+/*
+ * ws_cluster_enable_run clears routeKey's own "disabled" property
+ * (routes_set_property(configPath, routeKey, "disabled", "false"),
+ * routes.c) -- the dedicated, symmetric counterpart to "cluster drop"
+ * (without --purge): no connection URI to re-supply, unlike re-running
+ * "cluster register" to the same end (write_route_section()'s own
+ * "already configured" no-op path also clears "disabled", but only ever
+ * as a side effect of an otherwise-complete register call, which needs
+ * --pguri/--host again even though the route's own upstream is already
+ * on file). Refuses a route that doesn't exist, or one that is already
+ * active, the same "nothing to do, say so, don't error" shape "cluster
+ * drop" itself uses for an already-disabled route.
+ */
+bool
+ws_cluster_enable_run(const char *pgdata, const char *configFile,
+					  const char *routeKey)
+{
+	if (routeKey == NULL || routeKey[0] == '\0')
+	{
+		log_error("cluster enable requires a cluster name "
+				  "(\"pg_walserver cluster enable <name> ...\")");
+		return false;
+	}
+
+	if (pgdata == NULL || pgdata[0] == '\0')
+	{
+		log_error("cluster enable requires --pgdata (this instance's own "
+				  "data root)");
+		return false;
+	}
+
+	char configPath[MAXPGPATH] = { 0 };
+
+	config_file_path(pgdata, configFile, configPath, sizeof(configPath));
+
+	WsRoute *routes = NULL;
+	int routeCount = 0;
+
+	if (!routes_load(configPath, &routes, &routeCount))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	const WsRoute *route = routes_find_exact(routes, routeCount, routeKey);
+
+	if (route == NULL)
+	{
+		log_error("No route \"%s\" in \"%s\"", routeKey, configPath);
+		routes_free(routes);
+		return false;
+	}
+
+	bool alreadyEnabled = !route->disabled;
+
+	routes_free(routes);
+
+	if (alreadyEnabled)
+	{
+		log_info("Route \"%s\" is already active in \"%s\"", routeKey,
+				 configPath);
+		return true;
+	}
+
+	if (!routes_set_property(configPath, routeKey, "disabled", "false"))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	log_info("Route \"%s\" enabled again in \"%s\"", routeKey, configPath);
 
 	return true;
 }
@@ -822,8 +898,8 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
 	if (route->disabled)
 	{
 		log_error("Route \"%s\" is dropped (disabled) -- run "
-				  "\"pg_walserver cluster register %s ...\" to bring it "
-				  "back before changing its upstream", routeKey, routeKey);
+				  "\"pg_walserver cluster enable %s\" to bring it back "
+				  "before changing its upstream", routeKey, routeKey);
 		routes_free(routes);
 		return false;
 	}

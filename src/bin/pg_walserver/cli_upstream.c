@@ -149,8 +149,8 @@ cli_resolve_upstream(const char *pgdata, const char *configFile,
 				if (route != NULL && route->disabled)
 				{
 					log_error("Route \"%s\" is dropped (disabled) -- run "
-							  "\"pg_walserver cluster register %s ...\" to "
-							  "bring it back first", routeKey, routeKey);
+							  "\"pg_walserver cluster enable %s\" to bring "
+							  "it back first", routeKey, routeKey);
 					routes_free(routes);
 					return false;
 				}

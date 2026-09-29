@@ -1887,11 +1887,132 @@ static CommandLine cluster_drop_command =
 				 "restore-wal), and its\n"
 				 "              own data is left in place -- see \"cluster "
 				 "list --disabled\"\n"
-				 "              to find it again, \"cluster register\" to "
+				 "              to find it again, \"cluster enable\" to "
 				 "bring it back, or\n"
 				 "              \"cluster prune\" to remove every dropped "
 				 "cluster at once\n",
 				 cli_cluster_drop_getopt, cli_cluster_drop_command_run);
+
+
+static char clusterEnablePgdata[MAXPGPATH] = { 0 };
+static char clusterEnableConfigFile[MAXPGPATH] = { 0 };
+static char clusterEnableRoute[NAMEDATALEN + 16] = { 0 };
+
+static struct option clusterEnableLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_cluster_enable_getopt parses "pg_walserver cluster enable"'s own
+ * flags (everything except the cluster name itself, a positional
+ * argument left in argv for cli_cluster_enable_command_run() below) into
+ * the file-scope statics above.
+ */
+static int
+cli_cluster_enable_getopt(int argc, char **argv)
+{
+	optind = 0;
+	clusterEnablePgdata[0] = '\0';
+	clusterEnableConfigFile[0] = '\0';
+	clusterEnableRoute[0] = '\0';
+	ws_prefill_pgdata_from_env(clusterEnablePgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:f:", clusterEnableLongOptions,
+							NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(clusterEnablePgdata, optarg,
+						sizeof(clusterEnablePgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(clusterEnableConfigFile, optarg,
+						sizeof(clusterEnableConfigFile));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_cluster_enable_command_run reads the one positional argument
+ * "cluster enable" takes -- the cluster's own name -- then runs ws_
+ * cluster_enable_run() against it and the options cli_cluster_enable_
+ * getopt parsed above, and exit()s with its own result.
+ */
+static void
+cli_cluster_enable_command_run(int argc, char **argv)
+{
+	if (argc != 1)
+	{
+		log_fatal("cluster enable requires exactly one argument: the "
+				  "cluster's own name (\"pg_walserver cluster enable "
+				  "<name> ...\")");
+		commandline_print_usage(&ws_root, stderr);
+		exit(1);
+	}
+
+	strlcpy(clusterEnableRoute, argv[0], sizeof(clusterEnableRoute));
+
+	if (!ws_cluster_enable_run(clusterEnablePgdata, clusterEnableConfigFile,
+							   clusterEnableRoute))
+	{
+		exit(1);
+	}
+
+	cli_cluster_reload_running_server(clusterEnablePgdata);
+
+	exit(0);
+}
+
+
+static CommandLine cluster_enable_command =
+	make_command("enable",
+				 "Bring a dropped (disabled) cluster back",
+				 "<name> --pgdata <path> [--config <path>]",
+				 "  <name>      the cluster's own name, given positionally "
+				 "(never a flag)\n"
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "\n"
+				 "The symmetric counterpart to \"cluster drop\" (without "
+				 "--purge): clears\n"
+				 "the route's own \"disabled\" property, nothing else -- "
+				 "its own \"path\"/\n"
+				 "\"upstream\"/\"hostname\" are already on file, so, "
+				 "unlike re-running\n"
+				 "\"cluster register\" to the same end, no connection "
+				 "URI needs to be\n"
+				 "re-supplied. Reloads an already-running \"pg_walserver "
+				 "serve\" for the\n"
+				 "same --pgdata immediately afterward, so its embedded "
+				 "receivewal worker\n"
+				 "(if \"receivewal = pull\") starts again right away. A "
+				 "cluster that was\n"
+				 "already active is a safe no-op.\n",
+				 cli_cluster_enable_getopt, cli_cluster_enable_command_run);
 
 
 static char clusterListPgdata[MAXPGPATH] = { 0 };
@@ -2252,6 +2373,7 @@ static CommandLine cluster_set_upstream_command =
 static CommandLine *cluster_subcommands[] = {
 	&cluster_register_command,
 	&cluster_drop_command,
+	&cluster_enable_command,
 	&cluster_list_command,
 	&cluster_set_upstream_command,
 	&cluster_prune_command,
@@ -2260,8 +2382,8 @@ static CommandLine *cluster_subcommands[] = {
 
 static CommandLine cluster_commands =
 	make_command_set("cluster",
-					 "Register, drop, list, re-point, or prune the "
-					 "clusters this pg_walserver archives",
+					 "Register, drop, enable, list, re-point, or prune "
+					 "the clusters this pg_walserver archives",
 					 NULL, NULL, NULL, cluster_subcommands);
 
 /* -----------------------------------------------------------------------
