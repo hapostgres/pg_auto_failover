@@ -16,6 +16,7 @@
 
 #include "cli_archive_cleanup.h"
 #include "cmd_base_backup.h"
+#include "cmd_replication_slot.h"
 #include "file_utils.h"
 #include "log.h"
 #include "routes.h"
@@ -992,6 +993,49 @@ ws_archive_cleanup_run(const char *routePath,
 
 	strlcpy(combinedCutoff, backups[cutoffIndex].startSegment,
 			sizeof(combinedCutoff));
+
+	/*
+	 * A still-existing replication slot's own restart_lsn is an
+	 * unconditional floor, exactly like a real PostgreSQL slot: there is
+	 * no flag here to ignore it short of dropping the slot itself
+	 * (DROP_REPLICATION_SLOT/"pg_walserver ps" or similar). Unlike a real
+	 * primary, where a forgotten slot can silently grow pg_wal until the
+	 * disk fills (max_slot_wal_keep_size, when configured, is the only
+	 * guard), this is a WARN every single archive-cleanup run logs
+	 * loudly by name whenever the slot is the actual reason less was
+	 * removed than --keep-count/--keep-age alone would have allowed --
+	 * an operator running this on a schedule cannot miss it the way a
+	 * real primary's own slow disk-filling often goes unnoticed until
+	 * it's critical.
+	 */
+	char slotName[NAMEDATALEN] = { 0 };
+	char slotLsn[32] = { 0 };
+
+	if (ws_replication_slot_oldest_restart_lsn(&route, segSize, slotName,
+											   sizeof(slotName), slotLsn,
+											   sizeof(slotLsn)))
+	{
+		uint64_t slotSegno;
+
+		if (ws_wal_lsn_to_segno(slotLsn, segSize, &slotSegno))
+		{
+			char slotCutoff[WS_WAL_FNAME_LEN + 1] = { 0 };
+
+			wal_segment_filename(0, slotSegno, segSize, slotCutoff,
+								 sizeof(slotCutoff));
+
+			if (strcmp(slotCutoff + 8, combinedCutoff + 8) < 0)
+			{
+				log_warn("archive-cleanup: replication slot \"%s\" (restart_lsn "
+						 "%s) needs WAL from \"%s\" onward, older than "
+						 "--keep-count/--keep-age alone would have kept -- "
+						 "retaining it too; drop the slot (or let it catch "
+						 "up) to allow this WAL to be removed",
+						 slotName, slotLsn, slotCutoff);
+				strlcpy(combinedCutoff, slotCutoff, sizeof(combinedCutoff));
+			}
+		}
+	}
 
 	if (haveKeepCount && haveKeepAge)
 	{

@@ -11,6 +11,15 @@
  *   required for a client (a real pg_receivewal) that already does its own
  *   validation on the bytes it receives.
  *
+ *   SLOT slotName, when given, must already exist (CREATE_REPLICATION_SLOT
+ *   first) -- refused otherwise, the same requirement a real walsender
+ *   enforces. While streaming, every StandbyStatusUpdate the client sends
+ *   (real pg_receivewal/a real standby send one periodically on their
+ *   own) advances the slot's own "restart_lsn" to the reported "flush"
+ *   position -- see cmd_replication_slot.h's own ws_replication_slot_
+ *   update_restart_lsn(), and this file's own wait_for_more_data_or_
+ *   client() for exactly when/how often.
+ *
  * Licensed under the PostgreSQL License.
  *
  */
@@ -26,10 +35,9 @@
  * slotName/startLsn/haveTimeline/timeline are already parsed out by
  * repl_gram.y's grammar (see repl_command.h) -- this file no longer
  * tokenizes the raw command text itself. slotName is "" when the client
- * didn't send a SLOT clause (this file doesn't act on it either way, see
- * this header's own comment on retention). haveTimeline is false when the
- * client didn't send a TIMELINE clause, in which case the current
- * timeline is looked up from the WAL cache, same as before.
+ * didn't send a SLOT clause; haveTimeline is false when the client didn't
+ * send a TIMELINE clause, in which case the current timeline is looked up
+ * from the WAL cache, same as before.
  */
 void cmd_start_replication(int sock, const WsRoute *route,
 						   const char *slotName, uint64_t startLsn,
