@@ -283,8 +283,8 @@ static void
 print_config_files(const char *pgdata, const char *configPath)
 {
 	printf("%-24s %-7s %-10s %s\n", "FILE", "EXISTS", "SIZE", "MODIFIED"); /* IGNORE-BANNED */
-	printf("------------------------------------------------------" /* IGNORE-BANNED */
-		   "----------\n");
+	printf("%-24s %-7s %-10s %s\n", /* IGNORE-BANNED */
+		   "------------------------", "-------", "----------", "--------");
 
 	print_config_files_row("pg_walserver.ini", configPath);
 
@@ -305,10 +305,23 @@ print_config_files(const char *pgdata, const char *configPath)
 bool
 cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 {
-	if (pgdata == NULL || pgdata[0] == '\0')
+	if (includeConfigFiles && (pgdata == NULL || pgdata[0] == '\0'))
 	{
-		log_error("--pgdata is required (or set the PGDATA environment "
-				  "variable)");
+		/*
+		 * The --config tier lists well-known files at fixed
+		 * "<pgdata>/<name>" paths, not just the config file itself --
+		 * pgdata is genuinely needed here, unlike the default table below.
+		 */
+		log_error("--pgdata is required for --config (or set the PGDATA "
+				  "environment variable)");
+		return false;
+	}
+
+	if ((pgdata == NULL || pgdata[0] == '\0') &&
+		(configFile == NULL || configFile[0] == '\0'))
+	{
+		log_error("--pgdata or --config is required (or set the PGDATA "
+				  "environment variable)");
 		return false;
 	}
 
@@ -328,7 +341,7 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 	if (!routes_load(routesPath, &routes, &routeCount) || routeCount == 0)
 	{
 		printf("No routes configured yet under \"%s\" -- see " /* IGNORE-BANNED */
-			   "\"pg_walserver register cluster\".\n", pgdata);
+			   "\"pg_walserver cluster register\".\n", routesPath);
 		routes_free(routes);
 		return true;
 	}
@@ -336,8 +349,9 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 	printf("%-20s %-8s %-12s %-10s %-10s %-11s %s\n", /* IGNORE-BANNED */
 		   "CLUSTER", "BACKUPS", "BACKUP SIZE", "WAL FILES", "WAL SIZE",
 		   "TOTAL SIZE", "LAST BACKUP");
-	printf("--------------------------------------------------------------" /* IGNORE-BANNED */
-		   "----------------------------------------\n");
+	printf("%-20s %-8s %-12s %-10s %-10s %-11s %s\n", /* IGNORE-BANNED */
+		   "--------------------", "--------", "------------", "----------",
+		   "----------", "-----------", "-----------");
 
 	for (int i = 0; i < routeCount; i++)
 	{

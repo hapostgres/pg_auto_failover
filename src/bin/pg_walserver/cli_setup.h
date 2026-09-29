@@ -12,7 +12,7 @@
  *   "explicit flag beats a persisted default" precedent this project
  *   already follows everywhere else).
  *
- *   --config-file overrides where that config file itself lives --
+ *   --config overrides where that config file itself lives --
  *   config_file_path()'s own Debian-style split (routes.h): a systemd
  *   unit or a container entrypoint commonly wants pg_walserver's own
  *   config under /etc/pg_walserver/pg_walserver.ini, independent of
@@ -20,8 +20,26 @@
  *   still created here regardless -- every route's own storage still
  *   lives under it unconditionally.
  *
+ *   Also prepares everything else a first "pg_walserver serve" needs
+ *   that doesn't require an operator-chosen secret: a self-signed TLS
+ *   certificate (create_certificate(), cli_create_cert.c, the exact same
+ *   facility "cluster register" itself already uses), and an HBA file
+ *   with one real, active rule rather than the commented-out placeholder
+ *   "serve" itself falls back to -- open to this machine's own local
+ *   network, auto-discovered with ws_setup_autodetect_cidr() (hba.h),
+ *   the same idea as pg_autoctl's own LAN-CIDR HBA auto-admission
+ *   (pghba_enable_lan_cidr(), src/bin/pg_autoctl/pghba.c) adapted to
+ *   "setup" having no remote/upstream target to discover it *from* (see
+ *   ws_setup_autodetect_cidr()'s own comment, hba.c). Neither step
+ *   overwrites a file that already exists; discovery failing (no usable
+ *   local interface) only skips the HBA step, never fails setup as a
+ *   whole. Deliberately NOT written here: the password file
+ *   (pg_walserver_passwd, "scram-secret" writes to it) and the HBA
+ *   rule's own role name/password both need an operator-chosen secret
+ *   setup cannot fabricate safely.
+ *
  *   Deliberately nothing about any one archived cluster -- that's
- *   `pg_walserver register|drop|set-upstream cluster`'s own job
+ *   `pg_walserver cluster register|drop|list|set-upstream`'s own job
  *   (cli_cluster.h) now, split out of what used to be this same command.
  *   "setup" configures the server; "cluster" configures what it serves.
  *
@@ -39,8 +57,8 @@
 typedef struct WsSetupOptions
 {
 	char pgdata[MAXPGPATH];
-	char configFile[MAXPGPATH];  /* --config-file: empty means the default,
-	                              * see config_file_path()'s own comment */
+	char configFile[MAXPGPATH];  /* --config: empty means the default, see
+	                              * config_file_path()'s own comment */
 	bool havePort;
 	int port;
 	char sslCertFile[MAXPGPATH];
@@ -48,15 +66,17 @@ typedef struct WsSetupOptions
 	char sslCaFile[MAXPGPATH];
 	bool haveAuthTimeout;
 	int authTimeout;
+	bool noHba;    /* --no-hba: skip the HBA auto-provisioning step below */
+	bool noCert;   /* --no-cert: skip the TLS certificate auto-creation */
 } WsSetupOptions;
 
 /*
  * cli_setup_run writes whichever of options's own fields were actually
  * given into the config file's own global section (config_set_global_
- * property(), routes.c) -- see this file's own header comment. Creates
- * --pgdata if it doesn't exist yet. Returns true on success, false with
- * an error already logged otherwise. Never touches any route's own
- * section.
+ * property(), routes.c), then auto-provisions the certificate and HBA
+ * file -- see this file's own header comment. Creates --pgdata if it
+ * doesn't exist yet. Returns true on success, false with an error already
+ * logged otherwise. Never touches any route's own section.
  */
 bool cli_setup_run(const WsSetupOptions *options);
 

@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver fetch-systemid --pgdata <path> [--config-file <path>] --cluster <name>
+  pg_walserver fetch-systemid --pgdata <path> [--config <path>] --cluster <name>
       [--path <dir>] [--upstream <conninfo> | --host <host> [--port <port>] [--user <name>]]
       [--force]
 
@@ -31,7 +31,7 @@ Options
 
   This instance's own data root. Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives (defaults to
   ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).

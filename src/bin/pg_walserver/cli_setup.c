@@ -7,11 +7,14 @@
  */
 
 #include <string.h>
+#include <unistd.h>
 
 #include "postgres_fe.h"
 
+#include "cli_create_cert.h"
 #include "cli_setup.h"
 #include "file_utils.h"
+#include "hba.h"
 #include "log.h"
 #include "routes.h"
 #include "string_utils.h"
@@ -117,6 +120,86 @@ cli_setup_run(const WsSetupOptions *options)
 				 "\"pg_walserver serve\"'s own built-in defaults apply "
 				 "unless overridden on its own command line",
 				 configPath);
+	}
+
+	/*
+	 * TLS certificate: the same self-signed facility "cluster register"
+	 * itself already uses (cli_create_cert.c) -- created here too so a
+	 * first "serve" already has TLS ready, rather than only once a second
+	 * route forces the issue. Never overwrites an existing certificate.
+	 */
+	if (!options->noCert)
+	{
+		char certPath[MAXPGPATH] = { 0 };
+		char keyPath[MAXPGPATH] = { 0 };
+
+		sformat(certPath, sizeof(certPath), "%s/server.crt", options->pgdata);
+		sformat(keyPath, sizeof(keyPath), "%s/server.key", options->pgdata);
+
+		if (!file_exists(certPath) || !file_exists(keyPath))
+		{
+			char localHostname[_POSIX_HOST_NAME_MAX] = "pg_walserver";
+
+			(void) gethostname(localHostname, sizeof(localHostname));
+
+			if (!ws_create_cert_run(options->pgdata, localHostname, false))
+			{
+				log_warn("Failed to create a self-signed certificate for "
+						 "\"%s\" -- pass --ssl-cert-file/--ssl-key-file to "
+						 "\"serve\", or create \"%s\"/\"%s\" yourself (\"pg_"
+						 "walserver create-cert\"), before starting it",
+						 options->pgdata, certPath, keyPath);
+			}
+		}
+	}
+
+	/*
+	 * HBA file: written with one real, active rule open to this machine's
+	 * own local network when ws_setup_autodetect_cidr() finds one (hba.c),
+	 * else the same commented-out placeholder "serve"'s own bootstrap path
+	 * already falls back to -- never a hard error either way, and never
+	 * overwrites an already-existing HBA file.
+	 */
+	if (!options->noHba)
+	{
+		char hbaPath[MAXPGPATH] = { 0 };
+
+		sformat(hbaPath, sizeof(hbaPath), "%s/pg_walserver_hba.conf",
+				options->pgdata);
+
+		if (!file_exists(hbaPath))
+		{
+			char certPath[MAXPGPATH] = { 0 };
+
+			sformat(certPath, sizeof(certPath), "%s/server.crt",
+					options->pgdata);
+
+			bool tlsAvailable = file_exists(certPath);
+
+			char localCIDR[64] = { 0 };
+			bool haveCIDR = ws_setup_autodetect_cidr(localCIDR,
+													 sizeof(localCIDR));
+
+			if (!hba_write_setup_default(hbaPath, tlsAvailable,
+										 haveCIDR ? localCIDR : NULL))
+			{
+				log_warn("Failed to create \"%s\"", hbaPath);
+			}
+			else if (haveCIDR)
+			{
+				log_info("HBA: admitting \"%s\" (this machine's own local "
+						 "network, auto-discovered) in \"%s\" -- review and "
+						 "adjust it before running on a reachable network",
+						 localCIDR, hbaPath);
+			}
+			else
+			{
+				log_info("HBA: could not auto-discover a local network "
+						 "CIDR to admit -- \"%s\" was created with its "
+						 "default commented-out placeholder; add a rule by "
+						 "hand", hbaPath);
+			}
+		}
 	}
 
 	return true;

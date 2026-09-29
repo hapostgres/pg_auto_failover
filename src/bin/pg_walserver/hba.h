@@ -121,6 +121,24 @@ void hba_match(const WsHbaRuleSet *ruleSet, const char *routeKey,
 bool hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable);
 
 /*
+ * Same as hba_write_default_if_missing(), plus an optional localCIDR: when
+ * given (non-empty), the one example rule written is active (not commented
+ * out), open to that CIDR -- "pg_walserver setup"'s own use, once it has
+ * auto-discovered its local network's CIDR with ws_setup_autodetect_cidr()
+ * below. NULL/empty gets the exact same commented-out-placeholder behavior
+ * as hba_write_default_if_missing() itself.
+ */
+bool hba_write_setup_default(const char *hbaPath, bool tlsAvailable,
+							 const char *localCIDR);
+
+/*
+ * ws_setup_autodetect_cidr is a best-effort, non-fatal discovery of this
+ * machine's own local-network CIDR -- see hba.c's own comment. Returns
+ * false, cidrOut untouched, when nothing usable was found; never fatal.
+ */
+bool ws_setup_autodetect_cidr(char *cidrOut, size_t cidrOutSize);
+
+/*
  * hba_ruleset_requires_client_cert reports whether any rule in ruleSet has
  * "clientcert=verify-full" -- checked once at startup (and again on a
  * SIGHUP reload) so a ruleset needing client certificate verification with

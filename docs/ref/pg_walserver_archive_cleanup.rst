@@ -11,7 +11,7 @@ Synopsis
 ::
 
   pg_walserver archive-cleanup --cluster <name> --pgdata <path>
-      [--config-file <path>] | --path <dir>
+      [--config <path>] | --path <dir>
       [--keep-count <N>] [--keep-age <interval>] [--dry-run] [--force]
 
 Removes WAL segments (and ``.partial``/``.backup`` files) and base
@@ -68,7 +68,7 @@ Options
 
   This instance's own data root. Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives (defaults to
   ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).

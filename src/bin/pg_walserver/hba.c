@@ -6,6 +6,10 @@
  *
  */
 
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <stdlib.h>
 #include <strings.h>
 #include <string.h>
@@ -57,10 +61,31 @@ static const char *hbaHeader =
  * There is no automatic node admission in this PR (no monitor integration
  * yet, see hba.h's own header comment): the default file only documents how
  * to add a rule, it never admits anything by itself, so every connection is
- * rejected until an operator adds a line.
+ * rejected until an operator adds a line -- unless localCIDR is given (see
+ * hba_write_setup_default(), which is the one caller that passes it), in
+ * which case a real, active rule for that CIDR is written instead of a
+ * commented-out example.
  */
 bool
 hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable)
+{
+	return hba_write_setup_default(hbaPath, tlsAvailable, NULL);
+}
+
+
+/*
+ * hba_write_setup_default is hba_write_default_if_missing()'s own
+ * implementation, plus an optional localCIDR: when given (non-empty), the
+ * written file's one example rule is an active one (no leading "#"), open
+ * to that CIDR, rather than a commented-out placeholder -- "pg_walserver
+ * setup"'s own use, once it has auto-discovered its local network's CIDR
+ * (see cli_setup.c). hba_write_default_if_missing() itself always passes
+ * NULL: "serve"'s own bootstrap path never auto-admits a CIDR it hasn't
+ * been asked to.
+ */
+bool
+hba_write_setup_default(const char *hbaPath, bool tlsAvailable,
+						const char *localCIDR)
 {
 	if (file_exists(hbaPath))
 	{
@@ -72,6 +97,53 @@ hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable)
 	PQExpBuffer buffer = createPQExpBuffer();
 
 	appendPQExpBufferStr(buffer, hbaHeader);
+
+	bool haveCIDR = localCIDR != NULL && localCIDR[0] != '\0';
+
+	if (haveCIDR)
+	{
+		/*
+		 * USER is "all" here, deliberately never PG_AUTOCTL_REPLICA_USERNAME:
+		 * that constant names pg_auto_failover's own conventional role, but
+		 * an operator is free to register a cluster under any role name at
+		 * all ("cluster register --pguri ..."), which "setup" has no way
+		 * to know yet -- pinning this active rule to one specific,
+		 * possibly-wrong role name would silently reject every other one.
+		 * "all" still requires a valid scram-sha-256 password for whichever
+		 * role actually connects, so this is not an open door, only not
+		 * restricted to a role name setup cannot possibly know in advance.
+		 */
+		appendPQExpBufferStr(
+			buffer,
+			"# One rule below, open to this machine's own local network\n"
+			"# (auto-discovered by \"pg_walserver setup\"), for any role\n"
+			"# with the right scram-sha-256 password -- narrow ROUTE/USER\n"
+			"# to a specific cluster/role once you know them, or add more\n"
+			"# lines below; the first matching line always wins:\n");
+
+		if (tlsAvailable)
+		{
+			appendPQExpBuffer(buffer,
+							  "hostssl  all  all  %s  scram-sha-256\n",
+							  localCIDR);
+		}
+		else
+		{
+			appendPQExpBuffer(buffer,
+							  "# no server.crt/server.key in this directory: "
+							  "TLS is off\n"
+							  "host     all  all  %s  scram-sha-256\n",
+							  localCIDR);
+		}
+
+		bool ok = !PQExpBufferBroken(buffer) &&
+				  write_file_atomic(buffer->data, buffer->len, (char *) hbaPath);
+
+		destroyPQExpBuffer(buffer);
+
+		return ok;
+	}
+
 	appendPQExpBufferStr(
 		buffer,
 		"# No rule matches anything yet: every connection is rejected until\n"
@@ -99,6 +171,84 @@ hba_write_default_if_missing(const char *hbaPath, bool tlsAvailable)
 	destroyPQExpBuffer(buffer);
 
 	return ok;
+}
+
+
+/*
+ * ws_setup_autodetect_cidr is a best-effort, non-fatal discovery of this
+ * machine's own local-network CIDR, for "pg_walserver setup" to seed its
+ * HBA file with a real, working rule instead of a commented-out example.
+ *
+ * pg_autoctl's own discovery (fetchLocalIPAddress() then fetchLocalCIDR(),
+ * src/bin/common/ipaddr.c) needs a real remote target to connect() toward
+ * first (--monitor's own address, always already known by the time it
+ * runs it) -- "setup" has no such target at all, by design: it runs before
+ * any cluster/upstream is known (see cli_setup.h). So this walks
+ * getifaddrs() directly instead, picking the first UP, non-loopback IPv4
+ * interface as "this machine's own address", then hands that straight to
+ * the same fetchLocalCIDR() pg_autoctl itself uses to turn an address into
+ * its interface's own CIDR (netmask-derived) -- no network reachability of
+ * any kind required, only that the host has at least one configured
+ * interface, which every real deployment does.
+ *
+ * Returns false, cidrOut untouched, when no such interface exists (e.g. an
+ * otherwise-unconfigured container with only loopback) -- callers treat
+ * that as "skip it", never as a hard error: setup's other work still
+ * completes.
+ */
+bool
+ws_setup_autodetect_cidr(char *cidrOut, size_t cidrOutSize)
+{
+	struct ifaddrs *ifaddrList = NULL;
+	char localIP[INET6_ADDRSTRLEN] = { 0 };
+	bool found = false;
+
+	if (getifaddrs(&ifaddrList) == -1)
+	{
+		log_debug("Failed to get the list of local network interfaces: %m");
+		return false;
+	}
+
+	for (struct ifaddrs *ifa = ifaddrList; ifa != NULL; ifa = ifa->ifa_next)
+	{
+		if (ifa->ifa_addr == NULL ||
+			ifa->ifa_addr->sa_family != AF_INET ||
+			(ifa->ifa_flags & IFF_LOOPBACK) != 0 ||
+			(ifa->ifa_flags & IFF_UP) == 0)
+		{
+			continue;
+		}
+
+		struct sockaddr_in *addr = (struct sockaddr_in *) ifa->ifa_addr;
+
+		if (inet_ntop(AF_INET, &(addr->sin_addr),
+					  localIP, sizeof(localIP)) != NULL)
+		{
+			log_debug("Using local interface \"%s\" (%s) to discover this "
+					  "machine's own CIDR", ifa->ifa_name, localIP);
+			found = true;
+			break;
+		}
+	}
+
+	freeifaddrs(ifaddrList);
+
+	if (!found)
+	{
+		return false;
+	}
+
+	char localCIDR[INET6_ADDRSTRLEN + 8] = { 0 };
+
+	if (!fetchLocalCIDR(localIP, localCIDR, sizeof(localCIDR)))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	strlcpy(cidrOut, localCIDR, cidrOutSize);
+
+	return true;
 }
 
 

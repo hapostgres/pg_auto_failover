@@ -116,18 +116,34 @@ This needs ``wal_level`` already set to ``replica`` or higher (the
 default since PostgreSQL 10).
 
 **2. On the archive host**, set ``PGDATA`` once for every command
-below, create the SCRAM verifier and the HBA rule for the cluster this
-instance is about to serve, and create its TLS certificate right away
-(a self-signed one is enough to start with; replace it with a real one
-before running on a reachable network)::
+below, then run :ref:`pg_walserver_setup`: it creates the config file,
+a self-signed TLS certificate (replace it with a real one before
+running on a reachable network), and ``pg_walserver_hba.conf`` with one
+real rule open to this machine's own local network, auto-discovered the
+same way ``pg_autoctl`` discovers its own LAN CIDR::
 
   archive$ export PGDATA=/var/lib/archiver
+  archive$ pg_walserver setup
+  11:36:08 179613 INFO  setup: "/var/lib/archiver/pg_walserver.ini" already exists; no --port/--ssl-*/--auth-timeout flag was given, nothing to persist -- "pg_walserver serve"'s own built-in defaults apply unless overridden on its own command line
+  11:36:08 179613 INFO   /usr/bin/openssl req -new -x509 -days 365 -nodes -text -out /var/lib/archiver/server.crt -keyout /var/lib/archiver/server.key -subj "/CN=archive"
+  11:36:09 179613 INFO  Created a self-signed certificate for "/var/lib/archiver" ("/var/lib/archiver/server.crt"/"/var/lib/archiver/server.key", CN=archive) -- replace it with a real one before running on a reachable network
+  11:36:09 179613 INFO  Creating the default pg_walserver HBA file "/var/lib/archiver/pg_walserver_hba.conf"
+  11:36:09 179613 INFO  HBA: admitting "10.1.0.0/24" (this machine's own local network, auto-discovered) in "/var/lib/archiver/pg_walserver_hba.conf" -- review and adjust it before running on a reachable network
+
+The written rule admits any role with the right password from that
+network -- ``setup`` cannot know the role name ahead of time, since
+that is only chosen once a cluster is registered (below); narrow it by
+hand once it is::
+
+  archive$ tail -1 /var/lib/archiver/pg_walserver_hba.conf
+  hostssl  all  all  10.1.0.0/24  scram-sha-256
+
+Still needed, and not something ``setup`` can do on its own: the SCRAM
+verifier for the role created on the primary in step 1, since that
+needs its actual password::
+
   archive$ PGPASSWORD=s3kr3t pg_walserver scram-secret --user archiver_repl \
       >> /var/lib/archiver/pg_walserver_passwd
-  archive$ cat > /var/lib/archiver/pg_walserver_hba.conf <<EOF
-  hostssl  mycluster  archiver_repl  0.0.0.0/0  scram-sha-256
-  EOF
-  archive$ pg_walserver create-cert --hostname archive
 
 **3. Start the server**, in the background, before any cluster is
 registered -- ``serve`` needs neither ``--pgdata`` (``PGDATA`` is
@@ -135,8 +151,8 @@ already exported above) nor ``--port`` (``6543`` is already the
 default)::
 
   archive$ pg_walserver serve &
-  23:02:10 92 INFO  TLS is enabled ("/var/lib/archiver/server.crt")
-  23:02:10 92 INFO  pg_walserver listening on port 6543, routes /var/lib/archiver/pg_walserver.ini
+  11:36:14 179753 INFO  TLS is enabled ("/var/lib/archiver/server.crt")
+  11:36:14 179753 INFO  pg_walserver listening on port 6543, routes /var/lib/archiver/pg_walserver.ini
 
 Registering the cluster
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -320,7 +336,7 @@ receiving::
 
   archive$ pg_walserver list clusters
   CLUSTER              BACKUP   RECEIVEWAL WORKER   WAL START              WAL END
-  --------------------------------------------------------------------------------------------
+  -------------------- -------- ---------- -------- ---------------------- ----------------------
   mycluster            yes      pull       yes      0/04000028             0/05024778
 
   archive$ pg_walserver ps

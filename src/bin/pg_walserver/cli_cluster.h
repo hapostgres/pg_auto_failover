@@ -95,9 +95,15 @@ bool ws_cluster_drop_run(const char *pgdata, const char *configFile,
  * differs from :ref:`pg_walserver_list`'s own "list clusters". Returns
  * true (having printed a clean "no clusters registered yet" message,
  * never an error) when there are none, false only on a genuine problem
- * (e.g. no --pgdata given, or an unparsable config file).
+ * (e.g. neither --pgdata nor --config given, or an unparsable config
+ * file). UPSTREAM is a full connection string/URI, often much wider
+ * than every other column combined -- skipped from the default table
+ * entirely, and only with showUpstream (--upstream) does it print at
+ * all, pivoted into one key: value block per cluster rather than
+ * widening the row.
  */
-bool ws_cluster_list_run(const char *pgdata, const char *configFile);
+bool ws_cluster_list_run(const char *pgdata, const char *configFile,
+						 bool showUpstream);
 
 /*
  * ws_cluster_set_upstream_run changes routeKey's own "upstream" property

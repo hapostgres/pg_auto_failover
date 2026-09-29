@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver status --pgdata <path> [--config-file <path>]
+  pg_walserver status --pgdata <path> [--config <path>]
 
 Prints a short, scannable *process* dashboard, and only that: running
 or not (a real liveness check, not just "the pidfile exists"), pid,
@@ -29,7 +29,7 @@ Options
 
   This instance's own data root. Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives (defaults to
   ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).
