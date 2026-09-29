@@ -93,6 +93,18 @@ bool ws_cluster_drop_run(const char *pgdata, const char *configFile,
 						 const char *routeKey, bool purge);
 
 /*
+ * ws_cluster_enable_run clears routeKey's own "disabled" property -- the
+ * dedicated, symmetric counterpart to "cluster drop" (without --purge):
+ * see cli_cluster.c's own comment for how this differs from re-running
+ * "cluster register" to the same end. Returns true (having printed a
+ * clean "already active" message, never an error) when the route was
+ * already enabled, false only on a genuine problem (no such route, or a
+ * write failure).
+ */
+bool ws_cluster_enable_run(const char *pgdata, const char *configFile,
+						   const char *routeKey);
+
+/*
  * ws_cluster_prune_run purges every disabled ("dropped") route at once,
  * the "ala docker" bulk equivalent of "cluster drop --purge <name>"
  * applied to every route currently disabled -- see cli_cluster.c's own

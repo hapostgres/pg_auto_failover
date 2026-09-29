@@ -53,7 +53,7 @@ top-level list (the rows without a nested tree of their own below)::
     fetch-systemid   Fetch a route's upstream system identifier
     basebackup       Take a base backup of a route's upstream
     setup            Configure pg_walserver itself (port, TLS, auth-timeout, HBA)
-  + cluster          Register, drop, list, re-point, or prune the clusters this pg_walserver archives
+  + cluster          Register, drop, enable, list, re-point, or prune the clusters this pg_walserver archives
     create-cert      Create a self-signed TLS certificate for --pgdata
     archive-wal      Push one WAL/.backup file into a pg_walserver route (archive_command)
     restore-wal      Fetch one WAL/.backup file from a pg_walserver route (restore_command)
@@ -69,6 +69,7 @@ top-level list (the rows without a nested tree of their own below)::
   pg_walserver cluster
     register      Register (or validate) one cluster this pg_walserver archives
     drop          Drop (disable) one cluster, or fully remove it with --purge
+    enable        Bring a dropped (disabled) cluster back
     list          List every cluster this pg_walserver has registered
     set-upstream  Point an already-registered cluster at a new upstream (e.g. after a failover)
     prune         Remove every dropped (disabled) cluster's registration and on-disk data

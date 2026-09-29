@@ -136,12 +136,16 @@ typedef struct WsRoute
 	                                     * resolve_upstream() (cli_upstream.c)
 	                                     * refuses it for basebackup/fetch-
 	                                     * systemid/set-upstream. "cluster
-	                                     * register" on the same key/path
-	                                     * clears it again (see cli_cluster.c's
-	                                     * own write_route_section()) -- the
-	                                     * natural way to "undrop" a route
-	                                     * without a dedicated command for
-	                                     * that alone. */
+	                                     * enable" clears it again -- no
+	                                     * connection URI to re-supply, since
+	                                     * "path"/"upstream"/"hostname" are
+	                                     * already on file (see cli_cluster.c's
+	                                     * own ws_cluster_enable_run());
+	                                     * "cluster register" on the same
+	                                     * key/path clears it too, as a side
+	                                     * effect (see write_route_section()),
+	                                     * but needs the connection URI given
+	                                     * again to do so. */
 } WsRoute;
 
 /*
