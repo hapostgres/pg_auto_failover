@@ -327,15 +327,56 @@ real PostgreSQL primary except where noted:
   ``.backup``/``.history`` file in a single round trip. Used by
   ``restore-wal``.
 
-``CHECK_FILE`` / ``ARCHIVE_FILE``
+``CHECK_FILE '<name>' <size> crc32c:<hex>``
 
-  ``pg_walserver`` extensions, the push side of the protocol: check
-  whether a file already matches what the route has, or push one.
-  ``CHECK_FILE`` also reports whether the connected route's own embedded
-  receivewal worker has already streamed past the file in question -- a
-  hole it can never retroactively fill, typically a timeline switch --
-  recommending an immediate ``ARCHIVE_FILE`` push over waiting. Used by
-  ``archive-wal``.
+  A ``pg_walserver`` extension, the push side's cheap, transfer-free
+  round trip: the client (``archive-wal``, running as
+  ``archive_command``) sends its own *local* file's size and CRC32C: no
+  file bytes cross the wire at all. The reply is a two-column,
+  single-row result (the same ``RowDescription``/``DataRow``/
+  ``CommandComplete`` shape ``SHOW`` already uses):
+
+  ``status``
+    ``missing`` (nothing on disk here under that name yet), ``matches``
+    (identical size and checksum), or ``differs`` (something else is
+    already there under that name) -- never anything a client should
+    parse structurally beyond those three strings.
+
+  ``fallback``
+    ``yes`` or ``no``: whether this route's own embedded receivewal
+    worker has already streamed *past* ``<name>`` (its own
+    last-observed position is at a later WAL segment, or a later
+    timeline) while ``<name>`` itself never showed up here -- a hole a
+    streaming worker can never retroactively fill (typically a timeline
+    switch left a segment behind on the old timeline). This recommends
+    an immediate ``ARCHIVE_FILE`` push over waiting for the embedded
+    worker to eventually catch up on its own, which it never will for
+    this one segment. ``no`` whenever ``status`` is ``matches``, the
+    route has no embedded receivewal worker at all, or there simply
+    isn't a live progress reading yet to compare against -- the safe
+    default (keep waiting for the normal ``archive_command`` retry
+    loop), never ``yes`` on ambiguous information.
+
+  Advisory only: ``CHECK_FILE`` never writes anything, and the checksum
+  it reports on is never trusted by ``ARCHIVE_FILE`` -- see its own
+  entry below. Used by ``archive-wal``.
+
+``ARCHIVE_FILE '<name>'``
+
+  A ``pg_walserver`` extension, the push side's actual transfer: a
+  ``CopyIn`` (client to server) of one file's real bytes -- a WAL
+  segment or a base backup's own ``.backup`` history file -- into the
+  connected route's own directory. The server never trusts a client's
+  own preceding ``CHECK_FILE`` checksum (a lying client could otherwise
+  talk its way past the overwrite-safety check entirely): once the
+  whole ``CopyIn`` is received, the same size/CRC32C comparison
+  ``CHECK_FILE`` reports on is re-derived directly from the real bytes
+  on disk versus the real bytes just received -- identical succeeds (an
+  idempotent retry, exactly matching PostgreSQL's own
+  ``archive_command`` contract, which explicitly requires this),
+  different is cleanly rejected, and nothing there yet is written for
+  real via a same-directory temp file plus atomic rename (a partial
+  file is never visible under the final name). Used by ``archive-wal``.
 
 See ``src/bin/pg_walserver/README.md`` for the wire protocol's full
 design.
