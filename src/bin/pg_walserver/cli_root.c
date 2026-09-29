@@ -2947,8 +2947,8 @@ static bool lsIncludeConfigFiles = false;
 
 static struct option lsLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
-	{ "config", no_argument, NULL, 'c' },
+	{ "config", required_argument, NULL, 'f' },
+	{ "all", no_argument, NULL, 'a' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -2966,7 +2966,7 @@ cli_ls_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:f:c", lsLongOptions, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "D:f:a", lsLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -2982,7 +2982,7 @@ cli_ls_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'c':
+			case 'a':
 			{
 				lsIncludeConfigFiles = true;
 				break;
@@ -3017,15 +3017,15 @@ cli_ls_command_run(int argc, char **argv)
 static CommandLine ls_command =
 	make_command("ls",
 				 "Per-cluster storage summary: base backups, WAL, disk usage",
-				 "--pgdata <path> [--config-file <path>] [--config]",
+				 "--pgdata <path> [--config <path>] [--all]",
 				 "  --pgdata    this instance's own top-level storage root "
 				 "(defaults to\n"
 				 "              PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
+				 "  --config    where the config file itself lives "
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --config    list the config/credential/certificate "
+				 "  --all, -a   list the config/credential/certificate "
 				 "files instead\n"
 				 "              (rarely change, rarely interesting day "
 				 "to day)\n",

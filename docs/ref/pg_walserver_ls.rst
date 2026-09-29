@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver ls --pgdata <path> [--config-file <path>] [--config]
+  pg_walserver ls --pgdata <path> [--config <path>] [--all]
 
 Prints one row per configured route: how many base backups it holds
 and their combined real size on disk, how many WAL segments it has
@@ -25,7 +25,7 @@ at a glance. This is never the archived WAL or base backup data's own
 full inventory -- see :ref:`pg_walserver_list` for every individual
 file, one row each.
 
-``--config`` shows a different, unrelated view instead: pg_walserver's
+``--all`` shows a different, unrelated view instead: pg_walserver's
 own config/credential/certificate files (``pg_walserver.ini``,
 ``pg_walserver_hba.conf``, ``pg_walserver_passwd``, ``server.crt``,
 ``server.key``, ``ca.crt``) -- written once, by hand or by
@@ -39,14 +39,14 @@ Options
 
   This instance's own top-level storage root. Defaults to ``PGDATA``.
 
---config-file
+--config
 
   Where the config file itself lives (defaults to
   ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``); also
-  where ``--config``'s own ``pg_walserver.ini`` row checks, when it
+  where ``--all``'s own ``pg_walserver.ini`` row checks, when it
   differs from the default.
 
---config
+--all, -a
 
   List the config/credential/certificate files instead of the
   per-cluster storage summary.
@@ -62,16 +62,16 @@ Default output, the per-cluster storage summary::
   mycluster            1        52.7MB       5+1        96.0MB     148.7MB     2026-09-28T20:42:33Z
   another              2        105.3MB      0          0.0B       105.3MB     2026-09-28T20:43:37Z
 
-  (config/credential/certificate files omitted; pass --config to list those instead)
+  (config/credential/certificate files omitted; pass --all to list those instead)
 
 ``5+1`` under WAL FILES means 5 complete segments plus 1 still being
 written (a ``.partial`` file) -- ``another`` has none at all: it was
 set up with ``--no-receivewal`` and fed only by ``archive-wal`` pushes,
 none of which have happened yet.
 
-With ``--config``, the config/credential/certificate file tier::
+With ``--all``, the config/credential/certificate file tier::
 
-  archive$ pg_walserver ls --config
+  archive$ pg_walserver ls --all
   FILE                     EXISTS  SIZE       MODIFIED
   ------------------------ ------- ---------- --------
   pg_walserver.ini         yes     247.0B     2026-09-28T20:43:35Z

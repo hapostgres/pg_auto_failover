@@ -27,7 +27,7 @@
  * or by "setup"/"create-cert", and rarely changing thereafter -- see
  * cli_root.c's own cli_serve_run() (routes/HBA/passwd/TLS paths) and
  * tls.c (--ssl-ca-file's own default path, "ca.crt"). Only shown with
- * --config: confirming these still exist tells an operator little day
+ * --all: confirming these still exist tells an operator little day
  * to day, so they don't clutter the default output, which is the real
  * per-cluster storage summary below instead.
  */
@@ -246,7 +246,7 @@ scan_route_footprint(const WsRoute *route, WsRouteFootprint *out)
 
 
 /*
- * print_config_files_row prints one row of the --config tier's own table
+ * print_config_files_row prints one row of the --all tier's own table
  * for label/path -- shared between the config file itself (whose
  * resolved path is not always "<pgdata>/<name>", see config_file_path())
  * and every other well-known file, which still always is.
@@ -272,7 +272,7 @@ print_config_files_row(const char *label, const char *path)
 
 
 /*
- * print_config_files prints the --config tier's own table: one row per
+ * print_config_files prints the --all tier's own table: one row per
  * well-known config/credential/certificate file, whether it exists, its
  * size, and its last-modified time. Every file except the config file
  * itself lives at a fixed "<pgdata>/<name>" path; the config file's own
@@ -308,11 +308,11 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 	if (includeConfigFiles && (pgdata == NULL || pgdata[0] == '\0'))
 	{
 		/*
-		 * The --config tier lists well-known files at fixed
-		 * "<pgdata>/<name>" paths, not just the config file itself --
-		 * pgdata is genuinely needed here, unlike the default table below.
+		 * The --all tier lists well-known files at fixed "<pgdata>/<name>"
+		 * paths, not just the config file itself -- pgdata is genuinely
+		 * needed here, unlike the default table below.
 		 */
-		log_error("--pgdata is required for --config (or set the PGDATA "
+		log_error("--pgdata is required for --all (or set the PGDATA "
 				  "environment variable)");
 		return false;
 	}
@@ -388,7 +388,7 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 	routes_free(routes);
 
 	printf("\n(config/credential/certificate files omitted; " /* IGNORE-BANNED */
-		   "pass --config to list those instead)\n");
+		   "pass --all to list those instead)\n");
 
 	return true;
 }
