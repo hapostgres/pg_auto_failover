@@ -14,9 +14,11 @@ Synopsis
       [--cluster <name>] [--segments]
 
 Prints aggregate WAL cache stats per route by default (segment count,
-total bytes, oldest and newest segment, ``.history`` file count); with
-``--segments``, lists every individual WAL/``.partial``/``.backup``/
-``.history`` file instead.
+total bytes, oldest and newest segment, ``.history`` file count), one
+``pg_controldata``-style ``Label:  value`` block per route, rather than
+a table -- one route's worth of facts read more naturally stacked than
+crammed into a row; with ``--segments``, lists every individual
+WAL/``.partial``/``.backup``/``.history`` file instead, still a table.
 
 Options
 -------
@@ -44,9 +46,16 @@ Examples
 Aggregate stats::
 
   archive$ pg_walserver list wal --cluster mycluster
-  CLUSTER              SEGMENTS  SIZE       OLDEST                   NEWEST                   HISTORY
-  -------------------- --------- ---------- ------------------------ ------------------------ -------
-  mycluster            1         32.0MB     00000001000000000000002C 00000001000000000000002C 0
+  Cluster:   mycluster
+  Segments:  1
+  Size:      32.0MB
+  Oldest:    00000001000000000000002C
+  Newest:    00000001000000000000002C
+  History:   0
+
+With more than one route matching (no ``--cluster``, or a ``--cluster``
+that isn't given at all), each route's own block is separated by a
+blank line.
 
 See Also
 --------

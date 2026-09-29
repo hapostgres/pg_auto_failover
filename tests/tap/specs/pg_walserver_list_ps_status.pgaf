@@ -140,9 +140,10 @@ step test_003_real_wal_range_and_aggregate_stats {
     exec walserver bash -c 'grep -E "^pushc" /tmp/lc1.out | grep -qE " - *\$" || { cat /tmp/lc1.out; false; }'
 
     # list wal: pullc's real segment count matches a real "ls" of its own
-    # directory; pushc has none.
-    exec walserver bash -c 'REAL_COUNT=$(ls /tmp/lps/pullc | grep -cE "^[0-9A-F]{24}$"); pg_walserver list wal --pgdata /tmp/lps --cluster pullc > /tmp/lw1.out 2>&1; grep -qE "^pullc +$REAL_COUNT " /tmp/lw1.out || { cat /tmp/lw1.out; ls -la /tmp/lps/pullc; false; }'
-    exec walserver bash -c 'pg_walserver list wal --pgdata /tmp/lps --cluster pushc > /tmp/lw1push.out 2>&1; grep -qE "^pushc +0 " /tmp/lw1push.out || { cat /tmp/lw1push.out; false; }'
+    # directory; pushc has none. The default output is one
+    # pg_controldata-style "Label:  value" block per cluster, not a table.
+    exec walserver bash -c 'REAL_COUNT=$(ls /tmp/lps/pullc | grep -cE "^[0-9A-F]{24}$"); pg_walserver list wal --pgdata /tmp/lps --cluster pullc > /tmp/lw1.out 2>&1; grep -qE "^Cluster: *pullc$" /tmp/lw1.out && grep -qE "^Segments: *$REAL_COUNT$" /tmp/lw1.out || { cat /tmp/lw1.out; ls -la /tmp/lps/pullc; false; }'
+    exec walserver bash -c 'pg_walserver list wal --pgdata /tmp/lps --cluster pushc > /tmp/lw1push.out 2>&1; grep -qE "^Cluster: *pushc$" /tmp/lw1push.out && grep -qE "^Segments: *0$" /tmp/lw1push.out || { cat /tmp/lw1push.out; false; }'
 
     # --segments lists every real file: at least one complete segment for
     # sure (a still-growing ".partial" may or may not exist at this exact
