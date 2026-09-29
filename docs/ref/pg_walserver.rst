@@ -357,26 +357,42 @@ real PostgreSQL primary except where noted:
     default (keep waiting for the normal ``archive_command`` retry
     loop), never ``yes`` on ambiguous information.
 
-  Advisory only: ``CHECK_FILE`` never writes anything, and the checksum
-  it reports on is never trusted by ``ARCHIVE_FILE`` -- see its own
-  entry below. Used by ``archive-wal``.
+  Advisory only: ``CHECK_FILE`` never writes anything to disk, and
+  nothing it reports here is trusted later by ``ARCHIVE_FILE`` -- see
+  its own entry below. Used by ``archive-wal``.
 
 ``ARCHIVE_FILE '<name>'``
 
-  A ``pg_walserver`` extension, the push side's actual transfer: a
-  ``CopyIn`` (client to server) of one file's real bytes -- a WAL
-  segment or a base backup's own ``.backup`` history file -- into the
-  connected route's own directory. The server never trusts a client's
-  own preceding ``CHECK_FILE`` checksum (a lying client could otherwise
-  talk its way past the overwrite-safety check entirely): once the
-  whole ``CopyIn`` is received, the same size/CRC32C comparison
-  ``CHECK_FILE`` reports on is re-derived directly from the real bytes
-  on disk versus the real bytes just received -- identical succeeds (an
-  idempotent retry, exactly matching PostgreSQL's own
-  ``archive_command`` contract, which explicitly requires this),
-  different is cleanly rejected, and nothing there yet is written for
-  real via a same-directory temp file plus atomic rename (a partial
-  file is never visible under the final name). Used by ``archive-wal``.
+  A ``pg_walserver`` extension, the push side's actual file transfer.
+  Unlike ``CHECK_FILE``, no size or checksum is sent as part of the
+  command itself -- only the filename. What follows is a ``CopyIn``: the
+  client streams the file's raw bytes (a WAL segment, or a base
+  backup's own ``.backup`` history file), which the server writes, as
+  they arrive, into a temporary file in the connected route's own
+  directory.
+
+  Once the whole transfer completes, the server settles what to do with
+  it purely from what is actually on disk, never from anything a client
+  claimed earlier (including a previous ``CHECK_FILE`` reply, which a
+  lying or out-of-date client could otherwise use to push its way past
+  this check):
+
+  * it computes the size and CRC32C of the bytes it just received, and
+    compares them against a real file already on disk under ``<name>``,
+    if one exists;
+  * nothing there yet -- the temporary file is renamed into place
+    (atomically, so a reader never sees a half-written file under the
+    final name) and the push succeeds;
+  * something there already, and it is byte-for-byte identical to what
+    was just received -- the push succeeds without writing anything;
+    this is treated as an ordinary, harmless retry (e.g. after a crash
+    mid-push), exactly as PostgreSQL's own ``archive_command`` contract
+    requires;
+  * something there already, and it differs -- the push is rejected and
+    the existing file is left untouched; nothing is ever silently
+    overwritten.
+
+  Used by ``archive-wal``.
 
 See ``src/bin/pg_walserver/README.md`` for the wire protocol's full
 design.
