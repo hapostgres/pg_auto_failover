@@ -19,18 +19,20 @@
 #include <stdbool.h>
 
 /*
- * cli_list_clusters_run prints one row per route configured in
- * "<pgdata>/pg_walserver.ini" (or just clusterFilter's own route, when not
- * NULL/empty): its path/upstream/hostname/receivewal setting, whether it has
- * a base backup, whether its embedded receivewal worker is currently running
- * (cross-referenced against the ps state file, ps_state.h -- "n/a" when
- * "serve" is not running at all), and the WAL range it currently covers
- * (start LSN from its latest base backup's own backup_label, end LSN from
- * the newest WAL segment actually present). Returns false, with an error
- * already logged, only on a configuration problem (no such --pgdata/
- * pg_walserver.ini, or no such cluster).
+ * cli_list_clusters_run prints one row per route configured in the config
+ * file config_file_path() resolves for pgdata/configFile (or just
+ * clusterFilter's own route, when not NULL/empty): its path/upstream/
+ * hostname/receivewal setting, whether it has a base backup, whether its
+ * embedded receivewal worker is currently running (cross-referenced
+ * against the ps state file, ps_state.h -- "n/a" when "serve" is not
+ * running at all), and the WAL range it currently covers (start LSN from
+ * its latest base backup's own backup_label, end LSN from the newest WAL
+ * segment actually present). Returns false, with an error already
+ * logged, only on a configuration problem (no such --pgdata/config file,
+ * or no such cluster).
  */
-bool cli_list_clusters_run(const char *pgdata, const char *clusterFilter);
+bool cli_list_clusters_run(const char *pgdata, const char *configFile,
+						   const char *clusterFilter);
 
 /*
  * cli_list_backups_run prints one row per base backup found under every
@@ -38,7 +40,8 @@ bool cli_list_clusters_run(const char *pgdata, const char *clusterFilter);
  * cleanup.c's own ws_backup_list_load()): its label/timestamp, size on
  * disk, and whether it is the route's ".latest".
  */
-bool cli_list_backups_run(const char *pgdata, const char *clusterFilter);
+bool cli_list_backups_run(const char *pgdata, const char *configFile,
+						  const char *clusterFilter);
 
 /*
  * cli_list_wal_run prints, per matching route, aggregate WAL cache stats
@@ -46,7 +49,7 @@ bool cli_list_backups_run(const char *pgdata, const char *clusterFilter);
  * by default, or, with segments true, one row per individual WAL/.partial/
  * .backup/.history file instead.
  */
-bool cli_list_wal_run(const char *pgdata, const char *clusterFilter,
-					  bool segments);
+bool cli_list_wal_run(const char *pgdata, const char *configFile,
+					  const char *clusterFilter, bool segments);
 
 #endif /* WS_CLI_LIST_H */

@@ -50,8 +50,8 @@ setup {
 
     exec walserver bash -c 'mkdir -p /tmp/lps && printf "host all all 0.0.0.0/0 trust\n" > /tmp/lps/pg_walserver_hba.conf'
 
-    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register --pgdata /tmp/lps --cluster pullc --path /tmp/lps/pullc --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
-    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register --pgdata /tmp/lps --cluster pushc --path /tmp/lps/pushc --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
+    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver register cluster pullc --pgdata /tmp/lps --path /tmp/lps/pullc --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver register cluster pushc --pgdata /tmp/lps --path /tmp/lps/pushc --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
 
     sql node1 { CREATE TABLE lps(a int); INSERT INTO lps VALUES (1); }
 }

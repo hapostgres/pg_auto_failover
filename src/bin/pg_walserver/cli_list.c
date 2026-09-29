@@ -196,14 +196,16 @@ directory_size(const char *path)
  * --------------------------------------------------------------------- */
 
 /*
- * load_pgdata_routes reads <pgdata>/pg_walserver.ini into a freshly
- * malloc'ed array (routes_load()), the shared first step every "list"
- * sub-command needs; when clusterFilter is given, also refuses (false,
- * an error already logged) if no route matches it, rather than every
- * caller having to check that on its own.
+ * load_pgdata_routes reads the config file config_file_path() resolves
+ * for pgdata/configFile into a freshly malloc'ed array (routes_load()),
+ * the shared first step every "list" sub-command needs; when
+ * clusterFilter is given, also refuses (false, an error already logged)
+ * if no route matches it, rather than every caller having to check that
+ * on its own.
  */
 static bool
-load_pgdata_routes(const char *pgdata, const char *clusterFilter,
+load_pgdata_routes(const char *pgdata, const char *configFile,
+				   const char *clusterFilter,
 				   WsRoute **routesOut, int *countOut)
 {
 	if (pgdata == NULL || pgdata[0] == '\0')
@@ -215,7 +217,7 @@ load_pgdata_routes(const char *pgdata, const char *clusterFilter,
 
 	char routesPath[MAXPGPATH] = { 0 };
 
-	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
+	config_file_path(pgdata, configFile, routesPath, sizeof(routesPath));
 
 	if (!routes_load(routesPath, routesOut, countOut))
 	{
@@ -347,19 +349,23 @@ receivewal_running_for_route(const char *pgdata, const char *routeKey,
  * pg_walserver list clusters
  * --------------------------------------------------------------------- */
 bool
-cli_list_clusters_run(const char *pgdata, const char *clusterFilter)
+cli_list_clusters_run(const char *pgdata, const char *configFile,
+					  const char *clusterFilter)
 {
 	WsRoute *routes = NULL;
 	int routeCount = 0;
 
-	if (!load_pgdata_routes(pgdata, clusterFilter, &routes, &routeCount))
+	if (!load_pgdata_routes(pgdata, configFile, clusterFilter, &routes, &routeCount))
 	{
 		return false;
 	}
 
 	if (routeCount == 0)
 	{
-		log_info("No routes configured in \"%s/pg_walserver.ini\"", pgdata);
+		char configPath[MAXPGPATH] = { 0 };
+
+		config_file_path(pgdata, configFile, configPath, sizeof(configPath));
+		log_info("No routes configured in \"%s\"", configPath);
 		routes_free(routes);
 		return true;
 	}
@@ -441,12 +447,13 @@ cli_list_clusters_run(const char *pgdata, const char *clusterFilter)
  * pg_walserver list backups
  * --------------------------------------------------------------------- */
 bool
-cli_list_backups_run(const char *pgdata, const char *clusterFilter)
+cli_list_backups_run(const char *pgdata, const char *configFile,
+					 const char *clusterFilter)
 {
 	WsRoute *routes = NULL;
 	int routeCount = 0;
 
-	if (!load_pgdata_routes(pgdata, clusterFilter, &routes, &routeCount))
+	if (!load_pgdata_routes(pgdata, configFile, clusterFilter, &routes, &routeCount))
 	{
 		return false;
 	}
@@ -637,12 +644,13 @@ scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
  * printSegments mode when segments is true.
  */
 bool
-cli_list_wal_run(const char *pgdata, const char *clusterFilter, bool segments)
+cli_list_wal_run(const char *pgdata, const char *configFile,
+				 const char *clusterFilter, bool segments)
 {
 	WsRoute *routes = NULL;
 	int routeCount = 0;
 
-	if (!load_pgdata_routes(pgdata, clusterFilter, &routes, &routeCount))
+	if (!load_pgdata_routes(pgdata, configFile, clusterFilter, &routes, &routeCount))
 	{
 		return false;
 	}

@@ -192,6 +192,7 @@ ws_prefill_pgdata_from_env(char *pgdata)
 
 static WsServerConfig serveConfig = { 0 };
 static char servePgdata[MAXPGPATH] = { 0 };
+static char serveConfigFile[MAXPGPATH] = { 0 };
 static char serveSslCertFile[MAXPGPATH] = { 0 };
 static char serveSslKeyFile[MAXPGPATH] = { 0 };
 static char serveSslCaFile[MAXPGPATH] = { 0 };
@@ -226,6 +227,7 @@ ws_write_pidfile(const char *pidfile, pid_t pid)
 static struct option serveLongOptions[] = {
 	{ "port", required_argument, NULL, 'p' },
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'f' },
 	{ "ssl-cert-file", required_argument, NULL, 'C' },
 	{ "ssl-key-file", required_argument, NULL, 'K' },
 	{ "ssl-ca-file", required_argument, NULL, 'A' },
@@ -257,7 +259,7 @@ cli_serve_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "p:D:", serveLongOptions, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "p:D:f:", serveLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -276,6 +278,12 @@ cli_serve_getopt(int argc, char **argv)
 			case 'D':
 			{
 				strlcpy(servePgdata, optarg, sizeof(servePgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(serveConfigFile, optarg, sizeof(serveConfigFile));
 				break;
 			}
 
@@ -364,16 +372,16 @@ cli_serve_run(int argc, char **argv)
 	{
 		strlcpy(serveConfig.pgdata, servePgdata, sizeof(serveConfig.pgdata));
 
-		sformat(serveConfig.routesPath, sizeof(serveConfig.routesPath),
-				"%s/pg_walserver.ini", servePgdata);
+		config_file_path(servePgdata, serveConfigFile,
+						 serveConfig.routesPath, sizeof(serveConfig.routesPath));
 		sformat(serveConfig.auth.hbaPath, sizeof(serveConfig.auth.hbaPath),
 				"%s/pg_walserver_hba.conf", servePgdata);
 		sformat(serveConfig.auth.passwdPath, sizeof(serveConfig.auth.passwdPath),
 				"%s/pg_walserver_passwd", servePgdata);
 
 		/*
-		 * "pg_walserver setup" (cli_setup.c) writes pg_walserver.ini's own
-		 * global section (routes_load_global(), routes.c): whichever of
+		 * "pg_walserver setup" (cli_setup.c) writes the config file's own
+		 * global section (config_load_global(), routes.c): whichever of
 		 * port/ssl-cert-file/ssl-key-file/ssl-ca-file/auth-timeout was
 		 * persisted there becomes this instance's own default from here on,
 		 * still always overridden by the same flag given directly on this
@@ -383,7 +391,7 @@ cli_serve_run(int argc, char **argv)
 		 */
 		WsGlobalConfig globalConfig = { 0 };
 
-		if (!routes_load_global(serveConfig.routesPath, &globalConfig))
+		if (!config_load_global(serveConfig.routesPath, &globalConfig))
 		{
 			log_fatal("Failed to parse \"%s\": refusing to start",
 					  serveConfig.routesPath);
@@ -627,31 +635,44 @@ static CommandLine serve_command =
 	make_command("serve",
 				 "Run the pg_walserver accept loop",
 				 "[--port <port>] [--pgdata <path> | --insecure] "
+				 "[--config-file <path>] "
 				 "[--ssl-cert-file <path> --ssl-key-file <path>] "
 				 "[--ssl-ca-file <path>] "
 				 "[--auth-timeout <seconds>]",
-				 "  --port      port to listen on (default: 6543)\n"
+				 "  --port      port to listen on (default: 6543, or "
+				 "whatever \"pg_walserver\n"
+				 "              setup\" persisted)\n"
 				 "  --pgdata    this instance's own top-level storage root "
 				 "(defaults to\n"
-				 "              the PGDATA environment variable); the "
-				 "routes file mapping\n"
-				 "              each route key (an opaque string; "
-				 "pg_auto_failover's own\n"
-				 "              convention is \"<formation>/<group>\") to "
-				 "its own storage path\n"
-				 "              is read from <pgdata>/pg_walserver.ini, "
-				 "and access is\n"
-				 "              decided by <pgdata>/pg_walserver_hba.conf; the "
-				 "server refuses to\n"
-				 "              start without it unless --insecure is "
-				 "given\n"
+				 "              the PGDATA environment variable); every "
+				 "route's own storage\n"
+				 "              (WAL, base backups) lives under it, and "
+				 "so does\n"
+				 "              <pgdata>/pg_walserver_hba.conf, unless "
+				 "--insecure is given\n"
+				 "  --config-file  where the config file mapping each "
+				 "route key (an opaque\n"
+				 "              string; pg_auto_failover's own convention "
+				 "is\n"
+				 "              \"<formation>/<group>\") to its own "
+				 "storage path lives --\n"
+				 "              defaults to <pgdata>/pg_walserver.ini, or "
+				 "the\n"
+				 "              PG_WALSERVER_CONFIG_FILE environment "
+				 "variable; independent\n"
+				 "              of --pgdata, for a Debian-style "
+				 "deployment (config under\n"
+				 "              /etc/pg_walserver/, data under "
+				 "/var/lib/pg_walserver/)\n"
 				 "  --insecure  no --pgdata: accept any dbname WITHOUT ANY "
 				 "authentication;\n"
 				 "              for manual testing only, never on a "
 				 "reachable network\n"
 				 "  --ssl-cert-file / --ssl-key-file  server certificate "
 				 "(default:\n"
-				 "              <pgdata>/server.crt / <pgdata>/server.key)\n"
+				 "              <pgdata>/server.crt / <pgdata>/server.key, "
+				 "or whatever\n"
+				 "              \"pg_walserver setup\" persisted)\n"
 				 "  --ssl-ca-file  trusted CA bundle for TLS client "
 				 "certificate verification\n"
 				 "              (default: <pgdata>/ca.crt); required for a "
@@ -661,7 +682,9 @@ static CommandLine serve_command =
 				 "  --auth-timeout  absolute deadline in seconds for a "
 				 "connection to\n"
 				 "              complete startup, TLS, HBA and "
-				 "authentication (default: 30)\n",
+				 "authentication (default: 30,\n"
+				 "              or whatever \"pg_walserver setup\" "
+				 "persisted)\n",
 				 cli_serve_getopt, cli_serve_run);
 
 
@@ -764,6 +787,7 @@ static CommandLine scram_secret_command =
  * ----------------------------------------------------------------------- */
 
 static char fetchSystemidPgdata[MAXPGPATH] = { 0 };
+static char fetchSystemidConfigFile[MAXPGPATH] = { 0 };
 static char fetchSystemidRoute[NAMEDATALEN + 16] = { 0 };
 static char fetchSystemidPath[MAXPGPATH] = { 0 };
 static char fetchSystemidUpstream[MAXCONNINFO] = { 0 };
@@ -774,6 +798,7 @@ static bool fetchSystemidForce = false;
 
 static struct option fetchSystemidLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'F' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "upstream", required_argument, NULL, 'u' },
@@ -796,7 +821,7 @@ cli_fetch_systemid_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c:P:u:h:p:U:f",
+	while ((c = getopt_long(argc, argv, "D:F:c:P:u:h:p:U:f",
 							fetchSystemidLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -804,6 +829,13 @@ cli_fetch_systemid_getopt(int argc, char **argv)
 			case 'D':
 			{
 				strlcpy(fetchSystemidPgdata, optarg, sizeof(fetchSystemidPgdata));
+				break;
+			}
+
+			case 'F':
+			{
+				strlcpy(fetchSystemidConfigFile, optarg,
+						sizeof(fetchSystemidConfigFile));
 				break;
 			}
 
@@ -874,7 +906,8 @@ cli_fetch_systemid_command_run(int argc, char **argv)
 
 	WsUpstreamTarget target = { 0 };
 
-	if (!cli_resolve_upstream(fetchSystemidPgdata, fetchSystemidRoute,
+	if (!cli_resolve_upstream(fetchSystemidPgdata, fetchSystemidConfigFile,
+							  fetchSystemidRoute,
 							  fetchSystemidPath, fetchSystemidUpstream,
 							  fetchSystemidHost, fetchSystemidPort,
 							  fetchSystemidUser, &target))
@@ -889,13 +922,18 @@ cli_fetch_systemid_command_run(int argc, char **argv)
 static CommandLine fetch_systemid_command =
 	make_command("fetch-systemid",
 				 "Fetch a route's upstream system identifier",
-				 "--cluster <name> --pgdata <path> | --path <dir> "
+				 "--cluster <name> --pgdata <path> [--config-file <path>] "
+				 "| --path <dir> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--force]",
-				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
-				 "(defaults to PGDATA)\n"
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --cluster   the cluster name to fetch for (looked up in "
-				 "pg_walserver.ini)\n"
+				 "the config file)\n"
 				 "  --path      the route's own directory (overrides the "
 				 "route's own \"path\")\n"
 				 "  --upstream  a libpq connection string to connect with "
@@ -915,6 +953,7 @@ static CommandLine fetch_systemid_command =
  * ----------------------------------------------------------------------- */
 
 static char basebackupPgdata[MAXPGPATH] = { 0 };
+static char basebackupConfigFile[MAXPGPATH] = { 0 };
 static char basebackupRoute[NAMEDATALEN + 16] = { 0 };
 static char basebackupPath[MAXPGPATH] = { 0 };
 static char basebackupUpstream[MAXCONNINFO] = { 0 };
@@ -930,6 +969,7 @@ static bool basebackupForce = false;
 
 static struct option basebackupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'F' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "upstream", required_argument, NULL, 'u' },
@@ -963,7 +1003,7 @@ cli_basebackup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c:P:u:h:p:U:k:a:nf",
+	while ((c = getopt_long(argc, argv, "D:F:c:P:u:h:p:U:k:a:nf",
 							basebackupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -971,6 +1011,13 @@ cli_basebackup_getopt(int argc, char **argv)
 			case 'D':
 			{
 				strlcpy(basebackupPgdata, optarg, sizeof(basebackupPgdata));
+				break;
+			}
+
+			case 'F':
+			{
+				strlcpy(basebackupConfigFile, optarg,
+						sizeof(basebackupConfigFile));
 				break;
 			}
 
@@ -1071,7 +1118,8 @@ cli_basebackup_command_run(int argc, char **argv)
 
 	WsUpstreamTarget target = { 0 };
 
-	if (!cli_resolve_upstream(basebackupPgdata, basebackupRoute,
+	if (!cli_resolve_upstream(basebackupPgdata, basebackupConfigFile,
+							  basebackupRoute,
 							  basebackupPath, basebackupUpstream,
 							  basebackupHost, basebackupPort,
 							  basebackupUser, &target))
@@ -1118,14 +1166,19 @@ cli_basebackup_command_run(int argc, char **argv)
 static CommandLine basebackup_command =
 	make_command("basebackup",
 				 "Take a base backup of a route's upstream",
-				 "--cluster <name> --pgdata <path> | --path <dir> "
+				 "--cluster <name> --pgdata <path> [--config-file <path>] "
+				 "| --path <dir> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--keep-count <N>] [--keep-age <interval>] "
 				 "[--dry-run] [--force]",
-				 "  --pgdata      where <pgdata>/pg_walserver.ini lives "
-				 "(defaults to PGDATA)\n"
+				 "  --pgdata      this instance's own data root (defaults "
+				 "to PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "                <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --cluster     the cluster name to back up (looked up in "
-				 "pg_walserver.ini)\n"
+				 "the config file)\n"
 				 "  --path        the route's own directory (overrides the "
 				 "route's own \"path\")\n"
 				 "  --upstream    a libpq connection string to connect with "
@@ -1174,6 +1227,7 @@ static WsSetupOptions setupOptions = { 0 };
 
 static struct option setupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'f' },
 	{ "port", required_argument, NULL, 'p' },
 	{ "ssl-cert-file", required_argument, NULL, 'C' },
 	{ "ssl-key-file", required_argument, NULL, 'K' },
@@ -1197,7 +1251,7 @@ cli_setup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:p:C:K:A:T:",
+	while ((c = getopt_long(argc, argv, "D:f:p:C:K:A:T:",
 							setupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -1205,6 +1259,13 @@ cli_setup_getopt(int argc, char **argv)
 			case 'D':
 			{
 				strlcpy(setupOptions.pgdata, optarg, sizeof(setupOptions.pgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(setupOptions.configFile, optarg,
+						sizeof(setupOptions.configFile));
 				break;
 			}
 
@@ -1283,12 +1344,26 @@ cli_setup_command_run(int argc, char **argv)
 static CommandLine setup_command =
 	make_command("setup",
 				 "Configure pg_walserver itself (port, TLS, auth-timeout)",
-				 "--pgdata <path> [--port <port>] "
+				 "--pgdata <path> [--config-file <path>] [--port <port>] "
 				 "[--ssl-cert-file <path>] [--ssl-key-file <path>] "
 				 "[--ssl-ca-file <path>] [--auth-timeout <seconds>]",
-				 "  --pgdata    where <pgdata>/pg_walserver.ini lives, "
-				 "created if missing\n"
-				 "              (defaults to PGDATA)\n"
+				 "  --pgdata    this instance's own data root, created if "
+				 "missing\n"
+				 "              (defaults to PGDATA); the config file "
+				 "itself lives at\n"
+				 "              <pgdata>/pg_walserver.ini unless "
+				 "--config-file overrides it\n"
+				 "  --config-file  where the config file itself lives, "
+				 "independent of\n"
+				 "              --pgdata (or the PG_WALSERVER_CONFIG_FILE "
+				 "environment\n"
+				 "              variable) -- a Debian-style deployment's "
+				 "own split, e.g.\n"
+				 "              /etc/pg_walserver/pg_walserver.ini for "
+				 "config, --pgdata\n"
+				 "              at /var/lib/pg_walserver for data; every "
+				 "other pg_walserver\n"
+				 "              command below takes this same flag\n"
 				 "  --port      \"serve\"'s own default port when its own "
 				 "--port isn't\n"
 				 "              given (defaults to 6543)\n"
@@ -1307,20 +1382,22 @@ static CommandLine setup_command =
 				 "still overridden by the same flag given directly to "
 				 "\"serve\" itself.\n"
 				 "Nothing about any one archived cluster -- see "
-				 "\"pg_walserver cluster\"\n"
-				 "for registering, dropping, listing, or re-pointing "
-				 "those.\n",
+				 "\"pg_walserver register/drop/\n"
+				 "set-upstream cluster\" for registering, dropping, or "
+				 "re-pointing those.\n",
 				 cli_setup_getopt, cli_setup_command_run);
 
 
 /* -----------------------------------------------------------------------
- * pg_walserver cluster register|drop|list|set-upstream
+ * pg_walserver register cluster <name> | list
+ * pg_walserver drop cluster <name>
+ * pg_walserver set-upstream cluster <name>
  * ----------------------------------------------------------------------- */
 
 /*
  * cli_cluster_reload_running_server reloads an already-running
  * "pg_walserver serve" for the same --pgdata, if one is running, so it
- * immediately picks up whatever "cluster register"/"cluster set-upstream"
+ * immediately picks up whatever "register cluster"/"set-upstream cluster"
  * just wrote -- exactly "pg_walserver reload"'s own read_pidfile()/SIGHUP
  * shape (cli_reload_run() above), with one difference: no running server
  * at all is not an error here, only a normal, expected case -- logged,
@@ -1376,33 +1453,30 @@ cli_cluster_reload_running_server(const char *pgdata)
 
 static WsClusterRegisterOptions clusterRegisterOptions = { 0 };
 
-/*
- * "cluster register"'s own --cluster short flag is 'C' (uppercase), not
- * 'c': lowercase 'c' is already taken by --receivewal in this
- * sub-command's own optstring below.
- */
-static struct option clusterRegisterLongOptions[] = {
+static struct option registerClusterLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "cluster", required_argument, NULL, 'C' },
+	{ "config-file", required_argument, NULL, 'f' },
 	{ "path", required_argument, NULL, 'P' },
-	{ "upstream", required_argument, NULL, 'u' },
+	{ "pguri", required_argument, NULL, 'u' },
 	{ "host", required_argument, NULL, 'h' },
 	{ "port", required_argument, NULL, 'p' },
 	{ "user", required_argument, NULL, 'U' },
 	{ "hostname", required_argument, NULL, 'n' },
 	{ "receivewal", required_argument, NULL, 'c' },
 	{ "no-receivewal", no_argument, NULL, 'N' },
-	{ "force", no_argument, NULL, 'f' },
+	{ "force", no_argument, NULL, 'F' },
 	{ "ssl-self-signed", no_argument, NULL, 's' },
 	{ NULL, 0, NULL, 0 }
 };
 
 /*
- * cli_cluster_register_getopt parses "pg_walserver cluster register"'s
- * own flags into the file-scope statics above.
+ * cli_register_cluster_getopt parses "pg_walserver register cluster"'s
+ * own flags (everything except the cluster name itself, a positional
+ * argument left in argv for cli_register_cluster_command_run() below)
+ * into the file-scope statics above.
  */
 static int
-cli_cluster_register_getopt(int argc, char **argv)
+cli_register_cluster_getopt(int argc, char **argv)
 {
 	optind = 0;
 	clusterRegisterOptions = (WsClusterRegisterOptions) {
@@ -1412,7 +1486,7 @@ cli_cluster_register_getopt(int argc, char **argv)
 
 	/*
 	 * The embedded receivewal worker is on by default now: running
-	 * "cluster register" with no receivewal-related flag at all writes
+	 * "register cluster" with no receivewal-related flag at all writes
 	 * "receivewal = pull" (see write_route_section(), cli_cluster.c).
 	 * --receivewal none / --no-receivewal are the explicit opt-out for a
 	 * push-only (archive_command-only) route; --receivewal pull still
@@ -1422,8 +1496,8 @@ cli_cluster_register_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:C:P:u:h:p:U:n:c:fNs",
-							clusterRegisterLongOptions, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "D:f:P:u:h:p:U:n:c:NFs",
+							registerClusterLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -1434,10 +1508,10 @@ cli_cluster_register_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'C':
+			case 'f':
 			{
-				strlcpy(clusterRegisterOptions.route, optarg,
-						sizeof(clusterRegisterOptions.route));
+				strlcpy(clusterRegisterOptions.configFile, optarg,
+						sizeof(clusterRegisterOptions.configFile));
 				break;
 			}
 
@@ -1450,8 +1524,8 @@ cli_cluster_register_getopt(int argc, char **argv)
 
 			case 'u':
 			{
-				strlcpy(clusterRegisterOptions.upstream, optarg,
-						sizeof(clusterRegisterOptions.upstream));
+				strlcpy(clusterRegisterOptions.pguri, optarg,
+						sizeof(clusterRegisterOptions.pguri));
 				break;
 			}
 
@@ -1509,7 +1583,7 @@ cli_cluster_register_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'f':
+			case 'F':
 			{
 				clusterRegisterOptions.force = true;
 				break;
@@ -1534,15 +1608,26 @@ cli_cluster_register_getopt(int argc, char **argv)
 
 
 /*
- * cli_cluster_register_command_run runs "pg_walserver cluster register"
- * against the options cli_cluster_register_getopt parsed above, then
- * exit()s with its own result.
+ * cli_register_cluster_command_run reads the one positional argument
+ * "register cluster" takes -- the cluster's own name, left in argv once
+ * cli_register_cluster_getopt() has consumed every flag -- then runs
+ * ws_cluster_register_run() against it and the options that getopt call
+ * parsed above, and exit()s with its own result.
  */
 static void
-cli_cluster_register_command_run(int argc, char **argv)
+cli_register_cluster_command_run(int argc, char **argv)
 {
-	(void) argc;
-	(void) argv;
+	if (argc != 1)
+	{
+		log_fatal("register cluster requires exactly one argument: the "
+				  "cluster's own name (\"pg_walserver register cluster "
+				  "<name> ...\")");
+		commandline_print_usage(&ws_root, stderr);
+		exit(1);
+	}
+
+	strlcpy(clusterRegisterOptions.cluster, argv[0],
+			sizeof(clusterRegisterOptions.cluster));
 
 	if (!ws_cluster_register_run(&clusterRegisterOptions))
 	{
@@ -1555,23 +1640,29 @@ cli_cluster_register_command_run(int argc, char **argv)
 }
 
 
-static CommandLine cluster_register_command =
-	make_command("register",
+static CommandLine register_cluster_command =
+	make_command("cluster",
 				 "Register (or validate) one cluster this pg_walserver "
 				 "archives",
-				 "--cluster <name> --pgdata <path> "
+				 "<name> --pgdata <path> [--config-file <path>] "
 				 "[--path <dir>] "
-				 "[--upstream <conninfo> | --host <host> [--port <port>] "
+				 "[--pguri <conninfo> | --host <host> [--port <port>] "
 				 "[--user <name>]] [--hostname <fqdn>] "
 				 "[--receivewal pull|none | --no-receivewal] "
 				 "[--ssl-self-signed] [--force]",
-				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
-				 "(defaults to PGDATA)\n"
-				 "  --cluster   the cluster name to register or validate\n"
+				 "  <name>      the cluster's own name, given positionally "
+				 "(never a flag)\n"
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config-file  where the config file itself lives, "
+				 "independent of\n"
+				 "              --pgdata (defaults to "
+				 "<pgdata>/pg_walserver.ini, or\n"
+				 "              PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --path      the route's own directory, created if "
 				 "missing; defaults\n"
-				 "              to <pgdata>/<cluster>\n"
-				 "  --upstream  a libpq connection string, written into the "
+				 "              to <pgdata>/<name>\n"
+				 "  --pguri     a libpq connection string, written into the "
 				 "route's own\n"
 				 "              \"upstream\" property\n"
 				 "  --host / --port / --user  further override individual "
@@ -1630,38 +1721,136 @@ static CommandLine cluster_register_command =
 													  "starts. Either\n"
 													  "way, \"serve\" itself takes this route's first base backup "
 													  "automatically\n"
-													  "if it doesn't have one yet -- \"cluster register\" never "
+													  "if it doesn't have one yet -- \"register cluster\" never "
 													  "takes one itself.\n",
-				 cli_cluster_register_getopt, cli_cluster_register_command_run);
+				 cli_register_cluster_getopt, cli_register_cluster_command_run);
+
+
+static char registerListPgdata[MAXPGPATH] = { 0 };
+static char registerListConfigFile[MAXPGPATH] = { 0 };
+
+static struct option registerListLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_register_list_getopt parses "pg_walserver register list"'s own
+ * flags into the file-scope statics above.
+ */
+static int
+cli_register_list_getopt(int argc, char **argv)
+{
+	optind = 0;
+	registerListPgdata[0] = '\0';
+	registerListConfigFile[0] = '\0';
+	ws_prefill_pgdata_from_env(registerListPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:f:", registerListLongOptions,
+							NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(registerListPgdata, optarg, sizeof(registerListPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(registerListConfigFile, optarg,
+						sizeof(registerListConfigFile));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_register_list_command_run runs "pg_walserver register list" against
+ * the options cli_register_list_getopt parsed above, then exit()s with
+ * its own result.
+ */
+static void
+cli_register_list_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(ws_cluster_list_run(registerListPgdata, registerListConfigFile) ? 0 : 1);
+}
+
+
+static CommandLine register_list_command =
+	make_command("list",
+				 "List every cluster this pg_walserver has registered",
+				 "--pgdata <path> [--config-file <path>]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n",
+				 cli_register_list_getopt, cli_register_list_command_run);
+
+
+static CommandLine *register_subcommands[] = {
+	&register_cluster_command,
+	&register_list_command,
+	NULL
+};
+
+static CommandLine register_commands =
+	make_command_set("register",
+					 "Register one cluster this pg_walserver archives, or "
+					 "list what's registered",
+					 NULL, NULL, NULL, register_subcommands);
 
 
 static char clusterDropPgdata[MAXPGPATH] = { 0 };
+static char clusterDropConfigFile[MAXPGPATH] = { 0 };
 static char clusterDropRoute[NAMEDATALEN + 16] = { 0 };
 static bool clusterDropPurge = false;
 
-static struct option clusterDropLongOptions[] = {
+static struct option dropClusterLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "cluster", required_argument, NULL, 'c' },
+	{ "config-file", required_argument, NULL, 'f' },
 	{ "purge", no_argument, NULL, 'P' },
 	{ NULL, 0, NULL, 0 }
 };
 
 /*
- * cli_cluster_drop_getopt parses "pg_walserver cluster drop"'s own flags
- * into the file-scope statics above.
+ * cli_drop_cluster_getopt parses "pg_walserver drop cluster"'s own flags
+ * (everything except the cluster name itself, a positional argument left
+ * in argv for cli_drop_cluster_command_run() below) into the file-scope
+ * statics above.
  */
 static int
-cli_cluster_drop_getopt(int argc, char **argv)
+cli_drop_cluster_getopt(int argc, char **argv)
 {
 	optind = 0;
 	clusterDropPgdata[0] = '\0';
+	clusterDropConfigFile[0] = '\0';
 	clusterDropRoute[0] = '\0';
 	clusterDropPurge = false;
 	ws_prefill_pgdata_from_env(clusterDropPgdata);
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c:P", clusterDropLongOptions,
+	while ((c = getopt_long(argc, argv, "D:f:P", dropClusterLongOptions,
 							NULL)) != -1)
 	{
 		switch (c)
@@ -1672,9 +1861,10 @@ cli_cluster_drop_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'c':
+			case 'f':
 			{
-				strlcpy(clusterDropRoute, optarg, sizeof(clusterDropRoute));
+				strlcpy(clusterDropConfigFile, optarg,
+						sizeof(clusterDropConfigFile));
 				break;
 			}
 
@@ -1697,18 +1887,27 @@ cli_cluster_drop_getopt(int argc, char **argv)
 
 
 /*
- * cli_cluster_drop_command_run runs "pg_walserver cluster drop" against
- * the options cli_cluster_drop_getopt parsed above, then exit()s with its
- * own result.
+ * cli_drop_cluster_command_run reads the one positional argument "drop
+ * cluster" takes -- the cluster's own name -- then runs ws_cluster_drop_
+ * run() against it and the options cli_drop_cluster_getopt parsed above,
+ * and exit()s with its own result.
  */
 static void
-cli_cluster_drop_command_run(int argc, char **argv)
+cli_drop_cluster_command_run(int argc, char **argv)
 {
-	(void) argc;
-	(void) argv;
+	if (argc != 1)
+	{
+		log_fatal("drop cluster requires exactly one argument: the "
+				  "cluster's own name (\"pg_walserver drop cluster "
+				  "<name> ...\")");
+		commandline_print_usage(&ws_root, stderr);
+		exit(1);
+	}
 
-	if (!ws_cluster_drop_run(clusterDropPgdata, clusterDropRoute,
-							 clusterDropPurge))
+	strlcpy(clusterDropRoute, argv[0], sizeof(clusterDropRoute));
+
+	if (!ws_cluster_drop_run(clusterDropPgdata, clusterDropConfigFile,
+							 clusterDropRoute, clusterDropPurge))
 	{
 		exit(1);
 	}
@@ -1719,113 +1918,65 @@ cli_cluster_drop_command_run(int argc, char **argv)
 }
 
 
-static CommandLine cluster_drop_command =
-	make_command("drop",
+static CommandLine drop_cluster_command =
+	make_command("cluster",
 				 "Drop one cluster's registration (never its own data, "
 				 "unless --purge)",
-				 "--cluster <name> --pgdata <path> [--purge]",
-				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
-				 "(defaults to PGDATA)\n"
-				 "  --cluster   the cluster name to drop\n"
+				 "<name> --pgdata <path> [--config-file <path>] [--purge]",
+				 "  <name>      the cluster's own name, given positionally "
+				 "(never a flag)\n"
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --purge     also remove the route's own on-disk data "
 				 "(every base\n"
 				 "              backup and WAL segment it holds) -- "
 				 "without it, only the\n"
 				 "              registration itself is removed, the data "
 				 "is left in place\n",
-				 cli_cluster_drop_getopt, cli_cluster_drop_command_run);
+				 cli_drop_cluster_getopt, cli_drop_cluster_command_run);
 
 
-static char clusterListPgdata[MAXPGPATH] = { 0 };
-
-static struct option clusterListLongOptions[] = {
-	{ "pgdata", required_argument, NULL, 'D' },
-	{ NULL, 0, NULL, 0 }
+static CommandLine *drop_subcommands[] = {
+	&drop_cluster_command,
+	NULL
 };
 
-/*
- * cli_cluster_list_getopt parses "pg_walserver cluster list"'s own flags
- * into the file-scope statics above.
- */
-static int
-cli_cluster_list_getopt(int argc, char **argv)
-{
-	optind = 0;
-	clusterListPgdata[0] = '\0';
-	ws_prefill_pgdata_from_env(clusterListPgdata);
-
-	int c;
-
-	while ((c = getopt_long(argc, argv, "D:", clusterListLongOptions,
-							NULL)) != -1)
-	{
-		switch (c)
-		{
-			case 'D':
-			{
-				strlcpy(clusterListPgdata, optarg, sizeof(clusterListPgdata));
-				break;
-			}
-
-			default:
-			{
-				commandline_print_usage(&ws_root, stderr);
-				exit(1);
-			}
-		}
-	}
-
-	return optind;
-}
-
-
-/*
- * cli_cluster_list_command_run runs "pg_walserver cluster list" against
- * the options cli_cluster_list_getopt parsed above, then exit()s with its
- * own result.
- */
-static void
-cli_cluster_list_command_run(int argc, char **argv)
-{
-	(void) argc;
-	(void) argv;
-
-	exit(ws_cluster_list_run(clusterListPgdata) ? 0 : 1);
-}
-
-
-static CommandLine cluster_list_command =
-	make_command("list",
-				 "List every cluster this pg_walserver has registered",
-				 "--pgdata <path>",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA)\n",
-				 cli_cluster_list_getopt, cli_cluster_list_command_run);
+static CommandLine drop_commands =
+	make_command_set("drop",
+					 "Drop one cluster's registration",
+					 NULL, NULL, NULL, drop_subcommands);
 
 
 static char clusterSetUpstreamPgdata[MAXPGPATH] = { 0 };
+static char clusterSetUpstreamConfigFile[MAXPGPATH] = { 0 };
 static char clusterSetUpstreamRoute[NAMEDATALEN + 16] = { 0 };
 static char clusterSetUpstreamUpstream[MAXCONNINFO] = { 0 };
 static bool clusterSetUpstreamForceBasebackup = false;
 
-static struct option clusterSetUpstreamLongOptions[] = {
+static struct option setUpstreamClusterLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
-	{ "cluster", required_argument, NULL, 'c' },
-	{ "upstream", required_argument, NULL, 'u' },
-	{ "force-basebackup", no_argument, NULL, 'f' },
+	{ "config-file", required_argument, NULL, 'f' },
+	{ "pguri", required_argument, NULL, 'u' },
+	{ "force-basebackup", no_argument, NULL, 'F' },
 	{ NULL, 0, NULL, 0 }
 };
 
 /*
- * cli_cluster_set_upstream_getopt parses "pg_walserver cluster
- * set-upstream"'s own flags into the file-scope statics above.
+ * cli_set_upstream_cluster_getopt parses "pg_walserver set-upstream
+ * cluster"'s own flags (everything except the cluster name itself, a
+ * positional argument left in argv for cli_set_upstream_cluster_command_
+ * run() below) into the file-scope statics above.
  */
 static int
-cli_cluster_set_upstream_getopt(int argc, char **argv)
+cli_set_upstream_cluster_getopt(int argc, char **argv)
 {
 	optind = 0;
 	clusterSetUpstreamPgdata[0] = '\0';
+	clusterSetUpstreamConfigFile[0] = '\0';
 	clusterSetUpstreamRoute[0] = '\0';
 	clusterSetUpstreamUpstream[0] = '\0';
 	clusterSetUpstreamForceBasebackup = false;
@@ -1833,8 +1984,8 @@ cli_cluster_set_upstream_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c:u:f",
-							clusterSetUpstreamLongOptions, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "D:f:u:F",
+							setUpstreamClusterLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -1845,10 +1996,10 @@ cli_cluster_set_upstream_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'c':
+			case 'f':
 			{
-				strlcpy(clusterSetUpstreamRoute, optarg,
-						sizeof(clusterSetUpstreamRoute));
+				strlcpy(clusterSetUpstreamConfigFile, optarg,
+						sizeof(clusterSetUpstreamConfigFile));
 				break;
 			}
 
@@ -1859,7 +2010,7 @@ cli_cluster_set_upstream_getopt(int argc, char **argv)
 				break;
 			}
 
-			case 'f':
+			case 'F':
 			{
 				clusterSetUpstreamForceBasebackup = true;
 				break;
@@ -1878,17 +2029,27 @@ cli_cluster_set_upstream_getopt(int argc, char **argv)
 
 
 /*
- * cli_cluster_set_upstream_command_run runs "pg_walserver cluster
- * set-upstream" against the options cli_cluster_set_upstream_getopt
- * parsed above, then exit()s with its own result.
+ * cli_set_upstream_cluster_command_run reads the one positional argument
+ * "set-upstream cluster" takes -- the cluster's own name -- then runs
+ * ws_cluster_set_upstream_run() against it and the options cli_set_
+ * upstream_cluster_getopt parsed above, and exit()s with its own result.
  */
 static void
-cli_cluster_set_upstream_command_run(int argc, char **argv)
+cli_set_upstream_cluster_command_run(int argc, char **argv)
 {
-	(void) argc;
-	(void) argv;
+	if (argc != 1)
+	{
+		log_fatal("set-upstream cluster requires exactly one argument: "
+				  "the cluster's own name (\"pg_walserver set-upstream "
+				  "cluster <name> ...\")");
+		commandline_print_usage(&ws_root, stderr);
+		exit(1);
+	}
+
+	strlcpy(clusterSetUpstreamRoute, argv[0], sizeof(clusterSetUpstreamRoute));
 
 	if (!ws_cluster_set_upstream_run(clusterSetUpstreamPgdata,
+									 clusterSetUpstreamConfigFile,
 									 clusterSetUpstreamRoute,
 									 clusterSetUpstreamUpstream,
 									 clusterSetUpstreamForceBasebackup))
@@ -1902,16 +2063,21 @@ cli_cluster_set_upstream_command_run(int argc, char **argv)
 }
 
 
-static CommandLine cluster_set_upstream_command =
-	make_command("set-upstream",
+static CommandLine set_upstream_cluster_command =
+	make_command("cluster",
 				 "Point an already-registered cluster at a new upstream "
 				 "(e.g. after a failover)",
-				 "--cluster <name> --pgdata <path> --upstream <conninfo> "
-				 "[--force-basebackup]",
-				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
-				 "(defaults to PGDATA)\n"
-				 "  --cluster   the cluster name to re-point\n"
-				 "  --upstream  the new libpq connection string, replacing "
+				 "<name> --pgdata <path> [--config-file <path>] "
+				 "--pguri <conninfo> [--force-basebackup]",
+				 "  <name>      the cluster's own name, given positionally "
+				 "(never a flag)\n"
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --pguri     the new libpq connection string, replacing "
 				 "the route's\n"
 				 "              own \"upstream\" property\n"
 				 "  --force-basebackup  also take a fresh base backup "
@@ -1927,23 +2093,19 @@ static CommandLine cluster_set_upstream_command =
 				 "change and restarts this route's embedded receivewal "
 				 "worker against\n"
 				 "the new one -- no separate step needed to \"move\" it.\n",
-				 cli_cluster_set_upstream_getopt,
-				 cli_cluster_set_upstream_command_run);
+				 cli_set_upstream_cluster_getopt,
+				 cli_set_upstream_cluster_command_run);
 
 
-static CommandLine *cluster_subcommands[] = {
-	&cluster_register_command,
-	&cluster_drop_command,
-	&cluster_list_command,
-	&cluster_set_upstream_command,
+static CommandLine *set_upstream_subcommands[] = {
+	&set_upstream_cluster_command,
 	NULL
 };
 
-static CommandLine cluster_commands =
-	make_command_set("cluster",
-					 "Register, drop, list, or re-point the clusters this "
-					 "pg_walserver archives",
-					 NULL, NULL, NULL, cluster_subcommands);
+static CommandLine set_upstream_commands =
+	make_command_set("set-upstream",
+					 "Point an already-registered cluster at a new upstream",
+					 NULL, NULL, NULL, set_upstream_subcommands);
 
 
 /* -----------------------------------------------------------------------
@@ -2313,6 +2475,7 @@ cli_reload_run(int argc, char **argv)
  * ----------------------------------------------------------------------- */
 
 static char archiveCleanupPgdata[MAXPGPATH] = { 0 };
+static char archiveCleanupConfigFile[MAXPGPATH] = { 0 };
 static char archiveCleanupRoute[NAMEDATALEN + 16] = { 0 };
 static char archiveCleanupPath[MAXPGPATH] = { 0 };
 static bool archiveCleanupHaveKeepCount = false;
@@ -2324,6 +2487,7 @@ static bool archiveCleanupForce = false;
 
 static struct option archiveCleanupLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'F' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ "path", required_argument, NULL, 'P' },
 	{ "keep-count", required_argument, NULL, 'k' },
@@ -2342,6 +2506,7 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 {
 	optind = 0;
 	ws_prefill_pgdata_from_env(archiveCleanupPgdata);
+	archiveCleanupConfigFile[0] = '\0';
 	archiveCleanupRoute[0] = '\0';
 	archiveCleanupPath[0] = '\0';
 	archiveCleanupHaveKeepCount = false;
@@ -2355,7 +2520,7 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c:P:k:a:nf",
+	while ((c = getopt_long(argc, argv, "D:F:c:P:k:a:nf",
 							archiveCleanupLongOptions, NULL)) != -1)
 	{
 		switch (c)
@@ -2363,6 +2528,13 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 			case 'D':
 			{
 				strlcpy(archiveCleanupPgdata, optarg, sizeof(archiveCleanupPgdata));
+				break;
+			}
+
+			case 'F':
+			{
+				strlcpy(archiveCleanupConfigFile, optarg,
+						sizeof(archiveCleanupConfigFile));
 				break;
 			}
 
@@ -2449,8 +2621,8 @@ cli_archive_cleanup_command_run(int argc, char **argv)
 		WsRoute *routes = NULL;
 		int routeCount = 0;
 
-		sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini",
-				archiveCleanupPgdata);
+		config_file_path(archiveCleanupPgdata, archiveCleanupConfigFile,
+						 routesPath, sizeof(routesPath));
 
 		const WsRoute *route = NULL;
 
@@ -2489,13 +2661,18 @@ static CommandLine archive_cleanup_command =
 	make_command("archive-cleanup",
 				 "Remove WAL/base backups this route no longer needs to "
 				 "keep (operator/cron-driven, never automatic)",
-				 "--cluster <name> --pgdata <path> | --path <dir> "
+				 "--cluster <name> --pgdata <path> [--config-file <path>] "
+				 "| --path <dir> "
 				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run] "
 				 "[--force]",
-				 "  --pgdata      where <pgdata>/pg_walserver.ini lives "
-				 "(defaults to PGDATA)\n"
+				 "  --pgdata      this instance's own data root (defaults "
+				 "to PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "                <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --cluster     the cluster name to clean up (looked up "
-				 "in pg_walserver.ini)\n"
+				 "in the config file)\n"
 				 "  --path        the route's own directory (overrides "
 				 "the route's own \"path\")\n"
 				 "  --keep-count  keep at least this many of the most "
@@ -2732,10 +2909,12 @@ static CommandLine ps_command =
  * ----------------------------------------------------------------------- */
 
 static char lsPgdata[MAXPGPATH] = { 0 };
+static char lsConfigFile[MAXPGPATH] = { 0 };
 static bool lsIncludeConfigFiles = false;
 
 static struct option lsLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'f' },
 	{ "config", no_argument, NULL, 'c' },
 	{ NULL, 0, NULL, 0 }
 };
@@ -2749,17 +2928,24 @@ cli_ls_getopt(int argc, char **argv)
 {
 	optind = 0;
 	ws_prefill_pgdata_from_env(lsPgdata);
+	lsConfigFile[0] = '\0';
 	lsIncludeConfigFiles = false;
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c", lsLongOptions, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "D:f:c", lsLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
 			case 'D':
 			{
 				strlcpy(lsPgdata, optarg, sizeof(lsPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(lsConfigFile, optarg, sizeof(lsConfigFile));
 				break;
 			}
 
@@ -2791,17 +2977,21 @@ cli_ls_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_ls_run(lsPgdata, lsIncludeConfigFiles) ? 0 : 1);
+	exit(cli_ls_run(lsPgdata, lsConfigFile, lsIncludeConfigFiles) ? 0 : 1);
 }
 
 
 static CommandLine ls_command =
 	make_command("ls",
 				 "Per-cluster storage summary: base backups, WAL, disk usage",
-				 "--pgdata <path> [--config]",
+				 "--pgdata <path> [--config-file <path>] [--config]",
 				 "  --pgdata    this instance's own top-level storage root "
 				 "(defaults to\n"
 				 "              PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --config    list the config/credential/certificate "
 				 "files instead\n"
 				 "              (rarely change, rarely interesting day "
@@ -2814,9 +3004,11 @@ static CommandLine ls_command =
  * ----------------------------------------------------------------------- */
 
 static char statusPgdata[MAXPGPATH] = { 0 };
+static char statusConfigFile[MAXPGPATH] = { 0 };
 
 static struct option statusLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'f' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -2829,16 +3021,23 @@ cli_status_getopt(int argc, char **argv)
 {
 	optind = 0;
 	ws_prefill_pgdata_from_env(statusPgdata);
+	statusConfigFile[0] = '\0';
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:", statusLongOptions, NULL)) != -1)
+	while ((c = getopt_long(argc, argv, "D:f:", statusLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
 			case 'D':
 			{
 				strlcpy(statusPgdata, optarg, sizeof(statusPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(statusConfigFile, optarg, sizeof(statusConfigFile));
 				break;
 			}
 
@@ -2864,17 +3063,21 @@ cli_status_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_status_run(statusPgdata) ? 0 : 1);
+	exit(cli_status_run(statusPgdata, statusConfigFile) ? 0 : 1);
 }
 
 
 static CommandLine status_command =
 	make_command("status",
 				 "Show a short pg_walserver status dashboard",
-				 "--pgdata <path>",
+				 "--pgdata <path> [--config-file <path>]",
 				 "  --pgdata    this instance's own top-level storage root "
 				 "(defaults to\n"
-				 "              PGDATA)\n",
+				 "              PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n",
 				 cli_status_getopt, cli_status_command_run);
 
 
@@ -2883,11 +3086,13 @@ static CommandLine status_command =
  * ----------------------------------------------------------------------- */
 
 static char listPgdata[MAXPGPATH] = { 0 };
+static char listConfigFile[MAXPGPATH] = { 0 };
 static char listCluster[NAMEDATALEN + 16] = { 0 };
 static bool listWalSegments = false;
 
 static struct option listClustersLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'f' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ NULL, 0, NULL, 0 }
 };
@@ -2901,11 +3106,12 @@ cli_list_clusters_getopt(int argc, char **argv)
 {
 	optind = 0;
 	ws_prefill_pgdata_from_env(listPgdata);
+	listConfigFile[0] = '\0';
 	listCluster[0] = '\0';
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c:", listClustersLongOptions,
+	while ((c = getopt_long(argc, argv, "D:f:c:", listClustersLongOptions,
 							NULL)) != -1)
 	{
 		switch (c)
@@ -2913,6 +3119,12 @@ cli_list_clusters_getopt(int argc, char **argv)
 			case 'D':
 			{
 				strlcpy(listPgdata, optarg, sizeof(listPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(listConfigFile, optarg, sizeof(listConfigFile));
 				break;
 			}
 
@@ -2945,7 +3157,7 @@ cli_list_clusters_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_list_clusters_run(listPgdata, listCluster) ? 0 : 1);
+	exit(cli_list_clusters_run(listPgdata, listConfigFile, listCluster) ? 0 : 1);
 }
 
 
@@ -2953,9 +3165,13 @@ static CommandLine list_clusters_command =
 	make_command("clusters",
 				 "List every route, its backup/receivewal status, and the "
 				 "WAL range it covers",
-				 "--pgdata <path> [--cluster <name>]",
-				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
-				 "(defaults to PGDATA)\n"
+				 "--pgdata <path> [--config-file <path>] [--cluster <name>]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --cluster   limit output to a single route\n",
 				 cli_list_clusters_getopt, cli_list_clusters_command_run);
 
@@ -2971,7 +3187,7 @@ cli_list_backups_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_list_backups_run(listPgdata, listCluster) ? 0 : 1);
+	exit(cli_list_backups_run(listPgdata, listConfigFile, listCluster) ? 0 : 1);
 }
 
 
@@ -2979,15 +3195,20 @@ static CommandLine list_backups_command =
 	make_command("backups",
 				 "List base backups per cluster (label, size, which is "
 				 ".latest)",
-				 "--pgdata <path> [--cluster <name>]",
-				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
-				 "(defaults to PGDATA)\n"
+				 "--pgdata <path> [--config-file <path>] [--cluster <name>]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --cluster   limit output to a single route\n",
 				 cli_list_clusters_getopt, cli_list_backups_command_run);
 
 
 static struct option listWalLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'f' },
 	{ "cluster", required_argument, NULL, 'c' },
 	{ "segments", no_argument, NULL, 's' },
 	{ NULL, 0, NULL, 0 }
@@ -3002,12 +3223,13 @@ cli_list_wal_getopt(int argc, char **argv)
 {
 	optind = 0;
 	ws_prefill_pgdata_from_env(listPgdata);
+	listConfigFile[0] = '\0';
 	listCluster[0] = '\0';
 	listWalSegments = false;
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:c:s", listWalLongOptions,
+	while ((c = getopt_long(argc, argv, "D:f:c:s", listWalLongOptions,
 							NULL)) != -1)
 	{
 		switch (c)
@@ -3015,6 +3237,12 @@ cli_list_wal_getopt(int argc, char **argv)
 			case 'D':
 			{
 				strlcpy(listPgdata, optarg, sizeof(listPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(listConfigFile, optarg, sizeof(listConfigFile));
 				break;
 			}
 
@@ -3052,7 +3280,8 @@ cli_list_wal_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_list_wal_run(listPgdata, listCluster, listWalSegments) ? 0 : 1);
+	exit(cli_list_wal_run(listPgdata, listConfigFile, listCluster,
+						  listWalSegments) ? 0 : 1);
 }
 
 
@@ -3060,9 +3289,14 @@ static CommandLine list_wal_command =
 	make_command("wal",
 				 "List WAL cache aggregate stats per cluster, or every "
 				 "file with --segments",
-				 "--pgdata <path> [--cluster <name>] [--segments]",
-				 "  --pgdata    where <pgdata>/pg_walserver.ini lives "
-				 "(defaults to PGDATA)\n"
+				 "--pgdata <path> [--config-file <path>] [--cluster <name>] "
+				 "[--segments]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --cluster   limit output to a single route\n"
 				 "  --segments  list every individual WAL/.history/.backup "
 				 "file instead\n"
@@ -3117,7 +3351,9 @@ static CommandLine *root_subcommands[] = {
 	&fetch_systemid_command,
 	&basebackup_command,
 	&setup_command,
-	&cluster_commands,
+	&register_commands,
+	&drop_commands,
+	&set_upstream_commands,
 	&create_cert_command,
 	&archive_command,
 	&restore_command,
@@ -3137,7 +3373,8 @@ CommandLine ws_root =
 	make_command_set("pg_walserver",
 					 "The archiver's own replication-protocol server",
 					 "serve ... | scram-secret ... | setup ... | "
-					 "cluster ... | fetch-systemid ... | basebackup ... | "
+					 "register ... | drop ... | set-upstream ... | "
+					 "fetch-systemid ... | basebackup ... | "
 					 "create-cert ... | archive-wal ... | restore-wal ... | "
 					 "archive-cleanup ... | reload ... | stop ... | ps ... | "
 					 "ls ... | status ... | list ... | help",

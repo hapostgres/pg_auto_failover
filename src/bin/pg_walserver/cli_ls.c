@@ -32,7 +32,6 @@
  * per-cluster storage summary below instead.
  */
 static const char *configFiles[] = {
-	"pg_walserver.ini",
 	"pg_walserver_hba.conf",
 	"pg_walserver_passwd",
 	"server.crt",
@@ -247,16 +246,47 @@ scan_route_footprint(const WsRoute *route, WsRouteFootprint *out)
 
 
 /*
- * print_config_files prints the --config tier's own table: one row per
- * well-known config/credential/certificate file under pgdata, whether it
- * exists, its size, and its last-modified time.
+ * print_config_files_row prints one row of the --config tier's own table
+ * for label/path -- shared between the config file itself (whose
+ * resolved path is not always "<pgdata>/<name>", see config_file_path())
+ * and every other well-known file, which still always is.
  */
 static void
-print_config_files(const char *pgdata)
+print_config_files_row(const char *label, const char *path)
+{
+	struct stat st;
+	bool exists = stat(path, &st) == 0;
+
+	char sizeStr[32] = "-";
+	char mtimeStr[32] = "-";
+
+	if (exists)
+	{
+		format_bytes((uint64_t) st.st_size, sizeStr, sizeof(sizeStr));
+		format_utc(st.st_mtime, mtimeStr, sizeof(mtimeStr));
+	}
+
+	printf("%-24s %-7s %-10s %s\n", /* IGNORE-BANNED */
+		   label, exists ? "yes" : "no", sizeStr, mtimeStr);
+}
+
+
+/*
+ * print_config_files prints the --config tier's own table: one row per
+ * well-known config/credential/certificate file, whether it exists, its
+ * size, and its last-modified time. Every file except the config file
+ * itself lives at a fixed "<pgdata>/<name>" path; the config file's own
+ * row instead follows configPath, wherever config_file_path() resolved
+ * it to (not always under pgdata, see routes.h's own comment).
+ */
+static void
+print_config_files(const char *pgdata, const char *configPath)
 {
 	printf("%-24s %-7s %-10s %s\n", "FILE", "EXISTS", "SIZE", "MODIFIED"); /* IGNORE-BANNED */
 	printf("------------------------------------------------------" /* IGNORE-BANNED */
 		   "----------\n");
+
+	print_config_files_row("pg_walserver.ini", configPath);
 
 	for (int i = 0; configFiles[i] != NULL; i++)
 	{
@@ -264,20 +294,7 @@ print_config_files(const char *pgdata)
 
 		sformat(path, sizeof(path), "%s/%s", pgdata, configFiles[i]);
 
-		struct stat st;
-		bool exists = stat(path, &st) == 0;
-
-		char sizeStr[32] = "-";
-		char mtimeStr[32] = "-";
-
-		if (exists)
-		{
-			format_bytes((uint64_t) st.st_size, sizeStr, sizeof(sizeStr));
-			format_utc(st.st_mtime, mtimeStr, sizeof(mtimeStr));
-		}
-
-		printf("%-24s %-7s %-10s %s\n", /* IGNORE-BANNED */
-			   configFiles[i], exists ? "yes" : "no", sizeStr, mtimeStr);
+		print_config_files_row(configFiles[i], path);
 	}
 }
 
@@ -286,7 +303,7 @@ print_config_files(const char *pgdata)
  * cli_ls_run -- see cli_ls.h's own comment.
  */
 bool
-cli_ls_run(const char *pgdata, bool includeConfigFiles)
+cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 {
 	if (pgdata == NULL || pgdata[0] == '\0')
 	{
@@ -295,15 +312,15 @@ cli_ls_run(const char *pgdata, bool includeConfigFiles)
 		return false;
 	}
 
-	if (includeConfigFiles)
-	{
-		print_config_files(pgdata);
-		return true;
-	}
-
 	char routesPath[MAXPGPATH] = { 0 };
 
-	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
+	config_file_path(pgdata, configFile, routesPath, sizeof(routesPath));
+
+	if (includeConfigFiles)
+	{
+		print_config_files(pgdata, routesPath);
+		return true;
+	}
 
 	WsRoute *routes = NULL;
 	int routeCount = 0;
@@ -311,7 +328,7 @@ cli_ls_run(const char *pgdata, bool includeConfigFiles)
 	if (!routes_load(routesPath, &routes, &routeCount) || routeCount == 0)
 	{
 		printf("No routes configured yet under \"%s\" -- see " /* IGNORE-BANNED */
-			   "\"pg_walserver setup\".\n", pgdata);
+			   "\"pg_walserver register cluster\".\n", pgdata);
 		routes_free(routes);
 		return true;
 	}

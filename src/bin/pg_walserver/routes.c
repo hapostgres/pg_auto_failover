@@ -27,6 +27,7 @@
 #include "port/pg_crc32c.h"
 
 #include "routes.h"
+#include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
 #include "string_utils.h"
@@ -679,14 +680,14 @@ routes_drop_section(const char *routesPath, const char *routeKey)
 
 
 /*
- * routes_load_global -- see routes.h's own comment on WsGlobalConfig.
+ * config_load_global -- see routes.h's own comment on WsGlobalConfig.
  */
 bool
-routes_load_global(const char *routesPath, WsGlobalConfig *out)
+config_load_global(const char *configPath, WsGlobalConfig *out)
 {
 	memset(out, 0, sizeof(WsGlobalConfig));
 
-	if (!file_exists(routesPath))
+	if (!file_exists(configPath))
 	{
 		return true;
 	}
@@ -694,10 +695,10 @@ routes_load_global(const char *routesPath, WsGlobalConfig *out)
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+	if (!ws_read_file_capped(configPath, WS_MAX_CONFIG_FILE_SIZE, false,
 							 &contents, &fileSize, NULL))
 	{
-		log_error("Failed to read routes file \"%s\"", routesPath);
+		log_error("Failed to read config file \"%s\"", configPath);
 		return false;
 	}
 
@@ -707,7 +708,7 @@ routes_load_global(const char *routesPath, WsGlobalConfig *out)
 
 	if (ini == NULL)
 	{
-		log_error("Failed to parse routes file \"%s\"", routesPath);
+		log_error("Failed to parse config file \"%s\"", configPath);
 		return false;
 	}
 
@@ -756,7 +757,7 @@ routes_load_global(const char *routesPath, WsGlobalConfig *out)
 		}
 		else
 		{
-			log_warn("Ignoring unknown global routes file key \"%s\"",
+			log_warn("Ignoring unknown global config file key \"%s\"",
 					 propName);
 		}
 	}
@@ -768,20 +769,20 @@ routes_load_global(const char *routesPath, WsGlobalConfig *out)
 
 
 /*
- * routes_set_global_property -- see routes.h's own comment.
+ * config_set_global_property -- see routes.h's own comment.
  */
 bool
-routes_set_global_property(const char *routesPath, const char *propName,
+config_set_global_property(const char *configPath, const char *propName,
 						   const char *propValue)
 {
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (file_exists(routesPath) &&
-		!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+	if (file_exists(configPath) &&
+		!ws_read_file_capped(configPath, WS_MAX_CONFIG_FILE_SIZE, false,
 							 &contents, &fileSize, NULL))
 	{
-		log_error("Failed to read routes file \"%s\"", routesPath);
+		log_error("Failed to read config file \"%s\"", configPath);
 		return false;
 	}
 
@@ -880,18 +881,47 @@ routes_set_global_property(const char *routesPath, const char *propName,
 	}
 
 	bool ok = !PQExpBufferBroken(whole) &&
-			  write_file_atomic(whole->data, whole->len, routesPath);
+			  write_file_atomic(whole->data, whole->len, configPath);
 
 	destroyPQExpBuffer(whole);
 	free(contents);
 
 	if (!ok)
 	{
-		log_error("Failed to write \"%s\"", routesPath);
+		log_error("Failed to write \"%s\"", configPath);
 		return false;
 	}
 
-	log_info("Set \"%s = %s\" in \"%s\"", propName, propValue, routesPath);
+	log_info("Set \"%s = %s\" in \"%s\"", propName, propValue, configPath);
 
 	return true;
+}
+
+
+/*
+ * config_file_path -- see routes.h's own comment.
+ */
+void
+config_file_path(const char *pgdata, const char *configFile,
+				 char *out, size_t outSize)
+{
+	if (configFile != NULL && configFile[0] != '\0')
+	{
+		strlcpy(out, configFile, outSize);
+		return;
+	}
+
+	if (env_exists(WS_CONFIG_FILE_ENV_VAR))
+	{
+		char fromEnv[MAXPGPATH] = { 0 };
+
+		if (get_env_copy(WS_CONFIG_FILE_ENV_VAR, fromEnv, sizeof(fromEnv)) &&
+			fromEnv[0] != '\0')
+		{
+			strlcpy(out, fromEnv, outSize);
+			return;
+		}
+	}
+
+	sformat(out, outSize, "%s/pg_walserver.ini", pgdata);
 }

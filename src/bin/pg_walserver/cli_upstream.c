@@ -106,7 +106,8 @@ cli_parse_upstream_conninfo(const char *conninfo, WsUpstreamTarget *target)
  * cli_resolve_upstream -- see cli_upstream.h's own comment.
  */
 bool
-cli_resolve_upstream(const char *pgdata, const char *routeKey,
+cli_resolve_upstream(const char *pgdata, const char *configFile,
+					 const char *routeKey,
 					 const char *pathArg, const char *upstreamArg,
 					 const char *hostArg, const char *portArg,
 					 const char *userArg,
@@ -121,9 +122,10 @@ cli_resolve_upstream(const char *pgdata, const char *routeKey,
 	int routeCount = 0;
 	const WsRoute *route = NULL;
 
-	if (pgdata != NULL && pgdata[0] != '\0')
+	if ((pgdata != NULL && pgdata[0] != '\0') ||
+		(configFile != NULL && configFile[0] != '\0'))
 	{
-		sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
+		config_file_path(pgdata, configFile, routesPath, sizeof(routesPath));
 
 		if (routes_load(routesPath, &routes, &routeCount))
 		{

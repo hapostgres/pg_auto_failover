@@ -11,7 +11,9 @@ pg_walserver - standalone PostgreSQL replication-protocol server
 
    pg_walserver_serve
    pg_walserver_setup
-   pg_walserver_cluster
+   pg_walserver_register
+   pg_walserver_drop
+   pg_walserver_set_upstream
    pg_walserver_scram_secret
    pg_walserver_fetch_systemid
    pg_walserver_basebackup
@@ -36,36 +38,44 @@ enough for that: this is what ``pg_walserver`` does. It is not part of
 ``pg_autoctl``'s own process supervision: it is started and stopped on
 its own.
 
-This is ``pg_walserver --help``'s own output, verbatim::
+This is ``pg_walserver help``'s own output, verbatim -- the whole
+sub-command tree, including every group's own nested sub-commands, in a
+single call; ``pg_walserver --help`` alone only shows the top-level
+list (the rows without a nested tree of their own below)::
 
-  pg_walserver: The archiver's own replication-protocol server
-  usage: pg_walserver serve ... | scram-secret ... | setup ... | cluster ... | fetch-systemid ... | basebackup ... | create-cert ... | archive-wal ... | restore-wal ... | archive-cleanup ... | reload ... | stop ... | ps ... | ls ... | status ... | list ... | help
+  pg_walserver
+    serve            Run the pg_walserver accept loop
+    scram-secret     Print one pg_walserver_passwd line for a user
+    fetch-systemid   Fetch a route's upstream system identifier
+    basebackup       Take a base backup of a route's upstream
+    setup            Configure pg_walserver itself (port, TLS, auth-timeout)
+  + register         Register one cluster this pg_walserver archives, or list what's registered
+  + drop             Drop one cluster's registration
+  + set-upstream     Point an already-registered cluster at a new upstream
+    create-cert      Create a self-signed TLS certificate for --pgdata
+    archive-wal      Push one WAL/.backup file into a pg_walserver route (archive_command)
+    restore-wal      Fetch one WAL/.backup file from a pg_walserver route (restore_command)
+    archive-cleanup  Remove WAL/base backups this route no longer needs to keep (operator/cron-driven, never automatic)
+    reload           Ask a running pg_walserver to reload its configuration
+    stop             Stop a running pg_walserver cleanly
+    ps               Show pg_walserver serve's own process-level status (pid, receivewal workers, bootstrap jobs)
+    ls               Per-cluster storage summary: base backups, WAL, disk usage
+    status           Show a short pg_walserver status dashboard
+  + list             List clusters, base backups, or WAL cache contents
+    help             Print this whole sub-command tree at once
 
+  pg_walserver register
+    cluster  Register (or validate) one cluster this pg_walserver archives
+    list     List every cluster this pg_walserver has registered
 
-  Available commands:
-    pg_walserver
-      serve            Run the pg_walserver accept loop
-      scram-secret     Print one pg_walserver_passwd line for a user
-      fetch-systemid   Fetch a route's upstream system identifier
-      basebackup       Take a base backup of a route's upstream
-      setup            Configure pg_walserver itself (port, TLS, auth-timeout)
-    + cluster          Register, drop, list, or re-point the clusters this pg_walserver archives
-      create-cert      Create a self-signed TLS certificate for --pgdata
-      archive-wal      Push one WAL/.backup file into a pg_walserver route (archive_command)
-      restore-wal      Fetch one WAL/.backup file from a pg_walserver route (restore_command)
-      archive-cleanup  Remove WAL/base backups this route no longer needs to keep (operator/cron-driven, never automatic)
-      reload           Ask a running pg_walserver to reload its configuration
-      stop             Stop a running pg_walserver cleanly
-      ps               Show pg_walserver serve's own process-level status (pid, receivewal workers, bootstrap jobs)
-      ls               Per-cluster storage summary: base backups, WAL, disk usage
-      status           Show a short pg_walserver status dashboard
-    + list             List clusters, base backups, or WAL cache contents
-      help             Print this whole sub-command tree at once
+  pg_walserver drop
+    cluster  Drop one cluster's registration (never its own data, unless --purge)
 
-``pg_walserver help`` prints this same whole tree, including ``cluster``'s
-and ``list``'s own sub-commands, in a single call -- no need to walk
-``--help`` down each level by hand. ``list`` is itself three further
-sub-commands (``pg_walserver list --help``, also verbatim)::
+  pg_walserver set-upstream
+    cluster  Point an already-registered cluster at a new upstream (e.g. after a failover)
+
+``list`` is itself three further sub-commands (``pg_walserver list
+--help``, also verbatim)::
 
   pg_walserver list: List clusters, base backups, or WAL cache contents
 
@@ -105,7 +115,7 @@ variable as a default, exactly like ``pg_autoctl``'s own ``--pgdata``/
 PostgreSQL data directory of any cluster it archives: those are each a
 route's own, separate ``path`` (below), never confused with this one.
 A route's ``path`` itself defaults to ``<pgdata>/<cluster>`` and rarely
-needs to be set explicitly -- see :ref:`pg_walserver_cluster`'s own
+needs to be set explicitly -- see :ref:`pg_walserver_register`'s own
 ``--path``.
 
 Archiving one cluster
@@ -114,9 +124,9 @@ Archiving one cluster
 A cluster's data is safe once three things are on record: its system
 identifier, a base backup to restore from, and continuous WAL capture
 from that point on. ``pg_walserver`` builds all three from a single
-``cluster register`` call followed by a running ``serve``:
+``register cluster`` call followed by a running ``serve``:
 
-A single ``pg_walserver cluster register`` call handles connecting to
+A single ``pg_walserver register cluster`` call handles connecting to
 the upstream PostgreSQL instance, recording its system identifier, and
 writing the route into ``pg_walserver.ini``. ``pg_walserver serve``
 picks the route up -- at startup, and again after every ``pg_walserver
@@ -183,8 +193,8 @@ by the TLS SNI hostname it connected with. Every connection tries
 
 A single cluster needs only ``dbname``, set to the route's own key::
 
-  archive$ pg_walserver cluster register --pgdata /var/lib/archiver --cluster mycluster \
-      --upstream "postgres://archiver_repl@primary/?sslmode=require"
+  archive$ pg_walserver register cluster mycluster --pgdata /var/lib/archiver \
+      --pguri "postgres://archiver_repl@primary/?sslmode=require"
 
   standby$ psql "host=archive port=6543 dbname=mycluster user=archiver_repl sslmode=require" \
       -c "IDENTIFY_SYSTEM"
@@ -193,12 +203,12 @@ More than one cluster behind the same ``pg_walserver`` instance needs a
 second, independent way to tell them apart: TLS SNI virtual-hosts each
 one behind its own ``--hostname``::
 
-  archive$ pg_walserver cluster register --pgdata /var/lib/archiver --cluster mycluster \
-      --upstream "postgres://archiver_repl@primary:5432/?sslmode=require" \
+  archive$ pg_walserver register cluster mycluster --pgdata /var/lib/archiver \
+      --pguri "postgres://archiver_repl@primary:5432/?sslmode=require" \
       --hostname mycluster.archive.example.com
 
-  archive$ pg_walserver cluster register --pgdata /var/lib/archiver --cluster another \
-      --upstream "postgres://archiver_repl@primary2:5432/?sslmode=require" \
+  archive$ pg_walserver register cluster another --pgdata /var/lib/archiver \
+      --pguri "postgres://archiver_repl@primary2:5432/?sslmode=require" \
       --hostname another.archive.example.com
 
   standby$ cat >> /var/lib/postgres/standby/postgresql.auto.conf <<EOF
@@ -206,7 +216,7 @@ one behind its own ``--hostname``::
   EOF
 
 A self-signed certificate for ``--pgdata`` is created automatically by
-``cluster register`` the moment a second named route needs one, and
+``register cluster`` the moment a second named route needs one, and
 ``pg_walserver`` requires TLS from that point on. See
 :ref:`pg_walserver_serve`'s "Routing more than one cluster by name: TLS
 SNI" for the full mechanism, its DNS prerequisite, and why a real
@@ -362,8 +372,8 @@ walkthrough; this is only the shape of it::
   # on the archive host: register the node (creating a certificate right
   # away, --ssl-self-signed), then serve on the default port, 6543
   archive$ export PGDATA=/var/lib/archiver
-  archive$ PGPASSWORD='s3kr3t' pg_walserver cluster register --cluster mycluster \
-      --upstream "postgres://archiver_repl@primary:5432/?sslmode=require" \
+  archive$ PGPASSWORD='s3kr3t' pg_walserver register cluster mycluster \
+      --pguri "postgres://archiver_repl@primary:5432/?sslmode=require" \
       --ssl-self-signed --hostname archive
   archive$ pg_walserver serve &
 
