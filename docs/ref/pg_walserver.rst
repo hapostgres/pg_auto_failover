@@ -37,9 +37,14 @@ enough for that: this is what ``pg_walserver`` does. It is not part of
 its own.
 
 This is ``pg_walserver help``'s own output, verbatim -- the whole
-sub-command tree, including every group's own nested sub-commands, in a
-single call; ``pg_walserver --help`` alone only shows the top-level
-list (the rows without a nested tree of their own below)::
+sub-command tree, including every group's own nested sub-commands
+(``cluster`` and ``list`` are both ordinary, structurally identical
+command groups, so both get expanded here, in this same single call),
+except the trailing ``internal``/``internal service`` tree (a hidden
+subprocess entry point for the embedded receivewal worker, never meant
+for direct operator use, omitted from this page but not from the real
+command's own output). ``pg_walserver --help`` alone only shows the
+top-level list (the rows without a nested tree of their own below)::
 
   pg_walserver
     serve            Run the pg_walserver accept loop
@@ -66,16 +71,10 @@ list (the rows without a nested tree of their own below)::
     list          List every cluster this pg_walserver has registered
     set-upstream  Point an already-registered cluster at a new upstream (e.g. after a failover)
 
-``list`` is itself three further sub-commands (``pg_walserver list
---help``, also verbatim)::
-
-  pg_walserver list: List clusters, base backups, or WAL cache contents
-
-  Available commands:
-    pg_walserver list
-      clusters  List every route, its backup/receivewal status, and the WAL range it covers
-      backups   List base backups per cluster (label, size, which is .latest)
-      wal       List WAL cache aggregate stats per cluster, or every file with --segments
+  pg_walserver list
+    clusters  List every route, its backup/receivewal status, and the WAL range it covers
+    backups   List base backups per cluster (label, size, which is .latest)
+    wal       List WAL cache aggregate stats per cluster, or every file with --segments
 
 Description
 -----------
