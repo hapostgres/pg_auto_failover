@@ -20,6 +20,7 @@ pg_walserver - standalone PostgreSQL replication-protocol server
    pg_walserver_restore_wal
    pg_walserver_archive_cleanup
    pg_walserver_reload
+   pg_walserver_stop
    pg_walserver_ps
    pg_walserver_ls
    pg_walserver_status

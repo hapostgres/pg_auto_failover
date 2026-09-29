@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver ls --pgdata <path> [--config]
+  pg_walserver ls --pgdata <path> [--config-file <path>] [--config]
 
 Prints one row per configured route: how many base backups it holds
 and their combined real size on disk, how many WAL segments it has
@@ -38,6 +38,13 @@ Options
 --pgdata
 
   This instance's own top-level storage root. Defaults to ``PGDATA``.
+
+--config-file
+
+  Where the config file itself lives (defaults to
+  ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``); also
+  where ``--config``'s own ``pg_walserver.ini`` row checks, when it
+  differs from the default.
 
 --config
 

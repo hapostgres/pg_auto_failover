@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver basebackup --pgdata <path> --cluster <name>
+  pg_walserver basebackup --pgdata <path> [--config-file <path>] --cluster <name>
       [--path <dir>] [--upstream <conninfo> | --host <host> [--port <port>] [--user <name>]]
       [--keep-count <N>] [--keep-age <interval>] [--dry-run] [--force]
 
@@ -19,7 +19,8 @@ Takes a real base backup from a route's upstream into
 ``<path>/basebackups/.latest`` once the backup is verified complete,
 using a ``pg_basebackup`` client picked to match the upstream's own
 recorded Postgres version (written by :ref:`pg_walserver_fetch_systemid`/
-``setup``), not just whatever happens to be first on ``$PATH`` --
+``pg_walserver cluster register``), not just whatever happens to be
+first on ``$PATH`` --
 PostgreSQL's own compatibility contract only ever guarantees a client
 working with a server of the *same or older* major version, never a
 newer one. ``pg_walserver serve`` already takes a route's first base
@@ -37,11 +38,16 @@ Options
 
 --pgdata
 
-  Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
+  This instance's own data root. Defaults to ``PGDATA``.
+
+--config-file
+
+  Where the config file itself lives (defaults to
+  ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).
 
 --cluster
 
-  The cluster name to back up, looked up in ``pg_walserver.ini``.
+  The cluster name to back up, looked up in the config file.
 
 --path
 
@@ -166,7 +172,7 @@ testing) genuinely has plenty to prune::
   21:15:27 2592866 INFO  archive-cleanup: removing "/var/lib/archiver/mycluster/00000001000000000000002B": older than the retention cutoff ("00000001000000000000002C")
 
 A cleanup refusal never costs the backup that was just taken --
-``bbdemo`` was set up with ``--no-receivewal`` and nothing has ever
+``bbdemo`` was registered with ``--no-receivewal`` and nothing has ever
 pushed WAL into it via ``archive-wal``, so it has no WAL at all: the
 continuity check can never be satisfied for it, the whole cleanup pass
 refuses, and the fresh backup stays::

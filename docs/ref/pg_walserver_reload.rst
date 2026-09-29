@@ -39,4 +39,5 @@ See Also
 --------
 
 * :ref:`pg_walserver`
+* :ref:`pg_walserver_stop`
 * :ref:`pg_walserver_cluster`
