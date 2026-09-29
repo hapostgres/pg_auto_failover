@@ -117,7 +117,7 @@ ws_receivewal_start_all(const WsRoute *routes, int routeCount)
 
 	for (int i = 0; i < routeCount; i++)
 	{
-		if (!routes[i].receivewalPull)
+		if (!routes[i].receivewalPull || routes[i].disabled)
 		{
 			continue;
 		}

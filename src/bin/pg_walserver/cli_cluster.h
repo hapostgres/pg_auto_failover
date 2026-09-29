@@ -31,8 +31,8 @@
 typedef struct WsClusterRegisterOptions
 {
 	char pgdata[MAXPGPATH];
-	char configFile[MAXPGPATH];  /* --config-file: empty means the default,
-	                              * see config_file_path()'s own comment */
+	char configFile[MAXPGPATH];  /* --config: empty means the default, see
+	                              * config_file_path()'s own comment */
 	char cluster[NAMEDATALEN + 16]; /* the positional <name> */
 	char path[MAXPGPATH];
 	char pguri[MAXCONNINFO];     /* --pguri: a libpq connection string to
@@ -146,5 +146,13 @@ bool ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
 								 const char *routeKey,
 								 const char *newUpstream,
 								 bool forceBasebackup);
+
+/*
+ * ws_cluster_reload_running_server reloads an already-running "pg_
+ * walserver serve" for the same --pgdata, if one is running -- see
+ * cli_cluster.c's own comment. A no-op (logged, not an error) when
+ * nothing is running.
+ */
+void ws_cluster_reload_running_server(const char *pgdata);
 
 #endif /* WS_CLI_CLUSTER_H */

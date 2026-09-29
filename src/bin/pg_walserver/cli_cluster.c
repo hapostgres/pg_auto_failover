@@ -62,6 +62,8 @@
  *
  */
 
+#include <errno.h>
+#include <signal.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -76,10 +78,124 @@
 #include "cli_upstream.h"
 #include "file_utils.h"
 #include "log.h"
+#include "pidfile.h"
 #include "routes.h"
 #include "string_utils.h"
 
+/*
+ * "pidfile.h" above may resolve to either src/bin/common/pidfile.h or, via
+ * this project's own include-path fallback, pg_autoctl's own pidfile.h --
+ * which pulls in keeper.h, and, with it, commandline.h's own "streq" macro.
+ * Guard against a redefinition error either way, rather than relying on
+ * which one the include path happens to pick (the same guard cli_list.c
+ * already carries, for the same reason).
+ */
+#ifndef streq
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+#endif
+
+
+/*
+ * WS_RMTREE_RETRY_ATTEMPTS/WS_RMTREE_RETRY_USEC: SIGHUP-ing a running
+ * "serve" only *asks* it to stop a route's own embedded receivewal
+ * worker/bootstrap backup -- signal delivery and the child's own SIGINT
+ * handling are asynchronous, so the child can still hold the route's
+ * directory open (an in-progress ".partial" segment, in particular) for
+ * a brief moment after ws_cluster_reload_running_server() above already
+ * returned. Retrying rmtree() a handful of times, a short sleep apart,
+ * covers that ordinary window without ws_cluster_drop_run() needing any
+ * real cross-process synchronization with a "serve" it only ever talks
+ * to via SIGHUP + the pidfile. rmtree() (PostgreSQL's own, src/common/
+ * rmtree.c) logs its own warning on every failed attempt, not just the
+ * last -- kept to a handful of attempts, not dozens, so a genuine
+ * failure (not a transient race at all, e.g. a permissions problem)
+ * doesn't spam the log before this function's own final warning above.
+ */
+#define WS_RMTREE_RETRY_ATTEMPTS 5
+#define WS_RMTREE_RETRY_USEC (150 * 1000)
+
+static bool
+rmtree_retrying(const char *path)
+{
+	for (int attempt = 1; attempt <= WS_RMTREE_RETRY_ATTEMPTS; attempt++)
+	{
+		if (rmtree(path, true))
+		{
+			return true;
+		}
+
+		if (attempt < WS_RMTREE_RETRY_ATTEMPTS)
+		{
+			usleep(WS_RMTREE_RETRY_USEC);
+		}
+	}
+
+	return false;
+}
+
+
+/*
+ * ws_cluster_reload_running_server reloads an already-running
+ * "pg_walserver serve" for the same --pgdata, if one is running, so it
+ * immediately picks up whatever config-mutating command just wrote --
+ * the same read_pidfile()/SIGHUP shape "pg_walserver reload" itself
+ * uses, with one difference: no running server at all is not an error
+ * here, only a normal, expected case -- logged, not fatal. Shared (not
+ * cli_root.c-private) so every command that mutates the routes file can
+ * call it at the point that actually matters for its own case -- in
+ * particular, ws_cluster_drop_run()'s own --purge path below, which
+ * must stop a still-running embedded receivewal worker/bootstrap backup
+ * for the route *before* rmtree()ing its directory out from under it,
+ * not after.
+ */
+void
+ws_cluster_reload_running_server(const char *pgdata)
+{
+	if (pgdata == NULL || pgdata[0] == '\0')
+	{
+		return;
+	}
+
+	char pidfilePath[MAXPGPATH] = { 0 };
+
+	sformat(pidfilePath, sizeof(pidfilePath), "%s/pg_walserver.pid", pgdata);
+
+	/*
+	 * Ignore SIGHUP in THIS one-shot process first, before ever sending it
+	 * on -- the same guard cli_reload_run() (cli_root.c) applies to
+	 * itself, for the same reason: this process is not "serve" and must
+	 * never react to its own signal.
+	 */
+	signal(SIGHUP, SIG_IGN);
+
+	pid_t pid = 0;
+
+	if (!read_pidfile(pidfilePath, &pid))
+	{
+		log_info("No running \"pg_walserver serve\" found at \"%s\": the "
+				 "route just written will take effect the next time "
+				 "\"serve\" starts", pidfilePath);
+		return;
+	}
+
+	if (kill(pid, SIGHUP) != 0)
+	{
+		if (errno == ESRCH)
+		{
+			log_info("Pidfile \"%s\" names pid %d, which is not running: "
+					 "the route just written will take effect the next "
+					 "time \"serve\" starts", pidfilePath, pid);
+		}
+		else
+		{
+			log_warn("Failed to send SIGHUP to pg_walserver pid %d: %m", pid);
+		}
+		return;
+	}
+
+	log_info("Reloaded the running pg_walserver (pid %d): it will pick up "
+			 "this route immediately", pid);
+}
 
 
 /*
@@ -514,7 +630,22 @@ ws_cluster_drop_run(const char *pgdata, const char *configFile,
 		return false;
 	}
 
-	if (!rmtree(routePath, true))
+	/*
+	 * Reload BEFORE rmtree(), not after: routeKey is now gone from the
+	 * config file, so an already-running "serve" that picks this up
+	 * stops the route's own embedded receivewal worker/bootstrap backup
+	 * (if either was actually running -- always true unless the route
+	 * was already disabled first) before its directory is removed out
+	 * from under it. Reloading only after rmtree(), the way this used to
+	 * work, let a still-live child keep writing into a directory that no
+	 * longer existed until the next SIGHUP finally caught up to it.
+	 */
+	if (!alreadyDisabled)
+	{
+		ws_cluster_reload_running_server(pgdata);
+	}
+
+	if (!rmtree_retrying(routePath))
 	{
 		log_warn("Route \"%s\" was dropped from \"%s\", but removing "
 				 "its own directory \"%s\" failed -- remove it by "
@@ -611,10 +742,15 @@ ws_cluster_enable_run(const char *pgdata, const char *configFile,
  * drop --purge <name>" does for one route by name, applied to every route
  * currently disabled, the "ala docker" bulk equivalent of "docker
  * container prune"/"docker system prune". Never touches an active
- * (non-disabled) route. Always returns true: no dropped routes to prune
- * is an ordinary state to report, not a failure; a route whose own
- * rmtree() fails is warned about (same as a single "drop --purge") and
- * pruning continues with the rest rather than aborting outright.
+ * (non-disabled) route -- only an already-disabled one is ever eligible,
+ * so (unlike ws_cluster_drop_run()'s own --purge path) there is no live
+ * embedded receivewal worker/bootstrap backup left to stop first: an
+ * already-running "serve", reloaded once at the very end, is only
+ * catching up on registration bookkeeping it should already agree with.
+ * Always returns true: no dropped routes to prune is an ordinary state
+ * to report, not a failure; a route whose own rmtree() fails is warned
+ * about (same as a single "drop --purge") and pruning continues with
+ * the rest rather than aborting outright.
  */
 bool
 ws_cluster_prune_run(const char *pgdata, const char *configFile)
@@ -668,7 +804,7 @@ ws_cluster_prune_run(const char *pgdata, const char *configFile)
 			continue;
 		}
 
-		if (!rmtree(routePath, true))
+		if (!rmtree_retrying(routePath))
 		{
 			log_warn("Route \"%s\" was dropped from \"%s\", but removing "
 					 "its own directory \"%s\" failed -- remove it by "
@@ -683,6 +819,11 @@ ws_cluster_prune_run(const char *pgdata, const char *configFile)
 	}
 
 	routes_free(routes);
+
+	if (pruned > 0)
+	{
+		ws_cluster_reload_running_server(pgdata);
+	}
 
 	if (pruned == 0)
 	{

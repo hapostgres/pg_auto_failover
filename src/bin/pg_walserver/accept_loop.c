@@ -462,7 +462,7 @@ ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount)
 	{
 		const WsRoute *route = &routes[i];
 
-		if (route->path[0] == '\0' ||
+		if (route->path[0] == '\0' || route->disabled ||
 			cli_basebackup_route_has_backup(route->path))
 		{
 			continue;

@@ -1,6 +1,6 @@
 /*
  * src/bin/pg_walserver/cli_setup.h
- *   `pg_walserver setup --pgdata <path> [--config-file <path>]
+ *   `pg_walserver setup --pgdata <path> [--config <path>]
  *   [--port <port>] [--ssl-cert-file <path>] [--ssl-key-file <path>]
  *   [--ssl-ca-file <path>] [--auth-timeout <seconds>]`: configures
  *   pg_walserver *itself* -- writes whichever of these were given as

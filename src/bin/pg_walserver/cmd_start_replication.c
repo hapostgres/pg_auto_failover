@@ -548,7 +548,11 @@ cmd_start_replication(int sock, const WsRoute *route,
 									   "archiver's captured history and will "
 									   "never become available");
 
-				/* an error inside CopyBoth ends the connection */
+				/* an error inside CopyBoth ends the connection -- flush
+				 * whatever feedback arrived before it, same as every
+				 * other way this stream can end (see the identical call
+				 * at the very end of this function for why) */
+				slot_feedback_persist(&slotState, time(NULL));
 				ws_connection_close_after_command = true;
 				return;
 			}
@@ -585,6 +589,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 			fclose(file);
 			ws_send_error_response(sock, "58030",
 								   "failed to read the requested WAL segment");
+			slot_feedback_persist(&slotState, time(NULL));
 			ws_connection_close_after_command = true;
 			return;
 		}

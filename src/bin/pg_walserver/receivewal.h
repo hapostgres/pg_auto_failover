@@ -29,7 +29,11 @@
  * pg-receivewal" (cli_internal.c), which runs the vendored pg_receivewal
  * against that route's own "upstream", writing straight into that
  * route's own "path". A route with receivewalPull but no "upstream" is
- * logged and skipped, not a startup failure. Called once, from
+ * logged and skipped, not a startup failure -- so is a disabled route
+ * (routes.h's own WsRoute.disabled), silently: a dropped route never
+ * gets its embedded receivewal worker started in the first place, the
+ * same guarantee ws_receivewal_reload() already gives a route that
+ * becomes disabled while already running. Called once, from
  * cli_serve_run(), after pg_walserver.ini/HBA validation succeeds and
  * before ws_accept_loop() starts. Must not be called more than once per
  * process.
