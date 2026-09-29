@@ -476,6 +476,29 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 		return false;
 	}
 
+	if (route->disabled)
+	{
+		/*
+		 * A dropped ("cluster drop" without --purge) route: refused the
+		 * same way an unknown route is, after authentication, never
+		 * before -- see this function's own header comment on why. The
+		 * route genuinely still exists in the config file (its own "path"
+		 * stays on record for a later "cluster drop --purge"/"cluster
+		 * prune" to find it), so this is deliberately a distinct message
+		 * from "database does not exist", not the same 3D000 case.
+		 */
+		log_warn("Authenticated connection for dropped (disabled) route "
+				 "\"%s\"", safeRoute);
+
+		char message[256];
+
+		sformat(message, sizeof(message),
+				"database \"%s\" has been dropped and is no longer served",
+				safeRoute);
+		ws_send_error_response(sock, "3D000", message);
+		return false;
+	}
+
 	*foundRoute = route;
 	return true;
 }
