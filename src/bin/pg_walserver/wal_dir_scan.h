@@ -55,6 +55,30 @@ bool wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 						 char *endLsn, size_t endLsnSize);
 
 /*
+ * ws_wal_segment_prefix_to_position decodes a 24-hex WAL segment prefix
+ * (this file's own WS_WAL_FILE_SEGMENT/PARTIAL/BACKUP shape, see ws_wal_
+ * dir_classify_filename() below) into its own timeline and 0-based
+ * segment number -- the exact 8+8+8 hex split/perXLogId division wal_dir_
+ * find_latest() above already applies to the highest segment name it
+ * finds by directory scan, exposed here for an arbitrary segment name a
+ * caller already has in hand (never touches the filesystem itself).
+ */
+void ws_wal_segment_prefix_to_position(const char *segmentPrefix,
+									   uint64_t segSize,
+									   uint32_t *timelineOut,
+									   uint64_t *segnoOut);
+
+/*
+ * ws_wal_lsn_to_segno converts an "%X/%08X"-formatted LSN plus a route's
+ * own WAL segment size into the 0-based segment number it falls in -- the
+ * same division wal_dir_find_latest() and cli_archive_cleanup.c's own
+ * retention math already use. Returns false (untouched) when lsn doesn't
+ * parse as "%X/%X".
+ */
+bool ws_wal_lsn_to_segno(const char *lsn, uint64_t segSize,
+						 uint64_t *segnoOut);
+
+/*
  * wal_dir_has_any_segment returns true as soon as route->path holds at
  * least one WAL segment file, complete OR still ".partial" -- unlike wal_
  * dir_find_latest() above (complete segments only, the right conservative

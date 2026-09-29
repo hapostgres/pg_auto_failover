@@ -26,11 +26,19 @@
  *   manually-set client flag:
  *
  *     - the route has "receivewal = pull" configured (its own embedded,
- *       supervised pg_receivewal writes into this same directory): only
- *       ever CHECK_FILE, never ARCHIVE_FILE. Exit 0 on "matches", exit 1
- *       on "missing"/"differs" with a clean stderr message -- no sleep, no
- *       retry loop inside this client, PostgreSQL's own archive_command
- *       retry loop is the entire retry mechanism;
+ *       supervised pg_receivewal writes into this same directory):
+ *       ordinarily only ever CHECK_FILE, never ARCHIVE_FILE. Exit 0 on
+ *       "matches", exit 1 on "missing"/"differs" with a clean stderr
+ *       message -- no sleep, no retry loop inside this client,
+ *       PostgreSQL's own archive_command retry loop is the entire retry
+ *       mechanism. The one exception: CHECK_FILE's own "fallback" column
+ *       (cmd_check_file.h) tells this client when the embedded receivewal
+ *       worker has already streamed *past* filename without it ever
+ *       showing up -- a hole a streaming worker can never retroactively
+ *       fill, typically a timeline switch that left a segment behind on
+ *       the old timeline -- in which case this pushes it directly via
+ *       ARCHIVE_FILE right away instead of waiting on a retry loop that
+ *       would otherwise never succeed;
  *     - the route has no "receivewal = pull" (absent or "none"): only ever
  *       ARCHIVE_FILE, unconditionally pushing the full file every
  *       invocation, no CHECK_FILE round trip first -- the server's own

@@ -11,8 +11,8 @@
  *                     is ever implicit: `pg_walserver` alone (or any
  *                     unrecognized/missing sub-command) only prints usage
  *                     and exits non-zero -- `pg_walserver serve ...` must
- *                     always be spelled out. Applies pg_walserver.ini's own
- *                     global section (routes_load_global(), routes.c, see
+ *                     always be spelled out. Applies the config file's own
+ *                     global section (config_load_global(), routes.c, see
  *                     "setup" below) as its own port/TLS/auth-timeout
  *                     defaults whenever the equivalent flag isn't given
  *                     directly on this command line.
@@ -1382,26 +1382,25 @@ static CommandLine setup_command =
 				 "still overridden by the same flag given directly to "
 				 "\"serve\" itself.\n"
 				 "Nothing about any one archived cluster -- see "
-				 "\"pg_walserver register/drop/\n"
-				 "set-upstream cluster\" for registering, dropping, or "
-				 "re-pointing those.\n",
+				 "\"pg_walserver cluster\"\n"
+				 "for registering, dropping, listing, or re-pointing "
+				 "those.\n",
 				 cli_setup_getopt, cli_setup_command_run);
 
 
 /* -----------------------------------------------------------------------
- * pg_walserver register cluster <name> | list
- * pg_walserver drop cluster <name>
- * pg_walserver set-upstream cluster <name>
+ * pg_walserver cluster register <name> | drop <name> | list | set-upstream <name>
  * ----------------------------------------------------------------------- */
 
 /*
  * cli_cluster_reload_running_server reloads an already-running
  * "pg_walserver serve" for the same --pgdata, if one is running, so it
- * immediately picks up whatever "register cluster"/"set-upstream cluster"
- * just wrote -- exactly "pg_walserver reload"'s own read_pidfile()/SIGHUP
- * shape (cli_reload_run() above), with one difference: no running server
- * at all is not an error here, only a normal, expected case -- logged,
- * not fatal, and the caller still exits 0.
+ * immediately picks up whatever "cluster register"/"cluster
+ * set-upstream" just wrote -- exactly "pg_walserver reload"'s own
+ * read_pidfile()/SIGHUP shape (cli_reload_run() above), with one
+ * difference: no running server at all is not an error here, only a
+ * normal, expected case -- logged, not fatal, and the caller still
+ * exits 0.
  */
 static void
 cli_cluster_reload_running_server(const char *pgdata)
@@ -1453,7 +1452,7 @@ cli_cluster_reload_running_server(const char *pgdata)
 
 static WsClusterRegisterOptions clusterRegisterOptions = { 0 };
 
-static struct option registerClusterLongOptions[] = {
+static struct option clusterRegisterLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
 	{ "config-file", required_argument, NULL, 'f' },
 	{ "path", required_argument, NULL, 'P' },
@@ -1470,13 +1469,13 @@ static struct option registerClusterLongOptions[] = {
 };
 
 /*
- * cli_register_cluster_getopt parses "pg_walserver register cluster"'s
+ * cli_cluster_register_getopt parses "pg_walserver cluster register"'s
  * own flags (everything except the cluster name itself, a positional
- * argument left in argv for cli_register_cluster_command_run() below)
+ * argument left in argv for cli_cluster_register_command_run() below)
  * into the file-scope statics above.
  */
 static int
-cli_register_cluster_getopt(int argc, char **argv)
+cli_cluster_register_getopt(int argc, char **argv)
 {
 	optind = 0;
 	clusterRegisterOptions = (WsClusterRegisterOptions) {
@@ -1486,7 +1485,7 @@ cli_register_cluster_getopt(int argc, char **argv)
 
 	/*
 	 * The embedded receivewal worker is on by default now: running
-	 * "register cluster" with no receivewal-related flag at all writes
+	 * "cluster register" with no receivewal-related flag at all writes
 	 * "receivewal = pull" (see write_route_section(), cli_cluster.c).
 	 * --receivewal none / --no-receivewal are the explicit opt-out for a
 	 * push-only (archive_command-only) route; --receivewal pull still
@@ -1497,7 +1496,7 @@ cli_register_cluster_getopt(int argc, char **argv)
 	int c;
 
 	while ((c = getopt_long(argc, argv, "D:f:P:u:h:p:U:n:c:NFs",
-							registerClusterLongOptions, NULL)) != -1)
+							clusterRegisterLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -1608,19 +1607,19 @@ cli_register_cluster_getopt(int argc, char **argv)
 
 
 /*
- * cli_register_cluster_command_run reads the one positional argument
- * "register cluster" takes -- the cluster's own name, left in argv once
- * cli_register_cluster_getopt() has consumed every flag -- then runs
+ * cli_cluster_register_command_run reads the one positional argument
+ * "cluster register" takes -- the cluster's own name, left in argv once
+ * cli_cluster_register_getopt() has consumed every flag -- then runs
  * ws_cluster_register_run() against it and the options that getopt call
  * parsed above, and exit()s with its own result.
  */
 static void
-cli_register_cluster_command_run(int argc, char **argv)
+cli_cluster_register_command_run(int argc, char **argv)
 {
 	if (argc != 1)
 	{
-		log_fatal("register cluster requires exactly one argument: the "
-				  "cluster's own name (\"pg_walserver register cluster "
+		log_fatal("cluster register requires exactly one argument: the "
+				  "cluster's own name (\"pg_walserver cluster register "
 				  "<name> ...\")");
 		commandline_print_usage(&ws_root, stderr);
 		exit(1);
@@ -1640,8 +1639,8 @@ cli_register_cluster_command_run(int argc, char **argv)
 }
 
 
-static CommandLine register_cluster_command =
-	make_command("cluster",
+static CommandLine cluster_register_command =
+	make_command("register",
 				 "Register (or validate) one cluster this pg_walserver "
 				 "archives",
 				 "<name> --pgdata <path> [--config-file <path>] "
@@ -1721,103 +1720,9 @@ static CommandLine register_cluster_command =
 													  "starts. Either\n"
 													  "way, \"serve\" itself takes this route's first base backup "
 													  "automatically\n"
-													  "if it doesn't have one yet -- \"register cluster\" never "
+													  "if it doesn't have one yet -- \"cluster register\" never "
 													  "takes one itself.\n",
-				 cli_register_cluster_getopt, cli_register_cluster_command_run);
-
-
-static char registerListPgdata[MAXPGPATH] = { 0 };
-static char registerListConfigFile[MAXPGPATH] = { 0 };
-
-static struct option registerListLongOptions[] = {
-	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config-file", required_argument, NULL, 'f' },
-	{ NULL, 0, NULL, 0 }
-};
-
-/*
- * cli_register_list_getopt parses "pg_walserver register list"'s own
- * flags into the file-scope statics above.
- */
-static int
-cli_register_list_getopt(int argc, char **argv)
-{
-	optind = 0;
-	registerListPgdata[0] = '\0';
-	registerListConfigFile[0] = '\0';
-	ws_prefill_pgdata_from_env(registerListPgdata);
-
-	int c;
-
-	while ((c = getopt_long(argc, argv, "D:f:", registerListLongOptions,
-							NULL)) != -1)
-	{
-		switch (c)
-		{
-			case 'D':
-			{
-				strlcpy(registerListPgdata, optarg, sizeof(registerListPgdata));
-				break;
-			}
-
-			case 'f':
-			{
-				strlcpy(registerListConfigFile, optarg,
-						sizeof(registerListConfigFile));
-				break;
-			}
-
-			default:
-			{
-				commandline_print_usage(&ws_root, stderr);
-				exit(1);
-			}
-		}
-	}
-
-	return optind;
-}
-
-
-/*
- * cli_register_list_command_run runs "pg_walserver register list" against
- * the options cli_register_list_getopt parsed above, then exit()s with
- * its own result.
- */
-static void
-cli_register_list_command_run(int argc, char **argv)
-{
-	(void) argc;
-	(void) argv;
-
-	exit(ws_cluster_list_run(registerListPgdata, registerListConfigFile) ? 0 : 1);
-}
-
-
-static CommandLine register_list_command =
-	make_command("list",
-				 "List every cluster this pg_walserver has registered",
-				 "--pgdata <path> [--config-file <path>]",
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config-file  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n",
-				 cli_register_list_getopt, cli_register_list_command_run);
-
-
-static CommandLine *register_subcommands[] = {
-	&register_cluster_command,
-	&register_list_command,
-	NULL
-};
-
-static CommandLine register_commands =
-	make_command_set("register",
-					 "Register one cluster this pg_walserver archives, or "
-					 "list what's registered",
-					 NULL, NULL, NULL, register_subcommands);
+				 cli_cluster_register_getopt, cli_cluster_register_command_run);
 
 
 static char clusterDropPgdata[MAXPGPATH] = { 0 };
@@ -1825,7 +1730,7 @@ static char clusterDropConfigFile[MAXPGPATH] = { 0 };
 static char clusterDropRoute[NAMEDATALEN + 16] = { 0 };
 static bool clusterDropPurge = false;
 
-static struct option dropClusterLongOptions[] = {
+static struct option clusterDropLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
 	{ "config-file", required_argument, NULL, 'f' },
 	{ "purge", no_argument, NULL, 'P' },
@@ -1833,13 +1738,13 @@ static struct option dropClusterLongOptions[] = {
 };
 
 /*
- * cli_drop_cluster_getopt parses "pg_walserver drop cluster"'s own flags
+ * cli_cluster_drop_getopt parses "pg_walserver cluster drop"'s own flags
  * (everything except the cluster name itself, a positional argument left
- * in argv for cli_drop_cluster_command_run() below) into the file-scope
+ * in argv for cli_cluster_drop_command_run() below) into the file-scope
  * statics above.
  */
 static int
-cli_drop_cluster_getopt(int argc, char **argv)
+cli_cluster_drop_getopt(int argc, char **argv)
 {
 	optind = 0;
 	clusterDropPgdata[0] = '\0';
@@ -1850,7 +1755,7 @@ cli_drop_cluster_getopt(int argc, char **argv)
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:f:P", dropClusterLongOptions,
+	while ((c = getopt_long(argc, argv, "D:f:P", clusterDropLongOptions,
 							NULL)) != -1)
 	{
 		switch (c)
@@ -1887,18 +1792,18 @@ cli_drop_cluster_getopt(int argc, char **argv)
 
 
 /*
- * cli_drop_cluster_command_run reads the one positional argument "drop
- * cluster" takes -- the cluster's own name -- then runs ws_cluster_drop_
- * run() against it and the options cli_drop_cluster_getopt parsed above,
- * and exit()s with its own result.
+ * cli_cluster_drop_command_run reads the one positional argument
+ * "cluster drop" takes -- the cluster's own name -- then runs ws_
+ * cluster_drop_run() against it and the options cli_cluster_drop_getopt
+ * parsed above, and exit()s with its own result.
  */
 static void
-cli_drop_cluster_command_run(int argc, char **argv)
+cli_cluster_drop_command_run(int argc, char **argv)
 {
 	if (argc != 1)
 	{
-		log_fatal("drop cluster requires exactly one argument: the "
-				  "cluster's own name (\"pg_walserver drop cluster "
+		log_fatal("cluster drop requires exactly one argument: the "
+				  "cluster's own name (\"pg_walserver cluster drop "
 				  "<name> ...\")");
 		commandline_print_usage(&ws_root, stderr);
 		exit(1);
@@ -1918,8 +1823,8 @@ cli_drop_cluster_command_run(int argc, char **argv)
 }
 
 
-static CommandLine drop_cluster_command =
-	make_command("cluster",
+static CommandLine cluster_drop_command =
+	make_command("drop",
 				 "Drop one cluster's registration (never its own data, "
 				 "unless --purge)",
 				 "<name> --pgdata <path> [--config-file <path>] [--purge]",
@@ -1937,18 +1842,88 @@ static CommandLine drop_cluster_command =
 				 "without it, only the\n"
 				 "              registration itself is removed, the data "
 				 "is left in place\n",
-				 cli_drop_cluster_getopt, cli_drop_cluster_command_run);
+				 cli_cluster_drop_getopt, cli_cluster_drop_command_run);
 
 
-static CommandLine *drop_subcommands[] = {
-	&drop_cluster_command,
-	NULL
+static char clusterListPgdata[MAXPGPATH] = { 0 };
+static char clusterListConfigFile[MAXPGPATH] = { 0 };
+
+static struct option clusterListLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config-file", required_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
 };
 
-static CommandLine drop_commands =
-	make_command_set("drop",
-					 "Drop one cluster's registration",
-					 NULL, NULL, NULL, drop_subcommands);
+/*
+ * cli_cluster_list_getopt parses "pg_walserver cluster list"'s own flags
+ * into the file-scope statics above.
+ */
+static int
+cli_cluster_list_getopt(int argc, char **argv)
+{
+	optind = 0;
+	clusterListPgdata[0] = '\0';
+	clusterListConfigFile[0] = '\0';
+	ws_prefill_pgdata_from_env(clusterListPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:f:", clusterListLongOptions,
+							NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(clusterListPgdata, optarg, sizeof(clusterListPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(clusterListConfigFile, optarg,
+						sizeof(clusterListConfigFile));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_cluster_list_command_run runs "pg_walserver cluster list" against
+ * the options cli_cluster_list_getopt parsed above, then exit()s with
+ * its own result.
+ */
+static void
+cli_cluster_list_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(ws_cluster_list_run(clusterListPgdata, clusterListConfigFile) ? 0 : 1);
+}
+
+
+static CommandLine cluster_list_command =
+	make_command("list",
+				 "List every cluster this pg_walserver has registered",
+				 "--pgdata <path> [--config-file <path>]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config-file  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n",
+				 cli_cluster_list_getopt, cli_cluster_list_command_run);
 
 
 static char clusterSetUpstreamPgdata[MAXPGPATH] = { 0 };
@@ -1957,7 +1932,7 @@ static char clusterSetUpstreamRoute[NAMEDATALEN + 16] = { 0 };
 static char clusterSetUpstreamUpstream[MAXCONNINFO] = { 0 };
 static bool clusterSetUpstreamForceBasebackup = false;
 
-static struct option setUpstreamClusterLongOptions[] = {
+static struct option clusterSetUpstreamLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
 	{ "config-file", required_argument, NULL, 'f' },
 	{ "pguri", required_argument, NULL, 'u' },
@@ -1966,13 +1941,13 @@ static struct option setUpstreamClusterLongOptions[] = {
 };
 
 /*
- * cli_set_upstream_cluster_getopt parses "pg_walserver set-upstream
- * cluster"'s own flags (everything except the cluster name itself, a
- * positional argument left in argv for cli_set_upstream_cluster_command_
- * run() below) into the file-scope statics above.
+ * cli_cluster_set_upstream_getopt parses "pg_walserver cluster
+ * set-upstream"'s own flags (everything except the cluster name itself,
+ * a positional argument left in argv for cli_cluster_set_upstream_
+ * command_run() below) into the file-scope statics above.
  */
 static int
-cli_set_upstream_cluster_getopt(int argc, char **argv)
+cli_cluster_set_upstream_getopt(int argc, char **argv)
 {
 	optind = 0;
 	clusterSetUpstreamPgdata[0] = '\0';
@@ -1985,7 +1960,7 @@ cli_set_upstream_cluster_getopt(int argc, char **argv)
 	int c;
 
 	while ((c = getopt_long(argc, argv, "D:f:u:F",
-							setUpstreamClusterLongOptions, NULL)) != -1)
+							clusterSetUpstreamLongOptions, NULL)) != -1)
 	{
 		switch (c)
 		{
@@ -2029,19 +2004,19 @@ cli_set_upstream_cluster_getopt(int argc, char **argv)
 
 
 /*
- * cli_set_upstream_cluster_command_run reads the one positional argument
- * "set-upstream cluster" takes -- the cluster's own name -- then runs
- * ws_cluster_set_upstream_run() against it and the options cli_set_
- * upstream_cluster_getopt parsed above, and exit()s with its own result.
+ * cli_cluster_set_upstream_command_run reads the one positional argument
+ * "cluster set-upstream" takes -- the cluster's own name -- then runs
+ * ws_cluster_set_upstream_run() against it and the options cli_cluster_
+ * set_upstream_getopt parsed above, and exit()s with its own result.
  */
 static void
-cli_set_upstream_cluster_command_run(int argc, char **argv)
+cli_cluster_set_upstream_command_run(int argc, char **argv)
 {
 	if (argc != 1)
 	{
-		log_fatal("set-upstream cluster requires exactly one argument: "
-				  "the cluster's own name (\"pg_walserver set-upstream "
-				  "cluster <name> ...\")");
+		log_fatal("cluster set-upstream requires exactly one argument: "
+				  "the cluster's own name (\"pg_walserver cluster "
+				  "set-upstream <name> ...\")");
 		commandline_print_usage(&ws_root, stderr);
 		exit(1);
 	}
@@ -2063,8 +2038,8 @@ cli_set_upstream_cluster_command_run(int argc, char **argv)
 }
 
 
-static CommandLine set_upstream_cluster_command =
-	make_command("cluster",
+static CommandLine cluster_set_upstream_command =
+	make_command("set-upstream",
 				 "Point an already-registered cluster at a new upstream "
 				 "(e.g. after a failover)",
 				 "<name> --pgdata <path> [--config-file <path>] "
@@ -2093,20 +2068,23 @@ static CommandLine set_upstream_cluster_command =
 				 "change and restarts this route's embedded receivewal "
 				 "worker against\n"
 				 "the new one -- no separate step needed to \"move\" it.\n",
-				 cli_set_upstream_cluster_getopt,
-				 cli_set_upstream_cluster_command_run);
+				 cli_cluster_set_upstream_getopt,
+				 cli_cluster_set_upstream_command_run);
 
 
-static CommandLine *set_upstream_subcommands[] = {
-	&set_upstream_cluster_command,
+static CommandLine *cluster_subcommands[] = {
+	&cluster_register_command,
+	&cluster_drop_command,
+	&cluster_list_command,
+	&cluster_set_upstream_command,
 	NULL
 };
 
-static CommandLine set_upstream_commands =
-	make_command_set("set-upstream",
-					 "Point an already-registered cluster at a new upstream",
-					 NULL, NULL, NULL, set_upstream_subcommands);
-
+static CommandLine cluster_commands =
+	make_command_set("cluster",
+					 "Register, drop, list, or re-point the clusters this "
+					 "pg_walserver archives",
+					 NULL, NULL, NULL, cluster_subcommands);
 
 /* -----------------------------------------------------------------------
  * pg_walserver create-cert --pgdata <path> --hostname <name> [--force]
@@ -3351,9 +3329,7 @@ static CommandLine *root_subcommands[] = {
 	&fetch_systemid_command,
 	&basebackup_command,
 	&setup_command,
-	&register_commands,
-	&drop_commands,
-	&set_upstream_commands,
+	&cluster_commands,
 	&create_cert_command,
 	&archive_command,
 	&restore_command,
@@ -3373,8 +3349,7 @@ CommandLine ws_root =
 	make_command_set("pg_walserver",
 					 "The archiver's own replication-protocol server",
 					 "serve ... | scram-secret ... | setup ... | "
-					 "register ... | drop ... | set-upstream ... | "
-					 "fetch-systemid ... | basebackup ... | "
+					 "cluster ... | fetch-systemid ... | basebackup ... | "
 					 "create-cert ... | archive-wal ... | restore-wal ... | "
 					 "archive-cleanup ... | reload ... | stop ... | ps ... | "
 					 "ls ... | status ... | list ... | help",

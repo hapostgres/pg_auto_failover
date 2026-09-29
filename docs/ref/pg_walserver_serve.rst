@@ -101,7 +101,7 @@ cluster is registered against the already-running server -- the way
 ``pg_walserver`` is meant to be deployed in practice, as an OS service
 or a container's own PID 1, with clusters added and removed over its
 lifetime rather than baked into a one-shot startup sequence. This also
-demonstrates ``register cluster``'s own auto-reload behavior.
+demonstrates ``cluster register``'s own auto-reload behavior.
 
 Starting the server
 ~~~~~~~~~~~~~~~~~~~~
@@ -146,13 +146,13 @@ Registering the cluster
 ``postgres://`` URI, either works; ``--path`` only ever needs to be
 given to override its own default, ``<pgdata>/<name>``::
 
-  archive$ PGPASSWORD=s3kr3t pg_walserver register cluster mycluster \
+  archive$ PGPASSWORD=s3kr3t pg_walserver cluster register mycluster \
       --pguri "postgres://archiver_repl@primary:5432/?sslmode=require"
   23:02:21 99 INFO  Added route "mycluster" (path "/var/lib/archiver/mycluster") to "/var/lib/archiver/pg_walserver.ini"
   23:02:21 99 INFO  Connecting to primary:5432 as "archiver_repl" to fetch the system identifier
   23:02:21 99 INFO  Wrote system identifier 7690725181130416167 to "/var/lib/archiver/mycluster/pg_walserver_systemid"
   23:02:21 99 INFO  Wrote upstream Postgres version 170011 to "/var/lib/archiver/mycluster/pg_walserver_pgversion"
-  23:02:21 99 INFO  register cluster complete: route "mycluster" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
+  23:02:21 99 INFO  cluster register complete: route "mycluster" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
   23:02:21 99 INFO  Reloaded the running pg_walserver (pid 92): it will pick up this route immediately
 
 That reload is real, on the already-running server, not a restart --
@@ -185,7 +185,7 @@ receivewal worker shows real streaming evidence, is ``serve``'s own
 job: no separate ``pg_walserver basebackup`` call is needed, and the
 ``pg_basebackup`` client it uses is picked to match the upstream's own
 recorded Postgres version (written alongside its system identifier by
-``register cluster``), not just whatever happens to be first on
+``cluster register``), not just whatever happens to be first on
 ``$PATH`` -- see :ref:`pg_walserver_basebackup`. Running ``cluster
 register`` again later, for the same or a new route, while ``serve`` is
 already running, reloads it immediately (a ``SIGHUP``, the same as
@@ -204,11 +204,14 @@ notably)::
   archive_command = 'pg_walserver archive-wal %p %f --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
 
 Because ``mycluster`` has ``receivewal = pull`` configured (the
-default), each invocation only ever runs ``CHECK_FILE``: exit 0 once the
-embedded worker has already delivered the segment, exit 1 otherwise.
-It never pushes anything itself; PostgreSQL's own retry of
-``archive_command`` covers the case where the worker has not yet
-caught up.
+default), each invocation ordinarily only ever runs ``CHECK_FILE``:
+exit 0 once the embedded worker has already delivered the segment,
+exit 1 otherwise, never pushing anything itself; PostgreSQL's own
+retry of ``archive_command`` covers the case where the worker has not
+yet caught up. The one exception is a genuine hole the worker can
+never retroactively fill (typically a timeline switch): ``archive-wal``
+then pushes the file directly instead of waiting forever -- see
+:ref:`pg_walserver_archive_wal` for the full design.
 
 Restoring with point-in-time recovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -357,7 +360,7 @@ otherwise. The shortest path to a second, SNI-routed cluster, against
 an already-running server with one cluster already registered and no
 certificate yet, is::
 
-  archive$ PGPASSWORD=s3kr3t pg_walserver register cluster another \
+  archive$ PGPASSWORD=s3kr3t pg_walserver cluster register another \
       --pguri "postgres://archiver_repl@primary2/?sslmode=require" \
       --hostname another.archive.example.com --ssl-self-signed
   22:57:22 63 INFO  Added route "another" (path "/var/lib/archiver/another") to "/var/lib/archiver/pg_walserver.ini"
@@ -367,10 +370,10 @@ certificate yet, is::
   22:57:22 63 INFO  Connecting to primary2:5432 as "archiver_repl" to fetch the system identifier
   22:57:22 63 INFO  Wrote system identifier 7690676421909321516 to "/var/lib/archiver/another/pg_walserver_systemid"
   22:57:22 63 INFO  Wrote upstream Postgres version 170011 to "/var/lib/archiver/another/pg_walserver_pgversion"
-  22:57:22 63 INFO  register cluster complete: route "another" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
+  22:57:22 63 INFO  cluster register complete: route "another" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
   22:57:22 63 INFO  Reloaded the running pg_walserver (pid 92): it will pick up this route immediately
 
-Without ``--ssl-self-signed`` here, this same ``register cluster`` call
+Without ``--ssl-self-signed`` here, this same ``cluster register`` call
 would have created the certificate itself, automatically, the moment
 the file it just wrote to reached two routes -- either way works, this
 only gets it sooner. The certificate can also be created, or with
