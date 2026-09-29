@@ -70,7 +70,10 @@ bool ws_accept_loop(WsServerConfig *config);
  * A route with "receivewal = pull" is only ever bootstrapped once its own
  * real, already-started receivewal worker (receivewal.c) shows genuine on-disk
  * evidence of streaming; a route missing an "upstream" property to take a
- * backup from is logged and skipped, never an error.
+ * backup from is logged and skipped, never an error; a disabled route
+ * (routes.h's own WsRoute.disabled) is skipped silently, the same "never
+ * touch a dropped route" guarantee every other automatic pg_walserver
+ * action gives it.
  *
  * Called at exactly two points, both documented in the project's own
  * README.md: once from cli_serve_run() (cli_root.c), right after

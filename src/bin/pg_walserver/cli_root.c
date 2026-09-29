@@ -1430,61 +1430,13 @@ static CommandLine setup_command =
  * ----------------------------------------------------------------------- */
 
 /*
- * cli_cluster_reload_running_server reloads an already-running
- * "pg_walserver serve" for the same --pgdata, if one is running, so it
- * immediately picks up whatever "cluster register"/"cluster
- * set-upstream" just wrote -- exactly "pg_walserver reload"'s own
- * read_pidfile()/SIGHUP shape (cli_reload_run() above), with one
- * difference: no running server at all is not an error here, only a
- * normal, expected case -- logged, not fatal, and the caller still
- * exits 0.
+ * The pidfile/SIGHUP reload logic that used to be a private static
+ * function right here now lives in cli_cluster.c as ws_cluster_reload_
+ * running_server() (cli_cluster.h), shared with commands there that need
+ * to reload a running server at a point other than "after the whole
+ * command finished" (ws_cluster_drop_run()'s own --purge path, in
+ * particular).
  */
-static void
-cli_cluster_reload_running_server(const char *pgdata)
-{
-	if (pgdata == NULL || pgdata[0] == '\0')
-	{
-		return;
-	}
-
-	char pidfilePath[MAXPGPATH] = { 0 };
-
-	sformat(pidfilePath, sizeof(pidfilePath), "%s/pg_walserver.pid", pgdata);
-
-	/*
-	 * Ignore SIGHUP in THIS one-shot process first, before ever sending it
-	 * on -- see cli_reload_run()'s own comment just above for why.
-	 */
-	signal(SIGHUP, SIG_IGN);
-
-	pid_t pid = 0;
-
-	if (!read_pidfile(pidfilePath, &pid))
-	{
-		log_info("No running \"pg_walserver serve\" found at \"%s\": the "
-				 "route just written will take effect the next time "
-				 "\"serve\" starts", pidfilePath);
-		return;
-	}
-
-	if (kill(pid, SIGHUP) != 0)
-	{
-		if (errno == ESRCH)
-		{
-			log_info("Pidfile \"%s\" names pid %d, which is not running: "
-					 "the route just written will take effect the next "
-					 "time \"serve\" starts", pidfilePath, pid);
-		}
-		else
-		{
-			log_warn("Failed to send SIGHUP to pg_walserver pid %d: %m", pid);
-		}
-		return;
-	}
-
-	log_info("Reloaded the running pg_walserver (pid %d): it will pick up "
-			 "this route immediately", pid);
-}
 
 
 static WsClusterRegisterOptions clusterRegisterOptions = { 0 };
@@ -1670,7 +1622,7 @@ cli_cluster_register_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	cli_cluster_reload_running_server(clusterRegisterOptions.pgdata);
+	ws_cluster_reload_running_server(clusterRegisterOptions.pgdata);
 
 	exit(0);
 }
@@ -1854,7 +1806,7 @@ cli_cluster_drop_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	cli_cluster_reload_running_server(clusterDropPgdata);
+	ws_cluster_reload_running_server(clusterDropPgdata);
 
 	exit(0);
 }
@@ -1978,7 +1930,7 @@ cli_cluster_enable_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	cli_cluster_reload_running_server(clusterEnablePgdata);
+	ws_cluster_reload_running_server(clusterEnablePgdata);
 
 	exit(0);
 }
@@ -2330,7 +2282,7 @@ cli_cluster_set_upstream_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	cli_cluster_reload_running_server(clusterSetUpstreamPgdata);
+	ws_cluster_reload_running_server(clusterSetUpstreamPgdata);
 
 	exit(0);
 }
