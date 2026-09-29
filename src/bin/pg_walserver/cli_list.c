@@ -643,8 +643,12 @@ scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
 
 /*
  * cli_list_wal_run prints, per route, WsWalStats's own aggregate counts
- * (the default), or every individual file via scan_wal_dir()'s own
- * printSegments mode when segments is true.
+ * (the default: one pg_controldata-style "Label:  value" block per
+ * route, chosen over a table for the same reason "cluster list
+ * --upstream" is pivoted rather than tabular -- one route's worth of
+ * facts read more naturally stacked than crammed into a row), or every
+ * individual file, still a table, via scan_wal_dir()'s own printSegments
+ * mode when segments is true.
  */
 bool
 cli_list_wal_run(const char *pgdata, const char *configFile,
@@ -666,15 +670,8 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 			   "--------------------", "----------------------------",
 			   "---------", "----------", "--------");
 	}
-	else
-	{
-		printf("%-20s %-9s %-10s %-24s %-24s %s\n", /* IGNORE-BANNED */
-			   "CLUSTER", "SEGMENTS", "SIZE", "OLDEST", "NEWEST", "HISTORY");
-		printf("%-20s %-9s %-10s %-24s %-24s %s\n", /* IGNORE-BANNED */
-			   "--------------------", "---------", "----------",
-			   "------------------------", "------------------------",
-			   "-------");
-	}
+
+	bool first = true;
 
 	for (int i = 0; i < routeCount; i++)
 	{
@@ -699,11 +696,20 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 
 			format_bytes(stats.totalBytes, sizeStr, sizeof(sizeStr));
 
-			printf("%-20s %-9d %-10s %-24s %-24s %d\n", /* IGNORE-BANNED */
-				   route->key, stats.segments, sizeStr,
-				   stats.oldest[0] != '\0' ? stats.oldest : "-",
-				   stats.newest[0] != '\0' ? stats.newest : "-",
-				   stats.history);
+			if (!first)
+			{
+				printf("\n"); /* IGNORE-BANNED */
+			}
+			first = false;
+
+			printf("%-11s%s\n", "Cluster:", route->key); /* IGNORE-BANNED */
+			printf("%-11s%d\n", "Segments:", stats.segments); /* IGNORE-BANNED */
+			printf("%-11s%s\n", "Size:", sizeStr); /* IGNORE-BANNED */
+			printf("%-11s%s\n", "Oldest:", /* IGNORE-BANNED */
+				   stats.oldest[0] != '\0' ? stats.oldest : "-");
+			printf("%-11s%s\n", "Newest:", /* IGNORE-BANNED */
+				   stats.newest[0] != '\0' ? stats.newest : "-");
+			printf("%-11s%d\n", "History:", stats.history); /* IGNORE-BANNED */
 		}
 	}
 
