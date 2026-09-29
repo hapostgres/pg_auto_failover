@@ -89,5 +89,5 @@ See Also
 --------
 
 * :ref:`pg_walserver`
-* :ref:`pg_walserver_register`
+* :ref:`pg_walserver_cluster`
 * :ref:`pg_walserver_serve`

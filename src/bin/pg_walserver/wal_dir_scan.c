@@ -158,12 +158,52 @@ wal_segment_filename(uint32_t timeline, uint64_t segno, uint64_t segSize,
 }
 
 
+void
+ws_wal_segment_prefix_to_position(const char *segmentPrefix, uint64_t segSize,
+								  uint32_t *timelineOut, uint64_t *segnoOut)
+{
+	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
+
+	char tliHex[9] = { 0 };
+	char logIdHex[9] = { 0 };
+	char segHex[9] = { 0 };
+
+	memcpy(tliHex, segmentPrefix, 8); /* IGNORE-BANNED */
+	memcpy(logIdHex, segmentPrefix + 8, 8); /* IGNORE-BANNED */
+	memcpy(segHex, segmentPrefix + 16, 8); /* IGNORE-BANNED */
+
+	uint32_t tli = (uint32_t) strtoul(tliHex, NULL, 16);
+	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
+	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
+
+	*timelineOut = tli;
+	*segnoOut = (uint64_t) logId * perXLogId + seg;
+}
+
+
+bool
+ws_wal_lsn_to_segno(const char *lsn, uint64_t segSize, uint64_t *segnoOut)
+{
+	uint32_t hi, lo;
+
+	if (sscanf(lsn, "%X/%X", &hi, &lo) != 2) /* IGNORE-BANNED */
+	{
+		return false;
+	}
+
+	uint64_t lsnValue = ((uint64_t) hi << 32) | lo;
+
+	*segnoOut = lsnValue / segSize;
+
+	return true;
+}
+
+
 bool
 wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 					char *endLsn, size_t endLsnSize)
 {
 	uint64_t segSize = ws_route_wal_segment_size(route);
-	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
 	DIR *dir = opendir(route->path);
 
 	if (dir == NULL)
@@ -194,19 +234,11 @@ wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 		return false;
 	}
 
-	char tliHex[9] = { 0 };
-	char logIdHex[9] = { 0 };
-	char segHex[9] = { 0 };
+	uint32_t tli;
+	uint64_t segno;
 
-	memcpy(tliHex, best, 8); /* IGNORE-BANNED */
-	memcpy(logIdHex, best + 8, 8); /* IGNORE-BANNED */
-	memcpy(segHex, best + 16, 8); /* IGNORE-BANNED */
+	ws_wal_segment_prefix_to_position(best, segSize, &tli, &segno);
 
-	uint32_t tli = (uint32_t) strtoul(tliHex, NULL, 16);
-	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
-	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
-
-	uint64_t segno = (uint64_t) logId * perXLogId + seg;
 	uint64_t endOfSegment = (segno + 1) * segSize;
 
 	*timeline = tli;

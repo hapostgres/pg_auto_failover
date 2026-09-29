@@ -21,13 +21,25 @@ use as PostgreSQL's own ``archive_command``::
 
 The connected route's own ``receivewal`` setting decides what each
 invocation does. With ``receivewal = pull`` configured, ``archive-wal``
-only ever runs ``CHECK_FILE``: it exits 0 when the segment already
-matches what the route has, exits 1 otherwise, and never pushes
+ordinarily only ever runs ``CHECK_FILE``: it exits 0 when the segment
+already matches what the route has, exits 1 otherwise, and never pushes
 anything -- PostgreSQL's own retry of ``archive_command`` covers the
 case where the embedded receivewal worker has not yet caught up. With
 no ``receivewal = pull``, ``archive-wal`` only ever runs
 ``ARCHIVE_FILE``, unconditionally pushing the file, with no prior
 ``CHECK_FILE`` round trip.
+
+The one exception on a ``receivewal = pull`` route: ``CHECK_FILE``'s own
+smart-fallback signal. A streaming worker can only ever move forward, so
+a segment it has already streamed *past* without ever producing --
+almost always a timeline switch that left a segment behind on the old
+timeline -- is a genuine hole it can never retroactively fill, not the
+ordinary "hasn't caught up yet" case PostgreSQL's own retry loop already
+handles. When ``CHECK_FILE`` detects this (cheaply, from the receivewal
+worker's own last-observed position, the same one ``pg_walserver ps``
+displays -- no extra directory scan), ``archive-wal`` pushes the file
+directly via ``ARCHIVE_FILE`` right away instead of waiting on a retry
+loop that would otherwise never succeed.
 
 Options
 -------
@@ -72,6 +84,18 @@ has not caught up to yet -- ``CHECK_FILE`` fails, exit 1, and PostgreSQL retries
       pg_wal/0000000100000000000000FF 0000000100000000000000FF \
       --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require
   21:13:25 2589232 ERROR "0000000100000000000000FF" is not yet on "archive" route "mycluster" (missing): waiting for its own receivewal worker to catch up
+
+The same route, run against an older segment that never arrived even
+though the embedded receivewal worker has already streamed well past it
+(a timeline switch left it behind, most commonly) -- ``CHECK_FILE`` says
+so, and ``archive-wal`` pushes it directly instead of waiting on a retry
+that would otherwise never succeed::
+
+  primary$ PGPASSWORD=s3kr3t pg_walserver archive-wal \
+      pg_wal/000000010000000000000002 000000010000000000000002 \
+      --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode disable
+  01:12:16 131 INFO  "000000010000000000000002" is not on "archive" route "mycluster" (missing), and its own embedded receivewal worker has already streamed past it (likely a timeline switch left it behind): pushing it directly via ARCHIVE_FILE instead of waiting
+  01:12:16 131 INFO  Archived "000000010000000000000002" to "archive" route "mycluster"
 
 See Also
 --------

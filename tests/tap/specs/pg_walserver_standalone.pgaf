@@ -1,5 +1,5 @@
 # pg_walserver, on its own, with no archiver/monitor integration at all --
-# except for `pg_walserver register cluster` itself, its own one-shot onboarding
+# except for `pg_walserver cluster register` itself, its own one-shot onboarding
 # wizard (cli_setup.c): create/validate the pg_walserver.ini route, check
 # the upstream role's REPLICATION attribute, and fetch the system
 # identifier. "pg_walserver serve" itself then bootstraps the route's
@@ -81,7 +81,7 @@ setup {
     # pg_receivewal (below) into this exact route directory -- the embedded
     # receivewal worker, on by default now, would otherwise fork a second
     # process racing it for the same segment files.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver register cluster default/0 --pgdata /tmp/ws --path /tmp/ws/default/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register default/0 --pgdata /tmp/ws --path /tmp/ws/default/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
     exec node2 bash -c 'if grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini; then echo "receivewal = pull should not have been written with --no-receivewal"; false; fi'
 
     # capture real WAL off node1 with the stock pg_receivewal (not this

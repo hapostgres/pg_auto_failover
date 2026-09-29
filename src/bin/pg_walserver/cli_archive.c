@@ -32,13 +32,17 @@
 /*
  * check_file_status runs one CHECK_FILE round trip for filename/size/crc32c
  * against conn, filling statusOut (at least 16 bytes) with the server's
- * reply ("missing"/"matches"/"differs"). Returns false (statusOut
+ * reply ("missing"/"matches"/"differs") and fallbackOut with whether the
+ * server recommends pushing via ARCHIVE_FILE right away instead of waiting
+ * -- see cmd_check_file.h's own header comment for exactly what that
+ * means and when the server says "yes". Returns false (both out params
  * untouched) on any connection/protocol failure -- always with an error
  * already logged.
  */
 static bool
 check_file_status(PGconn *conn, const char *filename, uint64_t size,
-				  uint32_t crc, char *statusOut, size_t statusOutSize)
+				  uint32_t crc, char *statusOut, size_t statusOutSize,
+				  bool *fallbackOut)
 {
 	char *quoted = PQescapeLiteral(conn, filename, strlen(filename));
 
@@ -74,6 +78,15 @@ check_file_status(PGconn *conn, const char *filename, uint64_t size,
 	}
 
 	strlcpy(statusOut, PQgetvalue(res, 0, 0), statusOutSize);
+
+	/*
+	 * PQnfields() guards against an older server that only ever sent the
+	 * one "status" column: never treat that as a fallback recommendation,
+	 * just the pre-existing behavior.
+	 */
+	*fallbackOut = PQnfields(res) > 1 &&
+				   strcmp(PQgetvalue(res, 0, 1), "yes") == 0;
+
 	PQclear(res);
 
 	return true;
@@ -266,15 +279,23 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 	}
 
 	bool ok;
+	bool pushedAsFallback = false;
 
 	if (receivewalPull)
 	{
 		/*
 		 * The route has an embedded receivewal worker writing into the same
-		 * directory this push would target: never push here, only ever
-		 * check. PostgreSQL's own archive_command retry loop is the entire
-		 * retry mechanism -- it calls this client again later, cheaply,
-		 * until the receivewal worker catches up and CHECK_FILE reports "matches".
+		 * directory this push would target: ordinarily never push here, only
+		 * ever check -- PostgreSQL's own archive_command retry loop is the
+		 * entire retry mechanism, calling this client again later, cheaply,
+		 * until the receivewal worker catches up and CHECK_FILE reports
+		 * "matches". The one exception is the server's own "fallback"
+		 * recommendation (cmd_check_file.h's own header comment): a hole a
+		 * streaming worker can never retroactively fill (typically a
+		 * timeline switch left filename behind on the old timeline) -- in
+		 * that one case, waiting for "the receivewal worker to catch up"
+		 * would wait forever, so this pushes it directly instead, exactly
+		 * as the non-pull branch below always does.
 		 */
 		uint64_t size = 0;
 		uint32_t crc = 0;
@@ -287,8 +308,10 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 		}
 
 		char status[16] = { 0 };
+		bool fallback = false;
 
-		if (!check_file_status(conn, filename, size, crc, status, sizeof(status)))
+		if (!check_file_status(conn, filename, size, crc, status,
+							   sizeof(status), &fallback))
 		{
 			PQfinish(conn);
 			return false;
@@ -299,6 +322,16 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 			log_info("\"%s\" already matches what \"%s\" has for \"%s\": "
 					 "nothing to push", filename, target->host, target->route);
 			ok = true;
+		}
+		else if (fallback)
+		{
+			log_info("\"%s\" is not on \"%s\" route \"%s\" (%s), and its own "
+					 "embedded receivewal worker has already streamed past "
+					 "it (likely a timeline switch left it behind): pushing "
+					 "it directly via ARCHIVE_FILE instead of waiting",
+					 filename, target->host, target->route, status);
+			ok = push_file(conn, localPath, filename);
+			pushedAsFallback = true;
 		}
 		else
 		{
@@ -326,7 +359,7 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 
 	PQfinish(conn);
 
-	if (ok && !receivewalPull)
+	if (ok && (!receivewalPull || pushedAsFallback))
 	{
 		log_info("Archived \"%s\" to \"%s\" route \"%s\"",
 				 filename, target->host, target->route);

@@ -170,13 +170,23 @@ The commands a connected client can issue on a `Query` ('Q') message are:
   been moved out, see "FETCH_FILE's client" below.
 - `CHECK_FILE '<name>' <size> crc32c:<hex>` (`cmd_check_file.c`) -- another
   of this project's own extensions, a cheap query with no file transfer at
-  all: `RowDescription(status text)` + `DataRow('missing'|'matches'|
-  'differs')` + `CommandComplete`, the same shape `SHOW` already uses. The
-  client (`pg_walserver archive-wal`, see "The archive push side" below)
-  computes the size and CRC32C of its own *local* file and sends both
-  here; the reply says whether that's already what's on disk under this
-  name, without moving a single byte of file content. See "The archive
-  push side" below for the full design.
+  all: `RowDescription(status text, fallback text)` + `DataRow('missing'|
+  'matches'|'differs', 'yes'|'no')` + `CommandComplete`, the same shape
+  `SHOW` already uses. The client (`pg_walserver archive-wal`, see "The
+  archive push side" below) computes the size and CRC32C of its own
+  *local* file and sends both here; the reply says whether that's already
+  what's on disk under this name, without moving a single byte of file
+  content. `fallback` is the smart-fallback signal: "yes" when this
+  route's own embedded receivewal worker has already streamed *past*
+  `<name>` (its own last-observed position, "receivewal-progress", is at
+  a later segment or a later timeline) while `<name>` itself never
+  arrived -- a hole streaming can never retroactively fill, typically a
+  timeline switch left a segment behind on the old timeline -- telling
+  `archive-wal` to push it directly via `ARCHIVE_FILE` right away instead
+  of waiting on a retry loop that would otherwise never succeed. "no"
+  otherwise (including whenever there isn't a live progress reading to
+  compare against, the safe default). See "The archive push side" below
+  for the full design.
 - `ARCHIVE_FILE '<name>'` (`cmd_archive_file.c`) -- a `CopyIn` (client to
   server): the actual push, used only when `CHECK_FILE` said `missing` or
   `differs`. The server never trusts a client's own `CHECK_FILE` checksum
@@ -1066,11 +1076,25 @@ A route with `receivewal = pull` configured has its own embedded, supervised
 `pg_receivewal` (see "The embedded receivewal worker" below) writing straight
 into that route's own directory. A push from `archive-wal` racing that
 receivewal worker's own write for the same final filename, with no coordination
-between the two, is unsafe. `archive-wal` avoids the race by never pushing
-at all on such a route: it runs `CHECK_FILE` only, ever, and leaves
+between the two, is unsafe. `archive-wal` avoids the race by ordinarily never
+pushing at all on such a route: it runs `CHECK_FILE` only, ever, and leaves
 delivering the segment entirely to the receivewal worker. A route with no
 `receivewal = pull` has no such writer to race, so `archive-wal` pushes via
 `ARCHIVE_FILE` only, ever, with no `CHECK_FILE` round trip first.
+
+The one exception on a `receivewal = pull` route is `CHECK_FILE`'s own
+smart-fallback signal (`cmd_check_file.c`): a streaming worker can only
+ever move forward, so a segment it has already streamed *past* without
+ever producing -- almost always a timeline switch that left a segment
+behind on the old timeline -- is a genuine hole it can never
+retroactively fill, not the ordinary "hasn't caught up yet" case
+PostgreSQL's own retry loop already handles. `CHECK_FILE` detects this
+cheaply, from the receivewal worker's own last-observed position
+(`<path>/receivewal-progress`, already written for `pg_walserver ps`/
+`status`/`list clusters` to display -- no extra directory scan added to
+this hot path), and tells `archive-wal` to push the file directly via
+`ARCHIVE_FILE` in that one case, rather than waiting on a retry loop that
+would otherwise never succeed and leave WAL piling up on the primary.
 
 `pg_walserver archive-wal <path-to-file> <filename> --cluster <name> --host
 <host> [--port <port>] [--user <name>] [--sslmode <mode>]`
@@ -1082,11 +1106,16 @@ which would silently go stale the moment an operator changes the route's
 `receivewal` setting without also updating every `archive_command` line
 referencing it:
 
-- **`receivewal = pull`**: `CHECK_FILE` only. `matches` -> exit 0, nothing to
-  push. `missing`/`differs` -> exit 1 with a clean stderr message, no
-  sleep, no retry loop, no `ARCHIVE_FILE` call at all -- PostgreSQL's own
-  `archive_command` retry loop is the entire retry mechanism, calling
-  `archive-wal` again later, cheaply, until the receivewal worker catches up.
+- **`receivewal = pull`**: `CHECK_FILE` only, ordinarily. `matches` -> exit 0,
+  nothing to push. `missing`/`differs` with `fallback = no` -> exit 1 with a
+  clean stderr message, no sleep, no retry loop, no `ARCHIVE_FILE` call at
+  all -- PostgreSQL's own `archive_command` retry loop is the entire retry
+  mechanism, calling `archive-wal` again later, cheaply, until the
+  receivewal worker catches up. `missing`/`differs` with `fallback = yes`
+  (the receivewal worker has already streamed past this exact file, a hole
+  it can never retroactively fill) -> pushes it directly via `ARCHIVE_FILE`
+  right away instead, exactly like the no-`receivewal` case below, then
+  exits 0/nonzero on that push's own result.
 - **no `receivewal = pull`** (absent or `receivewal = none`): `ARCHIVE_FILE`
   only, unconditionally pushing the full file every invocation, computing
   its local size and CRC32C (`ws_file_crc32c()`, `ws_util.c`, backed by the

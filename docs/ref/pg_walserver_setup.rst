@@ -24,10 +24,10 @@ given directly to ``serve`` still always wins over whatever ``setup``
 persisted here.
 
 ``setup`` is deliberately not about any one archived cluster: that is
-:ref:`pg_walserver_register`/:ref:`pg_walserver_drop`/
-:ref:`pg_walserver_set_upstream`'s job now, split out of what used to
-be this same command. ``setup`` configures the server; those configure
-what it serves.
+:ref:`pg_walserver_cluster`'s job now (``register``/``drop``/``list``/
+``set-upstream``), split out of what used to be this same command.
+``setup`` configures the server; ``cluster`` configures what it
+serves.
 
 Options
 -------
@@ -92,8 +92,6 @@ See Also
 --------
 
 * :ref:`pg_walserver`
-* :ref:`pg_walserver_register`
-* :ref:`pg_walserver_drop`
-* :ref:`pg_walserver_set_upstream`
+* :ref:`pg_walserver_cluster`
 * :ref:`pg_walserver_serve`
 * :ref:`pg_walserver_create_cert`

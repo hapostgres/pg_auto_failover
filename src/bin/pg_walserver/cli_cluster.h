@@ -1,8 +1,8 @@
 /*
  * src/bin/pg_walserver/cli_cluster.h
- *   `pg_walserver register cluster <name> ...`, `pg_walserver drop cluster
- *   <name> ...`, `pg_walserver register list ...`, `pg_walserver set-
- *   upstream cluster <name> ...`: the wizard that creates, removes, lists,
+ *   `pg_walserver cluster register <name> ...`, `pg_walserver cluster drop
+ *   <name> ...`, `pg_walserver cluster list ...`, `pg_walserver cluster
+ *   set-upstream <name> ...`: the wizard that creates, removes, lists,
  *   and re-points the clusters (routes) one pg_walserver instance archives
  *   -- see cli_cluster.c for the full sequence each verb runs. Split out
  *   of what used to be "pg_walserver setup" (now cli_setup.h, narrowed to
@@ -10,7 +10,7 @@
  *   "setup" configures the server, these configure what it serves.
  *
  *   The cluster's own name is always given positionally (the first
- *   non-option argument), never a "--cluster" flag -- "register cluster
+ *   non-option argument), never a "--cluster" flag -- "cluster register
  *   mycluster ..." reads the way an operator says it out loud, and this
  *   project already gives a positional name to other resources it names
  *   elsewhere (`pg_walserver restore-wal <filename> <destination-path>`).
@@ -70,7 +70,7 @@ typedef struct WsClusterRegisterOptions
 } WsClusterRegisterOptions;
 
 /*
- * ws_cluster_register_run runs the whole "register cluster" sequence
+ * ws_cluster_register_run runs the whole "cluster register" sequence
  * documented in cli_cluster.c's own header comment: validate/write the
  * pg_walserver.ini section, check the role's REPLICATION attribute, and
  * fetch the system identifier. It never takes a base backup itself:

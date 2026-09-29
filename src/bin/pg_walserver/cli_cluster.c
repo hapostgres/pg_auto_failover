@@ -1,8 +1,8 @@
 /*
  * src/bin/pg_walserver/cli_cluster.c
- *   See cli_cluster.h. "pg_walserver register cluster <name>", "pg_
- *   walserver drop cluster <name>", "pg_walserver register list", "pg_
- *   walserver set-upstream cluster <name>": registering, dropping,
+ *   See cli_cluster.h. "pg_walserver cluster register <name>", "pg_
+ *   walserver cluster drop <name>", "pg_walserver cluster list", "pg_
+ *   walserver cluster set-upstream <name>": registering, dropping,
  *   listing, and re-pointing the clusters (routes) one pg_walserver
  *   instance archives -- split out of what used to be "pg_walserver
  *   setup" (now cli_setup.c, narrowed to configuring pg_walserver itself:
@@ -10,7 +10,7 @@
  *   cluster). "setup" configures the server; these configure what it
  *   serves.
  *
- *   "register cluster <name>", in order, stopping at the first failure:
+ *   "cluster register <name>", in order, stopping at the first failure:
  *
  *     1. resolve path/upstream (cli_upstream.c: --path/--pguri/--host/
  *        --port/--user, or <name> looked up in the config file when it
@@ -23,13 +23,13 @@
  *        *default* now (an explicit "receivewal = pull" is written into the
  *        route's own section, routes.h, unless --no-receivewal / --receivewal
  *        none says otherwise), opting the route into it the next time
- *        "serve" starts -- "register cluster" itself never starts or
+ *        "serve" starts -- "cluster register" itself never starts or
  *        touches that receivewal worker, it only records the intent.
  *        Writing the property explicitly (rather than changing what an
  *        *absent* "receivewal" property under a hand-edited config file
  *        means, which stays "off", unchanged in routes.c/routes.h) is a
  *        deliberate choice: anyone reading the config file by hand sees
- *        exactly what "register cluster" decided, with no implicit-
+ *        exactly what "cluster register" decided, with no implicit-
  *        default surprise to remember;
  *     3. fetch the system identifier (cli_fetch_systemid.c) -- this
  *        connection (pgctl_identify_system(), a real replication-mode
@@ -52,7 +52,7 @@
  *     5. reload an already-running "pg_walserver serve" for this same
  *        --pgdata, if one is running (cli_root.c's own cli_cluster_
  *        reload_running_server()) -- the same read_pidfile()/SIGHUP shape
- *        "pg_walserver reload" itself uses. "register cluster" never
+ *        "pg_walserver reload" itself uses. "cluster register" never
  *        takes a base backup itself: a running server picks up the
  *        new/changed route the moment it is reloaded, and bootstraps a
  *        first base backup for it automatically if it doesn't have one
@@ -85,7 +85,7 @@
 /*
  * write_route_section creates or validates the [routeKey] section of the
  * config file: a brand new key is appended; an existing one must already
- * have the same path (an operator re-running "register cluster" must be
+ * have the same path (an operator re-running "cluster register" must be
  * a safe no-op), or --force is required to change it -- the same "never
  * silently replace what's already there" principle as cli_fetch_
  * systemid.c's own systemid check.
@@ -132,7 +132,7 @@ write_route_section(const char *configPath, const char *routeKey,
 					 "by default now, but was not the last time \"register "
 					 "cluster\" wrote this route, or --no-receivewal/--receivewal "
 					 "none was passed then) -- edit \"%s\" by hand to add it, "
-					 "\"register cluster\" never changes an already-existing "
+					 "\"cluster register\" never changes an already-existing "
 					 "route's properties beyond path", routeKey, configPath,
 					 configPath);
 		}
@@ -298,14 +298,14 @@ ws_cluster_register_run(const WsClusterRegisterOptions *options)
 {
 	if (options->cluster[0] == '\0')
 	{
-		log_error("register cluster requires a cluster name "
-				  "(\"pg_walserver register cluster <name> ...\")");
+		log_error("cluster register requires a cluster name "
+				  "(\"pg_walserver cluster register <name> ...\")");
 		return false;
 	}
 
 	if (options->pgdata[0] == '\0')
 	{
-		log_error("register cluster requires --pgdata (this instance's "
+		log_error("cluster register requires --pgdata (this instance's "
 				  "own data root)");
 		return false;
 	}
@@ -384,7 +384,7 @@ ws_cluster_register_run(const WsClusterRegisterOptions *options)
 		return false;
 	}
 
-	log_info("register cluster complete: route \"%s\" is ready (no base "
+	log_info("cluster register complete: route \"%s\" is ready (no base "
 			 "backup taken here -- \"pg_walserver serve\" bootstraps the "
 			 "route's first base backup automatically, once, the next "
 			 "time it starts or reloads this route; run \"pg_walserver "
@@ -412,14 +412,14 @@ ws_cluster_drop_run(const char *pgdata, const char *configFile,
 {
 	if (routeKey == NULL || routeKey[0] == '\0')
 	{
-		log_error("drop cluster requires a cluster name "
-				  "(\"pg_walserver drop cluster <name> ...\")");
+		log_error("cluster drop requires a cluster name "
+				  "(\"pg_walserver cluster drop <name> ...\")");
 		return false;
 	}
 
 	if (pgdata == NULL || pgdata[0] == '\0')
 	{
-		log_error("drop cluster requires --pgdata (this instance's own "
+		log_error("cluster drop requires --pgdata (this instance's own "
 				  "data root)");
 		return false;
 	}
@@ -516,7 +516,7 @@ ws_cluster_list_run(const char *pgdata, const char *configFile)
 	if (routeCount == 0)
 	{
 		printf("No clusters registered yet under \"%s\" -- see " /* IGNORE-BANNED */
-			   "\"pg_walserver register cluster\".\n", configPath);
+			   "\"pg_walserver cluster register\".\n", configPath);
 		routes_free(routes);
 		return true;
 	}
@@ -549,7 +549,7 @@ ws_cluster_list_run(const char *pgdata, const char *configFile)
  * move), without dropping and re-registering it. An already-running
  * "serve" for the same --pgdata is reloaded immediately afterward
  * (cli_root.c's own cli_cluster_reload_running_server(), the exact same
- * shape "register cluster" and "reload" itself already use): reload's
+ * shape "cluster register" and "reload" itself already use): reload's
  * own reconciliation (receivewal.c's own ws_receivewal_reload()) already
  * detects an "upstream" change on its own and restarts this route's
  * embedded receivewal worker against the new one -- no separate "move the
@@ -569,21 +569,21 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
 {
 	if (routeKey == NULL || routeKey[0] == '\0')
 	{
-		log_error("set-upstream cluster requires a cluster name "
-				  "(\"pg_walserver set-upstream cluster <name> ...\")");
+		log_error("cluster set-upstream requires a cluster name "
+				  "(\"pg_walserver cluster set-upstream <name> ...\")");
 		return false;
 	}
 
 	if (pgdata == NULL || pgdata[0] == '\0')
 	{
-		log_error("set-upstream cluster requires --pgdata (this "
+		log_error("cluster set-upstream requires --pgdata (this "
 				  "instance's own data root)");
 		return false;
 	}
 
 	if (newUpstream == NULL || newUpstream[0] == '\0')
 	{
-		log_error("set-upstream cluster requires --pguri");
+		log_error("cluster set-upstream requires --pguri");
 		return false;
 	}
 
