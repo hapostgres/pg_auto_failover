@@ -10,9 +10,10 @@ Synopsis
 
 ::
 
-  pg_walserver list clusters --pgdata <path> [--cluster <name>]
+  pg_walserver list clusters --pgdata <path> [--config-file <path>]
+      [--cluster <name>]
 
-Lists every route configured in ``<pgdata>/pg_walserver.ini``: whether it
+Lists every route configured in the config file: whether it
 has a base backup, its ``receivewal`` setting, whether its embedded
 receivewal worker is currently running, and the WAL range it currently
 covers (the start LSN from its latest base backup's own
@@ -24,7 +25,12 @@ Options
 
 --pgdata
 
-  Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
+  This instance's own data root. Defaults to ``PGDATA``.
+
+--config-file
+
+  Where the config file itself lives (defaults to
+  ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).
 
 --cluster
 
@@ -44,8 +50,8 @@ Examples
   bbdemo               yes      none       n/a      0/2A000028             -
 
 Having no embedded receivewal worker to report on, running or
-otherwise, is why ``another`` shows ``WORKER n/a``: it was set up with
-``--no-receivewal``, and its WAL arrives only through
+otherwise, is why ``another`` shows ``WORKER n/a``: it was registered
+with ``--no-receivewal``, and its WAL arrives only through
 ``archive-wal``/``ARCHIVE_FILE`` pushes. For a route with a running
 worker, ``WAL END`` is that worker's own live, currently-observed LSN
 (see :ref:`pg_walserver_ps`) when one is available, falling back to a

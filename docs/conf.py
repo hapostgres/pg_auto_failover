@@ -153,7 +153,7 @@ latex_documents = [
         master_doc,
         "pg_auto_failover.tex",
         r"pg\_auto\_failover Documentation",
-        "Microsoft",
+        author,
         "manual",
     ),
 ]

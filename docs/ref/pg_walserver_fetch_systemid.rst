@@ -10,7 +10,7 @@ Synopsis
 
 ::
 
-  pg_walserver fetch-systemid --pgdata <path> --cluster <name>
+  pg_walserver fetch-systemid --pgdata <path> [--config-file <path>] --cluster <name>
       [--path <dir>] [--upstream <conninfo> | --host <host> [--port <port>] [--user <name>]]
       [--force]
 
@@ -20,20 +20,25 @@ current major version, and writes them to
 the latter is what later picks the right ``pg_basebackup`` client for
 this route, see :ref:`pg_walserver_basebackup`. Refuses to overwrite
 an already-recorded, different identifier unless ``--force``.
-``setup`` calls this itself; running it directly is for checking or
-repairing a route's own recorded identifier without touching anything
-else about it.
+``pg_walserver cluster register`` calls this itself; running it
+directly is for checking or repairing a route's own recorded
+identifier without touching anything else about it.
 
 Options
 -------
 
 --pgdata
 
-  Where ``<pgdata>/pg_walserver.ini`` lives. Defaults to ``PGDATA``.
+  This instance's own data root. Defaults to ``PGDATA``.
+
+--config-file
+
+  Where the config file itself lives (defaults to
+  ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).
 
 --cluster
 
-  The cluster name to fetch for, looked up in ``pg_walserver.ini``.
+  The cluster name to fetch for, looked up in the config file.
 
 --path
 
