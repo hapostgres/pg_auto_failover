@@ -19,6 +19,7 @@
 #include "port/pg_bswap.h"
 #include "pqexpbuffer.h"
 
+#include "cmd_replication_slot.h"
 #include "cmd_start_replication.h"
 #include "file_utils.h"
 #include "framing.h"
@@ -30,7 +31,38 @@
 #define WS_KEEPALIVE_INTERVAL_SEC 5
 #define WS_POLL_INTERVAL_USEC (200 * 1000)
 
+/*
+ * How often a slot's own "restart_lsn" is actually rewritten to disk as
+ * StandbyStatusUpdate feedback keeps arriving -- a real standby/
+ * pg_receivewal sends one every few hundred milliseconds to a few
+ * seconds, far more often than a small marker file needs to be
+ * rewritten. Matches WS_KEEPALIVE_INTERVAL_SEC's own cadence: no
+ * particular reason they must be equal, just one less magic number to
+ * track.
+ */
+#define WS_SLOT_FEEDBACK_PERSIST_INTERVAL_SEC 5
+
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+
+
+/*
+ * WsSlotFeedbackState tracks, across one whole START_REPLICATION session,
+ * the highest "flush" position a client's own StandbyStatusUpdate
+ * messages have reported, and when that was last actually persisted to
+ * the named slot's own marker file (cmd_replication_slot.h's
+ * ws_replication_slot_update_restart_lsn()). route/slotName are set once
+ * at session start; active is false for the (still by far the common)
+ * case of no SLOT clause at all, in which case every function below is a
+ * no-op.
+ */
+typedef struct WsSlotFeedbackState
+{
+	bool active;
+	const WsRoute *route;
+	char slotName[NAMEDATALEN];
+	uint64_t restartLsn;      /* highest known-good value, in memory */
+	time_t lastPersisted;
+} WsSlotFeedbackState;
 
 
 static void
@@ -39,6 +71,93 @@ append_int64(PQExpBuffer buf, int64_t v)
 	uint64_t n = pg_hton64((uint64_t) v);
 
 	appendBinaryPQExpBuffer(buf, (const char *) &n, 8);
+}
+
+
+/*
+ * slot_feedback_persist writes slot's own current in-memory restartLsn to
+ * its marker file right now, unconditionally (the throttling itself is
+ * the caller's job -- see slot_feedback_apply()'s own comment, and this
+ * function's own use at the end of cmd_start_replication() to flush one
+ * final time on disconnect). A failed write is only ever logged, never
+ * fatal to the stream itself: the marker file simply keeps whatever
+ * value it already had, a strictly more conservative (never less
+ * protective) outcome than losing the advance silently.
+ */
+static void
+slot_feedback_persist(WsSlotFeedbackState *slot, time_t now)
+{
+	if (!slot->active)
+	{
+		return;
+	}
+
+	char lsnStr[32];
+
+	sformat(lsnStr, sizeof(lsnStr), "%X/%08X",
+			(uint32_t) (slot->restartLsn >> 32),
+			(uint32_t) slot->restartLsn);
+
+	if (!ws_replication_slot_update_restart_lsn(slot->route, slot->slotName,
+												lsnStr))
+	{
+		log_warn("START_REPLICATION: failed to update slot \"%s\"'s own "
+				 "restart_lsn to %s", slot->slotName, lsnStr);
+	}
+
+	slot->lastPersisted = now;
+}
+
+
+/*
+ * slot_feedback_apply decodes payload as a StandbyStatusUpdate ('r')
+ * message -- Byte1('r') Int64 write Int64 flush Int64 apply Int64
+ * sendTime Byte1 replyRequested, the same wire shape a real walreceiver
+ * sends periodically on its own -- and, when its own "flush" field is
+ * genuinely an advance on what is already known, updates slot's own
+ * in-memory restartLsn and, no more often than every
+ * WS_SLOT_FEEDBACK_PERSIST_INTERVAL_SEC, persists it to the slot's own
+ * marker file. restart_lsn tracks "flush", never "write" or "apply": the
+ * same field a real walsender's own PhysicalConfirmReceivedLocation()
+ * uses for exactly this purpose -- "flush" is what the standby has
+ * durably fsync()'d, the point before which WAL is genuinely no longer
+ * needed to protect it against its own crash. Silently does nothing for
+ * any other message shape (an 'h' HotStandbyFeedback message, or a
+ * malformed/short 'r' one) -- feedback is advisory input from a client
+ * this project doesn't otherwise trust, never something a protocol
+ * error should be raised over.
+ */
+static void
+slot_feedback_apply(WsSlotFeedbackState *slot, const char *payload,
+					int32_t payloadLen)
+{
+	if (!slot->active || payloadLen < 34 || payload[0] != 'r')
+	{
+		return;
+	}
+
+	uint64_t flushNet;
+
+	memcpy(&flushNet, payload + 9, sizeof(flushNet)); /* IGNORE-BANNED */
+
+	uint64_t flush = pg_ntoh64(flushNet);
+
+	if (flush <= slot->restartLsn)
+	{
+		/* never regress -- an out-of-order or stale report is simply
+		 * ignored, the same "restart_lsn only ever moves forward"
+		 * invariant a real physical slot maintains */
+		return;
+	}
+
+	slot->restartLsn = flush;
+
+	time_t now = time(NULL);
+
+	if (now - slot->lastPersisted >= WS_SLOT_FEEDBACK_PERSIST_INTERVAL_SEC)
+	{
+		slot_feedback_persist(slot, now);
+	}
 }
 
 
@@ -94,15 +213,16 @@ send_keepalive(int sock, uint64_t walEnd)
 
 /*
  * wait_for_more_data_or_client waits up to WS_POLL_INTERVAL_USEC for
- * either more WAL bytes to become available or a message from the client,
- * draining (and ignoring the content of) any standby status update the
- * client sends meanwhile -- this project has no cascading/retention logic
- * that needs to react to it yet. Returns false when the client has
- * disconnected/terminated or we've been asked to stop, in which case the
- * caller should end the stream.
+ * either more WAL bytes to become available or a message from the
+ * client. A 'd' CopyData message is handed to slot_feedback_apply() --
+ * a standby status update advances slot's own restart_lsn (see its own
+ * comment); anything else is simply not a shape that function acts on.
+ * Returns false when the client has disconnected/terminated or we've
+ * been asked to stop, in which case the caller should end the stream.
  */
 static bool
-wait_for_more_data_or_client(int sock, uint64_t currentLsn, time_t *lastKeepalive)
+wait_for_more_data_or_client(int sock, uint64_t currentLsn,
+							 time_t *lastKeepalive, WsSlotFeedbackState *slot)
 {
 	if (asked_to_stop || asked_to_stop_fast)
 	{
@@ -136,15 +256,17 @@ wait_for_more_data_or_client(int sock, uint64_t currentLsn, time_t *lastKeepaliv
 			return false;   /* client disconnected */
 		}
 
+		if (type == 'd')   /* CopyData: a standby status update, maybe */
+		{
+			slot_feedback_apply(slot, payload, payloadLen);
+		}
+
 		free(payload);
 
 		if (type == 'X' || type == 'c')   /* Terminate or CopyDone */
 		{
 			return false;
 		}
-
-		/* 'd' CopyData: a standby status update / hot-standby feedback we
-		 * don't act on yet -- already consumed above, nothing more to do */
 	}
 
 	time_t now = time(NULL);
@@ -312,10 +434,40 @@ cmd_start_replication(int sock, const WsRoute *route,
 		return;
 	}
 
-	/* the SLOT clause is accepted by the grammar but not acted on here --
-	 * see this file's own header comment on why no real slot-based
-	 * retention exists yet */
-	(void) slotName;
+	WsSlotFeedbackState slotState = { 0 };
+
+	if (slotName != NULL && slotName[0] != '\0')
+	{
+		/* SLOT of a slot that does not exist is refused, the same
+		 * requirement a real walsender enforces (never a silent no-op) --
+		 * this must happen before ws_send_copy_both_response() below,
+		 * same as the "no WAL cache directory" check above: once CopyBoth
+		 * starts, an error can no longer be a plain ErrorResponse */
+		if (!ws_replication_slot_exists(route, slotName))
+		{
+			ws_send_error_response(sock, "42704",
+								   "replication slot does not exist");
+			return;
+		}
+
+		slotState.active = true;
+		slotState.route = route;
+		strlcpy(slotState.slotName, slotName, sizeof(slotState.slotName));
+		slotState.lastPersisted = time(NULL);
+
+		char restartLsnStr[32] = { 0 };
+
+		if (ws_replication_slot_read_restart_lsn(route, slotName, restartLsnStr,
+												 sizeof(restartLsnStr)))
+		{
+			uint32_t hi, lo;
+
+			if (sscanf(restartLsnStr, "%X/%X", &hi, &lo) == 2) /* IGNORE-BANNED */
+			{
+				slotState.restartLsn = ((uint64_t) hi << 32) | lo;
+			}
+		}
+	}
 
 	if (!haveTimeline)
 	{
@@ -402,7 +554,8 @@ cmd_start_replication(int sock, const WsRoute *route,
 			}
 
 			/* nothing captured for this segment yet -- wait for it */
-			if (!wait_for_more_data_or_client(sock, currentLsn, &lastKeepalive))
+			if (!wait_for_more_data_or_client(sock, currentLsn, &lastKeepalive,
+											  &slotState))
 			{
 				break;
 			}
@@ -416,7 +569,8 @@ cmd_start_replication(int sock, const WsRoute *route,
 		{
 			log_warn("Failed to open \"%s\": %m (will retry)", readPath);
 
-			if (!wait_for_more_data_or_client(sock, currentLsn, &lastKeepalive))
+			if (!wait_for_more_data_or_client(sock, currentLsn, &lastKeepalive,
+											  &slotState))
 			{
 				break;
 			}
@@ -455,7 +609,8 @@ cmd_start_replication(int sock, const WsRoute *route,
 				continue;
 			}
 
-			if (!wait_for_more_data_or_client(sock, currentLsn, &lastKeepalive))
+			if (!wait_for_more_data_or_client(sock, currentLsn, &lastKeepalive,
+											  &slotState))
 			{
 				break;
 			}
@@ -477,6 +632,16 @@ cmd_start_replication(int sock, const WsRoute *route,
 			offset = 0;
 		}
 	}
+
+	/*
+	 * One final, unthrottled flush of whatever feedback arrived since the
+	 * last periodic write: a client that cleanly ends its own session
+	 * right after its last StandbyStatusUpdate (e.g. pg_basebackup's
+	 * --wal-method=stream background receiver, reaching its target LSN
+	 * and disconnecting) would otherwise lose up to
+	 * WS_SLOT_FEEDBACK_PERSIST_INTERVAL_SEC seconds of real progress.
+	 */
+	slot_feedback_persist(&slotState, time(NULL));
 
 	(void) ws_send_copy_done(sock);
 

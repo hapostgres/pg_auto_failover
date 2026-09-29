@@ -45,6 +45,37 @@ retention math itself) for an operator who has independently confirmed
 proceeding is safe -- a default unattended cron job should never pass
 it blindly.
 
+Replication slots
+------------------
+
+A still-existing replication slot (:ref:`pg_walserver`'s own
+``CREATE_REPLICATION_SLOT``) is an unconditional floor on top of
+``--keep-count``/``--keep-age``: WAL a slot's own ``restart_lsn`` still
+needs is never removed, no matter how far back that pushes the
+retention cutoff, and there is no flag here to override it -- the same
+way a real PostgreSQL primary never lets its own WAL retention outrun
+a still-connected replica's slot. Unlike a real primary, where a
+forgotten slot silently grows ``pg_wal`` until the disk fills (with no
+warning short of ``max_slot_wal_keep_size``, when configured), a slot
+that is the actual reason less WAL was removed than ``--keep-count``/
+``--keep-age`` alone would have allowed is logged as a ``WARN`` on
+*every* ``archive-cleanup`` run, naming the slot and its own
+``restart_lsn`` -- an operator running this on a schedule cannot miss
+it. Drop the slot (``DROP_REPLICATION_SLOT``), or let its own consumer
+catch back up, to allow that WAL to be removed.
+
+::
+
+  archive$ pg_walserver archive-cleanup --path /var/lib/archiver/mycluster \
+      --keep-count 1 --dry-run
+  WARN  archive-cleanup: replication slot "stale_slot" (restart_lsn
+        0/12000000) needs WAL from "000000000000000000000012" onward,
+        older than --keep-count/--keep-age alone would have kept --
+        retaining it too; drop the slot (or let it catch up) to allow
+        this WAL to be removed
+  INFO  archive-cleanup: --keep-count 1 -- retaining WAL from
+        "000000000000000000000012" onward
+
 :ref:`pg_walserver_basebackup` takes the exact same ``--keep-count``/
 ``--keep-age``/``--dry-run``/``--force`` flags, and runs this same
 retention pass immediately after taking a fresh backup -- reusing this

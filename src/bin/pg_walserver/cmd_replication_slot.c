@@ -100,6 +100,179 @@ slot_marker_path(const WsRoute *route, const char *slotName, char *dest, size_t 
 }
 
 
+/*
+ * read_restart_lsn_file reads path's own "restart_lsn=<lsn>\n" line into
+ * lsnOut -- the parsing cmd_read_replication_slot() and every exported
+ * accessor below share, factored out to one place.
+ */
+static bool
+read_restart_lsn_file(const char *path, char *lsnOut, size_t lsnOutSize)
+{
+	char *contents = NULL;
+	long fileSize = 0;
+
+	if (!read_file_if_exists(path, &contents, &fileSize) || contents == NULL)
+	{
+		return false;
+	}
+
+	bool found = false;
+	const char *prefix = "restart_lsn=";
+	char *line = strstr(contents, prefix);
+
+	if (line != NULL)
+	{
+		line += strlen(prefix);
+
+		char *nl = strchr(line, '\n');
+
+		if (nl != NULL)
+		{
+			*nl = '\0';
+		}
+
+		strlcpy(lsnOut, line, lsnOutSize);
+		found = true;
+	}
+
+	free(contents);
+
+	return found;
+}
+
+
+bool
+ws_replication_slot_exists(const WsRoute *route, const char *slotName)
+{
+	if (route == NULL || route->path[0] == '\0' || !slot_name_is_safe(slotName))
+	{
+		return false;
+	}
+
+	char path[MAXPGPATH];
+
+	slot_marker_path(route, slotName, path, sizeof(path));
+
+	return file_exists(path);
+}
+
+
+bool
+ws_replication_slot_read_restart_lsn(const WsRoute *route, const char *slotName,
+									 char *lsnOut, size_t lsnOutSize)
+{
+	if (route == NULL || route->path[0] == '\0' || !slot_name_is_safe(slotName))
+	{
+		return false;
+	}
+
+	char path[MAXPGPATH];
+
+	slot_marker_path(route, slotName, path, sizeof(path));
+
+	return read_restart_lsn_file(path, lsnOut, lsnOutSize);
+}
+
+
+bool
+ws_replication_slot_update_restart_lsn(const WsRoute *route, const char *slotName,
+									   const char *lsn)
+{
+	if (route == NULL || route->path[0] == '\0' || !slot_name_is_safe(slotName))
+	{
+		return false;
+	}
+
+	char path[MAXPGPATH];
+
+	slot_marker_path(route, slotName, path, sizeof(path));
+
+	/* never create a slot as a side effect of streaming -- only an
+	 * already-existing slot's own restart_lsn can be advanced */
+	if (!file_exists(path))
+	{
+		return false;
+	}
+
+	char contents[128];
+
+	sformat(contents, sizeof(contents), "restart_lsn=%s\n", lsn);
+
+	return write_file_atomic(contents, strlen(contents), path);
+}
+
+
+bool
+ws_replication_slot_oldest_restart_lsn(const WsRoute *route, uint64_t segSize,
+									   char *slotNameOut, size_t slotNameOutSize,
+									   char *lsnOut, size_t lsnOutSize)
+{
+	if (route == NULL || route->path[0] == '\0')
+	{
+		return false;
+	}
+
+	DIR *dir = opendir(route->path);
+
+	if (dir == NULL)
+	{
+		return false;
+	}
+
+	bool found = false;
+	uint64_t oldestSegno = 0;
+	char oldestLsn[32] = { 0 };
+	char oldestName[NAMEDATALEN] = { 0 };
+
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		if (!entry_is_slot(entry->d_name))
+		{
+			continue;
+		}
+
+		char path[MAXPGPATH];
+
+		sformat(path, sizeof(path), "%s/%s", route->path, entry->d_name);
+
+		char lsn[32] = { 0 };
+
+		if (!read_restart_lsn_file(path, lsn, sizeof(lsn)))
+		{
+			continue;
+		}
+
+		uint64_t segno;
+
+		if (!ws_wal_lsn_to_segno(lsn, segSize, &segno))
+		{
+			continue;
+		}
+
+		if (!found || segno < oldestSegno)
+		{
+			found = true;
+			oldestSegno = segno;
+			strlcpy(oldestLsn, lsn, sizeof(oldestLsn));
+			strlcpy(oldestName, entry->d_name + strlen(WS_SLOT_PREFIX),
+					sizeof(oldestName));
+		}
+	}
+
+	closedir(dir);
+
+	if (found)
+	{
+		strlcpy(slotNameOut, oldestName, slotNameOutSize);
+		strlcpy(lsnOut, oldestLsn, lsnOutSize);
+	}
+
+	return found;
+}
+
+
 void
 cmd_create_replication_slot(int sock, const WsRoute *route,
 							const char *slotName, bool temporary, bool isLogical)
@@ -211,16 +384,13 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *slotName)
 
 	slot_marker_path(route, slotName, path, sizeof(path));
 
-	char *contents = NULL;
-	long fileSize = 0;
-
 	WsColumn columns[] = {
 		{ "slot_type", WS_TEXTOID, -1 },
 		{ "restart_lsn", WS_TEXTOID, -1 },
 		{ "restart_tli", WS_INT8OID, 8 },
 	};
 
-	if (!read_file_if_exists(path, &contents, &fileSize) || contents == NULL)
+	if (!file_exists(path))
 	{
 		/* matches real Postgres: slot doesn't exist -> one all-NULL row,
 		 * not an ErrorResponse -- the client checks PQgetisnull() itself */
@@ -235,25 +405,13 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *slotName)
 		return;
 	}
 
+	/* the file exists: report it even if its own "restart_lsn=" line
+	 * could somehow not be parsed (never happens in practice -- nothing
+	 * but this file's own code ever writes a slot marker -- but a
+	 * genuinely malformed file is still a real slot, not a missing one) */
 	char restartLsn[32] = "0/0";
-	const char *prefix = "restart_lsn=";
-	char *line = strstr(contents, prefix);
 
-	if (line != NULL)
-	{
-		line += strlen(prefix);
-
-		char *nl = strchr(line, '\n');
-
-		if (nl != NULL)
-		{
-			*nl = '\0';
-		}
-
-		strlcpy(restartLsn, line, sizeof(restartLsn));
-	}
-
-	free(contents);
+	(void) read_restart_lsn_file(path, restartLsn, sizeof(restartLsn));
 
 	uint32_t timeline = 1;
 	char discardLsn[32] = { 0 };
