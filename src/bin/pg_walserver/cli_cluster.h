@@ -81,29 +81,45 @@ typedef struct WsClusterRegisterOptions
 bool ws_cluster_register_run(const WsClusterRegisterOptions *options);
 
 /*
- * ws_cluster_drop_run removes routeKey's own registration from the config
- * file config_file_path() resolves for pgdata/configFile; with purge,
- * also removes its own on-disk data -- see cli_cluster.c's own comment.
- * Returns true on success, false with an error already logged otherwise.
+ * ws_cluster_drop_run, without purge, marks routeKey's own registration
+ * disabled in the config file config_file_path() resolves for pgdata/
+ * configFile, rather than removing it -- its own on-disk data is left in
+ * place and its "path" stays on record for a later --purge to find; with
+ * purge, removes the registration outright and its own on-disk data too
+ * -- see cli_cluster.c's own comment for the full rationale. Returns true
+ * on success, false with an error already logged otherwise.
  */
 bool ws_cluster_drop_run(const char *pgdata, const char *configFile,
 						 const char *routeKey, bool purge);
 
 /*
+ * ws_cluster_prune_run purges every disabled ("dropped") route at once,
+ * the "ala docker" bulk equivalent of "cluster drop --purge <name>"
+ * applied to every route currently disabled -- see cli_cluster.c's own
+ * comment. Always returns true; a per-route rmtree() failure is warned
+ * about, not fatal to the rest.
+ */
+bool ws_cluster_prune_run(const char *pgdata, const char *configFile);
+
+/*
  * ws_cluster_list_run prints one row per registered route -- see
  * cli_cluster.c's own comment for exactly which fields, and how this
- * differs from :ref:`pg_walserver_list`'s own "list clusters". Returns
- * true (having printed a clean "no clusters registered yet" message,
- * never an error) when there are none, false only on a genuine problem
- * (e.g. neither --pgdata nor --config given, or an unparsable config
- * file). UPSTREAM is a full connection string/URI, often much wider
- * than every other column combined -- skipped from the default table
- * entirely, and only with showUpstream (--upstream) does it print at
- * all, pivoted into one key: value block per cluster rather than
- * widening the row.
+ * differs from :ref:`pg_walserver_list`'s own "list clusters". By
+ * default, only active (non-disabled) routes are shown; with
+ * showDisabled (--disabled), only dropped (disabled) ones are -- the two
+ * views are deliberately never combined into one table, the same reason
+ * "docker ps" (running only) and "docker ps -a" (stopped included) stay
+ * distinct rather than one command growing a column for it. Returns true
+ * (having printed a clean "none" message, never an error) when the
+ * chosen view has nothing to show, false only on a genuine problem (e.g.
+ * neither --pgdata nor --config given, or an unparsable config file).
+ * UPSTREAM is a full connection string/URI, often much wider than every
+ * other column combined -- skipped from the default table entirely, and
+ * only with showUpstream (--upstream) does it print at all, pivoted into
+ * one key: value block per cluster rather than widening the row.
  */
 bool ws_cluster_list_run(const char *pgdata, const char *configFile,
-						 bool showUpstream);
+						 bool showUpstream, bool showDisabled);
 
 /*
  * ws_cluster_set_upstream_run changes routeKey's own "upstream" property

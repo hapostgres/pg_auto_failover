@@ -61,8 +61,11 @@ void ws_receivewal_tick(bool (*otherChildExited)(void *ctx, pid_t pid,
  *
  *   - a route that newly has "receivewal = pull" (or is new outright) gets a
  *     receivewal worker started;
- *   - a route whose "receivewal = pull" was removed, or whose route
- *     disappeared entirely, gets its receivewal worker stopped (SIGINT);
+ *   - a route whose "receivewal = pull" was removed, whose route
+ *     disappeared entirely, or that is now disabled ("cluster drop"
+ *     without --purge, see routes.h's own WsRoute.disabled comment),
+ *     gets its receivewal worker stopped (SIGINT), and never gets a new
+ *     one started for it either;
  *   - a route whose "upstream" or "path" changed while "receivewal = pull"
  *     stayed on gets stopped (SIGINT) and, once reaped, automatically
  *     restarted with the new values by the ordinary PERMANENT-policy

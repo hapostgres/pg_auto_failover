@@ -1862,8 +1862,8 @@ cli_cluster_drop_command_run(int argc, char **argv)
 
 static CommandLine cluster_drop_command =
 	make_command("drop",
-				 "Drop one cluster's registration (never its own data, "
-				 "unless --purge)",
+				 "Drop (disable) one cluster, or fully remove it with "
+				 "--purge",
 				 "<name> --pgdata <path> [--config <path>] [--purge]",
 				 "  <name>      the cluster's own name, given positionally "
 				 "(never a flag)\n"
@@ -1873,23 +1873,37 @@ static CommandLine cluster_drop_command =
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --purge     also remove the route's own on-disk data "
-				 "(every base\n"
-				 "              backup and WAL segment it holds) -- "
-				 "without it, only the\n"
-				 "              registration itself is removed, the data "
-				 "is left in place\n",
+				 "  --purge     also remove the registration and the "
+				 "route's own on-disk\n"
+				 "              data (every base backup and WAL segment "
+				 "it holds) -- without\n"
+				 "              it, the route is only marked disabled: "
+				 "its embedded\n"
+				 "              receivewal worker is stopped, it refuses "
+				 "every connection\n"
+				 "              and command (basebackup, fetch-systemid, "
+				 "set-upstream,\n"
+				 "              CHECK_FILE/ARCHIVE_FILE/archive-wal/"
+				 "restore-wal), and its\n"
+				 "              own data is left in place -- see \"cluster "
+				 "list --disabled\"\n"
+				 "              to find it again, \"cluster register\" to "
+				 "bring it back, or\n"
+				 "              \"cluster prune\" to remove every dropped "
+				 "cluster at once\n",
 				 cli_cluster_drop_getopt, cli_cluster_drop_command_run);
 
 
 static char clusterListPgdata[MAXPGPATH] = { 0 };
 static char clusterListConfigFile[MAXPGPATH] = { 0 };
 static bool clusterListShowUpstream = false;
+static bool clusterListShowDisabled = false;
 
 static struct option clusterListLongOptions[] = {
 	{ "pgdata", required_argument, NULL, 'D' },
 	{ "config", required_argument, NULL, 'f' },
 	{ "upstream", no_argument, NULL, 'u' },
+	{ "disabled", no_argument, NULL, 'x' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -1904,11 +1918,12 @@ cli_cluster_list_getopt(int argc, char **argv)
 	clusterListPgdata[0] = '\0';
 	clusterListConfigFile[0] = '\0';
 	clusterListShowUpstream = false;
+	clusterListShowDisabled = false;
 	ws_prefill_pgdata_from_env(clusterListPgdata);
 
 	int c;
 
-	while ((c = getopt_long(argc, argv, "D:f:u", clusterListLongOptions,
+	while ((c = getopt_long(argc, argv, "D:f:ux", clusterListLongOptions,
 							NULL)) != -1)
 	{
 		switch (c)
@@ -1929,6 +1944,12 @@ cli_cluster_list_getopt(int argc, char **argv)
 			case 'u':
 			{
 				clusterListShowUpstream = true;
+				break;
+			}
+
+			case 'x':
+			{
+				clusterListShowDisabled = true;
 				break;
 			}
 
@@ -1956,14 +1977,16 @@ cli_cluster_list_command_run(int argc, char **argv)
 	(void) argv;
 
 	exit(ws_cluster_list_run(clusterListPgdata, clusterListConfigFile,
-							 clusterListShowUpstream) ? 0 : 1);
+							 clusterListShowUpstream,
+							 clusterListShowDisabled) ? 0 : 1);
 }
 
 
 static CommandLine cluster_list_command =
 	make_command("list",
 				 "List every cluster this pg_walserver has registered",
-				 "[--pgdata <path> | --config <path>] [--upstream]",
+				 "[--pgdata <path> | --config <path>] [--upstream] "
+				 "[--disabled]",
 				 "  --pgdata    this instance's own data root (defaults to "
 				 "PGDATA)\n"
 				 "  --config  where the config file itself lives; either "
@@ -1977,8 +2000,107 @@ static CommandLine cluster_list_command =
 				 "cluster instead of\n"
 				 "              a table column (skipped by default -- "
 				 "these are often\n"
-				 "              too wide for a readable row)\n",
+				 "              too wide for a readable row)\n"
+				 "  --disabled  list dropped (disabled) clusters instead "
+				 "of active ones\n"
+				 "              -- \"cluster drop\" (without --purge) "
+				 "marks a cluster\n"
+				 "              this way rather than removing it; see "
+				 "\"cluster prune\"\n"
+				 "              to remove every one of them at once\n",
 				 cli_cluster_list_getopt, cli_cluster_list_command_run);
+
+
+static char clusterPrunePgdata[MAXPGPATH] = { 0 };
+static char clusterPruneConfigFile[MAXPGPATH] = { 0 };
+
+static struct option clusterPruneLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_cluster_prune_getopt parses "pg_walserver cluster prune"'s own
+ * flags into the file-scope statics above.
+ */
+static int
+cli_cluster_prune_getopt(int argc, char **argv)
+{
+	optind = 0;
+	clusterPrunePgdata[0] = '\0';
+	clusterPruneConfigFile[0] = '\0';
+	ws_prefill_pgdata_from_env(clusterPrunePgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:f:", clusterPruneLongOptions,
+							NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(clusterPrunePgdata, optarg, sizeof(clusterPrunePgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(clusterPruneConfigFile, optarg,
+						sizeof(clusterPruneConfigFile));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_cluster_prune_command_run runs "pg_walserver cluster prune" against
+ * the options cli_cluster_prune_getopt parsed above, then exit()s with
+ * its own result.
+ */
+static void
+cli_cluster_prune_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(ws_cluster_prune_run(clusterPrunePgdata,
+							  clusterPruneConfigFile) ? 0 : 1);
+}
+
+
+static CommandLine cluster_prune_command =
+	make_command("prune",
+				 "Remove every dropped (disabled) cluster's registration "
+				 "and on-disk data",
+				 "[--pgdata <path> | --config <path>]",
+				 "  --pgdata    this instance's own data root. Either "
+				 "this or --config\n"
+				 "              is enough\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "\n"
+				 "The bulk equivalent of \"cluster drop --purge <name>\" "
+				 "run once per\n"
+				 "cluster \"cluster list --disabled\" shows -- every "
+				 "dropped cluster's own\n"
+				 "registration and on-disk data (every base backup and "
+				 "WAL segment it\n"
+				 "holds) is removed. Never touches an active cluster.\n",
+				 cli_cluster_prune_getopt, cli_cluster_prune_command_run);
 
 
 static char clusterSetUpstreamPgdata[MAXPGPATH] = { 0 };
@@ -2132,13 +2254,14 @@ static CommandLine *cluster_subcommands[] = {
 	&cluster_drop_command,
 	&cluster_list_command,
 	&cluster_set_upstream_command,
+	&cluster_prune_command,
 	NULL
 };
 
 static CommandLine cluster_commands =
 	make_command_set("cluster",
-					 "Register, drop, list, or re-point the clusters this "
-					 "pg_walserver archives",
+					 "Register, drop, list, re-point, or prune the "
+					 "clusters this pg_walserver archives",
 					 NULL, NULL, NULL, cluster_subcommands);
 
 /* -----------------------------------------------------------------------

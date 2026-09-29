@@ -370,11 +370,14 @@ ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
 			}
 		}
 
-		if (want == NULL || !want->receivewalPull || want->upstream[0] == '\0')
+		if (want == NULL || !want->receivewalPull || want->upstream[0] == '\0' ||
+			want->disabled)
 		{
 			log_info("Reload: stopping the embedded receivewal worker for "
-					 "route \"%s\" (pid %d): no longer \"receivewal = pull\"",
-					 cr->routeKey, service->pid);
+					 "route \"%s\" (pid %d): %s", cr->routeKey, service->pid,
+					 want != NULL && want->disabled
+					 ? "route dropped (disabled)"
+					 : "no longer \"receivewal = pull\"");
 			service->policy = PROCESS_RP_TEMPORARY;
 			(void) kill(service->pid, SIGINT);
 			++stopped;
@@ -414,7 +417,7 @@ ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
 	 * route not already handled above */
 	for (int j = 0; j < newRouteCount; j++)
 	{
-		if (handled[j] || !newRoutes[j].receivewalPull)
+		if (handled[j] || !newRoutes[j].receivewalPull || newRoutes[j].disabled)
 		{
 			continue;
 		}

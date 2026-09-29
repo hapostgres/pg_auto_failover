@@ -168,6 +168,10 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 							 "\"pull\"", propValue, name);
 				}
 			}
+			else if (streq(propName, "disabled"))
+			{
+				route->disabled = streq(propValue, "true");
+			}
 			else
 			{
 				log_warn("Ignoring unknown routes file key \"%s\" in section [%s]",

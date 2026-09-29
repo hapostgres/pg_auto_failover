@@ -118,14 +118,23 @@ write_route_section(const char *configPath, const char *routeKey,
 		return false;
 	}
 
+	/*
+	 * Copy out of *existing everything still needed below before it's
+	 * freed -- existing is a pointer into routes, which routes_free()
+	 * invalidates.
+	 */
+	bool samePath = existing != NULL && streq(existing->path, target->path);
+	bool existingHasReceivewalPull = existing != NULL && existing->receivewalPull;
+	bool existingDisabled = existing != NULL && existing->disabled;
+
 	routes_free(routes);
 
-	if (existing != NULL && streq(existing->path, target->path))
+	if (samePath)
 	{
 		log_info("Route \"%s\" already configured in \"%s\"",
 				 routeKey, configPath);
 
-		if (receivewalPull && !existing->receivewalPull)
+		if (receivewalPull && !existingHasReceivewalPull)
 		{
 			log_warn("Route \"%s\" already exists in \"%s\" without "
 					 "\"receivewal = pull\" (the embedded receivewal worker is on "
@@ -135,6 +144,18 @@ write_route_section(const char *configPath, const char *routeKey,
 					 "\"cluster register\" never changes an already-existing "
 					 "route's properties beyond path", routeKey, configPath,
 					 configPath);
+		}
+
+		if (existingDisabled)
+		{
+			if (!routes_set_property(configPath, routeKey, "disabled", "false"))
+			{
+				/* errors have already been logged */
+				return false;
+			}
+
+			log_info("Route \"%s\" was dropped (disabled) -- registering it "
+					 "again brings it back", routeKey);
 		}
 
 		return true;
@@ -396,15 +417,23 @@ ws_cluster_register_run(const WsClusterRegisterOptions *options)
 
 
 /*
- * ws_cluster_drop_run removes routeKey's own [section] from the config
- * file (routes_drop_section(), routes.c) -- the registration only. The
- * route's own on-disk data (captured WAL, base backups, under its own
- * "path") is left untouched unless purge is true, in which case it is
- * rmtree()'d after the section is gone: a deliberate two-step, opt-in
- * destruction, never a side effect of dropping the registration alone --
- * an operator who only meant to stop archiving a cluster, or is about to
- * re-register it under a different upstream, should never lose its
- * archive by accident.
+ * ws_cluster_drop_run, without purge, marks routeKey's own [section] as
+ * disabled (routes_set_property(configPath, routeKey, "disabled", "true"),
+ * routes.c) rather than removing it outright: an operator who only meant
+ * to stop archiving a cluster, or is about to re-register it under a
+ * different upstream, should never lose its archive by accident, and the
+ * section's own "path" must stay on record for --purge to find later --
+ * dropping the section right away, the way this used to work, would
+ * orphan the route's own on-disk data (captured WAL, base backups) with
+ * nothing left in the config file pointing back at it. A disabled route
+ * is otherwise inert -- see routes.h's own comment on WsRoute's
+ * "disabled" field for the full list of what stops.
+ *
+ * With purge, the route's own directory is rmtree()'d and its [section]
+ * is fully removed (routes_drop_section()) -- this works the same way
+ * whether the route was already disabled (the common case: "drop" once
+ * to stop it, "drop --purge" later once its data is no longer needed) or
+ * still active (an operator skipping straight to full removal).
  */
 bool
 ws_cluster_drop_run(const char *pgdata, const char *configFile,
@@ -447,9 +476,37 @@ ws_cluster_drop_run(const char *pgdata, const char *configFile,
 	}
 
 	char routePath[MAXPGPATH] = { 0 };
+	bool alreadyDisabled = route->disabled;
 
 	strlcpy(routePath, route->path, sizeof(routePath));
 	routes_free(routes);
+
+	if (!purge)
+	{
+		if (alreadyDisabled)
+		{
+			log_info("Route \"%s\" is already dropped (disabled); its own "
+					 "data under \"%s\" is still in place -- pass --purge "
+					 "to remove it, or \"pg_walserver cluster prune\" to "
+					 "remove every dropped route at once",
+					 routeKey, routePath);
+			return true;
+		}
+
+		if (!routes_set_property(configPath, routeKey, "disabled", "true"))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		log_info("Route \"%s\" dropped (disabled) in \"%s\"; its own data "
+				 "under \"%s\" was left in place -- pass --purge to remove "
+				 "it too, or run \"pg_walserver cluster register %s ...\" "
+				 "again to bring it back",
+				 routeKey, configPath, routePath, routeKey);
+
+		return true;
+	}
 
 	if (!routes_drop_section(configPath, routeKey))
 	{
@@ -457,8 +514,84 @@ ws_cluster_drop_run(const char *pgdata, const char *configFile,
 		return false;
 	}
 
-	if (purge)
+	if (!rmtree(routePath, true))
 	{
+		log_warn("Route \"%s\" was dropped from \"%s\", but removing "
+				 "its own directory \"%s\" failed -- remove it by "
+				 "hand", routeKey, configPath, routePath);
+	}
+	else
+	{
+		log_info("Removed \"%s\" (--purge)", routePath);
+	}
+
+	return true;
+}
+
+
+/*
+ * ws_cluster_prune_run purges every disabled ("dropped") route at once --
+ * routes_drop_section() plus rmtree() for each, the same work "cluster
+ * drop --purge <name>" does for one route by name, applied to every route
+ * currently disabled, the "ala docker" bulk equivalent of "docker
+ * container prune"/"docker system prune". Never touches an active
+ * (non-disabled) route. Always returns true: no dropped routes to prune
+ * is an ordinary state to report, not a failure; a route whose own
+ * rmtree() fails is warned about (same as a single "drop --purge") and
+ * pruning continues with the rest rather than aborting outright.
+ */
+bool
+ws_cluster_prune_run(const char *pgdata, const char *configFile)
+{
+	if ((pgdata == NULL || pgdata[0] == '\0') &&
+		(configFile == NULL || configFile[0] == '\0'))
+	{
+		log_error("cluster prune requires --pgdata or --config");
+		return false;
+	}
+
+	char configPath[MAXPGPATH] = { 0 };
+
+	config_file_path(pgdata, configFile, configPath, sizeof(configPath));
+
+	WsRoute *routes = NULL;
+	int routeCount = 0;
+
+	if (!routes_load(configPath, &routes, &routeCount))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * Copy the disabled routes' own key/path aside before touching the
+	 * config file: routes_drop_section() rewrites it on disk, and this
+	 * loop's own routes array must stay a stable, already-loaded snapshot
+	 * throughout (the same reason ws_cluster_drop_run() above copies
+	 * routePath out before its own routes_free()).
+	 */
+	int pruned = 0;
+
+	for (int i = 0; i < routeCount; i++)
+	{
+		if (!routes[i].disabled)
+		{
+			continue;
+		}
+
+		char routeKey[NAMEDATALEN + 16] = { 0 };
+		char routePath[MAXPGPATH] = { 0 };
+
+		strlcpy(routeKey, routes[i].key, sizeof(routeKey));
+		strlcpy(routePath, routes[i].path, sizeof(routePath));
+
+		if (!routes_drop_section(configPath, routeKey))
+		{
+			log_warn("Failed to remove route \"%s\" from \"%s\" -- "
+					 "skipping it", routeKey, configPath);
+			continue;
+		}
+
 		if (!rmtree(routePath, true))
 		{
 			log_warn("Route \"%s\" was dropped from \"%s\", but removing "
@@ -467,14 +600,22 @@ ws_cluster_drop_run(const char *pgdata, const char *configFile,
 		}
 		else
 		{
-			log_info("Removed \"%s\" (--purge)", routePath);
+			log_info("Removed \"%s\" (\"%s\", dropped)", routePath, routeKey);
 		}
+
+		pruned++;
+	}
+
+	routes_free(routes);
+
+	if (pruned == 0)
+	{
+		printf("No dropped clusters to prune.\n"); /* IGNORE-BANNED */
 	}
 	else
 	{
-		log_info("Route \"%s\" dropped from \"%s\"; its own data under "
-				 "\"%s\" was left in place (pass --purge to remove it too)",
-				 routeKey, configPath, routePath);
+		printf("Pruned %d dropped cluster%s.\n", /* IGNORE-BANNED */
+			   pruned, pruned == 1 ? "" : "s");
 	}
 
 	return true;
@@ -487,12 +628,13 @@ ws_cluster_drop_run(const char *pgdata, const char *configFile,
  * registration itself, as the config file records it, never the
  * operational/data-layer facts :ref:`pg_walserver_list`'s own "list
  * clusters" already reports (backup/WAL presence, WAL range). Prints a
- * clean "no clusters registered yet" message, not an error, when there
- * are none.
+ * clean "none" message, not an error, when the chosen view (active
+ * routes by default, dropped/disabled ones with showDisabled) has
+ * nothing to show.
  */
 bool
 ws_cluster_list_run(const char *pgdata, const char *configFile,
-					bool showUpstream)
+					bool showUpstream, bool showDisabled)
 {
 	if ((pgdata == NULL || pgdata[0] == '\0') &&
 		(configFile == NULL || configFile[0] == '\0'))
@@ -514,10 +656,33 @@ ws_cluster_list_run(const char *pgdata, const char *configFile,
 		return false;
 	}
 
-	if (routeCount == 0)
+	int matching = 0;
+
+	for (int i = 0; i < routeCount; i++)
 	{
-		printf("No clusters registered yet under \"%s\" -- see " /* IGNORE-BANNED */
-			   "\"pg_walserver cluster register\".\n", configPath);
+		if (routes[i].disabled == showDisabled)
+		{
+			matching++;
+		}
+	}
+
+	if (matching == 0)
+	{
+		if (showDisabled)
+		{
+			printf("No dropped clusters under \"%s\".\n", configPath); /* IGNORE-BANNED */
+		}
+		else if (routeCount == 0)
+		{
+			printf("No clusters registered yet under \"%s\" -- see " /* IGNORE-BANNED */
+				   "\"pg_walserver cluster register\".\n", configPath);
+		}
+		else
+		{
+			printf("No active clusters under \"%s\" (pass --disabled to " /* IGNORE-BANNED */
+				   "see dropped ones).\n", configPath);
+		}
+
 		routes_free(routes);
 		return true;
 	}
@@ -531,12 +696,20 @@ ws_cluster_list_run(const char *pgdata, const char *configFile,
 		 * cluster instead (only reached with --upstream, an explicit
 		 * opt-in; the default table below never prints this column).
 		 */
+		bool first = true;
+
 		for (int i = 0; i < routeCount; i++)
 		{
-			if (i > 0)
+			if (routes[i].disabled != showDisabled)
+			{
+				continue;
+			}
+
+			if (!first)
 			{
 				printf("\n"); /* IGNORE-BANNED */
 			}
+			first = false;
 
 			printf("cluster:    %s\n", routes[i].key); /* IGNORE-BANNED */
 			printf("receivewal: %s\n", /* IGNORE-BANNED */
@@ -561,6 +734,11 @@ ws_cluster_list_run(const char *pgdata, const char *configFile,
 
 	for (int i = 0; i < routeCount; i++)
 	{
+		if (routes[i].disabled != showDisabled)
+		{
+			continue;
+		}
+
 		printf("%-20s %-10s %-24s %s\n", /* IGNORE-BANNED */
 			   routes[i].key,
 			   routes[i].receivewalPull ? "pull" : "none",
@@ -637,6 +815,15 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
 	if (route == NULL)
 	{
 		log_error("No route \"%s\" in \"%s\"", routeKey, configPath);
+		routes_free(routes);
+		return false;
+	}
+
+	if (route->disabled)
+	{
+		log_error("Route \"%s\" is dropped (disabled) -- run "
+				  "\"pg_walserver cluster register %s ...\" to bring it "
+				  "back before changing its upstream", routeKey, routeKey);
 		routes_free(routes);
 		return false;
 	}

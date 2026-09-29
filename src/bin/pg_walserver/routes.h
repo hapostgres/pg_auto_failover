@@ -116,6 +116,32 @@ typedef struct WsRoute
 	                                     * (pg_walserver.ini)" and "The
 	                                     * embedded receivewal worker" sections
 	                                     * for the full rationale. */
+	bool disabled;                      /* "disabled = true" in this route's
+	                                     * own section: "cluster drop" without
+	                                     * --purge sets this instead of
+	                                     * removing the section outright, so
+	                                     * the route's own on-disk data is
+	                                     * never orphaned (its "path" stays
+	                                     * on record for a later "cluster
+	                                     * drop --purge"/"cluster prune" to
+	                                     * find and remove). A disabled route
+	                                     * is otherwise inert: reload stops
+	                                     * its embedded receivewal worker if
+	                                     * one is running and never starts a
+	                                     * new one, ws_authenticate() (auth.c)
+	                                     * refuses every connection routed to
+	                                     * it (CHECK_FILE/ARCHIVE_FILE/
+	                                     * START_REPLICATION/archive-wal/
+	                                     * restore-wal alike), and cli_
+	                                     * resolve_upstream() (cli_upstream.c)
+	                                     * refuses it for basebackup/fetch-
+	                                     * systemid/set-upstream. "cluster
+	                                     * register" on the same key/path
+	                                     * clears it again (see cli_cluster.c's
+	                                     * own write_route_section()) -- the
+	                                     * natural way to "undrop" a route
+	                                     * without a dedicated command for
+	                                     * that alone. */
 } WsRoute;
 
 /*
