@@ -1,7 +1,7 @@
 # pg_walserver archive-cleanup (cli_archive_cleanup.c): WAL/base-backup
 # retention. See README.md's own "archive-cleanup" section for the full
 # design; this spec exercises it end to end against a route fed by the
-# embedded receivewal worker ("receivewal = pull", pg_walserver cluster register's own
+# embedded receivewal worker ("receivewal = pull", pg_walserver register cluster's own
 # default), so every WAL segment involved is real, captured off a real
 # pg_auto_failover-managed primary (node1).
 #
@@ -94,7 +94,7 @@ setup {
     # flag at all) so this route accumulates real WAL continuously, off
     # node1, with no manual archive-wal pushing needed anywhere in this
     # spec.
-    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register --pgdata /tmp/ws --cluster default/0 --path /tmp/ws/default/0 --upstream "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver register cluster default/0 --pgdata /tmp/ws --path /tmp/ws/default/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
 
     sql node1 { CREATE TABLE ws(a int); INSERT INTO ws VALUES (1); }
 

@@ -1,12 +1,19 @@
 /*
  * src/bin/pg_walserver/cli_cluster.h
- *   `pg_walserver cluster register|drop|list|set-upstream`: the wizard
- *   that creates, removes, lists, and re-points the clusters (routes) one
- *   pg_walserver instance archives -- see cli_cluster.c for the full
- *   sequence each verb runs. Split out of what used to be "pg_walserver
- *   setup" (now cli_setup.h, narrowed to configuring pg_walserver itself,
- *   nothing about any one cluster): "setup" configures the server,
- *   "cluster" configures what it serves.
+ *   `pg_walserver register cluster <name> ...`, `pg_walserver drop cluster
+ *   <name> ...`, `pg_walserver register list ...`, `pg_walserver set-
+ *   upstream cluster <name> ...`: the wizard that creates, removes, lists,
+ *   and re-points the clusters (routes) one pg_walserver instance archives
+ *   -- see cli_cluster.c for the full sequence each verb runs. Split out
+ *   of what used to be "pg_walserver setup" (now cli_setup.h, narrowed to
+ *   configuring pg_walserver itself, nothing about any one cluster):
+ *   "setup" configures the server, these configure what it serves.
+ *
+ *   The cluster's own name is always given positionally (the first
+ *   non-option argument), never a "--cluster" flag -- "register cluster
+ *   mycluster ..." reads the way an operator says it out loud, and this
+ *   project already gives a positional name to other resources it names
+ *   elsewhere (`pg_walserver restore-wal <filename> <destination-path>`).
  *
  * Licensed under the PostgreSQL License.
  *
@@ -24,9 +31,15 @@
 typedef struct WsClusterRegisterOptions
 {
 	char pgdata[MAXPGPATH];
-	char route[NAMEDATALEN + 16];
+	char configFile[MAXPGPATH];  /* --config-file: empty means the default,
+	                              * see config_file_path()'s own comment */
+	char cluster[NAMEDATALEN + 16]; /* the positional <name> */
 	char path[MAXPGPATH];
-	char upstream[MAXCONNINFO];
+	char pguri[MAXCONNINFO];     /* --pguri: a libpq connection string to
+	                              * this cluster's own upstream (named to
+	                              * match pg_autoctl's own "pguri"
+	                              * vocabulary for a Postgres connection
+	                              * string, e.g. monitor_pguri) */
 	char host[_POSIX_HOST_NAME_MAX];
 	char port[16];
 	char user[NAMEDATALEN];
@@ -47,17 +60,17 @@ typedef struct WsClusterRegisterOptions
 	                                     * starts. */
 	bool force;
 	bool sslSelfSigned;                 /* --ssl-self-signed: create a
-	                                     * self-signed certificate for
-	                                     * --pgdata right away, the same
-	                                     * "skip create-cert entirely"
-	                                     * convenience pg_autoctl's own
-	                                     * --ssl-self-signed already gives
-	                                     * -- see cli_cluster.c's own
-	                                     * ensure_tls_certificate(). */
+	                                    * self-signed certificate for
+	                                    * --pgdata right away, the same
+	                                    * "skip create-cert entirely"
+	                                    * convenience pg_autoctl's own
+	                                    * --ssl-self-signed already gives
+	                                    * -- see cli_cluster.c's own
+	                                    * ensure_tls_certificate(). */
 } WsClusterRegisterOptions;
 
 /*
- * ws_cluster_register_run runs the whole "cluster register" sequence
+ * ws_cluster_register_run runs the whole "register cluster" sequence
  * documented in cli_cluster.c's own header comment: validate/write the
  * pg_walserver.ini section, check the role's REPLICATION attribute, and
  * fetch the system identifier. It never takes a base backup itself:
@@ -68,12 +81,13 @@ typedef struct WsClusterRegisterOptions
 bool ws_cluster_register_run(const WsClusterRegisterOptions *options);
 
 /*
- * ws_cluster_drop_run removes routeKey's own registration from
- * pg_walserver.ini; with purge, also removes its own on-disk data
- * (everything under its own "path") -- see cli_cluster.c's own comment.
+ * ws_cluster_drop_run removes routeKey's own registration from the config
+ * file config_file_path() resolves for pgdata/configFile; with purge,
+ * also removes its own on-disk data -- see cli_cluster.c's own comment.
  * Returns true on success, false with an error already logged otherwise.
  */
-bool ws_cluster_drop_run(const char *pgdata, const char *routeKey, bool purge);
+bool ws_cluster_drop_run(const char *pgdata, const char *configFile,
+						 const char *routeKey, bool purge);
 
 /*
  * ws_cluster_list_run prints one row per registered route -- see
@@ -81,9 +95,9 @@ bool ws_cluster_drop_run(const char *pgdata, const char *routeKey, bool purge);
  * differs from :ref:`pg_walserver_list`'s own "list clusters". Returns
  * true (having printed a clean "no clusters registered yet" message,
  * never an error) when there are none, false only on a genuine problem
- * (e.g. no --pgdata given, or an unparsable pg_walserver.ini).
+ * (e.g. no --pgdata given, or an unparsable config file).
  */
-bool ws_cluster_list_run(const char *pgdata);
+bool ws_cluster_list_run(const char *pgdata, const char *configFile);
 
 /*
  * ws_cluster_set_upstream_run changes routeKey's own "upstream" property
@@ -94,7 +108,8 @@ bool ws_cluster_list_run(const char *pgdata);
  * "take a fresh backup against the new upstream right away" behavior.
  * Returns true on success, false with an error already logged otherwise.
  */
-bool ws_cluster_set_upstream_run(const char *pgdata, const char *routeKey,
+bool ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
+								 const char *routeKey,
 								 const char *newUpstream,
 								 bool forceBasebackup);
 

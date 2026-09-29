@@ -120,7 +120,7 @@ bootstrap_child_main(const WsRoute *route)
 
 	WsUpstreamTarget target = { 0 };
 
-	if (!cli_resolve_upstream(NULL, NULL, route->path, route->upstream,
+	if (!cli_resolve_upstream(NULL, NULL, NULL, route->path, route->upstream,
 							  NULL, NULL, NULL, &target))
 	{
 		/* errors have already been logged */

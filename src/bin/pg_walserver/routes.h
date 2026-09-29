@@ -216,7 +216,7 @@ bool routes_drop_section(const char *routesPath, const char *routeKey);
  * timeout whenever the equivalent command-line flag wasn't given --
  * matches every other "explicit flag always wins over a persisted
  * default" precedent in this project. Never routes/clusters -- those are
- * "pg_walserver cluster register"'s own job.
+ * "pg_walserver register cluster"'s own job.
  */
 typedef struct WsGlobalConfig
 {
@@ -230,24 +230,53 @@ typedef struct WsGlobalConfig
 } WsGlobalConfig;
 
 /*
- * routes_load_global reads pg_walserver.ini's own anonymous/global section
+ * config_load_global reads pg_walserver.ini's own anonymous/global section
  * (see WsGlobalConfig's own comment) into *out. Always succeeds (true),
  * leaving *out zeroed, when the file doesn't exist yet or has no global
  * section -- a normal, expected state, not an error (the same "missing
  * config is not a failure" convention routes_load() itself already
- * follows).
+ * follows). Named "config_", not "routes_": this reads pg_walserver's own
+ * settings, never a route/cluster -- those stay routes_*, this file's own
+ * ini-parsing home for both concerns notwithstanding.
  */
-bool routes_load_global(const char *routesPath, WsGlobalConfig *out);
+bool config_load_global(const char *configPath, WsGlobalConfig *out);
 
 /*
- * routes_set_global_property sets "propName = propValue" as a plain
+ * config_set_global_property sets "propName = propValue" as a plain
  * top-of-file line, before any route's own [section] header -- creating
  * the file (with just that one line) if it doesn't exist yet, replacing
  * an already-present line with the same propName otherwise. "pg_walserver
  * setup"'s own way to persist one instance-level setting; never touches
- * any route's own section.
+ * any route's own section. See config_load_global()'s own comment for
+ * why this is "config_", not "routes_".
  */
-bool routes_set_global_property(const char *routesPath, const char *propName,
+bool config_set_global_property(const char *configPath, const char *propName,
 								const char *propValue);
+
+/* the environment variable config_file_path() checks, see its own comment */
+#define WS_CONFIG_FILE_ENV_VAR "PG_WALSERVER_CONFIG_FILE"
+
+/*
+ * config_file_path resolves the on-disk path of pg_walserver's own config
+ * file (pg_walserver.ini: the global settings section this file's own
+ * config_load_global()/config_set_global_property() manage, plus one
+ * [section] per route the rest of this file manages) into out, up to
+ * outSize bytes:
+ *
+ *   1. configFile itself, when given explicitly (a command's own
+ *      --config-file flag) -- always wins;
+ *   2. else the PG_WALSERVER_CONFIG_FILE environment variable, when set;
+ *   3. else "<pgdata>/pg_walserver.ini", the long-standing default.
+ *
+ * This is what lets a Debian-style deployment -- config under
+ * /etc/pg_walserver/pg_walserver.ini, data under /var/lib/pg_walserver/,
+ * the same split a systemd unit file or a container entrypoint commonly
+ * wants -- point every pg_walserver command at a config file that lives
+ * outside --pgdata, without changing where routes/basebackups/WAL/certs
+ * themselves are stored (those stay under --pgdata unconditionally; only
+ * this one file's own location becomes independently configurable).
+ */
+void config_file_path(const char *pgdata, const char *configFile,
+					  char *out, size_t outSize);
 
 #endif /* WS_ROUTES_H */

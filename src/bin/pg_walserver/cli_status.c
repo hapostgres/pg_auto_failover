@@ -51,7 +51,7 @@ format_uptime(time_t startedAt, char *dest, size_t destSize)
  * cli_status_run -- see cli_status.h's own comment.
  */
 bool
-cli_status_run(const char *pgdata)
+cli_status_run(const char *pgdata, const char *configFile)
 {
 	if (pgdata == NULL || pgdata[0] == '\0')
 	{
@@ -85,7 +85,7 @@ cli_status_run(const char *pgdata)
 	 */
 	char routesPath[MAXPGPATH] = { 0 };
 
-	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
+	config_file_path(pgdata, configFile, routesPath, sizeof(routesPath));
 
 	WsRoute *routes = NULL;
 	int routeCount = 0;

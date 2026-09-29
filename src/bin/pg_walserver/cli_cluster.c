@@ -1,19 +1,21 @@
 /*
  * src/bin/pg_walserver/cli_cluster.c
- *   See cli_cluster.h. "pg_walserver cluster register|drop|list|
- *   set-upstream": registering, dropping, listing, and re-pointing the
- *   clusters (routes) one pg_walserver instance archives -- split out of
- *   what used to be "pg_walserver setup" (now cli_setup.c, narrowed to
- *   configuring pg_walserver itself: --pgdata's own port/TLS/auth-timeout
- *   defaults, nothing about any one cluster). "setup" configures the
- *   server; "cluster" configures what it serves.
+ *   See cli_cluster.h. "pg_walserver register cluster <name>", "pg_
+ *   walserver drop cluster <name>", "pg_walserver register list", "pg_
+ *   walserver set-upstream cluster <name>": registering, dropping,
+ *   listing, and re-pointing the clusters (routes) one pg_walserver
+ *   instance archives -- split out of what used to be "pg_walserver
+ *   setup" (now cli_setup.c, narrowed to configuring pg_walserver itself:
+ *   --pgdata's own port/TLS/auth-timeout defaults, nothing about any one
+ *   cluster). "setup" configures the server; these configure what it
+ *   serves.
  *
- *   "cluster register", in order, stopping at the first failure:
+ *   "register cluster <name>", in order, stopping at the first failure:
  *
- *     1. resolve path/upstream (cli_upstream.c: --path/--upstream/--host/
- *        --port/--user, or --cluster looked up in <pgdata>/pg_walserver.ini
- *        when it already has a matching section);
- *     2. write (or validate) the pg_walserver.ini section for --cluster,
+ *     1. resolve path/upstream (cli_upstream.c: --path/--pguri/--host/
+ *        --port/--user, or <name> looked up in the config file when it
+ *        already has a matching section);
+ *     2. write (or validate) the config file's own section for <name>,
  *        refusing a route key that already exists with a *different*
  *        path/upstream unless --force -- the same overwrite-safety
  *        principle as cli_fetch_systemid.c's own systemid check, applied
@@ -21,14 +23,14 @@
  *        *default* now (an explicit "receivewal = pull" is written into the
  *        route's own section, routes.h, unless --no-receivewal / --receivewal
  *        none says otherwise), opting the route into it the next time
- *        "serve" starts -- "cluster register" itself never starts or
+ *        "serve" starts -- "register cluster" itself never starts or
  *        touches that receivewal worker, it only records the intent.
  *        Writing the property explicitly (rather than changing what an
- *        *absent* "receivewal" property under a hand-edited
- *        pg_walserver.ini means, which stays "off", unchanged in
- *        routes.c/routes.h) is a deliberate choice: anyone reading
- *        pg_walserver.ini by hand sees exactly what "cluster register"
- *        decided, with no implicit-default surprise to remember;
+ *        *absent* "receivewal" property under a hand-edited config file
+ *        means, which stays "off", unchanged in routes.c/routes.h) is a
+ *        deliberate choice: anyone reading the config file by hand sees
+ *        exactly what "register cluster" decided, with no implicit-
+ *        default surprise to remember;
  *     3. fetch the system identifier (cli_fetch_systemid.c) -- this
  *        connection (pgctl_identify_system(), a real replication-mode
  *        IDENTIFY_SYSTEM) is also this step's own role-permission check:
@@ -36,7 +38,7 @@
  *        REPLICATION at the *backend* level, independent of HBA, so a
  *        misconfigured role fails here with a clear message instead of a
  *        cryptic pg_basebackup/pg_receivewal error later;
- *     4. once every route in pg_walserver.ini is accounted for, create a
+ *     4. once every route in the config file is accounted for, create a
  *        self-signed certificate for <pgdata> if none exists yet
  *        (pg_create_self_signed_cert(), the exact function `pg_autoctl
  *        create ... --ssl-self-signed` already uses), in either of two
@@ -50,7 +52,7 @@
  *     5. reload an already-running "pg_walserver serve" for this same
  *        --pgdata, if one is running (cli_root.c's own cli_cluster_
  *        reload_running_server()) -- the same read_pidfile()/SIGHUP shape
- *        "pg_walserver reload" itself uses. "cluster register" never
+ *        "pg_walserver reload" itself uses. "register cluster" never
  *        takes a base backup itself: a running server picks up the
  *        new/changed route the moment it is reloaded, and bootstraps a
  *        first base backup for it automatically if it doesn't have one
@@ -81,25 +83,21 @@
 
 
 /*
- * write_route_section creates or validates the [routeKey] section of
- * pg_walserver.ini: a brand new key is appended; an existing one must
- * already have the same path (an operator re-running "cluster register"
- * must be a safe no-op), or --force is required to change it -- the same
- * "never silently replace what's already there" principle as cli_fetch_
+ * write_route_section creates or validates the [routeKey] section of the
+ * config file: a brand new key is appended; an existing one must already
+ * have the same path (an operator re-running "register cluster" must be
+ * a safe no-op), or --force is required to change it -- the same "never
+ * silently replace what's already there" principle as cli_fetch_
  * systemid.c's own systemid check.
  */
 static bool
-write_route_section(const char *pgdata, const char *routeKey,
+write_route_section(const char *configPath, const char *routeKey,
 					const WsUpstreamTarget *target, const char *upstreamRaw,
 					const char *hostname, bool receivewalPull, bool force)
 {
-	char routesPath[MAXPGPATH] = { 0 };
-
-	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
-
 	WsRoute *routes = NULL;
 	int routeCount = 0;
-	bool haveExisting = routes_load(routesPath, &routes, &routeCount);
+	bool haveExisting = routes_load(configPath, &routes, &routeCount);
 	const WsRoute *existing = haveExisting
 							  ? routes_find(routes, routeCount, routeKey)
 							  : NULL;
@@ -115,7 +113,7 @@ write_route_section(const char *pgdata, const char *routeKey,
 	{
 		log_error("Route \"%s\" already exists in \"%s\" with path \"%s\", "
 				  "not \"%s\" -- pass --force to change it",
-				  routeKey, routesPath, existing->path, target->path);
+				  routeKey, configPath, existing->path, target->path);
 		routes_free(routes);
 		return false;
 	}
@@ -125,18 +123,18 @@ write_route_section(const char *pgdata, const char *routeKey,
 	if (existing != NULL && streq(existing->path, target->path))
 	{
 		log_info("Route \"%s\" already configured in \"%s\"",
-				 routeKey, routesPath);
+				 routeKey, configPath);
 
 		if (receivewalPull && !existing->receivewalPull)
 		{
 			log_warn("Route \"%s\" already exists in \"%s\" without "
 					 "\"receivewal = pull\" (the embedded receivewal worker is on "
-					 "by default now, but was not the last time \"cluster "
-					 "register\" wrote this route, or --no-receivewal/--receivewal "
+					 "by default now, but was not the last time \"register "
+					 "cluster\" wrote this route, or --no-receivewal/--receivewal "
 					 "none was passed then) -- edit \"%s\" by hand to add it, "
-					 "\"cluster register\" never changes an already-existing "
-					 "route's properties beyond path", routeKey, routesPath,
-					 routesPath);
+					 "\"register cluster\" never changes an already-existing "
+					 "route's properties beyond path", routeKey, configPath,
+					 configPath);
 		}
 
 		return true;
@@ -172,7 +170,7 @@ write_route_section(const char *pgdata, const char *routeKey,
 	long existingSize = 0L;
 	bool ok;
 
-	if (read_file_if_exists(routesPath, &existingContents, &existingSize) &&
+	if (read_file_if_exists(configPath, &existingContents, &existingSize) &&
 		existingContents != NULL)
 	{
 		PQExpBuffer whole = createPQExpBuffer();
@@ -181,7 +179,7 @@ write_route_section(const char *pgdata, const char *routeKey,
 		appendPQExpBufferStr(whole, section->data);
 
 		ok = !PQExpBufferBroken(whole) &&
-			 write_file_atomic(whole->data, whole->len, routesPath);
+			 write_file_atomic(whole->data, whole->len, configPath);
 
 		destroyPQExpBuffer(whole);
 		free(existingContents);
@@ -189,26 +187,26 @@ write_route_section(const char *pgdata, const char *routeKey,
 	else
 	{
 		/* skip the leading blank line for a brand new file */
-		ok = write_file_atomic(section->data + 1, section->len - 1, routesPath);
+		ok = write_file_atomic(section->data + 1, section->len - 1, configPath);
 	}
 
 	destroyPQExpBuffer(section);
 
 	if (!ok)
 	{
-		log_error("Failed to write \"%s\"", routesPath);
+		log_error("Failed to write \"%s\"", configPath);
 		return false;
 	}
 
 	log_info("Added route \"%s\" (path \"%s\") to \"%s\"",
-			 routeKey, target->path, routesPath);
+			 routeKey, target->path, configPath);
 
 	return true;
 }
 
 
 /*
- * ensure_tls_certificate re-reads pg_walserver.ini after write_route_
+ * ensure_tls_certificate re-reads the config file after write_route_
  * section() and creates a self-signed certificate for <pgdata> (via ws_
  * create_cert_run() -- cli_create_cert.c, the same helper `pg_walserver
  * create-cert` itself calls, wrapping pg_create_self_signed_cert()) in
@@ -221,16 +219,14 @@ write_route_section(const char *pgdata, const char *routeKey,
  * multi-route case. Never a hard failure in either case.
  */
 static void
-ensure_tls_certificate(const char *pgdata, const char *routeKey,
-					   const char *hostname, bool sslSelfSigned)
+ensure_tls_certificate(const char *pgdata, const char *configPath,
+					   const char *routeKey, const char *hostname,
+					   bool sslSelfSigned)
 {
-	char routesPath[MAXPGPATH] = { 0 };
 	WsRoute *routes = NULL;
 	int routeCount = 0;
 
-	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
-
-	if (!routes_load(routesPath, &routes, &routeCount))
+	if (!routes_load(configPath, &routes, &routeCount))
 	{
 		routes_free(routes);
 		return;
@@ -248,7 +244,7 @@ ensure_tls_certificate(const char *pgdata, const char *routeKey,
 				 "alone cannot tell a real physical standby's connection "
 				 "apart from any other route once there is more than one, "
 				 "see this project's own README.md)",
-				 routesPath, routeCount);
+				 configPath, routeCount);
 	}
 
 	if (!multipleRoutes && !sslSelfSigned)
@@ -288,7 +284,7 @@ ensure_tls_certificate(const char *pgdata, const char *routeKey,
 				 "by dbname (pg_basebackup/pg_receivewal/archive_command) "
 				 "or the \"*\" wildcard, never by name by a real physical "
 				 "standby -- pass --hostname next time, or edit \"%s\" by "
-				 "hand, to add one", routeKey, routesPath);
+				 "hand, to add one", routeKey, configPath);
 	}
 }
 
@@ -300,18 +296,24 @@ ensure_tls_certificate(const char *pgdata, const char *routeKey,
 bool
 ws_cluster_register_run(const WsClusterRegisterOptions *options)
 {
-	if (options->route[0] == '\0')
+	if (options->cluster[0] == '\0')
 	{
-		log_error("cluster register requires --cluster");
+		log_error("register cluster requires a cluster name "
+				  "(\"pg_walserver register cluster <name> ...\")");
 		return false;
 	}
 
 	if (options->pgdata[0] == '\0')
 	{
-		log_error("cluster register requires --pgdata (where "
-				  "pg_walserver.ini lives)");
+		log_error("register cluster requires --pgdata (this instance's "
+				  "own data root)");
 		return false;
 	}
+
+	char configPath[MAXPGPATH] = { 0 };
+
+	config_file_path(options->pgdata, options->configFile,
+					 configPath, sizeof(configPath));
 
 	/*
 	 * --path is only ever an override: a route's own directory defaults to
@@ -324,14 +326,14 @@ ws_cluster_register_run(const WsClusterRegisterOptions *options)
 	if (pathArg[0] == '\0')
 	{
 		sformat(defaultPath, sizeof(defaultPath), "%s/%s",
-				options->pgdata, options->route);
+				options->pgdata, options->cluster);
 		pathArg = defaultPath;
 	}
 
 	WsUpstreamTarget target = { 0 };
 
-	if (!cli_resolve_upstream(NULL /* not looking one up yet */, NULL,
-							  pathArg, options->upstream,
+	if (!cli_resolve_upstream(NULL /* not looking one up yet */, NULL, NULL,
+							  pathArg, options->pguri,
 							  options->host,
 							  options->port[0] != '\0' ? options->port : NULL,
 							  options->user, &target))
@@ -357,19 +359,19 @@ ws_cluster_register_run(const WsClusterRegisterOptions *options)
 
 	/*
 	 * cli_resolve_upstream() above already refused to succeed without a
-	 * resolved host (--upstream, --host, or an existing route's own
+	 * resolved host (--pguri, --host, or an existing route's own
 	 * "upstream"), so --receivewal pull always has somewhere to pull from by
 	 * the time it's written below -- no separate check needed here.
 	 */
-	if (!write_route_section(options->pgdata, options->route, &target,
-							 options->upstream, options->hostname,
+	if (!write_route_section(configPath, options->cluster, &target,
+							 options->pguri, options->hostname,
 							 options->receivewalPull, options->force))
 	{
 		/* errors have already been logged */
 		return false;
 	}
 
-	ensure_tls_certificate(options->pgdata, options->route,
+	ensure_tls_certificate(options->pgdata, configPath, options->cluster,
 						   options->hostname, options->sslSelfSigned);
 
 	uint64_t systemIdentifier = 0;
@@ -382,52 +384,54 @@ ws_cluster_register_run(const WsClusterRegisterOptions *options)
 		return false;
 	}
 
-	log_info("cluster register complete: route \"%s\" is ready (no base "
+	log_info("register cluster complete: route \"%s\" is ready (no base "
 			 "backup taken here -- \"pg_walserver serve\" bootstraps the "
 			 "route's first base backup automatically, once, the next "
 			 "time it starts or reloads this route; run \"pg_walserver "
 			 "basebackup\" by hand at any time to take another one)",
-			 options->route);
+			 options->cluster);
 
 	return true;
 }
 
 
 /*
- * ws_cluster_drop_run removes routeKey's own [section] from pg_walserver.ini
- * (routes_drop_section(), routes.c) -- the registration only. The route's
- * own on-disk data (captured WAL, base backups, under its own "path") is
- * left untouched unless purge is true, in which case it is rmtree()'d
- * after the section is gone: a deliberate two-step, opt-in destruction,
- * never a side effect of dropping the registration alone -- an operator
- * who only meant to stop archiving a cluster, or is about to re-register
- * it under a different upstream, should never lose its archive by
- * accident.
+ * ws_cluster_drop_run removes routeKey's own [section] from the config
+ * file (routes_drop_section(), routes.c) -- the registration only. The
+ * route's own on-disk data (captured WAL, base backups, under its own
+ * "path") is left untouched unless purge is true, in which case it is
+ * rmtree()'d after the section is gone: a deliberate two-step, opt-in
+ * destruction, never a side effect of dropping the registration alone --
+ * an operator who only meant to stop archiving a cluster, or is about to
+ * re-register it under a different upstream, should never lose its
+ * archive by accident.
  */
 bool
-ws_cluster_drop_run(const char *pgdata, const char *routeKey, bool purge)
+ws_cluster_drop_run(const char *pgdata, const char *configFile,
+					const char *routeKey, bool purge)
 {
 	if (routeKey == NULL || routeKey[0] == '\0')
 	{
-		log_error("cluster drop requires --cluster");
+		log_error("drop cluster requires a cluster name "
+				  "(\"pg_walserver drop cluster <name> ...\")");
 		return false;
 	}
 
 	if (pgdata == NULL || pgdata[0] == '\0')
 	{
-		log_error("cluster drop requires --pgdata (where pg_walserver.ini "
-				  "lives)");
+		log_error("drop cluster requires --pgdata (this instance's own "
+				  "data root)");
 		return false;
 	}
 
-	char routesPath[MAXPGPATH] = { 0 };
+	char configPath[MAXPGPATH] = { 0 };
 
-	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
+	config_file_path(pgdata, configFile, configPath, sizeof(configPath));
 
 	WsRoute *routes = NULL;
 	int routeCount = 0;
 
-	if (!routes_load(routesPath, &routes, &routeCount))
+	if (!routes_load(configPath, &routes, &routeCount))
 	{
 		/* errors have already been logged */
 		return false;
@@ -437,7 +441,7 @@ ws_cluster_drop_run(const char *pgdata, const char *routeKey, bool purge)
 
 	if (route == NULL)
 	{
-		log_error("No route \"%s\" in \"%s\"", routeKey, routesPath);
+		log_error("No route \"%s\" in \"%s\"", routeKey, configPath);
 		routes_free(routes);
 		return false;
 	}
@@ -447,7 +451,7 @@ ws_cluster_drop_run(const char *pgdata, const char *routeKey, bool purge)
 	strlcpy(routePath, route->path, sizeof(routePath));
 	routes_free(routes);
 
-	if (!routes_drop_section(routesPath, routeKey))
+	if (!routes_drop_section(configPath, routeKey))
 	{
 		/* errors have already been logged */
 		return false;
@@ -459,7 +463,7 @@ ws_cluster_drop_run(const char *pgdata, const char *routeKey, bool purge)
 		{
 			log_warn("Route \"%s\" was dropped from \"%s\", but removing "
 					 "its own directory \"%s\" failed -- remove it by "
-					 "hand", routeKey, routesPath, routePath);
+					 "hand", routeKey, configPath, routePath);
 		}
 		else
 		{
@@ -470,7 +474,7 @@ ws_cluster_drop_run(const char *pgdata, const char *routeKey, bool purge)
 	{
 		log_info("Route \"%s\" dropped from \"%s\"; its own data under "
 				 "\"%s\" was left in place (pass --purge to remove it too)",
-				 routeKey, routesPath, routePath);
+				 routeKey, configPath, routePath);
 	}
 
 	return true;
@@ -480,30 +484,30 @@ ws_cluster_drop_run(const char *pgdata, const char *routeKey, bool purge)
 /*
  * ws_cluster_list_run prints one row per registered route: its key, path,
  * upstream, hostname (or "-"), and "receivewal" setting -- the
- * registration itself, as pg_walserver.ini records it, never the
+ * registration itself, as the config file records it, never the
  * operational/data-layer facts :ref:`pg_walserver_list`'s own "list
  * clusters" already reports (backup/WAL presence, WAL range). Prints a
  * clean "no clusters registered yet" message, not an error, when there
  * are none.
  */
 bool
-ws_cluster_list_run(const char *pgdata)
+ws_cluster_list_run(const char *pgdata, const char *configFile)
 {
 	if (pgdata == NULL || pgdata[0] == '\0')
 	{
-		log_error("cluster list requires --pgdata (or set the PGDATA "
+		log_error("register list requires --pgdata (or set the PGDATA "
 				  "environment variable)");
 		return false;
 	}
 
-	char routesPath[MAXPGPATH] = { 0 };
+	char configPath[MAXPGPATH] = { 0 };
 
-	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
+	config_file_path(pgdata, configFile, configPath, sizeof(configPath));
 
 	WsRoute *routes = NULL;
 	int routeCount = 0;
 
-	if (!routes_load(routesPath, &routes, &routeCount))
+	if (!routes_load(configPath, &routes, &routeCount))
 	{
 		/* errors have already been logged */
 		return false;
@@ -512,7 +516,7 @@ ws_cluster_list_run(const char *pgdata)
 	if (routeCount == 0)
 	{
 		printf("No clusters registered yet under \"%s\" -- see " /* IGNORE-BANNED */
-			   "\"pg_walserver cluster register\".\n", pgdata);
+			   "\"pg_walserver register cluster\".\n", configPath);
 		routes_free(routes);
 		return true;
 	}
@@ -545,13 +549,13 @@ ws_cluster_list_run(const char *pgdata)
  * move), without dropping and re-registering it. An already-running
  * "serve" for the same --pgdata is reloaded immediately afterward
  * (cli_root.c's own cli_cluster_reload_running_server(), the exact same
- * shape "cluster register" and "reload" itself already use): reload's
+ * shape "register cluster" and "reload" itself already use): reload's
  * own reconciliation (receivewal.c's own ws_receivewal_reload()) already
  * detects an "upstream" change on its own and restarts this route's
  * embedded receivewal worker against the new one -- no separate "move the
  * receivewal worker" step needed here, reload already does it. With
  * forceBasebackup, also takes a fresh base backup against the *new*
- * upstream right away (ws_basebackup_run(), cli_basebackup.c) once the
+ * upstream right away (cli_basebackup_run(), cli_basebackup.c) once the
  * property is written -- the common "failover just happened, the old
  * upstream's own base backups are no longer usable against the new
  * timeline, get a current one immediately" case -- rather than leaving a
@@ -559,36 +563,38 @@ ws_cluster_list_run(const char *pgdata)
  * basebackup" call.
  */
 bool
-ws_cluster_set_upstream_run(const char *pgdata, const char *routeKey,
-						   const char *newUpstream, bool forceBasebackup)
+ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
+							const char *routeKey, const char *newUpstream,
+							bool forceBasebackup)
 {
 	if (routeKey == NULL || routeKey[0] == '\0')
 	{
-		log_error("cluster set-upstream requires --cluster");
+		log_error("set-upstream cluster requires a cluster name "
+				  "(\"pg_walserver set-upstream cluster <name> ...\")");
 		return false;
 	}
 
 	if (pgdata == NULL || pgdata[0] == '\0')
 	{
-		log_error("cluster set-upstream requires --pgdata (where "
-				  "pg_walserver.ini lives)");
+		log_error("set-upstream cluster requires --pgdata (this "
+				  "instance's own data root)");
 		return false;
 	}
 
 	if (newUpstream == NULL || newUpstream[0] == '\0')
 	{
-		log_error("cluster set-upstream requires --upstream");
+		log_error("set-upstream cluster requires --pguri");
 		return false;
 	}
 
-	char routesPath[MAXPGPATH] = { 0 };
+	char configPath[MAXPGPATH] = { 0 };
 
-	sformat(routesPath, sizeof(routesPath), "%s/pg_walserver.ini", pgdata);
+	config_file_path(pgdata, configFile, configPath, sizeof(configPath));
 
 	WsRoute *routes = NULL;
 	int routeCount = 0;
 
-	if (!routes_load(routesPath, &routes, &routeCount))
+	if (!routes_load(configPath, &routes, &routeCount))
 	{
 		/* errors have already been logged */
 		return false;
@@ -598,7 +604,7 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *routeKey,
 
 	if (route == NULL)
 	{
-		log_error("No route \"%s\" in \"%s\"", routeKey, routesPath);
+		log_error("No route \"%s\" in \"%s\"", routeKey, configPath);
 		routes_free(routes);
 		return false;
 	}
@@ -608,7 +614,7 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *routeKey,
 	strlcpy(routePath, route->path, sizeof(routePath));
 	routes_free(routes);
 
-	if (!routes_set_property(routesPath, routeKey, "upstream", newUpstream))
+	if (!routes_set_property(configPath, routeKey, "upstream", newUpstream))
 	{
 		/* errors have already been logged */
 		return false;
@@ -623,8 +629,8 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *routeKey,
 	 */
 	WsUpstreamTarget target = { 0 };
 
-	if (cli_resolve_upstream(pgdata, routeKey, NULL, NULL, NULL, NULL, NULL,
-							 &target))
+	if (cli_resolve_upstream(pgdata, configFile, routeKey, NULL, NULL, NULL,
+							 NULL, NULL, &target))
 	{
 		uint64_t systemIdentifier = 0;
 
@@ -644,8 +650,8 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *routeKey,
 	{
 		WsUpstreamTarget backupTarget = { 0 };
 
-		if (!cli_resolve_upstream(pgdata, routeKey, NULL, NULL, NULL, NULL,
-								  NULL, &backupTarget) ||
+		if (!cli_resolve_upstream(pgdata, configFile, routeKey, NULL, NULL,
+								  NULL, NULL, NULL, &backupTarget) ||
 			!cli_basebackup_run(&backupTarget, NULL, 0))
 		{
 			log_error("Route \"%s\"'s own upstream was updated, but the "
