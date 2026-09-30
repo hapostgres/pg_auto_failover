@@ -8,6 +8,8 @@
 
 #include <errno.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 #include <string.h>
 
@@ -97,6 +99,110 @@ static void
 slot_marker_path(const WsRoute *route, const char *slotName, char *dest, size_t destSize)
 {
 	sformat(dest, destSize, "%s/.slot_%s", route->path, slotName);
+}
+
+
+/*
+ * slot_lock_path is deliberately a *different* file from slot_marker_
+ * path()'s own ".slot_<name>" -- see ws_replication_slot_try_lock()'s
+ * own comment for why: a file that write_file_atomic() ever replaces
+ * via rename() cannot double as a stable flock() target.
+ */
+static void
+slot_lock_path(const WsRoute *route, const char *slotName, char *dest, size_t destSize)
+{
+	sformat(dest, destSize, "%s/.slot_%s.lock", route->path, slotName);
+}
+
+
+/*
+ * ws_replication_slot_try_lock serializes concurrent streaming attempts
+ * against the same slot, the same "one active connection per slot" rule
+ * a real PostgreSQL walsender enforces -- without it, two concurrent
+ * START_REPLICATION sessions naming the same slot could each advance and
+ * persist its own "restart_lsn" independently, and whichever persists
+ * last wins regardless of which one is actually further ahead, silently
+ * moving the slot's own floor backward (still only ever a retention
+ * cost -- cli_archive_cleanup.c only ever keeps *more* WAL for a smaller
+ * restart_lsn, never removes something a real reader still needs -- but
+ * a real violation of "restart_lsn only ever moves forward" all the
+ * same).
+ *
+ * This locks a dedicated, never-renamed ".slot_<name>.lock" file, never
+ * slot_marker_path()'s own ".slot_<name>" -- that file's own periodic
+ * rewrite (ws_replication_slot_update_restart_lsn(), a temp file plus
+ * rename()) swaps in a fresh inode each time, so a lock taken against it
+ * would only ever protect whichever incarnation happened to be open at
+ * lock time, not the slot as a whole. The lock file itself is never
+ * rewritten, only opened, so this problem doesn't apply to it.
+ *
+ * flock()'s own release-on-close() semantics (including on an unclean
+ * process exit -- a crashed or killed session releases it for free, no
+ * separate staleness detection needed) is exactly the property wanted
+ * here: each connection is its own forked child (accept_loop.c), so
+ * "the lock is held for as long as this process has the fd open" is
+ * already "for as long as this one streaming session is alive".
+ *
+ * Returns an open fd to keep for as long as the lock should be held
+ * (release with ws_replication_slot_unlock()), or -1 -- already locked
+ * by another session, or some other error, either way already logged --
+ * when the lock could not be acquired.
+ */
+int
+ws_replication_slot_try_lock(const WsRoute *route, const char *slotName)
+{
+	if (route == NULL || route->path[0] == '\0' || !slot_name_is_safe(slotName))
+	{
+		return -1;
+	}
+
+	char path[MAXPGPATH];
+
+	slot_lock_path(route, slotName, path, sizeof(path));
+
+	int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600); /* IGNORE-BANNED */
+
+	if (fd < 0)
+	{
+		log_warn("Failed to open replication slot lock file \"%s\": %m", path);
+		return -1;
+	}
+
+	if (flock(fd, LOCK_EX | LOCK_NB) != 0)
+	{
+		if (errno == EWOULDBLOCK)
+		{
+			log_warn("Replication slot \"%s\" is already active for "
+					 "another session", slotName);
+		}
+		else
+		{
+			log_warn("Failed to lock \"%s\": %m", path);
+		}
+
+		close(fd);
+		return -1;
+	}
+
+	return fd;
+}
+
+
+/*
+ * ws_replication_slot_unlock releases a lock ws_replication_slot_try_
+ * lock() returned -- close() alone already releases the flock(), this
+ * just gives the release its own named call site rather than a bare
+ * close() wherever a caller happens to return. Safe to call with fd < 0
+ * (nothing was ever locked, e.g. slotName was empty -- no SLOT clause
+ * given at all).
+ */
+void
+ws_replication_slot_unlock(int fd)
+{
+	if (fd >= 0)
+	{
+		close(fd);
+	}
 }
 
 
@@ -467,20 +573,45 @@ cmd_drop_replication_slot(int sock, const WsRoute *route,
 
 	slot_marker_path(route, slotName, path, sizeof(path));
 
-	if (unlink(path) != 0)
+	if (!file_exists(path))
 	{
-		if (errno == ENOENT)
-		{
-			ws_send_error_response(sock, "42704",
-								   "replication slot does not exist");
-		}
-		else
-		{
-			log_error("Failed to remove replication slot file \"%s\": %m", path);
-			ws_send_error_response(sock, "58030",
-								   "failed to drop the replication slot");
-		}
+		ws_send_error_response(sock, "42704",
+							   "replication slot does not exist");
+		return;
+	}
 
+	/*
+	 * Refuse to drop a slot a START_REPLICATION session is actively
+	 * streaming against, the same as real PostgreSQL -- ws_replication_
+	 * slot_try_lock() (cmd_replication_slot.h) is the same lock that
+	 * session itself holds for as long as it's alive.
+	 */
+	int lockFd = ws_replication_slot_try_lock(route, slotName);
+
+	if (lockFd < 0)
+	{
+		ws_send_error_response(sock, "55006",
+							   "replication slot is active for another session");
+		return;
+	}
+
+	bool ok = unlink(path) == 0;
+
+	if (!ok)
+	{
+		log_error("Failed to remove replication slot file \"%s\": %m", path);
+	}
+
+	char lockPath[MAXPGPATH];
+
+	slot_lock_path(route, slotName, lockPath, sizeof(lockPath));
+	ws_replication_slot_unlock(lockFd);
+	(void) unlink(lockPath);
+
+	if (!ok)
+	{
+		ws_send_error_response(sock, "58030",
+							   "failed to drop the replication slot");
 		return;
 	}
 

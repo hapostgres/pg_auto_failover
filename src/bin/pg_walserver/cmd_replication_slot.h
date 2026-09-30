@@ -12,6 +12,14 @@
  *   still needs -- unconditionally, the same as a real Postgres slot,
  *   with no flag to opt out short of dropping the slot itself.
  *
+ *   At most one START_REPLICATION session may stream against a given
+ *   slot at a time (ws_replication_slot_try_lock()/_unlock(), below),
+ *   the same "one active connection per slot" rule a real PostgreSQL
+ *   walsender enforces -- without it, two concurrent sessions could each
+ *   persist their own "restart_lsn" independently, and whichever wrote
+ *   last would win regardless of which was actually further ahead.
+ *
+ *
  * Licensed under the PostgreSQL License.
  *
  */
@@ -94,5 +102,25 @@ bool ws_replication_slot_oldest_restart_lsn(const WsRoute *route,
 											char *slotNameOut,
 											size_t slotNameOutSize,
 											char *lsnOut, size_t lsnOutSize);
+
+/*
+ * ws_replication_slot_try_lock serializes concurrent START_REPLICATION
+ * sessions against the same slot, the same "one active connection per
+ * slot" rule a real PostgreSQL walsender enforces -- see cmd_
+ * replication_slot.c's own comment for the full mechanism (a dedicated,
+ * never-renamed ".lock" file, flock()'d for the whole session, released
+ * automatically on close() including an unclean process exit). Returns
+ * an open fd to hold for the session's own duration (release with ws_
+ * replication_slot_unlock()), or -1 -- already active elsewhere, or some
+ * other error, either way already logged -- when the lock could not be
+ * acquired.
+ */
+int ws_replication_slot_try_lock(const WsRoute *route, const char *slotName);
+
+/*
+ * ws_replication_slot_unlock releases a lock ws_replication_slot_try_
+ * lock() returned. Safe to call with fd < 0 (nothing was ever locked).
+ */
+void ws_replication_slot_unlock(int fd);
 
 #endif /* WS_CMD_REPLICATION_SLOT_H */
