@@ -380,6 +380,33 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 
 static WsWalServerTarget archiveTarget = { 0 };
 
+static int cli_archive_getopt(int argc, char **argv);
+static void cli_archive_command_run(int argc, char **argv);
+
+CommandLine archive_command =
+	make_command("archive-wal",
+				 "Push one WAL/.backup file into a pg_walserver route "
+				 "(archive_command)",
+				 "<path-to-file> <filename> --cluster <name> --host <host> "
+				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
+				 "  --cluster   the cluster to archive into (sent as "
+				 "dbname)\n"
+				 "  --host      the pg_walserver host to connect to\n"
+				 "  --port      the pg_walserver port to connect to "
+				 "(default: 6543)\n"
+				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+																				  "  --sslmode   libpq sslmode (default: libpq's own "
+																				  "default, \"prefer\")\n"
+																				  "\n"
+																				  "  Meant to be used as (part of) a Postgres "
+																				  "archive_command, e.g.:\n"
+																				  "    archive_command = 'pg_walserver archive-wal %%p "
+																				  "%%f --cluster mycluster \\\n"
+																				  "                       --host archive.example.com "
+																				  "--user archiver_repl'\n",
+				 cli_archive_getopt, cli_archive_command_run);
+
+
 /*
  * cli_archive_getopt parses "pg_walserver archive-wal"'s own flags into the
  * file-scope statics above.
@@ -421,27 +448,3 @@ cli_archive_command_run(int argc, char **argv)
 
 	exit(ws_archive_run(&archiveTarget, argv[0], argv[1]) ? 0 : 1);
 }
-
-
-CommandLine archive_command =
-	make_command("archive-wal",
-				 "Push one WAL/.backup file into a pg_walserver route "
-				 "(archive_command)",
-				 "<path-to-file> <filename> --cluster <name> --host <host> "
-				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
-				 "  --cluster   the cluster to archive into (sent as "
-				 "dbname)\n"
-				 "  --host      the pg_walserver host to connect to\n"
-				 "  --port      the pg_walserver port to connect to "
-				 "(default: 6543)\n"
-				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
-																				  "  --sslmode   libpq sslmode (default: libpq's own "
-																				  "default, \"prefer\")\n"
-																				  "\n"
-																				  "  Meant to be used as (part of) a Postgres "
-																				  "archive_command, e.g.:\n"
-																				  "    archive_command = 'pg_walserver archive-wal %%p "
-																				  "%%f --cluster mycluster \\\n"
-																				  "                       --host archive.example.com "
-																				  "--user archiver_repl'\n",
-				 cli_archive_getopt, cli_archive_command_run);

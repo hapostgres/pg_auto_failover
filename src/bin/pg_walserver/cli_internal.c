@@ -59,6 +59,46 @@ static struct option internalPgReceivewalLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_internal_pg_receivewal_getopt(int argc, char **argv);
+static void cli_internal_pg_receivewal_run(int argc, char **argv);
+
+static CommandLine service_pg_receivewal_command =
+	make_command("pg-receivewal",
+				 "Subprocess entry point for the embedded receivewal worker",
+				 "--route <key> --upstream <conninfo> --path <dir>",
+				 "  --route     the route this receivewal worker belongs to "
+				 "(process title only)\n"
+				 "  --upstream  a libpq connection string to receive WAL "
+				 "from\n"
+				 "  --path      the route's own directory to receive "
+				 "into\n",
+				 cli_internal_pg_receivewal_getopt,
+				 cli_internal_pg_receivewal_run);
+
+
+static CommandLine *internal_service_subcommands[] = {
+	&service_pg_receivewal_command,
+	NULL
+};
+
+static CommandLine internal_service_commands =
+	make_hidden_command_set("service",
+							"Subprocess entry points for receivewal.c's own "
+							"supervisor",
+							NULL, NULL, NULL, internal_service_subcommands);
+
+static CommandLine *internal_subcommands[] = {
+	&internal_service_commands,
+	NULL
+};
+
+CommandLine internal_commands =
+	make_hidden_command_set("internal",
+							"Internal subprocess entry points -- not for "
+							"direct use",
+							NULL, NULL, NULL, internal_subcommands);
+
+
 static int
 cli_internal_pg_receivewal_getopt(int argc, char **argv)
 {
@@ -258,40 +298,3 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 
 	exit(rc);
 }
-
-
-static CommandLine service_pg_receivewal_command =
-	make_command("pg-receivewal",
-				 "Subprocess entry point for the embedded receivewal worker",
-				 "--route <key> --upstream <conninfo> --path <dir>",
-				 "  --route     the route this receivewal worker belongs to "
-				 "(process title only)\n"
-				 "  --upstream  a libpq connection string to receive WAL "
-				 "from\n"
-				 "  --path      the route's own directory to receive "
-				 "into\n",
-				 cli_internal_pg_receivewal_getopt,
-				 cli_internal_pg_receivewal_run);
-
-
-static CommandLine *internal_service_subcommands[] = {
-	&service_pg_receivewal_command,
-	NULL
-};
-
-static CommandLine internal_service_commands =
-	make_hidden_command_set("service",
-							"Subprocess entry points for receivewal.c's own "
-							"supervisor",
-							NULL, NULL, NULL, internal_service_subcommands);
-
-static CommandLine *internal_subcommands[] = {
-	&internal_service_commands,
-	NULL
-};
-
-CommandLine internal_commands =
-	make_hidden_command_set("internal",
-							"Internal subprocess entry points -- not for "
-							"direct use",
-							NULL, NULL, NULL, internal_subcommands);

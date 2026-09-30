@@ -80,6 +80,66 @@ static struct option serveLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_serve_getopt(int argc, char **argv);
+static void cli_serve_run(int argc, char **argv);
+
+CommandLine serve_command =
+	make_command("serve",
+				 "Run the pg_walserver accept loop",
+				 "[--port <port>] [--pgdata <path> | --insecure] "
+				 "[--config <path>] "
+				 "[--ssl-cert-file <path> --ssl-key-file <path>] "
+				 "[--ssl-ca-file <path>] "
+				 "[--auth-timeout <seconds>]",
+				 "  --port      port to listen on (default: 6543, or "
+				 "whatever \"pg_walserver\n"
+				 "              setup\" persisted)\n"
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              the PGDATA environment variable); every "
+				 "route's own storage\n"
+				 "              (WAL, base backups) lives under it, and "
+				 "so does\n"
+				 "              <pgdata>/pg_walserver_hba.conf, unless "
+				 "--insecure is given\n"
+				 "  --config  where the config file mapping each "
+				 "route key (an opaque\n"
+				 "              string; pg_auto_failover's own convention "
+				 "is\n"
+				 "              \"<formation>/<group>\") to its own "
+				 "storage path lives --\n"
+				 "              defaults to <pgdata>/pg_walserver.ini, or "
+				 "the\n"
+				 "              PG_WALSERVER_CONFIG_FILE environment "
+				 "variable; independent\n"
+				 "              of --pgdata, for a Debian-style "
+				 "deployment (config under\n"
+				 "              /etc/pg_walserver/, data under "
+				 "/var/lib/pg_walserver/)\n"
+				 "  --insecure  no --pgdata: accept any dbname WITHOUT ANY "
+				 "authentication;\n"
+				 "              for manual testing only, never on a "
+				 "reachable network\n"
+				 "  --ssl-cert-file / --ssl-key-file  server certificate "
+				 "(default:\n"
+				 "              <pgdata>/server.crt / <pgdata>/server.key, "
+				 "or whatever\n"
+				 "              \"pg_walserver setup\" persisted)\n"
+				 "  --ssl-ca-file  trusted CA bundle for TLS client "
+				 "certificate verification\n"
+				 "              (default: <pgdata>/ca.crt); required for a "
+				 "\"clientcert=\n"
+				 "              verify-full\" HBA line to have anything to "
+				 "validate against\n"
+				 "  --auth-timeout  absolute deadline in seconds for a "
+				 "connection to\n"
+				 "              complete startup, TLS, HBA and "
+				 "authentication (default: 30,\n"
+				 "              or whatever \"pg_walserver setup\" "
+				 "persisted)\n",
+				 cli_serve_getopt, cli_serve_run);
+
+
 /*
  * cli_serve_getopt parses every server-mode flag (--port, --pgdata,
  * --ssl-cert-file, --ssl-key-file, --ssl-ca-file, --auth-timeout,
@@ -473,60 +533,3 @@ cli_serve_run(int argc, char **argv)
 
 	exit(ok ? 0 : 1);
 }
-
-
-CommandLine serve_command =
-	make_command("serve",
-				 "Run the pg_walserver accept loop",
-				 "[--port <port>] [--pgdata <path> | --insecure] "
-				 "[--config <path>] "
-				 "[--ssl-cert-file <path> --ssl-key-file <path>] "
-				 "[--ssl-ca-file <path>] "
-				 "[--auth-timeout <seconds>]",
-				 "  --port      port to listen on (default: 6543, or "
-				 "whatever \"pg_walserver\n"
-				 "              setup\" persisted)\n"
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              the PGDATA environment variable); every "
-				 "route's own storage\n"
-				 "              (WAL, base backups) lives under it, and "
-				 "so does\n"
-				 "              <pgdata>/pg_walserver_hba.conf, unless "
-				 "--insecure is given\n"
-				 "  --config  where the config file mapping each "
-				 "route key (an opaque\n"
-				 "              string; pg_auto_failover's own convention "
-				 "is\n"
-				 "              \"<formation>/<group>\") to its own "
-				 "storage path lives --\n"
-				 "              defaults to <pgdata>/pg_walserver.ini, or "
-				 "the\n"
-				 "              PG_WALSERVER_CONFIG_FILE environment "
-				 "variable; independent\n"
-				 "              of --pgdata, for a Debian-style "
-				 "deployment (config under\n"
-				 "              /etc/pg_walserver/, data under "
-				 "/var/lib/pg_walserver/)\n"
-				 "  --insecure  no --pgdata: accept any dbname WITHOUT ANY "
-				 "authentication;\n"
-				 "              for manual testing only, never on a "
-				 "reachable network\n"
-				 "  --ssl-cert-file / --ssl-key-file  server certificate "
-				 "(default:\n"
-				 "              <pgdata>/server.crt / <pgdata>/server.key, "
-				 "or whatever\n"
-				 "              \"pg_walserver setup\" persisted)\n"
-				 "  --ssl-ca-file  trusted CA bundle for TLS client "
-				 "certificate verification\n"
-				 "              (default: <pgdata>/ca.crt); required for a "
-				 "\"clientcert=\n"
-				 "              verify-full\" HBA line to have anything to "
-				 "validate against\n"
-				 "  --auth-timeout  absolute deadline in seconds for a "
-				 "connection to\n"
-				 "              complete startup, TLS, HBA and "
-				 "authentication (default: 30,\n"
-				 "              or whatever \"pg_walserver setup\" "
-				 "persisted)\n",
-				 cli_serve_getopt, cli_serve_run);

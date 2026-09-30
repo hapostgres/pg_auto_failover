@@ -99,6 +99,272 @@
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 #endif
 
+static int cli_cluster_register_getopt(int argc, char **argv);
+static void cli_cluster_register_command_run(int argc, char **argv);
+
+static int cli_cluster_drop_getopt(int argc, char **argv);
+static void cli_cluster_drop_command_run(int argc, char **argv);
+
+static int cli_cluster_enable_getopt(int argc, char **argv);
+static void cli_cluster_enable_command_run(int argc, char **argv);
+
+static int cli_cluster_list_getopt(int argc, char **argv);
+static void cli_cluster_list_command_run(int argc, char **argv);
+
+static int cli_cluster_prune_getopt(int argc, char **argv);
+static void cli_cluster_prune_command_run(int argc, char **argv);
+
+static int cli_cluster_set_upstream_getopt(int argc, char **argv);
+static void cli_cluster_set_upstream_command_run(int argc, char **argv);
+
+CommandLine cluster_register_command =
+	make_command(
+		"register",
+		"Register (or validate) one cluster this pg_walserver "
+		"archives",
+		"<name> --pgdata <path> [--config <path>] "
+		"[--path <dir>] "
+		"[--pguri <conninfo> | --host <host> [--port <port>] "
+		"[--user <name>]] [--hostname <fqdn>] "
+		"[--receivewal pull|none | --no-receivewal] "
+		"[--ssl-self-signed] [--force]",
+		"  <name>      the cluster's own name, given positionally "
+		"(never a flag)\n"
+		"  --pgdata    this instance's own data root (defaults to "
+		"PGDATA)\n"
+		"  --config  where the config file itself lives, "
+		"independent of\n"
+		"              --pgdata (defaults to "
+		"<pgdata>/pg_walserver.ini, or\n"
+		"              PG_WALSERVER_CONFIG_FILE)\n"
+		"  --path      the route's own directory, created if "
+		"missing; defaults\n"
+		"              to <pgdata>/<name>\n"
+		"  --pguri     a libpq connection string, written into the "
+		"route's own\n"
+		"              \"upstream\" property\n"
+		"  --host / --port / --user  further override individual "
+		"connection\n"
+		"              parameters (default port: 5432, default "
+		"user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+											 "  --hostname  the route's own TLS SNI hostname, written "
+											 "into its\n"
+											 "              \"hostname\" property -- the only way a "
+											 "real physical\n"
+											 "              standby can address this route by name "
+											 "once more than\n"
+											 "              one exists (dbname alone cannot, see "
+											 "README.md's\n"
+											 "              \"Routing beyond dbname: TLS SNI\" "
+											 "section); creates a\n"
+											 "              self-signed certificate for\n"
+											 "              --pgdata automatically, the moment a "
+											 "second route is\n"
+											 "              added, if none exists yet (or right away "
+											 "with\n"
+											 "              --ssl-self-signed, below)\n"
+											 "  --receivewal pull  write \"receivewal = pull\" into the "
+											 "route's own section\n"
+											 "              (the default now, even with no --receivewal "
+											 "flag at all):\n"
+											 "              the next \"pg_walserver serve\" forks a "
+											 "supervised child\n"
+											 "              running the embedded pg_receivewal "
+											 "worker against\n"
+											 "              this route's own \"upstream\" (receivewal.c)"
+											 " -- see README.md's\n"
+											 "              \"The embedded receivewal worker\" section\n"
+											 "  --receivewal none / --no-receivewal  opt this route out of "
+											 "the embedded\n"
+											 "              receivewal worker (push-only, archive_command-only)"
+											 "\n"
+											 "  --ssl-self-signed  create a self-signed certificate "
+											 "for --pgdata right\n"
+											 "              away, whether or not this is the only "
+											 "route -- skips a\n"
+											 "              separate \"pg_walserver create-cert\" call "
+											 "entirely; an\n"
+											 "              already-existing certificate is left "
+											 "untouched\n"
+											 "  --force     change an already-existing route's path, "
+											 "or overwrite an\n"
+											 "              already-recorded, different system "
+											 "identifier\n"
+											 "\n"
+											 "Reloads an already-running \"pg_walserver serve\" for this "
+											 "--pgdata, if one is\n"
+											 "running, so it picks up this route immediately; with none "
+											 "running, the\n"
+											 "config just written takes effect the next time \"serve\" "
+											 "starts. Either\n"
+											 "way, \"serve\" itself takes this route's first base backup "
+											 "automatically\n"
+											 "if it doesn't have one yet -- \"cluster register\" never "
+											 "takes one itself.\n",
+		cli_cluster_register_getopt, cli_cluster_register_command_run);
+
+CommandLine cluster_drop_command =
+	make_command("drop",
+				 "Drop (disable) one cluster, or fully remove it with "
+				 "--purge",
+				 "<name> --pgdata <path> [--config <path>] [--purge]",
+				 "  <name>      the cluster's own name, given positionally "
+				 "(never a flag)\n"
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --purge     also remove the registration and the "
+				 "route's own on-disk\n"
+				 "              data (every base backup and WAL segment "
+				 "it holds) -- without\n"
+				 "              it, the route is only marked disabled: "
+				 "its embedded\n"
+				 "              receivewal worker is stopped, it refuses "
+				 "every connection\n"
+				 "              and command (basebackup, fetch-systemid, "
+				 "set-upstream,\n"
+				 "              CHECK_FILE/ARCHIVE_FILE/archive-wal/"
+				 "restore-wal), and its\n"
+				 "              own data is left in place -- see \"cluster "
+				 "list --disabled\"\n"
+				 "              to find it again, \"cluster enable\" to "
+				 "bring it back, or\n"
+				 "              \"cluster prune\" to remove every dropped "
+				 "cluster at once\n",
+				 cli_cluster_drop_getopt, cli_cluster_drop_command_run);
+
+CommandLine cluster_enable_command =
+	make_command("enable",
+				 "Bring a dropped (disabled) cluster back",
+				 "<name> --pgdata <path> [--config <path>]",
+				 "  <name>      the cluster's own name, given positionally "
+				 "(never a flag)\n"
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "\n"
+				 "The symmetric counterpart to \"cluster drop\" (without "
+				 "--purge): clears\n"
+				 "the route's own \"disabled\" property, nothing else -- "
+				 "its own \"path\"/\n"
+				 "\"upstream\"/\"hostname\" are already on file, so, "
+				 "unlike re-running\n"
+				 "\"cluster register\" to the same end, no connection "
+				 "URI needs to be\n"
+				 "re-supplied. Reloads an already-running \"pg_walserver "
+				 "serve\" for the\n"
+				 "same --pgdata immediately afterward, so its embedded "
+				 "receivewal worker\n"
+				 "(if \"receivewal = pull\") starts again right away. A "
+				 "cluster that was\n"
+				 "already active is a safe no-op.\n",
+				 cli_cluster_enable_getopt, cli_cluster_enable_command_run);
+
+CommandLine cluster_list_command =
+	make_command("list",
+				 "List every cluster this pg_walserver has registered",
+				 "[--pgdata <path> | --config <path>] [--upstream] "
+				 "[--disabled]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives; either "
+				 "this or\n"
+				 "              --pgdata is enough (defaults to "
+				 "<pgdata>/pg_walserver.ini,\n"
+				 "              or PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --upstream  also print each cluster's own upstream "
+				 "connection\n"
+				 "              string, pivoted into one block per "
+				 "cluster instead of\n"
+				 "              a table column (skipped by default -- "
+				 "these are often\n"
+				 "              too wide for a readable row)\n"
+				 "  --disabled  list dropped (disabled) clusters instead "
+				 "of active ones\n"
+				 "              -- \"cluster drop\" (without --purge) "
+				 "marks a cluster\n"
+				 "              this way rather than removing it; see "
+				 "\"cluster prune\"\n"
+				 "              to remove every one of them at once\n",
+				 cli_cluster_list_getopt, cli_cluster_list_command_run);
+
+CommandLine cluster_prune_command =
+	make_command("prune",
+				 "Remove every dropped (disabled) cluster's registration "
+				 "and on-disk data",
+				 "[--pgdata <path> | --config <path>]",
+				 "  --pgdata    this instance's own data root. Either "
+				 "this or --config\n"
+				 "              is enough\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "\n"
+				 "The bulk equivalent of \"cluster drop --purge <name>\" "
+				 "run once per\n"
+				 "cluster \"cluster list --disabled\" shows -- every "
+				 "dropped cluster's own\n"
+				 "registration and on-disk data (every base backup and "
+				 "WAL segment it\n"
+				 "holds) is removed. Never touches an active cluster.\n",
+				 cli_cluster_prune_getopt, cli_cluster_prune_command_run);
+
+CommandLine cluster_set_upstream_command =
+	make_command("set-upstream",
+				 "Point an already-registered cluster at a new upstream "
+				 "(e.g. after a failover)",
+				 "<name> --pgdata <path> [--config <path>] "
+				 "--pguri <conninfo> [--force-basebackup]",
+				 "  <name>      the cluster's own name, given positionally "
+				 "(never a flag)\n"
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --pguri     the new libpq connection string, replacing "
+				 "the route's\n"
+				 "              own \"upstream\" property\n"
+				 "  --force-basebackup  also take a fresh base backup "
+				 "against the new\n"
+				 "              upstream right away, rather than waiting "
+				 "for the next\n"
+				 "              scheduled \"pg_walserver basebackup\"\n"
+				 "\n"
+				 "Reloads an already-running \"pg_walserver serve\" for "
+				 "this --pgdata, if\n"
+				 "one is running: its own reconciliation already detects "
+				 "the \"upstream\"\n"
+				 "change and restarts this route's embedded receivewal "
+				 "worker against\n"
+				 "the new one -- no separate step needed to \"move\" it.\n",
+				 cli_cluster_set_upstream_getopt,
+				 cli_cluster_set_upstream_command_run);
+
+static CommandLine *cluster_subcommands[] = {
+	&cluster_register_command,
+	&cluster_drop_command,
+	&cluster_enable_command,
+	&cluster_list_command,
+	&cluster_set_upstream_command,
+	&cluster_prune_command,
+	NULL
+};
+
+CommandLine cluster_commands =
+	make_command_set("cluster",
+					 "Register, drop, enable, list, re-point, or prune "
+					 "the clusters this pg_walserver archives",
+					 NULL, NULL, NULL, cluster_subcommands);
+
 
 /*
  * WS_RMTREE_RETRY_ATTEMPTS/WS_RMTREE_RETRY_USEC: SIGHUP-ing a running
@@ -1311,92 +1577,6 @@ cli_cluster_register_command_run(int argc, char **argv)
 }
 
 
-CommandLine cluster_register_command =
-	make_command("register",
-				 "Register (or validate) one cluster this pg_walserver "
-				 "archives",
-				 "<name> --pgdata <path> [--config <path>] "
-				 "[--path <dir>] "
-				 "[--pguri <conninfo> | --host <host> [--port <port>] "
-				 "[--user <name>]] [--hostname <fqdn>] "
-				 "[--receivewal pull|none | --no-receivewal] "
-				 "[--ssl-self-signed] [--force]",
-				 "  <name>      the cluster's own name, given positionally "
-				 "(never a flag)\n"
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives, "
-				 "independent of\n"
-				 "              --pgdata (defaults to "
-				 "<pgdata>/pg_walserver.ini, or\n"
-				 "              PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --path      the route's own directory, created if "
-				 "missing; defaults\n"
-				 "              to <pgdata>/<name>\n"
-				 "  --pguri     a libpq connection string, written into the "
-				 "route's own\n"
-				 "              \"upstream\" property\n"
-				 "  --host / --port / --user  further override individual "
-				 "connection\n"
-				 "              parameters (default port: 5432, default "
-				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
-													  "  --hostname  the route's own TLS SNI hostname, written "
-													  "into its\n"
-													  "              \"hostname\" property -- the only way a "
-													  "real physical\n"
-													  "              standby can address this route by name "
-													  "once more than\n"
-													  "              one exists (dbname alone cannot, see "
-													  "README.md's\n"
-													  "              \"Routing beyond dbname: TLS SNI\" "
-													  "section); creates a\n"
-													  "              self-signed certificate for\n"
-													  "              --pgdata automatically, the moment a "
-													  "second route is\n"
-													  "              added, if none exists yet (or right away "
-													  "with\n"
-													  "              --ssl-self-signed, below)\n"
-													  "  --receivewal pull  write \"receivewal = pull\" into the "
-													  "route's own section\n"
-													  "              (the default now, even with no --receivewal "
-													  "flag at all):\n"
-													  "              the next \"pg_walserver serve\" forks a "
-													  "supervised child\n"
-													  "              running the embedded pg_receivewal "
-													  "worker against\n"
-													  "              this route's own \"upstream\" (receivewal.c)"
-													  " -- see README.md's\n"
-													  "              \"The embedded receivewal worker\" section\n"
-													  "  --receivewal none / --no-receivewal  opt this route out of "
-													  "the embedded\n"
-													  "              receivewal worker (push-only, archive_command-only)"
-													  "\n"
-													  "  --ssl-self-signed  create a self-signed certificate "
-													  "for --pgdata right\n"
-													  "              away, whether or not this is the only "
-													  "route -- skips a\n"
-													  "              separate \"pg_walserver create-cert\" call "
-													  "entirely; an\n"
-													  "              already-existing certificate is left "
-													  "untouched\n"
-													  "  --force     change an already-existing route's path, "
-													  "or overwrite an\n"
-													  "              already-recorded, different system "
-													  "identifier\n"
-													  "\n"
-													  "Reloads an already-running \"pg_walserver serve\" for this "
-													  "--pgdata, if one is\n"
-													  "running, so it picks up this route immediately; with none "
-													  "running, the\n"
-													  "config just written takes effect the next time \"serve\" "
-													  "starts. Either\n"
-													  "way, \"serve\" itself takes this route's first base backup "
-													  "automatically\n"
-													  "if it doesn't have one yet -- \"cluster register\" never "
-													  "takes one itself.\n",
-				 cli_cluster_register_getopt, cli_cluster_register_command_run);
-
-
 static char clusterDropPgdata[MAXPGPATH] = { 0 };
 static char clusterDropConfigFile[MAXPGPATH] = { 0 };
 static char clusterDropRoute[NAMEDATALEN + 16] = { 0 };
@@ -1495,40 +1675,6 @@ cli_cluster_drop_command_run(int argc, char **argv)
 }
 
 
-CommandLine cluster_drop_command =
-	make_command("drop",
-				 "Drop (disable) one cluster, or fully remove it with "
-				 "--purge",
-				 "<name> --pgdata <path> [--config <path>] [--purge]",
-				 "  <name>      the cluster's own name, given positionally "
-				 "(never a flag)\n"
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --purge     also remove the registration and the "
-				 "route's own on-disk\n"
-				 "              data (every base backup and WAL segment "
-				 "it holds) -- without\n"
-				 "              it, the route is only marked disabled: "
-				 "its embedded\n"
-				 "              receivewal worker is stopped, it refuses "
-				 "every connection\n"
-				 "              and command (basebackup, fetch-systemid, "
-				 "set-upstream,\n"
-				 "              CHECK_FILE/ARCHIVE_FILE/archive-wal/"
-				 "restore-wal), and its\n"
-				 "              own data is left in place -- see \"cluster "
-				 "list --disabled\"\n"
-				 "              to find it again, \"cluster enable\" to "
-				 "bring it back, or\n"
-				 "              \"cluster prune\" to remove every dropped "
-				 "cluster at once\n",
-				 cli_cluster_drop_getopt, cli_cluster_drop_command_run);
-
-
 static char clusterEnablePgdata[MAXPGPATH] = { 0 };
 static char clusterEnableConfigFile[MAXPGPATH] = { 0 };
 static char clusterEnableRoute[NAMEDATALEN + 16] = { 0 };
@@ -1619,37 +1765,6 @@ cli_cluster_enable_command_run(int argc, char **argv)
 }
 
 
-CommandLine cluster_enable_command =
-	make_command("enable",
-				 "Bring a dropped (disabled) cluster back",
-				 "<name> --pgdata <path> [--config <path>]",
-				 "  <name>      the cluster's own name, given positionally "
-				 "(never a flag)\n"
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "\n"
-				 "The symmetric counterpart to \"cluster drop\" (without "
-				 "--purge): clears\n"
-				 "the route's own \"disabled\" property, nothing else -- "
-				 "its own \"path\"/\n"
-				 "\"upstream\"/\"hostname\" are already on file, so, "
-				 "unlike re-running\n"
-				 "\"cluster register\" to the same end, no connection "
-				 "URI needs to be\n"
-				 "re-supplied. Reloads an already-running \"pg_walserver "
-				 "serve\" for the\n"
-				 "same --pgdata immediately afterward, so its embedded "
-				 "receivewal worker\n"
-				 "(if \"receivewal = pull\") starts again right away. A "
-				 "cluster that was\n"
-				 "already active is a safe no-op.\n",
-				 cli_cluster_enable_getopt, cli_cluster_enable_command_run);
-
-
 static char clusterListPgdata[MAXPGPATH] = { 0 };
 static char clusterListConfigFile[MAXPGPATH] = { 0 };
 static bool clusterListShowUpstream = false;
@@ -1738,35 +1853,6 @@ cli_cluster_list_command_run(int argc, char **argv)
 }
 
 
-CommandLine cluster_list_command =
-	make_command("list",
-				 "List every cluster this pg_walserver has registered",
-				 "[--pgdata <path> | --config <path>] [--upstream] "
-				 "[--disabled]",
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives; either "
-				 "this or\n"
-				 "              --pgdata is enough (defaults to "
-				 "<pgdata>/pg_walserver.ini,\n"
-				 "              or PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --upstream  also print each cluster's own upstream "
-				 "connection\n"
-				 "              string, pivoted into one block per "
-				 "cluster instead of\n"
-				 "              a table column (skipped by default -- "
-				 "these are often\n"
-				 "              too wide for a readable row)\n"
-				 "  --disabled  list dropped (disabled) clusters instead "
-				 "of active ones\n"
-				 "              -- \"cluster drop\" (without --purge) "
-				 "marks a cluster\n"
-				 "              this way rather than removing it; see "
-				 "\"cluster prune\"\n"
-				 "              to remove every one of them at once\n",
-				 cli_cluster_list_getopt, cli_cluster_list_command_run);
-
-
 static char clusterPrunePgdata[MAXPGPATH] = { 0 };
 static char clusterPruneConfigFile[MAXPGPATH] = { 0 };
 
@@ -1834,29 +1920,6 @@ cli_cluster_prune_command_run(int argc, char **argv)
 	exit(ws_cluster_prune_run(clusterPrunePgdata,
 							  clusterPruneConfigFile) ? 0 : 1);
 }
-
-
-CommandLine cluster_prune_command =
-	make_command("prune",
-				 "Remove every dropped (disabled) cluster's registration "
-				 "and on-disk data",
-				 "[--pgdata <path> | --config <path>]",
-				 "  --pgdata    this instance's own data root. Either "
-				 "this or --config\n"
-				 "              is enough\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "\n"
-				 "The bulk equivalent of \"cluster drop --purge <name>\" "
-				 "run once per\n"
-				 "cluster \"cluster list --disabled\" shows -- every "
-				 "dropped cluster's own\n"
-				 "registration and on-disk data (every base backup and "
-				 "WAL segment it\n"
-				 "holds) is removed. Never touches an active cluster.\n",
-				 cli_cluster_prune_getopt, cli_cluster_prune_command_run);
 
 
 static char clusterSetUpstreamPgdata[MAXPGPATH] = { 0 };
@@ -1969,54 +2032,3 @@ cli_cluster_set_upstream_command_run(int argc, char **argv)
 
 	exit(0);
 }
-
-
-CommandLine cluster_set_upstream_command =
-	make_command("set-upstream",
-				 "Point an already-registered cluster at a new upstream "
-				 "(e.g. after a failover)",
-				 "<name> --pgdata <path> [--config <path>] "
-				 "--pguri <conninfo> [--force-basebackup]",
-				 "  <name>      the cluster's own name, given positionally "
-				 "(never a flag)\n"
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --pguri     the new libpq connection string, replacing "
-				 "the route's\n"
-				 "              own \"upstream\" property\n"
-				 "  --force-basebackup  also take a fresh base backup "
-				 "against the new\n"
-				 "              upstream right away, rather than waiting "
-				 "for the next\n"
-				 "              scheduled \"pg_walserver basebackup\"\n"
-				 "\n"
-				 "Reloads an already-running \"pg_walserver serve\" for "
-				 "this --pgdata, if\n"
-				 "one is running: its own reconciliation already detects "
-				 "the \"upstream\"\n"
-				 "change and restarts this route's embedded receivewal "
-				 "worker against\n"
-				 "the new one -- no separate step needed to \"move\" it.\n",
-				 cli_cluster_set_upstream_getopt,
-				 cli_cluster_set_upstream_command_run);
-
-
-static CommandLine *cluster_subcommands[] = {
-	&cluster_register_command,
-	&cluster_drop_command,
-	&cluster_enable_command,
-	&cluster_list_command,
-	&cluster_set_upstream_command,
-	&cluster_prune_command,
-	NULL
-};
-
-CommandLine cluster_commands =
-	make_command_set("cluster",
-					 "Register, drop, enable, list, re-point, or prune "
-					 "the clusters this pg_walserver archives",
-					 NULL, NULL, NULL, cluster_subcommands);

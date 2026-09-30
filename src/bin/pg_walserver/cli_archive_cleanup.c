@@ -1279,6 +1279,58 @@ static struct option archiveCleanupLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_archive_cleanup_getopt(int argc, char **argv);
+static void cli_archive_cleanup_command_run(int argc, char **argv);
+
+CommandLine archive_cleanup_command =
+	make_command("archive-cleanup",
+				 "Remove WAL/base backups this route no longer needs to "
+				 "keep (operator/cron-driven, never automatic)",
+				 "--cluster <name> --pgdata <path> [--config <path>] "
+				 "| --path <dir> "
+				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run] "
+				 "[--force]",
+				 "  --pgdata      this instance's own data root (defaults "
+				 "to PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "                <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster     the cluster name to clean up (looked up "
+				 "in the config file)\n"
+				 "  --path        the route's own directory (overrides "
+				 "the route's own \"path\")\n"
+				 "  --keep-count  keep at least this many of the most "
+				 "recent base backups\n"
+				 "  --keep-age    keep anything from the last <N><unit> "
+				 "(h/d/w/m -- hours,\n"
+				 "                days, weeks, calendar months); at "
+				 "least one of --keep-count/\n"
+				 "                --keep-age is required, retention is "
+				 "infinite otherwise\n"
+				 "  --dry-run, -n print what would be removed without "
+				 "removing anything -- still runs\n"
+				 "                and reports the WAL-continuity check "
+				 "below, pass or fail\n"
+				 "  --force, -f   before deleting anything, a pre-flight "
+				 "check refuses the whole\n"
+				 "                operation if any kept backup would be "
+				 "left with a WAL gap, or\n"
+				 "                if removing a backup would leave a "
+				 "time range with no gap-free\n"
+				 "                newer backup to cover it; --force "
+				 "bypasses that refusal only (it\n"
+				 "                does not change what --keep-count/"
+				 "--keep-age decide to remove) --\n"
+				 "                a default, unattended cron job should "
+				 "NEVER blindly pass this;\n"
+				 "                only use it once you've independently "
+				 "verified proceeding is\n"
+				 "                safe (e.g. an independent backup, or "
+				 "an accepted/expected gap)\n",
+				 cli_archive_cleanup_getopt, cli_archive_cleanup_command_run);
+
+
 /*
  * cli_archive_cleanup_getopt parses "pg_walserver archive-cleanup"'s own flags into the
  * file-scope statics above.
@@ -1437,52 +1489,3 @@ cli_archive_cleanup_command_run(int argc, char **argv)
 								archiveCleanupHaveKeepAge, archiveCleanupKeepAge,
 								archiveCleanupDryRun, archiveCleanupForce) ? 0 : 1);
 }
-
-
-CommandLine archive_cleanup_command =
-	make_command("archive-cleanup",
-				 "Remove WAL/base backups this route no longer needs to "
-				 "keep (operator/cron-driven, never automatic)",
-				 "--cluster <name> --pgdata <path> [--config <path>] "
-				 "| --path <dir> "
-				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run] "
-				 "[--force]",
-				 "  --pgdata      this instance's own data root (defaults "
-				 "to PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "                <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster     the cluster name to clean up (looked up "
-				 "in the config file)\n"
-				 "  --path        the route's own directory (overrides "
-				 "the route's own \"path\")\n"
-				 "  --keep-count  keep at least this many of the most "
-				 "recent base backups\n"
-				 "  --keep-age    keep anything from the last <N><unit> "
-				 "(h/d/w/m -- hours,\n"
-				 "                days, weeks, calendar months); at "
-				 "least one of --keep-count/\n"
-				 "                --keep-age is required, retention is "
-				 "infinite otherwise\n"
-				 "  --dry-run, -n print what would be removed without "
-				 "removing anything -- still runs\n"
-				 "                and reports the WAL-continuity check "
-				 "below, pass or fail\n"
-				 "  --force, -f   before deleting anything, a pre-flight "
-				 "check refuses the whole\n"
-				 "                operation if any kept backup would be "
-				 "left with a WAL gap, or\n"
-				 "                if removing a backup would leave a "
-				 "time range with no gap-free\n"
-				 "                newer backup to cover it; --force "
-				 "bypasses that refusal only (it\n"
-				 "                does not change what --keep-count/"
-				 "--keep-age decide to remove) --\n"
-				 "                a default, unattended cron job should "
-				 "NEVER blindly pass this;\n"
-				 "                only use it once you've independently "
-				 "verified proceeding is\n"
-				 "                safe (e.g. an independent backup, or "
-				 "an accepted/expected gap)\n",
-				 cli_archive_cleanup_getopt, cli_archive_cleanup_command_run);

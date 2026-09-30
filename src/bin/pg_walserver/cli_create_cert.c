@@ -92,6 +92,28 @@ static struct option createCertLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_create_cert_getopt(int argc, char **argv);
+static void cli_create_cert_command_run(int argc, char **argv);
+
+CommandLine create_cert_command =
+	make_command("create-cert",
+				 "Create a self-signed TLS certificate for --pgdata",
+				 "--pgdata <path> --hostname <name> [--force]",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA); the certificate is written as "
+				 "\"<pgdata>/server.crt\"\n"
+				 "              and \"<pgdata>/server.key\"\n"
+				 "  --hostname  the certificate's own CN/subject (the name "
+				 "a client's\n"
+				 "              TLS SNI, or a human, is expected to use to "
+				 "reach this\n"
+				 "              server)\n"
+				 "  --force     overwrite an already-existing server.crt/"
+				 "server.key\n",
+				 cli_create_cert_getopt, cli_create_cert_command_run);
+
+
 /*
  * cli_create_cert_getopt parses "pg_walserver create-cert"'s own flags into the
  * file-scope statics above.
@@ -154,22 +176,3 @@ cli_create_cert_command_run(int argc, char **argv)
 	exit(ws_create_cert_run(createCertPgdata, createCertHostname,
 							createCertForce) ? 0 : 1);
 }
-
-
-CommandLine create_cert_command =
-	make_command("create-cert",
-				 "Create a self-signed TLS certificate for --pgdata",
-				 "--pgdata <path> --hostname <name> [--force]",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA); the certificate is written as "
-				 "\"<pgdata>/server.crt\"\n"
-				 "              and \"<pgdata>/server.key\"\n"
-				 "  --hostname  the certificate's own CN/subject (the name "
-				 "a client's\n"
-				 "              TLS SNI, or a human, is expected to use to "
-				 "reach this\n"
-				 "              server)\n"
-				 "  --force     overwrite an already-existing server.crt/"
-				 "server.key\n",
-				 cli_create_cert_getopt, cli_create_cert_command_run);

@@ -262,6 +262,38 @@ static struct option fetchSystemidLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_fetch_systemid_getopt(int argc, char **argv);
+static void cli_fetch_systemid_command_run(int argc, char **argv);
+
+CommandLine fetch_systemid_command =
+	make_command("fetch-systemid",
+				 "Fetch a route's upstream system identifier",
+				 "--cluster <name> --pgdata <path> [--config <path>] "
+				 "| --path <dir> "
+				 "[--upstream <conninfo> | --host <host> [--port <port>] "
+				 "[--user <name>]] [--force]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster   the cluster name to fetch for (looked up in "
+				 "the config file)\n"
+				 "  --path      the route's own directory (overrides the "
+				 "route's own \"path\")\n"
+				 "  --upstream  a libpq connection string to connect with "
+				 "(overrides the\n"
+				 "              route's own \"upstream\")\n"
+				 "  --host / --port / --user  further override individual "
+				 "connection\n"
+				 "              parameters (default port: 5432, default "
+				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+													  "  --force     overwrite an already-recorded, different "
+													  "system identifier\n",
+				 cli_fetch_systemid_getopt, cli_fetch_systemid_command_run);
+
+
 /*
  * cli_fetch_systemid_getopt parses "pg_walserver fetch-systemid"'s own flags into the
  * file-scope statics above.
@@ -370,32 +402,3 @@ cli_fetch_systemid_command_run(int argc, char **argv)
 
 	exit(cli_fetch_systemid_run(&target, fetchSystemidForce, NULL) ? 0 : 1);
 }
-
-
-CommandLine fetch_systemid_command =
-	make_command("fetch-systemid",
-				 "Fetch a route's upstream system identifier",
-				 "--cluster <name> --pgdata <path> [--config <path>] "
-				 "| --path <dir> "
-				 "[--upstream <conninfo> | --host <host> [--port <port>] "
-				 "[--user <name>]] [--force]",
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster   the cluster name to fetch for (looked up in "
-				 "the config file)\n"
-				 "  --path      the route's own directory (overrides the "
-				 "route's own \"path\")\n"
-				 "  --upstream  a libpq connection string to connect with "
-				 "(overrides the\n"
-				 "              route's own \"upstream\")\n"
-				 "  --host / --port / --user  further override individual "
-				 "connection\n"
-				 "              parameters (default port: 5432, default "
-				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
-													  "  --force     overwrite an already-recorded, different "
-													  "system identifier\n",
-				 cli_fetch_systemid_getopt, cli_fetch_systemid_command_run);

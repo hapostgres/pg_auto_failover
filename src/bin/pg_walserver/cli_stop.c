@@ -34,6 +34,21 @@ static struct option stopLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_stop_getopt(int argc, char **argv);
+static void cli_stop_run(int argc, char **argv);
+
+CommandLine stop_command =
+	make_command("stop",
+				 "Stop a running pg_walserver cleanly",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA); sends SIGTERM to the pid recorded "
+				 "in\n"
+				 "              \"<pgdata>/pg_walserver.pid\"\n",
+				 cli_stop_getopt, cli_stop_run);
+
+
 /*
  * cli_stop_getopt parses "pg_walserver stop"'s own flags into the
  * file-scope statics above.
@@ -125,15 +140,3 @@ cli_stop_run(int argc, char **argv)
 	log_info("Sent SIGTERM to pg_walserver pid %d", pid);
 	exit(0);
 }
-
-
-CommandLine stop_command =
-	make_command("stop",
-				 "Stop a running pg_walserver cleanly",
-				 "--pgdata <path>",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA); sends SIGTERM to the pid recorded "
-				 "in\n"
-				 "              \"<pgdata>/pg_walserver.pid\"\n",
-				 cli_stop_getopt, cli_stop_run);

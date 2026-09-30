@@ -51,6 +51,33 @@ ws_restore_run(const WsWalServerTarget *target,
 
 static WsWalServerTarget restoreTarget = { 0 };
 
+static int cli_restore_getopt(int argc, char **argv);
+static void cli_restore_command_run(int argc, char **argv);
+
+CommandLine restore_command =
+	make_command("restore-wal",
+				 "Fetch one WAL/.backup file from a pg_walserver route "
+				 "(restore_command)",
+				 "<filename> <destination-path> --cluster <name> --host <host> "
+				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
+				 "  --cluster   the cluster to restore from (sent as "
+				 "dbname)\n"
+				 "  --host      the pg_walserver host to connect to\n"
+				 "  --port      the pg_walserver port to connect to "
+				 "(default: 6543)\n"
+				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+																				  "  --sslmode   libpq sslmode (default: libpq's own "
+																				  "default, \"prefer\")\n"
+																				  "\n"
+																				  "  Meant to be used as (part of) a Postgres "
+																				  "restore_command, e.g.:\n"
+																				  "    restore_command = 'pg_walserver restore-wal %%f "
+																				  "%%p --cluster mycluster \\\n"
+																				  "                        --host archive.example.com "
+																				  "--user archiver_repl'\n",
+				 cli_restore_getopt, cli_restore_command_run);
+
+
 /*
  * cli_restore_getopt parses restore-wal's flags (--cluster/--host/--port/
  * --user/--sslmode), the same shape and defaults cli_archive_getopt() above
@@ -94,27 +121,3 @@ cli_restore_command_run(int argc, char **argv)
 
 	exit(ws_restore_run(&restoreTarget, argv[0], argv[1]) ? 0 : 1);
 }
-
-
-CommandLine restore_command =
-	make_command("restore-wal",
-				 "Fetch one WAL/.backup file from a pg_walserver route "
-				 "(restore_command)",
-				 "<filename> <destination-path> --cluster <name> --host <host> "
-				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
-				 "  --cluster   the cluster to restore from (sent as "
-				 "dbname)\n"
-				 "  --host      the pg_walserver host to connect to\n"
-				 "  --port      the pg_walserver port to connect to "
-				 "(default: 6543)\n"
-				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
-																				  "  --sslmode   libpq sslmode (default: libpq's own "
-																				  "default, \"prefer\")\n"
-																				  "\n"
-																				  "  Meant to be used as (part of) a Postgres "
-																				  "restore_command, e.g.:\n"
-																				  "    restore_command = 'pg_walserver restore-wal %%f "
-																				  "%%p --cluster mycluster \\\n"
-																				  "                        --host archive.example.com "
-																				  "--user archiver_repl'\n",
-				 cli_restore_getopt, cli_restore_command_run);

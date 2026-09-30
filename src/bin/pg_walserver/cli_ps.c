@@ -196,6 +196,20 @@ static struct option psLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_ps_getopt(int argc, char **argv);
+static void cli_ps_command_run(int argc, char **argv);
+
+CommandLine ps_command =
+	make_command("ps",
+				 "Show pg_walserver serve's own process-level status "
+				 "(pid, receivewal workers, bootstrap jobs)",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n",
+				 cli_ps_getopt, cli_ps_command_run);
+
+
 /*
  * cli_ps_getopt parses "pg_walserver ps"'s own flags into the
  * file-scope statics above.
@@ -242,14 +256,3 @@ cli_ps_command_run(int argc, char **argv)
 
 	exit(cli_ps_run(psPgdata) ? 0 : 1);
 }
-
-
-CommandLine ps_command =
-	make_command("ps",
-				 "Show pg_walserver serve's own process-level status "
-				 "(pid, receivewal workers, bootstrap jobs)",
-				 "--pgdata <path>",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA)\n",
-				 cli_ps_getopt, cli_ps_command_run);

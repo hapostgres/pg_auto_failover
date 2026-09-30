@@ -95,6 +95,72 @@
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 #endif
 
+static int cli_list_clusters_getopt(int argc, char **argv);
+static void cli_list_clusters_command_run(int argc, char **argv);
+
+static void cli_list_backups_command_run(int argc, char **argv);
+
+static int cli_list_wal_getopt(int argc, char **argv);
+static void cli_list_wal_command_run(int argc, char **argv);
+
+CommandLine list_clusters_command =
+	make_command("clusters",
+				 "List every route, its backup/receivewal status, and the "
+				 "WAL range it covers",
+				 "--pgdata <path> [--config <path>] [--cluster <name>]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster   limit output to a single route\n",
+				 cli_list_clusters_getopt, cli_list_clusters_command_run);
+
+CommandLine list_backups_command =
+	make_command("backups",
+				 "List base backups per cluster (label, size, which is "
+				 ".latest)",
+				 "--pgdata <path> [--config <path>] [--cluster <name>]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster   limit output to a single route\n",
+				 cli_list_clusters_getopt, cli_list_backups_command_run);
+
+CommandLine list_wal_command =
+	make_command("wal",
+				 "List WAL cache aggregate stats per cluster, or every "
+				 "file with --segments",
+				 "--pgdata <path> [--config <path>] [--cluster <name>] "
+				 "[--segments]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster   limit output to a single route\n"
+				 "  --segments  list every individual WAL/.history/.backup "
+				 "file instead\n"
+				 "              of the default aggregate stats\n",
+				 cli_list_wal_getopt, cli_list_wal_command_run);
+
+static CommandLine *list_subcommands[] = {
+	&list_clusters_command,
+	&list_backups_command,
+	&list_wal_command,
+	NULL
+};
+
+CommandLine list_commands =
+	make_command_set("list",
+					 "List clusters, base backups, or WAL cache contents",
+					 NULL, NULL, NULL, list_subcommands);
+
 
 /* ---------------------------------------------------------------------
  * small formatting helpers, shared by all three "list" sub-commands
@@ -780,21 +846,6 @@ cli_list_clusters_command_run(int argc, char **argv)
 }
 
 
-CommandLine list_clusters_command =
-	make_command("clusters",
-				 "List every route, its backup/receivewal status, and the "
-				 "WAL range it covers",
-				 "--pgdata <path> [--config <path>] [--cluster <name>]",
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster   limit output to a single route\n",
-				 cli_list_clusters_getopt, cli_list_clusters_command_run);
-
-
 /*
  * cli_list_backups_command_run runs "pg_walserver list backups" against the
  * options cli_list_backups_getopt parsed above, then exit()s with its own
@@ -808,21 +859,6 @@ cli_list_backups_command_run(int argc, char **argv)
 
 	exit(cli_list_backups_run(listPgdata, listConfigFile, listCluster) ? 0 : 1);
 }
-
-
-CommandLine list_backups_command =
-	make_command("backups",
-				 "List base backups per cluster (label, size, which is "
-				 ".latest)",
-				 "--pgdata <path> [--config <path>] [--cluster <name>]",
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster   limit output to a single route\n",
-				 cli_list_clusters_getopt, cli_list_backups_command_run);
 
 
 static struct option listWalLongOptions[] = {
@@ -902,35 +938,3 @@ cli_list_wal_command_run(int argc, char **argv)
 	exit(cli_list_wal_run(listPgdata, listConfigFile, listCluster,
 						  listWalSegments) ? 0 : 1);
 }
-
-
-CommandLine list_wal_command =
-	make_command("wal",
-				 "List WAL cache aggregate stats per cluster, or every "
-				 "file with --segments",
-				 "--pgdata <path> [--config <path>] [--cluster <name>] "
-				 "[--segments]",
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster   limit output to a single route\n"
-				 "  --segments  list every individual WAL/.history/.backup "
-				 "file instead\n"
-				 "              of the default aggregate stats\n",
-				 cli_list_wal_getopt, cli_list_wal_command_run);
-
-
-static CommandLine *list_subcommands[] = {
-	&list_clusters_command,
-	&list_backups_command,
-	&list_wal_command,
-	NULL
-};
-
-CommandLine list_commands =
-	make_command_set("list",
-					 "List clusters, base backups, or WAL cache contents",
-					 NULL, NULL, NULL, list_subcommands);
