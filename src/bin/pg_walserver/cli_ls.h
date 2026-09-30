@@ -39,6 +39,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 /*
  * cli_ls_run prints, by default, one row per configured route: its own
  * base backup count/combined size, WAL segment count/combined size, and
@@ -56,5 +58,7 @@
  */
 bool cli_ls_run(const char *pgdata, const char *configFile,
 				bool includeConfigFiles);
+
+extern CommandLine ls_command;
 
 #endif /* WS_CLI_LS_H */

@@ -27,6 +27,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 #include "cli_upstream.h"
 
 /*
@@ -59,5 +61,7 @@ bool cli_basebackup_run(const WsUpstreamTarget *target,
  * automatic bootstrap backup for.
  */
 bool cli_basebackup_route_has_backup(const char *path);
+
+extern CommandLine basebackup_command;
 
 #endif /* WS_CLI_BASEBACKUP_H */

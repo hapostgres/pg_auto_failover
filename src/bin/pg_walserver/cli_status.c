@@ -6,6 +6,7 @@
  *
  */
 
+#include <getopt.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/types.h>
@@ -13,6 +14,10 @@
 
 #include "postgres_fe.h"
 
+#include "commandline.h"
+
+#include "cli_common.h"
+#include "cli_root.h"
 #include "cli_status.h"
 #include "log.h"
 #include "pidfile.h"
@@ -135,3 +140,85 @@ cli_status_run(const char *pgdata, const char *configFile)
 
 	return true;
 }
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver status --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char statusPgdata[MAXPGPATH] = { 0 };
+static char statusConfigFile[MAXPGPATH] = { 0 };
+
+static struct option statusLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_status_getopt parses "pg_walserver status"'s own flags into the
+ * file-scope statics above.
+ */
+static int
+cli_status_getopt(int argc, char **argv)
+{
+	optind = 0;
+	ws_prefill_pgdata_from_env(statusPgdata);
+	statusConfigFile[0] = '\0';
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:f:", statusLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(statusPgdata, optarg, sizeof(statusPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(statusConfigFile, optarg, sizeof(statusConfigFile));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_status_command_run runs "pg_walserver status" against the options
+ * cli_status_getopt parsed above, then exit()s with its own result.
+ */
+static void
+cli_status_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_status_run(statusPgdata, statusConfigFile) ? 0 : 1);
+}
+
+
+CommandLine status_command =
+	make_command("status",
+				 "Show a short pg_walserver status dashboard",
+				 "--pgdata <path> [--config <path>]",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n",
+				 cli_status_getopt, cli_status_command_run);

@@ -7,14 +7,19 @@
  */
 
 #include <dirent.h>
+#include <getopt.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
 
 #include "postgres_fe.h"
 
-#include "cli_ls.h"
+#include "commandline.h"
+
 #include "cli_archive_cleanup.h"
+#include "cli_common.h"
+#include "cli_ls.h"
+#include "cli_root.h"
 #include "file_utils.h"
 #include "log.h"
 #include "ps_state.h"
@@ -362,3 +367,98 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 
 	return true;
 }
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver ls --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char lsPgdata[MAXPGPATH] = { 0 };
+static char lsConfigFile[MAXPGPATH] = { 0 };
+static bool lsIncludeConfigFiles = false;
+
+static struct option lsLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'f' },
+	{ "all", no_argument, NULL, 'a' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_ls_getopt parses "pg_walserver ls"'s own flags into the
+ * file-scope statics above.
+ */
+static int
+cli_ls_getopt(int argc, char **argv)
+{
+	optind = 0;
+	ws_prefill_pgdata_from_env(lsPgdata);
+	lsConfigFile[0] = '\0';
+	lsIncludeConfigFiles = false;
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:f:a", lsLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(lsPgdata, optarg, sizeof(lsPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(lsConfigFile, optarg, sizeof(lsConfigFile));
+				break;
+			}
+
+			case 'a':
+			{
+				lsIncludeConfigFiles = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_ls_command_run runs "pg_walserver ls" against the options cli_ls_getopt
+ * parsed above, then exit()s with its own result.
+ */
+static void
+cli_ls_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_ls_run(lsPgdata, lsConfigFile, lsIncludeConfigFiles) ? 0 : 1);
+}
+
+
+CommandLine ls_command =
+	make_command("ls",
+				 "Per-cluster storage summary: base backups, WAL, disk usage",
+				 "--pgdata <path> [--config <path>] [--all]",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n"
+				 "  --config    where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --all, -a   list the config/credential/certificate "
+				 "files instead\n"
+				 "              (rarely change, rarely interesting day "
+				 "to day)\n",
+				 cli_ls_getopt, cli_ls_command_run);

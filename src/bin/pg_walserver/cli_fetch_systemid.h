@@ -19,6 +19,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "commandline.h"
+
 #include "cli_upstream.h"
 
 /*
@@ -41,5 +43,7 @@
  */
 bool cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 							uint64_t *systemIdentifierOut);
+
+extern CommandLine fetch_systemid_command;
 
 #endif /* WS_CLI_FETCH_SYSTEMID_H */

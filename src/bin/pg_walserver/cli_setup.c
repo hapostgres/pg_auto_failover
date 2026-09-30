@@ -6,12 +6,17 @@
  *
  */
 
+#include <getopt.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "postgres_fe.h"
 
+#include "commandline.h"
+
+#include "cli_common.h"
 #include "cli_create_cert.h"
+#include "cli_root.h"
 #include "cli_setup.h"
 #include "file_utils.h"
 #include "hba.h"
@@ -204,3 +209,211 @@ cli_setup_run(const WsSetupOptions *options)
 
 	return true;
 }
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver setup --pgdata <path> [--port <port>]
+ *                     [--ssl-cert-file <path>] [--ssl-key-file <path>]
+ *                     [--ssl-ca-file <path>] [--auth-timeout <seconds>]
+ * ----------------------------------------------------------------------- */
+
+static WsSetupOptions setupOptions = { 0 };
+
+static struct option setupLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'f' },
+	{ "port", required_argument, NULL, 'p' },
+	{ "ssl-cert-file", required_argument, NULL, 'C' },
+	{ "ssl-key-file", required_argument, NULL, 'K' },
+	{ "ssl-ca-file", required_argument, NULL, 'A' },
+	{ "auth-timeout", required_argument, NULL, 'T' },
+	{ "no-hba", no_argument, NULL, 'H' },
+	{ "no-cert", no_argument, NULL, 'N' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_setup_getopt parses "pg_walserver setup"'s own flags into the
+ * file-scope statics above.
+ */
+static int
+cli_setup_getopt(int argc, char **argv)
+{
+	optind = 0;
+	setupOptions = (WsSetupOptions) {
+		0
+	};
+	ws_prefill_pgdata_from_env(setupOptions.pgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:f:p:C:K:A:T:HN",
+							setupLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(setupOptions.pgdata, optarg, sizeof(setupOptions.pgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(setupOptions.configFile, optarg,
+						sizeof(setupOptions.configFile));
+				break;
+			}
+
+			case 'p':
+			{
+				if (!stringToInt(optarg, &(setupOptions.port)) ||
+					setupOptions.port <= 0 || setupOptions.port > 65535)
+				{
+					log_fatal("Invalid --port value \"%s\"", optarg);
+					exit(1);
+				}
+				setupOptions.havePort = true;
+				break;
+			}
+
+			case 'C':
+			{
+				strlcpy(setupOptions.sslCertFile, optarg,
+						sizeof(setupOptions.sslCertFile));
+				break;
+			}
+
+			case 'K':
+			{
+				strlcpy(setupOptions.sslKeyFile, optarg,
+						sizeof(setupOptions.sslKeyFile));
+				break;
+			}
+
+			case 'A':
+			{
+				strlcpy(setupOptions.sslCaFile, optarg,
+						sizeof(setupOptions.sslCaFile));
+				break;
+			}
+
+			case 'T':
+			{
+				if (!stringToInt(optarg, &(setupOptions.authTimeout)) ||
+					setupOptions.authTimeout <= 0 ||
+					setupOptions.authTimeout > 3600)
+				{
+					log_fatal("Invalid --auth-timeout value \"%s\"", optarg);
+					exit(1);
+				}
+				setupOptions.haveAuthTimeout = true;
+				break;
+			}
+
+			case 'H':
+			{
+				setupOptions.noHba = true;
+				break;
+			}
+
+			case 'N':
+			{
+				setupOptions.noCert = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_setup_command_run runs "pg_walserver setup" against the options
+ * cli_setup_getopt parsed above, then exit()s with its own result.
+ */
+static void
+cli_setup_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_setup_run(&setupOptions) ? 0 : 1);
+}
+
+
+CommandLine setup_command =
+	make_command("setup",
+				 "Configure pg_walserver itself (port, TLS, auth-timeout, HBA)",
+				 "--pgdata <path> [--config <path>] [--port <port>] "
+				 "[--ssl-cert-file <path>] [--ssl-key-file <path>] "
+				 "[--ssl-ca-file <path>] [--auth-timeout <seconds>] "
+				 "[--no-hba] [--no-cert]",
+				 "  --pgdata    this instance's own data root, created if "
+				 "missing\n"
+				 "              (defaults to PGDATA); the config file "
+				 "itself lives at\n"
+				 "              <pgdata>/pg_walserver.ini unless "
+				 "--config overrides it\n"
+				 "  --config  where the config file itself lives, "
+				 "independent of\n"
+				 "              --pgdata (or the PG_WALSERVER_CONFIG_FILE "
+				 "environment\n"
+				 "              variable) -- a Debian-style deployment's "
+				 "own split, e.g.\n"
+				 "              /etc/pg_walserver/pg_walserver.ini for "
+				 "config, --pgdata\n"
+				 "              at /var/lib/pg_walserver for data; every "
+				 "other pg_walserver\n"
+				 "              command below takes this same flag\n"
+				 "  --port      \"serve\"'s own default port when its own "
+				 "--port isn't\n"
+				 "              given (defaults to 6543)\n"
+				 "  --ssl-cert-file / --ssl-key-file / --ssl-ca-file  "
+				 "\"serve\"'s own\n"
+				 "              defaults when its own equivalent flag "
+				 "isn't given\n"
+				 "  --auth-timeout  \"serve\"'s own default auth-timeout "
+				 "when its own\n"
+				 "              --auth-timeout isn't given\n"
+				 "  --no-hba    skip auto-creating <pgdata>/pg_walserver_"
+				 "hba.conf\n"
+				 "              (see below)\n"
+				 "  --no-cert   skip auto-creating a self-signed TLS "
+				 "certificate\n"
+				 "              (see below)\n"
+				 "\n"
+				 "Every --port/--ssl-*/--auth-timeout flag here is "
+				 "optional and independent:\n"
+				 "only whichever ones are given get written; each is "
+				 "\"serve\"'s own default\n"
+				 "from then on, still overridden by the same flag given "
+				 "directly to \"serve\"\n"
+				 "itself. Unconditionally, unless skipped: a self-signed "
+				 "TLS certificate is\n"
+				 "created (the same facility \"cluster register\" itself "
+				 "uses, --no-cert skips\n"
+				 "it), and <pgdata>/pg_walserver_hba.conf is created with "
+				 "one real, active\n"
+				 "rule open to this machine's own local network, "
+				 "auto-discovered the same\n"
+				 "way pg_autoctl discovers its own LAN CIDR (--no-hba "
+				 "skips it, falling back\n"
+				 "to a commented-out placeholder, same as when discovery "
+				 "itself finds\n"
+				 "nothing to use) -- review and adjust either default "
+				 "before running on a\n"
+				 "reachable network. Neither step ever overwrites a file "
+				 "that already exists.\n"
+				 "Nothing about any one archived cluster -- see "
+				 "\"pg_walserver cluster\"\n"
+				 "for registering, dropping, listing, or re-pointing "
+				 "those.\n",
+				 cli_setup_getopt, cli_setup_command_run);

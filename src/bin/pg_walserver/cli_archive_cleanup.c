@@ -8,13 +8,18 @@
 
 #include <ctype.h>
 #include <dirent.h>
+#include <getopt.h>
 #include <inttypes.h>
 #include <string.h>
 #include <time.h>
 
 #include "postgres_fe.h"
 
+#include "commandline.h"
+
 #include "cli_archive_cleanup.h"
+#include "cli_common.h"
+#include "cli_root.h"
 #include "cmd_base_backup.h"
 #include "cmd_replication_slot.h"
 #include "file_utils.h"
@@ -1243,3 +1248,241 @@ ws_archive_cleanup_run(const char *routePath,
 	 * would have refused to do */
 	return continuityOk || force;
 }
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver archive-cleanup --cluster <name> --pgdata <path> | --path <dir>
+ *                               [--keep-count <N>] [--keep-age <interval>]
+ *                               [--dry-run]
+ * ----------------------------------------------------------------------- */
+
+static char archiveCleanupPgdata[MAXPGPATH] = { 0 };
+static char archiveCleanupConfigFile[MAXPGPATH] = { 0 };
+static char archiveCleanupRoute[NAMEDATALEN + 16] = { 0 };
+static char archiveCleanupPath[MAXPGPATH] = { 0 };
+static bool archiveCleanupHaveKeepCount = false;
+static int archiveCleanupKeepCount = 0;
+static bool archiveCleanupHaveKeepAge = false;
+static WsRetentionAge archiveCleanupKeepAge = { 0 };
+static bool archiveCleanupDryRun = false;
+static bool archiveCleanupForce = false;
+
+static struct option archiveCleanupLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'F' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ "path", required_argument, NULL, 'P' },
+	{ "keep-count", required_argument, NULL, 'k' },
+	{ "keep-age", required_argument, NULL, 'a' },
+	{ "dry-run", no_argument, NULL, 'n' },
+	{ "force", no_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_archive_cleanup_getopt parses "pg_walserver archive-cleanup"'s own flags into the
+ * file-scope statics above.
+ */
+static int
+cli_archive_cleanup_getopt(int argc, char **argv)
+{
+	optind = 0;
+	ws_prefill_pgdata_from_env(archiveCleanupPgdata);
+	archiveCleanupConfigFile[0] = '\0';
+	archiveCleanupRoute[0] = '\0';
+	archiveCleanupPath[0] = '\0';
+	archiveCleanupHaveKeepCount = false;
+	archiveCleanupKeepCount = 0;
+	archiveCleanupHaveKeepAge = false;
+	archiveCleanupKeepAge = (WsRetentionAge) {
+		0
+	};
+	archiveCleanupDryRun = false;
+	archiveCleanupForce = false;
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:F:c:P:k:a:nf",
+							archiveCleanupLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(archiveCleanupPgdata, optarg, sizeof(archiveCleanupPgdata));
+				break;
+			}
+
+			case 'F':
+			{
+				strlcpy(archiveCleanupConfigFile, optarg,
+						sizeof(archiveCleanupConfigFile));
+				break;
+			}
+
+			case 'c':
+			{
+				strlcpy(archiveCleanupRoute, optarg, sizeof(archiveCleanupRoute));
+				break;
+			}
+
+			case 'P':
+			{
+				strlcpy(archiveCleanupPath, optarg, sizeof(archiveCleanupPath));
+				break;
+			}
+
+			case 'k':
+			{
+				if (!stringToInt(optarg, &archiveCleanupKeepCount) ||
+					archiveCleanupKeepCount <= 0)
+				{
+					log_fatal("Invalid --keep-count value \"%s\": expected "
+							  "a positive whole number", optarg);
+					exit(1);
+				}
+				archiveCleanupHaveKeepCount = true;
+				break;
+			}
+
+			case 'a':
+			{
+				if (!ws_parse_retention_age(optarg, &archiveCleanupKeepAge))
+				{
+					/* error already logged */
+					exit(1);
+				}
+				archiveCleanupHaveKeepAge = true;
+				break;
+			}
+
+			case 'n':
+			{
+				archiveCleanupDryRun = true;
+				break;
+			}
+
+			case 'f':
+			{
+				archiveCleanupForce = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_archive_cleanup_command_run runs "pg_walserver archive-cleanup" against
+ * the options cli_archive_cleanup_getopt parsed above, then exit()s with its
+ * own result.
+ */
+static void
+cli_archive_cleanup_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	char routePath[MAXPGPATH] = { 0 };
+
+	if (archiveCleanupPath[0] != '\0')
+	{
+		strlcpy(routePath, archiveCleanupPath, sizeof(routePath));
+	}
+	else if (archiveCleanupPgdata[0] != '\0' && archiveCleanupRoute[0] != '\0')
+	{
+		char routesPath[MAXPGPATH] = { 0 };
+		WsRoute *routes = NULL;
+		int routeCount = 0;
+
+		config_file_path(archiveCleanupPgdata, archiveCleanupConfigFile,
+						 routesPath, sizeof(routesPath));
+
+		const WsRoute *route = NULL;
+
+		if (routes_load(routesPath, &routes, &routeCount))
+		{
+			route = routes_find(routes, routeCount, archiveCleanupRoute);
+		}
+
+		if (route == NULL)
+		{
+			log_fatal("No route \"%s\" in \"%s\"", archiveCleanupRoute,
+					  routesPath);
+			routes_free(routes);
+			exit(1);
+		}
+
+		strlcpy(routePath, route->path, sizeof(routePath));
+		routes_free(routes);
+	}
+	else
+	{
+		log_fatal("archive-cleanup requires --path, or --cluster with "
+				  "--pgdata pointing at a \"pg_walserver.ini\" that has "
+				  "that route");
+		exit(1);
+	}
+
+	exit(ws_archive_cleanup_run(routePath,
+								archiveCleanupHaveKeepCount, archiveCleanupKeepCount,
+								archiveCleanupHaveKeepAge, archiveCleanupKeepAge,
+								archiveCleanupDryRun, archiveCleanupForce) ? 0 : 1);
+}
+
+
+CommandLine archive_cleanup_command =
+	make_command("archive-cleanup",
+				 "Remove WAL/base backups this route no longer needs to "
+				 "keep (operator/cron-driven, never automatic)",
+				 "--cluster <name> --pgdata <path> [--config <path>] "
+				 "| --path <dir> "
+				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run] "
+				 "[--force]",
+				 "  --pgdata      this instance's own data root (defaults "
+				 "to PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "                <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster     the cluster name to clean up (looked up "
+				 "in the config file)\n"
+				 "  --path        the route's own directory (overrides "
+				 "the route's own \"path\")\n"
+				 "  --keep-count  keep at least this many of the most "
+				 "recent base backups\n"
+				 "  --keep-age    keep anything from the last <N><unit> "
+				 "(h/d/w/m -- hours,\n"
+				 "                days, weeks, calendar months); at "
+				 "least one of --keep-count/\n"
+				 "                --keep-age is required, retention is "
+				 "infinite otherwise\n"
+				 "  --dry-run, -n print what would be removed without "
+				 "removing anything -- still runs\n"
+				 "                and reports the WAL-continuity check "
+				 "below, pass or fail\n"
+				 "  --force, -f   before deleting anything, a pre-flight "
+				 "check refuses the whole\n"
+				 "                operation if any kept backup would be "
+				 "left with a WAL gap, or\n"
+				 "                if removing a backup would leave a "
+				 "time range with no gap-free\n"
+				 "                newer backup to cover it; --force "
+				 "bypasses that refusal only (it\n"
+				 "                does not change what --keep-count/"
+				 "--keep-age decide to remove) --\n"
+				 "                a default, unattended cron job should "
+				 "NEVER blindly pass this;\n"
+				 "                only use it once you've independently "
+				 "verified proceeding is\n"
+				 "                safe (e.g. an independent backup, or "
+				 "an accepted/expected gap)\n",
+				 cli_archive_cleanup_getopt, cli_archive_cleanup_command_run);

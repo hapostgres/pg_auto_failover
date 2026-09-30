@@ -18,6 +18,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 /*
  * cli_list_clusters_run prints one row per route configured in the config
  * file config_file_path() resolves for pgdata/configFile (or just
@@ -51,5 +53,10 @@ bool cli_list_backups_run(const char *pgdata, const char *configFile,
  */
 bool cli_list_wal_run(const char *pgdata, const char *configFile,
 					  const char *clusterFilter, bool segments);
+
+extern CommandLine list_clusters_command;
+extern CommandLine list_backups_command;
+extern CommandLine list_wal_command;
+extern CommandLine list_commands;
 
 #endif /* WS_CLI_LIST_H */

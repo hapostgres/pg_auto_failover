@@ -47,6 +47,8 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "commandline.h"
+
 #include "postgres_fe.h"
 
 /*
@@ -128,5 +130,7 @@ bool ws_archive_cleanup_run(const char *routePath,
 							bool haveKeepCount, int keepCount,
 							bool haveKeepAge, WsRetentionAge keepAge,
 							bool dryRun, bool force);
+
+extern CommandLine archive_cleanup_command;
 
 #endif /* WS_CLI_ARCHIVE_CLEANUP_H */

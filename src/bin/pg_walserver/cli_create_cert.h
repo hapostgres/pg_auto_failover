@@ -22,6 +22,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 #include "postgres_fe.h"
 
 /*
@@ -35,5 +37,7 @@
  * false with an error already logged otherwise.
  */
 bool ws_create_cert_run(const char *pgdata, const char *hostname, bool force);
+
+extern CommandLine create_cert_command;
 
 #endif /* WS_CLI_CREATE_CERT_H */

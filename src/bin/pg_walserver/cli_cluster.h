@@ -24,6 +24,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 #include "postgres_fe.h"
 
 #include "pgsql.h"
@@ -154,5 +156,13 @@ bool ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
  * nothing is running.
  */
 void ws_cluster_reload_running_server(const char *pgdata);
+
+extern CommandLine cluster_register_command;
+extern CommandLine cluster_drop_command;
+extern CommandLine cluster_enable_command;
+extern CommandLine cluster_list_command;
+extern CommandLine cluster_prune_command;
+extern CommandLine cluster_set_upstream_command;
+extern CommandLine cluster_commands;
 
 #endif /* WS_CLI_CLUSTER_H */
