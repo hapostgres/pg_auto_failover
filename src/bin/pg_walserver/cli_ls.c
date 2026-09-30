@@ -384,6 +384,27 @@ static struct option lsLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_ls_getopt(int argc, char **argv);
+static void cli_ls_command_run(int argc, char **argv);
+
+CommandLine ls_command =
+	make_command("ls",
+				 "Per-cluster storage summary: base backups, WAL, disk usage",
+				 "--pgdata <path> [--config <path>] [--all]",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n"
+				 "  --config    where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --all, -a   list the config/credential/certificate "
+				 "files instead\n"
+				 "              (rarely change, rarely interesting day "
+				 "to day)\n",
+				 cli_ls_getopt, cli_ls_command_run);
+
+
 /*
  * cli_ls_getopt parses "pg_walserver ls"'s own flags into the
  * file-scope statics above.
@@ -444,21 +465,3 @@ cli_ls_command_run(int argc, char **argv)
 
 	exit(cli_ls_run(lsPgdata, lsConfigFile, lsIncludeConfigFiles) ? 0 : 1);
 }
-
-
-CommandLine ls_command =
-	make_command("ls",
-				 "Per-cluster storage summary: base backups, WAL, disk usage",
-				 "--pgdata <path> [--config <path>] [--all]",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA)\n"
-				 "  --config    where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --all, -a   list the config/credential/certificate "
-				 "files instead\n"
-				 "              (rarely change, rarely interesting day "
-				 "to day)\n",
-				 cli_ls_getopt, cli_ls_command_run);

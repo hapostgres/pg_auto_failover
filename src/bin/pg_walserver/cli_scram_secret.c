@@ -34,6 +34,21 @@ static struct option scramSecretLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_scram_secret_getopt(int argc, char **argv);
+static void cli_scram_secret_run(int argc, char **argv);
+
+CommandLine scram_secret_command =
+	make_command("scram-secret",
+				 "Print one pg_walserver_passwd line for a user",
+				 "[--user <name>]  (password read from PGPASSWORD)",
+				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+																				  "\n"
+																				  "  The password is read from the PGPASSWORD environment "
+																				  "variable, never\n"
+																				  "  from the command line.\n",
+				 cli_scram_secret_getopt, cli_scram_secret_run);
+
+
 /*
  * cli_scram_secret_getopt parses scram-secret's only flag, --user.
  */
@@ -103,15 +118,3 @@ cli_scram_secret_run(int argc, char **argv)
 
 	exit(0);
 }
-
-
-CommandLine scram_secret_command =
-	make_command("scram-secret",
-				 "Print one pg_walserver_passwd line for a user",
-				 "[--user <name>]  (password read from PGPASSWORD)",
-				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
-																				  "\n"
-																				  "  The password is read from the PGPASSWORD environment "
-																				  "variable, never\n"
-																				  "  from the command line.\n",
-				 cli_scram_secret_getopt, cli_scram_secret_run);

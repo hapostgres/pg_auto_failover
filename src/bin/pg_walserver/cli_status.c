@@ -155,6 +155,23 @@ static struct option statusLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_status_getopt(int argc, char **argv);
+static void cli_status_command_run(int argc, char **argv);
+
+CommandLine status_command =
+	make_command("status",
+				 "Show a short pg_walserver status dashboard",
+				 "--pgdata <path> [--config <path>]",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n",
+				 cli_status_getopt, cli_status_command_run);
+
+
 /*
  * cli_status_getopt parses "pg_walserver status"'s own flags into the
  * file-scope statics above.
@@ -208,17 +225,3 @@ cli_status_command_run(int argc, char **argv)
 
 	exit(cli_status_run(statusPgdata, statusConfigFile) ? 0 : 1);
 }
-
-
-CommandLine status_command =
-	make_command("status",
-				 "Show a short pg_walserver status dashboard",
-				 "--pgdata <path> [--config <path>]",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n",
-				 cli_status_getopt, cli_status_command_run);

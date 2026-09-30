@@ -34,6 +34,21 @@ static struct option reloadLongOptions[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+static int cli_reload_getopt(int argc, char **argv);
+static void cli_reload_run(int argc, char **argv);
+
+CommandLine reload_command =
+	make_command("reload",
+				 "Ask a running pg_walserver to reload its configuration",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA); sends SIGHUP to the pid recorded "
+				 "in\n"
+				 "              \"<pgdata>/pg_walserver.pid\"\n",
+				 cli_reload_getopt, cli_reload_run);
+
+
 /*
  * cli_reload_getopt parses "pg_walserver reload"'s own flags into the
  * file-scope statics above.
@@ -131,15 +146,3 @@ cli_reload_run(int argc, char **argv)
 	log_info("Sent SIGHUP to pg_walserver pid %d", pid);
 	exit(0);
 }
-
-
-CommandLine reload_command =
-	make_command("reload",
-				 "Ask a running pg_walserver to reload its configuration",
-				 "--pgdata <path>",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA); sends SIGHUP to the pid recorded "
-				 "in\n"
-				 "              \"<pgdata>/pg_walserver.pid\"\n",
-				 cli_reload_getopt, cli_reload_run);
