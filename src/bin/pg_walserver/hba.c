@@ -175,32 +175,32 @@ hba_write_setup_default(const char *hbaPath, bool tlsAvailable,
 
 
 /*
- * ws_setup_autodetect_cidr is a best-effort, non-fatal discovery of this
- * machine's own local-network CIDR, for "pg_walserver setup" to seed its
- * HBA file with a real, working rule instead of a commented-out example.
- *
- * pg_autoctl's own discovery (fetchLocalIPAddress() then fetchLocalCIDR(),
- * src/bin/common/ipaddr.c) needs a real remote target to connect() toward
- * first (--monitor's own address, always already known by the time it
- * runs it) -- "setup" has no such target at all, by design: it runs before
- * any cluster/upstream is known (see cli_setup.h). So this walks
- * getifaddrs() directly instead, picking the first UP, non-loopback IPv4
- * interface as "this machine's own address", then hands that straight to
- * the same fetchLocalCIDR() pg_autoctl itself uses to turn an address into
- * its interface's own CIDR (netmask-derived) -- no network reachability of
- * any kind required, only that the host has at least one configured
- * interface, which every real deployment does.
- *
- * Returns false, cidrOut untouched, when no such interface exists (e.g. an
- * otherwise-unconfigured container with only loopback) -- callers treat
- * that as "skip it", never as a hard error: setup's other work still
- * completes.
+ * A stable, well-known target for fetchLocalIPAddressForRouting()'s own
+ * UDP-routing trick below -- never actually contacted (see that
+ * function's own comment), so any address that is about as unlikely to
+ * be renumbered as an IP address gets works equally well here; this is
+ * the same address pg_autoctl's own DEFAULT_INTERFACE_LOOKUP_SERVICE_
+ * NAME (defaults.h) uses for its own, TCP-based version of this same
+ * question.
  */
-bool
-ws_setup_autodetect_cidr(char *cidrOut, size_t cidrOutSize)
+#define WS_SETUP_CIDR_PROBE_ADDRESS "8.8.8.8"
+#define WS_SETUP_CIDR_PROBE_PORT 53
+
+/*
+ * ws_setup_local_ip_via_interfaces is ws_setup_autodetect_cidr()'s own
+ * fallback, for the rare host with no route at all (not even a default
+ * one) to WS_SETUP_CIDR_PROBE_ADDRESS -- an otherwise-unconfigured
+ * container with only loopback, most likely. It walks getifaddrs()
+ * directly, picking the first UP, non-loopback IPv4 interface as "this
+ * machine's own address". Unlike fetchLocalIPAddressForRouting(), this
+ * cannot ask the kernel which interface it would actually route through
+ * -- it is a plain first-match guess, which is exactly why it is only
+ * ever the fallback, not the primary method.
+ */
+static bool
+ws_setup_local_ip_via_interfaces(char *localIP, size_t localIPSize)
 {
 	struct ifaddrs *ifaddrList = NULL;
-	char localIP[INET6_ADDRSTRLEN] = { 0 };
 	bool found = false;
 
 	if (getifaddrs(&ifaddrList) == -1)
@@ -221,8 +221,7 @@ ws_setup_autodetect_cidr(char *cidrOut, size_t cidrOutSize)
 
 		struct sockaddr_in *addr = (struct sockaddr_in *) ifa->ifa_addr;
 
-		if (inet_ntop(AF_INET, &(addr->sin_addr),
-					  localIP, sizeof(localIP)) != NULL)
+		if (inet_ntop(AF_INET, &(addr->sin_addr), localIP, localIPSize) != NULL)
 		{
 			log_debug("Using local interface \"%s\" (%s) to discover this "
 					  "machine's own CIDR", ifa->ifa_name, localIP);
@@ -232,6 +231,57 @@ ws_setup_autodetect_cidr(char *cidrOut, size_t cidrOutSize)
 	}
 
 	freeifaddrs(ifaddrList);
+
+	return found;
+}
+
+
+/*
+ * ws_setup_autodetect_cidr is a best-effort, non-fatal discovery of this
+ * machine's own local-network CIDR, for "pg_walserver setup" to seed its
+ * HBA file with a real, working rule instead of a commented-out example.
+ *
+ * pg_autoctl's own discovery for the same underlying question
+ * (fetchLocalIPAddress() then fetchLocalCIDR(), src/bin/common/ipaddr.c)
+ * is a real TCP connect() -- reachability of its own target is "expected"
+ * (its own header comment's word), a reasonable assumption on a monitor
+ * node, but not one "pg_walserver setup" can make: it runs before any
+ * cluster/upstream is known, by design (see cli_setup.h), and an
+ * air-gapped archive host is a normal deployment for it. This uses that
+ * same file's UDP counterpart, fetchLocalIPAddressForRouting(), instead:
+ * connect()ing a UDP socket toward WS_SETUP_CIDR_PROBE_ADDRESS never
+ * actually sends a packet -- the kernel only consults its own routing
+ * table to decide which local address it would use to reach it -- so
+ * this needs a route to exist, never a real connection, while still
+ * getting the kernel's own real routing answer (the actual LAN-facing
+ * interface, not a guess) rather than an arbitrary first match off
+ * getifaddrs(). Only when even that fails (ws_setup_local_ip_via_
+ * interfaces(), above -- no route at all, e.g. an otherwise-
+ * unconfigured container with only loopback) does this fall back to
+ * guessing from the interface list directly.
+ *
+ * Either way, the resulting local IP is handed to the same
+ * fetchLocalCIDR() pg_autoctl itself uses to turn an address into its
+ * interface's own CIDR (netmask-derived).
+ *
+ * Returns false, cidrOut untouched, when neither method finds anything
+ * usable -- callers treat that as "skip it", never as a hard error:
+ * setup's other work still completes.
+ */
+bool
+ws_setup_autodetect_cidr(char *cidrOut, size_t cidrOutSize)
+{
+	char localIP[INET6_ADDRSTRLEN] = { 0 };
+
+	bool found = fetchLocalIPAddressForRouting(localIP, sizeof(localIP),
+											   WS_SETUP_CIDR_PROBE_ADDRESS,
+											   WS_SETUP_CIDR_PROBE_PORT,
+											   LOG_DEBUG);
+
+	if (!found)
+	{
+		found = ws_setup_local_ip_via_interfaces(localIP, sizeof(localIP));
+	}
 
 	if (!found)
 	{

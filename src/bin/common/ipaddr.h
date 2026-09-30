@@ -24,6 +24,18 @@ IPType ip_address_type(const char *hostname);
 bool fetchLocalIPAddress(char *localIpAddress, int size,
 						 const char *serviceName, int servicePort,
 						 int logLevel, bool *mayRetry);
+
+/*
+ * fetchLocalIPAddressForRouting is fetchLocalIPAddress()'s own UDP
+ * counterpart -- see ipaddr.c's own comment. Prefer this one whenever
+ * the caller only wants to know "what's my own local IP for reaching
+ * serviceName", not whether serviceName is actually reachable right
+ * now: it needs a route to exist, never a real connection.
+ */
+bool fetchLocalIPAddressForRouting(char *localIpAddress, int size,
+								   const char *serviceName, int servicePort,
+								   int logLevel);
+
 bool fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size);
 bool findHostnameLocalAddress(const char *hostname,
 							  char *localIpAddress, int size);
