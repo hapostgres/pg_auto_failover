@@ -44,7 +44,9 @@
 #include "ws_util.h"
 
 
+#ifndef streq
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
+#endif
 
 /*
  * A real, unmodified Postgres standby's own internal walreceiver process

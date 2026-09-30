@@ -15,10 +15,9 @@
 #include "log.h"
 #include "string_utils.h"
 
+#include "cli_root.h"
 #include "cli_wal_target.h"
 #include "defaults.h"
-
-extern CommandLine ws_root;
 
 static struct option walTargetLongOptions[] = {
 	{ "cluster", required_argument, NULL, 'c' },

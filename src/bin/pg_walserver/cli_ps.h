@@ -15,6 +15,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 /*
  * cli_ps_run prints "serve"'s own process-level status for --pgdata.
  * Returns true (having printed a clean "not running" message, never an
@@ -22,5 +24,7 @@
  * false only on a genuine problem (e.g. no --pgdata given).
  */
 bool cli_ps_run(const char *pgdata);
+
+extern CommandLine ps_command;
 
 #endif /* WS_CLI_PS_H */

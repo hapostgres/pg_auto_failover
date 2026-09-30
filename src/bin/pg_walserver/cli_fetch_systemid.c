@@ -6,12 +6,18 @@
  *
  */
 
+#include <getopt.h>
 #include <inttypes.h>
 #include <string.h>
 
 #include "postgres_fe.h"
 
+#include "commandline.h"
+
+#include "cli_common.h"
 #include "cli_fetch_systemid.h"
+#include "cli_root.h"
+#include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
@@ -227,3 +233,169 @@ cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 
 	return true;
 }
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver fetch-systemid --cluster <name> --pgdata <path> [--upstream ...]
+ * ----------------------------------------------------------------------- */
+
+static char fetchSystemidPgdata[MAXPGPATH] = { 0 };
+static char fetchSystemidConfigFile[MAXPGPATH] = { 0 };
+static char fetchSystemidRoute[NAMEDATALEN + 16] = { 0 };
+static char fetchSystemidPath[MAXPGPATH] = { 0 };
+static char fetchSystemidUpstream[MAXCONNINFO] = { 0 };
+static char fetchSystemidHost[_POSIX_HOST_NAME_MAX] = { 0 };
+static char fetchSystemidPort[16] = { 0 };
+static char fetchSystemidUser[NAMEDATALEN] = { 0 };
+static bool fetchSystemidForce = false;
+
+static struct option fetchSystemidLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'F' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ "path", required_argument, NULL, 'P' },
+	{ "upstream", required_argument, NULL, 'u' },
+	{ "host", required_argument, NULL, 'h' },
+	{ "port", required_argument, NULL, 'p' },
+	{ "user", required_argument, NULL, 'U' },
+	{ "force", no_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_fetch_systemid_getopt parses "pg_walserver fetch-systemid"'s own flags into the
+ * file-scope statics above.
+ */
+static int
+cli_fetch_systemid_getopt(int argc, char **argv)
+{
+	optind = 0;
+	ws_prefill_pgdata_from_env(fetchSystemidPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:F:c:P:u:h:p:U:f",
+							fetchSystemidLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(fetchSystemidPgdata, optarg, sizeof(fetchSystemidPgdata));
+				break;
+			}
+
+			case 'F':
+			{
+				strlcpy(fetchSystemidConfigFile, optarg,
+						sizeof(fetchSystemidConfigFile));
+				break;
+			}
+
+			case 'c':
+			{
+				strlcpy(fetchSystemidRoute, optarg, sizeof(fetchSystemidRoute));
+				break;
+			}
+
+			case 'P':
+			{
+				strlcpy(fetchSystemidPath, optarg, sizeof(fetchSystemidPath));
+				break;
+			}
+
+			case 'u':
+			{
+				strlcpy(fetchSystemidUpstream, optarg, sizeof(fetchSystemidUpstream));
+				break;
+			}
+
+			case 'h':
+			{
+				strlcpy(fetchSystemidHost, optarg, sizeof(fetchSystemidHost));
+				break;
+			}
+
+			case 'p':
+			{
+				strlcpy(fetchSystemidPort, optarg, sizeof(fetchSystemidPort));
+				break;
+			}
+
+			case 'U':
+			{
+				strlcpy(fetchSystemidUser, optarg, sizeof(fetchSystemidUser));
+				break;
+			}
+
+			case 'f':
+			{
+				fetchSystemidForce = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_fetch_systemid_command_run runs "pg_walserver fetch-systemid" against
+ * the options cli_fetch_systemid_getopt parsed above, then exit()s with its
+ * own result.
+ */
+static void
+cli_fetch_systemid_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	WsUpstreamTarget target = { 0 };
+
+	if (!cli_resolve_upstream(fetchSystemidPgdata, fetchSystemidConfigFile,
+							  fetchSystemidRoute,
+							  fetchSystemidPath, fetchSystemidUpstream,
+							  fetchSystemidHost, fetchSystemidPort,
+							  fetchSystemidUser, &target))
+	{
+		exit(1);
+	}
+
+	exit(cli_fetch_systemid_run(&target, fetchSystemidForce, NULL) ? 0 : 1);
+}
+
+
+CommandLine fetch_systemid_command =
+	make_command("fetch-systemid",
+				 "Fetch a route's upstream system identifier",
+				 "--cluster <name> --pgdata <path> [--config <path>] "
+				 "| --path <dir> "
+				 "[--upstream <conninfo> | --host <host> [--port <port>] "
+				 "[--user <name>]] [--force]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster   the cluster name to fetch for (looked up in "
+				 "the config file)\n"
+				 "  --path      the route's own directory (overrides the "
+				 "route's own \"path\")\n"
+				 "  --upstream  a libpq connection string to connect with "
+				 "(overrides the\n"
+				 "              route's own \"upstream\")\n"
+				 "  --host / --port / --user  further override individual "
+				 "connection\n"
+				 "              parameters (default port: 5432, default "
+				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+													  "  --force     overwrite an already-recorded, different "
+													  "system identifier\n",
+				 cli_fetch_systemid_getopt, cli_fetch_systemid_command_run);

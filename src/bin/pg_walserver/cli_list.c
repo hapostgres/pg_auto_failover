@@ -58,6 +58,7 @@
  */
 
 #include <dirent.h>
+#include <getopt.h>
 #include <inttypes.h>
 #include <signal.h>
 #include <string.h>
@@ -67,8 +68,12 @@
 
 #include "postgres_fe.h"
 
-#include "cli_list.h"
+#include "commandline.h"
+
 #include "cli_archive_cleanup.h"
+#include "cli_common.h"
+#include "cli_list.h"
+#include "cli_root.h"
 #include "cmd_base_backup.h"
 #include "file_utils.h"
 #include "log.h"
@@ -693,3 +698,239 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 
 	return true;
 }
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver list clusters|backups|wal [--cluster <name>] [--segments]
+ * ----------------------------------------------------------------------- */
+
+static char listPgdata[MAXPGPATH] = { 0 };
+static char listConfigFile[MAXPGPATH] = { 0 };
+static char listCluster[NAMEDATALEN + 16] = { 0 };
+static bool listWalSegments = false;
+
+static struct option listClustersLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'f' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_list_clusters_getopt parses "pg_walserver list clusters"'s own flags into the
+ * file-scope statics above.
+ */
+static int
+cli_list_clusters_getopt(int argc, char **argv)
+{
+	optind = 0;
+	ws_prefill_pgdata_from_env(listPgdata);
+	listConfigFile[0] = '\0';
+	listCluster[0] = '\0';
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:f:c:", listClustersLongOptions,
+							NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(listPgdata, optarg, sizeof(listPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(listConfigFile, optarg, sizeof(listConfigFile));
+				break;
+			}
+
+			case 'c':
+			{
+				strlcpy(listCluster, optarg, sizeof(listCluster));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_list_clusters_command_run runs "pg_walserver list clusters" against the
+ * options cli_list_clusters_getopt parsed above, then exit()s with its own
+ * result.
+ */
+static void
+cli_list_clusters_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_list_clusters_run(listPgdata, listConfigFile, listCluster) ? 0 : 1);
+}
+
+
+CommandLine list_clusters_command =
+	make_command("clusters",
+				 "List every route, its backup/receivewal status, and the "
+				 "WAL range it covers",
+				 "--pgdata <path> [--config <path>] [--cluster <name>]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster   limit output to a single route\n",
+				 cli_list_clusters_getopt, cli_list_clusters_command_run);
+
+
+/*
+ * cli_list_backups_command_run runs "pg_walserver list backups" against the
+ * options cli_list_backups_getopt parsed above, then exit()s with its own
+ * result.
+ */
+static void
+cli_list_backups_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_list_backups_run(listPgdata, listConfigFile, listCluster) ? 0 : 1);
+}
+
+
+CommandLine list_backups_command =
+	make_command("backups",
+				 "List base backups per cluster (label, size, which is "
+				 ".latest)",
+				 "--pgdata <path> [--config <path>] [--cluster <name>]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster   limit output to a single route\n",
+				 cli_list_clusters_getopt, cli_list_backups_command_run);
+
+
+static struct option listWalLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'f' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ "segments", no_argument, NULL, 's' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_list_wal_getopt parses "pg_walserver list wal"'s own flags into the
+ * file-scope statics above.
+ */
+static int
+cli_list_wal_getopt(int argc, char **argv)
+{
+	optind = 0;
+	ws_prefill_pgdata_from_env(listPgdata);
+	listConfigFile[0] = '\0';
+	listCluster[0] = '\0';
+	listWalSegments = false;
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:f:c:s", listWalLongOptions,
+							NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(listPgdata, optarg, sizeof(listPgdata));
+				break;
+			}
+
+			case 'f':
+			{
+				strlcpy(listConfigFile, optarg, sizeof(listConfigFile));
+				break;
+			}
+
+			case 'c':
+			{
+				strlcpy(listCluster, optarg, sizeof(listCluster));
+				break;
+			}
+
+			case 's':
+			{
+				listWalSegments = true;
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_list_wal_command_run runs "pg_walserver list wal" against the options
+ * cli_list_wal_getopt parsed above, then exit()s with its own result.
+ */
+static void
+cli_list_wal_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_list_wal_run(listPgdata, listConfigFile, listCluster,
+						  listWalSegments) ? 0 : 1);
+}
+
+
+CommandLine list_wal_command =
+	make_command("wal",
+				 "List WAL cache aggregate stats per cluster, or every "
+				 "file with --segments",
+				 "--pgdata <path> [--config <path>] [--cluster <name>] "
+				 "[--segments]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster   limit output to a single route\n"
+				 "  --segments  list every individual WAL/.history/.backup "
+				 "file instead\n"
+				 "              of the default aggregate stats\n",
+				 cli_list_wal_getopt, cli_list_wal_command_run);
+
+
+static CommandLine *list_subcommands[] = {
+	&list_clusters_command,
+	&list_backups_command,
+	&list_wal_command,
+	NULL
+};
+
+CommandLine list_commands =
+	make_command_set("list",
+					 "List clusters, base backups, or WAL cache contents",
+					 NULL, NULL, NULL, list_subcommands);

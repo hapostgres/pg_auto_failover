@@ -58,6 +58,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 #include "postgres_fe.h"
 
 #include "cli_wal_target.h"
@@ -70,5 +72,7 @@
  */
 bool ws_restore_run(const WsWalServerTarget *target,
 					const char *filename, const char *outputPath);
+
+extern CommandLine restore_command;
 
 #endif /* WS_CLI_RESTORE_WAL_H */

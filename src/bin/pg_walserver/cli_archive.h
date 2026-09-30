@@ -79,6 +79,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 #include "postgres_fe.h"
 
 #include "cli_wal_target.h"
@@ -93,5 +95,7 @@
  */
 bool ws_archive_run(const WsWalServerTarget *target,
 					const char *localPath, const char *filename);
+
+extern CommandLine archive_command;
 
 #endif /* WS_CLI_ARCHIVE_H */

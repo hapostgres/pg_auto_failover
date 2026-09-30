@@ -21,13 +21,14 @@ override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor -I$(SRC_DIR)../pg_autoctl
 # -----------------------------------------------------------------------
 # Sources that live in this directory
 # -----------------------------------------------------------------------
-LOCAL_SRC = main.c cli_root.c accept_loop.c startup.c auth.c framing.c repl_command.c \
+LOCAL_SRC = main.c cli_root.c cli_common.c accept_loop.c startup.c auth.c framing.c repl_command.c \
             repl_gram.c repl_scanner.c \
             routes.c hba.c tls.c cmd_identify_system.c cmd_show.c cmd_base_backup.c \
             tar_stream.c cmd_fetch_file.c cmd_check_file.c cmd_archive_file.c \
             cmd_timeline_history.c cmd_replication_slot.c \
             cmd_start_replication.c wal_dir_scan.c ws_util.c receivewal.c \
             backup_bootstrap.c \
+            cli_serve.c cli_scram_secret.c cli_reload.c cli_stop.c \
             cli_upstream.c cli_wal_target.c cli_fetch_systemid.c cli_basebackup.c cli_setup.c \
             cli_cluster.c \
             cli_create_cert.c cli_archive.c cli_restore_wal.c cli_archive_cleanup.c cli_internal.c \

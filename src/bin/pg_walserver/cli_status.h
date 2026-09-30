@@ -24,6 +24,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 /*
  * cli_status_run prints the one-line/short dashboard described above.
  * Always returns true unless pgdata itself is missing -- "serve" not
@@ -32,5 +34,7 @@
  * of pgdata -- see config_file_path()'s own comment, routes.h.
  */
 bool cli_status_run(const char *pgdata, const char *configFile);
+
+extern CommandLine status_command;
 
 #endif /* WS_CLI_STATUS_H */

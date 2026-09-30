@@ -52,6 +52,8 @@
 
 #include <stdbool.h>
 
+#include "commandline.h"
+
 #include "postgres_fe.h"
 
 typedef struct WsSetupOptions
@@ -79,5 +81,7 @@ typedef struct WsSetupOptions
  * logged otherwise. Never touches any route's own section.
  */
 bool cli_setup_run(const WsSetupOptions *options);
+
+extern CommandLine setup_command;
 
 #endif /* WS_CLI_SETUP_H */

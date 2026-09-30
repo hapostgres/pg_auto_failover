@@ -45,6 +45,7 @@
  *
  */
 
+#include <getopt.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/types.h>
@@ -52,7 +53,11 @@
 
 #include "postgres_fe.h"
 
+#include "commandline.h"
+
+#include "cli_common.h"
 #include "cli_ps.h"
+#include "cli_root.h"
 #include "file_utils.h"
 #include "log.h"
 #include "pidfile.h"
@@ -178,3 +183,73 @@ cli_ps_run(const char *pgdata)
 
 	return true;
 }
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver ps --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char psPgdata[MAXPGPATH] = { 0 };
+
+static struct option psLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ NULL, 0, NULL, 0 }
+};
+
+/*
+ * cli_ps_getopt parses "pg_walserver ps"'s own flags into the
+ * file-scope statics above.
+ */
+static int
+cli_ps_getopt(int argc, char **argv)
+{
+	optind = 0;
+	ws_prefill_pgdata_from_env(psPgdata);
+
+	int c;
+
+	while ((c = getopt_long(argc, argv, "D:", psLongOptions, NULL)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(psPgdata, optarg, sizeof(psPgdata));
+				break;
+			}
+
+			default:
+			{
+				commandline_print_usage(&ws_root, stderr);
+				exit(1);
+			}
+		}
+	}
+
+	return optind;
+}
+
+
+/*
+ * cli_ps_command_run runs "pg_walserver ps" against the options cli_ps_getopt
+ * parsed above, then exit()s with its own result.
+ */
+static void
+cli_ps_command_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	exit(cli_ps_run(psPgdata) ? 0 : 1);
+}
+
+
+CommandLine ps_command =
+	make_command("ps",
+				 "Show pg_walserver serve's own process-level status "
+				 "(pid, receivewal workers, bootstrap jobs)",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n",
+				 cli_ps_getopt, cli_ps_command_run);
