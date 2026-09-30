@@ -359,9 +359,12 @@ real PostgreSQL primary except where noted:
   Removes a slot's own marker file, immediately lifting whatever
   retention floor it was placing on :ref:`pg_walserver_archive_cleanup`.
   Dropping a slot that does not exist is an error (``42704``), the same
-  as real PostgreSQL. ``WAIT`` parses but has no effect: removing the
-  marker file is always immediate, so there is nothing to actually wait
-  for.
+  as real PostgreSQL. Dropping a slot a ``START_REPLICATION`` session is
+  currently streaming against is refused too (``55006``), also the same
+  as real PostgreSQL -- see ``START_REPLICATION``'s own entry below for
+  what "currently streaming against" means here. ``WAIT`` parses but has
+  no effect: removing the marker file is always immediate, so there is
+  nothing to actually wait for.
 
 ``START_REPLICATION [SLOT slot_name] [PHYSICAL] <lsn> [TIMELINE <tli>]``
 
@@ -369,6 +372,18 @@ real PostgreSQL primary except where noted:
   with ``primary_conninfo`` expects. The optional ``SLOT`` clause names
   an already-existing slot -- refused (``42704``) if it does not exist,
   the same requirement a real walsender enforces, never a silent no-op.
+
+  At most one session may stream against a given slot at a time, the
+  same "one active connection per slot" rule a real walsender enforces:
+  a second ``START_REPLICATION`` naming the same slot while the first is
+  still running is refused (``55006``, "replication slot is active for
+  another session"), rather than letting two sessions each advance and
+  persist the same slot's own ``restart_lsn`` independently (whichever
+  persisted last would otherwise win, regardless of which was actually
+  further ahead). The lock is released the moment a session ends, clean
+  or not -- a crashed or killed session's own lock is freed automatically
+  as soon as its connection is noticed as gone, no separate cleanup step
+  or stale-lock detection needed.
 
   While streaming, every ``StandbyStatusUpdate`` the client sends (a
   real ``pg_receivewal``/standby sends one every few seconds on its

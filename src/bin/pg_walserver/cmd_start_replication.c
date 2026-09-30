@@ -435,6 +435,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 	}
 
 	WsSlotFeedbackState slotState = { 0 };
+	int slotLockFd = -1;
 
 	if (slotName != NULL && slotName[0] != '\0')
 	{
@@ -447,6 +448,24 @@ cmd_start_replication(int sock, const WsRoute *route,
 		{
 			ws_send_error_response(sock, "42704",
 								   "replication slot does not exist");
+			return;
+		}
+
+		/*
+		 * At most one session streams against a given slot at a time,
+		 * the same "one active connection per slot" rule a real
+		 * walsender enforces -- see cmd_replication_slot.h's own
+		 * comment. Held for this whole function's own lifetime,
+		 * released on every exit path below (including the early
+		 * error returns inside the loop).
+		 */
+		slotLockFd = ws_replication_slot_try_lock(route, slotName);
+
+		if (slotLockFd < 0)
+		{
+			ws_send_error_response(sock, "55006",
+								   "replication slot is active for another "
+								   "session");
 			return;
 		}
 
@@ -483,6 +502,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 
 	if (!ws_send_copy_both_response(sock, 0))
 	{
+		ws_replication_slot_unlock(slotLockFd);
 		ws_connection_close_after_command = true;
 		return;
 	}
@@ -553,6 +573,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 				 * other way this stream can end (see the identical call
 				 * at the very end of this function for why) */
 				slot_feedback_persist(&slotState, time(NULL));
+				ws_replication_slot_unlock(slotLockFd);
 				ws_connection_close_after_command = true;
 				return;
 			}
@@ -590,6 +611,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 			ws_send_error_response(sock, "58030",
 								   "failed to read the requested WAL segment");
 			slot_feedback_persist(&slotState, time(NULL));
+			ws_replication_slot_unlock(slotLockFd);
 			ws_connection_close_after_command = true;
 			return;
 		}
@@ -647,6 +669,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 	 * WS_SLOT_FEEDBACK_PERSIST_INTERVAL_SEC seconds of real progress.
 	 */
 	slot_feedback_persist(&slotState, time(NULL));
+	ws_replication_slot_unlock(slotLockFd);
 
 	(void) ws_send_copy_done(sock);
 
