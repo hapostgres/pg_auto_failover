@@ -175,6 +175,101 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 
 
 /*
+ * fetchLocalIPAddressForRouting is fetchLocalIPAddress()'s own UDP
+ * counterpart, for exactly the case that function's own header comment
+ * flags as a real limitation: connecting to DEFAULT_INTERFACE_LOOKUP_
+ * SERVICE_NAME (8.8.8.8:53) over TCP is "expected to be reachable" --
+ * a genuine assumption on a monitor node (normally internet-facing), but
+ * not one every caller of this same "what's my own local IP" question
+ * can make (an air-gapped host is a normal deployment for some of them).
+ *
+ * connect()ing a UDP (SOCK_DGRAM) socket never actually sends a packet:
+ * the kernel only consults its own routing table to decide which local
+ * address it would use to reach serviceName:servicePort, exactly the
+ * same "what's my own outbound address" question, without needing
+ * serviceName to be reachable, or even to exist, at all -- only that
+ * *some* route to it is configured, in practice almost always true (a
+ * default route). This is this file's own original stated intent (see
+ * this file's own header comment, "using getsockname and a udp
+ * connection") -- fetchLocalIPAddress() itself became a real TCP
+ * connect() at some point, this restores the UDP alternative alongside
+ * it rather than in its place, since a real TCP handshake is still the
+ * right choice whenever the caller actually wants to confirm the target
+ * is reachable, not only route to it.
+ *
+ * Returns false, localIpAddress untouched, when even routing toward
+ * serviceName fails outright (ENETUNREACH and similar -- no route
+ * configured to it at all), logged at logLevel; never retries (there is
+ * nothing transient to retry: a route either exists right now or it
+ * doesn't).
+ */
+bool
+fetchLocalIPAddressForRouting(char *localIpAddress, int size,
+							  const char *serviceName, int servicePort,
+							  int logLevel)
+{
+	struct addrinfo *lookup;
+	struct addrinfo *ai;
+	struct addrinfo hints;
+
+	bool couldConnect = false;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;    /* accept any family as supported by OS */
+	hints.ai_socktype = SOCK_DGRAM; /* we only want UDP sockets */
+	hints.ai_protocol = IPPROTO_UDP;
+
+	if (!GetAddrInfo(serviceName,
+					 intToString(servicePort).strValue,
+					 &hints,
+					 &lookup))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	for (ai = lookup; ai; ai = ai->ai_next)
+	{
+		char addr[BUFSIZE] = { 0 };
+
+		if (!ipaddr_sockaddr_to_string(ai, addr, sizeof(addr)))
+		{
+			/* errors have already been logged */
+			continue;
+		}
+
+		int sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+
+		if (sock < 0)
+		{
+			log_level(logLevel, "Failed to create a UDP socket: %m");
+			continue;
+		}
+
+		if (connect(sock, ai->ai_addr, ai->ai_addrlen) != 0)
+		{
+			log_level(logLevel, "Failed to route to %s (UDP): %m", addr);
+			close(sock);
+			continue;
+		}
+
+		couldConnect = ipaddr_getsockname(sock, localIpAddress, size);
+
+		close(sock);
+
+		if (couldConnect)
+		{
+			break;
+		}
+	}
+
+	freeaddrinfo(lookup);
+
+	return couldConnect;
+}
+
+
+/*
  * fetchLocalCIDR loops over the local interfaces on the host and finds the one
  * for which the IP address is the same as the given localIpAddress parameter.
  * Then using the netmask information from the network interface,
