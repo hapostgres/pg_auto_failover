@@ -41,7 +41,7 @@ Examples
   archive$ pg_walserver list backups --cluster mycluster
   CLUSTER              LABEL                        TAKEN AT               SIZE       LATEST
   -------------------- ---------------------------- ---------------------- ---------- ------
-  mycluster            basebackup-20260928T211526Z  2026-09-28T21:15:26Z   56.1MB     yes
+  mycluster            basebackup-20260930T145619Z  2026-09-30T14:56:19Z   38 MB      yes
 
 See Also
 --------

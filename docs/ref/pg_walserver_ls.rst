@@ -59,26 +59,33 @@ Default output, the per-cluster storage summary::
   archive$ pg_walserver ls
   CLUSTER              BACKUPS  BACKUP SIZE  WAL FILES  WAL SIZE   TOTAL SIZE  LAST BACKUP
   -------------------- -------- ------------ ---------- ---------- ----------- -----------
-  mycluster            1        52.7MB       5+1        96.0MB     148.7MB     2026-09-28T20:42:33Z
-  another              2        105.3MB      0          0.0B       105.3MB     2026-09-28T20:43:37Z
+  mycluster            1        38 MB        4+1        80 MB      118 MB      2026-09-30T14:56:19Z
 
   (config/credential/certificate files omitted; pass --all to list those instead)
 
-``5+1`` under WAL FILES means 5 complete segments plus 1 still being
-written (a ``.partial`` file) -- ``another`` has none at all: it was
-set up with ``--no-receivewal`` and fed only by ``archive-wal`` pushes,
-none of which have happened yet.
+``4+1`` under WAL FILES means 4 complete segments plus 1 still being
+written (a ``.partial`` file). A route set up with ``--no-receivewal``
+and never yet pushed to by ``archive-wal`` would show ``0`` there
+instead, with ``BACKUP SIZE``/``TOTAL SIZE`` still real if it has taken
+at least one base backup.
+
+Sizes are formatted by this project's own shared
+``pretty_print_bytes()`` (``src/bin/common/system_utils.c``, also used
+by ``pg_autoctl``): an integer, a space, then a scaled unit
+(``B``/``kB``/``MB``/``GB``/...), switching once a value reaches 10240
+of the current unit, not 1024 -- the same "one recognizable size class
+at a time" convention ``pg_autoctl`` itself already uses elsewhere.
 
 With ``--all``, the config/credential/certificate file tier::
 
   archive$ pg_walserver ls --all
   FILE                     EXISTS  SIZE       MODIFIED
   ------------------------ ------- ---------- --------
-  pg_walserver.ini         yes     247.0B     2026-09-28T20:43:35Z
-  pg_walserver_hba.conf    yes     117.0B     2026-09-28T20:43:35Z
-  pg_walserver_passwd      yes     148.0B     2026-09-28T20:42:28Z
-  server.crt               yes     4.0KB      2026-09-28T20:42:28Z
-  server.key               yes     1.7KB      2026-09-28T20:42:28Z
+  pg_walserver.ini         yes     257 B      2026-09-30T14:56:19Z
+  pg_walserver_hba.conf    yes     1520 B     2026-09-30T14:56:05Z
+  pg_walserver_passwd      yes     148 B      2026-09-30T14:56:05Z
+  server.crt               yes     4134 B     2026-09-30T14:56:00Z
+  server.key               yes     1704 B     2026-09-30T14:56:00Z
   ca.crt                   no      -          -
 
 See Also

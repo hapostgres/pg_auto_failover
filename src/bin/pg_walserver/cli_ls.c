@@ -20,6 +20,7 @@
 #include "ps_state.h"
 #include "routes.h"
 #include "string_utils.h"
+#include "system_utils.h"
 #include "wal_dir_scan.h"
 
 /*
@@ -39,37 +40,6 @@ static const char *configFiles[] = {
 	"ca.crt",
 	NULL
 };
-
-
-/*
- * format_bytes renders bytes as a human-scaled "<N.N><unit>" string
- * (B/KB/MB/GB), one decimal digit, the same shape cli_list.c's own
- * format_bytes() renders for the identical purpose.
- */
-static void
-format_bytes(uint64_t bytes, char *dest, size_t destSize)
-{
-	double b = (double) bytes;
-	const char *unit = "B";
-
-	if (b >= 1024.0 * 1024 * 1024)
-	{
-		b /= 1024.0 * 1024 * 1024;
-		unit = "GB";
-	}
-	else if (b >= 1024.0 * 1024)
-	{
-		b /= 1024.0 * 1024;
-		unit = "MB";
-	}
-	else if (b >= 1024.0)
-	{
-		b /= 1024.0;
-		unit = "KB";
-	}
-
-	sformat(dest, destSize, "%.1f%s", b, unit);
-}
 
 
 /*
@@ -262,12 +232,12 @@ print_config_files_row(const char *label, const char *path)
 
 	if (exists)
 	{
-		format_bytes((uint64_t) st.st_size, sizeStr, sizeof(sizeStr));
+		pretty_print_bytes(sizeStr, sizeof(sizeStr), (uint64_t) st.st_size);
 		format_utc(st.st_mtime, mtimeStr, sizeof(mtimeStr));
 	}
 
-	printf("%-24s %-7s %-10s %s\n", /* IGNORE-BANNED */
-		   label, exists ? "yes" : "no", sizeStr, mtimeStr);
+	fformat(stdout, "%-24s %-7s %-10s %s\n",
+			label, exists ? "yes" : "no", sizeStr, mtimeStr);
 }
 
 
@@ -282,9 +252,9 @@ print_config_files_row(const char *label, const char *path)
 static void
 print_config_files(const char *pgdata, const char *configPath)
 {
-	printf("%-24s %-7s %-10s %s\n", "FILE", "EXISTS", "SIZE", "MODIFIED"); /* IGNORE-BANNED */
-	printf("%-24s %-7s %-10s %s\n", /* IGNORE-BANNED */
-		   "------------------------", "-------", "----------", "--------");
+	fformat(stdout, "%-24s %-7s %-10s %s\n", "FILE", "EXISTS", "SIZE", "MODIFIED");
+	fformat(stdout, "%-24s %-7s %-10s %s\n",
+			"------------------------", "-------", "----------", "--------");
 
 	print_config_files_row("pg_walserver.ini", configPath);
 
@@ -340,18 +310,18 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 
 	if (!routes_load(routesPath, &routes, &routeCount) || routeCount == 0)
 	{
-		printf("No routes configured yet under \"%s\" -- see " /* IGNORE-BANNED */
-			   "\"pg_walserver cluster register\".\n", routesPath);
+		fformat(stdout, "No routes configured yet under \"%s\" -- see "
+						"\"pg_walserver cluster register\".\n", routesPath);
 		routes_free(routes);
 		return true;
 	}
 
-	printf("%-20s %-8s %-12s %-10s %-10s %-11s %s\n", /* IGNORE-BANNED */
-		   "CLUSTER", "BACKUPS", "BACKUP SIZE", "WAL FILES", "WAL SIZE",
-		   "TOTAL SIZE", "LAST BACKUP");
-	printf("%-20s %-8s %-12s %-10s %-10s %-11s %s\n", /* IGNORE-BANNED */
-		   "--------------------", "--------", "------------", "----------",
-		   "----------", "-----------", "-----------");
+	fformat(stdout, "%-20s %-8s %-12s %-10s %-10s %-11s %s\n",
+			"CLUSTER", "BACKUPS", "BACKUP SIZE", "WAL FILES", "WAL SIZE",
+			"TOTAL SIZE", "LAST BACKUP");
+	fformat(stdout, "%-20s %-8s %-12s %-10s %-10s %-11s %s\n",
+			"--------------------", "--------", "------------", "----------",
+			"----------", "-----------", "-----------");
 
 	for (int i = 0; i < routeCount; i++)
 	{
@@ -365,9 +335,9 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 		char lastBackup[32] = { 0 };
 		char walFiles[32] = { 0 };
 
-		format_bytes(fp.backupBytes, backupSize, sizeof(backupSize));
-		format_bytes(fp.walBytes, walSize, sizeof(walSize));
-		format_bytes(fp.backupBytes + fp.walBytes, totalSize, sizeof(totalSize));
+		pretty_print_bytes(backupSize, sizeof(backupSize), fp.backupBytes);
+		pretty_print_bytes(walSize, sizeof(walSize), fp.walBytes);
+		pretty_print_bytes(totalSize, sizeof(totalSize), fp.backupBytes + fp.walBytes);
 		format_utc(fp.lastBackupAt, lastBackup, sizeof(lastBackup));
 
 		if (fp.walPartials > 0)
@@ -380,15 +350,15 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 			sformat(walFiles, sizeof(walFiles), "%d", fp.walSegments);
 		}
 
-		printf("%-20s %-8d %-12s %-10s %-10s %-11s %s\n", /* IGNORE-BANNED */
-			   routes[i].key, fp.backupCount, backupSize, walFiles, walSize,
-			   totalSize, lastBackup);
+		fformat(stdout, "%-20s %-8d %-12s %-10s %-10s %-11s %s\n",
+				routes[i].key, fp.backupCount, backupSize, walFiles, walSize,
+				totalSize, lastBackup);
 	}
 
 	routes_free(routes);
 
-	printf("\n(config/credential/certificate files omitted; " /* IGNORE-BANNED */
-		   "pass --all to list those instead)\n");
+	fformat(stdout, "\n(config/credential/certificate files omitted; "
+					"pass --all to list those instead)\n");
 
 	return true;
 }

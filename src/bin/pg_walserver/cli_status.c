@@ -69,7 +69,7 @@ cli_status_run(const char *pgdata, const char *configFile)
 
 	if (!running)
 	{
-		printf("pg_walserver: not running (--pgdata \"%s\")\n", pgdata); /* IGNORE-BANNED */
+		fformat(stdout, "pg_walserver: not running (--pgdata \"%s\")\n", pgdata);
 		return true;
 	}
 
@@ -125,10 +125,11 @@ cli_status_run(const char *pgdata, const char *configFile)
 
 	format_uptime(haveState ? state.serveStartedAt : 0, uptime, sizeof(uptime));
 
-	printf("pg_walserver: running (pid %d, uptime %s)\n", (int) servePid, uptime); /* IGNORE-BANNED */
-	printf("  receivewal workers: %d/%d running\n", /* IGNORE-BANNED */
-		   receivewalWorkersRunning, receivewalPullCount);
-	printf("  bootstrap backups pending: %d\n", bootstrapsPending); /* IGNORE-BANNED */
+	fformat(stdout, "pg_walserver: running (pid %d, uptime %s)\n", (int) servePid,
+			uptime);
+	fformat(stdout, "  receivewal workers: %d/%d running\n",
+			receivewalWorkersRunning, receivewalPullCount);
+	fformat(stdout, "  bootstrap backups pending: %d\n", bootstrapsPending);
 
 	routes_free(routes);
 

@@ -101,7 +101,7 @@ Examples
       --upstream "host=primary port=5534 user=archiver_repl sslmode=require"
   21:15:04 2592271 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
   21:15:04 2592271 INFO  Taking a base backup of primary:5534 into "/var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211504Z"
-  21:15:04 2592271 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver-basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211504Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T211504Z
+  21:15:04 2592271 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver_basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211504Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T211504Z
   21:15:04 2592271 INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
   21:15:04 2592271 INFO  pg_basebackup: checkpoint completed
   21:15:04 2592271 INFO  pg_basebackup: write-ahead log start point: 0/29000028 on timeline 1
@@ -130,7 +130,7 @@ testing) genuinely has plenty to prune::
       --upstream "host=primary port=5534 user=archiver_repl sslmode=require" --keep-count 1
   21:15:26 2592866 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
   21:15:26 2592866 INFO  Taking a base backup of primary:5534 into "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T211526Z"
-  21:15:26 2592866 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver-basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/mycluster/basebackups/basebackup-20260928T211526Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T211526Z
+  21:15:26 2592866 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver_basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/mycluster/basebackups/basebackup-20260928T211526Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T211526Z
   21:15:26 2592866 INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
   21:15:26 2592866 INFO  pg_basebackup: checkpoint completed
   21:15:26 2592866 INFO  pg_basebackup: write-ahead log start point: 0/2C000028 on timeline 1
@@ -181,7 +181,7 @@ refuses, and the fresh backup stays::
       --upstream "host=primary port=5534 user=archiver_repl sslmode=require" --keep-count 1
   21:15:13 2592535 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
   21:15:13 2592535 INFO  Taking a base backup of primary:5534 into "/var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211513Z"
-  21:15:13 2592535 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver-basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211513Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T211513Z
+  21:15:13 2592535 INFO   /usr/lib/postgresql/17/bin/pg_basebackup -w -d 'application_name=pg_walserver_basebackup host=primary port=5534 user=archiver_repl sslmode=require' --pgdata /var/lib/archiver/bbdemo/basebackups/basebackup-20260928T211513Z -U archiver_repl --verbose --progress --wal-method=stream --checkpoint=fast --label basebackup-20260928T211513Z
   21:15:13 2592535 INFO  pg_basebackup: initiating base backup, waiting for checkpoint to complete
   21:15:13 2592535 INFO  pg_basebackup: checkpoint completed
   21:15:13 2592535 INFO  pg_basebackup: write-ahead log start point: 0/2A000028 on timeline 1

@@ -750,7 +750,7 @@ cli_scram_secret_run(int argc, char **argv)
 	if (!get_env_copy("PGPASSWORD", password, sizeof(password)) ||
 		password[0] == '\0')
 	{
-		fprintf(stderr, /* IGNORE-BANNED */
+		fformat(stderr,
 				"scram-secret: set the password in PGPASSWORD\n");
 		exit(1);
 	}
@@ -760,11 +760,11 @@ cli_scram_secret_run(int argc, char **argv)
 	if (!scram_build_verifier(password, WS_SCRAM_ITERATIONS,
 							  secret, sizeof(secret)))
 	{
-		fprintf(stderr, "scram-secret: failed to build the secret\n"); /* IGNORE-BANNED */
+		fformat(stderr, "scram-secret: failed to build the secret\n");
 		exit(1);
 	}
 
-	printf("%s:%s\n", scramUser, secret); /* IGNORE-BANNED */
+	fformat(stdout, "%s:%s\n", scramUser, secret);
 
 	exit(0);
 }
