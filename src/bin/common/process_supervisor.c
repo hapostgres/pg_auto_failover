@@ -23,6 +23,9 @@ static bool process_supervisor_find_service(ProcessSupervisor *supervisor,
 											pid_t pid, ProcessService **result);
 
 
+/*
+ * process_supervisor_init -- see process_supervisor.h.
+ */
 void
 process_supervisor_init(ProcessSupervisor *supervisor,
 						ProcessService *services, int serviceCount)
@@ -40,6 +43,9 @@ process_supervisor_init(ProcessSupervisor *supervisor,
 }
 
 
+/*
+ * process_supervisor_start_all -- see process_supervisor.h.
+ */
 bool
 process_supervisor_start_all(ProcessSupervisor *supervisor)
 {
@@ -61,6 +67,12 @@ process_supervisor_start_all(ProcessSupervisor *supervisor)
 }
 
 
+/*
+ * process_supervisor_find_service finds supervisor's own service whose
+ * pid matches, if any -- a plain linear scan, never called on a hot
+ * path (once per exited child, in process_supervisor_tick() below, not
+ * once per tick).
+ */
 static bool
 process_supervisor_find_service(ProcessSupervisor *supervisor, pid_t pid,
 								ProcessService **result)
@@ -203,6 +215,9 @@ process_supervisor_restart_service(ProcessService *service, int status)
 }
 
 
+/*
+ * process_supervisor_tick -- see process_supervisor.h.
+ */
 void
 process_supervisor_tick(ProcessSupervisor *supervisor,
 						bool (*otherChildExited)(void *ctx, pid_t pid,
@@ -243,6 +258,9 @@ process_supervisor_tick(ProcessSupervisor *supervisor,
 }
 
 
+/*
+ * process_supervisor_stop_all -- see process_supervisor.h.
+ */
 void
 process_supervisor_stop_all(ProcessSupervisor *supervisor, int signal,
 							int timeoutMs)
