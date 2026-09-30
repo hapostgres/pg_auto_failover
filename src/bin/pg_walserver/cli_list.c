@@ -76,6 +76,7 @@
 #include "ps_state.h"
 #include "routes.h"
 #include "string_utils.h"
+#include "system_utils.h"
 #include "wal_dir_scan.h"
 
 /*
@@ -93,31 +94,6 @@
 /* ---------------------------------------------------------------------
  * small formatting helpers, shared by all three "list" sub-commands
  * --------------------------------------------------------------------- */
-static void
-format_bytes(uint64_t bytes, char *dest, size_t destSize)
-{
-	double b = (double) bytes;
-	const char *unit = "B";
-
-	if (b >= 1024.0 * 1024 * 1024)
-	{
-		b /= 1024.0 * 1024 * 1024;
-		unit = "GB";
-	}
-	else if (b >= 1024.0 * 1024)
-	{
-		b /= 1024.0 * 1024;
-		unit = "MB";
-	}
-	else if (b >= 1024.0)
-	{
-		b /= 1024.0;
-		unit = "KB";
-	}
-
-	sformat(dest, destSize, "%.1f%s", b, unit);
-}
-
 
 /*
  * format_utc renders t as an ISO-8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ"),
@@ -371,11 +347,11 @@ cli_list_clusters_run(const char *pgdata, const char *configFile,
 		return true;
 	}
 
-	printf("%-20s %-8s %-10s %-8s %-22s %-22s\n", /* IGNORE-BANNED */
-		   "CLUSTER", "BACKUP", "RECEIVEWAL", "WORKER", "WAL START", "WAL END");
-	printf("%-20s %-8s %-10s %-8s %-22s %-22s\n", /* IGNORE-BANNED */
-		   "--------------------", "--------", "----------", "--------",
-		   "----------------------", "----------------------");
+	fformat(stdout, "%-20s %-8s %-10s %-8s %-22s %-22s\n",
+			"CLUSTER", "BACKUP", "RECEIVEWAL", "WORKER", "WAL START", "WAL END");
+	fformat(stdout, "%-20s %-8s %-10s %-8s %-22s %-22s\n",
+			"--------------------", "--------", "----------", "--------",
+			"----------------------", "----------------------");
 
 	for (int i = 0; i < routeCount; i++)
 	{
@@ -433,10 +409,10 @@ cli_list_clusters_run(const char *pgdata, const char *configFile,
 			strlcpy(endLsn, entry.lsn, sizeof(endLsn));
 		}
 
-		printf("%-20s %-8s %-10s %-8s %-22s %-22s\n", /* IGNORE-BANNED */
-			   route->key, haveBackup ? "yes" : "no",
-			   route->receivewalPull ? "pull" : "none", receivewalStr,
-			   startLsn, endLsn);
+		fformat(stdout, "%-20s %-8s %-10s %-8s %-22s %-22s\n",
+				route->key, haveBackup ? "yes" : "no",
+				route->receivewalPull ? "pull" : "none", receivewalStr,
+				startLsn, endLsn);
 	}
 
 	routes_free(routes);
@@ -460,11 +436,11 @@ cli_list_backups_run(const char *pgdata, const char *configFile,
 		return false;
 	}
 
-	printf("%-20s %-28s %-22s %-10s %s\n", /* IGNORE-BANNED */
-		   "CLUSTER", "LABEL", "TAKEN AT", "SIZE", "LATEST");
-	printf("%-20s %-28s %-22s %-10s %s\n", /* IGNORE-BANNED */
-		   "--------------------", "----------------------------",
-		   "----------------------", "----------", "------");
+	fformat(stdout, "%-20s %-28s %-22s %-10s %s\n",
+			"CLUSTER", "LABEL", "TAKEN AT", "SIZE", "LATEST");
+	fformat(stdout, "%-20s %-28s %-22s %-10s %s\n",
+			"--------------------", "----------------------------",
+			"----------------------", "----------", "------");
 
 	for (int i = 0; i < routeCount; i++)
 	{
@@ -495,11 +471,11 @@ cli_list_backups_run(const char *pgdata, const char *configFile,
 			char size[32] = { 0 };
 
 			format_utc(backups[b].takenAt, takenAt, sizeof(takenAt));
-			format_bytes(directory_size(backups[b].dirPath), size, sizeof(size));
+			pretty_print_bytes(size, sizeof(size), directory_size(backups[b].dirPath));
 
-			printf("%-20s %-28s %-22s %-10s %s\n", /* IGNORE-BANNED */
-				   route->key, backups[b].label, takenAt, size,
-				   streq(backups[b].label, latestLabel) ? "yes" : "");
+			fformat(stdout, "%-20s %-28s %-22s %-10s %s\n",
+					route->key, backups[b].label, takenAt, size,
+					streq(backups[b].label, latestLabel) ? "yes" : "");
 		}
 
 		free(backups);
@@ -627,11 +603,11 @@ scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
 			char sizeStr[32] = { 0 };
 			char mtimeStr[32] = { 0 };
 
-			format_bytes(size, sizeStr, sizeof(sizeStr));
+			pretty_print_bytes(sizeStr, sizeof(sizeStr), size);
 			format_utc(st.st_mtime, mtimeStr, sizeof(mtimeStr));
 
-			printf("%-20s %-28s %-9s %-10s %s\n", /* IGNORE-BANNED */
-				   routeKey, entry->d_name, kindStr, sizeStr, mtimeStr);
+			fformat(stdout, "%-20s %-28s %-9s %-10s %s\n",
+					routeKey, entry->d_name, kindStr, sizeStr, mtimeStr);
 		}
 	}
 
@@ -664,11 +640,11 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 
 	if (segments)
 	{
-		printf("%-20s %-28s %-9s %-10s %s\n", /* IGNORE-BANNED */
-			   "CLUSTER", "FILE", "KIND", "SIZE", "MODIFIED");
-		printf("%-20s %-28s %-9s %-10s %s\n", /* IGNORE-BANNED */
-			   "--------------------", "----------------------------",
-			   "---------", "----------", "--------");
+		fformat(stdout, "%-20s %-28s %-9s %-10s %s\n",
+				"CLUSTER", "FILE", "KIND", "SIZE", "MODIFIED");
+		fformat(stdout, "%-20s %-28s %-9s %-10s %s\n",
+				"--------------------", "----------------------------",
+				"---------", "----------", "--------");
 	}
 
 	bool first = true;
@@ -694,22 +670,22 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 		{
 			char sizeStr[32] = { 0 };
 
-			format_bytes(stats.totalBytes, sizeStr, sizeof(sizeStr));
+			pretty_print_bytes(sizeStr, sizeof(sizeStr), stats.totalBytes);
 
 			if (!first)
 			{
-				printf("\n"); /* IGNORE-BANNED */
+				fformat(stdout, "\n");
 			}
 			first = false;
 
-			printf("%-11s%s\n", "Cluster:", route->key); /* IGNORE-BANNED */
-			printf("%-11s%d\n", "Segments:", stats.segments); /* IGNORE-BANNED */
-			printf("%-11s%s\n", "Size:", sizeStr); /* IGNORE-BANNED */
-			printf("%-11s%s\n", "Oldest:", /* IGNORE-BANNED */
-				   stats.oldest[0] != '\0' ? stats.oldest : "-");
-			printf("%-11s%s\n", "Newest:", /* IGNORE-BANNED */
-				   stats.newest[0] != '\0' ? stats.newest : "-");
-			printf("%-11s%d\n", "History:", stats.history); /* IGNORE-BANNED */
+			fformat(stdout, "%-11s%s\n", "Cluster:", route->key);
+			fformat(stdout, "%-11s%d\n", "Segments:", stats.segments);
+			fformat(stdout, "%-11s%s\n", "Size:", sizeStr);
+			fformat(stdout, "%-11s%s\n", "Oldest:",
+					stats.oldest[0] != '\0' ? stats.oldest : "-");
+			fformat(stdout, "%-11s%s\n", "Newest:",
+					stats.newest[0] != '\0' ? stats.newest : "-");
+			fformat(stdout, "%-11s%d\n", "History:", stats.history);
 		}
 	}
 

@@ -827,12 +827,12 @@ ws_cluster_prune_run(const char *pgdata, const char *configFile)
 
 	if (pruned == 0)
 	{
-		printf("No dropped clusters to prune.\n"); /* IGNORE-BANNED */
+		fformat(stdout, "No dropped clusters to prune.\n");
 	}
 	else
 	{
-		printf("Pruned %d dropped cluster%s.\n", /* IGNORE-BANNED */
-			   pruned, pruned == 1 ? "" : "s");
+		fformat(stdout, "Pruned %d dropped cluster%s.\n",
+				pruned, pruned == 1 ? "" : "s");
 	}
 
 	return true;
@@ -887,17 +887,17 @@ ws_cluster_list_run(const char *pgdata, const char *configFile,
 	{
 		if (showDisabled)
 		{
-			printf("No dropped clusters under \"%s\".\n", configPath); /* IGNORE-BANNED */
+			fformat(stdout, "No dropped clusters under \"%s\".\n", configPath);
 		}
 		else if (routeCount == 0)
 		{
-			printf("No clusters registered yet under \"%s\" -- see " /* IGNORE-BANNED */
-				   "\"pg_walserver cluster register\".\n", configPath);
+			fformat(stdout, "No clusters registered yet under \"%s\" -- see "
+							"\"pg_walserver cluster register\".\n", configPath);
 		}
 		else
 		{
-			printf("No active clusters under \"%s\" (pass --disabled to " /* IGNORE-BANNED */
-				   "see dropped ones).\n", configPath);
+			fformat(stdout, "No active clusters under \"%s\" (pass --disabled to "
+							"see dropped ones).\n", configPath);
 		}
 
 		routes_free(routes);
@@ -924,18 +924,18 @@ ws_cluster_list_run(const char *pgdata, const char *configFile,
 
 			if (!first)
 			{
-				printf("\n"); /* IGNORE-BANNED */
+				fformat(stdout, "\n");
 			}
 			first = false;
 
-			printf("cluster:    %s\n", routes[i].key); /* IGNORE-BANNED */
-			printf("receivewal: %s\n", /* IGNORE-BANNED */
-				   routes[i].receivewalPull ? "pull" : "none");
-			printf("upstream:   %s\n", /* IGNORE-BANNED */
-				   routes[i].upstream[0] != '\0' ? routes[i].upstream : "-");
-			printf("hostname:   %s\n", /* IGNORE-BANNED */
-				   routes[i].hostname[0] != '\0' ? routes[i].hostname : "-");
-			printf("path:       %s\n", routes[i].path); /* IGNORE-BANNED */
+			fformat(stdout, "cluster:    %s\n", routes[i].key);
+			fformat(stdout, "receivewal: %s\n",
+					routes[i].receivewalPull ? "pull" : "none");
+			fformat(stdout, "upstream:   %s\n",
+					routes[i].upstream[0] != '\0' ? routes[i].upstream : "-");
+			fformat(stdout, "hostname:   %s\n",
+					routes[i].hostname[0] != '\0' ? routes[i].hostname : "-");
+			fformat(stdout, "path:       %s\n", routes[i].path);
 		}
 
 		routes_free(routes);
@@ -943,11 +943,11 @@ ws_cluster_list_run(const char *pgdata, const char *configFile,
 		return true;
 	}
 
-	printf("%-20s %-10s %-24s %s\n", /* IGNORE-BANNED */
-		   "CLUSTER", "RECEIVEWAL", "HOSTNAME", "PATH");
-	printf("%-20s %-10s %-24s %s\n", /* IGNORE-BANNED */
-		   "--------------------", "----------",
-		   "------------------------", "----");
+	fformat(stdout, "%-20s %-10s %-24s %s\n",
+			"CLUSTER", "RECEIVEWAL", "HOSTNAME", "PATH");
+	fformat(stdout, "%-20s %-10s %-24s %s\n",
+			"--------------------", "----------",
+			"------------------------", "----");
 
 	for (int i = 0; i < routeCount; i++)
 	{
@@ -956,11 +956,11 @@ ws_cluster_list_run(const char *pgdata, const char *configFile,
 			continue;
 		}
 
-		printf("%-20s %-10s %-24s %s\n", /* IGNORE-BANNED */
-			   routes[i].key,
-			   routes[i].receivewalPull ? "pull" : "none",
-			   routes[i].hostname[0] != '\0' ? routes[i].hostname : "-",
-			   routes[i].path);
+		fformat(stdout, "%-20s %-10s %-24s %s\n",
+				routes[i].key,
+				routes[i].receivewalPull ? "pull" : "none",
+				routes[i].hostname[0] != '\0' ? routes[i].hostname : "-",
+				routes[i].path);
 	}
 
 	routes_free(routes);

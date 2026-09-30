@@ -91,7 +91,7 @@ cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 	replicationSource.primaryNode = target->node;
 	strlcpy(replicationSource.userName, target->userName,
 			sizeof(replicationSource.userName));
-	strlcpy(replicationSource.applicationName, "pg_walserver-fetch-systemid",
+	strlcpy(replicationSource.applicationName, "pg_walserver_fetch_systemid",
 			sizeof(replicationSource.applicationName));
 	replicationSource.sslOptions = target->sslOptions;
 

@@ -106,8 +106,8 @@ cli_ps_run(const char *pgdata)
 
 	if (!read_pidfile(pidfilePath, &servePid))
 	{
-		printf("pg_walserver is not running (no pidfile at \"%s\")\n", /* IGNORE-BANNED */
-			   pidfilePath);
+		fformat(stdout, "pg_walserver is not running (no pidfile at \"%s\")\n",
+				pidfilePath);
 		return true;
 	}
 
@@ -121,8 +121,8 @@ cli_ps_run(const char *pgdata)
 
 	int childCount = haveState ? (state.receivewalWorkerCount + state.bootstrapCount) : 0;
 
-	printf("pg_walserver(%d) running, uptime %s\n", /* IGNORE-BANNED */
-		   (int) servePid, serveUptime);
+	fformat(stdout, "pg_walserver(%d) running, uptime %s\n",
+			(int) servePid, serveUptime);
 
 	if (childCount == 0)
 	{
@@ -155,10 +155,10 @@ cli_ps_run(const char *pgdata)
 					c->lsn, c->lsnTimeline, age);
 		}
 
-		printf("%s receivewal(%d) %s, %s, uptime %s, restarts %d%s\n", /* IGNORE-BANNED */
-			   isLast ? "`--" : "|--",
-			   (int) c->pid, c->routeKey,
-			   running ? "running" : "stopped", uptime, c->restarts, lsnStr);
+		fformat(stdout, "%s receivewal(%d) %s, %s, uptime %s, restarts %d%s\n",
+				isLast ? "`--" : "|--",
+				(int) c->pid, c->routeKey,
+				running ? "running" : "stopped", uptime, c->restarts, lsnStr);
 	}
 
 	for (int i = 0; i < state.bootstrapCount; i++)
@@ -170,10 +170,10 @@ cli_ps_run(const char *pgdata)
 
 		format_uptime(running ? b->startedAt : 0, uptime, sizeof(uptime));
 
-		printf("%s bootstrap(%d) %s, %s, uptime %s\n", /* IGNORE-BANNED */
-			   isLast ? "`--" : "|--",
-			   (int) b->pid, b->routeKey,
-			   running ? "running" : "done", uptime);
+		fformat(stdout, "%s bootstrap(%d) %s, %s, uptime %s\n",
+				isLast ? "`--" : "|--",
+				(int) b->pid, b->routeKey,
+				running ? "running" : "done", uptime);
 	}
 
 	return true;

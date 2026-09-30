@@ -216,7 +216,7 @@ ensure_receivewal_slot(const WsReceivewalRoute *cr)
 	replicationSource.primaryNode = target.node;
 	strlcpy(replicationSource.userName, target.userName,
 			sizeof(replicationSource.userName));
-	strlcpy(replicationSource.applicationName, "pg_walserver-receivewal",
+	strlcpy(replicationSource.applicationName, "pg_walserver_receivewal",
 			sizeof(replicationSource.applicationName));
 	replicationSource.sslOptions = target.sslOptions;
 

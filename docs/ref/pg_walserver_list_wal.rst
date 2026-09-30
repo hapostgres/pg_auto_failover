@@ -47,10 +47,10 @@ Aggregate stats::
 
   archive$ pg_walserver list wal --cluster mycluster
   Cluster:   mycluster
-  Segments:  1
-  Size:      32.0MB
-  Oldest:    00000001000000000000002C
-  Newest:    00000001000000000000002C
+  Segments:  4
+  Size:      80 MB
+  Oldest:    00000001000000000000001C
+  Newest:    00000001000000000000001F
   History:   0
 
 With more than one route matching (no ``--cluster``, or a ``--cluster``

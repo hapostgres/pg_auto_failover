@@ -117,7 +117,7 @@ cli_basebackup_run(const WsUpstreamTarget *target,
 	replicationSource.primaryNode = target->node;
 	strlcpy(replicationSource.userName, target->userName,
 			sizeof(replicationSource.userName));
-	strlcpy(replicationSource.applicationName, "pg_walserver-basebackup",
+	strlcpy(replicationSource.applicationName, "pg_walserver_basebackup",
 			sizeof(replicationSource.applicationName));
 	strlcpy(replicationSource.backupDir, backupDir,
 			sizeof(replicationSource.backupDir));
