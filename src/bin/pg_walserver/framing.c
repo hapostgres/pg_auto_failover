@@ -134,8 +134,10 @@ ws_read_startup_payload(int sock, char **payload, int32_t *payloadLen)
 		return false;
 	}
 
-	int32_t len = ((int32_t) lenBuf[0] << 24) | ((int32_t) lenBuf[1] << 16) |
-				  ((int32_t) lenBuf[2] << 8) | (int32_t) lenBuf[3];
+	int32_t len = (int32_t) (((uint32_t) lenBuf[0] << 24) |
+							 ((uint32_t) lenBuf[1] << 16) |
+							 ((uint32_t) lenBuf[2] << 8) |
+							 (uint32_t) lenBuf[3]);
 
 	if (len < 4 || len > WS_MAX_STARTUP_PACKET_SIZE)
 	{
@@ -195,8 +197,10 @@ ws_read_message(int sock, char *type, char **payload, int32_t *payloadLen,
 		return false;
 	}
 
-	int32_t len = ((int32_t) lenBuf[0] << 24) | ((int32_t) lenBuf[1] << 16) |
-				  ((int32_t) lenBuf[2] << 8) | (int32_t) lenBuf[3];
+	int32_t len = (int32_t) (((uint32_t) lenBuf[0] << 24) |
+							 ((uint32_t) lenBuf[1] << 16) |
+							 ((uint32_t) lenBuf[2] << 8) |
+							 (uint32_t) lenBuf[3]);
 
 	/*
 	 * Like pq_getmessage(): the length is checked against the caller's

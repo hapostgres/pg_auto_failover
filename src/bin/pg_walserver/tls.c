@@ -28,6 +28,19 @@
 #define WS_TLS_CIPHER_LIST "HIGH:!aNULL"
 #define WS_TLS_GROUPS "X25519:prime256v1"
 
+/*
+ * SSL_CTX_set_cipher_list() above only configures suites for TLS 1.2 and
+ * below -- TLS 1.3 has its own, separate suite list and its own setter
+ * (SSL_CTX_set_ciphersuites(), OpenSSL 1.1.1+). Without this, a TLS 1.3
+ * handshake falls back to whatever OpenSSL was compiled with by default
+ * rather than an explicit, reviewed policy. These three are OpenSSL's own
+ * documented TLS 1.3 defaults (all AEAD, all considered secure), named
+ * explicitly here so the policy doesn't silently depend on the local
+ * OpenSSL build's own defaults.
+ */
+#define WS_TLS_CIPHERSUITES \
+	"TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256"
+
 static SSL_CTX *serverContext = NULL;
 static SSL *activeSsl = NULL;
 static bool clientVerificationEnabled = false;
@@ -223,6 +236,13 @@ ws_tls_server_init(const char *certPath, const char *keyPath)
 	if (SSL_CTX_set_cipher_list(ctx, WS_TLS_CIPHER_LIST) != 1)
 	{
 		log_openssl_errors("Setting the TLS cipher list");
+		SSL_CTX_free(ctx);
+		return false;
+	}
+
+	if (SSL_CTX_set_ciphersuites(ctx, WS_TLS_CIPHERSUITES) != 1)
+	{
+		log_openssl_errors("Setting the TLS 1.3 ciphersuites");
 		SSL_CTX_free(ctx);
 		return false;
 	}
