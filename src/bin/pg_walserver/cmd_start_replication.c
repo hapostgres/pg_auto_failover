@@ -190,8 +190,14 @@ send_xlogdata(int sock, uint64_t dataStart, uint64_t walEnd,
 
 /*
  * send_keepalive sends one CopyData-framed Primary keepalive ('k') message:
- * walEnd, sendTime (zero, unused), and replyRequested (always false --
- * this project never blocks a stream waiting for a standby status update).
+ * walEnd, sendTime (zero, unused), and replyRequested always true. A real
+ * walsender only sets this when it's about to hit wal_sender_timeout, but
+ * this project never blocks waiting for the reply either way, so there's
+ * no cost to always asking: a client that only replies on request (rather
+ * than on its own timer, as pg_receivewal/pg_basebackup already do) would
+ * otherwise never send a StandbyStatusUpdate at all, and restart_lsn
+ * (slot_feedback_apply(), WS_SLOT_FEEDBACK_PERSIST_INTERVAL_SEC above)
+ * would never advance for it.
  */
 static bool
 send_keepalive(int sock, uint64_t walEnd)
@@ -201,7 +207,7 @@ send_keepalive(int sock, uint64_t walEnd)
 	appendPQExpBufferChar(buf, 'k');   /* PqReplMsg_Keepalive */
 	append_int64(buf, (int64_t) walEnd);
 	append_int64(buf, (int64_t) 0);   /* sendTime */
-	appendPQExpBufferChar(buf, 0);   /* replyRequested = false */
+	appendPQExpBufferChar(buf, 1);   /* replyRequested = true */
 
 	bool ok = !PQExpBufferBroken(buf) && ws_send_copy_data(sock, buf->data, buf->len);
 

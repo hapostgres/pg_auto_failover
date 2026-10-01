@@ -59,7 +59,7 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 			return false;
 		}
 
-		int32_t code;
+		uint32_t code;
 
 		memcpy(&code, payload, 4); /* IGNORE-BANNED */
 		code = ntohl(code);
