@@ -36,6 +36,122 @@
  * cli_archive_cleanup.h, exported for "pg_walserver list backups"
  * (cli_list.c) to reuse -- see that header's own comment. */
 
+/*
+ * WsContinuityProblem carries one WAL-continuity problem's detail string
+ * back out of check_wal_range()/ws_check_wal_continuity() below -- declared
+ * here, ahead of those functions' own forward declarations, since both take
+ * a pointer to it.
+ */
+typedef struct WsContinuityProblem
+{
+	bool hasProblem;
+	char detail[512];
+} WsContinuityProblem;
+
+/* local helpers */
+static time_t ws_retention_age_cutoff(const WsRetentionAge *age, time_t now);
+static bool is_hex_run(const char *name, size_t len);
+static bool is_wal_segment_name(const char *name);
+static bool wal_prefix_from_name(const char *name, char *prefixOut);
+static int backup_cmp(const void *a, const void *b);
+static bool parse_backup_label_time(const char *label, time_t *takenAt);
+static bool lsn_to_segno(const char *lsn, uint64_t segSize, uint64_t *segnoOut);
+static bool lsn_to_segment(const char *lsn, uint32_t timeline, uint64_t segSize,
+						   char *segmentOut, size_t segmentOutSize);
+static bool segment_name_to_tli_segno(const char *name, uint64_t segSize,
+									  uint32_t *timelineOut, uint64_t *segnoOut);
+static bool read_last_history_line(const char *routePath, uint32_t timeline,
+								   uint32_t *parentTliOut, char *lsnOut,
+								   size_t lsnOutSize);
+static void check_wal_range(const char *routePath, uint64_t segSize,
+							uint32_t startTli, uint64_t startSegno,
+							uint32_t endTli, uint64_t endSegno,
+							WsContinuityProblem *problem);
+static bool ws_check_wal_continuity(const char *routePath, const WsRoute *route,
+									uint64_t segSize, WsBackupInfo *backups,
+									int backupCount, const bool *kept);
+
+static int cli_archive_cleanup_getopt(int argc, char **argv);
+static void cli_archive_cleanup_command_run(int argc, char **argv);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver archive-cleanup --cluster <name> --pgdata <path> | --path <dir>
+ *                               [--keep-count <N>] [--keep-age <interval>]
+ *                               [--dry-run]
+ * ----------------------------------------------------------------------- */
+
+static char archiveCleanupPgdata[MAXPGPATH] = { 0 };
+static char archiveCleanupConfigFile[MAXPGPATH] = { 0 };
+static char archiveCleanupRoute[NAMEDATALEN + 16] = { 0 };
+static char archiveCleanupPath[MAXPGPATH] = { 0 };
+static bool archiveCleanupHaveKeepCount = false;
+static int archiveCleanupKeepCount = 0;
+static bool archiveCleanupHaveKeepAge = false;
+static WsRetentionAge archiveCleanupKeepAge = { 0 };
+static bool archiveCleanupDryRun = false;
+static bool archiveCleanupForce = false;
+
+static struct option archiveCleanupLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'F' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ "path", required_argument, NULL, 'P' },
+	{ "keep-count", required_argument, NULL, 'k' },
+	{ "keep-age", required_argument, NULL, 'a' },
+	{ "dry-run", no_argument, NULL, 'n' },
+	{ "force", no_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+CommandLine archive_cleanup_command =
+	make_command("archive-cleanup",
+				 "Remove WAL/base backups this route no longer needs to "
+				 "keep (operator/cron-driven, never automatic)",
+				 "--cluster <name> --pgdata <path> [--config <path>] "
+				 "| --path <dir> "
+				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run] "
+				 "[--force]",
+				 "  --pgdata      this instance's own data root (defaults "
+				 "to PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "                <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster     the cluster name to clean up (looked up "
+				 "in the config file)\n"
+				 "  --path        the route's own directory (overrides "
+				 "the route's own \"path\")\n"
+				 "  --keep-count  keep at least this many of the most "
+				 "recent base backups\n"
+				 "  --keep-age    keep anything from the last <N><unit> "
+				 "(h/d/w/m -- hours,\n"
+				 "                days, weeks, calendar months); at "
+				 "least one of --keep-count/\n"
+				 "                --keep-age is required, retention is "
+				 "infinite otherwise\n"
+				 "  --dry-run, -n print what would be removed without "
+				 "removing anything -- still runs\n"
+				 "                and reports the WAL-continuity check "
+				 "below, pass or fail\n"
+				 "  --force, -f   before deleting anything, a pre-flight "
+				 "check refuses the whole\n"
+				 "                operation if any kept backup would be "
+				 "left with a WAL gap, or\n"
+				 "                if removing a backup would leave a "
+				 "time range with no gap-free\n"
+				 "                newer backup to cover it; --force "
+				 "bypasses that refusal only (it\n"
+				 "                does not change what --keep-count/"
+				 "--keep-age decide to remove) --\n"
+				 "                a default, unattended cron job should "
+				 "NEVER blindly pass this;\n"
+				 "                only use it once you've independently "
+				 "verified proceeding is\n"
+				 "                safe (e.g. an independent backup, or "
+				 "an accepted/expected gap)\n",
+				 cli_archive_cleanup_getopt, cli_archive_cleanup_command_run);
+
 
 /* ---------------------------------------------------------------------
  * --keep-age parsing
@@ -495,13 +611,6 @@ ws_backup_list_load(const char *routePath, uint64_t segSize,
  * --------------------------------------------------------------------- */
 
 #define WS_MAX_TIMELINE_CHAIN 64
-
-typedef struct WsContinuityProblem
-{
-	bool hasProblem;
-	char detail[512];
-} WsContinuityProblem;
-
 
 /*
  * read_last_history_line reads "<routePath>/%08X.history" (timeline) and
@@ -1248,87 +1357,6 @@ ws_archive_cleanup_run(const char *routePath,
 	 * would have refused to do */
 	return continuityOk || force;
 }
-
-
-/* -----------------------------------------------------------------------
- * pg_walserver archive-cleanup --cluster <name> --pgdata <path> | --path <dir>
- *                               [--keep-count <N>] [--keep-age <interval>]
- *                               [--dry-run]
- * ----------------------------------------------------------------------- */
-
-static char archiveCleanupPgdata[MAXPGPATH] = { 0 };
-static char archiveCleanupConfigFile[MAXPGPATH] = { 0 };
-static char archiveCleanupRoute[NAMEDATALEN + 16] = { 0 };
-static char archiveCleanupPath[MAXPGPATH] = { 0 };
-static bool archiveCleanupHaveKeepCount = false;
-static int archiveCleanupKeepCount = 0;
-static bool archiveCleanupHaveKeepAge = false;
-static WsRetentionAge archiveCleanupKeepAge = { 0 };
-static bool archiveCleanupDryRun = false;
-static bool archiveCleanupForce = false;
-
-static struct option archiveCleanupLongOptions[] = {
-	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config", required_argument, NULL, 'F' },
-	{ "cluster", required_argument, NULL, 'c' },
-	{ "path", required_argument, NULL, 'P' },
-	{ "keep-count", required_argument, NULL, 'k' },
-	{ "keep-age", required_argument, NULL, 'a' },
-	{ "dry-run", no_argument, NULL, 'n' },
-	{ "force", no_argument, NULL, 'f' },
-	{ NULL, 0, NULL, 0 }
-};
-
-static int cli_archive_cleanup_getopt(int argc, char **argv);
-static void cli_archive_cleanup_command_run(int argc, char **argv);
-
-CommandLine archive_cleanup_command =
-	make_command("archive-cleanup",
-				 "Remove WAL/base backups this route no longer needs to "
-				 "keep (operator/cron-driven, never automatic)",
-				 "--cluster <name> --pgdata <path> [--config <path>] "
-				 "| --path <dir> "
-				 "[--keep-count <N>] [--keep-age <interval>] [--dry-run] "
-				 "[--force]",
-				 "  --pgdata      this instance's own data root (defaults "
-				 "to PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "                <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster     the cluster name to clean up (looked up "
-				 "in the config file)\n"
-				 "  --path        the route's own directory (overrides "
-				 "the route's own \"path\")\n"
-				 "  --keep-count  keep at least this many of the most "
-				 "recent base backups\n"
-				 "  --keep-age    keep anything from the last <N><unit> "
-				 "(h/d/w/m -- hours,\n"
-				 "                days, weeks, calendar months); at "
-				 "least one of --keep-count/\n"
-				 "                --keep-age is required, retention is "
-				 "infinite otherwise\n"
-				 "  --dry-run, -n print what would be removed without "
-				 "removing anything -- still runs\n"
-				 "                and reports the WAL-continuity check "
-				 "below, pass or fail\n"
-				 "  --force, -f   before deleting anything, a pre-flight "
-				 "check refuses the whole\n"
-				 "                operation if any kept backup would be "
-				 "left with a WAL gap, or\n"
-				 "                if removing a backup would leave a "
-				 "time range with no gap-free\n"
-				 "                newer backup to cover it; --force "
-				 "bypasses that refusal only (it\n"
-				 "                does not change what --keep-count/"
-				 "--keep-age decide to remove) --\n"
-				 "                a default, unattended cron job should "
-				 "NEVER blindly pass this;\n"
-				 "                only use it once you've independently "
-				 "verified proceeding is\n"
-				 "                safe (e.g. an independent backup, or "
-				 "an accepted/expected gap)\n",
-				 cli_archive_cleanup_getopt, cli_archive_cleanup_command_run);
 
 
 /*

@@ -28,6 +28,102 @@
 #define WS_BASEBACKUP_LATEST_FILENAME "basebackups/.latest"
 #define WS_PGVERSION_FILENAME "pg_walserver_pgversion"
 
+/* local helpers */
+static bool find_pg_basebackup_for_route(const WsUpstreamTarget *target,
+										 char *pgBasebackupPathOut, size_t size);
+
+static int cli_basebackup_getopt(int argc, char **argv);
+static void cli_basebackup_command_run(int argc, char **argv);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver basebackup --cluster <name> --pgdata <path> [--upstream ...]
+ * ----------------------------------------------------------------------- */
+
+static char basebackupPgdata[MAXPGPATH] = { 0 };
+static char basebackupConfigFile[MAXPGPATH] = { 0 };
+static char basebackupRoute[NAMEDATALEN + 16] = { 0 };
+static char basebackupPath[MAXPGPATH] = { 0 };
+static char basebackupUpstream[MAXCONNINFO] = { 0 };
+static char basebackupHost[_POSIX_HOST_NAME_MAX] = { 0 };
+static char basebackupPort[16] = { 0 };
+static char basebackupUser[NAMEDATALEN] = { 0 };
+static bool basebackupHaveKeepCount = false;
+static int basebackupKeepCount = 0;
+static bool basebackupHaveKeepAge = false;
+static WsRetentionAge basebackupKeepAge = { 0 };
+static bool basebackupDryRun = false;
+static bool basebackupForce = false;
+
+static struct option basebackupLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'F' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ "path", required_argument, NULL, 'P' },
+	{ "upstream", required_argument, NULL, 'u' },
+	{ "host", required_argument, NULL, 'h' },
+	{ "port", required_argument, NULL, 'p' },
+	{ "user", required_argument, NULL, 'U' },
+	{ "keep-count", required_argument, NULL, 'k' },
+	{ "keep-age", required_argument, NULL, 'a' },
+	{ "dry-run", no_argument, NULL, 'n' },
+	{ "force", no_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+CommandLine basebackup_command =
+	make_command("basebackup",
+				 "Take a base backup of a route's upstream",
+				 "--cluster <name> --pgdata <path> [--config <path>] "
+				 "| --path <dir> "
+				 "[--upstream <conninfo> | --host <host> [--port <port>] "
+				 "[--user <name>]] [--keep-count <N>] [--keep-age <interval>] "
+				 "[--dry-run] [--force]",
+				 "  --pgdata      this instance's own data root (defaults "
+				 "to PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "                <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster     the cluster name to back up (looked up in "
+				 "the config file)\n"
+				 "  --path        the route's own directory (overrides the "
+				 "route's own \"path\")\n"
+				 "  --upstream    a libpq connection string to connect with "
+				 "(overrides the\n"
+				 "                route's own \"upstream\")\n"
+				 "  --host / --port / --user  further override individual "
+				 "connection\n"
+				 "                parameters (default port: 5432, default "
+				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+													  "  --keep-count  after taking the backup, also run "
+													  "archive-cleanup's own\n"
+													  "                retention pass, keeping at least this "
+													  "many of the most\n"
+													  "                recent base backups (optional; with "
+													  "neither --keep-count\n"
+													  "                nor --keep-age, no cleanup is attempted)\n"
+													  "  --keep-age    ... keeping every base backup taken "
+													  "within this long\n"
+													  "                (\"72h\"/\"30d\"/\"4w\"/\"3m\"); the more "
+													  "conservative of\n"
+													  "                --keep-count/--keep-age wins when both "
+													  "are given\n"
+													  "  --dry-run     with --keep-count/--keep-age, report what "
+													  "the cleanup\n"
+													  "                pass would remove without removing "
+													  "anything (the backup\n"
+													  "                itself is always taken for real)\n"
+													  "  --force       with --keep-count/--keep-age, bypass the "
+													  "cleanup pass's\n"
+													  "                WAL-continuity refusal (same meaning as "
+													  "archive-cleanup's\n"
+													  "                own --force); never bypasses the backup "
+													  "itself, and never\n"
+													  "                turns a cleanup refusal into a lost "
+													  "backup\n",
+				 cli_basebackup_getopt, cli_basebackup_command_run);
+
 
 /*
  * find_pg_basebackup_for_route picks the pg_basebackup binary to use for
@@ -215,98 +311,6 @@ cli_basebackup_route_has_backup(const char *path)
 
 	return nonEmpty;
 }
-
-
-/* -----------------------------------------------------------------------
- * pg_walserver basebackup --cluster <name> --pgdata <path> [--upstream ...]
- * ----------------------------------------------------------------------- */
-
-static char basebackupPgdata[MAXPGPATH] = { 0 };
-static char basebackupConfigFile[MAXPGPATH] = { 0 };
-static char basebackupRoute[NAMEDATALEN + 16] = { 0 };
-static char basebackupPath[MAXPGPATH] = { 0 };
-static char basebackupUpstream[MAXCONNINFO] = { 0 };
-static char basebackupHost[_POSIX_HOST_NAME_MAX] = { 0 };
-static char basebackupPort[16] = { 0 };
-static char basebackupUser[NAMEDATALEN] = { 0 };
-static bool basebackupHaveKeepCount = false;
-static int basebackupKeepCount = 0;
-static bool basebackupHaveKeepAge = false;
-static WsRetentionAge basebackupKeepAge = { 0 };
-static bool basebackupDryRun = false;
-static bool basebackupForce = false;
-
-static struct option basebackupLongOptions[] = {
-	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config", required_argument, NULL, 'F' },
-	{ "cluster", required_argument, NULL, 'c' },
-	{ "path", required_argument, NULL, 'P' },
-	{ "upstream", required_argument, NULL, 'u' },
-	{ "host", required_argument, NULL, 'h' },
-	{ "port", required_argument, NULL, 'p' },
-	{ "user", required_argument, NULL, 'U' },
-	{ "keep-count", required_argument, NULL, 'k' },
-	{ "keep-age", required_argument, NULL, 'a' },
-	{ "dry-run", no_argument, NULL, 'n' },
-	{ "force", no_argument, NULL, 'f' },
-	{ NULL, 0, NULL, 0 }
-};
-
-static int cli_basebackup_getopt(int argc, char **argv);
-static void cli_basebackup_command_run(int argc, char **argv);
-
-CommandLine basebackup_command =
-	make_command("basebackup",
-				 "Take a base backup of a route's upstream",
-				 "--cluster <name> --pgdata <path> [--config <path>] "
-				 "| --path <dir> "
-				 "[--upstream <conninfo> | --host <host> [--port <port>] "
-				 "[--user <name>]] [--keep-count <N>] [--keep-age <interval>] "
-				 "[--dry-run] [--force]",
-				 "  --pgdata      this instance's own data root (defaults "
-				 "to PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "                <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster     the cluster name to back up (looked up in "
-				 "the config file)\n"
-				 "  --path        the route's own directory (overrides the "
-				 "route's own \"path\")\n"
-				 "  --upstream    a libpq connection string to connect with "
-				 "(overrides the\n"
-				 "                route's own \"upstream\")\n"
-				 "  --host / --port / --user  further override individual "
-				 "connection\n"
-				 "                parameters (default port: 5432, default "
-				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
-													  "  --keep-count  after taking the backup, also run "
-													  "archive-cleanup's own\n"
-													  "                retention pass, keeping at least this "
-													  "many of the most\n"
-													  "                recent base backups (optional; with "
-													  "neither --keep-count\n"
-													  "                nor --keep-age, no cleanup is attempted)\n"
-													  "  --keep-age    ... keeping every base backup taken "
-													  "within this long\n"
-													  "                (\"72h\"/\"30d\"/\"4w\"/\"3m\"); the more "
-													  "conservative of\n"
-													  "                --keep-count/--keep-age wins when both "
-													  "are given\n"
-													  "  --dry-run     with --keep-count/--keep-age, report what "
-													  "the cleanup\n"
-													  "                pass would remove without removing "
-													  "anything (the backup\n"
-													  "                itself is always taken for real)\n"
-													  "  --force       with --keep-count/--keep-age, bypass the "
-													  "cleanup pass's\n"
-													  "                WAL-continuity refusal (same meaning as "
-													  "archive-cleanup's\n"
-													  "                own --force); never bypasses the backup "
-													  "itself, and never\n"
-													  "                turns a cleanup refusal into a lost "
-													  "backup\n",
-				 cli_basebackup_getopt, cli_basebackup_command_run);
 
 
 /*

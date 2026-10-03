@@ -31,6 +31,49 @@
  * own WS_FETCH_CHUNK_SIZE for the read side */
 #define WS_ARCHIVE_CHUNK_SIZE (128 * 1024)
 
+/* local helpers */
+static bool check_file_status(PGconn *conn, const char *filename,
+							  uint64_t size, uint32_t crc, char *statusOut,
+							  size_t statusOutSize, bool *fallbackOut);
+static bool show_receivewal(PGconn *conn, bool *pullOut);
+static bool push_file(PGconn *conn, const char *localPath,
+					  const char *filename);
+
+static int cli_archive_getopt(int argc, char **argv);
+static void cli_archive_command_run(int argc, char **argv);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver archive <path-to-file> <filename>
+ *                       --cluster <name> --host <host> [--port <port>]
+ *                       [--user <name>] [--sslmode <mode>]
+ * ----------------------------------------------------------------------- */
+
+static WsWalServerTarget archiveTarget = { 0 };
+
+CommandLine archive_command =
+	make_command("archive-wal",
+				 "Push one WAL/.backup file into a pg_walserver route "
+				 "(archive_command)",
+				 "<path-to-file> <filename> --cluster <name> --host <host> "
+				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
+				 "  --cluster   the cluster to archive into (sent as "
+				 "dbname)\n"
+				 "  --host      the pg_walserver host to connect to\n"
+				 "  --port      the pg_walserver port to connect to "
+				 "(default: 6543)\n"
+				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+																				  "  --sslmode   libpq sslmode (default: libpq's own "
+																				  "default, \"prefer\")\n"
+																				  "\n"
+																				  "  Meant to be used as (part of) a Postgres "
+																				  "archive_command, e.g.:\n"
+																				  "    archive_command = 'pg_walserver archive-wal %%p "
+																				  "%%f --cluster mycluster \\\n"
+																				  "                       --host archive.example.com "
+																				  "--user archiver_repl'\n",
+				 cli_archive_getopt, cli_archive_command_run);
+
 
 /*
  * check_file_status runs one CHECK_FILE round trip for filename/size/crc32c
@@ -370,41 +413,6 @@ ws_archive_run(const WsWalServerTarget *target, const char *localPath,
 
 	return ok;
 }
-
-
-/* -----------------------------------------------------------------------
- * pg_walserver archive <path-to-file> <filename>
- *                       --cluster <name> --host <host> [--port <port>]
- *                       [--user <name>] [--sslmode <mode>]
- * ----------------------------------------------------------------------- */
-
-static WsWalServerTarget archiveTarget = { 0 };
-
-static int cli_archive_getopt(int argc, char **argv);
-static void cli_archive_command_run(int argc, char **argv);
-
-CommandLine archive_command =
-	make_command("archive-wal",
-				 "Push one WAL/.backup file into a pg_walserver route "
-				 "(archive_command)",
-				 "<path-to-file> <filename> --cluster <name> --host <host> "
-				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
-				 "  --cluster   the cluster to archive into (sent as "
-				 "dbname)\n"
-				 "  --host      the pg_walserver host to connect to\n"
-				 "  --port      the pg_walserver port to connect to "
-				 "(default: 6543)\n"
-				 "  --user      role name (default: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
-																				  "  --sslmode   libpq sslmode (default: libpq's own "
-																				  "default, \"prefer\")\n"
-																				  "\n"
-																				  "  Meant to be used as (part of) a Postgres "
-																				  "archive_command, e.g.:\n"
-																				  "    archive_command = 'pg_walserver archive-wal %%p "
-																				  "%%f --cluster mycluster \\\n"
-																				  "                       --host archive.example.com "
-																				  "--user archiver_repl'\n",
-				 cli_archive_getopt, cli_archive_command_run);
 
 
 /*

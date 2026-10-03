@@ -64,6 +64,34 @@
 #include "ps_state.h"
 #include "string_utils.h"
 
+/* local helpers */
+static void format_uptime(time_t startedAt, char *dest, size_t destSize);
+
+static int cli_ps_getopt(int argc, char **argv);
+static void cli_ps_command_run(int argc, char **argv);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver ps --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char psPgdata[MAXPGPATH] = { 0 };
+
+static struct option psLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ NULL, 0, NULL, 0 }
+};
+
+CommandLine ps_command =
+	make_command("ps",
+				 "Show pg_walserver serve's own process-level status "
+				 "(pid, receivewal workers, bootstrap jobs)",
+				 "--pgdata <path>",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n",
+				 cli_ps_getopt, cli_ps_command_run);
+
 
 /*
  * format_uptime renders the time elapsed since startedAt as "<h>h<mm>m<ss>s"
@@ -183,31 +211,6 @@ cli_ps_run(const char *pgdata)
 
 	return true;
 }
-
-
-/* -----------------------------------------------------------------------
- * pg_walserver ps --pgdata <path>
- * ----------------------------------------------------------------------- */
-
-static char psPgdata[MAXPGPATH] = { 0 };
-
-static struct option psLongOptions[] = {
-	{ "pgdata", required_argument, NULL, 'D' },
-	{ NULL, 0, NULL, 0 }
-};
-
-static int cli_ps_getopt(int argc, char **argv);
-static void cli_ps_command_run(int argc, char **argv);
-
-CommandLine ps_command =
-	make_command("ps",
-				 "Show pg_walserver serve's own process-level status "
-				 "(pid, receivewal workers, bootstrap jobs)",
-				 "--pgdata <path>",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA)\n",
-				 cli_ps_getopt, cli_ps_command_run);
 
 
 /*

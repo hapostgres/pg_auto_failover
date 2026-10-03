@@ -27,6 +27,69 @@
 #define WS_SYSTEMID_FILENAME "pg_walserver_systemid"
 #define WS_PGVERSION_FILENAME "pg_walserver_pgversion"
 
+/* local helpers */
+static bool read_existing_systemid(const char *path, uint64_t *out);
+static bool read_existing_pgversion(const char *path, int *out);
+
+static int cli_fetch_systemid_getopt(int argc, char **argv);
+static void cli_fetch_systemid_command_run(int argc, char **argv);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver fetch-systemid --cluster <name> --pgdata <path> [--upstream ...]
+ * ----------------------------------------------------------------------- */
+
+static char fetchSystemidPgdata[MAXPGPATH] = { 0 };
+static char fetchSystemidConfigFile[MAXPGPATH] = { 0 };
+static char fetchSystemidRoute[NAMEDATALEN + 16] = { 0 };
+static char fetchSystemidPath[MAXPGPATH] = { 0 };
+static char fetchSystemidUpstream[MAXCONNINFO] = { 0 };
+static char fetchSystemidHost[_POSIX_HOST_NAME_MAX] = { 0 };
+static char fetchSystemidPort[16] = { 0 };
+static char fetchSystemidUser[NAMEDATALEN] = { 0 };
+static bool fetchSystemidForce = false;
+
+static struct option fetchSystemidLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'F' },
+	{ "cluster", required_argument, NULL, 'c' },
+	{ "path", required_argument, NULL, 'P' },
+	{ "upstream", required_argument, NULL, 'u' },
+	{ "host", required_argument, NULL, 'h' },
+	{ "port", required_argument, NULL, 'p' },
+	{ "user", required_argument, NULL, 'U' },
+	{ "force", no_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+CommandLine fetch_systemid_command =
+	make_command("fetch-systemid",
+				 "Fetch a route's upstream system identifier",
+				 "--cluster <name> --pgdata <path> [--config <path>] "
+				 "| --path <dir> "
+				 "[--upstream <conninfo> | --host <host> [--port <port>] "
+				 "[--user <name>]] [--force]",
+				 "  --pgdata    this instance's own data root (defaults to "
+				 "PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --cluster   the cluster name to fetch for (looked up in "
+				 "the config file)\n"
+				 "  --path      the route's own directory (overrides the "
+				 "route's own \"path\")\n"
+				 "  --upstream  a libpq connection string to connect with "
+				 "(overrides the\n"
+				 "              route's own \"upstream\")\n"
+				 "  --host / --port / --user  further override individual "
+				 "connection\n"
+				 "              parameters (default port: 5432, default "
+				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
+													  "  --force     overwrite an already-recorded, different "
+													  "system identifier\n",
+				 cli_fetch_systemid_getopt, cli_fetch_systemid_command_run);
+
 
 /*
  * read_existing_systemid reads "<path>/pg_walserver_systemid" if it exists,
@@ -233,65 +296,6 @@ cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 
 	return true;
 }
-
-
-/* -----------------------------------------------------------------------
- * pg_walserver fetch-systemid --cluster <name> --pgdata <path> [--upstream ...]
- * ----------------------------------------------------------------------- */
-
-static char fetchSystemidPgdata[MAXPGPATH] = { 0 };
-static char fetchSystemidConfigFile[MAXPGPATH] = { 0 };
-static char fetchSystemidRoute[NAMEDATALEN + 16] = { 0 };
-static char fetchSystemidPath[MAXPGPATH] = { 0 };
-static char fetchSystemidUpstream[MAXCONNINFO] = { 0 };
-static char fetchSystemidHost[_POSIX_HOST_NAME_MAX] = { 0 };
-static char fetchSystemidPort[16] = { 0 };
-static char fetchSystemidUser[NAMEDATALEN] = { 0 };
-static bool fetchSystemidForce = false;
-
-static struct option fetchSystemidLongOptions[] = {
-	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config", required_argument, NULL, 'F' },
-	{ "cluster", required_argument, NULL, 'c' },
-	{ "path", required_argument, NULL, 'P' },
-	{ "upstream", required_argument, NULL, 'u' },
-	{ "host", required_argument, NULL, 'h' },
-	{ "port", required_argument, NULL, 'p' },
-	{ "user", required_argument, NULL, 'U' },
-	{ "force", no_argument, NULL, 'f' },
-	{ NULL, 0, NULL, 0 }
-};
-
-static int cli_fetch_systemid_getopt(int argc, char **argv);
-static void cli_fetch_systemid_command_run(int argc, char **argv);
-
-CommandLine fetch_systemid_command =
-	make_command("fetch-systemid",
-				 "Fetch a route's upstream system identifier",
-				 "--cluster <name> --pgdata <path> [--config <path>] "
-				 "| --path <dir> "
-				 "[--upstream <conninfo> | --host <host> [--port <port>] "
-				 "[--user <name>]] [--force]",
-				 "  --pgdata    this instance's own data root (defaults to "
-				 "PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster   the cluster name to fetch for (looked up in "
-				 "the config file)\n"
-				 "  --path      the route's own directory (overrides the "
-				 "route's own \"path\")\n"
-				 "  --upstream  a libpq connection string to connect with "
-				 "(overrides the\n"
-				 "              route's own \"upstream\")\n"
-				 "  --host / --port / --user  further override individual "
-				 "connection\n"
-				 "              parameters (default port: 5432, default "
-				 "user: " PG_AUTOCTL_REPLICA_USERNAME ")\n"
-													  "  --force     overwrite an already-recorded, different "
-													  "system identifier\n",
-				 cli_fetch_systemid_getopt, cli_fetch_systemid_command_run);
 
 
 /*

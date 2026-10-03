@@ -45,28 +45,8 @@ static char servePidfilePath[MAXPGPATH] = { 0 };
 static bool serveHavePort = false;
 static bool serveHaveAuthTimeout = false;
 
-/*
- * ws_write_pidfile writes this process's own pid to pidfile, one line,
- * "%d\n" -- exactly the shape src/bin/common/pidfile.h's own
- * read_pidfile()/remove_pidfile() expect (read_pidfile() only ever parses
- * the first line, then does a kill(pid, 0) staleness check). Deliberately
- * NOT that same file's create_pidfile(): that one writes pg_autoctl's own
- * multi-line supervisor pidfile format (data directory, pg_autoctl version,
- * extension version, log semaphore id) and requires the PGDATA environment
- * variable to be set, neither of which fits pg_walserver's own single
- * --pgdata-driven, single-long-lived-process model. read_pidfile() and
- * remove_pidfile() are reused as-is: they are already the generic,
- * single-PID-focused half of that API.
- */
-static bool
-ws_write_pidfile(const char *pidfile, pid_t pid)
-{
-	char content[32];
-	int len = sformat(content, sizeof(content), "%d\n", (int) pid);
-
-	return write_file(content, (size_t) len, pidfile);
-}
-
+/* local helpers */
+static bool ws_write_pidfile(const char *pidfile, pid_t pid);
 
 static struct option serveLongOptions[] = {
 	{ "port", required_argument, NULL, 'p' },
@@ -138,6 +118,29 @@ CommandLine serve_command =
 				 "              or whatever \"pg_walserver setup\" "
 				 "persisted)\n",
 				 cli_serve_getopt, cli_serve_run);
+
+
+/*
+ * ws_write_pidfile writes this process's own pid to pidfile, one line,
+ * "%d\n" -- exactly the shape src/bin/common/pidfile.h's own
+ * read_pidfile()/remove_pidfile() expect (read_pidfile() only ever parses
+ * the first line, then does a kill(pid, 0) staleness check). Deliberately
+ * NOT that same file's create_pidfile(): that one writes pg_autoctl's own
+ * multi-line supervisor pidfile format (data directory, pg_autoctl version,
+ * extension version, log semaphore id) and requires the PGDATA environment
+ * variable to be set, neither of which fits pg_walserver's own single
+ * --pgdata-driven, single-long-lived-process model. read_pidfile() and
+ * remove_pidfile() are reused as-is: they are already the generic,
+ * single-PID-focused half of that API.
+ */
+static bool
+ws_write_pidfile(const char *pidfile, pid_t pid)
+{
+	char content[32];
+	int len = sformat(content, sizeof(content), "%d\n", (int) pid);
+
+	return write_file(content, (size_t) len, pidfile);
+}
 
 
 /*
