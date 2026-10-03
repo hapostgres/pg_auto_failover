@@ -46,6 +46,68 @@ static const char *configFiles[] = {
 	NULL
 };
 
+/*
+ * WsRouteFootprint is one route's own on-disk footprint: how many base
+ * backups it holds and their combined real size, how many WAL segments
+ * (complete ones; a ".partial" in progress is counted separately, never
+ * as a complete segment) and their combined size, and when its most
+ * recent base backup was taken -- see this file's own header comment for
+ * why exactly these fields, out of everything scan_route_footprint()
+ * could report.
+ */
+typedef struct WsRouteFootprint
+{
+	int backupCount;
+	uint64_t backupBytes;
+	time_t lastBackupAt;
+	int walSegments;
+	int walPartials;
+	uint64_t walBytes;
+} WsRouteFootprint;
+
+/* local helpers */
+static void format_utc(time_t t, char *dest, size_t destSize);
+static uint64_t directory_size(const char *path);
+static void scan_route_footprint(const WsRoute *route, WsRouteFootprint *out);
+static void print_config_files_row(const char *label, const char *path);
+static void print_config_files(const char *pgdata, const char *configPath);
+
+static int cli_ls_getopt(int argc, char **argv);
+static void cli_ls_command_run(int argc, char **argv);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver ls --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char lsPgdata[MAXPGPATH] = { 0 };
+static char lsConfigFile[MAXPGPATH] = { 0 };
+static bool lsIncludeConfigFiles = false;
+
+static struct option lsLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'f' },
+	{ "all", no_argument, NULL, 'a' },
+	{ NULL, 0, NULL, 0 }
+};
+
+CommandLine ls_command =
+	make_command("ls",
+				 "Per-cluster storage summary: base backups, WAL, disk usage",
+				 "--pgdata <path> [--config <path>] [--all]",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n"
+				 "  --config    where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n"
+				 "  --all, -a   list the config/credential/certificate "
+				 "files instead\n"
+				 "              (rarely change, rarely interesting day "
+				 "to day)\n",
+				 cli_ls_getopt, cli_ls_command_run);
+
 
 /*
  * format_utc renders t as an ISO-8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ"),
@@ -117,26 +179,6 @@ directory_size(const char *path)
 
 	return total;
 }
-
-
-/*
- * WsRouteFootprint is one route's own on-disk footprint: how many base
- * backups it holds and their combined real size, how many WAL segments
- * (complete ones; a ".partial" in progress is counted separately, never
- * as a complete segment) and their combined size, and when its most
- * recent base backup was taken -- see this file's own header comment for
- * why exactly these fields, out of everything scan_route_footprint()
- * could report.
- */
-typedef struct WsRouteFootprint
-{
-	int backupCount;
-	uint64_t backupBytes;
-	time_t lastBackupAt;
-	int walSegments;
-	int walPartials;
-	uint64_t walBytes;
-} WsRouteFootprint;
 
 
 /*
@@ -367,42 +409,6 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 
 	return true;
 }
-
-
-/* -----------------------------------------------------------------------
- * pg_walserver ls --pgdata <path>
- * ----------------------------------------------------------------------- */
-
-static char lsPgdata[MAXPGPATH] = { 0 };
-static char lsConfigFile[MAXPGPATH] = { 0 };
-static bool lsIncludeConfigFiles = false;
-
-static struct option lsLongOptions[] = {
-	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config", required_argument, NULL, 'f' },
-	{ "all", no_argument, NULL, 'a' },
-	{ NULL, 0, NULL, 0 }
-};
-
-static int cli_ls_getopt(int argc, char **argv);
-static void cli_ls_command_run(int argc, char **argv);
-
-CommandLine ls_command =
-	make_command("ls",
-				 "Per-cluster storage summary: base backups, WAL, disk usage",
-				 "--pgdata <path> [--config <path>] [--all]",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA)\n"
-				 "  --config    where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --all, -a   list the config/credential/certificate "
-				 "files instead\n"
-				 "              (rarely change, rarely interesting day "
-				 "to day)\n",
-				 cli_ls_getopt, cli_ls_command_run);
 
 
 /*

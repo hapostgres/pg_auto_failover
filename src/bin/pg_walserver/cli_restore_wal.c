@@ -19,28 +19,8 @@
 #include "log.h"
 #include "string_utils.h"
 
-/*
- * ws_restore_run connects to target (pg_walserver itself, never a Postgres
- * primary -- see this file's own header comment for why it doesn't reuse
- * cli_upstream.c) and fetches filename into outputPath via
- * src/bin/common/fetch_client.c's own ws_fetch_file_client(), which does
- * the actual FETCH_FILE round trip and the same-directory-temp-file-plus-
- * rename dance that keeps a killed/interrupted restore from leaving a
- * partial file at outputPath. Returns true on success, false with an
- * error already logged (by ws_fetch_file_client() itself) on any failure,
- * including the ordinary "not found" case restore_command hits at the end
- * of recovery -- this function does not try to tell that apart from any
- * other failure, exactly matching PostgreSQL's own restore_command
- * contract of "nonzero means try the next thing" either way.
- */
-bool
-ws_restore_run(const WsWalServerTarget *target,
-			   const char *filename, const char *outputPath)
-{
-	return ws_fetch_file_client(target->host, target->port, target->user,
-								target->route, target->sslmode,
-								filename, outputPath) == 0;
-}
+static int cli_restore_getopt(int argc, char **argv);
+static void cli_restore_command_run(int argc, char **argv);
 
 
 /* -----------------------------------------------------------------------
@@ -50,9 +30,6 @@ ws_restore_run(const WsWalServerTarget *target,
  * ----------------------------------------------------------------------- */
 
 static WsWalServerTarget restoreTarget = { 0 };
-
-static int cli_restore_getopt(int argc, char **argv);
-static void cli_restore_command_run(int argc, char **argv);
 
 CommandLine restore_command =
 	make_command("restore-wal",
@@ -76,6 +53,30 @@ CommandLine restore_command =
 																				  "                        --host archive.example.com "
 																				  "--user archiver_repl'\n",
 				 cli_restore_getopt, cli_restore_command_run);
+
+
+/*
+ * ws_restore_run connects to target (pg_walserver itself, never a Postgres
+ * primary -- see this file's own header comment for why it doesn't reuse
+ * cli_upstream.c) and fetches filename into outputPath via
+ * src/bin/common/fetch_client.c's own ws_fetch_file_client(), which does
+ * the actual FETCH_FILE round trip and the same-directory-temp-file-plus-
+ * rename dance that keeps a killed/interrupted restore from leaving a
+ * partial file at outputPath. Returns true on success, false with an
+ * error already logged (by ws_fetch_file_client() itself) on any failure,
+ * including the ordinary "not found" case restore_command hits at the end
+ * of recovery -- this function does not try to tell that apart from any
+ * other failure, exactly matching PostgreSQL's own restore_command
+ * contract of "nonzero means try the next thing" either way.
+ */
+bool
+ws_restore_run(const WsWalServerTarget *target,
+			   const char *filename, const char *outputPath)
+{
+	return ws_fetch_file_client(target->host, target->port, target->user,
+								target->route, target->sslmode,
+								filename, outputPath) == 0;
+}
 
 
 /*

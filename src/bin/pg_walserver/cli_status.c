@@ -25,6 +25,39 @@
 #include "routes.h"
 #include "string_utils.h"
 
+/* local helpers */
+static void format_uptime(time_t startedAt, char *dest, size_t destSize);
+
+static int cli_status_getopt(int argc, char **argv);
+static void cli_status_command_run(int argc, char **argv);
+
+
+/* -----------------------------------------------------------------------
+ * pg_walserver status --pgdata <path>
+ * ----------------------------------------------------------------------- */
+
+static char statusPgdata[MAXPGPATH] = { 0 };
+static char statusConfigFile[MAXPGPATH] = { 0 };
+
+static struct option statusLongOptions[] = {
+	{ "pgdata", required_argument, NULL, 'D' },
+	{ "config", required_argument, NULL, 'f' },
+	{ NULL, 0, NULL, 0 }
+};
+
+CommandLine status_command =
+	make_command("status",
+				 "Show a short pg_walserver status dashboard",
+				 "--pgdata <path> [--config <path>]",
+				 "  --pgdata    this instance's own top-level storage root "
+				 "(defaults to\n"
+				 "              PGDATA)\n"
+				 "  --config  where the config file itself lives "
+				 "(defaults to\n"
+				 "              <pgdata>/pg_walserver.ini, or "
+				 "PG_WALSERVER_CONFIG_FILE)\n",
+				 cli_status_getopt, cli_status_command_run);
+
 
 /*
  * format_uptime renders the time elapsed since startedAt as "<h>h<mm>m<ss>s"
@@ -140,36 +173,6 @@ cli_status_run(const char *pgdata, const char *configFile)
 
 	return true;
 }
-
-
-/* -----------------------------------------------------------------------
- * pg_walserver status --pgdata <path>
- * ----------------------------------------------------------------------- */
-
-static char statusPgdata[MAXPGPATH] = { 0 };
-static char statusConfigFile[MAXPGPATH] = { 0 };
-
-static struct option statusLongOptions[] = {
-	{ "pgdata", required_argument, NULL, 'D' },
-	{ "config", required_argument, NULL, 'f' },
-	{ NULL, 0, NULL, 0 }
-};
-
-static int cli_status_getopt(int argc, char **argv);
-static void cli_status_command_run(int argc, char **argv);
-
-CommandLine status_command =
-	make_command("status",
-				 "Show a short pg_walserver status dashboard",
-				 "--pgdata <path> [--config <path>]",
-				 "  --pgdata    this instance's own top-level storage root "
-				 "(defaults to\n"
-				 "              PGDATA)\n"
-				 "  --config  where the config file itself lives "
-				 "(defaults to\n"
-				 "              <pgdata>/pg_walserver.ini, or "
-				 "PG_WALSERVER_CONFIG_FILE)\n",
-				 cli_status_getopt, cli_status_command_run);
 
 
 /*
