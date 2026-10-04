@@ -247,6 +247,13 @@ read_restart_lsn_file(const char *path, char *lsnOut, size_t lsnOutSize)
 }
 
 
+/*
+ * ws_replication_slot_exists is true when slotName's own marker file is
+ * present under route -- cmd_start_replication.c's own check that a named
+ * SLOT clause refers to a real slot, the same requirement a real
+ * PostgreSQL walsender enforces (START_REPLICATION SLOT of a slot that
+ * does not exist is refused, never silently ignored).
+ */
 bool
 ws_replication_slot_exists(const WsRoute *route, const char *slotName)
 {
@@ -263,6 +270,12 @@ ws_replication_slot_exists(const WsRoute *route, const char *slotName)
 }
 
 
+/*
+ * ws_replication_slot_read_restart_lsn reads slotName's own current
+ * "restart_lsn" into lsnOut ("%X/%08X" shape). Returns false (lsnOut
+ * untouched) when the slot does not exist or its marker file could not be
+ * read.
+ */
 bool
 ws_replication_slot_read_restart_lsn(const WsRoute *route, const char *slotName,
 									 char *lsnOut, size_t lsnOutSize)
@@ -280,6 +293,19 @@ ws_replication_slot_read_restart_lsn(const WsRoute *route, const char *slotName,
 }
 
 
+/*
+ * ws_replication_slot_update_restart_lsn overwrites slotName's own
+ * "restart_lsn" with lsn -- cmd_start_replication.c's own use, advancing
+ * an existing slot as the standby's own feedback reports further
+ * progress (see cmd_start_replication.c's own header comment for the full
+ * mechanism: which field is trusted, how often this is actually called).
+ * Never creates a slot: returns false (nothing written) if slotName does
+ * not already exist -- streaming against a nonexistent slot is refused
+ * before this could ever be reached anyway (see ws_replication_slot_
+ * exists() above), so this is a defensive, not a load-bearing, check.
+ * The caller alone decides whether lsn is actually an advance -- this
+ * function itself does not compare against what's already on disk.
+ */
 bool
 ws_replication_slot_update_restart_lsn(const WsRoute *route, const char *slotName,
 									   const char *lsn)
@@ -308,6 +334,17 @@ ws_replication_slot_update_restart_lsn(const WsRoute *route, const char *slotNam
 }
 
 
+/*
+ * ws_replication_slot_oldest_restart_lsn scans every slot under route and
+ * reports the one whose own "restart_lsn" is oldest (the smallest WAL
+ * segment number at segSize) -- cli_archive_cleanup.c's own use: the
+ * floor beyond which retention must never remove WAL a still-existing
+ * slot needs. Returns false (both Out parameters untouched) when route
+ * has no slots at all, the ordinary case today. slotNameOut/lsnOut, when
+ * true is returned, are only ever used for logging which slot is
+ * responsible -- ties (more than one slot at the same oldest position)
+ * report whichever is found first, an arbitrary but harmless choice.
+ */
 bool
 ws_replication_slot_oldest_restart_lsn(const WsRoute *route, uint64_t segSize,
 									   char *slotNameOut, size_t slotNameOutSize,
