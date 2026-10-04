@@ -599,3 +599,60 @@ processBufferCallback(const char *buffer, bool error)
 		}
 	}
 }
+
+
+/*
+ * ws_parse_retention_age -- see string_utils.h.
+ */
+bool
+ws_parse_retention_age(const char *str, WsRetentionAge *age)
+{
+	size_t len = str == NULL ? 0 : strlen(str);
+
+	if (len < 2)
+	{
+		log_error("Invalid --keep-age value \"%s\": expected a number "
+				  "followed by one of \"h\" (hours), \"d\" (days), \"w\" "
+				  "(weeks), or \"m\" (calendar months), e.g. \"72h\", "
+				  "\"30d\", \"4w\", \"3m\" -- an explicit suffix is "
+				  "required, there is no bare-number default",
+				  str == NULL ? "" : str);
+		return false;
+	}
+
+	char unit = str[len - 1];
+
+	if (unit != 'h' && unit != 'd' && unit != 'w' && unit != 'm')
+	{
+		log_error("Invalid --keep-age value \"%s\": unrecognized suffix "
+				  "\"%c\" -- accepted suffixes are \"h\" (hours), \"d\" "
+				  "(days), \"w\" (weeks), and \"m\" (calendar months)",
+				  str, unit);
+		return false;
+	}
+
+	char numberPart[32] = { 0 };
+
+	if (len - 1 >= sizeof(numberPart))
+	{
+		log_error("Invalid --keep-age value \"%s\": number is too long", str);
+		return false;
+	}
+
+	memcpy(numberPart, str, len - 1); /* IGNORE-BANNED */
+	numberPart[len - 1] = '\0';
+
+	int64_t value = 0;
+
+	if (!stringToInt64(numberPart, &value) || value <= 0 || value > 100000)
+	{
+		log_error("Invalid --keep-age value \"%s\": expected a positive "
+				  "whole number before the \"%c\" suffix", str, unit);
+		return false;
+	}
+
+	age->value = (long) value;
+	age->unit = unit;
+
+	return true;
+}

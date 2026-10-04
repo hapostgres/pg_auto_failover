@@ -6,7 +6,6 @@
  *
  */
 
-#include <ctype.h>
 #include <dirent.h>
 #include <getopt.h>
 #include <inttypes.h>
@@ -27,6 +26,7 @@
 #include "routes.h"
 #include "string_utils.h"
 #include "wal_dir_scan.h"
+#include "wal_segment.h"
 
 #define WS_WAL_FNAME_LEN 24
 #define WS_BACKUPS_SUBDIR "basebackups"
@@ -50,16 +50,8 @@ typedef struct WsContinuityProblem
 
 /* local helpers */
 static time_t ws_retention_age_cutoff(const WsRetentionAge *age, time_t now);
-static bool is_hex_run(const char *name, size_t len);
-static bool is_wal_segment_name(const char *name);
-static bool wal_prefix_from_name(const char *name, char *prefixOut);
 static int backup_cmp(const void *a, const void *b);
 static bool parse_backup_label_time(const char *label, time_t *takenAt);
-static bool lsn_to_segno(const char *lsn, uint64_t segSize, uint64_t *segnoOut);
-static bool lsn_to_segment(const char *lsn, uint32_t timeline, uint64_t segSize,
-						   char *segmentOut, size_t segmentOutSize);
-static bool segment_name_to_tli_segno(const char *name, uint64_t segSize,
-									  uint32_t *timelineOut, uint64_t *segnoOut);
 static bool read_last_history_line(const char *routePath, uint32_t timeline,
 								   uint32_t *parentTliOut, char *lsnOut,
 								   size_t lsnOutSize);
@@ -153,64 +145,10 @@ CommandLine archive_cleanup_command =
 				 cli_archive_cleanup_getopt, cli_archive_cleanup_command_run);
 
 
-/* ---------------------------------------------------------------------
- * --keep-age parsing
- * --------------------------------------------------------------------- */
-bool
-ws_parse_retention_age(const char *str, WsRetentionAge *age)
-{
-	size_t len = str == NULL ? 0 : strlen(str);
-
-	if (len < 2)
-	{
-		log_error("Invalid --keep-age value \"%s\": expected a number "
-				  "followed by one of \"h\" (hours), \"d\" (days), \"w\" "
-				  "(weeks), or \"m\" (calendar months), e.g. \"72h\", "
-				  "\"30d\", \"4w\", \"3m\" -- an explicit suffix is "
-				  "required, there is no bare-number default",
-				  str == NULL ? "" : str);
-		return false;
-	}
-
-	char unit = str[len - 1];
-
-	if (unit != 'h' && unit != 'd' && unit != 'w' && unit != 'm')
-	{
-		log_error("Invalid --keep-age value \"%s\": unrecognized suffix "
-				  "\"%c\" -- accepted suffixes are \"h\" (hours), \"d\" "
-				  "(days), \"w\" (weeks), and \"m\" (calendar months)",
-				  str, unit);
-		return false;
-	}
-
-	char numberPart[32] = { 0 };
-
-	if (len - 1 >= sizeof(numberPart))
-	{
-		log_error("Invalid --keep-age value \"%s\": number is too long", str);
-		return false;
-	}
-
-	memcpy(numberPart, str, len - 1); /* IGNORE-BANNED */
-	numberPart[len - 1] = '\0';
-
-	int64_t value = 0;
-
-	if (!stringToInt64(numberPart, &value) || value <= 0 || value > 100000)
-	{
-		log_error("Invalid --keep-age value \"%s\": expected a positive "
-				  "whole number before the \"%c\" suffix", str, unit);
-		return false;
-	}
-
-	age->value = (long) value;
-	age->unit = unit;
-
-	return true;
-}
-
-
 /*
+ * WsRetentionAge/ws_parse_retention_age() -- --keep-age parsing -- have
+ * moved to src/bin/common/string_utils.h/.c, shared with cli_basebackup.c.
+ *
  * ws_retention_age_cutoff computes the timestamp before which a base
  * backup counts as expired under --keep-age. 'h'/'d'/'w' are plain fixed
  * durations; 'm' is real calendar-month arithmetic on UTC struct tm
@@ -262,87 +200,9 @@ ws_retention_age_cutoff(const WsRetentionAge *age, time_t now)
 }
 
 
-/* ---------------------------------------------------------------------
- * WAL/.partial/.backup filename helpers -- same shapes wal_dir_scan.c's
- * own is_wal_segment_filename() (not exported) recognizes, plus the
- * ".backup" and ".history" forms it has no need to.
- * --------------------------------------------------------------------- */
-static bool
-is_hex_run(const char *name, size_t len)
-{
-	for (size_t i = 0; i < len; i++)
-	{
-		if (!isxdigit((unsigned char) name[i]))
-		{
-			return false;
-		}
-	}
-
-	return true;
-}
-
-
-static bool
-is_wal_segment_name(const char *name)
-{
-	return strlen(name) == WS_WAL_FNAME_LEN && is_hex_run(name, WS_WAL_FNAME_LEN);
-}
-
-
 /*
- * wal_prefix_from_name extracts the 24-hex WAL-segment prefix a filename's
- * retention decision is keyed on, the same three shapes real
- * pg_archivecleanup's own SetWALFileNameForCleanup()/CleanupPriorWALFiles()
- * recognize (src/bin/pg_archivecleanup/pg_archivecleanup.c): a plain
- * segment, a ".partial" segment, or a "<24hex>.<8hex>.backup" backup
- * history file. Returns false (not one of these three shapes) for
- * anything else, including a "<8hex>.history" timeline history file --
- * see cli_archive_cleanup_run()'s own comment on why those are never
- * removed by this function at all.
- */
-static bool
-wal_prefix_from_name(const char *name, char *prefixOut)
-{
-	size_t len = strlen(name);
-
-	if (is_wal_segment_name(name))
-	{
-		memcpy(prefixOut, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
-		prefixOut[WS_WAL_FNAME_LEN] = '\0';
-		return true;
-	}
-
-	const char *partialSuffix = ".partial";
-	size_t partialLen = strlen(partialSuffix);
-
-	if (len == WS_WAL_FNAME_LEN + partialLen &&
-		strcmp(name + WS_WAL_FNAME_LEN, partialSuffix) == 0 &&
-		is_hex_run(name, WS_WAL_FNAME_LEN))
-	{
-		memcpy(prefixOut, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
-		prefixOut[WS_WAL_FNAME_LEN] = '\0';
-		return true;
-	}
-
-	/* "<24hex>.<8hex>.backup", exactly IsBackupHistoryFileName()'s shape */
-	if (len == WS_WAL_FNAME_LEN + 1 + 8 + strlen(".backup") &&
-		name[WS_WAL_FNAME_LEN] == '.' &&
-		is_hex_run(name, WS_WAL_FNAME_LEN) &&
-		is_hex_run(name + WS_WAL_FNAME_LEN + 1, 8) &&
-		strcmp(name + WS_WAL_FNAME_LEN + 1 + 8, ".backup") == 0)
-	{
-		memcpy(prefixOut, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
-		prefixOut[WS_WAL_FNAME_LEN] = '\0';
-		return true;
-	}
-
-	return false;
-}
-
-
-/* ---------------------------------------------------------------------
  * Base backup enumeration
- * --------------------------------------------------------------------- */
+ */
 static int
 backup_cmp(const void *a, const void *b)
 {
@@ -393,92 +253,6 @@ parse_backup_label_time(const char *label, time_t *takenAt)
 	*takenAt = timegm(&tm);
 
 	return *takenAt != (time_t) -1;
-}
-
-
-/*
- * lsn_to_segno converts an "%X/%08X"-formatted LSN plus a route's own WAL
- * segment size into the 0-based segment number it falls in, the same
- * division wal_dir_scan.c's own wal_dir_find_latest() uses. Shared by
- * lsn_to_segment() (below) and the WAL-continuity check's own timeline-
- * switch-point arithmetic (ws_check_wal_continuity()).
- */
-static bool
-lsn_to_segno(const char *lsn, uint64_t segSize, uint64_t *segnoOut)
-{
-	uint32_t hi, lo;
-
-	if (sscanf(lsn, "%X/%X", &hi, &lo) != 2) /* IGNORE-BANNED */
-	{
-		return false;
-	}
-
-	uint64_t lsnValue = ((uint64_t) hi << 32) | lo;
-
-	*segnoOut = lsnValue / segSize;
-
-	return true;
-}
-
-
-/*
- * lsn_and_segsize_to_segment converts an "%X/%08X"-formatted LSN plus a
- * route's own WAL segment size into the 24-hex segment filename that LSN
- * falls in, using the exact same math wal_dir_scan.c's own wal_segment_
- * filename() and wal_dir_find_latest() already use.
- */
-static bool
-lsn_to_segment(const char *lsn, uint32_t timeline, uint64_t segSize,
-			   char *segmentOut, size_t segmentOutSize)
-{
-	uint64_t segno;
-
-	if (!lsn_to_segno(lsn, segSize, &segno))
-	{
-		return false;
-	}
-
-	wal_segment_filename(timeline, segno, segSize, segmentOut, segmentOutSize);
-
-	return true;
-}
-
-
-/*
- * segment_name_to_tli_segno parses a 24-hex WAL segment filename prefix
- * (such as WsBackupInfo's own startSegment) back into its timeline and
- * 0-based segment number, the same %08X%08X%08X shape wal_segment_
- * filename() produces and wal_dir_find_latest() (wal_dir_scan.c) already
- * parses -- duplicated locally rather than exported, the same way this
- * file's own is_wal_segment_name() already duplicates wal_dir_scan.c's
- * private is_wal_segment_filename() for a different purpose.
- */
-static bool
-segment_name_to_tli_segno(const char *name, uint64_t segSize,
-						  uint32_t *timelineOut, uint64_t *segnoOut)
-{
-	if (!is_wal_segment_name(name))
-	{
-		return false;
-	}
-
-	char tliHex[9] = { 0 };
-	char logHex[9] = { 0 };
-	char segHex[9] = { 0 };
-
-	memcpy(tliHex, name, 8); /* IGNORE-BANNED */
-	memcpy(logHex, name + 8, 8); /* IGNORE-BANNED */
-	memcpy(segHex, name + 16, 8); /* IGNORE-BANNED */
-
-	uint32_t tli = (uint32_t) strtoul(tliHex, NULL, 16);
-	uint32_t logId = (uint32_t) strtoul(logHex, NULL, 16);
-	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
-	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
-
-	*timelineOut = tli;
-	*segnoOut = (uint64_t) logId * perXLogId + seg;
-
-	return true;
 }
 
 
@@ -558,9 +332,10 @@ ws_backup_list_load(const char *routePath, uint64_t segSize,
 
 		if (read_backup_label(backup->dirPath, lsn, sizeof(lsn), &timeline))
 		{
-			backup->haveStart = lsn_to_segment(lsn, (uint32_t) timeline, segSize,
-											   backup->startSegment,
-											   sizeof(backup->startSegment));
+			backup->haveStart = wal_lsn_to_segment_name(lsn, (uint32_t) timeline,
+														segSize,
+														backup->startSegment,
+														sizeof(backup->startSegment));
 		}
 
 		if (!backup->haveStart)
@@ -585,7 +360,7 @@ ws_backup_list_load(const char *routePath, uint64_t segSize,
 }
 
 
-/* ---------------------------------------------------------------------
+/*
  * WAL-continuity pre-flight check
  *
  * Before any deletion happens, verify that every *kept* backup's own
@@ -608,7 +383,7 @@ ws_backup_list_load(const char *routePath, uint64_t segSize,
  * require every segment number to be present under whichever timeline
  * owned it at that point in the chain -- never flagging a gap merely
  * because two adjacent kept segments' timeline bytes differ.
- * --------------------------------------------------------------------- */
+ */
 
 #define WS_MAX_TIMELINE_CHAIN 64
 
@@ -735,7 +510,7 @@ check_wal_range(const char *routePath, uint64_t segSize,
 
 		uint64_t switchSegno;
 
-		if (!lsn_to_segno(lsn, segSize, &switchSegno))
+		if (!wal_lsn_to_segno(lsn, segSize, &switchSegno))
 		{
 			sformat(problem->detail, sizeof(problem->detail),
 					"cannot verify WAL continuity: \"%08X.history\" under "
@@ -801,8 +576,8 @@ check_wal_range(const char *routePath, uint64_t segSize,
 		{
 			char segName[WS_WAL_FNAME_LEN + 1] = { 0 };
 
-			wal_segment_filename(chainTli[k], segno, segSize,
-								 segName, sizeof(segName));
+			wal_segment_name_format(chainTli[k], segno, segSize,
+									segName, sizeof(segName));
 
 			char segPath[MAXPGPATH] = { 0 };
 
@@ -860,13 +635,15 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
 		uint32_t startTli;
 		uint64_t startSegno;
 
-		if (!segment_name_to_tli_segno(backup->startSegment, segSize,
-									   &startTli, &startSegno))
+		if (!wal_segment_name_is_valid(backup->startSegment))
 		{
 			/* can't happen: startSegment was produced by our own
-			 * wal_segment_filename() when this backup was loaded */
+			 * wal_segment_name_format() when this backup was loaded */
 			continue;
 		}
+
+		wal_segment_name_parse(backup->startSegment, segSize,
+							   &startTli, &startSegno);
 
 		uint32_t endTli = 0;
 		uint64_t endSegno = 0;
@@ -876,8 +653,13 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
 		{
 			WsBackupInfo *next = &(backups[keptIdx[k + 1]]);
 
-			haveEnd = segment_name_to_tli_segno(next->startSegment, segSize,
-												&endTli, &endSegno);
+			haveEnd = wal_segment_name_is_valid(next->startSegment);
+
+			if (haveEnd)
+			{
+				wal_segment_name_parse(next->startSegment, segSize,
+									   &endTli, &endSegno);
+			}
 		}
 		else
 		{
@@ -889,7 +671,7 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
 			{
 				uint64_t oneAfterSegno;
 
-				if (lsn_to_segno(latestEndLsn, segSize, &oneAfterSegno) &&
+				if (wal_lsn_to_segno(latestEndLsn, segSize, &oneAfterSegno) &&
 					oneAfterSegno > 0)
 				{
 					endTli = latestTli;
@@ -945,9 +727,9 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
 }
 
 
-/* ---------------------------------------------------------------------
+/*
  * Main entry point
- * --------------------------------------------------------------------- */
+ */
 bool
 ws_archive_cleanup_run(const char *routePath,
 					   bool haveKeepCount, int keepCount,
@@ -1131,12 +913,12 @@ ws_archive_cleanup_run(const char *routePath,
 	{
 		uint64_t slotSegno;
 
-		if (ws_wal_lsn_to_segno(slotLsn, segSize, &slotSegno))
+		if (wal_lsn_to_segno(slotLsn, segSize, &slotSegno))
 		{
 			char slotCutoff[WS_WAL_FNAME_LEN + 1] = { 0 };
 
-			wal_segment_filename(0, slotSegno, segSize, slotCutoff,
-								 sizeof(slotCutoff));
+			wal_segment_name_format(0, slotSegno, segSize, slotCutoff,
+									sizeof(slotCutoff));
 
 			if (strcmp(slotCutoff + 8, combinedCutoff + 8) < 0)
 			{
@@ -1304,7 +1086,7 @@ ws_archive_cleanup_run(const char *routePath,
 	{
 		char prefix[WS_WAL_FNAME_LEN + 1] = { 0 };
 
-		if (!wal_prefix_from_name(entry->d_name, prefix))
+		if (!wal_segment_name_extract_prefix(entry->d_name, prefix))
 		{
 			/* not a WAL/.partial/.backup shaped name -- includes
 			 * "<8hex>.history" timeline history files, deliberately never

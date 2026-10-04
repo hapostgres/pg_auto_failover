@@ -19,6 +19,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "string_utils.h"
+#include "wal_segment.h"
 #include "ws_util.h"
 
 /* default WAL segment size (16MB) when the route has no pg_walserver_walsegsize */
@@ -27,33 +28,6 @@
 #define WS_MAX_WAL_SEGMENT_SIZE UINT64CONST(0x40000000)
 
 #define WS_WAL_FNAME_LEN 24
-
-
-/*
- * is_wal_segment_filename returns true when name looks like a complete WAL
- * segment filename: exactly WS_WAL_FNAME_LEN (24) hexadecimal digits, no
- * more, no less (so ".partial"/".gz"/etc suffixed names are excluded).
- */
-static bool
-is_wal_segment_filename(const char *name)
-{
-	size_t len = strlen(name);
-
-	if (len != WS_WAL_FNAME_LEN)
-	{
-		return false;
-	}
-
-	for (size_t i = 0; i < len; i++)
-	{
-		if (!isxdigit((unsigned char) name[i]))
-		{
-			return false;
-		}
-	}
-
-	return true;
-}
 
 
 /*
@@ -146,59 +120,6 @@ ws_wal_segment_size_string(uint64_t segSize, char *dest, size_t destSize)
 }
 
 
-void
-wal_segment_filename(uint32_t timeline, uint64_t segno, uint64_t segSize,
-					 char *dest, size_t destSize)
-{
-	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
-	uint32_t logId = (uint32_t) (segno / perXLogId);
-	uint32_t seg = (uint32_t) (segno % perXLogId);
-
-	sformat(dest, destSize, "%08X%08X%08X", timeline, logId, seg);
-}
-
-
-void
-ws_wal_segment_prefix_to_position(const char *segmentPrefix, uint64_t segSize,
-								  uint32_t *timelineOut, uint64_t *segnoOut)
-{
-	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
-
-	char tliHex[9] = { 0 };
-	char logIdHex[9] = { 0 };
-	char segHex[9] = { 0 };
-
-	memcpy(tliHex, segmentPrefix, 8); /* IGNORE-BANNED */
-	memcpy(logIdHex, segmentPrefix + 8, 8); /* IGNORE-BANNED */
-	memcpy(segHex, segmentPrefix + 16, 8); /* IGNORE-BANNED */
-
-	uint32_t tli = (uint32_t) strtoul(tliHex, NULL, 16);
-	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
-	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
-
-	*timelineOut = tli;
-	*segnoOut = (uint64_t) logId * perXLogId + seg;
-}
-
-
-bool
-ws_wal_lsn_to_segno(const char *lsn, uint64_t segSize, uint64_t *segnoOut)
-{
-	uint32_t hi, lo;
-
-	if (sscanf(lsn, "%X/%X", &hi, &lo) != 2) /* IGNORE-BANNED */
-	{
-		return false;
-	}
-
-	uint64_t lsnValue = ((uint64_t) hi << 32) | lo;
-
-	*segnoOut = lsnValue / segSize;
-
-	return true;
-}
-
-
 bool
 wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 					char *endLsn, size_t endLsnSize)
@@ -216,7 +137,7 @@ wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 
 	while ((entry = readdir(dir)) != NULL)
 	{
-		if (!is_wal_segment_filename(entry->d_name))
+		if (!wal_segment_name_is_valid(entry->d_name))
 		{
 			continue;
 		}
@@ -237,7 +158,7 @@ wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 	uint32_t tli;
 	uint64_t segno;
 
-	ws_wal_segment_prefix_to_position(best, segSize, &tli, &segno);
+	wal_segment_name_parse(best, segSize, &tli, &segno);
 
 	uint64_t endOfSegment = (segno + 1) * segSize;
 
@@ -269,27 +190,11 @@ wal_dir_has_any_segment(const WsRoute *route)
 
 	while (!found && (entry = readdir(dir)) != NULL)
 	{
-		if (is_wal_segment_filename(entry->d_name))
+		if (wal_segment_name_is_valid(entry->d_name) ||
+			wal_segment_name_is_partial(entry->d_name))
 		{
 			found = true;
 			break;
-		}
-
-		const char *partialSuffix = ".partial";
-		size_t nameLen = strlen(entry->d_name);
-		size_t suffixLen = strlen(partialSuffix);
-
-		if (nameLen == WS_WAL_FNAME_LEN + suffixLen &&
-			strcmp(entry->d_name + WS_WAL_FNAME_LEN, partialSuffix) == 0)
-		{
-			char segPart[WS_WAL_FNAME_LEN + 1] = { 0 };
-
-			memcpy(segPart, entry->d_name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
-
-			if (is_wal_segment_filename(segPart))
-			{
-				found = true;
-			}
 		}
 	}
 
@@ -307,7 +212,7 @@ ws_wal_dir_classify_filename(const char *name, char *segmentOut)
 {
 	size_t len = strlen(name);
 
-	if (is_wal_segment_filename(name))
+	if (wal_segment_name_is_valid(name))
 	{
 		if (segmentOut != NULL)
 		{
@@ -317,24 +222,14 @@ ws_wal_dir_classify_filename(const char *name, char *segmentOut)
 		return WS_WAL_FILE_SEGMENT;
 	}
 
-	const char *partialSuffix = ".partial";
-	size_t partialLen = strlen(partialSuffix);
-
-	if (len == WS_WAL_FNAME_LEN + partialLen &&
-		strcmp(name + WS_WAL_FNAME_LEN, partialSuffix) == 0)
+	if (wal_segment_name_is_partial(name))
 	{
-		char prefix[WS_WAL_FNAME_LEN + 1] = { 0 };
-
-		memcpy(prefix, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
-
-		if (is_wal_segment_filename(prefix))
+		if (segmentOut != NULL)
 		{
-			if (segmentOut != NULL)
-			{
-				strlcpy(segmentOut, prefix, WS_WAL_FNAME_LEN + 1);
-			}
-			return WS_WAL_FILE_PARTIAL;
+			memcpy(segmentOut, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
+			segmentOut[WS_WAL_FNAME_LEN] = '\0';
 		}
+		return WS_WAL_FILE_PARTIAL;
 	}
 
 	/* "<24hex>.<8hex>.backup" */
@@ -342,20 +237,14 @@ ws_wal_dir_classify_filename(const char *name, char *segmentOut)
 
 	if (len == WS_WAL_FNAME_LEN + 1 + 8 + strlen(backupSuffix) &&
 		name[WS_WAL_FNAME_LEN] == '.' &&
-		strcmp(name + WS_WAL_FNAME_LEN + 1 + 8, backupSuffix) == 0)
+		wal_backup_history_name_is_valid(name))
 	{
-		char prefix[WS_WAL_FNAME_LEN + 1] = { 0 };
-
-		memcpy(prefix, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
-
-		if (is_wal_segment_filename(prefix))
+		if (segmentOut != NULL)
 		{
-			if (segmentOut != NULL)
-			{
-				strlcpy(segmentOut, prefix, WS_WAL_FNAME_LEN + 1);
-			}
-			return WS_WAL_FILE_BACKUP;
+			memcpy(segmentOut, name, WS_WAL_FNAME_LEN); /* IGNORE-BANNED */
+			segmentOut[WS_WAL_FNAME_LEN] = '\0';
 		}
+		return WS_WAL_FILE_BACKUP;
 	}
 
 	/* "<8hex>.history" */

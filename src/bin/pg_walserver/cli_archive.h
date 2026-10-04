@@ -86,15 +86,16 @@
 #include "cli_wal_target.h"
 
 /*
- * ws_archive_run implements the 4-step archive_command sequence described
- * above against localPath (the "%p" argument: the file's real path, still
- * on the *source* instance's own filesystem) to be archived as filename
- * (the "%f" argument: the bare name it is archived under). Returns true on
- * success (the caller exits 0), false with an error already logged to
- * stderr otherwise (the caller exits nonzero, so PostgreSQL retries).
+ * ws_archive_push_file implements the 4-step archive_command sequence
+ * described above against localPath (the "%p" argument: the file's real
+ * path, still on the *source* instance's own filesystem) to be archived as
+ * filename (the "%f" argument: the bare name it is archived under).
+ * Returns true on success (the caller exits 0), false with an error
+ * already logged to stderr otherwise (the caller exits nonzero, so
+ * PostgreSQL retries).
  */
-bool ws_archive_run(const WsWalServerTarget *target,
-					const char *localPath, const char *filename);
+bool ws_archive_push_file(const WsWalServerTarget *target,
+						  const char *localPath, const char *filename);
 
 extern CommandLine archive_command;
 

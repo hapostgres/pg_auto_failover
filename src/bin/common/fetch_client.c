@@ -25,6 +25,7 @@
 int
 ws_fetch_file_client(const char *host, int port, const char *user,
 					 const char *routeKey, const char *sslmode,
+					 const char *applicationName,
 					 const char *filename, const char *outputPath)
 {
 	/*
@@ -46,8 +47,8 @@ ws_fetch_file_client(const char *host, int port, const char *user,
 	PQExpBuffer connInfo = createPQExpBuffer();
 
 	appendPQExpBuffer(connInfo, "host=%s port=%d user=%s dbname=%s "
-								"fallback_application_name=fetch_client",
-					  host, port, user, routeKey);
+								"fallback_application_name=%s",
+					  host, port, user, routeKey, applicationName);
 
 	if (sslmode != NULL && sslmode[0] != '\0')
 	{

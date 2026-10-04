@@ -6,7 +6,6 @@
  *
  */
 
-#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <string.h>
@@ -41,8 +40,6 @@
  * track.
  */
 #define WS_SLOT_FEEDBACK_PERSIST_INTERVAL_SEC 5
-
-#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
 
 /*
@@ -362,53 +359,25 @@ find_oldest_segno(const char *walcacheDir, uint32_t timeline,
 
 	while ((entry = readdir(dir)) != NULL)
 	{
-		size_t len = strlen(entry->d_name);
+		if (!wal_segment_name_is_valid(entry->d_name) &&
+			!wal_segment_name_is_partial(entry->d_name))
+		{
+			continue;
+		}
+
 		char segPart[25] = { 0 };
 
-		if (len == 24)
-		{
-			memcpy(segPart, entry->d_name, 24); /* IGNORE-BANNED */
-		}
-		else if (len == 24 + 8 && streq(entry->d_name + 24, ".partial"))
-		{
-			memcpy(segPart, entry->d_name, 24); /* IGNORE-BANNED */
-		}
-		else
-		{
-			continue;
-		}
+		memcpy(segPart, entry->d_name, 24); /* IGNORE-BANNED */
 
-		bool isHex = true;
+		uint32_t tli;
+		uint64_t segno;
 
-		for (size_t i = 0; i < 24 && isHex; i++)
-		{
-			isHex = isxdigit((unsigned char) segPart[i]);
-		}
+		wal_segment_name_parse(segPart, segSize, &tli, &segno);
 
-		if (!isHex)
+		if (tli != timeline)
 		{
 			continue;
 		}
-
-		char tliHex[9] = { 0 };
-
-		memcpy(tliHex, segPart, 8); /* IGNORE-BANNED */
-
-		if ((uint32_t) strtoul(tliHex, NULL, 16) != timeline)
-		{
-			continue;
-		}
-
-		char logIdHex[9] = { 0 };
-		char segHex[9] = { 0 };
-
-		memcpy(logIdHex, segPart + 8, 8); /* IGNORE-BANNED */
-		memcpy(segHex, segPart + 16, 8); /* IGNORE-BANNED */
-
-		uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
-		uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
-		uint64_t segno = (uint64_t) logId *
-						 (UINT64CONST(0x100000000) / segSize) + seg;
 
 		if (!found || segno < best)
 		{
@@ -533,8 +502,8 @@ cmd_start_replication(int sock, const WsRoute *route,
 
 		char filename[32];
 
-		wal_segment_filename(timeline, segno, segSize, filename,
-							 sizeof(filename));
+		wal_segment_name_format(timeline, segno, segSize, filename,
+								sizeof(filename));
 
 		char completePath[MAXPGPATH];
 
@@ -559,8 +528,8 @@ cmd_start_replication(int sock, const WsRoute *route,
 			{
 				char oldestName[32];
 
-				wal_segment_filename(timeline, oldestSegno, segSize,
-									 oldestName, sizeof(oldestName));
+				wal_segment_name_format(timeline, oldestSegno, segSize,
+										oldestName, sizeof(oldestName));
 
 				log_error("START_REPLICATION: requested segment \"%s\" "
 						  "predates the oldest segment this archiver has "

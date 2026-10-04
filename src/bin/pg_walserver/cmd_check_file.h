@@ -34,7 +34,7 @@
  *   never from a CHECK_FILE result a client could lie about. "fallback"
  *   is advisory in the same sense: it only ever *recommends* pushing via
  *   ARCHIVE_FILE sooner rather than waiting, never forces it -- the
- *   client (cli_archive.c's own ws_archive_run()) still decides.
+ *   client (cli_archive.c's own ws_archive_push_file()) still decides.
  *
  * Licensed under the PostgreSQL License.
  *

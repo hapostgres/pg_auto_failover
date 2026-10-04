@@ -65,13 +65,13 @@
 #include "cli_wal_target.h"
 
 /*
- * ws_restore_run fetches filename (the "%f" argument) from the pg_walserver
- * described by target and writes it to outputPath (the "%p" argument).
- * Returns true on success (the caller exits 0), false with an error
- * already logged to stderr otherwise (the caller exits nonzero).
+ * ws_restore_fetch_file fetches filename (the "%f" argument) from the
+ * pg_walserver described by target and writes it to outputPath (the "%p"
+ * argument). Returns true on success (the caller exits 0), false with an
+ * error already logged to stderr otherwise (the caller exits nonzero).
  */
-bool ws_restore_run(const WsWalServerTarget *target,
-					const char *filename, const char *outputPath);
+bool ws_restore_fetch_file(const WsWalServerTarget *target,
+						   const char *filename, const char *outputPath);
 
 extern CommandLine restore_command;
 

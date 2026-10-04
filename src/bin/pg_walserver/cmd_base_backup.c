@@ -91,7 +91,6 @@
  *
  */
 
-#include <ctype.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -109,8 +108,6 @@
 #include "string_utils.h"
 #include "tar_stream.h"
 #include "wal_dir_scan.h"
-
-#define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
 typedef struct BaseBackupOptions
 {
@@ -335,10 +332,14 @@ send_position_row(int sock, const char *lsn, const char *tli)
  * than a stale re-send of the start position.
  *
  * Deliberately not pg_walserver/wal_dir_scan.c's own wal_dir_find_latest()
- * (this project doesn't share code across its own binaries, see this
- * file's own precedent of small, self-contained helpers): that function
- * only ever considers a *complete* (non-".partial") segment, which is the
- * right, conservative choice for IDENTIFY_SYSTEM/CREATE_REPLICATION_SLOT's
+ * -- that is a *business-logic* function this file intentionally doesn't
+ * reuse (as opposed to the plain filename-shape primitives below,
+ * wal_segment_name_is_valid()/_is_partial()/_parse(), src/bin/common/
+ * wal_segment.h, which this file does share with wal_dir_scan.c -- there
+ * is nothing route- or archiver-specific about recognizing a WAL segment
+ * filename's own shape): wal_dir_find_latest() only ever considers a
+ * *complete* (non-".partial") segment, which is the right, conservative
+ * choice for IDENTIFY_SYSTEM/CREATE_REPLICATION_SLOT's own
  * own "confirmed durable" needs, but wrong here -- an archiver whose only
  * WAL activity so far is still sitting in the current ".partial" segment
  * (a real, common case: nothing has forced a segment switch yet) would
@@ -366,28 +367,6 @@ send_position_row(int sock, const char *lsn, const char *tli)
  * first tick has landed.
  */
 #define CBB_WAL_FNAME_LEN 24
-
-
-static bool
-is_wal_segment_filename(const char *name)
-{
-	size_t len = strlen(name);
-
-	if (len != CBB_WAL_FNAME_LEN)
-	{
-		return false;
-	}
-
-	for (size_t i = 0; i < len; i++)
-	{
-		if (!isxdigit((unsigned char) name[i]))
-		{
-			return false;
-		}
-	}
-
-	return true;
-}
 
 
 /*
@@ -458,7 +437,6 @@ find_reachable_end_position(const WsRoute *route, uint32_t *timeline,
 {
 	const char *walcacheDir = route->path;
 	uint64_t segSize = ws_route_wal_segment_size(route);
-	uint64_t perXLogId = UINT64CONST(0x100000000) / segSize;
 
 	if (wal_position_cache_read(walcacheDir, timeline, endLsn, endLsnSize))
 	{
@@ -478,7 +456,7 @@ find_reachable_end_position(const WsRoute *route, uint32_t *timeline,
 
 	while ((entry = readdir(dir)) != NULL)
 	{
-		if (is_wal_segment_filename(entry->d_name))
+		if (wal_segment_name_is_valid(entry->d_name))
 		{
 			if (bestComplete[0] == '\0' || strcmp(entry->d_name, bestComplete) > 0)
 			{
@@ -488,19 +466,13 @@ find_reachable_end_position(const WsRoute *route, uint32_t *timeline,
 			continue;
 		}
 
-		const char *partialSuffix = ".partial";
-		size_t nameLen = strlen(entry->d_name);
-		size_t suffixLen = strlen(partialSuffix);
-
-		if (nameLen == CBB_WAL_FNAME_LEN + suffixLen &&
-			streq(entry->d_name + CBB_WAL_FNAME_LEN, partialSuffix))
+		if (wal_segment_name_is_partial(entry->d_name))
 		{
 			char segPart[CBB_WAL_FNAME_LEN + 1] = { 0 };
 
 			memcpy(segPart, entry->d_name, CBB_WAL_FNAME_LEN); /* IGNORE-BANNED */
 
-			if (is_wal_segment_filename(segPart) &&
-				(bestPartial[0] == '\0' || strcmp(segPart, bestPartial) > 0))
+			if (bestPartial[0] == '\0' || strcmp(segPart, bestPartial) > 0)
 			{
 				strlcpy(bestPartial, segPart, sizeof(bestPartial));
 			}
@@ -525,19 +497,11 @@ find_reachable_end_position(const WsRoute *route, uint32_t *timeline,
 		return false;
 	}
 
-	char tliHex[9] = { 0 };
-	char logIdHex[9] = { 0 };
-	char segHex[9] = { 0 };
+	uint32_t tli;
+	uint64_t segno;
 
-	memcpy(tliHex, chosen, 8); /* IGNORE-BANNED */
-	memcpy(logIdHex, chosen + 8, 8); /* IGNORE-BANNED */
-	memcpy(segHex, chosen + 16, 8); /* IGNORE-BANNED */
+	wal_segment_name_parse(chosen, segSize, &tli, &segno);
 
-	uint32_t tli = (uint32_t) strtoul(tliHex, NULL, 16);
-	uint32_t logId = (uint32_t) strtoul(logIdHex, NULL, 16);
-	uint32_t seg = (uint32_t) strtoul(segHex, NULL, 16);
-
-	uint64_t segno = (uint64_t) logId * perXLogId + seg;
 	uint64_t segStart = segno * segSize;
 	uint64_t position;
 

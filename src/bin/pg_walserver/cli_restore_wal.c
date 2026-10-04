@@ -6,8 +6,6 @@
  *
  */
 
-#include <string.h>
-
 #include "postgres_fe.h"
 
 #include "commandline.h"
@@ -17,7 +15,6 @@
 #include "defaults.h"
 #include "fetch_client.h"
 #include "log.h"
-#include "string_utils.h"
 
 static int cli_restore_getopt(int argc, char **argv);
 static void cli_restore_command_run(int argc, char **argv);
@@ -56,9 +53,9 @@ CommandLine restore_command =
 
 
 /*
- * ws_restore_run connects to target (pg_walserver itself, never a Postgres
- * primary -- see this file's own header comment for why it doesn't reuse
- * cli_upstream.c) and fetches filename into outputPath via
+ * ws_restore_fetch_file connects to target (pg_walserver itself, never a
+ * Postgres primary -- see this file's own header comment for why it
+ * doesn't reuse cli_upstream.c) and fetches filename into outputPath via
  * src/bin/common/fetch_client.c's own ws_fetch_file_client(), which does
  * the actual FETCH_FILE round trip and the same-directory-temp-file-plus-
  * rename dance that keeps a killed/interrupted restore from leaving a
@@ -70,11 +67,12 @@ CommandLine restore_command =
  * contract of "nonzero means try the next thing" either way.
  */
 bool
-ws_restore_run(const WsWalServerTarget *target,
-			   const char *filename, const char *outputPath)
+ws_restore_fetch_file(const WsWalServerTarget *target,
+					  const char *filename, const char *outputPath)
 {
 	return ws_fetch_file_client(target->host, target->port, target->user,
 								target->route, target->sslmode,
+								"pg_walserver_restore_wal",
 								filename, outputPath) == 0;
 }
 
@@ -97,10 +95,11 @@ cli_restore_getopt(int argc, char **argv)
  * next) then %p (the local path it must be written to), the reverse order
  * of archive_command's own %p/%f (see cli_archive_command_run() above) --
  * left in argv once cli_restore_getopt() has consumed every flag, then
- * runs ws_restore_run(). Exit code matches PostgreSQL's own restore_command
- * contract exactly: 0 with the file written on success, 1 on any failure
- * (including the ordinary "not found" case at the end of recovery), so
- * PostgreSQL decides what to do next the same way it always does.
+ * runs ws_restore_fetch_file(). Exit code matches PostgreSQL's own
+ * restore_command contract exactly: 0 with the file written on success, 1
+ * on any failure (including the ordinary "not found" case at the end of
+ * recovery), so PostgreSQL decides what to do next the same way it always
+ * does.
  */
 static void
 cli_restore_command_run(int argc, char **argv)
@@ -120,5 +119,5 @@ cli_restore_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	exit(ws_restore_run(&restoreTarget, argv[0], argv[1]) ? 0 : 1);
+	exit(ws_restore_fetch_file(&restoreTarget, argv[0], argv[1]) ? 0 : 1);
 }
