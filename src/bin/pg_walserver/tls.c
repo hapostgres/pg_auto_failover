@@ -229,9 +229,18 @@ verify_cb(int preverifyOk, X509_STORE_CTX *ctx)
 
 
 /*
- * ws_tls_server_load_ca loads a trusted CA bundle and switches the server
- * to request (never require, at the TLS layer) a client certificate on
- * every future handshake -- see tls.h's own comment for the full contract.
+ * ws_tls_server_load_ca loads caPath (a PEM bundle of one or more trusted
+ * CA certificates, mirroring real PostgreSQL's own ssl_ca_file) into the
+ * already-initialized serverContext (ws_tls_server_init() must have
+ * succeeded first) and switches every future handshake to *request* a
+ * client certificate (SSL_VERIFY_PEER, not SSL_VERIFY_FAIL_IF_NO_PEER_CERT:
+ * a client presenting none is still allowed to complete the handshake, the
+ * same way real PostgreSQL's be_tls_open_server() only requests one at the
+ * TLS layer -- whether one was actually required is an HBA-time decision,
+ * "clientcert=verify-full", see hba.h/auth.c). A client that DOES present a
+ * certificate not signed by a CA in caPath fails the handshake outright,
+ * exactly like real PostgreSQL. Returns false, TLS left exactly as
+ * ws_tls_server_init() set it up, on any failure to read or load caPath.
  */
 bool
 ws_tls_server_load_ca(const char *caPath)
@@ -348,8 +357,16 @@ ws_tls_get_sni_hostname(void)
 
 
 /*
- * ws_tls_get_peer_cert_cn reads the connecting client's own certificate
- * Subject CN, when it sent one -- see tls.h's own comment.
+ * ws_tls_get_peer_cert_cn writes the active connection's peer certificate
+ * Subject CN into cnBuf (truncated to cnBufSize), the same
+ * SSL_get_peer_certificate() + X509_NAME_get_text_by_NID(subject,
+ * NID_commonName, ...) pattern ws_tls_get_sni_hostname() already documents
+ * as the established way this codebase reads TLS-handshake metadata.
+ * Returns false, cnBuf left empty, when there is no active TLS connection,
+ * the client presented no certificate at all, or the certificate has no
+ * CN -- never a "no certificate" error string, since the caller (auth.c)
+ * generates its own error message in that case, matching this project's
+ * response-sanitizing convention.
  */
 bool
 ws_tls_get_peer_cert_cn(char *cnBuf, size_t cnBufSize)

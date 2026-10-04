@@ -115,7 +115,10 @@ format_elapsed(time_t startedAt, char *dest, size_t destSize)
 
 
 /*
- * cli_ps_run -- see cli_ps.h's own comment.
+ * cli_ps_run prints "serve"'s own process-level status for --pgdata.
+ * Returns true (having printed a clean "not running" message, never an
+ * error) when no "serve" is currently running for this --pgdata at all;
+ * false only on a genuine problem (e.g. no --pgdata given).
  */
 bool
 cli_ps_run(const char *pgdata)

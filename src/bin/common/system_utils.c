@@ -167,9 +167,7 @@ pretty_print_bytes(char *buffer, size_t size, uint64_t bytes)
 }
 
 
-/*
- * monotonic_ms -- see system_utils.h's own comment.
- */
+/* CLOCK_MONOTONIC in milliseconds */
 int64_t
 monotonic_ms(void)
 {

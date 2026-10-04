@@ -81,7 +81,11 @@ format_elapsed(time_t startedAt, char *dest, size_t destSize)
 
 
 /*
- * cli_status_run -- see cli_status.h's own comment.
+ * cli_status_run prints the one-line/short dashboard described above.
+ * Always returns true unless pgdata itself is missing -- "serve" not
+ * running is a normal, cleanly reported case, never an error. configFile,
+ * when given, overrides where the config file itself lives, independent
+ * of pgdata -- see config_file_path()'s own comment, routes.h.
  */
 bool
 cli_status_run(const char *pgdata, const char *configFile)

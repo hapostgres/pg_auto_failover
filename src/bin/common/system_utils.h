@@ -32,7 +32,6 @@ void pretty_print_bytes(char *buffer, size_t size, uint64_t bytes);
 void pretty_print_bytes_scaled(char *buffer, size_t size, uint64_t bytes,
 							   uint64_t threshold, bool withSpace);
 
-/* CLOCK_MONOTONIC in milliseconds */
 int64_t monotonic_ms(void);
 
 

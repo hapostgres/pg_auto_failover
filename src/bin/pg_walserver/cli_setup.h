@@ -72,14 +72,6 @@ typedef struct WsSetupOptions
 	bool noCert;   /* --no-cert: skip the TLS certificate auto-creation */
 } WsSetupOptions;
 
-/*
- * cli_setup_run writes whichever of options's own fields were actually
- * given into the config file's own global section (config_set_global_
- * property(), routes.c), then auto-provisions the certificate and HBA
- * file -- see this file's own header comment. Creates --pgdata if it
- * doesn't exist yet. Returns true on success, false with an error already
- * logged otherwise. Never touches any route's own section.
- */
 bool cli_setup_run(const WsSetupOptions *options);
 
 extern CommandLine setup_command;

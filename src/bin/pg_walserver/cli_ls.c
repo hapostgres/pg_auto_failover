@@ -317,7 +317,19 @@ print_config_files(const char *pgdata, const char *configPath)
 
 
 /*
- * cli_ls_run -- see cli_ls.h's own comment.
+ * cli_ls_run prints, by default, one row per configured route: its own
+ * base backup count/combined size, WAL segment count/combined size, and
+ * most recent base backup timestamp. With includeConfigFiles (--all),
+ * prints the config/credential/certificate file tier instead (whether
+ * each well-known file exists, its size, its last-modified time) -- see
+ * this file's own header comment for why these are two separate views,
+ * not combined into one. configFile (--config), when given, overrides
+ * where the config file itself lives, independent of pgdata -- see
+ * config_file_path()'s own comment, routes.h; the --all tier's own row
+ * for it follows that same resolved path, not always
+ * "<pgdata>/pg_walserver.ini". Always returns true: no routes configured
+ * yet, or a route with nothing on disk yet, are ordinary states to
+ * report, never a failure.
  */
 bool
 cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)

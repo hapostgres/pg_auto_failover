@@ -71,15 +71,6 @@ typedef struct WsClusterRegisterOptions
 	                                    * ensure_tls_certificate(). */
 } WsClusterRegisterOptions;
 
-/*
- * ws_cluster_register_run runs the whole "cluster register" sequence
- * documented in cli_cluster.c's own header comment: validate/write the
- * pg_walserver.ini section, check the role's REPLICATION attribute, and
- * fetch the system identifier. It never takes a base backup itself:
- * "pg_walserver serve" bootstraps the route's first base backup
- * automatically, once, the next time it starts or reloads. Returns true
- * on success, false with an error already logged otherwise.
- */
 bool ws_cluster_register_run(const WsClusterRegisterOptions *options);
 
 /*

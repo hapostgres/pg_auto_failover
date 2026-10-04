@@ -284,7 +284,17 @@ routes_find_by_hostname(const WsRoute *routes, int count, const char *hostname)
 
 
 /*
- * routes_slot_name -- see routes.h's own comment.
+ * routes_slot_name derives a valid, deterministic PostgreSQL replication
+ * slot name (lowercase alnum/underscore only, NAMEDATALEN-1 bytes max) from
+ * an arbitrary route key -- which, unlike a slot name, is an entirely
+ * opaque string with no character restrictions (see this file's own header
+ * comment: pg_auto_failover's own archiver reconciler uses
+ * "<formation>/<group>" keys, for one). The sanitized key alone could
+ * collide (e.g. "a/b" and "a-b" both sanitize to "a_b"); a short CRC32C
+ * suffix of the *original*, unsanitized key makes every slot name unique
+ * per route regardless. Always writes a NUL-terminated name into out
+ * (truncating the sanitized part, never the suffix, if it would overflow
+ * outSize/NAMEDATALEN).
  */
 void
 routes_slot_name(const char *routeKey, char *out, size_t outSize)
@@ -684,7 +694,14 @@ routes_drop_section(const char *routesPath, const char *routeKey)
 
 
 /*
- * config_load_global -- see routes.h's own comment on WsGlobalConfig.
+ * config_load_global reads pg_walserver.ini's own anonymous/global section
+ * (see WsGlobalConfig's own comment) into *out. Always succeeds (true),
+ * leaving *out zeroed, when the file doesn't exist yet or has no global
+ * section -- a normal, expected state, not an error (the same "missing
+ * config is not a failure" convention routes_load() itself already
+ * follows). Named "config_", not "routes_": this reads pg_walserver's own
+ * settings, never a route/cluster -- those stay routes_*, this file's own
+ * ini-parsing home for both concerns notwithstanding.
  */
 bool
 config_load_global(const char *configPath, WsGlobalConfig *out)
@@ -773,7 +790,13 @@ config_load_global(const char *configPath, WsGlobalConfig *out)
 
 
 /*
- * config_set_global_property -- see routes.h's own comment.
+ * config_set_global_property sets "propName = propValue" as a plain
+ * top-of-file line, before any route's own [section] header -- creating
+ * the file (with just that one line) if it doesn't exist yet, replacing
+ * an already-present line with the same propName otherwise. "pg_walserver
+ * setup"'s own way to persist one instance-level setting; never touches
+ * any route's own section. See config_load_global()'s own comment for
+ * why this is "config_", not "routes_".
  */
 bool
 config_set_global_property(const char *configPath, const char *propName,
@@ -903,7 +926,25 @@ config_set_global_property(const char *configPath, const char *propName,
 
 
 /*
- * config_file_path -- see routes.h's own comment.
+ * config_file_path resolves the on-disk path of pg_walserver's own config
+ * file (pg_walserver.ini: the global settings section this file's own
+ * config_load_global()/config_set_global_property() manage, plus one
+ * [section] per route the rest of this file manages) into out, up to
+ * outSize bytes:
+ *
+ *   1. configFile itself, when given explicitly (a command's own
+ *      --config flag, --config-file on "ls" specifically, see its own
+ *      header comment) -- always wins;
+ *   2. else the PG_WALSERVER_CONFIG_FILE environment variable, when set;
+ *   3. else "<pgdata>/pg_walserver.ini", the long-standing default.
+ *
+ * This is what lets a Debian-style deployment -- config under
+ * /etc/pg_walserver/pg_walserver.ini, data under /var/lib/pg_walserver/,
+ * the same split a systemd unit file or a container entrypoint commonly
+ * wants -- point every pg_walserver command at a config file that lives
+ * outside --pgdata, without changing where routes/basebackups/WAL/certs
+ * themselves are stored (those stay under --pgdata unconditionally; only
+ * this one file's own location becomes independently configurable).
  */
 void
 config_file_path(const char *pgdata, const char *configFile,
