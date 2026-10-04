@@ -96,23 +96,32 @@ test ci-test run-test run-test-prebuilt:
 # harmless no-op for a plain checkout (it just mounts $(CURDIR)/.git over
 # itself).
 GIT_COMMON_DIR := $(shell cd "$(CURDIR)" && cd "$$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)
-CITUS_INDENT_DOCKER = docker run --rm \
+# Mirror CI: the container gets a wildcard git safe.directory so it works
+# whatever the checkout's owner is, and runs as the invoking user (HOME=/tmp)
+# so files re-indented by docker-indent stay owned by the caller.
+CITUS_DOCKER_RUN = docker run --rm \
+	--user "$$(id -u):$$(id -g)" \
+	-e HOME=/tmp \
+	-e GIT_CONFIG_COUNT=1 \
+	-e GIT_CONFIG_KEY_0=safe.directory \
+	-e GIT_CONFIG_VALUE_0='*' \
 	-v "$(CURDIR):/workdir" \
 	$(if $(GIT_COMMON_DIR),-v "$(GIT_COMMON_DIR):$(GIT_COMMON_DIR)") \
 	-w /workdir \
-	citus/stylechecker:no-py \
-	citus_indent
+	citus/stylechecker:no-py
+CITUS_INDENT_DOCKER = $(CITUS_DOCKER_RUN) citus_indent
 
 .PHONY: indent
 indent:
 	citus_indent
 	black --exclude=ci/tools .
 
-.PHONY: docker-indent docker-check
+.PHONY: docker-indent docker-check ci-lint
 docker-indent:
 	$(CITUS_INDENT_DOCKER)
-docker-check:
+docker-check ci-lint:
 	$(CITUS_INDENT_DOCKER) --check
+	$(CITUS_DOCKER_RUN) ci/banned.h.sh
 
 .PHONY: lint linting spellcheck
 lint linting: spellcheck ;

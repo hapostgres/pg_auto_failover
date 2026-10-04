@@ -1,0 +1,51 @@
+.. _pg_walserver_list_backups:
+
+pg_walserver list backups
+===========================
+
+pg_walserver list backups - List base backups per cluster
+
+Synopsis
+--------
+
+::
+
+  pg_walserver list backups --pgdata <path> [--config <path>]
+      [--cluster <name>]
+
+Lists every base backup found under each matching route's own
+``basebackups/`` directory: its label, when it was taken, its size on
+disk, and whether it is the route's ``.latest``.
+
+Options
+-------
+
+--pgdata
+
+  This instance's own data root. Defaults to ``PGDATA``.
+
+--config
+
+  Where the config file itself lives (defaults to
+  ``<pgdata>/pg_walserver.ini``, or ``PG_WALSERVER_CONFIG_FILE``).
+
+--cluster
+
+  Limit output to a single route.
+
+Examples
+--------
+
+::
+
+  archive$ pg_walserver list backups --cluster mycluster
+  CLUSTER              LABEL                        TAKEN AT               SIZE       LATEST
+  -------------------- ---------------------------- ---------------------- ---------- ------
+  mycluster            basebackup-20260930T145619Z  2026-09-30T14:56:19Z   38 MB      yes
+
+See Also
+--------
+
+* :ref:`pg_walserver_list`
+* :ref:`pg_walserver_list_clusters`
+* :ref:`pg_walserver_archive_cleanup`

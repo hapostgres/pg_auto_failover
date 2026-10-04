@@ -1,0 +1,183 @@
+# pg_walserver's inventory/process-visibility sub-commands: `ps`, `ls`,
+# `status`, `list clusters`, `list backups`, `list wal`. See README.md's
+# own "Inventory and process visibility" section for the full design
+# (the ps state file mechanism, the LSN-range computation, and the
+# per-invocation-only caching for list backups/list wal).
+#
+# Two routes, both fed from the same real upstream (node1, the same
+# "one upstream, several routes" precedent pg_walserver_sni_routing.pgaf
+# already uses): "pullc" with the default "receivewal = pull" (a real,
+# supervised embedded pg_receivewal, so its own WAL segments are genuine),
+# "pushc" with --no-receivewal (archive_command-push-only -- this spec never
+# actually pushes into it, so it stays a real "has a backup but zero WAL
+# captured yet" cluster throughout, which is itself a real, worth-testing
+# shape for every sub-command below).
+#
+#   test_001  ps/status/ls/list clusters all behave cleanly, with no
+#             error, while "serve" is not running yet
+#   test_002  once "serve" is started, both routes get their automatic
+#             bootstrap base backup; ps shows the real serve pid and the
+#             real, running "pullc" receivewal worker child; status's counts match;
+#             ls now shows a pidfile and a ps state file; list backups
+#             shows one real row per cluster, both marked latest
+#   test_003  real WAL, switched several times on node1, is genuinely
+#             captured by "pullc"'s embedded receivewal worker; list clusters'
+#             own WAL END actually advances to reflect it, list wal's
+#             aggregate segment count/size match a real "ls" of the
+#             directory, and "--segments" lists every real file;
+#             "pushc" (no receivewal worker) stays at zero segments throughout
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+    }
+
+    # a dedicated, unmanaged box for pg_walserver itself -- same shape as
+    # pg_walserver_sni_routing.pgaf's own "walserver" node: this spec
+    # needs to drive "setup" for two routes, and check the "serve is not
+    # running yet" case, before "serve" itself ever starts.
+    pg_walserver walserver
+        command "tail -f /dev/null"
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+
+    exec node1 bash -c 'echo host replication pgautofailover_replicator 0.0.0.0/0 trust >> /var/lib/postgres/pgaf/pg_hba.conf && pg_ctl -D /var/lib/postgres/pgaf reload'
+
+    exec walserver bash -c 'mkdir -p /tmp/lps && printf "host all all 0.0.0.0/0 trust\n" > /tmp/lps/pg_walserver_hba.conf'
+
+    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register pullc --pgdata /tmp/lps --path /tmp/lps/pullc --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register pushc --pgdata /tmp/lps --path /tmp/lps/pushc --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
+
+    sql node1 { CREATE TABLE lps(a int); INSERT INTO lps VALUES (1); }
+}
+
+teardown {
+    compose down
+}
+
+step test_001_not_running_is_clean_not_an_error {
+    exec walserver bash -c 'pg_walserver ps --pgdata /tmp/lps > /tmp/ps0.out 2>&1; test $? -eq 0'
+    exec walserver bash -c 'grep -q "not running" /tmp/ps0.out || { cat /tmp/ps0.out; false; }'
+
+    exec walserver bash -c 'pg_walserver status --pgdata /tmp/lps > /tmp/status0.out 2>&1; test $? -eq 0'
+    exec walserver bash -c 'grep -q "not running" /tmp/status0.out || { cat /tmp/status0.out; false; }'
+
+    # default output is the per-cluster storage summary (base backup/WAL
+    # count and size), never the config/credential/certificate files --
+    # neither route has a base backup yet at this point (serve hasn't
+    # started), so both show a zero row.
+    exec walserver bash -c 'pg_walserver ls --pgdata /tmp/lps > /tmp/ls0.out 2>&1; test $? -eq 0'
+    exec walserver bash -c 'grep -qE "^pg_walserver\.ini " /tmp/ls0.out && { cat /tmp/ls0.out; false; }; true'
+    exec walserver bash -c 'grep -E "^pullc +0 " /tmp/ls0.out || { cat /tmp/ls0.out; false; }'
+    exec walserver bash -c 'grep -E "^pushc +0 " /tmp/ls0.out || { cat /tmp/ls0.out; false; }'
+    exec walserver bash -c 'pg_walserver ls --pgdata /tmp/lps --config > /tmp/ls0c.out 2>&1; test $? -eq 0'
+    exec walserver bash -c 'grep -E "^pg_walserver\.ini +yes" /tmp/ls0c.out || { cat /tmp/ls0c.out; false; }'
+
+    exec walserver bash -c 'pg_walserver list clusters --pgdata /tmp/lps > /tmp/lc0.out 2>&1; test $? -eq 0'
+    exec walserver bash -c 'grep -E "^pullc +no +pull +n/a" /tmp/lc0.out || { cat /tmp/lc0.out; false; }'
+    exec walserver bash -c 'grep -E "^pushc +no +none +n/a" /tmp/lc0.out || { cat /tmp/lc0.out; false; }'
+}
+
+step test_002_serve_running_ps_status_ls_and_backups {
+    exec walserver bash -c 'nohup pg_walserver serve --pgdata /tmp/lps --port 6543 > /tmp/lps-serve.log 2>&1 & echo started'
+    exec walserver bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/lps-serve.log; exit 1'
+
+    # both routes get their automatic bootstrap backup.
+    exec walserver bash -c 'for i in $(seq 60); do grep -q "is now the latest for \"/tmp/lps/pullc\"" /tmp/lps-serve.log && grep -q "is now the latest for \"/tmp/lps/pushc\"" /tmp/lps-serve.log && exit 0; sleep 1; done; cat /tmp/lps-serve.log; exit 1'
+
+    # pstree-style output: "pg_walserver(<pid>) running, ..." as the root,
+    # one "`--"/"|--" branch per receivewal worker or bootstrap job below it
+    exec walserver bash -c 'SERVE_PID=$(cat /tmp/lps/pg_walserver.pid); pg_walserver ps --pgdata /tmp/lps > /tmp/ps1.out 2>&1; grep -q "pg_walserver($SERVE_PID) running" /tmp/ps1.out || { cat /tmp/ps1.out; false; }'
+    exec walserver bash -c 'grep -E "receivewal\([0-9]+\) pullc, running" /tmp/ps1.out || { cat /tmp/ps1.out; false; }'
+    exec walserver bash -c 'grep -q "pushc" /tmp/ps1.out && { echo "pushc has no receivewal worker, must not appear in ps"; cat /tmp/ps1.out; false; } || true'
+
+    exec walserver bash -c 'pg_walserver status --pgdata /tmp/lps > /tmp/status1.out 2>&1'
+    exec walserver bash -c 'grep -q "pg_walserver: running" /tmp/status1.out || { cat /tmp/status1.out; false; }'
+    exec walserver bash -c 'grep -q "receivewal workers: 1/1 running" /tmp/status1.out || { cat /tmp/status1.out; false; }'
+    exec walserver bash -c 'grep -q "bootstrap backups pending: 0" /tmp/status1.out || { cat /tmp/status1.out; false; }'
+    # status is deliberately process-only now: no cluster/backup counts,
+    # those are pg_walserver ls's/list's own job
+    exec walserver bash -c 'grep -q "clusters:" /tmp/status1.out && { echo "status must not show cluster/backup counts anymore"; cat /tmp/status1.out; false; } || true'
+
+    # both routes now have exactly one real base backup on disk, so both
+    # show a nonzero BACKUPS count and a real (non "-") LAST BACKUP.
+    exec walserver bash -c 'pg_walserver ls --pgdata /tmp/lps > /tmp/ls1.out 2>&1'
+    exec walserver bash -c 'grep -E "^pullc +1 " /tmp/ls1.out || { cat /tmp/ls1.out; false; }'
+    exec walserver bash -c 'grep -E "^pushc +1 " /tmp/ls1.out || { cat /tmp/ls1.out; false; }'
+    exec walserver bash -c 'grep -E "^pullc" /tmp/ls1.out | grep -qE "[0-9]{4}-[0-9]{2}-[0-9]{2}T" || { cat /tmp/ls1.out; false; }'
+
+    exec walserver bash -c 'pg_walserver list backups --pgdata /tmp/lps > /tmp/lb1.out 2>&1'
+    exec walserver bash -c 'grep -E "^pullc +basebackup-[0-9T]+Z .*yes *$" /tmp/lb1.out || { cat /tmp/lb1.out; false; }'
+    exec walserver bash -c 'grep -E "^pushc +basebackup-[0-9T]+Z .*yes *$" /tmp/lb1.out || { cat /tmp/lb1.out; false; }'
+
+    exec walserver bash -c 'pg_walserver list backups --pgdata /tmp/lps --cluster pullc > /tmp/lb1c.out 2>&1'
+    exec walserver bash -c 'grep -q "pushc" /tmp/lb1c.out && { echo "--cluster pullc must not show pushc rows"; cat /tmp/lb1c.out; false; } || true'
+}
+
+step test_003_real_wal_range_and_aggregate_stats {
+    # real WAL, switched several times: pullc's own embedded receivewal worker
+    # (receivewal.c, a genuine vendored pg_receivewal) must actually pick it
+    # up, with no archive-wal pushing anywhere in this spec.
+    sql node1 { INSERT INTO lps SELECT generate_series(1, 200000) }
+    sql node1 { SELECT pg_switch_wal() }
+    sql node1 { INSERT INTO lps SELECT generate_series(1, 200000) }
+    sql node1 { SELECT pg_switch_wal() }
+    exec walserver bash -c 'for i in $(seq 30); do test $(ls /tmp/lps/pullc | grep -cE "^[0-9A-F]{24}$") -ge 2 && exit 0; sleep 1; done; ls -la /tmp/lps/pullc; exit 1'
+
+    exec walserver bash -c 'pg_walserver list clusters --pgdata /tmp/lps > /tmp/lc1.out 2>&1'
+    # pullc: a real receivewal worker, running, with a real (non "-") WAL END.
+    exec walserver bash -c 'grep -E "^pullc +yes +pull +yes" /tmp/lc1.out || { cat /tmp/lc1.out; false; }'
+    exec walserver bash -c 'grep -E "^pullc" /tmp/lc1.out | grep -qE "[0-9A-F]+/[0-9A-F]+ +[0-9A-F]+/[0-9A-F]+" || { cat /tmp/lc1.out; false; }'
+    # pushc: a real start LSN (it does have a backup_label), but no WAL
+    # captured at all (no receivewal worker, nothing pushed in this spec): WAL END
+    # stays "-".
+    exec walserver bash -c 'grep -E "^pushc +yes +none +n/a" /tmp/lc1.out || { cat /tmp/lc1.out; false; }'
+    exec walserver bash -c 'grep -E "^pushc" /tmp/lc1.out | grep -qE " - *\$" || { cat /tmp/lc1.out; false; }'
+
+    # list wal: pullc's real segment count matches a real "ls" of its own
+    # directory; pushc has none. The default output is one
+    # pg_controldata-style "Label:  value" block per cluster, not a table.
+    exec walserver bash -c 'REAL_COUNT=$(ls /tmp/lps/pullc | grep -cE "^[0-9A-F]{24}$"); pg_walserver list wal --pgdata /tmp/lps --cluster pullc > /tmp/lw1.out 2>&1; grep -qE "^Cluster: *pullc$" /tmp/lw1.out && grep -qE "^Segments: *$REAL_COUNT$" /tmp/lw1.out || { cat /tmp/lw1.out; ls -la /tmp/lps/pullc; false; }'
+    exec walserver bash -c 'pg_walserver list wal --pgdata /tmp/lps --cluster pushc > /tmp/lw1push.out 2>&1; grep -qE "^Cluster: *pushc$" /tmp/lw1push.out && grep -qE "^Segments: *0$" /tmp/lw1push.out || { cat /tmp/lw1push.out; false; }'
+
+    # --segments lists every real file: at least one complete segment for
+    # sure (a still-growing ".partial" may or may not exist at this exact
+    # instant, depending on whether the receivewal worker has started a new segment
+    # since the last pg_switch_wal(), so that one is not asserted here),
+    # and the row count matches a real "ls" of the directory exactly.
+    exec walserver bash -c 'pg_walserver list wal --pgdata /tmp/lps --cluster pullc --segments > /tmp/lw1seg.out 2>&1'
+    exec walserver bash -c 'grep -qE "^pullc +[0-9A-F]{24} +segment" /tmp/lw1seg.out || { cat /tmp/lw1seg.out; false; }'
+    exec walserver bash -c 'REAL_FILES=$(ls /tmp/lps/pullc | grep -cE "^[0-9A-F]{24}(\.partial)?$"); ROWS=$(grep -c "^pullc" /tmp/lw1seg.out); test "$REAL_FILES" = "$ROWS" || { echo "expected $REAL_FILES rows, got $ROWS"; cat /tmp/lw1seg.out; ls -la /tmp/lps/pullc; false; }'
+}
+
+step test_004_receivewal_progress_lsn_visible_and_advances {
+    # pullc's embedded receivewal worker relays its own live (lsn, timeline)
+    # to "serve" via a small, throttled per-route file (wal_dir_scan.h's
+    # ws_receivewal_progress_write()/_read()), folded into the ps state file
+    # and surfaced on "ps" (status is process-only now, no per-worker LSN
+    # of its own -- see cli_status.h's own comment) -- a real, plausible
+    # LSN, not a placeholder/zero, and one that genuinely advances as more
+    # real WAL is generated on node1.
+    exec walserver bash -c 'pg_walserver ps --pgdata /tmp/lps > /tmp/ps2.out 2>&1; grep -E "receivewal\([0-9]+\) pullc, running.*lsn [0-9A-F]+/[0-9A-F]+ \(timeline [1-9][0-9]*, [0-9]+s ago\)" /tmp/ps2.out || { cat /tmp/ps2.out; false; }'
+    exec walserver bash -c 'grep -oE "lsn [0-9A-F]+/[0-9A-F]+" /tmp/ps2.out | head -1 | awk "{print \$2}" > /tmp/lsn1.txt; test -s /tmp/lsn1.txt'
+
+    # generate real, substantial WAL on the real upstream between the two
+    # "ps" calls below.
+    sql node1 { INSERT INTO lps SELECT generate_series(1, 400000) }
+    sql node1 { SELECT pg_switch_wal() }
+    sql node1 { INSERT INTO lps SELECT generate_series(1, 400000) }
+    sql node1 { SELECT pg_switch_wal() }
+
+    exec walserver bash -c 'lsn_dec() { IFS="/" read -r hi lo <<< "$1"; echo $(( (16#$hi) * 4294967296 + 16#$lo )); }; LSN1=$(cat /tmp/lsn1.txt); D1=$(lsn_dec "$LSN1"); for i in $(seq 30); do sleep 1; pg_walserver ps --pgdata /tmp/lps > /tmp/ps3.out 2>&1; LSN2=$(grep -oE "lsn [0-9A-F]+/[0-9A-F]+" /tmp/ps3.out | head -1 | awk "{print \$2}"); [ -z "$LSN2" ] && continue; D2=$(lsn_dec "$LSN2"); if [ "$D2" -gt "$D1" ]; then echo "LSN advanced from $LSN1 to $LSN2"; exit 0; fi; done; echo "LSN never advanced past $LSN1"; cat /tmp/ps3.out; false'
+}
+
+sequence
+    test_001_not_running_is_clean_not_an_error
+    test_002_serve_running_ps_status_ls_and_backups
+    test_003_real_wal_range_and_aggregate_stats
+    test_004_receivewal_progress_lsn_visible_and_advances

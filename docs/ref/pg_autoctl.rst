@@ -5,6 +5,32 @@ pg_autoctl
 
 pg_autoctl - control a pg_auto_failover node
 
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   pg_autoctl_create
+   pg_autoctl_drop
+   pg_autoctl_config
+   pg_autoctl_show
+   pg_autoctl_enable
+   pg_autoctl_disable
+   pg_autoctl_get
+   pg_autoctl_set
+   pg_autoctl_perform
+   pg_autoctl_accept
+   pg_autoctl_node
+   pg_autoctl_inspect
+   pg_autoctl_manual
+   pg_autoctl_do
+   pg_autoctl_run
+   pg_autoctl_watch
+   pg_autoctl_stop
+   pg_autoctl_reload
+   pg_autoctl_status
+   pg_autoctl_activate
+   configuration
+
 Synopsis
 --------
 

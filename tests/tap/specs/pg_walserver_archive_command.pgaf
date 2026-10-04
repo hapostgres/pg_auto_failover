@@ -1,0 +1,290 @@
+# CHECK_FILE/ARCHIVE_FILE (the push side, cmd_check_file.c/cmd_archive_file.c)
+# and the `pg_walserver archive-wal`/`pg_walserver restore-wal`/
+# `pg_walserver create-cert` client-side sub-commands (cli_archive.c/
+# cli_restore_wal.c/cli_create_cert.c) -- entirely monitor-independent, see
+# README.md's "The archive push side" section for the full design this
+# spec exercises.
+#
+# `archive-wal` picks one of two disjoint behaviors per invocation from the
+# connected route's own "receivewal" setting (SHOW receivewal): a route with no
+# "receivewal = pull" (arch/0 below, set up with --no-receivewal) is push-only,
+# ARCHIVE_FILE every time, no CHECK_FILE first; a route with "receivewal =
+# pull" (arch/1 below, its own embedded pg_receivewal actually running and
+# pulling real WAL off node1) is check-only, CHECK_FILE every time, never
+# ARCHIVE_FILE. Both get real coverage below.
+#
+# Modeled closely on pg_walserver_standalone.pgaf/pg_walserver_sni_
+# routing.pgaf: node2 hosts pg_walserver, every connection below is node2
+# talking to its own pg_walserver over loopback, a manually written,
+# properly scoped pg_walserver_hba.conf (there is no monitor here to learn a
+# real client's address from), and `pg_walserver cluster register` handles onboarding
+# each route (path + upstream + systemid) exactly as an operator would.
+# Two named routes with no TLS is otherwise a hard startup error (see
+# README.md's "Routing beyond dbname" section); `cluster register` itself creates a
+# self-signed certificate automatically the moment arch/1 becomes this
+# pg_walserver.ini's second route, so this spec never has to ask for TLS
+# explicitly, only ever connecting to each route by its exact dbname.
+#
+#   test_001  CHECK_FILE reports "missing" for a filename nothing has ever
+#             pushed -- a raw wire-level check, no file transfer at all
+#   test_002  `pg_walserver archive-wal <path> <name> ...` against arch/0
+#             (no receivewal = pull) pushes a brand new file via ARCHIVE_FILE
+#             unconditionally (exit 0, real bytes land on disk, byte-
+#             identical to the source, no CHECK_FILE round trip first);
+#             run a second time against the exact same source file, still
+#             an unconditional push, still exit 0 -- the "safe to run
+#             archive_command repeatedly" idempotency property PostgreSQL's
+#             own contract requires, provided end to end by cmd_archive_
+#             file.c's own overwrite-safety, not by any client-side check
+#   test_003  pushing a *different* local file under the same already-
+#             archived name on arch/0: still an unconditional ARCHIVE_FILE
+#             push, and the server cleanly rejects it (nonzero exit, clean
+#             stderr message) -- the file already on disk is untouched,
+#             never overwritten with the differing content
+#   test_004  `pg_walserver create-cert`: setup{} above already created a
+#             certificate automatically (arch/1 is a second named route);
+#             a plain call refuses to replace it (never silently
+#             overwriting an existing certificate); with --force it
+#             overwrites cleanly, twice, CN reflecting each --hostname
+#   test_005  `pg_walserver restore-wal <name> <dest> ...` fetches the file
+#             test_002 pushed, via a real FETCH_FILE round trip, and writes
+#             it byte-identical to its destination (exit 0); restoring a
+#             name nothing ever archived fails cleanly (nonzero exit)
+#   test_006  `archive-wal` against arch/1 (receivewal = pull, a real embedded
+#             pg_receivewal actually running against node1): run against
+#             the segment currently being captured (still a ".partial" file
+#             under this exact name) exits 1 immediately via a CHECK_FILE-
+#             only round trip, no ARCHIVE_FILE ever happening (the final
+#             file never appears as a side effect of the failed attempt);
+#             once the receivewal worker actually finishes that exact segment (a
+#             forced WAL switch on node1), a subsequent `archive-wal`
+#             invocation against the identical bytes reports "matches" and
+#             exits 0, still without ever calling ARCHIVE_FILE
+#   test_007  the exact same ARCHIVE_FILE push as test_002, but with
+#             --sslmode require over the real TLS connection test_004's
+#             own certificate now enables (arch/1 being a second named
+#             route already made "setup" create one automatically): a real
+#             regression test for a bug this project once had, where
+#             cmd_archive_file.c wrote the received bytes to its local
+#             temporary file through framing.c's own connection-write
+#             helper (TLS-aware, global-activeSsl-driven) instead of a
+#             plain local write() -- silently SSL_write()ing the WAL bytes
+#             back out to the client instead of ever reaching disk, only
+#             whenever TLS was actually active on the connection, which
+#             the rest of this spec's own sslmode=disable coverage could
+#             never have caught
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+
+    # node2 hosts pg_walserver for this test; it is otherwise an ordinary
+    # registered secondary and that is irrelevant here. Every connection
+    # below is node2 talking to its own pg_walserver over loopback.
+    exec node2 bash -c 'mkdir -p /tmp/wsarch && printf "host all all 127.0.0.1/32 trust\n" > /tmp/wsarch/pg_walserver_hba.conf'
+
+    # the one-shot wizard: creates /tmp/wsarch/arch/0, writes the
+    # pg_walserver.ini [arch/0] section (path + upstream), checks
+    # pgautofailover_replicator's REPLICATION attribute on node1, and
+    # fetches node1's real system identifier into pg_walserver_systemid.
+    # This spec never serves BASE_BACKUP, so it never needs the base
+    # backup "serve" would otherwise bootstrap automatically for this
+    # route.
+    # --no-receivewal: this spec pushes its own small, deterministic fake "WAL
+    # segments" by hand (test_002/test_003 below) under real WAL-segment-
+    # shaped names -- the embedded receivewal worker, on by default now, would
+    # otherwise fork and pull real WAL from node1 into this same directory,
+    # under the same segment names, racing (and likely colliding with) what
+    # this spec writes itself.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register arch/0 --pgdata /tmp/wsarch --path /tmp/wsarch/arch/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
+    exec node2 bash -c 'if grep -qx "receivewal = pull" /tmp/wsarch/pg_walserver.ini; then echo "receivewal = pull should not have been written with --no-receivewal"; false; fi'
+
+    # a second route, receivewal = pull by setup's own default now (no
+    # --no-receivewal): a real, embedded pg_receivewal actually pulling WAL
+    # off node1 into arch/1's own directory, for test_006's own coverage of
+    # the CHECK_FILE-only behavior. This is a second named route, so
+    # "setup" itself now creates a self-signed certificate for --pgdata
+    # automatically (see README.md's "Routing beyond dbname" section) --
+    # every connection in this spec still only ever uses dbname, so that
+    # certificate never has to be presented or even referenced below.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register arch/1 --pgdata /tmp/wsarch --path /tmp/wsarch/arch/1 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+    exec node2 bash -c 'grep -qx "receivewal = pull" /tmp/wsarch/pg_walserver.ini || { echo "receivewal = pull should have been written for arch/1 by default"; cat /tmp/wsarch/pg_walserver.ini; false; }'
+
+    exec node2 bash -c 'nohup pg_walserver serve --pgdata /tmp/wsarch --port 6547 > /tmp/wsarch-walserver.log 2>&1 & echo started'
+    exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6547) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/wsarch-walserver.log; exit 1'
+    exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal arch/1$" > /tmp/wsarch_cap_pid.txt && test -s /tmp/wsarch_cap_pid.txt && exit 0; sleep 1; done; cat /tmp/wsarch-walserver.log; ps aux; exit 1'
+}
+
+teardown {
+    compose down
+}
+
+step test_001_check_file_missing {
+    # a WAL-segment-shaped filename ("^[0-9A-F]{24}$", ws_fetch_filename_is_
+    # servable()'s own allow-list) that nothing has ever archived -- the
+    # size/crc32c given don't matter at all for "missing": cmd_check_file.c
+    # checks existence (ENOENT) before ever comparing anything.
+    exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6547 dbname=arch/0 replication=true sslmode=disable" -Atc "CHECK_FILE 000000010000000000000099 100 crc32c:00000000"); test "$out" = "missing|no" || { echo "got: $out"; false; }'
+}
+
+step test_002_archive_pushes_then_matches {
+    # a small, deterministic "WAL segment" (this spec never needs a real
+    # 16MB one -- ARCHIVE_FILE's own size cap only bounds the maximum, it
+    # never requires a minimum)
+    exec node2 bash -c 'head -c 65536 /dev/urandom > /tmp/seg1.bin'
+
+    # step 1: nothing on disk yet under this name -- CHECK_FILE says
+    # "missing", pg_walserver archive-wal pushes it via ARCHIVE_FILE, exit 0
+    exec node2 bash -c 'pg_walserver archive-wal /tmp/seg1.bin 000000010000000000000001 --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive1.log 2>&1 || (cat /tmp/archive1.log; false)'
+    exec node2 bash -c 'grep -qi "ARCHIVE_FILE\|Archived" /tmp/archive1.log'
+    exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001 || (ls -la /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001; false)'
+
+    # step 2: the exact same source file, archived again (PostgreSQL's own
+    # archive_command contract: an idempotent retry after a crash mid-
+    # archive is expected and normal) -- arch/0 has no receivewal = pull, so
+    # archive-wal pushes unconditionally again, with no CHECK_FILE round
+    # trip first; cmd_archive_file.c's own overwrite-safety (identical
+    # bytes already on disk) is what makes this idempotent, still exit 0
+    exec node2 bash -c 'pg_walserver archive-wal /tmp/seg1.bin 000000010000000000000001 --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive2.log 2>&1 || (cat /tmp/archive2.log; false)'
+    exec node2 bash -c 'grep -qi "ARCHIVE_FILE\|Archived" /tmp/archive2.log'
+    exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001'
+}
+
+step test_003_check_file_differs_is_rejected {
+    # a different file pushed under the SAME already-archived name: the
+    # server must never trust ARCHIVE_FILE's own CHECK_FILE preamble --
+    # cmd_archive_file.c re-derives the overwrite-safety decision from the
+    # real bytes on disk vs. the real bytes just received, independent of
+    # whatever CHECK_FILE reported earlier in the same invocation
+    exec node2 bash -c 'head -c 65536 /dev/urandom > /tmp/seg1-different.bin'
+    exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/seg1-different.bin && (echo "the two random files collided, extremely unlikely -- rerun"; false); true'
+
+    exec node2 bash -c 'out=$(cat /tmp/seg1-different.bin | wc -c); test "$out" = "65536"'
+    exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6547 dbname=arch/0 replication=true sslmode=disable" -Atc "CHECK_FILE 000000010000000000000001 65536 crc32c:00000000"); test "$out" = "differs|no" || { echo "got: $out"; false; }'
+
+    # pg_walserver archive-wal itself: arch/0 has no receivewal = pull, so it
+    # never calls CHECK_FILE at all here, it pushes unconditionally via
+    # ARCHIVE_FILE -- and the server rejects it outright, from the real
+    # bytes just received vs. the real bytes already on disk: nonzero exit,
+    # a clean stderr message, and the file already on disk is untouched.
+    exec node2 bash -c 'if pg_walserver archive-wal /tmp/seg1-different.bin 000000010000000000000001 --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive3.log 2>&1; then cat /tmp/archive3.log; false; fi'
+    exec node2 bash -c 'grep -qi "already exists\|differ" /tmp/archive3.log'
+    exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/wsarch/arch/0/000000010000000000000001 || (echo "the original file was overwritten -- overwrite-safety failed"; false)'
+}
+
+step test_004_create_cert_fresh_and_refuse {
+    # arch/1 (setup{} above) is this pg_walserver.ini's second named route,
+    # so "setup" itself already created a self-signed certificate for
+    # --pgdata automatically the moment it was written (see README.md's
+    # "Routing beyond dbname" section) -- there is no certificate-less
+    # state left to observe here, so this step starts from "a certificate
+    # already exists" rather than "none exists yet".
+    exec node2 bash -c 'test -f /tmp/wsarch/server.crt && test -f /tmp/wsarch/server.key'
+
+    # a call with no --force: refuses rather than silently replacing
+    # what's already there (matches cli_fetch_systemid.c's own overwrite-
+    # safety principle applied here to server.crt/server.key)
+    exec node2 bash -c 'md5sum /tmp/wsarch/server.crt > /tmp/cert1.md5'
+    exec node2 bash -c 'if pg_walserver create-cert --pgdata /tmp/wsarch --hostname archtest.internal 2>/tmp/create-cert-refuse.log; then cat /tmp/create-cert-refuse.log; false; fi'
+    exec node2 bash -c 'grep -qi -- "--force" /tmp/create-cert-refuse.log'
+    exec node2 bash -c 'md5sum -c /tmp/cert1.md5'
+
+    # --force: overwrites cleanly, CN now reflects the new --hostname
+    exec node2 bash -c 'pg_walserver create-cert --pgdata /tmp/wsarch --hostname archtest.internal --force'
+    exec node2 bash -c 'openssl x509 -noout -subject -in /tmp/wsarch/server.crt | grep -q archtest.internal'
+
+    # a second --force call, a different --hostname: overwrites cleanly again
+    exec node2 bash -c 'pg_walserver create-cert --pgdata /tmp/wsarch --hostname other.internal --force'
+    exec node2 bash -c 'openssl x509 -noout -subject -in /tmp/wsarch/server.crt | grep -q other.internal'
+}
+
+step test_005_restore_wal_fetches_a_real_file {
+    # test_002 above archived 000000010000000000000001 (byte-identical to
+    # /tmp/seg1.bin); fetch it back with the actual, recommended
+    # restore_command client, src/bin/common/fetch_client.c's own
+    # ws_fetch_file_client() finally getting exercised through its own
+    # sub-command wrapper, not just through a raw "psql -c FETCH_FILE".
+    exec node2 bash -c 'rm -f /tmp/restored.bin'
+    exec node2 bash -c 'pg_walserver restore-wal 000000010000000000000001 /tmp/restored.bin --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/restore1.log 2>&1 || (cat /tmp/restore1.log; false)'
+    exec node2 bash -c 'cmp -s /tmp/seg1.bin /tmp/restored.bin || (ls -la /tmp/seg1.bin /tmp/restored.bin; false)'
+
+    # a name nothing has ever archived: a clean nonzero exit, the same
+    # "not found" outcome a real restore_command hits at the end of
+    # recovery -- no partial file left at the destination either.
+    exec node2 bash -c 'rm -f /tmp/restored-missing.bin'
+    exec node2 bash -c 'if pg_walserver restore-wal 000000010000000000000098 /tmp/restored-missing.bin --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/restore2.log 2>&1; then cat /tmp/restore2.log; false; fi'
+    exec node2 bash -c 'test ! -e /tmp/restored-missing.bin'
+}
+
+step test_006_receivewal_pull_route_is_check_file_only {
+    # arch/1 has receivewal = pull configured and its own embedded pg_
+    # receivewal (setup{} above) actually pulling real WAL off node1 --
+    # identify the segment it is currently writing by its own ".partial"
+    # file, entirely from arch/1's local directory, no query against node1
+    # needed to learn the name.
+    exec node2 bash -c 'for i in $(seq 60); do p=$(ls /tmp/wsarch/arch/1/*.partial 2>/dev/null | head -1); test -n "$p" && { basename "$p" .partial > /tmp/pull_seg.txt; exit 0; }; sleep 1; done; ls -la /tmp/wsarch/arch/1; cat /tmp/wsarch-walserver.log; exit 1'
+
+    # that segment is still growing: nothing complete exists yet under its
+    # own final name.
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); test ! -e /tmp/wsarch/arch/1/$seg'
+
+    # a fake local file for that exact name: CHECK_FILE cannot possibly
+    # report "matches" for it (only a ".partial" exists, never the final
+    # name), so archive-wal exits 1 immediately, via CHECK_FILE alone --
+    # ARCHIVE_FILE is never called (cli_archive.c's own receivewal = pull
+    # branch never calls push_file() at all), so the final file never
+    # appears as a side effect of this failed attempt either.
+    exec node2 bash -c 'head -c 4096 /dev/urandom > /tmp/notyet.bin'
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); if pg_walserver archive-wal /tmp/notyet.bin $seg --cluster arch/1 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive6.log 2>&1; then cat /tmp/archive6.log; false; fi'
+    exec node2 bash -c 'grep -qi "waiting for its own receivewal worker\|missing\|differs" /tmp/archive6.log'
+    exec node2 bash -c '! grep -qi "ARCHIVE_FILE\|Archived " /tmp/archive6.log'
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); test ! -e /tmp/wsarch/arch/1/$seg'
+
+    # force node1 to close that exact segment for good: the embedded
+    # receivewal worker picks it up, same as pg_walserver_capture.pgaf's own
+    # test_001.
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); for i in $(seq 60); do test -f /tmp/wsarch/arch/1/$seg && exit 0; sleep 1; done; ls -la /tmp/wsarch/arch/1; exit 1'
+
+    # once the receivewal worker has actually delivered it, archive-wal against the
+    # identical bytes reports "matches" and exits 0 -- still CHECK_FILE
+    # only, ARCHIVE_FILE is still never called.
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); cp /tmp/wsarch/arch/1/$seg /tmp/now_received.bin'
+    exec node2 bash -c 'seg=$(cat /tmp/pull_seg.txt); pg_walserver archive-wal /tmp/now_received.bin $seg --cluster arch/1 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode disable > /tmp/archive7.log 2>&1 || (cat /tmp/archive7.log; false)'
+    exec node2 bash -c 'grep -qi "already matches\|nothing to push" /tmp/archive7.log'
+    exec node2 bash -c '! grep -qi "ARCHIVE_FILE\|Archived " /tmp/archive7.log'
+}
+
+step test_007_archive_pushes_over_real_tls {
+    # test_004 (create-cert --force) already left a real, current
+    # server.crt/server.key for --pgdata in place; --sslmode require forces
+    # a genuine TLS handshake for this one push, unlike every other step in
+    # this spec (sslmode=disable throughout, since routing is by dbname
+    # alone and never needed TLS to pass).
+    exec node2 bash -c 'head -c 65536 /dev/urandom > /tmp/seg-tls.bin'
+    exec node2 bash -c 'pg_walserver archive-wal /tmp/seg-tls.bin 000000010000000000000002 --cluster arch/0 --host 127.0.0.1 --port 6547 --user pgautofailover_replicator --sslmode require > /tmp/archive-tls.log 2>&1 || (cat /tmp/archive-tls.log; false)'
+    exec node2 bash -c 'grep -qi "ARCHIVE_FILE\|Archived" /tmp/archive-tls.log'
+
+    # the real, load-bearing assertion: the bytes actually landed on disk
+    # byte-identical to the source, over the real TLS connection -- not
+    # silently written back to the client instead (see this step's own
+    # header comment for the exact bug this guards against).
+    exec node2 bash -c 'cmp -s /tmp/seg-tls.bin /tmp/wsarch/arch/0/000000010000000000000002 || (ls -la /tmp/seg-tls.bin /tmp/wsarch/arch/0/000000010000000000000002; false)'
+}
+
+sequence
+    test_001_check_file_missing
+    test_002_archive_pushes_then_matches
+    test_003_check_file_differs_is_rejected
+    test_004_create_cert_fresh_and_refuse
+    test_005_restore_wal_fetches_a_real_file
+    test_006_receivewal_pull_route_is_check_file_only
+    test_007_archive_pushes_over_real_tls

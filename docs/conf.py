@@ -67,8 +67,8 @@ master_doc = "index"
 
 # General information about the project.
 project = "pg_auto_failover"
-copyright = "Copyright (c) Microsoft Corporation. All rights reserved."
-author = "Microsoft"
+copyright = "PostgreSQL Development Group"
+author = "PostgreSQL Development Group"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -153,7 +153,7 @@ latex_documents = [
         master_doc,
         "pg_auto_failover.tex",
         r"pg\_auto\_failover Documentation",
-        "Microsoft",
+        author,
         "manual",
     ),
 ]
@@ -468,6 +468,13 @@ man_pages = [
         "ref/pg_autoctl_activate",
         "pg_autoctl activate",
         "pg_autoctl activate",
+        [author],
+        1,
+    ),
+    (
+        "ref/pg_walserver",
+        "pg_walserver",
+        "the archiver's own standalone replication-protocol server",
         [author],
         1,
     ),

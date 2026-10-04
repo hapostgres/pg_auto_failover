@@ -75,7 +75,7 @@ LIBS  = -L $(shell $(PG_CONFIG) --pkglibdir)
 LIBS += -L $(shell $(PG_CONFIG) --libdir)
 LIBS += $(PG_LDFLAGS)
 LIBS += $(shell $(PG_CONFIG) --libs)
-LIBS += -lpq
+LIBS += -lpq -lssl -lcrypto -lresolv
 
 DEPDIR = .deps
 
@@ -137,8 +137,8 @@ lib-parson.o: $(PARSON_SRC)
 # -----------------------------------------------------------------------
 # Vendored pg_receivewal (src/bin/common/vendor/pg_receivewal/) -- shared by
 # pg_autoctl (the pgaf-integrated archiver's own WAL-capture controller,
-# service_archiver_pgreceivewal_ctl.c) and pg_walserver (the embedded pull
-# capturer, pg_walserver/capture.c), so both build the identical vendored
+# service_archiver_pgreceivewal_ctl.c) and pg_walserver (the embedded
+# receivewal worker, pg_walserver/receivewal.c), so both build the identical vendored
 # sources instead of duplicating them; see that directory's own pg_
 # receivewal.c header comment for the vendoring rationale. A caller opts in
 # by adding $(PG_RECEIVEWAL_VENDOR_OBJS) to its own OBJS and linking

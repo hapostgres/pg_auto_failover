@@ -1,0 +1,329 @@
+# Full standalone-story integration test: one ordinary, unmanaged Postgres
+# primary, archived and continuously pulled by pg_walserver, then restored
+# two different ways -- a point-in-time-recovery target built with real
+# pg_basebackup + restore_command, and a real, continuously-streaming
+# secondary built with `pg_walserver basebackup` + primary_conninfo. This is
+# the first spec in this suite to actually exercise the `postgres <name>`/
+# `pg_walserver <name>` DSL sugar kinds themselves (test_spec_parse.y's
+# postgres_line/pg_walserver_line) rather than hand-building an equivalent
+# formation node -- every other pg_walserver_*.pgaf spec runs pg_walserver
+# by hand inside an ordinary pg_auto_failover-managed formation node instead.
+#
+# Four roles, four design decisions worth writing down:
+#
+#   1. "pg1" -- `postgres pg1` (the DSL's plain, unmanaged,
+#      no-monitor sugar). Named "pg1", not "primary": test_spec_scan.l's
+#      CLUSTER_BODY lexer state reserves "primary" (and "secondary", role 4
+#      below) as FSM-state keywords (T_FS_PRIMARY/T_FS_SECONDARY, used by
+#      "wait until primary, secondary in group N" elsewhere in this suite),
+#      so postgres_line's own "T_POSTGRES T_IDENT" production never matches
+#      either word as a node name. No pg_auto_failover formation or monitor
+#      anywhere in this spec at all -- matching this PR's own "pg_walserver
+#      is genuinely useful outside pg_auto_failover" framing. Since a
+#      no-monitor node's Postgres does not start on its own (see
+#      monitor_disabled.pgaf), setup{} below assigns it "single" by hand
+#      first, the same incantation that spec uses.
+#
+#   2. "server" -- `pg_walserver server` (the DSL's pg_walserver sugar),
+#      with its own default startup command overridden to "tail -f
+#      /dev/null" -- exactly like pg_walserver_sni_routing.pgaf's own
+#      "walserver" node -- because this spec needs `pg_walserver cluster register` to
+#      configure a route before "serve" ever starts. This means the DSL
+#      sugar's own *default* command (compose_gen.c's write_pg_walserver_
+#      default_hba()/pg_walserver_line's own commandOverride, the auto-
+#      generated pg_walserver_hba.conf included) is never actually exercised by
+#      this spec either -- no existing spec's own use of the pg_walserver
+#      DSL kind can be, while also needing setup-before-serve. "server"
+#      writes its own pg_walserver_hba.conf by hand instead (the same "trust
+#      every peer on this test's own network" precedent every other
+#      pg_walserver_*.pgaf spec already uses), matching the DSL's
+#      isPgWalserver marking used purely to identify the node kind here.
+#      Receivewal defaults to on (setup is called with no --no-receivewal, and no
+#      --receivewal flag at all): this spec specifically wants to prove the
+#      embedded pg_receivewal worker is running in the background the
+#      whole time, the same process-title check pg_walserver_capture.pgaf
+#      already uses.
+#
+#      pg_walserver.ini ends up with both a named route ("pitr") and a "*"
+#      wildcard mapped at the very same path. The named route is what
+#      archive-wal/restore-wal/a hand-written pg_basebackup address
+#      explicitly; the wildcard is what makes `pg_walserver basebackup`
+#      (role 4 below) and a real standby's walreceiver (which always sends
+#      the literal dbname "replication", see README.md's "Routing beyond
+#      dbname") resolve to the very same directory with zero extra routing
+#      ceremony -- docs/ref/pg_walserver.rst's own recommendation for a
+#      single-route deployment.
+#
+#   3. "pitr" -- a point-in-time-recovery target, built with a real,
+#      unmodified `pg_basebackup` against "server" (proving wire
+#      compatibility with the stock tool, the same thing pg_walserver_
+#      standalone.pgaf's own test_006 already proves for a real standby),
+#      then `restore_command` fetching WAL on demand via `pg_walserver
+#      restore-wal`. Recovery target: `recovery_target_name`, not
+#      `recovery_target_time`. A named restore point
+#      (`pg_create_restore_point('pitr_target')`) is created on the primary
+#      right after the "before" row and right before the "after" row, and
+#      recovered to by name -- deliberately NOT a wall-clock timestamp,
+#      because this DSL has no cross-node value capture (`let`/`${var}`,
+#      see pg_walserver_standalone.pgaf's own header comment) and "pg1"
+#      and "pitr" are two different containers with two different
+#      filesystems: there is no simple way to hand a timestamp string
+#      captured on one node to a step running on the other. A named restore
+#      point sidesteps that entirely -- the name itself is the only value
+#      that needs to cross containers, and it is a literal already written
+#      into both steps. `recovery_target_action = promote`: this test's own
+#      assertions are simplest against a fully read-write instance,  with
+#      no separate "wait for hot standby, then run a second promote step"
+#      dance.
+#
+#      This role uses a plain, hand-driven container (`postgres pitr
+#      command "tail -f /dev/null"`), not pg_autoctl at all: postgres_line's
+#      own default ("pg_autoctl node run", which does its own initdb on
+#      first run) would initialize /var/lib/postgres/pgaf itself before this
+#      spec ever gets to lay down a base backup there instead. Overriding
+#      the command to a no-op keeps the container (and its image, with
+#      real pg_basebackup/pg_ctl/psql already on it) around without
+#      pg_autoctl ever touching the data directory this spec builds by hand
+#      -- the same "postgres <name>, fully hand-driven, bypassing pg_autoctl's
+#      own FSM entirely" shape pg_walserver_standalone.pgaf's own test_006
+#      already uses for its real standby, just declared via the DSL sugar
+#      here instead of an ordinary formation node.
+#
+#   4. "sec" (node name; "secondary" is a reserved DSL keyword, an FSM
+#      state -- see the "primary"/"pg1" note above) -- a real,
+#      continuously-streaming standby, built with
+#      `pg_walserver basebackup` (the CLI sub-command) instead of real
+#      `pg_basebackup`. `pg_walserver basebackup --upstream <conninfo>
+#      --path <dir>` is designed to populate a route's own storage from a
+#      real Postgres primary; here it is deliberately pointed at "server"
+#      itself instead, since "server" answers BASE_BACKUP requests over the
+#      exact same wire protocol a real primary does -- proving this CLI
+#      tool is generically usable against anything speaking the protocol,
+#      not hardcoded to talk to a real primary. One real wrinkle this
+#      surfaces: `pg_walserver basebackup`'s own internal `pg_basebackup_
+#      fetch()` (src/bin/common/pgctl.c) never sends an explicit `dbname`
+#      on its connection string at all (see prepare_primary_conninfo()'s own
+#      "no database" call site there) -- ordinary libpq then defaults
+#      `dbname` to whatever `--user` resolves to, matching neither "pitr"
+#      nor the literal "replication" a real standby's own walreceiver would
+#      send. This is exactly what "server"'s own "*" wildcard route (role 2
+#      above) is for: every one of these differently-defaulted `dbname`
+#      values falls through to the same path with no further configuration.
+#      The resulting base backup directory
+#      (`<path>/basebackups/basebackup-<UTC timestamp>/`, `.latest` holding
+#      its label -- cli_basebackup.c's own layout) is moved into place with
+#      a single `mv`, mirroring (not reusing) pg_basebackup_fetch()'s own
+#      atomic-rename-into-place ending in pgctl.c. "sec" is also a
+#      hand-driven `postgres <name>` node, for the same reason "pitr" is.
+#
+#   test_001  seed a "before" row, a named restore point, and force a WAL
+#             switch; "server" picks the segment up (archive_command's own
+#             push, the embedded receivewal worker's own pull, or both -- CHECK_FILE's
+#             own idempotency makes a second delivery of the same segment a
+#             no-op either way, see README.md's "archive push side")
+#   test_002  seed an "after" row and force another WAL switch
+#   test_003  a real pg_basebackup against "server", then real PostgreSQL
+#             recovery (restore_command = pg_walserver restore-wal,
+#             recovery_target_name = the named restore point, promote):
+#             the "before" row is there, the "after" row is not
+#   test_004  `pg_walserver basebackup` against "server" (not a real
+#             primary), moved into place as this node's own PGDATA, then a
+#             real, continuously-streaming standby (primary_conninfo +
+#             standby.signal) that already has both rows and picks up a
+#             third, live one via genuine streaming replication
+
+cluster {
+    ssl off
+
+    postgres pg1
+
+    pg_walserver server
+        command "tail -f /dev/null"
+
+    postgres pitr
+        command "tail -f /dev/null"
+
+    postgres sec
+        command "tail -f /dev/null"
+}
+
+setup {
+    # no-monitor nodes start pg_autoctl in INIT state (postgres not yet
+    # running) -- give it a moment to lay down its own data directory
+    # before driving the FSM by hand, the same setup{} monitor_disabled.pgaf
+    # itself uses.
+    sleep 5s
+
+    # start Postgres on the primary -- see monitor_disabled.pgaf's own
+    # test_002_init_to_single for this exact incantation.
+    exec pg1 pg_autoctl manual fsm assign single
+    exec pg1 pg_autoctl inspect pgsetup wait
+
+    # a real replication role, matching docs/ref/pg_walserver.rst's own
+    # worked example exactly (CREATE ROLE ... REPLICATION LOGIN PASSWORD).
+    sql pg1 { CREATE ROLE archiver_repl REPLICATION LOGIN PASSWORD 'wspw' }
+
+    # "pg1" registers with no monitor, so nothing else ever adds an HBA
+    # rule for "server"'s address -- add it by hand, the same "an operator
+    # (or, here, pg_walserver_pid1.pgaf/pg_walserver_sni_routing.pgaf's own
+    # setup{} blocks) adds one real pg_hba.conf line" precedent already used
+    # throughout this suite.
+    exec pg1 bash -c 'echo "host replication archiver_repl 0.0.0.0/0 trust" >> /var/lib/postgres/pgaf/pg_hba.conf && pg_ctl -D /var/lib/postgres/pgaf reload'
+
+    # archive_mode is PGC_POSTMASTER: a real restart is required, driven
+    # through pg_autoctl's own "manual pgctl off/on" (the "stop postgres"/
+    # "start postgres" DSL commands below) rather than a bare `pg_ctl
+    # restart`, so pg_autoctl's own postgres-controller service isn't
+    # fighting a restart it didn't initiate. wal_level is already "replica"
+    # by default (PostgreSQL 10+, see docs/ref/pg_walserver.rst), set here
+    # explicitly anyway for clarity; synchronous_standby_names is cleared
+    # defensively even though nothing in this no-monitor spec ever sets it.
+    exec pg1 bash -c 'printf "%b\n" "wal_level = replica" "archive_mode = on" "archive_command = \x27pg_walserver archive-wal %p %f --cluster pitr --host server --port 6543 --user archiver_repl --sslmode disable\x27" "synchronous_standby_names = \x27\x27" >> /var/lib/postgres/pgaf/postgresql.conf'
+    stop postgres pg1
+    start postgres pg1
+    exec pg1 bash -c 'for i in $(seq 30); do out=$(psql -Atc "show archive_mode" 2>/dev/null); test "$out" = "on" && exit 0; sleep 1; done; exit 1'
+
+    # "server": its own pg_walserver_hba.conf, hand-written (see this file's own
+    # header comment on why the DSL sugar's own auto-generated default,
+    # compose_gen.c's write_pg_walserver_default_hba(), is never reached
+    # here) -- every peer on this test's own network, no authentication,
+    # the same "test infrastructure, trust is fine" precedent every
+    # existing pg_walserver_*.pgaf spec already uses.
+    exec server bash -c 'mkdir -p /tmp/ws && printf "host all all 0.0.0.0/0 trust\n" > /tmp/ws/pg_walserver_hba.conf'
+
+    # the one-shot wizard: writes pg_walserver.ini's own [pitr] section
+    # (path + upstream + "receivewal = pull", on by default with no --receivewal
+    # flag at all), checks archiver_repl's REPLICATION attribute against
+    # the real primary, and fetches its system identifier. No "serve" is
+    # running yet, so setup only logs that this config will take effect
+    # the next time it starts, below -- that is what actually bootstraps
+    # this route's first base backup automatically, once its own embedded
+    # receivewal worker (started at the same startup) shows real streaming
+    # evidence.
+    exec server bash -c 'PGPASSWORD=wspw pg_walserver cluster register pitr --pgdata /tmp/ws --path /tmp/ws/pitr --pguri "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
+    exec server bash -c 'grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini || { echo "receivewal = pull should have been written by default"; cat /tmp/ws/pg_walserver.ini; false; }'
+
+    # the "*" wildcard, mapped at the exact same path as "pitr" -- see this
+    # file's own header comment (role 2) for why role 4 below needs this.
+    exec server bash -c 'printf "\n[*]\npath = /tmp/ws/pitr\n" >> /tmp/ws/pg_walserver.ini'
+
+    exec server bash -c 'nohup pg_walserver serve --pgdata /tmp/ws --port 6543 > /tmp/ws-server.log 2>&1 & echo started'
+    exec server bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; exit 1'
+
+    # the embedded receivewal worker really is running, the whole time, in the
+    # background -- pg_walserver_capture.pgaf's own process-title check.
+    exec server bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal pitr$" > /dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; ps aux; exit 1'
+
+    # "serve" bootstraps this route's first base backup automatically at
+    # startup now (no more "setup --with-basebackup", see accept_loop.c's
+    # own ws_bootstrap_missing_backups()) -- test_003 below needs it
+    # already in place, so wait for it here.
+    exec server bash -c 'for i in $(seq 60); do test -s /tmp/ws/pitr/basebackups/.latest && exit 0; sleep 1; done; cat /tmp/ws-server.log; exit 1'
+}
+
+teardown {
+    compose down
+}
+
+step test_001_seed_before_target_and_archive {
+    sql pg1 { CREATE TABLE t (id serial primary key, v text) }
+    sql pg1 { INSERT INTO t(v) VALUES ('row-before-target') }
+    sql pg1 { SELECT pg_create_restore_point('pitr_target') }
+    sql pg1 { SELECT pg_switch_wal() }
+
+    # "server" picks the segment up -- archive_command's own push, the
+    # embedded receivewal worker's own pull, or (most likely) both racing, with
+    # CHECK_FILE's own idempotency making whichever loses a clean no-op.
+    exec server bash -c 'for i in $(seq 60); do ls /tmp/ws/pitr/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | head -1 | grep -q . && exit 0; sleep 1; done; ls -la /tmp/ws/pitr; cat /tmp/ws-server.log; exit 1'
+}
+
+step test_002_seed_after_target_and_archive {
+    sql pg1 { INSERT INTO t(v) VALUES ('row-after-target') }
+    sql pg1 { SELECT pg_switch_wal() }
+
+    exec server bash -c 'for i in $(seq 60); do n=$(ls /tmp/ws/pitr/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | wc -l); test "$n" -ge 2 && exit 0; sleep 1; done; ls -la /tmp/ws/pitr; exit 1'
+}
+
+step test_003_pitr_recovers_to_named_restore_point {
+    # a real, unmodified pg_basebackup against "server" -- the same
+    # wire-compatibility proof pg_walserver_standalone.pgaf's own test_006
+    # already gives a real standby, here used for a PITR target instead.
+    exec pitr bash -c 'pg_basebackup -w -d "host=server port=6543 dbname=pitr sslmode=disable" -D /tmp/pitr-data -X none --no-manifest'
+    exec pitr bash -c 'test -f /tmp/pitr-data/PG_VERSION'
+
+    # "pitr" is a byte-for-byte copy of pg1's own data directory, so its
+    # postgresql.auto.conf still carries pg1's own archive_mode = on and
+    # archive_command (pointed at this same "pitr" route) verbatim -- the
+    # same "the base backup copies the ENTIRE config, not just the bits a
+    # PITR/standby target actually wants" wrinkle pg_walserver_standalone.
+    # pgaf's own test_006 already documents for synchronous_standby_names.
+    # Left as-is, promoting here would run that inherited archive_command
+    # for real, pushing this node's own freshly-created timeline history
+    # file back onto the very same shared route "sec" (test_004) also
+    # reads from -- confusing it about which timeline its real streaming
+    # primary (pg1, never promoted, still timeline 1) is actually on.
+    # archive_mode is PGC_POSTMASTER, so turning it off here (before this
+    # node's own first start from the base backup) is enough; no reload
+    # needed.
+    exec pitr bash -c 'mkdir -p /tmp/pitr-sock && printf "%b\n" "port = 5433" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/pitr-sock\x27" "archive_mode = off" "restore_command = \x27pg_walserver restore-wal %f %p --cluster pitr --host server --port 6543 --user archiver_repl --sslmode disable\x27" "recovery_target_name = \x27pitr_target\x27" "recovery_target_action = \x27promote\x27" >> /tmp/pitr-data/postgresql.auto.conf && touch /tmp/pitr-data/recovery.signal && (pg_ctl -D /tmp/pitr-data -w -l /tmp/pitr.log start || (cat /tmp/pitr.log; false))'
+
+    # recovery_target_action = promote: once the named restore point is
+    # reached, this instance promotes on its own -- no separate manual
+    # "pg_ctl promote" step needed the way test_006's own continuously-
+    # streaming standby requires one.
+    exec pitr bash -c 'for i in $(seq 60); do out=$(psql -h /tmp/pitr-sock -p 5433 -d demo -Atc "SELECT pg_is_in_recovery()" 2>/dev/null); test "$out" = "f" && exit 0; sleep 1; done; cat /tmp/pitr.log; exit 1'
+
+    # exactly the "before" row, nothing recovered past the named target.
+    exec pitr bash -c 'psql -h /tmp/pitr-sock -p 5433 -d demo -Atc "SELECT v FROM t ORDER BY id" > /tmp/pitr-rows.txt; cat /tmp/pitr-rows.txt'
+    exec pitr bash -c 'test "$(cat /tmp/pitr-rows.txt)" = "row-before-target" || { echo "unexpected rows:"; cat /tmp/pitr-rows.txt; false; }'
+    exec pitr bash -c 'psql -h /tmp/pitr-sock -p 5433 -d demo -c "INSERT INTO t(v) VALUES ('"'"'promoted-and-writable'"'"')"'
+}
+
+step test_004_secondary_via_pg_walserver_basebackup {
+    # `pg_walserver basebackup` (the CLI sub-command), pointed at "server"
+    # itself rather than a real Postgres primary -- see this file's own
+    # header comment (role 4) for the "*" wildcard wrinkle this surfaces
+    # and why it's needed.
+    exec sec bash -c 'pg_walserver basebackup --upstream "host=server port=6543 user=archiver_repl sslmode=disable" --path /tmp/secondary-fetch > /tmp/secondary-fetch.log 2>&1 || (cat /tmp/secondary-fetch.log; false)'
+    exec sec bash -c 'test -s /tmp/secondary-fetch/basebackups/.latest'
+    exec sec bash -c 'label=$(cat /tmp/secondary-fetch/basebackups/.latest); test -f "/tmp/secondary-fetch/basebackups/$label/PG_VERSION"'
+
+    # a single atomic rename into place -- mirroring, not reusing,
+    # pg_basebackup_fetch()'s own ending in src/bin/common/pgctl.c.
+    exec sec bash -c 'label=$(cat /tmp/secondary-fetch/basebackups/.latest); mv "/tmp/secondary-fetch/basebackups/$label" /tmp/secondary-data'
+    exec sec bash -c 'test -f /tmp/secondary-data/PG_VERSION'
+
+    # a real, continuously-streaming standby from here on: primary_conninfo
+    # + standby.signal, nothing but stock PostgreSQL. dbname=pitr is
+    # harmless here (a hand-written primary_conninfo, unlike a real
+    # standby's own walreceiver, does send whatever dbname it's given) --
+    # kept for readability; the "*" wildcard would resolve it identically
+    # either way.
+    # same inherited-config wrinkle as "pitr" above (this base backup is
+    # also a byte-for-byte copy of pg1's data directory): archive_mode is
+    # turned off defensively, even though "sec" itself is never promoted
+    # in this spec, so nothing here can ever repeat "pitr"'s own mistake.
+    exec sec bash -c 'mkdir -p /tmp/secondary-sock && printf "%b\n" "port = 5434" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/secondary-sock\x27" "hot_standby = on" "archive_mode = off" "restore_command = \x27pg_walserver restore-wal %f %p --cluster pitr --host server --port 6543 --user archiver_repl --sslmode disable\x27" "primary_conninfo = \x27host=server port=6543 user=archiver_repl password=wspw dbname=pitr sslmode=disable\x27" >> /tmp/secondary-data/postgresql.auto.conf && touch /tmp/secondary-data/standby.signal && (pg_ctl -D /tmp/secondary-data -w -l /tmp/secondary.log start || (cat /tmp/secondary.log; false))'
+
+    exec sec bash -c 'psql -h /tmp/secondary-sock -p 5434 -d demo -Atc "SELECT pg_is_in_recovery()" | grep -qx t'
+
+    # the base backup itself already carries both seeded rows (it was taken
+    # after test_002's own "after" row); "promoted-and-writable" (written on
+    # "pitr" after ITS OWN promotion, a fully separate PITR target) must
+    # never show up here -- proving this secondary is following "server"/
+    # "pg1", not somehow the promoted "pitr" instance.
+    exec sec bash -c 'for i in $(seq 30); do n=$(psql -h /tmp/secondary-sock -p 5434 -d demo -Atc "SELECT count(*) FROM t" 2>/dev/null); test "$n" = "2" && exit 0; sleep 1; done; cat /tmp/secondary.log; exit 1'
+    exec sec bash -c 'psql -h /tmp/secondary-sock -p 5434 -d demo -Atc "SELECT count(*) FROM t WHERE v = '"'"'promoted-and-writable'"'"'" | grep -qx 0'
+
+    # a genuine walreceiver streaming live: a brand new row on the real
+    # primary shows up here with nothing else driving it.
+    sql pg1 { INSERT INTO t(v) VALUES ('row-live-on-secondary') }
+    sql pg1 { SELECT pg_switch_wal() }
+    exec sec bash -c 'for i in $(seq 30); do out=$(psql -h /tmp/secondary-sock -p 5434 -d demo -Atc "SELECT v FROM t WHERE v = '"'"'row-live-on-secondary'"'"'" 2>/dev/null); test "$out" = "row-live-on-secondary" && exit 0; sleep 1; done; cat /tmp/secondary.log; exit 1'
+}
+
+sequence
+    test_001_seed_before_target_and_archive
+    test_002_seed_after_target_and_archive
+    test_003_pitr_recovers_to_named_restore_point
+    test_004_secondary_via_pg_walserver_basebackup

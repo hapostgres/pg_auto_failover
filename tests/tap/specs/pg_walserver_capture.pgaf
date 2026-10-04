@@ -1,0 +1,166 @@
+# pg_walserver's own embedded, supervised receivewal worker (receivewal.c): a
+# route configured with "receivewal = pull" (pg_walserver.ini) -- written by
+# `pg_walserver cluster register` *by default* now, with no --receivewal flag at all
+# needed (an operator has to pass --no-receivewal / --receivewal none to opt
+# out) -- gets a forked, supervised pg_receivewal child at "serve" startup:
+# no external pg_receivewal process, no separate supervisor unit. This
+# spec's own setup{} below relies on exactly that default. See README.md's
+# "The embedded receivewal worker" section for the design this spec proves.
+#
+# tests/tap/specs/pg_walserver_standalone.pgaf's own test_003 is this
+# spec's byte-identical-output bar: a real, unmodified, independently-run
+# "reference" pg_receivewal (started in setup{}, capturing straight off
+# node1 into /tmp/ref) gives every test step here something to diff the
+# embedded receivewal worker's own output against, proving it produces the exact
+# same bytes a real external pg_receivewal would, not just "some file
+# appears".
+#
+# This PR's own pgaftest predates `let`/`${var}` capture (see pg_walserver_
+# standalone.pgaf's own header comment), so every value that needs to cross
+# steps -- pids, segment names -- is written to a plain file on node2 and
+# re-read with $(cat ...), exactly the same way.
+#
+# Every test step identifies the receivewal worker child by its own process title
+# ("pg_walserver: receivewal default/0", set right after fork() by
+# receivewal.c's start_one_receivewal_child(), the same set_ps_title() mechanism
+# every connection child already uses for its own title) rather than a
+# pidfile -- pg_walserver keeps no pidfile for it, on purpose (see
+# receivewal.h's own comment: it is reaped/restarted from inside
+# pg_walserver's own accept loop, no external process needs to find it by
+# name outside of a test harness like this one). Every pgrep -f pattern
+# below is anchored (^...$): pgrep -f matches against every process's own
+# *full command line*, which includes the exec'd "bash -c '...'" shell
+# script currently running the pgrep call itself -- its script text
+# necessarily contains the same search string this file uses (it's right
+# there in this file's own source), so an unanchored pgrep -f always
+# spuriously matches its own invoking shell in addition to the real
+# target. Anchoring to the target process's own, much shorter, exact
+# command line avoids that self-match.
+#
+#   test_001  after "pg_walserver serve" starts with a "receivewal = pull"
+#             route configured, a pg_receivewal child is alive under it,
+#             with no external pg_receivewal ever invoked for this route;
+#             forcing a WAL switch on node1 lands a byte-identical segment
+#             in the route's own directory and in the independent
+#             reference capture
+#   test_002  killing the receivewal worker child (SIGKILL, simulating a crash) gets
+#             it restarted automatically, under a new pid, and receiving
+#             continues: a second forced WAL switch lands a byte-identical
+#             segment again
+#   test_003  stopping pg_walserver itself (SIGTERM) cleanly stops the
+#             receivewal worker child too -- no orphaned pg_receivewal process left
+#             running once the server has exited
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+
+    # node2 hosts pg_walserver for this test; it is otherwise an ordinary
+    # registered secondary and that is irrelevant here. Same loopback-only
+    # HBA rule as pg_walserver_standalone.pgaf's own setup{} -- there is no
+    # monitor here to learn a real client's address from, and none needed.
+    exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
+
+    # the wizard, with NO --receivewal flag at all this time: the embedded
+    # receivewal worker is on by default now (an operator has to pass
+    # --no-receivewal, or --receivewal none, to opt out), so this one call is
+    # itself the regression test proving "setup" with no receivewal-related
+    # flag still writes "receivewal = pull" into pg_walserver.ini's [default/0]
+    # section on its own -- exactly what the rest of this spec then proves
+    # actually starts and runs a real embedded pg_receivewal child. Also
+    # checks pgautofailover_replicator's REPLICATION attribute on node1 and
+    # fetches node1's real system identifier -- this spec only needs the
+    # receivewal worker, not BASE_BACKUP, so it never relies on the base backup
+    # "serve" bootstraps automatically for this route in the background.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register default/0 --pgdata /tmp/ws --path /tmp/ws/default/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
+    exec node2 bash -c 'grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini || { echo "receivewal = pull should have been written by default, with no --receivewal flag at all"; cat /tmp/ws/pg_walserver.ini; false; }'
+
+    # the independent "reference" capture: a real, unmodified, externally
+    # run pg_receivewal (the stock OS one, not this project's vendored
+    # copy) capturing the exact same primary into its own directory --
+    # every test step below diffs the embedded receivewal worker's own output
+    # against this, the same byte-identical-output bar pg_walserver_
+    # standalone.pgaf's own test_003 already proves for START_REPLICATION.
+    exec node2 bash -c 'mkdir -p /tmp/ref && nohup pg_receivewal -w -d "host=node1 port=5432 user=pgautofailover_replicator password=pgaf-repl-pw sslmode=disable" --directory /tmp/ref > /tmp/ref.log 2>&1 & echo started'
+
+    # start pg_walserver itself: with [default/0]'s own "receivewal = pull"
+    # already on disk, this alone is what should fork the embedded
+    # receivewal worker -- no external pg_receivewal for /tmp/ws/default/0 anywhere
+    # in this spec.
+    exec node2 bash -c 'nohup pg_walserver serve --pgdata /tmp/ws --port 6543 > /tmp/ws-walserver.log 2>&1 & echo started'
+    exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
+    exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver serve --pgdata /tmp/ws --port 6543$" > /tmp/ws_pid.txt && test -s /tmp/ws_pid.txt && exit 0; sleep 1; done; ps aux; exit 1'
+
+    # the embedded receivewal worker child must show up on its own, with no test
+    # step ever invoking pg_receivewal against /tmp/ws/default/0 itself.
+    exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal default/0$" > /tmp/cap_pid.txt && test -s /tmp/cap_pid.txt && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; ps aux; exit 1'
+}
+
+teardown {
+    compose down
+}
+
+step test_001_embedded_receivewal_is_running_and_captures {
+    # exactly one pg_receivewal-shaped child, forked by pg_walserver
+    # itself, and its own parent is pg_walserver's own pid -- proving it is
+    # this server's own supervised child, not some unrelated process that
+    # happens to match the title pattern.
+    exec node2 bash -c 'test "$(wc -l < /tmp/cap_pid.txt)" = "1" || { echo "cap_pid.txt:"; cat /tmp/cap_pid.txt; ps aux | grep -i walserver; false; }'
+    exec node2 bash -c 'pid=$(cat /tmp/cap_pid.txt); test -d /proc/$pid'
+    exec node2 bash -c 'pid=$(cat /tmp/cap_pid.txt); parent=$(cat /tmp/ws_pid.txt); actual_ppid=$(awk "{print \$4}" /proc/$pid/stat); test "$actual_ppid" = "$parent" || { echo "receivewal worker pid $pid has ppid $actual_ppid, expected pg_walserver pid $parent"; false; }'
+
+    sql node1 { CREATE TABLE ws_capture(a int); INSERT INTO ws_capture VALUES (1); }
+    sql node1 { SELECT pg_switch_wal() }
+
+    # both the embedded receivewal worker's own directory and the independent
+    # reference capture must pick up the same, newly-closed segment.
+    exec node2 bash -c 'for i in $(seq 60); do cur=$(ls /tmp/ws/default/0/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | xargs -n1 basename 2>/dev/null | sort | tail -1); test -n "$cur" && { echo "$cur" > /tmp/seg1.txt; exit 0; }; sleep 1; done; ls -la /tmp/ws/default/0; exit 1'
+    exec node2 bash -c 'seg=$(cat /tmp/seg1.txt); for i in $(seq 60); do test -s /tmp/ref/$seg && exit 0; sleep 1; done; cat /tmp/ref.log; ls -la /tmp/ref; exit 1'
+    exec node2 bash -c 'seg=$(cat /tmp/seg1.txt); cmp -s /tmp/ws/default/0/$seg /tmp/ref/$seg || (ls -la /tmp/ws/default/0/$seg /tmp/ref/$seg; false)'
+}
+
+step test_002_receivewal_restarts_on_kill_and_keeps_capturing {
+    # simulate a crash: SIGKILL, not the clean SIGINT/SIGTERM shutdown path
+    # (that path is test_003's own job) -- receivewal.c's own reap/restart
+    # tick (ws_receivewal_tick(), called every accept-loop
+    # iteration) must notice this and fork a replacement on its own.
+    exec node2 bash -c 'kill -9 $(cat /tmp/cap_pid.txt)'
+
+    exec node2 bash -c 'old=$(cat /tmp/cap_pid.txt); for i in $(seq 30); do new=$(pgrep -f "^pg_walserver: receivewal default/0$"); test -n "$new" -a "$new" != "$old" && { echo "$new" > /tmp/cap_pid2.txt; exit 0; }; sleep 1; done; cat /tmp/ws-walserver.log; ps aux; exit 1'
+    exec node2 bash -c 'test "$(wc -l < /tmp/cap_pid2.txt)" = "1" || { echo "cap_pid2.txt:"; cat /tmp/cap_pid2.txt; false; }'
+    exec node2 bash -c 'pid=$(cat /tmp/cap_pid2.txt); test -d /proc/$pid'
+    exec node2 bash -c 'pid=$(cat /tmp/cap_pid2.txt); parent=$(cat /tmp/ws_pid.txt); actual_ppid=$(awk "{print \$4}" /proc/$pid/stat); test "$actual_ppid" = "$parent" || { echo "restarted receivewal worker pid $pid has ppid $actual_ppid, expected pg_walserver pid $parent"; false; }'
+
+    sql node1 { INSERT INTO ws_capture SELECT generate_series(1, 500000) }
+    sql node1 { SELECT pg_switch_wal() }
+
+    exec node2 bash -c 'prev=$(cat /tmp/seg1.txt); for i in $(seq 60); do cur=$(ls /tmp/ws/default/0/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | xargs -n1 basename 2>/dev/null | sort | tail -1); test -n "$cur" -a "$cur" != "$prev" && { echo "$cur" > /tmp/seg2.txt; exit 0; }; sleep 1; done; ls -la /tmp/ws/default/0; exit 1'
+    exec node2 bash -c 'seg=$(cat /tmp/seg2.txt); for i in $(seq 60); do test -s /tmp/ref/$seg && exit 0; sleep 1; done; cat /tmp/ref.log; ls -la /tmp/ref; exit 1'
+    exec node2 bash -c 'seg=$(cat /tmp/seg2.txt); cmp -s /tmp/ws/default/0/$seg /tmp/ref/$seg || (ls -la /tmp/ws/default/0/$seg /tmp/ref/$seg; false)'
+}
+
+step test_003_stopping_pg_walserver_stops_the_receivewal_too {
+    # a clean SIGTERM, the server's own ordinary shutdown signal
+    # (asked_to_stop, signals.c) -- accept_loop.c's own shutdown path calls
+    # ws_receivewal_stop_all() right before the process exits, so the
+    # receivewal worker child (tracked here under its post-restart pid,
+    # /tmp/cap_pid2.txt from test_002) must be gone too, not just the
+    # server itself.
+    exec node2 bash -c 'kill -TERM $(cat /tmp/ws_pid.txt)'
+
+    exec node2 bash -c 'ppid=$(cat /tmp/ws_pid.txt); for i in $(seq 30); do test -d /proc/$ppid || exit 0; sleep 1; done; ps aux; exit 1'
+    exec node2 bash -c 'cappid=$(cat /tmp/cap_pid2.txt); test ! -d /proc/$cappid || { echo "receivewal worker pid $cappid is still alive after pg_walserver stopped -- orphaned"; ps aux; false; }'
+}
+
+sequence
+    test_001_embedded_receivewal_is_running_and_captures
+    test_002_receivewal_restarts_on_kill_and_keeps_capturing
+    test_003_stopping_pg_walserver_stops_the_receivewal_too

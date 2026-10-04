@@ -2,6 +2,17 @@
  * src/bin/pg_autoctl/supervisor.c
  *   Supervisor for services run in sub-processes.
  *
+ *   This is a thin layer of pg_autoctl-specific business logic (the
+ *   node-spec file watcher, the keeper-only SIGTERM graceful-shutdown
+ *   handoff, the escalating-signal shutdown sequence, and pg_autoctl's
+ *   own three-way RestartPolicy and EXIT_CODE_DROPPED/EXIT_CODE_FATAL
+ *   sentinel exit codes) on top of the actually-generic restart-backoff
+ *   and orphan-reaping mechanics, which live once, shared, in
+ *   src/bin/common/process_supervisor.h/.c and are called directly from
+ *   here (see supervisor.h's own top comment for the full picture, and
+ *   for why the rest of this file's service-array supervision stays
+ *   local rather than being forced into that shared file too).
+ *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
@@ -135,11 +146,8 @@ supervisor_start(Service services[], int serviceCount, const char *pidfile)
 		if (started)
 		{
 			uint64_t now = time(NULL);
-			RestartCounters *counters = &(service->restartCounters);
 
-			counters->count = 1;
-			counters->position = 0;
-			counters->startTime[counters->position] = now;
+			process_restart_counters_start(&(service->restartCounters), now);
 
 			log_info("Started pg_autoctl %s service with pid %d",
 					 service->name, service->pid);
@@ -321,17 +329,10 @@ supervisor_loop(Supervisor *supervisor)
 					 * grandchildren are reparented to us by the kernel and
 					 * we will reap them here.  This is expected behaviour;
 					 * log at INFO rather than ERROR so it doesn't look like
-					 * a bug.
+					 * a bug. See process_supervisor.h/.c, shared with
+					 * pg_walserver's own orphan-reaping classification.
 					 */
-					if (getpid() == 1)
-					{
-						log_info("Reaped orphaned subprocess with pid %d "
-								 "(reparented to PID 1)", pid);
-					}
-					else
-					{
-						log_error("Unknown subprocess died with pid %d", pid);
-					}
+					process_supervisor_log_unknown_pid(pid);
 					break;
 				}
 
@@ -924,13 +925,8 @@ supervisor_restart_service(Supervisor *supervisor, Service *service, int status)
 	 */
 	if (supervisor_may_restart(service))
 	{
-		/* update our ring buffer: move our clock hand */
-		int position = (counters->position + 1) % SUPERVISOR_SERVICE_MAX_RETRY;
-
-		/* we have restarted once more */
-		counters->count += 1;
-		counters->position = position;
-		counters->startTime[counters->position] = now;
+		/* update our ring buffer: move our clock hand, one more restart */
+		process_restart_counters_record(counters, now);
 	}
 	else
 	{
@@ -1034,36 +1030,32 @@ supervisor_may_restart(Service *service)
 			  epoch_to_string(counters->startTime[position], timestring),
 			  (int) (now - counters->startTime[position]));
 
-	/* until we have restarted MaxR times, we know we can restart */
-	if (counters->count <= SUPERVISOR_SERVICE_MAX_RETRY)
+	/*
+	 * The actual MaxR/MaxT computation is the shared ring-buffer logic in
+	 * process_supervisor.c, also used by pg_walserver -- see supervisor.h's
+	 * top comment. Only the "what to log, and at which level, once we give
+	 * up" wording stays pg_autoctl-specific here.
+	 */
+	if (process_restart_counters_may_restart(counters))
 	{
 		return true;
 	}
 
 	/*
-	 * When we have restarted more than MaxR times, the only case when we can't
-	 * restart again is if the oldest entry in the counters startTime array is
-	 * older than our MaxT.
-	 *
 	 * The oldest entry in the ring buffer is the one just after the current
-	 * one:
+	 * one -- recompute it here only to report how long ago it happened.
 	 */
 	position = (position + 1) % SUPERVISOR_SERVICE_MAX_RETRY;
 	uint64_t oldestRestartTime = counters->startTime[position];
 
-	if ((now - oldestRestartTime) <= SUPERVISOR_SERVICE_MAX_TIME)
-	{
-		log_fatal("pg_autoctl service %s has already been "
-				  "restarted %d times in the last %d seconds, "
-				  "stopping now",
-				  service->name,
-				  SUPERVISOR_SERVICE_MAX_RETRY,
-				  (int) (now - oldestRestartTime));
+	log_fatal("pg_autoctl service %s has already been "
+			  "restarted %d times in the last %d seconds, "
+			  "stopping now",
+			  service->name,
+			  SUPERVISOR_SERVICE_MAX_RETRY,
+			  (int) (now - oldestRestartTime));
 
-		return false;
-	}
-
-	return true;
+	return false;
 }
 
 

@@ -68,8 +68,10 @@ __ https://github.com/hapostgres/pg_auto_failover
    :hidden:
    :caption: Manual Pages
 
-   ref/manual
-   ref/configuration
+   ref/pg_autoctl
+   ref/pg_walserver
+   ref/pgaftest
+   ref/pg_receivewal
 
 .. toctree::
    :hidden:

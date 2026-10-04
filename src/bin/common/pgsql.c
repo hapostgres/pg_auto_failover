@@ -41,7 +41,6 @@ static char * ConnectionTypeToString(ConnectionType connectionType);
 static void log_connection_error(PGconn *connection, int logLevel);
 static void pgAutoCtlDefaultNoticeProcessor(void *arg, const char *message);
 static void pgAutoCtlDebugNoticeProcessor(void *arg, const char *message);
-static PGconn * pgsql_open_connection(PGSQL *pgsql);
 static bool pgsql_retry_open_connection(PGSQL *pgsql);
 static bool is_response_ok(PGresult *result);
 static bool clear_results(PGSQL *pgsql);
@@ -512,8 +511,17 @@ log_connection_error(PGconn *connection, int logLevel)
  * pgsql_open_connection opens a PostgreSQL connection, given a PGSQL client
  * instance. If a connection is already open in the client (it's not NULL),
  * then this errors, unless we are inside a transaction opened by pgsql_begin.
+ *
+ * Exported (not static) so a caller outside this file that needs a raw
+ * PGconn for a command this file has no wrapper for yet -- a wire-protocol
+ * extension like pg_walserver's own FETCH_FILE, for instance
+ * (src/bin/common/fetch_client.c) -- still gets this same retry policy,
+ * connect-timeout handling, and notice-processor wiring, exactly like
+ * pgsql_identify_system() and every other command already implemented in
+ * this file. Call pgsql_init() first; pgsql_finish() releases the
+ * connection this returns.
  */
-static PGconn *
+PGconn *
 pgsql_open_connection(PGSQL *pgsql)
 {
 	/* we might be connected already */
@@ -3170,6 +3178,12 @@ pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system)
 		return false;
 	}
 
+	/*
+	 * Free for the taking now that the connection is open: no extra round
+	 * trip, unlike a "SHOW server_version_num" query would need.
+	 */
+	system->serverVersion = PQserverVersion(connection);
+
 	/* extended query protocol not supported in a replication connection */
 	PGresult *result = PQexec(connection, "IDENTIFY_SYSTEM");
 
@@ -3255,6 +3269,77 @@ pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system)
 	}
 
 	/* now we're done with running SQL queries */
+	PQfinish(connection);
+
+	return true;
+}
+
+
+/*
+ * pgsql_create_physical_replication_slot_over_replication_connection issues
+ * the replication-protocol command CREATE_REPLICATION_SLOT "<slotName>"
+ * PHYSICAL RESERVE_WAL on the given pgsql client, whose connection string
+ * must contain "replication=1" (the same requirement as pgsql_identify_
+ * system(), right above). Unlike pgsql_create_replication_slot() (this
+ * file, further up), which creates the slot with an ordinary SQL query
+ * against a real database (pg_create_physical_replication_slot()), this
+ * one needs no dbname at all -- CREATE_REPLICATION_SLOT is itself a
+ * replication command, not SQL, so it works the same way IDENTIFY_SYSTEM
+ * does over a connection string built with no "dbname" property. RESERVE_
+ * WAL, per PostgreSQL's own protocol docs, "reserves a WAL segment
+ * immediately" rather than waiting for the first streamed record: the
+ * exact guarantee callers of this function need, since without it a slot
+ * created but not yet ever connected-to gives no retention guarantee at
+ * all. An already-existing slot with this name (SQLSTATE 42710,
+ * duplicate_object) is treated as success, not an error: idempotent,
+ * safe to call on every restart.
+ */
+bool
+pgsql_create_physical_replication_slot_over_replication_connection(PGSQL *pgsql, const
+																   char *slotName)
+{
+	PGconn *connection = pgsql_open_connection(pgsql);
+
+	if (connection == NULL)
+	{
+		/* error message was logged in pgsql_open_connection */
+		return false;
+	}
+
+	char command[BUFSIZE] = { 0 };
+
+	sformat(command, sizeof(command),
+			"CREATE_REPLICATION_SLOT \"%s\" PHYSICAL RESERVE_WAL", slotName);
+
+	/* extended query protocol not supported in a replication connection */
+	PGresult *result = PQexec(connection, command);
+
+	if (!is_response_ok(result))
+	{
+		char *sqlstate = PQresultErrorField(result, PG_DIAG_SQLSTATE);
+
+		if (sqlstate != NULL && strcmp(sqlstate, STR_ERRCODE_DUPLICATE_OBJECT) == 0)
+		{
+			log_debug("Replication slot \"%s\" already exists, skipping",
+					  slotName);
+			PQclear(result);
+			clear_results(pgsql);
+			PQfinish(connection);
+			return true;
+		}
+
+		log_error("Failed to CREATE_REPLICATION_SLOT \"%s\": %s",
+				  slotName, PQerrorMessage(connection));
+		PQclear(result);
+		clear_results(pgsql);
+		PQfinish(connection);
+		return false;
+	}
+
+	log_info("Created replication slot \"%s\"", slotName);
+
+	PQclear(result);
+	clear_results(pgsql);
 	PQfinish(connection);
 
 	return true;
