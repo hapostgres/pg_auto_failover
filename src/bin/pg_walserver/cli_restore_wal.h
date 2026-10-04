@@ -24,7 +24,7 @@
  *   (the bare filename recovery wants next) then "%p" (the local path it
  *   should be written to) -- the reverse of archive_command's own "%p %f",
  *   which is `cli_archive.c`'s own argument order (see that file's own
- *   header comment). Wraps src/bin/common/fetch_client.c's own
+ *   header comment). Wraps fetch_client.c's own
  *   ws_fetch_file_client(), finally giving that function a real caller:
  *   connects to pg_walserver, issues FETCH_FILE '<name>' as a plain simple
  *   query, and writes the result to the destination path (a same-directory

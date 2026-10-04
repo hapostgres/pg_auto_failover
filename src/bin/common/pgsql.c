@@ -515,7 +515,7 @@ log_connection_error(PGconn *connection, int logLevel)
  * Exported (not static) so a caller outside this file that needs a raw
  * PGconn for a command this file has no wrapper for yet -- a wire-protocol
  * extension like pg_walserver's own FETCH_FILE, for instance
- * (src/bin/common/fetch_client.c) -- still gets this same retry policy,
+ * (src/bin/pg_walserver/fetch_client.c) -- still gets this same retry policy,
  * connect-timeout handling, and notice-processor wiring, exactly like
  * pgsql_identify_system() and every other command already implemented in
  * this file. Call pgsql_init() first; pgsql_finish() releases the

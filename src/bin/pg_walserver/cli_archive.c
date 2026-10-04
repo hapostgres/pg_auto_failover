@@ -54,7 +54,7 @@ CommandLine archive_command =
 
 /*
  * ws_archive_push_file connects to target (pg_walserver itself) and pushes
- * localPath into it as filename via src/bin/common/push_client.c's own
+ * localPath into it as filename via push_client.c's own
  * ws_push_file_client(), which does the CHECK_FILE/ARCHIVE_FILE round
  * trip. Returns true on success, false with an error already logged
  * (by ws_push_file_client() itself) on any failure, matching PostgreSQL's
