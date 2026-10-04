@@ -20,8 +20,8 @@
 #include "hba.h"
 #include "log.h"
 #include "scram.h"
+#include "string_utils.h"
 #include "tls.h"
-#include "ws_util.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
@@ -71,8 +71,8 @@ find_verifier(const char *passwdPath, const char *user, ScramVerifier *verifier)
 	size_t size = 0;
 
 	if (passwdPath[0] == '\0' ||
-		!ws_read_file_capped(passwdPath, WS_MAX_CONFIG_FILE_SIZE, true,
-							 &contents, &size, NULL))
+		!read_file_capped(passwdPath, WS_MAX_CONFIG_FILE_SIZE, true,
+						  &contents, &size, NULL))
 	{
 		return false;
 	}
@@ -151,7 +151,7 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 	{
 		char safeUser[NAMEDATALEN + 8];
 
-		ws_sanitize_for_log(user, safeUser, sizeof(safeUser));
+		sanitize_for_log(user, safeUser, sizeof(safeUser));
 		log_warn("No SCRAM verifier for user \"%s\" in \"%s\"", safeUser,
 				 authConfig->passwdPath);
 
@@ -281,7 +281,7 @@ scram_authenticate(int sock, const WsAuthConfig *authConfig, const char *user)
 	{
 		char safeUser[NAMEDATALEN + 8];
 
-		ws_sanitize_for_log(user, safeUser, sizeof(safeUser));
+		sanitize_for_log(user, safeUser, sizeof(safeUser));
 		log_warn("SCRAM authentication failed for user \"%s\"", safeUser);
 		ws_send_error_response(sock, "28P01",
 							   "password authentication failed");
@@ -306,7 +306,7 @@ ws_client_cert_matches(int sock, const char *user)
 {
 	char safeUser[NAMEDATALEN + 8];
 
-	ws_sanitize_for_log(user, safeUser, sizeof(safeUser));
+	sanitize_for_log(user, safeUser, sizeof(safeUser));
 
 	if (!ws_tls_active())
 	{
@@ -333,7 +333,7 @@ ws_client_cert_matches(int sock, const char *user)
 	{
 		char safeCn[NAMEDATALEN * 4 + 8];
 
-		ws_sanitize_for_log(cn, safeCn, sizeof(safeCn));
+		sanitize_for_log(cn, safeCn, sizeof(safeCn));
 		log_warn("Rejecting connection as user \"%s\": client certificate "
 				 "CN \"%s\" does not match", safeUser, safeCn);
 		ws_send_error_response(sock, "08000",
@@ -403,8 +403,8 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 	char safeUser[NAMEDATALEN + 8];
 	char safeRoute[NAMEDATALEN + 24];
 
-	ws_sanitize_for_log(params->user, safeUser, sizeof(safeUser));
-	ws_sanitize_for_log(routeKey, safeRoute, sizeof(safeRoute));
+	sanitize_for_log(params->user, safeUser, sizeof(safeUser));
+	sanitize_for_log(routeKey, safeRoute, sizeof(safeRoute));
 
 	WsAuthMethod method = WS_AUTH_REJECT;
 	bool requireClientCert = false;

@@ -16,7 +16,7 @@ SRC_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 include $(SRC_DIR)../common/Makefile.common
 
-override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor -I$(SRC_DIR)../pg_autoctl
+override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)../pg_autoctl
 
 # -----------------------------------------------------------------------
 # Sources that live in this directory
@@ -24,7 +24,7 @@ override CFLAGS += -I$(SRC_DIR) -I$(SRC_DIR)vendor -I$(SRC_DIR)../pg_autoctl
 LOCAL_SRC = main.c cli_root.c cli_common.c accept_loop.c startup.c auth.c framing.c repl_command.c \
             repl_gram.c repl_scanner.c \
             routes.c hba.c tls.c cmd_identify_system.c cmd_show.c cmd_base_backup.c \
-            tar_stream.c cmd_fetch_file.c cmd_check_file.c cmd_archive_file.c \
+            cmd_fetch_file.c cmd_check_file.c cmd_archive_file.c \
             cmd_timeline_history.c cmd_replication_slot.c \
             cmd_start_replication.c wal_dir_scan.c ws_util.c receivewal.c \
             backup_bootstrap.c fetch_client.c push_client.c \
@@ -81,23 +81,15 @@ repl_scanner.o: repl_scanner.c
 	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
 	$(CC) $(GENERATED_CFLAGS) -c -MMD -MP -MF$(DEPDIR)/repl_scanner.Po -o $@ $<
 
-# -----------------------------------------------------------------------
-# Vendored PostgreSQL source (see vendor/tar.c's own header comment) --
-# compiled as vendor-%.o to keep it visually distinct from this project's
-# own code.
-# -----------------------------------------------------------------------
-VENDOR_SRC = tar.c
-VENDOR_OBJS = $(patsubst %.c,vendor-%.o,$(VENDOR_SRC))
-
-vendor-%.o: $(SRC_DIR)vendor/%.c
-	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
-	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/vendor-$(*F).Po -o $@ $<
-
 shared-state.o: $(SRC_DIR)../pg_autoctl/state.c
 	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
 	$(CC) $(CFLAGS) -I$(SRC_DIR)../pg_autoctl -c -MMD -MP -MF$(DEPDIR)/shared-state.Po -o $@ $<
 
-OBJS  = $(LOCAL_OBJS) $(VENDOR_OBJS)
+# tar_stream.c itself now lives in src/bin/common/ (built into
+# libpgaf_common.a via COMMON_LIB below); vendor/tar.c that it depends on
+# moved to src/bin/common/vendor/ alongside it, built as $(TAR_VENDOR_OBJS)
+# (see Makefile.common) -- pg_walserver is the only caller that links it.
+OBJS  = $(LOCAL_OBJS) $(TAR_VENDOR_OBJS)
 # common/ipaddr.c (forward/reverse DNS with its retry policy, reused here for
 # HBA address matching) sits on common/pgsql.c, which needs parson and
 # pg_autoctl's state.c (NodeStateFromString): linked, not reimplemented.

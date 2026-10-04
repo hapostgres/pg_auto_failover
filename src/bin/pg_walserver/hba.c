@@ -25,7 +25,6 @@
 #include "ipaddr.h"
 #include "log.h"
 #include "string_utils.h"
-#include "ws_util.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
@@ -752,8 +751,8 @@ hba_parse_file(const char *hbaPath, WsHbaRuleSet *ruleSet)
 	ruleSet->rules = NULL;
 	ruleSet->count = 0;
 
-	if (!ws_read_file_capped(hbaPath, WS_MAX_CONFIG_FILE_SIZE, false,
-							 &contents, &size, NULL))
+	if (!read_file_capped(hbaPath, WS_MAX_CONFIG_FILE_SIZE, false,
+						  &contents, &size, NULL))
 	{
 		log_error("Failed to read the HBA file \"%s\": rejecting", hbaPath);
 		return false;

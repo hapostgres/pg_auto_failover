@@ -40,6 +40,7 @@
 #include "routes.h"
 #include "signals.h"
 #include "startup.h"
+#include "string_utils.h"
 #include "wal_dir_scan.h"
 #include "ws_util.h"
 
@@ -222,8 +223,8 @@ handle_connection(int clientSock, const WsServerConfig *config)
 	char title[256];
 	char safeKey[NAMEDATALEN + 24];
 
-	ws_sanitize_for_log(route != NULL ? route->key : routeKey,
-						safeKey, sizeof(safeKey));
+	sanitize_for_log(route != NULL ? route->key : routeKey,
+					 safeKey, sizeof(safeKey));
 	sformat(title, sizeof(title), "pg_autoctl: walsender %s", safeKey);
 	set_ps_title(title);
 

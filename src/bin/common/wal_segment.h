@@ -117,4 +117,14 @@ bool wal_lsn_to_segment_name(const char *lsn, uint32_t timeline,
 							 uint64_t segSize, char *segmentOut,
 							 size_t segmentOutSize);
 
+/*
+ * wal_segment_size_string formats segSize (a byte count) the way the
+ * wal_segment_size GUC prints it ("16MB", "1GB"), the format
+ * pg_receivewal/pg_basebackup's own RetrieveWalSegSize() expects to parse
+ * back out of a SHOW wal_segment_size reply. Distinct from common/
+ * system_utils.c's pretty_print_bytes(), which uses a space ("16 MB") for
+ * human display -- not interchangeable with this wire-format string.
+ */
+void wal_segment_size_string(uint64_t segSize, char *dest, size_t destSize);
+
 #endif /* WS_WAL_SEGMENT_H */

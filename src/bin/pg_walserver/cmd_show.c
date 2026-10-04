@@ -13,6 +13,7 @@
 #include "cmd_show.h"
 #include "framing.h"
 #include "wal_dir_scan.h"
+#include "wal_segment.h"
 
 
 /*
@@ -38,8 +39,8 @@ cmd_show(int sock, const WsRoute *route, const char *name)
 	if (strcasecmp(name, "wal_segment_size") == 0)
 	{
 		/* the route's own segment size, in the GUC's own format */
-		ws_wal_segment_size_string(ws_route_wal_segment_size(route),
-								   segSizeStr, sizeof(segSizeStr));
+		wal_segment_size_string(ws_route_wal_segment_size(route),
+								segSizeStr, sizeof(segSizeStr));
 		value = segSizeStr;
 	}
 	else if (strcasecmp(name, "data_directory_mode") == 0)

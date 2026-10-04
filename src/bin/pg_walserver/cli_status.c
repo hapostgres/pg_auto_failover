@@ -26,7 +26,7 @@
 #include "string_utils.h"
 
 /* local helpers */
-static void format_uptime(time_t startedAt, char *dest, size_t destSize);
+static void format_elapsed(time_t startedAt, char *dest, size_t destSize);
 
 static int cli_status_getopt(int argc, char **argv);
 static void cli_status_command_run(int argc, char **argv);
@@ -60,12 +60,13 @@ CommandLine status_command =
 
 
 /*
- * format_uptime renders the time elapsed since startedAt as "<h>h<mm>m<ss>s"
- * (e.g. "0h04m31s"), or "-" when startedAt is unset (<= 0, "serve" isn't
- * running).
+ * format_elapsed renders the time elapsed since startedAt via
+ * IntervalToString() (common/string_utils.c), or "-" when startedAt is
+ * unset (<= 0, "serve" isn't running) -- IntervalToString itself has no
+ * such sentinel, so that case is handled here instead.
  */
 static void
-format_uptime(time_t startedAt, char *dest, size_t destSize)
+format_elapsed(time_t startedAt, char *dest, size_t destSize)
 {
 	if (startedAt <= 0)
 	{
@@ -73,15 +74,9 @@ format_uptime(time_t startedAt, char *dest, size_t destSize)
 		return;
 	}
 
-	long secs = (long) (time(NULL) - startedAt);
+	double elapsed = (double) (time(NULL) - startedAt);
 
-	if (secs < 0)
-	{
-		secs = 0;
-	}
-
-	sformat(dest, destSize, "%ldh%02ldm%02lds",
-			secs / 3600, (secs % 3600) / 60, secs % 60);
+	IntervalToString(elapsed < 0 ? 0 : elapsed, dest, destSize);
 }
 
 
@@ -161,7 +156,7 @@ cli_status_run(const char *pgdata, const char *configFile)
 
 	char uptime[32] = { 0 };
 
-	format_uptime(haveState ? state.serveStartedAt : 0, uptime, sizeof(uptime));
+	format_elapsed(haveState ? state.serveStartedAt : 0, uptime, sizeof(uptime));
 
 	fformat(stdout, "pg_walserver: running (pid %d, uptime %s)\n", (int) servePid,
 			uptime);

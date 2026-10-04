@@ -656,3 +656,37 @@ ws_parse_retention_age(const char *str, WsRetentionAge *age)
 
 	return true;
 }
+
+
+/*
+ * sanitize_for_log -- see string_utils.h's own comment.
+ */
+void
+sanitize_for_log(const char *in, char *out, size_t outSize)
+{
+	size_t o = 0;
+
+	if (outSize == 0)
+	{
+		return;
+	}
+
+	for (const char *p = in; *p != '\0'; p++)
+	{
+		if (o + 1 >= outSize)
+		{
+			if (outSize > 4)
+			{
+				strlcpy(out + outSize - 4, "...", 4);
+				return;
+			}
+			break;
+		}
+
+		unsigned char c = (unsigned char) *p;
+
+		out[o++] = (c < 0x20 || c == 0x7f) ? '?' : (char) c;
+	}
+
+	out[o] = '\0';
+}

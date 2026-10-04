@@ -17,7 +17,7 @@
 #include "file_utils.h"
 #include "framing.h"
 #include "log.h"
-#include "ws_util.h"
+#include "string_utils.h"
 
 /* CopyData messages of at most this many bytes, like a real walsender's */
 #define WS_FETCH_CHUNK_SIZE (128 * 1024)
@@ -133,7 +133,7 @@ cmd_fetch_file(int sock, const WsRoute *route, const char *filename)
 	{
 		char safeName[64];
 
-		ws_sanitize_for_log(filename, safeName, sizeof(safeName));
+		sanitize_for_log(filename, safeName, sizeof(safeName));
 		log_warn("Rejecting FETCH_FILE request for filename \"%s\"", safeName);
 		ws_send_error_response(sock, "22023", "invalid filename");
 		return;
@@ -150,7 +150,7 @@ cmd_fetch_file(int sock, const WsRoute *route, const char *filename)
 
 	sformat(path, sizeof(path), "%s/%s", route->path, filename);
 
-	int fd = ws_open_served_file(path);
+	int fd = open_regular_file(path);
 
 	if (fd < 0)
 	{

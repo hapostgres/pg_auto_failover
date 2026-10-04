@@ -20,7 +20,6 @@
 #include "log.h"
 #include "string_utils.h"
 #include "wal_segment.h"
-#include "ws_util.h"
 
 /* default WAL segment size (16MB) when the route has no pg_walserver_walsegsize */
 #define WS_DEFAULT_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
@@ -55,7 +54,7 @@ ws_route_wal_segment_size(const WsRoute *route)
 	size_t size = 0;
 
 	/* absent: the archiver has not recorded one, the default applies */
-	if (!ws_read_file_capped(path, 64, true, &contents, &size, NULL))
+	if (!read_file_capped(path, 64, true, &contents, &size, NULL))
 	{
 		return WS_DEFAULT_WAL_SEGMENT_SIZE;
 	}
@@ -95,28 +94,6 @@ ws_route_wal_segment_size(const WsRoute *route)
 	}
 
 	return value;
-}
-
-
-/*
- * ws_wal_segment_size_string formats segSize (a byte count) the way the
- * wal_segment_size GUC prints it ("16MB", "1GB"), the format
- * pg_receivewal/pg_basebackup's own RetrieveWalSegSize() expects to parse
- * back out of a SHOW wal_segment_size reply.
- */
-void
-ws_wal_segment_size_string(uint64_t segSize, char *dest, size_t destSize)
-{
-	/* the format of the wal_segment_size GUC, which pg_receivewal and
-	 * pg_basebackup parse (RetrieveWalSegSize): "16MB", "1GB" */
-	if (segSize >= UINT64CONST(0x40000000))
-	{
-		sformat(dest, destSize, "%" PRIu64 "GB", segSize >> 30);
-	}
-	else
-	{
-		sformat(dest, destSize, "%" PRIu64 "MB", segSize >> 20);
-	}
 }
 
 

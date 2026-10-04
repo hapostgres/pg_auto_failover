@@ -37,13 +37,6 @@
 uint64_t ws_route_wal_segment_size(const WsRoute *route);
 
 /*
- * ws_wal_segment_size_string formats a segment size the way the
- * wal_segment_size GUC shows it ("16MB", "64MB", "1GB"), which is what
- * pg_receivewal and pg_basebackup parse (RetrieveWalSegSize).
- */
-void ws_wal_segment_size_string(uint64_t segSize, char *dest, size_t destSize);
-
-/*
  * wal_dir_find_latest scans the route's directory for the highest-numbered complete
  * WAL segment (24 hex chars, no ".partial" suffix). On success, returns
  * true with *timeline set and endLsn filled with that segment's end-of-

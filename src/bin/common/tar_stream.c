@@ -1,5 +1,5 @@
 /*
- * src/bin/pg_walserver/tar_stream.c
+ * src/bin/common/tar_stream.c
  *   See tar_stream.h.
  *
  * Licensed under the PostgreSQL License.
@@ -28,7 +28,30 @@ typedef struct TarWalkState
 	TarChunkCallback callback;
 	void *context;
 	bool ok;
+	const char **excludeNames;
+	int excludeCount;
 } TarWalkState;
+
+
+/*
+ * root_name_excluded returns true when name (a root-level directory entry
+ * only -- callers check relDir[0] == '\0' before calling this) appears in
+ * state's caller-supplied exclude list. tar_stream_directory itself has no
+ * opinion on what belongs in that list; see its own header comment.
+ */
+static bool
+root_name_excluded(TarWalkState *state, const char *name)
+{
+	for (int i = 0; i < state->excludeCount; i++)
+	{
+		if (streq(state->excludeNames[i], name))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
 
 
 /*
@@ -199,18 +222,18 @@ walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 		}
 
 		/*
-		 * backup_manifest sits at basebackupDir's own root (written there
-		 * by the real pg_basebackup run that originally produced this
-		 * on-disk backup -- see pg_basebackup_fetch()'s own comment,
-		 * pgctl.c) and describes *that* pull, not the bytes being
-		 * retransmitted here. Real Postgres never puts it in the main tar
-		 * either: cmd_base_backup.c serves it as its own second CopyOut
-		 * stream when the client asks for one (see that file's BASE_BACKUP
-		 * wire sequence comment), so skip it here unconditionally rather
-		 * than let a stale copy of it land at the receiving node's
-		 * $PGDATA/backup_manifest.
+		 * A caller-supplied root-level exclude list (state->excludeNames):
+		 * tar_stream.c itself has no business logic about which files a
+		 * particular caller wants left out of the stream -- see
+		 * cmd_base_backup.c's own call site for why it passes
+		 * "backup_manifest" here (that file sits at basebackupDir's own
+		 * root, written there by the real pg_basebackup run that
+		 * originally produced this on-disk backup, and describes *that*
+		 * pull, not the bytes being retransmitted here; real Postgres
+		 * never puts it in the main tar either, serving it as its own
+		 * second CopyOut stream instead).
 		 */
-		if (relDir[0] == '\0' && streq(entry->d_name, "backup_manifest"))
+		if (relDir[0] == '\0' && root_name_excluded(state, entry->d_name))
 		{
 			continue;
 		}
