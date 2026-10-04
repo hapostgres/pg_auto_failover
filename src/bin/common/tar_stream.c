@@ -322,7 +322,30 @@ walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 
 
 /*
- * tar_stream_directory -- see tar_stream.h.
+ * tar_stream_directory walks rootDir recursively and invokes callback with
+ * the resulting ustar byte stream. Tar member names are rootDir-relative,
+ * with no leading "./" (matching real Postgres's own convention -- see
+ * basebackup.c's sendDir()).
+ *
+ * Deliberately omits the standalone-tar-file convention's trailing two-
+ * zero-block end-of-archive marker: real Postgres's own perform_base_
+ * backup() (basebackup.c) never puts one on the wire for a client-
+ * streamed, WAL-not-included backup either (the only mode this project
+ * serves, see cmd_base_backup.c's own "WAL-inclusive BASE_BACKUP is not
+ * supported yet" check) -- it sends CopyDone right after the last file's
+ * content/padding, relying on that alone to signal "no more files". A pre-
+ * 15 pg_basebackup client's own receiving state machine (ReceiveAndUnpack
+ * TarFile(), pg_basebackup.c) takes this literally: once it's between
+ * files, it treats the *next* CopyData chunk as a new tar header and
+ * requires it to be exactly TAR_BLOCK_SIZE bytes, erroring out ("invalid
+ * tar block header size") on anything else -- including this marker, which
+ * this project used to send as one extra 2*TAR_BLOCK_SIZE-byte chunk after
+ * the real content. Never needed, and actively broke pre-15 clients.
+ *
+ * excludeNames (excludeCount entries, may be NULL/0) names files to skip
+ * at rootDir's own top level only (never below it) -- this generic walker
+ * has no opinion of its own on what belongs in that list; see e.g.
+ * cmd_base_backup.c's own call site for why it excludes "backup_manifest".
  */
 bool
 tar_stream_directory(const char *rootDir, TarChunkCallback callback,

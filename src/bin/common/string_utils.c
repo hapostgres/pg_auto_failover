@@ -602,7 +602,11 @@ processBufferCallback(const char *buffer, bool error)
 
 
 /*
- * stringToRetentionAge -- see string_utils.h.
+ * stringToRetentionAge parses a --keep-age argument such as "72h",
+ * "14d", "4w", "3m" into *age. An explicit suffix is required -- there is
+ * no bare-number default, ambiguity here is worse than a clear error.
+ * Returns false with an error already logged (naming the accepted
+ * suffixes) on anything else.
  */
 bool
 stringToRetentionAge(const char *str, RetentionAge *age)
@@ -659,7 +663,12 @@ stringToRetentionAge(const char *str, RetentionAge *age)
 
 
 /*
- * sanitizeForLog -- see string_utils.h's own comment.
+ * sanitizeForLog copies a possibly-untrusted string (e.g. straight from
+ * an unauthenticated client: a user name, a route key) into out (bounded
+ * by outSize), replacing any control character (< 0x20 or 0x7f) with '?'
+ * so it can be logged or shown in a process title without letting it
+ * inject terminal escape sequences or fake log lines. Truncates with a
+ * trailing "..." when in doesn't fit.
  */
 void
 sanitizeForLog(const char *in, char *out, size_t outSize)
