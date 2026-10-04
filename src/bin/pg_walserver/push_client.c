@@ -20,11 +20,11 @@
 
 #include "push_client.h"
 
+#include "file_crc32c.h"
 #include "file_utils.h"
 #include "log.h"
 #include "pgsql.h"
 #include "string_utils.h"
-#include "ws_util.h"
 
 /* CopyData chunks of this size when pushing, matching fetch_client.c's
  * own read-side chunk size */
@@ -338,7 +338,7 @@ ws_push_file_client(const char *host, int port, const char *user,
 		uint64_t size = 0;
 		uint32_t crc = 0;
 
-		if (!ws_file_crc32c(localPath, &size, &crc))
+		if (!file_crc32c(localPath, &size, &crc))
 		{
 			log_error("Failed to read \"%s\": %m", localPath);
 			pgsql_finish(&pgsql);

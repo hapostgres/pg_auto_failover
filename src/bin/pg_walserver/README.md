@@ -1102,10 +1102,11 @@ referencing it:
   exits 0/nonzero on that push's own result.
 - **no `receivewal = pull`** (absent or `receivewal = none`): `ARCHIVE_FILE`
   only, unconditionally pushing the full file every invocation, computing
-  its local size and CRC32C (`ws_file_crc32c()`, `ws_util.c`, backed by the
-  same `INIT_CRC32C`/`COMP_CRC32C`/`FIN_CRC32C` facility
-  (`port/pg_crc32c.h`) real Postgres and `pg_autoctl`'s own `nodespec.c`
-  already use) only for the `CHECK_FILE` path, not this one. The server's
+  its local size and CRC32C (`file_crc32c()`, `src/bin/common/
+  file_crc32c.c`, shared with `pg_autoctl`'s own `nodespec.c` file-change
+  detection, backed by the same `INIT_CRC32C`/`COMP_CRC32C`/`FIN_CRC32C`
+  facility real Postgres itself uses) only for the `CHECK_FILE` path, not
+  this one. The server's
   own overwrite-safety in `cmd_archive_file.c` (compare real bytes on disk
   vs. real bytes just received; identical -> idempotent success, different
   -> reject) already makes this safe and idempotent on PostgreSQL's own

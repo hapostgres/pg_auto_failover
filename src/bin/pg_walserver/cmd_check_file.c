@@ -15,6 +15,7 @@
 
 #include "cmd_check_file.h"
 #include "cmd_fetch_file.h"
+#include "file_crc32c.h"
 #include "file_utils.h"
 #include "framing.h"
 #include "log.h"
@@ -147,7 +148,7 @@ cmd_check_file(int sock, const WsRoute *route, const char *filename,
 	uint32_t diskCrc = 0;
 	const char *status;
 
-	if (!ws_file_crc32c(path, &diskSize, &diskCrc))
+	if (!file_crc32c(path, &diskSize, &diskCrc))
 	{
 		if (errno == ENOENT)
 		{
