@@ -54,7 +54,14 @@ typedef bool (*TarChunkCallback) (void *context, const char *data, size_t len);
  * tar block header size") on anything else -- including this marker, which
  * this project used to send as one extra 2*TAR_BLOCK_SIZE-byte chunk after
  * the real content. Never needed, and actively broke pre-15 clients.
+ *
+ * excludeNames (excludeCount entries, may be NULL/0) names files to skip
+ * at rootDir's own top level only (never below it) -- this generic walker
+ * has no opinion of its own on what belongs in that list; see e.g.
+ * cmd_base_backup.c's own call site for why it excludes "backup_manifest".
  */
-bool tar_stream_directory(const char *rootDir, TarChunkCallback callback, void *context);
+bool tar_stream_directory(const char *rootDir, TarChunkCallback callback,
+						  void *context, const char **excludeNames,
+						  int excludeCount);
 
 #endif /* WS_TAR_STREAM_H */
