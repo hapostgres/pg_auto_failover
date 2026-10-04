@@ -322,14 +322,14 @@ walk_directory(TarWalkState *state, const char *rootDir, const char *relDir)
 
 
 /*
- * tar_stream_directory walks rootDir recursively and calls callback with
- * each successive chunk of the resulting tar stream (headers, file data,
- * padding). Returns false as soon as either the walk or callback fails.
+ * tar_stream_directory -- see tar_stream.h.
  */
 bool
-tar_stream_directory(const char *rootDir, TarChunkCallback callback, void *context)
+tar_stream_directory(const char *rootDir, TarChunkCallback callback,
+					 void *context, const char **excludeNames,
+					 int excludeCount)
 {
-	TarWalkState state = { callback, context, true };
+	TarWalkState state = { callback, context, true, excludeNames, excludeCount };
 
 	return walk_directory(&state, rootDir, "");
 }

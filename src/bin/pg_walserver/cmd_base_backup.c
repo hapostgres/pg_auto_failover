@@ -857,7 +857,21 @@ cmd_base_backup(int sock, const WsRoute *route,
 
 	TarStreamCbContext ctx = { sock, true };
 
-	if (!tar_stream_directory(basebackupDir, tar_chunk_cb, &ctx) || !ctx.ok)
+	/*
+	 * backup_manifest sits at basebackupDir's own root (written there by
+	 * the real pg_basebackup run that originally produced this on-disk
+	 * backup -- see pg_basebackup_fetch()'s own comment, pgctl.c) and
+	 * describes *that* pull, not the bytes being retransmitted here. Real
+	 * Postgres never puts it in the main tar either: this file serves it
+	 * as its own second CopyOut stream below (when the client asks for
+	 * one, see this file's own BASE_BACKUP wire sequence comment), so it
+	 * is excluded from the tar itself rather than let a stale copy of it
+	 * land at the receiving node's $PGDATA/backup_manifest.
+	 */
+	static const char *excludeNames[] = { "backup_manifest" };
+
+	if (!tar_stream_directory(basebackupDir, tar_chunk_cb, &ctx,
+							  excludeNames, 1) || !ctx.ok)
 	{
 		log_error("Failed to stream base backup tar contents from \"%s\"",
 				  basebackupDir);
