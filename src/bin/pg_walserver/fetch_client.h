@@ -1,27 +1,21 @@
 /*
- * src/bin/common/fetch_client.h
+ * src/bin/pg_walserver/fetch_client.h
  *   A one-shot client for pg_walserver's own FETCH_FILE extension (see
- *   pg_walserver/cmd_fetch_file.h for the server side that answers it): a
- *   plain libpq connection issuing "FETCH_FILE '<name>'" as a simple query
- *   and saving its COPY OUT reply to a file. Every ordinary libpq connection
- *   option works exactly as it does for pg_basebackup (password via
+ *   cmd_fetch_file.h for the server side that answers it): a plain libpq
+ *   connection issuing "FETCH_FILE '<name>'" as a simple query and saving
+ *   its COPY OUT reply to a file. Every ordinary libpq connection option
+ *   works exactly as it does for pg_basebackup (password via
  *   PGPASSWORD/.pgpass, TLS via PGSSLMODE/PGSSLROOTCERT/..., etc), because
  *   this is nothing more than a libpq client speaking one extra command --
- *   it has no dependency on pg_walserver's own wire-framing code
- *   (framing.h) or any other pg_walserver-internal header, which is why it
- *   lives here in common/ rather than in src/bin/pg_walserver/: both
- *   pg_walserver and pg_autoctl already link src/bin/common/.
+ *   built on src/bin/common/pgsql.c's generic connect/retry facility, but
+ *   this file itself stays here rather than in common/: it's pg_walserver's
+ *   own FETCH_FILE command it's speaking, not a generic utility, matching
+ *   pg_autoctl's own convention of keeping domain-specific protocol clients
+ *   (monitor.c, etc.) in the binary that owns the protocol, not in common/.
  *
- *   Its current, real caller is `pg_walserver restore` (cli_restore.c),
- *   used as a standalone deployment's own restore_command; a future,
- *   separate "archiving" PR is expected to grow `pg_autoctl restore
- *   command` to call this same function directly, in-process, once that
- *   PR's own monitor-backed archiver-node/quorum bookkeeping exists on top
- *   of it -- no execv() into a sub-command either way, which used to be how
- *   this was wired (a `pg_walserver fetch-file` sub-command) and is no
- *   longer: pg_walserver is a server binary (plus its scram-secret/setup/
- *   fetch-systemid/basebackup/create-cert/archive/restore client-side
- *   utilities), nothing else.
+ *   Its current, real caller is `pg_walserver restore-wal`
+ *   (cli_restore_wal.c), used as a standalone deployment's own
+ *   restore_command.
  *
  * Licensed under the PostgreSQL License.
  *

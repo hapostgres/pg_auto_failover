@@ -1,17 +1,19 @@
 /*
- * src/bin/common/push_client.h
+ * src/bin/pg_walserver/push_client.h
  *   A one-shot client for pg_walserver's own CHECK_FILE/ARCHIVE_FILE
- *   extensions (see pg_walserver/cmd_check_file.h and cmd_archive_file.h
- *   for the server side that answers them): a plain libpq connection
- *   issuing "CHECK_FILE ..."/"ARCHIVE_FILE ..." as simple queries and
- *   streaming a local file's contents up via CopyIn. Every ordinary libpq
- *   connection option works exactly as it does for pg_basebackup (password
- *   via PGPASSWORD/.pgpass, TLS via PGSSLMODE/PGSSLROOTCERT/..., etc),
- *   because this is nothing more than a libpq client speaking two extra
- *   commands -- it has no dependency on pg_walserver's own wire-framing
- *   code (framing.h) or any other pg_walserver-internal header, which is
- *   why it lives here in common/ rather than in src/bin/pg_walserver/:
- *   both pg_walserver and pg_autoctl already link src/bin/common/.
+ *   extensions (see cmd_check_file.h and cmd_archive_file.h for the server
+ *   side that answers them): a plain libpq connection issuing
+ *   "CHECK_FILE ..."/"ARCHIVE_FILE ..." as simple queries and streaming a
+ *   local file's contents up via CopyIn. Every ordinary libpq connection
+ *   option works exactly as it does for pg_basebackup (password via
+ *   PGPASSWORD/.pgpass, TLS via PGSSLMODE/PGSSLROOTCERT/..., etc), because
+ *   this is nothing more than a libpq client speaking two extra commands --
+ *   built on src/bin/common/pgsql.c's generic connect/retry facility, but
+ *   this file itself stays here rather than in common/: it's pg_walserver's
+ *   own CHECK_FILE/ARCHIVE_FILE commands it's speaking, not a generic
+ *   utility, matching pg_autoctl's own convention of keeping domain-specific
+ *   protocol clients (monitor.c, etc.) in the binary that owns the protocol,
+ *   not in common/.
  *
  *   Its current, real caller is `pg_walserver archive-wal` (cli_archive.c),
  *   used as a standalone deployment's own archive_command.

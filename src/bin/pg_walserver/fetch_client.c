@@ -1,5 +1,5 @@
 /*
- * src/bin/common/fetch_client.c
+ * src/bin/pg_walserver/fetch_client.c
  *   See fetch_client.h.
  *
  * Licensed under the PostgreSQL License.

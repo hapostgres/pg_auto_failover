@@ -210,49 +210,33 @@ Anything else parses to `WS_CMD_UNKNOWN` and gets a clean `ErrorResponse`
 connection remains usable for the next command afterwards
 (`test_004_grammar_edge_cases` in the tap spec exercises exactly this).
 
-### FETCH_FILE's client: `src/bin/common/fetch_client.c` and `pg_walserver restore-wal`
+### FETCH_FILE's client: `fetch_client.c` and `pg_walserver restore-wal`
 
-Earlier in this PR's own history, `pg_walserver` shipped both sides of
-`FETCH_FILE`: the server handler above, and a `pg_walserver fetch-file`
-CLI sub-command (a one-shot libpq client) meant to be `execv()`'d by a
-future `pg_autoctl restore command`. Review concluded that design was
-backwards: `pg_walserver` should be a server binary, full stop, and any
-client belongs where its caller can call it directly, in-process, with no
-subprocess/`execv()` indirection at all.
+`pg_walserver` does not ship a `fetch-file` CLI sub-command at all -- the
+client side of `FETCH_FILE` is a plain function, `ws_fetch_file_client()`
+(`fetch_client.c`/`fetch_client.h`), called directly, in-process, by
+`pg_walserver restore-wal` (`cli_restore_wal.c`), with no
+subprocess/`execv()` indirection. It opens a connection via
+`src/bin/common/pgsql.c`'s generic connect/retry facility, runs
+`FETCH_FILE '<name>'` as a simple query via `PQexec()`, and drains the
+`CopyOut` with `PQgetCopyData()` -- ordinary libpq, the same way
+`pg_basebackup` itself would, just speaking one extra, project-specific
+command. It lives in `src/bin/pg_walserver/` rather than
+`src/bin/common/`: it's pg_walserver's own `FETCH_FILE` protocol it
+speaks, domain-specific logic, not a generic reusable utility, even though
+the connection plumbing underneath it (`pgsql.c`) is.
 
-The client's logic moved, unchanged in substance, to
-`src/bin/common/fetch_client.c`/`fetch_client.h` as `ws_fetch_file_client()`.
-It was a clean move rather than a rewrite because the client never actually
-depended on any `pg_walserver`-internal header: it opens a plain
-`PQconnectdbParams()` connection, runs `FETCH_FILE '<name>'` as a simple
-query via `PQexec()`, and drains the `CopyOut` with `PQgetCopyData()` --
-ordinary libpq, the same way `pg_basebackup` itself would. It never touched
-`framing.h` or any other `pg_walserver`-private wire-format code (that code
-is what makes the *server* side pg_walserver-specific; the client is just
-another libpq application). `src/bin/common/` is already linked by both
-`pg_autoctl` and `pg_walserver` (see `Makefile.common`'s `COMMON_SRC`
-wildcard), so the move required no new build wiring beyond removing the
-file from `pg_walserver`'s own `LOCAL_SRC` list.
-
-`ws_fetch_file_client()` now has a real, current caller: `pg_walserver
-restore` (`cli_restore.c`, see "New client-side sub-commands" below), a
-thin wrapper meant to be used directly as a standalone deployment's own
-`restore_command`, mirroring `pg_walserver archive-wal`'s own role as
-`archive_command` on the push side. `pg_walserver` itself still has **no**
-`fetch-file` sub-command -- that one-shot design was rejected, not merely
-renamed -- but it does have `restore-wal`. A later, separate "archiving" PR is
-expected to also grow `pg_autoctl restore command`, calling
-`ws_fetch_file_client()` directly as a C function the same way, once that
-PR's own monitor-backed quorum/archiver-node participation exists on top
-of it; until then, `pg_walserver restore-wal`, or any other libpq client
-issuing a raw `FETCH_FILE` (`psql` included, since it is a real,
-if project-specific, replication-protocol command), is the actual, current
-way to drive this. This PR's own test suite (see "Testing" below)
-exercises `ws_fetch_file_client()` two ways: `pg_walserver_standalone.
-pgaf`'s `test_002_fetch_file` drives the *server-side* `FETCH_FILE`
-command directly with a plain `psql -c "FETCH_FILE ..."`, never touching
-this client code, while `pg_walserver_archive_command.pgaf` exercises
-`pg_walserver restore-wal` itself end to end.
+`ws_fetch_file_client()`'s real, current caller is `pg_walserver
+restore-wal`, a thin wrapper used directly as a standalone deployment's
+own `restore_command`, mirroring `pg_walserver archive-wal`'s own role as
+`archive_command` on the push side (`push_client.c`'s
+`ws_push_file_client()`, same shape). This PR's own test suite (see
+"Testing" below) exercises `ws_fetch_file_client()` two ways:
+`pg_walserver_standalone.pgaf`'s `test_002_fetch_file` drives the
+*server-side* `FETCH_FILE` command directly with a plain
+`psql -c "FETCH_FILE ..."`, never touching this client code, while
+`pg_walserver_archive_command.pgaf` exercises `pg_walserver restore-wal`
+itself end to end.
 
 ## Replication slots
 
@@ -1144,7 +1128,7 @@ the other way, to a different kind of server entirely: it runs *on* the
 Postgres primary itself, as `archive_command`, connecting *to*
 `pg_walserver`'s own replication-protocol server -- a plain libpq
 connection issuing `CHECK_FILE`/`ARCHIVE_FILE` as simple queries, exactly
-like `src/bin/common/fetch_client.c`'s own `FETCH_FILE` client, with no
+like `fetch_client.c`'s own `FETCH_FILE` client, with no
 `ReplicationSource`/`pgctl.c` involved at all. The shared `WsWalServerTarget`
 (`cli_wal_target.h`) mirrors `cli_upstream.h`'s flag *names*
 (`--cluster`/`--host`/`--port`/`--user`) for consistency, but is resolved
@@ -1167,7 +1151,7 @@ separate `basebackup` sub-command -- see `cli_archive.h`'s own header
 comment for the full naming rationale (shared by both).
 
 Unlike `archive-wal`, `restore-wal` implements no protocol of its own: it
-is a thin CLI wrapper around `src/bin/common/fetch_client.c`'s own
+is a thin CLI wrapper around `fetch_client.c`'s own
 `ws_fetch_file_client()` (see "FETCH_FILE's client" above), which does the
 actual `FETCH_FILE '<name>'` round trip and the same-directory-temp-file-
 plus-`rename()` dance that keeps a killed/interrupted restore from leaving
@@ -1748,7 +1732,7 @@ cleanly, twice, CN reflecting each `--hostname` (`test_004`);
 `pg_walserver restore-wal` fetches the file
 `test_002` pushed back out, via a real `FETCH_FILE` round trip
 (byte-identical to the original), finally giving `ws_fetch_file_client()`
-(`src/bin/common/fetch_client.c`) a real, exercised caller -- restoring a
+(`fetch_client.c`) a real, exercised caller -- restoring a
 name nothing ever archived fails cleanly, with no partial file left behind
 (`test_005`); and, against `arch/1`, `archive-wal` run against the segment
 its embedded receivewal worker is still writing (identified by its own `.partial`

@@ -62,7 +62,7 @@
  *   archive_command *on* the Postgres primary itself, connecting *to*
  *   pg_walserver's own replication-protocol server -- a plain libpq
  *   connection issuing CHECK_FILE/ARCHIVE_FILE as simple queries, exactly
- *   like src/bin/common/fetch_client.c's own FETCH_FILE client, with no
+ *   like fetch_client.c's own FETCH_FILE client, with no
  *   ReplicationSource/pgctl.c involved at all. The shared WsWalServerTarget
  *   (cli_wal_target.h) mirrors cli_upstream.h's own flag *names*
  *   (--cluster/--host/--port/--user) for consistency, but is resolved

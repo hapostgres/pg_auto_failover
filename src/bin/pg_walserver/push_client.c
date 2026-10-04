@@ -1,5 +1,5 @@
 /*
- * src/bin/common/push_client.c
+ * src/bin/pg_walserver/push_client.c
  *   See push_client.h.
  *
  * Licensed under the PostgreSQL License.
@@ -18,113 +18,25 @@
 #include "libpq-fe.h"
 #include "pqexpbuffer.h"
 
-#include "port/pg_crc32c.h"
-
 #include "push_client.h"
 
 #include "file_utils.h"
 #include "log.h"
 #include "pgsql.h"
 #include "string_utils.h"
+#include "ws_util.h"
 
-/* CopyData chunks of this size when pushing, matching src/bin/common/
- * fetch_client.c's own read-side chunk size */
+/* CopyData chunks of this size when pushing, matching fetch_client.c's
+ * own read-side chunk size */
 #define WS_PUSH_CHUNK_SIZE (128 * 1024)
 
 /* local helpers */
-static bool push_client_file_crc32c(const char *localPath,
-									uint64_t *sizeOut, uint32_t *crcOut);
 static bool check_file_status(PGconn *conn, const char *filename,
 							  uint64_t size, uint32_t crc, char *statusOut,
 							  size_t statusOutSize, bool *fallbackOut);
 static bool show_receivewal(PGconn *conn, bool *pullOut);
 static bool push_file(PGconn *conn, const char *localPath,
 					  const char *filename);
-
-
-/*
- * push_client_file_crc32c reads the whole regular file at localPath (a
- * plain sequential read, in chunks -- never loading a whole WAL segment
- * into memory) and computes its size and CRC32C, using the same
- * INIT_CRC32C/COMP_CRC32C/FIN_CRC32C facility (port/pg_crc32c.h) real
- * Postgres uses for its own backup manifests. This duplicates pg_
- * walserver's own ws_file_crc32c() (ws_util.c) byte for byte rather than
- * calling it: that function lives in src/bin/pg_walserver/, and this file
- * must stay independent of any pg_walserver-specific header (see this
- * file's own header comment) -- pg_crc32c.h itself is an ordinary,
- * frontend-safe PostgreSQL header, already linked into every caller of
- * src/bin/common/ via libpgcommon. Returns false, with errno left exactly
- * as open()/read() set it, on any failure to open or read the file;
- * sizeOut/crcOut are left untouched in that case.
- */
-static bool
-push_client_file_crc32c(const char *localPath, uint64_t *sizeOut, uint32_t *crcOut)
-{
-	int fd = open(localPath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-
-	if (fd < 0)
-	{
-		return false;
-	}
-
-	struct stat st;
-
-	if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
-	{
-		close(fd);
-		errno = EINVAL;
-		return false;
-	}
-
-	pg_crc32c crc;
-
-	INIT_CRC32C(crc);
-
-	char buffer[WS_PUSH_CHUNK_SIZE];
-	uint64_t total = 0;
-	bool ok = true;
-
-	for (;;)
-	{
-		ssize_t got = read(fd, buffer, sizeof(buffer));
-
-		if (got < 0 && errno == EINTR)
-		{
-			continue;
-		}
-
-		if (got < 0)
-		{
-			ok = false;
-			break;
-		}
-
-		if (got == 0)
-		{
-			break;
-		}
-
-		COMP_CRC32C(crc, buffer, (size_t) got);
-		total += (uint64_t) got;
-	}
-
-	int savedErrno = errno;
-
-	close(fd);
-
-	if (!ok)
-	{
-		errno = savedErrno;
-		return false;
-	}
-
-	FIN_CRC32C(crc);
-
-	*sizeOut = total;
-	*crcOut = crc;
-
-	return true;
-}
 
 
 /*
@@ -345,7 +257,7 @@ ws_push_file_client(const char *host, int port, const char *user,
 	 * ready" loop), PGCONNECT_TIMEOUT handling, and notice-processor
 	 * wiring every other connection in this codebase already gets, for
 	 * free, instead of a one-shot connect attempt with none of that --
-	 * exactly like src/bin/common/fetch_client.c's own ws_fetch_file_
+	 * exactly like fetch_client.c's own ws_fetch_file_
 	 * client() already does for the read side.
 	 */
 	PQExpBuffer connInfo = createPQExpBuffer();
@@ -426,7 +338,7 @@ ws_push_file_client(const char *host, int port, const char *user,
 		uint64_t size = 0;
 		uint32_t crc = 0;
 
-		if (!push_client_file_crc32c(localPath, &size, &crc))
+		if (!ws_file_crc32c(localPath, &size, &crc))
 		{
 			log_error("Failed to read \"%s\": %m", localPath);
 			pgsql_finish(&pgsql);
