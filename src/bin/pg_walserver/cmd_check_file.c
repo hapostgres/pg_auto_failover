@@ -127,7 +127,7 @@ cmd_check_file(int sock, const WsRoute *route, const char *filename,
 	{
 		char safeName[64];
 
-		sanitize_for_log(filename, safeName, sizeof(safeName));
+		sanitizeForLog(filename, safeName, sizeof(safeName));
 		log_warn("Rejecting CHECK_FILE request for filename \"%s\"", safeName);
 		ws_send_error_response(sock, "22023", "invalid filename");
 		return;

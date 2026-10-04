@@ -223,8 +223,8 @@ handle_connection(int clientSock, const WsServerConfig *config)
 	char title[256];
 	char safeKey[NAMEDATALEN + 24];
 
-	sanitize_for_log(route != NULL ? route->key : routeKey,
-					 safeKey, sizeof(safeKey));
+	sanitizeForLog(route != NULL ? route->key : routeKey,
+				   safeKey, sizeof(safeKey));
 	sformat(title, sizeof(title), "pg_autoctl: walsender %s", safeKey);
 	set_ps_title(title);
 

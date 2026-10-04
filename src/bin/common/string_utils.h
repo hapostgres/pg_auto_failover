@@ -49,29 +49,29 @@ void processBufferCallback(const char *buffer, bool error);
  * timegm(), see cli_archive_cleanup.c's own ws_retention_age_cutoff()) --
  * NOT a fixed 30-day approximation, since month lengths vary.
  */
-typedef struct WsRetentionAge
+typedef struct RetentionAge
 {
 	long value;
 	char unit;   /* 'h', 'd', 'w', or 'm' */
-} WsRetentionAge;
+} RetentionAge;
 
 /*
- * ws_parse_retention_age parses a --keep-age argument such as "72h",
+ * stringToRetentionAge parses a --keep-age argument such as "72h",
  * "14d", "4w", "3m" into *age. An explicit suffix is required -- there is
  * no bare-number default, ambiguity here is worse than a clear error.
  * Returns false with an error already logged (naming the accepted
  * suffixes) on anything else.
  */
-bool ws_parse_retention_age(const char *str, WsRetentionAge *age);
+bool stringToRetentionAge(const char *str, RetentionAge *age);
 
 /*
- * sanitize_for_log copies a possibly-untrusted string (e.g. straight from
+ * sanitizeForLog copies a possibly-untrusted string (e.g. straight from
  * an unauthenticated client: a user name, a route key) into out (bounded
  * by outSize), replacing any control character (< 0x20 or 0x7f) with '?'
  * so it can be logged or shown in a process title without letting it
  * inject terminal escape sequences or fake log lines. Truncates with a
  * trailing "..." when in doesn't fit.
  */
-void sanitize_for_log(const char *in, char *out, size_t outSize);
+void sanitizeForLog(const char *in, char *out, size_t outSize);
 
 #endif /* STRING_UTILS_h */
