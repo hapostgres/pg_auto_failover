@@ -10,7 +10,8 @@
  *   whole negotiation runs under the connection's absolute authentication
  *   deadline (accept_loop.c). A startup packet without a user name is
  *   refused, as PostgreSQL does. The client supplied strings kept in
- *   WsStartupParams are raw: log them through ws_sanitize_for_log().
+ *   WsStartupParams are raw: log them through sanitize_for_log()
+ *   (common/string_utils.h).
  *
  * Licensed under the PostgreSQL License.
  *

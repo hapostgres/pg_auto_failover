@@ -33,6 +33,9 @@
 /* absolute authentication deadline of a connection, in seconds */
 #define WS_DEFAULT_AUTH_TIMEOUT 30
 
+/* hba/passwd/nodes/routes/uri files: nothing legitimate is larger */
+#define WS_MAX_CONFIG_FILE_SIZE (1024 * 1024)
+
 /*
  * Reported as the "server_version" startup parameter so that real libpq
  * clients (pg_basebackup, pg_receivewal) compute a sane PQserverVersion().

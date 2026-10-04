@@ -11,6 +11,7 @@
 #define SYSTEM_UTILS_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 
 /* taken from sysinfo(2) on Linux */
@@ -22,6 +23,17 @@ typedef struct SystemInfo
 
 bool get_system_info(SystemInfo *sysInfo);
 void pretty_print_bytes(char *buffer, size_t size, uint64_t bytes);
+
+/*
+ * pretty_print_bytes_scaled is the shared unit-scaling mechanism behind
+ * pretty_print_bytes() and wal_segment.c's own wal_segment_size_string() --
+ * see pretty_print_bytes_scaled's own comment in system_utils.c.
+ */
+void pretty_print_bytes_scaled(char *buffer, size_t size, uint64_t bytes,
+							   uint64_t threshold, bool withSpace);
+
+/* CLOCK_MONOTONIC in milliseconds */
+int64_t monotonic_ms(void);
 
 
 #endif /* SYSTEM_UTILS_H */

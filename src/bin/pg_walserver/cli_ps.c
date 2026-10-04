@@ -65,7 +65,7 @@
 #include "string_utils.h"
 
 /* local helpers */
-static void format_uptime(time_t startedAt, char *dest, size_t destSize);
+static void format_elapsed(time_t startedAt, char *dest, size_t destSize);
 
 static int cli_ps_getopt(int argc, char **argv);
 static void cli_ps_command_run(int argc, char **argv);
@@ -94,11 +94,13 @@ CommandLine ps_command =
 
 
 /*
- * format_uptime renders the time elapsed since startedAt as "<h>h<mm>m<ss>s"
- * (e.g. "0h04m31s"), or "-" when startedAt is unset (<= 0).
+ * format_elapsed renders the time elapsed since startedAt via
+ * IntervalToString() (common/string_utils.c), or "-" when startedAt is
+ * unset (<= 0, meaning "not running"/"unknown") -- IntervalToString itself
+ * has no such sentinel, so that case is handled here instead.
  */
 static void
-format_uptime(time_t startedAt, char *dest, size_t destSize)
+format_elapsed(time_t startedAt, char *dest, size_t destSize)
 {
 	if (startedAt <= 0)
 	{
@@ -106,15 +108,9 @@ format_uptime(time_t startedAt, char *dest, size_t destSize)
 		return;
 	}
 
-	long secs = (long) (time(NULL) - startedAt);
+	double elapsed = (double) (time(NULL) - startedAt);
 
-	if (secs < 0)
-	{
-		secs = 0;
-	}
-
-	sformat(dest, destSize, "%ldh%02ldm%02lds",
-			secs / 3600, (secs % 3600) / 60, secs % 60);
+	IntervalToString(elapsed < 0 ? 0 : elapsed, dest, destSize);
 }
 
 
@@ -149,8 +145,8 @@ cli_ps_run(const char *pgdata)
 
 	char serveUptime[32] = { 0 };
 
-	format_uptime(haveState ? state.serveStartedAt : 0, serveUptime,
-				  sizeof(serveUptime));
+	format_elapsed(haveState ? state.serveStartedAt : 0, serveUptime,
+				   sizeof(serveUptime));
 
 	int childCount = haveState ? (state.receivewalWorkerCount + state.bootstrapCount) : 0;
 
@@ -171,7 +167,7 @@ cli_ps_run(const char *pgdata)
 		char uptime[32] = { 0 };
 		bool isLast = (++printed == childCount);
 
-		format_uptime(running ? c->startedAt : 0, uptime, sizeof(uptime));
+		format_elapsed(running ? c->startedAt : 0, uptime, sizeof(uptime));
 
 		char lsnStr[64] = { 0 };
 
@@ -201,7 +197,7 @@ cli_ps_run(const char *pgdata)
 		char uptime[32] = { 0 };
 		bool isLast = (++printed == childCount);
 
-		format_uptime(running ? b->startedAt : 0, uptime, sizeof(uptime));
+		format_elapsed(running ? b->startedAt : 0, uptime, sizeof(uptime));
 
 		fformat(stdout, "%s bootstrap(%d) %s, %s, uptime %s\n",
 				isLast ? "`--" : "|--",

@@ -1042,3 +1042,125 @@ set_ps_title(const char *title)
 		*(ps_buffer + i) = '\0';
 	}
 }
+
+
+/*
+ * read_file_capped -- see file_utils.h's own comment.
+ */
+bool
+read_file_capped(const char *path, size_t maxSize, bool missingOk,
+				 char **contents, size_t *size, struct stat *stOut)
+{
+	return read_file_flags(path, O_RDONLY | O_CLOEXEC, maxSize, missingOk,
+						   contents, size, stOut);
+}
+
+
+/*
+ * open_regular_file -- see file_utils.h's own comment.
+ */
+int
+open_regular_file(const char *path)
+{
+	int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+
+	if (fd < 0)
+	{
+		return -1;
+	}
+
+	struct stat st;
+
+	if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
+	{
+		close(fd);
+		errno = EINVAL;
+		return -1;
+	}
+
+	return fd;
+}
+
+
+/*
+ * read_file_flags -- see file_utils.h's own comment.
+ */
+bool
+read_file_flags(const char *path, int openFlags, size_t maxSize,
+				bool missingOk, char **contents, size_t *size,
+				struct stat *stOut)
+{
+	*contents = NULL;
+	*size = 0;
+
+	int fd = open(path, openFlags);
+
+	if (fd < 0)
+	{
+		if (!(missingOk && errno == ENOENT))
+		{
+			log_error("Failed to open \"%s\": %m", path);
+		}
+
+		return false;
+	}
+
+	struct stat st;
+
+	if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
+	{
+		log_error("\"%s\" is not a readable regular file", path);
+		close(fd);
+		return false;
+	}
+
+	if ((uint64_t) st.st_size > maxSize)
+	{
+		log_error("\"%s\" is too large (%lld bytes, the limit is %zu)", path,
+				  (long long) st.st_size, maxSize);
+		close(fd);
+		return false;
+	}
+
+	char *buf = (char *) malloc((size_t) st.st_size + 1);
+
+	if (buf == NULL)
+	{
+		close(fd);
+		return false;
+	}
+
+	size_t total = 0;
+	size_t capacity = (size_t) st.st_size;
+
+	while (total < capacity)
+	{
+		ssize_t n = read(fd, buf + total, capacity - total);
+
+		if (n < 0 && errno == EINTR)
+		{
+			continue;
+		}
+
+		if (n <= 0)
+		{
+			break;
+		}
+
+		total += (size_t) n;
+	}
+
+	close(fd);
+
+	buf[total] = '\0';
+
+	*contents = buf;
+	*size = total;
+
+	if (stOut != NULL)
+	{
+		*stOut = st;
+	}
+
+	return true;
+}

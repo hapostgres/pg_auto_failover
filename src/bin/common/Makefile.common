@@ -16,6 +16,7 @@ COMMANDLINE_SRC = $(wildcard $(LIB_DIR)/subcommands.c/commandline.*)
 PARSON_SRC      = $(wildcard $(LIB_DIR)/parson/parson.*)
 
 COMMON_INCLUDES  = -I$(COMMON_DIR)
+COMMON_INCLUDES += -I$(COMMON_DIR)vendor
 COMMON_INCLUDES += -I$(LIB_DIR)/pg
 COMMON_INCLUDES += -I$(LIB_DIR)/log/src/
 COMMON_INCLUDES += -I$(LIB_DIR)/subcommands.c/
@@ -148,8 +149,7 @@ lib-parson.o: $(PARSON_SRC)
 #
 # Object files are named pgrw-*.o, not vendor-*.o, so this pattern rule can
 # never collide with a caller's own "vendor-%.o: $(SRC_DIR)vendor/%.c" rule
-# (pg_walserver's own vendor/tar.c, for instance) even though both callers
-# include this file.
+# even though both callers include this file.
 # -----------------------------------------------------------------------
 PG_RECEIVEWAL_VENDOR_SRC  = pg_receivewal.c receivelog.c streamutil.c walmethods.c
 PG_RECEIVEWAL_VENDOR_OBJS = $(patsubst %.c,pgrw-%.o,$(PG_RECEIVEWAL_VENDOR_SRC))
@@ -157,3 +157,19 @@ PG_RECEIVEWAL_VENDOR_OBJS = $(patsubst %.c,pgrw-%.o,$(PG_RECEIVEWAL_VENDOR_SRC))
 pgrw-%.o: $(PG_RECEIVEWAL_VENDOR_DIR)/%.c
 	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
 	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/pgrw-$(*F).Po -o $@ $<
+
+# -----------------------------------------------------------------------
+# vendor/tar.c (src/bin/common/vendor/tar.c, see that file's own header
+# comment) -- ustar header construction, vendored from PostgreSQL's
+# src/port/tar.c. common/tar_stream.c builds its directory-to-tar-stream
+# walk on top of it. Opt-in like PG_RECEIVEWAL_VENDOR_OBJS above: a caller
+# adds $(TAR_VENDOR_OBJS) to its own OBJS only if it actually links
+# tar_stream.c (currently just pg_walserver).
+# -----------------------------------------------------------------------
+TAR_VENDOR_DIR  = $(COMMON_DIR)vendor
+TAR_VENDOR_SRC  = tar.c
+TAR_VENDOR_OBJS = $(patsubst %.c,pgtar-%.o,$(TAR_VENDOR_SRC))
+
+pgtar-%.o: $(TAR_VENDOR_DIR)/%.c
+	@if test ! -d $(DEPDIR); then mkdir -p $(DEPDIR); fi
+	$(CC) $(CFLAGS) -c -MMD -MP -MF$(DEPDIR)/pgtar-$(*F).Po -o $@ $<

@@ -21,8 +21,8 @@
 #include "file_utils.h"
 #include "framing.h"
 #include "log.h"
+#include "string_utils.h"
 #include "wal_dir_scan.h"
-#include "ws_util.h"
 
 
 /*
@@ -84,7 +84,7 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 	{
 		char safeName[64];
 
-		ws_sanitize_for_log(filename, safeName, sizeof(safeName));
+		sanitize_for_log(filename, safeName, sizeof(safeName));
 		log_warn("Rejecting ARCHIVE_FILE request for filename \"%s\"", safeName);
 		ws_send_error_response(sock, "22023", "invalid filename");
 		return;

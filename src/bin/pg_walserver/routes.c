@@ -27,11 +27,11 @@
 #include "port/pg_crc32c.h"
 
 #include "routes.h"
+#include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
 #include "log.h"
 #include "string_utils.h"
-#include "ws_util.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
@@ -67,8 +67,8 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (!ws_read_file_capped(path, WS_MAX_CONFIG_FILE_SIZE, false,
-							 &contents, &fileSize, NULL))
+	if (!read_file_capped(path, WS_MAX_CONFIG_FILE_SIZE, false,
+						  &contents, &fileSize, NULL))
 	{
 		log_error("Failed to read routes file \"%s\"", path);
 		return false;
@@ -359,8 +359,8 @@ routes_persist_path(const char *routesPath, const char *routeKey,
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
-							 &contents, &fileSize, NULL))
+	if (!read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+						  &contents, &fileSize, NULL))
 	{
 		log_error("Failed to read routes file \"%s\"", routesPath);
 		return false;
@@ -475,8 +475,8 @@ routes_set_property(const char *routesPath, const char *routeKey,
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
-							 &contents, &fileSize, NULL))
+	if (!read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+						  &contents, &fileSize, NULL))
 	{
 		log_error("Failed to read routes file \"%s\"", routesPath);
 		return false;
@@ -596,8 +596,8 @@ routes_drop_section(const char *routesPath, const char *routeKey)
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (!ws_read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
-							 &contents, &fileSize, NULL))
+	if (!read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+						  &contents, &fileSize, NULL))
 	{
 		log_error("Failed to read routes file \"%s\"", routesPath);
 		return false;
@@ -699,8 +699,8 @@ config_load_global(const char *configPath, WsGlobalConfig *out)
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (!ws_read_file_capped(configPath, WS_MAX_CONFIG_FILE_SIZE, false,
-							 &contents, &fileSize, NULL))
+	if (!read_file_capped(configPath, WS_MAX_CONFIG_FILE_SIZE, false,
+						  &contents, &fileSize, NULL))
 	{
 		log_error("Failed to read config file \"%s\"", configPath);
 		return false;
@@ -783,8 +783,8 @@ config_set_global_property(const char *configPath, const char *propName,
 	size_t fileSize = 0;
 
 	if (file_exists(configPath) &&
-		!ws_read_file_capped(configPath, WS_MAX_CONFIG_FILE_SIZE, false,
-							 &contents, &fileSize, NULL))
+		!read_file_capped(configPath, WS_MAX_CONFIG_FILE_SIZE, false,
+						  &contents, &fileSize, NULL))
 	{
 		log_error("Failed to read config file \"%s\"", configPath);
 		return false;

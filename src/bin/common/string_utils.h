@@ -64,4 +64,14 @@ typedef struct WsRetentionAge
  */
 bool ws_parse_retention_age(const char *str, WsRetentionAge *age);
 
+/*
+ * sanitize_for_log copies a possibly-untrusted string (e.g. straight from
+ * an unauthenticated client: a user name, a route key) into out (bounded
+ * by outSize), replacing any control character (< 0x20 or 0x7f) with '?'
+ * so it can be logged or shown in a process title without letting it
+ * inject terminal escape sequences or fake log lines. Truncates with a
+ * trailing "..." when in doesn't fit.
+ */
+void sanitize_for_log(const char *in, char *out, size_t outSize);
+
 #endif /* STRING_UTILS_h */
