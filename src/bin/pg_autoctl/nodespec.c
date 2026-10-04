@@ -22,6 +22,7 @@
 #include "pgsetup.h"
 #include "string_utils.h"
 #include "file_utils.h"    /* sformat */
+#include "file_crc32c.h"
 #include "env_utils.h"
 #include "cli_root.h"      /* pg_autoctl_program */
 #include "runprogram.h"    /* Program, run_program, free_program */
@@ -1027,30 +1028,19 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 
 /*
  * nodespec_file_crc computes the CRC32C of the current content of *path
- * into *crc.  Returns false (leaving *crc untouched) if the file can't be
- * read right now — a transient condition while it's being rewritten, not
- * treated as a change.
+ * into *crc, via src/bin/common/file_crc32c.c's own file_crc32c() (a
+ * sequential, chunked read -- shared with pg_walserver's own CHECK_FILE/
+ * ARCHIVE_FILE handling, which needs the same size+CRC32C computation).
+ * Returns false (leaving *crc untouched) if the file can't be read right
+ * now -- a transient condition while it's being rewritten, not treated as
+ * a change.
  */
 static bool
 nodespec_file_crc(const char *path, pg_crc32c *crc)
 {
-	char *contents = NULL;
-	long fileSize = 0;
+	uint64_t fileSize = 0;
 
-	if (!read_file(path, &contents, &fileSize))
-	{
-		return false;
-	}
-
-	pg_crc32c newCrc;
-	INIT_CRC32C(newCrc);
-	COMP_CRC32C(newCrc, contents, fileSize);
-	FIN_CRC32C(newCrc);
-
-	free(contents);
-
-	*crc = newCrc;
-	return true;
+	return file_crc32c(path, &fileSize, crc);
 }
 
 

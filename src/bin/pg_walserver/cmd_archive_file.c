@@ -17,6 +17,7 @@
 
 #include "cmd_archive_file.h"
 #include "cmd_fetch_file.h"
+#include "file_crc32c.h"
 #include "file_utils.h"
 #include "framing.h"
 #include "log.h"
@@ -236,7 +237,7 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 	uint64_t receivedSize = 0;
 	uint32_t receivedCrc = 0;
 
-	if (!ws_file_crc32c(tmpPath, &receivedSize, &receivedCrc))
+	if (!file_crc32c(tmpPath, &receivedSize, &receivedCrc))
 	{
 		log_error("ARCHIVE_FILE: failed to re-read \"%s\" after receiving "
 				  "it: %m", tmpPath);
@@ -247,7 +248,7 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 
 	uint64_t existingSize = 0;
 	uint32_t existingCrc = 0;
-	bool haveExisting = ws_file_crc32c(finalPath, &existingSize, &existingCrc);
+	bool haveExisting = file_crc32c(finalPath, &existingSize, &existingCrc);
 
 	if (haveExisting)
 	{
