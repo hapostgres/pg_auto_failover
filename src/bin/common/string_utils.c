@@ -602,10 +602,10 @@ processBufferCallback(const char *buffer, bool error)
 
 
 /*
- * ws_parse_retention_age -- see string_utils.h.
+ * stringToRetentionAge -- see string_utils.h.
  */
 bool
-ws_parse_retention_age(const char *str, WsRetentionAge *age)
+stringToRetentionAge(const char *str, RetentionAge *age)
 {
 	size_t len = str == NULL ? 0 : strlen(str);
 
@@ -659,10 +659,10 @@ ws_parse_retention_age(const char *str, WsRetentionAge *age)
 
 
 /*
- * sanitize_for_log -- see string_utils.h's own comment.
+ * sanitizeForLog -- see string_utils.h's own comment.
  */
 void
-sanitize_for_log(const char *in, char *out, size_t outSize)
+sanitizeForLog(const char *in, char *out, size_t outSize)
 {
 	size_t o = 0;
 

@@ -108,7 +108,7 @@ bool ws_backup_list_load(const char *routePath, uint64_t segSize,
  */
 bool ws_archive_cleanup_run(const char *routePath,
 							bool haveKeepCount, int keepCount,
-							bool haveKeepAge, WsRetentionAge keepAge,
+							bool haveKeepAge, RetentionAge keepAge,
 							bool dryRun, bool force);
 
 extern CommandLine archive_cleanup_command;

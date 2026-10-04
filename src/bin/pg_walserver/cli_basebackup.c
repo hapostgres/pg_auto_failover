@@ -51,7 +51,7 @@ static char basebackupUser[NAMEDATALEN] = { 0 };
 static bool basebackupHaveKeepCount = false;
 static int basebackupKeepCount = 0;
 static bool basebackupHaveKeepAge = false;
-static WsRetentionAge basebackupKeepAge = { 0 };
+static RetentionAge basebackupKeepAge = { 0 };
 static bool basebackupDryRun = false;
 static bool basebackupForce = false;
 
@@ -325,7 +325,7 @@ cli_basebackup_getopt(int argc, char **argv)
 	basebackupHaveKeepCount = false;
 	basebackupKeepCount = 0;
 	basebackupHaveKeepAge = false;
-	basebackupKeepAge = (WsRetentionAge) {
+	basebackupKeepAge = (RetentionAge) {
 		0
 	};
 	basebackupDryRun = false;
@@ -402,7 +402,7 @@ cli_basebackup_getopt(int argc, char **argv)
 
 			case 'a':
 			{
-				if (!ws_parse_retention_age(optarg, &basebackupKeepAge))
+				if (!stringToRetentionAge(optarg, &basebackupKeepAge))
 				{
 					/* error already logged */
 					exit(1);

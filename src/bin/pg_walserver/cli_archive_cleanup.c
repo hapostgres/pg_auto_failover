@@ -49,7 +49,7 @@ typedef struct WsContinuityProblem
 } WsContinuityProblem;
 
 /* local helpers */
-static time_t ws_retention_age_cutoff(const WsRetentionAge *age, time_t now);
+static time_t ws_retention_age_cutoff(const RetentionAge *age, time_t now);
 static int backup_cmp(const void *a, const void *b);
 static bool parse_backup_label_time(const char *label, time_t *takenAt);
 static bool read_last_history_line(const char *routePath, uint32_t timeline,
@@ -80,7 +80,7 @@ static char archiveCleanupPath[MAXPGPATH] = { 0 };
 static bool archiveCleanupHaveKeepCount = false;
 static int archiveCleanupKeepCount = 0;
 static bool archiveCleanupHaveKeepAge = false;
-static WsRetentionAge archiveCleanupKeepAge = { 0 };
+static RetentionAge archiveCleanupKeepAge = { 0 };
 static bool archiveCleanupDryRun = false;
 static bool archiveCleanupForce = false;
 
@@ -146,7 +146,7 @@ CommandLine archive_cleanup_command =
 
 
 /*
- * WsRetentionAge/ws_parse_retention_age() -- --keep-age parsing -- have
+ * RetentionAge/stringToRetentionAge() -- --keep-age parsing -- have
  * moved to src/bin/common/string_utils.h/.c, shared with cli_basebackup.c.
  *
  * ws_retention_age_cutoff computes the timestamp before which a base
@@ -160,7 +160,7 @@ CommandLine archive_cleanup_command =
  * not a bug.
  */
 static time_t
-ws_retention_age_cutoff(const WsRetentionAge *age, time_t now)
+ws_retention_age_cutoff(const RetentionAge *age, time_t now)
 {
 	if (age->unit == 'm')
 	{
@@ -733,7 +733,7 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
 bool
 ws_archive_cleanup_run(const char *routePath,
 					   bool haveKeepCount, int keepCount,
-					   bool haveKeepAge, WsRetentionAge keepAge,
+					   bool haveKeepAge, RetentionAge keepAge,
 					   bool dryRun, bool force)
 {
 	if (!haveKeepCount && !haveKeepAge)
@@ -1156,7 +1156,7 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 	archiveCleanupHaveKeepCount = false;
 	archiveCleanupKeepCount = 0;
 	archiveCleanupHaveKeepAge = false;
-	archiveCleanupKeepAge = (WsRetentionAge) {
+	archiveCleanupKeepAge = (RetentionAge) {
 		0
 	};
 	archiveCleanupDryRun = false;
@@ -1209,7 +1209,7 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 
 			case 'a':
 			{
-				if (!ws_parse_retention_age(optarg, &archiveCleanupKeepAge))
+				if (!stringToRetentionAge(optarg, &archiveCleanupKeepAge))
 				{
 					/* error already logged */
 					exit(1);
