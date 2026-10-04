@@ -17,6 +17,9 @@
 #include "log.h"
 #include "string_utils.h"
 
+/*
+ * ws_ps_state_path fills dest with "<pgdata>/" WS_PS_STATE_FILENAME.
+ */
 void
 ws_ps_state_path(const char *pgdata, char *dest, size_t destSize)
 {
@@ -24,6 +27,13 @@ ws_ps_state_path(const char *pgdata, char *dest, size_t destSize)
 }
 
 
+/*
+ * ws_ps_state_write overwrites the state file under pgdata with state's
+ * current contents (write_file_atomic(), so a concurrent reader never sees
+ * a half-written file). A no-op (returns true) when pgdata is NULL/empty --
+ * "serve --insecure" with no --pgdata has nowhere to write one, exactly as
+ * it has no pidfile either.
+ */
 bool
 ws_ps_state_write(const char *pgdata, const WsPsState *state)
 {
@@ -147,6 +157,12 @@ parse_kv(char *line, char *routeKeyOut, char *pathOut, pid_t *pidOut,
 }
 
 
+/*
+ * ws_ps_state_read reads the state file back. Returns false (state
+ * untouched) when pgdata is NULL/empty, or the file does not exist (no
+ * "serve" has ever run for this --pgdata) -- callers must treat that as
+ * "not running", never as an error.
+ */
 bool
 ws_ps_state_read(const char *pgdata, WsPsState *state)
 {

@@ -77,6 +77,7 @@ find_attribute(const char *message, char key, size_t *valueLen)
 }
 
 
+/* build the stored secret of a password (SASLprep'ed first, as PostgreSQL does) */
 bool
 scram_build_verifier(const char *password, int iterations,
 					 char *dest, size_t destSize)
@@ -241,6 +242,12 @@ scram_mock_verifier(const char *user, ScramVerifier *verifier)
 }
 
 
+/*
+ * scram_server_first consumes the client-first message received for
+ * mechanism (SCRAM_MECHANISM or SCRAM_MECHANISM_PLUS); cbindData is the
+ * hash of our TLS certificate (RFC 5929 tls-server-end-point), NULL/0 when
+ * the connection is not encrypted (channel binding not offered).
+ */
 bool
 scram_server_first(ScramServerState *state, const ScramVerifier *verifier,
 				   const char *mechanism, const char *clientFirst,

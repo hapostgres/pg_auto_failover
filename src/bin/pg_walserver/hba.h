@@ -86,14 +86,6 @@ typedef struct WsHbaRuleSet
 	int count;
 } WsHbaRuleSet;
 
-/*
- * hba_parse_file reads and parses the whole HBA file at hbaPath into a
- * freshly malloc'd WsHbaRuleSet (free with hba_ruleset_free()). Returns
- * false, *ruleSet left empty, when the file cannot be read, is larger than
- * 1 MiB, or has ANY malformed line (logged with its line number): callers
- * must fail closed, exactly like PostgreSQL refusing to load a bad
- * pg_hba.conf -- never install a partially-parsed ruleset.
- */
 bool hba_parse_file(const char *hbaPath, WsHbaRuleSet *ruleSet);
 
 /* releases a WsHbaRuleSet returned by hba_parse_file() */
