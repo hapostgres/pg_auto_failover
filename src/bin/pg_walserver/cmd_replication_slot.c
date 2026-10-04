@@ -352,7 +352,7 @@ ws_replication_slot_oldest_restart_lsn(const WsRoute *route, uint64_t segSize,
 
 		uint64_t segno;
 
-		if (!ws_wal_lsn_to_segno(lsn, segSize, &segno))
+		if (!wal_lsn_to_segno(lsn, segSize, &segno))
 		{
 			continue;
 		}

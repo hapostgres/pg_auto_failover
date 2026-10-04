@@ -83,12 +83,12 @@ check_file_receivewal_has_passed(const WsRoute *route, const char *filename)
 	uint32_t fileTimeline;
 	uint64_t fileSegNo;
 
-	ws_wal_segment_prefix_to_position(segmentPrefix, segSize, &fileTimeline,
-									  &fileSegNo);
+	wal_segment_name_parse(segmentPrefix, segSize, &fileTimeline,
+						   &fileSegNo);
 
 	uint64_t progressSegNo;
 
-	if (!ws_wal_lsn_to_segno(progressLsn, segSize, &progressSegNo))
+	if (!wal_lsn_to_segno(progressLsn, segSize, &progressSegNo))
 	{
 		return false;
 	}

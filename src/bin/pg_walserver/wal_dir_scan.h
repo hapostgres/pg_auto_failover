@@ -24,6 +24,7 @@
 #include <time.h>
 
 #include "routes.h"
+#include "wal_segment.h"
 
 /*
  * ws_route_wal_segment_size: the WAL segment size of the route's cluster,
@@ -55,30 +56,6 @@ bool wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 						 char *endLsn, size_t endLsnSize);
 
 /*
- * ws_wal_segment_prefix_to_position decodes a 24-hex WAL segment prefix
- * (this file's own WS_WAL_FILE_SEGMENT/PARTIAL/BACKUP shape, see ws_wal_
- * dir_classify_filename() below) into its own timeline and 0-based
- * segment number -- the exact 8+8+8 hex split/perXLogId division wal_dir_
- * find_latest() above already applies to the highest segment name it
- * finds by directory scan, exposed here for an arbitrary segment name a
- * caller already has in hand (never touches the filesystem itself).
- */
-void ws_wal_segment_prefix_to_position(const char *segmentPrefix,
-									   uint64_t segSize,
-									   uint32_t *timelineOut,
-									   uint64_t *segnoOut);
-
-/*
- * ws_wal_lsn_to_segno converts an "%X/%08X"-formatted LSN plus a route's
- * own WAL segment size into the 0-based segment number it falls in -- the
- * same division wal_dir_find_latest() and cli_archive_cleanup.c's own
- * retention math already use. Returns false (untouched) when lsn doesn't
- * parse as "%X/%X".
- */
-bool ws_wal_lsn_to_segno(const char *lsn, uint64_t segSize,
-						 uint64_t *segnoOut);
-
-/*
  * wal_dir_has_any_segment returns true as soon as route->path holds at
  * least one WAL segment file, complete OR still ".partial" -- unlike wal_
  * dir_find_latest() above (complete segments only, the right conservative
@@ -92,14 +69,6 @@ bool ws_wal_lsn_to_segno(const char *lsn, uint64_t segSize,
  * "prime the embedded receivewal worker before taking the first base backup" use.
  */
 bool wal_dir_has_any_segment(const WsRoute *route);
-
-/*
- * wal_segment_filename formats a filename the same way real Postgres does
- * (XLogFileName), for a given timeline, 0-based segment number and segment
- * size.
- */
-void wal_segment_filename(uint32_t timeline, uint64_t segno, uint64_t segSize,
-						  char *dest, size_t destSize);
 
 /*
  * wal_position_cache_read reads "<path>/archiver-position" -- the current
@@ -161,9 +130,9 @@ bool ws_receivewal_progress_read(const char *path, char *lsn, size_t lsnSize,
  * WsWalFileKind classifies one directory entry's filename shape -- exported
  * for "pg_walserver list wal" (cli_list.c) to reuse this file's own
  * filename-parsing rather than re-deriving it a second time (cli_archive_
- * cleanup.c's own wal_prefix_from_name() recognizes almost the same shapes,
- * for a different purpose -- retention cutoff comparison, not inventory --
- * and stays private to that file).
+ * cleanup.c's own wal_segment_name_extract_prefix() call, src/bin/common/
+ * wal_segment.h, recognizes almost the same shapes, for a different
+ * purpose -- retention cutoff comparison, not inventory).
  */
 typedef enum
 {
