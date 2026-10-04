@@ -1045,7 +1045,10 @@ set_ps_title(const char *title)
 
 
 /*
- * read_file_capped -- see file_utils.h's own comment.
+ * read_file_capped reads the whole regular file at path into a freshly
+ * malloc'ed, NUL-terminated buffer. A file larger than maxSize is an error
+ * (logged, false). A missing file returns false quietly when missingOk.
+ * When st is not NULL it receives the fstat() of the file actually read.
  */
 bool
 read_file_capped(const char *path, size_t maxSize, bool missingOk,
@@ -1057,7 +1060,10 @@ read_file_capped(const char *path, size_t maxSize, bool missingOk,
 
 
 /*
- * open_regular_file -- see file_utils.h's own comment.
+ * open_regular_file opens a file that is about to be served/streamed back
+ * out: O_NOFOLLOW (a symlink planted where a regular file is expected is
+ * never followed) and a regular-file check on the descriptor itself
+ * (fstat). Returns -1 with errno set (ENOENT when missing) on failure.
  */
 int
 open_regular_file(const char *path)
@@ -1082,9 +1088,7 @@ open_regular_file(const char *path)
 }
 
 
-/*
- * read_file_flags -- see file_utils.h's own comment.
- */
+/* the same with explicit open() flags (e.g. O_RDONLY | O_CLOEXEC | O_NOFOLLOW) */
 bool
 read_file_flags(const char *path, int openFlags, size_t maxSize,
 				bool missingOk, char **contents, size_t *size,

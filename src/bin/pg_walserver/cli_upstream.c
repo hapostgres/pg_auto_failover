@@ -103,7 +103,16 @@ cli_parse_upstream_conninfo(const char *conninfo, WsUpstreamTarget *target)
 
 
 /*
- * cli_resolve_upstream -- see cli_upstream.h's own comment.
+ * cli_resolve_upstream fills *target for --cluster/--pgdata (looked up in
+ * the config file config_file_path() resolves -- <pgdata>/pg_walserver.ini
+ * by default, or configFile/PG_WALSERVER_CONFIG_FILE when given, see
+ * routes.h) and/or --path/--upstream/--host/--port/--user given directly on
+ * the command line -- an explicit flag always wins over whatever the
+ * route's own "upstream"/"path" ini properties say. Returns false (with an
+ * error already logged) when neither source leaves *target fully resolved
+ * (a path and a host are both required; user defaults to
+ * "pgautofailover_replicator", port to 5432 when the upstream conninfo
+ * didn't say).
  */
 bool
 cli_resolve_upstream(const char *pgdata, const char *configFile,

@@ -816,7 +816,10 @@ hba_match(const WsHbaRuleSet *ruleSet, const char *routeKey, const char *user,
 
 /*
  * hba_ruleset_requires_client_cert reports whether any rule in ruleSet has
- * "clientcert=verify-full" -- see hba.h's own comment.
+ * "clientcert=verify-full" -- checked once at startup (and again on a
+ * SIGHUP reload) so a ruleset needing client certificate verification with
+ * no CA loaded (tls.h's ws_tls_client_verification_enabled()) can fail
+ * closed instead of silently never matching a real client certificate.
  */
 bool
 hba_ruleset_requires_client_cert(const WsHbaRuleSet *ruleSet)

@@ -17,12 +17,6 @@
 
 #include "commandline.h"
 
-/*
- * cli_ps_run prints "serve"'s own process-level status for --pgdata.
- * Returns true (having printed a clean "not running" message, never an
- * error) when no "serve" is currently running for this --pgdata at all;
- * false only on a genuine problem (e.g. no --pgdata given).
- */
 bool cli_ps_run(const char *pgdata);
 
 extern CommandLine ps_command;
