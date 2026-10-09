@@ -1379,9 +1379,9 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
 }
 
 
-/* -----------------------------------------------------------------------
- * pg_walserver cluster register <name> | drop <name> | list | set-upstream <name>
- * ----------------------------------------------------------------------- */
+/*
+ * pg_walserver cluster register <name>
+ */
 
 /*
  * The pidfile/SIGHUP reload logic that used to be a private static

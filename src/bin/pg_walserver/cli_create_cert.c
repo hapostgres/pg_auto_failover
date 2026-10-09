@@ -22,9 +22,9 @@
 #include "pgsetup.h"
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver create-cert --pgdata <path> --hostname <name> [--force]
- * ----------------------------------------------------------------------- */
+ */
 
 static char createCertPgdata[MAXPGPATH] = { 0 };
 static char createCertHostname[_POSIX_HOST_NAME_MAX] = { 0 };

@@ -23,9 +23,9 @@
 #include "scram.h"
 #include "string_utils.h"
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver scram-secret [--user <name>]   (password in PGPASSWORD)
- * ----------------------------------------------------------------------- */
+ */
 
 static char scramUser[NAMEDATALEN] = PG_AUTOCTL_REPLICA_USERNAME;
 

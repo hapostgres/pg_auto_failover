@@ -23,9 +23,9 @@
 #include "pidfile.h"
 #include "string_utils.h"
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver reload --pgdata <path>
- * ----------------------------------------------------------------------- */
+ */
 
 static char reloadPgdata[MAXPGPATH] = { 0 };
 

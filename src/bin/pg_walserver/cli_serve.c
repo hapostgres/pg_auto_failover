@@ -30,9 +30,9 @@
 #include "string_utils.h"
 #include "tls.h"
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver serve [options]  (the default command)
- * ----------------------------------------------------------------------- */
+ */
 
 static WsServerConfig serveConfig = { 0 };
 static char servePgdata[MAXPGPATH] = { 0 };

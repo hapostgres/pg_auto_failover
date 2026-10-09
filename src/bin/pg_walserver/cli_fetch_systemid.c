@@ -35,9 +35,9 @@ static int cli_fetch_systemid_getopt(int argc, char **argv);
 static void cli_fetch_systemid_command_run(int argc, char **argv);
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver fetch-systemid --cluster <name> --pgdata <path> [--upstream ...]
- * ----------------------------------------------------------------------- */
+ */
 
 static char fetchSystemidPgdata[MAXPGPATH] = { 0 };
 static char fetchSystemidConfigFile[MAXPGPATH] = { 0 };
