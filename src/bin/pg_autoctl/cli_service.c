@@ -28,6 +28,7 @@
 #include "pidfile.h"
 #include "service_keeper.h"
 #include "service_monitor.h"
+#include "service_walserver.h"
 #include "signals.h"
 
 static int stop_signal = SIGTERM;
@@ -35,6 +36,7 @@ static int stop_signal = SIGTERM;
 static void cli_service_run(int argc, char **argv);
 static void cli_keeper_run(int argc, char **argv);
 static void cli_monitor_run(int argc, char **argv);
+static void cli_walserver_run(int argc, char **argv);
 
 static int cli_getopt_pgdata_and_mode(int argc, char **argv);
 
@@ -108,6 +110,12 @@ cli_service_run(int argc, char **argv)
 		case PG_AUTOCTL_ROLE_KEEPER:
 		{
 			(void) cli_keeper_run(argc, argv);
+			break;
+		}
+
+		case PG_AUTOCTL_ROLE_WALSERVER:
+		{
+			(void) cli_walserver_run(argc, argv);
 			break;
 		}
 
@@ -243,6 +251,40 @@ cli_monitor_run(int argc, char **argv)
 	if (!start_monitor(&monitor))
 	{
 		log_fatal("Failed to start pg_autoctl monitor service, "
+				  "see above for details");
+		exit(EXIT_CODE_INTERNAL_ERROR);
+	}
+}
+
+
+/*
+ * cli_walserver_run reads this node's walserver configuration file (as
+ * written by `pg_autoctl create walserver`) and hands off to
+ * start_walserver(), which forks and supervises `pg_walserver serve` as a
+ * plain child process. Unlike cli_monitor_run()/cli_keeper_run(), there is
+ * no monitor registration and no keeper FSM involved at all.
+ */
+static void
+cli_walserver_run(int argc, char **argv)
+{
+	WalServerConfig config = { 0 };
+
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 keeperOptions.pgSetup.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!walserver_config_read(config.pathnames.config, &config))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (!start_walserver(&config))
+	{
+		log_fatal("Failed to start pg_autoctl walserver service, "
 				  "see above for details");
 		exit(EXIT_CODE_INTERNAL_ERROR);
 	}

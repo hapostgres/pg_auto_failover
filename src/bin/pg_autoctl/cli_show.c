@@ -1860,6 +1860,13 @@ cli_show_file(int argc, char **argv)
 							break;
 						}
 
+						case PG_AUTOCTL_ROLE_WALSERVER:
+						{
+							log_fatal("pg_autoctl show file --contents is not "
+									  "supported for a walserver node");
+							exit(EXIT_CODE_BAD_CONFIG);
+						}
+
 						case PG_AUTOCTL_ROLE_UNKNOWN:
 						{
 							log_fatal("Unknown node role %d", role);

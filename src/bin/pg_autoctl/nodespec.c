@@ -204,10 +204,14 @@ nodespec_read(const char *path, NodeSpec *spec)
 	{
 		spec->kind = NODE_KIND_CITUS_WORKER;
 	}
+	else if (strcmp(kindStr, "walserver") == 0)
+	{
+		spec->kind = NODE_KIND_WALSERVER;
+	}
 	else
 	{
 		log_error("Unknown node kind \"%s\" in \"%s\"; "
-				  "expected: monitor, postgres, coordinator, worker",
+				  "expected: monitor, postgres, coordinator, worker, walserver",
 				  kindStr, path);
 		return false;
 	}
@@ -340,8 +344,15 @@ nodespec_read(const char *path, NodeSpec *spec)
 		}
 	}
 
-	/* validate: non-monitor nodes need a monitor URI unless no_monitor=true */
+	/*
+	 * validate: non-monitor nodes need a monitor URI unless no_monitor=true.
+	 * A walserver node never registers with a monitor at all -- it is not a
+	 * Postgres instance and never participates in the keeper FSM -- so skip
+	 * this check for it entirely, the same way a monitor itself (kind ==
+	 * NODE_KIND_UNKNOWN) is skipped.
+	 */
 	if (spec->kind != NODE_KIND_UNKNOWN &&
+		spec->kind != NODE_KIND_WALSERVER &&
 		IS_EMPTY_STRING_BUFFER(spec->monitor_pguri) &&
 		!spec->noMonitor)
 	{
@@ -388,6 +399,12 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			break;
 		}
 
+		case NODE_KIND_WALSERVER:
+		{
+			kindStr = "walserver";
+			break;
+		}
+
 		default:
 		{
 			kindStr = "postgres";
@@ -416,7 +433,7 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			spec->port,
 			spec->pgdata);
 
-	if (spec->kind != NODE_KIND_UNKNOWN)
+	if (spec->kind != NODE_KIND_UNKNOWN && spec->kind != NODE_KIND_WALSERVER)
 	{
 		if (spec->noMonitor)
 		{
@@ -443,24 +460,33 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 				spec->group);
 	}
 
-	fformat(out,
-			"[settings]\n"
-			"candidate_priority = %d\n"
-			"replication_quorum = %s\n"
-			"\n"
-			"[options]\n"
-			"ssl        = %s\n"
-			"auth       = %s\n"
-			"pg_hba_lan = %s\n",
-			spec->candidate_priority,
-			spec->replication_quorum ? "true" : "false",
-			spec->ssl,
-			spec->auth,
-			spec->pg_hba_lan ? "true" : "false");
-
-	if (spec->debianCluster[0])
+	/*
+	 * [settings]/[options] only make sense for a Postgres-backed node (they
+	 * cover candidate_priority/replication_quorum/ssl/auth/pg_hba_lan, all
+	 * meaningless for a walserver node, which never joins the keeper FSM and
+	 * never has pg_autoctl manage its own SSL/HBA).
+	 */
+	if (spec->kind != NODE_KIND_WALSERVER)
 	{
-		fformat(out, "debian_cluster = %s\n", spec->debianCluster);
+		fformat(out,
+				"[settings]\n"
+				"candidate_priority = %d\n"
+				"replication_quorum = %s\n"
+				"\n"
+				"[options]\n"
+				"ssl        = %s\n"
+				"auth       = %s\n"
+				"pg_hba_lan = %s\n",
+				spec->candidate_priority,
+				spec->replication_quorum ? "true" : "false",
+				spec->ssl,
+				spec->auth,
+				spec->pg_hba_lan ? "true" : "false");
+
+		if (spec->debianCluster[0])
+		{
+			fformat(out, "debian_cluster = %s\n", spec->debianCluster);
+		}
 	}
 
 	/* only emit [launch] when deferred — omitting the section means immediate */
@@ -527,6 +553,43 @@ nodespec_create_argv(const NodeSpec *spec,
 		} \
 		args[i++] = (char *) (v); \
 } while (0)
+
+	/*
+	 * A walserver node is not a Postgres instance: it never registers with a
+	 * monitor, never joins a formation, and has none of the SSL/auth/
+	 * candidate-priority/replication-quorum machinery below. Build its (much
+	 * simpler) argv and return immediately rather than threading a dozen
+	 * "&& spec->kind != NODE_KIND_WALSERVER" guards through the generic
+	 * Postgres-node logic that follows.
+	 */
+	if (spec->kind == NODE_KIND_WALSERVER)
+	{
+		PUSH(pg_autoctl_path);
+		PUSH("create");
+		PUSH("walserver");
+		PUSH("--pgdata");
+		PUSH(spec->pgdata);
+
+		if (!IS_EMPTY_STRING_BUFFER(spec->name))
+		{
+			PUSH("--name");
+			PUSH(spec->name);
+		}
+
+		if (spec->port > 0)
+		{
+			static char walPortBuf[16];
+			sformat(walPortBuf, sizeof(walPortBuf), "%d", spec->port);
+			PUSH("--port");
+			PUSH(walPortBuf);
+		}
+
+		PUSH("--run");
+
+		args[i] = NULL;
+
+		return i;
+	}
 
 	PUSH(pg_autoctl_path);
 	PUSH("create");

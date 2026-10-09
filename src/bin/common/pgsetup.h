@@ -132,6 +132,17 @@ typedef enum PgInstanceKind
 	NODE_KIND_CITUS_COORDINATOR = 2,
 	NODE_KIND_CITUS_WORKER = 4,
 
+	/*
+	 * NODE_KIND_WALSERVER: a pg_walserver node. It never registers with a
+	 * monitor and never participates in the keeper FSM (it is not a Postgres
+	 * instance at all), so it never appears in any NODE_KIND_ANY/
+	 * NODE_KIND_CITUS_ANY FSM transition table -- it is only ever compared
+	 * with a plain "== NODE_KIND_WALSERVER", same as NODE_KIND_STANDALONE's
+	 * own precedent. Kept as a power of two for consistency with the other
+	 * values here, even though nothing ever ORs it together with them.
+	 */
+	NODE_KIND_WALSERVER = 8,
+
 	NODE_KIND_ANY = 0xff
 } PgInstanceKind;
 
