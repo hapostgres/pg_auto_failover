@@ -70,7 +70,7 @@
 
 #include "commandline.h"
 
-#include "cli_archive_cleanup.h"
+#include "backup_list.h"
 #include "cli_common.h"
 #include "cli_list.h"
 #include "cli_root.h"

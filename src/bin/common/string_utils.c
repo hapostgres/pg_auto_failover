@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
@@ -659,6 +660,58 @@ stringToRetentionAge(const char *str, RetentionAge *age)
 	age->unit = unit;
 
 	return true;
+}
+
+
+/*
+ * retentionAgeCutoff computes the timestamp before which a base backup
+ * counts as expired under --keep-age. 'h'/'d'/'w' are plain fixed
+ * durations; 'm' is real calendar-month arithmetic on UTC struct tm
+ * fields plus timegm() -- deliberately not "value * 30 days", since month
+ * lengths vary. A day-of-month that doesn't exist in the target month
+ * (e.g. going back one month from March 31st, where February 31st doesn't
+ * exist) normalizes forward the same way mktime()/timegm() always
+ * normalizes an out-of-range struct tm -- ordinary, documented behavior,
+ * not a bug.
+ */
+time_t
+retentionAgeCutoff(const RetentionAge *age, time_t now)
+{
+	if (age->unit == 'm')
+	{
+		struct tm tmNow = { 0 };
+
+		gmtime_r(&now, &tmNow);
+		tmNow.tm_mon -= (int) age->value;
+
+		return timegm(&tmNow);
+	}
+
+	long secondsPerUnit;
+
+	switch (age->unit)
+	{
+		case 'h':
+		{
+			secondsPerUnit = 3600L;
+			break;
+		}
+
+		case 'd':
+		{
+			secondsPerUnit = 86400L;
+			break;
+		}
+
+		case 'w':
+		default:
+		{
+			secondsPerUnit = 604800L;
+			break;
+		}
+	}
+
+	return now - (age->value * secondsPerUnit);
 }
 
 

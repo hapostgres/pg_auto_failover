@@ -10,6 +10,7 @@
 #define STRING_UTILS_H
 
 #include <stdbool.h>
+#include <time.h>
 
 
 /* maximum decimal int64 length with minus and NUL */
@@ -46,8 +47,8 @@ void processBufferCallback(const char *buffer, bool error);
  * sub-commands): a bare count and one of the four required suffixes.
  * 'h'/'d'/'w' are fixed-length durations (3600/86400/604800 seconds
  * respectively); 'm' is real calendar-month arithmetic (struct tm plus
- * timegm(), see cli_archive_cleanup.c's own ws_retention_age_cutoff()) --
- * NOT a fixed 30-day approximation, since month lengths vary.
+ * timegm(), see this file's own retentionAgeCutoff()) -- NOT a fixed
+ * 30-day approximation, since month lengths vary.
  */
 typedef struct RetentionAge
 {
@@ -56,6 +57,8 @@ typedef struct RetentionAge
 } RetentionAge;
 
 bool stringToRetentionAge(const char *str, RetentionAge *age);
+
+time_t retentionAgeCutoff(const RetentionAge *age, time_t now);
 
 void sanitizeForLog(const char *in, char *out, size_t outSize);
 

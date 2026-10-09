@@ -16,7 +16,7 @@
 
 #include "commandline.h"
 
-#include "cli_archive_cleanup.h"
+#include "backup_list.h"
 #include "cli_common.h"
 #include "cli_ls.h"
 #include "cli_root.h"
@@ -183,8 +183,8 @@ directory_size(const char *path)
 
 /*
  * scan_cluster_footprint computes one cluster's own WsClusterFootprint: a real
- * base backup enumeration (ws_backup_list_load(), cli_archive_cleanup.h --
- * the same one "list backups"/"archive-cleanup" use, so a size or count
+ * base backup enumeration (ws_backup_list_load(), backup_list.h -- the
+ * same one "list backups"/"archive-cleanup" use, so a size or count
  * shown here always agrees with those) plus a real WAL directory scan
  * (ws_wal_dir_classify_filename(), wal_dir_scan.h -- the same
  * classification "list wal" uses). Never fails outright: a cluster with no

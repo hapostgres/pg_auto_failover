@@ -16,10 +16,10 @@
 
 #include "commandline.h"
 
+#include "backup_list.h"
 #include "cli_archive_cleanup.h"
 #include "cli_common.h"
 #include "cli_root.h"
-#include "cmd_base_backup.h"
 #include "cmd_replication_slot.h"
 #include "file_utils.h"
 #include "log.h"
@@ -32,33 +32,7 @@
 #define WS_BACKUPS_SUBDIR "basebackups"
 #define WS_LATEST_FILENAME "basebackups/.latest"
 
-/* WsBackupInfo (formerly a private WsCleanupBackup) is now declared in
- * cli_archive_cleanup.h, exported for "pg_walserver list backups"
- * (cli_list.c) to reuse -- see that header's own comment. */
-
-/*
- * WsContinuityProblem carries one WAL-continuity problem's detail string
- * back out of check_wal_range()/ws_check_wal_continuity() below -- declared
- * here, ahead of those functions' own forward declarations, since both take
- * a pointer to it.
- */
-typedef struct WsContinuityProblem
-{
-	bool hasProblem;
-	char detail[512];
-} WsContinuityProblem;
-
 /* local helpers */
-static time_t ws_retention_age_cutoff(const RetentionAge *age, time_t now);
-static int backup_cmp(const void *a, const void *b);
-static bool parse_backup_label_time(const char *label, time_t *takenAt);
-static bool read_last_history_line(const char *clusterPath, uint32_t timeline,
-								   uint32_t *parentTliOut, char *lsnOut,
-								   size_t lsnOutSize);
-static void check_wal_range(const char *clusterPath, uint64_t segSize,
-							uint32_t startTli, uint64_t startSegno,
-							uint32_t endTli, uint64_t endSegno,
-							WsContinuityProblem *problem);
 static bool ws_check_wal_continuity(const char *clusterPath, const WsCluster *cluster,
 									uint64_t segSize, WsBackupInfo *backups,
 									int backupCount, const bool *kept);
@@ -67,11 +41,11 @@ static int cli_archive_cleanup_getopt(int argc, char **argv);
 static void cli_archive_cleanup_command_run(int argc, char **argv);
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver archive-cleanup --cluster <name> --pgdata <path> | --path <dir>
  *                               [--keep-count <N>] [--keep-age <interval>]
  *                               [--dry-run]
- * ----------------------------------------------------------------------- */
+ */
 
 static char archiveCleanupPgdata[MAXPGPATH] = { 0 };
 static char archiveCleanupConfigFile[MAXPGPATH] = { 0 };
@@ -146,219 +120,17 @@ CommandLine archive_cleanup_command =
 
 
 /*
- * RetentionAge/stringToRetentionAge() -- --keep-age parsing -- have
- * moved to src/bin/common/string_utils.h/.c, shared with cli_basebackup.c.
- *
- * ws_retention_age_cutoff computes the timestamp before which a base
- * backup counts as expired under --keep-age. 'h'/'d'/'w' are plain fixed
- * durations; 'm' is real calendar-month arithmetic on UTC struct tm
- * fields plus timegm() -- deliberately not "value * 30 days", since month
- * lengths vary. A day-of-month that doesn't exist in the target month
- * (e.g. going back one month from March 31st, where February 31st doesn't
- * exist) normalizes forward the same way mktime()/timegm() always
- * normalizes an out-of-range struct tm -- ordinary, documented behavior,
- * not a bug.
+ * RetentionAge/stringToRetentionAge() -- --keep-age parsing -- and
+ * retentionAgeCutoff() -- the timestamp before which a base backup counts
+ * as expired under --keep-age -- have moved to src/bin/common/
+ * string_utils.h/.c, shared with cli_basebackup.c.
  */
-static time_t
-ws_retention_age_cutoff(const RetentionAge *age, time_t now)
-{
-	if (age->unit == 'm')
-	{
-		struct tm tmNow = { 0 };
-
-		gmtime_r(&now, &tmNow);
-		tmNow.tm_mon -= (int) age->value;
-
-		return timegm(&tmNow);
-	}
-
-	long secondsPerUnit;
-
-	switch (age->unit)
-	{
-		case 'h':
-		{
-			secondsPerUnit = 3600L;
-			break;
-		}
-
-		case 'd':
-		{
-			secondsPerUnit = 86400L;
-			break;
-		}
-
-		case 'w':
-		default:
-		{
-			secondsPerUnit = 604800L;
-			break;
-		}
-	}
-
-	return now - (age->value * secondsPerUnit);
-}
-
 
 /*
- * Base backup enumeration
+ * Base backup enumeration: WsBackupInfo/ws_backup_list_load()/backup_cmp()
+ * have moved to backup_list.h/.c, shared with "pg_walserver list backups"
+ * (cli_list.c).
  */
-static int
-backup_cmp(const void *a, const void *b)
-{
-	const WsBackupInfo *ba = (const WsBackupInfo *) a;
-	const WsBackupInfo *bb = (const WsBackupInfo *) b;
-
-	return strcmp(ba->label, bb->label);
-}
-
-
-/*
- * parse_backup_label_time parses this project's own base backup directory
- * naming scheme, "basebackup-<UTC timestamp>Z" (cli_basebackup.c's own
- * strftime("basebackup-%Y%m%dT%H%M%SZ", ...)), back into a time_t, entirely
- * with a fixed-format scan (IGNORE-BANNED below) and timegm() -- the same
- * fixed-format-string style this project's own backup_label parsing
- * (cmd_base_backup.c's read_backup_label()) already uses, rather than
- * introducing strptime().
- */
-static bool
-parse_backup_label_time(const char *label, time_t *takenAt)
-{
-	const char *prefix = "basebackup-";
-	size_t prefixLen = strlen(prefix);
-
-	if (strncmp(label, prefix, prefixLen) != 0)
-	{
-		return false;
-	}
-
-	int y, mo, d, h, mi, s;
-
-	if (sscanf(label + prefixLen, "%4d%2d%2dT%2d%2d%2dZ", /* IGNORE-BANNED */
-			   &y, &mo, &d, &h, &mi, &s) != 6)
-	{
-		return false;
-	}
-
-	struct tm tm = { 0 };
-
-	tm.tm_year = y - 1900;
-	tm.tm_mon = mo - 1;
-	tm.tm_mday = d;
-	tm.tm_hour = h;
-	tm.tm_min = mi;
-	tm.tm_sec = s;
-
-	*takenAt = timegm(&tm);
-
-	return *takenAt != (time_t) -1;
-}
-
-
-/*
- * load_backups scans <clusterPath>/basebackups/ for backup directories,
- * parses each one's own label timestamp and (via read_backup_label(),
- * cmd_base_backup.c) its own required starting WAL segment, and returns
- * them sorted oldest-first (label strings sort chronologically). Returns
- * true even when there are zero backups (an empty, not-yet-used cluster);
- * false only on a directory that cannot be opened at all.
- */
-bool
-ws_backup_list_load(const char *clusterPath, uint64_t segSize,
-					WsBackupInfo **backupsOut, int *countOut)
-{
-	char backupsDir[MAXPGPATH] = { 0 };
-
-	sformat(backupsDir, sizeof(backupsDir), "%s/%s", clusterPath, WS_BACKUPS_SUBDIR);
-
-	*backupsOut = NULL;
-	*countOut = 0;
-
-	DIR *dir = opendir(backupsDir);
-
-	if (dir == NULL)
-	{
-		/* no basebackups/ directory yet at all: nothing to enumerate */
-		return true;
-	}
-
-	int capacity = 16;
-	WsBackupInfo *backups = (WsBackupInfo *)
-							malloc(capacity * sizeof(WsBackupInfo));
-	int count = 0;
-	struct dirent *entry;
-
-	while ((entry = readdir(dir)) != NULL)
-	{
-		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0 ||
-			strcmp(entry->d_name, ".latest") == 0)
-		{
-			continue;
-		}
-
-		char entryPath[MAXPGPATH] = { 0 };
-
-		sformat(entryPath, sizeof(entryPath), "%s/%s", backupsDir, entry->d_name);
-
-		if (!directory_exists(entryPath))
-		{
-			continue;
-		}
-
-		if (count == capacity)
-		{
-			capacity *= 2;
-			backups = (WsBackupInfo *)
-					  realloc(backups, capacity * sizeof(WsBackupInfo));
-		}
-
-		WsBackupInfo *backup = &(backups[count]);
-
-		memset(backup, 0, sizeof(WsBackupInfo));
-		strlcpy(backup->label, entry->d_name, sizeof(backup->label));
-		strlcpy(backup->dirPath, entryPath, sizeof(backup->dirPath));
-
-		if (!parse_backup_label_time(backup->label, &(backup->takenAt)))
-		{
-			log_warn("archive-cleanup: \"%s\" does not look like a "
-					 "pg_walserver base backup directory name; leaving it "
-					 "alone", backup->dirPath);
-			backup->takenAt = 0;
-		}
-
-		char lsn[MAXPGPATH] = { 0 };
-		int timeline = 0;
-
-		if (read_backup_label(backup->dirPath, lsn, sizeof(lsn), &timeline))
-		{
-			backup->haveStart = wal_lsn_to_segment_name(lsn, (uint32_t) timeline,
-														segSize,
-														backup->startSegment,
-														sizeof(backup->startSegment));
-		}
-
-		if (!backup->haveStart)
-		{
-			log_warn("archive-cleanup: could not determine \"%s\"'s own "
-					 "required starting WAL segment (missing or "
-					 "unparseable backup_label); leaving this backup "
-					 "alone this run", backup->dirPath);
-		}
-
-		count++;
-	}
-
-	closedir(dir);
-
-	qsort(backups, count, sizeof(WsBackupInfo), backup_cmp); /* IGNORE-BANNED */
-
-	*backupsOut = backups;
-	*countOut = count;
-
-	return true;
-}
-
 
 /*
  * WAL-continuity pre-flight check
@@ -383,241 +155,35 @@ ws_backup_list_load(const char *clusterPath, uint64_t segSize,
  * require every segment number to be present under whichever timeline
  * owned it at that point in the chain -- never flagging a gap merely
  * because two adjacent kept segments' timeline bytes differ.
+ *
+ * The generic chasing-the-chain-of-segments logic itself (timeline-history
+ * parsing, the segment-range walk) lives in src/bin/common/wal_segment.c's
+ * own wal_check_range()/wal_check_continuity(), free of any pg_walserver
+ * type: ws_check_wal_continuity() below is the thin, pg_walserver-specific
+ * wrapper around it, resolving this project's own WsCluster/WsBackupInfo
+ * into the plain tli/segno positions wal_check_continuity() needs (via
+ * wal_dir_find_latest(), wal_dir_scan.c, for the newest kept backup's own
+ * end boundary), then reporting each problem it hands back with this
+ * project's own log_error() wording, naming the specific backup.
  */
 
-#define WS_MAX_TIMELINE_CHAIN 64
-
 /*
- * read_last_history_line reads "<clusterPath>/%08X.history" (timeline) and
- * returns, in *parentTliOut/lsnOut, the parent timeline and switchpoint LSN
- * from its last non-blank, non-comment line -- the entry that records where
- * *this* timeline itself branched off from *parentTliOut* (a history file
- * may carry more than one line, one per ancestor further back, but the last
- * line is always the immediate parent, exactly how real Postgres's own
- * readTimeLineHistory()/tliOfPointInHistory() reasoning works). Returns
- * false if the file is missing, empty, or has no parseable line.
- */
-static bool
-read_last_history_line(const char *clusterPath, uint32_t timeline,
-					   uint32_t *parentTliOut, char *lsnOut, size_t lsnOutSize)
-{
-	char path[MAXPGPATH] = { 0 };
-
-	sformat(path, sizeof(path), "%s/%08X.history", clusterPath, timeline);
-
-	char *contents = NULL;
-	long size = 0;
-
-	if (!read_file_if_exists(path, &contents, &size) ||
-		contents == NULL || size == 0)
-	{
-		return false;
-	}
-
-	bool found = false;
-	char *line = contents;
-
-	while (line != NULL && *line != '\0')
-	{
-		char *nl = strchr(line, '\n');
-
-		if (nl != NULL)
-		{
-			*nl = '\0';
-		}
-
-		char *p = line;
-
-		while (*p == ' ' || *p == '\t')
-		{
-			p++;
-		}
-
-		if (*p != '\0' && *p != '#')
-		{
-			unsigned int tli;
-			char lsn[64] = { 0 };
-
-			if (sscanf(p, "%u\t%63s", &tli, lsn) == 2 || /* IGNORE-BANNED */
-				sscanf(p, "%u %63s", &tli, lsn) == 2) /* IGNORE-BANNED */
-			{
-				*parentTliOut = (uint32_t) tli;
-				strlcpy(lsnOut, lsn, lsnOutSize);
-				found = true;
-			}
-		}
-
-		line = (nl != NULL) ? nl + 1 : NULL;
-	}
-
-	free(contents);
-
-	return found;
-}
-
-
-/*
- * check_wal_range verifies that every WAL segment number from startSegno
- * (on startTli) through endSegno (on endTli, inclusive) is present on
- * disk under clusterPath, resolving any intervening timeline switch(es) via
- * "%08X.history" files. On the first missing segment, or the first
- * ancestry fact that can't be established, fills *problem and returns --
- * callers only need to check problem->hasProblem.
- */
-static void
-check_wal_range(const char *clusterPath, uint64_t segSize,
-				uint32_t startTli, uint64_t startSegno,
-				uint32_t endTli, uint64_t endSegno,
-				WsContinuityProblem *problem)
-{
-	problem->hasProblem = false;
-	problem->detail[0] = '\0';
-
-	if (endTli < startTli)
-	{
-		sformat(problem->detail, sizeof(problem->detail),
-				"cannot verify WAL continuity: the newer boundary is on "
-				"timeline %u, older than the earlier boundary's timeline "
-				"%u -- this should never happen",
-				endTli, startTli);
-		problem->hasProblem = true;
-		return;
-	}
-
-	uint32_t chainTli[WS_MAX_TIMELINE_CHAIN];
-	uint64_t chainLower[WS_MAX_TIMELINE_CHAIN];
-	int chainLen = 1;
-
-	chainTli[0] = endTli;
-
-	uint32_t cur = endTli;
-
-	while (cur != startTli)
-	{
-		uint32_t parentTli = 0;
-		char lsn[64] = { 0 };
-
-		if (!read_last_history_line(clusterPath, cur, &parentTli, lsn, sizeof(lsn)))
-		{
-			sformat(problem->detail, sizeof(problem->detail),
-					"cannot verify WAL continuity across a timeline switch: "
-					"\"%08X.history\" is missing or unreadable under \"%s\", "
-					"needed to confirm timeline %u's own ancestry back to "
-					"timeline %u", cur, clusterPath, cur, startTli);
-			problem->hasProblem = true;
-			return;
-		}
-
-		uint64_t switchSegno;
-
-		if (!wal_lsn_to_segno(lsn, segSize, &switchSegno))
-		{
-			sformat(problem->detail, sizeof(problem->detail),
-					"cannot verify WAL continuity: \"%08X.history\" under "
-					"\"%s\" has an unparseable switchpoint LSN (\"%s\")",
-					cur, clusterPath, lsn);
-			problem->hasProblem = true;
-			return;
-		}
-
-		chainLower[chainLen - 1] = switchSegno;
-
-		if (parentTli >= cur || parentTli < startTli)
-		{
-			sformat(problem->detail, sizeof(problem->detail),
-					"cannot verify WAL continuity: \"%08X.history\" under "
-					"\"%s\" names an implausible parent timeline %u",
-					cur, clusterPath, parentTli);
-			problem->hasProblem = true;
-			return;
-		}
-
-		cur = parentTli;
-
-		if (chainLen >= WS_MAX_TIMELINE_CHAIN)
-		{
-			sformat(problem->detail, sizeof(problem->detail),
-					"cannot verify WAL continuity: more than %d timeline "
-					"switches between timeline %u and timeline %u",
-					WS_MAX_TIMELINE_CHAIN, startTli, endTli);
-			problem->hasProblem = true;
-			return;
-		}
-
-		chainTli[chainLen] = cur;
-		chainLen++;
-	}
-
-	chainLower[chainLen - 1] = startSegno;
-
-	/* walk oldest (startTli) to newest (endTli), each timeline owning the
-	 * segment-number range [chainLower[k], next boundary) within the
-	 * overall [startSegno, endSegno] range being checked */
-	for (int k = chainLen - 1; k >= 0; k--)
-	{
-		uint64_t lower = chainLower[k];
-
-		/* an older timeline whose immediate successor switched away at
-		 * segno 0 owns nothing at all within this range -- guard the
-		 * subtraction below rather than underflow an unsigned bound */
-		if (k > 0 && chainLower[k - 1] == 0)
-		{
-			continue;
-		}
-
-		uint64_t upper = (k == 0) ? endSegno : (chainLower[k - 1] - 1);
-
-		if (lower > upper)
-		{
-			continue;
-		}
-
-		for (uint64_t segno = lower; segno <= upper; segno++)
-		{
-			char segName[WS_WAL_FNAME_LEN + 1] = { 0 };
-
-			wal_segment_name_format(chainTli[k], segno, segSize,
-									segName, sizeof(segName));
-
-			char segPath[MAXPGPATH] = { 0 };
-
-			sformat(segPath, sizeof(segPath), "%s/%s", clusterPath, segName);
-
-			if (!file_exists(segPath))
-			{
-				sformat(problem->detail, sizeof(problem->detail),
-						"missing WAL segment \"%s\" (needed between "
-						"\"%08X%08X%08X\" and \"%08X%08X%08X\")",
-						segName,
-						startTli, (uint32_t) (startSegno >> 32),
-						(uint32_t) startSegno,
-						endTli, (uint32_t) (endSegno >> 32),
-						(uint32_t) endSegno);
-				problem->hasProblem = true;
-				return;
-			}
-		}
-	}
-}
-
-
-/*
- * ws_check_wal_continuity runs check_wal_range() (above) for every kept
- * backup in the final kept set: from its own required starting segment
- * through to the next newer kept backup's own start segment, or, for the
- * newest kept backup, through to the newest WAL segment actually present
- * on disk. Logs a specific log_error (naming the backup and the missing
- * segment/range) for every problem found and returns false if any were --
- * callers decide what to do about that (refuse outright, or proceed
- * anyway under --force).
+ * ws_check_wal_continuity runs wal_check_continuity() (src/bin/common/
+ * wal_segment.c) for every kept backup in the final kept set: from its own
+ * required starting segment through to the next newer kept backup's own
+ * start segment, or, for the newest kept backup, through to the newest WAL
+ * segment actually present on disk (wal_dir_find_latest(), this project's
+ * own cluster/WAL-directory knowledge, resolved here and handed down as
+ * plain scalars). Logs a specific log_error (naming the backup and the
+ * missing segment/range) for every problem found and returns false if any
+ * were -- callers decide what to do about that (refuse outright, or
+ * proceed anyway under --force).
  */
 static bool
 ws_check_wal_continuity(const char *clusterPath, const WsCluster *cluster,
 						uint64_t segSize, WsBackupInfo *backups,
 						int backupCount, const bool *kept)
 {
-	bool ok = true;
-
 	int *keptIdx = (int *) malloc(sizeof(int) * backupCount);
 	int keptLen = 0;
 
@@ -629,11 +195,14 @@ ws_check_wal_continuity(const char *clusterPath, const WsCluster *cluster,
 		}
 	}
 
+	WalContinuityEntry *entries = (WalContinuityEntry *)
+								  malloc(sizeof(WalContinuityEntry) * keptLen);
+	int *entryBackupIdx = (int *) malloc(sizeof(int) * keptLen);
+	int entryLen = 0;
+
 	for (int k = 0; k < keptLen; k++)
 	{
 		WsBackupInfo *backup = &(backups[keptIdx[k]]);
-		uint32_t startTli;
-		uint64_t startSegno;
 
 		if (!wal_segment_name_is_valid(backup->startSegment))
 		{
@@ -643,85 +212,77 @@ ws_check_wal_continuity(const char *clusterPath, const WsCluster *cluster,
 		}
 
 		wal_segment_name_parse(backup->startSegment, segSize,
-							   &startTli, &startSegno);
+							   &(entries[entryLen].startTli),
+							   &(entries[entryLen].startSegno));
+		entryBackupIdx[entryLen] = keptIdx[k];
+		entryLen++;
+	}
 
-		uint32_t endTli = 0;
-		uint64_t endSegno = 0;
-		bool haveEnd = false;
+	bool haveLatest = false;
+	uint32_t latestTli = 0;
+	uint64_t latestEndSegno = 0;
 
-		if (k + 1 < keptLen)
+	{
+		char latestEndLsn[64] = { 0 };
+
+		if (wal_dir_find_latest(cluster, &latestTli, latestEndLsn,
+								sizeof(latestEndLsn)))
 		{
-			WsBackupInfo *next = &(backups[keptIdx[k + 1]]);
+			uint64_t oneAfterSegno;
 
-			haveEnd = wal_segment_name_is_valid(next->startSegment);
-
-			if (haveEnd)
+			if (wal_lsn_to_segno(latestEndLsn, segSize, &oneAfterSegno) &&
+				oneAfterSegno > 0)
 			{
-				wal_segment_name_parse(next->startSegment, segSize,
-									   &endTli, &endSegno);
+				latestEndSegno = oneAfterSegno - 1;
+				haveLatest = true;
 			}
 		}
-		else
+	}
+
+	WalContinuityProblem *problems = (WalContinuityProblem *)
+									 calloc(entryLen > 0 ? entryLen : 1,
+											sizeof(WalContinuityProblem));
+
+	bool ok = wal_check_continuity(clusterPath, segSize, entries, entryLen,
+								   haveLatest, latestTli, latestEndSegno,
+								   problems);
+
+	for (int e = 0; e < entryLen; e++)
+	{
+		if (!problems[e].hasProblem)
 		{
-			uint32_t latestTli = 0;
-			char latestEndLsn[64] = { 0 };
-
-			if (wal_dir_find_latest(cluster, &latestTli, latestEndLsn,
-									sizeof(latestEndLsn)))
-			{
-				uint64_t oneAfterSegno;
-
-				if (wal_lsn_to_segno(latestEndLsn, segSize, &oneAfterSegno) &&
-					oneAfterSegno > 0)
-				{
-					endTli = latestTli;
-					endSegno = oneAfterSegno - 1;
-					haveEnd = true;
-				}
-			}
-		}
-
-		if (!haveEnd)
-		{
-			/* nothing on disk to compare against at all (a brand new
-			 * cluster, or every recognizable complete segment is gone) --
-			 * the least we can require is that this backup's own
-			 * required starting segment is itself still present */
-			char segPath[MAXPGPATH] = { 0 };
-
-			sformat(segPath, sizeof(segPath), "%s/%s", clusterPath,
-					backup->startSegment);
-
-			if (!file_exists(segPath))
-			{
-				log_error("archive-cleanup: WAL continuity check failed for "
-						  "kept backup \"%s\": its own required starting "
-						  "WAL segment \"%s\" is missing, and no WAL "
-						  "segment at all is present under \"%s\" to "
-						  "compare against", backup->dirPath,
-						  backup->startSegment, clusterPath);
-				ok = false;
-			}
-
 			continue;
 		}
 
-		WsContinuityProblem problem = { 0 };
+		WsBackupInfo *backup = &(backups[entryBackupIdx[e]]);
+		bool lastWithNoReference = (e == entryLen - 1) && !haveLatest;
 
-		check_wal_range(clusterPath, segSize, startTli, startSegno,
-						endTli, endSegno, &problem);
-
-		if (problem.hasProblem)
+		if (lastWithNoReference)
+		{
+			/* nothing on disk to compare against at all (a brand new
+			 * cluster, or every recognizable complete segment is gone) --
+			 * the least that could still be required (its own required
+			 * starting segment being present) already failed */
+			log_error("archive-cleanup: WAL continuity check failed for "
+					  "kept backup \"%s\": its own required starting "
+					  "WAL segment \"%s\" is missing, and no WAL "
+					  "segment at all is present under \"%s\" to "
+					  "compare against", backup->dirPath,
+					  backup->startSegment, clusterPath);
+		}
+		else
 		{
 			log_error("archive-cleanup: WAL continuity check failed for "
 					  "kept backup \"%s\" (requires WAL from \"%s\" "
 					  "onward): %s", backup->dirPath, backup->startSegment,
-					  problem.detail);
-			ok = false;
+					  problems[e].detail);
 		}
 	}
 
 	free(keptIdx);
+	free(entries);
+	free(entryBackupIdx);
+	free(problems);
 
 	return ok;
 }
@@ -839,7 +400,7 @@ ws_archive_cleanup_run(const char *clusterPath,
 
 	/* --- decide which backups are kept, oldest to newest --- */
 	time_t now = time(NULL);
-	time_t ageCutoffTime = haveKeepAge ? ws_retention_age_cutoff(&keepAge, now) : 0;
+	time_t ageCutoffTime = haveKeepAge ? retentionAgeCutoff(&keepAge, now) : 0;
 	int countCutoffIndex = haveKeepCount ? (backupCount - keepCount) : 0;
 
 	bool *keptByCount = (bool *) calloc(backupCount, sizeof(bool));
