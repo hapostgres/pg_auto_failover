@@ -9,7 +9,7 @@
  *   `basebackup --keep-count <N> --keep-age <interval>` (both optional;
  *   plain `basebackup` still behaves exactly as before with neither given)
  *   composes this with `archive-cleanup`'s own retention logic (ws_
- *   archive_cleanup_run(), cli_archive_cleanup.c/.h) so one cron line can
+ *   archive_cleanup_execute(), cli_archive_cleanup.c/.h) so one cron line can
  *   both take a new backup and immediately prune what the retention policy
  *   no longer needs -- see cli_root.c's own cli_basebackup_command_run().
  *   Cleanup only ever runs after a *successful* backup, and a cleanup

@@ -59,10 +59,10 @@
  * "pg_walserver list backups" (cli_list.c).
  */
 
-bool ws_archive_cleanup_run(const char *clusterPath,
-							bool haveKeepCount, int keepCount,
-							bool haveKeepAge, RetentionAge keepAge,
-							bool dryRun, bool force);
+bool ws_archive_cleanup_execute(const char *clusterPath,
+								bool haveKeepCount, int keepCount,
+								bool haveKeepAge, RetentionAge keepAge,
+								bool dryRun, bool force);
 
 extern CommandLine archive_cleanup_command;
 

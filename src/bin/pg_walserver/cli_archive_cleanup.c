@@ -289,55 +289,18 @@ ws_check_wal_continuity(const char *clusterPath, const WsCluster *cluster,
 
 
 /*
- * Main entry point
+ * resolve_latest_backup looks up which enumerated backup
+ * "basebackups/.latest" currently names (written by cli_basebackup_run()),
+ * and validates it has a readable starting WAL position. *latestIndexOut
+ * is set only on success. Returns false, with an error already logged
+ * (naming the problem), when ".latest" is missing/empty, names a backup
+ * that no longer exists, or that backup's own backup_label couldn't be
+ * read.
  */
-bool
-ws_archive_cleanup_run(const char *clusterPath,
-					   bool haveKeepCount, int keepCount,
-					   bool haveKeepAge, RetentionAge keepAge,
-					   bool dryRun, bool force)
+static bool
+resolve_latest_backup(const char *clusterPath, WsBackupInfo *backups,
+					  int backupCount, int *latestIndexOut)
 {
-	if (!haveKeepCount && !haveKeepAge)
-	{
-		log_error("archive-cleanup requires --keep-count and/or --keep-age "
-				  "-- retention is infinite by default, and running with "
-				  "neither would mean \"delete everything\", which this "
-				  "tool refuses to do implicitly");
-		return false;
-	}
-
-	if (!directory_exists(clusterPath))
-	{
-		log_error("archive-cleanup: \"%s\" is not a directory", clusterPath);
-		return false;
-	}
-
-	WsCluster cluster = { 0 };
-
-	strlcpy(cluster.path, clusterPath, sizeof(cluster.path));
-
-	uint64_t segSize = ws_cluster_wal_segment_size(&cluster);
-
-	WsBackupInfo *backups = NULL;
-	int backupCount = 0;
-
-	if (!ws_backup_list_load(clusterPath, segSize, &backups, &backupCount))
-	{
-		log_error("archive-cleanup: could not read \"%s/%s\"",
-				  clusterPath, WS_BACKUPS_SUBDIR);
-		return false;
-	}
-
-	if (backupCount == 0)
-	{
-		log_warn("archive-cleanup: no base backups found under \"%s/%s\"; "
-				 "nothing to anchor WAL retention against, leaving \"%s\" "
-				 "untouched", clusterPath, WS_BACKUPS_SUBDIR, clusterPath);
-		free(backups);
-		return true;
-	}
-
-	/* which backup does basebackups/.latest currently point to? */
 	char latestPath[MAXPGPATH] = { 0 };
 	char *latestContents = NULL;
 	long latestSize = 0;
@@ -350,7 +313,6 @@ ws_archive_cleanup_run(const char *clusterPath,
 		log_error("archive-cleanup: \"%s\" is missing or empty -- refusing "
 				  "to run without a known \"latest\" backup to protect",
 				  latestPath);
-		free(backups);
 		return false;
 	}
 
@@ -384,7 +346,6 @@ ws_archive_cleanup_run(const char *clusterPath,
 				  "does not exist under \"%s/%s\" -- refusing to run "
 				  "without a known \"latest\" backup to protect",
 				  latestPath, latestLabel, clusterPath, WS_BACKUPS_SUBDIR);
-		free(backups);
 		return false;
 	}
 
@@ -394,11 +355,36 @@ ws_archive_cleanup_run(const char *clusterPath,
 				  "readable starting WAL position -- refusing to run "
 				  "without knowing what WAL it requires",
 				  backups[latestIndex].dirPath);
-		free(backups);
 		return false;
 	}
 
-	/* --- decide which backups are kept, oldest to newest --- */
+	*latestIndexOut = latestIndex;
+
+	return true;
+}
+
+
+/*
+ * decide_kept_backups computes, for every enumerated backup, whether
+ * --keep-count/--keep-age (whichever, or both, were given -- when both,
+ * the more conservative, keeps-more rule wins) keeps it, folds in the
+ * unconditional floor a still-existing replication slot's own restart_lsn
+ * imposes (logging loudly, by name, whenever that is the actual reason
+ * less was removed than the flags alone would have allowed), and logs
+ * which cutoff rule(s) ended up in effect. Fills *keptByCountOut,
+ * *keptByAgeOut, and *keptOut (freshly calloc'd backupCount-long arrays,
+ * each to be free()'d by the caller) and combinedCutoffOut
+ * (combinedCutoffSize-long) with the resulting combined WAL retention
+ * cutoff segment name.
+ */
+static void
+decide_kept_backups(WsBackupInfo *backups, int backupCount, int latestIndex,
+					bool haveKeepCount, int keepCount,
+					bool haveKeepAge, RetentionAge keepAge,
+					const WsCluster *cluster, uint64_t segSize,
+					bool **keptByCountOut, bool **keptByAgeOut, bool **keptOut,
+					char *combinedCutoffOut, size_t combinedCutoffSize)
+{
 	time_t now = time(NULL);
 	time_t ageCutoffTime = haveKeepAge ? retentionAgeCutoff(&keepAge, now) : 0;
 	int countCutoffIndex = haveKeepCount ? (backupCount - keepCount) : 0;
@@ -446,10 +432,8 @@ ws_archive_cleanup_run(const char *clusterPath,
 		}
 	}
 
-	char combinedCutoff[WS_WAL_FNAME_LEN + 1] = { 0 };
-
-	strlcpy(combinedCutoff, backups[cutoffIndex].startSegment,
-			sizeof(combinedCutoff));
+	strlcpy(combinedCutoffOut, backups[cutoffIndex].startSegment,
+			combinedCutoffSize);
 
 	/*
 	 * A still-existing replication slot's own restart_lsn is an
@@ -468,7 +452,7 @@ ws_archive_cleanup_run(const char *clusterPath,
 	char slotName[NAMEDATALEN] = { 0 };
 	char slotLsn[32] = { 0 };
 
-	if (ws_replication_slot_oldest_restart_lsn(&cluster, segSize, slotName,
+	if (ws_replication_slot_oldest_restart_lsn(cluster, segSize, slotName,
 											   sizeof(slotName), slotLsn,
 											   sizeof(slotLsn)))
 	{
@@ -481,7 +465,7 @@ ws_archive_cleanup_run(const char *clusterPath,
 			wal_segment_name_format(0, slotSegno, segSize, slotCutoff,
 									sizeof(slotCutoff));
 
-			if (strcmp(slotCutoff + 8, combinedCutoff + 8) < 0)
+			if (strcmp(slotCutoff + 8, combinedCutoffOut + 8) < 0)
 			{
 				log_warn("archive-cleanup: replication slot \"%s\" (restart_lsn "
 						 "%s) needs WAL from \"%s\" onward, older than "
@@ -489,7 +473,7 @@ ws_archive_cleanup_run(const char *clusterPath,
 						 "retaining it too; drop the slot (or let it catch "
 						 "up) to allow this WAL to be removed",
 						 slotName, slotLsn, slotCutoff);
-				strlcpy(combinedCutoff, slotCutoff, sizeof(combinedCutoff));
+				strlcpy(combinedCutoffOut, slotCutoff, combinedCutoffSize);
 			}
 		}
 	}
@@ -499,64 +483,97 @@ ws_archive_cleanup_run(const char *clusterPath,
 		log_info("archive-cleanup: --keep-count %d and --keep-age %ld%c "
 				 "both given; the more conservative (keeps more) of the "
 				 "two wins -- retaining WAL from \"%s\" onward",
-				 keepCount, keepAge.value, keepAge.unit, combinedCutoff);
+				 keepCount, keepAge.value, keepAge.unit, combinedCutoffOut);
 	}
 	else if (haveKeepCount)
 	{
 		log_info("archive-cleanup: --keep-count %d -- retaining WAL from "
-				 "\"%s\" onward", keepCount, combinedCutoff);
+				 "\"%s\" onward", keepCount, combinedCutoffOut);
 	}
 	else
 	{
 		log_info("archive-cleanup: --keep-age %ld%c -- retaining WAL from "
-				 "\"%s\" onward", keepAge.value, keepAge.unit, combinedCutoff);
+				 "\"%s\" onward", keepAge.value, keepAge.unit, combinedCutoffOut);
 	}
 
-	/* --- pre-flight WAL-continuity check on the final kept set, always
-	 * computed and reported (dry-run or not) -- see ws_check_wal_
-	 * continuity()'s own header comment. Only a real run's actual
-	 * deletion is gated on the outcome (and only without --force): a
-	 * dry-run never deletes anything regardless, but must still surface
-	 * the same problem a real run would refuse over. */
-	bool continuityOk = ws_check_wal_continuity(clusterPath, &cluster, segSize,
+	*keptByCountOut = keptByCount;
+	*keptByAgeOut = keptByAge;
+	*keptOut = kept;
+}
+
+
+/*
+ * run_continuity_preflight runs ws_check_wal_continuity() on the final kept
+ * set, always (dry-run or not), and decides whether the deletion phases
+ * that follow may proceed: refuses outright (logging a log_fatal and
+ * returning false) only on a real run (not dryRun) without --force when a
+ * problem was found; otherwise returns true (a dry run or --force still
+ * proceeds through the -- otherwise no-op or bypassed -- remaining phases,
+ * surfacing the same problem a real run would have refused over).
+ * *continuityOkOut carries the raw pass/fail result either way, for the
+ * caller's own final return value.
+ */
+static bool
+run_continuity_preflight(const char *clusterPath, const WsCluster *cluster,
+						 uint64_t segSize, WsBackupInfo *backups,
+						 int backupCount, const bool *kept,
+						 bool dryRun, bool force, bool *continuityOkOut)
+{
+	bool continuityOk = ws_check_wal_continuity(clusterPath, cluster, segSize,
 												backups, backupCount, kept);
 
-	if (!continuityOk)
+	*continuityOkOut = continuityOk;
+
+	if (continuityOk)
 	{
-		if (force)
-		{
-			log_warn("archive-cleanup: proceeding despite the WAL "
-					 "continuity problem(s) above because --force was "
-					 "given");
-		}
-		else if (dryRun)
-		{
-			log_error("archive-cleanup: [dry run] the WAL continuity "
-					  "problem(s) above would refuse this operation "
-					  "outright on a real run (pass --force to proceed "
-					  "anyway once you've verified that is safe)");
-		}
-		else
-		{
-			log_fatal("archive-cleanup: refusing to remove anything: one "
-					  "or more kept backups would be left without a "
-					  "complete, gap-free WAL sequence -- see the "
-					  "specific problem(s) logged above. This is a whole-"
-					  "operation refusal, nothing has been deleted. Pass "
-					  "--force only once you have independently verified "
-					  "it is safe to proceed (e.g. an independent backup, "
-					  "or an accepted/expected gap) -- a default, "
-					  "unattended cron job should never blindly pass "
-					  "--force");
-			free(backups);
-			free(keptByCount);
-			free(keptByAge);
-			free(kept);
-			return false;
-		}
+		return true;
 	}
 
-	/* --- remove non-kept, non-superseded-anyway backups --- */
+	if (force)
+	{
+		log_warn("archive-cleanup: proceeding despite the WAL "
+				 "continuity problem(s) above because --force was "
+				 "given");
+	}
+	else if (dryRun)
+	{
+		log_error("archive-cleanup: [dry run] the WAL continuity "
+				  "problem(s) above would refuse this operation "
+				  "outright on a real run (pass --force to proceed "
+				  "anyway once you've verified that is safe)");
+	}
+	else
+	{
+		log_fatal("archive-cleanup: refusing to remove anything: one "
+				  "or more kept backups would be left without a "
+				  "complete, gap-free WAL sequence -- see the "
+				  "specific problem(s) logged above. This is a whole-"
+				  "operation refusal, nothing has been deleted. Pass "
+				  "--force only once you have independently verified "
+				  "it is safe to proceed (e.g. an independent backup, "
+				  "or an accepted/expected gap) -- a default, "
+				  "unattended cron job should never blindly pass "
+				  "--force");
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * remove_expired_backups removes every enumerated backup that isn't the
+ * current "latest" one and isn't in the kept set -- or that is kept but
+ * already superseded anyway (its own required starting WAL segment is
+ * already missing, so keeping the backup directory itself around no
+ * longer helps). dryRun logs what would be removed without removing
+ * anything.
+ */
+static void
+remove_expired_backups(const char *clusterPath, WsBackupInfo *backups,
+					   int backupCount, int latestIndex, const bool *kept,
+					   bool haveKeepCount, bool haveKeepAge, bool dryRun)
+{
 	for (int i = 0; i < backupCount; i++)
 	{
 		if (i == latestIndex)
@@ -627,17 +644,26 @@ ws_archive_cleanup_run(const char *clusterPath,
 			}
 		}
 	}
+}
 
-	/* --- remove WAL/.partial/.backup files older than the cutoff --- */
+
+/*
+ * remove_expired_wal_files removes every WAL/.partial/.backup file directly
+ * under clusterPath whose own filename prefix sorts before combinedCutoff
+ * (ignoring the timeline byte range, exactly like real pg_archivecleanup's
+ * own CleanupPriorWALFiles() does). dryRun logs what would be removed
+ * without removing anything. Returns false, with an error already logged,
+ * only when clusterPath itself cannot be opened.
+ */
+static bool
+remove_expired_wal_files(const char *clusterPath, const char *combinedCutoff,
+						 bool dryRun)
+{
 	DIR *dir = opendir(clusterPath);
 
 	if (dir == NULL)
 	{
 		log_error("archive-cleanup: could not open \"%s\"", clusterPath);
-		free(backups);
-		free(keptByCount);
-		free(keptByAge);
-		free(kept);
 		return false;
 	}
 
@@ -688,6 +714,132 @@ ws_archive_cleanup_run(const char *clusterPath,
 	}
 
 	closedir(dir);
+
+	return true;
+}
+
+
+/*
+ * ws_archive_cleanup_execute is the actual archive-cleanup operation: it
+ * prunes clusterPath (one cluster's own directory: WAL segments/.partial/
+ * .backup files directly under it, base backups under its "basebackups/"
+ * subdirectory) down to whatever haveKeepCount/haveKeepAge (at least one
+ * must be true) ask to retain. dryRun logs what would be removed without
+ * removing anything. Returns false, with an error already logged, on a
+ * configuration problem (neither retention flag given, an unreadable
+ * cluster directory, a ".latest" backup that cannot be found or parsed)
+ * -- never partway through an unsafe removal.
+ *
+ * Before any deletion, a pre-flight WAL-continuity check (ws_check_wal_
+ * continuity() above) verifies every kept backup can still walk forward,
+ * with no missing segment, to wherever it needs to reach (accounting for
+ * legitimate timeline switches via "%08X.history" files). Always computed
+ * and logged, in both dry-run and a real run. On a real run, finding a
+ * problem refuses the *entire* operation (nothing deleted at all, not
+ * even otherwise-safe parts) unless force is true -- force exists for an
+ * operator who has independently verified proceeding is safe (e.g. an
+ * independent backup, or an accepted/expected gap); a default, unattended
+ * cron job should never blindly pass it. dryRun never deletes anything
+ * regardless of force/continuity, but still returns false when a problem
+ * was found and force was not given, so its own exit status reflects what
+ * a real run would have refused to do.
+ *
+ * Orchestrates, in order: resolving the "latest" backup to protect
+ * (resolve_latest_backup()), deciding the kept/removed set per backup
+ * (decide_kept_backups()), the WAL-continuity pre-flight check
+ * (run_continuity_preflight()), and, when it allows proceeding, the two
+ * actual removal phases (remove_expired_backups(), remove_expired_wal_
+ * files()).
+ */
+bool
+ws_archive_cleanup_execute(const char *clusterPath,
+						   bool haveKeepCount, int keepCount,
+						   bool haveKeepAge, RetentionAge keepAge,
+						   bool dryRun, bool force)
+{
+	if (!haveKeepCount && !haveKeepAge)
+	{
+		log_error("archive-cleanup requires --keep-count and/or --keep-age "
+				  "-- retention is infinite by default, and running with "
+				  "neither would mean \"delete everything\", which this "
+				  "tool refuses to do implicitly");
+		return false;
+	}
+
+	if (!directory_exists(clusterPath))
+	{
+		log_error("archive-cleanup: \"%s\" is not a directory", clusterPath);
+		return false;
+	}
+
+	WsCluster cluster = { 0 };
+
+	strlcpy(cluster.path, clusterPath, sizeof(cluster.path));
+
+	uint64_t segSize = ws_cluster_wal_segment_size(&cluster);
+
+	WsBackupInfo *backups = NULL;
+	int backupCount = 0;
+
+	if (!ws_backup_list_load(clusterPath, segSize, &backups, &backupCount))
+	{
+		log_error("archive-cleanup: could not read \"%s/%s\"",
+				  clusterPath, WS_BACKUPS_SUBDIR);
+		return false;
+	}
+
+	if (backupCount == 0)
+	{
+		log_warn("archive-cleanup: no base backups found under \"%s/%s\"; "
+				 "nothing to anchor WAL retention against, leaving \"%s\" "
+				 "untouched", clusterPath, WS_BACKUPS_SUBDIR, clusterPath);
+		free(backups);
+		return true;
+	}
+
+	int latestIndex = -1;
+
+	if (!resolve_latest_backup(clusterPath, backups, backupCount, &latestIndex))
+	{
+		free(backups);
+		return false;
+	}
+
+	bool *keptByCount = NULL;
+	bool *keptByAge = NULL;
+	bool *kept = NULL;
+	char combinedCutoff[WS_WAL_FNAME_LEN + 1] = { 0 };
+
+	decide_kept_backups(backups, backupCount, latestIndex,
+						haveKeepCount, keepCount, haveKeepAge, keepAge,
+						&cluster, segSize,
+						&keptByCount, &keptByAge, &kept,
+						combinedCutoff, sizeof(combinedCutoff));
+
+	bool continuityOk = true;
+
+	if (!run_continuity_preflight(clusterPath, &cluster, segSize, backups,
+								  backupCount, kept, dryRun, force,
+								  &continuityOk))
+	{
+		free(backups);
+		free(keptByCount);
+		free(keptByAge);
+		free(kept);
+		return false;
+	}
+
+	remove_expired_backups(clusterPath, backups, backupCount, latestIndex,
+						   kept, haveKeepCount, haveKeepAge, dryRun);
+
+	if (!remove_expired_wal_files(clusterPath, combinedCutoff, dryRun))
+	{
+		free(backups);
+		free(keptByCount);
+		free(keptByAge);
+		free(kept);
+		return false;
+	}
 
 	free(backups);
 	free(keptByCount);
@@ -855,8 +1007,8 @@ cli_archive_cleanup_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	exit(ws_archive_cleanup_run(clusterPath,
-								archiveCleanupHaveKeepCount, archiveCleanupKeepCount,
-								archiveCleanupHaveKeepAge, archiveCleanupKeepAge,
-								archiveCleanupDryRun, archiveCleanupForce) ? 0 : 1);
+	exit(ws_archive_cleanup_execute(clusterPath,
+									archiveCleanupHaveKeepCount, archiveCleanupKeepCount,
+									archiveCleanupHaveKeepAge, archiveCleanupKeepAge,
+									archiveCleanupDryRun, archiveCleanupForce) ? 0 : 1);
 }
