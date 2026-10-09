@@ -29,7 +29,7 @@ typedef struct WalServerConfig
 
 	char pgdata[MAXPGPATH];  /* pg_walserver's own storage root (its --pgdata) */
 	int port;                /* 0 means: don't pass --port, let pg_walserver
-							   * use its own default/persisted value */
+	                          * use its own default/persisted value */
 	char name[_POSIX_HOST_NAME_MAX]; /* optional --name, informational only */
 } WalServerConfig;
 
