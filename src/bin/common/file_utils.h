@@ -81,4 +81,6 @@ bool read_file_flags(const char *path, int openFlags, size_t maxSize,
 
 int open_regular_file(const char *path);
 
+uint64_t directory_size(const char *path);
+
 #endif /* FILE_UTILS_H */

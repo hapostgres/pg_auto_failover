@@ -7,6 +7,7 @@
  *
  */
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <libgen.h>
@@ -1167,4 +1168,56 @@ read_file_flags(const char *path, int openFlags, size_t maxSize,
 	}
 
 	return true;
+}
+
+
+/*
+ * directory_size recursively sums the size in bytes of every regular file
+ * under path -- shared by pg_walserver's "ls" and "list" sub-commands
+ * (cli_ls.c, cli_list.c) to report a base backup's own real size on disk.
+ */
+uint64_t
+directory_size(const char *path)
+{
+	DIR *dir = opendir(path);
+
+	if (dir == NULL)
+	{
+		return 0;
+	}
+
+	uint64_t total = 0;
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+		{
+			continue;
+		}
+
+		char entryPath[MAXPGPATH] = { 0 };
+
+		sformat(entryPath, sizeof(entryPath), "%s/%s", path, entry->d_name);
+
+		struct stat st;
+
+		if (lstat(entryPath, &st) != 0)
+		{
+			continue;
+		}
+
+		if (S_ISDIR(st.st_mode))
+		{
+			total += directory_size(entryPath);
+		}
+		else if (S_ISREG(st.st_mode))
+		{
+			total += (uint64_t) st.st_size;
+		}
+	}
+
+	closedir(dir);
+
+	return total;
 }

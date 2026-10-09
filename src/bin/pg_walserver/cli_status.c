@@ -30,9 +30,9 @@ static int cli_status_getopt(int argc, char **argv);
 static void cli_status_command_run(int argc, char **argv);
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver status --pgdata <path>
- * ----------------------------------------------------------------------- */
+ */
 
 static char statusPgdata[MAXPGPATH] = { 0 };
 static char statusConfigFile[MAXPGPATH] = { 0 };

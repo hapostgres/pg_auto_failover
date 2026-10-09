@@ -200,3 +200,24 @@ format_elapsed_time(time_t startedAt, char *dest, size_t destSize)
 
 	IntervalToString(elapsed < 0 ? 0 : elapsed, dest, destSize);
 }
+
+
+/*
+ * format_utc renders t as an ISO-8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ"),
+ * or "-" when t is unset (<= 0). Shared by pg_walserver's "ls" and "list"
+ * sub-commands (cli_ls.c, cli_list.c).
+ */
+void
+format_utc(time_t t, char *dest, size_t destSize)
+{
+	if (t <= 0)
+	{
+		strlcpy(dest, "-", destSize);
+		return;
+	}
+
+	struct tm tmVal = { 0 };
+
+	gmtime_r(&t, &tmVal);
+	strftime(dest, destSize, "%Y-%m-%dT%H:%M:%SZ", &tmVal);
+}

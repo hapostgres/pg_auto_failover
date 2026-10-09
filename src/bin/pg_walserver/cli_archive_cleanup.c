@@ -290,7 +290,7 @@ ws_check_wal_continuity(const char *clusterPath, const WsCluster *cluster,
 
 /*
  * resolve_latest_backup looks up which enumerated backup
- * "basebackups/.latest" currently names (written by cli_basebackup_run()),
+ * "basebackups/.latest" currently names (written by ws_basebackup_execute()),
  * and validates it has a readable starting WAL position. *latestIndexOut
  * is set only on success. Returns false, with an error already logged
  * (naming the problem), when ".latest" is missing/empty, names a backup
@@ -321,7 +321,7 @@ resolve_latest_backup(const char *clusterPath, WsBackupInfo *backups,
 	strlcpy(latestLabel, latestContents, sizeof(latestLabel));
 	free(latestContents);
 
-	/* trim a trailing newline, the same way cli_basebackup_run() writes it */
+	/* trim a trailing newline, the same way ws_basebackup_execute() writes it */
 	size_t latestLen = strlen(latestLabel);
 
 	if (latestLen > 0 && latestLabel[latestLen - 1] == '\n')

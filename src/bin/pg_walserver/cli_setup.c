@@ -33,11 +33,11 @@ static void cli_setup_create_cert_if_missing(const WsSetupOptions *options);
 static void cli_setup_create_hba_if_missing(const WsSetupOptions *options);
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver setup --pgdata <path> [--port <port>]
  *                     [--ssl-cert-file <path>] [--ssl-key-file <path>]
  *                     [--ssl-ca-file <path>] [--auth-timeout <seconds>]
- * ----------------------------------------------------------------------- */
+ */
 
 static WsSetupOptions setupOptions = { 0 };
 
