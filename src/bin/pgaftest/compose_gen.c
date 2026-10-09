@@ -586,21 +586,25 @@ compose_service_ip(const char *projectName, int offset, char *buf, int buflen)
  * "<dir>/<nodeName>-pg_walserver_hba.conf" on the host, to be bind-mounted
  * read-only into that node's container at /etc/pgaf/<nodeName>-pg_walserver_
  * hba.conf (see the volumes: stanza in the per-node loop below) -- NOT
- * directly at the /var/lib/postgres/ws/pg_walserver_hba.conf path pg_walserver
- * itself reads. pg_walserver_line's own default commandOverride copies it
- * into place from there instead (`cp ... && exec pg_walserver ...`), the
- * exact same "read-only bind-mount, then cp into the volume in the start
- * command" pattern this file already uses for ssl_needs_certs()'s own
+ * directly at the /var/lib/postgres/pgaf/pg_walserver_hba.conf path
+ * pg_walserver itself reads (that is this walserver node's own --pgdata,
+ * the same NODE_PGDATA every other node's node.ini also declares, now that
+ * pg_walserver_line routes its node through `pg_autoctl create walserver` /
+ * `pg_autoctl node run` instead of exec'ing pg_walserver directly).
+ * pg_walserver_line's own default commandOverride copies it into place from
+ * there instead (`cp ... && exec pg_autoctl node run ...`), the exact same
+ * "read-only bind-mount, then cp into the volume in the start command"
+ * pattern this file already uses for ssl_needs_certs()'s own
  * server.crt/server.key (see write_node_command()'s SSL cp step) --
  * necessary for the same reason: a bind-mounted file's *parent directories*
  * are auto-created by the Docker daemon itself (root:root, mode 0755) the
  * moment they don't already exist inside the named volume, which would
- * leave /var/lib/postgres/ws itself un-writable by the container's own
+ * leave /var/lib/postgres/pgaf itself un-writable by the container's own
  * unprivileged user for anything pg_walserver subsequently needs to create
  * under it (pg_walserver.ini, a cluster's own subdirectory, ...) if the HBA
  * file were bind-mounted directly into it. Copying it into place from
  * within the container's own startup command, after that command's own
- * "mkdir -p /var/lib/postgres/ws" has created the directory as the
+ * "mkdir -p /var/lib/postgres/pgaf" has created the directory as the
  * container's own user, avoids that trap entirely.
  *
  * Why this exists: hba_write_default_if_missing() (src/bin/pg_walserver/
@@ -1810,6 +1814,12 @@ compose_gen_write_node_ini(const TestCluster *cluster,
 		case NODE_KIND_CITUS_WORKER:
 		{
 			kindStr = "worker";
+			break;
+		}
+
+		case NODE_KIND_WALSERVER:
+		{
+			kindStr = "walserver";
 			break;
 		}
 

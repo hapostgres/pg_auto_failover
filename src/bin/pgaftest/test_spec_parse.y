@@ -449,31 +449,58 @@ pg_walserver_line:
 		current_node->isPgWalserver = true;
 
 		/*
-		 * Default: run pg_walserver's own "serve" mode directly as this
-		 * container's PID 1, pointed at a writable directory of its own
-		 * under the node's already-provisioned /var/lib/postgres volume.
-		 * Zero named clusters at startup is a supported, harmless state (see
-		 * cli_serve_run in pg_walserver/cli_root.c); a spec that wants
-		 * clusters configured first overrides this via "command \"...\"".
+		 * This is a pg_autoctl "walserver" node (NODE_KIND_WALSERVER), not a
+		 * plain no-monitor Postgres node: compose_gen_write_node_ini() emits
+		 * "kind = walserver" into this node's node.ini, and
+		 * nodespec_create_argv() on the pg_autoctl side knows to run
+		 * `pg_autoctl create walserver --pgdata ... --run` for it, which
+		 * supervises `pg_walserver serve` as a plain child process -- never
+		 * registering with a monitor, never joining the keeper FSM, exactly
+		 * like create_standalone_node()'s noMonitor=true already set above.
+		 */
+		current_node->kind = NODE_KIND_WALSERVER;
+
+		/*
+		 * Default: go through pg_autoctl (`pg_autoctl node run <ini>`,
+		 * exactly like any other node -- see write_node_command() in
+		 * compose_gen.c) rather than exec'ing pg_walserver directly as PID 1.
+		 * This gives the node pg_autoctl's own create/launch-deferred
+		 * support "for free" via aux_opt below, and process supervision
+		 * (automatic restart) instead of a one-shot PID 1.
 		 *
-		 * Also copies in a real, usable default pg_walserver_hba.conf --
-		 * compose_gen.c's write_pg_walserver_default_hba() bind-mounts it
-		 * read-only at /etc/pgaf/<name>-pg_walserver_hba.conf; this cp (after
-		 * "mkdir -p" has created /var/lib/postgres/ws as this container's
-		 * own user, not Docker's auto-created root:root parent directory a
-		 * direct bind-mount into it would leave behind) is what actually
-		 * puts it where pg_walserver reads it from. See that function's own
-		 * header comment for the full design and why a direct bind-mount
-		 * into /var/lib/postgres/ws isn't used instead. "|| true": the
-		 * source file may not exist for a node whose name collides with
-		 * nothing generated (never happens via this grammar rule, but keeps
-		 * this command robust rather than failing PID 1 outright over HBA).
+		 * The one wrinkle: pg_walserver needs a real, usable default
+		 * pg_walserver_hba.conf already in place in its --pgdata directory
+		 * before "serve" ever starts (its own hba_write_default_if_missing()
+		 * otherwise leaves every rule commented out, rejecting every
+		 * connection). compose_gen.c's write_pg_walserver_default_hba()
+		 * generates one and bind-mounts it read-only at
+		 * /etc/pgaf/<name>-pg_walserver_hba.conf -- outside the node's own
+		 * data volume, so the bind mount's own auto-created parent directory
+		 * ownership (root:root) never collides with pgdata. This command
+		 * does the one step pg_autoctl itself has no reason to know about --
+		 * "mkdir -p" the node's own pgdata as the container's real user
+		 * (not Docker's auto-created root:root bind-mount parent a direct
+		 * mount into pgdata would leave behind) and copy that generated
+		 * default into place -- before handing off to the exact same
+		 * `pg_autoctl node run <ini>` every other node already uses. "||
+		 * true": the source file may not exist for a node whose name
+		 * collides with nothing generated (never happens via this grammar
+		 * rule, but keeps this command robust rather than failing outright
+		 * over HBA).
+		 *
+		 * A spec that needs to run `pg_walserver setup` (or anything else)
+		 * before "serve" ever starts overrides this default the same way any
+		 * node already can, with an explicit trailing "command \"...\"", or
+		 * -- the new, usually-better option -- "launch deferred" (see
+		 * aux_opt below): provision whatever is needed via setup{} steps,
+		 * then clear the deferred flag to let pg_autoctl's own "node run"
+		 * proceed, with no second override mechanism needed.
 		 */
 		strlcpy(current_node->commandOverride,
-		        "mkdir -p /var/lib/postgres/ws && "
+		        "mkdir -p /var/lib/postgres/pgaf && "
 		        "(cp /etc/pgaf/$(hostname)-pg_walserver_hba.conf "
-		        "/var/lib/postgres/ws/pg_walserver_hba.conf || true) && "
-		        "exec pg_walserver --pgdata /var/lib/postgres/ws --port 5432",
+		        "/var/lib/postgres/pgaf/pg_walserver_hba.conf || true) && "
+		        "exec pg_autoctl node run /etc/pgaf/node.ini",
 		        sizeof(current_node->commandOverride));
 	}
 	aux_opt_list
@@ -495,6 +522,43 @@ aux_opt:
 	| T_DOCKER_INIT
 	{
 		current_node->dockerInit = true;
+	}
+	/*
+	 * create/launch-deferred modifiers, same semantics as node_opt's own
+	 * rules below -- safe to add here (unlike T_SSL/T_AUTH/...) because
+	 * none of T_LAUNCH/T_DEFERRED/T_CREATE/T_IMMEDIATE/T_AND ever starts a
+	 * bare top-level cluster_item, so there is no shift/reduce ambiguity
+	 * to introduce; verified by rebuilding the generated parser with
+	 * bison and confirming zero new conflicts/warnings (see this task's
+	 * own commit message).
+	 */
+	| T_DEFERRED
+	{
+		/* bare "deferred" = create and launch deferred (both gates) */
+		current_node->createDeferred = true;
+		current_node->launchDeferred = true;
+	}
+	| T_LAUNCH T_DEFERRED
+	{
+		/* "launch deferred" alone = run-deferred only, create immediate */
+		current_node->launchDeferred = true;
+	}
+	| T_CREATE T_DEFERRED
+	{
+		current_node->createDeferred = true;
+	}
+	| T_CREATE T_AND T_LAUNCH T_DEFERRED
+	{
+		current_node->createDeferred = true;
+		current_node->launchDeferred = true;
+	}
+	| T_LAUNCH T_IMMEDIATE
+	{
+		current_node->launchDeferred = false;
+	}
+	| T_IMMEDIATE
+	{
+		current_node->launchDeferred = false;
 	}
 	;
 
