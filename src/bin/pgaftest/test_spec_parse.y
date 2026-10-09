@@ -560,6 +560,17 @@ aux_opt:
 	{
 		current_node->launchDeferred = false;
 	}
+	/*
+	 * port N -- same rule body as node_opt's own T_PORT T_INTEGER (below),
+	 * safe to add here (unlike T_SSL/T_AUTH/...) because T_PORT never
+	 * starts a bare top-level cluster_item either; verified by rebuilding
+	 * the generated parser with bison and confirming zero new
+	 * conflicts/warnings (see this task's own commit message).
+	 */
+	| T_PORT T_INTEGER
+	{
+		current_node->pgPort = $2;
+	}
 	;
 
 /* image "tag" | image tag */
