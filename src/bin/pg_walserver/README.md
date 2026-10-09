@@ -53,7 +53,7 @@ throughout this codebase's comments). This PR is the standalone piece:
 `pg_walserver` builds, runs, authenticates connections and serves the wire
 protocol entirely on its own, driven by a handful of files it reads
 directly off disk (`pg_walserver.ini`, `pg_walserver_hba.conf`,
-`pg_walserver_passwd`, and per-route bookkeeping files -- see below). Several of
+`pg_walserver_passwd`, and per-cluster bookkeeping files -- see below). Several of
 its own sub-commands (`setup`, `fetch-systemid`, `basebackup`, `archive-wal`,
 `restore-wal`, `create-cert`; see "New client-side sub-commands" below) can
 now create and keep those files current, and push/pull WAL, directly from
@@ -116,8 +116,8 @@ from-the-wire-format reimplementation, not a linking exercise. See
 
 The commands a connected client can issue on a `Query` ('Q') message are:
 
-- `IDENTIFY_SYSTEM` (`cmd_identify_system.c`) -- reports the route's system
-  identifier (read from a small `pg_walserver_systemid` file under the route's
+- `IDENTIFY_SYSTEM` (`cmd_identify_system.c`) -- reports the cluster's system
+  identifier (read from a small `pg_walserver_systemid` file under the cluster's
   directory), current timeline and `xlogpos`, and `dbname` (`NULL` unless
   the client's startup packet used `replication=database`, matching real
   `pg_receivewal`'s expectations exactly, see `walsender.h`).
@@ -126,11 +126,11 @@ The commands a connected client can issue on a `Query` ('Q') message are:
   16MB PostgreSQL default; this project does not support a non-default WAL
   segment size), and `data_directory_mode` (a fixed `"0700"`). Also `receivewal`,
   this project's own extension with no PostgreSQL equivalent: reports the
-  connected route's own `receivewal` setting, `"pull"` or `"none"`, straight
-  from `routes.h`'s `WsRoute.receivewalPull` -- how `pg_walserver archive-wal`
+  connected cluster's own `receivewal` setting, `"pull"` or `"none"`, straight
+  from `clusters.h`'s `WsCluster.receivewalPull` -- how `pg_walserver archive-wal`
   (see "The archive push side" below) learns, per invocation, which of its
   two behaviors to run.
-- `BASE_BACKUP [options...]` (`cmd_base_backup.c`) -- streams the route's
+- `BASE_BACKUP [options...]` (`cmd_base_backup.c`) -- streams the cluster's
   current base backup back as a tar archive, in the same
   `CopyOutResponse`/tagged-`CopyData` framing real PostgreSQL uses,
   including the PG15+ "archive framing" (`'n'`/`'d'`/`'m'` tags in one
@@ -146,7 +146,7 @@ The commands a connected client can issue on a `Query` ('Q') message are:
   slots" below.
 - `START_REPLICATION [SLOT <name>] <startlsn> [TIMELINE <tli>]`
   (`cmd_start_replication.c`) -- streams WAL bytes straight out of the
-  route's WAL cache directory as `CopyData` messages, physical replication
+  cluster's WAL cache directory as `CopyData` messages, physical replication
   only. It deliberately does not vendor `xlogreader.c`: streaming raw bytes
   needs no WAL *record* decoding, only byte-range bookkeeping over
   TLI+segno, which this file does directly (see its own header comment).
@@ -157,7 +157,7 @@ The commands a connected client can issue on a `Query` ('Q') message are:
   extension to the grammar, with no PostgreSQL equivalent. It streams one
   file (a complete WAL segment or a `.history` file, nothing else --
   `ws_fetch_filename_is_servable()` is an allow-list, not a filter) out of
-  the route's directory as an ordinary `CopyOut`. It exists because a
+  the cluster's directory as an ordinary `CopyOut`. It exists because a
   `restore_command` is invoked as a brand-new short-lived process per WAL
   segment, with no session to reuse and no walsender-style long streaming
   connection to amortize over -- a plain one-shot request/response fits
@@ -177,7 +177,7 @@ The commands a connected client can issue on a `Query` ('Q') message are:
   *local* file and sends both here; the reply says whether that's already
   what's on disk under this name, without moving a single byte of file
   content. `fallback` is the smart-fallback signal: "yes" when this
-  route's own embedded receivewal worker has already streamed *past*
+  cluster's own embedded receivewal worker has already streamed *past*
   `<name>` (its own last-observed position, "receivewal-progress", is at
   a later segment or a later timeline) while `<name>` itself never
   arrived -- a hole streaming can never retroactively fill, typically a
@@ -200,8 +200,8 @@ The commands a connected client can issue on a `Query` ('Q') message are:
   `FETCH_FILE`'s read side (`ws_fetch_filename_is_servable()`, extended to
   also accept a base backup's own `<24hex>.<8hex>.backup` history file,
   since real Postgres archives it exactly like a WAL segment), hard size
-  cap at the route's
-  own `wal_segment_size` (`ws_route_wal_segment_size()`) plus
+  cap at the cluster's
+  own `wal_segment_size` (`ws_cluster_wal_segment_size()`) plus
   `WS_ARCHIVE_FILE_SIZE_SLACK` (1 MiB), checked as bytes arrive so an
   oversized push never gets to write the whole thing to disk.
 
@@ -247,7 +247,7 @@ rejected with SQLSTATE `0A000`.
 A "slot" here is **not** a real PostgreSQL replication slot -- there is no
 live PostgreSQL server underneath `pg_walserver` for one to exist on. It is
 a small bookkeeping marker file, `.slot_<name>`, written directly in the
-route's own directory, containing one line: `restart_lsn=<lsn>`. This is
+cluster's own directory, containing one line: `restart_lsn=<lsn>`. This is
 enough to give real clients (`pg_receivewal --slot`, a standby's
 walreceiver with `primary_slot_name`) the illusion of a slot they can
 create, read back and drop, matching the shape of the real
@@ -263,12 +263,12 @@ Naming and safety constraints, enforced by `slot_name_is_safe()`:
   `ReplicationSlotValidateName()` enforces (`WS_SLOT_NAME_LEN_MAX` is
   `NAMEDATALEN - 1`);
 - this is not just cosmetic: the name is used verbatim in the marker
-  file's own filename under the route directory, so this validation is
+  file's own filename under the cluster directory, so this validation is
   also what stops a client from writing anywhere else on disk (no `/`, no
   `..`, no leading `.`, nothing that isn't in the class above);
-- at most `WS_MAX_SLOTS_PER_ROUTE` (64) slots per route -- each is a file,
+- at most `WS_MAX_SLOTS_PER_CLUSTER` (64) slots per cluster -- each is a file,
   counted with a directory scan (`count_slots()`) at `CREATE` time, and a
-  route beyond the cap gets a clean `53400` error rather than an unbounded
+  cluster beyond the cap gets a clean `53400` error rather than an unbounded
   pile of marker files;
 - `CREATE` of an existing slot is always an error (`42710`); it never
   resets an existing slot's `restart_lsn`, unlike an accidental
@@ -279,7 +279,7 @@ no WAL-retention enforcement at all. A real PostgreSQL replication slot's
 entire point is holding `pg_wal` back from recycling segments a slot's
 consumer hasn't consumed yet; this `.slot_*` marker file records a
 `restart_lsn` but nothing currently *reads* it to decide what may be
-pruned from a route's WAL cache. That is intentionally left as the
+pruned from a cluster's WAL cache. That is intentionally left as the
 prune/retention milestone's job -- the comment in
 `cmd_replication_slot.h` points at `prune_archiver_wal()` in the (not yet
 existing, in this PR) monitor SQL schema as where that enforcement is
@@ -338,7 +338,7 @@ project, so building never requires `bison`/`flex` to be installed.
 ## HBA (hba.c / hba.h)
 
 `pg_walserver_hba.conf` is a deliberately small subset of `pg_hba.conf`: one
-rule per line, `TYPE ROUTE USER ADDRESS METHOD`, first match wins, and
+rule per line, `TYPE CLUSTER USER ADDRESS METHOD`, first match wins, and
 *anything* that isn't a clean match -- no match, a missing/oversize/
 unreadable file, or a single malformed line anywhere in the file -- fails
 closed and rejects the connection. A malformed line is never skipped over:
@@ -356,13 +356,13 @@ logical line before tokenizing. What's intentionally left out, because
 this project's own HBA format doesn't use it: comma-separated lists,
 `@file` inclusion, and regular expressions.
 
-`ROUTE` is `all`, or a route key exactly as it appears in `pg_walserver.ini` (see
-"The routes file" below) -- an opaque string `hba.c` never parses, splits,
+`CLUSTER` is `all`, or a cluster key exactly as it appears in `pg_walserver.ini` (see
+"The clusters file" below) -- an opaque string `hba.c` never parses, splits,
 or gives any filesystem meaning to. pg_auto_failover's own convention is
 `"<formation>/<group>"` (e.g. `default/0`), because it reads well and is
 already guaranteed unique across a whole deployment, but the `/` in it
 carries no special meaning here at all: `hba.c` compares it against a
-rule's `ROUTE` field with a plain string `==`, the exact same way it would
+rule's `CLUSTER` field with a plain string `==`, the exact same way it would
 compare `"archive1"` or any other key an operator picked by hand.
 
 Supported `ADDRESS` forms, tried in `rule_address_matches()`:
@@ -381,7 +381,7 @@ Supported `ADDRESS` forms, tried in `rule_address_matches()`:
 
 **Removed in this PR**: an earlier iteration had a `"monitor"` `ADDRESS`
 keyword, matching "every node the monitor currently lists for this
-route", backed by a `refresher.c` child process (the *only* process that
+cluster", backed by a `refresher.c` child process (the *only* process that
 talked to the monitor, over libpq with this project's own `PGSQL`
 wrapper/retry policy) and a `monitor_hosts.c` reader/matcher for the local
 cache it maintained (`archiver-nodes.list`, one writer/many-readers, an
@@ -431,13 +431,13 @@ Two methods, chosen by the first matching HBA rule's `METHOD` field:
 - `reject` -- refused outright, and no rule matching at all defaults to
   reject as well (`WS_AUTH_REJECT` is the zero value of `WsAuthMethod`).
 
-Authentication runs **before** anything about the requested route is
-revealed, exactly as PostgreSQL orders it: the HBA lookup uses the route
-key the client asked for whether or not it turns out to be a real route,
-and only *after* a successful authentication does an unknown route get
+Authentication runs **before** anything about the requested cluster is
+revealed, exactly as PostgreSQL orders it: the HBA lookup uses the cluster
+key the client asked for whether or not it turns out to be a real cluster,
+and only *after* a successful authentication does an unknown cluster get
 reported (SQLSTATE `3D000`, "database does not exist"). A rejection is one
 generic message naming only the peer address and user (both already known
-to the client), never the route -- and every client-supplied string is
+to the client), never the cluster -- and every client-supplied string is
 sanitized (control characters stripped, length capped) before it is
 logged, so a hostile client can't forge log lines.
 
@@ -463,7 +463,7 @@ oversized message can't be used to allocate against that deadline.
 Without any `--pgdata` at all, `pg_walserver` refuses to start unless
 `--insecure` is explicitly given (manual testing only, never on a
 reachable network): every dbname is then accepted with no authentication
-whatsoever, and there is no HBA file, no routes file, and no TLS.
+whatsoever, and there is no HBA file, no clusters file, and no TLS.
 
 ## Client certificate authentication (`clientcert=verify-full`)
 
@@ -473,7 +473,7 @@ An HBA rule's `METHOD` field may be followed by one more, optional field:
 `clientCertFull`):
 
 ```
-# TYPE     ROUTE       USER              ADDRESS       METHOD         [clientcert]
+# TYPE     CLUSTER     USER              ADDRESS       METHOD         [clientcert]
 hostssl    all         archiver_repl     10.0.0.0/8    scram-sha-256  clientcert=verify-full
 hostssl    default/0   pitr_restore      192.0.2.0/24  trust          clientcert=verify-full
 ```
@@ -525,8 +525,8 @@ the only one implemented.
 `clientcert=verify-full` needs the server to have actually asked for, and
 been able to validate, a client certificate in the first place -- otherwise
 there is nothing for it to check. This reuses `tls.c`'s existing OpenSSL
-`SSL_CTX` plumbing (the same one SNI routing, above, already reads
-handshake metadata from) rather than adding a second TLS code path:
+`SSL_CTX` plumbing (the same one SNI-based cluster addressing, above, already
+reads handshake metadata from) rather than adding a second TLS code path:
 
 - `--ssl-ca-file` (default `<pgdata>/ca.crt`, the same
   `--ssl-cert-file`/`--ssl-key-file` default-path convention) names a PEM
@@ -552,7 +552,7 @@ handshake metadata from) rather than adding a second TLS code path:
   `clientcert=verify-full` line with no CA loaded is refused outright
   (`hba_ruleset_requires_client_cert()`, `hba.c`) -- the same fail-closed
   principle this project applies to a malformed HBA line, or to more than
-  one named route with no TLS at all, applied here to a rule that could
+  one named cluster with no TLS at all, applied here to a rule that could
   never actually be satisfied.
 - `ws_tls_get_peer_cert_cn()` (`tls.c`) reads the connecting client's own
   certificate CN, once the handshake (which validated it against the CA
@@ -573,58 +573,59 @@ does not (yet) ship a `create-client-cert`-style helper; see
 `tests/tap/specs/pg_walserver_clientcert.pgaf`'s own `setup{}` block for the
 `openssl` invocations a real deployment would run by hand.
 
-## The routes file (pg_walserver.ini)
+## The clusters file (pg_walserver.ini)
 
-`pg_walserver.ini` (`routes.c`/`routes.h`) is this server's own routing
-table: one INI section per route it serves, mapping a route key -- matched
+`pg_walserver.ini` (`clusters.c`/`clusters.h`) is this server's own cluster
+table: one INI section per cluster it serves, mapping a cluster key -- matched
 against the connection's `dbname`, i.e. what a real client puts in its
-connection string's `dbname=` -- to a `path`, that route's own local
-storage root. That's the *only* thing a route carries: which base backup
-is current, a route's own system identifier, and the current WAL position
-are deliberately **not** stored in the routes file. Every command that
+connection string's `dbname=` -- to a `path`, that cluster's own local
+storage root. That's the *only* thing a cluster carries: which base backup
+is current, a cluster's own system identifier, and the current WAL position
+are deliberately **not** stored in the clusters file. Every command that
 needs one of those instead reads it fresh, straight off a small
 purpose-built file directly under that same path, at connection time --
 for instance `cmd_base_backup.c`'s own `basebackups/.latest` and
 `cmd_identify_system.c`'s own `pg_walserver_systemid`. `pg_walserver` itself
 never talks to the monitor (see the "monitor" HBA removal above); this
-per-route-directory split is what lets it stay that way while still always
+per-cluster-directory split is what lets it stay that way while still always
 answering with whatever is current.
 
 Three further properties are optional, each read as a default the way
 `path` never is: `upstream` (a libpq connection string to the instance
-this route archives from, read by `fetch-systemid`/`basebackup`/`setup`
-and by the embedded receivewal worker below), `hostname` (TLS SNI routing,
-see "Routing beyond `dbname`" below), and `receivewal` (`receivewal = pull`
-opts this route into the embedded receivewal worker -- see "The embedded
-receivewal worker" below; absent, unaffected).
+this cluster archives from, read by `fetch-systemid`/`basebackup`/`setup`
+and by the embedded receivewal worker below), `hostname` (TLS SNI-based
+cluster addressing, see "Addressing a cluster beyond `dbname`" below), and
+`receivewal` (`receivewal = pull` opts this cluster into the embedded
+receivewal worker -- see "The embedded receivewal worker" below; absent,
+unaffected).
 
 `BASE_BACKUP`, `FETCH_FILE`, `START_REPLICATION`, and the replication-slot
-commands all resolve the connection's route once (`routes_find()`, in
+commands all resolve the connection's cluster once (`clusters_find()`, in
 `accept_loop.c`'s `handle_connection()`) and then read/write only inside
-that route's own directory -- there is no code path that lets a connection
-authenticated against one route touch another route's files.
+that cluster's own directory -- there is no code path that lets a connection
+authenticated against one cluster touch another cluster's files.
 
 The parser is deliberately built directly on the vendored `ini.h`'s
 low-level, dynamic-section API (`ini_load()`/`ini_section_count()`/...)
 rather than this project's own `ini_file.c` wrapper: that wrapper's
 `IniOption` model assumes a fixed, compile-time-known set of section/key
-names, which does not fit a file whose sections are one per route, under
+names, which does not fit a file whose sections are one per cluster, under
 whatever key an operator (or a driver such as pg_auto_failover) picked --
 unknown in advance, and changing over the life of the server.
 
-### Route keys are opaque strings, not paths
+### Cluster keys are opaque strings, not paths
 
-A route key is never parsed, split on `/`, or given any filesystem meaning
+A cluster key is never parsed, split on `/`, or given any filesystem meaning
 of its own anywhere in this codebase -- it is matched by a plain string
-`==` against `dbname` (`routes_find()`) and, independently, against
-`pg_walserver_hba.conf`'s own `ROUTE` field (`hba_match()`), and nowhere else.
+`==` against `dbname` (`clusters_find()`) and, independently, against
+`pg_walserver_hba.conf`'s own `CLUSTER` field (`hba_match()`), and nowhere else.
 pg_auto_failover's own convention, `"<formation>/<group>"` (e.g.
 `default/0`), *looks* like a path, but it is not one, and never becomes
 one: the only thing that ever determines an actual directory on disk is
-the route's own explicit `path` property, written by whoever maintains
+the cluster's own explicit `path` property, written by whoever maintains
 `pg_walserver.ini` (a human, or `service_archiver_reconciler.c` in the later
 archiving PR). This is a deliberate design choice, not an oversight -- see
-the wildcard route below for why substituting a route key straight into a
+the wildcard cluster below for why substituting a cluster key straight into a
 filesystem path would be actively dangerous, given that the key is
 whatever an unauthenticated client's `dbname` says it is until HBA and
 SCRAM have run.
@@ -637,17 +638,17 @@ more than an arbitrary string a human chose to also type into `psql`'s
 cluster name, a customer id, a UUID -- pg_auto_failover is one driver of
 this file, not a requirement it imposes on it.
 
-### The wildcard route (`*`)
+### The wildcard cluster (`*`)
 
-One route key is special: `WS_ROUTES_WILDCARD_KEY` (`"*"`, `routes.h`) is a
-catch-all fallback, used when a connection's `dbname` matches no route of
+One cluster key is special: `WS_CLUSTERS_WILDCARD_KEY` (`"*"`, `clusters.h`) is a
+catch-all fallback, used when a connection's `dbname` matches no cluster of
 its own. The syntax and precedence are deliberately the same as
 PgBouncer's own `[databases]` `"*"` entry
 (<https://www.pgbouncer.org/config.html>), on the theory that anyone who
 has already run a PgBouncer knows exactly what to expect here:
 
 ```ini
-# an explicit route always wins over the wildcard, exactly like PgBouncer
+# an explicit cluster always wins over the wildcard, exactly like PgBouncer
 [default/0]
 path = /var/lib/postgres/pgaf/default/0
 
@@ -662,32 +663,32 @@ One deliberate difference from PgBouncer: PgBouncer's own wildcard
 the result is just another `dbname` handed to a real PostgreSQL server,
 which validates it on its own. Doing the same thing here would mean
 building a *filesystem path* out of a string an unauthenticated client
-supplied before HBA or SCRAM ever ran, and a route key is explicitly
+supplied before HBA or SCRAM ever ran, and a cluster key is explicitly
 allowed to contain `/` (see above) -- so a naive `%r`-style substitution
 would turn pg_auto_failover's own key convention into a path-traversal
-primitive the moment a client sent a crafted `dbname`. `routes_find()`
+primitive the moment a client sent a crafted `dbname`. `clusters_find()`
 does not do this: every `dbname` that falls through to `"*"` shares that
 one configured `path` verbatim, never a per-key subdirectory synthesized
 on the fly. The wildcard is what makes `pg_walserver` usable with zero
 multiplexing ceremony outside pg_auto_failover: a single-cluster
-deployment can skip per-route sections entirely, keep just one `[*]`
+deployment can skip per-cluster sections entirely, keep just one `[*]`
 section in `pg_walserver.ini`, and never has to learn or type a special `dbname`
 value at all.
 
-`pg_walserver_hba.conf`'s own `ROUTE` matching is completely independent of
-this: an HBA rule's `ROUTE` field is always compared against the literal
-`dbname` the client sent, never against whichever `WsRoute` `routes_find()`
+`pg_walserver_hba.conf`'s own `CLUSTER` matching is completely independent of
+this: an HBA rule's `CLUSTER` field is always compared against the literal
+`dbname` the client sent, never against whichever `WsCluster` `clusters_find()`
 happened to resolve it to. A `hostssl all ...` rule already admits any
-route, wildcard-resolved or not; a rule scoped to one specific route key
+cluster, wildcard-resolved or not; a rule scoped to one specific cluster key
 still only matches that literal key, exactly as before.
 
-### Routing beyond `dbname`: TLS SNI, for a real physical standby
+### Addressing a cluster beyond `dbname`: TLS SNI, for a real physical standby
 
-`routes_find()`'s `dbname`-based matching above assumes the client gets to
+`clusters_find()`'s `dbname`-based matching above assumes the client gets to
 choose its `dbname`. A real Postgres physical standby doesn't: its own
 `libpqwalreceiver.c` (`libpqrcv_connect()`) always sends the literal
 `dbname=replication` for a physical replication connection, discarding
-whatever `primary_conninfo`'s own `dbname=` says. One route, this is no
+whatever `primary_conninfo`'s own `dbname=` says. One cluster, this is no
 problem -- there is nothing to disambiguate. More than one, `dbname` alone
 can no longer tell them apart for a real standby, only for a hand-written
 `psql`/`pg_basebackup` invocation that sets `dbname` itself.
@@ -700,8 +701,8 @@ exchanged -- `libpq`'s `sslsni` (on by default) sends the connection's
 `primary_conninfo` already carries exactly the signal needed, in its
 `host=` setting, with no client-side change at all.
 
-- `pg_walserver.ini` gains a `hostname` route property (`routes.h`'s
-  `WsRoute.hostname`, `routes.c`'s parsing), set via `pg_walserver setup
+- `pg_walserver.ini` gains a `hostname` cluster property (`clusters.h`'s
+  `WsCluster.hostname`, `clusters.c`'s parsing), set via `pg_walserver setup
   --hostname <name>`.
 - `tls.c`'s `ws_tls_get_sni_hostname()` reads it back with the simple,
   post-handshake `SSL_get_servername(activeSsl, TLSEXT_NAMETYPE_host_name)`.
@@ -711,24 +712,24 @@ exchanged -- `libpq`'s `sslsni` (on by default) sends the connection's
   `SSL_client_hello_get0_ext()` -- OpenSSL's own documented advice, needed
   there because that feature *switches the served certificate* based on
   the name, which is ordering-sensitive during the handshake. `pg_walserver`
-  never switches certificates by SNI (one certificate serves every route),
+  never switches certificates by SNI (one certificate serves every cluster),
   so the simpler, safe-after-the-fact read is enough here.
-- `auth.c`'s `ws_authenticate()` resolves a route in three steps: an exact
+- `auth.c`'s `ws_authenticate()` resolves a cluster in three steps: an exact
   `dbname` match first (unchanged, and always tried first: a hand-written
-  `dbname=<route key>` connection keeps working exactly as before, with or
+  `dbname=<cluster key>` connection keeps working exactly as before, with or
   without TLS), then, only for a TLS connection, the SNI hostname, then the
-  `"*"` wildcard. `pg_walserver_hba.conf`'s own `ROUTE` matching stays exactly
+  `"*"` wildcard. `pg_walserver_hba.conf`'s own `CLUSTER` matching stays exactly
   as described above -- always against the literal `dbname`, never against
-  whichever route SNI resolved to.
-- More than one *named* route (i.e. more than one section besides `"*"`)
+  whichever cluster SNI resolved to.
+- More than one *named* cluster (i.e. more than one section besides `"*"`)
   with no TLS configured is a hard error: `cli_root.c`'s `cli_serve_run()`
   refuses to start (`log_fatal`/`exit(1)`) rather than silently leaving a
-  second route unreachable by any real standby. A single named route keeps
+  second cluster unreachable by any real standby. A single named cluster keeps
   working with no TLS at all -- `dbname` alone is already unambiguous.
 - `pg_walserver setup` prepares for this automatically: adding a *second*
-  named route creates a self-signed certificate for `--pgdata`  (reusing
+  named cluster creates a self-signed certificate for `--pgdata`  (reusing
   `pg_create_self_signed_cert()`, `src/bin/common/pgctl.c`, unchanged) the
-  moment it's needed, and warns if that second route was set up without
+  moment it's needed, and warns if that second cluster was set up without
   `--hostname` (it would then only ever be reachable via its `dbname`, or
   the `"*"` wildcard, never by a real standby).
 
@@ -736,25 +737,25 @@ A client TLS certificate's CN is a second, unimplemented alternative to
 SNI for the same problem: `sslcert`/`sslkey` in a conninfo are also not
 touched by `libpqrcv_connect()`'s `dbname` override, flowing through from
 the original conninfo untouched for a real physical standby exactly as for
-any other client. A route could be assigned its own client certificate (a
-distinct CN per route), read during the TLS handshake
+any other client. A cluster could be assigned its own client certificate (a
+distinct CN per cluster), read during the TLS handshake
 (`SSL_get_peer_certificate()` + `X509_NAME_get_text_by_NID(subject,
 NID_commonName, ...)`, both plain OpenSSL, already reachable from `tls.c`)
-as a route-selection input independent of `dbname` entirely -- the same
+as a cluster-selection input independent of `dbname` entirely -- the same
 *mechanism* PostgreSQL's own `clientcert=verify-full` HBA option already
-uses to map a certificate to a role, applied to route selection instead of
+uses to map a certificate to a role, applied to cluster selection instead of
 authentication. Not designed in detail or scheduled; SNI already resolves
 the same underlying limitation (`test_006_real_standby_with_core_tools` in
 `pg_walserver_standalone.pgaf` first surfaced it: a real physical standby's
 walreceiver always sends the literal `dbname` `"replication"`,
-`libpqrcv_connect()`'s own unconditional override, never a real route key)
+`libpqrcv_connect()`'s own unconditional override, never a real cluster key)
 for every deployment this PR's own test suites exercise.
 
 ## New client-side sub-commands (setup / fetch-systemid / basebackup)
 
 Three sub-commands, alongside `serve`/`scram-secret`, all sharing
 `cli_upstream.c`'s own `--cluster`/`--path`/`--upstream`/`--host`/`--port`/
-`--user` resolution (an explicit flag always wins over a route's own
+`--user` resolution (an explicit flag always wins over a cluster's own
 `pg_walserver.ini` properties):
 
 - **`fetch-systemid`** (`cli_fetch_systemid.c`) -- connects to the
@@ -764,7 +765,7 @@ Three sub-commands, alongside `serve`/`scram-secret`, all sharing
   *different* identifier unless `--force`: the same "never silently
   replace what's already there" principle PostgreSQL's own
   `archive_command` overwrite-safety rule applies elsewhere, here applied
-  to a route's own identity.
+  to a cluster's own identity.
 - **`basebackup`** (`cli_basebackup.c`) -- takes a real base backup via
   `pg_basebackup_fetch()` (`src/bin/common/pgctl.c`; ported forward from
   where it already existed on a separate, more-advanced branch -- see that
@@ -778,9 +779,9 @@ Three sub-commands, alongside `serve`/`scram-secret`, all sharing
 - **`setup`** (`cli_setup.c`) -- the wizard: writes/validates the
   `pg_walserver.ini` section for `--cluster` (refusing to silently change an
   existing one's path unless `--force`), optionally records a `--hostname`
-  for SNI-based routing (see above -- and auto-creates a self-signed
-  certificate the moment a *second* named route needs one to stay
-  reachable) and/or `--receivewal pull` (writes the route's own
+  for SNI-based cluster addressing (see above -- and auto-creates a self-signed
+  certificate the moment a *second* named cluster needs one to stay
+  reachable) and/or `--receivewal pull` (writes the cluster's own
   `receivewal = pull` property, see "The embedded receivewal worker" below --
   `setup` only ever *records* the intent, it never itself starts or
   touches the receivewal worker; that happens the next time `serve` starts), then
@@ -799,14 +800,14 @@ Three sub-commands, alongside `serve`/`scram-secret`, all sharing
   HBA misconfiguration on the *upstream* side too, not just the role's own
   attribute. `setup` never takes a base backup itself any more (it used to,
   behind a now-removed `--with-basebackup` flag -- see "Bootstrapping a
-  route's first base backup" below for why, and for what replaced it): its
+  cluster's first base backup" below for why, and for what replaced it): its
   very last step is to reload an already-running `serve` for the same
   `--pgdata`, if there is one (`<pgdata>/pg_walserver.pid`, the same
   `read_pidfile()`/`SIGHUP` shape `reload` itself uses, see "Config reload"
-  below), so it picks up the new/changed route immediately; with no server
+  below), so it picks up the new/changed cluster immediately; with no server
   running, the config just written simply takes effect the next time
   `serve` starts -- logged, not an error, a normal and expected case (e.g.
-  setting a route up before `serve` has ever been started for this
+  setting a cluster up before `serve` has ever been started for this
   `--pgdata`).
 
 None of the three touch `pg_walserver_hba.conf` or `pg_walserver_passwd` -- a
@@ -814,17 +815,17 @@ deliberately separate concern an operator (or `pg_autoctl`, later) still
 configures on its own, see `docs/ref/pg_walserver.rst`'s own worked
 example for the full sequence including those.
 
-## Bootstrapping a route's first base backup
+## Bootstrapping a cluster's first base backup
 
-`setup` used to take a route's first base backup itself, synchronously,
+`setup` used to take a cluster's first base backup itself, synchronously,
 behind a `--with-basebackup` flag -- removed. `pg_walserver serve` takes it
-instead, automatically, once, for any currently-configured route that is
-still missing one (`cli_basebackup_route_has_backup()`, cli_basebackup.c:
+instead, automatically, once, for any currently-configured cluster that is
+still missing one (`cli_basebackup_cluster_has_backup()`, cli_basebackup.c:
 `<path>/basebackups/.latest` exists and is non-empty): right after startup
-(once `ws_receivewal_start_all()` has started every route's own real
+(once `ws_receivewal_start_all()` has started every cluster's own real
 receivewal worker), and right after a successful `SIGHUP` reload (once
 `ws_receivewal_reload()` has reconciled the receivewal worker set against the newly
-reloaded routes) -- `accept_loop.c`'s own `ws_bootstrap_missing_backups()`
+reloaded clusters) -- `accept_loop.c`'s own `ws_bootstrap_missing_backups()`
 is the single entry point both call. These are the *only* two moments this
 ever happens; there is no other trigger, and no recurring/scheduled
 backup of any kind -- see this section's own "Recurring backups are not
@@ -834,25 +835,25 @@ This replaced an earlier design (this PR's own history, see `git log` on
 `receivewal.c`/`cli_setup.c`) where `setup --with-basebackup` primed a
 *throwaway* embedded receivewal worker just long enough to prove the base backup's
 own start LSN was covered, then tore it down before `serve` ever started
-its own real one for the same route. That design worked, but existed only
+its own real one for the same cluster. That design worked, but existed only
 to compensate for base backups being taken too early -- before `serve`,
-and therefore before any real receivewal worker, had ever run for the route at all.
+and therefore before any real receivewal worker, had ever run for the cluster at all.
 Moving the base backup itself into `serve` removes the problem at its
-source: by the time `serve` ever decides a route needs a bootstrap backup,
-its own real, supervised receivewal worker for that route (if `receivewal = pull`) has
+source: by the time `serve` ever decides a cluster needs a bootstrap backup,
+its own real, supervised receivewal worker for that cluster (if `receivewal = pull`) has
 already been started, so there is always a genuine one to wait on directly
 -- no throwaway primer, no teardown dance, no separate "priming" code path
 to keep in sync with the real one.
 
-For a `receivewal = pull` route, `ws_bootstrap_missing_backups()` first waits
+For a `receivewal = pull` cluster, `ws_bootstrap_missing_backups()` first waits
 (bounded, `backup_bootstrap.c`'s own `WS_BOOTSTRAP_STREAM_WAIT_*`
-constants) for that route's own real receivewal worker to show genuine on-disk
+constants) for that cluster's own real receivewal worker to show genuine on-disk
 evidence of streaming (`wal_dir_has_any_segment()`, `wal_dir_scan.c` --
 true even for a still-growing `.partial` segment, so a caller doesn't spin
 until an entire segment happens to fill) before ever taking the backup --
 the same "the backup's own start LSN must already be covered by captured
 WAL" property the removed primer used to guarantee, now proven against the
-real receivewal worker instead of a throwaway one. A route with no `receivewal = pull`
+real receivewal worker instead of a throwaway one. A cluster with no `receivewal = pull`
 has no such wait: its `archive-wal`-driven push has no equivalent gap to
 close (see "The archive push side" below), so the backup is taken right
 away.
@@ -883,8 +884,8 @@ not the full `process_supervisor.h` `MaxR`/`MaxT` ring-buffer machinery
 above): that machinery is built for a service restarted many times over a
 process's whole lifetime, tracking restarts against a sliding time window,
 which is more than a single one-shot child that runs once needs. On final
-failure, a clear error is logged and the child exits; the route keeps
-serving whatever it already has (nothing about this ever brings the route,
+failure, a clear error is logged and the child exits; the cluster keeps
+serving whatever it already has (nothing about this ever brings the cluster,
 or `pg_walserver` itself, down), and it is retried again automatically the
 next time `serve` starts or reloads -- if the underlying problem (e.g. the
 upstream still being unreachable) hasn't cleared by then, the operator's
@@ -893,7 +894,7 @@ the meantime.
 
 **Recurring backups are not this project's job.** This one-time bootstrap
 attempt, at either of its two trigger points, is the only "automatic" base
-backup behavior `pg_walserver` has or will have. Keeping a route's backup
+backup behavior `pg_walserver` has or will have. Keeping a cluster's backup
 current after that first, automatic one -- on a schedule, after a certain
 amount of WAL, or on any other policy -- is deliberately left to the
 operator's own `pg_walserver basebackup` invocation (by hand, or from
@@ -906,7 +907,7 @@ for WAL retention.
 `pg_walserver archive-cleanup --cluster <name> --pgdata <path> | --path
 <dir> [--keep-count <N>] [--keep-age <interval>] [--dry-run] [--force]`
 (`cli_archive_cleanup.c`) removes WAL segments/`.partial`/`.backup` files
-and base backups a route no longer needs, mirroring real PostgreSQL's own
+and base backups a cluster no longer needs, mirroring real PostgreSQL's own
 `pg_archivecleanup` contrib tool -- same filename-prefix-extraction
 algorithm for `.partial`/`.backup` files, same ignore-the-timeline
 string comparison (`SetWALFileNameForCleanup()`/`CleanupPriorWALFiles()`,
@@ -919,7 +920,7 @@ whether deleting a given segment would leave one unrestorable).
 never runs `pg_archivecleanup` on its own -- it is always operator-wired,
 via `archive_cleanup_command` or a cron job. `archive-cleanup` follows the
 exact same philosophy `pg_walserver basebackup` itself already does for
-recurring backups (see "Bootstrapping a route's first base backup" above,
+recurring backups (see "Bootstrapping a cluster's first base backup" above,
 its own "Recurring backups are not this project's job" paragraph):
 `pg_walserver` provides the facility, never the scheduling policy, and
 never deletes anything on its own initiative. At least one of
@@ -962,7 +963,7 @@ target month (e.g. March 31st minus one month, since February 31st
 doesn't exist) normalizes forward the same way `mktime()`/`timegm()`
 always normalizes an out-of-range `struct tm`.
 
-Reuses `wal_dir_scan.h`'s own `ws_route_wal_segment_size()`/
+Reuses `wal_dir_scan.h`'s own `ws_cluster_wal_segment_size()`/
 `wal_segment_filename()` for WAL segment math (no re-derivation of this
 project's own WAL filename parsing), and `cmd_base_backup.c`'s own
 `read_backup_label()` (exported for this purpose) to learn each backup's
@@ -1016,14 +1017,14 @@ pass `--force`**.
 `pg_walserver create-cert --pgdata <path> --hostname <name> [--force]`
 (`cli_create_cert.c`) writes `<pgdata>/server.crt`/`server.key` via
 `pg_create_self_signed_cert()` (`src/bin/common/pgctl.c`) -- the exact
-function `setup`'s own `ensure_tls_for_multiple_routes()` calls
-automatically the moment a second named route needs a certificate (see
+function `setup`'s own `ensure_tls_for_multiple_clusters()` calls
+automatically the moment a second named cluster needs a certificate (see
 above); `ws_create_cert_run()` (`cli_create_cert.c`) is the one shared
 helper both now call, so the call-and-log sequence isn't duplicated
 between the automatic and the by-hand path. Useful whenever an operator
-wants TLS in place from the very first route (a single route served over
-a reachable network still benefits from encryption, even though SNI
-routing itself doesn't need it yet), or wants to replace an existing
+wants TLS in place from the very first cluster (a single cluster served over
+a reachable network still benefits from encryption, even though SNI-based
+cluster addressing itself doesn't need it yet), or wants to replace an existing
 self-signed certificate. Refuses to overwrite an already-existing
 `server.crt`/`server.key` unless `--force` -- the same "never silently
 replace what's already there" principle as `cli_fetch_systemid.c`'s own
@@ -1056,17 +1057,17 @@ their wire shape and overwrite-safety rule) and the `pg_walserver archive-wal`
 client sub-command that drives them, meant to run as (part of) a Postgres
 `archive_command`. This section documents that design as built.
 
-A route with `receivewal = pull` configured has its own embedded, supervised
+A cluster with `receivewal = pull` configured has its own embedded, supervised
 `pg_receivewal` (see "The embedded receivewal worker" below) writing straight
-into that route's own directory. A push from `archive-wal` racing that
+into that cluster's own directory. A push from `archive-wal` racing that
 receivewal worker's own write for the same final filename, with no coordination
 between the two, is unsafe. `archive-wal` avoids the race by ordinarily never
-pushing at all on such a route: it runs `CHECK_FILE` only, ever, and leaves
-delivering the segment entirely to the receivewal worker. A route with no
+pushing at all on such a cluster: it runs `CHECK_FILE` only, ever, and leaves
+delivering the segment entirely to the receivewal worker. A cluster with no
 `receivewal = pull` has no such writer to race, so `archive-wal` pushes via
 `ARCHIVE_FILE` only, ever, with no `CHECK_FILE` round trip first.
 
-The one exception on a `receivewal = pull` route is `CHECK_FILE`'s own
+The one exception on a `receivewal = pull` cluster is `CHECK_FILE`'s own
 smart-fallback signal (`cmd_check_file.c`): a streaming worker can only
 ever move forward, so a segment it has already streamed *past* without
 ever producing -- almost always a timeline switch that left a segment
@@ -1083,10 +1084,10 @@ would otherwise never succeed and leave WAL piling up on the primary.
 `pg_walserver archive-wal <path-to-file> <filename> --cluster <name> --host
 <host> [--port <port>] [--user <name>] [--sslmode <mode>]`
 (`cli_archive.c`) picks between these two disjoint behaviors automatically,
-every invocation, from the connected route's own actual `receivewal` setting
+every invocation, from the connected cluster's own actual `receivewal` setting
 -- `SHOW receivewal` (`cmd_show.c`, an extension to the existing `SHOW` wire
 command alongside `wal_segment_size`), never a manually-set client flag,
-which would silently go stale the moment an operator changes the route's
+which would silently go stale the moment an operator changes the cluster's
 `receivewal` setting without also updating every `archive_command` line
 referencing it:
 
@@ -1176,18 +1177,18 @@ than duplicating them.
 
 ## The embedded receivewal worker (receivewal.c)
 
-A route with `receivewal = pull` (`pg_walserver.ini`, written by hand or by
+A cluster with `receivewal = pull` (`pg_walserver.ini`, written by hand or by
 `pg_walserver setup --receivewal pull`) gets its own forked, supervised
 `pg_receivewal` child the moment `serve` starts -- no external
 `pg_receivewal` process, no separate supervisor unit, nothing else to
-wire up. `pg_walserver --pgdata ... serve` alone, with one route's
+wire up. `pg_walserver --pgdata ... serve` alone, with one cluster's
 `upstream`/`receivewal = pull` set, is a complete archiving daemon on its
 own. This section documents the design as built.
 
 **`fork()` + `execv()` of this same binary, mirroring `pg_autoctl`'s own
 long-lived-service pattern.** Each receivewal worker child is started by forking,
 then `execv()`-ing `pg_walserver` itself, re-entered as the hidden
-`pg_walserver internal service pg-receivewal --route <key> --upstream
+`pg_walserver internal service pg-receivewal --cluster <key> --upstream
 <conninfo> --path <dir>` sub-command (`cli_internal.c`), which calls
 `pg_receivewal_main()` (the vendored entry point, `src/bin/common/
 vendor/pg_receivewal/pg_receivewal_entry.h` -- see "Vendor relocation"
@@ -1212,18 +1213,18 @@ always has a real, absolute path to re-exec, not a bare/relative `argv[0]`
 that only happened to resolve via `$PATH` once, at the parent's own
 startup.
 
-**Supervision shape: one long-lived child per active route, not
+**Supervision shape: one long-lived child per active cluster, not
 per-connection, built on this project's own generic child-process
 supervisor.** A receivewal worker child is alive for the server's *whole*
 lifetime, independent of any client connection, and needs restart-on-
 crash -- unlike a connection child, simply reaped and forgotten the
 moment it exits. Rather than a bespoke `fork()`/`waitpid()`/backoff loop,
 `receivewal.c` builds one `ProcessService` (`src/bin/common/process_
-supervisor.h`) per `receivewal = pull` route and hands them to that file's
+supervisor.h`) per `receivewal = pull` cluster and hands them to that file's
 own generic supervisor: `ws_receivewal_start_all()` forks every configured
 receivewal worker once, at `serve` startup (`cli_root.c`'s `cli_serve_run()`,
 right after `pg_walserver.ini`/HBA validation succeeds -- the same place
-`ensure_tls_for_multiple_routes()`-adjacent logic already runs);
+`ensure_tls_for_multiple_clusters()`-adjacent logic already runs);
 `ws_receivewal_tick()` is called once per `ws_accept_loop()` iteration to
 detect a dead receivewal worker and restart it (see "The single wildcard reaper"
 below for why this is also where connection children get reaped now);
@@ -1273,11 +1274,11 @@ values -- 5 restarts per 300 seconds -- `pg_autoctl`'s own
 problem): a service restarted more than `MaxR` times within the last
 `MaxT` seconds stops being restarted. One deliberate policy difference
 from `pg_autoctl`'s own `supervisor.c`: giving up on one receivewal worker here
-does **not** bring down `pg_walserver` itself or any other route's own
+does **not** bring down `pg_walserver` itself or any other cluster's own
 receivewal worker -- unlike `pg_autoctl`, where each service is essential to the
 single node it manages, `pg_walserver` may be serving several independent
-routes at once, and one route's truly broken upstream should not stop
-every other route it is otherwise serving correctly.
+clusters at once, and one cluster's truly broken upstream should not stop
+every other cluster it is otherwise serving correctly.
 
 **Vendor relocation.** `vendor/pg_receivewal/` used to live under
 `src/bin/pg_autoctl/`, linked only by `pg_autoctl`; it now lives under
@@ -1316,11 +1317,11 @@ case an unhandled `SIGHUP` would terminate it before it ever sends
 anything.
 
 `pg_walserver.ini` and `pg_walserver_hba.conf` are parsed once, at `serve`
-startup, into an in-memory `WsServerConfig.routes`/`WsAuthConfig.
+startup, into an in-memory `WsServerConfig.clusters`/`WsAuthConfig.
 hbaRuleSet` (`accept_loop.h`) -- every connection reads that same snapshot,
 none of them re-parses either file off disk itself. `SIGHUP` (`ws_accept_
 loop()`'s own main loop, alongside `receivewal.c`'s `ws_receivewal_tick()`) calls
-`ws_reload_config()`, which re-reads both files (`routes_load()`, `hba_
+`ws_reload_config()`, which re-reads both files (`clusters_load()`, `hba_
 parse_file()`) and swaps them in **only when both parse successfully**,
 exactly like real PostgreSQL's own `SIGHUP`-triggered `ProcessConfigFile()`:
 a bad reload is refused, logged clearly, and the previous, still-valid
@@ -1330,7 +1331,7 @@ reads whatever snapshot was already installed the moment it was forked.
 
 What is live-reloadable this way:
 
-- **routes** (`pg_walserver.ini`): added, removed, and changed routes
+- **clusters** (`pg_walserver.ini`): added, removed, and changed clusters
   (`path`/`upstream`/`hostname`/`receivewal`) are logged by key, one line per
   change, plus a one-line summary;
 - **the HBA ruleset** (`pg_walserver_hba.conf`): logged as a rule-count-plus-
@@ -1338,10 +1339,10 @@ What is live-reloadable this way:
   extra complexity) -- "unchanged (N rules)" or "changed (N rules before,
   M after)";
 - **the embedded receivewal worker set** (`receivewal.c`'s `ws_receivewal_reload()`):
-  reconciled against the newly reloaded routes, without ever restarting a
-  receivewal worker whose own route did not change -- a route that newly has
+  reconciled against the newly reloaded clusters, without ever restarting a
+  receivewal worker whose own cluster did not change -- a cluster that newly has
   `receivewal = pull` gets a receivewal worker started; one that lost it, or whose
-  route disappeared entirely, gets its receivewal worker stopped (`SIGINT`); one
+  cluster disappeared entirely, gets its receivewal worker stopped (`SIGINT`); one
   whose `upstream`/`path` changed while `receivewal = pull` stayed on is
   stopped and, once reaped, automatically restarted with the new values by
   the same `PROCESS_RP_PERMANENT` restart-on-exit path `ws_receivewal_tick()`
@@ -1372,19 +1373,19 @@ clusters`/`list backups`/`list wal` inventory the archived data itself.
 `pg_walserver ps`/`pg_walserver status` run as brand-new, one-shot
 processes, entirely separate from whatever `pg_walserver serve` process
 may be running for the same `--pgdata` -- they cannot read `receivewal.c`'s
-own in-process `receivewalRoutes`/`receivewalServices` arrays, or
+own in-process `receivewalClusters`/`receivewalServices` arrays, or
 `accept_loop.c`'s own `bootstrapChildren` array, because those simply do
 not exist in a different process's address space.
 
 Two mechanisms were available. `/proc` scraping would work for *half* of
 the picture: every embedded receivewal worker child is `exec()`'d as
-`pg_walserver internal service pg-receivewal --route <key> ...`
-(`receivewal.c`), so its route key is recoverable from `/proc/<pid>/cmdline`
+`pg_walserver internal service pg-receivewal --cluster <key> ...`
+(`receivewal.c`), so its cluster key is recoverable from `/proc/<pid>/cmdline`
 by any process willing to walk `/proc`. It does not work for the other
 half: the one-shot bootstrap-backup job (`backup_bootstrap.c`) is a
 *plain* `fork()`, with no `exec()` and therefore no distinguishable
 `/proc/<pid>/cmdline` at all -- only `serve`'s own in-process
-`bootstrapChildren[]` bookkeeping (`accept_loop.c`) knows its pid-to-route
+`bootstrapChildren[]` bookkeeping (`accept_loop.c`) knows its pid-to-cluster
 mapping. Restart counts and precise start times have no `/proc`
 equivalent either way: they live in `process_supervisor.h`'s own
 in-memory `ProcessRestartCounters` ring buffer.
@@ -1397,7 +1398,7 @@ immediately), once per main accept-loop tick (at least once a second,
 alongside the existing `ws_receivewal_tick()` call, see `accept_loop.c`'s own
 `refresh_ps_state()`), and once more right after a successful `SIGHUP`
 reload. It records `serve`'s own pid and start time, one line per tracked
-embedded receivewal worker (route, pid, path, start time, restart count -- all
+embedded receivewal worker (cluster, pid, path, start time, restart count -- all
 of it already available inside `receivewal.c`, via the small
 `ws_receivewal_get_status()` accessor this PR adds), and one line per
 in-flight bootstrap backup job (`accept_loop.c`'s own
@@ -1411,7 +1412,7 @@ the narrow window since the last refresh, have already exited; a stale
 entry is never trusted at face value.
 
 Liveness of `serve` itself -- both for `ps`/`status` and for `list
-clusters`' own "is this route's receivewal worker running" column -- reuses
+clusters`' own "is this cluster's receivewal worker running" column -- reuses
 `src/bin/common/pidfile.c`'s existing `read_pidfile()` unchanged: a real
 `kill(pid, 0)` check, with a stale pidfile removed automatically, the
 exact same function `pg_walserver reload` already relies on. `serve` not
@@ -1437,7 +1438,7 @@ below) -- it shares no memory with `serve`, so it cannot write straight into
 `accept_loop.c`'s own in-process bookkeeping the way `ws_receivewal_get_status()`
 does for pid/restart-count. It relays its (lsn, timeline) the same way `serve`
 itself relays pid/restart bookkeeping to `ps`/`status`: a small, throttled,
-per-route file, `<route path>/receivewal-progress` (`wal_dir_scan.h`'s
+per-cluster file, `<cluster path>/receivewal-progress` (`wal_dir_scan.h`'s
 `ws_receivewal_progress_write()`/`ws_receivewal_progress_read()`), which
 `accept_loop.c`'s own `refresh_ps_state()` tick reads back and folds into the
 `WsPsReceivewalEntry` it publishes (new `lsn`/`lsnTimeline`/`lsnObservedAt`
@@ -1450,22 +1451,22 @@ contract, relied on by `cmd_start_replication.c`/`cmd_replication_slot.c`/
 `cmd_base_backup.c`/`cmd_identify_system.c` elsewhere in this codebase, is a
 safe, record-boundary "resume from here" position -- `pgaf_wal_progress_hook`'s
 own raw stream position must never be mistaken for that. `receivewal-progress`
-is display-only: it feeds `ps`'s per-worker line, `status`'s per-route
+is display-only: it feeds `ps`'s per-worker line, `status`'s per-cluster
 summary, and `list clusters`' own "WAL END" column (in preference to that
 column's existing `wal_dir_find_latest()` segment-boundary scan, when a
-route's receivewal worker is running and has reported a reading -- falling
+cluster's receivewal worker is running and has reported a reading -- falling
 back to the scan otherwise).
 
 ### `list clusters`: computing the covered WAL range
 
-The start LSN of a route's currently covered WAL range comes straight
+The start LSN of a cluster's currently covered WAL range comes straight
 from its latest base backup's own `backup_label` ("START WAL LOCATION"),
 read with `cmd_base_backup.c`'s own `read_backup_label()` -- already
 parsed, already tested elsewhere in this codebase (`archive-cleanup`
 reuses it too), no reason to duplicate it a third time.
 
 The end LSN reuses `wal_dir_scan.c`'s own `wal_dir_find_latest()` as-is:
-a single `opendir()`/`readdir()` pass over the route's directory, picking
+a single `opendir()`/`readdir()` pass over the cluster's directory, picking
 out the highest-numbered *complete* WAL segment filename -- this
 project's one existing "what is the newest WAL we have" answer, already
 used by `IDENTIFY_SYSTEM`/`CREATE_REPLICATION_SLOT`. It is a directory
@@ -1500,7 +1501,7 @@ segment" answer is above -- they need to read every relevant directory
 entry at least once. The design this feature started from called for a
 small, per-cluster, *incrementally* maintained metadata cache file,
 updated by each of the existing code paths that already write into a
-route's own directory: the embedded receivewal worker on each completed
+cluster's own directory: the embedded receivewal worker on each completed
 segment (`receivewal.c`'s vendored `pg_receivewal`), `archive-wal`/
 `ARCHIVE_FILE` on each push (`cmd_archive_file.c`), the bootstrap-backup
 code on completion (`backup_bootstrap.c`), and `archive-cleanup` on
@@ -1516,9 +1517,9 @@ dies between the write and the cache update" story) that did not fit
 safely in the time available for this change. What is implemented instead
 is the documented fallback explicitly allowed for this case: `list
 backups`/`list wal` compute their answer fresh, by scanning the matching
-route's own directory, on every invocation -- always correct, cached only
+cluster's own directory, on every invocation -- always correct, cached only
 for the lifetime of that one invocation (one directory scan feeds every
-row printed for that route, never re-scanned per row within the same
+row printed for that cluster, never re-scanned per row within the same
 run). This is fast enough for the realistic case (a WAL cache holding a
 retention window's worth of segments, thousands at most at the default
 16MB segment size) that an operator running this by hand would not notice
@@ -1599,21 +1600,21 @@ later "archiving PR" that actually wires it into `pg_autoctl`:
 
 There is no archiver integration in this PR's own stack for a test to
 drive `pg_walserver` through -- no `pg_autoctl create archiver`, no
-reconciler writing routes/HBA files, no monitor schema. So the tap spec
+reconciler writing clusters/HBA files, no monitor schema. So the tap spec
 builds the smallest possible harness instead, ahead of the archiver
 feature that will eventually make all of this automatic:
 
 - `pg_walserver setup --no-receivewal` does most of the work in one call:
-  creates the route's own directory, writes the `pg_walserver.ini` section
+  creates the cluster's own directory, writes the `pg_walserver.ini` section
   (`path` + `upstream`), and fetches node1's real system identifier into
   `pg_walserver_systemid` -- exactly the sequence
   `docs/ref/pg_walserver.rst`'s own worked example now leads with.
-  `pg_walserver serve`, started a few steps later, takes the route's first
-  base backup automatically at startup (see "Bootstrapping a route's
+  `pg_walserver serve`, started a few steps later, takes the cluster's first
+  base backup automatically at startup (see "Bootstrapping a cluster's
   first base backup" above). `--no-receivewal` opts out of the embedded pull
   receivewal worker, on by `setup`'s own default now (see "The embedded pull
   receivewal worker" below): this spec drives its own external, stock
-  `pg_receivewal` into this exact route directory a few lines below, and
+  `pg_receivewal` into this exact cluster directory a few lines below, and
   the embedded receivewal worker would otherwise fork a second process racing it
   for the same segment files;
 - a hand-crafted `pg_walserver_hba.conf` (a single `host all all
@@ -1623,7 +1624,7 @@ feature that will eventually make all of this automatic:
   `setup` deliberately never touches HBA, see its own header comment);
 - real WAL captured off a real `pg_auto_failover`-managed primary (node1)
   by the stock OS `pg_receivewal` (not this project's own vendored copy,
-  which belongs to a different PR's stack) into the route's directory,
+  which belongs to a different PR's stack) into the cluster's directory,
   which `pg_walserver` then serves out of directly.
 
 `pg_walserver` itself is started as a plain background process on node2
@@ -1657,8 +1658,8 @@ seven steps:
    (not a hand-rolled parser) lexed the identifier correctly; and a
    garbage command produces a clean `ErrorResponse` without crashing the
    server or leaving the connection unusable for the next, real command.
-6. `test_005_wildcard_route` -- adds a second route, reachable only
-   through pg_walserver.ini's `"*"` wildcard (see "The routes file" above), with
+6. `test_005_wildcard_cluster` -- adds a second cluster, reachable only
+   through pg_walserver.ini's `"*"` wildcard (see "The clusters file" above), with
    its own distinct system identifier; a `dbname` matching no explicit
    section resolves to it, while `default/0` -- which still has its own
    explicit section -- keeps resolving to its own path, proving an exact
@@ -1671,13 +1672,13 @@ seven steps:
    -- `primary_conninfo` pointed at `pg_walserver`, `standby.signal`,
    nothing but stock PostgreSQL configuration and commands -- then streams
    live changes from it via a genuine walreceiver, not `pg_receivewal`, and
-   is finally promoted. Needs one extra route: a real physical replication
+   is finally promoted. Needs one extra cluster: a real physical replication
    connection's walreceiver always sends the literal `dbname=replication`
    on the wire regardless of what `primary_conninfo` says (PostgreSQL's own
    `libpqrcv_connect()` overrides it unconditionally, `libpqwalreceiver.c`'s
    own comment: "the database name is ignored by the server in replication
    mode, but specify 'replication' for .pgpass lookup") -- so this step
-   gives the route a second, literal-`"replication"` alias pointing at the
+   gives the cluster a second, literal-`"replication"` alias pointing at the
    same path, exactly as a deployment serving real physical standbys by
    name (rather than through the `"*"` wildcard) would need to.
 
@@ -1688,19 +1689,19 @@ README) -- they were already written to avoid exercising either path.
 
 ### Testing SNI-based routing (tests/tap/specs/pg_walserver_sni_routing.pgaf)
 
-A second, separate spec covers the "Routing beyond `dbname`: TLS SNI"
-feature above with two real, independent routes on two `/etc/hosts`
-aliases (`routeA.internal`/`routeB.internal`) resolving to the same
+A second, separate spec covers the "Addressing a cluster beyond `dbname`: TLS
+SNI" feature above with two real, independent clusters on two `/etc/hosts`
+aliases (`clusterA.internal`/`clusterB.internal`) resolving to the same
 `pg_walserver`, both addressed with the exact same, useless
 `dbname=replication` a real physical standby always sends -- proving the
 disambiguation is genuinely happening by hostname, not by coincidence.
-Four steps: adding a second named route via `setup --hostname` creates a
+Four steps: adding a second named cluster via `setup --hostname` creates a
 self-signed certificate automatically (`test_001`); a client presenting
-each hostname over TLS is routed to that route and no other, both ways
+each hostname over TLS resolves to that cluster and no other, both ways
 (`test_002`); a connection with no resolvable hostname and no wildcard
-fails cleanly instead of falling through to either real route
+fails cleanly instead of falling through to either real cluster
 (`test_003`); and removing the certificate makes `pg_walserver serve`
-refuse to start at all with two named routes configured (`test_004`).
+refuse to start at all with two named clusters configured (`test_004`).
 Runs 4/4 green.
 
 ### Testing the archive push side (tests/tap/specs/pg_walserver_archive_command.pgaf)
@@ -1708,14 +1709,14 @@ Runs 4/4 green.
 A third, separate spec covers `CHECK_FILE`/`ARCHIVE_FILE` and the
 `pg_walserver archive-wal`/`restore-wal`/`create-cert` sub-commands above,
 entirely monitor-independent as the design requires (see "The archive push
-side" above). It configures two routes: `arch/0`, set up with
+side" above). It configures two clusters: `arch/0`, set up with
 `--no-receivewal` (this spec pushes its own small, deterministic fake "WAL
 segments" by hand under real WAL-segment-shaped names -- the embedded
 receivewal worker would otherwise fork and pull real WAL from node1 into the same
 directory, under the same names, racing what the spec itself writes), and
 `arch/1`, left at `setup`'s own `receivewal = pull` default, with a real
 embedded `pg_receivewal` actually pulling WAL off node1 -- proving
-`archive-wal`'s two disjoint behaviors against a route genuinely
+`archive-wal`'s two disjoint behaviors against a cluster genuinely
 configured each way. Six steps: `CHECK_FILE` reports `missing` for a
 filename nothing has ever archived (`test_001`); against `arch/0`,
 `pg_walserver archive-wal` pushes a brand new file via `ARCHIVE_FILE`
@@ -1728,7 +1729,7 @@ check (`test_002`); pushing a *different* file under the same
 already-archived name on `arch/0` is cleanly rejected (nonzero exit, the
 original bytes on disk untouched) (`test_003`); `create-cert` refuses a
 plain call against the certificate `setup{}` already created automatically
-(`arch/1` being a second named route), and `--force` overwrites it
+(`arch/1` being a second named cluster), and `--force` overwrites it
 cleanly, twice, CN reflecting each `--hostname` (`test_004`);
 `pg_walserver restore-wal` fetches the file
 `test_002` pushed back out, via a real `FETCH_FILE` round trip
@@ -1748,17 +1749,17 @@ reports `matches` and exits 0, still without ever calling `ARCHIVE_FILE`
 
 A fourth, separate spec covers `receivewal.c`'s embedded receivewal worker above.
 Its own setup{} runs `pg_walserver setup --receivewal pull` (writing
-`receivewal = pull` into the route's own section) and starts an independent,
+`receivewal = pull` into the cluster's own section) and starts an independent,
 externally-run "reference" `pg_receivewal` capturing the same primary into
 a separate directory -- every step below diffs the embedded receivewal worker's own
 output against that reference, the same byte-identical-output bar
 `pg_walserver_standalone.pgaf`'s own `test_003` already proves for
 `START_REPLICATION`. Three steps: a live `pg_receivewal` child is running
 under `pg_walserver`'s own pid (identified by its own process title,
-`"pg_walserver: receivewal <route>"`, set by `start_one_receivewal_child()`'s
+`"pg_walserver: receivewal <cluster>"`, set by `start_one_receivewal_child()`'s
 own `set_ps_title()` call -- not a pidfile, `pg_walserver` keeps none for
-it) with no external `pg_receivewal` ever invoked for this route, and a
-forced WAL switch lands a byte-identical segment in the route's own
+it) with no external `pg_receivewal` ever invoked for this cluster, and a
+forced WAL switch lands a byte-identical segment in the cluster's own
 directory and in the reference capture (`test_001`); `kill -9`-ing the
 receivewal worker child gets it restarted automatically, under a new pid, still
 parented by `pg_walserver` itself, with receivewal continuing byte-identical
@@ -1819,8 +1820,8 @@ against anything speaking the wire protocol -- which surfaces one real
 wrinkle worth knowing: `pg_walserver basebackup`'s own internal
 `pg_basebackup_fetch()` (`src/bin/common/pgctl.c`) never sends an explicit
 `dbname`, so libpq defaults it to whatever `--user` resolves to; `server`'s
-own `pg_walserver.ini` carries a `"*"` wildcard route (mapped at the same
-path as its named `"pitr"` route) specifically so that default, and a real
+own `pg_walserver.ini` carries a `"*"` wildcard cluster (mapped at the same
+path as its named `"pitr"` cluster) specifically so that default, and a real
 standby's own always-`"replication"` `dbname`, both resolve without any
 further configuration. See the spec file's own header comment for the full
 design and the reasoning behind each of these four roles. Runs 4/4 green.
@@ -1830,15 +1831,15 @@ design and the reasoning behind each of these four roles. Runs 4/4 green.
 A seventh, separate spec covers the pidfile and SIGHUP-driven config reload
 described in "Config reload" above. Five steps: the pidfile
 (`<pgdata>/pg_walserver.pid`) holds the real, running pid (`test_001`);
-editing `pg_walserver.ini` to add a `"*"` wildcard route and running
-`pg_walserver reload` makes that route immediately reachable, with no
-server restart, while the original route keeps working too (`test_002`);
+editing `pg_walserver.ini` to add a `"*"` wildcard cluster and running
+`pg_walserver reload` makes that cluster immediately reachable, with no
+server restart, while the original cluster keeps working too (`test_002`);
 corrupting `pg_walserver_hba.conf` with a malformed line makes `reload` log a
 clear parse error while the server keeps serving its prior, still-valid
-HBA ruleset -- a request against the route that already worked before the
+HBA ruleset -- a request against the cluster that already worked before the
 bad edit still succeeds (`test_003`); `pg_walserver reload` against a
 stale pidfile (an already-exited pid) fails cleanly with a nonzero exit,
 and `read_pidfile()` removes the stale file as a side effect (`test_004`);
-and giving the route `receivewal = pull` via reload starts its embedded pull
+and giving the cluster `receivewal = pull` via reload starts its embedded pull
 receivewal worker with no server restart, and removing it again stops that same
 receivewal worker child (`test_005`). Runs 5/5 green.

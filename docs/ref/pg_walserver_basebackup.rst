@@ -3,7 +3,7 @@
 pg_walserver basebackup
 ========================
 
-pg_walserver basebackup - Take a base backup of a route's upstream
+pg_walserver basebackup - Take a base backup of a cluster's upstream
 
 Synopsis
 --------
@@ -14,7 +14,7 @@ Synopsis
       [--path <dir>] [--upstream <conninfo> | --host <host> [--port <port>] [--user <name>]]
       [--keep-count <N>] [--keep-age <interval>] [--dry-run] [--force]
 
-Takes a real base backup from a route's upstream into
+Takes a real base backup from a cluster's upstream into
 ``<path>/basebackups/<label>/``, then updates
 ``<path>/basebackups/.latest`` once the backup is verified complete,
 using a ``pg_basebackup`` client picked to match the upstream's own
@@ -23,7 +23,7 @@ recorded Postgres version (written by :ref:`pg_walserver_fetch_systemid`/
 first on ``$PATH`` --
 PostgreSQL's own compatibility contract only ever guarantees a client
 working with a server of the *same or older* major version, never a
-newer one. ``pg_walserver serve`` already takes a route's first base
+newer one. ``pg_walserver serve`` already takes a cluster's first base
 backup automatically; run this by hand, or from a cron job, whenever a
 fresh one is wanted afterward.
 
@@ -51,12 +51,12 @@ Options
 
 --path
 
-  The route's own directory. Overrides the route's own ``path``
+  The cluster's own directory. Overrides the cluster's own ``path``
   property.
 
 --upstream
 
-  A libpq connection string to connect with. Overrides the route's own
+  A libpq connection string to connect with. Overrides the cluster's own
   ``upstream`` property.
 
 --host, --port, --user
@@ -122,7 +122,7 @@ itself, is why ``pg_basebackup`` is always invoked with
 ``--wal-method=stream``.
 
 With ``--keep-count``/``--keep-age``, the same command also prunes
-right after -- a route with real captured WAL (``mycluster``, its
+right after -- a cluster with real captured WAL (``mycluster``, its
 embedded receivewal worker running throughout this session's own
 testing) genuinely has plenty to prune::
 

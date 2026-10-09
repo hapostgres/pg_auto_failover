@@ -25,7 +25,7 @@ The vendored copy adds two callbacks to its own ``stop_streaming()``
 (already invoked on every check-in, segment-closing or not), and
 ``pg_walserver`` wires both of them, in ``cli_internal.c``, into a
 single, throttled (roughly once a second) write of a small
-``<route path>/receivewal-progress`` file:
+``<cluster path>/receivewal-progress`` file:
 
 ``pgaf_wal_segment_closed_hook(xlogpos, timeline)``
   Called the moment a WAL segment finishes. ``xlogpos`` is that
@@ -45,7 +45,7 @@ single, throttled (roughly once a second) write of a small
 That file is what ``pg_walserver ps``/``pg_walserver status`` read
 back (each running receivewal worker's own ``lsn <LSN> (timeline <N>,
 <secs>s ago)`` line) and what ``pg_walserver list clusters`` prefers
-for its own WAL END column when a route's receivewal worker is
+for its own WAL END column when a cluster's receivewal worker is
 running, falling back to the directory-scan approximation otherwise.
 Both hooks run synchronously, on the streaming loop's own thread of
 control, so the write they trigger has to stay fast and non-blocking,
@@ -63,9 +63,9 @@ What starts this service
 --------------------------
 
 Today, only :ref:`pg_walserver`'s embedded receivewal worker does: each
-route configured with ``receivewal = pull`` (the default; see
+cluster configured with ``receivewal = pull`` (the default; see
 :ref:`pg_walserver_cluster`'s ``--receivewal`` option) gets a supervised
-child running ``pg_walserver internal service pg-receivewal --route
+child running ``pg_walserver internal service pg-receivewal --cluster
 <key> --upstream <conninfo> --path <dir>`` -- a real, separate,
 supervised process (restarted on failure the same way any other
 supervised service in this project is), just one that calls
@@ -75,7 +75,7 @@ not meant to be run by hand.
 
 Before starting that child, the parent creates (or confirms) a real,
 permanent physical replication slot on the upstream -- named
-deterministically from the route key -- and passes it along
+deterministically from the cluster key -- and passes it along
 (``-S <slot>``): the same guarantee a real streaming standby's own
 slot gives it, keeping the upstream from recycling a WAL segment this
 worker has not fetched yet out from under it.

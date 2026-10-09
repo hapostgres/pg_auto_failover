@@ -13,9 +13,9 @@ Synopsis
   pg_walserver list backups --pgdata <path> [--config <path>]
       [--cluster <name>]
 
-Lists every base backup found under each matching route's own
+Lists every base backup found under each matching cluster's own
 ``basebackups/`` directory: its label, when it was taken, its size on
-disk, and whether it is the route's ``.latest``.
+disk, and whether it is the cluster's ``.latest``.
 
 Options
 -------
@@ -31,7 +31,7 @@ Options
 
 --cluster
 
-  Limit output to a single route.
+  Limit output to a single cluster.
 
 Examples
 --------

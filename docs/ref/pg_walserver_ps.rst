@@ -31,7 +31,7 @@ Options
 Examples
 --------
 
-With ``serve`` running, more than one route each with an embedded
+With ``serve`` running, more than one cluster each with an embedded
 receivewal worker -- ``|--`` for every branch but the last, ``\`--``
 for the last::
 
@@ -42,7 +42,7 @@ for the last::
 
 An in-flight bootstrap base backup job (see :ref:`pg_walserver_serve`'s
 "Archiving one cluster") appears the same way, as ``bootstrap(<pid>)
-<cluster>, running, uptime ...``. A route with no receivewal worker
+<cluster>, running, uptime ...``. A cluster with no receivewal worker
 (``--receivewal none``) never gets a branch at all: it has nothing
 running to show -- ``another`` (``--no-receivewal``, see
 :ref:`pg_walserver_ls`) is absent from the tree above for exactly that

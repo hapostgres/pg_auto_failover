@@ -152,7 +152,7 @@ default)::
 
   archive$ pg_walserver serve &
   11:36:14 179753 INFO  TLS is enabled ("/var/lib/archiver/server.crt")
-  11:36:14 179753 INFO  pg_walserver listening on port 6543, routes /var/lib/archiver/pg_walserver.ini
+  11:36:14 179753 INFO  pg_walserver listening on port 6543, clusters /var/lib/archiver/pg_walserver.ini
 
 Registering the cluster
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -164,46 +164,46 @@ given to override its own default, ``<pgdata>/<name>``::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver cluster register mycluster \
       --pguri "postgres://archiver_repl@primary:5432/?sslmode=require"
-  23:02:21 99 INFO  Added route "mycluster" (path "/var/lib/archiver/mycluster") to "/var/lib/archiver/pg_walserver.ini"
+  23:02:21 99 INFO  Added cluster "mycluster" (path "/var/lib/archiver/mycluster") to "/var/lib/archiver/pg_walserver.ini"
   23:02:21 99 INFO  Connecting to primary:5432 as "archiver_repl" to fetch the system identifier
   23:02:21 99 INFO  Wrote system identifier 7690725181130416167 to "/var/lib/archiver/mycluster/pg_walserver_systemid"
   23:02:21 99 INFO  Wrote upstream Postgres version 170011 to "/var/lib/archiver/mycluster/pg_walserver_pgversion"
-  23:02:21 99 INFO  cluster register complete: route "mycluster" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
-  23:02:21 99 INFO  Reloaded the running pg_walserver (pid 92): it will pick up this route immediately
+  23:02:21 99 INFO  cluster register complete: cluster "mycluster" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the cluster's first base backup automatically, once, the next time it starts or reloads this cluster; run "pg_walserver basebackup" by hand at any time to take another one)
+  23:02:21 99 INFO  Reloaded the running pg_walserver (pid 92): it will pick up this cluster immediately
 
 That reload is real, on the already-running server, not a restart --
-its own log shows the route arriving, its embedded receivewal worker
+its own log shows the cluster arriving, its embedded receivewal worker
 starting, and the automatic bootstrap base backup that follows::
 
   23:02:21 92 INFO  Received SIGHUP: reloading "/var/lib/archiver/pg_walserver.ini" and "/var/lib/archiver/pg_walserver_hba.conf"
-  23:02:21 92 INFO  reload: route "mycluster" added (path "/var/lib/archiver/mycluster")
-  23:02:21 92 INFO  reload: routes: 1 added, 0 removed, 0 changed (1 total now)
+  23:02:21 92 INFO  reload: cluster "mycluster" added (path "/var/lib/archiver/mycluster")
+  23:02:21 92 INFO  reload: clusters: 1 added, 0 removed, 0 changed (1 total now)
   23:02:21 92 INFO  reload: HBA ruleset unchanged (1 rule)
-  23:02:21 92 INFO  Started the embedded receivewal worker for route "mycluster" (pid 105), receiving into "/var/lib/archiver/mycluster"
-  23:02:21 92 INFO  Reload: started a new embedded receivewal worker for route "mycluster"
+  23:02:21 92 INFO  Started the embedded receivewal worker for cluster "mycluster" (pid 105), receiving into "/var/lib/archiver/mycluster"
+  23:02:21 92 INFO  Reload: started a new embedded receivewal worker for cluster "mycluster"
   23:02:21 92 INFO  Reload: receivewal worker reconciliation: 1 started, 0 stopped, 0 restarted, 0 unchanged
-  23:02:21 92 INFO  Reload complete: now serving 1 route
-  23:02:21 92 INFO  Route "mycluster" has no base backup yet: starting an automatic bootstrap base backup in the background (pid 106)
-  23:02:21 106 INFO  Route "mycluster": waiting for its embedded receivewal worker to start streaming before taking the bootstrap base backup
-  23:02:21 106 INFO  Route "mycluster": taking its automatic bootstrap base backup (attempt 1/3)
+  23:02:21 92 INFO  Reload complete: now serving 1 cluster
+  23:02:21 92 INFO  Cluster "mycluster" has no base backup yet: starting an automatic bootstrap base backup in the background (pid 106)
+  23:02:21 106 INFO  Cluster "mycluster": waiting for its embedded receivewal worker to start streaming before taking the bootstrap base backup
+  23:02:21 106 INFO  Cluster "mycluster": taking its automatic bootstrap base backup (attempt 1/3)
   23:02:21 106 INFO  Using pg_basebackup for PostgreSQL 17 found at its well-known Debian/Ubuntu path "/usr/lib/postgresql/17/bin/pg_basebackup"
   23:02:21 106 INFO  Taking a base backup of primary:5432 into "/var/lib/archiver/mycluster/basebackups/basebackup-20260928T230221Z"
   23:02:23 106 INFO  Base backup "basebackup-20260928T230221Z" is now the latest for "/var/lib/archiver/mycluster"
-  23:02:23 106 INFO  Route "mycluster": automatic bootstrap base backup complete
+  23:02:23 106 INFO  Cluster "mycluster": automatic bootstrap base backup complete
 
-Receiving the route's own WAL continuously, with no separate
+Receiving the cluster's own WAL continuously, with no separate
 ``pg_receivewal`` process, is the default behavior: ``receivewal =
-pull`` is written into the route unless told otherwise
-(``--no-receivewal`` opts out, feeding the route another way instead --
+pull`` is written into the cluster unless told otherwise
+(``--no-receivewal`` opts out, feeding the cluster another way instead --
 an externally-run ``pg_receivewal``, or ``archive-wal`` alone). Taking
-the route's first base backup automatically, once its embedded
+the cluster's first base backup automatically, once its embedded
 receivewal worker shows real streaming evidence, is ``serve``'s own
 job: no separate ``pg_walserver basebackup`` call is needed, and the
 ``pg_basebackup`` client it uses is picked to match the upstream's own
 recorded Postgres version (written alongside its system identifier by
 ``cluster register``), not just whatever happens to be first on
 ``$PATH`` -- see :ref:`pg_walserver_basebackup`. Running ``cluster
-register`` again later, for the same or a new route, while ``serve`` is
+register`` again later, for the same or a new cluster, while ``serve`` is
 already running, reloads it immediately (a ``SIGHUP``, the same as
 ``pg_walserver reload``) exactly as it just did here.
 
@@ -286,8 +286,8 @@ reachable by that name, so give it a second entry, keyed literally
 
 An operator who only ever serves real physical standbys, never
 ``pg_basebackup``/``pg_receivewal`` by name, would instead use
-``replication`` as the route's one and only key from the start. A
-``"*"`` wildcard route, or TLS SNI routing (below), work just as well
+``replication`` as the cluster's one and only key from the start. A
+``"*"`` wildcard cluster, or TLS SNI addressing (below), work just as well
 when more than one cluster needs to be reachable this way::
 
   standby$ export WALSERVER_PGURI='postgres://archiver_repl@archive:6543/mycluster?sslmode=require'
@@ -351,8 +351,8 @@ and :ref:`pg_walserver_ls`. See :ref:`pg_walserver_status`,
 :ref:`pg_walserver_ps`, and :ref:`pg_walserver_list` for each command's
 own manual page.
 
-Routing more than one cluster by name: TLS SNI
------------------------------------------------
+Addressing more than one cluster by name: TLS SNI
+--------------------------------------------------
 
 The ``[replication]`` alias above only disambiguates a single cluster: a
 real standby's ``primary_conninfo`` always produces the same literal
@@ -363,41 +363,41 @@ handshake. libpq's own ``sslsni`` setting (on by default) sends the
 connection's ``host=`` value this way, so a real standby's
 ``primary_conninfo`` already carries what is needed.
 
-Each route's ``--hostname`` needs its own DNS entry (an A record or a
+Each cluster's ``--hostname`` needs its own DNS entry (an A record or a
 CNAME; either resolves identically for this purpose), and every one of
 them must resolve to this ``pg_walserver`` instance. This is provisioned
 outside ``pg_walserver`` entirely. A connection using a literal IP address
-never sends SNI (RFC 6066), and cannot be routed by hostname.
+never sends SNI (RFC 6066), and cannot be addressed by hostname.
 
-One route needs none of this: ``dbname`` alone is unambiguous, and
+One cluster needs none of this: ``dbname`` alone is unambiguous, and
 ``serve`` runs with no TLS configured at all. The moment a second named
-route exists, TLS is required; ``pg_walserver`` refuses to start
-otherwise. The shortest path to a second, SNI-routed cluster, against
+cluster exists, TLS is required; ``pg_walserver`` refuses to start
+otherwise. The shortest path to a second, SNI-addressed cluster, against
 an already-running server with one cluster already registered and no
 certificate yet, is::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver cluster register another \
       --pguri "postgres://archiver_repl@primary2/?sslmode=require" \
       --hostname another.archive.example.com --ssl-self-signed
-  22:57:22 63 INFO  Added route "another" (path "/var/lib/archiver/another") to "/var/lib/archiver/pg_walserver.ini"
+  22:57:22 63 INFO  Added cluster "another" (path "/var/lib/archiver/another") to "/var/lib/archiver/pg_walserver.ini"
   22:57:22 63 INFO   /usr/bin/openssl req -new -x509 -days 365 -nodes -text -out /var/lib/archiver/server.crt -keyout /var/lib/archiver/server.key -subj "/CN=another.archive.example.com"
   22:57:22 63 INFO  Created a self-signed certificate for "/var/lib/archiver" ("/var/lib/archiver/server.crt"/"/var/lib/archiver/server.key", CN=another.archive.example.com) -- replace it with a real one before running on a reachable network
-  22:57:22 63 INFO  "/var/lib/archiver/pg_walserver.ini" now has 2 routes: TLS is required for more than one route to be reachable by name (dbname-based routing alone cannot tell a real physical standby's connection apart from any other route once there is more than one, see this project's own README.md)
+  22:57:22 63 INFO  "/var/lib/archiver/pg_walserver.ini" now has 2 clusters: TLS is required for more than one cluster to be reachable by name (dbname-based addressing alone cannot tell a real physical standby's connection apart from any other cluster once there is more than one, see this project's own README.md)
   22:57:22 63 INFO  Connecting to primary2:5432 as "archiver_repl" to fetch the system identifier
   22:57:22 63 INFO  Wrote system identifier 7690676421909321516 to "/var/lib/archiver/another/pg_walserver_systemid"
   22:57:22 63 INFO  Wrote upstream Postgres version 170011 to "/var/lib/archiver/another/pg_walserver_pgversion"
-  22:57:22 63 INFO  cluster register complete: route "another" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the route's first base backup automatically, once, the next time it starts or reloads this route; run "pg_walserver basebackup" by hand at any time to take another one)
-  22:57:22 63 INFO  Reloaded the running pg_walserver (pid 92): it will pick up this route immediately
+  22:57:22 63 INFO  cluster register complete: cluster "another" is ready (no base backup taken here -- "pg_walserver serve" bootstraps the cluster's first base backup automatically, once, the next time it starts or reloads this cluster; run "pg_walserver basebackup" by hand at any time to take another one)
+  22:57:22 63 INFO  Reloaded the running pg_walserver (pid 92): it will pick up this cluster immediately
 
 Without ``--ssl-self-signed`` here, this same ``cluster register`` call
 would have created the certificate itself, automatically, the moment
-the file it just wrote to reached two routes -- either way works, this
+the file it just wrote to reached two clusters -- either way works, this
 only gets it sooner. The certificate can also be created, or with
 ``--force`` replaced, by hand at any time, with ``create-cert``::
 
   archive$ pg_walserver create-cert --hostname mycluster.archive.example.com
 
-Each standby then names its own route's hostname in ``primary_conninfo``'s
+Each standby then names its own cluster's hostname in ``primary_conninfo``'s
 ``host=``::
 
   standby$ cat >> /var/lib/postgres/standby/postgresql.auto.conf <<EOF
@@ -405,13 +405,13 @@ Each standby then names its own route's hostname in ``primary_conninfo``'s
   EOF
 
 A connection with no resolvable hostname, and no ``*`` wildcard
-configured, fails cleanly rather than matching another route.
-Exact-``dbname`` routing keeps working unchanged alongside SNI, and is
+configured, fails cleanly rather than matching another cluster.
+Exact-``dbname`` addressing keeps working unchanged alongside SNI, and is
 always tried first.
 
 See Also
 --------
 
-The wire protocol, routing precedence, the embedded receivewal worker, and
+The wire protocol, cluster-addressing precedence, the embedded receivewal worker, and
 the push-side ``CHECK_FILE``/``ARCHIVE_FILE`` design are documented in
 full in ``src/bin/pg_walserver/README.md``, in the source tree.

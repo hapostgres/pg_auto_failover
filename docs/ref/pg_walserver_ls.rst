@@ -12,7 +12,7 @@ Synopsis
 
   pg_walserver ls --pgdata <path> [--config <path>] [--all]
 
-Prints one row per configured route: how many base backups it holds
+Prints one row per configured cluster: how many base backups it holds
 and their combined real size on disk, how many WAL segments it has
 captured/archived and their combined size, and when its most recent
 base backup was taken. Real PostgreSQL archiving practice treats an
@@ -64,7 +64,7 @@ Default output, the per-cluster storage summary::
   (config/credential/certificate files omitted; pass --all to list those instead)
 
 ``4+1`` under WAL FILES means 4 complete segments plus 1 still being
-written (a ``.partial`` file). A route set up with ``--no-receivewal``
+written (a ``.partial`` file). A cluster set up with ``--no-receivewal``
 and never yet pushed to by ``archive-wal`` would show ``0`` there
 instead, with ``BACKUP SIZE``/``TOTAL SIZE`` still real if it has taken
 at least one base backup.

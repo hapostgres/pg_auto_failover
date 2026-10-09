@@ -3,7 +3,7 @@
 pg_walserver restore-wal
 =========================
 
-pg_walserver restore-wal - Fetch one WAL/.backup file from a pg_walserver route (restore_command)
+pg_walserver restore-wal - Fetch one WAL/.backup file from a pg_walserver cluster (restore_command)
 
 Synopsis
 --------
@@ -13,7 +13,7 @@ Synopsis
   pg_walserver restore-wal <filename> <destination-path> --cluster <name>
       --host <host> [--port <port>] [--user <name>] [--sslmode <mode>]
 
-Fetches one WAL segment or ``.backup`` history file from a route, for
+Fetches one WAL segment or ``.backup`` history file from a cluster, for
 use as PostgreSQL's own ``restore_command``::
 
   restore_command = 'pg_walserver restore-wal %f %p --cluster mycluster \
