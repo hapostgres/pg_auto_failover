@@ -1,0 +1,78 @@
+/*
+ * src/bin/pg_walserver/auth.h
+ *   Connection authentication for pg_walserver. The cluster the client asked
+ *   for must exist in the clusters file; then the first matching rule of the
+ *   HBA file (hba.h) decides the method:
+ *
+ *     trust          accept
+ *     scram-sha-256  real SCRAM-SHA-256 exchange (RFC 5802, as spoken by
+ *                    libpq, so pg_basebackup, pg_receivewal and a
+ *                    standby's walreceiver work unmodified) against the
+ *                    stored verifier for the user in the passwd file, one
+ *                    "<user>:SCRAM-SHA-256$<iter>:<salt>$<stored>:<server>"
+ *                    per line (create one with `pg_walserver scram-secret`)
+ *     reject         refuse
+ *
+ *   A matching rule may also carry "clientcert=verify-full" (hba.h): the
+ *   TLS peer certificate's CN must equal the connecting role name exactly.
+ *   Checked first, before the method above runs -- with "trust" the
+ *   certificate check is the whole authentication; with "scram-sha-256"
+ *   both it and the password are required (two-factor). No certificate, or
+ *   a CN that does not match, is a clean rejection; this project does not
+ *   implement "clientcert=verify-ca" (see hba.h's own comment for why).
+ *
+ *   Authentication comes FIRST, as in PostgreSQL: the HBA rules are looked
+ *   up with the cluster key the client asked for (whether or not it is a
+ *   known cluster), then the method runs, and only after a successful
+ *   authentication is an unknown cluster reported (3D000, "database does not
+ *   exist"). A rejection is one generic message naming the peer address and
+ *   user, never the cluster. Client supplied strings are sanitized (control
+ *   characters, length) before being logged.
+ *
+ *   The whole exchange runs under the connection's absolute authentication
+ *   deadline (--auth-timeout, see accept_loop.h). Before authentication a
+ *   client message is at most WS_MAX_AUTH_MESSAGE_LEN bytes.
+ *
+ *   Without any HBA file configured (no --pgdata: only with the explicit
+ *   --insecure flag, for manual testing), everything is accepted.
+ *
+ * Licensed under the PostgreSQL License.
+ *
+ */
+
+#ifndef WS_AUTH_H
+#define WS_AUTH_H
+
+#include <stdbool.h>
+
+#include "postgres_fe.h"
+
+#include "walserver.h"
+#include "hba.h"
+#include "clusters.h"
+
+typedef struct WsAuthConfig
+{
+	char hbaPath[MAXPGPATH];       /* empty: no authentication at all; the
+	                                * path itself is kept only for logging
+	                                * and reload -- matching against a
+	                                * connection always uses hbaRuleSet
+	                                * below, never re-reads this path */
+	char passwdPath[MAXPGPATH];    /* scram-sha-256 verifiers, still read
+	                                * fresh on every authentication attempt
+	                                * (not part of the clusters/HBA reload
+	                                * this project's SIGHUP handling covers) */
+	WsHbaRuleSet hbaRuleSet;        /* the currently installed, validated HBA
+	                                 * ruleset -- parsed once at startup and
+	                                 * swapped in atomically by
+	                                 * accept_loop.c's ws_reload_config() on a
+	                                 * successful SIGHUP reload */
+} WsAuthConfig;
+
+bool ws_authenticate(int sock, const WsStartupParams *params,
+					 const char *clusterKey,
+					 const WsCluster *clusters, int clusterCount,
+					 const WsAuthConfig *authConfig,
+					 const WsCluster **foundCluster);
+
+#endif /* WS_AUTH_H */

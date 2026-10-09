@@ -22,6 +22,7 @@
 #include "coordinator.h"
 #include "env_utils.h"
 #include "defaults.h"
+#include "file_utils.h"
 #include "fsm.h"
 #include "ini_file.h"
 #include "ipaddr.h"
@@ -40,6 +41,7 @@
 #include "service_keeper_init.h"
 #include "service_monitor.h"
 #include "service_monitor_init.h"
+#include "service_walserver.h"
 #include "string_utils.h"
 
 /*
@@ -47,6 +49,7 @@
  * functions and their command implementation. We can't pass parameters around.
  */
 MonitorConfig monitorOptions = { 0 };
+static WalServerConfig walserverOptions = { 0 };
 
 static int cli_create_postgres_getopts(int argc, char **argv);
 static void cli_create_postgres(int argc, char **argv);
@@ -61,6 +64,9 @@ static void cli_activate_node(int argc, char **argv);
 
 static int cli_create_monitor_getopts(int argc, char **argv);
 static void cli_create_monitor(int argc, char **argv);
+
+static int cli_create_walserver_getopts(int argc, char **argv);
+static void cli_create_walserver(int argc, char **argv);
 
 static void check_hostname(const char *hostname);
 
@@ -105,6 +111,19 @@ CommandLine create_postgres_command =
 		"  --maximum-backup-rate   maximum transfer rate of data transferred from the server during initial sync\n",
 		cli_create_postgres_getopts,
 		cli_create_postgres);
+
+CommandLine create_walserver_command =
+	make_command(
+		"walserver",
+		"Initialize a pg_walserver node, supervised by pg_autoctl",
+		"",
+		"  --pgdata          this node's own top-level storage root "
+		"(pg_walserver's own --pgdata)\n"
+		"  --port            port for pg_walserver to listen on\n"
+		"  --name            pg_auto_failover node name\n"
+		"  --run             create node then run pg_autoctl service\n",
+		cli_create_walserver_getopts,
+		cli_create_walserver);
 
 CommandLine create_coordinator_command =
 	make_command(
@@ -304,6 +323,209 @@ cli_create_pg(Keeper *keeper)
 	{
 		/* errors have been logged */
 		exit(EXIT_CODE_BAD_STATE);
+	}
+}
+
+
+/*
+ * cli_create_walserver_getopts parses command line options for
+ * `pg_autoctl create walserver` and sets the global walserverOptions
+ * variable from them, without doing any check. Deliberately much simpler
+ * than cli_create_postgres_getopts: a walserver node never registers with a
+ * monitor, never joins a formation, and has no SSL/auth/candidate-priority
+ * options at all.
+ */
+static int
+cli_create_walserver_getopts(int argc, char **argv)
+{
+	WalServerConfig options = { 0 };
+	int c, option_index = 0;
+	int verboseCount = 0;
+
+	static struct option long_options[] = {
+		{ "pgdata", required_argument, NULL, 'D' },
+		{ "port", required_argument, NULL, 'p' },
+		{ "name", required_argument, NULL, 'a' },
+		{ "run", no_argument, NULL, 'x' },
+		{ "version", no_argument, NULL, 'V' },
+		{ "verbose", no_argument, NULL, 'v' },
+		{ "quiet", no_argument, NULL, 'q' },
+		{ "help", no_argument, NULL, 'h' },
+		{ NULL, 0, NULL, 0 }
+	};
+
+	optind = 0;
+
+	while ((c = getopt_long(argc, argv, "D:p:a:xVvqh",
+							long_options, &option_index)) != -1)
+	{
+		switch (c)
+		{
+			case 'D':
+			{
+				strlcpy(options.pgdata, optarg, MAXPGPATH);
+				log_trace("--pgdata %s", options.pgdata);
+				break;
+			}
+
+			case 'p':
+			{
+				if (!stringToInt(optarg, &options.port) ||
+					options.port <= 0 || options.port > 65535)
+				{
+					log_fatal("--port argument is not a valid port number: "
+							  "\"%s\"", optarg);
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--port %d", options.port);
+				break;
+			}
+
+			case 'a':
+			{
+				strlcpy(options.name, optarg, sizeof(options.name));
+				log_trace("--name %s", options.name);
+				break;
+			}
+
+			case 'x':
+			{
+				createAndRun = true;
+				log_trace("--run");
+				break;
+			}
+
+			case 'V':
+			{
+				keeper_cli_print_version(argc, argv);
+				break;
+			}
+
+			case 'v':
+			{
+				++verboseCount;
+				switch (verboseCount)
+				{
+					case 1:
+					{
+						log_set_level(LOG_INFO);
+						break;
+					}
+
+					case 2:
+					{
+						log_set_level(LOG_DEBUG);
+						break;
+					}
+
+					default:
+					{
+						log_set_level(LOG_TRACE);
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'q':
+			{
+				log_set_level(LOG_ERROR);
+				break;
+			}
+
+			case 'h':
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_QUIT);
+				break;
+			}
+
+			default:
+			{
+				commandline_help(stderr);
+				exit(EXIT_CODE_BAD_ARGS);
+				break;
+			}
+		}
+	}
+
+	if (IS_EMPTY_STRING_BUFFER(options.pgdata))
+	{
+		if (!env_exists("PGDATA") ||
+			!get_env_copy("PGDATA", options.pgdata, MAXPGPATH))
+		{
+			log_fatal("Please provide a --pgdata path, or set PGDATA");
+			exit(EXIT_CODE_BAD_ARGS);
+		}
+	}
+	else
+	{
+		/*
+		 * From now on, want PGDATA set in the environment: supervisor_start()
+		 * (via create_pidfile()) reads it from there, same convention as
+		 * every other `pg_autoctl create <kind>` command
+		 * (cli_common_get_set_pgdata_or_exit()).
+		 */
+		setenv("PGDATA", options.pgdata, 1);
+	}
+
+	walserverOptions = options;
+
+	return optind;
+}
+
+
+/*
+ * cli_create_walserver creates a pg_walserver node: it writes the minimal
+ * walserver configuration file (see service_walserver.c's
+ * walserver_config_write()), creates the --pgdata directory if needed, and,
+ * with --run, hands off to start_walserver() directly -- there is no
+ * keeper-init/activation dance to run first, unlike every other `pg_autoctl
+ * create <kind>` command.
+ */
+static void
+cli_create_walserver(int argc, char **argv)
+{
+	WalServerConfig config = walserverOptions;
+	pid_t pid = 0;
+
+	if (!keeper_config_set_pathnames_from_pgdata(&config.pathnames,
+												 config.pgdata))
+	{
+		/* errors have already been logged */
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	if (read_pidfile(config.pathnames.pid, &pid))
+	{
+		log_fatal("pg_autoctl is already running with pid %d", pid);
+		exit(EXIT_CODE_BAD_STATE);
+	}
+
+	if (pg_mkdir_p(config.pgdata, 0700) == -1 && !directory_exists(config.pgdata))
+	{
+		log_fatal("Failed to create directory \"%s\": %m", config.pgdata);
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
+	if (!walserver_config_write(&config))
+	{
+		log_fatal("Failed to write the pg_autoctl configuration file, "
+				  "see above");
+		exit(EXIT_CODE_BAD_CONFIG);
+	}
+
+	log_info("pg_autoctl create walserver: configuration written to \"%s\"",
+			 config.pathnames.config);
+
+	if (createAndRun)
+	{
+		if (!start_walserver(&config))
+		{
+			log_fatal("Failed to start pg_autoctl walserver service, "
+					  "see above for details");
+			exit(EXIT_CODE_INTERNAL_ERROR);
+		}
 	}
 }
 

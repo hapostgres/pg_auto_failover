@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "postgres_fe.h"
 #include "pqexpbuffer.h"
@@ -598,4 +599,156 @@ processBufferCallback(const char *buffer, bool error)
 			log_info("%s", outLines[lineNumber]);
 		}
 	}
+}
+
+
+/*
+ * stringToRetentionAge parses a --keep-age argument such as "72h",
+ * "14d", "4w", "3m" into *age. An explicit suffix is required -- there is
+ * no bare-number default, ambiguity here is worse than a clear error.
+ * Returns false with an error already logged (naming the accepted
+ * suffixes) on anything else.
+ */
+bool
+stringToRetentionAge(const char *str, RetentionAge *age)
+{
+	size_t len = str == NULL ? 0 : strlen(str);
+
+	if (len < 2)
+	{
+		log_error("Invalid --keep-age value \"%s\": expected a number "
+				  "followed by one of \"h\" (hours), \"d\" (days), \"w\" "
+				  "(weeks), or \"m\" (calendar months), e.g. \"72h\", "
+				  "\"30d\", \"4w\", \"3m\" -- an explicit suffix is "
+				  "required, there is no bare-number default",
+				  str == NULL ? "" : str);
+		return false;
+	}
+
+	char unit = str[len - 1];
+
+	if (unit != 'h' && unit != 'd' && unit != 'w' && unit != 'm')
+	{
+		log_error("Invalid --keep-age value \"%s\": unrecognized suffix "
+				  "\"%c\" -- accepted suffixes are \"h\" (hours), \"d\" "
+				  "(days), \"w\" (weeks), and \"m\" (calendar months)",
+				  str, unit);
+		return false;
+	}
+
+	char numberPart[32] = { 0 };
+
+	if (len - 1 >= sizeof(numberPart))
+	{
+		log_error("Invalid --keep-age value \"%s\": number is too long", str);
+		return false;
+	}
+
+	memcpy(numberPart, str, len - 1); /* IGNORE-BANNED */
+	numberPart[len - 1] = '\0';
+
+	int64_t value = 0;
+
+	if (!stringToInt64(numberPart, &value) || value <= 0 || value > 100000)
+	{
+		log_error("Invalid --keep-age value \"%s\": expected a positive "
+				  "whole number before the \"%c\" suffix", str, unit);
+		return false;
+	}
+
+	age->value = (long) value;
+	age->unit = unit;
+
+	return true;
+}
+
+
+/*
+ * retentionAgeCutoff computes the timestamp before which a base backup
+ * counts as expired under --keep-age. 'h'/'d'/'w' are plain fixed
+ * durations; 'm' is real calendar-month arithmetic on UTC struct tm
+ * fields plus timegm() -- deliberately not "value * 30 days", since month
+ * lengths vary. A day-of-month that doesn't exist in the target month
+ * (e.g. going back one month from March 31st, where February 31st doesn't
+ * exist) normalizes forward the same way mktime()/timegm() always
+ * normalizes an out-of-range struct tm -- ordinary, documented behavior,
+ * not a bug.
+ */
+time_t
+retentionAgeCutoff(const RetentionAge *age, time_t now)
+{
+	if (age->unit == 'm')
+	{
+		struct tm tmNow = { 0 };
+
+		gmtime_r(&now, &tmNow);
+		tmNow.tm_mon -= (int) age->value;
+
+		return timegm(&tmNow);
+	}
+
+	long secondsPerUnit;
+
+	switch (age->unit)
+	{
+		case 'h':
+		{
+			secondsPerUnit = 3600L;
+			break;
+		}
+
+		case 'd':
+		{
+			secondsPerUnit = 86400L;
+			break;
+		}
+
+		case 'w':
+		default:
+		{
+			secondsPerUnit = 604800L;
+			break;
+		}
+	}
+
+	return now - (age->value * secondsPerUnit);
+}
+
+
+/*
+ * sanitizeForLog copies a possibly-untrusted string (e.g. straight from
+ * an unauthenticated client: a user name, a cluster key) into out (bounded
+ * by outSize), replacing any control character (< 0x20 or 0x7f) with '?'
+ * so it can be logged or shown in a process title without letting it
+ * inject terminal escape sequences or fake log lines. Truncates with a
+ * trailing "..." when in doesn't fit.
+ */
+void
+sanitizeForLog(const char *in, char *out, size_t outSize)
+{
+	size_t o = 0;
+
+	if (outSize == 0)
+	{
+		return;
+	}
+
+	for (const char *p = in; *p != '\0'; p++)
+	{
+		if (o + 1 >= outSize)
+		{
+			if (outSize > 4)
+			{
+				strlcpy(out + outSize - 4, "...", 4);
+				return;
+			}
+			break;
+		}
+
+		unsigned char c = (unsigned char) *p;
+
+		out[o++] = (c < 0x20 || c == 0x7f) ? '?' : (char) c;
+	}
+
+	out[o] = '\0';
 }

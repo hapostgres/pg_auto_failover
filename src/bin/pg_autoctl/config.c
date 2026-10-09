@@ -335,6 +335,10 @@ ProbeConfigurationFileRole(const char *filename)
 	{
 		return PG_AUTOCTL_ROLE_KEEPER;
 	}
+	else if (strcmp(config.role, WALSERVER_ROLE) == 0)
+	{
+		return PG_AUTOCTL_ROLE_WALSERVER;
+	}
 	else
 	{
 		log_fatal("Failed to recognize configuration file setting for "

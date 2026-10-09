@@ -92,6 +92,7 @@ extern CommandLine create_monitor_command;
 extern CommandLine create_postgres_command;
 extern CommandLine create_coordinator_command;
 extern CommandLine create_worker_command;
+extern CommandLine create_walserver_command;
 extern CommandLine activate_node_command;
 
 /* cli_drop_node.c */

@@ -40,6 +40,11 @@ RUN if [ -d src/bin/pgaftest ]; then \
             src/bin/pgaftest/test_spec_parse.h \
             src/bin/pgaftest/test_spec_scan.c; \
     fi
+RUN if [ -d src/bin/pg_walserver ]; then \
+      touch src/bin/pg_walserver/repl_gram.c \
+            src/bin/pg_walserver/repl_gram.h \
+            src/bin/pg_walserver/repl_scanner.c; \
+    fi
 
 RUN make -s clean && make -s install -j$(nproc) BINDIR=/usr/local/bin
 RUN pg_virtualenv -v ${PGVERSION} \
@@ -120,6 +125,12 @@ COPY --from=build /usr/lib/postgresql/${PGVERSION}/lib/pgautofailover.so \
 COPY --from=build /usr/share/postgresql/${PGVERSION}/extension/pgautofailover* \
                   /usr/share/postgresql/${PGVERSION}/extension/
 COPY --from=build /usr/local/bin/pg_autoctl /usr/local/bin/
+# Bracket-glob makes this an optional copy: BuildKit treats [r] as a glob,
+# and an empty glob match is not an error for COPY (unlike a literal missing
+# path). This lets tests/upgrade build the "current" Dockerfile against an
+# old release's source tree, which predates pg_walserver and has no binary
+# to copy. Stopgap only -- revisit after the release with a cleaner fix.
+COPY --from=build /usr/local/bin/pg_walserve[r] /usr/local/bin/
 
 RUN mkdir -p /var/lib/postgres \
  && chown -R docker /var/lib/postgres

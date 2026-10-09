@@ -1,0 +1,265 @@
+# pg_walserver, on its own, with no archiver/monitor integration at all --
+# except for `pg_walserver cluster register` itself, its own one-shot onboarding
+# wizard (cli_setup.c): create/validate the pg_walserver.ini cluster, check
+# the upstream role's REPLICATION attribute, and fetch the system
+# identifier. "pg_walserver serve" itself then bootstraps the cluster's
+# first base backup automatically the moment it starts (accept_loop.c's
+# own ws_bootstrap_missing_backups()) -- setup no longer takes one itself.
+# Ongoing WAL capture is still the stock OS pg_receivewal, run by hand
+# here (pg_walserver's own embedded receivewal worker is a later addition, see
+# DESIGN-standalone-archiving.md) -- this is the smallest harness that still
+# exercises the real replication wire protocol end to end, ahead of the
+# archiver feature (a later PR) that wires pg_walserver into pg_autoctl's
+# own process supervision.
+#
+# This PR's own pgaftest predates `let`/`${var}` capture, so values that
+# cross steps (the captured segment's name) are written to plain files on
+# node2 instead, and re-read with $(cat ...).
+#
+#   test_001  IDENTIFY_SYSTEM reports node1's own system identifier (as
+#             `cluster register` fetched it), and SHOW wal_segment_size reports the
+#             16MB default (nothing here has told it otherwise)
+#   test_002  FETCH_FILE returns the exact bytes of a captured WAL segment
+#   test_003  a real client (pg_receivewal) can START_REPLICATION from
+#             pg_walserver itself: with the original capture process still
+#             running, a fresh segment forced on node1 is picked up by both
+#             at once, and both end up with byte-identical copies of it
+#   test_004  a couple of real-protocol edge cases the repl_scanner.l/
+#             repl_gram.y port (see repl_command.h) is specifically meant
+#             to get right that a hand-rolled parser easily wouldn't: a
+#             double-quoted slot name with an embedded escaped quote, and a
+#             garbage command producing a clean error rather than a crash
+#             (and the connection still usable afterwards)
+#   test_005  the pg_walserver.ini "*" wildcard (clusters.h/clusters.c, PgBouncer-
+#             style): a dbname with no cluster of its own falls through to
+#             it, while "default/0" -- which still has its own explicit
+#             section -- keeps resolving to its own path, proving an exact
+#             match always wins over the wildcard, never the other way
+#             around
+#   test_006  a real, unmodified `pg_basebackup` client takes a BASE_BACKUP
+#             from pg_walserver of the exact backup "serve" bootstrapped
+#             automatically at startup, then a real standby -- primary_conninfo
+#             pointed at pg_walserver, standby.signal, nothing but stock
+#             PostgreSQL commands anywhere in this step -- streams live
+#             changes from it via a genuine walreceiver (not pg_receivewal)
+#             and is finally promoted, proving pg_walserver's own
+#             START_REPLICATION is wire-compatible with a real standby,
+#             not just the CLI tools exercised by every step above it
+
+cluster {
+    monitor
+    ssl off
+    formation {
+        node1 replication-password "pgaf-repl-pw"
+        node2 replication-password "pgaf-repl-pw"
+    }
+}
+
+setup {
+    wait until primary, secondary in group 0  timeout 120s
+
+    # node2 hosts pg_walserver for this test; it is otherwise an ordinary
+    # registered secondary and that is irrelevant here.
+
+    # every connection below is node2 talking to its own pg_walserver over
+    # loopback (127.0.0.1): a manually written, properly scoped rule for
+    # that exact peer, not "0.0.0.0/0" -- there is no monitor here to learn
+    # a real client's address from, and none needed: pg_walserver's HBA is
+    # just a file, hand-edited exactly as an operator running it on its own
+    # (no archiver, no monitor) would. `cluster register` itself never touches HBA --
+    # a deliberately separate concern, see cli_cluster.c's own header comment.
+    exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
+
+    # the one-shot wizard: creates /tmp/ws/default/0, writes the
+    # pg_walserver.ini [default/0] section (path + upstream), checks
+    # pgautofailover_replicator's REPLICATION attribute on node1, and
+    # fetches node1's real system identifier into pg_walserver_systemid. No
+    # "serve" is running yet at this point, so setup only logs that this
+    # config will take effect the next time it starts -- test_000 below
+    # starts it, which is what actually bootstraps this cluster's first base
+    # backup automatically. --no-receivewal: this spec drives its own external
+    # pg_receivewal (below) into this exact cluster directory -- the embedded
+    # receivewal worker, on by default now, would otherwise fork a second
+    # process racing it for the same segment files.
+    exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register default/0 --pgdata /tmp/ws --path /tmp/ws/default/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
+    exec node2 bash -c 'if grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini; then echo "receivewal = pull should not have been written with --no-receivewal"; false; fi'
+
+    # capture real WAL off node1 with the stock pg_receivewal (not this
+    # project's own vendored copy, which is not part of this PR's stack)
+    exec node2 bash -c 'nohup pg_receivewal -w -d "host=node1 port=5432 user=pgautofailover_replicator password=pgaf-repl-pw sslmode=disable" --directory /tmp/ws/default/0 --no-loop > /tmp/ws-receive.log 2>&1 & echo started'
+
+    sql node1 { CREATE TABLE ws(a int); INSERT INTO ws VALUES (1); }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'for i in $(seq 60); do ls /tmp/ws/default/0/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | head -1 | grep -q . && exit 0; sleep 1; done; ls -la /tmp/ws/default/0; exit 1'
+}
+
+teardown {
+    compose down
+}
+
+step test_000_sync_files_from_node1 {
+    # `cluster register`, in the setup{} block above, already wrote
+    # pg_walserver_systemid -- nothing to fetch by hand here beyond the one
+    # value pgaftest's own let/${var} (not available at this point in its
+    # history) can't carry across steps on its own.
+    exec node2 bash -c 'ls /tmp/ws/default/0/*[0-9A-F] | grep -v "\.partial$" | xargs -n1 basename | sort | tail -1 > /tmp/seg.txt'
+    exec node2 bash -c 'test -s /tmp/seg.txt'
+    exec node2 bash -c 'test -s /tmp/ws/default/0/pg_walserver_systemid'
+    # `cluster register` (via fetch-systemid) also records node1's real Postgres major
+    # version, alongside its system identifier, in its own sibling file --
+    # cli_fetch_systemid.c's own header comment. It's PQserverVersion()'s raw
+    # server_version_num form (e.g. 170011 for 17.11), so a real value here
+    # is a 5-6 digit positive integer, never empty or garbage.
+    exec node2 bash -c 'test -s /tmp/ws/default/0/pg_walserver_pgversion'
+    exec node2 bash -c 'grep -Eqx "[0-9]{5,6}" /tmp/ws/default/0/pg_walserver_pgversion || { echo "got: $(cat /tmp/ws/default/0/pg_walserver_pgversion)"; false; }'
+    # the setup capturer keeps running: test_003 needs it live, to prove
+    # pg_walserver can serve a segment while it is concurrently being written
+    exec node2 bash -c 'nohup pg_walserver serve --pgdata /tmp/ws --port 6543 > /tmp/ws-walsender.log 2>&1 & echo started'
+    exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walsender.log; exit 1'
+    # "serve" bootstraps this cluster's first base backup automatically at
+    # startup now (no more "setup --with-basebackup", see accept_loop.c's
+    # own ws_bootstrap_missing_backups()) -- wait for it to actually
+    # complete before the rest of this spec relies on it.
+    exec node2 bash -c 'for i in $(seq 30); do test -s /tmp/ws/default/0/basebackups/.latest && exit 0; sleep 1; done; cat /tmp/ws-walsender.log; exit 1'
+    # that automatic bootstrap backup went through cli_basebackup_run(),
+    # which -- since pg_walserver_pgversion above was already on disk by the
+    # time "serve" started -- picked its pg_basebackup binary the
+    # version-aware way (find_pg_basebackup_for_major_version(), pgctl.c)
+    # rather than falling back to a blind PATH lookup: its own log line says
+    # so, and the "no recorded upstream version" warning that fallback path
+    # logs must not appear anywhere in this run.
+    exec node2 bash -c 'grep -q "Using pg_basebackup for PostgreSQL" /tmp/ws-walsender.log || { cat /tmp/ws-walsender.log; false; }'
+    exec node2 bash -c '! grep -q "no recorded upstream Postgres version" /tmp/ws-walsender.log'
+}
+
+step test_001_identify_system_and_show {
+    exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/pg_walserver_systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "SHOW wal_segment_size" | grep -qx 16MB'
+}
+
+step test_002_fetch_file {
+    exec node2 bash -c 'seg=$(cat /tmp/seg.txt); psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -c "FETCH_FILE $seg" > /tmp/fetched.out'
+    exec node2 bash -c 'seg=$(cat /tmp/seg.txt); test "$(stat -c %s /tmp/ws/default/0/$seg)" = "$(stat -c %s /tmp/fetched.out)" || (ls -la /tmp/ws/default/0/$seg /tmp/fetched.out; false)'
+}
+
+step test_003_start_replication_from_pg_walserver {
+    # start a second, independent client streaming from pg_walserver itself
+    # before forcing a new segment, so it is live-tailing when the segment
+    # closes -- the same "keep up with the primary" role the archiver's own
+    # replication-quorum membership plays in the full feature (a later PR)
+    exec node2 bash -c 'mkdir -p /tmp/rw && nohup pg_receivewal -w -d "host=127.0.0.1 port=6543 dbname=default/0 sslmode=disable" --directory /tmp/rw --no-loop > /tmp/rw.log 2>&1 & echo started'
+    sql node1 { INSERT INTO ws SELECT generate_series(1, 2000000) }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'prev=$(cat /tmp/seg.txt); for i in $(seq 60); do cur=$(ls /tmp/ws/default/0/*[0-9A-F] | grep -v "\.partial$" | xargs -n1 basename | sort | tail -1); test -n "$cur" -a "$cur" != "$prev" && { echo "$cur" > /tmp/seg2.txt; exit 0; }; sleep 1; done; ls -la /tmp/ws/default/0; exit 1'
+    exec node2 bash -c 'seg2=$(cat /tmp/seg2.txt); for i in $(seq 60); do test -s /tmp/rw/$seg2 && exit 0; sleep 1; done; cat /tmp/rw.log; ls -la /tmp/rw; exit 1'
+    exec node2 bash -c 'seg2=$(cat /tmp/seg2.txt); cmp -s /tmp/rw/$seg2 /tmp/ws/default/0/$seg2 || (ls -la /tmp/rw/$seg2 /tmp/ws/default/0/$seg2; false)'
+}
+
+step test_004_grammar_edge_cases {
+    # a double-quoted slot name with an embedded escaped quote ("foo""bar",
+    # i.e. the identifier foo"bar) must be lexed by the real grammar's <xd>
+    # state exactly as PostgreSQL's own IDENT quoting rule defines it, and
+    # reach cmd_replication_slot.c's semantic slot_name_is_safe() check --
+    # which then rejects it (a slot name may not contain '"') with a clean
+    # 42602 error, proving the parser (not the old, deleted
+    # parse_slot_name(), see repl_command.h) got the identifier right
+    # rather than choking on the embedded '""' with a syntax error.
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -c '"'"'CREATE_REPLICATION_SLOT "foo""bar" TEMPORARY PHYSICAL'"'"' 2>&1 | grep -qi "invalid replication slot name"'
+
+    # a garbage command must produce a clean ErrorResponse, not crash the
+    # server or hang the connection -- and the same connection must still
+    # answer a real command right afterwards
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -c "GARBAGE COMMAND ???" 2>&1 | grep -q ERROR'
+    exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM" > /dev/null'
+}
+
+step test_005_wildcard_cluster {
+    # a second cluster, deliberately never named "default/0", with its own
+    # distinct (fake) systemid -- reachable only through the "*" wildcard,
+    # never directly
+    exec node2 bash -c 'mkdir -p /tmp/ws-wild && printf "6543216543216543216\n" > /tmp/ws-wild/pg_walserver_systemid'
+    exec node2 bash -c 'printf "\n[*]\npath = /tmp/ws-wild\n" >> /tmp/ws/pg_walserver.ini'
+
+    # pg_walserver.ini is cached in memory (accept_loop.c's own
+    # ws_reload_config()) rather than re-read on every connection now, so
+    # a cluster added by hand needs an explicit reload before it is reachable
+    # -- see README.md's "Config reload" section.
+    exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
+
+    # a dbname matching no explicit section falls through to the wildcard's
+    # own path -- clusters.c's own "*" fallback, not a hardcoded default
+    exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6543 dbname=no-such-cluster replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "6543216543216543216" || { echo "got: $out"; false; }'
+
+    # "default/0" still has its own explicit section: it must keep
+    # resolving to ITS OWN path, never falling through to the wildcard now
+    # that one exists -- an exact match always wins, exactly as PgBouncer's
+    # own "*" [databases] entry precedence works
+    exec node2 bash -c 'sysid=$(cat /tmp/ws/default/0/pg_walserver_systemid); out=$(psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysid" || { echo "got: $out, want: $sysid"; false; }'
+}
+
+step test_006_real_standby_with_core_tools {
+    # a real, unmodified pg_basebackup client BASE_BACKUP-ing from
+    # pg_walserver: proves cmd_base_backup.c actually serves the backup
+    # "serve" bootstrapped automatically at startup (test_000 above only
+    # checked that the file exists on disk, never that it's actually
+    # servable over the wire).
+    exec node2 bash -c 'pg_basebackup -w -d "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -D /tmp/standby -X stream --no-manifest'
+    exec node2 bash -c 'test -f /tmp/standby/PG_VERSION'
+
+    # real Postgres's own walreceiver (libpqrcv_connect(), physical mode)
+    # always sends the literal dbname "replication" on the wire, silently
+    # discarding whatever dbname= a real primary_conninfo carries ("the
+    # database name is ignored by the server in replication mode, but
+    # specify 'replication' for .pgpass lookup" -- libpqwalreceiver.c's own
+    # comment). So a real physical standby can never select a cluster by
+    # name the way pg_basebackup/pg_receivewal above just did -- only
+    # clusters.ini's own "*" wildcard, or a cluster whose key literally is
+    # "replication", are ever reachable by one. This cluster already has a
+    # name ("default/0"); give it a second, literal-"replication" alias
+    # pointing at the same path, purely so this one test step can reach it
+    # -- an operator who *only* serves real physical standbys, never
+    # pg_basebackup/pg_receivewal by name, would use "replication" as the
+    # cluster'"'"'s only key to begin with.
+    exec node2 bash -c 'printf "\n[replication]\npath = /tmp/ws/default/0\n" >> /tmp/ws/pg_walserver.ini'
+
+    # pg_walserver.ini is cached in memory now (see test_005 above): reload
+    # before this new cluster is reachable.
+    exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
+
+    # a real standby from here on: nothing but stock PostgreSQL
+    # configuration and commands -- primary_conninfo points straight at
+    # pg_walserver, exactly as it would point at a real primary.
+    # synchronous_standby_names comes along verbatim in the base backup's
+    # own copied config -- it was node1's real, pg_auto_failover-managed
+    # setting, naming a standby ("pgautofailover_standby_2") that will
+    # never exist here. Left as-is, any write on this standalone instance
+    # blocks forever after promotion waiting for a synchronous ack that
+    # can never arrive: a real, if slightly surprising, consequence of
+    # `pg_basebackup` faithfully copying the *entire* configuration, not
+    # pg_walserver's own doing, but this test needs to clear it to behave
+    # like the standalone PITR/DR target it actually is.
+    exec node2 bash -c 'mkdir -p /tmp/standby-sock && printf "%b\n" "port = 5433" "listen_addresses = \x27\x27" "unix_socket_directories = \x27/tmp/standby-sock\x27" "hot_standby = on" "logging_collector = off" "synchronous_standby_names = \x27\x27" "primary_conninfo = \x27host=127.0.0.1 port=6543 dbname=default/0 sslmode=disable\x27" >> /tmp/standby/postgresql.auto.conf && touch /tmp/standby/standby.signal && (pg_ctl -D /tmp/standby -w -l /tmp/standby.log start || (cat /tmp/standby.log; false))'
+    exec node2 bash -c 'psql -h /tmp/standby-sock -p 5433 -d demo -Atc "SELECT pg_is_in_recovery()" | grep -qx t'
+
+    # a genuine walreceiver, not pg_receivewal, streaming from
+    # pg_walserver's own START_REPLICATION: new data on node1 must show up
+    # on the standby with nothing else driving it.
+    sql node1 { INSERT INTO ws SELECT generate_series(2000001, 2000010) }
+    sql node1 { SELECT pg_switch_wal() }
+    exec node2 bash -c 'for i in $(seq 60); do n=$(psql -h /tmp/standby-sock -p 5433 -d demo -Atc "SELECT count(*) FROM ws" 2>/dev/null); test "$n" = "2000011" && exit 0; sleep 1; done; cat /tmp/standby.log; exit 1'
+
+    # promote it: closes the loop from "archive" to "usable primary", the
+    # same PITR/failover-target role a real archiver serves.
+    exec node2 bash -c 'pg_ctl -D /tmp/standby promote -w'
+    exec node2 bash -c 'for i in $(seq 30); do out=$(psql -h /tmp/standby-sock -p 5433 -d demo -Atc "SELECT pg_is_in_recovery()" 2>/dev/null); test "$out" = "f" && exit 0; sleep 1; done; exit 1'
+    exec node2 bash -c 'psql -h /tmp/standby-sock -p 5433 -d demo -c "INSERT INTO ws VALUES (999999)"'
+}
+
+sequence
+    test_000_sync_files_from_node1
+    test_001_identify_system_and_show
+    test_002_fetch_file
+    test_003_start_replication_from_pg_walserver
+    test_004_grammar_edge_cases
+    test_005_wildcard_cluster
+    test_006_real_standby_with_core_tools

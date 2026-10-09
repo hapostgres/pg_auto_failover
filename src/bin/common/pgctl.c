@@ -548,6 +548,192 @@ config_find_pg_ctl(PostgresSetup *pgSetup)
 
 
 /*
+ * find_pg_basebackup_for_major_version looks for a pg_basebackup binary
+ * whose major version is at least targetMajor, following the same
+ * compatibility rule pg_basebackup's own documentation states: "pg_basebackup
+ * works with servers of the same or older major version" -- a newer client
+ * against an older server is fine, the reverse is not guaranteed. Picking a
+ * pg_basebackup blindly (e.g. whatever happens to be first in PATH) can
+ * silently violate that rule, which is what this function is for.
+ *
+ * Lookup order, stopping at the first usable match:
+ *
+ *   1. $PG_CONFIG, when set (set_pg_ctl_from_PG_CONFIG()'s own bindir
+ *      lookup) -- an explicit developer override, honoured the same way
+ *      config_find_pg_ctl() already honours it elsewhere in this file, but
+ *      only when its own major version is new enough: an explicit override
+ *      pointing at something older than the target would silently defeat
+ *      the whole point of this function, so it's skipped (with a warning)
+ *      rather than trusted blindly.
+ *
+ *   2. the well-known Debian/Ubuntu postgresql-common per-major-version
+ *      layout, "/usr/lib/postgresql/<targetMajor>/bin/pg_basebackup" -- an
+ *      exact match when present, which is the common case in this
+ *      project's own Docker images.
+ *
+ *   3. every "pg_basebackup" found in PATH (config_find_pg_ctl()'s own
+ *      PATH-search branch, applied to pg_basebackup instead of pg_ctl),
+ *      keeping the newest one whose major version is >= targetMajor.
+ *
+ * Returns false with a log_fatal (not merely a log_error: the caller has no
+ * better fallback left to try once this function itself has exhausted
+ * every avenue) when only older-than-target candidates are found anywhere,
+ * or none at all.
+ */
+bool
+find_pg_basebackup_for_major_version(int targetMajor,
+									 char *pgBasebackupPathOut,
+									 size_t size)
+{
+	/* 1. PG_CONFIG, when set and new enough */
+	if (env_exists("PG_CONFIG"))
+	{
+		PostgresSetup pgConfigSetup = { 0 };
+
+		if (set_pg_ctl_from_PG_CONFIG(&pgConfigSetup))
+		{
+			int numericVersion = 0;
+
+			if (parse_pg_version_string(pgConfigSetup.pg_version,
+										&numericVersion))
+			{
+				int major = numericVersion / 100;
+
+				if (major >= targetMajor)
+				{
+					char candidate[MAXPGPATH] = { 0 };
+
+					path_in_same_directory(pgConfigSetup.pg_ctl,
+										   "pg_basebackup", candidate);
+
+					if (file_exists(candidate))
+					{
+						strlcpy(pgBasebackupPathOut, candidate, size);
+
+						log_info("Using pg_basebackup for PostgreSQL %s "
+								 "at \"%s\" (from PG_CONFIG)",
+								 pgConfigSetup.pg_version, candidate);
+
+						return true;
+					}
+
+					log_warn("PG_CONFIG points at PostgreSQL %s but no "
+							 "pg_basebackup was found next to its pg_ctl "
+							 "at \"%s\" -- ignoring PG_CONFIG for this "
+							 "lookup", pgConfigSetup.pg_version, candidate);
+				}
+				else
+				{
+					log_warn("PG_CONFIG points at PostgreSQL %s, older "
+							 "than the target major version %d -- ignoring "
+							 "PG_CONFIG for this lookup, an older "
+							 "pg_basebackup client is not guaranteed to "
+							 "work against a newer server",
+							 pgConfigSetup.pg_version, targetMajor);
+				}
+			}
+		}
+	}
+
+	/* 2. the well-known Debian/Ubuntu postgresql-common per-major layout */
+	{
+		char candidate[MAXPGPATH] = { 0 };
+
+		sformat(candidate, sizeof(candidate),
+				"/usr/lib/postgresql/%d/bin/pg_basebackup", targetMajor);
+
+		if (file_exists(candidate))
+		{
+			strlcpy(pgBasebackupPathOut, candidate, size);
+
+			log_info("Using pg_basebackup for PostgreSQL %d found at its "
+					 "well-known Debian/Ubuntu path \"%s\"",
+					 targetMajor, candidate);
+
+			return true;
+		}
+	}
+
+	/* 3. PATH search, keep the newest match that is >= targetMajor */
+	SearchPath allBasebackups = { 0 };
+	SearchPath basebackups = { 0 };
+
+	if (!search_path("pg_basebackup", &allBasebackups))
+	{
+		log_error("Failed to search PATH for pg_basebackup");
+		return false;
+	}
+
+	if (!search_path_deduplicate_symlinks(&allBasebackups, &basebackups))
+	{
+		log_error("Failed to resolve symlinks found in PATH entries, "
+				  "see above for details");
+		return false;
+	}
+
+	char bestPath[MAXPGPATH] = { 0 };
+	int bestMajor = -1;
+
+	for (int i = 0; i < basebackups.found; i++)
+	{
+		char *candidate = basebackups.matches[i];
+
+		Program prog = run_program(candidate, "--version", NULL);
+
+		if (prog.returnCode != 0)
+		{
+			errno = prog.error;
+			log_warn("Failed to run \"%s --version\": %m", candidate);
+			free_program(&prog);
+			continue;
+		}
+
+		char versionString[PG_VERSION_STRING_MAX] = { 0 };
+		int numericVersion = 0;
+
+		if (!parse_version_number(prog.stdOut, versionString,
+								  sizeof(versionString), &numericVersion))
+		{
+			log_warn("Failed to parse version info from \"%s --version\"",
+					 candidate);
+			free_program(&prog);
+			continue;
+		}
+
+		free_program(&prog);
+
+		int major = numericVersion / 100;
+
+		if (major >= targetMajor && major > bestMajor)
+		{
+			bestMajor = major;
+			strlcpy(bestPath, candidate, MAXPGPATH);
+		}
+	}
+
+	if (bestMajor >= 0)
+	{
+		strlcpy(pgBasebackupPathOut, bestPath, size);
+
+		log_info("Using pg_basebackup for PostgreSQL %d found in PATH: "
+				 "\"%s\"", bestMajor, bestPath);
+
+		return true;
+	}
+
+	log_fatal("Failed to find a pg_basebackup for PostgreSQL %d or newer "
+			  "-- checked $PG_CONFIG, "
+			  "\"/usr/lib/postgresql/%d/bin/pg_basebackup\", and PATH; "
+			  "an older pg_basebackup client is not guaranteed to work "
+			  "against a newer server (pg_basebackup's own compatibility "
+			  "rule: same or older major version only)",
+			  targetMajor, targetMajor);
+
+	return false;
+}
+
+
+/*
  * find_pg_config_from_pg_ctl finds the path to pg_config from the known path
  * to pg_ctl. If that exists, we first use the pg_config binary found in the
  * same directory as the pg_ctl binary itself.
@@ -1250,13 +1436,35 @@ ensure_empty_tablespace_dirs(const char *pgdata)
 
 
 /*
- * Call pg_basebackup, using a temporary directory for the duration of the data
- * transfer.
+ * How many times the HBA-readiness preflight below retries
+ * pgctl_identify_system() before giving up and launching pg_basebackup
+ * anyway -- each attempt's own connection already carries up to ~2s of
+ * internal retry (pgsql_set_interactive_retry_policy()'s own comment),
+ * so this bounds the preflight's own total wait to roughly that times
+ * this count, without an extra outer sleep compounding it further.
+ */
+#define PG_BASEBACKUP_HBA_MAX_ATTEMPTS 10
+
+/*
+ * pg_basebackup_fetch runs the real pg_basebackup client against
+ * replicationSource, writing the result into replicationSource->backupDir
+ * and nowhere else -- no assumption about what the caller does with that
+ * directory afterward, unlike pg_basebackup() below, whose whole point is
+ * to become the caller's new PGDATA. Split out so a caller that wants a
+ * base backup as an independent, standalone artifact (this project's own
+ * archiver, or pg_walserver's own `basebackup`/`setup` sub-commands) can
+ * fetch one without pg_basebackup()'s own rmtree-and-move ending -- see
+ * that function's own comment for why calling it unmodified for that use
+ * case would be wrong.
+ *
+ * replicationSource->walMethod/label (both optional, pgsql.h's own
+ * comment on the fields) are the two places this differs from the
+ * defaults every existing pg_basebackup()-only caller already relies on:
+ * empty means the exact same "--wal-method=stream", no --label behavior
+ * this function always had before the split.
  */
 bool
-pg_basebackup(const char *pgdata,
-			  const char *pg_ctl,
-			  ReplicationSource *replicationSource)
+pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource)
 {
 	int returnCode;
 	char pg_basebackup[MAXPGPATH];
@@ -1264,7 +1472,8 @@ pg_basebackup(const char *pgdata,
 	NodeAddress *primaryNode = &(replicationSource->primaryNode);
 	char primaryConnInfo[MAXCONNINFO] = { 0 };
 
-	char *args[18];  /* enough for all pg_basebackup flags incl. --checkpoint=fast */
+	char *args[20];  /* enough for all pg_basebackup flags incl. --checkpoint=fast
+	                  * and --label */
 	int argsIndex = 0;
 
 	char command[BUFSIZE];
@@ -1272,12 +1481,6 @@ pg_basebackup(const char *pgdata,
 
 	log_debug("mkdir -p \"%s\"", replicationSource->backupDir);
 	if (!ensure_empty_dir(replicationSource->backupDir, 0700))
-	{
-		/* errors have already been logged. */
-		return false;
-	}
-
-	if (!ensure_empty_tablespace_dirs(pgdata))
 	{
 		/* errors have already been logged. */
 		return false;
@@ -1327,10 +1530,30 @@ pg_basebackup(const char *pgdata,
 	args[argsIndex++] = replicationSource->userName;
 	args[argsIndex++] = "--verbose";
 	args[argsIndex++] = "--progress";
-	args[argsIndex++] = "--max-rate";
-	args[argsIndex++] = replicationSource->maximumBackupRate;
-	args[argsIndex++] = "--wal-method=stream";
+
+	char walMethodArg[NAMEDATALEN + 16] = { 0 };
+
+	sformat(walMethodArg, sizeof(walMethodArg), "--wal-method=%s",
+			IS_EMPTY_STRING_BUFFER(replicationSource->walMethod)
+			? "stream"
+			: replicationSource->walMethod);
+	args[argsIndex++] = walMethodArg;
 	args[argsIndex++] = "--checkpoint=fast";
+
+	/* --max-rate/--label only make sense together with a streamed,
+	 * self-consistent backup -- a --wal-method=none caller leaves
+	 * maximumBackupRate empty and sets label instead */
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->maximumBackupRate))
+	{
+		args[argsIndex++] = "--max-rate";
+		args[argsIndex++] = replicationSource->maximumBackupRate;
+	}
+
+	if (!IS_EMPTY_STRING_BUFFER(replicationSource->label))
+	{
+		args[argsIndex++] = "--label";
+		args[argsIndex++] = replicationSource->label;
+	}
 
 	/* we don't use a replication slot e.g. when upstream is a standby */
 	if (!IS_EMPTY_STRING_BUFFER(replicationSource->slotName))
@@ -1340,6 +1563,37 @@ pg_basebackup(const char *pgdata,
 	}
 
 	args[argsIndex] = NULL;
+
+	/*
+	 * Preflight: retry pgctl_identify_system() (a plain replication-mode
+	 * IDENTIFY_SYSTEM, "check that HBA is ready" per its own comment)
+	 * against this same source, up to PG_BASEBACKUP_HBA_MAX_ATTEMPTS
+	 * times, before ever launching the real pg_basebackup subprocess
+	 * below. Closes a real, observed startup race: a freshly-registered
+	 * node's own pg_hba.conf entry on the source can take a moment to
+	 * propagate (HBA rules are written and the config reloaded
+	 * asynchronously), and unlike pg_receivewal (which retries a failed
+	 * connection internally) plain pg_basebackup has no such retry of its
+	 * own -- a single race hit here was fatal, no second chance. No extra
+	 * sleep between attempts: pgctl_identify_system()'s own connection
+	 * already carries pgsql_init()'s "interactive" retry policy (up to
+	 * ~2s of internal backoff per call), so an added outer sleep would
+	 * only compound that delay rather than add useful coverage.
+	 * Best-effort, not a hard gate: exhausting every attempt just means
+	 * this preflight didn't get to close the race, and pg_basebackup runs
+	 * anyway with its own real error if the HBA rule genuinely still
+	 * isn't there.
+	 */
+	for (int attempt = 0;
+		 attempt < PG_BASEBACKUP_HBA_MAX_ATTEMPTS &&
+		 !(asked_to_stop || asked_to_stop_fast || asked_to_quit);
+		 attempt++)
+	{
+		if (pgctl_identify_system(replicationSource))
+		{
+			break;
+		}
+	}
 
 	/*
 	 * We do not want to call setsid() when running this program, as the
@@ -1385,6 +1639,35 @@ pg_basebackup(const char *pgdata,
 	if (returnCode != 0)
 	{
 		log_error("Failed to run pg_basebackup: exit code %d", returnCode);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * Call pg_basebackup, using a temporary directory for the duration of the
+ * data transfer, then replace pgdata with the result -- standby init's own
+ * use of a base backup: pgdata becomes the fetched backup. NOT what every
+ * caller wants a base backup for (see pg_basebackup_fetch()'s own comment,
+ * just above); ordinary standby creation is the only caller that should
+ * ever reach this rmtree-and-move ending.
+ */
+bool
+pg_basebackup(const char *pgdata,
+			  const char *pg_ctl,
+			  ReplicationSource *replicationSource)
+{
+	if (!ensure_empty_tablespace_dirs(pgdata))
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	if (!pg_basebackup_fetch(pg_ctl, replicationSource))
+	{
+		/* errors have already been logged. */
 		return false;
 	}
 
@@ -2793,6 +3076,63 @@ pgctl_identify_system(ReplicationSource *replicationSource)
 	}
 
 	return true;
+}
+
+
+/*
+ * pgctl_create_replication_slot connects with replication=1 to our target
+ * node (the same connection shape as pgctl_identify_system(), right above)
+ * and issues CREATE_REPLICATION_SLOT ... PHYSICAL RESERVE_WAL for slotName,
+ * idempotently: an already-existing slot with that name is success, not an
+ * error -- see pgsql_create_physical_replication_slot_over_replication_
+ * connection()'s own comment for why this needs no real "dbname" at all.
+ */
+bool
+pgctl_create_replication_slot(ReplicationSource *replicationSource,
+							  const char *slotName)
+{
+	NodeAddress *primaryNode = &(replicationSource->primaryNode);
+
+	char primaryConnInfo[MAXCONNINFO] = { 0 };
+	char primaryConnInfoReplication[MAXCONNINFO] = { 0 };
+	PGSQL replicationClient = { 0 };
+
+	if (!prepare_primary_conninfo(primaryConnInfo,
+								  MAXCONNINFO,
+								  primaryNode->host,
+								  primaryNode->port,
+								  replicationSource->userName,
+								  NULL, /* no database */
+								  replicationSource->password,
+								  replicationSource->applicationName,
+								  replicationSource->sslOptions,
+								  false)) /* no need for escaping */
+	{
+		/* errors have already been logged. */
+		return false;
+	}
+
+	int len = sformat(primaryConnInfoReplication, MAXCONNINFO,
+					  "%s replication=1",
+					  primaryConnInfo);
+
+	if (len >= MAXCONNINFO)
+	{
+		log_warn("Failed to create a replication slot: primary_conninfo "
+				 "too large");
+		return false;
+	}
+
+	if (!pgsql_init(&replicationClient,
+					primaryConnInfoReplication,
+					PGSQL_CONN_UPSTREAM))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return pgsql_create_physical_replication_slot_over_replication_connection(
+		&replicationClient, slotName);
 }
 
 

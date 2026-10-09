@@ -230,6 +230,16 @@ typedef struct IdentifySystem
 	char xlogpos[PG_LSN_MAXLENGTH];
 	char dbname[NAMEDATALEN];
 	TimeLineHistory timelines;
+
+	/*
+	 * PQserverVersion() of the connection IDENTIFY_SYSTEM was run on, in
+	 * its raw server_version_num form (e.g. 170004 for 17.4): free to
+	 * capture here, the connection is already open for IDENTIFY_SYSTEM
+	 * itself, no extra round trip. pg_walserver's own fetch-systemid uses
+	 * this to record the upstream's major version alongside its system
+	 * identifier (see cli_fetch_systemid.c).
+	 */
+	int serverVersion;
 } IdentifySystem;
 
 
@@ -269,6 +279,18 @@ typedef struct ReplicationSource
 	bool pauseAtRecoveryTarget;
 	SSLOptions sslOptions;
 	IdentifySystem system;
+
+	/*
+	 * pg_basebackup_fetch()'s own --wal-method and --label overrides, both
+	 * optional: empty (the zero value, every existing caller's default)
+	 * means pg_basebackup()'s own long-standing "stream" behavior and no
+	 * --label at all. Set by a caller that wants the backup left non-self-
+	 * consistent on purpose (a --wal-method=none caller supplying WAL some
+	 * other way) and/or a specific label instead of pg_basebackup's own
+	 * default.
+	 */
+	char walMethod[NAMEDATALEN];
+	char label[NAMEDATALEN];
 } ReplicationSource;
 
 
@@ -343,6 +365,7 @@ typedef struct SingleValueResultContext
 	") as t(ok) "
 
 bool pgsql_init(PGSQL *pgsql, char *url, ConnectionType connectionType);
+PGconn * pgsql_open_connection(PGSQL *pgsql);
 
 void pgsql_set_retry_policy(ConnectionRetryPolicy *retryPolicy,
 							int maxT,
@@ -417,6 +440,9 @@ bool pgsql_one_slot_has_reached_target_lsn(PGSQL *pgsql,
 bool pgsql_has_reached_target_lsn(PGSQL *pgsql, char *targetLSN,
 								  char *currentLSN, bool *hasReachedLSN);
 bool pgsql_identify_system(PGSQL *pgsql, IdentifySystem *system);
+bool pgsql_create_physical_replication_slot_over_replication_connection(PGSQL *pgsql,
+																		const char *
+																		slotName);
 bool pgsql_listen(PGSQL *pgsql, char *channels[]);
 bool pgsql_prepare_to_wait(PGSQL *pgsql);
 
