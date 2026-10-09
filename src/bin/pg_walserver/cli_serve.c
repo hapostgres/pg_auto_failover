@@ -48,6 +48,15 @@ static bool serveHaveAuthTimeout = false;
 /* local helpers */
 static bool ws_write_pidfile(const char *pidfile, pid_t pid);
 
+static void cli_serve_check_pgdata_or_insecure(void);
+static void cli_serve_load_global_defaults(void);
+static void cli_serve_setup_tls(void);
+static void cli_serve_load_clusters_and_hba(void);
+static void cli_serve_check_sni_requirements(void);
+static void cli_serve_start_receivewal_children(void);
+static void cli_serve_start_backup_bootstraps(void);
+static void cli_serve_write_pidfile_or_die(void);
+
 static struct option serveLongOptions[] = {
 	{ "port", required_argument, NULL, 'p' },
 	{ "pgdata", required_argument, NULL, 'D' },
@@ -244,24 +253,15 @@ cli_serve_getopt(int argc, char **argv)
 
 
 /*
- * cli_serve_run brings up the accept loop: it validates --pgdata/--insecure,
- * derives the clusters/HBA/passwd paths under --pgdata, initializes TLS and
- * the default HBA file, seeds the SCRAM mock secret (before any fork, so
- * every connection sees the same one), and calls ws_accept_loop(), which
- * only returns once the server is asked to stop. Never returns on success
- * other than through exit() at process end.
+ * cli_serve_check_pgdata_or_insecure validates the --pgdata/--insecure
+ * combination servePgdata/serveInsecure were parsed into: without --pgdata
+ * (or PGDATA) there is no HBA file, no clusters and no authentication at
+ * all, so it refuses to start unless --insecure says that is what is
+ * wanted (manual testing). Never returns on an invalid combination.
  */
 static void
-cli_serve_run(int argc, char **argv)
+cli_serve_check_pgdata_or_insecure(void)
 {
-	(void) argc;
-	(void) argv;
-
-	/*
-	 * Without --pgdata (or PGDATA) there is no HBA file, no clusters and no
-	 * authentication at all: refuse to start unless --insecure says that is
-	 * what is wanted (manual testing).
-	 */
 	if (servePgdata[0] == '\0' && !serveInsecure)
 	{
 		log_fatal("Neither --pgdata nor PGDATA is set: refusing to start "
@@ -274,254 +274,332 @@ cli_serve_run(int argc, char **argv)
 	{
 		log_warn("--insecure is ignored: --pgdata is set");
 	}
+}
 
-	if (servePgdata[0] != '\0')
+
+/*
+ * cli_serve_load_global_defaults derives the clusters/HBA/passwd paths
+ * under servePgdata, then loads "pg_walserver setup"'s own persisted
+ * global config section (config_load_global(), clusters.c): whichever of
+ * port/ssl-cert-file/ssl-key-file/ssl-ca-file/auth-timeout was persisted
+ * there becomes this instance's own default from here on, still always
+ * overridden by the same flag given directly on this very command line
+ * (an explicit flag beats a persisted default, the same precedent this
+ * project already follows everywhere else).
+ */
+static void
+cli_serve_load_global_defaults(void)
+{
+	strlcpy(serveConfig.pgdata, servePgdata, sizeof(serveConfig.pgdata));
+
+	config_file_path(servePgdata, serveConfigFile,
+					 serveConfig.clustersPath, sizeof(serveConfig.clustersPath));
+	sformat(serveConfig.auth.hbaPath, sizeof(serveConfig.auth.hbaPath),
+			"%s/pg_walserver_hba.conf", servePgdata);
+	sformat(serveConfig.auth.passwdPath, sizeof(serveConfig.auth.passwdPath),
+			"%s/pg_walserver_passwd", servePgdata);
+
+	WsGlobalConfig globalConfig = { 0 };
+
+	if (!config_load_global(serveConfig.clustersPath, &globalConfig))
 	{
-		strlcpy(serveConfig.pgdata, servePgdata, sizeof(serveConfig.pgdata));
+		log_fatal("Failed to parse \"%s\": refusing to start",
+				  serveConfig.clustersPath);
+		exit(1);
+	}
 
-		config_file_path(servePgdata, serveConfigFile,
-						 serveConfig.clustersPath, sizeof(serveConfig.clustersPath));
-		sformat(serveConfig.auth.hbaPath, sizeof(serveConfig.auth.hbaPath),
-				"%s/pg_walserver_hba.conf", servePgdata);
-		sformat(serveConfig.auth.passwdPath, sizeof(serveConfig.auth.passwdPath),
-				"%s/pg_walserver_passwd", servePgdata);
+	if (!serveHavePort && globalConfig.havePort)
+	{
+		serveConfig.port = globalConfig.port;
+	}
+
+	if (serveConfig.port <= 0 || serveConfig.port > 65535)
+	{
+		log_fatal("Invalid port %d in \"%s\"", serveConfig.port,
+				  serveConfig.clustersPath);
+		exit(1);
+	}
+
+	if (!serveHaveAuthTimeout && globalConfig.haveAuthTimeout)
+	{
+		serveConfig.authTimeout = globalConfig.authTimeout;
+	}
+
+	if (serveSslCertFile[0] == '\0' && globalConfig.sslCertFile[0] != '\0')
+	{
+		strlcpy(serveSslCertFile, globalConfig.sslCertFile,
+				sizeof(serveSslCertFile));
+	}
+
+	if (serveSslKeyFile[0] == '\0' && globalConfig.sslKeyFile[0] != '\0')
+	{
+		strlcpy(serveSslKeyFile, globalConfig.sslKeyFile,
+				sizeof(serveSslKeyFile));
+	}
+
+	if (serveSslCaFile[0] == '\0' && globalConfig.sslCaFile[0] != '\0')
+	{
+		strlcpy(serveSslCaFile, globalConfig.sslCaFile,
+				sizeof(serveSslCaFile));
+	}
+}
+
+
+/*
+ * cli_serve_setup_tls loads the server certificate/key given with
+ * --ssl-cert-file/--ssl-key-file (else <pgdata>/server.crt/server.key),
+ * then, only if that succeeded, optionally loads the CA file given with
+ * --ssl-ca-file (else <pgdata>/ca.crt) to enable TLS client certificate
+ * verification. The CA file is optional: with no usable CA file, TLS
+ * still works exactly as before, only "clientcert=verify-full" HBA lines
+ * cannot be satisfied (checked later, once the HBA file itself is
+ * parsed, by cli_serve_check_sni_requirements()).
+ */
+static void
+cli_serve_setup_tls(void)
+{
+	/* the certificate given with --ssl-*-file, else <pgdata>/server.* */
+	char certPath[MAXPGPATH], keyPath[MAXPGPATH];
+
+	if (serveSslCertFile[0] != '\0' && serveSslKeyFile[0] != '\0')
+	{
+		strlcpy(certPath, serveSslCertFile, sizeof(certPath));
+		strlcpy(keyPath, serveSslKeyFile, sizeof(keyPath));
+	}
+	else
+	{
+		sformat(certPath, sizeof(certPath), "%s/server.crt", servePgdata);
+		sformat(keyPath, sizeof(keyPath), "%s/server.key", servePgdata);
+	}
+
+	if (ws_tls_server_init(certPath, keyPath))
+	{
+		log_info("TLS is enabled (\"%s\")", certPath);
 
 		/*
-		 * "pg_walserver setup" (cli_setup.c) writes the config file's own
-		 * global section (config_load_global(), clusters.c): whichever of
-		 * port/ssl-cert-file/ssl-key-file/ssl-ca-file/auth-timeout was
-		 * persisted there becomes this instance's own default from here on,
-		 * still always overridden by the same flag given directly on this
-		 * very command line above (an explicit flag beats a persisted
-		 * default, the same precedent this project already follows
-		 * everywhere else).
+		 * The CA file, if any, given with --ssl-ca-file, else
+		 * <pgdata>/ca.crt (the same --ssl-cert-file/--ssl-key-file
+		 * default-path convention above, applied to the CA).
 		 */
-		WsGlobalConfig globalConfig = { 0 };
+		char caPath[MAXPGPATH];
 
-		if (!config_load_global(serveConfig.clustersPath, &globalConfig))
+		if (serveSslCaFile[0] != '\0')
 		{
-			log_fatal("Failed to parse \"%s\": refusing to start",
-					  serveConfig.clustersPath);
-			exit(1);
-		}
-
-		if (!serveHavePort && globalConfig.havePort)
-		{
-			serveConfig.port = globalConfig.port;
-		}
-
-		if (serveConfig.port <= 0 || serveConfig.port > 65535)
-		{
-			log_fatal("Invalid port %d in \"%s\"", serveConfig.port,
-					  serveConfig.clustersPath);
-			exit(1);
-		}
-
-		if (!serveHaveAuthTimeout && globalConfig.haveAuthTimeout)
-		{
-			serveConfig.authTimeout = globalConfig.authTimeout;
-		}
-
-		if (serveSslCertFile[0] == '\0' && globalConfig.sslCertFile[0] != '\0')
-		{
-			strlcpy(serveSslCertFile, globalConfig.sslCertFile,
-					sizeof(serveSslCertFile));
-		}
-
-		if (serveSslKeyFile[0] == '\0' && globalConfig.sslKeyFile[0] != '\0')
-		{
-			strlcpy(serveSslKeyFile, globalConfig.sslKeyFile,
-					sizeof(serveSslKeyFile));
-		}
-
-		if (serveSslCaFile[0] == '\0' && globalConfig.sslCaFile[0] != '\0')
-		{
-			strlcpy(serveSslCaFile, globalConfig.sslCaFile,
-					sizeof(serveSslCaFile));
-		}
-
-		/* the certificate given with --ssl-*-file, else <pgdata>/server.* */
-		char certPath[MAXPGPATH], keyPath[MAXPGPATH];
-
-		if (serveSslCertFile[0] != '\0' && serveSslKeyFile[0] != '\0')
-		{
-			strlcpy(certPath, serveSslCertFile, sizeof(certPath));
-			strlcpy(keyPath, serveSslKeyFile, sizeof(keyPath));
+			strlcpy(caPath, serveSslCaFile, sizeof(caPath));
 		}
 		else
 		{
-			sformat(certPath, sizeof(certPath), "%s/server.crt", servePgdata);
-			sformat(keyPath, sizeof(keyPath), "%s/server.key", servePgdata);
+			sformat(caPath, sizeof(caPath), "%s/ca.crt", servePgdata);
 		}
 
-		if (ws_tls_server_init(certPath, keyPath))
+		if (file_exists(caPath))
 		{
-			log_info("TLS is enabled (\"%s\")", certPath);
-
-			/*
-			 * The CA file, if any, given with --ssl-ca-file, else
-			 * <pgdata>/ca.crt (the same --ssl-cert-file/--ssl-key-file
-			 * default-path convention above, applied to the CA). Optional:
-			 * with no usable CA file, TLS still works exactly as before,
-			 * only "clientcert=verify-full" HBA lines cannot be satisfied
-			 * (checked below, once the HBA file itself is parsed).
-			 */
-			char caPath[MAXPGPATH];
-
-			if (serveSslCaFile[0] != '\0')
+			if (ws_tls_server_load_ca(caPath))
 			{
-				strlcpy(caPath, serveSslCaFile, sizeof(caPath));
+				log_info("TLS client certificate verification is enabled "
+						 "(\"%s\")", caPath);
 			}
 			else
 			{
-				sformat(caPath, sizeof(caPath), "%s/ca.crt", servePgdata);
-			}
-
-			if (file_exists(caPath))
-			{
-				if (ws_tls_server_load_ca(caPath))
-				{
-					log_info("TLS client certificate verification is enabled "
-							 "(\"%s\")", caPath);
-				}
-				else
-				{
-					log_fatal("Failed to load the TLS CA file \"%s\"", caPath);
-					exit(1);
-				}
-			}
-			else if (serveSslCaFile[0] != '\0')
-			{
-				/* an explicit --ssl-ca-file that does not exist is a
-				 * startup error, unlike the default path silently absent */
-				log_fatal("The TLS CA file \"%s\" does not exist", caPath);
+				log_fatal("Failed to load the TLS CA file \"%s\"", caPath);
 				exit(1);
 			}
 		}
-		else
+		else if (serveSslCaFile[0] != '\0')
 		{
-			log_warn("TLS is not enabled: no usable server.crt/server.key in "
-					 "\"%s\"; \"hostssl\" HBA lines will not match", servePgdata);
-		}
-
-		if (!hba_write_default_if_missing(serveConfig.auth.hbaPath,
-										  ws_tls_server_enabled()))
-		{
-			log_fatal("Failed to create \"%s\"", serveConfig.auth.hbaPath);
+			/* an explicit --ssl-ca-file that does not exist is a
+			 * startup error, unlike the default path silently absent */
+			log_fatal("The TLS CA file \"%s\" does not exist", caPath);
 			exit(1);
 		}
+	}
+	else
+	{
+		log_warn("TLS is not enabled: no usable server.crt/server.key in "
+				 "\"%s\"; \"hostssl\" HBA lines will not match", servePgdata);
+	}
+}
 
-		/*
-		 * More than one *named* cluster (the "*" wildcard doesn't count: a
-		 * single named cluster plus a wildcard fallback is still fully
-		 * disambiguated by dbname alone) and no TLS: refuse to start.
-		 * dbname-based addressing cannot tell a real physical standby's
-		 * connection apart from any other cluster once there is more than
-		 * one -- every such standby's own walreceiver always sends the
-		 * literal dbname "replication", never a real cluster key (see
-		 * auth.c's own comment) -- so TLS SNI is the only way left to
-		 * address more than one cluster by name. `pg_walserver setup` already
-		 * creates a self-signed certificate the moment it writes a second
-		 * cluster, precisely so this check never fires for a deployment
-		 * built with it; it exists here too for a pg_walserver.ini
-		 * hand-edited or driven some other way.
-		 */
 
-		/*
-		 * Parse pg_walserver.ini and pg_walserver_hba.conf once, up front:
-		 * both are cached in serveConfig (WsServerConfig.clusters/clusterCount,
-		 * WsAuthConfig.hbaRuleSet) and installed only once they parse
-		 * cleanly -- every connection reads this same in-memory snapshot
-		 * from here on, never the files themselves (see accept_loop.c's
-		 * handle_connection()). A SIGHUP later re-parses both and swaps
-		 * them in atomically, the same way, only if both still parse
-		 * (ws_reload_config(), accept_loop.c) -- refusing to start on an
-		 * unparsable file here is the same "fail closed" policy applied at
-		 * startup instead of leaving every future connection to discover
-		 * it on its own.
-		 */
-		if (!clusters_load(serveConfig.clustersPath, &serveConfig.clusters,
-						   &serveConfig.clusterCount))
+/*
+ * cli_serve_load_clusters_and_hba creates the default HBA file if one
+ * doesn't exist yet, then parses pg_walserver.ini and
+ * pg_walserver_hba.conf once, up front: both are cached in serveConfig
+ * (WsServerConfig.clusters/clusterCount, WsAuthConfig.hbaRuleSet) and
+ * installed only once they parse cleanly -- every connection reads this
+ * same in-memory snapshot from here on, never the files themselves (see
+ * accept_loop.c's handle_connection()). A SIGHUP later re-parses both and
+ * swaps them in atomically, the same way, only if both still parse
+ * (ws_reload_config(), accept_loop.c) -- refusing to start on an
+ * unparsable file here is the same "fail closed" policy applied at
+ * startup instead of leaving every future connection to discover it on
+ * its own.
+ */
+static void
+cli_serve_load_clusters_and_hba(void)
+{
+	if (!hba_write_default_if_missing(serveConfig.auth.hbaPath,
+									  ws_tls_server_enabled()))
+	{
+		log_fatal("Failed to create \"%s\"", serveConfig.auth.hbaPath);
+		exit(1);
+	}
+
+	if (!clusters_load(serveConfig.clustersPath, &serveConfig.clusters,
+					   &serveConfig.clusterCount))
+	{
+		log_fatal("Failed to parse \"%s\": refusing to start",
+				  serveConfig.clustersPath);
+		exit(1);
+	}
+
+	if (!hba_parse_file(serveConfig.auth.hbaPath, &serveConfig.auth.hbaRuleSet))
+	{
+		log_fatal("Failed to parse \"%s\": refusing to start",
+				  serveConfig.auth.hbaPath);
+		exit(1);
+	}
+}
+
+
+/*
+ * cli_serve_check_sni_requirements enforces the two TLS-related sanity
+ * checks that can only be made once the HBA ruleset and the cluster list
+ * are both parsed: a "clientcert=verify-full" HBA rule needs a usable TLS
+ * CA file to validate against, and more than one *named* cluster (the "*"
+ * wildcard doesn't count: a single named cluster plus a wildcard fallback
+ * is still fully disambiguated by dbname alone) requires TLS to be
+ * reachable by name at all -- dbname-based addressing cannot tell a real
+ * physical standby's connection apart from any other cluster once there
+ * is more than one -- every such standby's own walreceiver always sends
+ * the literal dbname "replication", never a real cluster key (see
+ * auth.c's own comment) -- so TLS SNI is the only way left to address
+ * more than one cluster by name. `pg_walserver setup` already creates a
+ * self-signed certificate the moment it writes a second cluster,
+ * precisely so this check never fires for a deployment built with it; it
+ * exists here too for a pg_walserver.ini hand-edited or driven some other
+ * way.
+ */
+static void
+cli_serve_check_sni_requirements(void)
+{
+	if (hba_ruleset_requires_client_cert(&serveConfig.auth.hbaRuleSet) &&
+		!ws_tls_client_verification_enabled())
+	{
+		log_fatal("\"%s\" has a \"clientcert=verify-full\" rule but no "
+				  "usable TLS CA file: pass --ssl-ca-file, or create "
+				  "<pgdata>/ca.crt", serveConfig.auth.hbaPath);
+		exit(1);
+	}
+
+	int namedClusterCount = 0;
+
+	for (int i = 0; i < serveConfig.clusterCount; i++)
+	{
+		if (!streq(serveConfig.clusters[i].key, WS_CLUSTERS_WILDCARD_KEY))
 		{
-			log_fatal("Failed to parse \"%s\": refusing to start",
-					  serveConfig.clustersPath);
-			exit(1);
+			namedClusterCount++;
 		}
+	}
 
-		if (!hba_parse_file(serveConfig.auth.hbaPath, &serveConfig.auth.hbaRuleSet))
-		{
-			log_fatal("Failed to parse \"%s\": refusing to start",
-					  serveConfig.auth.hbaPath);
-			exit(1);
-		}
+	if (namedClusterCount > 1 && !ws_tls_server_enabled())
+	{
+		log_fatal("\"%s\" has %d named clusters but TLS is not "
+				  "enabled: more than one cluster requires TLS (for "
+				  "SNI-based addressing) to be reachable by name at "
+				  "all -- pass --ssl-cert-file/--ssl-key-file, or "
+				  "create <pgdata>/server.crt and server.key "
+				  "(\"pg_walserver setup\" already does this "
+				  "automatically)", serveConfig.clustersPath,
+				  namedClusterCount);
+		exit(1);
+	}
+}
 
-		if (hba_ruleset_requires_client_cert(&serveConfig.auth.hbaRuleSet) &&
-			!ws_tls_client_verification_enabled())
-		{
-			log_fatal("\"%s\" has a \"clientcert=verify-full\" rule but no "
-					  "usable TLS CA file: pass --ssl-ca-file, or create "
-					  "<pgdata>/ca.crt", serveConfig.auth.hbaPath);
-			exit(1);
-		}
 
-		int namedClusterCount = 0;
+/*
+ * cli_serve_start_receivewal_children starts every "receivewal = pull"
+ * cluster's own supervised embedded pg_receivewal child (receivewal.c) --
+ * called once, now that pg_walserver.ini/HBA validation above has already
+ * succeeded, and before ws_accept_loop() (and thus before any connection
+ * child can be forked). See receivewal.h's own comment for the full
+ * startup/shutdown contract.
+ */
+static void
+cli_serve_start_receivewal_children(void)
+{
+	(void) ws_receivewal_start_all(serveConfig.clusters, serveConfig.clusterCount);
+}
 
-		for (int i = 0; i < serveConfig.clusterCount; i++)
-		{
-			if (!streq(serveConfig.clusters[i].key, WS_CLUSTERS_WILDCARD_KEY))
-			{
-				namedClusterCount++;
-			}
-		}
 
-		if (namedClusterCount > 1 && !ws_tls_server_enabled())
-		{
-			log_fatal("\"%s\" has %d named clusters but TLS is not "
-					  "enabled: more than one cluster requires TLS (for "
-					  "SNI-based addressing) to be reachable by name at "
-					  "all -- pass --ssl-cert-file/--ssl-key-file, or "
-					  "create <pgdata>/server.crt and server.key "
-					  "(\"pg_walserver setup\" already does this "
-					  "automatically)", serveConfig.clustersPath,
-					  namedClusterCount);
-			exit(1);
-		}
+/*
+ * cli_serve_start_backup_bootstraps checks every cluster for a missing
+ * base backup and kicks off an automatic bootstrap for it in the
+ * background -- the first of the two trigger points documented in
+ * accept_loop.h's own ws_bootstrap_missing_backups() comment (the second
+ * being a successful SIGHUP reload, ws_reload_config(), accept_loop.c).
+ * Must run after cli_serve_start_receivewal_children(), since it relies
+ * on every "receivewal = pull" cluster's own real receivewal worker
+ * already being started.
+ */
+static void
+cli_serve_start_backup_bootstraps(void)
+{
+	ws_bootstrap_missing_backups(serveConfig.clusters, serveConfig.clusterCount);
+}
 
-		/*
-		 * Every "receivewal = pull" cluster gets its own supervised
-		 * embedded pg_receivewal child (receivewal.c) -- started here,
-		 * once, now that pg_walserver.ini/HBA validation above has
-		 * already succeeded, and before ws_accept_loop() (and thus
-		 * before any connection child can be forked). See receivewal.h's
-		 * own comment for the full startup/shutdown contract.
-		 */
-		(void) ws_receivewal_start_all(serveConfig.clusters, serveConfig.clusterCount);
 
-		/*
-		 * Now that every "receivewal = pull" cluster's own real receivewal worker above
-		 * has been started, check every cluster for a missing base backup
-		 * and kick off an automatic bootstrap for it in the background --
-		 * the first of the two trigger points documented in accept_loop.h's
-		 * own ws_bootstrap_missing_backups() comment (the second being a
-		 * successful SIGHUP reload, ws_reload_config(), accept_loop.c).
-		 */
-		ws_bootstrap_missing_backups(serveConfig.clusters, serveConfig.clusterCount);
+/*
+ * cli_serve_write_pidfile_or_die writes servePidfilePath, the pidfile that
+ * "pg_walserver reload"/"pg_ctl reload"-style tooling signals -- called
+ * only now, after every other startup validation above has already
+ * succeeded, so a pidfile only ever exists for a pg_walserver that is
+ * genuinely about to serve. Removed again on clean shutdown by
+ * cli_serve_run() itself.
+ */
+static void
+cli_serve_write_pidfile_or_die(void)
+{
+	sformat(servePidfilePath, sizeof(servePidfilePath), "%s/pg_walserver.pid",
+			servePgdata);
 
-		/*
-		 * The pidfile is what "pg_walserver reload"/"pg_ctl reload"-style
-		 * tooling signals -- written only now, after every other startup
-		 * validation above has already succeeded, so a pidfile only ever
-		 * exists for a pg_walserver that is genuinely about to serve.
-		 * Removed again on clean shutdown, below.
-		 */
-		sformat(servePidfilePath, sizeof(servePidfilePath), "%s/pg_walserver.pid",
-				servePgdata);
+	if (!ws_write_pidfile(servePidfilePath, getpid()))
+	{
+		log_fatal("Failed to write pidfile \"%s\"", servePidfilePath);
+		exit(1);
+	}
+}
 
-		if (!ws_write_pidfile(servePidfilePath, getpid()))
-		{
-			log_fatal("Failed to write pidfile \"%s\"", servePidfilePath);
-			exit(1);
-		}
+
+/*
+ * cli_serve_run brings up the accept loop: it validates --pgdata/--insecure,
+ * derives the clusters/HBA/passwd paths under --pgdata, initializes TLS and
+ * the default HBA file, seeds the SCRAM mock secret (before any fork, so
+ * every connection sees the same one), and calls ws_accept_loop(), which
+ * only returns once the server is asked to stop. Never returns on success
+ * other than through exit() at process end. Each of its own phases above
+ * --pgdata validation, global-config defaults, TLS, HBA/clusters parsing,
+ * SNI sanity checks, starting the receivewal children, kicking off backup
+ * bootstraps, and writing the pidfile -- is its own named helper above,
+ * called here in the one order that matters.
+ */
+static void
+cli_serve_run(int argc, char **argv)
+{
+	(void) argc;
+	(void) argv;
+
+	cli_serve_check_pgdata_or_insecure();
+
+	if (servePgdata[0] != '\0')
+	{
+		cli_serve_load_global_defaults();
+		cli_serve_setup_tls();
+		cli_serve_load_clusters_and_hba();
+		cli_serve_check_sni_requirements();
+		cli_serve_start_receivewal_children();
+		cli_serve_start_backup_bootstraps();
+		cli_serve_write_pidfile_or_die();
 	}
 
 	/* before any fork: every connection must see the same mock secret */
