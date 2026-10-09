@@ -12,6 +12,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <time.h>
 
 
 /* taken from sysinfo(2) on Linux */
@@ -33,6 +34,14 @@ void pretty_print_bytes_scaled(char *buffer, size_t size, uint64_t bytes,
 							   uint64_t threshold, bool withSpace);
 
 int64_t monotonic_ms(void);
+
+/*
+ * format_elapsed_time is the shared "-"-sentinel wrapper around
+ * IntervalToString() (common/string_utils.c) that both pg_walserver's
+ * "ps" and "status" sub-commands use -- see its own comment in
+ * system_utils.c.
+ */
+void format_elapsed_time(time_t startedAt, char *dest, size_t destSize);
 
 
 #endif /* SYSTEM_UTILS_H */

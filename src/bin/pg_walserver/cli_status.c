@@ -24,9 +24,7 @@
 #include "ps_state.h"
 #include "clusters.h"
 #include "string_utils.h"
-
-/* local helpers */
-static void format_elapsed(time_t startedAt, char *dest, size_t destSize);
+#include "system_utils.h"
 
 static int cli_status_getopt(int argc, char **argv);
 static void cli_status_command_run(int argc, char **argv);
@@ -57,27 +55,6 @@ CommandLine status_command =
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n",
 				 cli_status_getopt, cli_status_command_run);
-
-
-/*
- * format_elapsed renders the time elapsed since startedAt via
- * IntervalToString() (common/string_utils.c), or "-" when startedAt is
- * unset (<= 0, "serve" isn't running) -- IntervalToString itself has no
- * such sentinel, so that case is handled here instead.
- */
-static void
-format_elapsed(time_t startedAt, char *dest, size_t destSize)
-{
-	if (startedAt <= 0)
-	{
-		strlcpy(dest, "-", destSize);
-		return;
-	}
-
-	double elapsed = (double) (time(NULL) - startedAt);
-
-	IntervalToString(elapsed < 0 ? 0 : elapsed, dest, destSize);
-}
 
 
 /*
@@ -160,7 +137,7 @@ ws_status_report(const char *pgdata, const char *configFile)
 
 	char uptime[32] = { 0 };
 
-	format_elapsed(haveState ? state.serveStartedAt : 0, uptime, sizeof(uptime));
+	format_elapsed_time(haveState ? state.serveStartedAt : 0, uptime, sizeof(uptime));
 
 	fformat(stdout, "pg_walserver: running (pid %d, uptime %s)\n", (int) servePid,
 			uptime);
