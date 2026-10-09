@@ -789,7 +789,7 @@ ws_cluster_register_run(const WsClusterRegisterOptions *options)
 
 	uint64_t systemIdentifier = 0;
 
-	if (!cli_fetch_systemid_run(&target, options->force, &systemIdentifier))
+	if (!ws_fetch_systemid_execute(&target, options->force, &systemIdentifier))
 	{
 		/* errors have already been logged -- including, per this call's own
 		 * comment, a role lacking REPLICATION: Postgres refuses a
@@ -1258,7 +1258,7 @@ ws_cluster_list_run(const char *pgdata, const char *configFile,
  * embedded receivewal worker against the new one -- no separate "move the
  * receivewal worker" step needed here, reload already does it. With
  * forceBasebackup, also takes a fresh base backup against the *new*
- * upstream right away (cli_basebackup_run(), cli_basebackup.c) once the
+ * upstream right away (ws_basebackup_execute(), cli_basebackup.c) once the
  * property is written -- the common "failover just happened, the old
  * upstream's own base backups are no longer usable against the new
  * timeline, get a current one immediately" case -- rather than leaving a
@@ -1346,7 +1346,7 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
 	{
 		uint64_t systemIdentifier = 0;
 
-		if (!cli_fetch_systemid_run(&target, true, &systemIdentifier))
+		if (!ws_fetch_systemid_execute(&target, true, &systemIdentifier))
 		{
 			log_warn("Cluster \"%s\"'s own system identifier/upstream "
 					 "version could not be refreshed against the new "
@@ -1364,7 +1364,7 @@ ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
 
 		if (!cli_resolve_upstream(pgdata, configFile, clusterKey, NULL, NULL,
 								  NULL, NULL, NULL, &backupTarget) ||
-			!cli_basebackup_run(&backupTarget, NULL, 0))
+			!ws_basebackup_execute(&backupTarget, NULL, 0))
 		{
 			log_error("Cluster \"%s\"'s own upstream was updated, but the "
 					  "base backup that --force-basebackup asked for "

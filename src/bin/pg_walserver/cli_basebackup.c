@@ -183,7 +183,7 @@ find_pg_basebackup_for_cluster(const WsUpstreamTarget *target,
 
 
 /*
- * cli_basebackup_run takes a real pg_basebackup of target's upstream into a
+ * ws_basebackup_execute takes a real pg_basebackup of target's upstream into a
  * freshly created "<target->path>/basebackups/<label>" directory (label:
  * a UTC timestamp, matching service_archiver_basebackup.c's own scheme so
  * both the standalone and pgaf-integrated backups sit side by side without
@@ -199,8 +199,8 @@ find_pg_basebackup_for_cluster(const WsUpstreamTarget *target,
  * backup's own label), false with an error already logged otherwise.
  */
 bool
-cli_basebackup_run(const WsUpstreamTarget *target,
-				   char *labelOut, size_t labelOutSize)
+ws_basebackup_execute(const WsUpstreamTarget *target,
+					  char *labelOut, size_t labelOutSize)
 {
 	char pgBasebackupPath[MAXPGPATH] = { 0 };
 
@@ -480,7 +480,7 @@ cli_basebackup_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	if (!cli_basebackup_run(&target, NULL, 0))
+	if (!ws_basebackup_execute(&target, NULL, 0))
 	{
 		/* errors have already been logged; never attempt retention against
 		 * a failed/partial backup attempt */

@@ -115,13 +115,13 @@ format_elapsed(time_t startedAt, char *dest, size_t destSize)
 
 
 /*
- * cli_ps_run prints "serve"'s own process-level status for --pgdata.
+ * ws_ps_report prints "serve"'s own process-level status for --pgdata.
  * Returns true (having printed a clean "not running" message, never an
  * error) when no "serve" is currently running for this --pgdata at all;
  * false only on a genuine problem (e.g. no --pgdata given).
  */
 bool
-cli_ps_run(const char *pgdata)
+ws_ps_report(const char *pgdata)
 {
 	if (pgdata == NULL || pgdata[0] == '\0')
 	{
@@ -256,5 +256,5 @@ cli_ps_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_ps_run(psPgdata) ? 0 : 1);
+	exit(ws_ps_report(psPgdata) ? 0 : 1);
 }

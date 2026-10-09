@@ -81,14 +81,14 @@ format_elapsed(time_t startedAt, char *dest, size_t destSize)
 
 
 /*
- * cli_status_run prints the one-line/short dashboard described above.
+ * ws_status_report prints the one-line/short dashboard described above.
  * Always returns true unless pgdata itself is missing -- "serve" not
  * running is a normal, cleanly reported case, never an error. configFile,
  * when given, overrides where the config file itself lives, independent
  * of pgdata -- see config_file_path()'s own comment, clusters.h.
  */
 bool
-cli_status_run(const char *pgdata, const char *configFile)
+ws_status_report(const char *pgdata, const char *configFile)
 {
 	if (pgdata == NULL || pgdata[0] == '\0')
 	{
@@ -225,5 +225,5 @@ cli_status_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_status_run(statusPgdata, statusConfigFile) ? 0 : 1);
+	exit(ws_status_report(statusPgdata, statusConfigFile) ? 0 : 1);
 }

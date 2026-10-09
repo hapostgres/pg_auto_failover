@@ -24,7 +24,7 @@
 #include "cli_upstream.h"
 
 /*
- * cli_fetch_systemid_run connects to target's upstream (a plain
+ * ws_fetch_systemid_execute connects to target's upstream (a plain
  * replication-mode IDENTIFY_SYSTEM, via pgctl_identify_system()) and writes
  * its system identifier into "<target->path>/pg_walserver_systemid", atomically
  * (write_file_atomic()). If that file already exists with a *different*
@@ -41,8 +41,8 @@
  * case), false with an error already logged otherwise, including the
  * identifier-mismatch case above.
  */
-bool cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
-							uint64_t *systemIdentifierOut);
+bool ws_fetch_systemid_execute(const WsUpstreamTarget *target, bool force,
+							   uint64_t *systemIdentifierOut);
 
 extern CommandLine fetch_systemid_command;
 

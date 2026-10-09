@@ -17,7 +17,7 @@
 
 #include "commandline.h"
 
-bool cli_ps_run(const char *pgdata);
+bool ws_ps_report(const char *pgdata);
 
 extern CommandLine ps_command;
 

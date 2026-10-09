@@ -152,8 +152,8 @@ read_existing_pgversion(const char *path, int *out)
 
 
 bool
-cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
-					   uint64_t *systemIdentifierOut)
+ws_fetch_systemid_execute(const WsUpstreamTarget *target, bool force,
+						  uint64_t *systemIdentifierOut)
 {
 	ReplicationSource replicationSource = { 0 };
 
@@ -404,5 +404,5 @@ cli_fetch_systemid_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	exit(cli_fetch_systemid_run(&target, fetchSystemidForce, NULL) ? 0 : 1);
+	exit(ws_fetch_systemid_execute(&target, fetchSystemidForce, NULL) ? 0 : 1);
 }

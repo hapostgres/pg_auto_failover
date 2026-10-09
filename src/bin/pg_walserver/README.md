@@ -859,7 +859,7 @@ close (see "The archive push side" below), so the backup is taken right
 away.
 
 Taking the backup itself reuses `pg_walserver basebackup`'s own already-
-public logic (`cli_basebackup_run()`, `cli_basebackup.c`) directly,
+public logic (`ws_basebackup_execute()`, `cli_basebackup.c`) directly,
 in-process, after a plain `fork()` (`backup_bootstrap.c`'s own
 `ws_backup_bootstrap_start()`) -- deliberately **not** a new hidden
 `internal service basebackup` entry point mirroring the embedded
