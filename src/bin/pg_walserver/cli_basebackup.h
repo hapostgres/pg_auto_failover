@@ -31,8 +31,8 @@
 
 #include "cli_upstream.h"
 
-bool cli_basebackup_run(const WsUpstreamTarget *target,
-						char *labelOut, size_t labelOutSize);
+bool ws_basebackup_execute(const WsUpstreamTarget *target,
+						   char *labelOut, size_t labelOutSize);
 
 bool cli_basebackup_cluster_has_backup(const char *path);
 

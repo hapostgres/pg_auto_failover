@@ -41,8 +41,8 @@
 
 #include "commandline.h"
 
-bool cli_ls_run(const char *pgdata, const char *configFile,
-				bool includeConfigFiles);
+bool ws_ls_report(const char *pgdata, const char *configFile,
+				  bool includeConfigFiles);
 
 extern CommandLine ls_command;
 

@@ -72,7 +72,7 @@ typedef struct WsSetupOptions
 	bool noCert;   /* --no-cert: skip the TLS certificate auto-creation */
 } WsSetupOptions;
 
-bool cli_setup_run(const WsSetupOptions *options);
+bool ws_setup_execute(const WsSetupOptions *options);
 
 extern CommandLine setup_command;
 

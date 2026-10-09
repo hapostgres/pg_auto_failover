@@ -26,7 +26,7 @@
 
 #include "commandline.h"
 
-bool cli_status_run(const char *pgdata, const char *configFile);
+bool ws_status_report(const char *pgdata, const char *configFile);
 
 extern CommandLine status_command;
 

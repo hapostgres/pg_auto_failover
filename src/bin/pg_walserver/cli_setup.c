@@ -120,7 +120,7 @@ CommandLine setup_command =
 
 
 /*
- * cli_setup_run writes whichever of options's own fields were actually
+ * ws_setup_execute writes whichever of options's own fields were actually
  * given into the config file's own global section (config_set_global_
  * property(), clusters.c), then auto-provisions the certificate and HBA
  * file -- see this file's own header comment. Creates --pgdata if it
@@ -128,7 +128,7 @@ CommandLine setup_command =
  * logged otherwise. Never touches any cluster's own section.
  */
 bool
-cli_setup_run(const WsSetupOptions *options)
+ws_setup_execute(const WsSetupOptions *options)
 {
 	if (options->pgdata[0] == '\0')
 	{
@@ -423,5 +423,5 @@ cli_setup_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_setup_run(&setupOptions) ? 0 : 1);
+	exit(ws_setup_execute(&setupOptions) ? 0 : 1);
 }

@@ -137,7 +137,7 @@ bootstrap_child_main(const WsCluster *cluster)
 				 "(attempt %d/%d)", cluster->key, attempt,
 				 WS_BOOTSTRAP_BACKUP_MAX_ATTEMPTS);
 
-		ok = cli_basebackup_run(&target, NULL, 0);
+		ok = ws_basebackup_execute(&target, NULL, 0);
 
 		if (!ok && attempt < WS_BOOTSTRAP_BACKUP_MAX_ATTEMPTS)
 		{
@@ -182,7 +182,7 @@ bootstrap_child_main(const WsCluster *cluster)
  *     function is ever called, "serve" has already started (or already
  *     reconciled, on reload) cluster's own real receivewal worker, so there is always
  *     a genuine one to wait on directly;
- *   - takes the backup itself (cli_basebackup_run(), cli_basebackup.c),
+ *   - takes the backup itself (ws_basebackup_execute(), cli_basebackup.c),
  *     retried up to WS_BOOTSTRAP_BACKUP_MAX_ATTEMPTS times with a short
  *     delay between attempts -- bounded, never an infinite retry loop;
  *   - logs a clear error and exits nonzero on final failure. The cluster

@@ -317,7 +317,7 @@ print_config_files(const char *pgdata, const char *configPath)
 
 
 /*
- * cli_ls_run prints, by default, one row per configured cluster: its own
+ * ws_ls_report prints, by default, one row per configured cluster: its own
  * base backup count/combined size, WAL segment count/combined size, and
  * most recent base backup timestamp. With includeConfigFiles (--all),
  * prints the config/credential/certificate file tier instead (whether
@@ -332,7 +332,7 @@ print_config_files(const char *pgdata, const char *configPath)
  * report, never a failure.
  */
 bool
-cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
+ws_ls_report(const char *pgdata, const char *configFile, bool includeConfigFiles)
 {
 	if (includeConfigFiles && (pgdata == NULL || pgdata[0] == '\0'))
 	{
@@ -481,5 +481,5 @@ cli_ls_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_ls_run(lsPgdata, lsConfigFile, lsIncludeConfigFiles) ? 0 : 1);
+	exit(ws_ls_report(lsPgdata, lsConfigFile, lsIncludeConfigFiles) ? 0 : 1);
 }
