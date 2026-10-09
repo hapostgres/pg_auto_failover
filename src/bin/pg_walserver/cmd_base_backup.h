@@ -1,6 +1,6 @@
 /*
  * src/bin/pg_walserver/cmd_base_backup.h
- *   BASE_BACKUP: streams the backup directory named by route->path's own
+ *   BASE_BACKUP: streams the backup directory named by cluster->path's own
  *   basebackups/.latest pointer as a ustar archive over the real
  *   multiplexed-COPY-stream wire format modern (>= 15) pg_basebackup
  *   clients expect (traced from PostgreSQL's src/backend/backup/
@@ -31,7 +31,7 @@
 #ifndef WS_CMD_BASE_BACKUP_H
 #define WS_CMD_BASE_BACKUP_H
 
-#include "routes.h"
+#include "clusters.h"
 #include "repl_command.h"
 
 /*
@@ -40,7 +40,7 @@
  * longer tokenizes "(...)" itself, see cmd_base_backup.c's own removed
  * scan_options().
  */
-void cmd_base_backup(int sock, const WsRoute *route,
+void cmd_base_backup(int sock, const WsCluster *cluster,
 					 const WsCommandOption *options, int nOptions);
 
 /*

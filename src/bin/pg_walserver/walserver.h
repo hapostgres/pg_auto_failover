@@ -23,20 +23,20 @@
 
 #include "postgres_fe.h"
 
-/* one entry per route this instance serves, see routes.h */
-typedef struct WsRoute WsRoute;
+/* one entry per cluster this instance serves, see clusters.h */
+typedef struct WsCluster WsCluster;
 
 /*
  * Parsed StartupMessage contents we care about. "database" doubles as our
- * routing key: an opaque string matched against pg_walserver.ini/hba.conf, see
- * routes.h. pg_auto_failover's own archiver uses "<formation>/<group>"
+ * cluster-selection key: an opaque string matched against pg_walserver.ini/hba.conf, see
+ * clusters.h. pg_auto_failover's own archiver uses "<formation>/<group>"
  * (e.g. "default/0", as in its process title "pg_autoctl: walsender
  * default/0") -- one convention among any an operator could choose.
  */
 typedef struct WsStartupParams
 {
 	char user[NAMEDATALEN];
-	char database[NAMEDATALEN + 16];  /* the routing key, may exceed a bare
+	char database[NAMEDATALEN + 16];  /* the cluster-selection key, may exceed a bare
 	                                   * NAMEDATALEN ("<formation>/<group>"
 	                                   * can, see this struct's own comment) */
 	char applicationName[NAMEDATALEN];

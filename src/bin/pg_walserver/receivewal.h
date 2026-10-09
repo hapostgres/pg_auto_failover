@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_walserver/receivewal.h
- *   The embedded, supervised WAL receivewal worker for every route with
- *   "receivewal = pull" configured (routes.h) -- see receivewal.c's own header
+ *   The embedded, supervised WAL receivewal worker for every cluster with
+ *   "receivewal = pull" configured (clusters.h) -- see receivewal.c's own header
  *   comment for the full design (fork()+execv() shape, the shared
  *   process_supervisor.h it's built on, restart/backoff policy, and the
  *   single-wildcard-reaper contract ws_receivewal_tick() has with its
@@ -20,26 +20,26 @@
 
 #include "postgres_fe.h"
 
-#include "routes.h"
+#include "clusters.h"
 
-bool ws_receivewal_start_all(const WsRoute *routes, int routeCount);
+bool ws_receivewal_start_all(const WsCluster *clusters, int clusterCount);
 
 void ws_receivewal_tick(bool (*otherChildExited)(void *ctx, pid_t pid,
 												 int status),
 						void *otherCtx);
 
-void ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount);
+void ws_receivewal_reload(const WsCluster *newClusters, int newClusterCount);
 
 /*
  * WsReceivewalStatus is one supervised "receivewal = pull" receivewal worker's current
  * status, as seen from inside "serve" itself -- see ws_receivewal_get_status()
  * below, and ps_state.h for why a *different* process (pg_walserver ps/
- * status) cannot just read receivewalServices/receivewalRoutes directly and
+ * status) cannot just read receivewalServices/receivewalClusters directly and
  * instead goes through a state file "serve" writes from this same data.
  */
 typedef struct WsReceivewalStatus
 {
-	char routeKey[NAMEDATALEN + 16];
+	char clusterKey[NAMEDATALEN + 16];
 	char path[MAXPGPATH];
 	char upstream[MAXCONNINFO];
 	pid_t pid;          /* <= 0: not currently running */

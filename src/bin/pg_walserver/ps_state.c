@@ -59,9 +59,9 @@ ws_ps_state_write(const char *pgdata, const WsPsState *state)
 		const WsPsReceivewalEntry *c = &state->receivewalWorkers[i];
 
 		appendPQExpBuffer(content,
-						  "receivewal route=%s path=%s pid=%d started=%lld restarts=%d "
+						  "receivewal cluster=%s path=%s pid=%d started=%lld restarts=%d "
 						  "lsn=%s timeline=%u observed=%lld\n",
-						  c->routeKey, c->path, (int) c->pid,
+						  c->clusterKey, c->path, (int) c->pid,
 						  (long long) c->startedAt, c->restarts,
 						  c->lsn, c->lsnTimeline, (long long) c->lsnObservedAt);
 	}
@@ -70,8 +70,8 @@ ws_ps_state_write(const char *pgdata, const WsPsState *state)
 	{
 		const WsPsBootstrapEntry *b = &state->bootstraps[i];
 
-		appendPQExpBuffer(content, "bootstrap route=%s pid=%d started=%lld\n",
-						  b->routeKey, (int) b->pid, (long long) b->startedAt);
+		appendPQExpBuffer(content, "bootstrap cluster=%s pid=%d started=%lld\n",
+						  b->clusterKey, (int) b->pid, (long long) b->startedAt);
 	}
 
 	if (PQExpBufferBroken(content))
@@ -100,7 +100,7 @@ ws_ps_state_write(const char *pgdata, const WsPsState *state)
  * point at, recognizing only the field names it is given.
  */
 static void
-parse_kv(char *line, char *routeKeyOut, char *pathOut, pid_t *pidOut,
+parse_kv(char *line, char *clusterKeyOut, char *pathOut, pid_t *pidOut,
 		 time_t *startedAtOut, int *restartsOut, char *lsnOut,
 		 uint32_t *lsnTimelineOut, time_t *lsnObservedAtOut)
 {
@@ -118,9 +118,9 @@ parse_kv(char *line, char *routeKeyOut, char *pathOut, pid_t *pidOut,
 			const char *key = tok;
 			const char *value = eq + 1;
 
-			if (strcmp(key, "route") == 0 && routeKeyOut != NULL)
+			if (strcmp(key, "cluster") == 0 && clusterKeyOut != NULL)
 			{
-				strlcpy(routeKeyOut, value, NAMEDATALEN + 16);
+				strlcpy(clusterKeyOut, value, NAMEDATALEN + 16);
 			}
 			else if (strcmp(key, "path") == 0 && pathOut != NULL)
 			{
@@ -212,7 +212,7 @@ ws_ps_state_read(const char *pgdata, WsPsState *state)
 				&state->receivewalWorkers[state->receivewalWorkerCount];
 
 			memset(c, 0, sizeof(WsPsReceivewalEntry));
-			parse_kv(rest, c->routeKey, c->path, &c->pid, &c->startedAt,
+			parse_kv(rest, c->clusterKey, c->path, &c->pid, &c->startedAt,
 					 &c->restarts, c->lsn, &c->lsnTimeline, &c->lsnObservedAt);
 			state->receivewalWorkerCount++;
 		}
@@ -222,7 +222,7 @@ ws_ps_state_read(const char *pgdata, WsPsState *state)
 			WsPsBootstrapEntry *b = &state->bootstraps[state->bootstrapCount];
 
 			memset(b, 0, sizeof(WsPsBootstrapEntry));
-			parse_kv(rest, b->routeKey, NULL, &b->pid, &b->startedAt, NULL,
+			parse_kv(rest, b->clusterKey, NULL, &b->pid, &b->startedAt, NULL,
 					 NULL, NULL, NULL);
 			state->bootstrapCount++;
 		}

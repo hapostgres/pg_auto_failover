@@ -5,7 +5,7 @@
  *   Postgres source); this project's own archive_command client
  *   (cli_archive.c) additionally queries "receivewal", this project's own
  *   extension with no PostgreSQL equivalent, to learn whether the
- *   connected route has an embedded receivewal worker before deciding whether
+ *   connected cluster has an embedded receivewal worker before deciding whether
  *   to only ever CHECK_FILE or only ever ARCHIVE_FILE.
  *
  * Licensed under the PostgreSQL License.
@@ -15,13 +15,13 @@
 #ifndef WS_CMD_SHOW_H
 #define WS_CMD_SHOW_H
 
-#include "routes.h"
+#include "clusters.h"
 
 /*
- * SHOW wal_segment_size answers the route's own size ("16MB", "64MB", "1GB");
- * SHOW receivewal answers the route's own receivewal setting ("pull" or "none"),
- * read straight from WsRoute.receivewalPull.
+ * SHOW wal_segment_size answers the cluster's own size ("16MB", "64MB", "1GB");
+ * SHOW receivewal answers the cluster's own receivewal setting ("pull" or "none"),
+ * read straight from WsCluster.receivewalPull.
  */
-void cmd_show(int sock, const WsRoute *route, const char *name);
+void cmd_show(int sock, const WsCluster *cluster, const char *name);
 
 #endif /* WS_CMD_SHOW_H */

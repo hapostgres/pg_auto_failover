@@ -1,6 +1,6 @@
 /*
  * src/bin/pg_walserver/backup_bootstrap.h
- *   A one-shot, plain fork() (no execv()) that takes a single route's very
+ *   A one-shot, plain fork() (no execv()) that takes a single cluster's very
  *   first base backup in the background, reusing `pg_walserver basebackup`'s
  *   own logic (cli_basebackup.c) in-process -- see backup_bootstrap.c's own
  *   header comment for the full design, and accept_loop.c's own
@@ -18,8 +18,8 @@
 
 #include "postgres_fe.h"
 
-#include "routes.h"
+#include "clusters.h"
 
-bool ws_backup_bootstrap_start(const WsRoute *route, pid_t *pidOut);
+bool ws_backup_bootstrap_start(const WsCluster *cluster, pid_t *pidOut);
 
 #endif /* WS_BACKUP_BOOTSTRAP_H */

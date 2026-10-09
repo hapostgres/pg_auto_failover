@@ -6,9 +6,9 @@
 # spec exercises.
 #
 # `archive-wal` picks one of two disjoint behaviors per invocation from the
-# connected route's own "receivewal" setting (SHOW receivewal): a route with no
+# connected cluster's own "receivewal" setting (SHOW receivewal): a cluster with no
 # "receivewal = pull" (arch/0 below, set up with --no-receivewal) is push-only,
-# ARCHIVE_FILE every time, no CHECK_FILE first; a route with "receivewal =
+# ARCHIVE_FILE every time, no CHECK_FILE first; a cluster with "receivewal =
 # pull" (arch/1 below, its own embedded pg_receivewal actually running and
 # pulling real WAL off node1) is check-only, CHECK_FILE every time, never
 # ARCHIVE_FILE. Both get real coverage below.
@@ -18,12 +18,12 @@
 # talking to its own pg_walserver over loopback, a manually written,
 # properly scoped pg_walserver_hba.conf (there is no monitor here to learn a
 # real client's address from), and `pg_walserver cluster register` handles onboarding
-# each route (path + upstream + systemid) exactly as an operator would.
-# Two named routes with no TLS is otherwise a hard startup error (see
-# README.md's "Routing beyond dbname" section); `cluster register` itself creates a
+# each cluster (path + upstream + systemid) exactly as an operator would.
+# Two named clusters with no TLS is otherwise a hard startup error (see
+# README.md's "Addressing a cluster beyond dbname" section); `cluster register` itself creates a
 # self-signed certificate automatically the moment arch/1 becomes this
-# pg_walserver.ini's second route, so this spec never has to ask for TLS
-# explicitly, only ever connecting to each route by its exact dbname.
+# pg_walserver.ini's second cluster, so this spec never has to ask for TLS
+# explicitly, only ever connecting to each cluster by its exact dbname.
 #
 #   test_001  CHECK_FILE reports "missing" for a filename nothing has ever
 #             pushed -- a raw wire-level check, no file transfer at all
@@ -42,7 +42,7 @@
 #             stderr message) -- the file already on disk is untouched,
 #             never overwritten with the differing content
 #   test_004  `pg_walserver create-cert`: setup{} above already created a
-#             certificate automatically (arch/1 is a second named route);
+#             certificate automatically (arch/1 is a second named cluster);
 #             a plain call refuses to replace it (never silently
 #             overwriting an existing certificate); with --force it
 #             overwrites cleanly, twice, CN reflecting each --hostname
@@ -63,7 +63,7 @@
 #   test_007  the exact same ARCHIVE_FILE push as test_002, but with
 #             --sslmode require over the real TLS connection test_004's
 #             own certificate now enables (arch/1 being a second named
-#             route already made "setup" create one automatically): a real
+#             cluster already made "setup" create one automatically): a real
 #             regression test for a bug this project once had, where
 #             cmd_archive_file.c wrote the received bytes to its local
 #             temporary file through framing.c's own connection-write
@@ -97,7 +97,7 @@ setup {
     # fetches node1's real system identifier into pg_walserver_systemid.
     # This spec never serves BASE_BACKUP, so it never needs the base
     # backup "serve" would otherwise bootstrap automatically for this
-    # route.
+    # cluster.
     # --no-receivewal: this spec pushes its own small, deterministic fake "WAL
     # segments" by hand (test_002/test_003 below) under real WAL-segment-
     # shaped names -- the embedded receivewal worker, on by default now, would
@@ -107,12 +107,12 @@ setup {
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register arch/0 --pgdata /tmp/wsarch --path /tmp/wsarch/arch/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
     exec node2 bash -c 'if grep -qx "receivewal = pull" /tmp/wsarch/pg_walserver.ini; then echo "receivewal = pull should not have been written with --no-receivewal"; false; fi'
 
-    # a second route, receivewal = pull by setup's own default now (no
+    # a second cluster, receivewal = pull by setup's own default now (no
     # --no-receivewal): a real, embedded pg_receivewal actually pulling WAL
     # off node1 into arch/1's own directory, for test_006's own coverage of
-    # the CHECK_FILE-only behavior. This is a second named route, so
+    # the CHECK_FILE-only behavior. This is a second named cluster, so
     # "setup" itself now creates a self-signed certificate for --pgdata
-    # automatically (see README.md's "Routing beyond dbname" section) --
+    # automatically (see README.md's "Addressing a cluster beyond dbname" section) --
     # every connection in this spec still only ever uses dbname, so that
     # certificate never has to be presented or even referenced below.
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register arch/1 --pgdata /tmp/wsarch --path /tmp/wsarch/arch/1 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
@@ -181,10 +181,10 @@ step test_003_check_file_differs_is_rejected {
 }
 
 step test_004_create_cert_fresh_and_refuse {
-    # arch/1 (setup{} above) is this pg_walserver.ini's second named route,
+    # arch/1 (setup{} above) is this pg_walserver.ini's second named cluster,
     # so "setup" itself already created a self-signed certificate for
     # --pgdata automatically the moment it was written (see README.md's
-    # "Routing beyond dbname" section) -- there is no certificate-less
+    # "Addressing a cluster beyond dbname" section) -- there is no certificate-less
     # state left to observe here, so this step starts from "a certificate
     # already exists" rather than "none exists yet".
     exec node2 bash -c 'test -f /tmp/wsarch/server.crt && test -f /tmp/wsarch/server.key'
@@ -224,7 +224,7 @@ step test_005_restore_wal_fetches_a_real_file {
     exec node2 bash -c 'test ! -e /tmp/restored-missing.bin'
 }
 
-step test_006_receivewal_pull_route_is_check_file_only {
+step test_006_receivewal_pull_cluster_is_check_file_only {
     # arch/1 has receivewal = pull configured and its own embedded pg_
     # receivewal (setup{} above) actually pulling real WAL off node1 --
     # identify the segment it is currently writing by its own ".partial"
@@ -286,5 +286,5 @@ sequence
     test_003_check_file_differs_is_rejected
     test_004_create_cert_fresh_and_refuse
     test_005_restore_wal_fetches_a_real_file
-    test_006_receivewal_pull_route_is_check_file_only
+    test_006_receivewal_pull_cluster_is_check_file_only
     test_007_archive_pushes_over_real_tls

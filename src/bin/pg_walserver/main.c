@@ -66,7 +66,7 @@ main(int argc, char **argv)
 	 * argv[0] the shell happened to invoke us with (e.g. a bare
 	 * "pg_walserver" found via $PATH). Falls back to argv[0] verbatim if
 	 * the absolute path can't be resolved (matches pg_autoctl's own
-	 * main.c); a route with "receivewal = pull" then fails to start its own
+	 * main.c); a cluster with "receivewal = pull" then fails to start its own
 	 * receivewal worker with a clear "execv() failed" error rather than silently
 	 * misbehaving.
 	 */

@@ -31,7 +31,7 @@
  * Deliberately NOT framing.c's own ws_write_bytes(): that function writes
  * to *the client connection* (plain write() with no active TLS handshake,
  * SSL_write() otherwise, via ws_io_write()'s global activeSsl -- see
- * tls.c), which is exactly wrong here -- fd below is this route's own
+ * tls.c), which is exactly wrong here -- fd below is this cluster's own
  * on-disk temporary file, never the socket, and calling ws_write_bytes()
  * on it would (with TLS active) silently SSL_write() the received bytes
  * back out to the client instead of ever reaching disk, desyncing the
@@ -69,7 +69,7 @@ archive_file_write_local(int fd, const void *buf, size_t len)
 /*
  * cmd_archive_file implements ARCHIVE_FILE: validate the filename against
  * the same allow-list FETCH_FILE's read side uses, receive the whole CopyIn
- * into a same-directory temporary file (capped at the route's own
+ * into a same-directory temporary file (capped at the cluster's own
  * wal_segment_size plus WS_ARCHIVE_FILE_SIZE_SLACK, checked as bytes
  * arrive so an oversized push never gets to write the whole thing), then
  * decide what to do with it purely from a fresh CRC32C/size comparison
@@ -78,7 +78,7 @@ archive_file_write_local(int fd, const void *buf, size_t len)
  * header comment for the full contract.
  */
 void
-cmd_archive_file(int sock, const WsRoute *route, const char *filename)
+cmd_archive_file(int sock, const WsCluster *cluster, const char *filename)
 {
 	if (!ws_fetch_filename_is_servable(filename))
 	{
@@ -90,21 +90,21 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 		return;
 	}
 
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
-							   "no WAL cache directory configured for this route");
+							   "no WAL cache directory configured for this cluster");
 		return;
 	}
 
 	char finalPath[MAXPGPATH];
 	char tmpPath[MAXPGPATH];
 
-	sformat(finalPath, sizeof(finalPath), "%s/%s", route->path, filename);
+	sformat(finalPath, sizeof(finalPath), "%s/%s", cluster->path, filename);
 	sformat(tmpPath, sizeof(tmpPath), "%s/.archive_tmp.%s.%d",
-			route->path, filename, (int) getpid());
+			cluster->path, filename, (int) getpid());
 
-	uint64_t cap = ws_route_wal_segment_size(route) + WS_ARCHIVE_FILE_SIZE_SLACK;
+	uint64_t cap = ws_cluster_wal_segment_size(cluster) + WS_ARCHIVE_FILE_SIZE_SLACK;
 
 	int fd = open(tmpPath, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
 
@@ -161,7 +161,7 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 					{
 						log_error("ARCHIVE_FILE: \"%s\" exceeds the "
 								  "%" PRIu64 "-byte cap for \"%s\"",
-								  filename, cap, route->path);
+								  filename, cap, cluster->path);
 						oversized = true;
 					}
 					else if (payloadLen > 0 &&
@@ -221,7 +221,7 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 		unlink(tmpPath);
 		ws_send_error_response(sock, oversized ? "54000" : "58030",
 							   oversized
-							   ? "file exceeds this route's maximum archive size"
+							   ? "file exceeds this cluster's maximum archive size"
 							   : "failed to write the received file");
 		return;
 	}
@@ -259,7 +259,7 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 			 * archive_command contract requires */
 			unlink(tmpPath);
 			log_info("ARCHIVE_FILE: \"%s\" already matches what's on disk "
-					 "under \"%s\" (idempotent retry)", filename, route->path);
+					 "under \"%s\" (idempotent retry)", filename, cluster->path);
 			(void) ws_send_command_complete(sock, "ARCHIVE_FILE");
 			return;
 		}
@@ -287,7 +287,7 @@ cmd_archive_file(int sock, const WsRoute *route, const char *filename)
 
 	log_info("ARCHIVE_FILE: stored \"%s\" (%" PRIu64 " bytes, CRC32C %08X) "
 													 "under \"%s\"", filename,
-			 receivedSize, receivedCrc, route->path);
+			 receivedSize, receivedCrc, cluster->path);
 
 	(void) ws_send_command_complete(sock, "ARCHIVE_FILE");
 }

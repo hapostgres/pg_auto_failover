@@ -4,14 +4,14 @@
  *   pg_create_self_signed_cert() (src/bin/common/pgctl.c) that writes
  *   <pgdata>/server.crt and <pgdata>/server.key by hand, on demand -- the
  *   same self-signed certificate `pg_walserver setup` already creates
- *   automatically the moment a second named route needs one (see
- *   cli_setup.c's own ensure_tls_for_multiple_routes(), which now calls the
+ *   automatically the moment a second named cluster needs one (see
+ *   cli_setup.c's own ensure_tls_for_multiple_clusters(), which now calls the
  *   same ws_create_cert_run() this sub-command calls directly). Useful when
- *   an operator wants TLS from the very first route (SNI routing isn't the
- *   only reason to want it -- so does a single route served over a
+ *   an operator wants TLS from the very first cluster (SNI addressing isn't the
+ *   only reason to want it -- so does a single cluster served over a
  *   reachable network at all), or wants to replace an existing self-signed
  *   certificate with a freshly generated one (--force) without touching any
- *   route.
+ *   cluster.
  *
  * Licensed under the PostgreSQL License.
  *

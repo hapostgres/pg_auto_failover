@@ -23,7 +23,7 @@
 
 
 /*
- * Connects to host:port as user, requests filename for routeKey ("<formation>/
+ * Connects to host:port as user, requests filename for clusterKey ("<formation>/
  * <group>", the dbname), and writes the result to outputPath (via a same-directory
  * temp file + rename, so a killed/interrupted fetch never leaves a
  * partial file at outputPath). sslmode is an ordinary libpq sslmode string
@@ -37,7 +37,7 @@
  */
 int
 ws_fetch_file_client(const char *host, int port, const char *user,
-					 const char *routeKey, const char *sslmode,
+					 const char *clusterKey, const char *sslmode,
 					 const char *applicationName,
 					 const char *filename, const char *outputPath)
 {
@@ -61,7 +61,7 @@ ws_fetch_file_client(const char *host, int port, const char *user,
 
 	appendPQExpBuffer(connInfo, "host=%s port=%d user=%s dbname=%s "
 								"fallback_application_name=%s",
-					  host, port, user, routeKey, applicationName);
+					  host, port, user, clusterKey, applicationName);
 
 	if (sslmode != NULL && sslmode[0] != '\0')
 	{

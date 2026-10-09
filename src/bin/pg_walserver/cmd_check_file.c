@@ -25,7 +25,7 @@
 
 /*
  * check_file_receivewal_has_passed answers this file's own header
- * comment's "fallback" column: has route's own embedded receivewal
+ * comment's "fallback" column: has cluster's own embedded receivewal
  * worker already streamed past filename -- a later segment, or a later
  * timeline -- while filename itself never showed up? That is a hole a
  * streaming worker can never retroactively fill (a timeline switch left
@@ -46,16 +46,16 @@
  *
  * Returns false (the safe "keep waiting" default) whenever there isn't
  * enough information to call it a hole with confidence: no embedded
- * receivewal worker on this route at all, no live progress reading yet
+ * receivewal worker on this cluster at all, no live progress reading yet
  * (never ticked, or not running), or filename isn't one of the LSN-
  * positioned shapes (WS_WAL_FILE_SEGMENT/PARTIAL/BACKUP) this comparison
  * applies to -- a bare ".history" file, most notably, carries no LSN of
  * its own to compare against.
  */
 static bool
-check_file_receivewal_has_passed(const WsRoute *route, const char *filename)
+check_file_receivewal_has_passed(const WsCluster *cluster, const char *filename)
 {
-	if (!route->receivewalPull)
+	if (!cluster->receivewalPull)
 	{
 		return false;
 	}
@@ -73,14 +73,14 @@ check_file_receivewal_has_passed(const WsRoute *route, const char *filename)
 	uint32_t progressTimeline = 0;
 	time_t observedAt = 0;
 
-	if (!ws_receivewal_progress_read(route->path, progressLsn,
+	if (!ws_receivewal_progress_read(cluster->path, progressLsn,
 									 sizeof(progressLsn), &progressTimeline,
 									 &observedAt))
 	{
 		return false;
 	}
 
-	uint64_t segSize = ws_route_wal_segment_size(route);
+	uint64_t segSize = ws_cluster_wal_segment_size(cluster);
 	uint32_t fileTimeline;
 	uint64_t fileSegNo;
 
@@ -120,7 +120,7 @@ check_file_receivewal_has_passed(const WsRoute *route, const char *filename)
  * before ARCHIVE_FILE actually pushes anything (see cli_archive.c).
  */
 void
-cmd_check_file(int sock, const WsRoute *route, const char *filename,
+cmd_check_file(int sock, const WsCluster *cluster, const char *filename,
 			   uint64_t clientSize, const char *clientCrc32cHex)
 {
 	if (!ws_fetch_filename_is_servable(filename))
@@ -133,16 +133,16 @@ cmd_check_file(int sock, const WsRoute *route, const char *filename,
 		return;
 	}
 
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
-							   "no WAL cache directory configured for this route");
+							   "no WAL cache directory configured for this cluster");
 		return;
 	}
 
 	char path[MAXPGPATH];
 
-	sformat(path, sizeof(path), "%s/%s", route->path, filename);
+	sformat(path, sizeof(path), "%s/%s", cluster->path, filename);
 
 	uint64_t diskSize = 0;
 	uint32_t diskCrc = 0;
@@ -175,7 +175,7 @@ cmd_check_file(int sock, const WsRoute *route, const char *filename,
 	}
 
 	bool fallback = strcmp(status, "matches") != 0 &&
-					check_file_receivewal_has_passed(route, filename);
+					check_file_receivewal_has_passed(cluster, filename);
 
 	WsColumn columns[] = {
 		{ "status", WS_TEXTOID, -1 },
@@ -194,13 +194,13 @@ cmd_check_file(int sock, const WsRoute *route, const char *filename,
 	if (fallback)
 	{
 		log_info("CHECK_FILE: \"%s\" under \"%s\" is \"%s\", and this "
-				 "route's own embedded receivewal worker has already "
+				 "cluster's own embedded receivewal worker has already "
 				 "streamed past it: recommending an ARCHIVE_FILE fallback",
-				 filename, route->path, status);
+				 filename, cluster->path, status);
 	}
 	else
 	{
 		log_info("CHECK_FILE: \"%s\" under \"%s\" is \"%s\"",
-				 filename, route->path, status);
+				 filename, cluster->path, status);
 	}
 }

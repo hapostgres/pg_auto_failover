@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_walserver/auth.h
- *   Connection authentication for pg_walserver. The route the client asked
- *   for must exist in the routes file; then the first matching rule of the
+ *   Connection authentication for pg_walserver. The cluster the client asked
+ *   for must exist in the clusters file; then the first matching rule of the
  *   HBA file (hba.h) decides the method:
  *
  *     trust          accept
@@ -22,11 +22,11 @@
  *   implement "clientcert=verify-ca" (see hba.h's own comment for why).
  *
  *   Authentication comes FIRST, as in PostgreSQL: the HBA rules are looked
- *   up with the route key the client asked for (whether or not it is a
- *   known route), then the method runs, and only after a successful
- *   authentication is an unknown route reported (3D000, "database does not
+ *   up with the cluster key the client asked for (whether or not it is a
+ *   known cluster), then the method runs, and only after a successful
+ *   authentication is an unknown cluster reported (3D000, "database does not
  *   exist"). A rejection is one generic message naming the peer address and
- *   user, never the route. Client supplied strings are sanitized (control
+ *   user, never the cluster. Client supplied strings are sanitized (control
  *   characters, length) before being logged.
  *
  *   The whole exchange runs under the connection's absolute authentication
@@ -49,7 +49,7 @@
 
 #include "walserver.h"
 #include "hba.h"
-#include "routes.h"
+#include "clusters.h"
 
 typedef struct WsAuthConfig
 {
@@ -60,7 +60,7 @@ typedef struct WsAuthConfig
 	                                * below, never re-reads this path */
 	char passwdPath[MAXPGPATH];    /* scram-sha-256 verifiers, still read
 	                                * fresh on every authentication attempt
-	                                * (not part of the routes/HBA reload
+	                                * (not part of the clusters/HBA reload
 	                                * this project's SIGHUP handling covers) */
 	WsHbaRuleSet hbaRuleSet;        /* the currently installed, validated HBA
 	                                 * ruleset -- parsed once at startup and
@@ -70,9 +70,9 @@ typedef struct WsAuthConfig
 } WsAuthConfig;
 
 bool ws_authenticate(int sock, const WsStartupParams *params,
-					 const char *routeKey,
-					 const WsRoute *routes, int routeCount,
+					 const char *clusterKey,
+					 const WsCluster *clusters, int clusterCount,
 					 const WsAuthConfig *authConfig,
-					 const WsRoute **foundRoute);
+					 const WsCluster **foundCluster);
 
 #endif /* WS_AUTH_H */

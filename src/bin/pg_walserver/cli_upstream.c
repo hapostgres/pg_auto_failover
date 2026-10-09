@@ -17,7 +17,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "pgsetup.h"
-#include "routes.h"
+#include "clusters.h"
 #include "string_utils.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
@@ -25,7 +25,7 @@
 
 /*
  * parse_upstream_conninfo parses a plain libpq keyword/value connection
- * string (routes.h's own "upstream" property shape, e.g. "host=primary
+ * string (clusters.h's own "upstream" property shape, e.g. "host=primary
  * user=archiver_repl sslmode=require") directly with PQconninfoParse(),
  * filling in target's host/port/user/sslOptions from whatever keywords it
  * finds. Deliberately not this project's own parse_pguri_ssl_settings()
@@ -106,9 +106,9 @@ cli_parse_upstream_conninfo(const char *conninfo, WsUpstreamTarget *target)
  * cli_resolve_upstream fills *target for --cluster/--pgdata (looked up in
  * the config file config_file_path() resolves -- <pgdata>/pg_walserver.ini
  * by default, or configFile/PG_WALSERVER_CONFIG_FILE when given, see
- * routes.h) and/or --path/--upstream/--host/--port/--user given directly on
+ * clusters.h) and/or --path/--upstream/--host/--port/--user given directly on
  * the command line -- an explicit flag always wins over whatever the
- * route's own "upstream"/"path" ini properties say. Returns false (with an
+ * cluster's own "upstream"/"path" ini properties say. Returns false (with an
  * error already logged) when neither source leaves *target fully resolved
  * (a path and a host are both required; user defaults to
  * "pgautofailover_replicator", port to 5432 when the upstream conninfo
@@ -116,7 +116,7 @@ cli_parse_upstream_conninfo(const char *conninfo, WsUpstreamTarget *target)
  */
 bool
 cli_resolve_upstream(const char *pgdata, const char *configFile,
-					 const char *routeKey,
+					 const char *clusterKey,
 					 const char *pathArg, const char *upstreamArg,
 					 const char *hostArg, const char *portArg,
 					 const char *userArg,
@@ -126,74 +126,74 @@ cli_resolve_upstream(const char *pgdata, const char *configFile,
 	strlcpy(target->userName, PG_AUTOCTL_REPLICA_USERNAME,
 			sizeof(target->userName));
 
-	char routesPath[MAXPGPATH] = { 0 };
-	WsRoute *routes = NULL;
-	int routeCount = 0;
-	const WsRoute *route = NULL;
+	char clustersPath[MAXPGPATH] = { 0 };
+	WsCluster *clusters = NULL;
+	int clusterCount = 0;
+	const WsCluster *cluster = NULL;
 
 	if ((pgdata != NULL && pgdata[0] != '\0') ||
 		(configFile != NULL && configFile[0] != '\0'))
 	{
-		config_file_path(pgdata, configFile, routesPath, sizeof(routesPath));
+		config_file_path(pgdata, configFile, clustersPath, sizeof(clustersPath));
 
-		if (routes_load(routesPath, &routes, &routeCount))
+		if (clusters_load(clustersPath, &clusters, &clusterCount))
 		{
-			if (routeKey != NULL && routeKey[0] != '\0')
+			if (clusterKey != NULL && clusterKey[0] != '\0')
 			{
-				route = routes_find(routes, routeCount, routeKey);
+				cluster = clusters_find(clusters, clusterCount, clusterKey);
 
 				/*
-				 * routes_load() itself returns true with zero routes both
-				 * for a routes file that doesn't exist yet at all (a
+				 * clusters_load() itself returns true with zero clusters both
+				 * for a clusters file that doesn't exist yet at all (a
 				 * normal, expected state -- nothing to warn about) and for
-				 * one that exists but is simply empty or lacks this route
+				 * one that exists but is simply empty or lacks this cluster
 				 * (worth a warning); file_exists() is what tells those two
 				 * apart here.
 				 */
-				if (route == NULL && file_exists(routesPath))
+				if (cluster == NULL && file_exists(clustersPath))
 				{
-					log_warn("No route \"%s\" in \"%s\"", routeKey, routesPath);
+					log_warn("No cluster \"%s\" in \"%s\"", clusterKey, clustersPath);
 				}
 
-				if (route != NULL && route->disabled)
+				if (cluster != NULL && cluster->disabled)
 				{
-					log_error("Route \"%s\" is dropped (disabled) -- run "
+					log_error("Cluster \"%s\" is dropped (disabled) -- run "
 							  "\"pg_walserver cluster enable %s\" to bring "
-							  "it back first", routeKey, routeKey);
-					routes_free(routes);
+							  "it back first", clusterKey, clusterKey);
+					clusters_free(clusters);
 					return false;
 				}
 			}
 		}
 		else
 		{
-			log_debug("No usable \"%s\" yet", routesPath);
+			log_debug("No usable \"%s\" yet", clustersPath);
 		}
 	}
 
-	/* path: explicit --path always wins, else the route's own */
+	/* path: explicit --path always wins, else the cluster's own */
 	if (pathArg != NULL && pathArg[0] != '\0')
 	{
 		strlcpy(target->path, pathArg, sizeof(target->path));
 	}
-	else if (route != NULL && route->path[0] != '\0')
+	else if (cluster != NULL && cluster->path[0] != '\0')
 	{
-		strlcpy(target->path, route->path, sizeof(target->path));
+		strlcpy(target->path, cluster->path, sizeof(target->path));
 	}
 
-	/* upstream: explicit --upstream always wins, else the route's own */
+	/* upstream: explicit --upstream always wins, else the cluster's own */
 	bool haveUpstream = false;
 
 	if (upstreamArg != NULL && upstreamArg[0] != '\0')
 	{
 		haveUpstream = cli_parse_upstream_conninfo(upstreamArg, target);
 	}
-	else if (route != NULL && route->upstream[0] != '\0')
+	else if (cluster != NULL && cluster->upstream[0] != '\0')
 	{
-		haveUpstream = cli_parse_upstream_conninfo(route->upstream, target);
+		haveUpstream = cli_parse_upstream_conninfo(cluster->upstream, target);
 	}
 
-	routes_free(routes);
+	clusters_free(clusters);
 
 	/* --host/--port/--user, if given, override whatever the above resolved */
 	if (hostArg != NULL && hostArg[0] != '\0')
@@ -219,30 +219,30 @@ cli_resolve_upstream(const char *pgdata, const char *configFile,
 	/*
 	 * Still nothing? Default to "<pgdata>/<cluster>", the same top-level
 	 * storage root every other pg_walserver file already lives under --
-	 * --path only ever needs to be passed to override that. When the route
+	 * --path only ever needs to be passed to override that. When the cluster
 	 * itself already exists in pg_walserver.ini (just without its own
 	 * "path" property -- e.g. hand-written with only "upstream"), persist
 	 * the default back into the file, the same way "setup" always writes
-	 * one for a route it creates, so every other command reading this
-	 * route later (routes_load() has no defaulting logic of its own) sees
+	 * one for a cluster it creates, so every other command reading this
+	 * cluster later (clusters_load() has no defaulting logic of its own) sees
 	 * it too.
 	 */
 	if (target->path[0] == '\0' && pgdata != NULL && pgdata[0] != '\0' &&
-		routeKey != NULL && routeKey[0] != '\0')
+		clusterKey != NULL && clusterKey[0] != '\0')
 	{
-		sformat(target->path, sizeof(target->path), "%s/%s", pgdata, routeKey);
+		sformat(target->path, sizeof(target->path), "%s/%s", pgdata, clusterKey);
 
-		if (route != NULL)
+		if (cluster != NULL)
 		{
-			/* routesPath was already filled in above, resolving the route */
-			if (!routes_persist_path(routesPath, routeKey, target->path))
+			/* clustersPath was already filled in above, resolving the cluster */
+			if (!clusters_persist_path(clustersPath, clusterKey, target->path))
 			{
 				/* not fatal: the resolved path above is still usable for
 				 * this one invocation, only the write-back failed */
-				log_warn("Route \"%s\"'s default path could not be saved "
+				log_warn("Cluster \"%s\"'s default path could not be saved "
 						 "to \"%s\"; pass --path explicitly, or add "
 						 "\"path = %s\" to its section by hand, to avoid "
-						 "recomputing it every time", routeKey, routesPath,
+						 "recomputing it every time", clusterKey, clustersPath,
 						 target->path);
 			}
 		}
@@ -250,7 +250,7 @@ cli_resolve_upstream(const char *pgdata, const char *configFile,
 
 	if (target->path[0] == '\0')
 	{
-		log_error("No route path: pass --path, or --cluster with --pgdata "
+		log_error("No cluster path: pass --path, or --cluster with --pgdata "
 				  "pointing at a \"pg_walserver.ini\" that has one");
 		return false;
 	}
@@ -259,7 +259,7 @@ cli_resolve_upstream(const char *pgdata, const char *configFile,
 	{
 		log_error("No upstream to connect to: pass --host (with --port/"
 				  "--user), or --upstream, or --cluster with --pgdata "
-				  "pointing at a \"pg_walserver.ini\" whose route has an "
+				  "pointing at a \"pg_walserver.ini\" whose cluster has an "
 				  "\"upstream\" property");
 		return false;
 	}

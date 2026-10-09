@@ -13,7 +13,7 @@
  *               (identical), or "differs" (something else is already
  *               there under that name) -- never anything a client should
  *               try to parse structurally beyond those three strings.
- *     fallback  "yes" or "no": whether this route's own embedded
+ *     fallback  "yes" or "no": whether this cluster's own embedded
  *               receivewal worker has already streamed *past* filename
  *               (its own last-observed position, "<path>/receivewal-
  *               progress", wal_dir_scan.h, is at a later segment or a
@@ -21,7 +21,7 @@
  *               a hole a streaming worker can never retroactively fill
  *               (typically a timeline switch left a segment behind on
  *               the old timeline). "no" whenever status is "matches",
- *               the route has no embedded receivewal worker at all, or
+ *               the cluster has no embedded receivewal worker at all, or
  *               there simply isn't a live progress reading yet (nothing
  *               to compare against) -- the safe default, meaning "keep
  *               waiting for the normal archive_command retry loop",
@@ -45,18 +45,18 @@
 
 #include <stdint.h>
 
-#include "routes.h"
+#include "clusters.h"
 
 /*
  * cmd_check_file validates filename against the same allow-list
  * ARCHIVE_FILE/FETCH_FILE use (ws_fetch_filename_is_servable(),
  * cmd_fetch_file.h), then compares clientSize/clientCrc32cHex (an uppercase
  * or lowercase hex CRC32C, compared case-insensitively) against what is
- * actually on disk under route->path, replying "missing"/"matches"/
+ * actually on disk under cluster->path, replying "missing"/"matches"/
  * "differs" accordingly, plus this file's own header comment's "fallback"
  * column.
  */
-void cmd_check_file(int sock, const WsRoute *route, const char *filename,
+void cmd_check_file(int sock, const WsCluster *cluster, const char *filename,
 					uint64_t clientSize, const char *clientCrc32cHex);
 
 #endif /* WS_CMD_CHECK_FILE_H */

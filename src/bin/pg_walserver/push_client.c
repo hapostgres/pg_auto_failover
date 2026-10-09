@@ -105,7 +105,7 @@ check_file_status(PGconn *conn, const char *filename, uint64_t size,
 
 /*
  * show_receivewal runs "SHOW receivewal" against conn and fills pullOut with
- * whether the connected route has "receivewal = pull" configured. Returns
+ * whether the connected cluster has "receivewal = pull" configured. Returns
  * false (pullOut untouched) on any connection/protocol failure, with an
  * error already logged -- the same failure shape check_file_status() uses.
  */
@@ -245,7 +245,7 @@ push_file(PGconn *conn, const char *localPath, const char *filename)
 
 int
 ws_push_file_client(const char *host, int port, const char *user,
-					const char *routeKey, const char *sslmode,
+					const char *clusterKey, const char *sslmode,
 					const char *applicationName,
 					const char *localPath, const char *filename)
 {
@@ -264,7 +264,7 @@ ws_push_file_client(const char *host, int port, const char *user,
 
 	appendPQExpBuffer(connInfo, "host=%s port=%d user=%s dbname=%s "
 								"fallback_application_name=%s",
-					  host, port, user, routeKey, applicationName);
+					  host, port, user, clusterKey, applicationName);
 
 	if (sslmode != NULL && sslmode[0] != '\0')
 	{
@@ -299,10 +299,10 @@ ws_push_file_client(const char *host, int port, const char *user,
 	}
 
 	/*
-	 * Learn the connected route's own "receivewal" setting: it decides
+	 * Learn the connected cluster's own "receivewal" setting: it decides
 	 * which of the two disjoint behaviors below this invocation runs,
 	 * never a manually-set client flag (which would silently go stale the
-	 * moment an operator changes the route's own "receivewal" setting
+	 * moment an operator changes the cluster's own "receivewal" setting
 	 * without also updating every archive_command line referencing it).
 	 * See cli_archive.h's own header comment and README.md's "The archive
 	 * push side" section for the full design.
@@ -321,7 +321,7 @@ ws_push_file_client(const char *host, int port, const char *user,
 	if (receivewalPull)
 	{
 		/*
-		 * The route has an embedded receivewal worker writing into the
+		 * The cluster has an embedded receivewal worker writing into the
 		 * same directory this push would target: ordinarily never push
 		 * here, only ever check -- PostgreSQL's own archive_command retry
 		 * loop is the entire retry mechanism, calling this client again
@@ -358,39 +358,39 @@ ws_push_file_client(const char *host, int port, const char *user,
 		if (strcmp(status, "matches") == 0)
 		{
 			log_info("\"%s\" already matches what \"%s\" has for \"%s\": "
-					 "nothing to push", filename, host, routeKey);
+					 "nothing to push", filename, host, clusterKey);
 			ok = true;
 		}
 		else if (fallback)
 		{
-			log_info("\"%s\" is not on \"%s\" route \"%s\" (%s), and its own "
+			log_info("\"%s\" is not on \"%s\" cluster \"%s\" (%s), and its own "
 					 "embedded receivewal worker has already streamed past "
 					 "it (likely a timeline switch left it behind): pushing "
 					 "it directly via ARCHIVE_FILE instead of waiting",
-					 filename, host, routeKey, status);
+					 filename, host, clusterKey, status);
 			ok = push_file(conn, localPath, filename);
 			pushedAsFallback = true;
 		}
 		else
 		{
-			log_error("\"%s\" is not yet on \"%s\" route \"%s\" (%s): "
+			log_error("\"%s\" is not yet on \"%s\" cluster \"%s\" (%s): "
 					  "waiting for its own receivewal worker to catch up",
-					  filename, host, routeKey, status);
+					  filename, host, clusterKey, status);
 			ok = false;
 		}
 	}
 	else
 	{
 		/*
-		 * No embedded receivewal worker on this route: this client is the
+		 * No embedded receivewal worker on this cluster: this client is the
 		 * only writer, so an unconditional push every invocation is safe.
 		 * The server's own overwrite-safety (cmd_archive_file.c: compare
 		 * real bytes on disk vs. real bytes received) already makes this
 		 * idempotent on PostgreSQL's own retries, with no CHECK_FILE round
 		 * trip needed first.
 		 */
-		log_info("Pushing \"%s\" to \"%s\" route \"%s\" via ARCHIVE_FILE",
-				 filename, host, routeKey);
+		log_info("Pushing \"%s\" to \"%s\" cluster \"%s\" via ARCHIVE_FILE",
+				 filename, host, clusterKey);
 
 		ok = push_file(conn, localPath, filename);
 	}
@@ -399,7 +399,7 @@ ws_push_file_client(const char *host, int port, const char *user,
 
 	if (ok && (!receivewalPull || pushedAsFallback))
 	{
-		log_info("Archived \"%s\" to \"%s\" route \"%s\"", filename, host, routeKey);
+		log_info("Archived \"%s\" to \"%s\" cluster \"%s\"", filename, host, clusterKey);
 	}
 
 	return ok ? 0 : 1;

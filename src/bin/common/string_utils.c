@@ -664,7 +664,7 @@ stringToRetentionAge(const char *str, RetentionAge *age)
 
 /*
  * sanitizeForLog copies a possibly-untrusted string (e.g. straight from
- * an unauthenticated client: a user name, a route key) into out (bounded
+ * an unauthenticated client: a user name, a cluster key) into out (bounded
  * by outSize), replacing any control character (< 0x20 or 0x7f) with '?'
  * so it can be logged or shown in a process title without letting it
  * inject terminal escape sequences or fake log lines. Truncates with a

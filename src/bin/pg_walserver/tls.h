@@ -54,8 +54,8 @@ bool ws_tls_server_accept(int sock);
  * unmodified), or NULL when there is no active TLS connection or the
  * client sent no SNI extension at all. Read-only: this project does not
  * switch certificates based on it (unlike real PostgreSQL's own ssl_sni/
- * hosts_file feature, be-secure-openssl.c) -- see routes_find_by_
- * hostname()'s own comment for what it *is* used for (route selection).
+ * hosts_file feature, be-secure-openssl.c) -- see clusters_find_by_
+ * hostname()'s own comment for what it *is* used for (cluster selection).
  */
 const char * ws_tls_get_sni_hostname(void);
 

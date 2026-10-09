@@ -5,7 +5,7 @@
  *   unrecognized/missing sub-command) only prints usage and exits
  *   non-zero -- `pg_walserver serve ...` must always be spelled out.
  *   Applies the config file's own global section (config_load_global(),
- *   routes.c, see cli_setup.h) as its own port/TLS/auth-timeout defaults
+ *   clusters.c, see cli_setup.h) as its own port/TLS/auth-timeout defaults
  *   whenever the equivalent flag isn't given directly on this command
  *   line.
  *

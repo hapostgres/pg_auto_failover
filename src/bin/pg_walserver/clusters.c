@@ -1,10 +1,10 @@
 /*
- * src/bin/pg_walserver/routes.c
- *   See routes.h. Deliberately built on the low-level, dynamic-section
+ * src/bin/pg_walserver/clusters.c
+ *   See clusters.h. Deliberately built on the low-level, dynamic-section
  *   ini.h API (ini_load/ini_section_count/...) rather than this project's
  *   own ini_file.c wrapper: ini_file.c's IniOption model assumes a fixed,
  *   compile-time-known set of section/key names, which doesn't fit a file
- *   whose sections are one per route, under whatever key names the
+ *   whose sections are one per cluster, under whatever key names the
  *   operator (or a driver such as pg_auto_failover) chose -- unknown in
  *   advance. ini.h's lower-level, enumerable API is exactly the right
  *   shape and is already vendored into this project (src/bin/lib/libs/
@@ -26,7 +26,7 @@
 #include "pqexpbuffer.h"
 #include "port/pg_crc32c.h"
 
-#include "routes.h"
+#include "clusters.h"
 #include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
@@ -37,22 +37,22 @@
 
 
 /*
- * routes_load reads and parses the routes ini file at path into a freshly
- * malloc'd array (*routesOut, *countOut entries; free with routes_free()),
- * one WsRoute per non-global section, keyed by its section name (an opaque
- * string -- see routes.h) with its "path" property (the only key
+ * clusters_load reads and parses the clusters ini file at path into a freshly
+ * malloc'd array (*clustersOut, *countOut entries; free with clusters_free()),
+ * one WsCluster per non-global section, keyed by its section name (an opaque
+ * string -- see clusters.h) with its "path" property (the only key
  * recognized; any other key logs a warning and is ignored). Returns false
- * (with *routesOut and *countOut left untouched) when the file cannot be
+ * (with *clustersOut and *countOut left untouched) when the file cannot be
  * read or parsed.
  */
 bool
-routes_load(const char *path, WsRoute **routesOut, int *countOut)
+clusters_load(const char *path, WsCluster **clustersOut, int *countOut)
 {
-	*routesOut = NULL;
+	*clustersOut = NULL;
 	*countOut = 0;
 
 	/*
-	 * No routes file yet is a normal, expected state -- the first "setup"/
+	 * No clusters file yet is a normal, expected state -- the first "setup"/
 	 * "cluster register" call for a fresh --pgdata, most notably -- never
 	 * an error to log; the same file_exists()-before-read convention
 	 * pg_autoctl's own config-file callers already use throughout (see
@@ -70,7 +70,7 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 	if (!read_file_capped(path, WS_MAX_CONFIG_FILE_SIZE, false,
 						  &contents, &fileSize, NULL))
 	{
-		log_error("Failed to read routes file \"%s\"", path);
+		log_error("Failed to read clusters file \"%s\"", path);
 		return false;
 	}
 
@@ -80,18 +80,18 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 
 	if (ini == NULL)
 	{
-		log_error("Failed to parse routes file \"%s\"", path);
+		log_error("Failed to parse clusters file \"%s\"", path);
 		return false;
 	}
 
 	int sectionCount = ini_section_count(ini);
 
-	/* section 0 is ini.h's implicit global section: never a real route */
-	WsRoute *routes = (WsRoute *) calloc(sectionCount, sizeof(WsRoute));
+	/* section 0 is ini.h's implicit global section: never a real cluster */
+	WsCluster *clusters = (WsCluster *) calloc(sectionCount, sizeof(WsCluster));
 
-	if (routes == NULL && sectionCount > 0)
+	if (clusters == NULL && sectionCount > 0)
 	{
-		log_error("Failed to allocate memory for %d routes", sectionCount);
+		log_error("Failed to allocate memory for %d clusters", sectionCount);
 		ini_destroy(ini);
 		return false;
 	}
@@ -107,10 +107,10 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 			continue;   /* the global section */
 		}
 
-		WsRoute *route = &routes[n];
+		WsCluster *cluster = &clusters[n];
 
-		memset(route, 0, sizeof(WsRoute));
-		strlcpy(route->key, name, sizeof(route->key));
+		memset(cluster, 0, sizeof(WsCluster));
+		strlcpy(cluster->key, name, sizeof(cluster->key));
 
 		int propCount = ini_property_count(ini, s);
 
@@ -129,7 +129,7 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 			 * whitespace around the value but NOT trailing whitespace
 			 * between a key and '=' -- "walcache = /path" parses the key
 			 * as "walcache " with a trailing space. Trim defensively here
-			 * rather than relying on every routes file being written with
+			 * rather than relying on every clusters file being written with
 			 * no space before '='.
 			 */
 			char propName[128];
@@ -145,21 +145,21 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 
 			if (streq(propName, "path"))
 			{
-				strlcpy(route->path, propValue, sizeof(route->path));
+				strlcpy(cluster->path, propValue, sizeof(cluster->path));
 			}
 			else if (streq(propName, "upstream"))
 			{
-				strlcpy(route->upstream, propValue, sizeof(route->upstream));
+				strlcpy(cluster->upstream, propValue, sizeof(cluster->upstream));
 			}
 			else if (streq(propName, "hostname"))
 			{
-				strlcpy(route->hostname, propValue, sizeof(route->hostname));
+				strlcpy(cluster->hostname, propValue, sizeof(cluster->hostname));
 			}
 			else if (streq(propName, "receivewal"))
 			{
 				if (streq(propValue, "pull"))
 				{
-					route->receivewalPull = true;
+					cluster->receivewalPull = true;
 				}
 				else
 				{
@@ -170,11 +170,11 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 			}
 			else if (streq(propName, "disabled"))
 			{
-				route->disabled = streq(propValue, "true");
+				cluster->disabled = streq(propValue, "true");
 			}
 			else
 			{
-				log_warn("Ignoring unknown routes file key \"%s\" in section [%s]",
+				log_warn("Ignoring unknown clusters file key \"%s\" in section [%s]",
 						 propName, name);
 			}
 		}
@@ -184,25 +184,25 @@ routes_load(const char *path, WsRoute **routesOut, int *countOut)
 
 	ini_destroy(ini);
 
-	*routesOut = routes;
+	*clustersOut = clusters;
 	*countOut = n;
 
 	return true;
 }
 
 
-/* routes_free releases an array returned by routes_load(). */
+/* clusters_free releases an array returned by clusters_load(). */
 void
-routes_free(WsRoute *routes)
+clusters_free(WsCluster *clusters)
 {
-	free(routes);
+	free(clusters);
 }
 
 
 /*
- * routes_find returns the route whose key exactly matches (case-sensitive)
- * key, or, failing that, the route whose key is the wildcard
- * WS_ROUTES_WILDCARD_KEY ("*"), if the file has one. NULL when neither
+ * clusters_find returns the cluster whose key exactly matches (case-sensitive)
+ * key, or, failing that, the cluster whose key is the wildcard
+ * WS_CLUSTERS_WILDCARD_KEY ("*"), if the file has one. NULL when neither
  * exists.
  *
  * The precedence -- an exact match always wins, the wildcard is only ever
@@ -215,39 +215,39 @@ routes_free(WsRoute *routes)
  * another dbname handed to a real Postgres server, which validates it on
  * its own; ours would be a directory on this server's own filesystem, so
  * this project does NOT substitute the requested key into the wildcard
- * route's path the way PgBouncer substitutes dbname into its connection
+ * cluster's path the way PgBouncer substitutes dbname into its connection
  * string -- every dbname that falls through to the wildcard shares that
  * one configured path verbatim, never a per-key subdirectory synthesized
  * from a string an unauthenticated client provided (which would turn an
  * operator-chosen key -- like pg_auto_failover's own "<formation>/<group>"
  * -- into a path-traversal surface the moment it contained a "/" or "..").
- * A route key is, and stays, just an opaque label matched by this function;
- * only a route's own explicit, operator-written "path" property ever
- * touches the filesystem, see routes.h's own comment.
+ * A cluster key is, and stays, just an opaque label matched by this function;
+ * only a cluster's own explicit, operator-written "path" property ever
+ * touches the filesystem, see clusters.h's own comment.
  */
-const WsRoute *
-routes_find(const WsRoute *routes, int count, const char *key)
+const WsCluster *
+clusters_find(const WsCluster *clusters, int count, const char *key)
 {
-	const WsRoute *exact = routes_find_exact(routes, count, key);
+	const WsCluster *exact = clusters_find_exact(clusters, count, key);
 
 	if (exact != NULL)
 	{
 		return exact;
 	}
 
-	return routes_find_exact(routes, count, WS_ROUTES_WILDCARD_KEY);
+	return clusters_find_exact(clusters, count, WS_CLUSTERS_WILDCARD_KEY);
 }
 
 
-/* routes_find() without the wildcard fallback, see routes.h's own comment */
-const WsRoute *
-routes_find_exact(const WsRoute *routes, int count, const char *key)
+/* clusters_find() without the wildcard fallback, see clusters.h's own comment */
+const WsCluster *
+clusters_find_exact(const WsCluster *clusters, int count, const char *key)
 {
 	for (int i = 0; i < count; i++)
 	{
-		if (streq(routes[i].key, key))
+		if (streq(clusters[i].key, key))
 		{
-			return &routes[i];
+			return &clusters[i];
 		}
 	}
 
@@ -256,14 +256,14 @@ routes_find_exact(const WsRoute *routes, int count, const char *key)
 
 
 /*
- * routes_find_by_hostname matches hostname (case-insensitively, DNS names
+ * clusters_find_by_hostname matches hostname (case-insensitively, DNS names
  * are not case sensitive: RFC 952/RFC 921, the same rule real PostgreSQL's
  * own sni_clienthello_cb() applies to its pg_hosts.conf lookup) against
- * every route's own "hostname" property. See routes.h's own comment on
+ * every cluster's own "hostname" property. See clusters.h's own comment on
  * why this exists at all.
  */
-const WsRoute *
-routes_find_by_hostname(const WsRoute *routes, int count, const char *hostname)
+const WsCluster *
+clusters_find_by_hostname(const WsCluster *clusters, int count, const char *hostname)
 {
 	if (hostname == NULL || hostname[0] == '\0')
 	{
@@ -272,10 +272,10 @@ routes_find_by_hostname(const WsRoute *routes, int count, const char *hostname)
 
 	for (int i = 0; i < count; i++)
 	{
-		if (routes[i].hostname[0] != '\0' &&
-			strcasecmp(routes[i].hostname, hostname) == 0)
+		if (clusters[i].hostname[0] != '\0' &&
+			strcasecmp(clusters[i].hostname, hostname) == 0)
 		{
-			return &routes[i];
+			return &clusters[i];
 		}
 	}
 
@@ -284,31 +284,31 @@ routes_find_by_hostname(const WsRoute *routes, int count, const char *hostname)
 
 
 /*
- * routes_slot_name derives a valid, deterministic PostgreSQL replication
+ * clusters_slot_name derives a valid, deterministic PostgreSQL replication
  * slot name (lowercase alnum/underscore only, NAMEDATALEN-1 bytes max) from
- * an arbitrary route key -- which, unlike a slot name, is an entirely
+ * an arbitrary cluster key -- which, unlike a slot name, is an entirely
  * opaque string with no character restrictions (see this file's own header
  * comment: pg_auto_failover's own archiver reconciler uses
  * "<formation>/<group>" keys, for one). The sanitized key alone could
  * collide (e.g. "a/b" and "a-b" both sanitize to "a_b"); a short CRC32C
  * suffix of the *original*, unsanitized key makes every slot name unique
- * per route regardless. Always writes a NUL-terminated name into out
+ * per cluster regardless. Always writes a NUL-terminated name into out
  * (truncating the sanitized part, never the suffix, if it would overflow
  * outSize/NAMEDATALEN).
  */
 void
-routes_slot_name(const char *routeKey, char *out, size_t outSize)
+clusters_slot_name(const char *clusterKey, char *out, size_t outSize)
 {
 	pg_crc32c crc;
 
 	INIT_CRC32C(crc);
-	COMP_CRC32C(crc, routeKey, strlen(routeKey));
+	COMP_CRC32C(crc, clusterKey, strlen(clusterKey));
 	FIN_CRC32C(crc);
 
 	char sanitized[NAMEDATALEN] = { 0 };
 	size_t si = 0;
 
-	for (const char *p = routeKey; *p != '\0' && si < sizeof(sanitized) - 1; p++)
+	for (const char *p = clusterKey; *p != '\0' && si < sizeof(sanitized) - 1; p++)
 	{
 		unsigned char c = (unsigned char) *p;
 
@@ -331,7 +331,7 @@ routes_slot_name(const char *routeKey, char *out, size_t outSize)
 
 	if (sanitized[0] == '\0')
 	{
-		strlcpy(sanitized, "route", sizeof(sanitized));
+		strlcpy(sanitized, "cluster", sizeof(sanitized));
 	}
 
 	char suffix[16];
@@ -340,7 +340,7 @@ routes_slot_name(const char *routeKey, char *out, size_t outSize)
 
 	/* PostgreSQL slot names are NAMEDATALEN-1 (63) bytes max; keep the
 	 * fixed prefix and CRC suffix intact, truncating only the sanitized
-	 * route key if the combination would overflow that */
+	 * cluster key if the combination would overflow that */
 	size_t maxLen = NAMEDATALEN - 1;
 	size_t fixedLen = strlen("pgws_") + strlen(suffix);
 
@@ -354,31 +354,31 @@ routes_slot_name(const char *routeKey, char *out, size_t outSize)
 
 
 /*
- * routes_persist_path writes "path = <path>" into an existing [routeKey]
+ * clusters_persist_path writes "path = <path>" into an existing [clusterKey]
  * section that doesn't have one yet, right after its header line. See
- * routes.h's own comment: never creates a new section, and a no-op (true)
+ * clusters.h's own comment: never creates a new section, and a no-op (true)
  * if the section already has a "path" property -- callers only reach this
- * for a route cli_resolve_upstream() found in the file but had to default
+ * for a cluster cli_resolve_upstream() found in the file but had to default
  * a path for, so both of those should already hold, but a plain text
  * re-scan here is cheap insurance against acting on stale information.
  */
 bool
-routes_persist_path(const char *routesPath, const char *routeKey,
-					const char *path)
+clusters_persist_path(const char *clustersPath, const char *clusterKey,
+					  const char *path)
 {
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (!read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+	if (!read_file_capped(clustersPath, WS_MAX_CONFIG_FILE_SIZE, false,
 						  &contents, &fileSize, NULL))
 	{
-		log_error("Failed to read routes file \"%s\"", routesPath);
+		log_error("Failed to read clusters file \"%s\"", clustersPath);
 		return false;
 	}
 
 	char header[NAMEDATALEN + 16 + 2] = { 0 };
 
-	sformat(header, sizeof(header), "[%s]", routeKey);
+	sformat(header, sizeof(header), "[%s]", clusterKey);
 
 	char *sectionStart = strstr(contents, header);
 
@@ -386,7 +386,7 @@ routes_persist_path(const char *routesPath, const char *routeKey,
 		(sectionStart != contents && sectionStart[-1] != '\n'))
 	{
 		log_error("No section \"%s\" found in \"%s\" to add \"path\" to",
-				  header, routesPath);
+				  header, clustersPath);
 		free(contents);
 		return false;
 	}
@@ -449,52 +449,52 @@ routes_persist_path(const char *routesPath, const char *routeKey,
 	appendPQExpBufferStr(whole, afterHeader);
 
 	bool ok = !PQExpBufferBroken(whole) &&
-			  write_file_atomic(whole->data, whole->len, routesPath);
+			  write_file_atomic(whole->data, whole->len, clustersPath);
 
 	destroyPQExpBuffer(whole);
 	free(contents);
 
 	if (!ok)
 	{
-		log_error("Failed to write \"%s\"", routesPath);
+		log_error("Failed to write \"%s\"", clustersPath);
 		return false;
 	}
 
-	log_info("Added \"path = %s\" to route \"%s\" in \"%s\"",
-			 path, routeKey, routesPath);
+	log_info("Added \"path = %s\" to cluster \"%s\" in \"%s\"",
+			 path, clusterKey, clustersPath);
 
 	return true;
 }
 
 
 /*
- * routes_set_property sets propName = propValue in an existing [routeKey]
+ * clusters_set_property sets propName = propValue in an existing [clusterKey]
  * section: replacing that property's own line in place if the section
  * already has one, appending a new line right after the header
- * otherwise. Unlike routes_persist_path() above, this always writes the
+ * otherwise. Unlike clusters_persist_path() above, this always writes the
  * given value -- the whole point of "pg_walserver cluster set-upstream"
  * (cli_root.c) is to *change* an already-set "upstream", not merely fill
  * in a gap. Never creates a new section (that's "pg_walserver cluster
  * register"'s own job); false, with an error already logged, if
- * routeKey has no section to set anything in.
+ * clusterKey has no section to set anything in.
  */
 bool
-routes_set_property(const char *routesPath, const char *routeKey,
-					const char *propName, const char *propValue)
+clusters_set_property(const char *clustersPath, const char *clusterKey,
+					  const char *propName, const char *propValue)
 {
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (!read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+	if (!read_file_capped(clustersPath, WS_MAX_CONFIG_FILE_SIZE, false,
 						  &contents, &fileSize, NULL))
 	{
-		log_error("Failed to read routes file \"%s\"", routesPath);
+		log_error("Failed to read clusters file \"%s\"", clustersPath);
 		return false;
 	}
 
 	char header[NAMEDATALEN + 16 + 2] = { 0 };
 
-	sformat(header, sizeof(header), "[%s]", routeKey);
+	sformat(header, sizeof(header), "[%s]", clusterKey);
 
 	char *sectionStart = strstr(contents, header);
 
@@ -502,7 +502,7 @@ routes_set_property(const char *routesPath, const char *routeKey,
 		(sectionStart != contents && sectionStart[-1] != '\n'))
 	{
 		log_error("No section \"%s\" found in \"%s\" to set \"%s\" in",
-				  header, routesPath, propName);
+				  header, clustersPath, propName);
 		free(contents);
 		return false;
 	}
@@ -572,50 +572,50 @@ routes_set_property(const char *routesPath, const char *routeKey,
 	}
 
 	bool ok = !PQExpBufferBroken(whole) &&
-			  write_file_atomic(whole->data, whole->len, routesPath);
+			  write_file_atomic(whole->data, whole->len, clustersPath);
 
 	destroyPQExpBuffer(whole);
 	free(contents);
 
 	if (!ok)
 	{
-		log_error("Failed to write \"%s\"", routesPath);
+		log_error("Failed to write \"%s\"", clustersPath);
 		return false;
 	}
 
-	log_info("Set \"%s = %s\" for route \"%s\" in \"%s\"",
-			 propName, propValue, routeKey, routesPath);
+	log_info("Set \"%s = %s\" for cluster \"%s\" in \"%s\"",
+			 propName, propValue, clusterKey, clustersPath);
 
 	return true;
 }
 
 
 /*
- * routes_drop_section removes the whole [routeKey] section (header and
+ * clusters_drop_section removes the whole [clusterKey] section (header and
  * every property line under it, up to the next section or end of file)
- * from the routes file at routesPath -- "pg_walserver cluster drop"'s own
- * job. Never touches anything on disk under the route's own "path": that
+ * from the clusters file at clustersPath -- "pg_walserver cluster drop"'s own
+ * job. Never touches anything on disk under the cluster's own "path": that
  * is a deliberate, separate decision (--purge, cli_root.c's own cluster-
  * drop command), not an automatic side effect of removing the
- * registration alone. false, with an error already logged, if routeKey
+ * registration alone. false, with an error already logged, if clusterKey
  * has no section to remove.
  */
 bool
-routes_drop_section(const char *routesPath, const char *routeKey)
+clusters_drop_section(const char *clustersPath, const char *clusterKey)
 {
 	char *contents = NULL;
 	size_t fileSize = 0;
 
-	if (!read_file_capped(routesPath, WS_MAX_CONFIG_FILE_SIZE, false,
+	if (!read_file_capped(clustersPath, WS_MAX_CONFIG_FILE_SIZE, false,
 						  &contents, &fileSize, NULL))
 	{
-		log_error("Failed to read routes file \"%s\"", routesPath);
+		log_error("Failed to read clusters file \"%s\"", clustersPath);
 		return false;
 	}
 
 	char header[NAMEDATALEN + 16 + 2] = { 0 };
 
-	sformat(header, sizeof(header), "[%s]", routeKey);
+	sformat(header, sizeof(header), "[%s]", clusterKey);
 
 	char *sectionStart = strstr(contents, header);
 
@@ -623,15 +623,15 @@ routes_drop_section(const char *routesPath, const char *routeKey)
 		(sectionStart != contents && sectionStart[-1] != '\n'))
 	{
 		log_error("No section \"%s\" found in \"%s\" to drop",
-				  header, routesPath);
+				  header, clustersPath);
 		free(contents);
 		return false;
 	}
 
-	/* the blank line write_route_section() always writes right before a
+	/* the blank line write_cluster_section() always writes right before a
 	 * new section's own header belongs to the *previous* section as far
 	 * as a human editing this file is concerned; drop it along with the
-	 * section itself so removing a route never leaves a stray blank line
+	 * section itself so removing a cluster never leaves a stray blank line
 	 * behind */
 	char *removeFrom = sectionStart;
 
@@ -676,18 +676,18 @@ routes_drop_section(const char *routesPath, const char *routeKey)
 	appendPQExpBufferStr(whole, sectionEnd);
 
 	bool ok = !PQExpBufferBroken(whole) &&
-			  write_file_atomic(whole->data, whole->len, routesPath);
+			  write_file_atomic(whole->data, whole->len, clustersPath);
 
 	destroyPQExpBuffer(whole);
 	free(contents);
 
 	if (!ok)
 	{
-		log_error("Failed to write \"%s\"", routesPath);
+		log_error("Failed to write \"%s\"", clustersPath);
 		return false;
 	}
 
-	log_info("Dropped route \"%s\" from \"%s\"", routeKey, routesPath);
+	log_info("Dropped cluster \"%s\" from \"%s\"", clusterKey, clustersPath);
 
 	return true;
 }
@@ -698,9 +698,9 @@ routes_drop_section(const char *routesPath, const char *routeKey)
  * (see WsGlobalConfig's own comment) into *out. Always succeeds (true),
  * leaving *out zeroed, when the file doesn't exist yet or has no global
  * section -- a normal, expected state, not an error (the same "missing
- * config is not a failure" convention routes_load() itself already
- * follows). Named "config_", not "routes_": this reads pg_walserver's own
- * settings, never a route/cluster -- those stay routes_*, this file's own
+ * config is not a failure" convention clusters_load() itself already
+ * follows). Named "config_", not "clusters_": this reads pg_walserver's own
+ * settings, never a cluster -- those stay clusters_*, this file's own
  * ini-parsing home for both concerns notwithstanding.
  */
 bool
@@ -791,12 +791,12 @@ config_load_global(const char *configPath, WsGlobalConfig *out)
 
 /*
  * config_set_global_property sets "propName = propValue" as a plain
- * top-of-file line, before any route's own [section] header -- creating
+ * top-of-file line, before any cluster's own [section] header -- creating
  * the file (with just that one line) if it doesn't exist yet, replacing
  * an already-present line with the same propName otherwise. "pg_walserver
  * setup"'s own way to persist one instance-level setting; never touches
- * any route's own section. See config_load_global()'s own comment for
- * why this is "config_", not "routes_".
+ * any cluster's own section. See config_load_global()'s own comment for
+ * why this is "config_", not "clusters_".
  */
 bool
 config_set_global_property(const char *configPath, const char *propName,
@@ -929,7 +929,7 @@ config_set_global_property(const char *configPath, const char *propName,
  * config_file_path resolves the on-disk path of pg_walserver's own config
  * file (pg_walserver.ini: the global settings section this file's own
  * config_load_global()/config_set_global_property() manage, plus one
- * [section] per route the rest of this file manages) into out, up to
+ * [section] per cluster the rest of this file manages) into out, up to
  * outSize bytes:
  *
  *   1. configFile itself, when given explicitly (a command's own
@@ -942,7 +942,7 @@ config_set_global_property(const char *configPath, const char *propName,
  * /etc/pg_walserver/pg_walserver.ini, data under /var/lib/pg_walserver/,
  * the same split a systemd unit file or a container entrypoint commonly
  * wants -- point every pg_walserver command at a config file that lives
- * outside --pgdata, without changing where routes/basebackups/WAL/certs
+ * outside --pgdata, without changing where clusters/basebackups/WAL/certs
  * themselves are stored (those stay under --pgdata unconditionally; only
  * this one file's own location becomes independently configurable).
  */

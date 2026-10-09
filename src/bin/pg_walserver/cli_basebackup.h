@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_walserver/cli_basebackup.h
  *   `pg_walserver basebackup`: a one-shot client that takes a real
- *   pg_basebackup of a route's upstream straight into
+ *   pg_basebackup of a cluster's upstream straight into
  *   "<path>/basebackups/<label>/", then atomically swaps
  *   "<path>/basebackups/.latest" to point at it -- the file
  *   cmd_base_backup.c's server side reads on every BASE_BACKUP request.
@@ -34,7 +34,7 @@
 bool cli_basebackup_run(const WsUpstreamTarget *target,
 						char *labelOut, size_t labelOutSize);
 
-bool cli_basebackup_route_has_backup(const char *path);
+bool cli_basebackup_cluster_has_backup(const char *path);
 
 extern CommandLine basebackup_command;
 

@@ -45,8 +45,8 @@ process_supervisor_init(ProcessSupervisor *supervisor,
  * process_supervisor_start_all calls every service's own startFunction()
  * once, in order, stopping and returning false at the first failure (with
  * every service started so far left running -- the caller decides what to
- * do next, exactly like ws_receivewal_start_all()'s own per-route "log and
- * skip this one" callers already do for a single misconfigured route).
+ * do next, exactly like ws_receivewal_start_all()'s own per-cluster "log and
+ * skip this one" callers already do for a single misconfigured cluster).
  */
 bool
 process_supervisor_start_all(ProcessSupervisor *supervisor)

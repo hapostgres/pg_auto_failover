@@ -41,7 +41,7 @@ static void cli_fetch_systemid_command_run(int argc, char **argv);
 
 static char fetchSystemidPgdata[MAXPGPATH] = { 0 };
 static char fetchSystemidConfigFile[MAXPGPATH] = { 0 };
-static char fetchSystemidRoute[NAMEDATALEN + 16] = { 0 };
+static char fetchSystemidCluster[NAMEDATALEN + 16] = { 0 };
 static char fetchSystemidPath[MAXPGPATH] = { 0 };
 static char fetchSystemidUpstream[MAXCONNINFO] = { 0 };
 static char fetchSystemidHost[_POSIX_HOST_NAME_MAX] = { 0 };
@@ -64,7 +64,7 @@ static struct option fetchSystemidLongOptions[] = {
 
 CommandLine fetch_systemid_command =
 	make_command("fetch-systemid",
-				 "Fetch a route's upstream system identifier",
+				 "Fetch a cluster's upstream system identifier",
 				 "--cluster <name> --pgdata <path> [--config <path>] "
 				 "| --path <dir> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
@@ -77,11 +77,11 @@ CommandLine fetch_systemid_command =
 				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --cluster   the cluster name to fetch for (looked up in "
 				 "the config file)\n"
-				 "  --path      the route's own directory (overrides the "
-				 "route's own \"path\")\n"
+				 "  --path      the cluster's own directory (overrides the "
+				 "cluster's own \"path\")\n"
 				 "  --upstream  a libpq connection string to connect with "
 				 "(overrides the\n"
-				 "              route's own \"upstream\")\n"
+				 "              cluster's own \"upstream\")\n"
 				 "  --host / --port / --user  further override individual "
 				 "connection\n"
 				 "              parameters (default port: 5432, default "
@@ -95,7 +95,7 @@ CommandLine fetch_systemid_command =
  * read_existing_systemid reads "<path>/pg_walserver_systemid" if it exists,
  * returning the parsed identifier in *out. Returns false when the file is
  * absent or unparseable (treated as "no prior identifier", never a hard
- * error: a brand new route has no systemid file yet).
+ * error: a brand new cluster has no systemid file yet).
  */
 static bool
 read_existing_systemid(const char *path, uint64_t *out)
@@ -124,7 +124,7 @@ read_existing_systemid(const char *path, uint64_t *out)
  * read_existing_pgversion reads "<path>/pg_walserver_pgversion" if it
  * exists, returning the parsed server_version_num in *out. Returns false
  * when the file is absent or unparseable (treated as "no prior recorded
- * version", never a hard error: a brand new route, or one created before
+ * version", never a hard error: a brand new cluster, or one created before
  * this file existed, has no pgversion file yet).
  */
 static bool
@@ -195,11 +195,11 @@ cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 		else if (!force)
 		{
 			log_error("Refusing to overwrite the system identifier already "
-					  "recorded for this route: %" PRIu64 " on disk, "
-														  "%" PRIu64
-					  " from %s:%d -- this route's identity would "
+					  "recorded for this cluster: %" PRIu64 " on disk, "
+															"%" PRIu64
+					  " from %s:%d -- this cluster's identity would "
 					  "be changing under it, which usually means the wrong "
-					  "upstream was given, or this route needs a fresh path "
+					  "upstream was given, or this cluster needs a fresh path "
 					  "instead of reusing an old one",
 					  existingIdentifier, identifier, target->node.host,
 					  target->node.port);
@@ -254,7 +254,7 @@ cli_fetch_systemid_run(const WsUpstreamTarget *target, bool force,
 		else if (!force)
 		{
 			log_error("Refusing to overwrite the upstream Postgres version "
-					  "already recorded for this route: %d on disk, %d "
+					  "already recorded for this cluster: %d on disk, %d "
 					  "from %s:%d -- pass --force to overwrite it "
 					  "deliberately",
 					  existingVersion, version, target->node.host,
@@ -330,7 +330,7 @@ cli_fetch_systemid_getopt(int argc, char **argv)
 
 			case 'c':
 			{
-				strlcpy(fetchSystemidRoute, optarg, sizeof(fetchSystemidRoute));
+				strlcpy(fetchSystemidCluster, optarg, sizeof(fetchSystemidCluster));
 				break;
 			}
 
@@ -396,7 +396,7 @@ cli_fetch_systemid_command_run(int argc, char **argv)
 	WsUpstreamTarget target = { 0 };
 
 	if (!cli_resolve_upstream(fetchSystemidPgdata, fetchSystemidConfigFile,
-							  fetchSystemidRoute,
+							  fetchSystemidCluster,
 							  fetchSystemidPath, fetchSystemidUpstream,
 							  fetchSystemidHost, fetchSystemidPort,
 							  fetchSystemidUser, &target))

@@ -25,8 +25,8 @@
 /* a valid slot name is at most WS_SLOT_NAME_LEN_MAX (NAMEDATALEN-1) */
 #define WS_SLOT_NAME_LEN_MAX 63
 
-/* slots per route: each is a file in the route's directory */
-#define WS_MAX_SLOTS_PER_ROUTE 64
+/* slots per cluster: each is a file in the cluster's directory */
+#define WS_MAX_SLOTS_PER_CLUSTER 64
 
 #define WS_SLOT_PREFIX ".slot_"
 
@@ -34,7 +34,7 @@
 /*
  * Slot names are restricted like PostgreSQL's ReplicationSlotValidateName():
  * [a-z0-9_]{1,63}. The name ends up in a file name, so this is also what
- * keeps a client from writing anywhere but its route's directory.
+ * keeps a client from writing anywhere but its cluster's directory.
  */
 static bool
 slot_name_is_safe(const char *name)
@@ -69,9 +69,9 @@ entry_is_slot(const char *entryName)
 
 
 static int
-count_slots(const char *routePath)
+count_slots(const char *clusterPath)
 {
-	DIR *dir = opendir(routePath);
+	DIR *dir = opendir(clusterPath);
 	int count = 0;
 
 	if (dir == NULL)
@@ -96,9 +96,10 @@ count_slots(const char *routePath)
 
 
 static void
-slot_marker_path(const WsRoute *route, const char *slotName, char *dest, size_t destSize)
+slot_marker_path(const WsCluster *cluster, const char *slotName, char *dest, size_t
+				 destSize)
 {
-	sformat(dest, destSize, "%s/.slot_%s", route->path, slotName);
+	sformat(dest, destSize, "%s/.slot_%s", cluster->path, slotName);
 }
 
 
@@ -109,9 +110,10 @@ slot_marker_path(const WsRoute *route, const char *slotName, char *dest, size_t 
  * via rename() cannot double as a stable flock() target.
  */
 static void
-slot_lock_path(const WsRoute *route, const char *slotName, char *dest, size_t destSize)
+slot_lock_path(const WsCluster *cluster, const char *slotName, char *dest, size_t
+			   destSize)
 {
-	sformat(dest, destSize, "%s/.slot_%s.lock", route->path, slotName);
+	sformat(dest, destSize, "%s/.slot_%s.lock", cluster->path, slotName);
 }
 
 
@@ -149,16 +151,16 @@ slot_lock_path(const WsRoute *route, const char *slotName, char *dest, size_t de
  * when the lock could not be acquired.
  */
 int
-ws_replication_slot_try_lock(const WsRoute *route, const char *slotName)
+ws_replication_slot_try_lock(const WsCluster *cluster, const char *slotName)
 {
-	if (route == NULL || route->path[0] == '\0' || !slot_name_is_safe(slotName))
+	if (cluster == NULL || cluster->path[0] == '\0' || !slot_name_is_safe(slotName))
 	{
 		return -1;
 	}
 
 	char path[MAXPGPATH];
 
-	slot_lock_path(route, slotName, path, sizeof(path));
+	slot_lock_path(cluster, slotName, path, sizeof(path));
 
 	int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600); /* IGNORE-BANNED */
 
@@ -249,22 +251,22 @@ read_restart_lsn_file(const char *path, char *lsnOut, size_t lsnOutSize)
 
 /*
  * ws_replication_slot_exists is true when slotName's own marker file is
- * present under route -- cmd_start_replication.c's own check that a named
+ * present under cluster -- cmd_start_replication.c's own check that a named
  * SLOT clause refers to a real slot, the same requirement a real
  * PostgreSQL walsender enforces (START_REPLICATION SLOT of a slot that
  * does not exist is refused, never silently ignored).
  */
 bool
-ws_replication_slot_exists(const WsRoute *route, const char *slotName)
+ws_replication_slot_exists(const WsCluster *cluster, const char *slotName)
 {
-	if (route == NULL || route->path[0] == '\0' || !slot_name_is_safe(slotName))
+	if (cluster == NULL || cluster->path[0] == '\0' || !slot_name_is_safe(slotName))
 	{
 		return false;
 	}
 
 	char path[MAXPGPATH];
 
-	slot_marker_path(route, slotName, path, sizeof(path));
+	slot_marker_path(cluster, slotName, path, sizeof(path));
 
 	return file_exists(path);
 }
@@ -277,17 +279,17 @@ ws_replication_slot_exists(const WsRoute *route, const char *slotName)
  * read.
  */
 bool
-ws_replication_slot_read_restart_lsn(const WsRoute *route, const char *slotName,
+ws_replication_slot_read_restart_lsn(const WsCluster *cluster, const char *slotName,
 									 char *lsnOut, size_t lsnOutSize)
 {
-	if (route == NULL || route->path[0] == '\0' || !slot_name_is_safe(slotName))
+	if (cluster == NULL || cluster->path[0] == '\0' || !slot_name_is_safe(slotName))
 	{
 		return false;
 	}
 
 	char path[MAXPGPATH];
 
-	slot_marker_path(route, slotName, path, sizeof(path));
+	slot_marker_path(cluster, slotName, path, sizeof(path));
 
 	return read_restart_lsn_file(path, lsnOut, lsnOutSize);
 }
@@ -307,17 +309,17 @@ ws_replication_slot_read_restart_lsn(const WsRoute *route, const char *slotName,
  * function itself does not compare against what's already on disk.
  */
 bool
-ws_replication_slot_update_restart_lsn(const WsRoute *route, const char *slotName,
+ws_replication_slot_update_restart_lsn(const WsCluster *cluster, const char *slotName,
 									   const char *lsn)
 {
-	if (route == NULL || route->path[0] == '\0' || !slot_name_is_safe(slotName))
+	if (cluster == NULL || cluster->path[0] == '\0' || !slot_name_is_safe(slotName))
 	{
 		return false;
 	}
 
 	char path[MAXPGPATH];
 
-	slot_marker_path(route, slotName, path, sizeof(path));
+	slot_marker_path(cluster, slotName, path, sizeof(path));
 
 	/* never create a slot as a side effect of streaming -- only an
 	 * already-existing slot's own restart_lsn can be advanced */
@@ -335,27 +337,27 @@ ws_replication_slot_update_restart_lsn(const WsRoute *route, const char *slotNam
 
 
 /*
- * ws_replication_slot_oldest_restart_lsn scans every slot under route and
+ * ws_replication_slot_oldest_restart_lsn scans every slot under cluster and
  * reports the one whose own "restart_lsn" is oldest (the smallest WAL
  * segment number at segSize) -- cli_archive_cleanup.c's own use: the
  * floor beyond which retention must never remove WAL a still-existing
- * slot needs. Returns false (both Out parameters untouched) when route
+ * slot needs. Returns false (both Out parameters untouched) when cluster
  * has no slots at all, the ordinary case today. slotNameOut/lsnOut, when
  * true is returned, are only ever used for logging which slot is
  * responsible -- ties (more than one slot at the same oldest position)
  * report whichever is found first, an arbitrary but harmless choice.
  */
 bool
-ws_replication_slot_oldest_restart_lsn(const WsRoute *route, uint64_t segSize,
+ws_replication_slot_oldest_restart_lsn(const WsCluster *cluster, uint64_t segSize,
 									   char *slotNameOut, size_t slotNameOutSize,
 									   char *lsnOut, size_t lsnOutSize)
 {
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		return false;
 	}
 
-	DIR *dir = opendir(route->path);
+	DIR *dir = opendir(cluster->path);
 
 	if (dir == NULL)
 	{
@@ -378,7 +380,7 @@ ws_replication_slot_oldest_restart_lsn(const WsRoute *route, uint64_t segSize,
 
 		char path[MAXPGPATH];
 
-		sformat(path, sizeof(path), "%s/%s", route->path, entry->d_name);
+		sformat(path, sizeof(path), "%s/%s", cluster->path, entry->d_name);
 
 		char lsn[32] = { 0 };
 
@@ -417,13 +419,13 @@ ws_replication_slot_oldest_restart_lsn(const WsRoute *route, uint64_t segSize,
 
 
 void
-cmd_create_replication_slot(int sock, const WsRoute *route,
+cmd_create_replication_slot(int sock, const WsCluster *cluster,
 							const char *slotName, bool temporary, bool isLogical)
 {
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
-							   "no WAL cache directory configured for this route");
+							   "no WAL cache directory configured for this cluster");
 		return;
 	}
 
@@ -450,7 +452,7 @@ cmd_create_replication_slot(int sock, const WsRoute *route,
 
 	char path[MAXPGPATH];
 
-	slot_marker_path(route, slotName, path, sizeof(path));
+	slot_marker_path(cluster, slotName, path, sizeof(path));
 
 	/* an existing slot is left as it is, never reset by a second CREATE */
 	if (file_exists(path))
@@ -460,10 +462,10 @@ cmd_create_replication_slot(int sock, const WsRoute *route,
 		return;
 	}
 
-	if (count_slots(route->path) >= WS_MAX_SLOTS_PER_ROUTE)
+	if (count_slots(cluster->path) >= WS_MAX_SLOTS_PER_CLUSTER)
 	{
 		ws_send_error_response(sock, "53400",
-							   "all replication slots of this route are in "
+							   "all replication slots of this cluster are in "
 							   "use");
 		return;
 	}
@@ -471,10 +473,10 @@ cmd_create_replication_slot(int sock, const WsRoute *route,
 	char consistentPoint[32] = "0/0";
 	uint32_t timeline;
 
-	if (!wal_position_cache_read(route->path, &timeline, consistentPoint,
+	if (!wal_position_cache_read(cluster->path, &timeline, consistentPoint,
 								 sizeof(consistentPoint)))
 	{
-		(void) wal_dir_find_latest(route, &timeline, consistentPoint,
+		(void) wal_dir_find_latest(cluster, &timeline, consistentPoint,
 								   sizeof(consistentPoint));
 	}
 
@@ -508,12 +510,12 @@ cmd_create_replication_slot(int sock, const WsRoute *route,
 
 
 void
-cmd_read_replication_slot(int sock, const WsRoute *route, const char *slotName)
+cmd_read_replication_slot(int sock, const WsCluster *cluster, const char *slotName)
 {
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
-							   "no WAL cache directory configured for this route");
+							   "no WAL cache directory configured for this cluster");
 		return;
 	}
 
@@ -525,7 +527,7 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *slotName)
 
 	char path[MAXPGPATH];
 
-	slot_marker_path(route, slotName, path, sizeof(path));
+	slot_marker_path(cluster, slotName, path, sizeof(path));
 
 	WsColumn columns[] = {
 		{ "slot_type", WS_TEXTOID, -1 },
@@ -559,10 +561,10 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *slotName)
 	uint32_t timeline = 1;
 	char discardLsn[32] = { 0 };
 
-	if (!wal_position_cache_read(route->path, &timeline, discardLsn,
+	if (!wal_position_cache_read(cluster->path, &timeline, discardLsn,
 								 sizeof(discardLsn)))
 	{
-		(void) wal_dir_find_latest(route, &timeline, discardLsn,
+		(void) wal_dir_find_latest(cluster, &timeline, discardLsn,
 								   sizeof(discardLsn));
 	}
 
@@ -586,13 +588,13 @@ cmd_read_replication_slot(int sock, const WsRoute *route, const char *slotName)
  * PostgreSQL.
  */
 void
-cmd_drop_replication_slot(int sock, const WsRoute *route,
+cmd_drop_replication_slot(int sock, const WsCluster *cluster,
 						  const char *slotName, bool wait)
 {
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
-							   "no WAL cache directory configured for this route");
+							   "no WAL cache directory configured for this cluster");
 		return;
 	}
 
@@ -608,7 +610,7 @@ cmd_drop_replication_slot(int sock, const WsRoute *route,
 
 	char path[MAXPGPATH];
 
-	slot_marker_path(route, slotName, path, sizeof(path));
+	slot_marker_path(cluster, slotName, path, sizeof(path));
 
 	if (!file_exists(path))
 	{
@@ -623,7 +625,7 @@ cmd_drop_replication_slot(int sock, const WsRoute *route,
 	 * slot_try_lock() (cmd_replication_slot.h) is the same lock that
 	 * session itself holds for as long as it's alive.
 	 */
-	int lockFd = ws_replication_slot_try_lock(route, slotName);
+	int lockFd = ws_replication_slot_try_lock(cluster, slotName);
 
 	if (lockFd < 0)
 	{
@@ -641,7 +643,7 @@ cmd_drop_replication_slot(int sock, const WsRoute *route,
 
 	char lockPath[MAXPGPATH];
 
-	slot_lock_path(route, slotName, lockPath, sizeof(lockPath));
+	slot_lock_path(cluster, slotName, lockPath, sizeof(lockPath));
 	ws_replication_slot_unlock(lockFd);
 	(void) unlink(lockPath);
 

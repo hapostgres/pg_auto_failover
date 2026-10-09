@@ -19,27 +19,27 @@
 /*
  * cmd_show implements the tiny subset of SHOW that real pg_basebackup/
  * pg_receivewal actually query over a replication connection:
- * "wal_segment_size" (the route's own configured segment size, in GUC
+ * "wal_segment_size" (the cluster's own configured segment size, in GUC
  * format, e.g. "16MB") and "data_directory_mode" (a fixed "0700"). It also
  * implements "receivewal", this project's own extension with no PostgreSQL
- * equivalent: the connected route's own "receivewal" setting, "pull" when
- * WsRoute.receivewalPull is set, "none" otherwise -- how cli_archive.c's
- * "archive-wal" learns, per invocation, straight from the route it actually
+ * equivalent: the connected cluster's own "receivewal" setting, "pull" when
+ * WsCluster.receivewalPull is set, "none" otherwise -- how cli_archive.c's
+ * "archive-wal" learns, per invocation, straight from the cluster it actually
  * connected to, whether to only ever CHECK_FILE or only ever ARCHIVE_FILE
  * (see that file's own header comment). Any other parameter name is
  * rejected with the same SQLSTATE (42704) real Postgres uses for an unknown
  * GUC.
  */
 void
-cmd_show(int sock, const WsRoute *route, const char *name)
+cmd_show(int sock, const WsCluster *cluster, const char *name)
 {
 	const char *value = NULL;
 	char segSizeStr[16];
 
 	if (strcasecmp(name, "wal_segment_size") == 0)
 	{
-		/* the route's own segment size, in the GUC's own format */
-		wal_segment_size_string(ws_route_wal_segment_size(route),
+		/* the cluster's own segment size, in the GUC's own format */
+		wal_segment_size_string(ws_cluster_wal_segment_size(cluster),
 								segSizeStr, sizeof(segSizeStr));
 		value = segSizeStr;
 	}
@@ -49,7 +49,7 @@ cmd_show(int sock, const WsRoute *route, const char *name)
 	}
 	else if (strcasecmp(name, "receivewal") == 0)
 	{
-		value = (route != NULL && route->receivewalPull) ? "pull" : "none";
+		value = (cluster != NULL && cluster->receivewalPull) ? "pull" : "none";
 	}
 
 	if (value == NULL)

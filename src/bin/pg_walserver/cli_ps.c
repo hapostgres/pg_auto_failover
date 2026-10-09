@@ -4,14 +4,14 @@
  *
  *   Cross-process visibility mechanism: "pg_walserver ps" runs as a brand
  *   new process, entirely separate from any running "pg_walserver serve" --
- *   it cannot read receivewal.c's own in-process receivewalRoutes/receivewalServices
+ *   it cannot read receivewal.c's own in-process receivewalClusters/receivewalServices
  *   arrays, or accept_loop.c's own bootstrapChildren array, because those
  *   simply do not exist in this process's address space. Two mechanisms
  *   were considered:
  *
  *     - /proc scraping: every embedded receivewal worker child is exec()'d as
- *       "pg_walserver internal service pg-receivewal --route <key> ..."
- *       (receivewal.c), so its own route key IS recoverable from
+ *       "pg_walserver internal service pg-receivewal --cluster <key> ..."
+ *       (receivewal.c), so its own cluster key IS recoverable from
  *       /proc/<pid>/cmdline by any process willing to walk /proc looking
  *       for it. This would work for the receivewal worker set alone.
  *
@@ -24,7 +24,7 @@
  *   the one-shot bootstrap-backup job is a *plain* fork(), with no
  *   exec() and therefore no distinguishable /proc/<pid>/cmdline at all --
  *   /proc scraping cannot see it, only "serve"'s own in-process
- *   bootstrapChildren[] bookkeeping (accept_loop.c) knows the pid<->route
+ *   bootstrapChildren[] bookkeeping (accept_loop.c) knows the pid<->cluster
  *   mapping for it -- and restart counts/precise start times live in
  *   process_supervisor.h's own in-memory ring buffer, which has no /proc
  *   equivalent either. A state file "serve" already has every one of
@@ -189,7 +189,7 @@ cli_ps_run(const char *pgdata)
 
 		fformat(stdout, "%s receivewal(%d) %s, %s, uptime %s, restarts %d%s\n",
 				isLast ? "`--" : "|--",
-				(int) c->pid, c->routeKey,
+				(int) c->pid, c->clusterKey,
 				running ? "running" : "stopped", uptime, c->restarts, lsnStr);
 	}
 
@@ -204,7 +204,7 @@ cli_ps_run(const char *pgdata)
 
 		fformat(stdout, "%s bootstrap(%d) %s, %s, uptime %s\n",
 				isLast ? "`--" : "|--",
-				(int) b->pid, b->routeKey,
+				(int) b->pid, b->clusterKey,
 				running ? "running" : "done", uptime);
 	}
 

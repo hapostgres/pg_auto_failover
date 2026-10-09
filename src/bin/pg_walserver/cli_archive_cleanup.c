@@ -23,7 +23,7 @@
 #include "cmd_replication_slot.h"
 #include "file_utils.h"
 #include "log.h"
-#include "routes.h"
+#include "clusters.h"
 #include "string_utils.h"
 #include "wal_dir_scan.h"
 #include "wal_segment.h"
@@ -52,14 +52,14 @@ typedef struct WsContinuityProblem
 static time_t ws_retention_age_cutoff(const RetentionAge *age, time_t now);
 static int backup_cmp(const void *a, const void *b);
 static bool parse_backup_label_time(const char *label, time_t *takenAt);
-static bool read_last_history_line(const char *routePath, uint32_t timeline,
+static bool read_last_history_line(const char *clusterPath, uint32_t timeline,
 								   uint32_t *parentTliOut, char *lsnOut,
 								   size_t lsnOutSize);
-static void check_wal_range(const char *routePath, uint64_t segSize,
+static void check_wal_range(const char *clusterPath, uint64_t segSize,
 							uint32_t startTli, uint64_t startSegno,
 							uint32_t endTli, uint64_t endSegno,
 							WsContinuityProblem *problem);
-static bool ws_check_wal_continuity(const char *routePath, const WsRoute *route,
+static bool ws_check_wal_continuity(const char *clusterPath, const WsCluster *cluster,
 									uint64_t segSize, WsBackupInfo *backups,
 									int backupCount, const bool *kept);
 
@@ -75,7 +75,7 @@ static void cli_archive_cleanup_command_run(int argc, char **argv);
 
 static char archiveCleanupPgdata[MAXPGPATH] = { 0 };
 static char archiveCleanupConfigFile[MAXPGPATH] = { 0 };
-static char archiveCleanupRoute[NAMEDATALEN + 16] = { 0 };
+static char archiveCleanupCluster[NAMEDATALEN + 16] = { 0 };
 static char archiveCleanupPath[MAXPGPATH] = { 0 };
 static bool archiveCleanupHaveKeepCount = false;
 static int archiveCleanupKeepCount = 0;
@@ -98,7 +98,7 @@ static struct option archiveCleanupLongOptions[] = {
 
 CommandLine archive_cleanup_command =
 	make_command("archive-cleanup",
-				 "Remove WAL/base backups this route no longer needs to "
+				 "Remove WAL/base backups this cluster no longer needs to "
 				 "keep (operator/cron-driven, never automatic)",
 				 "--cluster <name> --pgdata <path> [--config <path>] "
 				 "| --path <dir> "
@@ -112,8 +112,8 @@ CommandLine archive_cleanup_command =
 				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --cluster     the cluster name to clean up (looked up "
 				 "in the config file)\n"
-				 "  --path        the route's own directory (overrides "
-				 "the route's own \"path\")\n"
+				 "  --path        the cluster's own directory (overrides "
+				 "the cluster's own \"path\")\n"
 				 "  --keep-count  keep at least this many of the most "
 				 "recent base backups\n"
 				 "  --keep-age    keep anything from the last <N><unit> "
@@ -257,20 +257,20 @@ parse_backup_label_time(const char *label, time_t *takenAt)
 
 
 /*
- * load_backups scans <routePath>/basebackups/ for backup directories,
+ * load_backups scans <clusterPath>/basebackups/ for backup directories,
  * parses each one's own label timestamp and (via read_backup_label(),
  * cmd_base_backup.c) its own required starting WAL segment, and returns
  * them sorted oldest-first (label strings sort chronologically). Returns
- * true even when there are zero backups (an empty, not-yet-used route);
+ * true even when there are zero backups (an empty, not-yet-used cluster);
  * false only on a directory that cannot be opened at all.
  */
 bool
-ws_backup_list_load(const char *routePath, uint64_t segSize,
+ws_backup_list_load(const char *clusterPath, uint64_t segSize,
 					WsBackupInfo **backupsOut, int *countOut)
 {
 	char backupsDir[MAXPGPATH] = { 0 };
 
-	sformat(backupsDir, sizeof(backupsDir), "%s/%s", routePath, WS_BACKUPS_SUBDIR);
+	sformat(backupsDir, sizeof(backupsDir), "%s/%s", clusterPath, WS_BACKUPS_SUBDIR);
 
 	*backupsOut = NULL;
 	*countOut = 0;
@@ -388,7 +388,7 @@ ws_backup_list_load(const char *routePath, uint64_t segSize,
 #define WS_MAX_TIMELINE_CHAIN 64
 
 /*
- * read_last_history_line reads "<routePath>/%08X.history" (timeline) and
+ * read_last_history_line reads "<clusterPath>/%08X.history" (timeline) and
  * returns, in *parentTliOut/lsnOut, the parent timeline and switchpoint LSN
  * from its last non-blank, non-comment line -- the entry that records where
  * *this* timeline itself branched off from *parentTliOut* (a history file
@@ -398,12 +398,12 @@ ws_backup_list_load(const char *routePath, uint64_t segSize,
  * false if the file is missing, empty, or has no parseable line.
  */
 static bool
-read_last_history_line(const char *routePath, uint32_t timeline,
+read_last_history_line(const char *clusterPath, uint32_t timeline,
 					   uint32_t *parentTliOut, char *lsnOut, size_t lsnOutSize)
 {
 	char path[MAXPGPATH] = { 0 };
 
-	sformat(path, sizeof(path), "%s/%08X.history", routePath, timeline);
+	sformat(path, sizeof(path), "%s/%08X.history", clusterPath, timeline);
 
 	char *contents = NULL;
 	long size = 0;
@@ -459,13 +459,13 @@ read_last_history_line(const char *routePath, uint32_t timeline,
 /*
  * check_wal_range verifies that every WAL segment number from startSegno
  * (on startTli) through endSegno (on endTli, inclusive) is present on
- * disk under routePath, resolving any intervening timeline switch(es) via
+ * disk under clusterPath, resolving any intervening timeline switch(es) via
  * "%08X.history" files. On the first missing segment, or the first
  * ancestry fact that can't be established, fills *problem and returns --
  * callers only need to check problem->hasProblem.
  */
 static void
-check_wal_range(const char *routePath, uint64_t segSize,
+check_wal_range(const char *clusterPath, uint64_t segSize,
 				uint32_t startTli, uint64_t startSegno,
 				uint32_t endTli, uint64_t endSegno,
 				WsContinuityProblem *problem)
@@ -497,13 +497,13 @@ check_wal_range(const char *routePath, uint64_t segSize,
 		uint32_t parentTli = 0;
 		char lsn[64] = { 0 };
 
-		if (!read_last_history_line(routePath, cur, &parentTli, lsn, sizeof(lsn)))
+		if (!read_last_history_line(clusterPath, cur, &parentTli, lsn, sizeof(lsn)))
 		{
 			sformat(problem->detail, sizeof(problem->detail),
 					"cannot verify WAL continuity across a timeline switch: "
 					"\"%08X.history\" is missing or unreadable under \"%s\", "
 					"needed to confirm timeline %u's own ancestry back to "
-					"timeline %u", cur, routePath, cur, startTli);
+					"timeline %u", cur, clusterPath, cur, startTli);
 			problem->hasProblem = true;
 			return;
 		}
@@ -515,7 +515,7 @@ check_wal_range(const char *routePath, uint64_t segSize,
 			sformat(problem->detail, sizeof(problem->detail),
 					"cannot verify WAL continuity: \"%08X.history\" under "
 					"\"%s\" has an unparseable switchpoint LSN (\"%s\")",
-					cur, routePath, lsn);
+					cur, clusterPath, lsn);
 			problem->hasProblem = true;
 			return;
 		}
@@ -527,7 +527,7 @@ check_wal_range(const char *routePath, uint64_t segSize,
 			sformat(problem->detail, sizeof(problem->detail),
 					"cannot verify WAL continuity: \"%08X.history\" under "
 					"\"%s\" names an implausible parent timeline %u",
-					cur, routePath, parentTli);
+					cur, clusterPath, parentTli);
 			problem->hasProblem = true;
 			return;
 		}
@@ -581,7 +581,7 @@ check_wal_range(const char *routePath, uint64_t segSize,
 
 			char segPath[MAXPGPATH] = { 0 };
 
-			sformat(segPath, sizeof(segPath), "%s/%s", routePath, segName);
+			sformat(segPath, sizeof(segPath), "%s/%s", clusterPath, segName);
 
 			if (!file_exists(segPath))
 			{
@@ -612,7 +612,7 @@ check_wal_range(const char *routePath, uint64_t segSize,
  * anyway under --force).
  */
 static bool
-ws_check_wal_continuity(const char *routePath, const WsRoute *route,
+ws_check_wal_continuity(const char *clusterPath, const WsCluster *cluster,
 						uint64_t segSize, WsBackupInfo *backups,
 						int backupCount, const bool *kept)
 {
@@ -666,7 +666,7 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
 			uint32_t latestTli = 0;
 			char latestEndLsn[64] = { 0 };
 
-			if (wal_dir_find_latest(route, &latestTli, latestEndLsn,
+			if (wal_dir_find_latest(cluster, &latestTli, latestEndLsn,
 									sizeof(latestEndLsn)))
 			{
 				uint64_t oneAfterSegno;
@@ -684,12 +684,12 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
 		if (!haveEnd)
 		{
 			/* nothing on disk to compare against at all (a brand new
-			 * route, or every recognizable complete segment is gone) --
+			 * cluster, or every recognizable complete segment is gone) --
 			 * the least we can require is that this backup's own
 			 * required starting segment is itself still present */
 			char segPath[MAXPGPATH] = { 0 };
 
-			sformat(segPath, sizeof(segPath), "%s/%s", routePath,
+			sformat(segPath, sizeof(segPath), "%s/%s", clusterPath,
 					backup->startSegment);
 
 			if (!file_exists(segPath))
@@ -699,7 +699,7 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
 						  "WAL segment \"%s\" is missing, and no WAL "
 						  "segment at all is present under \"%s\" to "
 						  "compare against", backup->dirPath,
-						  backup->startSegment, routePath);
+						  backup->startSegment, clusterPath);
 				ok = false;
 			}
 
@@ -708,7 +708,7 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
 
 		WsContinuityProblem problem = { 0 };
 
-		check_wal_range(routePath, segSize, startTli, startSegno,
+		check_wal_range(clusterPath, segSize, startTli, startSegno,
 						endTli, endSegno, &problem);
 
 		if (problem.hasProblem)
@@ -731,7 +731,7 @@ ws_check_wal_continuity(const char *routePath, const WsRoute *route,
  * Main entry point
  */
 bool
-ws_archive_cleanup_run(const char *routePath,
+ws_archive_cleanup_run(const char *clusterPath,
 					   bool haveKeepCount, int keepCount,
 					   bool haveKeepAge, RetentionAge keepAge,
 					   bool dryRun, bool force)
@@ -745,25 +745,25 @@ ws_archive_cleanup_run(const char *routePath,
 		return false;
 	}
 
-	if (!directory_exists(routePath))
+	if (!directory_exists(clusterPath))
 	{
-		log_error("archive-cleanup: \"%s\" is not a directory", routePath);
+		log_error("archive-cleanup: \"%s\" is not a directory", clusterPath);
 		return false;
 	}
 
-	WsRoute route = { 0 };
+	WsCluster cluster = { 0 };
 
-	strlcpy(route.path, routePath, sizeof(route.path));
+	strlcpy(cluster.path, clusterPath, sizeof(cluster.path));
 
-	uint64_t segSize = ws_route_wal_segment_size(&route);
+	uint64_t segSize = ws_cluster_wal_segment_size(&cluster);
 
 	WsBackupInfo *backups = NULL;
 	int backupCount = 0;
 
-	if (!ws_backup_list_load(routePath, segSize, &backups, &backupCount))
+	if (!ws_backup_list_load(clusterPath, segSize, &backups, &backupCount))
 	{
 		log_error("archive-cleanup: could not read \"%s/%s\"",
-				  routePath, WS_BACKUPS_SUBDIR);
+				  clusterPath, WS_BACKUPS_SUBDIR);
 		return false;
 	}
 
@@ -771,7 +771,7 @@ ws_archive_cleanup_run(const char *routePath,
 	{
 		log_warn("archive-cleanup: no base backups found under \"%s/%s\"; "
 				 "nothing to anchor WAL retention against, leaving \"%s\" "
-				 "untouched", routePath, WS_BACKUPS_SUBDIR, routePath);
+				 "untouched", clusterPath, WS_BACKUPS_SUBDIR, clusterPath);
 		free(backups);
 		return true;
 	}
@@ -781,7 +781,7 @@ ws_archive_cleanup_run(const char *routePath,
 	char *latestContents = NULL;
 	long latestSize = 0;
 
-	sformat(latestPath, sizeof(latestPath), "%s/%s", routePath, WS_LATEST_FILENAME);
+	sformat(latestPath, sizeof(latestPath), "%s/%s", clusterPath, WS_LATEST_FILENAME);
 
 	if (!read_file_if_exists(latestPath, &latestContents, &latestSize) ||
 		latestContents == NULL || latestSize == 0)
@@ -822,7 +822,7 @@ ws_archive_cleanup_run(const char *routePath,
 		log_error("archive-cleanup: the backup named by \"%s\" (\"%s\") "
 				  "does not exist under \"%s/%s\" -- refusing to run "
 				  "without a known \"latest\" backup to protect",
-				  latestPath, latestLabel, routePath, WS_BACKUPS_SUBDIR);
+				  latestPath, latestLabel, clusterPath, WS_BACKUPS_SUBDIR);
 		free(backups);
 		return false;
 	}
@@ -907,7 +907,7 @@ ws_archive_cleanup_run(const char *routePath,
 	char slotName[NAMEDATALEN] = { 0 };
 	char slotLsn[32] = { 0 };
 
-	if (ws_replication_slot_oldest_restart_lsn(&route, segSize, slotName,
+	if (ws_replication_slot_oldest_restart_lsn(&cluster, segSize, slotName,
 											   sizeof(slotName), slotLsn,
 											   sizeof(slotLsn)))
 	{
@@ -957,7 +957,7 @@ ws_archive_cleanup_run(const char *routePath,
 	 * deletion is gated on the outcome (and only without --force): a
 	 * dry-run never deletes anything regardless, but must still surface
 	 * the same problem a real run would refuse over. */
-	bool continuityOk = ws_check_wal_continuity(routePath, &route, segSize,
+	bool continuityOk = ws_check_wal_continuity(clusterPath, &cluster, segSize,
 												backups, backupCount, kept);
 
 	if (!continuityOk)
@@ -1010,7 +1010,7 @@ ws_archive_cleanup_run(const char *routePath,
 		{
 			char segPath[MAXPGPATH] = { 0 };
 
-			sformat(segPath, sizeof(segPath), "%s/%s", routePath,
+			sformat(segPath, sizeof(segPath), "%s/%s", clusterPath,
 					backup->startSegment);
 			supersededByMissingWal = !file_exists(segPath);
 		}
@@ -1068,11 +1068,11 @@ ws_archive_cleanup_run(const char *routePath,
 	}
 
 	/* --- remove WAL/.partial/.backup files older than the cutoff --- */
-	DIR *dir = opendir(routePath);
+	DIR *dir = opendir(clusterPath);
 
 	if (dir == NULL)
 	{
-		log_error("archive-cleanup: could not open \"%s\"", routePath);
+		log_error("archive-cleanup: could not open \"%s\"", clusterPath);
 		free(backups);
 		free(keptByCount);
 		free(keptByAge);
@@ -1110,7 +1110,7 @@ ws_archive_cleanup_run(const char *routePath,
 
 		char filePath[MAXPGPATH] = { 0 };
 
-		sformat(filePath, sizeof(filePath), "%s/%s", routePath, entry->d_name);
+		sformat(filePath, sizeof(filePath), "%s/%s", clusterPath, entry->d_name);
 
 		if (dryRun)
 		{
@@ -1151,7 +1151,7 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 	optind = 0;
 	ws_prefill_pgdata_from_env(archiveCleanupPgdata);
 	archiveCleanupConfigFile[0] = '\0';
-	archiveCleanupRoute[0] = '\0';
+	archiveCleanupCluster[0] = '\0';
 	archiveCleanupPath[0] = '\0';
 	archiveCleanupHaveKeepCount = false;
 	archiveCleanupKeepCount = 0;
@@ -1184,7 +1184,7 @@ cli_archive_cleanup_getopt(int argc, char **argv)
 
 			case 'c':
 			{
-				strlcpy(archiveCleanupRoute, optarg, sizeof(archiveCleanupRoute));
+				strlcpy(archiveCleanupCluster, optarg, sizeof(archiveCleanupCluster));
 				break;
 			}
 
@@ -1253,48 +1253,48 @@ cli_archive_cleanup_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	char routePath[MAXPGPATH] = { 0 };
+	char clusterPath[MAXPGPATH] = { 0 };
 
 	if (archiveCleanupPath[0] != '\0')
 	{
-		strlcpy(routePath, archiveCleanupPath, sizeof(routePath));
+		strlcpy(clusterPath, archiveCleanupPath, sizeof(clusterPath));
 	}
-	else if (archiveCleanupPgdata[0] != '\0' && archiveCleanupRoute[0] != '\0')
+	else if (archiveCleanupPgdata[0] != '\0' && archiveCleanupCluster[0] != '\0')
 	{
-		char routesPath[MAXPGPATH] = { 0 };
-		WsRoute *routes = NULL;
-		int routeCount = 0;
+		char clustersPath[MAXPGPATH] = { 0 };
+		WsCluster *clusters = NULL;
+		int clusterCount = 0;
 
 		config_file_path(archiveCleanupPgdata, archiveCleanupConfigFile,
-						 routesPath, sizeof(routesPath));
+						 clustersPath, sizeof(clustersPath));
 
-		const WsRoute *route = NULL;
+		const WsCluster *cluster = NULL;
 
-		if (routes_load(routesPath, &routes, &routeCount))
+		if (clusters_load(clustersPath, &clusters, &clusterCount))
 		{
-			route = routes_find(routes, routeCount, archiveCleanupRoute);
+			cluster = clusters_find(clusters, clusterCount, archiveCleanupCluster);
 		}
 
-		if (route == NULL)
+		if (cluster == NULL)
 		{
-			log_fatal("No route \"%s\" in \"%s\"", archiveCleanupRoute,
-					  routesPath);
-			routes_free(routes);
+			log_fatal("No cluster \"%s\" in \"%s\"", archiveCleanupCluster,
+					  clustersPath);
+			clusters_free(clusters);
 			exit(1);
 		}
 
-		strlcpy(routePath, route->path, sizeof(routePath));
-		routes_free(routes);
+		strlcpy(clusterPath, cluster->path, sizeof(clusterPath));
+		clusters_free(clusters);
 	}
 	else
 	{
 		log_fatal("archive-cleanup requires --path, or --cluster with "
 				  "--pgdata pointing at a \"pg_walserver.ini\" that has "
-				  "that route");
+				  "that cluster");
 		exit(1);
 	}
 
-	exit(ws_archive_cleanup_run(routePath,
+	exit(ws_archive_cleanup_run(clusterPath,
 								archiveCleanupHaveKeepCount, archiveCleanupKeepCount,
 								archiveCleanupHaveKeepAge, archiveCleanupKeepAge,
 								archiveCleanupDryRun, archiveCleanupForce) ? 0 : 1);

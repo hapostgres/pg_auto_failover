@@ -1933,9 +1933,9 @@ yyreduce:
 		 * Default: run pg_walserver's own "serve" mode directly as this
 		 * container's PID 1, pointed at a writable directory of its own
 		 * under the node's already-provisioned /var/lib/postgres volume.
-		 * Zero named routes at startup is a supported, harmless state (see
+		 * Zero named clusters at startup is a supported, harmless state (see
 		 * cli_serve_run in pg_walserver/cli_root.c); a spec that wants
-		 * routes configured first overrides this via "command \"...\"".
+		 * clusters configured first overrides this via "command \"...\"".
 		 *
 		 * Also copies in a real, usable default pg_walserver_hba.conf --
 		 * compose_gen.c's write_pg_walserver_default_hba() bind-mounts it

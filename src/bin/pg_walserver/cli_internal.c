@@ -2,7 +2,7 @@
  * src/bin/pg_walserver/cli_internal.c
  *   See cli_internal.h.
  *
- *   `pg_walserver internal service pg-receivewal --route <key> --upstream
+ *   `pg_walserver internal service pg-receivewal --cluster <key> --upstream
  *   <conninfo> --path <dir>` is the subprocess entry point receivewal.c's own
  *   start_one_receivewal_child() forks and execv()s into, mirroring
  *   pg_autoctl's own "pg_autoctl internal service postgres|listener|
@@ -44,16 +44,16 @@
 #include "log.h"
 #include "pg_receivewal_entry.h"
 #include "pgsql.h"
-#include "routes.h"
+#include "clusters.h"
 #include "string_utils.h"
 #include "wal_dir_scan.h"
 
-static char internalPgReceivewalRoute[NAMEDATALEN + 16] = { 0 };
+static char internalPgReceivewalCluster[NAMEDATALEN + 16] = { 0 };
 static char internalPgReceivewalUpstream[MAXCONNINFO] = { 0 };
 static char internalPgReceivewalPath[MAXPGPATH] = { 0 };
 
 static struct option internalPgReceivewalLongOptions[] = {
-	{ "route", required_argument, NULL, 'r' },
+	{ "cluster", required_argument, NULL, 'r' },
 	{ "upstream", required_argument, NULL, 'u' },
 	{ "path", required_argument, NULL, 'p' },
 	{ NULL, 0, NULL, 0 }
@@ -65,12 +65,12 @@ static void cli_internal_pg_receivewal_run(int argc, char **argv);
 static CommandLine service_pg_receivewal_command =
 	make_command("pg-receivewal",
 				 "Subprocess entry point for the embedded receivewal worker",
-				 "--route <key> --upstream <conninfo> --path <dir>",
-				 "  --route     the route this receivewal worker belongs to "
+				 "--cluster <key> --upstream <conninfo> --path <dir>",
+				 "  --cluster     the cluster this receivewal worker belongs to "
 				 "(process title only)\n"
 				 "  --upstream  a libpq connection string to receive WAL "
 				 "from\n"
-				 "  --path      the route's own directory to receive "
+				 "  --path      the cluster's own directory to receive "
 				 "into\n",
 				 cli_internal_pg_receivewal_getopt,
 				 cli_internal_pg_receivewal_run);
@@ -113,8 +113,8 @@ cli_internal_pg_receivewal_getopt(int argc, char **argv)
 		{
 			case 'r':
 			{
-				strlcpy(internalPgReceivewalRoute, optarg,
-						sizeof(internalPgReceivewalRoute));
+				strlcpy(internalPgReceivewalCluster, optarg,
+						sizeof(internalPgReceivewalCluster));
 				break;
 			}
 
@@ -154,8 +154,8 @@ cli_internal_pg_receivewal_getopt(int argc, char **argv)
  * comment, and ps_state.h's own comment for why "serve" already solves the
  * identical cross-process problem for pid/restart bookkeeping via a state
  * file). Hands its (lsn, timeline) off the same way: a tiny, throttled,
- * per-route file (wal_dir_scan.h's ws_receivewal_progress_write(), written
- * into the route's own directory), which accept_loop.c's own refresh_ps_
+ * per-cluster file (wal_dir_scan.h's ws_receivewal_progress_write(), written
+ * into the cluster's own directory), which accept_loop.c's own refresh_ps_
  * state() tick later reads back and folds into the ps state file "pg_
  * walserver ps"/"status"/"list clusters" read.
  *
@@ -205,13 +205,13 @@ cli_internal_pg_receivewal_progress_hook(XLogRecPtr xlogpos, uint32 timeline)
  * cli_internal_pg_receivewal_run calls pg_receivewal_main() in-process
  * against --upstream/--path/--slot, exactly the argv shape "pg_receivewal
  * -w -d <upstream> -D <path> -S <slot>" would build. The slot itself --
- * named deterministically from the route key by routes_slot_name(), the
+ * named deterministically from the cluster key by clusters_slot_name(), the
  * same name receivewal.c's own ensure_receivewal_slot() already created
  * (or confirmed exists) in the parent before forking this child -- is
  * what keeps the upstream from recycling a WAL segment this worker
  * hasn't fetched yet out from under it, the same guarantee a real
  * streaming standby's own slot gives it; without one, a connection drop
- * right after this route's very first connection (before the slot would
+ * right after this cluster's very first connection (before the slot would
  * otherwise start holding segments back) can lose a segment the primary
  * considers no longer needed by anyone, permanently stalling this
  * worker on a segment that will never come back (see README.md's own
@@ -239,7 +239,7 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 
 	char slotName[NAMEDATALEN] = { 0 };
 
-	routes_slot_name(internalPgReceivewalRoute, slotName, sizeof(slotName));
+	clusters_slot_name(internalPgReceivewalCluster, slotName, sizeof(slotName));
 
 	char *args[9];
 	int argsIndex = 0;
@@ -257,7 +257,7 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 	char title[256];
 
 	sformat(title, sizeof(title), "pg_walserver: receivewal %s",
-			internalPgReceivewalRoute);
+			internalPgReceivewalCluster);
 	set_ps_title(title);
 
 	/*
@@ -266,7 +266,7 @@ cli_internal_pg_receivewal_run(int argc, char **argv)
 	 * getopt_long() tracks its scan position in a single, process-global
 	 * optind, which cli_internal_pg_receivewal_getopt() above already
 	 * advanced past the end of *this* array while parsing pg_walserver's
-	 * own --route/--upstream/--path flags. Without resetting it here,
+	 * own --cluster/--upstream/--path flags. Without resetting it here,
 	 * pg_receivewal_main()'s own getopt_long() call starts scanning
 	 * args[] from a stale, out-of-bounds index -- undefined behavior, a
 	 * crash. optind = 0 is glibc's documented way to force a full

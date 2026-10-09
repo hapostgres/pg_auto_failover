@@ -29,7 +29,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "routes.h"
+#include "clusters.h"
 
 typedef enum WsCommandType
 {
@@ -119,14 +119,14 @@ bool repl_command_parse(const char *query, WsCommand *cmd);
 const WsCommandOption * ws_command_find_option(const WsCommand *cmd, const char *name);
 
 /*
- * ws_dispatch_command runs cmd against the connection's resolved route
+ * ws_dispatch_command runs cmd against the connection's resolved cluster
  * (NULL in manual-testing mode, see auth.h) and the dbname the client
- * originally requested (always set, even without a route -- see
+ * originally requested (always set, even without a cluster -- see
  * startup.c), sending whatever RowDescription/DataRow/CommandComplete or
  * ErrorResponse the command produces. Never sends ReadyForQuery -- the
  * caller's command loop does that once per Query message, uniformly.
  */
 void ws_dispatch_command(int sock, const WsCommand *cmd,
-						 const WsRoute *route, const char *dbname);
+						 const WsCluster *cluster, const char *dbname);
 
 #endif /* WS_REPL_COMMAND_H */

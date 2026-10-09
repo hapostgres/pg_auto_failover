@@ -1,8 +1,8 @@
 # pg_walserver, on its own, with no archiver/monitor integration at all --
 # except for `pg_walserver cluster register` itself, its own one-shot onboarding
-# wizard (cli_setup.c): create/validate the pg_walserver.ini route, check
+# wizard (cli_setup.c): create/validate the pg_walserver.ini cluster, check
 # the upstream role's REPLICATION attribute, and fetch the system
-# identifier. "pg_walserver serve" itself then bootstraps the route's
+# identifier. "pg_walserver serve" itself then bootstraps the cluster's
 # first base backup automatically the moment it starts (accept_loop.c's
 # own ws_bootstrap_missing_backups()) -- setup no longer takes one itself.
 # Ongoing WAL capture is still the stock OS pg_receivewal, run by hand
@@ -30,8 +30,8 @@
 #             double-quoted slot name with an embedded escaped quote, and a
 #             garbage command producing a clean error rather than a crash
 #             (and the connection still usable afterwards)
-#   test_005  the pg_walserver.ini "*" wildcard (routes.h/routes.c, PgBouncer-
-#             style): a dbname with no route of its own falls through to
+#   test_005  the pg_walserver.ini "*" wildcard (clusters.h/clusters.c, PgBouncer-
+#             style): a dbname with no cluster of its own falls through to
 #             it, while "default/0" -- which still has its own explicit
 #             section -- keeps resolving to its own path, proving an exact
 #             match always wins over the wildcard, never the other way
@@ -76,9 +76,9 @@ setup {
     # fetches node1's real system identifier into pg_walserver_systemid. No
     # "serve" is running yet at this point, so setup only logs that this
     # config will take effect the next time it starts -- test_000 below
-    # starts it, which is what actually bootstraps this route's first base
+    # starts it, which is what actually bootstraps this cluster's first base
     # backup automatically. --no-receivewal: this spec drives its own external
-    # pg_receivewal (below) into this exact route directory -- the embedded
+    # pg_receivewal (below) into this exact cluster directory -- the embedded
     # receivewal worker, on by default now, would otherwise fork a second
     # process racing it for the same segment files.
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register default/0 --pgdata /tmp/ws --path /tmp/ws/default/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
@@ -116,7 +116,7 @@ step test_000_sync_files_from_node1 {
     # pg_walserver can serve a segment while it is concurrently being written
     exec node2 bash -c 'nohup pg_walserver serve --pgdata /tmp/ws --port 6543 > /tmp/ws-walsender.log 2>&1 & echo started'
     exec node2 bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-walsender.log; exit 1'
-    # "serve" bootstraps this route's first base backup automatically at
+    # "serve" bootstraps this cluster's first base backup automatically at
     # startup now (no more "setup --with-basebackup", see accept_loop.c's
     # own ws_bootstrap_missing_backups()) -- wait for it to actually
     # complete before the rest of this spec relies on it.
@@ -173,8 +173,8 @@ step test_004_grammar_edge_cases {
     exec node2 bash -c 'psql "host=127.0.0.1 port=6543 dbname=default/0 replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM" > /dev/null'
 }
 
-step test_005_wildcard_route {
-    # a second route, deliberately never named "default/0", with its own
+step test_005_wildcard_cluster {
+    # a second cluster, deliberately never named "default/0", with its own
     # distinct (fake) systemid -- reachable only through the "*" wildcard,
     # never directly
     exec node2 bash -c 'mkdir -p /tmp/ws-wild && printf "6543216543216543216\n" > /tmp/ws-wild/pg_walserver_systemid'
@@ -182,13 +182,13 @@ step test_005_wildcard_route {
 
     # pg_walserver.ini is cached in memory (accept_loop.c's own
     # ws_reload_config()) rather than re-read on every connection now, so
-    # a route added by hand needs an explicit reload before it is reachable
+    # a cluster added by hand needs an explicit reload before it is reachable
     # -- see README.md's "Config reload" section.
     exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
 
     # a dbname matching no explicit section falls through to the wildcard's
-    # own path -- routes.c's own "*" fallback, not a hardcoded default
-    exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6543 dbname=no-such-route replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "6543216543216543216" || { echo "got: $out"; false; }'
+    # own path -- clusters.c's own "*" fallback, not a hardcoded default
+    exec node2 bash -c 'out=$(psql "host=127.0.0.1 port=6543 dbname=no-such-cluster replication=true sslmode=disable" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "6543216543216543216" || { echo "got: $out"; false; }'
 
     # "default/0" still has its own explicit section: it must keep
     # resolving to ITS OWN path, never falling through to the wildcard now
@@ -211,19 +211,19 @@ step test_006_real_standby_with_core_tools {
     # discarding whatever dbname= a real primary_conninfo carries ("the
     # database name is ignored by the server in replication mode, but
     # specify 'replication' for .pgpass lookup" -- libpqwalreceiver.c's own
-    # comment). So a real physical standby can never select a route by
+    # comment). So a real physical standby can never select a cluster by
     # name the way pg_basebackup/pg_receivewal above just did -- only
-    # routes.ini's own "*" wildcard, or a route whose key literally is
-    # "replication", are ever reachable by one. This route already has a
+    # clusters.ini's own "*" wildcard, or a cluster whose key literally is
+    # "replication", are ever reachable by one. This cluster already has a
     # name ("default/0"); give it a second, literal-"replication" alias
     # pointing at the same path, purely so this one test step can reach it
     # -- an operator who *only* serves real physical standbys, never
     # pg_basebackup/pg_receivewal by name, would use "replication" as the
-    # route'"'"'s only key to begin with.
+    # cluster'"'"'s only key to begin with.
     exec node2 bash -c 'printf "\n[replication]\npath = /tmp/ws/default/0\n" >> /tmp/ws/pg_walserver.ini'
 
     # pg_walserver.ini is cached in memory now (see test_005 above): reload
-    # before this new route is reachable.
+    # before this new cluster is reachable.
     exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
 
     # a real standby from here on: nothing but stock PostgreSQL
@@ -261,5 +261,5 @@ sequence
     test_002_fetch_file
     test_003_start_replication_from_pg_walserver
     test_004_grammar_edge_cases
-    test_005_wildcard_route
+    test_005_wildcard_cluster
     test_006_real_standby_with_core_tools

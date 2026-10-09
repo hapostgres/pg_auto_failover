@@ -2,7 +2,7 @@
  * src/bin/pg_walserver/cmd_identify_system.c
  *   See cmd_identify_system.h.
  *
- *   systemid is read straight from route->path's own "pg_walserver_systemid"
+ *   systemid is read straight from cluster->path's own "pg_walserver_systemid"
  *   file, written once (never refreshed -- a system identifier is
  *   immutable for a cluster's lifetime) by pg_autoctl's archiver-capture
  *   loop the first time it learns the group's real primary has one (see
@@ -30,7 +30,7 @@
 
 
 /*
- * read_systemid reads route->path's own "pg_walserver_systemid" file (see this
+ * read_systemid reads cluster->path's own "pg_walserver_systemid" file (see this
  * file's own header comment) into idOut, trimmed of its trailing newline.
  * Returns false (idOut untouched) when the file doesn't exist yet -- the
  * group's real primary hasn't been discovered to have one yet.
@@ -68,12 +68,12 @@ read_systemid(const char *path, char *idOut, size_t idOutSize)
  * cmd_identify_system implements IDENTIFY_SYSTEM: one row of (systemid,
  * timeline, xlogpos, dbname), matching real Postgres's own reply shape
  * closely enough for pg_basebackup/pg_receivewal to accept it. See this
- * file's own header comment for where each value comes from; a route with
+ * file's own header comment for where each value comes from; a cluster with
  * nothing captured yet falls back to systemid "0", timeline 1, xlogpos
  * "0/0". dbname is echoed back verbatim from the client's startup packet.
  */
 void
-cmd_identify_system(int sock, const WsRoute *route, const char *dbname)
+cmd_identify_system(int sock, const WsCluster *cluster, const char *dbname)
 {
 	WsColumn columns[] = {
 		{ "systemid", WS_TEXTOID, -1 },
@@ -87,15 +87,15 @@ cmd_identify_system(int sock, const WsRoute *route, const char *dbname)
 	char systemIdBuf[32] = "0";
 	int timeline = 1;
 
-	if (route != NULL && route->path[0] != '\0')
+	if (cluster != NULL && cluster->path[0] != '\0')
 	{
-		(void) read_systemid(route->path, systemIdBuf, sizeof(systemIdBuf));
+		(void) read_systemid(cluster->path, systemIdBuf, sizeof(systemIdBuf));
 
 		uint32_t foundTimeline;
 
-		if (wal_position_cache_read(route->path, &foundTimeline,
+		if (wal_position_cache_read(cluster->path, &foundTimeline,
 									xlogpos, sizeof(xlogpos)) ||
-			wal_dir_find_latest(route, &foundTimeline,
+			wal_dir_find_latest(cluster, &foundTimeline,
 								xlogpos, sizeof(xlogpos)))
 		{
 			timeline = (int) foundTimeline;

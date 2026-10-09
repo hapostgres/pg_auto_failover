@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_walserver/cmd_start_replication.h
  *   START_REPLICATION [SLOT <name>] <startlsn> TIMELINE <tli>: streams WAL
- *   bytes straight out of the route's WAL cache directory, physical-only.
+ *   bytes straight out of the cluster's WAL cache directory, physical-only.
  *
  *   Deliberately does NOT vendor xlogreader.c for this: real walsender's
  *   own WalSndSegmentOpen (walsender.c) just computes a path from TLI+segno
@@ -29,7 +29,7 @@
 
 #include <stdint.h>
 
-#include "routes.h"
+#include "clusters.h"
 
 /*
  * slotName/startLsn/haveTimeline/timeline are already parsed out by
@@ -39,7 +39,7 @@
  * send a TIMELINE clause, in which case the current timeline is looked up
  * from the WAL cache, same as before.
  */
-void cmd_start_replication(int sock, const WsRoute *route,
+void cmd_start_replication(int sock, const WsCluster *cluster,
 						   const char *slotName, uint64_t startLsn,
 						   bool haveTimeline, uint32_t timeline);
 

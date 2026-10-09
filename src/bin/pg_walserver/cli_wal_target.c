@@ -47,7 +47,7 @@ cli_wal_target_getopt(int argc, char **argv, WsWalServerTarget *target)
 		{
 			case 'c':
 			{
-				strlcpy(target->route, optarg, sizeof(target->route));
+				strlcpy(target->cluster, optarg, sizeof(target->cluster));
 				break;
 			}
 

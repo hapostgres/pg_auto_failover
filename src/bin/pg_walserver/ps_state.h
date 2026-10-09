@@ -12,15 +12,15 @@
  *
  *   Why a state file rather than /proc scraping: "serve"'s own receivewal worker
  *   children (receivewal.c) are exec()'d as "pg_walserver internal service
- *   pg-receivewal --route <key> ..." -- their route key IS visible in
+ *   pg-receivewal --cluster <key> ..." -- their cluster key IS visible in
  *   /proc/<pid>/cmdline, so a determined "ps" could, in principle, walk
  *   /proc, find every pid whose cmdline matches, and reconstruct the
- *   route/pid mapping without any cooperation from "serve" at all. Two
+ *   cluster/pid mapping without any cooperation from "serve" at all. Two
  *   reasons this file is preferred over that: (1) the one-shot bootstrap-
  *   backup child (backup_bootstrap.c) is a *plain* fork(), not an exec()
  *   into a distinguishable command line -- ws_bootstrap_missing_backups()'s
  *   in-process bookkeeping (accept_loop.c's own bootstrapChildren[]) is the
- *   only place its route association exists at all, so a state file this
+ *   only place its cluster association exists at all, so a state file this
  *   process itself writes is the only way to expose that mapping to
  *   another process without adding a second, redundant execv()-into-a-
  *   distinguishable-title indirection for a one-shot job that does not
@@ -59,7 +59,7 @@
 
 typedef struct WsPsReceivewalEntry
 {
-	char routeKey[NAMEDATALEN + 16];
+	char clusterKey[NAMEDATALEN + 16];
 	char path[MAXPGPATH];
 	pid_t pid;              /* <= 0: not currently running (gave up, or
 	                         * never started) */
@@ -82,7 +82,7 @@ typedef struct WsPsReceivewalEntry
 
 typedef struct WsPsBootstrapEntry
 {
-	char routeKey[NAMEDATALEN + 16];
+	char clusterKey[NAMEDATALEN + 16];
 	pid_t pid;
 	time_t startedAt;
 } WsPsBootstrapEntry;

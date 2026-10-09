@@ -3,8 +3,8 @@
  *   Finds the newest fully-captured (non-.partial) WAL segment in an
  *   archiver's WAL cache directory and derives its boundary LSNs from the
  *   segment filename alone (standard 24-hex-digit XLogFileName format,
- *   using the route's own WAL segment size, see
- *   ws_route_wal_segment_size()).
+ *   using the cluster's own WAL segment size, see
+ *   ws_cluster_wal_segment_size()).
  *
  *   This is a segment-boundary approximation, not a real-record-level
  *   position: it doesn't parse WAL contents, just the filename. Good
@@ -23,21 +23,21 @@
 #include <stdint.h>
 #include <time.h>
 
-#include "routes.h"
+#include "clusters.h"
 #include "wal_segment.h"
 
-uint64_t ws_route_wal_segment_size(const WsRoute *route);
+uint64_t ws_cluster_wal_segment_size(const WsCluster *cluster);
 
-bool wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
+bool wal_dir_find_latest(const WsCluster *cluster, uint32_t *timeline,
 						 char *endLsn, size_t endLsnSize);
 
-bool wal_dir_has_any_segment(const WsRoute *route);
+bool wal_dir_has_any_segment(const WsCluster *cluster);
 
 bool wal_position_cache_read(const char *path, uint32_t *timeline,
 							 char *lsn, size_t lsnSize);
 
 /*
- * WS_RECEIVEWAL_PROGRESS_FILENAME is "<route path>/receivewal-progress" --
+ * WS_RECEIVEWAL_PROGRESS_FILENAME is "<cluster path>/receivewal-progress" --
  * a separate, purely observational LSN cache from "archiver-position"
  * above, written by the embedded receivewal worker's own pgaf_wal_progress_
  * hook/pgaf_wal_segment_closed_hook callbacks (pg_receivewal_entry.h,

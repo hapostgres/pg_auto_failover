@@ -28,7 +28,7 @@
 #      with its own default startup command overridden to "tail -f
 #      /dev/null" -- exactly like pg_walserver_sni_routing.pgaf's own
 #      "walserver" node -- because this spec needs `pg_walserver cluster register` to
-#      configure a route before "serve" ever starts. This means the DSL
+#      configure a cluster before "serve" ever starts. This means the DSL
 #      sugar's own *default* command (compose_gen.c's write_pg_walserver_
 #      default_hba()/pg_walserver_line's own commandOverride, the auto-
 #      generated pg_walserver_hba.conf included) is never actually exercised by
@@ -44,15 +44,15 @@
 #      whole time, the same process-title check pg_walserver_capture.pgaf
 #      already uses.
 #
-#      pg_walserver.ini ends up with both a named route ("pitr") and a "*"
-#      wildcard mapped at the very same path. The named route is what
+#      pg_walserver.ini ends up with both a named cluster ("pitr") and a "*"
+#      wildcard mapped at the very same path. The named cluster is what
 #      archive-wal/restore-wal/a hand-written pg_basebackup address
 #      explicitly; the wildcard is what makes `pg_walserver basebackup`
 #      (role 4 below) and a real standby's walreceiver (which always sends
-#      the literal dbname "replication", see README.md's "Routing beyond
-#      dbname") resolve to the very same directory with zero extra routing
+#      the literal dbname "replication", see README.md's "Addressing a
+#      cluster beyond dbname: TLS SNI") resolve to the very same directory with zero extra
 #      ceremony -- docs/ref/pg_walserver.rst's own recommendation for a
-#      single-route deployment.
+#      single-cluster deployment.
 #
 #   3. "pitr" -- a point-in-time-recovery target, built with a real,
 #      unmodified `pg_basebackup` against "server" (proving wire
@@ -94,7 +94,7 @@
 #      continuously-streaming standby, built with
 #      `pg_walserver basebackup` (the CLI sub-command) instead of real
 #      `pg_basebackup`. `pg_walserver basebackup --upstream <conninfo>
-#      --path <dir>` is designed to populate a route's own storage from a
+#      --path <dir>` is designed to populate a cluster's own storage from a
 #      real Postgres primary; here it is deliberately pointed at "server"
 #      itself instead, since "server" answers BASE_BACKUP requests over the
 #      exact same wire protocol a real primary does -- proving this CLI
@@ -106,7 +106,7 @@
 #      "no database" call site there) -- ordinary libpq then defaults
 #      `dbname` to whatever `--user` resolves to, matching neither "pitr"
 #      nor the literal "replication" a real standby's own walreceiver would
-#      send. This is exactly what "server"'s own "*" wildcard route (role 2
+#      send. This is exactly what "server"'s own "*" wildcard cluster (role 2
 #      above) is for: every one of these differently-defaulted `dbname`
 #      values falls through to the same path with no further configuration.
 #      The resulting base backup directory
@@ -197,7 +197,7 @@ setup {
     # the real primary, and fetches its system identifier. No "serve" is
     # running yet, so setup only logs that this config will take effect
     # the next time it starts, below -- that is what actually bootstraps
-    # this route's first base backup automatically, once its own embedded
+    # this cluster's first base backup automatically, once its own embedded
     # receivewal worker (started at the same startup) shows real streaming
     # evidence.
     exec server bash -c 'PGPASSWORD=wspw pg_walserver cluster register pitr --pgdata /tmp/ws --path /tmp/ws/pitr --pguri "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
@@ -214,7 +214,7 @@ setup {
     # background -- pg_walserver_capture.pgaf's own process-title check.
     exec server bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal pitr$" > /dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; ps aux; exit 1'
 
-    # "serve" bootstraps this route's first base backup automatically at
+    # "serve" bootstraps this cluster's first base backup automatically at
     # startup now (no more "setup --with-basebackup", see accept_loop.c's
     # own ws_bootstrap_missing_backups()) -- test_003 below needs it
     # already in place, so wait for it here.
@@ -253,13 +253,13 @@ step test_003_pitr_recovers_to_named_restore_point {
 
     # "pitr" is a byte-for-byte copy of pg1's own data directory, so its
     # postgresql.auto.conf still carries pg1's own archive_mode = on and
-    # archive_command (pointed at this same "pitr" route) verbatim -- the
+    # archive_command (pointed at this same "pitr" cluster) verbatim -- the
     # same "the base backup copies the ENTIRE config, not just the bits a
     # PITR/standby target actually wants" wrinkle pg_walserver_standalone.
     # pgaf's own test_006 already documents for synchronous_standby_names.
     # Left as-is, promoting here would run that inherited archive_command
     # for real, pushing this node's own freshly-created timeline history
-    # file back onto the very same shared route "sec" (test_004) also
+    # file back onto the very same shared cluster "sec" (test_004) also
     # reads from -- confusing it about which timeline its real streaming
     # primary (pg1, never promoted, still timeline 1) is actually on.
     # archive_mode is PGC_POSTMASTER, so turning it off here (before this
