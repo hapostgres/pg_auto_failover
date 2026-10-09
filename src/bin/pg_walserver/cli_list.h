@@ -21,7 +21,7 @@
 #include "commandline.h"
 
 /*
- * cli_list_clusters_run prints one row per cluster configured in the config
+ * ws_list_clusters_report prints one row per cluster configured in the config
  * file config_file_path() resolves for pgdata/configFile (or just
  * clusterFilter's own cluster, when not NULL/empty): its path/upstream/
  * hostname/receivewal setting, whether it has a base backup, whether its
@@ -33,26 +33,26 @@
  * logged, only on a configuration problem (no such --pgdata/config file,
  * or no such cluster).
  */
-bool cli_list_clusters_run(const char *pgdata, const char *configFile,
-						   const char *clusterFilter);
+bool ws_list_clusters_report(const char *pgdata, const char *configFile,
+							 const char *clusterFilter);
 
 /*
- * cli_list_backups_run prints one row per base backup found under every
- * matching cluster's own "basebackups/" directory (reusing cli_archive_
- * cleanup.c's own ws_backup_list_load()): its label/timestamp, size on
- * disk, and whether it is the cluster's ".latest".
+ * ws_list_backups_report prints one row per base backup found under every
+ * matching cluster's own "basebackups/" directory (reusing backup_list.h's
+ * own ws_backup_list_load()): its label/timestamp, size on disk, and
+ * whether it is the cluster's ".latest".
  */
-bool cli_list_backups_run(const char *pgdata, const char *configFile,
-						  const char *clusterFilter);
+bool ws_list_backups_report(const char *pgdata, const char *configFile,
+							const char *clusterFilter);
 
 /*
- * cli_list_wal_run prints, per matching cluster, aggregate WAL cache stats
+ * ws_list_wal_report prints, per matching cluster, aggregate WAL cache stats
  * (segment count, total bytes, oldest/newest segment, .history file count)
  * by default, or, with segments true, one row per individual WAL/.partial/
  * .backup/.history file instead.
  */
-bool cli_list_wal_run(const char *pgdata, const char *configFile,
-					  const char *clusterFilter, bool segments);
+bool ws_list_wal_report(const char *pgdata, const char *configFile,
+						const char *clusterFilter, bool segments);
 
 extern CommandLine list_clusters_command;
 extern CommandLine list_backups_command;

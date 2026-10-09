@@ -66,8 +66,6 @@ typedef struct WsClusterFootprint
 } WsClusterFootprint;
 
 /* local helpers */
-static void format_utc(time_t t, char *dest, size_t destSize);
-static uint64_t directory_size(const char *path);
 static void scan_cluster_footprint(const WsCluster *cluster, WsClusterFootprint *out);
 static void print_config_files_row(const char *label, const char *path);
 static void print_config_files(const char *pgdata, const char *configPath);
@@ -76,9 +74,9 @@ static int cli_ls_getopt(int argc, char **argv);
 static void cli_ls_command_run(int argc, char **argv);
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver ls --pgdata <path>
- * ----------------------------------------------------------------------- */
+ */
 
 static char lsPgdata[MAXPGPATH] = { 0 };
 static char lsConfigFile[MAXPGPATH] = { 0 };
@@ -107,78 +105,6 @@ CommandLine ls_command =
 				 "              (rarely change, rarely interesting day "
 				 "to day)\n",
 				 cli_ls_getopt, cli_ls_command_run);
-
-
-/*
- * format_utc renders t as an ISO-8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ"),
- * or "-" when t is unset (<= 0, e.g. a cluster with no base backup yet).
- */
-static void
-format_utc(time_t t, char *dest, size_t destSize)
-{
-	if (t <= 0)
-	{
-		strlcpy(dest, "-", destSize);
-		return;
-	}
-
-	struct tm tmVal = { 0 };
-
-	gmtime_r(&t, &tmVal);
-	strftime(dest, destSize, "%Y-%m-%dT%H:%M:%SZ", &tmVal);
-}
-
-
-/*
- * directory_size recursively sums the size in bytes of every regular file
- * under path -- one base backup's own real size on disk, the same helper
- * cli_list.c's own "list backups" uses for the identical purpose.
- */
-static uint64_t
-directory_size(const char *path)
-{
-	DIR *dir = opendir(path);
-
-	if (dir == NULL)
-	{
-		return 0;
-	}
-
-	uint64_t total = 0;
-	struct dirent *entry;
-
-	while ((entry = readdir(dir)) != NULL)
-	{
-		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-		{
-			continue;
-		}
-
-		char entryPath[MAXPGPATH] = { 0 };
-
-		sformat(entryPath, sizeof(entryPath), "%s/%s", path, entry->d_name);
-
-		struct stat st;
-
-		if (lstat(entryPath, &st) != 0)
-		{
-			continue;
-		}
-
-		if (S_ISDIR(st.st_mode))
-		{
-			total += directory_size(entryPath);
-		}
-		else if (S_ISREG(st.st_mode))
-		{
-			total += (uint64_t) st.st_size;
-		}
-	}
-
-	closedir(dir);
-
-	return total;
-}
 
 
 /*

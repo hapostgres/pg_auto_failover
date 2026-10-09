@@ -43,5 +43,7 @@ int64_t monotonic_ms(void);
  */
 void format_elapsed_time(time_t startedAt, char *dest, size_t destSize);
 
+void format_utc(time_t t, char *dest, size_t destSize);
+
 
 #endif /* SYSTEM_UTILS_H */

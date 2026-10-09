@@ -162,85 +162,9 @@ CommandLine list_commands =
 					 NULL, NULL, NULL, list_subcommands);
 
 
-/* ---------------------------------------------------------------------
- * small formatting helpers, shared by all three "list" sub-commands
- * --------------------------------------------------------------------- */
-
 /*
- * format_utc renders t as an ISO-8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ"),
- * or "-" when t is unset (<= 0).
- */
-static void
-format_utc(time_t t, char *dest, size_t destSize)
-{
-	if (t <= 0)
-	{
-		strlcpy(dest, "-", destSize);
-		return;
-	}
-
-	struct tm tmVal = { 0 };
-
-	gmtime_r(&t, &tmVal);
-	strftime(dest, destSize, "%Y-%m-%dT%H:%M:%SZ", &tmVal);
-}
-
-
-/*
- * directory_size recursively sums the size in bytes of every regular file
- * under path (a base backup directory: PGDATA's own base/, pg_wal/, etc.
- * subdirectories included) -- "list backups" own per-row size column.
- */
-static uint64_t
-directory_size(const char *path)
-{
-	DIR *dir = opendir(path);
-
-	if (dir == NULL)
-	{
-		return 0;
-	}
-
-	uint64_t total = 0;
-	struct dirent *entry;
-
-	while ((entry = readdir(dir)) != NULL)
-	{
-		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-		{
-			continue;
-		}
-
-		char entryPath[MAXPGPATH] = { 0 };
-
-		sformat(entryPath, sizeof(entryPath), "%s/%s", path, entry->d_name);
-
-		struct stat st;
-
-		if (lstat(entryPath, &st) != 0)
-		{
-			continue;
-		}
-
-		if (S_ISDIR(st.st_mode))
-		{
-			total += directory_size(entryPath);
-		}
-		else if (S_ISREG(st.st_mode))
-		{
-			total += (uint64_t) st.st_size;
-		}
-	}
-
-	closedir(dir);
-
-	return total;
-}
-
-
-/* ---------------------------------------------------------------------
  * shared cluster loading/filtering
- * --------------------------------------------------------------------- */
+ */
 
 /*
  * load_pgdata_clusters reads the config file config_file_path() resolves
@@ -393,12 +317,12 @@ receivewal_running_for_cluster(const char *pgdata, const char *clusterKey,
 }
 
 
-/* ---------------------------------------------------------------------
+/*
  * pg_walserver list clusters
- * --------------------------------------------------------------------- */
+ */
 bool
-cli_list_clusters_run(const char *pgdata, const char *configFile,
-					  const char *clusterFilter)
+ws_list_clusters_report(const char *pgdata, const char *configFile,
+						const char *clusterFilter)
 {
 	WsCluster *clusters = NULL;
 	int clusterCount = 0;
@@ -493,12 +417,12 @@ cli_list_clusters_run(const char *pgdata, const char *configFile,
 }
 
 
-/* ---------------------------------------------------------------------
+/*
  * pg_walserver list backups
- * --------------------------------------------------------------------- */
+ */
 bool
-cli_list_backups_run(const char *pgdata, const char *configFile,
-					 const char *clusterFilter)
+ws_list_backups_report(const char *pgdata, const char *configFile,
+					   const char *clusterFilter)
 {
 	WsCluster *clusters = NULL;
 	int clusterCount = 0;
@@ -560,9 +484,9 @@ cli_list_backups_run(const char *pgdata, const char *configFile,
 }
 
 
-/* ---------------------------------------------------------------------
+/*
  * pg_walserver list wal
- * --------------------------------------------------------------------- */
+ */
 typedef struct WsWalStats
 {
 	int segments;
@@ -691,7 +615,7 @@ scan_wal_dir(const WsCluster *cluster, WsWalStats *stats, bool printSegments,
 
 
 /*
- * cli_list_wal_run prints, per cluster, WsWalStats's own aggregate counts
+ * ws_list_wal_report prints, per cluster, WsWalStats's own aggregate counts
  * (the default: one pg_controldata-style "Label:  value" block per
  * cluster, chosen over a table for the same reason "cluster list
  * --upstream" is pivoted rather than tabular -- one cluster's worth of
@@ -700,8 +624,8 @@ scan_wal_dir(const WsCluster *cluster, WsWalStats *stats, bool printSegments,
  * mode when segments is true.
  */
 bool
-cli_list_wal_run(const char *pgdata, const char *configFile,
-				 const char *clusterFilter, bool segments)
+ws_list_wal_report(const char *pgdata, const char *configFile,
+				   const char *clusterFilter, bool segments)
 {
 	WsCluster *clusters = NULL;
 	int clusterCount = 0;
@@ -769,9 +693,9 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 }
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver list clusters|backups|wal [--cluster <name>] [--segments]
- * ----------------------------------------------------------------------- */
+ */
 
 static char listPgdata[MAXPGPATH] = { 0 };
 static char listConfigFile[MAXPGPATH] = { 0 };
@@ -845,7 +769,7 @@ cli_list_clusters_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_list_clusters_run(listPgdata, listConfigFile, listCluster) ? 0 : 1);
+	exit(ws_list_clusters_report(listPgdata, listConfigFile, listCluster) ? 0 : 1);
 }
 
 
@@ -860,7 +784,7 @@ cli_list_backups_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_list_backups_run(listPgdata, listConfigFile, listCluster) ? 0 : 1);
+	exit(ws_list_backups_report(listPgdata, listConfigFile, listCluster) ? 0 : 1);
 }
 
 
@@ -938,6 +862,6 @@ cli_list_wal_command_run(int argc, char **argv)
 	(void) argc;
 	(void) argv;
 
-	exit(cli_list_wal_run(listPgdata, listConfigFile, listCluster,
-						  listWalSegments) ? 0 : 1);
+	exit(ws_list_wal_report(listPgdata, listConfigFile, listCluster,
+							listWalSegments) ? 0 : 1);
 }

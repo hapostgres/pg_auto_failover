@@ -36,9 +36,9 @@ static int cli_basebackup_getopt(int argc, char **argv);
 static void cli_basebackup_command_run(int argc, char **argv);
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver basebackup --cluster <name> --pgdata <path> [--upstream ...]
- * ----------------------------------------------------------------------- */
+ */
 
 static char basebackupPgdata[MAXPGPATH] = { 0 };
 static char basebackupConfigFile[MAXPGPATH] = { 0 };
