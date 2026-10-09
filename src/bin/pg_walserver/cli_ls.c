@@ -23,7 +23,7 @@
 #include "file_utils.h"
 #include "log.h"
 #include "ps_state.h"
-#include "routes.h"
+#include "clusters.h"
 #include "string_utils.h"
 #include "system_utils.h"
 #include "wal_dir_scan.h"
@@ -31,7 +31,7 @@
 /*
  * The config/credential/certificate tier: written once, by the operator
  * or by "setup"/"create-cert", and rarely changing thereafter -- see
- * cli_root.c's own cli_serve_run() (routes/HBA/passwd/TLS paths) and
+ * cli_root.c's own cli_serve_run() (clusters/HBA/passwd/TLS paths) and
  * tls.c (--ssl-ca-file's own default path, "ca.crt"). Only shown with
  * --all: confirming these still exist tells an operator little day
  * to day, so they don't clutter the default output, which is the real
@@ -47,15 +47,15 @@ static const char *configFiles[] = {
 };
 
 /*
- * WsRouteFootprint is one route's own on-disk footprint: how many base
+ * WsClusterFootprint is one cluster's own on-disk footprint: how many base
  * backups it holds and their combined real size, how many WAL segments
  * (complete ones; a ".partial" in progress is counted separately, never
  * as a complete segment) and their combined size, and when its most
  * recent base backup was taken -- see this file's own header comment for
- * why exactly these fields, out of everything scan_route_footprint()
+ * why exactly these fields, out of everything scan_cluster_footprint()
  * could report.
  */
-typedef struct WsRouteFootprint
+typedef struct WsClusterFootprint
 {
 	int backupCount;
 	uint64_t backupBytes;
@@ -63,12 +63,12 @@ typedef struct WsRouteFootprint
 	int walSegments;
 	int walPartials;
 	uint64_t walBytes;
-} WsRouteFootprint;
+} WsClusterFootprint;
 
 /* local helpers */
 static void format_utc(time_t t, char *dest, size_t destSize);
 static uint64_t directory_size(const char *path);
-static void scan_route_footprint(const WsRoute *route, WsRouteFootprint *out);
+static void scan_cluster_footprint(const WsCluster *cluster, WsClusterFootprint *out);
 static void print_config_files_row(const char *label, const char *path);
 static void print_config_files(const char *pgdata, const char *configPath);
 
@@ -111,7 +111,7 @@ CommandLine ls_command =
 
 /*
  * format_utc renders t as an ISO-8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ"),
- * or "-" when t is unset (<= 0, e.g. a route with no base backup yet).
+ * or "-" when t is unset (<= 0, e.g. a cluster with no base backup yet).
  */
 static void
 format_utc(time_t t, char *dest, size_t destSize)
@@ -182,26 +182,26 @@ directory_size(const char *path)
 
 
 /*
- * scan_route_footprint computes one route's own WsRouteFootprint: a real
+ * scan_cluster_footprint computes one cluster's own WsClusterFootprint: a real
  * base backup enumeration (ws_backup_list_load(), cli_archive_cleanup.h --
  * the same one "list backups"/"archive-cleanup" use, so a size or count
  * shown here always agrees with those) plus a real WAL directory scan
  * (ws_wal_dir_classify_filename(), wal_dir_scan.h -- the same
- * classification "list wal" uses). Never fails outright: a route with no
+ * classification "list wal" uses). Never fails outright: a cluster with no
  * backups yet, or whose directory cannot be opened at all (not yet
- * created), simply reports all-zero, exactly like a freshly "setup" route
+ * created), simply reports all-zero, exactly like a freshly "setup" cluster
  * that "serve" has not started for yet.
  */
 static void
-scan_route_footprint(const WsRoute *route, WsRouteFootprint *out)
+scan_cluster_footprint(const WsCluster *cluster, WsClusterFootprint *out)
 {
-	memset(out, 0, sizeof(WsRouteFootprint));
+	memset(out, 0, sizeof(WsClusterFootprint));
 
-	uint64_t segSize = ws_route_wal_segment_size(route);
+	uint64_t segSize = ws_cluster_wal_segment_size(cluster);
 	WsBackupInfo *backups = NULL;
 	int backupCount = 0;
 
-	if (ws_backup_list_load(route->path, segSize, &backups, &backupCount))
+	if (ws_backup_list_load(cluster->path, segSize, &backups, &backupCount))
 	{
 		out->backupCount = backupCount;
 
@@ -218,7 +218,7 @@ scan_route_footprint(const WsRoute *route, WsRouteFootprint *out)
 		free(backups);
 	}
 
-	DIR *dir = opendir(route->path);
+	DIR *dir = opendir(cluster->path);
 
 	if (dir == NULL)
 	{
@@ -239,7 +239,7 @@ scan_route_footprint(const WsRoute *route, WsRouteFootprint *out)
 
 		char entryPath[MAXPGPATH] = { 0 };
 
-		sformat(entryPath, sizeof(entryPath), "%s/%s", route->path, entry->d_name);
+		sformat(entryPath, sizeof(entryPath), "%s/%s", cluster->path, entry->d_name);
 
 		struct stat st;
 
@@ -294,7 +294,7 @@ print_config_files_row(const char *label, const char *path)
  * size, and its last-modified time. Every file except the config file
  * itself lives at a fixed "<pgdata>/<name>" path; the config file's own
  * row instead follows configPath, wherever config_file_path() resolved
- * it to (not always under pgdata, see routes.h's own comment).
+ * it to (not always under pgdata, see clusters.h's own comment).
  */
 static void
 print_config_files(const char *pgdata, const char *configPath)
@@ -317,7 +317,7 @@ print_config_files(const char *pgdata, const char *configPath)
 
 
 /*
- * cli_ls_run prints, by default, one row per configured route: its own
+ * cli_ls_run prints, by default, one row per configured cluster: its own
  * base backup count/combined size, WAL segment count/combined size, and
  * most recent base backup timestamp. With includeConfigFiles (--all),
  * prints the config/credential/certificate file tier instead (whether
@@ -325,10 +325,10 @@ print_config_files(const char *pgdata, const char *configPath)
  * this file's own header comment for why these are two separate views,
  * not combined into one. configFile (--config), when given, overrides
  * where the config file itself lives, independent of pgdata -- see
- * config_file_path()'s own comment, routes.h; the --all tier's own row
+ * config_file_path()'s own comment, clusters.h; the --all tier's own row
  * for it follows that same resolved path, not always
- * "<pgdata>/pg_walserver.ini". Always returns true: no routes configured
- * yet, or a route with nothing on disk yet, are ordinary states to
+ * "<pgdata>/pg_walserver.ini". Always returns true: no clusters configured
+ * yet, or a cluster with nothing on disk yet, are ordinary states to
  * report, never a failure.
  */
 bool
@@ -354,24 +354,24 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 		return false;
 	}
 
-	char routesPath[MAXPGPATH] = { 0 };
+	char clustersPath[MAXPGPATH] = { 0 };
 
-	config_file_path(pgdata, configFile, routesPath, sizeof(routesPath));
+	config_file_path(pgdata, configFile, clustersPath, sizeof(clustersPath));
 
 	if (includeConfigFiles)
 	{
-		print_config_files(pgdata, routesPath);
+		print_config_files(pgdata, clustersPath);
 		return true;
 	}
 
-	WsRoute *routes = NULL;
-	int routeCount = 0;
+	WsCluster *clusters = NULL;
+	int clusterCount = 0;
 
-	if (!routes_load(routesPath, &routes, &routeCount) || routeCount == 0)
+	if (!clusters_load(clustersPath, &clusters, &clusterCount) || clusterCount == 0)
 	{
-		fformat(stdout, "No routes configured yet under \"%s\" -- see "
-						"\"pg_walserver cluster register\".\n", routesPath);
-		routes_free(routes);
+		fformat(stdout, "No clusters configured yet under \"%s\" -- see "
+						"\"pg_walserver cluster register\".\n", clustersPath);
+		clusters_free(clusters);
 		return true;
 	}
 
@@ -382,11 +382,11 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 			"--------------------", "--------", "------------", "----------",
 			"----------", "-----------", "-----------");
 
-	for (int i = 0; i < routeCount; i++)
+	for (int i = 0; i < clusterCount; i++)
 	{
-		WsRouteFootprint fp = { 0 };
+		WsClusterFootprint fp = { 0 };
 
-		scan_route_footprint(&routes[i], &fp);
+		scan_cluster_footprint(&clusters[i], &fp);
 
 		char backupSize[32] = { 0 };
 		char walSize[32] = { 0 };
@@ -410,11 +410,11 @@ cli_ls_run(const char *pgdata, const char *configFile, bool includeConfigFiles)
 		}
 
 		fformat(stdout, "%-20s %-8d %-12s %-10s %-10s %-11s %s\n",
-				routes[i].key, fp.backupCount, backupSize, walFiles, walSize,
+				clusters[i].key, fp.backupCount, backupSize, walFiles, walSize,
 				totalSize, lastBackup);
 	}
 
-	routes_free(routes);
+	clusters_free(clusters);
 
 	fformat(stdout, "\n(config/credential/certificate files omitted; "
 					"pass --all to list those instead)\n");

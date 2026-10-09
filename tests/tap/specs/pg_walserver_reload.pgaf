@@ -1,12 +1,12 @@
 # pg_walserver's pidfile + SIGHUP-driven config reload (accept_loop.c's own
 # ws_reload_config()/ws_receivewal_reload(), cli_root.c's "pg_walserver
 # reload" sub-command). See README.md's "Config reload" section for the
-# full design: routes (pg_walserver.ini) and the HBA ruleset
+# full design: clusters (pg_walserver.ini) and the HBA ruleset
 # (pg_walserver_hba.conf) are cached in memory, re-parsed on SIGHUP, and
 # swapped in only when both parse cleanly -- a bad reload is refused and the previous,
 # still-valid configuration keeps serving every connection. The embedded
-# receivewal worker set is reconciled against the new routes, without
-# restarting a receivewal worker whose route did not change.
+# receivewal worker set is reconciled against the new clusters, without
+# restarting a receivewal worker whose cluster did not change.
 #
 # This PR's own pgaftest predates `let`/`${var}` capture (see pg_walserver_
 # standalone.pgaf's own header comment), so values that cross steps are
@@ -14,18 +14,18 @@
 #
 #   test_001  "pg_walserver serve" writes <pgdata>/pg_walserver.pid with
 #             its own real pid
-#   test_002  editing pg_walserver.ini to add a wildcard "*" route and
-#             running "pg_walserver reload" makes that route immediately
+#   test_002  editing pg_walserver.ini to add a wildcard "*" cluster and
+#             running "pg_walserver reload" makes that cluster immediately
 #             reachable (IDENTIFY_SYSTEM against a fresh dbname), with no
-#             server restart -- the original route keeps working too
+#             server restart -- the original cluster keeps working too
 #   test_003  a corrupted pg_walserver_hba.conf (a malformed line) makes
 #             reload log a clear parse error and exit 0 (the signal itself
 #             was delivered) while the server keeps serving its prior,
 #             still-valid HBA ruleset -- a request against the original
-#             route still succeeds
+#             cluster still succeeds
 #   test_004  "pg_walserver reload" against a stale pidfile (pid of an
 #             already-exited process) fails cleanly, nonzero exit
-#   test_005  giving the route "receivewal = pull" via reload starts its
+#   test_005  giving the cluster "receivewal = pull" via reload starts its
 #             embedded receivewal worker with no server restart; removing it
 #             again stops that same receivewal worker child
 
@@ -46,7 +46,7 @@ setup {
     # address from, and none needed.
     exec node2 bash -c 'mkdir -p /tmp/ws && printf "host all all 127.0.0.1/32 trust\n" > /tmp/ws/pg_walserver_hba.conf'
 
-    # a single named route, no upstream/receivewal yet -- test_005 below adds
+    # a single named cluster, no upstream/receivewal yet -- test_005 below adds
     # "upstream"/"receivewal = pull" via reload, once the server is already
     # running, to prove the embedded receivewal worker reconciliation path.
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register default/0 --pgdata /tmp/ws --path /tmp/ws/default/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --no-receivewal'
@@ -65,30 +65,30 @@ step test_001_pidfile_has_the_right_pid {
     exec node2 bash -c 'pidfile_pid=$(cat /tmp/ws/pg_walserver.pid); real_pid=$(cat /tmp/ws_pid.txt); test "$pidfile_pid" = "$real_pid" || { echo "pidfile says $pidfile_pid, real pid is $real_pid"; false; }'
 }
 
-step test_002_reload_picks_up_a_new_route_with_no_restart {
-    # sanity: the original route already works before touching anything.
+step test_002_reload_picks_up_a_new_cluster_with_no_restart {
+    # sanity: the original cluster already works before touching anything.
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw psql "host=127.0.0.1 port=6543 dbname=default/0 user=pgautofailover_replicator replication=true" -c "IDENTIFY_SYSTEM" > /tmp/before_reload.out'
     exec node2 bash -c 'grep -q "|" /tmp/before_reload.out || { cat /tmp/before_reload.out; false; }'
 
-    # add a wildcard "*" route (no TLS needed: it never counts as a
-    # "named" route, see routes.h) pointing at the same route directory --
+    # add a wildcard "*" cluster (no TLS needed: it never counts as a
+    # "named" cluster, see clusters.h) pointing at the same cluster directory --
     # any dbname that is not "default/0" now falls through to it.
     exec node2 bash -c 'printf "\n[*]\npath = /tmp/ws/default/0\n" >> /tmp/ws/pg_walserver.ini'
 
     exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
 
-    exec node2 bash -c 'for i in $(seq 30); do grep -q "reload: route \"\*\" added" /tmp/ws-walserver.log && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
-    exec node2 bash -c 'grep -q "Reload complete: now serving 2 routes" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
+    exec node2 bash -c 'for i in $(seq 30); do grep -q "reload: cluster \"\*\" added" /tmp/ws-walserver.log && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; exit 1'
+    exec node2 bash -c 'grep -q "Reload complete: now serving 2 clusters" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
 
     # the server never restarted: same pid throughout.
     exec node2 bash -c 'pid=$(pgrep -f "^pg_walserver serve --pgdata /tmp/ws --port 6543$"); test "$pid" = "$(cat /tmp/ws_pid.txt)" || { echo "pg_walserver restarted (pid $pid, expected $(cat /tmp/ws_pid.txt))"; false; }'
 
     # a brand new dbname, matching no explicit section, now resolves via
-    # the freshly reloaded wildcard route -- no server restart needed.
+    # the freshly reloaded wildcard cluster -- no server restart needed.
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw psql "host=127.0.0.1 port=6543 dbname=brand-new-dbname user=pgautofailover_replicator replication=true" -c "IDENTIFY_SYSTEM" > /tmp/after_reload.out'
     exec node2 bash -c 'grep -q "|" /tmp/after_reload.out || { cat /tmp/after_reload.out; false; }'
 
-    # the original, already-existing route keeps working too.
+    # the original, already-existing cluster keeps working too.
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw psql "host=127.0.0.1 port=6543 dbname=default/0 user=pgautofailover_replicator replication=true" -c "IDENTIFY_SYSTEM" > /tmp/still_works.out'
     exec node2 bash -c 'grep -q "|" /tmp/still_works.out || { cat /tmp/still_works.out; false; }'
 }
@@ -103,7 +103,7 @@ step test_003_bad_reload_is_refused_and_old_hba_keeps_serving {
     exec node2 bash -c 'grep -q "Malformed HBA line 2" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
 
     # the server is still alive (never restarted) and still serving the
-    # OLD, still-valid HBA ruleset -- a request against the route that
+    # OLD, still-valid HBA ruleset -- a request against the cluster that
     # already worked before the bad edit must still succeed.
     exec node2 bash -c 'pid=$(pgrep -f "^pg_walserver serve --pgdata /tmp/ws --port 6543$"); test "$pid" = "$(cat /tmp/ws_pid.txt)" || { echo "pg_walserver restarted"; false; }'
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw psql "host=127.0.0.1 port=6543 dbname=default/0 user=pgautofailover_replicator replication=true" -c "IDENTIFY_SYSTEM" > /tmp/after_bad_reload.out'
@@ -124,12 +124,12 @@ step test_005_reload_reconciles_the_embedded_receivewal_worker {
     # no receivewal worker running yet: setup{} used --no-receivewal.
     exec node2 bash -c 'pgrep -f "^pg_walserver: receivewal default/0$" && { echo "a receivewal worker is already running"; false; } || true'
 
-    # give the route "receivewal = pull" and reload: a receivewal worker should start,
+    # give the cluster "receivewal = pull" and reload: a receivewal worker should start,
     # on its own, with no server restart.
     exec node2 bash -c 'sed -i "/\[default\/0\]/a receivewal = pull" /tmp/ws/pg_walserver.ini && cat /tmp/ws/pg_walserver.ini'
     exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
     exec node2 bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal default/0$" > /tmp/cap_pid.txt && test -s /tmp/cap_pid.txt && exit 0; sleep 1; done; cat /tmp/ws-walserver.log; ps aux; exit 1'
-    exec node2 bash -c 'grep -q "Reload: started a new embedded receivewal worker for route \"default/0\"" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
+    exec node2 bash -c 'grep -q "Reload: started a new embedded receivewal worker for cluster \"default/0\"" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
     exec node2 bash -c 'pid=$(cat /tmp/cap_pid.txt); parent=$(cat /tmp/ws_pid.txt); actual_ppid=$(awk "{print \$4}" /proc/$pid/stat); test "$actual_ppid" = "$parent" || { echo "receivewal worker pid $pid has ppid $actual_ppid, expected pg_walserver pid $parent"; false; }'
 
     # remove "receivewal = pull" again and reload: that same receivewal worker child
@@ -137,12 +137,12 @@ step test_005_reload_reconciles_the_embedded_receivewal_worker {
     exec node2 bash -c 'sed -i "/^receivewal = pull$/d" /tmp/ws/pg_walserver.ini && cat /tmp/ws/pg_walserver.ini'
     exec node2 bash -c 'pg_walserver reload --pgdata /tmp/ws'
     exec node2 bash -c 'cappid=$(cat /tmp/cap_pid.txt); for i in $(seq 30); do test -d /proc/$cappid || exit 0; sleep 1; done; ps aux; exit 1'
-    exec node2 bash -c 'grep -q "Reload: stopping the embedded receivewal worker for route \"default/0\"" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
+    exec node2 bash -c 'grep -q "Reload: stopping the embedded receivewal worker for cluster \"default/0\"" /tmp/ws-walserver.log || { cat /tmp/ws-walserver.log; false; }'
 }
 
 sequence
     test_001_pidfile_has_the_right_pid
-    test_002_reload_picks_up_a_new_route_with_no_restart
+    test_002_reload_picks_up_a_new_cluster_with_no_restart
     test_003_bad_reload_is_refused_and_old_hba_keeps_serving
     test_004_reload_against_a_stale_pidfile_fails_cleanly
     test_005_reload_reconciles_the_embedded_receivewal_worker

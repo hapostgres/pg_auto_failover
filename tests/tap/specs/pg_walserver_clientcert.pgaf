@@ -31,9 +31,9 @@ cluster {
 
     # No upstream Postgres is ever actually archived from in this spec:
     # every test below only needs an authenticated connection and "SHOW
-    # wal_segment_size" (cmd_show.c), which touches nothing route-specific
-    # on disk -- so the route below has no "upstream" property at all
-    # (optional, see routes.h) and this container needs no relationship to
+    # wal_segment_size" (cmd_show.c), which touches nothing cluster-specific
+    # on disk -- so the cluster below has no "upstream" property at all
+    # (optional, see clusters.h) and this container needs no relationship to
     # node1 beyond existing in the same compose network.
     pg_walserver walserver
         command "tail -f /dev/null"
@@ -57,7 +57,7 @@ setup {
     # written, so no --ssl-ca-file flag is needed below.
     exec walserver bash -c 'pg_walserver create-cert --pgdata /tmp/cc --hostname walserver.internal'
 
-    # one route, path only -- no upstream, see the cluster{} comment above
+    # one cluster, path only -- no upstream, see the cluster{} comment above
     exec walserver bash -c 'mkdir -p /tmp/cc/mycluster && printf "[mycluster]\npath = /tmp/cc/mycluster\n" > /tmp/cc/pg_walserver.ini'
 
     # archiver_repl also needs a real SCRAM verifier for the two-factor
@@ -75,8 +75,8 @@ step test_000_no_ca_file_refuses_to_start {
     # a separate --pgdata with a "clientcert=verify-full" line and no CA
     # file at all (no --ssl-ca-file, no <pgdata>/ca.crt): must fail closed,
     # the same "never partially applied" principle a malformed HBA line or
-    # more than one named route with no TLS already gets (README.md's own
-    # "HBA" and "Routing beyond dbname" sections).
+    # more than one named cluster with no TLS already gets (README.md's own
+    # "HBA" and "Addressing a cluster beyond dbname" sections).
     exec walserver bash -c 'mkdir -p /tmp/ccnoca && cp /tmp/cc/server.crt /tmp/cc/server.key /tmp/ccnoca/'
     exec walserver bash -c 'printf "hostssl all cert_trust_user 0.0.0.0/0 trust clientcert=verify-full\n" > /tmp/ccnoca/pg_walserver_hba.conf'
     exec walserver bash -c 'printf "[mycluster]\npath = /tmp/ccnoca/mycluster\n" > /tmp/ccnoca/pg_walserver.ini && mkdir -p /tmp/ccnoca/mycluster'

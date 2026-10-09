@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_walserver/cmd_fetch_file.h
  *   FETCH_FILE '<name>': our own replication-connection command (not in
- *   PostgreSQL's grammar) to fetch one file of the route's WAL cache, one
+ *   PostgreSQL's grammar) to fetch one file of the cluster's WAL cache, one
  *   at a time, for a restore_command -- which spawns a fresh process per
  *   segment, with no session to reuse. It is served like any other command
  *   on an ordinary connection: the client (a plain libpq connection, see
@@ -18,13 +18,13 @@
 
 #include <stdbool.h>
 
-#include "routes.h"
+#include "clusters.h"
 
 /*
  * Only WAL segments ("^[0-9A-F]{24}$"), timeline history files
  * ("^[0-9A-F]{8}\.history$"), and base backup history files
  * ("^[0-9A-F]{24}\.[0-9A-F]{8}\.backup$") are served or accepted -- never a
- * .partial segment or any other file of the route's directory. Shared by
+ * .partial segment or any other file of the cluster's directory. Shared by
  * both the read side (cmd_fetch_file.c's own FETCH_FILE) and the write side
  * (cmd_archive_file.c's own ARCHIVE_FILE), see this function's own comment
  * in cmd_fetch_file.c. On the read side, the file is opened O_NOFOLLOW,
@@ -32,6 +32,6 @@
  */
 bool ws_fetch_filename_is_servable(const char *filename);
 
-void cmd_fetch_file(int sock, const WsRoute *route, const char *filename);
+void cmd_fetch_file(int sock, const WsCluster *cluster, const char *filename);
 
 #endif /* WS_CMD_FETCH_FILE_H */

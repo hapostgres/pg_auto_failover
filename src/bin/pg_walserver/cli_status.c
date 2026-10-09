@@ -22,7 +22,7 @@
 #include "log.h"
 #include "pidfile.h"
 #include "ps_state.h"
-#include "routes.h"
+#include "clusters.h"
 #include "string_utils.h"
 
 /* local helpers */
@@ -85,7 +85,7 @@ format_elapsed(time_t startedAt, char *dest, size_t destSize)
  * Always returns true unless pgdata itself is missing -- "serve" not
  * running is a normal, cleanly reported case, never an error. configFile,
  * when given, overrides where the config file itself lives, independent
- * of pgdata -- see config_file_path()'s own comment, routes.h.
+ * of pgdata -- see config_file_path()'s own comment, clusters.h.
  */
 bool
 cli_status_run(const char *pgdata, const char *configFile)
@@ -111,7 +111,7 @@ cli_status_run(const char *pgdata, const char *configFile)
 	}
 
 	/*
-	 * How many routes are configured with "receivewal = pull", the
+	 * How many clusters are configured with "receivewal = pull", the
 	 * denominator for the "N/M running" line below -- a process-workforce
 	 * fact (how many supervised children are *supposed* to be running),
 	 * not the data-layer facts (backup/WAL presence, which cluster is
@@ -120,19 +120,19 @@ cli_status_run(const char *pgdata, const char *configFile)
 	 * own child processes, never the archive data those processes
 	 * maintain.
 	 */
-	char routesPath[MAXPGPATH] = { 0 };
+	char clustersPath[MAXPGPATH] = { 0 };
 
-	config_file_path(pgdata, configFile, routesPath, sizeof(routesPath));
+	config_file_path(pgdata, configFile, clustersPath, sizeof(clustersPath));
 
-	WsRoute *routes = NULL;
-	int routeCount = 0;
+	WsCluster *clusters = NULL;
+	int clusterCount = 0;
 	int receivewalPullCount = 0;
 
-	if (routes_load(routesPath, &routes, &routeCount))
+	if (clusters_load(clustersPath, &clusters, &clusterCount))
 	{
-		for (int i = 0; i < routeCount; i++)
+		for (int i = 0; i < clusterCount; i++)
 		{
-			if (routes[i].receivewalPull)
+			if (clusters[i].receivewalPull)
 			{
 				receivewalPullCount++;
 			}
@@ -168,7 +168,7 @@ cli_status_run(const char *pgdata, const char *configFile)
 			receivewalWorkersRunning, receivewalPullCount);
 	fformat(stdout, "  bootstrap backups pending: %d\n", bootstrapsPending);
 
-	routes_free(routes);
+	clusters_free(clusters);
 
 	return true;
 }

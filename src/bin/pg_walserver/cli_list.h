@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_walserver/cli_list.h
  *   `pg_walserver list clusters|backups|wal`: three read-only inventory
- *   views over one or every route configured in a "--pgdata"'s own
+ *   views over one or every cluster configured in a "--pgdata"'s own
  *   "pg_walserver.ini". See cli_list.c's own header comment for the LSN-
  *   range computation and per-invocation caching design; cli_root.c wires
  *   each of the three functions below into its own "list <name>"
@@ -21,9 +21,9 @@
 #include "commandline.h"
 
 /*
- * cli_list_clusters_run prints one row per route configured in the config
+ * cli_list_clusters_run prints one row per cluster configured in the config
  * file config_file_path() resolves for pgdata/configFile (or just
- * clusterFilter's own route, when not NULL/empty): its path/upstream/
+ * clusterFilter's own cluster, when not NULL/empty): its path/upstream/
  * hostname/receivewal setting, whether it has a base backup, whether its
  * embedded receivewal worker is currently running (cross-referenced
  * against the ps state file, ps_state.h -- "n/a" when "serve" is not
@@ -38,15 +38,15 @@ bool cli_list_clusters_run(const char *pgdata, const char *configFile,
 
 /*
  * cli_list_backups_run prints one row per base backup found under every
- * matching route's own "basebackups/" directory (reusing cli_archive_
+ * matching cluster's own "basebackups/" directory (reusing cli_archive_
  * cleanup.c's own ws_backup_list_load()): its label/timestamp, size on
- * disk, and whether it is the route's ".latest".
+ * disk, and whether it is the cluster's ".latest".
  */
 bool cli_list_backups_run(const char *pgdata, const char *configFile,
 						  const char *clusterFilter);
 
 /*
- * cli_list_wal_run prints, per matching route, aggregate WAL cache stats
+ * cli_list_wal_run prints, per matching cluster, aggregate WAL cache stats
  * (segment count, total bytes, oldest/newest segment, .history file count)
  * by default, or, with segments true, one row per individual WAL/.partial/
  * .backup/.history file instead.

@@ -3,7 +3,7 @@
  *   `pg_walserver cluster register <name> ...`, `pg_walserver cluster drop
  *   <name> ...`, `pg_walserver cluster list ...`, `pg_walserver cluster
  *   set-upstream <name> ...`: the wizard that creates, removes, lists,
- *   and re-points the clusters (routes) one pg_walserver instance archives
+ *   and re-points the clusters (clusters) one pg_walserver instance archives
  *   -- see cli_cluster.c for the full sequence each verb runs. Split out
  *   of what used to be "pg_walserver setup" (now cli_setup.h, narrowed to
  *   configuring pg_walserver itself, nothing about any one cluster):
@@ -45,18 +45,18 @@ typedef struct WsClusterRegisterOptions
 	char host[_POSIX_HOST_NAME_MAX];
 	char port[16];
 	char user[NAMEDATALEN];
-	char hostname[_POSIX_HOST_NAME_MAX]; /* the route's own TLS SNI hostname,
+	char hostname[_POSIX_HOST_NAME_MAX]; /* the cluster's own TLS SNI hostname,
 	                                      * written into pg_walserver.ini's
 	                                      * "hostname" property -- see
 	                                      * cli_cluster.c's own comment on
 	                                      * why this matters the moment a
-	                                      * second route is added */
+	                                      * second cluster is added */
 	bool receivewalPull;                /* on by default (an operator has to
 	                                     * pass --no-receivewal, or --receivewal
 	                                     * none, to opt out): written as an
 	                                     * explicit "receivewal = pull" into
-	                                     * the route's own section
-	                                     * (routes.h) unless opted out,
+	                                     * the cluster's own section
+	                                     * (clusters.h) unless opted out,
 	                                     * opting it into the embedded
 	                                     * receivewal worker (receivewal.c) once "serve"
 	                                     * starts. */
@@ -74,7 +74,7 @@ typedef struct WsClusterRegisterOptions
 bool ws_cluster_register_run(const WsClusterRegisterOptions *options);
 
 /*
- * ws_cluster_drop_run, without purge, marks routeKey's own registration
+ * ws_cluster_drop_run, without purge, marks clusterKey's own registration
  * disabled in the config file config_file_path() resolves for pgdata/
  * configFile, rather than removing it -- its own on-disk data is left in
  * place and its "path" stays on record for a later --purge to find; with
@@ -83,34 +83,34 @@ bool ws_cluster_register_run(const WsClusterRegisterOptions *options);
  * on success, false with an error already logged otherwise.
  */
 bool ws_cluster_drop_run(const char *pgdata, const char *configFile,
-						 const char *routeKey, bool purge);
+						 const char *clusterKey, bool purge);
 
 /*
- * ws_cluster_enable_run clears routeKey's own "disabled" property -- the
+ * ws_cluster_enable_run clears clusterKey's own "disabled" property -- the
  * dedicated, symmetric counterpart to "cluster drop" (without --purge):
  * see cli_cluster.c's own comment for how this differs from re-running
  * "cluster register" to the same end. Returns true (having printed a
- * clean "already active" message, never an error) when the route was
- * already enabled, false only on a genuine problem (no such route, or a
+ * clean "already active" message, never an error) when the cluster was
+ * already enabled, false only on a genuine problem (no such cluster, or a
  * write failure).
  */
 bool ws_cluster_enable_run(const char *pgdata, const char *configFile,
-						   const char *routeKey);
+						   const char *clusterKey);
 
 /*
- * ws_cluster_prune_run purges every disabled ("dropped") route at once,
+ * ws_cluster_prune_run purges every disabled ("dropped") cluster at once,
  * the "ala docker" bulk equivalent of "cluster drop --purge <name>"
- * applied to every route currently disabled -- see cli_cluster.c's own
- * comment. Always returns true; a per-route rmtree() failure is warned
+ * applied to every cluster currently disabled -- see cli_cluster.c's own
+ * comment. Always returns true; a per-cluster rmtree() failure is warned
  * about, not fatal to the rest.
  */
 bool ws_cluster_prune_run(const char *pgdata, const char *configFile);
 
 /*
- * ws_cluster_list_run prints one row per registered route -- see
+ * ws_cluster_list_run prints one row per registered cluster -- see
  * cli_cluster.c's own comment for exactly which fields, and how this
  * differs from :ref:`pg_walserver_list`'s own "list clusters". By
- * default, only active (non-disabled) routes are shown; with
+ * default, only active (non-disabled) clusters are shown; with
  * showDisabled (--disabled), only dropped (disabled) ones are -- the two
  * views are deliberately never combined into one table, the same reason
  * "docker ps" (running only) and "docker ps -a" (stopped included) stay
@@ -127,7 +127,7 @@ bool ws_cluster_list_run(const char *pgdata, const char *configFile,
 						 bool showUpstream, bool showDisabled);
 
 /*
- * ws_cluster_set_upstream_run changes routeKey's own "upstream" property
+ * ws_cluster_set_upstream_run changes clusterKey's own "upstream" property
  * to newUpstream, reloading an already-running "serve" for the same
  * --pgdata immediately afterward so its embedded receivewal worker (if
  * any) relocates onto the new upstream -- see cli_cluster.c's own
@@ -136,7 +136,7 @@ bool ws_cluster_list_run(const char *pgdata, const char *configFile,
  * Returns true on success, false with an error already logged otherwise.
  */
 bool ws_cluster_set_upstream_run(const char *pgdata, const char *configFile,
-								 const char *routeKey,
+								 const char *clusterKey,
 								 const char *newUpstream,
 								 bool forceBasebackup);
 

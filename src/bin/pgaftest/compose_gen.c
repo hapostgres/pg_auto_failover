@@ -597,7 +597,7 @@ compose_service_ip(const char *projectName, int offset, char *buf, int buflen)
  * moment they don't already exist inside the named volume, which would
  * leave /var/lib/postgres/ws itself un-writable by the container's own
  * unprivileged user for anything pg_walserver subsequently needs to create
- * under it (pg_walserver.ini, a route's own subdirectory, ...) if the HBA
+ * under it (pg_walserver.ini, a cluster's own subdirectory, ...) if the HBA
  * file were bind-mounted directly into it. Copying it into place from
  * within the container's own startup command, after that command's own
  * "mkdir -p /var/lib/postgres/ws" has created the directory as the

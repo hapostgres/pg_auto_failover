@@ -21,7 +21,7 @@
 #include "string_utils.h"
 #include "wal_segment.h"
 
-/* default WAL segment size (16MB) when the route has no pg_walserver_walsegsize */
+/* default WAL segment size (16MB) when the cluster has no pg_walserver_walsegsize */
 #define WS_DEFAULT_WAL_SEGMENT_SIZE UINT64CONST(0x1000000)
 #define WS_MIN_WAL_SEGMENT_SIZE UINT64CONST(0x100000)
 #define WS_MAX_WAL_SEGMENT_SIZE UINT64CONST(0x40000000)
@@ -30,27 +30,27 @@
 
 
 /*
- * ws_route_wal_segment_size returns the route's own configured WAL segment
+ * ws_cluster_wal_segment_size returns the cluster's own configured WAL segment
  * size, read from its "pg_walserver_walsegsize" file (a bare decimal byte count,
  * written once by pg_autoctl when the archiver first learns it from the
  * group's real primary). Falls back to WS_DEFAULT_WAL_SEGMENT_SIZE (16MB)
- * when route is NULL/has no path, the file is absent, or its content isn't a
+ * when cluster is NULL/has no path, the file is absent, or its content isn't a
  * valid power-of-two size in [WS_MIN_WAL_SEGMENT_SIZE,
  * WS_MAX_WAL_SEGMENT_SIZE] (logged as an error in that last case). Every
  * segment number/name/LSN computation and "SHOW wal_segment_size" derive
  * from it.
  */
 uint64_t
-ws_route_wal_segment_size(const WsRoute *route)
+ws_cluster_wal_segment_size(const WsCluster *cluster)
 {
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		return WS_DEFAULT_WAL_SEGMENT_SIZE;
 	}
 
 	char path[MAXPGPATH];
 
-	sformat(path, sizeof(path), "%s/pg_walserver_walsegsize", route->path);
+	sformat(path, sizeof(path), "%s/pg_walserver_walsegsize", cluster->path);
 
 	char *contents = NULL;
 	size_t size = 0;
@@ -100,7 +100,7 @@ ws_route_wal_segment_size(const WsRoute *route)
 
 
 /*
- * wal_dir_find_latest scans the route's directory for the highest-numbered complete
+ * wal_dir_find_latest scans the cluster's directory for the highest-numbered complete
  * WAL segment (24 hex chars, no ".partial" suffix). On success, returns
  * true with *timeline set and endLsn filled with that segment's end-of-
  * segment LSN (formatted "%X/%08X", matching pg_lsn's own text form) --
@@ -109,11 +109,11 @@ ws_route_wal_segment_size(const WsRoute *route)
  * if the directory has no WAL segments yet.
  */
 bool
-wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
+wal_dir_find_latest(const WsCluster *cluster, uint32_t *timeline,
 					char *endLsn, size_t endLsnSize)
 {
-	uint64_t segSize = ws_route_wal_segment_size(route);
-	DIR *dir = opendir(route->path);
+	uint64_t segSize = ws_cluster_wal_segment_size(cluster);
+	DIR *dir = opendir(cluster->path);
 
 	if (dir == NULL)
 	{
@@ -159,11 +159,11 @@ wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
 
 
 /*
- * wal_dir_has_any_segment returns true as soon as route->path holds at
+ * wal_dir_has_any_segment returns true as soon as cluster->path holds at
  * least one WAL segment file, complete OR still ".partial" -- unlike wal_
  * dir_find_latest() above (complete segments only, the right conservative
  * choice for a "resume from here" position), this is a plain "has a
- * receivewal worker connected and begun streaming into this route at all yet"
+ * receivewal worker connected and begun streaming into this cluster at all yet"
  * check: a receivewal worker whose only activity so far is its very first, still-
  * growing ".partial" segment (the common case moments after it starts)
  * must count as "yes" here, or a caller polling for readiness would spin
@@ -172,14 +172,14 @@ wal_dir_find_latest(const WsRoute *route, uint32_t *timeline,
  * "prime the embedded receivewal worker before taking the first base backup" use.
  */
 bool
-wal_dir_has_any_segment(const WsRoute *route)
+wal_dir_has_any_segment(const WsCluster *cluster)
 {
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		return false;
 	}
 
-	DIR *dir = opendir(route->path);
+	DIR *dir = opendir(cluster->path);
 
 	if (dir == NULL)
 	{
@@ -377,9 +377,9 @@ ws_receivewal_progress_write(const char *path, const char *lsn, uint32_t timelin
 
 /*
  * ws_receivewal_progress_read reads it back: lsn/timeline/observedAt are
- * only set on success. Returns false (untouched) when the route has no such
+ * only set on success. Returns false (untouched) when the cluster has no such
  * file yet (its receivewal worker has never ticked, isn't running, or the
- * route isn't "receivewal = pull" at all) or it fails to parse -- callers
+ * cluster isn't "receivewal = pull" at all) or it fails to parse -- callers
  * must treat that as "no live reading available", never as an error.
  */
 bool

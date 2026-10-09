@@ -250,7 +250,7 @@ wal_lsn_to_segment_name(const char *lsn, uint32_t timeline, uint64_t segSize,
  * Built on common/system_utils.c's own pretty_print_bytes_scaled(), the
  * same unit-scaling mechanism pretty_print_bytes() uses, but switching
  * units at exactly 1024 rather than 10240: segSize is always an exact
- * power of two between 1 MiB and 1 GiB (see ws_route_wal_segment_size()'s
+ * power of two between 1 MiB and 1 GiB (see ws_cluster_wal_segment_size()'s
  * own validation), so this reproduces the GUC's own "16MB"/"1GB" wire
  * format exactly, with no rounding -- equivalent to, and verified against,
  * the previous direct bit-shift (segSize >> 20 / segSize >> 30)

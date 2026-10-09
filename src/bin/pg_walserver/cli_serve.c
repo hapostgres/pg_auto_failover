@@ -25,7 +25,7 @@
 #include "log.h"
 #include "pidfile.h"
 #include "receivewal.h"
-#include "routes.h"
+#include "clusters.h"
 #include "scram.h"
 #include "string_utils.h"
 #include "tls.h"
@@ -77,13 +77,13 @@ CommandLine serve_command =
 				 "  --pgdata    this instance's own top-level storage root "
 				 "(defaults to\n"
 				 "              the PGDATA environment variable); every "
-				 "route's own storage\n"
+				 "cluster's own storage\n"
 				 "              (WAL, base backups) lives under it, and "
 				 "so does\n"
 				 "              <pgdata>/pg_walserver_hba.conf, unless "
 				 "--insecure is given\n"
 				 "  --config  where the config file mapping each "
-				 "route key (an opaque\n"
+				 "cluster key (an opaque\n"
 				 "              string; pg_auto_failover's own convention "
 				 "is\n"
 				 "              \"<formation>/<group>\") to its own "
@@ -245,7 +245,7 @@ cli_serve_getopt(int argc, char **argv)
 
 /*
  * cli_serve_run brings up the accept loop: it validates --pgdata/--insecure,
- * derives the routes/HBA/passwd paths under --pgdata, initializes TLS and
+ * derives the clusters/HBA/passwd paths under --pgdata, initializes TLS and
  * the default HBA file, seeds the SCRAM mock secret (before any fork, so
  * every connection sees the same one), and calls ws_accept_loop(), which
  * only returns once the server is asked to stop. Never returns on success
@@ -258,7 +258,7 @@ cli_serve_run(int argc, char **argv)
 	(void) argv;
 
 	/*
-	 * Without --pgdata (or PGDATA) there is no HBA file, no routes and no
+	 * Without --pgdata (or PGDATA) there is no HBA file, no clusters and no
 	 * authentication at all: refuse to start unless --insecure says that is
 	 * what is wanted (manual testing).
 	 */
@@ -280,7 +280,7 @@ cli_serve_run(int argc, char **argv)
 		strlcpy(serveConfig.pgdata, servePgdata, sizeof(serveConfig.pgdata));
 
 		config_file_path(servePgdata, serveConfigFile,
-						 serveConfig.routesPath, sizeof(serveConfig.routesPath));
+						 serveConfig.clustersPath, sizeof(serveConfig.clustersPath));
 		sformat(serveConfig.auth.hbaPath, sizeof(serveConfig.auth.hbaPath),
 				"%s/pg_walserver_hba.conf", servePgdata);
 		sformat(serveConfig.auth.passwdPath, sizeof(serveConfig.auth.passwdPath),
@@ -288,7 +288,7 @@ cli_serve_run(int argc, char **argv)
 
 		/*
 		 * "pg_walserver setup" (cli_setup.c) writes the config file's own
-		 * global section (config_load_global(), routes.c): whichever of
+		 * global section (config_load_global(), clusters.c): whichever of
 		 * port/ssl-cert-file/ssl-key-file/ssl-ca-file/auth-timeout was
 		 * persisted there becomes this instance's own default from here on,
 		 * still always overridden by the same flag given directly on this
@@ -298,10 +298,10 @@ cli_serve_run(int argc, char **argv)
 		 */
 		WsGlobalConfig globalConfig = { 0 };
 
-		if (!config_load_global(serveConfig.routesPath, &globalConfig))
+		if (!config_load_global(serveConfig.clustersPath, &globalConfig))
 		{
 			log_fatal("Failed to parse \"%s\": refusing to start",
-					  serveConfig.routesPath);
+					  serveConfig.clustersPath);
 			exit(1);
 		}
 
@@ -313,7 +313,7 @@ cli_serve_run(int argc, char **argv)
 		if (serveConfig.port <= 0 || serveConfig.port > 65535)
 		{
 			log_fatal("Invalid port %d in \"%s\"", serveConfig.port,
-					  serveConfig.routesPath);
+					  serveConfig.clustersPath);
 			exit(1);
 		}
 
@@ -412,24 +412,24 @@ cli_serve_run(int argc, char **argv)
 		}
 
 		/*
-		 * More than one *named* route (the "*" wildcard doesn't count: a
-		 * single named route plus a wildcard fallback is still fully
+		 * More than one *named* cluster (the "*" wildcard doesn't count: a
+		 * single named cluster plus a wildcard fallback is still fully
 		 * disambiguated by dbname alone) and no TLS: refuse to start.
-		 * dbname-based routing cannot tell a real physical standby's
-		 * connection apart from any other route once there is more than
+		 * dbname-based addressing cannot tell a real physical standby's
+		 * connection apart from any other cluster once there is more than
 		 * one -- every such standby's own walreceiver always sends the
-		 * literal dbname "replication", never a real route key (see
+		 * literal dbname "replication", never a real cluster key (see
 		 * auth.c's own comment) -- so TLS SNI is the only way left to
-		 * address more than one route by name. `pg_walserver setup` already
+		 * address more than one cluster by name. `pg_walserver setup` already
 		 * creates a self-signed certificate the moment it writes a second
-		 * route, precisely so this check never fires for a deployment
+		 * cluster, precisely so this check never fires for a deployment
 		 * built with it; it exists here too for a pg_walserver.ini
 		 * hand-edited or driven some other way.
 		 */
 
 		/*
 		 * Parse pg_walserver.ini and pg_walserver_hba.conf once, up front:
-		 * both are cached in serveConfig (WsServerConfig.routes/routeCount,
+		 * both are cached in serveConfig (WsServerConfig.clusters/clusterCount,
 		 * WsAuthConfig.hbaRuleSet) and installed only once they parse
 		 * cleanly -- every connection reads this same in-memory snapshot
 		 * from here on, never the files themselves (see accept_loop.c's
@@ -440,11 +440,11 @@ cli_serve_run(int argc, char **argv)
 		 * startup instead of leaving every future connection to discover
 		 * it on its own.
 		 */
-		if (!routes_load(serveConfig.routesPath, &serveConfig.routes,
-						 &serveConfig.routeCount))
+		if (!clusters_load(serveConfig.clustersPath, &serveConfig.clusters,
+						   &serveConfig.clusterCount))
 		{
 			log_fatal("Failed to parse \"%s\": refusing to start",
-					  serveConfig.routesPath);
+					  serveConfig.clustersPath);
 			exit(1);
 		}
 
@@ -464,48 +464,48 @@ cli_serve_run(int argc, char **argv)
 			exit(1);
 		}
 
-		int namedRouteCount = 0;
+		int namedClusterCount = 0;
 
-		for (int i = 0; i < serveConfig.routeCount; i++)
+		for (int i = 0; i < serveConfig.clusterCount; i++)
 		{
-			if (!streq(serveConfig.routes[i].key, WS_ROUTES_WILDCARD_KEY))
+			if (!streq(serveConfig.clusters[i].key, WS_CLUSTERS_WILDCARD_KEY))
 			{
-				namedRouteCount++;
+				namedClusterCount++;
 			}
 		}
 
-		if (namedRouteCount > 1 && !ws_tls_server_enabled())
+		if (namedClusterCount > 1 && !ws_tls_server_enabled())
 		{
-			log_fatal("\"%s\" has %d named routes but TLS is not "
-					  "enabled: more than one route requires TLS (for "
-					  "SNI-based routing) to be reachable by name at "
+			log_fatal("\"%s\" has %d named clusters but TLS is not "
+					  "enabled: more than one cluster requires TLS (for "
+					  "SNI-based addressing) to be reachable by name at "
 					  "all -- pass --ssl-cert-file/--ssl-key-file, or "
 					  "create <pgdata>/server.crt and server.key "
 					  "(\"pg_walserver setup\" already does this "
-					  "automatically)", serveConfig.routesPath,
-					  namedRouteCount);
+					  "automatically)", serveConfig.clustersPath,
+					  namedClusterCount);
 			exit(1);
 		}
 
 		/*
-		 * Every "receivewal = pull" route gets its own supervised
+		 * Every "receivewal = pull" cluster gets its own supervised
 		 * embedded pg_receivewal child (receivewal.c) -- started here,
 		 * once, now that pg_walserver.ini/HBA validation above has
 		 * already succeeded, and before ws_accept_loop() (and thus
 		 * before any connection child can be forked). See receivewal.h's
 		 * own comment for the full startup/shutdown contract.
 		 */
-		(void) ws_receivewal_start_all(serveConfig.routes, serveConfig.routeCount);
+		(void) ws_receivewal_start_all(serveConfig.clusters, serveConfig.clusterCount);
 
 		/*
-		 * Now that every "receivewal = pull" route's own real receivewal worker above
-		 * has been started, check every route for a missing base backup
+		 * Now that every "receivewal = pull" cluster's own real receivewal worker above
+		 * has been started, check every cluster for a missing base backup
 		 * and kick off an automatic bootstrap for it in the background --
 		 * the first of the two trigger points documented in accept_loop.h's
 		 * own ws_bootstrap_missing_backups() comment (the second being a
 		 * successful SIGHUP reload, ws_reload_config(), accept_loop.c).
 		 */
-		ws_bootstrap_missing_backups(serveConfig.routes, serveConfig.routeCount);
+		ws_bootstrap_missing_backups(serveConfig.clusters, serveConfig.clusterCount);
 
 		/*
 		 * The pidfile is what "pg_walserver reload"/"pg_ctl reload"-style

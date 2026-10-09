@@ -34,7 +34,7 @@ typedef struct WsWalServerTarget
 	char host[_POSIX_HOST_NAME_MAX];
 	int port;
 	char user[NAMEDATALEN];
-	char route[NAMEDATALEN + 16];   /* sent as the connection's dbname */
+	char cluster[NAMEDATALEN + 16];   /* sent as the connection's dbname */
 	char sslmode[32];                /* libpq sslmode, e.g. "prefer"/"require" */
 } WsWalServerTarget;
 

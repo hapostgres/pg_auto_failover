@@ -1,5 +1,5 @@
 # pg_walserver's own embedded, supervised receivewal worker (receivewal.c): a
-# route configured with "receivewal = pull" (pg_walserver.ini) -- written by
+# cluster configured with "receivewal = pull" (pg_walserver.ini) -- written by
 # `pg_walserver cluster register` *by default* now, with no --receivewal flag at all
 # needed (an operator has to pass --no-receivewal / --receivewal none to opt
 # out) -- gets a forked, supervised pg_receivewal child at "serve" startup:
@@ -38,10 +38,10 @@
 # command line avoids that self-match.
 #
 #   test_001  after "pg_walserver serve" starts with a "receivewal = pull"
-#             route configured, a pg_receivewal child is alive under it,
-#             with no external pg_receivewal ever invoked for this route;
+#             cluster configured, a pg_receivewal child is alive under it,
+#             with no external pg_receivewal ever invoked for this cluster;
 #             forcing a WAL switch on node1 lands a byte-identical segment
-#             in the route's own directory and in the independent
+#             in the cluster's own directory and in the independent
 #             reference capture
 #   test_002  killing the receivewal worker child (SIGKILL, simulating a crash) gets
 #             it restarted automatically, under a new pid, and receiving
@@ -79,7 +79,7 @@ setup {
     # checks pgautofailover_replicator's REPLICATION attribute on node1 and
     # fetches node1's real system identifier -- this spec only needs the
     # receivewal worker, not BASE_BACKUP, so it never relies on the base backup
-    # "serve" bootstraps automatically for this route in the background.
+    # "serve" bootstraps automatically for this cluster in the background.
     exec node2 bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register default/0 --pgdata /tmp/ws --path /tmp/ws/default/0 --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable"'
     exec node2 bash -c 'grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini || { echo "receivewal = pull should have been written by default, with no --receivewal flag at all"; cat /tmp/ws/pg_walserver.ini; false; }'
 

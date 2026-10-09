@@ -341,8 +341,8 @@ ws_tls_server_accept(int sock)
  * SSL_client_hello_get0_ext() instead, on OpenSSL's own advice, because it
  * needs to pick a certificate *during* the handshake), a plain post-
  * handshake read has no such ordering concern: nothing here depends on the
- * result to decide anything about the handshake itself, only about routing
- * a request afterward.
+ * result to decide anything about the handshake itself, only about
+ * addressing a request afterward.
  */
 const char *
 ws_tls_get_sni_hostname(void)

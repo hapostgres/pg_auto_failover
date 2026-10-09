@@ -348,20 +348,20 @@ ws_client_cert_matches(int sock, const char *user)
 
 /*
  * ws_authenticate authenticates the connection per the HBA file and then
- * resolves routeKey to a route. routeKey is passed explicitly because it is
+ * resolves clusterKey to a cluster. clusterKey is passed explicitly because it is
  * not always the connection's dbname (a real walreceiver sends the literal
  * "replication", see accept_loop.c). On success returns
- * true and sets *foundRoute (NULL when routes were not supplied at all).
+ * true and sets *foundCluster (NULL when clusters were not supplied at all).
  * On failure an ErrorResponse has already been sent; the caller only needs
  * to close the connection. AuthenticationOk is NOT sent here: the caller
  * sends it, as before.
  */
 bool
-ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
-				const WsRoute *routes, int routeCount,
-				const WsAuthConfig *authConfig, const WsRoute **foundRoute)
+ws_authenticate(int sock, const WsStartupParams *params, const char *clusterKey,
+				const WsCluster *clusters, int clusterCount,
+				const WsAuthConfig *authConfig, const WsCluster **foundCluster)
 {
-	*foundRoute = NULL;
+	*foundCluster = NULL;
 
 	if (authConfig->hbaPath[0] == '\0')
 	{
@@ -375,31 +375,31 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 
 	/*
 	 * Authenticate BEFORE revealing anything, as PostgreSQL does: which
-	 * routes exist is only told to a client that got through the HBA rules
-	 * and the password exchange. An unknown route is reported (3D000,
+	 * clusters exist is only told to a client that got through the HBA rules
+	 * and the password exchange. An unknown cluster is reported (3D000,
 	 * "database does not exist") only after a successful authentication.
 	 *
 	 * Three tiers, in order: an exact dbname match (what every command
 	 * except a real physical standby's own walreceiver can set directly);
 	 * failing that, over TLS, the client's own SNI hostname (a real
 	 * standby's walreceiver always sends the literal dbname "replication",
-	 * never a real route key -- see routes_find_by_hostname()'s own
+	 * never a real cluster key -- see clusters_find_by_hostname()'s own
 	 * comment); failing that too, the "*" wildcard, if the file has one.
-	 * HBA's own ROUTE matching, just below, stays independent of all of
+	 * HBA's own CLUSTER matching, just below, stays independent of all of
 	 * this and always sees the literal dbname the client sent -- see
 	 * hba.h's own comment.
 	 */
-	const WsRoute *route = routes_find_exact(routes, routeCount, routeKey);
+	const WsCluster *cluster = clusters_find_exact(clusters, clusterCount, clusterKey);
 
-	if (route == NULL && ws_tls_active())
+	if (cluster == NULL && ws_tls_active())
 	{
-		route = routes_find_by_hostname(routes, routeCount,
-										ws_tls_get_sni_hostname());
+		cluster = clusters_find_by_hostname(clusters, clusterCount,
+											ws_tls_get_sni_hostname());
 	}
 
-	if (route == NULL)
+	if (cluster == NULL)
 	{
-		route = routes_find_exact(routes, routeCount, WS_ROUTES_WILDCARD_KEY);
+		cluster = clusters_find_exact(clusters, clusterCount, WS_CLUSTERS_WILDCARD_KEY);
 	}
 
 	char peerIP[NI_MAXHOST];
@@ -411,15 +411,15 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 	}
 
 	char safeUser[NAMEDATALEN + 8];
-	char safeRoute[NAMEDATALEN + 24];
+	char safeCluster[NAMEDATALEN + 24];
 
 	sanitizeForLog(params->user, safeUser, sizeof(safeUser));
-	sanitizeForLog(routeKey, safeRoute, sizeof(safeRoute));
+	sanitizeForLog(clusterKey, safeCluster, sizeof(safeCluster));
 
 	WsAuthMethod method = WS_AUTH_REJECT;
 	bool requireClientCert = false;
 
-	hba_match(&authConfig->hbaRuleSet, routeKey, params->user, peerIP,
+	hba_match(&authConfig->hbaRuleSet, clusterKey, params->user, peerIP,
 			  ws_tls_active(), &method, &requireClientCert);
 
 	/*
@@ -457,12 +457,12 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 		case WS_AUTH_REJECT:
 		default:
 		{
-			log_warn("Rejecting connection from %s as user \"%s\" for route "
+			log_warn("Rejecting connection from %s as user \"%s\" for cluster "
 					 "\"%s\": no matching HBA entry", peerIP, safeUser,
-					 safeRoute);
+					 safeCluster);
 
 			/* one generic message: it names the peer and the user, both
-			 * known to the client already, and never the route */
+			 * known to the client already, and never the cluster */
 			char message[256];
 
 			sformat(message, sizeof(message),
@@ -473,42 +473,42 @@ ws_authenticate(int sock, const WsStartupParams *params, const char *routeKey,
 		}
 	}
 
-	if (route == NULL)
+	if (cluster == NULL)
 	{
-		log_warn("Authenticated connection for unknown route \"%s\"",
-				 safeRoute);
+		log_warn("Authenticated connection for unknown cluster \"%s\"",
+				 safeCluster);
 
 		char message[256];
 
 		sformat(message, sizeof(message), "database \"%s\" does not exist",
-				safeRoute);
+				safeCluster);
 		ws_send_error_response(sock, "3D000", message);
 		return false;
 	}
 
-	if (route->disabled)
+	if (cluster->disabled)
 	{
 		/*
-		 * A dropped ("cluster drop" without --purge) route: refused the
-		 * same way an unknown route is, after authentication, never
+		 * A dropped ("cluster drop" without --purge) cluster: refused the
+		 * same way an unknown cluster is, after authentication, never
 		 * before -- see this function's own header comment on why. The
-		 * route genuinely still exists in the config file (its own "path"
+		 * cluster genuinely still exists in the config file (its own "path"
 		 * stays on record for a later "cluster drop --purge"/"cluster
 		 * prune" to find it), so this is deliberately a distinct message
 		 * from "database does not exist", not the same 3D000 case.
 		 */
-		log_warn("Authenticated connection for dropped (disabled) route "
-				 "\"%s\"", safeRoute);
+		log_warn("Authenticated connection for dropped (disabled) cluster "
+				 "\"%s\"", safeCluster);
 
 		char message[256];
 
 		sformat(message, sizeof(message),
 				"database \"%s\" has been dropped and is no longer served",
-				safeRoute);
+				safeCluster);
 		ws_send_error_response(sock, "3D000", message);
 		return false;
 	}
 
-	*foundRoute = route;
+	*foundCluster = cluster;
 	return true;
 }

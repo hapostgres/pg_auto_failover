@@ -397,7 +397,7 @@ monitor_line:
  *     safe: process_supervisor.c gives it the same orphan-reaping/clean-
  *     shutdown behaviour pg_autoctl's own supervisor.c gives a managed
  *     node). A spec that needs to run `pg_walserver setup` by hand before
- *     `serve` ever starts (e.g. to configure named routes across several
+ *     `serve` ever starts (e.g. to configure named clusters across several
  *     test steps) overrides this default the same way any node already
  *     can, with an explicit trailing "command "..."" -- no second
  *     override mechanism invented for this. This default command also
@@ -452,9 +452,9 @@ pg_walserver_line:
 		 * Default: run pg_walserver's own "serve" mode directly as this
 		 * container's PID 1, pointed at a writable directory of its own
 		 * under the node's already-provisioned /var/lib/postgres volume.
-		 * Zero named routes at startup is a supported, harmless state (see
+		 * Zero named clusters at startup is a supported, harmless state (see
 		 * cli_serve_run in pg_walserver/cli_root.c); a spec that wants
-		 * routes configured first overrides this via "command \"...\"".
+		 * clusters configured first overrides this via "command \"...\"".
 		 *
 		 * Also copies in a real, usable default pg_walserver_hba.conf --
 		 * compose_gen.c's write_pg_walserver_default_hba() bind-mounts it
@@ -851,7 +851,7 @@ node_opt:
  * alias_list — one or more quoted vanity hostnames after "alias", each one
  * appended to current_node->aliases as it is parsed.  Quoted strings only
  * (not a bare T_IDENT): CLUSTER_BODY's identifier pattern doesn't allow
- * ".", and a hostname like "routeA.internal" needs one.
+ * ".", and a hostname like "clusterA.internal" needs one.
  */
 alias_list:
 	  T_STRING

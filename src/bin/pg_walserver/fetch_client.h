@@ -25,7 +25,7 @@
 #define WS_FETCH_CLIENT_H
 
 int ws_fetch_file_client(const char *host, int port, const char *user,
-						 const char *routeKey, const char *sslmode,
+						 const char *clusterKey, const char *sslmode,
 						 const char *applicationName,
 						 const char *filename, const char *outputPath);
 

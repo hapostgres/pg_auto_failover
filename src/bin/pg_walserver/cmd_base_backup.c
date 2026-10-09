@@ -181,7 +181,7 @@ collect_options(const WsCommandOption *options, int nOptions, BaseBackupOptions 
  * crude, but we are not expecting any variability in the file format", to
  * quote the original). Unlike the backend version, a parse failure here is
  * not FATAL: it's logged and the function returns false, and the caller
- * falls back to the route's own systemid/timeline, "0/0" for the LSN --
+ * falls back to the cluster's own systemid/timeline, "0/0" for the LSN --
  * this project never expects a backup_label to fail to parse (the archiver
  * itself wrote it), but a corrupt/missing file must not crash the server.
  * Fields the backend also extracts but no caller here needs (BACKUP METHOD,
@@ -336,7 +336,7 @@ send_position_row(int sock, const char *lsn, const char *tli)
  * reuse (as opposed to the plain filename-shape primitives below,
  * wal_segment_name_is_valid()/_is_partial()/_parse(), src/bin/common/
  * wal_segment.h, which this file does share with wal_dir_scan.c -- there
- * is nothing route- or archiver-specific about recognizing a WAL segment
+ * is nothing cluster- or archiver-specific about recognizing a WAL segment
  * filename's own shape): wal_dir_find_latest() only ever considers a
  * *complete* (non-".partial") segment, which is the right, conservative
  * choice for IDENTIFY_SYSTEM/CREATE_REPLICATION_SLOT's own
@@ -432,11 +432,11 @@ partial_segment_real_length(const char *path, uint64_t *length)
 
 
 static bool
-find_reachable_end_position(const WsRoute *route, uint32_t *timeline,
+find_reachable_end_position(const WsCluster *cluster, uint32_t *timeline,
 							char *endLsn, size_t endLsnSize)
 {
-	const char *walcacheDir = route->path;
-	uint64_t segSize = ws_route_wal_segment_size(route);
+	const char *walcacheDir = cluster->path;
+	uint64_t segSize = ws_cluster_wal_segment_size(cluster);
 
 	if (wal_position_cache_read(walcacheDir, timeline, endLsn, endLsnSize))
 	{
@@ -539,7 +539,7 @@ find_reachable_end_position(const WsRoute *route, uint32_t *timeline,
  * that backup's own label/subdirectory under "<path>/basebackups/". This
  * is the *only* place BASE_BACKUP learns which backup is current: no
  * caching, no monitor round trip, just whatever this file says right now
- * -- see routes.h's own header comment for the full rationale. Returns
+ * -- see clusters.h's own header comment for the full rationale. Returns
  * false (labelOut untouched) when the file doesn't exist yet: no live base
  * backup has ever completed for this membership.
  */
@@ -686,24 +686,24 @@ fail_stream(int sock)
 
 
 void
-cmd_base_backup(int sock, const WsRoute *route,
+cmd_base_backup(int sock, const WsCluster *cluster,
 				const WsCommandOption *options, int nOptions)
 {
 	char label[NAMEDATALEN] = { 0 };
 	char basebackupDir[MAXPGPATH] = { 0 };
 
-	if (route == NULL || route->path[0] == '\0' ||
-		!read_latest_basebackup_label(route->path, label, sizeof(label)))
+	if (cluster == NULL || cluster->path[0] == '\0' ||
+		!read_latest_basebackup_label(cluster->path, label, sizeof(label)))
 	{
 		ws_send_error_response(sock, "58P01",
-							   "no base backup configured for this route "
+							   "no base backup configured for this cluster "
 							   "(the archiver hasn't taken one yet, or this "
-							   "route wasn't given a storage path)");
+							   "cluster wasn't given a storage path)");
 		return;
 	}
 
 	sformat(basebackupDir, sizeof(basebackupDir), "%s/basebackups/%s",
-			route->path, label);
+			cluster->path, label);
 
 	if (!directory_exists(basebackupDir))
 	{
@@ -784,7 +784,7 @@ cmd_base_backup(int sock, const WsRoute *route,
 	 */
 	uint32_t walcacheTimeline = 0;
 	char walcacheEndLsn[32] = { 0 };
-	bool haveWalcacheInfo = find_reachable_end_position(route,
+	bool haveWalcacheInfo = find_reachable_end_position(cluster,
 														&walcacheTimeline,
 														walcacheEndLsn,
 														sizeof(walcacheEndLsn));

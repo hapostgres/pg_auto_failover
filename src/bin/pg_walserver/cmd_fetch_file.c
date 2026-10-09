@@ -85,7 +85,7 @@ is_wal_backup_label_name(const char *filename, size_t len)
  * files exactly like WAL segments, so both directions need to recognize
  * them, which is why this one function
  * is shared by both cmd_fetch_file.c and cmd_archive_file.c rather than each
- * having its own allow-list. Everything else in the route's directory
+ * having its own allow-list. Everything else in the cluster's directory
  * (pg_walserver_hba.conf, pg_walserver_passwd's neighbours, .slot_* files, the
  * basebackups/ tree, ".partial" segments still being written...) is never
  * served or accepted.
@@ -118,7 +118,7 @@ ws_fetch_filename_is_servable(const char *filename)
 /*
  * cmd_fetch_file implements this project's own FETCH_FILE extension: it
  * validates filename against the servable allow-list, opens it under
- * route->path, and streams it back to the client as a CopyOut of
+ * cluster->path, and streams it back to the client as a CopyOut of
  * WS_FETCH_CHUNK_SIZE-sized CopyData messages (never loading the whole file,
  * which can be up to a 1 GiB WAL segment), followed by CopyDone and a
  * CommandComplete. Any failure mid-stream sends an ErrorResponse (if nothing
@@ -127,7 +127,7 @@ ws_fetch_filename_is_servable(const char *filename)
  * resynchronized from there.
  */
 void
-cmd_fetch_file(int sock, const WsRoute *route, const char *filename)
+cmd_fetch_file(int sock, const WsCluster *cluster, const char *filename)
 {
 	if (!ws_fetch_filename_is_servable(filename))
 	{
@@ -139,23 +139,23 @@ cmd_fetch_file(int sock, const WsRoute *route, const char *filename)
 		return;
 	}
 
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
-							   "no WAL cache directory configured for this route");
+							   "no WAL cache directory configured for this cluster");
 		return;
 	}
 
 	char path[MAXPGPATH];
 
-	sformat(path, sizeof(path), "%s/%s", route->path, filename);
+	sformat(path, sizeof(path), "%s/%s", cluster->path, filename);
 
 	int fd = open_regular_file(path);
 
 	if (fd < 0)
 	{
 		log_info("FETCH_FILE: \"%s\" not found under \"%s\"",
-				 filename, route->path);
+				 filename, cluster->path);
 		ws_send_error_response(sock, "58P01", "requested file not found");
 		return;
 	}
@@ -216,6 +216,6 @@ cmd_fetch_file(int sock, const WsRoute *route, const char *filename)
 	else
 	{
 		log_info("FETCH_FILE: served \"%s\" (%lld bytes) from \"%s\"",
-				 filename, (long long) total, route->path);
+				 filename, (long long) total, cluster->path);
 	}
 }

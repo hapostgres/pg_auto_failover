@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_walserver/cli_ls.h
  *   `pg_walserver ls --pgdata <path> [--config <path>] [--all]`: a
- *   per-cluster storage summary -- how many base backups a route holds
+ *   per-cluster storage summary -- how many base backups a cluster holds
  *   and their combined real size, how many WAL segments it has
  *   captured/archived and their combined size, and when its most recent
  *   base backup was taken.
@@ -25,9 +25,9 @@
  *
  *   A different axis from every "list" sub-command (cli_list.h): "list
  *   backups"/"list wal" enumerate every individual backup/WAL file across
- *   every route, one row each; this command aggregates that same real
+ *   every cluster, one row each; this command aggregates that same real
  *   data (reusing the exact same scan/enumeration code -- see cli_ls.c's
- *   own comment) into one row per route, the "how much, and how current"
+ *   own comment) into one row per cluster, the "how much, and how current"
  *   summary a human actually wants at a glance, not the full inventory.
  *
  * Licensed under the PostgreSQL License.

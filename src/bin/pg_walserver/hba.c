@@ -36,10 +36,10 @@ static const char *hbaHeader =
 	"# The first matching line wins; no match, an unreadable file or any\n"
 	"# malformed line rejects every connection.\n"
 	"#\n"
-	"# TYPE  ROUTE  USER  ADDRESS  METHOD\n"
+	"# TYPE  CLUSTER  USER  ADDRESS  METHOD\n"
 	"#\n"
 	"# TYPE     host (TLS or not), hostssl (TLS only), hostnossl (no TLS)\n"
-	"# ROUTE    all, or a route key exactly as it appears in pg_walserver.ini\n"
+	"# CLUSTER  all, or a cluster key exactly as it appears in pg_walserver.ini\n"
 	"#          (an opaque string, never a path; pg_auto_failover's own\n"
 	"#          convention is \"<formation>/<group>\", e.g. \"default/0\")\n"
 	"# USER     all, or a role name\n"
@@ -116,7 +116,7 @@ hba_write_setup_default(const char *hbaPath, bool tlsAvailable,
 			buffer,
 			"# One rule below, open to this machine's own local network\n"
 			"# (auto-discovered by \"pg_walserver setup\"), for any role\n"
-			"# with the right scram-sha-256 password -- narrow ROUTE/USER\n"
+			"# with the right scram-sha-256 password -- narrow CLUSTER/USER\n"
 			"# to a specific cluster/role once you know them, or add more\n"
 			"# lines below; the first matching line always wins:\n");
 
@@ -471,7 +471,7 @@ hba_rule_free_fields(HbaRule *rule)
  * simplification, not an oversight: PostgreSQL needs comma-separated lists
  * and @file inclusion because its own pg_hba.conf's DATABASE/USER fields
  * can each name several databases/roles, or include a whole external list
- * file. This project's own HBA dialect has no such thing -- ROUTE and USER
+ * file. This project's own HBA dialect has no such thing -- CLUSTER and USER
  * (see hba.h's own grammar) are each always a single value ("all" or one
  * exact string), never a list -- so there is nothing for a comma or an
  * @file reference to ever separate or expand here:
@@ -794,7 +794,7 @@ hba_ruleset_free(WsHbaRuleSet *ruleSet)
 
 
 void
-hba_match(const WsHbaRuleSet *ruleSet, const char *routeKey, const char *user,
+hba_match(const WsHbaRuleSet *ruleSet, const char *clusterKey, const char *user,
 		  const char *peerIP, bool isTLS, WsAuthMethod *method,
 		  bool *requireClientCert)
 {
@@ -810,7 +810,7 @@ hba_match(const WsHbaRuleSet *ruleSet, const char *routeKey, const char *user,
 						   (streq(fields[0], "hostnossl") && !isTLS);
 
 		if (typeMatches &&
-			(streq(fields[1], "all") || streq(fields[1], routeKey)) &&
+			(streq(fields[1], "all") || streq(fields[1], clusterKey)) &&
 			(streq(fields[2], "all") || streq(fields[2], user)) &&
 			rule_address_matches(fields[3], peerIP))
 		{

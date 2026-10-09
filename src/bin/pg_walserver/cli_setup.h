@@ -5,7 +5,7 @@
  *   [--ssl-ca-file <path>] [--auth-timeout <seconds>]`: configures
  *   pg_walserver *itself* -- writes whichever of these were given as
  *   plain "key = value" lines at the top of its own config file
- *   (config_set_global_property(), routes.c), so "pg_walserver serve
+ *   (config_set_global_property(), clusters.c), so "pg_walserver serve
  *   --pgdata <path>" alone, with none of these flags repeated, already
  *   picks them up as its own defaults (an explicit flag given directly to
  *   "serve" still always wins over whatever this persisted, the same
@@ -13,11 +13,11 @@
  *   already follows everywhere else).
  *
  *   --config overrides where that config file itself lives --
- *   config_file_path()'s own Debian-style split (routes.h): a systemd
+ *   config_file_path()'s own Debian-style split (clusters.h): a systemd
  *   unit or a container entrypoint commonly wants pg_walserver's own
  *   config under /etc/pg_walserver/pg_walserver.ini, independent of
  *   --pgdata (its data root, e.g. /var/lib/pg_walserver). --pgdata is
- *   still created here regardless -- every route's own storage still
+ *   still created here regardless -- every cluster's own storage still
  *   lives under it unconditionally.
  *
  *   Also prepares everything else a first "pg_walserver serve" needs

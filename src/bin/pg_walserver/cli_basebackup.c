@@ -29,8 +29,8 @@
 #define WS_PGVERSION_FILENAME "pg_walserver_pgversion"
 
 /* local helpers */
-static bool find_pg_basebackup_for_route(const WsUpstreamTarget *target,
-										 char *pgBasebackupPathOut, size_t size);
+static bool find_pg_basebackup_for_cluster(const WsUpstreamTarget *target,
+										   char *pgBasebackupPathOut, size_t size);
 
 static int cli_basebackup_getopt(int argc, char **argv);
 static void cli_basebackup_command_run(int argc, char **argv);
@@ -42,7 +42,7 @@ static void cli_basebackup_command_run(int argc, char **argv);
 
 static char basebackupPgdata[MAXPGPATH] = { 0 };
 static char basebackupConfigFile[MAXPGPATH] = { 0 };
-static char basebackupRoute[NAMEDATALEN + 16] = { 0 };
+static char basebackupCluster[NAMEDATALEN + 16] = { 0 };
 static char basebackupPath[MAXPGPATH] = { 0 };
 static char basebackupUpstream[MAXCONNINFO] = { 0 };
 static char basebackupHost[_POSIX_HOST_NAME_MAX] = { 0 };
@@ -73,7 +73,7 @@ static struct option basebackupLongOptions[] = {
 
 CommandLine basebackup_command =
 	make_command("basebackup",
-				 "Take a base backup of a route's upstream",
+				 "Take a base backup of a cluster's upstream",
 				 "--cluster <name> --pgdata <path> [--config <path>] "
 				 "| --path <dir> "
 				 "[--upstream <conninfo> | --host <host> [--port <port>] "
@@ -87,11 +87,11 @@ CommandLine basebackup_command =
 				 "PG_WALSERVER_CONFIG_FILE)\n"
 				 "  --cluster     the cluster name to back up (looked up in "
 				 "the config file)\n"
-				 "  --path        the route's own directory (overrides the "
-				 "route's own \"path\")\n"
+				 "  --path        the cluster's own directory (overrides the "
+				 "cluster's own \"path\")\n"
 				 "  --upstream    a libpq connection string to connect with "
 				 "(overrides the\n"
-				 "                route's own \"upstream\")\n"
+				 "                cluster's own \"upstream\")\n"
 				 "  --host / --port / --user  further override individual "
 				 "connection\n"
 				 "                parameters (default port: 5432, default "
@@ -126,7 +126,7 @@ CommandLine basebackup_command =
 
 
 /*
- * find_pg_basebackup_for_route picks the pg_basebackup binary to use for
+ * find_pg_basebackup_for_cluster picks the pg_basebackup binary to use for
  * target: when target->path has a "pg_walserver_pgversion" file (written
  * by `pg_walserver fetch-systemid`, see cli_fetch_systemid.c), uses
  * find_pg_basebackup_for_major_version() to pick one that is at least that
@@ -134,15 +134,15 @@ CommandLine basebackup_command =
  * older major version [as the server]" only, so an older client against a
  * newer upstream is not safe to use.
  *
- * A route with no recorded version yet (created before this file existed,
+ * A cluster with no recorded version yet (created before this file existed,
  * or fetch-systemid was never run against it) falls back to the old blind
  * search_path_first() behaviour, with a clear warning: never a hard
  * failure just for missing this file, backward compatibility with
- * existing routes matters more here.
+ * existing clusters matters more here.
  */
 static bool
-find_pg_basebackup_for_route(const WsUpstreamTarget *target,
-							 char *pgBasebackupPathOut, size_t size)
+find_pg_basebackup_for_cluster(const WsUpstreamTarget *target,
+							   char *pgBasebackupPathOut, size_t size)
 {
 	char pgversionPath[MAXPGPATH] = { 0 };
 	char *contents = NULL;
@@ -174,7 +174,7 @@ find_pg_basebackup_for_route(const WsUpstreamTarget *target,
 			 "(\"%s\" not found or unreadable) -- picking whatever "
 			 "pg_basebackup happens to be first in PATH, which may not be "
 			 "version-safe against this upstream; run \"pg_walserver "
-			 "fetch-systemid\" against this route to record its upstream "
+			 "fetch-systemid\" against this cluster to record its upstream "
 			 "version and fix this",
 			 target->path, pgversionPath);
 
@@ -192,7 +192,7 @@ find_pg_basebackup_for_route(const WsUpstreamTarget *target,
  * backup_label on a zero exit, this is a defense against a partial result
  * rather than a re-parse of it), and only then atomically swaps
  * "<target->path>/basebackups/.latest" to the new label. Never touches
- * .latest on failure: a route always keeps serving its previous,
+ * .latest on failure: a cluster always keeps serving its previous,
  * known-good backup until a new one actually completes.
  *
  * Returns true on success (labelOut, when not NULL, receives the new
@@ -204,8 +204,8 @@ cli_basebackup_run(const WsUpstreamTarget *target,
 {
 	char pgBasebackupPath[MAXPGPATH] = { 0 };
 
-	if (!find_pg_basebackup_for_route(target, pgBasebackupPath,
-									  sizeof(pgBasebackupPath)))
+	if (!find_pg_basebackup_for_cluster(target, pgBasebackupPath,
+										sizeof(pgBasebackupPath)))
 	{
 		/* errors have already been logged */
 		return false;
@@ -303,17 +303,17 @@ cli_basebackup_run(const WsUpstreamTarget *target,
 
 
 /*
- * cli_basebackup_route_has_backup returns true when
+ * cli_basebackup_cluster_has_backup returns true when
  * "<path>/basebackups/.latest" exists and is non-empty -- the same "does
- * this route already have a usable base backup" check cmd_base_backup.c's
+ * this cluster already have a usable base backup" check cmd_base_backup.c's
  * own read_latest_basebackup_label() effectively makes (it additionally
  * validates the label's own character set, not needed for this plain
  * existence check). Used by accept_loop.c's own ws_bootstrap_missing_
- * backups() to decide which routes "pg_walserver serve" needs to take an
+ * backups() to decide which clusters "pg_walserver serve" needs to take an
  * automatic bootstrap backup for.
  */
 bool
-cli_basebackup_route_has_backup(const char *path)
+cli_basebackup_cluster_has_backup(const char *path)
 {
 	char latestPath[MAXPGPATH] = { 0 };
 
@@ -376,7 +376,7 @@ cli_basebackup_getopt(int argc, char **argv)
 
 			case 'c':
 			{
-				strlcpy(basebackupRoute, optarg, sizeof(basebackupRoute));
+				strlcpy(basebackupCluster, optarg, sizeof(basebackupCluster));
 				break;
 			}
 
@@ -472,7 +472,7 @@ cli_basebackup_command_run(int argc, char **argv)
 	WsUpstreamTarget target = { 0 };
 
 	if (!cli_resolve_upstream(basebackupPgdata, basebackupConfigFile,
-							  basebackupRoute,
+							  basebackupCluster,
 							  basebackupPath, basebackupUpstream,
 							  basebackupHost, basebackupPort,
 							  basebackupUser, &target))
@@ -492,7 +492,7 @@ cli_basebackup_command_run(int argc, char **argv)
 	 * either is given, run the exact same retention-and-cleanup logic
 	 * "pg_walserver archive-cleanup" itself uses (count/age union math,
 	 * the always-protect-".latest" rule, and its WAL-continuity pre-flight
-	 * safety check) against the route we just backed up. A cleanup refusal
+	 * safety check) against the cluster we just backed up. A cleanup refusal
 	 * (e.g. the continuity check finds a problem and --force wasn't given)
 	 * only logs an error here -- it must never undo or unreport the base
 	 * backup that was just taken and kept: a cron job wired to this command

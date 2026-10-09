@@ -27,7 +27,7 @@
 
 /*
  * Connects to host:port as user, pushes localPath up as filename for
- * routeKey ("<formation>/<group>", the dbname), and returns 0 on success
+ * clusterKey ("<formation>/<group>", the dbname), and returns 0 on success
  * (including the "already there, byte-identical" case), 1 on any failure
  * (connection, auth, the embedded receivewal worker not having caught up
  * yet, a short write) -- always with a human-readable message already
@@ -39,7 +39,7 @@
  * or NULL/empty to leave it to libpq's own default/PGSSLMODE.
  */
 int ws_push_file_client(const char *host, int port, const char *user,
-						const char *routeKey, const char *sslmode,
+						const char *clusterKey, const char *sslmode,
 						const char *applicationName,
 						const char *localPath, const char *filename);
 

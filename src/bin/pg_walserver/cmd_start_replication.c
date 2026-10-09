@@ -47,7 +47,7 @@
  * the highest "flush" position a client's own StandbyStatusUpdate
  * messages have reported, and when that was last actually persisted to
  * the named slot's own marker file (cmd_replication_slot.h's
- * ws_replication_slot_update_restart_lsn()). route/slotName are set once
+ * ws_replication_slot_update_restart_lsn()). cluster/slotName are set once
  * at session start; active is false for the (still by far the common)
  * case of no SLOT clause at all, in which case every function below is a
  * no-op.
@@ -55,7 +55,7 @@
 typedef struct WsSlotFeedbackState
 {
 	bool active;
-	const WsRoute *route;
+	const WsCluster *cluster;
 	char slotName[NAMEDATALEN];
 	uint64_t restartLsn;      /* highest known-good value, in memory */
 	time_t lastPersisted;
@@ -95,7 +95,7 @@ slot_feedback_persist(WsSlotFeedbackState *slot, time_t now)
 			(uint32_t) (slot->restartLsn >> 32),
 			(uint32_t) slot->restartLsn);
 
-	if (!ws_replication_slot_update_restart_lsn(slot->route, slot->slotName,
+	if (!ws_replication_slot_update_restart_lsn(slot->cluster, slot->slotName,
 												lsnStr))
 	{
 		log_warn("START_REPLICATION: failed to update slot \"%s\"'s own "
@@ -291,7 +291,7 @@ wait_for_more_data_or_client(int sock, uint64_t currentLsn,
 /*
  * trim_trailing_zeros returns the length of buffer with any trailing run of
  * zero bytes removed. A ".partial" segment is pre-allocated to its full
- * the route's segment size by pg_receivewal the moment it's created (matching
+ * the cluster's segment size by pg_receivewal the moment it's created (matching
  * real Postgres's own WAL file pre-allocation, XLogFileInitInternal) --
  * unlike a real primary's own walsender, which only ever knows about bytes
  * it has actually flushed, a plain fread() from a ".partial" file cannot
@@ -398,14 +398,14 @@ find_oldest_segno(const char *walcacheDir, uint32_t timeline,
 
 
 void
-cmd_start_replication(int sock, const WsRoute *route,
+cmd_start_replication(int sock, const WsCluster *cluster,
 					  const char *slotName, uint64_t startLsn,
 					  bool haveTimeline, uint32_t timeline)
 {
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
-							   "no WAL cache directory configured for this route");
+							   "no WAL cache directory configured for this cluster");
 		return;
 	}
 
@@ -419,7 +419,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 		 * this must happen before ws_send_copy_both_response() below,
 		 * same as the "no WAL cache directory" check above: once CopyBoth
 		 * starts, an error can no longer be a plain ErrorResponse */
-		if (!ws_replication_slot_exists(route, slotName))
+		if (!ws_replication_slot_exists(cluster, slotName))
 		{
 			ws_send_error_response(sock, "42704",
 								   "replication slot does not exist");
@@ -434,7 +434,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 		 * released on every exit path below (including the early
 		 * error returns inside the loop).
 		 */
-		slotLockFd = ws_replication_slot_try_lock(route, slotName);
+		slotLockFd = ws_replication_slot_try_lock(cluster, slotName);
 
 		if (slotLockFd < 0)
 		{
@@ -445,13 +445,13 @@ cmd_start_replication(int sock, const WsRoute *route,
 		}
 
 		slotState.active = true;
-		slotState.route = route;
+		slotState.cluster = cluster;
 		strlcpy(slotState.slotName, slotName, sizeof(slotState.slotName));
 		slotState.lastPersisted = time(NULL);
 
 		char restartLsnStr[32] = { 0 };
 
-		if (ws_replication_slot_read_restart_lsn(route, slotName, restartLsnStr,
+		if (ws_replication_slot_read_restart_lsn(cluster, slotName, restartLsnStr,
 												 sizeof(restartLsnStr)))
 		{
 			uint32_t hi, lo;
@@ -467,10 +467,10 @@ cmd_start_replication(int sock, const WsRoute *route,
 	{
 		char discardLsn[32] = { 0 };
 
-		if (!wal_position_cache_read(route->path, &timeline, discardLsn,
+		if (!wal_position_cache_read(cluster->path, &timeline, discardLsn,
 									 sizeof(discardLsn)))
 		{
-			(void) wal_dir_find_latest(route, &timeline, discardLsn,
+			(void) wal_dir_find_latest(cluster, &timeline, discardLsn,
 									   sizeof(discardLsn));
 		}
 	}
@@ -485,9 +485,9 @@ cmd_start_replication(int sock, const WsRoute *route,
 	log_info("START_REPLICATION: streaming from %X/%08X on timeline %u "
 			 "from \"%s\"",
 			 (uint32_t) (startLsn >> 32), (uint32_t) startLsn, timeline,
-			 route->path);
+			 cluster->path);
 
-	uint64_t segSize = ws_route_wal_segment_size(route);
+	uint64_t segSize = ws_cluster_wal_segment_size(cluster);
 	uint64_t segno = startLsn / segSize;
 	uint64_t offset = startLsn % segSize;
 	uint64_t currentLsn = startLsn;
@@ -508,7 +508,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 		char completePath[MAXPGPATH];
 
 		sformat(completePath, sizeof(completePath), "%s/%s",
-				route->path, filename);
+				cluster->path, filename);
 
 		bool isComplete = file_exists(completePath);
 
@@ -522,7 +522,7 @@ cmd_start_replication(int sock, const WsRoute *route,
 		{
 			uint64_t oldestSegno;
 
-			if (find_oldest_segno(route->path, timeline, segSize,
+			if (find_oldest_segno(cluster->path, timeline, segSize,
 								  &oldestSegno) &&
 				segno < oldestSegno)
 			{

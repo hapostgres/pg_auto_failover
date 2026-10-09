@@ -216,9 +216,9 @@ ws_startup_negotiate(int sock, WsStartupParams *params)
 		 * replication=database is used (that's how pg_basebackup connects);
 		 * a bare replication=1/true connection (pg_receivewal's style) may
 		 * not set "database" at all. Default it to the "user" so downstream
-		 * routing always has *something* to look up rather than an empty
-		 * key -- a connection whose defaulted key matches no real route (and
-		 * no "*" wildcard, see routes.h) still gets a clean "unknown route"
+		 * cluster lookup always has *something* to look up rather than an empty
+		 * key -- a connection whose defaulted key matches no real cluster (and
+		 * no "*" wildcard, see clusters.h) still gets a clean "unknown cluster"
 		 * ErrorResponse from auth.c.
 		 */
 

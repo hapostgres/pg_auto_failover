@@ -90,9 +90,9 @@ typedef enum
  * giving up on restarting one service here does NOT bring down every
  * other service (unlike pg_autoctl, where each service is essential to
  * the single node it manages) -- pg_walserver may be serving several
- * independent routes at once, and one route's receivewal worker permanently
+ * independent clusters at once, and one cluster's receivewal worker permanently
  * failing (a truly broken upstream, not a transient blip) should not stop
- * every other route pg_walserver is otherwise serving correctly. That
+ * every other cluster pg_walserver is otherwise serving correctly. That
  * "what to do once MaxR/MaxT is exceeded" policy decision is made by each
  * caller on top of process_restart_counters_may_restart()'s answer, it is
  * not part of the shared ring-buffer mechanism itself.

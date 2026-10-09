@@ -3,7 +3,7 @@
  *   See receivewal.h.
  *
  *   Design decision: fork() + execv() of *this same pg_walserver binary*,
- *   re-entering it as "pg_walserver internal service pg-receivewal --route
+ *   re-entering it as "pg_walserver internal service pg-receivewal --cluster
  *   <key> --upstream <conninfo> --path <dir>" (cli_internal.c), never a
  *   bare fork() with no exec() and never exec() of a separately-installed
  *   "pg_receivewal" binary. This mirrors pg_autoctl's own long-lived
@@ -21,7 +21,7 @@
  *   binary needs to be installed/on $PATH anywhere.
  *
  *   Supervision shape: one long-lived child per active "receivewal = pull"
- *   route, not per-connection -- a different lifecycle from accept_loop.
+ *   cluster, not per-connection -- a different lifecycle from accept_loop.
  *   c's own per-connection children (reaped and forgotten the moment they
  *   exit): a receivewal worker child is alive for the server's whole lifetime,
  *   independent of any client connection, and needs restart-on-crash.
@@ -66,38 +66,38 @@
 #include "log.h"
 #include "pgctl.h"
 #include "process_supervisor.h"
-#include "routes.h"
+#include "clusters.h"
 #include "string_utils.h"
 
 #define streq(x, y) ((x != NULL) && (y != NULL) && (strcmp(x, y) == 0))
 
 /*
- * A route's own INI file is operator-written (or, later, written by
+ * A cluster's own INI file is operator-written (or, later, written by
  * service_archiver_reconciler.c), not attacker input -- this bound exists
  * only to keep the receivewal-services array a fixed size, the same
  * WS_MAX_CONNECTIONS-style hardening accept_loop.c already applies to
  * connection children, for a completely different (but equally
  * operator-controlled) count.
  */
-#define WS_RECEIVEWAL_MAX_ROUTES 64
+#define WS_RECEIVEWAL_MAX_CLUSTERS 64
 
 /* how long ws_receivewal_stop_all() waits before escalating to SIGKILL */
 #define WS_RECEIVEWAL_STOP_TIMEOUT_MS 5000
 
-typedef struct WsReceivewalRoute
+typedef struct WsReceivewalCluster
 {
-	char routeKey[NAMEDATALEN + 16];
+	char clusterKey[NAMEDATALEN + 16];
 	char path[MAXPGPATH];
 	char upstream[MAXCONNINFO];
 	time_t startedAt;    /* set by start_one_receivewal_child(): the single
-	                      * choke point every (re)start of this route's
+	                      * choke point every (re)start of this cluster's
 	                      * receivewal worker goes through, initial start, reload-
 	                      * driven restart, and tick-driven restart-on-
 	                      * crash alike */
-} WsReceivewalRoute;
+} WsReceivewalCluster;
 
-static WsReceivewalRoute receivewalRoutes[WS_RECEIVEWAL_MAX_ROUTES];
-static ProcessService receivewalServices[WS_RECEIVEWAL_MAX_ROUTES];
+static WsReceivewalCluster receivewalClusters[WS_RECEIVEWAL_MAX_CLUSTERS];
+static ProcessService receivewalServices[WS_RECEIVEWAL_MAX_CLUSTERS];
 static ProcessSupervisor receivewalSupervisor = { 0 };
 
 extern char pg_autoctl_program[MAXPGPATH];     /* main.c, this binary's own
@@ -108,62 +108,62 @@ static bool start_one_receivewal_child(void *context, pid_t *pid);
 
 
 /*
- * ws_receivewal_start_all forks one supervised receivewal worker child per route in
- * routes[0..routeCount) with receivewalPull set (routes.h), each running
+ * ws_receivewal_start_all forks one supervised receivewal worker child per cluster in
+ * clusters[0..clusterCount) with receivewalPull set (clusters.h), each running
  * this same pg_walserver binary re-exec'd into "internal service
  * pg-receivewal" (cli_internal.c), which runs the vendored pg_receivewal
- * against that route's own "upstream", writing straight into that
- * route's own "path". A route with receivewalPull but no "upstream" is
- * logged and skipped, not a startup failure -- so is a disabled route
- * (routes.h's own WsRoute.disabled), silently: a dropped route never
+ * against that cluster's own "upstream", writing straight into that
+ * cluster's own "path". A cluster with receivewalPull but no "upstream" is
+ * logged and skipped, not a startup failure -- so is a disabled cluster
+ * (clusters.h's own WsCluster.disabled), silently: a dropped cluster never
  * gets its embedded receivewal worker started in the first place, the
- * same guarantee ws_receivewal_reload() already gives a route that
+ * same guarantee ws_receivewal_reload() already gives a cluster that
  * becomes disabled while already running. Called once, from
  * cli_serve_run(), after pg_walserver.ini/HBA validation succeeds and
  * before ws_accept_loop() starts. Must not be called more than once per
  * process.
  */
 bool
-ws_receivewal_start_all(const WsRoute *routes, int routeCount)
+ws_receivewal_start_all(const WsCluster *clusters, int clusterCount)
 {
 	int n = 0;
 
-	for (int i = 0; i < routeCount; i++)
+	for (int i = 0; i < clusterCount; i++)
 	{
-		if (!routes[i].receivewalPull || routes[i].disabled)
+		if (!clusters[i].receivewalPull || clusters[i].disabled)
 		{
 			continue;
 		}
 
-		if (routes[i].upstream[0] == '\0')
+		if (clusters[i].upstream[0] == '\0')
 		{
-			log_error("Route \"%s\" has \"receivewal = pull\" but no "
+			log_error("Cluster \"%s\" has \"receivewal = pull\" but no "
 					  "\"upstream\" property: the embedded receivewal worker has "
 					  "nowhere to pull WAL from -- not starting it for "
-					  "this route", routes[i].key);
+					  "this cluster", clusters[i].key);
 			continue;
 		}
 
-		if (n >= WS_RECEIVEWAL_MAX_ROUTES)
+		if (n >= WS_RECEIVEWAL_MAX_CLUSTERS)
 		{
-			log_error("Too many \"receivewal = pull\" routes (max %d): not "
-					  "starting an embedded receivewal worker for route \"%s\"",
-					  WS_RECEIVEWAL_MAX_ROUTES, routes[i].key);
+			log_error("Too many \"receivewal = pull\" clusters (max %d): not "
+					  "starting an embedded receivewal worker for cluster \"%s\"",
+					  WS_RECEIVEWAL_MAX_CLUSTERS, clusters[i].key);
 			continue;
 		}
 
-		WsReceivewalRoute *cr = &receivewalRoutes[n];
+		WsReceivewalCluster *cr = &receivewalClusters[n];
 
-		memset(cr, 0, sizeof(WsReceivewalRoute));
-		strlcpy(cr->routeKey, routes[i].key, sizeof(cr->routeKey));
-		strlcpy(cr->path, routes[i].path, sizeof(cr->path));
-		strlcpy(cr->upstream, routes[i].upstream, sizeof(cr->upstream));
+		memset(cr, 0, sizeof(WsReceivewalCluster));
+		strlcpy(cr->clusterKey, clusters[i].key, sizeof(cr->clusterKey));
+		strlcpy(cr->path, clusters[i].path, sizeof(cr->path));
+		strlcpy(cr->upstream, clusters[i].upstream, sizeof(cr->upstream));
 
 		ProcessService *service = &receivewalServices[n];
 
 		memset(service, 0, sizeof(ProcessService));
 		sformat(service->name, sizeof(service->name), "receivewal-%s",
-				cr->routeKey);
+				cr->clusterKey);
 		service->policy = PROCESS_RP_PERMANENT;
 		service->startFunction = start_one_receivewal_child;
 		service->context = cr;
@@ -189,15 +189,15 @@ ws_receivewal_start_all(const WsRoute *routes, int routeCount)
 
 
 /*
- * ensure_receivewal_slot creates this route's own physical replication
- * slot on its upstream (routes_slot_name() derives the name from the
- * route key, idempotently -- see pgctl_create_replication_slot()'s own
+ * ensure_receivewal_slot creates this cluster's own physical replication
+ * slot on its upstream (clusters_slot_name() derives the name from the
+ * cluster key, idempotently -- see pgctl_create_replication_slot()'s own
  * comment for why an already-existing slot is success, not an error). A
  * real, permanent slot -- not pg_basebackup's own temporary one -- is
- * what keeps the upstream from recycling a WAL segment this route's
+ * what keeps the upstream from recycling a WAL segment this cluster's
  * receivewal worker hasn't fetched yet out from under it; see cli_
  * internal.c's own comment on cli_internal_pg_receivewal_run() for the
- * full rationale (a fresh route's very first connection racing the
+ * full rationale (a fresh cluster's very first connection racing the
  * upstream's own checkpoint can otherwise lose a segment permanently).
  * Best-effort only here: a failure is logged and start_one_receivewal_
  * child() still starts the worker regardless, the same "receivewal never
@@ -206,23 +206,23 @@ ws_receivewal_start_all(const WsRoute *routes, int routeCount)
  * a hard prerequisite for starting to stream.
  */
 static void
-ensure_receivewal_slot(const WsReceivewalRoute *cr)
+ensure_receivewal_slot(const WsReceivewalCluster *cr)
 {
 	WsUpstreamTarget target = { 0 };
 
 	if (!cli_parse_upstream_conninfo(cr->upstream, &target))
 	{
-		log_warn("Route \"%s\": failed to parse its own \"upstream\" to "
+		log_warn("Cluster \"%s\": failed to parse its own \"upstream\" to "
 				 "create its replication slot -- starting the receivewal "
 				 "worker without one, so a reconnect could lose a WAL "
 				 "segment the upstream considers no longer needed",
-				 cr->routeKey);
+				 cr->clusterKey);
 		return;
 	}
 
 	char slotName[NAMEDATALEN] = { 0 };
 
-	routes_slot_name(cr->routeKey, slotName, sizeof(slotName));
+	clusters_slot_name(cr->clusterKey, slotName, sizeof(slotName));
 
 	ReplicationSource replicationSource = { 0 };
 
@@ -241,25 +241,25 @@ ensure_receivewal_slot(const WsReceivewalRoute *cr)
 
 	if (!pgctl_create_replication_slot(&replicationSource, slotName))
 	{
-		log_warn("Route \"%s\": failed to create replication slot \"%s\" "
+		log_warn("Cluster \"%s\": failed to create replication slot \"%s\" "
 				 "on its upstream -- starting the receivewal worker "
 				 "without one, so a reconnect could lose a WAL segment "
 				 "the upstream considers no longer needed",
-				 cr->routeKey, slotName);
+				 cr->clusterKey, slotName);
 	}
 }
 
 
 /*
  * start_one_receivewal_child forks and execv()s this same pg_walserver
- * binary as "internal service pg-receivewal --route ... --upstream ...
+ * binary as "internal service pg-receivewal --cluster ... --upstream ...
  * --path ..." -- see this file's own header comment for why fork()+
  * execv(), not a bare fork().
  */
 static bool
 start_one_receivewal_child(void *context, pid_t *pid)
 {
-	WsReceivewalRoute *cr = (WsReceivewalRoute *) context;
+	WsReceivewalCluster *cr = (WsReceivewalCluster *) context;
 
 	ensure_receivewal_slot(cr);
 
@@ -270,8 +270,8 @@ start_one_receivewal_child(void *context, pid_t *pid)
 
 	if (fpid == -1)
 	{
-		log_error("Failed to fork the embedded receivewal worker for route "
-				  "\"%s\": %m", cr->routeKey);
+		log_error("Failed to fork the embedded receivewal worker for cluster "
+				  "\"%s\": %m", cr->clusterKey);
 		return false;
 	}
 
@@ -284,8 +284,8 @@ start_one_receivewal_child(void *context, pid_t *pid)
 		args[argsIndex++] = "internal";
 		args[argsIndex++] = "service";
 		args[argsIndex++] = "pg-receivewal";
-		args[argsIndex++] = "--route";
-		args[argsIndex++] = cr->routeKey;
+		args[argsIndex++] = "--cluster";
+		args[argsIndex++] = cr->clusterKey;
 		args[argsIndex++] = "--upstream";
 		args[argsIndex++] = cr->upstream;
 		args[argsIndex++] = "--path";
@@ -302,8 +302,8 @@ start_one_receivewal_child(void *context, pid_t *pid)
 	*pid = fpid;
 	cr->startedAt = time(NULL);
 
-	log_info("Started the embedded receivewal worker for route \"%s\" (pid %d), "
-			 "receiving into \"%s\"", cr->routeKey, fpid, cr->path);
+	log_info("Started the embedded receivewal worker for cluster \"%s\" (pid %d), "
+			 "receiving into \"%s\"", cr->clusterKey, fpid, cr->path);
 
 	return true;
 }
@@ -311,7 +311,7 @@ start_one_receivewal_child(void *context, pid_t *pid)
 
 /*
  * ws_receivewal_get_status fills out[0..min(serviceCount,maxOut)) with the
- * current status of every route ws_receivewal_start_all()/ws_receivewal_reload()
+ * current status of every cluster ws_receivewal_start_all()/ws_receivewal_reload()
  * is tracking (whether or not each one is currently running), and returns
  * how many entries it filled. Used by accept_loop.c's own refresh_ps_
  * state() to keep the on-disk ps state file (ps_state.h) current.
@@ -323,12 +323,12 @@ ws_receivewal_get_status(WsReceivewalStatus *out, int maxOut)
 
 	for (int i = 0; i < receivewalSupervisor.serviceCount && n < maxOut; i++)
 	{
-		WsReceivewalRoute *cr = &receivewalRoutes[i];
+		WsReceivewalCluster *cr = &receivewalClusters[i];
 		ProcessService *service = &receivewalServices[i];
 		WsReceivewalStatus *status = &out[n];
 
 		memset(status, 0, sizeof(WsReceivewalStatus));
-		strlcpy(status->routeKey, cr->routeKey, sizeof(status->routeKey));
+		strlcpy(status->clusterKey, cr->clusterKey, sizeof(status->clusterKey));
 		strlcpy(status->path, cr->path, sizeof(status->path));
 		strlcpy(status->upstream, cr->upstream, sizeof(status->upstream));
 		status->pid = service->pid;
@@ -345,17 +345,17 @@ ws_receivewal_get_status(WsReceivewalStatus *out, int maxOut)
 
 /*
  * ws_receivewal_reload reconciles the running "receivewal = pull" receivewal worker set
- * against a freshly, successfully reloaded (SIGHUP) route list -- it never
- * restarts a receivewal worker whose route is unchanged:
+ * against a freshly, successfully reloaded (SIGHUP) cluster list -- it never
+ * restarts a receivewal worker whose cluster is unchanged:
  *
- *   - a route that newly has "receivewal = pull" (or is new outright) gets a
+ *   - a cluster that newly has "receivewal = pull" (or is new outright) gets a
  *     receivewal worker started;
- *   - a route whose "receivewal = pull" was removed, whose route
+ *   - a cluster whose "receivewal = pull" was removed, whose cluster
  *     disappeared entirely, or that is now disabled ("cluster drop"
- *     without --purge, see routes.h's own WsRoute.disabled comment),
+ *     without --purge, see clusters.h's own WsCluster.disabled comment),
  *     gets its receivewal worker stopped (SIGINT), and never gets a new
  *     one started for it either;
- *   - a route whose "upstream" or "path" changed while "receivewal = pull"
+ *   - a cluster whose "upstream" or "path" changed while "receivewal = pull"
  *     stayed on gets stopped (SIGINT) and, once reaped, automatically
  *     restarted with the new values by the ordinary PERMANENT-policy
  *     restart path in ws_receivewal_tick() -- it cannot retarget an
@@ -366,9 +366,9 @@ ws_receivewal_get_status(WsReceivewalStatus *out, int maxOut)
  * after ws_receivewal_start_all() has already run once.
  */
 void
-ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
+ws_receivewal_reload(const WsCluster *newClusters, int newClusterCount)
 {
-	bool *handled = (bool *) calloc(newRouteCount > 0 ? newRouteCount : 1,
+	bool *handled = (bool *) calloc(newClusterCount > 0 ? newClusterCount : 1,
 									sizeof(bool));
 
 	if (handled == NULL)
@@ -381,26 +381,26 @@ ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
 	int started = 0, stopped = 0, restarted = 0, unchanged = 0;
 
 	/* stop, or update-then-restart-in-place, every currently tracked
-	 * receivewal worker whose route disappeared, lost "receivewal = pull", or changed
+	 * receivewal worker whose cluster disappeared, lost "receivewal = pull", or changed
 	 * "upstream"/"path" */
 	for (int i = 0; i < receivewalSupervisor.serviceCount; i++)
 	{
 		ProcessService *service = &receivewalServices[i];
-		WsReceivewalRoute *cr = &receivewalRoutes[i];
+		WsReceivewalCluster *cr = &receivewalClusters[i];
 
 		if (service->pid <= 0)
 		{
 			continue;   /* already stopped: a free slot for reuse below */
 		}
 
-		const WsRoute *want = NULL;
+		const WsCluster *want = NULL;
 		int wantIndex = -1;
 
-		for (int j = 0; j < newRouteCount; j++)
+		for (int j = 0; j < newClusterCount; j++)
 		{
-			if (streq(newRoutes[j].key, cr->routeKey))
+			if (streq(newClusters[j].key, cr->clusterKey))
 			{
-				want = &newRoutes[j];
+				want = &newClusters[j];
 				wantIndex = j;
 				break;
 			}
@@ -410,9 +410,9 @@ ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
 			want->disabled)
 		{
 			log_info("Reload: stopping the embedded receivewal worker for "
-					 "route \"%s\" (pid %d): %s", cr->routeKey, service->pid,
+					 "cluster \"%s\" (pid %d): %s", cr->clusterKey, service->pid,
 					 want != NULL && want->disabled
-					 ? "route dropped (disabled)"
+					 ? "cluster dropped (disabled)"
 					 : "no longer \"receivewal = pull\"");
 			service->policy = PROCESS_RP_TEMPORARY;
 			(void) kill(service->pid, SIGINT);
@@ -425,8 +425,8 @@ ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
 		if (!streq(cr->upstream, want->upstream) || !streq(cr->path, want->path))
 		{
 			log_info("Reload: restarting the embedded receivewal worker for "
-					 "route \"%s\" (pid %d): \"upstream\"/\"path\" changed",
-					 cr->routeKey, service->pid);
+					 "cluster \"%s\" (pid %d): \"upstream\"/\"path\" changed",
+					 cr->clusterKey, service->pid);
 
 			/*
 			 * service->context already points at cr: updating it here means
@@ -450,19 +450,19 @@ ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
 	}
 
 	/* start a receivewal worker for every newly-added (or newly "receivewal = pull")
-	 * route not already handled above */
-	for (int j = 0; j < newRouteCount; j++)
+	 * cluster not already handled above */
+	for (int j = 0; j < newClusterCount; j++)
 	{
-		if (handled[j] || !newRoutes[j].receivewalPull || newRoutes[j].disabled)
+		if (handled[j] || !newClusters[j].receivewalPull || newClusters[j].disabled)
 		{
 			continue;
 		}
 
-		if (newRoutes[j].upstream[0] == '\0')
+		if (newClusters[j].upstream[0] == '\0')
 		{
-			log_error("Reload: route \"%s\" has \"receivewal = pull\" but no "
+			log_error("Reload: cluster \"%s\" has \"receivewal = pull\" but no "
 					  "\"upstream\" property: not starting an embedded "
-					  "receivewal worker for it", newRoutes[j].key);
+					  "receivewal worker for it", newClusters[j].key);
 			continue;
 		}
 
@@ -479,28 +479,28 @@ ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
 
 		if (slot == -1)
 		{
-			if (receivewalSupervisor.serviceCount >= WS_RECEIVEWAL_MAX_ROUTES)
+			if (receivewalSupervisor.serviceCount >= WS_RECEIVEWAL_MAX_CLUSTERS)
 			{
-				log_error("Reload: too many \"receivewal = pull\" routes (max "
-						  "%d): not starting an embedded receivewal worker for route "
-						  "\"%s\"", WS_RECEIVEWAL_MAX_ROUTES, newRoutes[j].key);
+				log_error("Reload: too many \"receivewal = pull\" clusters (max "
+						  "%d): not starting an embedded receivewal worker for cluster "
+						  "\"%s\"", WS_RECEIVEWAL_MAX_CLUSTERS, newClusters[j].key);
 				continue;
 			}
 
 			slot = receivewalSupervisor.serviceCount++;
 		}
 
-		WsReceivewalRoute *cr = &receivewalRoutes[slot];
+		WsReceivewalCluster *cr = &receivewalClusters[slot];
 
-		memset(cr, 0, sizeof(WsReceivewalRoute));
-		strlcpy(cr->routeKey, newRoutes[j].key, sizeof(cr->routeKey));
-		strlcpy(cr->path, newRoutes[j].path, sizeof(cr->path));
-		strlcpy(cr->upstream, newRoutes[j].upstream, sizeof(cr->upstream));
+		memset(cr, 0, sizeof(WsReceivewalCluster));
+		strlcpy(cr->clusterKey, newClusters[j].key, sizeof(cr->clusterKey));
+		strlcpy(cr->path, newClusters[j].path, sizeof(cr->path));
+		strlcpy(cr->upstream, newClusters[j].upstream, sizeof(cr->upstream));
 
 		ProcessService *service = &receivewalServices[slot];
 
 		memset(service, 0, sizeof(ProcessService));
-		sformat(service->name, sizeof(service->name), "receivewal-%s", cr->routeKey);
+		sformat(service->name, sizeof(service->name), "receivewal-%s", cr->clusterKey);
 		service->policy = PROCESS_RP_PERMANENT;
 		service->startFunction = start_one_receivewal_child;
 		service->context = cr;
@@ -510,13 +510,13 @@ ws_receivewal_reload(const WsRoute *newRoutes, int newRouteCount)
 			process_restart_counters_start(&service->restartCounters,
 										   (uint64_t) time(NULL));
 			log_info("Reload: started a new embedded receivewal worker for "
-					 "route \"%s\"", cr->routeKey);
+					 "cluster \"%s\"", cr->clusterKey);
 			++started;
 		}
 		else
 		{
 			log_error("Reload: failed to start an embedded receivewal worker "
-					  "for route \"%s\"", cr->routeKey);
+					  "for cluster \"%s\"", cr->clusterKey);
 			service->pid = -1;
 		}
 	}

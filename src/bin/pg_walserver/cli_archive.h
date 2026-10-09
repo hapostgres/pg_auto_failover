@@ -22,10 +22,10 @@
  *   Implements the two disjoint behaviors README.md's "The archive push
  *   side: CHECK_FILE + ARCHIVE_FILE + pg_walserver archive-wal" section
  *   describes, chosen automatically per invocation from the connected
- *   route's own "receivewal" setting (SHOW receivewal, cmd_show.c), never a
+ *   cluster's own "receivewal" setting (SHOW receivewal, cmd_show.c), never a
  *   manually-set client flag:
  *
- *     - the route has "receivewal = pull" configured (its own embedded,
+ *     - the cluster has "receivewal = pull" configured (its own embedded,
  *       supervised pg_receivewal writes into this same directory):
  *       ordinarily only ever CHECK_FILE, never ARCHIVE_FILE. Exit 0 on
  *       "matches", exit 1 on "missing"/"differs" with a clean stderr
@@ -39,7 +39,7 @@
  *       the old timeline -- in which case this pushes it directly via
  *       ARCHIVE_FILE right away instead of waiting on a retry loop that
  *       would otherwise never succeed;
- *     - the route has no "receivewal = pull" (absent or "none"): only ever
+ *     - the cluster has no "receivewal = pull" (absent or "none"): only ever
  *       ARCHIVE_FILE, unconditionally pushing the full file every
  *       invocation, no CHECK_FILE round trip first -- the server's own
  *       overwrite-safety (cmd_archive_file.c) already makes this

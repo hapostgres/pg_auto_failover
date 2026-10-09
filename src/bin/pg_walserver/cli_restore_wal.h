@@ -44,7 +44,7 @@
  *   for the exact same reason cli_archive.c does not (see its own header
  *   comment): `restore-wal`, like `archive-wal`, connects to pg_walserver's
  *   own replication-protocol server, not out to a Postgres primary the way
- *   fetch-systemid/basebackup/setup do, so it has no "route's own upstream"
+ *   fetch-systemid/basebackup/setup do, so it has no "cluster's own upstream"
  *   to resolve at all -- only where pg_walserver itself is, the shared
  *   WsWalServerTarget (cli_wal_target.h: --cluster/--host/--port/--user/
  *   --sslmode) also used by cli_archive.h's own `archive-wal`.

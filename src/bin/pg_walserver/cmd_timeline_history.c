@@ -25,18 +25,18 @@
 /*
  * cmd_timeline_history implements TIMELINE_HISTORY <timeline>: builds the
  * "%08X.history" filename (TLHistoryFileName()'s own format), reads it
- * (O_NOFOLLOW, size-capped, regular files only, under route->path), and
+ * (O_NOFOLLOW, size-capped, regular files only, under cluster->path), and
  * replies with the one-row (filename, content) result real Postgres sends.
  * A missing file is an ErrorResponse, matching real walsender.c, which never
  * synthesizes an empty history for an unknown timeline.
  */
 void
-cmd_timeline_history(int sock, const WsRoute *route, int timeline)
+cmd_timeline_history(int sock, const WsCluster *cluster, int timeline)
 {
-	if (route == NULL || route->path[0] == '\0')
+	if (cluster == NULL || cluster->path[0] == '\0')
 	{
 		ws_send_error_response(sock, "58P01",
-							   "no WAL cache directory configured for this route");
+							   "no WAL cache directory configured for this cluster");
 		return;
 	}
 
@@ -47,7 +47,7 @@ cmd_timeline_history(int sock, const WsRoute *route, int timeline)
 
 	char path[MAXPGPATH];
 
-	sformat(path, sizeof(path), "%s/%s", route->path, filename);
+	sformat(path, sizeof(path), "%s/%s", cluster->path, filename);
 
 	/*
 	 * The name is generated from a validated number (never client text) and
@@ -64,7 +64,7 @@ cmd_timeline_history(int sock, const WsRoute *route, int timeline)
 		/* matches real walsender.c: no history file for this timeline is
 		 * an ERROR there too, not a soft "empty" fallback */
 		log_info("TIMELINE_HISTORY: \"%s\" not found under \"%s\"",
-				 filename, route->path);
+				 filename, cluster->path);
 		ws_send_error_response(sock, "58P01",
 							   "requested timeline history file not found");
 		return;

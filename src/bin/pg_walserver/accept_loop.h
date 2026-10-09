@@ -36,25 +36,25 @@ typedef struct WsServerConfig
 	                               * refresh_ps_state() (accept_loop.c) to
 	                               * know where to write the ps state file
 	                               * (ps_state.h) */
-	char routesPath[MAXPGPATH];   /* empty: no routing, manual-testing mode */
+	char clustersPath[MAXPGPATH];   /* empty: no cluster dispatch, manual-testing mode */
 	WsAuthConfig auth;
-	WsRoute *routes;               /* the currently installed, parsed
-	                                * pg_walserver.ini -- loaded once at
-	                                * startup (cli_serve_run()) and swapped
-	                                * in atomically, together with auth.
-	                                * hbaRuleSet above, by a successful
-	                                * SIGHUP reload (ws_reload_config(),
-	                                * accept_loop.c). Every connection reads
-	                                * this same, already-validated snapshot;
-	                                * none of them re-parses the file off
-	                                * disk itself. Owned here: routes_free()
-	                                * it, never a per-connection concern. */
-	int routeCount;
+	WsCluster *clusters;               /* the currently installed, parsed
+	                                    * pg_walserver.ini -- loaded once at
+	                                    * startup (cli_serve_run()) and swapped
+	                                    * in atomically, together with auth.
+	                                    * hbaRuleSet above, by a successful
+	                                    * SIGHUP reload (ws_reload_config(),
+	                                    * accept_loop.c). Every connection reads
+	                                    * this same, already-validated snapshot;
+	                                    * none of them re-parses the file off
+	                                    * disk itself. Owned here: clusters_free()
+	                                    * it, never a per-connection concern. */
+	int clusterCount;
 } WsServerConfig;
 
 bool ws_accept_loop(WsServerConfig *config);
 
-void ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount);
+void ws_bootstrap_missing_backups(const WsCluster *clusters, int clusterCount);
 
 /*
  * WsBootstrapStatus is one still-running automatic bootstrap base backup
@@ -62,7 +62,7 @@ void ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount);
  */
 typedef struct WsBootstrapStatus
 {
-	char routeKey[NAMEDATALEN + 16];
+	char clusterKey[NAMEDATALEN + 16];
 	pid_t pid;
 	time_t startedAt;
 } WsBootstrapStatus;

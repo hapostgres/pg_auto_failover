@@ -37,7 +37,7 @@
 #include "log.h"
 #include "ps_state.h"
 #include "repl_command.h"
-#include "routes.h"
+#include "clusters.h"
 #include "signals.h"
 #include "startup.h"
 #include "string_utils.h"
@@ -55,7 +55,7 @@
  * string as its startup packet's dbname -- confirmed against a real
  * standby: it does not forward whatever dbname the operator wrote into
  * primary_conninfo the way a generic libpq client (psql, pg_receivewal,
- * this project's own FETCH_FILE client) does. See the routeKey fallback
+ * this project's own FETCH_FILE client) does. See the clusterKey fallback
  * below.
  */
 #define WS_REAL_WALRECEIVER_DBNAME "replication"
@@ -145,7 +145,7 @@ create_listen_socket(int port)
 
 /*
  * handle_connection runs the full lifecycle of one accepted connection:
- * startup negotiation, routes-based auth, the initial handshake messages a
+ * startup negotiation, clusters-based auth, the initial handshake messages a
  * real client expects (AuthenticationOk/ParameterStatus/BackendKeyData/
  * ReadyForQuery), and then the simple-query command loop replication
  * connections use (see pgsql.c's own comment elsewhere in this project:
@@ -180,38 +180,38 @@ handle_connection(int clientSock, const WsServerConfig *config)
 	}
 
 	/*
-	 * routes/routeCount are the currently installed, already-validated
-	 * snapshot of pg_walserver.ini (config->routes, loaded once at startup
+	 * clusters/clusterCount are the currently installed, already-validated
+	 * snapshot of pg_walserver.ini (config->clusters, loaded once at startup
 	 * and swapped in atomically by a successful SIGHUP reload, see
 	 * ws_reload_config() below) -- this child, forked after that swap (or
 	 * before the next one), never re-reads the file off disk itself.
 	 */
-	const WsRoute *routes = config->routes;
-	int routeCount = config->routeCount;
+	const WsCluster *clusters = config->clusters;
+	int clusterCount = config->clusterCount;
 
-	const char *routeKey = params.database;
+	const char *clusterKey = params.database;
 
 	/*
-	 * dbname-based routing cannot work for a real walreceiver connection
+	 * dbname-based addressing cannot work for a real walreceiver connection
 	 * (see WS_REAL_WALRECEIVER_DBNAME's own comment) -- fall back to the
-	 * single configured route unambiguously, matching the
-	 * one-membership-per-archiver scope. Multiple routes with a real
-	 * walreceiver connecting is left as a clean auth rejection (routeKey
-	 * stays "replication", which never matches a real route.key) rather
-	 * than guessing; a multi-route archiver needs a different mechanism
-	 * for a real standby to identify its route (e.g. application_name,
+	 * single configured cluster unambiguously, matching the
+	 * one-membership-per-archiver scope. Multiple clusters with a real
+	 * walreceiver connecting is left as a clean auth rejection (clusterKey
+	 * stays "replication", which never matches a real cluster.key) rather
+	 * than guessing; a multi-cluster archiver needs a different mechanism
+	 * for a real standby to identify its cluster (e.g. application_name,
 	 * which real walreceiver does forward from primary_conninfo, unlike
 	 * dbname) -- not supported yet.
 	 */
-	if (streq(routeKey, WS_REAL_WALRECEIVER_DBNAME) && routeCount == 1)
+	if (streq(clusterKey, WS_REAL_WALRECEIVER_DBNAME) && clusterCount == 1)
 	{
-		routeKey = routes[0].key;
+		clusterKey = clusters[0].key;
 	}
 
-	const WsRoute *route = NULL;
+	const WsCluster *cluster = NULL;
 
-	if (!ws_authenticate(clientSock, &params, routeKey, routes, routeCount,
-						 &(config->auth), &route))
+	if (!ws_authenticate(clientSock, &params, clusterKey, clusters, clusterCount,
+						 &(config->auth), &cluster))
 	{
 		close(clientSock);
 		return;
@@ -223,7 +223,7 @@ handle_connection(int clientSock, const WsServerConfig *config)
 	char title[256];
 	char safeKey[NAMEDATALEN + 24];
 
-	sanitizeForLog(route != NULL ? route->key : routeKey,
+	sanitizeForLog(cluster != NULL ? cluster->key : clusterKey,
 				   safeKey, sizeof(safeKey));
 	sformat(title, sizeof(title), "pg_autoctl: walsender %s", safeKey);
 	set_ps_title(title);
@@ -279,7 +279,7 @@ handle_connection(int clientSock, const WsServerConfig *config)
 		}
 		else
 		{
-			ws_dispatch_command(clientSock, &cmd, route,
+			ws_dispatch_command(clientSock, &cmd, cluster,
 								params.replicationDatabase ? params.database : NULL);
 		}
 
@@ -382,7 +382,7 @@ connection_child_exited(void *ctx, pid_t pid, int status)
  * successfully-reaped child of our own.
  */
 static pid_t bootstrapChildren[WS_MAX_CONNECTIONS];
-static char bootstrapChildRoutes[WS_MAX_CONNECTIONS][NAMEDATALEN + 16];
+static char bootstrapChildClusters[WS_MAX_CONNECTIONS][NAMEDATALEN + 16];
 static time_t bootstrapChildStartedAt[WS_MAX_CONNECTIONS];
 static int bootstrapChildCount = 0;
 
@@ -390,7 +390,7 @@ static int bootstrapChildCount = 0;
 /*
  * bootstrap_child_exited is bootstrap_or_connection_child_exited()'s own
  * half of the otherChildExited chain -- see bootstrapChildren's own comment
- * just above. Keeps the three parallel arrays (pid/route/startedAt) in
+ * just above. Keeps the three parallel arrays (pid/cluster/startedAt) in
  * sync: the same swap-with-last removal, applied to all three at once.
  */
 static bool
@@ -403,8 +403,8 @@ bootstrap_child_exited(pid_t pid)
 			int last = --bootstrapChildCount;
 
 			bootstrapChildren[i] = bootstrapChildren[last];
-			strlcpy(bootstrapChildRoutes[i], bootstrapChildRoutes[last],
-					sizeof(bootstrapChildRoutes[i]));
+			strlcpy(bootstrapChildClusters[i], bootstrapChildClusters[last],
+					sizeof(bootstrapChildClusters[i]));
 			bootstrapChildStartedAt[i] = bootstrapChildStartedAt[last];
 			return true;
 		}
@@ -427,8 +427,8 @@ ws_bootstrap_get_status(WsBootstrapStatus *out, int maxOut)
 
 	for (int i = 0; i < bootstrapChildCount && n < maxOut; i++)
 	{
-		strlcpy(out[n].routeKey, bootstrapChildRoutes[i],
-				sizeof(out[n].routeKey));
+		strlcpy(out[n].clusterKey, bootstrapChildClusters[i],
+				sizeof(out[n].clusterKey));
 		out[n].pid = bootstrapChildren[i];
 		out[n].startedAt = bootstrapChildStartedAt[i];
 		n++;
@@ -459,76 +459,76 @@ bootstrap_or_connection_child_exited(void *ctx, pid_t pid, int status)
 
 
 /*
- * ws_bootstrap_missing_backups checks every route in routes[0..routeCount)
- * for whether it already has a base backup (cli_basebackup_route_has_
+ * ws_bootstrap_missing_backups checks every cluster in clusters[0..clusterCount)
+ * for whether it already has a base backup (cli_basebackup_cluster_has_
  * backup(), cli_basebackup.c: "<path>/basebackups/.latest" exists and is
  * non-empty) and, for any that don't, starts a one-shot background job
  * (backup_bootstrap.c's own ws_backup_bootstrap_start()) that takes one --
  * see that file's own header comment for the full fork/retry-bound design.
- * A route with "receivewal = pull" is only ever bootstrapped once its own
+ * A cluster with "receivewal = pull" is only ever bootstrapped once its own
  * real, already-started receivewal worker (receivewal.c) shows genuine on-disk
- * evidence of streaming; a route missing an "upstream" property to take a
- * backup from is logged and skipped, never an error; a disabled route
- * (routes.h's own WsRoute.disabled) is skipped silently, the same "never
- * touch a dropped route" guarantee every other automatic pg_walserver
+ * evidence of streaming; a cluster missing an "upstream" property to take a
+ * backup from is logged and skipped, never an error; a disabled cluster
+ * (clusters.h's own WsCluster.disabled) is skipped silently, the same "never
+ * touch a dropped cluster" guarantee every other automatic pg_walserver
  * action gives it.
  *
  * Called at exactly two points, both documented in the project's own
  * README.md: once from cli_serve_run() (cli_root.c), right after
- * ws_receivewal_start_all() has started every configured route's own real
+ * ws_receivewal_start_all() has started every configured cluster's own real
  * receivewal worker at "serve" startup; and once from ws_reload_config() (accept_
  * loop.c), right after a successful SIGHUP reload's own ws_receivewal_
  * reload() has reconciled the receivewal worker set against the newly reloaded
- * routes. This one-time bootstrap attempt at either of those two moments
+ * clusters. This one-time bootstrap attempt at either of those two moments
  * is the only "automatic" base backup behavior pg_walserver has: recurring
  * or scheduled backups are explicitly out of scope, the same
  * provide-the-facility-not-the-scheduling-policy philosophy this project
  * applies elsewhere -- an operator's own "pg_walserver basebackup"
- * invocation (or their own cron job around it) is what keeps a route's
+ * invocation (or their own cron job around it) is what keeps a cluster's
  * backup current after its first, automatic one.
  */
 void
-ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount)
+ws_bootstrap_missing_backups(const WsCluster *clusters, int clusterCount)
 {
-	for (int i = 0; i < routeCount; i++)
+	for (int i = 0; i < clusterCount; i++)
 	{
-		const WsRoute *route = &routes[i];
+		const WsCluster *cluster = &clusters[i];
 
-		if (route->path[0] == '\0' || route->disabled ||
-			cli_basebackup_route_has_backup(route->path))
+		if (cluster->path[0] == '\0' || cluster->disabled ||
+			cli_basebackup_cluster_has_backup(cluster->path))
 		{
 			continue;
 		}
 
-		if (route->upstream[0] == '\0')
+		if (cluster->upstream[0] == '\0')
 		{
-			log_warn("Route \"%s\" has no base backup yet, and no "
+			log_warn("Cluster \"%s\" has no base backup yet, and no "
 					 "\"upstream\" property to take one from -- run "
 					 "\"pg_walserver basebackup\" by hand once it has one",
-					 route->key);
+					 cluster->key);
 			continue;
 		}
 
 		if (bootstrapChildCount >= WS_MAX_CONNECTIONS)
 		{
 			log_error("Too many pending automatic bootstrap base backups "
-					  "(max %d): not starting one for route \"%s\" this "
+					  "(max %d): not starting one for cluster \"%s\" this "
 					  "time -- it will be retried at the next start or "
-					  "reload", WS_MAX_CONNECTIONS, route->key);
+					  "reload", WS_MAX_CONNECTIONS, cluster->key);
 			continue;
 		}
 
 		pid_t pid = -1;
 
-		if (ws_backup_bootstrap_start(route, &pid))
+		if (ws_backup_bootstrap_start(cluster, &pid))
 		{
-			strlcpy(bootstrapChildRoutes[bootstrapChildCount], route->key,
-					sizeof(bootstrapChildRoutes[bootstrapChildCount]));
+			strlcpy(bootstrapChildClusters[bootstrapChildCount], cluster->key,
+					sizeof(bootstrapChildClusters[bootstrapChildCount]));
 			bootstrapChildStartedAt[bootstrapChildCount] = time(NULL);
 			bootstrapChildren[bootstrapChildCount++] = pid;
-			log_info("Route \"%s\" has no base backup yet: starting an "
+			log_info("Cluster \"%s\" has no base backup yet: starting an "
 					 "automatic bootstrap base backup in the background "
-					 "(pid %d)", route->key, pid);
+					 "(pid %d)", cluster->key, pid);
 		}
 		else
 		{
@@ -539,65 +539,65 @@ ws_bootstrap_missing_backups(const WsRoute *routes, int routeCount)
 
 
 /*
- * log_route_diff logs a summary of what changed between the previously
- * installed route set and a freshly, successfully reloaded one: routes
+ * log_cluster_diff logs a summary of what changed between the previously
+ * installed cluster set and a freshly, successfully reloaded one: clusters
  * added, removed, or changed (path/upstream/hostname/receivewal), compared by
  * key. Called only once both pg_walserver.ini and pg_walserver_hba.conf have
- * re-parsed cleanly, right before the new routes are installed.
+ * re-parsed cleanly, right before the new clusters are installed.
  */
 static void
-log_route_diff(const WsRoute *oldRoutes, int oldCount,
-			   const WsRoute *newRoutes, int newCount)
+log_cluster_diff(const WsCluster *oldClusters, int oldCount,
+				 const WsCluster *newClusters, int newCount)
 {
 	int added = 0, removed = 0, changed = 0;
 
 	for (int i = 0; i < newCount; i++)
 	{
-		const WsRoute *old = routes_find_exact(oldRoutes, oldCount,
-											   newRoutes[i].key);
+		const WsCluster *old = clusters_find_exact(oldClusters, oldCount,
+												   newClusters[i].key);
 
 		if (old == NULL)
 		{
 			++added;
-			log_info("reload: route \"%s\" added (path \"%s\")",
-					 newRoutes[i].key, newRoutes[i].path);
+			log_info("reload: cluster \"%s\" added (path \"%s\")",
+					 newClusters[i].key, newClusters[i].path);
 			continue;
 		}
 
-		if (strcmp(old->path, newRoutes[i].path) != 0 ||
-			strcmp(old->upstream, newRoutes[i].upstream) != 0 ||
-			strcmp(old->hostname, newRoutes[i].hostname) != 0 ||
-			old->receivewalPull != newRoutes[i].receivewalPull)
+		if (strcmp(old->path, newClusters[i].path) != 0 ||
+			strcmp(old->upstream, newClusters[i].upstream) != 0 ||
+			strcmp(old->hostname, newClusters[i].hostname) != 0 ||
+			old->receivewalPull != newClusters[i].receivewalPull)
 		{
 			++changed;
-			log_info("reload: route \"%s\" changed (path \"%s\" -> \"%s\", "
+			log_info("reload: cluster \"%s\" changed (path \"%s\" -> \"%s\", "
 					 "upstream \"%s\" -> \"%s\", hostname \"%s\" -> \"%s\", "
 					 "receivewal %s -> %s)",
-					 newRoutes[i].key, old->path, newRoutes[i].path,
-					 old->upstream, newRoutes[i].upstream,
-					 old->hostname, newRoutes[i].hostname,
+					 newClusters[i].key, old->path, newClusters[i].path,
+					 old->upstream, newClusters[i].upstream,
+					 old->hostname, newClusters[i].hostname,
 					 old->receivewalPull ? "pull" : "none",
-					 newRoutes[i].receivewalPull ? "pull" : "none");
+					 newClusters[i].receivewalPull ? "pull" : "none");
 		}
 	}
 
 	for (int i = 0; i < oldCount; i++)
 	{
-		if (routes_find_exact(newRoutes, newCount, oldRoutes[i].key) == NULL)
+		if (clusters_find_exact(newClusters, newCount, oldClusters[i].key) == NULL)
 		{
 			++removed;
-			log_info("reload: route \"%s\" removed", oldRoutes[i].key);
+			log_info("reload: cluster \"%s\" removed", oldClusters[i].key);
 		}
 	}
 
 	if (added == 0 && removed == 0 && changed == 0)
 	{
-		log_info("reload: routes unchanged (%d route%s)",
+		log_info("reload: clusters unchanged (%d cluster%s)",
 				 newCount, newCount == 1 ? "" : "s");
 	}
 	else
 	{
-		log_info("reload: routes: %d added, %d removed, %d changed "
+		log_info("reload: clusters: %d added, %d removed, %d changed "
 				 "(%d total now)", added, removed, changed, newCount);
 	}
 }
@@ -661,13 +661,13 @@ log_hba_diff(const WsHbaRuleSet *oldSet, const WsHbaRuleSet *newSet)
 
 /*
  * ws_reload_config is what a SIGHUP tick in ws_accept_loop()'s own main loop
- * calls: it re-reads and re-validates pg_walserver.ini (routes_load()) and
+ * calls: it re-reads and re-validates pg_walserver.ini (clusters_load()) and
  * pg_walserver_hba.conf (hba_parse_file()) from disk, and atomically swaps in
  * the new versions ONLY when both parse successfully -- exactly like
  * PostgreSQL's own SIGHUP-triggered ProcessConfigFile(), a bad reload is
  * refused, never partially applied, and the previous, already-validated
  * configuration keeps serving every connection. Reconciles the embedded
- * receivewal worker set against the new routes (receivewal.c's ws_receivewal_reload())
+ * receivewal worker set against the new clusters (receivewal.c's ws_receivewal_reload())
  * once both files are known-good. The TLS certificate/key are never
  * touched here -- see the one-line note logged below.
  */
@@ -676,7 +676,7 @@ ws_reload_config(WsServerConfig *config)
 {
 	static bool loggedTlsReloadNote = false;
 
-	if (config->routesPath[0] == '\0')
+	if (config->clustersPath[0] == '\0')
 	{
 		log_info("Received SIGHUP: running with --insecure and no --pgdata, "
 				 "nothing to reload");
@@ -684,7 +684,7 @@ ws_reload_config(WsServerConfig *config)
 	}
 
 	log_info("Received SIGHUP: reloading \"%s\" and \"%s\"",
-			 config->routesPath, config->auth.hbaPath);
+			 config->clustersPath, config->auth.hbaPath);
 
 	if (!loggedTlsReloadNote)
 	{
@@ -695,14 +695,14 @@ ws_reload_config(WsServerConfig *config)
 		loggedTlsReloadNote = true;
 	}
 
-	WsRoute *newRoutes = NULL;
-	int newRouteCount = 0;
-	bool routesOk = routes_load(config->routesPath, &newRoutes, &newRouteCount);
+	WsCluster *newClusters = NULL;
+	int newClusterCount = 0;
+	bool clustersOk = clusters_load(config->clustersPath, &newClusters, &newClusterCount);
 
-	if (!routesOk)
+	if (!clustersOk)
 	{
 		log_error("Reload failed: could not parse \"%s\": keeping the "
-				  "current configuration", config->routesPath);
+				  "current configuration", config->clustersPath);
 	}
 
 	WsHbaRuleSet newHbaRuleSet = { 0 };
@@ -723,34 +723,35 @@ ws_reload_config(WsServerConfig *config)
 		hbaOk = false;
 	}
 
-	if (!routesOk || !hbaOk)
+	if (!clustersOk || !hbaOk)
 	{
-		routes_free(newRoutes);
+		clusters_free(newClusters);
 		hba_ruleset_free(&newHbaRuleSet);
 		return;
 	}
 
-	log_route_diff(config->routes, config->routeCount, newRoutes, newRouteCount);
+	log_cluster_diff(config->clusters, config->clusterCount, newClusters,
+					 newClusterCount);
 	log_hba_diff(&config->auth.hbaRuleSet, &newHbaRuleSet);
 
 	/* never restart an already-running receivewal worker just because SIGHUP fired;
 	 * only reconcile against what actually changed */
-	ws_receivewal_reload(newRoutes, newRouteCount);
+	ws_receivewal_reload(newClusters, newClusterCount);
 
-	routes_free(config->routes);
+	clusters_free(config->clusters);
 	hba_ruleset_free(&config->auth.hbaRuleSet);
 
-	config->routes = newRoutes;
-	config->routeCount = newRouteCount;
+	config->clusters = newClusters;
+	config->clusterCount = newClusterCount;
 	config->auth.hbaRuleSet = newHbaRuleSet;
 
-	log_info("Reload complete: now serving %d route%s",
-			 newRouteCount, newRouteCount == 1 ? "" : "s");
+	log_info("Reload complete: now serving %d cluster%s",
+			 newClusterCount, newClusterCount == 1 ? "" : "s");
 
 	/*
 	 * Now that the reconciled receivewal worker set above has had a chance to start
 	 * a real, supervised receivewal worker for any newly-added "receivewal = pull"
-	 * route, check every currently-configured route for a missing base
+	 * cluster, check every currently-configured cluster for a missing base
 	 * backup and kick off an automatic bootstrap for it -- the second of
 	 * the two trigger points documented in accept_loop.h's own
 	 * ws_bootstrap_missing_backups() comment (the first being "serve"'s own
@@ -759,7 +760,7 @@ ws_reload_config(WsServerConfig *config)
 	 * ends up with a base backup with no manual "pg_walserver basebackup"
 	 * invocation needed at all.
 	 */
-	ws_bootstrap_missing_backups(config->routes, config->routeCount);
+	ws_bootstrap_missing_backups(config->clusters, config->clusterCount);
 
 	refresh_ps_state(config, gServePid, gServeStartedAt);
 }
@@ -799,7 +800,7 @@ refresh_ps_state(const WsServerConfig *config, pid_t servePid,
 		WsPsReceivewalEntry *dst =
 			&state.receivewalWorkers[state.receivewalWorkerCount++];
 
-		strlcpy(dst->routeKey, receivewalStatus[i].routeKey, sizeof(dst->routeKey));
+		strlcpy(dst->clusterKey, receivewalStatus[i].clusterKey, sizeof(dst->clusterKey));
 		strlcpy(dst->path, receivewalStatus[i].path, sizeof(dst->path));
 		dst->pid = receivewalStatus[i].pid;
 		dst->startedAt = receivewalStatus[i].startedAt;
@@ -827,7 +828,7 @@ refresh_ps_state(const WsServerConfig *config, pid_t servePid,
 	{
 		WsPsBootstrapEntry *dst = &state.bootstraps[state.bootstrapCount++];
 
-		strlcpy(dst->routeKey, bootstrapStatus[i].routeKey, sizeof(dst->routeKey));
+		strlcpy(dst->clusterKey, bootstrapStatus[i].clusterKey, sizeof(dst->clusterKey));
 		dst->pid = bootstrapStatus[i].pid;
 		dst->startedAt = bootstrapStatus[i].startedAt;
 	}
@@ -849,7 +850,7 @@ refresh_ps_state(const WsServerConfig *config, pid_t servePid,
  * returns true.
  *
  * Takes a mutable config: a successful SIGHUP reload updates
- * config->routes/routeCount and config->auth.hbaRuleSet in place (see
+ * config->clusters/clusterCount and config->auth.hbaRuleSet in place (see
  * ws_reload_config() in this same file). Every forked connection child still
  * only ever reads it.
  */
@@ -872,8 +873,8 @@ ws_accept_loop(WsServerConfig *config)
 
 	log_info("pg_walserver listening on port %d%s%s",
 			 config->port,
-			 config->routesPath[0] != '\0' ? ", routes " : " (no routes file)",
-			 config->routesPath[0] != '\0' ? config->routesPath : "");
+			 config->clustersPath[0] != '\0' ? ", clusters " : " (no clusters file)",
+			 config->clustersPath[0] != '\0' ? config->clustersPath : "");
 
 	gServePid = getpid();
 	gServeStartedAt = time(NULL);
@@ -898,9 +899,9 @@ ws_accept_loop(WsServerConfig *config)
 		 * One tick, one wildcard waitpid(-1, ...) call site for this whole
 		 * process (receivewal.c's own ws_receivewal_tick(), process_supervisor.c
 		 * underneath it): reaps and restarts-on-death every "receivewal =
-		 * pull" route's own supervised pg_receivewal child (a completely
+		 * pull" cluster's own supervised pg_receivewal child (a completely
 		 * independent lifecycle from the connection children below -- one
-		 * long-lived child per active route, alive for the server's whole
+		 * long-lived child per active cluster, alive for the server's whole
 		 * lifetime, not per accepted connection, see receivewal.c's own
 		 * header comment), and hands any pid it doesn't recognize to
 		 * connection_child_exited() above.
@@ -1012,7 +1013,7 @@ ws_accept_loop(WsServerConfig *config)
 	close(listenSock);
 
 	/*
-	 * Stop every "receivewal = pull" route's own supervised pg_receivewal
+	 * Stop every "receivewal = pull" cluster's own supervised pg_receivewal
 	 * child cleanly (SIGINT, a bounded wait, then SIGKILL if needed --
 	 * receivewal.c's own ws_receivewal_stop_all()) before this process itself
 	 * exits: the same shutdown path every other part of this server uses

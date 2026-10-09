@@ -2,13 +2,13 @@
  * src/bin/pg_walserver/cli_list.c
  *   See cli_list.h.
  *
- *   LSN-range computation ("list clusters"): the start LSN of a route's
+ *   LSN-range computation ("list clusters"): the start LSN of a cluster's
  *   currently covered WAL range comes straight from its latest base
  *   backup's own "backup_label" ("START WAL LOCATION"), read with
  *   cmd_base_backup.c's own read_backup_label() -- already parsed,
  *   already tested, no reason to duplicate it. The end LSN comes from
  *   wal_dir_scan.c's own wal_dir_find_latest(): a single opendir()/
- *   readdir() pass over the route's own directory picking out the
+ *   readdir() pass over the cluster's own directory picking out the
  *   highest-numbered *complete* WAL segment filename, which is already
  *   this project's one existing "what's the latest WAL we have" answer
  *   (used elsewhere for IDENTIFY_SYSTEM/CREATE_REPLICATION_SLOT). It is a
@@ -33,7 +33,7 @@
  *   entry in the directory at least once. The original design sketch for
  *   this feature called for a small, per-cluster, incrementally-maintained
  *   cache file, updated by each of the existing code paths that already
- *   write into a route's own directory (the embedded receivewal worker on each
+ *   write into a cluster's own directory (the embedded receivewal worker on each
  *   completed segment, archive-wal/ARCHIVE_FILE on each push, the bootstrap-
  *   backup code on completion, archive-cleanup on removal). That was not
  *   implemented in this pass: wiring an incremental-cache update into four
@@ -42,9 +42,9 @@
  *   nontrivial plumbing that did not fit safely in the time available for
  *   this change. What IS implemented instead is the documented fallback:
  *   "list backups"/"list wal" compute their answer fresh, by scanning the
- *   route's own directory, on every invocation -- correct always, cached
+ *   cluster's own directory, on every invocation -- correct always, cached
  *   only for the lifetime of that one invocation (a single directory scan
- *   feeds every row printed for that route, never re-scanned per row). A
+ *   feeds every row printed for that cluster, never re-scanned per row). A
  *   directory holding a realistic number of WAL segments (thousands, e.g. a
  *   few days of retention at the default 16MB segment size) scans in well
  *   under the time a human operator running this by hand would notice; if
@@ -79,7 +79,7 @@
 #include "log.h"
 #include "pidfile.h"
 #include "ps_state.h"
-#include "routes.h"
+#include "clusters.h"
 #include "string_utils.h"
 #include "system_utils.h"
 #include "wal_dir_scan.h"
@@ -105,7 +105,7 @@ static void cli_list_wal_command_run(int argc, char **argv);
 
 CommandLine list_clusters_command =
 	make_command("clusters",
-				 "List every route, its backup/receivewal status, and the "
+				 "List every cluster, its backup/receivewal status, and the "
 				 "WAL range it covers",
 				 "--pgdata <path> [--config <path>] [--cluster <name>]",
 				 "  --pgdata    this instance's own data root (defaults to "
@@ -114,7 +114,7 @@ CommandLine list_clusters_command =
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster   limit output to a single route\n",
+				 "  --cluster   limit output to a single cluster\n",
 				 cli_list_clusters_getopt, cli_list_clusters_command_run);
 
 CommandLine list_backups_command =
@@ -128,7 +128,7 @@ CommandLine list_backups_command =
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster   limit output to a single route\n",
+				 "  --cluster   limit output to a single cluster\n",
 				 cli_list_clusters_getopt, cli_list_backups_command_run);
 
 CommandLine list_wal_command =
@@ -143,7 +143,7 @@ CommandLine list_wal_command =
 				 "(defaults to\n"
 				 "              <pgdata>/pg_walserver.ini, or "
 				 "PG_WALSERVER_CONFIG_FILE)\n"
-				 "  --cluster   limit output to a single route\n"
+				 "  --cluster   limit output to a single cluster\n"
 				 "  --segments  list every individual WAL/.history/.backup "
 				 "file instead\n"
 				 "              of the default aggregate stats\n",
@@ -239,21 +239,21 @@ directory_size(const char *path)
 
 
 /* ---------------------------------------------------------------------
- * shared route loading/filtering
+ * shared cluster loading/filtering
  * --------------------------------------------------------------------- */
 
 /*
- * load_pgdata_routes reads the config file config_file_path() resolves
- * for pgdata/configFile into a freshly malloc'ed array (routes_load()),
+ * load_pgdata_clusters reads the config file config_file_path() resolves
+ * for pgdata/configFile into a freshly malloc'ed array (clusters_load()),
  * the shared first step every "list" sub-command needs; when
  * clusterFilter is given, also refuses (false, an error already logged)
- * if no route matches it, rather than every caller having to check that
+ * if no cluster matches it, rather than every caller having to check that
  * on its own.
  */
 static bool
-load_pgdata_routes(const char *pgdata, const char *configFile,
-				   const char *clusterFilter,
-				   WsRoute **routesOut, int *countOut)
+load_pgdata_clusters(const char *pgdata, const char *configFile,
+					 const char *clusterFilter,
+					 WsCluster **clustersOut, int *countOut)
 {
 	if ((pgdata == NULL || pgdata[0] == '\0') &&
 		(configFile == NULL || configFile[0] == '\0'))
@@ -263,23 +263,23 @@ load_pgdata_routes(const char *pgdata, const char *configFile,
 		return false;
 	}
 
-	char routesPath[MAXPGPATH] = { 0 };
+	char clustersPath[MAXPGPATH] = { 0 };
 
-	config_file_path(pgdata, configFile, routesPath, sizeof(routesPath));
+	config_file_path(pgdata, configFile, clustersPath, sizeof(clustersPath));
 
-	if (!routes_load(routesPath, routesOut, countOut))
+	if (!clusters_load(clustersPath, clustersOut, countOut))
 	{
-		log_error("Failed to parse \"%s\"", routesPath);
+		log_error("Failed to parse \"%s\"", clustersPath);
 		return false;
 	}
 
 	if (clusterFilter != NULL && clusterFilter[0] != '\0')
 	{
-		if (routes_find_exact(*routesOut, *countOut, clusterFilter) == NULL)
+		if (clusters_find_exact(*clustersOut, *countOut, clusterFilter) == NULL)
 		{
-			log_error("No route \"%s\" in \"%s\"", clusterFilter, routesPath);
-			routes_free(*routesOut);
-			*routesOut = NULL;
+			log_error("No cluster \"%s\" in \"%s\"", clusterFilter, clustersPath);
+			clusters_free(*clustersOut);
+			*clustersOut = NULL;
 			*countOut = 0;
 			return false;
 		}
@@ -290,28 +290,28 @@ load_pgdata_routes(const char *pgdata, const char *configFile,
 
 
 /*
- * route_matches_filter is true when clusterFilter is empty (no --cluster
- * given, every route matches) or equals route's own key exactly.
+ * cluster_matches_filter is true when clusterFilter is empty (no --cluster
+ * given, every cluster matches) or equals cluster's own key exactly.
  */
 static bool
-route_matches_filter(const WsRoute *route, const char *clusterFilter)
+cluster_matches_filter(const WsCluster *cluster, const char *clusterFilter)
 {
 	return clusterFilter == NULL || clusterFilter[0] == '\0' ||
-		   streq(route->key, clusterFilter);
+		   streq(cluster->key, clusterFilter);
 }
 
 
 /*
- * read_latest_label reads "<routePath>/basebackups/.latest" -- the label of
- * the route's currently active backup, trimmed of its trailing newline.
- * Returns false (labelOut untouched) when the route has no backup yet.
+ * read_latest_label reads "<clusterPath>/basebackups/.latest" -- the label of
+ * the cluster's currently active backup, trimmed of its trailing newline.
+ * Returns false (labelOut untouched) when the cluster has no backup yet.
  */
 static bool
-read_latest_label(const char *routePath, char *labelOut, size_t labelOutSize)
+read_latest_label(const char *clusterPath, char *labelOut, size_t labelOutSize)
 {
 	char latestPath[MAXPGPATH] = { 0 };
 
-	sformat(latestPath, sizeof(latestPath), "%s/basebackups/.latest", routePath);
+	sformat(latestPath, sizeof(latestPath), "%s/basebackups/.latest", clusterPath);
 
 	char *contents = NULL;
 	long fileSize = 0;
@@ -337,8 +337,8 @@ read_latest_label(const char *routePath, char *labelOut, size_t labelOutSize)
 
 
 /*
- * receivewal_running_for_route cross-references the ps state file (ps_state.h,
- * written by a running "serve") against routeKey. *knownOut is set to false
+ * receivewal_running_for_cluster cross-references the ps state file (ps_state.h,
+ * written by a running "serve") against clusterKey. *knownOut is set to false
  * when "serve" is not running at all (the caller should print "n/a", not
  * "no": there is no receivewal worker status to report either way), true otherwise
  * with the return value being the actual running/stopped answer. When
@@ -347,8 +347,8 @@ read_latest_label(const char *routePath, char *labelOut, size_t labelOutSize)
  * (ps_state.h's WsPsReceivewalEntry.lsn) rather than re-deriving one.
  */
 static bool
-receivewal_running_for_route(const char *pgdata, const char *routeKey,
-							 bool *knownOut, WsPsReceivewalEntry *entryOut)
+receivewal_running_for_cluster(const char *pgdata, const char *clusterKey,
+							   bool *knownOut, WsPsReceivewalEntry *entryOut)
 {
 	*knownOut = false;
 
@@ -372,7 +372,7 @@ receivewal_running_for_route(const char *pgdata, const char *routeKey,
 
 	for (int i = 0; i < state.receivewalWorkerCount; i++)
 	{
-		if (streq(state.receivewalWorkers[i].routeKey, routeKey))
+		if (streq(state.receivewalWorkers[i].clusterKey, clusterKey))
 		{
 			*knownOut = true;
 
@@ -386,7 +386,7 @@ receivewal_running_for_route(const char *pgdata, const char *routeKey,
 		}
 	}
 
-	/* the route has no receivewal worker entry at all: known, and definitely not
+	/* the cluster has no receivewal worker entry at all: known, and definitely not
 	 * running (either "receivewal = pull" isn't set, or it failed to start) */
 	*knownOut = true;
 	return false;
@@ -400,21 +400,22 @@ bool
 cli_list_clusters_run(const char *pgdata, const char *configFile,
 					  const char *clusterFilter)
 {
-	WsRoute *routes = NULL;
-	int routeCount = 0;
+	WsCluster *clusters = NULL;
+	int clusterCount = 0;
 
-	if (!load_pgdata_routes(pgdata, configFile, clusterFilter, &routes, &routeCount))
+	if (!load_pgdata_clusters(pgdata, configFile, clusterFilter, &clusters,
+							  &clusterCount))
 	{
 		return false;
 	}
 
-	if (routeCount == 0)
+	if (clusterCount == 0)
 	{
 		char configPath[MAXPGPATH] = { 0 };
 
 		config_file_path(pgdata, configFile, configPath, sizeof(configPath));
-		log_info("No routes configured in \"%s\"", configPath);
-		routes_free(routes);
+		log_info("No clusters configured in \"%s\"", configPath);
+		clusters_free(clusters);
 		return true;
 	}
 
@@ -424,17 +425,17 @@ cli_list_clusters_run(const char *pgdata, const char *configFile,
 			"--------------------", "--------", "----------", "--------",
 			"----------------------", "----------------------");
 
-	for (int i = 0; i < routeCount; i++)
+	for (int i = 0; i < clusterCount; i++)
 	{
-		const WsRoute *route = &routes[i];
+		const WsCluster *cluster = &clusters[i];
 
-		if (!route_matches_filter(route, clusterFilter))
+		if (!cluster_matches_filter(cluster, clusterFilter))
 		{
 			continue;
 		}
 
 		char backupLabel[NAMEDATALEN] = { 0 };
-		bool haveBackup = read_latest_label(route->path, backupLabel,
+		bool haveBackup = read_latest_label(cluster->path, backupLabel,
 											sizeof(backupLabel));
 
 		char startLsn[32] = "-";
@@ -446,7 +447,7 @@ cli_list_clusters_run(const char *pgdata, const char *configFile,
 			int timeline = 0;
 
 			sformat(backupDir, sizeof(backupDir), "%s/basebackups/%s",
-					route->path, backupLabel);
+					cluster->path, backupLabel);
 
 			if (read_backup_label(backupDir, lsn, sizeof(lsn), &timeline))
 			{
@@ -457,13 +458,13 @@ cli_list_clusters_run(const char *pgdata, const char *configFile,
 		char endLsn[32] = "-";
 		uint32_t tli = 0;
 
-		(void) wal_dir_find_latest(route, &tli, endLsn, sizeof(endLsn));
+		(void) wal_dir_find_latest(cluster, &tli, endLsn, sizeof(endLsn));
 
 		bool known = false;
 		WsPsReceivewalEntry entry = { 0 };
-		bool running = receivewal_running_for_route(pgdata, route->key, &known,
-													&entry);
-		const char *receivewalStr = !route->receivewalPull ? "n/a" :
+		bool running = receivewal_running_for_cluster(pgdata, cluster->key, &known,
+													  &entry);
+		const char *receivewalStr = !cluster->receivewalPull ? "n/a" :
 									!known ? "n/a" : running ? "yes" : "no";
 
 		/*
@@ -471,8 +472,8 @@ cli_list_clusters_run(const char *pgdata, const char *configFile,
 		 * relayed from its hook callbacks -- see accept_loop.c's own
 		 * refresh_ps_state()) is a strictly more current "what's the latest
 		 * WAL we have" answer than wal_dir_find_latest()'s segment-boundary
-		 * scan above, for this exact route: use it in preference, falling
-		 * back to the scan-based value when the route has no receivewal
+		 * scan above, for this exact cluster: use it in preference, falling
+		 * back to the scan-based value when the cluster has no receivewal
 		 * worker running, or it hasn't reported a reading yet.
 		 */
 		if (running && entry.lsn[0] != '\0')
@@ -481,12 +482,12 @@ cli_list_clusters_run(const char *pgdata, const char *configFile,
 		}
 
 		fformat(stdout, "%-20s %-8s %-10s %-8s %-22s %-22s\n",
-				route->key, haveBackup ? "yes" : "no",
-				route->receivewalPull ? "pull" : "none", receivewalStr,
+				cluster->key, haveBackup ? "yes" : "no",
+				cluster->receivewalPull ? "pull" : "none", receivewalStr,
 				startLsn, endLsn);
 	}
 
-	routes_free(routes);
+	clusters_free(clusters);
 
 	return true;
 }
@@ -499,10 +500,11 @@ bool
 cli_list_backups_run(const char *pgdata, const char *configFile,
 					 const char *clusterFilter)
 {
-	WsRoute *routes = NULL;
-	int routeCount = 0;
+	WsCluster *clusters = NULL;
+	int clusterCount = 0;
 
-	if (!load_pgdata_routes(pgdata, configFile, clusterFilter, &routes, &routeCount))
+	if (!load_pgdata_clusters(pgdata, configFile, clusterFilter, &clusters,
+							  &clusterCount))
 	{
 		return false;
 	}
@@ -513,28 +515,28 @@ cli_list_backups_run(const char *pgdata, const char *configFile,
 			"--------------------", "----------------------------",
 			"----------------------", "----------", "------");
 
-	for (int i = 0; i < routeCount; i++)
+	for (int i = 0; i < clusterCount; i++)
 	{
-		const WsRoute *route = &routes[i];
+		const WsCluster *cluster = &clusters[i];
 
-		if (!route_matches_filter(route, clusterFilter))
+		if (!cluster_matches_filter(cluster, clusterFilter))
 		{
 			continue;
 		}
 
-		uint64_t segSize = ws_route_wal_segment_size(route);
+		uint64_t segSize = ws_cluster_wal_segment_size(cluster);
 		WsBackupInfo *backups = NULL;
 		int backupCount = 0;
 
-		if (!ws_backup_list_load(route->path, segSize, &backups, &backupCount))
+		if (!ws_backup_list_load(cluster->path, segSize, &backups, &backupCount))
 		{
-			log_warn("Could not read backups for route \"%s\"", route->key);
+			log_warn("Could not read backups for cluster \"%s\"", cluster->key);
 			continue;
 		}
 
 		char latestLabel[NAMEDATALEN] = { 0 };
 
-		(void) read_latest_label(route->path, latestLabel, sizeof(latestLabel));
+		(void) read_latest_label(cluster->path, latestLabel, sizeof(latestLabel));
 
 		for (int b = 0; b < backupCount; b++)
 		{
@@ -545,14 +547,14 @@ cli_list_backups_run(const char *pgdata, const char *configFile,
 			pretty_print_bytes(size, sizeof(size), directory_size(backups[b].dirPath));
 
 			fformat(stdout, "%-20s %-28s %-22s %-10s %s\n",
-					route->key, backups[b].label, takenAt, size,
+					cluster->key, backups[b].label, takenAt, size,
 					streq(backups[b].label, latestLabel) ? "yes" : "");
 		}
 
 		free(backups);
 	}
 
-	routes_free(routes);
+	clusters_free(clusters);
 
 	return true;
 }
@@ -575,7 +577,7 @@ typedef struct WsWalStats
 
 /*
  * scan_wal_dir classifies and tallies every WAL/.partial/.backup/.history
- * file under route's own directory into *stats (segment/partial/backup/
+ * file under cluster's own directory into *stats (segment/partial/backup/
  * history counts, total bytes, oldest/newest complete segment); when
  * printSegments, also prints one row per file as it goes (the
  * "--segments" detail view), so this only ever scans the directory once
@@ -583,12 +585,12 @@ typedef struct WsWalStats
  * left zeroed) if the directory itself cannot be opened.
  */
 static bool
-scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
-			 const char *routeKey)
+scan_wal_dir(const WsCluster *cluster, WsWalStats *stats, bool printSegments,
+			 const char *clusterKey)
 {
 	memset(stats, 0, sizeof(WsWalStats));
 
-	DIR *dir = opendir(route->path);
+	DIR *dir = opendir(cluster->path);
 
 	if (dir == NULL)
 	{
@@ -609,7 +611,7 @@ scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
 
 		char entryPath[MAXPGPATH] = { 0 };
 
-		sformat(entryPath, sizeof(entryPath), "%s/%s", route->path, entry->d_name);
+		sformat(entryPath, sizeof(entryPath), "%s/%s", cluster->path, entry->d_name);
 
 		struct stat st;
 		uint64_t size = 0;
@@ -678,7 +680,7 @@ scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
 			format_utc(st.st_mtime, mtimeStr, sizeof(mtimeStr));
 
 			fformat(stdout, "%-20s %-28s %-9s %-10s %s\n",
-					routeKey, entry->d_name, kindStr, sizeStr, mtimeStr);
+					clusterKey, entry->d_name, kindStr, sizeStr, mtimeStr);
 		}
 	}
 
@@ -689,10 +691,10 @@ scan_wal_dir(const WsRoute *route, WsWalStats *stats, bool printSegments,
 
 
 /*
- * cli_list_wal_run prints, per route, WsWalStats's own aggregate counts
+ * cli_list_wal_run prints, per cluster, WsWalStats's own aggregate counts
  * (the default: one pg_controldata-style "Label:  value" block per
- * route, chosen over a table for the same reason "cluster list
- * --upstream" is pivoted rather than tabular -- one route's worth of
+ * cluster, chosen over a table for the same reason "cluster list
+ * --upstream" is pivoted rather than tabular -- one cluster's worth of
  * facts read more naturally stacked than crammed into a row), or every
  * individual file, still a table, via scan_wal_dir()'s own printSegments
  * mode when segments is true.
@@ -701,10 +703,11 @@ bool
 cli_list_wal_run(const char *pgdata, const char *configFile,
 				 const char *clusterFilter, bool segments)
 {
-	WsRoute *routes = NULL;
-	int routeCount = 0;
+	WsCluster *clusters = NULL;
+	int clusterCount = 0;
 
-	if (!load_pgdata_routes(pgdata, configFile, clusterFilter, &routes, &routeCount))
+	if (!load_pgdata_clusters(pgdata, configFile, clusterFilter, &clusters,
+							  &clusterCount))
 	{
 		return false;
 	}
@@ -720,20 +723,20 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 
 	bool first = true;
 
-	for (int i = 0; i < routeCount; i++)
+	for (int i = 0; i < clusterCount; i++)
 	{
-		const WsRoute *route = &routes[i];
+		const WsCluster *cluster = &clusters[i];
 
-		if (!route_matches_filter(route, clusterFilter))
+		if (!cluster_matches_filter(cluster, clusterFilter))
 		{
 			continue;
 		}
 
 		WsWalStats stats = { 0 };
 
-		if (!scan_wal_dir(route, &stats, segments, route->key))
+		if (!scan_wal_dir(cluster, &stats, segments, cluster->key))
 		{
-			log_warn("Could not read WAL directory for route \"%s\"", route->key);
+			log_warn("Could not read WAL directory for cluster \"%s\"", cluster->key);
 			continue;
 		}
 
@@ -749,7 +752,7 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 			}
 			first = false;
 
-			fformat(stdout, "%-11s%s\n", "Cluster:", route->key);
+			fformat(stdout, "%-11s%s\n", "Cluster:", cluster->key);
 			fformat(stdout, "%-11s%d\n", "Segments:", stats.segments);
 			fformat(stdout, "%-11s%s\n", "Size:", sizeStr);
 			fformat(stdout, "%-11s%s\n", "Oldest:",
@@ -760,7 +763,7 @@ cli_list_wal_run(const char *pgdata, const char *configFile,
 		}
 	}
 
-	routes_free(routes);
+	clusters_free(clusters);
 
 	return true;
 }

@@ -2,7 +2,7 @@
  * src/bin/pg_walserver/cli_archive_cleanup.h
  *   `pg_walserver archive-cleanup --cluster <name> --pgdata <path> |
  *   --path <dir> [--keep-count <N>] [--keep-age <interval>] [--dry-run]`:
- *   a local, operator- or cron-driven retention tool for one route's own
+ *   a local, operator- or cron-driven retention tool for one cluster's own
  *   directory, mirroring real PostgreSQL's own `pg_archivecleanup` contrib
  *   tool -- same filename-prefix-extraction algorithm for `.partial`/
  *   `.backup` files (`SetWALFileNameForCleanup()`/`CleanupPriorWALFiles()`,
@@ -17,7 +17,7 @@
  *   ARCHIVE_FILE-shaped "delete" wire command, and deleting from a
  *   directory a running server is actively reading/writing needs no
  *   protocol round trip, only the same file the server itself already
- *   reads and writes directly) -- it resolves a route's own directory the
+ *   reads and writes directly) -- it resolves a cluster's own directory the
  *   same way `fetch-systemid`/`basebackup`/`setup` do
  *   (`--pgdata`/`--cluster`/`--path`), not the `WsWalServerTarget`
  *   (`cli_wal_target.h`) `archive-wal`/`restore-wal` use to reach
@@ -55,7 +55,7 @@
 
 /*
  * WsBackupInfo is one enumerated base backup directory under
- * "<route path>/basebackups/" -- exported so "pg_walserver list backups"
+ * "<cluster path>/basebackups/" -- exported so "pg_walserver list backups"
  * (cli_list.c) can reuse this file's own enumeration (ws_backup_list_load(),
  * below) rather than re-deriving the same backup_label parsing/label-
  * timestamp-parsing logic a second time.
@@ -71,25 +71,25 @@ typedef struct WsBackupInfo
 } WsBackupInfo;
 
 /*
- * ws_backup_list_load scans "<routePath>/basebackups/" for backup
+ * ws_backup_list_load scans "<clusterPath>/basebackups/" for backup
  * directories, parses each one's own label timestamp and (via
  * read_backup_label(), cmd_base_backup.c) its own required starting WAL
  * segment, and returns them sorted oldest-first (label strings sort
  * chronologically) in a freshly malloc'd array (free() it yourself).
  * Returns true even when there are zero backups (an empty, not-yet-used
- * route); false only on a directory that cannot be opened at all.
+ * cluster); false only on a directory that cannot be opened at all.
  */
-bool ws_backup_list_load(const char *routePath, uint64_t segSize,
+bool ws_backup_list_load(const char *clusterPath, uint64_t segSize,
 						 WsBackupInfo **backupsOut, int *countOut);
 
 /*
- * ws_archive_cleanup_run prunes routePath (one route's own directory: WAL
+ * ws_archive_cleanup_run prunes clusterPath (one cluster's own directory: WAL
  * segments/.partial/.backup files directly under it, base backups under
  * its "basebackups/" subdirectory) down to whatever haveKeepCount/
  * haveKeepAge (at least one must be true) ask to retain. dryRun logs what
  * would be removed without removing anything. Returns false, with an
  * error already logged, on a configuration problem (neither retention
- * flag given, an unreadable route directory, a ".latest" backup that
+ * flag given, an unreadable cluster directory, a ".latest" backup that
  * cannot be found or parsed) -- never partway through an unsafe removal.
  *
  * Before any deletion, a pre-flight WAL-continuity check (ws_check_wal_
@@ -106,7 +106,7 @@ bool ws_backup_list_load(const char *routePath, uint64_t segSize,
  * false when a problem was found and force was not given, so its own
  * exit status reflects what a real run would have refused to do.
  */
-bool ws_archive_cleanup_run(const char *routePath,
+bool ws_archive_cleanup_run(const char *clusterPath,
 							bool haveKeepCount, int keepCount,
 							bool haveKeepAge, RetentionAge keepAge,
 							bool dryRun, bool force);

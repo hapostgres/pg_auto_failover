@@ -55,7 +55,7 @@
  *       # NODE_KIND_ARCHIVER / `pg_autoctl create archiver`, this DSL's own
  *       # separate, braced `archiver <name> { formation ... }` block).
  *       postgres     plain1
- *       pg_walserver walserver1  alias "routeA.internal", "routeB.internal"
+ *       pg_walserver walserver1  alias "clusterA.internal", "clusterB.internal"
  *   }
  *
  * When "formation" has no name it defaults to "default".

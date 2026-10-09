@@ -30,7 +30,7 @@ static WsWalServerTarget archiveTarget = { 0 };
 
 CommandLine archive_command =
 	make_command("archive-wal",
-				 "Push one WAL/.backup file into a pg_walserver route "
+				 "Push one WAL/.backup file into a pg_walserver cluster "
 				 "(archive_command)",
 				 "<path-to-file> <filename> --cluster <name> --host <host> "
 				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
@@ -65,7 +65,7 @@ ws_archive_push_file(const WsWalServerTarget *target, const char *localPath,
 					 const char *filename)
 {
 	return ws_push_file_client(target->host, target->port, target->user,
-							   target->route, target->sslmode,
+							   target->cluster, target->sslmode,
 							   "pg_walserver_archive_wal",
 							   localPath, filename) == 0;
 }
@@ -104,7 +104,7 @@ cli_archive_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	if (archiveTarget.route[0] == '\0' || archiveTarget.host[0] == '\0')
+	if (archiveTarget.cluster[0] == '\0' || archiveTarget.host[0] == '\0')
 	{
 		log_fatal("archive-wal requires --cluster and --host");
 		exit(1);

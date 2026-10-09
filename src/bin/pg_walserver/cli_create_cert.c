@@ -64,8 +64,8 @@ CommandLine create_cert_command =
  * pg_create_self_signed_cert() (src/bin/common/pgctl.c), refusing to
  * overwrite already-existing files unless force is set. The one shared
  * helper both `pg_walserver create-cert` (by hand) and cli_setup.c's own
- * ensure_tls_for_multiple_routes() (automatically, the moment a second
- * named route needs a certificate) call, so the create-and-log sequence
+ * ensure_tls_for_multiple_clusters() (automatically, the moment a second
+ * named cluster needs a certificate) call, so the create-and-log sequence
  * isn't duplicated between the two call sites. Returns true on success,
  * false with an error already logged otherwise.
  */

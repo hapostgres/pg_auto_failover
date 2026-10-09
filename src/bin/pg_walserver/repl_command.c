@@ -27,7 +27,7 @@
 
 
 /*
- * ws_dispatch_command routes an already-parsed WsCommand to its own
+ * ws_dispatch_command clusters an already-parsed WsCommand to its own
  * per-command handler -- the parse-tree-to-handler step that stayed
  * separate from parsing even after repl_command_parse() itself moved into
  * repl_gram.y's own semantic actions (see this file's own header comment).
@@ -39,76 +39,76 @@
  */
 void
 ws_dispatch_command(int sock, const WsCommand *cmd,
-					const WsRoute *route, const char *dbname)
+					const WsCluster *cluster, const char *dbname)
 {
 	switch (cmd->type)
 	{
 		case WS_CMD_IDENTIFY_SYSTEM:
 		{
-			cmd_identify_system(sock, route, dbname);
+			cmd_identify_system(sock, cluster, dbname);
 			break;
 		}
 
 		case WS_CMD_SHOW:
 		{
-			cmd_show(sock, route, cmd->showName);
+			cmd_show(sock, cluster, cmd->showName);
 			break;
 		}
 
 		case WS_CMD_BASE_BACKUP:
 		{
-			cmd_base_backup(sock, route, cmd->options, cmd->nOptions);
+			cmd_base_backup(sock, cluster, cmd->options, cmd->nOptions);
 			break;
 		}
 
 		case WS_CMD_TIMELINE_HISTORY:
 		{
-			cmd_timeline_history(sock, route, cmd->timeline);
+			cmd_timeline_history(sock, cluster, cmd->timeline);
 			break;
 		}
 
 		case WS_CMD_CREATE_REPLICATION_SLOT:
 		{
-			cmd_create_replication_slot(sock, route, cmd->slotName,
+			cmd_create_replication_slot(sock, cluster, cmd->slotName,
 										cmd->temporary, cmd->isLogical);
 			break;
 		}
 
 		case WS_CMD_READ_REPLICATION_SLOT:
 		{
-			cmd_read_replication_slot(sock, route, cmd->slotName);
+			cmd_read_replication_slot(sock, cluster, cmd->slotName);
 			break;
 		}
 
 		case WS_CMD_DROP_REPLICATION_SLOT:
 		{
-			cmd_drop_replication_slot(sock, route, cmd->slotName, cmd->dropWait);
+			cmd_drop_replication_slot(sock, cluster, cmd->slotName, cmd->dropWait);
 			break;
 		}
 
 		case WS_CMD_START_REPLICATION:
 		{
-			cmd_start_replication(sock, route, cmd->slotName, cmd->startLsn,
+			cmd_start_replication(sock, cluster, cmd->slotName, cmd->startLsn,
 								  cmd->haveTimeline, (uint32_t) cmd->timeline);
 			break;
 		}
 
 		case WS_CMD_FETCH_FILE:
 		{
-			cmd_fetch_file(sock, route, cmd->filename);
+			cmd_fetch_file(sock, cluster, cmd->filename);
 			break;
 		}
 
 		case WS_CMD_CHECK_FILE:
 		{
-			cmd_check_file(sock, route, cmd->filename,
+			cmd_check_file(sock, cluster, cmd->filename,
 						   cmd->checkFileSize, cmd->checkFileCrc32c);
 			break;
 		}
 
 		case WS_CMD_ARCHIVE_FILE:
 		{
-			cmd_archive_file(sock, route, cmd->filename);
+			cmd_archive_file(sock, cluster, cmd->filename);
 			break;
 		}
 

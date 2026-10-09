@@ -1,23 +1,23 @@
-# TLS SNI-based routing: two named routes, both configured with
+# TLS SNI-based routing: two named clusters, both configured with
 # `pg_walserver cluster register --hostname`, disambiguated by the hostname a real
 # client presents during the TLS handshake rather than by `dbname` --
 # exactly the case a real physical standby forces (its own walreceiver
 # always sends the literal dbname "replication", see auth.c's own comment
-# and README.md's "Routing beyond dbname: TLS SNI" section).
+# and README.md's "Addressing a cluster beyond dbname: TLS SNI" section).
 #
-#   test_001  `cluster register --hostname` on a *second* route creates a self-signed
+#   test_001  `cluster register --hostname` on a *second* cluster creates a self-signed
 #             certificate for --pgdata automatically (none existed after
-#             the first route alone -- a single named route is still fully
+#             the first cluster alone -- a single named cluster is still fully
 #             disambiguated by dbname, no TLS/SNI needed for it)
 #   test_002  a client whose dbname is the useless "replication" (what a
 #             real physical standby always sends) is routed to the right
-#             route purely by the hostname it connects with -- both ways,
+#             cluster purely by the hostname it connects with -- both ways,
 #             proving this is genuine disambiguation, not a coincidence
 #   test_003  neither dbname nor the connecting hostname resolves to
-#             anything (no route by that name, no wildcard configured):
-#             a clean "unknown route" failure, not an accidental match
+#             anything (no cluster by that name, no wildcard configured):
+#             a clean "unknown cluster" failure, not an accidental match
 #   test_004  removing the certificate makes `pg_walserver serve` refuse
-#             to start outright: more than one named route without TLS is
+#             to start outright: more than one named cluster without TLS is
 #             a hard error, not just `cluster register`'s own advisory warning
 
 cluster {
@@ -36,19 +36,19 @@ cluster {
     #
     # "command" overrides this node kind's own default (running
     # `pg_walserver serve` immediately as PID 1): this spec needs to
-    # configure named routes across several test steps before pg_walserver
+    # configure named clusters across several test steps before pg_walserver
     # ever starts, so the container just stays up instead, and each step
     # drives `pg_walserver cluster register`/`serve` by hand via exec, exactly as
     # before.
     #
     # "alias" gives the SAME container's static IP two extra vanity
     # hostnames in every other service's extra_hosts (including its own),
-    # replacing the old sudo-into-/etc/hosts hack entirely -- both routes'
+    # replacing the old sudo-into-/etc/hosts hack entirely -- both clusters'
     # SNI hostnames now resolve via ordinary container DNS/hosts, the same
     # mechanism every other inter-service hostname in this DSL already uses.
     pg_walserver walserver
         command "tail -f /dev/null"
-        alias "routeA.internal", "routeB.internal"
+        alias "clusterA.internal", "clusterB.internal"
 }
 
 setup {
@@ -64,16 +64,16 @@ setup {
     exec node1 bash -c 'echo host replication pgautofailover_replicator 0.0.0.0/0 trust >> /var/lib/postgres/pgaf/pg_hba.conf && pg_ctl -D /var/lib/postgres/pgaf reload'
 
     # 0.0.0.0/0, not 127.0.0.1/32: the connections below address this same
-    # container by its real vanity hostnames (routeA.internal/routeB.internal,
+    # container by its real vanity hostnames (clusterA.internal/clusterB.internal,
     # resolved via the "alias" declaration above to walserver's own real
     # bridge IP, not loopback), so the source address pg_walserver's own HBA
     # sees is that real IP, not 127.0.0.1 -- matching node1's own manual HBA
     # rule above, and every other cross-container HBA rule in this suite.
     exec walserver bash -c 'mkdir -p /tmp/sni && printf "hostssl all all 0.0.0.0/0 trust\n" > /tmp/sni/pg_walserver_hba.conf'
 
-    # route A: the first route in a brand new pg_walserver.ini -- one named
-    # route needs no TLS at all yet, dbname alone is unambiguous
-    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register routeA --pgdata /tmp/sni --path /tmp/sni/routeA --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --hostname routeA.internal'
+    # cluster A: the first cluster in a brand new pg_walserver.ini -- one named
+    # cluster needs no TLS at all yet, dbname alone is unambiguous
+    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register clusterA --pgdata /tmp/sni --path /tmp/sni/clusterA --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --hostname clusterA.internal'
     exec walserver bash -c 'test ! -f /tmp/sni/server.crt'
 }
 
@@ -81,58 +81,58 @@ teardown {
     compose down
 }
 
-step test_001_second_named_route_creates_certificate {
-    # route B: a *second* named route -- this is the moment dbname alone
+step test_001_second_named_cluster_creates_certificate {
+    # cluster B: a *second* named cluster -- this is the moment dbname alone
     # stops being enough, and setup creates a self-signed certificate for
     # --pgdata on its own, with no separate step asked for
-    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register routeB --pgdata /tmp/sni --path /tmp/sni/routeB --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --hostname routeB.internal'
+    exec walserver bash -c 'PGPASSWORD=pgaf-repl-pw pg_walserver cluster register clusterB --pgdata /tmp/sni --path /tmp/sni/clusterB --pguri "host=node1 port=5432 user=pgautofailover_replicator sslmode=disable" --hostname clusterB.internal'
     exec walserver bash -c 'test -f /tmp/sni/server.crt && test -f /tmp/sni/server.key'
 
-    # both routes archive from the same upstream (node1), so their real
-    # system identifiers are identical -- overwrite routeB's own with a
+    # both clusters archive from the same upstream (node1), so their real
+    # system identifiers are identical -- overwrite clusterB's own with a
     # distinguishable fake value directly (bypassing fetch-systemid's own
     # overwrite-safety on purpose, exactly as pg_walserver_systemid is
     # hand-crafted in pg_walserver_standalone.pgaf's own wildcard test), so
     # the checks below prove genuine SNI-based disambiguation rather than
     # two checks that could both pass by coincidence against one shared
     # value if routing were actually broken and resolved both hostnames to
-    # the same route
-    exec walserver bash -c 'echo "9999999999999999999" > /tmp/sni/routeB/pg_walserver_systemid'
+    # the same cluster
+    exec walserver bash -c 'echo "9999999999999999999" > /tmp/sni/clusterB/pg_walserver_systemid'
 
     exec walserver bash -c 'nohup pg_walserver serve --pgdata /tmp/sni --port 6544 > /tmp/sni-walserver.log 2>&1 & echo started'
     exec walserver bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6544) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/sni-walserver.log; exit 1'
 }
 
-step test_002_sni_disambiguates_two_routes {
-    # both routes are addressed with the exact same, useless dbname
+step test_002_sni_disambiguates_two_clusters {
+    # both clusters are addressed with the exact same, useless dbname
     # ("replication", what a real physical standby's own walreceiver
     # always sends) -- only the hostname each connection presents during
     # the TLS handshake tells them apart
-    exec walserver bash -c 'sysidA=$(cat /tmp/sni/routeA/pg_walserver_systemid); out=$(psql "host=routeA.internal port=6544 dbname=replication replication=true sslmode=require" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysidA" || { echo "routeA: got $out, want $sysidA"; false; }'
-    exec walserver bash -c 'sysidB=$(cat /tmp/sni/routeB/pg_walserver_systemid); out=$(psql "host=routeB.internal port=6544 dbname=replication replication=true sslmode=require" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysidB" || { echo "routeB: got $out, want $sysidB"; false; }'
-    # the two routes really do have distinct identities -- otherwise the
+    exec walserver bash -c 'sysidA=$(cat /tmp/sni/clusterA/pg_walserver_systemid); out=$(psql "host=clusterA.internal port=6544 dbname=replication replication=true sslmode=require" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysidA" || { echo "clusterA: got $out, want $sysidA"; false; }'
+    exec walserver bash -c 'sysidB=$(cat /tmp/sni/clusterB/pg_walserver_systemid); out=$(psql "host=clusterB.internal port=6544 dbname=replication replication=true sslmode=require" -Atc "IDENTIFY_SYSTEM"); echo "$out" | cut -d"|" -f1 | grep -qx "$sysidB" || { echo "clusterB: got $out, want $sysidB"; false; }'
+    # the two clusters really do have distinct identities -- otherwise the
     # two checks above could both pass by coincidence
-    exec walserver bash -c 'test "$(cat /tmp/sni/routeA/pg_walserver_systemid)" != "$(cat /tmp/sni/routeB/pg_walserver_systemid)"'
+    exec walserver bash -c 'test "$(cat /tmp/sni/clusterA/pg_walserver_systemid)" != "$(cat /tmp/sni/clusterB/pg_walserver_systemid)"'
 }
 
-step test_003_unresolved_route_fails_cleanly {
+step test_003_unresolved_cluster_fails_cleanly {
     # plain 127.0.0.1: no SNI hostname at all (fe-secure-openssl.c never
     # sends SNI for a literal IP, RFC 6066), and "replication" matches no
-    # named route and there is no "*" wildcard here -- must fail cleanly,
-    # never accidentally fall through to either real route
+    # named cluster and there is no "*" wildcard here -- must fail cleanly,
+    # never accidentally fall through to either real cluster
     exec walserver bash -c 'out=$(psql "host=127.0.0.1 port=6544 dbname=replication replication=true sslmode=require" -Atc "IDENTIFY_SYSTEM" 2>&1); echo "$out" | grep -qi "does not exist" || { echo "got: $out"; false; }'
 }
 
-step test_004_no_tls_refuses_to_start_with_two_routes {
+step test_004_no_tls_refuses_to_start_with_two_clusters {
     exec walserver bash -c 'pkill -x pg_walserver; for i in $(seq 30); do pgrep -x pg_walserver > /dev/null || exit 0; sleep 1; done; exit 1'
     exec walserver bash -c 'mv /tmp/sni/server.crt /tmp/sni/server.crt.bak && mv /tmp/sni/server.key /tmp/sni/server.key.bak'
     exec walserver bash -c 'if pg_walserver serve --pgdata /tmp/sni --port 6545 2>/tmp/sni-refuse.log; then cat /tmp/sni-refuse.log; false; fi'
-    exec walserver bash -c 'grep -qi "named routes but TLS is not" /tmp/sni-refuse.log'
+    exec walserver bash -c 'grep -qi "named clusters but TLS is not" /tmp/sni-refuse.log'
     exec walserver bash -c 'mv /tmp/sni/server.crt.bak /tmp/sni/server.crt && mv /tmp/sni/server.key.bak /tmp/sni/server.key'
 }
 
 sequence
-    test_001_second_named_route_creates_certificate
-    test_002_sni_disambiguates_two_routes
-    test_003_unresolved_route_fails_cleanly
-    test_004_no_tls_refuses_to_start_with_two_routes
+    test_001_second_named_cluster_creates_certificate
+    test_002_sni_disambiguates_two_clusters
+    test_003_unresolved_cluster_fails_cleanly
+    test_004_no_tls_refuses_to_start_with_two_clusters

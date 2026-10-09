@@ -30,7 +30,7 @@ static WsWalServerTarget restoreTarget = { 0 };
 
 CommandLine restore_command =
 	make_command("restore-wal",
-				 "Fetch one WAL/.backup file from a pg_walserver route "
+				 "Fetch one WAL/.backup file from a pg_walserver cluster "
 				 "(restore_command)",
 				 "<filename> <destination-path> --cluster <name> --host <host> "
 				 "[--port <port>] [--user <name>] [--sslmode <mode>]",
@@ -71,7 +71,7 @@ ws_restore_fetch_file(const WsWalServerTarget *target,
 					  const char *filename, const char *outputPath)
 {
 	return ws_fetch_file_client(target->host, target->port, target->user,
-								target->route, target->sslmode,
+								target->cluster, target->sslmode,
 								"pg_walserver_restore_wal",
 								filename, outputPath) == 0;
 }
@@ -113,7 +113,7 @@ cli_restore_command_run(int argc, char **argv)
 		exit(1);
 	}
 
-	if (restoreTarget.route[0] == '\0' || restoreTarget.host[0] == '\0')
+	if (restoreTarget.cluster[0] == '\0' || restoreTarget.host[0] == '\0')
 	{
 		log_fatal("restore-wal requires --cluster and --host");
 		exit(1);

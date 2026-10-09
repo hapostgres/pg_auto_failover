@@ -1,7 +1,7 @@
 /*
  * src/bin/pg_walserver/cli_upstream.h
  *   Shared resolution logic for the client-side sub-commands
- *   (fetch-systemid, basebackup, setup): "which route, and what upstream
+ *   (fetch-systemid, basebackup, setup): "which cluster, and what upstream
  *   connection to reach it from", an explicit-flag-always-wins-over-config
  *   layering this project's own precedent (`pg_autoctl`'s config-file-vs-
  *   command-line-flag resolution elsewhere in this codebase); this
@@ -29,19 +29,19 @@
 #include "pgsql.h"
 
 /*
- * Everything a client sub-command needs to reach the route's upstream and
- * write into the route's own directory.
+ * Everything a client sub-command needs to reach the cluster's upstream and
+ * write into the cluster's own directory.
  */
 typedef struct WsUpstreamTarget
 {
-	char path[MAXPGPATH];               /* the route's own local directory */
+	char path[MAXPGPATH];               /* the cluster's own local directory */
 	NodeAddress node;                   /* host + port */
 	char userName[NAMEDATALEN];
 	SSLOptions sslOptions;
 } WsUpstreamTarget;
 
 bool cli_resolve_upstream(const char *pgdata, const char *configFile,
-						  const char *routeKey,
+						  const char *clusterKey,
 						  const char *pathArg, const char *upstreamArg,
 						  const char *hostArg, const char *portArg,
 						  const char *userArg,
@@ -49,12 +49,12 @@ bool cli_resolve_upstream(const char *pgdata, const char *configFile,
 
 /*
  * cli_parse_upstream_conninfo parses a plain libpq keyword/value connection
- * string (routes.h's own "upstream" property shape) directly, filling in
+ * string (clusters.h's own "upstream" property shape) directly, filling in
  * target's host/port/user/sslOptions -- the same parsing cli_resolve_
- * upstream() uses internally for an explicit --upstream/a route's own
+ * upstream() uses internally for an explicit --upstream/a cluster's own
  * "upstream" property, exposed here for receivewal.c's own need to turn a
- * route's raw "upstream" string into connection fields (to create this
- * route's own replication slot) without going through the rest of cli_
+ * cluster's raw "upstream" string into connection fields (to create this
+ * cluster's own replication slot) without going through the rest of cli_
  * resolve_upstream()'s --path/--cluster/--pgdata resolution, which doesn't
  * apply there.
  */
