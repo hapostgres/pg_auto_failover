@@ -71,9 +71,9 @@ static int cli_ps_getopt(int argc, char **argv);
 static void cli_ps_command_run(int argc, char **argv);
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver ps --pgdata <path>
- * ----------------------------------------------------------------------- */
+ */
 
 static char psPgdata[MAXPGPATH] = { 0 };
 

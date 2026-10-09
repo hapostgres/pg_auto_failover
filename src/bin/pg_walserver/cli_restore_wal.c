@@ -20,11 +20,11 @@ static int cli_restore_getopt(int argc, char **argv);
 static void cli_restore_command_run(int argc, char **argv);
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver restore <filename> <destination-path>
  *                       --cluster <name> --host <host> [--port <port>]
  *                       [--user <name>] [--sslmode <mode>]
- * ----------------------------------------------------------------------- */
+ */
 
 static WsWalServerTarget restoreTarget = { 0 };
 

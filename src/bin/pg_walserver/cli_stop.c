@@ -23,9 +23,9 @@
 #include "pidfile.h"
 #include "string_utils.h"
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver stop --pgdata <path>
- * ----------------------------------------------------------------------- */
+ */
 
 static char stopPgdata[MAXPGPATH] = { 0 };
 

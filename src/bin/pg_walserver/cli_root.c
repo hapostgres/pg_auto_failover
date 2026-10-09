@@ -41,9 +41,9 @@
 #include "cli_stop.h"
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver help
- * ----------------------------------------------------------------------- */
+ */
 
 /*
  * cli_help_run prints the whole sub-command tree at once, the exact same
@@ -65,9 +65,9 @@ static CommandLine help_command =
 				 "", NULL, cli_help_run);
 
 
-/* -----------------------------------------------------------------------
+/*
  * Root command table
- * ----------------------------------------------------------------------- */
+ */
 
 static CommandLine *root_subcommands[] = {
 	&serve_command,

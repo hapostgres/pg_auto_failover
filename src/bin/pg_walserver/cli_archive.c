@@ -20,11 +20,11 @@ static int cli_archive_getopt(int argc, char **argv);
 static void cli_archive_command_run(int argc, char **argv);
 
 
-/* -----------------------------------------------------------------------
+/*
  * pg_walserver archive <path-to-file> <filename>
  *                       --cluster <name> --host <host> [--port <port>]
  *                       [--user <name>] [--sslmode <mode>]
- * ----------------------------------------------------------------------- */
+ */
 
 static WsWalServerTarget archiveTarget = { 0 };
 
