@@ -27,6 +27,11 @@
 static int cli_setup_getopt(int argc, char **argv);
 static void cli_setup_command_run(int argc, char **argv);
 
+static bool cli_setup_validate_pgdata(const WsSetupOptions *options);
+static bool cli_setup_persist_global_config(const WsSetupOptions *options);
+static void cli_setup_create_cert_if_missing(const WsSetupOptions *options);
+static void cli_setup_create_hba_if_missing(const WsSetupOptions *options);
+
 
 /* -----------------------------------------------------------------------
  * pg_walserver setup --pgdata <path> [--port <port>]
@@ -120,15 +125,12 @@ CommandLine setup_command =
 
 
 /*
- * ws_setup_execute writes whichever of options's own fields were actually
- * given into the config file's own global section (config_set_global_
- * property(), clusters.c), then auto-provisions the certificate and HBA
- * file -- see this file's own header comment. Creates --pgdata if it
- * doesn't exist yet. Returns true on success, false with an error already
- * logged otherwise. Never touches any cluster's own section.
+ * cli_setup_validate_pgdata requires options->pgdata to be set and creates
+ * it if it doesn't exist yet. Returns true on success, false with an
+ * error already logged otherwise.
  */
-bool
-ws_setup_execute(const WsSetupOptions *options)
+static bool
+cli_setup_validate_pgdata(const WsSetupOptions *options)
 {
 	if (options->pgdata[0] == '\0')
 	{
@@ -143,6 +145,21 @@ ws_setup_execute(const WsSetupOptions *options)
 		return false;
 	}
 
+	return true;
+}
+
+
+/*
+ * cli_setup_persist_global_config writes whichever of options's own
+ * port/ssl-cert-file/ssl-key-file/ssl-ca-file/auth-timeout fields were
+ * actually given into the config file's own global section
+ * (config_set_global_property(), clusters.c), one property at a time.
+ * Returns true on success (including when nothing was given to persist),
+ * false with an error already logged otherwise.
+ */
+static bool
+cli_setup_persist_global_config(const WsSetupOptions *options)
+{
 	char configPath[MAXPGPATH] = { 0 };
 
 	config_file_path(options->pgdata, options->configFile,
@@ -226,85 +243,135 @@ ws_setup_execute(const WsSetupOptions *options)
 				 configPath);
 	}
 
-	/*
-	 * TLS certificate: the same self-signed facility "cluster register"
-	 * itself already uses (cli_create_cert.c) -- created here too so a
-	 * first "serve" already has TLS ready, rather than only once a second
-	 * cluster forces the issue. Never overwrites an existing certificate.
-	 */
-	if (!options->noCert)
+	return true;
+}
+
+
+/*
+ * cli_setup_create_cert_if_missing auto-creates a self-signed TLS
+ * certificate under options->pgdata when one doesn't already exist, the
+ * same self-signed facility "cluster register" itself already uses
+ * (cli_create_cert.c) -- created here too so a first "serve" already has
+ * TLS ready, rather than only once a second cluster forces the issue.
+ * Never overwrites an existing certificate. A failure to create it is
+ * only ever a warning, never a hard error.
+ */
+static void
+cli_setup_create_cert_if_missing(const WsSetupOptions *options)
+{
+	if (options->noCert)
+	{
+		return;
+	}
+
+	char certPath[MAXPGPATH] = { 0 };
+	char keyPath[MAXPGPATH] = { 0 };
+
+	sformat(certPath, sizeof(certPath), "%s/server.crt", options->pgdata);
+	sformat(keyPath, sizeof(keyPath), "%s/server.key", options->pgdata);
+
+	if (!file_exists(certPath) || !file_exists(keyPath))
+	{
+		char localHostname[_POSIX_HOST_NAME_MAX] = "pg_walserver";
+
+		(void) gethostname(localHostname, sizeof(localHostname));
+
+		if (!ws_create_cert_run(options->pgdata, localHostname, false))
+		{
+			log_warn("Failed to create a self-signed certificate for "
+					 "\"%s\" -- pass --ssl-cert-file/--ssl-key-file to "
+					 "\"serve\", or create \"%s\"/\"%s\" yourself (\"pg_"
+					 "walserver create-cert\"), before starting it",
+					 options->pgdata, certPath, keyPath);
+		}
+	}
+}
+
+
+/*
+ * cli_setup_create_hba_if_missing auto-creates options->pgdata's default
+ * HBA file when one doesn't already exist, written with one real, active
+ * rule open to this machine's own local network when
+ * ws_setup_autodetect_cidr() finds one (hba.c), else the same
+ * commented-out placeholder "serve"'s own bootstrap path already falls
+ * back to -- never a hard error either way, and never overwrites an
+ * already-existing HBA file.
+ */
+static void
+cli_setup_create_hba_if_missing(const WsSetupOptions *options)
+{
+	if (options->noHba)
+	{
+		return;
+	}
+
+	char hbaPath[MAXPGPATH] = { 0 };
+
+	sformat(hbaPath, sizeof(hbaPath), "%s/pg_walserver_hba.conf",
+			options->pgdata);
+
+	if (!file_exists(hbaPath))
 	{
 		char certPath[MAXPGPATH] = { 0 };
-		char keyPath[MAXPGPATH] = { 0 };
 
-		sformat(certPath, sizeof(certPath), "%s/server.crt", options->pgdata);
-		sformat(keyPath, sizeof(keyPath), "%s/server.key", options->pgdata);
-
-		if (!file_exists(certPath) || !file_exists(keyPath))
-		{
-			char localHostname[_POSIX_HOST_NAME_MAX] = "pg_walserver";
-
-			(void) gethostname(localHostname, sizeof(localHostname));
-
-			if (!ws_create_cert_run(options->pgdata, localHostname, false))
-			{
-				log_warn("Failed to create a self-signed certificate for "
-						 "\"%s\" -- pass --ssl-cert-file/--ssl-key-file to "
-						 "\"serve\", or create \"%s\"/\"%s\" yourself (\"pg_"
-						 "walserver create-cert\"), before starting it",
-						 options->pgdata, certPath, keyPath);
-			}
-		}
-	}
-
-	/*
-	 * HBA file: written with one real, active rule open to this machine's
-	 * own local network when ws_setup_autodetect_cidr() finds one (hba.c),
-	 * else the same commented-out placeholder "serve"'s own bootstrap path
-	 * already falls back to -- never a hard error either way, and never
-	 * overwrites an already-existing HBA file.
-	 */
-	if (!options->noHba)
-	{
-		char hbaPath[MAXPGPATH] = { 0 };
-
-		sformat(hbaPath, sizeof(hbaPath), "%s/pg_walserver_hba.conf",
+		sformat(certPath, sizeof(certPath), "%s/server.crt",
 				options->pgdata);
 
-		if (!file_exists(hbaPath))
+		bool tlsAvailable = file_exists(certPath);
+
+		char localCIDR[64] = { 0 };
+		bool haveCIDR = ws_setup_autodetect_cidr(localCIDR,
+												 sizeof(localCIDR));
+
+		if (!hba_write_setup_default(hbaPath, tlsAvailable,
+									 haveCIDR ? localCIDR : NULL))
 		{
-			char certPath[MAXPGPATH] = { 0 };
-
-			sformat(certPath, sizeof(certPath), "%s/server.crt",
-					options->pgdata);
-
-			bool tlsAvailable = file_exists(certPath);
-
-			char localCIDR[64] = { 0 };
-			bool haveCIDR = ws_setup_autodetect_cidr(localCIDR,
-													 sizeof(localCIDR));
-
-			if (!hba_write_setup_default(hbaPath, tlsAvailable,
-										 haveCIDR ? localCIDR : NULL))
-			{
-				log_warn("Failed to create \"%s\"", hbaPath);
-			}
-			else if (haveCIDR)
-			{
-				log_info("HBA: admitting \"%s\" (this machine's own local "
-						 "network, auto-discovered) in \"%s\" -- review and "
-						 "adjust it before running on a reachable network",
-						 localCIDR, hbaPath);
-			}
-			else
-			{
-				log_info("HBA: could not auto-discover a local network "
-						 "CIDR to admit -- \"%s\" was created with its "
-						 "default commented-out placeholder; add a rule by "
-						 "hand", hbaPath);
-			}
+			log_warn("Failed to create \"%s\"", hbaPath);
+		}
+		else if (haveCIDR)
+		{
+			log_info("HBA: admitting \"%s\" (this machine's own local "
+					 "network, auto-discovered) in \"%s\" -- review and "
+					 "adjust it before running on a reachable network",
+					 localCIDR, hbaPath);
+		}
+		else
+		{
+			log_info("HBA: could not auto-discover a local network "
+					 "CIDR to admit -- \"%s\" was created with its "
+					 "default commented-out placeholder; add a rule by "
+					 "hand", hbaPath);
 		}
 	}
+}
+
+
+/*
+ * ws_setup_execute writes whichever of options's own fields were actually
+ * given into the config file's own global section (config_set_global_
+ * property(), clusters.c), then auto-provisions the certificate and HBA
+ * file -- see this file's own header comment. Creates --pgdata if it
+ * doesn't exist yet. Returns true on success, false with an error already
+ * logged otherwise. Never touches any cluster's own section. Each of its
+ * own phases above -- pgdata validation, persisting the global config,
+ * the certificate, the HBA file -- is its own named helper above, called
+ * here in the one order that matters.
+ */
+bool
+ws_setup_execute(const WsSetupOptions *options)
+{
+	if (!cli_setup_validate_pgdata(options))
+	{
+		return false;
+	}
+
+	if (!cli_setup_persist_global_config(options))
+	{
+		return false;
+	}
+
+	cli_setup_create_cert_if_missing(options);
+	cli_setup_create_hba_if_missing(options);
 
 	return true;
 }
