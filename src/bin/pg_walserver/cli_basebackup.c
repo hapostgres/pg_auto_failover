@@ -500,10 +500,10 @@ cli_basebackup_command_run(int argc, char **argv)
 	 * run where its own retention pass couldn't safely prune anything. */
 	if (basebackupHaveKeepCount || basebackupHaveKeepAge)
 	{
-		if (!ws_archive_cleanup_run(target.path,
-									basebackupHaveKeepCount, basebackupKeepCount,
-									basebackupHaveKeepAge, basebackupKeepAge,
-									basebackupDryRun, basebackupForce))
+		if (!ws_archive_cleanup_execute(target.path,
+										basebackupHaveKeepCount, basebackupKeepCount,
+										basebackupHaveKeepAge, basebackupKeepAge,
+										basebackupDryRun, basebackupForce))
 		{
 			log_error("basebackup: the new base backup succeeded and has "
 					  "been kept, but the retention cleanup pass that "
