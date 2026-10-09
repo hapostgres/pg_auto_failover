@@ -3,7 +3,7 @@
 pg_walserver list clusters
 ============================
 
-pg_walserver list clusters - List every route, its backup/receivewal status, and its WAL range
+pg_walserver list clusters - List every cluster, its backup/receivewal status, and its WAL range
 
 Synopsis
 --------
@@ -13,7 +13,7 @@ Synopsis
   pg_walserver list clusters --pgdata <path> [--config <path>]
       [--cluster <name>]
 
-Lists every route configured in the config file: whether it
+Lists every cluster configured in the config file: whether it
 has a base backup, its ``receivewal`` setting, whether its embedded
 receivewal worker is currently running, and the WAL range it currently
 covers (the start LSN from its latest base backup's own
@@ -34,7 +34,7 @@ Options
 
 --cluster
 
-  Limit output to a single route.
+  Limit output to a single cluster.
 
 Examples
 --------
@@ -52,7 +52,7 @@ Examples
 Having no embedded receivewal worker to report on, running or
 otherwise, is why ``another`` shows ``WORKER n/a``: it was registered
 with ``--no-receivewal``, and its WAL arrives only through
-``archive-wal``/``ARCHIVE_FILE`` pushes. For a route with a running
+``archive-wal``/``ARCHIVE_FILE`` pushes. For a cluster with a running
 worker, ``WAL END`` is that worker's own live, currently-observed LSN
 (see :ref:`pg_walserver_ps`) when one is available, falling back to a
 directory scan's coarser segment-boundary approximation otherwise.

@@ -3,7 +3,7 @@
 pg_walserver fetch-systemid
 ============================
 
-pg_walserver fetch-systemid - Fetch a route's upstream system identifier
+pg_walserver fetch-systemid - Fetch a cluster's upstream system identifier
 
 Synopsis
 --------
@@ -14,14 +14,14 @@ Synopsis
       [--path <dir>] [--upstream <conninfo> | --host <host> [--port <port>] [--user <name>]]
       [--force]
 
-Connects to a route's upstream, fetches its system identifier and its
+Connects to a cluster's upstream, fetches its system identifier and its
 current major version, and writes them to
 ``<path>/pg_walserver_systemid``/``<path>/pg_walserver_pgversion`` --
 the latter is what later picks the right ``pg_basebackup`` client for
-this route, see :ref:`pg_walserver_basebackup`. Refuses to overwrite
+this cluster, see :ref:`pg_walserver_basebackup`. Refuses to overwrite
 an already-recorded, different identifier unless ``--force``.
 ``pg_walserver cluster register`` calls this itself; running it
-directly is for checking or repairing a route's own recorded
+directly is for checking or repairing a cluster's own recorded
 identifier without touching anything else about it.
 
 Options
@@ -42,12 +42,12 @@ Options
 
 --path
 
-  The route's own directory. Overrides the route's own ``path``
+  The cluster's own directory. Overrides the cluster's own ``path``
   property.
 
 --upstream
 
-  A libpq connection string to connect with. Overrides the route's own
+  A libpq connection string to connect with. Overrides the cluster's own
   ``upstream`` property.
 
 --host, --port, --user
@@ -62,7 +62,7 @@ Options
 Examples
 --------
 
-Running it again for a route that already has the correct identifier
+Running it again for a cluster that already has the correct identifier
 and version on record is a no-op::
 
   archive$ PGPASSWORD=s3kr3t pg_walserver fetch-systemid --cluster mycluster \

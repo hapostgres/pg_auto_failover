@@ -3,7 +3,7 @@
 pg_walserver archive-cleanup
 =============================
 
-pg_walserver archive-cleanup - Remove WAL/base backups this route no longer needs to keep
+pg_walserver archive-cleanup - Remove WAL/base backups this cluster no longer needs to keep
 
 Synopsis
 --------
@@ -15,7 +15,7 @@ Synopsis
       [--keep-count <N>] [--keep-age <interval>] [--dry-run] [--force]
 
 Removes WAL segments (and ``.partial``/``.backup`` files) and base
-backups a route no longer needs to keep. Retention is infinite by
+backups a cluster no longer needs to keep. Retention is infinite by
 default: at least one of ``--keep-count``/``--keep-age`` is required,
 and ``archive-cleanup`` is never run automatically by ``pg_walserver``
 itself -- an operator wires it into cron, the same way
@@ -110,7 +110,7 @@ Options
 
 --path
 
-  The route's own directory. Overrides the route's own ``path``
+  The cluster's own directory. Overrides the cluster's own ``path``
   property.
 
 --keep-count
@@ -141,7 +141,7 @@ Options
 Examples
 --------
 
-A dry run against a route with two base backups on disk, keeping only
+A dry run against a cluster with two base backups on disk, keeping only
 the most recent one::
 
   archive$ pg_walserver archive-cleanup --path /var/lib/archiver/mycluster \

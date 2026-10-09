@@ -15,8 +15,8 @@ Synopsis
 Creates a self-signed TLS certificate for ``--pgdata``, written as
 ``<pgdata>/server.crt`` and ``<pgdata>/server.key``.
 :ref:`pg_walserver_cluster`'s own ``register`` sub-command already
-creates one automatically the first time a second named route needs
-one, or right away for the very first route with its own
+creates one automatically the first time a second named cluster needs
+one, or right away for the very first cluster with its own
 ``--ssl-self-signed`` flag -- the common case, and the one that needs
 no separate call to this command at all. Run this by hand instead only
 to create a certificate ahead of either of those, or to replace one
@@ -49,9 +49,9 @@ Examples
   21:12:53 2588243 INFO  Created a self-signed certificate for "/var/lib/archiver" ("/var/lib/archiver/server.crt"/"/var/lib/archiver/server.key", CN=mycluster.archive.example.com) -- replace it with a real one before running on a reachable network
 
 This is self-signed, exactly like the certificate ``cluster register``
-creates automatically: it establishes TLS/SNI routing, but a real deployment
-should replace it with one issued by a trusted CA before running on a
-reachable network.
+creates automatically: it provides the TLS that SNI-based cluster
+addressing needs, but a real deployment should replace it with one
+issued by a trusted CA before running on a reachable network.
 
 How the certificate is created
 -------------------------------
