@@ -25,19 +25,13 @@
 #      first, the same incantation that spec uses.
 #
 #   2. "server" -- `pg_walserver server` (the DSL's pg_walserver sugar),
-#      with its own default startup command overridden to "tail -f
-#      /dev/null" -- exactly like pg_walserver_sni_routing.pgaf's own
-#      "walserver" node -- because this spec needs `pg_walserver cluster register` to
-#      configure a cluster before "serve" ever starts. This means the DSL
-#      sugar's own *default* command (compose_gen.c's write_pg_walserver_
-#      default_hba()/pg_walserver_line's own commandOverride, the auto-
-#      generated pg_walserver_hba.conf included) is never actually exercised by
-#      this spec either -- no existing spec's own use of the pg_walserver
-#      DSL kind can be, while also needing setup-before-serve. "server"
-#      writes its own pg_walserver_hba.conf by hand instead (the same "trust
-#      every peer on this test's own network" precedent every other
-#      pg_walserver_*.pgaf spec already uses), matching the DSL's
-#      isPgWalserver marking used purely to identify the node kind here.
+#      declared "launch deferred": `pg_autoctl create walserver` (and the
+#      DSL's own auto-generated, trust-everyone-on-this-subnet default
+#      pg_walserver_hba.conf -- compose_gen.c's write_pg_walserver_default_
+#      hba()) happen immediately at container startup, but "serve" itself
+#      stays gated until setup{} below explicitly releases it with
+#      "pg_autoctl node start" -- that gap is what lets `pg_walserver
+#      cluster register` configure a cluster before "serve" ever starts.
 #      Receivewal defaults to on (setup is called with no --no-receivewal, and no
 #      --receivewal flag at all): this spec specifically wants to prove the
 #      embedded pg_receivewal worker is running in the background the
@@ -138,7 +132,8 @@ cluster {
     postgres pg1
 
     pg_walserver server
-        command "tail -f /dev/null"
+        port 6543
+        launch deferred
 
     postgres pitr
         command "tail -f /dev/null"
@@ -183,13 +178,12 @@ setup {
     start postgres pg1
     exec pg1 bash -c 'for i in $(seq 30); do out=$(psql -Atc "show archive_mode" 2>/dev/null); test "$out" = "on" && exit 0; sleep 1; done; exit 1'
 
-    # "server": its own pg_walserver_hba.conf, hand-written (see this file's own
-    # header comment on why the DSL sugar's own auto-generated default,
-    # compose_gen.c's write_pg_walserver_default_hba(), is never reached
-    # here) -- every peer on this test's own network, no authentication,
-    # the same "test infrastructure, trust is fine" precedent every
-    # existing pg_walserver_*.pgaf spec already uses.
-    exec server bash -c 'mkdir -p /tmp/ws && printf "host all all 0.0.0.0/0 trust\n" > /tmp/ws/pg_walserver_hba.conf'
+    # "server"'s own pg_walserver_hba.conf is the DSL sugar's auto-generated
+    # default (compose_gen.c's write_pg_walserver_default_hba(), copied into
+    # place before "serve" ever starts) -- every peer on this test's own
+    # network, no authentication, the same "test infrastructure, trust is
+    # fine" precedent every existing pg_walserver_*.pgaf spec already uses,
+    # now generated for free instead of hand-written.
 
     # the one-shot wizard: writes pg_walserver.ini's own [pitr] section
     # (path + upstream + "receivewal = pull", on by default with no --receivewal
@@ -200,25 +194,28 @@ setup {
     # this cluster's first base backup automatically, once its own embedded
     # receivewal worker (started at the same startup) shows real streaming
     # evidence.
-    exec server bash -c 'PGPASSWORD=wspw pg_walserver cluster register pitr --pgdata /tmp/ws --path /tmp/ws/pitr --pguri "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
-    exec server bash -c 'grep -qx "receivewal = pull" /tmp/ws/pg_walserver.ini || { echo "receivewal = pull should have been written by default"; cat /tmp/ws/pg_walserver.ini; false; }'
+    exec server bash -c 'PGPASSWORD=wspw pg_walserver cluster register pitr --pgdata /var/lib/postgres/pgaf --path /var/lib/postgres/pgaf/pitr --pguri "host=pg1 port=5432 user=archiver_repl sslmode=disable"'
+    exec server bash -c 'grep -qx "receivewal = pull" /var/lib/postgres/pgaf/pg_walserver.ini || { echo "receivewal = pull should have been written by default"; cat /var/lib/postgres/pgaf/pg_walserver.ini; false; }'
 
     # the "*" wildcard, mapped at the exact same path as "pitr" -- see this
     # file's own header comment (role 2) for why role 4 below needs this.
-    exec server bash -c 'printf "\n[*]\npath = /tmp/ws/pitr\n" >> /tmp/ws/pg_walserver.ini'
+    exec server bash -c 'printf "\n[*]\npath = /var/lib/postgres/pgaf/pitr\n" >> /var/lib/postgres/pgaf/pg_walserver.ini'
 
-    exec server bash -c 'nohup pg_walserver serve --pgdata /tmp/ws --port 6543 > /tmp/ws-server.log 2>&1 & echo started'
-    exec server bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; exit 1'
+    # release the launch-deferred gate: pg_autoctl's own supervisor forks
+    # and supervises `pg_walserver serve` from here on (restartable, unlike
+    # the old bare "nohup ... &").
+    exec server pg_autoctl node start
+    exec server bash -c 'for i in $(seq 30); do (echo > /dev/tcp/127.0.0.1/6543) 2>/dev/null && exit 0; sleep 1; done; exit 1'
 
     # the embedded receivewal worker really is running, the whole time, in the
     # background -- pg_walserver_capture.pgaf's own process-title check.
-    exec server bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal pitr$" > /dev/null && exit 0; sleep 1; done; cat /tmp/ws-server.log; ps aux; exit 1'
+    exec server bash -c 'for i in $(seq 30); do pgrep -f "^pg_walserver: receivewal pitr$" > /dev/null && exit 0; sleep 1; done; ps aux; exit 1'
 
     # "serve" bootstraps this cluster's first base backup automatically at
     # startup now (no more "setup --with-basebackup", see accept_loop.c's
     # own ws_bootstrap_missing_backups()) -- test_003 below needs it
     # already in place, so wait for it here.
-    exec server bash -c 'for i in $(seq 60); do test -s /tmp/ws/pitr/basebackups/.latest && exit 0; sleep 1; done; cat /tmp/ws-server.log; exit 1'
+    exec server bash -c 'for i in $(seq 60); do test -s /var/lib/postgres/pgaf/pitr/basebackups/.latest && exit 0; sleep 1; done; exit 1'
 }
 
 teardown {
@@ -234,14 +231,14 @@ step test_001_seed_before_target_and_archive {
     # "server" picks the segment up -- archive_command's own push, the
     # embedded receivewal worker's own pull, or (most likely) both racing, with
     # CHECK_FILE's own idempotency making whichever loses a clean no-op.
-    exec server bash -c 'for i in $(seq 60); do ls /tmp/ws/pitr/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | head -1 | grep -q . && exit 0; sleep 1; done; ls -la /tmp/ws/pitr; cat /tmp/ws-server.log; exit 1'
+    exec server bash -c 'for i in $(seq 60); do ls /var/lib/postgres/pgaf/pitr/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | head -1 | grep -q . && exit 0; sleep 1; done; ls -la /var/lib/postgres/pgaf/pitr; exit 1'
 }
 
 step test_002_seed_after_target_and_archive {
     sql pg1 { INSERT INTO t(v) VALUES ('row-after-target') }
     sql pg1 { SELECT pg_switch_wal() }
 
-    exec server bash -c 'for i in $(seq 60); do n=$(ls /tmp/ws/pitr/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | wc -l); test "$n" -ge 2 && exit 0; sleep 1; done; ls -la /tmp/ws/pitr; exit 1'
+    exec server bash -c 'for i in $(seq 60); do n=$(ls /var/lib/postgres/pgaf/pitr/*[0-9A-F] 2>/dev/null | grep -v "\.partial$" | wc -l); test "$n" -ge 2 && exit 0; sleep 1; done; ls -la /var/lib/postgres/pgaf/pitr; exit 1'
 }
 
 step test_003_pitr_recovers_to_named_restore_point {
