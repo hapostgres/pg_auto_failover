@@ -63,9 +63,7 @@
 #include "pidfile.h"
 #include "ps_state.h"
 #include "string_utils.h"
-
-/* local helpers */
-static void format_elapsed(time_t startedAt, char *dest, size_t destSize);
+#include "system_utils.h"
 
 static int cli_ps_getopt(int argc, char **argv);
 static void cli_ps_command_run(int argc, char **argv);
@@ -91,27 +89,6 @@ CommandLine ps_command =
 				 "(defaults to\n"
 				 "              PGDATA)\n",
 				 cli_ps_getopt, cli_ps_command_run);
-
-
-/*
- * format_elapsed renders the time elapsed since startedAt via
- * IntervalToString() (common/string_utils.c), or "-" when startedAt is
- * unset (<= 0, meaning "not running"/"unknown") -- IntervalToString itself
- * has no such sentinel, so that case is handled here instead.
- */
-static void
-format_elapsed(time_t startedAt, char *dest, size_t destSize)
-{
-	if (startedAt <= 0)
-	{
-		strlcpy(dest, "-", destSize);
-		return;
-	}
-
-	double elapsed = (double) (time(NULL) - startedAt);
-
-	IntervalToString(elapsed < 0 ? 0 : elapsed, dest, destSize);
-}
 
 
 /*
@@ -148,8 +125,8 @@ ws_ps_report(const char *pgdata)
 
 	char serveUptime[32] = { 0 };
 
-	format_elapsed(haveState ? state.serveStartedAt : 0, serveUptime,
-				   sizeof(serveUptime));
+	format_elapsed_time(haveState ? state.serveStartedAt : 0, serveUptime,
+						sizeof(serveUptime));
 
 	int childCount = haveState ? (state.receivewalWorkerCount + state.bootstrapCount) : 0;
 
@@ -170,7 +147,7 @@ ws_ps_report(const char *pgdata)
 		char uptime[32] = { 0 };
 		bool isLast = (++printed == childCount);
 
-		format_elapsed(running ? c->startedAt : 0, uptime, sizeof(uptime));
+		format_elapsed_time(running ? c->startedAt : 0, uptime, sizeof(uptime));
 
 		char lsnStr[64] = { 0 };
 
@@ -200,7 +177,7 @@ ws_ps_report(const char *pgdata)
 		char uptime[32] = { 0 };
 		bool isLast = (++printed == childCount);
 
-		format_elapsed(running ? b->startedAt : 0, uptime, sizeof(uptime));
+		format_elapsed_time(running ? b->startedAt : 0, uptime, sizeof(uptime));
 
 		fformat(stdout, "%s bootstrap(%d) %s, %s, uptime %s\n",
 				isLast ? "`--" : "|--",

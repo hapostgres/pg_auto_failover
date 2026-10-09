@@ -20,6 +20,7 @@
 
 #include "log.h"
 #include "file_utils.h"
+#include "string_utils.h"
 #include "system_utils.h"
 
 #if defined(__linux__)
@@ -176,4 +177,26 @@ monotonic_ms(void)
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 
 	return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+
+/*
+ * format_elapsed_time renders the time elapsed since startedAt via
+ * IntervalToString() (common/string_utils.c), or "-" when startedAt is
+ * unset (<= 0, meaning "not running"/"unknown") -- IntervalToString itself
+ * has no such sentinel, so that case is handled here instead. Shared by
+ * pg_walserver's "ps" and "status" sub-commands (cli_ps.c, cli_status.c).
+ */
+void
+format_elapsed_time(time_t startedAt, char *dest, size_t destSize)
+{
+	if (startedAt <= 0)
+	{
+		strlcpy(dest, "-", destSize);
+		return;
+	}
+
+	double elapsed = (double) (time(NULL) - startedAt);
+
+	IntervalToString(elapsed < 0 ? 0 : elapsed, dest, destSize);
 }
