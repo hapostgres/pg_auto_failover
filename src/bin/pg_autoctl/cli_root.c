@@ -98,6 +98,7 @@ CommandLine *root_subcommands[] = {
 	&show_commands,
 	&enable_commands,
 	&disable_commands,
+	&restart_commands,
 	&get_commands,
 	&set_commands,
 	&perform_commands,

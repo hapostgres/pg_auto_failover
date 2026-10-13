@@ -17,6 +17,7 @@ have their own manual page.
    pg_autoctl_show
    pg_autoctl_enable
    pg_autoctl_disable
+   pg_autoctl_restart
    pg_autoctl_get
    pg_autoctl_set
    pg_autoctl_perform

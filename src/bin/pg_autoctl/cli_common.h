@@ -107,6 +107,10 @@ extern CommandLine set_commands;
 extern CommandLine enable_commands;
 extern CommandLine disable_commands;
 
+/* cli_restart.c */
+extern CommandLine restart_postgres_command;
+extern CommandLine restart_commands;
+
 /* cli_formation.c */
 extern CommandLine create_formation_command;
 extern CommandLine drop_formation_command;
