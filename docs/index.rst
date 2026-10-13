@@ -56,7 +56,6 @@ __ https://github.com/hapostgres/pg_auto_failover
    failover-state-machine
    fault-tolerance
    cdc
-   orchestrated-operations
    security
 
 .. toctree::

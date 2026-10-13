@@ -180,12 +180,6 @@ back to its original primary/standby layout (or not, if you'd rather
 leave the promoted standby as the new primary -- nothing above requires
 failing back).
 
-This is a manual, multi-command procedure today. See
-:ref:`orchestrated_operations` for a design exploration of a generalized
-primitive that could drive exactly this sequence as a single, checkable,
-resumable operation -- independently of CDC, and reusable for other
-whole-cluster changes.
-
 How this compares to other HA tools
 ------------------------------------
 

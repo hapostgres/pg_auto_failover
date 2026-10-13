@@ -23,7 +23,6 @@
 
 cluster {
     monitor
-    image "pg_auto_failover:pg17"
     formation {
         node1
         node2
