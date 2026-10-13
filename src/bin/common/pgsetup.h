@@ -233,6 +233,7 @@ typedef struct pg_setup
 	NodeReplicationSettings settings;       /* node replication settings */
 	SSLOptions ssl;                         /* ssl options */
 	char citusClusterName[NAMEDATALEN];     /* citus.cluster_name */
+	char walLevel[NAMEDATALEN];             /* wal_level, defaults to "logical" */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')

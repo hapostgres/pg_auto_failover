@@ -47,7 +47,10 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "port", "5432" }, \
 	{ "max_wal_senders", "12" }, \
 	{ "max_replication_slots", "12" }, \
-	{ "wal_level", "'replica'" }, \
+	{ "wal_level", "'replica'" }, /* postgres_add_default_settings() patches \
+	                               * this entry to 'logical' by default, or \
+	                               * --wal-level replica's value, for \
+	                               * non-Citus nodes -- see there. */ \
 	{ "wal_log_hints", "on" }, \
 	{ "wal_sender_timeout", "'30s'" }, \
 	{ "hot_standby_feedback", "on" }, \
@@ -901,6 +904,8 @@ postgres_add_default_settings(LocalPostgresServer *postgres,
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	char configFilePath[MAXPGPATH];
 	GUC *default_settings = NULL;
+	GUC patchedSettings[32] = { 0 };
+	char walLevelValue[NAMEDATALEN + 2] = { 0 };
 
 	log_trace("postgres_add_default_settings (%s) [%d]",
 			  nodeKindToString(postgres->pgKind),
@@ -964,6 +969,49 @@ postgres_add_default_settings(LocalPostgresServer *postgres,
 		{
 			default_settings = postgres_default_settings_13;
 		}
+	}
+
+	/*
+	 * wal_level defaults to 'logical' on every plain (non-Citus) node:
+	 * CDC continuity (see docs/cdc.rst) needs it on any node that might
+	 * ever become primary, which in pg_auto_failover is every node in the
+	 * group. Citus nodes already force 'logical' unconditionally above,
+	 * for Citus's own unrelated needs, so they're left out of this
+	 * override. --wal-level replica at node creation time (pgSetup->walLevel)
+	 * opts back out, for clusters that know they'll never use CDC and
+	 * would rather not pay wal_level=logical's WAL-volume and catalog
+	 * xmin-retention cost.
+	 *
+	 * The static default_settings arrays above are copied into a local,
+	 * patched array here rather than hardcoding the value into each of
+	 * them, so there's exactly one place that decides the actual value
+	 * written to postgresql.conf.
+	 */
+	if (!IS_CITUS_INSTANCE_KIND(postgres->pgKind))
+	{
+		const char *requestedWalLevel =
+			IS_EMPTY_STRING_BUFFER(pgSetup->walLevel)
+			? "logical"
+			: pgSetup->walLevel;
+		int i = 0;
+		int maxEntries = (int) (sizeof(patchedSettings) /
+								sizeof(patchedSettings[0]));
+
+		sformat(walLevelValue, sizeof(walLevelValue), "'%s'", requestedWalLevel);
+
+		for (i = 0; default_settings[i].name != NULL && i < maxEntries - 1; i++)
+		{
+			patchedSettings[i] = default_settings[i];
+
+			if (strcmp(default_settings[i].name, "wal_level") == 0)
+			{
+				patchedSettings[i].value = walLevelValue;
+			}
+		}
+		patchedSettings[i].name = NULL;
+		patchedSettings[i].value = NULL;
+
+		default_settings = patchedSettings;
 	}
 
 	if (!pg_add_auto_failover_default_settings(pgSetup,

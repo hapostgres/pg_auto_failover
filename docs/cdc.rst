@@ -79,12 +79,17 @@ replication slots: that remains entirely your CDC tool's responsibility,
 exactly as it would be on a Postgres cluster not managed by
 pg_auto_failover. Concretely:
 
- 1. Set ``wal_level = logical`` yourself. pg_auto_failover does not force
-    this setting on 17+ nodes, since it has real costs (extra WAL volume,
-    catalog ``xmin`` retention) that only make sense if you are actually
-    using logical replication. You can set it through ``pg_autoctl config
-    set``, or directly in ``postgresql.conf``; either way it requires a
-    restart, same as on any Postgres instance.
+ 1. ``wal_level`` is ``logical`` by default on every node pg_auto_failover
+    creates (see :ref:`wal_level_default` below) -- there is nothing to do
+    here for a new cluster. If you're turning CDC on for an
+    *already-running* cluster that was created with the default, or with
+    ``--wal-level replica``, see :ref:`wal_level_rollout` for how to change
+    it safely: ``wal_level`` is ``PGC_POSTMASTER`` (Postgres won't let you
+    change it without a full server restart), and **every** node needs it,
+    not just the current primary -- any node could be promoted later, and a
+    node's own ``wal_level`` governs whether it's allowed to decode
+    logically at all, independently of what the primary that originally
+    wrote the WAL had configured.
 
  2. Create your logical replication slot(s) with ``failover => true``, for
     example::
@@ -102,6 +107,84 @@ pg_auto_failover. Concretely:
     own application-facing connection string machinery, a failover already
     redirects regular clients transparently; the same connection logic
     applies to your CDC consumer's connection to the (new) primary.
+
+.. _wal_level_default:
+
+Defaults and opting out
+------------------------
+
+Every node pg_auto_failover creates (``pg_autoctl create postgres``,
+``create monitor``, ``create coordinator``, ``create worker``) sets
+``wal_level = logical`` by default -- the cost (extra WAL volume, catalog
+``xmin`` retention pressure) is paid whether or not you ever create a
+slot, so if you know you'll never need CDC on a given cluster, you can
+opt back out at creation time::
+
+  pg_autoctl create postgres --wal-level replica ...
+
+The flag only takes effect at node creation, before Postgres's first
+start: ``wal_level`` can't be changed by editing the config and reloading
+on a running node (see :ref:`wal_level_rollout` for that case). There is
+no supported way to go the other direction (``replica`` back up to
+``logical``) except through that same rollout procedure, applied to a
+cluster that opted out at creation time.
+
+.. _wal_level_rollout:
+
+Turning on ``wal_level = logical`` on an already-running cluster
+-------------------------------------------------------------------
+
+Because ``wal_level`` is ``PGC_POSTMASTER``, there's no way around a full
+Postgres restart on every node -- but pg_auto_failover already has the
+primitives to do that fleet-wide with zero *unplanned* downtime, using
+exactly the same maintenance-mode mechanism documented in
+:ref:`upgrading_from_previous_versions`, which solves the identical
+problem -- "a change needs a restart on every node, without triggering a
+spurious failover" -- for a different cause (a pg_auto_failover version
+upgrade rather than a GUC change). The one planned switchover below costs
+the same single, short write-unavailability window as any manual
+switchover with this tool, nothing more.
+
+For a formation with one primary and one or more standbys:
+
+ 1. For each **standby**, one at a time:
+
+    a. ``pg_autoctl enable maintenance`` -- safe: the monitor switches the
+       primary to asynchronous replication and the standby is no longer a
+       promotion candidate while in this state.
+    b. Apply the change, either directly in ``postgresql.conf`` or via
+       ``ALTER SYSTEM SET wal_level = 'logical';`` (both are safe:
+       pg_auto_failover's own managed settings live in a separate included
+       file, so this never collides with anything it writes).
+    c. Restart Postgres on that node (``pg_ctl restart``, your init
+       system, or however you'd restart it for a kernel/Postgres point
+       release).
+    d. ``pg_autoctl disable maintenance`` to let it rejoin.
+
+ 2. Once **every standby** has been upgraded, promote one of them and
+    demote the old primary in one controlled step::
+
+      pg_autoctl enable maintenance --allow-failover
+
+    This runs the same promotion path as a normal switchover and leaves
+    the old primary in ``maintenance`` state as a standby -- this is the
+    one and only planned write-unavailability window in the whole
+    procedure.
+
+ 3. Apply steps 1b-1d to the now-demoted former primary, then
+    ``pg_autoctl disable maintenance`` to bring it back as a regular
+    standby.
+
+At the end, every node has ``wal_level = logical`` and the formation is
+back to its original primary/standby layout (or not, if you'd rather
+leave the promoted standby as the new primary -- nothing above requires
+failing back).
+
+This is a manual, multi-command procedure today. See
+:ref:`orchestrated_operations` for a design exploration of a generalized
+primitive that could drive exactly this sequence as a single, checkable,
+resumable operation -- independently of CDC, and reusable for other
+whole-cluster changes.
 
 How this compares to other HA tools
 ------------------------------------

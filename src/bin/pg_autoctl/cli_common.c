@@ -241,6 +241,22 @@ cli_common_keeper_getopts(int argc, char **argv,
 				break;
 			}
 
+			case 'K':
+			{
+				/* { "wal-level", required_argument, NULL, 'K' }, */
+				if (strcmp(optarg, "logical") != 0 && strcmp(optarg, "replica") != 0)
+				{
+					errors++;
+					log_error("Invalid value for --wal-level: \"%s\", "
+							  "expected \"logical\" (the default) or \"replica\"",
+							  optarg);
+				}
+
+				strlcpy(LocalOptionConfig.pgSetup.walLevel, optarg, NAMEDATALEN);
+				log_trace("--wal-level %s", LocalOptionConfig.pgSetup.walLevel);
+				break;
+			}
+
 			case 'S':
 			{
 				/* { "skip-pg-hba", required_argument, NULL, 'S' }, */

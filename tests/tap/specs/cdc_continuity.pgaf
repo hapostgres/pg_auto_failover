@@ -5,21 +5,21 @@
 # primary holding stale, non-synced failover slots that permanently block
 # the slot-sync worker on the node once it rejoins as a standby).
 #
-# wal_level must be 'logical' on every node that could ever hold the slot
-# (i.e. every node in the group, since any of them can be promoted), so
-# setup{} edits postgresql.conf directly and restarts Postgres on each node
-# -- there is no pg_autoctl config knob for an arbitrary Postgres GUC like
-# wal_level, unlike the pg_autoctl-owned settings under "postgresql.*"
-# (see config_get_set.pgaf).
+# wal_level defaults to 'logical' on every node pg_auto_failover creates
+# (see docs/cdc.rst), so there is nothing to set up here beyond the
+# default: test_001 below creating a failover-enabled logical slot right
+# after setup{} is itself the regression guard that the default actually
+# took effect on both nodes (it would fail outright with a plain Postgres
+# error otherwise, same as it would on wal_level='replica').
 #
-# Ordering matters here: node1's restart happens while it is still "single"
-# (no synchronous standby attached yet), and node2's restart happens while
-# it is merely a secondary. Restarting the *primary* after it already has a
-# synchronous standby configured is exactly the risky pattern
-# basic_operation.pgaf's own comments warn about ("stopping node1's
-# Postgres while it still has a synchronous secondary... reliably triggers
-# a real failover"): it was tried that way here first and did reliably
-# self-fence node1 into demote_timeout mid-setup.
+# Earlier revisions of this spec had to flip wal_level on after the fact,
+# and getting that ordering wrong (restarting the *primary* after it
+# already had a synchronous standby attached) reliably self-fenced it into
+# demote_timeout mid-setup -- exactly the risky pattern
+# basic_operation.pgaf's own comments warn about. See
+# docs/cdc.rst's wal_level rollout runbook for that procedure, still
+# needed for a cluster created before this default, or with
+# --wal-level replica.
 
 cluster {
     monitor
@@ -31,19 +31,7 @@ cluster {
 }
 
 setup {
-    wait until node1 state is single  timeout 60s
-
-    exec node1  bash -c "echo \"wal_level = 'logical'\" >> \$PGDATA/postgresql.conf"
-    stop postgres node1
-    start postgres node1
-    wait until node1 state is single  timeout 60s
-
     wait until primary, secondary  timeout 120s
-
-    exec node2  bash -c "echo \"wal_level = 'logical'\" >> \$PGDATA/postgresql.conf"
-    stop postgres node2
-    start postgres node2
-    wait until node2 state is secondary  timeout 60s
 }
 
 teardown {

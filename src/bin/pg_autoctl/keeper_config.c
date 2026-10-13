@@ -103,6 +103,10 @@
 	make_strbuf_option("postgresql", "hba_level", NULL, \
 					   false, MAXPGPATH, config->pgSetup.hbaLevelStr)
 
+#define OPTION_POSTGRESQL_WAL_LEVEL(config) \
+	make_strbuf_option("postgresql", "wal_level", "wal-level", \
+					   false, NAMEDATALEN, config->pgSetup.walLevel)
+
 #define OPTION_SSL_ACTIVE(config) \
 	make_int_option_default("ssl", "active", NULL, \
 							false, &(config->pgSetup.ssl.active), 0)
@@ -237,6 +241,7 @@
 		OPTION_POSTGRESQL_LISTEN_ADDRESSES(config), \
 		OPTION_POSTGRESQL_AUTH_METHOD(config), \
 		OPTION_POSTGRESQL_HBA_LEVEL(config), \
+		OPTION_POSTGRESQL_WAL_LEVEL(config), \
 		OPTION_SSL_ACTIVE(config), \
 		OPTION_SSL_MODE(config), \
 		OPTION_SSL_CA_FILE(config), \
