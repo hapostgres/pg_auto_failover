@@ -185,52 +185,6 @@ back to its original primary/standby layout (or not, if you'd rather
 leave the promoted standby as the new primary -- nothing above requires
 failing back).
 
-How this compares to other HA tools
-------------------------------------
-
-Postgres 17's native slot-sync mechanism is new enough (2024) that most HA
-tooling is still catching up. As of writing, only a handful of tools
-compute ``synchronized_standby_slots`` automatically instead of leaving it
-to the operator to set and maintain by hand:
-
-================== ========================== ============================== ========================= ===============================
-Tool               Computes the setting?       Derived from                   Manages slot-sync GUCs?   Handles stale slot on demotion?
-================== ========================== ============================== ========================= ===============================
-pg_auto_failover   Yes                         failover candidates            Yes, on by default         Yes (this work, issue #1188)
-Patroni            Yes (merged, unreleased)    synchronous standbys            No (left to the user)     Not addressed
-CloudNativePG      Yes (opt-in)                all HA standbys                 Partial (user must enable) No -- open issue
-EDB PGD            No (own Raft mechanism)     n/a                             n/a                        n/a
-repmgr             No                          n/a                             n/a                        n/a
-================== ========================== ============================== ========================= ===============================
-
-A few points worth calling out:
-
- - Patroni's equivalent (`patroni/patroni#3527
-   <https://github.com/patroni/patroni/pull/3527>`_) derives the slot list
-   from the cluster's *synchronous* standbys rather than its failover
-   *candidates* -- the two sets aren't always the same, and Patroni's
-   feature is inert in an async-only cluster. It's also opt-in behind
-   ``synchronous_mode`` and, as of this writing, merged but not in a
-   released Patroni version yet.
-
- - CloudNativePG computes the slot list but still requires the operator to
-   turn on ``sync_replication_slots`` themselves, and has an open issue
-   (`cloudnative-pg#9969
-   <https://github.com/cloudnative-pg/cloudnative-pg/issues/9969>`_) for
-   exactly the stale-slot-after-demotion problem this PR's issue #1188 fix
-   addresses -- the same underlying Postgres interaction, independently
-   discovered in a different project.
-
- - Neither tool -- nor core Postgres -- offers a quorum/"N of M" knob for
-   ``synchronized_standby_slots``; see the first bullet under
-   *Limitations* below.
-
- - EDB Postgres Distributed (PGD/BDR) solves a different, larger problem
-   (any node in a multi-master cluster can consume the slot, via its own
-   Raft-based coordination) and is not a direct comparison; it layers its
-   own ``failover_slot_scope`` on top of, and independently from, the
-   native PG17 mechanism.
-
 Limitations
 -----------
 
