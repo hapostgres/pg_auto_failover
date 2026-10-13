@@ -12,3 +12,9 @@ ensure
 multi_ifdown
 drop_node_destroy
 guard_data_loss
+
+# PG17+ only (the spec itself pins image "pg_auto_failover:pg17",
+# regardless of which PGVERSION leg runs this schedule): CDC continuity
+# (synchronized_standby_slots, failover-enabled logical slots surviving a
+# promotion) and the #1188 stale-failover-slot-after-demote_timeout fix.
+cdc_continuity

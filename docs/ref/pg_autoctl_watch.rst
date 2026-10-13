@@ -84,6 +84,16 @@ currently selected formation, the formation replication setting
 :ref:`number_sync_standbys`, and then in the right most position the current
 time.
 
+Whenever the group has at least one failover candidate, the header also
+shows a "CDC Slots" count: how many physical slot names the
+monitor-computed ``synchronized_standby_slots`` setting currently lists for
+that group (see :ref:`cdc_continuity`). This is the same list regardless of
+whether you actually have a failover-enabled logical replication slot in
+use -- it reflects the topology, not live slot activity. Watching this
+number drop during a failover is a quick way to notice a candidate dropping
+out of the list; see :ref:`pg_autoctl_show_synchronized_standby_slots` for
+the full slot name list.
+
 The second section displays one line per node, and each line contains a list
 of columns that describe the current state for the node. This list can
 includes the following columns, and which columns are part of the output

@@ -4062,6 +4062,69 @@ monitor_synchronous_standby_names(Monitor *monitor,
 
 
 /*
+ * monitor_synchronized_standby_slots returns the value for the Postgres 17+
+ * parameter "synchronized_standby_slots" to use for a given group, computed
+ * on the monitor from the current failover candidates in that group (see
+ * pgautofailover.synchronized_standby_slots() and its C implementation,
+ * synchronized_standby_slots() in node_active_protocol.c, for the details).
+ * This is what lets a failover-enabled logical replication slot survive a
+ * promotion: the primary only lets such slots advance once every node that
+ * might get promoted has replayed that far.
+ */
+bool
+monitor_synchronized_standby_slots(Monitor *monitor,
+								   char *formation, int groupId,
+								   char *synchronized_standby_slots, int size)
+{
+	PGSQL *pgsql = &monitor->pgsql;
+	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
+
+	const char *sql =
+		"select pgautofailover.synchronized_standby_slots($1, $2)";
+
+	int paramCount = 2;
+	Oid paramTypes[2] = { TEXTOID, INT4OID };
+	const char *paramValues[2] = { 0 };
+	IntString myGroupIdString = intToString(groupId);
+
+	paramValues[0] = formation;
+	paramValues[1] = myGroupIdString.strValue;
+
+	if (!pgsql_execute_with_params(pgsql, sql,
+								   paramCount, paramTypes, paramValues,
+								   &context, &parseSingleValueResult))
+	{
+		log_error("Failed to get the synchronized_standby_slots setting value "
+				  " from the monitor for formation %s and group %d",
+				  formation, groupId);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
+		return false;
+	}
+
+	if (!context.parsedOk)
+	{
+		log_error("Failed to get the synchronized_standby_slots setting value "
+				  " from the monitor for formation %s and group %d,"
+				  "see above for details",
+				  formation, groupId);
+		if (context.strVal)
+		{
+			free(context.strVal);
+		}
+		return false;
+	}
+
+	strlcpy(synchronized_standby_slots, context.strVal, size);
+	free(context.strVal);
+
+	return true;
+}
+
+
+/*
  * monitor_set_hostname sets the hostname on the monitor, using a simple SQL
  * update command.
  */

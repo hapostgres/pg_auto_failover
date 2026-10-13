@@ -78,6 +78,7 @@ typedef struct LocalPostgresServer
 	LocalExpectedPostgresStatus expectedPgStatus;
 	char standbyTargetLSN[PG_LSN_MAXLENGTH];
 	char synchronousStandbyNames[BUFSIZE];
+	char synchronizedStandbySlots[BUFSIZE];
 	PostgresVersionInfo pgVersion;
 } LocalPostgresServer;
 
@@ -108,8 +109,10 @@ bool primary_drop_replication_slot(LocalPostgresServer *postgres,
 bool primary_drop_replication_slots(LocalPostgresServer *postgres);
 bool primary_drop_all_replication_slots(LocalPostgresServer *postgres);
 bool primary_set_synchronous_standby_names(LocalPostgresServer *postgres);
+bool primary_set_synchronized_standby_slots(LocalPostgresServer *postgres);
 bool postgres_replication_slot_create_and_drop(LocalPostgresServer *postgres,
 											   NodeAddressArray *nodeArray);
+bool postgres_drop_stale_failover_slots(LocalPostgresServer *postgres);
 bool postgres_replication_slot_maintain(LocalPostgresServer *postgres,
 										NodeAddressArray *nodeArray);
 bool primary_disable_synchronous_replication(LocalPostgresServer *postgres);

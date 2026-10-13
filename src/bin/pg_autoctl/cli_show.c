@@ -46,6 +46,8 @@ static void cli_show_events(int argc, char **argv);
 static int cli_show_standby_names_getopts(int argc, char **argv);
 static void cli_show_standby_names(int argc, char **argv);
 
+static void cli_show_synchronized_standby_slots(int argc, char **argv);
+
 static int cli_show_timeline_getopts(int argc, char **argv);
 static void cli_show_timeline(int argc, char **argv);
 
@@ -127,6 +129,19 @@ CommandLine show_standby_names_command =
 				 "  --json        output data in the JSON format\n",
 				 cli_show_standby_names_getopts,
 				 cli_show_standby_names);
+
+CommandLine show_synchronized_standby_slots_command =
+	make_command("synchronized-standby-slots",
+				 "Prints synchronized_standby_slots for a given group "
+				 "(Postgres 17+ CDC continuity)",
+				 " [ --pgdata ] --formation --group",
+				 "  --pgdata      path to data directory	 \n"
+				 "  --monitor     show the monitor uri\n"
+				 "  --formation   formation to query, defaults to 'default'\n"
+				 "  --group       group to query formation, defaults to all\n"
+				 "  --json        output data in the JSON format\n",
+				 cli_show_standby_names_getopts,
+				 cli_show_synchronized_standby_slots);
 
 CommandLine show_timeline_command =
 	make_command("timeline",
@@ -919,6 +934,57 @@ cli_show_standby_names(int argc, char **argv)
 	{
 		/* current synchronous_standby_names might be an empty string */
 		(void) fformat(stdout, "'%s'\n", synchronous_standby_names);
+	}
+}
+
+
+/*
+ * cli_show_synchronized_standby_slots prints the Postgres 17+
+ * synchronized_standby_slots setting value for a given group (in a known
+ * formation): the comma-separated physical slot names of the group's
+ * current failover candidates, which is what lets a failover-enabled
+ * logical replication slot survive a promotion. See docs/cdc.rst.
+ */
+static void
+cli_show_synchronized_standby_slots(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+	Monitor monitor = { 0 };
+	char synchronized_standby_slots[BUFSIZE] = { 0 };
+
+	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
+
+	(void) cli_set_groupId(&monitor, &config);
+
+	if (!monitor_synchronized_standby_slots(
+			&monitor,
+			config.formation,
+			config.groupId,
+			synchronized_standby_slots,
+			BUFSIZE))
+	{
+		log_fatal("Failed to get the synchronized_standby_slots setting value "
+				  " from the monitor, see above for details");
+		exit(EXIT_CODE_MONITOR);
+	}
+
+	if (outputJSON)
+	{
+		JSON_Value *js = json_value_init_object();
+		JSON_Object *jsObj = json_value_get_object(js);
+
+		json_object_set_string(jsObj, "formation", config.formation);
+		json_object_set_number(jsObj, "group", (double) config.groupId);
+		json_object_set_string(jsObj,
+							   "synchronized_standby_slots",
+							   synchronized_standby_slots);
+
+		(void) cli_pprint_json(js);
+	}
+	else
+	{
+		/* current synchronized_standby_slots might be an empty string */
+		(void) fformat(stdout, "'%s'\n", synchronized_standby_slots);
 	}
 }
 

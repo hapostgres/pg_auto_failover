@@ -689,3 +689,105 @@ with last_events as
 )
 select * from last_events order by eventtime, eventid;
 $$;
+
+
+--
+-- Postgres 17+ CDC continuity: synchronized_standby_slots(formation, group)
+-- computes the Postgres 17+ "synchronized_standby_slots" setting for a
+-- group, the same way synchronous_standby_names is computed, but listing
+-- every current failover candidate's physical slot name instead of only
+-- the synchronous replication quorum. This is what lets a failover-enabled
+-- logical replication slot survive a promotion: it only advances once
+-- every node that might get promoted has replayed that far. See
+-- docs/cdc.rst for the full picture (issue #1188).
+--
+
+CREATE FUNCTION pgautofailover.synchronized_standby_slots
+ (
+    IN formation_id text default 'default',
+    IN group_id     int default 0
+ )
+RETURNS text LANGUAGE C STRICT
+AS 'MODULE_PATHNAME', $$synchronized_standby_slots$$;
+
+comment on function pgautofailover.synchronized_standby_slots(text, int)
+        is 'get the Postgres 17+ synchronized_standby_slots setting for a given group, used for CDC/logical slot continuity across failover';
+
+grant execute on function
+      pgautofailover.synchronized_standby_slots(text, int)
+   to autoctl_node;
+
+-- Re-create formation_settings() to also report synchronized_standby_slots,
+-- next to the existing synchronous_standby_names row.
+CREATE OR REPLACE FUNCTION pgautofailover.formation_settings
+ (
+    IN formation_id         text default 'default',
+   OUT context              text,
+   OUT group_id             int,
+   OUT node_id              bigint,
+   OUT nodename             text,
+   OUT setting              text,
+   OUT value                text
+ )
+RETURNS SETOF record LANGUAGE SQL STRICT
+AS $$
+  with groups(formationid, groupid) as
+  (
+     select formationid, groupid
+       from pgautofailover.node
+      where formationid = formation_id
+   group by formationid, groupid
+  )
+
+  -- context: formation, number_sync_standbys
+  select 'formation' as context,
+         NULL as group_id, NULL as node_id, formationid as nodename,
+         'number_sync_standbys' as setting,
+         cast(number_sync_standbys as text) as value
+    from pgautofailover.formation
+   where formationid = formation_id
+
+union all
+
+  -- context: primary, one entry per group in the formation
+  select 'primary', groups.groupid, nodes.node_id, nodes.node_name,
+         'synchronous_standby_names',
+         format('''%s''',
+         pgautofailover.synchronous_standby_names(formationid, groupid))
+    from groups, pgautofailover.get_nodes(formationid, groupid) as nodes
+   where node_is_primary
+
+union all
+
+  -- context: primary, synchronized_standby_slots (Postgres 17+ CDC continuity)
+  select 'primary', groups.groupid, nodes.node_id, nodes.node_name,
+         'synchronized_standby_slots',
+         format('''%s''',
+         pgautofailover.synchronized_standby_slots(formationid, groupid))
+    from groups, pgautofailover.get_nodes(formationid, groupid) as nodes
+   where node_is_primary
+
+union all
+
+(
+  -- context: node, one entry per node in the formation
+  select 'node', node.groupid, node.nodeid, node.nodename,
+         'replication quorum', cast(node.replicationquorum as text)
+    from pgautofailover.node as node
+   where node.formationid = formation_id
+order by nodeid
+)
+
+union all
+
+(
+  select 'node', node.groupid, node.nodeid, node.nodename,
+         'candidate priority', cast(node.candidatepriority as text)
+    from pgautofailover.node as node
+   where node.formationid = formation_id
+order by nodeid
+)
+$$;
+
+comment on function pgautofailover.formation_settings(text)
+        is 'get the current replication settings a formation';

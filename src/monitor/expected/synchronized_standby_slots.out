@@ -1,0 +1,210 @@
+-- Copyright (c) Microsoft Corporation. All rights reserved.
+-- Licensed under the PostgreSQL License.
+--
+-- Regression test for pgautofailover.synchronized_standby_slots(), the
+-- Postgres 17+ CDC-continuity companion to synchronous_standby_names: it
+-- lists the physical replication slot names of the group's current
+-- failover candidates (AutoFailoverNode.candidatePriority > 0), so that a
+-- failover-enabled logical replication slot only advances once every node
+-- that might get promoted has replayed that far.
+--
+-- Same bootstrap sequence as candidate_count_gate.sql: drive the FSM to
+-- primary + secondary + secondary through pgautofailover.node_active().
+--
+-- Unlike candidate_count_gate.sql, register_node()'s result is deliberately
+-- NOT printed with "SELECT *": assigned_node_id is a raw sequence value
+-- that depends on how many nodes every earlier test in regress_schedule
+-- has already registered, which would make this file's expected output
+-- fragile to the schedule's exact composition. Only assigned_group_state,
+-- which is what this test actually cares about, is printed; node ids are
+-- captured silently via \gset for use in node_active() below.
+\x on
+-- ── formation and node registration ─────────────────────────────────────────
+SELECT pgautofailover.create_formation('sss_test', 'pgsql', 'postgres', true, 1);
+-[ RECORD 1 ]----+------------------------------
+create_formation | (sss_test,pgsql,postgres,t,1)
+
+SELECT assigned_group_state
+  FROM pgautofailover.register_node('sss_test', 'sss_p', 5432,
+                                    'postgres', 'sss_p', 1);
+-[ RECORD 1 ]--------+-------
+assigned_group_state | single
+
+SELECT nodeid AS np FROM pgautofailover.node
+ WHERE formationid = 'sss_test' AND nodename = 'sss_p' \gset
+SELECT assigned_group_state
+  FROM pgautofailover.register_node('sss_test', 'sss_s1', 5432,
+                                    'postgres', 'sss_s1', 1);
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_standby
+
+SELECT nodeid AS ns1 FROM pgautofailover.node
+ WHERE formationid = 'sss_test' AND nodename = 'sss_s1' \gset
+SELECT assigned_group_state
+  FROM pgautofailover.register_node('sss_test', 'sss_s2', 5432,
+                                    'postgres', 'sss_s2', 1);
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_standby
+
+SELECT nodeid AS ns2 FROM pgautofailover.node
+ WHERE formationid = 'sss_test' AND nodename = 'sss_s2' \gset
+-- ── bootstrap: drive the FSM to primary + secondary + secondary ─────────────
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :np, 0,
+                                  current_group_role => 'single');
+-[ RECORD 1 ]--------+-------
+assigned_group_state | single
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :ns1, 0,
+                                  current_group_role => 'wait_standby');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_standby
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :np, 0,
+                                  current_group_role => 'single',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_primary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+-------------
+assigned_group_state | wait_primary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :ns1, 0,
+                                  current_group_role => 'wait_standby');
+-[ RECORD 1 ]--------+-----------
+assigned_group_state | catchingup
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :ns1, 0,
+                                  current_group_role => 'catchingup',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :ns1, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | primary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :np, 0,
+                                  current_group_role => 'primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+--------
+assigned_group_state | primary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :ns1, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+----------
+assigned_group_state | secondary
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :ns2, 0,
+                                  current_group_role => 'wait_standby');
+-[ RECORD 1 ]--------+-----------
+assigned_group_state | catchingup
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :ns2, 0,
+                                  current_group_role => 'catchingup',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+-----------
+assigned_group_state | catchingup
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :ns2, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+-----------
+assigned_group_state | catchingup
+
+-- p: primary (refresh to pick up second secondary)
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss_test', :np, 0,
+                                  current_group_role => 'primary',
+                                  current_lsn => '0/5000');
+-[ RECORD 1 ]--------+---------------
+assigned_group_state | apply_settings
+
+-- Verify bootstrap: p=primary, s1=secondary, s2=secondary.
+SELECT nodename, goalstate, reportedstate, candidatepriority
+  FROM pgautofailover.node
+ WHERE formationid = 'sss_test'
+ ORDER BY nodename;
+-[ RECORD 1 ]-----+---------------
+nodename          | sss_p
+goalstate         | apply_settings
+reportedstate     | primary
+candidatepriority | 100
+-[ RECORD 2 ]-----+---------------
+nodename          | sss_s1
+goalstate         | secondary
+reportedstate     | secondary
+candidatepriority | 100
+-[ RECORD 3 ]-----+---------------
+nodename          | sss_s2
+goalstate         | catchingup
+reportedstate     | secondary
+candidatepriority | 100
+
+-- ── both standbys are candidates: both slot names, in candidatePriority order
+SELECT pgautofailover.synchronized_standby_slots('sss_test', 0);
+-[ RECORD 1 ]--------------+----------------------------------------------------
+synchronized_standby_slots | pgautofailover_standby_39,pgautofailover_standby_40
+
+-- ── s2 opts out of the failover quorum: only s1's slot remains ─────────────
+SELECT pgautofailover.set_node_candidate_priority('sss_test', 'sss_s2', 0);
+-[ RECORD 1 ]---------------+--
+set_node_candidate_priority | t
+
+SELECT pgautofailover.synchronized_standby_slots('sss_test', 0);
+-[ RECORD 1 ]--------------+--------------------------
+synchronized_standby_slots | pgautofailover_standby_39
+
+-- ── no candidates left at all: empty string disables the feature ───────────
+SELECT pgautofailover.set_node_candidate_priority('sss_test', 'sss_s1', 0);
+NOTICE:  setting candidate priority to zero, preventing automated failover
+DETAIL:  Group 0 in formation "sss_test" have no failover candidate.
+-[ RECORD 1 ]---------------+--
+set_node_candidate_priority | t
+
+SELECT pgautofailover.synchronized_standby_slots('sss_test', 0);
+-[ RECORD 1 ]--------------+-
+synchronized_standby_slots | 
+
+-- ── a single-node group has nothing to synchronize against ─────────────────
+SELECT pgautofailover.create_formation('sss_single', 'pgsql', 'postgres', true, 1);
+-[ RECORD 1 ]----+--------------------------------
+create_formation | (sss_single,pgsql,postgres,t,1)
+
+SELECT assigned_group_state
+  FROM pgautofailover.register_node('sss_single', 'sss_only', 5432,
+                                    'postgres', 'sss_only', 1);
+-[ RECORD 1 ]--------+-------
+assigned_group_state | single
+
+SELECT pgautofailover.synchronized_standby_slots('sss_single', 0);
+-[ RECORD 1 ]--------------+-
+synchronized_standby_slots | 
+
+-- ── an empty group errors out, same as synchronous_standby_names ──────────
+SELECT pgautofailover.synchronized_standby_slots('sss_test', 42);
+ERROR:  no nodes found in group 42 of formation "sss_test"

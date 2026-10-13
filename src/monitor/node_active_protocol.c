@@ -71,6 +71,7 @@ PG_FUNCTION_INFO_V1(set_node_replication_quorum);
 PG_FUNCTION_INFO_V1(set_node_region);
 PG_FUNCTION_INFO_V1(report_postgres_version);
 PG_FUNCTION_INFO_V1(synchronous_standby_names);
+PG_FUNCTION_INFO_V1(synchronized_standby_slots);
 PG_FUNCTION_INFO_V1(testing_lock_formation);
 PG_FUNCTION_INFO_V1(testing_lock_node_group);
 PG_FUNCTION_INFO_V1(testing_set_node_health);
@@ -2643,6 +2644,98 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 
 			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
 		}
+	}
+}
+
+
+/*
+ * synchronized_standby_slots returns the value to use for the Postgres 17+
+ * "synchronized_standby_slots" parameter on the primary of a given Postgres
+ * service group in a given formation.
+ *
+ * synchronized_standby_slots lists the physical replication slot names that
+ * a logical replication slot created with failover => true must wait on
+ * (via the slot's synced copy catching up) before its confirmed_flush_lsn is
+ * allowed to advance. This is what lets a CDC consumer's logical slot
+ * survive a failover: as long as every node that might get promoted has
+ * already replayed everything the logical slot has confirmed, promoting it
+ * can never leave the slot pointing past data that node doesn't have.
+ *
+ * We compute this the same way as synchronous_standby_names above, but
+ * listing every current failover *candidate* (AutoFailoverNode.
+ * candidatePriority > 0) rather than only the nodes currently part of the
+ * synchronous replication quorum: a node can be promoted whether or not it
+ * was ever a synchronous standby, so the logical slot must wait on it
+ * regardless. Nodes with candidatePriority == 0 can only be promoted
+ * manually (force-failover), which is already an exceptional, operator-
+ * driven action, so we don't hold back CDC consumers for them.
+ *
+ * Returns the empty string when there is nothing to wait on (a single node
+ * group, or no promotion candidates at all), which disables the feature:
+ * Postgres treats an empty synchronized_standby_slots as "no requirement".
+ */
+Datum
+synchronized_standby_slots(PG_FUNCTION_ARGS)
+{
+	checkPgAutoFailoverVersion();
+
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	int32 groupId = PG_GETARG_INT32(1);
+
+	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
+	int nodesCount = list_length(nodesGroupList);
+
+	/*
+	 * When there's no nodes registered yet, there's no pg_autoctl process
+	 * that needs the information anyway. Return NULL.
+	 */
+	if (nodesCount == 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("no nodes found in group %d of formation \"%s\"",
+						groupId, formationId)));
+	}
+
+	/* a single node has nothing to synchronize against */
+	if (nodesCount == 1)
+	{
+		PG_RETURN_TEXT_P(cstring_to_text(""));
+	}
+
+	AutoFailoverNode *primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
+
+	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	List *candidateNodesList = GroupListCandidates(standbyNodesGroupList);
+
+	if (list_length(candidateNodesList) == 0)
+	{
+		PG_RETURN_TEXT_P(cstring_to_text(""));
+	}
+	else
+	{
+		StringInfo slotNames = makeStringInfo();
+		ListCell *nodeCell = NULL;
+		bool firstNode = true;
+
+		foreach(nodeCell, candidateNodesList)
+		{
+			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+			appendStringInfo(slotNames,
+							 "%spgautofailover_standby_%lld",
+							 firstNode ? "" : ",",
+							 (long long) node->nodeId);
+
+			if (firstNode)
+			{
+				firstNode = false;
+			}
+		}
+
+		PG_RETURN_TEXT_P(cstring_to_text(slotNames->data));
 	}
 }
 

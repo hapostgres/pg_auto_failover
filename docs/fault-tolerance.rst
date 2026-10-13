@@ -1,3 +1,5 @@
+.. _fault_tolerance:
+
 Failover and Fault Tolerance
 ============================
 

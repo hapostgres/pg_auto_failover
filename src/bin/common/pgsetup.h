@@ -277,6 +277,7 @@ SSLMode pgsetup_parse_sslmode(const char *sslMode);
 char * pgsetup_sslmode_to_string(SSLMode sslMode);
 
 bool pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel);
+bool pg_setup_synchronized_standby_slots_supported(PostgresSetup *pgSetup);
 
 HBAEditLevel pgsetup_parse_hba_level(const char *level);
 char * pgsetup_hba_level_to_string(HBAEditLevel hbaLevel);

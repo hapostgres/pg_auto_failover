@@ -670,7 +670,43 @@ fsm_apply_settings(Keeper *keeper)
 				sizeof(postgres->synchronousStandbyNames));
 	}
 
-	return primary_set_synchronous_standby_names(postgres);
+	if (!primary_set_synchronous_standby_names(postgres))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	/*
+	 * Also fetch and apply the synchronized_standby_slots setting (Postgres
+	 * 17+ CDC continuity): same monitor round-trip pattern as
+	 * synchronous_standby_names above, computed from the group's current
+	 * failover candidates rather than its synchronous replication quorum.
+	 * primary_set_synchronized_standby_slots() is itself a no-op before
+	 * Postgres 17, so we always fetch the value and let it decide.
+	 */
+	if (!config->monitorDisabled)
+	{
+		if (!monitor_synchronized_standby_slots(
+				monitor,
+				config->formation,
+				keeper->state.current_group,
+				postgres->synchronizedStandbySlots,
+				sizeof(postgres->synchronizedStandbySlots)))
+		{
+			log_error("Failed to set synchronized_standby_slots because "
+					  "we failed to get its value from the monitor, "
+					  "see above for details");
+			return false;
+		}
+	}
+	else
+	{
+		/* no monitor: nothing to synchronize against */
+		strlcpy(postgres->synchronizedStandbySlots, "",
+				sizeof(postgres->synchronizedStandbySlots));
+	}
+
+	return primary_set_synchronized_standby_slots(postgres);
 }
 
 

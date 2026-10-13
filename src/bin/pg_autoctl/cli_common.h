@@ -141,6 +141,7 @@ extern CommandLine show_state_command;
 extern CommandLine show_settings_command;
 extern CommandLine show_file_command;
 extern CommandLine show_standby_names_command;
+extern CommandLine show_synchronized_standby_slots_command;
 extern CommandLine show_timeline_command;
 
 /* cli_watch.c */

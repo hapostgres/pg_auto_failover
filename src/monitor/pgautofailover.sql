@@ -1228,6 +1228,22 @@ grant execute on function
    to autoctl_node;
 
 
+create function pgautofailover.synchronized_standby_slots
+ (
+    IN formation_id text default 'default',
+    IN group_id     int default 0
+ )
+returns text language C strict
+AS 'MODULE_PATHNAME', $$synchronized_standby_slots$$;
+
+comment on function pgautofailover.synchronized_standby_slots(text, int)
+        is 'get the Postgres 17+ synchronized_standby_slots setting for a given group, used for CDC/logical slot continuity across failover';
+
+grant execute on function
+      pgautofailover.synchronized_standby_slots(text, int)
+   to autoctl_node;
+
+
 CREATE FUNCTION pgautofailover.formation_settings
  (
     IN formation_id         text default 'default',
@@ -1263,6 +1279,16 @@ union all
          'synchronous_standby_names',
          format('''%s''',
          pgautofailover.synchronous_standby_names(formationid, groupid))
+    from groups, pgautofailover.get_nodes(formationid, groupid) as nodes
+   where node_is_primary
+
+union all
+
+  -- context: primary, synchronized_standby_slots (Postgres 17+ CDC continuity)
+  select 'primary', groups.groupid, nodes.node_id, nodes.node_name,
+         'synchronized_standby_slots',
+         format('''%s''',
+         pgautofailover.synchronized_standby_slots(formationid, groupid))
     from groups, pgautofailover.get_nodes(formationid, groupid) as nodes
    where node_is_primary
 
