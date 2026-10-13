@@ -151,15 +151,20 @@ For a formation with one primary and one or more standbys:
 
     a. ``pg_autoctl enable maintenance`` -- safe: the monitor switches the
        primary to asynchronous replication and the standby is no longer a
-       promotion candidate while in this state.
+       promotion candidate while in this state. pg_autoctl's own Postgres
+       controller also steps out of the way for the duration, precisely so
+       that manually stopping/starting Postgres on this node doesn't race
+       it.
     b. Apply the change, either directly in ``postgresql.conf`` or via
        ``ALTER SYSTEM SET wal_level = 'logical';`` (both are safe:
        pg_auto_failover's own managed settings live in a separate included
        file, so this never collides with anything it writes).
-    c. Restart Postgres on that node (``pg_ctl restart``, your init
-       system, or however you'd restart it for a kernel/Postgres point
-       release).
-    d. ``pg_autoctl disable maintenance`` to let it rejoin.
+    c. Stop Postgres on that node (``pg_ctl stop``, your init system, or
+       however you'd stop it for a kernel/Postgres point release) -- no
+       need to start it back up yourself, the next step does that.
+    d. ``pg_autoctl disable maintenance`` to let it rejoin: this starts
+       Postgres again as part of bringing the node back, so it comes up
+       already running with the new ``wal_level``.
 
  2. Once **every standby** has been upgraded, promote one of them and
     demote the old primary in one controlled step::
