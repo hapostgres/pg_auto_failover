@@ -2670,9 +2670,22 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
  * manually (force-failover), which is already an exceptional, operator-
  * driven action, so we don't hold back CDC consumers for them.
  *
+ * Among those candidates, only the ones that last reported themselves as
+ * SECONDARY are listed (AutoFailoverNode.reportedState, not goalState: an
+ * extra standby beyond what number_sync_standbys needs can sit at goal
+ * catchingup indefinitely for quorum bookkeeping alone, while genuinely
+ * being a fully caught-up secondary). A candidate the monitor has pushed
+ * back to catchingup because it actually fell behind or missed its
+ * reporting window, or that hasn't reached secondary yet at all
+ * (wait_standby, join_secondary, ...), is excluded: it remains a failover
+ * candidate in principle, but it isn't caught up right now, and listing it
+ * would make the logical slot's progress hostage to that node recovering
+ * -- the opposite of the opt-out this GUC is meant to give us.
+ *
  * Returns the empty string when there is nothing to wait on (a single node
- * group, or no promotion candidates at all), which disables the feature:
- * Postgres treats an empty synchronized_standby_slots as "no requirement".
+ * group, or no promotion candidates currently reporting secondary), which
+ * disables the feature: Postgres treats an empty synchronized_standby_slots
+ * as "no requirement".
  */
 Datum
 synchronized_standby_slots(PG_FUNCTION_ARGS)
@@ -2710,7 +2723,36 @@ synchronized_standby_slots(PG_FUNCTION_ARGS)
 	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
 	List *candidateNodesList = GroupListCandidates(standbyNodesGroupList);
 
-	if (list_length(candidateNodesList) == 0)
+	/*
+	 * Only wait on a candidate that last reported itself as SECONDARY. We
+	 * deliberately check reportedState, not goalState: an extra standby
+	 * beyond what number_sync_standbys needs can sit at goalState
+	 * catchingup indefinitely for quorum bookkeeping reasons alone, while
+	 * genuinely being a fully caught-up secondary (reportedState
+	 * secondary) -- that node belongs in the list. What we want to
+	 * exclude is a candidate the monitor has pushed back to catchingup
+	 * because it actually fell behind or missed its reporting window
+	 * (reportedState catchingup), or one that hasn't reached secondary yet
+	 * at all (wait_standby, join_secondary, ...). Holding a failover-
+	 * enabled logical slot's progress hostage to such a node would defeat
+	 * the point of CDC continuity: the slot would simply stop advancing
+	 * until that node recovers, instead of only waiting on candidates
+	 * actually able to take over right now.
+	 */
+	List *readyCandidateNodesList = NIL;
+	ListCell *candidateCell = NULL;
+
+	foreach(candidateCell, candidateNodesList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(candidateCell);
+
+		if (node->reportedState == REPLICATION_STATE_SECONDARY)
+		{
+			readyCandidateNodesList = lappend(readyCandidateNodesList, node);
+		}
+	}
+
+	if (list_length(readyCandidateNodesList) == 0)
 	{
 		PG_RETURN_TEXT_P(cstring_to_text(""));
 	}
@@ -2720,7 +2762,7 @@ synchronized_standby_slots(PG_FUNCTION_ARGS)
 		ListCell *nodeCell = NULL;
 		bool firstNode = true;
 
-		foreach(nodeCell, candidateNodesList)
+		foreach(nodeCell, readyCandidateNodesList)
 		{
 			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
 
