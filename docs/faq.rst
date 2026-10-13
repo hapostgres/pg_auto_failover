@@ -298,9 +298,14 @@ recent**. See :ref:`cdc_continuity` for the full picture; the short version:
    a logical slot created with ``failover => true`` keep working after a
    promotion, instead of being silently left behind on the old primary.
 
- - You still need to set ``wal_level = logical`` yourself (pg_auto_failover
-   leaves this one to you, since it isn't needed unless you actually use
-   logical replication) and create your slot(s) with ``failover => true``.
+ - ``wal_level = logical`` is the default on every node pg_auto_failover
+   creates (see :ref:`wal_level_default`) -- you only need to set it
+   yourself when opting back in on a cluster created with
+   ``--wal-level replica``, or one created before this default existed
+   (see :ref:`wal_level_rollout`). You still need to create your slot(s)
+   with ``failover => true`` yourself: pg_auto_failover manages the
+   infrastructure that keeps them working across a promotion, not slot
+   creation itself.
 
 On Postgres versions before 17, Postgres itself has no mechanism to keep a
 logical slot's position correct on a standby without losing unconsumed

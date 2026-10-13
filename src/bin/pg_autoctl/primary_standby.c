@@ -47,10 +47,10 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "port", "5432" }, \
 	{ "max_wal_senders", "12" }, \
 	{ "max_replication_slots", "12" }, \
-	{ "wal_level", "'replica'" }, /* postgres_add_default_settings() patches \
-	                               * this entry to 'logical' by default, or \
-	                               * --wal-level replica's value, for \
-	                               * non-Citus nodes -- see there. */ \
+	{ "wal_level", "'logical'" }, /* the default; postgres_add_default_settings() \
+	                               * patches this entry to 'replica' for a \
+	                               * non-Citus node created with \
+	                               * --wal-level replica -- see there. */ \
 	{ "wal_log_hints", "on" }, \
 	{ "wal_sender_timeout", "'30s'" }, \
 	{ "hot_standby_feedback", "on" }, \
@@ -972,32 +972,30 @@ postgres_add_default_settings(LocalPostgresServer *postgres,
 	}
 
 	/*
-	 * wal_level defaults to 'logical' on every plain (non-Citus) node:
-	 * CDC continuity (see docs/cdc.rst) needs it on any node that might
-	 * ever become primary, which in pg_auto_failover is every node in the
-	 * group. Citus nodes already force 'logical' unconditionally above,
-	 * for Citus's own unrelated needs, so they're left out of this
-	 * override. --wal-level replica at node creation time (pgSetup->walLevel)
-	 * opts back out, for clusters that know they'll never use CDC and
-	 * would rather not pay wal_level=logical's WAL-volume and catalog
-	 * xmin-retention cost.
+	 * wal_level already defaults to 'logical' in the non-Citus
+	 * default_settings arrays above: CDC continuity (see docs/cdc.rst)
+	 * needs it on any node that might ever become primary, which in
+	 * pg_auto_failover is every node in the group. Citus nodes already
+	 * force 'logical' unconditionally for Citus's own unrelated needs, so
+	 * they're left out of this override entirely.
 	 *
-	 * The static default_settings arrays above are copied into a local,
-	 * patched array here rather than hardcoding the value into each of
-	 * them, so there's exactly one place that decides the actual value
-	 * written to postgresql.conf.
+	 * --wal-level replica at node creation time (pgSetup->walLevel) is the
+	 * one case that needs patching: a non-Citus node opting back out, for
+	 * clusters that know they'll never use CDC and would rather not pay
+	 * wal_level=logical's WAL-volume and catalog xmin-retention cost. The
+	 * static default_settings array is copied into a local, patched array
+	 * here rather than hardcoding the opt-out into it, so there's exactly
+	 * one place that decides the actual value written to postgresql.conf.
 	 */
-	if (!IS_CITUS_INSTANCE_KIND(postgres->pgKind))
+	if (!IS_CITUS_INSTANCE_KIND(postgres->pgKind) &&
+		!IS_EMPTY_STRING_BUFFER(pgSetup->walLevel) &&
+		strcmp(pgSetup->walLevel, "logical") != 0)
 	{
-		const char *requestedWalLevel =
-			IS_EMPTY_STRING_BUFFER(pgSetup->walLevel)
-			? "logical"
-			: pgSetup->walLevel;
 		int i = 0;
 		int maxEntries = (int) (sizeof(patchedSettings) /
 								sizeof(patchedSettings[0]));
 
-		sformat(walLevelValue, sizeof(walLevelValue), "'%s'", requestedWalLevel);
+		sformat(walLevelValue, sizeof(walLevelValue), "'%s'", pgSetup->walLevel);
 
 		for (i = 0; default_settings[i].name != NULL && i < maxEntries - 1; i++)
 		{
