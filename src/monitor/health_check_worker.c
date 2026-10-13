@@ -824,6 +824,16 @@ LatchWait(long timeoutMs)
 
 	ResetLatch(MyLatch);
 
+	/*
+	 * Process any pending interrupts, in particular a ProcSignalBarrier
+	 * (e.g. from DROP DATABASE / smgr release elsewhere in the cluster):
+	 * without this, this process never acknowledges the barrier, and
+	 * whoever is waiting on it (WaitForProcSignalBarrier(), inside DROP
+	 * DATABASE) blocks forever, since WaitLatch() only wakes the process up
+	 * on the pending signal, it doesn't itself process it.
+	 */
+	CHECK_FOR_INTERRUPTS();
+
 	/* emergency bailout if postmaster has died */
 	if (waitResult & WL_POSTMASTER_DEATH)
 	{
