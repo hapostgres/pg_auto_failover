@@ -145,40 +145,38 @@ upgrade rather than a GUC change). The one planned switchover below costs
 the same single, short write-unavailability window as any manual
 switchover with this tool, nothing more.
 
-For a formation with one primary and one or more standbys:
+For a formation with one primary and one or more standbys, using
+``pg_autoctl restart postgres`` (a single command that enters maintenance,
+restarts Postgres, and leaves maintenance again, since nothing needs to
+happen while Postgres is down for a plain configuration change):
 
  1. For each **standby**, one at a time:
 
-    a. ``pg_autoctl enable maintenance`` -- safe: the monitor switches the
-       primary to asynchronous replication and the standby is no longer a
-       promotion candidate while in this state. pg_autoctl's own Postgres
-       controller also steps out of the way for the duration, precisely so
-       that manually stopping/starting Postgres on this node doesn't race
-       it.
-    b. Apply the change, either directly in ``postgresql.conf`` or via
+    a. Apply the change, either directly in ``postgresql.conf`` or via
        ``ALTER SYSTEM SET wal_level = 'logical';`` (both are safe:
        pg_auto_failover's own managed settings live in a separate included
        file, so this never collides with anything it writes).
-    c. Stop Postgres on that node (``pg_ctl stop``, your init system, or
-       however you'd stop it for a kernel/Postgres point release) -- no
-       need to start it back up yourself, the next step does that.
-    d. ``pg_autoctl disable maintenance`` to let it rejoin: this starts
-       Postgres again as part of bringing the node back, so it comes up
-       already running with the new ``wal_level``.
+    b. ::
 
- 2. Once **every standby** has been upgraded, promote one of them and
-    demote the old primary in one controlled step::
+         pg_autoctl restart postgres --maintenance --pgdata <standby PGDATA>
 
-      pg_autoctl enable maintenance --allow-failover
+       This enables maintenance (safe: the monitor switches the primary to
+       asynchronous replication and the standby is no longer a promotion
+       candidate while in this state), restarts Postgres so it comes back
+       up with the new ``wal_level``, then disables maintenance again so
+       the standby rejoins.
 
-    This runs the same promotion path as a normal switchover and leaves
-    the old primary in ``maintenance`` state as a standby -- this is the
-    one and only planned write-unavailability window in the whole
-    procedure.
+ 2. Once **every standby** has been upgraded, apply the same configuration
+    change to the primary, then restart it with ``--allow-failover`` added::
 
- 3. Apply steps 1b-1d to the now-demoted former primary, then
-    ``pg_autoctl disable maintenance`` to bring it back as a regular
-    standby.
+      pg_autoctl restart postgres --maintenance --allow-failover --pgdata <primary PGDATA>
+
+    ``--allow-failover`` is required here: entering maintenance on a
+    primary means promoting a standby first, the same promotion path as a
+    normal switchover. This is the one and only planned
+    write-unavailability window in the whole procedure. Once the restart
+    completes, the old primary rejoins as a regular standby, already
+    running with the new ``wal_level``.
 
 At the end, every node has ``wal_level = logical`` and the formation is
 back to its original primary/standby layout (or not, if you'd rather
