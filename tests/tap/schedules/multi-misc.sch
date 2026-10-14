@@ -12,3 +12,9 @@ ensure
 multi_ifdown
 drop_node_destroy
 guard_data_loss
+
+# PG17+ only (multi-misc only runs on the PG17 matrix leg -- see
+# .github/workflows/ci.yml): CDC continuity (synchronized_standby_slots,
+# failover-enabled logical slots surviving a promotion) and the #1188
+# stale-failover-slot-after-demote_timeout fix.
+cdc_continuity

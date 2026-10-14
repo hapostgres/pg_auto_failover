@@ -47,7 +47,10 @@ static void local_postgres_update_pg_failures_tracking(LocalPostgresServer *post
 	{ "port", "5432" }, \
 	{ "max_wal_senders", "12" }, \
 	{ "max_replication_slots", "12" }, \
-	{ "wal_level", "'replica'" }, \
+	{ "wal_level", "'logical'" }, /* the default; postgres_add_default_settings() \
+	                               * patches this entry to 'replica' for a \
+	                               * non-Citus node created with \
+	                               * --wal-level replica -- see there. */ \
 	{ "wal_log_hints", "on" }, \
 	{ "wal_sender_timeout", "'30s'" }, \
 	{ "hot_standby_feedback", "on" }, \
@@ -86,6 +89,22 @@ GUC postgres_default_settings_13[] = {
 	{ NULL, NULL }
 };
 
+/*
+ * Postgres 17 adds the slot-sync worker (sync_replication_slots) that keeps
+ * failover-enabled logical replication slots in sync on a physical standby,
+ * which is what lets a CDC consumer's slot survive promotion. It is only
+ * useful together with hot_standby_feedback (already on above) and a
+ * primary_conninfo that includes dbname (handled separately in
+ * prepare_recovery_settings()); it is a no-op when no failover slot exists,
+ * so it's safe to enable unconditionally on every 17+ node rather than
+ * behind a separate opt-in setting.
+ */
+GUC postgres_default_settings_17[] = {
+	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13,
+	{ "sync_replication_slots", "on" },
+	{ NULL, NULL }
+};
+
 GUC citus_default_settings_pre_13[] = {
 	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_PRE_13,
 	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
@@ -105,6 +124,18 @@ GUC citus_default_settings_13[] = {
 	{ "citus.cluster_name", "'default'" },
 	{ "citus.use_secondary_nodes", "'never'" },
 	{ "citus.local_hostname", "'localhost'" },
+	{ NULL, NULL }
+};
+
+GUC citus_default_settings_17[] = {
+	DEFAULT_GUC_SETTINGS_FOR_PG_AUTO_FAILOVER_13,
+	{ "shared_preload_libraries", "'citus,pg_stat_statements'" },
+	{ "wal_level", "logical" },
+	{ "citus.node_conninfo", "'sslmode=prefer'" },
+	{ "citus.cluster_name", "'default'" },
+	{ "citus.use_secondary_nodes", "'never'" },
+	{ "citus.local_hostname", "'localhost'" },
+	{ "sync_replication_slots", "on" },
 	{ NULL, NULL }
 };
 
@@ -705,6 +736,26 @@ primary_drop_all_replication_slots(LocalPostgresServer *postgres)
 		return false;
 	}
 
+	/*
+	 * Postgres 17+ CDC continuity (issue #1188): the query above only ever
+	 * touches physical slots matching our own naming pattern, so a logical
+	 * failover slot this node still owns from being primary survives it
+	 * untouched. If that slot is a stale (failover AND NOT synced) leftover
+	 * -- which is exactly what it is, now that we're becoming a standby --
+	 * it blocks the slot-sync worker from ever starting, so drop it here
+	 * too. This can be reached either after a clean demotion or, via
+	 * fsm_rewind_or_init(), after one interrupted by demote_timeout.
+	 */
+	if (pg_setup_synchronized_standby_slots_supported(&(postgres->postgresSetup)))
+	{
+		if (!postgres_drop_stale_failover_slots(postgres))
+		{
+			log_error("Failed to drop stale failover replication slots on "
+					  "the local Postgres instance, see above for details");
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -723,6 +774,26 @@ postgres_replication_slot_create_and_drop(LocalPostgresServer *postgres,
 	log_trace("postgres_replication_slot_drop_removed");
 
 	bool result = pgsql_replication_slot_create_and_drop(pgsql, nodeArray);
+
+	pgsql_finish(pgsql);
+	return result;
+}
+
+
+/*
+ * postgres_drop_stale_failover_slots drops stale (failover AND NOT synced)
+ * logical replication slots on the local Postgres instance. See
+ * pgsql_drop_stale_failover_slots() and primary_drop_all_replication_slots()
+ * (issue #1188) for the rationale.
+ */
+bool
+postgres_drop_stale_failover_slots(LocalPostgresServer *postgres)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	log_trace("postgres_drop_stale_failover_slots");
+
+	bool result = pgsql_drop_stale_failover_slots(pgsql);
 
 	pgsql_finish(pgsql);
 	return result;
@@ -770,6 +841,39 @@ primary_set_synchronous_standby_names(LocalPostgresServer *postgres)
 
 
 /*
+ * primary_set_synchronized_standby_slots sets the Postgres 17+
+ * synchronized_standby_slots GUC on a primary postgres node, so that
+ * failover-enabled logical replication slots (CDC) survive a promotion.
+ *
+ * Postgres versions before 17 don't have this GUC at all, so we skip
+ * applying it there rather than fail an ALTER SYSTEM SET against an unknown
+ * parameter name.
+ */
+bool
+primary_set_synchronized_standby_slots(LocalPostgresServer *postgres)
+{
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	if (!pg_setup_synchronized_standby_slots_supported(&(postgres->postgresSetup)))
+	{
+		log_debug("Skipping synchronized_standby_slots: "
+				  "not supported before Postgres 17");
+		return true;
+	}
+
+	log_info("Setting synchronized_standby_slots to '%s'",
+			 postgres->synchronizedStandbySlots);
+
+	bool result =
+		pgsql_set_synchronized_standby_slots(pgsql,
+											 postgres->synchronizedStandbySlots);
+
+	pgsql_finish(pgsql);
+	return result;
+}
+
+
+/*
  * primary_disable_synchronous_replication disables synchronous replication
  * on a primary postgres node.
  */
@@ -800,6 +904,8 @@ postgres_add_default_settings(LocalPostgresServer *postgres,
 	PostgresSetup *pgSetup = &(postgres->postgresSetup);
 	char configFilePath[MAXPGPATH];
 	GUC *default_settings = NULL;
+	GUC patchedSettings[32] = { 0 };
+	char walLevelValue[NAMEDATALEN + 2] = { 0 };
 
 	log_trace("postgres_add_default_settings (%s) [%d]",
 			  nodeKindToString(postgres->pgKind),
@@ -842,6 +948,17 @@ postgres_add_default_settings(LocalPostgresServer *postgres,
 			default_settings = postgres_default_settings_pre_13;
 		}
 	}
+	else if (pg_setup_synchronized_standby_slots_supported(pgSetup))
+	{
+		if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
+		{
+			default_settings = citus_default_settings_17;
+		}
+		else
+		{
+			default_settings = postgres_default_settings_17;
+		}
+	}
 	else
 	{
 		if (IS_CITUS_INSTANCE_KIND(postgres->pgKind))
@@ -852,6 +969,47 @@ postgres_add_default_settings(LocalPostgresServer *postgres,
 		{
 			default_settings = postgres_default_settings_13;
 		}
+	}
+
+	/*
+	 * wal_level already defaults to 'logical' in the non-Citus
+	 * default_settings arrays above: CDC continuity (see docs/cdc.rst)
+	 * needs it on any node that might ever become primary, which in
+	 * pg_auto_failover is every node in the group. Citus nodes already
+	 * force 'logical' unconditionally for Citus's own unrelated needs, so
+	 * they're left out of this override entirely.
+	 *
+	 * --wal-level replica at node creation time (pgSetup->walLevel) is the
+	 * one case that needs patching: a non-Citus node opting back out, for
+	 * clusters that know they'll never use CDC and would rather not pay
+	 * wal_level=logical's WAL-volume and catalog xmin-retention cost. The
+	 * static default_settings array is copied into a local, patched array
+	 * here rather than hardcoding the opt-out into it, so there's exactly
+	 * one place that decides the actual value written to postgresql.conf.
+	 */
+	if (!IS_CITUS_INSTANCE_KIND(postgres->pgKind) &&
+		!IS_EMPTY_STRING_BUFFER(pgSetup->walLevel) &&
+		strcmp(pgSetup->walLevel, "logical") != 0)
+	{
+		int i = 0;
+		int maxEntries = (int) (sizeof(patchedSettings) /
+								sizeof(patchedSettings[0]));
+
+		sformat(walLevelValue, sizeof(walLevelValue), "'%s'", pgSetup->walLevel);
+
+		for (i = 0; default_settings[i].name != NULL && i < maxEntries - 1; i++)
+		{
+			patchedSettings[i] = default_settings[i];
+
+			if (strcmp(default_settings[i].name, "wal_level") == 0)
+			{
+				patchedSettings[i].value = walLevelValue;
+			}
+		}
+		patchedSettings[i].name = NULL;
+		patchedSettings[i].value = NULL;
+
+		default_settings = patchedSettings;
 	}
 
 	if (!pg_add_auto_failover_default_settings(pgSetup,

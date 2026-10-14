@@ -1490,6 +1490,37 @@ pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 
 
 /*
+ * pgsql_set_synchronized_standby_slots sets the Postgres 17+
+ * synchronized_standby_slots GUC on the local Postgres to the value
+ * computed on the pg_auto_failover monitor: the comma-separated list of
+ * physical replication slot names of the current failover candidates. This
+ * is what makes a failover-enabled logical replication slot wait for every
+ * promotable standby before its confirmed position advances, so the slot
+ * stays usable by a CDC consumer across a promotion.
+ */
+bool
+pgsql_set_synchronized_standby_slots(PGSQL *pgsql,
+									 char *synchronized_standby_slots)
+{
+	char quoted[BUFSIZE] = { 0 };
+	GUC setting = { "synchronized_standby_slots", quoted };
+
+	if (sformat(quoted, BUFSIZE, "'%s'", synchronized_standby_slots) >= BUFSIZE)
+	{
+		log_error("Failed to apply the synchronized_standby_slots value \"%s\": "
+				  "pg_autoctl supports values up to %d bytes and this one "
+				  "requires %lu bytes",
+				  synchronized_standby_slots,
+				  BUFSIZE,
+				  (unsigned long) strlen(synchronized_standby_slots));
+		return false;
+	}
+
+	return pgsql_alter_system_set(pgsql, setting);
+}
+
+
+/*
  * pgsql_replication_slot_maintain advances the current confirmed position of
  * the given replication slot up to the given LSN position, create the
  * replication slot if it does not exist yet, and remove the slots that exist
@@ -1587,6 +1618,37 @@ pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName)
 
 	return pgsql_execute_with_params(pgsql, sql,
 									 1, paramTypes, paramValues, NULL, NULL);
+}
+
+
+/*
+ * pgsql_drop_stale_failover_slots drops every logical replication slot that
+ * still has failover enabled but isn't a synced copy (failover AND NOT
+ * synced): a slot in exactly that state on a node that is becoming a
+ * standby again is necessarily a stale leftover from when this node was
+ * primary, not something the slot-sync worker created. Left in place, it
+ * blocks that worker from starting at all ("same name slot ... already
+ * exists on the standby"), so the standby never gets a working synced copy
+ * (see issue #1188: this happens whenever demotion is interrupted, e.g. by
+ * demote_timeout, so the normal demotion cleanup below doesn't get a chance
+ * to run first).
+ *
+ * The failover/synced columns only exist from Postgres 17 onward (the
+ * version that introduces failover-enabled logical slots and the slot-sync
+ * worker in the first place), so this must only ever be called when
+ * pg_setup_synchronized_standby_slots_supported() is true.
+ */
+bool
+pgsql_drop_stale_failover_slots(PGSQL *pgsql)
+{
+	char *sql =
+		"SELECT pg_drop_replication_slot(slot_name) "
+		"  FROM pg_replication_slots "
+		" WHERE failover AND NOT synced AND NOT active";
+
+	log_trace("pgsql_drop_stale_failover_slots");
+
+	return pgsql_execute_with_params(pgsql, sql, 0, NULL, NULL, NULL, NULL);
 }
 
 

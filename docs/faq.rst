@@ -279,3 +279,40 @@ following commands::
 
   $ pg_autoctl disable monitor
   $ pg_autoctl enable monitor
+
+Can I use logical replication / CDC tools (Debezium, etc) with pg_auto_failover?
+---------------------------------------------------------------------------------
+
+Yes, as long as every node in the formation runs **Postgres 17 or more
+recent**. See :ref:`cdc_continuity` for the full picture; the short version:
+
+ - pg_auto_failover doesn't create or manage your logical replication
+   slots itself -- that stays your CDC tool's job, same as with any other
+   Postgres cluster.
+
+ - What pg_auto_failover does manage, automatically, on Postgres 17+: the
+   ``synchronized_standby_slots`` setting on the primary (kept in sync with
+   the current failover candidates), the ``dbname`` Postgres needs in
+   ``primary_conninfo`` to run its slot-sync worker, and ``sync_replication_slots``
+   / ``hot_standby_feedback`` on every standby. Together, these are what let
+   a logical slot created with ``failover => true`` keep working after a
+   promotion, instead of being silently left behind on the old primary.
+
+ - ``wal_level = logical`` is the default on every node pg_auto_failover
+   creates (see :ref:`wal_level_default`) -- you only need to set it
+   yourself when opting back in on a cluster created with
+   ``--wal-level replica``, or one created before this default existed
+   (see :ref:`wal_level_rollout`). You still need to create your slot(s)
+   with ``failover => true`` yourself: pg_auto_failover manages the
+   infrastructure that keeps them working across a promotion, not slot
+   creation itself.
+
+On Postgres versions before 17, Postgres itself has no mechanism to keep a
+logical slot's position correct on a standby without losing unconsumed
+changes, so there is nothing pg_auto_failover can safely do there: a
+logical slot on the primary does not survive a failover, the same as
+without pg_auto_failover. This was the situation discussed in `issue #400`__
+and `issue #1030`__ before Postgres 17 added slot synchronization.
+
+__ https://github.com/hapostgres/pg_auto_failover/issues/400
+__ https://github.com/hapostgres/pg_auto_failover/issues/1030

@@ -1,3 +1,5 @@
+.. _operations:
+
 Operating pg_auto_failover
 ==========================
 
@@ -193,6 +195,8 @@ monitor.
 
 And when the upgrade is done we can use ``pg_autoctl show state`` on the
 monitor to see that eveything is as expected.
+
+.. _upgrading_from_previous_versions:
 
 Upgrading from previous pg_auto_failover versions
 -------------------------------------------------

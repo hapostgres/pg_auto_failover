@@ -277,6 +277,48 @@ cli_watch_update_from_monitor(WatchContext *context)
 		return false;
 	}
 
+	/*
+	 * Postgres 17+ CDC continuity (see docs/cdc.rst): count how many
+	 * physical slots the group's synchronized_standby_slots currently
+	 * lists, same group/formation the rest of this dashboard is showing.
+	 * This is purely topology-derived on the monitor side, so it's safe
+	 * (and cheap) to always fetch, whether or not any node is running
+	 * Postgres 17 or holds a failover-enabled logical slot.
+	 */
+	{
+		char synchronizedStandbySlots[BUFSIZE] = { 0 };
+
+		if (!monitor_synchronized_standby_slots(
+				monitor,
+				context->formation,
+				context->groupId,
+				synchronizedStandbySlots,
+				BUFSIZE))
+		{
+			/* errors have already been logged */
+			return false;
+		}
+
+		if (IS_EMPTY_STRING_BUFFER(synchronizedStandbySlots))
+		{
+			context->synchronizedStandbySlotsCount = 0;
+		}
+		else
+		{
+			/* comma-separated slot names: N commas means N+1 slots */
+			int count = 1;
+
+			for (char *p = synchronizedStandbySlots; *p != '\0'; p++)
+			{
+				if (*p == ',')
+				{
+					++count;
+				}
+			}
+			context->synchronizedStandbySlotsCount = count;
+		}
+	}
+
 	if (!monitor_get_last_events(monitor,
 								 context->formation,
 								 context->groupId,
@@ -638,6 +680,33 @@ print_watch_header(WatchContext *context, int r)
 	attron(A_BOLD);
 	mvprintw(r, c, "%d", context->number_sync_standbys);
 	attroff(A_BOLD);
+
+	{
+		char nssStr[12] = { 0 };
+
+		sformat(nssStr, sizeof(nssStr), "%d", context->number_sync_standbys);
+		c += strlen(nssStr);
+	}
+
+	/*
+	 * Postgres 17+ CDC continuity (docs/cdc.rst): show how many physical
+	 * slots synchronized_standby_slots currently lists for this group, so
+	 * an operator watching a live failover can see at a glance whether a
+	 * candidate dropping out (count going down) could be stalling logical
+	 * decoding. Zero is the common, uninteresting case (no CDC in use, or
+	 * no promotion candidates), so it isn't worth the row's space unless
+	 * there's something to see.
+	 */
+	if (context->synchronizedStandbySlotsCount > 0 &&
+		context->cols > (c + 9 + 14 + 3))
+	{
+		mvprintw(r, c, " - CDC Slots: "); /* that's 14 chars */
+		c += 14;
+
+		attron(A_BOLD);
+		mvprintw(r, c, "%d", context->synchronizedStandbySlotsCount);
+		attroff(A_BOLD);
+	}
 
 	/* we only use one row */
 	return 1;

@@ -375,9 +375,12 @@ bool pgsql_replication_slot_exists(PGSQL *pgsql, const char *slotName,
 								   bool *slotExists);
 bool pgsql_create_replication_slot(PGSQL *pgsql, const char *slotName);
 bool pgsql_drop_replication_slot(PGSQL *pgsql, const char *slotName);
+bool pgsql_drop_stale_failover_slots(PGSQL *pgsql);
 bool postgres_sprintf_replicationSlotName(int64_t nodeId, char *slotName, int size);
 bool pgsql_set_synchronous_standby_names(PGSQL *pgsql,
 										 char *synchronous_standby_names);
+bool pgsql_set_synchronized_standby_slots(PGSQL *pgsql,
+										  char *synchronized_standby_slots);
 bool pgsql_replication_slot_create_and_drop(PGSQL *pgsql,
 											NodeAddressArray *nodeArray);
 bool pgsql_replication_slot_maintain(PGSQL *pgsql, NodeAddressArray *nodeArray);

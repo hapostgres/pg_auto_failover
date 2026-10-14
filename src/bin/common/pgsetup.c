@@ -1997,6 +1997,31 @@ pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel)
 
 
 /*
+ * pg_setup_synchronized_standby_slots_supported returns true when the
+ * target Postgres instance represented in pgSetup is Postgres 17 or more
+ * recent, the first version that implements the "synchronized_standby_slots"
+ * GUC and the pg_sync_replication_slots() slot-sync worker that keeps
+ * failover-enabled logical replication slots usable across a physical
+ * standby promotion. Before 17, Postgres has no mechanism to keep a logical
+ * slot's position correct on a standby without losing unconsumed changes,
+ * so pg_auto_failover's CDC-continuity support only applies to 17+.
+ */
+bool
+pg_setup_synchronized_standby_slots_supported(PostgresSetup *pgSetup)
+{
+	int pg_version = 0;
+
+	if (!parse_pg_version_string(pgSetup->pg_version, &pg_version))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	return pg_version >= 1700;
+}
+
+
+/*
  * pgsetup_parse_hba_level parses a string that represents an HBAEditLevel
  * value.
  */

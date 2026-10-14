@@ -279,6 +279,11 @@ bool monitor_synchronous_standby_names(Monitor *monitor,
 									   char *synchronous_standby_names,
 									   int size);
 
+bool monitor_synchronized_standby_slots(Monitor *monitor,
+										char *formation, int groupId,
+										char *synchronized_standby_slots,
+										int size);
+
 bool monitor_update_node_metadata(Monitor *monitor,
 								  int64_t nodeId,
 								  const char *name,

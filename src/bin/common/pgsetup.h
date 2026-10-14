@@ -233,6 +233,7 @@ typedef struct pg_setup
 	NodeReplicationSettings settings;       /* node replication settings */
 	SSLOptions ssl;                         /* ssl options */
 	char citusClusterName[NAMEDATALEN];     /* citus.cluster_name */
+	char walLevel[NAMEDATALEN];             /* wal_level, defaults to "logical" */
 } PostgresSetup;
 
 #define IS_EMPTY_STRING_BUFFER(strbuf) (strbuf[0] == '\0')
@@ -277,6 +278,7 @@ SSLMode pgsetup_parse_sslmode(const char *sslMode);
 char * pgsetup_sslmode_to_string(SSLMode sslMode);
 
 bool pg_setup_standby_slot_supported(PostgresSetup *pgSetup, int logLevel);
+bool pg_setup_synchronized_standby_slots_supported(PostgresSetup *pgSetup);
 
 HBAEditLevel pgsetup_parse_hba_level(const char *level);
 char * pgsetup_hba_level_to_string(HBAEditLevel hbaLevel);

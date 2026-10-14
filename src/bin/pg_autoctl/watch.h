@@ -66,6 +66,7 @@ typedef struct WatchContext
 	char formation[NAMEDATALEN];
 	int groupId;
 	int number_sync_standbys;
+	int synchronizedStandbySlotsCount; /* Postgres 17+ CDC continuity, see docs/cdc.rst */
 
 	/* data to display */
 	CurrentNodeStateArray nodesArray;

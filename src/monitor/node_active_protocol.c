@@ -71,6 +71,7 @@ PG_FUNCTION_INFO_V1(set_node_replication_quorum);
 PG_FUNCTION_INFO_V1(set_node_region);
 PG_FUNCTION_INFO_V1(report_postgres_version);
 PG_FUNCTION_INFO_V1(synchronous_standby_names);
+PG_FUNCTION_INFO_V1(synchronized_standby_slots);
 PG_FUNCTION_INFO_V1(testing_lock_formation);
 PG_FUNCTION_INFO_V1(testing_lock_node_group);
 PG_FUNCTION_INFO_V1(testing_set_node_health);
@@ -2511,6 +2512,37 @@ update_node_metadata(PG_FUNCTION_ARGS)
 
 
 /*
+ * AppendStandbySlotNames appends the pgautofailover_standby_<nodeId> names
+ * of every node in nodeList to buf, in list order, joined by separator.
+ * Shared by synchronous_standby_names() and synchronized_standby_slots()
+ * below, which otherwise only differ in which node list they build this
+ * from and how they wrap the result (synchronous_standby_names() wraps it
+ * in "ANY N (...)" itself, around this call).
+ */
+static void
+AppendStandbySlotNames(StringInfo buf, List *nodeList, const char *separator)
+{
+	ListCell *nodeCell = NULL;
+	bool firstNode = true;
+
+	foreach(nodeCell, nodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		appendStringInfo(buf,
+						 "%spgautofailover_standby_%lld",
+						 firstNode ? "" : separator,
+						 (long long) node->nodeId);
+
+		if (firstNode)
+		{
+			firstNode = false;
+		}
+	}
+}
+
+
+/*
  * synchronous_standby_names returns the synchronous_standby_names parameter
  * value for a given Postgres service group in a given formation.
  */
@@ -2620,29 +2652,132 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 				: formation->number_sync_standbys;
 
 			StringInfo sbnames = makeStringInfo();
-			ListCell *nodeCell = NULL;
-			bool firstNode = true;
 
 			appendStringInfo(sbnames, "ANY %d (", number_sync_standbys);
-
-			foreach(nodeCell, syncStandbyNodesGroupList)
-			{
-				AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-				appendStringInfo(sbnames,
-								 "%spgautofailover_standby_%lld",
-								 firstNode ? "" : ", ",
-								 (long long) node->nodeId);
-
-				if (firstNode)
-				{
-					firstNode = false;
-				}
-			}
+			AppendStandbySlotNames(sbnames, syncStandbyNodesGroupList, ", ");
 			appendStringInfoString(sbnames, ")");
 
 			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
 		}
+	}
+}
+
+
+/*
+ * synchronized_standby_slots returns the value to use for the Postgres 17+
+ * "synchronized_standby_slots" parameter on the primary of a given Postgres
+ * service group in a given formation.
+ *
+ * synchronized_standby_slots lists the physical replication slot names that
+ * a logical replication slot created with failover => true must wait on
+ * (via the slot's synced copy catching up) before its confirmed_flush_lsn is
+ * allowed to advance. This is what lets a CDC consumer's logical slot
+ * survive a failover: as long as every node that might get promoted has
+ * already replayed everything the logical slot has confirmed, promoting it
+ * can never leave the slot pointing past data that node doesn't have.
+ *
+ * We compute this the same way as synchronous_standby_names above, but
+ * listing every current failover *candidate* (AutoFailoverNode.
+ * candidatePriority > 0) rather than only the nodes currently part of the
+ * synchronous replication quorum: a node can be promoted whether or not it
+ * was ever a synchronous standby, so the logical slot must wait on it
+ * regardless. Nodes with candidatePriority == 0 can only be promoted
+ * manually (force-failover), which is already an exceptional, operator-
+ * driven action, so we don't hold back CDC consumers for them.
+ *
+ * Among those candidates, only the ones that last reported themselves as
+ * SECONDARY are listed (AutoFailoverNode.reportedState, not goalState: an
+ * extra standby beyond what number_sync_standbys needs can sit at goal
+ * catchingup indefinitely for quorum bookkeeping alone, while genuinely
+ * being a fully caught-up secondary). A candidate the monitor has pushed
+ * back to catchingup because it actually fell behind or missed its
+ * reporting window, or that hasn't reached secondary yet at all
+ * (wait_standby, join_secondary, ...), is excluded: it remains a failover
+ * candidate in principle, but it isn't caught up right now, and listing it
+ * would make the logical slot's progress hostage to that node recovering
+ * -- the opposite of the opt-out this GUC is meant to give us.
+ *
+ * Returns the empty string when there is nothing to wait on (a single node
+ * group, or no promotion candidates currently reporting secondary), which
+ * disables the feature: Postgres treats an empty synchronized_standby_slots
+ * as "no requirement".
+ */
+Datum
+synchronized_standby_slots(PG_FUNCTION_ARGS)
+{
+	checkPgAutoFailoverVersion();
+
+	text *formationIdText = PG_GETARG_TEXT_P(0);
+	char *formationId = text_to_cstring(formationIdText);
+
+	int32 groupId = PG_GETARG_INT32(1);
+
+	List *nodesGroupList = AutoFailoverNodeGroup(formationId, groupId);
+	int nodesCount = list_length(nodesGroupList);
+
+	/*
+	 * When there's no nodes registered yet, there's no pg_autoctl process
+	 * that needs the information anyway. Return NULL.
+	 */
+	if (nodesCount == 0)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+				 errmsg("no nodes found in group %d of formation \"%s\"",
+						groupId, formationId)));
+	}
+
+	/* a single node has nothing to synchronize against */
+	if (nodesCount == 1)
+	{
+		PG_RETURN_TEXT_P(cstring_to_text(""));
+	}
+
+	AutoFailoverNode *primaryNode = GetPrimaryNodeInGroup(formationId, groupId);
+
+	List *standbyNodesGroupList = AutoFailoverOtherNodesList(primaryNode);
+	List *candidateNodesList = GroupListCandidates(standbyNodesGroupList);
+
+	/*
+	 * Only wait on a candidate that last reported itself as SECONDARY. We
+	 * deliberately check reportedState, not goalState: an extra standby
+	 * beyond what number_sync_standbys needs can sit at goalState
+	 * catchingup indefinitely for quorum bookkeeping reasons alone, while
+	 * genuinely being a fully caught-up secondary (reportedState
+	 * secondary) -- that node belongs in the list. What we want to
+	 * exclude is a candidate the monitor has pushed back to catchingup
+	 * because it actually fell behind or missed its reporting window
+	 * (reportedState catchingup), or one that hasn't reached secondary yet
+	 * at all (wait_standby, join_secondary, ...). Holding a failover-
+	 * enabled logical slot's progress hostage to such a node would defeat
+	 * the point of CDC continuity: the slot would simply stop advancing
+	 * until that node recovers, instead of only waiting on candidates
+	 * actually able to take over right now.
+	 */
+	List *readyCandidateNodesList = NIL;
+	ListCell *candidateCell = NULL;
+
+	foreach(candidateCell, candidateNodesList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(candidateCell);
+
+		if (node->reportedState == REPLICATION_STATE_SECONDARY)
+		{
+			readyCandidateNodesList = lappend(readyCandidateNodesList, node);
+		}
+	}
+
+	if (list_length(readyCandidateNodesList) == 0)
+	{
+		PG_RETURN_TEXT_P(cstring_to_text(""));
+	}
+	else
+	{
+		StringInfo slotNames = makeStringInfo();
+
+		AppendStandbySlotNames(slotNames, readyCandidateNodesList, ",");
+
+		PG_RETURN_TEXT_P(cstring_to_text(slotNames->data));
 	}
 }
 

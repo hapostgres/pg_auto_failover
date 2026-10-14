@@ -229,6 +229,13 @@ Name of the PostgreSQL replication slot used in the streaming replication
 setup automatically deployed by pg_auto_failover. Replication slots can't be renamed
 in PostgreSQL.
 
+On Postgres 17 and more recent, pg_auto_failover also maintains the
+``synchronized_standby_slots`` Postgres setting on the primary, computed
+from the formation's current failover candidates: this is not a
+pg_auto_failover configuration key of its own (there is nothing to set),
+but it is what lets a failover-enabled logical replication slot survive a
+promotion. See :ref:`cdc_continuity` for the full picture.
+
 **replication.maximum_backup_rate**
 
 When pg_auto_failover (re-)builds a standby node using the ``pg_basebackup``

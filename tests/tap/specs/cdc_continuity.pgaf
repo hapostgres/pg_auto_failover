@@ -1,0 +1,142 @@
+# CDC continuity (Postgres 17+): a logical replication slot created with
+# failover => true must survive a promotion -- both a clean one (perform
+# failover) and one triggered by a primary self-fencing through
+# demote_timeout (issue #1188: an interrupted demotion can leave the old
+# primary holding stale, non-synced failover slots that permanently block
+# the slot-sync worker on the node once it rejoins as a standby).
+#
+# wal_level defaults to 'logical' on every node pg_auto_failover creates
+# (see docs/cdc.rst), so there is nothing to set up here beyond the
+# default: test_001 below creating a failover-enabled logical slot right
+# after setup{} is itself the regression guard that the default actually
+# took effect on both nodes (it would fail outright with a plain Postgres
+# error otherwise, same as it would on wal_level='replica').
+#
+# Earlier revisions of this spec had to flip wal_level on after the fact,
+# and getting that ordering wrong (restarting the *primary* after it
+# already had a synchronous standby attached) reliably self-fenced it into
+# demote_timeout mid-setup -- exactly the risky pattern
+# basic_operation.pgaf's own comments warn about. See
+# docs/cdc.rst's wal_level rollout runbook for that procedure, still
+# needed for a cluster created before this default, or with
+# --wal-level replica.
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2
+    }
+}
+
+setup {
+    wait until primary, secondary  timeout 120s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: create a failover-enabled logical slot on the primary, verify
+#           the monitor-computed synchronized_standby_slots setting names
+#           the standby's physical slot, and that the slot gets synced.
+#
+
+step test_001_create_failover_slot {
+    sql node1 {
+        SELECT slot_name FROM pg_create_logical_replication_slot(
+            'cdc_slot', 'pgoutput', false, false, true);
+    }
+    expect { cdc_slot }
+
+    sql node1 { SHOW synchronized_standby_slots; }
+    expect { pgautofailover_standby_2 }
+}
+
+step test_002_slot_gets_synced_to_standby {
+    # The slot-sync worker polls periodically; give it a few seconds.
+    sleep 5s
+    sql node2 {
+        SELECT slot_name, failover, synced
+          FROM pg_replication_slots
+         WHERE slot_name = 'cdc_slot';
+    }
+    expect { cdc_slot|t|t }
+}
+
+#
+# test_003: a clean failover must hand the slot to the new primary still
+#           usable for logical decoding, with no resync required. Note:
+#           "synced" stays true forever as a provenance marker (this slot
+#           originated as a synced copy) -- it is not what governs whether
+#           the slot can be decoded from, and is not reset on promotion.
+#
+
+step test_003_clean_failover_preserves_slot {
+    perform failover
+    wait until node2 state is primary
+        and node1 state is secondary
+        timeout 90s
+
+    sql node2 {
+        SELECT slot_name, failover, synced
+          FROM pg_replication_slots
+         WHERE slot_name = 'cdc_slot';
+    }
+    expect { cdc_slot|t|t }
+}
+
+#
+# test_004: reproduce issue #1188 -- at this point node2 is primary (from
+#           test_003) holding the real, promoted copy of cdc_slot, and
+#           node1 is its standby with a synced copy. node2 self-fences
+#           through demote_timeout (network partition, same technique as
+#           demote_timeout_wait_primary_deadlock.pgaf), node1 is promoted,
+#           and node2 rejoins as a standby still holding its own stale
+#           (failover AND NOT synced) copy of the slot.  Before the fix,
+#           this permanently blocked node2's slot-sync worker, logging
+#           "same name slot ... already exists on the standby" forever.
+#
+#           This necessarily re-promotes node1 -- cdc_slot's original
+#           creator -- a second time, which independently runs into a
+#           separate, narrower Postgres limitation (see "Limitations" in
+#           docs/cdc.rst: a node round-tripping back to primary can lose
+#           its own originally-created slot's data, regardless of this
+#           fix). That's why test_005 below only asserts the #1188
+#           regression itself (no blocking name collision, slot-sync
+#           worker not stuck) rather than re-asserting data continuity
+#           already covered by test_002/003 -- doing both at once in a
+#           2-node formation would conflate two different limitations.
+#           A 3-node formation could isolate them fully; left as a
+#           possible follow-up.
+#
+
+step test_004_primary_self_fences_mid_demotion {
+    network disconnect node2
+    wait until node2 assigned-state = demote_timeout  timeout 60s
+    wait until node1 state is wait_primary  timeout 60s
+
+    # Let node2's own keeper notice the partition and stop Postgres
+    # (network_partition_timeout, default 20s) before reconnecting it.
+    sleep 30s
+    network connect node2
+}
+
+step test_005_old_primary_rejoins_without_the_1188_deadlock {
+    wait until node2 state is secondary
+        and node1 state is primary
+        timeout 90s
+
+    # Give the slot-sync worker's retry loop time to either succeed or get
+    # stuck -- these are absence checks, so they're only meaningful once
+    # enough time has passed for the problem to have shown up if it exists.
+    sleep 20s
+
+    # The slot-sync worker must not be stuck behind node2's own leftover
+    # failover slot (the exact symptom reported in #1188): neither the
+    # permanent name-collision error nor an endless "would lose data" retry
+    # loop (a sign the stale slot cleanup ran too late or not at all).
+    logs node2 not contains "already exists on the standby"
+    logs node2 not contains "could not synchronize replication slot"
+}

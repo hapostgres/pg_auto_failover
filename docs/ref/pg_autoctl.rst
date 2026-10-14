@@ -52,6 +52,7 @@ pg_autoctl provides the following commands::
     state          Prints monitor's state of nodes in a given formation and group
     settings       Print replication settings for a formation from the monitor
     standby-names  Prints synchronous_standby_names for a given group
+    synchronized-standby-slots  Prints synchronized_standby_slots for a given group (Postgres 17+ CDC continuity)
     timeline       Show the timeline history known to the monitor for a group, and each node's position against it
     file           List pg_autoctl internal files (config, state, pid)
     systemd        Print systemd service file for this node
