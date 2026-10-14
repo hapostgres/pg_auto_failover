@@ -891,29 +891,39 @@ cli_show_standby_names_getopts(int argc, char **argv)
 
 
 /*
- * cli_show_standby_names prints the synchronous_standby_names setting value
- * for a given group (in a known formation).
+ * cli_show_monitor_computed_setting fetches a group-wide, monitor-computed
+ * setting value (synchronous_standby_names, synchronized_standby_slots,
+ * ...) via fetchFunction and prints it, in JSON or plain text depending on
+ * outputJSON. settingName is both the JSON key and what's named in the
+ * error message, so callers reusing this pass the same string Postgres
+ * itself uses for the GUC.
+ *
+ * Shared by cli_show_standby_names() and cli_show_synchronized_standby_slots()
+ * below, which otherwise only differ in which monitor function to call and
+ * which setting name to print under.
  */
 static void
-cli_show_standby_names(int argc, char **argv)
+cli_show_monitor_computed_setting(KeeperConfig *config,
+								  bool (*fetchFunction) (Monitor *monitor,
+														 char *formation,
+														 int groupId,
+														 char *buffer,
+														 int size),
+								  const char *settingName)
 {
-	KeeperConfig config = keeperOptions;
 	Monitor monitor = { 0 };
-	char synchronous_standby_names[BUFSIZE] = { 0 };
+	char settingValue[BUFSIZE] = { 0 };
 
-	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
+	(void) cli_monitor_init_from_option_or_config(&monitor, config);
 
-	(void) cli_set_groupId(&monitor, &config);
+	(void) cli_set_groupId(&monitor, config);
 
-	if (!monitor_synchronous_standby_names(
-			&monitor,
-			config.formation,
-			config.groupId,
-			synchronous_standby_names,
-			BUFSIZE))
+	if (!(*fetchFunction)(&monitor, config->formation, config->groupId,
+						  settingValue, BUFSIZE))
 	{
-		log_fatal("Failed to get the synchronous_standby_names setting value "
-				  " from the monitor, see above for details");
+		log_fatal("Failed to get the %s setting value "
+				  " from the monitor, see above for details",
+				  settingName);
 		exit(EXIT_CODE_MONITOR);
 	}
 
@@ -922,19 +932,32 @@ cli_show_standby_names(int argc, char **argv)
 		JSON_Value *js = json_value_init_object();
 		JSON_Object *jsObj = json_value_get_object(js);
 
-		json_object_set_string(jsObj, "formation", config.formation);
-		json_object_set_number(jsObj, "group", (double) config.groupId);
-		json_object_set_string(jsObj,
-							   "synchronous_standby_names",
-							   synchronous_standby_names);
+		json_object_set_string(jsObj, "formation", config->formation);
+		json_object_set_number(jsObj, "group", (double) config->groupId);
+		json_object_set_string(jsObj, settingName, settingValue);
 
 		(void) cli_pprint_json(js);
 	}
 	else
 	{
-		/* current synchronous_standby_names might be an empty string */
-		(void) fformat(stdout, "'%s'\n", synchronous_standby_names);
+		/* current setting value might be an empty string */
+		(void) fformat(stdout, "'%s'\n", settingValue);
 	}
+}
+
+
+/*
+ * cli_show_standby_names prints the synchronous_standby_names setting value
+ * for a given group (in a known formation).
+ */
+static void
+cli_show_standby_names(int argc, char **argv)
+{
+	KeeperConfig config = keeperOptions;
+
+	(void) cli_show_monitor_computed_setting(&config,
+											 monitor_synchronous_standby_names,
+											 "synchronous_standby_names");
 }
 
 
@@ -949,43 +972,10 @@ static void
 cli_show_synchronized_standby_slots(int argc, char **argv)
 {
 	KeeperConfig config = keeperOptions;
-	Monitor monitor = { 0 };
-	char synchronized_standby_slots[BUFSIZE] = { 0 };
 
-	(void) cli_monitor_init_from_option_or_config(&monitor, &config);
-
-	(void) cli_set_groupId(&monitor, &config);
-
-	if (!monitor_synchronized_standby_slots(
-			&monitor,
-			config.formation,
-			config.groupId,
-			synchronized_standby_slots,
-			BUFSIZE))
-	{
-		log_fatal("Failed to get the synchronized_standby_slots setting value "
-				  " from the monitor, see above for details");
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	if (outputJSON)
-	{
-		JSON_Value *js = json_value_init_object();
-		JSON_Object *jsObj = json_value_get_object(js);
-
-		json_object_set_string(jsObj, "formation", config.formation);
-		json_object_set_number(jsObj, "group", (double) config.groupId);
-		json_object_set_string(jsObj,
-							   "synchronized_standby_slots",
-							   synchronized_standby_slots);
-
-		(void) cli_pprint_json(js);
-	}
-	else
-	{
-		/* current synchronized_standby_slots might be an empty string */
-		(void) fformat(stdout, "'%s'\n", synchronized_standby_slots);
-	}
+	(void) cli_show_monitor_computed_setting(&config,
+											 monitor_synchronized_standby_slots,
+											 "synchronized_standby_slots");
 }
 
 

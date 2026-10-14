@@ -2512,6 +2512,37 @@ update_node_metadata(PG_FUNCTION_ARGS)
 
 
 /*
+ * AppendStandbySlotNames appends the pgautofailover_standby_<nodeId> names
+ * of every node in nodeList to buf, in list order, joined by separator.
+ * Shared by synchronous_standby_names() and synchronized_standby_slots()
+ * below, which otherwise only differ in which node list they build this
+ * from and how they wrap the result (synchronous_standby_names() wraps it
+ * in "ANY N (...)" itself, around this call).
+ */
+static void
+AppendStandbySlotNames(StringInfo buf, List *nodeList, const char *separator)
+{
+	ListCell *nodeCell = NULL;
+	bool firstNode = true;
+
+	foreach(nodeCell, nodeList)
+	{
+		AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
+
+		appendStringInfo(buf,
+						 "%spgautofailover_standby_%lld",
+						 firstNode ? "" : separator,
+						 (long long) node->nodeId);
+
+		if (firstNode)
+		{
+			firstNode = false;
+		}
+	}
+}
+
+
+/*
  * synchronous_standby_names returns the synchronous_standby_names parameter
  * value for a given Postgres service group in a given formation.
  */
@@ -2621,25 +2652,9 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 				: formation->number_sync_standbys;
 
 			StringInfo sbnames = makeStringInfo();
-			ListCell *nodeCell = NULL;
-			bool firstNode = true;
 
 			appendStringInfo(sbnames, "ANY %d (", number_sync_standbys);
-
-			foreach(nodeCell, syncStandbyNodesGroupList)
-			{
-				AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-				appendStringInfo(sbnames,
-								 "%spgautofailover_standby_%lld",
-								 firstNode ? "" : ", ",
-								 (long long) node->nodeId);
-
-				if (firstNode)
-				{
-					firstNode = false;
-				}
-			}
+			AppendStandbySlotNames(sbnames, syncStandbyNodesGroupList, ", ");
 			appendStringInfoString(sbnames, ")");
 
 			PG_RETURN_TEXT_P(cstring_to_text(sbnames->data));
@@ -2759,23 +2774,8 @@ synchronized_standby_slots(PG_FUNCTION_ARGS)
 	else
 	{
 		StringInfo slotNames = makeStringInfo();
-		ListCell *nodeCell = NULL;
-		bool firstNode = true;
 
-		foreach(nodeCell, readyCandidateNodesList)
-		{
-			AutoFailoverNode *node = (AutoFailoverNode *) lfirst(nodeCell);
-
-			appendStringInfo(slotNames,
-							 "%spgautofailover_standby_%lld",
-							 firstNode ? "" : ",",
-							 (long long) node->nodeId);
-
-			if (firstNode)
-			{
-				firstNode = false;
-			}
-		}
+		AppendStandbySlotNames(slotNames, readyCandidateNodesList, ",");
 
 		PG_RETURN_TEXT_P(cstring_to_text(slotNames->data));
 	}

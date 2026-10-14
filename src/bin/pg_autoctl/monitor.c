@@ -4002,22 +4002,25 @@ monitor_print_formation_settings_as_json(Monitor *monitor, char *formation)
 
 
 /*
- * monitor_synchronous_standby_names returns the value for the Postgres
- * parameter "synchronous_standby_names" to use for a given group. The setting
- * is computed on the monitor depending on the current values of the formation
- * number_sync_standbys and each node's candidate priority and replication
- * quorum properties.
+ * monitor_get_group_setting_from_sql runs the given single-row, single
+ * text-column SQL query (taking formation and groupId as its two
+ * parameters, in that order) and copies the result into buffer. settingName
+ * is only used to word the error messages.
+ *
+ * Shared by monitor_synchronous_standby_names() and
+ * monitor_synchronized_standby_slots() below, which otherwise only differ
+ * in which monitor SQL function to call and what to name the setting in
+ * their error messages.
  */
-bool
-monitor_synchronous_standby_names(Monitor *monitor,
-								  char *formation, int groupId,
-								  char *synchronous_standby_names, int size)
+static bool
+monitor_get_group_setting_from_sql(Monitor *monitor,
+								   const char *sql,
+								   const char *settingName,
+								   char *formation, int groupId,
+								   char *buffer, int size)
 {
 	PGSQL *pgsql = &monitor->pgsql;
 	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
-
-	const char *sql =
-		"select pgautofailover.synchronous_standby_names($1, $2)";
 
 	int paramCount = 2;
 	Oid paramTypes[2] = { TEXTOID, INT4OID };
@@ -4031,9 +4034,9 @@ monitor_synchronous_standby_names(Monitor *monitor,
 								   paramCount, paramTypes, paramValues,
 								   &context, &parseSingleValueResult))
 	{
-		log_error("Failed to get the synchronous_standby_names setting value "
+		log_error("Failed to get the %s setting value "
 				  " from the monitor for formation %s and group %d",
-				  formation, groupId);
+				  settingName, formation, groupId);
 		if (context.strVal)
 		{
 			free(context.strVal);
@@ -4043,10 +4046,10 @@ monitor_synchronous_standby_names(Monitor *monitor,
 
 	if (!context.parsedOk)
 	{
-		log_error("Failed to get the synchronous_standby_names setting value "
+		log_error("Failed to get the %s setting value "
 				  " from the monitor for formation %s and group %d,"
 				  "see above for details",
-				  formation, groupId);
+				  settingName, formation, groupId);
 		if (context.strVal)
 		{
 			free(context.strVal);
@@ -4054,10 +4057,31 @@ monitor_synchronous_standby_names(Monitor *monitor,
 		return false;
 	}
 
-	strlcpy(synchronous_standby_names, context.strVal, size);
+	strlcpy(buffer, context.strVal, size);
 	free(context.strVal);
 
 	return true;
+}
+
+
+/*
+ * monitor_synchronous_standby_names returns the value for the Postgres
+ * parameter "synchronous_standby_names" to use for a given group. The setting
+ * is computed on the monitor depending on the current values of the formation
+ * number_sync_standbys and each node's candidate priority and replication
+ * quorum properties.
+ */
+bool
+monitor_synchronous_standby_names(Monitor *monitor,
+								  char *formation, int groupId,
+								  char *synchronous_standby_names, int size)
+{
+	return monitor_get_group_setting_from_sql(
+		monitor,
+		"select pgautofailover.synchronous_standby_names($1, $2)",
+		"synchronous_standby_names",
+		formation, groupId,
+		synchronous_standby_names, size);
 }
 
 
@@ -4076,51 +4100,12 @@ monitor_synchronized_standby_slots(Monitor *monitor,
 								   char *formation, int groupId,
 								   char *synchronized_standby_slots, int size)
 {
-	PGSQL *pgsql = &monitor->pgsql;
-	SingleValueResultContext context = { { 0 }, PGSQL_RESULT_STRING, false };
-
-	const char *sql =
-		"select pgautofailover.synchronized_standby_slots($1, $2)";
-
-	int paramCount = 2;
-	Oid paramTypes[2] = { TEXTOID, INT4OID };
-	const char *paramValues[2] = { 0 };
-	IntString myGroupIdString = intToString(groupId);
-
-	paramValues[0] = formation;
-	paramValues[1] = myGroupIdString.strValue;
-
-	if (!pgsql_execute_with_params(pgsql, sql,
-								   paramCount, paramTypes, paramValues,
-								   &context, &parseSingleValueResult))
-	{
-		log_error("Failed to get the synchronized_standby_slots setting value "
-				  " from the monitor for formation %s and group %d",
-				  formation, groupId);
-		if (context.strVal)
-		{
-			free(context.strVal);
-		}
-		return false;
-	}
-
-	if (!context.parsedOk)
-	{
-		log_error("Failed to get the synchronized_standby_slots setting value "
-				  " from the monitor for formation %s and group %d,"
-				  "see above for details",
-				  formation, groupId);
-		if (context.strVal)
-		{
-			free(context.strVal);
-		}
-		return false;
-	}
-
-	strlcpy(synchronized_standby_slots, context.strVal, size);
-	free(context.strVal);
-
-	return true;
+	return monitor_get_group_setting_from_sql(
+		monitor,
+		"select pgautofailover.synchronized_standby_slots($1, $2)",
+		"synchronized_standby_slots",
+		formation, groupId,
+		synchronized_standby_slots, size);
 }
 
 

@@ -633,6 +633,54 @@ fsm_enable_sync_rep(Keeper *keeper)
 
 
 /*
+ * fsm_fetch_monitor_setting fetches a group-wide, monitor-computed setting
+ * value (synchronous_standby_names, synchronized_standby_slots, ...) into
+ * the given buffer via monitorFetchFunction, or falls back to
+ * defaultValueWhenNoMonitor when the monitor is disabled for this node.
+ * settingName is only used to word the error message.
+ *
+ * Shared by fsm_apply_settings() below for both settings it applies, which
+ * otherwise only differ in which monitor function to call, which buffer to
+ * fill, and what to fall back to without a monitor.
+ */
+static bool
+fsm_fetch_monitor_setting(Keeper *keeper,
+						  bool (*monitorFetchFunction) (Monitor *monitor,
+														char *formation,
+														int groupId,
+														char *buffer,
+														int size),
+						  char *buffer,
+						  size_t bufferSize,
+						  const char *defaultValueWhenNoMonitor,
+						  const char *settingName)
+{
+	Monitor *monitor = &(keeper->monitor);
+	KeeperConfig *config = &(keeper->config);
+
+	if (config->monitorDisabled)
+	{
+		strlcpy(buffer, defaultValueWhenNoMonitor, bufferSize);
+		return true;
+	}
+
+	if (!(*monitorFetchFunction)(monitor,
+								 config->formation,
+								 keeper->state.current_group,
+								 buffer,
+								 bufferSize))
+	{
+		log_error("Failed to get the %s value from the monitor, "
+				  "see above for details",
+				  settingName);
+		return false;
+	}
+
+	return true;
+}
+
+
+/*
  * fsm_apply_settings is used when a pg_auto_failover setting has changed, such
  * as number_sync_standbys or node priorities and replication quorum
  * properties.
@@ -643,31 +691,18 @@ fsm_enable_sync_rep(Keeper *keeper)
 bool
 fsm_apply_settings(Keeper *keeper)
 {
-	Monitor *monitor = &(keeper->monitor);
-	KeeperConfig *config = &(keeper->config);
 	LocalPostgresServer *postgres = &(keeper->postgres);
 
-	/* get synchronous_standby_names value from the monitor */
-	if (!config->monitorDisabled)
+	/* get synchronous_standby_names value from the monitor, '*' without one */
+	if (!fsm_fetch_monitor_setting(keeper,
+								   monitor_synchronous_standby_names,
+								   postgres->synchronousStandbyNames,
+								   sizeof(postgres->synchronousStandbyNames),
+								   "*",
+								   "synchronous_standby_names"))
 	{
-		if (!monitor_synchronous_standby_names(
-				monitor,
-				config->formation,
-				keeper->state.current_group,
-				postgres->synchronousStandbyNames,
-				sizeof(postgres->synchronousStandbyNames)))
-		{
-			log_error("Failed to enable synchronous replication because "
-					  "we failed to get the synchronous_standby_names value "
-					  "from the monitor, see above for details");
-			return false;
-		}
-	}
-	else
-	{
-		/* no monitor: use the generic value '*' */
-		strlcpy(postgres->synchronousStandbyNames, "*",
-				sizeof(postgres->synchronousStandbyNames));
+		/* errors have already been logged */
+		return false;
 	}
 
 	if (!primary_set_synchronous_standby_names(postgres))
@@ -684,26 +719,15 @@ fsm_apply_settings(Keeper *keeper)
 	 * primary_set_synchronized_standby_slots() is itself a no-op before
 	 * Postgres 17, so we always fetch the value and let it decide.
 	 */
-	if (!config->monitorDisabled)
+	if (!fsm_fetch_monitor_setting(keeper,
+								   monitor_synchronized_standby_slots,
+								   postgres->synchronizedStandbySlots,
+								   sizeof(postgres->synchronizedStandbySlots),
+								   "",
+								   "synchronized_standby_slots"))
 	{
-		if (!monitor_synchronized_standby_slots(
-				monitor,
-				config->formation,
-				keeper->state.current_group,
-				postgres->synchronizedStandbySlots,
-				sizeof(postgres->synchronizedStandbySlots)))
-		{
-			log_error("Failed to set synchronized_standby_slots because "
-					  "we failed to get its value from the monitor, "
-					  "see above for details");
-			return false;
-		}
-	}
-	else
-	{
-		/* no monitor: nothing to synchronize against */
-		strlcpy(postgres->synchronizedStandbySlots, "",
-				sizeof(postgres->synchronizedStandbySlots));
+		/* errors have already been logged */
+		return false;
 	}
 
 	return primary_set_synchronized_standby_slots(postgres);
