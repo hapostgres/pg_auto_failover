@@ -904,11 +904,11 @@ cli_show_standby_names_getopts(int argc, char **argv)
  */
 static void
 cli_show_monitor_computed_setting(KeeperConfig *config,
-								  bool (*fetchFunction) (Monitor *monitor,
-														 char *formation,
-														 int groupId,
-														 char *buffer,
-														 int size),
+								  bool (*fetchFunction)(Monitor *monitor,
+														char *formation,
+														int groupId,
+														char *buffer,
+														int size),
 								  const char *settingName)
 {
 	Monitor monitor = { 0 };

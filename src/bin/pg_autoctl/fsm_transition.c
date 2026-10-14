@@ -645,11 +645,11 @@ fsm_enable_sync_rep(Keeper *keeper)
  */
 static bool
 fsm_fetch_monitor_setting(Keeper *keeper,
-						  bool (*monitorFetchFunction) (Monitor *monitor,
-														char *formation,
-														int groupId,
-														char *buffer,
-														int size),
+						  bool (*monitorFetchFunction)(Monitor *monitor,
+													   char *formation,
+													   int groupId,
+													   char *buffer,
+													   int size),
 						  char *buffer,
 						  size_t bufferSize,
 						  const char *defaultValueWhenNoMonitor,
