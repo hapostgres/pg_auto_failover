@@ -52,37 +52,14 @@ Some Postgres changes can't be applied with a simple reload: a
 ``PGC_POSTMASTER`` setting such as ``wal_level`` needs a full restart to
 take effect, and some on-disk properties, such as data checksums on
 Postgres versions before 18, can only be changed while Postgres is
-stopped. ``pg_autoctl restart postgres`` is the single command for the
+stopped. :ref:`pg_autoctl_restart_postgres` is the single command for the
 restart step itself: by default it requires the node to already be in
 maintenance (refusing otherwise, so a restart can never happen by
 accident to a node that's still serving traffic), and it restarts
 Postgres the same careful way some FSM transitions already do before a
 planned shutdown -- a couple of ``CHECKPOINT``\ s first, so that the
 final shutdown checkpoint Postgres itself issues has as little work left
-to do as possible::
-
-  pg_autoctl restart postgres --pgdata <PGDATA> \
-    [ --maintenance [ --allow-failover ] | --force ] \
-    [ --exec <command> ]
-
-  --maintenance     enable maintenance before stopping Postgres, and
-                    disable it again once Postgres is back up -- use this
-                    when nothing needs to happen *while* Postgres is
-                    stopped, i.e. the change is a configuration edit made
-                    ahead of time
-  --allow-failover  together with --maintenance, allow restarting a
-                    primary (the monitor promotes a standby first, same
-                    as ``enable maintenance --allow-failover``); without
-                    it, --maintenance on a primary is refused
-  --force           skip every check (maintenance state, primary or
-                    standby) and restart unconditionally, without
-                    touching maintenance mode at all
-  --exec            a shell command to run while Postgres is stopped,
-                    before starting it back up -- for an offline step
-                    such as ``pg_checksums --enable``. A non-zero exit
-                    aborts before Postgres restarts and before
-                    maintenance mode is disabled, leaving the node
-                    exactly where you can inspect and finish by hand
+to do as possible. See the manual page for the full list of options.
 
 When the change is a pure configuration edit -- nothing needs to happen
 while Postgres is down, only before starting it again -- ``--maintenance``
