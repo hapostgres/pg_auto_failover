@@ -30,7 +30,7 @@ static void cli_restart_postgres(int argc, char **argv);
 
 static bool cli_restart_checkpoint_postgres(Keeper *keeper);
 static bool cli_restart_stop_exec_and_start(Keeper *keeper);
-static bool cli_restart_run_exec_command(void);
+static bool cli_restart_run_exec_command(const char *execCommand);
 
 CommandLine restart_postgres_command =
 	make_command("postgres",
@@ -222,9 +222,9 @@ cli_restart_postgres_getopts(int argc, char **argv)
 
 
 /*
- * cli_restart_run_exec_command runs the --exec command, if any, through the
- * shell while Postgres is stopped -- the same approach Postgres itself uses
- * to run archive_command: hand the whole string to system(3) rather than
+ * cli_restart_run_exec_command runs the given command through the shell
+ * while Postgres is stopped -- the same approach Postgres itself uses to
+ * run archive_command: hand the whole string to system(3) rather than
  * splitting it into an argv and execv()'ing it directly, so the command can
  * be a shell script, a Python script, a pipeline, or anything else the
  * shell knows how to run, not just a single directly-executable binary.
@@ -233,37 +233,36 @@ cli_restart_postgres_getopts(int argc, char **argv)
  * operator running this CLI locally, not from any remote or untrusted
  * input, so handing it to the shell as-is is the same trust model, not a
  * new one.
+ *
+ * Takes the command as a parameter rather than reading optExecCommand
+ * itself, so that only the call site needs to know about that global
+ * option variable.
  */
 static bool
-cli_restart_run_exec_command(void)
+cli_restart_run_exec_command(const char *execCommand)
 {
-	if (IS_EMPTY_STRING_BUFFER(optExecCommand))
-	{
-		return true;
-	}
-
 	log_info("Running --exec command while Postgres is stopped: %s",
-			 optExecCommand);
+			 execCommand);
 
-	int wstatus = system(optExecCommand);
+	int wstatus = system(execCommand);
 
 	if (wstatus == -1)
 	{
-		log_error("Failed to run --exec command \"%s\": %m", optExecCommand);
+		log_error("Failed to run --exec command \"%s\": %m", execCommand);
 		return false;
 	}
 
 	if (WIFSIGNALED(wstatus))
 	{
 		log_error("--exec command \"%s\" was terminated by signal %d",
-				  optExecCommand, WTERMSIG(wstatus));
+				  execCommand, WTERMSIG(wstatus));
 		return false;
 	}
 
 	if (!WIFEXITED(wstatus) || WEXITSTATUS(wstatus) != 0)
 	{
 		log_error("--exec command \"%s\" exited with code %d",
-				  optExecCommand, WEXITSTATUS(wstatus));
+				  execCommand, WEXITSTATUS(wstatus));
 		return false;
 	}
 
@@ -333,11 +332,14 @@ cli_restart_stop_exec_and_start(Keeper *keeper)
 		return false;
 	}
 
-	if (!cli_restart_run_exec_command())
+	if (!IS_EMPTY_STRING_BUFFER(optExecCommand))
 	{
-		log_error("--exec command failed: leaving Postgres stopped, "
-				  "see above for details");
-		return false;
+		if (!cli_restart_run_exec_command(optExecCommand))
+		{
+			log_error("--exec command failed: leaving Postgres stopped, "
+					  "see above for details");
+			return false;
+		}
 	}
 
 	if (!keeper_ensure_postgres_is_running(keeper, updateRetries))
