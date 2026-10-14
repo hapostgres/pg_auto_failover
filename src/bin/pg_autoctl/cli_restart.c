@@ -419,7 +419,7 @@ cli_restart_postgres(int argc, char **argv)
 			}
 
 			/* exits the process directly on failure */
-			(void) keeper_cli_enable_maintenance(&keeper, optAllowFailover);
+			(void) keeper_enable_maintenance(&keeper, optAllowFailover);
 		}
 	}
 
@@ -437,7 +437,7 @@ cli_restart_postgres(int argc, char **argv)
 		 * this command ran, disable it now that the restart is done.
 		 * Exits the process directly on failure.
 		 */
-		(void) keeper_cli_disable_maintenance(&keeper);
+		(void) keeper_disable_maintenance(&keeper);
 
 		log_info("Node has rejoined after the restart, maintenance "
 				 "mode is now disabled");

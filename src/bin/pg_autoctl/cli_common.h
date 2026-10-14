@@ -107,9 +107,6 @@ extern CommandLine set_commands;
 extern CommandLine enable_commands;
 extern CommandLine disable_commands;
 
-bool keeper_cli_enable_maintenance(Keeper *keeper, bool allowFailoverArg);
-bool keeper_cli_disable_maintenance(Keeper *keeper);
-
 /* cli_restart.c */
 extern CommandLine restart_postgres_command;
 extern CommandLine restart_commands;
