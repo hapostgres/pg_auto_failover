@@ -16,7 +16,7 @@
 #endif
 
 #include "nodespec.h"
-#include "defaults.h"      /* FOPEN_FLAGS_W */
+#include "pqexpbuffer.h"
 #include "ini_file.h"
 #include "ini.h"
 #include "log.h"
@@ -367,10 +367,15 @@ nodespec_read(const char *path, NodeSpec *spec)
 
 
 /*
- * nodespec_write serialises a NodeSpec as a pg_autoctl_node.ini file.
+ * nodespec_build serialises a NodeSpec as a pg_autoctl_node.ini file into
+ * buf, entirely in memory -- the shared implementation behind both
+ * nodespec_write() (prints it, e.g. to stdout) and nodespec_write_to_path()
+ * (writes it to disk via write_file_atomic()), so the two never drift
+ * against each other and neither has to build the ini text one fformat()
+ * call at a time against its own destination.
  */
-bool
-nodespec_write(const NodeSpec *spec, FILE *out)
+static void
+nodespec_build(const NodeSpec *spec, PQExpBuffer buf)
 {
 	const char *kindStr;
 
@@ -413,52 +418,52 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 		}
 	}
 
-	fformat(out,
-			"[node]\n"
-			"kind     = %s\n",
-			kindStr);
+	appendPQExpBuffer(buf,
+					  "[node]\n"
+					  "kind     = %s\n",
+					  kindStr);
 
 	if (!IS_EMPTY_STRING_BUFFER(spec->name))
 	{
-		fformat(out, "name     = %s\n", spec->name);
+		appendPQExpBuffer(buf, "name     = %s\n", spec->name);
 	}
 
-	fformat(out,
-			"hostname = %s\n"
-			"port     = %d\n"
-			"\n"
-			"[postgresql]\n"
-			"pgdata = %s\n"
-			"\n",
-			spec->hostname,
-			spec->port,
-			spec->pgdata);
+	appendPQExpBuffer(buf,
+					  "hostname = %s\n"
+					  "port     = %d\n"
+					  "\n"
+					  "[postgresql]\n"
+					  "pgdata = %s\n"
+					  "\n",
+					  spec->hostname,
+					  spec->port,
+					  spec->pgdata);
 
 	if (spec->kind != NODE_KIND_UNKNOWN && spec->kind != NODE_KIND_WALSERVER)
 	{
 		if (spec->noMonitor)
 		{
-			fformat(out,
-					"[monitor]\n"
-					"no_monitor = true\n"
-					"\n");
+			appendPQExpBuffer(buf,
+							  "[monitor]\n"
+							  "no_monitor = true\n"
+							  "\n");
 		}
 		else
 		{
-			fformat(out,
-					"[monitor]\n"
-					"pguri = %s\n"
-					"\n",
-					spec->monitor_pguri);
+			appendPQExpBuffer(buf,
+							  "[monitor]\n"
+							  "pguri = %s\n"
+							  "\n",
+							  spec->monitor_pguri);
 		}
 
-		fformat(out,
-				"[formation]\n"
-				"name  = %s\n"
-				"group = %d\n"
-				"\n",
-				spec->formation,
-				spec->group);
+		appendPQExpBuffer(buf,
+						  "[formation]\n"
+						  "name  = %s\n"
+						  "group = %d\n"
+						  "\n",
+						  spec->formation,
+						  spec->group);
 	}
 
 	/*
@@ -469,61 +474,94 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 	 */
 	if (spec->kind != NODE_KIND_WALSERVER)
 	{
-		fformat(out,
-				"[settings]\n"
-				"candidate_priority = %d\n"
-				"replication_quorum = %s\n"
-				"\n"
-				"[options]\n"
-				"ssl        = %s\n"
-				"auth       = %s\n"
-				"pg_hba_lan = %s\n",
-				spec->candidate_priority,
-				spec->replication_quorum ? "true" : "false",
-				spec->ssl,
-				spec->auth,
-				spec->pg_hba_lan ? "true" : "false");
+		appendPQExpBuffer(buf,
+						  "[settings]\n"
+						  "candidate_priority = %d\n"
+						  "replication_quorum = %s\n"
+						  "\n"
+						  "[options]\n"
+						  "ssl        = %s\n"
+						  "auth       = %s\n"
+						  "pg_hba_lan = %s\n",
+						  spec->candidate_priority,
+						  spec->replication_quorum ? "true" : "false",
+						  spec->ssl,
+						  spec->auth,
+						  spec->pg_hba_lan ? "true" : "false");
 
 		if (spec->debianCluster[0])
 		{
-			fformat(out, "debian_cluster = %s\n", spec->debianCluster);
+			appendPQExpBuffer(buf, "debian_cluster = %s\n", spec->debianCluster);
 		}
 	}
 
 	/* only emit [launch] when deferred — omitting the section means immediate */
 	if (spec->launchDeferred || spec->createDeferred)
 	{
-		fformat(out, "\n[launch]\n");
+		appendPQExpBuffer(buf, "\n[launch]\n");
 		if (spec->createDeferred)
 		{
-			fformat(out, "create = deferred\n");
+			appendPQExpBuffer(buf, "create = deferred\n");
 		}
 		if (spec->launchDeferred)
 		{
-			fformat(out, "run = deferred\n");
+			appendPQExpBuffer(buf, "run = deferred\n");
 		}
 	}
 
 	/* [formation <name>] sections — monitor kind only */
 	for (int fi = 0; fi < spec->formationCount; fi++)
 	{
-		fformat(out, "\n[formation %s]\n", spec->formationNames[fi]);
+		appendPQExpBuffer(buf, "\n[formation %s]\n", spec->formationNames[fi]);
 		if (spec->formationKinds[fi][0] &&
 			strcmp(spec->formationKinds[fi], "pgsql") != 0)
 		{
-			fformat(out, "kind = %s\n", spec->formationKinds[fi]);
+			appendPQExpBuffer(buf, "kind = %s\n", spec->formationKinds[fi]);
 		}
 		if (spec->formationDisableSecondary[fi])
 		{
-			fformat(out, "secondary = false\n");
+			appendPQExpBuffer(buf, "secondary = false\n");
 		}
 		if (spec->formationNumSync[fi] >= 0)
 		{
-			fformat(out, "num_sync_standbys = %d\n", spec->formationNumSync[fi]);
+			appendPQExpBuffer(buf, "num_sync_standbys = %d\n",
+							  spec->formationNumSync[fi]);
 		}
 	}
+}
 
-	return true;
+
+/*
+ * nodespec_write serialises a NodeSpec as a pg_autoctl_node.ini file and
+ * writes it to out (e.g. stdout, for "pg_autoctl node spec"-style display)
+ * in one fwrite(), after building the whole text in memory via
+ * nodespec_build().
+ */
+bool
+nodespec_write(const NodeSpec *spec, FILE *out)
+{
+	PQExpBuffer buf = createPQExpBuffer();
+
+	if (buf == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
+	nodespec_build(spec, buf);
+
+	if (PQExpBufferBroken(buf))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(buf);
+		return false;
+	}
+
+	bool ok = fwrite(buf->data, sizeof(char), buf->len, out) == buf->len;
+
+	destroyPQExpBuffer(buf);
+
+	return ok;
 }
 
 
@@ -792,25 +830,39 @@ nodespec_create_argv(const NodeSpec *spec,
 
 /*
  * nodespec_write_to_path writes the spec to the given filesystem path,
- * replacing the file in-place.  Used by pg_autoctl node start to clear the
- * [launch] deferred flag so the waiting pg_autoctl node run can proceed.
+ * replacing the file in-place via write_file_atomic() (common/file_utils.c:
+ * write to a temp file, fsync, rename, fsync the directory) after building
+ * the whole ini text in memory with nodespec_build() -- the same atomicity
+ * every other config writer in this project uses (keeper_config_write_file(),
+ * monitor_config_write_file()), so a concurrent reader (e.g. "pg_autoctl node
+ * run", waiting on this exact file's [launch] section to clear) never sees a
+ * partial write. Used by pg_autoctl node start to clear the [launch]
+ * deferred flag so the waiting pg_autoctl node run can proceed.
  */
 bool
 nodespec_write_to_path(const NodeSpec *spec, const char *path)
 {
-	FILE *f = fopen_with_umask(path, "w", FOPEN_FLAGS_W, 0644);
-	if (!f)
-	{
-		/* errors have already been logged */
-		return false;
-	}
-	bool ok = nodespec_write(spec, f);
+	PQExpBuffer buf = createPQExpBuffer();
 
-	if (fclose(f) == EOF)
+	if (buf == NULL)
 	{
-		log_error("Failed to write file \"%s\": %m", path);
+		log_error("Failed to allocate memory");
 		return false;
 	}
+
+	nodespec_build(spec, buf);
+
+	if (PQExpBufferBroken(buf))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(buf);
+		return false;
+	}
+
+	bool ok = write_file_atomic(buf->data, buf->len, path);
+
+	destroyPQExpBuffer(buf);
+
 	return ok;
 }
 

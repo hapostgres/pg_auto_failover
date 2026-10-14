@@ -14,12 +14,12 @@
 #include "postgres_fe.h"
 
 #include "config.h"
-#include "defaults.h"
 #include "file_utils.h"
 #include "ini_file.h"
 #include "log.h"
 #include "pgsetup.h"
 #include "pidfile.h"
+#include "pqexpbuffer.h"
 #include "service_walserver.h"
 #include "string_utils.h"
 #include "supervisor.h"
@@ -40,64 +40,58 @@
  * [pg_autoctl] role=walserver line, exactly like it already recognises
  * role=monitor / role=keeper for the other node kinds.
  *
- * Uses fopen_with_umask() (src/bin/common/file_utils.c) and a temp-file +
- * rename, exactly like keeper_config_write_file()/monitor_config_write_file()
- * do for the other node kinds, so a concurrent reader always sees either
- * the old complete file or the new complete file, never a partial one.
+ * Builds the whole file in memory with a PQExpBuffer, then writes it in a
+ * single write_file_atomic() call (src/bin/common/file_utils.c: temp file,
+ * fsync, rename, fsync the directory) -- stronger than the plain temp-file +
+ * rename keeper_config_write_file()/monitor_config_write_file() use, and
+ * the same facility pghba_ensure_host_rule_exists() already builds its own
+ * file contents with. A concurrent reader always sees either the old
+ * complete file or the new complete one, never a partial write.
  */
 bool
 walserver_config_write(WalServerConfig *config)
 {
 	const char *filePath = config->pathnames.config;
 
-	char tmpPath[MAXPGPATH];
+	PQExpBuffer buf = createPQExpBuffer();
 
-	if (sformat(tmpPath, sizeof(tmpPath), "%s.tmp", filePath) >= MAXPGPATH)
+	if (buf == NULL)
 	{
-		log_error("Config file path too long: \"%s\"", filePath);
+		log_error("Failed to allocate memory");
 		return false;
 	}
 
-	FILE *out = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
-
-	if (out == NULL)
-	{
-		/* errors have already been logged */
-		return false;
-	}
-
-	fformat(out,
-			"[pg_autoctl]\n"
-			"role = %s\n"
-			"\n"
-			"[walserver]\n"
-			"pgdata = %s\n",
-			WALSERVER_ROLE,
-			config->pgdata);
+	appendPQExpBuffer(buf,
+					  "[pg_autoctl]\n"
+					  "role = %s\n"
+					  "\n"
+					  "[walserver]\n"
+					  "pgdata = %s\n",
+					  WALSERVER_ROLE,
+					  config->pgdata);
 
 	if (config->port > 0)
 	{
-		fformat(out, "port = %d\n", config->port);
+		appendPQExpBuffer(buf, "port = %d\n", config->port);
 	}
 
 	if (!IS_EMPTY_STRING_BUFFER(config->name))
 	{
-		fformat(out, "name = %s\n", config->name);
+		appendPQExpBuffer(buf, "name = %s\n", config->name);
 	}
 
-	if (fclose(out) == EOF)
+	if (PQExpBufferBroken(buf))
 	{
-		log_error("Failed to write file \"%s\"", tmpPath);
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(buf);
 		return false;
 	}
 
-	if (rename(tmpPath, filePath) != 0)
-	{
-		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpPath, filePath);
-		return false;
-	}
+	bool ok = write_file_atomic(buf->data, buf->len, filePath);
 
-	return true;
+	destroyPQExpBuffer(buf);
+
+	return ok;
 }
 
 
