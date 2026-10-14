@@ -43,6 +43,75 @@ to connect to your Postgres nodes still need to be added. As pg_autoctl
 knows nothing about your applications, then you are responsible for editing
 the HBA file.
 
+.. _restart_postgres:
+
+Applying a Postgres change that requires a restart
+----------------------------------------------------
+
+Some Postgres changes can't be applied with a simple reload: a
+``PGC_POSTMASTER`` setting such as ``wal_level`` needs a full restart to
+take effect, and some on-disk properties, such as data checksums on
+Postgres versions before 18, can only be changed while Postgres is
+stopped. :ref:`pg_autoctl_restart_postgres` is the single command for the
+restart step itself: by default it requires the node to already be in
+maintenance (refusing otherwise, so a restart can never happen by
+accident to a node that's still serving traffic), and it restarts
+Postgres the same careful way some FSM transitions already do before a
+planned shutdown -- a couple of ``CHECKPOINT``\ s first, so that the
+final shutdown checkpoint Postgres itself issues has as little work left
+to do as possible. See the manual page for the full list of options.
+
+When the change is a pure configuration edit -- nothing needs to happen
+while Postgres is down, only before starting it again -- ``--maintenance``
+turns the whole operation into one command per node. This is exactly the
+case for a ``PGC_POSTMASTER`` GUC such as ``shared_buffers``: it can be
+applied with ``ALTER SYSTEM SET`` while Postgres is still up and running
+(the setting is only picked up on the next restart), so there is nothing
+to run while Postgres is down -- connected to the node you're about to
+restart::
+
+  psql -c "ALTER SYSTEM SET shared_buffers = '4GB';"
+  pg_autoctl restart postgres --maintenance --pgdata <PGDATA>
+
+For the primary, add ``--allow-failover`` the same way as any other
+restart on a primary::
+
+  psql -c "ALTER SYSTEM SET shared_buffers = '4GB';"
+  pg_autoctl restart postgres --maintenance --allow-failover --pgdata <primary PGDATA>
+
+When something needs to run *while* Postgres is stopped -- an offline
+on-disk tool, say -- pass it to ``--exec``: it runs through the shell
+(the same approach Postgres itself uses for ``archive_command``, handing
+the whole string to ``system(3)``), so it can be a one-liner, a script in
+any language, or a pipeline, not just a single directly-executable
+binary. As an example, here is how to turn on data checksums
+(``pg_checksums --enable``, Postgres 12 and up) on a standby, in one
+command::
+
+  pg_autoctl restart postgres --maintenance --pgdata <standby PGDATA> \
+    --exec "pg_checksums --enable -D <standby PGDATA>"
+
+To apply the same change to the *primary*, maintenance must first hand
+it off to a standby, which is what ``--allow-failover`` allows::
+
+  pg_autoctl restart postgres --maintenance --allow-failover --pgdata <primary PGDATA> \
+    --exec "pg_checksums --enable -D <primary PGDATA>"
+
+If ``pg_checksums`` fails or is interrupted, the command aborts before
+starting Postgres back up and before disabling maintenance: the node
+stays down and in maintenance until you've inspected and either re-run
+``pg_checksums`` by hand or re-run this same command once the underlying
+problem is fixed.
+
+.. note::
+
+   Postgres 18 introduced the ability to turn data checksums on and off
+   on a running cluster with ``ALTER SYSTEM SET data_checksums = ...``
+   and no restart at all. For Postgres 18 and later, that online path is
+   simpler than the procedure above. ``pg_checksums`` remains the only
+   option on earlier versions, and stays a convenient example here of a
+   change that genuinely needs the restart this command automates.
+
 Upgrading pg_auto_failover, from versions 1.4 onward
 -----------------------------------------------------
 

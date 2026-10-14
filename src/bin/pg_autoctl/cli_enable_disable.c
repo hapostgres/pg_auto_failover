@@ -462,10 +462,6 @@ cli_enable_maintenance(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	char *channels[] = { "state", NULL };
-
-	ConnectionRetryPolicy retryPolicy = { 0 };
-
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
@@ -485,13 +481,6 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_KEEPER);
 	}
 
-	if (keeper.state.current_role == PRIMARY_STATE && !allowFailover)
-	{
-		log_warn("Enabling maintenance on a primary causes a failover");
-		log_fatal("Please use --allow-failover to allow the command proceed");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
 	{
 		log_fatal("Failed to initialize the monitor connection, "
@@ -499,85 +488,7 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	/*
-	 * If we're already in MAINTENANCE the monitor returns true but we don't
-	 * want to listen to changes, we don't expect any
-	 */
-	if (keeper.state.current_role != MAINTENANCE_STATE)
-	{
-		if (!pgsql_listen(&(keeper.monitor.notificationClient), channels))
-		{
-			log_error("Failed to listen to state changes from the monitor");
-			exit(EXIT_CODE_MONITOR);
-		}
-	}
-
-	/*
-	 * Set a retry policy for cases when we have a transient error on the
-	 * monitor.
-	 */
-	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
-
-	while (!pgsql_retry_policy_expired(&retryPolicy))
-	{
-		int64_t nodeId = keeper.state.current_node_id;
-		bool mayRetry = false;
-
-		if (monitor_start_maintenance(&(keeper.monitor), nodeId, &mayRetry))
-		{
-			/* start_maintenance was successful, break out of the retry loop */
-			break;
-		}
-
-		if (!mayRetry)
-		{
-			log_fatal("Failed to enable maintenance of node %" PRId64
-					  " on the monitor, see above for details",
-					  nodeId);
-			exit(EXIT_CODE_MONITOR);
-		}
-
-		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
-
-		log_warn("Failed to enable maintenance of node %" PRId64
-				 " on the monitor, retrying in %d ms.",
-				 nodeId, sleepTimeMs);
-
-		/* we have milliseconds, pg_usleep() wants microseconds */
-		(void) pg_usleep(sleepTimeMs * 1000);
-	}
-
-	if (keeper.state.current_role == MAINTENANCE_STATE)
-	{
-		log_info("This node is already in the \"maintenance\" state.");
-		exit(EXIT_CODE_QUIT);
-	}
-
-	NodeState targetStates[] = { MAINTENANCE_STATE };
-
-	/*
-	 * When --allow-failover is used on the primary, the monitor must first
-	 * promote a secondary (up to 60 s) and then assign maintenance to this
-	 * node (another 60 s).  Use 3× the base timeout so both phases can
-	 * complete within the single wait window.
-	 */
-	int waitTimeoutSecs = (allowFailover && keeper.state.current_role == PRIMARY_STATE)
-						  ? 3 * PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT
-						  : PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
-
-	if (!monitor_wait_until_node_reported_state(
-			&(keeper.monitor),
-			keeper.config.formation,
-			keeper.config.groupId,
-			keeper.state.current_node_id,
-			keeper.config.pgSetup.pgKind,
-			targetStates,
-			lengthof(targetStates),
-			waitTimeoutSecs))
-	{
-		log_error("Failed to wait until the node reached the maintenance state");
-		exit(EXIT_CODE_MONITOR);
-	}
+	(void) keeper_enable_maintenance(&keeper, allowFailover);
 }
 
 
@@ -594,10 +505,6 @@ cli_disable_maintenance(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	char *channels[] = { "state", NULL };
-
-	ConnectionRetryPolicy retryPolicy = { 0 };
-
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
@@ -624,62 +531,7 @@ cli_disable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!pgsql_listen(&(keeper.monitor.notificationClient), channels))
-	{
-		log_error("Failed to listen to state changes from the monitor");
-		exit(EXIT_CODE_MONITOR);
-	}
-
-	/*
-	 * Set a retry policy for cases when we have a transient error on the
-	 * monitor.
-	 */
-	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
-
-	while (!pgsql_retry_policy_expired(&retryPolicy))
-	{
-		int64_t nodeId = keeper.state.current_node_id;
-		bool mayRetry = false;
-
-		if (monitor_stop_maintenance(&(keeper.monitor), nodeId, &mayRetry))
-		{
-			/* stop_maintenance was successful, break out of the retry loop */
-			break;
-		}
-
-		if (!mayRetry)
-		{
-			log_fatal("Failed to disable maintenance of node %" PRId64
-					  " on the monitor, see above for details",
-					  nodeId);
-			exit(EXIT_CODE_MONITOR);
-		}
-
-		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
-
-		log_warn("Failed to disable maintenance of node %" PRId64
-				 " on the monitor, retrying in %d ms.",
-				 nodeId, sleepTimeMs);
-
-		/* we have milliseconds, pg_usleep() wants microseconds */
-		(void) pg_usleep(sleepTimeMs * 1000);
-	}
-
-	NodeState targetStates[] = { SECONDARY_STATE, PRIMARY_STATE };
-
-	if (!monitor_wait_until_node_reported_state(
-			&(keeper.monitor),
-			keeper.config.formation,
-			keeper.config.groupId,
-			keeper.state.current_node_id,
-			keeper.config.pgSetup.pgKind,
-			targetStates,
-			lengthof(targetStates),
-			PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT))
-	{
-		log_error("Failed to wait until a node reached the secondary or primary state");
-		exit(EXIT_CODE_MONITOR);
-	}
+	(void) keeper_disable_maintenance(&keeper);
 }
 
 

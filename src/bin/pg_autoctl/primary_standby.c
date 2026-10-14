@@ -525,6 +525,30 @@ ensure_postgres_service_is_stopped(LocalPostgresServer *postgres)
 
 
 /*
+ * primary_checkpoint issues a single CHECKPOINT against the local Postgres
+ * instance, if it's currently running; a safe no-op otherwise. Meant to be
+ * called a couple of times in a row by callers that need to reduce the
+ * amount of work left for the final CHECKPOINT Postgres itself issues at
+ * shutdown time (see fsm_checkpoint_and_stop_postgres() in
+ * fsm_transition.c, and `pg_autoctl restart postgres` in cli_restart.c,
+ * which both do exactly that before a planned stop).
+ */
+bool
+primary_checkpoint(LocalPostgresServer *postgres)
+{
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+	PGSQL *pgsql = &(postgres->sqlClient);
+
+	if (!pg_setup_is_running(pgSetup))
+	{
+		return true;
+	}
+
+	return pgsql_checkpoint(pgsql);
+}
+
+
+/*
  * primary_has_replica returns whether the local postgres server has a
  * replica that is connecting using the given user name.
  */

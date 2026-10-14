@@ -829,7 +829,7 @@ fsm_checkpoint_and_stop_postgres(Keeper *keeper)
 
 		for (int i = 0; i < 2; i++)
 		{
-			if (!pgsql_checkpoint(pgsql))
+			if (!primary_checkpoint(postgres))
 			{
 				log_warn("Failed to checkpoint before stopping Postgres");
 			}
