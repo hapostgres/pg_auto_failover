@@ -159,15 +159,14 @@ down):
        ``ALTER SYSTEM SET wal_level = 'logical';`` (both are safe:
        pg_auto_failover's own managed settings live in a separate included
        file, so this never collides with anything it writes).
-    b. ::
+    b. Restart Postgres through maintenance mode: this enables maintenance
+       (safe: the monitor switches the primary to asynchronous replication
+       and the standby is no longer a promotion candidate while in this
+       state), restarts Postgres so it comes back up with the new
+       ``wal_level``, then disables maintenance again so the standby
+       rejoins::
 
          pg_autoctl restart postgres --maintenance --pgdata <standby PGDATA>
-
-       This enables maintenance (safe: the monitor switches the primary to
-       asynchronous replication and the standby is no longer a promotion
-       candidate while in this state), restarts Postgres so it comes back
-       up with the new ``wal_level``, then disables maintenance again so
-       the standby rejoins.
 
  2. Once **every standby** has been upgraded, apply the same configuration
     change to the primary, then restart it with ``--allow-failover`` added::
