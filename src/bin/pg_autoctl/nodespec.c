@@ -16,6 +16,7 @@
 #endif
 
 #include "nodespec.h"
+#include "defaults.h"      /* FOPEN_FLAGS_W */
 #include "ini_file.h"
 #include "ini.h"
 #include "log.h"
@@ -797,14 +798,19 @@ nodespec_create_argv(const NodeSpec *spec,
 bool
 nodespec_write_to_path(const NodeSpec *spec, const char *path)
 {
-	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
+	FILE *f = fopen_with_umask(path, "w", FOPEN_FLAGS_W, 0644);
 	if (!f)
 	{
-		log_error("Cannot open \"%s\" for writing: %m", path);
+		/* errors have already been logged */
 		return false;
 	}
 	bool ok = nodespec_write(spec, f);
-	fclose(f); /* IGNORE-BANNED */
+
+	if (fclose(f) == EOF)
+	{
+		log_error("Failed to write file \"%s\": %m", path);
+		return false;
+	}
 	return ok;
 }
 

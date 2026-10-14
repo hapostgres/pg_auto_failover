@@ -563,7 +563,7 @@ cmd_start_replication(int sock, const WsCluster *cluster,
 			continue;
 		}
 
-		FILE *file = fopen(readPath, "rb"); /* IGNORE-BANNED */
+		FILE *file = fopen_read_only(readPath);
 
 		if (file == NULL)
 		{

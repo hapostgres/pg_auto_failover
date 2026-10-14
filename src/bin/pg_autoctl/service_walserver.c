@@ -39,16 +39,30 @@
  * ProbeConfigurationFileRole() recognises this file solely from the
  * [pg_autoctl] role=walserver line, exactly like it already recognises
  * role=monitor / role=keeper for the other node kinds.
+ *
+ * Uses fopen_with_umask() (src/bin/common/file_utils.c) and a temp-file +
+ * rename, exactly like keeper_config_write_file()/monitor_config_write_file()
+ * do for the other node kinds, so a concurrent reader always sees either
+ * the old complete file or the new complete file, never a partial one.
  */
 bool
 walserver_config_write(WalServerConfig *config)
 {
-	FILE *out = fopen(config->pathnames.config, "w"); /* IGNORE-BANNED */
+	const char *filePath = config->pathnames.config;
+
+	char tmpPath[MAXPGPATH];
+
+	if (sformat(tmpPath, sizeof(tmpPath), "%s.tmp", filePath) >= MAXPGPATH)
+	{
+		log_error("Config file path too long: \"%s\"", filePath);
+		return false;
+	}
+
+	FILE *out = fopen_with_umask(tmpPath, "w", FOPEN_FLAGS_W, 0644);
 
 	if (out == NULL)
 	{
-		log_error("Failed to open \"%s\" for writing: %m",
-				  config->pathnames.config);
+		/* errors have already been logged */
 		return false;
 	}
 
@@ -71,7 +85,17 @@ walserver_config_write(WalServerConfig *config)
 		fformat(out, "name = %s\n", config->name);
 	}
 
-	fclose(out); /* IGNORE-BANNED */
+	if (fclose(out) == EOF)
+	{
+		log_error("Failed to write file \"%s\"", tmpPath);
+		return false;
+	}
+
+	if (rename(tmpPath, filePath) != 0)
+	{
+		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpPath, filePath);
+		return false;
+	}
 
 	return true;
 }

@@ -744,16 +744,17 @@ pghba_ensure_ident_map_entry(const char *pgdata,
 	destroyPQExpBuffer(needle);
 
 	/* append the new entry */
-	FILE *f = fopen(identFilePath, "a"); /* IGNORE-BANNED */
-	if (!f)
+	char line[BUFSIZE];
+
+	sformat(line, sizeof(line), "%s %s %s%s\n",
+			mapName, systemUser, pgUser, HBA_LINE_COMMENT);
+
+	if (!append_to_file(line, strlen(line), identFilePath))
 	{
-		log_error("Failed to open \"%s\" for appending: %m", identFilePath);
+		/* errors have already been logged */
 		free(contents);
 		return false;
 	}
-	fformat(f, "%s %s %s%s\n",
-			mapName, systemUser, pgUser, HBA_LINE_COMMENT);
-	fclose(f);
 	free(contents);
 
 	log_info("Added ident map entry \"%s %s %s\" to \"%s\"",

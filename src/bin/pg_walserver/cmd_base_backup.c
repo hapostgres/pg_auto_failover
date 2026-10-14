@@ -199,7 +199,7 @@ read_backup_label(const char *basebackupDir, char *lsnOut, size_t lsnOutSize,
 
 	sformat(path, sizeof(path), "%s/backup_label", basebackupDir);
 
-	FILE *lfp = fopen(path, "r"); /* IGNORE-BANNED */
+	FILE *lfp = fopen_read_only(path);
 
 	if (lfp == NULL)
 	{
@@ -628,7 +628,7 @@ stream_manifest_as_copy_data(int sock, const char *manifestPath)
 	}
 #endif
 
-	FILE *file = fopen(manifestPath, "rb"); /* IGNORE-BANNED */
+	FILE *file = fopen_read_only(manifestPath);
 
 	if (file == NULL)
 	{

@@ -117,7 +117,7 @@ emit_header(TarWalkState *state, const char *memberName,
 static bool
 emit_file_contents(TarWalkState *state, const char *path, off_t size)
 {
-	FILE *file = fopen(path, "rb"); /* IGNORE-BANNED */
+	FILE *file = fopen_read_only(path);
 
 	if (file == NULL)
 	{
