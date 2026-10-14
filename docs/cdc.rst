@@ -146,9 +146,12 @@ the same single, short write-unavailability window as any manual
 switchover with this tool, nothing more.
 
 For a formation with one primary and one or more standbys, using
-``pg_autoctl restart postgres`` (a single command that enters maintenance,
-restarts Postgres, and leaves maintenance again, since nothing needs to
-happen while Postgres is down for a plain configuration change):
+:ref:`pg_autoctl_restart_postgres` (a single command that enters
+maintenance, restarts Postgres, and leaves maintenance again, since
+nothing needs to happen while Postgres is down for a plain configuration
+change -- see :ref:`restart_postgres` for more worked examples of this
+command, including one that does need something to run while Postgres is
+down):
 
  1. For each **standby**, one at a time:
 
