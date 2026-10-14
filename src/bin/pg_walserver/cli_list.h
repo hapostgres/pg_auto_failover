@@ -1,0 +1,62 @@
+/*
+ * src/bin/pg_walserver/cli_list.h
+ *   `pg_walserver list clusters|backups|wal`: three read-only inventory
+ *   views over one or every cluster configured in a "--pgdata"'s own
+ *   "pg_walserver.ini". See cli_list.c's own header comment for the LSN-
+ *   range computation and per-invocation caching design; cli_root.c wires
+ *   each of the three functions below into its own "list <name>"
+ *   CommandLine, the same split every other pg_walserver sub-command in
+ *   this codebase already uses (flag parsing and the CommandLine table
+ *   stay in cli_root.c, the actual work stays in a dedicated cli_*.c).
+ *
+ * Licensed under the PostgreSQL License.
+ *
+ */
+
+#ifndef WS_CLI_LIST_H
+#define WS_CLI_LIST_H
+
+#include <stdbool.h>
+
+#include "commandline.h"
+
+/*
+ * ws_list_clusters_report prints one row per cluster configured in the config
+ * file config_file_path() resolves for pgdata/configFile (or just
+ * clusterFilter's own cluster, when not NULL/empty): its path/upstream/
+ * hostname/receivewal setting, whether it has a base backup, whether its
+ * embedded receivewal worker is currently running (cross-referenced
+ * against the ps state file, ps_state.h -- "n/a" when "serve" is not
+ * running at all), and the WAL range it currently covers (start LSN from
+ * its latest base backup's own backup_label, end LSN from the newest WAL
+ * segment actually present). Returns false, with an error already
+ * logged, only on a configuration problem (no such --pgdata/config file,
+ * or no such cluster).
+ */
+bool ws_list_clusters_report(const char *pgdata, const char *configFile,
+							 const char *clusterFilter);
+
+/*
+ * ws_list_backups_report prints one row per base backup found under every
+ * matching cluster's own "basebackups/" directory (reusing backup_list.h's
+ * own ws_backup_list_load()): its label/timestamp, size on disk, and
+ * whether it is the cluster's ".latest".
+ */
+bool ws_list_backups_report(const char *pgdata, const char *configFile,
+							const char *clusterFilter);
+
+/*
+ * ws_list_wal_report prints, per matching cluster, aggregate WAL cache stats
+ * (segment count, total bytes, oldest/newest segment, .history file count)
+ * by default, or, with segments true, one row per individual WAL/.partial/
+ * .backup/.history file instead.
+ */
+bool ws_list_wal_report(const char *pgdata, const char *configFile,
+						const char *clusterFilter, bool segments);
+
+extern CommandLine list_clusters_command;
+extern CommandLine list_backups_command;
+extern CommandLine list_wal_command;
+extern CommandLine list_commands;
+
+#endif /* WS_CLI_LIST_H */

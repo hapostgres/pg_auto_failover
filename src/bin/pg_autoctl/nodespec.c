@@ -16,12 +16,14 @@
 #endif
 
 #include "nodespec.h"
+#include "pqexpbuffer.h"
 #include "ini_file.h"
 #include "ini.h"
 #include "log.h"
 #include "pgsetup.h"
 #include "string_utils.h"
 #include "file_utils.h"    /* sformat */
+#include "file_crc32c.h"
 #include "env_utils.h"
 #include "cli_root.h"      /* pg_autoctl_program */
 #include "runprogram.h"    /* Program, run_program, free_program */
@@ -203,10 +205,14 @@ nodespec_read(const char *path, NodeSpec *spec)
 	{
 		spec->kind = NODE_KIND_CITUS_WORKER;
 	}
+	else if (strcmp(kindStr, "walserver") == 0)
+	{
+		spec->kind = NODE_KIND_WALSERVER;
+	}
 	else
 	{
 		log_error("Unknown node kind \"%s\" in \"%s\"; "
-				  "expected: monitor, postgres, coordinator, worker",
+				  "expected: monitor, postgres, coordinator, worker, walserver",
 				  kindStr, path);
 		return false;
 	}
@@ -339,8 +345,15 @@ nodespec_read(const char *path, NodeSpec *spec)
 		}
 	}
 
-	/* validate: non-monitor nodes need a monitor URI unless no_monitor=true */
+	/*
+	 * validate: non-monitor nodes need a monitor URI unless no_monitor=true.
+	 * A walserver node never registers with a monitor at all -- it is not a
+	 * Postgres instance and never participates in the keeper FSM -- so skip
+	 * this check for it entirely, the same way a monitor itself (kind ==
+	 * NODE_KIND_UNKNOWN) is skipped.
+	 */
 	if (spec->kind != NODE_KIND_UNKNOWN &&
+		spec->kind != NODE_KIND_WALSERVER &&
 		IS_EMPTY_STRING_BUFFER(spec->monitor_pguri) &&
 		!spec->noMonitor)
 	{
@@ -354,10 +367,15 @@ nodespec_read(const char *path, NodeSpec *spec)
 
 
 /*
- * nodespec_write serialises a NodeSpec as a pg_autoctl_node.ini file.
+ * nodespec_build serialises a NodeSpec as a pg_autoctl_node.ini file into
+ * buf, entirely in memory -- the shared implementation behind both
+ * nodespec_write() (prints it, e.g. to stdout) and nodespec_write_to_path()
+ * (writes it to disk via write_file_atomic()), so the two never drift
+ * against each other and neither has to build the ini text one fformat()
+ * call at a time against its own destination.
  */
-bool
-nodespec_write(const NodeSpec *spec, FILE *out)
+static void
+nodespec_build(const NodeSpec *spec, PQExpBuffer buf)
 {
 	const char *kindStr;
 
@@ -387,6 +405,12 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 			break;
 		}
 
+		case NODE_KIND_WALSERVER:
+		{
+			kindStr = "walserver";
+			break;
+		}
+
 		default:
 		{
 			kindStr = "postgres";
@@ -394,108 +418,150 @@ nodespec_write(const NodeSpec *spec, FILE *out)
 		}
 	}
 
-	fformat(out,
-			"[node]\n"
-			"kind     = %s\n",
-			kindStr);
+	appendPQExpBuffer(buf,
+					  "[node]\n"
+					  "kind     = %s\n",
+					  kindStr);
 
 	if (!IS_EMPTY_STRING_BUFFER(spec->name))
 	{
-		fformat(out, "name     = %s\n", spec->name);
+		appendPQExpBuffer(buf, "name     = %s\n", spec->name);
 	}
 
-	fformat(out,
-			"hostname = %s\n"
-			"port     = %d\n"
-			"\n"
-			"[postgresql]\n"
-			"pgdata = %s\n"
-			"\n",
-			spec->hostname,
-			spec->port,
-			spec->pgdata);
+	appendPQExpBuffer(buf,
+					  "hostname = %s\n"
+					  "port     = %d\n"
+					  "\n"
+					  "[postgresql]\n"
+					  "pgdata = %s\n"
+					  "\n",
+					  spec->hostname,
+					  spec->port,
+					  spec->pgdata);
 
-	if (spec->kind != NODE_KIND_UNKNOWN)
+	if (spec->kind != NODE_KIND_UNKNOWN && spec->kind != NODE_KIND_WALSERVER)
 	{
 		if (spec->noMonitor)
 		{
-			fformat(out,
-					"[monitor]\n"
-					"no_monitor = true\n"
-					"\n");
+			appendPQExpBuffer(buf,
+							  "[monitor]\n"
+							  "no_monitor = true\n"
+							  "\n");
 		}
 		else
 		{
-			fformat(out,
-					"[monitor]\n"
-					"pguri = %s\n"
-					"\n",
-					spec->monitor_pguri);
+			appendPQExpBuffer(buf,
+							  "[monitor]\n"
+							  "pguri = %s\n"
+							  "\n",
+							  spec->monitor_pguri);
 		}
 
-		fformat(out,
-				"[formation]\n"
-				"name  = %s\n"
-				"group = %d\n"
-				"\n",
-				spec->formation,
-				spec->group);
+		appendPQExpBuffer(buf,
+						  "[formation]\n"
+						  "name  = %s\n"
+						  "group = %d\n"
+						  "\n",
+						  spec->formation,
+						  spec->group);
 	}
 
-	fformat(out,
-			"[settings]\n"
-			"candidate_priority = %d\n"
-			"replication_quorum = %s\n"
-			"\n"
-			"[options]\n"
-			"ssl        = %s\n"
-			"auth       = %s\n"
-			"pg_hba_lan = %s\n",
-			spec->candidate_priority,
-			spec->replication_quorum ? "true" : "false",
-			spec->ssl,
-			spec->auth,
-			spec->pg_hba_lan ? "true" : "false");
-
-	if (spec->debianCluster[0])
+	/*
+	 * [settings]/[options] only make sense for a Postgres-backed node (they
+	 * cover candidate_priority/replication_quorum/ssl/auth/pg_hba_lan, all
+	 * meaningless for a walserver node, which never joins the keeper FSM and
+	 * never has pg_autoctl manage its own SSL/HBA).
+	 */
+	if (spec->kind != NODE_KIND_WALSERVER)
 	{
-		fformat(out, "debian_cluster = %s\n", spec->debianCluster);
+		appendPQExpBuffer(buf,
+						  "[settings]\n"
+						  "candidate_priority = %d\n"
+						  "replication_quorum = %s\n"
+						  "\n"
+						  "[options]\n"
+						  "ssl        = %s\n"
+						  "auth       = %s\n"
+						  "pg_hba_lan = %s\n",
+						  spec->candidate_priority,
+						  spec->replication_quorum ? "true" : "false",
+						  spec->ssl,
+						  spec->auth,
+						  spec->pg_hba_lan ? "true" : "false");
+
+		if (spec->debianCluster[0])
+		{
+			appendPQExpBuffer(buf, "debian_cluster = %s\n", spec->debianCluster);
+		}
 	}
 
 	/* only emit [launch] when deferred — omitting the section means immediate */
 	if (spec->launchDeferred || spec->createDeferred)
 	{
-		fformat(out, "\n[launch]\n");
+		appendPQExpBuffer(buf, "\n[launch]\n");
 		if (spec->createDeferred)
 		{
-			fformat(out, "create = deferred\n");
+			appendPQExpBuffer(buf, "create = deferred\n");
 		}
 		if (spec->launchDeferred)
 		{
-			fformat(out, "run = deferred\n");
+			appendPQExpBuffer(buf, "run = deferred\n");
 		}
 	}
 
 	/* [formation <name>] sections — monitor kind only */
 	for (int fi = 0; fi < spec->formationCount; fi++)
 	{
-		fformat(out, "\n[formation %s]\n", spec->formationNames[fi]);
+		appendPQExpBuffer(buf, "\n[formation %s]\n", spec->formationNames[fi]);
 		if (spec->formationKinds[fi][0] &&
 			strcmp(spec->formationKinds[fi], "pgsql") != 0)
 		{
-			fformat(out, "kind = %s\n", spec->formationKinds[fi]);
+			appendPQExpBuffer(buf, "kind = %s\n", spec->formationKinds[fi]);
 		}
 		if (spec->formationDisableSecondary[fi])
 		{
-			fformat(out, "secondary = false\n");
+			appendPQExpBuffer(buf, "secondary = false\n");
 		}
 		if (spec->formationNumSync[fi] >= 0)
 		{
-			fformat(out, "num_sync_standbys = %d\n", spec->formationNumSync[fi]);
+			appendPQExpBuffer(buf, "num_sync_standbys = %d\n",
+							  spec->formationNumSync[fi]);
 		}
 	}
+}
 
-	return true;
+
+/*
+ * nodespec_write serialises a NodeSpec as a pg_autoctl_node.ini file and
+ * writes it to out (e.g. stdout, for "pg_autoctl node spec"-style display)
+ * in one fwrite(), after building the whole text in memory via
+ * nodespec_build().
+ */
+bool
+nodespec_write(const NodeSpec *spec, FILE *out)
+{
+	PQExpBuffer buf = createPQExpBuffer();
+
+	if (buf == NULL)
+	{
+		log_error("Failed to allocate memory");
+		return false;
+	}
+
+	nodespec_build(spec, buf);
+
+	if (PQExpBufferBroken(buf))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(buf);
+		return false;
+	}
+
+	bool ok = fwrite(buf->data, sizeof(char), buf->len, out) == buf->len;
+
+	destroyPQExpBuffer(buf);
+
+	return ok;
 }
 
 
@@ -526,6 +592,43 @@ nodespec_create_argv(const NodeSpec *spec,
 		} \
 		args[i++] = (char *) (v); \
 } while (0)
+
+	/*
+	 * A walserver node is not a Postgres instance: it never registers with a
+	 * monitor, never joins a formation, and has none of the SSL/auth/
+	 * candidate-priority/replication-quorum machinery below. Build its (much
+	 * simpler) argv and return immediately rather than threading a dozen
+	 * "&& spec->kind != NODE_KIND_WALSERVER" guards through the generic
+	 * Postgres-node logic that follows.
+	 */
+	if (spec->kind == NODE_KIND_WALSERVER)
+	{
+		PUSH(pg_autoctl_path);
+		PUSH("create");
+		PUSH("walserver");
+		PUSH("--pgdata");
+		PUSH(spec->pgdata);
+
+		if (!IS_EMPTY_STRING_BUFFER(spec->name))
+		{
+			PUSH("--name");
+			PUSH(spec->name);
+		}
+
+		if (spec->port > 0)
+		{
+			static char walPortBuf[16];
+			sformat(walPortBuf, sizeof(walPortBuf), "%d", spec->port);
+			PUSH("--port");
+			PUSH(walPortBuf);
+		}
+
+		PUSH("--run");
+
+		args[i] = NULL;
+
+		return i;
+	}
 
 	PUSH(pg_autoctl_path);
 	PUSH("create");
@@ -727,20 +830,39 @@ nodespec_create_argv(const NodeSpec *spec,
 
 /*
  * nodespec_write_to_path writes the spec to the given filesystem path,
- * replacing the file in-place.  Used by pg_autoctl node start to clear the
- * [launch] deferred flag so the waiting pg_autoctl node run can proceed.
+ * replacing the file in-place via write_file_atomic() (common/file_utils.c:
+ * write to a temp file, fsync, rename, fsync the directory) after building
+ * the whole ini text in memory with nodespec_build() -- the same atomicity
+ * every other config writer in this project uses (keeper_config_write_file(),
+ * monitor_config_write_file()), so a concurrent reader (e.g. "pg_autoctl node
+ * run", waiting on this exact file's [launch] section to clear) never sees a
+ * partial write. Used by pg_autoctl node start to clear the [launch]
+ * deferred flag so the waiting pg_autoctl node run can proceed.
  */
 bool
 nodespec_write_to_path(const NodeSpec *spec, const char *path)
 {
-	FILE *f = fopen(path, "w"); /* IGNORE-BANNED */
-	if (!f)
+	PQExpBuffer buf = createPQExpBuffer();
+
+	if (buf == NULL)
 	{
-		log_error("Cannot open \"%s\" for writing: %m", path);
+		log_error("Failed to allocate memory");
 		return false;
 	}
-	bool ok = nodespec_write(spec, f);
-	fclose(f); /* IGNORE-BANNED */
+
+	nodespec_build(spec, buf);
+
+	if (PQExpBufferBroken(buf))
+	{
+		log_error("Failed to allocate memory");
+		destroyPQExpBuffer(buf);
+		return false;
+	}
+
+	bool ok = write_file_atomic(buf->data, buf->len, path);
+
+	destroyPQExpBuffer(buf);
+
 	return ok;
 }
 
@@ -1027,30 +1149,19 @@ nodespec_apply(const NodeSpec *new_spec, const NodeSpec *old_spec)
 
 /*
  * nodespec_file_crc computes the CRC32C of the current content of *path
- * into *crc.  Returns false (leaving *crc untouched) if the file can't be
- * read right now — a transient condition while it's being rewritten, not
- * treated as a change.
+ * into *crc, via src/bin/common/file_crc32c.c's own file_crc32c() (a
+ * sequential, chunked read -- shared with pg_walserver's own CHECK_FILE/
+ * ARCHIVE_FILE handling, which needs the same size+CRC32C computation).
+ * Returns false (leaving *crc untouched) if the file can't be read right
+ * now -- a transient condition while it's being rewritten, not treated as
+ * a change.
  */
 static bool
 nodespec_file_crc(const char *path, pg_crc32c *crc)
 {
-	char *contents = NULL;
-	long fileSize = 0;
+	uint64_t fileSize = 0;
 
-	if (!read_file(path, &contents, &fileSize))
-	{
-		return false;
-	}
-
-	pg_crc32c newCrc;
-	INIT_CRC32C(newCrc);
-	COMP_CRC32C(newCrc, contents, fileSize);
-	FIN_CRC32C(newCrc);
-
-	free(contents);
-
-	*crc = newCrc;
-	return true;
+	return file_crc32c(path, &fileSize, crc);
 }
 
 

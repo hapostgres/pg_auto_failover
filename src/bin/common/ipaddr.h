@@ -24,6 +24,18 @@ IPType ip_address_type(const char *hostname);
 bool fetchLocalIPAddress(char *localIpAddress, int size,
 						 const char *serviceName, int servicePort,
 						 int logLevel, bool *mayRetry);
+
+/*
+ * fetchLocalIPAddressForRouting is fetchLocalIPAddress()'s own UDP
+ * counterpart -- see ipaddr.c's own comment. Prefer this one whenever
+ * the caller only wants to know "what's my own local IP for reaching
+ * serviceName", not whether serviceName is actually reachable right
+ * now: it needs a route to exist, never a real connection.
+ */
+bool fetchLocalIPAddressForRouting(char *localIpAddress, int size,
+								   const char *serviceName, int servicePort,
+								   int logLevel);
+
 bool fetchLocalCIDR(const char *localIpAddress, char *localCIDR, int size);
 bool findHostnameLocalAddress(const char *hostname,
 							  char *localIpAddress, int size);
@@ -35,6 +47,21 @@ bool resolveHostnameForwardAndReverse(const char *hostname,
 									  bool *foundHostnameFromAddress);
 
 bool ipaddrGetLocalHostname(char *hostname, size_t size);
+
+/*
+ * Peer address matching, used to authenticate a client by its address (see
+ * pg_walserver's HBA file): all of them take the client's numeric address.
+ */
+bool ipaddrHostMatchesAddress(const char *hostOrIp, const char *ipaddr);
+bool ipaddrInCIDR(const char *cidr, const char *ipaddr);
+bool ipaddrIsSameHostOrNet(const char *ipaddr, bool sameNet);
+
+#define IPADDR_MAX_HOSTNAMES 16
+#define IPADDR_MAX_HOSTNAME_SIZE 256
+
+int ipaddrFindHostnamesFromAddress(const char *ipaddr,
+								   char hostnames[][IPADDR_MAX_HOSTNAME_SIZE],
+								   int maxCount);
 
 
 #endif /* __IPADDRH__ */

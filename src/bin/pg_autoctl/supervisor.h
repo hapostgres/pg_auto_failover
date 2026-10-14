@@ -2,6 +2,24 @@
  * src/bin/pg_autoctl/supervisor.h
  *   Utilities to start/stop the pg_autoctl services.
  *
+ *   pg_autoctl's own service-array supervision (Service/RestartPolicy,
+ *   the node-spec file watcher used by `pg_autoctl node run <file>`, the
+ *   keeper-only SIGTERM graceful-shutdown handoff, the escalating-signal
+ *   shutdown sequence, and pg_autoctl's own SERVICE_NAME_ and EXIT_CODE_
+ *   sentinel-value business rules) stays here: none of that is generic enough to belong
+ *   in a shared facility, since pg_autoctl is its only conceivable
+ *   caller. What genuinely is generic -- the Erlang-inspired MaxR/MaxT
+ *   restart-backoff ring buffer, and PID-1-safe orphan-reaping
+ *   classification -- is implemented once, in
+ *   `src/bin/common/process_supervisor.h`/`.c`, and used from here
+ *   directly (`RestartCounters` is a typedef of that file's own
+ *   `ProcessRestartCounters`, and `supervisor_may_restart()` calls
+ *   `process_restart_counters_may_restart()`): `pg_walserver`'s embedded
+ *   pull capturer (`capture.c`) uses that same shared implementation for
+ *   its own, independent set of services, so there is exactly one
+ *   MaxR/MaxT implementation and one orphan-reaping classification in
+ *   this project, not two hand-maintained copies of each.
+ *
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the PostgreSQL License.
  *
@@ -13,6 +31,7 @@
 #include <signal.h>
 
 #include "nodespec.h"
+#include "process_supervisor.h"
 
 /*
  * pg_autoctl runs sub-processes as "services", and we need to use the same
@@ -25,6 +44,7 @@
 #define SERVICE_NAME_POSTGRES "postgres"
 #define SERVICE_NAME_KEEPER "node-active"
 #define SERVICE_NAME_MONITOR "listener"
+#define SERVICE_NAME_WALSERVER "pg_walserver"
 
 /*
  * At pg_autoctl create time we use a transient service to initialize our local
@@ -70,9 +90,14 @@ typedef enum
  *    shutdown.
  *
  * SUPERVISOR_SERVICE_MAX_RETRY is MaxR, SUPERVISOR_SERVICE_MAX_TIME is MaxT.
+ *
+ * These are defined from process_supervisor.h's own PROCESS_SUPERVISOR_
+ * MAX_RETRY/_MAX_TIME rather than picked independently: the ring buffer
+ * itself (RestartCounters below) is a typedef of that file's own
+ * ProcessRestartCounters, and the two array sizes must match exactly.
  */
-#define SUPERVISOR_SERVICE_MAX_RETRY 5
-#define SUPERVISOR_SERVICE_MAX_TIME 300 /* in seconds */
+#define SUPERVISOR_SERVICE_MAX_RETRY PROCESS_SUPERVISOR_MAX_RETRY
+#define SUPERVISOR_SERVICE_MAX_TIME PROCESS_SUPERVISOR_MAX_TIME /* in seconds */
 
 /*
  * We use a "ring buffer" of the MaxR most recent retries.
@@ -80,13 +105,13 @@ typedef enum
  * With an array of SUPERVISOR_SERVICE_MAX_RETRY we can track this amount of
  * retries and compare the oldest one with the current time to decide if we are
  * allowed to restart or now, applying MaxT.
+ *
+ * This is process_supervisor.h's own ProcessRestartCounters: the actual
+ * MaxR/MaxT bookkeeping (process_restart_counters_start/_record/
+ * _may_restart()) is implemented once, in process_supervisor.c, and used
+ * from here directly -- see supervisor.h's own top comment.
  */
-typedef struct RestartCounters
-{
-	int count;                  /* how many restarts including first start */
-	int position;               /* array index */
-	uint64_t startTime[SUPERVISOR_SERVICE_MAX_RETRY];
-}  RestartCounters;
+typedef ProcessRestartCounters RestartCounters;
 
 /*
  * The supervisor works with an array of Service entries. Each service defines

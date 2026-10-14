@@ -1,0 +1,527 @@
+.. _pg_walserver:
+
+pg_walserver
+============
+
+pg_walserver - standalone PostgreSQL replication-protocol server
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   pg_walserver_serve
+   pg_walserver_setup
+   pg_walserver_cluster
+   pg_walserver_scram_secret
+   pg_walserver_fetch_systemid
+   pg_walserver_basebackup
+   pg_walserver_create_cert
+   pg_walserver_archive_wal
+   pg_walserver_restore_wal
+   pg_walserver_archive_cleanup
+   pg_walserver_reload
+   pg_walserver_stop
+   pg_walserver_ps
+   pg_walserver_ls
+   pg_walserver_status
+   pg_walserver_list
+
+Synopsis
+--------
+
+Serving ``pg_basebackup``, ``pg_receivewal``, and a real standby set up
+with a ``primary_conninfo`` directly out of a directory tree of WAL
+segments and base backups, with no live ``postmaster`` behind it, needs
+something that speaks the PostgreSQL replication wire protocol well
+enough for that: this is what ``pg_walserver`` does. It is not part of
+``pg_autoctl``'s own process supervision: it is started and stopped on
+its own.
+
+This is ``pg_walserver help``'s own output, verbatim -- the whole
+sub-command tree, including every group's own nested sub-commands
+(``cluster`` and ``list`` are both ordinary, structurally identical
+command groups, so both get expanded here, in this same single call),
+except the trailing ``internal``/``internal service`` tree (a hidden
+subprocess entry point for the embedded receivewal worker, never meant
+for direct operator use, omitted from this page but not from the real
+command's own output). ``pg_walserver --help`` alone only shows the
+top-level list (the rows without a nested tree of their own below)::
+
+  pg_walserver
+    serve            Run the pg_walserver accept loop
+    scram-secret     Print one pg_walserver_passwd line for a user
+    fetch-systemid   Fetch a cluster's upstream system identifier
+    basebackup       Take a base backup of a cluster's upstream
+    setup            Configure pg_walserver itself (port, TLS, auth-timeout, HBA)
+  + cluster          Register, drop, enable, list, re-point, or prune the clusters this pg_walserver archives
+    create-cert      Create a self-signed TLS certificate for --pgdata
+    archive-wal      Push one WAL/.backup file into a pg_walserver cluster (archive_command)
+    restore-wal      Fetch one WAL/.backup file from a pg_walserver cluster (restore_command)
+    archive-cleanup  Remove WAL/base backups this cluster no longer needs to keep (operator/cron-driven, never automatic)
+    reload           Ask a running pg_walserver to reload its configuration
+    stop             Stop a running pg_walserver cleanly
+    ps               Show pg_walserver serve's own process-level status (pid, receivewal workers, bootstrap jobs)
+    ls               Per-cluster storage summary: base backups, WAL, disk usage
+    status           Show a short pg_walserver status dashboard
+  + list             List clusters, base backups, or WAL cache contents
+    help             Print this whole sub-command tree at once
+
+  pg_walserver cluster
+    register      Register (or validate) one cluster this pg_walserver archives
+    drop          Drop (disable) one cluster, or fully remove it with --purge
+    enable        Bring a dropped (disabled) cluster back
+    list          List every cluster this pg_walserver has registered
+    set-upstream  Point an already-registered cluster at a new upstream (e.g. after a failover)
+    prune         Remove every dropped (disabled) cluster's registration and on-disk data
+
+  pg_walserver list
+    clusters  List every cluster, its backup/receivewal status, and the WAL range it covers
+    backups   List base backups per cluster (label, size, which is .latest)
+    wal       List WAL cache aggregate stats per cluster, or every file with --segments
+
+Description
+-----------
+
+Operating a PostgreSQL service in production requires a fully compliant
+`archiving`__ story in place: it is the foundation of disaster recovery
+and data durability in the event of a crash. PostgreSQL itself does not
+provide an archiving implementation, only a well-specified contract for
+one (``archive_command``/``restore_command``, base backups, timelines).
+External solutions exist to fill that gap, but none of them speak the
+PostgreSQL replication protocol, which means that when the worst happens,
+none of PostgreSQL's own tools -- ``pg_basebackup``, ``pg_receivewal``, a
+real standby's ``primary_conninfo`` -- can talk to the archive to rebuild
+a node.
+
+__ https://www.postgresql.org/docs/current/continuous-archiving.html
+
+That gap needs an archiving server that speaks the replication protocol
+and implements PostgreSQL's own archiving contract in full:
+``pg_walserver``. It combines streaming (the embedded receivewal
+worker, for efficiency) with ``archive_command`` (for robustness)
+rather than requiring one or the other.
+
+Every ``pg_walserver`` command reads its own bookkeeping -- ``pg_walserver.ini``,
+the HBA file, the SCRAM verifier file, the TLS certificate, the pid file --
+from a directory given by ``--pgdata``, or the ``PGDATA`` environment
+variable as a default, exactly like ``pg_autoctl``'s own ``--pgdata``/
+``PGDATA``. This is ``pg_walserver``'s own directory, not the
+PostgreSQL data directory of any cluster it archives: those are each a
+cluster's own, separate ``path`` (below), never confused with this one.
+A cluster's ``path`` itself defaults to ``<pgdata>/<cluster>`` and rarely
+needs to be set explicitly -- see :ref:`pg_walserver_cluster`'s own
+``--path``.
+
+Archiving one cluster
+~~~~~~~~~~~~~~~~~~~~~
+
+A cluster's data is safe once three things are on record: its system
+identifier, a base backup to restore from, and continuous WAL capture
+from that point on. ``pg_walserver`` builds all three from a single
+``cluster register`` call followed by a running ``serve``:
+
+A single ``pg_walserver cluster register`` call handles connecting to
+the upstream PostgreSQL instance, recording its system identifier, and
+writing the cluster into ``pg_walserver.ini``. ``pg_walserver serve``
+picks the cluster up -- at startup, and again after every ``pg_walserver
+reload`` -- takes its first base backup automatically, and starts
+capturing WAL continuously into the cluster's own storage (an embedded,
+supervised ``pg_receivewal``, on by default). Running ``cluster
+register`` once and starting (or reloading) ``serve`` is the whole
+sequence; no separate step takes that first backup.
+
+Every production deployment must also add
+``archive_command = 'pg_walserver archive-wal ...'`` on the primary, as
+a defense-in-depth backstop alongside continuous capture -- not an
+optional extra, since the embedded receivewal worker alone cannot
+survive every gap a real ``archive_command`` closes (a timeline switch
+during a promotion, most notably). Keeping a cluster's
+backup current after that first, automatic one is a recurring operator
+task, the same as WAL retention: run ``pg_walserver basebackup`` by
+hand, or from a cron job, whenever a fresh one is wanted. See
+`Addressing a cluster`_ below for what determines which files each connecting
+client can reach, and :ref:`pg_walserver_serve`'s "A complete
+standalone example" for the full sequence.
+
+Restoring, or building a standby, from the archive
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Because ``pg_walserver`` speaks the real protocol, restoring from it uses
+PostgreSQL's own tools directly: ``pg_basebackup`` takes the base backup,
+``restore_command = 'pg_walserver restore-wal ...'`` fetches WAL segments
+during recovery, and a real standby can set ``primary_conninfo`` to
+``pg_walserver`` itself and stream live changes with no intermediate
+tooling at all.
+
+Addressing a cluster
+~~~~~~~~~~~~~~~~~~~~~
+
+Archiving several PostgreSQL clusters from the same ``pg_walserver``
+installation is possible thanks to "virtual host" addressing, with a
+cluster-selection setup managed in ``pg_walserver.ini``. That file registers each
+cluster by name, under a cluster key (an operator-chosen key, carrying no
+filesystem meaning of its own) that maps to its own storage root: the
+WAL and base backups of one entire PostgreSQL cluster -- everything
+under that cluster's own data directory, never a single database
+within it -- WAL archiving is inherently a whole-cluster concept.
+
+The way to select a cluster when connecting -- with ``pg_basebackup``,
+``psql``, or any other replication client -- is the ``dbname`` key of
+the connection string, inspired by how PostgreSQL itself uses
+`dbname=replication`__ to activate the replication protocol: a real
+physical replication connection doesn't select an actual database
+either, ``dbname`` there is just a formality. ``pg_walserver`` puts
+that same, otherwise unused, field to work as a real cluster-selection
+key instead: it looks the given ``dbname`` up in ``pg_walserver.ini``, and
+never validates it against a real database in the archived cluster.
+One entry, ``*``, acts as a catch-all -- exactly like PgBouncer's own
+wildcard database -- matching any ``dbname`` with no cluster of its own.
+
+__ https://www.postgresql.org/docs/current/protocol-replication.html
+
+A client that cannot set its own ``dbname`` -- a real standby's
+``primary_conninfo``, most notably, which only ever sends the literal
+``dbname=replication`` -- is matched to its cluster a second way instead,
+by the TLS SNI hostname it connected with. Every connection tries
+``dbname`` first, which is enough on its own for a single cluster.
+
+A single cluster needs only ``dbname``, set to the cluster's own key::
+
+  archive$ pg_walserver cluster register mycluster --pgdata /var/lib/archiver \
+      --pguri "postgres://archiver_repl@primary/?sslmode=require"
+
+  standby$ psql "host=archive port=6543 dbname=mycluster user=archiver_repl sslmode=require" \
+      -c "IDENTIFY_SYSTEM"
+
+More than one cluster behind the same ``pg_walserver`` instance needs a
+second, independent way to tell them apart: TLS SNI virtual-hosts each
+one behind its own ``--hostname``::
+
+  archive$ pg_walserver cluster register mycluster --pgdata /var/lib/archiver \
+      --pguri "postgres://archiver_repl@primary:5432/?sslmode=require" \
+      --hostname mycluster.archive.example.com
+
+  archive$ pg_walserver cluster register another --pgdata /var/lib/archiver \
+      --pguri "postgres://archiver_repl@primary2:5432/?sslmode=require" \
+      --hostname another.archive.example.com
+
+  standby$ cat >> /var/lib/postgres/standby/postgresql.auto.conf <<EOF
+  primary_conninfo = 'host=mycluster.archive.example.com port=6543 user=archiver_repl password=s3kr3t sslmode=require'
+  EOF
+
+A self-signed certificate for ``--pgdata`` is created automatically by
+``cluster register`` the moment a second named cluster needs one, and
+``pg_walserver`` requires TLS from that point on. See
+:ref:`pg_walserver_serve`'s "Addressing more than one cluster by name: TLS
+SNI" for the full mechanism, its DNS prerequisite, and why a real
+standby's ``primary_conninfo`` needs it.
+
+Access control
+~~~~~~~~~~~~~~
+
+Each connecting peer is checked against ``<pgdata>/pg_walserver_hba.conf``,
+one rule per line (``TYPE CLUSTER USER ADDRESS METHOD``, first match
+wins); a missing, oversize, or malformed file rejects every connection
+outright. Three ``METHOD`` values are supported:
+
+``trust``
+
+  Accept the connection outright, with no password check. Only appropriate
+  behind another access control already trusted, such as a firewalled
+  private network.
+
+``scram-sha-256``
+
+  Run a real SCRAM-SHA-256 exchange (RFC 5802) against a verifier stored in
+  ``pg_walserver_passwd``. The method to use for any connection reachable
+  from outside a fully trusted network.
+
+``reject``
+
+  Refuse the connection outright. Also the default when no rule matches at
+  all, so a rule is required to admit anything.
+
+A ``scram-sha-256`` verifier has to come from somewhere: PostgreSQL
+keeps its own, in the ``pg_authid`` catalog, one entry per role.
+``pg_walserver`` is not PostgreSQL, and has no role system underneath
+it, so it keeps a separate credential store instead,
+``<pgdata>/pg_walserver_passwd``, one SCRAM-SHA-256 verifier per line,
+produced with ``pg_walserver scram-secret`` and populated by hand or by
+whatever provisions a cluster.
+
+TLS is enabled simply by the presence of
+``<pgdata>/server.crt``/``<pgdata>/server.key`` (or
+``--ssl-cert-file``/``--ssl-key-file``); without them, ``hostssl`` HBA
+rules never match.
+
+An optional sixth field after ``METHOD``, ``clientcert=verify-full``,
+adds one more check: the TLS peer certificate's CN must equal the
+connecting role name exactly. With ``METHOD`` ``trust`` the certificate
+check is the whole authentication; with ``scram-sha-256`` both the
+certificate and the password are required::
+
+  hostssl  all  archiver_repl  10.0.0.0/8  scram-sha-256  clientcert=verify-full
+
+Validating that client certificate needs ``--ssl-ca-file`` (see
+:ref:`pg_walserver_serve`); a rule using it with no usable CA file
+configured is refused at startup.
+
+For manual testing, with no ``--pgdata`` at all -- no
+``pg_walserver.ini``, no HBA file, no passwd file, no TLS -- pass
+``--insecure`` to accept any ``dbname`` with no authentication, purely
+to confirm the binary starts, listens, and answers the wire protocol
+correctly (network and TLS reachability, ``IDENTIFY_SYSTEM``, ...)
+before writing any real configuration. With no clusters configured, there
+is nothing to reach for a real file behind it. Never appropriate on a
+reachable network.
+
+Configuration reload
+~~~~~~~~~~~~~~~~~~~~~
+
+Its own pid is written to ``<pgdata>/pg_walserver.pid`` by ``serve`` at
+startup, at the same time it parses
+``pg_walserver.ini``/``pg_walserver_hba.conf``, once.
+:ref:`pg_walserver_reload` sends that pid ``SIGHUP``, which re-parses
+both files and installs them only if both still parse cleanly,
+reconciling the embedded receivewal worker set against the new clusters. The
+TLS certificate and key are not reloaded this way; a rotated
+certificate needs a restart.
+
+The wire protocol
+~~~~~~~~~~~~~~~~~~
+
+A connected client may issue any of the following, the same as against a
+real PostgreSQL primary except where noted:
+
+``IDENTIFY_SYSTEM``
+
+  Reports the connected cluster's system identifier, current timeline, and
+  WAL position.
+
+``SHOW``
+
+  Reports server and cluster parameters. A ``pg_walserver`` extension:
+  also answers ``receivewal``, the connected cluster's own setting,
+  ``pull`` or ``none``.
+
+``BASE_BACKUP``
+
+  Streams a base backup of the connected cluster's storage.
+
+``TIMELINE_HISTORY``
+
+  Streams a timeline's ``.history`` file.
+
+``CREATE_REPLICATION_SLOT slot_name [TEMPORARY] { PHYSICAL | LOGICAL plugin } [options]``
+
+  Physical slots only -- ``LOGICAL`` parses, so a real client's own
+  grammar keeps working, but is rejected at this point with
+  ``0A000 only physical replication slots are supported``. A slot here
+  is bookkeeping only, not a real PostgreSQL slot (there is no live
+  server behind it): one small marker file, ``<cluster path>/.slot_
+  <name>``, recording a single ``restart_lsn`` -- the cluster's own WAL
+  position at the moment of creation (from its position cache, falling
+  back to a directory scan).
+
+  A still-existing slot is an unconditional floor on
+  :ref:`pg_walserver_archive_cleanup`'s own retention -- see that page's
+  own "Replication slots" section -- exactly as a real PostgreSQL slot
+  protects WAL on a real primary, with no flag here to opt out short of
+  dropping the slot (``DROP_REPLICATION_SLOT``, below).
+
+  Slot names follow the same rule real PostgreSQL enforces
+  (``ReplicationSlotValidateName``): lowercase letters, digits, and
+  underscore, 63 characters at most. A cluster holds at most 64 slots at
+  once (``53400`` beyond that). Creating a slot that already exists is
+  an error (``42710``) and never resets it -- ``restart_lsn`` only ever
+  moves forward from here, as ``START_REPLICATION`` (below) streams
+  against it.
+
+  Replies with the same four columns real PostgreSQL does:
+  ``slot_name``, ``consistent_point`` (the ``restart_lsn`` just
+  recorded), and ``snapshot_name``/``output_plugin``, always ``NULL``
+  here (both are logical-replication-only concepts).
+
+``READ_REPLICATION_SLOT slot_name``
+
+  Reports one physical slot's own state: ``slot_type`` (always
+  ``physical``), ``restart_lsn`` (as recorded in its own marker file,
+  kept current by ``START_REPLICATION``, below), and ``restart_tli``
+  (the cluster's *current* timeline, not necessarily what it was when the
+  slot was created). A slot that does not exist replies with one row of
+  all ``NULL`` s, never an ``ErrorResponse`` -- the same contract real
+  PostgreSQL follows here, which is what lets ``pg_basebackup``/
+  ``pg_receivewal``'s own "does this slot already exist" check keep
+  working unmodified.
+
+``DROP_REPLICATION_SLOT slot_name [WAIT]``
+
+  Removes a slot's own marker file, immediately lifting whatever
+  retention floor it was placing on :ref:`pg_walserver_archive_cleanup`.
+  Dropping a slot that does not exist is an error (``42704``), the same
+  as real PostgreSQL. Dropping a slot a ``START_REPLICATION`` session is
+  currently streaming against is refused too (``55006``), also the same
+  as real PostgreSQL -- see ``START_REPLICATION``'s own entry below for
+  what "currently streaming against" means here. ``WAIT`` parses but has
+  no effect: removing the marker file is always immediate, so there is
+  nothing to actually wait for.
+
+``START_REPLICATION [SLOT slot_name] [PHYSICAL] <lsn> [TIMELINE <tli>]``
+
+  Streams WAL from a given position, exactly as a real standby set up
+  with ``primary_conninfo`` expects. The optional ``SLOT`` clause names
+  an already-existing slot -- refused (``42704``) if it does not exist,
+  the same requirement a real walsender enforces, never a silent no-op.
+
+  At most one session may stream against a given slot at a time, the
+  same "one active connection per slot" rule a real walsender enforces:
+  a second ``START_REPLICATION`` naming the same slot while the first is
+  still running is refused (``55006``, "replication slot is active for
+  another session"), rather than letting two sessions each advance and
+  persist the same slot's own ``restart_lsn`` independently (whichever
+  persisted last would otherwise win, regardless of which was actually
+  further ahead). The lock is released the moment a session ends, clean
+  or not -- a crashed or killed session's own lock is freed automatically
+  as soon as its connection is noticed as gone, no separate cleanup step
+  or stale-lock detection needed.
+
+  While streaming, every ``StandbyStatusUpdate`` the client sends (a
+  real ``pg_receivewal``/standby sends one every few seconds on its
+  own) advances the named slot's own ``restart_lsn`` to the reported
+  *flush* position -- what the client has durably written to its own
+  disk, the same field a real walsender's own
+  ``PhysicalConfirmReceivedLocation()`` tracks a physical slot by.
+  ``restart_lsn`` only ever moves forward: a stale or out-of-order
+  report is ignored. The marker file itself is rewritten at most once
+  every few seconds while streaming (never on every single status
+  update), plus once more, unconditionally, the moment the stream ends
+  cleanly, so a client that disconnects right after its last status
+  update never loses that last bit of progress.
+
+``FETCH_FILE '<name>'``
+
+  A ``pg_walserver`` extension: fetches one named WAL segment or
+  ``.backup``/``.history`` file in a single round trip. Used by
+  ``restore-wal``.
+
+``CHECK_FILE '<name>' <size> crc32c:<hex>``
+
+  A ``pg_walserver`` extension, the push side's cheap, transfer-free
+  round trip: the client (``archive-wal``, running as
+  ``archive_command``) sends its own *local* file's size and CRC32C: no
+  file bytes cross the wire at all. The reply is a two-column,
+  single-row result (the same ``RowDescription``/``DataRow``/
+  ``CommandComplete`` shape ``SHOW`` already uses):
+
+  ``status``
+    ``missing`` (nothing on disk here under that name yet), ``matches``
+    (identical size and checksum), or ``differs`` (something else is
+    already there under that name) -- never anything a client should
+    parse structurally beyond those three strings.
+
+  ``fallback``
+    ``yes`` or ``no``: whether this cluster's own embedded receivewal
+    worker has already streamed *past* ``<name>`` (its own
+    last-observed position is at a later WAL segment, or a later
+    timeline) while ``<name>`` itself never showed up here -- a hole a
+    streaming worker can never retroactively fill (typically a timeline
+    switch left a segment behind on the old timeline). This recommends
+    an immediate ``ARCHIVE_FILE`` push over waiting for the embedded
+    worker to eventually catch up on its own, which it never will for
+    this one segment. ``no`` whenever ``status`` is ``matches``, the
+    cluster has no embedded receivewal worker at all, or there simply
+    isn't a live progress reading yet to compare against -- the safe
+    default (keep waiting for the normal ``archive_command`` retry
+    loop), never ``yes`` on ambiguous information.
+
+  Advisory only: ``CHECK_FILE`` never writes anything to disk, and
+  nothing it reports here is trusted later by ``ARCHIVE_FILE`` -- see
+  its own entry below. Used by ``archive-wal``.
+
+``ARCHIVE_FILE '<name>'``
+
+  A ``pg_walserver`` extension, the push side's actual file transfer.
+  Unlike ``CHECK_FILE``, no size or checksum is sent as part of the
+  command itself -- only the filename. What follows is a ``CopyIn``: the
+  client streams the file's raw bytes (a WAL segment, or a base
+  backup's own ``.backup`` history file), which the server writes, as
+  they arrive, into a temporary file in the connected cluster's own
+  directory.
+
+  Once the whole transfer completes, the server settles what to do with
+  it purely from what is actually on disk, never from anything a client
+  claimed earlier (including a previous ``CHECK_FILE`` reply, which a
+  lying or out-of-date client could otherwise use to push its way past
+  this check):
+
+  * it computes the size and CRC32C of the bytes it just received, and
+    compares them against a real file already on disk under ``<name>``,
+    if one exists;
+  * nothing there yet -- the temporary file is renamed into place
+    (atomically, so a reader never sees a half-written file under the
+    final name) and the push succeeds;
+  * something there already, and it is byte-for-byte identical to what
+    was just received -- the push succeeds without writing anything;
+    this is treated as an ordinary, harmless retry (e.g. after a crash
+    mid-push), exactly as PostgreSQL's own ``archive_command`` contract
+    requires;
+  * something there already, and it differs -- the push is rejected and
+    the existing file is left untouched; nothing is ever silently
+    overwritten.
+
+  Used by ``archive-wal``.
+
+See ``src/bin/pg_walserver/README.md`` for the wire protocol's full
+design.
+
+Examples
+--------
+
+Create a SCRAM secret for the replication role, from a password given in
+the environment::
+
+  $ PGPASSWORD='s3kr3t' pg_walserver scram-secret --user pgautofailover_replicator
+  pgautofailover_replicator:SCRAM-SHA-256$4096:...
+
+Run the server against an existing ``--pgdata`` directory. No
+sub-command is ever implicit -- ``serve`` is always given explicitly::
+
+  $ pg_walserver serve --pgdata /var/lib/archiver
+
+Run the server with no authentication, for manual testing only::
+
+  $ pg_walserver serve --insecure --port 6543
+
+Registering a node and starting a PITR session, in shape
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The shortest possible path from nothing to a point-in-time restore --
+register one PostgreSQL node, start serving, then restore from it.
+Every command's own real output, and the reasoning behind each step,
+are in :ref:`pg_walserver_serve`'s own "A complete standalone example"
+walkthrough; this is only the shape of it::
+
+  # on the archive host: register the node (creating a certificate right
+  # away, --ssl-self-signed), then serve on the default port, 6543
+  archive$ export PGDATA=/var/lib/archiver
+  archive$ PGPASSWORD='s3kr3t' pg_walserver cluster register mycluster \
+      --pguri "postgres://archiver_repl@primary:5432/?sslmode=require" \
+      --ssl-self-signed --hostname archive
+  archive$ pg_walserver serve &
+
+  # elsewhere, once a base backup exists: restore to a point in time
+  restore$ export WALSERVER_PGURI='postgres://archiver_repl@archive:6543/mycluster?sslmode=require'
+  restore$ export PITR_PGDATA=/var/lib/postgres/pitr
+  restore$ PGPASSWORD='s3kr3t' pg_basebackup -d "${WALSERVER_PGURI}" -D "${PITR_PGDATA}"
+  restore$ cat >> ${PITR_PGDATA}/postgresql.auto.conf <<EOF
+  restore_command = 'PGPASSWORD=s3kr3t pg_walserver restore-wal %f %p --cluster mycluster --host archive --port 6543 --user archiver_repl --sslmode require'
+  recovery_target_time = '2026-09-27 11:30:00+00'
+  EOF
+  restore$ touch ${PITR_PGDATA}/recovery.signal
+  restore$ pg_ctl -D "${PITR_PGDATA}" start
+
+See :ref:`pg_walserver_serve` for the full standalone walkthrough
+(create a cluster, configure access, start the server, add
+``archive_command``, take a PITR restore or a live standby, and keep
+the archive from growing forever) with every command's own real,
+unedited output.

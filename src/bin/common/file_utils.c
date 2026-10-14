@@ -7,6 +7,10 @@
  *
  */
 
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <libgen.h>
 #include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -194,6 +198,93 @@ write_file(char *data, long fileSize, const char *filePath)
 	{
 		log_error("Failed to write file \"%s\"", filePath);
 		return false;
+	}
+
+	return true;
+}
+
+
+/*
+ * write_file_atomic writes data to filePath the same way write_file() does,
+ * except a reader can never observe a partial write: the content lands in
+ * "<filePath>.tmp.<pid>" first (a name unique to this process, not just
+ * this file, so two processes writing the same filePath concurrently never
+ * corrupt each other's tmp file), gets fsync()'d, then rename()'d into
+ * place (atomic on the same filesystem), and finally the containing
+ * directory is fsync()'d too (best effort) so the rename itself survives a
+ * crash. Use this instead of write_file() whenever another process might
+ * be reading filePath concurrently (a config/state file another running
+ * service polls, for instance) or might itself be writing it.
+ */
+bool
+write_file_atomic(char *data, long fileSize, const char *filePath)
+{
+	char tmpPath[MAXPGPATH] = { 0 };
+
+	sformat(tmpPath, sizeof(tmpPath), "%s.tmp.%d", filePath, (int) getpid());
+
+	int fd = open(tmpPath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+
+	if (fd < 0 && errno == EEXIST)
+	{
+		/* a leftover of an earlier process that had the same pid */
+		(void) unlink(tmpPath);
+		fd = open(tmpPath, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+	}
+
+	if (fd < 0)
+	{
+		log_error("Failed to create \"%s\": %m", tmpPath);
+		return false;
+	}
+
+	long done = 0;
+
+	while (done < fileSize)
+	{
+		ssize_t n = write(fd, data + done, fileSize - done);
+
+		if (n < 0 && errno == EINTR)
+		{
+			continue;
+		}
+
+		if (n <= 0)
+		{
+			log_error("Failed to write \"%s\": %m", tmpPath);
+			close(fd);
+			(void) unlink(tmpPath);
+			return false;
+		}
+
+		done += n;
+	}
+
+	if (fsync(fd) != 0 || close(fd) != 0)
+	{
+		log_error("Failed to sync \"%s\": %m", tmpPath);
+		(void) unlink(tmpPath);
+		return false;
+	}
+
+	if (rename(tmpPath, filePath) != 0)
+	{
+		log_error("Failed to rename \"%s\" to \"%s\": %m", tmpPath, filePath);
+		(void) unlink(tmpPath);
+		return false;
+	}
+
+	/* make the rename itself durable, best effort */
+	char dirCopy[MAXPGPATH] = { 0 };
+
+	strlcpy(dirCopy, filePath, sizeof(dirCopy));
+
+	int dirFd = open(dirname(dirCopy), O_RDONLY | O_CLOEXEC);
+
+	if (dirFd >= 0)
+	{
+		(void) fsync(dirFd);
+		close(dirFd);
 	}
 
 	return true;
@@ -923,6 +1014,17 @@ init_ps_buffer(int argc, char **argv)
 
 /*
  * set_ps_title sets our process name visible in ps/top/pstree etc.
+ *
+ * Deliberately NOT sformat(): ps_buffer_size is whatever room happened to
+ * be left in the original argv+envp block at exec time (init_ps_buffer()
+ * above), which can genuinely be smaller than a descriptive title -- this
+ * function's own header comment already documents truncating in that
+ * case as normal, by-design behavior, not a caller bug. sformat() would
+ * treat that same truncation as a "BUG: ... needs N bytes" ERROR, which
+ * is exactly the false-positive this avoids; strlcpy() truncates safely
+ * and silently instead, and returns strlen(title) either way (whether or
+ * not it fit), the same "how many bytes would this have needed" contract
+ * the padding loop below already relies on.
  */
 void
 set_ps_title(const char *title)
@@ -933,11 +1035,189 @@ set_ps_title(const char *title)
 		return;
 	}
 
-	int n = sformat(ps_buffer, ps_buffer_size, "%s", title);
+	size_t n = strlcpy(ps_buffer, title, ps_buffer_size);
 
 	/* pad our process title string */
 	for (size_t i = n; i < ps_buffer_size; i++)
 	{
 		*(ps_buffer + i) = '\0';
 	}
+}
+
+
+/*
+ * read_file_capped reads the whole regular file at path into a freshly
+ * malloc'ed, NUL-terminated buffer. A file larger than maxSize is an error
+ * (logged, false). A missing file returns false quietly when missingOk.
+ * When st is not NULL it receives the fstat() of the file actually read.
+ */
+bool
+read_file_capped(const char *path, size_t maxSize, bool missingOk,
+				 char **contents, size_t *size, struct stat *stOut)
+{
+	return read_file_flags(path, O_RDONLY | O_CLOEXEC, maxSize, missingOk,
+						   contents, size, stOut);
+}
+
+
+/*
+ * open_regular_file opens a file that is about to be served/streamed back
+ * out: O_NOFOLLOW (a symlink planted where a regular file is expected is
+ * never followed) and a regular-file check on the descriptor itself
+ * (fstat). Returns -1 with errno set (ENOENT when missing) on failure.
+ */
+int
+open_regular_file(const char *path)
+{
+	int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+
+	if (fd < 0)
+	{
+		return -1;
+	}
+
+	struct stat st;
+
+	if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
+	{
+		close(fd);
+		errno = EINVAL;
+		return -1;
+	}
+
+	return fd;
+}
+
+
+/* the same with explicit open() flags (e.g. O_RDONLY | O_CLOEXEC | O_NOFOLLOW) */
+bool
+read_file_flags(const char *path, int openFlags, size_t maxSize,
+				bool missingOk, char **contents, size_t *size,
+				struct stat *stOut)
+{
+	*contents = NULL;
+	*size = 0;
+
+	int fd = open(path, openFlags);
+
+	if (fd < 0)
+	{
+		if (!(missingOk && errno == ENOENT))
+		{
+			log_error("Failed to open \"%s\": %m", path);
+		}
+
+		return false;
+	}
+
+	struct stat st;
+
+	if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode))
+	{
+		log_error("\"%s\" is not a readable regular file", path);
+		close(fd);
+		return false;
+	}
+
+	if ((uint64_t) st.st_size > maxSize)
+	{
+		log_error("\"%s\" is too large (%lld bytes, the limit is %zu)", path,
+				  (long long) st.st_size, maxSize);
+		close(fd);
+		return false;
+	}
+
+	char *buf = (char *) malloc((size_t) st.st_size + 1);
+
+	if (buf == NULL)
+	{
+		close(fd);
+		return false;
+	}
+
+	size_t total = 0;
+	size_t capacity = (size_t) st.st_size;
+
+	while (total < capacity)
+	{
+		ssize_t n = read(fd, buf + total, capacity - total);
+
+		if (n < 0 && errno == EINTR)
+		{
+			continue;
+		}
+
+		if (n <= 0)
+		{
+			break;
+		}
+
+		total += (size_t) n;
+	}
+
+	close(fd);
+
+	buf[total] = '\0';
+
+	*contents = buf;
+	*size = total;
+
+	if (stOut != NULL)
+	{
+		*stOut = st;
+	}
+
+	return true;
+}
+
+
+/*
+ * directory_size recursively sums the size in bytes of every regular file
+ * under path -- shared by pg_walserver's "ls" and "list" sub-commands
+ * (cli_ls.c, cli_list.c) to report a base backup's own real size on disk.
+ */
+uint64_t
+directory_size(const char *path)
+{
+	DIR *dir = opendir(path);
+
+	if (dir == NULL)
+	{
+		return 0;
+	}
+
+	uint64_t total = 0;
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL)
+	{
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+		{
+			continue;
+		}
+
+		char entryPath[MAXPGPATH] = { 0 };
+
+		sformat(entryPath, sizeof(entryPath), "%s/%s", path, entry->d_name);
+
+		struct stat st;
+
+		if (lstat(entryPath, &st) != 0)
+		{
+			continue;
+		}
+
+		if (S_ISDIR(st.st_mode))
+		{
+			total += directory_size(entryPath);
+		}
+		else if (S_ISREG(st.st_mode))
+		{
+			total += (uint64_t) st.st_size;
+		}
+	}
+
+	closedir(dir);
+
+	return total;
 }

@@ -438,8 +438,19 @@ Node modifiers:
 ``candidate-priority <N>``                    Failover priority 0–100 (default: 50)
 ``region <name>``                             Data-centre / availability-zone label
                                               (``--region``; default: ``default``)
+``port <N>``                                  Override this node's own listen port
+                                              (default: 5432 for Postgres/Citus kinds,
+                                              6543 for a ``pg_walserver <name>`` node)
+``deferred``                                  Shorthand for ``create and launch deferred``
+                                              (both gates below)
+``create deferred``                           Container is never created during the
+                                              initial ``up``; needs
+                                              ``pgaftest compose start <node>``
 ``launch deferred``                           Container starts with ``sleep infinity``;
                                               use ``exec node  pg_autoctl node start``
+``create and launch deferred``                Both gates together
+``launch immediate``                          Explicitly the default; only useful to
+                                              override an inherited ``deferred``
 ``suspended``                                 The node-active service never transitions
                                               on its own; drive it explicitly with the
                                               ``fsm step <node>`` DSL command (see
@@ -450,7 +461,69 @@ Node modifiers:
 ``auth <method>``                             Per-node auth override
 ``ssl <mode>``                                Per-node SSL override
 ``volume <name> <path>``                      Mount a named Docker volume at ``<path>``
+``command "<string>"``                        Replace this node's own container command
+                                              entirely (raw shell command, no ``pg_autoctl``)
+``alias "h1", "h2", ...``                     Extra vanity hostnames resolving to this same
+                                              node's static IP in every other service's
+                                              ``extra_hosts`` (e.g. for TLS-SNI-routing tests)
+``docker-init``                               Add Compose's own ``init: true``: runs a tiny
+                                              init (tini) as the real PID 1 so a backgrounded
+                                              process a ``command`` override starts gets
+                                              reaped instead of becoming a zombie. Only use
+                                              alongside a ``command`` that does no reaping of
+                                              its own; never alongside a node whose own
+                                              command IS the thing under test as PID 1.
 ============================================  =============================================
+
+Bare, unmanaged single-node sugar
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Declaring one plain node with no formation and no monitor supervision
+at all needs a top-level declaration, a sibling of ``monitor``:
+``postgres <name>`` or ``pg_walserver <name>``. Each is pure syntactic
+sugar for a one-node, no-monitor formation, reusing the same
+container-generation code every other node already goes through:
+
+.. code-block:: text
+
+   cluster {
+       monitor
+       formation {
+           node1
+           node2
+       }
+
+       postgres     plain1                     # stock, unmanaged Postgres
+       pg_walserver walserver                   # pg_autoctl-supervised pg_walserver
+           port 6543
+           launch deferred                      # released once setup{} is ready
+           alias "clusterA.internal", "clusterB.internal"
+   }
+
+``postgres <name>`` runs the exact same container command as any other
+no-monitor node (``pg_autoctl node run``, which does its own initdb-on-
+first-run and supervises Postgres as PID 1). ``pg_walserver <name>``
+now defaults to that same ``pg_autoctl node run`` path too (via a new
+``pg_autoctl create walserver`` node kind, no monitor/formation
+involvement, just "create then supervise the one child process"): a
+restartable, fork+exec-supervised ``pg_walserver serve``, with a real,
+usable default ``pg_walserver_hba.conf`` seeded into its storage root
+before it ever starts, and the ``port``/``deferred``/``launch
+deferred``/``create deferred`` modifiers below all work on it exactly
+as they do on an ordinary ``formation`` node. A spec that needs to run
+``pg_walserver cluster register`` (or provision TLS certs, or anything
+else) before ``serve`` ever starts uses ``launch deferred`` and releases
+it with ``exec <node> pg_autoctl node start`` once that setup is done --
+the same pattern `Suspended nodes`_ below documents for ordinary nodes.
+
+``command "<string>"`` is still available as an escape hatch on either
+sugar form, for the rarer case of bypassing ``pg_autoctl`` entirely
+(e.g. a spec that specifically needs ``pg_walserver serve`` to be the
+container's own real PID 1, with no supervisor above it at all --
+``docker-init`` pairs with this the same way it does on an ordinary
+``formation`` node's own ``command`` override). Both sugar forms accept
+every modifier in the table above, not just ``alias``/``docker-init``/
+``command``.
 
 Node registration order
 ~~~~~~~~~~~~~~~~~~~~~~~~
