@@ -208,19 +208,22 @@ Limitations
    Citus needs more than this feature to give CDC consumers a coherent
    single stream, and is intentionally out of scope here.
 
- - **No "N of M" / per-candidate opt-out.** ``synchronized_standby_slots``
-   lists *every* current failover candidate unconditionally: Postgres
-   itself blocks a failover-enabled logical slot from advancing until
-   *all* of them confirm, with no quorum knob. A permanently lagging or
-   unreachable candidate therefore permanently stalls logical decoding
-   (and piles up WAL on the primary) until it catches up, is dropped as a
-   candidate, or is promoted. This is a known, documented trade-off of the
-   underlying Postgres feature, not something pg_auto_failover adds; other
-   tools that compute this setting (Patroni, CloudNativePG) have the same
-   constraint, since core provides no way to ask for "N of M". If this
-   bites you in practice, lowering the affected node's candidate priority
-   to ``0`` removes it from the list (at the cost of no longer being an
-   automatic failover candidate).
+ - **No "N of M" quorum knob.** Among the candidates it lists,
+   ``synchronized_standby_slots`` requires *all* of them to confirm before
+   a failover-enabled logical slot advances -- Postgres provides no
+   quorum knob here, unlike ``synchronous_standby_names``'s ``ANY N (...)``
+   syntax. This does not mean a lagging or unreachable candidate
+   permanently stalls decoding, though: pg_auto_failover only lists a
+   candidate while it's currently a converged secondary, so one that
+   falls behind or stops reporting in (pushed back to ``catchingup`` by
+   the monitor) drops out of the list on its own, and the slot keeps
+   advancing against whichever candidates are still caught up -- it
+   reappears automatically once that node catches back up and reports
+   secondary again. What's still missing is an explicit operator-facing
+   knob to require only some of several simultaneously-healthy candidates
+   to confirm; to exclude a node from the list permanently, regardless of
+   its replication state, lower its candidate priority to ``0`` (at the
+   cost of no longer being an automatic failover candidate).
 
  - **A node flip-flopping back to primary can lose its own
    originally-created slot.** If the *same* node that originally created a
