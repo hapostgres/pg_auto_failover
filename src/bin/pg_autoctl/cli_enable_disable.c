@@ -462,10 +462,6 @@ cli_enable_maintenance(int argc, char **argv)
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
 
-	char *channels[] = { "state", NULL };
-
-	ConnectionRetryPolicy retryPolicy = { 0 };
-
 	keeper.config = keeperOptions;
 
 	(void) exit_unless_role_is_keeper(&(keeper.config));
@@ -485,13 +481,6 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_KEEPER);
 	}
 
-	if (keeper.state.current_role == PRIMARY_STATE && !allowFailover)
-	{
-		log_warn("Enabling maintenance on a primary causes a failover");
-		log_fatal("Please use --allow-failover to allow the command proceed");
-		exit(EXIT_CODE_BAD_ARGS);
-	}
-
 	if (!monitor_init(&(keeper.monitor), keeper.config.monitor_pguri))
 	{
 		log_fatal("Failed to initialize the monitor connection, "
@@ -499,13 +488,43 @@ cli_enable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
+	(void) keeper_cli_enable_maintenance(&keeper, allowFailover);
+}
+
+
+/*
+ * keeper_cli_enable_maintenance drives the local node into maintenance from
+ * the client side, the same way `pg_autoctl enable maintenance` does: it
+ * calls pgautofailover.start_maintenance() on the monitor for the given,
+ * already keeper_init()/monitor_init()'d Keeper, and waits until the node
+ * has reported the maintenance state. Shared with `pg_autoctl restart
+ * postgres --maintenance`, which needs the exact same client-side sequence
+ * around its own restart step.
+ *
+ * Exits the process directly on every failure path, same as the CLI
+ * command this was extracted from -- there is no use case yet for a caller
+ * that wants to recover from a failure here rather than quit.
+ */
+bool
+keeper_cli_enable_maintenance(Keeper *keeper, bool allowFailoverArg)
+{
+	char *channels[] = { "state", NULL };
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	if (keeper->state.current_role == PRIMARY_STATE && !allowFailoverArg)
+	{
+		log_warn("Enabling maintenance on a primary causes a failover");
+		log_fatal("Please use --allow-failover to allow the command proceed");
+		exit(EXIT_CODE_BAD_ARGS);
+	}
+
 	/*
 	 * If we're already in MAINTENANCE the monitor returns true but we don't
 	 * want to listen to changes, we don't expect any
 	 */
-	if (keeper.state.current_role != MAINTENANCE_STATE)
+	if (keeper->state.current_role != MAINTENANCE_STATE)
 	{
-		if (!pgsql_listen(&(keeper.monitor.notificationClient), channels))
+		if (!pgsql_listen(&(keeper->monitor.notificationClient), channels))
 		{
 			log_error("Failed to listen to state changes from the monitor");
 			exit(EXIT_CODE_MONITOR);
@@ -520,10 +539,10 @@ cli_enable_maintenance(int argc, char **argv)
 
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		int64_t nodeId = keeper.state.current_node_id;
+		int64_t nodeId = keeper->state.current_node_id;
 		bool mayRetry = false;
 
-		if (monitor_start_maintenance(&(keeper.monitor), nodeId, &mayRetry))
+		if (monitor_start_maintenance(&(keeper->monitor), nodeId, &mayRetry))
 		{
 			/* start_maintenance was successful, break out of the retry loop */
 			break;
@@ -547,7 +566,7 @@ cli_enable_maintenance(int argc, char **argv)
 		(void) pg_usleep(sleepTimeMs * 1000);
 	}
 
-	if (keeper.state.current_role == MAINTENANCE_STATE)
+	if (keeper->state.current_role == MAINTENANCE_STATE)
 	{
 		log_info("This node is already in the \"maintenance\" state.");
 		exit(EXIT_CODE_QUIT);
@@ -561,16 +580,16 @@ cli_enable_maintenance(int argc, char **argv)
 	 * node (another 60 s).  Use 3× the base timeout so both phases can
 	 * complete within the single wait window.
 	 */
-	int waitTimeoutSecs = (allowFailover && keeper.state.current_role == PRIMARY_STATE)
+	int waitTimeoutSecs = (allowFailoverArg && keeper->state.current_role == PRIMARY_STATE)
 						  ? 3 * PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT
 						  : PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
 
 	if (!monitor_wait_until_node_reported_state(
-			&(keeper.monitor),
-			keeper.config.formation,
-			keeper.config.groupId,
-			keeper.state.current_node_id,
-			keeper.config.pgSetup.pgKind,
+			&(keeper->monitor),
+			keeper->config.formation,
+			keeper->config.groupId,
+			keeper->state.current_node_id,
+			keeper->config.pgSetup.pgKind,
 			targetStates,
 			lengthof(targetStates),
 			waitTimeoutSecs))
@@ -578,6 +597,8 @@ cli_enable_maintenance(int argc, char **argv)
 		log_error("Failed to wait until the node reached the maintenance state");
 		exit(EXIT_CODE_MONITOR);
 	}
+
+	return true;
 }
 
 
@@ -593,10 +614,6 @@ cli_disable_maintenance(int argc, char **argv)
 	bool missingPgdataIsOk = true;
 	bool pgIsNotRunningIsOk = true;
 	bool monitorDisabledIsOk = false;
-
-	char *channels[] = { "state", NULL };
-
-	ConnectionRetryPolicy retryPolicy = { 0 };
 
 	keeper.config = keeperOptions;
 
@@ -624,7 +641,28 @@ cli_disable_maintenance(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
-	if (!pgsql_listen(&(keeper.monitor.notificationClient), channels))
+	(void) keeper_cli_disable_maintenance(&keeper);
+}
+
+
+/*
+ * keeper_cli_disable_maintenance drives the local node out of maintenance
+ * from the client side, the same way `pg_autoctl disable maintenance`
+ * does: it calls pgautofailover.stop_maintenance() on the monitor for the
+ * given, already keeper_init()/monitor_init()'d Keeper, and waits until
+ * the node has rejoined as either secondary or primary. Shared with
+ * `pg_autoctl restart postgres --maintenance`.
+ *
+ * Exits the process directly on every failure path, same as the CLI
+ * command this was extracted from.
+ */
+bool
+keeper_cli_disable_maintenance(Keeper *keeper)
+{
+	char *channels[] = { "state", NULL };
+	ConnectionRetryPolicy retryPolicy = { 0 };
+
+	if (!pgsql_listen(&(keeper->monitor.notificationClient), channels))
 	{
 		log_error("Failed to listen to state changes from the monitor");
 		exit(EXIT_CODE_MONITOR);
@@ -638,10 +676,10 @@ cli_disable_maintenance(int argc, char **argv)
 
 	while (!pgsql_retry_policy_expired(&retryPolicy))
 	{
-		int64_t nodeId = keeper.state.current_node_id;
+		int64_t nodeId = keeper->state.current_node_id;
 		bool mayRetry = false;
 
-		if (monitor_stop_maintenance(&(keeper.monitor), nodeId, &mayRetry))
+		if (monitor_stop_maintenance(&(keeper->monitor), nodeId, &mayRetry))
 		{
 			/* stop_maintenance was successful, break out of the retry loop */
 			break;
@@ -668,11 +706,11 @@ cli_disable_maintenance(int argc, char **argv)
 	NodeState targetStates[] = { SECONDARY_STATE, PRIMARY_STATE };
 
 	if (!monitor_wait_until_node_reported_state(
-			&(keeper.monitor),
-			keeper.config.formation,
-			keeper.config.groupId,
-			keeper.state.current_node_id,
-			keeper.config.pgSetup.pgKind,
+			&(keeper->monitor),
+			keeper->config.formation,
+			keeper->config.groupId,
+			keeper->state.current_node_id,
+			keeper->config.pgSetup.pgKind,
 			targetStates,
 			lengthof(targetStates),
 			PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT))
@@ -680,6 +718,8 @@ cli_disable_maintenance(int argc, char **argv)
 		log_error("Failed to wait until a node reached the secondary or primary state");
 		exit(EXIT_CODE_MONITOR);
 	}
+
+	return true;
 }
 
 

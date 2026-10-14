@@ -10,11 +10,11 @@
  */
 #include <getopt.h>
 #include <inttypes.h>
+#include <sys/wait.h>
 
 #include "cli_common.h"
 #include "commandline.h"
 #include "defaults.h"
-#include "fsm.h"
 #include "keeper_config.h"
 #include "keeper.h"
 #include "log.h"
@@ -23,32 +23,26 @@
 static bool optMaintenance = false;
 static bool optAllowFailover = false;
 static bool optForce = false;
+static char optExecCommand[BUFSIZE] = { 0 };
 
 static int cli_restart_postgres_getopts(int argc, char **argv);
 static void cli_restart_postgres(int argc, char **argv);
 
-static bool cli_restart_enable_maintenance(Keeper *keeper);
-static bool cli_restart_disable_maintenance(Keeper *keeper);
-static bool cli_restart_checkpoint_and_restart(Keeper *keeper);
+static bool cli_restart_checkpoint_postgres(Keeper *keeper);
+static bool cli_restart_stop_exec_and_start(Keeper *keeper);
+static bool cli_restart_run_exec_command(void);
 
 CommandLine restart_postgres_command =
 	make_command("postgres",
 				 "Restart Postgres on this node, going through pg_autoctl's "
 				 "own supervised process",
-				 " [ --pgdata ] [ --maintenance [ --allow-failover ] | --force ]",
+				 " [ --pgdata ] [ --maintenance [ --allow-failover ] | --force ] "
+				 "[ --exec <command> ]",
 				 "  --pgdata          path to data directory\n"
-				 "  --maintenance     Enable maintenance mode before stopping "
-				 "Postgres, and disable it again once the restart is done. "
-				 "Without this option, the node must already be in "
-				 "maintenance.\n"
-				 "  --allow-failover  Together with --maintenance, allow "
-				 "restarting the primary: the monitor promotes a standby "
-				 "first, same as `enable maintenance --allow-failover`. "
-				 "Without it, --maintenance on a primary is refused.\n"
-				 "  --force           Skip every state check (maintenance, "
-				 "primary/standby) and restart unconditionally. Does not "
-				 "touch maintenance mode. Mutually exclusive with "
-				 "--maintenance and --allow-failover.\n",
+				 "  --maintenance     enable/disable maintenance around the restart\n"
+				 "  --allow-failover  with --maintenance, allow restarting the primary\n"
+				 "  --force           skip state checks and restart unconditionally\n"
+				 "  --exec            shell command to run while Postgres is stopped\n",
 				 cli_restart_postgres_getopts,
 				 cli_restart_postgres);
 
@@ -79,6 +73,7 @@ cli_restart_postgres_getopts(int argc, char **argv)
 		{ "maintenance", no_argument, NULL, 'M' },
 		{ "allow-failover", no_argument, NULL, 'A' },
 		{ "force", no_argument, NULL, 'F' },
+		{ "exec", required_argument, NULL, 'E' },
 		{ "version", no_argument, NULL, 'V' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "quiet", no_argument, NULL, 'q' },
@@ -88,7 +83,7 @@ cli_restart_postgres_getopts(int argc, char **argv)
 
 	optind = 0;
 
-	while ((c = getopt_long(argc, argv, "D:MAFVvqh",
+	while ((c = getopt_long(argc, argv, "D:MAFE:Vvqh",
 							long_options, &option_index)) != -1)
 	{
 		switch (c)
@@ -121,6 +116,23 @@ cli_restart_postgres_getopts(int argc, char **argv)
 				/* { "force", no_argument, NULL, 'F' }, */
 				optForce = true;
 				log_trace("--force");
+				break;
+			}
+
+			case 'E':
+			{
+				/* { "exec", required_argument, NULL, 'E' }, */
+				if (strlcpy(optExecCommand, optarg, sizeof(optExecCommand)) >=
+					sizeof(optExecCommand))
+				{
+					log_fatal("Option --exec is too long: pg_autoctl supports "
+							  "commands up to %lu bytes and this one requires "
+							  "%lu bytes",
+							  (unsigned long) sizeof(optExecCommand) - 1,
+							  (unsigned long) strlen(optarg));
+					exit(EXIT_CODE_BAD_ARGS);
+				}
+				log_trace("--exec %s", optExecCommand);
 				break;
 			}
 
@@ -210,93 +222,88 @@ cli_restart_postgres_getopts(int argc, char **argv)
 
 
 /*
- * cli_restart_enable_maintenance enables maintenance mode on the local node,
- * the same way `pg_autoctl enable maintenance` does, and waits until the
- * node has reached the maintenance state.
+ * cli_restart_run_exec_command runs the --exec command, if any, through the
+ * shell while Postgres is stopped -- the same approach Postgres itself uses
+ * to run archive_command: hand the whole string to system(3) rather than
+ * splitting it into an argv and execv()'ing it directly, so the command can
+ * be a shell script, a Python script, a pipeline, or anything else the
+ * shell knows how to run, not just a single directly-executable binary.
+ *
+ * As with archive_command, the string is trusted: it comes from the
+ * operator running this CLI locally, not from any remote or untrusted
+ * input, so handing it to the shell as-is is the same trust model, not a
+ * new one.
  */
 static bool
-cli_restart_enable_maintenance(Keeper *keeper)
+cli_restart_run_exec_command(void)
 {
-	char *channels[] = { "state", NULL };
-	ConnectionRetryPolicy retryPolicy = { 0 };
-
-	int64_t nodeId = keeper->state.current_node_id;
-	bool isPrimary = keeper->state.current_role == PRIMARY_STATE;
-
-	if (isPrimary && !optAllowFailover)
+	if (IS_EMPTY_STRING_BUFFER(optExecCommand))
 	{
-		log_warn("Restarting Postgres on the primary requires entering "
-				 "maintenance first, which causes a failover");
-		log_fatal("Please use --allow-failover to allow the command "
-				  "to proceed");
+		return true;
+	}
+
+	log_info("Running --exec command while Postgres is stopped: %s",
+			 optExecCommand);
+
+	int wstatus = system(optExecCommand);
+
+	if (wstatus == -1)
+	{
+		log_error("Failed to run --exec command \"%s\": %m", optExecCommand);
 		return false;
 	}
 
-	if (!pgsql_listen(&(keeper->monitor.notificationClient), channels))
+	if (WIFSIGNALED(wstatus))
 	{
-		log_error("Failed to listen to state changes from the monitor");
+		log_error("--exec command \"%s\" was terminated by signal %d",
+				  optExecCommand, WTERMSIG(wstatus));
 		return false;
 	}
 
-	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
-
-	while (!pgsql_retry_policy_expired(&retryPolicy))
+	if (!WIFEXITED(wstatus) || WEXITSTATUS(wstatus) != 0)
 	{
-		bool mayRetry = false;
+		log_error("--exec command \"%s\" exited with code %d",
+				  optExecCommand, WEXITSTATUS(wstatus));
+		return false;
+	}
 
-		if (monitor_start_maintenance(&(keeper->monitor), nodeId, &mayRetry))
+	log_info("--exec command completed successfully");
+
+	return true;
+}
+
+
+/*
+ * cli_restart_checkpoint_postgres issues a couple of CHECKPOINTs against the
+ * running Postgres, via the same primary_checkpoint() some FSM transitions
+ * already call before a planned shutdown (fsm_checkpoint_and_stop_postgres()
+ * in fsm_transition.c, used for e.g. entering maintenance on a primary), so
+ * that the final shutdown checkpoint Postgres itself issues once stopped
+ * has as little work left to do as possible.
+ *
+ * Deliberately runs before maintenance mode is touched at all: a no-op if
+ * Postgres isn't running, otherwise this is the first thing the command
+ * does, ahead of any maintenance-state check or transition.
+ */
+static bool
+cli_restart_checkpoint_postgres(Keeper *keeper)
+{
+	LocalPostgresServer *postgres = &(keeper->postgres);
+	PostgresSetup *pgSetup = &(postgres->postgresSetup);
+
+	if (!pg_setup_is_running(pgSetup))
+	{
+		return true;
+	}
+
+	log_info("Preparing Postgres for restart: CHECKPOINT;");
+
+	for (int i = 0; i < 2; i++)
+	{
+		if (!primary_checkpoint(postgres))
 		{
-			break;
+			log_warn("Failed to checkpoint before restarting Postgres");
 		}
-
-		if (!mayRetry)
-		{
-			log_fatal("Failed to enable maintenance of node %" PRId64
-					  " on the monitor, see above for details",
-					  nodeId);
-			return false;
-		}
-
-		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
-
-		log_warn("Failed to enable maintenance of node %" PRId64
-				 " on the monitor, retrying in %d ms.",
-				 nodeId, sleepTimeMs);
-
-		(void) pg_usleep(sleepTimeMs * 1000);
-	}
-
-	if (pgsql_retry_policy_expired(&retryPolicy))
-	{
-		log_fatal("Failed to enable maintenance, see above for details");
-		return false;
-	}
-
-	NodeState targetStates[] = { MAINTENANCE_STATE };
-
-	/*
-	 * When --allow-failover is used on the primary, the monitor must first
-	 * promote a secondary (up to 60s) and then assign maintenance to this
-	 * node (another 60s). Use 3x the base timeout so both phases can
-	 * complete within the single wait window, same as `enable maintenance`.
-	 */
-	int waitTimeoutSecs = (optAllowFailover && isPrimary)
-						  ? 3 * PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT
-						  : PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT;
-
-	if (!monitor_wait_until_node_reported_state(
-			&(keeper->monitor),
-			keeper->config.formation,
-			keeper->config.groupId,
-			nodeId,
-			keeper->config.pgSetup.pgKind,
-			targetStates,
-			lengthof(targetStates),
-			waitTimeoutSecs))
-	{
-		log_error("Failed to wait until the node reached the "
-				  "maintenance state");
-		return false;
 	}
 
 	return true;
@@ -304,95 +311,32 @@ cli_restart_enable_maintenance(Keeper *keeper)
 
 
 /*
- * cli_restart_disable_maintenance disables maintenance mode on the local
- * node, the same way `pg_autoctl disable maintenance` does, and waits until
- * the node has rejoined as a secondary or primary.
+ * cli_restart_stop_exec_and_start stops Postgres, runs the --exec command if
+ * any while it's down, and starts it back up through pg_autoctl's own
+ * supervised process.
+ *
+ * When --exec fails, Postgres is deliberately left stopped rather than
+ * started back up on top of a possibly-incomplete offline operation
+ * (interrupted pg_checksums --enable, say): the caller must not clear
+ * maintenance mode either, so the node stays exactly where the operator
+ * can inspect and finish the job by hand.
  */
 static bool
-cli_restart_disable_maintenance(Keeper *keeper)
+cli_restart_stop_exec_and_start(Keeper *keeper)
 {
-	char *channels[] = { "state", NULL };
-	ConnectionRetryPolicy retryPolicy = { 0 };
-
-	int64_t nodeId = keeper->state.current_node_id;
-
-	if (!pgsql_listen(&(keeper->monitor.notificationClient), channels))
-	{
-		log_error("Failed to listen to state changes from the monitor");
-		return false;
-	}
-
-	(void) pgsql_set_monitor_interactive_retry_policy(&retryPolicy);
-
-	while (!pgsql_retry_policy_expired(&retryPolicy))
-	{
-		bool mayRetry = false;
-
-		if (monitor_stop_maintenance(&(keeper->monitor), nodeId, &mayRetry))
-		{
-			break;
-		}
-
-		if (!mayRetry)
-		{
-			log_fatal("Failed to disable maintenance of node %" PRId64
-					  " on the monitor, see above for details",
-					  nodeId);
-			return false;
-		}
-
-		int sleepTimeMs = pgsql_compute_connection_retry_sleep_time(&retryPolicy);
-
-		log_warn("Failed to disable maintenance of node %" PRId64
-				 " on the monitor, retrying in %d ms.",
-				 nodeId, sleepTimeMs);
-
-		(void) pg_usleep(sleepTimeMs * 1000);
-	}
-
-	if (pgsql_retry_policy_expired(&retryPolicy))
-	{
-		log_fatal("Failed to disable maintenance, see above for details");
-		return false;
-	}
-
-	NodeState targetStates[] = { SECONDARY_STATE, PRIMARY_STATE };
-
-	if (!monitor_wait_until_node_reported_state(
-			&(keeper->monitor),
-			keeper->config.formation,
-			keeper->config.groupId,
-			nodeId,
-			keeper->config.pgSetup.pgKind,
-			targetStates,
-			lengthof(targetStates),
-			PG_AUTOCTL_LISTEN_NOTIFICATIONS_TIMEOUT))
-	{
-		log_error("Failed to wait until the node reached the "
-				  "secondary or primary state");
-		return false;
-	}
-
-	return true;
-}
-
-
-/*
- * cli_restart_checkpoint_and_restart stops Postgres the smart way -- the
- * same couple of CHECKPOINTs some FSM transitions already perform before a
- * controlled shutdown (fsm_checkpoint_and_stop_postgres(), used for e.g.
- * entering maintenance on a primary), so that the final CHECKPOINT Postgres
- * itself issues at shutdown has as little work left to do as possible --
- * and then starts it back up through pg_autoctl's own supervised process.
- */
-static bool
-cli_restart_checkpoint_and_restart(Keeper *keeper)
-{
+	LocalPostgresServer *postgres = &(keeper->postgres);
 	bool updateRetries = false;
 
-	if (!fsm_checkpoint_and_stop_postgres(keeper))
+	if (!ensure_postgres_service_is_stopped(postgres))
 	{
 		log_error("Failed to stop Postgres, see above for details");
+		return false;
+	}
+
+	if (!cli_restart_run_exec_command())
+	{
+		log_error("--exec command failed: leaving Postgres stopped, "
+				  "see above for details");
 		return false;
 	}
 
@@ -403,14 +347,17 @@ cli_restart_checkpoint_and_restart(Keeper *keeper)
 	}
 
 	log_info("Postgres has been restarted at \"%s\"",
-			 keeper->postgres.postgresSetup.pgdata);
+			 postgres->postgresSetup.pgdata);
 
 	return true;
 }
 
 
 /*
- * cli_restart_postgres implements `pg_autoctl restart postgres`.
+ * cli_restart_postgres implements `pg_autoctl restart postgres`: CHECKPOINT
+ * twice, enable maintenance (unless already in it, or --force), stop
+ * Postgres, run --exec if any, start Postgres back up, then disable
+ * maintenance again when --maintenance owns it.
  */
 static void
 cli_restart_postgres(int argc, char **argv)
@@ -447,6 +394,8 @@ cli_restart_postgres(int argc, char **argv)
 		exit(EXIT_CODE_MONITOR);
 	}
 
+	(void) cli_restart_checkpoint_postgres(&keeper);
+
 	if (optForce)
 	{
 		log_warn("--force given: skipping maintenance-state and "
@@ -469,15 +418,12 @@ cli_restart_postgres(int argc, char **argv)
 				exit(EXIT_CODE_BAD_STATE);
 			}
 
-			if (!cli_restart_enable_maintenance(&keeper))
-			{
-				/* errors have already been logged */
-				exit(EXIT_CODE_MONITOR);
-			}
+			/* exits the process directly on failure */
+			(void) keeper_cli_enable_maintenance(&keeper, optAllowFailover);
 		}
 	}
 
-	if (!cli_restart_checkpoint_and_restart(&keeper))
+	if (!cli_restart_stop_exec_and_start(&keeper))
 	{
 		/* errors have already been logged */
 		exit(EXIT_CODE_INTERNAL_ERROR);
@@ -489,12 +435,9 @@ cli_restart_postgres(int argc, char **argv)
 		 * --maintenance owns both ends of the operation: whether we just
 		 * entered maintenance above or the node was already in it before
 		 * this command ran, disable it now that the restart is done.
+		 * Exits the process directly on failure.
 		 */
-		if (!cli_restart_disable_maintenance(&keeper))
-		{
-			/* errors have already been logged */
-			exit(EXIT_CODE_MONITOR);
-		}
+		(void) keeper_cli_disable_maintenance(&keeper);
 
 		log_info("Node has rejoined after the restart, maintenance "
 				 "mode is now disabled");

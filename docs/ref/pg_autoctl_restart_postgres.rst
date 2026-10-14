@@ -25,23 +25,22 @@ traffic. Pass ``--maintenance`` to have the command enter and leave
 maintenance mode around the restart itself, which is all that's needed
 when the change is a configuration edit made ahead of time (nothing
 needs to happen while Postgres is stopped). When something must run
-while Postgres is down -- an offline on-disk tool, say -- drive
-maintenance mode yourself around that step instead, and let this command
-(without ``--maintenance``) handle only the restart: it tolerates
-Postgres already being stopped when it runs, skipping the now-pointless
-checkpoint and simply starting it back up.
+while Postgres is down -- an offline on-disk tool, say -- pass it to
+``--exec``: the command runs between the stop and the start, and
+Postgres only comes back up once it succeeds.
 
 See :ref:`restart_postgres` in the Operations guide for worked examples,
 including enabling data checksums.
 
 ::
 
-   usage: pg_autoctl restart postgres  [ --pgdata ] [ --maintenance [ --allow-failover ] | --force ]
+   usage: pg_autoctl restart postgres  [ --pgdata ] [ --maintenance [ --allow-failover ] | --force ] [ --exec <command> ]
 
   --pgdata          path to data directory
-  --maintenance     Enable maintenance mode before stopping Postgres, and disable it again once the restart is done. Without this option, the node must already be in maintenance.
-  --allow-failover  Together with --maintenance, allow restarting the primary: the monitor promotes a standby first, same as `enable maintenance --allow-failover`. Without it, --maintenance on a primary is refused.
-  --force           Skip every state check (maintenance, primary/standby) and restart unconditionally. Does not touch maintenance mode. Mutually exclusive with --maintenance and --allow-failover.
+  --maintenance     enable/disable maintenance around the restart
+  --allow-failover  with --maintenance, allow restarting the primary
+  --force           skip state checks and restart unconditionally
+  --exec            shell command to run while Postgres is stopped
 
 Options
 -------
@@ -69,6 +68,18 @@ Options
   Skip every state check (maintenance state, primary or standby) and
   restart Postgres unconditionally, without touching maintenance mode at
   all. Mutually exclusive with ``--maintenance`` and ``--allow-failover``.
+
+--exec
+
+  A shell command to run while Postgres is stopped, before starting it
+  back up again -- for an offline step such as ``pg_checksums --enable``
+  that can't run on a live cluster. Run the same way Postgres itself
+  runs ``archive_command``: the whole string is handed to the shell via
+  ``system(3)``, so it can be a one-liner, a script in any language, or
+  a pipeline, not only a single directly-executable binary. A non-zero
+  exit (or termination by signal) aborts before Postgres is started back
+  up and before maintenance mode is disabled, leaving the node exactly
+  where you can inspect and finish the job by hand.
 
 Environment
 -----------

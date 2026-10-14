@@ -62,7 +62,8 @@ final shutdown checkpoint Postgres itself issues has as little work left
 to do as possible::
 
   pg_autoctl restart postgres --pgdata <PGDATA> \
-    [ --maintenance [ --allow-failover ] | --force ]
+    [ --maintenance [ --allow-failover ] | --force ] \
+    [ --exec <command> ]
 
   --maintenance     enable maintenance before stopping Postgres, and
                     disable it again once Postgres is back up -- use this
@@ -76,46 +77,54 @@ to do as possible::
   --force           skip every check (maintenance state, primary or
                     standby) and restart unconditionally, without
                     touching maintenance mode at all
+  --exec            a shell command to run while Postgres is stopped,
+                    before starting it back up -- for an offline step
+                    such as ``pg_checksums --enable``. A non-zero exit
+                    aborts before Postgres restarts and before
+                    maintenance mode is disabled, leaving the node
+                    exactly where you can inspect and finish by hand
 
 When the change is a pure configuration edit -- nothing needs to happen
 while Postgres is down, only before starting it again -- ``--maintenance``
 turns the whole operation into one command per node. This is exactly the
-case for a ``PGC_POSTMASTER`` GUC such as ``wal_level``: edit
-``postgresql.conf`` (or run ``ALTER SYSTEM SET ...``) ahead of time, then::
+case for a ``PGC_POSTMASTER`` GUC such as ``shared_buffers``: it can be
+applied with ``ALTER SYSTEM SET`` while Postgres is still up and running
+(the setting is only picked up on the next restart), so there is nothing
+to run while Postgres is down -- connected to the node you're about to
+restart::
 
+  psql -c "ALTER SYSTEM SET shared_buffers = '4GB';"
   pg_autoctl restart postgres --maintenance --pgdata <PGDATA>
 
-When something needs to run while Postgres is stopped -- such as an
-offline on-disk tool -- drive maintenance mode yourself around that step,
-and let ``pg_autoctl restart postgres`` (without ``--maintenance``, since
-the node is already in maintenance) handle only the restart itself. As an
-example, here is how to turn on data checksums (``pg_checksums
---enable``, Postgres 12 and up) on a standby, one node at a time::
+For the primary, add ``--allow-failover`` the same way as any other
+restart on a primary::
 
-  pg_autoctl enable maintenance --pgdata <standby PGDATA>
+  psql -c "ALTER SYSTEM SET shared_buffers = '4GB';"
+  pg_autoctl restart postgres --maintenance --allow-failover --pgdata <primary PGDATA>
 
-  pg_ctl stop -D <standby PGDATA>
-  pg_checksums --enable -D <standby PGDATA>
+When something needs to run *while* Postgres is stopped -- an offline
+on-disk tool, say -- pass it to ``--exec``: it runs through the shell
+(the same approach Postgres itself uses for ``archive_command``, handing
+the whole string to ``system(3)``), so it can be a one-liner, a script in
+any language, or a pipeline, not just a single directly-executable
+binary. As an example, here is how to turn on data checksums
+(``pg_checksums --enable``, Postgres 12 and up) on a standby, in one
+command::
 
-  pg_autoctl restart postgres --pgdata <standby PGDATA>
-  pg_autoctl disable maintenance --pgdata <standby PGDATA>
-
-Postgres is already stopped by the time ``pg_autoctl restart postgres``
-runs here: it detects that, skips the now-pointless checkpoint, and
-simply starts Postgres back up -- the command tolerates either starting
-state, so the same four commands work whether or not you stop Postgres
-yourself first.
+  pg_autoctl restart postgres --maintenance --pgdata <standby PGDATA> \
+    --exec "pg_checksums --enable -D <standby PGDATA>"
 
 To apply the same change to the *primary*, maintenance must first hand
 it off to a standby, which is what ``--allow-failover`` allows::
 
-  pg_autoctl enable maintenance --allow-failover --pgdata <primary PGDATA>
+  pg_autoctl restart postgres --maintenance --allow-failover --pgdata <primary PGDATA> \
+    --exec "pg_checksums --enable -D <primary PGDATA>"
 
-  pg_ctl stop -D <primary PGDATA>
-  pg_checksums --enable -D <primary PGDATA>
-
-  pg_autoctl restart postgres --pgdata <primary PGDATA>
-  pg_autoctl disable maintenance --pgdata <primary PGDATA>
+If ``pg_checksums`` fails or is interrupted, the command aborts before
+starting Postgres back up and before disabling maintenance: the node
+stays down and in maintenance until you've inspected and either re-run
+``pg_checksums`` by hand or re-run this same command once the underlying
+problem is fixed.
 
 .. note::
 
