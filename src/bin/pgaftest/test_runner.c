@@ -1779,7 +1779,18 @@ runner_promote_one(TestRunner *r, const char *nodeName)
 		return false;
 	}
 
-	if (strcmp(reported, "primary") == 0)
+	/*
+	 * apply_settings is only ever assigned to a node that is already
+	 * primary (MonitorFSM[] only cascades it onto a node whose own goal
+	 * state is already primary -- see group_state_machine.c's pos 302 and
+	 * 317 rows), briefly re-applying synchronous_standby_names/
+	 * synchronized_standby_slots after some other node's quorum membership
+	 * changed. It's never a step on the way from secondary to primary, so
+	 * treat it the same as "primary" here rather than falling through to
+	 * perform_promotion(), which requires reportedState=secondary and
+	 * would otherwise race this transient heartbeat-driven state.
+	 */
+	if (strcmp(reported, "primary") == 0 || strcmp(reported, "apply_settings") == 0)
 	{
 		log_info("  promote: %s is already primary — no-op", nodeName);
 		return true;
