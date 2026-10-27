@@ -101,8 +101,12 @@ def test_002_002_add_two_standbys():
 #   secondary     primary      secondary
 #
 def test_003_001_stop_primary():
-    # verify that node1 is primary and stop it
-    assert node1.get_state().assigned == "primary"
+    # node3 catching up to secondary in test_002_002 (the second standby to
+    # join, after node1 had already converged to steady primary) now also
+    # nudges node1 through apply_settings, so that it re-fetches and
+    # re-applies synchronized_standby_slots -- wait for that round-trip to
+    # settle rather than snapshotting node1's assigned state instantly.
+    assert node1.wait_until_assigned_state(target_state="primary")
     node1.fail()
 
     # wait for node2 to become the new primary
@@ -237,8 +241,11 @@ def test_005_002_fail_primary_again():
     # node3.
     node2.run()
 
-    # verify that node1 is primary and stop it
-    assert node1.get_state().assigned == "primary"
+    # node2 catching up to secondary here now also nudges node1 (the
+    # primary) through apply_settings (see test_003_004's own comment
+    # above) -- wait for that round-trip to settle rather than snapshotting
+    # node1's assigned state instantly.
+    assert node1.wait_until_assigned_state(target_state="primary")
     node1.fail()
 
     print()
