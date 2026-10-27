@@ -289,6 +289,30 @@ ReplicationStateSetPatternMatches(ReplicationState actual,
 
 
 /*
+ * NodeSnapshotMatchesPattern matches a ReplicationStateSetPattern against
+ * node->onDiskSnapshot->reportedState (node_metadata.h), the only field this
+ * table currently reads off a node's snapshot rather than its live value.
+ * Unlike ReplicationStateSetPatternMatches's own caller, this one also owns
+ * the NULL guard: node itself can be NULL (no node in this role), and even a
+ * real node's onDiskSnapshot is only ever populated for the reporting node
+ * during the one node_active() call that captured it (see NodeActive(),
+ * node_active_protocol.c) -- primaryNode/otherNode/candidateNode roles, and
+ * every dispatch path that never goes through NodeActive() at all, never get
+ * one. Either case is treated as "no previous state to match against",
+ * i.e. only a declared-empty pattern (don't care) matches.
+ */
+static bool
+NodeSnapshotMatchesPattern(const AutoFailoverNode *node,
+						   ReplicationStateSetPattern pattern)
+{
+	return node == NULL || node->onDiskSnapshot == NULL
+		   ? pattern.states.count == 0
+		   : ReplicationStateSetPatternMatches(node->onDiskSnapshot->reportedState,
+											   pattern);
+}
+
+
+/*
  * Same reasoning as STATES() above: no compound-literal cast, since every use
  * is nested inside another static aggregate's designated initializer (e.g.
  * ".statePattern = FSM_STATE(x)" inside a MonitorFSMTransition row).
@@ -693,11 +717,8 @@ NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
 							  pattern->isComparableToReferenceTli) &&
 		   BoolMatchesPattern(unreachableFromDemoteTimeout,
 							  pattern->unreachableFromDemoteTimeout) &&
-		   (status->node == NULL || status->node->onDiskSnapshot == NULL
-			? pattern->previouslyReportedState.states.count == 0
-			: ReplicationStateSetPatternMatches(
-				status->node->onDiskSnapshot->reportedState,
-				pattern->previouslyReportedState));
+		   NodeSnapshotMatchesPattern(status->node,
+									  pattern->previouslyReportedState);
 }
 
 
@@ -4296,6 +4317,32 @@ NodeStatePatternReportedStatesText(const NodeStatePattern *pattern, bool *isNull
 	} while (0)
 
 /*
+ * Same idea as APPEND_BOOL_CONDITION, for a ReplicationStateSetPattern
+ * field: skips an empty set (the "don't care" default every row gets for
+ * free), otherwise renders "name=state1|state2|...".
+ */
+#define APPEND_STATE_SET_CONDITION(buf, name, statesPattern) \
+	do { \
+		if ((statesPattern).states.count > 0) \
+		{ \
+			if ((buf)->len > 0) \
+			{ \
+				appendStringInfoString((buf), ", "); \
+			} \
+			appendStringInfo((buf), "%s=", (name)); \
+			for (int i = 0; i < (statesPattern).states.count; i++) \
+			{ \
+				if (i > 0) \
+				{ \
+					appendStringInfoString((buf), "|"); \
+				} \
+				appendStringInfoString((buf), ReplicationStateGetName( \
+										   (statesPattern).states.states[i])); \
+			} \
+		} \
+	} while (0)
+
+/*
  * AppendNodeStateGoalCondition appends a role's own goal-state precondition
  * to buf, when its statePattern is NODE_STATE_ASSIGNED/NOT_ASSIGNED: "the
  * node's EXISTING goal (before this dispatch runs) must/must not already be
@@ -4387,29 +4434,8 @@ NodeStatusPatternConditionsText(const NodeStatusPattern *pattern, bool *isNull)
 						  pattern->isComparableToReferenceTli);
 	APPEND_BOOL_CONDITION(&buf, "unreachableFromDemoteTimeout",
 						  pattern->unreachableFromDemoteTimeout);
-
-	if (pattern->previouslyReportedState.states.count > 0)
-	{
-		if (buf.len > 0)
-		{
-			appendStringInfoString(&buf, ", ");
-		}
-
-		appendStringInfoString(&buf, "previouslyReportedState=");
-
-		for (int i = 0; i < pattern->previouslyReportedState.states.count; i++)
-		{
-			if (i > 0)
-			{
-				appendStringInfoString(&buf, "|");
-			}
-
-			appendStringInfoString(
-				&buf,
-				ReplicationStateGetName(
-					pattern->previouslyReportedState.states.states[i]));
-		}
-	}
+	APPEND_STATE_SET_CONDITION(&buf, "previouslyReportedState",
+							   pattern->previouslyReportedState);
 
 	if (buf.len == 0)
 	{
