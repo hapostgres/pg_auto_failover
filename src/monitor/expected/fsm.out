@@ -387,14 +387,14 @@ section_path                 | reporting_node.from_context
 active_node_current_state    | secondary
 other_node_current_state     | primary
 candidate_node_current_state | 
-active_node_conditions       | candidateEligible=true, reportedStateJustBecameSecondary=true
+active_node_conditions       | candidateEligible=true, previouslyReportedState=catchingup
 other_node_conditions        | 
 candidate_node_conditions    | 
 group_conditions             | 
 active_node_assigned_state   | 
 other_node_assigned_state    | apply_settings
 has_extra_action             | f
-comment                      | converged secondary, just became a ready candidate, primary converged primary -> apply_settings
+comment                      | catchingup -> secondary, primary converged primary -> apply_settings
 -[ RECORD 26 ]---------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 pos                          | 303
 section                      | reporting_node

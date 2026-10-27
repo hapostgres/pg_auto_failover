@@ -484,6 +484,23 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 								   (long long) currentNodeState->nodeId)));
 		}
 
+		/*
+		 * Snapshot this node's own record before any of this call's own
+		 * processing below overwrites reportedState/pgsrSyncState/
+		 * reportedLSN/pgIsRunning/reportedTLI/reportTime getting ready for
+		 * the next write -- see onDiskSnapshot's own comment
+		 * (node_metadata.h) for why ProceedGroupState()'s declarative
+		 * dispatch, further down, needs this spelled out explicitly rather
+		 * than recomputed from reportedState/goalState there.
+		 */
+		{
+			AutoFailoverNode *onDiskSnapshot =
+				(AutoFailoverNode *) palloc(sizeof(AutoFailoverNode));
+
+			*onDiskSnapshot = *pgAutoFailoverNode;
+			pgAutoFailoverNode->onDiskSnapshot = onDiskSnapshot;
+		}
+
 		if (pgAutoFailoverNode->reportedState != currentNodeState->replicationState)
 		{
 			/*
@@ -519,17 +536,6 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 			pgAutoFailoverNode->reportedLSN = currentNodeState->reportedLSN;
 
 			NotifyStateChange(pgAutoFailoverNode, message);
-
-			/*
-			 * This is the one place reportedState's previous value is still
-			 * available to compare against its new one -- see this field's
-			 * own comment (node_metadata.h) for why ProceedGroupState()'s
-			 * declarative dispatch, just below, needs it spelled out as an
-			 * explicit transient fact rather than recomputed from
-			 * reportedState/goalState there.
-			 */
-			pgAutoFailoverNode->reportedStateJustBecameSecondary =
-				currentNodeState->replicationState == REPLICATION_STATE_SECONDARY;
 		}
 
 		/*
