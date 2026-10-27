@@ -267,6 +267,52 @@ MatchStateSet(ReplicationState actual, ReplicationStateSet declared)
 
 
 /*
+ * ReplicationStateSetPattern matches a single ReplicationState against a
+ * declared set, or matches anything when no set was declared (states.count
+ * == 0 -- the zero-value default every row gets for free, same convention
+ * BoolPattern's own BOOL_ANY already uses). Used for fields read off a
+ * node's onDiskSnapshot (node_metadata.h): there's no "assigned" side to
+ * pair it with the way NodeStatePattern has goalState, so it doesn't need
+ * that struct's extra machinery, just a set-or-any match.
+ */
+typedef struct ReplicationStateSetPattern
+{
+	ReplicationStateSet states;
+} ReplicationStateSetPattern;
+
+static bool
+ReplicationStateSetPatternMatches(ReplicationState actual,
+								  ReplicationStateSetPattern pattern)
+{
+	return pattern.states.count == 0 || MatchStateSet(actual, pattern.states);
+}
+
+
+/*
+ * NodeSnapshotMatchesPattern matches a ReplicationStateSetPattern against
+ * node->onDiskSnapshot->reportedState (node_metadata.h), the only field this
+ * table currently reads off a node's snapshot rather than its live value.
+ * Unlike ReplicationStateSetPatternMatches's own caller, this one also owns
+ * the NULL guard: node itself can be NULL (no node in this role), and even a
+ * real node's onDiskSnapshot is only ever populated for the reporting node
+ * during the one node_active() call that captured it (see NodeActive(),
+ * node_active_protocol.c) -- primaryNode/otherNode/candidateNode roles, and
+ * every dispatch path that never goes through NodeActive() at all, never get
+ * one. Either case is treated as "no previous state to match against",
+ * i.e. only a declared-empty pattern (don't care) matches.
+ */
+static bool
+NodeSnapshotMatchesPattern(const AutoFailoverNode *node,
+						   ReplicationStateSetPattern pattern)
+{
+	return node == NULL || node->onDiskSnapshot == NULL
+		   ? pattern.states.count == 0
+		   : ReplicationStateSetPatternMatches(node->onDiskSnapshot->reportedState,
+											   pattern);
+}
+
+
+/*
  * Same reasoning as STATES() above: no compound-literal cast, since every use
  * is nested inside another static aggregate's designated initializer (e.g.
  * ".statePattern = FSM_STATE(x)" inside a MonitorFSMTransition row).
@@ -510,6 +556,9 @@ typedef struct NodeStatusPattern
 	BoolPattern replicationQuorum;
 	BoolPattern isComparableToReferenceTli;
 	BoolPattern unreachableFromDemoteTimeout;
+
+	/* matched against status->node->onDiskSnapshot->reportedState, not status->node->reportedState itself */
+	ReplicationStateSetPattern previouslyReportedState;
 } NodeStatusPattern;
 
 static void
@@ -667,7 +716,9 @@ NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
 		   BoolMatchesPattern(status->isComparableToReferenceTli,
 							  pattern->isComparableToReferenceTli) &&
 		   BoolMatchesPattern(unreachableFromDemoteTimeout,
-							  pattern->unreachableFromDemoteTimeout);
+							  pattern->unreachableFromDemoteTimeout) &&
+		   NodeSnapshotMatchesPattern(status->node,
+									  pattern->previouslyReportedState);
 }
 
 
@@ -2689,6 +2740,47 @@ static const MonitorFSMTransition MonitorFSM[] = {
 		  "converged secondary, reportedTLI not an ancestor of reference -> catchingup" },
 
 	/*
+	 * catchingup -> secondary transition (reportedState, not just
+	 * goalState), primary already converged primary -- this is the moment
+	 * this node actually becomes a ready failover candidate, which is
+	 * exactly what synchronized_standby_slots() filters on (see that
+	 * function's own comment). The ordinary "wait_standby, primary
+	 * converged primary -> catchingup + apply_settings" row (pos 317
+	 * below) already forces apply_settings on the primary the moment a
+	 * quorum member *starts* catching up (too early for
+	 * synchronized_standby_slots to include it, by design) -- nothing
+	 * forced a *second* apply_settings once the node actually finished, so
+	 * a primary that had already converged to steady "primary" before
+	 * this node got here never got told to re-fetch and re-apply
+	 * synchronized_standby_slots, and kept applying whatever shorter list
+	 * it last fetched, indefinitely.
+	 *
+	 * Gated on previouslyReportedState (onDiskSnapshot's reportedState,
+	 * node_metadata.h) being catchingup, not just the plain
+	 * FSM_STATE(SECONDARY) above: the latter also matches every ordinary
+	 * steady heartbeat from every secondary forever after, which would
+	 * force the primary through this same cascade on every single one of
+	 * them, an infinite apply_settings <-> primary ping-pong. Requiring
+	 * the *previous* value to have been catchingup pins this to the one
+	 * call where the transition actually happens.
+	 */
+	{ .pos = 302,
+	  .sectionPath = {
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
+	  },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
+					  .candidateEligible = BOOL_TRUE,
+					  .previouslyReportedState = {
+						  .states = STATES(REPLICATION_STATE_CATCHINGUP)
+					  }
+	  },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_APPLY_SETTINGS),
+	  .comment =
+		  "catchingup -> secondary, primary converged primary -> apply_settings" },
+
+	/*
 	 * replication stall (#997): primary healthy, no standby past
 	 * replication_stall_timeout
 	 */
@@ -4225,6 +4317,32 @@ NodeStatePatternReportedStatesText(const NodeStatePattern *pattern, bool *isNull
 	} while (0)
 
 /*
+ * Same idea as APPEND_BOOL_CONDITION, for a ReplicationStateSetPattern
+ * field: skips an empty set (the "don't care" default every row gets for
+ * free), otherwise renders "name=state1|state2|...".
+ */
+#define APPEND_STATE_SET_CONDITION(buf, name, statesPattern) \
+	do { \
+		if ((statesPattern).states.count > 0) \
+		{ \
+			if ((buf)->len > 0) \
+			{ \
+				appendStringInfoString((buf), ", "); \
+			} \
+			appendStringInfo((buf), "%s=", (name)); \
+			for (int i = 0; i < (statesPattern).states.count; i++) \
+			{ \
+				if (i > 0) \
+				{ \
+					appendStringInfoString((buf), "|"); \
+				} \
+				appendStringInfoString((buf), ReplicationStateGetName( \
+										   (statesPattern).states.states[i])); \
+			} \
+		} \
+	} while (0)
+
+/*
  * AppendNodeStateGoalCondition appends a role's own goal-state precondition
  * to buf, when its statePattern is NODE_STATE_ASSIGNED/NOT_ASSIGNED: "the
  * node's EXISTING goal (before this dispatch runs) must/must not already be
@@ -4316,6 +4434,8 @@ NodeStatusPatternConditionsText(const NodeStatusPattern *pattern, bool *isNull)
 						  pattern->isComparableToReferenceTli);
 	APPEND_BOOL_CONDITION(&buf, "unreachableFromDemoteTimeout",
 						  pattern->unreachableFromDemoteTimeout);
+	APPEND_STATE_SET_CONDITION(&buf, "previouslyReportedState",
+							   pattern->previouslyReportedState);
 
 	if (buf.len == 0)
 	{
@@ -5044,7 +5164,8 @@ NodeStatusPatternOtherFieldsAreAny(const NodeStatusPattern *pattern)
 		   pattern->isCitusWorkerGroup == BOOL_ANY &&
 		   pattern->replicationQuorum == BOOL_ANY &&
 		   pattern->isComparableToReferenceTli == BOOL_ANY &&
-		   pattern->unreachableFromDemoteTimeout == BOOL_ANY;
+		   pattern->unreachableFromDemoteTimeout == BOOL_ANY &&
+		   pattern->previouslyReportedState.states.count == 0;
 }
 
 

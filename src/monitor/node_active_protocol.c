@@ -484,6 +484,23 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 								   (long long) currentNodeState->nodeId)));
 		}
 
+		/*
+		 * Snapshot this node's own record before any of this call's own
+		 * processing below overwrites reportedState/pgsrSyncState/
+		 * reportedLSN/pgIsRunning/reportedTLI/reportTime getting ready for
+		 * the next write -- see onDiskSnapshot's own comment
+		 * (node_metadata.h) for why ProceedGroupState()'s declarative
+		 * dispatch, further down, needs this spelled out explicitly rather
+		 * than recomputed from reportedState/goalState there.
+		 */
+		{
+			AutoFailoverNode *onDiskSnapshot =
+				(AutoFailoverNode *) palloc(sizeof(AutoFailoverNode));
+
+			*onDiskSnapshot = *pgAutoFailoverNode;
+			pgAutoFailoverNode->onDiskSnapshot = onDiskSnapshot;
+		}
+
 		if (pgAutoFailoverNode->reportedState != currentNodeState->replicationState)
 		{
 			/*
@@ -2589,7 +2606,16 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 	 */
 	if (nodesCount == 2)
 	{
-		AutoFailoverNode *secondaryNode = linitial(standbyNodesGroupList);
+		/*
+		 * primaryNode can be NULL here (no node currently holds the
+		 * primary role, e.g. mid-promotion or mid-maintenance handoff),
+		 * in which case standbyNodesGroupList is NIL -- linitial() on an
+		 * empty list dereferences a NULL ListCell, so guard it explicitly
+		 * rather than relying on this branch never running in that
+		 * window.
+		 */
+		AutoFailoverNode *secondaryNode =
+			standbyNodesGroupList == NIL ? NULL : linitial(standbyNodesGroupList);
 
 		if (secondaryNode != NULL &&
 			secondaryNode->replicationQuorum &&

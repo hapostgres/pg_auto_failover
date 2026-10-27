@@ -139,6 +139,35 @@ typedef struct AutoFailoverNode
 	char *nodeCluster;
 	char *region;
 	TimestampTz replicationStallSince; /* 0 = not stalled */
+
+	/*
+	 * Transient, in-memory only: a read-only copy of this node's own
+	 * record, as it stood at the start of the current NodeActive() call,
+	 * before any of that call's own processing overwrote fields like
+	 * reportedState, pgIsRunning, or reportedLSN getting ready for the
+	 * next write. Never read from or written to the database -- NULL
+	 * except during the one node_active() call that populates it (see
+	 * NodeActive(), node_active_protocol.c).
+	 *
+	 * Exists because the (reportedState, goalState) pair alone can't tell
+	 * "reportedState just became SECONDARY this call" apart from "has
+	 * been SECONDARY for the last 10000 heartbeats" -- MonitorFSM[] needs
+	 * exactly the former to cascade an apply_settings refresh on the
+	 * primary once, never the latter, on pain of an infinite
+	 * apply_settings <-> primary ping-pong every heartbeat (see
+	 * group_state_machine.c's pos 302 row). A wholesale copy, rather than
+	 * a single-purpose "previous reportedState" field, so any future row
+	 * needing an "as it was" vs "as it is now" comparison on some other
+	 * field can reuse this directly instead of growing its own ad hoc
+	 * shadow field.
+	 *
+	 * Safe as a flat struct copy despite the pointer fields
+	 * (formationId/nodeName/nodeHost/nodeCluster/region): none of them are
+	 * ever mutated in place anywhere in this codebase, only ever replaced
+	 * by assigning a whole new pointer -- which this snapshot, taken
+	 * before any such reassignment, is immune to by construction.
+	 */
+	const struct AutoFailoverNode *onDiskSnapshot;
 } AutoFailoverNode;
 
 
