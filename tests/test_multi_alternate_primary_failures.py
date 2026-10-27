@@ -182,7 +182,13 @@ def test_003_004_bringup_first_failed_primary():
     # Now node 1 should become secondary
     print()
     assert node1.wait_until_state(target_state="secondary")
-    assert node2.get_state().assigned == "primary"
+
+    # node1 catching up to secondary now also nudges node2 (the primary)
+    # through apply_settings, so that it re-fetches and re-applies
+    # synchronized_standby_slots now that node1 is a ready candidate again --
+    # wait for that round-trip to settle rather than snapshotting node2's
+    # assigned state the instant node1 reports secondary.
+    assert node2.wait_until_assigned_state(target_state="primary")
     assert node3.get_state().assigned == "secondary"
 
     assert node1.has_needed_replication_slots()
@@ -261,7 +267,11 @@ def test_005_004_bring_up_last_failed_primary():
     # Now node 3 should become secondary
     print()
     assert node1.wait_until_state(target_state="secondary")
-    assert node3.get_state().assigned == "primary"
+
+    # node1 catching up to secondary now also nudges node3 (the primary)
+    # through apply_settings (see test_003_004's own comment above) -- wait
+    # for that round-trip to settle instead of snapshotting it instantly.
+    assert node3.wait_until_assigned_state(target_state="primary")
     assert node2.get_state().assigned == "secondary"
 
 
