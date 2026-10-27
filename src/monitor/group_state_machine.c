@@ -510,6 +510,7 @@ typedef struct NodeStatusPattern
 	BoolPattern replicationQuorum;
 	BoolPattern isComparableToReferenceTli;
 	BoolPattern unreachableFromDemoteTimeout;
+	BoolPattern reportedStateJustBecameSecondary;
 } NodeStatusPattern;
 
 static void
@@ -667,7 +668,10 @@ NodeMatchesPattern(const NodeStatus *status, const NodeStatusPattern *pattern)
 		   BoolMatchesPattern(status->isComparableToReferenceTli,
 							  pattern->isComparableToReferenceTli) &&
 		   BoolMatchesPattern(unreachableFromDemoteTimeout,
-							  pattern->unreachableFromDemoteTimeout);
+							  pattern->unreachableFromDemoteTimeout) &&
+		   BoolMatchesPattern(status->node != NULL &&
+							  status->node->reportedStateJustBecameSecondary,
+							  pattern->reportedStateJustBecameSecondary);
 }
 
 
@@ -2689,6 +2693,43 @@ static const MonitorFSMTransition MonitorFSM[] = {
 		  "converged secondary, reportedTLI not an ancestor of reference -> catchingup" },
 
 	/*
+	 * converged secondary, reportedState just became SECONDARY this call,
+	 * primary already converged primary -- this is the moment this node
+	 * actually becomes a ready failover candidate, which is exactly what
+	 * synchronized_standby_slots() filters on (see that function's own
+	 * comment). The ordinary "wait_standby, primary converged primary ->
+	 * catchingup + apply_settings" row (pos 317 below) already forces
+	 * apply_settings on the primary the moment a quorum member *starts*
+	 * catching up (too early for synchronized_standby_slots to include it,
+	 * by design) -- nothing forced a *second* apply_settings once the node
+	 * actually finished, so a primary that had already converged to
+	 * steady "primary" before this node got here never got told to
+	 * re-fetch and re-apply synchronized_standby_slots, and kept applying
+	 * whatever shorter list it last fetched, indefinitely.
+	 *
+	 * Gated on reportedStateJustBecameSecondary rather than plain
+	 * FSM_STATE(SECONDARY) alone: the latter also matches every ordinary
+	 * steady heartbeat from every secondary forever after, which would
+	 * force the primary through this same cascade on every single one of
+	 * them, an infinite apply_settings <-> primary ping-pong. See that
+	 * field's own comment (node_metadata.h) for why only NodeActive() can
+	 * compute it.
+	 */
+	{ .pos = 302,
+	  .sectionPath = {
+		  MONITOR_FSM_SECTION_REPORTING_NODE,
+		  MONITOR_FSM_SECTION_FROM_CONTEXT
+	  },
+	  .activeNode = { .statePattern = FSM_STATE(REPLICATION_STATE_SECONDARY),
+					  .candidateEligible = BOOL_TRUE,
+					  .reportedStateJustBecameSecondary = BOOL_TRUE },
+	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
+	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_APPLY_SETTINGS),
+	  .comment =
+		  "converged secondary, just became a ready candidate, primary converged "
+		  "primary -> apply_settings" },
+
+	/*
 	 * replication stall (#997): primary healthy, no standby past
 	 * replication_stall_timeout
 	 */
@@ -4316,6 +4357,8 @@ NodeStatusPatternConditionsText(const NodeStatusPattern *pattern, bool *isNull)
 						  pattern->isComparableToReferenceTli);
 	APPEND_BOOL_CONDITION(&buf, "unreachableFromDemoteTimeout",
 						  pattern->unreachableFromDemoteTimeout);
+	APPEND_BOOL_CONDITION(&buf, "reportedStateJustBecameSecondary",
+						  pattern->reportedStateJustBecameSecondary);
 
 	if (buf.len == 0)
 	{
@@ -5044,7 +5087,8 @@ NodeStatusPatternOtherFieldsAreAny(const NodeStatusPattern *pattern)
 		   pattern->isCitusWorkerGroup == BOOL_ANY &&
 		   pattern->replicationQuorum == BOOL_ANY &&
 		   pattern->isComparableToReferenceTli == BOOL_ANY &&
-		   pattern->unreachableFromDemoteTimeout == BOOL_ANY;
+		   pattern->unreachableFromDemoteTimeout == BOOL_ANY &&
+		   pattern->reportedStateJustBecameSecondary == BOOL_ANY;
 }
 
 

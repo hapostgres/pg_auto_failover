@@ -18,3 +18,4 @@ guard_data_loss
 # failover-enabled logical slots surviving a promotion) and the #1188
 # stale-failover-slot-after-demote_timeout fix.
 cdc_continuity
+cdc_continuity_stale_slots

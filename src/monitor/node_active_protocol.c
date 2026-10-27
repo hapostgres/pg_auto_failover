@@ -519,6 +519,17 @@ NodeActive(char *formationId, AutoFailoverNodeState *currentNodeState)
 			pgAutoFailoverNode->reportedLSN = currentNodeState->reportedLSN;
 
 			NotifyStateChange(pgAutoFailoverNode, message);
+
+			/*
+			 * This is the one place reportedState's previous value is still
+			 * available to compare against its new one -- see this field's
+			 * own comment (node_metadata.h) for why ProceedGroupState()'s
+			 * declarative dispatch, just below, needs it spelled out as an
+			 * explicit transient fact rather than recomputed from
+			 * reportedState/goalState there.
+			 */
+			pgAutoFailoverNode->reportedStateJustBecameSecondary =
+				currentNodeState->replicationState == REPLICATION_STATE_SECONDARY;
 		}
 
 		/*
@@ -2589,7 +2600,16 @@ synchronous_standby_names(PG_FUNCTION_ARGS)
 	 */
 	if (nodesCount == 2)
 	{
-		AutoFailoverNode *secondaryNode = linitial(standbyNodesGroupList);
+		/*
+		 * primaryNode can be NULL here (no node currently holds the
+		 * primary role, e.g. mid-promotion or mid-maintenance handoff),
+		 * in which case standbyNodesGroupList is NIL -- linitial() on an
+		 * empty list dereferences a NULL ListCell, so guard it explicitly
+		 * rather than relying on this branch never running in that
+		 * window.
+		 */
+		AutoFailoverNode *secondaryNode =
+			standbyNodesGroupList == NIL ? NULL : linitial(standbyNodesGroupList);
 
 		if (secondaryNode != NULL &&
 			secondaryNode->replicationQuorum &&

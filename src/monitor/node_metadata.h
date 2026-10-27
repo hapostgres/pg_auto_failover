@@ -139,6 +139,21 @@ typedef struct AutoFailoverNode
 	char *nodeCluster;
 	char *region;
 	TimestampTz replicationStallSince; /* 0 = not stalled */
+
+	/*
+	 * Transient, in-memory only: true for exactly the one NodeActive() call
+	 * where this node's reportedState just became SECONDARY (set there,
+	 * right where reportedState's previous value is still available for
+	 * comparison; reset to false otherwise). Never read from or written to
+	 * the database -- the (reportedState, goalState) pair alone can't tell
+	 * "just became secondary this call" apart from "has been secondary for
+	 * the last 10000 heartbeats", and MonitorFSM[] needs exactly the
+	 * former to cascade an apply_settings refresh on the primary once,
+	 * never the latter, on pain of an infinite apply_settings <-> primary
+	 * ping-pong every heartbeat. See group_state_machine.c's own row for
+	 * reportedStateJustBecameSecondary.
+	 */
+	bool reportedStateJustBecameSecondary;
 } AutoFailoverNode;
 
 

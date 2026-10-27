@@ -1,0 +1,119 @@
+# Postgres 17+ CDC continuity: a standby that finishes catching up after the
+# primary has already converged to steady "primary" must still get added to
+# the primary's synchronized_standby_slots -- and must stay in sync as later
+# standbys join, join concurrently, or get removed.
+#
+# Root cause: MonitorFSM[]'s "caught up, same TLI as primary, within sync
+# threshold -> secondary" row (pos 321 in group_state_machine.c, before this
+# fix) is what fires the moment a standby's reportedState actually becomes
+# SECONDARY -- exactly the signal synchronized_standby_slots() filters on
+# (see that function's own comment: it deliberately checks reportedState,
+# not goalState, to avoid listing a candidate that hasn't really caught up
+# yet). But unlike pos 317 just above it ("wait_standby (quorum member),
+# primary converged primary -> catchingup + apply_settings"), pos 321 never
+# told the primary to re-fetch and re-apply its monitor-computed settings.
+#
+# synchronous_standby_names stayed correct regardless, which is what made
+# this easy to miss: in the 3+-node case, GroupListSyncStandbys() lists every
+# node with replicationQuorum=true unconditionally, with no reportedState
+# check at all -- so it already includes a brand new standby from the single
+# apply_settings round pos 317 triggers when that standby *starts* catching
+# up, long before it actually finishes. synchronized_standby_slots has no
+# such early round: nothing ever asked the primary to look again once the
+# standby actually became ready, so the primary kept applying whatever
+# (possibly shorter) list it last fetched -- forever, since nothing about a
+# steady, already-converged secondary ever triggers another look either.
+#
+# Fix: a new pos 320 row, matching the same activeNode/conditions as pos 321
+# but narrowed to primaryNode already converged "primary", additionally
+# assigns the primary APPLY_SETTINGS -- the same mechanism pos 317, 319 (removal)
+# and the set_node_candidate_priority()/set_node_replication_quorum() API
+# functions already use.
+#
+# This is deliberately a separate spec from cdc_continuity.pgaf (which covers
+# failover/demote_timeout slot-preservation, issue #1188): a different bug,
+# in a different part of the lifecycle (node join/removal, not failover).
+
+cluster {
+    monitor
+    formation {
+        node1
+        node2 create and launch deferred
+        node3 create and launch deferred
+        node4 create and launch deferred
+    }
+}
+
+setup {
+    wait until node1 state is single  timeout 60s
+}
+
+teardown {
+    compose down
+}
+
+#
+# test_001: two standbys join at the same time, well after node1 has already
+#           converged to steady "primary" alone -- unlike a fresh formation
+#           where all nodes start together, this makes the "primary already
+#           converged" race in the bug report deterministic instead of a
+#           4-out-of-5 coin flip.
+#
+
+step test_001_add_two_standbys_at_once {
+    exec node2  pg_autoctl node start /etc/pgaf/node.ini
+    exec node3  pg_autoctl node start /etc/pgaf/node.ini
+    wait until node2 state is secondary
+        and node3 state is secondary
+        and node1 state is primary
+        timeout 90s
+
+    # node1 stays reported "primary" throughout this fix's apply_settings
+    # round-trip (goal primary -> apply_settings -> primary), so the wait
+    # above can be satisfied by the instant a standby reports secondary,
+    # before node1's own next heartbeat has actually processed that goal
+    # change and re-applied the setting. Give it a moment to settle.
+    sleep 10s
+}
+
+step test_002_primary_lists_both_standby_slots {
+    sql node1 { SHOW synchronized_standby_slots; }
+    expect { pgautofailover_standby_2,pgautofailover_standby_3 }
+}
+
+#
+# test_003: a third standby joining later, once the group is already stable,
+#           must also be added to the list.
+#
+
+step test_003_add_third_standby_later {
+    exec node4  pg_autoctl node start /etc/pgaf/node.ini
+    wait until node4 state is secondary
+        and node1 state is primary
+        timeout 90s
+    sleep 10s
+}
+
+step test_004_primary_lists_all_three_standby_slots {
+    sql node1 { SHOW synchronized_standby_slots; }
+    expect { pgautofailover_standby_2,pgautofailover_standby_3,pgautofailover_standby_4 }
+}
+
+#
+# test_005: removing a standby must also be reflected. This direction already
+#           worked before this fix (RemoveNode() already forces
+#           apply_settings on the primary) -- kept as a regression guard
+#           against the new row above accidentally changing that.
+#
+
+step test_005_remove_a_standby {
+    exec monitor  pg_autoctl drop node --name node3
+    compose stop node3
+    wait until node1 state is primary  timeout 90s
+    sleep 10s
+}
+
+step test_006_primary_lists_remaining_standby_slots {
+    sql node1 { SHOW synchronized_standby_slots; }
+    expect { pgautofailover_standby_2,pgautofailover_standby_4 }
+}
