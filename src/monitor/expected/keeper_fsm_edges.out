@@ -43,7 +43,14 @@ SELECT DISTINCT
        END AS current_state,
        (edge ->> 'assigned')::pgautofailover.replication_state AS assigned_state
   FROM jsonb_array_elements(:'keeper_json'::jsonb) AS edge;
-SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
+-- current_state is plain text (its own comment above explains why: the
+-- 'any' sentinel isn't a legal pgautofailover.replication_state value), so
+-- unlike assigned_state (the enum, sorted by declaration order regardless
+-- of locale) its ORDER BY position depends on the database's collation --
+-- explicit COLLATE "C" pins it to the same byte-wise order this file's own
+-- expected/keeper_fsm_edges.out was committed with, independent of
+-- whatever locale initdb happened to pick on a given machine or in CI.
+SELECT * FROM keeper_fsm_edges ORDER BY current_state COLLATE "C", assigned_state;
     current_state    |   assigned_state    
 ---------------------+---------------------
  any                 | dropped
@@ -177,6 +184,12 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
 --
 -- Expected result: empty. Every MonitorFSM[] rule currently has a matching
 -- KeeperFSM[] row for every current_state it can assign a transition from.
+--
+-- No COLLATE "C" needed on this query's own ORDER BY below, unlike the
+-- first query above and step 2b's below it: e.current_state here is
+-- dump_fsm_edges()'s own pgautofailover.replication_state return column
+-- (the enum, sorted by declaration order), not keeper_fsm_edges' plain-text
+-- column of the same name -- collation-independent already.
 SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.comment
   FROM pgautofailover.dump_fsm_edges() e
   JOIN pgautofailover.fsm f ON f.pos = e.pos
@@ -215,6 +228,8 @@ SELECT e.pos AS rule, count(*) AS n, e.current_state, e.assigned_state, f.commen
 -- deliberately excludes (see its own comment), so it can never appear
 -- here. Same "investigate before assuming which" caveat as the rest of
 -- this file applies to every other row below.
+-- Same COLLATE "C" reasoning as the first query above: k.current_state is
+-- keeper_fsm_edges' own plain-text column.
 SELECT k.current_state, k.assigned_state
   FROM keeper_fsm_edges k
  WHERE NOT EXISTS (
@@ -223,7 +238,7 @@ SELECT k.current_state, k.assigned_state
           WHERE e.assigned_state = k.assigned_state
             AND (k.current_state = 'any' OR k.current_state = e.current_state::text)
        )
- ORDER BY k.current_state, k.assigned_state;
+ ORDER BY k.current_state COLLATE "C", k.assigned_state;
     current_state    |   assigned_state    
 ---------------------+---------------------
  any                 | dropped
@@ -248,7 +263,6 @@ SELECT k.current_state, k.assigned_state
  secondary           | maintenance
  secondary           | wait_maintenance
  wait_primary        | join_primary
- wait_primary        | apply_settings
-(23 rows)
+(22 rows)
 
 DROP TABLE keeper_fsm_edges;

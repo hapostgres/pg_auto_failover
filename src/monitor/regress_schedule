@@ -47,6 +47,7 @@ test: timeline_fork_detection
 test: failover_candidate_leaves_secondary
 test: cluster_init_failover_rule_attribution
 test: synchronized_standby_slots
+test: synchronized_standby_slots_promoting_primary
 test: dummy_update
 test: drop_extension
 test: upgrade
