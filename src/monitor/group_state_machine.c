@@ -351,6 +351,34 @@ static const NodeStatePattern FSM_PRIMARY_ROLE_STATES = {
 };
 
 /*
+ * primary already converged to PRIMARY, OR mid-promotion toward it
+ * (reportedState=WAIT_PRIMARY, goalState already PRIMARY) -- the exact
+ * window pos 302 below needs to catch, and deliberately NOT a plain
+ * NODE_STATE_REPORTED pattern on {PRIMARY, WAIT_PRIMARY}: reportedState
+ * alone can't tell a primary mid-promotion (goalState=PRIMARY) apart from
+ * one simply sitting at steady WAIT_PRIMARY with no promotion pending
+ * (goalState=WAIT_PRIMARY too, e.g. waiting on its first quorum secondary)
+ * -- confirmed live by node_active_protocol.sql's own ordinary one-standby
+ * scenario, which must still resolve wait_primary -> primary directly.
+ * TRANSITIONING's AND of reportedStates/assignedStates excludes that
+ * steady case while still matching reported=PRIMARY (goal is then
+ * necessarily PRIMARY too, same as FSM_PRIMARY_OR_APPLY_SETTINGS_ONLY
+ * would require).
+ *
+ * Deliberately excludes JOIN_PRIMARY from reportedStates, unlike
+ * FSM_WAIT_OR_JOIN_PRIMARY_TRANSITIONING_TO_PRIMARY above: no
+ * (JOIN_PRIMARY_STATE, APPLY_SETTINGS_STATE) transition exists in the
+ * keeper's own FSM table (fsm.c), so admitting it here would assign a
+ * goalState the keeper has no transition function for.
+ */
+static const NodeStatePattern FSM_PRIMARY_CONVERGED_OR_PROMOTING = {
+	.kind = NODE_STATE_TRANSITIONING,
+	.reportedStates = STATES(REPLICATION_STATE_PRIMARY,
+							 REPLICATION_STATE_WAIT_PRIMARY),
+	.assignedStates = STATES(REPLICATION_STATE_PRIMARY),
+};
+
+/*
  * same "primary role" scope, minus WAIT_PRIMARY -- a narrower enumerated STABLE
  * set
  */
@@ -2741,12 +2769,12 @@ static const MonitorFSMTransition MonitorFSM[] = {
 
 	/*
 	 * catchingup -> secondary transition (reportedState, not just
-	 * goalState), primary already converged primary -- this is the moment
-	 * this node actually becomes a ready failover candidate, which is
-	 * exactly what synchronized_standby_slots() filters on (see that
-	 * function's own comment). The ordinary "wait_standby, primary
-	 * converged primary -> catchingup + apply_settings" row (pos 317
-	 * below) already forces apply_settings on the primary the moment a
+	 * goalState), primary already serving in some primary-role capacity --
+	 * this is the moment this node actually becomes a ready failover
+	 * candidate, which is exactly what synchronized_standby_slots() filters
+	 * on (see that function's own comment). The ordinary "wait_standby,
+	 * primary converged primary -> catchingup + apply_settings" row (pos
+	 * 317 below) already forces apply_settings on the primary the moment a
 	 * quorum member *starts* catching up (too early for
 	 * synchronized_standby_slots to include it, by design) -- nothing
 	 * forced a *second* apply_settings once the node actually finished, so
@@ -2763,6 +2791,29 @@ static const MonitorFSMTransition MonitorFSM[] = {
 	 * them, an infinite apply_settings <-> primary ping-pong. Requiring
 	 * the *previous* value to have been catchingup pins this to the one
 	 * call where the transition actually happens.
+	 *
+	 * primaryNode is gated on FSM_PRIMARY_CONVERGED_OR_PROMOTING, not
+	 * FSM_STATE(PRIMARY) (which also requires goalState to already
+	 * agree): fsm_enable_sync_rep()'s own WAIT_PRIMARY -> PRIMARY keeper
+	 * transition is retried every heartbeat until
+	 * primary_standby_has_caught_up() succeeds, re-fetching
+	 * synchronized_standby_slots fresh on every retry -- and that LOCAL
+	 * pg_stat_replication check can succeed off a single caught-up standby
+	 * before a SECOND standby's own catchingup -> secondary transition has
+	 * landed in this very table. If that second transition is processed
+	 * while the primary's row still reads reportedState=WAIT_PRIMARY (goal
+	 * already PRIMARY, i.e. mid-promotion), the strict FSM_STATE(PRIMARY)
+	 * version of this row would simply not match -- and since this is a
+	 * one-time transition per standby (gated on previouslyReportedState
+	 * above), it can never retroactively fire again for that standby,
+	 * leaving the primary stuck on its shorter list indefinitely. Matching
+	 * reportedState=WAIT_PRIMARY *with goalState already PRIMARY* catches
+	 * the primary in that same mid-promotion window and routes it through
+	 * apply_settings regardless -- but not a primary merely sitting at
+	 * steady WAIT_PRIMARY with no promotion pending (goalState still
+	 * WAIT_PRIMARY too), which must keep resolving straight to PRIMARY on
+	 * its own next heartbeat undisturbed (see
+	 * FSM_PRIMARY_CONVERGED_OR_PROMOTING's own comment).
 	 */
 	{ .pos = 302,
 	  .sectionPath = {
@@ -2775,10 +2826,11 @@ static const MonitorFSMTransition MonitorFSM[] = {
 						  .states = STATES(REPLICATION_STATE_CATCHINGUP)
 					  }
 	  },
-	  .primaryNode = { .statePattern = FSM_STATE(REPLICATION_STATE_PRIMARY) },
+	  .primaryNode = { .statePattern = FSM_PRIMARY_CONVERGED_OR_PROMOTING },
 	  .otherNodeAssignedState = GOAL(REPLICATION_STATE_APPLY_SETTINGS),
 	  .comment =
-		  "catchingup -> secondary, primary converged primary -> apply_settings" },
+		  "catchingup -> secondary, primary converged primary or "
+		  "mid-promotion to it -> apply_settings" },
 
 	/*
 	 * replication stall (#997): primary healthy, no standby past

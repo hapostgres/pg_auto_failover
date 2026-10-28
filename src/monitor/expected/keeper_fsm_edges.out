@@ -62,14 +62,14 @@ SELECT * FROM keeper_fsm_edges ORDER BY current_state, assigned_state;
  catchingup          | maintenance
  catchingup          | wait_maintenance
  catchingup          | report_lsn
- demote_timeout      | single
- demote_timeout      | primary
- demote_timeout      | demoted
- demote_timeout      | report_lsn
  demoted             | single
  demoted             | demote_timeout
  demoted             | catchingup
  demoted             | report_lsn
+ demote_timeout      | single
+ demote_timeout      | primary
+ demote_timeout      | demoted
+ demote_timeout      | report_lsn
  draining            | single
  draining            | demote_timeout
  draining            | demoted
@@ -248,7 +248,6 @@ SELECT k.current_state, k.assigned_state
  secondary           | maintenance
  secondary           | wait_maintenance
  wait_primary        | join_primary
- wait_primary        | apply_settings
-(23 rows)
+(22 rows)
 
 DROP TABLE keeper_fsm_edges;

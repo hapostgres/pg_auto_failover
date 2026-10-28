@@ -1,0 +1,175 @@
+-- Copyright (c) Microsoft Corporation. All rights reserved.
+-- Licensed under the PostgreSQL License.
+--
+-- Regression test for the residual race left by the fix in
+-- synchronized_standby_slots.sql / pos 302 (group_state_machine.c):
+-- that fix forces the primary through apply_settings when a standby
+-- finishes catching up *after* the primary has already converged to
+-- steady "primary" -- but a second, narrower window remained open when
+-- a standby instead finishes catching up *while the primary itself is
+-- still mid-promotion* (reportedState=wait_primary, goalState already
+-- primary, i.e. between the monitor assigning goal=primary and the
+-- keeper's own next heartbeat reporting it). fsm_enable_sync_rep()'s own
+-- WAIT_PRIMARY -> PRIMARY keeper transition fetches
+-- synchronized_standby_slots fresh on every retry, driven by LOCAL
+-- pg_stat_replication catch-up rather than the monitor's own
+-- reportedState column, so that fetch can complete off a single
+-- caught-up standby before a second standby's own catchingup -> secondary
+-- transition has landed on the monitor -- and since that transition is a
+-- one-time event per standby, pos 302's original strict
+-- FSM_STATE(PRIMARY) gate (reportedState == goalState == primary) could
+-- never retroactively fire for it afterwards, leaving the primary's own
+-- goalState (and, in the real keeper, its locally-applied
+-- synchronized_standby_slots GUC) stuck on whatever shorter list it had
+-- already fetched.
+--
+-- This test drives that exact interleaving entirely through
+-- pgautofailover.node_active() calls, without relying on timing. Both
+-- standbys are assigned catchingup concurrently, while the primary is
+-- still steady wait_primary (same as an ordinary two-standby startup);
+-- one standby (s1) finishes first, which is what nudges the primary into
+-- promoting -- and the *other* standby (s2) only reports finishing
+-- (catchingup -> secondary) once the primary is already mid-promotion
+-- (reportedState=wait_primary, goalState=primary): the real keeper's own
+-- retry window inside fsm_enable_sync_rep(). The regression check is on
+-- the primary's own goalState immediately after s2's transition: it must
+-- become apply_settings (forcing the next re-fetch), not silently stay
+-- primary.
+
+\x on
+
+-- ── formation and node registration ─────────────────────────────────────────
+
+SELECT pgautofailover.create_formation('sss2_test', 'pgsql', 'postgres', true, 1);
+
+SELECT assigned_group_state
+  FROM pgautofailover.register_node('sss2_test', 'sss2_p', 5432,
+                                    'postgres', 'sss2_p', 1);
+
+SELECT nodeid AS np FROM pgautofailover.node
+ WHERE formationid = 'sss2_test' AND nodename = 'sss2_p' \gset
+
+SELECT assigned_group_state
+  FROM pgautofailover.register_node('sss2_test', 'sss2_s1', 5432,
+                                    'postgres', 'sss2_s1', 1);
+
+SELECT nodeid AS ns1 FROM pgautofailover.node
+ WHERE formationid = 'sss2_test' AND nodename = 'sss2_s1' \gset
+
+SELECT assigned_group_state
+  FROM pgautofailover.register_node('sss2_test', 'sss2_s2', 5432,
+                                    'postgres', 'sss2_s2', 1);
+
+SELECT nodeid AS ns2 FROM pgautofailover.node
+ WHERE formationid = 'sss2_test' AND nodename = 'sss2_s2' \gset
+
+-- ── bootstrap: p single -> wait_primary, both standbys join as wait_standby ─
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :np, 0,
+                                  current_group_role => 'single');
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :ns1, 0,
+                                  current_group_role => 'wait_standby');
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :ns2, 0,
+                                  current_group_role => 'wait_standby');
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :np, 0,
+                                  current_group_role => 'single',
+                                  current_lsn => '0/5000');
+
+-- p: single -> wait_primary (confirm); steady, no secondary yet.
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+
+-- Both standbys are assigned catchingup concurrently, while p is still
+-- steady wait_primary -- an ordinary two-standby startup so far.
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :ns1, 0,
+                                  current_group_role => 'wait_standby');
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :ns2, 0,
+                                  current_group_role => 'wait_standby');
+
+-- Both standbys report sufficient LSN and get assigned goalState=secondary
+-- (still reporting catchingup themselves at this point -- the actual
+-- catchingup -> secondary *transition* only happens below, on each one's
+-- next call reporting secondary itself).
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :ns1, 0,
+                                  current_group_role => 'catchingup',
+                                  current_lsn => '0/5000');
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :ns2, 0,
+                                  current_group_role => 'catchingup',
+                                  current_lsn => '0/5000');
+
+-- s1 finishes first: catchingup -> secondary (the actual transition). p is
+-- still steady wait_primary at this exact moment -- pos 302 must not fire
+-- here, same as the ordinary one-standby case in node_active_protocol.sql.
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :ns1, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+
+-- p: wait_primary (own heartbeat) -- *now* the monitor sees a quorum
+-- secondary (s1) and assigns goalState=primary, while p's own
+-- reportedState is still wait_primary: this is the mid-promotion window
+-- the real keeper's fsm_enable_sync_rep() retry loop would be sitting
+-- inside, before its own local pg_stat_replication check lets it report
+-- reportedState=primary.
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :np, 0,
+                                  current_group_role => 'wait_primary',
+                                  current_lsn => '0/5000');
+
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'sss2_test' AND nodename = 'sss2_p';
+
+-- ── the race: s2 finishes catching up while p is still mid-promotion ───────
+
+-- s2: catchingup -> secondary, with p still reportedState=wait_primary /
+-- goalState=primary from the step above. This is a one-time transition
+-- per standby (gated on previouslyReportedState=catchingup) -- if it
+-- doesn't force p through apply_settings now, nothing else ever will.
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :ns2, 0,
+                                  current_group_role => 'secondary',
+                                  current_lsn => '0/5000');
+
+-- Regression check: p's goalState must now be apply_settings, not left at
+-- primary -- this is the exact bug symptom (goalState silently staying
+-- primary here is what let the real keeper's locally-applied
+-- synchronized_standby_slots GUC get stuck on a one-slot list forever).
+SELECT nodename, goalstate, reportedstate
+  FROM pgautofailover.node
+ WHERE formationid = 'sss2_test' AND nodename = 'sss2_p';
+
+-- ── drive p the rest of the way, as the keeper would ────────────────────────
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :np, 0,
+                                  current_group_role => 'apply_settings',
+                                  current_lsn => '0/5000');
+
+SELECT assigned_group_state
+  FROM pgautofailover.node_active('sss2_test', :np, 0,
+                                  current_group_role => 'primary',
+                                  current_lsn => '0/5000');
+
+SELECT nodename, goalstate, reportedstate, candidatepriority
+  FROM pgautofailover.node
+ WHERE formationid = 'sss2_test'
+ ORDER BY nodename;
+
+-- Both standbys are caught-up candidates: both slot names.
+SELECT pgautofailover.synchronized_standby_slots('sss2_test', 0);
