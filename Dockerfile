@@ -42,9 +42,14 @@ RUN if [ -d src/bin/pgaftest ]; then \
     fi
 
 RUN make -s clean && make -s install -j$(nproc) BINDIR=/usr/local/bin
+# On failure, dump every *.diffs file: the container (and with it
+# src/monitor/regression.diffs) is discarded once the build fails, so this
+# is the only way a CI log ends up showing what actually differed instead
+# of just the postmaster log tail.
 RUN pg_virtualenv -v ${PGVERSION} \
       -o "shared_preload_libraries=pgautofailover" \
-      make -C src/monitor/ installcheck
+      make -C src/monitor/ installcheck || \
+      (find src/monitor -name '*.diffs' -exec cat {} +; exit 1)
 
 # ---------------------------------------------------------------------------
 # test — old Python test runner (kept for compatibility; new tests use pgaftest)
