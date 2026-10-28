@@ -43,6 +43,7 @@ bool ensure_empty_dir(const char *dirname, int mode);
 FILE * fopen_with_umask(const char *filePath, const char *modes, int flags, mode_t umask);
 FILE * fopen_read_only(const char *filePath);
 bool write_file(char *data, long fileSize, const char *filePath);
+bool write_file_atomic(char *data, long fileSize, const char *filePath);
 bool append_to_file(char *data, long fileSize, const char *filePath);
 bool read_file(const char *filePath, char **contents, long *fileSize);
 bool read_file_if_exists(const char *filePath, char **contents, long *fileSize);
@@ -69,5 +70,17 @@ __attribute__((format(printf, 2, 3)));
 
 int sformat(char *str, size_t count, const char *fmt, ...)
 __attribute__((format(printf, 3, 4)));
+
+struct stat;
+bool read_file_capped(const char *path, size_t maxSize, bool missingOk,
+					  char **contents, size_t *size, struct stat *st);
+
+bool read_file_flags(const char *path, int openFlags, size_t maxSize,
+					 bool missingOk, char **contents, size_t *size,
+					 struct stat *st);
+
+int open_regular_file(const char *path);
+
+uint64_t directory_size(const char *path);
 
 #endif /* FILE_UTILS_H */

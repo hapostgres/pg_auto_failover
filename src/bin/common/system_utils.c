@@ -16,9 +16,11 @@
 #endif
 
 #include <math.h>
+#include <time.h>
 
 #include "log.h"
 #include "file_utils.h"
+#include "string_utils.h"
 #include "system_utils.h"
 
 #if defined(__linux__)
@@ -115,11 +117,20 @@ get_system_info_bsd(SystemInfo *sysInfo)
 
 
 /*
- * pretty_print_bytes pretty prints bytes in a human readable form. Given
- * 17179869184 it places the string "16 GB" in the given buffer.
+ * pretty_print_bytes_scaled is the shared unit-scaling mechanism behind
+ * both pretty_print_bytes() just below (human-readable, space-separated,
+ * switches to the next unit only once a value reaches 10x it, e.g.
+ * "16 GB") and common/wal_segment.c's own wal_segment_size_string()
+ * (the wal_segment_size GUC's own SHOW-reply wire format, e.g. "16MB"/
+ * "1GB", no space, switching to the next unit at exactly 1024 -- the
+ * right rule for a value that is always an exact power of two, unlike an
+ * arbitrary byte count). threshold is the cutoff each caller wants
+ * ("count >= threshold" advances to the next unit and divides by 1024);
+ * withSpace picks "%d %s" vs "%d%s".
  */
 void
-pretty_print_bytes(char *buffer, size_t size, uint64_t bytes)
+pretty_print_bytes_scaled(char *buffer, size_t size, uint64_t bytes,
+						  uint64_t threshold, bool withSpace)
 {
 	const char *suffixes[7] = {
 		"B",                    /* Bytes */
@@ -134,12 +145,79 @@ pretty_print_bytes(char *buffer, size_t size, uint64_t bytes)
 	uint sIndex = 0;
 	long double count = bytes;
 
-	while (count >= 10240 && sIndex < 7)
+	while (count >= threshold && sIndex < 7)
 	{
 		sIndex++;
 		count /= 1024;
 	}
 
 	/* forget about having more precision, Postgres wants integers here */
-	sformat(buffer, size, "%d %s", (int) count, suffixes[sIndex]);
+	sformat(buffer, size, withSpace ? "%d %s" : "%d%s",
+			(int) count, suffixes[sIndex]);
+}
+
+
+/*
+ * pretty_print_bytes pretty prints bytes in a human readable form. Given
+ * 17179869184 it places the string "16 GB" in the given buffer.
+ */
+void
+pretty_print_bytes(char *buffer, size_t size, uint64_t bytes)
+{
+	pretty_print_bytes_scaled(buffer, size, bytes, 10240, true);
+}
+
+
+/* CLOCK_MONOTONIC in milliseconds */
+int64_t
+monotonic_ms(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+
+	return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+
+/*
+ * format_elapsed_time renders the time elapsed since startedAt via
+ * IntervalToString() (common/string_utils.c), or "-" when startedAt is
+ * unset (<= 0, meaning "not running"/"unknown") -- IntervalToString itself
+ * has no such sentinel, so that case is handled here instead. Shared by
+ * pg_walserver's "ps" and "status" sub-commands (cli_ps.c, cli_status.c).
+ */
+void
+format_elapsed_time(time_t startedAt, char *dest, size_t destSize)
+{
+	if (startedAt <= 0)
+	{
+		strlcpy(dest, "-", destSize);
+		return;
+	}
+
+	double elapsed = (double) (time(NULL) - startedAt);
+
+	IntervalToString(elapsed < 0 ? 0 : elapsed, dest, destSize);
+}
+
+
+/*
+ * format_utc renders t as an ISO-8601 UTC timestamp ("YYYY-MM-DDTHH:MM:SSZ"),
+ * or "-" when t is unset (<= 0). Shared by pg_walserver's "ls" and "list"
+ * sub-commands (cli_ls.c, cli_list.c).
+ */
+void
+format_utc(time_t t, char *dest, size_t destSize)
+{
+	if (t <= 0)
+	{
+		strlcpy(dest, "-", destSize);
+		return;
+	}
+
+	struct tm tmVal = { 0 };
+
+	gmtime_r(&t, &tmVal);
+	strftime(dest, destSize, "%Y-%m-%dT%H:%M:%SZ", &tmVal);
 }

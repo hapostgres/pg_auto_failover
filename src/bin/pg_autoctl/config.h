@@ -18,12 +18,20 @@
 
 #define KEEPER_ROLE "keeper"
 #define MONITOR_ROLE "monitor"
+#define WALSERVER_ROLE "walserver"
 
 typedef enum
 {
 	PG_AUTOCTL_ROLE_UNKNOWN,
 	PG_AUTOCTL_ROLE_MONITOR,
-	PG_AUTOCTL_ROLE_KEEPER
+	PG_AUTOCTL_ROLE_KEEPER,
+
+	/*
+	 * A pg_walserver node: supervises `pg_walserver serve` as a plain child
+	 * process, never registers with a monitor, never participates in the
+	 * keeper FSM. See config.c's ProbeConfigurationFileRole().
+	 */
+	PG_AUTOCTL_ROLE_WALSERVER
 } pgAutoCtlNodeRole;
 
 typedef struct MinimalConfig

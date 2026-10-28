@@ -232,9 +232,9 @@ pghba_ensure_host_rule_exists(const char *hbaFilePath,
 	}
 
 	/* write the new pg_hba.conf */
-	if (!write_file(newHbaContents->data, newHbaContents->len, hbaFilePath))
+	if (!write_file_atomic(newHbaContents->data, newHbaContents->len, hbaFilePath))
 	{
-		/* write_file logs an error */
+		/* write_file_atomic logs an error */
 		destroyPQExpBuffer(newHbaContents);
 		return false;
 	}
@@ -474,9 +474,9 @@ pghba_ensure_host_rules_exist(const char *hbaFilePath,
 	{
 		log_info("Writing new HBA rules in \"%s\"", hbaFilePath);
 
-		if (!write_file(newHbaContents->data, newHbaContents->len, hbaFilePath))
+		if (!write_file_atomic(newHbaContents->data, newHbaContents->len, hbaFilePath))
 		{
-			/* write_file logs an error */
+			/* write_file_atomic logs an error */
 			destroyPQExpBuffer(newHbaContents);
 			return false;
 		}
@@ -744,16 +744,17 @@ pghba_ensure_ident_map_entry(const char *pgdata,
 	destroyPQExpBuffer(needle);
 
 	/* append the new entry */
-	FILE *f = fopen(identFilePath, "a"); /* IGNORE-BANNED */
-	if (!f)
+	char line[BUFSIZE];
+
+	sformat(line, sizeof(line), "%s %s %s%s\n",
+			mapName, systemUser, pgUser, HBA_LINE_COMMENT);
+
+	if (!append_to_file(line, strlen(line), identFilePath))
 	{
-		log_error("Failed to open \"%s\" for appending: %m", identFilePath);
+		/* errors have already been logged */
 		free(contents);
 		return false;
 	}
-	fformat(f, "%s %s %s%s\n",
-			mapName, systemUser, pgUser, HBA_LINE_COMMENT);
-	fclose(f);
 	free(contents);
 
 	log_info("Added ident map entry \"%s %s %s\" to \"%s\"",

@@ -36,6 +36,9 @@ bool find_extension_control_file(const char *pg_ctl, const char *extName);
 bool pg_ctl_version(PostgresSetup *pgSetup);
 bool set_pg_ctl_from_config_bindir(PostgresSetup *pgSetup, const char *pg_config);
 bool find_pg_config_from_pg_ctl(const char *pg_ctl, char *pg_config, size_t size);
+bool find_pg_basebackup_for_major_version(int targetMajor,
+										  char *pgBasebackupPathOut,
+										  size_t size);
 
 bool pg_add_auto_failover_default_settings(PostgresSetup *pgSetup,
 										   const char *hostname,
@@ -47,6 +50,7 @@ bool pg_auto_failover_default_settings_file_exists(PostgresSetup *pgSetup);
 bool pg_basebackup(const char *pgdata,
 				   const char *pg_ctl,
 				   ReplicationSource *replicationSource);
+bool pg_basebackup_fetch(const char *pg_ctl, ReplicationSource *replicationSource);
 bool pg_rewind(const char *pgdata,
 			   const char *pg_ctl,
 			   ReplicationSource *replicationSource);
@@ -72,6 +76,8 @@ bool pg_cleanup_standby_mode(uint32_t pg_control_version,
 							 PGSQL *pgsql);
 
 bool pgctl_identify_system(ReplicationSource *replicationSource);
+bool pgctl_create_replication_slot(ReplicationSource *replicationSource,
+								   const char *slotName);
 
 bool pg_is_running(const char *pg_ctl, const char *pgdata);
 bool pg_create_self_signed_cert(PostgresSetup *pgSetup, const char *hostname);

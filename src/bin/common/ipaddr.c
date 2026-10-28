@@ -14,6 +14,8 @@
 #include <limits.h>
 #include <netdb.h>
 #include <net/if.h>
+#include <arpa/nameser.h>
+#include <resolv.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <stdbool.h>
@@ -29,6 +31,7 @@
 #include "defaults.h"
 #include "env_utils.h"
 #include "file_utils.h"
+#include "ifaddr.h"
 #include "ipaddr.h"
 #include "log.h"
 #include "pgsetup.h"
@@ -168,6 +171,101 @@ fetchLocalIPAddress(char *localIpAddress, int size,
 	close(sock);
 
 	return true;
+}
+
+
+/*
+ * fetchLocalIPAddressForRouting is fetchLocalIPAddress()'s own UDP
+ * counterpart, for exactly the case that function's own header comment
+ * flags as a real limitation: connecting to DEFAULT_INTERFACE_LOOKUP_
+ * SERVICE_NAME (8.8.8.8:53) over TCP is "expected to be reachable" --
+ * a genuine assumption on a monitor node (normally internet-facing), but
+ * not one every caller of this same "what's my own local IP" question
+ * can make (an air-gapped host is a normal deployment for some of them).
+ *
+ * connect()ing a UDP (SOCK_DGRAM) socket never actually sends a packet:
+ * the kernel only consults its own routing table to decide which local
+ * address it would use to reach serviceName:servicePort, exactly the
+ * same "what's my own outbound address" question, without needing
+ * serviceName to be reachable, or even to exist, at all -- only that
+ * *some* route to it is configured, in practice almost always true (a
+ * default route). This is this file's own original stated intent (see
+ * this file's own header comment, "using getsockname and a udp
+ * connection") -- fetchLocalIPAddress() itself became a real TCP
+ * connect() at some point, this restores the UDP alternative alongside
+ * it rather than in its place, since a real TCP handshake is still the
+ * right choice whenever the caller actually wants to confirm the target
+ * is reachable, not only route to it.
+ *
+ * Returns false, localIpAddress untouched, when even routing toward
+ * serviceName fails outright (ENETUNREACH and similar -- no route
+ * configured to it at all), logged at logLevel; never retries (there is
+ * nothing transient to retry: a route either exists right now or it
+ * doesn't).
+ */
+bool
+fetchLocalIPAddressForRouting(char *localIpAddress, int size,
+							  const char *serviceName, int servicePort,
+							  int logLevel)
+{
+	struct addrinfo *lookup;
+	struct addrinfo *ai;
+	struct addrinfo hints;
+
+	bool couldConnect = false;
+
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = PF_UNSPEC;    /* accept any family as supported by OS */
+	hints.ai_socktype = SOCK_DGRAM; /* we only want UDP sockets */
+	hints.ai_protocol = IPPROTO_UDP;
+
+	if (!GetAddrInfo(serviceName,
+					 intToString(servicePort).strValue,
+					 &hints,
+					 &lookup))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	for (ai = lookup; ai; ai = ai->ai_next)
+	{
+		char addr[BUFSIZE] = { 0 };
+
+		if (!ipaddr_sockaddr_to_string(ai, addr, sizeof(addr)))
+		{
+			/* errors have already been logged */
+			continue;
+		}
+
+		int sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+
+		if (sock < 0)
+		{
+			log_level(logLevel, "Failed to create a UDP socket: %m");
+			continue;
+		}
+
+		if (connect(sock, ai->ai_addr, ai->ai_addrlen) != 0)
+		{
+			log_level(logLevel, "Failed to route to %s (UDP): %m", addr);
+			close(sock);
+			continue;
+		}
+
+		couldConnect = ipaddr_getsockname(sock, localIpAddress, size);
+
+		close(sock);
+
+		if (couldConnect)
+		{
+			break;
+		}
+	}
+
+	freeaddrinfo(lookup);
+
+	return couldConnect;
 }
 
 
@@ -437,7 +535,7 @@ fetchIPAddressFromInterfaceList(char *localIpAddress, int size)
 
 
 /*
- * From /Users/dim/dev/PostgreSQL/postgresql/src/backend/libpq/hba.c
+ * From PostgreSQL's src/backend/libpq/hba.c
  */
 static bool
 ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b)
@@ -447,7 +545,7 @@ ipv4eq(struct sockaddr_in *a, struct sockaddr_in *b)
 
 
 /*
- * From /Users/dim/dev/PostgreSQL/postgresql/src/backend/libpq/hba.c
+ * From PostgreSQL's src/backend/libpq/hba.c
  */
 static bool
 ipv6eq(struct sockaddr_in6 *a, struct sockaddr_in6 *b)
@@ -740,6 +838,261 @@ resolveHostnameForwardAndReverse(const char *hostname, char *ipaddr, int size,
 	freeaddrinfo(lookup);
 
 	return true;
+}
+
+
+/*
+ * ipaddrHostMatchesAddress returns true when hostOrIp -- an IP address, or a
+ * hostname that we resolve forward with GetAddrInfo(), retry policy included
+ * -- designates the numeric address ipaddr: every address of the DNS answer
+ * is compared, not only the first one.
+ */
+bool
+ipaddrHostMatchesAddress(const char *hostOrIp, const char *ipaddr)
+{
+	struct addrinfo *lookup, *ai;
+
+	if (!GetAddrInfo(hostOrIp, NULL, 0, &lookup))
+	{
+		/* errors have already been logged */
+		return false;
+	}
+
+	bool found = false;
+
+	for (ai = lookup; ai != NULL && !found; ai = ai->ai_next)
+	{
+		char candidate[BUFSIZE] = { 0 };
+
+		found = ipaddr_sockaddr_to_string(ai, candidate, BUFSIZE) &&
+				strcmp(candidate, ipaddr) == 0;
+	}
+
+	freeaddrinfo(lookup);
+
+	return found;
+}
+
+
+/*
+ * ipaddr_to_sockaddr parses a numeric address into a sockaddr_storage. An
+ * IPv4-mapped IPv6 address ("::ffff:a.b.c.d", what a dual-stack socket
+ * reports for an IPv4 client) is turned into the IPv4 address it carries.
+ */
+static bool
+ipaddr_to_sockaddr(const char *ipaddr, struct sockaddr_storage *addr)
+{
+	struct sockaddr_in *in4 = (struct sockaddr_in *) addr;
+	struct sockaddr_in6 *in6 = (struct sockaddr_in6 *) addr;
+
+	memset(addr, 0, sizeof(*addr));
+
+	if (strncmp(ipaddr, "::ffff:", 7) == 0 &&
+		inet_pton(AF_INET, ipaddr + 7, &(in4->sin_addr)) == 1)
+	{
+		addr->ss_family = AF_INET;
+		return true;
+	}
+
+	if (inet_pton(AF_INET, ipaddr, &(in4->sin_addr)) == 1)
+	{
+		addr->ss_family = AF_INET;
+		return true;
+	}
+
+	if (inet_pton(AF_INET6, ipaddr, &(in6->sin6_addr)) == 1)
+	{
+		addr->ss_family = AF_INET6;
+		return true;
+	}
+
+	return false;
+}
+
+
+/*
+ * ipaddrInCIDR returns true when ipaddr falls in the "address/prefix"
+ * network, IPv4 or IPv6, with the netmask arithmetic of PostgreSQL's own
+ * HBA matching (ifaddr.c, vendored).
+ */
+bool
+ipaddrInCIDR(const char *cidr, const char *ipaddr)
+{
+	char network[INET6_ADDRSTRLEN + 8];
+
+	strlcpy(network, cidr, sizeof(network));
+
+	char *slash = strchr(network, '/');
+
+	if (slash == NULL)
+	{
+		return false;
+	}
+
+	*slash = '\0';
+
+	struct sockaddr_storage netaddr, mask, peer;
+
+	if (!ipaddr_to_sockaddr(network, &netaddr) ||
+		!ipaddr_to_sockaddr(ipaddr, &peer) ||
+		netaddr.ss_family != peer.ss_family ||
+		pg_sockaddr_cidr_mask(&mask, slash + 1, netaddr.ss_family) != 0)
+	{
+		return false;
+	}
+
+	return pg_range_sockaddr(&peer, &netaddr, &mask) == 1;
+}
+
+
+/* what the pg_foreach_ifaddr() callback below compares the client with */
+typedef struct CheckNetworkData
+{
+	bool sameNet;               /* samenet: use the interface netmask */
+	const struct sockaddr_storage *peer;
+	bool result;
+} CheckNetworkData;
+
+
+/*
+ * From PostgreSQL's hba.c check_network_callback(): does the client address
+ * match this machine interface (samehost) or its network (samenet)?
+ */
+static void
+check_network_callback(struct sockaddr *addr, struct sockaddr *netmask,
+					   void *cb_data)
+{
+	CheckNetworkData *cn = (CheckNetworkData *) cb_data;
+	struct sockaddr_storage fullMask;
+
+	if (cn->result || cn->peer->ss_family != addr->sa_family)
+	{
+		return;
+	}
+
+	if (!cn->sameNet)
+	{
+		/* an all-ones netmask of the right family: the address itself */
+		pg_sockaddr_cidr_mask(&fullMask, NULL, addr->sa_family);
+		netmask = (struct sockaddr *) &fullMask;
+	}
+
+	cn->result = pg_range_sockaddr(cn->peer, (struct sockaddr_storage *) addr,
+								   (struct sockaddr_storage *) netmask) == 1;
+}
+
+
+/*
+ * ipaddrIsSameHostOrNet implements the HBA keywords "samehost" (the client
+ * is one of this machine's addresses) and "samenet" (it is on a network this
+ * machine is directly connected to), as PostgreSQL does.
+ */
+bool
+ipaddrIsSameHostOrNet(const char *ipaddr, bool sameNet)
+{
+	struct sockaddr_storage peer;
+	CheckNetworkData cn = { sameNet, &peer, false };
+
+	if (!ipaddr_to_sockaddr(ipaddr, &peer))
+	{
+		return false;
+	}
+
+	if (pg_foreach_ifaddr(check_network_callback, &cn) < 0)
+	{
+		log_warn("Failed to enumerate the network interfaces: %m");
+		return false;
+	}
+
+	return cn.result;
+}
+
+
+/*
+ * ipaddrFindHostnamesFromAddress is findHostnameFromLocalIpAddress() for all
+ * the names of an address: getnameinfo() only ever returns the first PTR
+ * record, but a host (or a Docker network) may have several, and an HBA rule
+ * may name any of them. Returns how many names were stored.
+ */
+int
+ipaddrFindHostnamesFromAddress(const char *ipaddr,
+							   char hostnames[][IPADDR_MAX_HOSTNAME_SIZE],
+							   int maxCount)
+{
+	unsigned char addr[16];
+	char query[NS_MAXDNAME];
+	int count = 0;
+
+	if (inet_pton(AF_INET, ipaddr, addr) == 1)
+	{
+		sformat(query, sizeof(query), "%u.%u.%u.%u.in-addr.arpa",
+				addr[3], addr[2], addr[1], addr[0]);
+	}
+	else if (inet_pton(AF_INET6, ipaddr, addr) == 1)
+	{
+		size_t len = 0;
+
+		query[0] = '\0';
+
+		for (int i = 15; i >= 0; i--)
+		{
+			len += (size_t) sformat(query + len, sizeof(query) - len, "%x.%x.",
+									addr[i] & 0x0F, addr[i] >> 4);
+		}
+
+		strlcpy(query + len, "ip6.arpa", sizeof(query) - len);
+	}
+	else
+	{
+		return 0;
+	}
+
+	unsigned char answer[4096];
+	int answerLen = res_query(query, ns_c_in, ns_t_ptr, answer, sizeof(answer));
+
+	if (answerLen <= 0)
+	{
+		log_debug("No PTR record for \"%s\"", ipaddr);
+		return 0;
+	}
+
+	/* res_query returns the full answer size, even when it was truncated */
+	if (answerLen > (int) sizeof(answer))
+	{
+		answerLen = (int) sizeof(answer);
+	}
+
+	ns_msg msg;
+
+	if (ns_initparse(answer, answerLen, &msg) != 0)
+	{
+		return 0;
+	}
+
+	for (int i = 0; i < ns_msg_count(msg, ns_s_an) && count < maxCount; i++)
+	{
+		ns_rr rr;
+		char name[NS_MAXDNAME];
+
+		if (ns_parserr(&msg, ns_s_an, i, &rr) != 0 || ns_rr_type(rr) != ns_t_ptr ||
+			ns_name_uncompress(ns_msg_base(msg), ns_msg_end(msg),
+							   ns_rr_rdata(rr), name, sizeof(name)) < 0)
+		{
+			continue;
+		}
+
+		/* resolvers give a trailing dot for a fully qualified name */
+		size_t len = strlen(name);
+
+		if (len > 0 && name[len - 1] == '.')
+		{
+			name[len - 1] = '\0';
+		}
+
+		strlcpy(hostnames[count++], name, IPADDR_MAX_HOSTNAME_SIZE);
+	}
+
+	return count;
 }
 
 
