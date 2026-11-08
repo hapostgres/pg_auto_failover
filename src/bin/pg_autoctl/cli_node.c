@@ -749,9 +749,9 @@ cli_node_init(int argc, char **argv)
 static int
 cli_node_apply_getopts(int argc, char **argv)
 {
-	if (argc > 0 && argv[0][0] != '-')
+	if (argc > 0 && argv[1][0] != '-')
 	{
-		strlcpy(nodeSpecPath, argv[0], sizeof(nodeSpecPath));
+		strlcpy(nodeSpecPath, argv[1], sizeof(nodeSpecPath));
 	}
 	else
 	{
@@ -901,9 +901,9 @@ cli_node_show(int argc, char **argv)
 static int
 cli_node_check_getopts(int argc, char **argv)
 {
-	if (argc > 0 && argv[0][0] != '-')
+	if (argc > 0 && argv[1][0] != '-')
 	{
-		strlcpy(nodeSpecPath, argv[0], sizeof(nodeSpecPath));
+		strlcpy(nodeSpecPath, argv[1], sizeof(nodeSpecPath));
 	}
 	else
 	{
