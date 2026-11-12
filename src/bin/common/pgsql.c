@@ -737,7 +737,19 @@ pgsql_retry_open_connection(PGSQL *pgsql)
 				 *
 				 * PQping does not check authentication, so we might still fail
 				 * to connect to the server.
+				 *
+				 * The previous attempt (the initial one made by
+				 * pgsql_open_connection, or a failed previous iteration of this
+				 * loop) left a PGconn behind: release it before we overwrite the
+				 * pointer, otherwise we leak the client-side PGconn on
+				 * every retry.
 				 */
+				if (pgsql->connection != NULL)
+				{
+					PQfinish(pgsql->connection);
+					pgsql->connection = NULL;
+				}
+
 				pgsql->connection = PQconnectdb(pgsql->connectionString);
 
 				if (PQstatus(pgsql->connection) == CONNECTION_OK)
